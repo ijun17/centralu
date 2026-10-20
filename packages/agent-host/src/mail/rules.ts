@@ -147,6 +147,49 @@ export function needsReceiver(sender: SenderClass, m: { kind: MessageKind; needs
 }
 
 /** Receipts are due 2 s after the message so a burst is one delivery; urgent mail and the person's words at once (§7.9) */
+/** How long a thread's mail may wait behind other threads' before it comes first (§5, §7.10): a question 5 minutes, anything else 15 */
+export const HOLD_QUESTION_MS = 5 * 60_000
+export const HOLD_OTHER_MS = 15 * 60_000
+
+/** One due message in a thread of the receiver's work, as far as choosing the thread goes */
+export type WorkCandidate = {
+  threadId: string
+  /** The person's words, or urgent mail: they decide (§7.1) */
+  decides: boolean
+  question: boolean
+  /** When the message fell due */
+  dueAt: number
+}
+
+/**
+ * The one thread of the receiver's work that a wake carries (§5, §6), from the due mail of its work threads, oldest first. Three
+ * classes, the lowest first, the oldest thread first within a class:
+ *
+ * 1. a thread with the person's words or urgent mail, or one passed over for longer than the most its mail may wait (`HOLD_*`);
+ * 2. a thread with a question;
+ * 3. the rest.
+ *
+ * So a stream of newer questions cannot starve older work: past its hold a thread moves up to the first class.
+ */
+export function pickWorkThread(candidates: readonly WorkCandidate[], now: number): string | null {
+  const classOf = new Map<string, 1 | 2 | 3>()
+  for (const c of candidates) {
+    const hold = c.question ? HOLD_QUESTION_MS : HOLD_OTHER_MS
+    const k = c.decides || now - c.dueAt > hold ? 1 : c.question ? 2 : 3
+    const was = classOf.get(c.threadId)
+    if (was === undefined || k < was) classOf.set(c.threadId, k)
+  }
+  let best: string | null = null
+  let bestClass = 4
+  for (const [threadId, k] of classOf) {
+    if (k < bestClass) {
+      best = threadId
+      bestClass = k
+    }
+  }
+  return best
+}
+
 export const DEBOUNCE_MS = 2_000
 
 export function dueAt(now: number, urgent: boolean, fromPerson: boolean): number {

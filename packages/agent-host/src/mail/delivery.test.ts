@@ -785,3 +785,26 @@ describe('a session that runs without asking holds mail from the sessions and ap
     normal.delivery.stop()
   })
 })
+
+describe('one turn, one thread (§5, §6)', () => {
+  it('a wake carries one work thread, and the other thread goes with the next turn', async () => {
+    const w = world()
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    const S3 = sessionAddress(HOST, 's3')
+    const first = assign(w)
+    const second = openBy(w.mail, { by: S3, kind: 'assign', subject: 'other work', body: 'also this', assignee: S2 })
+    await w.advance(2_000)
+    expect(w.delivered).toHaveLength(1)
+    expect(w.delivered[0]!.input.text).toContain(first.thread.id)
+    expect(w.delivered[0]!.input.text).not.toContain(second.thread.id)
+    expect(w.store.mail.receiptsOf(second.message.id)[0]).toMatchObject({ deliveredAt: null, held: null, attempts: 0 })
+
+    // The turn ends: the session pokes, and the second thread's mail is the next turn's
+    w.mail.read(first.thread.id, S2)
+    w.delivery.poke('s2')
+    await w.advance(35_000)
+    expect(w.delivered).toHaveLength(2)
+    expect(w.delivered[1]!.input.text).toContain(second.thread.id)
+  })
+})

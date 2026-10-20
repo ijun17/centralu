@@ -25,7 +25,7 @@ function setup(policy?: MailPolicy) {
 }
 
 /** What a drain says when there is nothing to say */
-const NOTHING = { text: '', messageIds: [], inline: [], pointed: [], wake: false, immediate: false, asks: false, line: '', quieted: [], heldBack: [] }
+const NOTHING = { text: '', messageIds: [], inline: [], pointed: [], wake: false, immediate: false, asks: false, line: '', quieted: [], heldBack: [], threads: [], workThread: null }
 
 describe('what a drain says (§7.3, §7.5)', () => {
   it('words that flow down (an assign from the owner) are quoted after the frame; the subject never is', () => {
@@ -234,3 +234,127 @@ describe('a delivery is told once (M2, §7.6)', () => {
   })
 })
 
+
+describe('one turn, one thread (§5, §6)', () => {
+  const S3 = sessionAddress(HOST, 's3')
+
+  it('a wake carries one thread of the receiver’s work, the oldest due; the other waits for the next turn', () => {
+    const { mail } = setup()
+    const first = openBy(mail, { by: S1, kind: 'assign', subject: 'first', body: 'go', assignee: S2 })
+    const second = openBy(mail, { by: S3, kind: 'assign', subject: 'second', body: 'also', assignee: S2 })
+    mail.post(first.thread.id, S1, { kind: 'note', body: 'more on the first' })
+
+    const wake = mail.drain(S2)
+    expect(wake.threads).toEqual([first.thread.id])
+    expect(wake.workThread).toBe(first.thread.id)
+    expect(wake.messageIds).toHaveLength(2)
+    expect(wake.messageIds).not.toContain(second.message.id)
+    expect(wake.line).toBe('✉ 2 messages in 1 thread, from the session that gave you this work')
+
+    // Taken: the next turn is the other thread's
+    mail.read(first.thread.id, S2)
+    const next = mail.drain(S2)
+    expect(next.threads).toEqual([second.thread.id])
+    expect(next.workThread).toBe(second.thread.id)
+  })
+
+  it('the person’s words choose the thread, then a question waiting, before the oldest', () => {
+    const { mail } = setup()
+    const a = openBy(mail, { by: S1, kind: 'assign', subject: 'a', body: 'go', assignee: S2 })
+    const b = openBy(mail, { by: S3, kind: 'assign', subject: 'b', body: 'go', assignee: S2 })
+    const c = openBy(mail, { by: sessionAddress(HOST, 's4'), kind: 'assign', subject: 'c', body: 'go', assignee: S2 })
+    mail.post(b.thread.id, S3, { kind: 'question', body: 'which?' })
+    expect(mail.drain(S2).workThread).toBe(b.thread.id)
+    mail.post(c.thread.id, PERSON, { kind: 'note', body: 'now' })
+    const wake = mail.drain(S2)
+    expect(wake).toMatchObject({ workThread: c.thread.id, threads: [c.thread.id], immediate: true, asks: false })
+    expect(a.thread.id).not.toBe(c.thread.id)
+  })
+
+  it('all the due mail of threads the receiver owns rides together, beside the one work thread', () => {
+    const { mail } = setup()
+    // S2 works on W1 and W2 for S1, and gave work of its own in O1 and O2 to S3, which reports in both
+    const w1 = openBy(mail, { by: S1, kind: 'assign', subject: 'w1', body: 'go', assignee: S2 })
+    const w2 = openBy(mail, { by: S1, kind: 'assign', subject: 'w2', body: 'go', assignee: S2 })
+    const o1 = openBy(mail, { by: S2, kind: 'assign', subject: 'o1', body: 'go', assignee: S3 })
+    const o2 = openBy(mail, { by: S2, kind: 'assign', subject: 'o2', body: 'go', assignee: S3 })
+    mail.post(o1.thread.id, S3, { kind: 'report', body: 'done 1' })
+    mail.post(o2.thread.id, S3, { kind: 'report', body: 'done 2' })
+
+    const wake = mail.drain(S2)
+    expect(wake.workThread).toBe(w1.thread.id)
+    expect(new Set(wake.threads)).toEqual(new Set([w1.thread.id, o1.thread.id, o2.thread.id]))
+    expect(wake.threads).not.toContain(w2.thread.id)
+  })
+
+  it('mail that starts no turn is not bound by it: news in several work threads is told of together', () => {
+    const { mail } = setup()
+    const a = openBy(mail, { by: S1, kind: 'assign', subject: 'a', body: 'go', assignee: S2, members: [APP] })
+    const b = openBy(mail, { by: S3, kind: 'assign', subject: 'b', body: 'go', assignee: S2, members: [APP] })
+    mail.read(a.thread.id, S2)
+    mail.read(b.thread.id, S2)
+    mail.post(a.thread.id, APP, { kind: 'notice', body: 'merged' })
+    mail.post(b.thread.id, APP, { kind: 'notice', body: 'merged too' })
+    const news = mail.drain(S2)
+    expect(news).toMatchObject({ wake: false, workThread: null })
+    expect(new Set(news.threads)).toEqual(new Set([a.thread.id, b.thread.id]))
+  })
+
+  it('a thread left out is not marked, held or lost: it comes back once the first is read', () => {
+    const { mail, store } = setup()
+    const a = openBy(mail, { by: S1, kind: 'assign', subject: 'a', body: 'go', assignee: S2 })
+    const b = openBy(mail, { by: S3, kind: 'assign', subject: 'b', body: 'go', assignee: S2 })
+    expect(mail.drain(S2).messageIds).toEqual([a.message.id])
+    expect(store.mail.receiptsOf(b.message.id)[0]).toMatchObject({ held: null, deliveredAt: null, attempts: 0 })
+    expect(mail.drain(S2).messageIds).toEqual([a.message.id])
+    mail.handled(a.thread.id, S2)
+    expect(mail.drain(S2).messageIds).toEqual([b.message.id])
+  })
+
+  it('a thread passed over for longer than its mail may wait comes first: a stream of newer questions cannot starve older work', () => {
+    const store = new Store()
+    const clock = { t: NOW }
+    const mail = new MailService(store.mail, { hostId: () => HOST, now: () => clock.t })
+    const MIN = 60_000
+    const plain = openBy(mail, { by: S1, kind: 'assign', subject: 'plain', body: 'go', assignee: S2 })
+    clock.t += 1 * MIN
+    const q1 = openBy(mail, { by: S3, kind: 'assign', subject: 'asks', body: 'go', assignee: S2 })
+    mail.post(q1.thread.id, S3, { kind: 'question', body: 'which?' })
+    clock.t += 2 * MIN
+    // A question beats older plain work, as long as the plain work has not waited its 15 minutes
+    expect(mail.drain(S2).workThread).toBe(q1.thread.id)
+    mail.handled(q1.thread.id, S2)
+
+    clock.t += 10 * MIN
+    const q2 = openBy(mail, { by: sessionAddress(HOST, 's4'), kind: 'assign', subject: 'asks again', body: 'go', assignee: S2 })
+    mail.post(q2.thread.id, sessionAddress(HOST, 's4'), { kind: 'question', body: 'and this?' })
+    clock.t += 2 * MIN
+    expect(mail.drain(S2).workThread).toBe(q2.thread.id)
+    mail.handled(q2.thread.id, S2)
+
+    // 16 minutes on, the plain work has waited past 15: it comes before a newer question
+    clock.t += 1 * MIN
+    const q3 = openBy(mail, { by: sessionAddress(HOST, 's5'), kind: 'assign', subject: 'asks a third time', body: 'go', assignee: S2 })
+    mail.post(q3.thread.id, sessionAddress(HOST, 's5'), { kind: 'question', body: 'what about this?' })
+    clock.t += 2 * MIN
+    expect(mail.drain(S2).workThread).toBe(plain.thread.id)
+  })
+
+  it('a question passed over for more than 5 minutes comes before a newer thread with the person’s words', () => {
+    const store = new Store()
+    const clock = { t: NOW }
+    const mail = new MailService(store.mail, { hostId: () => HOST, now: () => clock.t })
+    const MIN = 60_000
+    const asks = openBy(mail, { by: S1, kind: 'assign', subject: 'asks', body: 'go', assignee: S2 })
+    mail.post(asks.thread.id, S1, { kind: 'question', body: 'which?' })
+    clock.t += 3 * MIN
+    const person = openBy(mail, { by: S3, kind: 'assign', subject: 'person', body: 'go', assignee: S2 })
+    mail.post(person.thread.id, PERSON, { kind: 'note', body: 'now' })
+    clock.t += 1 * MIN
+    // Both are in the first class by the person's words and by the question's age is not yet: the person's goes first
+    expect(mail.drain(S2).workThread).toBe(person.thread.id)
+    // 6 minutes after the question fell due, it has waited past its 5 and, being older, goes first
+    clock.t += 3 * MIN
+    expect(mail.drain(S2).workThread).toBe(asks.thread.id)
+  })
+})

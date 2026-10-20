@@ -33,6 +33,7 @@ import {
   flowsDown,
   mayEditTask,
   mayPostKind,
+  pickWorkThread,
   wakes,
   refuse,
   refusalReason,
@@ -200,6 +201,10 @@ export type DrainResult = {
   quieted: { messageId: string; reason: QuietReason }[]
   /** Left out of it and held for the person (Inbox: Resume) */
   heldBack: { messageId: string; reason: HoldReason }[]
+  /** The threads the delivery is from, in the order of their first message */
+  threads: string[]
+  /** The one thread of the receiver's own work a turn this delivery starts belongs to (§6), or null when it carries none or starts no turn */
+  workThread: string | null
 }
 
 const POST_KEYS = new Set(['kind', 'body', 'urgent', 'needsOwner', 'wake', 'replyTo', 'dedupeKey'])
@@ -781,13 +786,16 @@ export class MailService {
    */
   drain(recipient: string, opts: DrainOptions = {}): DrainResult {
     this.party(recipient)
-    const items: MailFrameItem[] = []
-    let wake = false
-    let immediate = false
-    let asks = false
-    const relations = new Set<string>()
-    const threads = new Set<string>()
-    const quieted: { messageId: string; reason: QuietReason }[] = []
+    type Candidate = {
+      receipt: ReceiptRow
+      message: MessageRow
+      thread: ThreadRow
+      sender: SenderClass | undefined
+      down: boolean
+      pointerOnly: boolean
+      quietFor: QuietReason | null | undefined
+    }
+    const candidates: Candidate[] = []
     const heldBack: { messageId: string; reason: HoldReason }[] = []
     for (const { receipt, message, thread } of this.records.pendingFor(recipient, this.now(), opts.again === true)) {
       if (thread.state === 'done' || thread.state === 'unknown' || message.kind === 'event' || message.sender === recipient) continue
@@ -800,11 +808,45 @@ export class MailService {
       }
       const sender = parseAddress(message.sender)?.kind
       const down = flowsDown(sender === 'person', sender === 'session' && message.sender === thread.owner, recipient === thread.assignee, message.kind)
-      // A body that flows down and was delivered is not sent as the words again: if it is still unread it was only pointed at
-      // (cut to fit, or read by nobody), and `again` points at it once more. Read on acceptance, a whole one is not pending at all
-      const pointerOnly = down && receipt.deliveredAt !== null
-      // Told of without a turn: an inbound policy that holds it (§7.7), or a budget that is spent (§7.9); never the person's words
-      const quietFor = sender === 'person' ? null : opts.quiet?.(message, receipt, thread)
+      candidates.push({
+        receipt,
+        message,
+        thread,
+        sender,
+        down,
+        // A body that flows down and was delivered is not sent as the words again: if it is still unread it was only pointed at
+        // (cut to fit, or read by nobody), and `again` points at it once more. Read on acceptance, a whole one is not pending at all
+        pointerOnly: down && receipt.deliveredAt !== null,
+        // Told of without a turn: an inbound policy that holds it (§7.7), or a budget that is spent (§7.9); never the person's words
+        quietFor: sender === 'person' ? null : opts.quiet?.(message, receipt, thread),
+      })
+    }
+
+    /*
+     * One turn, one thread (§5, §6): a delivery that starts a turn carries at most one thread that is the receiver's work (it is
+     * the assignee or a member there, and that thread's owner gets the turn's report), the person's words first, then a question waiting, else
+     * the oldest due; the others wait for the next turn. Mail of threads the receiver owns (reports and news about work it gave) all rides together. A delivery that starts no
+     * turn (all of it told of, or news that does not wake) is not bound by this
+     */
+    const wakesIt = (c: Candidate) => !c.quietFor && wakes(c.sender ?? 'session', c.message)
+    const isWork = (c: Candidate) => c.thread.owner !== recipient
+    // Which one: the person's words, urgent mail and what has waited past its hold, then a question, else the oldest due (§5)
+    const work = candidates.filter((c) => wakesIt(c) && isWork(c))
+    const workThread = pickWorkThread(
+      work.map((c) => ({ threadId: c.thread.id, decides: c.message.urgent || c.sender === 'person', question: c.message.kind === 'question', dueAt: c.receipt.dueAt })),
+      this.now(),
+    )
+    const turnStarts = candidates.some(wakesIt)
+    const kept = turnStarts ? candidates.filter((c) => !isWork(c) || c.thread.id === workThread) : candidates
+
+    const items: MailFrameItem[] = []
+    let wake = false
+    let immediate = false
+    let asks = false
+    const relations = new Set<string>()
+    const threads = new Set<string>()
+    const quieted: { messageId: string; reason: QuietReason }[] = []
+    for (const { receipt, message, thread, sender, down, pointerOnly, quietFor } of kept) {
       if (quietFor) quieted.push({ messageId: message.id, reason: quietFor })
       else if (wakes(sender ?? 'session', message)) wake = true
       if (message.urgent || sender === 'person') immediate = true
@@ -826,7 +868,7 @@ export class MailService {
       })
     }
     const frame = buildMailFrame(items)
-    return { text: frame.text, messageIds: frame.shown, inline: frame.inline, pointed: frame.shown.filter((id) => !frame.inline.includes(id)), wake, immediate, asks, line: items.length === 0 ? '' : deliveryLine(items.length, threads.size, relations), quieted, heldBack }
+    return { text: frame.text, messageIds: frame.shown, inline: frame.inline, pointed: frame.shown.filter((id) => !frame.inline.includes(id)), wake, immediate, asks, line: items.length === 0 ? '' : deliveryLine(items.length, threads.size, relations), quieted, heldBack, threads: [...threads], workThread: turnStarts ? workThread : null }
   }
 
   /**
