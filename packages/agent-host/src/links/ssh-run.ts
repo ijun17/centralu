@@ -15,16 +15,26 @@ import { Tail } from '../stream-text.js'
 export type SshRunResult = { code: number | null; stdout: string; stderr: string }
 
 /** Why a run did not get to its end: its deadline, too much output, or an ssh that could not start (ENOENT) */
-export type SshRunFailureKind = 'timeout' | 'output' | 'spawn'
+export type SshRunFailureKind = 'timeout' | 'output' | 'spawn' | 'expected'
 
 export class SshRunFailure extends Error {
   constructor(
     readonly kind: SshRunFailureKind,
     message: string,
+    /** For `expected`: the index in `SshRunOptions.expect` of the line that did not come */
+    readonly stage: number | null = null,
   ) {
     super(message)
   }
 }
+
+/**
+ * A line a run waits for (`SshRunOptions.expect`). `endedMessage`: what a run that ends before the line came says, for a line
+ * after the first (the first line missing at the end is the command's own failure: ssh could not reach, or found no PowerShell), when it
+ * ended with one of `endedCodes`: the remote command's own exits. Any other end (ssh's 255 on a dropped link, a signal) says nothing of what the
+ * remote did after the last line it printed, which may have gone on, so it is the run's result as it stands
+ */
+export type SshExpectedLine = { marker: string; withinMs: number; message: string; endedMessage?: string; endedCodes?: readonly number[] }
 
 export type SshRunOptions = {
   /** The ssh program; default `ssh` on PATH */
@@ -33,6 +43,13 @@ export type SshRunOptions = {
   env?: NodeJS.ProcessEnv
   /** Written to ssh's stdin, then closed. Absent: stdin is not a pipe at all */
   stdin?: string
+  /**
+   * Lines the remote prints in order as it gets on with its stdin (#1360), each waited for from the one before (the first from
+   * the spawn). When one does not come within its `withinMs` the run rejects with its `message` (kind `expected`, `stage` the
+   * index of the line) and the ssh is ended, instead of waiting for `timeoutMs`. The markers stay in the output the run
+   * answers; the caller takes them out
+   */
+  expect?: readonly SshExpectedLine[]
   timeoutMs: number
   /** The most characters stdout may hold before the ssh is stopped; default `SSH_STDOUT_LIMIT` */
   stdoutLimit?: number
@@ -94,20 +111,32 @@ export function runSsh(opts: SshRunOptions): Promise<SshRunResult> {
     let stdout = ''
     const stderr = new Tail(opts.stderrKeep ?? SSH_STDERR_KEEP)
     let settled = false
-    const fail = (kind: SshRunFailureKind, message: string) => {
+    const fail = (kind: SshRunFailureKind, message: string, stage: number | null = null) => {
       if (settled) return
       settled = true
       clearTimeout(deadline)
+      clearTimeout(expectDeadline)
       if (kind !== 'spawn') void endChild(child)
-      reject(new SshRunFailure(kind, message))
+      reject(new SshRunFailure(kind, message, stage))
     }
     const deadline = setTimeout(() => fail('timeout', `ssh to ${opts.label} did not finish within ${seconds(opts.timeoutMs)}`), opts.timeoutMs)
+    // The lines the remote is expected to print, each from the one before; the timer of the one waited for now
+    const expected = opts.expect ?? []
+    let next = 0
+    let expectDeadline: ReturnType<typeof setTimeout> | undefined
+    const waitFor = (i: number) => {
+      clearTimeout(expectDeadline)
+      const line = expected[i]
+      expectDeadline = line ? setTimeout(() => fail('expected', line.message, i), line.withinMs) : undefined
+    }
+    waitFor(0)
     // Decoded as a stream: a character that arrives in two chunks is one character
     child.stdout!.setEncoding('utf8')
     child.stderr!.setEncoding('utf8')
     child.stdout!.on('data', (d: string) => {
       if (settled) return
       stdout += d
+      for (let e = expected[next]; e && stdout.includes(e.marker); e = expected[next]) waitFor(++next)
       if (stdout.length > stdoutLimit) fail('output', `ssh to ${opts.label} printed more than ${stdoutLimit / 1024 / 1024} MiB`)
     })
     child.stderr!.on('data', (d: string) => stderr.push(d))
@@ -115,8 +144,14 @@ export function runSsh(opts: SshRunOptions): Promise<SshRunResult> {
     child.once('error', (e) => fail('spawn', e.message))
     child.once('close', (code) => {
       if (settled) return
+      // Ended after the first line but before a later one, with an exit code that is the remote command's own (`endedCodes`): it stopped
+      // on its own before it got what it waited for. Any other end (ssh's 255 on a dropped link, a signal) says nothing of what the
+      // remote did after it, which may have gone on: that is the run's result as it stands
+      const missing = next > 0 ? expected[next] : undefined
+      if (missing?.endedMessage && code !== null && missing.endedCodes?.includes(code)) return fail('expected', missing.endedMessage, next)
       settled = true
       clearTimeout(deadline)
+      clearTimeout(expectDeadline)
       resolve({ code, stdout, stderr: stderr.text })
     })
   })

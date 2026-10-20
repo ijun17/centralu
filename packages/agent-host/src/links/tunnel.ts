@@ -4,7 +4,7 @@ import { win32 } from 'node:path'
 import { hostname } from 'node:os'
 import type { InstallSource, RemoteShell } from '@cc/protocol'
 import { Tail } from '../stream-text.js'
-import { endChild, runSsh, type SshRunResult } from './ssh-run.js'
+import { endChild, runSsh, SshRunFailure, type SshExpectedLine, type SshRunResult } from './ssh-run.js'
 import { isHostCrash, NodeTooOld } from './node-floor.js'
 
 /**
@@ -328,9 +328,12 @@ export function powershell(script: string): string {
 
 /**
  * One command for the other end of ssh, and, when it is too long for one command line, what to feed
- * its stdin. `exec` sends `stdin` and closes it.
+ * its stdin. `exec` sends `stdin` and closes it. `expect`: the lines the remote prints as it gets on with it, in order
+ * (`STDIN_READY`, once its PowerShell runs; `STDIN_ACK`, once it has read all of `stdin`); `exec` ends the run when one does not
+ * come in time (`SshTunnelOptions.stdinReadyMs`, `stdinAckMs`), instead of waiting out the step's whole limit on a remote
+ * that never saw its input (#1360)
  */
-export type RemoteCommand = string | { command: string; stdin: string }
+export type RemoteCommand = string | { command: string; stdin: string; expect?: readonly string[] }
 
 /**
  * The longest command sent inline to a Windows remote. Windows OpenSSH runs a command through the
@@ -341,19 +344,85 @@ export type RemoteCommand = string | { command: string; stdin: string }
  */
 export const WINDOWS_INLINE_MAX = 7_900
 
-/** What reads a script from stdin on Windows: base64 of the script's UTF-8, characters outside base64 dropped (CRLF) */
-const PS_FROM_STDIN =
-  "$s=[Console]::In.ReadToEnd(); $c=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(($s -replace '[^A-Za-z0-9+/=]',''))); & ([ScriptBlock]::Create($c))"
+/**
+ * The framing of a script on a Windows remote's stdin (#1360): base64 of its UTF-8, then a line that holds one dot
+ * (base64 has none, so no line of the script is that line). The reader stops at that line and does not wait for the end of
+ * input.
+ *
+ * **Measured on a Windows 11 PC (OpenSSH 9.5, Windows PowerShell 5.1, 2026-10-20), a private sshd on loopback and the
+ * installer's real command, 17,000 characters of stdin:** `[Console]::In.ReadToEnd()` never returned in 2 to 9 runs of
+ * 30 one after another and in 13 to 18 of 30 ten at a time; `[Console]::In.ReadLine()` up to the dot line did not hang at
+ * that size but did in 1 to 4 runs of 30 to 80 at 100,000 characters; a `StreamReader` over `OpenStandardInput()` hung in 5
+ * of 6. The stream itself, read with `Read()` into a buffer until the dot line, did not hang in 200 of 200 runs at 17,000
+ * and at 100,000 characters, five at a time, and read to its end it did not hang in 200 of 200 at 17,000. So the end of input
+ * did arrive; the text readers of `[Console]::In` are what stalled, and the size of the script is not the cause (a run of
+ * 70,000 characters passed and one of 17,000 hung). The bytes are read from the stream, and the end of input is not
+ * needed.
+ *
+ * The reader prints `STDIN_READY` when it starts and `STDIN_ACK` once the whole script is read, before it runs the script: the
+ * hub waits for both (`exec`), so a remote that never saw its input fails in seconds with that said, not after the step's 30
+ * minutes, and a step is sent again only when PowerShell was up and the input did not arrive. A stream that ends before the
+ * dot line (a cut input) runs nothing and says so.
+ */
+export const STDIN_END = '.'
+/** What the reader prints when it starts (see `STDIN_END`) */
+export const STDIN_READY = 'CENTRALU-STDIN-READY'
+/** What the reader prints once the whole script is read (see `STDIN_END`) */
+export const STDIN_ACK = 'CENTRALU-STDIN-OK'
+/**
+ * How long the reader waits, from the moment it says it runs, for the line with the dot (#1360 review). The hub's wait for the
+ * confirmation (`SSH_STDIN_ACK_MS`) is longer, so when the hub gives up and sends the step again the first reader has already
+ * ended on its own: it checks the time after every read and again before it confirms, so a reader that stalled and woke late
+ * exits with 4 and runs nothing, and one that waits for input that never comes does not stay behind (the PowerShell, its
+ * `cmd.exe` and `conhost.exe` of a failed step). Exit 4 prints nothing more.
+ */
+export const STDIN_READER_MS = 20_000
+/**
+ * How long PowerShell 5.1 may take to start (1.2 to 3.5 s on a Windows 11 PC under load, 2026-10-20). A reader that finds its process
+ * older than this when it says it runs will not read: the hub's wait for it (`SSH_STDIN_READY_MS`) may be over, and the input is
+ * already waiting in its pipe, so a PowerShell that comes up late would run a step the hub reported as not started
+ */
+export const SSH_POWERSHELL_START_MS = 30_000
+/** The reader's exit codes: the input ended before its dot line; its own time ran out (or its PowerShell started too late). The only exits of the reader the hub may answer by sending the step again (`SshExpectedLine.endedCodes`) */
+export const STDIN_EXIT_CUT = 3
+export const STDIN_EXIT_LATE = 4
+/** The reader (see `STDIN_END`): says it runs, takes the bytes up to the dot line within `deadlineMs`, confirms; `$s` is the text it read */
+function readStdin(deadlineMs: number, startMs: number): string {
+  return (
+    `Write-Output '${STDIN_READY}'; $w=[Diagnostics.Stopwatch]::StartNew(); ` +
+    // A PowerShell that took too long to start gets no input read (see `SSH_POWERSHELL_START_MS`); the process's age, on this machine's clock
+    `if (([DateTime]::Now-[Diagnostics.Process]::GetCurrentProcess().StartTime).TotalMilliseconds -gt ${startMs}) { exit ${STDIN_EXIT_LATE} }; ` +
+    '$i=[Console]::OpenStandardInput(); $m=New-Object IO.MemoryStream; $b=New-Object byte[] 65536; $g=$m.GetBuffer(); $d=$false; ' +
+    // Each read waits for what is left of the deadline (ReadAsync, so a read that never returns still ends); the input ends with a
+    // line holding one dot, whose line break is \n or \r\n
+    `while ($true) { $t=$i.ReadAsync($b,0,65536); $r=${deadlineMs}-$w.ElapsedMilliseconds; if ($r -le 0 -or -not $t.Wait([int]$r)) { exit ${STDIN_EXIT_LATE} }; $k=$t.Result; ` +
+    'if ($k -le 0) { break }; $m.Write($b,0,$k); $g=$m.GetBuffer(); $n=[int]$m.Length; ' +
+    'if ($n -ge 2 -and $g[$n-1] -eq 10 -and ($g[$n-2] -eq 46 -or ($n -ge 3 -and $g[$n-2] -eq 13 -and $g[$n-3] -eq 46))) { $d=$true; break } }; ' +
+    `if (-not $d) { [Console]::Error.WriteLine('The input ended before its end line'); exit ${STDIN_EXIT_CUT} }; ` +
+    `if ($w.ElapsedMilliseconds -gt ${deadlineMs}) { exit ${STDIN_EXIT_LATE} }; ` +
+    `$s=[Text.Encoding]::ASCII.GetString($g,0,[int]$m.Length); Write-Output '${STDIN_ACK}'`
+  )
+}
+const PS_READ_STDIN = readStdin(STDIN_READER_MS, SSH_POWERSHELL_START_MS)
+
+/** What reads a script from stdin on Windows (see `STDIN_END`): base64 of the script's UTF-8, characters outside base64 dropped (CRLF, the end line) */
+const psFromStdin = (readerMs: number, startMs: number) =>
+  `${readStdin(readerMs, startMs)}; $c=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(($s -replace '[^A-Za-z0-9+/=]',''))); & ([ScriptBlock]::Create($c))`
+
+/** A script's base64 as the readers above frame it */
+function framed(base64: string): string {
+  return `${base64}\n${STDIN_END}\n`
+}
 
 /**
  * A PowerShell script for a Windows remote: inline as `-EncodedCommand` when it fits cmd.exe's line,
  * else a short reader inline and the script on stdin (measured with a 40 KB script, 2026-10-11)
  */
-function powershellScript(script: string): RemoteCommand {
+export function powershellScript(script: string, readerMs = STDIN_READER_MS, startMs = SSH_POWERSHELL_START_MS): RemoteCommand {
   const inline = powershell(script)
   if (inline.length <= WINDOWS_INLINE_MAX) return inline
   const full = `${PS_PREAMBLE}${script}`
-  return { command: powershell(PS_FROM_STDIN), stdin: Buffer.from(full, 'utf8').toString('base64') }
+  return { command: powershell(psFromStdin(readerMs, startMs)), stdin: framed(Buffer.from(full, 'utf8').toString('base64')), expect: [STDIN_READY, STDIN_ACK] }
 }
 
 /**
@@ -523,7 +592,7 @@ export function remoteScript(spec: RemoteSpec, script: { sh: string; ps: string 
   const inline = powershell(`wsl.exe -d '${distro}' -- bash -lc 'echo ${b64} | base64 -d | bash -l'`)
   if (inline.length <= WINDOWS_INLINE_MAX) return inline
   // Too long for cmd.exe's line: the script on stdin, passed through to the distro (`-i`: PowerShell adds CRLF)
-  return { command: powershell(`$s=[Console]::In.ReadToEnd(); $s | wsl.exe -d '${distro}' -- bash -lc 'base64 -di | bash -l'`), stdin: b64 }
+  return { command: powershell(`${PS_READ_STDIN}; $s | wsl.exe -d '${distro}' -- bash -lc 'base64 -di | bash -l'`), stdin: framed(b64), expect: [STDIN_READY, STDIN_ACK] }
 }
 
 export type SshTunnelOptions = {
@@ -546,6 +615,10 @@ export type SshTunnelOptions = {
   detachTimeoutMs?: number
   /** How long a step of the installer, updater or autostart (`exec`) may take: a download on a slow link is part of it */
   execTimeoutMs?: number
+  /** How long a step whose script goes on stdin may take to say its PowerShell runs (`RemoteCommand.expect`, #1360); `SSH_STDIN_READY_MS` when absent */
+  stdinReadyMs?: number
+  /** How long, from then, it may take to say it has read the script; `SSH_STDIN_ACK_MS` when absent */
+  stdinAckMs?: number
   /** This computer's name, for `serve --detach --from` (#1223); the OS's host name when absent */
   hubName?: string
   log?: (line: string) => void
@@ -688,10 +761,53 @@ export class SshTunnel implements Tunnel {
    */
   async exec(command: RemoteCommand): Promise<RemoteRun> {
     this.ifClosed()
-    const [line, stdin] = typeof command === 'string' ? [command, undefined] : [command.command, command.stdin]
-    const r = await this.run([...this.config(), '-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '--', this.opts.target, line], stdin, this.opts.execTimeoutMs ?? SSH_EXEC_TIMEOUT_MS)
+    const line = typeof command === 'string' ? command : command.command
+    const stdin = typeof command === 'string' ? undefined : command.stdin
+    const markers: readonly string[] = typeof command === 'string' ? [] : (command.expect ?? [])
+    const readyMs = this.opts.stdinReadyMs ?? SSH_STDIN_READY_MS
+    const ackMs = this.opts.stdinAckMs ?? SSH_STDIN_ACK_MS
+    const sec = (ms: number) => `${Math.round(ms / 1000)} seconds`
+    const expect: SshExpectedLine[] = markers.map((marker, i) =>
+      i === 0
+        ? {
+            marker,
+            withinMs: readyMs,
+            message: `${this.opts.target} did not start this step's PowerShell within ${sec(readyMs)} (ssh connecting, login and PowerShell starting)`,
+          }
+        : {
+            marker,
+            withinMs: ackMs,
+            message: `PowerShell on ${this.opts.target} did not confirm within ${sec(ackMs)} that it had read this step's input, so the step did not start`,
+            endedMessage: `PowerShell on ${this.opts.target} ended before it had read this step's input (its own time for that ran out, or the input was cut), so the step did not start`,
+            // The reader's own exits (cut input, its time); a dropped link (255) or a signal is not, and is not sent again
+            endedCodes: [STDIN_EXIT_CUT, STDIN_EXIT_LATE],
+          },
+    )
+    const args = [...this.config(), '-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '--', this.opts.target, line]
+    let r: SshRunResult
+    try {
+      r = await this.run(args, stdin, this.opts.execTimeoutMs ?? SSH_EXEC_TIMEOUT_MS, expect)
+    } catch (err) {
+      /*
+       * Only when PowerShell was up and the input was not read in time. That reader ends on its own `STDIN_READER_MS` after it
+       * said it runs, less than the wait for its confirmation, and it checks the time again before it confirms, so by the time the
+       * step is sent again the first reader is gone or never ran the script: the script runs only after the confirmation.
+       * (The input is written with the command, not after PowerShell says it runs: written later, Windows OpenSSH did not deliver
+       * it in 11 to 30 percent of the runs, and not at all 100 ms later; docs/runtime-lessons.md RE18.)
+       */
+      if (!(err instanceof SshRunFailure) || err.kind !== 'expected' || err.stage !== 1) throw err
+      this.ifClosed()
+      this.opts.log?.(`[ssh] ${err.message}; sending it once more`)
+      try {
+        r = await this.run(args, stdin, this.opts.execTimeoutMs ?? SSH_EXEC_TIMEOUT_MS, expect)
+      } catch (again) {
+        if (again instanceof SshRunFailure && again.kind === 'expected' && again.stage === 1) throw new Error(`${again.message}, twice. The input of a command is not reaching it`)
+        throw again
+      }
+    }
     if (r.code === 255) throw new Error(`ssh could not reach ${this.opts.target}: ${lastLine(r.stderr) || 'no answer'}`)
-    return r
+    // The reader's lines are not the step's output
+    return markers.length ? { ...r, stdout: r.stdout.split(/\r?\n/).filter((l) => !markers.includes(l.trim())).join('\n') } : r
   }
 
   /** The connection line again until the link-bound host answers, or the forward that runs it ends */
@@ -731,10 +847,10 @@ export class SshTunnel implements Tunnel {
    * otherwise hold the call and its memory for good. Only the end of stderr is kept (`SSH_STDERR_KEEP`);
    * what it is read for is the last line. Closing the tunnel ends the ssh runs still in flight.
    */
-  private run(args: string[], stdin: string | undefined, timeoutMs: number): Promise<SshRunResult> {
+  private run(args: string[], stdin: string | undefined, timeoutMs: number, expect?: readonly SshExpectedLine[]): Promise<SshRunResult> {
     let child: ChildProcess | null = null
     // Once the run has settled, a stopped ssh is `endChild`'s to finish: closing has nothing more to end
-    return runSsh({ ssh: this.opts.ssh, args, env: this.opts.env, stdin, timeoutMs, label: this.opts.target, onChild: (c) => this.asking.add((child = c)) }).finally(() => {
+    return runSsh({ ssh: this.opts.ssh, args, env: this.opts.env, stdin, timeoutMs, expect, label: this.opts.target, onChild: (c) => this.asking.add((child = c)) }).finally(() => {
       if (child) this.asking.delete(child)
     })
   }
@@ -844,6 +960,24 @@ export const SSH_DETACH_TIMEOUT_MS = 120_000
  * for that: this is far past what a working link needs, and only ends a step that is stuck.
  */
 export const SSH_EXEC_TIMEOUT_MS = 30 * 60_000
+/**
+ * What ssh may spend connecting and logging in before it counts against a step's PowerShell (`SSH_STDIN_READY_MS`, #1360 review):
+ * `ConnectTimeout=15` is per address, and a name with several addresses or a ProxyJump chain tries them one after another.
+ * Six attempts' worth; a connection that is slower than that is not one a step should wait for
+ */
+export const SSH_CONNECT_ALLOWANCE_MS = 6 * 15_000
+/**
+ * How long a step whose script goes on stdin may take to start its PowerShell and say so (`RemoteCommand.expect`,
+ * `SshTunnelOptions.stdinReadyMs`, #1360): ssh's own connecting has its allowance (`SSH_CONNECT_ALLOWANCE_MS`) on top of PowerShell's
+ * start, so a slow connection is not reported as a PowerShell that did not start. A connection that fails says so itself (exit 255)
+ */
+export const SSH_STDIN_READY_MS = SSH_CONNECT_ALLOWANCE_MS + SSH_POWERSHELL_START_MS
+/**
+ * How long, from the reader saying it runs, the step may take to say it has read its script (`SshTunnelOptions.stdinAckMs`):
+ * 17 KB through a link that is up. More than the reader's own wait (`STDIN_READER_MS`, 20 s), which ends first. Past it the input did
+ * not arrive in time, the step has not started, and it is sent once more
+ */
+export const SSH_STDIN_ACK_MS = 30_000
 /** How much of the end of the forward's stderr is kept, for as long as the link lives */
 const FORWARD_STDERR_KEEP = 16 * 1024
 
