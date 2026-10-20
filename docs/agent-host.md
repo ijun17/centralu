@@ -2996,13 +2996,15 @@ PowerShell):
 | 1. Node | Downloads the pinned archive from nodejs.org, compares its SHA-256 with the one the hub sends from `remote-runtime.json`, unpacks it with the system's tar (`System32\tar.exe` on Windows) into a `.partial-node-*` folder, keeps only `bin/node` (`node.exe`) and `LICENSE`, and renames it to `<data>/remote/node/v<N>/` (on Windows, a rename refused while an on-access scanner holds the `node.exe` just run is tried again for up to 15 s, #368) | Sends the archive's name and hash; reads `CENTRALU-INSTALL node ok` or a failure code |
 | 2. Centralu | `remote-install.mjs`, written there gzipped in base64 and run on that Node: takes `install.lock`, fetches both tarballs, refuses any whose sha512 is not the integrity the hub sent, unpacks them in npm's layout into `.partial-<v>-<pid>/`, drops the AppImage or `centralu.exe` when the host came in the platform package, writes `install.json`, renames the folder to `versions/<v>/` (a folder already there, the same version with other bytes, is moved aside first and removed only after the new one is in place), writes the managed launcher if there is none (`managedLauncherScript` from that version's `serve.mjs`; never rewritten), moves `current` to `previous` and writes `current`, each by a rename over the file, and removes versions and Nodes neither names | Reads `CENTRALU-INSTALL done <json>`: `current`, `previous`, what was removed and what could not be (a Windows program running from it) |
 
-A script too long for a Windows command line (step 2's, about 17,000 characters) goes on the command's stdin as base64 and
+A script too long for a Windows command line (step 2's, about 17,000 characters of stdin) goes on the command's stdin as base64 and
 then a line holding one dot (#1360). The PowerShell reads the bytes from `[Console]::OpenStandardInput()` up to that line,
-prints `CENTRALU-STDIN-OK` and runs the script; it does not wait for the end of input, and it does not use
-`[Console]::In`, whose `ReadToEnd()` never returned in a share of the runs on Windows OpenSSH (docs/runtime-lessons.md RE18).
-`exec` waits 30 s for the confirmation (`SshTunnelOptions.stdinAckMs`); when it does not come the step has not started, so
-it is sent once more, and a second silence fails with "<machine> did not confirm within 30 seconds that it had read this step's
-input, so the step did not start". The step's own limit (30 minutes) is then only for a step that runs.
+says `CENTRALU-STDIN-READY` when it starts and `CENTRALU-STDIN-OK` when it has the script, then runs it; it does not wait for the
+end of input, and it does not use `[Console]::In`, whose `ReadToEnd()` never returned in a share of the runs on Windows OpenSSH
+(docs/runtime-lessons.md RE18). `exec` waits for the first line for 60 s (`stdinReadyMs`: ssh connecting, login, PowerShell
+starting; a failure there says nothing ran and the step is not sent again) and for the second for 30 s after it (`stdinAckMs`).
+When PowerShell was up and the input did not arrive, the step has not started, so it is sent once more, and a second silence
+fails with "PowerShell on <machine> did not confirm within 30 seconds that it had read this step's input, so the step did not
+start, twice". The step's own limit (30 minutes) is then only for a step that runs.
 
 The remote prints codes, the hub turns them into sentences (`node_hash`, `integrity`, `download`, `busy`, …); exit
 codes are not read, as for the lookup. `install.lock` is a folder made with `mkdir`, then its `pid` and a `token` of

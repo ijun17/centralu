@@ -1793,9 +1793,11 @@ characters; a `StreamReader` over `OpenStandardInput()` hung in 5 of 6; `OpenSta
 until the marker did not hang in 200 of 200 runs at 17,000 and at 100,000 characters (and not with a 4 KB buffer, or reading to the
 end). Payload size is not the cause; the text readers are. Each hung step leaves its `cmd.exe`, PowerShell and `conhost.exe`
 behind on the remote (113 of them after one afternoon of tests, until new sessions failed with 0xC0000142).
-Rule: a script goes on stdin as base64 and a line with one dot; the reader reads bytes until that line (or the end), prints
-`CENTRALU-STDIN-OK`, then runs the script; `exec` waits 30 s for that line, sends the step once more when it does not come
-(the step has not started), and then fails saying the remote never confirmed the input.
+Rule: a script goes on stdin as base64 and a line with one dot; the reader prints `CENTRALU-STDIN-READY`, reads bytes until
+that line (a CRLF after the dot is taken too), prints `CENTRALU-STDIN-OK`, then runs the script; `exec` waits 60 s for the
+first line (a remote that does not start PowerShell is not one that lost its input: fail, no second try) and 30 s after it for
+the second, sends the step once more when only the second is missing (the script runs after it, so the step has not
+started), and then fails saying the remote never confirmed the input.
 Guard: `host/links/stdin-frame.test.ts` (the reader on Windows PowerShell 5.1 with a 100 KB script and the input never
 closed, a cut input, the confirmation wait and the second try).
 Platforms: Windows and WSL remotes (a WSL step is read the same way by the PowerShell that starts it).
