@@ -425,6 +425,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     if (!on && this.status === 'updating' && !this.inOperation()) this.setStatus('unreachable', `The host on ${this.name} was being swapped; ${WAITS_FOR_PERSON}`)
     this.noteNextStep()
     if (on && !this.parked && !this.stopped && !this.held && AWAY.has(this.status)) this.reconnect()
+    // Said to whoever follows the machine: a link that was waiting to retry now waits for the person (the reports of a child there)
+    this.deps.broadcast({ type: 'machine_status', machine: this.info() })
   }
 
   /** An unreachable row says what comes next (`NEXT_STEP`); said again when the switch moves */

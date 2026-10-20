@@ -465,14 +465,14 @@ describe('a call that needs a machine that is connecting (#1341)', () => {
 
 describe('a child working on a machine whose Auto reconnect is off (#1341)', () => {
   /** A hub with the switch off whose child on Laptop keeps its turn open (it asks a question), so its report is owed */
-  async function busyChild() {
+  async function busyChild(o: { autoReconnect?: boolean; deps?: Partial<LinkDeps> } = {}) {
     const remoteStore = new Store()
     remoteStore.projects.addProject({ id: 'p-app', path: checkout('git@github.com:me/app.git'), name: 'app-checkout' })
     const remote = await remoteHost(remoteStore)
     const hubStore = new Store()
     hubStore.projects.addProject({ id: 'p-hub', path: checkout('https://github.com/me/app'), name: 'app' })
     seedSession(hubStore, 'p-hub', 'h1', 'worker', 'ext-h1')
-    const hub = await hubHost(() => lineFor(remote.port), { store: hubStore, autoReconnect: false })
+    const hub = await hubHost(() => lineFor(remote.port), { store: hubStore, autoReconnect: o.autoReconnect ?? false, ...(o.deps ? { deps: o.deps } : {}) })
     await hub.mgr.setProjectTrusted('p-hub', true)
     await eventually(() => hub.row().status === 'connected')
     const call = hub.mgr.startAgent('h1', { task: 'question: proceed?', machine: 'Laptop' })
@@ -507,6 +507,18 @@ describe('a child working on a machine whose Auto reconnect is off (#1341)', () 
     remote.mgr.answerQuestion(child.id, child.pendingQuestions[0].requestId, [{ answers: ['Yes'] } as any])
     await eventually(async () => (await said()).includes('answered: Yes'))
     await eventually(() => owed() === 0)
+  })
+
+  it('tells the caller again when the person turns Auto reconnect off while the machine is down and waiting to retry', async () => {
+    const { hub, said } = await busyChild({ autoReconnect: true, deps: { retryMs: [60_000, 60_000] } })
+    hub.tunnel().unreachable = true
+    hub.tunnel().drop()
+    // Told at the first sign, as before: the link is down and will be tried again
+    await eventually(async () => (await said()).includes('dropped while'))
+    expect(await said()).not.toContain('Auto reconnect is off')
+    await hub.call('machines.setAutoReconnect', { machineId: 'm1', autoReconnect: false })
+    await eventually(async () => (await said()).includes('Auto reconnect is off'))
+    expect(await said()).toContain('ask the person to connect it')
   })
 
   it('says the person disconnected it, not that Auto reconnect is off, when the switch is on', async () => {

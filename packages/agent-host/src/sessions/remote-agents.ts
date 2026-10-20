@@ -179,7 +179,12 @@ export class RemoteAgents {
   private loaded: RemoteAgent[] | null = null
   private readonly waits = new Map<string, TurnWait>()
   /** Children whose parent was told their link dropped, until it is back */
-  private readonly toldDown = new Set<string>()
+  /**
+   * The children whose caller was told the link dropped, with whether the notice said that nothing here reconnects the machine
+   * (#1341). One told only that the link dropped is told again when the machine turns out to wait for the person: the person
+   * turned Auto reconnect off, or disconnected it, while it was down
+   */
+  private readonly toldDown = new Map<string, boolean>()
   /** The cards of a caller's turn its caller was told of, once each (`<session>\0<turn>\0<request>`, #676) */
   private readonly toldCards = new Set<string>()
   /** Whose each child's turn is, as settled in this host (`Whose`); one not here is read from its record (`whoseOf`) */
@@ -214,7 +219,7 @@ export class RemoteAgents {
         continue
       }
       this.host.children.setLinkedReport(r.sessionId, { orchestratorId: r.callerId, busy: false, ...(r.owed.paused ? { paused: r.owed.paused } : {}) })
-      if (!r.owed.paused) this.toldDown.add(r.sessionId)
+      if (!r.owed.paused) this.toldDown.set(r.sessionId, false)
     }
   }
 
@@ -1081,13 +1086,14 @@ export class RemoteAgents {
         this.dropWait(rec.sessionId)
         wait.end({ step: 'unreachable', machine: name })
         // The call said it; what ended while the link was down is reported once it is back, seen working or not (#1038 review)
-        this.toldDown.add(rec.sessionId)
+        this.toldDown.set(rec.sessionId, false)
         continue
       }
       const report = this.host.children.linkedReports.get(rec.sessionId)
-      if (!report || report.orchestratorId !== rec.callerId || report.paused || this.toldDown.has(rec.sessionId)) continue
+      const told = this.toldDown.get(rec.sessionId)
+      if (!report || report.orchestratorId !== rec.callerId || report.paused || (told !== undefined && (told || !alone))) continue
       if (mayRecover) continue
-      this.toldDown.add(rec.sessionId)
+      this.toldDown.set(rec.sessionId, alone)
       const why = !alone
         ? 'It cannot be followed until the link is back: '
         : m.status === 'disconnected'
