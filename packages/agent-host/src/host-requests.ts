@@ -24,7 +24,10 @@ import { rpcError } from './rpc-error.js'
  *   2026-10-21: the one card with a timer, since a raw call has no turn to end it), or the host stops (`closeAll`).
  *   Nothing is kept across a host swap: the caller's socket closes with it, and the next host asks again.
  */
-export const HOST_REQUEST_LIMITS = { maxOpen: 8, lifetimeMs: 15 * 60_000 }
+export const HOST_REQUEST_LIMITS = { maxOpen: 8, lifetimeMs: 15 * 60_000, windowGoneMs: 30_000 }
+
+/** How long a generic card's parameters may be: what runs is what the card shows, whole, so a longer call is refused */
+const SHOWN_PARAMS_MAX = 2000
 
 export type HostRequestsDeps = {
   emit: (event: NormalizedEvent) => void
@@ -41,13 +44,18 @@ export type RequestFrom = { client: string | null }
 
 type Waiting = { request: HostRequest; settle: (answer: 'allow' | 'deny' | null, outcome: HostRequestOutcome) => void }
 
+/** How a card ended: answered, gone unanswered, or never raised (the bound, or no window to show it) */
+type Ended = { decision: 'allow' | 'deny' | null; outcome: HostRequestOutcome | 'too_many_requests' | 'no_window' }
+
 /** Why a host request ended without running, for a program to read (`data.refused`) */
-export type RequestRefusal = 'no_window' | 'too_many_requests' | 'denied' | 'withdrawn' | 'expired'
+export type RequestRefusal = 'no_window' | 'too_many_requests' | 'denied' | 'withdrawn' | 'expired' | 'not_done'
 
 export class HostRequests {
   private readonly open = new Map<string, Waiting>()
   private readonly limits: typeof HOST_REQUEST_LIMITS
   private readonly now: () => number
+  /** Set while no window shows requests: when it fires, what still waits is withdrawn (`showingChanged`) */
+  private noWindow: ReturnType<typeof setTimeout> | null = null
 
   constructor(private readonly deps: HostRequestsDeps) {
     this.limits = { ...HOST_REQUEST_LIMITS, ...deps.limits }
@@ -59,12 +67,9 @@ export class HostRequests {
    * not run. `signal` is the calling socket's: it fires when the program disconnects.
    */
   async ask(method: string, params: unknown, from: RequestFrom, signal: AbortSignal): Promise<unknown> {
-    if (this.open.size >= this.limits.maxOpen) {
-      throw refused('too_many_requests', `${this.limits.maxOpen} requests already wait for the person in the Centralu window, so ${method} was not done.`)
-    }
-    if (!this.deps.canShow()) {
-      throw refused('no_window', `No Centralu window is open to ask the person, so ${method} was not done. It needs the person's approval in the window.`)
-    }
+    // Said before anything is read; `card` checks both again when it raises, after the trash was read
+    const early = this.cannotRaise()
+    if (early) throw unanswered(method, early)
     const p = fields(params)
     switch (method) {
       case 'trash.purge':
@@ -72,10 +77,15 @@ export class HostRequests {
       case 'trash.purgeSubagentSteps':
         return this.viaTrash(method, from, signal, { action: 'delete', sessionId: str(p.sessionId), what: 'steps' }, () => ({ ok: true }))
       case 'trash.empty':
-        return this.viaTrash(method, from, signal, { action: 'empty' }, (purged, text) => ({ purged, failed: [], text }))
+        return this.viaTrash(method, from, signal, { action: 'empty' }, (purged, text, failed) => ({ purged, failed, text }))
       default: {
+        // The card shows every parameter that will run: one too long to show whole is refused, never cut
+        const shown = JSON.stringify(params ?? {})
+        if (shown.length > SHOWN_PARAMS_MAX) {
+          throw refused('not_done', `The parameters of ${method} are too long to show the person whole (${shown.length} characters, at most ${SHOWN_PARAMS_MAX}), so it was not done.`)
+        }
         const question =
-          `Allow ${method}? A program on this computer called it with ${plainQuoted(JSON.stringify(params ?? {}), 300)}. ` +
+          `Allow ${method}? A program on this computer called it with ${plainQuoted(shown, SHOWN_PARAMS_MAX)}. ` +
           'It cannot be undone or widens what runs without asking, so it waits for you. Allow it only if you asked for this.'
         const answer = await this.card(method, question, from, signal)
         if (answer.decision !== 'allow') throw unanswered(method, answer.outcome)
@@ -103,6 +113,32 @@ export class HostRequests {
   }
 
   /**
+   * How many windows that show requests are attached (`HostServer`'s `onShowing`). With none, what waits is withdrawn
+   * once `windowGoneMs` passes with none back: a card nobody can see is not left standing (owner, 2026-10-21), and a
+   * window that reloads, or reconnects after a swap behind the front door, comes back within it and keeps its cards.
+   */
+  showingChanged(count: number): void {
+    if (count > 0) {
+      if (this.noWindow) clearTimeout(this.noWindow)
+      this.noWindow = null
+      return
+    }
+    if (this.noWindow || this.open.size === 0) return
+    this.noWindow = setTimeout(() => {
+      this.noWindow = null
+      if (!this.deps.canShow()) this.closeAll()
+    }, this.limits.windowGoneMs)
+    this.noWindow.unref?.()
+  }
+
+  /** Why no card can be raised now, or null */
+  private cannotRaise(): 'too_many_requests' | 'no_window' | null {
+    if (this.open.size >= this.limits.maxOpen) return 'too_many_requests'
+    if (!this.deps.canShow()) return 'no_window'
+    return null
+  }
+
+  /**
    * A trash delete through the orchestrator's own flow, with this card for its question. `result` makes the method's own
    * answer from how many sessions the flow purged and what it said.
    */
@@ -111,10 +147,10 @@ export class HostRequests {
     from: RequestFrom,
     signal: AbortSignal,
     req: { action: 'delete'; sessionId: string; what: 'session' | 'steps' } | { action: 'empty' },
-    result: (purged: number, text: string) => unknown,
+    result: (purged: number, text: string, failed: { sessionId: string; name: string; error: string }[]) => unknown,
   ): Promise<unknown> {
     /** How the card ended, once one was raised: the flow says only that it did not run */
-    const asked: { decision: 'allow' | 'deny' | null; outcome: HostRequestOutcome }[] = []
+    const asked: Ended[] = []
     const flow = new TrashFlow({
       askHost: async (_caller, detail, cardSignal): Promise<HostAskAnswer> => {
         const answer = await this.card(method, 'raw' in detail ? detail.raw : '', from, cardSignal ?? signal)
@@ -123,10 +159,22 @@ export class HostRequests {
       },
     })
     let purged = 0
+    /** The sessions whose purge failed, by the names the trash gave them, as `trash.empty` answers them */
+    const failed: { sessionId: string; name: string; error: string }[] = []
+    const names = new Map<string, string>()
     flow.useRpc(async (m, p) => {
-      const r = await this.deps.rpc(m, p)
-      if (m === 'trash.purge') purged++
-      return r
+      try {
+        const r = await this.deps.rpc(m, p)
+        if (m === 'trash.list') for (const row of listed(r)) names.set(row.id, row.name)
+        if (m === 'trash.purge') purged++
+        return r
+      } catch (e) {
+        if (m === 'trash.purge') {
+          const sessionId = str(fields(p).sessionId)
+          failed.push({ sessionId, name: names.get(sessionId) ?? sessionId, error: e instanceof Error ? e.message : String(e) })
+        }
+        throw e
+      }
     })
     const answer = await flow.run('', req, signal)
     if (!answer.ok) {
@@ -134,12 +182,15 @@ export class HostRequests {
       const ended = asked.at(-1)
       throw rpcError(answer.error, 'internal', { data: { refused: ended && ended.decision !== 'allow' ? refusalOf(ended.outcome) : 'not_done' } })
     }
-    return result(purged, answer.text)
+    return result(purged, answer.text, failed)
   }
 
   /** Raises one card and waits for its answer, its time, or its caller going away */
-  private card(method: string, question: string, from: RequestFrom, signal: AbortSignal): Promise<{ decision: 'allow' | 'deny' | null; outcome: HostRequestOutcome }> {
+  private card(method: string, question: string, from: RequestFrom, signal: AbortSignal): Promise<Ended> {
     if (signal.aborted) return Promise.resolve({ decision: null, outcome: 'withdrawn' })
+    // Checked here too: a trash delete reads the trash first, and many of them at once must not get past the bound
+    const cannot = this.cannotRaise()
+    if (cannot) return Promise.resolve({ decision: null, outcome: cannot })
     const createdAt = this.now()
     const request: HostRequest = {
       requestId: randomUUID(),
@@ -174,21 +225,37 @@ function fields(params: unknown): Record<string, unknown> {
 /** A parameter as the flow's own id check reads it: anything but a string is checked (and refused) as an empty one */
 const str = (v: unknown): string => (typeof v === 'string' ? v : '')
 
-function refusalOf(outcome: HostRequestOutcome): RequestRefusal {
+function refusalOf(outcome: Ended['outcome']): RequestRefusal {
+  if (outcome === 'too_many_requests' || outcome === 'no_window') return outcome
   return outcome === 'denied' ? 'denied' : outcome === 'expired' ? 'expired' : 'withdrawn'
+}
+
+/** The rows of a `trash.list` answer, read defensively */
+function listed(r: unknown): { id: string; name: string }[] {
+  const sessions = fields(r).sessions
+  if (!Array.isArray(sessions)) return []
+  return sessions.flatMap((row: unknown) => {
+    const f = fields(row)
+    return typeof f.id === 'string' && typeof f.name === 'string' ? [{ id: f.id, name: f.name }] : []
+  })
 }
 
 function refused(why: RequestRefusal, message: string): Error {
   return rpcError(message, 'internal', { data: { refused: why } })
 }
 
-function unanswered(method: string, outcome: HostRequestOutcome): Error {
+function unanswered(method: string, outcome: Ended['outcome']): Error {
   const why = refusalOf(outcome)
-  const message =
-    why === 'denied'
-      ? `The person did not allow ${method}, so it was not done.`
-      : why === 'expired'
-        ? `Nobody answered the card for ${method} in time, so it was not done.`
-        : `The card for ${method} was withdrawn before the person answered, so it was not done.`
-  return refused(why, message)
+  switch (why) {
+    case 'too_many_requests':
+      return refused(why, `Too many requests already wait for the person in the Centralu window, so ${method} was not done.`)
+    case 'no_window':
+      return refused(why, `No Centralu window is open to ask the person, so ${method} was not done. It needs the person's approval in the window.`)
+    case 'denied':
+      return refused(why, `The person did not allow ${method}, so it was not done.`)
+    case 'expired':
+      return refused(why, `Nobody answered the card for ${method} in time, so it was not done.`)
+    default:
+      return refused(why, `The card for ${method} was withdrawn before the person answered, so it was not done.`)
+  }
 }

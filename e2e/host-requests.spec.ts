@@ -53,3 +53,26 @@ test('host requests stand one at a time, oldest first; Deny moves to the next, a
   await expect(page.getByTestId('host-request-more')).toBeHidden()
   expect(await answers(page)).toEqual([{ requestId: first, decision: 'deny' }])
 })
+
+test('the next card does not take a click meant for the last: its buttons wait a moment', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const first = await raise(page, 'Delete "one" for good?')
+  await raise(page, 'Delete "two" for good?')
+  await page.getByTestId('host-request-deny').click()
+  await expect(page.getByTestId('host-request-detail')).toHaveText('Delete "two" for good?')
+  // Standing where the first was, the second's buttons take no click yet, then do
+  await expect(page.getByTestId('host-request-allow')).toBeDisabled()
+  await page.getByTestId('host-request-allow').click({ force: true })
+  expect(await answers(page)).toEqual([{ requestId: first, decision: 'deny' }])
+  await expect(page.getByTestId('host-request-allow')).toBeEnabled()
+})
+
+test('a long question shows whole: a line of parameters with no spaces wraps instead of running off the card', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const params = `{"projectId":"p1","note":"${'x'.repeat(1500)}","tail":"END"}`
+  await raise(page, `Allow projects.delete? A program on this computer called it with ${JSON.stringify(params)}.`)
+  const detail = page.getByTestId('host-request-detail')
+  await expect(detail).toContainText('END')
+  const overflow = await detail.evaluate((el) => el.scrollWidth - el.clientWidth)
+  expect(overflow).toBeLessThanOrEqual(0)
+})

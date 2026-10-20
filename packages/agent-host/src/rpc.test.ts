@@ -123,3 +123,25 @@ describe('processes.strays', () => {
     await expect(rpc('processes.stop', { pids: [12345] })).rejects.toThrow(/keeper could not say/)
   })
 })
+
+/** The person's answers to the limited credential's calls (#1405, host-requests.ts), as the window reaches them */
+describe('requests.list and requests.answer', () => {
+  const handler = (services: Parameters<typeof createRpcHandler>[2]) => createRpcHandler({} as SessionManager, new Map(), services)
+  const request = { requestId: 'r1', method: 'trash.purge', question: 'Delete "x" for good?', client: null, createdAt: 1, expiresAt: 2 }
+
+  it('lists what waits and passes the answer on, checking its shape first', async () => {
+    const answered: [string, string][] = []
+    const rpc = handler({ requests: { list: () => [request], answer: (id, d) => (answered.push([id, d]), id === 'r1') } })
+    await expect(rpc('requests.list', {})).resolves.toEqual([request])
+    await expect(rpc('requests.answer', { requestId: 'r1', decision: 'allow' })).resolves.toEqual({ ok: true })
+    await expect(rpc('requests.answer', { requestId: 'gone', decision: 'deny' })).resolves.toEqual({ ok: false })
+    await expect(rpc('requests.answer', { requestId: 'r1', decision: 'always' })).rejects.toThrow()
+    expect(answered).toEqual([['r1', 'allow'], ['gone', 'deny']])
+  })
+
+  it('has nothing waiting on a host without the service, and answers nothing', async () => {
+    const rpc = handler({})
+    await expect(rpc('requests.list', {})).resolves.toEqual([])
+    await expect(rpc('requests.answer', { requestId: 'r1', decision: 'allow' })).resolves.toEqual({ ok: false })
+  })
+})

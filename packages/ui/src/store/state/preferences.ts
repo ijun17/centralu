@@ -53,6 +53,8 @@ export type PreferencesSlice = {
    * last list it gave, kept current by its events and read again after every reconnect.
    */
   hostRequests: HostRequest[]
+  /** How many host request events this window has heard: a list read before the latest of them is not laid over it */
+  hostRequestsHeard: number
   /** Reads the waiting requests again. Never throws; an older host that does not know them leaves the list as it was */
   refreshHostRequests(): Promise<void>
   /** The person's answer; a request no longer waiting is said in a toast, and the list is read again */

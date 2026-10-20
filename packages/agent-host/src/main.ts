@@ -725,6 +725,8 @@ const server = new HostServer({
   onRpc: router.handle,
   // A limited call that cannot be undone waits for the person's card (#1405)
   onAsk: (method, params, from, signal): Promise<unknown> => requests.ask(method, params, from, signal),
+  // A card nobody can see is withdrawn once no window shows them for a while (host-requests.ts)
+  onShowing: (count) => requests.showingChanged(count),
   // A window's connection ended: the pinned views it leased wait for a claim, then close (#392, view-host.ts)
   onClientGone: (client) => {
     views.holderGone(client)

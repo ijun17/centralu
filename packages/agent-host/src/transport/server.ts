@@ -132,6 +132,8 @@ export type HostServerOptions = {
    * fires when its socket goes. Without it, such a call is refused as before
    */
   onAsk?: (method: string, params: unknown, from: { client: string | null }, signal: AbortSignal) => Promise<unknown>
+  /** How many windows that show host requests are attached, each time it changes (#1405, `HostRequests.showingChanged`) */
+  onShowing?: (count: number) => void
   /**
    * Tracks every RPC for a planned host swap (#280 step 3, drain.ts): once the drain begins, new
    * RPCs are refused and running ones get its bound to finish. Refused and cut calls are answered
@@ -609,7 +611,10 @@ export class HostServer {
         this.clients.add(ws)
         this.byClient.set(client, ws)
         label = frame.data.client?.trim().slice(0, 60) || null
-        if (!limited && frame.data.shows?.includes(SHOWS_HOST_REQUESTS)) this.showing.add(ws)
+        if (!limited && frame.data.shows?.includes(SHOWS_HOST_REQUESTS)) {
+          this.showing.add(ws)
+          this.opts.onShowing?.(this.showing.size)
+        }
         this.greet(ws, frame.data.afterSeq ?? 0, frame.data.streamEpoch)
         return
       }
@@ -645,7 +650,8 @@ export class HostServer {
           } catch (err) {
             // A refusal says why in `data` (host-requests.ts): kept for a program to read
             const data: unknown = err !== null && typeof err === 'object' && 'data' in err ? err.data : undefined
-            this.sendError(ws, id, { code: 'internal', message: errorMessage(err), retryable: false, ...(data !== undefined ? { data } : {}) })
+            // An allowed call a swap refused or cut says "send it again", as any call does
+            this.sendError(ws, id, { code: 'internal', message: errorMessage(err), retryable: err instanceof DrainCut, ...(data !== undefined ? { data } : {}) })
           }
           return
         }
@@ -683,7 +689,7 @@ export class HostServer {
       clearTimeout(this.handshakeTimers.get(ws))
       this.handshakeTimers.delete(ws)
       this.clients.delete(ws)
-      this.showing.delete(ws)
+      if (this.showing.delete(ws)) this.opts.onShowing?.(this.showing.size)
       leaving.abort()
       if (this.byClient.get(client) === ws) this.byClient.delete(client)
       this.failCalls(ws, 'The connection ended before it answered')

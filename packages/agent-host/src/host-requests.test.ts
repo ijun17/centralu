@@ -7,7 +7,7 @@ const row = (id: string, name: string, extra: Partial<TrashedSession> = {}): Tra
   ({ id, name, tool: 'claude', project: null, deletedAt: 1000, messages: 4, bytes: 2048, conversationFile: 'keep', worktree: null, ...extra })
 
 /** A host with a trash, a window that may or may not be attached, and every call it is asked to make recorded */
-function harness(opts: { trash?: TrashedSession[]; canShow?: boolean; limits?: HostRequestsDeps['limits'] } = {}) {
+function harness(opts: { trash?: TrashedSession[]; canShow?: boolean; limits?: HostRequestsDeps['limits']; failPurge?: string } = {}) {
   let trash = opts.trash ?? [row('s1', 'Fix the parser'), row('m1.s2', 'Remote work', { machine: 'Laptop' })]
   const events: NormalizedEvent[] = []
   const calls: [string, unknown][] = []
@@ -21,6 +21,7 @@ function harness(opts: { trash?: TrashedSession[]; canShow?: boolean; limits?: H
       if (method === 'trash.list') return { sessions: trash, runs: [], bytes: trash.reduce((n, s) => n + s.bytes, 0), subagentSteps: [] }
       if (method === 'trash.purge') {
         const id = (params as { sessionId: string }).sessionId
+        if (id === opts.failPurge) throw new Error('the machine went away')
         trash = trash.filter((s) => s.id !== id)
         return { ok: true }
       }
@@ -173,6 +174,60 @@ describe('a host request (#1405)', () => {
     h.requests.answer(card.requestId, 'allow')
     await expect(asked).resolves.toEqual({ done: 'projects.delete' })
     expect(h.calls).toEqual([['projects.delete', params]])
+  })
+
+  it('never runs a parameter the card did not show: parameters too long to show whole are refused, not cut', async () => {
+    const h = harness()
+    const hidden = { projectId: 'p1', pad: 'x'.repeat(2500), alsoDelete: 'everything' }
+    const e = await caught(h.requests.ask('projects.delete', hidden, { client: null }, new AbortController().signal))
+    expect(e.data?.refused).toBe('not_done')
+    expect(h.raised()).toEqual([])
+    expect(h.calls).toEqual([])
+    // And what fits is shown whole
+    const asked = h.requests.ask('projects.delete', { projectId: 'p1', pad: 'y'.repeat(1500), tail: 'END' }, { client: null }, new AbortController().signal)
+    const card = await h.nextCard()
+    expect(card.question).toContain('END')
+    expect(card.question).not.toContain('…')
+    h.requests.closeAll()
+    await asked.catch(() => {})
+  })
+
+  it('keeps its bound when many trash deletes read the trash at once: no card past it', async () => {
+    const h = harness({ limits: { maxOpen: 2 } })
+    const signal = new AbortController().signal
+    const asks = Array.from({ length: 5 }, () => h.requests.ask('trash.purge', { sessionId: 's1' }, { client: null }, signal))
+    const settled = Promise.allSettled(asks)
+    await new Promise((r) => setTimeout(r, 30))
+    expect(h.raised()).toHaveLength(2)
+    h.requests.closeAll()
+    const outcomes = (await settled).map((r) => (r.status === 'rejected' ? (r.reason as { data?: { refused?: string } }).data?.refused : 'ran'))
+    expect(outcomes.filter((o) => o === 'too_many_requests')).toHaveLength(3)
+    expect(h.purged()).toEqual([])
+  })
+
+  it('says which sessions an allowed empty could not delete, as trash.empty answers them', async () => {
+    const h = harness({ failPurge: 'm1.s2' })
+    const asked = h.requests.ask('trash.empty', {}, { client: null }, new AbortController().signal)
+    h.requests.answer((await h.nextCard()).requestId, 'allow')
+    await expect(asked).resolves.toMatchObject({ purged: 1, failed: [{ sessionId: 'm1.s2', name: 'Remote work', error: 'the machine went away' }] })
+  })
+
+  it('withdraws what waits once no window shows requests for a while, and keeps it for one that comes back in time', async () => {
+    const h = harness({ limits: { windowGoneMs: 40 } })
+    const asked = h.requests.ask('projects.delete', { projectId: 'p1' }, { client: null }, new AbortController().signal)
+    await h.nextCard()
+    // A window reloads: gone, then back within the grace
+    h.setCanShow(false)
+    h.requests.showingChanged(0)
+    h.setCanShow(true)
+    h.requests.showingChanged(1)
+    await new Promise((r) => setTimeout(r, 80))
+    expect(h.requests.list()).toHaveLength(1)
+    // The last window closes for good
+    h.setCanShow(false)
+    h.requests.showingChanged(0)
+    expect((await caught(asked)).data?.refused).toBe('withdrawn')
+    expect(h.calls).toEqual([])
   })
 
   it('takes one answer: a second, or one for a request it never raised, changes nothing', async () => {

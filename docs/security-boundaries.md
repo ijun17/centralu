@@ -1172,16 +1172,21 @@ that it shows them (`hello.shows`), one at a time, oldest first.
   the orchestrator's: the same question, naming each session (quoted on one line), its machine, its size and what goes
   with it, and the same reading of the trash again after Allow: a session restored meanwhile is not deleted, and
   `trash.empty` deletes only the rows its card listed, never what arrived while it stood. Any other method's card
-  names the method and its parameters, quoted on one line with format characters escaped, and the call runs as made.
+  names the method and its parameters, quoted on one line with format characters escaped, and the call runs as made;
+  parameters too long to show whole (over 2,000 characters) are refused rather than cut, since what runs is what the
+  card shows. The card wraps a line anywhere, so a long one is not clipped.
   The program's own name (`hello.client`) is shown quoted, cut to 60 characters, and said to be what it calls itself:
   nothing checks it.
 - **Who answers.** Only a window holding the token (`requests.answer` is `window`): never the program, another
   limited socket, a bridge or an agent. Allow and Deny only, no "always" (owner, 2026-10-21), and no key: a y meant for
-  the composer must not delete something for good.
+  the composer must not delete something for good. A card's buttons take a click only once it has stood half a second,
+  and one click: the next card appears where the last one was, and the program hears each answer and can ask again.
 - **When it is refused at once.** No window that shows host requests holds the token (owner, 2026-10-21: refused,
-  not left standing): an older window, a hub's link and the limited credential count for nothing. Or 8 already wait.
+  not left standing): an older window, a hub's link and the limited credential count for nothing. Or 8 already wait,
+  counted again when the card is raised (a trash delete reads the trash first, so many at once cannot pass the bound).
 - **When it ends unanswered.** The program's socket closes, 15 minutes pass (owner, 2026-10-21: the one card with a
-  timer, since a raw call has no turn to end it), or the host stops. Nothing is kept across a swap: the caller asks the
+  timer, since a raw call has no turn to end it), no window shows requests for 30 seconds (a window that reloads comes
+  back within it and keeps its cards), or the host stops. Nothing is kept across a swap: the caller asks the
   next host again. An allowed call runs as a call the host serves, so a swap's drain refuses or cuts it like any other.
 - **Linked machines.** The card is raised on the host where the call started, before the router, so a call naming a
   linked machine's session asks on the hub and is relayed only once allowed (with the hub's link, which holds that

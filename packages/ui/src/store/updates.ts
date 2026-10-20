@@ -152,8 +152,11 @@ export const updateActions = (set: StoreSet, get: StoreGet): UpdateActions => ({
   async refreshHostRequests() {
     const platform = get().platform
     if (!platform) return
+    const heard = get().hostRequestsHeard
     try {
-      set({ hostRequests: await platform.requests.list() })
+      const hostRequests = await platform.requests.list()
+      // An event that arrived while the list was on its way is newer than the list: the events have kept it current
+      if (get().hostRequestsHeard === heard) set({ hostRequests })
     } catch {
       // An older host does not know them, and a host that did not answer is read again on the next reconnect
     }

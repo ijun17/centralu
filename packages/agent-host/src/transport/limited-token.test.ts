@@ -51,13 +51,13 @@ async function start() {
 /** A frame's text, whichever form the library hands it in */
 const text = (d: RawData) => (Buffer.isBuffer(d) ? d : Array.isArray(d) ? Buffer.concat(d) : Buffer.from(d)).toString('utf8')
 
-async function hello(port: number, token: string) {
+async function hello(port: number, token: string, extra: Record<string, unknown> = {}) {
   const ws = new WebSocket(`ws://127.0.0.1:${port}`)
   const frames: Record<string, unknown>[] = []
   ws.on('message', (d) => frames.push(JSON.parse(text(d))))
   const closed = new Promise<number>((r) => ws.on('close', (code) => r(code)))
   await new Promise<void>((r) => ws.on('open', () => r()))
-  ws.send(JSON.stringify({ kind: 'hello', token, protocolVersion: PROTOCOL_VERSION }))
+  ws.send(JSON.stringify({ kind: 'hello', token, protocolVersion: PROTOCOL_VERSION, ...extra }))
   const wait = async (pred: () => boolean, ms = 3000) => {
     const t0 = Date.now()
     while (!pred()) {
@@ -250,11 +250,13 @@ describe('a limited call that asks the person, over the sockets (#1405 slice 3)'
   it('waits for the window: the card reaches it, its Allow runs the call, and the program gets the answer', async () => {
     const { port, purged } = await startWithRequests()
     const win = await windowHello(port, ['host_requests'])
-    const script = await hello(port, limitedToken(TOKEN))
+    const script = await hello(port, limitedToken(TOKEN), { client: '  host-rpc \u202e script that names itself at length, past what a card shows of it  ' })
     const answer = send(script, 'p', 'trash.purge', { sessionId: 's1' })
     await win.wait(() => win.frames.some((f) => f.kind === 'event' && (f.event as NormalizedEvent).type === 'host_request'))
-    const raised = win.frames.find((f) => f.kind === 'event' && (f.event as NormalizedEvent).type === 'host_request')!.event as { request: { requestId: string; question: string } }
+    const raised = win.frames.find((f) => f.kind === 'event' && (f.event as NormalizedEvent).type === 'host_request')!.event as { request: { requestId: string; question: string; client: string | null } }
     expect(raised.request.question).toContain('"Fix the parser"')
+    // What the program called itself, trimmed, cut to 60 characters and quoted with its format characters escaped
+    expect(raised.request.client).toBe('"host-rpc \\u202e script that names itself at length, past what a c"')
     // The program cannot answer its own card
     const self = await script.call('requests.answer', { requestId: raised.request.requestId, decision: 'allow' })
     expect(self.error?.data).toEqual({ refused: 'rights', rights: 'window' })
