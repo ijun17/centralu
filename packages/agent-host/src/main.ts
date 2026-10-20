@@ -404,6 +404,8 @@ const mail = new MailService(store.mail, {
     inThread: (threadId, address) => store.mail.participants(threadId).some((p) => p.address === address && p.leftAt === null),
   }),
 })
+// A session that goes to the trash leaves the work it held in the mailbox to the person or to nobody (§3.3)
+mgr.useMail({ sessionGone: (id) => void mail.sessionGone(id) })
 /*
  * Terminal and command output can arrive before the server exists: under the keeper an adopted pty
  * replays its buffered output as soon as it is attached (HO11, lifecycle/gate.ts).

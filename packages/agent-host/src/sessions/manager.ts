@@ -60,6 +60,7 @@ import {
   DATA_DIR,
   withoutToolRecord,
   alwaysAllowKey,
+  errorMessage,
 } from '@cc/protocol'
 import type { AgentAdapter, AgentProcess, AgentSpawnSpec, EventSink, LinkedSessions, OrchestratorTools, SessionHandle } from '../adapters/contract.js'
 import type { MemoryGate } from './memory-gate.js'
@@ -799,6 +800,13 @@ export class SessionManager {
       // The CLI version belongs to the process (#297): without one there is no version to compare
       return { ...s, live, agentVersion: live ? (s.agentVersion ?? null) : null }
     })
+  }
+
+  /** What the mailbox asks of the sessions (#1347): set once by the host, null in a manager that has no mailbox */
+  private mailHooks: { sessionGone(sessionId: string): void } | null = null
+
+  useMail(hooks: { sessionGone(sessionId: string): void }): void {
+    this.mailHooks = hooks
   }
 
   /** A session that is here (not in the trash), as the mailbox's relations read it (#1347); undefined for one that is gone */
@@ -1882,6 +1890,14 @@ export class SessionManager {
       firstTool: (...a) => self.toolRegistry.firstTool(...a),
       forgetCardRest: (id) => self.cardRests.forget(id),
       forgetHeldNotices: (id) => self.reports.forgetHeld(id),
+      mailGone: (id) => {
+        try {
+          self.mailHooks?.sessionGone(id)
+        } catch (e) {
+          // The trash move has happened and is not undone by the mailbox: the delivery sweep moves the work on at its next run
+          console.error(`[mail] ${id.slice(0, 8)}: the work it held could not be moved on (${errorMessage(e)}); the next sweep does it`)
+        }
+      },
       forgetCommits: (...a) => self.events.forgetCommits(...a),
       gitTrust: (...a) => self.projectRegistry.gitTrust(...a),
       grantReads: (...a) => self.delegationFlow.grantReads(...a),

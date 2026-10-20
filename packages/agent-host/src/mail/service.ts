@@ -20,7 +20,7 @@ import {
   type ThreadRow,
   type ThreadState,
 } from '../dev-services/store/mail.js'
-import { CENTRALU, PERSON, parseAddress, type Party } from './address.js'
+import { CENTRALU, PERSON, parseAddress, sessionAddress, type Party } from './address.js'
 import { buildMailFrame, type MailFrameItem } from './frame.js'
 import { UlidMaker, messageIdOf, parseMailId, threadIdOf } from './ids.js'
 import {
@@ -198,6 +198,20 @@ export class MailService {
   get host(): string {
     this.cachedHost ??= this.opts.hostId()
     return this.cachedHost
+  }
+
+  /** A session's address on this host */
+  sessionAddress(sessionId: string): string {
+    return sessionAddress(this.host, sessionId)
+  }
+
+  /**
+   * A session left the host's list (it went to the trash, or was deleted): the work it held moves on (§3.3). A host that never
+   * made mail has nothing to move and does not even ask for its id
+   */
+  sessionGone(sessionId: string): ThreadRow[] {
+    if (!this.records.hasThreads()) return []
+    return this.partyGone(this.sessionAddress(sessionId))
   }
 
   // ── Opening and posting ──

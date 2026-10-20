@@ -325,6 +325,11 @@ export class MailRecords {
       })
   }
 
+  /** Whether there is a thread at all: a host that never made mail has nothing to move when a session goes */
+  hasThreads(): boolean {
+    return !!this.db.prepare<[], { one: number }>(`SELECT 1 AS one FROM mail_threads LIMIT 1`).get()
+  }
+
   thread(id: string): ThreadRow | undefined {
     const row = this.db.prepare<[string], ThreadSql>(`SELECT * FROM mail_threads WHERE id = ?`).get(id)
     return row && toThread(row)

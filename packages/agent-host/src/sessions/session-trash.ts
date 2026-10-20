@@ -53,6 +53,8 @@ export type SessionTrashHost = {
   forgetCardRest: (sessionId: string) => void
   /** Notices kept for it because it could not be woken (#1186) */
   forgetHeldNotices: (sessionId: string) => void
+  /** The mail it held: the work it was given or gave moves on (#1347, `MailService.sessionGone`). Never throws */
+  mailGone: (sessionId: string) => void
   gitTrust: (projectId: string | null) => { trusted: boolean; }
   readonly handles: Map<string, SessionHandle>
   handoffHeir: (sessionId: string) => string | null
@@ -385,6 +387,8 @@ export class SessionTrash {
     // Tears down this session's inline app views (M4 B-1) — releases whatever app it was holding onto. A
     // restored conversation reopens them from its history
     this.host.appsHub?.sessionGone(sessionId)
+    // The work it held in the mailbox moves on (§3.3): a thread it was assigned is open again, one it owned is the person's
+    this.host.mailGone(sessionId)
     this.host.emit({ type: 'session_deleted', sessionId })
     return true
   }
