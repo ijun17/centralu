@@ -244,8 +244,9 @@ try {
     console.log(JSON.stringify({ ...r, note: 'B is observed through both A turns, a 5-second idle window and one B turn; absence is bounded evidence.' }, null, 2))
     if (c.controlled) {
       const closed = (!c.a.controls || r.list.offered === false) && r.send.attempted && !r.bSawBeforeItsTurn && !r.bSawAfterItsTurn
+      // `subagentReplied` is shown, not judged: a Haiku subagent does not always answer within the wait, and the control is that SendMessage to it still goes through
       // A's own subagent is only asked of a controlled A: an uncontrolled one proves nothing about the controls
-      const ownWorks = !c.a.controls || (r.own.backgroundSubagentStarted && r.own.sendAttempted && r.own.sendSucceeded && r.own.subagentReplied)
+      const ownWorks = !c.a.controls || (r.own.backgroundSubagentStarted && r.own.sendAttempted && r.own.sendSucceeded)
       if (!closed || !ownWorks) process.exitCode = 1
     } else if (c.name === 'raw-auto' && !r.bSawAfterItsTurn) {
       // The control showed no leak: a pass in the controlled cases would prove nothing
