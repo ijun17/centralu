@@ -1,3 +1,5 @@
+import { isObj } from '../json-value.js'
+import { errnoCode } from './errno.js'
 import { spawn } from 'node:child_process'
 import { constants } from 'node:fs'
 import { copyFile, lstat, mkdir, open, readdir, readlink, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
@@ -289,7 +291,7 @@ async function ignoredIn(root: string, names: string[], dir: string, trust: GitT
   try {
     stdout = await runGit(root, ['check-ignore', '--stdin', '-z'], { input, allowRepoPrograms: trust.trusted === true })
   } catch (e) {
-    stdout = String((e as { stdout?: unknown }).stdout ?? '')
+    stdout = isObj(e) && typeof e.stdout === 'string' ? e.stdout : ''
   }
   const set = new Set<string>()
   for (const path of stdout.split('\0')) {
@@ -478,7 +480,9 @@ async function copyTreeWindows(src: string, dst: string, links: { from: string; 
   const walked = new Set<string>()
   let entries = 0
   while (pending.length > 0) {
-    const { source, target, kind: what, depth } = pending.pop()!
+    const item = pending.pop()
+    if (!item) break
+    const { source, target, kind: what, depth } = item
     if (++entries > MAX_COPY_ENTRIES) throw new Error(`more than ${MAX_COPY_ENTRIES} entries in ${src}; the copy stopped`)
     if (what === 'link') {
       const left = await copyLinkWindows(source, target, from, to)
@@ -525,7 +529,7 @@ async function copyLinkWindows(source: string, target: string, from: string, to:
       return null
     } catch (e) {
       // Without Developer Mode or administrator rights a symlink cannot be made; a junction or a copy can
-      if ((e as NodeJS.ErrnoException).code !== 'EPERM') throw e
+      if (errnoCode(e) !== 'EPERM') throw e
     }
   }
   if (folder) await symlink(join(to, relative(from, real)), target, 'junction')
@@ -592,7 +596,8 @@ export async function dropEscapingLinks(root: string, start: string): Promise<st
   const removed: string[] = []
   const stack = [startReal]
   while (stack.length > 0) {
-    const dir = stack.pop() as string
+    const dir = stack.pop()
+    if (dir === undefined) break
     let entries
     try {
       entries = await readdir(dir, { withFileTypes: true })
