@@ -7,8 +7,9 @@
  *
  * Those lists can be written by a command (`--record-all`), so they could also grow by a line, quietly, inside a
  * large diff. CEILING caps each package's total, and ASSERTIONS caps every `as T` in shipped code, the safe
- * widening ones included, which the lint does not report. Both only fail above their number, so a change in
- * flight never has to edit them; the change that fixes findings lowers them (the warning gives the numbers).
+ * widening ones included, which the lint does not report (with some room, ASSERTION_ROOM). Both only fail above
+ * their number, so a change in flight never has to edit them; the change that fixes findings lowers them (the
+ * warning gives the numbers).
  */
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
@@ -44,6 +45,13 @@ const ASSERTIONS: Record<string, number> = {
   'packages/ui': 260,
 }
 
+/**
+ * How far over ASSERTIONS a package may go: room for the safe assertions (a widening, `as unknown`) a change in
+ * flight adds, so it does not have to edit this file; unsafe ones the lint reports per file. The changes that
+ * remove assertions lower ASSERTIONS.
+ */
+const ASSERTION_ROOM = 10
+
 function countAssertions(file: string, text: string): number {
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, false, file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS)
   let n = 0
@@ -77,10 +85,10 @@ function shippedFiles(): string[] {
 }
 
 /** The packages above their ceiling, and the numbers a ceiling could come down to */
-function overAndUnder(actual: Record<string, number>, ceiling: Record<string, number>) {
+function overAndUnder(actual: Record<string, number>, ceiling: Record<string, number>, room = 0) {
   const over = Object.entries(actual)
-    .filter(([pkg, n]) => n > (ceiling[pkg] ?? 0))
-    .map(([pkg, n]) => `${pkg}: ${n}, ceiling ${ceiling[pkg] ?? 0}`)
+    .filter(([pkg, n]) => n > (ceiling[pkg] ?? 0) + room)
+    .map(([pkg, n]) => `${pkg}: ${n}, ceiling ${(ceiling[pkg] ?? 0) + room}`)
   const under = Object.entries(ceiling)
     .filter(([pkg, n]) => (actual[pkg] ?? 0) < n)
     .map(([pkg]) => `${pkg}: ${actual[pkg] ?? 0}`)
@@ -90,7 +98,7 @@ function overAndUnder(actual: Record<string, number>, ceiling: Record<string, nu
 describe('type-aware lint (#1339)', () => {
   it('keeps every list sorted, one line per file and rule, in its own package', () => {
     const dir = join(ROOT, ALLOWLIST_DIR)
-    for (const name of readdirSync(dir)) {
+    for (const name of readdirSync(dir).filter((n) => n.endsWith('.txt'))) {
       const text = readFileSync(join(dir, name), 'utf8').replace(/\r\n/g, '\n')
       expect(formatList(parseList(text, name)), `${ALLOWLIST_DIR}/${name} as \`pnpm lint:tighten\` writes it`).toBe(text)
     }
@@ -113,7 +121,7 @@ describe('type-aware lint (#1339)', () => {
         const n = countAssertions(file, readFileSync(join(ROOT, file), 'utf8'))
         if (n > 0) actual[packageOf(file)] = (actual[packageOf(file)] ?? 0) + n
       }
-      const { over, under } = overAndUnder(actual, ASSERTIONS)
+      const { over, under } = overAndUnder(actual, ASSERTIONS, ASSERTION_ROOM)
       expect(over, 'type assertions per package: check the value (a zod schema, a guard) instead of asserting its type').toEqual([])
       if (under.length > 0) console.warn(`type-aware-lint.test.ts: ASSERTIONS can come down to ${under.join(', ')}`)
     },
@@ -128,5 +136,6 @@ describe('type-aware lint (#1339)', () => {
 
   it('reports a package over its ceiling, and only that', () => {
     expect(overAndUnder({ a: 3, b: 1, c: 2 }, { a: 2, b: 2 })).toEqual({ over: ['a: 3, ceiling 2', 'c: 2, ceiling 0'], under: ['b: 1'] })
+    expect(overAndUnder({ a: 3, c: 2 }, { a: 2 }, 1)).toEqual({ over: ['c: 2, ceiling 1'], under: [] })
   })
 })

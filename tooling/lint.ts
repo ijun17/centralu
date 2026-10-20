@@ -4,7 +4,8 @@
  *
  *   pnpm lint                  fails on any finding the lists do not allow
  *   pnpm lint:tighten          the same, then lowers the lists to what the files hold now
- *   pnpm lint <paths>          only these files or folders (tighten then leaves other files' lines alone)
+ *   pnpm lint <paths>          only these files or folders, from the repository's root (tighten then leaves
+ *                              other files' lines alone, and those of a file that failed to parse)
  *   --record-all               lists every finding: only for the change that turns a rule on, which also
  *                              raises the ceilings in tooling/type-aware-lint.test.ts and says why
  *
@@ -15,16 +16,20 @@ import { ESLint } from 'eslint'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { applyAllowlist, ALLOWLIST_DIR, countFindings, listFileOf, packageOf, readAllowlist, relativeFile, tighten, writeAllowlist } from './lint-allowlist.js'
+import { applyAllowlist, ALLOWLIST_DIR, countedFiles, countFindings, listFileOf, packageOf, readAllowlist, tighten, writeAllowlist } from './lint-allowlist.js'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const args = process.argv.slice(2)
-const flags = new Set(args.filter((a) => a.startsWith('--')))
-const paths = args.filter((a) => !a.startsWith('--'))
+const FLAGS = ['--tighten', '--record-all']
+const flags = new Set(args.filter((a) => a.startsWith('-')))
+const paths = args.filter((a) => !a.startsWith('-'))
+const unknown = [...flags].filter((f) => !FLAGS.includes(f))
+if (unknown.length > 0) throw new Error(`tooling/lint.ts takes ${FLAGS.join(' and ')} and paths, not ${unknown.join(' ')}; run \`pnpm exec eslint\` for ESLint's own options`)
 
+// Read first: a list that cannot be read fails before a lint of half a minute, not after
+const allow = readAllowlist(ROOT)
 const eslint = new ESLint({ cwd: ROOT, concurrency: 'auto' })
 const results = await eslint.lintFiles(paths.length > 0 ? paths : ['.'])
-const allow = readAllowlist(ROOT)
 
 if (flags.has('--record-all')) {
   if (paths.length > 0) throw new Error('--record-all lints the whole repository; give it no paths')
@@ -34,8 +39,7 @@ if (flags.has('--record-all')) {
 }
 
 if (flags.has('--tighten')) {
-  const linted = new Set(results.map((r) => relativeFile(ROOT, r.filePath)))
-  writeAllowlist(ROOT, tighten(allow, countFindings(ROOT, results), linted, (file) => existsSync(join(ROOT, file))))
+  writeAllowlist(ROOT, tighten(allow, countFindings(ROOT, results), countedFiles(ROOT, results), (file) => existsSync(join(ROOT, file))))
 }
 
 const { over, loose } = applyAllowlist(ROOT, results, allow)

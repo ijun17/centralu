@@ -12,8 +12,20 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 import type { ESLint, Linter } from 'eslint'
+import tseslint from 'typescript-eslint'
 
 export const ALLOWLIST_DIR = 'tooling/lint-allowlist'
+
+/**
+ * The rules a line may name: the type-aware ones eslint.config.js turned on (#1339). Any other rule's
+ * findings were already errors before, and stay errors everywhere.
+ */
+export const LISTABLE_RULES: ReadonlySet<string> = new Set([
+  ...tseslint.configs.recommendedTypeCheckedOnly.flatMap((c) => Object.keys(c.rules ?? {})).filter((r) => r.startsWith('@typescript-eslint/')),
+  '@typescript-eslint/consistent-type-assertions',
+  '@typescript-eslint/no-non-null-assertion',
+  '@typescript-eslint/no-unsafe-type-assertion',
+])
 
 const HEADER = [
   '# Type-aware lint findings that predate the rules (#1339): <file> <rule> <count>, one per line, sorted.',
@@ -40,6 +52,7 @@ export function parseList(text: string, name: string): Allowlist {
     const m = /^(\S+) (\S+) ([1-9]\d*)$/.exec(line)
     if (!m) throw new Error(`${name}:${i + 1}: expected "<file> <rule> <count>", got "${line}"`)
     const [, file = '', rule = '', count = ''] = m
+    if (!LISTABLE_RULES.has(rule)) throw new Error(`${name}:${i + 1}: ${rule} is not a type-aware rule; its findings cannot be listed`)
     const rules = out.get(file) ?? new Map<string, number>()
     if (rules.has(rule)) throw new Error(`${name}:${i + 1}: ${file} ${rule} is listed twice`)
     out.set(file, rules.set(rule, Number(count)))
@@ -52,6 +65,7 @@ export function formatList(allow: Allowlist): string {
   const lines: string[] = []
   const byName = <T>([a]: [string, T], [b]: [string, T]) => (a < b ? -1 : a > b ? 1 : 0)
   for (const [file, rules] of [...allow].sort(byName)) {
+    if (/\s/.test(file)) throw new Error(`cannot list "${file}": a list line holds no spaces`)
     for (const [rule, count] of [...rules].sort(byName)) lines.push(`${file} ${rule} ${count}`)
   }
   return [...HEADER, ...lines].join('\n') + '\n'
@@ -89,15 +103,24 @@ export function writeAllowlist(root: string, allow: Allowlist): void {
 /** A result's path as the lists write it: relative to the root, with forward slashes */
 export const relativeFile = (root: string, filePath: string) => relative(root, filePath).split(sep).join('/')
 
-/** Errors per file and rule (fatal parse errors have no rule and are never listed) */
+/** Errors per file and rule, of the rules a line may name (fatal parse errors have no rule) */
 export function countFindings(root: string, results: ESLint.LintResult[]): Allowlist {
   const out: Allowlist = new Map()
   for (const result of results) {
     const rules = new Map<string, number>()
-    for (const m of result.messages) if (m.severity === 2 && m.ruleId) rules.set(m.ruleId, (rules.get(m.ruleId) ?? 0) + 1)
+    for (const m of result.messages) if (m.severity === 2 && m.ruleId && LISTABLE_RULES.has(m.ruleId)) rules.set(m.ruleId, (rules.get(m.ruleId) ?? 0) + 1)
     if (rules.size > 0) out.set(relativeFile(root, result.filePath), rules)
   }
   return out
+}
+
+/**
+ * The files whose findings these results fully count, so `tighten` may lower their lines: not one that failed to
+ * parse (its findings are unknown, not zero) or one ESLint ignored.
+ */
+export function countedFiles(root: string, results: ESLint.LintResult[]): Set<string> {
+  const ignored = (r: ESLint.LintResult) => r.messages.some((m) => m.ruleId === null && m.severity === 1 && m.message.startsWith('File ignored'))
+  return new Set(results.filter((r) => r.fatalErrorCount === 0 && !ignored(r)).map((r) => relativeFile(root, r.filePath)))
 }
 
 export type Over = { file: string; rule: string; count: number; allowed: number }

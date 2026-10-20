@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ESLint, Linter } from 'eslint'
 import { afterEach, describe, expect, it } from 'vitest'
-import { ALLOWLIST_DIR, applyAllowlist, formatList, parseList, readAllowlist, tighten, writeAllowlist, type Allowlist } from './lint-allowlist.js'
+import { ALLOWLIST_DIR, applyAllowlist, countedFiles, countFindings, formatList, parseList, readAllowlist, tighten, writeAllowlist, type Allowlist } from './lint-allowlist.js'
 
 const ROOT = join(tmpdir(), 'lint-allowlist-root')
 const UNSAFE = '@typescript-eslint/no-unsafe-type-assertion'
@@ -41,6 +41,17 @@ describe('the lists', () => {
     expect(() => parseList('packages/a/src/x.ts 2', 'l.txt')).toThrow('l.txt:1')
     expect(() => parseList(`packages/a/src/x.ts ${UNSAFE} 0`, 'l.txt')).toThrow('l.txt:1')
     expect(() => parseList(`a.ts ${UNSAFE} 1\na.ts ${UNSAFE} 2`, 'l.txt')).toThrow('listed twice')
+  })
+
+  it('name only the type-aware rules, which were not errors before', () => {
+    expect(() => parseList('packages/a/src/x.ts react-hooks/rules-of-hooks 1', 'l.txt')).toThrow('not a type-aware rule')
+    expect(() => parseList('packages/a/src/x.ts @typescript-eslint/no-explicit-any 1', 'l.txt')).toThrow('not a type-aware rule')
+    const results = [result('packages/a/src/x.ts', [message('boundaries/element-types'), message(UNSAFE)])]
+    expect(countFindings(ROOT, results)).toEqual(list([['packages/a/src/x.ts', UNSAFE, 1]]))
+  })
+
+  it('refuse a path with a space, which a line could not hold', () => {
+    expect(() => formatList(list([['packages/a/src/my file.ts', UNSAFE, 1]]))).toThrow('my file.ts')
   })
 
   it('are written sorted by file, then rule', () => {
@@ -98,6 +109,16 @@ describe('tightening the lists', () => {
   it("drops a missing file's lines and keeps the lines of a file not linted this time", () => {
     expect(tightened.has('gone.ts')).toBe(false)
     expect(tightened.get('other.ts')).toEqual(new Map([[UNSAFE, 4]]))
+  })
+
+  it('counts only the files whose findings are known: not one that failed to parse, or one ESLint ignored', () => {
+    const broken = { ...result('packages/a/src/broken.ts', [{ ...message(null), fatal: true }]), fatalErrorCount: 1 }
+    const ignored = result('packages/a/src/ignored.ts', [{ ...message(null, 1), message: 'File ignored because of a matching ignore pattern.' }])
+    const counted = countedFiles(ROOT, [broken, ignored, result('packages/a/src/fine.ts', [])])
+    expect([...counted]).toEqual(['packages/a/src/fine.ts'])
+    // So a file that does not parse for now keeps its lines
+    const kept = tighten(list([['packages/a/src/broken.ts', UNSAFE, 2]]), new Map(), counted, () => true)
+    expect(kept.get('packages/a/src/broken.ts')).toEqual(new Map([[UNSAFE, 2]]))
   })
 
   it('never adds a line', () => {
