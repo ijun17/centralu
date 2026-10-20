@@ -1,4 +1,5 @@
 import type { NormalizedEvent } from '@cc/protocol'
+import { asObj } from '../../json-value.js'
 import { inlineImageEvent, undrawnImageEvent } from '../images.js'
 import { todoWritePlan } from '../plan.js'
 import { tokenCount } from '../token-usage.js'
@@ -151,7 +152,7 @@ export function userEvents(m: Json, sessionId: string): NormalizedEvent[] {
     str(agent.status) === 'completed' && str(agent.agentId) && Array.isArray(agent.content) &&
     content.filter((b) => str(b.type) === 'tool_result').length === 1
       ? agentReport(
-          (agent.content as Json[]).map((b) => str(b.text)).join('\n'),
+          agent.content.map((b: unknown) => str(asObj(b).text)).join('\n'),
           agentStats(agent.totalToolUseCount, agent.totalDurationMs),
         )
       : null
@@ -171,7 +172,9 @@ export function userEvents(m: Json, sessionId: string): NormalizedEvent[] {
        * carries an image — a tool result is the only way one arrives.)
        */
       if (Array.isArray(c)) {
-        for (const part of c as Json[]) {
+        for (const item of c) {
+          // Something in the list that is not a block reads as none, as in a message's own list (`contentBlocks`)
+          const part = asObj(item)
           if (str(part.type) !== 'image') continue
           const source = (part.source ?? {}) as Json
           /*

@@ -525,6 +525,19 @@ describe('a message whose content is words, not blocks (after /compact)', () => 
     expect(events.map((e) => e.type)).toEqual(['tool_result'])
   })
 
+  it("reads a tool result's content and a finished agent's report for the blocks they have, past one that is not", () => {
+    const stream = new ClaudeStreamNormalizer(SID)
+    const image = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } }
+    const shot = stream.push({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tu1', content: [null, image] }] } })
+    expect(shot.map((e) => e.type)).toEqual(['tool_result', 'message_image'])
+    const report = stream.push({
+      type: 'user',
+      tool_use_result: { status: 'completed', agentId: 'a1', content: [null, { type: 'text', text: 'All checked.' }] },
+      message: { content: [{ type: 'tool_result', tool_use_id: 'tu2', content: 'hand-back' }] },
+    })
+    expect(report).toEqual([expect.objectContaining({ type: 'tool_result', callId: 'tu2', output: expect.stringContaining('All checked.') })])
+  })
+
   it('an assistant message of plain words is its text, as imported history reads it', () => {
     expect(n({ type: 'assistant', message: { content: 'All done.' } })).toEqual([
       { type: 'message_delta', sessionId: SID, role: 'assistant', text: 'All done.' },
