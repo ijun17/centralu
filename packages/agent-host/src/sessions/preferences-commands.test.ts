@@ -21,7 +21,7 @@ import { eventually } from '../../../../tooling/test-timing.js'
  * RPC handler, so the validation is the window's), and "apply updates when idle" turned on waits for the person's card.
  * The update, sleep and agent-version services are stand-ins that record what they were asked.
  */
-const COMMANDS = ['get_preferences', 'set_preferences'] as const
+const COMMANDS = ['get_preferences', 'set_preferences', 'apply_agent_versions'] as const
 
 let root: string
 /** What the host announced, to see that a change reaches every window */
@@ -71,16 +71,23 @@ function fakeSleeper() {
 
 function fakeVersions() {
   const calls: boolean[] = []
+  const applied: string[] = []
+  /** What the header's "restart idle sessions on the new CLI" answers */
+  let result: { restarted: string[]; busy: string[] } = { restarted: [], busy: [] }
   let status: AgentVersions = { installed: { claude: '2.0.0' }, autoApply: true, checkedAt: null } as AgentVersions
   const service = {
     check: async () => ({ ...status }),
+    applyNow: async (opts?: { keepQuiet?: boolean }) => {
+      applied.push(opts?.keepQuiet ? 'applyNow keepQuiet' : 'applyNow')
+      return result
+    },
     setAutoApply: (enabled: boolean) => {
       calls.push(enabled)
       status = { ...status, autoApply: enabled }
       return { ...status }
     },
   }
-  return { service: service as unknown as AgentVersionService, calls }
+  return { service: service as unknown as AgentVersionService, calls, applied, answer: (r: typeof result) => (result = r) }
 }
 
 beforeEach(() => {
@@ -152,7 +159,9 @@ describe('get_preferences', () => {
   it('says what stays with the person', async () => {
     const orc = await mgr.orchestrator()
     const r = await run(orc.id, 'get_preferences')
-    expect(r.text).toContain('Kept by the person (no command changes this)')
+    expect(r.text).toContain('Interface')
+    expect(r.text).toContain('- Send with Ctrl+Enter instead of Enter: off (set_preferences sendWithModifierEnter)')
+    expect(r.text).toContain('- Sidebar groups folded: 0')
     expect(r.text).toContain("Limits on agents (set_agent_limits changes them, behind the person's card)")
     // Always on (2026-10-20): not a setting, so the inventory does not list it
     expect(r.text).not.toContain('read-only tools')
@@ -605,11 +614,63 @@ describe('set_preferences: idle sleep and the update switches', () => {
   })
 })
 
+describe('set_preferences: the way of typing and the folded groups (#1219, fourth slice)', () => {
+  it('sets sending with Ctrl+Enter on and off at once, with no card, and says how a message is sent now', async () => {
+    const orc = await mgr.orchestrator()
+    const on = await run(orc.id, 'set_preferences', { sendWithModifierEnter: true })
+    expect(on.isError).toBeFalsy()
+    expect(on.text).toContain('send with Ctrl+Enter (Enter breaks the line)')
+    expect((await prefs()).sendWithModifierEnter).toBe(true)
+    expect(card(orc.id)).toBeUndefined()
+    expect((await run(orc.id, 'set_preferences', { sendWithModifierEnter: false })).text).toContain('send with Enter')
+    expect((await prefs()).sendWithModifierEnter).toBe(false)
+  })
+
+  it("folds and unfolds a session's children, keeping the groups the person folded and the order of the rest", async () => {
+    const orc = await mgr.orchestrator()
+    await rpc('prefs.set', { patch: { foldedGroups: ['session:s-person', 'app:notes'] } })
+    const folded = await run(orc.id, 'set_preferences', { foldedGroups: { fold: ['s-one', 's-two'] } })
+    expect(folded.isError).toBeFalsy()
+    expect(folded.text).toContain('4 sidebar groups folded')
+    expect((await prefs()).foldedGroups).toEqual(['session:s-person', 'app:notes', 'session:s-one', 'session:s-two'])
+    const unfolded = await run(orc.id, 'set_preferences', { foldedGroups: { unfold: ['s-one', 's-person'], fold: ['s-three'] } })
+    expect(unfolded.text).toContain('3 sidebar groups folded')
+    expect((await prefs()).foldedGroups).toEqual(['app:notes', 'session:s-two', 'session:s-three'])
+    expect(card(orc.id)).toBeUndefined()
+  })
+
+  it('refuses an id that is no session id, changing nothing', async () => {
+    const orc = await mgr.orchestrator()
+    await rpc('prefs.set', { patch: { foldedGroups: ['session:s-person'] } })
+    const r = await run(orc.id, 'set_preferences', { foldedGroups: { fold: ['s-ok', '../x'] }, sendWithModifierEnter: true })
+    expect(r.isError).toBe(true)
+    expect(r.text).toContain('"../x" is not a session id; list_sessions names them.')
+    expect((await prefs()).foldedGroups).toEqual(['session:s-person'])
+    expect((await prefs()).sendWithModifierEnter).toBe(false)
+  })
+})
+
+describe('apply_agent_versions', () => {
+  it('restarts the idle sessions on the installed agent CLI at once and names the busy ones that stay', async () => {
+    const orc = await mgr.orchestrator()
+    const none = await run(orc.id, 'apply_agent_versions')
+    expect(none.text).toBe('No session that has been quiet for a minute runs an older agent CLI than the one installed; nothing was restarted.')
+    versions.answer({ restarted: ['s-a', 's-b'], busy: ['s-c'] })
+    const r = await run(orc.id, 'apply_agent_versions')
+    expect(r.isError).toBeFalsy()
+    expect(r.text).toContain('Restarted 2 idle sessions on the installed agent CLI (s-a, s-b).')
+    expect(r.text).toContain('1 session is busy and left as it is (s-c)')
+    // An agent asked, not the person's own button: the quiet period is kept
+    expect(versions.applied).toEqual(['applyNow keepQuiet', 'applyNow keepQuiet'])
+    expect(card(orc.id)).toBeUndefined()
+  })
+})
+
 describe('what set_preferences does not reach', () => {
   it('has no field for what stays with the person: an unknown or trust-changing setting is refused by name', async () => {
     const orc = await mgr.orchestrator()
     const before = await prefs()
-    for (const args of [{ sessionTools: false }, { agentCeiling: 0 }, { agentDepth: 3 }, { agentModels: {} }, { sendWithModifierEnter: true }, { themeMode: 'system' }, { fontSize: 14 }, { accent: '#ff0000' }]) {
+    for (const args of [{ sessionTools: false }, { agentCeiling: 0 }, { agentDepth: 3 }, { agentModels: {} }, { themeMode: 'system' }, { fontSize: 14 }, { accent: '#ff0000' }]) {
       const r = await run(orc.id, 'set_preferences', args)
       expect(r.isError, JSON.stringify(args)).toBe(true)
       expect(r.text, JSON.stringify(args)).toMatch(/Unrecognized key/)

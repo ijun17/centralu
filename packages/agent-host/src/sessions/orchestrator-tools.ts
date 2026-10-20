@@ -351,10 +351,11 @@ const HANDLERS: ToolHandlers = {
 
   // The preferences (#1219): the flow writes each answer; set_preferences names what it did not find to change
   get_preferences: (_args, call) => preferencesCommand({ action: 'get' }, call),
+  apply_agent_versions: (_args, call) => preferencesCommand({ action: 'apply_agent_versions' }, call),
   set_preferences: (changes, call) =>
     Object.values(changes).some((v) => v !== undefined && !(typeof v === 'object' && Object.values(v).every((x) => x === undefined)))
       ? preferencesCommand({ action: 'set', changes }, call)
-      : { text: 'Nothing to change: give at least one of theme, textSize, bodyFont, codeFont, lineHeight, idleSleepMinutes, autoUpdate, moveIdleSessionsToNewAgentCli, notifications.', isError: true },
+      : { text: 'Nothing to change: give at least one of theme, textSize, bodyFont, codeFont, lineHeight, idleSleepMinutes, autoUpdate, moveIdleSessionsToNewAgentCli, sendWithModifierEnter, foldedGroups, notifications.', isError: true },
 
   async handoff_session(args, { tools, caller, signal }) {
     const sessionId = args.sessionId?.trim() ?? ''

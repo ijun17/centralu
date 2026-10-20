@@ -23,6 +23,7 @@ export const WINDOW_METHODS = [
   'updates.setAutoApply',
   'agents.versions',
   'agents.setAutoApplyVersions',
+  'agents.applyVersions',
   'trash.list',
   'trash.restore',
   'trash.restoreSubagentSteps',

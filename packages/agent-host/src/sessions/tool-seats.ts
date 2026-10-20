@@ -124,6 +124,7 @@ export const RARE_COMMANDS: Partial<Record<ToolProfile, readonly CommandName[]>>
     'list_ssh_hosts',
     'get_preferences',
     'set_preferences',
+    'apply_agent_versions',
     'list_trash',
     'restore_trashed',
     'trash_subagent_steps',

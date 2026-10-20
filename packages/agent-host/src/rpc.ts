@@ -289,7 +289,7 @@ export function createRpcHandler(
     'agents.versions': async (p) => requireAgentVersions().check(RpcMethods['agents.versions'].params.parse(p).force),
     'agents.setAutoApplyVersions': async (p) =>
       requireAgentVersions().setAutoApply(RpcMethods['agents.setAutoApplyVersions'].params.parse(p).enabled),
-    'agents.applyVersions': async () => requireAgentVersions().applyNow(),
+    'agents.applyVersions': async (p) => requireAgentVersions().applyNow({ keepQuiet: RpcMethods['agents.applyVersions'].params.parse(p).keepQuiet === true }),
     'agents.sleepPolicy': async () => requireSleeper().policy(),
     'agents.setSleepPolicy': async (p) => requireSleeper().setAfterMinutes(RpcMethods['agents.setSleepPolicy'].params.parse(p).afterMinutes),
     'agents.detect': async () =>

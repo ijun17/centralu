@@ -91,6 +91,7 @@ const CENTRALU_LABELS: Record<string, string> = {
   list_ssh_hosts: 'Listed the ssh config hosts',
   get_preferences: 'Read the preferences',
   set_preferences: 'Changed preferences',
+  apply_agent_versions: 'Moved idle sessions to the new agent CLI',
   list_trash: 'Listed the trash',
   restore_trashed: 'Restored from the trash',
   trash_subagent_steps: 'Moved subagent steps to the trash',

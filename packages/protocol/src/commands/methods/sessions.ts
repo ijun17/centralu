@@ -308,9 +308,13 @@ export const sessionMethods = {
    * Restarts every session that runs an older CLI than the one installed and is fully idle, on the installed one
    * (#297) — the session header's one app-wide action. A session that is working, waiting on the person, or running
    * background tasks is left as it is and listed in `busy`; with `autoApply` on it moves once it is idle.
+   *
+   * `keepQuiet` (additive, #1219): also leave a session that said something within the last minute, as the automatic move
+   * does, so a restart does not land the moment someone reads an answer and starts typing the next message. The person's own
+   * button asks for none of that wait (it is absent); the orchestrator's `apply_agent_versions` is not the person's own.
    */
   'agents.applyVersions': {
-    params: z.object({ ...machineParam }),
+    params: z.object({ ...machineParam, keepQuiet: z.boolean().optional() }),
     result: z.object({ restarted: z.array(z.string()).default([]), busy: z.array(z.string()).default([]) }),
   },
   /** When idle sessions go to sleep (#568): this host's setting */

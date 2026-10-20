@@ -38,6 +38,10 @@ export type PreferenceChanges = {
   /** "Automatic updates" (2026-10-20): checking, and installing and applying when idle, as one setting */
   autoUpdate?: boolean
   moveIdleSessionsToNewAgentCli?: boolean
+  /** "Send with Ctrl+Enter instead of Enter" (#1219, fourth slice): a way of typing, kept on the host with the other screen preferences */
+  sendWithModifierEnter?: boolean
+  /** The sidebar groups to fold or unfold (#666), by the session whose children they hide: a way of looking, nothing more */
+  foldedGroups?: { fold?: string[]; unfold?: string[] }
   /**
    * The notification switches (#1306), the ones to change. The "error" and "every session finished" ones are gone from the
    * product (2026-10-20): no field, though the stored record keeps them for older builds
@@ -46,7 +50,11 @@ export type PreferenceChanges = {
 }
 
 /** One request of the orchestrator's preference commands (#1219), as the tool runner reads its arguments */
-export type PreferencesRequest = { action: 'get' } | { action: 'set'; changes: PreferenceChanges }
+export type PreferencesRequest =
+  | { action: 'get' }
+  | { action: 'set'; changes: PreferenceChanges }
+  /** The session header's "restart idle sessions on the new agent CLI" (#297): a session that is busy is left as it is */
+  | { action: 'apply_agent_versions' }
 
 /** One request of the orchestrator's trash commands (#1219), as the tool runner reads its arguments */
 export type TrashRequest =

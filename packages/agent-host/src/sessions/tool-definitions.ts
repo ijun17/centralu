@@ -251,6 +251,15 @@ export const ORCHESTRATOR_TOOLS = [
         idleSleepMinutes: z.union([z.number().int().positive(), z.literal('never')]).optional().describe('Minutes before an idle session sleeps, or "never".'),
         autoUpdate: z.boolean().optional().describe('Automatic updates: check for, install, and apply a newer Centralu when idle.'),
         moveIdleSessionsToNewAgentCli: z.boolean().optional(),
+        sendWithModifierEnter: z.boolean().optional().describe('Send a message with Ctrl+Enter (or Cmd+Enter) instead of Enter.'),
+        foldedGroups: z
+          .object({
+            fold: z.array(z.string()).max(50).optional().describe('Sessions whose children to fold away in the sidebar.'),
+            unfold: z.array(z.string()).max(50).optional().describe('Sessions whose children to show again.'),
+          })
+          .strict()
+          .optional()
+          .describe('Which sidebar groups of children are folded; the rest stay as they are.'),
         notifications: z
           .object({
             approval: z.boolean().optional().describe('Notify when an agent is blocked on an approval.'),
@@ -263,6 +272,11 @@ export const ORCHESTRATOR_TOOLS = [
           .describe('The notification switches to change; the rest stay.'),
       })
       .strict(),
+  },
+  {
+    name: 'apply_agent_versions',
+    description: 'Restarts the idle sessions that run an older agent CLI than the one installed, on the installed one. A session that is busy, or said something within the last minute, is left as it is. Acts at once.',
+    schema: z.object({}),
   },
   /*
    * #1219: the trash. Rare commands. Listing, restoring and moving subagent steps there act at once; deleting for good
