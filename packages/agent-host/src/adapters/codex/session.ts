@@ -1,4 +1,5 @@
 import { InputReceipts, type InputReceipt } from '../input-receipts.js'
+import { hostAccessEnv } from '../contract.js'
 import type { InputObserver, InputOrigin } from '../contract.js'
 import type { ApprovalDecision, ApprovalScope } from '@cc/protocol'
 import { toolCommand } from '../../tool-launch.js'
@@ -177,8 +178,10 @@ export class CodexSession implements SessionHandle {
         command: toolCommand('codex'),
         // Under the keeper (#280 step 2) the app-server is spawned there, or adopted from a previous host
         process: opts.processSource
-          ? (opts.processSource.adopt?.process ?? spawnInKeeper(opts.processSource, opts.cwd))
+          ? (opts.processSource.adopt?.process ?? spawnInKeeper(opts.processSource, opts.cwd, hostAccessEnv(opts.hostAccess)))
           : undefined,
+        // The host's address and this session's credential, for a script the agent writes (#1405)
+        env: hostAccessEnv(opts.hostAccess),
       },
     )
     this.ready = this.start()

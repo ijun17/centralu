@@ -77,6 +77,8 @@ export class CodexClient {
        * started or already holds (#280 step 2). Same stdio, same protocol.
        */
       process?: AgentProcess
+      /** Variables added to the app-server's environment (#1405: the host's address and the session's credential) */
+      env?: Record<string, string>
     } = {},
   ) {
     if (opts.process) {
@@ -92,7 +94,7 @@ export class CodexClient {
        * and what it left running after it exited (`local-process.ts`). It no longer shares the host's
        * group: when the host goes, its stdin closes, and codex exits on EOF (#57).
        */
-      this.proc = spawnLocalAgent({ command: launch.command, args: [...launch.args, ...(opts.args ?? ['app-server'])], cwd: opts.cwd, env: launch.env(process.env) })
+      this.proc = spawnLocalAgent({ command: launch.command, args: [...launch.args, ...(opts.args ?? ['app-server'])], cwd: opts.cwd, env: { ...launch.env(process.env), ...opts.env } })
     }
 
     /**

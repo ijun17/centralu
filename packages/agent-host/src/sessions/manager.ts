@@ -309,7 +309,7 @@ export class SessionManager {
      * adapters that cannot attach to the tool in-process (Codex) comes back through this address.
      * The credential opens only that session's bridge calls (`transport/bridge-token.ts`, #382).
      */
-    private endpoint?: (sessionId: string) => { url: string; token: string } | null,
+    private endpoint?: (sessionId: string) => { url: string; token: string; credential?: string } | null,
     /**
      * Root under which worktrees are created. **Placed next to the data folder** — that way dev and
      * the packaged app naturally separate (`~/.centralu-dev` vs `~/.centralu`), and tests supply a

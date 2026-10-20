@@ -662,6 +662,8 @@ const requests: HostRequests = new HostRequests({
   emit: (e) => events.push(e),
   rpc: (method, params) => hostDrain.track(`request ${method}`, () => router.handle(method, params)),
   canShow: (): boolean => server.showsHostRequests(),
+  // Which session a session credential's card says asked (#1405)
+  sessionName: (sessionId) => mgr.listSessions().find((x) => x.id === sessionId)?.name ?? null,
 })
 const router: Router = new Router({
   forwarding: (method, params) => mgr.forwarding(method, params),
@@ -737,6 +739,8 @@ const server = new HostServer({
   onAsk: (method, params, from, signal): Promise<unknown> => requests.ask(method, params, from, signal),
   // A card nobody can see is withdrawn once no window shows them for a while (host-requests.ts)
   onShowing: (count) => requests.showingChanged(count),
+  // A session credential names one of this host's sessions, or it is refused at hello (#1405)
+  knowsSession: (sessionId) => mgr.listSessions().some((x) => x.id === sessionId),
   // A window's connection ended: the pinned views it leased wait for a claim, then close (#392, view-host.ts)
   onClientGone: (client) => {
     views.holderGone(client)

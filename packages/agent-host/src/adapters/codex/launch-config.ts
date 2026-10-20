@@ -173,7 +173,7 @@ export const APP_STARTUP_TIMEOUT_SEC = 30
  * An app-server spawned in the keeper (#280 step 2), from the same program a direct spawn uses: the platform binary
  * rather than npm's `node` wrapper (#568, native.ts).
  */
-export function spawnInKeeper(source: ProcessSource, cwd: string): AgentProcess {
+export function spawnInKeeper(source: ProcessSource, cwd: string, env: Record<string, string> = {}): AgentProcess {
   const launch = codexLaunch(toolCommand('codex'))
-  return source.spawn({ command: launch.command, args: [...launch.args, 'app-server'], cwd, env: launch.env(process.env) })
+  return source.spawn({ command: launch.command, args: [...launch.args, 'app-server'], cwd, env: { ...launch.env(process.env), ...env } })
 }

@@ -1,4 +1,5 @@
 import type { McpServerConfig, PermissionMode } from '@anthropic-ai/claude-agent-sdk'
+import { hostAccessEnv } from '../contract.js'
 import type { randomUUID } from 'node:crypto'
 import type { AgentProcess, CreateSessionOpts, InputOrigin } from '../contract.js'
 import type { LocalSpawnSpec } from '../local-process.js'
@@ -107,6 +108,8 @@ export function flagSettings(opts: Pick<CreateSessionOpts, 'autoCompactTokens'>,
 /** The options a session's `query()` starts with */
 export function claudeQueryOptions({ sessionId, opts, executablePath, servers, permissionOptions, codeIntelligence, spawn, canUseTool }: ClaudeQueryInputs) {
   return withoutCrossSessionMessaging({
+    // The host's address and this session's credential, for a script the agent writes (#1405)
+    env: hostAccessEnv(opts.hostAccess),
     cwd: opts.cwd,
     model: opts.model,
     /**

@@ -7,6 +7,9 @@ process ("App servers"); an app's screen is sandboxed ("App views"). The app mod
 
 ## Inter-agent content
 
+A script an agent runs calls the host with its session's credential (#1405, "Who holds full power"): attribution, not
+proof, and never more than the limited credential's rights.
+
 Worker reports retain their provenance in stored history and the UI. Reports from
 workers to directing sessions become host-authored notifications: the receiver's model reads only what Centralu wrote
 (how the work ended, the session's id, the kind of its tool's error, how to go on, and the `read_session` call that
@@ -1140,6 +1143,17 @@ host after a swap accepts it with nothing handed over, and holding it gives noth
 is a client like a window (it gets the event stream: owner, 2026-10-21, to revisit once the orchestrator's tooling no
 longer needs it), but none of its `res` frames answers the host's own calls, which are a hub's.
 
+**A session's credential** (`ccs1:<sessionId>:<mac>`, `transport/session-token.ts`, slice 6) has the limited
+credential's rights and names a session. Every agent the host starts finds it in its environment, with the host's
+address (`CC_HOST_URL`, `CC_HOST_CREDENTIAL`; `hostAccessEnv`, in the Claude CLI's and the Codex app-server's
+environment, and so in what they run), so a script an agent writes calls the host the sanctioned way instead of reading
+a token from somewhere. One naming a session this host does not have is refused at hello. It is **attribution, not
+proof**: an agent's environment is readable by every process of the same user for as long as it runs ("The front door"
+below), so a process can present another session's credential. Its rights are the same either way; all it can fake is
+the session a card names, which says "which says it runs under the session". Derived like the bridge's, so the next
+host after a swap, and a keeper's adopted agent, keep it working. The orchestrator's instructions do not mention it:
+their resident budget had no room, and `keeper.sock` hands out only the limited credential anyway.
+
 **Where it is judged:** in the transport, before the router, on the host where the call starts. A limited call naming a
 linked machine's session is refused on the hub and never relayed; the machine does not judge again, since it cannot tell
 a relayed call's origin.
@@ -1205,8 +1219,8 @@ that it shows them (`hello.shows`), one at a time, oldest first.
 **Who holds what, today.** Built so far: the credential, the classification (slices 1 and 2), the card (slice 3), and
 the keeper handing the token to windows only (slice 4, "The keeper's control socket" below): a script that asks
 `keeper.sock` gets the limited credential, and a serve host's `serve.json` (slice 5, "The remote host" below) holds no
-full credential: a script that reads it, or runs `--connection`, gets the limited one. The direct host on Windows gives
-its token only to the window that started it.
+full credential: a script that reads it, or runs `--connection`, gets the limited one. Every agent's process has its
+session's credential (slice 6). The direct host on Windows gives its token only to the window that started it.
 
 ## The remote host (`centralu serve`, #82)
 
