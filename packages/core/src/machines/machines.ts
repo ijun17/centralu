@@ -24,23 +24,6 @@ export function isAway(row: Placed | undefined, machines: Readonly<Record<string
   return !!m && m.status !== 'connected'
 }
 
-/**
- * The linked machines the window needs now (#1134): the machine of the focused session, of the focused project and of
- * the project the code viewer shows, those that connect when needed only. The window tells the host while they stay
- * so (`machines.need`); a machine connected at start needs no telling. Sorted, so the same set reads the same
- */
-export function machinesInUse(
-  open: { session?: Placed | null; projects?: readonly (Placed | null | undefined)[] },
-  machines: Readonly<Record<string, Pick<MachineInfo, 'connect'>>>,
-): string[] {
-  const ids = new Set<string>()
-  for (const row of [open.session, ...(open.projects ?? [])]) {
-    const id = row?.machine
-    if (id && machines[id]?.connect === 'when_needed') ids.add(id)
-  }
-  return [...ids].sort()
-}
-
 /** One word or two for a link's state, as Add project's machine menu and Settings say it */
 export const MACHINE_STATUS_LABEL: Record<MachineStatus, string> = {
   connected: 'connected',
@@ -67,7 +50,7 @@ export type MachineProblem = {
  * (`links/tunnel.ts`); these are the failures a person meets when linking a machine for the first
  * time, each with the one step that fixes it. Anything not recognised is shown as the host said it.
  */
-export function machineProblem(m: Pick<MachineInfo, 'status' | 'error' | 'name' | 'sshTarget'> & Partial<Pick<MachineInfo, 'shell'>>): MachineProblem | null {
+export function machineProblem(m: Pick<MachineInfo, 'status' | 'error' | 'name' | 'sshTarget'> & Partial<Pick<MachineInfo, 'shell' | 'autoReconnect'>>): MachineProblem | null {
   // Disconnected on purpose (#1134): nothing is wrong, and the row says how it connects again
   if (m.status === 'connected' || m.status === 'disconnected') return null
   const e = m.error ?? ''
@@ -110,10 +93,15 @@ export function machineProblem(m: Pick<MachineInfo, 'status' | 'error' | 'name' 
     return { title: `${m.name} refused the ssh connection`, fix: 'Its ssh server may be off: turn on Remote Login (macOS) or the OpenSSH server there' }
   }
   if (/timed out|No route to host|Network is unreachable|Host is down/i.test(e)) {
-    return { title: `${m.name} does not answer`, fix: 'It may be asleep, off or on another network. Centralu keeps trying' }
+    return { title: `${m.name} does not answer`, fix: `It may be asleep, off or on another network. ${tries(m)}` }
   }
   if (m.status === 'refused') return { title: e || `${m.name} refused the link`, fix: `Restart \`${shims(m).centralu} serve\` there, then reconnect` }
-  return e ? { title: e, fix: null } : { title: `${m.name} is away`, fix: 'Centralu keeps trying' }
+  return e ? { title: e, fix: null } : { title: `${m.name} is away`, fix: tries(m) }
+}
+
+/** What an away machine's row says comes next (#1341): the host keeps trying only while Auto reconnect is on */
+function tries(m: Partial<Pick<MachineInfo, 'autoReconnect'>>): string {
+  return m.autoReconnect === false ? 'Auto reconnect is off: press Connect to try again' : 'Centralu keeps trying'
 }
 
 /**

@@ -19,7 +19,7 @@ export function storeRegistry(store: Store): MachineRegistry {
     remove: (id) => store.machines.removeLinkedMachine(id),
     setAcceptedVersions: (id, key) => store.machines.setLinkedMachineAcceptedVersions(id, key),
     setAsks: (id, on) => store.machines.setLinkedMachineAsks(id, on),
-    setConnect: (id, connect) => store.machines.setLinkedMachineConnect(id, connect),
+    setAutoReconnect: (id, on) => store.machines.setLinkedMachineAutoReconnect(id, on),
   }
 }
 

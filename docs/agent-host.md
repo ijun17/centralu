@@ -1366,12 +1366,12 @@ a folder, and nothing named the machines. Both are rare commands of the orchestr
 
 A machine on a Centralu from before `projects.inspect` is named as too old, before any card. `list_machines` answers one
 line per machine from what `machines.list` answers (`SessionManager.useMachineList`, wired to `links.list()` in
-`main.ts`): its name, status, OS and shell (from the shell the hub reaches it with), and whether it connects at start or
-when needed (`MachineInfo.connect`, #1134).
+`main.ts`): its name, status, OS and shell (from the shell the hub reaches it with), and whether it reconnects by itself
+(Auto reconnect, `MachineInfo.autoReconnect`, #1341).
 
 **Managing the linked machines** (#1219, second slice). The orchestrator's rare commands `add_machine { sshTarget, name?,
 wslDistro? }`, `install_machine { machine, action: install | update }`, `remove_machine`, `reconnect_machine`,
-`set_machine_connect { connect }` and `set_machine_autostart { on }` make the calls the Machines screen makes on the
+`set_machine_auto_reconnect { on }` and `set_machine_autostart { on }` make the calls the Machines screen makes on the
 hub's links (`MachineFlow`, `sessions/machine-flow.ts`, wired by `SessionManager.useMachineOps(links)` in main.ts).
 `add_machine` connects nowhere before the person's card (security review of #1238): the target is resolved with `ssh -G`
 (`Links.resolve`; no connection, no key loaded) and the card shows the host, user and port ssh would use, and its
@@ -1382,7 +1382,9 @@ distro of it when one is named. A target, name or distro with a control or forma
 overrides among them) is refused before anything runs. Linking, installing,
 updating, removing and start at boot wait for a card in the orchestrator's slot under every preset (an `other` card,
 `about: "machine_change"`, the question whole in `raw`, so any window reads it; allow or deny, nothing remembered).
-Reconnecting and the connect mode act at once, as the row's buttons do. Refused before any card: a machine not linked,
+Reconnecting and Auto reconnect act at once, as the row's buttons do, except that undoing what the person chose asks (#1341):
+`reconnect_machine` on a machine they disconnected or whose Auto reconnect is off, and `set_machine_auto_reconnect` turning the
+switch back on, wait for a card (`about: "machine_change"`); a machine away on its own with the switch on is reconnected with no card, and one already connected is answered as connected (nothing is done). Refused before any card: a machine not linked,
 a target that is no ssh target or that `ssh -G` cannot read, a name already linked, and an install or update
 this computer cannot make (`LinkedMachine.operationRefusal`, the same sentences `operate` refuses with). Every answer
 ends with the machine as it is after the change (`machineLine`). An install or update runs while the tool call waits.
@@ -1498,7 +1500,7 @@ window's channel), grouped, and for each group one of three states.
 | App trust and grants. `apps.permissions`, `apps.forgetPermission`, `apps.reach`, `apps.enable`, `apps.review`, `apps.setShared`, `apps.setSecret`, `apps.importPrepare`, `apps.importCommit`, `apps.importCancel`, `projectConsents.list`, `projectConsents.revoke` | **Person** (listing: *next*) | Granting what an app may reach, enabling or importing one, sharing it and its secrets are trust decisions; a secret's value is never handed to an agent |
 | App upkeep. `apps.remove`, `apps.restart`, `apps.versions`, `apps.restoreVersion`, `apps.check`, `apps.runs`, `apps.errors`, `apps.usage`, `apps.questions`, `apps.answerQuestion`, `apps.builder`, `apps.createBuilder`, `apps.askBuilder`, `apps.sendError` | Should: *next* | `apps.remove` behind a card (its folder moves to `app-trash/`); the rest are reads or reversible. The builder calls are the app builder's own channel |
 | App screens. `apps.viewFrame`, `apps.viewDocument`, `apps.openView`, `apps.closeView`, `apps.recoverView`, `apps.holdViews`, `apps.inlineReopen`, `apps.inlineViews`, `apps.viewMessage`, `apps.readResource`, `apps.invoke` | **Person** | Drawing and clicking an app's screen: they have no meaning without a window |
-| Linked machines. `machines.list`, `machines.add`, `machines.remove`, `machines.reconnect`, `machines.setConnect`, `machines.install`, `machines.update`, `machines.autostart`, `machines.probe` | Has it (slice 1, #1238) | Six commands and `list_machines`; add, install, update, remove and start at boot behind a card |
+| Linked machines. `machines.list`, `machines.add`, `machines.remove`, `machines.reconnect`, `machines.setAutoReconnect`, `machines.setConnect`, `machines.install`, `machines.update`, `machines.autostart`, `machines.probe` | Has it (slice 1, #1238) | Six commands and `list_machines`; add, install, update, remove and start at boot behind a card |
 | `machines.disconnect`, `machines.rollback`, `machines.uninstall`, `machines.acceptVersions`, `machines.sshHosts`, `machines.activity` | Should: *next* | Disconnect acts at once; rollback, uninstall and accepting differing versions behind a card |
 | What a machine's sessions may ask of this computer. `machines.setAsks`, `machines.askConsents`, `machines.withdrawAsk`, `machines.need` | **Person** | It widens what code on another computer may do here (#550) |
 | Host to host. `host.activity`, `host.sessions`, `host.readSession`, `host.recall`, `host.lastAnswer`, `host.send`, `host.stop`, `host.handover`, `host.hubOffer` | Not the window's | Answered for a linked hub or a switch; no window calls them |
@@ -2980,35 +2982,54 @@ sessions resume on the new host through their stored ids, as after any restart.
 | The ssh processes are children of the hub host, behind the `Tunnel` interface | Probe 4 of the plan (§10.6, 2026-10-08) measured the alternatives across real hub swaps: the link is away about 1.1 s per swap as it is, 0.8 s with OpenSSH `ControlPersist` (which leaves a forward behind per swap and outlives "Quit completely"), and would be about 0.14 s as a keeper child. The remote's agents never notice a hub swap, so it stays here |
 
 **The link's states** (`MachineInfo.status`, sent as `machine_status`): `connecting`; `connected`; `unreachable`
-(ssh failed, the forward or the socket dropped; retried with backoff from 2 s to 5 minutes, #1134); `starting` (no host ran
+(ssh failed, the forward or the socket dropped; retried with backoff from 2 s to 5 minutes while Auto reconnect is on, #1134, #1341; with it off, not until the person's Connect); `starting` (no host ran
 there; the link is starting one, above); `updating` (the hub is stopping, switching or removing the Centralu it installed there; the link waits, above); `not_running` (Centralu answers there but no `centralu serve` runs, and
 starting one failed, `error` says why; retried); `versions_differ`; `refused` (a token refused twice in a row:
 the connection line is read again once at once, since `--rotate-token` changes the token a running serve keeps until
 it restarts); `disconnected` (#1134: closed on purpose and not tried, below); `stopped` (#1143: the person stopped
 Centralu there, or the hosts the link started kept stopping; the link starts none until the person's Start, above).
 
-**When a link is opened** (#1134, owner decision 2026-10-18; `MachineInfo.connect`, the `linked_machines.connect`
-column, v59). `at_start`, the default, is what every machine did before: connected when the hub starts and tried again
-after every drop, so an orchestrator working through it hears reports and cards as they happen. `when_needed` is for a
-laptop that is often closed or a server used once a week: the machine is not connected at start, and no attempt is
-made until something needs it. A need is the window opening one of its projects or sessions (`machines.need`, said
-again every 2 minutes while it stays open), or the orchestrator acting there: `start_agent` with the machine,
-`agent_session`, `ask_project` on one of its projects, `read_session` of one of its sessions (`linked-sessions.ts`
-waits up to 60 s for the link). Looking a name up is not a need: such a machine's projects stand as last listed, not as
-away, also while it is connecting or between attempts, so the act that follows waits for the link instead of being
-refused. Each act there starts the hold again. The link stays up for 10 minutes after the last need, for as long as a
-session there is in a turn as the hub last heard it (followed event by event, so a turn open when the link dropped
-keeps it tried), and for as long as a session here waits on a child there (its report owed, over its turn or over its
-background work; `SessionManager.linkedWorkOwed`); then it closes (`disconnected`), also while it was away. A
-restarted hub connects such a machine at start while a report of a child there is owed. Its sessions keep running there meanwhile; on the next connect the window
-re-reads that machine (`machine_resync`) and with it what they said. The row's Disconnect closes any link without
-unlinking the machine; Connect (`machines.reconnect`) opens it and keeps it until Disconnect. After the person's
-Disconnect, the window saying again that it still has something of the machine open (`machines.need` with `repeat`)
-does not bring it back; Connect, the window opening something of it again, or an agent's work does. A machine connected
-at start that the person disconnected stays so until Connect or the hub's next start: an agent's work does not bring it
-back. An install, update or autostart change on a disconnected machine connects it first, since it runs over the link's
-ssh, without pinning it: its hold runs from the end of the job. An older host ignores the column and connects every machine at start; an older window reads `disconnected` as
-`unreachable` and shows no setting.
+**Auto reconnect** (#1341, owner decision 2026-10-20; `MachineInfo.autoReconnect`, kept in the `linked_machines.connect`
+column of v59 with no new step: null is on, `when_needed` is off, which is where the older connect mode kept its choice, so
+a machine set to "when needed" reads back with the switch off and a build still serving during a host swap reads the same
+value as it always did; a later release may add a column named for the switch and drop this one, add first and remove
+later). One switch per linked machine, on by default; it replaces the connect mode (`at_start` / `when_needed`, #1134).
+
+*On* is what every machine did before: connected when the hub starts and tried again after every drop, on the backoff (2 s,
+doubling to 5 minutes), so an orchestrator working through it hears reports and cards as they happen.
+
+*Off* is for a laptop that is often closed or a server used once a week: the hub tries **once** when it starts. After a
+failed attempt, or a drop that the quick redials do not undo, it tries nothing more until the person presses Connect
+(`machines.reconnect`: Settings → Machines, or the machine's badge menu in the sidebar). The quick redials stay (owner
+decision): after a drop the client dials the same forward again a few times (`LINK_REDIALS`, about 6 s, no new ssh), so a blip
+or a host swapped in place is back with no Connect; only when they fail does the link give up, close the forward and wait.
+`LinkedMachineConnection.retryLater` does nothing for it, and the row says `press Connect to try again` where it says
+`reconnecting` for a machine with the switch on. The one thing it still does by itself is look again at the versions of a
+link held at `versions_differ` (every 60 s): it only reads the connection line, refreshes the row, and connects nothing
+(`readsOnly`). Turning the switch off while connected leaves the link up; turning it on while the link is away tries again
+at once. An attempt under way at the person's Connect, or the one immediate re-ask after a refusal, is part of that attempt
+and goes ahead either way.
+
+Nothing connects a machine on a need any more (`machines.need`, `NEED_HOLD_MS`, the idle disconnect and the 60 s wait of
+`linked-sessions.ts` are gone). An agent's call that needs a machine nothing here will connect (the person disconnected
+it, or its switch is off and the attempt at the hub's start is over: `LinkedMachineConnection.waitsForPerson`) is answered
+at once: `start_agent` with the machine, `ask_project` on one of its projects, `agent_session`, a send to or a read of
+one of its sessions say "is not connected, and nothing here connects it by itself; ask the person to connect it (Settings,
+Machines, Connect)" (`NOT_CONNECTED` / `awayPhrase`, `adapters/contract/orchestrator.ts`), and its projects are listed as
+away with that reason. A machine with the switch on that is away between attempts is still "not reachable right now;
+try again once its link is back". What a child there reported meanwhile is read once the link is up again. A parent waiting on a child whose turn is running is
+told when the machine starts waiting for the person (`LinkedReports.linkChanged`: a link-lost report saying Auto reconnect is off and to ask
+the person to connect it), judged by the link itself (`waitsForPerson`, sent with the `machine_status` of the moment it gives up) and not by
+the row, which says `unreachable` while the client still redials, an attempt is under way or an install or update holds the machine: the
+wait stands through those.
+
+Its sessions keep running there meanwhile; on the next connect the window re-reads that machine (`machine_resync`) and
+with it what they said. The row's Disconnect closes any link without unlinking the machine and tries none until Connect or
+the hub's next start, with the switch on or off. An install, update or autostart change on a disconnected machine connects
+it first, since it runs over the link's ssh, and leaves it up. `machines.need` is still accepted for one release and
+answers the row, so an older window does not fail, and `machines.setConnect` still sets the switch (`at_start` is on). A
+build from before it reads the column as the connect mode, so it connects a machine with the switch off only when something there
+needs it; an older window reads `disconnected` as `unreachable` and shows no setting.
 
 **Versions are checked before connecting** (plan §4). The connection line carries the running remote host's `version`
 and `protocolVersion`, and the hub compares them with its own before it opens the socket, and again with

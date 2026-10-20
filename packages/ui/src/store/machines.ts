@@ -29,8 +29,7 @@ type MachineActions = Pick<
   | 'removeMachine'
   | 'reconnectMachine'
   | 'disconnectMachine'
-  | 'setMachineConnect'
-  | 'needMachine'
+  | 'setMachineAutoReconnect'
   | 'changeMachineInstall'
   | 'setMachineAutostart'
   | 'setMachineAsks'
@@ -98,23 +97,15 @@ export const machineActions = (set: StoreSet, get: StoreGet): MachineActions => 
     }
   },
 
-  async setMachineConnect(machineId, connect) {
+  async setMachineAutoReconnect(machineId, autoReconnect) {
     try {
-      const m = await get().platform!.machines.setConnect(machineId, connect)
+      const m = await get().platform!.machines.setAutoReconnect(machineId, autoReconnect)
       // The setting is the answer's: a `machine_status` sent before it may predate the change
-      set((s) => ({ machines: { ...s.machines, [m.id]: { ...(s.machines[m.id] ?? m), connect: m.connect } } }))
+      set((s) => ({ machines: { ...s.machines, [m.id]: { ...(s.machines[m.id] ?? m), autoReconnect: m.autoReconnect, connect: m.connect } } }))
       return true
     } catch (e) {
-      set({ toast: `Could not change when it connects: ${(e as Error).message}` })
+      set({ toast: `Could not change Auto reconnect: ${(e as Error).message}` })
       return false
-    }
-  },
-
-  async needMachine(machineId, repeat = false) {
-    try {
-      await get().platform!.machines.need(machineId, repeat)
-    } catch {
-      // An older host has no such call; its machines connect at start anyway
     }
   },
 

@@ -1,4 +1,4 @@
-import { MACHINE_CHANGE, type MachineConnect, type MachineInfo, type MachineProbe, type RemoteShell } from '@cc/protocol'
+import { MACHINE_CHANGE, type MachineInfo, type MachineProbe, type RemoteShell } from '@cc/protocol'
 import type { MachineRequest } from '../adapters/contract.js'
 import type { HostCards } from './host-cards.js'
 import { trustedJsonText } from './tool-answers.js'
@@ -19,7 +19,7 @@ export type MachineOps = {
   reconnect(id: string, opts?: { start?: boolean }): MachineInfo
   /** Why no host is started on the machine just now (the person stopped it there, or the link's limit), or null */
   startHeldBack(id: string): string | null
-  setConnect(id: string, connect: MachineConnect): MachineInfo
+  setAutoReconnect(id: string, autoReconnect: boolean): MachineInfo
   install(id: string): Promise<{ machine: MachineInfo; current: { version: string }; note?: string }>
   update(id: string): Promise<{ machine: MachineInfo; current: { version: string }; note?: string }>
   autostart(id: string, on?: boolean): Promise<{ machine: MachineInfo; autostart: { on: boolean; how: string | null; linger: boolean | null } }>
@@ -57,10 +57,10 @@ function osOf(m: Pick<MachineInfo, 'shell' | 'wslDistro' | 'autostart'>): string
 
 /**
  * One linked machine for list_machines (#1220) and every machine command's answer (#1219): its name as the person
- * gave it (quoted, since it is theirs), status, OS and shell, and when its link is opened (#1134).
+ * gave it (quoted, since it is theirs), status, OS and shell, and whether it reconnects by itself (#1341).
  */
 export function machineLine(m: MachineInfo): string {
-  const connect = m.connect === 'when_needed' ? 'connects when needed' : 'connects at start'
+  const connect = m.autoReconnect ? 'auto reconnect on' : 'auto reconnect off (only the person connects it again)'
   return `- ${trustedJsonText(m.name)} [${m.id}]: ${MACHINE_STATUS[m.status] ?? m.status}; ${osOf(m)}; ${connect}`
 }
 
@@ -83,10 +83,12 @@ function targetError(target: string): string | null {
 
 /**
  * The orchestrator's commands for linked machines (#1219): add (probed first), install or update Centralu there,
- * remove, reconnect, when it connects, and whether it starts at boot. Each is the call the window's Machines screen
+ * remove, reconnect, Auto reconnect, and whether it starts at boot. Each is the call the window's Machines screen
  * makes. What changes a machine or this computer's reach (add, install, update, remove, start at boot) waits for the
- * person's card, in every preset; reconnecting and the connect mode do not, as the row's buttons do not ask, except
- * that reconnecting a machine where Centralu is stopped starts it, which this computer does not do by itself (#1143). Every
+ * person's card, in every preset; reconnecting and Auto reconnect do not, as the row's buttons do not ask, except
+ * that reconnecting a machine where Centralu is stopped starts it, which this computer does not do by itself (#1143),
+ * and that undoing what the person chose asks too (#1341): reconnecting a machine they disconnected or turned Auto
+ * reconnect off for, and turning Auto reconnect back on. Every
  * refusal that can be known first (no such machine, a target that is no ssh target or does not answer, a build that
  * cannot install) comes before any card.
  */
@@ -108,6 +110,8 @@ export class MachineFlow {
       if (typeof m === 'string') return { ok: false, error: m }
       switch (req.action) {
         case 'reconnect': {
+          // Already connected: there is nothing to reconnect, so nothing is asked and nothing is done (#1341)
+          if (m.status === 'connected') return done(`${m.name} is already connected; nothing was done.`, m)
           /*
            * Held back there (#1143): stopped by the person, or after the hosts this computer started kept stopping.
            * Starting one is the person's to allow, so it is asked whatever the row says just now (it reads the line again,
@@ -123,12 +127,39 @@ export class MachineFlow {
             if (refused) return { ok: false, error: refused }
             return done(`Starting Centralu on ${m.name}.`, ops.reconnect(m.id))
           }
+          /*
+           * Reconnecting what the person chose not to have connected by itself is theirs to allow (#1341): they disconnected it
+           * (only `machines.disconnect` leaves a machine `disconnected`), or turned its Auto reconnect off. A machine whose
+           * switch is on that is away on its own is reconnected with no card, as the row's button does
+           */
+          if (m.status === 'disconnected' || !m.autoReconnect) {
+            const why = m.status === 'disconnected' ? 'You disconnected it' : 'You turned its Auto reconnect off'
+            const refused = await this.ask(
+              sessionId,
+              `Connect ${m.name} (${m.sshTarget})? ${why}, so nothing here connects it by itself. It connects over ssh with your keys ` +
+                (m.status === 'disconnected' ? 'and stays connected until you disconnect it again.' : 'now; after a drop it stays away until you connect it again.'),
+              signal,
+            )
+            if (refused) return { ok: false, error: refused }
+          }
           return done(`Reconnecting ${m.name}.`, ops.reconnect(m.id, { start: false }))
         }
-        case 'connect':
+        case 'auto_reconnect':
+          // Turning it back on undoes the person's choice (#1341): asked. Turning it off, or on where it already is, is not
+          if (req.on && !m.autoReconnect) {
+            const refused = await this.ask(
+              sessionId,
+              `Turn Auto reconnect back on for ${m.name} (${m.sshTarget})? You turned it off. With it on, this computer connects to it over ssh with your ` +
+                'keys when Centralu starts and again after every drop, without asking.',
+              signal,
+            )
+            if (refused) return { ok: false, error: refused }
+          }
           return done(
-            req.connect === 'when_needed' ? `${m.name} now connects only when something needs it.` : `${m.name} now connects when Centralu starts.`,
-            ops.setConnect(m.id, req.connect),
+            req.on
+              ? `${m.name} now reconnects by itself, when Centralu starts and after every drop.`
+              : `${m.name} no longer reconnects by itself: after a drop only the person's Connect brings it back, and nothing here connects it.`,
+            ops.setAutoReconnect(m.id, req.on),
           )
         case 'remove': {
           const refused = await this.ask(

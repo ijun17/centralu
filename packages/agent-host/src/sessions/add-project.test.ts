@@ -205,24 +205,25 @@ describe('list_machines', () => {
       operation: null,
       autostart: null,
       elevated: null,
+      autoReconnect: true,
       connect: 'at_start',
       ...over,
     }) as MachineInfo
 
-  it('lists each machine machines.list answers: name, status, OS and shell, and when it connects', async () => {
+  it('lists each machine machines.list answers: name, status, OS and shell, and whether it reconnects by itself', async () => {
     const list = [
       machine({ id: 'm1', name: 'laptop', shell: 'powershell', status: 'connected' }),
       machine({ id: 'm2', name: 'pi', shell: 'posix', status: 'unreachable', autostart: { on: true, how: 'systemd', linger: true } }),
-      machine({ id: 'm3', name: 'studio', shell: 'wsl', wslDistro: 'Ubuntu', status: 'disconnected', connect: 'when_needed' }),
+      machine({ id: 'm3', name: 'studio', shell: 'wsl', wslDistro: 'Ubuntu', status: 'disconnected', autoReconnect: false, connect: 'when_needed' }),
     ]
     mgr.useMachineList(() => list)
     const orc = await mgr.orchestrator()
     const r = await mgr.runOrchestratorTool(orc.id, 'centralu_run', { command: 'list_machines', args: {} })
     expect(r.isError).toBeFalsy()
     expect(r.text.split('\n').slice(0, 3)).toEqual([
-      '- "laptop" [m1]: connected; Windows, PowerShell; connects at start',
-      '- "pi" [m2]: unreachable; Linux, Unix shell; connects at start',
-      '- "studio" [m3]: disconnected; Linux in WSL (Ubuntu) on Windows; connects when needed',
+      '- "laptop" [m1]: connected; Windows, PowerShell; auto reconnect on',
+      '- "pi" [m2]: unreachable; Linux, Unix shell; auto reconnect on',
+      '- "studio" [m3]: disconnected; Linux in WSL (Ubuntu) on Windows; auto reconnect off (only the person connects it again)',
     ])
   })
 

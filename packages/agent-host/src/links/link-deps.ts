@@ -1,4 +1,4 @@
-import type { MachineConnect, MachineSide, NormalizedEvent } from '@cc/protocol'
+import type { MachineSide, NormalizedEvent } from '@cc/protocol'
 import type { RemoteRuntime } from './install.js'
 import type { RegistryOptions } from './registry.js'
 import type { RemoteClientOptions } from './remote-client.js'
@@ -20,8 +20,8 @@ export type MachineRecord = {
   acceptedVersions: string | null
   /** Whether this machine's sessions may ask this computer's projects (#550); off when absent */
   asks?: boolean
-  /** When the hub opens the link (#1134); absent: at start */
-  connect?: MachineConnect
+  /** Auto reconnect (#1341); absent: on */
+  autoReconnect?: boolean
 }
 
 export interface MachineRegistry {
@@ -31,7 +31,7 @@ export interface MachineRegistry {
   setAcceptedVersions(id: string, key: string | null): void
   /** The reverse direction's switch (#550); off also forgets the machine's approved pairs */
   setAsks?(id: string, on: boolean): void
-  setConnect(id: string, connect: MachineConnect): void
+  setAutoReconnect(id: string, autoReconnect: boolean): void
 }
 
 /**
@@ -79,23 +79,14 @@ export type LinkDeps = {
   client?: Partial<RemoteClientOptions>
   /** Backoff between attempts while a machine is away; doubles up to the second value (2 s to 5 minutes when absent) */
   retryMs?: [number, number]
+  /** For tests: how long a call waits for an attempt to connect that is under way (60 s when absent, #1341) */
+  attemptWaitMs?: number
+  /** For tests: how long a link held at `versions_differ` waits before it looks at the versions again (60 s when absent) */
+  versionsRetryMs?: number
   /** For tests: how long a host stays up before the backoff starts over (60 s when absent, #1143) */
   stableMs?: number
   /** For tests: at most `max` hosts the link starts by itself within `windowMs` (3 in 10 minutes when absent, #1143) */
   restarts?: { max: number; windowMs: number }
-  /**
-   * Whether a session here waits on a session of the machine (#1134): a report owed of a child there, whose turn runs
-   * or whose background work does (`SessionManager.linkedWorkOwed`). A machine that connects when needed stays up for
-   * it, and is connected at start for it after a restart. Absent: nothing waits
-   */
-  workOwed?: (machineId: string) => boolean
-  /**
-   * For tests, a machine that connects when needed (#1134): how long it stays up after the last need, how often that
-   * is looked at, and how long an agent's call waits for it to connect
-   */
-  needHoldMs?: number
-  idleCheckMs?: number
-  needWaitMs?: number
   /** What `machines.install` sends (install.ts). Without it this hub installs nothing */
   installer?: LinkInstaller
   /** For tests: how long an updated host has to answer (update.ts `CHECK_MS`) */

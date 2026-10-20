@@ -1,18 +1,14 @@
 import { isObj } from '../json-value.js'
 import { rpcError } from '../rpc-error.js'
 import {
-  isInTurn,
-  transition,
   HostHandover,
   type HostLogon,
-  type MachineConnect,
   type MachineInfo,
   type MachineOperation,
   type MachineSide,
   type MachineStatus,
   type MachineVersions,
   type NormalizedEvent,
-  type SessionState,
 } from '@cc/protocol'
 import type { LinkDeps, MachineRecord } from './link-deps.js'
 import { belowFloor, NodeTooOld } from './node-floor.js'
@@ -75,24 +71,16 @@ const STABLE_MS = 60_000
 const RESTARTS = { max: 3, windowMs: 10 * 60_000 }
 
 /**
- * A machine that connects when needed (#1134) stays connected this long after the last thing that needed it, and
- * longer while a session there is in a turn. A window that keeps one of its projects or sessions open says so again
- * well within it (every 2 minutes, `machines.need`)
+ * What a row of an unreachable machine says comes next (#1341): the hub tries again on its backoff while Auto reconnect
+ * is on, and waits for the person's Connect while it is off. A row already showing one is changed when the switch moves
  */
-const NEED_HOLD_MS = 10 * 60_000
-/** How often such a machine is looked at for having been idle that long */
-const IDLE_CHECK_MS = 30_000
-/**
- * How long an agent's call waits for such a machine to connect before it is answered as not reachable. Connecting
- * took 2.1 to 4.3 s on a LAN (docs/agent-host.md §4.7); starting a host there adds its start. A machine that cannot
- * be reached answers sooner: ssh fails
- */
-const NEED_WAIT_MS = 60_000
-
-/** Where an attempt to connect ended, one way or the other: what a call waiting on `need` waits for */
-const SETTLED: ReadonlySet<MachineStatus> = new Set(['connected', 'unreachable', 'not_running', 'versions_differ', 'refused', 'disconnected', 'stopped'])
-/** Statuses a need tries again now, instead of waiting out the backoff */
-const RETRYING: ReadonlySet<MachineStatus> = new Set(['unreachable', 'not_running', 'refused'])
+const KEEPS_TRYING = 'reconnecting'
+const WAITS_FOR_PERSON = 'press Connect to try again'
+const NEXT_STEP = new RegExp(`; (${KEEPS_TRYING}|asking the machine again|${WAITS_FOR_PERSON})$`)
+/** How long a call waits for an attempt to connect that is under way before it is answered as not reachable */
+const ATTEMPT_WAIT_MS = 60_000
+/** Statuses of a link that is away between attempts: turning Auto reconnect on tries again now */
+const AWAY: ReadonlySet<MachineStatus> = new Set(['unreachable', 'not_running', 'refused', 'stopped'])
 
 export abstract class LinkedMachineConnection implements RoutedMachine {
   readonly q: Qualifier
@@ -180,30 +168,18 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   /** The floor could not be read from this host once already; said once in the log */
   private floorUnreadable = false
   /**
-   * The link was closed on purpose and none is tried (#1134, status `disconnected`): by the person, at start for a
-   * machine that connects when needed, or because nothing needed it. `stopped` is set with it, so every path that
-   * opens or retries ends as after a removal; `connect`, `need` and `start` open it again
+   * The link was closed on purpose and none is tried (#1134, status `disconnected`): the person disconnected it.
+   * `stopped` is set with it, so every path that opens or retries ends as after a removal; `connect` and `start` open it
+   * again
    */
   private parked = false
-  /** The person connected it (`connect`): it stays up until they disconnect it, whatever `connect` says */
-  private pinned = false
   /**
-   * The person disconnected it (`machines.disconnect`): the window saying again that it still has the machine open
-   * (`need` with `repeat`) does not bring it back. Connect does, the window opening something of it does, and an
-   * agent's work does
+   * The next retry is only to read (#1341): Auto reconnect is off, and the versions check looks again for a change on
+   * either side (`check`). It refreshes the row and connects nothing
    */
-  private downByPerson = false
-  /** When something last needed it (`need`), for a machine that connects when needed */
-  private neededAt = 0
-  private idleTimer: ReturnType<typeof setInterval> | undefined
-  /** Calls waiting on `need` for the attempt to connect to end */
+  private readsOnly = false
+  /** Calls waiting for an attempt to connect to end (`settled`) */
   private statusWaiters = new Set<() => void>()
-  /**
-   * Each shown session's state as the hub last heard it (#1134): from the lists, then followed event by event by the
-   * rule both sides run (`transition`). The mirror's `state` follows explicit `state_change` events only, which a turn
-   * need not send. Kept while the link is away, so a turn that was open when it dropped still counts
-   */
-  private states = new Map<string, SessionState>()
 
   constructor(
     protected record: MachineRecord,
@@ -211,10 +187,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     protected readonly deps: LinkDeps,
   ) {
     this.q = new Qualifier(record.id, record.slot, deps.ownerOf)
-    for (const s of deps.mirror.read(record.id, 'sessions') ?? []) {
-      this.classify(s)
-      this.noteState(s)
-    }
+    for (const s of deps.mirror.read(record.id, 'sessions') ?? []) this.classify(s)
     tunnel.onDown((reason) => this.transportDown(reason))
   }
 
@@ -227,19 +200,62 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   get reachable(): boolean {
     return this.status === 'connected' && this.client?.connected === true
   }
-  /** When the hub opens this link (#1134) */
-  get connectMode(): MachineConnect {
-    return this.record.connect ?? 'at_start'
+  /** Auto reconnect (#1341), on unless the person turned it off */
+  get autoReconnect(): boolean {
+    return this.record.autoReconnect !== false
   }
   /**
-   * Not connected now, and connected when something needs it (#1134): parked, connecting, or away between attempts.
-   * What the mirror holds stands for it until then, and what is asked of it waits on `need`. Not while its versions
-   * hold it or an operation runs there, which a need cannot end; and never a machine that connects at start, which the
-   * person disconnected or which is away: nothing but Connect or its backoff brings that one back
+   * Not connected now, and nothing here will connect it until the person presses Connect (#1341): they disconnected it,
+   * or Auto reconnect is off and the attempt it makes at the hub's start is over. An agent's call that needs it is
+   * answered as such at once. Not while an attempt is under way, or an operation holds it
    */
-  get onDemand(): boolean {
-    if (this.connectMode !== 'when_needed' || this.reachable) return false
-    return this.status !== 'versions_differ' && this.status !== 'updating'
+  get waitsForPerson(): boolean {
+    if (this.reachable || this.opening || this.inOperation()) return false
+    // Connecting is an attempt under way (the handshake and its few redials outlast `opening`); a link held at
+    // versions_differ or updating waits for something Connect does not give
+    if (this.status === 'connecting' || this.status === 'starting' || this.status === 'versions_differ' || this.status === 'updating') return false
+    if (this.redialing) return false
+    return this.parked || !this.autoReconnect
+  }
+
+  /**
+   * An attempt to connect is under way (#1341): the tunnel is opening, or the link is shaking hands with the host. A call
+   * that needs the machine waits for it (`settled`); with nothing trying it is answered at once
+   */
+  get attemptUnderWay(): boolean {
+    if (this.reachable || this.stopped) return false
+    return this.opening !== null || this.status === 'connecting' || this.status === 'starting'
+  }
+
+  /**
+   * The client is dialling the forward again after a drop, or shaking hands: it has not given up (`gaveUp`). Not an attempt a
+   * call waits for (it is answered as not reachable right now, as before), but not the person's to connect either
+   */
+  private get redialing(): boolean {
+    return this.client !== null && this.client !== this.gaveUp
+  }
+
+  /** Resolves once no attempt is under way, or after `waitMs` (a minute): connecting took 2 to 4 s on a LAN, a host started there adds its start */
+  settled(waitMs = this.deps.attemptWaitMs ?? ATTEMPT_WAIT_MS): Promise<void> {
+    if (!this.attemptUnderWay) return Promise.resolve()
+    return new Promise<void>((resolve) => {
+      const done = () => {
+        clearTimeout(timer)
+        this.statusWaiters.delete(waiter)
+        resolve()
+      }
+      const waiter = () => {
+        if (!this.attemptUnderWay) done()
+      }
+      const timer = setTimeout(done, waitMs)
+      timer.unref?.()
+      this.statusWaiters.add(waiter)
+    })
+  }
+
+  /** An install, update or other operation the person started is running: its retries are part of it (`retryLater`) */
+  protected inOperation(): boolean {
+    return this.held
   }
 
   info(): MachineInfo {
@@ -264,7 +280,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
       asks: { on: this.record.asks === true, note: this.record.asks === true ? this.asksNote : null },
       logon: this.logon,
       handover: this.handover,
-      connect: this.connectMode,
+      autoReconnect: this.autoReconnect,
+      connect: this.autoReconnect ? 'at_start' : 'when_needed',
     }
   }
 
@@ -344,11 +361,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     if (kind === 'sessions') {
       this.shown.clear()
       this.hidden.clear()
-      this.states.clear()
-      for (const s of list) {
-        this.classify(s)
-        this.noteState(s)
-      }
+      for (const s of list) this.classify(s)
       this.deps.mirror.replace(this.id, 'sessions', list.filter((s) => !hiddenKind(s)))
     } else {
       this.deps.mirror.replace(this.id, 'projects', list)
@@ -364,27 +377,16 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   start(): void {
     this.stopped = false
     this.parked = false
-    this.neededAt = Date.now()
-    this.watchIdle()
     void this.open()
   }
 
-  /** Not connected at start: the machine connects when needed (#1134). Nothing is opened or tried */
-  park(): void {
-    this.stopped = true
-    this.parked = true
-    this.setStatus('disconnected', null)
-  }
-
   /**
-   * The person's Connect (`machines.reconnect`, #1134): opens now, forgetting the backoff, also a disconnected link.
-   * It stays up until they disconnect it, as a machine that connects at start does. It is also the person's Start
+   * The person's Connect (`machines.reconnect`, #1134): opens now, forgetting the backoff, also a disconnected link and
+   * also with Auto reconnect off (#1341), where it is the only way to try again. It is also the person's Start
    * (#1143): a host is started there even where they stopped it or the link stopped starting them. `start: false` is
    * the orchestrator's reconnect without its card, which opens the link and starts nothing the link would not
    */
   connect(opts: { start?: boolean } = {}): void {
-    this.pinned = true
-    this.downByPerson = false
     if (opts.start !== false) {
       this.startAsked = true
       this.autoStarts = []
@@ -395,53 +397,14 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   }
 
   /**
-   * Something needs the machine now (#1134): the window opened one of its projects or sessions, or an agent is started
-   * or sent work there. A machine that connects when needed is connected, or tried again now when it was away, and
-   * is kept up for `NEED_HOLD_MS` after this. Resolves once the attempt ended (connected, or why not) or after
-   * `waitMs`; never rejects. Any other machine is left as it is. `repeat`: the window saying again that something of
-   * the machine is still open, which does not undo the person's Disconnect
+   * Closes the link and tries none until the person connects it again (#1134). The machine stays linked; its sessions
+   * keep running there, and the mirror lists them as last known
    */
-  need(opts: { waitMs?: number; repeat?: boolean } = {}): Promise<void> {
-    const waitMs = opts.waitMs ?? this.deps.needWaitMs ?? NEED_WAIT_MS
-    if (this.connectMode !== 'when_needed') return Promise.resolve()
-    if (opts.repeat && this.downByPerson) return Promise.resolve()
-    this.downByPerson = false
-    this.neededAt = Date.now()
-    if (this.reachable) return Promise.resolve()
-    if (this.parked) {
-      this.deps.log?.(`[links] ${this.name}: needed; connecting`)
-      this.start()
-    } else if (!this.stopped && !this.opening && RETRYING.has(this.status)) {
-      this.reconnect()
-    }
-    const settled = () => this.stopped || this.reachable || SETTLED.has(this.status)
-    if (settled()) return Promise.resolve()
-    return new Promise<void>((resolve) => {
-      const done = () => {
-        clearTimeout(timer)
-        this.statusWaiters.delete(waiter)
-        resolve()
-      }
-      const waiter = () => {
-        if (settled()) done()
-      }
-      const timer = setTimeout(done, waitMs)
-      this.statusWaiters.add(waiter)
-    })
-  }
-
-  /**
-   * Closes the link and tries none until it is connected or needed again (#1134). The machine stays linked; its
-   * sessions keep running there, and the mirror lists them as last known
-   */
-  async disconnect(why?: string, byPerson = false): Promise<void> {
-    this.pinned = false
-    this.downByPerson = byPerson
+  async disconnect(why?: string): Promise<void> {
     this.startAsked = false
     this.parked = true
     this.stopped = true
     clearTimeout(this.retryTimer)
-    this.stopIdle()
     this.client?.close()
     this.client = null
     if (why) this.deps.log?.(`[links] ${this.name}: ${why}`)
@@ -449,72 +412,37 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     await this.tunnel.close()
   }
 
-  /** When the hub opens the link (#1134), as the registry now keeps it */
-  setConnect(connect: MachineConnect): void {
-    this.record = { ...this.record, connect }
-    if (connect === 'at_start') {
-      this.stopIdle()
-      // At start means whenever the hub runs: a machine down for want of a need comes up now
-      if (this.parked) this.start()
-    } else if (!this.parked) {
-      // Counted as needed now, so it does not drop the moment the setting changes
-      this.neededAt = Date.now()
-      this.watchIdle()
-    }
+  /**
+   * Auto reconnect on or off (#1341), as the registry now keeps it. Off while connected leaves the link up: the switch
+   * says what happens after the next drop. Off while the link is away cancels the retry that was waiting, and the row
+   * says it waits for Connect. On while the link is away tries again now, as at the hub's start
+   */
+  setAutoReconnect(on: boolean): void {
+    this.record = { ...this.record, autoReconnect: on }
+    // An operation's retries stand: the switch takes effect once it ends (cancelling them rolled an update back)
+    if (!on && this.status !== 'versions_differ' && !this.inOperation()) clearTimeout(this.retryTimer)
+    // A swap's hold was waiting on the retry just cancelled: the row would say updating for good
+    if (!on && this.status === 'updating' && !this.inOperation()) this.setStatus('unreachable', `The host on ${this.name} was being swapped; ${WAITS_FOR_PERSON}`)
+    this.noteNextStep()
+    if (on && !this.parked && !this.stopped && !this.held && AWAY.has(this.status)) this.reconnect()
+    // Said to whoever follows the machine: a link that was waiting to retry now waits for the person (the reports of a child there)
+    this.deps.broadcast({ type: 'machine_status', machine: this.info() })
   }
 
-  /** An install, update or other operation the person started holds the machine; it is not idle meanwhile */
-  protected operating(): boolean {
-    return this.held
+  /** An unreachable row says what comes next (`NEXT_STEP`); said again when the switch moves */
+  private noteNextStep(): void {
+    if (this.status !== 'unreachable' || !this.error) return
+    const next = this.error.replace(NEXT_STEP, `; ${this.autoReconnect ? KEEPS_TRYING : WAITS_FOR_PERSON}`)
+    if (next !== this.error) this.setStatus('unreachable', next)
   }
 
   /**
-   * What the person asks of a disconnected machine runs over its link's ssh (#1134): it is opened for that, and not
-   * pinned. The operation holds it while it runs (`operating`), and its end counts as a need (`noteNeeded`)
+   * What the person asks of a disconnected machine runs over its link's ssh (#1134): it is opened for that. Nothing
+   * closes a link on its own, so it stays up (the person's Disconnect closes it)
    */
   openForOperation(): void {
     if (!this.parked) return
-    this.downByPerson = false
     this.start()
-  }
-
-  /** Counted as needed now, so the hold runs from here (#1134) */
-  protected noteNeeded(): void {
-    this.neededAt = Date.now()
-  }
-
-  /**
-   * Nothing needs the machine (#1134): it connects when needed, the person did not connect it themselves, nothing
-   * needed it for `NEED_HOLD_MS`, no operation runs, and no session there is in a turn as the hub last heard. A
-   * child working there keeps the link, also while it is away, so its report arrives
-   */
-  private idle(): boolean {
-    if (this.connectMode !== 'when_needed' || this.pinned || this.parked || this.stopped || this.operating()) return false
-    // An attempt under way is let finish: the next check after it decides, connected or away
-    if (this.opening) return false
-    if (Date.now() - this.neededAt < (this.deps.needHoldMs ?? NEED_HOLD_MS)) return false
-    // A child there whose report is owed: its turn runs, or its background work does after the turn ended
-    if (this.deps.workOwed?.(this.id)) return false
-    return ![...this.states.values()].some((state) => isInTurn(state))
-  }
-
-  /** A shown session's state from a list row or a `session_created` */
-  private noteState(s: unknown): void {
-    if (isObj(s) && typeof s.id === 'string' && typeof s.state === 'string' && !hiddenKind(s)) this.states.set(s.id, s.state as SessionState)
-  }
-
-  private watchIdle(): void {
-    if (this.connectMode !== 'when_needed' || this.idleTimer) return
-    // Also while it is away: a machine nothing needs is not tried every few minutes for as long as the hub runs
-    this.idleTimer = setInterval(() => {
-      if (this.idle()) void this.disconnect('nothing has needed it for a while and no session there is working; disconnected until something needs it')
-    }, this.deps.idleCheckMs ?? IDLE_CHECK_MS)
-    this.idleTimer.unref?.()
-  }
-
-  private stopIdle(): void {
-    clearInterval(this.idleTimer)
-    this.idleTimer = undefined
   }
 
   /** Opens again now, forgetting the backoff (`machines.reconnect`, or the person accepted the versions) */
@@ -531,7 +459,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
       void under.finally(() => {
         // It set a retry of its own after this (a start that failed, a refusal): that backoff stands
         if (this.stopped || this.held || this.opening || this.retriesSet !== set) return
-        if (this.client === null || this.client === this.gaveUp) this.retryLater(0)
+        if (this.client === null || this.client === this.gaveUp) this.retryLater(0, 'within')
       })
       return
     }
@@ -554,9 +482,9 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   async stop(): Promise<void> {
     this.stopped = true
     clearTimeout(this.retryTimer)
-    this.stopIdle()
     this.client?.close()
     this.client = null
+    for (const w of [...this.statusWaiters]) w()
     await this.tunnel.close()
   }
 
@@ -564,12 +492,19 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     if (this.held) return Promise.resolve()
     this.opening ??= this.doOpen().finally(() => {
       this.opening = null
+      for (const w of [...this.statusWaiters]) w()
+      // An attempt that failed set its status while it was still under way: the machine waits for the person only from here,
+      // and whoever reads `waitsForPerson` on a status event (the reports of a working child) is told again
+      if (this.waitsForPerson) this.deps.broadcast({ type: 'machine_status', machine: this.info() })
     })
     return this.opening
   }
 
   private async doOpen(): Promise<void> {
     if (this.stopped) return
+    // Looking again at the versions with Auto reconnect off (#1341): reads the line, opens no link and starts no host
+    const readsOnly = this.readsOnly
+    this.readsOnly = false
     // Kept only when it gave up redialling: `connectClient` points it at what the connection line says
     if (this.client !== this.gaveUp) {
       this.client?.close()
@@ -591,6 +526,10 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     if (endpoint.line.hostRunning) {
       this.startAsked = false
       this.heldBack = null
+    }
+    if (readsOnly && !endpoint.line.hostRunning) {
+      this.setStatus('unreachable', `Centralu is no longer running on ${this.name}; ${WAITS_FOR_PERSON}`)
+      return
     }
     // Only where the link can start one; elsewhere a host that is not running is `not_running`, as before
     const notStarted = endpoint.line.hostRunning || !this.tunnel.startHost ? null : this.startRefusal(endpoint.line)
@@ -614,6 +553,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
         this.setStatus('updating', null)
         if (!this.holdSaid) this.deps.log?.(`[links] ${this.name}: ${hold.by} is swapping its host; this link starts none until it is done`)
         this.holdSaid = true
+        // With Auto reconnect off nothing asks again (#1341): the row says so instead of waiting on a retry
+        if (!this.autoReconnect) return this.setStatus('unreachable', `${hold.by} is swapping the host on ${this.name}; ${WAITS_FOR_PERSON}`)
         // Asked again at the backoff's first step (2 s), never later than the hold lapses
         return this.retryLater(Math.max(50, Math.min(this.deps.retryMs?.[0] ?? 2_000, hold.until - Date.now())))
       }
@@ -678,6 +619,10 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     // The versions are checked before the link is opened (plan §4)
     const versions = this.check({ version: endpoint.line.version, protocolVersion: endpoint.line.protocolVersion, dev: false })
     if (!mayConnect(versions)) return
+    if (readsOnly) {
+      this.setStatus('unreachable', `The versions on ${this.name} agree now; Auto reconnect is off, so ${WAITS_FOR_PERSON}`)
+      return
+    }
     this.connectClient(endpoint)
   }
 
@@ -787,7 +732,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
         `${this.name} runs Centralu ${v.remote.version} (protocol ${v.remote.protocolVersion}); this computer runs ${v.hub.version} (protocol ${v.hub.protocolVersion}). Update ${which ?? 'one side'} to connect`,
       )
       // A later update on either side is noticed by asking again now and then (§4: the prompt comes again)
-      this.retryLater(60_000)
+      this.retryLater(this.deps.versionsRetryMs ?? 60_000, 'reads')
     }
     return v
   }
@@ -817,7 +762,12 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
         terminal: (f) => this.deps.terminal({ ...f, terminalId: this.q.id(f.terminalId) }),
         down: (reason) => {
           if (this.client !== client) return
-          this.setStatus('unreachable', `The link to ${this.name} dropped (${reason}); reconnecting`)
+          /*
+           * A short drop is dialled again at once, with the switch off too (#1341, owner decision): the client redials the
+           * same forward a few times (`LINK_REDIALS`, about 6 s, no ssh), and a blip or a host swapped in place is back
+           * within them. Only when they fail (`gaveUp`) does an off machine stay down until the person's Connect
+           */
+          this.setStatus('unreachable', `The link to ${this.name} dropped (${reason}); ${KEEPS_TRYING}`)
         },
         /*
          * A few redials of the same forward did not reach a host (#1143). A detached host that died leaves `ssh -N` up,
@@ -834,7 +784,9 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
             return
           }
           this.gaveUp = client
-          this.setStatus('unreachable', `${this.name}'s host did not answer on the link (${reason}); asking the machine again`)
+          // Nothing will use the forward before the person's Connect, which opens it again (#1341)
+          if (!this.autoReconnect) void this.tunnel.close().catch(() => {})
+          this.setStatus('unreachable', `${this.name}'s host did not answer on the link (${reason}); ${this.autoReconnect ? 'asking the machine again' : WAITS_FOR_PERSON}`)
           this.retryLater()
         },
         refused: (r) => {
@@ -858,7 +810,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
           if (!this.refusedOnce) {
             this.refusedOnce = true
             this.setStatus('connecting', why)
-            return this.retryLater(0)
+            return this.retryLater(0, 'within')
           }
           this.setStatus('refused', r.proving ? `${why}. Restart it there: \`${serve} --stop\`, then start it again` : `${why}. If its token was rotated, restart \`${serve}\` there`)
           this.retryLater()
@@ -939,14 +891,10 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     if (sid !== null) {
       if (raw.type === 'session_created') {
         this.classify(raw.session)
-        this.noteState(raw.session)
         if (isObj(raw.session) && !hiddenKind(raw.session)) this.deps.mirror.upsertSession(this.id, raw.session)
       }
       if (!this.shown.has(sid)) return
-      const was = this.states.get(sid)
-      if (was !== undefined) this.states.set(sid, transition(was, raw as NormalizedEvent).state)
       if (raw.type === 'session_deleted') {
-        this.states.delete(sid)
         this.shown.delete(sid)
         this.deps.mirror.removeSession(this.id, sid)
       } else if (raw.type === 'session_title' && typeof raw.title === 'string') {
@@ -974,17 +922,34 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     this.client = null
     // The update stopped the host on purpose; it reconnects when it is done
     if (this.held) return
-    this.setStatus('unreachable', `The connection to ${this.name} ended (${reason}); reconnecting`)
+    this.setStatus('unreachable', `The connection to ${this.name} ended (${reason}); ${this.nextStep()}`)
     this.retryLater()
   }
 
-  protected retryLater(fixedMs?: number): void {
+  /** What a row of an unreachable machine says comes next (`NEXT_STEP`) */
+  private nextStep(): string {
+    return this.autoReconnect ? KEEPS_TRYING : WAITS_FOR_PERSON
+  }
+
+  /**
+   * Asks the machine again after a delay. `backoff` (the default): the next step of the backoff, and nothing at all
+   * while Auto reconnect is off (#1341), where only the person's Connect tries again (after the client's quick redials,
+   * which an off machine keeps). `within`: part of an attempt that
+   * is under way or of the person's own request (a refusal asked again at once, a Connect that met an opening), so it
+   * goes ahead either way. `reads`: the versions check looking again for a change on either side; with the switch off it
+   * reads the line and connects nothing (`readsOnly`)
+   */
+  protected retryLater(fixedMs?: number, mode: 'backoff' | 'within' | 'reads' = 'backoff'): void {
     if (this.stopped || this.held) return
+    if (mode === 'backoff' && !this.autoReconnect && !this.inOperation()) return
     clearTimeout(this.retryTimer)
     const [first, max] = this.deps.retryMs ?? RETRY_MS
     const delay = fixedMs ?? Math.min(max, first * 2 ** this.attempt++)
     this.retriesSet++
-    this.retryTimer = setTimeout(() => void this.open(), delay)
+    this.retryTimer = setTimeout(() => {
+      this.readsOnly = mode === 'reads' && !this.autoReconnect
+      void this.open()
+    }, delay)
     this.retryTimer.unref?.()
   }
 

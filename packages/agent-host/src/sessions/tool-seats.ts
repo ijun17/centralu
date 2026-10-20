@@ -112,7 +112,7 @@ export const RARE_COMMANDS: Partial<Record<ToolProfile, readonly CommandName[]>>
     'install_machine',
     'remove_machine',
     'reconnect_machine',
-    'set_machine_connect',
+    'set_machine_auto_reconnect',
     'set_machine_autostart',
     'get_preferences',
     'set_preferences',

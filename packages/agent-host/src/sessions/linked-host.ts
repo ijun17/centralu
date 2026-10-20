@@ -37,22 +37,11 @@ export type LinkedHostHost = Pick<DelegationHost, 'meta' | 'store' | 'children' 
 
 /**
  * This host as a linked machine's hub and as a hub's linked machine (#82, #1038): the events a linked machine's
- * sessions send, the work owed there, and what a hub's orchestrator reads of and sends to this host's sessions.
+ * sessions send, and what a hub's orchestrator reads of and sends to this host's sessions.
  * Moved out of the session manager as it was (#1143); what it reaches of the manager is `LinkedHostHost`.
  */
 export class LinkedHost {
   constructor(private readonly host: LinkedHostHost) {}
-
-  /**
-   * Whether a session here still waits on a session of that linked machine (#1134): the report of a child there is
-   * owed, its turn running or paused over its background work (`ChildOwnership.linkedReports`, restored at start). The
-   * link of a machine that connects when needed stays up for it (`LinkDeps.workOwed`)
-   */
-  linkedWorkOwed(machineId: string): boolean {
-    const prefix = `${machineId}.`
-    for (const id of this.host.children.linkedReports.keys()) if (id.startsWith(prefix)) return true
-    return false
-  }
 
   /**
    * The session here that started a linked machine's session with start_agent (#1038), by its hub-side id; none for any

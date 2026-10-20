@@ -35,7 +35,6 @@ import type {
   HostHandover,
   HubOffer,
   MachineAutostartResult,
-  MachineConnect,
   MachineInfo,
   MachineInstallResult,
   MachineProbe,
@@ -110,11 +109,12 @@ export type MachinesPort = {
   add(spec: { name: string; sshTarget: string; shell: RemoteShell; wslDistro?: string | null; command?: string | null }): MachineInfo
   remove(id: string): Promise<void>
   reconnect(id: string, opts?: { start?: boolean }): MachineInfo
-  /** Closes the link until it is connected or needed again (#1134) */
+  /** Closes the link until the person connects it again (#1134) */
   disconnect(id: string): Promise<MachineInfo>
-  setConnect(id: string, connect: MachineConnect): MachineInfo
-  /** The window needs the machine now (#1134) */
-  needs(id: string, repeat?: boolean): MachineInfo
+  /** Auto reconnect on or off (#1341) */
+  setAutoReconnect(id: string, autoReconnect: boolean): MachineInfo
+  /** `machines.need` of an older window (#1134): answers the row, does nothing else (#1341) */
+  needs(id: string): MachineInfo
   acceptVersions(id: string): MachineInfo
   install(id: string): Promise<MachineInstallResult>
   update(id: string): Promise<MachineInstallResult>
@@ -886,14 +886,17 @@ export function createRpcHandler(
     },
     'machines.reconnect': async (p) => requireMachines().reconnect(RpcMethods['machines.reconnect'].params.parse(p).machineId),
     'machines.disconnect': async (p) => requireMachines().disconnect(RpcMethods['machines.disconnect'].params.parse(p).machineId),
+    'machines.setAutoReconnect': async (p) => {
+      const { machineId, autoReconnect } = RpcMethods['machines.setAutoReconnect'].params.parse(p)
+      return requireMachines().setAutoReconnect(machineId, autoReconnect)
+    },
+    // The connect mode of an older window (#1134), kept for one release (#1341): `at_start` is the switch on
     'machines.setConnect': async (p) => {
       const { machineId, connect } = RpcMethods['machines.setConnect'].params.parse(p)
-      return requireMachines().setConnect(machineId, connect)
+      return requireMachines().setAutoReconnect(machineId, connect === 'at_start')
     },
-    'machines.need': async (p) => {
-      const { machineId, repeat } = RpcMethods['machines.need'].params.parse(p)
-      return requireMachines().needs(machineId, repeat === true)
-    },
+    // An older window's need (#1134): answers the row and does nothing else (#1341)
+    'machines.need': async (p) => requireMachines().needs(RpcMethods['machines.need'].params.parse(p).machineId),
     'machines.install': async (p) => requireMachines().install(RpcMethods['machines.install'].params.parse(p).machineId),
     'machines.update': async (p) => requireMachines().update(RpcMethods['machines.update'].params.parse(p).machineId),
     'machines.rollback': async (p) => requireMachines().rollback(RpcMethods['machines.rollback'].params.parse(p).machineId),

@@ -738,11 +738,6 @@ export class SessionManager {
     if (this.store.machines.forgetMachineAskConsent(machineId, sessionId, projectId)) this.emit({ type: 'project_consents_changed' })
   }
 
-  /** `LinkedHost.linkedWorkOwed` (linked-host.ts), kept on the manager for its callers */
-  linkedWorkOwed(...a: Parameters<LinkedHost['linkedWorkOwed']>): ReturnType<LinkedHost['linkedWorkOwed']> {
-    return this.linkedHost.linkedWorkOwed(...a)
-  }
-
   /** `LinkedHost.remoteAgentParent` (linked-host.ts), kept on the manager for its callers */
   remoteAgentParent(...a: Parameters<LinkedHost['remoteAgentParent']>): ReturnType<LinkedHost['remoteAgentParent']> {
     return this.linkedHost.remoteAgentParent(...a)

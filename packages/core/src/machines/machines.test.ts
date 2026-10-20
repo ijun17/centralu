@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { MachineInfo, MachineVersions } from '@cc/protocol'
-import { asksRow, autostartRow, elevatedNote, hostStartNote, installNote, isAway, logonNote, MACHINE_STATUS_LABEL, machineProblem, machinesInUse, operationNote, updateStops, versionPrompt } from './machines.js'
+import { asksRow, autostartRow, elevatedNote, hostStartNote, installNote, isAway, logonNote, MACHINE_STATUS_LABEL, machineProblem, operationNote, updateStops, versionPrompt } from './machines.js'
 
 const machine = (patch: Partial<MachineInfo> = {}): MachineInfo => ({
   id: 'box',
@@ -18,6 +18,7 @@ const machine = (patch: Partial<MachineInfo> = {}): MachineInfo => ({
   hostStarted: null,
   install: null,
   operation: null,
+  autoReconnect: true,
   connect: 'at_start',
   autostart: null,
   elevated: null,
@@ -289,15 +290,19 @@ describe('a machine whose host runs outside the Windows sign-in (#1224)', () => 
   })
 })
 
-describe('a machine that connects when needed (#1134)', () => {
-  const machines = { lap: machine({ id: 'lap', connect: 'when_needed' }), srv: machine({ id: 'srv' }) }
+describe('a machine that is away, stopped or disconnected (#1143, #1341)', () => {
+  it('does not promise that Centralu keeps trying: the person presses Connect', () => {
+    const away = machine({ status: 'unreachable', error: null, autoReconnect: false })
+    expect(machineProblem(away)).toEqual({ title: 'Box is away', fix: 'Auto reconnect is off: press Connect to try again' })
+    expect(machineProblem({ ...away, error: 'ssh: connect to host box port 22: Operation timed out' })?.fix).toBe(
+      'It may be asleep, off or on another network. Auto reconnect is off: press Connect to try again',
+    )
+  })
 
-  it('is needed while its focused session or open project is on screen; a machine connected at start never is', () => {
-    expect(machinesInUse({ session: { machine: 'lap' } }, machines)).toEqual(['lap'])
-    expect(machinesInUse({ projects: [null, { machine: 'lap' }, { machine: 'lap' }] }, machines)).toEqual(['lap'])
-    expect(machinesInUse({ session: { machine: 'srv' }, projects: [{ machine: null }, undefined] }, machines)).toEqual([])
-    // A machine the window has no row for yet is not asked about
-    expect(machinesInUse({ session: { machine: 'gone' } }, machines)).toEqual([])
+  it('keeps saying that Centralu keeps trying while the switch is on, and for a host that does not say', () => {
+    expect(machineProblem(machine({ status: 'unreachable', error: null }))?.fix).toBe('Centralu keeps trying')
+    const { autoReconnect: _, ...older } = machine({ status: 'unreachable', error: null })
+    expect(machineProblem(older)?.fix).toBe('Centralu keeps trying')
   })
 
   // #1143: stopped there, by the person or after its hosts kept stopping; the host's sentence says which, and Start fixes it

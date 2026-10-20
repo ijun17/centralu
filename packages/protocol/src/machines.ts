@@ -19,7 +19,8 @@ export type MachineId = z.infer<typeof MachineId>
  *
  *   connecting       opening the transport or waiting for the remote host's hello
  *   connected        calls and events flow
- *   unreachable      the machine or its transport cannot be reached; the hub retries on its own
+ *   unreachable      the machine or its transport cannot be reached; the hub retries on its own while Auto
+ *                    reconnect is on (`MachineInfo.autoReconnect`), and waits for the person's Connect when it is off
  *   not_running      the machine answers, but no `centralu serve` is running there, and the hub
  *                    could not start one (`error` says why)
  *   starting         no host was running there; the hub is starting one (`centralu serve --detach`,
@@ -30,10 +31,9 @@ export type MachineId = z.infer<typeof MachineId>
  *   updating         the hub is stopping, switching or removing the Centralu it installed there
  *                    (`machines.update` / `rollback` / `uninstall`; `operation` says which step). The
  *                    link waits meanwhile. An older window reads it as unreachable
- *   disconnected     the hub keeps no link open and tries none (#1134): the person disconnected it, or it
- *                    connects when needed (`connect`) and nothing needs it now. Its sessions keep running
- *                    there; what they say arrives once the link is up again. An older window reads it as
- *                    unreachable
+ *   disconnected     the hub keeps no link open and tries none (#1134): the person disconnected it. Its sessions
+ *                    keep running there; what they say arrives once the link is up again. An older window reads
+ *                    it as unreachable
  *   stopped          no host runs there and the hub starts none by itself (#1143): the person stopped it there
  *                    (`centralu serve --stop`, or quitting Centralu there), or the hosts the hub started kept
  *                    stopping soon after they started. `error` says which; the person's Start
@@ -125,16 +125,9 @@ export const MachineAutostart = z.object({
 export type MachineAutostart = z.infer<typeof MachineAutostart>
 
 /**
- * When the hub opens a machine's link (#1134), the person's choice per machine:
- *
- *   at_start     when the hub starts, and again after every drop, for as long as it runs. The default, and what
- *                every machine did before: an orchestrator working through it hears its reports and cards as they
- *                happen
- *   when_needed  not at start. The hub connects when something needs the machine: the window opens one of its
- *                projects or sessions, or an agent is started there or sent work there. It disconnects again once
- *                nothing has needed it for a while and no session there is in a turn
- *
- * Additive: an older host treats every machine as `at_start`, and an older window does not show it
+ * What the older "connect mode" said (#1134): `at_start`, or `when_needed`. Replaced by `MachineInfo.autoReconnect`
+ * (#1341): `at_start` is the switch on, and `when_needed` off. Still sent in `MachineInfo.connect` for one release so
+ * that an older window reads the row as it did, and still accepted by `machines.setConnect`
  */
 export const MachineConnect = z.enum(['at_start', 'when_needed'])
 export type MachineConnect = z.infer<typeof MachineConnect>
@@ -228,7 +221,17 @@ export const MachineInfo = z.object({
    * predates it. Additive
    */
   handover: HostHandover.nullable().catch(null).default(null),
-  /** When the hub opens the link (`MachineConnect`, #1134). Additive: an older hub sends nothing, which is `at_start` */
+  /**
+   * Auto reconnect (#1341), the person's switch per machine, on by default. On: the hub connects when it starts and
+   * again after every drop, on a backoff from 2 s to 5 minutes. Off: it tries once when it starts; after a drop or a
+   * failed attempt it tries no more until the person presses Connect (`machines.reconnect`), and an agent's call that
+   * needs the machine is answered at once as not connected. Additive: an older hub sends nothing, which is on
+   */
+  autoReconnect: z.boolean().catch(true).default(true),
+  /**
+   * The same switch as the older connect mode (`MachineConnect`, #1134): `at_start` when `autoReconnect` is on,
+   * `when_needed` when it is off. Kept for one release so an older window still reads the row; read `autoReconnect`
+   */
   connect: MachineConnect.catch('at_start').default('at_start'),
 })
 export type MachineInfo = z.infer<typeof MachineInfo>
