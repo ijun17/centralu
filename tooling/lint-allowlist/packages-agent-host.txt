@@ -298,13 +298,7 @@ packages/agent-host/src/dev-services/project-folder.ts @typescript-eslint/no-uns
 packages/agent-host/src/dev-services/pty-slot.ts @typescript-eslint/no-unsafe-type-assertion 6
 packages/agent-host/src/dev-services/schema-doc.ts @typescript-eslint/no-unsafe-type-assertion 8
 packages/agent-host/src/dev-services/store-subagent-trash.test.ts @typescript-eslint/no-unnecessary-type-assertion 1
-packages/agent-host/src/dev-services/store/migrations/v02-v12.ts @typescript-eslint/no-unsafe-type-assertion 11
-packages/agent-host/src/dev-services/store/migrations/v13-v27.ts @typescript-eslint/no-unsafe-type-assertion 15
-packages/agent-host/src/dev-services/store/migrations/v28-v40.ts @typescript-eslint/no-unsafe-type-assertion 13
-packages/agent-host/src/dev-services/store/migrations/v41-v47.ts @typescript-eslint/no-unsafe-type-assertion 4
-packages/agent-host/src/dev-services/store/migrations/v48-v54.ts @typescript-eslint/no-unsafe-type-assertion 4
-packages/agent-host/src/dev-services/store/migrations/v55.ts @typescript-eslint/no-unsafe-type-assertion 2
-packages/agent-host/src/dev-services/store/migrations/v58.ts @typescript-eslint/no-unsafe-type-assertion 3
+packages/agent-host/src/dev-services/store/migrations/v13-v27.ts @typescript-eslint/no-unsafe-type-assertion 1
 packages/agent-host/src/dev-services/strays.ts @typescript-eslint/no-non-null-assertion 3
 packages/agent-host/src/dev-services/strays.ts @typescript-eslint/no-unsafe-type-assertion 1
 packages/agent-host/src/dev-services/terminal.ts @typescript-eslint/await-thenable 1
