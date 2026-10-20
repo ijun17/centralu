@@ -665,7 +665,7 @@ and "Send to builder".
   raises create_project's card for the folder first, since it is the one thing it makes outside a
   project.
 - **New app** (the UI's door to the same function): "New app…" in each project's menu, and the app
-  button beside Add project and New folder at the bottom of the sidebar, for an app that is a project
+  button beside Add project over the sidebar's project list, for an app that is a project
   of its own (#1141). The dialog asks for a name and the agent that builds it; without a project it
   also shows the folder it will make, in `~/Centralu` unless the person changes it (Choose… is the
   folder picker), judged as the new project dialog judges it (`projects.createPreview`), and offers

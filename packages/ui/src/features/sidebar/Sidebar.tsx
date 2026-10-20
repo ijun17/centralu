@@ -1,9 +1,8 @@
 import { useRef, useState } from 'react'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore, SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN, useTextZoom } from '../../store/store.js'
-import { CreateProjectDialog } from '../project/CreateProjectDialog.jsx'
 import { ResizeHandle } from '../../components/ResizeHandle.jsx'
-import { AppIcon, FolderIcon, FolderPlusIcon } from '../../components/icons.jsx'
+import { AppPlusIcon, FolderPlusIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
 import { NewAppDialog } from '../project/NewAppDialog.jsx'
 import { AddRemoteProjectDialog } from '../machines/AddRemoteProjectDialog.jsx'
@@ -39,7 +38,6 @@ export function Sidebar() {
   const addProject = useStore((s) => s.addProject)
   const setToast = useStore((s) => s.setToast)
   const [adding, setAdding] = useState(false)
-  const [creating, setCreating] = useState(false)
   const [creatingApp, setCreatingApp] = useState(false)
   const pickHere = async () => {
     setAdding(true)
@@ -82,14 +80,16 @@ export function Sidebar() {
         top and bottom left it none, and a project's row could not be reached at all. The bottom area gives way first.
       */}
       {/*
-        The three ways a project comes to be stand over the list as icons (owner, 2026-10-19), beside its name, instead
-        of a row of framed buttons under it: the list starts where its own controls are, and the bottom keeps only the
+        The two ways a project comes to be stand over the list as icons (owner, 2026-10-19), beside its name, instead
+        of a row of framed buttons under it: an existing folder, or a new app. "New folder as a project" was dropped
+        (owner, 2026-10-21): a new folder is made in the file manager or by an agent, then added.
+        The list starts where its own controls are, and the bottom keeps only the
         user-folder apps still listed. The row stands still; only the list under it scrolls. A wider gap above it sets it
         off from the doors, and a divider under it, the same hairline as between projects, sets it over the list (owner,
         2026-10-19).
       */}
       <div className="mt-4 flex shrink-0 items-center gap-0.5 border-b border-line/70 pb-1.5 pl-4 pr-2" data-testid="sidebar-projects-head">
-        <span className="min-w-0 flex-1 truncate text-xs font-medium text-ink-faint">Projects</span>
+        <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink-faint">Projects</span>
         <span ref={addAnchor} className="flex">
           <IconButton
             /*
@@ -106,20 +106,12 @@ export function Sidebar() {
             testId="add-project"
             align="right"
           >
-            <FolderIcon size={14} />
+            <FolderPlusIcon size={14} />
           </IconButton>
         </span>
-        <IconButton
-          label="New folder as a project"
-          onClick={() => setCreating(true)}
-          testId="create-project"
-          align="right"
-        >
-          <FolderPlusIcon size={14} />
-        </IconButton>
         {/* An app is made like a project (#1141): a new folder that joins this list as a project whose root is the app */}
         <IconButton label="New app" onClick={() => setCreatingApp(true)} testId="create-app" align="right">
-          <AppIcon size={14} />
+          <AppPlusIcon size={14} />
         </IconButton>
       </div>
       <div className="min-h-[4.5rem] flex-1 overflow-y-auto" data-testid="sidebar-projects">
@@ -133,8 +125,8 @@ export function Sidebar() {
           <p className="cc-fade px-4 py-6 text-sm leading-body text-ink-faint">
             No projects yet.
             <br />
-            Start with the buttons beside <span className="text-ink-muted">Projects</span> above: an existing folder, a new
-            folder, or a new app.
+            Start with the buttons beside <span className="text-ink-muted">Projects</span> above: an existing folder or a
+            new app.
           </p>
         ) : (
           <div className="cc-fade">
@@ -169,7 +161,6 @@ export function Sidebar() {
         />
       )}
       {addingOn && <AddRemoteProjectDialog machine={addingOn} onClose={() => setAddingOn(null)} />}
-      {creating && <CreateProjectDialog onClose={() => setCreating(false)} />}
       {creatingApp && <NewAppDialog projectId={null} onClose={() => setCreatingApp(false)} />}
     </aside>
   )
