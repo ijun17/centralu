@@ -180,7 +180,7 @@ describe.skipIf(process.platform === 'win32')('stopTree — a real tree (#149)',
     root.once('exit', () => (exited = true))
     const pid = await new Promise<number>((resolve, reject) => {
       let out = ''
-      root.stdout!.on('data', (d: Buffer) => {
+      root.stdout.on('data', (d: Buffer) => {
         out += String(d)
         if (out.includes('\n')) resolve(Number(out.trim()))
       })

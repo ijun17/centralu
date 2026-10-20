@@ -16,8 +16,7 @@ export function descendants(rows: readonly ParentRow[], roots: readonly number[]
   }
   const seen = new Set<number>(roots)
   const queue = [...roots]
-  while (queue.length > 0) {
-    const pid = queue.shift()!
+  for (let pid = queue.shift(); pid !== undefined; pid = queue.shift()) {
     for (const kid of byParent.get(pid) ?? []) {
       if (seen.has(kid)) continue
       seen.add(kid)

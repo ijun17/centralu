@@ -1,3 +1,4 @@
+import { isObj } from '../json-value.js'
 import { execFile } from 'node:child_process'
 import { realpathSync } from 'node:fs'
 import { promisify } from 'node:util'
@@ -61,7 +62,8 @@ export function parsePsRows(out: string): PsRow[] {
   for (const line of out.split('\n')) {
     const m = /^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.*)$/.exec(line)
     if (!m) continue
-    rows.push({ pid: Number(m[1]), ppid: Number(m[2]), tty: m[3]!, command: m[4]!.trim() })
+    const [, pid, ppid, tty = '', command = ''] = m
+    rows.push({ pid: Number(pid), ppid: Number(ppid), tty, command: command.trim() })
   }
   return rows
 }
@@ -151,7 +153,8 @@ export function pickStrays(
   const out: StrayProcess[] = []
   for (const [pid, cwd] of candidates) {
     if (!unowned(pid)) continue
-    out.push({ pid, command: byPid.get(pid)!.command, cwd })
+    const row = byPid.get(pid)
+    if (row) out.push({ pid, command: row.command, cwd })
   }
   return out.sort((a, b) => a.pid - b.pid)
 }
@@ -181,7 +184,7 @@ async function cwdsOf(pids: readonly number[]): Promise<Map<number, string>> {
     return parseLsofCwd(stdout)
   } catch (e) {
     // lsof exits 1 when some process cannot be read, but it still **prints what it did read** — that is not discarded
-    const partial = (e as { stdout?: string }).stdout
+    const partial = isObj(e) && typeof e.stdout === 'string' ? e.stdout : undefined
     return partial ? parseLsofCwd(partial) : new Map()
   }
 }

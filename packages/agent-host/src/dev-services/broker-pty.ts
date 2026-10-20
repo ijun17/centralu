@@ -1,9 +1,11 @@
+import { isObj } from '../json-value.js'
+import type { Readable, Writable } from 'node:stream'
 import { spawn as startProcess, type ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
-import type { Pty, PtyModule } from './pty-slot.js'
+import { isPtyModule, type Pty, type PtyModule } from './pty-slot.js'
 
 /**
  * **Terminals outside the work job** (Windows, #1067; the broker itself is `pty-broker.mjs`).
@@ -34,6 +36,31 @@ type BrokerEvent =
  * Where the broker's script is: beside this file in the source tree, and beside `main.mjs` (which this file is bundled
  * into) in the bundle, where `scripts/bundle.mjs` copies it. The same relative name either way.
  */
+/**
+ * One line of the broker's output as an event, or null for a line that is none: not JSON, not an object (`null` used to
+ * throw out of the line handler), or an event whose fields are not what it names (a `data` event with no text).
+ */
+export function parseBrokerEvent(line: string): BrokerEvent | null {
+  let v: unknown
+  try {
+    v = JSON.parse(line)
+  } catch {
+    return null
+  }
+  if (!isObj(v)) return null
+  const { ev, id } = v
+  if (ev === 'ready') return { ev }
+  if (typeof id !== 'number') return null
+  if (ev === 'spawned') return typeof v.pid === 'number' ? { ev, id, pid: v.pid } : null
+  if (ev === 'error') return typeof v.message === 'string' ? { ev, id, message: v.message } : null
+  if (ev === 'data') return typeof v.data === 'string' ? { ev, id, data: v.data } : null
+  if (ev === 'exit') {
+    if (typeof v.exitCode !== 'number') return null
+    return v.signal === null || typeof v.signal === 'number' ? { ev, id, exitCode: v.exitCode, signal: v.signal } : null
+  }
+  return null
+}
+
 export function brokerPath(): string {
   const path = fileURLToPath(new URL('./pty-broker.mjs', import.meta.url))
   if (!existsSync(path)) throw new Error(`terminal broker not found: ${path}`)
@@ -102,20 +129,30 @@ export class PtyBroker {
   private next = 1
   private gone: string | null = null
 
-  private constructor(private readonly child: ChildProcess) {
-    const lines = createInterface({ input: child.stdout! })
+  private constructor(
+    private readonly child: ChildProcess,
+    private readonly stdin: Writable,
+    stdout: Readable,
+    stderr: Readable,
+  ) {
+    const lines = createInterface({ input: stdout })
     lines.on('line', (line) => this.receive(line))
-    child.stderr!.on('data', (d: Buffer) => process.stderr.write(d))
+    stderr.on('data', (d: Buffer) => process.stderr.write(d))
     child.once('error', (e) => this.end(`the terminal service could not start: ${e.message}`))
     child.once('exit', (code) => this.end(`the terminal service ended (${code})`))
     // A write after it ended must not become an uncaught error in the host
-    child.stdin!.on('error', () => {})
+    stdin.on('error', () => {})
   }
 
   /** Starts the broker. Called before the host joins its work job, so the broker is outside it */
   static start(script: string = brokerPath()): PtyBroker {
     const child = startProcess(process.execPath, [script], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
-    return new PtyBroker(child)
+    const { stdin, stdout, stderr } = child
+    if (!stdin || !stdout || !stderr) {
+      child.kill()
+      throw new Error('the terminal service started without its pipes')
+    }
+    return new PtyBroker(child, stdin, stdout, stderr)
   }
 
   get alive(): boolean {
@@ -140,21 +177,17 @@ export class PtyBroker {
   /** @internal */
   send(message: Record<string, unknown>): void {
     if (this.gone) return
-    this.child.stdin!.write(`${JSON.stringify(message)}\n`)
+    this.stdin.write(`${JSON.stringify(message)}\n`)
   }
 
   /** Ends the broker; its terminals end with it */
   close(): void {
-    this.child.stdin!.end()
+    this.stdin.end()
   }
 
   private receive(line: string): void {
-    let e: BrokerEvent
-    try {
-      e = JSON.parse(line) as BrokerEvent
-    } catch {
-      return
-    }
+    const e = parseBrokerEvent(line)
+    if (!e) return
     if (e.ev === 'ready') return
     const p = this.ptys.get(e.id)
     if (!p) return
@@ -180,17 +213,30 @@ export class PtyBroker {
 
 const require = createRequire(import.meta.url)
 
+function loadNodePty(): PtyModule {
+  const loaded: unknown = require('node-pty')
+  if (!isPtyModule(loaded)) throw new Error('node-pty did not load as a terminal module')
+  return loaded
+}
+
+/** An environment as the values that are text; a value that is not text is no variable */
+function stringEnv(env: Record<string, unknown>): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [name, value] of Object.entries(env)) if (typeof value === 'string') out[name] = value
+  return out
+}
+
 /**
  * A node-pty-shaped module whose `spawn` asks the broker (as `keeperPtyModule` asks the keeper), or node-pty in this
  * host once the broker is gone (`fallback`, for tests).
  */
-export function brokerPtyModule(broker: PtyBroker, fallback: () => PtyModule = () => require('node-pty') as PtyModule): PtyModule {
+export function brokerPtyModule(broker: PtyBroker, fallback: () => PtyModule = loadNodePty): PtyModule {
   return {
     spawn(file: string, args: string[] | string, opts: Record<string, unknown>): Pty {
       if (!broker.alive) return fallback().spawn(file, args, opts)
       return broker.spawn(file, args, {
-        cwd: String(opts.cwd ?? process.cwd()),
-        env: (opts.env as Record<string, string | undefined>) ?? process.env,
+        cwd: typeof opts.cwd === 'string' ? opts.cwd : process.cwd(),
+        env: isObj(opts.env) ? stringEnv(opts.env) : process.env,
         cols: Number(opts.cols) || 80,
         rows: Number(opts.rows) || 24,
       })
