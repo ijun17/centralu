@@ -1,3 +1,4 @@
+import { oneRow, pragmaNumber } from '../rows.js'
 import { INDEXED_KINDS, indexedText } from '../search-index.js'
 import { mb, VACUUM_FREE_BYTES } from '../vacuum.js'
 import { MigrationRange, type MigrationStep } from './context.js'
@@ -26,7 +27,7 @@ export class StepsV28ToV40 extends MigrationRange {
            *
            * Why the index is dropped first: SQLite cannot DROP a column an index refers to.
            */
-          const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
+          const cols = this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(sessions)`).all()
           if (!cols.some((c) => c.name === 'archived')) return
           this.db.exec(`DROP INDEX IF EXISTS idx_sessions_project`)
           this.db.exec(`ALTER TABLE sessions DROP COLUMN archived`)
@@ -53,8 +54,8 @@ export class StepsV28ToV40 extends MigrationRange {
            * time" — not exact, but close enough to not disturb the ordering.
            */
           const rows = this.db
-            .prepare(`SELECT rowid, session_id, ts FROM messages ORDER BY session_id, seq DESC`)
-            .all() as { rowid: number; session_id: string; ts: number }[]
+            .prepare<unknown[], { rowid: number; session_id: string; ts: number }>(`SELECT rowid, session_id, ts FROM messages ORDER BY session_id, seq DESC`)
+            .all()
           const fix = this.db.prepare(`UPDATE messages SET ts = ? WHERE rowid = ?`)
           let repaired = 0
           const tx = this.db.transaction(() => {
@@ -88,7 +89,7 @@ export class StepsV28ToV40 extends MigrationRange {
          */
         run: () => {
           // Idempotent — a test rewinds user_version and replays this (following parent_session_id's precedent)
-          const cols = this.db.pragma('table_info(sessions)') as { name: string }[]
+          const cols = this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(sessions)`).all()
           if (!cols.some((c) => c.name === 'scope_session_ids')) {
             this.db.exec(`ALTER TABLE sessions ADD COLUMN scope_session_ids TEXT`)
           }
@@ -107,7 +108,7 @@ export class StepsV28ToV40 extends MigrationRange {
          * to the sidebar (so no session becomes unreachable).
          */
         run: () => {
-          const cols = this.db.pragma('table_info(sessions)') as { name: string }[]
+          const cols = this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(sessions)`).all()
           if (!cols.some((c) => c.name === 'app_id')) {
             this.db.exec(`ALTER TABLE sessions ADD COLUMN app_id TEXT`)
           }
@@ -139,7 +140,7 @@ export class StepsV28ToV40 extends MigrationRange {
          * v28's precedent).
          */
         run: () => {
-          const cols = () => this.db.pragma('table_info(projects)') as { name: string }[]
+          const cols = () => this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(projects)`).all()
           if (!cols().some((c) => c.name === 'default_models')) {
             this.db.exec(`ALTER TABLE projects ADD COLUMN default_models TEXT`)
           }
@@ -174,7 +175,7 @@ export class StepsV28ToV40 extends MigrationRange {
          * (This call for existing rows is reversed by v35. New projects still default to "no.")
          */
         run: () => {
-          const cols = this.db.pragma('table_info(projects)') as { name: string }[]
+          const cols = this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(projects)`).all()
           if (!cols.some((c) => c.name === 'trusted')) {
             this.db.exec(`ALTER TABLE projects ADD COLUMN trusted INTEGER NOT NULL DEFAULT 0`)
           }
@@ -313,7 +314,7 @@ export class StepsV28ToV40 extends MigrationRange {
          * index, every step scans the whole table.
          */
         run: () => {
-          const cols = this.db.prepare(`PRAGMA table_info(app_runs)`).all() as { name: string }[]
+          const cols = this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(app_runs)`).all()
           // A database with no table has only had its version bumped, never gone through v34
           // (an old database made by the migration tests) — there is no table to fix
           if (cols.length === 0) return
@@ -332,7 +333,7 @@ export class StepsV28ToV40 extends MigrationRange {
          * row, and old rows, are null.
          */
         run: () => {
-          const cols = this.db.prepare(`PRAGMA table_info(app_runs)`).all() as { name: string }[]
+          const cols = this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(app_runs)`).all()
           if (cols.length === 0) return
           if (!cols.some((c) => c.name === 'tokens_in')) this.db.exec(`ALTER TABLE app_runs ADD COLUMN tokens_in INTEGER`)
           if (!cols.some((c) => c.name === 'tokens_out')) this.db.exec(`ALTER TABLE app_runs ADD COLUMN tokens_out INTEGER`)
@@ -360,7 +361,7 @@ export class StepsV28ToV40 extends MigrationRange {
          * the trash — its rows still exist and still point at it.
          */
         run: () => {
-          const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
+          const cols = this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(sessions)`).all()
           if (!cols.some((c) => c.name === 'deleted_at')) this.db.exec(`ALTER TABLE sessions ADD COLUMN deleted_at INTEGER`)
           if (!cols.some((c) => c.name === 'trash')) this.db.exec(`ALTER TABLE sessions ADD COLUMN trash TEXT`)
         },
@@ -411,12 +412,14 @@ export class StepsV28ToV40 extends MigrationRange {
     // A store without the index at all (only a hand-made one in a test) is built one here rather than left broken
     const present = this.db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'messages_fts'`).get()
     const stale = present
-      ? (this.db
-          .prepare(
-            `SELECT COUNT(*) as n FROM messages_fts f
+      ? oneRow(
+          this.db
+            .prepare<unknown[], { n: number }>(
+              `SELECT COUNT(*) as n FROM messages_fts f
              WHERE NOT EXISTS (SELECT 1 FROM messages m WHERE m.rowid = f.rowid AND m.kind IN ${kinds})`,
-          )
-          .get() as { n: number })
+            )
+            .get(),
+        )
       : { n: 0 }
     const t0 = Date.now()
     let rows = 0
@@ -429,12 +432,12 @@ export class StepsV28ToV40 extends MigrationRange {
           );
         `)
         const insert = this.db.prepare(`INSERT INTO messages_fts (rowid, body, session_id, seq) VALUES (?, ?, ?, ?)`)
-        const pick = this.db.prepare(
+        const pick = this.db.prepare<unknown[], { rowid: number; session_id: string; seq: number; kind: string; payload: string }>(
           `SELECT rowid, session_id, seq, kind, payload FROM messages
            WHERE kind IN ${kinds} AND session_id NOT IN (SELECT id FROM sessions WHERE deleted_at IS NOT NULL)`,
         )
         // `.all()`, not `.iterate()`: better-sqlite3 refuses another statement while an iterator is open
-        for (const r of pick.all() as { rowid: number; session_id: string; seq: number; kind: string; payload: string }[]) {
+        for (const r of pick.all()) {
           const body = indexedText(r.kind, r.payload)
           if (!body) continue
           insert.run(r.rowid, body, r.session_id, r.seq)
@@ -443,8 +446,8 @@ export class StepsV28ToV40 extends MigrationRange {
       })()
     }
     const t1 = Date.now()
-    const pageSize = this.db.pragma('page_size', { simple: true }) as number
-    const free = (this.db.pragma('freelist_count', { simple: true }) as number) * pageSize
+    const pageSize = pragmaNumber(this.db, 'page_size')
+    const free = pragmaNumber(this.db, 'freelist_count') * pageSize
     if (free < VACUUM_FREE_BYTES) {
       if (stale.n > 0) console.error(`[store] search index rebuilt without tool calls: dropped ${stale.n} rows, kept ${rows} (${t1 - t0}ms)`)
       return

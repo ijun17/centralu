@@ -14,7 +14,7 @@ export async function duSizes(cwd: string, paths: string[]): Promise<Map<string,
     const out = await new Promise<string>((resolve, reject) => {
       execFile('du', ['-sk', ...paths], { cwd, timeout: SIZE_BUDGET_MS, maxBuffer: 1 << 20, windowsHide: true }, (err, stdout) =>
         // du exits non-zero if even one entry cannot be read — whatever it did print is used anyway
-        stdout ? resolve(stdout) : reject(err),
+        stdout ? resolve(stdout) : reject(err ?? new Error('du answered nothing')),
       )
     })
     for (const line of out.split('\n')) {
@@ -68,7 +68,8 @@ export async function treeBytes(path: string, deadline: number, maxEntries: numb
   const folders = [path]
   while (folders.length > 0) {
     if (Date.now() > deadline) return null
-    const folder = folders.pop()!
+    const folder = folders.pop()
+    if (folder === undefined) break
     const entries = await readdir(folder, { withFileTypes: true }).catch(() => [])
     seen += entries.length
     if (seen > maxEntries) return null

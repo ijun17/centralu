@@ -2,6 +2,7 @@ import type {
   QuestionAnswer,
   StoredMessage,
 } from '@cc/protocol'
+import type { SendIntent } from '@cc/platform/ports'
 import type { ChatAttachment, ChatItem } from '../transcript.js'
 
 /** Not yet sent. The text and attachments move together — binding only one to the session leaves
@@ -193,7 +194,7 @@ export type ConversationSlice = {
   setStickToBottom(sessionId: string, sticking: boolean): void
   /** Records the row that was showing when it was left (#61). `null` clears it — meaning it was at the bottom */
   setScrollAnchor(sessionId: string, anchor: { seq: number; offset: number } | null): void
-  send(sessionId: string, text: string, attachments?: ChatAttachment[]): Promise<void>
+  send(sessionId: string, text: string, attachments?: ChatAttachment[], intent?: SendIntent): Promise<void>
   attachFile(sessionId: string, file: File): Promise<ChatAttachment | null>
   respondApproval(
     sessionId: string,

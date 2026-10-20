@@ -1,5 +1,5 @@
 import { parseAppKey, type SessionSummary } from '@cc/core'
-import { sidebarProjectOf, treeParentOf } from './sidebarTree.js'
+import { treeParentOf } from './sidebarTree.js'
 
 /*
  * Folding a group (#666). A group is the rows hidden behind one chevron: the children a session started, or the
@@ -29,11 +29,10 @@ export function foldGroupsHiding(
   const own = session.appId ? appKeyOf(session) : null
   const appKey = own !== null && listedApps.has(own) ? own : null
   const keys: string[] = appKey !== null ? [appGroupKey(appKey)] : []
-  const here = sidebarProjectOf(session, all)
-  // The parent the tree draws this row under: one in the same sidebar project and the same app group (or none)
+  // The parent the tree draws this row under: one in the same project and the same app group (or none)
   const parentId = treeParentOf(session, (id) => {
     const parent = all[id]
-    if (!parent || sidebarProjectOf(parent, all) !== here) return false
+    if (!parent || parent.projectId !== session.projectId) return false
     const parentOwn = parent.appId ? appKeyOf(parent) : null
     return (parentOwn !== null && listedApps.has(parentOwn) ? parentOwn : null) === appKey
   })

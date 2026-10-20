@@ -106,7 +106,9 @@ export type ApprovedCsp = {
  *   default-src 'none'            everything not listed is blocked
  *   script/style 'unsafe-inline'  a view is inline HTML (matches the spec's default)
  *   img/media/font data:, blob:   data created inside the page, so not network traffic
- *   connect/frame 'none'          opens to those origins only when declared
+ *   connect/frame 'none'          opens to those origins only when declared. Under the opaque method this
+ *                                `frame-src` is also what stops the view navigating its own frame outward
+ *                                (see `buildProxyCsp` for the per-app origin method)
  *   form-action 'none'            form submission is a leak path that bypasses connect-src
  *   object-src 'none'
  *   base-uri 'self'               the spec's default
@@ -155,9 +157,14 @@ export function buildViewCsp(csp: ViewCspDomains | undefined): ApprovedCsp {
  * (pinned by hash) and a frame to that one origin.
  *
  * `frame-src` also decides **where the proxy's child frame is allowed to go.** This is what blocks
- * a view from sending its own frame elsewhere to leak data
- * (`location = 'https://…?data'`). Under the opaque method, the `frame-src` above (only what was
- * declared) does the same job.
+ * a view from sending its own frame elsewhere to leak data (`location = 'https://…?data'`): a
+ * frame's navigation is checked against the `frame-src` of the document that embeds it, here this
+ * page, never against the view's own policy (`buildViewCsp`, whose `frame-src` governs only the
+ * frames the view creates). Loosening the view's `frame-src` in this mode changes nothing; loosening
+ * this one lets the navigation out. Under the opaque method there is no separate proxy policy: the
+ * proxy page's header is the view's policy, so the `frame-src` of `buildViewCsp` (only what was
+ * declared) is the one that does this job. Both are shown by loosening the real response headers in
+ * `e2e/app-frame.spec.ts` ("which CSP stops a frame navigating itself outward").
  */
 export function buildProxyCsp(scriptHash: string, appOrigin: string): string {
   return [

@@ -96,6 +96,8 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
     return { ...p, handoff: q.owns(fromSessionId) ? { ...rest, fromSessionId: q.strip(fromSessionId, 'The predecessor') } : rest }
   }),
   'agents.send': session(),
+  // Who the hub's own waits owe a report to: a linked session's is asked of the hub, not of its machine (#1377)
+  'agents.reportOwed': HUB,
   'agents.respondApproval': session(),
   'agents.answerQuestion': session(),
   'agents.interrupt': session(),

@@ -55,6 +55,7 @@ const ORDER = [
   'integrate',
   'merge_queue',
   'unqueue',
+  'ack',
 ]
 const unlisted = Object.keys(TOOLS).filter((name) => !ORDER.includes(name))
 if (unlisted.length) throw new Error(`server.mjs: add ${unlisted.join(', ')} to ORDER`)

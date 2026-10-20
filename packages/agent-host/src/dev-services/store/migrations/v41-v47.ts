@@ -112,7 +112,7 @@ export class StepsV41ToV47 extends MigrationRange {
          */
         run: () => {
           const cols = new Set(
-            (this.db.prepare(`PRAGMA table_info(grid_layout)`).all() as { name: string }[]).map((c) => c.name),
+            this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(grid_layout)`).all().map((c) => c.name),
           )
           if (!cols.has('span_cols')) this.db.exec(`ALTER TABLE grid_layout ADD COLUMN span_cols INTEGER`)
           if (!cols.has('span_rows')) this.db.exec(`ALTER TABLE grid_layout ADD COLUMN span_rows INTEGER`)
@@ -167,7 +167,7 @@ export class StepsV41ToV47 extends MigrationRange {
          * it was.
          */
         run: () => {
-          const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
+          const cols = this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(sessions)`).all()
           if (!cols.some((c) => c.name === 'asked_by_session_id')) this.db.exec(`ALTER TABLE sessions ADD COLUMN asked_by_session_id TEXT`)
         },
       },
@@ -217,7 +217,7 @@ export class StepsV41ToV47 extends MigrationRange {
               PRIMARY KEY (machine_id, kind, item_id)
             );
           `)
-          const cols = this.db.prepare(`PRAGMA table_info(grid_layout)`).all() as { name: string }[]
+          const cols = this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(grid_layout)`).all()
           if (cols.length > 0 && !cols.some((c) => c.name === 'remote_session_id')) {
             this.db.exec(`ALTER TABLE grid_layout ADD COLUMN remote_session_id TEXT`)
           }
@@ -238,7 +238,7 @@ export class StepsV41ToV47 extends MigrationRange {
          * layout, which loses a panel, not the layout.
          */
         run: () => {
-          const cols = new Set((this.db.prepare(`PRAGMA table_info(grid_layout)`).all() as { name: string }[]).map((c) => c.name))
+          const cols = new Set(this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(grid_layout)`).all().map((c) => c.name))
           if (cols.size === 0) return
           if (!cols.has('remote_app_id')) this.db.exec(`ALTER TABLE grid_layout ADD COLUMN remote_app_id TEXT`)
           if (!cols.has('app_machine')) this.db.exec(`ALTER TABLE grid_layout ADD COLUMN app_machine TEXT`)

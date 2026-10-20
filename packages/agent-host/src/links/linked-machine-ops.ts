@@ -408,10 +408,10 @@ export class LinkedMachine extends LinkedMachineConnection {
   private control(exec: (command: RemoteCommand) => Promise<RemoteRun>, script: string, step: (s: UpdateStep) => void): HostControl {
     const hold = async () => {
       this.held = true
-      clearTimeout(this.retryTimer)
+      this.clearRetry()
       // An opening already under way finishes first: it may be about to start a host of its own
       await this.opening?.catch(() => undefined)
-      clearTimeout(this.retryTimer)
+      this.clearRetry()
       this.client?.close()
       this.client = null
       this.setStatus('updating', null)

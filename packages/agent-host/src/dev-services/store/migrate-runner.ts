@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { parseJson, readJsonList } from './json.js'
 import { type MigrationStep } from './migrations/context.js'
 import { ReaderGate } from './reader-gate.js'
+import { pragmaNumber } from './rows.js'
 import { readStoreKey, writeStoreKey } from './store-keys.js'
 import { OwedVacuum, VACUUM_OWED_KEY, type VacuumDone } from './vacuum.js'
 
@@ -280,14 +281,16 @@ export abstract class MigrationRunner extends ReaderGate {
     })
     // The steps' flags are read off an object that never runs them: `run` closes over `db`, which stays unused here
     // A probe has no concept modules (store/*.ts): it may only call the migration methods
-    const probe = Object.create(this.prototype) as MigrationRunner
+    const bare: unknown = Object.create(this.prototype)
+    if (!(bare instanceof this)) throw new Error('A probe made from the runner is not a runner')
+    const probe = bare
     const steps = probe.migrationSteps()
-    const known = steps[steps.length - 1]!.to
+    const known = steps.at(-1)?.to ?? 0
     if (dbPath === ':memory:' || !existsSync(dbPath)) return empty(known)
     const db = new Database(dbPath, { readonly: true, fileMustExist: true })
     try {
       probe.db = db
-      const userVersion = db.pragma('user_version', { simple: true }) as number
+      const userVersion = pragmaNumber(db, 'user_version')
       const floor = probe.storedMinReader()
       const deferred = new Set(probe.storedDeferred())
       return {

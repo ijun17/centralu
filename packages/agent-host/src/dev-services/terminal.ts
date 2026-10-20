@@ -3,7 +3,7 @@ import { homedir } from 'node:os'
 import { existsSync } from 'node:fs'
 import { whichTool } from '../env-path.js'
 import { commandInterpreter, systemTool } from '../os.js'
-import { PtySlot, type Pty, type PtyModule, type PtyStreamSink, type ShellLaunch } from './pty-slot.js'
+import { PtySlot, isPtyModule, type Pty, type PtyModule, type PtyStreamSink, type ShellLaunch } from './pty-slot.js'
 import { idNumber, type TerminalTag } from '../keeper/tags.js'
 
 /**
@@ -83,7 +83,7 @@ export class TerminalService {
    * signalling anything. The next host takes them over with `adopt`.
    */
   async detachAll(): Promise<void> {
-    await Promise.allSettled([...this.byId.values()].map((e) => e.slot.detach()))
+    await Promise.allSettled([...this.byId.values()].map((e) => e.slot.detach() ?? Promise.resolve()))
     this.byCwd.clear()
     this.byId.clear()
   }
@@ -206,7 +206,10 @@ export class TerminalService {
    * actually being verified.
    */
   protected loadPty(): PtyModule {
-    return this.ptys ?? (require('node-pty') as PtyModule)
+    if (this.ptys) return this.ptys
+    const loaded: unknown = require('node-pty')
+    if (!isPtyModule(loaded)) throw new Error('node-pty did not load as a terminal module')
+    return loaded
   }
 
   private entry(id: string, cwd: string, title: string, cols: number, rows: number): Entry {

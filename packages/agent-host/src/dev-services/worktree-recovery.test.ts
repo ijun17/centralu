@@ -3,6 +3,7 @@ import { execFile, execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { errorMessage } from '@cc/protocol'
 import { FIXTURE_GIT_CONFIG, fixtureGit, removeTree, tempRoot } from '../temp-dir.test-helpers.js'
 import * as gitModule from './git-exec.js'
 import { clearRecoveredBranchMark, repairWorktreeRecoveryRemovals, restoreWorktreeRecovery, saveWorktreeRecovery, worktreeRecoveryDir } from './worktree-recovery.js'
@@ -475,8 +476,8 @@ describe('worktree recovery follow-ups (#608)', () => {
     const inputGit = (args: string[], input: string) => new Promise<string>((resolve, reject) => {
       const child = execFile('git', [...FIXTURE_GIT_CONFIG, '-c', 'user.name=Recovery test', '-c', 'user.email=recovery@example.test', ...args], {
         cwd: repo, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
-      }, (err, out) => (err ? reject(err) : resolve(out.trim())))
-      child.stdin!.end(input)
+      }, (err, out) => (err ? reject(new Error(errorMessage(err), { cause: err })) : resolve(out.trim())))
+      child.stdin?.end(input)
     })
     const blob = git(repo, ['rev-parse', 'HEAD:file.txt'])
     // No giant checkout: real Git trees/commits are sufficient to reproduce the old

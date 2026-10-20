@@ -98,6 +98,29 @@ export function readPausedTasks(raw: string | null): PausedTask[] | null {
   return readJsonObjects<PausedTask>(raw, (t) => typeof t.id === 'string' && typeof t.description === 'string')
 }
 
+/**
+ * Whose a turn is (#1377): the person's (the person wrote while the session was at rest, or their message waited for
+ * the turn), or the delegated work's (the caller's message, an app's or Centralu's, or the CLI starting it itself when
+ * the work's background tasks end). `wrote`: the person wrote into a turn of the work; `added`: the person chose to add
+ * their message to the task.
+ */
+export type TurnStarter = { by: 'person' | 'work'; wrote?: true; added?: true }
+/** How long a message that is to start a turn waits for it: the tool starts one within moments, or none (#1377) */
+const NEXT_STARTER_MS = 15_000
+/** The store's record of the turn a session with an owed report is in (#1377), kept across a swap */
+export const reportTurnKey = (sessionId: string) => `report_turn:${sessionId}`
+/** A message that went into a turn the tool may or may not have taken in (#1377): decided at the turn's end */
+type PendingMessage = { id?: string; by: 'person' | 'work'; added?: true }
+type StoredTurn = TurnStarter & { pending?: PendingMessage[] }
+function readTurn(raw: string | null): StoredTurn | null {
+  if (raw === null) return null
+  const parsed = readJsonObjects<StoredTurn>(`[${raw}]`, (t) => t.by === 'person' || t.by === 'work')[0]
+  if (!parsed) return null
+  const pending = Array.isArray(parsed.pending) ? parsed.pending.filter((p) => (p.by === 'person' || p.by === 'work') && (p.id === undefined || typeof p.id === 'string')) : []
+  const { pending: _p, ...starter } = parsed
+  return { ...starter, ...(pending.length ? { pending } : {}) }
+}
+
 /** A delegated turn's link (#676): who gave the turn, and the cards it was already told of */
 export type TurnOwner = { callerId: string; untilTurnEnd: boolean; told: Set<string>; turnId: string }
 
@@ -107,7 +130,19 @@ export type TurnOwner = { callerId: string; untilTurnEnd: boolean; told: Set<str
  * `instruction`: the text of the instruction the wait was set for, while the machine has not yet been heard recording it
  * (#1082); until then nothing it relays is about that instruction's turn
  */
-export type LinkedReport = { orchestratorId: string; busy: boolean; paused?: BackgroundTask[]; instruction?: string }
+export type LinkedReport = {
+  orchestratorId: string
+  busy: boolean
+  paused?: BackgroundTask[]
+  instruction?: string
+  /** Whose the turn running there is (#1377), and whose the next will be: from the message each started with. Memory only */
+  turn?: TurnStarter
+  next?: TurnStarter
+  /** Whose the last turn there was: its last response is the person's answer when it was theirs */
+  lastBy?: 'person' | 'work'
+  /** When the person chose "Add to the task" for the message on its way to the machine (#1377): an older machine does not echo the choice */
+  addNext?: number
+}
 
 /** What one owner change moves (`ChildOwnership.moveOwner`), as the session manager chose it */
 export type OwnerMove = {
@@ -156,6 +191,18 @@ export class ChildOwnership {
    */
   private readonly paused = new Map<string, PausedTask[]>()
   readonly pausedReports: ReadonlyMap<string, PausedTask[]> = this.paused
+  /**
+   * Whose the running turn is, by session (#1377): recorded when the turn starts from the message that started it, decided
+   * at its end (`ChildReports.reportBackIfAwaited`). Mirrored in the app setting `report_turn:<session>` while a report is
+   * owed, so a host that takes over a kept session mid-turn knows it. None recorded (a mark an older build wrote): the
+   * work's, as every turn was.
+   */
+  private readonly starters = new Map<string, TurnStarter>()
+  private readonly lastBy = new Map<string, 'person' | 'work'>()
+  /** Messages that went into the running turn and may not have been taken into it (#1377), by session */
+  private readonly pending = new Map<string, PendingMessage[]>()
+  /** Whose the message is that waits to start the session's next turn, delivered while it was at rest */
+  private readonly nextStarter = new Map<string, TurnStarter & { at: number }>()
   /** The settle timer of a paused report whose background work has ended (#721) */
   private readonly pausedSettles = new Map<string, ReturnType<typeof setTimeout>>()
   /**
@@ -228,9 +275,12 @@ export class ChildOwnership {
     this.store.settings.deleteAppSetting(pausedReportKey(sessionId))
     this.reports.set(sessionId, callerId)
     this.store.children.setReportMark(sessionId, callerId)
+    this.persistTurn(sessionId)
   }
   clearReport(sessionId: string): void {
     this.unpauseReport(sessionId)
+    this.store.settings.deleteAppSetting(reportTurnKey(sessionId))
+    this.lastBy.delete(sessionId)
     if (!this.reports.delete(sessionId)) return
     this.store.children.clearReportMark(sessionId)
   }
@@ -263,6 +313,7 @@ export class ChildOwnership {
       }
       this.store.children.clearReportMark(mark.sessionId)
       this.store.settings.deleteAppSetting(pausedReportKey(mark.sessionId))
+      this.store.settings.deleteAppSetting(reportTurnKey(mark.sessionId))
     }
     return endedInSwap
   }
@@ -319,6 +370,13 @@ export class ChildOwnership {
   adoptReport(sessionId: string, callerId: string, paused: PausedTask[] | null): void {
     this.reports.set(sessionId, callerId)
     if (paused) this.paused.set(sessionId, paused)
+    // The turn it was in when the last host stopped (#1377): the person's is not reported when it ends here
+    const stored = readTurn(this.store.settings.appSetting(reportTurnKey(sessionId)))
+    if (stored) {
+      const { pending, ...starter } = stored
+      this.starters.set(sessionId, starter)
+      if (pending) this.pending.set(sessionId, pending)
+    }
   }
   /** Holds the session's owed report over its own background work (#721); the mark itself stays as it is */
   pauseReport(sessionId: string, running: readonly PausedTask[]): void {
@@ -333,6 +391,98 @@ export class ChildOwnership {
   unpauseReport(sessionId: string): void {
     this.stopSettling(sessionId)
     if (this.paused.delete(sessionId)) this.store.settings.deleteAppSetting(pausedReportKey(sessionId))
+  }
+  /**
+   * A message goes into the session (#1377): the person's, or anyone else's (a caller's, an app's, Centralu's). At rest
+   * (or where the tool holds it for a turn of its own) it is what the next turn starts from; into a running turn it joins
+   * that turn: a person's into the work's is noted ("the person wrote during this turn"), into their own it is theirs.
+   */
+  noteMessage(sessionId: string, by: 'person' | 'work', inTurnNow: boolean, joinsRunningTurn: boolean, added = false, inputId?: string): void {
+    if (inTurnNow && joinsRunningTurn) {
+      /*
+       * Into a running turn: the tool may take it in at its next round, or run it as a turn of its own once this one ends
+       * (Claude folds a queued input in only at a tool round, so a message sent while the final answer is written is a
+       * turn of its own). Which, is said at the turn's end (`turnEnded`), by the inputs the turn took.
+       */
+      if (!this.starters.has(sessionId)) this.starters.set(sessionId, { by: 'work' })
+      this.pending.set(sessionId, [...(this.pending.get(sessionId) ?? []), { ...(inputId ? { id: inputId } : {}), by, ...(added ? { added: true as const } : {}) }])
+      this.persistTurn(sessionId)
+      return
+    }
+    this.addNext(sessionId, by, added)
+  }
+  /** A message that is to start the session's next turn (#1377); a later one before it starts only joins */
+  private addNext(sessionId: string, by: 'person' | 'work', added: boolean): void {
+    // A note that no turn ever started from (a command the tool answers itself, a message it refused) goes stale
+    const found = this.nextStarter.get(sessionId)
+    const next = found && Date.now() - found.at < NEXT_STARTER_MS ? found : undefined
+    // "Add to the task" (a person's message that is the work's): the turn is the work's, noted as their addition
+    const mine: TurnStarter = added ? { by: 'work', added: true } : { by }
+    if (!next) {
+      this.nextStarter.set(sessionId, { ...mine, at: Date.now() })
+      return
+    }
+    // Two messages before the turn starts make one turn: the work's if either is (the work's instruction is in it)
+    if (mine.by === 'person') {
+      if (next.by === 'work' && !next.added) next.wrote = true
+      return
+    }
+    const adds = !!mine.added || !!next.added
+    const wrote = next.by === 'person' || !!next.wrote
+    this.nextStarter.set(sessionId, { by: 'work', ...(adds ? { added: true as const } : wrote ? { wrote: true as const } : {}), at: Date.now() })
+  }
+  /** A turn starts (#1377): from the message waiting for it, else the CLI's own (the work's background tasks ended) */
+  turnStarted(sessionId: string): void {
+    const found = this.nextStarter.get(sessionId)
+    this.nextStarter.delete(sessionId)
+    const next = found && Date.now() - found.at < NEXT_STARTER_MS ? found : undefined
+    const { at: _at, ...starter } = next ?? { by: 'work' as const, at: 0 }
+    this.starters.set(sessionId, starter)
+    this.persistTurn(sessionId)
+  }
+  /**
+   * The turn ends (#1377): whose it was; none recorded reads as the work's. The record goes with it. `taken`: the inputs
+   * the tool says the turn took in (`SessionHandle.turnInputs`); undefined when it takes in every message sent to a
+   * running turn, null when it cannot tell. A message that was taken in joined this turn (a person's into the work's is
+   * noted on it); one that was not is what the next turn starts from, and that turn is its sender's.
+   */
+  turnEnded(sessionId: string, taken?: readonly string[] | null): TurnStarter {
+    const starter: TurnStarter = { ...(this.starters.get(sessionId) ?? { by: 'work' as const }) }
+    this.starters.delete(sessionId)
+    const pending = this.pending.get(sessionId) ?? []
+    this.pending.delete(sessionId)
+    for (const p of pending) {
+      const joined = taken === undefined || (taken !== null && p.id !== undefined && taken.includes(p.id))
+      if (!joined) this.addNext(sessionId, p.by, !!p.added)
+      else if (p.by === 'person' && starter.by === 'work') {
+        if (p.added) starter.added = true
+        else starter.wrote = true
+      }
+    }
+    this.lastBy.set(sessionId, starter.by)
+    this.store.settings.deleteAppSetting(reportTurnKey(sessionId))
+    return starter
+  }
+  /** Whose the session's last turn was (#1377): its last response is the person's answer when it was theirs */
+  lastTurnBy(sessionId: string): 'person' | 'work' | undefined {
+    return this.lastBy.get(sessionId)
+  }
+  /** Whose the running turn is, when one is recorded */
+  starterOf(sessionId: string): TurnStarter | undefined {
+    return this.starters.get(sessionId)
+  }
+  /** The person took the session over (#1377): the running turn is theirs from here */
+  takeTurn(sessionId: string): void {
+    if (this.starters.has(sessionId)) {
+      this.starters.set(sessionId, { by: 'person' })
+      this.persistTurn(sessionId)
+    }
+  }
+  /** Kept while a report is owed, for a host that takes the session over mid-turn */
+  private persistTurn(sessionId: string): void {
+    const s = this.starters.get(sessionId)
+    const pending = this.pending.get(sessionId) ?? []
+    if (s && this.reports.has(sessionId)) this.store.settings.setAppSetting(reportTurnKey(sessionId), JSON.stringify({ ...s, ...(pending.length ? { pending } : {}) }))
   }
   /** Starts a paused report's settle timer (#721); the session manager decides when, and what it does */
   settleAfter(sessionId: string, timer: ReturnType<typeof setTimeout>): void {

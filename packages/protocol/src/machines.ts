@@ -19,8 +19,14 @@ export type MachineId = z.infer<typeof MachineId>
  *
  *   connecting       opening the transport or waiting for the remote host's hello
  *   connected        calls and events flow
- *   unreachable      the machine or its transport cannot be reached; the hub retries on its own while Auto
- *                    reconnect is on (`MachineInfo.autoReconnect`), and waits for the person's Connect when it is off
+ *   unreachable      the machine answered or was linked and then failed, or its link dropped: an ssh the machine
+ *                    refused (a key, a host key), a link that ended; `error` says why. The hub retries on its own while
+ *                    Auto reconnect is on (`MachineInfo.autoReconnect`), and waits for the person's Connect when it is off
+ *   away             the machine does not answer at all (#1398): ssh's connect timed out, there is no route, or the name
+ *                    does not resolve. Asleep, off or off the network, not an error; `error` keeps ssh's own line for the
+ *                    details, `lastConnectedAt` says when the link was last up, and `nextAttemptAt` when the hub tries
+ *                    again. The status stays `away` between attempts that fail the same way. An older window reads it as
+ *                    unreachable
  *   not_running      the machine answers, but no `centralu serve` is running there, and the hub
  *                    could not start one (`error` says why)
  *   starting         no host was running there; the hub is starting one (`centralu serve --detach`,
@@ -39,7 +45,7 @@ export type MachineId = z.infer<typeof MachineId>
  *                    stopping soon after they started. `error` says which; the person's Start
  *                    (`machines.reconnect`) starts one. An older window reads it as unreachable
  */
-export const MachineStatus = z.enum(['connecting', 'connected', 'unreachable', 'not_running', 'versions_differ', 'refused', 'starting', 'updating', 'disconnected', 'stopped'])
+export const MachineStatus = z.enum(['connecting', 'connected', 'unreachable', 'away', 'not_running', 'versions_differ', 'refused', 'starting', 'updating', 'disconnected', 'stopped'])
 export type MachineStatus = z.infer<typeof MachineStatus>
 
 export const MachineSide = z.object({
@@ -152,6 +158,8 @@ export const MachineInfo = z.object({
   versions: MachineVersions.nullable().default(null),
   /** When the link last completed a hello, for "last seen" */
   lastConnectedAt: z.number().nullable().default(null),
+  /** While `away`: when the hub tries again, as a time in ms; null when it tries none until the person's Connect (#1398). Additive */
+  nextAttemptAt: z.number().nullable().catch(null).default(null),
   /**
    * The local end of the forward, and whether it equals the remote host's port. For diagnosis only:
    * app views of a linked machine are served by the hub itself and need neither

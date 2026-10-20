@@ -57,6 +57,14 @@ describe('the drift workflow runs checks that exist', () => {
   })
 })
 
+describe('the Codex checks', () => {
+  it('run as two jobs, so a name gone and the types gone stale fail apart (#1383 review)', () => {
+    expect(live).toMatch(/\n {2}codex-contract:\n[\s\S]*?pnpm codex:bindings --check-contract\n/)
+    expect(live).toMatch(/\n {2}codex-types:\n[\s\S]*?pnpm codex:bindings --check-types\n/)
+    expect(live).not.toMatch(/codex:bindings --check\n/)
+  })
+})
+
 describe('the checks target the latest published surfaces, not the pins', () => {
   const drift = readFileSync(at('scripts/claude-sdk-drift.mjs'), 'utf8')
 

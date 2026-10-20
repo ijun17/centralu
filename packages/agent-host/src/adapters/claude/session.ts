@@ -33,7 +33,7 @@ function isGoalCommand(text: string): boolean {
 type StopWait = { bound: ReturnType<typeof setTimeout> | undefined; late: boolean; asks: number }
 
 /** A message as the stream loop reads it */
-type StreamMsg = { type?: string; session_id?: string; subtype?: string; slash_commands?: unknown; claude_code_version?: unknown; capabilities?: unknown; user_message_uuid?: string; parent_tool_use_id?: string | null }
+type StreamMsg = { type?: string; session_id?: string; subtype?: string; slash_commands?: unknown; claude_code_version?: unknown; capabilities?: unknown; user_message_uuid?: string; user_message_uuids?: unknown; parent_tool_use_id?: string | null }
 
 /**
  * How this adapter starts Claude processes, shared by every session it creates (#353): where the
@@ -53,6 +53,12 @@ export type ClaudeLaunch = {
   exitGraceMs: number
   /** How long a Stop waits for the CLI to confirm it (see `interrupt`) */
   stopConfirmMs: number
+}
+
+const UUID_FORMAT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+/** An id the host named an input by (#1377): the CLI takes only a UUID */
+function isUuid(s: string): s is ReturnType<typeof randomUUID> {
+  return UUID_FORMAT.test(s)
 }
 
 export class ClaudeSession implements SessionHandle {
@@ -324,6 +330,8 @@ export class ClaudeSession implements SessionHandle {
     if (m.type === 'result') this.turnOpen = false
     let events = this.stream.push(msg)
     const retrying = m.type === 'result' && this.raceRetry.afterResult(msg as RaceMsg)
+    // What this result folded in, for the host to read while it handles the events that end the turn (#1377)
+    this.resultInputs = m.type === 'result' && !retrying && this.sendTracked ? (Array.isArray(m.user_message_uuids) ? m.user_message_uuids.filter((id): id is string => typeof id === 'string') : []) : null
     if (m.type === 'result' && !retrying) {
       const result = msg as { user_message_uuid?: string; user_message_uuids?: string[] }
       for (const id of result.user_message_uuids ?? (result.user_message_uuid ? [result.user_message_uuid] : [])) this.personInputs.delete(id)
@@ -349,6 +357,7 @@ export class ClaudeSession implements SessionHandle {
        */
       if (e.type === 'error' || e.type === 'limit_reached') this.endStopWait()
     }
+    this.resultInputs = null
     // A result ends the open turn: a Stop still waiting for the interrupt's answer is confirmed by it (see `interrupt`)
     if (m.type === 'result') this.confirmStop()
     this.schedules.arm()
@@ -441,7 +450,13 @@ export class ClaudeSession implements SessionHandle {
     this.notify?.()
   }
 
-  send(text: string, opts?: { origin?: InputOrigin }): void { this.sendInput(text, randomUUID(), undefined, opts?.origin) }
+  send(text: string, opts?: { origin?: InputOrigin; id?: string }): void { this.sendInput(text, opts?.id !== undefined && isUuid(opts.id) ? opts.id : randomUUID(), undefined, opts?.origin) }
+
+  /** The inputs the result being handled names (#1377); null when the CLI cannot name them, and outside a result */
+  private resultInputs: readonly string[] | null = null
+  turnInputs(): readonly string[] | null {
+    return this.resultInputs
+  }
 
   private sendInput(text: string, uuid = randomUUID(), note?: InputReceipt, origin?: InputOrigin): void {
     /*

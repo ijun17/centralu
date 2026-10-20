@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { rmFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
+import { removeFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 import { ExternalApps, resultText, type AppCaller, type AppRef } from '../packages/agent-host/src/apps/external/runtime.js'
 import {
   decideMerge,
@@ -480,11 +480,14 @@ beforeEach(() => {
   gh = fakeGh(root, FAKE_GH)
 })
 
+// Waiting for the app trees can take a while on a loaded Windows machine: grace, kill, the process listing and
+// a taskkill per leftover, past the default 10 s hook limit (#1312)
 afterEach(async () => {
-  await rt?.dispose()
+  // Until the app and what it left running have ended: they run Node from this folder and write in it
+  await rt?.dispose({ awaitTree: true })
   rt = null
-  rmFakeDir(root)
-})
+  await removeFakeDir(root)
+}, 30_000 * SLOW)
 
 function runtime(state: Record<string, unknown>) {
   gh.setState(state)
@@ -720,7 +723,7 @@ describe('the project board app: ci_status and merge_when_green', { timeout: 30_
     expect(ghCalls().flat()).not.toContain('--delete-branch')
     expect(ghCalls().flat()).not.toContain('-d')
 
-    await rt!.dispose()
+    await rt!.dispose({ awaitTree: true })
     gh.clearCalls()
     const fork = ghState()
     fork.pr = { ...fork.pr, isCrossRepository: true }
@@ -737,7 +740,7 @@ describe('the project board app: ci_status and merge_when_green', { timeout: 30_
     expect(moved.text).toBe('Not merged: its head moved from c0ffee0 to beef000 while waiting, so the checks waited on are not the ones that count. Call again to wait on the new commit.')
     expect(merges()).toEqual([])
 
-    await rt!.dispose()
+    await rt!.dispose({ awaitTree: true })
     runtime(ghState({ mergeError: 'Pull request is not mergeable: the base branch policy prohibits the merge.' }))
     const refused = await call('merge_when_green', { pr: 77 })
     expect(refused.isError).toBe(true)

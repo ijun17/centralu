@@ -1,3 +1,6 @@
+import { errorMessage } from '@cc/protocol'
+import { isObj } from '../json-value.js'
+import { errnoCode } from './errno.js'
 import { execFileSync } from 'node:child_process'
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -87,14 +90,15 @@ function parseHolder(raw: string): Holder {
   const text = raw.trim()
   if (/^\d+$/.test(text)) return { pid: Number(text), started: null }
   try {
-    const v = JSON.parse(text) as { pid?: unknown; started?: unknown; at?: unknown; by?: unknown; from?: unknown }
+    const v: unknown = JSON.parse(text)
+    if (!isObj(v)) return { pid: NaN, started: null }
     const holder: Holder = {
       pid: typeof v.pid === 'number' ? v.pid : NaN,
       started: typeof v.started === 'string' ? v.started : null,
     }
     if (typeof v.at === 'number' && Number.isFinite(v.at)) holder.at = v.at
     if (v.by === 'app' || v.by === 'keeper' || v.by === 'serve') holder.by = v.by
-    const f = (v.from && typeof v.from === 'object' ? v.from : {}) as Record<string, unknown>
+    const f = isObj(v.from) ? v.from : {}
     const from = {
       ...(typeof f.hub === 'string' && NAME_RE.test(f.hub) ? { hub: f.hub } : {}),
       ...(typeof f.ssh === 'string' && NAME_RE.test(f.ssh) ? { ssh: f.ssh } : {}),
@@ -176,9 +180,9 @@ function takeOwnership(path: string): Database.Database | null {
     db.exec('BEGIN EXCLUSIVE')
   } catch (err) {
     db.close()
-    const code = (err as { code?: string }).code
+    const code = errnoCode(err)
     if (code === 'SQLITE_BUSY' || code === 'SQLITE_LOCKED') return null
-    throw Object.assign(new Error(`Cannot check who owns this data folder (${path}): ${(err as Error).message}`), { cause: err })
+    throw Object.assign(new Error(`Cannot check who owns this data folder (${path}): ${errorMessage(err)}`), { cause: err })
   }
   held.add(db)
   return db

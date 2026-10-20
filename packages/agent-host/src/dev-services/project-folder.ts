@@ -1,3 +1,5 @@
+import { errorMessage } from '@cc/protocol'
+import { execFailure } from './exec-error.js'
 import { lstatSync, mkdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import path from 'node:path'
@@ -67,8 +69,9 @@ export function projectFolderTarget(
   if (nameError) refuse(nameError)
   const given = spec.parent?.trim()
   if (given && !p.isAbsolute(given)) refuse(`The location has to be a full path (${platform === 'win32' ? 'C:\\Users\\me\\code' : '/home/me/code'}).`)
-  if (!given && !home) refuse('There is no default location here — give a parent folder.')
-  const parent = p.resolve(given || home!)
+  const base = given || home
+  if (!base) refuse('There is no default location here — give a parent folder.')
+  const parent = p.resolve(base)
   // Only the default parent is ever made: a parent the person typed has to be there already
   const isDefault = !given
   if (!isDefault) {
@@ -103,9 +106,9 @@ export function makeProjectFolder(target: ProjectFolderTarget): void {
   try {
     mkdirSync(target.path)
   } catch (e) {
-    const code = (e as NodeJS.ErrnoException).code
+    const code = execFailure(e).code
     if (code === 'EEXIST') refuse(`Something named "${target.name}" is already in ${target.parent} — choose another name.`)
     if (code === 'ENOENT') refuse(`There is no folder at ${target.parent}.`)
-    refuse(`Could not make ${target.path}: ${(e as Error).message}`)
+    refuse(`Could not make ${target.path}: ${errorMessage(e)}`)
   }
 }

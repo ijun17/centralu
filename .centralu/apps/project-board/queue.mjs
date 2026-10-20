@@ -15,6 +15,7 @@
 // batch of one ended without landing it, needs its session.
 import { canMerge, NO_PERMISSION, quickTierReason, ranTier, squashMessage } from './ci.mjs'
 import { CAUSE_TEXT, onFlakyList } from './run-failure.mjs'
+import { isAcked } from './notice-acks.mjs'
 import { short } from './util.mjs'
 
 /** What an item can be in. The first three are active (the driver polls them); the last two are done. */
@@ -42,7 +43,7 @@ const OK_CONCLUSIONS = new Set(['success', 'neutral', 'skipped'])
 // HAS_HOOKS wait, and say so after UNCLEAN_MS.
 const MERGEABLE_STATES = new Set(['CLEAN'])
 
-export const emptyQueue = () => ({ version: 1, seq: 0, pause: null, items: [], events: [], batches: [], batchSeq: 0, batchOff: null })
+export const emptyQueue = () => ({ version: 1, seq: 0, acksFrom: 0, pause: null, items: [], events: [], batches: [], batchSeq: 0, batchOff: null })
 /** A batch's states that are still running; one at a time is driven (batch.mjs has the batch rules). */
 export const BATCH_ACTIVE = new Set(['building', 'ci', 'landing'])
 
@@ -56,6 +57,8 @@ export function normalize(q) {
     ...base,
     ...q,
     seq: Number.isFinite(q.seq) ? q.seq : 0,
+    // A file from before acknowledging (#1351, notice-acks.mjs): what it already said counts as acknowledged
+    acksFrom: Number.isInteger(q.acksFrom) ? q.acksFrom : Number.isFinite(q.seq) ? q.seq : 0,
     batchSeq: Number.isInteger(q.batchSeq) ? q.batchSeq : Math.max(0, ...batches.map((b) => b.id)),
     batches,
     items: Array.isArray(q.items)
@@ -566,7 +569,8 @@ export const noticeKey = (reason, head) => `${reason.kind}:${head ?? ''}:${reaso
  */
 export function watchState(q, { owner = null, after }) {
   const mine = (x) => !owner || x.owner === owner
-  const news = q.events.filter((e) => e.seq > after && e.notify && mine(e))
+  // What the owner acknowledged already, or was posted for information, is not news again (#1351, notice-acks.mjs)
+  const news = q.events.filter((e) => e.seq > after && e.notify && !isAcked(e) && mine(e))
   const left = q.items.filter((i) => ACTIVE.has(i.state) && mine(i))
   const owned = new Set(q.items.filter(mine).map((i) => i.pr))
   const batchPending = (q.batches ?? []).some((b) => BATCH_ACTIVE.has(b.state) && b.members.some((m) => !owner || owned.has(m.pr)))

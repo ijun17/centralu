@@ -570,7 +570,7 @@ const links = new Links({
   tunnelFor: (record) => new SshTunnel({ target: record.sshTarget, remote: record.remote, log: (line) => console.error(line) }),
   installer: { runtime: remoteRuntime, script: installScript },
   log: (line) => console.error(line),
-  // A child start_agent started on a machine hangs under the session here that started it (#1038)
+  // A child start_agent started on a machine names the session here that started it as its `askedBy` (#1038); the window draws it in that machine's project and points to it from that session (#1416)
   ownerOf: (sessionId) => mgr.remoteAgentParent(sessionId),
   /*
    * The reverse direction (#550, docs/plans/remote-hub.md §12.7): who this hub is, offered to a machine whose switch is
@@ -615,6 +615,7 @@ const activity = (): ActivitySnapshot => ({
   commandRuns: commandRuns.liveCount(),
 })
 const router: Router = new Router({
+  forwarding: (method, params) => mgr.forwarding(method, params),
   local: createRpcHandler(mgr, adapters, {
     // A deleted project gives back the user-folder app it had become, once the trash cannot restore it (#1204)
     settleDeletedProjects: () => userAppAdoption.settle(),

@@ -334,6 +334,23 @@ describe('state and gauges', () => {
    * more than turn_complete, same as a successful one — the screen was left with an empty answer,
    * and the state stayed at "waiting for the person". The fixture is the shape of the real incident (#107).
    */
+  it("a failed turn/completed whose Codex kind is badRequest is a refused model even when the body is not in the message (#1369)", () => {
+    const failed = (codexErrorInfo: unknown) =>
+      n('turn/completed', {
+        threadId: 't1',
+        turn: {
+          id: 'turn-7',
+          items: [],
+          status: 'failed',
+          error: { message: "The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account.", codexErrorInfo, additionalDetails: null, misalignment: null },
+        },
+      })
+    expect(failed('badRequest')).toMatchObject([{ type: 'error', error: { retryable: false, data: { reason: 'model_rejected', model: 'gpt-5.5' } } }])
+    // Another kind is never a refusal; the catch-all says nothing, so the sentence alone cannot make it one without the provider's 400
+    expect(failed('usageLimitExceeded')).toMatchObject([{ type: 'error', error: { retryable: true } }])
+    expect(failed(null)).toMatchObject([{ type: 'error', error: { retryable: true } }])
+  })
+
   it('a failed turn/completed → error (does not emit turn_complete)', () => {
     const out = n('turn/completed', {
       threadId: 't1',
@@ -463,11 +480,19 @@ describe('state and gauges', () => {
     expect(out[0]).toMatchObject({ type: 'limit_reached' })
   })
 
-  it('thread/name/updated → session_title (FR-18 automatic naming)', () => {
-    expect(n('thread/name/updated', { name: 'auth refactor' })).toEqual([
+  it('thread/name/updated → session_title (FR-18 automatic naming), from the `threadName` Codex sends (#1339)', () => {
+    // generated/v2/ThreadNameUpdatedNotification.ts: { threadId, threadName? }
+    expect(n('thread/name/updated', { threadId: 't1', threadName: 'auth refactor' })).toEqual([
       // auto:true — a name the tool made up on its own, so it never overwrites a name the person set (issue #5)
       { type: 'session_title', sessionId: S, title: 'auth refactor', auto: true },
     ])
+    // A CLI that names it `name` still names the session
+    expect(n('thread/name/updated', { name: 'auth refactor' })).toEqual([{ type: 'session_title', sessionId: S, title: 'auth refactor', auto: true }])
+  })
+
+  it('thread/name/updated without a name says nothing, rather than blank an automatically named session', () => {
+    expect(n('thread/name/updated', { threadId: 't1' })).toEqual([])
+    expect(n('thread/name/updated', { threadId: 't1', threadName: '' })).toEqual([])
   })
 
   /*

@@ -39,7 +39,7 @@ export class UiPreferenceStore {
   }
 
   loadWorkspace(): Record<string, unknown> | null {
-    return this.host.store.settings.loadWorkspace<Record<string, unknown>>()
+    return this.host.store.settings.loadWorkspace()
   }
 
   /**

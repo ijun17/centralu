@@ -2,7 +2,6 @@ import { appKeyOf, appPanelId, arrangePanels, sessionPanelId } from '@cc/core'
 import type { AppState } from './state.js'
 import type { Screen } from './navHistory.js'
 import { externalAppKey, gridAppViewKey, isApp } from './appKeys.js'
-import { sidebarProjectOf } from './sidebarTree.js'
 
 /**
  * Which screen the person is on, read from the store's state: the project screen and what it shows,
@@ -49,9 +48,7 @@ export function openProjectOf(
   }
   if (!s.focusedSessionId) return projectScreenOf(s)
   if (s.view !== 'focus') return null
-  // The group the session's row stands in, which is not its own project for a child started on another machine (#1038)
-  const picked = s.sessions[s.focusedSessionId]
-  const pid = picked ? sidebarProjectOf(picked, s.sessions) : null
+  const pid = s.sessions[s.focusedSessionId]?.projectId
   return pid && s.projects[pid] ? pid : null
 }
 

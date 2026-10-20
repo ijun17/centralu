@@ -1,4 +1,6 @@
 import Database from 'better-sqlite3'
+import { isObj } from '../json-value.js'
+import { pragmaNumber } from './store/rows.js'
 import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { AppRunRecords, type AppRunRecord } from './store/app-runs.js'
@@ -173,11 +175,12 @@ export class Store extends MigrationRunner {
    */
   checkpoint(): boolean {
     if (!this.db.open) return false
-    const wait = this.db.pragma('busy_timeout', { simple: true }) as number
+    const wait = pragmaNumber(this.db, 'busy_timeout')
     try {
       this.db.pragma('busy_timeout = 0')
-      const [row] = this.db.pragma('wal_checkpoint(TRUNCATE)') as { busy: number }[]
-      return row?.busy === 0
+      const answer: unknown = this.db.pragma('wal_checkpoint(TRUNCATE)')
+      const row: unknown = Array.isArray(answer) ? answer[0] : undefined
+      return isObj(row) && row.busy === 0
     } catch {
       return false
     } finally {
@@ -194,7 +197,7 @@ export class Store extends MigrationRunner {
   }
 
   get schemaVersion(): number {
-    return this.db.pragma('user_version', { simple: true }) as number
+    return pragmaNumber(this.db, 'user_version')
   }
 
   close() {

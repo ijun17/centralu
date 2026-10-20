@@ -165,11 +165,75 @@ pub fn bundle_content_of_bundle(bundle: &Path) -> PathBuf {
 pub struct Refusal {
     pub reason: &'static str,
     pub message: String,
+    /// Which check of the verifier refused (`check_id`), for the window to word; None when no check did (a copy
+    /// that failed, a build that names no content).
+    pub check: Option<&'static str>,
+    /// The listed file the refusal is about, when it is about one.
+    pub file: Option<String>,
+    /// For a file whose hash differs: the hash the signed manifest lists and the one the file has, lowercase hex. The
+    /// window may show these (it checks they are hex); `message` is free text for the log only.
+    pub hashes: Option<(String, String)>,
 }
 
 impl Refusal {
     pub fn new(reason: &'static str, message: impl Into<String>) -> Refusal {
-        Refusal { reason, message: message.into() }
+        Refusal { reason, message: message.into(), check: None, file: None, hashes: None }
+    }
+
+    /// Says which check of the verifier this refusal is: its id and the file it is about.
+    pub fn because(mut self, e: &Error) -> Refusal {
+        self.check = Some(check_id(e));
+        self.file = file_of(e).map(String::from);
+        self
+    }
+
+    /// Names a check that is not a verifier error (`downgrade` is one, but its words are the keeper's own).
+    pub fn with_check(mut self, check: &'static str) -> Refusal {
+        self.check = Some(check);
+        self
+    }
+}
+
+/**
+ * Which check of the verifier refused, as a stable id the window words in its own dialog
+ * (`refusal` in the app). Written here, over the crate's `Error`, because the shell pins that crate's
+ * bytes: it cannot gain a method for this without a new shell version. The match has no wildcard, so
+ * a new refusal in the verifier fails to compile here until it is given an id. An id never changes
+ * meaning; the window reads an id it does not know as "not what the project signed".
+ */
+pub fn check_id(e: &Error) -> &'static str {
+    match e {
+        Error::Missing(_) => "missing-file",
+        Error::BadFile { .. } => "bad-file",
+        Error::ManifestMalformed(_) => "manifest-malformed",
+        Error::SignatureMalformed(_) => "signature-malformed",
+        Error::UnsupportedFormat(_) => "unsupported-format",
+        Error::UnknownKey(_) => "unknown-key",
+        Error::BadSignature => "bad-signature",
+        Error::WrongPlatform { .. } => "wrong-platform",
+        Error::ShellTooOld { .. } => "shell-too-old",
+        Error::BadPath { .. } => "bad-path",
+        Error::DuplicatePath(_) => "duplicate-path",
+        Error::Symlink(_) => "symlink",
+        Error::NotRegularFile(_) => "not-regular-file",
+        Error::SizeMismatch { .. } => "size-mismatch",
+        Error::HashMismatch(_) => "hash-mismatch",
+        Error::CopyMismatch(_) => "copy-mismatch",
+        Error::DestinationExists(_) => "destination-exists",
+        Error::BadVersion(_) => "bad-version",
+        Error::Downgrade { .. } => "downgrade",
+        Error::Io { .. } => "io",
+    }
+}
+
+/// The listed file a refusal is about, when it is about one.
+pub fn file_of(e: &Error) -> Option<&str> {
+    match e {
+        Error::BadPath { path, .. } | Error::SizeMismatch { path, .. } => Some(path),
+        Error::DuplicatePath(p) | Error::Symlink(p) | Error::NotRegularFile(p) | Error::HashMismatch(p) | Error::CopyMismatch(p) => Some(p),
+        Error::Missing(name) => Some(name),
+        Error::BadFile { name, .. } => Some(name),
+        _ => None,
     }
 }
 
@@ -206,7 +270,7 @@ impl Verifier<'_> {
         if src.starts_with(content_root(data)) || resolve(src).starts_with(content_root(&resolve(data))) {
             return Err(Refusal::new("content", format!("{} is inside the folder the keeper copies into", src.display())));
         }
-        let (manifest, bytes) = read_verified_manifest(src, self.keys, &self.expect()).map_err(|e| refusal(e, src, Stage::Source))?;
+        let (manifest, bytes) = read_verified_manifest(src, self.keys, &self.expect()).map_err(|e| self.refusal(e, src, Stage::Source))?;
         let has = |path: &str, exe: bool| manifest.files.iter().any(|f| f.path == path && (!exe || f.executable));
         if !has(KEEPER_EXE, true) {
             return Err(Refusal::new("content", format!("the new build's content has no executable {KEEPER_EXE}")));
@@ -220,12 +284,13 @@ impl Verifier<'_> {
             (self.log)(&format!("ignoring an unreadable {}: {e}", floor.display()));
             None
         });
-        check_not_downgrade(&manifest.app_version, highest.as_deref(), Rollback::Refuse).map_err(|e| match e {
+        check_not_downgrade(&manifest.app_version, highest.as_deref(), Rollback::Refuse).map_err(|e| match &e {
             Error::Downgrade { candidate, highest } => Refusal::new(
                 "downgrade",
                 format!("Centralu {candidate} is older than {highest}, which has already run here; an older version starts only when rolled back on purpose"),
-            ),
-            other => Refusal::new("content", other.to_string()),
+            )
+            .because(&e),
+            other => Refusal::new("content", other.to_string()).because(&e),
         })?;
         Ok((manifest, bytes))
     }
@@ -254,7 +319,7 @@ impl Verifier<'_> {
             ),
             PlaceError::Remove(dest, e) => Refusal::new("copy", format!("cannot remove {}: {e}", dest.display())),
             PlaceError::SourceChanged => Refusal::new("content", format!("the content at {} changed while it was being copied", src.display())),
-            PlaceError::Copy(e) => refusal(e, src, Stage::Copy),
+            PlaceError::Copy(e) => self.refusal(e, src, Stage::Copy),
         })
     }
 }
@@ -269,7 +334,138 @@ enum Stage {
 
 /// The verifier's error as a refusal, worded for the window. The shell's `run::refusal`, without the
 /// shell version.
-fn refusal(e: Error, src: &Path, stage: Stage) -> Refusal {
+impl Verifier<'_> {
+    /// The verifier's error as a refusal: worded for the window, naming the check and the file, and for a
+    /// file that does not match its hash, saying which hash the signed manifest lists and which the file has.
+    fn refusal(&self, e: Error, src: &Path, stage: Stage) -> Refusal {
+        let mut r = refusal_text(&e, src, stage).because(&e);
+        if let Error::HashMismatch(path) = &e {
+            if let Some((expected, found)) = self.hash_detail(src, path) {
+                r.message = format!("{}; the signed manifest lists {expected}, the file is {found}", r.message);
+                r.hashes = Some((expected, found));
+            }
+        }
+        r
+    }
+
+    /// (the hash the signed manifest lists, the file's hash) for `path` in the content at `src`: read again, since the
+    /// verifier's error names the file and not the hashes (the pinned shell's crate cannot be changed to carry them).
+    fn hash_detail(&self, src: &Path, path: &str) -> Option<(String, String)> {
+        let (manifest, _) = read_verified_manifest(src, self.keys, &self.expect()).ok()?;
+        let entry = manifest.files.iter().find(|f| f.path == path)?;
+        let found = hash_listed(src, path, entry.size).ok().flatten()?;
+        Some((content_verify::hex(&entry.sha256), found))
+    }
+}
+
+/// The first component of the listed path `rel` under `root` that is a symlink (the folders on the way as well as the file),
+/// as it is written in `rel`; None when none is. Checked one prefix at a time, as the verifier walks a path.
+fn through_symlink(root: &Path, rel: &str) -> Option<String> {
+    let mut so_far = String::new();
+    for part in rel.split('/') {
+        if !so_far.is_empty() {
+            so_far.push('/');
+        }
+        so_far.push_str(part);
+        if fs::symlink_metadata(root.join(&so_far)).map(|m| m.file_type().is_symlink()).unwrap_or(false) {
+            return Some(so_far);
+        }
+    }
+    None
+}
+
+/**
+ * The SHA-256 of a listed file `rel` under `root`, in lowercase hex, read as the verifier reads one: no component of the
+ * path a symlink (`through_symlink`, the last one also by `O_NOFOLLOW`), not blocking on a FIFO, only a regular file
+ * (checked on the opened descriptor), and no further than one byte past `size`. `Ok(None)` when it is longer than that (it
+ * cannot be the listed file, and is not read to its end).
+ */
+fn hash_listed(root: &Path, rel: &str, size: u64) -> std::io::Result<Option<String>> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+    use std::os::unix::fs::OpenOptionsExt;
+    if let Some(link) = through_symlink(root, rel) {
+        return Err(std::io::Error::other(format!("{link:?} is a symlink")));
+    }
+    let mut f = fs::OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK).open(root.join(rel))?;
+    if !f.metadata()?.is_file() {
+        return Err(std::io::Error::other("not a regular file"));
+    }
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 64 * 1024];
+    let mut total = 0u64;
+    loop {
+        let n = f.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        total += n as u64;
+        if total > size {
+            return Ok(None);
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(Some(content_verify::hex(&hasher.finalize())))
+}
+
+/**
+ * Why the content at `src` would be refused, found by reading it again: the shell's checks (`Verifier::check`),
+ * then every listed file's size and hash. For the window to say after the shell refused its own content
+ * (the shell's status carries one sentence and no hashes, and its crate cannot change without a new shell version).
+ * Reads and hashes; starts, copies and changes nothing. None when nothing is wrong with it now (the refusal was
+ * the copy's, or the content changed since).
+ */
+pub fn diagnose_with(v: &Verifier, data: &Path, src: &Path) -> Option<Refusal> {
+    let (manifest, _) = match v.check(data, src) {
+        Ok(c) => c,
+        Err(r) => return Some(r),
+    };
+    for f in &manifest.files {
+        let found = |check: &'static str, message: String| {
+            let mut r = Refusal::new("content", format!("the content at {} is not what the project signed: {message}", src.display())).with_check(check);
+            r.file = Some(f.path.clone());
+            Some(r)
+        };
+        if let Some(link) = through_symlink(src, &f.path) {
+            return found("symlink", format!("{:?} goes through a symlink at {link:?}", f.path));
+        }
+        let path = src.join(&f.path);
+        let meta = match fs::symlink_metadata(&path) {
+            Ok(m) => m,
+            Err(e) => return found("file-unreadable", format!("{:?} is listed but cannot be read: {e}", f.path)),
+        };
+        if !meta.is_file() {
+            return found("not-regular-file", format!("{:?} is not a regular file", f.path));
+        }
+        if meta.len() != f.size {
+            return found("size-mismatch", format!("{:?} is {} bytes, the manifest says {}", f.path, meta.len(), f.size));
+        }
+        match hash_listed(src, &f.path, f.size) {
+            Ok(Some(hash)) if hash == content_verify::hex(&f.sha256) => {}
+            Ok(Some(hash)) => {
+                let expected = content_verify::hex(&f.sha256);
+                let mut r = found(
+                    "hash-mismatch",
+                    format!("{:?} does not match its hash: the signed manifest lists {expected}, the file is {hash}", f.path),
+                )?;
+                r.hashes = Some((expected, hash));
+                return Some(r);
+            }
+            Ok(None) => return found("size-mismatch", format!("{:?} is longer than the {} bytes the manifest says", f.path, f.size)),
+            Err(e) => return found("file-unreadable", format!("{:?} cannot be read: {e}", f.path)),
+        }
+    }
+    None
+}
+
+/// `diagnose_with` under the built-in keys and this platform, as the shell checks.
+pub fn diagnose(data: &Path, src: &Path) -> Option<Refusal> {
+    let keys = super::keys::trusted_keys().ok()?;
+    let log = |_: &str| ();
+    diagnose_with(&Verifier { keys: &keys, platform: content_verify::current_platform(), log: &log }, data, src)
+}
+
+fn refusal_text(e: &Error, src: &Path, stage: Stage) -> Refusal {
     match e.fault(stage == Stage::Copy) {
         Fault::Copy => Refusal::new("copy", format!("could not copy the new build's content: {e}")),
         Fault::Unreadable => {

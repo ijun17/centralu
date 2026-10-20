@@ -1,3 +1,5 @@
+import { isObj } from '../json-value.js'
+import { execFailure } from './exec-error.js'
 import { killTree } from './kill-tree.js'
 import { killHandle, spawnGrouped } from './grouped-child.js'
 import { programPath } from '../tool-launch.js'
@@ -12,10 +14,11 @@ const GH_STDERR_KEEP = 4096
 const ghFailuresSaid = new Set<string>()
 
 /** gh's own reason a lookup failed, in the host's log once; "no pull request" is an answer, not a failure */
-function noteGhFailure(branch: string, e: { stderr?: unknown }): void {
-  const lines = String(e.stderr ?? '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
-  if (!lines.length || lines.some((l) => /no pull requests? found/i.test(l))) return
-  const why = lines[0]!.slice(0, 300)
+function noteGhFailure(branch: string, e: { stderr?: string }): void {
+  const lines = (e.stderr ?? '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+  const first = lines[0]
+  if (first === undefined || lines.some((l) => /no pull requests? found/i.test(l))) return
+  const why = first.slice(0, 300)
   if (ghFailuresSaid.has(why)) return
   ghFailuresSaid.add(why)
   console.error(`[git] gh could not read the pull request of ${branch}: ${why}`)
@@ -67,14 +70,20 @@ export async function gitBranchPr(
     cwd: projectCwd,
     stdio: ['ignore', 'pipe', 'pipe'],
   })
+  const stdoutPipe = child.stdout
+  const stderrPipe = child.stderr
+  if (!stdoutPipe || !stderrPipe) {
+    killTree(killHandle(child), 'SIGKILL')
+    throw new Error('gh started without its output pipes')
+  }
   const out: Buffer[] = []
   let outBytes = 0
-  child.stdout!.on('data', (chunk: Buffer) => {
+  stdoutPipe.on('data', (chunk: Buffer) => {
     outBytes += chunk.length
     if (outBytes <= OK.maxBuffer) out.push(chunk)
   })
   let err = ''
-  child.stderr!.on('data', (chunk: Buffer) => {
+  stderrPipe.on('data', (chunk: Buffer) => {
     err = (err + chunk.toString('utf8')).slice(-GH_STDERR_KEEP)
   })
   const run = new Promise<string>((resolve, reject) => {
@@ -98,7 +107,8 @@ export async function gitBranchPr(
     // gh itself as well, should the tree kill have found no group to fire at
     child.kill('SIGKILL')
   }
-  let onAbort: (() => void) | undefined
+  // Set by the executor below, which runs at once
+  let onAbort: () => void = () => {}
   const aborted = new Promise<never>((_, reject) => {
     onAbort = () => {
       stop()
@@ -108,12 +118,13 @@ export async function gitBranchPr(
     }
   })
   aborted.catch(() => {})
-  if (signal?.aborted) onAbort!()
-  else signal?.addEventListener('abort', onAbort!, { once: true })
-  const timer = setTimeout(onAbort!, timeoutMs)
+  if (signal?.aborted) onAbort()
+  else signal?.addEventListener('abort', onAbort, { once: true })
+  const timer = setTimeout(onAbort, timeoutMs)
   try {
     const stdout = await Promise.race([run, aborted])
-    const j = JSON.parse(stdout) as { number?: unknown; state?: unknown; url?: unknown; headRefOid?: unknown }
+    const j: unknown = JSON.parse(stdout)
+    if (!isObj(j)) return null
     if (typeof j.number !== 'number' || typeof j.state !== 'string' || typeof j.url !== 'string') return null
     return {
       number: j.number,
@@ -123,11 +134,12 @@ export async function gitBranchPr(
     }
   } catch (e) {
     // Not started at all (ENOENT) has nothing to wait for
-    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return 'unavailable'
-    noteGhFailure(branch, e as { stderr?: unknown })
+    const failure = execFailure(e)
+    if (failure.code === 'ENOENT') return 'unavailable'
+    noteGhFailure(branch, failure)
     return null
   } finally {
     clearTimeout(timer)
-    if (onAbort) signal?.removeEventListener('abort', onAbort)
+    signal?.removeEventListener('abort', onAbort)
   }
 }

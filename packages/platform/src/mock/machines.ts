@@ -66,6 +66,7 @@ export class MachinesMock {
         error: null,
         versions: null,
         lastConnectedAt: Date.now(),
+        nextAttemptAt: null,
         localPort: null,
         sameLocalPort: false,
         hostStarted: null,

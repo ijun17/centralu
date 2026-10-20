@@ -650,8 +650,8 @@ function talk(mock: MockPlatform, sessionId: string, lines: ['user' | 'assistant
  */
 function installResponder(mock: MockPlatform): void {
   const original = mock.agents.send.bind(mock.agents)
-  mock.agents.send = async (sessionId, text, attachments) => {
-    await original(sessionId, text, attachments)
+  mock.agents.send = async (sessionId, text, attachments, intent) => {
+    await original(sessionId, text, attachments, intent)
     const steps: [number, () => void][] = [
       [300, () => mock.emit({ type: 'activity', sessionId, activity: null })],
       [

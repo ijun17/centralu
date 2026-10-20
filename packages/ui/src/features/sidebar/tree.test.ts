@@ -45,6 +45,17 @@ describe('orderAsTree', () => {
     ).toEqual(['asked', 'orphan', 'root', '  child'])
   })
 
+  // #1416: a linked machine's project lists its child without the parent, which stands in another machine's project
+  it('leaves at the top level a child whose asker is on another machine, with its own children under it', () => {
+    expect(
+      shape([
+        s('m1.child', { askedBy: 'hub-parent' }),
+        s('m1.grandchild', { askedBy: 'm1.child' }),
+        s('m1.other'),
+      ]),
+    ).toEqual(['m1.child', '  m1.grandchild', 'm1.other'])
+  })
+
   it('hangs a child\'s own children one step further in, not at the top level beside their grandparent (#862)', () => {
     expect(
       shape([

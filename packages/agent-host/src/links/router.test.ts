@@ -95,6 +95,31 @@ describe('the hub router (docs/plans/remote-hub.md §5)', () => {
     expect(m1.calls).toEqual([])
   })
 
+  // #1377: the hub learns the person's choice from the call it routes, not from the machine echoing it
+  it("tells the hub of a call to a linked machine's session before it goes, and how it ended", async () => {
+    const seen: string[] = []
+    const m1 = new FakeMachine('m1', 1)
+    const router = new Router({
+      local: async () => ({ ok: true }),
+      machines: () => [m1],
+      forwarding: (method, params) => {
+        seen.push(`${method} ${JSON.stringify(params)}`)
+        return (delivered) => void seen.push(`ended ${delivered}`)
+      },
+    })
+    await router.handle('agents.send', { sessionId: 'm1.s1', text: 'hi', intent: 'takeover' })
+    m1.answers['agents.send'] = new Error('Box is not reachable')
+    await router.handle('agents.send', { sessionId: 'm1.s1', text: 'again', intent: 'task' }).catch(() => {})
+    // The hub's own sessions are not routed: nothing to tell
+    await router.handle('agents.send', { sessionId: 'abc', text: 'mine', intent: 'task' })
+    expect(seen).toEqual([
+      'agents.send {"sessionId":"m1.s1","text":"hi","intent":"takeover"}',
+      'ended true',
+      'agents.send {"sessionId":"m1.s1","text":"again","intent":"task"}',
+      'ended false',
+    ])
+  })
+
   it('an id whose prefix names no linked machine is the hub’s own', async () => {
     const { router, local } = rig()
     await router.handle('agents.send', { sessionId: 'zz.abc', text: 'hi' })

@@ -57,7 +57,13 @@ export function listSetting<T extends object>(
   settings: ListSettingAccess,
   key: string,
   has: (x: Obj) => boolean,
-): { read(): T[]; write(items: readonly T[]): void } {
+): { read(): T[]; write(items: readonly T[]): void }
+// The caller names the shape it keeps (`T`) and vouches for it with `has`; the elements are returned as they are
+export function listSetting(
+  settings: ListSettingAccess,
+  key: string,
+  has: (x: Obj) => boolean,
+): { read(): Obj[]; write(items: readonly object[]): void } {
   const usable = (x: unknown): x is Obj => isObj(x) && has(x)
   const stored = (): { raw: string | null; list: unknown[] | null } => {
     const raw = settings.appSetting(key)
@@ -71,7 +77,7 @@ export function listSetting<T extends object>(
         saidUnreadable.set(key, raw)
         console.error(`[store] app_settings.${key} is not a JSON list: ${JSON.stringify(raw.slice(0, 200))}; it reads as empty, and is set aside as app_settings.${asideKeyOf(key)} when next written`)
       }
-      return (list ?? []).filter(usable) as unknown as T[]
+      return (list ?? []).filter(usable)
     },
     write: (items) => {
       const { raw, list } = stored()
@@ -99,11 +105,13 @@ export class SettingsRecords {
       .run(tool, cwd, JSON.stringify(commands), Date.now())
   }
 
-  loadCommands<T>(tool: string, cwd: string): T | null {
+  loadCommands<T>(tool: string, cwd: string): T | null
+  // The caller names the list it expects (`CommandInfo[]`); a cache another build wrote is returned as it is
+  loadCommands(tool: string, cwd: string): unknown {
     const row = this.db
-      .prepare(`SELECT commands FROM command_cache WHERE tool = ? AND cwd = ?`)
-      .get(tool, cwd) as { commands: string } | undefined
-    return (parseJson(row?.commands) ?? null) as T | null
+      .prepare<unknown[], { commands: string }>(`SELECT commands FROM command_cache WHERE tool = ? AND cwd = ?`)
+      .get(tool, cwd)
+    return parseJson(row?.commands) ?? null
   }
 
   /**
@@ -124,12 +132,11 @@ export class SettingsRecords {
    * and is named on stderr with what it held (#384): the window comes up as its defaults and its next change replaces
    * the row, so the line is what is left of it.
    */
-  loadWorkspace<T = unknown>(): T | null {
-    const row = this.db.prepare(`SELECT layout FROM workspace WHERE id = 1`).get() as
-      { layout: string } | undefined
+  loadWorkspace(): Obj | null {
+    const row = this.db.prepare<unknown[], { layout: string }>(`SELECT layout FROM workspace WHERE id = 1`).get()
     if (!row) return null
     const v = parseJson(row.layout)
-    if (isObj(v)) return v as T
+    if (isObj(v)) return v
     // Once per row text: the screen preferences read it too, on every read until an old text size has moved (#312)
     if (this.brokenWorkspaceSaid !== row.layout) {
       this.brokenWorkspaceSaid = row.layout
@@ -148,8 +155,7 @@ export class SettingsRecords {
    * person who had turned the thing off (the same trade `showIgnored` makes in the UI).
    */
   appSetting(key: string): string | null {
-    const row = this.db.prepare(`SELECT value FROM app_settings WHERE key = ?`).get(key) as
-      { value: string } | undefined
+    const row = this.db.prepare<unknown[], { value: string }>(`SELECT value FROM app_settings WHERE key = ?`).get(key)
     return row?.value ?? null
   }
 

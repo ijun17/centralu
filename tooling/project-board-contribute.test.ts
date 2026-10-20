@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ownProcesses } from '../packages/agent-host/src/process.test-helpers.js'
-import { gitWrapper, rmFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
+import { gitWrapper, removeFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 import { ExternalApps, resultText, type AppCaller, type AppRef } from '../packages/agent-host/src/apps/external/runtime.js'
 import {
   commitProblems,
@@ -262,11 +262,14 @@ beforeEach(() => {
   gh.setState(state)
 })
 
+// Waiting for the app trees can take a while on a loaded Windows machine: grace, kill, the process listing and
+// a taskkill per leftover, past the default 10 s hook limit (#1312)
 afterEach(async () => {
-  await rt?.dispose()
+  // Until the app and what it left running have ended: they run Node from this folder and write in it
+  await rt?.dispose({ awaitTree: true })
   rt = null
-  rmFakeDir(root)
-})
+  await removeFakeDir(root)
+}, 30_000 * SLOW)
 
 function runtime() {
   rt = new ExternalApps({

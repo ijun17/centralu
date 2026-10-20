@@ -1,3 +1,4 @@
+import { oneRow } from './rows.js'
 import type Database from 'better-sqlite3'
 import { isObj } from '../../json-value.js'
 import { parseJson } from './json.js'
@@ -16,6 +17,8 @@ export type LinkedMachineRow = {
   autoReconnect?: boolean
   /** Whether this machine's sessions may ask this computer's projects (#550, v60); off by default */
   asks?: boolean
+  /** When the link to it was last up (#1398), from `app_settings` (`SEEN_KEY`); absent when it never was */
+  lastConnectedAt?: number
 }
 
 /** A pair the person approved for the reverse direction (#550, v60): a session of a linked machine, a project here */
@@ -31,6 +34,12 @@ export type MachineAskConsentRow = {
 
 /** The highest slot ever handed to a linked machine (#82) */
 const LINK_SLOT_KEY = 'links.slotHighWater'
+
+/**
+ * When a machine's link was last up (#1398), in ms, kept per machine so a machine that is away reads "last connected" across
+ * a restart of this host. A setting the previous build never reads, so it needs no migration step
+ */
+const SEEN_KEY = 'links.lastConnected.'
 
 /** Marks that a machine's list was mirrored at least once, so an empty mirror reads as empty rather than unknown */
 const MIRRORED_KEY = 'links.mirrored.'
@@ -52,11 +61,7 @@ export class LinkedMachineRecords {
 
   listLinkedMachines(): LinkedMachineRow[] {
     const rows = this.db
-      .prepare(
-        `SELECT id, name, ssh_target, shell, wsl_distro, command, slot, added_at, accepted_versions, connect, asks
-           FROM linked_machines ORDER BY added_at, id`,
-      )
-      .all() as {
+      .prepare<unknown[], {
       id: string
       name: string
       ssh_target: string
@@ -68,7 +73,11 @@ export class LinkedMachineRecords {
       accepted_versions: string | null
       connect: string | null
       asks: number
-    }[]
+    }>(
+        `SELECT id, name, ssh_target, shell, wsl_distro, command, slot, added_at, accepted_versions, connect, asks
+           FROM linked_machines ORDER BY added_at, id`,
+      )
+      .all()
     return rows.map((r) => ({
       id: r.id,
       name: r.name,
@@ -80,7 +89,19 @@ export class LinkedMachineRecords {
       // Anything but the one value for off is on, as a window reads an unknown one
       autoReconnect: r.connect !== 'when_needed',
       asks: r.asks === 1,
+      ...this.lastSeen(r.id),
     }))
+  }
+
+  /** When the link to the machine was last up, as `{ lastConnectedAt }`, or nothing when it never was or the setting is not a time */
+  private lastSeen(id: string): { lastConnectedAt?: number } {
+    const at = Number(this.settings.appSetting(`${SEEN_KEY}${id}`))
+    return Number.isSafeInteger(at) && at > 0 ? { lastConnectedAt: at } : {}
+  }
+
+  /** The link to the machine was up at `at` (#1398) */
+  setLinkedMachineSeen(id: string, at: number): void {
+    if (this.db.prepare(`SELECT 1 FROM linked_machines WHERE id = ?`).get(id)) this.settings.setAppSetting(`${SEEN_KEY}${id}`, String(Math.floor(at)))
   }
 
   /**
@@ -90,7 +111,7 @@ export class LinkedMachineRecords {
    */
   addLinkedMachine(m: Omit<LinkedMachineRow, 'slot'>): LinkedMachineRow {
     return this.db.transaction(() => {
-      const used = (this.db.prepare(`SELECT MAX(slot) AS s FROM linked_machines`).get() as { s: number | null }).s ?? 0
+      const used = oneRow(this.db.prepare<unknown[], { s: number | null }>(`SELECT MAX(slot) AS s FROM linked_machines`).get()).s ?? 0
       const slot = Math.max(used, this.slotHighWater()) + 1
       this.db
         .prepare(
@@ -125,6 +146,7 @@ export class LinkedMachineRecords {
       this.db.prepare(`DELETE FROM grid_layout WHERE remote_session_id IS NOT NULL AND substr(remote_session_id, 1, ?) = ?`).run(id.length + 1, `${id}.`)
       this.db.prepare(`DELETE FROM grid_layout WHERE remote_app_id IS NOT NULL AND app_machine = ?`).run(id)
       this.db.prepare(`DELETE FROM linked_machines WHERE id = ?`).run(id)
+      this.settings.deleteAppSetting(`${SEEN_KEY}${id}`)
       this.settings.deleteAppSetting(`${MIRRORED_KEY}${id}.session`)
       this.settings.deleteAppSetting(`${MIRRORED_KEY}${id}.project`)
     })()
@@ -154,17 +176,17 @@ export class LinkedMachineRecords {
 
   /** Whether a machine's switch is on, read from the row each time; false for a machine no longer linked */
   linkedMachineAsks(id: string): boolean {
-    const row = this.db.prepare(`SELECT asks FROM linked_machines WHERE id = ?`).get(id) as { asks: number } | undefined
+    const row = this.db.prepare<unknown[], { asks: number }>(`SELECT asks FROM linked_machines WHERE id = ?`).get(id)
     return row?.asks === 1
   }
 
   machineAskConsent(machineId: string, sessionId: string, projectId: string): MachineAskConsentRow | null {
     const row = this.db
-      .prepare(
+      .prepare<unknown[], MachineAskConsentRow>(
         `SELECT machine_id as machineId, session_id as sessionId, session_name as sessionName, project_id as projectId, decided_at as decidedAt
            FROM machine_ask_consents WHERE machine_id = ? AND session_id = ? AND project_id = ?`,
       )
-      .get(machineId, sessionId, projectId) as MachineAskConsentRow | undefined
+      .get(machineId, sessionId, projectId)
     return row ?? null
   }
 
@@ -186,11 +208,9 @@ export class LinkedMachineRecords {
   /** The approved pairs, newest first; one machine's when `machineId` is given */
   listMachineAskConsents(machineId?: string): MachineAskConsentRow[] {
     const cols = `machine_id as machineId, session_id as sessionId, session_name as sessionName, project_id as projectId, decided_at as decidedAt`
-    return (
-      machineId === undefined
-        ? this.db.prepare(`SELECT ${cols} FROM machine_ask_consents ORDER BY decided_at DESC`).all()
-        : this.db.prepare(`SELECT ${cols} FROM machine_ask_consents WHERE machine_id = ? ORDER BY decided_at DESC`).all(machineId)
-    ) as MachineAskConsentRow[]
+    return machineId === undefined
+      ? this.db.prepare<unknown[], MachineAskConsentRow>(`SELECT ${cols} FROM machine_ask_consents ORDER BY decided_at DESC`).all()
+      : this.db.prepare<unknown[], MachineAskConsentRow>(`SELECT ${cols} FROM machine_ask_consents WHERE machine_id = ? ORDER BY decided_at DESC`).all(machineId)
   }
 
   /** Withdraws one pair; true when there was one */
@@ -208,8 +228,8 @@ export class LinkedMachineRecords {
   machineHeaders(machineId: string, kind: 'session' | 'project'): unknown[] | null {
     if (this.settings.appSetting(`${MIRRORED_KEY}${machineId}.${kind}`) === null) return null
     const rows = this.db
-      .prepare(`SELECT info FROM machine_headers WHERE machine_id = ? AND kind = ? ORDER BY position, item_id`)
-      .all(machineId, kind) as { info: string }[]
+      .prepare<unknown[], { info: string }>(`SELECT info FROM machine_headers WHERE machine_id = ? AND kind = ? ORDER BY position, item_id`)
+      .all(machineId, kind)
     return rows.flatMap((r) => {
       const info = parseJson(r.info)
       return info === undefined ? [] : [info]
@@ -232,11 +252,11 @@ export class LinkedMachineRecords {
   /** One session header, added or replaced; a new one goes last */
   upsertMachineSession(machineId: string, item: { id: string }): void {
     if (!this.db.prepare(`SELECT 1 FROM linked_machines WHERE id = ?`).get(machineId)) return
-    const pos = (
+    const { p: pos } = oneRow(
       this.db
-        .prepare(`SELECT COALESCE(MAX(position), -1) + 1 AS p FROM machine_headers WHERE machine_id = ? AND kind = 'session'`)
-        .get(machineId) as { p: number }
-    ).p
+        .prepare<unknown[], { p: number }>(`SELECT COALESCE(MAX(position), -1) + 1 AS p FROM machine_headers WHERE machine_id = ? AND kind = 'session'`)
+        .get(machineId),
+    )
     this.db
       .prepare(
         `INSERT INTO machine_headers (machine_id, kind, item_id, info, position) VALUES (?, 'session', ?, ?, ?)
@@ -248,8 +268,8 @@ export class LinkedMachineRecords {
   /** Changes a few fields of one mirrored session (its name, its state); one that cannot be read is left for the next full mirror */
   patchMachineSession(machineId: string, sessionId: string, patch: Record<string, unknown>): void {
     const row = this.db
-      .prepare(`SELECT info FROM machine_headers WHERE machine_id = ? AND kind = 'session' AND item_id = ?`)
-      .get(machineId, sessionId) as { info: string } | undefined
+      .prepare<unknown[], { info: string }>(`SELECT info FROM machine_headers WHERE machine_id = ? AND kind = 'session' AND item_id = ?`)
+      .get(machineId, sessionId)
     const info = parseJson(row?.info)
     if (!isObj(info)) return
     const next = { ...info, ...patch }
