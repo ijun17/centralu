@@ -53,6 +53,29 @@ export type TrashRequest =
   | { action: 'delete'; sessionId: string; what: 'session' | 'steps' }
   | { action: 'empty' }
 
+/**
+ * One request of the orchestrator's trust commands (#1219, third slice), as the tool runner reads its arguments: what
+ * changes what agents and apps may do. Widening waits for the person's card; narrowing acts at once.
+ */
+export type TrustRequest =
+  | { action: 'list_projects' }
+  | { action: 'project_trust'; project: string; trusted: boolean }
+  | { action: 'list_rules'; project?: string }
+  | { action: 'remove_rule'; id: number }
+  | { action: 'list_app_grants'; app?: string; project?: string }
+  | { action: 'forget_app_answer'; app: string; project?: string; capability: string }
+  | { action: 'revoke_consent'; from: string; to: string; kind: 'delegate' | 'apps' | 'agents' }
+  | { action: 'share_app'; app: string; project?: string; shared: boolean }
+  | { action: 'set_limits'; changes: AgentLimitChanges }
+
+/** What `set_agent_limits` changes (#1219): the person's limits on agents; absent means leave it */
+export type AgentLimitChanges = {
+  /** Running agents per project: a number (0 is unlimited), or 'preset' for the preset's own */
+  agentCeiling?: number | 'preset'
+  /** How many levels of sessions may start agents, 1 to 3 */
+  agentDepth?: number
+}
+
 export type OrchestratedSession = {
   sessionId: string
   name: string
@@ -670,6 +693,11 @@ export type OrchestratorTools = {
    * for good, one item or all of it, waits for the person's card naming what goes. Absent on seats that cannot.
    */
   trash?(req: TrashRequest, signal?: AbortSignal): Promise<{ ok: true; text: string } | { ok: false; error: string }>
+  /**
+   * Trust (#1219, third slice): list the projects and change a project's trust, through the window's own calls. Trusting
+   * waits for the person's card naming the project and its apps; taking trust away acts at once. Absent on seats that cannot.
+   */
+  trust?(req: TrustRequest, signal?: AbortSignal): Promise<{ ok: true; text: string } | { ok: false; error: string }>
   /**
    * Hands a session off to a fresh one (#694), the orchestrator's alone: the note from the record by default or written
    * by the session (`mode: 'agent'`), the original's live children moved to the successor (#693), the original kept.

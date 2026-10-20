@@ -12,6 +12,7 @@ import { MergeChecks, type MergeChecksHost } from './merge-checks.js'
 import { MachineFlow, type MachineOps } from './machine-flow.js'
 import { PreferencesFlow } from './preferences-flow.js'
 import { TrashFlow } from './trash-flow.js'
+import { TrustFlow } from './trust-flow.js'
 import type { WindowRpc } from './window-rpc.js'
 import { ProjectCreation, type ProjectCreationHost } from './project-creation.js'
 import { UpdatesAsked, type UpdatesAskedHost } from './updates-asked.js'
@@ -186,6 +187,8 @@ export class SessionManager {
   private readonly preferencesFlow: PreferencesFlow
   /** The orchestrator's trash commands (trash-flow.ts) */
   private readonly trashFlow: TrashFlow
+  /** The orchestrator's trust commands (trust-flow.ts) */
+  private readonly trustFlow: TrustFlow
   /** An agent's update_centralu: check, install and apply, behind its preset and the person's card (updates-asked.ts) */
   private readonly updatesAsked: UpdatesAsked
   /** Whether a session of one project may reach another, and the consents remembered for it (project-consents.ts) */
@@ -326,6 +329,7 @@ export class SessionManager {
     this.machineFlow = new MachineFlow(this.parts())
     this.preferencesFlow = new PreferencesFlow(this.parts())
     this.trashFlow = new TrashFlow(this.parts())
+    this.trustFlow = new TrustFlow(this.parts())
     this.merges = new MergeChecks(this.parts())
     this.launches = new LaunchRecords(this.parts())
     this.interruptions = new InterruptionWatch(this.parts())
@@ -501,6 +505,7 @@ export class SessionManager {
   useWindowRpc(rpc: WindowRpc): void {
     this.preferencesFlow.useRpc(rpc)
     this.trashFlow.useRpc(rpc)
+    this.trustFlow.useRpc(rpc)
   }
 
   /** `ProjectCreation.addProject` (project-creation.ts), kept on the manager for its callers */
@@ -2068,6 +2073,7 @@ export class SessionManager {
       machineRequest: (sessionId, req, signal) => this.machineFlow.run(sessionId, req, signal),
       preferencesRequest: (sessionId, req, signal) => this.preferencesFlow.run(sessionId, req, signal),
       trashRequest: (sessionId, req, signal) => this.trashFlow.run(sessionId, req, signal),
+      trustRequest: (sessionId, req, signal) => this.trustFlow.run(sessionId, req, signal),
       startAgent: (callerId, opts, signal) => this.startAgent(callerId, opts, signal),
       agentSession: (callerId, opts, signal) => this.agentSession(callerId, opts, signal),
       listAgents: (callerId) => this.delegationFlow.listAgents(callerId),

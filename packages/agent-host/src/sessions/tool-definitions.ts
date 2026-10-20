@@ -264,6 +264,60 @@ export const ORCHESTRATOR_TOOLS = [
     description: 'Deletes everything listed in the trash for good, kept app runs included. The person approves a card naming what goes first.',
     schema: z.object({}),
   },
+  /*
+   * #1219, third slice: trust. Rare commands. Listing acts at once; trusting and taking trust away wait for the
+   * person's card (untrusting drops the project's own deny rules and hooks).
+   */
+  {
+    name: 'list_projects',
+    description: 'Lists the projects with their id, folder, machine and whether each is trusted.',
+    schema: z.object({}),
+  },
+  {
+    name: 'set_project_trust',
+    description: "Trusts a project (its apps run, its settings apply) or takes trust away. Either waits for the person's card.",
+    schema: z.object({ project: z.string().describe('Its name or id, from list_projects.'), trusted: z.boolean() }).strict(),
+  },
+  {
+    name: 'list_approval_rules',
+    description: 'Lists the approval rules: the standing "always allow" answers the person gave on cards, with what each allows and where.',
+    schema: z.object({ project: z.string().optional().describe('Only this project\'s rules: its name or id.') }).strict(),
+  },
+  {
+    name: 'remove_approval_rule',
+    description: 'Removes an approval rule, so that action asks again. Acts at once. No command adds a rule: only the person\'s "always" on a card does.',
+    schema: z.object({ id: z.number().int().describe('The id list_approval_rules gives.') }).strict(),
+  },
+  {
+    name: 'list_app_grants',
+    description: "Lists apps with their trust, sharing and the person's remembered answers to what each asked for, and the consents of one project reaching another.",
+    schema: z.object({ app: z.string().optional().describe('Only this app: its id or name.'), project: z.string().optional().describe('Only this project\'s apps, or where app is.') }).strict(),
+  },
+  {
+    name: 'forget_app_answer',
+    description: "Forgets an app grant: the person's remembered answer to one thing an app asked for, so it asks again. Acts at once.",
+    schema: z.object({ app: z.string().describe('Its id or name.'), project: z.string().optional(), capability: z.string().describe('As list_app_grants names it.') }).strict(),
+  },
+  {
+    name: 'revoke_project_consent',
+    description: 'Revokes a grant of one project reaching another (a remembered consent), so the next reach asks again. Acts at once.',
+    schema: z.object({ from: z.string().describe('Project name or id.'), to: z.string().describe('Project name or id.'), kind: z.enum(['delegate', 'apps', 'agents']) }).strict(),
+  },
+  {
+    name: 'share_app',
+    description: "Grants a project's inner app to the other projects (shares it), or stops. Sharing waits for the person's card; stopping acts at once.",
+    schema: z.object({ app: z.string().describe('Its id or name.'), project: z.string().optional(), shared: z.boolean() }).strict(),
+  },
+  {
+    name: 'set_agent_limits',
+    description: "Changes the limits on agents: running agents per project, levels of sessions that may start agents. Waits for the person's card.",
+    schema: z
+      .object({
+        agentCeiling: z.union([z.number().int().min(0), z.literal('preset')]).optional().describe('0 is unlimited; "preset" uses the preset\'s own.'),
+        agentDepth: z.number().int().optional().describe('1 to 3.'),
+      })
+      .strict(),
+  },
   {
     name: 'create_session',
     description:
@@ -708,7 +762,8 @@ export const ORCHESTRATOR_INSTRUCTIONS = [
   // #853: the orchestrator's light work outside any project went to its CLI's own subagent, which Centralu never shows
   'For light work outside any project (a web search, a lookup), start a session the person can watch with the start_agent command, not your Agent tool.',
   'Make a new project with create_project; add an existing folder, here or on a linked machine, with the add_project command (list_machines names the machines).',
-  'Linked machines: add_machine and others (centralu_commands "machine"). Settings: get_preferences, set_preferences. Trash: list_trash.',
+  // #1219: the machine and trust commands (#1219's third slice: projects' trust, approval rules, app grants, agent limits) are found by these words
+  'Machines and trust: centralu_commands "machine trust rule grant limits". Settings: get_preferences, set_preferences. Trash: list_trash.',
   'When the person says "make me a tool/screen that does…", make the app with create_app — a screen the person clicks and the tools an agent calls are one app.',
   // #1205: one server per trusted project that is an app grew every request; the orchestrator attaches the one it needs
   'Projects that are apps attach on demand: the find_apps command lists them.',

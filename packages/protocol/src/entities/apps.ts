@@ -117,9 +117,10 @@ export const ExternalAppInfo = z.object({
   root: z.boolean().optional(),
   /**
    * What the manifest declares it will ask Centralu for (`uses`: agents it may run, apps it may call, host data it may
-   * read), absent when it declares nothing or the manifest is invalid (#1141). A declaration, not a permission: the
-   * project's trust card lists it per app, so the person sees what trusting lets its apps ask for. Absent from an older
-   * host.
+   * read) (#1141). Present, empty when it declares nothing, whenever the manifest was read (#1219: a host before it left
+   * an empty one out too); absent when the manifest is invalid, or from an older host, which a trust card reads as
+   * "not known", never as asking for nothing. A declaration, not a permission: the project's trust card lists it per
+   * app, so the person sees what trusting lets its apps ask for.
    */
   uses: AppUses.optional(),
   /**
@@ -331,3 +332,26 @@ export const AppVersions = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('git'), repo: z.boolean(), commits: z.array(GitCommit) }),
 ])
 export type AppVersions = z.infer<typeof AppVersions>
+
+/**
+ * `uses` in plain words, one line per capability: the import review, the window's trust card, the inbox's app notice and
+ * the orchestrator's trust card (#1219) all say an app's asks the same way, so the person reads one wording wherever
+ * they are asked.
+ */
+export function usesLines(uses: AppUses): string[] {
+  const out: string[] = []
+  if (uses.agent === true) out.push('Run your default agent in a new session')
+  else if (Array.isArray(uses.agent) && uses.agent.length) out.push(`Run your agent in a new session: ${uses.agent.join(', ')}`)
+  if (uses.apps?.length) out.push(`Call other apps: ${uses.apps.join(', ')}`)
+  if (uses.host?.length) out.push(`Read Centralu data: ${uses.host.map((name) => HOST_DATA_WORDS[name] ?? name).join('; ')}`)
+  // Kept running with nothing open while it says it is busy (#1236), in the app's own words
+  if (uses.background) out.push(`Keep running in the background while busy: ${uses.background}`)
+  if (uses.notices) out.push('Post notices into the sessions that called it')
+  return out
+}
+
+/** The host data names an app may declare (`HOST_CAPABILITIES`), in plain words; an unknown one is shown as it is */
+const HOST_DATA_WORDS: Record<string, string> = {
+  'sessions.list': "the names and states of its project's sessions (sessions.list)",
+  'git.status': "its project's branch and changed files (git.status)",
+}

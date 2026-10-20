@@ -573,6 +573,21 @@ describe('the hub router (docs/plans/remote-hub.md §5)', () => {
       expect((m1.mirror.sessions as { id: string }[]).map((s) => s.id)).toEqual(['a', 'orch', 'co'])
     })
 
+    // #1219: a trust card names one machine's apps, and a machine that does not answer must not read as one with none
+    it('lists one machine apps alone when apps.list names it, and its failure is an error, not an empty list', async () => {
+      const { router, local, m1, m2 } = rig()
+      m1.answers['apps.list'] = [{ appId: 'notes', projectId: 'p1' }]
+      m2.answers['apps.list'] = [{ appId: 'other', projectId: 'p9' }]
+      expect(await router.handle('apps.list', { machine: 'm1' })).toEqual([expect.objectContaining({ appId: 'notes', projectId: 'm1.p1', machine: 'm1' })])
+      expect(m1.calls).toEqual([{ method: 'apps.list', params: {} }])
+      expect(m2.calls).toEqual([])
+      expect(local).toEqual([])
+      m1.answers['apps.list'] = new Error('dropped')
+      await expect(router.handle('apps.list', { machine: 'm1' })).rejects.toThrow()
+      // Without a machine it is the merge it always was: a machine that fails is left out
+      expect(await router.handle('apps.list', {})).toEqual(expect.arrayContaining([expect.objectContaining({ appId: 'other' })]))
+    })
+
     it('answers for an unreachable machine from the mirror, marked, with live as last known', async () => {
       const { router, localAnswers, m1 } = rig()
       localAnswers['sessions.list'] = []

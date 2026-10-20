@@ -1409,7 +1409,7 @@ the params with the method's schema and reads the answer with its result schema,
 
 - `get_preferences` reads `prefs.get`, `themes.list`, `agents.sleepPolicy`, `updates.status` (not forced: the read the window makes at start, which asks the registry only when checking is on and one is due)
   and `agents.versions`, one line each, with the choices; a part the host cannot read says so and the rest still answers.
-  It also lists what no command changes (send key, session tools, agent ceiling and depth).
+  It also lists the send key, which no command changes, and the limits on agents, which `set_agent_limits` changes behind a card.
 - `set_preferences` takes only what changes: `theme` (an id or a name), `textSize`, `bodyFont`, `codeFont`,
   `lineHeight`, `idleSleepMinutes` (a whole number, or "never"), `autoUpdate` ("Automatic updates", below), and
   `moveIdleSessionsToNewAgentCli` and `notifications` (the switches to change: `approval`, `done`, `whenFocused`, `sound`;
@@ -1472,6 +1472,58 @@ preferences) are the Trash screen's calls. `what` is `session` (the default) or 
   stood is left alone and said so, and so is one restored and trashed again (its `deletedAt`, message count or what goes
   with it differ from the row the card named); one that failed to delete stays and is reported, and the rest go on.
 
+**Trust** (#1219, third slice). The rare commands `list_projects` and `set_project_trust { project, trusted }`
+(`TrustFlow`, `sessions/trust-flow.ts`, through the same window RPC as the preferences) are the project list's and the
+trust switch's calls (`projects.list`, `projects.setTrusted`, with `apps.list` and `machines.list` to name what the
+trust covers and where). `project` is an id, or a name exactly one project has (two that share it are named with their
+ids). The orchestrator's instructions point to these and the machine commands in one line: `centralu_commands "machine trust rule grant limits"` finds them all (2 characters more than the line it replaced).
+
+- `list_projects`: each project with its id, folder, machine and whether it is trusted.
+- `set_project_trust` with `trusted: false` asks too, in every preset (the reviewer's decision on #1325): it is not only
+  narrowing. An untrusted project's sessions read the person's own settings only (`settingSourcesFor`), so the project's
+  own deny rules and the hooks that block tools stop applying to its agents, `auto` sessions included; its apps stop and
+  its idle sessions restart (a busy one when its turn ends, #663). The card says so; after Allow the project is read again
+  (removed, moved, unreachable, or untrusted meanwhile: nothing more changes).
+- With `trusted: true` it asks first, in every preset (`ORCHESTRATOR_CHANGE`, allow or deny only): the card names the
+  project, its folder and machine, and each of its apps (root and inner) with its description and what it may ask for,
+  in the window's trust card's words (`usesLines`, now in the protocol so both say it the same way). After Allow the
+  project and its apps are read again: one removed meanwhile, or whose apps changed (an app added by a pull, or what one
+  may ask for), is not trusted, and the answer says why; one the person trusted meanwhile is left as it is. What a
+  manifest supplies (name, description, the declared background work) is quoted with control and format characters
+  escaped, the folder is named whole, and an app whose manifest could not be read, or that a linked machine listed without
+  `uses` (an older build), is said to ask for what is not known rather than for nothing. A project whose machine is not
+  reachable (its row is the hub's last copy) is refused before the card. A linked machine's project's apps are asked of
+  that machine alone (`apps.list` with `machine`, which the router sends to that machine only, so a machine that does not
+  answer is an error, not a list without its apps); when they cannot be listed, trust is refused before the card. Every
+  app is named with its id quoted (an id is a folder's name). After Allow its folder and machine are checked too.
+- The lists (`list_projects`, `list_approval_rules`, `list_app_grants`) say which linked machines are not connected, or
+  that the machines could not be read at all, so a list without them does not read as complete.
+- `list_approval_rules { project? }` reads Settings' list (`approvals.rules`, a linked machine's merged with its ids
+  folded): each rule's id, what it allows, the project or session it belongs to, and since when.
+  `remove_approval_rule { id }` removes one at once (`approvals.deleteRule`), as Settings' delete does: it only
+  narrows, and that action asks again. An id no rule has is refused. **No command adds or widens a rule**: the window has
+  no such call either, and a rule comes only from the person answering a card "always" (`ApprovalRules.rememberAlways`).
+- App trust follows the project's since #1141 (a root app and its inner apps run when the project is trusted, and an
+  imported app is enabled by trusting its project), so trusting an app is `set_project_trust`. `list_app_grants { app?,
+  project? }` lists the apps (`apps.list`) with their trust and sharing and the person's remembered answers to what each
+  asked for (`apps.permissions`, routed to a linked machine as the window routes it), and the remembered consents of one
+  project reaching another (`projectConsents.list`). `forget_app_answer { app, project?, capability }` and
+  `revoke_project_consent { from, to, kind }` act at once (`apps.forgetPermission`, `projectConsents.revoke`): each only
+  makes the next attempt ask the person again. `share_app { app, project?, shared }` is the inner app's share switch
+  (`apps.setShared`): off acts at once; on asks first, every preset, with a card naming the app, its project and what it
+  may ask for. After Allow the app is read again: one removed, already shared, or whose `uses` changed while the card
+  stood is not shared. A root app and a user-folder app have no share switch, and are refused before any card. The
+  person's answer to an app's own capability question is not given from here: the app asks the person.
+- `set_agent_limits { agentCeiling?, agentDepth? }` changes the person's limits on agents: the running agents per project
+  (a number, 0 unlimited, or `"preset"` for the preset's own) and the levels of sessions that may start agents (1 to 3).
+  "Let sessions look at other sessions" (`sessionTools`) is not one of them: it is not a setting any more (owner decision
+  2026-10-20, #1321), so the command has no field for it and refuses one by name. They bound what agents do and cost, the
+  orchestrator's own children included, so **every change asks**, narrowing too, in every preset: the card names each
+  limit as it is and as it becomes (`→`). Values are checked with `prefs.set`'s own schema before the card; nothing to
+  change asks nothing. After Allow the limits are read again, and when the person changed one in Settings while the card
+  stood nothing is changed (the card's "from" is not what is set); otherwise one `prefs.set` with exactly the named fields.
+  `set_preferences` still has no field for them. The agent models (`agentModels`) stay the person's.
+
 ### 1.4 The inventory behind #1219: what the window calls, and what the orchestrator reaches
 
 The owner's direction (#1219): what the person can do in the window, the orchestrator can ask to do, through the same
@@ -1494,7 +1546,7 @@ window's channel), grouped, and for each group one of three states.
 | Restart or resume. `agents.restartSession`, `agents.resumeSession` | Has it | A send to an asleep or stopped session wakes it |
 | Housekeeping of a session. `agents.stopBackgroundTask`, `agents.clearBackgroundTasks`, `sessions.rename`, `sessions.markRead`, `sessions.reorder`, `agents.listExternalSessions`, `agents.commands`, `agents.models`, `agents.capabilities`, `agents.detect`, `agents.account`, `agents.usage`, `messages.image` | Should: *next* | Harmless; none is asked for by name yet. `agents.usage` read only. `messages.image` and the lists behind the composer are drawing aids, not errands |
 | MCP and skill proposals. `agents.mcpProposals`, `agents.skillProposals` (the lists) and the `resolve*` calls | Proposing has it (`propose_mcp_server`, `propose_skill`); resolving is **Person** | Approving installs code or changes every orchestrator turn from then on. `agents.orchestratorSkills` and `agents.deleteOrchestratorSkill`: **Person**, they edit the orchestrator's own instructions |
-| Preferences. `prefs.get`, `prefs.set` | **This change** for theme, text size, fonts, line height, and idle sleep (below); the rest **Person** or *next* | `sessionTools` is not a setting (always on, 2026-10-20). `agentCeiling`, `agentDepth`, `agentModels` widen what agents may do or cost: **Person**. `sendWithModifierEnter` and `foldedGroups` are harmless and not asked for yet: *next*. `accent` is gone from the product (2026-10-20): not offered, and refused by name |
+| Preferences. `prefs.get`, `prefs.set` | **This change** for theme, text size, fonts, line height, and idle sleep (below); the rest **Person** or *next* | `sessionTools` is not a setting (always on, 2026-10-20). `agentCeiling`, `agentDepth`: has it (#1219, third slice), `set_agent_limits`, every change behind a card. `agentModels`: **Person**. `sendWithModifierEnter` and `foldedGroups` are harmless and not asked for yet: *next*. `accent` is gone from the product (2026-10-20): not offered, and refused by name |
 | Themes. `themes.list` | **This change** (read) | `themes.save`, `themes.import`, `themes.resolve`: a theme file is a file in the data folder (docs/themes.md), which an agent can already write; no command |
 | Update switches. `updates.status`, `updates.setAuto`, `updates.setAutoApply`, `agents.versions`, `agents.setAutoApplyVersions` | **This change** | Turning "Automatic updates" **on** (`autoUpdate`, both halves) asks (it installs and relaunches without a later question); the rest act at once. `updates.apply` has `update_centralu install`; `updates.answerApply` and `updates.reportApply` are the window's side of an apply |
 | Idle sleep. `agents.sleepPolicy`, `agents.setSleepPolicy` | **This change** | |
@@ -1504,12 +1556,15 @@ window's channel), grouped, and for each group one of three states.
 | Deleting for good. `trash.purge`, `trash.purgeSubagentSteps`, `trash.purgeRuns`, `trash.empty` | **This change**, behind a card naming what goes | One session, or one session's trashed steps (`delete_trashed`), or all of it (`empty_trash`). `trash.empty` itself is not called: it takes everything there is, and `empty_trash` deletes what its card named, one call each |
 | Workspace layout. `workspace.save`, `workspace.load`, `grid.get`, `grid.set` | **Person** | The window's own state, written whole by one writer (`saveWorkspace`); a second writer erases the other's fields |
 | Projects. `projects.add`, `projects.inspect`, `projects.create`, `projects.createPreview` | Has it | `add_project`, `create_project`, each behind a card |
-| `projects.list`, `projects.gitStatus`, `projects.origin`, `files.search` | Should: *next* | A read-only project list (names, trust, machine); `list_sessions` and `create_session` look projects up by name today |
-| Project trust and commands. `projects.setTrusted`, `projects.setCommands`, `projects.setWorktreeSetup`, `worktrees.setTrunk`, `worktrees.createManager`, `projects.delete`, `projects.reorder` | **Person**, except `projects.reorder` (*next*, harmless) | Trusting a project lets its agents and apps run; commands and worktree setup run shell commands; `projects.delete` can trash a folder |
+| `projects.list` | Has it (#1219, third slice) | `list_projects`: names, ids, folders, machine and trust |
+| `projects.gitStatus`, `projects.origin`, `files.search` | Should: *next* | Read only |
+| Project trust. `projects.setTrusted` | Has it (#1219, third slice) | `set_project_trust`: both ways ask (taking trust away drops the project's own deny rules and hooks); trusting's card names the folder and each app with what it may ask for; both checked again after Allow |
+| Project commands. `projects.setCommands`, `projects.setWorktreeSetup`, `worktrees.setTrunk`, `worktrees.createManager`, `projects.delete`, `projects.reorder` | **Person**, except `projects.reorder` (*next*, harmless) | Commands and worktree setup run shell commands; `projects.delete` can trash a folder |
 | Git and files in a project. `git.*`, `fs.*`, `attachments.save` | **Person** | The window acting on the person's own repository and files. The orchestrator hands this to a session in the project, which has the tools and the preset that decide it |
-| Approval rules. `approvals.rules` (read), `approvals.deleteRule` | Reading: *next*; deleting: **Person** | A rule is a standing "allow"; seeing them is harmless, but removing or adding them changes what runs unasked. Widening is never offered |
+| Approval rules. `approvals.rules` (read), `approvals.deleteRule` | Has it (#1219, third slice) | `list_approval_rules`, `remove_approval_rule` (it only narrows: no card). No command adds or widens a rule; the window has no such call, and a rule comes only from the person's "always" on a card |
 | Apps. `apps.list`, `apps.create`, `apps.sessionTools`, `apps.sessionCall` | Has it | `find_apps`, `attach_app`, `detach_app`, `create_app`; an app's own tools reach a session through its attach |
-| App trust and grants. `apps.permissions`, `apps.forgetPermission`, `apps.reach`, `apps.enable`, `apps.review`, `apps.setShared`, `apps.setSecret`, `apps.importPrepare`, `apps.importCommit`, `apps.importCancel`, `projectConsents.list`, `projectConsents.revoke` | **Person** (listing: *next*) | Granting what an app may reach, enabling or importing one, sharing it and its secrets are trust decisions; a secret's value is never handed to an agent |
+| App grants. `apps.permissions`, `apps.forgetPermission`, `apps.setShared`, `projectConsents.list`, `projectConsents.revoke` | Has it (#1219, third slice) | `list_app_grants`, `forget_app_answer`, `revoke_project_consent` (they only make the next attempt ask: no card), `share_app` (on asks, with a card naming the app and what it may ask for, checked again after Allow; off acts at once) |
+| App trust and imports. `apps.reach`, `apps.enable`, `apps.review`, `apps.setSecret`, `apps.importPrepare`, `apps.importCommit`, `apps.importCancel` | **Person** | Enabling an app is trusting its project since #1141 (`set_project_trust`); importing one brings code in; a secret's value is never handed to an agent |
 | App upkeep. `apps.remove`, `apps.restart`, `apps.versions`, `apps.restoreVersion`, `apps.check`, `apps.runs`, `apps.errors`, `apps.usage`, `apps.questions`, `apps.answerQuestion`, `apps.builder`, `apps.createBuilder`, `apps.askBuilder`, `apps.sendError` | Should: *next* | `apps.remove` behind a card (its folder moves to `app-trash/`); the rest are reads or reversible. The builder calls are the app builder's own channel |
 | App screens. `apps.viewFrame`, `apps.viewDocument`, `apps.openView`, `apps.closeView`, `apps.recoverView`, `apps.holdViews`, `apps.inlineReopen`, `apps.inlineViews`, `apps.viewMessage`, `apps.readResource`, `apps.invoke` | **Person** | Drawing and clicking an app's screen: they have no meaning without a window |
 | Linked machines. `machines.list`, `machines.add`, `machines.remove`, `machines.reconnect`, `machines.setAutoReconnect`, `machines.setConnect`, `machines.install`, `machines.update`, `machines.autostart`, `machines.probe` | Has it (slice 1, #1238) | Six commands and `list_machines`; add, install, update, remove and start at boot behind a card |
@@ -1519,10 +1574,11 @@ window's channel), grouped, and for each group one of three states.
 | Terminals, commands and processes. `terminal.*`, `commands.*`, `processes.strays`, `processes.stop` | **Person** | A shell and run commands on the person's behalf, and stopping a process; the orchestrator has no shell of its own, its sessions do |
 | The orchestrator's own channel. `orchestrator.get`, `orchestrator.peek`, `orchestrator.configure`, `orchestrator.tools`, `orchestrator.tool` | Not an errand | How the window and the bridge reach the orchestrator itself |
 
-The linked machines came first (#1238). This change is the preferences above and the trash. *Next*, in the order the owner's
-errands have come: notifications (after their move into the preferences), the read-only lists (projects, approval rules,
-app grants), deleting a session that is not the caller's child, the machine calls left, and app upkeep. Trust-changing
-calls stay out of every slice unless the owner says otherwise.
+The linked machines came first (#1238), then the preferences and the trash (#1309) and the notification switches (#1313).
+The third slice is trust, as the owner asked (2026-10-20): project trust first (`list_projects`, `set_project_trust`),
+then approval rules, app trust and grants, and the orchestrator's own limits. In each, what narrows trust acts at once
+and what widens it waits for the person's card, which names exactly what changes and is checked again after Allow.
+*Next*, after it: deleting a session that is not the caller's child, the machine calls left, and app upkeep.
 
 ## 2. The AgentAdapter contract (the implementation spec for product spec §6.2)
 

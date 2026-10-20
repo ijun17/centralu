@@ -256,7 +256,12 @@ export const appMethods = {
    * untrusted project and apps with a broken manifest are listed too, with a reason (`status`,
    * `error`): hiding them would leave nowhere to ask why they do not show up.
    */
-  'apps.list': { params: z.object({}), result: z.array(ExternalAppInfo) },
+  /**
+   * Every app, every reachable linked machine's merged in. `machine` (#1219): only that linked machine's, asked of it
+   * alone, so a machine that does not answer is an error rather than a list without its apps (what a trust card needs to
+   * name what it covers). An older hub strips the field and answers the merged list.
+   */
+  'apps.list': { params: z.object({ ...machineParam }), result: z.array(ExternalAppInfo) },
   /**
    * Lets a stopped (`failed`) external app be started again — clears the run of consecutive
    * failures, and takes it down if it happens to be up. **Does not start it**: whatever calls

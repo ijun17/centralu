@@ -29,8 +29,10 @@ const SLEEP_CHOICES = 'a whole number of minutes, or "never"'
  * `set_preferences` changes the reversible ones the window offers. Each is the call the window makes (`prefs.set`,
  * `agents.setSleepPolicy`, `updates.setAuto`, ...) through the router, so the host checks it as it checks the window:
  * the method's own schema, and the same handler. What the window keeps for itself, or that widens what agents may do
- * (the agent ceiling, depth and models, trust, approval rules), has no field here. "Let sessions look at other sessions"
- * (`sessionTools`) is not a setting any more (owner decision 2026-10-20): always on, so neither command names it.
+ * (the agent ceiling, depth and models, trust, approval rules), has no field here: the trust commands (`trust-flow.ts`)
+ * change trust, rules, grants and the limits on agents, each behind its own card where it widens. "Let sessions look at
+ * other sessions" (`sessionTools`) is not a setting any more (owner decision 2026-10-20): always on, so neither command
+ * names it.
  *
  * Reversible means no card, with two exceptions. Turning off the notification for an approval asks first (the one that
  * tells the person a card waits), and so does the sound while it still notifies. The "error" and "every session finished"
@@ -96,8 +98,9 @@ export class PreferencesFlow {
       versions.status === 'fulfilled'
         ? `- Move idle sessions to a newly installed agent CLI: ${onOff(versions.value.autoApply)} (moveIdleSessionsToNewAgentCli)`
         : '- Agent CLI versions: not available on this host',
-      'Kept by the person (no command changes these)',
+      'Kept by the person (no command changes this)',
       `- Send with Ctrl+Enter instead of Enter: ${onOff(p.sendWithModifierEnter)}`,
+      'Limits on agents (set_agent_limits changes them, behind the person\'s card)',
       `- Agents: running per project ${p.agentCeiling === undefined || p.agentCeiling === null ? 'by preset' : p.agentCeiling === 0 ? 'unlimited' : p.agentCeiling}; levels that may start agents ${p.agentDepth ?? 1}`,
     ]
     return { ok: true, text: lines.join('\n') }
