@@ -370,13 +370,19 @@ export class AppLifecycle {
     }
   }
 
-  /** Stops every entry given and every process this runtime started — the host is exiting (`ExternalApps.dispose`) */
-  async stopAll(all: AppEntry[]): Promise<void> {
+  /**
+   * Stops every entry given and every process this runtime started — the host is exiting (`ExternalApps.dispose`).
+   * `awaitTree`: also wait until each process has ended and what it left running is collected, for a caller about to
+   * delete the data folder the apps write to (a test's cleanup): an app still ending there, or a child of it (on
+   * Windows the leftovers are only swept after the app has ended), would hold its files.
+   */
+  async stopAll(all: AppEntry[], { awaitTree = false }: { awaitTree?: boolean } = {}): Promise<void> {
     // Within the shutdown budget (Tauri's 3 seconds) — the grace period is shortened, and it does not wait all the way through SIGKILL
+    const how = { graceMs: 1_000, awaitKill: awaitTree, awaitTree }
     await Promise.allSettled([
-      ...all.map((e) => this.halt(e, 'host shutting down', { graceMs: 1_000, awaitKill: false })),
+      ...all.map((e) => this.halt(e, 'host shutting down', how)),
       // Also processes belonging to no entry at all (see the `spawned` comment) — if one is already stopping, this waits for that same stop (stop only ever runs once)
-      ...[...this.spawned].map((p) => p.stop(1_000, { awaitKill: false })),
+      ...[...this.spawned].map((p) => p.stop(how.graceMs, { awaitKill: how.awaitKill, awaitTree: how.awaitTree })),
     ])
     this.spawned.clear()
   }

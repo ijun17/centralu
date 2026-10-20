@@ -234,13 +234,14 @@ export class AgentVersionService {
 
   /**
    * Restarts every live session that runs an older CLI and is idle right now — the person asked, so
-   * the quiet period does not apply. The rest are listed as busy.
+   * the quiet period does not apply. The rest are listed as busy. `keepQuiet`: not the person's own button (an agent
+   * asked, #1219), so a session that said something within the quiet period is left too, as the automatic move leaves it.
    */
-  async applyNow(): Promise<{ restarted: string[]; busy: string[] }> {
+  async applyNow(opts: { keepQuiet?: boolean } = {}): Promise<{ restarted: string[]; busy: string[] }> {
     const restarted: string[] = []
     const busy: string[] = []
     for (const s of this.deps.sessions.listSessions()) {
-      const d = this.decide(s, 0)
+      const d = this.decide(s, opts.keepQuiet ? this.deps.quietMs : 0)
       if (d.restart) {
         if (await this.restart(s)) restarted.push(s.id)
         else busy.push(s.id)

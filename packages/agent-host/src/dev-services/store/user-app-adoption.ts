@@ -49,7 +49,7 @@ export class UserAppAdoptionRecords {
    */
   carry(appId: string, project: { path: string; name: string; trusted: boolean; newId: string }, mark: string): { projectId: string; sessions: string[] } {
     return this.db.transaction(() => {
-      const known = this.db.prepare(`SELECT id FROM projects WHERE path = ?`).get(project.path) as { id: string } | undefined
+      const known = this.db.prepare<unknown[], { id: string }>(`SELECT id FROM projects WHERE path = ?`).get(project.path)
       const projectId = known?.id ?? project.newId
       if (!known) {
         this.db
@@ -77,12 +77,13 @@ export class UserAppAdoptionRecords {
       // Its sessions (its builder, the agents it started): a user-folder app's had no project; the orchestrator and coordinators are not its
       const sessions = (
         this.db
-          .prepare(
+          .prepare<unknown[], { id: string }>(
             `SELECT id FROM sessions
               WHERE project_id IS NULL AND app_id = ? AND deleted_at IS NULL AND is_orchestrator = 0 AND scope_session_ids IS NULL`,
           )
-          .all(appId) as { id: string }[]
-      ).map((r) => r.id)
+          .all(appId)
+      )
+        .map((r) => r.id)
       const move = this.db.prepare(`UPDATE sessions SET project_id = ? WHERE id = ? AND project_id IS NULL AND deleted_at IS NULL`)
       for (const id of sessions) move.run(projectId, id)
       // Grid panels: moved, unless the project's key already has one
@@ -102,10 +103,10 @@ export class UserAppAdoptionRecords {
         if (isObj(assigned) && typeof assigned[from] === 'number' && assigned[to] === undefined) assigned[to] = assigned[from]
       })
       // Apps sessions attached themselves (find_apps / attach_app): the record names the app's project now
-      const attached = this.db.prepare(`SELECT key, value FROM app_settings WHERE key LIKE ? ESCAPE '\\'`).all(`${ATTACHED_PREFIX.replace(/_/g, '\\_')}%`) as {
+      const attached = this.db.prepare<unknown[], {
         key: string
         value: string
-      }[]
+      }>(`SELECT key, value FROM app_settings WHERE key LIKE ? ESCAPE '\\'`).all(`${ATTACHED_PREFIX.replace(/_/g, '\\_')}%`)
       for (const row of attached) {
         const list = parseJson(row.value)
         if (!Array.isArray(list)) continue
@@ -119,7 +120,7 @@ export class UserAppAdoptionRecords {
         if (changed) this.settings.setAppSetting(row.key, JSON.stringify(list))
       }
       // The names sessions have seen it under (#1141): the same app, so the same name, under its new key
-      const names = this.db.prepare(`SELECT key, value FROM app_settings WHERE key LIKE ? ESCAPE '\\'`).all('session\\_app\\_names:%') as { key: string; value: string }[]
+      const names = this.db.prepare<unknown[], { key: string; value: string }>(`SELECT key, value FROM app_settings WHERE key LIKE ? ESCAPE '\\'`).all('session\\_app\\_names:%')
       for (const row of names) {
         const book = parseJson(row.value)
         if (!isObj(book) || typeof book[from] !== 'string' || book[to] !== undefined) continue
@@ -131,7 +132,7 @@ export class UserAppAdoptionRecords {
        * The orchestrator was given it as a user-folder app; a root app it attaches when it needs one (#1205). One it has
        * seen keeps it attached, under the name it called it by: an attachment of its own, as attach_app writes one
        */
-      const orchestrators = this.db.prepare(`SELECT id FROM sessions WHERE is_orchestrator = 1 AND deleted_at IS NULL`).all() as { id: string }[]
+      const orchestrators = this.db.prepare<unknown[], { id: string }>(`SELECT id FROM sessions WHERE is_orchestrator = 1 AND deleted_at IS NULL`).all()
       for (const { id } of orchestrators) {
         const book = parseJson(this.settings.appSetting(`session_app_names:${id}`))
         const server = isObj(book) ? book[to] : undefined
@@ -143,7 +144,7 @@ export class UserAppAdoptionRecords {
         this.settings.setAppSetting(`${ATTACHED_PREFIX}${id}`, JSON.stringify(list))
       }
       // The window's own memory of the app (its span on the grid, the app it had open), kept in the workspace snapshot
-      const layout = this.settings.loadWorkspace<Record<string, unknown>>()
+      const layout = this.settings.loadWorkspace()
       if (isObj(layout)) {
         let changed = false
         const spans = layout.appSpans

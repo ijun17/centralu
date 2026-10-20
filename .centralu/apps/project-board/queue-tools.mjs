@@ -17,6 +17,7 @@ import { becauseLines, judgeBranch, labelTier, notAutoText, recordVerified } fro
 import { queueBusy, queueRef, readLease, readQueue, startDriver, updateQueue } from './queue-driver.mjs'
 import { answer, asError, linesAnswer } from './reply.mjs'
 import { plural, shellQuote } from './util.mjs'
+import { acknowledge, dueReposts, markReposted, noticeText, unacked } from './notice-acks.mjs'
 
 const dataDir = () => centralu.dataDir
 const WATCH = join(APP_DIR, 'bin', 'merge-queue.mjs')
@@ -47,6 +48,25 @@ const TELL_TRIES = 6
 /** Between tries of one message: Centralu may be restarting (a swap takes seconds to a minute) */
 const TELL_RETRY_MS = Number(process.env.PROJECT_BOARD_QUEUE_TELL_RETRY_MS) || 30_000
 const tellTries = new Map()
+/** The same for posting a message again (#1351) */
+const repostTries = new Map()
+
+/**
+ * Posts one message into its session, counting tries in `tries`: answers whether it was posted, false once given
+ * up on after TELL_TRIES, or null to try again later (not taken yet, or tried too recently).
+ */
+async function post(tries, e, text, now) {
+  const tried = tries.get(e.seq)
+  if (tried && now < tried.at + TELL_RETRY_MS) return null
+  const ok = await centralu.notify(e.to, text)
+  const n = (tried?.n ?? 0) + 1
+  if (!ok && n < TELL_TRIES) {
+    tries.set(e.seq, { n, at: now })
+    return null
+  }
+  tries.delete(e.seq)
+  return ok
+}
 let telling = false
 
 /**
@@ -62,19 +82,23 @@ export async function tellSessions(now = Date.now()) {
   try {
     const q = readQueue(dataDir())
     for (const e of q.events.filter((x) => x.notify && x.to && !x.told)) {
-      const tried = tellTries.get(e.seq)
-      if (tried && now < tried.at + TELL_RETRY_MS) continue
-      const ok = await centralu.notify(e.to, e.text)
-      const n = (tried?.n ?? 0) + 1
-      if (!ok && n < TELL_TRIES) {
-        tellTries.set(e.seq, { n, at: now })
-        continue
-      }
-      tellTries.delete(e.seq)
+      // One that needs attention says how to acknowledge it, or it stays listed (#1351)
+      const ok = await post(tellTries, e, noticeText(e), now)
+      if (ok === null) continue
       updateQueue(dataDir(), (fresh) => {
         const ev = fresh.events.find((x) => x.seq === e.seq)
-        if (ev) ev.told = ok ? true : 'failed'
+        if (!ev) return
+        ev.told = ok ? true : 'failed'
+        // When, for posting it again if it stays unacknowledged (#1351)
+        if (ok) ev.toldAt = new Date(now).toISOString()
       })
+    }
+    // A message that needs attention and is still unacknowledged after 30 minutes is posted again, once (#1351)
+    // A post Centralu does not take is tried again, as a first post is, and only then given up on
+    for (const e of dueReposts(readQueue(dataDir()), now).filter((x) => x.to)) {
+      const ok = await post(repostTries, e, `Merge queue: still not acknowledged after ${Math.round((now - Date.parse(e.toldAt)) / 60_000)} minutes: ${noticeText(e)}`, now)
+      if (ok === null) continue
+      updateQueue(dataDir(), (fresh) => markReposted(fresh, e.seq, new Date(now).toISOString(), ok))
     }
   } catch (err) {
     console.error(`[project-board] merge queue: telling a session failed: ${err?.message ?? err}`)
@@ -332,9 +356,34 @@ async function integrateWrites({ repo, name, defaultBranch, title, sections, ver
   return queuedAnswer(summary, r, { integrated: true, pr: number, url, opened, tier: j.tier, line: j.line })
 }
 
-async function mergeQueue({ all = false }) {
+/** The messages an owner (every owner when none is given) has not acknowledged, for merge_queue and the screen (#1351) */
+function unackedView(owner = null) {
+  return unacked(readQueue(dataDir()), owner).map(({ seq, at, owner: o, kind, pr, text }) => ({ seq, at, owner: o, kind, pr, text }))
+}
+
+async function mergeQueue({ all = false, owner }) {
   const v = queueView({ all })
-  return linesAnswer(v.summary, [['items', '', v.lines]], { counts: v.counts, queue: v.queue, batches: v.batches, events: v.events, pause: v.pause, seq: v.seq })
+  const who = owner?.trim() || null
+  const waiting = unackedView(who)
+  // What its owner has not acknowledged comes first, with how to (#1351); without an owner only how many, by owner
+  const owners = [...new Set(waiting.map((e) => e.owner))]
+  const head = !waiting.length
+    ? []
+    : who
+      ? [`${plural(waiting.length, 'message')} not acknowledged by ${who}; act on each, then ack({ owner, seqs }) (or upTo: ${waiting.at(-1).seq}):`, ...waiting.map((e) => `#${e.seq} ${e.text}`)]
+      : [`${plural(waiting.length, 'message')} not acknowledged, for ${owners.map((o) => `${o} (${waiting.filter((e) => e.owner === o).length})`).join(', ')}; merge_queue({ owner }) lists them.`]
+  return linesAnswer(v.summary, [['unacked', '', head], ['items', '', v.lines]], { counts: v.counts, queue: v.queue, batches: v.batches, events: v.events, unacked: waiting, pause: v.pause, seq: v.seq })
+}
+
+async function ack({ owner, seqs = [], upTo }) {
+  const who = owner.trim()
+  // A blank owner would match every owner's messages: refused
+  if (!who) return asError(answer('Nothing acknowledged: give the owner you queued with.', { acked: 0 }))
+  if (!seqs.length && upTo === undefined) return asError(answer('Nothing acknowledged: give seqs, or upTo.', { acked: 0 }))
+  const at = new Date().toISOString()
+  const n = updateQueue(dataDir(), (q) => acknowledge(q, who, { seqs, upTo: upTo ?? null, at }))
+  const left = unackedView(who).length
+  return answer(`Acknowledged ${plural(n, 'message')} for ${who}; ${left} still not acknowledged.`, { acked: n, left })
 }
 
 async function unqueue({ pr }) {
@@ -396,10 +445,29 @@ export const tools = {
       title: 'The merge queue',
       description:
         'The merge queue (queue_merge): each item waiting, in CI (alone or in a batch), needing attention (and why: dirty, failed twice and the job, a draft, …) or merged, the batches, who drives it now, and the latest messages. Instead of gh pr list / gh run list to follow merges.',
-      inputSchema: z.object({ all: z.boolean().optional().describe('Also items finished more than a day ago') }),
+      inputSchema: z.object({
+        all: z.boolean().optional().describe('Also items finished more than a day ago'),
+        owner: z.string().max(80).optional().describe("Yours: list first the messages needing attention to you that you have not acknowledged (ack them with ack)"),
+      }),
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     handler: answering(mergeQueue),
+  },
+
+  ack: {
+    config: {
+      title: 'Acknowledge merge queue messages',
+      description:
+        "Acknowledge the merge queue's messages that need attention, to you, once handled: by seq, or every one up to a seq. Until then merge_queue lists them first, the watch command without --after replays them, and each is posted into your session again once, 30 minutes after it was. Landings and other news need no ack.",
+      inputSchema: z.object({
+        owner: z.string().max(80).describe('The owner the messages are for: the name you queued with (not blank)'),
+        seqs: z.array(z.number().int()).max(200).optional().describe('The messages to acknowledge, by seq'),
+        upTo: z.number().int().optional().describe('Acknowledge every one of your messages up to this seq'),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      _meta: { ui: { visibility: ['model'] } },
+    },
+    handler: answering(serially(ack)),
   },
 
   unqueue: {

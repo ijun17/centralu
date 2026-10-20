@@ -140,6 +140,13 @@ describe('ChatRow: approvals and marks', () => {
     expect(notice.text).not.toContain('ignored')
     expect(notice.text).toContain('Codex · config warning')
   })
+
+  it('a refused model leaves a button to the model menu (#1369), and an ordinary divider none', () => {
+    const refused = row({ kind: 'mark', seq: 5, text: 'The agent could not finish this turn — … Pick another model for this session to continue.', pickModel: true })
+    expect(testIds(refused.html)).toEqual(['msg-mark', 'msg-mark-pick-model'])
+    expect(refused.text).toContain('Pick another model')
+    expect(testIds(row({ kind: 'mark', seq: 5, text: 'conversation compacted here' }).html)).toEqual(['msg-mark'])
+  })
 })
 
 describe('ChatRow: tool cards', () => {

@@ -3,7 +3,8 @@ import { createReadStream, existsSync } from 'node:fs'
 import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { isSessionId } from '@cc/protocol'
+import { errorMessage, isSessionId } from '@cc/protocol'
+import { isObj } from '../json-value.js'
 import { dataRoot } from '../data-dir.js'
 import { dataBytes, removeData } from './data-folder.js'
 import { gitFilterListings, runGit, type GitFilterListings, type GitTrust, type RunGitOptions } from './git-exec.js'
@@ -70,7 +71,7 @@ export async function repairWorktreeRecoveryRemovals(trashed: (sessionId: string
       }
       await removeData(staged)
     } catch (e) {
-      console.error(`[trash] recovery folder ${name} left by an interrupted purge was not repaired, retried at the next start: ${(e as Error).message}`)
+      console.error(`[trash] recovery folder ${name} left by an interrupted purge was not repaired, retried at the next start: ${errorMessage(e)}`)
     }
   }
 }
@@ -147,7 +148,7 @@ export async function saveWorktreeRecovery(sessionId: string, cwd: string, trunk
         const local: string[] = []
         for (const row of available.trim().split('\n')) {
           const [oid, type] = row.split(' ')
-          if (type === 'commit') local.push(oid!)
+          if (type === 'commit' && oid !== undefined) local.push(oid)
         }
         // Merged trunk history names every module commit its checkouts ever had, nearly all of them on
         // the module's remotes. Only the ones no remote has are worth a ref and a place in the bundle.
@@ -200,11 +201,11 @@ export async function saveWorktreeRecovery(sessionId: string, cwd: string, trunk
       let change: RegExpMatchArray | null = null
       for await (const row of gitRecords(repo, ['log', '--raw', '-z', '--no-renames', '--ignore-submodules=none', '--no-abbrev', '--format=', '--root', '--diff-merges=separate', '--stdin'], input, filters)) {
         if (change) {
-          const [, oldMode, newMode, oldOid, newOid] = change
-          if (oldMode === '160000') keepGitlink(row, oldOid!)
-          if (newMode === '160000') keepGitlink(row, newOid!)
-          keepManifest(row, oldOid!)
-          keepManifest(row, newOid!)
+          const [, oldMode, newMode, oldOid = '', newOid = ''] = change
+          if (oldMode === '160000') keepGitlink(row, oldOid)
+          if (newMode === '160000') keepGitlink(row, newOid)
+          keepManifest(row, oldOid)
+          keepManifest(row, newOid)
           change = null
         } else change = row.match(/^\n*:(\d{6}) (\d{6}) ([a-f0-9]+) ([a-f0-9]+) [A-Z]$/)
       }
@@ -212,17 +213,17 @@ export async function saveWorktreeRecovery(sessionId: string, cwd: string, trunk
     await scanHistory(revisions)
     for await (const row of gitRecords(repo, ['ls-tree', '-r', '-z', 'HEAD'], undefined, filters)) {
       const tab = row.indexOf('\t')
-      const [mode, , oid] = row.slice(0, tab).split(' ')
+      const [mode, , oid = ''] = row.slice(0, tab).split(' ')
       const rel = row.slice(tab + 1)
-      if (mode === '160000') keepGitlink(rel, oid!)
-      keepManifest(rel, oid!)
+      if (mode === '160000') keepGitlink(rel, oid)
+      keepManifest(rel, oid)
     }
     const stagedObjects: string[] = []
     for await (const row of gitRecords(repo, ['ls-files', '--stage', '-z'], undefined, filters)) {
       if (!row) continue
       const tab = row.indexOf('\t')
       const rel = row.slice(tab + 1)
-      const oid = row.split(' ')[1]!
+      const oid = row.split(' ')[1] ?? ''
       if (row.startsWith('160000 ')) keepGitlink(rel, oid)
       else if (stagedNames.has(rel)) stagedObjects.push(oid)
       keepManifest(rel, oid)
@@ -283,7 +284,9 @@ export async function saveWorktreeRecovery(sessionId: string, cwd: string, trunk
   const snapshotId = randomUUID()
   const dir = join(worktreeRecoveryDir(sessionId), snapshotId)
   await mkdir(dir, { recursive: true, mode: 0o700 })
-  const snapshot: Snapshot = { snapshot: snapshotId, tip: plans[0]!.tip, changedFiles: 0, commits: 0, repositories: [] }
+  const rootPlan = plans[0]
+  if (!rootPlan) throw new Error('The worktree names no repository to keep a recovery snapshot of')
+  const snapshot: Snapshot = { snapshot: snapshotId, tip: rootPlan.tip, changedFiles: 0, commits: 0, repositories: [] }
   const patchFile = async (repo: string, tip: string, file: string, env?: Record<string, string>): Promise<boolean> => {
     // Git writes bytes directly. Decoding stdout as UTF-8 would corrupt CP949/Latin-1 patches,
     // and buffering stdout would fail on large diffs even within the measured input limit.
@@ -357,13 +360,27 @@ async function readSnapshot(file: string): Promise<Snapshot> {
   try {
     v = JSON.parse(await readFile(file, 'utf8'))
   } catch (e) {
-    throw new Error(`The recovery snapshot ${file} could not be read (${(e as Error).message}); its files are left where they are`, { cause: e })
+    throw new Error(`The recovery snapshot ${file} could not be read (${errorMessage(e)}); its files are left where they are`, { cause: e })
   }
-  const repositories = (v as { repositories?: unknown } | null)?.repositories
-  if (!Array.isArray(repositories) || repositories.length === 0 || typeof repositories[0] !== 'object' || repositories[0] === null) {
+  const listed: unknown[] = isObj(v) && Array.isArray(v.repositories) ? v.repositories : []
+  if (!isObj(v) || !isObj(listed[0])) {
     throw new Error(`The recovery snapshot ${file} could not be read (it names no repository); its files are left where they are`)
   }
-  return v as Snapshot
+  // Read field by field, a missing one as none: a snapshot an older build wrote may lack a switch added since
+  return {
+    snapshot: typeof v.snapshot === 'string' ? v.snapshot : '',
+    tip: typeof v.tip === 'string' ? v.tip : '',
+    changedFiles: typeof v.changedFiles === 'number' ? v.changedFiles : 0,
+    commits: typeof v.commits === 'number' ? v.commits : 0,
+    repositories: listed.map((r): RepositorySnapshot => (isObj(r) ? {
+      path: typeof r.path === 'string' ? r.path : '',
+      tip: typeof r.tip === 'string' ? r.tip : '',
+      patch: r.patch === true,
+      staged: r.staged === true,
+      bundle: r.bundle === true,
+      ...(Array.isArray(r.refs) ? { refs: r.refs.filter((x): x is string => typeof x === 'string') } : {}),
+    } : { path: '', tip: '', patch: false, staged: false, bundle: false })),
+  }
 }
 
 /** Restore the root branch/worktree; keep patches available if applying them is no longer feasible. */
@@ -373,7 +390,8 @@ export async function restoreWorktreeRecovery(
   if (!isSessionId(recovery.snapshot)) throw new Error('Invalid recovery snapshot')
   const dir = join(worktreeRecoveryDir(sessionId), recovery.snapshot)
   const snapshot = await readSnapshot(join(dir, 'snapshot.json'))
-  const root = snapshot.repositories[0]!
+  const root = snapshot.repositories[0]
+  if (!root) throw new Error('The recovery snapshot names no repository')
   let extraNotice = ''
   if (root.bundle) {
     const heads = (await runGit(repo, ['bundle', 'list-heads', join(dir, '0.bundle')])).trim().split('\n')

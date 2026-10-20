@@ -424,6 +424,47 @@ describe('a failed turn reaches the screen (#107)', () => {
   })
 })
 
+describe('a model the provider refused (#1369)', () => {
+  const refused = (sessionId: string) =>
+    ({
+      type: 'error',
+      sessionId,
+      error: {
+        code: 'internal',
+        message: "Codex refused the model gpt-5.5: The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account.",
+        retryable: false,
+        data: { reason: 'model_rejected', model: 'gpt-5.5' },
+      },
+    }) as NormalizedEvent
+
+  it('stands as a line that offers another model, live', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('mr-1', sessionInfo('mr-1'))
+    await useStore.getState().attach(mock)
+
+    mock.emit(refused('mr-1'))
+
+    const last = (useStore.getState().chat['mr-1'] ?? []).at(-1) as { kind: string; text: string; pickModel?: true }
+    expect(last.kind).toBe('mark')
+    expect(last.text).toContain("The 'gpt-5.5' model is not supported")
+    expect(last.text).toContain('Pick another model')
+    expect(last.pickModel).toBe(true)
+  })
+
+  it('and the same line after reopening', () => {
+    const [item] = messagesToChat([{ sessionId: 'mr-2', seq: 4, role: 'system', kind: 'marker', ts: 1, payload: refused('mr-2') }])
+    expect(item).toMatchObject({ kind: 'mark', seq: 4, pickModel: true })
+  })
+
+  it('an ordinary failed turn offers nothing', () => {
+    const [item] = messagesToChat([{
+      sessionId: 'mr-3', seq: 4, role: 'system', kind: 'marker', ts: 1,
+      payload: { type: 'error', sessionId: 'mr-3', error: { code: 'internal', message: 'boom', retryable: true } },
+    }])
+    expect(item).not.toHaveProperty('pickModel')
+  })
+})
+
 describe('messagesToChat — image rows (#40, second pass)', () => {
   it('a persisted image is restored into the conversation', () => {
     const items = messagesToChat([

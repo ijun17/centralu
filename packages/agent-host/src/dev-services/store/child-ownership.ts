@@ -27,8 +27,8 @@ export class ChildOwnershipRecords {
 
   listReportMarks(): { sessionId: string; callerSessionId: string }[] {
     return this.db
-      .prepare(`SELECT session_id as sessionId, caller_session_id as callerSessionId FROM report_marks ORDER BY marked_at`)
-      .all() as { sessionId: string; callerSessionId: string }[]
+      .prepare<unknown[], { sessionId: string; callerSessionId: string }>(`SELECT session_id as sessionId, caller_session_id as callerSessionId FROM report_marks ORDER BY marked_at`)
+      .all()
   }
 
   setReportMark(sessionId: string, callerSessionId: string): void {
@@ -48,8 +48,8 @@ export class ChildOwnershipRecords {
 
   listAgentStartRequests(): { requestId: string; callerSessionId: string; request: unknown; askedAt: number }[] {
     const rows = this.db
-      .prepare(`SELECT request_id as requestId, caller_session_id as callerSessionId, request, asked_at as askedAt FROM agent_start_requests ORDER BY asked_at`)
-      .all() as { requestId: string; callerSessionId: string; request: string; askedAt: number }[]
+      .prepare<unknown[], { requestId: string; callerSessionId: string; request: string; askedAt: number }>(`SELECT request_id as requestId, caller_session_id as callerSessionId, request, asked_at as askedAt FROM agent_start_requests ORDER BY asked_at`)
+      .all()
     return rows.flatMap((r) => {
       const request = parseJson(r.request)
       return request === undefined ? [] : [{ ...r, request }]
@@ -73,8 +73,8 @@ export class ChildOwnershipRecords {
 
   listDelegatedTurns(): { sessionId: string; callerSessionId: string; told: string[]; turnId: string }[] {
     const rows = this.db
-      .prepare(`SELECT session_id as sessionId, caller_session_id as callerSessionId, told_cards as told, turn_id as turnId FROM delegated_turns ORDER BY started_at`)
-      .all() as { sessionId: string; callerSessionId: string; told: string; turnId: string }[]
+      .prepare<unknown[], { sessionId: string; callerSessionId: string; told: string; turnId: string }>(`SELECT session_id as sessionId, caller_session_id as callerSessionId, told_cards as told, turn_id as turnId FROM delegated_turns ORDER BY started_at`)
+      .all()
     return rows.map((r) => ({ ...r, told: r.told.split(' ').filter(Boolean) }))
   }
 
@@ -96,12 +96,12 @@ export class ChildOwnershipRecords {
 
   listQueuedRequests(): QueuedRequest[] {
     const rows = this.db
-      .prepare(
+      .prepare<unknown[], (Omit<QueuedRequest, 'openedByAuto'> & { openedByAuto: number | null })>(
         `SELECT id, session_id as sessionId, caller_session_id as callerSessionId, via, text, queued_at as queuedAt,
                 delivering_at as deliveringAt, opened_by_auto as openedByAuto
            FROM queued_requests ORDER BY queued_at, rowid`,
       )
-      .all() as (Omit<QueuedRequest, 'openedByAuto'> & { openedByAuto: number | null })[]
+      .all()
     return rows.map((r) => ({ ...r, openedByAuto: r.openedByAuto === null ? null : r.openedByAuto === 1 }))
   }
 

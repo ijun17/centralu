@@ -199,6 +199,35 @@ export const ORCHESTRATOR_TOOLS = [
     schema: z.object({ machine: z.string().describe('The machine, by the name list_machines gives.'), on: z.boolean() }),
   },
   /*
+   * #1219, the machine calls left: disconnect acts at once; rolling back, uninstalling and accepting differing versions
+   * wait for the person's card; the last two only read.
+   */
+  {
+    name: 'disconnect_machine',
+    description: 'Closes the link to a machine and tries none until the person connects it again. Acts at once; the machine and its sessions stay listed.',
+    schema: z.object({ machine: z.string().describe('The machine, by the name list_machines gives.') }),
+  },
+  {
+    name: 'rollback_machine',
+    description: 'Puts the machine back on the Centralu version installed there before the last update, one step. The person approves a card first.',
+    schema: z.object({ machine: z.string().describe('The machine, by the name list_machines gives.') }),
+  },
+  {
+    name: 'uninstall_machine',
+    description: 'Stops Centralu on a machine and removes what this computer installed there; its data stays and it stays linked. The person approves a card first.',
+    schema: z.object({ machine: z.string().describe('The machine, by the name list_machines gives.') }),
+  },
+  {
+    name: 'machine_activity',
+    description: 'Says what an update or a restart would stop on a machine: sessions working, approvals waiting, background work, terminals. Reads only.',
+    schema: z.object({ machine: z.string().describe('The machine, by the name list_machines gives.') }),
+  },
+  {
+    name: 'list_ssh_hosts',
+    description: "Lists the hosts of this computer's ssh config, with the machines already linked through each; add_machine takes an alias. Reads only.",
+    schema: z.object({}),
+  },
+  /*
    * #1219: the preferences. Rare commands (RARE_COMMANDS), through the window's own calls. Only the
    * reversible settings the window offers have a field; trust, approval rules and what widens agents' reach have none.
    */
@@ -222,6 +251,15 @@ export const ORCHESTRATOR_TOOLS = [
         idleSleepMinutes: z.union([z.number().int().positive(), z.literal('never')]).optional().describe('Minutes before an idle session sleeps, or "never".'),
         autoUpdate: z.boolean().optional().describe('Automatic updates: check for, install, and apply a newer Centralu when idle.'),
         moveIdleSessionsToNewAgentCli: z.boolean().optional(),
+        sendWithModifierEnter: z.boolean().optional().describe('Send a message with Ctrl+Enter (or Cmd+Enter) instead of Enter.'),
+        foldedGroups: z
+          .object({
+            fold: z.array(z.string()).max(50).optional().describe('Sessions whose children to fold away in the sidebar.'),
+            unfold: z.array(z.string()).max(50).optional().describe('Sessions whose children to show again.'),
+          })
+          .strict()
+          .optional()
+          .describe('Which sidebar groups of children are folded; the rest stay as they are.'),
         notifications: z
           .object({
             approval: z.boolean().optional().describe('Notify when an agent is blocked on an approval.'),
@@ -234,6 +272,11 @@ export const ORCHESTRATOR_TOOLS = [
           .describe('The notification switches to change; the rest stay.'),
       })
       .strict(),
+  },
+  {
+    name: 'apply_agent_versions',
+    description: 'Restarts the idle sessions that run an older agent CLI than the one installed, on the installed one. A session that is busy, or said something within the last minute, is left as it is. Acts at once.',
+    schema: z.object({}),
   },
   /*
    * #1219: the trash. Rare commands. Listing, restoring and moving subagent steps there act at once; deleting for good
@@ -253,6 +296,12 @@ export const ORCHESTRATOR_TOOLS = [
     name: 'trash_subagent_steps',
     description: "Moves a live session's subagent steps to the trash (its conversation stays); restore_trashed brings them back. No card.",
     schema: z.object({ sessionId: z.string().describe('The id list_trash gives.') }),
+  },
+  {
+    name: 'delete_session',
+    description:
+      "Moves a session to the trash, as the window's delete does; restore_trashed brings it back. Its worktree and the tool's own conversation file stay. For sessions that are not yours: a child you started is deleted with agent_session. The person approves a card first, which names what the host drops that restoring does not bring back (a caller waiting for its report, reports it owes). Refused while the session is working, waiting on the person or has a background job running.",
+    schema: z.object({ sessionId: z.string().describe('The id list_sessions gives.') }),
   },
   {
     name: 'delete_trashed',
@@ -308,6 +357,84 @@ export const ORCHESTRATOR_TOOLS = [
     description: "Grants a project's inner app to the other projects (shares it), or stops. Sharing waits for the person's card; stopping acts at once.",
     schema: z.object({ app: z.string().describe('Its id or name.'), project: z.string().optional(), shared: z.boolean() }).strict(),
   },
+  /*
+   * #1219, fourth slice: app upkeep. Rare commands. Reads and what undoes itself act at once; removing an app waits for
+   * the person's card (its folder moves to app-trash/).
+   */
+  /*
+   * #1219, fourth slice: housekeeping and reads. Rare commands; none asks. Stopping a session's background task, marking
+   * it read and reordering the sidebar are the person's (docs/agent-host.md section 1.4).
+   */
+  {
+    name: 'rename_session',
+    description: "Renames a worker session, as the window's rename does; renaming it back sets the old name. Acts at once.",
+    schema: z.object({ sessionId: z.string().describe('The id list_sessions gives.'), name: z.string().describe('The new name, one line.') }).strict(),
+  },
+  {
+    name: 'clear_background_tasks',
+    description: "Takes the ended background jobs off a session's list. Jobs still running stay. Acts at once.",
+    schema: z.object({ sessionId: z.string().describe('The id list_sessions gives.') }).strict(),
+  },
+  {
+    name: 'agent_status',
+    description: 'Says which agent CLIs are installed and logged in on this computer, with their plan and limits. Reads only.',
+    schema: z.object({ tool: z.string().optional().describe('Only this tool, as it is named here.') }).strict(),
+  },
+  {
+    name: 'agent_models',
+    description: "Lists the models an agent CLI offers, with the efforts each takes (the ids create_session and update_session_settings accept). Reads only.",
+    schema: z.object({ tool: z.string().describe('The tool, as agent_status names it.') }).strict(),
+  },
+  {
+    name: 'project_git_status',
+    description: "Says a project's branch, how many files changed and its origin. Reads only.",
+    schema: z.object({ project: z.string().describe('Its name or id, from list_projects.') }).strict(),
+  },
+  {
+    name: 'search_project_files',
+    description: "Finds files of a project by part of their name, as the composer's @ does. Reads only.",
+    schema: z.object({ project: z.string().describe('Its name or id, from list_projects.'), query: z.string(), limit: z.number().int().optional().describe('1 to 50; 20 by default.') }).strict(),
+  },
+  {
+    name: 'list_app_versions',
+    description: "Lists an app's kept versions (a user-folder app's snapshots, or a project app's recent commits, which are git's).",
+    schema: z.object({ app: z.string().describe('Its id or name.'), project: z.string().optional() }).strict(),
+  },
+  {
+    name: 'restore_app_version',
+    description: "Restores a user-folder app to a kept version; the code it replaces is kept as a version first, so it can be undone. Acts at once.",
+    schema: z.object({ app: z.string().describe('Its id or name.'), project: z.string().optional(), id: z.string().describe('The id list_app_versions gives.') }).strict(),
+  },
+  {
+    name: 'restart_app',
+    description: 'Stops an app (a call in progress ends) and clears its failures; it starts again the first time something calls it. Acts at once.',
+    schema: z.object({ app: z.string().describe('Its id or name.'), project: z.string().optional() }).strict(),
+  },
+  {
+    name: 'check_app',
+    description: "Restarts an app on its files and reports the problems with its manifest, tools and screens, as the building session's check does.",
+    schema: z.object({ app: z.string().describe('Its id or name.'), project: z.string().optional() }).strict(),
+  },
+  {
+    name: 'list_app_runs',
+    description: "Lists an app's recent runs: tool calls to it and what it asked of Centralu, with status, caller and how it was called.",
+    schema: z.object({ app: z.string().describe('Its id or name.'), project: z.string().optional(), limit: z.number().int().optional().describe('1 to 100; 20 by default.') }).strict(),
+  },
+  {
+    name: 'list_app_errors',
+    description: "Lists an app's recent errors since the host started, with the last lines of its standard error (the app's own words, quoted as data).",
+    schema: z.object({ app: z.string().describe('Its id or name.'), project: z.string().optional() }).strict(),
+  },
+  {
+    name: 'app_usage',
+    description: 'Says how much agent use an app requested over the last day and the last 30 days.',
+    schema: z.object({ app: z.string().describe('Its id or name.'), project: z.string().optional() }).strict(),
+  },
+  {
+    name: 'remove_app',
+    description: "Removes a user-folder app: its folder moves to app-trash/ and it is detached from every session. The person approves a card first. A project app is withdrawn through git.",
+    schema: z.object({ app: z.string().describe('Its id or name.'), project: z.string().optional() }).strict(),
+  },
   {
     name: 'set_agent_limits',
     description: "Changes the limits on agents: running agents per project, levels of sessions that may start agents. Waits for the person's card.",
@@ -321,7 +448,7 @@ export const ORCHESTRATOR_TOOLS = [
   {
     name: 'create_session',
     description:
-      'Creates one worker session (#13). Use it when there is no suitable session to assign work to — the created session appears right away in the list the person sees. Deleting it is the person\'s job.',
+      'Creates one worker session (#13). Use it when there is no suitable session to assign work to — the created session appears right away in the list the person sees. Deleting it asks the person.',
     schema: z.object({
       project: z
         .string()
@@ -758,12 +885,12 @@ export const ORCHESTRATOR_INSTRUCTIONS = [
   // #1233: work handed out is heard of when it ends; more words into it do not undo that
   "create_session's firstMessage reports back the same way unless reportBack is false; a note into a running turn never cancels a report.",
   'If a report is not enough, read that session\'s conversation directly with read_session.',
-  'If there is no suitable session to assign work to, make one with create_session — deleting it is the person\'s job.',
+  'If there is no suitable session to assign work to, make one with create_session; deleting a session asks the person (delete_session).',
   // #853: the orchestrator's light work outside any project went to its CLI's own subagent, which Centralu never shows
   'For light work outside any project (a web search, a lookup), start a session the person can watch with the start_agent command, not your Agent tool.',
   'Make a new project with create_project; add an existing folder, here or on a linked machine, with the add_project command (list_machines names the machines).',
   // #1219: the machine and trust commands (#1219's third slice: projects' trust, approval rules, app grants, agent limits) are found by these words
-  'Machines and trust: centralu_commands "machine trust rule grant limits". Settings: get_preferences, set_preferences. Trash: list_trash.',
+  'More commands: centralu_commands "machine trust rule grant limits app session agent project preferences trash".',
   'When the person says "make me a tool/screen that does…", make the app with create_app — a screen the person clicks and the tools an agent calls are one app.',
   // #1205: one server per trusted project that is an app grew every request; the orchestrator attaches the one it needs
   'Projects that are apps attach on demand: the find_apps command lists them.',

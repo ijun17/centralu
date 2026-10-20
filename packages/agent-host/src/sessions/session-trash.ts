@@ -5,6 +5,7 @@ import type { AgentRunWait } from './app-agents.js'
 import { basename } from 'node:path'
 import { rm } from 'node:fs/promises'
 import { isOrchestratorAgentFolder } from './orchestrator-home.js'
+import { plainQuoted } from './tool-answers.js'
 import { existsSync, statSync } from 'node:fs'
 import {
   isInTurn,
@@ -66,6 +67,10 @@ export type SessionTrashHost = {
   readonly record: SessionRecord
   readonly recoveryRepair: Promise<void>
   readonly restartPolicy: RestartPolicy
+  /** A wake or a resume under way (`SessionManager.resuming`): the session is about to take a turn */
+  readonly resuming: ReadonlyMap<string, unknown>
+  /** A queued note not yet taken by the session (`SessionManager.inputsHeld`) */
+  inputsHeld: (sessionId: string) => boolean
   readonly running: Map<string, { model: string | null; effort: string | null; verbosity: string | null; serviceTier: string | null; permissionPreset: PermissionPreset; }>
   stopWatchingReconnect: (sessionId: string) => void
   readonly store: Store
@@ -182,6 +187,58 @@ export class SessionTrash {
       this.trashing.delete(sessionId)
     }
     return moved
+  }
+
+  /**
+   * Whether the session is at rest at this moment: no turn running or about to start (a wake, a restart, a note held for it),
+   * no card on it, no background job running, no app waiting on its answer. Read with nothing awaited, in the step that moves it
+   * (`trashIfQuiet`), so a message the person sent a moment ago keeps it
+   */
+  isQuiet(sessionId: string): boolean {
+    const m = this.host.meta.get(sessionId)
+    if (!m) return false
+    if (isInTurn(m.state) || m.pendingApproval || m.pendingQuestions.length > 0) return false
+    if (m.backgroundTasks.some((t) => t.status === 'running')) return false
+    const run = this.host.agentRuns.get(sessionId)
+    if (run && !run.finished) return false
+    if (this.host.resuming.has(sessionId) || this.host.restartPolicy.deferredRestarts.has(sessionId) || this.host.inputsHeld(sessionId)) return false
+    return (this.host.children.queued.get(sessionId)?.length ?? 0) === 0
+  }
+
+  /**
+   * A delete the orchestrator asked for (#1219), decided here at the last moment, as `trashIf`'s is: the session moves only if
+   * it is still at rest in the very step that moves it, nothing awaited between (`isQuiet`). Unlike `trashIf` it is the
+   * person's kind of delete: it never purges, and a delete already under way is the one that stands. False: it stayed where it was
+   */
+  trashIfQuiet(sessionId: string, also: () => boolean = () => true): Promise<boolean> {
+    return this.trashShared(sessionId, false, false, undefined, false, () => this.isQuiet(sessionId) && also())
+  }
+
+  /**
+   * What moving the session to the trash drops that restoring does not bring back, in words for a card (see the lines of
+   * `trashSessionOnce` that let go of what the session held): a caller waiting for its report, work it waits on, reports its
+   * children owe it, the start_agent cards it raised, what the person allowed it to read or start
+   */
+  lossesOf(sessionId: string): string[] {
+    const c = this.host.children
+    const name = (id: string) => plainQuoted(this.host.meta.get(id)?.name ?? id, 60)
+    const out: string[] = []
+    const caller = c.awaitingReport.get(sessionId)
+    if (caller) out.push(`${name(caller)} is waiting for the report of the work it gave this session; that report will not come.`)
+    const waiting = [...c.delegations.values()].filter((d) => d.sessionId === sessionId && !d.settled)
+    if (waiting.length) out.push(`${waiting.length === 1 ? 'A session is' : `${waiting.length} sessions are`} waiting for its answer (${[...new Set(waiting.map((d) => name(d.callerId)))].join(', ')}); the answer will not come.`)
+    const owe = [...c.awaitingReport].filter(([, to]) => to === sessionId).length
+    if (owe) out.push(`${owe === 1 ? 'A session it started owes' : `${owe} sessions it started owe`} it a report; ${owe === 1 ? 'it' : 'they'} will not be told, and the report is dropped.`)
+    const asked = [...c.delegations.values()].filter((d) => d.callerId === sessionId && !d.settled)
+    if (asked.length) out.push(`It waits on ${asked.length === 1 ? 'a session' : `${asked.length} sessions`} of other projects it asked; the wait and what the person allowed for it are dropped.`)
+    const starts = [...c.agentStarts.values()].filter((r) => r.req.callerId === sessionId).length
+    if (starts) out.push(`${starts === 1 ? 'A start_agent card it raised is' : `${starts} start_agent cards it raised are`} withdrawn.`)
+    const run = this.host.agentRuns.get(sessionId)
+    if (run && !run.finished) out.push('An app is waiting for its answer; that wait ends with an error.')
+    if (this.host.readGrants.get(sessionId)?.size || this.host.delegationFlow.starts.agentConsents.has(sessionId)) {
+      out.push('What the person allowed it (reading other sessions, starting agents) is dropped; a restored session asks again.')
+    }
+    return out
   }
 
   private async trashSessionOnce(

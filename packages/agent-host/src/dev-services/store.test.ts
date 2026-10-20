@@ -1391,6 +1391,21 @@ describe('v21 migration — merges delta rows into messages', () => {
     s.close()
   })
 
+  it('a text row whose payload is JSON that is no object is left as it is, and the rows around it still merge', () => {
+    const { file } = oldDbWithDeltas()
+    const raw = new Database(file)
+    raw.pragma('user_version = 20')
+    // Valid JSON, not an object: reading its text used to throw inside the migration and roll the whole step back
+    raw.prepare(`UPDATE messages SET payload = 'null' WHERE session_id = 's1' AND seq = 3`).run()
+    raw.close()
+
+    const s = new Store(file)
+    const rows = s.messages.loadMessages('s1', 50)
+    expect(rows.map((m) => m.seq)).toContain(3)
+    expect(rows.find((m) => m.seq === 3)?.payload).toBeNull()
+    s.close()
+  })
+
   it('the seq of a merged spot is the first chunk\'s, so the read position never moves backward', () => {
     const { file } = oldDbWithDeltas()
     const raw = new Database(file)

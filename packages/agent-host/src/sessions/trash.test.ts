@@ -147,16 +147,17 @@ describe('emptying the trash', () => {
 
 /*
  * Nobody but the person decides to delete for good (#204, carried from #96; #1219). The trash is reached through the RPC,
- * which is the UI's socket, and by the central orchestrator's five trash commands, which make the same calls and delete
- * only after the person's card (trash-commands.test.ts). This holds it three ways: no other agent tool, broker tool or
- * host capability is named for it, those five are rare commands of the orchestrator's seat alone, and no code outside
- * the RPC handler calls the manager's purge.
+ * which is the UI's socket, and by the central orchestrator's six trash commands, which make the same calls and delete
+ * for good only after the person's card (trash-commands.test.ts); the sixth, `delete_session`, only moves a session to the
+ * trash, and nothing in it is destroyed. This holds it three ways: no other agent tool, broker tool or host capability is
+ * named for it, those six are rare commands of the orchestrator's seat alone, and no code outside the RPC handler calls
+ * the manager's purge.
  */
-const ORCHESTRATOR_TRASH_COMMANDS = ['list_trash', 'restore_trashed', 'trash_subagent_steps', 'delete_trashed', 'empty_trash']
+const ORCHESTRATOR_TRASH_COMMANDS = ['list_trash', 'restore_trashed', 'trash_subagent_steps', 'delete_session', 'delete_trashed', 'empty_trash']
 const TRASH_VERB = /trash|purge|delete_session|restore_session|empty/i
 
 describe('who can delete for good', () => {
-  it("agents and apps have no verb for the trash, but the orchestrator's five commands", () => {
+  it("agents and apps have no verb for the trash, but the orchestrator's six commands", () => {
     const names = [
       ...ORCHESTRATOR_TOOLS.map((t) => t.name),
       ...BROKER_TOOLS,

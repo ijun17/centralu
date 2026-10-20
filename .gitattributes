@@ -9,9 +9,10 @@
 # 손으로 고치지 않는다: 테스트(app-template.test.ts)와 번들 스크립트가 소스로 다시 만든 것과 바이트까지 대조한다.
 packages/agent-host/app-template/runtime/** linguist-generated=true -diff
 
-# The Codex app-server's types the adapter is compiled against, written by pnpm codex:bindings (#1339). Not edited
-# by hand: drift.yml's `codex:bindings --check` compares them with what Codex makes.
-packages/agent-host/src/adapters/codex/generated/** linguist-generated=true -diff
+# The Codex app-server's types the adapter is compiled against, written by pnpm codex:bindings (#1339): collapsed in
+# a pull request's diff, but still there to read. A hand edit fails generated-types.test.ts (protocol-types.sha256
+# beside them), and drift.yml compares them with what the latest Codex makes.
+packages/agent-host/src/adapters/codex/generated/** linguist-generated=true
 
 # The content manifest fixtures are hashed byte for byte by the Rust verifier and the Node writer
 # (apps/desktop/content-verify/tests/writer.rs). One of them holds every byte value, CR LF included,
