@@ -155,6 +155,8 @@ describe('a process that goes while its session is idle (#1397)', () => {
     await until(() => claude.created.length === started + 1)
     expect(claude.last).not.toBe(gone)
     expect(claude.last.sessionId).toBe(id)
+    // The same conversation: the new process is asked to resume the thread the old one held
+    expect(claude.asked.at(-1)?.resumeExternalId).toBe('thread-1')
     expect(mgr.isLive(id)).toBe(true)
     await until(() => claude.last.sent.some((t) => t.includes('carry on')))
     expect(events.some((e) => e.type === 'error')).toBe(false)
