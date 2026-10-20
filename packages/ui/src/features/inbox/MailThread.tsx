@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { MailMessage } from '@cc/protocol'
 import { composingKey } from '../../app/keys.js'
 import { Button } from '../../components/Button.js'
+import { Pill } from '../../components/Pill.js'
 import { RelativeAge } from '../../components/RelativeAge.js'
 import { useStore } from '../../store/store.js'
 import { isComposerSendKey } from '../session/composerKeys.js'
@@ -41,9 +42,9 @@ export function MailThread({ onOpenSession }: { onOpenSession: (sessionId: strin
         <h2 className="min-w-0 truncate text-sm font-medium text-ink" title={thread.subject}>
           {thread.subject}
         </h2>
-        <span className="shrink-0 rounded-full border border-line px-2 py-0.5 text-2xs text-ink-muted" data-testid="mail-thread-state">
+        <Pill size="label" data-testid="mail-thread-state">
           {threadStateLabel(thread)}
-        </span>
+        </Pill>
         <span className="ml-auto flex shrink-0 items-center gap-1.5">
           {unique.map((p) => (
             <Button key={p.address} size="sm" variant="quiet" onClick={() => p.sessionId && onOpenSession(p.sessionId)} data-testid={`mail-open-${p.sessionId}`}>
