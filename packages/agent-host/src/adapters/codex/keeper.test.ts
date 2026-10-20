@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
 import { describe, expect, it } from 'vitest'
-import type { AgentProcess } from '../contract.js'
+import type { AgentProcess, AgentSpawnSpec } from '../contract.js'
 import { CodexAdapter } from './index.js'
 import { eventually } from '../../../../../tooling/test-timing.js'
 
@@ -150,6 +150,24 @@ describe('codex under the keeper', () => {
     handle.interrupt()
     await eventually(() => server.received.some((m) => m.method === 'turn/interrupt'))
     expect(server.received.find((m) => m.method === 'turn/interrupt')!.params).toEqual({ threadId: 'thread-1', turnId: 'turn-9' })
+  })
+
+  it("a session's app-server finds the host's address and its own credential, with the environment it inherits (#1405)", async () => {
+    const server = new FakeAppServer('paginated', true)
+    const specs: AgentSpawnSpec[] = []
+    await new CodexAdapter().createSession(
+      {
+        sessionId: 's1',
+        cwd: '/tmp',
+        permissionPreset: 'safe',
+        hostAccess: { url: 'ws://127.0.0.1:4100', credential: 'ccs1:s1:mac' },
+        processSource: { spawn: (spec) => (specs.push(spec), server) },
+      },
+      () => {},
+    )
+    expect(specs).toHaveLength(1)
+    expect(specs[0]!.env).toMatchObject({ CC_HOST_URL: 'ws://127.0.0.1:4100', CC_HOST_CREDENTIAL: 'ccs1:s1:mac' })
+    expect(specs[0]!.env.PATH ?? specs[0]!.env.Path).toBe(process.env.PATH ?? process.env.Path)
   })
 
   it('a resume this host started itself sends excludeTurns and asks for no running turn', async () => {

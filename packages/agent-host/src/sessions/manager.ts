@@ -1503,6 +1503,16 @@ export class SessionManager {
     return this.sessionSettings.updateSettings(...a)
   }
 
+  /** Whether a session is one of this host's, without copying the list (#1405: asked at every hello with a session credential) */
+  hasSession(sessionId: string): boolean {
+    return this.meta.has(sessionId)
+  }
+
+  /** A session's name, or null when it has none or is not this host's (#1405: named on a host request) */
+  sessionName(sessionId: string): string | null {
+    return this.meta.get(sessionId)?.name ?? null
+  }
+
   /** Whether a session's process is alive (what the UI uses to know if it can be continued) */
   isLive(sessionId: string): boolean {
     return this.handles.has(sessionId)

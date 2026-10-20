@@ -754,7 +754,7 @@ const requests: HostRequests = new HostRequests({
   rpc: (method, params, ctx) => hostDrain.track(`request ${method}`, () => router.handle(method, params, ctx)),
   canShow: (): boolean => server.showsHostRequests(),
   // Which session a session credential's card says asked (#1405)
-  sessionName: (sessionId) => mgr.listSessions().find((x) => x.id === sessionId)?.name ?? null,
+  sessionName: (sessionId) => mgr.sessionName(sessionId),
 })
 /** The full credentials a socket said hello with on this host, for `host.credentials` once they are gone (#1405 review) */
 const usedCredentials = new UsedCredentials()
@@ -838,7 +838,7 @@ const server = new HostServer({
   // A card nobody can see is withdrawn once no window shows them for a while (host-requests.ts)
   onShowing: (count) => requests.showingChanged(count),
   // A session credential names one of this host's sessions, or it is refused at hello (#1405)
-  knowsSession: (sessionId) => mgr.listSessions().some((x) => x.id === sessionId),
+  knowsSession: (sessionId) => mgr.hasSession(sessionId),
   // A window's connection ended: the pinned views it leased wait for a claim, then close (#392, view-host.ts)
   onClientGone: (client) => {
     views.holderGone(client)
