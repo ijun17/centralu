@@ -1,18 +1,12 @@
-import type { PermissionPreset } from '@cc/protocol'
 import type { Options, Settings } from '@anthropic-ai/claude-agent-sdk'
 
-/** Inline SDK flag settings are separate from the files selected by settingSources. */
-export function withoutCrossSessionMessaging<T extends Omit<Options, 'settings'> & { settings?: Settings }>(
-  options: T,
-  preset: PermissionPreset = 'normal',
-) {
-  if (preset === 'auto')
-    return {
-      ...options,
-      settings: options.settings ?? {},
-      disallowedTools: options.disallowedTools ?? [],
-      env: { ...process.env, ...options.env },
-    }
+/**
+ * Closes Claude's own cross-session channel for every session Centralu starts, under every permission preset, `auto`
+ * included (#569; `auto` since slice 0 of the mailbox plan, which narrows #603 for this one control): the channel
+ * reaches another Centralu session past the relations, the record and the guards Centralu's own messaging keeps.
+ * Inline SDK flag settings are separate from the files selected by settingSources.
+ */
+export function withoutCrossSessionMessaging<T extends Omit<Options, 'settings'> & { settings?: Settings }>(options: T) {
   const env: NonNullable<Options['env']> = {
     ...process.env,
     ...options.env,

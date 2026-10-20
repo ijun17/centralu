@@ -1772,9 +1772,8 @@ added there reaches a new session and a wake alike (`sessions/launch-options.tes
 Its `spawnClaudeCodeProcess` callback sends the SDK's flags and environment to either the local
 spawn or the keeper; a fresh keeper replacement therefore receives the same options.
 
-`withoutCrossSessionMessaging` wraps the existing options and takes the session's preset
-in the Claude adapter. Under `auto` (#603) it leaves peer messaging, discovery and the
-environment gate alone; the CLI's own configuration still applies. Under `safe`/`normal`, it merges inline SDK flag settings
+`withoutCrossSessionMessaging` wraps the existing options in the Claude adapter, under every preset: `auto` too
+(the mailbox plan's slice 0, §9.6; this narrows #603 for this one control). It merges inline SDK flag settings
 with `crossSessionInbound: 'refuse'`, appends discovery denies `ListAgents` and `ListPeers`,
 and merges `process.env` and any explicit environment with `CLAUDE_CODE_HARBOR_KITE: '0'` last.
 The adapter previously selected settings files only through `settingSources`; inline `settings`

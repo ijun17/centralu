@@ -39,7 +39,7 @@ already left out other sessions', and indents a message's later lines, so text c
 work with it ([agent-host.md](agent-host.md) §1.2.1). They add no reach the caller lacked (the child works on the
 same files under the same or a lower preset), but they multiply what runs. The rules below
 apply to `safe` and `normal`; `auto` opens the consent, ownership and trust
-boundaries (#603), with a log line instead of a card or refusal. The agent depth binds every preset, `auto` included (#867):
+boundaries (#603), with a log line instead of a card or refusal (Claude's own cross-session messaging is closed under `auto` too, below). The agent depth binds every preset, `auto` included (#867):
 
 - **The person's consent.** For a `normal` caller it is the project's trust (#673): only a trusted project's
   sessions can start agents at all, and trusting it was the person's decision about that project, so no card is
@@ -280,7 +280,7 @@ Claude Code can discover other Claude processes on the same machine through
 the same permission-mode class, including two `safe` sessions. That path does not pass through
 Centralu's `ask_project` consent card.
 
-Every `safe` or `normal` Claude query Centralu builds applies inline SDK `settings.crossSessionInbound: 'refuse'`
+Every Claude query Centralu builds, under every preset, `auto` included, applies inline SDK `settings.crossSessionInbound: 'refuse'`
 to drop inbound peer messages and adds `ListAgents` and its alias `ListPeers` to
 `disallowedTools`. It also forces `CLAUDE_CODE_HARBOR_KITE=0` in the child environment: in the
 inspected CLI versions 2.1.263–2.1.289 this undocumented gate disables peer listing,
@@ -288,8 +288,11 @@ cross-session sends and inbox binding. `SendMessage` remains available because i
 continues the session's own background subagents. Existing settings, denies and environment
 are merged, and settings-file selection remains governed by project trust and session kind.
 
-Under `auto`, the adapter applies none of these cross-session controls (#603); the session's
-own CLI settings and environment still apply. For other presets these controls cover workers, orchestrators, coordinators, worktree managers, builders, app
+This control is **not** opened by `auto` (it narrows #603 for this one control, as the mailbox plan's slice 0
+decided, `docs/plans/mailbox.md` §9.6): two `auto` sessions are the same permission class, the CLI's default delivers
+between them at once, and that would reach another Centralu session past the relations, the record and the guards its
+own messaging keeps. The inline settings layer is Centralu's: a project settings file that asks for `crossSessionInbound: accept` loses to it (probe case `auto-accept-file`, CLI 2.1.296). The
+controls cover workers, orchestrators, coordinators, worktree managers, builders, app
 agents, `start_agent` children and resumed sessions, including fresh keeper processes. A host
 handover that adopts an existing CLI cannot retroactively change its startup flags or
 environment; processes started before this fix must be restarted.
@@ -587,7 +590,7 @@ processes after adoption, at idle or when their current turn finishes (#589).
 | `attach_app`, an untrusted target project's app (shared inside, or its root app) | refused | refused | refused | refused | refused | refused | refused | refused | An untrusted project's apps attach nowhere (owner, #1141); `AppAccess`, `SessionAppsHub` and the runtime's start and call gate refuse them under every preset (#603's opening no longer applies to apps) |
 | `update_centralu`, first time in an ordinary session | asks | asks | asks | open | asks | asks | asks | open | `updateCentraluAsked` → `askHost`; other presets keep session-only remembered consent |
 | `update_centralu` action `apply` (any profile that has the tool) | refused | asks | asks | open | refused | asks | asks | open | `applyUpdateAsked` → `askHost` (an `other` card, `about: 'centralu_apply'`) after a window answered ready (`UpdateApplyBroker`); app agents refused; the window re-checks with its button's rules (`agentApplyVerdict`: the bundle's own version must be the installed one and newer than the window) |
-| Claude's independent-session discovery and messaging | refused | refused | refused | open | — | — | — | — | Claude adapter `withoutCrossSessionMessaging`, applied only outside auto |
+| Claude's independent-session discovery and messaging | refused | refused | refused | refused | — | — | — | — | Claude adapter `withoutCrossSessionMessaging`, under every preset (`auto` too since the mailbox plan's slice 0; #603's opening no longer applies to it) |
 | `attach_app`, a user-folder app | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `AppAccess.attach` (no card: the person's own folder) |
 | `attach_app`, another trusted project's root app (#1141) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `AppAccess.attach` (no card: its project's trust covers it, and the trust card listed it, with what it may ask for) |
 | `attach_app` by the orchestrator (#1205), a trusted project's root app | allowed | allowed | allowed | allowed | allowed | allowed | allowed | allowed | `AppAccess.attach` (no card, as above; the orchestrator has no project whose trust would gate it). A project's inner app, shared or not, is refused: it is that project's (`AppAccess.candidates`) |

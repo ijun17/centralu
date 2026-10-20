@@ -246,15 +246,10 @@ describe('settings files and permissions the adapter passes to the CLI (#92)', (
       expect(state.options.map((o) => o.settingSources)).toEqual([[], [], []])
       for (const o of state.options) {
         expect(o).toMatchObject(PERMISSION[preset])
-        if (preset === 'auto') {
-          expect(o.settings).not.toHaveProperty('crossSessionInbound', 'refuse')
-          expect(o.disallowedTools).not.toContain('ListAgents')
-          expect(o.disallowedTools).not.toContain('ListPeers')
-        } else {
-          expect(o.settings).toMatchObject({ crossSessionInbound: 'refuse' })
-          expect(o.disallowedTools).toEqual(expect.arrayContaining(['ListAgents', 'ListPeers']))
-          expect(o.env).toMatchObject({ CLAUDE_CODE_HARBOR_KITE: '0' })
-        }
+        // Under every preset, auto included (the mailbox plan's slice 0)
+        expect(o.settings).toMatchObject({ crossSessionInbound: 'refuse' })
+        expect(o.disallowedTools).toEqual(expect.arrayContaining(['ListAgents', 'ListPeers']))
+        expect(o.env).toMatchObject({ CLAUDE_CODE_HARBOR_KITE: '0' })
       }
     })
   }
