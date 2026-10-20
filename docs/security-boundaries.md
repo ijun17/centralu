@@ -1735,10 +1735,14 @@ frame the HTML through `srcdoc` (`views/proxy-page.ts`). It never uses `document
 reference host that let the view inherit the proxy's origin and reach other proxies' addresses,
 secret paths included, and their storage (measured, S-1). The inner document's origin is `"null"`:
 no parent or top window, no storage or cookies, no popups, no top navigation, no fetch, WebSocket
-or image from the host port, and navigating itself elsewhere is blocked by the proxy's
-`frame-src` (`e2e/app-frame.spec.ts` "S-2 (browser part): an app frame cannot reach the parent,
-the top window, storage, popups, or the host network", and "opaque mode: the inner frame's origin
-is "null", and it cannot read the proxy's secret address"). The outer frame has
+or image from the host port, and navigating itself elsewhere is blocked by the `frame-src` of the
+proxy page's header, which in this mode is the view's own policy (`buildViewCsp`: `'none'` unless
+declared). A frame's navigation is checked against the document that embeds it, so the view's
+`frame-src` stops it only because that document is the proxy page here
+(`e2e/app-frame.spec.ts` "S-2 (browser part): an app frame cannot reach the parent, the top window,
+storage, popups, or the host network", "which CSP stops a frame navigating itself outward", and
+"opaque mode: the inner frame's origin is "null", and it cannot read the proxy's secret address").
+The outer frame has
 `allow-scripts allow-same-origin allow-forms` so that the per-app mode can work; its origin is
 the host port's, not our UI's, so it cannot touch our window.
 
@@ -1755,7 +1759,10 @@ instances, behind a secret derived per app from the host secret (HMAC), so a vie
 `location.href` learns nothing that opens another app's route; the proxy page there allows only
 its own script hash and that one frame origin (`origin-ports.test.ts`; `view-host.test.ts`
 "per-app origin"; `e2e/app-frame.spec.ts` "per-app origin mode: gets a real origin on its own
-port, storage is separated per app, and reopening gets the same origin").
+port, storage is separated per app, and reopening gets the same origin"). That one frame origin
+is also what stops the view navigating its own frame outward in this mode: the view's own policy
+cannot, since a frame's navigation is checked against the proxy page that embeds it
+(`buildProxyCsp`; `e2e/app-frame.spec.ts` "which CSP stops a frame navigating itself outward").
 
 **A linked machine's views are served by the hub** (#82, [plans/remote-hub.md](plans/remote-hub.md) §11). Storage
 lives in the window that renders a view, so the port has to come from the book of the host whose window shows it: a
