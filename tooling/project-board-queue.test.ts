@@ -1,5 +1,5 @@
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -740,7 +740,16 @@ if (args[0] === 'pr' && args[1] === 'view') {
   const pr = st.prs[args[2]]
   if (!pr) fail('Could not resolve to a PullRequest with the number of ' + args[2] + '.')
   out(pr)
+} else if (args[0] === 'pr' && args[1] === 'ready') {
+  // Ready for review, or back into a draft (--undo): GitHub says DRAFT for a draft's merge state
+  const pr = st.prs[args[2]]
+  const undo = args.includes('--undo')
+  write([undo ? 'draft' : 'ready', args[2]])
+  pr.isDraft = undo
+  pr.mergeStateStatus = undo ? 'DRAFT' : 'CLEAN'
+  save()
 } else if (args[0] === 'pr' && args[1] === 'merge') {
+  if (st.prs[args[2]] && st.prs[args[2]].isDraft) fail('Pull request #' + args[2] + ' is still a draft (HTTP 405)')
   if (st.mergeError) fail(st.mergeError)
   write(['merge', args[2], args])
   // GitHub's own merge queue: gh exits 0 and nothing is merged yet
@@ -798,6 +807,11 @@ if (args[0] === 'pr' && args[1] === 'view') {
   out([])
 } else if (path && path.startsWith(R + '/contents/.github/workflows/build.yml')) {
   out(st.workflow)
+} else if (path && path.startsWith(R + '/contents/')) {
+  // A file the board reads from the repository (the pull request template): as the test gives it, else none
+  const file = (st.files ?? {})[path.slice((R + '/contents/').length).split('?')[0]]
+  if (file === undefined) fail('Not Found (HTTP 404)')
+  out(file)
 } else if (path && /\/check-runs\?/.test(path)) {
   out({ check_runs: (st.checks ?? {})[path.split('/')[4]] ?? [] })
 } else if (path && /\/commits\/[^/]+\/status$/.test(path)) {
@@ -837,9 +851,13 @@ if (args[0] === 'pr' && args[1] === 'view') {
   // A pull request the queue opens itself (the main guard's revert, #1259): open, and readable as any other
   const body = JSON.parse(stdin)
   const number = 600 + Object.keys(st.prs ?? {}).filter((n) => Number(n) >= 600).length
-  st.prs = { ...st.prs, [number]: { number, title: body.title, body: body.body, state: 'OPEN', isDraft: false, mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', headRefOid: 'revert-' + number, headRefName: body.head, baseRefName: body.base, isCrossRepository: false, url: 'https://github.com/ijun17/centralu/pull/' + number, mergeCommit: null } }
+  st.prs = { ...st.prs, [number]: { number, title: body.title, body: body.body, state: 'OPEN', isDraft: body.draft === true, mergeable: 'MERGEABLE', mergeStateStatus: body.draft === true ? 'DRAFT' : 'CLEAN', labels: [], headRefOid: (st.prHeads ?? {})[body.head] ?? 'revert-' + number, headRefName: body.head, baseRefName: body.base, isCrossRepository: false, url: 'https://github.com/ijun17/centralu/pull/' + number, mergeCommit: null } }
   write(['pr-create', body.head, body.title])
   out({ number, html_url: 'https://github.com/ijun17/centralu/pull/' + number })
+} else if (path && /\/issues\/\d+\/labels$/.test(path)) {
+  const body = JSON.parse(stdin)
+  write(['labels', path.split('/')[4], body.labels])
+  out([])
 } else if (path === R + '/issues' && args.includes('POST')) {
   const body = JSON.parse(stdin)
   st.issues = [...(st.issues ?? []), body]
@@ -2575,6 +2593,7 @@ describe('agents find the board tool for the gh command they would type', { time
     const expected: Record<string, string> = {
       merge_when_green: 'Instead of gh pr merge',
       queue_merge: 'gh pr merge and gh run rerun',
+      integrate: 'Instead of open_pr and queue_merge (gh pr create, gh pr merge)',
       merge_queue: 'Instead of gh pr list / gh run list',
       rebase_stack: 'Instead of git rebase --onto',
       ci_status: 'Instead of gh pr checks',
@@ -2592,6 +2611,8 @@ describe('agents find the board tool for the gh command they would type', { time
     const names = new Set(tools.map((t) => t.name))
     expect([...named].filter((n) => !names.has(n))).toEqual([])
     for (const n of ['merge_when_green', 'queue_merge', 'rebase_stack', 'ci_status', 'read_failed_job', 'open_pr', 'comment', 'file_issue', 'release']) expect(named.has(n), n).toBe(true)
+    // An auto-tier change goes to integrate, by its name (#1259 step 3)
+    expect(first.text).toContain('hand it over with integrate')
   })
 })
 
@@ -3052,5 +3073,419 @@ describe('the main guard with overlapping failures, and when it acts again (#125
     expect(carried(all, known, 3)).toEqual([])
     // Not reverted at all (a release bump, say): every later commit carries it
     expect(carried(all, [{ sha: 'a', subject: '', pr: null }], 3)).toEqual(['a'])
+  })
+})
+
+// --- The integrator (#1259 step 3): an auto-tier branch lands without its session opening a pull request ------
+
+/**
+ * Main as GitHub has it, with this repository's judge and rules (scripts/tier.mjs, .centralu/tiers.json) and a doc,
+ * and `branches` made from it, each adding or changing its files; pushed to a bare repository standing for GitHub's,
+ * which the queue's checkout fetches from. The checkout itself is left on a branch of its own with work not committed.
+ */
+function integrateRepo(branches: Record<string, Record<string, string>>) {
+  const origin = join(root, 'origin.git')
+  const work = join(root, 'work')
+  g(root, 'init', '-q', '--bare', '-b', 'main', origin)
+  g(root, 'init', '-q', '-b', 'main', work)
+  g(work, 'config', 'user.name', 'Tester')
+  g(work, 'config', 'user.email', 'tester@example.test')
+  g(work, 'config', 'commit.gpgsign', 'false')
+  g(work, 'remote', 'add', 'origin', 'https://github.com/ijun17/centralu.git')
+  g(work, 'config', `url.${origin}.insteadOf`, 'https://github.com/ijun17/centralu.git')
+  const write = (f: string, text: string) => {
+    mkdirSync(join(work, f, '..'), { recursive: true })
+    writeFileSync(join(work, f), text)
+  }
+  for (const f of ['scripts/tier.mjs', '.centralu/tiers.json']) write(f, readFileSync(join(REPO_ROOT, f), 'utf8'))
+  write('docs/guide.md', 'base\n')
+  write('README.md', 'base\n')
+  g(work, 'add', '-A')
+  g(work, 'commit', '-q', '-m', 'base')
+  const main = g(work, 'rev-parse', 'HEAD')
+  const heads: Record<string, string> = {}
+  for (const [name, files] of Object.entries(branches)) {
+    g(work, 'checkout', '-q', '-b', name, main)
+    for (const [f, text] of Object.entries(files)) write(f, text)
+    g(work, 'add', '-A')
+    if (Object.keys(files).length) g(work, 'commit', '-q', '-m', `change on ${name}`)
+    heads[name] = g(work, 'rev-parse', 'HEAD')
+  }
+  g(work, 'checkout', '-q', '-b', 'mine', main)
+  writeFileSync(join(work, 'README.md'), 'edited, not committed\n')
+  g(work, 'push', '-q', 'origin', 'main', ...Object.keys(branches))
+  return { work, origin, main, heads }
+}
+
+/** A later push to `branch` on GitHub's stand-in (made in a clone of the test's own): `files` added or changed */
+function pushTo(repo: ReturnType<typeof integrateRepo>, branch: string, files: Record<string, string>) {
+  const tmp = join(root, `push-${Date.now()}`)
+  g(root, 'clone', '-q', '-b', branch, repo.origin, tmp)
+  g(tmp, 'config', 'user.name', 'Tester')
+  g(tmp, 'config', 'user.email', 'tester@example.test')
+  g(tmp, 'config', 'commit.gpgsign', 'false')
+  for (const [f, text] of Object.entries(files)) {
+    mkdirSync(join(tmp, f, '..'), { recursive: true })
+    writeFileSync(join(tmp, f), text)
+  }
+  g(tmp, 'add', '-A')
+  g(tmp, 'commit', '-q', '-m', `more on ${branch}`)
+  g(tmp, 'push', '-q', 'origin', branch)
+  return g(tmp, 'rev-parse', 'HEAD')
+}
+
+const TEMPLATE = readFileSync(join(REPO_ROOT, '.github/PULL_REQUEST_TEMPLATE.md'), 'utf8')
+/** What a session hands over: the branch and the record's text */
+const handOver = (branch: string, extra: Record<string, unknown> = {}) => ({ branch, title: 'docs(guide): say how the guide is read', why: 'The guide did not say it.', notExercised: 'Nothing', owner: 'writer', ...extra })
+const integrateQuick = () => [ghCheck('full tier', 'skipped', 10), ghCheck('verify', 'success', 11), ghCheck('windows tests', 'success', 12)]
+const integrateBatch = (suite: number) => [suiteCheck('full tier', 'skipped', suite * 10, suite), suiteCheck('verify', 'success', suite * 10 + 1, suite), suiteCheck('windows tests', 'success', suite * 10 + 2, suite)]
+
+/** GitHub as the queue reads it: the record #600's head is the branch's, its own quick run green, a batch's quick run green */
+function integrateRuntime(repo: ReturnType<typeof integrateRepo>, branch: string, patch: Gh = {}, tmpDir = appTmp()) {
+  const head = repo.heads[branch]!
+  const one = `batch-${head}`
+  mkdirSync(appTmp(), { recursive: true })
+  const tmp = { TMPDIR: tmpDir, TEMP: tmpDir, TMP: tmpDir }
+  return runtime(
+    ghState({
+      prs: {},
+      prHeads: { [branch]: head },
+      files: { '.github/PULL_REQUEST_TEMPLATE.md': TEMPLATE },
+      checks: { [head]: integrateQuick() },
+      runs: { [head]: [ghRun('success', 1, head, { head_branch: branch })] },
+      on: { 'dispatch:queue/batch-1': { runs: { [one]: [ghRun('success', 1, one, { id: 950, head_branch: 'queue/batch-1', event: 'workflow_dispatch', check_suite_id: 6000 })] }, checks: { [one]: integrateBatch(6000) } } },
+      ...patch,
+    }),
+    { ...FAST_LAND, PROJECT_BOARD_QUEUE_CHECKOUT: repo.work, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: join(root, 'no-gitconfig'), ...tmp },
+    gitWrapper(fake.bin),
+  )
+}
+const recordsOpened = () => writes().filter((w) => w[0] === 'pr-create')
+const itemsOnDisk = () => (filesNamed(join(root, 'data'), 'merge-queue.json').length ? (queueOnDisk().items as any[]) : [])
+
+describe('the integrator lands an auto-tier branch without a pull request from its session (#1259 step 3)', { timeout: 240_000 * SLOW }, () => {
+  it('judges the branch itself, opens the record from the template labelled tier:auto, queues it for the session, and lands it after the quick tier', async () => {
+    const repo = integrateRepo({ 'docs/guide': { 'docs/guide.md': 'read it top down\n', 'docs/new.md': 'new\n' } })
+    integrateRuntime(repo, 'docs/guide')
+    const r = await call('integrate', handOver('docs/guide'))
+    expect(r.isError, r.text).toBe(false)
+    expect(r.data).toMatchObject({ integrated: true, pr: 600, opened: true, tier: 'auto', owner: 'writer' })
+    expect(r.text).toContain('Integrated docs/guide: Tier: auto')
+    expect(r.text).toContain('Opened #600 as its record')
+    // The record: from the template, its Verified the integrator's own Tier line, labelled tier:auto
+    expect(recordsOpened()).toEqual([['pr-create', 'docs/guide', 'docs(guide): say how the guide is read']])
+    expect(writes().filter((w) => w[0] === 'labels')).toEqual([['labels', '600', ['tier:auto']]])
+    const body = gh().prs['600'].body as string
+    expect(body).toContain('## Why\n\nThe guide did not say it.')
+    expect(body).toMatch(/## Verified\n\nTier: auto, from `docs\/guide\.md` \(docs\), `docs\/new\.md` \(docs\)\. Judged by the integrator \(#1259 step 3\) from the diff of docs\/guide at [0-9a-f]{7} against main at [0-9a-f]{7}/)
+    expect(body).toContain('## Not exercised\n\nNothing')
+    expect(itemsOnDisk()).toMatchObject([{ pr: 600, owner: 'writer', author: 'writer', auto: { branch: 'docs/guide', head: repo.heads['docs/guide'], main: repo.main } }])
+    // A draft, which GitHub, merge_when_green and every version of the queue refuse to merge: only this queue lands it
+    expect(gh().prs['600']).toMatchObject({ isDraft: true, mergeStateStatus: 'DRAFT' })
+    // Landed by the queue's own path: a batch of the quick tier, the squash, the branch deleted, the session told
+    await until((x) => stateOf(x, 600) === 'merged', 'the record to land', BATCH_WAIT_MS)
+    expect(gh().dispatched).toEqual([{ ref: 'queue/batch-1', inputs: { tier: 'quick' } }])
+    expect(writes().map(short2)).toEqual(expect.arrayContaining(['merge 600', 'delete docs/guide']))
+    const merge = writes().find((w) => w[0] === 'merge')!
+    expect(merge[2]).toEqual(expect.arrayContaining(['--squash', '--match-head-commit', repo.heads['docs/guide']]))
+    // Readied in the same step as the squash, never before
+    const order = writes().map(short2)
+    expect(order.filter((w) => w === 'ready 600')).toHaveLength(1)
+    expect(order.indexOf('ready 600')).toBe(order.indexOf('merge 600') - 1)
+    expect(notices().map((e) => e.text)).toEqual([expect.stringContaining('Merge queue: merged #600 (docs(guide): say how the guide is read)')])
+    // The checkout it judged in: its branch, head and work as they were, and no ref of the integrator's left
+    expect(g(repo.work, 'branch', '--show-current')).toBe('mine')
+    expect(g(repo.work, 'status', '--porcelain')).toBe('M README.md')
+    expect(g(repo.work, 'for-each-ref', 'refs/centralu-integrate')).toBe('')
+  })
+
+  it("refuses a branch that is not auto with the files and rules that put it there, judged by main's judge and rules, not the branch's", async () => {
+    const repo = integrateRepo({
+      'feat/code': { 'docs/guide.md': 'more\n', 'packages/ui/src/x.ts': 'export const x = 1\n' },
+      // A branch that rewrites the judge to call everything auto, and the rules to make auto the fallback
+      'docs/sneaky': {
+        'scripts/tier.mjs': "console.log(JSON.stringify({ tier: 'auto', line: 'Tier: auto.', because: [], counts: { auto: 1 }, rulesFrom: process.argv[3] }))\n",
+        '.centralu/tiers.json': readFileSync(join(REPO_ROOT, '.centralu/tiers.json'), 'utf8').replace('"fallback": "light"', '"fallback": "auto"'),
+        'packages/ui/src/y.ts': 'export const y = 1\n',
+      },
+    })
+    integrateRuntime(repo, 'feat/code')
+    const light = await call('integrate', handOver('feat/code', { title: 'feat(ui): add x' }))
+    expect(light.isError).toBe(true)
+    expect(light.data).toMatchObject({ integrated: false, kind: 'tier', tier: 'light' })
+    expect(light.text).toContain('Not integrated: feat/code: its tier is light, not auto.')
+    expect(light.text).toContain('packages/ui/src/x.ts (no rule names it)')
+    expect(light.text).toContain('Open a pull request (open_pr, after the review its tier asks for) and queue it (queue_merge).')
+    const sneaky = await call('integrate', handOver('docs/sneaky'))
+    expect(sneaky.isError).toBe(true)
+    expect(sneaky.data).toMatchObject({ kind: 'tier', tier: 'deep' })
+    expect(sneaky.text).toContain('.centralu/tiers.json (tier-rules)')
+    expect(sneaky.text).toContain('scripts/tier.mjs (tier-rules)')
+    // Nothing opened, labelled or queued
+    expect(writes()).toEqual([])
+    expect(itemsOnDisk()).toEqual([])
+  })
+
+  it("refuses a branch not on GitHub, one with nothing over main, a fork's, a title too long to squash, and an account without merge rights, before any write", async () => {
+    const repo = integrateRepo({ 'docs/empty': {} })
+    integrateRuntime(repo, 'docs/empty')
+    const missing = await call('integrate', handOver('docs/nowhere'))
+    expect(missing.data).toMatchObject({ integrated: false, kind: 'missing' })
+    expect(missing.text).toContain('the branch docs/nowhere is not on GitHub. Push it first')
+    expect((await call('integrate', handOver('docs/empty'))).data).toMatchObject({ kind: 'empty' })
+    expect((await call('integrate', handOver('someone:docs/guide'))).data).toMatchObject({ kind: 'fork' })
+    expect((await call('integrate', handOver('main'))).data).toMatchObject({ kind: 'input' })
+    const long = await call('integrate', handOver('docs/empty', { title: `docs(guide): ${'a'.repeat(60)}` }))
+    expect(long.data).toMatchObject({ kind: 'subject' })
+    expect((await call('integrate', handOver('docs/empty', { notExercised: '' }))).data).toMatchObject({ kind: 'record' })
+    patchGh((s) => (s.permissions = { push: true }))
+    const contributor = await call('integrate', handOver('docs/empty'))
+    expect(contributor.data).toMatchObject({ kind: 'permission' })
+    expect(contributor.text).toContain('mark_ready')
+    expect(writes()).toEqual([])
+    expect(itemsOnDisk()).toEqual([])
+  })
+
+  it('takes the record already open from the branch when it is handed over again, and queues it again, never a second pull request', async () => {
+    const repo = integrateRepo({ 'docs/guide': { 'docs/guide.md': 'read it top down\n' } })
+    const head = repo.heads['docs/guide']!
+    // Its own run still going: nothing lands while the test hands it over twice
+    integrateRuntime(repo, 'docs/guide', { checks: { [head]: [ghCheck('verify', null, 11)] }, runs: { [head]: [ghRun(null, 1, head, { head_branch: 'docs/guide' })] }, on: {} })
+    expect((await call('integrate', handOver('docs/guide'))).data).toMatchObject({ integrated: true, pr: 600, opened: true })
+    // Marked ready by someone meanwhile (mark_ready, a person): the queue turns it back into a draft before anything else
+    patchGh((s) => Object.assign(s.prs['600'], { isDraft: false, mergeStateStatus: 'CLEAN' }))
+    await until(() => gh().prs['600'].isDraft === true, 'the record to be a draft again')
+    expect(writes().map(short2)).toContain('draft 600')
+    const again = await call('integrate', handOver('docs/guide'))
+    expect(again.isError, again.text).toBe(false)
+    expect(again.data).toMatchObject({ integrated: true, pr: 600, opened: false })
+    expect(again.text).toContain('#600, open from it already, is its record')
+    expect(again.text).toContain('queued it again')
+    expect(recordsOpened()).toHaveLength(1)
+    expect(itemsOnDisk().filter((i) => i.state !== 'merged').map((i) => i.pr)).toEqual([600])
+  })
+
+  it("judges from a temporary folder reached through a link, as macOS's /var is (/private/var)", async () => {
+    const repo = integrateRepo({ 'docs/guide': { 'docs/guide.md': 'read it top down\n' } })
+    mkdirSync(appTmp(), { recursive: true })
+    const link = join(root, 'tmp-link')
+    symlinkSync(appTmp(), link, process.platform === 'win32' ? 'junction' : 'dir')
+    const head = repo.heads['docs/guide']!
+    integrateRuntime(repo, 'docs/guide', { checks: { [head]: [ghCheck('verify', null, 11)] }, runs: { [head]: [ghRun(null, 1, head, { head_branch: 'docs/guide' })] }, on: {} }, link)
+    const r = await call('integrate', handOver('docs/guide'))
+    expect(r.isError, r.text).toBe(false)
+    expect(r.data).toMatchObject({ integrated: true, tier: 'auto' })
+    // Nothing of the judge's own left in the temporary folder
+    expect(readdirSync(appTmp()).filter((f) => f.startsWith('centralu-integrate-'))).toEqual([])
+  })
+
+  it('refuses a pull request open from the branch that a label puts above auto, and turns one it takes into a draft', async () => {
+    const repo = integrateRepo({ 'docs/guide': { 'docs/guide.md': 'read it top down\n' } })
+    const head = repo.heads['docs/guide']!
+    const open = ghPr(590, { headRefName: 'docs/guide', headRefOid: head, labels: [{ name: 'documentation' }, { name: 'tier:person' }] })
+    integrateRuntime(repo, 'docs/guide', { prs: { '590': open }, checks: { [head]: [ghCheck('verify', null, 11)] }, runs: { [head]: [ghRun(null, 1, head, { head_branch: 'docs/guide' })] }, on: {} })
+    const person = await call('integrate', handOver('docs/guide'))
+    expect(person.data).toMatchObject({ integrated: false, kind: 'label', tier: 'person', pr: 590 })
+    expect(person.text).toContain('#590, open from docs/guide, is labelled tier:person, and integrate lands only auto.')
+    expect(writes()).toEqual([])
+    // Without a tier label above auto it is the record, and a draft from then on
+    patchGh((s) => (s.prs['590'].labels = [{ name: 'documentation' }]))
+    const taken = await call('integrate', handOver('docs/guide'))
+    expect(taken.data).toMatchObject({ integrated: true, pr: 590, opened: false })
+    expect(writes().map(short2)).toEqual(['draft 590'])
+    expect(gh().prs['590'].isDraft).toBe(true)
+  })
+
+  it('says to try again when GitHub cannot be reached to judge it, rather than calling it deep', async () => {
+    const repo = integrateRepo({ 'docs/guide': { 'docs/guide.md': 'read it top down\n' } })
+    integrateRuntime(repo, 'docs/guide')
+    renameSync(repo.origin, `${repo.origin}.away`)
+    const r = await call('integrate', handOver('docs/guide'))
+    renameSync(`${repo.origin}.away`, repo.origin)
+    expect(r.data).toMatchObject({ integrated: false, kind: 'retry' })
+    expect(r.text).toContain('Nothing was written; integrate again in a moment.')
+    expect(writes()).toEqual([])
+  })
+
+  it("refuses an answer of main's judge whose rules did not come from main", async () => {
+    const repo = integrateRepo({ 'docs/guide': { 'docs/guide.md': 'read it top down\n' } })
+    pushTo(repo, 'main', { 'scripts/tier.mjs': "console.log(JSON.stringify({ tier: 'auto', line: 'Tier: auto.', because: [], counts: { auto: 1 }, rulesFrom: 'elsewhere' }))\n" })
+    integrateRuntime(repo, 'docs/guide')
+    const r = await call('integrate', handOver('docs/guide'))
+    expect(r.data).toMatchObject({ integrated: false, kind: 'tier', tier: 'deep' })
+    expect(r.text).toContain('the rules were not read from main')
+  })
+
+  it.each([
+    { name: 'GitHub refuses the squash', patch: { mergeError: 'GraphQL: Pull Request is not mergeable (HTTP 405)' }, merge: false, reason: 'refused' },
+    { name: 'a rate limit stops it mid-way', patch: { mergeError: 'API rate limit exceeded for user ID 1. (HTTP 403)' }, merge: false, reason: null },
+    { name: 'GitHub holds the squash (its own merge queue)', patch: { mergeNoop: true }, merge: true, reason: 'not-merged' },
+  ])('turns the record back into a draft when $name after readying it', async ({ patch, merge, reason }) => {
+    const repo = integrateRepo({ 'docs/guide': { 'docs/guide.md': 'read it top down\n' } })
+    integrateRuntime(repo, 'docs/guide', patch)
+    await call('integrate', handOver('docs/guide'))
+    await until(() => writes().some((w) => w[0] === 'draft' && w[1] === '600'), 'the record to be a draft again', BATCH_WAIT_MS)
+    const order = writes().map(short2).filter((w) => /^(ready|merge|draft) 600$/.test(w))
+    expect(order).toEqual(merge ? ['ready 600', 'merge 600', 'draft 600'] : ['ready 600', 'draft 600'])
+    expect(gh().prs['600']).toMatchObject({ state: 'OPEN', isDraft: true })
+    if (reason) {
+      const q = await until((x) => stateOf(x, 600) === 'attention', 'attention')
+      const item = q.queue.find((i: any) => i.pr === 600)
+      expect(item.reason.kind).toBe(reason)
+      if (reason === 'not-merged') expect(item.reason.text).toContain('it was turned back into a draft, which also stops what GitHub held')
+    }
+  })
+
+  it('refuses where the queue does not batch with two tiers of CI: a draft record would have no gate', async () => {
+    const repo = integrateRepo({ 'docs/guide': { 'docs/guide.md': 'read it top down\n' } })
+    mkdirSync(appTmp(), { recursive: true })
+    runtime(ghState({ prs: {}, files: { '.github/PULL_REQUEST_TEMPLATE.md': TEMPLATE } }), { ...NO_TIERS, PROJECT_BOARD_QUEUE_CHECKOUT: repo.work, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: join(root, 'no-gitconfig') }, gitWrapper(fake.bin))
+    const r = await call('integrate', handOver('docs/guide'))
+    expect(r.data).toMatchObject({ integrated: false, kind: 'setup' })
+    expect(r.text).toContain('does not batch with two tiers of CI')
+    expect(writes()).toEqual([])
+  })
+
+  it("never takes a fork's open pull request whose branch has the same name as the record", async () => {
+    const repo = integrateRepo({ 'docs/guide': { 'docs/guide.md': 'read it top down\n' } })
+    const head = repo.heads['docs/guide']!
+    integrateRuntime(repo, 'docs/guide', { prs: { '590': ghPr(590, { headRefName: 'docs/guide', isCrossRepository: true, headRefOid: SHA2 }) }, checks: { [head]: [ghCheck('verify', null, 11)] }, runs: { [head]: [ghRun(null, 1, head, { head_branch: 'docs/guide' })] }, on: {} })
+    const r = await call('integrate', handOver('docs/guide'))
+    expect(r.data).toMatchObject({ integrated: true, pr: 600, opened: true })
+    expect(itemsOnDisk().map((i) => i.pr)).toEqual([600])
+  })
+})
+
+describe('the queue judges an integrated change again on each new head and before it lands (#1259 step 3)', { timeout: 240_000 * SLOW }, () => {
+  /** Its own run still going: nothing lands until the test says CI passed */
+  const pending = (head: string) => ({ checks: { [head]: [ghCheck('verify', null, 11)] }, runs: { [head]: [ghRun(null, 1, head, { head_branch: 'docs/guide' })] }, on: {} })
+  /**
+   * CI passed on `head` (its own quick run), and a batch of it passes the quick tier: whenever its batch was started,
+   * before this or after (it may have been batched while its own run was still going)
+   */
+  const passes = (s: Gh, head: string) => {
+    const one = `batch-${head}`
+    s.checks[head] = integrateQuick()
+    s.runs[head] = [ghRun('success', 1, head, { head_branch: 'docs/guide' })]
+    // The batch is queue/batch-1, or a later one when an earlier batch was dropped (its head moved): runs are read on its branch
+    s.runs[one] = [1, 2, 3].map((n) => ghRun('success', 1, one, { id: 950 + n, head_branch: `queue/batch-${n}`, event: 'workflow_dispatch', check_suite_id: 6000 }))
+    s.checks[one] = integrateBatch(6000)
+  }
+  const tierNotices = () => notices().filter((e) => e.kind === 'attention' && e.text.includes('needs attention: tier'))
+
+  it('stops a head pushed after the hand-over that is no longer auto: attention for the session with the files, never batched or landed', async () => {
+    const repo = integrateRepo({ 'docs/guide': { 'docs/guide.md': 'read it top down\n' } })
+    const head = repo.heads['docs/guide']!
+    integrateRuntime(repo, 'docs/guide', pending(head))
+    expect((await call('integrate', handOver('docs/guide'))).data).toMatchObject({ integrated: true, pr: 600 })
+    await until(() => itemsOnDisk()[0]?.head === head, 'the first poll of its head')
+    // The session pushes code to the same branch, and CI passes on it
+    const code = pushTo(repo, 'docs/guide', { 'packages/ui/src/x.ts': 'export const x = 1\n' })
+    patchGh((s) => {
+      s.prs['600'].headRefOid = code
+      passes(s, code)
+    })
+    await until((x) => stateOf(x, 600) === 'attention', 'attention', BATCH_WAIT_MS)
+    const item = (await call('merge_queue')).data.queue.find((i: any) => i.pr === 600)
+    expect(item.reason.kind).toBe('tier')
+    expect(item.reason.text).toContain(`#600 was handed over with integrate as an auto-tier change, but at ${code.slice(0, 7)} its tier is now light, from packages/ui/src/x.ts (no rule names it).`)
+    expect(item.reason.text).toContain('queue it with queue_merge')
+    // Once, to the session that handed it over; the new head in no batch (the first one may have been), nothing landed
+    await morePolls(3)
+    expect(tierNotices()).toHaveLength(1)
+    expect(writes().filter((w) => w[0] === 'merge-into' && w[1] === code)).toEqual([])
+    expect(writes().map(short2)).not.toContain('merge 600')
+    expect(itemsOnDisk()[0].tierAt).toMatchObject({ head: code, tier: 'light', main: repo.main })
+  })
+
+  it('judges it once more right before the squash, against main as it is then: rules main changed since make it deep, and it does not land', async () => {
+    const repo = integrateRepo({ 'docs/guide': { 'docs/guide.md': 'read it top down\n' } })
+    const head = repo.heads['docs/guide']!
+    integrateRuntime(repo, 'docs/guide', pending(head))
+    await call('integrate', handOver('docs/guide'))
+    await until(() => itemsOnDisk()[0]?.head === head, 'the first poll of its head')
+    // Main moves on after that judgment: its rules now call docs deep
+    const rules = JSON.parse(readFileSync(join(REPO_ROOT, '.centralu/tiers.json'), 'utf8'))
+    rules.rules.find((r: any) => r.id === 'docs').tier = 'deep'
+    pushTo(repo, 'main', { '.centralu/tiers.json': `${JSON.stringify(rules, null, 2)}\n` })
+    patchGh((s) => passes(s, head))
+    await until((x) => stateOf(x, 600) === 'attention', 'attention', BATCH_WAIT_MS)
+    // It was batched on the poll's judgment of its head, and stopped at the squash
+    expect(gh().dispatched).toEqual([{ ref: 'queue/batch-1', inputs: { tier: 'quick' } }])
+    expect(writes().map(short2)).not.toContain('merge 600')
+    // No "Passed CI in the batch" status on a head that does not land
+    expect(writes().filter((w) => w[0] === 'status')).toEqual([])
+    expect(tierNotices().map((e) => e.text)).toEqual([expect.stringContaining(`but at ${head.slice(0, 7)} its tier is now deep, from docs/guide.md (docs)`)])
+    // The judgment stays on the item for that head: polls do not try to land it again
+    expect(itemsOnDisk()[0].tierAt).toMatchObject({ head, tier: 'deep' })
+    await morePolls(2)
+    expect(writes().filter((w) => w[0] === 'merge')).toEqual([])
+  })
+
+  it('retries a head it could not judge (GitHub out of reach) as a failed poll, tells nobody on a blip, and lands it once judged', async () => {
+    const repo = integrateRepo({ 'docs/guide': { 'docs/guide.md': 'read it top down\n' } })
+    const head = repo.heads['docs/guide']!
+    integrateRuntime(repo, 'docs/guide', pending(head))
+    await call('integrate', handOver('docs/guide'))
+    await until(() => itemsOnDisk()[0]?.head === head, 'the first poll of its head')
+    // A new auto head, read while GitHub's copy cannot be fetched
+    const more = pushTo(repo, 'docs/guide', { 'docs/more.md': 'more\n' })
+    renameSync(repo.origin, `${repo.origin}.away`)
+    patchGh((s) => (s.prs['600'].headRefOid = more))
+    await until(() => /the integrator could not judge #600/.test(itemsOnDisk()[0]?.lastError ?? ''), 'a poll that could not judge it')
+    expect(stateOf((await call('merge_queue')).data, 600)).not.toBe('attention')
+    expect(tierNotices()).toEqual([])
+    // Back in reach, and CI passed: judged auto, and it lands
+    renameSync(`${repo.origin}.away`, repo.origin)
+    patchGh((s) => passes(s, more))
+    await until((x) => stateOf(x, 600) === 'merged', 'the record to land', BATCH_WAIT_MS)
+    expect(itemsOnDisk()[0].tierAt).toMatchObject({ head: more, tier: 'auto' })
+    expect(notices().filter((e) => e.kind === 'attention')).toEqual([])
+  })
+
+  it('stops it when a person labels it above auto after the hand-over, whatever the judge said, and lands nothing', async () => {
+    const repo = integrateRepo({ 'docs/guide': { 'docs/guide.md': 'read it top down\n' } })
+    const head = repo.heads['docs/guide']!
+    integrateRuntime(repo, 'docs/guide', pending(head))
+    await call('integrate', handOver('docs/guide'))
+    await until(() => itemsOnDisk()[0]?.head === head, 'the first poll of its head')
+    // The owner raises it by hand, and CI passes
+    patchGh((s) => {
+      s.prs['600'].labels = [{ name: 'tier:auto' }, { name: 'tier:deep' }]
+      passes(s, head)
+    })
+    await until((x) => stateOf(x, 600) === 'attention', 'attention', BATCH_WAIT_MS)
+    const item = (await call('merge_queue')).data.queue.find((i: any) => i.pr === 600)
+    expect(item.reason.kind).toBe('tier')
+    expect(item.reason.text).toContain('#600 was handed over with integrate, but it is labelled tier:deep')
+    await morePolls(2)
+    expect(writes().map(short2)).not.toContain('merge 600')
+    expect(writes().map(short2)).not.toContain('ready 600')
+    expect(gh().prs['600'].isDraft).toBe(true)
+  })
+
+  it('lands a record as a pull request of its own tier only after it is taken out, marked ready and queued with queue_merge', async () => {
+    const repo = integrateRepo({ 'docs/guide': { 'docs/guide.md': 'read it top down\n' } })
+    const head = repo.heads['docs/guide']!
+    integrateRuntime(repo, 'docs/guide', pending(head))
+    await call('integrate', handOver('docs/guide'))
+    expect(itemsOnDisk()[0].auto).toBeTruthy()
+    // Still the integrator's: a draft, which queue_merge refuses like any draft
+    const refused = await call('queue_merge', { pr: 600, owner: 'writer' })
+    expect(refused.text).toContain('#600 is a draft')
+    await call('unqueue', { pr: 600 })
+    // Marked ready by the session (the fake's state is written whole by both sides: set it until it holds)
+    let queued = { isError: true, text: '' }
+    for (let i = 0; i < 20 && queued.isError; i++) {
+      patchGh((st) => Object.assign(st.prs['600'], { isDraft: false, mergeStateStatus: 'CLEAN' }))
+      queued = await call('queue_merge', { pr: 600, owner: 'writer' })
+    }
+    expect(queued.text).toContain('Queued #600')
+    const item = itemsOnDisk().find((i) => i.state !== 'removed' && i.pr === 600)
+    expect(item.auto).toBeUndefined()
+    expect(item.tierAt).toBeUndefined()
+    // Not the integrator's any more: never turned back into a draft
+    await morePolls(2)
+    expect(writes().map(short2)).not.toContain('draft 600')
   })
 })

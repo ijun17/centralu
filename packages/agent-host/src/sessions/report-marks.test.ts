@@ -223,6 +223,30 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     expect(store.settings.appSetting(`report_paused:${child}`)).toBeNull()
   })
 
+  it('held over background work and ended by the person writing to the child (#1340), it stays ended in the next host', async () => {
+    const verify = { id: 'bg-verify', kind: 'shell' as const, description: 'pnpm verify', status: 'running' as const }
+    const a = host()
+    const { parent, child } = await parentAndChild(a)
+    a.claude.handles.get(child)!.emitEvent({ type: 'background_tasks', sessionId: child, live: [verify] })
+    a.claude.handles.get(child)!.answer('waiting for verify')
+    await eventually(() => reports(a.claude.handles.get(parent), child).length === 1)
+    await a.mgr.send(child, 'a question of the person')
+    // Ended in the store as well as in memory: the mark and the stored pause
+    expect(store.children.listReportMarks()).toEqual([])
+    expect(store.settings.appSetting(`report_paused:${child}`)).toBeNull()
+    await eventually(() => reports(a.claude.handles.get(parent), child).length === 2)
+    await a.mgr.detachAll()
+
+    const b = host(new Set([child]))
+    await b.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() as unknown as AgentProcess }])
+    expect(store.children.listReportMarks()).toEqual([])
+    // The person's turn, running in the kept process, ends under the new host: the child's own, told to no one
+    b.claude.handles.get(child)!.answer('the person\'s answer')
+    await new Promise((r) => setTimeout(r, 20))
+    expect(reports(b.claude.handles.get(parent), child)).toEqual([])
+    expect(stored(parent)).toEqual([])
+  })
+
   it('held over background work, it is dropped by a host that finds no process: the work went with the old one', async () => {
     const verify = { id: 'bg-verify', kind: 'shell' as const, description: 'pnpm verify', status: 'running' as const }
     const a = host()

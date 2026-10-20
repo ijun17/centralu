@@ -3,7 +3,7 @@ import { inlineImageEvent, undrawnImageEvent } from '../images.js'
 import { todoWritePlan } from '../plan.js'
 import { tokenCount } from '../token-usage.js'
 import { toolResultEvent } from '../tool-result.js'
-import { str, type Json } from './json.js'
+import { contentBlocks, str, type Json } from './json.js'
 import { agentReport, agentStats, resultOutput, toolSummary } from './tool-summary.js'
 
 /**
@@ -30,7 +30,7 @@ export type AssistantStreamed = { textStreamed?: boolean; reasoningStreamed?: bo
 export function backgroundLaunch(m: Json): string | null {
   const r = (m.tool_use_result ?? {}) as Json
   if (str(r.status) !== 'async_launched' || !str(r.agentId)) return null
-  const blocks = (((m.message as Json | undefined)?.content ?? []) as Json[]).filter((b) => str(b.type) === 'tool_result')
+  const blocks = contentBlocks(m).filter((b) => str(b.type) === 'tool_result')
   return blocks.length === 1 ? str(blocks[0]?.tool_use_id) || null : null
 }
 
@@ -63,7 +63,7 @@ export function streamEventEvents(m: Json, sessionId: string): NormalizedEvent[]
 
 export function assistantEvents(m: Json, sessionId: string, opts?: AssistantStreamed): NormalizedEvent[] {
   const out: NormalizedEvent[] = []
-  const content = ((m.message as Json | undefined)?.content ?? []) as Json[]
+  const content = contentBlocks(m)
   // The only way out for a body that arrives with no deltas at all (see the opts.textStreamed comment on normalizeMessage — /usage arrives this way).
   // Thinking follows the same rule as text, but on its own flag: a message can stream its thinking and
   // then call a tool without any text, and then only the thinking has already gone out.
@@ -127,7 +127,8 @@ export function requestInputTokens(usage: Json): { inputTokens: number; cacheRea
 
 export function userEvents(m: Json, sessionId: string): NormalizedEvent[] {
   const out: NormalizedEvent[] = []
-  const content = ((m.message as Json | undefined)?.content ?? []) as Json[]
+  // Words only (the summary after /compact is a string) has no tool result in it and makes no event: the marker already told it
+  const content = contentBlocks(m)
   /*
    * The result of launching a background agent is **not actually a result** (#98). Closing the
    * card here would show the text meant only for the model ("never quote…") as its result, and

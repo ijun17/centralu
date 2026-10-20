@@ -310,9 +310,9 @@ describe("the orchestrator's tools see only this app's sessions", () => {
     // An ordinary session holds only the reader set (#320): the orchestrator's tools stay shut to it
     await expect(mgr.runOrchestratorTool(a.id, 'list_sessions', {})).rejects.toThrow(/Not a tool of this session/)
     await expect(mgr.runOrchestratorTool(a.id, 'send_to_session', { sessionId: orc.id, text: 'x' })).rejects.toThrow(/Not a tool of this session/)
-    // With the set turned off it has no door at all
+    // An "off" an older window sends changes nothing (2026-10-20): the reader set is always on, and still only reads
     await rpc('prefs.set', { patch: { sessionTools: false } })
-    await expect(mgr.runOrchestratorTool(a.id, 'read_session', {})).rejects.toThrow(/Only the orchestrator/)
+    await expect(mgr.runOrchestratorTool(a.id, 'send_to_session', { sessionId: orc.id, text: 'x' })).rejects.toThrow(/Not a tool of this session/)
     const r = await mgr.runOrchestratorTool(orc.id, 'list_sessions', {})
     expect(r.text).toContain(a.id)
   })
@@ -402,11 +402,12 @@ describe("the orchestrator's tools see only this app's sessions", () => {
     expect(codexAdapter.lastOpts?.permissionPreset).toBe('safe')
   })
 
-  it('a plain session gets no tools attached when the reader set is turned off — only the orchestrator receives them', async () => {
+  it('a plain session gets the reader set even after an older window sent the switch off (always on, 2026-10-20)', async () => {
     const p = await addProject()
     await rpc('prefs.set', { patch: { sessionTools: false } })
-    await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })
-    expect(adapter.lastOrchestratorTools).toBeUndefined()
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
+    expect(adapter.lastOrchestratorTools).toBeDefined()
+    expect(mgr.toolProfileOf(s.id)).toBe('reader')
   })
 
   /*
@@ -534,17 +535,22 @@ describe("an ordinary session's reader set (#320)", () => {
     expect(sent.some((t) => t.includes('sourceSessionId') && t.includes(a1.id))).toBe(true)
   })
 
-  it('turned off in Settings: a new session gets nothing, and a live one stops answering at once', async () => {
+  /*
+   * Owner decision 2026-10-20: the set is always on. An "off" stored by an earlier build, or sent by an older window, is
+   * not read: a live session keeps answering and a new one gets the set
+   */
+  it('cannot be turned off: an "off" stored before or sent by an older window changes nothing', async () => {
+    store.settings.setAppSetting('ui_preferences', JSON.stringify({ sessionTools: false }))
     const { shop, a1, a2 } = await setup()
     await rpc('prefs.set', { patch: { sessionTools: false } })
-    expect(await a1.tools.listSessions()).toEqual([])
-    expect((await a1.tools.readSession(a2.id)).ok).toBe(false)
-    expect(mgr.toolProfileOf(a1.id)).toBeNull()
-    expect(await rpc('orchestrator.tools', { sessionId: a1.id })).toEqual([])
+    expect((await a1.tools.listSessions()).map((s) => s.sessionId)).toContain(a2.id)
+    expect((await a1.tools.readSession(a2.id)).ok).toBe(true)
+    expect(mgr.toolProfileOf(a1.id)).toBe('reader')
+    expect(await rpc('orchestrator.tools', { sessionId: a1.id })).not.toEqual([])
 
     await rpc('agents.createSession', { projectId: shop.id, cwd: shop.path, tool: 'claude' })
-    expect(adapter.lastOpts?.orchestratorTools).toBeUndefined()
-    expect(adapter.lastOpts?.toolProfile).toBeUndefined()
+    expect(adapter.lastOpts?.orchestratorTools).toBeDefined()
+    expect(adapter.lastOpts?.toolProfile).toBe('reader')
   })
 })
 

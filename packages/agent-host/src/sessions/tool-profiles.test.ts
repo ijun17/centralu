@@ -7,35 +7,31 @@ import { Store } from '../dev-services/store.js'
 import { SessionManager } from './manager.js'
 import { codeIntelligenceOff, isAppAgent, readsOwnProject, toolBundleFor, toolProfileFor, type CodeIntelligenceFacts, type ToolProfileFacts } from './tool-profiles.js'
 
-/** An ordinary session in a project, with the reader set on; each case overrides what makes it different */
+/** An ordinary session in a project; each case overrides what makes it different */
 const facts = (over: Partial<ToolProfileFacts> = {}): ToolProfileFacts => ({
-  kind: 'worker', projectId: 'p1', appId: null, builder: false, sessionTools: true, ...over,
+  kind: 'worker', projectId: 'p1', appId: null, builder: false, ...over,
 })
 
 describe('toolProfileFor — which bundle a session gets (#69, #320)', () => {
   it('the orchestrator gets everything, whatever else its row says', () => {
     expect(toolProfileFor(facts({ kind: 'orchestrator', projectId: null }))).toBe('orchestrator')
     // Its kind decides; an app stamp, a builder slot or the Settings switch change nothing
-    expect(toolProfileFor(facts({ kind: 'orchestrator', projectId: null, appId: 'a', builder: true, sessionTools: false }))).toBe('orchestrator')
+    expect(toolProfileFor(facts({ kind: 'orchestrator', projectId: null, appId: 'a', builder: true }))).toBe('orchestrator')
   })
 
   it('a coordinator an older build left (#372) still wakes with the scoped bundle', () => {
     expect(toolProfileFor(facts({ kind: 'coordinator' }))).toBe('scoped')
-    expect(toolProfileFor(facts({ kind: 'coordinator', appId: 'control', builder: true, sessionTools: false }))).toBe('scoped')
+    expect(toolProfileFor(facts({ kind: 'coordinator', appId: 'control', builder: true }))).toBe('scoped')
   })
 
   it("a builder session gets its app's check, in a project or in the user folder, even with the reader set off (M4 C-3)", () => {
     expect(toolProfileFor(facts({ appId: 'app-notes', builder: true }))).toBe('builder')
     expect(toolProfileFor(facts({ projectId: null, appId: 'app-notes', builder: true }))).toBe('builder')
-    expect(toolProfileFor(facts({ appId: 'app-notes', builder: true, sessionTools: false }))).toBe('builder')
+    expect(toolProfileFor(facts({ appId: 'app-notes', builder: true }))).toBe('builder')
   })
 
   it('an ordinary session in a project gets the reader set (#320), including a worktree or delegated one that carries no app', () => {
     expect(toolProfileFor(facts())).toBe('reader')
-  })
-
-  it('an ordinary session gets nothing once "Let sessions look at other sessions" is off', () => {
-    expect(toolProfileFor(facts({ sessionTools: false }))).toBeNull()
   })
 
   it('a worker outside any project gets nothing', () => {
@@ -44,17 +40,23 @@ describe('toolProfileFor — which bundle a session gets (#69, #320)', () => {
 
   it("an app's agent (M4 D-1) gets nothing: its answer goes back to the app, so it may not read the project's conversations", () => {
     expect(toolProfileFor(facts({ appId: 'app-notes' }))).toBeNull()
-    // The switch does not open it either
-    expect(toolProfileFor(facts({ appId: 'app-notes', sessionTools: true }))).toBeNull()
   })
 
   it('a row stamped by the removed control app (#372) is an ordinary session, not an app agent', () => {
     for (const reserved of RESERVED_APP_IDS) expect(toolProfileFor(facts({ appId: reserved }))).toBe('reader')
   })
 
-  it('reads nothing about the tool or the preset: the facts have no such field, so Claude and Codex under safe, normal or auto share one answer', () => {
+  /*
+   * Nor any setting (owner decision 2026-10-20): "Let sessions look at other sessions" is always on, so the reader set
+   * depends on what the session is, never on a switch a stored record could still hold off
+   */
+  it('reads nothing about the tool, the preset or a setting: Claude and Codex under safe, normal or auto share one answer', () => {
     const keys = Object.keys(facts()).sort()
-    expect(keys).toEqual(['appId', 'builder', 'kind', 'projectId', 'sessionTools'])
+    expect(keys).toEqual(['appId', 'builder', 'kind', 'projectId'])
+    // A caller still handing the old switch in, off, changes nothing: the rule does not read it
+    const withOldSwitch = { ...facts(), sessionTools: false } as ToolProfileFacts
+    expect(toolProfileFor(withOldSwitch)).toBe('reader')
+    expect(readsOwnProject(withOldSwitch)).toBe(true)
   })
 })
 
@@ -67,12 +69,11 @@ describe('isAppAgent and readsOwnProject', () => {
     for (const reserved of RESERVED_APP_IDS) expect(isAppAgent({ kind: 'worker', appId: reserved, builder: false })).toBe(false)
   })
 
-  it('reads its own project only as a worker, in a project, not for an app, with the switch on', () => {
+  it('reads its own project only as a worker, in a project, not for an app', () => {
     expect(readsOwnProject(facts())).toBe(true)
     expect(readsOwnProject(facts({ kind: 'orchestrator' }))).toBe(false)
     expect(readsOwnProject(facts({ projectId: null }))).toBe(false)
     expect(readsOwnProject(facts({ appId: 'app-notes' }))).toBe(false)
-    expect(readsOwnProject(facts({ sessionTools: false }))).toBe(false)
     // The builder is an ordinary worker to this question; the profile rule ranks it first
     expect(readsOwnProject(facts({ appId: 'app-notes', builder: true }))).toBe(true)
   })

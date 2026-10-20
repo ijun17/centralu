@@ -27,7 +27,8 @@ export type UiPreferenceStoreHost = Pick<DelegationHost, 'emit' | 'meta' | 'stor
 
 /**
  * The screen's preferences (UiPreferences) and its workspace layout, kept in the store for every window: read as one
- * record, written back with only what changed, and the session tools switch applied to every live session (#382).
+ * record, written back with only what changed. The session tools switch it once applied to every live session (#382)
+ * is always on now (2026-10-20).
  * Moved out of the session manager as it was (#428); what it reaches of the manager is `UiPreferenceStoreHost`.
  */
 export class UiPreferenceStore {
@@ -84,6 +85,11 @@ export class UiPreferenceStore {
      * default); a row that is not an object, or a value that is not true or false, reads as off.
      */
     if (this.brokenRow() || ('hubAuto' in stored && typeof stored.hubAuto !== 'boolean')) prefs.hubAuto = false
+    /*
+     * "Let sessions look at other sessions" is always on (owner decision 2026-10-20): the field stays in the record for older
+     * builds, and a false one stored before, or sent by an older window, is not read
+     */
+    prefs.sessionTools = true
     return prefs
   }
 
@@ -99,7 +105,8 @@ export class UiPreferenceStore {
     // The switches are merged one by one (#1306): a patch carries only those that change, and two writers (the window, the
     // orchestrator) changing different ones do not undo each other. `current` has the field once the read above carried it; a
     // row that is not a JSON object has none, and the switches then start from the snapshot's, as the window shows them
-    const { notifyPolicy: switches, ...rest } = patch
+    // The session tools switch is always on (2026-10-20): what an older window sends for it is not stored
+    const { notifyPolicy: switches, sessionTools: _alwaysOn, ...rest } = patch
     const base = current.notifyPolicy ?? readNotifyPolicy(this.loadWorkspace()?.notifyPolicy)
     const notifyPolicy = switches ? { ...base, ...switches } : undefined
     const written = { ...rest, ...(notifyPolicy ? { notifyPolicy } : {}) }
@@ -112,14 +119,9 @@ export class UiPreferenceStore {
     const damaged = this.brokenRow() || ('hubAuto' in stored && typeof stored.hubAuto !== 'boolean')
     const kept = damaged && patch.hubAuto === undefined ? { hubAuto: false } : {}
     this.host.store.settings.setAppSetting(UI_PREFS_KEY, JSON.stringify({ ...stored, ...kept, ...written }))
-    // The session tools switch also decides the apps a session attached through them (#382): recount every live one
-    if (patch.sessionTools !== undefined && patch.sessionTools !== current.sessionTools) {
-      // Off ends what was allowed "once"; "always" and the person's own folder come back with the switch (#382)
-      if (!patch.sessionTools) this.host.appAccess?.dropOnce(this.host.meta.keys())
-      for (const id of this.host.meta.keys()) this.host.appsHub?.sessionAppsChanged(id)
-    }
     // Every window hears it (`prefs_changed`): one that did not make the change reads the record again
-    if (Object.keys(patch).length) this.host.emit({ type: 'prefs_changed' })
+    // A patch that only carried the session tools switch (always on, not stored) changed nothing
+    if (Object.keys(written).length) this.host.emit({ type: 'prefs_changed' })
     return { ...current, ...written }
   }
 

@@ -486,6 +486,60 @@ describe('compaction — saying what is currently happening', () => {
   })
 })
 
+/**
+ * After `/compact` the CLI writes the summary it feeds back as a user message whose `message.content` is a plain string, not a
+ * list of blocks. A reader that called `.filter` on it threw inside the adapter's stream loop, and the adapter reported the whole
+ * process as crashed: the marker arrived, then the turn failed with "(intermediate value) ?? []).filter is not a function".
+ */
+describe('a message whose content is words, not blocks (after /compact)', () => {
+  const SUMMARY = 'This session is being continued from a previous conversation. Summary: the user asked for X, and Y was done.'
+  const afterCompact = [
+    { type: 'system', subtype: 'status', status: 'compacting' },
+    { type: 'system', subtype: 'status', status: null, compact_result: 'success' },
+    { type: 'system', subtype: 'compact_boundary', compact_metadata: { trigger: 'manual', pre_tokens: 25485, post_tokens: 3686, duration_ms: 39099 } },
+    { type: 'user', message: { role: 'user', content: SUMMARY }, isSynthetic: true },
+  ]
+
+  it('the stream normalizer takes the whole sequence: the marker is kept, the summary makes no event, and nothing throws', () => {
+    const stream = new ClaudeStreamNormalizer(SID)
+    const events: NormalizedEvent[] = []
+    for (const m of afterCompact) expect(() => events.push(...stream.push(m))).not.toThrow()
+    expect(events).toContainEqual({ type: 'compaction', sessionId: SID, failed: false, before: 25485, after: 3686 })
+    // The summary is for the model: nothing of it reaches the screen as a result or a message
+    expect(events.map((e) => e.type)).not.toContain('tool_result')
+    expect(JSON.stringify(events)).not.toContain('is being continued')
+  })
+
+  it('also with a subagent\'s user message, an empty string, and content that is neither a list nor words', () => {
+    const stream = new ClaudeStreamNormalizer(SID)
+    for (const content of [SUMMARY, '', null, 7, { type: 'text', text: 'x' }]) {
+      expect(() => stream.push({ type: 'user', message: { content } })).not.toThrow()
+      expect(() => stream.push({ type: 'user', parent_tool_use_id: 'agent1', message: { content } })).not.toThrow()
+      expect(() => stream.push({ type: 'assistant', message: { content } })).not.toThrow()
+    }
+  })
+
+  it('a list with something that is not a block in it is read for the blocks it has', () => {
+    const stream = new ClaudeStreamNormalizer(SID)
+    const events = stream.push({ type: 'user', message: { content: [null, 'words', { type: 'tool_result', tool_use_id: 'tu9', content: 'ok' }] } })
+    expect(events.map((e) => e.type)).toEqual(['tool_result'])
+  })
+
+  it('an assistant message of plain words is its text, as imported history reads it', () => {
+    expect(n({ type: 'assistant', message: { content: 'All done.' } })).toEqual([
+      { type: 'message_delta', sessionId: SID, role: 'assistant', text: 'All done.' },
+    ])
+  })
+
+  it('a background agent\'s launch is told from the blocks, so words where the list should be is no launch', () => {
+    const launch = { status: 'async_launched', agentId: 'a1' }
+    expect(n({ type: 'user', tool_use_result: launch, message: { content: 'words' } })).toEqual([])
+    expect(n({ type: 'user', tool_use_result: launch, message: { content: [{ type: 'tool_result', tool_use_id: 'tu1', content: 'launched' }] } })).toEqual([
+      { type: 'tool_output_delta', sessionId: SID, callId: 'tu1', text: 'Running in the background\n' },
+    ])
+  })
+})
+
 describe('an unknown message is ignored silently', () => {
   it.each([
     { type: 'system', subtype: 'init' },

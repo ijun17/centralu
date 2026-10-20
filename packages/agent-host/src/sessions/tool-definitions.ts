@@ -204,14 +204,14 @@ export const ORCHESTRATOR_TOOLS = [
    */
   {
     name: 'get_preferences',
-    description: "Reads the person's settings: theme and the themes to choose from, text size, fonts, line height, the notification switches, idle sleep, the update switches.",
+    description: "Reads the person's settings: theme and the themes to choose from, text size, fonts, line height, the notification switches, idle sleep, automatic updates.",
     schema: z.object({}),
   },
   {
     name: 'set_preferences',
     description:
       'Changes settings the window offers, as it does; give only what changes (get_preferences shows the values and the choices). ' +
-      'Turning on applyUpdatesWhenIdle, or turning off the approval or error notification (or the sound while either notifies), asks the person first; the rest act at once.',
+      'Turning on autoUpdate, or turning off the approval notification (or the sound while it notifies), asks the person first; the rest act at once.',
     schema: z
       .object({
         theme: z.string().optional().describe('A theme by id or name. It sets the dark or light side by its base and shows that side.'),
@@ -220,15 +220,12 @@ export const ORCHESTRATOR_TOOLS = [
         codeFont: z.string().optional().describe('A font family; empty for the default.'),
         lineHeight: z.enum(['compact', 'normal', 'relaxed']).optional(),
         idleSleepMinutes: z.union([z.number().int().positive(), z.literal('never')]).optional().describe('Minutes before an idle session sleeps, or "never".'),
-        checkForUpdates: z.boolean().optional(),
-        applyUpdatesWhenIdle: z.boolean().optional(),
+        autoUpdate: z.boolean().optional().describe('Automatic updates: check for, install, and apply a newer Centralu when idle.'),
         moveIdleSessionsToNewAgentCli: z.boolean().optional(),
         notifications: z
           .object({
             approval: z.boolean().optional().describe('Notify when an agent is blocked on an approval.'),
-            error: z.boolean().optional(),
             done: z.boolean().optional().describe('Notify when a session finishes out of sight.'),
-            allDone: z.boolean().optional().describe('Notify once when every session has finished.'),
             whenFocused: z.boolean().optional().describe('Notify even while the app is focused.'),
             sound: z.boolean().optional(),
           })

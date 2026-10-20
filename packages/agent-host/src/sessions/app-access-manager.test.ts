@@ -248,34 +248,10 @@ describe('attaching from a session (find_apps, attach_app, detach_app)', () => {
   })
 
   /*
-   * #382: the switch "Let sessions look at other sessions" stops the set at once, and detach_app is part of that
-   * set — so an app attached through it has to go with it, or the session keeps tools it can no longer detach.
+   * #382 took attached apps away when the switch "Let sessions look at other sessions" went off. The switch is gone (owner
+   * decision 2026-10-20, always on): an "off" an older window sends leaves what is attached, "once" and "always" alike
    */
-  it('turning the session tools off in Settings takes attached apps away at once; turning them on brings them back', async () => {
-    allowedBefore()
-    await rpc('apps.setShared', { appId: 'board', projectId: beta, shared: true })
-    const s = await create(alpha, 'claude')
-    await tool(s.id, 'attach_app', { app: 'beta/board' })
-    const o = claude.last()
-    expect(servers(o)).toEqual(['app-board'])
-    let heard = 0
-    o.apps!.onChange(() => heard++)
-
-    await rpc('prefs.set', { patch: { sessionTools: false } })
-    // What the adapter hears (Claude's syncApps), and a call by the old name (a Codex thread still holding it)
-    expect(heard).toBe(1)
-    expect(servers(o)).toEqual([])
-    expect((await o.apps!.call('app-board', 'peek', {})).isError).toBe(true)
-
-    await rpc('prefs.set', { patch: { sessionTools: true } })
-    expect(servers(o)).toEqual(['app-board'])
-  })
-
-  /*
-   * Owner decision 2026-10-11 (#382, question 6): turning the switch off ends what "Allow once" allowed. An "always"
-   * is still the person's standing answer (listed in Settings), so it comes back with the switch; a "once" does not.
-   */
-  it('turning the session tools off drops what "Allow once" attached; turning them on brings back only the rest', async () => {
+  it('an "off" an older window sends for the session tools leaves attached apps, "once" and "always" alike', async () => {
     await rpc('apps.setShared', { appId: 'board', projectId: beta, shared: true })
     const once = await create(alpha, 'claude')
     const pending = tool(once.id, 'attach_app', { app: 'beta/board' })
@@ -292,12 +268,12 @@ describe('attaching from a session (find_apps, attach_app, detach_app)', () => {
     const alwaysOpts = claude.last()
     expect([servers(onceOpts), servers(alwaysOpts)]).toEqual([['app-board'], ['app-board']])
 
+    let heard = 0
+    onceOpts.apps!.onChange(() => heard++)
     await rpc('prefs.set', { patch: { sessionTools: false } })
-    expect([servers(onceOpts), servers(alwaysOpts)]).toEqual([[], []])
-    await rpc('prefs.set', { patch: { sessionTools: true } })
-    // The "once" record is gone, even though the pair now has an "always" that would have counted it
-    expect([servers(onceOpts), servers(alwaysOpts)]).toEqual([[], ['app-board']])
-    expect((await tool(once.id, 'detach_app', { app: 'beta/board' })).text).toContain('Attached: none')
+    expect([servers(onceOpts), servers(alwaysOpts)]).toEqual([['app-board'], ['app-board']])
+    expect(heard).toBe(0)
+    expect((await onceOpts.apps!.call('app-board', 'peek', {})).isError).toBeFalsy()
   })
 
   it('an attachment survives the session being restarted (resume)', async () => {

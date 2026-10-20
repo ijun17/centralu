@@ -52,6 +52,7 @@ const ORDER = [
   'mark_ready',
   'help',
   'queue_merge',
+  'integrate',
   'merge_queue',
   'unqueue',
 ]

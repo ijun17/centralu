@@ -208,7 +208,8 @@ export function decideBefore({ item, permissions, pr, defaultBranch, ref }) {
   // Landed only into the default branch: merged into a lower's branch, its lowers are not landed
   if (pr.state === 'MERGED') return { state: 'merged', landed: pr.baseRefName === defaultBranch }
   if (pr.state !== 'OPEN') return { state: 'closed' }
-  if (pr.isDraft) return attention('draft', `${n} is a draft, and the queue never merges a draft. Mark it ready for review; the queue carries on by itself.`)
+  // A record handed over with integrate is a draft on purpose until it lands (#1259 step 3, queue-integrate.mjs)
+  if (pr.isDraft && !item.auto) return attention('draft', `${n} is a draft, and the queue never merges a draft. Mark it ready for review; the queue carries on by itself.`)
   // A conflict: the driver merges the default branch in itself, or hands it to the author (#1182)
   if (pr.mergeStateStatus === 'DIRTY' || pr.mergeable === 'CONFLICTING')
     return attention(
@@ -378,6 +379,14 @@ export function decideCi({ item, pr, checks, runs = [], failures = {}, defaultBr
   // It failed alone in a batch on this head (queue-batch.mjs): that full run is the answer, whatever
   // its own quick run says (cancelled for the batch, it would otherwise be rerun to say nothing new)
   if (item.alone?.head === head && item.alone.reason) return { state: 'attention', reason: item.alone.reason }
+  // Handed over with integrate (#1259 step 3): a draft, whose own run is only CI's changes job, so it lands through a
+  // batch alone (the quick tier on what lands), never from its own run
+  if (item.auto) {
+    if (!canBatch) return attention('batch', `${n} was handed over with integrate, which lands only through a batch (the quick tier on ${defaultBranch}), and the queue cannot batch it (batches are off, or two tiers of CI are not set). Take it out (unqueue), mark it ready and land it with queue_merge.`)
+    const alone = item.alone?.head === head ? item.alone : null
+    if (alone) return attention('full-tier', `${n}'s batch of one ended without landing it: ${alone.text} Fix it and push (the queue takes the new head), or queue it again with integrate.`)
+    return { state: 'ci', quick: true, patch: { noCiSince: null, missingSince: null } }
+  }
   if (quickGreen(checks, runs, fullTier)) {
     const alone = item.alone?.head === head ? item.alone : null
     if (alone)
@@ -546,7 +555,7 @@ export function attentionText(item, reason, ref = refIn(item.repo)) {
 /** One line for an item in answers and on the screen. */
 export function itemLine(item, ref = refIn(item.repo)) {
   const stack = item.lowers?.length ? ` (stack over ${item.lowers.map((l) => ref(item.repo, l)).join(', ')})` : ''
-  const title = item.title ? ` ${item.title}` : ''
+  const title = `${item.title ? ` ${item.title}` : ''}${item.auto ? ' (integrated)' : ''}`
   const what =
     item.state === 'attention'
       ? `needs attention: ${item.reason?.kind ?? '?'} — ${item.reason?.text ?? ''}`

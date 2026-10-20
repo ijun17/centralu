@@ -184,6 +184,20 @@ full tier on your branch before queueing it (UI work, a change to the keeper or 
 gh workflow run build.yml --ref <your-branch>   # every job, on the branch's head; its checks show on the PR
 ```
 
+**An auto-tier change lands without a pull request of yours** (#1259 step 3). When everything
+your branch changes is auto ([below](#review-before-you-say-done): documents and images, fixture
+data, UI icons and fonts, only the kinds the auto rules list), push the branch, made from main, and hand it over with the board's `integrate` (the branch,
+the title, which becomes the squash subject, Why and Not exercised) instead of `open_pr` and
+`queue_merge`. The integrator judges the tier itself, with main's `pnpm tier` and rules on GitHub's
+copy of your branch, and refuses anything that is not auto, naming the files: then open a pull
+request as usual. Auto, it opens the pull request itself as the record (labelled `tier:auto`, and a
+draft until the queue squashes it, so nothing else can merge it: leave it a draft, even if an older
+board's message says to mark it ready) and queues it for your session; it lands after the fast tier like any queued change, and the queue's
+news (landed, a conflict, a failure, a later push that is no longer auto, a `tier:<name>` label above
+auto) comes to your session. One branch per change: no stack. Push a fix to the same branch and call
+`integrate` again; to land it as a pull request of its tier instead, `unqueue` it, mark it ready and
+`queue_merge` it.
+
 **A red run in the queue**: the queue reruns only what failed for the infrastructure's sake (a run
 cancelled with no failed job, a job that hit its timeout, a lost runner, a job on the board app's
 `queue.flakyJobs`). A test or build failure, also in a full run CI cancelled after `verify` failed
@@ -398,13 +412,13 @@ change with no behaviour (documents, a pure refactor) writes n/a.
 Every change has a risk tier by the paths it touches (#1259): `pnpm tier [--base origin/main]`
 prints it and the files that put it there. The rules, one reason each, are in
 [`.centralu/tiers.json`](.centralu/tiers.json); a change takes the highest tier of its files, and
-a test (`x.test.ts`) takes the tier of the file it tests (`x.ts`). No rules, rules that cannot be
+a test (`x.test.ts`) takes the tier of the file it tests (`x.ts`). A symbolic link or a submodule is deep, and a file that is executable in the change at least light, whatever its name. No rules, rules that cannot be
 read, or a skipped `pnpm pre-pr` make it deep.
 
 | Tier | What falls in it | Review, inside the author's loop |
 |---|---|---|
-| auto | `docs/**` (not `security-boundaries.md`), fixture data (not code), UI icons and fonts | none beyond the checks |
-| light | everything no rule names: ordinary code and its tests, UI scenarios, CSS, copy inside `.tsx` | one review by another model in the author's session: a sub-agent reads the diff against the self-check above |
+| auto | only harmless kinds, listed by extension: documents and images under `docs/**` (`.md`, `.txt`, images; not `security-boundaries.md`), fixture data (`.json`, `.txt`, `.sql`, `.csv`, `.yaml`, …), UI icons, images and fonts; any other file there (code, a script, a binary, a Makefile, anything unknown) is light | none beyond the checks; it lands without a pull request of yours, through the board's `integrate` ([how](#what-has-to-pass-before-you-send-it)) |
+| light | everything no rule names, and anything in an auto folder of a kind its rule does not list: ordinary code and its tests, UI scenarios, CSS, copy inside `.tsx` | one review by another model in the author's session: a sub-agent reads the diff against the self-check above |
 | deep | the store and migrations, `docs/security-boundaries.md`, trust and permission code and its tests, links, keeper and `centralu serve`, releases, `packages/protocol`, `tooling/**` guards, what CI runs the UI scenarios with, dependencies, `.github/**` and the board's merge gates | a separate review session that runs real-environment cases (packaged app, remote, Windows, a swap) |
 | person | never by path: the label `tier:person`, set by hand for product direction or trust policy | the owner decides on the board |
 

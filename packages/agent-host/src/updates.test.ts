@@ -623,7 +623,8 @@ describe('UpdateService', () => {
   })
 
   /**
-   * "Apply updates automatically when idle" (#352): off by default, and with it on a newer version
+   * "Apply updates automatically when idle" (#352): off when the host passes no stored switch (the host's stored default is
+   * on since 2026-10-20, update-switches.test.ts), and with it on a newer version
    * found by any check is installed without a click. Applying it stays the window's, once idle.
    */
   describe('automatic apply', () => {

@@ -326,7 +326,7 @@ const HANDLERS: ToolHandlers = {
   set_preferences: (changes, call) =>
     Object.values(changes).some((v) => v !== undefined && !(typeof v === 'object' && Object.values(v).every((x) => x === undefined)))
       ? preferencesCommand({ action: 'set', changes }, call)
-      : { text: 'Nothing to change: give at least one of theme, textSize, bodyFont, codeFont, lineHeight, idleSleepMinutes, checkForUpdates, applyUpdatesWhenIdle, moveIdleSessionsToNewAgentCli, notifications.', isError: true },
+      : { text: 'Nothing to change: give at least one of theme, textSize, bodyFont, codeFont, lineHeight, idleSleepMinutes, autoUpdate, moveIdleSessionsToNewAgentCli, notifications.', isError: true },
 
   async handoff_session(args, { tools, caller, signal }) {
     const sessionId = args.sessionId?.trim() ?? ''

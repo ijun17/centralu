@@ -32,11 +32,14 @@ export type PreferenceChanges = {
   lineHeight?: LineHeight
   /** Minutes of quiet before an idle session sleeps, or 'never' */
   idleSleepMinutes?: number | 'never'
-  checkForUpdates?: boolean
-  applyUpdatesWhenIdle?: boolean
+  /** "Automatic updates" (2026-10-20): checking, and installing and applying when idle, as one setting */
+  autoUpdate?: boolean
   moveIdleSessionsToNewAgentCli?: boolean
-  /** The notification switches (#1306), the ones to change; reversible, no card */
-  notifications?: { approval?: boolean; error?: boolean; done?: boolean; allDone?: boolean; whenFocused?: boolean; sound?: boolean }
+  /**
+   * The notification switches (#1306), the ones to change. The "error" and "every session finished" ones are gone from the
+   * product (2026-10-20): no field, though the stored record keeps them for older builds
+   */
+  notifications?: { approval?: boolean; done?: boolean; whenFocused?: boolean; sound?: boolean }
 }
 
 /** One request of the orchestrator's preference commands (#1219), as the tool runner reads its arguments */
