@@ -314,6 +314,11 @@ const HANDLERS: ToolHandlers = {
   reconnect_machine: ({ machine }, call) => machineCommand({ action: 'reconnect', machine }, call),
   set_machine_auto_reconnect: ({ machine, on }, call) => machineCommand({ action: 'auto_reconnect', machine, on }, call),
   set_machine_autostart: ({ machine, on }, call) => machineCommand({ action: 'autostart', machine, on }, call),
+  disconnect_machine: ({ machine }, call) => machineCommand({ action: 'disconnect', machine }, call),
+  rollback_machine: ({ machine }, call) => machineCommand({ action: 'rollback', machine }, call),
+  uninstall_machine: ({ machine }, call) => machineCommand({ action: 'uninstall', machine }, call),
+  machine_activity: ({ machine }, call) => machineCommand({ action: 'activity', machine }, call),
+  list_ssh_hosts: (_args, call) => machineCommand({ action: 'ssh_hosts' }, call),
 
   // The trash (#1219): the flow writes each answer; deleting for good waits for the person's card there
   list_trash: (_args, call) => trashCommand({ action: 'list' }, call),

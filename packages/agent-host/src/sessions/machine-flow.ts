@@ -1,7 +1,7 @@
-import { MACHINE_CHANGE, type MachineInfo, type MachineProbe, type RemoteShell } from '@cc/protocol'
+import { MACHINE_CHANGE, type HostActivity, type MachineInfo, type MachineProbe, type RemoteShell, type SshHostList } from '@cc/protocol'
 import type { MachineRequest } from '../adapters/contract.js'
 import type { HostCards } from './host-cards.js'
-import { trustedJsonText } from './tool-answers.js'
+import { plainQuoted, trustedJsonText } from './tool-answers.js'
 
 /**
  * What the orchestrator's machine commands reach of the hub's links (#1219), the same calls the window's `machines.*`
@@ -23,8 +23,18 @@ export type MachineOps = {
   install(id: string): Promise<{ machine: MachineInfo; current: { version: string }; note?: string }>
   update(id: string): Promise<{ machine: MachineInfo; current: { version: string }; note?: string }>
   autostart(id: string, on?: boolean): Promise<{ machine: MachineInfo; autostart: { on: boolean; how: string | null; linger: boolean | null } }>
-  /** Why an install or update would be refused before it starts, or null (`LinkedMachine.operationRefusal`) */
-  installRefusal(id: string, kind: 'install' | 'update'): string | null
+  /** Why an install, update, rollback or uninstall would be refused before it starts, or null (`LinkedMachine.operationRefusal`) */
+  installRefusal(id: string, kind: 'install' | 'update' | 'rollback' | 'uninstall'): string | null
+  /** The row's Disconnect (#1134): the link closes and none is tried; the machine and its lists stay */
+  disconnect(id: string): Promise<MachineInfo>
+  /** Back to the version installed before, one step (`machines.rollback`) */
+  rollback(id: string): Promise<{ machine: MachineInfo; current: { version: string }; note?: string }>
+  /** Stops the host there and removes what this computer installed; the data stays (`machines.uninstall`) */
+  uninstall(id: string): Promise<{ machine: MachineInfo; stopped: boolean }>
+  /** What would stop there if its host stopped now; null when the machine cannot say (`machines.activity`) */
+  activity(id: string): Promise<HostActivity | null>
+  /** The aliases of the person's ssh config, each with the machines linked through it (`machines.sshHosts`) */
+  sshHosts(): Promise<SshHostList>
 }
 
 export type { MachineRequest }
@@ -106,6 +116,7 @@ export class MachineFlow {
     if (!ops) return { ok: false, error: 'This computer links no machines here.' }
     try {
       if (req.action === 'add') return await this.add(ops, sessionId, req, signal)
+      if (req.action === 'ssh_hosts') return await this.sshHosts(ops)
       const m = this.named(ops, req.machine)
       if (typeof m === 'string') return { ok: false, error: m }
       switch (req.action) {
@@ -190,6 +201,75 @@ export class MachineFlow {
           const r = req.action === 'install' ? await ops.install(m.id) : await ops.update(m.id)
           return done(`${req.action === 'install' ? 'Installed' : 'Updated to'} Centralu ${r.current.version} on ${m.name}.${r.note ? ` ${r.note}` : ''}`, r.machine)
         }
+        case 'disconnect': {
+          // The row's Disconnect does not ask. Undoing it does (reconnect above), so this only narrows what the person has connected
+          if (m.status === 'disconnected') return done(`${plainQuoted(m.name)} is already disconnected; nothing was done.`, m)
+          const disconnected = await ops.disconnect(m.id)
+          return done(
+            `Disconnected ${plainQuoted(m.name)}: the link is closed and nothing here connects it by itself. Its sessions and projects stay in the lists, as the last read left them. ` +
+              "Connecting it again takes the person's card (reconnect_machine).",
+            disconnected,
+          )
+        }
+        case 'rollback': {
+          const previous = m.install?.previous
+          const nm = plainQuoted(m.name)
+          if (!previous) return { ok: false, error: `There is no earlier version installed on ${nm} to go back to; an update puts the one it replaces there.` }
+          const why = ops.installRefusal(m.id, 'rollback') ?? busyWith(m)
+          if (why) return { ok: false, error: why }
+          const was = m.install?.current?.version ?? m.versions?.remote.version
+          const refused = await this.ask(
+            sessionId,
+            `Roll ${nm} (${m.sshTarget}, ${osOf(m)}) back to Centralu ${shownVersion(previous.version)}${was ? `, from ${shownVersion(was)}` : ''}? It stops the Centralu there (its agents end and resume on ` +
+              'the older one; a turn in progress is lost), starts the older one, and puts the newer one back if it does not answer in 30 s. One step only: ' +
+              `the version it leaves is not kept, so a second rollback is not offered.${reconnects(m)}`,
+            signal,
+          )
+          if (refused) return { ok: false, error: refused }
+          // The card named this machine as it was: versions, no other change under way, and what connecting it would do
+          const now = stillAsCardSaid(ops, m)
+          if (typeof now === 'string') return { ok: false, error: now }
+          const r = await ops.rollback(m.id)
+          return done(`Rolled back to Centralu ${shownVersion(r.current.version)} on ${nm}.${r.note ? ` ${plainQuoted(r.note, 300)}` : ''}`, r.machine)
+        }
+        case 'uninstall': {
+          const installed = m.install?.current
+          const nm = plainQuoted(m.name)
+          if (!installed) return { ok: false, error: `Nothing this computer installed is on ${nm}, so there is nothing to uninstall.` }
+          const why = ops.installRefusal(m.id, 'uninstall') ?? busyWith(m)
+          if (why) return { ok: false, error: why }
+          const refused = await this.ask(
+            sessionId,
+            `Uninstall Centralu from ${nm} (${m.sshTarget}, ${osOf(m)})? It stops the Centralu running there (its agents end; a turn in progress is lost) and removes what this ` +
+              `computer installed there (Centralu ${shownVersion(installed.version)}${m.install?.previous ? ` and ${shownVersion(m.install.previous.version)}` : ''}, with the Node it runs on). Its sessions, projects and other data stay, and an npm ` +
+              `install of its own is not touched. ${nm} stays linked, and is away until Centralu is installed or started there again.${reconnects(m)}`,
+            signal,
+          )
+          if (refused) return { ok: false, error: refused }
+          const now = stillAsCardSaid(ops, m)
+          if (typeof now === 'string') return { ok: false, error: now }
+          const r = await ops.uninstall(m.id)
+          return done(`Removed what this computer installed on ${nm}${r.stopped ? ' and stopped the Centralu running there' : ''}. Its data stays.`, r.machine)
+        }
+        case 'activity': {
+          const a = await ops.activity(m.id)
+          if (!a) return { ok: true, text: `${m.name} cannot say what is running (it is not connected, speaks another protocol, or predates the question).` }
+          const parts: string[] = []
+          for (const [n, what] of [
+            [a.working, 'sessions working'],
+            [a.approvals, 'waiting on an approval'],
+            [a.questions, 'asking a question'],
+            [a.background, 'running background work'],
+            [a.terminals, 'terminals open'],
+            [a.commandRuns, 'commands running'],
+          ] as const) {
+            if (n > 0) parts.push(`${n} ${what}`)
+          }
+          return {
+            ok: true,
+            text: parts.length ? `On ${m.name}, an update or a restart would stop: ${parts.join(', ')}.` : `Nothing is running on ${m.name} that an update or a restart would stop.`,
+          }
+        }
         case 'autostart': {
           const refused = await this.ask(
             sessionId,
@@ -208,6 +288,21 @@ export class MachineFlow {
     } catch (e) {
       return { ok: false, error: (e as Error).message }
     }
+  }
+
+  /** The hosts of the person's ssh config, each with the machines linked through it: what add_machine can be given (#1219) */
+  private async sshHosts(ops: MachineOps): Promise<MachineAnswer> {
+    const list = await ops.sshHosts()
+    // The config file's path and ssh's own notes can echo lines of the file: each is quoted
+    const notes = list.notes.length ? ` ${list.notes.map((n) => plainQuoted(n, 300)).join(' ')}` : ''
+    const file = plainQuoted(list.configFile, 300)
+    if (!list.hosts.length) return { ok: true, text: `No host is named in ${file}.${notes} add_machine also takes user@host.` }
+    const rows = list.hosts.map((h) => {
+      const reach = `${h.user ? `${h.user}@` : ''}${h.hostName ?? h.alias}${h.port ? `:${h.port}` : ''}`
+      const linked = h.linked.length ? `; linked as ${h.linked.map((l) => trustedJsonText(l.name)).join(', ')}` : ''
+      return `- ${trustedJsonText(h.alias)}: ${trustedJsonText(reach)}${linked}`
+    })
+    return { ok: true, text: `Hosts in ${file} (pass an alias as sshTarget to add_machine):\n${rows.join('\n')}${notes ? `\n${notes.trim()}` : ''}` }
   }
 
   /** A linked machine by id or by the name the person gave it, case aside; the refusal names the way to list them */
@@ -281,6 +376,47 @@ export class MachineFlow {
     if (decision === null) return 'The card was withdrawn before the person answered, so nothing changed.'
     return null
   }
+}
+
+/** A version a machine reported, as one quoted line: it is the machine's own text, and a card or an answer must not read as something it does not say */
+const shownVersion = (version: string): string => plainQuoted(version, 80)
+
+/** Why an operation on a machine cannot start just now, when another one is under way there; known before any card */
+function busyWith(m: MachineInfo): string | null {
+  return m.operation ? `${plainQuoted(m.name)} is busy with ${m.operation.kind} (${m.operation.step}); try again once that is done.` : null
+}
+
+/**
+ * The card's last words when the operation would connect a machine the person had it not connected (#1341): they disconnected
+ * it, or turned its Auto reconnect off and it is down. The operation opens its link, and keeps it open afterwards
+ * (`LinkedMachine.operate` reconnects whenever the link is not up), which undoes that choice
+ */
+function reconnects(m: MachineInfo): string {
+  const nm = plainQuoted(m.name)
+  if (m.status === 'disconnected') return ` ${nm} is disconnected: this connects it for the change, and it stays connected afterwards until you disconnect it again.`
+  if (m.status !== 'connected' && !m.autoReconnect) {
+    return ` ${nm} is not connected and its Auto reconnect is off, so nothing here connects it by itself: this connects it for the change, and it stays connected afterwards.`
+  }
+  return ''
+}
+
+/**
+ * After Allow, the machine as it is now, or why it is no longer the one the card named (nothing is changed then): gone, its
+ * installed versions moved (a rollback would go from a version the card did not name), another change under way, or a link
+ * the person closed meanwhile that this would open again without the card having said so
+ */
+function stillAsCardSaid(ops: MachineOps, before: MachineInfo): MachineInfo | string {
+  const nm = plainQuoted(before.name)
+  const now = ops.list().find((x) => x.id === before.id)
+  if (!now) return `${nm} was removed while the card stood, so nothing was changed.`
+  const held = (m: MachineInfo) => `${m.install?.current?.version ?? ''}|${m.install?.previous?.version ?? ''}`
+  if (held(now) !== held(before)) return `The versions Centralu keeps on ${nm} changed while the card stood, so it is not what the card named and nothing was changed. Ask again to show the person what it holds now.`
+  const busy = busyWith(now)
+  if (busy) return `${busy} Nothing was changed.`
+  if (reconnects(now) && !reconnects(before)) {
+    return `${nm} was disconnected, or lost its connection with Auto reconnect off, while the card stood. This would connect it again, which the card did not say, so nothing was changed. Ask again.`
+  }
+  return now
 }
 
 /** A command's answer: what it did, then the machine as it is now */

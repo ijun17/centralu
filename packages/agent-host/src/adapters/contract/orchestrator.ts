@@ -21,6 +21,9 @@ export type MachineRequest =
   | { action: 'install' | 'update' | 'remove' | 'reconnect'; machine: string }
   | { action: 'auto_reconnect'; machine: string; on: boolean }
   | { action: 'autostart'; machine: string; on: boolean }
+  /** #1219, the machine calls left: disconnect acts at once, rolling back and uninstalling wait for the person's card, the last two read */
+  | { action: 'disconnect' | 'rollback' | 'uninstall' | 'activity'; machine: string }
+  | { action: 'ssh_hosts' }
 
 /** What `set_preferences` changes (#1219, preferences and the trash): each field is one setting the window offers; absent means leave it */
 export type PreferenceChanges = {

@@ -199,6 +199,35 @@ export const ORCHESTRATOR_TOOLS = [
     schema: z.object({ machine: z.string().describe('The machine, by the name list_machines gives.'), on: z.boolean() }),
   },
   /*
+   * #1219, the machine calls left: disconnect acts at once; rolling back, uninstalling and accepting differing versions
+   * wait for the person's card; the last two only read.
+   */
+  {
+    name: 'disconnect_machine',
+    description: 'Closes the link to a machine and tries none until the person connects it again. Acts at once; the machine and its sessions stay listed.',
+    schema: z.object({ machine: z.string().describe('The machine, by the name list_machines gives.') }),
+  },
+  {
+    name: 'rollback_machine',
+    description: 'Puts the machine back on the Centralu version installed there before the last update, one step. The person approves a card first.',
+    schema: z.object({ machine: z.string().describe('The machine, by the name list_machines gives.') }),
+  },
+  {
+    name: 'uninstall_machine',
+    description: 'Stops Centralu on a machine and removes what this computer installed there; its data stays and it stays linked. The person approves a card first.',
+    schema: z.object({ machine: z.string().describe('The machine, by the name list_machines gives.') }),
+  },
+  {
+    name: 'machine_activity',
+    description: 'Says what an update or a restart would stop on a machine: sessions working, approvals waiting, background work, terminals. Reads only.',
+    schema: z.object({ machine: z.string().describe('The machine, by the name list_machines gives.') }),
+  },
+  {
+    name: 'list_ssh_hosts',
+    description: "Lists the hosts of this computer's ssh config, with the machines already linked through each; add_machine takes an alias. Reads only.",
+    schema: z.object({}),
+  },
+  /*
    * #1219: the preferences. Rare commands (RARE_COMMANDS), through the window's own calls. Only the
    * reversible settings the window offers have a field; trust, approval rules and what widens agents' reach have none.
    */
