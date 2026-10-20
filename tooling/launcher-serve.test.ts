@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url'
 import { PROTOCOL_VERSION } from '@cc/protocol'
 import { acquireInstanceLock } from '../packages/agent-host/src/dev-services/instance-lock.js'
 import { HostServer, versionMismatchMessage } from '../packages/agent-host/src/transport/server.js'
+import { readFullCredentials } from '../packages/agent-host/src/lifecycle/serve-credentials.js'
 import { createRequire } from 'node:module'
 import {
   connectionLine,
@@ -38,6 +39,10 @@ import {
   readyPort,
   recordServePort,
   rotateServeToken,
+  pairServe,
+  revokeServe,
+  verifierOf,
+  limitedOf,
   SERVE_STATE_FILE,
   serveDataDir,
   chooseServePort,
@@ -163,21 +168,59 @@ describe('the data folder and the state file', () => {
     expect(statSync(join(d, SERVE_STATE_FILE)).mode & 0o777).toBe(0o600)
   })
 
-  it('generates the token once and keeps it across starts and port changes', () => {
+  it('generates the key once and keeps it across starts and port changes, with no full credential yet (#1405)', () => {
     const d = tempDir()
     const first = ensureServeState(d)
-    expect(first.token.length).toBeGreaterThanOrEqual(32)
+    expect(first.key.length).toBeGreaterThanOrEqual(32)
     expect(first.port).toBeNull()
+    expect(first.full).toEqual([])
+    // What the launcher's own probes say hello with: the limited credential, derived from the key as the host derives it
+    expect(first.token).toBe(limitedOf(first.key))
     recordServePort(d, 9100)
-    expect(ensureServeState(d)).toEqual({ token: first.token, port: 9100 })
+    expect(ensureServeState(d)).toEqual({ ...first, port: 9100 })
   })
 
-  it('replaces the token only when asked, keeping the port', () => {
+  it('keeps a full credential only as its hash, one per label, and withdraws it when asked (#1405)', () => {
+    const d = tempDir()
+    const hub = pairServe(d, 'hub:mac')
+    const again = pairServe(d, 'hub:mac')
+    const win = pairServe(d, 'window')
+    const file = readFileSync(join(d, SERVE_STATE_FILE), 'utf8')
+    for (const t of [hub.token, again.token, win.token]) expect(file).not.toContain(t)
+    const state = readServeState(d)!
+    // Pairing again replaces the label's earlier credential
+    expect(state.full.map((e: { label: string; id: string; verifier: string }) => [e.label, e.id, e.verifier])).toEqual([
+      ['hub:mac', again.id, verifierOf(again.token)],
+      ['window', win.id, verifierOf(win.token)],
+    ])
+    expect(revokeServe(d, again.id)).toBe(true)
+    expect(revokeServe(d, again.id)).toBe(false)
+    expect(readServeState(d).full.map((e: { label: string; id: string; verifier: string }) => e.label)).toEqual(['window'])
+  })
+
+  it('moves a version 1 file on: its token becomes a full credential no longer written down, removed by the next pairing (#1405)', () => {
+    const d = tempDir()
+    const legacy = 'x'.repeat(43)
+    writeFileSync(join(d, SERVE_STATE_FILE), JSON.stringify({ v: 1, token: legacy, port: 9300 }))
+    const moved = ensureServeState(d)
+    expect(moved).toMatchObject({ v: 2, port: 9300 })
+    expect(moved.full).toEqual([expect.objectContaining({ label: 'legacy', verifier: verifierOf(legacy) })])
+    expect(readFileSync(join(d, SERVE_STATE_FILE), 'utf8')).not.toContain(legacy)
+    // The key is new: a hello with the old token is not what derives the limited credential
+    expect(moved.key).not.toBe(legacy)
+    pairServe(d, 'hub:mac')
+    expect(readServeState(d).full.map((e: { label: string; id: string; verifier: string }) => e.label)).toEqual(['hub:mac'])
+  })
+
+  it('replaces the key and withdraws every full credential only when asked, keeping the port', () => {
     const d = tempDir()
     const first = ensureServeState(d)
     recordServePort(d, 9200)
+    pairServe(d, 'hub:mac')
     const after = rotateServeToken(d)
+    expect(after.key).not.toBe(first.key)
     expect(after.token).not.toBe(first.token)
+    expect(after.full).toEqual([])
     expect(after.port).toBe(9200)
     expect(readServeState(d)).toEqual(after)
   })
@@ -320,7 +363,8 @@ describe('the connection line', () => {
   it('has exactly the fields the client reads, in one JSON object', () => {
     const line = connectionLine({ port: 17175, token: 't', version: '1.2.3', protocolVersion: 1, dataDir: '/d', hostRunning: false })
     // `takes`: the options an older serve refuses, so a hub (`from`) or the window (`window`) uses them only on one that says so (#1223)
-    expect(JSON.parse(line)).toEqual({ v: 1, port: 17175, token: 't', version: '1.2.3', protocolVersion: 1, dataDir: '/d', hostRunning: false, takes: ['from', 'window'] })
+    // `pair` (#1405): `--connection --pair` hands out a full credential of its own
+    expect(JSON.parse(line)).toEqual({ v: 1, port: 17175, token: 't', version: '1.2.3', protocolVersion: 1, dataDir: '/d', hostRunning: false, takes: ['from', 'window', 'pair'] })
     expect(line).not.toContain('\n')
   })
 
@@ -514,6 +558,14 @@ function serve(dataDir: string, args: string[]) {
   return { child, out, exited, until }
 }
 
+/**
+ * The options a host `centralu serve` runs is started with since #1405: its key as the token, and the full credentials
+ * those serve.json names, read at each hello
+ */
+function serveHostCredentials(dataDir: string) {
+  return { token: String(readServeState(dataDir).key), fullCredentials: () => readFullCredentials(join(dataDir, SERVE_STATE_FILE)) }
+}
+
 async function connection(dataDir: string, extra: NodeJS.ProcessEnv = {}): Promise<Record<string, unknown>> {
   const stdout = await new Promise<string>((resolve, reject) =>
     execFile(process.execPath, [CLI, 'serve', '--connection'], { cwd: ROOT, env: { ...cliEnv(dataDir), ...extra } }, (err, out) =>
@@ -615,14 +667,27 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
 
       const info = await connection(d)
       // proof (#838): the running host answered a prove, so the hub will ask it to before sending the token
-      expect(info).toMatchObject({ v: 1, port, token: before.token, protocolVersion: PROTOCOL_VERSION, dataDir: d, hostRunning: true, proof: true })
+      expect(info).toMatchObject({ v: 1, port, limited: before.limited, protocolVersion: PROTOCOL_VERSION, dataDir: d, hostRunning: true, proof: true })
       // From the installed build (#838), whether a host runs or not
       expect(before.proof).toBe(true)
+      // --connection alone hands out no full credential (#1405): the limited one only
+      expect(info.token).toBeUndefined()
+      expect(String(info.limited)).toMatch(/^ccl1:/)
 
-      const ok = await hello(port, String(info.token))
+      // A hub pairs (#1405): a full credential of its own, printed once, which the running host takes at once
+      const paired = (await cli(d, ['--connection', '--pair', 'hub:test'])).line
+      expect(paired).toMatchObject({ token: expect.any(String), credential: expect.stringMatching(/^[0-9a-f]{8}$/), others: [] })
+      expect(readFileSync(join(d, SERVE_STATE_FILE), 'utf8')).not.toContain(String(paired.token))
+      const ok = await hello(port, String(paired.token))
       // Whether it runs with administrator rights is known before it listens (#702): a hub's first hello already says it
       expect(ok).toMatchObject({ kind: 'hello_ok', protocolVersion: PROTOCOL_VERSION, elevated: expect.any(Boolean) })
+      // The limited credential is a client too, and the key it comes from is no credential at all
+      expect(await hello(port, String(info.limited))).toMatchObject({ kind: 'hello_ok' })
+      await expect(hello(port, String(readServeState(d).key))).rejects.toThrow(/closed 4001/)
       await expect(hello(port, 'not-the-token')).rejects.toThrow(/closed 4001/)
+      // Withdrawn, the credential's next hello is refused
+      expect((await cli(d, ['--revoke', String(paired.credential)])).code).toBe(0)
+      await expect(hello(port, String(paired.token))).rejects.toThrow(/closed 4001/)
 
       const second = serve(d, [])
       expect(await second.exited).toBe(1)
@@ -634,9 +699,10 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
       else expect((await cli(d, ['--stop'])).line.stop).toMatchObject({ ok: true, wasRunning: true })
       expect(await s.exited).toBe(0)
       expect(s.out.stderr).toContain('[agent-host] shutting down')
-      // The ready line carries the token; serve passes it to no one
+      // The ready line carries the host's key; serve passes it to no one, nor any credential
       expect(s.out.stdout).toBe('')
-      expect(s.out.stderr).not.toContain(String(info.token))
+      expect(s.out.stderr).not.toContain(String(paired.token))
+      expect(s.out.stderr).not.toContain(String(readServeState(d).key))
       expect((await connection(d)).hostRunning).toBe(false)
     },
     90_000 * SLOW,
@@ -724,7 +790,7 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
         expect(s.out.stderr).toContain(`127.0.0.1:${held} is in use by another program; starting on ${held + 1} instead`)
         const info = await connection(d)
         expect(info).toMatchObject({ port: held + 1, hostRunning: true })
-        expect(await hello(held + 1, String(info.token))).toMatchObject({ kind: 'hello_ok' })
+        expect(await hello(held + 1, String(info.limited))).toMatchObject({ kind: 'hello_ok' })
         if (POSIX) s.child.kill('SIGTERM')
         else await cli(d, ['--stop'])
         expect(await s.exited).toBe(0)
@@ -849,7 +915,7 @@ describe('starting through WMI', () => {
           // What the task's serve does: a host on this folder's port, with its token
           const { dataDir } = a[0] as { dataDir: string }
           const state = readServeState(dataDir)!
-          const server = new HostServer({ port: state.port!, token: state.token, onRpc: async () => ({}), build: { commit: 'c', protocolVersion: PROTOCOL_VERSION, version: '1.0.0' } })
+          const server = new HostServer({ port: state.port!, ...serveHostCredentials(dataDir), onRpc: async () => ({}), build: { commit: 'c', protocolVersion: PROTOCOL_VERSION, version: '1.0.0' } })
           servers.push(server)
           await server.listen()
           return { started: true, name: 'Centralu host 1a2b3c4d' }
@@ -988,7 +1054,7 @@ describe('moving a host that runs in a network logon into the Windows sign-in', 
     const told: unknown[] = []
     const server: HostServer = new HostServer({
       port: state.port!,
-      token: state.token,
+      ...serveHostCredentials(d),
       ...(logon ? { logon: () => logon } : {}),
       build: { commit: 'c', protocolVersion: PROTOCOL_VERSION, version: '1.0.0' },
       onRpc: async (method, params) => {
@@ -1135,8 +1201,8 @@ describe('centralu serve --window: the desktop window uses the folder’s serve 
     recordServePort(d, await freePort())
     return { d, state: readServeState(d)! }
   }
-  const hostOn = async (state: { port: number | null; token: string }, logon: 'network' | 'interactive' = 'interactive') => {
-    const server = new HostServer({ port: state.port!, token: state.token, logon: () => logon, onRpc: async () => ({}), build: { commit: 'c', protocolVersion: PROTOCOL_VERSION, version: '1.0.0' } })
+  const hostOn = async (state: { port: number | null; token: string }, logon: 'network' | 'interactive' = 'interactive', d = '') => {
+    const server = new HostServer({ port: state.port!, ...serveHostCredentials(d), logon: () => logon, onRpc: async () => ({}), build: { commit: 'c', protocolVersion: PROTOCOL_VERSION, version: '1.0.0' } })
     await server.listen()
     return server
   }
@@ -1170,11 +1236,16 @@ describe('centralu serve --window: the desktop window uses the folder’s serve 
 
   it('hands the window the running host’s port and token as a ready line, and leaves the host running when the window goes', async () => {
     const { d, state } = await folder()
-    const server = await hostOn(state)
+    const server = await hostOn(state, 'interactive', d)
     try {
       const w = window(d)
       await vi.waitFor(() => expect(w.lines).toHaveLength(1))
-      expect(JSON.parse(w.lines[0]!)).toEqual({ ready: true, port: state.port, token: state.token, db: join(d, 'store.db') })
+      // A full credential made for the window at this start (#1405): serve.json keeps only its verifier
+      const ready = JSON.parse(w.lines[0]!)
+      expect(ready).toEqual({ ready: true, port: state.port, token: expect.any(String), db: join(d, 'store.db') })
+      expect(readServeState(d).full).toEqual([expect.objectContaining({ label: 'window', verifier: verifierOf(ready.token) })])
+      expect(readFileSync(join(d, SERVE_STATE_FILE), 'utf8')).not.toContain(ready.token)
+      expect(await hello(Number(state.port), ready.token)).toMatchObject({ kind: 'hello_ok' })
       expect(w.calls).toEqual({ detach: 0, signIn: 0 })
       w.stdin.end()
       expect(await w.done).toBe(0)
@@ -1190,13 +1261,13 @@ describe('centralu serve --window: the desktop window uses the folder’s serve 
     try {
       const w = window(d, {
         detach: async (o: { write: (l: string) => void }) => {
-          server = await hostOn(state)
-          o.write(`${JSON.stringify({ v: 1, port: state.port, token: state.token, hostRunning: true, detach: { ok: true, how: 'task', already: false } })}\n`)
+          server = await hostOn(state, 'interactive', d)
+          o.write(`${JSON.stringify({ v: 1, port: state.port, hostRunning: true, detach: { ok: true, how: 'task', already: false } })}\n`)
           return 0
         },
       })
       await vi.waitFor(() => expect(w.lines).toHaveLength(1))
-      expect(JSON.parse(w.lines[0]!)).toMatchObject({ ready: true, port: state.port, token: state.token })
+      expect(JSON.parse(w.lines[0]!)).toMatchObject({ ready: true, port: state.port, token: expect.any(String) })
       await server!.close()
       expect(await w.done).toBe(1)
     } finally {
@@ -1218,7 +1289,7 @@ describe('centralu serve --window: the desktop window uses the folder’s serve 
 
   it('uses a host in a network logon now, and starts the sign-in task that moves it into this sign-in once idle (#1224)', async () => {
     const { d, state } = await folder()
-    const server = await hostOn(state, 'network')
+    const server = await hostOn(state, 'network', d)
     try {
       const w = window(d)
       await vi.waitFor(() => expect(w.lines).toHaveLength(1))

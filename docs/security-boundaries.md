@@ -1204,9 +1204,9 @@ that it shows them (`hello.shows`), one at a time, oldest first.
 
 **Who holds what, today.** Built so far: the credential, the classification (slices 1 and 2), the card (slice 3), and
 the keeper handing the token to windows only (slice 4, "The keeper's control socket" below): a script that asks
-`keeper.sock` gets the limited credential. Not yet: the serve host's `serve.json` (below) still holds its token until
-slice 5, which a process of the user on a linked machine, or on Windows where the window attaches to the folder's serve
-host, can read; and the direct host on Windows gives its token only to the window that started it.
+`keeper.sock` gets the limited credential, and a serve host's `serve.json` (slice 5, "The remote host" below) holds no
+full credential: a script that reads it, or runs `--connection`, gets the limited one. The direct host on Windows gives
+its token only to the window that started it.
 
 ## The remote host (`centralu serve`, #82)
 
@@ -1216,15 +1216,35 @@ A host started with `centralu serve` on another machine is reached by the app th
 - **Nothing listens on a public interface.** The host binds 127.0.0.1 on the remote; the forward binds 127.0.0.1 on
   the person's computer. Reaching the host takes an SSH login to that machine as that user, so SSH is what
   authenticates the person and encrypts the link. Centralu adds no listener, no TLS and no login of its own.
-- **The token** is 32 random bytes in `<data folder>/serve.json`, created with mode 0600 (never written wider and
-  narrowed later) and set back to 0600 whenever `serve` finds it wider. It is printed only by
-  `centralu serve --connection`, which the client runs over SSH; the host's ready line, which also carries it, is read
-  by the launcher and passed on to nothing. It reaches the host as the first line on the host's stdin, a pipe to the
-  launcher (`CC_HOST_TOKEN_ON_STDIN=1`, #538): not on the command line, which every user on the machine can read with
-  `ps`, and not in the environment, which every process of the user can read for as long as the host runs (measured
-  below, "The front door"). A host bundle from before #538 (`CENTRALU_HOST_ENTRY` pointing at one), whose
-  `bundle-info.json` does not say `tokenOnStdin`, still gets it in `CC_HOST_TOKEN` (`takesTokenOnStdin`). It does not
-  change across restarts until `--rotate-token`.
+- **No full credential is written down** (#1405, `serve-files.mjs`, `lifecycle/serve-credentials.ts`).
+  `<data folder>/serve.json` (version 2, mode 0600 from the first byte and narrowed back if it drifts) holds the host's
+  `key` and one entry per full credential, `{ id, label, verifier, created }`, the verifier being the SHA-256 of the
+  credential. The host gets the key as the first line on its stdin (`{"key"}`, a pipe to the launcher: not on the command
+  line, which `ps` shows every user, and not in the environment, which every process of the user can read for as long
+  as the host runs, measured below in "The front door"), and the file's path in `CC_SERVE_STATE`. It derives what it
+  hands out from the key (the limited credential, a bridge's, the proof of a probe) and takes as full only a hello whose
+  credential's verifier is in the file, read again at each hello, so a pairing or a revocation applies at once. A hello
+  with the key itself is refused.
+  - **Who gets a full credential.** Whoever runs `serve --connection --pair <label>`: one is made, printed once and
+    kept as its verifier, replacing that label's earlier one. A hub pairs as `hub:<its name>` at each link, so its own
+    credential lives in its memory only, as the token did, and it needs no store change. The person's window on
+    Windows gets one per start (`--window`, label `window`). The launcher's own hand-over call (`host.handover`, a
+    hub's) uses one made for that call and withdrawn after it.
+  - **What anyone else gets.** `--connection` without `--pair` prints the limited credential (`limited`) and the
+    other full credentials by id, label and date (`others`), never their values; `--stop` and the launcher's probes
+    use the limited credential. `--revoke <id>` withdraws one full credential; `--rotate-token` draws a new key and
+    withdraws them all.
+  - **Moving on.** A version 1 file's token becomes a full credential labelled `legacy` (a hub or window still holding
+    it keeps working) and a new key is drawn; the next pairing removes `legacy`. An installed host from before
+    verifiers (a rollback; `verifiers` absent from its `bundle-info.json`) knows a single token: the launcher keeps one
+    for it (`legacyHostToken`), gives it to that host and to a hub that pairs, and drops it once a host of today runs.
+    A host bundle from before #538, whose `bundle-info.json` does not say `tokenOnStdin`, still gets that token in
+    `CC_HOST_TOKEN`.
+  - **The honest limit.** A process of this user on that machine can run `--pair` itself, as an agent that ssh-es there
+    can. It gets a full credential of its own, which the file names by its label; the hub's machine row will list such
+    credentials and offer to revoke them (#1405 slice 5b). It can also read the key, which gives it only the limited
+    credential. On Windows any process of this user can run `--window` and get the window's credential, until the
+    launcher checks its parent (#1417).
 - **Other users on the remote machine** can connect to 127.0.0.1 like anyone local, and are stopped by the token, as on
   a desktop. A machine where another user can read your files (root, or a wrong home-folder mode) can read the token;
   the remote mode is for a machine the person trusts, and the spec says so (product-spec.md §1.5).

@@ -34,17 +34,27 @@ export function protocolVersionOf(entry) {
  * `install` (additive, the line stays `v: 1`) says what runs this command (`installInfo`); `detach`
  * is added by `--detach` only.
  */
-export function connectionLine({ port, token, version, protocolVersion, dataDir, hostRunning, install, autostart, detach, proof, stopped }) {
+export function connectionLine({ port, token, credential, limited, others, version, protocolVersion, dataDir, hostRunning, install, autostart, detach, proof, stopped }) {
   /*
    * The options this serve takes that an older one refuses (#1223): a hub adds `--from <its name>` to `--detach` only
    * when the line says so, since an older serve answers an option it does not know with an error. `window`: the
    * desktop window on Windows uses this serve's host through `--window` only when it is listed (#1223 review)
    */
-  const takes = ['from', 'window']
+  /*
+   * `pair` (#1405): `--connection --pair <label>` hands out a full credential of its own; without it the line carries the
+   * limited credential only
+   */
+  const takes = ['from', 'window', 'pair']
   return JSON.stringify({
     v: 1,
     port,
-    token,
+    // A full credential only to `--pair` (#1405), with its id for the proof; an older serve always printed its token
+    ...(token ? { token } : {}),
+    ...(credential ? { credential } : {}),
+    // What a process of this user gets without pairing (#1405): everyday calls only
+    ...(limited ? { limited } : {}),
+    // The full credentials this folder holds besides the one just paired, as `{ id, label, created }` (#1405)
+    ...(others ? { others } : {}),
     version,
     protocolVersion,
     dataDir,
@@ -113,9 +123,14 @@ function parseStartedFrom(raw) {
  *   `CENTRALU_MANAGED`, which is the launcher's business and would otherwise reach every agent.
  * - `CC_SERVE=1` lets the host take `host.stop` (`--stop`); a host the app runs refuses it.
  */
-export function hostEnv(env, { dataDir, version, hostDir, legacyToken, from = null }) {
+export function hostEnv(env, { dataDir, version, hostDir, legacyToken, from = null, serveState = null }) {
   const out = { ...env }
-  for (const k of ['DISPLAY', 'WAYLAND_DISPLAY', 'CC_KEEPER', 'CC_FRONT_DOOR', 'CC_DEV', 'CC_HOST_TOKEN', 'CC_HOST_TOKEN_ON_STDIN', 'CC_HOST_SOURCE', 'CENTRALU_MANAGED', 'CENTRALU_STARTED_FROM', 'CC_SERVE_FROM', 'CC_STARTED_BY']) delete out[k]
+  for (const k of ['DISPLAY', 'WAYLAND_DISPLAY', 'CC_KEEPER', 'CC_FRONT_DOOR', 'CC_DEV', 'CC_HOST_TOKEN', 'CC_HOST_TOKEN_ON_STDIN', 'CC_HOST_SOURCE', 'CC_SERVE_STATE', 'CENTRALU_MANAGED', 'CENTRALU_STARTED_FROM', 'CC_SERVE_FROM', 'CC_STARTED_BY']) delete out[k]
+  /*
+   * A host that checks full credentials against serve.json's verifiers (#1405, `takesVerifiers`): the file it reads at
+   * each hello. A path, not a secret: the file is the user's own, 0600. Its key comes on stdin (`keyLine`)
+   */
+  if (serveState) out.CC_SERVE_STATE = serveState
   // Who asked for this host, for its host.lock (#1223): a second host on the folder names it when refused
   if (from) out.CC_SERVE_FROM = JSON.stringify(from)
   out.CC_DATA_DIR = dataDir
@@ -144,6 +159,37 @@ export function takesTokenOnStdin(entry) {
 /** The first line on the host's stdin: the token (#538, the host's `readHandedToken`) */
 export function tokenLine(token) {
   return `${JSON.stringify({ token })}\n`
+}
+
+/**
+ * The first line on the stdin of a host that takes verifiers (#1405): its key, from which it derives what it hands out.
+ * Not a full credential: the host never takes it as one (`CC_SERVE_STATE` says where the full ones' verifiers are)
+ */
+export function keyLine(key) {
+  return `${JSON.stringify({ key })}\n`
+}
+
+/**
+ * Whether the host at `entry` checks full credentials against serve.json's verifiers (#1405): a bundle says so in
+ * `bundle-info.json` (`verifiers`), a host run from source has `lifecycle/serve-credentials.ts`. An older one knows a
+ * single token, which this launcher then keeps for it (`legacyHostTokenOf`).
+ */
+export function takesVerifiers(entry) {
+  try {
+    return JSON.parse(readFileSync(join(dirname(entry), 'bundle-info.json'), 'utf8')).verifiers === 1
+  } catch {
+    // not a bundle; try the source below
+  }
+  return existsSync(join(dirname(entry), 'lifecycle', 'serve-credentials.ts'))
+}
+
+/**
+ * What this launcher says hello with to its own host, and what that host proves with to it: the limited credential
+ * and the key for a host that takes verifiers, the one token an older host knows otherwise (#1405).
+ */
+export function ownCredentials(state, entry) {
+  if (takesVerifiers(entry) || !state.legacyHostToken) return { token: state.token, proofKey: state.proofKey }
+  return { token: state.legacyHostToken, proofKey: state.legacyHostToken }
 }
 
 /**
@@ -228,7 +274,7 @@ function proofOf(token, nonce) {
  * `on.message(m, ws)` gets every frame after the hello; `on.unproven()` runs when the proof did not come, `on.gone()`
  * when the socket failed or closed.
  */
-function helloSocket({ port, token, protocolVersion, prove, WebSocketImpl, on }) {
+function helloSocket({ port, token, proofKey, protocolVersion, prove, WebSocketImpl, on }) {
   const ws = new WebSocketImpl(`ws://127.0.0.1:${port}`)
   const nonce = prove ? randomBytes(24).toString('base64url') : null
   // Proving only once the socket is open: a port where nothing listens is gone, not unproven
@@ -248,7 +294,8 @@ function helloSocket({ port, token, protocolVersion, prove, WebSocketImpl, on })
     }
     if (proving) {
       proving = false
-      if (m?.kind === 'proof' && m.nonce === nonce && m.mac === proofOf(token, nonce)) return hello()
+      // A host that takes verifiers proves with its key, which is not the credential this says hello with (#1405)
+      if (m?.kind === 'proof' && m.nonce === nonce && m.mac === proofOf(proofKey ?? token, nonce)) return hello()
       return on.unproven()
     }
     if (m) on.message(m, ws)
@@ -269,10 +316,10 @@ function helloSocket({ port, token, protocolVersion, prove, WebSocketImpl, on })
  * (`heldHere` tells those apart by the data folder's lock). Node 22.4+ has a global WebSocket; on an older 22 this falls
  * back to a TCP connect and reports only `running`.
  */
-export function probeHost({ port, token, protocolVersion, prove = false, timeoutMs = 2000, WebSocketImpl = globalThis.WebSocket }) {
+export function probeHost({ port, token, proofKey, protocolVersion, prove = false, timeoutMs = 2000, WebSocketImpl = globalThis.WebSocket }) {
   if (typeof WebSocketImpl !== 'function') return tcpProbe(port, timeoutMs)
   return helloExchange({
-    port, token, protocolVersion, prove, WebSocketImpl, timeoutMs,
+    port, token, proofKey, protocolVersion, prove, WebSocketImpl, timeoutMs,
     timedOut: { running: false },
     failed: () => ({ running: false }),
     on: (done) => ({
@@ -344,10 +391,10 @@ const HOST_LOGONS = ['interactive', 'network', 'batch', 'service']
  * One call to a running host (`method` with `params`), as `askHostToStop` makes it: a hello with the token, then the
  * call. Its result, or null when it did not answer or refused. For `host.handover` (#1224)
  */
-export function askHostRpc({ port, token, protocolVersion, prove = false, method, params = {}, timeoutMs = 5000, WebSocketImpl = globalThis.WebSocket }) {
+export function askHostRpc({ port, token, proofKey, protocolVersion, prove = false, method, params = {}, timeoutMs = 5000, WebSocketImpl = globalThis.WebSocket }) {
   if (typeof WebSocketImpl !== 'function') return Promise.resolve(null)
   return helloExchange({
-    port, token, protocolVersion, prove, WebSocketImpl, timeoutMs,
+    port, token, proofKey, protocolVersion, prove, WebSocketImpl, timeoutMs,
     timedOut: null,
     failed: () => null,
     on: (done) => ({
@@ -369,11 +416,11 @@ export function askHostRpc({ port, token, protocolVersion, prove = false, method
  * `ifIdle` (#1224): only if nothing runs there, checked and acted on by the host in one step; `{ ok: false, busy: true }`
  * when something does.
  */
-export function askHostToStop({ port, token, protocolVersion, prove = false, ifIdle = false, timeoutMs = 5000, WebSocketImpl = globalThis.WebSocket }) {
+export function askHostToStop({ port, token, proofKey, protocolVersion, prove = false, ifIdle = false, timeoutMs = 5000, WebSocketImpl = globalThis.WebSocket }) {
   if (typeof WebSocketImpl !== 'function') return Promise.resolve({ ok: false, message: `Node ${process.version} has no WebSocket to ask with` })
   // With `prove`, the token goes out only to a host that proved it holds it (#838)
   return helloExchange({
-    port, token, protocolVersion, prove, WebSocketImpl, timeoutMs,
+    port, token, proofKey, protocolVersion, prove, WebSocketImpl, timeoutMs,
     timedOut: { ok: false, message: 'no answer in time' },
     failed: (e) => ({ ok: false, message: e.message }),
     on: (done) => ({

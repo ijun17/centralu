@@ -1,6 +1,7 @@
 import WebSocket from 'ws'
 import { CANCEL_CALL_METHOD, HostBuild, PROTOCOL_VERSION, ProtocolError, ProtocolErrorCode, parseServerFrame, type HostHandover, type HostLogon } from '@cc/protocol'
-import { proofNonce, provesToken } from '../transport/host-proof.js'
+import { proofNonce, provesCredential, provesToken } from '../transport/host-proof.js'
+import { verifierOf } from '../lifecycle/serve-credentials.js'
 import { rpcError } from '../rpc-error.js'
 
 /**
@@ -78,6 +79,11 @@ export type RemoteClientOptions = {
    * (`ConnectionLine.proof`). Whatever listens on the forward's local port and cannot prove it never sees the token.
    */
   proveHost?: boolean
+  /**
+   * The id of the full credential `token` is (#1405, `centralu serve --pair`): the host proves with that credential's
+   * verifier, which this derives from the token, instead of with the token itself, which it never holds
+   */
+  credential?: string
 }
 
 export type RemoteClientEvents = {
@@ -159,7 +165,7 @@ export class RemoteClient {
       if (this.ws !== ws) return
       if (this.opts.proveHost) {
         this.proving = proofNonce()
-        ws.send(JSON.stringify({ kind: 'prove', nonce: this.proving }))
+        ws.send(JSON.stringify({ kind: 'prove', nonce: this.proving, ...(this.opts.credential ? { credential: this.opts.credential } : {}) }))
         return
       }
       this.sendHello(ws)
@@ -200,7 +206,8 @@ export class RemoteClient {
     const nonce = this.proving!
     this.proving = null
     const f = parseJson(raw) as { kind?: unknown; nonce?: unknown; mac?: unknown } | null
-    if (f?.kind === 'proof' && f.nonce === nonce && provesToken(this.opts.token, nonce, f.mac)) return this.sendHello(ws)
+    const proven = this.opts.credential ? provesCredential(verifierOf(this.opts.token), nonce, f?.mac) : provesToken(this.opts.token, nonce, f?.mac)
+    if (f?.kind === 'proof' && f.nonce === nonce && proven) return this.sendHello(ws)
     // Something else holds the port (another account's program, #838): it never gets the token
     this.lost(ws, "the forward's port answered without proving it is the machine's host")
   }
@@ -230,10 +237,13 @@ export class RemoteClient {
     this.lost(ws, `closed (${code})`)
   }
 
-  /** Points the client at another address or token (the tunnel came back on another port, or the token rotated) */
-  updateEndpoint(url: string, token: string): void {
+  /**
+   * Points the client at another address or token (the tunnel came back on another port, or the token rotated), and
+   * the id of the credential the token is, when it was paired (#1405)
+   */
+  updateEndpoint(url: string, token: string, credential?: string): void {
     const sameHost = this.opts.url === url
-    this.opts = { ...this.opts, url, token }
+    this.opts = { ...this.opts, url, token, credential }
     if (!sameHost) {
       // Another address may be another host: its numbers mean nothing to our cursor
       this.cursorValid = false

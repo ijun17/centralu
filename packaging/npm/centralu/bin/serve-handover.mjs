@@ -3,9 +3,9 @@
  * Windows sign-in (#1224). One module so the foreground `serve` (serve-run.mjs) and `--stop` (serve-detach.mjs) share
  * the stop without importing each other.
  */
-import { readServeState, heldHere, lockHolderPid, readServePid } from './serve-files.mjs'
+import { readServeState, heldHere, lockHolderPid, readServePid, pairServe, revokeServe } from './serve-files.mjs'
 import { DEFAULT_SERVE_PORT } from './serve-port.mjs'
-import { protocolVersionOf, hostProvesOf, probeHost, askHostToStop, askHostRpc } from './serve-host.mjs'
+import { protocolVersionOf, hostProvesOf, probeHost, askHostToStop, askHostRpc, ownCredentials, takesVerifiers } from './serve-host.mjs'
 import { ownLogon } from './serve-windows.mjs'
 import { isAlive, say, sleep, waitUntil } from './serve-util.mjs'
 
@@ -31,7 +31,9 @@ export async function stopServedHost({ dataDir, entry, platform = process.platfo
   const port = state.port ?? DEFAULT_SERVE_PORT
   const installed = protocolVersionOf(entry) ?? 0
   const prove = hostProvesOf(entry)
-  const probe = () => probeHost({ port, token: state.token, protocolVersion: installed, prove })
+  // The limited credential is enough to probe and to stop it (#1405, `host.stop` is everyday)
+  const own = ownCredentials(state, entry)
+  const probe = () => probeHost({ port, ...own, protocolVersion: installed, prove })
   const first = await probe()
   if (!heldHere(first, dataDir)) return { ok: true, wasRunning: false, message: `centralu serve is not running for ${dataDir}` }
 
@@ -41,8 +43,8 @@ export async function stopServedHost({ dataDir, entry, platform = process.platfo
   const launcherPid = launcher && hostPid && launcher.hostPid === hostPid ? launcher.pid : null
   const down = async () => !(await probe()).running && !(hostPid && isAlive(hostPid))
 
-  let asked = await askHostToStop({ port, token: state.token, protocolVersion: first.protocolVersion ?? installed, prove, ifIdle })
-  if (!asked.ok && asked.protocolVersion !== undefined) asked = await askHostToStop({ port, token: state.token, protocolVersion: asked.protocolVersion, prove, ifIdle })
+  let asked = await askHostToStop({ port, ...own, protocolVersion: first.protocolVersion ?? installed, prove, ifIdle })
+  if (!asked.ok && asked.protocolVersion !== undefined) asked = await askHostToStop({ port, ...own, protocolVersion: asked.protocolVersion, prove, ifIdle })
   // `ifIdle` and it has work running (#1224): it was left as it is
   if (asked.busy) return { ok: false, wasRunning: true, busy: true, message: asked.message }
   let how = 'asked'
@@ -124,13 +126,26 @@ export async function moveIntoSignIn({
   const port = state.port ?? DEFAULT_SERVE_PORT
   const prove = hostProvesOf(entry)
   const protocolVersion = existing.protocolVersion ?? protocolVersionOf(entry) ?? 0
-  const report = (handover) => (tell ?? ((h) => askHostRpc({ port, token: state.token, protocolVersion, prove, method: 'host.handover', params: { handover: h } })))(handover)
+  const own = ownCredentials(state, entry)
+  /*
+   * `host.handover` is a hub's call (#1405, `link`): said with a full credential made for this one call and withdrawn
+   * right after, never kept. An older installed host knows only the token kept for it
+   */
+  const sayHandover = async (h) => {
+    const made = takesVerifiers(entry) ? pairServe(dataDir, 'handover', platform) : null
+    try {
+      return await askHostRpc({ port, token: made?.token ?? own.token, proofKey: own.proofKey, protocolVersion, prove, method: 'host.handover', params: { handover: h } })
+    } finally {
+      if (made) revokeServe(dataDir, made.id, platform)
+    }
+  }
+  const report = (handover) => (tell ?? sayHandover)(handover)
   const pid = lockHolderPid(dataDir)
   say(`the host running for ${dataDir}${pid ? ` (pid ${pid})` : ''} runs in a network logon (started over ssh), where Git cannot use the credentials saved in Windows; moving it into this Windows sign-in once nothing runs there`)
   const t0 = now()
   let waiting = false
   for (;;) {
-    if (!(await probeHost({ port, token: state.token, protocolVersion, prove })).running) return true
+    if (!(await probeHost({ port, ...own, protocolVersion, prove })).running) return true
     const r = await stop()
     if (r.ok) {
       say(`stopped it${r.how && r.how !== 'asked' ? ` (${r.how})` : ''}; starting the host in this sign-in`)
