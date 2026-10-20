@@ -1,4 +1,4 @@
-import type { McpServerConfig, PermissionMode } from '@anthropic-ai/claude-agent-sdk'
+import type { McpServerConfig, PermissionMode, SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import type { randomUUID } from 'node:crypto'
 import type { AgentProcess, CreateSessionOpts, InputOrigin } from '../contract.js'
 import type { LocalSpawnSpec } from '../local-process.js'
@@ -18,7 +18,7 @@ export type ClaudeInput = { text: string; uuid: ReturnType<typeof randomUUID>; p
  * Only the part of the SDK Query that we use.
  * We write down only the minimal surface, so external types do not leave the adapter.
  */
-export type QueryHandle = AsyncIterable<unknown> &
+export type QueryHandle = AsyncIterable<SDKMessage> &
   UsageQuery &
   ModelQuery & {
     getContextUsage(): Promise<{ totalTokens?: number; maxTokens?: number } | undefined>

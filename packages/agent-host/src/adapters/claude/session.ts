@@ -1,4 +1,4 @@
-import { query, type SettingSource } from '@anthropic-ai/claude-agent-sdk'
+import { query, type SDKMessage, type SettingSource } from '@anthropic-ai/claude-agent-sdk'
 import { randomUUID } from 'node:crypto'
 import { InputReceipts, type InputReceipt } from '../input-receipts.js'
 import type { InputObserver } from '../contract.js'
@@ -311,7 +311,7 @@ export class ClaudeSession implements SessionHandle {
   }
 
   /** One message of the stream, in the order the CLI sent it */
-  private onMessage(q: QueryHandle, msg: unknown): void {
+  private onMessage(q: QueryHandle, msg: SDKMessage): void {
     const m = msg as StreamMsg
     if (!this.turnOpen && m.user_message_uuid && !m.parent_tool_use_id && (m.type === 'assistant' || m.type === 'stream_event')) {
       this.turnOpen = true
