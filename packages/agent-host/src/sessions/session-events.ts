@@ -53,6 +53,8 @@ export type SessionEventsHost = Pick<DelegationHost, 'agentRuns' | 'children' | 
     requireHandle: (sessionId: string) => SessionHandle
     /** Something about a session changed that may let its mail go (#1347): it came to rest, a card was answered. Never throws */
     mailPoke: (sessionId: string) => void
+    /** An event of a session, and whether it ended its turn: what the mail guards count (§7.9). Never throws */
+    mailEvent: (e: NormalizedEvent, endedTurn: boolean) => void
     resumeSession: (sessionId: string, adopt?: AgentProcess) => Promise<{ session: SessionInfo; resumed: boolean; reason?: string; lockedElsewhere?: boolean }>
   }
 
@@ -304,6 +306,8 @@ export class SessionEvents {
     if (endedTurn && e.sessionId) this.forgetCommits(e.sessionId)
     if (endedTurn && e.sessionId) this.host.restartPolicy.applyDeferredRestart(e.sessionId)
     // A turn ended, a card was answered or a state was stated: the mail it was holding may go (#1347)
+    // Counted before anything is poked: a delivery it lets go must see the turn that just ended
+    if (e.sessionId) this.host.mailEvent(e, endedTurn)
     if (e.sessionId && (endedTurn || e.type === 'state_change' || e.type === 'approval_resolved' || e.type === 'question_resolved')) this.host.mailPoke(e.sessionId)
     // A deferred restart also waits for the session's background work (#648): the moment it ends is a boundary too
     if (e.type === 'background_tasks' && e.sessionId) this.host.restartPolicy.applyDeferredRestart(e.sessionId)

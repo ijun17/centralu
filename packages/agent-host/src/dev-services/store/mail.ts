@@ -184,6 +184,20 @@ type MessageSql = {
   created_at: number
 }
 
+type TurnSql = {
+  session_id: string
+  turn_seq: number
+  thread_id: string | null
+  started_by: string
+  started_at: number
+  ended_at: number | null
+  outcome: string | null
+}
+
+function toTurn(r: TurnSql): TurnRow {
+  return { sessionId: r.session_id, turnSeq: r.turn_seq, threadId: r.thread_id, startedBy: r.started_by, startedAt: r.started_at, endedAt: r.ended_at, outcome: r.outcome }
+}
+
 type ReceiptSql = {
   message_id: string
   recipient: string
@@ -794,6 +808,33 @@ export class MailRecords {
     this.db
       .prepare(`INSERT INTO mail_turns (session_id, turn_seq, thread_id, started_by, started_at) VALUES (?, ?, ?, ?, ?)`)
       .run(t.sessionId, t.turnSeq, t.threadId, t.startedBy, t.startedAt)
+  }
+
+  /** The turns recorded for the session, oldest first */
+  turnsOf(sessionId: string): TurnRow[] {
+    return this.db
+      .prepare<[string], TurnSql>(`SELECT * FROM mail_turns WHERE session_id = ? ORDER BY turn_seq`)
+      .all(sessionId)
+      .map(toTurn)
+  }
+
+  /** The number the session's next turn is recorded under */
+  nextTurnSeq(sessionId: string): number {
+    const row = this.db.prepare<[string], { n: number }>(`SELECT COALESCE(MAX(turn_seq), 0) + 1 AS n FROM mail_turns WHERE session_id = ?`).get(sessionId)
+    return row?.n ?? 1
+  }
+
+  /** How many turns mail started in the thread since `since` (the loop guard, §7.9) */
+  mailTurnsSince(threadId: string, since: number): number {
+    const row = this.db
+      .prepare<[string, number], { n: number }>(`SELECT COUNT(*) AS n FROM mail_turns WHERE thread_id = ? AND started_by = 'mail' AND started_at >= ? AND COALESCE(outcome, '') <> 'canceled'`)
+      .get(threadId, since)
+    return row?.n ?? 0
+  }
+
+  /** Closes the turns still open, as ones a previous host left (they can never end) */
+  closeOpenTurns(now: number, outcome: string): void {
+    this.db.prepare(`UPDATE mail_turns SET ended_at = ?, outcome = ? WHERE ended_at IS NULL`).run(now, outcome)
   }
 
   endTurn(sessionId: string, turnSeq: number, now: number, outcome: string): void {

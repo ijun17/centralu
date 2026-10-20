@@ -79,6 +79,13 @@ export type AgentProcessHost = {
  * A tool process a previous host left running for this session, to be re-attached at startup. `version` is the CLI
  * version it was started from, when its tag says (#297): an adopted process does not announce it again.
  */
+/** What the mailbox hears from the manager (#1347): a session gone, a session that may now take mail, an event the guards count */
+export type MailHooks = {
+  sessionGone(sessionId: string): void
+  sessionChanged(sessionId: string): void
+  sessionEvent?(e: NormalizedEvent, endedTurn: boolean): void
+}
+
 export type KeptAgent = { sessionId: string; tool: ToolName; process: AgentProcess; version?: string }
 import { Store } from '../dev-services/store.js'
 import type { UpdateService } from '../updates.js'
@@ -804,9 +811,9 @@ export class SessionManager {
   }
 
   /** What the mailbox asks of the sessions (#1347): set once by the host, null in a manager that has no mailbox */
-  private mailHooks: { sessionGone(sessionId: string): void; sessionChanged(sessionId: string): void } | null = null
+  private mailHooks: MailHooks | null = null
 
-  useMail(hooks: { sessionGone(sessionId: string): void; sessionChanged(sessionId: string): void }): void {
+  useMail(hooks: MailHooks): void {
     this.mailHooks = hooks
   }
 
@@ -1929,6 +1936,13 @@ export class SessionManager {
           self.mailHooks?.sessionChanged(id)
         } catch (e) {
           console.error(`[mail] ${id.slice(0, 8)}: ${errorMessage(e)}`)
+        }
+      },
+      mailEvent: (e, ended) => {
+        try {
+          self.mailHooks?.sessionEvent?.(e, ended)
+        } catch (err) {
+          console.error(`[mail] ${e.sessionId?.slice(0, 8) ?? '?'}: ${errorMessage(err)}`)
         }
       },
       mailGone: (id) => {

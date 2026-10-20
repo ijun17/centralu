@@ -1,8 +1,9 @@
 import { errorMessage } from '@cc/protocol'
 import type { MailRecords, MessageRow, ReceiptRow } from '../dev-services/store/mail.js'
-import { PERSON, parseAddress } from './address.js'
+import { CENTRALU, PERSON, parseAddress } from './address.js'
 import { needsReceiver } from './rules.js'
 import { holdsInbound } from './policy.js'
+import type { MailTurns } from './turns.js'
 import type { DrainOptions, MailService } from './service.js'
 
 /**
@@ -73,6 +74,8 @@ export type MailDeliveryOptions = {
   maxRetryMs?: number
   /** After this many failed tries mail is held for the person (Inbox: Retry) */
   maxAttempts?: number
+  /** The loop and token guards (§7.9); without them mail is held by nothing but the receiver's policy */
+  turns?: MailTurns
   /** When the delivery last ran, kept by the host: how long it was off tells how to start (§7.9) */
   heartbeat?: { read(): number | null; write(ms: number): void }
   /** A host that was off longer than this wakes a sleeping session only for mail that needs it (30 minutes) */
@@ -88,8 +91,9 @@ const DEFAULTS = { sweepEveryMs: 60_000, minWakeGapMs: 30_000, retryBaseMs: 5_00
 export class MailDelivery {
   private readonly now: () => number
   private readonly schedule: (ms: number, fn: () => void) => () => void
-  private readonly o: Required<Omit<MailDeliveryOptions, 'now' | 'schedule' | 'heartbeat'>>
+  private readonly o: Required<Omit<MailDeliveryOptions, 'now' | 'schedule' | 'heartbeat' | 'turns'>>
   private readonly heartbeat: MailDeliveryOptions['heartbeat']
+  private readonly turns: MailTurns | undefined
   /** One delivery in flight per mailbox; a change that comes meanwhile is looked at when it ends */
   private readonly inFlight = new Set<string>()
   private readonly again = new Set<string>()
@@ -129,13 +133,15 @@ export class MailDelivery {
         return () => clearTimeout(t)
       })
     this.heartbeat = opts.heartbeat
-    this.o = { ...DEFAULTS, ...Object.fromEntries(Object.entries(opts).filter(([k]) => k !== 'now' && k !== 'schedule' && k !== 'heartbeat')) }
+    this.turns = opts.turns
+    this.o = { ...DEFAULTS, ...Object.fromEntries(Object.entries(opts).filter(([k]) => k !== 'now' && k !== 'schedule' && k !== 'heartbeat' && k !== 'turns')) }
   }
 
   /** Begins hearing the mailbox and sweeping. A host that is leaving does not (`stop`) */
   start(): void {
     if (this.running) return
     this.running = true
+    this.turns?.closeStale()
     this.sayWhatWasLeftHalfDone()
     const last = this.heartbeat?.read() ?? null
     if (last !== null && this.now() - last > this.o.catchUpAfterMs) {
@@ -419,13 +425,20 @@ export class MailDelivery {
     const { drained } = plan
     const quiet = !drained.wake
 
+    // A turn mail starts is known before the session's first event of it, and forgotten if the tool does not take the input
+    const turn = quiet ? undefined : this.turns?.begin(sessionId, drained.workThread ?? drained.threads[0] ?? null)
+    const cancelTurn = () => {
+      if (turn !== undefined) this.turns?.cancel(sessionId, turn)
+    }
     const delivered: { at?: number } = {}
     try {
       await this.sessions.deliver(sessionId, { text: drained.text, quiet, line: drained.line }, (e) => {
+        cancelTurn()
         // Told after `deliver` resolved, so the time is set
         if (delivered.at !== undefined) this.takeBack(recipient, drained.messageIds, delivered.at, e)
       })
     } catch (e) {
+      cancelTurn()
       if (e instanceof MailNotAtRest) {
         this.records.undoAttempt(recipient, drained.messageIds)
         return
@@ -437,7 +450,9 @@ export class MailDelivery {
     const deliveredAt = this.now()
     delivered.at = deliveredAt
     this.records.transaction(() => {
-      this.records.markDelivered(recipient, drained.messageIds, drained.inline, deliveredAt)
+      // Told of and held is not read: the person finds it in the Inbox, with Release, until they have seen it
+      const heldIds = new Set(drained.quieted.map((q) => q.messageId))
+      this.records.markDelivered(recipient, drained.messageIds, drained.inline.filter((id) => !heldIds.has(id)), deliveredAt)
       for (const reason of new Set(drained.quieted.map((q) => q.reason))) {
         this.records.setHeld(recipient, drained.quieted.filter((q) => q.reason === reason).map((q) => q.messageId), reason)
       }
@@ -452,12 +467,21 @@ export class MailDelivery {
   }
 
   /** What the receiver's guards say about its mail (§7.7, §7.9) */
-  private guardsFor(_recipient: string, state: { auto?: boolean }): Pick<DrainOptions, 'quiet' | 'holdBack'> {
+  private guardsFor(recipient: string, state: { auto?: boolean }): Pick<DrainOptions, 'quiet' | 'holdBack'> {
+    const session = parseAddress(recipient)
+    const spent = this.turns && session?.kind === 'session' && this.turns.budgetSpent(session.sessionId)
     return {
+      holdBack: (message, receipt, thread) => {
+        // The person's words are never held, and mail the person released has been looked at
+        if (!this.turns || receipt.held === 'released' || message.sender === PERSON) return null
+        return this.turns.loopSpent(thread.id) ? 'loop' : null
+      },
       quiet: (message, receipt, thread) => {
         // The person's words and Centralu's own are never held. Another session's or an app's, to a session that runs without asking,
         // is told of and never a reason to wake it, until the person releases it
         if (state.auto && receipt.held !== 'released' && holdsInbound(message, thread)) return 'policy'
+        // A session whose mail has used up its budget is told of what comes, and not woken for it (Centralu's own are never held)
+        if (spent && receipt.held !== 'released' && message.sender !== PERSON && message.sender !== CENTRALU) return 'budget'
         return null
       },
     }
@@ -467,6 +491,25 @@ export class MailDelivery {
     for (const reason of new Set(held.map((h) => h.reason))) {
       this.records.setHeld(recipient, held.filter((h) => h.reason === reason).map((h) => h.messageId), reason)
     }
+  }
+
+  /** The person pressed Resume on a session whose mail was paused for its budget: counted anew, and what was held goes now */
+  resumeSession(sessionId: string): void {
+    this.turns?.resumeBudget(sessionId)
+    const recipient = this.service.sessionAddress(sessionId)
+    this.releaseHeld((r) => r.recipient === recipient && r.held === 'budget')
+  }
+
+  /** The person pressed Resume on a thread paused for its turns: counted from now, and what was held goes now */
+  resumeThread(threadId: string): void {
+    this.turns?.resumeLoop(threadId)
+    this.releaseHeld((r) => r.held === 'loop' && this.records.message(r.messageId)?.threadId === threadId)
+  }
+
+  private releaseHeld(which: (r: ReceiptRow) => boolean): void {
+    const byRecipient = new Map<string, string[]>()
+    for (const r of this.records.heldReceipts().filter(which)) byRecipient.set(r.recipient, [...(byRecipient.get(r.recipient) ?? []), r.messageId])
+    for (const [recipient, ids] of byRecipient) this.service.resendHeld(recipient, ids)
   }
 
   /** Looks at the mailbox again after `ms` */

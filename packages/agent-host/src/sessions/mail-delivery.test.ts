@@ -9,6 +9,7 @@ import type { NormalizedEvent, SessionInfo } from '@cc/protocol'
 import type { InputObserver } from '../adapters/contract.js'
 import { MailDelivery } from '../mail/delivery.js'
 import { MailService } from '../mail/service.js'
+import { MailTurns } from '../mail/turns.js'
 import { openBy } from '../mail/mail.test-helpers.js'
 import { MAIL_ACCEPT_MS } from './session-events.js'
 import { FakeHandle, managerWorld } from './manager.test-helpers.js'
@@ -16,6 +17,7 @@ import { FakeHandle, managerWorld } from './manager.test-helpers.js'
 let w: ReturnType<typeof managerWorld>
 let mail: MailService
 let delivery: MailDelivery
+let turns: MailTurns
 let clock = { t: 1_800_000_000_000 }
 
 beforeEach(() => {
@@ -23,8 +25,9 @@ beforeEach(() => {
   clock = { t: 1_800_000_000_000 }
   mail = new MailService(w.store.mail, { hostId: () => 'hub-aaaaaaaa', now: () => clock.t })
   // The timers are not used: a test looks at a mailbox when it says so
-  delivery = new MailDelivery(mail, w.store.mail, w.mgr.mailSessions(), { now: () => clock.t, schedule: () => () => {} })
-  w.mgr.useMail({ sessionGone: (id) => void mail.sessionGone(id), sessionChanged: (id) => delivery.poke(id) })
+  turns = new MailTurns(w.store.mail, { now: () => clock.t })
+  delivery = new MailDelivery(mail, w.store.mail, w.mgr.mailSessions(), { now: () => clock.t, schedule: () => () => {}, turns })
+  w.mgr.useMail({ sessionGone: (id) => void mail.sessionGone(id), sessionChanged: (id) => delivery.poke(id), sessionEvent: (e, ended) => turns.observe(e, ended) })
   delivery.start()
 })
 afterEach(() => delivery.stop())
@@ -111,6 +114,28 @@ describe('a session at rest is woken by mail', () => {
     handleOf(worker.id).respondApproval('req-1', 'deny')
     await settle()
     expect(handleOf(worker.id).sent.filter((t) => t.includes('> after the card'))).toHaveLength(1)
+  })
+})
+
+describe('the turn mail starts (§7.9)', () => {
+  it('is recorded when the session is woken, and ends with the session’s turn: empty when nothing was called, acted when a tool was', async () => {
+    const worker = await create()
+    const { thread } = openBy(mail, { by: 'person', kind: 'assign', subject: 's', body: 'first', assignee: mail.sessionAddress(worker.id) })
+    await due(worker.id)
+    expect(w.store.mail.hasOpenTurn(thread.id)).toBe(true)
+    handleOf(worker.id).finishTurn()
+    await settle()
+    expect(w.store.mail.hasOpenTurn(thread.id)).toBe(false)
+    expect(w.store.mail.mailTurnsSince(thread.id, 0)).toBe(1)
+    const outcomes = () => w.store.mail.turnsOf(worker.id).map((t) => t.outcome)
+    expect(outcomes()).toEqual(['empty'])
+
+    mail.post(thread.id, 'person', { kind: 'note', body: 'second' })
+    await due(worker.id)
+    handleOf(worker.id).emitToolCall('Bash', 'ls')
+    handleOf(worker.id).finishTurn()
+    await settle()
+    expect(outcomes()).toEqual(['empty', 'acted'])
   })
 })
 

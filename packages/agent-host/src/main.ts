@@ -21,6 +21,7 @@ import { UserAppAdoption, adoptedProjectOf, adoptedUserApp } from './user-app-ad
 import { SessionManager } from './sessions/manager.js'
 import { MailService } from './mail/service.js'
 import { MailDelivery } from './mail/delivery.js'
+import { MailTurns } from './mail/turns.js'
 import { mailRelations } from './mail/relations.js'
 import { MemoryGate } from './sessions/memory-gate.js'
 import { DEFAULT_RARE_TIER, currentRareTier, rareTierFrom, setRareTier, setReaderInstructions } from './sessions/orchestrator-tools.js'
@@ -404,7 +405,10 @@ const mail = new MailService(store.mail, {
     inThread: (threadId, address) => store.mail.participants(threadId).some((p) => p.address === address && p.leftAt === null),
   }),
 })
+// The loop and token guards (§7.9): what turns mail started, and what they used
+const mailTurns = new MailTurns(store.mail)
 const mailDelivery = new MailDelivery(mail, store.mail, mgr.mailSessions(), {
+  turns: mailTurns,
   // When it last ran: a host that was off a long while does not wake a crowd of sleeping sessions (§7.9). A setting the previous build never reads
   heartbeat: {
     read: () => Number(store.settings.appSetting('mail.heartbeat')) || null,
@@ -415,7 +419,7 @@ const mailDelivery = new MailDelivery(mail, store.mail, mgr.mailSessions(), {
 })
 // A session that goes to the trash leaves the work it held in the mailbox to the person or to nobody (§3.3); one that comes
 // to rest, answers a card or is restored may now take the mail it was holding
-mgr.useMail({ sessionGone: (id) => void mail.sessionGone(id), sessionChanged: (id) => mailDelivery.poke(id) })
+mgr.useMail({ sessionGone: (id) => void mail.sessionGone(id), sessionChanged: (id) => mailDelivery.poke(id), sessionEvent: (e, ended) => mailTurns.observe(e, ended) })
 /*
  * Terminal and command output can arrive before the server exists: under the keeper an adopted pty
  * replays its buffered output as soon as it is attached (HO11, lifecycle/gate.ts).

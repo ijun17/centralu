@@ -7,6 +7,8 @@ import { Store } from '../dev-services/store.js'
 import { PERSON, appAddress, sessionAddress } from './address.js'
 import { MailDelivery, MailNotAtRest, type MailInput, type MailSessions, type ReceiverState } from './delivery.js'
 import { MailService } from './service.js'
+import { MailTurns } from './turns.js'
+import type { NormalizedEvent } from '@cc/protocol'
 import { openBy } from './mail.test-helpers.js'
 
 const HOST = 'hub-aaaaaaaa'
@@ -26,18 +28,22 @@ function world(seen: { heartbeat?: number | null } = {}) {
   const delivered: { sessionId: string; input: MailInput }[] = []
   const notes: { sessionId: string; text: string }[] = []
   const behaviour: { fail: Error | null; hold: Promise<void> | null } = { fail: null, hold: null }
+  const lates: ((e: Error) => void)[] = []
   const sessions: MailSessions = {
     receiver: (id) => states.get(id) ?? { kind: 'ready', live: true, quiet: true },
     note: (sessionId, text) => void notes.push({ sessionId, text }),
-    deliver: async (sessionId, input) => {
+    deliver: async (sessionId, input, late) => {
       delivered.push({ sessionId, input })
+      if (late) lates.push(late)
       if (behaviour.hold) await behaviour.hold
       if (behaviour.fail) throw behaviour.fail
     },
   }
   const beat = { value: seen.heartbeat ?? null }
+  const turns = new MailTurns(store.mail, { now: () => clock.t })
   const delivery = new MailDelivery(mail, store.mail, sessions, {
     now: () => clock.t,
+    turns,
     heartbeat: { read: () => beat.value, write: (ms) => void (beat.value = ms) },
     schedule: (ms, fn) => {
       const id = nextId++
@@ -63,7 +69,7 @@ function world(seen: { heartbeat?: number | null } = {}) {
     clock.t = end
     await settle()
   }
-  return { store, mail, clock, states, delivered, notes, behaviour, delivery, advance, timers, beat }
+  return { store, mail, clock, states, delivered, notes, behaviour, lates, delivery, advance, timers, beat, turns }
 }
 
 const settle = async () => {
@@ -787,7 +793,7 @@ describe('a session that runs without asking holds mail from the sessions and ap
 })
 
 describe('one turn, one thread (§5, §6)', () => {
-  it('a wake carries one work thread, and the other thread goes with the next turn', async () => {
+  it('a wake carries one work thread, the turn is recorded under it, and the other thread goes with the next turn', async () => {
     const w = world()
     w.delivery.start()
     stop = () => w.delivery.stop()
@@ -798,13 +804,277 @@ describe('one turn, one thread (§5, §6)', () => {
     expect(w.delivered).toHaveLength(1)
     expect(w.delivered[0]!.input.text).toContain(first.thread.id)
     expect(w.delivered[0]!.input.text).not.toContain(second.thread.id)
+    expect(w.store.mail.turnsOf('s2').map((x) => x.threadId)).toEqual([first.thread.id])
     expect(w.store.mail.receiptsOf(second.message.id)[0]).toMatchObject({ deliveredAt: null, held: null, attempts: 0 })
 
-    // The turn ends: the session pokes, and the second thread's mail is the next turn's
+    // The turn ends: the session pokes, and the second thread's mail is the next turn's, recorded under its own thread
+    ranTurn(w, { acted: true })
     w.mail.read(first.thread.id, S2)
     w.delivery.poke('s2')
     await w.advance(35_000)
     expect(w.delivered).toHaveLength(2)
     expect(w.delivered[1]!.input.text).toContain(second.thread.id)
+    expect(w.store.mail.turnsOf('s2').map((x) => x.threadId)).toEqual([first.thread.id, second.thread.id])
+  })
+})
+
+const toolCall: NormalizedEvent = { type: 'tool_call', sessionId: 's2', callId: 'c1', summary: { tool: 'Bash', title: 'ls', paths: [] } }
+const request = (inputTokens: number): NormalizedEvent => ({
+  type: 'usage_update',
+  sessionId: 's2',
+  tokens: { inputTokens, outputTokens: 10, cacheReadTokens: 0, cacheCreationTokens: 0 },
+  request: { inputTokens, cacheReadTokens: 0 },
+})
+const turnEnd: NormalizedEvent = { type: 'turn_complete', sessionId: 's2' }
+
+/** A turn that mail started, used `tokens` of input, did something (or not), and ended */
+function ranTurn(w: ReturnType<typeof world>, o: { tokens?: number; acted?: boolean } = {}) {
+  if (o.tokens) w.turns.observe(request(o.tokens), false)
+  if (o.acted) w.turns.observe(toolCall, false)
+  w.turns.observe(turnEnd, true)
+}
+
+describe('the loop guard (§7.9)', () => {
+  it('a thread whose mail started more than 20 turns in an hour holds its next mail, loop; Resume counts anew and lets the held mail go', async () => {
+    const w = world()
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    const { thread } = assign(w)
+    await w.advance(2_000)
+    ranTurn(w, { acted: true })
+    // Twenty turns, each woken a little after the last
+    for (let i = 1; i < 20; i++) {
+      w.mail.post(thread.id, S1, { kind: 'note', body: `n${i}` })
+      await w.advance(35_000)
+      ranTurn(w, { acted: true })
+    }
+    expect(w.delivered).toHaveLength(20)
+    expect(w.store.mail.mailTurnsSince(thread.id, 0)).toBe(20)
+
+    // The 21st turn is one past the limit: it still starts, and the mail after it is held
+    w.mail.post(thread.id, S1, { kind: 'note', body: 'n20' })
+    await w.advance(35_000)
+    ranTurn(w, { acted: true })
+    expect(w.delivered).toHaveLength(21)
+    const held = w.mail.post(thread.id, S1, { kind: 'note', body: 'n21' })
+    await w.advance(35_000)
+    expect(w.delivered).toHaveLength(21)
+    expect(w.store.mail.receiptsOf(held.message.id)[0]).toMatchObject({ held: 'loop', deliveredAt: null })
+
+    w.delivery.resumeThread(thread.id)
+    await w.advance(35_000)
+    expect(w.delivered).toHaveLength(22)
+    expect(w.delivered[21]!.input.text).toContain('n21')
+    expect(w.store.mail.receiptsOf(held.message.id)[0]).toMatchObject({ held: null, deliveredAt: expect.any(Number) })
+  })
+
+  it('the person’s word is never held by it, and starts the count again', async () => {
+    const w = world()
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    const { thread } = assign(w)
+    for (let i = 0; i < 22; i++) {
+      w.store.mail.startTurn({ sessionId: 's2', turnSeq: i + 1, threadId: thread.id, startedBy: 'mail', startedAt: w.clock.t })
+    }
+    expect(w.turns.loopSpent(thread.id)).toBe(true)
+    await w.advance(2_000)
+    expect(w.delivered).toHaveLength(0)
+    expect(w.store.mail.heldReceipts().map((r) => r.held)).toEqual(['loop'])
+
+    w.clock.t += 1
+    const word = w.mail.post(thread.id, PERSON, { kind: 'note', body: 'go on' })
+    w.clock.t += 1
+    expect(w.turns.loopSpent(thread.id)).toBe(false)
+    await w.advance(2_000)
+    const toWorker = w.delivered.filter((d) => d.sessionId === 's2')
+    expect(toWorker).toHaveLength(1)
+    expect(toWorker[0]!.input.text).toContain('go on')
+    expect(w.store.mail.receiptsOf(word.message.id)[0]!.deliveredAt).not.toBeNull()
+  })
+
+  it('turns of another hour do not count, and neither do those of another thread', () => {
+    const w = world()
+    const a = assign(w)
+    const b = openBy(w.mail, { by: S1, kind: 'assign', subject: 'other', body: 'x', assignee: S2 })
+    for (let i = 0; i < 25; i++) w.store.mail.startTurn({ sessionId: 's2', turnSeq: i + 1, threadId: a.thread.id, startedBy: 'mail', startedAt: w.clock.t })
+    expect(w.turns.loopSpent(a.thread.id)).toBe(true)
+    expect(w.turns.loopSpent(b.thread.id)).toBe(false)
+    w.clock.t += 61 * 60_000
+    expect(w.turns.loopSpent(a.thread.id)).toBe(false)
+  })
+})
+
+describe('the token guard (§7.9)', () => {
+  it('past 200,000 input tokens an hour of mail-started turns, mail from a session is told of without a turn and held, budget; the person’s is not', async () => {
+    const w = world()
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    const { thread } = assign(w)
+    await w.advance(2_000)
+    ranTurn(w, { acted: true, tokens: 120_000 })
+    w.mail.post(thread.id, S1, { kind: 'note', body: 'second' })
+    await w.advance(35_000)
+    ranTurn(w, { acted: true, tokens: 90_000 })
+    expect(w.turns.budgetSpent('s2')).toBe(true)
+    expect(w.delivered).toHaveLength(2)
+
+    const third = w.mail.post(thread.id, S1, { kind: 'note', body: 'third' })
+    await w.advance(35_000)
+    // Told of: quiet input, no turn; and held for the person
+    expect(w.delivered).toHaveLength(3)
+    expect(w.delivered[2]).toMatchObject({ sessionId: 's2', input: { quiet: true } })
+    expect(w.store.mail.receiptsOf(third.message.id)[0]).toMatchObject({ held: 'budget' })
+
+    // The person's word wakes it all the same
+    w.mail.post(thread.id, PERSON, { kind: 'note', body: 'please continue' })
+    await w.advance(2_000)
+    const toWorker = w.delivered.filter((d) => d.sessionId === 's2')
+    expect(toWorker).toHaveLength(4)
+    expect(toWorker[3]!.input.quiet).toBe(false)
+  })
+
+  it('input read again from the cache does not count, only the input that was new', () => {
+    const w = world()
+    w.turns.begin('s2', null)
+    w.turns.observe({ type: 'usage_update', sessionId: 's2', tokens: { inputTokens: 10, outputTokens: 1, cacheReadTokens: 900_000, cacheCreationTokens: 0 }, request: { inputTokens: 10, cacheReadTokens: 900_000 } }, false)
+    w.turns.observe(toolCall, false)
+    w.turns.observe(turnEnd, true)
+    expect(w.turns.tokensInAnHour('s2')).toBe(10)
+    expect(w.turns.budgetSpent('s2')).toBe(false)
+  })
+
+  it('3 mail-started turns in a row that ended doing nothing spend it too; a turn that did something starts the run again', async () => {
+    const w = world()
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    const { thread } = assign(w)
+    await w.advance(2_000)
+    ranTurn(w)
+    w.mail.post(thread.id, S1, { kind: 'note', body: 'b' })
+    await w.advance(35_000)
+    expect(w.turns.budgetSpent('s2')).toBe(false)
+    ranTurn(w)
+    w.mail.post(thread.id, S1, { kind: 'note', body: 'c' })
+    await w.advance(35_000)
+    ranTurn(w, { acted: true })
+    // The run was broken by the turn that acted
+    for (const body of ['d', 'e']) {
+      w.mail.post(thread.id, S1, { kind: 'note', body })
+      await w.advance(35_000)
+      ranTurn(w)
+      expect(w.turns.budgetSpent('s2')).toBe(false)
+    }
+    w.mail.post(thread.id, S1, { kind: 'note', body: 'f' })
+    await w.advance(35_000)
+    ranTurn(w)
+    expect(w.turns.budgetSpent('s2')).toBe(true)
+  })
+
+  it('an hour on the tokens no longer count, and Resume counts anew and lets the held mail go as a wake', async () => {
+    const w = world()
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    const { thread } = assign(w)
+    await w.advance(2_000)
+    ranTurn(w, { acted: true, tokens: 250_000 })
+    expect(w.turns.budgetSpent('s2')).toBe(true)
+    const held = w.mail.post(thread.id, S1, { kind: 'note', body: 'while paused' })
+    await w.advance(35_000)
+    expect(w.store.mail.receiptsOf(held.message.id)[0]).toMatchObject({ held: 'budget' })
+
+    w.delivery.resumeSession('s2')
+    expect(w.turns.budgetSpent('s2')).toBe(false)
+    await w.advance(35_000)
+    expect(w.delivered.at(-1)).toMatchObject({ input: { quiet: false } })
+    expect(w.delivered.at(-1)!.input.text).toContain('while paused')
+
+    ranTurn(w, { acted: true, tokens: 250_000 })
+    expect(w.turns.budgetSpent('s2')).toBe(true)
+    w.clock.t += 61 * 60_000
+    expect(w.turns.budgetSpent('s2')).toBe(false)
+  })
+
+  it('a delivery the tool did not take starts no turn', async () => {
+    const w = world()
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    const { thread } = assign(w)
+    w.behaviour.fail = new Error('process gone')
+    await w.advance(2_000)
+    expect(w.store.mail.hasOpenTurn(thread.id)).toBe(false)
+    expect(w.store.mail.mailTurnsSince(thread.id, 0)).toBe(0)
+    ranTurn(w)
+    // The turn that was never started is not one that ended empty
+    expect(w.turns.budgetSpent('s2')).toBe(false)
+  })
+
+  it('a wake the tool failed after the wait ran out starts no turn either, and a later turn is not the one cancelled', async () => {
+    const w = world()
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    const { thread } = assign(w)
+    await w.advance(2_000)
+    expect(w.store.mail.mailTurnsSince(thread.id, 0)).toBe(1)
+    w.lates[0]!(new Error('the session closed with it queued'))
+    expect(w.store.mail.hasOpenTurn(thread.id)).toBe(false)
+    expect(w.store.mail.mailTurnsSince(thread.id, 0)).toBe(0)
+  })
+
+  it('a failure told late of an earlier wake leaves the turn of a later one alone', async () => {
+    const w = world()
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    const first = assign(w)
+    await w.advance(2_000)
+    const second = openBy(w.mail, { by: S1, kind: 'assign', subject: 'more work', body: 'and #13', assignee: S2 })
+    await w.advance(60_000)
+    expect(w.lates).toHaveLength(2)
+    expect(w.store.mail.hasOpenTurn(second.thread.id)).toBe(true)
+
+    w.lates[0]!(new Error('the session closed with it queued'))
+    expect(w.store.mail.hasOpenTurn(second.thread.id)).toBe(true)
+    expect(w.store.mail.receiptsOf(first.message.id)[0]).toMatchObject({ deliveredAt: null })
+    expect(w.store.mail.receiptsOf(second.message.id)[0]).toMatchObject({ deliveredAt: expect.any(Number) })
+  })
+
+  it('turns a previous host left open are closed when the delivery starts', () => {
+    const w = world()
+    w.store.mail.startTurn({ sessionId: 's2', turnSeq: 1, threadId: 't', startedBy: 'mail', startedAt: NOW })
+    expect(w.store.mail.hasOpenTurn('t')).toBe(true)
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    expect(w.store.mail.hasOpenTurn('t')).toBe(false)
+  })
+})
+
+describe('the turn belongs to the receiver’s work thread (§6)', () => {
+  it('also when a thread it owns has older mail in the same wake', async () => {
+    const w = world()
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    const S3 = sessionAddress(HOST, 's3')
+    // S2 gave S1 some work and S1 reports: mail S2 owns, older than the work it was given by S3
+    const owned = openBy(w.mail, { by: S2, kind: 'assign', subject: 'handed on', body: 'do it', assignee: S1 })
+    w.mail.post(owned.thread.id, S1, { kind: 'report', body: 'done' })
+    const work = openBy(w.mail, { by: S3, kind: 'assign', subject: 'my work', body: 'please', assignee: S2 })
+    await w.advance(2_000)
+    const toS2 = w.delivered.filter((d) => d.sessionId === 's2')
+    expect(toS2).toHaveLength(1)
+    expect(toS2[0]!.input.text).toContain(owned.thread.id)
+    expect(toS2[0]!.input.text).toContain(work.thread.id)
+    expect(w.store.mail.turnsOf('s2').map((x) => x.threadId)).toEqual([work.thread.id])
+  })
+})
+
+describe('a delivery the session was not at rest for (§7.1, §7.9)', () => {
+  it('is no turn mail started: nothing is recorded, and the loop guard does not count it', async () => {
+    const w = world()
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    w.behaviour.fail = new MailNotAtRest()
+    const { thread } = assign(w)
+    await w.advance(2_000)
+    expect(w.store.mail.mailTurnsSince(thread.id, 0)).toBe(0)
+    expect(w.store.mail.hasOpenTurn(thread.id)).toBe(false)
   })
 })
