@@ -3009,7 +3009,8 @@ it exits with 4 and prints nothing more, also when the whole input comes late, s
 hub's 30 s are over, and a failed step leaves no PowerShell behind. A reader whose process is already older than 30 s when it says
 it runs (`SSH_POWERSHELL_START_MS`; a PowerShell that came up after the hub's wait, the input waiting in its pipe) reads nothing and
 exits with 4 too. When PowerShell was up and the input was not read, the step
-has not started, so it is sent once more, and a second failure says so with "PowerShell on <machine> did not confirm within 30 seconds that it had read this step's input, so the step did not
+has not started, so it is sent once more (only when the reader itself ended, with 3 or 4, or no confirmation came in 30 s; a dropped link
+after READY is "ssh could not reach" and is not sent again), and a second failure says so with "PowerShell on <machine> did not confirm within 30 seconds that it had read this step's input, so the step did not
 start, twice". The step's own limit (30 minutes) is then only for a step that runs.
 
 The remote prints codes, the hub turns them into sentences (`node_hash`, `integrity`, `download`, `busy`, …); exit

@@ -30,9 +30,11 @@ export class SshRunFailure extends Error {
 
 /**
  * A line a run waits for (`SshRunOptions.expect`). `endedMessage`: what a run that ends before the line came says, for a line
- * after the first (the first line missing at the end is the command's own failure: ssh could not reach, or found no PowerShell)
+ * after the first (the first line missing at the end is the command's own failure: ssh could not reach, or found no PowerShell), when it
+ * ended with one of `endedCodes`: the remote command's own exits. Any other end (ssh's 255 on a dropped link, a signal) says nothing of what the
+ * remote did after the last line it printed, which may have gone on, so it is the run's result as it stands
  */
-export type SshExpectedLine = { marker: string; withinMs: number; message: string; endedMessage?: string }
+export type SshExpectedLine = { marker: string; withinMs: number; message: string; endedMessage?: string; endedCodes?: readonly number[] }
 
 export type SshRunOptions = {
   /** The ssh program; default `ssh` on PATH */
@@ -142,9 +144,11 @@ export function runSsh(opts: SshRunOptions): Promise<SshRunResult> {
     child.once('error', (e) => fail('spawn', e.message))
     child.once('close', (code) => {
       if (settled) return
-      // Ended after the first line but before a later one: the remote stopped on its own before it got what it waited for
+      // Ended after the first line but before a later one, with an exit code that is the remote command's own (`endedCodes`): it stopped
+      // on its own before it got what it waited for. Any other end (ssh's 255 on a dropped link, a signal) says nothing of what the
+      // remote did after it, which may have gone on: that is the run's result as it stands
       const missing = next > 0 ? expected[next] : undefined
-      if (missing?.endedMessage) return fail('expected', missing.endedMessage, next)
+      if (missing?.endedMessage && code !== null && missing.endedCodes?.includes(code)) return fail('expected', missing.endedMessage, next)
       settled = true
       clearTimeout(deadline)
       clearTimeout(expectDeadline)

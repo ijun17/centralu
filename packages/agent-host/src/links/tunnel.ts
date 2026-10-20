@@ -383,20 +383,23 @@ export const STDIN_READER_MS = 20_000
  * already waiting in its pipe, so a PowerShell that comes up late would run a step the hub reported as not started
  */
 export const SSH_POWERSHELL_START_MS = 30_000
+/** The reader's exit codes: the input ended before its dot line; its own time ran out (or its PowerShell started too late). The only exits of the reader the hub may answer by sending the step again (`SshExpectedLine.endedCodes`) */
+export const STDIN_EXIT_CUT = 3
+export const STDIN_EXIT_LATE = 4
 /** The reader (see `STDIN_END`): says it runs, takes the bytes up to the dot line within `deadlineMs`, confirms; `$s` is the text it read */
 function readStdin(deadlineMs: number, startMs: number): string {
   return (
     `Write-Output '${STDIN_READY}'; $w=[Diagnostics.Stopwatch]::StartNew(); ` +
     // A PowerShell that took too long to start gets no input read (see `SSH_POWERSHELL_START_MS`); the process's age, on this machine's clock
-    `if (([DateTime]::Now-[Diagnostics.Process]::GetCurrentProcess().StartTime).TotalMilliseconds -gt ${startMs}) { exit 4 }; ` +
+    `if (([DateTime]::Now-[Diagnostics.Process]::GetCurrentProcess().StartTime).TotalMilliseconds -gt ${startMs}) { exit ${STDIN_EXIT_LATE} }; ` +
     '$i=[Console]::OpenStandardInput(); $m=New-Object IO.MemoryStream; $b=New-Object byte[] 65536; $g=$m.GetBuffer(); $d=$false; ' +
     // Each read waits for what is left of the deadline (ReadAsync, so a read that never returns still ends); the input ends with a
     // line holding one dot, whose line break is \n or \r\n
-    `while ($true) { $t=$i.ReadAsync($b,0,65536); $r=${deadlineMs}-$w.ElapsedMilliseconds; if ($r -le 0 -or -not $t.Wait([int]$r)) { exit 4 }; $k=$t.Result; ` +
+    `while ($true) { $t=$i.ReadAsync($b,0,65536); $r=${deadlineMs}-$w.ElapsedMilliseconds; if ($r -le 0 -or -not $t.Wait([int]$r)) { exit ${STDIN_EXIT_LATE} }; $k=$t.Result; ` +
     'if ($k -le 0) { break }; $m.Write($b,0,$k); $g=$m.GetBuffer(); $n=[int]$m.Length; ' +
     'if ($n -ge 2 -and $g[$n-1] -eq 10 -and ($g[$n-2] -eq 46 -or ($n -ge 3 -and $g[$n-2] -eq 13 -and $g[$n-3] -eq 46))) { $d=$true; break } }; ' +
-    "if (-not $d) { [Console]::Error.WriteLine('The input ended before its end line'); exit 3 }; " +
-    `if ($w.ElapsedMilliseconds -gt ${deadlineMs}) { exit 4 }; ` +
+    `if (-not $d) { [Console]::Error.WriteLine('The input ended before its end line'); exit ${STDIN_EXIT_CUT} }; ` +
+    `if ($w.ElapsedMilliseconds -gt ${deadlineMs}) { exit ${STDIN_EXIT_LATE} }; ` +
     `$s=[Text.Encoding]::ASCII.GetString($g,0,[int]$m.Length); Write-Output '${STDIN_ACK}'`
   )
 }
@@ -776,6 +779,8 @@ export class SshTunnel implements Tunnel {
             withinMs: ackMs,
             message: `PowerShell on ${this.opts.target} did not confirm within ${sec(ackMs)} that it had read this step's input, so the step did not start`,
             endedMessage: `PowerShell on ${this.opts.target} ended before it had read this step's input (its own time for that ran out, or the input was cut), so the step did not start`,
+            // The reader's own exits (cut input, its time); a dropped link (255) or a signal is not, and is not sent again
+            endedCodes: [STDIN_EXIT_CUT, STDIN_EXIT_LATE],
           },
     )
     const args = [...this.config(), '-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '--', this.opts.target, line]

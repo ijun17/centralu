@@ -205,10 +205,11 @@ describe('a step whose input the remote does not confirm', () => {
 
   /**
    * A stand-in ssh: counts its runs in a file, and for run N does what `plan[N-1]` says: nothing (`none`); say that PowerShell runs
-   * and stay (`ready`); say that and then that it ended on its own, as a reader whose time ran out (`exit`); or say that and that it
+   * and stay (`ready`); say that and then that it ended on its own, as a reader whose time ran out (`exit`, code 4) or whose input was
+   * cut (`cut`, 3); say that and lose the link (`drop`, ssh's 255); or say that and that it
    * has the script, then the step's output (`both`)
    */
-  function fakeSsh(plan: ('none' | 'ready' | 'exit' | 'both')[]) {
+  function fakeSsh(plan: ('none' | 'ready' | 'exit' | 'cut' | 'drop' | 'both')[]) {
     const counter = join(dir, 'runs.txt')
     const source = `
 const fs = require('node:fs')
@@ -221,6 +222,8 @@ else {
   process.stdout.write(${JSON.stringify(`${STDIN_READY}\n`)})
   if (what === 'both') { process.stdout.write(${JSON.stringify(`${STDIN_ACK}\n`)} + 'step output\\n'); setTimeout(() => process.exit(0), 100) }
   else if (what === 'exit') setTimeout(() => process.exit(4), 100)
+  else if (what === 'cut') setTimeout(() => process.exit(3), 100)
+  else if (what === 'drop') setTimeout(() => process.exit(255), 100)
   else setTimeout(() => process.exit(0), 600000)
 }
 `
@@ -265,6 +268,26 @@ else {
     const t = tunnel(ssh)
     await expect(t.exec(framed())).rejects.toThrow(/ended before it had read this step's input.*, twice/)
     expect(runs()).toBe(2)
+    await t.close()
+  }, 60_000 * SLOW)
+
+  it('sends the step again when the reader ended because its input was cut, not only when its time ran out', async () => {
+    const { ssh, runs } = fakeSsh(['cut', 'both'])
+    const t = tunnel(ssh)
+    expect((await t.exec(framed())).stdout.trim()).toBe('step output')
+    expect(runs()).toBe(2)
+    await t.close()
+  }, 60_000 * SLOW)
+
+  /*
+   * The link dropping after PowerShell said it runs says nothing of what the remote does next: its input is usually already in the
+   * pipe, the confirmation may be on its way, and the step may have started. Sending it again could run it twice.
+   */
+  it('does not send the step again when the link drops after PowerShell said it runs; it is a failure to reach the machine', async () => {
+    const { ssh, runs } = fakeSsh(['drop', 'both'])
+    const t = tunnel(ssh)
+    await expect(t.exec(framed())).rejects.toThrow(/ssh could not reach ijun1/)
+    expect(runs()).toBe(1)
     await t.close()
   }, 60_000 * SLOW)
 

@@ -1799,7 +1799,10 @@ first line (ssh's connecting has its own six-attempt allowance inside it; a remo
 that lost its input: fail, no second try; a reader whose process is more than 30 s old when it says it runs reads nothing and exits 4,
 so a PowerShell that came up after the hub gave up cannot run the step from the input waiting in its pipe) and 30 s after it for the second. The reader ends on its own 20 s after the first line,
 checking the time after every read and again before it confirms (exit 4, nothing more printed), so it is gone before the hub's 30 s
-are over; the hub then sends the step once more (the script runs only after the confirmation, so the step has not started), and
+are over; the hub then sends the step once more, but only for the reader's own exits (3: the input was cut; 4: its time ran out) or a missing
+confirmation after 30 s; ssh's 255 or a signal after READY says nothing of what the remote did next (the confirmation may be on its way
+and the step started), so it is "ssh could not reach", not sent again (the script runs only after the confirmation, so a step the
+reader gave up on has not started), and
 fails saying the remote never confirmed the input when that fails too.
 The input is written **with the command, not after PowerShell says it runs** (measured with the final reader, 17,000 characters,
 ten at a time): written at once it arrived in 80 of 80 runs (and 80 of 80 at 100,000 characters); written when READY came back,
