@@ -8,6 +8,7 @@ import { createHash, createHmac, randomBytes } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeSync, closeSync } from 'node:fs'
 import { join } from 'node:path'
 import { isAlive, renameRetrying, replaceFile, sleepSync } from './serve-util.mjs'
+import { CREDENTIAL_ID_RE, PAIR_LABEL_RE } from './serve-args.mjs'
 
 /**
  * The file in the data folder that holds the host's key, the full credentials' verifiers and the port, mode 0600.
@@ -155,9 +156,9 @@ function parseServeState(raw) {
     const port = Number.isInteger(v?.port) && v.port >= 1 && v.port <= 65535 ? v.port : null
     if (v?.v === 2) {
       if (typeof v.key !== 'string' || v.key.length < 32) return null
-      const full = (Array.isArray(v.full) ? v.full : []).filter(
-        (e) => typeof e?.id === 'string' && typeof e.label === 'string' && typeof e.verifier === 'string' && /^[0-9a-f]{64}$/.test(e.verifier),
-      ).map((e) => ({ id: e.id, label: e.label, verifier: e.verifier, created: Number.isFinite(e.created) ? e.created : 0 }))
+      // Exactly what the host takes (serve-credentials.ts `isListedEntry`): an entry of another shape is dropped here, so
+      // the next write leaves it out too, and the host refuses it meanwhile
+      const full = (Array.isArray(v.full) ? v.full : []).filter((e) => isListedEntry(e)).map((e) => ({ id: e.id, label: e.label, verifier: e.verifier, created: Number.isFinite(e.created) ? e.created : 0 }))
       const legacyHostToken = typeof v.legacyHostToken === 'string' && v.legacyHostToken.length >= 32 ? v.legacyHostToken : null
       return { v: 2, key: v.key, port, full, legacyHostToken, token: limitedOf(v.key), proofKey: v.key }
     }
@@ -166,6 +167,11 @@ function parseServeState(raw) {
   } catch {
     return null
   }
+}
+
+/** An entry the launcher lists, `--revoke` takes and the host accepts: an 8-hex id, a label `--pair` takes, a hex verifier */
+export function isListedEntry(e) {
+  return typeof e?.id === 'string' && CREDENTIAL_ID_RE.test(e.id) && typeof e.label === 'string' && PAIR_LABEL_RE.test(e.label) && typeof e.verifier === 'string' && /^[0-9a-f]{64}$/.test(e.verifier)
 }
 
 /** What version 2 writes for a state */

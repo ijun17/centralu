@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url'
 import { PROTOCOL_VERSION } from '@cc/protocol'
 import { acquireInstanceLock } from '../packages/agent-host/src/dev-services/instance-lock.js'
 import { HostServer, versionMismatchMessage } from '../packages/agent-host/src/transport/server.js'
-import { readFullCredentials } from '../packages/agent-host/src/lifecycle/serve-credentials.js'
+import { CREDENTIAL_ID_RE as HOST_ID_RE, CREDENTIAL_LABEL_RE as HOST_LABEL_RE, readFullCredentials } from '../packages/agent-host/src/lifecycle/serve-credentials.js'
 import { createRequire } from 'node:module'
 import {
   connectionLine,
@@ -66,6 +66,8 @@ import {
   markStopped,
   readStopped,
   rotateServeLog,
+  PAIR_LABEL_RE,
+  CREDENTIAL_ID_RE,
   // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
 } from '../packaging/npm/centralu/bin/serve.mjs'
 // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
@@ -148,6 +150,30 @@ describe('serve arguments', () => {
 })
 
 describe('the data folder and the state file', () => {
+  it('lists exactly the full credentials the host takes: an entry nothing would list opens nothing (#1405)', () => {
+    // The two rules are one: what --pair and --revoke take is what the host's reader takes
+    expect(HOST_ID_RE.source).toBe(CREDENTIAL_ID_RE.source)
+    expect(HOST_LABEL_RE.source).toBe(PAIR_LABEL_RE.source)
+    const d = tempDir()
+    const key = 'k'.repeat(43)
+    const v = verifierOf('h'.repeat(43))
+    const entries = [
+      { id: 'aaaaaaaa', verifier: v, created: 1 },
+      { id: 'zz', label: 'hand', verifier: v, created: 1 },
+      { id: 'bbbbbbbb', label: 'with space', verifier: v, created: 1 },
+      { id: 'cccccccc', label: 'window', verifier: v, created: 1 },
+    ]
+    writeFileSync(join(d, SERVE_STATE_FILE), JSON.stringify({ v: 2, key, port: null, full: entries }))
+    const listed = (readServeState(d).full as { id: string }[]).map((e) => e.id)
+    expect(listed).toEqual(['cccccccc'])
+    expect(readFullCredentials(join(d, SERVE_STATE_FILE)).map((e) => e.id)).toEqual(listed)
+    // And the next write leaves the others out of the file
+    pairServe(d, 'hub:laptop')
+    const kept = (JSON.parse(readFileSync(join(d, SERVE_STATE_FILE), 'utf8')) as { full: { id: string }[] }).full.map((e) => e.id)
+    expect(kept).not.toContain('aaaaaaaa')
+    expect(kept).not.toContain('zz')
+  })
+
   it('is ~/.centralu unless CC_DATA_DIR says otherwise', () => {
     expect(serveDataDir({}, '/home/me')).toBe(join('/home/me', '.centralu'))
     expect(serveDataDir({ CC_DATA_DIR: '/srv/cc' }, '/home/me')).toBe('/srv/cc')

@@ -18,6 +18,25 @@ import { asObj } from '../json-value.js'
  * then names: the honest limit, docs/security-boundaries.md "The remote host".
  */
 
+/**
+ * What an entry must be for the host to take it (#1405): exactly what the launcher lists and `--revoke` takes
+ * (`serve-files.mjs` `parseServeState`, `serve-args.mjs` `CREDENTIAL_ID_RE` and `PAIR_LABEL_RE`), and what a hub's
+ * machine row shows. An entry written into the file by hand with no label or another id would otherwise open the
+ * host whole while nobody could see or withdraw it; listing is the whole defence against a pairing nobody asked for.
+ */
+export const CREDENTIAL_ID_RE = /^[0-9a-f]{8}$/
+export const CREDENTIAL_LABEL_RE = /^[A-Za-z0-9:._-]{1,80}$/
+const VERIFIER_RE = /^[0-9a-f]{64}$/
+
+/** Whether one entry of the file is a full credential this host takes (`CREDENTIAL_ID_RE`) */
+export function isListedEntry(f: Record<string, unknown>): f is { id: string; label: string; verifier: string } {
+  return (
+    typeof f.id === 'string' && CREDENTIAL_ID_RE.test(f.id) &&
+    typeof f.label === 'string' && CREDENTIAL_LABEL_RE.test(f.label) &&
+    typeof f.verifier === 'string' && VERIFIER_RE.test(f.verifier)
+  )
+}
+
 /** One full credential the host accepts: its id, for the proof (`prove.credential`), and its verifier */
 export type FullCredential = { id: string; verifier: string }
 
@@ -27,7 +46,8 @@ export function verifierOf(credential: string): string {
 }
 
 /**
- * The full credentials `serve.json` at `path` names, read now. An unreadable file (a writer replacing it on Windows) is
+ * The full credentials `serve.json` at `path` names, read now: each entry of the listed shape (`isListedEntry`), and
+ * no other. An unreadable file (a writer replacing it on Windows) is
  * tried again a few times; one that stays unreadable, or is not version 2, names none: a hello is then refused rather
  * than let in on a guess.
  */
@@ -44,7 +64,7 @@ export function readFullCredentials(path: string, read: (p: string) => string = 
     if (o.v !== 2 || !Array.isArray(o.full)) return []
     const full = o.full.flatMap((e: unknown) => {
       const f = asObj(e)
-      return typeof f.id === 'string' && typeof f.verifier === 'string' && /^[0-9a-f]{64}$/.test(f.verifier) ? [{ id: f.id, verifier: f.verifier }] : []
+      return isListedEntry(f) ? [{ id: f.id, verifier: f.verifier }] : []
     })
     lastRead.set(path, full)
     return full
