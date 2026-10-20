@@ -208,7 +208,7 @@ export const ORCHESTRATOR_TOOLS = [
     name: 'set_preferences',
     description:
       'Changes settings the window offers, as it does; give only what changes (get_preferences shows the values and the choices). ' +
-      'Turning on applyUpdatesWhenIdle asks the person first; the rest act at once.',
+      'Turning on applyUpdatesWhenIdle, or turning off the approval or error notification (or the sound while either notifies), asks the person first; the rest act at once.',
     schema: z
       .object({
         theme: z.string().optional().describe('A theme by id or name. It sets the dark or light side by its base and shows that side.'),

@@ -35,7 +35,8 @@ const SLEEP_CHOICES = 'a whole number of minutes, or "never"'
  * the method's own schema, and the same handler. What the window keeps for itself, or that widens what agents may do
  * (`sessionTools`, the agent ceiling, depth and models, trust, approval rules), has no field here.
  *
- * Reversible means no card, with one exception: "apply updates when idle" turned **on** asks first, in every preset. With
+ * Reversible means no card, with two exceptions. Turning off the notification for an approval or an error asks first (the
+ * two that tell the person a card waits), and so does the sound while either still notifies. And "apply updates when idle" turned **on** asks first, in every preset. With
  * it on, this computer installs a newer Centralu by itself and the window relaunches into it when nothing is busy, so
  * from then on code arrives without a later question; `update_centralu` never touches that switch for the same reason
  * (docs/agent-host.md §4.5). Turning it off, and every other switch, acts at once.
@@ -85,7 +86,7 @@ export class PreferencesFlow {
       `- Line height: ${p.lineHeight} (compact, normal, relaxed)`,
       `- Accent colour: ${p.accent === null ? 'none' : plainQuoted(p.accent, 80)}`,
       'Notifications (set_preferences notifications)',
-      `- Approval needed: ${onOff(notify.approval)}; error: ${onOff(notify.error)}; a session finishes out of sight: ${onOff(notify.done)}; every session finished: ${onOff(notify.allDone)}; even while the app is focused: ${onOff(notify.whenFocused)}; sound: ${onOff(notify.sound)}`,
+      `- Approval needed: ${onOff(notify.approval)}; error: ${onOff(notify.error)}; a session finishes out of sight: ${onOff(notify.done)}; every session finished: ${onOff(notify.allDone)}; even while the app is focused: ${onOff(notify.whenFocused)}; sound: ${onOff(notify.sound)}; turning the approval or error one off, or the sound while either notifies, asks the person`,
       'Background',
       sleep.status === 'fulfilled'
         ? `- Idle sessions sleep after: ${sleep.value.afterMinutes === null ? 'never' : `${sleep.value.afterMinutes} minutes`} (set_preferences idleSleepMinutes)`
@@ -150,7 +151,58 @@ export class PreferencesFlow {
       })
     }
     // The notification switches (#1306): only those named change, merged into the host's record one by one
-    const switches = Object.fromEntries(Object.entries(changes.notifications ?? {}).filter(([, v]) => v !== undefined))
+    const switches: Record<string, boolean> = Object.fromEntries(Object.entries(changes.notifications ?? {}).filter(([, v]) => v !== undefined))
+    /*
+     * Turning off what tells the person a card waits asks first: the orchestrator would be choosing what the person stops
+     * hearing about. That is the notification for an approval, the one for an error, and the sound, which is how both reach
+     * someone who is away (notices.ts alerts through the sound; the OS banner path does not reach them), so turning it off
+     * counts while an approval or an error would still notify. Turning them on, and every other switch, asks nothing. A
+     * denial keeps them notifying, and the other switches of the call still change. A switch already off is no change.
+     */
+    const stops = (['approval', 'error'] as const).filter((k) => switches[k] === false)
+    if (stops.length || switches.sound === false) {
+      let current: Partial<Record<'approval' | 'error' | 'sound', boolean>> = {}
+      try {
+        current = (await callWindow(rpc, 'prefs.get', {})).notifyPolicy ?? DEFAULT_NOTIFY_POLICY
+      } catch {
+        /* unread: treated as on, so it asks */
+      }
+      const turning = stops.filter((k) => current[k] !== false)
+      // One already off needs no write, and none is made: nothing the card did not name goes out after it
+      for (const k of stops) if (!turning.includes(k)) delete switches[k]
+      const muting = switches.sound === false && current.sound !== false
+      if (switches.sound === false && !muting) delete switches.sound
+      // What would still notify once the approved stops are made
+      const stays = (k: 'approval' | 'error') => (switches[k] === false ? false : current[k] !== false)
+      const silences = muting && (stays('approval') || stays('error'))
+      if (turning.length || silences) {
+        const names = turning.map((k) => (k === 'approval' ? '"awaiting approval"' : '"error"'))
+        const heard = turning.map((k) => (k === 'approval' ? 'an agent waits for your approval' : 'a session fails'))
+        const lost = turning.map((k) => (k === 'approval' ? 'an approval' : 'a failure'))
+        const stop = turning.length
+          ? `Stop the ${names.join(' and ')} ${turning.length === 1 ? 'notification' : 'notifications'}? Centralu would no longer show a notice or play a sound when ${heard.join(' or ')}, ` +
+            `so ${lost.join(' or ')} could go unnoticed while you are away. You can turn ${turning.length === 1 ? 'it' : 'them'} back on in Settings, Notifications.`
+          : ''
+        const sound = silences
+          ? turning.length
+            ? ' The sound is also turned off, and the sound is how an approval or an error reaches you when you are away.'
+            : 'Turn off the notification sound? The sound is how an approval or an error reaches you when you are away; without it they show a notice only, which you may not see. You can turn it back on in Settings, Notifications.'
+          : ''
+        const refused = await this.ask(
+          sessionId,
+          stop + sound,
+          signal,
+          turning.length === 0 ? 'the sound stays on' : turning.length === 1 && !silences ? 'it keeps notifying' : 'they keep notifying',
+        )
+        if (refused) {
+          failed.push(`Notifications: ${refused}`)
+          for (const k of turning) delete switches[k]
+          // With an approval or an error still notifying, the sound stays on too: off, it would silence them
+          if (muting && (current.approval !== false || current.error !== false)) delete switches.sound
+        }
+      }
+      // Neither notifies any more: the sound goes off with nothing to silence, and nothing asks
+    }
     if (Object.keys(switches).length) {
       await attempt('Notifications', async () => {
         const now = (await callWindow(rpc, 'prefs.set', { patch: { notifyPolicy: switches } })).notifyPolicy ?? DEFAULT_NOTIFY_POLICY
@@ -231,10 +283,10 @@ export class PreferencesFlow {
   }
 
   /** The preferences card, allow or deny only (`ORCHESTRATOR_CHANGE`): the refusal the orchestrator reads, or null once allowed */
-  private async ask(sessionId: string, question: string, signal?: AbortSignal): Promise<string | null> {
+  private async ask(sessionId: string, question: string, signal?: AbortSignal, stays = 'it stays off'): Promise<string | null> {
     const decision = await this.host.askHost(sessionId, { kind: 'other', about: ORCHESTRATOR_CHANGE, raw: question }, signal, { alwaysAsk: true })
-    if (decision === 'deny') return 'The person did not approve it, so it stays off. Do not ask again unless they tell you to.'
-    if (decision === null) return 'The card was withdrawn before the person answered, so nothing changed.'
+    if (decision === 'deny') return `The person did not approve it, so ${stays}. Do not ask again unless they tell you to.`
+    if (decision === null) return 'The card was withdrawn before the person answered, so that change was not made.'
     return null
   }
 }
