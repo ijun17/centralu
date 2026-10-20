@@ -21,8 +21,10 @@ export type MachineOps = {
   startHeldBack(id: string): string | null
   setAutoReconnect(id: string, autoReconnect: boolean): MachineInfo
   install(id: string): Promise<{ machine: MachineInfo; current: { version: string }; note?: string }>
-  /** `when: 'idle'`: waits until no session there is in a turn before it stops the host (#1399); `signal` ends the wait */
-  update(id: string, opts?: { when?: 'idle' | 'now'; signal?: AbortSignal }): Promise<{ machine: MachineInfo; current: { version: string }; note?: string }>
+  /** `when: 'idle'`: waits until no session there is in a turn before it stops the host (#1399), which can take hours */
+  update(id: string, opts?: { when?: 'idle' | 'now' }): Promise<{ machine: MachineInfo; current: { version: string }; note?: string }>
+  /** For tests: how long an install or update call is waited for before it is answered as still under way (`UPDATE_ANSWER_MS` when absent) */
+  updateAnswerMs?: number
   /** What would stop there if its host stopped now (`host.activity`); null when the machine cannot say */
   activity(id: string): Promise<HostActivity | null>
   autostart(id: string, on?: boolean): Promise<{ machine: MachineInfo; autostart: { on: boolean; how: string | null; linger: boolean | null } }>
@@ -36,6 +38,9 @@ export type MachineAnswer = { ok: true; text: string } | { ok: false; error: str
 
 /** What the machine commands reach of the session manager: its cards */
 export type MachineFlowHost = Pick<HostCards, 'askHost'>
+
+/** How long install_machine waits for the install or update before it answers that it is still under way (#1399) */
+const UPDATE_ANSWER_MS = 200_000
 
 /** A linked machine's status in words (#1220); a status this build does not name reads as itself */
 const MACHINE_STATUS: Record<string, string> = {
@@ -182,9 +187,10 @@ export class MachineFlow {
           const version = m.versions?.hub.version ? `Centralu ${m.versions.hub.version}` : "this computer's Centralu"
           /*
            * An update never stops a turn that runs there on the orchestrator's say (#1399): with sessions in a turn the card says so
-           * and Allow means "update when idle" (the call waits, and ends if it is cancelled). Forcing it is the person's, from Settings
+           * and Allow means "update when idle". Forcing it is the person's, from Settings
            */
-          const running = req.action === 'update' ? turnsRunning(await ops.activity(m.id).catch(() => null)) : 0
+          const seen = req.action === 'update' ? await ops.activity(m.id).catch(() => null) : null
+          const running = turnsRunning(seen)
           const refused = await this.ask(
             sessionId,
             req.action === 'install'
@@ -192,14 +198,32 @@ export class MachineFlow {
                   "release's pins, beside what is installed. A Centralu running there keeps running until it next starts."
               : running > 0
                 ? `Update ${m.name} (${m.sshTarget}, ${osOf(m)}) to ${version} when it is idle? ${running} ${running === 1 ? 'session is' : 'sessions are'} in a turn there, so the update ` +
-                  'installs beside the running Centralu and waits until they are done; it stops nothing before that, and this call waits too. Then it stops the Centralu there ' +
+                  `installs beside the running Centralu and waits until ${running === 1 ? 'it is' : 'they are'} done; it stops nothing before that, and the call is answered while it waits. Then it stops the Centralu there ` +
                   '(its agents end and resume on the new one), starts the new one, and puts the old one back if it does not answer in 30 s.'
-                : `Update ${m.name} (${m.sshTarget}, ${osOf(m)}) to ${version}? It installs beside the running one, stops the Centralu there (its agents end ` +
-                  'and resume on the new one; no turn is running there now, and if one starts the update waits for it), starts the new one, and puts the old one back if it does not answer in 30 s.',
+                : seen
+                  ? `Update ${m.name} (${m.sshTarget}, ${osOf(m)}) to ${version}? It installs beside the running one, stops the Centralu there (its agents end ` +
+                    'and resume on the new one; no turn is running there now, and if one starts the update waits for it), starts the new one, and puts the old one back if it does not answer in 30 s.'
+                  : `Update ${m.name} (${m.sshTarget}, ${osOf(m)}) to ${version}? It installs beside the running one, stops the Centralu there (its agents end ` +
+                    'and resume on the new one; what runs there could not be read, so a turn in progress may be lost), starts the new one, and puts the old one back if it does not answer in 30 s.',
             signal,
           )
           if (refused) return { ok: false, error: refused }
-          const r = req.action === 'install' ? await ops.install(m.id) : await ops.update(m.id, { when: 'idle', signal })
+          /*
+           * Answered when it is done, or while it still runs (#1399): a wait for sessions can last hours, and a tool call that long is
+           * cut by its caller (the Codex bridge at 280 s) while the update goes on unannounced. The update goes on; list_machines shows
+           * it, and the person can cancel the wait from Settings
+           */
+          const run = req.action === 'install' ? ops.install(m.id) : ops.update(m.id, { when: 'idle' })
+          const waited = ops.updateAnswerMs ?? UPDATE_ANSWER_MS
+          const r = await Promise.race([run, new Promise<null>((resolve) => setTimeout(() => resolve(null), waited).unref?.())])
+          if (!r) {
+            run.catch(() => undefined)
+            return done(
+              `${req.action === 'install' ? 'Installing' : 'Updating'} ${m.name} is still under way${req.action === 'update' ? ' (it installs beside, then waits until no session there is in a turn, and stops none)' : ''}. ` +
+                'It goes on without this call; list_machines shows where it stands. The person can cancel the wait in Settings, Machines.',
+              ops.list().find((x) => x.id === m.id) ?? m,
+            )
+          }
           return done(`${req.action === 'install' ? 'Installed' : 'Updated to'} Centralu ${r.current.version} on ${m.name}.${r.note ? ` ${r.note}` : ''}`, r.machine)
         }
         case 'autostart': {

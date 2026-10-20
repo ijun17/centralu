@@ -206,7 +206,7 @@ function StopConfirm({ m, action, onCancel, onConfirm }: { m: MachineInfo; actio
   // An update with sessions in a turn there waits for them (#1399); stopping them is a second, plain choice
   const waits = action === 'Update' && activity !== undefined ? updateWaits(m.name, activity) : null
   return (
-    <>
+    <div className="space-y-1">
       <InlineConfirm
         text={activity === undefined ? `Asking ${m.name} what is running…` : (waits ?? updateStops(m.name, activity).replace(/^Updating/, action))}
         yesLabel={waits ? 'Update when idle' : action}
@@ -222,7 +222,7 @@ function StopConfirm({ m, action, onCancel, onConfirm }: { m: MachineInfo; actio
           Update now, stopping them
         </button>
       )}
-    </>
+    </div>
   )
 }
 

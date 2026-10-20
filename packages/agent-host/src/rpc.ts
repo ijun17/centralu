@@ -117,7 +117,7 @@ export type MachinesPort = {
   needs(id: string): MachineInfo
   acceptVersions(id: string): MachineInfo
   install(id: string): Promise<MachineInstallResult>
-  update(id: string, opts?: { when?: 'idle' | 'now'; signal?: AbortSignal }): Promise<MachineInstallResult>
+  update(id: string, opts?: { when?: 'idle' | 'now' }): Promise<MachineInstallResult>
   /** Ends an update's wait for the sessions there to finish (#1399) */
   cancelUpdate(id: string): MachineInfo
   rollback(id: string): Promise<MachineInstallResult>

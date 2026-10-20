@@ -1424,11 +1424,19 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
   }
 
   /** A hub with a remote whose sessions are in a turn (`activity`, changed by the test), recording what ran there */
-  async function waiting(o: { noActivity?: boolean } = {}) {
+  async function waiting(o: { noActivity?: boolean; script?: Partial<HostActivity>[]; fails?: boolean } = {}) {
     const reg = await fakeRegistry(['centralu', '@centralu/linux-x64'].map((name) => ({ name, version: APP_VERSION, files: { 'package.json': '{}' } })))
     cleanups.push(() => reg.close())
     const activity: HostActivity = { working: 2, approvals: 1, questions: 0, background: 0, terminals: 1, commandRuns: 0 }
-    let running = await remoteHost(0, new Store(), { version: '0.0.1', ...(o.noActivity ? {} : { activity: () => activity }) })
+    /** How many times the remote was asked what runs, and how many when the host was stopped */
+    let reads = 0
+    let readsAtStop = -1
+    const asked = (): HostActivity => {
+      if (o.fails) throw new Error('the host could not count')
+      const step = o.script?.[Math.min(reads++, o.script.length - 1)]
+      return step ? { ...activity, working: 0, approvals: 0, questions: 0, background: 0, ...step } : activity
+    }
+    let running = await remoteHost(0, new Store(), { version: '0.0.1', ...(o.noActivity ? {} : { activity: asked }) })
     let line = lineFor(running.port, { version: '0.0.1' })
     const runs: string[] = []
     const old = { version: '0.0.1', node: NODE }
@@ -1446,6 +1454,7 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
         case 'install_beside':
           return out(done({ installed: next, current: old, previous: null, removed: [], left: [] }))
         case 'stop':
+          readsAtStop = reads
           await running.close()
           line = { ...line, hostRunning: false }
           return out('{"v":1,"stop":{"ok":true,"wasRunning":true,"how":"asked"}}\n')
@@ -1474,7 +1483,7 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
         .events()
         .filter((e) => e.type === 'machine_status' && e.machine.operation)
         .map((e) => e.machine.operation.step as string)
-    return { hub, u, runs, activity, idle, stepsSeen, ran: () => runs.filter((k) => k !== 'open') }
+    return { hub, u, runs, activity, idle, stepsSeen, ran: () => runs.filter((k) => k !== 'open'), readsAtStop: () => readsAtStop }
   }
 
   it('installs beside, then waits while sessions are in a turn, and stops the host only once none is', async () => {
@@ -1545,6 +1554,37 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
     const { u, idle } = await waiting()
     idle()
     expect((await u.call('machines.update', { machineId: 'm1', when: 'now' })).note).toBeUndefined()
+  })
+
+  // The stop takes seconds, and a turn that began in them would end with it: the last reading is taken twice
+  it('reads what runs once more right before it stops the host, and keeps waiting when a turn began meanwhile', async () => {
+    // Idle, then a turn, then idle twice: it stops only after the second quiet pair
+    const { u, ran, readsAtStop } = await waiting({ script: [{}, { working: 1 }, {}, {}] })
+    await u.call('machines.update', { machineId: 'm1' })
+    expect(ran()).toContain('stop')
+    expect(readsAtStop()).toBeGreaterThanOrEqual(4)
+  })
+
+  it('does not wait for a host whose answer fails, once it has read it again twice', async () => {
+    const { u, ran, stepsSeen } = await waiting({ fails: true })
+    await u.call('machines.update', { machineId: 'm1' })
+    expect(ran()).toContain('stop')
+    expect(stepsSeen()).not.toContain('wait_idle')
+  })
+
+  it('ends the wait when the machine is removed meanwhile, saying so, and nothing was switched', async () => {
+    const { u, ran, stepsSeen } = await waiting()
+    const call = u.call('machines.update', { machineId: 'm1' })
+    const failed = expect(call).rejects.toThrow(/ended while it waited for the sessions there to finish, since the machine was removed or the hub stopped; nothing was switched/)
+    await eventually(() => stepsSeen().includes('wait_idle'))
+    await u.call('machines.remove', { machineId: 'm1' })
+    await failed
+    expect(ran()).not.toContain('stop')
+  })
+
+  it('says so when no update waits to be cancelled', async () => {
+    const { u } = await waiting()
+    await expect(u.call('machines.cancelUpdate', { machineId: 'm1' })).rejects.toThrow(/No update is waiting for the sessions on Remote box to finish/)
   })
 
   it('does not wait for a host that cannot say what runs (from before host.activity), as before', async () => {

@@ -115,10 +115,14 @@ export const machineActions = (set: StoreSet, get: StoreGet): MachineActions => 
     try {
       const r = kind === 'update' ? await port.update(machineId, when ? { when } : undefined) : await port[kind](machineId)
       set((s) => ({ machines: withAnswered(s.machines, r.machine) }))
+      // What an update that stopped working turns says it ended (#1399)
+      if (kind === 'update' && 'note' in r && r.note) set({ toast: r.note })
       return true
     } catch (e) {
       const what = { install: 'Install', update: 'Update', rollback: 'Rollback', uninstall: 'Uninstall' }[kind]
-      set({ toast: `${what} failed: ${(e as Error).message}` })
+      // An update that waits for sessions can outlast the call: the row says where it is (#1399)
+      if (kind === 'update' && /timed out/i.test(errorMessage(e))) set({ toast: 'The update is still under way; the machine\'s row shows where it is' })
+      else set({ toast: `${what} failed: ${errorMessage(e)}` })
       return false
     }
   },

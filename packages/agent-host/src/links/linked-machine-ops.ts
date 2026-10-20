@@ -1,4 +1,4 @@
-import { HostActivity, isNewerVersion, releaseOf, turnsRunning } from '@cc/protocol'
+import { errorMessage, HostActivity, isNewerVersion, releaseOf, turnsRunning } from '@cc/protocol'
 import type { MachineAutostartResult, MachineInstallResult, MachineOperation, MachineUninstallResult } from '@cc/protocol'
 import { autostartRemote } from './autostart.js'
 import { installRemote, type InstallResult } from './install.js'
@@ -20,6 +20,27 @@ const linkError = (message: string) => rpcError(message)
 
 /** How often an update that waits for the sessions there to finish reads what is running (#1399) */
 const ACTIVITY_POLL_MS = 15_000
+/** How long after a reading that says none is in a turn it is read once more, right before the host is stopped (#1399) */
+const ACTIVITY_SETTLE_MS = 3_000
+/** How many times a reading that failed is repeated before the update stops waiting for what it cannot see (#1399) */
+const ACTIVITY_UNREAD_RETRIES = 2
+
+/** Waits `ms`, or until `signal` aborts (and then throws its reason) */
+function pause(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) return reject(signal.reason)
+    const t = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    t.unref?.()
+    function onAbort() {
+      clearTimeout(t)
+      reject(signal.reason)
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
+}
 
 export class LinkedMachine extends LinkedMachineConnection {
   /** One install, update, rollback, uninstall or start-at-boot change at a time per machine (`begin`; the remote also holds `install.lock`) */
@@ -60,10 +81,9 @@ export class LinkedMachine extends LinkedMachineConnection {
 
   /**
    * `machines.update` (update.ts, plan §10.5): install beside, wait until no turn runs there (`when: 'idle'`, the default, #1399),
-   * stop, switch, start, check, or put back. `when: 'now'`: no wait, the turns running are stopped and the answer says so.
-   * `signal`: ends the wait (an orchestrator's call that was cancelled)
+   * stop, switch, start, check, or put back. `when: 'now'`: no wait, the turns running are stopped and the answer says so
    */
-  async update(opts: { when?: 'idle' | 'now'; signal?: AbortSignal } = {}): Promise<MachineInstallResult> {
+  async update(opts: { when?: 'idle' | 'now' } = {}): Promise<MachineInstallResult> {
     const pick = await this.versionToInstall()
     // Never down: a local build whose base is unpublished may be handed an older release than the remote runs. A dev
     // build put there from a commit (`<base>.local.N`, `pnpm remote-dev`, #1036) going back to its own release is no downgrade
@@ -73,7 +93,7 @@ export class LinkedMachine extends LinkedMachineConnection {
     }
     return this.operate('update', pick.version, async (c, installer) => {
       if (pick.note) this.deps.log?.(`[links] ${this.name}: ${pick.note}`)
-      c.beforeStop = () => this.beforeStop(c, opts.when ?? 'idle', opts.signal)
+      c.beforeStop = () => this.beforeStop(c, opts.when ?? 'idle')
       const r = await updateRemote(c, {
         version: pick.version,
         runtime: installer.runtime(),
@@ -86,21 +106,32 @@ export class LinkedMachine extends LinkedMachineConnection {
     })
   }
 
-  /** The update waits for the sessions there to finish; `cancelUpdate` and an orchestrator's cancelled call end the wait */
+  /** The update waits for the sessions there to finish; `cancelUpdate`, a removed machine and the hub stopping end the wait */
   private idleWait: AbortController | null = null
 
-  /** `machines.cancelUpdate` (#1399): ends the wait for the sessions there; the update fails and nothing was switched */
-  cancelUpdate(): void {
-    this.idleWait?.abort(new Error(`The update of ${this.name} was cancelled while it waited for the sessions there to finish; nothing was switched`))
+  /** `machines.cancelUpdate` (#1399): ends the wait for the sessions there; the update fails and nothing was switched. False when none waits */
+  cancelUpdate(): boolean {
+    const wait = this.idleWait
+    if (!wait) return false
+    wait.abort(new Error(`The update of ${this.name} was cancelled while it waited for the sessions there to finish; nothing was switched`))
+    return true
+  }
+
+  /** Removed, or the hub stopping: nothing waits for sessions of a machine that is gone */
+  override async stop(): Promise<void> {
+    this.idleWait?.abort(new Error(`The update of ${this.name} ended while it waited for the sessions there to finish, since the machine was removed or the hub stopped; nothing was switched`))
+    await super.stop()
   }
 
   /**
-   * Before the running host is stopped (#1399). `idle`: waits until no session there is in a turn, reading what is running
-   * every `ACTIVITY_POLL_MS` (the row says `wait_idle` meanwhile). A machine that cannot say what is running is not waited
-   * for when its link is up (a host from before `host.activity`), and is when the link is away (it may come back). `now`:
-   * stops at once, and the answer says how many turns that ended
+   * Before the running host is stopped (#1399). `idle`: waits until no session there is in a turn, reading what is running every
+   * `ACTIVITY_POLL_MS` (the row says `wait_idle` meanwhile). Once a reading says none, it is read again a few seconds later, right
+   * before the host is held and stopped: the stop takes seconds, and a turn that began in them would end with it. A machine that
+   * cannot be asked at all (a host from before `host.activity`, a link held on another protocol) is not waited for, and one whose
+   * answer failed is read again twice, then not waited for either: waiting on what cannot be seen would never end. `now`: stops
+   * at once, and the answer says how many turns that ended
    */
-  private async beforeStop(c: HostControl, when: 'idle' | 'now', signal?: AbortSignal): Promise<string | null> {
+  private async beforeStop(c: HostControl, when: 'idle' | 'now'): Promise<string | null> {
     if (when === 'now') {
       const running = turnsRunning(await this.activity())
       if (running === 0) return null
@@ -110,33 +141,44 @@ export class LinkedMachine extends LinkedMachineConnection {
     }
     const wait = new AbortController()
     this.idleWait = wait
-    const stop = () => wait.abort(signal?.reason ?? new Error(`The update of ${this.name} was cancelled while it waited for the sessions there to finish; nothing was switched`))
-    if (signal?.aborted) stop()
-    signal?.addEventListener('abort', stop, { once: true })
+    const poll = this.deps.activityPollMs ?? ACTIVITY_POLL_MS
+    const settle = Math.min(poll, ACTIVITY_SETTLE_MS)
+    /** Reads what runs; throws the reason when the wait was ended while the reading was out */
+    const read = async () => {
+      wait.signal.throwIfAborted()
+      const r = await this.readActivity()
+      wait.signal.throwIfAborted()
+      return r
+    }
     try {
       let said = false
+      let blind = 0
       for (;;) {
-        wait.signal.throwIfAborted()
-        const a = await this.activity()
-        const running = a ? turnsRunning(a) : this.reachable ? 0 : 1
-        if (running === 0) return null
-        if (!said) {
-          said = true
-          c.step('wait_idle')
-          this.deps.log?.(`[links] ${this.name}: the update waits for ${a ? `${running} ${running === 1 ? 'session' : 'sessions'} in a turn` : 'the link to come back'}`)
-        }
-        await new Promise<void>((resolve) => {
-          const t = setTimeout(done, this.deps.activityPollMs ?? ACTIVITY_POLL_MS)
-          t.unref?.()
-          wait.signal.addEventListener('abort', done, { once: true })
-          function done() {
-            clearTimeout(t)
-            resolve()
+        const r = await read()
+        if (!r.activity) {
+          if (r.cannot || ++blind > ACTIVITY_UNREAD_RETRIES) {
+            this.deps.log?.(`[links] ${this.name}: it cannot be told what runs there, so the update does not wait for it`)
+            return null
           }
-        })
+        } else {
+          blind = 0
+          const running = turnsRunning(r.activity)
+          if (running === 0) {
+            await pause(settle, wait.signal)
+            const again = await read()
+            if (!again.activity || turnsRunning(again.activity) === 0) {
+              if (said) c.step('stop')
+              return null
+            }
+          } else if (!said) {
+            said = true
+            c.step('wait_idle')
+            this.deps.log?.(`[links] ${this.name}: the update waits for ${running} ${running === 1 ? 'session' : 'sessions'} in a turn`)
+          }
+        }
+        await pause(poll, wait.signal)
       }
     } finally {
-      signal?.removeEventListener('abort', stop)
       if (this.idleWait === wait) this.idleWait = null
     }
   }
@@ -237,16 +279,25 @@ export class LinkedMachine extends LinkedMachineConnection {
    * protocol, through a short connection of its own. Null when the machine cannot say
    */
   activity(): Promise<HostActivity | null> {
-    const read = (r: unknown): HostActivity | null => {
+    return this.readActivity().then((r) => r.activity)
+  }
+
+  /**
+   * `activity`, and whether a null is final (#1399): `cannot` when the machine cannot be asked at all (no way to reach its host, the
+   * link held on another protocol, a host from before `host.activity`), as against an answer that failed, which may be asked again
+   */
+  private readActivity(): Promise<{ activity: HostActivity | null; cannot: boolean }> {
+    const read = (r: unknown): { activity: HostActivity | null; cannot: boolean } => {
       const p = HostActivity.safeParse(r)
-      return p.success ? p.data : null
+      return { activity: p.success ? p.data : null, cannot: false }
     }
-    if (this.client?.connected) return this.client.call('host.activity', {}).then(read, () => null)
+    const failed = (err: unknown) => ({ activity: null, cannot: /^Unknown method/.test(errorMessage(err)) })
+    if (this.client?.connected) return this.client.call('host.activity', {}).then(read, failed)
     const e = this.endpoint
-    if (!e?.url || this.versions?.compatible === false || this.held) return Promise.resolve(null)
+    if (!e?.url || this.versions?.compatible === false || this.held) return Promise.resolve({ activity: null, cannot: true })
     return new Promise((resolve) => {
       let settled = false
-      const done = (v: HostActivity | null) => {
+      const done = (v: { activity: HostActivity | null; cannot: boolean }) => {
         if (settled) return
         settled = true
         clearTimeout(timer)
@@ -255,9 +306,9 @@ export class LinkedMachine extends LinkedMachineConnection {
       }
       const client = new RemoteClient(
         { ...this.deps.client, url: e.url, token: e.token, proveHost: e.line.proof === true, handshakeTimeoutMs: 5_000, callTimeoutMs: 5_000 },
-        { hello: () => void client.call('host.activity', {}).then(read, () => null).then(done), refused: () => done(null) },
+        { hello: () => void client.call('host.activity', {}).then(read, failed).then(done), refused: () => done({ activity: null, cannot: false }) },
       )
-      const timer = setTimeout(() => done(null), 8_000)
+      const timer = setTimeout(() => done({ activity: null, cannot: false }), 8_000)
       client.connect()
     })
   }

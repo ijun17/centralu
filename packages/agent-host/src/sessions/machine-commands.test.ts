@@ -61,6 +61,8 @@ function fakeOps() {
   let refusal: string | null = null
   /** Why the hub starts no host on the first machine just now (#1143), or null */
   let heldBack: string | null = null
+  /** How long an update takes, to be answered while it still runs (#1399) */
+  let slowUpdateMs = 0
   /** What the machines report as running (#1399): nothing, until a test says so */
   let activity: HostActivity | null = { working: 0, approvals: 0, questions: 0, background: 0, terminals: 0, commandRuns: 0 }
   const find = (id: string) => machines.find((m) => m.id === id)!
@@ -100,6 +102,7 @@ function fakeOps() {
     },
     update: async (id, opts) => {
       calls.push(opts?.when ? ['update', id, opts.when] : ['update', id])
+      if (slowUpdateMs > 0) await new Promise((r) => setTimeout(r, slowUpdateMs))
       return { machine: find(id), current: { version: '9.9.9-test.1' } }
     },
     activity: async () => activity,
@@ -124,6 +127,10 @@ function fakeOps() {
     patch: (over: Partial<MachineInfo>) => void Object.assign(machines[0]!, over),
     holdBack: (why: string | null) => {
       heldBack = why
+    },
+    slowUpdate: (ms: number, answerMs: number) => {
+      slowUpdateMs = ms
+      o.updateAnswerMs = answerMs
     },
     running: (a: Partial<HostActivity> | null) => {
       activity = a && { working: 0, approvals: 0, questions: 0, background: 0, terminals: 0, commandRuns: 0, ...a }
@@ -301,6 +308,7 @@ describe('install_machine', () => {
     expect(update.question).toContain('when it is idle?')
     expect(update.question).toContain('4 sessions are in a turn there')
     expect(update.question).toContain('waits until they are done; it stops nothing before that')
+    expect(update.question).toContain('the call is answered while it waits')
     expect(update.question).not.toContain('a turn in progress is lost')
     expect(ops.changes()).toEqual([['update', 'laptop', 'idle']])
   })
@@ -310,16 +318,32 @@ describe('install_machine', () => {
     const orc = await mgr.orchestrator()
     const { question, r } = await answered(orc.id, 'install_machine', { machine: 'laptop', action: 'update' }, 'deny')
     expect(question).toContain('1 session is in a turn there')
+    expect(question).toContain('waits until it is done;')
     expect(r.isError).toBe(true)
     expect(ops.changes()).toEqual([])
   })
 
-  it('updates as before when the machine cannot say what runs there, and terminals alone are no turn', async () => {
+  it('updates as before when the machine cannot say what runs there, and says it could not be read; terminals alone are no turn', async () => {
     ops.running(null)
     const orc = await mgr.orchestrator()
-    expect((await answered(orc.id, 'install_machine', { machine: 'laptop', action: 'update' }, 'allow')).question).not.toContain('when it is idle?')
+    const unknown = (await answered(orc.id, 'install_machine', { machine: 'laptop', action: 'update' }, 'allow')).question
+    expect(unknown).not.toContain('when it is idle?')
+    expect(unknown).toContain('what runs there could not be read, so a turn in progress may be lost')
     ops.running({ terminals: 3, commandRuns: 2 })
-    expect((await answered(orc.id, 'install_machine', { machine: 'laptop', action: 'update' }, 'allow')).question).not.toContain('when it is idle?')
+    const quiet = (await answered(orc.id, 'install_machine', { machine: 'laptop', action: 'update' }, 'allow')).question
+    expect(quiet).not.toContain('when it is idle?')
+    expect(quiet).toContain('no turn is running there now')
+  })
+
+  it('answers while an update is still under way, since the wait for sessions can last hours and its caller would cut the call', async () => {
+    ops.running({ working: 2 })
+    ops.slowUpdate(400, 60)
+    const orc = await mgr.orchestrator()
+    const { r } = await answered(orc.id, 'install_machine', { machine: 'laptop', action: 'update' }, 'allow')
+    expect(r.isError).toBeFalsy()
+    expect(r.text).toContain('Updating Laptop is still under way (it installs beside, then waits until no session there is in a turn, and stops none).')
+    expect(r.text).toContain('list_machines shows where it stands')
+    expect(ops.changes()).toEqual([['update', 'laptop', 'idle']])
   })
 
   it('runs nothing when the person denies it', async () => {
