@@ -121,9 +121,16 @@
       "why": "messages between UI, host and linked machines of different versions: additions only, and a mistake reaches every pair"
     },
     {
+      "id": "lint-allowlist",
+      "tier": "light",
+      "paths": ["tooling/lint-allowlist/*.txt"],
+      "why": "the type-aware lint's lists of findings that predate it (#1339): every conversion edits them, and what keeps them shrinking is deep (tooling/lint-allowlist.ts, tooling/type-aware-lint.test.ts, which compares them with main's)"
+    },
+    {
       "id": "guards",
       "tier": "deep",
       "paths": ["tooling/**"],
+      "except": ["tooling/lint-allowlist/*.txt"],
       "why": "the repository-wide guards and the test, lint and type setup every change is checked by: a weakened guard lets every later change through"
     },
     {
