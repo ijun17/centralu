@@ -80,10 +80,60 @@ const isTest = (file: string) => /\.test\.tsx?$/.test(file) || file.endsWith('te
 const isSource = (file: string) => /\.(tsx?|mts)$/.test(file) && !file.endsWith('.d.ts') && !file.includes('/adapters/codex/generated/')
 
 function filesUnder(dir: string): string[] {
-  if (!existsSync(join(ROOT, dir))) return []
-  return readdirSync(join(ROOT, dir), { recursive: true, encoding: 'utf8' })
-    .map((entry) => relative(ROOT, join(ROOT, dir, entry)).split(sep).join('/'))
-    .filter((file) => !file.includes('/node_modules/') && isSource(file))
+  const at = join(ROOT, dir)
+  const entries = walkAgainIfVanished(() => readdirSync(at, { recursive: true, encoding: 'utf8' }), () => existsSync(at))
+  return entries.map((entry) => relative(ROOT, join(at, entry)).split(sep).join('/')).filter((file) => !file.includes('/node_modules/') && isSource(file))
+}
+
+/** An error saying a path is not there (any more): not one saying it is there but cannot be read */
+const vanished = (e: unknown) => typeof e === 'object' && e !== null && 'code' in e && (e.code === 'ENOENT' || e.code === 'ENOTDIR')
+
+/**
+ * A walk of a folder while other test files make and remove folders in it: walked again (up to three times) when
+ * something in it vanished mid-walk, nothing when the folder itself is gone. Any other failure fails it.
+ */
+function walkAgainIfVanished(walk: () => string[], folderThere: () => boolean): string[] {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return walk()
+    } catch (e) {
+      if (!vanished(e)) throw e
+      if (!folderThere()) return []
+      if (attempt >= 3) throw e
+    }
+  }
+}
+
+/**
+ * A file's text, or null when it went away since it was listed. A file that is there but cannot be read (locked,
+ * no permission) fails the scan rather than passing unchecked.
+ */
+function readIfThereOf(file: string, read: (file: string) => string, there: (file: string) => boolean): string | null {
+  try {
+    return read(file)
+  } catch (e) {
+    if (vanished(e) && !there(file)) return null
+    throw e
+  }
+}
+const readIfThere = (file: string) =>
+  readIfThereOf(
+    file,
+    (f) => readFileSync(join(ROOT, f), 'utf8'),
+    (f) => existsSync(join(ROOT, f)),
+  )
+
+/**
+ * The comments that switch a type-aware rule off, in these files. Only a file whose text names `eslint` can hold one,
+ * so only those are parsed (a few dozen of some two thousand); a file that went away since it was listed is passed
+ * by (`readIfThere`), as other test files make and remove files in the tree while this runs.
+ */
+function scanComments(files: readonly string[], read: (file: string) => string | null, check: (file: string, code: string) => string[]): string[] {
+  return files.flatMap((file) => {
+    const code = read(file)
+    if (code === null || !code.includes(E)) return []
+    return check(file, code).map((what) => `${file}: ${what}`)
+  })
 }
 
 /** packages/*\/src and apps/*\/src: what ships */
@@ -239,11 +289,41 @@ describe('type-aware lint (#1339)', () => {
   it(
     'turns no type-aware rule off with a comment',
     () => {
-      const found = typedFiles().flatMap((file) => forbiddenComments(file, readFileSync(join(ROOT, file), 'utf8')).map((what) => `${file}: ${what}`))
+      const found = scanComments(typedFiles(), readIfThere, forbiddenComments)
       expect(found, 'check the value (a zod schema, a guard) instead of switching the rule off').toEqual([])
     },
     30_000 * SLOW,
   )
+
+  it('passes by a file that went away while it scanned, and parses only files that name eslint', () => {
+    const texts: Record<string, string> = { 'a.ts': `// ${D}-next-line @typescript-eslint/no-unsafe-call\nconst a = 1`, 'b.ts': 'const b = 1' }
+    const parsed: string[] = []
+    const fail = (code: string) => () => {
+      throw Object.assign(new Error(`${code}: on purpose`), { code })
+    }
+    const read = (file: string) => (file === 'gone.ts' ? readIfThereOf(file, fail('ENOENT'), () => false) : (texts[file] ?? null))
+    const check = (file: string, code: string) => {
+      parsed.push(file)
+      return forbiddenComments(file, code)
+    }
+    expect(scanComments(['a.ts', 'gone.ts', 'b.ts'], read, check)).toEqual([`a.ts: ${D} @typescript-eslint/no-unsafe-call`])
+    expect(parsed).toEqual(['a.ts'])
+    // A file that is there but cannot be read fails the scan, as does any other failure
+    expect(() => readIfThereOf('x.ts', fail('EBUSY'), () => true)).toThrow('EBUSY')
+    expect(() => readIfThereOf('x.ts', fail('ENOENT'), () => true)).toThrow('ENOENT')
+    expect(() => readIfThereOf('x.ts', fail('EISDIR'), () => false)).toThrow('EISDIR')
+  })
+
+  it('walks a folder again when something in it vanished mid-walk, three times at most', () => {
+    const gone = Object.assign(new Error('ENOENT: on purpose'), { code: 'ENOENT' })
+    let walks = 0
+    expect(walkAgainIfVanished(() => (++walks < 2 ? (() => { throw gone })() : ['a.ts']), () => true)).toEqual(['a.ts'])
+    expect(walks).toBe(2)
+    expect(() => walkAgainIfVanished(() => { throw gone }, () => true)).toThrow('ENOENT')
+    // The folder itself gone: nothing in it
+    expect(walkAgainIfVanished(() => { throw gone }, () => false)).toEqual([])
+    expect(() => walkAgainIfVanished(() => { throw Object.assign(new Error('EACCES'), { code: 'EACCES' }) }, () => true)).toThrow('EACCES')
+  })
 
   it('finds every comment that would switch a type-aware rule off, and only those', () => {
     const f = (code: string) => forbiddenComments('x.ts', code)
