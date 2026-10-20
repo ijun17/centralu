@@ -117,6 +117,39 @@ it("leaves a restored held report to the link's resync, so a link slow to come u
   }
 })
 
+// #1342: the stored side of the person's message ending a paused report, across a hub swap
+it("a hub swap keeps a paused report ended by the person's message ended: one notice, the stored record cleared, no later report", async () => {
+  const delivered: string[] = []
+  const reports = new LinkedReports({
+    children,
+    linkedReader: { describe: () => ({ name: 'Child', project: 'app' }), lastWords: async () => ({ ok: true as const, text: '', length: 0, seq: null }) } as unknown as LinkedSessions,
+    hasSession: () => true,
+    closing: false,
+    deliverReport: async (_to: string, sessionId: string) => void delivered.push(sessionId),
+  } as unknown as LinkedReportsHost)
+  store.settings.setAppSetting(REMOTE_AGENTS_KEY, JSON.stringify([{ ...child, owed: { paused: [task] } }]))
+  // The next host: the paused report is owed again from the store
+  const ra = agents()
+  ra.restore()
+  expect(children.linkedReports.get(child.sessionId)?.paused).toEqual([task])
+  // The person writes there: the host reads the event with the child's rule first, then the linked reports (`observeLinked`)
+  const person = { type: 'user_message', sessionId: child.sessionId, seq: 3, text: '/compact' }
+  ra.observe(person)
+  reports.observe(person)
+  await new Promise((r) => setTimeout(r, 20))
+  expect(told.length + delivered.length).toBe(1)
+  expect(children.linkedReports.has(child.sessionId)).toBe(false)
+  expect(JSON.parse(store.settings.appSetting(REMOTE_AGENTS_KEY) ?? '[]')[0].owed).toBeUndefined()
+  // Their turn fails: nothing more is reported
+  for (const e of [{ type: 'state_change', sessionId: child.sessionId, state: 'working' }, { type: 'error', sessionId: child.sessionId, error: { message: 'compact crashed' } }]) {
+    ra.observe(e)
+    reports.observe(e)
+  }
+  await new Promise((r) => setTimeout(r, 20))
+  expect(told.length + delivered.length).toBe(1)
+  reports.dispose()
+})
+
 // #1038 review (RV12): on the link's return, a turn the person ran there meanwhile was reported as the caller's answer
 /**
  * Whose turn runs on the child's machine (#1038 review, RV12): only one that took the instruction this hub sent, and

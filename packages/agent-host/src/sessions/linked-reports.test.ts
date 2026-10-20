@@ -306,28 +306,6 @@ describe('the person writes to a session whose report is paused there (#1342)', 
     await flush()
     expect(delivered).toHaveLength(1)
   })
-
-  it("a host swap owes nothing of it: the next host holds no wait, and the person's failed turn there reports nothing", async () => {
-    await paused()
-    reports.observe(person())
-    await flush()
-    // A linked wait lives in the hub's memory only (nothing of it is stored); the next host starts empty over the same store
-    const next = new ChildOwnership(store)
-    expect([...next.linkedReports]).toEqual([])
-    const nextDelivered: string[] = []
-    const nextReports = new LinkedReports({
-      children: next,
-      linkedReader: null,
-      hasSession: () => true,
-      closing: false,
-      deliverReport: async (_o, sessionId) => void nextDelivered.push(sessionId),
-    })
-    nextReports.observe({ type: 'state_change', sessionId: 'm1.w1', state: 'working' })
-    nextReports.observe({ type: 'error', sessionId: 'm1.w1', error: { message: 'compact crashed' } })
-    await flush()
-    expect(nextDelivered).toEqual([])
-    nextReports.dispose()
-  })
 })
 
 describe('a machine whose link drops or comes back', () => {
