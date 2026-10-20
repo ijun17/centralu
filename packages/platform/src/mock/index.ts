@@ -19,6 +19,7 @@ import { GridMock } from './grid.js'
 import { HandoffMock } from './handoff.js'
 import { KeeperMock } from './keeper.js'
 import { MachinesMock } from './machines.js'
+import { MailMock } from './mail.js'
 import { OrchestratorMock } from './orchestrator.js'
 import { PreferencesMock } from './preferences.js'
 import { ProjectStore } from './project-store.js'
@@ -77,6 +78,7 @@ export class MockPlatform implements Platform {
   private readonly updatesMock = new UpdatesMock(this.clock, this.forward)
   private readonly keeperMock = new KeeperMock(this.updatesMock)
   private readonly machinesMock = new MachinesMock(this.forward, this.projectStore)
+  private readonly mailMock = new MailMock(this.clock, this.forward)
   private readonly preferencesMock = new PreferencesMock(this.forward)
   private readonly projectsMock = new ProjectsMock(this.clock, this.forward, this.store, this.projectStore, this.registry, this.toolsMock, this.gridMock, this.machinesMock, this.trashMock)
   private readonly proposalsMock = new ProposalsMock(this.forward)
@@ -106,6 +108,9 @@ export class MockPlatform implements Platform {
   }
   readonly projects = this.projectsMock.projects
   readonly machines = this.machinesMock.machines
+  readonly mail = this.mailMock.mail
+  /** The mailbox's mock, for a test to seed and read (`seedMail` seeds a thread) */
+  readonly mockMail = this.mailMock
   readonly trash = this.trashMock.trash
   readonly fs = this.filesMock.fs
   readonly git = this.gitMock.git
@@ -349,6 +354,10 @@ export class MockPlatform implements Platform {
   set gitStatusCalls(value: ProjectsMock['gitStatusCalls']) { this.projectsMock.gitStatusCalls = value }
   get trustCalls() { return this.projectsMock.trustCalls }
 
+  // mail.ts: the mailbox as the Inbox sees it. A test or the demo puts a thread in with `seedMail`
+  seedMail(...a: Parameters<MailMock['seed']>): ReturnType<MailMock['seed']> {
+    return this.mailMock.seed(...a)
+  }
   // machines.ts
   get machinesList() { return this.machinesMock.machinesList }
   set machinesList(value: MachinesMock['machinesList']) { this.machinesMock.machinesList = value }

@@ -17,6 +17,8 @@ import { Store } from '../../agent-host/src/dev-services/store.js'
 import { createRpcHandler } from '../../agent-host/src/rpc.js'
 import { UpdateService } from '../../agent-host/src/updates.js'
 import { AgentVersionService } from '../../agent-host/src/agent-versions.js'
+import { MailPerson } from '../../agent-host/src/mail/person.js'
+import { MailService } from '../../agent-host/src/mail/service.js'
 import { ThemeFiles } from '../../agent-host/src/themes.js'
 import { ViewHost } from '../../agent-host/src/views/view-host.js'
 import { OriginPorts } from '../../agent-host/src/views/origin-ports.js'
@@ -194,10 +196,17 @@ async function makeOnRealHost(connect: (port: number, token: string) => Promise<
     sessions: mgr,
     publish: (status) => server.broadcast({ type: 'agent_versions', status }),
   })
+  // The person's side of the mailbox over this store (#1347); nothing in it delivers, so the delivery's part is empty
+  const mail = new MailPerson(
+    new MailService(store.mail, { hostId: () => 'hub-contract' }),
+    store.mail,
+    { resumeSession: () => {}, resumeThread: () => {}, answerCrowd: async () => {}, crowdWaiting: () => 0 },
+    { session: () => undefined },
+  )
   const server = new HostServer({
     port: 0,
     token: 'contract',
-    onRpc: createRpcHandler(mgr, adapters, { updates, themes, agentVersions }),
+    onRpc: createRpcHandler(mgr, adapters, { updates, themes, agentVersions, mail }),
   })
   const port = await server.listen()
   const platform = await connect(port, 'contract')
@@ -512,6 +521,15 @@ describe.each([
     expect((await h.platform.trash.list()).sessions.some((x) => x.id === s.id)).toBe(false)
     await expect(h.platform.trash.read(s.id)).rejects.toThrow(/Not in the session archive/)
     await expect(h.platform.trash.restore(s.id)).rejects.toThrow(/Not in the session archive/)
+  })
+
+  // The person's mailbox (#1347): empty on a fresh host, and a refusal arrives with the same code whichever implementation says it
+  it('the mailbox is empty on a fresh host, and a thread that is not there is refused', async () => {
+    expect(await h.platform.mail.list()).toEqual({ threads: [], held: [], waiting: 0 })
+    await expect(h.platform.mail.thread('hub-contract.t_01ARZ3NDEKTSV4RRFFQ69G5FAV')).rejects.toMatchObject({ code: 'refused' })
+    await expect(h.platform.mail.reply('hub-contract.t_01ARZ3NDEKTSV4RRFFQ69G5FAV', 'hello')).rejects.toMatchObject({ code: 'refused' })
+    await h.platform.mail.resume({ sessionId: 'nobody' })
+    await h.platform.mail.wake(false)
   })
 
   // App-agent run records (#378): the mock never runs an app's agent, but the empty answers match the host's
