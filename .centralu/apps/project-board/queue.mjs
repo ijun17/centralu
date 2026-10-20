@@ -15,6 +15,7 @@
 // batch of one ended without landing it, needs its session.
 import { canMerge, NO_PERMISSION, quickTierReason, ranTier, squashMessage } from './ci.mjs'
 import { CAUSE_TEXT, onFlakyList } from './run-failure.mjs'
+import { isAcked } from './notice-acks.mjs'
 import { short } from './util.mjs'
 
 /** What an item can be in. The first three are active (the driver polls them); the last two are done. */
@@ -568,8 +569,8 @@ export const noticeKey = (reason, head) => `${reason.kind}:${head ?? ''}:${reaso
  */
 export function watchState(q, { owner = null, after }) {
   const mine = (x) => !owner || x.owner === owner
-  // What the owner acknowledged already is not news again (#1351, notice-acks.mjs)
-  const news = q.events.filter((e) => e.seq > after && e.notify && !e.ackedAt && mine(e))
+  // What the owner acknowledged already, or was posted for information, is not news again (#1351, notice-acks.mjs)
+  const news = q.events.filter((e) => e.seq > after && e.notify && !isAcked(e) && mine(e))
   const left = q.items.filter((i) => ACTIVE.has(i.state) && mine(i))
   const owned = new Set(q.items.filter(mine).map((i) => i.pr))
   const batchPending = (q.batches ?? []).some((b) => BATCH_ACTIVE.has(b.state) && b.members.some((m) => !owner || owned.has(m.pr)))
