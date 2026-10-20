@@ -184,10 +184,11 @@ export function createRpcHandler(
   const handlers: { [M in RpcMethodName]: (p: unknown, ctx?: { client: number }) => Promise<unknown> } = {
     'agents.createSession': async (p) => mgr.createSession(RpcMethods['agents.createSession'].params.parse(p)),
     'agents.send': async (p) => {
-      const { sessionId, text, attachments } = RpcMethods['agents.send'].params.parse(p)
-      await mgr.send(sessionId, text, attachments, undefined, true)
+      const { sessionId, text, attachments, intent } = RpcMethods['agents.send'].params.parse(p)
+      await mgr.send(sessionId, text, attachments, undefined, true, intent)
       return { ok: true as const }
     },
+    'agents.reportOwed': async (p) => ({ owed: mgr.reportOwed(RpcMethods['agents.reportOwed'].params.parse(p).sessionId) }),
     'agents.respondApproval': async (p) => {
       const { sessionId, requestId, decision, scope, matcher } =
         RpcMethods['agents.respondApproval'].params.parse(p)

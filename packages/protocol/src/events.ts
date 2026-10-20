@@ -267,6 +267,12 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
      */
     fromApp: z.object({ appId: z.string(), projectId: z.string().nullable(), name: z.string() }).optional(),
     /*
+     * The person's choice for a delegation report the session owes (#1377), carried on the message so a hub that follows
+     * a linked machine's session reads it: `task` adds the message to the delegated work, `takeover` takes the session
+     * over. Absent: just asking.
+     */
+    intent: z.enum(['task', 'takeover']).optional(),
+    /*
      * Attachments carried along with it (M4 C-5). Not needed for text the UI sends, since the
      * screen has already drawn it together with its attachments. For text inserted by the host,
      * such as text from the composer under an app screen, this event is the only way it ever

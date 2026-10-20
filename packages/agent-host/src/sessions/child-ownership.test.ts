@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SessionInfo } from '@cc/protocol'
 import { Store, type QueuedRequest } from '../dev-services/store.js'
-import { ChildOwnership, pausedReportKey, type AgentStartRecord, type Delegation } from './child-ownership.js'
+import { ChildOwnership, pausedReportKey, reportTurnKey, type AgentStartRecord, type Delegation } from './child-ownership.js'
 
 /*
  * The ownership state on its own (#428): each change writes its store mirror, and an owner change moves every map in
@@ -260,5 +260,90 @@ describe('restoring what the previous host left (#646, #676, #677)', () => {
     expect(next.queued.get('gone-process')?.map((r) => [r.id, r.openedByAuto])).toEqual([['q3', true]])
     expect(read).toEqual(['q3'])
     expect(store.children.listQueuedRequests().map((r) => [r.id, r.deliveringAt]).sort()).toEqual([['q1', null], ['q3', null]])
+  })
+})
+
+/*
+ * Whose a turn is (#1377): recorded when it starts, from the message it started with, and read when it ends. The rows are
+ * the issue's table; the host-level runs (paused-reports, report-marks) go through the manager.
+ */
+describe('whose a turn is', () => {
+  it("the person at rest: the next turn is theirs; none recorded or the CLI's own: the work's", () => {
+    own.noteMessage('s', 'person', false, true)
+    own.turnStarted('s')
+    expect(own.turnEnded('s')).toEqual({ by: 'person' })
+    // No message: the CLI started it (the work's tasks ended)
+    own.turnStarted('s')
+    expect(own.turnEnded('s')).toEqual({ by: 'work' })
+    // A turn never started reads as the work's: what an older build left
+    expect(own.turnEnded('s')).toEqual({ by: 'work' })
+  })
+
+  it("a caller's, an app's or Centralu's message makes it the work's, also with the person's behind it", () => {
+    own.noteMessage('s', 'work', false, true)
+    own.noteMessage('s', 'person', false, true)
+    own.turnStarted('s')
+    expect(own.turnEnded('s')).toEqual({ by: 'work', wrote: true })
+  })
+
+  it('the person into a running turn of the work: noted; into their own: nothing; "add to the task": noted as such', () => {
+    own.noteMessage('s', 'work', false, true)
+    own.turnStarted('s')
+    own.noteMessage('s', 'person', true, true)
+    expect(own.starterOf('s')).toEqual({ by: 'work', wrote: true })
+    own.noteMessage('s', 'person', true, true, true)
+    expect(own.turnEnded('s')).toEqual({ by: 'work', wrote: true, added: true })
+    own.noteMessage('s', 'person', false, true)
+    own.turnStarted('s')
+    own.noteMessage('s', 'person', true, true)
+    expect(own.turnEnded('s')).toEqual({ by: 'person' })
+  })
+
+  it("add to the task, at rest, makes the turn the work's, noted as their addition", () => {
+    own.noteMessage('s', 'person', false, true, true)
+    own.turnStarted('s')
+    expect(own.turnEnded('s')).toEqual({ by: 'work', added: true })
+  })
+
+  it("a tool that holds a message for the turn after: the running turn stays as it was, and the next is the person's", () => {
+    own.noteMessage('s', 'work', false, true)
+    own.turnStarted('s')
+    own.noteMessage('s', 'person', true, false)
+    expect(own.turnEnded('s')).toEqual({ by: 'work' })
+    own.turnStarted('s')
+    expect(own.turnEnded('s')).toEqual({ by: 'person' })
+  })
+
+  it('taking the session over makes the running turn theirs', () => {
+    own.noteMessage('s', 'work', false, true)
+    own.turnStarted('s')
+    own.takeTurn('s')
+    expect(own.turnEnded('s')).toEqual({ by: 'person' })
+  })
+
+  it('is kept in the store while a report is owed, read back by the next host, and dropped with the report', () => {
+    own.noteMessage('s', 'person', false, true)
+    own.turnStarted('s')
+    expect(store.settings.appSetting(reportTurnKey('s'))).toBeNull()
+    // The mark is set during their turn: the turn is kept from then on
+    own.markReport('s', 'caller')
+    expect(JSON.parse(store.settings.appSetting(reportTurnKey('s'))!)).toEqual({ by: 'person' })
+    const next = new ChildOwnership(store)
+    next.adoptReport('s', 'caller', null)
+    expect(next.starterOf('s')).toEqual({ by: 'person' })
+    own.clearReport('s')
+    expect(store.settings.appSetting(reportTurnKey('s'))).toBeNull()
+  })
+
+  it("a turn's end takes its record down, and an unreadable one reads as nothing", () => {
+    own.markReport('s', 'caller')
+    own.turnStarted('s')
+    expect(store.settings.appSetting(reportTurnKey('s'))).not.toBeNull()
+    own.turnEnded('s')
+    expect(store.settings.appSetting(reportTurnKey('s'))).toBeNull()
+    store.settings.setAppSetting(reportTurnKey('t'), 'not json')
+    const next = new ChildOwnership(store)
+    next.adoptReport('t', 'caller', null)
+    expect(next.starterOf('t')).toBeUndefined()
   })
 })

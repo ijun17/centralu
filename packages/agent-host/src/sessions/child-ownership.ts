@@ -98,6 +98,21 @@ export function readPausedTasks(raw: string | null): PausedTask[] | null {
   return readJsonObjects<PausedTask>(raw, (t) => typeof t.id === 'string' && typeof t.description === 'string')
 }
 
+/**
+ * Whose a turn is (#1377): the person's (the person wrote while the session was at rest, or their message waited for
+ * the turn), or the delegated work's (the caller's message, an app's or Centralu's, or the CLI starting it itself when
+ * the work's background tasks end). `wrote`: the person wrote into a turn of the work; `added`: the person chose to add
+ * their message to the task.
+ */
+export type TurnStarter = { by: 'person' | 'work'; wrote?: true; added?: true }
+/** The store's record of the turn a session with an owed report is in (#1377), kept across a swap */
+export const reportTurnKey = (sessionId: string) => `report_turn:${sessionId}`
+function readStarter(raw: string | null): TurnStarter | null {
+  if (raw === null) return null
+  const parsed = readJsonObjects<TurnStarter>(`[${raw}]`, (t) => t.by === 'person' || t.by === 'work')[0]
+  return parsed ?? null
+}
+
 /** A delegated turn's link (#676): who gave the turn, and the cards it was already told of */
 export type TurnOwner = { callerId: string; untilTurnEnd: boolean; told: Set<string>; turnId: string }
 
@@ -107,7 +122,15 @@ export type TurnOwner = { callerId: string; untilTurnEnd: boolean; told: Set<str
  * `instruction`: the text of the instruction the wait was set for, while the machine has not yet been heard recording it
  * (#1082); until then nothing it relays is about that instruction's turn
  */
-export type LinkedReport = { orchestratorId: string; busy: boolean; paused?: BackgroundTask[]; instruction?: string }
+export type LinkedReport = {
+  orchestratorId: string
+  busy: boolean
+  paused?: BackgroundTask[]
+  instruction?: string
+  /** Whose the turn running there is (#1377), and whose the next will be: from the message each started with. Memory only */
+  turn?: TurnStarter
+  next?: TurnStarter
+}
 
 /** What one owner change moves (`ChildOwnership.moveOwner`), as the session manager chose it */
 export type OwnerMove = {
@@ -156,6 +179,15 @@ export class ChildOwnership {
    */
   private readonly paused = new Map<string, PausedTask[]>()
   readonly pausedReports: ReadonlyMap<string, PausedTask[]> = this.paused
+  /**
+   * Whose the running turn is, by session (#1377): recorded when the turn starts from the message that started it, decided
+   * at its end (`ChildReports.reportBackIfAwaited`). Mirrored in the app setting `report_turn:<session>` while a report is
+   * owed, so a host that takes over a kept session mid-turn knows it. None recorded (a mark an older build wrote): the
+   * work's, as every turn was.
+   */
+  private readonly starters = new Map<string, TurnStarter>()
+  /** Whose the message is that waits to start the session's next turn, delivered while it was at rest */
+  private readonly nextStarter = new Map<string, TurnStarter>()
   /** The settle timer of a paused report whose background work has ended (#721) */
   private readonly pausedSettles = new Map<string, ReturnType<typeof setTimeout>>()
   /**
@@ -228,9 +260,11 @@ export class ChildOwnership {
     this.store.settings.deleteAppSetting(pausedReportKey(sessionId))
     this.reports.set(sessionId, callerId)
     this.store.children.setReportMark(sessionId, callerId)
+    this.persistTurn(sessionId)
   }
   clearReport(sessionId: string): void {
     this.unpauseReport(sessionId)
+    this.store.settings.deleteAppSetting(reportTurnKey(sessionId))
     if (!this.reports.delete(sessionId)) return
     this.store.children.clearReportMark(sessionId)
   }
@@ -263,6 +297,7 @@ export class ChildOwnership {
       }
       this.store.children.clearReportMark(mark.sessionId)
       this.store.settings.deleteAppSetting(pausedReportKey(mark.sessionId))
+      this.store.settings.deleteAppSetting(reportTurnKey(mark.sessionId))
     }
     return endedInSwap
   }
@@ -319,6 +354,9 @@ export class ChildOwnership {
   adoptReport(sessionId: string, callerId: string, paused: PausedTask[] | null): void {
     this.reports.set(sessionId, callerId)
     if (paused) this.paused.set(sessionId, paused)
+    // The turn it was in when the last host stopped (#1377): the person's is not reported when it ends here
+    const starter = readStarter(this.store.settings.appSetting(reportTurnKey(sessionId)))
+    if (starter) this.starters.set(sessionId, starter)
   }
   /** Holds the session's owed report over its own background work (#721); the mark itself stays as it is */
   pauseReport(sessionId: string, running: readonly PausedTask[]): void {
@@ -333,6 +371,62 @@ export class ChildOwnership {
   unpauseReport(sessionId: string): void {
     this.stopSettling(sessionId)
     if (this.paused.delete(sessionId)) this.store.settings.deleteAppSetting(pausedReportKey(sessionId))
+  }
+  /**
+   * A message goes into the session (#1377): the person's, or anyone else's (a caller's, an app's, Centralu's). At rest
+   * (or where the tool holds it for a turn of its own) it is what the next turn starts from; into a running turn it joins
+   * that turn: a person's into the work's is noted ("the person wrote during this turn"), into their own it is theirs.
+   */
+  noteMessage(sessionId: string, by: 'person' | 'work', inTurnNow: boolean, joinsRunningTurn: boolean, added = false): void {
+    if (inTurnNow && joinsRunningTurn) {
+      // A turn from before this host knew whose turns are whose reads as the work's
+      const running = this.starters.get(sessionId) ?? { by: 'work' as const }
+      this.starters.set(sessionId, running)
+      if (by === 'person' && running.by === 'work') {
+        if (added) running.added = true
+        else running.wrote = true
+        this.persistTurn(sessionId)
+      }
+      return
+    }
+    const next = this.nextStarter.get(sessionId)
+    // The turn belongs to the first message that starts it; a later one only joins
+    if (next) {
+      if (by === 'person' && next.by === 'work') next[added ? 'added' : 'wrote'] = true
+      return
+    }
+    // "Add to the task" (a person's message that is the work's): the turn is the work's, noted as their addition
+    this.nextStarter.set(sessionId, added ? { by: 'work', added: true } : { by })
+  }
+  /** A turn starts (#1377): from the message waiting for it, else the CLI's own (the work's background tasks ended) */
+  turnStarted(sessionId: string): void {
+    const next = this.nextStarter.get(sessionId)
+    this.nextStarter.delete(sessionId)
+    this.starters.set(sessionId, next ?? { by: 'work' })
+    this.persistTurn(sessionId)
+  }
+  /** The turn ends (#1377): whose it was; none recorded reads as the work's. The record goes with it */
+  turnEnded(sessionId: string): TurnStarter {
+    const starter = this.starters.get(sessionId) ?? { by: 'work' as const }
+    this.starters.delete(sessionId)
+    this.store.settings.deleteAppSetting(reportTurnKey(sessionId))
+    return starter
+  }
+  /** Whose the running turn is, when one is recorded */
+  starterOf(sessionId: string): TurnStarter | undefined {
+    return this.starters.get(sessionId)
+  }
+  /** The person took the session over (#1377): the running turn is theirs from here */
+  takeTurn(sessionId: string): void {
+    if (this.starters.has(sessionId)) {
+      this.starters.set(sessionId, { by: 'person' })
+      this.persistTurn(sessionId)
+    }
+  }
+  /** Kept while a report is owed, for a host that takes the session over mid-turn */
+  private persistTurn(sessionId: string): void {
+    const s = this.starters.get(sessionId)
+    if (s && this.reports.has(sessionId)) this.store.settings.setAppSetting(reportTurnKey(sessionId), JSON.stringify(s))
   }
   /** Starts a paused report's settle timer (#721); the session manager decides when, and what it does */
   settleAfter(sessionId: string, timer: ReturnType<typeof setTimeout>): void {

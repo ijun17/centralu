@@ -36,6 +36,7 @@ export type LinkedReportsHost = {
     ending: Pick<NormalizedEvent, 'type'> & { error?: { message?: string } },
     work?: ReportWork,
     answerSeq?: number,
+    part?: { wrote?: true; added?: true },
   ): Promise<void>
   /**
    * Whether a report about this session may go now (#1038 review): a child start_agent started on a linked machine
@@ -43,6 +44,11 @@ export type LinkedReportsHost = {
    * machine) is reported to nobody, and one the hub cannot tell yet stays owed until it can. Any other session's goes
    */
   reportGate?(sessionId: string): 'deliver' | 'withhold' | 'defer'
+}
+
+/** What a report says of the person's part in a turn (#1377): nothing, unless they wrote into it or added to the task */
+function partOf(turn: { wrote?: true; added?: true }): { wrote?: true; added?: true } | undefined {
+  return turn.wrote || turn.added ? { ...(turn.wrote ? { wrote: true as const } : {}), ...(turn.added ? { added: true as const } : {}) } : undefined
 }
 
 /** Whether a relayed message was sent by this hub's orchestrator: the machine records it as from `HUB_SENDER`, qualified */
@@ -66,6 +72,8 @@ export type LinkedEvent = {
   machineId?: unknown
   text?: unknown
   from?: unknown
+  /** The person's choice for a report the session owes (`user_message`, #1377) */
+  intent?: unknown
   /** An app's message (`user_message`): not the person's */
   fromApp?: unknown
   live?: unknown
@@ -126,11 +134,11 @@ export class LinkedReports {
     if (!wait) return
     this.remember(sessionId)
     /*
-     * The person wrote to a session whose report is paused over its own background work there (#1342, as #1344 does for
-     * a local one): what it does from here is theirs. A message with a source (the hub's instruction, another session, an
-     * app) is not; nor is one into the turn the work's ending started (`busy`), whose end is the final report.
+     * A turn belongs to whoever started it (#1377), as a local one does (`ChildOwnership.noteMessage`): the person's
+     * message at rest makes the next turn theirs, and it is not reported; into the work's turn it is noted. Only their
+     * choice to take the session over closes the report.
      */
-    if (e.type === 'user_message' && wait.paused && !wait.busy && !e.from && !e.fromApp) return this.tookOver(sessionId, wait)
+    if (e.type === 'user_message' && wait.instruction === undefined && this.messageSeen(sessionId, wait, e)) return
     if (e.type === 'background_tasks') {
       if (wait.paused) this.settleLater(sessionId, wait)
       return
@@ -144,17 +152,31 @@ export class LinkedReports {
      * relayed) is not waited for past the send's answer (`sendToSession`, orchestrator-seat.ts).
      */
     if (wait.instruction !== undefined) {
-      if (e.type === 'user_message' && e.text === wait.instruction && fromHub(e.from)) delete wait.instruction
+      if (e.type === 'user_message' && e.text === wait.instruction && fromHub(e.from)) {
+        delete wait.instruction
+        // The turn that takes the instruction is the work's
+        wait.next = { by: 'work' }
+      }
       return
     }
     const step = linkedTurnEnd(wait.busy, e)
     if (step?.step === 'busy') {
       wait.busy = true
+      wait.turn = wait.next ?? { by: 'work' }
+      delete wait.next
       // A turn runs: its own end reports
       this.stopSettling(sessionId)
       return
     }
     if (step?.step !== 'completed' && step?.step !== 'failed') return
+    const turn = wait.turn ?? { by: 'work' as const }
+    delete wait.turn
+    // The person's own turn is reported to nobody and changes nothing of the report; paused work that ended meanwhile settles again
+    if (turn.by === 'person') {
+      wait.busy = false
+      if (wait.paused) this.settleLater(sessionId, wait)
+      return
+    }
     // Whose turn ended (#1038 review): another's is reported to nobody; one the hub cannot tell yet stays owed
     const gate = this.gate(sessionId)
     if (gate === 'defer') return
@@ -169,11 +191,36 @@ export class LinkedReports {
       wait.busy = false
       // Changed in place: set again, so what keeps it stored reads the pause (#1038)
       this.host.children.setLinkedReport(sessionId, wait)
-      if (!told) void this.report(sessionId, wait.orchestratorId, e, { paused: running, stoppable: false })
+      if (!told) void this.report(sessionId, wait.orchestratorId, e, { paused: running, stoppable: false }, undefined, partOf(turn))
       return
     }
     this.drop(sessionId)
-    void this.report(sessionId, wait.orchestratorId, e)
+    void this.report(sessionId, wait.orchestratorId, e, undefined, undefined, partOf(turn))
+  }
+
+  /**
+   * A message the machine took (#1377). Whose it is: a message with no source is the person's; the hub's instruction,
+   * another session's and an app's are the work's. At rest it is what the next turn starts from; into a running turn it
+   * joins it, noted when it is the person's into the work's. The person's choice rides on it (`intent`): `takeover` closes
+   * the report (`tookOver`), `task` adds it to the work. Returns whether the event is settled here.
+   */
+  private messageSeen(sessionId: string, wait: LinkedReport, e: LinkedEvent): boolean {
+    const person = !e.from && !e.fromApp
+    if (person && e.intent === 'takeover') {
+      this.tookOver(sessionId, wait)
+      return true
+    }
+    const added = person && e.intent === 'task'
+    if (wait.busy) {
+      const running = wait.turn ?? { by: 'work' as const }
+      wait.turn = running
+      if (person && running.by === 'work') running[added ? 'added' : 'wrote'] = true
+    } else if (wait.next) {
+      if (person && wait.next.by === 'work') wait.next[added ? 'added' : 'wrote'] = true
+    } else {
+      wait.next = added ? { by: 'work', added: true } : { by: person ? 'person' : 'work' }
+    }
+    return false
   }
 
   /**
@@ -344,6 +391,8 @@ export class LinkedReports {
     ending: { type: string; error?: { message?: string } },
     work?: ReportWork,
     known?: { name: string; project: string },
+    /** The person's part in the turn reported (#1377) */
+    part?: { wrote?: true; added?: true },
   ): Promise<void> {
     const reader = this.host.linkedReader
     if (!reader || !this.host.hasSession(orchestratorId)) return
@@ -365,6 +414,6 @@ export class LinkedReports {
       : words.ok ? words.text
       : `(its last response could not be read there: ${words.error})`
     const seq = words?.ok && words.seq !== null ? words.seq : undefined
-    await this.host.deliverReport(orchestratorId, sessionId, about.name, about.project, preview, ending as Pick<NormalizedEvent, 'type'>, work, seq)
+    await this.host.deliverReport(orchestratorId, sessionId, about.name, about.project, preview, ending as Pick<NormalizedEvent, 'type'>, work, seq, part)
   }
 }

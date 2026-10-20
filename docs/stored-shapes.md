@@ -23,7 +23,7 @@ For every shape:
 4. **A broken file or row** (not JSON, the wrong top-level type): a clear message that names the file or row, never a
    crash, and never a setting reset without a word.
 
-A row of `app_settings` kept for one session is keyed `<name>:<sessionId>` (`agent_depth:`, `report_paused:`,
+A row of `app_settings` kept for one session is keyed `<name>:<sessionId>` (`agent_depth:`, `report_paused:`, `report_turn:`,
 `tool_prefix:`, …). Deleting the session for good deletes every key of that shape (`SESSION_SETTING_OF`,
 `purgeSession`), so a new per-session key needs no line in the purge.
 
@@ -60,7 +60,7 @@ this build cannot read, and sets a row that is not a list aside, naming it, befo
 | Project order across machines | `app_settings.hub.projectOrder` | agent-host links | `storeProjectOrder` `agent-host/src/links/stored.ts:52` | — | — | no order, with no word; the next drag writes a new one | `links/stored.test.ts` |
 | Card rests | `app_settings.card_rests` | agent-host sessions | `sessions/card-rest.ts:37` | an unknown state is dropped (the data is temporary) | — | `{}` | none for broken |
 | View hand-over | `app_settings.views.handover` | agent-host | `restoreViewHandover` `agent-host/src/view-handover.ts:68` | an element that is not a view is skipped | — | nothing reopens; the row is deleted all the same | `view-handover.test.ts` |
-| Per-session settings | `app_settings.<name>:<sessionId>` | agent-host sessions | `report_paused:` `sessions/child-ownership.ts:89`; `background_tasks:` (`keptBackgroundTasks`), `tool_prefix:`, `launch_settings:` `sessions/launch-records.ts:49`; `agent_depth:`, `hub_ask_depth:` `sessions/agent-depth.ts:59`; `fresh_start:` `sessions/session-start.ts:638`; `external_synced:` `sessions/external-conversations.ts:237`; `code_intelligence:` `sessions/tool-profiles.ts:108` | — | default | `background_tasks:` that does not read whole (not JSON, not a list, a task in another shape) reads as "not known", which keeps an adopted process from sleeping, and is named on stderr; an unreadable `agent_depth:` is depth 0; a `fresh_start:` that is not a number reads as nothing to lose. The others read as their safe side (a changed launch hash restarts, an unreadable sync mark reads again) | `store-purge-settings.test.ts` (the purge), `background-tasks-swap.test.ts` (`background_tasks:`, all three); none for the other broken values |
+| Per-session settings | `app_settings.<name>:<sessionId>` | agent-host sessions | `report_paused:` `sessions/child-ownership.ts:89`; `report_turn:` (`reportTurnKey`, `sessions/child-ownership.ts`, #1377); `background_tasks:` (`keptBackgroundTasks`), `tool_prefix:`, `launch_settings:` `sessions/launch-records.ts:49`; `agent_depth:`, `hub_ask_depth:` `sessions/agent-depth.ts:59`; `fresh_start:` `sessions/session-start.ts:638`; `external_synced:` `sessions/external-conversations.ts:237`; `code_intelligence:` `sessions/tool-profiles.ts:108` | — | default | `background_tasks:` that does not read whole (not JSON, not a list, a task in another shape) reads as "not known", which keeps an adopted process from sleeping, and is named on stderr; an unreadable `agent_depth:` is depth 0; a `fresh_start:` that is not a number reads as nothing to lose. The others read as their safe side (a changed launch hash restarts, an unreadable sync mark reads again) | `store-purge-settings.test.ts` (the purge), `background-tasks-swap.test.ts` (`background_tasks:`, all three); none for the other broken values |
 
 ## Apps
 

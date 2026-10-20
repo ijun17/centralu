@@ -693,8 +693,8 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
       expect(h.reports()).toHaveLength(2)
     })
 
-    // #1342: the person's message goes straight to the machine; the hub sees the machine's record of it
-    it("the person writing to the session there ends the paused report: told once, and their failed turn is not 'the assigned work failed'", async () => {
+    // #1377: the person's message goes straight to the machine; the hub sees the machine's record of it and the turn's events
+    it("the person writing to the session there never closes the paused report: their turn is not reported, the work's end is", async () => {
       const h = await hub()
       await h.send(true)
       h.mgr.observeLinked({ type: 'message_delta', sessionId: 'm1.w1' })
@@ -705,13 +705,36 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
       expect(h.reports()[0]).toContain('The assigned work paused')
 
       h.mgr.observeLinked({ type: 'user_message', sessionId: 'm1.w1', seq: 9, text: '/compact' })
+      h.mgr.observeLinked({ type: 'state_change', sessionId: 'm1.w1', state: 'working' })
+      h.mgr.observeLinked({ type: 'error', sessionId: 'm1.w1', error: { message: 'compact crashed' } })
+      await h.settle(2)
+      expect(h.reports()).toHaveLength(1)
+
+      // The work ends and the turn that starts finishes it: reported
+      h.mgr.observeLinked(tasks([], [{ ...verify, status: 'completed' }]))
+      turn(h)
       await h.settle(2)
       expect(h.reports()).toHaveLength(2)
-      expect(h.reports()[1]).toContain('[Centralu] The person continued in this session themselves; its later turns are theirs, and none of them will be reported to you.')
+      expect(h.reports()[1]).toMatch(/^\[Centralu\] The assigned work finished\./)
+    })
+
+    it("\"Take it over\" on the machine closes the report: told once, in Centralu's words, and none of their later turns is reported", async () => {
+      const h = await hub()
+      await h.send(true)
+      h.mgr.observeLinked({ type: 'message_delta', sessionId: 'm1.w1' })
+      h.mgr.observeLinked(tasks([verify]))
+      h.mgr.observeLinked({ type: 'turn_complete', sessionId: 'm1.w1' })
+      h.mgr.observeLinked({ type: 'state_change', sessionId: 'm1.w1', state: 'waiting_input' })
+      await h.settle(1)
+
+      h.mgr.observeLinked({ type: 'user_message', sessionId: 'm1.w1', seq: 9, text: '/compact', intent: 'takeover' })
+      await h.settle(2)
+      expect(h.reports()).toHaveLength(2)
+      expect(h.reports()[1]).toContain('[Centralu] The person took this session over; its later turns are theirs, and none of them will be reported to you.')
       expect(h.reports()[1]).toContain('no final report follows')
       // What the orchestrator's model reads is Centralu's words with the id, never the task's own description
       await eventually(() => h.messages().length === 2)
-      expect(h.messages()[1]).toContain('The person continued in this session themselves')
+      expect(h.messages()[1]).toContain('The person took this session over')
       expect(h.messages()[1]).not.toContain('pnpm verify')
 
       h.mgr.observeLinked({ type: 'state_change', sessionId: 'm1.w1', state: 'working' })
@@ -720,6 +743,17 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
       turn(h)
       await h.settle(2)
       expect(h.reports()).toHaveLength(2)
+    })
+
+    it("the person writing into the work's turn there is reported with their part", async () => {
+      const h = await hub()
+      await h.send(true)
+      h.mgr.observeLinked({ type: 'message_delta', sessionId: 'm1.w1' })
+      h.mgr.observeLinked({ type: 'user_message', sessionId: 'm1.w1', seq: 9, text: 'also lint' })
+      h.mgr.observeLinked({ type: 'turn_complete', sessionId: 'm1.w1' })
+      await h.settle(1)
+      expect(h.reports()[0]).toContain('[Centralu] The assigned work finished.')
+      expect(h.reports()[0]).toContain('The person wrote in this session during this turn.')
     })
 
     it('knows work started before it was asked, and a timer the tool holds does not hold the report', async () => {
