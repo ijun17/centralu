@@ -420,8 +420,8 @@ mod tests {
             file: file.map(String::from),
             hashes: None,
             message: "the new build's content at /App.app/Contents/Resources/content is not what the project signed: \"host/main.mjs\" does not match its hash".into(),
-            new_version: Some("0.1.0-beta.32".into()),
-            running_version: Some("0.1.0-beta.31".into()),
+            new_version: Some("9.9.9-test.2".into()),
+            running_version: Some("9.9.9-test.1".into()),
         }
     }
 
@@ -433,7 +433,7 @@ mod tests {
         r.hashes = Some(("a".repeat(64), "b".repeat(64)));
         let d = dialog(&r);
         assert_eq!(d.title, TITLE_UPDATE);
-        assert!(d.text.starts_with("Centralu 0.1.0-beta.32 could not be verified and was not started. Centralu 0.1.0-beta.31 is still running."), "{}", d.text);
+        assert!(d.text.starts_with("Centralu 9.9.9-test.2 could not be verified and was not started. Centralu 9.9.9-test.1 is still running."), "{}", d.text);
         let details = d.text.split("\n\nDetails\n").nth(1).expect("a Details part");
         assert_eq!(
             details.lines().collect::<Vec<_>>(),
@@ -458,7 +458,7 @@ mod tests {
         let d = dialog(&r);
         assert!(!d.text.contains("curl") && !d.text.contains("Terminal") && !d.text.contains("evil"), "{}", d.text);
         assert!(!d.text.contains(&r.message) && !d.text.contains("Update failed"), "{}", d.text);
-        let shell = Refusal::from_shell("downgrade", CRAFTED, None, "0.1.0-beta.32").unwrap();
+        let shell = Refusal::from_shell("downgrade", CRAFTED, None, "9.9.9-test.2").unwrap();
         let d = dialog(&shell);
         assert!(!d.text.contains("curl") && !d.text.contains("Terminal"), "{}", d.text);
         assert!(shell.message.contains("curl"), "the log has it: {}", shell.message);
@@ -476,7 +476,7 @@ mod tests {
         assert!(d.text.contains("File: a b c\n"), "a file name is plain text: {:?}", d.text);
         assert!(!d.text.contains("not a hash") && !d.text.contains("The file is"), "{}", d.text);
         assert!(!d.text.contains('\u{7}') && !d.text.contains('\r'), "{:?}", d.text);
-        assert_eq!(plain_version("0.1.0-beta.32+7"), Some("0.1.0-beta.32+7".into()));
+        assert_eq!(plain_version("9.9.9-test.2+7"), Some("9.9.9-test.2+7".into()));
         for bad in ["", "1 2", "1\n2", "a|b", &"1".repeat(65)] {
             assert_eq!(plain_version(bad), None, "{bad:?}");
         }
@@ -526,7 +526,7 @@ mod tests {
             file: None,
             hashes: None,
             message: "x".into(),
-            new_version: Some("0.1.0-beta.32".into()),
+            new_version: Some("9.9.9-test.2".into()),
             running_version: None,
         };
         let d = dialog(&r);
@@ -539,7 +539,7 @@ mod tests {
         assert!(d.text.contains("It is signed with a key this Centralu does not trust.\nCheck: unknown-key\n"), "{}", d.text);
         assert!(!d.text.contains("File:"), "no file when none is named");
         assert!(!d.text.contains("was not run"), "{}", d.text);
-        assert!(d.text.contains("run `npm i -g centralu@0.1.0-beta.32` and then `centralu install --force` in a terminal, then open Centralu."), "{}", d.text);
+        assert!(d.text.contains("run `npm i -g centralu@9.9.9-test.2` and then `centralu install --force` in a terminal, then open Centralu."), "{}", d.text);
         assert!(!d.text.contains("centralu update"), "{}", d.text);
     }
 
@@ -571,11 +571,11 @@ mod tests {
             hashes: Some(("a".repeat(64), "b".repeat(64))),
             message: "the content at /App.app/Contents/Resources/content is not what the project signed".into(),
         };
-        let r = Refusal::from_shell("content", "x", Some(found), "0.1.0-beta.32").unwrap();
+        let r = Refusal::from_shell("content", "x", Some(found), "9.9.9-test.2").unwrap();
         assert_eq!((r.source, r.check.as_deref(), r.file.as_deref()), (Source::Shell, Some("hash-mismatch"), Some("host/main.mjs")));
         assert_eq!(r.hashes, Some(("a".repeat(64), "b".repeat(64))));
-        assert_eq!(r.new_version.as_deref(), Some("0.1.0-beta.32"));
-        let r = Refusal::from_shell("content", "the shell's sentence", None, "0.1.0-beta.32").unwrap();
+        assert_eq!(r.new_version.as_deref(), Some("9.9.9-test.2"));
+        let r = Refusal::from_shell("content", "the shell's sentence", None, "9.9.9-test.2").unwrap();
         assert_eq!((r.check, r.file, r.message.as_str()), (None, None, "the shell's sentence"));
         assert_eq!(Refusal::from_shell("downgrade", "x", None, "1").unwrap().check.as_deref(), Some("downgrade"));
         assert_eq!(Refusal::from_shell("shell-too-old", "x", None, "1").unwrap().check.as_deref(), Some("shell-too-old"));
@@ -587,8 +587,8 @@ mod tests {
     #[test]
     fn the_keepers_refusal_is_read_from_its_swap_view_with_this_windows_own_version() {
         let hashes = ["a".repeat(64), "b".repeat(64)];
-        let r = Refusal::from_swap(Some("content"), Some("hash-mismatch"), Some("f"), Some(&hashes), Some("sentence"), Some("0.1.0-beta.32"), Some("0.1.0-beta.31")).unwrap();
-        assert_eq!((r.source, r.reason.as_str(), r.check.as_deref(), r.running_version.as_deref()), (Source::Keeper, "content", Some("hash-mismatch"), Some("0.1.0-beta.31")));
+        let r = Refusal::from_swap(Some("content"), Some("hash-mismatch"), Some("f"), Some(&hashes), Some("sentence"), Some("9.9.9-test.2"), Some("9.9.9-test.1")).unwrap();
+        assert_eq!((r.source, r.reason.as_str(), r.check.as_deref(), r.running_version.as_deref()), (Source::Keeper, "content", Some("hash-mismatch"), Some("9.9.9-test.1")));
         assert_eq!(r.hashes, Some(("a".repeat(64), "b".repeat(64))));
         let r = Refusal::from_swap(Some("downgrade"), None, None, None, Some("0.1.0 is older than 0.2.0"), None, None).unwrap();
         assert_eq!(headline(&r), "It is older than a version that has already run here.");
@@ -616,7 +616,7 @@ mod tests {
         assert!(shown.first(&keeper(Some("hash-mismatch"), Some("keeper")), 200, 20 * gap));
         shown.open_flag().store(false, Ordering::SeqCst);
         let mut newer = r.clone();
-        newer.new_version = Some("0.1.0-beta.33".into());
+        newer.new_version = Some("9.9.9-test.3".into());
         assert!(shown.first(&newer, 200, 30 * gap));
     }
 
@@ -684,7 +684,7 @@ mod tests {
 
     #[test]
     fn the_shells_refusal_is_shown_first_the_keepers_after_it_closes_and_each_once() {
-        let shell = Refusal::from_shell("content", "x", None, "0.1.0-beta.32").unwrap();
+        let shell = Refusal::from_shell("content", "x", None, "9.9.9-test.2").unwrap();
         let swap = keeper(Some("hash-mismatch"), Some("host/main.mjs"));
         let mut a = Announcer::default();
         assert_eq!(a.next(0), None);
