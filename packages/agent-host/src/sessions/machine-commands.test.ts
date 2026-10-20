@@ -357,8 +357,9 @@ describe('reconnect_machine and set_machine_auto_reconnect', () => {
 })
 
 /*
- * #1341: what the person did is not undone by an agent on its own. A machine they disconnected is reconnected, and Auto
- * reconnect turned back on, only after their card; a machine that only dropped, and turning the switch off, need none
+ * #1341: what the person chose is not undone by an agent on its own. A machine they disconnected or turned Auto reconnect
+ * off for is reconnected, and the switch turned back on, only after their card; a machine away on its own with the switch
+ * on, and turning the switch off, need none
  */
 describe('undoing what the person did', () => {
   it('asks before it reconnects a machine the person disconnected, and connects nothing on Deny', async () => {
@@ -391,9 +392,21 @@ describe('undoing what the person did', () => {
     expect(card(orc.id)).toBeUndefined()
   })
 
-  it('reconnects a machine that only dropped with no card, whether or not its switch is off', async () => {
+  it('asks before it reconnects a machine whose Auto reconnect the person turned off, and connects nothing on Deny', async () => {
     const orc = await mgr.orchestrator()
     ops.patch({ status: 'unreachable', error: 'ssh: connect to host laptop port 22: Operation timed out', autoReconnect: false, connect: 'when_needed' })
+    const denied = await answered(orc.id, 'reconnect_machine', { machine: 'Laptop' }, 'deny')
+    expect(denied.question).toContain('Connect Laptop (me@laptop)? You turned its Auto reconnect off')
+    expect(denied.r.isError).toBe(true)
+    expect(ops.changes()).toEqual([])
+    const allowed = await answered(orc.id, 'reconnect_machine', { machine: 'Laptop' }, 'allow')
+    expect(allowed.r.text).toContain('Reconnecting Laptop.')
+    expect(ops.changes()).toEqual([['reconnect', 'laptop', { start: false }]])
+  })
+
+  it('reconnects a machine that is away on its own, its switch on, with no card', async () => {
+    const orc = await mgr.orchestrator()
+    ops.patch({ status: 'unreachable', error: 'ssh: connect to host laptop port 22: Operation timed out' })
     expect((await run(orc.id, 'reconnect_machine', { machine: 'Laptop' })).isError).toBeFalsy()
     expect(card(orc.id)).toBeUndefined()
     expect(ops.changes()).toEqual([['reconnect', 'laptop', { start: false }]])

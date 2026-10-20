@@ -87,8 +87,8 @@ function targetError(target: string): string | null {
  * makes. What changes a machine or this computer's reach (add, install, update, remove, start at boot) waits for the
  * person's card, in every preset; reconnecting and Auto reconnect do not, as the row's buttons do not ask, except
  * that reconnecting a machine where Centralu is stopped starts it, which this computer does not do by itself (#1143),
- * and that undoing what the person did asks too (#1341): reconnecting a machine they disconnected, and turning Auto
- * reconnect back on. Every
+ * and that undoing what the person chose asks too (#1341): reconnecting a machine they disconnected or turned Auto
+ * reconnect off for, and turning Auto reconnect back on. Every
  * refusal that can be known first (no such machine, a target that is no ssh target or does not answer, a build that
  * cannot install) comes before any card.
  */
@@ -126,14 +126,16 @@ export class MachineFlow {
             return done(`Starting Centralu on ${m.name}.`, ops.reconnect(m.id))
           }
           /*
-           * Disconnected by the person (#1341): only `machines.disconnect` leaves a machine `disconnected`, so an agent undoing it
-           * asks first. A machine that only dropped on its own is reconnected with no card, as the row's button does
+           * Reconnecting what the person chose not to have connected by itself is theirs to allow (#1341): they disconnected it
+           * (only `machines.disconnect` leaves a machine `disconnected`), or turned its Auto reconnect off. A machine whose
+           * switch is on that is away on its own is reconnected with no card, as the row's button does
            */
-          if (m.status === 'disconnected') {
+          if (m.status === 'disconnected' || !m.autoReconnect) {
+            const why = m.status === 'disconnected' ? 'You disconnected it' : 'You turned its Auto reconnect off'
             const refused = await this.ask(
               sessionId,
-              `Connect ${m.name} (${m.sshTarget})? You disconnected it, so nothing here connects it by itself. It connects over ssh with your keys ` +
-                'and stays connected until you disconnect it again.',
+              `Connect ${m.name} (${m.sshTarget})? ${why}, so nothing here connects it by itself. It connects over ssh with your keys ` +
+                (m.status === 'disconnected' ? 'and stays connected until you disconnect it again.' : 'now; after a drop it stays away until you connect it again.'),
               signal,
             )
             if (refused) return { ok: false, error: refused }

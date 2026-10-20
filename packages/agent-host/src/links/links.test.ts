@@ -2923,20 +2923,20 @@ describe('the machine commands on a real hub (#1219)', () => {
   }
   const run = (hub: Hub, orcId: string, command: string, args: Record<string, unknown>) => hub.mgr.runOrchestratorTool(orcId, 'centralu_run', { command, args })
 
-  it('sets Auto reconnect and reconnects a machine with no card, as the row does', async () => {
+  it('reconnects a machine whose switch is on, and turns the switch off, with no card, as the row does', async () => {
     const remote = await remoteHost()
     const hub = await hubHost(() => lineFor(remote.port))
     await eventually(() => status(hub) === 'connected')
     const orc = await hub.mgr.orchestrator()
+    expect((await run(hub, orc.id, 'reconnect_machine', { machine: 'm1' })).isError).toBeFalsy()
     const r = await run(hub, orc.id, 'set_machine_auto_reconnect', { machine: 'remote box', on: false })
     expect(r.isError).toBeFalsy()
     expect(hub.links.list()[0]!.autoReconnect).toBe(false)
     expect(r.text).toContain('auto reconnect off')
-    expect((await run(hub, orc.id, 'reconnect_machine', { machine: 'm1' })).isError).toBeFalsy()
     expect(machineCard(hub, orc.id)).toBeUndefined()
   })
 
-  it('asks before it undoes what the person did: a machine they disconnected, and Auto reconnect turned back on (#1341)', async () => {
+  it('asks before it undoes what the person chose: a machine they disconnected or turned off, and Auto reconnect turned back on (#1341)', async () => {
     const remote = await remoteHost()
     const hub = await hubHost(() => lineFor(remote.port))
     await eventually(() => status(hub) === 'connected')
