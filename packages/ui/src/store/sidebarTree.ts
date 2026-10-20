@@ -1,24 +1,36 @@
 import type { SessionSummary } from '@cc/core'
 
 /**
- * The project a session's row stands under in the sidebar (#1038). Its own, except for a child started on another
- * machine than the session that started it (start_agent with a machine): that child is a session of the machine's
- * checkout, but it hangs under its parent, as a local child does, so it goes to its parent's project. What it started
- * in its own project goes with it. An ask_project session (`askedBy` of another project on the same machine) stays in
- * its own project, as before; a loop in the links (which the host never makes) stops where it closes.
+ * What a session handed to other machines: the sessions it started (`askedBy`) on a machine other than its own, by
+ * machine (#1416). Such a child is drawn in the project that holds it, on the machine that holds it, so the parent's
+ * row cannot hold it; this is what the parent's pointer ("2 on ijun1") counts and reveals. A child on the parent's own
+ * machine, in its project or another, is not here: it hangs under the parent, or stands as an ask_project session does.
  */
-export function sidebarProjectOf(s: SessionSummary, sessions: Readonly<Record<string, SessionSummary>>): string | null {
-  const seen = new Set<string>()
-  let cur = s
-  for (;;) {
-    seen.add(cur.id)
-    const parent = cur.askedBy ? sessions[cur.askedBy] : undefined
-    if (!parent || seen.has(parent.id)) return cur.projectId
-    const otherMachine = (parent.machine ?? null) !== (cur.machine ?? null)
-    if (!otherMachine && parent.projectId !== cur.projectId) return cur.projectId
-    cur = parent
+export type HandedOff = { machine: string; sessions: SessionSummary[] }
+
+/** `handedOffBy` for every session at once, built once per `sessions` object, which the rows of one render share */
+const handedOffIndex = new WeakMap<object, Map<string, HandedOff[]>>()
+
+export function handedOffBy(parentId: string, sessions: Readonly<Record<string, SessionSummary>>): readonly HandedOff[] {
+  let index = handedOffIndex.get(sessions)
+  if (!index) {
+    index = new Map()
+    for (const s of Object.values(sessions)) {
+      const parent = s.askedBy ? sessions[s.askedBy] : undefined
+      // A child with no machine runs here, and so does a parent with none: only a difference is "on another machine"
+      if (!parent || !s.machine || s.machine === (parent.machine ?? null)) continue
+      const groups = index.get(parent.id) ?? []
+      const group = groups.find((g) => g.machine === s.machine)
+      if (group) group.sessions.push(s)
+      else groups.push({ machine: s.machine, sessions: [s] })
+      index.set(parent.id, groups)
+    }
+    handedOffIndex.set(sessions, index)
   }
+  return index.get(parentId) ?? NONE
 }
+
+const NONE: readonly HandedOff[] = []
 
 /**
  * The session a row hangs under, among the rows the list has (`inList`): the session it was forked from, else the one

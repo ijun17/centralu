@@ -483,7 +483,7 @@ export class RemoteAgents {
       preset: childPreset,
     }
     this.save([...this.records(), rec])
-    // Its row came to the windows before the hub knew whose it is: now it hangs under the caller (#1038)
+    // Its row came to the windows before the hub knew whose it is: now it names the caller as its `askedBy`, and the caller points to it (#1038, #1416)
     this.owned(rec.sessionId, callerId)
     // Its task is on its way: whose its turn is, its record there says (`messageTaken`)
     this.whose.set(rec.sessionId, 'unknown')
