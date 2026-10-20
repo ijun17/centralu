@@ -36,6 +36,7 @@ export type UpdateStep =
   | 'centralu'
   | 'build'
   | 'wait_idle'
+  | 'wait_unread'
   | 'stop'
   | 'backup'
   | 'switch'

@@ -139,7 +139,7 @@ function MachineRow({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: (ca
       {operation && (
         <p className="mt-1 text-xs leading-body text-ink" data-testid={`machine-operation-${m.id}`} data-step={m.operation?.step}>
           {operation}
-          {m.operation?.step === 'wait_idle' && (
+          {(m.operation?.step === 'wait_idle' || m.operation?.step === 'wait_unread') && (
             <>
               {' '}
               <button type="button" className={linkButton} onClick={() => void cancelUpdate(m.id)} data-testid={`machine-update-cancel-${m.id}`}>
@@ -204,7 +204,7 @@ function StopConfirm({ m, action, onCancel, onConfirm }: { m: MachineInfo; actio
   const asked = useLoad(() => machineActivity(m.id), [machineActivity, m.id])
   const activity: HostActivity | null | undefined = asked.error !== null ? null : asked.data
   // An update with sessions in a turn there waits for them (#1399); stopping them is a second, plain choice
-  const waits = action === 'Update' && activity !== undefined ? updateWaits(m.name, activity) : null
+  const waits = action === 'Update' && activity !== undefined ? updateWaits(m.name, activity, m.updateWaits) : null
   return (
     <div className="space-y-1">
       <InlineConfirm

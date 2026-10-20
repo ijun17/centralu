@@ -1424,16 +1424,18 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
   }
 
   /** A hub with a remote whose sessions are in a turn (`activity`, changed by the test), recording what ran there */
-  async function waiting(o: { noActivity?: boolean; script?: Partial<HostActivity>[]; fails?: boolean } = {}) {
+  async function waiting(o: { noActivity?: boolean; script?: (Partial<HostActivity> | 'fail')[]; fails?: boolean } = {}) {
     const reg = await fakeRegistry(['centralu', '@centralu/linux-x64'].map((name) => ({ name, version: APP_VERSION, files: { 'package.json': '{}' } })))
     cleanups.push(() => reg.close())
     const activity: HostActivity = { working: 2, approvals: 1, questions: 0, background: 0, terminals: 1, commandRuns: 0 }
     /** How many times the remote was asked what runs, and how many when the host was stopped */
     let reads = 0
     let readsAtStop = -1
+    /** While set, the remote's answer to what runs fails, as a busy or dropped remote's does */
+    let broken = !!o.fails
     const asked = (): HostActivity => {
-      if (o.fails) throw new Error('the host could not count')
       const step = o.script?.[Math.min(reads++, o.script.length - 1)]
+      if (broken || step === 'fail') throw new Error('the host could not count')
       return step ? { ...activity, working: 0, approvals: 0, questions: 0, background: 0, ...step } : activity
     }
     let running = await remoteHost(0, new Store(), { version: '0.0.1', ...(o.noActivity ? {} : { activity: asked }) })
@@ -1483,7 +1485,7 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
         .events()
         .filter((e) => e.type === 'machine_status' && e.machine.operation)
         .map((e) => e.machine.operation.step as string)
-    return { hub, u, runs, activity, idle, stepsSeen, ran: () => runs.filter((k) => k !== 'open'), readsAtStop: () => readsAtStop }
+    return { hub, u, runs, activity, idle, stepsSeen, ran: () => runs.filter((k) => k !== 'open'), readsAtStop: () => readsAtStop, breakReads: (on: boolean) => (broken = on) }
   }
 
   it('installs beside, then waits while sessions are in a turn, and stops the host only once none is', async () => {
@@ -1494,6 +1496,7 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
     await new Promise((r) => setTimeout(r, 400))
     expect(ran()).toEqual(['preflight', 'node', 'install_beside'])
     expect(hub.links.list()[0]!.operation?.step).toBe('wait_idle')
+    expect(hub.links.list()[0]!.updateWaits).toBe(true)
     idle()
     const r = await call
     expect(r).toMatchObject({ current: { version: APP_VERSION } })
@@ -1560,6 +1563,32 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
   it('reads what runs once more right before it stops the host, and keeps waiting when a turn began meanwhile', async () => {
     // Idle, then a turn, then idle twice: it stops only after the second quiet pair
     const { u, ran, readsAtStop } = await waiting({ script: [{}, { working: 1 }, {}, {}] })
+    await u.call('machines.update', { machineId: 'm1' })
+    expect(ran()).toContain('stop')
+    expect(readsAtStop()).toBeGreaterThanOrEqual(4)
+  })
+
+  // #1399 review: a busy or dropped remote fails its readings too, and stopping it then ends the turns the wait is there to keep
+  it('keeps waiting through failed readings once a turn has been seen, and stops only on a reading of none', async () => {
+    const { u, ran, idle, stepsSeen, breakReads } = await waiting()
+    const call = u.call('machines.update', { machineId: 'm1' })
+    await eventually(() => stepsSeen().includes('wait_idle'))
+    breakReads(true)
+    await eventually(() => stepsSeen().includes('wait_unread'))
+    // Many polls (40 ms each) with every reading failing: far more than the two repeats a never-read host gets
+    await new Promise((r) => setTimeout(r, 500))
+    expect(ran()).toEqual(['preflight', 'node', 'install_beside'])
+    // It reads again, sees the turns end, and goes on
+    breakReads(false)
+    idle()
+    await call
+    expect(ran()).toContain('stop')
+    expect(stepsSeen()).toContain('wait_idle')
+  })
+
+  it('does not stop on a failed reading right before the stop, but reads again', async () => {
+    // Idle, then the re-read fails, then idle twice: the host is stopped only on a successful pair
+    const { u, ran, readsAtStop } = await waiting({ script: [{}, 'fail', {}, {}] })
     await u.call('machines.update', { machineId: 'm1' })
     expect(ran()).toContain('stop')
     expect(readsAtStop()).toBeGreaterThanOrEqual(4)

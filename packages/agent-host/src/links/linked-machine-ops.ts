@@ -131,8 +131,10 @@ export class LinkedMachine extends LinkedMachineConnection {
    * `ACTIVITY_POLL_MS` (the row says `wait_idle` meanwhile). Once a reading says none, it is read again a few seconds later, right
    * before the host is held and stopped: the stop takes seconds, and a turn that began in them would end with it. A machine that
    * cannot be asked at all (a host from before `host.activity`, a link held on another protocol) is not waited for, and one whose
-   * answer failed is read again twice, then not waited for either: waiting on what cannot be seen would never end. `now`: stops
-   * at once, and the answer says how many turns that ended
+   * every answer failed is read again twice, then not waited for either: waiting on what was never seen would never end. Once an
+   * answer has come, though, the wait goes on through failed readings (the row says `wait_unread`) and the host is stopped only on
+   * a successful reading of none in a turn, since a busy or dropped remote reads as failed too; Cancel or Update now are the ways
+   * out. `now`: stops at once, and the answer says how many turns that ended
    */
   private async beforeStop(c: HostControl, when: 'idle' | 'now'): Promise<string | null> {
     if (when === 'now') {
@@ -154,30 +156,42 @@ export class LinkedMachine extends LinkedMachineConnection {
       return r
     }
     try {
-      let said = false
+      /** Which step the row shows now: null before the first, then `wait_idle` or `wait_unread` */
+      let shown: 'wait_idle' | 'wait_unread' | null = null
+      /** A reading has succeeded: from then on what runs there is known to be readable, so a failed one proves nothing */
+      let seen = false
       let blind = 0
+      const show = (step: 'wait_idle' | 'wait_unread', why: string) => {
+        if (shown === step) return
+        shown = step
+        c.step(step)
+        this.deps.log?.(`[links] ${this.name}: ${why}`)
+      }
+      const unread = () => show('wait_unread', 'what runs there cannot be read now; the update keeps waiting, since the sessions there may be in a turn (Cancel ends it)')
+      const busy = (n: number) => show('wait_idle', `the update waits for ${n} ${n === 1 ? 'session' : 'sessions'} in a turn`)
       for (;;) {
         const r = await read()
-        if (!r.activity) {
-          if (r.cannot || ++blind > ACTIVITY_UNREAD_RETRIES) {
-            this.deps.log?.(`[links] ${this.name}: it cannot be told what runs there, so the update does not wait for it`)
-            return null
-          }
-        } else {
+        if (r.activity) {
+          seen = true
           blind = 0
           const running = turnsRunning(r.activity)
           if (running === 0) {
             await pause(settle, wait.signal)
             const again = await read()
-            if (!again.activity || turnsRunning(again.activity) === 0) {
-              if (said) c.step('stop')
+            // Only a reading that succeeded and shows nobody in a turn lets the host be stopped: a failed one proves nothing
+            if (again.activity && turnsRunning(again.activity) === 0) {
+              if (shown) c.step('stop')
               return null
             }
-          } else if (!said) {
-            said = true
-            c.step('wait_idle')
-            this.deps.log?.(`[links] ${this.name}: the update waits for ${running} ${running === 1 ? 'session' : 'sessions'} in a turn`)
-          }
+            if (again.activity) busy(turnsRunning(again.activity))
+            else unread()
+          } else busy(running)
+        } else if (seen) {
+          unread()
+        } else if (r.cannot || ++blind > ACTIVITY_UNREAD_RETRIES) {
+          // Never read: there is nothing to wait for that could be seen, and waiting on it would never end
+          this.deps.log?.(`[links] ${this.name}: it cannot be told what runs there, so the update does not wait for it`)
+          return null
         }
         await pause(poll, wait.signal)
       }

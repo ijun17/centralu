@@ -78,6 +78,7 @@ export class MachinesMock {
         logon: null,
         handover: null,
         autoReconnect: true,
+        updateWaits: true,
         connect: 'at_start',
       }
       this.machinesList.push(info)

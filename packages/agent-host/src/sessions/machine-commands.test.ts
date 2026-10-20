@@ -35,6 +35,7 @@ const COMMANDS = [
 let root: string
 let store: Store
 let mgr: SessionManager
+let claude: CrossAdapter
 let rpc: (method: string, params: unknown) => Promise<unknown>
 let ops: ReturnType<typeof fakeOps>
 
@@ -77,6 +78,8 @@ function fakeOps() {
   let heldBack: string | null = null
   /** How long an update takes, to be answered while it still runs (#1399) */
   let slowUpdateMs = 0
+  /** Why an update fails once it has run for `slowUpdateMs`, or null */
+  let updateFails: string | null = null
   const find = (id: string) => machines.find((m) => m.id === id)!
   const o: MachineOps = {
     list: () => machines.map((m) => ({ ...m })),
@@ -115,6 +118,7 @@ function fakeOps() {
     update: async (id, opts) => {
       calls.push(opts?.when ? ['update', id, opts.when] : ['update', id])
       if (slowUpdateMs > 0) await new Promise((r) => setTimeout(r, slowUpdateMs))
+      if (updateFails) throw new Error(updateFails)
       return { machine: find(id), current: { version: '9.9.9-test.1' } }
     },
     autostart: async (id, on) => {
@@ -167,6 +171,9 @@ function fakeOps() {
     holdBack: (why: string | null) => {
       heldBack = why
     },
+    failUpdate: (why: string | null) => {
+      updateFails = why
+    },
     slowUpdate: (ms: number, answerMs: number) => {
       slowUpdateMs = ms
       o.updateAnswerMs = answerMs
@@ -184,6 +191,7 @@ beforeEach(() => {
   store = new Store()
   const adapters = new Map<ToolName, CrossAdapter>([['claude', new CrossAdapter('claude')]])
   const agents = adapters as unknown as Map<ToolName, AgentAdapter>
+  claude = adapters.get('claude')!
   mgr = new SessionManager(store, agents, () => {})
   ops = fakeOps()
   mgr.useMachineOps(ops.ops)
@@ -385,6 +393,23 @@ describe('install_machine', () => {
     expect(r.text).toContain('Updating Laptop is still under way (it installs beside, then waits until no session there is in a turn, and stops none).')
     expect(r.text).toContain('list_machines shows where it stands')
     expect(ops.changes()).toEqual([['update', 'laptop', 'idle']])
+  })
+
+  // #1399 review: the call was answered "still under way", so how the update ends reaches its caller some other way
+  it('tells the caller in its conversation when an update it was answered "still under way" for fails later, and when it ends', async () => {
+    ops.running({ working: 2 })
+    ops.slowUpdate(200, 40)
+    ops.failUpdate('the update of Laptop was cancelled while it waited for the sessions there to finish; nothing was switched')
+    const orc = await mgr.orchestrator()
+    const { r } = await answered(orc.id, 'install_machine', { machine: 'laptop', action: 'update' }, 'allow')
+    expect(r.text).toContain('is still under way')
+    await eventually(() =>
+      !!claude.handles.get(orc.id)?.sent.some((t) => t.includes('The update of "Laptop" you started did not finish: the update of Laptop was cancelled while it waited')),
+    )
+    // A later one that ends well is told too
+    ops.failUpdate(null)
+    await answered(orc.id, 'install_machine', { machine: 'laptop', action: 'update' }, 'allow')
+    await eventually(() => !!claude.handles.get(orc.id)?.sent.some((t) => t.includes('The update of "Laptop" you started has finished: Centralu 9.9.9-test.1 is there.')))
   })
 
   it('runs nothing when the person denies it', async () => {

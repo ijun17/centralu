@@ -229,6 +229,11 @@ export const MachineInfo = z.object({
    */
   autoReconnect: z.boolean().catch(true).default(true),
   /**
+   * `machines.update` waits for the sessions there to finish before it stops the host (#1399; see `machines.update { when }`).
+   * Additive: an older hub sends nothing and stops at once, so a window must not promise a wait without this
+   */
+  updateWaits: z.boolean().optional(),
+  /**
    * The same switch as the older connect mode (`MachineConnect`, #1134): `at_start` when `autoReconnect` is on,
    * `when_needed` when it is off. Kept for one release so an older window still reads the row; read `autoReconnect`
    */

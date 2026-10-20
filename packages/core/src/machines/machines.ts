@@ -239,11 +239,13 @@ export function updateStops(name: string, activity: HostActivity | null | undefi
 
 /**
  * What the "Update <machine>" prompt says when sessions there are in a turn (#1399): the update installs beside and waits for them,
- * and stops nothing before they are done. Null when none is, or the machine cannot say (then `updateStops` words it)
+ * and stops nothing before they are done. Null when none is, or the machine cannot say (then `updateStops` words it), or the hub
+ * does not wait (`MachineInfo.updateWaits` absent: a hub from before #1399 stops at once and ignores `when`, so the window must not
+ * promise a wait there)
  */
-export function updateWaits(name: string, activity: HostActivity | null | undefined): string | null {
+export function updateWaits(name: string, activity: HostActivity | null | undefined, hubWaits: boolean | undefined): string | null {
   const n = turnsRunning(activity)
-  if (!activity || n === 0) return null
+  if (!activity || n === 0 || hubWaits !== true) return null
   const them = n === 1 ? 'it is' : 'they are'
   return `${count(n, 'session', 'sessions')} on ${name} ${n === 1 ? 'is' : 'are'} in a turn. Update installs beside Centralu there and waits until ${them} done; nothing is stopped before that. Then it stops Centralu there while it switches: its terminals and running commands end with it, and sessions resume on the new version.`
 }
@@ -254,6 +256,7 @@ const STEP_TEXT: Record<string, string> = {
   node: 'installing Node',
   centralu: 'installing Centralu',
   wait_idle: 'waiting for its sessions to finish',
+  wait_unread: 'waiting: it cannot read what runs there now',
   stop: 'stopping Centralu there',
   switch: 'switching versions',
   start: 'starting Centralu there',

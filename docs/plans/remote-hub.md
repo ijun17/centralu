@@ -456,7 +456,9 @@ through an additive call, since the hub's mirror knows sessions but not terminal
 1. Install the new version beside the running one (§10.2). The running host is not touched; a failure leaves at most
    a `.partial` folder.
 2. **Wait until no session there is in a turn** (#1399; the person can stop the wait, or choose to stop the turns): a remote
-   has no keeper to hand agents over, so the update does not end a turn on its own. Then stop the running host in order
+   has no keeper to hand agents over, so the update does not end a turn on its own. Once a reading has succeeded the wait goes
+   on through failed readings (a busy or dropped remote fails them too) and ends only on a successful reading of none, taken
+   twice; a machine never read successfully is not waited for. Then stop the running host in order
    (`serve --stop`, §10.4). Without a keeper this ends its agents; their sessions resume on the new host through the stored
    external ids, as after any restart. A turn that begins in the seconds between the last reading and the stop is lost; the
    reading is taken twice for that, and `host.stop { ifIdle }` (the drain, `lifecycle/stop-gate.ts`) would close it for good
