@@ -973,26 +973,52 @@ export class MailService {
       }
       const result: { recipient: string; resent: number; held: number }[] = []
       for (const [recipient, messages] of byRecipient) {
-        const again = messages.filter((m) => m.kind === 'notice' || m.sender === CENTRALU)
-        const unsure = messages.filter((m) => !again.includes(m))
-        if (again.length > 0) {
-          this.records.markMaybeRepeated(recipient, again.map((m) => m.id), now)
-          this.changed(again[0]?.threadId ?? '', [recipient])
-        }
-        if (unsure.length > 0) {
-          this.records.markUncertain(recipient, unsure.map((m) => m.id))
-          for (const threadId of new Set(unsure.map((m) => m.threadId))) {
-            const n = unsure.filter((m) => m.threadId === threadId).length
-            this.insertEvent(threadId, 'A delivery may not have arrived when Centralu restarted. It was not sent again.', { change: 'delivery_uncertain', recipient, messages: n }, now)
-          }
-        }
-        result.push({ recipient, resent: again.length, held: unsure.length })
+        result.push({ recipient, ...this.settleUncertain(recipient, messages, 'restart', now) })
       }
       return result
     })
     // What is held `uncertain` waits for the person's Resend or Dismiss: the Inbox is told
     this.announceMessages(left.map((r) => r.messageId))
     return out
+  }
+
+  /**
+   * A wake the tool failed after the wait for it ran out (§7.6.5, the same uncertainty as a restart's): the tool had been counted as
+   * having taken it, and a failure told this late (a session stopped or closed, a turn that took the input among others ended in an
+   * error) does not prove it never ran it. The receipts that wake delivered (matched by `deliveredAt`) are unread and undelivered
+   * again, in the same transaction, and treated as a restart's: held `uncertain` and said in the thread, or, for news that starts no
+   * work, sent again with the note that it may be a repeat. Mail handled, held or delivered again since is left alone
+   */
+  deliveryFailedLate(recipient: string, messageIds: readonly string[], deliveredAt: number): { resent: number; held: number } {
+    const out = this.run(() => {
+      const ids = this.records.undeliver(recipient, messageIds, deliveredAt)
+      const messages = ids.flatMap((id) => this.records.message(id) ?? [])
+      return this.settleUncertain(recipient, messages, 'late', this.now())
+    })
+    this.announceMessages(messageIds)
+    return out
+  }
+
+  /** Mail whose delivery may or may not have gone: news and Centralu's own words go again, the rest is held for the person */
+  private settleUncertain(recipient: string, messages: readonly MessageRow[], cause: 'restart' | 'late', now: number): { resent: number; held: number } {
+    const again = messages.filter((m) => m.kind === 'notice' || m.sender === CENTRALU)
+    const unsure = messages.filter((m) => !again.includes(m))
+    if (again.length > 0) {
+      this.records.markMaybeRepeated(recipient, again.map((m) => m.id), now)
+      this.changed(again[0]?.threadId ?? '', [recipient])
+    }
+    if (unsure.length > 0) {
+      this.records.markUncertain(recipient, unsure.map((m) => m.id))
+      const said =
+        cause === 'restart'
+          ? 'A delivery may not have arrived when Centralu restarted. It was not sent again.'
+          : 'A delivery may have reached the session although its tool then reported a failure. It was not sent again.'
+      for (const threadId of new Set(unsure.map((m) => m.threadId))) {
+        const n = unsure.filter((m) => m.threadId === threadId).length
+        this.insertEvent(threadId, said, { change: 'delivery_uncertain', cause, recipient, messages: n }, now)
+      }
+    }
+    return { resent: again.length, held: unsure.length }
   }
 
   /** The person says send it (or sent it again after a failure): mail held for a reason that needs them goes now (§7.6.5, Inbox: Resend / Retry) */

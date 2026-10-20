@@ -1076,7 +1076,7 @@ describe('the Inbox is told when mail is held for the person (§7.6, §7.7, §7.
     await w.advance(2_000)
     expect(toPerson().map((c) => c.threadId)).not.toContain(thread.id)
     w.lates[0]!(new Error('the session closed with it queued'))
-    expect(w.store.mail.heldReceipts().map((r) => r.held)).toEqual(['failed'])
+    expect(w.store.mail.heldReceipts().map((r) => r.held)).toEqual(['uncertain'])
     expect(toPerson().map((c) => c.threadId)).toContain(thread.id)
   })
 

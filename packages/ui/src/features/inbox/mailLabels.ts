@@ -51,7 +51,7 @@ export function heldLabel(reason: string): { why: string; action: string; kind: 
     case 'policy':
       return { why: 'Held: this session runs without asking, and this is from a session or an app it has no work with', action: 'Release', kind: 'release' }
     case 'uncertain':
-      return { why: 'It may already have reached the session when Centralu stopped', action: 'Send again', kind: 'release' }
+      return { why: 'It may already have reached the session, and the session may already have run it', action: 'Send again', kind: 'release' }
     case 'failed':
       return { why: 'It could not be delivered', action: 'Retry', kind: 'release' }
     default:
