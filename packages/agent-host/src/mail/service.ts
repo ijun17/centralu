@@ -159,7 +159,14 @@ export type ReadMessage = Omit<MessageRow, 'facts'> & {
   receipts?: { recipient: string; delivered: boolean; read: boolean; handled: boolean }[]
 }
 
-export type ThreadView = { thread: ThreadRow; participants: ParticipantRow[]; blockers: BlockerRow[]; messages: ReadMessage[] }
+export type ThreadView = {
+  thread: ThreadRow
+  participants: ParticipantRow[]
+  blockers: BlockerRow[]
+  messages: ReadMessage[]
+  /** There are messages before the first one returned (`tail`) */
+  older?: boolean
+}
 
 export type ReadOptions = {
   /** From the start, not from where the reader last read */
@@ -170,6 +177,12 @@ export type ReadOptions = {
   peek?: boolean
   /** At most this many messages: the reader is moved on only as far as it got */
   limit?: number
+  /**
+   * The last this many messages of the thread (or of those before `before`), and, unless they are an earlier page, the whole thread is
+   * read: what the Inbox shows of a long thread is its end, where the question waiting for the person is
+   */
+  tail?: number
+  before?: number
 }
 
 /** What a delivery to one receiver would send now (§7.5, §7.6) */
@@ -302,6 +315,30 @@ export class MailService {
       }
     }
     return result
+  }
+
+  /**
+   * The person has something to act on that no post made: mail held for them (a failed delivery, a pause, a policy), one thing dismissed,
+   * or the question about sleeping sessions (`threadId` ''). The state is written already; the listeners (the Inbox's news) are told now
+   */
+  announce(threadId: string): void {
+    for (const listener of this.listeners) {
+      try {
+        listener({ threadId, recipients: [PERSON] })
+      } catch (e) {
+        console.error(`[mail] a listener failed: ${errorMessage(e)}`)
+      }
+    }
+  }
+
+  /** `announce` for the threads these messages are in */
+  announceMessages(messageIds: readonly string[]): void {
+    const threads = new Set<string>()
+    for (const id of messageIds) {
+      const m = this.records.message(id)
+      if (m) threads.add(m.threadId)
+    }
+    for (const threadId of threads) this.announce(threadId)
   }
 
   private changed(threadId: string, recipients: readonly string[] = []): void {
@@ -570,7 +607,8 @@ export class MailService {
     if (!standing) throw refuse('not_participant', `${reader} is not in thread ${threadId}`)
     const position = this.records.readPosition(thread.id, reader)
     const after = opts.after ?? (opts.all ? 0 : position)
-    const messages = this.records.messagesAfter(thread.id, after, opts.limit)
+    const tailed = opts.tail !== undefined
+    const messages = tailed ? this.records.messagesTail(thread.id, opts.tail ?? 0, opts.before) : this.records.messagesAfter(thread.id, after, opts.limit)
     const view: ReadMessage[] = messages.map((m) => {
       const { facts, ...rest } = m
       const out: ReadMessage = party.kind === 'app' ? rest : { ...rest, facts }
@@ -585,6 +623,21 @@ export class MailService {
       return out
     })
     const last = messages.at(-1)?.seq
+    if (tailed) {
+      // The end of the thread was opened (not an earlier page): it is read to its end, and the earlier part stays there to be asked for
+      if (!opts.peek && opts.before === undefined && last !== undefined && party.kind !== 'centralu') {
+        this.records.markThreadRead(reader, thread.id, this.now())
+        this.records.setReadPosition(thread.id, reader, Math.max(position, last))
+      }
+      const first = messages[0]?.seq
+      return {
+        thread,
+        participants: this.records.participants(thread.id),
+        blockers: this.records.blockers(thread.id),
+        messages: view,
+        older: first !== undefined && this.records.hasMessagesBefore(thread.id, first),
+      }
+    }
     if (!opts.peek && last !== undefined && party.kind !== 'centralu') {
       // Only what was returned is read, and the place moves only when it joins on to where the reader was: reading from
       // further on (an app's `after`) leaves a gap, and the gap stays unread
@@ -911,14 +964,14 @@ export class MailService {
   reconcileInterrupted(): { recipient: string; resent: number; held: number }[] {
     const left = this.records.attemptedUnconfirmed()
     if (left.length === 0) return []
-    return this.run(() => {
+    const out = this.run(() => {
       const now = this.now()
       const byRecipient = new Map<string, MessageRow[]>()
       for (const r of left) {
         const m = this.records.message(r.messageId)
         if (m) byRecipient.set(r.recipient, [...(byRecipient.get(r.recipient) ?? []), m])
       }
-      const out: { recipient: string; resent: number; held: number }[] = []
+      const result: { recipient: string; resent: number; held: number }[] = []
       for (const [recipient, messages] of byRecipient) {
         const again = messages.filter((m) => m.kind === 'notice' || m.sender === CENTRALU)
         const unsure = messages.filter((m) => !again.includes(m))
@@ -933,10 +986,13 @@ export class MailService {
             this.insertEvent(threadId, 'A delivery may not have arrived when Centralu restarted. It was not sent again.', { change: 'delivery_uncertain', recipient, messages: n }, now)
           }
         }
-        out.push({ recipient, resent: again.length, held: unsure.length })
+        result.push({ recipient, resent: again.length, held: unsure.length })
       }
-      return out
+      return result
     })
+    // What is held `uncertain` waits for the person's Resend or Dismiss: the Inbox is told
+    this.announceMessages(left.map((r) => r.messageId))
+    return out
   }
 
   /** The person says send it (or sent it again after a failure): mail held for a reason that needs them goes now (§7.6.5, Inbox: Resend / Retry) */
@@ -953,7 +1009,9 @@ export class MailService {
 
   /** The person says never: the mail is left undelivered, and not held against anyone (Inbox: Dismiss) */
   dismissHeld(recipient: string, messageIds: readonly string[]): number {
-    return this.run(() => this.records.releaseHeld(recipient, messageIds, 'dismissed', this.now()))
+    const n = this.run(() => this.records.releaseHeld(recipient, messageIds, 'dismissed', this.now()))
+    this.announceMessages(messageIds)
+    return n
   }
 
   // ── Retention ──

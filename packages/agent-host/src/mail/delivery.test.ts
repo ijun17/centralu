@@ -1047,6 +1047,93 @@ describe('the token guard (§7.9)', () => {
   })
 })
 
+describe('the Inbox is told when mail is held for the person (§7.6, §7.7, §7.9)', () => {
+  const MIN = 60_000
+  const watch = (w: ReturnType<typeof world>) => {
+    const told: { threadId: string; recipients: string[] }[] = []
+    w.mail.onChange((c) => void told.push(c))
+    return () => told.filter((c) => c.recipients.includes(PERSON))
+  }
+
+  it('a delivery that failed six times, and a pause for a thread’s turns, are announced with the thread', async () => {
+    const w = world()
+    const toPerson = watch(w)
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    w.behaviour.fail = new Error('the tool will not start')
+    const { thread } = assign(w)
+    await w.advance(30 * MIN)
+    expect(w.store.mail.heldReceipts().map((r) => r.held)).toEqual(['failed'])
+    expect(toPerson().map((c) => c.threadId)).toContain(thread.id)
+  })
+
+  it('a wake the tool failed after the wait for it ran out, held for the person, is announced with the thread', async () => {
+    const w = world()
+    const toPerson = watch(w)
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    const { thread } = assign(w)
+    await w.advance(2_000)
+    expect(toPerson().map((c) => c.threadId)).not.toContain(thread.id)
+    w.lates[0]!(new Error('the session closed with it queued'))
+    expect(w.store.mail.heldReceipts().map((r) => r.held)).toEqual(['failed'])
+    expect(toPerson().map((c) => c.threadId)).toContain(thread.id)
+  })
+
+  it('a hold for a policy or a spent budget is announced, also when no turn can tell the receiver of it', async () => {
+    const w = world()
+    const toPerson = watch(w)
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    w.states.set('s2', { kind: 'ready', live: false, quiet: false, auto: true })
+    const { thread } = assign(w)
+    const S3 = sessionAddress(HOST, 's3')
+    w.mail.addMember(thread.id, S1, S3)
+    await w.advance(3_000)
+    const before = toPerson().length
+    w.mail.post(thread.id, S3, { kind: 'note', body: 'a word' })
+    await w.advance(5 * MIN)
+    expect(w.store.mail.heldReceipts().map((r) => r.held)).toEqual(['policy'])
+    expect(toPerson().length).toBeGreaterThan(before)
+    expect(toPerson().at(-1)!.threadId).toBe(thread.id)
+  })
+
+  it('what a dead host left half done, and Dismiss, are announced', async () => {
+    const w = world()
+    const { message, thread } = assign(w)
+    w.store.mail.markAttempt(S2, [message.id], w.clock.t)
+    w.clock.t += 60_000
+    const toPerson = watch(w)
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    await w.advance(1_000)
+    expect(toPerson().map((c) => c.threadId)).toContain(thread.id)
+    const n = toPerson().length
+    expect(w.mail.dismissHeld(S2, [message.id])).toBe(1)
+    expect(toPerson().length).toBeGreaterThan(n)
+  })
+
+  it('the question about sleeping sessions is announced when it comes up and when it is answered', async () => {
+    const w = world({ heartbeat: NOW - 3 * 60 * MIN })
+    const toPerson = watch(w)
+    for (let i = 0; i < 12; i++) {
+      w.states.set(`a${i}`, { kind: 'ready', live: false, quiet: false })
+      openBy(w.mail, { by: S1, kind: 'assign', subject: `a${i}`, body: 'x', assignee: sessionAddress(HOST, `a${i}`) })
+    }
+    const before = toPerson().length
+    w.clock.t += 3_000
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    await w.advance(1_000)
+    expect(w.delivery.crowdWaiting()).toBe(12)
+    expect(toPerson().slice(before).some((c) => c.threadId === '')).toBe(true)
+    const asked = toPerson().length
+    await w.delivery.answerCrowd(false)
+    expect(toPerson().length).toBeGreaterThan(asked)
+    expect(toPerson().at(-1)!.threadId).toBe('')
+  })
+})
+
 describe('the turn belongs to the receiver’s work thread (§6)', () => {
   it('also when a thread it owns has older mail in the same wake', async () => {
     const w = world()

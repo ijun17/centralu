@@ -571,6 +571,14 @@ export class MailRecords {
     return row && toMessage(row)
   }
 
+  /** The latest message of a thread that is not an event: what the Inbox shows as its last word */
+  lastMessageOf(threadId: string): MessageRow | undefined {
+    const row = this.db
+      .prepare<[string], MessageSql>(`SELECT * FROM mail_messages WHERE thread_id = ? AND kind <> 'event' ORDER BY seq DESC LIMIT 1`)
+      .get(threadId)
+    return row && toMessage(row)
+  }
+
   message(id: string): MessageRow | undefined {
     const row = this.db.prepare<[string], MessageSql>(`SELECT * FROM mail_messages WHERE id = ?`).get(id)
     return row && toMessage(row)
@@ -593,6 +601,28 @@ export class MailRecords {
   }
 
   /** A thread's messages after `seq`, oldest first */
+  /** The last `n` messages of a thread, or the last `n` before `before` (a `seq`), oldest first: what the Inbox shows of a long thread */
+  messagesTail(threadId: string, n: number, before?: number): MessageRow[] {
+    return this.db
+      .prepare<[string, number, number], MessageSql>(
+        `SELECT * FROM (SELECT * FROM mail_messages WHERE thread_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?) ORDER BY seq`,
+      )
+      .all(threadId, before ?? Number.MAX_SAFE_INTEGER, n)
+      .map(toMessage)
+  }
+
+  /** Whether the thread has a message before `seq` */
+  hasMessagesBefore(threadId: string, seq: number): boolean {
+    return !!this.db.prepare<[string, number], { one: number }>(`SELECT 1 AS one FROM mail_messages WHERE thread_id = ? AND seq < ? LIMIT 1`).get(threadId, seq)
+  }
+
+  /** Everything of the thread `recipient` has not read is read: the person opened its end, and the earlier part is theirs to ask for */
+  markThreadRead(recipient: string, threadId: string, now: number): number {
+    return this.db
+      .prepare(`UPDATE mail_receipts SET read_at = ? WHERE recipient = ? AND read_at IS NULL AND message_id IN (SELECT id FROM mail_messages WHERE thread_id = ?)`)
+      .run(now, recipient, threadId).changes
+  }
+
   messagesAfter(threadId: string, seq: number, limit = 500): MessageRow[] {
     return this.db
       .prepare<[string, number, number], MessageSql>(`SELECT * FROM mail_messages WHERE thread_id = ? AND seq > ? ORDER BY seq LIMIT ?`)

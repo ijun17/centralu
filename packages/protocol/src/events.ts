@@ -721,6 +721,12 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    */
   z.object({ ...appScoped, type: z.literal('update_status'), status: UpdateStatus }),
   /**
+   * A thread of the mailbox changed (#1347, docs/plans/mailbox.md §10.1): a message, a state, a party, a receipt the person acts
+   * on. App-wide like `update_status`: the Inbox reads its list again, or the open thread. It names the thread and nothing of
+   * its content, which the person's screen asks for (`mail.thread`); `toPerson` says the person has something to read in it.
+   */
+  z.object({ ...appScoped, type: z.literal('mail_changed'), threadId: z.string(), toPerson: z.boolean().default(false) }),
+  /**
    * An agent asked to apply the installed update (#665, `update_centralu` action "apply"): each window that hears this
    * makes the checks its "Apply now" makes and answers with `updates.answerApply`. Nothing relaunches yet; a window
    * the host picks is told so by `update_apply_go`. A replay of this event after the host stopped asking is answered

@@ -181,6 +181,7 @@ export class MailDelivery {
     if (this.crowd?.includes(address)) {
       this.crowd = this.crowd.filter((r) => r !== address)
       if (this.crowd.length === 0) this.crowd = null
+      this.crowdChanged()
     }
     this.look(address)
   }
@@ -245,8 +246,10 @@ export class MailDelivery {
       } else awake.push(recipient)
     }
     asleep.sort((a, b) => a.rank - b.rank)
-    if (asleep.length > this.o.crowdOver) this.crowd = asleep.map((a) => a.recipient)
-    else await this.wakeInOrder(asleep.map((a) => a.recipient))
+    if (asleep.length > this.o.crowdOver) {
+      this.crowd = asleep.map((a) => a.recipient)
+      this.crowdChanged()
+    } else await this.wakeInOrder(asleep.map((a) => a.recipient))
     await Promise.all(awake.map((r) => this.process(r)))
   }
 
@@ -266,6 +269,7 @@ export class MailDelivery {
     const crowd = this.crowd
     this.crowd = null
     if (!crowd) return
+    this.crowdChanged()
     if (!wake) {
       for (const r of crowd) this.left.add(r)
       return
@@ -303,7 +307,7 @@ export class MailDelivery {
     if (attempts >= this.o.maxAttempts) {
       this.records.transaction(() => {
         this.records.failAttempt(recipient, messageIds, error, this.now())
-        this.records.setHeld(recipient, messageIds, 'failed')
+        this.hold(recipient, messageIds, 'failed')
       })
       return
     }
@@ -324,7 +328,7 @@ export class MailDelivery {
       const ids = this.records.undeliver(recipient, messageIds, deliveredAt)
       if (ids.length === 0) return
       this.records.failAttempt(recipient, ids, errorMessage(cause), this.now())
-      this.records.setHeld(recipient, ids, 'failed')
+      this.hold(recipient, ids, 'failed')
     })
   }
 
@@ -454,7 +458,7 @@ export class MailDelivery {
       const heldIds = new Set(drained.quieted.map((q) => q.messageId))
       this.records.markDelivered(recipient, drained.messageIds, drained.inline.filter((id) => !heldIds.has(id)), deliveredAt)
       for (const reason of new Set(drained.quieted.map((q) => q.reason))) {
-        this.records.setHeld(recipient, drained.quieted.filter((q) => q.reason === reason).map((q) => q.messageId), reason)
+        this.hold(recipient, drained.quieted.filter((q) => q.reason === reason).map((q) => q.messageId), reason)
       }
     })
     if (!quiet) this.lastWake.set(recipient, this.now())
@@ -463,6 +467,7 @@ export class MailDelivery {
       this.left.delete(recipient)
       this.crowd = this.crowd?.filter((r) => r !== recipient) ?? null
       if (this.crowd?.length === 0) this.crowd = null
+      this.crowdChanged()
     }
   }
 
@@ -489,8 +494,19 @@ export class MailDelivery {
 
   private holdBack(recipient: string, held: readonly { messageId: string; reason: string }[]): void {
     for (const reason of new Set(held.map((h) => h.reason))) {
-      this.records.setHeld(recipient, held.filter((h) => h.reason === reason).map((h) => h.messageId), reason)
+      this.hold(recipient, held.filter((h) => h.reason === reason).map((h) => h.messageId), reason)
     }
+  }
+
+  /** Mail held for the person to act on: written, and the Inbox is told (it lists it with the button that frees it) */
+  private hold(recipient: string, messageIds: readonly string[], reason: string): void {
+    this.records.setHeld(recipient, messageIds, reason)
+    this.service.announceMessages(messageIds)
+  }
+
+  /** The question about sleeping sessions came up, or was answered or went away: the Inbox is told */
+  private crowdChanged(): void {
+    this.service.announce('')
   }
 
   /** The person pressed Resume on a session whose mail was paused for its budget: counted anew, and what was held goes now */

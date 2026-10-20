@@ -293,6 +293,9 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   // A project event, so there is no sessionId (#34) — the same rule as update_status
   { type: 'fs_changed', projectId: 'p1', dirs: ['', 'src'] },
   { type: 'update_status', status: { current: '0.1.0-beta.2' } },
+  // The mailbox (#1347): a thread changed, named and nothing of its content; an older sender omits `toPerson`
+  { type: 'mail_changed', threadId: 'hub-aaaaaaaa.t_01J', toPerson: true },
+  { type: 'mail_changed', threadId: 'hub-aaaaaaaa.t_01J' },
   {
     type: 'update_status',
     status: {

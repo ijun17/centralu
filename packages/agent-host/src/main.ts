@@ -21,6 +21,7 @@ import { UserAppAdoption, adoptedProjectOf, adoptedUserApp } from './user-app-ad
 import { SessionManager } from './sessions/manager.js'
 import { MailService } from './mail/service.js'
 import { MailDelivery } from './mail/delivery.js'
+import { MailPerson } from './mail/person.js'
 import { MailTool } from './mail/tool.js'
 import { MailTurns } from './mail/turns.js'
 import { mailRelations } from './mail/relations.js'
@@ -419,6 +420,14 @@ const mailDelivery = new MailDelivery(mail, store.mail, mgr.mailSessions(), {
     },
   },
 })
+// The person's side of the mailbox (§10.1) and the news that a thread changed, for the Inbox to read again
+const mailPerson = new MailPerson(mail, store.mail, mailDelivery, {
+  session: (id) => {
+    const s = mgr.sessionInfo(id)
+    return s ? { name: s.name, state: s.state } : undefined
+  },
+})
+mail.onChange((c) => events.push({ type: 'mail_changed', threadId: c.threadId, toPerson: c.recipients.includes('person') }))
 // A session that goes to the trash leaves the work it held in the mailbox to the person or to nobody (§3.3); one that comes
 // to rest, answers a card or is restored may now take the mail it was holding
 mgr.useMail({ sessionGone: (id) => void mail.sessionGone(id), sessionChanged: (id) => mailDelivery.poke(id), sessionEvent: (e, ended) => mailTurns.observe(e, ended), tool: (id, args) => mailTool.run(id, args) })
@@ -672,6 +681,7 @@ const router: Router = new Router({
     activity: () => activityCounts(activity()),
     updateApply,
     hubs,
+    mail: mailPerson,
   }),
   machines: () => links.all(),
   order: storeProjectOrder(store),

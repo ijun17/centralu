@@ -1,6 +1,7 @@
 import type { z } from 'zod'
 import { appMethods } from './commands/methods/apps.js'
 import { hostMethods } from './commands/methods/host.js'
+import { mailMethods } from './commands/methods/mail.js'
 import { orchestratorMethods } from './commands/methods/orchestrator.js'
 import { projectMethods } from './commands/methods/projects.js'
 import { sessionMethods } from './commands/methods/sessions.js'
@@ -26,6 +27,7 @@ export const RpcMethods = {
   ...terminalMethods,
   ...appMethods,
   ...hostMethods,
+  ...mailMethods,
   ...settingsMethods,
 } as const
 
