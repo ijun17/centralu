@@ -9,6 +9,7 @@ import { writeHandoffNoteSync } from '../dev-services/handoff-notes.js'
 import { rpcError } from '../rpc-error.js'
 import { agentDepthKey } from './agent-depth.js'
 import { presetFromHub, startedFromHubKey } from './hub-preset.js'
+import { adoptOpenedSettings } from './opened-settings.js'
 import type { AppSessions } from './app-sessions.js'
 import type { CardRests } from './card-rest.js'
 import type { DelegationHost } from './delegation-flow.js'
@@ -321,6 +322,8 @@ export class SessionStarts {
       throw rpcError(`Could not start ${params.tool} session: ${msg}${left ? ` (${left})` : ''}`)
     }
 
+    // An imported conversation keeps the model it was started with: the record follows what runs (#1369), before it is saved
+    adoptOpenedSettings(handle, info, { model: info.model, effort: info.effort }, !!params.resumeExternalId)
     this.host.meta.set(id, info)
     this.host.store.sessions.upsertSession(info)
     if (noCodeIntelligence) this.host.store.settings.setAppSetting(codeIntelligenceKey(id), 'off')
@@ -803,6 +806,14 @@ export class SessionStarts {
         // too (Codex holds its lock the whole time it runs)
         await handle.dispose().catch(() => {})
         return { session: m, resumed: false, reason: leaving }
+      }
+      /*
+       * What the tool's conversation turned out to run with, taken into the record before anything reads it (#1369):
+       * `launched` below becomes what this process runs, and the record follows it
+       */
+      if (adoptOpenedSettings(handle, m, launched, m.importedFrom != null)) {
+        this.host.store.sessions.upsertSession(m)
+        this.host.emit({ type: 'settings_changed', sessionId, model: m.model, effort: m.effort, verbosity: m.verbosity, serviceTier: m.serviceTier, by: 'tool' })
       }
       this.host.handles.set(sessionId, handle)
       if (!adopt) {
