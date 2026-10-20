@@ -224,10 +224,13 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
    */
   get attemptUnderWay(): boolean {
     if (this.reachable || this.stopped) return false
-    return this.opening !== null || this.status === 'connecting' || this.status === 'starting' || this.redialing
+    return this.opening !== null || this.status === 'connecting' || this.status === 'starting'
   }
 
-  /** The client is dialling the forward again after a drop, or shaking hands: it has not given up (`gaveUp`) */
+  /**
+   * The client is dialling the forward again after a drop, or shaking hands: it has not given up (`gaveUp`). Not an attempt a
+   * call waits for (it is answered as not reachable right now, as before), but not the person's to connect either
+   */
   private get redialing(): boolean {
     return this.client !== null && this.client !== this.gaveUp
   }
