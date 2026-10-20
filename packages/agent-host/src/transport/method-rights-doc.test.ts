@@ -64,6 +64,7 @@ const REREAD = 'a read, made again after Allow to check that what the card named
 const CARDED_YET_EVERYDAY: Record<string, string> = {
   'apps.list': REREAD,
   'prefs.get': REREAD,
+  'sessions.list': REREAD,
 }
 
 /**
