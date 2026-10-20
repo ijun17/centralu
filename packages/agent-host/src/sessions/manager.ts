@@ -1653,6 +1653,8 @@ export class SessionManager {
     if (!this.sessionIdle(sessionId).idle || this.waitsOn(sessionId).length > 0) return false
     this.handles.delete(sessionId)
     this.running.delete(sessionId)
+    // No process to adopt any more: its compaction ceiling is of no use to a later host (#1376)
+    this.modelWindows.forget(sessionId)
     this.emit({ type: 'session_live', sessionId, live: false, reason: 'asleep' })
     const going = (async () => {
       await h.dispose().catch(() => {})

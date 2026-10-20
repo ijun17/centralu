@@ -304,6 +304,7 @@ export class SessionStarts {
       }
     } catch (err) {
       this.host.record.unborn.delete(id)
+      this.host.modelWindows.forget(id)
       apps?.close()
       // A session that never came up is not a builder session — clear the slot the app points at
       if (params.builderOf) this.host.appSessions.setBuilder(params.builderOf, null, id)
@@ -487,10 +488,11 @@ export class SessionStarts {
    * whose window reading follows the point it was started with, said to `ModelWindows`, so that reading is not taken for the
    * model's window; another tool's readings always count.
    */
-  private autoCompactFor(m: SessionInfo, adopted: boolean): Pick<CreateSessionOpts, 'autoCompactTokens'> {
+  private autoCompactFor(m: SessionInfo, adopted: boolean): Pick<CreateSessionOpts, 'autoCompactTokens' | 'autoCompactCeiling'> {
     const { tokens } = autoCompactPlan(autoCompactOf(this.host.uiPreferences()), this.host.modelWindows, m)
     this.host.modelWindows.started(m.id, tokens === null ? null : (this.host.adapters.get(m.tool)?.windowCeilingFor?.(tokens) ?? null), adopted)
-    return tokens === null ? {} : { autoCompactTokens: tokens }
+    const kept = adopted ? this.host.modelWindows.ceilingOf(m.id) : null
+    return { ...(tokens === null ? {} : { autoCompactTokens: tokens }), ...(kept === null ? {} : { autoCompactCeiling: kept }) }
   }
 
   /**
@@ -898,6 +900,8 @@ export class SessionStarts {
       )
       return { session: m, resumed: true }
     } catch (err) {
+      // No process came up for it: the ceiling written for the start is no use (#1376)
+      this.host.modelWindows.forget(sessionId)
       /*
        * Only digs into why it failed **after** it has already failed.
        *

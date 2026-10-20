@@ -64,6 +64,12 @@ export type CreateSessionOpts = {
    * reserve), Codex as `model_auto_compact_token_limit`. Absent: nothing is passed and the agent's own settings decide.
    */
   autoCompactTokens?: number
+  /**
+   * For a process the host adopts (a host swap): the compaction window it was started with, which it keeps whatever the
+   * setting says by now (`ModelWindows.started`). Absent when it was started without one, or the host that started it did not
+   * say. The adapter compares where the tool says it compacts with this, not with `autoCompactTokens`.
+   */
+  autoCompactCeiling?: number
   permissionPreset: PermissionPreset
   /**
    * Whether this session's working folder is trusted (M4 decision 3, #92, #152) — **whether files
