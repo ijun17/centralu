@@ -199,6 +199,8 @@ export class ChildReports {
       if (this.host.children.pausedReports.has(sessionId)) this.settlePausedReport(sessionId)
       return
     }
+    // The report of paused work that ended with no turn after it, when the session's last turn was the person's: its last response is theirs, not the work's (#1377). Read before the report is closed
+    const theirs = !!settled && this.host.children.lastTurnBy(sessionId) === 'person'
     // Only a turn that completed is paused: a failed or stopped one is reported as it ended (#698)
     const running = ending.type === 'turn_complete' && !settled ? this.ownTasksRunning(sessionId) : []
     const paused = running.length > 0
@@ -218,7 +220,8 @@ export class ChildReports {
      */
     const { name, project } = this.reportedAs(target)
     const work = paused ? { paused: running, stoppable: target.askedBy === orchestratorId } : settled ? { settled } : undefined
-    await this.deliverReport(orchestratorId, sessionId, name, project, answer !== undefined ? clipPreview(answer, 600) : previewOf(this.host.store.messages, sessionId, 600), ending, work, this.answerSeq(sessionId), turn)
+    const preview = theirs ? "(not read: the session's last turn was the person's; read_session shows it)" : answer !== undefined ? clipPreview(answer, 600) : previewOf(this.host.store.messages, sessionId, 600)
+    await this.deliverReport(orchestratorId, sessionId, name, project, preview, ending, work, theirs ? undefined : this.answerSeq(sessionId), turn)
   }
 
   /** Where the session's last response starts, as its preview reads it (#1186): the report names the read that shows it */

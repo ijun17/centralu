@@ -250,6 +250,9 @@ describe('a child that waits on its own background work (#721)', () => {
       for (let i = 0; i < 50 && reportsTo(caller, child).length < 2; i++) await vi.advanceTimersByTimeAsync(0)
       expect(reportsTo(caller, child)).toHaveLength(2)
       expect(reportsTo(caller, child)[1]).toContain("background work ended (pnpm verify: completed) and no turn followed")
+      // The last response there is the person's answer: not the work's to report
+      expect(reportsTo(caller, child)[1]).not.toContain('Done checking.')
+      expect(reportsTo(caller, child)[1]).toContain("the session's last turn was the person's")
     })
 
     it("row 2: the caller's message starts the turn: the delegated work's, reported (also when a person asked in between)", async () => {

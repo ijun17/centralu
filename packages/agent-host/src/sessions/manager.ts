@@ -878,8 +878,10 @@ export class SessionManager {
             this.store.sessions.upsertSession(m)
             this.emit(change)
             // Its turn is over: the report it owed says so now, rather than naming a later turn (#698)
-            if (this.children.awaitingReport.has(m.id)) void this.reports.reportBackIfAwaited(m.id, { type: 'state_change', sessionId: m.id, state: 'idle' })
-            else void this.reports.tellAskerOfInterruption(m.id, this.children.turnOwners.get(m.id)?.callerId)
+            // Whose the turn was (#1377): the person's is reported to nobody
+            const turnBy = this.children.turnEnded(m.id)
+            if (this.children.awaitingReport.has(m.id)) void this.reports.reportBackIfAwaited(m.id, { type: 'state_change', sessionId: m.id, state: 'idle' }, undefined, undefined, turnBy)
+            else if (turnBy.by !== 'person') void this.reports.tellAskerOfInterruption(m.id, this.children.turnOwners.get(m.id)?.callerId)
           } else if (this.children.pausedReports.has(m.id)) {
             // The background work its report waited on went with the process (#721): the work stopped
             void this.reports.reportBackIfAwaited(m.id, { type: 'state_change', sessionId: m.id, state: 'idle' })
@@ -1797,7 +1799,10 @@ export class SessionManager {
       get cards() {
         return self.cards
       },
-      joinsRunningTurn: (sessionId) => self.adapters.get(self.meta.get(sessionId)?.tool ?? 'claude')?.capabilities.midTurnInput === true,
+      joinsRunningTurn: (sessionId) => {
+        const tool = self.meta.get(sessionId)?.tool
+        return tool !== undefined && self.adapters.get(tool)?.capabilities.midTurnInput === true
+      },
       get children() {
         return self.children
       },

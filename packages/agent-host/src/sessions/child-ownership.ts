@@ -105,6 +105,8 @@ export function readPausedTasks(raw: string | null): PausedTask[] | null {
  * their message to the task.
  */
 export type TurnStarter = { by: 'person' | 'work'; wrote?: true; added?: true }
+/** How long a message that is to start a turn waits for it: the tool starts one within moments, or none (#1377) */
+const NEXT_STARTER_MS = 15_000
 /** The store's record of the turn a session with an owed report is in (#1377), kept across a swap */
 export const reportTurnKey = (sessionId: string) => `report_turn:${sessionId}`
 function readStarter(raw: string | null): TurnStarter | null {
@@ -130,6 +132,8 @@ export type LinkedReport = {
   /** Whose the turn running there is (#1377), and whose the next will be: from the message each started with. Memory only */
   turn?: TurnStarter
   next?: TurnStarter
+  /** Whose the last turn there was: its last response is the person's answer when it was theirs */
+  lastBy?: 'person' | 'work'
 }
 
 /** What one owner change moves (`ChildOwnership.moveOwner`), as the session manager chose it */
@@ -186,8 +190,9 @@ export class ChildOwnership {
    * work's, as every turn was.
    */
   private readonly starters = new Map<string, TurnStarter>()
+  private readonly lastBy = new Map<string, 'person' | 'work'>()
   /** Whose the message is that waits to start the session's next turn, delivered while it was at rest */
-  private readonly nextStarter = new Map<string, TurnStarter>()
+  private readonly nextStarter = new Map<string, TurnStarter & { at: number }>()
   /** The settle timer of a paused report whose background work has ended (#721) */
   private readonly pausedSettles = new Map<string, ReturnType<typeof setTimeout>>()
   /**
@@ -265,6 +270,7 @@ export class ChildOwnership {
   clearReport(sessionId: string): void {
     this.unpauseReport(sessionId)
     this.store.settings.deleteAppSetting(reportTurnKey(sessionId))
+    this.lastBy.delete(sessionId)
     if (!this.reports.delete(sessionId)) return
     this.store.children.clearReportMark(sessionId)
   }
@@ -389,28 +395,44 @@ export class ChildOwnership {
       }
       return
     }
-    const next = this.nextStarter.get(sessionId)
-    // The turn belongs to the first message that starts it; a later one only joins
-    if (next) {
-      if (by === 'person' && next.by === 'work') next[added ? 'added' : 'wrote'] = true
+    // A note that no turn ever started from (a command the tool answers itself, a message it refused) goes stale
+    const found = this.nextStarter.get(sessionId)
+    const next = found && Date.now() - found.at < NEXT_STARTER_MS ? found : undefined
+    // "Add to the task" (a person's message that is the work's): the turn is the work's, noted as their addition
+    const mine: TurnStarter = added ? { by: 'work', added: true } : { by }
+    if (!next) {
+      this.nextStarter.set(sessionId, { ...mine, at: Date.now() })
       return
     }
-    // "Add to the task" (a person's message that is the work's): the turn is the work's, noted as their addition
-    this.nextStarter.set(sessionId, added ? { by: 'work', added: true } : { by })
+    // Two messages before the turn starts make one turn: the work's if either is (the work's instruction is in it)
+    if (mine.by === 'person') {
+      if (next.by === 'work' && !next.added) next.wrote = true
+      return
+    }
+    const adds = !!mine.added || !!next.added
+    const wrote = next.by === 'person' || !!next.wrote
+    this.nextStarter.set(sessionId, { by: 'work', ...(adds ? { added: true as const } : wrote ? { wrote: true as const } : {}), at: Date.now() })
   }
   /** A turn starts (#1377): from the message waiting for it, else the CLI's own (the work's background tasks ended) */
   turnStarted(sessionId: string): void {
-    const next = this.nextStarter.get(sessionId)
+    const found = this.nextStarter.get(sessionId)
     this.nextStarter.delete(sessionId)
-    this.starters.set(sessionId, next ?? { by: 'work' })
+    const next = found && Date.now() - found.at < NEXT_STARTER_MS ? found : undefined
+    const { at: _at, ...starter } = next ?? { by: 'work' as const, at: 0 }
+    this.starters.set(sessionId, starter)
     this.persistTurn(sessionId)
   }
   /** The turn ends (#1377): whose it was; none recorded reads as the work's. The record goes with it */
   turnEnded(sessionId: string): TurnStarter {
     const starter = this.starters.get(sessionId) ?? { by: 'work' as const }
     this.starters.delete(sessionId)
+    this.lastBy.set(sessionId, starter.by)
     this.store.settings.deleteAppSetting(reportTurnKey(sessionId))
     return starter
+  }
+  /** Whose the session's last turn was (#1377): its last response is the person's answer when it was theirs */
+  lastTurnBy(sessionId: string): 'person' | 'work' | undefined {
+    return this.lastBy.get(sessionId)
   }
   /** Whose the running turn is, when one is recorded */
   starterOf(sessionId: string): TurnStarter | undefined {

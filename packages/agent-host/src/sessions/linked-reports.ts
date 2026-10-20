@@ -171,6 +171,7 @@ export class LinkedReports {
     if (step?.step !== 'completed' && step?.step !== 'failed') return
     const turn = wait.turn ?? { by: 'work' as const }
     delete wait.turn
+    wait.lastBy = turn.by
     // The person's own turn is reported to nobody and changes nothing of the report; paused work that ended meanwhile settles again
     if (turn.by === 'person') {
       wait.busy = false
@@ -206,10 +207,8 @@ export class LinkedReports {
    */
   private messageSeen(sessionId: string, wait: LinkedReport, e: LinkedEvent): boolean {
     const person = !e.from && !e.fromApp
-    if (person && e.intent === 'takeover') {
-      this.tookOver(sessionId, wait)
-      return true
-    }
+    // A takeover the gate does not let through (not yet told whose the turn is) is only a message of the person's
+    if (person && e.intent === 'takeover' && this.tookOver(sessionId, wait)) return true
     const added = person && e.intent === 'task'
     if (wait.busy) {
       const running = wait.turn ?? { by: 'work' as const }
@@ -280,12 +279,13 @@ export class LinkedReports {
    * once, and none of the session's later turns is reported to it. Only where the report may go now (`gate`): a child
    * start_agent started has its own rule for the person's turns (`RemoteAgents`, which reads the event first)
    */
-  private tookOver(sessionId: string, wait: LinkedReport): void {
-    if (this.gate(sessionId) !== 'deliver') return
+  private tookOver(sessionId: string, wait: LinkedReport): boolean {
+    if (this.gate(sessionId) !== 'deliver') return false
     const paused = this.pausedTasksNow(sessionId, wait)
     const known = this.about.get(sessionId)
     this.drop(sessionId)
     void this.report(sessionId, wait.orchestratorId, { type: 'turn_complete' }, { tookOver: true, paused }, known)
+    return true
   }
 
   /** The paused work ended with no turn after it: the report goes out with how each task ended */
@@ -296,7 +296,7 @@ export class LinkedReports {
     if (gate === 'withhold') return this.drop(sessionId)
     const settled = this.pausedTasksNow(sessionId, wait)
     this.drop(sessionId)
-    void this.report(sessionId, wait.orchestratorId, { type: 'turn_complete' }, { settled })
+    void this.report(sessionId, wait.orchestratorId, { type: 'turn_complete' }, { settled }, undefined, undefined, wait.lastBy === 'person')
   }
 
   private stopSettling(sessionId: string): void {
@@ -393,6 +393,8 @@ export class LinkedReports {
     known?: { name: string; project: string },
     /** The person's part in the turn reported (#1377) */
     part?: { wrote?: true; added?: true },
+    /** The session's last turn was the person's (#1377): its last response is not the work's to report */
+    theirs = false,
   ): Promise<void> {
     const reader = this.host.linkedReader
     if (!reader || !this.host.hasSession(orchestratorId)) return
@@ -406,10 +408,11 @@ export class LinkedReports {
      * be reached says that, or where its last words were
      */
     // Nor its words once the person has taken it over: what is there now is not the assigned work's
-    const tookOver = !!work && 'tookOver' in work
+    const tookOver = (!!work && 'tookOver' in work) || theirs
     const words = unreachable || tookOver ? null : await reader.lastWords(sessionId, 600).catch((e: Error) => ({ ok: false as const, error: e.message }))
     const preview =
-      tookOver ? "(not read: the conversation there is the person's now; read_session shows it)"
+      theirs && !(work && 'tookOver' in work) ? "(not read: the last turn there was the person's; read_session shows it)"
+      : tookOver ? "(not read: the conversation there is the person's now; read_session shows it)"
       : !words ? (work && 'paused' in work && work.paused ? '(in the paused report before this one)' : '(not read: its machine could not be reached)')
       : words.ok ? words.text
       : `(its last response could not be read there: ${words.error})`

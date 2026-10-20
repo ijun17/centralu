@@ -335,6 +335,36 @@ describe('whose a turn is', () => {
     expect(store.settings.appSetting(reportTurnKey('s'))).toBeNull()
   })
 
+  it("a message that no turn started from goes stale, and the next message starts afresh", () => {
+    vi.useFakeTimers()
+    own.noteMessage('s', 'person', false, true)
+    // The tool answered it itself (a command that is not a turn); a caller's message comes later
+    vi.advanceTimersByTime(20_000)
+    own.noteMessage('s', 'work', false, true)
+    own.turnStarted('s')
+    expect(own.turnEnded('s')).toEqual({ by: 'work' })
+    // And a turn that starts from a stale note reads as the CLI's own
+    own.noteMessage('s', 'person', false, true)
+    vi.advanceTimersByTime(20_000)
+    own.turnStarted('s')
+    expect(own.turnEnded('s')).toEqual({ by: 'work' })
+  })
+
+  it("two messages before the turn starts make one turn: the work's if either is", () => {
+    own.noteMessage('s', 'person', false, true)
+    own.noteMessage('s', 'work', false, true)
+    own.turnStarted('s')
+    expect(own.turnEnded('s')).toEqual({ by: 'work', wrote: true })
+    own.noteMessage('s', 'work', false, true)
+    own.noteMessage('s', 'person', false, true, true)
+    own.turnStarted('s')
+    expect(own.turnEnded('s')).toEqual({ by: 'work', added: true })
+    own.noteMessage('s', 'person', false, true)
+    own.noteMessage('s', 'person', false, true)
+    own.turnStarted('s')
+    expect(own.turnEnded('s')).toEqual({ by: 'person' })
+  })
+
   it("a turn's end takes its record down, and an unreadable one reads as nothing", () => {
     own.markReport('s', 'caller')
     own.turnStarted('s')

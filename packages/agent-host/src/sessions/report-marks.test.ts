@@ -239,7 +239,7 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     await a.mgr.detachAll()
 
     const b = host(new Set([child]))
-    await b.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() as unknown as AgentProcess }])
+    await b.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() }])
     expect(b.mgr.listSessions().find((s) => s.id === child)!.state).toBe('working')
     expect(store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
     // Their turn ends under the new host: reported to nobody, the report still open
@@ -264,7 +264,7 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     expect(JSON.parse(store.settings.appSetting(`report_turn:${child}`)!)).toEqual({ by: 'work' })
     await a.mgr.detachAll()
     const b = host(new Set([child]))
-    await b.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() as unknown as AgentProcess }])
+    await b.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() }])
     b.claude.handles.get(child)!.answer('finished under the new host')
     await eventually(() => reports(b.claude.handles.get(parent), child).length === 1)
     expect(stored(parent)[0]).toContain('finished under the new host')

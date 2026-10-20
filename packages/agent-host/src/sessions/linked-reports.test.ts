@@ -277,6 +277,9 @@ describe('a turn belongs to whoever started it, on a linked machine (#1377)', ()
     await flush()
     expect(delivered).toHaveLength(2)
     expect(delivered[1]).toMatchObject({ work: { settled: [{ id: 'bg-verify', status: 'completed' }] } })
+    // The last response there is the person's: not read, so not the work's to report
+    expect(delivered[1]?.preview).toContain("the last turn there was the person's")
+    expect(delivered[1]?.preview).not.toContain('last words of')
   })
 
   it("row 2: the hub's instruction starts the turn: the work's, reported", async () => {
