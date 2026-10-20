@@ -1,10 +1,11 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { storeRunLedger } from '../app-run-ledger.js'
 import { ExternalApps, type ExternalAppsDeps, type RuntimeTiming } from '../apps/external/runtime.js'
 import { Store } from '../dev-services/store.js'
+import { removeTree } from '../temp-dir.test-helpers.js'
 
 /**
  * The world shared by tests that attach apps to a session (A-5) — a real runtime, a real app
@@ -100,7 +101,8 @@ export function attachWorld(kit: PlantKit, timing: Partial<RuntimeTiming> = {}, 
     async dispose() {
       await rt.dispose()
       store.close()
-      rmSync(root, { recursive: true, force: true })
+      // Retried: a process of an app can still be ending in the folder (#368)
+      await removeTree(root)
     },
   }
   return world
