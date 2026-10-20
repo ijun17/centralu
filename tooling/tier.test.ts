@@ -164,6 +164,16 @@ describe('the repository\'s tier rules', () => {
     expect(classify(['a/x.test.ts', 'b/x.test.ts'], rules).files.map((f: { tier: string }) => f.tier)).toEqual(['auto', 'light'])
   })
 
+  it('takes the lint allowlists as light, and what keeps them shrinking as deep (#1339)', () => {
+    // Every conversion edits a list; the comparison with main's lists is what guards them
+    expect(tierOf(['tooling/lint-allowlist/packages-core.txt']).tier).toBe('light')
+    expect(tierOf(['tooling/lint-allowlist.ts']).tier).toBe('deep')
+    expect(tierOf(['tooling/type-aware-lint.test.ts']).tier).toBe('deep')
+    expect(tierOf(['tooling/lint.ts']).tier).toBe('deep')
+    // Only the lists: code put in that folder is a guard like any other
+    expect(tierOf(['tooling/lint-allowlist/read.ts']).tier).toBe('deep')
+  })
+
   it('takes nothing changed as auto', () => {
     expect(tierOf([]).tier).toBe('auto')
     expect(tierLine(tierOf([]), RULES)).toBe('Tier: auto (no files changed).')
