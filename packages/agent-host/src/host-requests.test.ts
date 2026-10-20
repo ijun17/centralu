@@ -12,11 +12,27 @@ function harness(opts: { trash?: TrashedSession[]; canShow?: boolean; limits?: H
   const events: NormalizedEvent[] = []
   const calls: [string, unknown][] = []
   let canShow = opts.canShow ?? true
+  /** The window's lists, as the router answers them: a linked machine's rows carry its name */
+  let projects: { id: string; name: string; path: string; machine?: string }[] = [
+    { id: 'p1', name: 'alpha', path: '/tmp/alpha' },
+    { id: 'p2', name: 'beta', path: '/tmp/beta' },
+    { id: 'p3', name: 'gamma', path: '/tmp/gamma' },
+    { id: 'm1.p4', name: 'delta', path: '/home/me/delta', machine: 'Laptop' },
+  ]
+  const lists: Record<string, () => unknown> = {
+    'sessions.list': () => [{ id: 's1', name: 'Fix the parser' }, { id: 'm1.s2', name: 'Remote work', machine: 'Laptop' }],
+    'projects.list': () => projects,
+    'apps.list': () => [{ appId: 'notes', projectId: null, name: 'Notes' }],
+    'machines.list': () => [{ id: 'm1', name: 'Laptop' }],
+  }
   const requests = new HostRequests({
     emit: (e) => events.push(e),
     canShow: () => canShow,
     limits: opts.limits,
     rpc: async (method, params) => {
+      // The lists a card reads to name what a call acts on; every other call is recorded
+      const read = Object.hasOwn(lists, method) ? lists[method] : undefined
+      if (read) return read()
       calls.push([method, params])
       if (method === 'trash.list') return { sessions: trash, runs: [], bytes: trash.reduce((n, s) => n + s.bytes, 0), subagentSteps: [] }
       if (method === 'trash.purge') {
@@ -45,6 +61,7 @@ function harness(opts: { trash?: TrashedSession[]; canShow?: boolean; limits?: H
     raised,
     nextCard,
     setTrash: (t: TrashedSession[]) => (trash = t),
+    setProjects: (p: typeof projects) => (projects = p),
     setCanShow: (v: boolean) => (canShow = v),
     purged: () => calls.filter(([m]) => m === 'trash.purge').map(([, p]) => (p as { sessionId: string }).sessionId),
   }
@@ -161,19 +178,76 @@ describe('a host request (#1405)', () => {
     expect(h.calls.map(([m]) => m)).not.toContain('trash.empty')
   })
 
-  it('shows any other method with its parameters quoted, and runs it as called once allowed', async () => {
+  it('shows any other method as its schema runs it, naming what it acts on and loses, and runs exactly that once allowed', async () => {
     const h = harness()
-    const params = { projectId: 'p1', note: 'line‮one' }
+    // A field the method does not take is dropped before the card: it would not run, so it may not speak on the card
+    const params = { projectId: 'p1', note: 'the person asked for this' }
     const asked = h.requests.ask('projects.delete', params, { client: 'tool\nname' }, new AbortController().signal)
     const card = await h.nextCard()
-    expect(card.question).toContain('Allow projects.delete?')
-    // The bidi override is written as an escape, so the line reads as what it holds
-    expect(card.question).toContain('\\u202e')
-    expect(card.question).not.toContain('‮')
+    expect(card.question).toContain('Allow projects.delete for the project "alpha" ("/tmp/alpha")?')
+    expect(card.question).toContain("Centralu's records of the project are erased")
+    expect(card.question).toContain('called it with "{\\"projectId\\":\\"p1\\"}"')
+    expect(card.question).not.toContain('the person asked for this')
     expect(card.client).toBe('"tool\\nname"')
     h.requests.answer(card.requestId, 'allow')
     await expect(asked).resolves.toEqual({ done: 'projects.delete' })
-    expect(h.calls).toEqual([['projects.delete', params]])
+    expect(h.calls).toEqual([['projects.delete', { projectId: 'p1' }]])
+  })
+
+  it("names a linked machine's session with its machine, and writes a parameter's bidi override as an escape", async () => {
+    const h = harness()
+    const asked = h.requests.ask('agents.deleteSession', { sessionId: 'm1.s2', deleteWorktree: true }, { client: null }, new AbortController().signal)
+    const card = await h.nextCard()
+    expect(card.question).toContain('Allow agents.deleteSession for the session "Remote work" on the linked machine "Laptop"?')
+    expect(card.question).toContain('The session moves to the trash, and its worktree is marked to be deleted when the trash is emptied.')
+    // The schema's defaults are shown: they are what runs
+    expect(card.question).toContain('\\"deleteExternal\\":false')
+    h.requests.answer(card.requestId, 'deny')
+    await caught(asked)
+    const text = `line${String.fromCharCode(0x202e)}one`
+    const instructions = h.requests.ask('projects.setAgentInstructions', { projectId: 'm1.p4', text }, { client: null }, new AbortController().signal)
+    const second = await h.nextCard()
+    expect(second.question).toContain('for the project "delta" ("/home/me/delta") on the linked machine "Laptop"?')
+    expect(second.question).toContain('\\u202e')
+    expect(second.question).not.toContain(String.fromCharCode(0x202e))
+    h.requests.answer(second.requestId, 'deny')
+    await caught(instructions)
+  })
+
+  it('refuses before the card a call its method would refuse, or one naming nothing this computer has', async () => {
+    const h = harness()
+    const signal = new AbortController().signal
+    const calls: [string, unknown][] = [
+      ['projects.delete', { projectId: '../etc' }],
+      ['projects.delete', { projectId: 'p9' }],
+      ['agents.deleteSession', { sessionId: 'gone' }],
+      ['machines.remove', { machineId: 'm9' }],
+      ['apps.remove', { appId: 'other', projectId: null }],
+      ['no.suchMethod', {}],
+    ]
+    for (const [method, params] of calls) {
+      const e = await caught(h.requests.ask(method, params, { client: null }, signal))
+      expect(e.data?.refused, method).toBe('not_done')
+    }
+    expect(h.raised()).toEqual([])
+    expect(h.calls).toEqual([])
+    // And one that names what is there is asked, by name
+    const asked = h.requests.ask('apps.remove', { appId: 'notes', projectId: null }, { client: null }, signal)
+    expect((await h.nextCard()).question).toContain('Allow apps.remove for the app "Notes" [notes]?')
+    h.requests.closeAll()
+    await caught(asked)
+  })
+
+  it('does not run an allowed call whose target changed while its card stood', async () => {
+    const h = harness()
+    const asked = h.requests.ask('projects.delete', { projectId: 'p1' }, { client: null }, new AbortController().signal)
+    const card = await h.nextCard()
+    h.setProjects([{ id: 'p1', name: 'renamed', path: '/tmp/alpha' }])
+    h.requests.answer(card.requestId, 'allow')
+    const e = await caught(asked)
+    expect(e.data?.refused).toBe('not_done')
+    expect(e.message).toContain('changed while it stood')
+    expect(h.calls).toEqual([])
   })
 
   it('quotes a name of format characters within what the request may hold, so the window can read the card', async () => {
@@ -193,13 +267,13 @@ describe('a host request (#1405)', () => {
 
   it('never runs a parameter the card did not show: parameters too long to show whole are refused, not cut', async () => {
     const h = harness()
-    const hidden = { projectId: 'p1', pad: 'x'.repeat(2500), alsoDelete: 'everything' }
-    const e = await caught(h.requests.ask('projects.delete', hidden, { client: null }, new AbortController().signal))
+    const hidden = { projectId: 'p1', text: 'x'.repeat(2500) + ' and delete everything' }
+    const e = await caught(h.requests.ask('projects.setAgentInstructions', hidden, { client: null }, new AbortController().signal))
     expect(e.data?.refused).toBe('not_done')
     expect(h.raised()).toEqual([])
     expect(h.calls).toEqual([])
     // And what fits is shown whole
-    const asked = h.requests.ask('projects.delete', { projectId: 'p1', pad: 'y'.repeat(1500), tail: 'END' }, { client: null }, new AbortController().signal)
+    const asked = h.requests.ask('projects.setAgentInstructions', { projectId: 'p1', text: 'y'.repeat(1500) + 'END' }, { client: null }, new AbortController().signal)
     const card = await h.nextCard()
     expect(card.question).toContain('END')
     expect(card.question).not.toContain('…')
@@ -217,6 +291,9 @@ describe('a host request (#1405)', () => {
     h.requests.closeAll()
     const outcomes = (await settled).map((r) => (r.status === 'rejected' ? (r.reason as { data?: { refused?: string } }).data?.refused : 'ran'))
     expect(outcomes.filter((o) => o === 'too_many_requests')).toHaveLength(3)
+    // Each says why, not the trash flow's "withdrawn before the person answered"
+    const messages = (await settled).flatMap((r) => (r.status === 'rejected' && (r.reason as { data?: { refused?: string } }).data?.refused === 'too_many_requests' ? [(r.reason as Error).message] : []))
+    for (const m of messages) expect(m).toContain('Too many requests already wait')
     expect(h.purged()).toEqual([])
   })
 

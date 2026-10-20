@@ -5,6 +5,7 @@ import type { HostAskAnswer } from './sessions/host-cards.js'
 import type { WindowRpc } from './sessions/window-rpc.js'
 import { plainQuoted } from './sessions/tool-answers.js'
 import { rpcError } from './rpc-error.js'
+import { asItRuns, effectOf, namedTargets } from './host-request-targets.js'
 
 /**
  * Host requests (#1405): a call made with the limited credential that cannot be undone or widens what runs without
@@ -15,13 +16,15 @@ import { rpcError } from './rpc-error.js'
  * - **What the card names.** The trash's deletes go through the orchestrator's own trash flow (sessions/trash-flow.ts),
  *   with this card in place of the orchestrator's: the same question, naming each session and what goes with it, and the
  *   same reading of the trash again after Allow, so nothing the card did not name is deleted (`trash.empty` deletes the
- *   rows its card listed, never what arrived while it stood). Every other method gets a card that names the method and
- *   its parameters, quoted on one line, and runs as called.
+ *   rows its card listed, never what arrived while it stood). Every other method gets a card that names the method, what
+ *   it acts on by name and what it loses, and its parameters as its schema parses them, quoted on one line; it runs with
+ *   those parsed parameters (`generic`, host-request-targets.ts).
  * - **Who answers.** `requests.answer`, which only a window holding the token may call (`window` in method-rights.ts).
  * - **When it is refused at once.** No window that shows host requests is attached with the token (owner, 2026-10-21:
  *   refused, not left standing), or `maxOpen` requests already wait (a loop cannot flood the window).
  * - **When it ends unanswered.** The program disconnects (its socket's signal), `lifetimeMs` passes (15 minutes, owner
- *   2026-10-21: the one card with a timer, since a raw call has no turn to end it), or the host stops (`closeAll`).
+ *   2026-10-21: the one card with a timer, since a raw call has no turn to end it), or no window shows requests for
+ *   `windowGoneMs` (`closeAll`). A host that stops ends them through the first: its sockets close with it.
  *   Nothing is kept across a host swap: the caller's socket closes with it, and the next host asks again.
  */
 export const HOST_REQUEST_LIMITS = { maxOpen: 8, lifetimeMs: 15 * 60_000, windowGoneMs: 30_000 }
@@ -92,20 +95,37 @@ export class HostRequests {
         return this.viaTrash(method, from, signal, { action: 'delete', sessionId: str(p.sessionId), what: 'steps' }, () => ({ ok: true }))
       case 'trash.empty':
         return this.viaTrash(method, from, signal, { action: 'empty' }, (purged, text, failed) => ({ purged, failed, text }))
-      default: {
-        // The card shows every parameter that will run: one too long to show whole is refused, never cut
-        const shown = JSON.stringify(params ?? {})
-        if (shown.length > SHOWN_PARAMS_MAX) {
-          throw refused('not_done', `The parameters of ${method} are too long to show the person whole (${shown.length} characters, at most ${SHOWN_PARAMS_MAX}), so it was not done.`)
-        }
-        const question =
-          `Allow ${method}? A program on this computer called it with ${plainQuoted(shown, SHOWN_PARAMS_MAX)}. ` +
-          'It cannot be undone or widens what runs without asking, so it waits for you. Allow it only if you asked for this.'
-        const answer = await this.card(method, question, from, signal)
-        if (answer.decision !== 'allow') throw unanswered(method, answer.outcome)
-        return this.deps.rpc(method, params)
-      }
+      default:
+        return this.generic(method, params, from, signal)
     }
+  }
+
+  /**
+   * Any other method's card (host-request-targets.ts): the call parsed by its method's schema, which is what the card
+   * shows and what runs, what it acts on by name, and what it loses. After Allow the names are read again, and a call
+   * whose target changed meanwhile (renamed, deleted, unlinked) is not run: the person allowed what the card named.
+   */
+  private async generic(method: string, params: unknown, from: RequestFrom, signal: AbortSignal): Promise<unknown> {
+    const runs = asItRuns(method, params)
+    if (!runs.ok) throw refused('not_done', `${method} was not done: ${runs.why}.`)
+    // The card shows every parameter that will run: one too long to show whole is refused, never cut
+    const shown = JSON.stringify(runs.params ?? {})
+    if (shown.length > SHOWN_PARAMS_MAX) {
+      throw refused('not_done', `The parameters of ${method} are too long to show the person whole (${shown.length} characters, at most ${SHOWN_PARAMS_MAX}), so it was not done.`)
+    }
+    const targets = await namedTargets(this.deps.rpc, runs.params)
+    if (!targets.ok) throw refused('not_done', `${method} was not done: ${targets.why}.`)
+    const question =
+      `Allow ${method}${targets.text ? ` for ${targets.text}` : ''}? ${effectOf(method, runs.params)}` +
+      `A program on this computer called it with ${plainQuoted(shown, SHOWN_PARAMS_MAX)}. ` +
+      'It cannot be undone or widens what runs without asking, so it waits for you. Allow it only if you asked for this.'
+    const answer = await this.card(method, question, from, signal)
+    if (answer.decision !== 'allow') throw unanswered(method, answer.outcome)
+    const now = await namedTargets(this.deps.rpc, runs.params)
+    if (!now.ok || now.text !== targets.text) {
+      throw refused('not_done', `${method} was not done: what its card named changed while it stood (${now.ok ? `now ${now.text}` : now.why}).`)
+    }
+    return this.deps.rpc(method, runs.params)
   }
 
   /** The requests waiting, oldest first */
@@ -121,7 +141,7 @@ export class HostRequests {
     return true
   }
 
-  /** The host stops: every request ends unanswered, and its call runs nothing */
+  /** Every request ends unanswered, and its call runs nothing: no window came back in time (`showingChanged`) */
   closeAll(): void {
     for (const w of [...this.open.values()]) w.settle(null, 'withdrawn')
   }
@@ -194,6 +214,8 @@ export class HostRequests {
     if (!answer.ok) {
       // Not asked at all (nothing to delete, a bad id), or asked and not allowed, or allowed and then changed meanwhile
       const ended = asked.at(-1)
+      // Never raised (the bound, no window): its own message, not the flow's "withdrawn before the person answered"
+      if (ended && (ended.outcome === 'too_many_requests' || ended.outcome === 'no_window')) throw unanswered(method, ended.outcome)
       throw rpcError(answer.error, 'internal', { data: { refused: ended && ended.decision !== 'allow' ? refusalOf(ended.outcome) : 'not_done' } })
     }
     return result(purged, answer.text, failed)

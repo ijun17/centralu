@@ -1171,9 +1171,14 @@ that it shows them (`hello.shows`), one at a time, oldest first.
 - **What it names.** The trash's deletes ask through the orchestrator's own trash flow with this card in place of
   the orchestrator's: the same question, naming each session (quoted on one line), its machine, its size and what goes
   with it, and the same reading of the trash again after Allow: a session restored meanwhile is not deleted, and
-  `trash.empty` deletes only the rows its card listed, never what arrived while it stood. Any other method's card
-  names the method and its parameters, quoted on one line with format characters escaped, and the call runs as made;
-  parameters too long to show whole (over 2,000 characters) are refused rather than cut, since what runs is what the
+  `trash.empty` deletes only the rows its card listed, never what arrived while it stood. Any other method's call is
+  parsed by the method's own schema first (`host-request-targets.ts`): a field the method does not take is dropped, so
+  a caller cannot put text on the card that would not run, and a call the method would refuse is refused before it
+  asks. The card names the method, what it acts on by name as the window's lists name it (the session, project, app or
+  linked machine, with the machine it lives on), what a delete loses, and the parsed parameters, quoted on one line with
+  format characters escaped; the call runs with those parameters. An id that names nothing is refused, and after Allow
+  the names are read again: a call whose target was renamed, deleted or unlinked while the card stood does not run.
+  Parameters too long to show whole (over 2,000 characters) are refused rather than cut, since what runs is what the
   card shows. The card wraps a line anywhere, so a long one is not clipped.
   The program's own name (`hello.client`) is shown quoted, cut to 60 characters, and said to be what it calls itself:
   nothing checks it.
@@ -1186,7 +1191,7 @@ that it shows them (`hello.shows`), one at a time, oldest first.
   counted again when the card is raised (a trash delete reads the trash first, so many at once cannot pass the bound).
 - **When it ends unanswered.** The program's socket closes, 15 minutes pass (owner, 2026-10-21: the one card with a
   timer, since a raw call has no turn to end it), no window shows requests for 30 seconds (a window that reloads comes
-  back within it and keeps its cards), or the host stops. Nothing is kept across a swap: the caller asks the
+  back within it and keeps its cards), or the host stops (its sockets close with it). Nothing is kept across a swap: the caller asks the
   next host again. An allowed call runs as a call the host serves, so a swap's drain refuses or cuts it like any other.
 - **Linked machines.** The card is raised on the host where the call started, before the router, so a call naming a
   linked machine's session asks on the hub and is relayed only once allowed (with the hub's link, which holds that
