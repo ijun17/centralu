@@ -544,16 +544,6 @@ export function ArchiveIcon({ size = 14 }: { size?: number }) {
   )
 }
 
-/** A bin — the trash */
-export function TrashIcon({ size = 14 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0">
-      <path d="M2.5 4.2h11M6.3 4.2V2.6h3.4v1.6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M3.8 4.2l.7 9.1c.1.6.5 1 1.1 1h4.8c.6 0 1-.4 1.1-1l.7-9.1" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
-    </svg>
-  )
-}
-
 /** A keyboard — shortcuts */
 export function KeyboardIcon({ size = 14 }: { size?: number }) {
   return (

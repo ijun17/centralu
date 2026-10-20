@@ -459,7 +459,7 @@ describe('delete_all_archived', () => {
     await keptRun()
     const orc = await mgr.orchestrator()
     const { question, r } = await answered(orc.id, 'delete_all_archived', {}, 'allow')
-    expect(question).toContain('Delete all archived sessions: delete 2 sessions, 1 kept app run and the archived subagent steps of 1 session for good')
+    expect(question).toContain('Delete everything in the session archive: delete 2 sessions, 1 kept app run and the archived subagent steps of 1 session for good')
     expect(question).toContain('Sessions: "Second", "First"')
     expect(question).toContain('What reaches the session archive after this card is not deleted. This cannot be undone.')
     expect(r.text).toBe('Deleted for good: 2 sessions, 1 app run, the subagent steps of 1 session.')

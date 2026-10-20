@@ -303,7 +303,7 @@ export class TrashFlow {
     ]
     const refused = await this.ask(
       caller,
-      `Delete all archived sessions: delete ${plural(named.sessions.length, 'session')}${named.runs.length ? `, ${plural(named.runs.length, 'kept app run')}` : ''}${named.steps.length ? ` and the archived subagent steps of ${plural(named.steps.length, 'session')}` : ''} ` +
+      `Delete everything in the session archive: delete ${plural(named.sessions.length, 'session')}${named.runs.length ? `, ${plural(named.runs.length, 'kept app run')}` : ''}${named.steps.length ? ` and the archived subagent steps of ${plural(named.steps.length, 'session')}` : ''} ` +
         `for good (${bytesText(named.bytes)})? ${listed.length ? `Sessions: ${listed.join(', ')}. ` : ''}Their conversations, attachments and handoff notes leave this computer` +
         `${files ? `, with ${plural(files, 'tool conversation file')}` : ''}${trees ? `${files ? ' and' : ', with'} ${plural(trees, 'worktree')}` : ''}. ` +
         `${named.unreached.length ? `The session archive on ${named.unreached.map((m) => shown(m.name)).join(', ')} could not be reached and is left alone. ` : ''}` +
