@@ -10,6 +10,7 @@ With the limited credential: runs.
 
 - `agents.account`
 - `agents.applyVersions`
+- `agents.autoCompact`
 - `agents.capabilities`
 - `agents.clearBackgroundTasks`
 - `agents.commands`
@@ -22,6 +23,7 @@ With the limited credential: runs.
 - `agents.mcpProposals`
 - `agents.models`
 - `agents.orchestratorSkills`
+- `agents.reportOwed`
 - `agents.restartSession`
 - `agents.resumeSession`
 - `agents.send`
@@ -84,6 +86,7 @@ With the limited credential: runs.
 - `host.stop`
 - `machines.activity`
 - `machines.askConsents`
+- `machines.cancelUpdate`
 - `machines.disconnect`
 - `machines.list`
 - `machines.need`
@@ -204,6 +207,15 @@ With the limited credential: refused, never a card: the person's own answers and
 - `apps.viewFrame`
 - `apps.viewMessage`
 - `grid.set`
+- `mail.close`
+- `mail.held`
+- `mail.list`
+- `mail.reassign`
+- `mail.reply`
+- `mail.resume`
+- `mail.thread`
+- `mail.unblock`
+- `mail.wake`
 - `updates.answerApply`
 - `updates.reportApply`
 - `workspace.save`
