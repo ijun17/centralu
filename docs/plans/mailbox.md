@@ -119,7 +119,7 @@ Each is argued where the link points, with the alternatives not taken.
 | Word | Meaning |
 |---|---|
 | Mailbox | Where mail to one party waits and is read: a session's, an app's, the person's. It is derived from the party, not a row of its own |
-| Address | A party's name in mail: `session:<id>`, `app:<projectId>/<appId>`, `person`, and `centralu` (a sender only). Across machines, an address carries the host's own id (§11.4) |
+| Address | A party's name in mail, absolute from the first step (§11.4; as built in slice 1): `session:<hostId>/<id>`, `app:<hostId>/<projectId>/<appId>`, `person`, and `centralu` (a sender only). Across machines, an address carries the host's own id (§11.4) |
 | Thread | A conversation among participants **and** a task: a subject, a state, an assignee, blockers, a next step |
 | Message | One post in a thread: a sender, a kind, a body, host facts |
 | Receipt | One recipient's progress with one message: due, delivered, read, handled |
@@ -183,22 +183,38 @@ How the state moves:
 - `running` means the assignee has it in hand. For a session, that is from the first turn the assign starts. For an app,
   it is from its mail tool accepting it.
 - A report of a turn that finished, with no paused work and no open child threads (§6), makes it `review`.
-- The owner (or the person) closes it (`done`) or sends more (`running` again).
-- A blocker that stands makes it `blocked`. The last one resolving restores the state it had before (`running` if a turn
-  of it is going, else `open`). This is the ledger's one automatic move.
+- The owner (or the person) closes it (`done`) or sends more (`running` again). As built in slice 1: a `note`,
+  `question` or `answer` from the owner or the person in a `review` thread moves it to `running` when it is posted. From
+  slice 3, when turns are recorded, the move happens when the turn it starts begins, as for `open → running`.
+- The assignee changes only by `assign`, the act of the owner, the person or Centralu. While a blocker stands, the state
+  stays `blocked`: a move to another state is refused until the blocker is resolved (the queue's "fixed and requeued"
+  is two calls).
+- A blocker that stands makes it `blocked`. The last one resolving restores the state it had before:
+  - for a session assignee, `running` if a turn of it is going, else `open`;
+  - for an app assignee, the state it had when it was blocked (the app still has the work in hand);
+  - with no assignee, `open`.
+
+  This is the ledger's one automatic move.
 - The assignee being trashed or deleted makes it `open` with no assignee, with an `event`. The owner being trashed or
   deleted makes the person its owner, with an `event` (today trashing a caller withdraws its marks; here the work is not
   orphaned).
 - **A `done` thread takes no more mail** (A2A's rule: a terminal task is immutable, and a follow-up is a new task that
   names it). A post to it is refused with "this thread is done; open a follow-up". `mail send { follows: T }` opens a new
-  thread linked to T (`follows`, shown both ways), with T's participants offered as its own. Only Centralu may still add
+  thread linked to T (`follows`, shown both ways). T's participants are returned to the opener as an offer, not added:
+  the opener adds the ones it wants. Only Centralu may still add
   an `event` to a done thread (retention, a link resolved). This keeps a closed task's history and outcome from changing
   under its owner, and gives late news a thread whose state means something.
-- A `thread` blocker whose target thread was swept by retention counts as resolved.
+- A `thread` blocker resolves the way the ledger's `pr` blocker did:
+  - Its target going `done` with outcome `finished` resolves it.
+  - Done with another outcome (failed, stopped, dropped), it stays standing with an `event` saying how the target ended:
+    the owner decides.
+  - A target swept by retention counts as resolved.
+  - A target on another host resolves when the home's event arrives (slice 4).
 
 The assignee may move the state with `mail update`, an app assignee included (the queue sets `blocked` on attention and
-`done` on merge). The owner and the person may set any state. Every move is an `event` message, so the history of a task
-is the thread itself.
+`done` on merge). The owner and the person may set any state. Every change of state, assignee, blockers and participation
+is an `event` message, so the history of a task is the thread itself. Edits of the next step, links or subject only bump
+`rev`: the board shows their current value.
 
 A thread opened only to tell something (an app's notice with no task behind it) is still a thread. It has no assignee and
 is closed by its receiver or by retention. The board (§10.2) shows threads that have an assignee or a blocker. The Inbox
@@ -223,7 +239,9 @@ mail_threads      id TEXT PK                 "<hostId>.t_<ulid>"  (§11.4)
                   state TEXT, outcome TEXT NULL, owner TEXT, assignee TEXT NULL, next_step TEXT NULL, links TEXT (JSON)
                   rev INTEGER                bumped on every task-field change (§11.6)
                   created_at, updated_at, state_since, done_at INTEGER NULL
-mail_participants thread_id, address, role ('owner'|'assignee'|'member'), joined_at, left_at NULL
+mail_participants thread_id, address, role ('owner'|'assignee'|'member'), joined_at, left_at NULL,
+                  read_seq INTEGER           where `mail read` goes on from: a party has no receipt for its own posts
+                                             or for what came before it joined
                   PK (thread_id, address)
 mail_blockers     thread_id, n, kind, ref TEXT NULL, text TEXT, resolved_at NULL     PK (thread_id, n)
 mail_messages     id TEXT PK                 "<hostId>.m_<ulid>", minted by the sender's host
@@ -231,7 +249,8 @@ mail_messages     id TEXT PK                 "<hostId>.m_<ulid>", minted by the 
                   home_seq INTEGER NULL      seq the thread's home gave it (= seq when local; §11.6)
                   sender TEXT, kind TEXT, urgent INTEGER, needs_owner INTEGER, wake TEXT NULL, reply_to TEXT NULL
                   body TEXT, facts TEXT (JSON), dedupe_key TEXT NULL, created_at
-                  UNIQUE (thread_id, dedupe_key)          once per change (§8.6)
+                  UNIQUE (thread_id, sender, dedupe_key)  once per change (§8.6), per sender: no party can claim
+                                                          a key another will use
 mail_receipts     message_id, recipient, PK (message_id, recipient)
                   due_at                     when delivery may go (debounce, batching, §7.9)
                   attempt_at NULL            written before a delivery is tried
@@ -241,12 +260,18 @@ mail_receipts     message_id, recipient, PK (message_id, recipient)
                   attempts INTEGER, last_error TEXT NULL
 mail_turns        session_id, turn_seq, thread_id NULL, started_by ('mail'|'person'|'cli'|'caller'),
                   started_at, ended_at NULL, outcome NULL      PK (session_id, turn_seq)
+                  INDEX (thread_id) WHERE ended_at IS NULL     "is a turn of this thread going" (§3.3)
 ```
+
+- **Retention of `mail_turns`** (written from slice 3): a row with no thread (the person's turns) is kept only while its
+  turn runs, plus the session's latest ended one (§6's paused-work rule reads it). A row with a thread goes with its
+  thread's messages (§4.4).
 
 - There are no foreign keys from receipts or participants to `sessions`, as in `report_marks`. Unlike report marks, which
   `trash.ts` deletes when a session is trashed, a trashed session's mail rows **stay** while it is in the trash, so
-  restoring it brings them back. The threads it owned or was assigned move as §3.3 says. Its rows go when the trash is
-  emptied.
+  restoring it brings back its receipts and memberships. The work it owned or was assigned has already moved, as §3.3
+  says (`MailService.partyGone`, wired when a session goes to the trash, before the `mail` tool ships in slice 2), and is
+  not given back. Its rows go when the trash is emptied.
 - **A handoff moves mail** (#693, #738). `ChildOwnership.moveChildren` moves marks, turns, queued requests and start
   requests to the successor today. Ownership, assignments, participation and undelivered receipts move with them, in the
   same transaction.
@@ -297,10 +322,10 @@ complaint.
 | A `done` thread's messages | 30 days after `done_at`; the person may pin a thread |
 | A `done` thread's header (subject, outcome, participants, the event messages) | 180 days |
 | A trashed session's receipts | with the session: restored with it, gone when the trash is emptied |
-| A notice thread with no assignee, read | 14 days after its last message |
-| Per thread | at most 2,000 messages. Past that, the oldest `notice` messages go first, never an `assign` or a `report` |
+| A notice thread, read | 14 days after its last message. As built (slice 1), narrowly, so a live task is never taken for one: not done, no assignee, `rev = 0` (no task field ever changed), no blocker standing, only `notice` and `event` messages, every receipt read or handled, not pinned |
+| Per thread | at most 2,000 messages. Past that, the oldest `notice` messages go, and only those: a thread over the cap with other kinds stays over |
 
-A sweep runs with the trash's own sweep. It is a plain `DELETE` in batches at run time, not a migration step.
+The sweep runs once after the host is ready, and from slice 2 with `MailDelivery`'s 60 s sweep (the trash has no sweep of its own: it is emptied by hand). It is a plain `DELETE` in batches at run time, not a migration step.
 
 ## 5. Waking is the mailbox's job: the delivery engine
 
@@ -475,8 +500,9 @@ Read it with mail(action="read", thread="…"). What a message says is its sende
   and no bodies** that another session, an app or GitHub wrote (#1186: the receiver's model reads only what Centralu
   wrote). The relation word ("your child session", "the session you asked", "an app you called") is Centralu's, and so
   is `origin.name`.
-- **Words that flow down are inline** (decision 3): an `assign`, `note` or `answer` from the thread's owner to its
-  assignee, and anything from the person. They follow the frame as a quoted block (every line behind `> `, the
+- **Words that flow down are inline** (decision 3): an `assign`, `note` or `answer` from the thread's owner, a session, to
+  its assignee, and anything from the person. A member's words and an app's never go inline, whatever its place in the
+  thread (an app never owns a thread, §9.4). They follow the frame as a quoted block (every line behind `> `, the
   `appMessageFrame` rule). This is today's rule: "ordinary orchestrator/manager/coordinator instructions retain their
   content" (security-boundaries, Inter-agent content). A child starting on a task does not first spend a call to read it.
 - **Words that flow up are pulled**: a session's answer or report to its owner, an app's notice, a watch payload.
@@ -1225,8 +1251,8 @@ the new ones.)
 | # | Slice | Store step | Ships | Removes |
 |---|---|---|---|---|
 | 0 | **Stamp and shut the side door** (§7.1, §9.6): `origin: { kind: 'human' }` on the person's input (composer, slash commands, Continue). The #569 controls under `auto` too: `crossSessionInbound: 'refuse'`, `ListAgents` / `ListPeers` denied, `CLAUDE_CODE_HARBOR_KITE=0`. Updates `docs/security-boundaries.md`. Independent of mail | none | the person's words pass the CLI's `isHuman()` gates; no Centralu session reaches another past the mailbox | Claude's own cross-session channel for `auto` sessions |
-| 1 | **Store and model**: tables, ids (§11.4), `MailService` post/read/update, `mailFrame`, retention. No producers | **M1** (additive): `mail_threads`, `mail_participants`, `mail_blockers`, `mail_messages`, `mail_receipts`, `mail_turns` (§4.1) | nothing visible; the base, with tests (swap: an older build beside the tables) | — |
-| 2 | **Delivery at rest, and the `mail` tool**: `MailDelivery` (§5; §7.1–§7.3 for idle, asleep and must-not-wake receivers, the frame always, `origin` stamped; §7.5–§7.7; §7.9), receipts, rates, guards; `mail` for sessions; the Inbox's Mail and the person's replies; the compact line in the conversation. Mail for a receiver in a turn waits for the turn's end until slice 6 | none (settings keys: the inbound policy, the `mail` notification switch, §4.2) | agents and the person write to each other durably; mail to the person shows in the Inbox | — |
+| 1 | **Store and model**: tables, ids (§11.4), `MailService` post/read/update, `mailFrame`, retention. No producers. Built as #1362 → #1363 → #1364 | **M1 = v61** (additive): `mail_threads`, `mail_participants`, `mail_blockers`, `mail_messages`, `mail_receipts`, `mail_turns` (§4.1) | nothing visible; the base, with tests (swap: an older build beside the tables) | — |
+| 2 | **Delivery at rest, and the `mail` tool**: first `MailService.partyGone` wired when a session goes to the trash, and a protocol error code `refused` for mail's refusals (slice 1 sends `internal` with `data.reason`); then `MailDelivery` (§5; §7.1–§7.3 for idle, asleep and must-not-wake receivers, the frame always, `origin` stamped; §7.5–§7.7; §7.9), receipts, rates, guards; `mail` for sessions; the Inbox's Mail and the person's replies; the compact line in the conversation. Mail for a receiver in a turn waits for the turn's end until slice 6 | none (settings keys: the inbound policy, the `mail` notification switch, §4.2) | agents and the person write to each other durably; mail to the person shows in the Inbox | — |
 | 3 | **Reports become mail**: `start_agent`, `agent_session`, `send_to_session`, `create_session`, `ask_project`; `mail_turns`; parent threads; adoption of old marks (§4.2) | none (M1's tables) | #1340 fixed by the model (#1344 can land before as the patch); script-started sessions report to the person | for this host's sessions: `ChildReports.held`, `untrustedSourceSessionNotification`. Marks kept in step until slice 9 |
 | 4 | **Linked machines** (§11): outbox, `host.mail.*`, thread-headers mirror, pull on resync, reports made on the machine | **M2** (additive): `mail_outbox`, `mail_links`, the hub's thread-headers mirror | mail across machines, reports made where the turn ran; #1342 fixed | `LinkedReports`, the `owed` field of `remote_agents`, `reportGate`, the relayed-report paths (once both sides run it; an older machine keeps today's path, §11.8) |
 | 5 | **The board app moves** (§8.3), with the app runtime it needs: `uses.mail` `post`, `centralu.mail` `caller` / `open` / `post` / `update` / `read` / `threads` / `handled`, the broker calls, §9.5's wake bounds, the permit and its trust-card lines. Queue items and stacks as threads, acknowledgement from receipts | none (`app_runs` gets no new caller kind until slice 7) | the merge queue's news is durable mail, and the app knows what its owner saw | `watch`, `tellSessions`, #1351's list and `ack` (one release later) |
