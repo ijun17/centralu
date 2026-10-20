@@ -198,24 +198,12 @@ export function sidebarMachinesTests(): void {
       await test.step('a linked machine: its path typed, the project added there with its badge', async () => {
         await page.getByTestId('add-project').click()
         await page.getByTestId('add-project-on-box').click()
-        await expect(page.getByTestId('add-remote-project-dialog')).toContainText('Add a project on Box')
+        await expect(page.getByTestId('add-remote-project-dialog')).toContainText('Add a project · Box')
         await page.getByTestId('add-remote-project-path').fill('/home/me/api')
         await page.getByTestId('add-remote-project-confirm').click()
         await expect(page.getByTestId('add-remote-project-dialog')).toHaveCount(0)
         await expect(page.getByTestId('project-machine-api')).toHaveText('Box')
         expect(await listed(page)).toEqual(['alpha', 'beta', 'gamma', 'api'])
-      })
-
-      await test.step('or a new folder made there', async () => {
-        await page.getByTestId('add-project').click()
-        await page.getByTestId('add-project-on-box').click()
-        const dialog = page.getByTestId('add-remote-project-dialog')
-        await dialog.getByTestId('add-remote-project-mode-new').click()
-        await dialog.getByTestId('create-project-name').fill('fresh')
-        await dialog.getByTestId('create-project-confirm').click()
-        await expect(dialog).toHaveCount(0)
-        await expect(page.getByTestId('project-machine-fresh')).toHaveText('Box')
-        expect(await page.evaluate(() => (window as unknown as MockWindow).__mock.createProjectCalls)).toEqual([{ name: 'fresh', machine: 'box' }])
       })
     })
 

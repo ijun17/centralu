@@ -188,6 +188,17 @@ export function AppIcon({ size = 13 }: { size?: number }) {
   )
 }
 
+/** An app window with a plus in place of its content: make a new app (the sidebar's Projects row, owner 2026-10-21) */
+export function AppPlusIcon({ size = 13 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0">
+      <rect x="1.8" y="2.3" width="12.4" height="11.4" rx="2" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M1.8 5.8h12.4" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M8 7.8v3.9M6.05 9.75h3.9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 /** A folder: an existing folder added as a project (the sidebar's Projects row) */
 export function FolderIcon({ size = 13 }: { size?: number }) {
   return (
@@ -202,7 +213,7 @@ export function FolderIcon({ size = 13 }: { size?: number }) {
   )
 }
 
-/** A folder with a plus: a new, empty folder made as a project (the sidebar's Projects row) */
+/** A folder with a plus: add a folder as a project (the sidebar's Projects row, owner 2026-10-21) */
 export function FolderPlusIcon({ size = 13 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0">
