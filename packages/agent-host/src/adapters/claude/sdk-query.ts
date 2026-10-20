@@ -6,6 +6,7 @@ import { withoutCrossSessionMessaging } from './cross-session.js'
 import { probeIds } from './live-queries.js'
 import type { ModelQuery } from './models.js'
 import { settingSourcesFor } from './permissions.js'
+import type { ClaudeMessage } from './json.js'
 import type { ClaudeCards } from './session-cards.js'
 import type { UsageQuery } from './usage.js'
 
@@ -18,7 +19,7 @@ export type ClaudeInput = { text: string; uuid: ReturnType<typeof randomUUID>; p
  * Only the part of the SDK Query that we use.
  * We write down only the minimal surface, so external types do not leave the adapter.
  */
-export type QueryHandle = AsyncIterable<unknown> &
+export type QueryHandle = AsyncIterable<ClaudeMessage> &
   UsageQuery &
   ModelQuery & {
     getContextUsage(): Promise<{ totalTokens?: number; maxTokens?: number } | undefined>

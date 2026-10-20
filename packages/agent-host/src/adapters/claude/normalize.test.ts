@@ -8,9 +8,10 @@ import { DIFF_PREVIEW_CHARS } from '../file-changes.js'
 import { IMAGE_MAX_BYTES } from '../images.js'
 import { RESULT_SUMMARY_CHARS } from '../tool-result.js'
 import { ClaudeStreamNormalizer, approvalDetail, normalizeMessage, toolSummary } from './normalize.js'
+import { sdk } from './sdk-message.test-helpers.js'
 
 const SID = 's1'
-const n = (msg: unknown) => normalizeMessage(msg, SID)
+const n = (msg: unknown) => normalizeMessage(sdk(msg), SID)
 
 describe('streaming deltas', () => {
   it('stream_event content_block_delta → message_delta', () => {
@@ -64,30 +65,30 @@ describe('an assistant body that arrives with no deltas', () => {
   }
 
   it('emits the whole body as a message_delta when there were no deltas — this is the path /usage\'s answer takes', () => {
-    const events = normalizeMessage(assistant, SID, { textStreamed: false })
+    const events = normalizeMessage(sdk(assistant), SID, { textStreamed: false })
     expect(events).toContainEqual({ type: 'message_delta', sessionId: SID, role: 'assistant', text: 'Usage: 18%' })
   })
 
   it('does not emit a body again once it already went out as deltas — appearing twice would be a new bug', () => {
-    const events = normalizeMessage(assistant, SID, { textStreamed: true })
+    const events = normalizeMessage(sdk(assistant), SID, { textStreamed: true })
     expect(events.filter((e) => e.type === 'message_delta')).toEqual([])
   })
 
   it('local command output (system/local_command_output) is also a body — the same generalized channel', () => {
     const events = normalizeMessage(
-      { type: 'system', subtype: 'local_command_output', content: 'command output content' },
+      sdk({ type: 'system', subtype: 'local_command_output', content: 'command output content' }),
       SID,
     )
     expect(events).toContainEqual({ type: 'message_delta', sessionId: SID, role: 'assistant', text: 'command output content' })
   })
 
   it('active_goal becomes a goal event (2026-09-07 — the judgment behind /goal\'s Stop hook)', () => {
-    const events = normalizeMessage(
+    const events = normalizeMessage(sdk(
       {
         type: 'active_goal',
         value: { condition: 'all tests pass', iterations: 3, set_at: 1, tokens_at_start: 10, last_reason: '2 failures' },
         session_id: 'x',
-      },
+      }),
       SID,
     )
     expect(events).toEqual([
@@ -100,7 +101,7 @@ describe('an assistant body that arrives with no deltas', () => {
   })
 
   it('active_goal with value=null is a clear notification (including having been achieved)', () => {
-    const events = normalizeMessage({ type: 'active_goal', value: null }, SID)
+    const events = normalizeMessage(sdk({ type: 'active_goal', value: null }), SID)
     expect(events).toEqual([{ type: 'goal', sessionId: SID, goal: null }])
   })
 })
@@ -116,12 +117,12 @@ describe('tool calls (the actual shape from the spike)', () => {
 
   it('a Write marks its file (for conflict detection) once its result says it went through', () => {
     const stream = new ClaudeStreamNormalizer(SID)
-    const call = stream.push({
+    const call = stream.push(sdk({
       type: 'assistant',
       message: { content: [{ type: 'tool_use', id: 'tu2', name: 'Write', input: { file_path: '/tmp/hello.txt', content: 'hi' } }] },
-    })
+    }))
     expect(call.map((e) => e.type)).toEqual(['tool_call'])
-    const done = stream.push({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tu2', content: 'wrote' }] } })
+    const done = stream.push(sdk({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tu2', content: 'wrote' }] } }))
     expect(done.map((e) => e.type)).toEqual(['tool_result', 'files_touched'])
     expect(done[1]).toMatchObject({ type: 'files_touched', paths: ['/tmp/hello.txt'] })
   })
@@ -129,28 +130,28 @@ describe('tool calls (the actual shape from the spike)', () => {
   it('an edit the person denied marks no file (#843)', () => {
     const stream = new ClaudeStreamNormalizer(SID)
     const events = [
-      ...stream.push({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'e1', name: 'Edit', input: { file_path: '/repo/a.ts', old_string: 'a', new_string: 'b' } }] } }),
-      ...stream.push({
+      ...stream.push(sdk({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'e1', name: 'Edit', input: { file_path: '/repo/a.ts', old_string: 'a', new_string: 'b' } }] } })),
+      ...stream.push(sdk({
         type: 'user',
         message: { content: [{ type: 'tool_result', tool_use_id: 'e1', content: 'The user denied this edit', is_error: true }] },
-      }),
+      })),
     ]
     expect(events.map((e) => e.type)).toEqual(['tool_call', 'tool_result'])
   })
 
   it("a subagent's edit marks its file once its own result went through (#843)", () => {
     const stream = new ClaudeStreamNormalizer(SID)
-    const call = stream.push({
+    const call = stream.push(sdk({
       type: 'assistant',
       parent_tool_use_id: 'agent1',
       message: { content: [{ type: 'tool_use', id: 's1', name: 'Edit', input: { file_path: '/repo/b.ts', old_string: 'a', new_string: 'b' } }] },
-    })
+    }))
     expect(call.some((e) => e.type === 'files_touched')).toBe(false)
-    const done = stream.push({
+    const done = stream.push(sdk({
       type: 'user',
       parent_tool_use_id: 'agent1',
       message: { content: [{ type: 'tool_result', tool_use_id: 's1', content: 'ok' }] },
-    })
+    }))
     expect(done.find((e) => e.type === 'files_touched')).toMatchObject({ paths: ['/repo/b.ts'] })
   })
 
@@ -503,7 +504,7 @@ describe('a message whose content is words, not blocks (after /compact)', () => 
   it('the stream normalizer takes the whole sequence: the marker is kept, the summary makes no event, and nothing throws', () => {
     const stream = new ClaudeStreamNormalizer(SID)
     const events: NormalizedEvent[] = []
-    for (const m of afterCompact) expect(() => events.push(...stream.push(m))).not.toThrow()
+    for (const m of afterCompact) expect(() => events.push(...stream.push(sdk(m)))).not.toThrow()
     expect(events).toContainEqual({ type: 'compaction', sessionId: SID, failed: false, before: 25485, after: 3686 })
     // The summary is for the model: nothing of it reaches the screen as a result or a message
     expect(events.map((e) => e.type)).not.toContain('tool_result')
@@ -513,16 +514,31 @@ describe('a message whose content is words, not blocks (after /compact)', () => 
   it('also with a subagent\'s user message, an empty string, and content that is neither a list nor words', () => {
     const stream = new ClaudeStreamNormalizer(SID)
     for (const content of [SUMMARY, '', null, 7, { type: 'text', text: 'x' }]) {
-      expect(() => stream.push({ type: 'user', message: { content } })).not.toThrow()
-      expect(() => stream.push({ type: 'user', parent_tool_use_id: 'agent1', message: { content } })).not.toThrow()
-      expect(() => stream.push({ type: 'assistant', message: { content } })).not.toThrow()
+      expect(() => stream.push(sdk({ type: 'user', message: { content } }))).not.toThrow()
+      expect(() => stream.push(sdk({ type: 'user', parent_tool_use_id: 'agent1', message: { content } }))).not.toThrow()
+      expect(() => stream.push(sdk({ type: 'assistant', message: { content } }))).not.toThrow()
     }
   })
 
   it('a list with something that is not a block in it is read for the blocks it has', () => {
     const stream = new ClaudeStreamNormalizer(SID)
-    const events = stream.push({ type: 'user', message: { content: [null, 'words', { type: 'tool_result', tool_use_id: 'tu9', content: 'ok' }] } })
+    const events = stream.push(sdk({ type: 'user', message: { content: [null, 'words', { type: 'tool_result', tool_use_id: 'tu9', content: 'ok' }] } }))
     expect(events.map((e) => e.type)).toEqual(['tool_result'])
+  })
+
+  it("reads a tool result's content and a finished agent's report for the blocks they have, past one that is not", () => {
+    const stream = new ClaudeStreamNormalizer(SID)
+    const image = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } }
+    const shot = stream.push(sdk({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tu1', content: [null, image] }] } }))
+    expect(shot.map((e) => e.type)).toEqual(['tool_result', 'message_image'])
+    const report = stream.push(
+      sdk({
+        type: 'user',
+        tool_use_result: { status: 'completed', agentId: 'a1', content: [null, { type: 'text', text: 'All checked.' }] },
+        message: { content: [{ type: 'tool_result', tool_use_id: 'tu2', content: 'hand-back' }] },
+      }),
+    )
+    expect(report).toEqual([expect.objectContaining({ type: 'tool_result', callId: 'tu2', output: expect.stringContaining('All checked.') })])
   })
 
   it('an assistant message of plain words is its text, as imported history reads it', () => {
@@ -579,30 +595,30 @@ describe('streamed thinking is not repeated from the finished message', () => {
 
   it('a message that streamed its thinking and then called a tool shows that thinking once', () => {
     const stream = new ClaudeStreamNormalizer(SID)
-    const events = [...stream.push(thinkingDelta), ...stream.push(finished)]
+    const events = [...stream.push(sdk(thinkingDelta)), ...stream.push(sdk(finished))]
     expect(reasoningText(events)).toBe(THOUGHT)
     expect(events.some((e) => e.type === 'tool_call')).toBe(true)
   })
 
   it('thinking that never streamed still comes out of the finished message', () => {
     const stream = new ClaudeStreamNormalizer(SID)
-    expect(reasoningText(stream.push(finished))).toBe(THOUGHT)
+    expect(reasoningText(stream.push(sdk(finished)))).toBe(THOUGHT)
   })
 
   it('the next message starts counting again, so its own unstreamed thinking is not lost', () => {
     const stream = new ClaudeStreamNormalizer(SID)
-    stream.push(thinkingDelta)
-    stream.push(finished)
-    expect(reasoningText(stream.push(finished))).toBe(THOUGHT)
+    stream.push(sdk(thinkingDelta))
+    stream.push(sdk(finished))
+    expect(reasoningText(stream.push(sdk(finished)))).toBe(THOUGHT)
   })
 
   it('encrypted thinking, which streams only token estimates, does not count as streamed', () => {
     const stream = new ClaudeStreamNormalizer(SID)
-    stream.push({
+    stream.push(sdk({
       type: 'stream_event',
       event: { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: '', estimated_tokens: 40 } },
-    })
-    expect(reasoningText(stream.push(finished))).toBe(THOUGHT)
+    }))
+    expect(reasoningText(stream.push(sdk(finished)))).toBe(THOUGHT)
   })
 })
 
@@ -668,19 +684,19 @@ describe('the whole record of a tool call (#221)', () => {
   it('a finished background agent keeps its whole report, which its task_notification carries in summary', () => {
     const report = `${'The background agent reports at length. '.repeat(20)}Done.`
     const stream = new ClaudeStreamNormalizer(SID)
-    stream.push({
+    stream.push(sdk({
       type: 'user',
       message: { content: [{ type: 'tool_result', tool_use_id: 'bg', content: [{ type: 'text', text: 'Async agent launched successfully.' }] }] },
       tool_use_result: { status: 'async_launched', agentId: 'a2' },
-    })
-    const [done] = stream.push({
+    }))
+    const [done] = stream.push(sdk({
       type: 'system',
       subtype: 'task_notification',
       tool_use_id: 'bg',
       status: 'completed',
       summary: report,
       usage: { tool_uses: 2, duration_ms: 9000 },
-    }) as { summary: string; output?: string }[]
+    })) as { summary: string; output?: string }[]
     expect(done?.summary).toBe(`2 tool uses · 9s\n\n${report}`.slice(0, RESULT_SUMMARY_CHARS))
     expect(done?.output).toBe(`2 tool uses · 9s\n\n${report}`)
   })
@@ -695,16 +711,16 @@ describe('unmapped message types (#58)', () => {
     try {
       const one = new ClaudeStreamNormalizer('aaaaaaaa-1')
       // What a settings deny rule sends (measured in #58, CLI 2.1.282): nothing maps it, so it is said once however often it comes
-      one.push({ type: 'system', subtype: 'permission_denied', tool_name: 'Bash', decision_reason_type: 'rule' })
-      one.push({ type: 'system', subtype: 'permission_denied', tool_name: 'Bash', decision_reason_type: 'rule' })
-      one.push({ type: 'tool_use_summary', summary: 'Read 3 files' })
+      one.push(sdk({ type: 'system', subtype: 'permission_denied', tool_name: 'Bash', decision_reason_type: 'rule' }))
+      one.push(sdk({ type: 'system', subtype: 'permission_denied', tool_name: 'Bash', decision_reason_type: 'rule' }))
+      one.push(sdk({ type: 'tool_use_summary', summary: 'Read 3 files' }))
       // Mapped, and ignored on purpose: no line
-      one.push({ type: 'system', subtype: 'init', session_id: 'x' })
-      one.push({ type: 'system', subtype: 'task_started', task_id: 't' })
-      one.push({ type: 'stream_event', event: { type: 'message_start', message: { id: 'm1' } } })
-      one.push({ type: 'conversation_reset', new_conversation_id: 'c1', trigger: 'clear' })
+      one.push(sdk({ type: 'system', subtype: 'init', session_id: 'x' }))
+      one.push(sdk({ type: 'system', subtype: 'task_started', task_id: 't' }))
+      one.push(sdk({ type: 'stream_event', event: { type: 'message_start', message: { id: 'm1' } } }))
+      one.push(sdk({ type: 'conversation_reset', new_conversation_id: 'c1', trigger: 'clear' }))
       // Another session has not said it yet
-      new ClaudeStreamNormalizer('bbbbbbbb-2').push({ type: 'system', subtype: 'permission_denied', tool_name: 'Edit' })
+      new ClaudeStreamNormalizer('bbbbbbbb-2').push(sdk({ type: 'system', subtype: 'permission_denied', tool_name: 'Edit' }))
       expect(unmappedLines(spy)).toEqual([
         '[claude] aaaaaaaa unmapped message type: system/permission_denied',
         '[claude] aaaaaaaa unmapped message type: tool_use_summary',
@@ -765,7 +781,7 @@ describe('resets, notices, retries and refusals (#304)', () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
     try {
       const stream = new ClaudeStreamNormalizer(SID)
-      const activity = (msg: unknown) => stream.push(msg).filter((e) => e.type === 'activity')
+      const activity = (msg: unknown) => stream.push(sdk(msg)).filter((e) => e.type === 'activity')
       expect(activity({ type: 'system', subtype: 'status', status: 'requesting' })).toEqual([{ type: 'activity', sessionId: SID, activity: null }])
       const retry = (attempt: number) => ({
         type: 'system', subtype: 'api_retry', attempt, max_retries: 2, retry_delay_ms: 556, error_status: 529, error: 'overloaded',
@@ -785,10 +801,10 @@ describe('resets, notices, retries and refusals (#304)', () => {
 
   it('a session-scoped refusal fallback says why and reports the model the CLI switched to', () => {
     const stream = new ClaudeStreamNormalizer(SID, () => launched)
-    const out = stream.push({
+    const out = stream.push(sdk({
       type: 'system', subtype: 'model_refusal_fallback', trigger: 'refusal', direction: 'retry', scope: 'session',
       original_model: 'claude-opus-4-8', fallback_model: 'claude-sonnet-4-6', request_id: 'req_1', content: '',
-    })
+    }))
     expect(out).toEqual([
       { type: 'notice', sessionId: SID, level: 'warning', text: 'claude-opus-4-8 declined to answer, so Claude Code switched this session to claude-sonnet-4-6', from: 'Claude Code', label: 'model switch' },
       { type: 'settings_changed', sessionId: SID, model: 'claude-sonnet-4-6', effort: 'high', verbosity: null, serviceTier: null, by: 'tool' },
@@ -800,10 +816,10 @@ describe('resets, notices, retries and refusals (#304)', () => {
     try {
       const stream = new ClaudeStreamNormalizer(SID, () => launched)
       expect(
-        stream.push({
+        stream.push(sdk({
           type: 'system', subtype: 'model_refusal_fallback', trigger: 'refusal', direction: 'retry', scope: 'local',
           original_model: 'claude-opus-4-8', fallback_model: 'claude-sonnet-4-6', request_id: null, content: 'x',
-        }),
+        })),
       ).toEqual([])
     } finally {
       spy.mockRestore()
@@ -816,20 +832,20 @@ describe('resets, notices, retries and refusals (#304)', () => {
       api_refusal_category: 'cyber', api_refusal_explanation: null, content: '',
     }
     const failing = new ClaudeStreamNormalizer(SID)
-    expect(failing.push(refused)).toEqual([])
-    const ended = failing.push({ type: 'result', subtype: 'success', is_error: true, result: 'API Error: refused', modelUsage: {} })
+    expect(failing.push(sdk(refused))).toEqual([])
+    const ended = failing.push(sdk({ type: 'result', subtype: 'success', is_error: true, result: 'API Error: refused', modelUsage: {} }))
     expect(ended).toEqual([
       { type: 'error', sessionId: SID, error: { code: 'internal', message: 'The model declined to answer (cyber)', retryable: true } },
     ])
 
     const quiet = new ClaudeStreamNormalizer(SID)
-    quiet.push({ ...refused, api_refusal_explanation: 'This request looks like malware development.' })
-    expect(quiet.push({ type: 'result', subtype: 'success', is_error: false, result: '', modelUsage: {} })).toEqual([
+    quiet.push(sdk({ ...refused, api_refusal_explanation: 'This request looks like malware development.' }))
+    expect(quiet.push(sdk({ type: 'result', subtype: 'success', is_error: false, result: '', modelUsage: {} }))).toEqual([
       { type: 'notice', sessionId: SID, level: 'warning', text: 'This request looks like malware development.', from: 'Claude Code', label: 'refusal' },
       { type: 'turn_complete', sessionId: SID },
     ])
     // Said once: the next turn's result is its own
-    expect(quiet.push({ type: 'result', subtype: 'success', is_error: false, result: '', modelUsage: {} })).toEqual([
+    expect(quiet.push(sdk({ type: 'result', subtype: 'success', is_error: false, result: '', modelUsage: {} }))).toEqual([
       { type: 'turn_complete', sessionId: SID },
     ])
   })
@@ -851,10 +867,10 @@ describe('a model request, for prompt cache accounting', () => {
   it('is carried once per message id, however many messages repeat it', () => {
     const stream = new ClaudeStreamNormalizer(SID)
     const out = [
-      ...stream.push(block('msg_1', [{ type: 'thinking', thinking: '' }])),
-      ...stream.push(block('msg_1', [{ type: 'text', text: 'Reading it.' }])),
-      ...stream.push(block('msg_1', [{ type: 'tool_use', id: 'tu1', name: 'Read', input: { file_path: '/a' } }])),
-      ...stream.push(block('msg_2', [{ type: 'text', text: 'Done.' }])),
+      ...stream.push(sdk(block('msg_1', [{ type: 'thinking', thinking: '' }]))),
+      ...stream.push(sdk(block('msg_1', [{ type: 'text', text: 'Reading it.' }]))),
+      ...stream.push(sdk(block('msg_1', [{ type: 'tool_use', id: 'tu1', name: 'Read', input: { file_path: '/a' } }]))),
+      ...stream.push(sdk(block('msg_2', [{ type: 'text', text: 'Done.' }]))),
     ]
     expect(requests(out)).toEqual([
       { inputTokens: 9, cacheReadTokens: 80_412, cacheCreationTokens: 4_213 },
@@ -864,20 +880,20 @@ describe('a model request, for prompt cache accounting', () => {
 
   it("counts a subagent's requests too, without its tokens taking the parent's reading", () => {
     const stream = new ClaudeStreamNormalizer(SID)
-    stream.push(block('msg_parent', [{ type: 'tool_use', id: 'tu1', name: 'Agent', input: { prompt: 'look' } }]))
+    stream.push(sdk(block('msg_parent', [{ type: 'tool_use', id: 'tu1', name: 'Agent', input: { prompt: 'look' } }])))
     const sub = {
       type: 'assistant',
       parent_tool_use_id: 'tu1',
       message: { id: 'msg_sub', role: 'assistant', content: [{ type: 'text', text: 'x' }], usage: { input_tokens: 3, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 21_000 } },
     }
-    const out = stream.push(sub)
+    const out = stream.push(sdk(sub))
     // Named by the call that launched it, so its own prompt and cache are judged apart from the parent's
     expect(requests(out)).toEqual([{ inputTokens: 3, cacheReadTokens: 0, cacheCreationTokens: 21_000, agent: 'tu1' }])
     // The reading is still the parent's: the subagent's 21k write is not what the session's figures show
     const reading = out.find((e) => e.type === 'usage_update')
     expect(reading).toMatchObject({ tokens: { inputTokens: 9, cacheReadTokens: 80_412, cacheCreationTokens: 4_213 } })
     // Repeats of the same subagent message are not counted again
-    expect(requests(stream.push(sub))).toEqual([])
+    expect(requests(stream.push(sdk(sub)))).toEqual([])
   })
 
   it('says how long its write stays cached, from the API split of the write', () => {
@@ -886,7 +902,7 @@ describe('a model request, for prompt cache accounting', () => {
       message: { id, role: 'assistant', content: [], usage: { ...usage, cache_creation: split } },
     })
     const stream = new ClaudeStreamNormalizer(SID)
-    const ttl = (id: string, split: Record<string, number>) => requests(stream.push(withSplit(id, split)))[0]?.cacheTtl
+    const ttl = (id: string, split: Record<string, number>) => requests(stream.push(sdk(withSplit(id, split))))[0]?.cacheTtl
     expect(ttl('m1h', { ephemeral_1h_input_tokens: 4_213, ephemeral_5m_input_tokens: 0 })).toBe('1h')
     expect(ttl('m5m', { ephemeral_1h_input_tokens: 0, ephemeral_5m_input_tokens: 4_213 })).toBe('5m')
     // Wrote nothing, or no split: the lifetime is not known from this request
@@ -896,22 +912,22 @@ describe('a model request, for prompt cache accounting', () => {
   it("keeps the session's reading running mid-turn: the last result's total plus each request since (#843)", () => {
     const stream = new ClaudeStreamNormalizer(SID)
     const tokensOf = (events: NormalizedEvent[]) => events.find((e) => e.type === 'usage_update')
-    stream.push({
+    stream.push(sdk({
       type: 'result',
       subtype: 'success',
       total_cost_usd: 0.5,
       modelUsage: { m: { inputTokens: 100, outputTokens: 1_000, cacheReadInputTokens: 2_000_000, cacheCreationInputTokens: 50_000 } },
-    })
-    const first = [...stream.push(block('msg_1', [{ type: 'text', text: 'a' }])), ...stream.push(block('msg_1', [{ type: 'text', text: 'b' }]))]
+    }))
+    const first = [...stream.push(sdk(block('msg_1', [{ type: 'text', text: 'a' }]))), ...stream.push(sdk(block('msg_1', [{ type: 'text', text: 'b' }])))]
     expect(first.filter((e) => e.type === 'usage_update').map((e) => (e as { tokens: unknown }).tokens)).toEqual([
       { inputTokens: 109, outputTokens: 1_040, cacheReadTokens: 2_080_412, cacheCreationTokens: 54_213, costUsd: 0.5 },
       // The same request repeated by a second message of one response is not counted again
       { inputTokens: 109, outputTokens: 1_040, cacheReadTokens: 2_080_412, cacheCreationTokens: 54_213, costUsd: 0.5 },
     ])
-    expect(tokensOf(stream.push(block('msg_2', [])))).toMatchObject({ tokens: { cacheReadTokens: 2_160_824 } })
+    expect(tokensOf(stream.push(sdk(block('msg_2', []))))).toMatchObject({ tokens: { cacheReadTokens: 2_160_824 } })
     // The next result is the process's total again, and the requests since start over from it
-    stream.push({ type: 'result', subtype: 'success', modelUsage: { m: { inputTokens: 200, outputTokens: 2_000, cacheReadInputTokens: 3_000_000, cacheCreationInputTokens: 60_000 } } })
-    expect(tokensOf(stream.push(block('msg_3', [])))).toMatchObject({ tokens: { inputTokens: 209, cacheReadTokens: 3_080_412 } })
+    stream.push(sdk({ type: 'result', subtype: 'success', modelUsage: { m: { inputTokens: 200, outputTokens: 2_000, cacheReadInputTokens: 3_000_000, cacheCreationInputTokens: 60_000 } } }))
+    expect(tokensOf(stream.push(sdk(block('msg_3', []))))).toMatchObject({ tokens: { inputTokens: 209, cacheReadTokens: 3_080_412 } })
   })
 
   it('reads a count that is not a number as 0, not NaN (#843)', () => {
@@ -923,11 +939,11 @@ describe('a model request, for prompt cache accounting', () => {
 
   it("is not carried by the turn's result, which is a running total", () => {
     const stream = new ClaudeStreamNormalizer(SID)
-    const out = stream.push({
+    const out = stream.push(sdk({
       type: 'result',
       subtype: 'success',
       modelUsage: { m: { inputTokens: 1, outputTokens: 1, cacheReadInputTokens: 10, cacheCreationInputTokens: 10 } },
-    })
+    }))
     expect(out.some((e) => e.type === 'usage_update')).toBe(true)
     expect(requests(out)).toEqual([])
   })
@@ -949,32 +965,32 @@ describe("Claude Code's task list as the session's plan (#843)", () => {
 
   it('creates tasks from their results, and follows their updates', () => {
     const stream = new ClaudeStreamNormalizer(SID)
-    expect(plans(stream.push(use('c1', 'TaskCreate', { subject: 'Read the code', description: 'd' })))).toEqual([])
-    expect(plans(stream.push(result('c1', 'Task #1 created successfully: Read the code', { task: { id: '1', subject: 'Read the code' } })))).toEqual([
+    expect(plans(stream.push(sdk(use('c1', 'TaskCreate', { subject: 'Read the code', description: 'd' }))))).toEqual([])
+    expect(plans(stream.push(sdk(result('c1', 'Task #1 created successfully: Read the code', { task: { id: '1', subject: 'Read the code' } }))))).toEqual([
       [{ text: 'Read the code', status: 'pending' }],
     ])
-    stream.push(use('c2', 'TaskCreate', { subject: 'Fix the bug', description: 'd' }))
+    stream.push(sdk(use('c2', 'TaskCreate', { subject: 'Fix the bug', description: 'd' })))
     // Without the record (a message carrying several results), the id is read from the text
-    expect(plans(stream.push(result('c2', 'Task #2 created successfully: Fix the bug')))).toEqual([
+    expect(plans(stream.push(sdk(result('c2', 'Task #2 created successfully: Fix the bug'))))).toEqual([
       [{ text: 'Read the code', status: 'pending' }, { text: 'Fix the bug', status: 'pending' }],
     ])
-    stream.push(use('u1', 'TaskUpdate', { taskId: '1', status: 'completed' }))
-    stream.push(use('u2', 'TaskUpdate', { taskId: '2', status: 'in_progress' }))
-    const updated = [...stream.push(result('u1', 'Updated task #1 status')), ...stream.push(result('u2', 'Updated task #2 status'))]
+    stream.push(sdk(use('u1', 'TaskUpdate', { taskId: '1', status: 'completed' })))
+    stream.push(sdk(use('u2', 'TaskUpdate', { taskId: '2', status: 'in_progress' })))
+    const updated = [...stream.push(sdk(result('u1', 'Updated task #1 status'))), ...stream.push(sdk(result('u2', 'Updated task #2 status')))]
     expect(plans(updated).at(-1)).toEqual([{ text: 'Read the code', status: 'completed' }, { text: 'Fix the bug', status: 'inProgress' }])
-    stream.push(use('u3', 'TaskUpdate', { taskId: '1', status: 'deleted' }))
-    expect(plans(stream.push(result('u3', 'Updated task #1 deleted')))).toEqual([[{ text: 'Fix the bug', status: 'inProgress' }]])
+    stream.push(sdk(use('u3', 'TaskUpdate', { taskId: '1', status: 'deleted' })))
+    expect(plans(stream.push(sdk(result('u3', 'Updated task #1 deleted'))))).toEqual([[{ text: 'Fix the bug', status: 'inProgress' }]])
   })
 
   it('takes a TaskList as the whole list, and ignores a failed call and a subagent', () => {
     const stream = new ClaudeStreamNormalizer(SID)
-    stream.push(use('l1', 'TaskList', {}))
-    expect(plans(stream.push(result('l1', '#1 [completed] A', { tasks: [{ id: '1', subject: 'A', status: 'completed', blockedBy: [] }, { id: '2', subject: 'B', status: 'pending', blockedBy: [] }] })))).toEqual([
+    stream.push(sdk(use('l1', 'TaskList', {})))
+    expect(plans(stream.push(sdk(result('l1', '#1 [completed] A', { tasks: [{ id: '1', subject: 'A', status: 'completed', blockedBy: [] }, { id: '2', subject: 'B', status: 'pending', blockedBy: [] }] }))))).toEqual([
       [{ text: 'A', status: 'completed' }, { text: 'B', status: 'pending' }],
     ])
-    stream.push(use('u1', 'TaskUpdate', { taskId: '2', status: 'completed' }))
-    expect(plans(stream.push({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'u1', content: 'Task not found', is_error: true }] } }))).toEqual([])
-    stream.push(use('s1', 'TaskCreate', { subject: 'Sub', description: 'd' }, { parent_tool_use_id: 'agent' }))
-    expect(plans(stream.push(result('s1', 'Task #3 created successfully: Sub', { task: { id: '3', subject: 'Sub' } }, { parent_tool_use_id: 'agent' })))).toEqual([])
+    stream.push(sdk(use('u1', 'TaskUpdate', { taskId: '2', status: 'completed' })))
+    expect(plans(stream.push(sdk({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'u1', content: 'Task not found', is_error: true }] } })))).toEqual([])
+    stream.push(sdk(use('s1', 'TaskCreate', { subject: 'Sub', description: 'd' }, { parent_tool_use_id: 'agent' })))
+    expect(plans(stream.push(sdk(result('s1', 'Task #3 created successfully: Sub', { task: { id: '3', subject: 'Sub' } }, { parent_tool_use_id: 'agent' }))))).toEqual([])
   })
 })

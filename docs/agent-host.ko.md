@@ -2065,7 +2065,8 @@ UI는 `supported: false`를 에러가 아니라 안내로 그린다.
 주입된 블록 뒤에 진짜 사용자 발화가 이어지는 경우가 많기 때문이다.
 제거하고 나서 아무것도 남지 않을 때만 그 줄을 버린다.
 **도구 호출은 실시간으로 보였던 대로 돌아온다** ([#843](https://github.com/ijun17/centralu/issues/843)). 기록에서 말이 아닌
-것은 모두 어댑터의 실시간 정규화기가 읽고(Claude 메시지는 `normalizeMessage`, Codex 항목은 시작하고 끝난 것처럼
+것은 모두 어댑터의 실시간 정규화기가 읽고(Claude 메시지의 본문은 `readableMessage`가 읽는 모양으로 확인한 뒤
+`assistantEvents`와 `userEvents`가, #1339; Codex 항목은 시작하고 끝난 것처럼
 `normalizeNotification`), 읽는 쪽은 그중 도구 호출, 그 결과, 압축을 남긴다(`adapters/history-events.ts`). 생각, 사용량,
 계획, 이미지, 활동은 다시 읽은 대화에 들어가지 않는다. 전에는 말만 돌아오고 Claude 호출은 이름 한 줄로 남았기 때문에,
 가져온 대화는 지켜본 대화가 명령과 출력을 보여 주던 자리에 `Bash`만 보여 줬다. 한도는 가장 새로운 쪽의 말과 압축만

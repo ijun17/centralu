@@ -3470,7 +3470,8 @@ and the first conversation as `<ide_opened_file>…`.
 because real user speech often follows an injected block.
 Only when nothing is left after stripping is the line dropped.
 **Tool calls come back as they were shown live** ([#843](https://github.com/ijun17/centralu/issues/843)). Everything in
-a record but the words is read by the adapter's live normalizer (`normalizeMessage` for a Claude message,
+a record but the words is read by the adapter's live normalizer (a Claude message's body by `assistantEvents` and
+`userEvents`, once `readableMessage` has checked it into the shape they read, #1339;
 `normalizeNotification` for a Codex item as if it had started and completed), and the reader keeps its tool calls,
 their results and its compactions (`adapters/history-events.ts`); its thinking, usage, plan, images and activity are
 not part of a conversation read back. Before, only the words came back, with a Claude call kept as its name, so an
