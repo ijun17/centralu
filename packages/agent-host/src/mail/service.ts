@@ -22,7 +22,7 @@ import {
   type ThreadState,
 } from '../dev-services/store/mail.js'
 import { CENTRALU, PERSON, parseAddress, sessionAddress, type Party } from './address.js'
-import { buildMailFrame, type MailFrameItem } from './frame.js'
+import { buildMailFrame, type MailCalls, type MailFrameItem } from './frame.js'
 import { UlidMaker, messageIdFloor, messageIdOf, parseMailId, threadIdOf } from './ids.js'
 import {
   MAX_BLOCKERS,
@@ -65,6 +65,8 @@ export type MailPolicy = {
    * it cannot make, §9.3). Asked before anything else about the receiver, also for a reply in a thread it is in
    */
   cannotRead?(to: string): string | null
+  /** How `to` makes the calls a wake names: the tool itself, or `centralu_run` for a seat that reaches `mail` as a command */
+  calls?(to: string): MailCalls
 }
 
 export type MailServiceOptions = {
@@ -949,7 +951,7 @@ export class MailService {
         ...(down && !pointerOnly ? { inline: message.body } : {}),
       })
     }
-    const frame = buildMailFrame(items)
+    const frame = buildMailFrame(items, undefined, this.policy.calls?.(recipient))
     return { text: frame.text, messageIds: frame.shown, inline: frame.inline, pointed: frame.shown.filter((id) => !frame.inline.includes(id)), wake, immediate, asks, line: items.length === 0 ? '' : deliveryLine(items.length, threads.size, relations), quieted, heldBack, threads: [...threads], workThread: turnStarts ? workThread : null }
   }
 

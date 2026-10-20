@@ -20,11 +20,12 @@ import {
   SCOPED_TOOL_NAMES,
   type AgentToolName,
   type AppAccessToolName,
+  type MailToolName,
   type OrchestratorToolName,
 } from './tool-definitions.js'
 
 /** A command a seat may reach through centralu_run */
-export type CommandName = OrchestratorToolName | AgentToolName | AppAccessToolName
+export type CommandName = OrchestratorToolName | AgentToolName | AppAccessToolName | MailToolName
 
 let readerInstructions = true
 
@@ -158,6 +159,7 @@ export const RARE_COMMANDS: Partial<Record<ToolProfile, readonly CommandName[]>>
     'find_apps',
     'attach_app',
     'detach_app',
+    'mail',
   ],
 }
 
@@ -259,8 +261,9 @@ function baseAllows(profile: ToolProfile, name: string): boolean {
       MAIL_TOOLS.some((t) => t.name === name)
     )
   }
-  // The mailbox is an ordinary session's: the directing seats are not parties of it (slice 2 of #1347)
-  if (MAIL_TOOLS.some((t) => t.name === name)) return false
+  // The mailbox is an ordinary session's and the orchestrator's, which owns the threads send_to_session opens and runs it as a command;
+  // a coordinator, a builder and an app's agent are not parties of it (#1347)
+  if (MAIL_TOOLS.some((t) => t.name === name)) return profile === 'orchestrator'
   // ask_project is a reader's alone: every directing seat already works inside its own view. start_agent's pair (#561) is
   // the orchestrator's too (#853), for children outside any project, and so are the app-access tools (#1205), for the
   // root apps it attaches when it needs one
@@ -283,7 +286,7 @@ export function toolDefsFor(
   if (profile === 'reader') return [...READER_TOOLS, ...DELEGATE_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS, ...MAIL_TOOLS]
   const deferred = deferredFor(profile, tier)
   return [
-    ...[...ORCHESTRATOR_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS].filter((t) => profileAllows(profile, t.name, tier)).map((t) => (deferred.includes(t.name) ? { ...t, deferred: true } : t)),
+    ...[...ORCHESTRATOR_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS, ...MAIL_TOOLS].filter((t) => profileAllows(profile, t.name, tier)).map((t) => (deferred.includes(t.name) ? { ...t, deferred: true } : t)),
     ...(commandsFor(profile, tier).length ? COMMAND_TOOLS : []),
   ]
 }

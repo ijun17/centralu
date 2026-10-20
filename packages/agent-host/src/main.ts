@@ -22,11 +22,12 @@ import { SessionManager } from './sessions/manager.js'
 import { MailService } from './mail/service.js'
 import { MailDelivery } from './mail/delivery.js'
 import { MailPerson } from './mail/person.js'
+import { COMMAND_CALLS, PLAIN_CALLS } from './mail/frame.js'
 import { MailTool } from './mail/tool.js'
 import { MailTurns } from './mail/turns.js'
 import { mailRelations } from './mail/relations.js'
 import { MemoryGate } from './sessions/memory-gate.js'
-import { DEFAULT_RARE_TIER, currentRareTier, rareTierFrom, setRareTier, setReaderInstructions } from './sessions/orchestrator-tools.js'
+import { DEFAULT_RARE_TIER, commandsFor, currentRareTier, rareTierFrom, setRareTier, setReaderInstructions } from './sessions/orchestrator-tools.js'
 import { setOrchestratorPreamble } from './sessions/orchestrator-home.js'
 import { readShared } from './sessions/app-access.js'
 import { Store, StoreTooNewError } from './dev-services/store.js'
@@ -403,11 +404,12 @@ const mail = new MailService(store.mail, {
   // Who may write to whom (§9.1), read from the sessions that are here
   policy: mailRelations({
     session: (id) => mgr.sessionInfo(id),
-    mailTool: (id) => mgr.toolProfileOf(id) === 'reader',
+    mailTool: (id) => mgr.toolProfileOf(id) === 'reader' || mgr.toolProfileOf(id) === 'orchestrator',
+    mailCommand: (id) => mgr.toolProfileOf(id) === 'orchestrator' && commandsFor('orchestrator').includes('mail'),
     inThread: (threadId, address) => store.mail.participants(threadId).some((p) => p.address === address && p.leftAt === null),
   }),
 })
-const mailTool = new MailTool(mail, store.mail)
+const mailTool = new MailTool(mail, store.mail, (id) => (mgr.toolProfileOf(id) === 'orchestrator' && commandsFor('orchestrator').includes('mail') ? COMMAND_CALLS : PLAIN_CALLS))
 // The loop and token guards (§7.9): what turns mail started, and what they used
 const mailTurns = new MailTurns(store.mail)
 const mailDelivery = new MailDelivery(mail, store.mail, mgr.mailSessions(), {

@@ -10,7 +10,7 @@ import type { TrustRequest } from './trust-flow.js'
 import type { AppUpkeepRequest } from './app-upkeep-flow.js'
 import type { HousekeepingRequest } from './housekeeping-flow.js'
 import { ANSWER_FORM, agentListText, agentRunText, askProjectText, busyText, cardsText, listSessionsText, queuedText, trustedJsonText } from './tool-answers.js'
-import { AGENT_TOOLS, APP_ACCESS_TOOLS, ORCHESTRATOR_TOOLS, TOOL_ARGS, type CommandToolName } from './tool-definitions.js'
+import { AGENT_TOOLS, APP_ACCESS_TOOLS, MAIL_TOOLS, ORCHESTRATOR_TOOLS, TOOL_ARGS, type CommandToolName } from './tool-definitions.js'
 import { FILL, callForm, commandsFor, guideSeats, namedCall, notAToolText, profileAllows, type CommandName } from './tool-seats.js'
 
 /*
@@ -595,7 +595,7 @@ function commandLine(description: string): string {
 }
 
 function commandDef(name: string) {
-  return [...ORCHESTRATOR_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS].find((t) => t.name === name)
+  return [...ORCHESTRATOR_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS, ...MAIL_TOOLS].find((t) => t.name === name)
 }
 
 function commandSchemaText(name: CommandName): string {

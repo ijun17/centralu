@@ -156,6 +156,28 @@ describe('a participant that cannot take mail does not block the others (§9.1)'
   })
 })
 
+describe('the call a wake names is the one the receiver can make (§9.3, #850)', () => {
+  it('is centralu_run for a seat that runs mail as a command, the tool for the rest', () => {
+    const p = policy({ mailCommand: (id) => id === 'orch' })
+    expect(p.calls?.(ORCH)?.('read', 't1')).toBe('centralu_run(command="mail", args={action: "read", thread: "t1"})')
+    for (const to of [OTHER, PERSON, APP, a('gone')]) expect(p.calls?.(to)?.('read', 't1'), to).toBe('mail(action="read", thread="t1")')
+  })
+
+  it('reaches the orchestrator’s wake: the person’s word to it is framed with centralu_run', () => {
+    const store = new Store()
+    const mail = new MailService(store.mail, {
+      hostId: () => HOST,
+      policy: mailRelations({ session: (id) => sessions[id], mailTool: (id) => id !== 'coord', mailCommand: (id) => id === 'orch', inThread: () => false }),
+    })
+    openBy(mail, { by: PERSON, kind: 'assign', subject: 's', body: 'tell me when it lands', assignee: ORCH })
+    const toOrchestrator = mail.drain(ORCH, {}).text
+    expect(toOrchestrator).toContain('centralu_run(command="mail"')
+    expect(toOrchestrator).not.toContain('mail(action=')
+    openBy(mail, { by: PERSON, kind: 'assign', subject: 's', body: 'and you', assignee: OTHER })
+    expect(mail.drain(OTHER, {}).text).toContain('Read it with mail(action=')
+  })
+})
+
 describe('mail only reaches a session that can read it (§9.3)', () => {
   const noTool = new Set(['orch', 'coord', 'member'])
   const p = () => policy({ mailTool: (id) => !noTool.has(id) })

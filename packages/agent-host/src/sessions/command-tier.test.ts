@@ -4,6 +4,7 @@ import type { ToolProfile } from '../apps/contract.js'
 import {
   AGENT_TOOLS,
   APP_ACCESS_TOOLS,
+  MAIL_TOOLS,
   COMMANDS_INSTRUCTION,
   DEFAULT_RARE_TIER,
   ORCHESTRATOR_INSTRUCTIONS,
@@ -223,7 +224,7 @@ describe('the deferred tier', () => {
   it("defers the orchestrator's rare tools on Claude and nothing else changes", () => {
     setRareTier('deferred')
     const defs = toolDefsFor('orchestrator')
-    expect(defs.filter((t) => 'deferred' in t && t.deferred).map((t) => t.name)).toEqual([...ORCHESTRATOR_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS].filter((t) => RARE.includes(t.name)).map((t) => t.name))
+    expect(defs.filter((t) => 'deferred' in t && t.deferred).map((t) => t.name)).toEqual([...ORCHESTRATOR_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS, ...MAIL_TOOLS].filter((t) => RARE.includes(t.name)).map((t) => t.name))
     expect(defs.map((t) => t.name)).toEqual(toolDefsFor('orchestrator', 'resident').map((t) => t.name))
     const cost = residentCost('orchestrator', DEFERRED_SERVER)
     expect(cost.deferredChars).toBeGreaterThan(3_500)
