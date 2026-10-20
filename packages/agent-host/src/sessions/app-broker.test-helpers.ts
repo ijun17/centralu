@@ -23,6 +23,46 @@ import { FIXTURE_APP, type PlantKit } from './session-apps.test-helpers.js'
  * `session-apps.test-helpers.ts` does.)
  */
 
+/**
+ * The timers the fakes run on (a fake agent answers a send later, the person's answer to a card comes later). One that
+ * fires after the world closed its store writes to a closed database, and the run reports an unhandled rejection with every
+ * test passing (#1354). So the world waits for these before it closes the store (`settle`), and a timer asked for after
+ * that is an error by name (`close`), not a write to a closed store.
+ */
+export class WorldTimers {
+  private readonly pending = new Set<Promise<void>>()
+  private closed = false
+
+  after(ms: number, run: () => void): void {
+    if (this.closed) throw new Error('A timer was asked for after its world was disposed: the test left work running past its end (#1354)')
+    const done = new Promise<void>((resolve) => {
+      setTimeout(() => {
+        this.pending.delete(done)
+        try {
+          run()
+        } finally {
+          resolve()
+        }
+      }, ms)
+    })
+    this.pending.add(done)
+  }
+
+  /** Resolves once every timer asked for so far, and every timer those asked for in turn, has fired */
+  async settle(): Promise<void> {
+    for (let round = 0; this.pending.size > 0; round++) {
+      if (round >= 50) throw new Error('The fakes keep starting timers for each other; the test never settles')
+      await Promise.all([...this.pending])
+      // What a timer started without awaiting (a fire-and-forget rpc) runs in a later turn of the event loop
+      await new Promise<void>((resolve) => setImmediate(resolve))
+    }
+  }
+
+  close(): void {
+    this.closed = true
+  }
+}
+
 export class FakeHandle implements SessionHandle {
   readonly externalId: string
   readonly sent: string[] = []
@@ -31,18 +71,21 @@ export class FakeHandle implements SessionHandle {
   disposed = false
   /** A close the test holds open (#378 review): `dispose` resolves when this does, as a real CLI's exit takes its time */
   closing: Promise<void> | null = null
+  /** How long the fake takes to answer a send, in ms */
+  answerDelayMs = 5
   constructor(
     readonly sessionId: string,
     readonly opts: CreateSessionOpts,
     readonly emit: EventSink,
     private onSend: (h: FakeHandle, text: string) => void,
+    private readonly timers: WorldTimers,
   ) {
     this.externalId = `ext-${sessionId}`
   }
   send(text: string) {
     this.sent.push(text)
     // The tool answers later — answering on the same tick would test an ordering that does not actually occur
-    setTimeout(() => this.onSend(this, text), 5)
+    this.timers.after(this.answerDelayMs, () => this.onSend(this, text))
   }
   respondApproval(requestId: string, decision: string) {
     this.answered.push({ requestId, decision })
@@ -77,7 +120,9 @@ export class FakeAdapter implements AgentAdapter {
   opened: CreateSessionOpts[] = []
   /** A start the test holds (#378 review): the next `createSession` (a wake included) resolves when this does */
   starting: Promise<void> | null = null
-  constructor(readonly tool: ToolName, label: string) {
+  /** How long each handle this adapter opens takes to answer a send (`FakeHandle.answerDelayMs`) */
+  answerDelayMs = 5
+  constructor(readonly tool: ToolName, label: string, private readonly timers: WorldTimers) {
     this.descriptor = { name: tool, label, mark: label[0]!, install: 'x', login: `${tool} login` }
   }
   async detect() {
@@ -90,7 +135,8 @@ export class FakeAdapter implements AgentAdapter {
     const held = this.starting
     this.starting = null
     await held
-    const h = new FakeHandle(opts.sessionId, opts, emit, (hh, t) => this.onSend(hh, t))
+    const h = new FakeHandle(opts.sessionId, opts, emit, (hh, t) => this.onSend(hh, t), this.timers)
+    h.answerDelayMs = this.answerDelayMs
     this.handles.set(opts.sessionId, h)
     return h
   }
@@ -134,8 +180,9 @@ export async function brokerWorld(kit: PlantKit, timing: Partial<RuntimeTiming> 
   mkdirSync(dataRoot)
   execFileSync('git', ['init', '-q', '-b', 'main', repo], { cwd: root })
   const store = new Store()
-  const claude = new FakeAdapter('claude', 'Claude Code')
-  const codex = new FakeAdapter('codex', 'Codex')
+  const timers = new WorldTimers()
+  const claude = new FakeAdapter('claude', 'Claude Code', timers)
+  const codex = new FakeAdapter('codex', 'Codex', timers)
   const adapters = new Map<ToolName, AgentAdapter>([
     ['claude', claude],
     ['codex', codex],
@@ -148,13 +195,13 @@ export async function brokerWorld(kit: PlantKit, timing: Partial<RuntimeTiming> 
     // Answer in place of the person — **after** the card has stood up, as a real person would (answering on the same tick would test an ordering that does not actually occur)
     if (e.type === 'approval_request' && e.detail.kind === 'capability' && w?.answerCapabilities) {
       const answer = w.answerCapabilities
-      setTimeout(() => {
+      timers.after(5, () => {
         try {
           w.mgr.respondApproval(e.sessionId, e.requestId, answer)
         } catch {
           // the card was already closed in the meantime
         }
-      }, 5)
+      })
     }
   }
   const mgr = new SessionManager(store, adapters, onEvent, () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), join(root, 'worktrees'))
@@ -197,9 +244,13 @@ export async function brokerWorld(kit: PlantKit, timing: Partial<RuntimeTiming> 
     },
     agentSessions: () => mgr.listSessions().filter((s) => s.appId !== null),
     async dispose() {
+      // The timers still to fire land while the store is open, before and after the sessions are let go of (#1354)
+      await timers.settle()
       await mgr.disposeAll()
       await rt.dispose()
+      await timers.settle()
       store.close()
+      timers.close()
       rmSync(root, { recursive: true, force: true })
     },
   }
