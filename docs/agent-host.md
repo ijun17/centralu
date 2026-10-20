@@ -1468,13 +1468,15 @@ the params with the method's schema and reads the answer with its result schema,
   setting can report, and a reading is read against it: **below it** is the model's real window and is recorded, whatever was known (a
   record that was too large corrects itself); **at it** is only "at least this": the record stands when the CLI names the same model, and is
   dropped when it names another (the alias, the project default or the person's own setting moved), so the next start passes nothing and
-  learns the real window (a record that was too small can rise). Codex reports the model's own window, so its readings always replace the
+  learns the real window (a record that was too small can rise). The ceiling a process was started with is kept with the session
+  (`auto_compact_ceiling:<id>`) and read back when a host swap adopts the process, since the process keeps its original flags whatever the
+  setting says by then; one adopted without a kept ceiling (a host from before) can only say "at least". Codex reports the model's own window, so its readings always replace the
   known one. A model nobody has read a window from passes nothing at its first start and the value from the next (Settings, and the
   session's own settings menu, say so).
   **Linked machines.** A machine starts and wakes its sessions from its own preferences, and the setting lives on the hub, so the hub tells
   each machine its setting as a change of that machine's preferences (`prefs.set`, at every connect and when the hub changes it,
   `LinkedMachine.offerAutoCompact`): the hub's switch and percentage govern the machines it links, and a value set on the machine itself is
-  replaced at the next connect. A machine from before it drops the field and applies nothing. The model windows are kept per host, so a
+  replaced at the next connect (a machine linked to two hubs takes the last one's). A machine from before it drops the field and applies nothing. The model windows are kept per host, so a
   machine learns its own. `agents.autoCompact { sessionId }` answers `{ controlled, share, tokens }` for the next start from the host
   that runs the session (routed like the session), from the same function the launch uses (`autoCompactPlan`), and the session's settings
   menu shows it; a machine from before it answers "Unknown method", which the menu reads as "this computer's Centralu predates the

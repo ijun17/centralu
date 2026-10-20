@@ -487,9 +487,9 @@ export class SessionStarts {
    * whose window reading follows the point it was started with, said to `ModelWindows`, so that reading is not taken for the
    * model's window; another tool's readings always count.
    */
-  private autoCompactFor(m: SessionInfo): Pick<CreateSessionOpts, 'autoCompactTokens'> {
+  private autoCompactFor(m: SessionInfo, adopted: boolean): Pick<CreateSessionOpts, 'autoCompactTokens'> {
     const { tokens } = autoCompactPlan(autoCompactOf(this.host.uiPreferences()), this.host.modelWindows, m)
-    this.host.modelWindows.started(m.id, tokens === null ? null : (this.host.adapters.get(m.tool)?.windowCeilingFor?.(tokens) ?? null))
+    this.host.modelWindows.started(m.id, tokens === null ? null : (this.host.adapters.get(m.tool)?.windowCeilingFor?.(tokens) ?? null), adopted)
     return tokens === null ? {} : { autoCompactTokens: tokens }
   }
 
@@ -522,7 +522,7 @@ export class SessionStarts {
       verbosity: o.verbosity,
       serviceTier: o.serviceTier,
       // Where the agent compacts by itself (#1376), read at every start and wake: a change reaches a session when its process next starts
-      ...this.autoCompactFor(m),
+      ...this.autoCompactFor(m, !!o.adopt),
       permissionPreset: o.permissionPreset,
       resumeExternalId: o.resumeExternalId,
       ...(o.knownGoal ? { knownGoal: o.knownGoal } : {}),

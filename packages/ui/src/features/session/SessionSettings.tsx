@@ -428,8 +428,10 @@ export function SessionSettings({
           {compactSetting.controlled && !compact.loading && (
             <MenuSection label="Auto compact">
               <p data-testid="settings-auto-compact-note" className="px-2 pb-1 text-2xs leading-body text-ink-faint">
-                {compact.error
-                  ? "This computer's Centralu predates the Auto compact setting, so the agent's own setting decides."
+                {compact.error !== null
+                  ? /^Unknown method/.test(compact.error)
+                    ? "This computer's Centralu predates the Auto compact setting, so the agent's own setting decides."
+                    : `Could not read where this session compacts (${compact.error}).`
                   : !compact.data?.controlled
                     ? "Centralu does not set this on the computer that runs it; the agent's own setting decides."
                     : compact.data.tokens === null

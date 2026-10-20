@@ -46,8 +46,8 @@ type Known = { window: number; model: string | null }
  */
 export class ModelWindows {
   private readonly known = new Map<string, Known | null>()
-  /** The largest window each running process can report because of what it was started with, until it ends */
-  private readonly ceilings = new Map<string, number>()
+  /** The largest window each running process can report because of what it was started with; 'unknown' for an adopted process that did not say */
+  private readonly ceilings = new Map<string, number | 'unknown'>()
 
   constructor(private readonly settings: SettingAccess) {}
 
@@ -55,8 +55,24 @@ export class ModelWindows {
     return `model_window:${m.tool}:${m.model ?? `default@${m.projectId ?? ''}`}`
   }
 
-  /** A process of this session starts with a setting that caps the window it can report at `ceiling` (null: it does not) */
-  started(sessionId: string, ceiling: number | null): void {
+  /**
+   * A process of this session starts with a setting that caps the window it can report at `ceiling` (null: it does not).
+   * The ceiling is kept with the session (`auto_compact_ceiling:<id>`), because a process outlives the host: the next host
+   * adopts it (`adopted`) with the flags it was started with, whatever the setting says by then, so its ceiling is read back,
+   * not recomputed. Kept from a host that did not write it, the ceiling is unknown, and the process's readings can only
+   * say "at least" (they drop a record, never lower it).
+   */
+  started(sessionId: string, ceiling: number | null, adopted = false): void {
+    const key = `auto_compact_ceiling:${sessionId}`
+    if (adopted) {
+      const raw = this.settings.appSetting(key)
+      const kept = raw === null || raw === '' ? Number.NaN : Number(raw)
+      if (Number.isNaN(kept)) this.ceilings.set(sessionId, 'unknown')
+      else if (kept > 0) this.ceilings.set(sessionId, kept)
+      else this.ceilings.delete(sessionId)
+      return
+    }
+    this.settings.setAppSetting(key, String(ceiling ?? 0))
     if (ceiling === null) this.ceilings.delete(sessionId)
     else this.ceilings.set(sessionId, ceiling)
   }
@@ -67,7 +83,7 @@ export class ModelWindows {
     const key = this.key(m)
     const known = this.read(key)
     const ceiling = this.ceilings.get(m.id)
-    if (ceiling !== undefined && window >= ceiling) {
+    if (ceiling === 'unknown' || (ceiling !== undefined && window >= ceiling)) {
       // Only "at least this window": the record stands for the model it was taken for, else it is not to be trusted
       if (known && resolved !== undefined && known.model === resolved) return
       this.write(key, null)

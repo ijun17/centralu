@@ -101,6 +101,43 @@ describe('ModelWindows', () => {
     expect(w.of(m('a', 'gpt-5.6'))).toBe(272_000)
   })
 
+  it('an adopted process keeps the ceiling it was started with, not the one the setting gives now (host swap)', () => {
+    const store = settings()
+    const before = new ModelWindows(store)
+    before.note(m('a', 'haiku', 'claude'), 200_000, 'claude-haiku-4-5')
+    // Started at 60%: it can report 153,000 at most
+    before.started('a', 153_000)
+    // The share is raised to 80% and the host is swapped: the new host would compute 155,400, but the process still has 153,000
+    const after = new ModelWindows(store)
+    after.started('a', 155_400, true)
+    after.note(m('a', 'haiku', 'claude'), 153_000, 'claude-haiku-4-5')
+    expect(after.of(m('a', 'haiku', 'claude'))).toBe(200_000)
+  })
+
+  it('an adopted process whose ceiling was not kept (a host from before) can only say "at least": it drops a record, never lowers it', () => {
+    const store = settings()
+    const w = new ModelWindows(store)
+    w.note(m('a', 'haiku', 'claude'), 200_000, 'claude-haiku-4-5')
+    w.started('a', 155_400, true)
+    w.note(m('a', 'haiku', 'claude'), 153_000, 'claude-haiku-4-5')
+    expect(w.of(m('a', 'haiku', 'claude'))).toBe(200_000)
+    w.note(m('a', 'haiku', 'claude'), 153_000, 'claude-haiku-5-5')
+    expect(w.of(m('a', 'haiku', 'claude'))).toBeNull()
+  })
+
+  it('an adopted process started without the setting reports the real window, and the next start forgets the old ceiling', () => {
+    const store = settings()
+    const w = new ModelWindows(store)
+    w.started('a', null)
+    const after = new ModelWindows(store)
+    after.started('a', 153_000, true)
+    after.note(m('a', 'haiku', 'claude'), 200_000, 'claude-haiku-4-5')
+    expect(after.of(m('a', 'haiku', 'claude'))).toBe(200_000)
+    after.started('a', 153_000)
+    after.note(m('a', 'haiku', 'claude'), 153_000, 'claude-haiku-4-5')
+    expect(after.of(m('a', 'haiku', 'claude'))).toBe(200_000)
+  })
+
   it('keeps the model beside the window across a restart of the host', () => {
     const store = settings()
     new ModelWindows(store).note(m('a', 'haiku', 'claude'), 200_000, 'claude-haiku-4-5')

@@ -61,6 +61,10 @@ class Adapter implements AgentAdapter {
   readonly capabilities: AdapterCapabilities = {
     approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false, backgroundTasks: false,
   }
+  /** Claude's CLI reports the smaller of the model's window and the one it was started with (#1376) */
+  windowCeilingFor(tokens: number) {
+    return tokens + 33_000
+  }
   created: Handle[] = []
   listed = 0
   constructor(readonly tool: ToolName) {}
@@ -168,6 +172,33 @@ describe('a host restart under the keeper', () => {
       await b.mgr.refreshToolDefinitions()
       expect(b.claude.last).toBe(live)
       expect(restart).toHaveBeenCalledTimes(!current && preset !== 'safe' ? 1 : 0)
+    } finally {
+      await b.mgr.disposeAll()
+    }
+  })
+
+  it("an adopted process's capped window reading is not taken for the model's window after a share raised before the swap (#1376)", async () => {
+    const a = host()
+    const project = (await a.rpc('projects.add', { path: tmpdir() })) as { id: string }
+    // A session of the same tool and model has read the real window: 200,000
+    const first = await a.mgr.createSession({ projectId: project.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal' })
+    a.claude.last.emit({ type: 'context_update', sessionId: first.id, used: 1, window: 200_000, exactness: 'exact', model: 'claude-haiku-4-5' })
+    // The next one starts at 60%: 120,000 asked, so the process can report 153,000 at most
+    const second = await a.mgr.createSession({ projectId: project.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal' })
+    expect(a.claude.last.opts.autoCompactTokens).toBe(120_000)
+    // The person raises the share while it runs, and the host is swapped
+    await a.rpc('prefs.set', { patch: { autoCompact: { share: 0.8 } } })
+    await a.mgr.detachAll()
+
+    const b = host(new Set([second.id]))
+    try {
+      await b.mgr.adoptKept([{ sessionId: second.id, tool: 'claude', process: new FakeProcess() }])
+      // The process still has what it was started with; it reports the cap, which says only "at least"
+      b.claude.last.emit({ type: 'context_update', sessionId: second.id, used: 1, window: 153_000, exactness: 'exact', model: 'claude-haiku-4-5' })
+      const third = await b.mgr.createSession({ projectId: project.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal' })
+      // 80% of the real 200,000 window: the record was not lowered to the cap
+      expect(b.claude.last.opts.autoCompactTokens).toBe(160_000)
+      expect(third.id).not.toBe(second.id)
     } finally {
       await b.mgr.disposeAll()
     }
