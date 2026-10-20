@@ -401,7 +401,8 @@ export class SessionEvents {
     relayedText?: string,
     /**
      * The person typed this themselves (the composer, a slash command, Continue): the tool is told so. Never set for a
-     * message that has a source, or for words Centralu framed (a report, an app's notice, a builder request).
+     * message that has a source, or for words Centralu framed (a report, an app's notice, a builder request). Not stamped
+     * either when Centralu puts a line of its own in front of it (`rootAppsNotice`, once).
      */
     fromPerson = false,
   ): Promise<void> {
@@ -493,7 +494,8 @@ export class SessionEvents {
     // A turn is asked for now, whether or not the tool announces it before its first card (`CardRests`)
     this.host.cardRests.turnAsked(sessionId)
     if (sendInput) sendInput(h, input)
-    else if (fromPerson) h.send(input, { origin: { kind: 'human' } })
+    // Not with a line of Centralu's in front of it: that message is not only the person's words
+    else if (fromPerson && !notice) h.send(input, { origin: { kind: 'human' } })
     else h.send(input)
     // It takes messages again: what could not be told it before goes in now (#1186)
     this.host.reports.deliverHeld(sessionId)

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { tmpdir } from 'node:os'
 import type { NormalizedEvent } from '@cc/protocol'
 import { SessionManager } from './manager.js'
@@ -39,13 +39,6 @@ describe('the person\'s input is stamped human', () => {
     expect(adapter.last!.origins).toEqual([human, human, human])
   })
 
-  it('the first message of a new session', async () => {
-    const p = (await rpc('projects.add', { path: tmpdir() })) as { id: string; path: string }
-    await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude', initialPrompt: 'start here' })
-    expect(adapter.last!.sent).toEqual(['start here'])
-    expect(adapter.last!.origins).toEqual([human])
-  })
-
   it('a message to a session that has no process yet: woken first, then stamped', async () => {
     const s = await session()
     await mgr.sleepSession(s.id)
@@ -56,6 +49,24 @@ describe('the person\'s input is stamped human', () => {
 })
 
 describe('nothing else is stamped', () => {
+  it("the first message of a new session: the UI's handoff opening quotes a note an agent wrote", async () => {
+    const p = (await rpc('projects.add', { path: tmpdir() })) as { id: string; path: string }
+    await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude', initialPrompt: 'start here, from the note' })
+    expect(adapter.last!.sent).toEqual(['start here, from the note'])
+    expect(adapter.last!.origins).toEqual([undefined])
+  })
+
+  it("a person's message with a line of Centralu's in front of it (the orchestrator's one-time root apps notice)", async () => {
+    const s = await session()
+    const apps = (mgr as unknown as { apps: { rootAppsNotice(id: string): string | null } }).apps
+    const notice = vi.spyOn(apps, 'rootAppsNotice').mockReturnValueOnce('Your root apps are gone.')
+    await rpc('agents.send', { sessionId: s.id, text: 'hello' })
+    await rpc('agents.send', { sessionId: s.id, text: 'hello again' })
+    expect(notice).toHaveBeenCalled()
+    expect(adapter.last!.sent).toEqual(['[Centralu] Your root apps are gone.\n\nhello', 'hello again'])
+    expect(adapter.last!.origins).toEqual([undefined, human])
+  })
+
   it('another session\'s delivery, also with the person\'s flag passed along by mistake', async () => {
     const s = await session()
     await mgr.send(s.id, 'do this', undefined, { sessionId: 'caller', name: 'Caller' })

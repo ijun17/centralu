@@ -13,12 +13,11 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
       for await (const u of prompt) wire.messages.push(u)
     })()
     return {
-      async *[Symbol.asyncIterator]() {
-        await new Promise<void>(() => {})
-      },
+      // A stream that never yields: the test reads only what the adapter writes
+      [Symbol.asyncIterator]: () => ({ next: () => new Promise<IteratorResult<unknown>>(() => {}) }),
       interrupt: async () => {},
       close: () => {},
-      supportedCommands: async () => [],
+      supportedCommands: async () => [{ name: 'goal' }],
       getContextUsage: async () => undefined,
     }
   },
@@ -65,6 +64,19 @@ describe('the origin on a user message written to the CLI', () => {
       ['from a report', null],
       ['from the person', { kind: 'human' }],
       ['from an app', null],
+    ])
+    await handle.dispose()
+  })
+
+  it('survives the /goal gate, which holds a message until the command list answers', async () => {
+    wire.messages.length = 0
+    const handle = await start('o4')
+    handle.send('/goal all tests pass', { origin: { kind: 'human' } })
+    handle.send('then this one', { origin: { kind: 'human' } })
+    await tick()
+    expect(wire.messages.map((m) => [textOf(m), m.origin])).toEqual([
+      ['/goal all tests pass', { kind: 'human' }],
+      ['then this one', { kind: 'human' }],
     ])
     await handle.dispose()
   })

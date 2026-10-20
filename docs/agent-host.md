@@ -758,10 +758,13 @@ not widen it here. Dependency preparation above applies to both adapters.
 
 **The person's input is stamped as theirs.** The Claude Agent SDK's user message has an `origin`; an absent one is
 "unattributed" and fails closed at the CLI's strict `isHuman()` trust gates. `SessionManager.send` takes `fromPerson`,
-which only `agents.send` (the composer, slash commands, the person's Continue) and a new session's first message set.
+which only `agents.send` (the composer, slash commands, the person's Continue) sets.
 `SessionEvents.deliver` hands it to the handle as `send(text, { origin: { kind: 'human' } })`, and the Claude adapter
 writes `origin: { kind: 'human' }` on that stdin message. A message with a source (a caller's delivery, a report), an app's
-notice or view message, a builder request and every note through `sendTracked` carry none, as before. Measured on CLI
+notice or view message, a builder request, a new session's first message (only the UI's handoff opening, which quotes an
+agent's note), a message with a Centralu line in front of it (`rootAppsNotice`) and every note through `sendTracked` carry
+none, as before. One known gap: the handoff request the UI writes for the predecessor goes through `agents.send` and is
+stamped, since the host cannot tell Centralu's text from the person's there. Measured on CLI
 2.1.296: the CLI accepts it, echoes it on the replayed user message, and answers the same with or without it, mid-turn
 wording and `/compact` included (`docs/plans/mailbox.md` §7.1).
 
