@@ -169,15 +169,31 @@ script rehearses by default and why nothing publishes automatically.
 A push to a branch or a merge still publishes nothing. **A `v*` tag now does** — that is what
 the tag is for.
 
+### The release commit (#1350)
+
+The merge queue lands a change every 15 to 30 minutes, so by the time the bump PR's CI and the rehearsal are done, main
+has moved on. A release does not wait for main's head: the **release commit** is the bump's own squash commit on main,
+the commit that declared the version (the board walks main's history back from its head to the first commit that does not
+carry it). `rehearse` and `tag` take it by default, or a `commit` of main's history that carries the version, from any
+checkout of the repository (it must be clean; its branch and how far it is from main do not matter, as the tag is pushed
+by commit from GitHub's history). The gates are that commit's: its own CI on main green (or the bump PR's run on the same
+tree, below), a successful rehearsal on it or on the bump branch at a commit with the same tree, the version untagged and
+after the last tag. What lands after it does not matter: not its CI, not a rehearsal of main's head, which counts only when
+its tree is the release commit's. **A later commit that changes the version does**: a newer bump superseded this one, and
+the tag for the older version is refused. `release_status` names the release commit and how many commits behind main it is.
+When main has moved on and the bump branch is gone, `rehearse` pushes the release commit to `release.branchPrefix` plus the
+version and runs the workflow there (a workflow is dispatched on a branch, not on a commit); a branch left over with another
+tree is refused, not moved.
+
 ### Reusing the bump PR's CI (#629)
 
 The same tree rule lets `tag` count a rehearsal that ran on the bump branch (step 2 below).
 
 For `rehearse` and `tag`, the board can use the bump PR's green required checks while
 main's checks are pending or absent. The PR must be merged into main from
-`release.branchPrefix` plus the current version, main's head must be its single-parent
-squash merge commit, and `git rev-parse <sha>^{tree}` must match for main and the PR head.
-Even a later commit with an unchanged tree invalidates this evidence. Every required
+`release.branchPrefix` plus the current version, the release commit must be its single-parent
+squash merge commit, and `git rev-parse <sha>^{tree}` must match for that commit and the PR head.
+A commit landed after the release commit does not matter (#1350). Every required
 check on that exact PR head must be reported and green; missing, pending or failed
 checks refuse it, and so does a run that did not pass the `full tier` check, when the required
 set names it: a quick run skips every job but `changes`, `verify` and the Windows unit tests, and a
@@ -265,7 +281,7 @@ very tree.
 The project board app (`.centralu/apps/project-board`) carries these steps as tools (#386):
 `release_status` says where the release stands and what is next, and `release` takes `step`
 `bump`, `rehearse`, `tag` or `approve`. Each step is for a login with maintain or admin
-permission, checks everything first (a clean checkout on main at GitHub's main, qualifying green CI,
+permission, checks everything first (for a bump, a clean checkout on main at GitHub's main; for a tag, a clean checkout and the release commit, #1350; qualifying green CI,
 the version untagged, a successful rehearsal before the tag) and refuses with every reason, and
 does nothing without `confirm: true`. The board's "Release" dialog shows the same state.
 

@@ -419,9 +419,10 @@ type Repo = { work: string; origin: string; released: string; tip: string }
  * GitHub; fetches reach it through `insteadOf` on GitHub's address, and pushes by `pushurl`, so not
  * even a broken rewrite could push anywhere real.
  *
- * - `bumped`: the bump to NEXT is merged too, untagged (the state before tag)
+ * - `bumped`: the bump to NEXT is merged too, untagged (the state before tag); `inBump` changes more files in that same commit
+ *   (the release commit is the bump's own, #1350: what the evidence reads is what the bump carried, not what landed after it)
  */
-function repo({ bumped = false, version = APP_VERSION }: { bumped?: boolean; version?: string } = {}): Repo {
+function repo({ bumped = false, version = APP_VERSION, inBump }: { bumped?: boolean; version?: string; inBump?: (work: string) => void } = {}): Repo {
   const origin = join(root, 'origin.git')
   const work = join(root, 'work')
   g(root, 'init', '-q', '--bare', '-b', 'main', origin)
@@ -443,6 +444,7 @@ function repo({ bumped = false, version = APP_VERSION }: { bumped?: boolean; ver
   let tip = commitAll(work, 'fix: two (#11)')
   if (bumped) {
     for (const f of CARRIERS) write(work, f, bumpText(readFileSync(join(work, f), 'utf8'), version, NEXT).text)
+    inBump?.(work)
     tip = commitAll(work, `chore(release): ${NEXT} (#900)`)
   }
   g(work, 'push', '-q', 'origin', 'main', `v${version}`)
@@ -487,12 +489,8 @@ function bumpEvidence(s: Repo, { differentTree = false } = {}) {
 
 describe('release', { timeout: 60_000 * SLOW }, () => {
   it.each(['pending', 'none'] as const)('accepts the bump PR same tree when main CI is %s, in both steps', async (ci) => {
-    const s = repo({ bumped: true })
     // Release jobs can share CI names; their separate event is not PR CI evidence.
-    write(s.work, '.github/workflows/release.yml', 'on:\n  workflow_dispatch:\njobs:\n  build:\n    runs-on: ubuntu-latest\n')
-    s.tip = commitAll(s.work, 'ci: add a separate release workflow')
-    g(s.work, 'push', '-q', 'origin', 'main')
-    patchState((st) => { st.dispatchSha = s.tip })
+    const s = repo({ bumped: true, inBump: (work) => write(work, '.github/workflows/release.yml', 'on:\n  workflow_dispatch:\njobs:\n  build:\n    runs-on: ubuntu-latest\n') })
     const prHead = bumpEvidence(s)
     patchState((st) => { st.ci = ci })
     expect(prHead).not.toBe(s.tip)
@@ -521,7 +519,6 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
 
   it.each([
     ['different tree', 'different tree'],
-    ['later merge', "merge commit is not main's head"],
     ['main failing', 'Main CI failed'],
     ['PR failing', 'head checks are not all green'],
     ['PR pending', 'head checks are not all green'],
@@ -529,20 +526,13 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
     ['event job', 'uses event or branch context'],
     ['push-only job', 'does not run on both push and pull_request'],
   ])('refuses %s in both steps and reports the reason in status', async (scenario, reason) => {
-    const s = repo({ bumped: true })
-    if (scenario === 'event job' || scenario === 'push-only job') {
+    const changeBuild = (work: string) => {
       const file = '.github/workflows/build.yml'
-      const workflow = readFileSync(join(s.work, file), 'utf8')
-      write(s.work, file, scenario === 'event job' ? workflow.replace('    runs-on:', "    if: github.event_name == 'push'\n    runs-on:") : workflow.replace('  pull_request:\n', ''))
-      s.tip = commitAll(s.work, 'ci: change required build')
-      g(s.work, 'push', '-q', 'origin', 'main')
+      const workflow = readFileSync(join(work, file), 'utf8')
+      write(work, file, scenario === 'event job' ? workflow.replace('    runs-on:', "    if: github.event_name == 'push'\n    runs-on:") : workflow.replace('  pull_request:\n', ''))
     }
+    const s = repo({ bumped: true, ...(scenario === 'event job' || scenario === 'push-only job' ? { inBump: changeBuild } : {}) })
     bumpEvidence(s, { differentTree: scenario === 'different tree' })
-    if (scenario === 'later merge') {
-      // Even an empty subsequent merge with the identical tree invalidates the exemption.
-      g(s.work, 'commit', '--allow-empty', '-q', '-m', 'docs: later merge (#901)')
-      g(s.work, 'push', '-q', 'origin', 'main')
-    }
     patchState((st) => {
       if (scenario === 'main failing') st.ci = 'failing'
       if (scenario === 'PR failing') st.prCi = 'failing'
@@ -597,11 +587,7 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
 
   // Two tiers of CI (2026-10-18): a quick run skips every job but a few, and a skipped job reads as passed
   it("takes the bump PR's run as evidence only when it ran the full tier", async () => {
-    const s = repo({ bumped: true })
-    write(s.work, '.github/workflows/build.yml', 'on:\n  push:\n    branches: [main]\n  pull_request:\njobs:\n  build:\n    runs-on: ubuntu-latest\n  full-tier:\n    name: full tier\n    runs-on: ubuntu-latest\n')
-    s.tip = commitAll(s.work, 'ci: two tiers')
-    g(s.work, 'push', '-q', 'origin', 'main')
-    patchState((st) => { st.dispatchSha = s.tip })
+    const s = repo({ bumped: true, inBump: (work) => write(work, '.github/workflows/build.yml', 'on:\n  push:\n    branches: [main]\n  pull_request:\njobs:\n  build:\n    runs-on: ubuntu-latest\n  full-tier:\n    name: full tier\n    runs-on: ubuntu-latest\n') })
     const prHead = bumpEvidence(s)
     patchState((st) => {
       st.requiredContexts = ['build', 'full tier']
@@ -631,9 +617,10 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
   it.each(['multiple parents', 'different base'])('refuses bump PR evidence with %s', async (scenario) => {
     const s = repo({ bumped: true })
     if (scenario === 'multiple parents') {
-      const merge = g(s.work, 'commit-tree', g(s.work, 'rev-parse', `${s.tip}^{tree}`), '-p', s.tip, '-p', s.released, '-m', 'chore(release): merge bump')
+      // The bump landed as a merge commit: two parents
+      const merge = g(s.work, 'commit-tree', g(s.work, 'rev-parse', `${s.tip}^{tree}`), '-p', g(s.work, 'rev-parse', `${s.tip}^`), '-p', s.released, '-m', 'chore(release): merge bump')
       g(s.work, 'reset', '--hard', merge)
-      g(s.work, 'push', '-q', 'origin', 'main')
+      g(s.work, 'push', '-q', '-f', 'origin', 'main')
       s.tip = merge
     }
     bumpEvidence(s)
@@ -877,8 +864,9 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
     expect(r.data).toMatchObject({ ok: true, phase: 'released', version: APP_VERSION, head: s.tip })
     expect(r.data.summary).toBe(`main at ${s.tip.slice(0, 7)} carries ${APP_VERSION}: released as v${APP_VERSION}. Next: ${APP_VERSION} is released. 2 changes since: bump with release step bump.`)
     expect(r.data.lines).toEqual([
+      `Release commit: ${s.released.slice(0, 7)}, tagged v${APP_VERSION}, 2 commits behind main at ${s.tip.slice(0, 7)}.`,
       `The tagged commit's own CI at ${s.released.slice(0, 7)}: green.`,
-      `Checkout: clean, on main at ${s.tip.slice(0, 7)}.`,
+      'Checkout: clean.',
       `Release run for v${APP_VERSION}: succeeded, https://github.com/ijun17/centralu/actions/runs/60.`,
       `Merged since v${APP_VERSION} (2):`,
       '- fix: two (#11)',
@@ -1078,19 +1066,20 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
     expect(ghWrites()).toEqual([])
   })
 
+  // A bump is made from main as GitHub has it; a tag is pushed by commit from GitHub's history (#1350), so where the checkout is does not matter to it
   it.each([
-    ['a dirty checkout', (w: string) => write(w, 'a.txt', 'edited\n'), /^The checkout at .* has 1 uncommitted change \(a\.txt\); commit or put them away first/],
-    ['another branch', (w: string) => g(w, 'switch', '-q', '-c', 'topic'), /^The checkout at .* is on branch topic, not main; switch to main first\.$/],
-    ['a checkout behind GitHub', (w: string) => g(w, 'reset', '-q', '--hard', 'HEAD~1'), /^The checkout's main \(\w{7}\) is behind main on origin \(\w{7}\); pull first\.$/],
-    ['local commits GitHub lacks', (w: string) => (write(w, 'c.txt', 'c\n'), commitAll(w, 'local')), /^The checkout's main \(\w{7}\) has commits main on origin \(\w{7}\) does not/],
-  ])('refuses to bump or tag from %s', async (_, spoil, why) => {
+    ['another branch', (w: string) => g(w, 'switch', '-q', '-c', 'topic'), /^The checkout at .* is on branch topic, not main; switch to main first\.$/, false],
+    ['a checkout behind GitHub', (w: string) => g(w, 'reset', '-q', '--hard', 'HEAD~1'), /^The checkout's main \(\w{7}\) is behind main on origin \(\w{7}\); pull first\.$/, false],
+    ['local commits GitHub lacks', (w: string) => (write(w, 'c.txt', 'c\n'), commitAll(w, 'local')), /^The checkout's main \(\w{7}\) has commits main on origin \(\w{7}\) does not/, false],
+  ])('refuses to bump from %s, but not to tag', async (_, spoil, why, tagToo) => {
     const s = repo()
     spoil(s.work)
     runtime()
     for (const step of ['bump', 'tag']) {
       const r = await call('release', { step, path: s.work, confirm: true, skipRehearsal: true })
       expect(r.isError, step).toBe(true)
-      expect(r.data.problems.some((p: string) => why.test(p)), `${step}: ${r.data.problems.join(' | ')}`).toBe(true)
+      const said = r.data.problems.some((p: string) => why.test(p))
+      expect(said, `${step}: ${r.data.problems.join(' | ')}`).toBe(step === 'bump' || tagToo)
     }
     expect(ghWrites()).toEqual([])
     expect(remoteHas(s.origin, `refs/heads/chore/release-${NEXT}`)).toBeNull()
@@ -1321,6 +1310,210 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
     ])
     expect(remoteHas(s.origin, 'refs/tags/v9.9.9')).toBeNull()
     expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBeNull()
+  })
+
+  /*
+   * #1350: the release commit is the bump's own squash commit, not main's head. The merge queue lands a change every 15 to 30
+   * minutes, so by the time the bump's CI and rehearsal are done main has moved; a release goes out whatever lands meanwhile.
+   */
+  describe('the release commit is the bump\'s own, not main\'s head (#1350)', () => {
+    const NEWER = '9.8.7'
+    /** n more changes merged after the bump: answers main's new head (GitHub's main moves with it) */
+    function landMore(s: Repo, n = 2) {
+      for (let i = 1; i <= n; i++) {
+        write(s.work, `later-${i}.txt`, `${i}\n`)
+        s.tip = commitAll(s.work, `fix: later ${i} (#${20 + i})`)
+      }
+      g(s.work, 'push', '-q', 'origin', 'main')
+      patchState((st) => (st.dispatchSha = s.tip))
+      return s.tip
+    }
+    const short7 = (sha: string) => sha.slice(0, 7)
+
+    it('tags the bump commit after two more changes landed, from a checkout elsewhere, whatever CI says of main\'s head', async () => {
+      const s = repo({ bumped: true })
+      const bump = s.tip
+      patchState((st) => st.runs.push(run({ head_sha: bump })))
+      const head = landMore(s)
+      // The newer commits are red and unrehearsed: they are not what is released
+      patchState((st) => (st.ciBySha = { [head]: 'failing' }))
+      g(s.work, 'switch', '-q', '-c', 'topic', bump)
+      const before = checkout(s.work)
+      runtime()
+      const plan = await call('release', { step: 'tag', path: s.work })
+      expect(plan.isError, plan.text).toBe(false)
+      expect(plan.data.summary).toContain(`Ready to tag v${NEXT} on ${short7(bump)} (2 commits behind main at ${short7(head)}); nothing pushed yet.`)
+      expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBeNull()
+      // A dirty checkout is still refused: what is released must be what is committed
+      write(s.work, 'a.txt', 'edited\n')
+      const dirty = await call('release', { step: 'tag', path: s.work, confirm: true })
+      expect(dirty.isError).toBe(true)
+      expect(dirty.data.problems[0]).toMatch(/^The checkout at .* has 1 uncommitted change \(a\.txt\); commit or put them away first/)
+      expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBeNull()
+      g(s.work, 'checkout', '-q', '--', 'a.txt')
+      const r = await call('release', { step: 'tag', path: s.work, confirm: true })
+      expect(r.isError, r.text).toBe(false)
+      // The bump, not main's head
+      expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBe(bump)
+      expect(r.data.lines.join(' ')).toContain(`The release commit ${short7(bump)} (2 commits behind main at ${short7(head)}): CI green`)
+      expect(r.data.summary).toContain(`Tagged v${NEXT} on ${short7(bump)} (2 commits behind main at ${short7(head)}).`)
+      expect(checkout(s.work)).toEqual(before)
+    })
+
+    it('does not take a rehearsal on main\'s head for the bump commit when the trees differ', async () => {
+      const s = repo({ bumped: true })
+      const bump = s.tip
+      const head = landMore(s)
+      patchState((st) => st.runs.push(run({ head_sha: head })))
+      runtime()
+      const r = await call('release', { step: 'tag', path: s.work, confirm: true })
+      expect(r.isError).toBe(true)
+      expect(r.data.problems).toEqual([`No rehearsal ran on ${short7(bump)} or on its bump branch at the same tree: rehearse first (release step rehearse), or pass skipRehearsal: true to tag without one.`])
+      expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBeNull()
+      // One on the bump does
+      patchState((st) => st.runs.push(run({ id: 51, head_sha: bump })))
+      const ok = await call('release', { step: 'tag', path: s.work, confirm: true })
+      expect(ok.isError, ok.text).toBe(false)
+      expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBe(bump)
+    })
+
+    it('refuses a version a later commit has changed, by name or by commit, and releases the newer bump by default', async () => {
+      const s = repo({ bumped: true })
+      const bump = s.tip
+      patchState((st) => st.runs.push(run({ head_sha: bump })))
+      // A newer bump lands before this one was tagged
+      for (const f of CARRIERS) write(s.work, f, bumpText(readFileSync(join(s.work, f), 'utf8'), NEXT, NEWER).text)
+      const newer = commitAll(s.work, `chore(release): ${NEWER} (#905)`)
+      g(s.work, 'push', '-q', 'origin', 'main')
+      patchState((st) => (st.dispatchSha = newer))
+      runtime()
+      const byName = await call('release', { step: 'tag', path: s.work, version: NEXT, confirm: true })
+      expect(byName.data.problems).toEqual([`main at ${short7(newer)} carries ${NEWER}, not ${NEXT}; a later commit changed the version, so ${NEXT} is not released from here.`])
+      const byCommit = await call('release', { step: 'tag', path: s.work, commit: bump, skipRehearsal: true, confirm: true })
+      expect(byCommit.data.problems).toEqual([`${short7(bump)} is before the commit that declared ${NEWER} (${short7(newer)}): it carries another version.`])
+      const rehearse = await call('release', { step: 'rehearse', path: s.work, version: NEXT, confirm: true })
+      expect(rehearse.isError).toBe(true)
+      expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBeNull()
+      expect(ghWrites()).toEqual([])
+      // By default it is the newer bump that is released: the newest declaration of main's version
+      const def = await call('release', { step: 'tag', path: s.work, skipRehearsal: true, confirm: true })
+      expect(def.isError, def.text).toBe(false)
+      expect(remoteHas(s.origin, `refs/tags/v${NEWER}`)).toBe(newer)
+    })
+
+    it('says in the status which commit is the release and how far behind main it is', async () => {
+      const s = repo({ bumped: true })
+      const bump = s.tip
+      const head = landMore(s)
+      runtime()
+      const r = await call('release_status', { path: s.work })
+      expect(r.isError, r.text).toBe(false)
+      expect(r.data).toMatchObject({ phase: 'ready-to-tag', version: NEXT, head, releaseCommit: bump, behind: 2 })
+      expect(r.data.lines).toContain(`Release commit: ${short7(bump)}, 2 commits behind main at ${short7(head)}.`)
+      expect(r.data.lines).toContain(`No rehearsal on ${short7(bump)} yet.`)
+      expect(r.data.summary).toContain(`main at ${short7(head)} carries ${NEXT} (release commit ${short7(bump)}, 2 commits behind main at ${short7(head)}): not tagged yet`)
+    })
+
+    it('takes another commit of main that carries the version when named', async () => {
+      const s = repo({ bumped: true })
+      const head = landMore(s, 3)
+      const middle = g(s.work, 'rev-parse', `${head}~1`)
+      runtime()
+      const named = await call('release', { step: 'tag', path: s.work, commit: middle.slice(0, 10), skipRehearsal: true, confirm: true })
+      expect(named.isError, named.text).toBe(false)
+      expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBe(middle)
+    })
+
+    it('refuses a commit that is not on main, or before the bump, or no commit at all', async () => {
+      const s = repo({ bumped: true })
+      landMore(s)
+      g(s.work, 'switch', '-q', '-c', 'side', s.released)
+      write(s.work, 'side.txt', 's\n')
+      const side = commitAll(s.work, 'side work')
+      g(s.work, 'switch', '-q', 'main')
+      runtime()
+      for (const [commit, why] of [
+        [side, /is not on main's history/],
+        [s.released, /is before the commit that declared/],
+        ['nonsense', /is not a commit this checkout has/],
+        ['abcdef0123', /is not a commit this checkout has/],
+      ] as const) {
+        const r = await call('release', { step: 'tag', path: s.work, commit, skipRehearsal: true, confirm: true })
+        expect(r.isError, commit).toBe(true)
+        expect(r.data.problems.join(' '), commit).toMatch(why)
+      }
+      expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBeNull()
+    })
+
+    it('still uses the merged bump PR\'s checks after more changes landed on main', async () => {
+      const s = repo({ bumped: true })
+      const bump = s.tip
+      bumpEvidence(s)
+      g(s.work, 'commit', '--allow-empty', '-q', '-m', 'docs: later merge (#901)')
+      g(s.work, 'push', '-q', 'origin', 'main')
+      patchState((st) => (st.dispatchSha = g(s.work, 'rev-parse', 'HEAD')))
+      runtime()
+      for (const step of ['rehearse', 'tag']) {
+        const r = await call('release', { step, path: s.work, skipRehearsal: true, confirm: true })
+        expect(r.isError, r.text).toBe(false)
+        expect(r.data.lines.join(' ')).toContain("CI: PR #900's run on the same tree")
+      }
+      expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBe(bump)
+    })
+
+    it('rehearses the bump commit from a branch at it once main moved on, and tags on that rehearsal', async () => {
+      const s = repo({ bumped: true })
+      const bump = s.tip
+      const head = landMore(s)
+      runtime()
+      const branch = `chore/release-${NEXT}`
+      const plan = await call('release', { step: 'rehearse', path: s.work })
+      expect(plan.isError, plan.text).toBe(false)
+      expect(plan.data.summary).toBe(
+        `Ready to rehearse ${NEXT} on the release commit ${short7(bump)}, 2 commits behind main at ${short7(head)} (release.yml on ${branch}, which is made at that commit with dry_run=true; builds and packs, publishes nothing, asks no approval). Call again with confirm: true to start it.`,
+      )
+      expect(remoteHas(s.origin, `refs/heads/${branch}`)).toBeNull()
+      // GitHub runs a branch at its commit: the fake attributes the dispatch to the commit it is given
+      patchState((st) => (st.dispatchSha = bump))
+      const r = await call('release', { step: 'rehearse', path: s.work, confirm: true })
+      patchState((st) => (st.dispatchSha = head))
+      expect(r.isError, r.text).toBe(false)
+      expect(r.data.started).toBe(true)
+      expect(r.data.summary).toBe(`Started the rehearsal of ${NEXT} on ${short7(bump)} (2 commits behind main at ${short7(head)}, on ${branch}): https://github.com/ijun17/centralu/actions/runs/77. Tag once it succeeds.`)
+      expect(remoteHas(s.origin, `refs/heads/${branch}`)).toBe(bump)
+      expect(ghWrites()).toEqual([{ args: ['api', '-X', 'POST', 'repos/ijun17/centralu/actions/workflows/release.yml/dispatches', '--input', '-'], stdin: JSON.stringify({ ref: branch, inputs: { dry_run: 'true' } }) }])
+      // Not started twice, and tagged on it once it succeeds
+      const again = await call('release', { step: 'rehearse', path: s.work, confirm: true })
+      expect(again.data.summary).toBe(`A rehearsal on ${short7(bump)} queued: https://github.com/ijun17/centralu/actions/runs/77; not starting another.`)
+      patchState((st) => Object.assign(st.runs[0]!, { status: 'completed', conclusion: 'success' }))
+      const tag = await call('release', { step: 'tag', path: s.work, confirm: true })
+      expect(tag.isError, tag.text).toBe(false)
+      expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBe(bump)
+      expect(ghWrites()).toHaveLength(1)
+    })
+
+    it('rehearses on a bump branch that is left over only when it holds the release commit\'s tree', async () => {
+      const s = repo({ bumped: true })
+      const bump = s.tip
+      landMore(s)
+      const branch = `chore/release-${NEXT}`
+      // The PR's own head, another commit with the same tree: the rehearsal runs on it
+      const prHead = g(s.work, 'commit-tree', g(s.work, 'rev-parse', `${bump}^{tree}`), '-p', s.released, '-m', 'chore(release): bump candidate')
+      g(s.work, 'push', '-q', 'origin', `${prHead}:refs/heads/${branch}`)
+      runtime()
+      patchState((st) => (st.dispatchSha = prHead))
+      const same = await call('release', { step: 'rehearse', path: s.work, confirm: true })
+      expect(same.isError, same.text).toBe(false)
+      expect(remoteHas(s.origin, `refs/heads/${branch}`)).toBe(prHead)
+      // Another tree on it: nothing is started, and nothing is moved
+      g(s.work, 'push', '-q', '-f', 'origin', `${s.released}:refs/heads/${branch}`)
+      patchState((st) => (st.runs.length = 0))
+      const other = await call('release', { step: 'rehearse', path: s.work, confirm: true })
+      expect(other.isError).toBe(true)
+      expect(other.data.problems).toEqual([`The branch ${branch} on origin (${short7(s.released)}) holds another tree than the release commit ${short7(bump)}; delete it (the bump is merged), then rehearse again.`])
+      expect(remoteHas(s.origin, `refs/heads/${branch}`)).toBe(s.released)
+      expect(ghWrites()).toHaveLength(1)
+    })
   })
 
   // #1259: changes land after the fast tier, so main's own push run (the full tier) is the only evidence for a release
