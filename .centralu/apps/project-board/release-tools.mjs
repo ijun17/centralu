@@ -65,7 +65,7 @@ async function release(args, step, call) {
   try {
     if (step === 'status') {
       const r = await guarded(() => releaseStatus(ctx))
-      return linesAnswer(r.summary, [['lines', '', r.lines]], { ok: true, phase: r.phase, version: r.version, tag: r.tag, head: r.head, releaseCommit: r.releaseCommit, behind: r.behind, duplicates: r.duplicates })
+      return linesAnswer(r.summary, [['lines', '', r.lines]], { ok: true, phase: r.phase, version: r.version, tag: r.tag, head: r.head, releaseCommit: r.releaseCommit, behind: r.behind, notes: r.notes, after: r.after, duplicates: r.duplicates })
     }
     // Who is asking comes first, as for merging: a contributor's agent gets no further
     ctx.permissions = (await readRepo(repo)).permissions

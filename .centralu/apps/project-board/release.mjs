@@ -25,6 +25,7 @@ import {
   commitCount,
   commitFiles,
   currentBranch,
+  deleteRemoteBranch,
   fetchRefs,
   filesAt,
   filesHolding,
@@ -32,9 +33,11 @@ import {
   git,
   head,
   isAncestor,
+  lastTouching,
   pushRef,
   remoteFor,
   remoteRefs,
+  shallowBoundary,
   showFile,
   subjects,
   topLevel,
@@ -108,15 +111,16 @@ async function readState({ repo, dir, cfg, gh }) {
   const last = tags[0] ?? null
   let notes = []
   let notesFrom = null
+  let lastSha = null
   if (last) {
-    const [lastSha] = await fetchRefs(root, remote, [`refs/tags/${last.name}`], space)
+    ;[lastSha] = await fetchRefs(root, remote, [`refs/tags/${last.name}`], space)
     if (await isAncestor(root, lastSha, tip)) {
       notesFrom = last.name
       notes = releaseNotes(await subjects(root, lastSha, tip))
     }
   }
   // `at`: the commit a release is cut from (`releaseCommit` sets it); main's head until then
-  return { root, remote, main, permissions: info.permissions, tip, version, tag, tagged, tags, last, notes, notesFrom, at: tip, behind: 0 }
+  return { root, remote, main, permissions: info.permissions, tip, version, tag, tagged, tags, last, lastSha, notes, notesFrom, after: [], at: tip, behind: 0 }
 }
 
 /** How many first-parent commits of main are looked through for where the version was declared */
@@ -133,8 +137,12 @@ async function releaseCommit(s, cfg, { version, commit } = {}) {
   const want = version !== undefined ? String(version).replace(/^v/, '') : s.version
   if (want !== s.version) {
     const later = parseVersion(want) && compareVersions(want, s.version) > 0
+    // A newer version main declared once and no longer does: its bump was merged and then reverted
+    const declared = parseVersion(want) ? await lastTouching(s.root, s.tip, want, cfg.source.path) : null
     throw new ReleaseRefusal([
-      `${s.main} at ${short(s.tip)} carries ${s.version}, not ${want}; ${later ? 'merge its bump first' : `a later commit changed the version, so ${want} is not released from here`}.`,
+      later && declared
+        ? `${want} was merged on ${s.main} and then taken out again by ${short(declared)} (a revert): ${s.main} at ${short(s.tip)} carries ${s.version} again, so there is nothing of ${want} to tag; bump again (release step bump) if it should go out.`
+        : `${s.main} at ${short(s.tip)} carries ${s.version}, not ${want}; ${later ? 'merge its bump first' : `a later commit changed the version, so ${want} is not released from here`}.`,
     ])
   }
   const log = (await git(s.root, ['rev-list', '--first-parent', '-n', String(WALK_LIMIT), s.tip])).split('\n').filter(Boolean)
@@ -149,6 +157,9 @@ async function releaseCommit(s, cfg, { version, commit } = {}) {
     first = i
   }
   if (ended && log.length >= WALK_LIMIT) throw new ReleaseRefusal([`${cfg.source.path} carries ${want} in all of the last ${WALK_LIMIT} commits of ${s.main}, so the bump that declared it cannot be found; name the commit.`])
+  // History that stops at a shallow clone's boundary has not reached the commit that declared the version: that commit is not the bump
+  if (ended && (await shallowBoundary(s.root)).has(log[log.length - 1]))
+    throw new ReleaseRefusal([`This checkout is shallow: its history of ${s.main} stops at ${short(log[log.length - 1])} while ${cfg.source.path} still carries ${want}, so the bump that declared it cannot be found. Deepen it (git fetch --unshallow ${s.remote}), then call again.`])
   let at = first
   if (commit !== undefined) {
     const named = String(commit).trim()
@@ -161,6 +172,11 @@ async function releaseCommit(s, cfg, { version, commit } = {}) {
   }
   s.at = log[at]
   s.behind = at
+  // What this release ships is what merged up to the release commit; what landed after it is listed apart (#1350)
+  if (s.notesFrom && s.lastSha) {
+    s.notes = releaseNotes(await subjects(s.root, s.lastSha, s.at))
+    s.after = s.at === s.tip ? [] : releaseNotes(await subjects(s.root, s.at, s.tip))
+  }
   return { sha: s.at, behind: at, bump: log[first] }
 }
 
@@ -423,7 +439,8 @@ const runState = (r) => (r.status === 'completed' ? (r.conclusion === 'success' 
 
 function notesLines(s) {
   if (!s.notesFrom) return s.last ? [`${s.last.name} is not on ${s.main}, so what merged since cannot be listed.`] : ['No release tag yet.']
-  return s.notes.length ? [`Merged since ${s.notesFrom} (${s.notes.length}):`, ...s.notes.map((n) => `- ${n}`)] : [`Nothing merged since ${s.notesFrom}.`]
+  const after = s.after?.length ? [`Not in this release (merged after the release commit ${short(s.at)}, ${s.after.length}):`, ...s.after.map((n) => `- ${n}`)] : []
+  return [...(s.notes.length ? [`Merged since ${s.notesFrom} (${s.notes.length}):`, ...s.notes.map((n) => `- ${n}`)] : [`Nothing merged since ${s.notesFrom}.`]), ...after]
 }
 
 // --- status -------------------------------------------------------------------------------------------
@@ -499,7 +516,7 @@ export async function releaseStatus({ repo, dir, cfg, gh, ci }) {
   const summary = `${s.main} at ${short(s.tip)} carries ${s.version}${!s.tagged && s.at !== s.tip ? ` (release commit ${short(s.at)}, ${standing(s)})` : ''}: ${
     { tagged: `tagged ${s.tag}`, 'waiting-approval': `${s.tag} is waiting for approval`, publishing: `${s.tag} is being published`, released: `released as ${s.tag}`, failed: `the ${s.tag} release run failed`, 'ready-to-tag': `not tagged yet (last release ${s.last?.name ?? 'none'})` }[phase]
   }. Next: ${next}`
-  return { summary, lines, phase, version: s.version, tag: s.tag, head: s.tip, releaseCommit: s.at, behind: s.behind, notes: s.notes, duplicates: duplicates.map((d) => ({ id: d.run.id, url: d.run.url, safeToCancel: d.safe })) }
+  return { summary, lines, phase, version: s.version, tag: s.tag, head: s.tip, releaseCommit: s.at, behind: s.behind, notes: s.notes, after: s.after, duplicates: duplicates.map((d) => ({ id: d.run.id, url: d.run.url, safeToCancel: d.safe })) }
 }
 
 // --- bump ---------------------------------------------------------------------------------------------
@@ -687,7 +704,8 @@ export async function rehearseRelease({ repo, dir, cfg, gh, ci, permissions }, {
     ref = branch
   }
   await gh.dispatchWorkflow(repo, file, ref, cfg.rehearsalInputs)
-  const run = await findRun(gh, repo, file, { event: 'workflow_dispatch', headSha: s.at }, () => true, at)
+  // On a leftover bump branch the run's commit is the branch's, with the release commit's tree
+  const run = await findRun(gh, repo, file, { event: 'workflow_dispatch', headSha: onBranch?.sha ?? s.at }, () => true, at)
   return {
     summary: `Started the rehearsal of ${s.version} on ${short(s.at)}${s.at === s.tip ? '' : ` (${standing(s)}, on ${branch})`}${run?.url ? `: ${run.url}` : `; GitHub does not list the run yet, look at ${file}'s runs`}. Tag once it succeeds.`,
     lines: evidence.lines,
@@ -802,6 +820,17 @@ export async function tagRelease({ repo, dir, cfg, gh, ci, permissions }, { vers
     throw new ReleaseRefusal([`Pushing ${s.tag} failed, so nothing was released: ${e.message}`])
   }
   lines.push(`Pushed ${s.tag} on ${short(s.at)} to ${s.remote}.`)
+  // The branch `rehearse` made at the release commit has done its work; the tag keeps the commit. A bump PR's own head is another commit and stays
+  const rehearsalBranch = `${cfg.branchPrefix}${s.version}`
+  const made = (await remoteRefs(s.root, s.remote, 'refs/heads/').catch(() => [])).find((b) => b.name === rehearsalBranch)
+  if (made?.sha === s.at) {
+    try {
+      await deleteRemoteBranch(s.root, s.remote, rehearsalBranch)
+      lines.push(`Deleted ${rehearsalBranch} on ${s.remote}: it was made at the release commit only to rehearse on.`)
+    } catch (e) {
+      lines.push(`${rehearsalBranch} on ${s.remote} could not be deleted (${e.message}); it holds only the release commit, delete it by hand.`)
+    }
+  }
   const run = await findRun(gh, repo, workflowFile(cfg), { event: 'push', headSha: s.at }, (r) => r.headBranch === s.tag)
   return {
     summary: `Tagged ${s.tag} on ${short(s.at)}${s.at === s.tip ? '' : ` (${standing(s)})`}. ${run?.url ? `The release run: ${run.url}.` : `GitHub does not list the release run yet; look at ${workflowFile(cfg)}'s runs.`} It waits for approval on ${cfg.environment}: the platform jobs first, then the shim. Next: release step approve, or approve on GitHub.`,

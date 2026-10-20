@@ -178,12 +178,16 @@ carry it). `rehearse` and `tag` take it by default, or a `commit` of main's hist
 checkout of the repository (it must be clean; its branch and how far it is from main do not matter, as the tag is pushed
 by commit from GitHub's history). The gates are that commit's: its own CI on main green (or the bump PR's run on the same
 tree, below), a successful rehearsal on it or on the bump branch at a commit with the same tree, the version untagged and
-after the last tag. What lands after it does not matter: not its CI, not a rehearsal of main's head, which counts only when
-its tree is the release commit's. **A later commit that changes the version does**: a newer bump superseded this one, and
+after the last tag. What lands after it does not matter: not its CI, and not a rehearsal of main's head (only runs on the release commit
+itself, or on the bump branch at a commit with the same tree, count; a run on main's head does not, even with the same tree).
+The notes and `release_status` list what merged from the last tag to the release commit as this release, and what came
+after it apart as "Not in this release". A shallow checkout whose history stops before the bump is refused (deepen it with
+`git fetch --unshallow`), as the boundary commit would be taken for the bump. **A later commit that changes the version does**: a newer bump superseded this one, and
 the tag for the older version is refused. `release_status` names the release commit and how many commits behind main it is.
 When main has moved on and the bump branch is gone, `rehearse` pushes the release commit to `release.branchPrefix` plus the
 version and runs the workflow there (a workflow is dispatched on a branch, not on a commit); a branch left over with another
-tree is refused, not moved.
+tree is refused, not moved. Once the tag is pushed, a branch the board made at the release commit is deleted; a bump PR's own
+branch is another commit and stays. A bump that was merged and then reverted is named as such.
 
 ### Reusing the bump PR's CI (#629)
 

@@ -783,10 +783,14 @@ step shows on the screen.
   longer declares (a later commit changed it, a newer bump) is refused, by `version` or by `commit`.
   Everything the release reads is read at that commit: CI, the version files, the rehearsals (those on
   it, and those on the bump branch at a commit with its tree), the PR evidence. What lands after it
-  does not matter; a rehearsal of main's head counts only with the same tree. `tag` and `rehearse`
+  does not matter, and a rehearsal of main's head does not count (only runs on the release commit, or
+  on the bump branch at a commit with its tree). The notes run from the last tag to the release commit;
+  what came after is listed as "Not in this release". A shallow checkout whose history stops before
+  the bump is refused (the boundary is not the bump). `tag` and `rehearse`
   need a clean checkout, not one on main or at main (the tag is pushed by id); `bump` still does.
   Off main's head `rehearse` pushes the commit to `branchPrefix` + the version (never moved: a branch
-  there with another tree is refused) and dispatches the workflow on it.
+  there with another tree is refused) and dispatches the workflow on it; `tag` deletes that branch
+  after the push when it is still at the release commit (a bump PR's head is not).
 - **CI evidence for rehearse and tag (#629):** CI on the release commit green is used directly and its
   failure always blocks. Otherwise the merged bump PR may supply green required checks only when the
   release commit is its single-parent squash commit and the PR head has the identical Git tree. Audit required workflow

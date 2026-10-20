@@ -1401,6 +1401,87 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
       expect(remoteHas(s.origin, `refs/tags/v${NEWER}`)).toBe(newer)
     })
 
+    it('refuses a shallow checkout whose history stops before the bump, and takes the bump once it is deepened', async () => {
+      const s = repo({ bumped: true })
+      const bump = s.tip
+      const head = landMore(s, 3)
+      const shallow = join(root, 'shallow')
+      g(root, 'clone', '-q', '--depth', '2', `file://${s.origin}`, shallow)
+      g(shallow, 'remote', 'set-url', 'origin', 'https://github.com/ijun17/centralu.git')
+      g(shallow, 'config', `url.${s.origin}.insteadOf`, 'https://github.com/ijun17/centralu.git')
+      g(shallow, 'config', 'remote.origin.pushurl', s.origin)
+      g(shallow, 'config', 'user.name', 'Tester')
+      g(shallow, 'config', 'user.email', 'tester@example.test')
+      runtime()
+      // The boundary commit is not the bump (it is three behind head; the boundary is one behind): nothing is tagged on it
+      const refused = await call('release', { step: 'tag', path: shallow, skipRehearsal: true, confirm: true })
+      expect(refused.isError).toBe(true)
+      expect(refused.data.problems).toEqual([expect.stringContaining('This checkout is shallow: its history of main stops at ')])
+      expect(refused.data.problems[0]).toContain('git fetch --unshallow origin')
+      expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBeNull()
+      const status = await call('release_status', { path: shallow })
+      expect(status.data.lines.join(' ')).toContain('Release commit: This checkout is shallow')
+      const rehearse = await call('release', { step: 'rehearse', path: shallow, confirm: true })
+      expect(rehearse.isError).toBe(true)
+      expect(ghWrites()).toEqual([])
+      g(shallow, 'fetch', '-q', '--unshallow', 'origin')
+      const ok = await call('release', { step: 'tag', path: shallow, skipRehearsal: true, confirm: true })
+      expect(ok.isError, ok.text).toBe(false)
+      expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBe(bump)
+      expect(head).not.toBe(bump)
+    })
+
+    it('takes the first commit of the repository as the release commit when every commit carries the version', async () => {
+      // A repository that began at the version: the walk reaches a real first commit, which is not a shallow boundary
+      const s = repo({ version: NEXT })
+      g(s.work, 'push', '-q', 'origin', `:refs/tags/v${NEXT}`)
+      runtime()
+      const r = await call('release_status', { path: s.work })
+      expect(r.isError, r.text).toBe(false)
+      expect(r.data).toMatchObject({ phase: 'ready-to-tag', version: NEXT, releaseCommit: s.released, behind: 2 })
+    })
+
+    it('lists what merged up to the release commit as this release, and what came after apart as not in it', async () => {
+      const s = repo({ bumped: true })
+      const bump = s.tip
+      const head = landMore(s)
+      runtime()
+      const status = await call('release_status', { path: s.work })
+      expect(status.data.notes).toEqual(['fix: two (#11)', 'feat(ui): one (#10)'])
+      expect(status.data.after).toEqual(['fix: later 2 (#22)', 'fix: later 1 (#21)'])
+      expect(status.data.lines).toEqual(expect.arrayContaining([
+        `Merged since v${APP_VERSION} (2):`,
+        '- fix: two (#11)',
+        `Not in this release (merged after the release commit ${short7(bump)}, 2):`,
+        '- fix: later 2 (#22)',
+        '- fix: later 1 (#21)',
+      ]))
+      // The tag preview says the same, so the confirmation is for what is shipped
+      const plan = await call('release', { step: 'tag', path: s.work, skipRehearsal: true })
+      const text = plan.data.lines.join('\n')
+      expect(text).toContain(`Merged since v${APP_VERSION} (2):\n- fix: two (#11)\n- feat(ui): one (#10)\nNot in this release (merged after the release commit ${short7(bump)}, 2):`)
+      expect(text.indexOf('fix: later 2')).toBeGreaterThan(text.indexOf('Not in this release'))
+      expect(head).not.toBe(bump)
+    })
+
+    it('says a bump that was merged and then reverted was reverted, not that it is to be merged', async () => {
+      const s = repo({ bumped: true })
+      g(s.work, 'revert', '--no-edit', 'HEAD')
+      g(s.work, 'push', '-q', 'origin', 'main')
+      const revert = g(s.work, 'rev-parse', 'HEAD')
+      patchState((st) => (st.dispatchSha = g(s.work, 'rev-parse', 'HEAD')))
+      runtime()
+      const r = await call('release', { step: 'tag', path: s.work, version: NEXT, skipRehearsal: true, confirm: true })
+      expect(r.isError).toBe(true)
+      const said = r.data.problems.join(' ')
+      expect(said).toContain(`${NEXT} was merged on main and then taken out again by ${short7(revert)} (a revert): main at `)
+      expect(said).toContain(`carries ${APP_VERSION} again`)
+      expect(said).not.toContain('merge its bump first')
+      // An unknown newer version is still "merge its bump first"
+      const unknown = await call('release', { step: 'tag', path: s.work, version: '9.9.9', confirm: true })
+      expect(unknown.data.problems.join(' ')).toContain('merge its bump first')
+    })
+
     it('says in the status which commit is the release and how far behind main it is', async () => {
       const s = repo({ bumped: true })
       const bump = s.tip
@@ -1490,6 +1571,9 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
       expect(tag.isError, tag.text).toBe(false)
       expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBe(bump)
       expect(ghWrites()).toHaveLength(1)
+      // The branch made at the release commit only to rehearse on is gone once the tag keeps the commit
+      expect(remoteHas(s.origin, `refs/heads/${branch}`)).toBeNull()
+      expect(tag.data.lines).toContain(`Deleted ${branch} on origin: it was made at the release commit only to rehearse on.`)
     })
 
     it('rehearses on a bump branch that is left over only when it holds the release commit\'s tree', async () => {
@@ -1505,6 +1589,16 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
       const same = await call('release', { step: 'rehearse', path: s.work, confirm: true })
       expect(same.isError, same.text).toBe(false)
       expect(remoteHas(s.origin, `refs/heads/${branch}`)).toBe(prHead)
+      // The run is on the branch's commit, not the release commit: it is found and reported
+      expect(same.data.run).toBe('https://github.com/ijun17/centralu/actions/runs/77')
+      expect(same.data.summary).toContain(': https://github.com/ijun17/centralu/actions/runs/77.')
+      expect(same.data.summary).not.toContain('does not list the run yet')
+      // Tagged on that rehearsal; the bump PR's own head is not a branch the tool made, so it stays
+      patchState((st) => Object.assign(st.runs[0]!, { status: 'completed', conclusion: 'success' }))
+      const tagged = await call('release', { step: 'tag', path: s.work, confirm: true })
+      expect(tagged.isError, tagged.text).toBe(false)
+      expect(remoteHas(s.origin, `refs/heads/${branch}`)).toBe(prHead)
+      g(s.origin, 'tag', '-d', `v${NEXT}`)
       // Another tree on it: nothing is started, and nothing is moved
       g(s.work, 'push', '-q', '-f', 'origin', `${s.released}:refs/heads/${branch}`)
       patchState((st) => (st.runs.length = 0))
