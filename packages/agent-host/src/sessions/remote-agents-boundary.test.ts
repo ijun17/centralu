@@ -92,6 +92,7 @@ class Machine {
       read: async () => (this.reachable ? { ok: true, state: this.state, lines: [] } : { ok: false, error: 'not reachable' }),
       list: async () => [{ sessionId: CHILD, name: 'Child', project: 'app', state: this.state, tool: 'claude', preview: '', machine: 'Box' }],
       machineLinked: () => true,
+      machineWaitsForPerson: () => false,
       machineNamed: (n: string) => (n === 'Box' ? { id: 'm1', name: 'Box' } : null),
       describe: () => ({ name: 'Child', project: 'app' }),
       lastWords: async () => (this.reachable ? ({ ok: true as const, text: lastOf('assistant')?.payload.text ?? '', length: 0, seq: null }) : { ok: false as const, error: 'not reachable' }),

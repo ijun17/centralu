@@ -359,8 +359,6 @@ export class MockPlatform implements Platform {
   set askPairs(value: MachinesMock['askPairs']) { this.machinesMock.askPairs = value }
   /** Machines whose "Allow auto from a linked computer" a test turned off (#1273) */
   get hubAutoOff() { return this.machinesMock.hubAutoOff }
-  /** What the window said it needs, in order (#1134) */
-  get machinesNeeded() { return this.machinesMock.needed }
 
   // git.ts
   get gitDiffCalls() { return this.gitMock.gitDiffCalls }

@@ -6,7 +6,7 @@ import type { ApprovalDecision, ApprovalScope, QuestionAnswer } from '@cc/protoc
 import { ClaudeLinks } from './exe-link.js'
 import { StartGate } from './start-gate.js'
 import type { UsageQuery } from './usage.js'
-import type { AgentProcess, AgentSpawnSpec, CreateSessionOpts, EventSink, SessionHandle } from '../contract.js'
+import type { AgentProcess, AgentSpawnSpec, CreateSessionOpts, EventSink, InputOrigin, SessionHandle } from '../contract.js'
 import { spawnLocalAgent } from '../local-process.js'
 import { withStderrTail } from '../../stream-text.js'
 import { ClaudeStreamNormalizer } from './normalize.js'
@@ -16,6 +16,7 @@ import { ClaudeCards } from './session-cards.js'
 import { ClaudeServers } from './session-servers.js'
 import { appToolOf, isOrchestratorTool, permissionOptionsFor, settingSourcesFor } from './permissions.js'
 import { liveQueries, probeIds, querySessions } from './live-queries.js'
+import type { ClaudeMessage } from './json.js'
 import { claudeQueryOptions, type ClaudeInput, type QueryHandle } from './sdk-query.js'
 import { ClaudeRaceRetry, type RaceMsg } from './refresh-race.js'
 import { tracksInputs } from './tracked-input.js'
@@ -229,6 +230,8 @@ export class ClaudeSession implements SessionHandle {
           session_id: this.externalId ?? '',
           uuid: next.uuid,
           message: { role: 'user' as const, content: [{ type: 'text' as const, text: next.text }] },
+          // The person's own typing says so; everything else is left unattributed, as before (see `InputOrigin`)
+          ...(next.origin ? { origin: next.origin } : {}),
         }
         continue
       }
@@ -309,7 +312,7 @@ export class ClaudeSession implements SessionHandle {
   }
 
   /** One message of the stream, in the order the CLI sent it */
-  private onMessage(q: QueryHandle, msg: unknown): void {
+  private onMessage(q: QueryHandle, msg: ClaudeMessage): void {
     const m = msg as StreamMsg
     if (!this.turnOpen && m.user_message_uuid && !m.parent_tool_use_id && (m.type === 'assistant' || m.type === 'stream_event')) {
       this.turnOpen = true
@@ -438,9 +441,9 @@ export class ClaudeSession implements SessionHandle {
     this.notify?.()
   }
 
-  send(text: string): void { this.sendInput(text) }
+  send(text: string, opts?: { origin?: InputOrigin }): void { this.sendInput(text, randomUUID(), undefined, opts?.origin) }
 
-  private sendInput(text: string, uuid = randomUUID(), note?: InputReceipt): void {
+  private sendInput(text: string, uuid = randomUUID(), note?: InputReceipt, origin?: InputOrigin): void {
     /*
      * `/goal` goes to the CLI when the CLI offers it (2026-10-03). On 2026-09-07 (SDK 0.3.231 and
      * 0.3.263, the CLI of that day) the headless path had no goal at all: sent as text, the model
@@ -459,13 +462,13 @@ export class ClaudeSession implements SessionHandle {
      */
     const goal = isGoalCommand(text)
     if (!this.sendGate && !(goal && this.goalCommand === undefined)) {
-      this.deliver(text, uuid, !!note)
+      this.deliver(text, uuid, !!note, origin)
       return
     }
     const gate = (this.sendGate = (this.sendGate ?? this.goalKnown).then(() => {
       if (note?.cancelled) return
       if (!this.closed) {
-        this.deliver(text, uuid, !!note)
+        this.deliver(text, uuid, !!note, origin)
         return
       }
       // Closed while it waited: the same rule as dispose's queue — a message is never dropped silently
@@ -476,7 +479,7 @@ export class ClaudeSession implements SessionHandle {
     })
   }
 
-  private deliver(text: string, uuid: ReturnType<typeof randomUUID>, parentNote: boolean): void {
+  private deliver(text: string, uuid: ReturnType<typeof randomUUID>, parentNote: boolean, origin?: InputOrigin): void {
     if (isGoalCommand(text)) {
       if (this.goalCommand !== true) {
         /*
@@ -496,7 +499,7 @@ export class ClaudeSession implements SessionHandle {
       this.stream.goal.commandSent()
     }
     const starting = !this.turnOpen
-    this.queue.push({ text, uuid, parentNote })
+    this.queue.push({ text, uuid, parentNote, ...(origin ? { origin } : {}) })
     this.turnOpen = true
     this.notify?.()
     this.notify = null

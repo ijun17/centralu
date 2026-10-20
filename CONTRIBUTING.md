@@ -274,6 +274,31 @@ main's record lists it, and raises the ceiling for good. In CI a missing or unre
 main fails the test with the reason; rerun once main's record exists. A local run checks the ceiling
 only, and says it did not compare with main.
 
+**Lint reads types, and what predates that only shrinks** (#1339). `pnpm lint` runs typescript-eslint's
+type-aware rules on everything the root `tsconfig.json` compiles: no `any` flowing on from `JSON.parse`
+or a catch, no assertion that narrows (`as T` from `unknown`, `x!`) in shipped code, no promise left
+floating. Data from outside the process goes through a zod schema or a narrowing guard, and a caught
+value's text through `errorMessage(e)` from `@cc/protocol`, not `(e as Error).message`. The findings that
+were there when these rules came in are listed in `tooling/lint-allowlist/`, one list per package, a
+sorted line per file and rule with the number of findings it may hold. A new finding fails, in a listed
+file as anywhere else: fix it, do not list it. A file holding fewer than its line passes, and so does a
+line for a file that is gone: a change that only fixes things need not touch a list, and two that fix one
+finding each in the same file do not fail together. `pnpm lint:tighten` lowers such lines (run it when you
+fix listed findings), and a weekly job (`.github/workflows/lint-tighten.yml`) opens a pull request with
+whatever is left. A count moves only with a file git sees renamed: rename a file (with `git mv`, or `git add` the
+move) and run `pnpm lint:tighten`, which moves its lines to the new path and says so. A file added at a path
+main still has a stale line for holds nothing. Code moved into another file is a
+new finding there, and a count freed in one file is not credit for another. `tooling/type-aware-lint.test.ts`
+compares the lists with main's at the merge base (a push to main with its parent) and refuses any line that
+is new or higher than main's but a renamed file's own (CI's `verify` fetches main's history for it and fails
+without it; elsewhere, without one, the test says it did not compare).
+The same test refuses an `eslint-disable` of a type-aware rule, a disable naming no rule, and a comment
+that configures one off, and caps the type assertions (`as T`, safe ones too) in each package's shipped
+code. `eslint` run by itself, and an editor, do not read the lists and show the old findings too. The
+lint runs on two threads and without `--cache`: each thread builds the whole program (six took 13.6 GB),
+and ESLint's cache keys a file on its own content while a type-aware finding can come from a type
+another file changed.
+
 **A new test must fail when the fix it guards is disabled.** Disable the fix, watch the test
 fail, quote the failure in the commit or the PR, then restore it. A test that still passes
 with the fix removed is not testing the fix.

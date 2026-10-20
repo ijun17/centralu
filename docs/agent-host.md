@@ -756,6 +756,18 @@ the person's settings, falling back to explicit `default`) and project-trust set
 or network gap. A sandbox in the person's own Claude settings can still restrict commands; Centralu does
 not widen it here. Dependency preparation above applies to both adapters.
 
+**The person's input is stamped as theirs.** The Claude Agent SDK's user message has an `origin`; an absent one is
+"unattributed" and fails closed at the CLI's strict `isHuman()` trust gates. `SessionManager.send` takes `fromPerson`,
+which only `agents.send` (the composer, slash commands, the person's Continue) sets.
+`SessionEvents.deliver` hands it to the handle as `send(text, { origin: { kind: 'human' } })`, and the Claude adapter
+writes `origin: { kind: 'human' }` on that stdin message. A message with a source (a caller's delivery, a report), an app's
+notice or view message, a builder request, a new session's first message (only the UI's handoff opening, which quotes an
+agent's note), a message with a Centralu line in front of it (`rootAppsNotice`) and every note through `sendTracked` carry
+none, as before. One known gap: the handoff request the UI writes for the predecessor goes through `agents.send` and is
+stamped, since the host cannot tell Centralu's text from the person's there. Measured on CLI
+2.1.296: the CLI accepts it, echoes it on the replayed user message, and answers the same with or without it, mid-turn
+wording and `/compact` included (`docs/plans/mailbox.md` §7.1).
+
 `agent_session` normally acts on a session whose `askedBy` is the caller, in its project (the `auto` exception is above).
 Deleting a child without a worktree also accepts `parentSessionId` as its ownership link. `send` during the caller's turn
 uses the adapter's ordinary message path when it declares `capabilities.midTurnInput` and provides `sendTracked`:
@@ -1366,12 +1378,12 @@ a folder, and nothing named the machines. Both are rare commands of the orchestr
 
 A machine on a Centralu from before `projects.inspect` is named as too old, before any card. `list_machines` answers one
 line per machine from what `machines.list` answers (`SessionManager.useMachineList`, wired to `links.list()` in
-`main.ts`): its name, status, OS and shell (from the shell the hub reaches it with), and whether it connects at start or
-when needed (`MachineInfo.connect`, #1134).
+`main.ts`): its name, status, OS and shell (from the shell the hub reaches it with), and whether it reconnects by itself
+(Auto reconnect, `MachineInfo.autoReconnect`, #1341).
 
 **Managing the linked machines** (#1219, second slice). The orchestrator's rare commands `add_machine { sshTarget, name?,
 wslDistro? }`, `install_machine { machine, action: install | update }`, `remove_machine`, `reconnect_machine`,
-`set_machine_connect { connect }` and `set_machine_autostart { on }` make the calls the Machines screen makes on the
+`set_machine_auto_reconnect { on }` and `set_machine_autostart { on }` make the calls the Machines screen makes on the
 hub's links (`MachineFlow`, `sessions/machine-flow.ts`, wired by `SessionManager.useMachineOps(links)` in main.ts).
 `add_machine` connects nowhere before the person's card (security review of #1238): the target is resolved with `ssh -G`
 (`Links.resolve`; no connection, no key loaded) and the card shows the host, user and port ssh would use, and its
@@ -1382,7 +1394,9 @@ distro of it when one is named. A target, name or distro with a control or forma
 overrides among them) is refused before anything runs. Linking, installing,
 updating, removing and start at boot wait for a card in the orchestrator's slot under every preset (an `other` card,
 `about: "machine_change"`, the question whole in `raw`, so any window reads it; allow or deny, nothing remembered).
-Reconnecting and the connect mode act at once, as the row's buttons do. Refused before any card: a machine not linked,
+Reconnecting and Auto reconnect act at once, as the row's buttons do, except that undoing what the person chose asks (#1341):
+`reconnect_machine` on a machine they disconnected or whose Auto reconnect is off, and `set_machine_auto_reconnect` turning the
+switch back on, wait for a card (`about: "machine_change"`); a machine away on its own with the switch on is reconnected with no card, and one already connected is answered as connected (nothing is done). Refused before any card: a machine not linked,
 a target that is no ssh target or that `ssh -G` cannot read, a name already linked, and an install or update
 this computer cannot make (`LinkedMachine.operationRefusal`, the same sentences `operate` refuses with). Every answer
 ends with the machine as it is after the change (`machineLine`). An install or update runs while the tool call waits.
@@ -1395,7 +1409,7 @@ the params with the method's schema and reads the answer with its result schema,
 
 - `get_preferences` reads `prefs.get`, `themes.list`, `agents.sleepPolicy`, `updates.status` (not forced: the read the window makes at start, which asks the registry only when checking is on and one is due)
   and `agents.versions`, one line each, with the choices; a part the host cannot read says so and the rest still answers.
-  It also lists what no command changes (send key, session tools, agent ceiling and depth).
+  It also lists the send key, which no command changes, and the limits on agents, which `set_agent_limits` changes behind a card.
 - `set_preferences` takes only what changes: `theme` (an id or a name), `textSize`, `bodyFont`, `codeFont`,
   `lineHeight`, `idleSleepMinutes` (a whole number, or "never"), `autoUpdate` ("Automatic updates", below), and
   `moveIdleSessionsToNewAgentCli` and `notifications` (the switches to change: `approval`, `done`, `whenFocused`, `sound`;
@@ -1458,6 +1472,58 @@ preferences) are the Trash screen's calls. `what` is `session` (the default) or 
   stood is left alone and said so, and so is one restored and trashed again (its `deletedAt`, message count or what goes
   with it differ from the row the card named); one that failed to delete stays and is reported, and the rest go on.
 
+**Trust** (#1219, third slice). The rare commands `list_projects` and `set_project_trust { project, trusted }`
+(`TrustFlow`, `sessions/trust-flow.ts`, through the same window RPC as the preferences) are the project list's and the
+trust switch's calls (`projects.list`, `projects.setTrusted`, with `apps.list` and `machines.list` to name what the
+trust covers and where). `project` is an id, or a name exactly one project has (two that share it are named with their
+ids). The orchestrator's instructions point to these and the machine commands in one line: `centralu_commands "machine trust rule grant limits"` finds them all (2 characters more than the line it replaced).
+
+- `list_projects`: each project with its id, folder, machine and whether it is trusted.
+- `set_project_trust` with `trusted: false` asks too, in every preset (the reviewer's decision on #1325): it is not only
+  narrowing. An untrusted project's sessions read the person's own settings only (`settingSourcesFor`), so the project's
+  own deny rules and the hooks that block tools stop applying to its agents, `auto` sessions included; its apps stop and
+  its idle sessions restart (a busy one when its turn ends, #663). The card says so; after Allow the project is read again
+  (removed, moved, unreachable, or untrusted meanwhile: nothing more changes).
+- With `trusted: true` it asks first, in every preset (`ORCHESTRATOR_CHANGE`, allow or deny only): the card names the
+  project, its folder and machine, and each of its apps (root and inner) with its description and what it may ask for,
+  in the window's trust card's words (`usesLines`, now in the protocol so both say it the same way). After Allow the
+  project and its apps are read again: one removed meanwhile, or whose apps changed (an app added by a pull, or what one
+  may ask for), is not trusted, and the answer says why; one the person trusted meanwhile is left as it is. What a
+  manifest supplies (name, description, the declared background work) is quoted with control and format characters
+  escaped, the folder is named whole, and an app whose manifest could not be read, or that a linked machine listed without
+  `uses` (an older build), is said to ask for what is not known rather than for nothing. A project whose machine is not
+  reachable (its row is the hub's last copy) is refused before the card. A linked machine's project's apps are asked of
+  that machine alone (`apps.list` with `machine`, which the router sends to that machine only, so a machine that does not
+  answer is an error, not a list without its apps); when they cannot be listed, trust is refused before the card. Every
+  app is named with its id quoted (an id is a folder's name). After Allow its folder and machine are checked too.
+- The lists (`list_projects`, `list_approval_rules`, `list_app_grants`) say which linked machines are not connected, or
+  that the machines could not be read at all, so a list without them does not read as complete.
+- `list_approval_rules { project? }` reads Settings' list (`approvals.rules`, a linked machine's merged with its ids
+  folded): each rule's id, what it allows, the project or session it belongs to, and since when.
+  `remove_approval_rule { id }` removes one at once (`approvals.deleteRule`), as Settings' delete does: it only
+  narrows, and that action asks again. An id no rule has is refused. **No command adds or widens a rule**: the window has
+  no such call either, and a rule comes only from the person answering a card "always" (`ApprovalRules.rememberAlways`).
+- App trust follows the project's since #1141 (a root app and its inner apps run when the project is trusted, and an
+  imported app is enabled by trusting its project), so trusting an app is `set_project_trust`. `list_app_grants { app?,
+  project? }` lists the apps (`apps.list`) with their trust and sharing and the person's remembered answers to what each
+  asked for (`apps.permissions`, routed to a linked machine as the window routes it), and the remembered consents of one
+  project reaching another (`projectConsents.list`). `forget_app_answer { app, project?, capability }` and
+  `revoke_project_consent { from, to, kind }` act at once (`apps.forgetPermission`, `projectConsents.revoke`): each only
+  makes the next attempt ask the person again. `share_app { app, project?, shared }` is the inner app's share switch
+  (`apps.setShared`): off acts at once; on asks first, every preset, with a card naming the app, its project and what it
+  may ask for. After Allow the app is read again: one removed, already shared, or whose `uses` changed while the card
+  stood is not shared. A root app and a user-folder app have no share switch, and are refused before any card. The
+  person's answer to an app's own capability question is not given from here: the app asks the person.
+- `set_agent_limits { agentCeiling?, agentDepth? }` changes the person's limits on agents: the running agents per project
+  (a number, 0 unlimited, or `"preset"` for the preset's own) and the levels of sessions that may start agents (1 to 3).
+  "Let sessions look at other sessions" (`sessionTools`) is not one of them: it is not a setting any more (owner decision
+  2026-10-20, #1321), so the command has no field for it and refuses one by name. They bound what agents do and cost, the
+  orchestrator's own children included, so **every change asks**, narrowing too, in every preset: the card names each
+  limit as it is and as it becomes (`→`). Values are checked with `prefs.set`'s own schema before the card; nothing to
+  change asks nothing. After Allow the limits are read again, and when the person changed one in Settings while the card
+  stood nothing is changed (the card's "from" is not what is set); otherwise one `prefs.set` with exactly the named fields.
+  `set_preferences` still has no field for them. The agent models (`agentModels`) stay the person's.
+
 ### 1.4 The inventory behind #1219: what the window calls, and what the orchestrator reaches
 
 The owner's direction (#1219): what the person can do in the window, the orchestrator can ask to do, through the same
@@ -1480,7 +1546,7 @@ window's channel), grouped, and for each group one of three states.
 | Restart or resume. `agents.restartSession`, `agents.resumeSession` | Has it | A send to an asleep or stopped session wakes it |
 | Housekeeping of a session. `agents.stopBackgroundTask`, `agents.clearBackgroundTasks`, `sessions.rename`, `sessions.markRead`, `sessions.reorder`, `agents.listExternalSessions`, `agents.commands`, `agents.models`, `agents.capabilities`, `agents.detect`, `agents.account`, `agents.usage`, `messages.image` | Should: *next* | Harmless; none is asked for by name yet. `agents.usage` read only. `messages.image` and the lists behind the composer are drawing aids, not errands |
 | MCP and skill proposals. `agents.mcpProposals`, `agents.skillProposals` (the lists) and the `resolve*` calls | Proposing has it (`propose_mcp_server`, `propose_skill`); resolving is **Person** | Approving installs code or changes every orchestrator turn from then on. `agents.orchestratorSkills` and `agents.deleteOrchestratorSkill`: **Person**, they edit the orchestrator's own instructions |
-| Preferences. `prefs.get`, `prefs.set` | **This change** for theme, text size, fonts, line height, and idle sleep (below); the rest **Person** or *next* | `sessionTools` is not a setting (always on, 2026-10-20). `agentCeiling`, `agentDepth`, `agentModels` widen what agents may do or cost: **Person**. `sendWithModifierEnter` and `foldedGroups` are harmless and not asked for yet: *next*. `accent` is gone from the product (2026-10-20): not offered, and refused by name |
+| Preferences. `prefs.get`, `prefs.set` | **This change** for theme, text size, fonts, line height, and idle sleep (below); the rest **Person** or *next* | `sessionTools` is not a setting (always on, 2026-10-20). `agentCeiling`, `agentDepth`: has it (#1219, third slice), `set_agent_limits`, every change behind a card. `agentModels`: **Person**. `sendWithModifierEnter` and `foldedGroups` are harmless and not asked for yet: *next*. `accent` is gone from the product (2026-10-20): not offered, and refused by name |
 | Themes. `themes.list` | **This change** (read) | `themes.save`, `themes.import`, `themes.resolve`: a theme file is a file in the data folder (docs/themes.md), which an agent can already write; no command |
 | Update switches. `updates.status`, `updates.setAuto`, `updates.setAutoApply`, `agents.versions`, `agents.setAutoApplyVersions` | **This change** | Turning "Automatic updates" **on** (`autoUpdate`, both halves) asks (it installs and relaunches without a later question); the rest act at once. `updates.apply` has `update_centralu install`; `updates.answerApply` and `updates.reportApply` are the window's side of an apply |
 | Idle sleep. `agents.sleepPolicy`, `agents.setSleepPolicy` | **This change** | |
@@ -1490,25 +1556,29 @@ window's channel), grouped, and for each group one of three states.
 | Deleting for good. `trash.purge`, `trash.purgeSubagentSteps`, `trash.purgeRuns`, `trash.empty` | **This change**, behind a card naming what goes | One session, or one session's trashed steps (`delete_trashed`), or all of it (`empty_trash`). `trash.empty` itself is not called: it takes everything there is, and `empty_trash` deletes what its card named, one call each |
 | Workspace layout. `workspace.save`, `workspace.load`, `grid.get`, `grid.set` | **Person** | The window's own state, written whole by one writer (`saveWorkspace`); a second writer erases the other's fields |
 | Projects. `projects.add`, `projects.inspect`, `projects.create`, `projects.createPreview` | Has it | `add_project`, `create_project`, each behind a card |
-| `projects.list`, `projects.gitStatus`, `projects.origin`, `files.search` | Should: *next* | A read-only project list (names, trust, machine); `list_sessions` and `create_session` look projects up by name today |
-| Project trust and commands. `projects.setTrusted`, `projects.setCommands`, `projects.setWorktreeSetup`, `worktrees.setTrunk`, `worktrees.createManager`, `projects.delete`, `projects.reorder` | **Person**, except `projects.reorder` (*next*, harmless) | Trusting a project lets its agents and apps run; commands and worktree setup run shell commands; `projects.delete` can trash a folder |
+| `projects.list` | Has it (#1219, third slice) | `list_projects`: names, ids, folders, machine and trust |
+| `projects.gitStatus`, `projects.origin`, `files.search` | Should: *next* | Read only |
+| Project trust. `projects.setTrusted` | Has it (#1219, third slice) | `set_project_trust`: both ways ask (taking trust away drops the project's own deny rules and hooks); trusting's card names the folder and each app with what it may ask for; both checked again after Allow |
+| Project commands. `projects.setCommands`, `projects.setWorktreeSetup`, `worktrees.setTrunk`, `worktrees.createManager`, `projects.delete`, `projects.reorder` | **Person**, except `projects.reorder` (*next*, harmless) | Commands and worktree setup run shell commands; `projects.delete` can trash a folder |
 | Git and files in a project. `git.*`, `fs.*`, `attachments.save` | **Person** | The window acting on the person's own repository and files. The orchestrator hands this to a session in the project, which has the tools and the preset that decide it |
-| Approval rules. `approvals.rules` (read), `approvals.deleteRule` | Reading: *next*; deleting: **Person** | A rule is a standing "allow"; seeing them is harmless, but removing or adding them changes what runs unasked. Widening is never offered |
+| Approval rules. `approvals.rules` (read), `approvals.deleteRule` | Has it (#1219, third slice) | `list_approval_rules`, `remove_approval_rule` (it only narrows: no card). No command adds or widens a rule; the window has no such call, and a rule comes only from the person's "always" on a card |
 | Apps. `apps.list`, `apps.create`, `apps.sessionTools`, `apps.sessionCall` | Has it | `find_apps`, `attach_app`, `detach_app`, `create_app`; an app's own tools reach a session through its attach |
-| App trust and grants. `apps.permissions`, `apps.forgetPermission`, `apps.reach`, `apps.enable`, `apps.review`, `apps.setShared`, `apps.setSecret`, `apps.importPrepare`, `apps.importCommit`, `apps.importCancel`, `projectConsents.list`, `projectConsents.revoke` | **Person** (listing: *next*) | Granting what an app may reach, enabling or importing one, sharing it and its secrets are trust decisions; a secret's value is never handed to an agent |
+| App grants. `apps.permissions`, `apps.forgetPermission`, `apps.setShared`, `projectConsents.list`, `projectConsents.revoke` | Has it (#1219, third slice) | `list_app_grants`, `forget_app_answer`, `revoke_project_consent` (they only make the next attempt ask: no card), `share_app` (on asks, with a card naming the app and what it may ask for, checked again after Allow; off acts at once) |
+| App trust and imports. `apps.reach`, `apps.enable`, `apps.review`, `apps.setSecret`, `apps.importPrepare`, `apps.importCommit`, `apps.importCancel` | **Person** | Enabling an app is trusting its project since #1141 (`set_project_trust`); importing one brings code in; a secret's value is never handed to an agent |
 | App upkeep. `apps.remove`, `apps.restart`, `apps.versions`, `apps.restoreVersion`, `apps.check`, `apps.runs`, `apps.errors`, `apps.usage`, `apps.questions`, `apps.answerQuestion`, `apps.builder`, `apps.createBuilder`, `apps.askBuilder`, `apps.sendError` | Should: *next* | `apps.remove` behind a card (its folder moves to `app-trash/`); the rest are reads or reversible. The builder calls are the app builder's own channel |
 | App screens. `apps.viewFrame`, `apps.viewDocument`, `apps.openView`, `apps.closeView`, `apps.recoverView`, `apps.holdViews`, `apps.inlineReopen`, `apps.inlineViews`, `apps.viewMessage`, `apps.readResource`, `apps.invoke` | **Person** | Drawing and clicking an app's screen: they have no meaning without a window |
-| Linked machines. `machines.list`, `machines.add`, `machines.remove`, `machines.reconnect`, `machines.setConnect`, `machines.install`, `machines.update`, `machines.autostart`, `machines.probe` | Has it (slice 1, #1238) | Six commands and `list_machines`; add, install, update, remove and start at boot behind a card |
+| Linked machines. `machines.list`, `machines.add`, `machines.remove`, `machines.reconnect`, `machines.setAutoReconnect`, `machines.setConnect`, `machines.install`, `machines.update`, `machines.autostart`, `machines.probe` | Has it (slice 1, #1238) | Six commands and `list_machines`; add, install, update, remove and start at boot behind a card |
 | `machines.disconnect`, `machines.rollback`, `machines.uninstall`, `machines.acceptVersions`, `machines.sshHosts`, `machines.activity` | Should: *next* | Disconnect acts at once; rollback, uninstall and accepting differing versions behind a card |
 | What a machine's sessions may ask of this computer. `machines.setAsks`, `machines.askConsents`, `machines.withdrawAsk`, `machines.need` | **Person** | It widens what code on another computer may do here (#550) |
 | Host to host. `host.activity`, `host.sessions`, `host.readSession`, `host.recall`, `host.lastAnswer`, `host.send`, `host.stop`, `host.handover`, `host.hubOffer` | Not the window's | Answered for a linked hub or a switch; no window calls them |
 | Terminals, commands and processes. `terminal.*`, `commands.*`, `processes.strays`, `processes.stop` | **Person** | A shell and run commands on the person's behalf, and stopping a process; the orchestrator has no shell of its own, its sessions do |
 | The orchestrator's own channel. `orchestrator.get`, `orchestrator.peek`, `orchestrator.configure`, `orchestrator.tools`, `orchestrator.tool` | Not an errand | How the window and the bridge reach the orchestrator itself |
 
-The linked machines came first (#1238). This change is the preferences above and the trash. *Next*, in the order the owner's
-errands have come: notifications (after their move into the preferences), the read-only lists (projects, approval rules,
-app grants), deleting a session that is not the caller's child, the machine calls left, and app upkeep. Trust-changing
-calls stay out of every slice unless the owner says otherwise.
+The linked machines came first (#1238), then the preferences and the trash (#1309) and the notification switches (#1313).
+The third slice is trust, as the owner asked (2026-10-20): project trust first (`list_projects`, `set_project_trust`),
+then approval rules, app trust and grants, and the orchestrator's own limits. In each, what narrows trust acts at once
+and what widens it waits for the person's card, which names exactly what changes and is checked again after Allow.
+*Next*, after it: deleting a session that is not the caller's child, the machine calls left, and app upkeep.
 
 ## 2. The AgentAdapter contract (the implementation spec for product spec §6.2)
 
@@ -1524,7 +1594,7 @@ interface AgentAdapter {
 
 interface SessionHandle {
   readonly externalId: string
-  send(input: UserInput): void
+  send(input: UserInput, opts?: { origin?: InputOrigin }): void  // origin: only { kind: 'human' }, for the person's own typing
   sendTracked?(text: string, observer?: InputObserver): Promise<void> // host-only completion receipt (#592)
   respondApproval(requestId: string, decision: Decision, scope?: Scope): void
   interrupt(): void
@@ -2980,35 +3050,54 @@ sessions resume on the new host through their stored ids, as after any restart.
 | The ssh processes are children of the hub host, behind the `Tunnel` interface | Probe 4 of the plan (§10.6, 2026-10-08) measured the alternatives across real hub swaps: the link is away about 1.1 s per swap as it is, 0.8 s with OpenSSH `ControlPersist` (which leaves a forward behind per swap and outlives "Quit completely"), and would be about 0.14 s as a keeper child. The remote's agents never notice a hub swap, so it stays here |
 
 **The link's states** (`MachineInfo.status`, sent as `machine_status`): `connecting`; `connected`; `unreachable`
-(ssh failed, the forward or the socket dropped; retried with backoff from 2 s to 5 minutes, #1134); `starting` (no host ran
+(ssh failed, the forward or the socket dropped; retried with backoff from 2 s to 5 minutes while Auto reconnect is on, #1134, #1341; with it off, not until the person's Connect); `starting` (no host ran
 there; the link is starting one, above); `updating` (the hub is stopping, switching or removing the Centralu it installed there; the link waits, above); `not_running` (Centralu answers there but no `centralu serve` runs, and
 starting one failed, `error` says why; retried); `versions_differ`; `refused` (a token refused twice in a row:
 the connection line is read again once at once, since `--rotate-token` changes the token a running serve keeps until
 it restarts); `disconnected` (#1134: closed on purpose and not tried, below); `stopped` (#1143: the person stopped
 Centralu there, or the hosts the link started kept stopping; the link starts none until the person's Start, above).
 
-**When a link is opened** (#1134, owner decision 2026-10-18; `MachineInfo.connect`, the `linked_machines.connect`
-column, v59). `at_start`, the default, is what every machine did before: connected when the hub starts and tried again
-after every drop, so an orchestrator working through it hears reports and cards as they happen. `when_needed` is for a
-laptop that is often closed or a server used once a week: the machine is not connected at start, and no attempt is
-made until something needs it. A need is the window opening one of its projects or sessions (`machines.need`, said
-again every 2 minutes while it stays open), or the orchestrator acting there: `start_agent` with the machine,
-`agent_session`, `ask_project` on one of its projects, `read_session` of one of its sessions (`linked-sessions.ts`
-waits up to 60 s for the link). Looking a name up is not a need: such a machine's projects stand as last listed, not as
-away, also while it is connecting or between attempts, so the act that follows waits for the link instead of being
-refused. Each act there starts the hold again. The link stays up for 10 minutes after the last need, for as long as a
-session there is in a turn as the hub last heard it (followed event by event, so a turn open when the link dropped
-keeps it tried), and for as long as a session here waits on a child there (its report owed, over its turn or over its
-background work; `SessionManager.linkedWorkOwed`); then it closes (`disconnected`), also while it was away. A
-restarted hub connects such a machine at start while a report of a child there is owed. Its sessions keep running there meanwhile; on the next connect the window
-re-reads that machine (`machine_resync`) and with it what they said. The row's Disconnect closes any link without
-unlinking the machine; Connect (`machines.reconnect`) opens it and keeps it until Disconnect. After the person's
-Disconnect, the window saying again that it still has something of the machine open (`machines.need` with `repeat`)
-does not bring it back; Connect, the window opening something of it again, or an agent's work does. A machine connected
-at start that the person disconnected stays so until Connect or the hub's next start: an agent's work does not bring it
-back. An install, update or autostart change on a disconnected machine connects it first, since it runs over the link's
-ssh, without pinning it: its hold runs from the end of the job. An older host ignores the column and connects every machine at start; an older window reads `disconnected` as
-`unreachable` and shows no setting.
+**Auto reconnect** (#1341, owner decision 2026-10-20; `MachineInfo.autoReconnect`, kept in the `linked_machines.connect`
+column of v59 with no new step: null is on, `when_needed` is off, which is where the older connect mode kept its choice, so
+a machine set to "when needed" reads back with the switch off and a build still serving during a host swap reads the same
+value as it always did; a later release may add a column named for the switch and drop this one, add first and remove
+later). One switch per linked machine, on by default; it replaces the connect mode (`at_start` / `when_needed`, #1134).
+
+*On* is what every machine did before: connected when the hub starts and tried again after every drop, on the backoff (2 s,
+doubling to 5 minutes), so an orchestrator working through it hears reports and cards as they happen.
+
+*Off* is for a laptop that is often closed or a server used once a week: the hub tries **once** when it starts. After a
+failed attempt, or a drop that the quick redials do not undo, it tries nothing more until the person presses Connect
+(`machines.reconnect`: Settings → Machines, or the machine's badge menu in the sidebar). The quick redials stay (owner
+decision): after a drop the client dials the same forward again a few times (`LINK_REDIALS`, about 6 s, no new ssh), so a blip
+or a host swapped in place is back with no Connect; only when they fail does the link give up, close the forward and wait.
+`LinkedMachineConnection.retryLater` does nothing for it, and the row says `press Connect to try again` where it says
+`reconnecting` for a machine with the switch on. The one thing it still does by itself is look again at the versions of a
+link held at `versions_differ` (every 60 s): it only reads the connection line, refreshes the row, and connects nothing
+(`readsOnly`). Turning the switch off while connected leaves the link up; turning it on while the link is away tries again
+at once. An attempt under way at the person's Connect, or the one immediate re-ask after a refusal, is part of that attempt
+and goes ahead either way.
+
+Nothing connects a machine on a need any more (`machines.need`, `NEED_HOLD_MS`, the idle disconnect and the 60 s wait of
+`linked-sessions.ts` are gone). An agent's call that needs a machine nothing here will connect (the person disconnected
+it, or its switch is off and the attempt at the hub's start is over: `LinkedMachineConnection.waitsForPerson`) is answered
+at once: `start_agent` with the machine, `ask_project` on one of its projects, `agent_session`, a send to or a read of
+one of its sessions say "is not connected, and nothing here connects it by itself; ask the person to connect it (Settings,
+Machines, Connect)" (`NOT_CONNECTED` / `awayPhrase`, `adapters/contract/orchestrator.ts`), and its projects are listed as
+away with that reason. A machine with the switch on that is away between attempts is still "not reachable right now;
+try again once its link is back". What a child there reported meanwhile is read once the link is up again. A parent waiting on a child whose turn is running is
+told when the machine starts waiting for the person (`LinkedReports.linkChanged`: a link-lost report saying Auto reconnect is off and to ask
+the person to connect it), judged by the link itself (`waitsForPerson`, sent with the `machine_status` of the moment it gives up) and not by
+the row, which says `unreachable` while the client still redials, an attempt is under way or an install or update holds the machine: the
+wait stands through those.
+
+Its sessions keep running there meanwhile; on the next connect the window re-reads that machine (`machine_resync`) and
+with it what they said. The row's Disconnect closes any link without unlinking the machine and tries none until Connect or
+the hub's next start, with the switch on or off. An install, update or autostart change on a disconnected machine connects
+it first, since it runs over the link's ssh, and leaves it up. `machines.need` is still accepted for one release and
+answers the row, so an older window does not fail, and `machines.setConnect` still sets the switch (`at_start` is on). A
+build from before it reads the column as the connect mode, so it connects a machine with the switch off only when something there
+needs it; an older window reads `disconnected` as `unreachable` and shows no setting.
 
 **Versions are checked before connecting** (plan §4). The connection line carries the running remote host's `version`
 and `protocolVersion`, and the hub compares them with its own before it opens the socket, and again with
@@ -3371,7 +3460,8 @@ and the first conversation as `<ide_opened_file>…`.
 because real user speech often follows an injected block.
 Only when nothing is left after stripping is the line dropped.
 **Tool calls come back as they were shown live** ([#843](https://github.com/ijun17/centralu/issues/843)). Everything in
-a record but the words is read by the adapter's live normalizer (`normalizeMessage` for a Claude message,
+a record but the words is read by the adapter's live normalizer (a Claude message's body by `assistantEvents` and
+`userEvents`, once `readableMessage` has checked it into the shape they read, #1339;
 `normalizeNotification` for a Codex item as if it had started and completed), and the reader keeps its tool calls,
 their results and its compactions (`adapters/history-events.ts`); its thinking, usage, plan, images and activity are
 not part of a conversation read back. Before, only the words came back, with a Claude call kept as its name, so an

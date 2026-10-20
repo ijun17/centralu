@@ -1,24 +1,25 @@
 import type { McpServerConfig, PermissionMode } from '@anthropic-ai/claude-agent-sdk'
 import type { randomUUID } from 'node:crypto'
-import type { AgentProcess, CreateSessionOpts } from '../contract.js'
+import type { AgentProcess, CreateSessionOpts, InputOrigin } from '../contract.js'
 import type { LocalSpawnSpec } from '../local-process.js'
 import { withoutCrossSessionMessaging } from './cross-session.js'
 import { probeIds } from './live-queries.js'
 import type { ModelQuery } from './models.js'
 import { settingSourcesFor } from './permissions.js'
+import type { ClaudeMessage } from './json.js'
 import type { ClaudeCards } from './session-cards.js'
 import type { UsageQuery } from './usage.js'
 
 /** The SDK query a Claude session runs on: the surface of it we use, what its input carries, and its options. */
 
 /** One message for the CLI to read, as the session's input stream holds it */
-export type ClaudeInput = { text: string; uuid: ReturnType<typeof randomUUID>; parentNote: boolean }
+export type ClaudeInput = { text: string; uuid: ReturnType<typeof randomUUID>; parentNote: boolean; origin?: InputOrigin }
 
 /**
  * Only the part of the SDK Query that we use.
  * We write down only the minimal surface, so external types do not leave the adapter.
  */
-export type QueryHandle = AsyncIterable<unknown> &
+export type QueryHandle = AsyncIterable<ClaudeMessage> &
   UsageQuery &
   ModelQuery & {
     getContextUsage(): Promise<{ totalTokens?: number; maxTokens?: number } | undefined>

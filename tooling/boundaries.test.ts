@@ -5,7 +5,7 @@
  * file.
  */
 import { describe, expect, it } from 'vitest'
-import { ESLint } from 'eslint'
+import { virtualFileLinter } from './eslint-virtual.test-helpers.js'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -17,7 +17,7 @@ const PROTOCOL_SRC = join(ROOT, 'packages/protocol/src/')
 const stripComments = (code: string) =>
   code.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1')
 
-const eslint = new ESLint({ cwd: ROOT })
+const eslint = virtualFileLinter()
 
 async function lint(filePath: string, code: string) {
   const [res] = await eslint.lintText(code, { filePath, warnIgnored: false })

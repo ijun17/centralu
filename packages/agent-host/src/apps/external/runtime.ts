@@ -920,8 +920,10 @@ export class ExternalApps {
       // A root app has no share switch: its project's trust decides (#1141), so it never carries the mark
       ...(e.ref.projectId !== null && !e.found.root && this.deps.shared?.(e.ref) ? { shared: true } : {}),
       ...(e.found.root ? { root: true } : {}),
-      // What it declares it will ask for, for the project's trust card (#1141)
-      ...(m && (m.uses.agent || m.uses.apps?.length || m.uses.host?.length || m.uses.background || m.uses.notices) ? { uses: m.uses } : {}),
+      // What it declares it will ask for, for the project's trust card (#1141). Always, once the manifest is read, an empty
+      // one too: absent then means it could not be read (or an older host said nothing), which the orchestrator's trust
+      // card tells apart from asking for nothing (#1219)
+      ...(m ? { uses: m.uses } : {}),
       // Holding its process for background work now (#1236): the row says so, in the app's words
       ...(this.lifecycle.busyReason(e) !== null ? { busy: this.lifecycle.busyReason(e)! } : {}),
     }

@@ -33,6 +33,7 @@ function agents(extra: Record<string, unknown> = {}): RemoteAgents {
     read: async () => ({ ok: true, state, lines: [] }),
     list: async (): Promise<OrchestratedSession[]> => [{ sessionId: child.sessionId, name: 'Child', project: 'app', state, tool: 'claude', preview: '', machine: 'Box' }],
     machineLinked: () => true,
+    machineWaitsForPerson: () => false,
     lastWords: async () => ({ ok: true as const, text: 'done there', length: 0, seq: null }),
     lastUserMessage: async () => ({ ok: true, message: lastUser }),
   } as unknown as LinkedSessions
@@ -137,6 +138,7 @@ describe("the turn on the child's machine, read as the caller's only on evidence
       read: async () => ({ ok: true, state, lines: [] }),
       list: async (): Promise<OrchestratedSession[]> => [{ sessionId: child.sessionId, name: 'Child', project: 'app', state, tool: 'claude', preview: '', machine: 'Box' }],
       machineLinked: () => true,
+      machineWaitsForPerson: () => false,
       lastWords: words,
       lastUserMessage: async () => ({ ok: true, message: lastUser }),
       cards: async () => ({ ok: true, approval: null, questions: [q] }),

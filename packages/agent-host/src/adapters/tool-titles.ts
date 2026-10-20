@@ -82,7 +82,7 @@ const CENTRALU_LABELS: Record<string, string> = {
   install_machine: 'Asked to install Centralu on a machine',
   remove_machine: 'Asked to remove a machine',
   reconnect_machine: 'Reconnected a machine',
-  set_machine_connect: 'Set when a machine connects',
+  set_machine_auto_reconnect: 'Set whether a machine reconnects by itself',
   set_machine_autostart: 'Asked to change a machine starting at boot',
   get_preferences: 'Read the preferences',
   set_preferences: 'Changed preferences',

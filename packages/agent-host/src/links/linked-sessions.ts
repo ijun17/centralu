@@ -1,5 +1,5 @@
 import { AGENT_INSTRUCTIONS_MAX, BackgroundTask, HostLastAnswerResult, HostReadSessionResult, PermissionPreset, RpcMethods, HostRecallHit, HostSessionRow, oneLineText, SessionId, SessionInfo, ToolName } from '@cc/protocol'
-import { NOT_REACHABLE, type LinkedProject, type LinkedSessions, type OrchestratedSession, type RecallHit } from '../adapters/contract.js'
+import { awayPhrase, NOT_CONNECTED, NOT_REACHABLE, type LinkedProject, type LinkedSessions, type OrchestratedSession, type RecallHit } from '../adapters/contract.js'
 import { trustedJsonText } from '../sessions/orchestrator-tools.js'
 import { clipPreview } from '../sessions/turn-answer.js'
 import { splitQualified } from './machine-ids.js'
@@ -141,17 +141,23 @@ export function linkedSessions(
     return null
   }
   /**
-   * An agent's work there is a need (#1134): started or sent work there, or read there. A machine that connects when
-   * needed is connected first, and resolves when that attempt ended, connected or not; one already up counts it too,
-   * so its hold runs from this work and not from when it connected
+   * Why a machine that is not connected cannot be asked, as the sentence the model reads (#1341). One that nothing here
+   * will connect (the person disconnected it, or its Auto reconnect is off and the attempt at the hub's start is over)
+   * says so at once and names who can: the person. No call connects a machine by itself
    */
-  const needed = async (m: RoutedMachine): Promise<void> => {
-    await m.need?.()
+  const away = (m: RoutedMachine): string =>
+    m.waitsForPerson ? `${m.name} ${awayPhrase(NOT_CONNECTED)}, then try again` : `${m.name} is ${NOT_REACHABLE}; try again once its link is back`
+  /**
+   * A machine that is connecting is waited for, bounded (#1341): the act that needs it goes through once the attempt ends,
+   * as it did when a need connected it. With nothing trying, the call is answered at once
+   */
+  const settle = async (m: RoutedMachine): Promise<void> => {
+    if (m.attemptUnderWay) await m.settled?.()
   }
   /** The router's call, its refusal as the sentence the model reads */
   const attempt = async <T>(m: RoutedMachine, run: () => Promise<T>): Promise<({ ok: true } & T) | { ok: false; error: string }> => {
-    await needed(m)
-    if (!m.reachable) return { ok: false, error: `${m.name} is ${NOT_REACHABLE}; try again once its link is back` }
+    await settle(m)
+    if (!m.reachable) return { ok: false, error: away(m) }
     try {
       return { ok: true, ...(await run()) }
     } catch (err) {
@@ -243,10 +249,9 @@ export function linkedSessions(
           away.push({ machine: m.name, machineId: m.id, why })
           return lastProjects(m).map((p) => ({ ...p, away: why }))
         }
-        // Not away (#1134): its projects stand as last listed, and what is asked of one connects the machine; looking a
-        // name up is no need to connect it
-        if (!m.reachable && m.onDemand) return lastProjects(m)
-        if (!m.reachable) return mirrored(NOT_REACHABLE)
+        // Not away while it is connecting: its projects stand as last listed, and the act that follows waits for the link
+        if (!m.reachable && m.attemptUnderWay) return lastProjects(m)
+        if (!m.reachable) return mirrored(m.waitsForPerson ? NOT_CONNECTED : NOT_REACHABLE)
         try {
           const list = await raceTimeout(m.call('projects.list', {}), lookupMs, TIMED_OUT)
           if (list === TIMED_OUT) throw new Error(notWithin(lookupMs))
@@ -464,6 +469,10 @@ export function linkedSessions(
       return !!machineById(machineId)
     },
 
+    machineWaitsForPerson(machineId) {
+      return machineById(machineId)?.waitsForPerson === true
+    },
+
     async backgroundTasks(machineId) {
       const m = machineById(machineId)
       if (!m || !m.reachable) return null
@@ -570,8 +579,8 @@ export function linkedSessions(
     async lastWords(sessionId, maxChars) {
       const m = owner(sessionId)
       if (!m) return { ok: false, error: `Not a session of a linked machine: ${sessionId}` }
-      await needed(m)
-      if (!m.reachable) return { ok: false, error: `${m.name} is ${NOT_REACHABLE}` }
+      await settle(m)
+      if (!m.reachable) return { ok: false, error: m.waitsForPerson ? away(m) : `${m.name} is ${NOT_REACHABLE}` }
       try {
         const answer = await m.call('host.lastAnswer', { sessionId: m.q.strip(sessionId, 'The session'), maxChars: Math.min(maxChars, ANSWER_MAX_CHARS) })
         const r = HostLastAnswerResult.safeParse(answer)
@@ -595,7 +604,7 @@ export function linkedSessions(
     async list() {
       const perMachine = await Promise.all(
         [...machines()].map(async (m) => {
-          if (!m.reachable) return lastKnown(m, m.onDemand ? 'not connected now; it connects when needed' : 'not reachable right now')
+          if (!m.reachable) return lastKnown(m, m.waitsForPerson ? NOT_CONNECTED : NOT_REACHABLE)
           try {
             // Bounded like a lookup (#984): every session's list waits on the slowest machine otherwise
             const answer = await raceTimeout(m.call('host.sessions', {}), lookupMs, TIMED_OUT)
@@ -616,8 +625,8 @@ export function linkedSessions(
     async read(sessionId, limit, opts) {
       const m = owner(sessionId)
       if (!m) return { ok: false, error: `Not a session of a linked machine: ${sessionId}` }
-      await needed(m)
-      if (!m.reachable) return { ok: false, error: `${m.name} is not reachable right now; read it again once its link is back` }
+      await settle(m)
+      if (!m.reachable) return { ok: false, error: m.waitsForPerson ? away(m) : `${m.name} is not reachable right now; read it again once its link is back` }
       try {
         const answer = await m.call('host.readSession', {
           sessionId: m.q.strip(sessionId, 'The session'),

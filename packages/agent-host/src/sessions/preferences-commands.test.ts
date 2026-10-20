@@ -152,7 +152,8 @@ describe('get_preferences', () => {
   it('says what stays with the person', async () => {
     const orc = await mgr.orchestrator()
     const r = await run(orc.id, 'get_preferences')
-    expect(r.text).toContain('Kept by the person (no command changes these)')
+    expect(r.text).toContain('Kept by the person (no command changes this)')
+    expect(r.text).toContain("Limits on agents (set_agent_limits changes them, behind the person's card)")
     // Always on (2026-10-20): not a setting, so the inventory does not list it
     expect(r.text).not.toContain('read-only tools')
     expect(r.text).not.toMatch(/sessionTools/)
@@ -628,7 +629,7 @@ describe('who may run them', () => {
   it('are found through centralu_commands, as the instructions say: "machine" lists the machine commands, and the settings and trash ones are named', async () => {
     const orc = await mgr.orchestrator()
     const machines = (await mgr.runOrchestratorTool(orc.id, 'centralu_commands', { query: 'machine' })).text
-    for (const name of ['add_machine', 'install_machine', 'remove_machine', 'reconnect_machine', 'set_machine_connect', 'set_machine_autostart']) expect(machines, name).toContain(`- ${name}:`)
+    for (const name of ['add_machine', 'install_machine', 'remove_machine', 'reconnect_machine', 'set_machine_auto_reconnect', 'set_machine_autostart']) expect(machines, name).toContain(`- ${name}:`)
     const trash = (await mgr.runOrchestratorTool(orc.id, 'centralu_commands', { query: 'trash' })).text
     for (const name of ['list_trash', 'restore_trashed', 'trash_subagent_steps', 'delete_trashed', 'empty_trash']) expect(trash, name).toContain(`- ${name}:`)
     const prefs = (await mgr.runOrchestratorTool(orc.id, 'centralu_commands', { query: 'preferences' })).text
