@@ -80,6 +80,8 @@ export interface AgentPort {
    * the worktree, and the tool's own conversation file (codex rollout, claude JSONL). Both stay until then.
    */
   deleteSession(sessionId: string, deleteWorktree?: boolean, deleteExternal?: boolean): Promise<void>
+  /** Where the session's agent will compact next time its process starts (#1376), as the host that runs it decides */
+  autoCompact(sessionId: string): Promise<{ controlled: boolean; share: number; tokens: number | null }>
   /** The material needed to ask the person whether it is fine to delete. Null if it is not a worktree session */
   worktreeStatus(
     sessionId: string,

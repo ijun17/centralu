@@ -9,6 +9,7 @@ import { dataRoot } from '../../data-dir.js'
 import { whichTool } from '../../env-path.js'
 import { launchFor, toolCommand, toolExecutable, type ToolLaunch } from '../../tool-launch.js'
 import { installedCliVersion } from '../../cli-version.js'
+import { claudeAutoCompactWindow } from './sdk-query.js'
 import { ClaudeLinks, ClaudePlaceholderError, windowsStart, type ExeFs } from './exe-link.js'
 import { StartGate } from './start-gate.js'
 import { deleteClaudeSession, forkClaudeSession, listClaudeSessions, readClaudeHistory } from './history.js'
@@ -217,8 +218,10 @@ export class ClaudeAdapter implements AgentAdapter {
     for (const q of ClaudeAdapter.liveQueries) last = q
     return last
   }
-  /** The CLI reports min(model window, `autoCompactWindow`) (read in CLI 2.1.263+; #1376) */
-  readonly windowFollowsCompactPoint = true
+  /** The CLI reports min(model window, `autoCompactWindow`) (measured, CLI 2.1.296; #1376) */
+  windowCeilingFor(autoCompactTokens: number): number {
+    return claudeAutoCompactWindow(autoCompactTokens)
+  }
   readonly capabilities: AdapterCapabilities = {
     approvals: true, // M0 validation: the global bypass can be overridden per session.
     contextUsage: 'exact',

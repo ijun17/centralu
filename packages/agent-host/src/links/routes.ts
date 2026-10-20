@@ -108,6 +108,7 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'agents.exportHandoffRecord': session(),
   'agents.exportHandoffNote': session(),
   'agents.worktreeStatus': session(),
+  'agents.autoCompact': session(),
   'agents.restartSession': session(sessionResult),
   'agents.resumeSession': session(sessionResult),
   'agents.forkConversation': session(sessionResult),

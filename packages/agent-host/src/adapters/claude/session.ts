@@ -17,7 +17,7 @@ import { ClaudeServers } from './session-servers.js'
 import { appToolOf, isOrchestratorTool, permissionOptionsFor, settingSourcesFor } from './permissions.js'
 import { liveQueries, probeIds, querySessions } from './live-queries.js'
 import type { ClaudeMessage } from './json.js'
-import { claudeQueryOptions, type ClaudeInput, type QueryHandle } from './sdk-query.js'
+import { claudeAutoCompactWindow, claudeQueryOptions, type ClaudeInput, type QueryHandle } from './sdk-query.js'
 import { ClaudeRaceRetry, type RaceMsg } from './refresh-race.js'
 import { tracksInputs } from './tracked-input.js'
 import { initSurfaceLines } from './surface.js'
@@ -556,13 +556,32 @@ export class ClaudeSession implements SessionHandle {
       const usage = await q.getContextUsage()
       const used = Number(usage?.totalTokens ?? 0)
       const window = Number(usage?.maxTokens ?? 0)
+      this.contextWindow = window > 0 ? window : null
       if (window > 0 && used >= 0) {
-        this.emit({ type: 'context_update', sessionId: this.sessionId, used, window, exactness: 'exact' })
+        // The model the CLI resolved the name to: an alias moves between models, and the host keeps windows per model (#1376)
+        const model = typeof usage?.model === 'string' && usage.model ? usage.model : undefined
+        this.emit({ type: 'context_update', sessionId: this.sessionId, used, window, exactness: 'exact', ...(model ? { model } : {}) })
+        this.checkCompactPoint(Number(usage?.autoCompactThreshold ?? 0))
       }
     } catch {
       // The conversation continues even if context usage cannot be read.
     }
   }
+
+  /**
+   * Where the CLI says it compacts, against where Centralu asked it to (#1376). A CLI whose buffer is not the one
+   * `CLAUDE_AUTO_COMPACT_BUFFER` was measured with compacts elsewhere than the setting says; said once, in the host log.
+   */
+  private checkCompactPoint(reported: number): void {
+    const asked = this.opts.autoCompactTokens
+    if (!asked || !(reported > 0) || this.compactPointSaid || Math.abs(reported - asked) <= 1_000) return
+    // A model whose window is smaller than the one passed compacts at its own point: not a difference of buffers
+    if (reported < asked && this.contextWindow !== null && this.contextWindow < claudeAutoCompactWindow(asked)) return
+    this.compactPointSaid = true
+    console.error(`[claude] ${this.sessionId.slice(0, 8)} compacts at ${reported} tokens, not the ${asked} Centralu asked for`)
+  }
+  private compactPointSaid = false
+  private contextWindow: number | null = null
 
   /**
    * Interrupt.

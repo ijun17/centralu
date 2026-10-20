@@ -971,9 +971,11 @@ function AutoCompactSetting({ setPrefs }: { setPrefs: (patch: UiPreferencesPatch
         hint={
           <>
             Agents compact their conversation by themselves at a share of the model&apos;s window, for Claude and Codex
-            alike. Off, Centralu passes nothing and each agent&apos;s own settings decide. A running session takes a change
-            when its process next starts; a model Centralu has not read a window from yet takes it from its second start.
-            Claude may compact somewhat earlier than the point, by what it holds back for its answer.
+            alike. Off, Centralu passes nothing and each agent&apos;s own settings decide. On, Centralu also turns auto
+            compact on for Claude if you turned it off in your own Claude settings. A running session takes a change when
+            its process next starts; a model Centralu has not read a window from yet takes it from its second start.
+            Claude never compacts before 67,000 tokens. Linked computers are told this setting when they connect and when
+            it changes; one from before it applies nothing.
           </>
         }
       />

@@ -204,14 +204,21 @@ export function SessionSettings({
   onOpenChange?: (open: boolean) => void
 }) {
   const update = useStore((s) => s.updateSessionSettings)
-  // Where this agent compacts by itself is Centralu's setting (#1376); what a session with no window reading yet gets is said below
-  const compact = useStore((s) => autoCompactOf(s.prefs))
-  const windowKnown = useStore((s) => !!s.sessions[sessionId]?.context?.window)
+  // Where this agent compacts by itself is Centralu's setting (#1376): the host that runs the session says what its next start passes
+  const compactSetting = useStore((s) => autoCompactOf(s.prefs))
+  const compactPlatform = usePlatform()
   // A session on a linked machine runs that machine's CLI (#82): its models and knobs are asked there
   const machine = useStore((s) => s.sessions[sessionId]?.machine ?? null)
   const { models, reason } = useModels(tool, live, machine)
   const verbosities = useVerbosities(tool, machine)
   const [open, setOpen] = useState(false)
+  // Read when the menu opens and again when the setting or the model changes. A linked machine answers for itself; one from
+  // before the setting answers "Unknown method", which means it passes nothing
+  const compact = useLoad(
+    () => (open ? compactPlatform.agents.autoCompact(sessionId) : null),
+    [compactPlatform, sessionId, open],
+    [compactSetting.controlled, compactSetting.share, model],
+  )
   /** Mid closing-animation — unmounts only after it has fully settled (cc-hang-out) */
   const [closing, setClosing] = useState(false)
   // Tells the outside when it opens/closes (the collapsed composer must not fold away meanwhile)
@@ -418,12 +425,16 @@ export function SessionSettings({
             </MenuSection>
           )}
 
-          {compact.controlled && (
+          {compactSetting.controlled && !compact.loading && (
             <MenuSection label="Auto compact">
               <p data-testid="settings-auto-compact-note" className="px-2 pb-1 text-2xs leading-body text-ink-faint">
-                {windowKnown
-                  ? `Compacts at ${Math.round(compact.share * 100)}% of the model's window, set in Settings. A change reaches this session when it next starts.`
-                  : "Centralu has not read this model's window yet, so the agent's own setting decides until the session next starts after its first turn."}
+                {compact.error
+                  ? "This computer's Centralu predates the Auto compact setting, so the agent's own setting decides."
+                  : !compact.data?.controlled
+                    ? "Centralu does not set this on the computer that runs it; the agent's own setting decides."
+                    : compact.data.tokens === null
+                      ? "Centralu has not read this model's window yet, so the agent's own setting decides until the session next starts after its first turn."
+                      : `Compacts at ${Math.round(compact.data.share * 100)}% of the model's window (about ${compact.data.tokens.toLocaleString('en-US')} tokens) from the next start, set in Settings.`}
               </p>
             </MenuSection>
           )}

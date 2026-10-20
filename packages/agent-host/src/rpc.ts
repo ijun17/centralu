@@ -123,6 +123,8 @@ export type MachinesPort = {
   /** The ssh config's hosts, and what one target runs (#514) */
   sshHosts(): Promise<SshHostList>
   probe(sshTarget: string): Promise<MachineProbe>
+  /** Tells every connected machine this hub's auto-compact setting (#1376); best effort, a machine from before it keeps applying nothing */
+  offerAutoCompact?(): Promise<void>
   autostart(id: string, on?: boolean): Promise<MachineAutostartResult>
   activity(id: string): Promise<HostActivity | null>
   /** That machine's "Allow auto from a linked computer", read or set over the link (#1273 review) */
@@ -233,6 +235,7 @@ export function createRpcHandler(
       const { sessionId, afterSeq } = RpcMethods['agents.exportHandoffNote'].params.parse(p)
       return mgr.exportHandoffNote(sessionId, afterSeq)
     },
+    'agents.autoCompact': async (p) => mgr.autoCompactFor(RpcMethods['agents.autoCompact'].params.parse(p).sessionId),
     'agents.worktreeStatus': async (p) =>
       mgr.worktreeStatus(RpcMethods['agents.worktreeStatus'].params.parse(p).sessionId),
     'agents.mcpProposals': async () => ({ proposals: mgr.mcpProposals() }),
@@ -817,7 +820,13 @@ export function createRpcHandler(
       return { ok: true as const }
     },
     'prefs.get': async () => mgr.uiPreferences(),
-    'prefs.set': async (p) => mgr.setUiPreferences(RpcMethods['prefs.set'].params.parse(p).patch),
+    'prefs.set': async (p) => {
+      const patch = RpcMethods['prefs.set'].params.parse(p).patch
+      const saved = mgr.setUiPreferences(patch)
+      // The hub's setting governs the machines it links (#1376): they are told at once, and at every connect
+      if (patch.autoCompact) void machines?.offerAutoCompact?.()
+      return saved
+    },
     'themes.list': async () => requireThemes().list(),
     'themes.save': async (p) => {
       const { id, content } = RpcMethods['themes.save'].params.parse(p)

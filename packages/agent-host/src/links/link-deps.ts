@@ -1,4 +1,4 @@
-import type { MachineSide, NormalizedEvent } from '@cc/protocol'
+import type { AutoCompact, MachineSide, NormalizedEvent } from '@cc/protocol'
 import type { RemoteRuntime } from './install.js'
 import type { RegistryOptions } from './registry.js'
 import type { RemoteClientOptions } from './remote-client.js'
@@ -78,6 +78,11 @@ export type LinkDeps = {
    * from one is dropped, as before the reverse direction existed
    */
   hubSelf?: () => { id: string; name: string }
+  /**
+   * This hub's "when agents compact" setting (#1376), told to every machine at connect and when it changes: a machine starts
+   * and wakes its own sessions from its own preferences, and the person's setting lives here. Without it nothing is told
+   */
+  autoCompact?: () => AutoCompact
   reverse?: ReverseCalls
   /** For tests: the client's options beyond url and token */
   client?: Partial<RemoteClientOptions>

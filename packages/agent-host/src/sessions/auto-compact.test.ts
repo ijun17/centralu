@@ -69,20 +69,45 @@ describe('ModelWindows', () => {
     expect(w.of(m('a', 'sonnet[1m]', 'claude'))).toBeNull()
   })
 
-  it("does not shrink the window with what Claude reads back under the setting: it reports the setting, not the model's window", () => {
+  it("a reading from a process started with the setting that is below its ceiling is the model's real window, even when a larger one was known", () => {
     const w = new ModelWindows(settings())
-    w.note(m('a', 'sonnet', 'claude'), 200_000)
-    // Started at 60%, the CLI reads back its autoCompactWindow
-    w.started('a', 120_000)
-    w.note(m('a', 'sonnet', 'claude'), 133_000)
-    expect(w.of(m('a', 'sonnet', 'claude'))).toBe(200_000)
-    // A larger reading is a real change of the model's window
-    w.note(m('a', 'sonnet', 'claude'), 1_000_000)
-    expect(w.of(m('a', 'sonnet', 'claude'))).toBe(1_000_000)
-    // A process started without the setting reports the window itself
-    w.started('b', null)
-    w.note(m('b', 'sonnet', 'claude'), 200_000)
-    expect(w.of(m('b', 'sonnet', 'claude'))).toBe(200_000)
+    // 1M learnt under the alias, then the alias moved to a 200k model: the CLI reports 200,000 under a ceiling of 633,000
+    w.note(m('a', 'haiku', 'claude'), 1_000_000, 'claude-haiku-5-5')
+    w.started('a', 633_000)
+    w.note(m('a', 'haiku', 'claude'), 200_000, 'claude-haiku-4-5')
+    expect(w.of(m('a', 'haiku', 'claude'))).toBe(200_000)
+  })
+
+  it('a reading at the ceiling is only "at least": the record stands for the same model, and is dropped for another so it can rise', () => {
+    const w = new ModelWindows(settings())
+    w.note(m('a', 'haiku', 'claude'), 200_000, 'claude-haiku-4-5')
+    // The same model reports the ceiling it was given: the record is not lowered
+    w.started('a', 153_000)
+    w.note(m('a', 'haiku', 'claude'), 153_000, 'claude-haiku-4-5')
+    expect(w.of(m('a', 'haiku', 'claude'))).toBe(200_000)
+    // The alias now means a 1M model: a 200k record would make it compact at 10% for ever, so it goes and is learnt again
+    w.note(m('a', 'haiku', 'claude'), 153_000, 'claude-haiku-5-5')
+    expect(w.of(m('a', 'haiku', 'claude'))).toBeNull()
+    // The next start passes nothing; its reading is the real window
+    w.started('a', null)
+    w.note(m('a', 'haiku', 'claude'), 1_000_000, 'claude-haiku-5-5')
+    expect(w.of(m('a', 'haiku', 'claude'))).toBe(1_000_000)
+  })
+
+  it("a tool that reports the model's own window (no ceiling) always records what it reads", () => {
+    const w = new ModelWindows(settings())
+    w.note(m('a', 'gpt-5.6'), 1_000_000)
+    w.note(m('a', 'gpt-5.6'), 272_000)
+    expect(w.of(m('a', 'gpt-5.6'))).toBe(272_000)
+  })
+
+  it('keeps the model beside the window across a restart of the host', () => {
+    const store = settings()
+    new ModelWindows(store).note(m('a', 'haiku', 'claude'), 200_000, 'claude-haiku-4-5')
+    const again = new ModelWindows(store)
+    again.started('b', 153_000)
+    again.note(m('b', 'haiku', 'claude'), 153_000, 'claude-haiku-5-5')
+    expect(again.of(m('b', 'haiku', 'claude'))).toBeNull()
   })
 })
 
@@ -122,16 +147,37 @@ describe('what a session is launched with', () => {
     expect(world.codexAdapter.lastOpts?.autoCompactTokens).toBe(163_200)
   })
 
-  it("a tool whose window follows the compaction point (Claude's) never has its known window lowered by a process started with the setting", async () => {
-    Object.assign(world.codexAdapter, { windowFollowsCompactPoint: true })
+  it("a tool whose window follows the compaction point (Claude's): a real smaller window is learnt, and the share applies to it", async () => {
+    Object.assign(world.codexAdapter, { windowCeilingFor: (tokens: number) => tokens + 33_000 })
     const s = await create()
-    handle(s.id).emitContext(10_000, 1_000_000)
-    expect(await world.mgr.sleepSession(s.id)).toBe(true)
-    await world.mgr.resumeSession(s.id)
-    handle(s.id).emitContext(10_000, 613_000)
+    handle(s.id).emitContext(10_000, 1_000_000, 'big')
     expect(await world.mgr.sleepSession(s.id)).toBe(true)
     await world.mgr.resumeSession(s.id)
     expect(world.codexAdapter.lastOpts?.autoCompactTokens).toBe(600_000)
+    // The name now means a 200k model: under the ceiling of 633,000 it reports 200,000, which is real
+    handle(s.id).emitContext(10_000, 200_000, 'small')
+    expect(await world.mgr.sleepSession(s.id)).toBe(true)
+    await world.mgr.resumeSession(s.id)
+    expect(world.codexAdapter.lastOpts?.autoCompactTokens).toBe(120_000)
+  })
+
+  it('what the session menu is told is what the next start passes (agents.autoCompact)', async () => {
+    const s = await create()
+    // Nothing read yet: the menu says nothing is passed, as the start did
+    expect(await world.rpc('agents.autoCompact', { sessionId: s.id })).toEqual({ controlled: true, share: 0.6, tokens: null })
+    handle(s.id).emitContext(10_000, 200_000)
+    expect(await world.rpc('agents.autoCompact', { sessionId: s.id })).toEqual({ controlled: true, share: 0.6, tokens: 120_000 })
+    expect(await world.mgr.sleepSession(s.id)).toBe(true)
+    await world.mgr.resumeSession(s.id)
+    expect(world.codexAdapter.lastOpts?.autoCompactTokens).toBe(120_000)
+
+    // A model switch: the old model's window is not the new one's, and the menu says so before the start does
+    await world.rpc('agents.updateSettings', { sessionId: s.id, model: 'gpt-5.7' })
+    expect(await world.rpc('agents.autoCompact', { sessionId: s.id })).toEqual({ controlled: true, share: 0.6, tokens: null })
+
+    // Turned off: the menu says the control is off
+    await world.rpc('prefs.set', { patch: { autoCompact: { controlled: false } } })
+    expect(await world.rpc('agents.autoCompact', { sessionId: s.id })).toMatchObject({ controlled: false, tokens: null })
   })
 
   it('a new session of a model another session has read the window of gets the value at once', async () => {

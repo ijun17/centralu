@@ -1,4 +1,4 @@
-import { ModelWindows } from './auto-compact.js'
+import { ModelWindows, autoCompactPlan } from './auto-compact.js'
 import { repairWorktreeRecoveryRemovals } from '../dev-services/worktree-recovery.js'
 import { windowAround } from './snippet.js'
 import { orchestratorToolsFor, type OrchestratorSeatHost } from './orchestrator-seat.js'
@@ -55,6 +55,7 @@ import type {
   MachineAskConsent,
 } from '@cc/protocol'
 import {
+  autoCompactOf,
   sessionOnlyAlways,
   DATA_DIR,
   withoutToolRecord,
@@ -1414,6 +1415,11 @@ export class SessionManager {
   /** `WorktreeSessions.deleteHubChild` (worktree-sessions.ts, #1161 item 3): `agents.deleteAgentChild` */
   deleteHubChild(...a: Parameters<WorktreeSessions['deleteHubChild']>): ReturnType<WorktreeSessions['deleteHubChild']> {
     return this.worktrees.deleteHubChild(...a)
+  }
+
+  /** Where a session's agent compacts the next time its process starts, as the launch decides it (`agents.autoCompact`, #1376) */
+  autoCompactFor(sessionId: string): { controlled: boolean; share: number; tokens: number | null } {
+    return autoCompactPlan(autoCompactOf(this.uiPreferences()), this.modelWindows, this.sessionOf(sessionId))
   }
 
   /** The material needed to decide whether a worktree can be deleted. null if this is not a worktree session

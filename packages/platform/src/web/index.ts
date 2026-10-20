@@ -155,6 +155,9 @@ class WebAgentPort implements AgentPort {
   updateSettings(sessionId: string, settings: Omit<UpdateSettingsParams, 'sessionId'>) {
     return this.rpc.call('agents.updateSettings', { sessionId, ...settings })
   }
+  async autoCompact(sessionId: string) {
+    return this.rpc.call('agents.autoCompact', { sessionId })
+  }
   async worktreeStatus(sessionId: string) {
     return this.rpc.call('agents.worktreeStatus', { sessionId })
   }

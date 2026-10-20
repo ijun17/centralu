@@ -313,7 +313,7 @@ export class SessionEvents {
         break
       case 'context_update':
         m.context = nextContext(m.context, e)
-        this.host.modelWindows.note(m, e.window)
+        this.host.modelWindows.note(m, e.window, e.model)
         break
       case 'conversation_reset':
         // The old conversation's reading no longer describes anything (#304); the tool reports the new one when the turn ends

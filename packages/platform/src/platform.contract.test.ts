@@ -1055,6 +1055,14 @@ describe.each([
     })
   })
 
+  describe('where a session compacts (#1376)', () => {
+    it('answers what the next start passes: the setting, and no tokens for a model whose window has not been read', async () => {
+      const p = await aProject()
+      const s = await h.platform.agents.createSession({ projectId: p.id, cwd: p.path, tool: 'claude', permissionPreset: 'normal' })
+      expect(await h.platform.agents.autoCompact(s.id)).toEqual({ controlled: true, share: 0.6, tokens: null })
+    })
+  })
+
   describe('a fresh install with a snapshot from before #312', () => {
     it('a text size kept in the workspace snapshot moves into the preferences once', async () => {
       await h.platform.workspace.save({ textScale: 4 })

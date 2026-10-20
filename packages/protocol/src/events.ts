@@ -432,6 +432,11 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
     used: z.number(),
     window: z.number(),
     exactness: z.enum(['exact', 'estimate']),
+    /**
+     * The model the tool resolved the session's model name to (Claude's CLI: an alias such as `haiku` or the project's default
+     * names a different model over time), when it says. With the window it is what `ModelWindows` keeps per model (#1376).
+     */
+    model: z.string().optional(),
   }),
   z.object({
     ...base,

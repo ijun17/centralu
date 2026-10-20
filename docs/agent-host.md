@@ -1453,18 +1453,32 @@ the params with the method's schema and reads the answer with its result schema,
   window, for both tools. `launchOptions` (every launch and wake) turns the share and the model's window into tokens
   (`sessions/auto-compact.ts`), `CreateSessionOpts.autoCompactTokens`. **Claude** gets `autoCompactWindow` and `autoCompactEnabled: true` in
   the flag-layer `settings` of the query, next to the code-intelligence plugins (`flagSettings`, no file is touched). The CLI compacts
-  at that window minus a 13,000-token buffer (read in the binary of CLI 2.1.296), so the adapter passes the point plus 13,000, kept
-  to the 100k to 1M it accepts; whatever it also holds back for output is not counted, so it may compact somewhat earlier, and a
-  share that puts the point under 87k tokens (20% to 40% of a 200k model) lands on the floor. The CLI's
-  `CLAUDE_CODE_AUTO_COMPACT_WINDOW` variable still takes precedence. **Codex** gets `model_auto_compact_token_limit` in the per-thread
-  `config` of `thread/start` and `thread/resume`, which overrides the person's `config.toml` for that thread. Off (`controlled: false`),
-  nothing is passed and each agent's own settings decide, untouched.
-  The window is the one the context gauge shows, which a tool reports with its token readings. `ModelWindows` keeps it per tool
-  and model (a default model per project) in the app settings, so a model switch brings its own and a restart of the host loses
-  nothing. Claude's CLI reports the smaller of the model's window and the `autoCompactWindow` it was started with, so a reading
-  from a process started with the setting only counts when it is larger than what is known; otherwise each restart would shrink the
-  window. That rule is for a tool that says so (`AgentAdapter.windowFollowsCompactPoint`, Claude's); Codex reports the model's own window,
-  so its readings always replace the known one (a default model that changed to a smaller window is learnt). A model nobody has read a window from passes nothing at its first start and the value from the next (Settings, and the session's own settings menu, say so).
+  at that window minus **33,000 tokens** (measured on CLI 2.1.296 with `getContextUsage()`: `autoCompactThreshold` was `maxTokens - 33,000`
+  with the setting and without it, at 200k and at 1M), so the adapter passes the point plus 33,000, kept to the 100k to 1M it accepts: the
+  earliest it can compact is 67,000 tokens, and a share under that on a small model lands there. The adapter compares the threshold the CLI
+  reports with the one asked for and logs a difference once. The CLI's `CLAUDE_CODE_AUTO_COMPACT_WINDOW` variable still takes precedence,
+  and with the setting on Centralu turns auto compact on (`autoCompactEnabled`) even when the person's own Claude settings turned it off
+  (Settings says so). **Codex** gets `model_auto_compact_token_limit` in the per-thread `config` of `thread/start` and `thread/resume`,
+  which overrides the person's `config.toml` for that thread. Off (`controlled: false`), nothing is passed and each agent's own settings
+  decide, untouched.
+  The window is the one the context gauge shows, which a tool reports with its token readings. `ModelWindows` keeps it, with the model the
+  tool resolved the name to (`context_update.model`), per tool and model name (a default model per project) in the app settings. Claude's CLI
+  reports the smaller of the model's window and the `autoCompactWindow` it was started with (a 1M model started at 153,000 reports 153,000; a
+  200k one started at 633,000 reports 200,000), so `AgentAdapter.windowCeilingFor` gives the largest window a process started with the
+  setting can report, and a reading is read against it: **below it** is the model's real window and is recorded, whatever was known (a
+  record that was too large corrects itself); **at it** is only "at least this": the record stands when the CLI names the same model, and is
+  dropped when it names another (the alias, the project default or the person's own setting moved), so the next start passes nothing and
+  learns the real window (a record that was too small can rise). Codex reports the model's own window, so its readings always replace the
+  known one. A model nobody has read a window from passes nothing at its first start and the value from the next (Settings, and the
+  session's own settings menu, say so).
+  **Linked machines.** A machine starts and wakes its sessions from its own preferences, and the setting lives on the hub, so the hub tells
+  each machine its setting as a change of that machine's preferences (`prefs.set`, at every connect and when the hub changes it,
+  `LinkedMachine.offerAutoCompact`): the hub's switch and percentage govern the machines it links, and a value set on the machine itself is
+  replaced at the next connect. A machine from before it drops the field and applies nothing. The model windows are kept per host, so a
+  machine learns its own. `agents.autoCompact { sessionId }` answers `{ controlled, share, tokens }` for the next start from the host
+  that runs the session (routed like the session), from the same function the launch uses (`autoCompactPlan`), and the session's settings
+  menu shows it; a machine from before it answers "Unknown method", which the menu reads as "this computer's Centralu predates the
+  setting".
   A change reaches a session when its process next starts; running sessions are not restarted and are not marked as drifted. The
   patch merges field by field like the notification switches; `set_preferences { autoCompact: { controlled?, share? } }` (no card:
   reversible, and only about when an agent compacts) and `get_preferences` carry it; Settings, agents section, offers the switch
@@ -1578,7 +1592,7 @@ window's channel), grouped, and for each group one of three states.
 | Group (methods) | State | Notes |
 |---|---|---|
 | Sessions: start, message, stop. `agents.createSession`, `agents.send`, `agents.interrupt`, `agents.forkConversation`, `agents.switchTool`, `agents.exportHandoff*`, `agents.updateSettings` | Has it | `create_session`, `send_to_session`, `agent_session` (`stop`, `send`), `start_agent` (a fork), `handoff_session`, `update_session_settings`, each behind the target's preset |
-| Reading sessions. `sessions.list`, `messages.load`, `messages.subagent`, `messages.search`, `agents.worktreeStatus` | Has it | `list_sessions`, `read_session`, `recall`, `agent_session` (`status`, `list`) |
+| Reading sessions. `sessions.list`, `messages.load`, `messages.subagent`, `messages.search`, `agents.worktreeStatus`, `agents.autoCompact` | Has it | `list_sessions`, `read_session`, `recall`, `agent_session` (`status`, `list`) |
 | Answering a waiting session. `agents.respondApproval`, `agents.answerQuestion` | Has it | `answer_question`, the target's preset and the delegation rules decide (security-boundaries.md) |
 | Deleting a session. `agents.deleteSession` | Has it: its own children (`agent_session delete`), and any other worker session behind a card (`delete_session`, #1219 fourth slice) | A move to the trash keeps the conversation, the worktree and the tool's file but not what the host holds for the session (a caller's wait for its report, delegations, grants, standing start_agent cards), so `delete_session` **asks**, naming that, and the host decides in the step that moves it (a message the person sent meanwhile keeps the session). It refuses the caller itself, an orchestrator or coordinator, a child of the caller (that is `agent_session delete`, #637), a session that is working, waiting on the person or running a background job (the trash ends its process), and one on a machine that cannot be reached |
 | Restart or resume. `agents.restartSession`, `agents.resumeSession` | Has it | A send to an asleep or stopped session wakes it |

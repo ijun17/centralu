@@ -190,6 +190,11 @@ export class Links {
     return this.need(id).hubAuto(allowed)
   }
 
+  /** Tells every connected machine this hub's auto-compact setting (#1376) */
+  async offerAutoCompact(): Promise<void> {
+    await Promise.all([...this.machines.values()].map((m) => m.offerAutoCompact()))
+  }
+
   /** The reverse direction's switch for one machine (#550) */
   async setAsks(id: string, on: boolean): Promise<MachineInfo> {
     const m = this.need(id)

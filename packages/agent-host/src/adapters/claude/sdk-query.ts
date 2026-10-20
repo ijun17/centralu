@@ -22,7 +22,7 @@ export type ClaudeInput = { text: string; uuid: ReturnType<typeof randomUUID>; p
 export type QueryHandle = AsyncIterable<ClaudeMessage> &
   UsageQuery &
   ModelQuery & {
-    getContextUsage(): Promise<{ totalTokens?: number; maxTokens?: number } | undefined>
+    getContextUsage(): Promise<{ totalTokens?: number; maxTokens?: number; model?: string; autoCompactThreshold?: number } | undefined>
     /** Interrupts the turn in progress. Only works in streaming input mode — which is the mode we use. */
     interrupt(options?: { cancelQueued: boolean }): Promise<unknown>
     /** Optional on older SDKs; cancel_async_message removes one UUID-stamped queued input. */
@@ -63,12 +63,12 @@ export type ClaudeQueryInputs = {
 export const CLAUDE_AUTO_COMPACT_MIN = 100_000
 export const CLAUDE_AUTO_COMPACT_MAX = 1_000_000
 /**
- * The CLI compacts when context reaches its auto-compact window **minus a buffer of 13,000 tokens** (read in the binary of
- * CLI 2.1.296: `J4(window) = window - 13000`, the "Autocompact buffer" of `/context`). To land the point at the tokens
- * Centralu means, the window passed is that many tokens more. Whatever the CLI also holds back for the model's output is not
- * counted: it may compact up to that much earlier (not measured in a live session).
+ * The CLI compacts when context reaches its auto-compact window **minus 33,000 tokens**. Measured on CLI 2.1.296 with
+ * `getContextUsage()`: `autoCompactThreshold` was `maxTokens - 33,000` with the setting and without it, at 200k and at 1M
+ * (167,000 of 200,000; 967,000 of 1,000,000; 100,000 for a window of 133,000). The adapter checks its own constant against what
+ * the CLI reports (`reportContext`). To land the point at the tokens Centralu means, the window passed is that many more.
  */
-export const CLAUDE_AUTO_COMPACT_BUFFER = 13_000
+export const CLAUDE_AUTO_COMPACT_BUFFER = 33_000
 
 /** The `autoCompactWindow` that makes the CLI compact at `tokens`, inside what it accepts */
 export function claudeAutoCompactWindow(tokens: number): number {

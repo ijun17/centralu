@@ -227,6 +227,16 @@ export const sessionMethods = {
     params: z.object({ sessionId: SessionId, afterSeq: z.number().int().nonnegative() }),
     result: z.object({ text: z.string(), path: z.string() }).nullable(),
   },
+  /**
+   * Where this session's agent will compact by itself the next time its process starts (#1376), as the host that runs the
+   * session decides it: its setting, over the model's window. `tokens` is null when nothing will be passed (the control is
+   * off, or the model's window has not been read yet). A linked machine answers for itself; one from before this answers
+   * "Unknown method", which a window reads as "not set by Centralu there".
+   */
+  'agents.autoCompact': {
+    params: z.object({ sessionId: SessionId }),
+    result: z.object({ controlled: z.boolean(), share: z.number(), tokens: z.number().nullable() }),
+  },
   'agents.worktreeStatus': {
     params: z.object({ sessionId: SessionId }),
     result: z

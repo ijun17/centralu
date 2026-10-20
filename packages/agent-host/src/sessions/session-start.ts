@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { BackgroundTask, CreateSessionParams, SessionInfo, ToolName } from '@cc/protocol'
-import { autoCompactTokens } from './auto-compact.js'
+import { autoCompactPlan } from './auto-compact.js'
 import { autoCompactOf, sessionLiveDefaults } from '@cc/protocol'
 import type { AgentProcess, AgentSpawnSpec, CreateSessionOpts, EventSink, OrchestratorTools, ProcessSource, SessionApps, SessionHandle } from '../adapters/contract.js'
 import type { ToolProfile } from '../apps/contract.js'
@@ -488,8 +488,8 @@ export class SessionStarts {
    * model's window; another tool's readings always count.
    */
   private autoCompactFor(m: SessionInfo): Pick<CreateSessionOpts, 'autoCompactTokens'> {
-    const tokens = autoCompactTokens(autoCompactOf(this.host.uiPreferences()), this.host.modelWindows.of(m))
-    this.host.modelWindows.started(m.id, this.host.adapters.get(m.tool)?.windowFollowsCompactPoint ? tokens : null)
+    const { tokens } = autoCompactPlan(autoCompactOf(this.host.uiPreferences()), this.host.modelWindows, m)
+    this.host.modelWindows.started(m.id, tokens === null ? null : (this.host.adapters.get(m.tool)?.windowCeilingFor?.(tokens) ?? null))
     return tokens === null ? {} : { autoCompactTokens: tokens }
   }
 

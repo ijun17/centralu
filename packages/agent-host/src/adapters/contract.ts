@@ -336,11 +336,12 @@ export interface AgentAdapter {
   readonly tool: ToolName
   readonly capabilities: AdapterCapabilities
   /**
-   * Whether the context window this tool reports is the smaller of the model's and the compaction point it was started with
-   * (#1376: Claude's CLI is; Codex reports the model's own). The host then takes a reading from a process started with the
-   * setting as a ceiling only, never as a smaller window (`ModelWindows.note`).
+   * For a tool whose reported context window is the smaller of the model's and the compaction point it was started with
+   * (#1376: Claude's CLI is; Codex reports the model's own): the largest window a process started with `autoCompactTokens`
+   * can report. The host reads a reading against it (`ModelWindows.note`): below it is the model's real window, at it only
+   * "at least this".
    */
-  readonly windowFollowsCompactPoint?: boolean
+  windowCeilingFor?(autoCompactTokens: number): number
   /**
    * Who this tool is, for the screens that draw a row per tool.
    *

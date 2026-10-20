@@ -9,12 +9,12 @@ const off = { settings: { enabledPlugins: { 'ts-lsp': false as const } } }
 
 describe('flagSettings', () => {
   it('passes autoCompactWindow, with auto-compact switched on so the person\'s own "off" does not defeat it', () => {
-    expect(flagSettings({ autoCompactTokens: 120_000 }, {})).toEqual({ settings: { autoCompactEnabled: true, autoCompactWindow: 133_000 } })
-    expect(flagSettings({ autoCompactTokens: 600_000 }, {})).toEqual({ settings: { autoCompactEnabled: true, autoCompactWindow: 613_000 } })
+    expect(flagSettings({ autoCompactTokens: 120_000 }, {})).toEqual({ settings: { autoCompactEnabled: true, autoCompactWindow: 153_000 } })
+    expect(flagSettings({ autoCompactTokens: 600_000 }, {})).toEqual({ settings: { autoCompactEnabled: true, autoCompactWindow: 633_000 } })
   })
 
-  it("adds the CLI's 13,000-token buffer, so it compacts at the tokens meant, and keeps the window inside 100k to 1M", () => {
-    expect(claudeAutoCompactWindow(120_000)).toBe(133_000)
+  it("adds the CLI's 33,000-token buffer, so it compacts at the tokens meant, and keeps the window inside 100k to 1M", () => {
+    expect(claudeAutoCompactWindow(120_000)).toBe(153_000)
     expect(claudeAutoCompactWindow(25_600)).toBe(100_000)
     expect(claudeAutoCompactWindow(990_000)).toBe(1_000_000)
     expect(flagSettings({ autoCompactTokens: 25_600 }, {})).toEqual({ settings: { autoCompactEnabled: true, autoCompactWindow: 100_000 } })
@@ -22,7 +22,7 @@ describe('flagSettings', () => {
 
   it('keeps the code intelligence plugins it already passed', () => {
     expect(flagSettings({ autoCompactTokens: 120_000 }, off)).toEqual({
-      settings: { enabledPlugins: { 'ts-lsp': false }, autoCompactEnabled: true, autoCompactWindow: 133_000 },
+      settings: { enabledPlugins: { 'ts-lsp': false }, autoCompactEnabled: true, autoCompactWindow: 153_000 },
     })
     expect(flagSettings({}, off)).toEqual(off)
   })
@@ -47,7 +47,7 @@ describe('the options of a session\'s query', () => {
       canUseTool: () => Promise.resolve({ behavior: 'deny' as const, message: '' }),
     })
   it('carry the setting', () => {
-    expect(options(120_000)).toMatchObject({ settings: { autoCompactWindow: 133_000, autoCompactEnabled: true } })
+    expect(options(120_000)).toMatchObject({ settings: { autoCompactWindow: 153_000, autoCompactEnabled: true } })
     // The cross-session refusal is always in the flag layer; Centralu adds nothing of its own to it
     expect(options().settings).toEqual({ crossSessionInbound: 'refuse' })
   })
