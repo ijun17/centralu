@@ -37,7 +37,7 @@ async function fakeKeeper(reply: (request: any) => unknown | undefined) {
   return { dir, requests, env: { CC_DATA_DIR: dir } as Record<string, string | undefined> }
 }
 
-const ready = (port = 41234, token = TOKEN, rights: string | undefined = 'limited') => ({ ok: true, view: { keeper: { pid: 1 }, status: { state: 'ready', port, token }, background: false, ...(rights ? { rights } : {}) } })
+const ready = (port = 41234, token = TOKEN, rights: string | null = 'limited') => ({ ok: true, view: { keeper: { pid: 1 }, status: { state: 'ready', port, token }, background: false, ...(rights ? { rights } : {}) } })
 const view = (status: unknown) => ({ ok: true, view: { status } })
 
 /** A port nobody listens on, and a held one. */
@@ -147,7 +147,7 @@ describe('dev:live: the command', () => {
   })
 
   unixIt('says so when an older keeper handed it the full token (#1405)', async () => {
-    const k = await fakeKeeper(() => ready(41234, TOKEN, undefined))
+    const k = await fakeKeeper(() => ready(41234, TOKEN, null))
     const port = await freePort()
     const r = recorder()
     expect(await run({ ...k.env, PORT: String(port) }, { ...r.deps, platform: 'darwin' })).toBe(0)
