@@ -8,7 +8,7 @@ import { RetryActivity } from '../retry-activity.js'
 import { ClaudeBackgroundTracker } from './background-tracker.js'
 import { activeGoalEvents, conversationResetEvents, systemEvents } from './cli-messages.js'
 import { ClaudeGoalTracker } from './goal-tracker.js'
-import { str, type Json } from './json.js'
+import { contentBlocks, str, type Json } from './json.js'
 import { assistantEvents, backgroundLaunch, requestInputTokens, streamEventEvents, userEvents } from './model-messages.js'
 import { ClaudeTaskPlan } from './task-plan.js'
 import { agentReport, agentStats, approvalDetail, editedPaths, toolSummary } from './tool-summary.js'
@@ -376,7 +376,7 @@ export class ClaudeStreamNormalizer {
    * session's plan. The message's `tool_use_result` is read only when it carries one result.
    */
   private followTasks(m: Json, events: NormalizedEvent[]): NormalizedEvent[] {
-    const results = (((m.message as Json | undefined)?.content ?? []) as Json[]).filter((b) => str(b?.type) === 'tool_result')
+    const results = contentBlocks(m).filter((b) => str(b.type) === 'tool_result')
     const record = results.length === 1 && typeof m.tool_use_result === 'object' && m.tool_use_result !== null ? (m.tool_use_result as Json) : undefined
     const out: NormalizedEvent[] = []
     for (const e of events) {
