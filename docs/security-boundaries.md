@@ -1294,15 +1294,22 @@ door's port and a credential, stop the host, and make the keeper run a host from
 **only this user's processes get in, and only a Centralu window gets the token** (#1405).
 
 - **Who is a window** (`keeper/window_peer.rs`). The peer pid the kernel recorded at `connect` (`LOCAL_PEERPID`,
-  `SO_PEERCRED`, as the child socket reads it) names an executable (`proc_pidpath`, `/proc/<pid>/exe`) whose file is
-  named `centralu`, the window's binary in every build; on a keeper signed with a team identifier, that executable is
-  also signed by the same team (`codesign --display`). No release is signed with a team today (macOS releases are
-  signed ad hoc), so in every build that ships the name decides. A peer whose pid or executable the kernel does not
-  name is not a window; where the keeper has a team and `codesign` cannot run at all, the name decides. The keeper
-  judges before it takes its state lock, logs every refusal with the executable and why, and a window given the
-  limited credential says so in its own log. A window adopted in a keeper handoff is judged again from its socket,
-  whose peer record travels with it. A test runs a copy of the test binary named `centralu` against the socket and
-  checks that it gets the token.
+  `SO_PEERCRED`, as the child socket reads it) names an executable (`proc_pidpath`, `/proc/<pid>/exe`) that is, by
+  exact resolved path, one of the window executables the keeper accepts (`accepted_windows`): the `centralu` beside
+  the keeper's own executable (the macOS bundle's `Contents/MacOS/`, a debug build), unless the keeper runs from
+  `<data>/content/`, where a file dropped beside it proves nothing; and the window of each build the keeper names: its
+  own `--bundle-path` and the bundle of the current host's and the next launch's build, which only a window's `switch`
+  sets (`<bundle>/Contents/MacOS/centralu` for a macOS bundle, the executable itself elsewhere). What a client says
+  about its own build in `attach` counts for nothing. A file named `centralu` anywhere else, a renamed `node` among
+  them, is not a window. Linux's ` (deleted)` mark is taken only after an accepted path (an update replaced the
+  file). On a keeper signed with a team identifier the executable must also be signed by that team (`codesign
+  --display`), and one whose signature cannot be read is not a window; no release is signed with a team today
+  (macOS releases are signed ad hoc), so in every build that ships the path decides. A peer whose pid or executable
+  the kernel does not name is not a window. The keeper judges before it takes its state lock, logs every refusal with
+  the executable, the accepted paths and why, and a window given the limited credential says so in its own log. A
+  window adopted in a keeper handoff is judged again from its socket, whose peer record travels with it. A test runs
+  two copies of the test binary against the socket, one at the accepted path and one named `centralu` elsewhere: only
+  the first gets the token (`only_the_accepted_window_executable_gets_the_token`).
 - **What a window gets.** `status` and `attach` carry the front door's token (`view.rights: "full"`), and so does
   every status pushed to it. It alone may `switch` and `upgrade`, which start a build of the request's naming and hand
   it the token.
@@ -1313,11 +1320,17 @@ door's port and a credential, stop the host, and make the keeper run a host from
   that is not a window and fails if any line it gets back holds the token
   (`no_reply_carries_the_token_to_a_process_that_is_not_a_window`); the ops are listed once (`OPS`) and a second test
   checks the list against the dispatcher.
-- **Residuals.** A process of this user can start the app's own executable, which opens a window the person sees; on a
-  keeper that is not signed with a team (every build that ships today) it can also run a program of its own renamed
-  `centralu`: deliberate, not the easy path this closes.
-  A debug keeper started with `CC_KEEPER_TEST_ANY_PEER=1` counts every peer as a window, for the integration scripts,
-  whose clients are Node processes; a release keeper compiles that out. An older keeper (before #1405) still hands the
+- **Residuals.** A process of this user can start the app's own executable, which opens a window the person sees, or
+  replace the file at an accepted path (an app bundle is the user's to change). A peer can connect and then `exec` the
+  window's executable, keeping its pid: the window it starts flashes on screen. `codesign --display` reads the file
+  now at the path, not the code running in the peer; a team-signed keeper should judge the peer's audit token
+  (`LOCAL_PEERTOKEN`, `SecCodeCopyGuestWithAttributes`) before releases are signed with a team (#1439). On
+  Linux, where the keeper runs only with `CC_USE_KEEPER=1`, a window runs from its AppImage's mount, whose path
+  changes at every launch: only the window that started or switched the keeper is accepted, and a later launch gets
+  the limited credential until a window of its own starts a keeper; to settle before the Linux keeper runs by
+  default.
+  A debug keeper started with `CC_KEEPER_TEST_WINDOW_EXE=<path>` also accepts that executable, for the integration
+  scripts, which pass the `node` that runs them; a release keeper compiles that out. An older keeper (before #1405) still hands the
   token to every process until the app is fully quit or the keeper is updated (its update hands over to a keeper that
   judges windows).
 
@@ -1335,7 +1348,10 @@ Limits:
 
 - `switch` runs `main.mjs` from whatever host folder the request names, and only a window may ask (#1405): it would
   otherwise hand the token to code of the caller's choosing. A process of this user can still replace the files of a
-  host folder before a window switches to it; that is the same-user residual, not a boundary.
+  host folder before a window switches to it; that is the same-user residual, not a boundary. The same holds with no
+  window at all: a host the keeper restarts after it exits runs from its copy as the copy is (`<data>/hosts/<key>/`,
+  or `<data>/content/<version>/host/`, not verified again before each launch), so a process that edits the copy and
+  then ends the host (its pid is in `status`) has its own code started with the token.
 - `relaunching` (#352) keeps a keeper with no window running for at most 300 s, whatever background mode says. It
   grants nothing `set_background` does not already, and only for a bounded time.
 - `children` (#538) lists what the keeper holds (each child's id, pid, kind, tag and state), read-only: the child
@@ -1373,7 +1389,7 @@ host. It changes where a client connects, not what it must prove:
   bytes are read once, by the one process holding its end. What was left: the control socket's `status` and `attach`
   handed the token to any process of this user, since every window needs it and no window is the keeper's child
   (the owner kept that path when deciding #538). Since #1405 they hand it only to a Centralu window, judged by the
-  executable the kernel names for the peer ("The keeper's control socket" above); any other process gets the limited
+  exact path of the executable the kernel names for the peer ("The keeper's control socket" above); any other process gets the limited
   credential. So the token is not one request away any more, though it is still not a wall between processes of the
   same user (the residuals above); it is no longer in any process's start environment for one to read.
 - **The Codex bridge gets a credential of its own, not the token** (#382, owner question 4, decided 2026-10-11).

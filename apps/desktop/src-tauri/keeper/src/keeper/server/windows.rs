@@ -20,7 +20,7 @@ pub(super) fn attach(k: Arc<Keeper>, mut stream: UnixStream, reader: BufReader<U
     }
     let client: Option<BuildSource> = req.get("build").cloned().and_then(|b| serde_json::from_value(b).ok());
     // Before the state lock: the judgement may run `codesign` (#1405)
-    let full = judged(&stream);
+    let full = judged(&k, &stream);
     let id = {
         let Ok(mut st) = k.state.lock() else { return };
         if st.stopping {
@@ -130,7 +130,7 @@ pub(in crate::keeper) fn adopt_window(k: &Arc<Keeper>, stream: UnixStream) {
     let Ok(read_half) = stream.try_clone() else { return };
     let _ = stream.set_write_timeout(Some(WINDOW_WRITE_TIMEOUT));
     // Judged again from the socket another keeper passed: the peer's record travels with it (#1405)
-    let full = judged(&stream);
+    let full = judged(k, &stream);
     let id = {
         let Ok(mut st) = k.state.lock() else { return };
         st.add_window(k, stream, full)
@@ -141,8 +141,8 @@ pub(in crate::keeper) fn adopt_window(k: &Arc<Keeper>, stream: UnixStream) {
 
 /// Whether the peer of an attaching or handed-over window is a Centralu window (#1405), logged with why when it is not:
 /// it then gets the limited credential, and its own log says so too.
-fn judged(stream: &UnixStream) -> bool {
-    match window_peer::judge(stream) {
+fn judged(k: &Keeper, stream: &UnixStream) -> bool {
+    match k.judge_window(stream) {
         Ok(()) => true,
         Err(why) => {
             log(&format!("an attaching client gets the limited credential: {why}"));

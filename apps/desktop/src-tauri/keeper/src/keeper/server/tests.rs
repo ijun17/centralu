@@ -353,10 +353,6 @@ fn ask(sock: &Path, req: &Value, want: usize) -> Vec<String> {
  */
 #[test]
 fn no_reply_carries_the_token_to_a_process_that_is_not_a_window() {
-    if window_peer::test_any_peer() {
-        eprintln!("skipped: CC_KEEPER_TEST_ANY_PEER=1 makes every peer a window");
-        return;
-    }
     let data = PathBuf::from(format!("/tmp/cck-token-{}", std::process::id()));
     let _ = fs::remove_dir_all(&data);
     fs::create_dir_all(&data).unwrap();
@@ -416,10 +412,6 @@ fn no_reply_carries_the_token_to_a_process_that_is_not_a_window() {
 /// A window's view carries the token, and a push goes to each window in its own credential.
 #[test]
 fn a_window_gets_the_token_and_every_other_client_the_limited_credential() {
-    if window_peer::test_any_peer() {
-        eprintln!("skipped: CC_KEEPER_TEST_ANY_PEER=1 makes every peer a window");
-        return;
-    }
     let data = PathBuf::from(format!("/tmp/cck-rights-{}", std::process::id()));
     let _ = fs::remove_dir_all(&data);
     fs::create_dir_all(&data).unwrap();
@@ -460,13 +452,15 @@ fn a_window_gets_the_token_and_every_other_client_the_limited_credential() {
 }
 
 /**
- * #1405, the other side: a process whose executable is named `centralu` gets the front door's token. This test binary,
- * copied as `centralu` and run again to make the request, is that process; the kernel names its executable, as it
- * names the window's. (A keeper with a team would also want the copy signed by it; no keeper in a test has one.)
+ * #1405, the other side: a process whose executable is the window's, by the exact path this keeper accepts (here the
+ * window of the build it names, `bundle_path`), gets the front door's token; the same executable copied as `centralu`
+ * anywhere else does not. This test binary, copied and run again to make the request, is both processes; the kernel
+ * names its executable, as it names the window's. (A keeper with a team would also want the copy signed by it; no
+ * keeper in a test has one.)
  */
 #[test]
-fn a_process_named_centralu_gets_the_token() {
-    const NAME: &str = "keeper::server::tests::a_process_named_centralu_gets_the_token";
+fn only_the_accepted_window_executable_gets_the_token() {
+    const NAME: &str = "keeper::server::tests::only_the_accepted_window_executable_gets_the_token";
     // The copy, run again: it is the client
     if let Ok(sock) = std::env::var("CCK_TEST_CLIENT_SOCK") {
         let lines = ask(Path::new(&sock), &json!({ "op": "status" }), 1);
@@ -476,25 +470,40 @@ fn a_process_named_centralu_gets_the_token() {
     }
     let data = PathBuf::from(format!("/tmp/cck-named-{}", std::process::id()));
     let _ = fs::remove_dir_all(&data);
-    fs::create_dir_all(&data).unwrap();
+    fs::create_dir_all(data.join("elsewhere")).unwrap();
     let k = keeper_with_a_host(&data);
     let sock = k.sock.clone();
     {
         let k = k.clone();
         thread::spawn(move || accept_loop(&k));
     }
-    let copy = data.join("centralu");
-    fs::copy(std::env::current_exe().unwrap(), &copy).unwrap();
-    let out = std::process::Command::new(&copy)
-        .args(["--exact", NAME, "--nocapture", "--test-threads=1"])
-        .env("CCK_TEST_CLIENT_SOCK", &sock)
-        .env_remove("CC_KEEPER_TEST_ANY_PEER")
-        .output()
-        .unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    let reply = stdout.lines().find_map(|l| l.find("REPLY ").map(|at| &l[at + 6..])).unwrap_or_else(|| panic!("the copy made no request: {stdout}"));
-    let v: Value = serde_json::from_str(reply).unwrap();
-    assert_eq!(v["view"]["status"]["token"], json!(DOOR_TOKEN), "{reply}");
+    let window = data.join("centralu");
+    let renamed = data.join("elsewhere").join("centralu");
+    for copy in [&window, &renamed] {
+        fs::copy(std::env::current_exe().unwrap(), copy).unwrap();
+    }
+    // The build this keeper names is the window's: where no bundle is, its executable itself (`window_exe_of`)
+    k.state.lock().unwrap().desired.bundle_path = Some(window.to_string_lossy().to_string());
+    let status_of = |exe: &Path| -> Value {
+        let out = std::process::Command::new(exe)
+            .args(["--exact", NAME, "--nocapture", "--test-threads=1"])
+            .env("CCK_TEST_CLIENT_SOCK", &sock)
+            .env_remove("CC_KEEPER_TEST_WINDOW_EXE")
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let reply = stdout
+            .lines()
+            .find_map(|l| l.find("REPLY ").map(|at| l[at + 6..].to_string()))
+            .unwrap_or_else(|| panic!("the copy made no request: {stdout}"));
+        serde_json::from_str(&reply).unwrap()
+    };
+    let v = status_of(&window);
+    assert_eq!(v["view"]["status"]["token"], json!(DOOR_TOKEN), "{v}");
     assert_eq!(v["view"]["rights"], json!("full"));
+    // The same bytes, named `centralu`, at a path nothing accepts: a renamed `node` is this case
+    let v = status_of(&renamed);
+    assert_eq!(v["view"]["status"]["token"], json!(limited::limited_token(DOOR_TOKEN)), "{v}");
+    assert_eq!(v["view"]["rights"], json!("limited"));
     let _ = fs::remove_dir_all(&data);
 }

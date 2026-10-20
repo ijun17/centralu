@@ -340,6 +340,32 @@ pub(super) fn log(msg: &str) {
 
 impl Keeper {
     /**
+     * The window executables this keeper accepts (#1405, `window_peer::accepted_windows`): the one beside its own
+     * executable, unless it runs from content, and the window of each build it names: its own (`--bundle-path`), the
+     * current host's and the next launch's (each `switch` a window made). Read under the state lock, which is let go
+     * before anything is judged.
+     */
+    pub(super) fn window_exes(&self) -> Vec<PathBuf> {
+        let mut bundles: Vec<String> = self.info.build.iter().filter_map(|b| b.bundle_path.clone()).collect();
+        if let Ok(st) = self.state.lock() {
+            bundles.extend(st.source.iter().chain(std::iter::once(&st.desired)).filter_map(|b| b.bundle_path.clone()));
+        }
+        let own = std::env::current_exe().ok();
+        let beside = if self.origin.dir().is_some() { None } else { own.as_deref() };
+        window_peer::accepted_windows(beside, &bundles)
+    }
+
+    /// Whether the peer of `stream` is a Centralu window, judged against `window_exes`; never under the state lock.
+    pub(super) fn is_window(&self, stream: &UnixStream) -> bool {
+        window_peer::is_window(stream, &self.window_exes())
+    }
+
+    /// The same, with why not (`window_peer::judge`).
+    pub(super) fn judge_window(&self, stream: &UnixStream) -> Result<(), String> {
+        window_peer::judge(stream, &self.window_exes())
+    }
+
+    /**
      * What this keeper says about itself and its host, for one client: `full` for a window, whose
      * view carries the front door's token; any other process gets the limited credential in its
      * place (#1405, `limited.rs`). Nothing else differs.
@@ -512,7 +538,7 @@ fn handle(k: Arc<Keeper>, mut stream: UnixStream, guard: Request) {
     match op {
         "status" => {
             // A window's status carries the token; anyone else's the limited credential (#1405)
-            let full = window_peer::is_window(&stream);
+            let full = k.is_window(&stream);
             let view = k.state.lock().map(|st| k.view(&st, full)).ok();
             reply(&mut stream, &json!({ "ok": true, "view": view }));
         }
@@ -530,7 +556,7 @@ fn handle(k: Arc<Keeper>, mut stream: UnixStream, guard: Request) {
         }
         "relaunching" => relaunching(&k, &mut stream, &req),
         // Both start code the request names and hand it the token: a window's only (#1405)
-        "switch" | "upgrade" if !window_peer::is_window(&stream) => {
+        "switch" | "upgrade" if !k.is_window(&stream) => {
             log(&format!("refused {op} to a process that is not a Centralu window"));
             reply(&mut stream, &json!({ "ok": false, "error": "window_only: only a Centralu window can switch or upgrade the keeper" }))
         }
