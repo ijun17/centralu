@@ -124,7 +124,7 @@
       "id": "lint-allowlist",
       "tier": "light",
       "paths": ["tooling/lint-allowlist/*.txt"],
-      "why": "the type-aware lint's lists of findings that predate it (#1339): every conversion edits them, and what keeps them shrinking is deep (tooling/lint-allowlist.ts, tooling/type-aware-lint.test.ts, which compares them with main's)"
+      "why": "the type-aware lint's lists of findings that predate it (#1339): every conversion edits them, and what keeps them shrinking is deep (tooling/lint-allowlist.ts, tooling/type-aware-lint.test.ts, which compares them with main's). When the last list goes, this rule and the except in guards go with it: tooling/tier.test.ts fails on a glob that matches nothing"
     },
     {
       "id": "guards",
