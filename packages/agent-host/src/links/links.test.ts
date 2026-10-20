@@ -776,7 +776,7 @@ describe('a hub linked to another host (#82)', () => {
       const statuses: string[] = []
       const tunnel = Object.assign(
         new DirectTunnel(() => {
-          if (o.asleep?.()) throw new Error('ssh: connect to host box port 22: Operation timed out')
+          if (o.asleep?.()) throw new Error('ssh could not reach box: ssh: connect to host box port 22: Operation timed out')
           asks++
           const port = host?.port ?? o.running?.() ?? null
           const stopped = port === null && !markCleared ? o.stopped?.() : undefined
