@@ -4,12 +4,19 @@
  * Uses the person's Claude authentication; projects and CC_DATA_DIR are temporary.
  * No host is started and no process other than these queries is stopped.
  *
- * Two sessions, A (the sender) and B (the receiver), run in the same machine. The cases (default: all):
+ * Two sessions, A (the sender) and B (the receiver), run in the same machine. A addresses B by the name B registered in
+ * ~/.claude/sessions/<pid>.json (and its `uds:` pipe when B bound one): the CLI does not deliver to a session UUID, so
+ * addressing by UUID reports "unreachable" with the controls on or off. The cases (default: all):
  *   normal, auto       Centralu's controls on, under the `normal` and `auto` presets: the channel must be closed. `list`:
  *                      ListAgents is not offered; `send`: A's SendMessage to B reaches nothing; `refused`: B never read it,
  *                      before or after a turn of its own. A's own background subagent still takes a SendMessage.
  *   auto-accept-file   As `auto`, with both folders' project settings asking for `crossSessionInbound: accept`: the inline
  *                      layer must still win.
+ *   in-from-raw        Mixed: an uncontrolled sender (an older host's session, the person's own CLI) to a controlled receiver:
+ *                      the receiver has no inbox to reach.
+ *   out-to-raw         Mixed: a controlled sender to an uncontrolled receiver: the sender may not send (nor its subagent).
+ *   kite-on-b          An uncontrolled sender to a controlled B whose settings `env` turns CLAUDE_CODE_HARBOR_KITE back on (the person's user settings
+ *                      can): B binds its inbox again, and only `crossSessionInbound: refuse` keeps the message unread.
  *   raw-auto           Control: both sessions under `auto` with NO controls (what Centralu did before slice 0). Shows the
  *                      probe can see a leak: ListAgents is offered and B reads the message.
  *   raw-held           Control: A prompting, B bypass, no controls. The CLI's default holds mail from another class at a
@@ -18,8 +25,8 @@
  */
 import { query, type SDKMessage, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { randomUUID } from 'node:crypto'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { withoutCrossSessionMessaging } from '../src/adapters/claude/cross-session.js'
@@ -49,7 +56,7 @@ class Input {
   }
 }
 
-type Mode = { permissionMode: 'default' | 'bypassPermissions'; controls: boolean; settingSources?: ('user' | 'project' | 'local')[] }
+type Mode = { permissionMode: 'default' | 'bypassPermissions'; controls: boolean; settingSources?: ('user' | 'project' | 'local')[]; settings?: Record<string, unknown> }
 
 function start(cwd: string, executable: string, mode: Mode) {
   const input = new Input()
@@ -58,6 +65,7 @@ function start(cwd: string, executable: string, mode: Mode) {
   const base = {
     cwd, model: 'haiku', pathToClaudeCodeExecutable: executable,
     ...(mode.settingSources ? { settingSources: mode.settingSources } : {}),
+    ...(mode.settings ? { settings: mode.settings } : {}),
     permissionMode: mode.permissionMode, includePartialMessages: true, forwardSubagentText: true,
     maxTurns: 6,
     // Under bypassPermissions canUseTool is not asked, so the tools a session must not use are denied by name
@@ -122,9 +130,30 @@ const CASES: Case[] = [
   { name: 'auto', a: { permissionMode: 'bypassPermissions', controls: true }, b: { permissionMode: 'bypassPermissions', controls: true }, controlled: true },
   // The person's own project settings ask for the channel: the inline layer must still win
   { name: 'auto-accept-file', a: { permissionMode: 'bypassPermissions', controls: true, settingSources: ['user', 'project', 'local'] }, b: { permissionMode: 'bypassPermissions', controls: true, settingSources: ['user', 'project', 'local'] }, controlled: true, acceptFile: true },
+  { name: 'in-from-raw', a: { permissionMode: 'bypassPermissions', controls: false }, b: { permissionMode: 'bypassPermissions', controls: true }, controlled: true },
+  { name: 'out-to-raw', a: { permissionMode: 'bypassPermissions', controls: true }, b: { permissionMode: 'bypassPermissions', controls: false }, controlled: true },
+  { name: 'kite-on-b', a: { permissionMode: 'bypassPermissions', controls: false }, b: { permissionMode: 'bypassPermissions', controls: true, settings: { env: { CLAUDE_CODE_HARBOR_KITE: '1' } } }, controlled: true },
   { name: 'raw-auto', a: { permissionMode: 'bypassPermissions', controls: false }, b: { permissionMode: 'bypassPermissions', controls: false }, controlled: false },
   { name: 'raw-held', a: { permissionMode: 'default', controls: false }, b: { permissionMode: 'bypassPermissions', controls: false }, controlled: false },
 ]
+
+type Registered = { name: string; socket: string | null }
+
+/** What B registered for the other sessions to find it by: its name, and the pipe it bound (none when its inbox is closed) */
+async function registeredAs(sessionId: string): Promise<Registered | null> {
+  const dir = join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude'), 'sessions')
+  for (let tries = 0; tries < 20; tries++) {
+    for (const file of await readdir(dir).catch(() => [] as string[])) {
+      if (!file.endsWith('.json')) continue
+      const entry = JSON.parse(await readFile(join(dir, file), 'utf8').catch(() => 'null')) as Record<string, unknown> | null
+      if (entry?.sessionId === sessionId && typeof entry.name === 'string') {
+        return { name: entry.name, socket: typeof entry.messagingSocketPath === 'string' ? entry.messagingSocketPath : null }
+      }
+    }
+    await delay(500)
+  }
+  return null
+}
 
 async function runCase(c: Case, root: string, executable: string) {
   const sessions: ReturnType<typeof start>[] = []
@@ -138,6 +167,8 @@ async function runCase(c: Case, root: string, executable: string) {
     await b.turn('Reply READY. Do not call any tools.')
     const bInit = b.messages.find((m) => m.type === 'system' && m.subtype === 'init')
     if (!bInit || bInit.type !== 'system' || bInit.subtype !== 'init') throw new Error('B did not initialize')
+    const target = await registeredAs(bInit.session_id)
+    if (!target) throw new Error('B never registered a name in the CLI session registry')
     const a = start(aDir, executable, c.a)
     sessions.push(a)
     const peerTag = `CC_CROSS_SESSION_${randomUUID()}`
@@ -145,7 +176,8 @@ async function runCase(c: Case, root: string, executable: string) {
     const bBaseline = b.messages.length
     const peerTurn = await a.turn(
       'Use ListAgents (or its alias ListPeers) to list other sessions if available. ' +
-      `Then try SendMessage to the independent session B, session ID ${bInit.session_id}, cwd ${bDir}, ` +
+      `Then try SendMessage to the independent session B, by its name "${target.name}"` +
+      (target.socket ? `, and if that fails by the address "uds:${target.socket}"` : '') + ', ' +
       `with this exact text: ${peerTag}. Attempt the send even if discovery is unavailable. ` +
       'Do not message any other independent session. Use no other tools. Briefly report any refusal.',
     )
@@ -165,7 +197,7 @@ async function runCase(c: Case, root: string, executable: string) {
     const ownSendSucceeded = toolResults(a.messages, ownCallIds).some((r) => !r.isError)
     const ownReply = () => a.messages.some((m) => m.type === 'assistant' && !!m.parent_tool_use_id &&
       m.message.content.some((x) => x.type === 'text' && x.text.includes(ownTag)))
-    if (ownCalls.length > 0 && !ownReply()) await a.until(ownReply, 'own subagent echo', 30_000).catch(() => {})
+    if (ownCalls.length > 0 && !ownReply()) await a.until(ownReply, 'own subagent echo', 90_000).catch(() => {})
     const peerCalls = toolCalls(peerTurn, 'SendMessage')
     const listCalls = [...toolCalls(peerTurn, 'ListAgents'), ...toolCalls(peerTurn, 'ListPeers')]
     return {
@@ -177,6 +209,7 @@ async function runCase(c: Case, root: string, executable: string) {
         results: toolResults(a.messages, new Set(listCalls.map((x) => x.id))),
       },
       send: { attempted: peerCalls.length > 0, results: toolResults(a.messages, new Set(peerCalls.map((x) => x.id))) },
+      b: { name: target.name, boundItsInbox: target.socket !== null },
       bSawBeforeItsTurn: bSawBeforeTurn,
       bSawAfterItsTurn: bSawAfterTurn,
       own: {
@@ -195,6 +228,9 @@ async function runCase(c: Case, root: string, executable: string) {
 
 const root = await mkdtemp(join(tmpdir(), 'cc-cross-session-'))
 const previousDataDir = process.env.CC_DATA_DIR
+// Run inside a Claude session, the probe inherits that session's inbox: the uncontrolled cases must not register it
+delete process.env.CLAUDE_CODE_MESSAGING_SOCKET
+delete process.env.CLAUDE_CODE_MESSAGING_TOKEN
 process.env.CC_DATA_DIR = join(root, 'data')
 try {
   const executable = toolExecutable('claude')
@@ -207,10 +243,11 @@ try {
     const r = await runCase(c, root, executable)
     console.log(JSON.stringify({ ...r, note: 'B is observed through both A turns, a 5-second idle window and one B turn; absence is bounded evidence.' }, null, 2))
     if (c.controlled) {
-      const closed = r.list.offered === false && r.send.attempted && !r.bSawBeforeItsTurn && !r.bSawAfterItsTurn
-      const ownWorks = r.own.backgroundSubagentStarted && r.own.sendAttempted && r.own.sendSucceeded && r.own.subagentReplied
+      const closed = (!c.a.controls || r.list.offered === false) && r.send.attempted && !r.bSawBeforeItsTurn && !r.bSawAfterItsTurn
+      // A's own subagent is only asked of a controlled A: an uncontrolled one proves nothing about the controls
+      const ownWorks = !c.a.controls || (r.own.backgroundSubagentStarted && r.own.sendAttempted && r.own.sendSucceeded && r.own.subagentReplied)
       if (!closed || !ownWorks) process.exitCode = 1
-    } else if (c.name === 'raw-auto' && !r.bSawAfterItsTurn && !process.exitCode) {
+    } else if (c.name === 'raw-auto' && !r.bSawAfterItsTurn) {
       // The control showed no leak: a pass in the controlled cases would prove nothing
       console.error('raw-auto delivered nothing: the probe cannot see a leak here')
       process.exitCode = 3

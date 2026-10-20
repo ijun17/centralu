@@ -116,14 +116,20 @@ describe('a host restart under the keeper', () => {
     { preset: 'normal', working: true },
     { preset: 'safe', working: false },
     { preset: 'auto', working: false },
-  ] as const)('refreshes an adopted pre-#578 process only when its permission flags changed ($preset, working=$working)', async ({ preset, working }) => {
+    { preset: 'auto', working: true },
+    // The current fingerprints: nothing changed, so the adopted process is kept
+    { preset: 'auto', working: false, current: true },
+    { preset: 'normal', working: false, current: true },
+  ] as const)('refreshes an adopted process only when its launch flags changed: pre-#578 normal, and auto from before the cross-session controls (#1347 slice 0) ($preset, working=$working, current=$current)', async ({ preset, working, ...rest }) => {
+    const current = 'current' in rest
     const a = host()
     const project = (await a.rpc('projects.add', { path: tmpdir() })) as { id: string }
     const session = await a.mgr.createSession({ projectId: project.id, cwd: tmpdir(), tool: 'claude', permissionPreset: preset })
     const key = `launch_settings:${session.id}`
     // Persist the released fingerprint, before normal acquired an explicit mode flag.
     const legacy = JSON.parse(store.settings.appSetting(key)!)
-    legacy.v = preset === 'auto' ? 2 : 1
+    // What an older host stored: normal before #578's explicit mode flag, auto before the cross-session controls (v2), safe unchanged
+    if (!current) legacy.v = preset === 'auto' ? 2 : 1
     const oldFingerprint = JSON.stringify(legacy)
     store.settings.setAppSetting(key, oldFingerprint)
     a.claude.last.pendingOutputOnDetach = working
@@ -146,7 +152,7 @@ describe('a host restart under the keeper', () => {
         adopted.emit({ type: 'turn_complete', sessionId: session.id })
         await vi.waitFor(() => expect(b.claude.last).not.toBe(adopted))
       }
-      if (preset === 'normal') {
+      if (!current && preset !== 'safe') {
         expect(adopted.disposed).toBe(true)
         expect(b.claude.last).not.toBe(adopted)
         expect(b.claude.last.opts.processSource?.adopt).toBeUndefined()
@@ -158,10 +164,10 @@ describe('a host restart under the keeper', () => {
         expect(b.claude.last).toBe(adopted)
         expect(store.settings.appSetting(key)).toBe(oldFingerprint)
       }
-      const current = b.claude.last
+      const live = b.claude.last
       await b.mgr.refreshToolDefinitions()
-      expect(b.claude.last).toBe(current)
-      expect(restart).toHaveBeenCalledTimes(preset === 'normal' ? 1 : 0)
+      expect(b.claude.last).toBe(live)
+      expect(restart).toHaveBeenCalledTimes(!current && preset !== 'safe' ? 1 : 0)
     } finally {
       await b.mgr.disposeAll()
     }

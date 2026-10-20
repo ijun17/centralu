@@ -280,31 +280,50 @@ Claude Code can discover other Claude processes on the same machine through
 the same permission-mode class, including two `safe` sessions. That path does not pass through
 Centralu's `ask_project` consent card.
 
-Every Claude query Centralu builds, under every preset, `auto` included, applies inline SDK `settings.crossSessionInbound: 'refuse'`
-to drop inbound peer messages and adds `ListAgents` and its alias `ListPeers` to
-`disallowedTools`. It also forces `CLAUDE_CODE_HARBOR_KITE=0` in the child environment: in the
-inspected CLI versions 2.1.263–2.1.289 this undocumented gate disables peer listing,
-cross-session sends and inbox binding. `SendMessage` remains available because it also
-continues the session's own background subagents. Existing settings, denies and environment
-are merged, and settings-file selection remains governed by project trust and session kind.
+Every Claude query Centralu builds, under every preset, `auto` included, applies inline SDK flag settings
+`crossSessionInbound: 'refuse'` to drop inbound peer messages, adds `ListAgents` and its alias `ListPeers` to
+`disallowedTools`, and sets `CLAUDE_CODE_HARBOR_KITE=0` in the child environment. `SendMessage` remains available
+because it also continues the session's own background subagents. Existing settings, denies and environment are merged,
+and settings-file selection remains governed by project trust and session kind. The host's own
+`CLAUDE_CODE_MESSAGING_SOCKET` and `CLAUDE_CODE_MESSAGING_TOKEN` are dropped from the environment it passes on: a host
+started inside a Claude session would otherwise hand its children that session's inbox address and secret.
 
-This control is **not** opened by `auto` (it narrows #603 for this one control, as the mailbox plan's slice 0
-decided, `docs/plans/mailbox.md` §9.6): two `auto` sessions are the same permission class, the CLI's default delivers
-between them at once, and that would reach another Centralu session past the relations, the record and the guards its
-own messaging keeps. The inline settings layer is Centralu's: a project settings file that asks for `crossSessionInbound: accept` loses to it (probe case `auto-accept-file`, CLI 2.1.296). The
-controls cover workers, orchestrators, coordinators, worktree managers, builders, app
-agents, `start_agent` children and resumed sessions, including fresh keeper processes. A host
-handover that adopts an existing CLI cannot retroactively change its startup flags or
-environment; processes started before this fix must be restarted.
+This is not opened by `auto` (it narrows #603 for this one control, as the mailbox plan's slice 0 decided,
+`docs/plans/mailbox.md` §9.6): two `auto` sessions are the same permission class, the CLI's default delivers between
+them at once, and that would reach another Centralu session past the relations, the record and the guards its own
+messaging keeps. The controls cover workers, orchestrators, coordinators, worktree managers, builders, app agents,
+`start_agent` children and resumed sessions, including fresh keeper processes.
 
-Limits: the environment gate is version-sensitive. The documented inbound refusal and
-discovery denies remain even if that gate stops working, but they alone do not prove outbound
-isolation when a peer address is already known and `SendMessage` stays enabled. Re-run
-`packages/agent-host/scripts/probe-cross-session.mts` before SDK/CLI upgrades to check discovery,
-delivery to a second session and own-subagent messaging. Unit tests check constructed options;
-the live probe supplies bounded runtime evidence. This is a provider-messaging boundary,
-not OS isolation: commands with the user's permissions can still access same-user files and
-sockets, and processes started outside Centralu are not configured by this adapter.
+What holds, and what does not, said plainly (CLI 2.1.263 to 2.1.299 read and measured):
+
+- **`CLAUDE_CODE_HARBOR_KITE=0` can be undone.** The CLI applies the `env` of the person's **user** settings
+  (`~/.claude/settings.json`), of flag settings and of managed settings onto its environment after it starts, so a user
+  `env` that sets the key to `1` binds the session's inbox again. Project and local settings cannot set it (the key is
+  on their deny list). The environment gate is therefore not the control to rely on. What holds when it is undone is
+  the inline `crossSessionInbound: 'refuse'` (the message is accepted into the inbox and never read: probe case
+  `kite-on-b`) and the `ListAgents` / `ListPeers` denies.
+- **Managed (organisation policy) settings outrank Centralu's inline layer.** The CLI resolves the inbound value as
+  managed, then flag, then user settings; repo files can only tighten it. A managed `crossSessionInbound: accept`
+  reopens the channel, and a managed `env` can turn the gate back on. That is the organisation's decision and Centralu
+  does not override it. A managed file was not tried (it would affect every Claude on the machine).
+- **Below that, the person's own settings do not reopen it.** A project settings file that asks for `accept` loses to
+  the inline layer (probe case `auto-accept-file`), and so does the person's user setting `crossSessionInbound: accept`
+  and the CLI's `/config` switch: flag settings beat user settings. The person's own interactive Claude cannot reach a
+  Centralu session either (probe case `in-from-raw`: the receiver has no inbox to reach).
+- **A process an older host started keeps the flags it was started with**, so a kept `auto` session from before this
+  change has its inbox open. Its launch fingerprint is version 3 now (`launchSettingsFingerprint`), so the host that
+  adopts it restarts it once, at the next safe boundary (the #589 path: at idle, or after its turn), and the restart
+  carries the controls.
+
+Limits: the environment gate is version-sensitive, undocumented, and undoable by user settings as said. The documented
+inbound refusal and the discovery denies do not alone prove outbound isolation when a peer address is already known and
+`SendMessage` stays enabled; the probe measures the outbound side too (`out-to-raw`: a controlled sender is told
+"Cross-session messaging is not available in this session", also through its own subagent). Re-run
+`packages/agent-host/scripts/probe-cross-session.mts` before SDK/CLI upgrades: it addresses the receiver by the name it
+registered (the CLI never routes a session UUID), runs the controlled cases, the mixed ones, and two uncontrolled
+controls that show it can see a leak. Unit tests check constructed options; the live probe supplies bounded runtime
+evidence. This is a provider-messaging boundary, not OS isolation: commands with the user's permissions can still access
+same-user files and sockets, and processes started outside Centralu are not configured by this adapter.
 
 ## What each session's tools can do (#382)
 

@@ -40,6 +40,18 @@ describe('Claude cross-session controls', () => {
     expect(result.env.KEEP).toBe('yes')
   })
 
+  it('drops the inbox socket and token a host started inside a Claude session inherits, also when an option names them', () => {
+    vi.stubEnv('CLAUDE_CODE_MESSAGING_SOCKET', '/tmp/parent-inbox.sock')
+    vi.stubEnv('CLAUDE_CODE_MESSAGING_TOKEN', 'parent-secret')
+    vi.stubEnv('KEEP_ME', 'yes')
+    const result = withoutCrossSessionMessaging({ env: { CLAUDE_CODE_MESSAGING_TOKEN: 'from-options' } })
+    expect(result.env).not.toHaveProperty('CLAUDE_CODE_MESSAGING_SOCKET')
+    expect(result.env).not.toHaveProperty('CLAUDE_CODE_MESSAGING_TOKEN')
+    expect(result.env.KEEP_ME).toBe('yes')
+    // The host's own environment is not touched
+    expect(process.env.CLAUDE_CODE_MESSAGING_SOCKET).toBe('/tmp/parent-inbox.sock')
+  })
+
   it('blocks peers when no inline settings, denies or environment were supplied', () => {
     const result = withoutCrossSessionMessaging({})
     expect(result.settings.crossSessionInbound).toBe('refuse')
