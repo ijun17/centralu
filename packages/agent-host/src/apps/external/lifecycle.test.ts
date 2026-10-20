@@ -419,6 +419,27 @@ describe('the shutdown rule (S-5)', () => {
     }
   }, 15_000 * SLOW)
 
+  /*
+   * A caller about to delete the data folder (a test's cleanup, which removes it at once) waits for the trees: by default
+   * the host's exit does not wait (Tauri's 3 seconds), and on Windows what an app left running is swept only after it
+   * has ended. The board app's tests removed their folder while an app's tree still ran Node from it, and a cleanup
+   * hook timed out (job 118035858311).
+   */
+  it.runIf(process.platform === 'win32')("dispose with awaitTree resolves only once an app's leftovers outside its job have ended", async () => {
+    plant('parent', 'detached-grandchild')
+    make()
+    await rt.tools(ref('parent'))
+    const pid = starts('parent')[0]!.pid
+    const grandchild = records('parent').find((r) => r.t === 'grandchild')!.grandchild!
+    try {
+      expect(alive(grandchild)).toBe(true)
+      await rt.dispose({ awaitTree: true })
+      expect([alive(pid), alive(grandchild)]).toEqual([false, false])
+    } finally {
+      own.end([grandchild])
+    }
+  }, 15_000 * SLOW)
+
   it('when the host exits (dispose), every running app stops', async () => {
     plant('a1')
     plant('a2', 'ignore-eof')
