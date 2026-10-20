@@ -765,8 +765,8 @@ step shows on the screen.
 - **Read fresh at every call**: main's commit and the tags from the remote (`git fetch`/`ls-remote`
   under refs of the call's own, removed again), CI on main from GitHub, the release workflow's runs.
   `release_status` (read-only, agents and the screen's "Release" dialog) answers the phase
-  (`ready-to-tag`, `tagged`, `publishing`, `waiting-approval`, `released`, `failed`), CI on main, the
-  checkout's state, the rehearsal or the release run, the jobs waiting for approval, what merged since
+  (`ready-to-tag`, `tagged`, `publishing`, `waiting-approval`, `released`, `failed`), the release
+  commit and how far behind main it is (#1350), CI on it, the checkout's state, the rehearsal or the release run, the jobs waiting for approval, what merged since
   the last tag (the release notes draft, without `chore(release)` commits) and the next step.
 - **Release CI sources (#633 review):** match GitHub Actions check-suite ids to runs of the
   configured CI workflow files and exact commit/event (main push or PR). Release/rehearsal checks
@@ -776,9 +776,24 @@ step shows on the screen.
   cancellation. Generated release bumps have their own build concurrency group per commit.
   Status reports this publication gate. The inline event scan does not follow called scripts or
   actions; review those manually as described in docs/releasing.md.
-- **CI evidence for rehearse and tag (#629):** main green is used directly and main failure always
-  blocks. Otherwise the merged bump PR may supply green required checks only when main is its
-  single-parent squash commit and the PR head has the identical Git tree. Audit required workflow
+- **The release commit (#1350):** a release is cut from the bump's own squash commit, not main's head.
+  `releaseCommit` walks main's first-parent history back from its head to the first commit that
+  does not declare main's version (`release.source`); that commit is the default for `rehearse` and
+  `tag`, and `commit` names another one of that run (main's head among them). A version main no
+  longer declares (a later commit changed it, a newer bump) is refused, by `version` or by `commit`.
+  Everything the release reads is read at that commit: CI, the version files, the rehearsals (those on
+  it, and those on the bump branch at a commit with its tree), the PR evidence. What lands after it
+  does not matter, and a rehearsal of main's head does not count (only runs on the release commit, or
+  on the bump branch at a commit with its tree). The notes run from the last tag to the release commit;
+  what came after is listed as "Not in this release". A shallow checkout whose history stops before
+  the bump is refused (the boundary is not the bump). `tag` and `rehearse`
+  need a clean checkout, not one on main or at main (the tag is pushed by id); `bump` still does.
+  Off main's head `rehearse` pushes the commit to `branchPrefix` + the version (never moved: a branch
+  there with another tree is refused) and dispatches the workflow on it; `tag` deletes that branch
+  after the push when it is still at the release commit (a bump PR's head is not).
+- **CI evidence for rehearse and tag (#629):** CI on the release commit green is used directly and its
+  failure always blocks. Otherwise the merged bump PR may supply green required checks only when the
+  release commit is its single-parent squash commit and the PR head has the identical Git tree. Audit required workflow
   jobs for event/branch behavior first; such jobs or unmapped required names require main CI. Both
   steps and status say which evidence they used, or why it was refused. Bump still needs main CI.
 - **`release`** (`step`, `confirm?`, `path?`): each step checks everything first and refuses with every
@@ -797,18 +812,18 @@ step shows on the screen.
     checked with `dryRun` before the push: the merged list under Why, the files under What changed.
     It warns, never refuses, when other builds' jobs (running plus queued, of every active run) reach
     three quarters of `release.runners` (default 20): the bump PR's CI would queue behind them (#1035).
-  - `rehearse`: CI green, the version untagged and its files consistent; starts the workflow on main
+  - `rehearse`: CI green on the release commit, the version untagged and its files consistent; starts the workflow on main (or, when main has moved past the release commit, on a branch at it)
     with `rehearsalInputs` (`dry_run=true`: builds and packs, publishes nothing, asks no approval).
     A rehearsal already running or passed on that commit is not started again. While main's version
     is released (#1035), it rehearses the open bump PR instead: on its branch, with no CI required,
     when exactly one `branchPrefix` branch after main's version has an open PR into main (or
     `version` names it), its head is the PR's head, main's head is an ancestor of it (else the
     squash would give main another tree), and it carries that version consistently and untagged.
-  - `tag` (`version?`, `skipRehearsal?`): the checkout as for bump, CI green, main's version after the
+  - `tag` (`version?`, `commit?`, `skipRehearsal?`): a clean checkout, CI green on the release commit, main's version after the
     latest tag and untagged (a release tag is never moved), its files consistent, and a successful
-    rehearsal on that commit, or on `branchPrefix` + the version at a commit with main's tree (the
+    rehearsal on that commit, or on `branchPrefix` + the version at a commit with its tree (the
     bump PR's rehearsal; the rule #629 uses for its CI), unless `skipRehearsal: true`. The newest of
-    those counts. Pushes the tag on main's commit by its id
+    those counts. Pushes the tag on the release commit by its id
     (lightweight, as before; no local tag is made) and answers the release run.
   - `approve` (`version?`, `comment?`): only the tag's release run (event push, head the tag, on the
     tag's commit), only the configured environment, only what GitHub says this login may approve
