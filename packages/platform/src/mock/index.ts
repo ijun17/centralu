@@ -200,6 +200,8 @@ export class MockPlatform implements Platform {
   get unresumable() { return this.sessionsMock.unresumable }
   get savedAttachments() { return this.sessionsMock.savedAttachments }
   get sentAttachments() { return this.sessionsMock.sentAttachments }
+  get sentIntents() { return this.sessionsMock.sentIntents }
+  get reportsOwed() { return this.sessionsMock.reportsOwed }
   get attachmentData() { return this.sessionsMock.attachmentData }
   get restarted() { return this.sessionsMock.restarted }
   set restarted(value: SessionsMock['restarted']) { this.sessionsMock.restarted = value }

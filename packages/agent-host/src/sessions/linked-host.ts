@@ -69,6 +69,16 @@ export class LinkedHost {
   }
 
   /**
+   * A call the hub routes to a linked machine, seen before it goes (`Router`'s `forwarding`): the person's choice on an
+   * `agents.send` for a report this hub holds (#1377). Returns what to do when the call ends.
+   */
+  forwarding(method: string, params: unknown): ((delivered: boolean) => void) | undefined {
+    if (method !== 'agents.send' || typeof params !== 'object' || params === null) return undefined
+    const sessionId = 'sessionId' in params ? params.sessionId : undefined
+    return typeof sessionId === 'string' && 'intent' in params ? this.host.linkedReports.choosing(sessionId, params.intent) : undefined
+  }
+
+  /**
    * A hub's orchestrator's instruction to one of this host's sessions (`host.send`, #82 phase 4 step 2). Delivered as
    * `send_to_session` delivers one here, recorded as sent by `fromName`, to a session a hub is shown and no other.
    *

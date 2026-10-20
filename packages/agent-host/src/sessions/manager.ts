@@ -758,6 +758,11 @@ export class SessionManager {
     return this.linkedHost.remoteAgentParent(...a)
   }
 
+  /** `LinkedHost.forwarding` (linked-host.ts), kept on the manager for its callers */
+  forwarding(...a: Parameters<LinkedHost['forwarding']>): ReturnType<LinkedHost['forwarding']> {
+    return this.linkedHost.forwarding(...a)
+  }
+
   /** `LinkedHost.observeLinked` (linked-host.ts), kept on the manager for its callers */
   observeLinked(...a: Parameters<LinkedHost['observeLinked']>): ReturnType<LinkedHost['observeLinked']> {
     return this.linkedHost.observeLinked(...a)
@@ -888,8 +893,10 @@ export class SessionManager {
             this.store.sessions.upsertSession(m)
             this.emit(change)
             // Its turn is over: the report it owed says so now, rather than naming a later turn (#698)
-            if (this.children.awaitingReport.has(m.id)) void this.reports.reportBackIfAwaited(m.id, { type: 'state_change', sessionId: m.id, state: 'idle' })
-            else void this.reports.tellAskerOfInterruption(m.id, this.children.turnOwners.get(m.id)?.callerId)
+            // Whose the turn was (#1377): the person's is reported to nobody
+            const turnBy = this.children.turnEnded(m.id, null)
+            if (this.children.awaitingReport.has(m.id)) void this.reports.reportBackIfAwaited(m.id, { type: 'state_change', sessionId: m.id, state: 'idle' }, undefined, undefined, turnBy)
+            else if (turnBy.by !== 'person') void this.reports.tellAskerOfInterruption(m.id, this.children.turnOwners.get(m.id)?.callerId)
           } else if (this.children.pausedReports.has(m.id)) {
             // The background work its report waited on went with the process (#721): the work stopped
             void this.reports.reportBackIfAwaited(m.id, { type: 'state_change', sessionId: m.id, state: 'idle' })
@@ -1101,21 +1108,31 @@ export class SessionManager {
     from?: { sessionId: string; name: string },
     /** The person's own typing, as the screen's composer sends it: the tool is told it is the person's (`InputOrigin`) */
     fromPerson = false,
+    /** What the person chose for a delegation report the session owes (#1377); "just asking" unless they said */
+    intent: 'ask' | 'task' | 'takeover' = 'ask',
   ): Promise<void> {
     // The person wrote to it (#378): an app's agent session they wrote to becomes theirs
     if (!from) this.appSessions.noteTookPart(sessionId, 'wrote')
-    // Read before the message starts a turn of its own: a paused session already in a turn is in the one its work's ending started
-    const state = this.meta.get(sessionId)?.state
-    const inItsOwnTurn = state !== undefined && inTurn(state)
-    await this.deliver(sessionId, text, attachments, from, false, undefined, 'inline', undefined, undefined, undefined, fromPerson && !from)
+    await this.deliver(sessionId, text, attachments, from, false, undefined, 'inline', undefined, undefined, undefined, fromPerson && !from, from ? 'ask' : intent)
     /*
-     * Once it is delivered, so a message that did not reach the session takes nothing over (#1340). The mark ends
-     * before this returns, ahead of any event of the person's turn; telling the caller is not waited for. Their message
-     * is what takes a session over from the caller that assigned it work, paused on its own background tasks; a caller's,
-     * another session's, an app's or Centralu's own words all reach `deliver` with a source and do not. Not while the
-     * session is in a turn already: that is the one its work's ending started, and its end is the final report.
+     * A person's message never closes a delegation report (#1377): its turn is theirs, and not reported, or the work's,
+     * when they chose to add it. Only "take it over" closes it, and tells the caller once. After the delivery, so a
+     * message that did not reach the session takes nothing over.
      */
-    if (!from && !inItsOwnTurn) void this.reports.personTookOver(sessionId)
+    if (!from && intent === 'takeover') {
+      this.children.takeTurn(sessionId)
+      void this.reports.personTookOver(sessionId)
+    }
+  }
+
+  /**
+   * Who waits for the session's work (#1377), for the composer's "Working for <caller>" choice: the session that holds
+   * the delegation report it owes, here or (a linked session's, asked of this hub) on a machine. `null` when it owes none.
+   */
+  reportOwed(sessionId: string): { callerId: string; callerName: string } | null {
+    const callerId = this.children.awaitingReport.get(sessionId) ?? this.children.linkedReports.get(sessionId)?.orchestratorId
+    const caller = callerId ? this.meta.get(callerId) : undefined
+    return callerId && caller ? { callerId, callerName: caller.name } : null
   }
 
   /**
@@ -1796,6 +1813,10 @@ export class SessionManager {
       },
       get cards() {
         return self.cards
+      },
+      joinsRunningTurn: (sessionId) => {
+        const tool = self.meta.get(sessionId)?.tool
+        return tool !== undefined && self.adapters.get(tool)?.capabilities.midTurnInput === true
       },
       get children() {
         return self.children

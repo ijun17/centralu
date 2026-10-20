@@ -22,8 +22,16 @@ export class CrossHandle implements SessionHandle {
     readonly opts: CreateSessionOpts,
     private emit: EventSink,
   ) {}
-  send(text: string) {
+  /** The ids the host named each input by, in the same order (`SessionHandle.send`'s `opts.id`) */
+  ids: (string | undefined)[] = []
+  /**
+   * A test sets this to make the tool one that folds a message in only at a tool round (Claude): the inputs the turn that
+   * ends took in, by id (`SessionHandle.turnInputs`). Unset, the tool takes every message into the running turn
+   */
+  turnInputs?: () => readonly string[] | null
+  send(text: string, opts?: { id?: string }) {
     this.sent.push(text)
+    this.ids.push(opts?.id)
     this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'working' })
   }
   sendTracked(text: string, observer?: InputObserver): Promise<void> {

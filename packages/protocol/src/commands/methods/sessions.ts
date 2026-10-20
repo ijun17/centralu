@@ -20,6 +20,7 @@ import { MessageImage } from '../files.js'
 import { machineParam } from '../machine-fields.js'
 import { CommandInfo, ProjectInfo } from '../projects.js'
 import {
+  SendIntent,
   CreateSessionParams,
   SUBAGENT_STEPS_PAGE,
   SessionInfo,
@@ -35,8 +36,26 @@ import {
 export const sessionMethods = {
   'agents.createSession': { params: CreateSessionParams, result: SessionInfo },
   'agents.send': {
-    params: z.object({ sessionId: SessionId, text: z.string(), attachments: z.array(Attachment).optional() }),
+    params: z.object({
+      sessionId: SessionId,
+      text: z.string(),
+      attachments: z.array(Attachment).optional(),
+      /*
+       * What the message means to a delegation report the session owes (#1377), when the person chose: `ask` (the default,
+       * "Just asking": the person's own turn, not reported), `task` ("Add to the task": its turn is the delegated work's,
+       * noted as the person's addition), `takeover` ("Take it over": the report closes and the caller is told once)
+       */
+      intent: SendIntent.optional(),
+    }),
     result: z.object({ ok: z.literal(true) }),
+  },
+  /**
+   * The delegation report a session owes (#1377), for the composer's "Working for <caller>" choice: who is waiting for
+   * its work, here or on a linked machine. `null` when it owes none.
+   */
+  'agents.reportOwed': {
+    params: z.object({ sessionId: SessionId }),
+    result: z.object({ owed: z.object({ callerId: z.string(), callerName: z.string() }).nullable() }),
   },
   'agents.respondApproval': {
     params: z.object({

@@ -346,6 +346,17 @@ describe.each([
     expect(events.some((e) => e.sessionId === s.id)).toBe(true)
   })
 
+  // #1377: the composer asks the host who waits for a session's work, and sends the person's choice with the message
+  it('says nobody waits for a session that owes no report, and takes a message with the choice', async () => {
+    const p = await aProject()
+    const s = await h.platform.agents.createSession({ projectId: p.id, cwd: p.path, tool: 'claude', permissionPreset: 'normal' })
+    expect(await h.platform.agents.reportOwed(s.id)).toBeNull()
+    events.length = 0
+    await h.platform.agents.send(s.id, 'just asking', undefined, 'ask')
+    await waitFor(() => events.some((e) => e.type === 'user_message'))
+    expect(await h.platform.agents.reportOwed(s.id)).toBeNull()
+  })
+
   it('the first message becomes the session name (FR-18)', async () => {
     const p = await aProject()
     const s = await h.platform.agents.createSession({ projectId: p.id, cwd: p.path, tool: 'claude', permissionPreset: 'normal' })

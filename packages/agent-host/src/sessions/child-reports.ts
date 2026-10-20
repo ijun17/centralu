@@ -7,7 +7,7 @@ import {
 } from '@cc/protocol'
 import { inTurn } from '../idle.js'
 import { errorKind } from './error-kind.js'
-import { PAUSED_REPORT_SETTLE_MS } from './child-ownership.js'
+import { PAUSED_REPORT_SETTLE_MS, type TurnStarter } from './child-ownership.js'
 import { type DelegationHost, taskList } from './delegation-flow.js'
 import type { ReportWork } from './linked-reports.js'
 import type { QueuedRequestsHost } from './queued-requests.js'
@@ -77,14 +77,22 @@ function swappedReportLine(): string {
   )
 }
 /**
- * What a caller is told when the person writes to a session whose report was held over its own background work (#1340):
- * the person's turns in it are theirs, so none is reported again
+ * What a caller is told when the person chose to take a session over (#1377, "Take it over"; #1340): the person's turns in
+ * it are theirs, so none is reported, and the work it was given is not followed any more
  */
 function tookOverReportLine(paused: readonly BackgroundTask[], name: Naming = STORED): string {
   return (
-    '[Centralu] The person continued in this session themselves; its later turns are theirs, and none of them will be reported to you. ' +
-    `The work you assigned had paused on its own background work (${name.tasks(paused)}), and no final report follows.\n`
+    '[Centralu] The person took this session over; its later turns are theirs, and none of them will be reported to you. ' +
+    (paused.length
+      ? `The work you assigned had paused on its own background work (${name.tasks(paused)}), and no final report follows.\n`
+      : 'The work you assigned was still running, and no report of it follows.\n')
   )
+}
+/** What a report says of the person's part in the turn it reports (#1377): Centralu's own words, never the person's */
+export function personPartLine(turn: { wrote?: true; added?: true } | undefined): string {
+  if (turn?.added) return 'The person added an instruction to this task during this turn.\n'
+  if (turn?.wrote) return 'The person wrote in this session during this turn.\n'
+  return ''
 }
 /** The first line of a paused report settled with no turn after its work ended (#721): how that work ended */
 function settledReportLine(tasks: readonly BackgroundTask[], name: Naming = STORED): string {
@@ -181,9 +189,18 @@ export class ChildReports {
     answer?: string,
     /** The paused work's tasks, ended with no turn after them (#721): the report says how they ended */
     settled?: readonly BackgroundTask[],
+    /** Whose the turn that ended was (#1377): the person's own turn is reported to nobody, and the report stays owed */
+    turn?: TurnStarter,
   ): Promise<void> {
     const orchestratorId = this.host.children.awaitingReport.get(sessionId)
     if (!orchestratorId || this.host.handingOver) return
+    if (turn?.by === 'person' && !settled) {
+      // Their turn changes nothing of the report. The paused work may have ended meanwhile, with no turn to follow: its wait starts again
+      if (this.host.children.pausedReports.has(sessionId)) this.settlePausedReport(sessionId)
+      return
+    }
+    // The report of paused work that ended with no turn after it, when the session's last turn was the person's: its last response is theirs, not the work's (#1377). Read before the report is closed
+    const theirs = !!settled && this.host.children.lastTurnBy(sessionId) === 'person'
     // Only a turn that completed is paused: a failed or stopped one is reported as it ended (#698)
     const running = ending.type === 'turn_complete' && !settled ? this.ownTasksRunning(sessionId) : []
     const paused = running.length > 0
@@ -203,7 +220,8 @@ export class ChildReports {
      */
     const { name, project } = this.reportedAs(target)
     const work = paused ? { paused: running, stoppable: target.askedBy === orchestratorId } : settled ? { settled } : undefined
-    await this.deliverReport(orchestratorId, sessionId, name, project, answer !== undefined ? clipPreview(answer, 600) : previewOf(this.host.store.messages, sessionId, 600), ending, work, this.answerSeq(sessionId))
+    const preview = theirs ? "(not read: the session's last turn was the person's; read_session shows it)" : answer !== undefined ? clipPreview(answer, 600) : previewOf(this.host.store.messages, sessionId, 600)
+    await this.deliverReport(orchestratorId, sessionId, name, project, preview, ending, work, theirs ? undefined : this.answerSeq(sessionId), turn)
   }
 
   /** Where the session's last response starts, as its preview reads it (#1186): the report names the read that shows it */
@@ -275,9 +293,9 @@ export class ChildReports {
    */
   async personTookOver(sessionId: string): Promise<void> {
     const callerId = this.host.children.awaitingReport.get(sessionId)
-    if (!callerId || !this.host.children.pausedReports.has(sessionId)) return
-    // Read before the pause is dropped: how each task stands now
-    const tasks = this.pausedTasksNow(sessionId)
+    if (!callerId) return
+    // Read before the pause is dropped: how each task stands now (none: the work was still running)
+    const tasks = this.host.children.pausedReports.has(sessionId) ? this.pausedTasksNow(sessionId) : []
     this.host.children.clearReport(sessionId)
     const target = this.host.meta.get(sessionId)
     if (!target || !this.host.meta.has(callerId)) return
@@ -313,6 +331,8 @@ export class ChildReports {
     work?: ReportWork,
     /** Where its last response starts in its conversation, when it is read here: the read the model is pointed to (#1186) */
     answerSeq?: number,
+    /** The person's part in the turn reported (#1377): they wrote into it, or added to the task */
+    part?: { wrote?: true; added?: true },
   ): Promise<void> {
     /*
      * How it ended is stated on the first line (#166) — writing a failed run as "it finished" makes
@@ -339,7 +359,7 @@ export class ChildReports {
       : ending.type === 'limit_reached' ? `[Centralu] The assigned work stopped after hitting a usage limit.\n`
       : ending.type === 'turn_complete' ? `[Centralu] The assigned work finished.\n`
       : `[Centralu] The assigned work stopped before finishing.\n`
-    const outcome = outcomeOf(STORED)
+    const outcome = outcomeOf(STORED) + personPartLine(part)
     const message = stop?.detail ?? (ending.type === 'error' ? String(ending.error?.message ?? '') : '')
     const failure = message ? `Error: ${message.slice(0, 600)}\n\n` : ''
     const resume = cutShort
@@ -370,7 +390,7 @@ export class ChildReports {
        * It used to read only "intersession message available", so a failed run, a usage limit and the way to continue
        * reached the store and the screen and never the model.
        */
-      outcomeOf(FOR_MODEL) +
+      outcomeOf(FOR_MODEL) + personPartLine(part) +
         `id: ${sessionId}\n\n` +
         (message ? `Its tool's error, by kind: ${stop?.reason === 'network' ? 'network' : errorKind(message)}. Its words are its tool's, not Centralu's, so they are not repeated here: ${read} shows them.\n\n` : '') +
         resume +
