@@ -17,19 +17,20 @@ import { groupAttention } from '../fold.js'
  * screen reader can tell apart.
  */
 export function HandedOffPointer({ parentId }: { parentId: string }) {
-  const sessions = useStore((s) => s.sessions)
+  // The index is cached per `sessions` object, so a row that handed nothing off gets the same empty answer and stays put
+  const groups = useStore((s) => handedOffBy(parentId, s.sessions))
   const machines = useStore((s) => s.machines)
   const revealSessions = useStore((s) => s.revealSessions)
-  const groups = handedOffBy(parentId, sessions)
   if (groups.length === 0) return null
   return (
     <div className={`flex flex-wrap items-center gap-x-1 pb-1 pl-[calc(var(--sidebar-gutter)-4px)]`} data-testid={`handed-off-${parentId}`}>
       {groups.map(({ machine, sessions: children }) => {
         const name = machines[machine]?.name ?? machine
         const attention = groupAttention(children)
-        const label =
-          `${children.length} ${children.length === 1 ? 'session' : 'sessions'} started on ${name}` +
-          (attention === 'alert' ? ', one needs you' : attention === 'unread' ? ', one unread' : '')
+        // The name starts with what is written on the button (WCAG 2.5.3), so "click 2 on Box" finds it
+        const status = attention === 'alert' ? ', one needs you' : attention === 'unread' ? ', one unread' : ''
+        const label = `${children.length} on ${name}${status}`
+        const hint = `Show the ${children.length === 1 ? 'session' : `${children.length} sessions`} this one started on ${name}${status}`
         // The one to scroll to: the first that needs the person, else the first
         const target = (children.find((c) => groupAttention([c]) === 'alert') ?? children[0])?.id ?? ''
         return (
@@ -39,7 +40,7 @@ export function HandedOffPointer({ parentId }: { parentId: string }) {
             size="xs"
             className="flex items-center gap-1"
             aria-label={label}
-            title={label}
+            title={hint}
             data-testid={`handed-off-${parentId}-${machine}`}
             data-attention={attention ?? undefined}
             onClick={() => {

@@ -94,7 +94,7 @@ describe('SessionListRow', () => {
         const html = render(session(), false)
         expect(html).toMatch(/data-testid="handed-off-s1-m1"[^>]*data-attention="alert"/)
         expect(html).toContain('handed-off-s1-m1-attention')
-        expect(html).toMatch(/aria-label="2 sessions started on Windows PC, one needs you"/)
+        expect(html).toMatch(/aria-label="2 on Windows PC, one needs you"/)
       }
     })
 

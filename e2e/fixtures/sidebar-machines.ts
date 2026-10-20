@@ -386,7 +386,7 @@ export function sidebarMachinesTests(): void {
       for (const state of ['error', 'waiting_approval'] as const) {
         await page.evaluate((st) => (window as unknown as MockWindow).__mock.emit({ type: 'state_change', sessionId: 'box.child-2', state: st }), state)
         await expect(page.getByTestId(`handed-off-${parent}-box-attention`)).toHaveAttribute('data-attention', 'alert')
-        await expect(pointer).toHaveAttribute('aria-label', '2 sessions started on Box, one needs you')
+        await expect(pointer).toHaveAttribute('aria-label', '2 on Box, one needs you')
       }
       await page.evaluate(() => (window as unknown as MockWindow).__mock.emit({ type: 'state_change', sessionId: 'box.child-2', state: 'working' }))
       await expect(page.getByTestId(`handed-off-${parent}-box-attention`)).toHaveCount(0)
