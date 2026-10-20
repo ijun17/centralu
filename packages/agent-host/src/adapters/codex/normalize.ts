@@ -308,10 +308,16 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
       ]
     }
 
-    case 'thread/name/updated':
+    case 'thread/name/updated': {
       // This is a name the tool made up on its own -> auto:true. A name the person set is not overwritten by this (issue #5)
-      // Read as before; `name` is not in ThreadNameUpdatedNotification (the next commit reads `threadName`)
-      return [{ type: 'session_title', sessionId, title: str(asObj(n.params).name), auto: true }]
+      /*
+       * Codex sends the name as `threadName` (generated/v2/ThreadNameUpdatedNotification.ts); this read `name`, so
+       * every automatic name arrived empty, and an automatically named session's name went blank (#1339). `name` is
+       * still read for a CLI that sends it; with neither there is nothing to say.
+       */
+      const title = str(paramsOf(n, 'thread/name/updated').threadName) || str(asObj(n.params).name)
+      return title ? [{ type: 'session_title', sessionId, title, auto: true }] : []
+    }
 
     // Deprecated (0.160.0's binding) and not sent in any measured run — kept for a CLI that still does (#303)
     case 'thread/compacted':
