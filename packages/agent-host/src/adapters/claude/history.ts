@@ -1,6 +1,6 @@
 import { launchesSubagent, type NormalizedEvent } from '@cc/protocol'
 import type { ExternalSessionSummary, HistoryMessage } from '../contract.js'
-import { finite, isObj, trimmed } from '../../json-value.js'
+import { asObj, finite, isObj, trimmed } from '../../json-value.js'
 import { HISTORY_SESSION, historyEvents, lastLines } from '../history-events.js'
 import { cleanTitle, stripInjectedBlocks } from '../history-text.js'
 import { blocksOf, type AssistantBody } from './json.js'
@@ -221,13 +221,13 @@ function userLines(message: AssistantBody, agents: ReadonlySet<string>): History
 /** The text blocks of a user message: what the person typed, before injected blocks are stripped */
 function userText(message: unknown): string {
   if (typeof message === 'string') return message.trim()
-  const content = (message as { content?: unknown } | null)?.content
+  const content = asObj(message).content
   if (typeof content === 'string') return content.trim()
   if (!Array.isArray(content)) return ''
   const parts: string[] = []
   for (const b of content) {
-    const block = b as { type?: unknown; text?: unknown }
-    if (block?.type === 'text' && typeof block.text === 'string') parts.push(block.text)
+    const block = asObj(b)
+    if (block.type === 'text' && typeof block.text === 'string') parts.push(block.text)
   }
   return parts.join('\n\n').trim()
 }
