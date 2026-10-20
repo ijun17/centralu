@@ -9,6 +9,7 @@ import { deriveHttpSecret, sameSecret, secretError, type HttpRoute } from './htt
 import { bridgeToken } from './bridge-token.js'
 import { hostProof } from './host-proof.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
+import { refuse } from '../mail/rules.js'
 
 const TOKEN = 'test-token'
 let server: HostServer | null = null
@@ -705,6 +706,22 @@ describe('RPC round trip', () => {
     expect(c.frames.find((f) => f.kind === 'res')).toMatchObject({
       ok: false,
       error: { code: 'internal', message: "ENOENT: no such file or directory, stat '/p/item.yml'" },
+    })
+    c.ws.close()
+  })
+
+  it('a refusal of mail reaches the window as `refused` with its reason, and is not worth a retry', async () => {
+    const { port } = await start(async () => {
+      throw refuse('thread_done', 'this thread is done; open a follow-up')
+    })
+    const c = connect(port)
+    await c.open()
+    c.send({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION })
+    c.send({ kind: 'rpc', id: 'r1', method: 'agents.send', params: {} })
+    await c.wait(() => c.frames.some((f) => f.kind === 'res'))
+    expect(c.frames.find((f) => f.kind === 'res')).toMatchObject({
+      ok: false,
+      error: { code: 'refused', message: 'this thread is done; open a follow-up', retryable: false, data: { reason: 'thread_done' } },
     })
     c.ws.close()
   })

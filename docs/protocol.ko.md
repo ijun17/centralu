@@ -361,7 +361,7 @@ v48은 예전 워크트리 매니저의 세션들에 `parent_session_id`를 이 
 ```ts
 type ProtocolError = {
   code: 'adapter_crashed' | 'conversation_locked' | 'tool_not_installed' | 'not_logged_in'
-      | 'session_not_found' | 'rate_limited' | 'version_mismatch' | 'internal'
+      | 'session_not_found' | 'rate_limited' | 'version_mismatch' | 'refused' | 'internal'
   message: string          // a human-readable explanation (must be displayable in the UI as is)
   retryable: boolean
   data?: unknown           // extra information per code (rate_limited → resumeAt etc.)
@@ -369,6 +369,7 @@ type ProtocolError = {
 ```
 
 - code는 닫힌 집합이다. UI는 code로 분기하고 message는 표시만 한다. 문자열 매칭 분기는 금지다.
+- **`refused`**(#1347): 호스트가 호출을 알아듣고 이름 붙일 수 있는 이유로 거절한 경우다(메일함에서 스레드가 끝났거나, 보낸 쪽이 스레드 안에 없거나, 정책이 막을 때). `retryable`은 늘 false이고, `data.reason`은 짧은 단어(`thread_done`, `not_participant`, `policy` 등)다. 장애가 아니므로 화면은 오류 보고가 아닌 거절로 보여 준다. 이 단어를 닫힌 집합에 갖지 않은 옛 창은 프레임을 검증하지 못해 같은 메시지를 단 `internal`로 호출을 끝내므로 문장은 사람에게 닿고, `data`만 잃는다.
 - 어댑터의 raw 에러(SDK 예외, 프로세스 종료 코드)는 호스트 내부에서 이 형태로 변환된다.
 
 ## 6. 링크된 기기 ([#82](https://github.com/ijun17/centralu/issues/82), [plans/remote-hub.md](plans/remote-hub.md))

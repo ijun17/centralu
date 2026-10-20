@@ -35,11 +35,11 @@ const REFUSALS = [
 export type MailRefusal = (typeof REFUSALS)[number]
 
 /**
- * A refusal is an error with a `data.reason` word. The protocol has no code for "your request was not allowed" and a new
- * code is a protocol change of its own, so the code is `internal` and the door sends the message and the reason as data
+ * A refusal is an error with the protocol's `refused` code and a `data.reason` word the caller can act on: the host understood
+ * the call and said no, which is not a fault and not worth a retry
  */
 export function refuse(reason: MailRefusal, message: string, more: Record<string, unknown> = {}): RpcError {
-  return rpcError(message, 'internal', { data: { reason, ...more } })
+  return rpcError(message, 'refused', { retryable: false, data: { reason, ...more } })
 }
 
 /** The words of a refusal: `err.data.reason`, or undefined for an error that is not one */

@@ -400,15 +400,16 @@ or before still writes the cross-project meaning; a newer host clears those rows
 ```ts
 type ProtocolError = {
   code: 'adapter_crashed' | 'conversation_locked' | 'tool_not_installed' | 'not_logged_in'
-      | 'session_not_found' | 'rate_limited' | 'version_mismatch' | 'internal'
+      | 'session_not_found' | 'rate_limited' | 'version_mismatch' | 'refused' | 'internal'
   message: string          // a human-readable explanation (must be displayable in the UI as is)
   retryable: boolean
-  data?: unknown           // extra information per code (rate_limited → resumeAt etc.)
+  data?: unknown           // extra information per code (rate_limited → resumeAt, refused → reason etc.)
 }
 ```
 
 - code is a closed set. The UI branches on code and only displays message. Branching on string matching is forbidden.
 - A call the hub could not pass to a linked machine because its link is down (§6) is `internal`, `retryable: true`, with `data: { machine, reason: 'unreachable' }`. A failure the remote host answered keeps its own code, `retryable` and `data`.
+- **`refused`** (#1347): the host understood a call and said no for a reason it can name, as the mailbox does when a thread is done, a sender is not in it, or the policy does not let it write. Never `retryable`; `data.reason` is a short word (`thread_done`, `not_participant`, `not_allowed`, `field_not_allowed`, `policy`, ...) and `message` is the sentence. It is not a fault, so a screen shows it as a refusal and not as an error to report. An older window, which does not have the word in its closed set, cannot validate the frame and ends the call as `internal` with the same message (the net in `rpc-client.ts`), so the sentence still reaches the person; it loses `data`.
 - An adapter's raw errors (SDK exceptions, process exit codes) are converted into this shape inside the host.
 
 ## 6. Linked machines ([#82](https://github.com/ijun17/centralu/issues/82), [plans/remote-hub.md](plans/remote-hub.md))
