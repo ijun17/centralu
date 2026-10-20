@@ -455,7 +455,8 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
               throw e
             })
           : await rpc.call('apps.openView', { ...params, ...(openKey ? { openKey } : {}) })
-        return v
+        // Checked as `callTool`'s and `reopenInlineView`'s results are: a result the screen cannot read is a failed one, not a crash there
+        return isAppToolResult(v.toolResult) ? v : { ...v, toolResult: viewToolResult({ text: 'The app answered with a result this window cannot read', result: v.toolResult }) }
       },
       closeView: async (instanceId) => {
         await rpc.call('apps.closeView', { instanceId })
