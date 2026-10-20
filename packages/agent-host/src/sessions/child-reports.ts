@@ -76,6 +76,16 @@ function swappedReportLine(): string {
     'It is most likely the end of the work you gave it; check its last response before relying on it.\n'
   )
 }
+/**
+ * What a caller is told when the person writes to a session whose report was held over its own background work (#1340):
+ * the person's turns in it are theirs, so none is reported again
+ */
+function tookOverReportLine(paused: readonly BackgroundTask[], name: Naming = STORED): string {
+  return (
+    '[Centralu] The person continued in this session themselves; its later turns are theirs, and none of them will be reported to you. ' +
+    `The work you assigned had paused on its own background work (${name.tasks(paused)}), and no final report follows.\n`
+  )
+}
 /** The first line of a paused report settled with no turn after its work ended (#721): how that work ended */
 function settledReportLine(tasks: readonly BackgroundTask[], name: Naming = STORED): string {
   const clean = tasks.every((t) => t.status === 'completed')
@@ -252,6 +262,38 @@ export class ChildReports {
     if (!m || !this.host.meta.has(callerId) || this.host.handingOver) return
     const { name, project } = this.reportedAs(m)
     await this.deliverReport(callerId, sessionId, name, project, previewOf(this.host.store.messages, sessionId, 600), { type: 'turn_complete' }, { swapped: true }, this.answerSeq(sessionId))
+  }
+
+  /**
+   * The person wrote to a session whose report is held over its own background work (#1340): the work the caller gave
+   * ended with the turn that paused, and what the session does from here is the person's. Nothing clears that pause
+   * but the end of the background work, which a watcher or a dev server never reaches, so every later turn end of
+   * the session, whoever started it, was reported as the assigned work ("The assigned work failed" for a person's
+   * failed `/compact`). The mark and the pause end here, stored as well, so a host swap keeps them ended; the caller is
+   * told once. A report not paused is a turn of the caller's still running, which the person's message joins: it
+   * stays owed. A message from the caller itself, another session or an app never comes here (`SessionManager.send`).
+   */
+  async personTookOver(sessionId: string): Promise<void> {
+    const callerId = this.host.children.awaitingReport.get(sessionId)
+    if (!callerId || !this.host.children.pausedReports.has(sessionId)) return
+    // Read before the pause is dropped: how each task stands now
+    const tasks = this.pausedTasksNow(sessionId)
+    this.host.children.clearReport(sessionId)
+    const target = this.host.meta.get(sessionId)
+    if (!target || !this.host.meta.has(callerId)) return
+    const { name, project } = this.reportedAs(target)
+    const read = `read_session(sessionId="${sessionId}")`
+    await this.tellSession(
+      callerId,
+      tookOverReportLine(tasks) +
+        `Session: ${frameField(name)}\n` +
+        `id: ${sessionId}\n` +
+        `Project: ${frameField(project)}\n\n` +
+        `If you need more, you can read that session's recent conversation with read_session.`,
+      { sessionId, name },
+      true,
+      tookOverReportLine(tasks, FOR_MODEL) + `id: ${sessionId}\n\n${read} shows what the person and the session did since.`,
+    )
   }
 
   /** Reports the end of a turn the orchestrator asked to hear about, as one message in its session (#166) */
