@@ -13,11 +13,14 @@ export function RowMenu({
   testId,
   onClose,
   children,
+  className = 'w-48',
 }: {
   anchorEl: HTMLElement | null
   testId: string
   onClose: () => void
   children: ReactNode
+  /** The menu's width: a row menu's by default, wider for one that reads out a state (the machine badge's) */
+  className?: string
 }) {
   const ref = useRef<HTMLDivElement>(null)
 
@@ -58,7 +61,7 @@ export function RowMenu({
       ref={ref}
       role="menu"
       data-testid={testId}
-      className="fixed z-30 w-48 overflow-y-auto rounded-lg border border-line bg-surface-raised p-1 shadow-(--shadow-popover)"
+      className={`fixed z-30 ${className} overflow-y-auto rounded-lg border border-line bg-surface-raised p-1 shadow-(--shadow-popover)`}
       style={{
         top: place?.top ?? 0,
         left: place?.left ?? 0,

@@ -1,5 +1,5 @@
 import { useStore } from '../../../store/store.js'
-import { MachineStatusMark } from '../../machines/MachineTag.jsx'
+import { MachineStatusMark } from '../../machines/MachineStatusMark.jsx'
 import { RowMenu } from './RowMenu.jsx'
 import { ActionRow } from './ActionRow.jsx'
 
