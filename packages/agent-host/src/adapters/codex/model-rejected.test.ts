@@ -39,6 +39,9 @@ describe('modelRejection', () => {
     const plain = "The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account."
     expect(modelRejection(plain, 'badRequest')?.model).toBe('gpt-5.5')
     expect(modelRejection(plain, null)).toBeNull()
+    // The catch-all names nothing: it reads as no kind, the provider's 400 must still be there
+    expect(modelRejection(plain, 'other')).toBeNull()
+    expect(modelRejection(bad(plain), 'other')?.model).toBe('gpt-5.5')
     for (const kind of ['usageLimitExceeded', 'contextWindowExceeded', 'unauthorized', { httpConnectionFailed: { httpStatusCode: 400 } }]) {
       expect(modelRejection(bad(plain), kind)).toBeNull()
       expect(turnError(bad(plain), kind)).toMatchObject({ retryable: true })

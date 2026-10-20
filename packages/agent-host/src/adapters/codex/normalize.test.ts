@@ -334,6 +334,23 @@ describe('state and gauges', () => {
    * more than turn_complete, same as a successful one — the screen was left with an empty answer,
    * and the state stayed at "waiting for the person". The fixture is the shape of the real incident (#107).
    */
+  it("a failed turn/completed whose Codex kind is badRequest is a refused model even when the body is not in the message (#1369)", () => {
+    const failed = (codexErrorInfo: unknown) =>
+      n('turn/completed', {
+        threadId: 't1',
+        turn: {
+          id: 'turn-7',
+          items: [],
+          status: 'failed',
+          error: { message: "The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account.", codexErrorInfo, additionalDetails: null, misalignment: null },
+        },
+      })
+    expect(failed('badRequest')).toMatchObject([{ type: 'error', error: { retryable: false, data: { reason: 'model_rejected', model: 'gpt-5.5' } } }])
+    // Another kind is never a refusal; the catch-all says nothing, so the sentence alone cannot make it one without the provider's 400
+    expect(failed('usageLimitExceeded')).toMatchObject([{ type: 'error', error: { retryable: true } }])
+    expect(failed(null)).toMatchObject([{ type: 'error', error: { retryable: true } }])
+  })
+
   it('a failed turn/completed → error (does not emit turn_complete)', () => {
     const out = n('turn/completed', {
       threadId: 't1',

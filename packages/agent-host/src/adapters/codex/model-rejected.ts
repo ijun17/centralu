@@ -23,7 +23,8 @@ export function modelRejection(message: string, errorInfo?: unknown): { model: s
    * whatever the sentence says, and "badRequest" is the 400 the provider's body would otherwise have to prove.
    */
   const kind = typeof errorInfo === 'string' ? errorInfo : errorInfo !== null && typeof errorInfo === 'object' ? Object.keys(errorInfo)[0] : undefined
-  if (kind !== undefined && kind !== 'badRequest') return null
+  // "other" is the catch-all: it says nothing, so the sentence decides as it does with no kind
+  if (kind !== undefined && kind !== 'badRequest' && kind !== 'other') return null
   const body = jsonBody(message)
   const error = asObj(body.error)
   // Codex may name the kind of error on a line of its own after the sentence (turn.error.additionalDetails)

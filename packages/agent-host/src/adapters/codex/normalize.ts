@@ -251,7 +251,7 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
       if (str(turn.status) === 'interrupted' && !failure.message) return [{ type: 'state_change', sessionId, state: 'waiting_input', reason: 'interrupted' }]
       if (str(turn.status) !== 'failed' && !failure.message) return [{ type: 'turn_complete', sessionId }]
       const detail = str(failure.additionalDetails)
-      return [{ type: 'error', sessionId, error: turnError([str(failure.message) || 'The turn failed', detail].filter(Boolean).join('\n')) }]
+      return [{ type: 'error', sessionId, error: turnError([str(failure.message) || 'The turn failed', detail].filter(Boolean).join('\n'), failure.codexErrorInfo) }]
     }
 
     case 'turn/started':
