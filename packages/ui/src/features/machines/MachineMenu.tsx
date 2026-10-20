@@ -17,6 +17,8 @@ export function MachineMenu({ machine, anchorEl, onClose }: { machine: string; a
   const connected = status === 'connected'
   // An attempt under way: Connect would only start the same one again
   const action = connectAction(status)
+  // An install, update or rollback is under way there: Settings → Machines hides Connect and Disconnect then, and so does this menu
+  const busy = !!info?.operation
   const trying = status === 'connecting' || status === 'starting' || status === 'updating'
   const pick = (fn: () => void) => () => {
     fn()
@@ -49,13 +51,13 @@ export function MachineMenu({ machine, anchorEl, onClose }: { machine: string; a
       </div>
       <div className="border-t border-line pt-1">
         {connected ? (
-          <ActionRow label="Disconnect" onClick={pick(() => void useStore.getState().disconnectMachine(machine))} testId={`machine-menu-disconnect-${machine}`} />
+          <ActionRow label="Disconnect" disabled={busy} title={busy ? 'Wait for the change under way there to finish' : undefined} onClick={pick(() => void useStore.getState().disconnectMachine(machine))} testId={`machine-menu-disconnect-${machine}`} />
         ) : (
           <ActionRow
             label={trying ? 'Connecting…' : action.label}
-            title={trying ? undefined : action.title}
+            title={busy ? 'Wait for the change under way there to finish' : trying ? undefined : action.title}
             onClick={pick(() => void useStore.getState().reconnectMachine(machine))}
-            disabled={trying}
+            disabled={trying || busy}
             testId={`machine-menu-connect-${machine}`}
           />
         )}
