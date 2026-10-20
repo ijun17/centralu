@@ -483,12 +483,13 @@ export class SessionStarts {
   }
 
   /**
-   * `autoCompactTokens` for a session's launch (#1376): Centralu's setting at this moment over the model's window. Said to
-   * `ModelWindows`, so a reading this process gives back under the setting is not taken for the model's window.
+   * `autoCompactTokens` for a session's launch (#1376): Centralu's setting at this moment over the model's window. For a tool
+   * whose window reading follows the point it was started with, said to `ModelWindows`, so that reading is not taken for the
+   * model's window; another tool's readings always count.
    */
   private autoCompactFor(m: SessionInfo): Pick<CreateSessionOpts, 'autoCompactTokens'> {
     const tokens = autoCompactTokens(autoCompactOf(this.host.uiPreferences()), this.host.modelWindows.of(m))
-    this.host.modelWindows.started(m.id, tokens)
+    this.host.modelWindows.started(m.id, this.host.adapters.get(m.tool)?.windowFollowsCompactPoint ? tokens : null)
     return tokens === null ? {} : { autoCompactTokens: tokens }
   }
 

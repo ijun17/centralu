@@ -1463,7 +1463,8 @@ the params with the method's schema and reads the answer with its result schema,
   and model (a default model per project) in the app settings, so a model switch brings its own and a restart of the host loses
   nothing. Claude's CLI reports the smaller of the model's window and the `autoCompactWindow` it was started with, so a reading
   from a process started with the setting only counts when it is larger than what is known; otherwise each restart would shrink the
-  window. A model nobody has read a window from passes nothing at its first start and the value from the next (Settings says so).
+  window. That rule is for a tool that says so (`AgentAdapter.windowFollowsCompactPoint`, Claude's); Codex reports the model's own window,
+  so its readings always replace the known one (a default model that changed to a smaller window is learnt). A model nobody has read a window from passes nothing at its first start and the value from the next (Settings, and the session's own settings menu, say so).
   A change reaches a session when its process next starts; running sessions are not restarted and are not marked as drifted. The
   patch merges field by field like the notification switches; `set_preferences { autoCompact: { controlled?, share? } }` (no card:
   reversible, and only about when an agent compacts) and `get_preferences` carry it; Settings, agents section, offers the switch

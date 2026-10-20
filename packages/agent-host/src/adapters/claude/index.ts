@@ -217,6 +217,8 @@ export class ClaudeAdapter implements AgentAdapter {
     for (const q of ClaudeAdapter.liveQueries) last = q
     return last
   }
+  /** The CLI reports min(model window, `autoCompactWindow`) (read in CLI 2.1.263+; #1376) */
+  readonly windowFollowsCompactPoint = true
   readonly capabilities: AdapterCapabilities = {
     approvals: true, // M0 validation: the global bypass can be overridden per session.
     contextUsage: 'exact',

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useDismiss } from '../../components/useDismiss.js'
 import { ChevronIcon } from '../../components/icons.jsx'
-import type { ModelOption, PermissionPreset, ToolName } from '@cc/protocol'
+import { autoCompactOf, type ModelOption, type PermissionPreset, type ToolName } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useLoad } from '../../app/useLoad.js'
 import { useStore } from '../../store/store.js'
@@ -204,6 +204,9 @@ export function SessionSettings({
   onOpenChange?: (open: boolean) => void
 }) {
   const update = useStore((s) => s.updateSessionSettings)
+  // Where this agent compacts by itself is Centralu's setting (#1376); what a session with no window reading yet gets is said below
+  const compact = useStore((s) => autoCompactOf(s.prefs))
+  const windowKnown = useStore((s) => !!s.sessions[sessionId]?.context?.window)
   // A session on a linked machine runs that machine's CLI (#82): its models and knobs are asked there
   const machine = useStore((s) => s.sessions[sessionId]?.machine ?? null)
   const { models, reason } = useModels(tool, live, machine)
@@ -412,6 +415,16 @@ export function SessionSettings({
                   onPick={() => choose({ serviceTier: t.id })}
                 />
               ))}
+            </MenuSection>
+          )}
+
+          {compact.controlled && (
+            <MenuSection label="Auto compact">
+              <p data-testid="settings-auto-compact-note" className="px-2 pb-1 text-2xs leading-body text-ink-faint">
+                {windowKnown
+                  ? `Compacts at ${Math.round(compact.share * 100)}% of the model's window, set in Settings. A change reaches this session when it next starts.`
+                  : "Centralu has not read this model's window yet, so the agent's own setting decides until the session next starts after its first turn."}
+              </p>
             </MenuSection>
           )}
 

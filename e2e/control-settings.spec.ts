@@ -419,6 +419,19 @@ test('Settings: turning off a notification policy is persisted (E-5)', async ({ 
  * Now the list comes straight from the tool's official API, and effort levels arrive attached to
  * each model.
  */
+// #1376: a session whose model's window Centralu has not read says that the agent's own setting decides for now
+test("The session's settings say when Centralu has not read the model's window to set where the agent compacts, and say nothing when its control is off", async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'task')
+  await page.getByTestId('settings-open').click()
+  const note = page.getByTestId('settings-auto-compact-note')
+  await expect(note).toContainText("has not read this model's window yet")
+
+  // Turned off in Settings: Centralu says nothing about it here
+  await page.evaluate(() => (window as any).__store.getState().setPrefs({ autoCompact: { controlled: false } }))
+  await expect(note).toHaveCount(0)
+})
+
 test('The model list comes from what the tool reports, and effort only appears for models that support it', async ({
   page,
 }) => {

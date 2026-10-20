@@ -108,6 +108,32 @@ describe('what a session is launched with', () => {
     expect(world.codexAdapter.lastOpts?.autoCompactTokens).toBe(155_040)
   })
 
+  it("a Codex session reports the model's own window: a smaller one replaces the known window, and the next start passes the share of it", async () => {
+    const s = await create()
+    handle(s.id).emitContext(10_000, 1_000_000)
+    expect(await world.mgr.sleepSession(s.id)).toBe(true)
+    await world.mgr.resumeSession(s.id)
+    expect(world.codexAdapter.lastOpts?.autoCompactTokens).toBe(600_000)
+
+    // Started with the setting, the thread reports its real, smaller window (the default model changed, the provider shrank it)
+    handle(s.id).emitContext(10_000, 272_000)
+    expect(await world.mgr.sleepSession(s.id)).toBe(true)
+    await world.mgr.resumeSession(s.id)
+    expect(world.codexAdapter.lastOpts?.autoCompactTokens).toBe(163_200)
+  })
+
+  it("a tool whose window follows the compaction point (Claude's) never has its known window lowered by a process started with the setting", async () => {
+    Object.assign(world.codexAdapter, { windowFollowsCompactPoint: true })
+    const s = await create()
+    handle(s.id).emitContext(10_000, 1_000_000)
+    expect(await world.mgr.sleepSession(s.id)).toBe(true)
+    await world.mgr.resumeSession(s.id)
+    handle(s.id).emitContext(10_000, 613_000)
+    expect(await world.mgr.sleepSession(s.id)).toBe(true)
+    await world.mgr.resumeSession(s.id)
+    expect(world.codexAdapter.lastOpts?.autoCompactTokens).toBe(600_000)
+  })
+
   it('a new session of a model another session has read the window of gets the value at once', async () => {
     const first = await create()
     handle(first.id).emitContext(10_000, 258_400)
