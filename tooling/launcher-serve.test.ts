@@ -209,8 +209,11 @@ describe('the data folder and the state file', () => {
     expect(readFileSync(join(d, SERVE_STATE_FILE), 'utf8')).not.toContain(legacy)
     // The key is new: a hello with the old token is not what derives the limited credential
     expect(moved.key).not.toBe(legacy)
+    // The window's credential leaves it: whoever held it was a hub, which pairs next
+    pairServe(d, 'window')
+    expect(readServeState(d).full.map((e: { label: string; id: string; verifier: string }) => e.label)).toEqual(['legacy', 'window'])
     pairServe(d, 'hub:mac')
-    expect(readServeState(d).full.map((e: { label: string; id: string; verifier: string }) => e.label)).toEqual(['hub:mac'])
+    expect(readServeState(d).full.map((e: { label: string; id: string; verifier: string }) => e.label)).toEqual(['window', 'hub:mac'])
   })
 
   it('replaces the key and withdraws every full credential only when asked, keeping the port', () => {

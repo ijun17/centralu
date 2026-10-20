@@ -18,16 +18,20 @@ const entry = (id: string, token: string) => ({ id, label: id, verifier: verifie
 describe('reading the full credentials', () => {
   it('reads each entry of a version 2 file, and none of anything else', () => {
     const file = JSON.stringify({ v: 2, key: KEY, port: 1, full: [entry('aaaaaaaa', HUB), { id: 'bad', verifier: 'not hex' }, entry('bbbbbbbb', WINDOW)] })
-    expect(readFullCredentials('x', () => file).map((c) => c.id)).toEqual(['aaaaaaaa', 'bbbbbbbb'])
-    expect(readFullCredentials('x', () => JSON.stringify({ v: 1, token: HUB }))).toEqual([])
-    expect(readFullCredentials('x', () => 'half')).toEqual([])
+    expect(readFullCredentials('v2', () => file).map((c) => c.id)).toEqual(['aaaaaaaa', 'bbbbbbbb'])
+    expect(readFullCredentials('v1', () => JSON.stringify({ v: 1, token: HUB }))).toEqual([])
+    expect(readFullCredentials('half', () => 'half', () => {})).toEqual([])
   })
 
   it('reads again when the file is caught mid-replace, and names none when it stays unreadable', () => {
     let reads = 0
     const flaky = () => (++reads < 3 ? '' : JSON.stringify({ v: 2, key: KEY, full: [entry('aaaaaaaa', HUB)] }))
-    expect(readFullCredentials('x', flaky)).toHaveLength(1)
-    expect(readFullCredentials('x', () => { throw new Error('EBUSY') })).toEqual([])
+    expect(readFullCredentials('flaky', flaky, () => {})).toHaveLength(1)
+    expect(readFullCredentials('never-read', () => { throw new Error('EBUSY') }, () => {})).toEqual([])
+    // Held past the retries (a scanner on Windows): what it said last, not no one
+    const good = JSON.stringify({ v: 2, key: KEY, full: [entry('aaaaaaaa', HUB)] })
+    expect(readFullCredentials('held', () => good, () => {})).toHaveLength(1)
+    expect(readFullCredentials('held', () => { throw new Error('EBUSY') }, () => {}).map((c) => c.id)).toEqual(['aaaaaaaa'])
   })
 
   it('takes a credential whose hash is one of them, and nothing else', () => {

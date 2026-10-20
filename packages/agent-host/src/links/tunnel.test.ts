@@ -5,6 +5,8 @@ import { createServer, type Server } from 'node:net'
 import { tmpdir } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
 import {
+  pairLabel,
+  hubKeyOf,
   autostartCommand,
   connectionCommand,
   detachCommand,
@@ -94,6 +96,9 @@ const has = (process.env.FAKE_SSH_HAS || '').split('|')
 const line = (over) => JSON.stringify({ ...JSON.parse(process.env.FAKE_SSH_LINE), hostRunning: running(), ...over })
 const answer = () => {
   // A serve from before #1405 refuses --pair, as it refuses any option it does not know
+  // A remote updated meanwhile: refuses --pair only while this file exists, and prints no token without --pair
+  if (process.env.FAKE_SSH_NO_PAIR_FILE && / --pair /.test(cmd) && fs.existsSync(process.env.FAKE_SSH_NO_PAIR_FILE)) { process.stderr.write('unknown option for serve: --pair' + String.fromCharCode(10)); process.exit(2) }
+  if (process.env.FAKE_SSH_NO_PAIR_FILE && !/ --pair /.test(cmd) && !fs.existsSync(process.env.FAKE_SSH_NO_PAIR_FILE)) return process.stdout.write(line({ token: undefined, takes: ['from', 'window', 'pair'] }) + String.fromCharCode(10))
   if (process.env.FAKE_SSH_NO_PAIR && / --pair /.test(cmd)) { process.stderr.write('unknown option for serve: --pair' + String.fromCharCode(10)); process.exit(2) }
   // What centralu serve --detach answers, per FAKE_SSH_DETACH; anything else is --connection
   if (/ serve --detach/.test(cmd)) {
@@ -471,6 +476,26 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
     await expect(t.open()).resolves.toMatchObject({ token: 'tok' })
     const after = (logged() as { run?: string }[]).filter((x) => x.run).map((x) => x.run!)
     expect(after.slice(2).map((r) => / --pair hub:/.test(r))).toEqual([false])
+  })
+
+  it('asks with --pair again once a remote that refused it was updated, rather than linking with no credential (#1405 review)', async () => {
+    const flag = join(dir, `no-pair-${Date.now()}`)
+    writeFileSync(flag, '')
+    const t = tunnel({ FAKE_SSH_NO_PAIR_FILE: flag })
+    await expect(t.open()).resolves.toMatchObject({ token: 'tok' })
+    await t.close()
+    // Updated there: it takes --pair now, and prints no token without it
+    rmSync(flag, { force: true })
+    await expect(t.open()).resolves.toMatchObject({ token: 'tok' })
+    const runs = (logged() as { run?: string }[]).filter((x) => x.run).map((x) => / --pair hub:/.test(x.run!))
+    expect(runs).toEqual([true, false, false, true])
+  })
+
+  it('pairs under a label of its own: its name, and a key that tells it from a hub of the same name', () => {
+    expect(pairLabel('Mac-mini', hubKeyOf('/Users/me/.centralu'))).toMatch(/^hub:Mac-mini-[0-9a-f]{8}$/)
+    expect(pairLabel('Mac-mini', hubKeyOf('/Users/me/.centralu-dev'))).not.toBe(pairLabel('Mac-mini', hubKeyOf('/Users/me/.centralu')))
+    // Never past what --pair takes (80 characters)
+    expect(pairLabel('x'.repeat(64), hubKeyOf('/d')).length).toBeLessThanOrEqual(80)
   })
 
   it('runs the person’s own command in place of centralu, with no fallback', async () => {

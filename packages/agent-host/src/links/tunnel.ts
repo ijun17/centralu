@@ -1,4 +1,5 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { asObj } from '../json-value.js'
 import { createConnection, createServer } from 'node:net'
 import { win32 } from 'node:path'
@@ -532,12 +533,18 @@ export function connectionCommand(spec: RemoteSpec, pair: string | null = null):
   return remoteCommand(spec, pair ? `serve --connection --pair ${pair}` : 'serve --connection')
 }
 
+/** A hub's key for its pair label (#1405, `SshTunnelOptions.hubKey`): 8 hex characters of its data folder's SHA-256 */
+export function hubKeyOf(dataDir: string): string {
+  return createHash('sha256').update(dataDir).digest('hex').slice(0, 8)
+}
+
 /**
  * The label a hub pairs as (#1405): `hub:` and this computer's name, cleaned as `--from` is (`hubNameForRemote`). A
  * hub pairs again at each link and so replaces its own credential there; the machine's other ones keep their labels.
  */
-export function pairLabel(name: string): string {
-  return `hub:${hubNameForRemote(name) ?? 'hub'}`
+export function pairLabel(name: string, hubKey?: string): string {
+  const key = hubKey && /^[0-9a-f]{1,16}$/.test(hubKey) ? `-${hubKey}` : ''
+  return `hub:${(hubNameForRemote(name) ?? 'hub').slice(0, 56)}${key}`
 }
 
 /**
@@ -667,6 +674,12 @@ export type SshTunnelOptions = {
   stdinAckMs?: number
   /** This computer's name, for `serve --detach --from` (#1223); the OS's host name when absent */
   hubName?: string
+  /**
+   * What tells this hub from another of the same name (#1405): its data folder, hashed (`hubKeyOf`). It ends the label
+   * the hub pairs as, so two hubs on computers of one name (or a packaged app and a development host on one computer)
+   * do not replace each other's credential at each link
+   */
+  hubKey?: string
   log?: (line: string) => void
 }
 
@@ -915,11 +928,19 @@ export class SshTunnel implements Tunnel {
      * A full credential of this hub's own, made there at each link (#1405): `--connection` alone prints none since. A
      * remote from before it answers `--pair` with "unknown option", and is asked again as before, printing its token
      */
-    const pair = this.pairs ? pairLabel(this.opts.hubName ?? hostname()) : null
+    const pair = this.pairs ? pairLabel(this.opts.hubName ?? hostname(), this.opts.hubKey) : null
     let r = await this.run([...base, connectionCommand(remote, pair)], undefined, this.opts.commandTimeoutMs ?? SSH_COMMAND_TIMEOUT_MS)
     if (pair && r.code !== 0 && r.code !== 255 && /unknown option for serve: --pair/.test(r.stderr + r.stdout)) {
       this.pairs = false
       r = await this.run([...base, connectionCommand(remote)], undefined, this.opts.commandTimeoutMs ?? SSH_COMMAND_TIMEOUT_MS)
+    }
+    /*
+     * A remote updated since it refused `--pair` says it takes it now, and prints no token without it: asked again with
+     * it, once, rather than linking with no credential until this hub restarts (#1405 review)
+     */
+    if (!this.pairs && r.code === 0 && /"takes":\[[^\]]*"pair"/.test(r.stdout) && !/"token":/.test(r.stdout)) {
+      this.pairs = true
+      return this.connectionLine()
     }
     if (r.code === 255) throw new Error(`ssh could not reach ${this.opts.target}: ${lastLine(r.stderr) || 'no answer'}`)
     if (r.stdout.includes(NOT_FOUND) || (r.code === 127 && !remote.command)) throw notInstalled(this.where, remote)

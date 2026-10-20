@@ -18,7 +18,7 @@ export const SERVE_HELP = `centralu serve: run the Centralu host on this machine
                                   app on another computer runs at each link
   centralu serve --revoke <id>    Withdraw one full credential (--connection lists their ids)
   centralu serve --rotate-token   A new key, and every full credential withdrawn (a running serve
-                                  hands out what its old key derives until restarted)
+                                  keeps its old key until restarted)
   centralu serve --from <hub>     With serve or --detach: the name of the computer whose link asks,
                                   said by a second Centralu on this data folder when it is refused
   centralu serve --autostart on|off|remove|status

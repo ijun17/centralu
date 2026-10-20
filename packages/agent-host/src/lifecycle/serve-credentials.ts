@@ -31,8 +31,9 @@ export function verifierOf(credential: string): string {
  * tried again a few times; one that stays unreadable, or is not version 2, names none: a hello is then refused rather
  * than let in on a guess.
  */
-export function readFullCredentials(path: string, read: (p: string) => string = (p) => readFileSync(p, 'utf8')): FullCredential[] {
-  for (let i = 0; i < 3; i++) {
+export function readFullCredentials(path: string, read: (p: string) => string = (p) => readFileSync(p, 'utf8'), pause: (ms: number) => void = sleepSync): FullCredential[] {
+  for (let i = 0; i < 5; i++) {
+    if (i > 0) pause(10 * i)
     let parsed: unknown
     try {
       parsed = JSON.parse(read(path))
@@ -41,12 +42,23 @@ export function readFullCredentials(path: string, read: (p: string) => string = 
     }
     const o = asObj(parsed)
     if (o.v !== 2 || !Array.isArray(o.full)) return []
-    return o.full.flatMap((e: unknown) => {
+    const full = o.full.flatMap((e: unknown) => {
       const f = asObj(e)
       return typeof f.id === 'string' && typeof f.verifier === 'string' && /^[0-9a-f]{64}$/.test(f.verifier) ? [{ id: f.id, verifier: f.verifier }] : []
     })
+    lastRead.set(path, full)
+    return full
   }
-  return []
+  // Held past the retries (a scanner on Windows): what it said last, rather than refusing every hub until it lets go
+  return lastRead.get(path) ?? []
+}
+
+/** The last list read from each file, for a read that stays refused (`readFullCredentials`) */
+const lastRead = new Map<string, FullCredential[]>()
+
+/** Waits `ms` on this thread: the reads are a few milliseconds apart, at a hello, and the host has no other wait here */
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
 }
 
 /** Whether `given` is one of `full`, compared in constant time against each */
