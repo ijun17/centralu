@@ -244,19 +244,24 @@ export type EventSink = (event: NormalizedEvent) => void
 export type InputObserver = { complete(): void; fail(error: Error): void }
 
 /**
- * Who wrote an input, when the host can say so. Only the person's own typing is stamped (`human`): a report, an app's
- * notice, another session's delivery and Centralu's own words carry none. Claude passes it to the CLI as the user
+ * Who wrote an input, when the host can say so. The person's own typing is stamped `human`; the mailbox's delivery is stamped
+ * `channel` from `centralu` (docs/plans/mailbox.md §7.1: it carries nothing to the model, but is the record and what a later CLI
+ * may honour). A report, an app's notice and Centralu's other words carry none. Claude passes it to the CLI as the user
  * message's `origin`, where an absent one is "unattributed" and fails closed at its strict `isHuman()` gates.
  */
-export type InputOrigin = { kind: 'human' }
+export type InputOrigin = { kind: 'human' } | { kind: 'channel'; server: 'centralu' }
 
 export interface SessionHandle {
   readonly sessionId: string
   readonly externalId: string | null
   /** Limits the parent should know before delegating more work; decided by the adapter's effective settings. */
   delegationNotice?(): string | undefined
-  /** `id`: a name the host gives the input, which `turnInputs` then reports back (a UUID) */
-  send(text: string, opts?: { origin?: InputOrigin; id?: string }): void
+  /**
+   * `id`: a name the host gives the input, which `turnInputs` then reports back (a UUID). `quiet`: appended to the conversation without
+   * starting a turn, and read with the next message that does (Claude's `shouldQuery: false`). Only an adapter with `quietInput` takes
+   * it; the mailbox's mail that must not wake goes this way
+   */
+  send(text: string, opts?: { origin?: InputOrigin; id?: string; quiet?: boolean }): void
   /**
    * Which of the inputs given an `id` the turn that just ended took in (#1377), read while the event that ends it is
    * handled. Absent: the tool takes every message into the turn it is running (Codex steers an active turn). Present:
@@ -340,6 +345,8 @@ export interface SessionHandle {
 
 export interface AgentAdapter {
   readonly tool: ToolName
+  /** Whether a live session takes a `quiet` input (see `SessionHandle.send`): the mailbox sends mail that must not wake only to such a tool */
+  readonly quietInput?: boolean
   readonly capabilities: AdapterCapabilities
   /**
    * For a tool whose reported context window is the smaller of the model's and the compaction point it was started with

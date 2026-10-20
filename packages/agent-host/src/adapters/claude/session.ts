@@ -228,8 +228,9 @@ export class ClaudeSession implements SessionHandle {
     while (!this.closed) {
       const next = this.queue.shift()
       if (next !== undefined) {
-        this.raceRetry.read(next)
-        if (!next.parentNote) this.personInputs.add(next.uuid)
+        if (!next.quiet) this.raceRetry.read(next)
+        // A quiet input starts no turn and has no result to settle it, so nothing waits for it
+        if (!next.parentNote && !next.quiet) this.personInputs.add(next.uuid)
         yield {
           type: 'user' as const,
           parent_tool_use_id: null,
@@ -238,6 +239,7 @@ export class ClaudeSession implements SessionHandle {
           message: { role: 'user' as const, content: [{ type: 'text' as const, text: next.text }] },
           // The person's own typing says so; everything else is left unattributed, as before (see `InputOrigin`)
           ...(next.origin ? { origin: next.origin } : {}),
+          ...(next.quiet ? { shouldQuery: false } : {}),
         }
         continue
       }
@@ -450,7 +452,9 @@ export class ClaudeSession implements SessionHandle {
     this.notify?.()
   }
 
-  send(text: string, opts?: { origin?: InputOrigin; id?: string }): void { this.sendInput(text, opts?.id !== undefined && isUuid(opts.id) ? opts.id : randomUUID(), undefined, opts?.origin) }
+  send(text: string, opts?: { origin?: InputOrigin; id?: string; quiet?: boolean }): void {
+    this.sendInput(text, opts?.id !== undefined && isUuid(opts.id) ? opts.id : randomUUID(), undefined, opts?.origin, opts?.quiet)
+  }
 
   /** The inputs the result being handled names (#1377); null when the CLI cannot name them, and outside a result */
   private resultInputs: readonly string[] | null = null
@@ -458,7 +462,7 @@ export class ClaudeSession implements SessionHandle {
     return this.resultInputs
   }
 
-  private sendInput(text: string, uuid = randomUUID(), note?: InputReceipt, origin?: InputOrigin): void {
+  private sendInput(text: string, uuid = randomUUID(), note?: InputReceipt, origin?: InputOrigin, quiet?: boolean): void {
     /*
      * `/goal` goes to the CLI when the CLI offers it (2026-10-03). On 2026-09-07 (SDK 0.3.231 and
      * 0.3.263, the CLI of that day) the headless path had no goal at all: sent as text, the model
@@ -477,13 +481,13 @@ export class ClaudeSession implements SessionHandle {
      */
     const goal = isGoalCommand(text)
     if (!this.sendGate && !(goal && this.goalCommand === undefined)) {
-      this.deliver(text, uuid, !!note, origin)
+      this.deliver(text, uuid, !!note, origin, quiet)
       return
     }
     const gate = (this.sendGate = (this.sendGate ?? this.goalKnown).then(() => {
       if (note?.cancelled) return
       if (!this.closed) {
-        this.deliver(text, uuid, !!note, origin)
+        this.deliver(text, uuid, !!note, origin, quiet)
         return
       }
       // Closed while it waited: the same rule as dispose's queue — a message is never dropped silently
@@ -494,7 +498,14 @@ export class ClaudeSession implements SessionHandle {
     })
   }
 
-  private deliver(text: string, uuid: ReturnType<typeof randomUUID>, parentNote: boolean, origin?: InputOrigin): void {
+  private deliver(text: string, uuid: ReturnType<typeof randomUUID>, parentNote: boolean, origin?: InputOrigin, quiet?: boolean): void {
+    if (quiet) {
+      // No turn: the process reads it and answers nothing, and the session stays at rest (the mailbox's mail that must not wake)
+      this.queue.push({ text, uuid, parentNote, ...(origin ? { origin } : {}), quiet: true })
+      this.notify?.()
+      this.notify = null
+      return
+    }
     if (isGoalCommand(text)) {
       if (this.goalCommand !== true) {
         /*
