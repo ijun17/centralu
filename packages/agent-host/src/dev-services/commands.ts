@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module'
 import { commandShell, type Pty, type PtyModule } from './terminal.js'
 import { idNumber, type CommandTag } from '../keeper/tags.js'
-import { PtySlot, type PtyStreamSink } from './pty-slot.js'
+import { PtySlot, isPtyModule, type PtyStreamSink } from './pty-slot.js'
 
 /**
  * The runner for frequently used commands (#60).
@@ -164,7 +164,10 @@ export class CommandRunner {
 
   /** A test substitutes this (the same reason as terminal.ts) */
   protected loadPty(): PtyModule {
-    return this.ptys ?? (require('node-pty') as PtyModule)
+    if (this.ptys) return this.ptys
+    const loaded: unknown = require('node-pty')
+    if (!isPtyModule(loaded)) throw new Error('node-pty did not load as a terminal module')
+    return loaded
   }
 
   private entry(cwd: string, command: string, runId: string, startedAt: number): Entry {
