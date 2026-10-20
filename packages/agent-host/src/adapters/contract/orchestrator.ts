@@ -53,6 +53,8 @@ export type TrashRequest =
   | { action: 'list' }
   | { action: 'restore'; sessionId: string; what: 'session' | 'steps' }
   | { action: 'trash_steps'; sessionId: string }
+  /** #1219: a session that is not the caller's child, moved to the trash (reversible) */
+  | { action: 'delete_session'; sessionId: string }
   | { action: 'delete'; sessionId: string; what: 'session' | 'steps' }
   | { action: 'empty' }
 

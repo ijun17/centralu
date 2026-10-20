@@ -127,6 +127,7 @@ export const RARE_COMMANDS: Partial<Record<ToolProfile, readonly CommandName[]>>
     'list_trash',
     'restore_trashed',
     'trash_subagent_steps',
+    'delete_session',
     'delete_trashed',
     'empty_trash',
     'list_projects',

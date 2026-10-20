@@ -94,6 +94,7 @@ const CENTRALU_LABELS: Record<string, string> = {
   list_trash: 'Listed the trash',
   restore_trashed: 'Restored from the trash',
   trash_subagent_steps: 'Moved subagent steps to the trash',
+  delete_session: 'Moved a session to the trash',
   delete_trashed: 'Asked to delete from the trash for good',
   empty_trash: 'Asked to empty the trash',
   propose_mcp_server: 'Proposed an MCP server',

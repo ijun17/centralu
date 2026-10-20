@@ -28,6 +28,7 @@ export const WINDOW_METHODS = [
   'trash.restoreSubagentSteps',
   'subagents.usage',
   'subagents.trash',
+  'agents.deleteSession',
   'trash.purge',
   'trash.purgeSubagentSteps',
   'trash.purgeRuns',

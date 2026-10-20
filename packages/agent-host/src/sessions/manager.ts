@@ -505,6 +505,7 @@ export class SessionManager {
   useWindowRpc(rpc: WindowRpc): void {
     this.preferencesFlow.useRpc(rpc)
     this.trashFlow.useRpc(rpc)
+    this.trashFlow.useSessions({ lossesOf: (id) => this.trash.lossesOf(id), deleteIfQuiet: (id, also) => this.trash.trashIfQuiet(id, also) })
     this.trustFlow.useRpc(rpc)
   }
 

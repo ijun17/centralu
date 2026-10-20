@@ -324,6 +324,7 @@ const HANDLERS: ToolHandlers = {
   list_trash: (_args, call) => trashCommand({ action: 'list' }, call),
   restore_trashed: ({ sessionId, what }, call) => trashCommand({ action: 'restore', sessionId: sessionId.trim(), what: what ?? 'session' }, call),
   trash_subagent_steps: ({ sessionId }, call) => trashCommand({ action: 'trash_steps', sessionId: sessionId.trim() }, call),
+  delete_session: ({ sessionId }, call) => trashCommand({ action: 'delete_session', sessionId: sessionId.trim() }, call),
   delete_trashed: ({ sessionId, what }, call) => trashCommand({ action: 'delete', sessionId: sessionId.trim(), what: what ?? 'session' }, call),
   empty_trash: (_args, call) => trashCommand({ action: 'empty' }, call),
 

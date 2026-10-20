@@ -284,6 +284,12 @@ export const ORCHESTRATOR_TOOLS = [
     schema: z.object({ sessionId: z.string().describe('The id list_trash gives.') }),
   },
   {
+    name: 'delete_session',
+    description:
+      "Moves a session to the trash, as the window's delete does; restore_trashed brings it back. Its worktree and the tool's own conversation file stay. For sessions that are not yours: a child you started is deleted with agent_session. The person approves a card first, which names what the host drops that restoring does not bring back (a caller waiting for its report, reports it owes). Refused while the session is working, waiting on the person or has a background job running.",
+    schema: z.object({ sessionId: z.string().describe('The id list_sessions gives.') }),
+  },
+  {
     name: 'delete_trashed',
     description: 'Deletes one trashed session, or (what "steps") its trashed subagent steps, for good. The person approves a card naming what goes first.',
     schema: z.object({ sessionId: z.string().describe('The id list_trash gives.'), what: z.enum(['session', 'steps']).optional() }),
