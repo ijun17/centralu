@@ -3,6 +3,7 @@ import { liveEventWatchers } from '../sessionList.js'
 import { appEvent, appViewEvent } from './apps.js'
 import { conversationEvent, subagentStepEvent } from './conversation.js'
 import { listEvent } from './lists.js'
+import { mailEvent } from '../mail.js'
 import { machineEvent } from './machines.js'
 import { noticeEvent } from './notices.js'
 import { sessionEvent, sessionListEvent } from './sessions.js'
@@ -22,7 +23,7 @@ export const eventActions = (set: StoreSet, get: StoreGet): Pick<AppState, 'disp
      * vanishes silently — placing the update status handling after it would make the host's message
      * arrive and do nothing, the worst kind of defect to trace.
      */
-    if (updateEvent(e, set, get) || listEvent(e, set, get) || machineEvent(e, set, get) || appEvent(e, set, get) || subagentStepEvent(e, set, get)) return
+    if (updateEvent(e, set, get) || listEvent(e, set, get) || machineEvent(e, set, get) || mailEvent(e, set, get) || appEvent(e, set, get) || subagentStepEvent(e, set, get)) return
 
     const sessionId = e.sessionId
     if (!sessionId) return

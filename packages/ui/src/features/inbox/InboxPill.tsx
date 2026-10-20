@@ -3,6 +3,7 @@ import type { WaitingCounts } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import type { Notice } from '../../store/state/notifications.js'
 import { MailIcon } from '../../components/icons.jsx'
+import { mailAttention } from '../../store/mail.js'
 
 /** How long a new notice stays written out in the capsule before it folds back into the count (owner, 2026-10-18: 4 s;
  * 2026-10-20: 5 s, as 4 s sometimes folded before it was read); a finished turn on screen is judged seen at the same
@@ -20,7 +21,9 @@ export const PEEK_MS = 5000
  */
 export function InboxPill({ counts, onOpen, title }: { counts: WaitingCounts; onOpen: () => void; title: string }) {
   const peek = useNoticePeek()
-  const total = counts.approval + counts.input + counts.error
+  // What waits on the person: the sessions, and the threads of the mailbox that have something for them (#1347)
+  const mailWaiting = useStore((s) => mailAttention(s.mail))
+  const total = counts.approval + counts.input + counts.error + mailWaiting
   // Brightness says what kind of wait: an approval or an error is the signal, plain waiting stays quiet
   const tone = counts.approval + counts.error > 0 ? 'signal' : total > 0 ? 'text-ink-muted' : 'text-ink-faint'
   /*

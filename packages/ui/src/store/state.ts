@@ -13,6 +13,7 @@ import type { AppsSlice } from './state/apps.js'
 import type { AppViewsSlice } from './state/appViews.js'
 import type { NavigationSlice } from './state/navigation.js'
 import type { OrchestratorSlice } from './state/orchestrator.js'
+import type { MailSlice } from './state/mail.js'
 
 /**
  * The store's state and actions as one type (`AppState`), and the shapes of what it holds. The store
@@ -48,4 +49,5 @@ export type AppState = ConnectionSlice &
   AppsSlice &
   AppViewsSlice &
   NavigationSlice &
-  OrchestratorSlice
+  OrchestratorSlice &
+  MailSlice

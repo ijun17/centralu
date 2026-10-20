@@ -463,6 +463,8 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
           flushWorkspace(get, set)
           // A new host (a restart, a switched build) read the installed CLIs before this window was back (#297)
           void get().checkAgentVersions(false)
+          // Mail posted while the window was away sent its news to nobody
+          void get().loadMail()
           // Revive sessions that were running; a resync's own recovery below does that and more
           if (!resync) void get().recoverAfterReconnect()
         }
@@ -604,6 +606,8 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
     void get().checkUpdate(false)
     // The installed agent CLIs (#297), for the same reason: the host read them before this window attached
     void get().checkAgentVersions(false)
+    // The person's mailbox (#1347), for the count on the inbox and its list; a host from before it answers nothing
+    void get().loadMail()
 
     // Come back to where you were (C-3). A session that no longer exists is quietly skipped.
     restoringWorkspace = true
