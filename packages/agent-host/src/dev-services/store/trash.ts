@@ -1,3 +1,4 @@
+import { oneRow } from './rows.js'
 import type Database from 'better-sqlite3'
 import type { WorktreeRecovery } from '../worktree-recovery.js'
 import type { SessionInfo } from '@cc/protocol'
@@ -41,6 +42,9 @@ export type TrashedRow = {
   worktree: { path: string; branch: string } | null
 }
 
+const isWorktreeRecovery = (x: unknown): x is WorktreeRecovery =>
+  isObj(x) && typeof x.snapshot === 'string' && typeof x.tip === 'string' && typeof x.changedFiles === 'number' && typeof x.commits === 'number'
+
 /** A record written by an older or broken build reads as "keep everything" — deleting for good must be asked for */
 function parseTrashRecord(json: string | null): TrashRecord {
   // Unreadable, or JSON that is not an object (#850): the defaults below keep the files
@@ -51,12 +55,7 @@ function parseTrashRecord(json: string | null): TrashRecord {
     projectPath: filled(r.projectPath),
     removeExternal: r.removeExternal === true,
     removeWorktree: r.removeWorktree === true,
-    ...(isObj(r.recovery) &&
-      typeof (r.recovery as WorktreeRecovery).snapshot === 'string' &&
-      typeof (r.recovery as WorktreeRecovery).tip === 'string' &&
-      typeof (r.recovery as WorktreeRecovery).changedFiles === 'number' &&
-      typeof (r.recovery as WorktreeRecovery).commits === 'number'
-      ? { recovery: r.recovery as WorktreeRecovery } : {}),
+    ...(isWorktreeRecovery(r.recovery) ? { recovery: r.recovery } : {}),
   }
 }
 
@@ -158,17 +157,17 @@ export class TrashRecords {
    */
   async purgeSession(sessionId: string, chunk = DELETE_CHUNK): Promise<boolean> {
     if (!this.isTrashed(sessionId)) return false
-    const pick = this.db.prepare(`SELECT rowid FROM messages WHERE session_id = ? LIMIT ?`)
+    const pick = this.db.prepare<unknown[], { rowid: number }>(`SELECT rowid FROM messages WHERE session_id = ? LIMIT ?`)
     const dropFts = this.db.prepare(`DELETE FROM messages_fts WHERE rowid = ?`)
     const dropMsg = this.db.prepare(`DELETE FROM messages WHERE rowid = ?`)
     // A subagent's steps (#222) go first, in the same chunks: they can outnumber the conversation's own rows
-    const pickSub = this.db.prepare(`SELECT rowid FROM subagent_messages WHERE session_id = ? LIMIT ?`)
+    const pickSub = this.db.prepare<unknown[], { rowid: number }>(`SELECT rowid FROM subagent_messages WHERE session_id = ? LIMIT ?`)
     const dropSub = this.db.prepare(`DELETE FROM subagent_messages WHERE rowid = ?`)
     const step = this.db.transaction((): boolean => {
-      const subs = pickSub.all(sessionId, chunk) as { rowid: number }[]
+      const subs = pickSub.all(sessionId, chunk)
       for (const { rowid } of subs) dropSub.run(rowid)
       if (subs.length === chunk) return false
-      const rows = pick.all(sessionId, chunk) as { rowid: number }[]
+      const rows = pick.all(sessionId, chunk)
       for (const { rowid } of rows) {
         dropFts.run(rowid)
         dropMsg.run(rowid)
@@ -212,14 +211,15 @@ export class TrashRecords {
     withPayload: boolean,
     each: (rows: { rowid: number; seq: number; kind?: string; payload?: string }[]) => void,
   ): Promise<void> {
-    const pick = this.db.prepare(
+    const pick = this.db.prepare<unknown[], { rowid: number; seq: number; kind?: string; payload?: string }>(
       `SELECT rowid, seq${withPayload ? ', kind, payload' : ''} FROM messages WHERE session_id = ? AND seq > ? ORDER BY seq LIMIT ?`,
     )
     let after = Number.MIN_SAFE_INTEGER
     const step = this.db.transaction((): boolean => {
-      const rows = pick.all(sessionId, after, chunk) as { rowid: number; seq: number; kind?: string; payload?: string }[]
+      const rows = pick.all(sessionId, after, chunk)
       each(rows)
-      if (rows.length > 0) after = rows[rows.length - 1]!.seq
+      const last = rows.at(-1)
+      if (last) after = last.seq
       return rows.length < chunk
     })
     while (!step()) await new Promise<void>((resolve) => setImmediate(resolve))
@@ -242,7 +242,7 @@ export class TrashRecords {
 
   /** The ids in the trash — for the few callers that must tell "in the trash" from "gone" */
   trashedIds(): Set<string> {
-    const rows = this.db.prepare(`SELECT id FROM sessions WHERE deleted_at IS NOT NULL`).all() as { id: string }[]
+    const rows = this.db.prepare<unknown[], { id: string }>(`SELECT id FROM sessions WHERE deleted_at IS NOT NULL`).all()
     return new Set(rows.map((r) => r.id))
   }
 
@@ -250,10 +250,11 @@ export class TrashRecords {
   trashedSession(sessionId: string): { session: SessionInfo; record: TrashRecord; deletedAt: number } | null {
     const session = this.sessions.readSessions(`s.id = ? AND s.deleted_at IS NOT NULL`, sessionId)[0]
     if (!session) return null
-    const row = this.db.prepare(`SELECT deleted_at as deletedAt, trash FROM sessions WHERE id = ?`).get(sessionId) as {
-      deletedAt: number
-      trash: string | null
-    }
+    const row = oneRow(
+      this.db
+        .prepare<unknown[], { deletedAt: number; trash: string | null }>(`SELECT deleted_at as deletedAt, trash FROM sessions WHERE id = ?`)
+        .get(sessionId),
+    )
     return { session, record: parseTrashRecord(row.trash), deletedAt: row.deletedAt }
   }
 
@@ -275,11 +276,11 @@ export class TrashRecords {
   trashedProjectPaths(): string[] {
     return (
       this.db
-        .prepare(
+        .prepare<unknown[], { path: unknown }>(
           `SELECT DISTINCT json_extract(trash, '$.projectPath') AS path FROM sessions
             WHERE deleted_at IS NOT NULL AND json_valid(trash) AND json_extract(trash, '$.projectPath') IS NOT NULL`,
         )
-        .all() as { path: unknown }[]
+        .all()
     )
       .map((r) => r.path)
       .filter((p): p is string => typeof p === 'string')
@@ -292,7 +293,12 @@ export class TrashRecords {
    */
   listTrash(): TrashedRow[] {
     const rows = this.db
-      .prepare(
+      .prepare<unknown[], (Omit<TrashedRow, 'record' | 'worktree' | 'hasConversationFile'> & {
+      hasConversationFile: number
+      trash: string | null
+      worktreePath: string | null
+      worktreeBranch: string | null
+    })>(
         `SELECT s.id, s.name, s.tool, s.deleted_at as deletedAt, s.trash as trash,
                 s.worktree_path as worktreePath, s.worktree_branch as worktreeBranch,
                 (s.external_id IS NOT NULL OR s.imported_from IS NOT NULL) as hasConversationFile,
@@ -303,12 +309,7 @@ export class TrashRecords {
          FROM sessions s LEFT JOIN messages m ON m.session_id = s.id
          WHERE s.deleted_at IS NOT NULL GROUP BY s.id ORDER BY s.deleted_at DESC`,
       )
-      .all() as (Omit<TrashedRow, 'record' | 'worktree' | 'hasConversationFile'> & {
-      hasConversationFile: number
-      trash: string | null
-      worktreePath: string | null
-      worktreeBranch: string | null
-    })[]
+      .all()
     return rows.map(({ trash, worktreePath, worktreeBranch, hasConversationFile, ...r }) => ({
       ...r,
       hasConversationFile: !!hasConversationFile,
@@ -335,9 +336,7 @@ export class TrashRecords {
    */
   deleteProject(projectId: string): void {
     const tx = this.db.transaction(() => {
-      const project = this.db.prepare(`SELECT name, path FROM projects WHERE id = ?`).get(projectId) as
-        | { name: string; path: string }
-        | undefined
+      const project = this.db.prepare<unknown[], { name: string; path: string }>(`SELECT name, path FROM projects WHERE id = ?`).get(projectId)
       const record: TrashRecord = {
         projectId,
         projectName: project?.name ?? null,
@@ -345,9 +344,9 @@ export class TrashRecords {
         removeExternal: false,
         removeWorktree: false,
       }
-      const left = this.db.prepare(`SELECT id FROM sessions WHERE project_id = ? AND deleted_at IS NULL`).all(projectId) as {
+      const left = this.db.prepare<unknown[], {
         id: string
-      }[]
+      }>(`SELECT id FROM sessions WHERE project_id = ? AND deleted_at IS NULL`).all(projectId)
       for (const { id } of left) {
         this.db.prepare(`DELETE FROM messages_fts WHERE rowid IN (SELECT rowid FROM messages WHERE session_id = ?)`).run(id)
         this.db

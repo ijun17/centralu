@@ -31,11 +31,11 @@ export class HandoffMarkers {
      * only deleting it for good lets the note go.
      */
     const rows = this.db
-      .prepare(
+      .prepare<unknown[], { payload: string }>(
         `/* includes the trash: a trashed successor keeps its note */
          SELECT m.payload as payload FROM messages m JOIN sessions s ON s.id = m.session_id WHERE m.kind = 'marker'`,
       )
-      .all() as { payload: string }[]
+      .all()
     const out = new Set<string>()
     for (const r of rows) {
       // A row that cannot be parsed claims nothing — cleanup only holds off when there is a claim
@@ -55,7 +55,7 @@ export class HandoffMarkers {
      * The CASE keeps a row that is not valid JSON from failing the query; it names no heir.
      */
     const rows = this.db
-      .prepare(
+      .prepare<unknown[], { sessionId: string; trashed: number }>(
         `SELECT m.session_id as sessionId, MAX(m.ts) as ts, s.deleted_at IS NOT NULL as trashed
            FROM messages m JOIN sessions s ON s.id = m.session_id
           WHERE m.kind = 'marker'
@@ -64,7 +64,7 @@ export class HandoffMarkers {
                   ELSE 0 END
           GROUP BY m.session_id ORDER BY ts DESC`,
       )
-      .all(fromSessionId) as { sessionId: string; trashed: number }[]
+      .all(fromSessionId)
     return rows.map((r) => ({ sessionId: r.sessionId, trashed: !!r.trashed }))
   }
 
@@ -75,8 +75,8 @@ export class HandoffMarkers {
    */
   hasNotice(sessionId: string, text: string): boolean {
     const rows = this.db
-      .prepare(`SELECT payload FROM messages WHERE session_id = ? AND kind = 'marker'`)
-      .all(sessionId) as { payload: string }[]
+      .prepare<unknown[], { payload: string }>(`SELECT payload FROM messages WHERE session_id = ? AND kind = 'marker'`)
+      .all(sessionId)
     return rows.some((r) => {
       const p = asObj(parseJson(r.payload))
       return p.type === 'notice' && p.text === text
@@ -90,8 +90,8 @@ export class HandoffMarkers {
    */
   inheritsHandoff(sessionId: string): boolean {
     const rows = this.db
-      .prepare(`SELECT payload FROM messages WHERE session_id = ? AND kind = 'marker'`)
-      .all(sessionId) as { payload: string }[]
+      .prepare<unknown[], { payload: string }>(`SELECT payload FROM messages WHERE session_id = ? AND kind = 'marker'`)
+      .all(sessionId)
     return rows.some((r) => handoffFrom(r.payload) !== null)
   }
 }

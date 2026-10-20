@@ -1,3 +1,4 @@
+import { oneRow } from './rows.js'
 import type Database from 'better-sqlite3'
 import type { AgentUse } from '@cc/protocol'
 
@@ -78,14 +79,14 @@ export class AppRunRecords {
   /** One run as the record of a deleted app-agent session reads it (#378); null when the run is not in the log */
   appRun(id: string): (AppRunRecord & { tokens: { input: number; output: number } | null; request: string | null; answer: string | null; output: string | null }) | null {
     const r = this.db
-      .prepare(
+      .prepare<unknown[], (AppRunRecord & { tokensIn: number | null; tokensOut: number | null; request: string | null; answer: string | null; output: string | null })>(
         `SELECT id, project_id as projectId, app_id as appId, kind, tool, caller_kind as callerKind,
                 caller_session_id as callerSessionId, parent_run_id as parentRunId, status, duration_ms as durationMs,
                 args_digest as argsDigest, args_summary as argsSummary, error, created_at as createdAt, session_id as sessionId,
                 tokens_in as tokensIn, tokens_out as tokensOut, request, answer, output
          FROM app_runs WHERE id = ?`,
       )
-      .get(id) as (AppRunRecord & { tokensIn: number | null; tokensOut: number | null; request: string | null; answer: string | null; output: string | null }) | undefined
+      .get(id)
     if (!r) return null
     const { tokensIn, tokensOut, ...rest } = r
     return { ...rest, tokens: tokensIn === null ? null : { input: tokensIn, output: tokensOut ?? 0 } }
@@ -98,14 +99,16 @@ export class AppRunRecords {
    * request (#378: written only once a session stood up, and left empty when its record is deleted).
    */
   appAgentUse(projectId: string | null, appId: string, since: number): AgentUse {
-    const r = this.db
-      .prepare(
+    const r = oneRow(
+      this.db
+      .prepare<unknown[], { runs: number; durationMs: number; counted: number; input: number; output: number }>(
         `SELECT COUNT(*) as runs, COALESCE(SUM(duration_ms), 0) as durationMs, COUNT(tokens_in) as counted,
                 COALESCE(SUM(tokens_in), 0) as input, COALESCE(SUM(tokens_out), 0) as output
          FROM app_runs
          WHERE app_id = ? AND project_id IS ? AND kind = 'broker' AND tool = 'run_agent' AND (session_id IS NOT NULL OR request IS NOT NULL) AND created_at >= ?`,
       )
-      .get(appId, projectId, since) as { runs: number; durationMs: number; counted: number; input: number; output: number }
+      .get(appId, projectId, since),
+    )
     return { runs: r.runs, durationMs: r.durationMs, tokens: r.counted > 0 ? { input: r.input, output: r.output } : null }
   }
 
@@ -148,7 +151,15 @@ export class AppRunRecords {
     limit: number,
   ): (AppRunRecord & { tokens: { input: number; output: number } | null; failure: { args: string; result: string | null } | null; kept: boolean })[] {
     const rows = this.db
-      .prepare(
+      .prepare<unknown[], (AppRunRecord & {
+      tokensIn: number | null
+      tokensOut: number | null
+      failureArgs: string | null
+      failureResult: string | null
+      kept: number
+      seq: number
+      isRoot: number
+    })>(
         `WITH RECURSIVE
            roots(id) AS (
              SELECT r.id FROM app_runs r
@@ -173,15 +184,7 @@ export class AppRunRecords {
          WHERE r.id IN (SELECT id FROM chain)
          ORDER BY isRoot DESC, r.created_at DESC, r.rowid DESC LIMIT ?`,
       )
-      .all(appId, projectId, limit, limit + CHAIN_ROWS_MAX) as (AppRunRecord & {
-      tokensIn: number | null
-      tokensOut: number | null
-      failureArgs: string | null
-      failureResult: string | null
-      kept: number
-      seq: number
-      isRoot: number
-    })[]
+      .all(appId, projectId, limit, limit + CHAIN_ROWS_MAX)
     // Filling roots first was only the order used for truncation — what is returned is chronological (most recent first)
     rows.sort((a, b) => b.createdAt - a.createdAt || b.seq - a.seq)
     return rows.map(({ failureArgs, failureResult, tokensIn, tokensOut, kept, seq: _seq, isRoot: _isRoot, ...r }) => ({

@@ -97,8 +97,8 @@ export class SessionRecords {
      * would answer here as the central one.
      */
     const row = this.db
-      .prepare(`SELECT id FROM sessions WHERE is_orchestrator = 1 AND project_id IS NULL AND deleted_at IS NULL LIMIT 1`)
-      .get() as { id: string } | undefined
+      .prepare<unknown[], { id: string }>(`SELECT id FROM sessions WHERE is_orchestrator = 1 AND project_id IS NULL AND deleted_at IS NULL LIMIT 1`)
+      .get()
     return row?.id ?? null
   }
 
@@ -110,7 +110,18 @@ export class SessionRecords {
   /** The rows of `listSessions`, for any condition on `sessions s` — the one place a row becomes a `SessionInfo` */
   readSessions(where: string, ...params: unknown[]): SessionInfo[] {
     const rows = this.db
-      .prepare(
+      .prepare<unknown[], (Omit<SessionInfo, 'autoNamed' | 'worktree' | 'kind'> & {
+      autoNamed: number
+      isOrchestrator: number
+      worktreePath: string | null
+      worktreeBranch: string | null
+      worktreeBase: string | null
+      contextUsed: number | null
+      contextWindow: number | null
+      contextExactness: string | null
+      scopeSessionIdsJson: string | null
+      interruptionJson: string | null
+    })>(
         `SELECT s.id, s.project_id as projectId, s.tool, s.external_id as externalId, s.name,
                 s.auto_named as autoNamed, s.state, s.is_orchestrator as isOrchestrator,
                 s.last_read_seq as lastReadSeq,
@@ -128,18 +139,7 @@ export class SessionRecords {
                 COALESCE((SELECT MAX(seq) FROM messages m WHERE m.session_id = s.id), 0) as lastSeq
          FROM sessions s WHERE ${where} ORDER BY s.sidebar_order, s.created_at`,
       )
-      .all(...params) as (Omit<SessionInfo, 'autoNamed' | 'worktree' | 'kind'> & {
-      autoNamed: number
-      isOrchestrator: number
-      worktreePath: string | null
-      worktreeBranch: string | null
-      worktreeBase: string | null
-      contextUsed: number | null
-      contextWindow: number | null
-      contextExactness: string | null
-      scopeSessionIdsJson: string | null
-      interruptionJson: string | null
-    })[]
+      .all(...params)
     // Live-only fields are not in the database — a restored session correctly has none of them (facts that die with the host)
     return rows.map(
       ({
@@ -228,8 +228,7 @@ export class SessionRecords {
    * resolves it the first time it needs the path and writes it back.
    */
   sessionCwd(sessionId: string): string | null {
-    const row = this.db.prepare(`SELECT cwd FROM sessions WHERE id = ?`).get(sessionId) as
-      { cwd: string | null } | undefined
+    const row = this.db.prepare<unknown[], { cwd: string | null }>(`SELECT cwd FROM sessions WHERE id = ?`).get(sessionId)
     return row?.cwd ?? null
   }
 
@@ -244,8 +243,7 @@ export class SessionRecords {
   }
 
   getTouchedPaths(sessionId: string): string[] {
-    const row = this.db.prepare(`SELECT touched_paths as p FROM sessions WHERE id = ?`).get(sessionId) as
-      { p: string } | undefined
+    const row = this.db.prepare<unknown[], { p: string }>(`SELECT touched_paths as p FROM sessions WHERE id = ?`).get(sessionId)
     return readJsonList(row?.p, z.string())
   }
 
@@ -259,8 +257,8 @@ export class SessionRecords {
 
   commitSessions(projectId: string): { sha: string; sessionId: string }[] {
     return this.db
-      .prepare(`SELECT sha, session_id AS sessionId FROM commit_sessions WHERE project_id = ?`)
-      .all(projectId) as { sha: string; sessionId: string }[]
+      .prepare<unknown[], { sha: string; sessionId: string }>(`SELECT sha, session_id AS sessionId FROM commit_sessions WHERE project_id = ?`)
+      .all(projectId)
   }
 
   markRead(sessionId: string, seq: number): void {

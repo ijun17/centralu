@@ -13,6 +13,17 @@ export type ConsentRow = { fromProjectId: string; toProjectId: string; kind: Pro
 /** One row of app_permissions — the same shape as the runtime's `CapabilityDecision` (locked together structurally, M4 D-4) */
 export type AppPermissionRecord = { capability: string; text: string; decision: 'allow' | 'deny'; stamp: string; decidedAt: number }
 
+/** One row of approval_rules, as the settings screen lists it */
+export type ApprovalRuleRow = {
+  id: number
+  scope: string
+  matcher: string
+  decision: string
+  projectId: string | null
+  sessionId: string | null
+  createdAt: number
+}
+
 /** What the person has answered: "always" rules, an app's capability requests, and one project reaching another */
 export class PermissionRecords {
   constructor(private readonly db: Database.Database) {}
@@ -31,24 +42,16 @@ export class PermissionRecords {
       .run(r.scope, r.projectId ?? null, r.sessionId ?? null, r.matcher, r.decision, Date.now())
   }
 
-  listApprovalRules(): {
-    id: number
-    scope: string
-    matcher: string
-    decision: string
-    projectId: string | null
-    sessionId: string | null
-    createdAt: number
-  }[] {
+  listApprovalRules(): ApprovalRuleRow[] {
     return this.db
-      .prepare(
+      .prepare<unknown[], ApprovalRuleRow>(
         `SELECT id, scope, matcher, decision, project_id as projectId, session_id as sessionId,
                 created_at as createdAt
          FROM approval_rules
          WHERE session_id IS NULL OR session_id NOT IN (SELECT id FROM sessions WHERE deleted_at IS NOT NULL)
          ORDER BY created_at DESC`,
       )
-      .all() as never
+      .all()
   }
 
   /**
@@ -70,10 +73,10 @@ export class PermissionRecords {
 
   getAppPermission(appKey: string, capability: string): AppPermissionRecord | null {
     const row = this.db
-      .prepare(
+      .prepare<unknown[], AppPermissionRecord>(
         `SELECT capability, text, decision, uses_stamp as stamp, decided_at as decidedAt FROM app_permissions WHERE app_key = ? AND capability = ?`,
       )
-      .get(appKey, capability) as AppPermissionRecord | undefined
+      .get(appKey, capability)
     return row ?? null
   }
 
@@ -91,21 +94,21 @@ export class PermissionRecords {
 
   listAppPermissions(appKey: string): AppPermissionRecord[] {
     return this.db
-      .prepare(
+      .prepare<unknown[], AppPermissionRecord>(
         `SELECT capability, text, decision, uses_stamp as stamp, decided_at as decidedAt FROM app_permissions WHERE app_key = ? ORDER BY decided_at DESC`,
       )
-      .all(appKey) as AppPermissionRecord[]
+      .all(appKey)
   }
 
   // ── The person's "always" for one project reaching another (#371) — see migration v44 ──
 
   getProjectConsent(fromProjectId: string, toProjectId: string, kind: ProjectConsentKind): ConsentRow | null {
     const row = this.db
-      .prepare(
+      .prepare<unknown[], ConsentRow>(
         `SELECT from_project_id as fromProjectId, to_project_id as toProjectId, kind, decided_at as decidedAt
            FROM project_consents WHERE from_project_id = ? AND to_project_id = ? AND kind = ?`,
       )
-      .get(fromProjectId, toProjectId, kind) as ConsentRow | undefined
+      .get(fromProjectId, toProjectId, kind)
     return row ?? null
   }
 
@@ -133,11 +136,11 @@ export class PermissionRecords {
    */
   listProjectConsents(): ConsentRow[] {
     const rows = this.db
-      .prepare(
+      .prepare<unknown[], ConsentRow>(
         `SELECT from_project_id as fromProjectId, to_project_id as toProjectId, kind, decided_at as decidedAt
            FROM project_consents ORDER BY decided_at DESC`,
       )
-      .all() as ConsentRow[]
+      .all()
     return rows.filter((r) => ProjectConsentKind.safeParse(r.kind).success)
   }
 }

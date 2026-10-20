@@ -54,6 +54,8 @@ export function readJsonList<T>(raw: string | null | undefined, item: z.ZodType<
  * list reads as empty, and an element that is not an object or lacks what `has` asks for is skipped. An element keeps
  * every field it has, so writing the list back after a change does not drop what a newer build added to it.
  */
-export function readJsonObjects<T extends object>(raw: string | null | undefined, has: (x: JsonObject) => boolean): T[] {
-  return readJsonList(raw, JsonObject).filter(has) as unknown as T[]
+export function readJsonObjects<T extends object>(raw: string | null | undefined, has: (x: JsonObject) => boolean): T[]
+// The caller names the shape it keeps (`T`) and vouches for it with `has`; the objects are returned as they are
+export function readJsonObjects(raw: string | null | undefined, has: (x: JsonObject) => boolean): JsonObject[] {
+  return readJsonList(raw, JsonObject).filter(has)
 }

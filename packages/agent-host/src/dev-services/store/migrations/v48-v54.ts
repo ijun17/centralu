@@ -19,7 +19,7 @@ export class StepsV48ToV54 extends MigrationRange {
          */
         run: () => {
           // A store an older step's test built by hand may lack a column: there is then nothing to rewrite
-          const cols = new Set((this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]).map((c) => c.name))
+          const cols = new Set(this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(sessions)`).all().map((c) => c.name))
           if (!['asked_by_session_id', 'parent_session_id', 'worktree_path'].every((c) => cols.has(c))) return
           this.db.exec(`
             UPDATE sessions SET asked_by_session_id = parent_session_id
@@ -163,7 +163,7 @@ export class StepsV48ToV54 extends MigrationRange {
               delivering_at     INTEGER
             )
           `)
-          const cols = (this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]).map((c) => c.name)
+          const cols = this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(sessions)`).all().map((c) => c.name)
           if (!cols.includes('forked_from_session_id')) this.db.exec(`ALTER TABLE sessions ADD COLUMN forked_from_session_id TEXT`)
         },
       },
@@ -180,7 +180,7 @@ export class StepsV48ToV54 extends MigrationRange {
          * serves during a swap keeps the last value until this build writes the row again.
          */
         run: () => {
-          const cols = (this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]).map((c) => c.name)
+          const cols = this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(sessions)`).all().map((c) => c.name)
           if (!cols.includes('interruption')) this.db.exec(`ALTER TABLE sessions ADD COLUMN interruption TEXT`)
         },
       },
@@ -197,7 +197,7 @@ export class StepsV48ToV54 extends MigrationRange {
          * has no remembered consent.
          */
         run: () => {
-          const cols = (this.db.prepare(`PRAGMA table_info(queued_requests)`).all() as { name: string }[]).map((c) => c.name)
+          const cols = this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(queued_requests)`).all().map((c) => c.name)
           if (!cols.includes('opened_by_auto')) this.db.exec(`ALTER TABLE queued_requests ADD COLUMN opened_by_auto INTEGER`)
         },
       },
