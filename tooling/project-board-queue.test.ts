@@ -958,13 +958,15 @@ beforeEach(() => {
   fake = fakeGh(root, FAKE_GH)
 })
 
+// Waiting for the app trees can take a while on a loaded Windows machine: grace, kill, the process listing and
+// a taskkill per leftover, past the default 10 s hook limit (#1312)
 afterEach(async () => {
   // Until the app and what it left running have ended: they run Node from this folder and write in it
   await rt?.dispose({ awaitTree: true })
   rt = null
   // Without blocking the event loop while it retries; a folder Windows still holds is left to its temporary-folder cleanup (#1346)
   await removeFakeDir(root)
-})
+}, 30_000 * SLOW)
 
 const FAST = { PROJECT_BOARD_QUEUE_TICK_MS: '50', PROJECT_BOARD_QUEUE_POLL_MS: '50' }
 /**
