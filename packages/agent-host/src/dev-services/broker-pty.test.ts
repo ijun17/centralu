@@ -32,7 +32,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   } else if (m.op === 'write') {
     if (m.data === 'end the broker') process.exit(3)
     // Lines that are no event: they are skipped, and the next one still arrives
-    if (m.data === 'say junk') process.stdout.write('null\\n[1]\\n7\\n{"ev":"data","id":' + m.id + '}\\n{"ev":"unheard of","id":1}\\nnot json\\n')
+    if (m.data === 'say junk') process.stdout.write('{"ev":"data","id":' + m.id + '}\\nnull\\n[1]\\n7\\n{"ev":"unheard of","id":1}\\nnot json\\n')
     send({ ev: 'data', id: m.id, data: 'got ' + m.data })
   } else if (m.op === 'resize') send({ ev: 'data', id: m.id, data: 'size ' + m.cols + 'x' + m.rows })
   else if (m.op === 'kill') {
