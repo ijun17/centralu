@@ -148,6 +148,18 @@ export class CodexSession implements SessionHandle {
           // The child threads lived in that process (#290) — closed by us or not, they are gone
           this.releaseChildren()
           if (expected) return
+          /*
+           * **An app-server that goes while no turn is running is not a crash** (#1397). A Codex session keeps its app-server
+           * alive while idle (#568), so a Mac shutdown, a logout or an `kill` of the process lands on sessions that were doing
+           * nothing, and each used to show an error. With nothing in flight the process is only gone: the session is asleep
+           * and the next message resumes the thread, with no error and no mark, whatever the exit code. A turn in flight (a
+           * running turn, an input not yet taken, a blocking command) or a process that never finished starting is still a
+           * crash.
+           */
+          if (this.idle()) {
+            this.emit({ type: 'session_live', sessionId: this.sessionId, live: false, reason: 'asleep' })
+            return
+          }
           this.emit({
             type: 'error',
             sessionId: this.sessionId,
@@ -210,6 +222,18 @@ export class CodexSession implements SessionHandle {
     const settings = this.opened
     this.opened = null
     return settings
+  }
+
+  /**
+   * Messages sent (`send`, `sendTracked`, a flush of the queue) whose `turn/start` has not been answered yet. An ordinary
+   * `send` has no receipt, so between sending it and getting the turn's id the session is not idle: an app-server that exits
+   * then has lost that message, and says so as a crash (#1397 review).
+   */
+  private startsInFlight = 0
+
+  /** Started, and nothing in flight: no turn running, no `turn/start` unanswered, no input queued, no input waiting for its turn, no blocking command (#1397) */
+  private idle(): boolean {
+    return this.started && this.turns.turnId === null && this.startsInFlight === 0 && this.pendingInputs.length === 0 && this.inputReceipts.size === 0 && !this.blockingTurn
   }
 
   private async start(): Promise<void> {
@@ -419,6 +443,8 @@ export class CodexSession implements SessionHandle {
 
   private sendInput(text: string, receipt?: InputReceipt): void {
     const nth = this.sends.issue()
+    // Raised now, not when `turn/start` goes out: the message is already ours to lose (`startsInFlight`)
+    this.startsInFlight += 1
     void this.ready
       .then(() => {
         // A Stop pressed before the thread was up already reclaimed this message (`sends`) — do not send it
@@ -462,6 +488,11 @@ export class CodexSession implements SessionHandle {
           error: turnError(e.message),
         })
       })
+      // After the catch: a process's exit handler runs before the rejection is seen, so an exit with this message
+      // unanswered is read as a crash
+      .finally(() => {
+        this.startsInFlight -= 1
+      })
   }
 
   /**
@@ -487,6 +518,7 @@ export class CodexSession implements SessionHandle {
     if (clientId) this.inputGroups.set(clientId, receipts)
     const input = pending.map(({ text }) => ({ type: 'text', text }))
     this.pendingInputs = []
+    this.startsInFlight += 1
     void this.client
       .request('turn/start', {
         threadId: this.threadId,
@@ -505,6 +537,9 @@ export class CodexSession implements SessionHandle {
           sessionId: this.sessionId,
           error: turnError(e.message),
         })
+      })
+      .finally(() => {
+        this.startsInFlight -= 1
       })
   }
 

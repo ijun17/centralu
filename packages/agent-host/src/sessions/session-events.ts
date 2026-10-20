@@ -174,6 +174,16 @@ export class SessionEvents {
        * disappear** (until an explicit restart). Removing it means send()'s "resume if missing" path
        * becomes automatic recovery on its own.
        */
+      /*
+       * An adapter whose process went while its session was idle says so with `session_live` (false, asleep) instead of an
+       * error (#1397): the handle is retired the same way, since nothing is behind it, and the next message resumes. Only
+       * from the handle registered now: a set-aside handle's last word is not this session's.
+       */
+      if (e.type === 'session_live' && !e.live && e.reason === 'asleep' && from && this.host.handles.get(e.sessionId) === from) {
+        void from.dispose().catch(() => {})
+        this.host.handles.delete(e.sessionId)
+        this.host.running.delete(e.sessionId)
+      }
       // A lock error after a lazy resume handed the handle out (#168, item 5) leaves a handle with no thread — the same as a crash
       if (e.type === 'error' && (e.error.code === 'adapter_crashed' || e.error.code === 'conversation_locked')) {
         const dead = this.host.handles.get(e.sessionId)

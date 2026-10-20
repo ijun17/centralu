@@ -21,13 +21,15 @@ class FakeAppServer extends EventEmitter {
   stdinEnded = false
   kills: string[] = []
   detached = false
+  /** Methods this fake does not answer (a request left in flight, as when the process dies before answering) */
+  hold = new Set<string>()
   /**
    * `paginated`: codex-cli 0.160.0 given `excludeTurns: true` (#342) — the resume answers with no turns and
    * `thread/turns/list` names the running one. `legacy`: a Codex that predates both, answering with the turns and not
    * knowing the method.
    */
   constructor(
-    private readonly mode: 'paginated' | 'legacy' = 'legacy',
+    private readonly mode: 'paginated' | 'legacy' | 'idle' = 'legacy',
     /** A process this host spawned answers `initialize`; an adopted one already was initialized */
     private readonly fresh = false,
   ) {
@@ -50,11 +52,13 @@ class FakeAppServer extends EventEmitter {
     if (id !== undefined) this.stdout.write(`${JSON.stringify({ id, ...body })}\n`)
   }
   private answer(m: { id?: string; method: string }) {
+    if (this.hold.has(m.method)) return
     if (m.method === 'initialize') {
       return this.reply(m.id, this.fresh ? { result: {} } : { error: { code: -32600, message: 'Already initialized' } })
     }
     if (m.method === 'thread/resume') {
-      const turns = this.mode === 'paginated' ? [] : [{ id: 'turn-9', status: 'inProgress' }]
+      const turns = this.mode === 'paginated' || this.mode === 'idle' ? [] : [{ id: 'turn-9', status: 'inProgress' }]
+      if (this.mode === 'idle') return this.reply(m.id, { result: { thread: { id: 'thread-1', status: { type: 'idle' }, turns } } })
       this.reply(m.id, { result: { thread: { id: 'thread-1', status: { type: 'active', activeFlags: ['waitingOnApproval'] }, turns } } })
       // The approval the old host never answered, re-sent under its old id
       this.stdout.write(`${JSON.stringify({ id: 0, method: 'item/commandExecution/requestApproval', params: { threadId: 'thread-1', turnId: 'turn-9', itemId: 'i1', command: 'touch x', cwd: '/tmp' } })}\n`)
@@ -63,6 +67,7 @@ class FakeAppServer extends EventEmitter {
     if (m.method === 'thread/goal/get') return this.reply(m.id, { result: { goal: null } })
     if (m.method === 'thread/turns/list') {
       if (this.mode === 'legacy') return this.reply(m.id, { error: { code: -32601, message: 'Method not found' } })
+      if (this.mode === 'idle') return this.reply(m.id, { result: { data: [], nextCursor: null, backwardsCursor: null } })
       return this.reply(m.id, { result: { data: [{ id: 'turn-9', status: 'inProgress', items: [], itemsView: 'notLoaded' }], nextCursor: 'c1', backwardsCursor: null } })
     }
     this.reply(m.id, { result: {} })
@@ -76,7 +81,7 @@ class FakeAppServer extends EventEmitter {
   }
 }
 
-async function adopt(mode: 'paginated' | 'legacy' = 'legacy') {
+async function adopt(mode: 'paginated' | 'legacy' | 'idle' = 'legacy') {
   const server = new FakeAppServer(mode)
   const events: { type: string; requestId?: string }[] = []
   const handle = await new CodexAdapter().createSession(
@@ -188,6 +193,115 @@ describe('codex under the keeper', () => {
       code: 'adapter_crashed',
       message: 'codex app-server exited (code 1). stderr: Error: thread already has an active writer',
     })
+  })
+
+  /**
+   * #1397: a Codex session keeps its app-server while idle (#568), so a shutdown or a kill lands on sessions with no turn.
+   * Whatever the exit code, that is only a process gone: asleep, no error. A turn in flight is still a crash.
+   */
+  it.each([0, 1])('an app-server that exits (code %i) while its session is idle only puts the session to sleep, with no error', async (code) => {
+    const { events, server } = await adopt('idle')
+    await eventually(() => server.received.some((m) => m.method === 'thread/goal/get'))
+    await new Promise((r) => setTimeout(r, 20))
+    expect(events.some((e) => e.type === 'approval_request')).toBe(false)
+    server.exitCode = code
+    server.emit('exit', code, null)
+    await eventually(() => events.some((e) => e.type === 'session_live'))
+    expect(events.find((e) => e.type === 'session_live')).toEqual({ type: 'session_live', sessionId: 's1', live: false, reason: 'asleep' })
+    expect(events.some((e) => e.type === 'error')).toBe(false)
+  })
+
+  it.each([0, 1])('an app-server that exits (code %i) in the middle of a turn is still a crash', async (code) => {
+    const { events, server } = await adopt()
+    await eventually(() => events.some((e) => e.type === 'approval_request'))
+    server.exitCode = code
+    server.emit('exit', code, null)
+    await eventually(() => events.some((e) => e.type === 'error'))
+    expect((events.find((e) => e.type === 'error') as unknown as { error: unknown }).error).toMatchObject({ code: 'adapter_crashed' })
+    expect(events.some((e) => e.type === 'session_live')).toBe(false)
+  })
+
+  /**
+   * #1397 review: an ordinary send has no receipt, so between `turn/start` going out and its answer the session looked idle:
+   * an exit then said "asleep", the manager dropped the handle and the #157 filter dropped the error, and the message was
+   * lost with no answer, error or stderr. A message not yet answered is a turn in flight.
+   */
+  it.each([0, 101])('an app-server that exits (code %i) before its answer to a message just sent is a crash, not sleep', async (code) => {
+    const { events, server, handle } = await adopt('idle')
+    await eventually(() => server.received.some((m) => m.method === 'thread/goal/get'))
+    server.hold.add('turn/start')
+    handle.send('please do the thing')
+    await eventually(() => server.received.some((m) => m.method === 'turn/start'))
+    server.exitCode = code
+    server.emit('exit', code, null)
+    await eventually(() => events.some((e) => e.type === 'error'))
+    expect(events.some((e) => e.type === 'session_live')).toBe(false)
+    expect(events.filter((e) => e.type === 'error').map((e) => (e as unknown as { error: { code: string } }).error.code)).toContain('adapter_crashed')
+  })
+
+  it('a message sent in the same tick as the exit counts too: nothing between the send and its turn/start is idle', async () => {
+    const { events, server, handle } = await adopt('idle')
+    await eventually(() => server.received.some((m) => m.method === 'thread/goal/get'))
+    server.hold.add('turn/start')
+    handle.send('first')
+    // Not yet on the wire: the thread is up, and turn/start goes out on a later tick
+    server.exitCode = 101
+    server.emit('exit', 101, null)
+    await eventually(() => events.some((e) => e.type === 'error'))
+    expect(events.some((e) => e.type === 'session_live')).toBe(false)
+  })
+
+  it('goes idle again once the turn/start is answered and no turn runs: an exit then is sleep', async () => {
+    const { events, server, handle } = await adopt('idle')
+    await eventually(() => server.received.some((m) => m.method === 'thread/goal/get'))
+    handle.send('hello')
+    await eventually(() => server.received.some((m) => m.method === 'turn/start'))
+    // The answer names no turn: nothing runs, and nothing is left in flight
+    await new Promise((r) => setTimeout(r, 30))
+    server.exitCode = 0
+    server.emit('exit', 0, null)
+    await eventually(() => events.some((e) => e.type === 'session_live'))
+    expect(events.some((e) => e.type === 'error')).toBe(false)
+  })
+
+  it('a running compact is a turn in flight: an exit during it is a crash', async () => {
+    const { events, server, handle } = await adopt('idle')
+    await eventually(() => server.received.some((m) => m.method === 'thread/goal/get'))
+    server.hold.add('thread/compact/start')
+    handle.send('/compact')
+    await eventually(() => server.received.some((m) => m.method === 'thread/compact/start'))
+    server.exitCode = 0
+    server.emit('exit', 0, null)
+    await eventually(() => events.some((e) => e.type === 'error'))
+    expect(events.some((e) => e.type === 'session_live')).toBe(false)
+  })
+
+  it('an app-server that exits before it has finished starting is a crash, not sleep', async () => {
+    const server = new FakeAppServer('idle')
+    server.hold.add('thread/resume')
+    const events: { type: string }[] = []
+    void new CodexAdapter()
+      .createSession(
+        {
+          sessionId: 's1',
+          cwd: '/tmp',
+          permissionPreset: 'safe',
+          resumeExternalId: 'thread-1',
+          processSource: {
+            spawn: () => {
+              throw new Error('an adopted session must not spawn')
+            },
+            adopt: { process: server as unknown as AgentProcess, openCalls: [] },
+          },
+        },
+        (e) => events.push(e as never),
+      )
+      .catch(() => {})
+    await eventually(() => server.received.some((m) => m.method === 'thread/resume'))
+    server.exitCode = 0
+    server.emit('exit', 0, null)
+    await eventually(() => events.some((e) => e.type === 'error'))
+    expect(events.some((e) => e.type === 'session_live')).toBe(false)
   })
 
   it('request ids carry a per-client prefix, so an answer meant for the old host cannot resolve a new request', async () => {
