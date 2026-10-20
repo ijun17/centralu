@@ -173,7 +173,7 @@ packages/agent-host/src/adapters/codex/background-tasks.test.ts @typescript-esli
 packages/agent-host/src/adapters/codex/bridge-reconnect.test.ts @typescript-eslint/no-base-to-string 1
 packages/agent-host/src/adapters/codex/bridge-utf8.test.ts @typescript-eslint/no-base-to-string 1
 packages/agent-host/src/adapters/codex/child-threads.ts @typescript-eslint/no-unsafe-type-assertion 1
-packages/agent-host/src/adapters/codex/client.ts @typescript-eslint/no-unsafe-type-assertion 3
+packages/agent-host/src/adapters/codex/client.ts @typescript-eslint/no-unsafe-type-assertion 1
 packages/agent-host/src/adapters/codex/compact.test.ts @typescript-eslint/no-unnecessary-type-assertion 2
 packages/agent-host/src/adapters/codex/history.ts @typescript-eslint/no-unsafe-assignment 1
 packages/agent-host/src/adapters/codex/history.ts @typescript-eslint/no-unsafe-type-assertion 10

@@ -1,33 +1,37 @@
 /**
  * A-1: verifies the Codex app-server protocol contract.
  *
- * The generated bindings (642 files, 2.6MB) are **never committed** — committing them whole would
- * bury the signal a review needs to see under noise. Instead, only `protocol-contract.json` (the
- * list of methods we actually use) is committed, and **anything that has disappeared** is reported
- * by diffing it against the generated output (change axis C4: protocol drift detection).
+ * The generated bindings (747 files) are not committed whole: that would bury the signal a review
+ * needs to see under noise. `protocol-contract.json` (the methods, fields and words we actually use)
+ * is committed, and **anything that has disappeared** is reported by diffing it against the
+ * generated output (change axis C4: protocol drift detection).
  *
- * One exception: `generated/Verbosity.ts` is committed (#54). The adapter imports it at compile
- * time (the satisfies drift trap on CODEX_VERBOSITIES), and without it every place tsc runs would
- * break — especially `pnpm verify` in release. Regenerating it here also updates that file, so if
- * codex changes its enum values, both a git diff and a compile error surface it.
+ * What is committed of the bindings is what the adapter is compiled against (#1339): the params
+ * type of every server notification and request the contract names, read from the generated
+ * `ServerNotification` and `ServerRequest` unions, every type those import, and `Verbosity` (#54,
+ * the satisfies drift trap on CODEX_VERBOSITIES). A field Codex renames in one of them then fails
+ * the build where the adapter reads it, as well as the drift check here.
  *
- *   pnpm codex:bindings          — generates types (for local reference, gitignored) + verifies the contract
- *   pnpm codex:bindings --check  — verifies the contract only (for CI)
+ *   pnpm codex:bindings          — verifies the contract, and writes those types into generated/ (to commit),
+ *                                  replacing the folder: nothing else belongs in it; codex-version.txt says which
+ *                                  Codex made them
+ *   pnpm codex:bindings --check  — verifies the contract, and that generated/ holds them as Codex makes them
+ *                                  (drift.yml, with the latest Codex: a type we read changing goes red there)
  *
  * What is checked: the method, notification, item-type and value names we use; the arguments we send to each request
  * (both ways, see below); the fields we read from an answer (`responseFields`); and the enum words we send or compare
  * (`enumValues`).
  */
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, cpSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = fileURLToPath(new URL('../../..', import.meta.url))
 const ADAPTER = join(ROOT, 'packages/agent-host/src/adapters/codex')
 const CONTRACT = join(ADAPTER, 'protocol-contract.json')
-const KEEP = !process.argv.includes('--check') // --check does not keep the generated output
+const WRITE = !process.argv.includes('--check') // --check compares generated/ with what Codex makes, writing nothing
 
 const contract = JSON.parse(readFileSync(CONTRACT, 'utf8'))
 const version = execFileSync('codex', ['--version'], { encoding: 'utf8' }).trim()
@@ -171,6 +175,61 @@ for (const [type, values] of Object.entries(contract.enumValues ?? {})) {
   }
 }
 
+/*
+ * The types the adapter is compiled against (#1339): each contract method's params type, as the generated unions name
+ * it (`{ "method": "item/started", "params": ItemStartedNotification }`), and everything those import.
+ */
+const committed = new Map()
+{
+  const roots = ['Verbosity']
+  for (const [union, key] of [['ServerNotification', 'serverNotifications'], ['ServerRequest', 'serverRequests']]) {
+    const src = readFileSync(join(tmp, `${union}.ts`), 'utf8')
+    for (const method of contract[key] ?? []) {
+      const quoted = method.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')
+      const m = new RegExp(`"method": "${quoted}",[^}]*?"?params"?: (\\w+)`).exec(src)
+      const name = m?.[1]
+      const from = name ? new RegExp(`import type \\{ ${name} \\} from "\\./([^"]+)"`).exec(src)?.[1] : undefined
+      if (!from) missing.push(`${union}: no params type for ${method}`)
+      else roots.push(from)
+    }
+  }
+  const visit = (file) => {
+    if (committed.has(file)) return
+    const path = join(tmp, `${file}.ts`)
+    if (!existsSync(path)) {
+      missing.push(`generated type: ${file}`)
+      return
+    }
+    const text = readFileSync(path, 'utf8')
+    committed.set(file, text)
+    for (const m of text.matchAll(/from "(\.[^"]+)"/g)) visit(join(dirname(file), m[1]).split('\\').join('/'))
+  }
+  for (const root of roots) visit(root)
+}
+const DEST = join(ADAPTER, 'generated')
+const VERSION_FILE = join(DEST, 'codex-version.txt')
+/** What generated/ no longer matches; said apart from what disappeared from the contract, since the fix differs */
+const stale = []
+/** Every file under generated/, by path without `.ts` */
+const committedNow = () => {
+  const out = new Map()
+  if (!existsSync(DEST)) return out
+  for (const entry of readdirSync(DEST, { recursive: true, withFileTypes: true })) {
+    if (!entry.isFile() || !entry.name.endsWith('.ts')) continue
+    const full = join(entry.parentPath, entry.name)
+    out.set(relative(DEST, full).split('\\').join('/').slice(0, -3), readFileSync(full, 'utf8'))
+  }
+  return out
+}
+if (!WRITE) {
+  const now = committedNow()
+  for (const [file, text] of committed) {
+    if (!now.has(file)) stale.push(`generated/${file}.ts: not committed`)
+    else if (now.get(file) !== text) stale.push(`generated/${file}.ts: differs from what Codex makes now`)
+  }
+  for (const file of now.keys()) if (!committed.has(file)) stale.push(`generated/${file}.ts: no longer read by the adapter`)
+}
+
 if (missing.length > 0) {
   console.error(
     `[codex] the protocol has changed (${version}). ${missing.length} item(s) we depend on have disappeared:\n  ` +
@@ -180,20 +239,31 @@ if (missing.length > 0) {
   rmSync(tmp, { recursive: true, force: true })
   process.exit(1)
 }
+if (stale.length > 0) {
+  const made = existsSync(VERSION_FILE) ? readFileSync(VERSION_FILE, 'utf8').trim() : 'an unknown version'
+  console.error(
+    `[codex] generated/ does not hold the types the adapter reads as ${version} makes them (committed: ${made}). ${stale.length} file(s):\n  ` +
+      stale.join('\n  ') +
+      `\n→ run pnpm codex:bindings with ${version} and commit generated/; fix what the build then says about the adapter.`,
+  )
+  rmSync(tmp, { recursive: true, force: true })
+  process.exit(1)
+}
 
-if (KEEP) {
-  // Kept only for local reference (gitignored — not subject to typecheck or lint either)
-  const dest = join(ADAPTER, 'generated')
-  rmSync(dest, { recursive: true, force: true })
-  mkdirSync(dest, { recursive: true })
-  cpSync(tmp, dest, { recursive: true })
-  console.log(`[codex] contract verified (${version}) · left the reference types in generated/ (not for commit)`)
+if (WRITE) {
+  rmSync(DEST, { recursive: true, force: true })
+  for (const [file, text] of committed) {
+    mkdirSync(dirname(join(DEST, file)), { recursive: true })
+    writeFileSync(join(DEST, `${file}.ts`), text)
+  }
+  writeFileSync(VERSION_FILE, `${version}\n`)
+  console.log(`[codex] contract verified (${version}) · wrote the ${committed.size} types the adapter is compiled against into generated/ (commit them)`)
 } else {
   console.log(
     `[codex] contract verified (${version}) — all ${groups.reduce((n, [k]) => n + contract[k].length, 0)} dependent item(s) + ` +
       `${Object.keys(contract.requestParams ?? {}).length} request param set(s) + ` +
       `${Object.keys(contract.responseFields ?? {}).length} response type(s) + ` +
-      `${Object.keys(contract.enumValues ?? {}).length} enum(s) match`,
+      `${Object.keys(contract.enumValues ?? {}).length} enum(s) match, and generated/ holds the ${committed.size} types the adapter reads as Codex makes them`,
   )
 }
 
