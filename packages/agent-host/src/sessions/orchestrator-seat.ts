@@ -13,6 +13,7 @@ import type { PreferencesAnswer, PreferencesRequest } from './preferences-flow.j
 import type { TrashAnswer, TrashRequest } from './trash-flow.js'
 import type { TrustAnswer, TrustRequest } from './trust-flow.js'
 import type { AppUpkeepAnswer, AppUpkeepRequest } from './app-upkeep-flow.js'
+import type { HousekeepingAnswer, HousekeepingRequest } from './housekeeping-flow.js'
 import { dedupeNearbyHits, takeInTurns, windowAround, windowAroundLines } from './snippet.js'
 import { LINE_WINDOW_CHARS, lineText, sessionLines } from './session-lines.js'
 import { contextAt, labelOf, lastActiveOf, previewOf, timeOf } from './transcript-view.js'
@@ -92,6 +93,8 @@ export type OrchestratorSeatHost = {
   trustRequest(sessionId: string, req: TrustRequest, signal?: AbortSignal): Promise<TrustAnswer>
   /** The app upkeep commands (#1219): `AppUpkeepFlow.run`, with the orchestrator as the session its card stands in */
   appUpkeepRequest(sessionId: string, req: AppUpkeepRequest, signal?: AbortSignal): Promise<AppUpkeepAnswer>
+  /** The housekeeping and read commands (#1219): `HousekeepingFlow.run`, with the orchestrator as the caller */
+  housekeepingRequest(sessionId: string, req: HousekeepingRequest): Promise<HousekeepingAnswer>
   /** start_agent and agent_session for the central orchestrator (#853): the start flow, with the orchestrator as the caller */
   startAgent(callerId: string, opts: StartAgentOpts, signal?: AbortSignal): Promise<ChildRunResult>
   agentSession(callerId: string, opts: AgentSessionOpts, signal?: AbortSignal): Promise<ChildRunResult>
@@ -703,6 +706,9 @@ export function orchestratorToolsFor(
 
     // Trust (#1219): the central orchestrator's alone; widening it waits for the person's card
     trust: async (req, signal) => (central ? host.trustRequest(orchestratorId, req, signal) : { ok: false, error: 'Only the orchestrator changes trust' }),
+
+    // Housekeeping and reads (#1219): the central orchestrator's alone; none asks
+    housekeeping: async (req) => (central ? host.housekeepingRequest(orchestratorId, req) : { ok: false, error: 'Only the orchestrator does this housekeeping' }),
 
     // App upkeep (#1219): the central orchestrator's alone; removing an app waits for the person's card
     appUpkeep: async (req, signal) => (central ? host.appUpkeepRequest(orchestratorId, req, signal) : { ok: false, error: 'Only the orchestrator looks after apps' }),

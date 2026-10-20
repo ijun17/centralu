@@ -8,6 +8,7 @@ import type { PreferencesRequest } from './preferences-flow.js'
 import type { TrashRequest } from './trash-flow.js'
 import type { TrustRequest } from './trust-flow.js'
 import type { AppUpkeepRequest } from './app-upkeep-flow.js'
+import type { HousekeepingRequest } from './housekeeping-flow.js'
 import { ANSWER_FORM, agentListText, agentRunText, askProjectText, busyText, cardsText, listSessionsText, queuedText, trustedJsonText } from './tool-answers.js'
 import { AGENT_TOOLS, APP_ACCESS_TOOLS, ORCHESTRATOR_TOOLS, TOOL_ARGS, type CommandToolName } from './tool-definitions.js'
 import { FILL, callForm, commandsFor, guideSeats, namedCall, notAToolText, profileAllows, type CommandName } from './tool-seats.js'
@@ -338,6 +339,14 @@ const HANDLERS: ToolHandlers = {
   forget_app_answer: ({ app, project, capability }, call) => trustCommand({ action: 'forget_app_answer', app, ...(trimmed(project) ? { project: trimmed(project) } : {}), capability }, call),
   revoke_project_consent: ({ from, to, kind }, call) => trustCommand({ action: 'revoke_consent', from, to, kind }, call),
   set_agent_limits: (changes, call) => trustCommand({ action: 'set_limits', changes }, call),
+  // Housekeeping and reads (#1219, fourth slice): none asks
+  rename_session: ({ sessionId, name }, call) => housekeepingCommand({ action: 'rename_session', sessionId, name }, call),
+  clear_background_tasks: ({ sessionId }, call) => housekeepingCommand({ action: 'clear_background_tasks', sessionId }, call),
+  agent_status: ({ tool }, call) => housekeepingCommand({ action: 'agent_status', ...(trimmed(tool) ? { tool: trimmed(tool) } : {}) }, call),
+  agent_models: ({ tool }, call) => housekeepingCommand({ action: 'agent_models', tool }, call),
+  project_git_status: ({ project }, call) => housekeepingCommand({ action: 'git_status', project }, call),
+  search_project_files: ({ project, query, limit }, call) => housekeepingCommand({ action: 'search_files', project, query, ...(limit !== undefined ? { limit } : {}) }, call),
+
   // App upkeep (#1219, fourth slice): the flow writes each answer; removing an app waits for the person's card there
   list_app_versions: ({ app, project }, call) => appUpkeepCommand({ action: 'versions', app, ...(trimmed(project) ? { project: trimmed(project) } : {}) }, call),
   restore_app_version: ({ app, project, id }, call) => appUpkeepCommand({ action: 'restore_version', app, id, ...(trimmed(project) ? { project: trimmed(project) } : {}) }, call),
@@ -686,6 +695,13 @@ async function preferencesCommand(req: PreferencesRequest, { tools, signal }: To
 async function trustCommand(req: TrustRequest, { tools, signal }: ToolCall): Promise<ToolOutput> {
   if (!tools.trust) return { text: 'This session cannot change trust.', isError: true }
   const r = await tools.trust(req, signal)
+  return r.ok ? { text: r.text } : { text: `Nothing changed: ${r.error}`, isError: true }
+}
+
+/** One housekeeping or read command (#1219), through the seat's `housekeeping`; a seat without it is told so */
+async function housekeepingCommand(req: HousekeepingRequest, { tools, signal }: ToolCall): Promise<ToolOutput> {
+  if (!tools.housekeeping) return { text: 'This session cannot do this housekeeping.', isError: true }
+  const r = await tools.housekeeping(req, signal)
   return r.ok ? { text: r.text } : { text: `Nothing changed: ${r.error}`, isError: true }
 }
 

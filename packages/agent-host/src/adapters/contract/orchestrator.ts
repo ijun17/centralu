@@ -90,6 +90,19 @@ export type AppUpkeepRequest =
   | { action: 'restore_version'; app: string; project?: string; id: string }
   | { action: 'runs'; app: string; project?: string; limit?: number }
 
+/**
+ * One request of the orchestrator's housekeeping and read commands (#1219, fourth slice), as the tool runner reads its
+ * arguments: renaming a session, clearing its ended background tasks, and reading how the agent CLIs stand, a project's git
+ * state and its files. None asks.
+ */
+export type HousekeepingRequest =
+  | { action: 'rename_session'; sessionId: string; name: string }
+  | { action: 'clear_background_tasks'; sessionId: string }
+  | { action: 'agent_status'; tool?: string }
+  | { action: 'agent_models'; tool: string }
+  | { action: 'git_status'; project: string }
+  | { action: 'search_files'; project: string; query: string; limit?: number }
+
 /** What `set_agent_limits` changes (#1219): the person's limits on agents; absent means leave it */
 export type AgentLimitChanges = {
   /** Running agents per project: a number (0 is unlimited), or 'preset' for the preset's own */
@@ -720,6 +733,8 @@ export type OrchestratorTools = {
    * waits for the person's card naming the project and its apps; taking trust away acts at once. Absent on seats that cannot.
    */
   trust?(req: TrustRequest, signal?: AbortSignal): Promise<{ ok: true; text: string } | { ok: false; error: string }>
+  /** The housekeeping and read commands (#1219, fourth slice) */
+  housekeeping?(req: HousekeepingRequest, signal?: AbortSignal): Promise<{ ok: true; text: string } | { ok: false; error: string }>
   /** The app upkeep commands (#1219, fourth slice) */
   appUpkeep?(req: AppUpkeepRequest, signal?: AbortSignal): Promise<{ ok: true; text: string } | { ok: false; error: string }>
   /**

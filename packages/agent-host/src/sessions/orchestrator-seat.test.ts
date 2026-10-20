@@ -65,6 +65,7 @@ beforeEach(() => {
     trashRequest: vi.fn(),
     trustRequest: vi.fn(),
     appUpkeepRequest: vi.fn(),
+    housekeepingRequest: vi.fn(),
     startAgent: vi.fn(async () => ({ ok: false as const, error: 'reached the start flow' })),
     agentSession: vi.fn(async () => ({ ok: false as const, error: 'reached the start flow' })),
     listAgents: vi.fn(async () => []),
@@ -209,6 +210,16 @@ describe('the scope of a seat', () => {
     expect(host.appUpkeepRequest).not.toHaveBeenCalled()
     expect(await orchestratorToolsFor(host, 'orch').appUpkeep!({ action: 'usage', app: 'notes' })).toEqual({ ok: true, text: 'reached the flow' })
     expect(host.appUpkeepRequest).toHaveBeenCalledWith('orch', { action: 'usage', app: 'notes' }, undefined)
+  })
+
+  it('only the central orchestrator reaches the housekeeping commands (#1219): a lead, a reader view and a hub view never do', async () => {
+    host.housekeepingRequest = vi.fn(async () => ({ ok: true as const, text: 'reached the flow' }))
+    for (const seat of [orchestratorToolsFor(host, 'orch', ['a']), orchestratorToolsFor(host, 'b', undefined, true), orchestratorToolsFor(host, 'orch', undefined, false, true)]) {
+      expect(await seat.housekeeping!({ action: 'rename_session', sessionId: 'a', name: 'x' })).toEqual({ ok: false, error: 'Only the orchestrator does this housekeeping' })
+    }
+    expect(host.housekeepingRequest).not.toHaveBeenCalled()
+    expect(await orchestratorToolsFor(host, 'orch').housekeeping!({ action: 'agent_status' })).toEqual({ ok: true, text: 'reached the flow' })
+    expect(host.housekeepingRequest).toHaveBeenCalledWith('orch', { action: 'agent_status' })
   })
 
   it('never reads or sends to itself', async () => {

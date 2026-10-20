@@ -361,6 +361,40 @@ export const ORCHESTRATOR_TOOLS = [
    * #1219, fourth slice: app upkeep. Rare commands. Reads and what undoes itself act at once; removing an app waits for
    * the person's card (its folder moves to app-trash/).
    */
+  /*
+   * #1219, fourth slice: housekeeping and reads. Rare commands; none asks. Stopping a session's background task, marking
+   * it read and reordering the sidebar are the person's (docs/agent-host.md section 1.4).
+   */
+  {
+    name: 'rename_session',
+    description: "Renames a worker session, as the window's rename does; renaming it back sets the old name. Acts at once.",
+    schema: z.object({ sessionId: z.string().describe('The id list_sessions gives.'), name: z.string().describe('The new name, one line.') }).strict(),
+  },
+  {
+    name: 'clear_background_tasks',
+    description: "Takes the ended background jobs off a session's list. Jobs still running stay. Acts at once.",
+    schema: z.object({ sessionId: z.string().describe('The id list_sessions gives.') }).strict(),
+  },
+  {
+    name: 'agent_status',
+    description: 'Says which agent CLIs are installed and logged in on this computer, with their plan and limits. Reads only.',
+    schema: z.object({ tool: z.string().optional().describe('Only this tool, as it is named here.') }).strict(),
+  },
+  {
+    name: 'agent_models',
+    description: "Lists the models an agent CLI offers, with the efforts each takes (the ids create_session and update_session_settings accept). Reads only.",
+    schema: z.object({ tool: z.string().describe('The tool, as agent_status names it.') }).strict(),
+  },
+  {
+    name: 'project_git_status',
+    description: "Says a project's branch, how many files changed and its origin. Reads only.",
+    schema: z.object({ project: z.string().describe('Its name or id, from list_projects.') }).strict(),
+  },
+  {
+    name: 'search_project_files',
+    description: "Finds files of a project by part of their name, as the composer's @ does. Reads only.",
+    schema: z.object({ project: z.string().describe('Its name or id, from list_projects.'), query: z.string(), limit: z.number().int().optional().describe('1 to 50; 20 by default.') }).strict(),
+  },
   {
     name: 'list_app_versions',
     description: "Lists an app's kept versions (a user-folder app's snapshots, or a project app's recent commits, which are git's).",
@@ -414,7 +448,7 @@ export const ORCHESTRATOR_TOOLS = [
   {
     name: 'create_session',
     description:
-      'Creates one worker session (#13). Use it when there is no suitable session to assign work to — the created session appears right away in the list the person sees. Deleting it is the person\'s job.',
+      'Creates one worker session (#13). Use it when there is no suitable session to assign work to — the created session appears right away in the list the person sees. Deleting it asks the person.',
     schema: z.object({
       project: z
         .string()
@@ -851,12 +885,12 @@ export const ORCHESTRATOR_INSTRUCTIONS = [
   // #1233: work handed out is heard of when it ends; more words into it do not undo that
   "create_session's firstMessage reports back the same way unless reportBack is false; a note into a running turn never cancels a report.",
   'If a report is not enough, read that session\'s conversation directly with read_session.',
-  'If there is no suitable session to assign work to, make one with create_session — deleting it is the person\'s job.',
+  'If there is no suitable session to assign work to, make one with create_session; deleting a session asks the person (delete_session).',
   // #853: the orchestrator's light work outside any project went to its CLI's own subagent, which Centralu never shows
   'For light work outside any project (a web search, a lookup), start a session the person can watch with the start_agent command, not your Agent tool.',
   'Make a new project with create_project; add an existing folder, here or on a linked machine, with the add_project command (list_machines names the machines).',
   // #1219: the machine and trust commands (#1219's third slice: projects' trust, approval rules, app grants, agent limits) are found by these words
-  'Machines and trust: centralu_commands "machine trust rule grant limits". Settings: get_preferences, set_preferences. Trash: list_trash.',
+  'More commands: centralu_commands "machine trust rule grant limits app session agent project preferences trash".',
   'When the person says "make me a tool/screen that does…", make the app with create_app — a screen the person clicks and the tools an agent calls are one app.',
   // #1205: one server per trusted project that is an app grew every request; the orchestrator attaches the one it needs
   'Projects that are apps attach on demand: the find_apps command lists them.',
