@@ -337,7 +337,7 @@ export async function readRepo(repo) {
 const PR_FIELDS = 'number,title,body,state,isDraft,mergeable,headRefOid,headRefName,baseRefName,isCrossRepository,url,mergeCommit'
 
 // The merge queue also reads how GitHub would merge it (DIRTY, BEHIND, BLOCKED, CLEAN, …)
-export const QUEUE_PR_FIELDS = `${PR_FIELDS},mergeStateStatus`
+export const QUEUE_PR_FIELDS = `${PR_FIELDS},mergeStateStatus,labels`
 
 /** One pull request, as `gh pr view --json` gives it. */
 export async function readPr(repo, number, fields = PR_FIELDS) {
@@ -774,7 +774,7 @@ export async function setPrBase(repo, number, base) {
 export async function prsWithHead(repo, branch) {
   checkRepo(repo)
   if (!REF.test(String(branch))) return []
-  const out = await runGh(['pr', 'list', '-R', repo, '--head', branch, '--state', 'all', '--limit', '10', '--json', 'number,state,isDraft,headRefName,baseRefName,headRefOid,mergeCommit'])
+  const out = await runGh(['pr', 'list', '-R', repo, '--head', branch, '--state', 'all', '--limit', '10', '--json', 'number,state,isDraft,headRefName,baseRefName,headRefOid,mergeCommit,isCrossRepository,labels'])
   const list = parseJson(out)
   return Array.isArray(list) ? list.sort((a, b) => b.number - a.number) : []
 }

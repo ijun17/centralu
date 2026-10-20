@@ -39,7 +39,7 @@ import {
   rerunRun,
   setPrBase,
 } from './github.mjs'
-import { ACTIVE, attentionText, BATCH_ACTIVE, decideRun, ERROR_LIMIT, findItem, noticeKey, pushEvent, SUBJECT_MAX, supersededSuites } from './queue.mjs'
+import { ACTIVE, attentionText, BATCH_ACTIVE, decideRun, ERROR_LIMIT, findItem, noticeKey, pushEvent, quickLanded, SUBJECT_MAX, supersededSuites } from './queue.mjs'
 import { afterMerge, batchable, failingLine, land, latestRuns, permissionsOf, pollMs, runFailures, takeLease, updateQueue } from './queue-driver.mjs'
 import { short } from './util.mjs'
 
@@ -161,7 +161,7 @@ async function build(b, ctx) {
       continue
     }
     const pr = await readPr(repo, m.pr, QUEUE_PR_FIELDS)
-    if (pr.state === 'OPEN' && !pr.isDraft && pr.headRefOid === m.head && pr.mergeStateStatus !== 'DIRTY' && pr.mergeable !== 'CONFLICTING' && batchable(pr)) kept.push({ ...m, title: pr.title })
+    if (pr.state === 'OPEN' && (!pr.isDraft || it.auto) && pr.headRefOid === m.head && pr.mergeStateStatus !== 'DIRTY' && pr.mergeable !== 'CONFLICTING' && batchable(pr)) kept.push({ ...m, title: pr.title })
     else gone.push(m.pr)
   }
   if (kept.length < KEEP_MIN) {
@@ -289,7 +289,7 @@ async function runCi(b, ctx) {
       continue
     }
     const pr = await readPr(repo, s.pr, QUEUE_PR_FIELDS)
-    if (pr.state !== 'OPEN' || pr.isDraft || pr.headRefOid !== s.head) left.push(s.pr)
+    if (pr.state !== 'OPEN' || (pr.isDraft && !it.auto) || pr.headRefOid !== s.head) left.push(s.pr)
   }
   if (left.length) {
     await cancelBatchRuns(b, renew)
@@ -316,7 +316,17 @@ async function runCi(b, ctx) {
   const n = `Batch ${b.branch}`
   // Why a finished run failed: a real failure is split at once, only an infrastructure one rerun
   const failures = checks.verdict === 'failing' ? await runFailures(repo, runs, b.failures) : {}
-  const d = decideRun({ subject: b, head: b.head, checks, runs, failures, now, n })
+  /*
+   * Landing after the fast tier (`ci.landTier: quick`, #1259): the batch's run is the quick tier, judged as a pull
+   * request's own quick run is (`quickGreen`): every run finished, nothing it reported failed or is pending, the full
+   * tier's check skipped. The required set is read from the whole workflow, whose full-tier jobs a quick run never
+   * reports (a matrix job left out reports no check of its name at all): without this, those counted as missing and
+   * the green batch stopped with "never reported" (queue/batch-98, 2026-10-19). A quick-tier failure still fails;
+   * a run with no full tier check at all, one that concluded badly, or one where a check named in ci.quickChecks
+   * was not reported or did not succeed, is left to decideRun (`quickLanded`).
+   */
+  const quickLanding = TIERS && CI.landTier === 'quick' && quickLanded(checks, runs, CI.fullTier, CI.quickChecks)
+  const d = quickLanding ? { state: 'green' } : decideRun({ subject: b, head: b.head, checks, runs, failures, now, n })
   if (d.action?.type === 'rerun') {
     if (!renew()) return { yielded: true }
     save((fq, fb) => Object.assign(fb, { required, failures, reruns: d.patch.reruns }))
@@ -462,17 +472,19 @@ async function landNext(b, ctx) {
   let squash = null
   if (d.do === 'merge') {
     if (!renew()) return { yielded: true }
-    // On the pull request, why it merged with its own run cancelled
-    await postStatus(repo, step.head, {
-      state: 'success',
-      context: STATUS_CONTEXT,
-      description: `Passed CI in ${b.branch}${prs.length > 1 ? ` with ${list(b, prs.filter((p) => p !== step.pr), ref)}` : ''}`,
-      targetUrl: b.run?.url ?? null,
-    }).catch((e) => {
-      if (e instanceof GitHubError && FATAL.has(e.kind)) throw e
-    })
+    // On the pull request, why it merged with its own run cancelled: once land's own checks passed (an integrated
+    // change judged not auto there gets no green status for a head that does not land, #1259 step 3)
+    const status = () =>
+      postStatus(repo, step.head, {
+        state: 'success',
+        context: STATUS_CONTEXT,
+        description: `Passed CI in ${b.branch}${prs.length > 1 ? ` with ${list(b, prs.filter((p) => p !== step.pr), ref)}` : ''}`,
+        targetUrl: b.run?.url ?? null,
+      }).catch((e) => {
+        if (e instanceof GitHubError && FATAL.has(e.kind)) throw e
+      })
     // The batch's run proved it (an older batch file has no time: a lower's failure then counts)
-    const r = await land(view, pr, ref, renew, defaultBranch, { provedAt: b.run?.createdAt ?? null })
+    const r = await land(view, pr, ref, renew, defaultBranch, { provedAt: b.run?.createdAt ?? null, beforeMerge: status })
     if (r.yielded) return { yielded: true }
     if (r.state !== 'merged') {
       const rest = prs.slice(k + 1)
@@ -481,6 +493,8 @@ async function landNext(b, ctx) {
         then: (fq) => {
           const it = findItem(fq, repo, step.pr)
           if (!it) return
+          // An integrated one judged not auto at landing keeps that judgment for its head (#1259 step 3)
+          if (r.tierAt) it.tierAt = r.tierAt
           Object.assign(it, { state: 'attention', reason: r.reason, noticeKey: `${r.reason.kind}:${step.head}:`, updatedAt: at, nextAt: new Date(now + pollMs('attention')).toISOString() })
           pushEvent(fq, it, { kind: 'attention', text: attentionText(it, r.reason, ref), notify: true, at })
         },

@@ -14,7 +14,7 @@
 // branch). An item whose quick tier passed waits for a batch; one that cannot be batched, or whose
 // batch of one ended without landing it, needs its session.
 import { canMerge, NO_PERMISSION, quickTierReason, ranTier, squashMessage } from './ci.mjs'
-import { CAUSE_TEXT } from './run-failure.mjs'
+import { CAUSE_TEXT, onFlakyList } from './run-failure.mjs'
 import { short } from './util.mjs'
 
 /** What an item can be in. The first three are active (the driver polls them); the last two are done. */
@@ -208,7 +208,8 @@ export function decideBefore({ item, permissions, pr, defaultBranch, ref }) {
   // Landed only into the default branch: merged into a lower's branch, its lowers are not landed
   if (pr.state === 'MERGED') return { state: 'merged', landed: pr.baseRefName === defaultBranch }
   if (pr.state !== 'OPEN') return { state: 'closed' }
-  if (pr.isDraft) return attention('draft', `${n} is a draft, and the queue never merges a draft. Mark it ready for review; the queue carries on by itself.`)
+  // A record handed over with integrate is a draft on purpose until it lands (#1259 step 3, queue-integrate.mjs)
+  if (pr.isDraft && !item.auto) return attention('draft', `${n} is a draft, and the queue never merges a draft. Mark it ready for review; the queue carries on by itself.`)
   // A conflict: the driver merges the default branch in itself, or hands it to the author (#1182)
   if (pr.mergeStateStatus === 'DIRTY' || pr.mergeable === 'CONFLICTING')
     return attention(
@@ -378,6 +379,14 @@ export function decideCi({ item, pr, checks, runs = [], failures = {}, defaultBr
   // It failed alone in a batch on this head (queue-batch.mjs): that full run is the answer, whatever
   // its own quick run says (cancelled for the batch, it would otherwise be rerun to say nothing new)
   if (item.alone?.head === head && item.alone.reason) return { state: 'attention', reason: item.alone.reason }
+  // Handed over with integrate (#1259 step 3): a draft, whose own run is only CI's changes job, so it lands through a
+  // batch alone (the quick tier on what lands), never from its own run
+  if (item.auto) {
+    if (!canBatch) return attention('batch', `${n} was handed over with integrate, which lands only through a batch (the quick tier on ${defaultBranch}), and the queue cannot batch it (batches are off, or two tiers of CI are not set). Take it out (unqueue), mark it ready and land it with queue_merge.`)
+    const alone = item.alone?.head === head ? item.alone : null
+    if (alone) return attention('full-tier', `${n}'s batch of one ended without landing it: ${alone.text} Fix it and push (the queue takes the new head), or queue it again with integrate.`)
+    return { state: 'ci', quick: true, patch: { noCiSince: null, missingSince: null } }
+  }
   if (quickGreen(checks, runs, fullTier)) {
     const alone = item.alone?.head === head ? item.alone : null
     if (alone)
@@ -446,6 +455,27 @@ export function lowerFailureCounts(run, provedAt) {
  * check did not pass (skipped, or never reported by an older workflow), and no required check it
  * reported failed or is still going; the checks a quick run leaves out are not reported at all.
  */
+/**
+ * Whether a batch's run lands under `ci.landTier: quick` (#1259): its quick tier passed as a pull request's own
+ * does (`quickGreen`), and more strictly, since this decides a landing: the full tier's check reported, skipped (a
+ * run with no such check at all is not known to be the quick tier), every run concluded well (a run that failed on a
+ * check outside the required rows does not land), and **each named quick check** (`quickChecks`, project.json
+ * `ci.quickChecks`, `*` for any run of characters) reported and succeeded, every check its name matches: one never
+ * reported (a renamed job, one a broken `changes` switched off, a Windows shard GitHub never created) or skipped does
+ * not land (#1259 review). No names, nothing lands from a quick run.
+ */
+export function quickLanded(checks, runs, fullTier, quickChecks = []) {
+  if (!quickChecks?.length) return false
+  if (!quickGreen(checks, runs, fullTier) || ranTier(checks, fullTier) !== 'quick') return false
+  if (!runs.every((r) => OK_CONCLUSIONS.has(r.conclusion))) return false
+  const all = [...checks.rows, ...(checks.others ?? [])]
+  const succeeded = (r) => !!r.check && (r.check.kind === 'status' ? r.check.state === 'success' : r.check.status === 'completed' && r.check.conclusion === 'success')
+  return quickChecks.every((pattern) => {
+    const named = all.filter((r) => onFlakyList(r.name, [pattern]))
+    return named.length > 0 && named.every(succeeded)
+  })
+}
+
 export function quickGreen(checks, runs, fullTier) {
   if (!fullTier || ranTier(checks, fullTier) === 'full') return false
   if (!runs?.length || runs.some((r) => r.status !== 'completed')) return false
@@ -525,7 +555,7 @@ export function attentionText(item, reason, ref = refIn(item.repo)) {
 /** One line for an item in answers and on the screen. */
 export function itemLine(item, ref = refIn(item.repo)) {
   const stack = item.lowers?.length ? ` (stack over ${item.lowers.map((l) => ref(item.repo, l)).join(', ')})` : ''
-  const title = item.title ? ` ${item.title}` : ''
+  const title = `${item.title ? ` ${item.title}` : ''}${item.auto ? ' (integrated)' : ''}`
   const what =
     item.state === 'attention'
       ? `needs attention: ${item.reason?.kind ?? '?'} — ${item.reason?.text ?? ''}`
