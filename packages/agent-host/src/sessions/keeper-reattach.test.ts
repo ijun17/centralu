@@ -199,6 +199,8 @@ describe('a host restart under the keeper', () => {
       // 80% of the real 200,000 window: the record was not lowered to the cap
       expect(b.claude.last.opts.autoCompactTokens).toBe(160_000)
       expect(third.id).not.toBe(second.id)
+      // The adopted process is handed the window it was started with, for the adapter to compare where it compacts against
+      expect(b.claude.created.find((h) => h.opts.sessionId === second.id)?.opts.autoCompactCeiling).toBe(153_000)
     } finally {
       await b.mgr.disposeAll()
     }

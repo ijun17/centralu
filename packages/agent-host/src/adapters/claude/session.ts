@@ -17,7 +17,7 @@ import { ClaudeServers } from './session-servers.js'
 import { appToolOf, isOrchestratorTool, permissionOptionsFor, settingSourcesFor } from './permissions.js'
 import { liveQueries, probeIds, querySessions } from './live-queries.js'
 import type { ClaudeMessage } from './json.js'
-import { claudeAutoCompactWindow, claudeQueryOptions, type ClaudeInput, type QueryHandle } from './sdk-query.js'
+import { claudeAutoCompactWindow, claudeQueryOptions, compactPointOff, type ClaudeInput, type QueryHandle } from './sdk-query.js'
 import { ClaudeRaceRetry, type RaceMsg } from './refresh-race.js'
 import { tracksInputs } from './tracked-input.js'
 import { initSurfaceLines } from './surface.js'
@@ -573,12 +573,13 @@ export class ClaudeSession implements SessionHandle {
    * `CLAUDE_AUTO_COMPACT_BUFFER` was measured with compacts elsewhere than the setting says; said once, in the host log.
    */
   private checkCompactPoint(reported: number): void {
-    const asked = this.opts.autoCompactTokens
-    if (!asked || !(reported > 0) || this.compactPointSaid || Math.abs(reported - asked) <= 1_000) return
-    // A model whose window is smaller than the one passed compacts at its own point: not a difference of buffers
-    if (reported < asked && this.contextWindow !== null && this.contextWindow < claudeAutoCompactWindow(asked)) return
+    if (this.compactPointSaid) return
+    // What this process was passed: for a fresh one the setting gives it, for an adopted one what it was started with
+    const passed = this.opts.processSource?.adopt ? this.opts.autoCompactCeiling : this.opts.autoCompactTokens ? claudeAutoCompactWindow(this.opts.autoCompactTokens) : undefined
+    const expected = compactPointOff(passed, reported, this.contextWindow)
+    if (expected === null) return
     this.compactPointSaid = true
-    console.error(`[claude] ${this.sessionId.slice(0, 8)} compacts at ${reported} tokens, not the ${asked} Centralu asked for`)
+    console.error(`[claude] ${this.sessionId.slice(0, 8)} compacts at ${reported} tokens, not the ${expected} Centralu asked for`)
   }
   private compactPointSaid = false
   private contextWindow: number | null = null

@@ -1470,7 +1470,7 @@ the params with the method's schema and reads the answer with its result schema,
   dropped when it names another (the alias, the project default or the person's own setting moved), so the next start passes nothing and
   learns the real window (a record that was too small can rise). The ceiling a process was started with is kept with the session
   (`auto_compact_ceiling:<id>`) and read back when a host swap adopts the process, since the process keeps its original flags whatever the
-  setting says by then; one adopted without a kept ceiling (a host from before) can only say "at least". Codex reports the model's own window, so its readings always replace the
+  setting says by then; one adopted without a kept ceiling (a host from before) can only say "at least". The row is dropped when the session has no process to adopt: when it sleeps, is deleted, or its start fails (a purge of the trash takes any left, by its `<name>:<id>` shape). The adopted process is handed the ceiling (`CreateSessionOpts.autoCompactCeiling`), and the adapter's once-only log of a compaction point that differs from the one asked for compares against it, not against what the setting gives now. Codex reports the model's own window, so its readings always replace the
   known one. A model nobody has read a window from passes nothing at its first start and the value from the next (Settings, and the
   session's own settings menu, say so).
   **Linked machines.** A machine starts and wakes its sessions from its own preferences, and the setting lives on the hub, so the hub tells

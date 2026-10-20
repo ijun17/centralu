@@ -1,3 +1,4 @@
+import type { ModelWindows } from './auto-compact.js'
 import { restoreWorktreeRecovery, stageWorktreeRecoveryRemoval, worktreeRecoveryBytes, type WorktreeRecovery } from '../dev-services/worktree-recovery.js'
 import type { ChildOwnership } from './child-ownership.js'
 import type { SessionAppsHub } from './session-apps.js'
@@ -65,6 +66,7 @@ export type SessionTrashHost = {
   quitNotices: { sessionId: string; requester: string; swapped?: true }[]
   readonly readGrants: Map<string, Set<string>>
   readonly record: SessionRecord
+  readonly modelWindows: Pick<ModelWindows, "forget">
   readonly recoveryRepair: Promise<void>
   readonly restartPolicy: RestartPolicy
   /** A wake or a resume under way (`SessionManager.resuming`): the session is about to take a turn */
@@ -347,6 +349,8 @@ export class SessionTrash {
     let project: { name: string; path: string } | undefined
     if (m.projectId) project = this.host.store.projects.listProjects().find((p) => p.id === m.projectId)
     this.host.running.delete(sessionId)
+    // Its process is gone: so is the compaction ceiling kept for a later host to adopt it by (#1376)
+    this.host.modelWindows.forget(sessionId)
     this.host.restartPolicy.restartAfterTurn.delete(sessionId)
     this.host.restartPolicy.trustRestartNotice.delete(sessionId)
     // A deleted session's branch is never asked about again (#392: one entry per worktree session ever made)

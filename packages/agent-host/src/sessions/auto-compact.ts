@@ -1,6 +1,9 @@
 import type { AutoCompact, SessionInfo } from '@cc/protocol'
 import type { SettingAccess } from '../dev-services/store/settings.js'
 
+/** What `ModelWindows` reaches of the store */
+export type WindowSettings = SettingAccess & { deleteAppSetting(key: string): void }
+
 /**
  * Where an agent compacts by itself, as Centralu sets it (#1376): the share of the model's context window the person chose
  * (60% unless changed), in tokens, for the tool to take at launch. Nothing when Centralu's control is off, or when the
@@ -49,7 +52,7 @@ export class ModelWindows {
   /** The largest window each running process can report because of what it was started with; 'unknown' for an adopted process that did not say */
   private readonly ceilings = new Map<string, number | 'unknown'>()
 
-  constructor(private readonly settings: SettingAccess) {}
+  constructor(private readonly settings: WindowSettings) {}
 
   private key(m: Pick<SessionInfo, 'tool' | 'model' | 'projectId'>): string {
     return `model_window:${m.tool}:${m.model ?? `default@${m.projectId ?? ''}`}`
@@ -75,6 +78,22 @@ export class ModelWindows {
     this.settings.setAppSetting(key, String(ceiling ?? 0))
     if (ceiling === null) this.ceilings.delete(sessionId)
     else this.ceilings.set(sessionId, ceiling)
+  }
+
+  /** The ceiling a running or adopted process was started with, or null when none is known */
+  ceilingOf(sessionId: string): number | null {
+    const c = this.ceilings.get(sessionId)
+    return typeof c === 'number' ? c : null
+  }
+
+  /**
+   * The session has no process any more (it slept, was deleted, or never came up), so its ceiling is no use to a later host:
+   * the next start writes one again. Without this the row outlived the session (a deleted one's is purged with it, but a
+   * slept session's and a failed start's were left behind)
+   */
+  forget(sessionId: string): void {
+    this.ceilings.delete(sessionId)
+    this.settings.deleteAppSetting(`auto_compact_ceiling:${sessionId}`)
   }
 
   /** A reading of the session's window, with the model the tool says it is for when it says */

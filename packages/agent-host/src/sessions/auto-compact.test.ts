@@ -43,7 +43,7 @@ describe('the setting as stored', () => {
 describe('ModelWindows', () => {
   const settings = () => {
     const values = new Map<string, string>()
-    return { appSetting: (k: string) => values.get(k) ?? null, setAppSetting: (k: string, v: string) => void values.set(k, v) }
+    return { appSetting: (k: string) => values.get(k) ?? null, setAppSetting: (k: string, v: string) => void values.set(k, v), deleteAppSetting: (k: string) => void values.delete(k) }
   }
   const m = (id: string, model: string | null, tool: 'claude' | 'codex' = 'codex', projectId: string | null = 'p1') => ({ id, tool, model, projectId })
 
@@ -138,6 +138,21 @@ describe('ModelWindows', () => {
     expect(after.of(m('a', 'haiku', 'claude'))).toBe(200_000)
   })
 
+  it('forgets the ceiling of a session with no process any more, in memory and in the store', () => {
+    const store = settings()
+    const w = new ModelWindows(store)
+    w.started('a', 153_000)
+    expect(w.ceilingOf('a')).toBe(153_000)
+    expect(store.appSetting('auto_compact_ceiling:a')).toBe('153000')
+    w.forget('a')
+    expect(w.ceilingOf('a')).toBeNull()
+    expect(store.appSetting('auto_compact_ceiling:a')).toBeNull()
+    // A host that adopts it now finds no ceiling: it can only say "at least"
+    const after = new ModelWindows(store)
+    after.started('a', 155_400, true)
+    expect(after.ceilingOf('a')).toBeNull()
+  })
+
   it('keeps the model beside the window across a restart of the host', () => {
     const store = settings()
     new ModelWindows(store).note(m('a', 'haiku', 'claude'), 200_000, 'claude-haiku-4-5')
@@ -215,6 +230,36 @@ describe('what a session is launched with', () => {
     // Turned off: the menu says the control is off
     await world.rpc('prefs.set', { patch: { autoCompact: { controlled: false } } })
     expect(await world.rpc('agents.autoCompact', { sessionId: s.id })).toMatchObject({ controlled: false, tokens: null })
+  })
+
+  it('the ceiling row goes with the process: slept, deleted, or never started', async () => {
+    Object.assign(world.codexAdapter, { windowCeilingFor: (tokens: number) => tokens + 33_000 })
+    const rowOf = (id: string) => world.store.settings.appSetting(`auto_compact_ceiling:${id}`)
+    const s = await create()
+    handle(s.id).emitContext(10_000, 200_000)
+    expect(await world.mgr.sleepSession(s.id)).toBe(true)
+    await world.mgr.resumeSession(s.id)
+    expect(rowOf(s.id)).toBe('153000')
+
+    // A slept session has no process for a later host to adopt
+    expect(await world.mgr.sleepSession(s.id)).toBe(true)
+    expect(rowOf(s.id)).toBeNull()
+
+    // Deleted: the row goes at once, not only when the trash is purged
+    await world.mgr.resumeSession(s.id)
+    expect(rowOf(s.id)).toBe('153000')
+    await world.rpc('agents.deleteSession', { sessionId: s.id })
+    expect(rowOf(s.id)).toBeNull()
+
+    // A start that failed leaves no row for a session that was never saved
+    const sets: string[] = []
+    const set = world.store.settings.setAppSetting.bind(world.store.settings)
+    world.store.settings.setAppSetting = (k, v) => (k.startsWith('auto_compact_ceiling:') && sets.push(k), set(k, v))
+    world.codexAdapter.failCreate = 'no tool'
+    const p = (await world.rpc('projects.add', { path: tmpdir() })) as { id: string }
+    await expect(world.rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'codex', model: 'gpt-5.6' })).rejects.toThrow('no tool')
+    expect(sets).toHaveLength(1)
+    expect(world.store.settings.appSetting(sets[0]!)).toBeNull()
   })
 
   it('a new session of a model another session has read the window of gets the value at once', async () => {

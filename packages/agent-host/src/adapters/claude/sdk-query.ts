@@ -70,6 +70,20 @@ export const CLAUDE_AUTO_COMPACT_MAX = 1_000_000
  */
 export const CLAUDE_AUTO_COMPACT_BUFFER = 33_000
 
+/**
+ * Where the CLI should compact for a process passed `passed` as its auto-compact window, when the point it reports
+ * (`getContextUsage().autoCompactThreshold`) is not it; null when it is, or when nothing can be said. A model whose window
+ * is smaller than the one passed compacts at its own point, which is not a difference of buffers. `passed` is what the process
+ * was started with: for an adopted one that is what its original host kept, not what the setting gives now (#1376).
+ */
+export function compactPointOff(passed: number | undefined, reported: number, modelWindow: number | null): number | null {
+  if (!passed || !(reported > 0)) return null
+  const expected = passed - CLAUDE_AUTO_COMPACT_BUFFER
+  if (Math.abs(reported - expected) <= 1_000) return null
+  if (reported < expected && modelWindow !== null && modelWindow < passed) return null
+  return expected
+}
+
 /** The `autoCompactWindow` that makes the CLI compact at `tokens`, inside what it accepts */
 export function claudeAutoCompactWindow(tokens: number): number {
   return Math.min(CLAUDE_AUTO_COMPACT_MAX, Math.max(CLAUDE_AUTO_COMPACT_MIN, Math.round(tokens) + CLAUDE_AUTO_COMPACT_BUFFER))
