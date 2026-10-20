@@ -21,11 +21,9 @@ describe('toModelOptions', () => {
      */
     /*
      * The shape is written out here instead of importing the generated
-     * ReasoningEffortOption: generated/ is deliberately not committed (see
-     * codex-bindings.mjs — the adapter imports none of it, and protocol drift
-     * is caught by the contract check, not by these types). Importing it here
-     * broke the first CI typecheck ever run on Linux, because only machines
-     * with the codex CLI have the files. If codex renames these fields, the
+     * ReasoningEffortOption: generated/ holds only the types the adapter reads
+     * from notifications and requests (codex-bindings.mjs, #1339), and this
+     * answer is not one of them yet. If codex renames these fields, the
      * contract check is the tripwire — not this literal.
      */
     supportedReasoningEfforts: [

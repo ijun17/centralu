@@ -12,7 +12,7 @@ not wired into CI, and are run by hand when the related area changes.
 |---|---|
 | `fix-pty-permissions.mjs` | `postinstall` — sets the execute permission on node-pty's spawn-helper |
 | `bundle.mjs` | `pnpm bundle:host` — builds the host bundle for distribution (esbuild, target node22); `CC_BUNDLE_OUT` names another (absolute) output folder |
-| `codex-bindings.mjs` | `pnpm codex:bindings` — generates codex protocol types and refreshes the dependent contract |
+| `codex-bindings.mjs` | `pnpm codex:bindings` — verifies the dependent contract against the installed codex, and writes the protocol types the adapter reads into `adapters/codex/generated/` (committed); `--check` compares them instead |
 
 ## Verification wired through npm scripts
 

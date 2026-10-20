@@ -12,8 +12,11 @@
  * the satisfies drift trap on CODEX_VERBOSITIES). A field Codex renames in one of them then fails
  * the build where the adapter reads it, as well as the drift check here.
  *
- *   pnpm codex:bindings          — verifies the contract, and writes those types into generated/ (to commit)
- *   pnpm codex:bindings --check  — verifies the contract, and that generated/ holds them as Codex makes them (CI)
+ *   pnpm codex:bindings          — verifies the contract, and writes those types into generated/ (to commit),
+ *                                  replacing the folder: nothing else belongs in it; codex-version.txt says which
+ *                                  Codex made them
+ *   pnpm codex:bindings --check  — verifies the contract, and that generated/ holds them as Codex makes them
+ *                                  (drift.yml, with the latest Codex: a type we read changing goes red there)
  *
  * What is checked: the method, notification, item-type and value names we use; the arguments we send to each request
  * (both ways, see below); the fields we read from an answer (`responseFields`); and the enum words we send or compare
@@ -204,6 +207,9 @@ const committed = new Map()
   for (const root of roots) visit(root)
 }
 const DEST = join(ADAPTER, 'generated')
+const VERSION_FILE = join(DEST, 'codex-version.txt')
+/** What generated/ no longer matches; said apart from what disappeared from the contract, since the fix differs */
+const stale = []
 /** Every file under generated/, by path without `.ts` */
 const committedNow = () => {
   const out = new Map()
@@ -218,10 +224,10 @@ const committedNow = () => {
 if (!WRITE) {
   const now = committedNow()
   for (const [file, text] of committed) {
-    if (!now.has(file)) missing.push(`generated/${file}.ts: not committed (run pnpm codex:bindings)`)
-    else if (now.get(file) !== text) missing.push(`generated/${file}.ts: differs from what Codex makes now (run pnpm codex:bindings)`)
+    if (!now.has(file)) stale.push(`generated/${file}.ts: not committed`)
+    else if (now.get(file) !== text) stale.push(`generated/${file}.ts: differs from what Codex makes now`)
   }
-  for (const file of now.keys()) if (!committed.has(file)) missing.push(`generated/${file}.ts: no longer read by the adapter (run pnpm codex:bindings)`)
+  for (const file of now.keys()) if (!committed.has(file)) stale.push(`generated/${file}.ts: no longer read by the adapter`)
 }
 
 if (missing.length > 0) {
@@ -233,6 +239,16 @@ if (missing.length > 0) {
   rmSync(tmp, { recursive: true, force: true })
   process.exit(1)
 }
+if (stale.length > 0) {
+  const made = existsSync(VERSION_FILE) ? readFileSync(VERSION_FILE, 'utf8').trim() : 'an unknown version'
+  console.error(
+    `[codex] generated/ does not hold the types the adapter reads as ${version} makes them (committed: ${made}). ${stale.length} file(s):\n  ` +
+      stale.join('\n  ') +
+      `\n→ run pnpm codex:bindings with ${version} and commit generated/; fix what the build then says about the adapter.`,
+  )
+  rmSync(tmp, { recursive: true, force: true })
+  process.exit(1)
+}
 
 if (WRITE) {
   rmSync(DEST, { recursive: true, force: true })
@@ -240,6 +256,7 @@ if (WRITE) {
     mkdirSync(dirname(join(DEST, file)), { recursive: true })
     writeFileSync(join(DEST, `${file}.ts`), text)
   }
+  writeFileSync(VERSION_FILE, `${version}\n`)
   console.log(`[codex] contract verified (${version}) · wrote the ${committed.size} types the adapter is compiled against into generated/ (commit them)`)
 } else {
   console.log(

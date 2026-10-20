@@ -258,6 +258,7 @@ describe('a request timer', () => {
 
 describe('a frame that is JSON but not a JSON-RPC message (#1339)', () => {
   it('is passed by, and the next frame is read: a line of `null` threw on reading its id', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
     const { proc, emitter, sent, reply } = fakeProcess()
     const client = new CodexClient(quiet, { process: proc })
     const answered = client.request('probe')
@@ -266,6 +267,9 @@ describe('a frame that is JSON but not a JSON-RPC message (#1339)', () => {
 `)
     reply({ id: sent[0]!.id, result: { ok: true } })
     await expect(answered).resolves.toEqual({ ok: true })
+    // Each one said once in host.log
+    expect(logged.mock.calls.filter(([what]) => String(what).includes('not a JSON-RPC message'))).toHaveLength(5)
+    logged.mockRestore()
   })
 })
 

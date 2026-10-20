@@ -9,8 +9,9 @@
 #                   option keys and response fields the adapter reads, against the
 #                   shipped .d.ts (plus sdk.mjs for the one probed, untyped option).
 #   codex-protocol  packages/agent-host/scripts/codex-bindings.mjs --check —
-#                   regenerates the app-server bindings from the installed codex and
-#                   diffs protocol-contract.json (the methods we use) against them.
+#                   regenerates the app-server bindings from the installed codex,
+#                   diffs protocol-contract.json (the methods we use) against them, and
+#                   compares adapters/codex/generated/ (the types we read, #1339) with them.
 #   surface         scripts/surface-drift.mts --file-issue — the other direction (#270):
 #                   what the latest tools offer that their adapters have not reviewed,
 #                   and which limitations an adapter declares may be gone.
@@ -92,7 +93,7 @@ jobs:
           npm install -g @openai/codex@latest
           codex --version
 
-      # `--check` verifies the contract and leaves no generated files behind; it needs
+      # `--check` verifies the contract and compares generated/, writing nothing; it needs
       # only node builtins, so no `pnpm install` here either.
       - run: pnpm codex:bindings --check
 
