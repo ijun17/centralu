@@ -1,0 +1,20 @@
+# Type-aware lint findings that predate the rules (#1339): <file> <rule> <count>, one per line, sorted.
+# Lowered by `pnpm lint:tighten`, which also moves a file's lines along a rename git sees; no line may be new or higher than main's.
+packages/protocol/src/agent-version.ts @typescript-eslint/no-non-null-assertion 1
+packages/protocol/src/app-frames.ts @typescript-eslint/no-base-to-string 1
+packages/protocol/src/app-link.ts @typescript-eslint/no-non-null-assertion 1
+packages/protocol/src/centralu-calls.ts @typescript-eslint/no-non-null-assertion 3
+packages/protocol/src/commands.ts @typescript-eslint/no-unsafe-type-assertion 1
+packages/protocol/src/entities/approvals.ts @typescript-eslint/no-unnecessary-type-assertion 1
+packages/protocol/src/entities/approvals.ts @typescript-eslint/no-unsafe-type-assertion 3
+packages/protocol/src/entities/preferences.ts @typescript-eslint/no-non-null-assertion 1
+packages/protocol/src/entities/preferences.ts @typescript-eslint/no-unsafe-type-assertion 4
+packages/protocol/src/events.ts @typescript-eslint/no-unsafe-type-assertion 1
+packages/protocol/src/paths.ts @typescript-eslint/no-non-null-assertion 7
+packages/protocol/src/semver.ts @typescript-eslint/no-unsafe-type-assertion 1
+packages/protocol/src/theme.ts @typescript-eslint/no-unsafe-assignment 1
+packages/protocol/src/theme.ts @typescript-eslint/no-unsafe-type-assertion 3
+packages/protocol/src/tolerant.ts @typescript-eslint/no-non-null-assertion 8
+packages/protocol/src/tolerant.ts @typescript-eslint/no-unsafe-type-assertion 3
+packages/protocol/src/transcript-rows.test.ts @typescript-eslint/no-unnecessary-type-assertion 2
+packages/protocol/src/transcript-rows.ts @typescript-eslint/no-unsafe-type-assertion 1

@@ -43,6 +43,19 @@ export const PLATFORM_MODULES = [
   'packages/agent-host/src/links/**',
 ]
 
+/**
+ * The files the type-aware rules read: what the root tsconfig.json compiles. A file outside it has no
+ * type information to give (the root scripts/*.mts, the Vite and Vitest configs, plain JavaScript).
+ */
+export const TYPED_FILES = [
+  'packages/*/src/**/*.{ts,tsx}',
+  'packages/*/scripts/**/*.mts',
+  'apps/*/src/**/*.{ts,tsx}',
+  'e2e/**/*.{ts,tsx,mts}',
+  'tooling/**/*.ts',
+]
+export const TEST_FILES = ['**/*.test.{ts,tsx}', '**/*test-helpers.ts', 'e2e/**/*']
+
 /** The layer rules originate in docs/architecture.md §2. This is the machine-enforced version. */
 export default tseslint.config(
   // tmp/: disposable probes and captures made during dogfooding. They never stay in the
@@ -64,6 +77,59 @@ export default tseslint.config(
     rules: {
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
       '@typescript-eslint/no-explicit-any': 'error',
+    },
+  },
+  /*
+   * Type-aware rules (#1339).
+   *
+   * A Claude session crashed after `/compact` because the adapter read the SDK's messages as
+   * `Record<string, unknown>` and asserted `as Json[]` on a field the SDK types as
+   * `string | ContentBlockParam[]`. The compiler would have refused the `.filter` that crashed; the
+   * assertion switched it off. These rules see types: an `any` flowing out of `JSON.parse` or a
+   * catch, an assertion that narrows instead of checking, a promise nobody awaits.
+   *
+   * What predates them is listed per file and rule in tooling/lint-allowlist/, one list per
+   * package, and `pnpm lint` (tooling/lint.ts) lets a file hold up to its listed count. So `eslint`
+   * run by itself, or an editor, also shows those old findings. Adding lines is not the way past a
+   * finding: tooling/type-aware-lint.test.ts refuses any line new or higher than main's (a renamed
+   * file's own lines aside), and an eslint-disable of these rules.
+   */
+  {
+    files: TYPED_FILES,
+    extends: [tseslint.configs.recommendedTypeChecked],
+    languageOptions: { parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname } },
+    rules: {
+      // Asks that an `async` function contain an `await`. A port implemented without one (the mock
+      // platform: 183 of them) is still right to return a promise, and dropping `async` turns a
+      // rejection into a synchronous throw: not a type question.
+      '@typescript-eslint/require-await': 'off',
+    },
+  },
+  {
+    files: TYPED_FILES,
+    ignores: TEST_FILES,
+    rules: {
+      // `{ ... } as T` skips the excess and missing property checks a `: T` annotation makes
+      '@typescript-eslint/consistent-type-assertions': ['error', { assertionStyle: 'as', objectLiteralTypeAssertions: 'never' }],
+      // An assertion that narrows (`unknown` or `any` to a type, a union to one member) is a claim
+      // nothing checks. Data from outside the process goes through a zod schema or a narrowing
+      // guard instead.
+      '@typescript-eslint/no-unsafe-type-assertion': 'error',
+      // `x!` is the same claim about `undefined`
+      '@typescript-eslint/no-non-null-assertion': 'error',
+    },
+  },
+  {
+    // Tests may use `any` (below), so what follows from it is not reported either; nor is
+    // `expect(mock.method)`, which reads a method without calling it on purpose.
+    files: TEST_FILES,
+    rules: {
+      '@typescript-eslint/no-unsafe-assignment': 'off',
+      '@typescript-eslint/no-unsafe-member-access': 'off',
+      '@typescript-eslint/no-unsafe-call': 'off',
+      '@typescript-eslint/no-unsafe-return': 'off',
+      '@typescript-eslint/no-unsafe-argument': 'off',
+      '@typescript-eslint/unbound-method': 'off',
     },
   },
   /*

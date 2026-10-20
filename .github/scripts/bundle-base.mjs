@@ -52,7 +52,10 @@ function measureMain(root) {
   const out = mkdtempSync(join(tmpdir(), 'cc-bundle-main-out-'))
   const run = (cmd, args, cwd, env = {}) => execFileSync(cmd, args, { cwd, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'inherit'], encoding: 'utf8' })
   try {
-    run('git', ['fetch', '--no-tags', '--depth=1', 'origin', 'main'], root)
+    // Only a shallow checkout gets a shallow fetch: in verify's full one, `--depth=1` would cut main's history, which
+    // tooling/type-aware-lint.test.ts reads for the merge base with main (#1339)
+    const shallow = run('git', ['rev-parse', '--is-shallow-repository'], root).trim() === 'true'
+    run('git', ['fetch', '--no-tags', ...(shallow ? ['--depth=1'] : []), 'origin', 'main'], root)
     const sha = run('git', ['rev-parse', 'FETCH_HEAD'], root).trim()
     run('git', ['worktree', 'add', '--detach', dir, sha], root)
     run('pnpm', ['install', '--frozen-lockfile', '--ignore-scripts'], dir)

@@ -35,7 +35,8 @@ centralu/
 │                               #   content in Contents/Resources/content/ (scripts/bundle-stage.mts)
 │
 ├─ packages/
-│  ├─ protocol/                 # the shared language: event and command schemas (zod, its only dependency)
+│  ├─ protocol/                 # the shared language: event and command schemas (zod, its only dependency), and the small
+│  │                            #   helpers both sides use on them (errorMessage, oneLineText, parseCliVersion)
 │  │  └─ src/
 │  │     ├─ events.ts           # the NormalizedEvent family
 │  │     ├─ commands.ts         # request/response RPC (RpcMethods), spread from commands/methods/; re-exports commands/
