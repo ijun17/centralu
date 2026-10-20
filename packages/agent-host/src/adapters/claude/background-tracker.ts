@@ -1,4 +1,5 @@
 import type { BackgroundTask, NormalizedEvent } from '@cc/protocol'
+import { isObj } from '../../json-value.js'
 import { str, type Json } from './json.js'
 import { ClaudeSchedules } from './schedules.js'
 import { BackgroundEvents, endedSummary } from '../background-events.js'
@@ -99,7 +100,8 @@ export class ClaudeBackgroundTracker {
     if (str(m.type) !== 'system') return []
     const subtype = str(m.subtype)
     if (subtype === 'background_tasks_changed') {
-      const tasks = (Array.isArray(m.tasks) ? m.tasks : []) as Json[]
+      // A list item that is not an object reads as no task (#1339): a `null` here crashed the stream loop
+      const tasks = Array.isArray(m.tasks) ? m.tasks.filter(isObj) : []
       this.live = []
       for (const t of tasks) {
         const id = str(t.task_id)

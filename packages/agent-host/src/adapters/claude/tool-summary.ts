@@ -1,6 +1,7 @@
 import { launchesSubagent, mcpNameParts, type ApprovalDetail, type ToolSummary } from '@cc/protocol'
 import { diffLines, fileEditDetail, type FileChange } from '../file-changes.js'
 import { centraluMark, centraluRunCommand, isCentraluTool } from '../tool-titles.js'
+import { asObj, isObj } from '../../json-value.js'
 import { str, type Json } from './json.js'
 
 const FILE_EDIT_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit'])
@@ -97,9 +98,11 @@ export function agentReport(report: string, stats: string): string {
 export function resultOutput(content: unknown): string {
   if (typeof content === 'string') return content
   if (!Array.isArray(content)) return content == null ? '' : JSON.stringify(content)
-  return (content as Json[])
-    .filter((b) => str(b?.type) !== 'image' && str((b?.source as Json | undefined)?.type) !== 'base64')
-    .map((b) => (str(b?.type) === 'text' ? str(b.text) : JSON.stringify(b)))
+  // A list item that is not an object is no block: it was written out as the text "null" (#1339)
+  return content
+    .filter(isObj)
+    .filter((b) => str(b.type) !== 'image' && str(asObj(b.source).type) !== 'base64')
+    .map((b) => (str(b.type) === 'text' ? str(b.text) : JSON.stringify(b)))
     .join('\n')
 }
 
