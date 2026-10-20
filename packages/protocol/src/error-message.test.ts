@@ -18,4 +18,10 @@ describe('errorMessage', () => {
     expect(errorMessage(null)).toBe('null')
     expect(errorMessage({ message: 7 })).toBe('[object Object]')
   })
+
+  it('never throws, even for a value that cannot be written out', () => {
+    const throwing = { toString: () => { throw new Error('no') } }
+    expect(errorMessage(Object.create(null))).toBe('(a thrown object that cannot be written out)')
+    expect(errorMessage(throwing)).toBe('(a thrown object that cannot be written out)')
+  })
 })
