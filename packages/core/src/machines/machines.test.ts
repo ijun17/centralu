@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { MachineInfo, MachineVersions } from '@cc/protocol'
-import { asksRow, autostartRow, awayNote, elevatedNote, hostStartNote, installNote, isAway, logonNote, MACHINE_STATUS_LABEL, machineProblem, operationNote, updateStops, versionPrompt } from './machines.js'
+import type { HostActivity, MachineInfo, MachineVersions } from '@cc/protocol'
+import { asksRow, autostartRow, awayNote, elevatedNote, hostStartNote, installNote, isAway, logonNote, MACHINE_STATUS_LABEL, machineProblem, operationNote, updateStops, updateWaits, versionPrompt } from './machines.js'
 
 const machine = (patch: Partial<MachineInfo> = {}): MachineInfo => ({
   id: 'box',
@@ -319,6 +319,40 @@ describe('a machine that is away, stopped or disconnected (#1143, #1341)', () =>
   it('is disconnected without a problem to fix, and the row says so', () => {
     expect(machineProblem(machine({ status: 'disconnected' }))).toBeNull()
     expect(MACHINE_STATUS_LABEL.disconnected).toBe('disconnected')
+  })
+})
+
+// #1399: an update waits for the sessions that are in a turn there instead of stopping them
+describe('the update prompt when sessions are in a turn', () => {
+  const act = (o: Partial<HostActivity>): HostActivity => ({ working: 0, approvals: 0, questions: 0, background: 0, terminals: 0, commandRuns: 0, ...o })
+
+  it('says the update waits for them and stops nothing before, with what stops after', () => {
+    const text = updateWaits('Box', act({ working: 2, approvals: 1, terminals: 4 }), true)
+    expect(text).toBe(
+      '3 sessions on Box are in a turn. Update installs beside Centralu there and waits until they are done; nothing is stopped before that. Then it stops Centralu there while it switches: its terminals and running commands end with it, and sessions resume on the new version.',
+    )
+  })
+
+  it('says it in the singular for one session, counting background work as a turn', () => {
+    expect(updateWaits('Box', act({ background: 1 }), true)).toMatch(/^1 session on Box is in a turn\..* waits until it is done;/)
+  })
+
+  it('says nothing when none is in a turn (terminals and commands alone wait for nobody) or the machine cannot say', () => {
+    expect(updateWaits('Box', act({ terminals: 3, commandRuns: 2 }), true)).toBeNull()
+    expect(updateWaits('Box', act({}), true)).toBeNull()
+    expect(updateWaits('Box', null, true)).toBeNull()
+    expect(updateWaits('Box', undefined, true)).toBeNull()
+  })
+
+  // A hub from before #1399 ignores `when` and stops at once: "Update when idle" there would be a promise it breaks
+  it('promises no wait when the hub does not send that it waits (an older hub)', () => {
+    expect(updateWaits('Box', act({ working: 2 }), undefined)).toBeNull()
+    expect(updateWaits('Box', act({ working: 2 }), false)).toBeNull()
+  })
+
+  it('names the step of the wait on the row', () => {
+    expect(operationNote({ operation: { kind: 'update', step: 'wait_idle', target: '0.2.0', at: 1 } })).toBe('Updating to 0.2.0: waiting for its sessions to finish…')
+    expect(operationNote({ operation: { kind: 'update', step: 'wait_unread', target: '0.2.0', at: 1 } })).toBe('Updating to 0.2.0: waiting: it cannot read what runs there now…')
   })
 })
 

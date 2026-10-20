@@ -35,6 +35,8 @@ export type UpdateStep =
   | 'node'
   | 'centralu'
   | 'build'
+  | 'wait_idle'
+  | 'wait_unread'
   | 'stop'
   | 'backup'
   | 'switch'
@@ -54,6 +56,11 @@ export type HostControl = {
   target: string
   /** `remote-install.mjs`'s text: the pointer and prune steps run it too */
   script: string
+  /**
+   * Called before the running host is stopped (#1399): resolves when it may be, with a sentence for the person when it was
+   * stopped with turns running; rejects to end the update with nothing switched. Absent: stopped at once
+   */
+  beforeStop?: () => Promise<string | null>
   /** The link stops reconnecting and starting a host on its own; called before the host is stopped */
   hold: () => void | Promise<void>
   /** `centralu serve --detach` there, through the lookup (which reads `current`) */
@@ -234,6 +241,8 @@ export async function switchRemote(
   keep: InstalledVersion | null,
   o: { saveStore?: boolean } = {},
 ): Promise<InstallResult> {
+  // What is working there is waited for before anything is held or stopped (#1399); the new version is already beside it
+  const stoppedTurns = (await c.beforeStop?.()) ?? null
   await c.hold()
   c.step('stop')
   const { wasRunning } = await stopRemoteHost(c)
@@ -254,7 +263,8 @@ export async function switchRemote(
   if (why) return putBack(c, next, why, { ...was, running: wasRunning }, saveStore)
   c.step('prune')
   const pruned = await pruneThere(c, next).catch(() => ({ removed: [], left: [] }))
-  return { current: next, previous: keep, ...pruned, ...(note ? { note } : {}) }
+  const said = [stoppedTurns, note].filter(Boolean).join(' ')
+  return { current: next, previous: keep, ...pruned, ...(said ? { note: said } : {}) }
 }
 
 /** `machines.rollback`: back to `previous`, one step only (`previous` is cleared) */

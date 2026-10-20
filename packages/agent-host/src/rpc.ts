@@ -117,7 +117,9 @@ export type MachinesPort = {
   needs(id: string): MachineInfo
   acceptVersions(id: string): MachineInfo
   install(id: string): Promise<MachineInstallResult>
-  update(id: string): Promise<MachineInstallResult>
+  update(id: string, opts?: { when?: 'idle' | 'now' }): Promise<MachineInstallResult>
+  /** Ends an update's wait for the sessions there to finish (#1399) */
+  cancelUpdate(id: string): MachineInfo
   rollback(id: string): Promise<MachineInstallResult>
   uninstall(id: string): Promise<MachineUninstallResult>
   /** The ssh config's hosts, and what one target runs (#514) */
@@ -899,7 +901,11 @@ export function createRpcHandler(
     // An older window's need (#1134): answers the row and does nothing else (#1341)
     'machines.need': async (p) => requireMachines().needs(RpcMethods['machines.need'].params.parse(p).machineId),
     'machines.install': async (p) => requireMachines().install(RpcMethods['machines.install'].params.parse(p).machineId),
-    'machines.update': async (p) => requireMachines().update(RpcMethods['machines.update'].params.parse(p).machineId),
+    'machines.update': async (p) => {
+      const { machineId, when } = RpcMethods['machines.update'].params.parse(p)
+      return requireMachines().update(machineId, { when: when ?? 'idle' })
+    },
+    'machines.cancelUpdate': async (p) => requireMachines().cancelUpdate(RpcMethods['machines.cancelUpdate'].params.parse(p).machineId),
     'machines.rollback': async (p) => requireMachines().rollback(RpcMethods['machines.rollback'].params.parse(p).machineId),
     'machines.uninstall': async (p) => requireMachines().uninstall(RpcMethods['machines.uninstall'].params.parse(p).machineId),
     'machines.autostart': async (p) => {

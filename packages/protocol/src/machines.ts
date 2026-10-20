@@ -237,6 +237,11 @@ export const MachineInfo = z.object({
    */
   autoReconnect: z.boolean().catch(true).default(true),
   /**
+   * `machines.update` waits for the sessions there to finish before it stops the host (#1399; see `machines.update { when }`).
+   * Additive: an older hub sends nothing and stops at once, so a window must not promise a wait without this
+   */
+  updateWaits: z.boolean().optional(),
+  /**
    * The same switch as the older connect mode (`MachineConnect`, #1134): `at_start` when `autoReconnect` is on,
    * `when_needed` when it is off. Kept for one release so an older window still reads the row; read `autoReconnect`
    */
@@ -366,6 +371,15 @@ export const HostActivity = z.object({
   commandRuns: z.number().int().default(0),
 })
 export type HostActivity = z.infer<typeof HostActivity>
+
+/**
+ * How many sessions of a host are in a turn or hold work that stopping it would end (#1399): working, waiting on an approval or
+ * a question, or running background work. Terminals and project commands are left out: they are kept open for hours, and an
+ * update that waited for them would wait for good. Null (the host cannot say) counts none
+ */
+export function turnsRunning(a: HostActivity | null | undefined): number {
+  return a ? a.working + a.approvals + a.questions + a.background : 0
+}
 
 /*
  * What a hub's orchestrator reads about a linked machine's sessions (docs/plans/remote-hub.md §12, phase 4 step 1).

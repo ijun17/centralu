@@ -171,7 +171,17 @@ export const hostMethods = {
    * success only the current and previous versions are kept. Progress is the machine's `operation`
    * in `machine_status`. Refused like `machines.install`
    */
-  'machines.update': { params: z.object({ machineId: MachineId }), result: MachineInstallResult },
+  'machines.update': {
+    /**
+     * `when` (#1399, additive): `idle`, the default and what an older window means, installs beside and then waits until no session
+     * there is in a turn (`MachineInfo.operation.step` is `wait_idle` meanwhile; `machines.cancelUpdate` ends the wait) before it
+     * stops the host; `now` stops it at once and says what it stopped (the person chose it)
+     */
+    params: z.object({ machineId: MachineId, when: z.enum(['idle', 'now']).optional() }),
+    result: MachineInstallResult,
+  },
+  /** Ends an update's wait for the sessions there to finish (#1399); the update fails saying so and nothing was switched. Additive */
+  'machines.cancelUpdate': { params: z.object({ machineId: MachineId }), result: MachineInfo },
   /**
    * Switches a machine back to the version the hub installed before (`previous`), stopping and starting
    * its host as `machines.update` does and checking the same way. One step only: `previous` is cleared,

@@ -316,6 +316,7 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'machines.acceptVersions': HUB,
   'machines.install': HUB,
   'machines.update': HUB,
+  'machines.cancelUpdate': HUB,
   'machines.rollback': HUB,
   'machines.uninstall': HUB,
   'machines.autostart': HUB,

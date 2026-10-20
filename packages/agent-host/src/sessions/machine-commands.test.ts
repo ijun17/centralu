@@ -35,6 +35,7 @@ const COMMANDS = [
 let root: string
 let store: Store
 let mgr: SessionManager
+let claude: CrossAdapter
 let rpc: (method: string, params: unknown) => Promise<unknown>
 let ops: ReturnType<typeof fakeOps>
 
@@ -75,6 +76,10 @@ function fakeOps() {
   let sshHosts: SshHostList = { configFile: '~/.ssh/config', hosts: [], notes: [] }
   /** Why the hub starts no host on the first machine just now (#1143), or null */
   let heldBack: string | null = null
+  /** How long an update takes, to be answered while it still runs (#1399) */
+  let slowUpdateMs = 0
+  /** Why an update fails once it has run for `slowUpdateMs`, or null */
+  let updateFails: string | null = null
   const find = (id: string) => machines.find((m) => m.id === id)!
   const o: MachineOps = {
     list: () => machines.map((m) => ({ ...m })),
@@ -110,8 +115,10 @@ function fakeOps() {
       calls.push(['install', id])
       return { machine: find(id), current: { version: '9.9.9-test.1' } }
     },
-    update: async (id) => {
-      calls.push(['update', id])
+    update: async (id, opts) => {
+      calls.push(opts?.when ? ['update', id, opts.when] : ['update', id])
+      if (slowUpdateMs > 0) await new Promise((r) => setTimeout(r, slowUpdateMs))
+      if (updateFails) throw new Error(updateFails)
       return { machine: find(id), current: { version: '9.9.9-test.1' } }
     },
     autostart: async (id, on) => {
@@ -164,6 +171,16 @@ function fakeOps() {
     holdBack: (why: string | null) => {
       heldBack = why
     },
+    failUpdate: (why: string | null) => {
+      updateFails = why
+    },
+    slowUpdate: (ms: number, answerMs: number) => {
+      slowUpdateMs = ms
+      o.updateAnswerMs = answerMs
+    },
+    running: (a: Partial<HostActivity> | null) => {
+      activity = a && { working: 0, approvals: 0, questions: 0, background: 0, terminals: 0, commandRuns: 0, ...a }
+    },
     /** The calls that changed something, leaving out the reads and the pre-checks */
     changes: () => calls.filter((c) => !['resolve', 'probe', 'installRefusal', 'activity', 'sshHosts'].includes(c[0] as string)),
   }
@@ -174,6 +191,7 @@ beforeEach(() => {
   store = new Store()
   const adapters = new Map<ToolName, CrossAdapter>([['claude', new CrossAdapter('claude')]])
   const agents = adapters as unknown as Map<ToolName, AgentAdapter>
+  claude = adapters.get('claude')!
   mgr = new SessionManager(store, agents, () => {})
   ops = fakeOps()
   mgr.useMachineOps(ops.ops)
@@ -315,18 +333,83 @@ describe('add_machine', () => {
 
 describe('install_machine', () => {
   it('asks with the machine and what an install or an update does there, then runs the one asked for', async () => {
+    ops.running({})
     const orc = await mgr.orchestrator()
     const install = await answered(orc.id, 'install_machine', { machine: 'laptop' }, 'allow')
     expect(install.question).toContain("Install this computer's Centralu on Laptop (me@laptop, Windows, PowerShell)?")
     expect(install.r.text).toContain('Installed Centralu 9.9.9-test.1 on Laptop.')
     const update = await answered(orc.id, 'install_machine', { machine: 'Laptop', action: 'update' }, 'allow')
     expect(update.question).toContain('stops the Centralu there')
-    expect(update.question).toContain('a turn in progress is lost')
+    expect(update.question).toContain('no turn is running there now, and if one starts the update waits for it')
     expect(update.r.text).toContain('Updated to Centralu 9.9.9-test.1 on Laptop.')
+    // Always when idle: the orchestrator never stops a turn (#1399)
     expect(ops.changes()).toEqual([
       ['install', 'laptop'],
-      ['update', 'laptop'],
+      ['update', 'laptop', 'idle'],
     ])
+  })
+
+  // #1399: an update of a machine with sessions in a turn never stops them on an orchestrator's say
+  it('names the turns running there on the update card, and what Allow means: update when idle, stopping nothing before', async () => {
+    ops.running({ working: 3, approvals: 1, terminals: 2 })
+    const orc = await mgr.orchestrator()
+    const update = await answered(orc.id, 'install_machine', { machine: 'Laptop', action: 'update' }, 'allow')
+    expect(update.question).toContain('when it is idle?')
+    expect(update.question).toContain('4 sessions are in a turn there')
+    expect(update.question).toContain('waits until they are done; it stops nothing before that')
+    expect(update.question).toContain('the call is answered while it waits')
+    expect(update.question).not.toContain('a turn in progress is lost')
+    expect(ops.changes()).toEqual([['update', 'laptop', 'idle']])
+  })
+
+  it('says one session is in a turn in the singular, and runs nothing on Deny', async () => {
+    ops.running({ background: 1 })
+    const orc = await mgr.orchestrator()
+    const { question, r } = await answered(orc.id, 'install_machine', { machine: 'laptop', action: 'update' }, 'deny')
+    expect(question).toContain('1 session is in a turn there')
+    expect(question).toContain('waits until it is done;')
+    expect(r.isError).toBe(true)
+    expect(ops.changes()).toEqual([])
+  })
+
+  it('updates as before when the machine cannot say what runs there, and says it could not be read; terminals alone are no turn', async () => {
+    ops.running(null)
+    const orc = await mgr.orchestrator()
+    const unknown = (await answered(orc.id, 'install_machine', { machine: 'laptop', action: 'update' }, 'allow')).question
+    expect(unknown).not.toContain('when it is idle?')
+    expect(unknown).toContain('what runs there could not be read, so a turn in progress may be lost')
+    ops.running({ terminals: 3, commandRuns: 2 })
+    const quiet = (await answered(orc.id, 'install_machine', { machine: 'laptop', action: 'update' }, 'allow')).question
+    expect(quiet).not.toContain('when it is idle?')
+    expect(quiet).toContain('no turn is running there now')
+  })
+
+  it('answers while an update is still under way, since the wait for sessions can last hours and its caller would cut the call', async () => {
+    ops.running({ working: 2 })
+    ops.slowUpdate(400, 60)
+    const orc = await mgr.orchestrator()
+    const { r } = await answered(orc.id, 'install_machine', { machine: 'laptop', action: 'update' }, 'allow')
+    expect(r.isError).toBeFalsy()
+    expect(r.text).toContain('Updating Laptop is still under way (it installs beside, then waits until no session there is in a turn, and stops none).')
+    expect(r.text).toContain('list_machines shows where it stands')
+    expect(ops.changes()).toEqual([['update', 'laptop', 'idle']])
+  })
+
+  // #1399 review: the call was answered "still under way", so how the update ends reaches its caller some other way
+  it('tells the caller in its conversation when an update it was answered "still under way" for fails later, and when it ends', async () => {
+    ops.running({ working: 2 })
+    ops.slowUpdate(200, 40)
+    ops.failUpdate('the update of Laptop was cancelled while it waited for the sessions there to finish; nothing was switched')
+    const orc = await mgr.orchestrator()
+    const { r } = await answered(orc.id, 'install_machine', { machine: 'laptop', action: 'update' }, 'allow')
+    expect(r.text).toContain('is still under way')
+    await eventually(() =>
+      !!claude.handles.get(orc.id)?.sent.some((t) => t.includes('The update of "Laptop" you started did not finish: the update of Laptop was cancelled while it waited')),
+    )
+    // A later one that ends well is told too
+    ops.failUpdate(null)
+    await answered(orc.id, 'install_machine', { machine: 'laptop', action: 'update' }, 'allow')
+    await eventually(() => !!claude.handles.get(orc.id)?.sent.some((t) => t.includes('The update of "Laptop" you started has finished: Centralu 9.9.9-test.1 is there.')))
   })
 
   it('runs nothing when the person denies it', async () => {

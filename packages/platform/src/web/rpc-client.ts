@@ -92,6 +92,7 @@ const LONG_CALLS = new Set<string>([
    */
   'agents.updateSettings', // Swaps out the process if a resting session's settings change (restartSession)
   'agents.forkConversation', // Revives as a forked copy
+  'machines.update', // Installs beside and waits for the sessions there to finish (#1399); a wait that outlasts it is the row's to show
   'agents.resolveMcpProposal', // Restarts the orchestrator on approval
   'agents.resolveSkillProposal', // Same
   'agents.deleteOrchestratorSkill', // Same

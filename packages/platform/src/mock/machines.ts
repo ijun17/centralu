@@ -23,6 +23,8 @@ export class MachinesMock {
    * raises no card of a machine's session
    */
   askPairs: MachineAskConsent[] = []
+  /** Every `machines.update` the window sent (#1399), in order, with when it asked the update to stop the host */
+  updates: { machineId: string; when: 'idle' | 'now' }[] = []
   /** Each mock machine's "Allow auto from a linked computer" (#1273): on unless a test turned it off */
   hubAutoOff = new Set<string>()
   machineRow(id: string, patch: Partial<MachineInfo>): MachineInfo {
@@ -77,6 +79,7 @@ export class MachinesMock {
         logon: null,
         handover: null,
         autoReconnect: true,
+        updateWaits: true,
         connect: 'at_start',
       }
       this.machinesList.push(info)
@@ -113,7 +116,11 @@ export class MachinesMock {
       return this.machineRow(machineId, { status: 'connected', error: null, versions: v ? { ...v, accepted: true } : null })
     },
     install: async (machineId: string) => this.mockInstall(machineId, 'install'),
-    update: async (machineId: string) => this.mockInstall(machineId, 'update'),
+    update: async (machineId: string, opts?: { when?: 'idle' | 'now' }) => {
+      this.updates.push({ machineId, when: opts?.when ?? 'idle' })
+      return this.mockInstall(machineId, 'update')
+    },
+    cancelUpdate: async (machineId: string) => this.machineRow(machineId, {}),
     rollback: async (machineId: string) => {
       const prev = this.machinesList.find((m) => m.id === machineId)?.install?.previous
       if (!prev) throw mockError('There is no earlier version installed there to go back to')
