@@ -8,10 +8,12 @@
 #   claude-sdk      scripts/claude-sdk-drift.mjs — module exports, Query methods,
 #                   option keys and response fields the adapter reads, against the
 #                   shipped .d.ts (plus sdk.mjs for the one probed, untyped option).
-#   codex-protocol  packages/agent-host/scripts/codex-bindings.mjs --check —
-#                   regenerates the app-server bindings from the installed codex,
-#                   diffs protocol-contract.json (the methods we use) against them, and
-#                   compares adapters/codex/generated/ (the types we read, #1339) with them.
+#   codex-contract  packages/agent-host/scripts/codex-bindings.mjs --check-contract —
+#                   regenerates the app-server bindings from the installed codex and
+#                   diffs protocol-contract.json (the methods we use) against them: a break.
+#   codex-types     the same script, --check-types: whether adapters/codex/generated/ (the
+#                   types the adapter is compiled against, #1339) is still what Codex makes.
+#                   Red means regenerate and see what the build says, not that a name is gone.
 #   surface         scripts/surface-drift.mts --file-issue — the other direction (#270):
 #                   what the latest tools offer that their adapters have not reviewed,
 #                   and which limitations an adapter declares may be gone.
@@ -72,7 +74,9 @@ jobs:
       # not accidentally measure.
       - run: pnpm drift:claude
 
-  codex-protocol:
+  # Two jobs, so that the failure email says which: a name the adapter uses is gone (codex-contract), or the types
+  # it is compiled against changed and want regenerating (codex-types)
+  codex-contract:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -93,9 +97,28 @@ jobs:
           npm install -g @openai/codex@latest
           codex --version
 
-      # `--check` verifies the contract and compares generated/, writing nothing; it needs
-      # only node builtins, so no `pnpm install` here either.
-      - run: pnpm codex:bindings --check
+      # Writes nothing; it needs only node builtins, so no `pnpm install` here either.
+      - run: pnpm codex:bindings --check-contract
+
+  codex-types:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Install latest Codex CLI
+        run: |
+          npm install -g @openai/codex@latest
+          codex --version
+
+      # Writes nothing; compares generated/ with what this Codex makes
+      - run: pnpm codex:bindings --check-types
 
   # The other direction (#270): not "is a name we use gone?" but "does the tool now offer something the adapter has
   # not reviewed, or no longer need a limitation it works around?". Every adapter fills in the contract's `surface`, and

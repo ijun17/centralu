@@ -126,7 +126,7 @@ Workflow event audit (2026-10-13):
 | `release.yml`: `guard`, `platform`, `shim` | Tag push or manual dispatch; `guard` validates the tag on push and dry-run controls publishing. Neither main push nor PR runs it. | No; rehearsal remains a separate tag prerequisite. |
 | `shell-release.yml`: `guard`, `build`, `publish` | Manual dispatch only. | No. |
 | `local-content-sign.yml`: `validate`, `sign` | Manual dispatch only; real signing requires main. | No. |
-| `drift.yml`: `claude-sdk`, `codex-protocol`, `surface` | Schedule or manual dispatch only. `surface` files or updates an issue (`issues: write`). | No. |
+| `drift.yml`: `claude-sdk`, `codex-contract`, `codex-types`, `surface` | Schedule or manual dispatch only. `surface` files or updates an issue (`issues: write`). | No. |
 | `discord-notify.yml`: `notify` | Issue, PR and discussion notifications (`pull_request_target`, not build CI). | No. |
 
 Before reusing PR evidence, the tool audits the configured `ci.workflows` files from
