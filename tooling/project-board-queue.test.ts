@@ -3606,8 +3606,7 @@ describe("the merge queue keeps its messages until their owner acknowledges them
     // A file written before #1351: no acksFrom, its messages never acknowledged, one told long ago
     const old = mailbox() as Record<string, unknown> & { events: Record<string, unknown>[] }
     delete old.acksFrom
-    old.events[0].told = true
-    old.events[0].toldAt = new Date(NOW).toISOString()
+    Object.assign(old.events[0]!, { told: true, toldAt: new Date(NOW).toISOString() })
     const q = normalize(JSON.parse(JSON.stringify(old)))
     expect(unacked(q)).toEqual([])
     expect(dueReposts(q, NOW + 120 * 60_000)).toEqual([])
