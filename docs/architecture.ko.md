@@ -65,6 +65,27 @@ npm 런처에서 `process.platform`(또는 `os.platform()`)을 읽거나 무엇�
 OS는 그 파일들을 고치는 일이다. 테스트와 빌드 스크립트는 검사하지 않는다. 호스트가 뜨는 방식에 대한 Rust 쪽의 짝은
 `start_plan`이다([agent-host.md](agent-host.md) §4.0).
 
+**프로세스 밖에서 온 데이터는 확인하지, 단언하지 않는다** (#1339). 다음은 모두 무언가가 확인하기 전까지 `unknown`이다.
+- 에이전트 CLI의 스트림, Codex app-server의 메시지, 원격 호스트나 앱이 보낸 프레임
+- 무엇이든 `JSON.parse`한 것, 파일, 소켓, 환경 변수
+- 저장소에서 다시 읽은 JSON 열
+
+확인은 두 가지다. 필드가 여럿인 모양은 zod 스키마(`schema.safeParse`, 실패했을 때의 길과 함께)로 확인한다. 필드
+하나씩 읽는 값은 좁히는 가드(`typeof`, `Array.isArray`, `agent-host/src/json-value.ts`의 `isObj`/`asObj`/`str`,
+또는 주장하는 것을 모두 확인하는 `v is T` 함수)로 확인한다. 그런 값에 `x as T`를 쓰는 것은 아무도 확인하지 않은
+주장이고, 타입을 읽는 lint가 막는다(`no-unsafe-type-assertion`, 그리고 `JSON.parse`가 돌려주는 `any`에 대한
+`no-unsafe-*`; [CONTRIBUTING.md](../CONTRIBUTING.md)). 잡은 예외도 같다: `(e as Error).message`가 아니라 protocol의
+`errorMessage(e)`.
+
+라이브러리가 스트림을 파싱하고 그 타입을 선언하는 곳에서는, 어댑터가 그 타입으로 읽고 빌드가 필드 이름을 하나하나
+그 타입과 대조한다: Claude Agent SDK의 `SDKMessage`, Codex의 생성된 프로토콜 타입. 값은 여전히 조심해서
+읽는다(`adapters/claude/json.ts`의 `ContentBlock`). 상대 프로세스는 그 타입이 설명하는 것과 다른 버전일 수 있기
+때문이다. 다른 빌드가 쓴 파일에서 다시 읽은 같은 메시지는 그 타입이 아니다: 먼저 가드를 거친다(`history.ts`의
+`readableMessage`).
+
+`parseTolerant`(protocol)는 스키마가 거부한 값을 그대로 두는 유일한 읽기다. Centralu의 두 빌드 사이의 우리
+프로토콜을 위한 것이고(docs/protocol.md §4), 바깥 데이터를 확인하는 것이 아니다.
+
 **런타임의 Rust에서도 같고, 테스트가 지킨다** (`keeper/src/platform_checks.rs`): `cfg(…)`, `cfg!(…)`, `cfg_attr`의
 조건에 OS를 묻는 것(`unix`, `windows`, `target_os`, …)과 `std::env::consts::OS`는 keeper 크레이트의 `src/`와 창의
 `src/`에서 OS 계층(`keeper/src/os/`), `start_plan.rs`(`Os::current`), 창 자신의 OS 통합(`src/ide.rs`) 밖에 있으면

@@ -75,6 +75,28 @@ must depict a named CLI use an explained `eslint-disable` comment. A kept proces
 third adapter an enrollment in the registry and an implementation under `adapters/`, rather than an edit across
 session policy, links, costs and UI mocks.
 
+**Data from outside the process is checked, never asserted** (#1339). These all reach the code as `unknown` until
+something checks them:
+- an agent CLI's stream, a Codex app-server's messages, a remote host's or an app's frames;
+- `JSON.parse` of anything, a file, a socket, an environment variable;
+- a JSON column read back from the store.
+
+The check is one of two kinds. A zod schema (`schema.safeParse`, with a path for when it fails) checks a shape with
+several fields. A narrowing guard (`typeof`, `Array.isArray`, `isObj`/`asObj`/`str` in `agent-host/src/json-value.ts`,
+or a `v is T` function that checks all it claims) checks a value read field by field. `x as T` on such a value is a
+claim nothing checks, and the type-aware lint refuses it (`no-unsafe-type-assertion`, the `no-unsafe-*` rules for
+the `any` that `JSON.parse` returns; [CONTRIBUTING.md](../CONTRIBUTING.md)). The same goes for a caught value: `errorMessage(e)`
+from protocol, not `(e as Error).message`.
+
+Where a library parses the stream and declares its type, the adapter reads by that type and the build checks every
+field name against it: the Claude Agent SDK's `SDKMessage`, and Codex's generated protocol types. The values are
+still read carefully (`adapters/claude/json.ts` `ContentBlock`), since the other process may be another version than
+the one the types describe. The same message read back from a file another build wrote is not that type: it goes
+through a guard first (`history.ts` `readableMessage`).
+
+`parseTolerant` (protocol) is the one reader that keeps a value its schema rejects. It is meant for our own protocol
+between two builds of Centralu (docs/protocol.md §4), and is not a check of outside data.
+
 **In the runtime's Rust the same holds, enforced by a test** (`keeper/src/platform_checks.rs`): an OS predicate in
 `cfg(…)`, `cfg!(…)` or a `cfg_attr` condition (`unix`, `windows`, `target_os`, …) and `std::env::consts::OS` fail
 `cargo test` in the keeper crate's `src/` and the window's `src/` outside the OS layer (`keeper/src/os/`),
