@@ -14,6 +14,14 @@ import { failuresOf, guardFiles, guardWarnings, isGuardTest, isTestFile, isVites
  * A fake test file is one line a test: `name :: file :: text`, passing when the file holds the text.
  */
 
+/*
+ * Much of this file is synchronous work (git, tsc and vitest through `execFileSync`) that holds the worker's event loop, and
+ * vitest's worker gives up on the answer to a report after 60 s ("Timeout calling onTaskUpdate", tooling/vitest-stall-watch.ts).
+ * On a loaded runner the file hit it with every test passing. The loop gets a turn after each test, so a report is answered
+ * between tests and not only when the file ends.
+ */
+afterEach(() => new Promise<void>((resolve) => setImmediate(resolve)))
+
 const GIT_ENV = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', LC_ALL: 'C' }
 const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-c', 'core.autocrlf=false', ...args], { cwd, encoding: 'utf8', env: GIT_ENV }).trim()
 
@@ -138,9 +146,9 @@ describe('what pre-pr reads', () => {
       if (fileLink) expect(readFileSync(join(tree, 'node_modules/shim.txt'), 'utf8')).toBe('a file')
       // The workspace package is the worktree's own, whichever way it is reached: no path back into the checkout
       expect(readFileSync(join(tree, 'packages/ui/node_modules/@cc/core/src/x.ts'), 'utf8')).toBe('worktree')
-      expect(realpathSync(join(tree, 'packages/ui/node_modules/@cc/core'))).toBe(realpathSync(join(tree, 'packages/core')))
+      expect(realpathSync.native(join(tree, 'packages/ui/node_modules/@cc/core'))).toBe(realpathSync.native(join(tree, 'packages/core')))
       // Everything else leads to the checkout's own dependencies
-      expect(realpathSync(join(tree, 'packages/ui/node_modules/react'))).toBe(realpathSync(join(root, 'packages/ui/node_modules/react')))
+      expect(realpathSync.native(join(tree, 'packages/ui/node_modules/react'))).toBe(realpathSync.native(join(root, 'packages/ui/node_modules/react')))
       // .pnpm, left-pad, react and @cc/core; the copy of a file is not a link
       expect(unlinkLinks(tree)).toBe(4)
       expect(existsSync(join(tree, 'node_modules/left-pad'))).toBe(false)
@@ -218,7 +226,7 @@ describe('what pre-pr reads', () => {
       // Links first: `typescript` in both folders leads into this repository's own node_modules, which no delete may follow
       unlinkLinks(tree)
       unlinkLinks(root)
-      rmSync(realpathSync(base), { recursive: true, force: true })
+      rmSync(realpathSync.native(base), { recursive: true, force: true })
     }
   }
 
