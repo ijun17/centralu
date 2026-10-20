@@ -472,7 +472,9 @@ export class SessionStarts {
       this.host.store.sessions.upsertSession(info)
       this.host.emit({ type: 'user_message', sessionId: id, seq, text: params.initialPrompt, ...(from ? { from } : {}) })
       this.host.cardRests.turnAsked(id)
-      handle.send(params.initialPrompt)
+      // The first message of a new session is the person's own unless another session wrote it (the handoff's)
+      if (from) handle.send(params.initialPrompt)
+      else handle.send(params.initialPrompt, { origin: { kind: 'human' } })
     }
     return info
   }

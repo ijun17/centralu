@@ -231,12 +231,19 @@ export type EventSink = (event: NormalizedEvent) => void
  */
 export type InputObserver = { complete(): void; fail(error: Error): void }
 
+/**
+ * Who wrote an input, when the host can say so. Only the person's own typing is stamped (`human`): a report, an app's
+ * notice, another session's delivery and Centralu's own words carry none. Claude passes it to the CLI as the user
+ * message's `origin`, where an absent one is "unattributed" and fails closed at its strict `isHuman()` gates.
+ */
+export type InputOrigin = { kind: 'human' }
+
 export interface SessionHandle {
   readonly sessionId: string
   readonly externalId: string | null
   /** Limits the parent should know before delegating more work; decided by the adapter's effective settings. */
   delegationNotice?(): string | undefined
-  send(text: string): void
+  send(text: string, opts?: { origin?: InputOrigin }): void
   /** Completes after the consuming turn is recorded. The observer runs synchronously, before later turn frames. */
   sendTracked?(text: string, observer?: InputObserver): Promise<void>
   /** The matcher is computed by core and passed along by the UI (boundary rule: the host does not know core) */
