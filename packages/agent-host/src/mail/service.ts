@@ -1,5 +1,5 @@
 import { oneLineText } from '@cc/protocol'
-import { isObj } from '../json-value.js'
+import { asObj, isObj } from '../json-value.js'
 import {
   BLOCKER_KINDS,
   MESSAGE_KINDS,
@@ -21,6 +21,7 @@ import {
   type ThreadState,
 } from '../dev-services/store/mail.js'
 import { CENTRALU, PERSON, parseAddress, type Party } from './address.js'
+import { buildMailFrame, type MailFrameItem } from './frame.js'
 import { UlidMaker, messageIdOf, parseMailId, threadIdOf } from './ids.js'
 import {
   MAX_BLOCKERS,
@@ -28,6 +29,7 @@ import {
   SUBJECT_MAX,
   bodyLimit,
   dueAt,
+  flowsDown,
   mayEditTask,
   mayPostKind,
   refuse,
@@ -146,6 +148,18 @@ export type ReadOptions = {
   after?: number
   /** Do not mark what is returned read (the board and the Inbox list; a peek) */
   peek?: boolean
+}
+
+/** What a delivery to one receiver would send now (§7.5, §7.6) */
+export type DrainResult = {
+  /** The wake frame; empty when there is nothing to say */
+  text: string
+  /** Every message the text tells of */
+  messageIds: string[]
+  /** Those whose words are in the text whole (they flow down). Read on acceptance, and never sent again */
+  inline: string[]
+  /** Those the text only points at: delivered, still unread */
+  pointed: string[]
 }
 
 const POST_KEYS = new Set(['kind', 'body', 'urgent', 'needsOwner', 'wake', 'replyTo', 'dedupeKey'])
@@ -639,6 +653,44 @@ export class MailService {
     })
   }
 
+  // ── The wake ──
+
+  /**
+   * What a delivery to `recipient` would send now, and which messages it covers (§7.5). It reads the receipts as they are:
+   * what was read or handled since is not in it, nor what is in a thread that has since been done, nor what the policy
+   * no longer lets the sender write, nor what was already delivered, is held, or is not yet due. Nothing to say gives an
+   * empty text, and nothing is sent.
+   *
+   * `inline` are the messages whose words are in the text whole: the receiver has them, and they are never sent again
+   * (§7.6.5: an `assign` the CLI took just before a crash would start the same work twice). `pointed` are those the text only
+   * tells of. With `again`, mail that was delivered but is still unread is pointed at once more (§7.6.6), never inline
+   */
+  drain(recipient: string, opts: { again?: boolean } = {}): DrainResult {
+    this.party(recipient)
+    const items: MailFrameItem[] = []
+    for (const { receipt, message, thread } of this.records.pendingFor(recipient, this.now(), opts.again === true)) {
+      if (thread.state === 'done' || thread.state === 'unknown' || message.kind === 'event' || message.sender === recipient) continue
+      if (this.policy.mayWrite(message.sender, recipient, thread) !== null) continue
+      const sender = parseAddress(message.sender)?.kind
+      const down = flowsDown(sender === 'person', sender === 'session' && message.sender === thread.owner, recipient === thread.assignee, message.kind)
+      if (down && receipt.deliveredAt !== null) continue
+      const about = aboutOf(message.facts)
+      const outcome = typeof message.facts.outcome === 'string' ? message.facts.outcome : undefined
+      items.push({
+        messageId: message.id,
+        threadId: thread.id,
+        kind: message.kind,
+        from: message.sender,
+        relation: relationWord(recipient, message.sender, thread),
+        ...(about ? { about } : {}),
+        ...(outcome ? { outcome } : {}),
+        ...(down ? { inline: message.body } : {}),
+      })
+    }
+    const frame = buildMailFrame(items)
+    return { text: frame.text, messageIds: frame.shown, inline: frame.inline, pointed: frame.shown.filter((id) => !frame.inline.includes(id)) }
+  }
+
   // ── Retention ──
 
   /**
@@ -901,4 +953,21 @@ function checkLinks(links: MailLinks): MailLinks {
     out[key] = [...new Set(list)]
   }
   return out
+}
+
+/** The session a report is about, from Centralu's facts, when it parses as an address */
+function aboutOf(facts: MailFacts): string | undefined {
+  const session = asObj(facts.about).session
+  return typeof session === 'string' && parseAddress(session) ? session : undefined
+}
+
+/** Centralu's word for how the sender stands to the receiver in this thread (§7.3). Never a name another party wrote */
+function relationWord(recipient: string, sender: string, thread: ThreadRow): string {
+  const party = parseAddress(sender)
+  if (party?.kind === 'centralu') return 'Centralu'
+  if (party?.kind === 'person') return 'the person'
+  if (party?.kind === 'app') return recipient === thread.owner ? 'an app you called' : 'an app in this thread'
+  if (sender === thread.owner) return 'the session that gave you this work'
+  if (sender === thread.assignee && recipient === thread.owner) return 'the session you gave this work to'
+  return 'another session in this thread'
 }

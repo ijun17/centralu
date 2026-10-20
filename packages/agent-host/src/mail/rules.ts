@@ -102,6 +102,15 @@ export function reopensReview(standing: Standing, kind: MessageKind): boolean {
   return (standing === 'owner' || standing === 'person') && (kind === 'note' || kind === 'question' || kind === 'answer')
 }
 
+/**
+ * Words that flow down (§7.3): an assign, note or answer from the thread's owner, a session, to its assignee, and anything
+ * from the person. An app's words never do, whatever its place in the thread
+ */
+export function flowsDown(senderIsPerson: boolean, senderIsOwnerSession: boolean, recipientIsAssignee: boolean, kind: MessageKind): boolean {
+  if (senderIsPerson) return true
+  return senderIsOwnerSession && recipientIsAssignee && (kind === 'assign' || kind === 'note' || kind === 'answer')
+}
+
 /** Receipts are due 2 s after the message so a burst is one delivery; urgent mail and the person's words at once (§7.9) */
 export const DEBOUNCE_MS = 2_000
 
