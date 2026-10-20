@@ -27,6 +27,8 @@ import { appReachNotice } from './appReachNotice.js'
 import { usePlatform } from '../../app/PlatformProvider.js'
 import { ComposerFooter } from './ComposerFooter.jsx'
 import { EMPTY_CHAT, EMPTY_QUESTIONS } from './empty.js'
+import { ReportChoice, useReportOwed } from './ReportChoice.jsx'
+import type { SendIntent } from '@cc/platform/ports'
 
 /**
  * A handle that lets the composer take over handling a drop received from outside it (#116).
@@ -152,6 +154,14 @@ export const Composer = memo(function Composer({
    */
   const [recall, setRecall] = useState<{ at: number; text: string } | null>(null)
   const text = recall ? recall.text : draft.text
+  /*
+   * A session that owes a delegation report asks what the message means (#1377). Asked of the host once the person
+   * types; "Just asking" is the default and comes back after every message
+   */
+  const [intent, setIntent] = useState<SendIntent>('ask')
+  const [sentCount, setSentCount] = useState(0)
+  const owed = useReportOwed(sessionId, text.trim().length > 0, sentCount)
+  useEffect(() => setIntent('ask'), [sessionId])
   const attachments = draft.attachments
 
   const patchDraft = useCallback(
@@ -544,9 +554,12 @@ export const Composer = memo(function Composer({
         setDraft(sessionId, EMPTY_DRAFT)
         asked.current++
         setAppNotice(null)
-        void send(sessionId, t, attachments)
+        void send(sessionId, t, attachments, owed ? intent : undefined)
+        setIntent('ask')
+        setSentCount((n) => n + 1)
       }}
     >
+      {owed && <ReportChoice owed={owed} value={intent} onChange={setIntent} />}
       {(attachments.length > 0 || uploading > 0) && (
         <AttachmentStrip attachments={attachments} uploading={uploading} onRemove={removeAttachment} />
       )}

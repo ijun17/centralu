@@ -24,9 +24,17 @@ import type {
 } from '@cc/protocol'
 import type { Unsubscribe, ConnectionState, MachineRef } from './common.js'
 
+/**
+ * What a message means to a delegation report the session owes (#1377): `ask` ("Just asking", the default), `task` ("Add
+ * to the task") or `takeover` ("Take it over")
+ */
+export type SendIntent = 'ask' | 'task' | 'takeover'
+
 export interface AgentPort {
   createSession(params: CreateSessionParams): Promise<SessionInfo>
-  send(sessionId: string, text: string, attachments?: Attachment[]): Promise<void>
+  send(sessionId: string, text: string, attachments?: Attachment[], intent?: SendIntent): Promise<void>
+  /** Who waits for this session's work, when it owes a report (#1377); the composer then offers the choice */
+  reportOwed(sessionId: string): Promise<{ callerId: string; callerName: string } | null>
   /** Saves a pasted image and returns its path (so base64 does not end up in the conversation record) */
   saveAttachment(sessionId: string, name: string, mime: string, dataBase64: string): Promise<Attachment>
   respondApproval(

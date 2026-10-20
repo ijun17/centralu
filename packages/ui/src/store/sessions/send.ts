@@ -214,7 +214,7 @@ export const sendActions = (set: StoreSet, get: StoreGet): SendActions => ({
     }
   },
 
-  async send(sessionId, text, attachments) {
+  async send(sessionId, text, attachments, intent) {
     /*
      * **If a question is open, the composer's text is that question's answer, not a new turn.**
      *
@@ -324,6 +324,7 @@ export const sendActions = (set: StoreSet, get: StoreGet): SendActions => ({
         sessionId,
         text,
         attachments?.map(({ data: _, ...a }) => a),
+        intent,
       )
       if (dropped.length) {
         const mark: ChatItem = { kind: 'mark', seq: nextChatKey(), text: droppedQuestionsText(dropped) }
