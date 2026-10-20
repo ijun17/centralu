@@ -40,7 +40,7 @@ async function heldFolder(): Promise<{ dir: string; pid: number; exited: Promise
   const exited = new Promise((resolve) => child.once('exit', resolve))
   started.push({ pid: child.pid!, exited })
   await new Promise<void>((resolve, reject) => {
-    child.stdout!.once('data', () => resolve())
+    child.stdout.once('data', () => resolve())
     child.once('exit', () => reject(new Error('the holding process ended before it was ready')))
   })
   return { dir, pid: child.pid!, exited }
