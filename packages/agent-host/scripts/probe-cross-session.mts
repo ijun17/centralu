@@ -145,9 +145,9 @@ async function registeredAs(sessionId: string): Promise<Registered | null> {
   for (let tries = 0; tries < 20; tries++) {
     for (const file of await readdir(dir).catch(() => [] as string[])) {
       if (!file.endsWith('.json')) continue
-      const entry = JSON.parse(await readFile(join(dir, file), 'utf8').catch(() => 'null')) as Record<string, unknown> | null
-      if (entry?.sessionId === sessionId && typeof entry.name === 'string') {
-        return { name: entry.name, socket: typeof entry.messagingSocketPath === 'string' ? entry.messagingSocketPath : null }
+      const entry = await readFile(join(dir, file), 'utf8').then((text): unknown => JSON.parse(text)).catch(() => null)
+      if (typeof entry === 'object' && entry !== null && 'sessionId' in entry && entry.sessionId === sessionId && 'name' in entry && typeof entry.name === 'string') {
+        return { name: entry.name, socket: 'messagingSocketPath' in entry && typeof entry.messagingSocketPath === 'string' ? entry.messagingSocketPath : null }
       }
     }
     await delay(500)
