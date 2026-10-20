@@ -1,4 +1,5 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { oneLineText } from '@cc/protocol'
 import { createHash } from 'node:crypto'
 import { asObj } from '../json-value.js'
 import { createConnection, createServer } from 'node:net'
@@ -187,7 +188,10 @@ function othersOf(raw: unknown): { others?: RemoteCredential[] } {
   if (!Array.isArray(raw)) return {}
   const others = raw.flatMap((e: unknown) => {
     const o = asObj(e)
-    return typeof o.id === 'string' && typeof o.label === 'string' ? [{ id: o.id.slice(0, 16), label: o.label.slice(0, 64), created: typeof o.created === 'number' && Number.isFinite(o.created) ? o.created : 0 }] : []
+    // An id `--revoke` takes, a label of one line with no format character, a date that is one
+    if (typeof o.id !== 'string' || !/^[0-9a-f]{8}$/.test(o.id) || typeof o.label !== 'string') return []
+    const created = typeof o.created === 'number' && Number.isFinite(o.created) && o.created > 0 && o.created < 8.64e15 ? o.created : 0
+    return [{ id: o.id, label: oneLineText(o.label, 64), created }]
   })
   return { others: others.slice(0, 32) }
 }

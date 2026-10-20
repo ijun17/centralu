@@ -93,6 +93,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   /** The host this link started there, if it did (owner decision 7, plan §10.9) */
   protected hostStarted: (HostStart & { at: number }) | null = null
   protected endpoint: Endpoint | null = null
+  /** The full credentials this hub withdrew on the machine (#1405): never listed again, whatever a line read before said */
+  protected revokedHere = new Set<string>()
   protected client: RemoteClient | null = null
   /** The client when it stopped redialling (`gaveUp`, #1143) and is waiting, idle, for the next opening */
   private gaveUp: RemoteClient | null = null
@@ -292,8 +294,12 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
       autoReconnect: this.autoReconnect,
       updateWaits: true,
       connect: this.autoReconnect ? 'at_start' : 'when_needed',
-      // The machine's other full credentials, as its last connection line named them (#1405)
-      otherCredentials: this.endpoint?.line.others ?? null,
+      /*
+       * The machine's other full credentials, as the connection line of this link named them (#1405), less any this hub
+       * withdrew since. A snapshot from when the link opened: a pairing there later shows at the next link. None while
+       * not connected, so a list from an earlier link is not taken for the present one
+       */
+      otherCredentials: this.status === 'connected' && this.endpoint?.line.others ? this.endpoint.line.others.filter((c) => !this.revokedHere.has(c.id)) : null,
     }
   }
 
