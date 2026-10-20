@@ -5,17 +5,17 @@ import { InlineConfirm } from '../../components/InlineConfirm.jsx'
 import { LoadFailed } from '../../components/LoadFailed.jsx'
 
 /**
- * A session's subagent steps in Settings → Trash (#418): what each live session's steps take, with the way to move them
- * to the trash while the session stays, and a trashed set of steps as a row of the trash.
+ * A session's subagent steps in Settings → Archive (#418): what each live session's steps take, with the way to move them
+ * to the session archive while the session stays, and a trashed set of steps as a row of the session archive.
  *
  * The steps of the native subagents a session launched (#222) are kept under their launch cards and read only when a
  * card is opened, so nothing showed what they took: the measured store held 46 MB of them, all one session still in use,
- * and the only way to let them go was to delete the conversation. The trash is where this screen says what the store
+ * and the only way to let them go was to delete the conversation. The session archive is where this screen says what the store
  * holds, so they are said here.
  *
  * The list of what sessions hold is drawn in the conversation's card shape (docs/design-system.md §2, *owner,
  * 2026-10-18*: the bubble corner, rows split by a faint hairline), its action the shared `Button`; a trashed set of steps
- * is a row of the trash list, drawn as the trashed sessions beside it are.
+ * is a row of the session archive list, drawn as the archived sessions beside it are.
  */
 
 /** A count and its noun, the count through the shared formatter (`formatCount`): "1 run", "1.2k steps" */
@@ -34,7 +34,7 @@ type RowState = {
 }
 
 /**
- * What each live session's subagent steps take, largest first, each with "Move to trash…". `sessions` null while it is
+ * What each live session's subagent steps take, largest first, each with "Archive…". `sessions` null while it is
  * read; `error` when reading it failed. `unreached`: linked machines whose sessions could not be read (#841's rule), each
  * named; with one, the list is never said to be empty, since it is not the whole of it.
  */
@@ -62,7 +62,7 @@ export function SubagentStepsHeldList({
       <div className="px-1">
         <h3 className="text-xs font-medium text-ink-muted">Subagent steps in sessions</h3>
         <p className="mt-0.5 text-xs leading-body text-ink-faint">
-          What the agents a session launched did, kept under their cards in the conversation. Moving them to the trash
+          What the agents a session launched did, kept under their cards in the conversation. Moving them to the session archive
           frees the space and keeps the conversation; the cards then say where the steps went.
         </p>
       </div>
@@ -94,7 +94,7 @@ export function SubagentStepsHeldList({
                       onClick={() => onAsk(s.sessionId)}
                       data-testid={`subagent-steps-move-${s.sessionId}`}
                     >
-                      Move to trash…
+                      Archive…
                     </Button>
                   </div>
                   <div className="readout mt-0.5 text-2xs text-ink-faint" data-testid={`subagent-steps-take-${s.sessionId}`}>
@@ -107,8 +107,8 @@ export function SubagentStepsHeldList({
                   )}
                   {r.confirming && (
                     <InlineConfirm
-                      text={`Move the subagent steps of “${s.name}” to the trash? The conversation stays, and its cards say the steps are in the trash. You can restore them here.`}
-                      yesLabel="Move to trash"
+                      text={`Move the subagent steps of “${s.name}” to the session archive? The conversation stays, and its cards say the steps are in the session archive. You can restore them here.`}
+                      yesLabel="Archive"
                       busy={r.busy}
                       onYes={() => onMove(s)}
                       onNo={onCancel}
@@ -129,7 +129,7 @@ export function SubagentStepsHeldList({
   )
 }
 
-/** A session's subagent steps in the trash: a row of the trash list, with Restore and Delete for good */
+/** A session's subagent steps in the session archive: a row of the session archive list, with Restore and Delete for good */
 export function TrashedSubagentStepsRow({
   entry: s,
   busy,

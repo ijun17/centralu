@@ -2,8 +2,8 @@ import type { ChatItem } from '../../store/store.js'
 import { Markdown } from '../session/Markdown.jsx'
 
 /**
- * One item of a conversation read in the trash (#204), drawn plainly: the words, the tool calls by name, the
- * boundaries. A trashed session's and a kept app-agent run's (#378) are read the same way.
+ * One item of a conversation read in the session archive (#204), drawn plainly: the words, the tool calls by name, the
+ * boundaries. A archived session's and a kept app-agent run's (#378) are read the same way.
  */
 export function ReaderItem({ item }: { item: ChatItem }) {
   switch (item.kind) {

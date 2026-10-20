@@ -79,7 +79,7 @@ export class HandoffChildren {
    *   (`askedBy`/`parentSessionId`, with the reports, turns and delegations that are theirs), since an orphan is worse;
    *   that session is told in its conversation (its note was read long ago), and the original, about to go, is told
    *   nothing. What the original asked for and the person never answered stays behind: its start_agent requests and the
-   *   requests it queued are withdrawn and dropped by the trash as before, so no card appears in another session
+   *   requests it queued are withdrawn and dropped by the session archive as before, so no card appears in another session
    *   because this one was deleted, and nothing is delivered in a session that did not ask for it.
    *
    * Everything stored moves in one transaction (`Store.moveChildren`), and only then the host's memory, all without an
@@ -105,7 +105,7 @@ export class HandoffChildren {
     this.host.delegationFlow.remote.moveCaller(from, to)
     const removed = scope === 'removed'
     // What only `auto` let the original queue does not go to a successor that is not `auto`; the original is told.
-    // A removed original's queue moves nowhere: the trash drops it
+    // A removed original's queue moves nowhere: the session archive drops it
     if (!removed && heir.permissionPreset !== 'auto') this.host.dropOpenedByAuto(from)
     const queuedBy = removed ? new Set<string>() : new Set([...this.host.children.queued.values()].flat().filter((r) => r.callerSessionId === from).map((r) => r.sessionId))
     const delegated = [...this.host.children.delegations.values()].filter((d) => d.callerId === from)
@@ -159,7 +159,7 @@ export class HandoffChildren {
           : `${told ? 'Its report comes to you' : 'Nothing about it comes to you unless you ask'}${owns ? ', and you are told of the cards of the turn you now own' : ''}. You did not start it, so agent_session works on it only with the auto preset.`
       moved.push({ handle: id, name: this.host.nameOf(id), state, can, ...(project !== undefined ? { project } : {}) })
     }
-    // A removed original's requests still open are withdrawn by the trash, not raised in another session
+    // A removed original's requests still open are withdrawn by the session archive, not raised in another session
     const starts = removed ? [] : [...this.host.children.agentStarts.values()].filter((r) => r.req.callerId === from && !r.ended)
     for (const r of starts) {
       moved.push(r.req.allowed
@@ -213,7 +213,7 @@ export class HandoffChildren {
     if (scope === 'removed') {
       this.host.onEvent({
         type: 'notice', sessionId: to, level: 'info', from: 'Centralu', label: 'handoff',
-        text: `“${original.name}” [${from}], which handed over to this session, was deleted. This session follows what it still had from now on: ${items.join('; ')}.`,
+        text: `“${original.name}” [${from}], which handed over to this session, was archived. This session follows what it still had from now on: ${items.join('; ')}.`,
       })
     } else {
       this.host.onEvent({

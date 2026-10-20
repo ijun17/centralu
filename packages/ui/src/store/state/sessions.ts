@@ -141,10 +141,10 @@ export type SessionsSlice = {
   /** Hides from the list / brings back (the record survives) */
   /** Restarts only the agent (the conversation stays as is) */
   restartSession(sessionId: string): Promise<boolean>
-  /** Moves the session to the trash (#204); the two flags say what goes with it when it is deleted for good */
+  /** Moves the session to the session archive (#204); the two flags say what goes with it when it is deleted for good */
   deleteSession(sessionId: string, deleteWorktree?: boolean, deleteExternal?: boolean): Promise<void>
   /**
-   * Brings a session back from the trash (#204). A project its restore registered again is added here, and asked
+   * Brings a session back from the session archive (#204). A project its restore registered again is added here, and asked
    * about trust as a newly added one is. Returns an error message, or null when it is back.
    */
   restoreFromTrash(sessionId: string): Promise<string | null>

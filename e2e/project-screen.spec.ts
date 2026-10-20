@@ -141,14 +141,14 @@ test('removing every panel survives a reload without legacy fields bringing them
   await expect(page.getByTestId(`session-row-${id}`)).toBeVisible()
 })
 
-test('a trashed session leaves its screen and a removed panel returns only when its sidebar row is dragged', async ({
+test('an archived session leaves its screen and a removed panel returns only when its sidebar row is dragged', async ({
   page,
 }) => {
   await setup(page, ['/tmp/alpha'])
   const a = await newSession(page, 'alpha')
   const b = await newSession(page, 'alpha')
   const c = await newSession(page, 'alpha')
-  // Arranged first, so the remembered order names the session that then goes to the trash
+  // Arranged first, so the remembered order names the session that then goes to the session archive
   await page.getByTestId('project-header-alpha').click()
   await addSessionPanels(page, [a, b, c])
   await dragPanel(page, `session:${b}`, `session:${a}`, 'before')

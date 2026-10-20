@@ -664,7 +664,7 @@ function ActionKey({
  * running terminal) since a rule of its text would also let the plain command through, and one ending in `*`, which
  * an older host reads as a prefix. Nor for a card this window could not read (#844): "always" would remember a
  * question the person never saw in full. Nor for the orchestrator's change to a linked machine (#1219): each one is
- * asked on its own, and the host remembers nothing for it. Nor for the orchestrator's change to its settings or the trash (#1219).
+ * asked on its own, and the host remembers nothing for it. Nor for the orchestrator's change to its settings or the session archive (#1219).
  */
 export function offersAlways(detail: ApprovalDetail): boolean {
   if (isUnknownCard(detail) || isMachineChange(detail) || isOrchestratorChange(detail)) return false

@@ -75,8 +75,8 @@ export interface AgentPort {
   /** Restarts only the agent attached to the session (the conversation stays as is) */
   restartSession(sessionId: string): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }>
   /**
-   * Moves the session to the trash (#204) — nothing is destroyed here; `TrashPort` is the way out.
-   * `deleteWorktree` and `deleteExternal` choose what goes with it when it is deleted for good from the trash:
+   * Moves the session to the session archive (#204) — nothing is destroyed here; `TrashPort` is the way out.
+   * `deleteWorktree` and `deleteExternal` choose what goes with it when it is deleted for good from the session archive:
    * the worktree, and the tool's own conversation file (codex rollout, claude JSONL). Both stay until then.
    */
   deleteSession(sessionId: string, deleteWorktree?: boolean, deleteExternal?: boolean): Promise<void>
@@ -154,7 +154,7 @@ export interface AgentPort {
    */
   loadSubagentMessages(sessionId: string, parentCallId: string, afterSeq?: number, limit?: number): Promise<StoredMessage[]>
   /**
-   * How many of one launch card's steps are in the trash (#418), so the card says they were moved there rather than
+   * How many of one launch card's steps are in the session archive (#418), so the card says they were moved there rather than
    * that none were recorded. A host before it does not answer.
    */
   subagentTrashed(sessionId: string, parentCallId: string): Promise<{ steps: number }>

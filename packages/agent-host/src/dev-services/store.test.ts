@@ -64,7 +64,7 @@ function gridSession(s: Store, id: string, projectId: string) {
 /** A trash record that removes nothing outside the store when purged */
 const KEEP_ALL = { projectId: 'p1', projectName: 'p1', projectPath: '/tmp/p1', removeExternal: false, removeWorktree: false }
 
-/** Counts one session's search index rows straight from the table — `searchMessages` filters the trash, this does not */
+/** Counts one session's search index rows straight from the table — `searchMessages` filters the session archive, this does not */
 function indexRowsOf(s: Store, sessionId: string): () => number {
   const db = (s as unknown as { db: Database.Database }).db
   const q = db.prepare(`SELECT COUNT(*) as n FROM messages_fts WHERE session_id = ?`)
@@ -345,7 +345,7 @@ describe('migrations (E-0)', () => {
    * (#179, 1.96s on a real-database session with 49,710 messages). The event loop has to turn
    * between chunks, and no matter which chunk boundary this is stopped at, the remaining
    * messages and the index have to agree with each other.
-   * Since #204 that is purging a session from the trash; the index rows it meets are the ones a trash step cut
+   * Since #204 that is purging a session from the session archive; the index rows it meets are the ones a trash step cut
    * short left behind, so they are put back here first to give the chunks something to keep in step.
    */
   it('purging a session lets the event loop go between chunks, and its messages and index rows leave together', async () => {
@@ -1839,11 +1839,11 @@ describe('how much of an app\'s requested agents were used (M4 D-5)', () => {
 })
 
 /**
- * The trash (#204). Deleting a session moves it here; only purging removes its rows. While it is here it is out of
+ * The session archive (#204). Deleting a session moves it here; only purging removes its rows. While it is here it is out of
  * reach: of every list and of search (its index rows are dropped, which is also where the size is — #96 measured
  * the index at 71MB of a 137MB store).
  */
-describe('the trash (#204)', () => {
+describe('the session archive (#204)', () => {
   const galaxy = (sessionId: string, n: number): StoredMessage[] =>
     Array.from({ length: n }, (_, i) => ({
       sessionId, seq: i + 1, role: 'user' as const, kind: 'text' as const, payload: { text: `galaxy ${i}` }, ts: i,
@@ -1856,7 +1856,7 @@ describe('the trash (#204)', () => {
       parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null, ...sessionLiveDefaults(), ...over,
     })
 
-  it('a trashed session leaves every listing and search at once, and keeps its messages', async () => {
+  it('an archived session leaves every listing and search at once, and keeps its messages', async () => {
     const s = seeded()
     s.messages.appendMessages(galaxy('s1', 5))
     s.permissions.addApprovalRule({ scope: 'session', projectId: 'p1', sessionId: 's1', matcher: 'Bash(ls)', decision: 'allow' })
@@ -1874,7 +1874,7 @@ describe('the trash (#204)', () => {
     expect(s.messages.searchMessages('ga')).toEqual([]) // the short-query path (LIKE) is a second way into the index
     expect(s.permissions.listApprovalRules()).toEqual([])
     expect(indexRowsOf(s, 's1')()).toBe(0)
-    // Out of reach is not gone: the conversation is all there, and the trash lists it with where it came from
+    // Out of reach is not gone: the conversation is all there, and the session archive lists it with where it came from
     expect(s.messages.loadMessages('s1', 10)).toHaveLength(5)
     expect(s.trash.listTrash().map((r) => [r.id, r.messages, r.record.projectId]).sort()).toEqual([
       ['orch', 0, null],
@@ -1886,12 +1886,12 @@ describe('the trash (#204)', () => {
 
   /*
    * The guard for the next query. Every SQL string in the store that reads `sessions` has to say what it does about
-   * the trash: filter it (`deleted_at`), read one session by id, or carry a comment saying why it includes the trash.
+   * the session archive: filter it (`deleted_at`), read one session by id, or carry a comment saying why it includes the session archive.
    * A new listing that forgets all three fails here, before it reaches a screen or an agent.
    */
-  it('no query in the store reads sessions without deciding about the trash', async () => {
+  it('no query in the store reads sessions without deciding about the session archive', async () => {
     const { readFileSync, readdirSync } = await import('node:fs')
-    // The queries that serve the app: every file of `store/` but the migrations, which run before anything is in the trash
+    // The queries that serve the app: every file of `store/` but the migrations, which run before anything is in the session archive
     const parts = readdirSync(new URL('./store/', import.meta.url)).filter((f) => f.endsWith('.ts'))
     expect(parts).toContain('sessions.ts')
     const own = readFileSync(new URL('./store.ts', import.meta.url), 'utf8')
@@ -1904,10 +1904,10 @@ describe('the trash (#204)', () => {
     const reading = literals.filter((q) => /\b(FROM|JOIN)\s+sessions\b/i.test(q))
     expect(reading.length).toBeGreaterThan(10)
     const undecided = reading.filter(
-      (q) => !/deleted_at/.test(q) && !/\bid = \?/.test(q) && !/\/\* includes the trash: /.test(q) && !/\$\{where\}/.test(q),
+      (q) => !/deleted_at/.test(q) && !/\bid = \?/.test(q) && !/\/\* includes the archive: /.test(q) && !/\$\{where\}/.test(q),
     )
     expect(undecided).toEqual([])
-    // `readSessions` takes its condition from the caller — every caller has to name the trash in it
+    // `readSessions` takes its condition from the caller — every caller has to name the session archive in it
     const callers = [...body.matchAll(/this\.(?:sessions\.)?readSessions\(`([^`]*)`/g)].map((m) => m[1]!)
     expect(callers.length).toBeGreaterThanOrEqual(3)
     expect(callers.filter((w) => !/deleted_at/.test(w))).toEqual([])
@@ -1928,11 +1928,11 @@ describe('the trash (#204)', () => {
     expect(s.messages.searchMessages('galaxy')).toHaveLength(5)
     expect(indexRowsOf(s, 's1')()).toBe(5) // a message with no text gets no index row, as when it was written
     expect(s.permissions.listApprovalRules().map((r) => r.sessionId)).toEqual(['s1'])
-    expect(await s.trash.restoreSession('s1', 'p1')).toBeNull() // only what is in the trash comes back
+    expect(await s.trash.restoreSession('s1', 'p1')).toBeNull() // only what is in the session archive comes back
     s.close()
   })
 
-  it('moving to the trash and back let the event loop go between chunks, and search reaches it only once it is back', async () => {
+  it('moving to the session archive and back let the event loop go between chunks, and search reaches it only once it is back', async () => {
     const s = seeded()
     const n = 1000
     s.messages.appendMessages(galaxy('s1', n))
@@ -1966,7 +1966,7 @@ describe('the trash (#204)', () => {
     s.close()
   })
 
-  it('purging takes only a session in the trash, with every row that points at it and nothing else; its app runs stay unlinked (#378)', async () => {
+  it('purging takes only a session in the session archive, with every row that points at it and nothing else; its app runs stay unlinked (#378)', async () => {
     const s = seeded()
     session(s, 's2', 'p1')
     for (const id of ['s1', 's2']) {
@@ -1979,7 +1979,7 @@ describe('the trash (#204)', () => {
       s.appRuns.beginAppRun({ ...run, id: `called-${id}`, callerSessionId: id, sessionId: null })
       s.appRuns.keepAppRunFailure({ runId: `called-${id}`, projectId: 'p1', appId: 'notes', args: '{}', result: null, createdAt: 1 }, 10)
     }
-    expect(await s.trash.purgeSession('s1')).toBe(false) // a live session has to go through the trash first
+    expect(await s.trash.purgeSession('s1')).toBe(false) // a live session has to go through the session archive first
     expect(s.messages.loadMessages('s1', 10)).toHaveLength(3)
 
     await s.trash.trashSession('s1', KEEP_ALL)
@@ -2009,12 +2009,12 @@ describe('the trash (#204)', () => {
     s.close()
   })
 
-  it('deleting a project moves its sessions to the trash and keeps the rows that point at them', async () => {
+  it('deleting a project moves its sessions to the session archive and keeps the rows that point at them', async () => {
     const s = seeded()
     session(s, 's2', 'p1')
     s.messages.appendMessages(galaxy('s1', 3))
     s.messages.appendMessages(galaxy('s2', 2))
-    await s.trash.trashSession('s2', KEEP_ALL) // already in the trash when the project goes
+    await s.trash.trashSession('s2', KEEP_ALL) // already in the session archive when the project goes
     s.permissions.addApprovalRule({ scope: 'session', projectId: 'p1', sessionId: 's1', matcher: 'Bash(ls)', decision: 'allow' })
     s.permissions.addApprovalRule({ scope: 'project', projectId: 'p1', matcher: 'Bash(pwd)', decision: 'allow' })
     s.sessions.recordCommit('p1', 'sha-s1', 's1')
@@ -2030,7 +2030,7 @@ describe('the trash (#204)', () => {
     expect(s.sessions.listSessions()).toEqual([])
     const trash = s.trash.listTrash()
     expect(trash.map((r) => [r.id, r.messages])).toEqual(expect.arrayContaining([['s1', 3], ['s2', 2]]))
-    // Nobody was asked about the tool's files or a worktree, so emptying the trash leaves them
+    // Nobody was asked about the tool's files or a worktree, so deleting all archived sessions leaves them
     expect(trash.find((r) => r.id === 's1')?.record).toEqual(KEEP_ALL)
     expect(s.messages.searchMessages('galaxy')).toEqual([])
     const db = (s as unknown as { db: Database.Database }).db
@@ -2041,7 +2041,7 @@ describe('the trash (#204)', () => {
     s.close()
   })
 
-  it('a store from before the trash comes up with nothing in it, each step after v38 run once', () => {
+  it('a store from before the session archive comes up with nothing in it, each step after v38 run once', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-v39-'))
     const file = join(dir, 'store.db')
     try {

@@ -1,6 +1,6 @@
 import type { ProjectInfo } from '@cc/protocol'
 
-/** The registered projects, as the mock holds them — the session list, the trash, machines and the project port all read it */
+/** The registered projects, as the mock holds them — the session list, the session archive, machines and the project port all read it */
 export class ProjectStore {
   list: ProjectInfo[] = []
 

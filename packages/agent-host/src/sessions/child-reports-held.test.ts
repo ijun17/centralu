@@ -5,7 +5,7 @@ import { managerWorld } from './manager.test-helpers.js'
 
 /*
  * A notice a session could not be woken for is kept and goes in with its next message (#1186). One for a session that
- * was deleted goes with it (#1186 review): a restore from the trash brings the same id back, and the notice with it.
+ * was deleted goes with it (#1186 review): a restore from the session archive brings the same id back, and the notice with it.
  */
 describe('notices kept for a session that could not be woken', () => {
   const world = (deliver: ChildReportsHost['deliver']) => {
@@ -35,7 +35,7 @@ describe('notices kept for a session that could not be woken', () => {
     expect(deliver).toHaveBeenCalledTimes(1)
   })
 
-  it('are forgotten when the session is moved to the trash', async () => {
+  it('are forgotten when the session is archived', async () => {
     const { rpc, mgr } = managerWorld()
     const p = (await rpc('projects.add', { path: tmpdir() })) as { id: string; path: string }
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }

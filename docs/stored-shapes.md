@@ -113,7 +113,7 @@ this build cannot read, and sets a row that is not a list aside, naming it, befo
 | Keeper record | `keeper.json` | keeper | written for a person and the integration scripts; no build reads it | | | | |
 | Bundle info | `bundle-info.json` next to a host | keeper | `source.rs:69`, `server/host.rs:192` | ignored | — | commit `unknown`, the build time from the file's time, with no word | |
 | Remote connection line | `centralu serve --connection` stdout | agent-host links | `parseConnectionLine` `agent-host/src/links/tunnel.ts:108` | ignored; `hostRunning` defaults to false | `version` and `dataDir` default | another `v` is an error that says which side to update; a missing port, token or protocol version is an error; lines that are not JSON are skipped | `tunnel.test.ts` (all three), `dev-build.test.ts`, `autostart.test.ts` |
-| Worktree recovery snapshot | `snapshot.json` in a trashed worktree's folder | agent-host | `readSnapshot` `agent-host/src/dev-services/worktree-recovery.ts:324` | — | — | not JSON, or naming no repository: the restore fails with an error that names the file, and its patches and bundles stay for a restore by hand | `worktree-recovery.test.ts` (broken) |
+| Worktree recovery snapshot | `snapshot.json` in an archived session's worktree recovery folder | agent-host | `readSnapshot` `agent-host/src/dev-services/worktree-recovery.ts:324` | — | — | not JSON, or naming no repository: the restore fails with an error that names the file, and its patches and bundles stay for a restore by hand | `worktree-recovery.test.ts` (broken) |
 
 ## Host ↔ UI payloads
 

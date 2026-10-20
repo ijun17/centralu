@@ -37,17 +37,17 @@ GyuHo123이 [#411](https://github.com/ijun17/centralu/issues/411)에 그린 모�
 | 오케스트레이터 | 앱 전체에 하나뿐인, 모든 세션을 보고 지휘하는 세션. 어느 프로젝트에도 속하지 않는다 | `kind: 'orchestrator'`; `packages/agent-host/src/sessions/orchestrator-tools.ts`, `orchestrator-home.ts` | 프로젝트 오케스트레이터(폐지) |
 | 평범한 세션 | 빌더도 앱의 에이전트도 아닌 프로젝트 안의 `worker`. 읽기 전용 `reader` 도구를 받는다(워크트리 세션, 띄운 에이전트, 다른 프로젝트의 일을 받은 세션도). 설정에서 끌 수 있다 | `readsOwnProject`, `packages/agent-host/src/sessions/tool-profiles.ts` | |
 | 워크트리 세션(워커) | 자기 git 워크트리와 브랜치에서 일하는 세션. 사람이 만든 것은 따로 서고, 세션이 `start_agent`로 띄운 것은 그 세션 아래에 놓인다(`parentSessionId`). 이것들을 쥐던 워크트리 매니저는 없어졌다(#561 part 3) | `SessionInfo.worktree`, `parentSessionId` | 브랜치 세션 |
-| 코디네이터 | 볼 수 있는 세션 목록(`scopeSessionIds`)과 역할 글(`roleAppend`)을 만들 때 정해 둔 세션. 관제 앱의 작업만 이것을 만들었다. 그 앱은 #372에서 걷어냈고 만들던 RPC(`agents.createCoordinator`)도 그 뒤에 빠져서, 새로 만드는 것은 없다. 종류는 사람들의 저장소에 이미 있는 것을 위해 남는다. 그것들은 다른 세션처럼 목록에 들고, 읽히고, 깨어나고, 휴지통에 가며, `appId: 'control'`을 달고 있다 | `kind: 'coordinator'`; `manager.ts` | 하위 오케스트레이터 |
+| 코디네이터 | 볼 수 있는 세션 목록(`scopeSessionIds`)과 역할 글(`roleAppend`)을 만들 때 정해 둔 세션. 관제 앱의 작업만 이것을 만들었다. 그 앱은 #372에서 걷어냈고 만들던 RPC(`agents.createCoordinator`)도 그 뒤에 빠져서, 새로 만드는 것은 없다. 종류는 사람들의 저장소에 이미 있는 것을 위해 남는다. 그것들은 다른 세션처럼 목록에 들고, 읽히고, 깨어나고, 보관함에 가며, `appId: 'control'`을 달고 있다 | `kind: 'coordinator'`; `manager.ts` | 하위 오케스트레이터 |
 | 빌더 | `<<role>>` 앱 하나를 만드는 세션. `appId`를 달고 **그리고** 빌더 지도(`apps.builders`)에서 그 앱이 가리키는 세션 | `AppSessions`의 `builderRefOf`, `packages/agent-host/src/sessions/app-sessions.ts`; `packages/agent-host/src/sessions/app-builder.ts` | |
-| 앱 에이전트 세션 | `<<role>>` 앱이 `run_agent`로 세운 세션. `appId`를 달지만 빌더가 아니고, `safe`로 돌며, 앱도 reader 도구도 받지 않고, 답은 앱에게 돌아간다. 실행이 깨끗하게 끝나고 아무도 참여하지 않았으면 지워지고, 그 기록이 휴지통에 남는다(#378) | `isAppAgent`, `packages/agent-host/src/sessions/tool-profiles.ts`; `runAppAgent`, `packages/agent-host/src/sessions/app-sessions.ts`; `packages/agent-host/src/sessions/app-agents.ts` | |
+| 앱 에이전트 세션 | `<<role>>` 앱이 `run_agent`로 세운 세션. `appId`를 달지만 빌더가 아니고, `safe`로 돌며, 앱도 reader 도구도 받지 않고, 답은 앱에게 돌아간다. 실행이 깨끗하게 끝나고 아무도 참여하지 않았으면 지워지고, 그 기록이 세션 보관함에 남는다(#378) | `isAppAgent`, `packages/agent-host/src/sessions/tool-profiles.ts`; `runAppAgent`, `packages/agent-host/src/sessions/app-sessions.ts`; `packages/agent-host/src/sessions/app-agents.ts` | |
 | 위임된 세션 | `<<role>>` 다른 프로젝트의 세션이 `ask_project`로 일을 준, 이미 있는 평범한 세션. Centralu는 그 일을 위해 다른 프로젝트에 세션을 만들지 않고(#614) 표시도 붙이지 않는다. 부탁한 세션은 대화 속 그 일의 `from`이고, 일은 맡긴 턴으로 돈다. #614 이전에는 `ask_project`가 세션을 세우거나 다시 쓰고 `askedBy`로 표시했으며, 그 표시는 지워진다 | `askProject`, `packages/agent-host/src/sessions/ask-project-flow.ts`; `askFrame`, `ask-project.ts`; [agent-host.ko.md](agent-host.ko.md) §1.2 | 델리게이트 |
 | 띄운 에이전트(자식) | `<<role>>` 같은 프로젝트의 다른 세션이 `start_agent`로 띄운 세션(#561). 그 세션의 폴더에서 그 세션의 프리셋으로 돈다. `askedBy`로 표시하며, 띄운 세션이 `agent_session`으로 다룰 수 있는 건 이 세션들뿐이다. 연결된 기계에 띄운 것(#1038)은 그 기계 체크아웃의 세션이다. 허브가 그 기계의 행에 부모를 `askedBy`로 적고, 사이드바는 그 기계의 프로젝트에 "Asked by" 표시와 함께 그린다(#1416). 부모의 행에는 "2 on ijun1" 같은 포인터가 있어, 누르면 그 자식들을 펼쳐 보이고 하나라도 기다리거나 오류면 표시한다. 지우면 그 기계에서 그 세션에 만든 작업 트리도 함께 지운다. 커밋하지 않았거나 푸시하지 않은 것이 없을 때만 지우고, 아니면 무엇을 왜 남겼는지 말한다(#1161). 다른 프로젝트의 일을 하는 세션처럼 에이전트를 띄우거나 프로젝트에 부탁하지 못한다 | `SessionInfo.askedBy`; `sessions/start-agent-flow.ts`의 `startAgent`, `sessions/delegation-flow.ts`의 `agentSession`(둘 다 `manager.ts`를 거쳐 닿는다); `packages/agent-host/src/sessions/start-agent.ts`; [agent-host.ko.md](agent-host.ko.md) §1.2.1 | 자식, 워커 |
 | 에이전트 지침 | 프로젝트에서 `start_agent`가 띄우는 에이전트에게 사람이 정해 둔 지침(#1161 항목 2). 그런 일마다 일 뒤에 붙는다. 매 지시문에 되풀이하는 대신 프로젝트 메뉴("Instructions for agents…")에서 한 번 정한다. 기계마다 자기 프로젝트 사본의 것을 따로 가지므로, 연결된 기계에 띄운 자식은 그 기계의 지침(그 경로, 그 셸)을 읽는다 | `ProjectInfo.agentInstructions`, 앱 설정 `agent_instructions:<프로젝트>`; `packages/agent-host/src/sessions/start-agent.ts`의 `projectInstructions`; [agent-host.ko.md](agent-host.ko.md) §1.2.1 | 프로젝트 프롬프트, 시스템 프롬프트 |
 | 도구 프로필 | 세션이 받는 Centralu 자체 도구(`centralu` MCP 서버) 묶음: `orchestrator`, `scoped`, `builder`, `reader`, 또는 없음(워크트리 매니저의 `manager`는 평범한 세션에 접혀 들어갔다, #561) | `toolProfileFor`, `packages/agent-host/src/sessions/tool-profiles.ts` (`manager.ts`의 `toolProfileOf`가 묻는다); [agent-host.ko.md](agent-host.ko.md) §1.1 | |
 | 권한 프리셋 | 에이전트가 묻지 않고 해도 되는 범위: `safe`, `normal`, `auto` | `PermissionPreset`, `entities/approvals.ts` | 모드 |
-| 살아 있음 | 세션에 지금 프로세스가 있는가. 살아 있지 않은 세션은 말을 걸면 이어 띄운다 | `SessionInfo.live` | 보관(FR-20은 폐지) |
+| 살아 있음 | 세션에 지금 프로세스가 있는가. 살아 있지 않은 세션은 말을 걸면 이어 띄운다 | `SessionInfo.live` | 숨기기(FR-20은 폐지) |
 | 잠듦 | 호스트가 유휴 세션의 프로세스를 끝냈거나(#568, 기본 15분) 재시작 뒤 아무것도 깨우지 않아 살아 있지 않은 상태. 입력하거나 메시지를 보내면 깨어난다. 고르기만 해서는 깨어나지 않는다 | `session_live`, `sessions/sleep.ts` | dormant, suspended, hibernated |
-| 휴지통 | 지운 세션을 영영 사라지기 전 한동안 두는 곳 | `sessions.deleted_at`, `trash`; product-spec FR-22 | 보관 |
+| 세션 보관함 | 끝났거나 치워 둔 세션을, 사람이 영영 지울 때까지 두는 곳. 열어 볼 수 있고 되돌릴 수 있다. 앱 에이전트 세션의 남긴 기록과 보관한 서브에이전트 단계도 여기에 든다. #1404 전에는 휴지통이라 불렀다. 나갈 길이 없던 폐지된 숨기기(아카이브) 기능 FR-20과는 다르다 | `sessions.deleted_at`, `sessions.trash`, `trash.*`; product-spec FR-22 | 휴지통, 숨기기(아카이브) |
 | 가져온 세션 | 도구가 Centralu 밖에서 시작한 대화를 이어 가는 세션 | `SessionInfo.importedFrom`; [agent-host.ko.md](agent-host.ko.md) §8 | |
 | 인계(세션) | 새 후임 세션(어느 도구든)이 노트를 통해 전임의 일을 넘겨받는 것. 노트는 저장된 대화에서 모델 없이 만들거나(#78, #694부터 기본), 에이전트가 직접 쓴다. 사람은 세션 메뉴에서 인계를 시작하고, 중앙 오케스트레이터는 `handoff_session`으로 시작한다. 오케스트레이터의 인계는 `auto`가 아니면 사람의 카드를 거치고, 턴 도중에는 하지 않으며, 전임을 항상 남긴다(#694). 노트는 파일 `<data>/handoff/<project>/<session>.md`이고 후임의 첫 메시지가 그 경로를 가리킨다. 전임의 살아 있는 자식(일하는 중, 기다리는 중, 큐에 든 것, 보고나 읽기가 남은 것, 아직 서 있는 시작 카드)은 후임의 것이 되고 노트 맨 앞에 나열된다. 정리된 자식은 전임이 남을 때만 남는다(#693). 창은 전임을 기본으로 남긴다(#694 전에는 기본으로 지웠다). 전임을 지우면 정리된 자식까지 모든 자식이 후임에게 간다. 인계할 때 가거나, 전임을 나중에 지울 때 간다(#738) | `handoff` 이벤트, `packages/protocol/src/events.ts`; `packages/agent-host/src/dev-services/handoff-notes.ts`, `sessions/handoff-record.ts`, `sessions/handoff-flow.ts` | (키퍼 인계와 다르다, §1.5) |
 | 도구 바꾸기 | 세션(이름, 순서, 기록, 패널)은 그대로 두고 그 아래의 에이전트 도구만 바꾸는 것. 새 도구는 새 스레드로 시작한다. 옛 도구의 대화는 에이전트에게 넘어가지 않고, 기록만 화면에 남는다 | `agents.switchTool`, `packages/protocol/src/commands/methods/sessions.ts`; `switchTool`, `manager.ts` | |
@@ -63,7 +63,7 @@ GyuHo123이 [#411](https://github.com/ijun17/centralu/issues/411)에 그린 모�
 | 정규화된 이벤트 | 어댑터가 도구의 출력을 바꿔 놓은 것: 델타, 도구 호출과 결과, 승인, 질문, 상태 변화. UI와 스토어가 읽는 단 하나의 흐름 | `NormalizedEvent`, `packages/protocol/src/events.ts` | |
 | 메시지 | 대화에 저장된 한 줄. 세션 안에서 번호(`seq`)가 붙는다. 종류: 글, 도구 호출, 도구 결과, 승인, 표지, 이미지, 추론, 앱 화면 | `StoredMessage`, `commands/sessions.ts` | |
 | 도구 호출 / 도구 결과 | 에이전트가 도구를 쓴 것과 돌아온 것. `callId`로 짝을 짓고, 도구 카드 하나로 그린다 | `tool_call`, `tool_result`, `events.ts` | |
-| 서브에이전트 단계 | 에이전트가 띄운 서브에이전트(Claude의 Task)의 한 걸음. 띄운 도구 호출에 매달리고, 대화의 번호에는 들어가지 않는다. 세션의 단계는 세션 없이 휴지통에 갈 수 있다 (#418) | `subagent_event`, `events.ts`; `subagent_messages`(스토어 v41, `trashed_at` v58) | |
+| 서브에이전트 단계 | 에이전트가 띄운 서브에이전트(Claude의 Task)의 한 걸음. 띄운 도구 호출에 매달리고, 대화의 번호에는 들어가지 않는다. 세션의 단계는 세션 없이 세션 보관함에 갈 수 있다 (#418) | `subagent_event`, `events.ts`; `subagent_messages`(스토어 v41, `trashed_at` v58) | |
 | 승인 | 에이전트가 하려는 일에 대해 기다리는 예/아니오. 한 세션에 한 번에 하나까지 | `pendingApproval`, `ApprovalDetail`, `entities/approvals.ts` | 권한 요청 |
 | 승인 내용 | 무엇을 묻는가: `command`, `file_edit`, `other`(어댑터가 올린다. 호스트의 적용·인계 카드도 `about`을 달고 여기에 실린다), `capability`, `project_access`, `agent_start`, `centralu_update`, `project_create`(호스트가 올린다) | `ApprovalDetail`, `entities/approvals.ts` | |
 | 승인 규칙 | 명령에 대해 기억해 둔 "항상 허용". `*`가 든 패턴으로 맞추고, 세션이나 프로젝트 범위를 가진다(프로젝트가 없는 세션은 프로젝트 범위로 답해도 그 세션에만 남는다). 허용만 저장하고, 어댑터가 묻기 전에 확인한다 | `ApprovalRule`, `packages/core/src/approval/approval.ts`; `rulesFor`, `sessions/approval-rules.ts` | 허용 목록 |
@@ -202,7 +202,7 @@ classDiagram
 ```
 
 - 세션은 프로젝트에 **많아야 하나** 속한다. 프로젝트가 없는 세션: 오케스트레이터, 코디네이터, 사용자 폴더 앱의
-  빌더나 앱 에이전트 세션(사이드바에서 그 앱의 줄 아래에 선다), 그리고 휴지통의 세션(프로젝트는 휴지통 기록에
+  빌더나 앱 에이전트 세션(사이드바에서 그 앱의 줄 아래에 선다), 그리고 보관함의 세션(프로젝트는 보관 기록에
   남는다). 인박스와 팔레트는 프로젝트가 없는 세션을 모두 "Orchestrator"라고 적는다.
 - 세션이 만들어질 때 정해지는 것은 `kind`뿐이다. 다른 역할은 모두 그때그때 관계에서 읽어 낸다: 빌더는 빌더 지도에 이름이 있고, 앱 에이전트 세션은 빌더 지도가
   되가리키지 않는 `appId`를 달고, 띄운 에이전트는 같은 프로젝트의 세션을 가리키는 `askedBy`를 가진다. 위임된
@@ -214,7 +214,7 @@ classDiagram
 저장되는 곳:
 
 - `projects`: 프로젝트와 그 신뢰, 기본값, 저장한 명령, 워크트리 준비, 그리고 워크트리 줄기(예전 매니저 자리의 줄, `worktree_manager`).
-- `sessions`: 세션. 종류, 워크트리, 부모, 앱, 부탁한 세션, 휴지통 표시까지.
+- `sessions`: 세션. 종류, 워크트리, 부모, 앱, 부탁한 세션, 보관(`trash` 열) 표시까지.
 - `command_cache`: 도구가 한 폴더에서 내놓는 슬래시 명령(스킬). 살아 있지 않은 세션도 목록을 보일 수 있게.
 
 살아 있는 동안만(호스트 메모리): `live`, 기다리는 승인과 질문, 목표, 백그라운드 작업, 에이전트 버전.
@@ -352,7 +352,7 @@ classDiagram
 저장되는 곳:
 
 - `app_runs`: 실행 기록. `run_agent` 줄은 부탁과 답도 남긴다(#378).
-- `app_run_records`: 휴지통에 남은, 지운 앱 에이전트 세션의 기록(#378). 휴지통이 보여 주는 것.
+- `app_run_records`: 세션 보관함에 남은, 지운 앱 에이전트 세션의 기록(#378). 보관함이 보여 주는 것.
 - `app_run_messages`: 그 기록에 복사해 둔 세션의 대화 전체(#378).
 - `app_run_subagent_messages`: 그 기록에 복사해 둔 세션의 서브에이전트 걸음(#378).
 - `app_run_failures`: 앱의 최근 실패한 호출의 원래 인자와 결과(20개까지). 빌더를 위해.
@@ -378,7 +378,7 @@ classDiagram
 
 - `grid_layout`: 그리드의 패널(세션과 앱, 스토어 v42. 차지하는 칸은 v43. 이어진 기기의 세션은 따로 둔 열에, v46).
 - `grid_panels`: v9가 만든 세션 패널 그리드. v42보다 오래된 호스트를 위해 남겨 둔다(이 빌드는 한 번 옮겨 온 뒤에는
-  휴지통에 간 세션의 줄을 지우기만 한다). 나중의 수축 단계에서 지운다([agent-host.ko.md](agent-host.ko.md) §5.1).
+  보관함에 간 세션의 줄을 지우기만 한다). 나중의 수축 단계에서 지운다([agent-host.ko.md](agent-host.ko.md) §5.1).
 - `workspace`: UI의 스냅숏. 한 줄.
 - `commit_sessions`: 커밋 귀속.
 
@@ -405,7 +405,7 @@ classDiagram
 - `mail_receipts`: 각 수신자가 각 메시지를 어디까지 받았는가.
 - `mail_turns`: 세션의 각 턴이 속한 스레드.
 
-호스트 교체 동안 같은 스토어를 맡은 옛 빌드는 이 테이블을 이름으로 부르지 않는다(v61은 더하기만 한다). 휴지통에서 지워진
+호스트 교체 동안 같은 스토어를 맡은 옛 빌드는 이 테이블을 이름으로 부르지 않는다(v61은 더하기만 한다). 보관함에서 지워진
 세션은 자기 수신 기록, 스레드 안의 자리, 턴 기록을 함께 가져간다. 보존(끝난 스레드는 30일과 180일 뒤, 읽은 알림은 14일 뒤)은
 `MailService.sweep`이고, 호스트가 준비된 뒤 한 번 돌린다([plans/mailbox.md](plans/mailbox.md) §4.4).
 
@@ -661,7 +661,7 @@ sequenceDiagram
   B->>B: run row closed (request, answer)
   B->>M: agentRunEnded
   opt ok, and nobody took part
-    M->>M: keep the record (app_run_records), session to the trash and deleted
+    M->>M: keep the record (app_run_records), session to the session archive and deleted
   end
   B-->>App: result
   App-->>R: tool result
@@ -670,7 +670,7 @@ sequenceDiagram
 
 `run_agent`마다 새 세션을 세운다. 다시 쓰는 것은 없다. 중개자에게 온 부탁은 도구 호출의 실행 줄 아래에 자기 실행
 줄을 받고(`parentRunId`), 그것이 세운 세션과 이어진다. 깨끗하게 끝난 실행은 앱이 답을 받기 전에 그 세션을 데리고
-간다(#378). 그것이 한 일의 기록은 휴지통에 남는다.
+간다(#378). 그것이 한 일의 기록은 세션 보관함에 남는다.
 
 ### 5.4 빌드 바꾸기(키퍼가 있을 때의 블루그린 스왑)
 

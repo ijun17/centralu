@@ -491,7 +491,7 @@ describe('starting another agent in the same project', () => {
       expect(reached).toEqual([])
     })
 
-    it('a child the trash refuses has its process stopped, and the call says it was not moved', async () => {
+    it('a child the session archive refuses has its process stopped, and the call says it was not moved', async () => {
       const s = await session()
       const make = w.mgr.createSession.bind(w.mgr)
       let release!: () => void
@@ -509,9 +509,9 @@ describe('starting another agent in the same project', () => {
       w.store.projects.setProjectTrusted(w.caller.id, false)
       release()
       const r = await starting
-      expect(!r.ok && r.error).toContain('could not be moved to the trash (the folder is locked)')
+      expect(!r.ok && r.error).toContain('could not be archived (the folder is locked)')
       expect(!r.ok && r.error).toMatch(/its process was stopped|no process of its was running/)
-      expect(!r.ok && r.error).not.toContain('was moved to the trash')
+      expect(!r.ok && r.error).not.toContain('was archived')
       expect(handleOf(made!)?.sent ?? []).toEqual([])
     })
 
@@ -533,8 +533,8 @@ describe('starting another agent in the same project', () => {
       release()
       const r = await starting
       expect(r).toMatchObject({ ok: false, error: expect.stringContaining('lowered to safe') })
-      // Named for its job before it went to the trash
-      expect(!r.ok && r.error).toContain('moved to the trash')
+      // Named for its job before it was archived
+      expect(!r.ok && r.error).toContain('archived')
       expect(!r.ok && r.error).toContain('write the parser')
       expect(childrenOf(s)).toEqual([])
       const reached = [...w.adapters.get('claude')!.handles.values()].filter((h) => h.sent.some((t) => t.includes('write the parser')))
@@ -1250,7 +1250,7 @@ describe('starting another agent in the same project', () => {
       expect(childrenOf(s)[0]).toMatchObject({ worktree: null, parentSessionId: null, askedBy: s })
 
       const result = await w.mgr.runOrchestratorTool(s, 'agent_session', { sessionId: c, action: 'delete' })
-      expect(result).toEqual({ text: expect.stringContaining('to the trash. Tell the person in one line.') })
+      expect(result).toEqual({ text: expect.stringContaining('to the session archive. Tell the person in one line.') })
       expect(result.text).not.toMatch(/worktree|branch|undefined/)
       expect(w.mgr.listSessions().some((child) => child.id === c)).toBe(false)
       expect(w.store.trash.trashedSession(c)?.session).toMatchObject({ askedBy: s, parentSessionId: null })
@@ -1292,7 +1292,7 @@ describe('starting another agent in the same project', () => {
         await w.until(() => dispose.mock.calls.length === 1)
         expect(w.store.trash.trashedSession(c)).toBeNull()
         expect(w.events.some((e) => e.type === 'session_deleted' && e.sessionId === c)).toBe(false)
-        // Output already in flight is flushed with the conversation before it goes to the trash.
+        // Output already in flight is flushed with the conversation before it goes to the session archive.
         child.event({ type: 'message_delta', sessionId: c, role: 'assistant', text: ' before stop' })
       } finally {
         release()
@@ -1582,7 +1582,7 @@ describe('starting another agent in the same project', () => {
       next.prLookup = async () => null
       try {
         expect(next.listSessions().find((row) => row.id === c.id)?.worktree).toEqual(worktree)
-        // The folder is gone, so there is nothing to lose: the session goes to the trash (#715)
+        // The folder is gone, so there is nothing to lose: the session goes to the session archive (#715)
         expect(await next.agentSession(s, { sessionId: c.id, action: 'delete' })).toMatchObject({ ok: true, state: 'deleted', note: expect.stringContaining('already gone') })
         expect(w.store.trash.trashedSession(c.id)).not.toBeNull()
         expect(next.listSessions().some((row) => row.id === c.id)).toBe(false)

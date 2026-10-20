@@ -191,7 +191,7 @@ export class SessionManager {
   private readonly machineFlow: MachineFlow
   /** The orchestrator's get_preferences and set_preferences (preferences-flow.ts) */
   private readonly preferencesFlow: PreferencesFlow
-  /** The orchestrator's trash commands (trash-flow.ts) */
+  /** The orchestrator's session archive commands (trash-flow.ts) */
   private readonly trashFlow: TrashFlow
   /** The orchestrator's trust commands (trust-flow.ts) */
   private readonly trustFlow: TrustFlow
@@ -225,7 +225,7 @@ export class SessionManager {
   private readonly toolQueries: ToolQueries
   /** The sessions an external app owns: its builder and the agents it asks for (app-sessions.ts) */
   private readonly appSessions: AppSessions
-  /** A session's way to the trash and back: delete, list, restore, purge (session-trash.ts) */
+  /** A session's way to the session archive and back: delete, list, restore, purge (session-trash.ts) */
   private readonly trash: SessionTrash
   /** When a session's process is replaced, and the background work a restart waits for (restart-policy.ts) */
   private readonly restartPolicy: RestartPolicy
@@ -447,9 +447,9 @@ export class SessionManager {
      * someone. A failure here is no reason to block session restore, so it is not awaited.
      */
     void this.handoffNotes.sweepOrphanHandoffNotes().catch(() => {})
-    // Recovery folders a purge moved aside and never finished with (#647): back for an entry still in the trash, gone otherwise
+    // Recovery folders a purge moved aside and never finished with (#647): back for an entry still in the session archive, gone otherwise
     // Not awaited here; a purge or restore waits for it, so neither reads the folder while it is still aside
-    this.recoveryRepair = repairWorktreeRecoveryRemovals((id) => store.trash.isTrashed(id)).catch((e) => console.error(`[trash] recovery folders left by an interrupted purge were not repaired: ${(e as Error).message}`))
+    this.recoveryRepair = repairWorktreeRecoveryRemovals((id) => store.trash.isTrashed(id)).catch((e) => console.error(`[archive] recovery folders left by an interrupted purge were not repaired: ${(e as Error).message}`))
     this.nameUnnamedWorktrees()
     // "Always allow" rules ending in `*` (#838): since #908 none allows anything, and an older build read them as prefixes
     const wildcards = store.permissions.dropWildcardApprovalRules()
@@ -582,10 +582,10 @@ export class SessionManager {
    * Files are left untouched — removing a folder only ever happens through the OS trash, and that
    * is the shell's (Rust's) job, which the caller finishes **before** this command. Why the order
    * runs that direction: the only place the path is known is this DB row, so deleting the row first
-   * would leave nowhere to ask what to discard. Conversely, if the trash step fails, this ends
+   * would leave nowhere to ask what to discard. Conversely, if the session archive step fails, this ends
    * having deleted nothing.
    *
-   * Sessions go straight through `trashSession` — **its sessions go to the trash (#204), not with the
+   * Sessions go straight through `trashSession` — **its sessions go to the session archive (#204), not with the
    * project.** The
    * owner's rule is that a conversation leaves the store only from Settings, and deleting a project destroyed every
    * one of its conversations at once — the largest loss one click could cause. The process is stopped and
@@ -1200,7 +1200,7 @@ export class SessionManager {
     }
     /*
      * Read again after each wait (#839): a session deleted meanwhile is not written back from the copy read before it
-     * (its row in the trash took the new tool), nor one another switch moved first
+     * (its row in the session archive took the new tool), nor one another switch moved first
      */
     const from = m.tool
     const stillHere = () => {

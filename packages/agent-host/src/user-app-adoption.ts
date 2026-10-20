@@ -30,14 +30,14 @@ import type { AdoptedRecord } from './dev-services/store/user-app-adoption.js'
  * `notes-copy`): today it is listed `invalid` and never runs, and adopting it would make two runnable apps of one id.
  * It stays in the user folder with its reason, and the log says so once.
  *
- * **A project the person deletes gives its folder back** (#1204), once nothing in the trash could bring it back: no
+ * **A project the person deletes gives its folder back** (#1204), once nothing in the session archive could bring it back: no
  * session of it is left there (restoring one registers the project again, at the same path, under the same id) and no
  * project is registered at the folder (the person may have added it again). Until
  * then the folder stays where it is, adopted, so a restore finds it. After, it goes to `<data>/app-trash/` as a
  * removed user-folder app's does, what the project kept for it returns to the user-folder key, and the record goes: a
  * person who moves the folder back into the user folder gets it as a new project, with its data. Left in place, it was
  * listed nowhere and nothing could remove it. Checked at each run (so once the host is ready: a project deleted
- * before this build, or a move a stopped host left half done) and whenever a project is deleted or the trash loses
+ * before this build, or a move a stopped host left half done) and whenever a project is deleted or the session archive loses
  * sessions (`settle`).
  *
  * Trust: the project is trusted, as the user folder was, except for an imported app the person never enabled (or
@@ -107,7 +107,7 @@ export function atAdoptedFolder(path: string, dirs: readonly string[]): boolean 
 }
 
 /**
- * Whether a kept path (a project's, a trashed session's) could name this folder (#1204), or null when the folder's own
+ * Whether a kept path (a project's, an archived session's) could name this folder (#1204), or null when the folder's own
  * real path cannot be told. It errs toward yes: a folder wrongly kept is only kept, while one wrongly moved is a live
  * project's. Both sides are compared by their real paths (`realFolder`), so a project added through a symbolic link, a
  * junction, a `subst` drive or a short name is the same folder, and with ASCII case folded on every system (a
@@ -239,12 +239,12 @@ export class UserAppAdoption {
   }
 
   /**
-   * A project was deleted, or sessions left the trash for good (#1204): gives back the folders of deleted projects that
-   * nothing in the trash can restore any more. Only once the host is ready (the first `run`); that run checks too
+   * A project was deleted, or sessions left the session archive for good (#1204): gives back the folders of deleted projects that
+   * nothing in the session archive can restore any more. Only once the host is ready (the first `run`); that run checks too
    */
   settle(): Promise<void> {
     if (!this.ready) return Promise.resolve()
-    // A run under way may have read the trash before this change: a run of its own after it
+    // A run under way may have read the session archive before this change: a run of its own after it
     const prior = this.running
     return (prior ? prior.catch(() => 0).then(() => this.run()) : this.run()).then(
       () => undefined,
@@ -300,7 +300,7 @@ export class UserAppAdoption {
 
   /**
    * Whether the folder this record names is free to give back: its project is gone, no other project is registered at
-   * the folder (the person may have added it again), and nothing in the trash would register one there
+   * the folder (the person may have added it again), and nothing in the session archive would register one there
    */
   private released(record: AdoptedRecord, dir: string): boolean {
     const projects = this.deps.store.projects.listProjects()
@@ -315,7 +315,7 @@ export class UserAppAdoption {
    * the give-back (`released`), nothing changed. `may_move`: it is the project of an adopted folder that still carries the
    * adoption's mark, or stands at that folder. `around_may_move`: it lies inside such a folder whose own project is gone.
    * `unsure`: such a folder's own project is gone, and this one's path cannot be told from it (a UNC path, a drive that is not
-   * there, no answer in time), which the give-back counts as at the folder. Else `stays`. "May" because the give-back also waits for the trash and for any other
+   * there, no answer in time), which the give-back counts as at the folder. Else `stays`. "May" because the give-back also waits for the session archive and for any other
    * project at the folder (`released`), which the dialog says; this does not read those, as they change while it is open.
    */
   async outlook(projectId: string): Promise<'stays' | 'may_move' | 'around_may_move' | 'unsure'> {
@@ -337,7 +337,7 @@ export class UserAppAdoption {
     return 'stays'
   }
 
-  /** The folders of deleted projects that nothing in the trash can restore, given back (`ExternalApps.returnAdoptedApp`) */
+  /** The folders of deleted projects that nothing in the session archive can restore, given back (`ExternalApps.returnAdoptedApp`) */
   private async giveBack(): Promise<void> {
     let records: [string, AdoptedRecord][] = []
     try {

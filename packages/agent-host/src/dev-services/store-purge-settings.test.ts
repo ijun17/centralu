@@ -73,7 +73,7 @@ describe('purging a session deletes the settings it keeps', () => {
     s.close()
   })
 
-  it('a session that stays in the trash keeps them, for a restore', async () => {
+  it('a session that stays in the session archive keeps them, for a restore', async () => {
     const s = new Store()
     s.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
     session(s, 's1')

@@ -87,7 +87,7 @@ export type OrchestratorSeatHost = {
   machineRequest(sessionId: string, req: MachineRequest, signal?: AbortSignal): Promise<MachineAnswer>
   /** The preference commands (#1219): `PreferencesFlow.run`, with the orchestrator as the session its card stands in */
   preferencesRequest(sessionId: string, req: PreferencesRequest, signal?: AbortSignal): Promise<PreferencesAnswer>
-  /** The trash commands (#1219): `TrashFlow.run`, with the orchestrator as the session its cards stand in */
+  /** The session archive commands (#1219): `TrashFlow.run`, with the orchestrator as the session its cards stand in */
   trashRequest(sessionId: string, req: TrashRequest, signal?: AbortSignal): Promise<TrashAnswer>
   /** The trust commands (#1219): `TrustFlow.run`, with the orchestrator as the session its cards stand in */
   trustRequest(sessionId: string, req: TrustRequest, signal?: AbortSignal): Promise<TrustAnswer>
@@ -701,8 +701,8 @@ export function orchestratorToolsFor(
     // The preferences (#1219): the central orchestrator's alone, through the window's own calls
     preferences: async (req, signal) => (central ? host.preferencesRequest(orchestratorId, req, signal) : { ok: false, error: 'Only the orchestrator changes preferences' }),
 
-    // The trash (#1219): the central orchestrator's alone; deleting for good waits for the person's card
-    trash: async (req, signal) => (central ? host.trashRequest(orchestratorId, req, signal) : { ok: false, error: 'Only the orchestrator manages the trash' }),
+    // The session archive (#1219): the central orchestrator's alone; deleting for good waits for the person's card
+    trash: async (req, signal) => (central ? host.trashRequest(orchestratorId, req, signal) : { ok: false, error: 'Only the orchestrator manages the session archive' }),
 
     // Trust (#1219): the central orchestrator's alone; widening it waits for the person's card
     trust: async (req, signal) => (central ? host.trustRequest(orchestratorId, req, signal) : { ok: false, error: 'Only the orchestrator changes trust' }),

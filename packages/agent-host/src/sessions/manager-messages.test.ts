@@ -612,7 +612,7 @@ describe("a subagent's steps are kept under its launch card and read by nothing 
     expect(leaks(codexAdapter.lastOpts?.systemPromptAppend ?? '')).toEqual([])
   })
 
-  it('they follow the session into the trash and back, and go with it for good', async () => {
+  it('they follow the session into the session archive and back, and go with it for good', async () => {
     const { a } = await setup()
     await rpc('agents.deleteSession', { sessionId: a.id })
     expect(leaks(await rpc('trash.read', { sessionId: a.id }))).toEqual([])

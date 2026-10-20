@@ -62,12 +62,12 @@ export async function saveAttachment(
   return { kind: mime.startsWith('image/') ? 'image' : 'file', path: file, name, mime, bytes: buf.length }
 }
 
-/** Removed with the session when it is deleted for good from the trash (#204) — moving it to the trash keeps them */
+/** Removed with the session when it is deleted for good from the session archive (#204) — moving it to the session archive keeps them */
 export async function clearAttachments(sessionId: string): Promise<void> {
   await removeData(sessionDir(sessionId))
 }
 
-/** How much one session's attachments take — the trash shows what it holds (#204). 0 when there are none */
+/** How much one session's attachments take — the session archive shows what it holds (#204). 0 when there are none */
 export async function attachmentBytes(sessionId: string): Promise<number> {
   return dataBytes(sessionDir(sessionId))
 }

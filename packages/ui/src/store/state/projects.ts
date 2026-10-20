@@ -82,9 +82,9 @@ export type ProjectsSlice = {
   /**
    * Delete a project — the record here, and optionally the folder on disk.
    *
-   * Two calls, in this order and not the other: the trash first, the record second. The
+   * Two calls, in this order and not the other: the session archive first, the record second. The
    * path is only known from the record, so removing it first would leave nothing to point
-   * the trash at; and if the trash refuses (a browser has none), nothing has been deleted
+   * the session archive at; and if the session archive refuses (a browser has none), nothing has been deleted
    * yet and the whole thing stops with the reason. The reverse order can lose the folder
    * *and* the history in the failure case, which is the one case that matters.
    */

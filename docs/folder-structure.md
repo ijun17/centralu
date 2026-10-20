@@ -145,7 +145,7 @@ centralu/
 │        │     ├─ migrations/   # the step list, in files by version range; index.ts holds the rule a new step follows
 │        │     ├─ migrate-runner.ts  reader-gate.ts   # what `Store` extends: the runner (and `Store.inspect`), the min-reader gate
 │        │     ├─ store-keys.ts  # the bookkeeping keys the runner, the gate and vacuum.ts keep in app_settings
-│        │     ├─ projects.ts  sessions.ts  grid.ts  messages.ts  handoff-markers.ts  trash.ts
+│        │     ├─ projects.ts  sessions.ts  grid.ts  messages.ts  handoff-markers.ts  trash.ts (the session archive)
 │        │     ├─ settings.ts  permissions.ts  app-runs.ts  child-ownership.ts  linked-machines.ts
 │        │     ├─ mail.ts  mail-retention.ts   # the mailbox's rows (#1347, docs/plans/mailbox.md §4) and what it keeps for how long
 │        │     └─ search-index.ts  vacuum.ts   # shared by the steps and the tables above; vacuum.ts also runs an owed VACUUM

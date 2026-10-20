@@ -32,7 +32,7 @@ export class HandoffMarkers {
      */
     const rows = this.db
       .prepare<unknown[], { payload: string }>(
-        `/* includes the trash: a trashed successor keeps its note */
+        `/* includes the archive: an archived successor keeps its note */
          SELECT m.payload as payload FROM messages m JOIN sessions s ON s.id = m.session_id WHERE m.kind = 'marker'`,
       )
       .all()

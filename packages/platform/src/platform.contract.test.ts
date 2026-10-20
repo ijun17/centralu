@@ -481,13 +481,13 @@ describe.each([
   })
 
   /*
-   * The trash (#204): deleting moves a session there with its conversation, and the ways out answer alike in both
+   * The session archive (#204): deleting moves a session there with its conversation, and the ways out answer alike in both
    * implementations — the e2e scenarios drive the mock, so a mock that deleted for real would pass them all.
    */
-  it('a deleted session goes to the trash, reads, comes back, and is deleted for good only from there', async () => {
+  it('a deleted session goes to the session archive, reads, comes back, and is deleted for good only from there', async () => {
     const p = await aProject()
     const s = await h.platform.agents.createSession({ projectId: p.id, cwd: p.path, tool: 'claude', permissionPreset: 'normal' })
-    await h.platform.agents.send(s.id, 'kept in the trash')
+    await h.platform.agents.send(s.id, 'kept in the session archive')
     await waitFor(async () => (await h.platform.agents.loadMessages(s.id)).length > 0)
     const said = (await h.platform.agents.loadMessages(s.id)).map((m) => [m.seq, m.role, m.payload])
 
@@ -510,23 +510,23 @@ describe.each([
     await h.platform.agents.deleteSession(s.id)
     await h.platform.trash.purge(s.id)
     expect((await h.platform.trash.list()).sessions.some((x) => x.id === s.id)).toBe(false)
-    await expect(h.platform.trash.read(s.id)).rejects.toThrow(/Not in the trash/)
-    await expect(h.platform.trash.restore(s.id)).rejects.toThrow(/Not in the trash/)
+    await expect(h.platform.trash.read(s.id)).rejects.toThrow(/Not in the session archive/)
+    await expect(h.platform.trash.restore(s.id)).rejects.toThrow(/Not in the session archive/)
   })
 
   // App-agent run records (#378): the mock never runs an app's agent, but the empty answers match the host's
-  it('the trash lists its app-agent run records, and one that is not there reads and deletes as gone', async () => {
+  it('the session archive lists its app-agent run records, and one that is not there reads and deletes as gone', async () => {
     const listed = await h.platform.trash.list()
     expect(listed.runs).toEqual([])
-    await expect(h.platform.trash.readRun('run_missing')).rejects.toThrow(/Not in the trash/)
+    await expect(h.platform.trash.readRun('run_missing')).rejects.toThrow(/Not in the session archive/)
     expect(await h.platform.trash.purgeRuns(['run_missing'])).toEqual({ purged: 0 })
   })
 
   /*
-   * A session's subagent steps go to the trash without it (#418), and come back or leave for good from there, alike in
+   * A session's subagent steps go to the session archive without it (#418), and come back or leave for good from there, alike in
    * both implementations: the e2e scenario for it drives the mock.
    */
-  it("a session's subagent steps go to the trash and back while the session stays", async () => {
+  it("a session's subagent steps go to the session archive and back while the session stays", async () => {
     const p = await aProject()
     const s = await h.platform.agents.createSession({ projectId: p.id, cwd: p.path, tool: 'claude', permissionPreset: 'normal' })
     const step = (text: string) => ({ type: 'subagent_event' as const, sessionId: s.id, parentCallId: 'toolu_a', step: { type: 'message_delta' as const, sessionId: s.id, role: 'assistant' as const, text } })
@@ -548,11 +548,11 @@ describe.each([
 
     await h.platform.trash.restoreSubagentSteps(s.id)
     expect((await h.platform.agents.loadSubagentMessages(s.id, 'toolu_a')).map((m) => m.seq)).toEqual([1, 2])
-    await expect(h.platform.trash.restoreSubagentSteps(s.id)).rejects.toThrow(/No subagent steps .* are in the trash/)
+    await expect(h.platform.trash.restoreSubagentSteps(s.id)).rejects.toThrow(/No subagent steps .* are in the session archive/)
 
     await h.platform.trash.trashSubagentSteps(s.id)
     const [seen] = (await h.platform.trash.list()).subagentSteps!
-    // Steps moved after the list was read: neither emptying the trash nor deleting the listed entry takes them (#418 review)
+    // Steps moved after the list was read: neither deleting all archived sessions nor deleting the listed entry takes them (#418 review)
     events.length = 0
     h.agentSays([{ ...step('later'), parentCallId: 'toolu_b' }, { type: 'turn_complete', sessionId: s.id }])
     await waitFor(() => events.some((e) => e.type === 'turn_complete' && e.sessionId === s.id))
@@ -562,7 +562,7 @@ describe.each([
     await h.platform.trash.purgeSubagentSteps(s.id, seen!.deletedAt)
     expect(await h.platform.agents.subagentTrashed(s.id, 'toolu_a')).toEqual({ steps: 0 })
     expect(await h.platform.agents.subagentTrashed(s.id, 'toolu_b')).toEqual({ steps: 1 })
-    await expect(h.platform.trash.purgeSubagentSteps(s.id, seen!.deletedAt)).rejects.toThrow(/No subagent steps of .* are in the trash/)
+    await expect(h.platform.trash.purgeSubagentSteps(s.id, seen!.deletedAt)).rejects.toThrow(/No subagent steps of .* are in the session archive/)
     const [later] = (await h.platform.trash.list()).subagentSteps!
     await h.platform.trash.purgeSubagentSteps(s.id, later!.deletedAt)
     expect((await h.platform.trash.list()).subagentSteps).toEqual([])
@@ -841,7 +841,7 @@ describe.each([
     })
 
     /**
-     * The trash and the file manager **answer whether they can, first** (the same shape as
+     * The OS trash and the file manager **answer whether they can, first** (the same shape as
      * `models()`).
      *
      * It is normal for the implementations to answer differently here: a browser has no
@@ -849,7 +849,7 @@ describe.each([
      * comes with it"** — a supported:false with no reason is indistinguishable on screen from
      * quietly doing nothing.
      */
-    it('the trash answers whether it can, and gives a reason if it cannot', async () => {
+    it('the OS trash answers whether it can, and gives a reason if it cannot', async () => {
       await dropIn('dropped.txt', 'hello')
       const res = await h.platform.fs.trash(projectId, 'dropped.txt')
       if (res.supported) {

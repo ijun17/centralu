@@ -94,7 +94,7 @@ export class ProjectFiles {
     // A commit link of a session in the trash is kept (#96, #204) — and says where the session is rather than "deleted"
     const trashed = this.host.store.trash.trashedIds()
     return attachCommitSessions(commits, this.host.store.sessions.commitSessions(projectId), (sid) =>
-      this.host.session(sid)?.name ?? (trashed.has(sid) ? '(in the trash)' : undefined),
+      this.host.session(sid)?.name ?? (trashed.has(sid) ? '(archived)' : undefined),
     )
   }
   gitCommitDetail(projectId: string, sha: string) {

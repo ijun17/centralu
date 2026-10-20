@@ -534,6 +534,16 @@ export function ShieldIcon({ size = 14 }: { size?: number }) {
   )
 }
 
+/** A box with a lid — the session archive. Not the bin: the archive is put-away sessions, and a bin invited "empty it" (#1404) */
+export function ArchiveIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0">
+      <rect x="2" y="2.8" width="12" height="3.2" rx="0.8" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+      <path d="M3.2 6v6.4c0 .6.4 1 1 1h7.6c.6 0 1-.4 1-1V6M6.4 9h3.2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
 /** A bin — the trash */
 export function TrashIcon({ size = 14 }: { size?: number }) {
   return (

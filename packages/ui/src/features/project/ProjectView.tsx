@@ -21,7 +21,7 @@ import { dragVerdict, droppedArrangement, droppedPanelId } from './drop.js'
  * The project screen (#203) — what clicking a project's name opens.
  *
  * Like the global grid, it starts empty and remembers only panels the person adds, in order.
- * Creating a session does not add a panel; a session in the trash is unavailable and leaves
+ * Creating a session does not add a panel; a session in the session archive is unavailable and leaves
  * the screen. Removing a panel leaves the session or app itself untouched.
  *
  * This project's sidebar session and app rows can be dropped here: an absent panel is added

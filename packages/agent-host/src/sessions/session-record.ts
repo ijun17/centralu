@@ -298,7 +298,7 @@ export class SessionRecord {
   /**
    * The steps of the subagent one card launched (#222) — the only read of them, asked when the person opens that
    * card's steps. As cards: a tool's `input` and `output` stay in the store, as for a history page (#221).
-   * A trashed session's cards can be opened in its read-only view, so this does not refuse the trash.
+   * A archived session's cards can be opened in its read-only view, so this does not refuse the session archive.
    */
   loadSubagentMessages(sessionId: string, parentCallId: string, afterSeq: number | undefined, limit: number): StoredMessage[] {
     return this.host.store.messages.loadSubagentMessages(sessionId, parentCallId, { afterSeq, limit })

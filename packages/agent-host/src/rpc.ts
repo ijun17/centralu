@@ -838,7 +838,8 @@ export function createRpcHandler(
     'themes.resolve': async (p) => ({ path: requireThemes().pathOf(RpcMethods['themes.resolve'].params.parse(p).id) }),
     'approvals.rules': async () => mgr.listApprovalRules(),
     /*
-     * The trash (#204). These are the person's: this handler is reached over the UI's socket and, for the central
+     * The session archive (#204; "trash" until #1404, kept in the method names because the protocol only grows).
+     * These are the person's: this handler is reached over the UI's socket and, for the central
      * orchestrator's trash commands (#1219, `trash-flow.ts`), through the router; its deletes for good wait for the
      * person's card. The other agents' tools (`orchestrator-tools.ts`) and the apps' broker (`broker.ts`, `host_data`)
      * have no verb for any of it.

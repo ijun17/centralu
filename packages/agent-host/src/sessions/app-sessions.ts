@@ -73,7 +73,7 @@ export type AppSessionsHost = {
   readonly record: SessionRecord
   rename: (sessionId: string, name: string) => void
   /**
-   * The way a finished app-agent session goes (#378): to the trash if still unused (`SessionTrash.trashIf`), then deleted
+   * The way a finished app-agent session goes (#378): to the session archive if still unused (`SessionTrash.trashIf`), then deleted
    * for good unless a delete the person asked for joined it (`joined`)
    */
   trashIf: (sessionId: string, removeExternal: boolean, onlyIf: () => boolean) => Promise<'moved' | 'joined' | false>
@@ -370,7 +370,7 @@ export class AppSessions {
    *
    * **When it finishes, its process is closed and it is left `idle`**, never `waiting_input`, so it never appears in
    * the inbox: a turn whose answer an app has already collected is not a turn waiting on a person's reply. Once the
-   * desk has closed the run as `ok`, the session is deleted and its record kept in the trash (`agentRunEnded`, #378),
+   * desk has closed the run as `ok`, the session is deleted and its record kept in the session archive (`agentRunEnded`, #378),
    * unless the person took part in it. (The plan's "archive it" went with the archive, FR-20: a hidden session was
    * indistinguishable from a deleted one. An app calling run_agent a few dozen times a day then filled the sidebar.)
    *
@@ -511,7 +511,7 @@ export class AppSessions {
 
   /**
    * A run_agent run is over (#378): its session is deleted when the run ended cleanly and nobody took part in it, and
-   * what it did is kept in the trash as the run's record (the app's request, the answer, the whole conversation). It
+   * what it did is kept in the session archive as the run's record (the app's request, the answer, the whole conversation). It
    * stays, as before, when the run failed, was stopped or cancelled (the person needs to see what went wrong), when a
    * card was shown during it, or when the person opened it or wrote to it.
    */
@@ -550,7 +550,7 @@ export class AppSessions {
       return this.host.store.keptRuns.keepRun({ runId, sessionId, sessionName: now.name, appName: answered.appName, projectName, tool: now.tool, keptAt: Date.now() })
     })
     if (!trashed) return
-    // The person deleted it meanwhile, which keeps a session in the trash: theirs to purge, as any session they delete
+    // The person deleted it meanwhile, which keeps a session in the session archive: theirs to purge, as any session they delete
     if (trashed === 'moved') await this.host.purgeSession(sessionId)
     // The app's runs panel reads the run as kept now
     if (m.appId) this.host.emit({ type: 'external_app_runs_changed', appId: m.appId, projectId: m.projectId })

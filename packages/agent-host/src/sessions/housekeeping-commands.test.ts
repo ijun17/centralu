@@ -204,7 +204,7 @@ describe('who may run them', () => {
     const added = [
       'disconnect_machine', 'rollback_machine', 'uninstall_machine', 'machine_activity', 'list_ssh_hosts', 'delete_session', 'rename_session', 'clear_background_tasks',
       'agent_status', 'agent_models', 'project_git_status', 'search_project_files', 'list_app_versions', 'restore_app_version', 'restart_app', 'check_app',
-      'list_app_runs', 'list_app_errors', 'app_usage', 'remove_app', 'apply_agent_versions', 'get_preferences', 'set_preferences', 'list_trash',
+      'list_app_runs', 'list_app_errors', 'app_usage', 'remove_app', 'apply_agent_versions', 'get_preferences', 'set_preferences', 'list_archive',
     ]
     for (const name of added) expect(found, name).toContain(`- ${name}:`)
     // And the instructions no longer say that deleting a session is the person's alone

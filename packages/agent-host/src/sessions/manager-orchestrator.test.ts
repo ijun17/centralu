@@ -1127,7 +1127,7 @@ describe('coordinator sessions an older build left — an orchestrator-type with
     expect(list.text).toContain(a.id)
   })
 
-  it('goes to the trash and comes back like any other session', async () => {
+  it('goes to the session archive and comes back like any other session', async () => {
     const p = await addProject()
     const a = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
     const c = await oldCoordinator({ name: 'Old task', memberSessionIds: [a.id], roleAppend: 'Role text', appId: 'control' })

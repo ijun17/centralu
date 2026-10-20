@@ -79,11 +79,11 @@ One session = one agent process (Claude Code or Codex).
   that note. You can choose the receiving tool. The orchestrator can hand a session off too
   (its handoff_session command), after you approve its card; the original stays. A worktree session cannot be
   handed off yet.
-- Deleting: session's ⋯ → Delete session…. By default this also deletes the conversation file on
-  the tool's side. Turning that option off leaves the conversation on the tool, so it can be loaded
-  again from the past-conversation list in the New session window.
-- There is no archive feature — it was removed. Deleting is the only way to clear something from
-  the list.
+- Archiving: session's ⋯ → Archive session…. The session leaves the sidebar and goes to the session
+  archive (Settings → Archive), where the person can read it, restore it, or delete it for good.
+  Nothing is deleted on its own. The dialog also asks whether deleting it for good should delete the
+  conversation file on the tool's side (on by default); turning that off leaves the conversation on
+  the tool, so it can be loaded again from the past-conversation list in the New session window.
 - There is no menu to change a session's agent (claude ↔ codex). A new tool does not know the old
   conversation, so use a handoff to continue with a different tool. The orchestrator is the one
   exception (Settings → Orchestrator).`,
@@ -124,7 +124,7 @@ Changing a live session's settings restarts the conversation in place — the ch
 the next turn on.
 App settings (the Settings button in the top bar): Orchestrator (change the orchestrator's tools
 and approved skills; every session can always look at other sessions), Apps (the app list), Notifications, Appearance, Permissions (saved approval rules),
-Shortcuts (the shortcut list), and Updates.`,
+Shortcuts (the shortcut list), Archive (archived sessions: read, restore, or delete for good), and Updates.`,
 
   updates: `# Updates
 Check from Settings → Updates. It reports a new version based on the npm registry, and the person

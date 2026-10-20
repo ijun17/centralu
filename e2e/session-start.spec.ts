@@ -81,7 +81,7 @@ test("the empty screen lists the project's past conversations, and picking one r
     importHistory: true,
   })
   await expect(page.getByTestId('msg-user')).toContainText('split this module up')
-  // The empty one held nothing: it is gone from the host and the screen, without a word about the trash
+  // The empty one held nothing: it is gone from the host and the screen, without a word about the session archive
   await expect.poll(() => inMock(page, empty)).toBe(false)
   await expect.poll(() => stored(page, empty)).toBeNull()
   expect(await stored(page, resumed)).not.toBeNull()

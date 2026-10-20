@@ -90,7 +90,7 @@ export function currentRareTier(): RareTier {
  * get_preferences and set_preferences; the machine commands are found by their name (centralu_commands "machine") and the line names three more (30 characters less).
  * In since #1219's third slice: the trust commands (list_projects, set_project_trust, list_approval_rules,
  * remove_approval_rule, list_app_grants, forget_app_answer, revoke_project_consent, share_app, set_agent_limits), found
- * with the machine commands by the words the line gives (centralu_commands "machine trust rule grant limits app session agent project preferences trash"; the line replaced the three that named the machine, trust, settings and trash commands, and is shorter than they were). In since the fourth slice: the remaining machine calls, delete_session, the app upkeep commands, apply_agent_versions and the housekeeping and reads, all found by the same words.
+ * with the machine commands by the words the line gives (centralu_commands "machine trust rule grant limits app session agent project preferences archive"; the line replaced the three that named the machine, trust, settings and trash commands, and is shorter than they were). In since the fourth slice: the remaining machine calls, delete_session, the app upkeep commands, apply_agent_versions and the housekeeping and reads, all found by the same words.
  * In since #1205: find_apps, attach_app and detach_app, for the root apps it attaches when it needs one rather than
  * carrying each as a server (session-apps.ts `givesApp`). As tools they would put its every request over its ceiling
  * (find_apps alone is 294 characters, and the seat had 219 to spare); the instructions name find_apps.
@@ -125,12 +125,12 @@ export const RARE_COMMANDS: Partial<Record<ToolProfile, readonly CommandName[]>>
     'get_preferences',
     'set_preferences',
     'apply_agent_versions',
-    'list_trash',
-    'restore_trashed',
-    'trash_subagent_steps',
+    'list_archive',
+    'restore_archived',
+    'archive_subagent_steps',
     'delete_session',
-    'delete_trashed',
-    'empty_trash',
+    'delete_archived',
+    'delete_all_archived',
     'list_projects',
     'set_project_trust',
     'list_approval_rules',

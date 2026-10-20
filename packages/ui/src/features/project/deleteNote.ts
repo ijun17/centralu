@@ -14,7 +14,7 @@ const COMING_BACK =
   'data, logs and versions (its secrets and grants are not kept).'
 
 /** When the host moves a folder: never put as certain, since it also waits for the adoption's mark and for every path to resolve */
-const WHEN = 'when no session that could bring the project back is left in Centralu’s trash and no other project is at the folder'
+const WHEN = 'when no session that could bring the project back is left in Centralu’s session archive and no other project is at the folder'
 
 /**
  * What the Delete project dialog says of the folder when the person has not asked for it to go to the Trash (#1301).
@@ -38,7 +38,7 @@ export function folderNote(project: Pick<ProjectInfo, 'fromUserFolder'>, outlook
     return (
       'This project lies inside an app folder from Centralu’s apps folder. Deleting it leaves its own folder alone, but the host may ' +
       'move the app folder around it to app-trash/ in the data folder of the computer it is on, when no project is left at or inside ' +
-      'that folder and no session that could bring the app back is left in Centralu’s trash. ' +
+      'that folder and no session that could bring the app back is left in Centralu’s session archive. ' +
       COMING_BACK
     )
   }

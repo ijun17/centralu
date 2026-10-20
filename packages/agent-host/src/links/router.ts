@@ -425,7 +425,7 @@ export class Router {
      */
     if (method === 'trash.empty' && missed.length && isObj(out)) {
       const failed = Array.isArray(out.failed) ? out.failed : []
-      out = { ...out, failed: [...failed, ...missed.map((m) => ({ sessionId: m.id, name: m.name, error: 'this machine could not be reached, so its trash was not emptied' }))] }
+      out = { ...out, failed: [...failed, ...missed.map((m) => ({ sessionId: m.id, name: m.name, error: 'this machine could not be reached, so its archived sessions were not deleted' }))] }
     }
     // The trash's list says whose trash is not in it: read as the whole trash, it hid what a machine still holds
     if ((method === 'trash.list' || method === 'subagents.usage') && missed.length && isObj(out)) {

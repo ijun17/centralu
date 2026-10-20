@@ -712,12 +712,12 @@ describe('what set_preferences does not reach', () => {
 })
 
 describe('who may run them', () => {
-  it('are found through centralu_commands, as the instructions say: "machine" lists the machine commands, and the settings and trash ones are named', async () => {
+  it('are found through centralu_commands, as the instructions say: "machine" lists the machine commands, and the settings and archive ones are named', async () => {
     const orc = await mgr.orchestrator()
     const machines = (await mgr.runOrchestratorTool(orc.id, 'centralu_commands', { query: 'machine' })).text
     for (const name of ['add_machine', 'install_machine', 'remove_machine', 'reconnect_machine', 'set_machine_auto_reconnect', 'set_machine_autostart']) expect(machines, name).toContain(`- ${name}:`)
-    const trash = (await mgr.runOrchestratorTool(orc.id, 'centralu_commands', { query: 'trash' })).text
-    for (const name of ['list_trash', 'restore_trashed', 'trash_subagent_steps', 'delete_trashed', 'empty_trash']) expect(trash, name).toContain(`- ${name}:`)
+    const trash = (await mgr.runOrchestratorTool(orc.id, 'centralu_commands', { query: 'archive' })).text
+    for (const name of ['list_archive', 'restore_archived', 'archive_subagent_steps', 'delete_archived', 'delete_all_archived']) expect(trash, name).toContain(`- ${name}:`)
     const prefs = (await mgr.runOrchestratorTool(orc.id, 'centralu_commands', { query: 'preferences' })).text
     expect(prefs).toContain('- get_preferences:')
     expect(prefs).toContain('- set_preferences:')

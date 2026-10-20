@@ -32,9 +32,9 @@ export function ConfirmDelete({
   const platform = usePlatform()
   const toolLabel = useToolMeta(tool).label
   /*
-   * Since #204 the session goes to the trash, and both choices below are about what goes with it **when it is deleted
-   * for good** from Settings → Trash. The dialog says so in its first lines: a session that leaves the sidebar with
-   * no word about where it went and how it comes back is the retired archive (FR-20).
+   * Since #204 the session goes to the session archive, and both choices below are about what goes with it **when it is deleted
+   * for good** from Settings → Archive. The dialog says so in its first lines: a session that leaves the sidebar with
+   * no word about where it went and how it comes back is the retired hide-a-session feature (FR-20).
    *
    * Whether to also delete the original on the tool's side too (dogfooding: "really delete it").
    * **Defaults to deleting it** — it used to default to keeping it, but a person pressing delete
@@ -56,11 +56,11 @@ export function ConfirmDelete({
   return (
     <Modal onClose={onCancel} testId="confirm-delete">
       <div className="w-[380px] max-w-[calc(90vw/var(--text-zoom))] rounded-lg border border-line bg-surface-side p-4 shadow-(--shadow-modal)">
-        <p className="text-md text-ink">Move this session to the trash?</p>
+        <p className="text-md text-ink">Archive this session?</p>
         <p className="mt-1.5 truncate text-sm text-ink-muted">{name}</p>
         <p className="mt-2 text-xs leading-body text-ink-faint" data-testid="delete-trash-note">
-          Chat history and attachments stay in Centralu’s trash, out of the sidebar, search and the agents’ reach.{' '}
-          <span className="text-ink">Settings → Trash</span> reads it, restores it, or deletes it for good.
+          Chat history and attachments stay in Centralu’s session archive, out of the sidebar, search and the agents’ reach.{' '}
+          <span className="text-ink">Settings → Archive</span> reads it, restores it, or deletes it for good.
         </p>
         {deleteExternal ? (
           <p
@@ -102,7 +102,7 @@ export function ConfirmDelete({
             <p className="text-xs text-ink-muted">
               This session ran in a worktree — <span className="font-mono text-ink">{wt.branch}</span>
             </p>
-            <p className="mt-1 text-xs text-ink-faint">It stays where it is while the session is in the trash.</p>
+            <p className="mt-1 text-xs text-ink-faint">It stays where it is while the session is in the session archive.</p>
             {wt.dirty && (
               <p className="mt-1 text-xs text-ink" data-testid="worktree-dirty">
                 {wt.unknown
@@ -131,7 +131,7 @@ export function ConfirmDelete({
             Cancel
           </button>
           <Button variant="primary" onClick={() => onConfirm(deleteWorktree, deleteExternal)} data-testid="confirm-delete-yes">
-            Move to trash
+            Archive
           </Button>
         </div>
       </div>

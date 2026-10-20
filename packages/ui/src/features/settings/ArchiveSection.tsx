@@ -8,40 +8,40 @@ import { formatBytes, formatDay } from '../../app/format.js'
 import { InlineConfirm } from '../../components/InlineConfirm.jsx'
 import { LoadFailed } from '../../components/LoadFailed.jsx'
 import { useToolMeta } from '../../store/selectors.js'
-import { ReaderItem } from './TrashReaderItem.jsx'
-import { TrashRunReader, TrashRuns } from './TrashRuns.jsx'
-import { SubagentStepsHeldList, TrashedSubagentStepsRow, stepsCount } from './SubagentStepsTrash.jsx'
+import { ReaderItem } from './ArchiveReaderItem.jsx'
+import { ArchiveRunReader, ArchiveRuns } from './ArchiveRuns.jsx'
+import { SubagentStepsHeldList, TrashedSubagentStepsRow, stepsCount } from './SubagentStepsArchive.jsx'
 import { SettingsCard, SettingsEmpty, SettingsPage, SettingsRow } from './SettingsLayout.jsx'
 
 /**
- * Settings → Trash (#204): the way out of a deleted session, built in the same change as the way in.
+ * Settings → Archive (#204): the way out of a deleted session, built in the same change as the way in.
  *
  * The retired archive (FR-20) is why this screen exists at all: it hid sessions with a keystroke and had no exit, so
- * a record that sat intact in the store was, to the person, gone. Here every session in the trash can be read,
+ * a record that sat intact in the store was, to the person, gone. Here every session in the session archive can be read,
  * restored, or deleted for good, and the screen says what each one still takes on this machine and what else goes
  * with it — a store that keeps everything anyone ever pasted into a chat should not keep it out of sight.
  *
- * Deleting for good is only here. Nothing empties the trash on its own, which is why the total is in the first line.
+ * Deleting for good is only here. Nothing empties the session archive on its own, which is why the total is in the first line.
  */
 /**
  * The linked machines whose trash was not read (#841 item 4): without this line the list read as the whole trash,
  * and what a machine still holds looked deleted
  */
-export function TrashUnreached({ unreached }: { unreached?: readonly { name: string }[] }) {
+export function ArchiveUnreached({ unreached }: { unreached?: readonly { name: string }[] }) {
   if (!unreached?.length) return null
   return (
     <p className="mt-2 text-sm text-ink" data-testid="trash-unreached">
-      Not listed: the trash on {unreached.map((m) => m.name).join(', ')}, which could not be reached just now.
+      Not listed: the session archive on {unreached.map((m) => m.name).join(', ')}, which could not be reached just now.
     </p>
   )
 }
 
-export function TrashSection() {
+export function ArchiveSection() {
   const platform = usePlatform()
   const restoreFromTrash = useStore((s) => s.restoreFromTrash)
   const trashSubagentSteps = useStore((s) => s.trashSubagentSteps)
   const restoreSubagentSteps = useStore((s) => s.restoreSubagentSteps)
-  // The trash list is read by `useLoad`: a failure is an error beside an empty box (with a retry), never "Loading…"
+  // The session archive list is read by `useLoad`: a failure is an error beside an empty box (with a retry), never "Loading…"
   // for good, and an answer to an older read cannot overwrite a newer one
   const list = useLoad(() => platform.trash.list(), [platform])
   const trash = list.data ?? null
@@ -53,8 +53,8 @@ export function TrashSection() {
   const [rowError, setRowError] = useState<{ id: string; text: string } | null>(null)
   const [emptyReport, setEmptyReport] = useState<string | null>(null)
   /**
-   * The one confirmation open on the whole screen: `all` for the whole trash, `session:<id>` for a trashed session,
-   * `steps:<id>` for a session's steps in the trash and `held:<id>` for moving them there (#418), `runs:<key>` for a
+   * The one confirmation open on the whole screen: `all` for the whole trash, `session:<id>` for a archived session,
+   * `steps:<id>` for a session's steps in the session archive and `held:<id>` for moving them there (#418), `runs:<key>` for a
    * kept app run or an app's runs (#378). One state, so a second "Delete for good…" closes the first
    */
   const [confirming, setConfirming] = useState<string | null>(null)
@@ -82,8 +82,8 @@ export function TrashSection() {
 
   useEffect(loadHeld, [loadHeld])
 
-  if (reading) return <TrashReader session={reading} onBack={() => setReading(null)} />
-  if (readingRun) return <TrashRunReader run={readingRun} onBack={() => setReadingRun(null)} />
+  if (reading) return <ArchiveReader session={reading} onBack={() => setReading(null)} />
+  if (readingRun) return <ArchiveRunReader run={readingRun} onBack={() => setReadingRun(null)} />
 
   const act = async (id: string | null, run: () => Promise<string | null>) => {
     setBusy(true)
@@ -101,8 +101,8 @@ export function TrashSection() {
   }
   const errorOf = (id: string) => (rowError?.id === id ? rowError.text : null)
   /*
-   * A session's subagent steps in the trash (#418), deleted up to the `deletedAt` this screen listed: steps moved there
-   * after it read the trash (another window, a machine not reached then) are not deleted unseen
+   * A session's subagent steps in the session archive (#418), deleted up to the `deletedAt` this screen listed: steps moved there
+   * after it read the session archive (another window, a machine not reached then) are not deleted unseen
    */
   const purgeStepsOf = (t: TrashedSubagentSteps) => platform.trash.purgeSubagentSteps(t.sessionId, t.deletedAt)
   const purgeSteps = (t: TrashedSubagentSteps) =>
@@ -134,7 +134,7 @@ export function TrashSection() {
     )
   /*
    * The sessions, then the run records and the subagent steps this screen listed (#378, #418): `trash.empty` leaves both
-   * alone, so what a linked machine or another window put in the trash since is never deleted unseen. A trash holding
+   * alone, so what a linked machine or another window put in the session archive since is never deleted unseen. A trash holding
    * only records or steps is emptied too: `trash.empty` is asked only when there are sessions
    */
   const emptyAll = () =>
@@ -145,7 +145,7 @@ export function TrashSection() {
       if (sessions.length) {
         await platform.trash.empty().then(
           (r) => {
-            if (r.failed.length) failed.push(`${r.failed.length} stayed in the trash: ${r.failed.map((f) => `${f.name} — ${f.error}`).join('; ')}`)
+            if (r.failed.length) failed.push(`${r.failed.length} stayed in the session archive: ${r.failed.map((f) => `${f.name} — ${f.error}`).join('; ')}`)
           },
           (e: Error) => failed.push(e.message),
         )
@@ -164,13 +164,13 @@ export function TrashSection() {
   return (
     <SettingsPage
       testId="settings-trash"
-      title="Trash"
+      title="Archive"
       lead="Deleted sessions wait here with their conversations. Nothing is emptied on its own — a conversation leaves this machine only when you delete it for good here."
     >
       {(list.error || trash?.unreached?.length) && (
         <div>
-          {list.error && <LoadFailed what="the trash" error={list.error} onRetry={load} testId="trash-load-error" />}
-          <TrashUnreached unreached={trash?.unreached} />
+          {list.error && <LoadFailed what="the archive" error={list.error} onRetry={load} testId="trash-load-error" />}
+          <ArchiveUnreached unreached={trash?.unreached} />
         </div>
       )}
 
@@ -195,7 +195,7 @@ export function TrashSection() {
               onClick={() => setConfirming('all')}
               data-testid="trash-empty"
             >
-              Empty trash…
+              Delete all archived sessions…
             </button>
           }
         >
@@ -217,7 +217,7 @@ export function TrashSection() {
         </SettingsRow>
 
         {trash !== null && nothing ? (
-          <SettingsEmpty testId="trash-list-empty">The trash is empty</SettingsEmpty>
+          <SettingsEmpty testId="trash-list-empty">The session archive is empty</SettingsEmpty>
         ) : sessions.length === 0 ? null : (
           <ul className="divide-y divide-line/70" data-testid="trash-list">
             {sessions.map((s) => (
@@ -302,7 +302,7 @@ export function TrashSection() {
 
       {runs.length > 0 && (
         <div>
-          <TrashRuns
+          <ArchiveRuns
             runs={runs}
             busy={busy}
             confirming={confirming?.startsWith('runs:') ? confirming.slice(5) : null}
@@ -375,11 +375,11 @@ function Confirm({ text, busy, onYes, onNo }: { text: string; busy: boolean; onY
 const PAGE = 200
 
 /**
- * A trashed conversation, read-only. It is drawn plainly — the words, the tool calls by name, the boundaries —
+ * A archived conversation, read-only. It is drawn plainly — the words, the tool calls by name, the boundaries —
  * because it is here to be recognised before it is restored or deleted, not worked in: nothing in it can be
  * answered, opened or run.
  */
-function TrashReader({ session, onBack }: { session: TrashedSession; onBack: () => void }) {
+function ArchiveReader({ session, onBack }: { session: TrashedSession; onBack: () => void }) {
   const platform = usePlatform()
   /** The stored messages read so far, one per `seq`, oldest first: a page that overlaps the rows held is not drawn twice */
   const [msgs, setMsgs] = useState<StoredMessage[] | null>(null)
@@ -419,7 +419,7 @@ function TrashReader({ session, onBack }: { session: TrashedSession; onBack: () 
           onClick={onBack}
           data-testid="trash-reader-back"
         >
-          ← Trash
+          ← Archive
         </button>
         <span className="min-w-0 truncate text-sm text-ink">{session.name}</span>
         <span className="ml-auto shrink-0 text-2xs text-ink-faint">read-only</span>

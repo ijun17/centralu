@@ -619,7 +619,7 @@ const activity = (): ActivitySnapshot => ({
 const router: Router = new Router({
   forwarding: (method, params) => mgr.forwarding(method, params),
   local: createRpcHandler(mgr, adapters, {
-    // A deleted project gives back the user-folder app it had become, once the trash cannot restore it (#1204)
+    // A deleted project gives back the user-folder app it had become, once the session archive cannot restore it (#1204)
     settleDeletedProjects: () => userAppAdoption.settle(),
     // And what a delete may do to the folder, for the dialog that asks (#1301)
     deleteOutlook: (projectId) => userAppAdoption.outlook(projectId),

@@ -106,11 +106,11 @@ in front of them can forward to a remote without touching the 6.5k-line session 
 
 | How it routes | Count | Notes |
 |---|---|---|
-| By session id | 28 | send, approve, answer, interrupt, messages, trash… |
+| By session id | 28 | send, approve, answer, interrupt, messages, archive (`trash.*`)… |
 | By project id | 34 | createSession, git, fs, terminals, commands… |
 | By app | 27 | four keyed by opaque host values the hub must remember (view instance, question, import token) |
 | By terminal / run id | 4 | ids are per-host counters |
-| Merge across hosts | 14 | `sessions.list`, `projects.list`, search, trash… (approval rule ids and pids collide) |
+| Merge across hosts | 14 | `sessions.list`, `projects.list`, search, `trash.list`… (approval rule ids and pids collide) |
 | Hub only | 26 | layout, grid, prefs, themes, updates, orchestrator, skills |
 | Internal callbacks, never routed | 4 | a remote's own Codex bridge talks to its own host |
 | Needs a machine parameter | 9 | `projects.add`, `agents.models/detect/capabilities/versions/usage`… (additive optional `machine`); since joined by `projects.create` and `projects.createPreview` (#515): a new project's folder is made by the host of its machine, in that machine's `~/Centralu` by default (`%USERPROFILE%\Centralu` on Windows), which only that host can name in its own path terms |
@@ -164,7 +164,7 @@ wakes sessions that were live. So the hub must:
 
 | # | Question | How |
 |---|---|---|
-| 1 | Do machine-prefixed ids survive end to end? | A toy router with an `m1.` prefix in front of a second host; drive create, send, approve, terminal and trash through the real UI |
+| 1 | Do machine-prefixed ids survive end to end? | A toy router with an `m1.` prefix in front of a second host; drive create, send, approve, terminal and archive through the real UI |
 | 2 | Does the UI keep a mirrored unreachable machine's sessions and leave them asleep? | Same rig; drop the second host; reconnect the UI |
 | 3 | Is the hub fast enough as a relay? | Streaming deltas, terminal typing and a large diff over a real SSH link to the Ubuntu server; watch the 64 MiB slow-reader cut |
 | 4 | Where should the ssh process live? | Keeper child vs `ControlPersist` across a blue-green hub swap: does the link survive, how long to reconnect. **Run 2026-10-08, §10.6** |
@@ -178,7 +178,7 @@ and router, with a scripted agent instead of a model), the hub linked to the oth
 loopback, the real web UI on the hub (`e2e/linked-hosts*.spec.ts`, Chromium and WebKit, 4 of 4
 passed). Through the UI: the remote project shows in the sidebar, a session is created in it
 (`m1.<uuid>`), a message streams back, an approval card is answered, a question is answered, a
-terminal runs `echo` on the remote (`m1.term-1`), and the session goes to the trash. What broke or
+terminal runs `echo` on the remote (`m1.term-1`), and the session goes to the session archive. What broke or
 answered for the wrong machine:
 
 | Where | What happened | Fix |
@@ -188,7 +188,7 @@ answered for the wrong machine:
 | `agents.detect`, `agents.models`, `agents.capabilities`, `agents.usage`, `agents.versions` | The new-session dialog and the session header ask without a machine, so the hub's own CLIs answered for a remote project | The optional `machine` parameter (§5); the UI passes it (next PR) |
 | `fs.listDir`, `fs.watch`, `agents.listExternalSessions` | Routed by project and worked, so the file tree of a remote project already opens | Kept routed; only `fs.resolve` (a path for this computer's OS) is refused |
 | Session row, terminal surface, approval and question ids | Passed unchanged: test ids like `session-row-m1.<uuid>` and `terminal-surface-m1.term-1`; request ids are per session and travel with the routed session id | None |
-| The scripted agent | Trashing with "also delete the conversation" needs `deleteExternalConversation` | Test double only |
+| The scripted agent | Archiving with "also delete the conversation" needs `deleteExternalConversation` | Test double only |
 
 Approval rule ids, the one number the UI hands back, are folded into negative numbers per machine
 (`links/machine-ids.ts`), so an older UI can never delete a local rule with a remote rule's id.

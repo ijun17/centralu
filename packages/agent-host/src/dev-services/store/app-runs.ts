@@ -177,7 +177,7 @@ export class AppRunRecords {
                 r.duration_ms as durationMs, r.args_digest as argsDigest, r.args_summary as argsSummary,
                 r.error, r.created_at as createdAt, r.session_id as sessionId, r.tokens_in as tokensIn, r.tokens_out as tokensOut,
                 f.args as failureArgs, f.result as failureResult,
-                /* the record of a deleted app-agent session (#378), in the trash */
+                /* the record of a deleted app-agent session (#378), in the archive */
                 EXISTS (SELECT 1 FROM app_run_records k WHERE k.run_id = r.id) as kept,
                 r.rowid as seq, r.id IN (SELECT id FROM roots) as isRoot
          FROM app_runs r LEFT JOIN app_run_failures f ON f.run_id = r.id

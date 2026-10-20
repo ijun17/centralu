@@ -287,38 +287,38 @@ export const ORCHESTRATOR_TOOLS = [
     schema: z.object({}),
   },
   /*
-   * #1219: the trash. Rare commands. Listing, restoring and moving subagent steps there act at once; deleting for good
+   * #1219: the session archive. Rare commands. Listing, restoring and moving subagent steps there act at once; deleting for good
    * waits for the person's card naming what goes.
    */
   {
-    name: 'list_trash',
-    description: 'Lists the trash: deleted sessions, kept app runs, trashed subagent steps, and sessions whose subagent steps could be trashed.',
+    name: 'list_archive',
+    description: 'Lists the session archive: archived sessions, kept app runs, archived subagent steps, and sessions whose subagent steps could be archived.',
     schema: z.object({}),
   },
   {
-    name: 'restore_trashed',
-    description: 'Brings a session back from the trash, or (what "steps") puts its trashed subagent steps back under their cards. No card.',
-    schema: z.object({ sessionId: z.string().describe('The id list_trash gives.'), what: z.enum(['session', 'steps']).optional() }),
+    name: 'restore_archived',
+    description: 'Brings a session back from the session archive, or (what "steps") puts its archived subagent steps back under their cards. No card.',
+    schema: z.object({ sessionId: z.string().describe('The id list_archive gives.'), what: z.enum(['session', 'steps']).optional() }),
   },
   {
-    name: 'trash_subagent_steps',
-    description: "Moves a live session's subagent steps to the trash (its conversation stays); restore_trashed brings them back. No card.",
-    schema: z.object({ sessionId: z.string().describe('The id list_trash gives.') }),
+    name: 'archive_subagent_steps',
+    description: "Archives a live session's subagent steps (its conversation stays); restore_archived brings them back. No card.",
+    schema: z.object({ sessionId: z.string().describe('The id list_archive gives.') }),
   },
   {
     name: 'delete_session',
     description:
-      "Moves a session to the trash, as the window's delete does; restore_trashed brings it back. Its worktree and the tool's own conversation file stay. For sessions that are not yours: a child you started is deleted with agent_session. The person approves a card first, which names what the host drops that restoring does not bring back (a caller waiting for its report, reports it owes). Refused while the session is working, waiting on the person or has a background job running.",
+      "Archives a session, as the window's delete does; restore_archived brings it back. Its worktree and the tool's own conversation file stay. For sessions that are not yours: a child you started is deleted with agent_session. The person approves a card first, which names what the host drops that restoring does not bring back (a caller waiting for its report, reports it owes). Refused while the session is working, waiting on the person or has a background job running.",
     schema: z.object({ sessionId: z.string().describe('The id list_sessions gives.') }),
   },
   {
-    name: 'delete_trashed',
-    description: 'Deletes one trashed session, or (what "steps") its trashed subagent steps, for good. The person approves a card naming what goes first.',
-    schema: z.object({ sessionId: z.string().describe('The id list_trash gives.'), what: z.enum(['session', 'steps']).optional() }),
+    name: 'delete_archived',
+    description: 'Deletes one archived session, or (what "steps") its archived subagent steps, for good. The person approves a card naming what goes first.',
+    schema: z.object({ sessionId: z.string().describe('The id list_archive gives.'), what: z.enum(['session', 'steps']).optional() }),
   },
   {
-    name: 'empty_trash',
-    description: 'Deletes everything listed in the trash for good, kept app runs included. The person approves a card naming what goes first.',
+    name: 'delete_all_archived',
+    description: 'Deletes everything listed in the session archive for good, kept app runs included. The person approves a card naming what goes first.',
     schema: z.object({}),
   },
   /*
@@ -714,7 +714,7 @@ export const AGENT_TOOLS = [
      * "answer" (#676): a card of the turn the caller gave, which status shows; `card` only when more than one stands.
      * Not in the description: the answer that shows a card names the call, and the description rides in every request.
      */
-    description: 'Lists, checks, messages, waits for, stops or deletes sessions start_agent started.',
+    description: 'Lists, checks, messages, waits for, stops or archives sessions start_agent started.',
     schema: z.object({
       // Not needed for "list" (#690): the caller's own children, so a parent that forgot one finds it in one call
       sessionId: z.string().optional(),
@@ -898,7 +898,7 @@ export const ORCHESTRATOR_INSTRUCTIONS = [
   'For light work outside any project (a web search, a lookup), start a session the person can watch with the start_agent command, not your Agent tool.',
   'Make a new project with create_project; add an existing folder, here or on a linked machine, with the add_project command (list_machines names the machines).',
   // #1219: the machine and trust commands (#1219's third slice: projects' trust, approval rules, app grants, agent limits) are found by these words
-  'More commands: centralu_commands "machine trust rule grant limits app session agent project preferences trash".',
+  'More commands: centralu_commands "machine trust rule grant limits app session agent project preferences archive".',
   'When the person says "make me a tool/screen that does…", make the app with create_app — a screen the person clicks and the tools an agent calls are one app.',
   // #1205: one server per trusted project that is an app grew every request; the orchestrator attaches the one it needs
   'Projects that are apps attach on demand: the find_apps command lists them.',

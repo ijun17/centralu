@@ -81,12 +81,12 @@ export class Store extends MigrationRunner {
   readonly messages: MessageRecords
   readonly handoffs: HandoffMarkers
   readonly trash: TrashRecords
-  /** A session's subagent steps moved to the trash without it (#418) */
+  /** A session's subagent steps archived without it (#418) */
   readonly subagentSteps: SubagentStepRecords
   readonly settings: SettingsRecords
   readonly permissions: PermissionRecords
   readonly appRuns: AppRunRecords
-  /** The records of deleted app-agent sessions, kept in the trash (#378) */
+  /** The records of deleted app-agent sessions, kept in the session archive (#378) */
   readonly keptRuns: KeptRuns
   readonly children: ChildOwnershipRecords
   /** The mailbox's threads, messages and receipts (#1347, v61) */

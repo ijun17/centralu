@@ -8,8 +8,8 @@ import { handoffNoteBytes, handoffNotePath } from './handoff-notes.js'
 import { worktreeRecoveryBytes, worktreeRecoveryDir } from './worktree-recovery.js'
 
 /**
- * What one session's data folders take, as the trash shows it (#204, #850 item 19), through the
- * three functions the trash adds up: attachments, worktree recovery snapshots and the handoff note.
+ * What one session's data folders take, as the session archive shows it (#204, #850 item 19), through the
+ * three functions the session archive adds up: attachments, worktree recovery snapshots and the handoff note.
  * The same rule for all three: regular files count, a link counts for nothing and is never followed,
  * and one entry that cannot be read costs only itself.
  */

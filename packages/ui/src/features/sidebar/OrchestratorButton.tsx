@@ -196,7 +196,7 @@ function OrchestratorChildRow({ s }: { s: SessionSummary }) {
             />
           )}
           <ActionRow
-            label="Delete session…"
+            label="Archive session…"
             onClick={() => {
               setMenu(null)
               setConfirming(true)

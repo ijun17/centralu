@@ -468,7 +468,7 @@ export class RemoteAgents {
       const gone = await reader.deleteSession(made.sessionId)
       return {
         ok: false,
-        error: `${why}, so the session made there was given no task and went to ${machine.name}'s trash${gone.ok ? '' : `, or would have: it could not be deleted (${bare(gone.error)}), so "${made.name}" stays there with no task`}. Start it again to ask the person. ${ASK_THE_PERSON}`,
+        error: `${why}, so the session made there was given no task and went to ${machine.name}'s session archive${gone.ok ? '' : `, or would have: it could not be deleted (${bare(gone.error)}), so "${made.name}" stays there with no task`}. Start it again to ask the person. ${ASK_THE_PERSON}`,
       }
     }
     const label = labelOf(this.host.store.messages, caller)
@@ -677,7 +677,7 @@ export class RemoteAgents {
         this.forget(rec.sessionId)
         return {
           ok: true, state: 'deleted', sessionId: rec.sessionId, sessionName: rec.name, tool: rec.tool,
-          notice: `It went to ${rec.machine}'s trash${remoteWorktreeLine(rec, withWorktree?.ok ? withWorktree : older ? 'older' : undefined)}.`,
+          notice: `It went to ${rec.machine}'s session archive${remoteWorktreeLine(rec, withWorktree?.ok ? withWorktree : older ? 'older' : undefined)}.`,
         }
       }
     }

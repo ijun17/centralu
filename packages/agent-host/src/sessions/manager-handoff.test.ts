@@ -137,7 +137,7 @@ describe("a handoff note does not race its reader (#106)", () => {
     await mgr.trashSession(other.id)
 
     // Purging another session sweeps the project's notes. While that sweep reads the folder, the person
-    // moves the note's session to the trash, which keeps its note (#204).
+    // moves the note's session to the session archive, which keeps its note (#204).
     const claimed = store.handoffs.handoffPredecessors.bind(store.handoffs)
     let trashing: Promise<void> | undefined
     const spy = vi.spyOn(store.handoffs, 'handoffPredecessors').mockImplementation(() => {
@@ -147,7 +147,7 @@ describe("a handoff note does not race its reader (#106)", () => {
     try {
       await mgr.purgeSession(other.id)
       // A sweep that asks per note may never need the claims for this one (it is still live when judged);
-      // the trash then lands after the sweep, which must keep the note just the same
+      // the session archive then lands after the sweep, which must keep the note just the same
       await (trashing ??= mgr.trashSession(handing.id))
     } finally {
       spy.mockRestore()
@@ -168,7 +168,7 @@ describe("a handoff note does not race its reader (#106)", () => {
 
     await mgr.trashSession(dying.id)
     await mgr.trashSession(heir.id)
-    // Both in the trash: either could be restored and ask for the note, so it stays (#204)
+    // Both in the session archive: either could be restored and ask for the note, so it stays (#204)
     expect(existsSync(note(dying.id))).toBe(true)
     await mgr.purgeSession(dying.id)
     expect(existsSync(note(dying.id))).toBe(true)
@@ -176,14 +176,14 @@ describe("a handoff note does not race its reader (#106)", () => {
     expect(existsSync(note(dying.id))).toBe(false)
   })
 
-  it('a note whose session is in the trash survives a sweep, and goes when that session is deleted for good (#204)', async () => {
+  it('a note whose session is in the session archive survives a sweep, and goes when that session is deleted for good (#204)', async () => {
     const p = await project()
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: dir, tool: 'claude' })) as SessionInfo
     placeNote(s.id)
     placeNote('gone-session', 'nobody owns this')
     await mgr.trashSession(s.id)
 
-    // A restart sweeps orphan notes. One in the trash is not an orphan: restoring it must find its note
+    // A restart sweeps orphan notes. One in the session archive is not an orphan: restoring it must find its note
     new SessionManager(store, new Map([['claude', adapter as AgentAdapter]]), () => {})
     await vi.waitFor(() => expect(existsSync(note('gone-session'))).toBe(false))
     expect(existsSync(note(s.id))).toBe(true)
@@ -218,7 +218,7 @@ describe("a handoff note does not race its reader (#106)", () => {
  * The old location, `<project>/.centralu/handoff/`, was inside the user's repository and so not
  * ignored by git, and cleanup trusted that folder: committing `.centralu/handoff -> ..` in a
  * repository made the host delete every `*.md` at the repository root each time it started
- * (measured — README.md and CHANGELOG.md vanished without even passing through the trash). The
+ * (measured — README.md and CHANGELOG.md vanished without even passing through the session archive). The
  * note now lives in the data folder, and the host neither reads, writes, nor cleans the old
  * location. It also leaves alone any note already sitting in the old location — an old successor
  * session is still holding that path.

@@ -10,8 +10,8 @@ import { SessionManager } from './manager.js'
 import { createRpcHandler } from '../rpc.js'
 
 /**
- * #418 through the RPC: a session's subagent steps, listed with what they take, moved to the trash while the session
- * stays, restored under their cards, and deleted for good one at a time or with the rest of the trash. The store's side
+ * #418 through the RPC: a session's subagent steps, listed with what they take, archived while the session
+ * stays, restored under their cards, and deleted for good one at a time or with the rest of the session archive. The store's side
  * is store-subagent-trash.test.ts.
  */
 
@@ -74,7 +74,7 @@ const trash = async () => (await rpc('trash.list', {})) as { sessions: TrashedSe
 const card = async (sessionId: string) => (await rpc('messages.subagent', { sessionId, parentCallId: AGENT })) as StoredMessage[]
 const trashedOnCard = async (sessionId: string) => (await rpc('messages.subagentTrashed', { sessionId, parentCallId: AGENT })) as { steps: number }
 
-describe("a session's subagent steps, to the trash and back without the session (#418)", () => {
+describe("a session's subagent steps, to the session archive and back without the session (#418)", () => {
   it('lists what they take, moves them, says so on the card, and restores them', async () => {
     const p = await project()
     const s = await newSession(p)
@@ -100,7 +100,7 @@ describe("a session's subagent steps, to the trash and back without the session 
     expect((await trash()).subagentSteps).toEqual([])
   })
 
-  it('deletes them for good from the trash, one session at a time or with the rest, and keeps the session', async () => {
+  it('deletes them for good from the session archive, one session at a time or with the rest, and keeps the session', async () => {
     const p = await project()
     const a = await newSession(p)
     const b = await newSession(p)
@@ -120,10 +120,10 @@ describe("a session's subagent steps, to the trash and back without the session 
     // Named as the person knows it, never by its id
     await expect(rpc('trash.restoreSubagentSteps', { sessionId: a.id })).rejects.toMatchObject({
       code: 'session_not_found',
-      message: `No subagent steps of “${a.name}” are in the trash`,
+      message: `No subagent steps of “${a.name}” are in the session archive`,
     })
 
-    // Emptying the trash deletes the sessions in it, never subagent steps: the window deletes each entry it listed
+    // Emptying the session archive deletes the sessions in it, never subagent steps: the window deletes each entry it listed
     expect(await rpc('trash.empty', {})).toEqual({ purged: 1, failed: [] })
     expect((await trash()).subagentSteps.map((x) => x.sessionId)).toEqual([b.id])
     await rpc('trash.purgeSubagentSteps', { sessionId: b.id, upTo: upTo(b.id) })
@@ -131,14 +131,14 @@ describe("a session's subagent steps, to the trash and back without the session 
     expect(((await rpc('sessions.list', {})) as SessionInfo[]).map((x) => x.id).sort()).toEqual([a.id, b.id].sort())
   })
 
-  // #418 review: both ways of deleting for good took steps moved after the window read the trash
-  it('steps moved after the window read the trash survive deleting the entry it listed, and emptying the trash', async () => {
+  // #418 review: both ways of deleting for good took steps moved after the window read the session archive
+  it('steps moved after the window read the session archive survive deleting the entry it listed, and deleting all archived sessions', async () => {
     const p = await project()
     const s = await newSession(p)
     steps(s.id, 2)
     await rpc('subagents.trash', { sessionId: s.id })
     const [seen] = (await trash()).subagentSteps
-    // Another window moves more of the session's steps after this one read the trash
+    // Another window moves more of the session's steps after this one read the session archive
     store.messages.appendSubagentMessage(s.id, 'toolu_later', { role: 'assistant', kind: 'text', payload: { type: 'message_delta', sessionId: s.id, role: 'assistant', text: 'later' }, ts: 9 })
     await rpc('subagents.trash', { sessionId: s.id })
 
@@ -149,13 +149,13 @@ describe("a session's subagent steps, to the trash and back without the session 
     expect(await rpc('messages.subagentTrashed', { sessionId: s.id, parentCallId: 'toolu_later' })).toEqual({ steps: 1 })
   })
 
-  it('refuses a session that is not live: unknown, or in the trash', async () => {
+  it('refuses a session that is not live: unknown, or in the session archive', async () => {
     const p = await project()
     const s = await newSession(p)
     steps(s.id, 1)
     await expect(rpc('subagents.trash', { sessionId: 'nobody' })).rejects.toMatchObject({
       code: 'session_not_found',
-      message: 'That session is no longer here: it was deleted, or is in the trash',
+      message: 'That session is no longer here: it was deleted, or is in the session archive',
     })
     await rpc('agents.deleteSession', { sessionId: s.id })
     await expect(rpc('subagents.trash', { sessionId: s.id })).rejects.toMatchObject({ code: 'session_not_found' })
@@ -165,9 +165,9 @@ describe("a session's subagent steps, to the trash and back without the session 
   })
 })
 
-/** The trash's rule (#204): only the person deletes for good, and only through the RPC */
+/** The session archive's rule (#204): only the person deletes for good, and only through the RPC */
 describe('who can delete subagent steps for good', () => {
-  it('only the RPC handler and emptying the trash call the purge', () => {
+  it('only the RPC handler and deleting all archived sessions call the purge', () => {
     const src = join(fileURLToPath(new URL('.', import.meta.url)), '..')
     const callers: string[] = []
     const walk = (dir: string) => {

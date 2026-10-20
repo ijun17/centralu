@@ -130,7 +130,7 @@ export type WorktreeHost = {
 
 /**
  * A worktree session's worktree (#428): checked out and set up for a new session (FR-2 option, #69, #407), and taken
- * apart when a started agent's session is cleaned up (#608, #647), its local work kept in the trash. Moved out of the
+ * apart when a started agent's session is cleaned up (#608, #647), its local work kept in the session archive. Moved out of the
  * session manager as it was; what it reaches of the manager is `WorktreeHost`.
  */
 export class WorktreeSessions {
@@ -400,7 +400,7 @@ export class WorktreeSessions {
     return false
   }
 
-  /** #608: the parent decides; local work follows the session into the trash in every preset. */
+  /** #608: the parent decides; local work follows the session into the session archive in every preset. */
   async cleanUpWorktreeChild(target: SessionInfo): Promise<{ ok: true; branch: string; setAside: { changedFiles: number; commits: number }; warning?: string; note?: string } | { ok: false; error: string }> {
     if (!target.worktree?.base || !target.projectId) {
       return { ok: false, error: `"${target.name}" works in no worktree of its own, so there is nothing to clean up — the person deletes a session` }
@@ -460,25 +460,25 @@ export class WorktreeSessions {
       const setAside = await saveWorktreeRecovery(target.id, path, trunk ?? 'missing-trunk', branch)
       if (setAside.changedFiles || setAside.commits) {
         this.host.onEvent({ type: 'notice', sessionId: target.id, level: 'info', from: 'Centralu', label: 'worktree recovery',
-          text: `Local work saved before worktree deletion: ${setAside.changedFiles} uncommitted files, ${setAside.commits} commits not on the trunk. Recovery patches and bundles are at ${worktreeRecoveryDir(target.id)}. Restore from Settings → Trash or recover these files manually before deleting this session for good.` })
+          text: `Local work saved before worktree deletion: ${setAside.changedFiles} uncommitted files, ${setAside.commits} commits not on the trunk. Recovery patches and bundles are at ${worktreeRecoveryDir(target.id)}. Restore from Settings → Archive or recover these files manually before deleting this session for good.` })
       }
       // The snapshot took a while (bundles may take up to two minutes): a session may have come into the folder meanwhile
-      // (one restored from the trash, one opened there). It stays in place, and so does the worktree; the snapshot is kept.
+      // (one restored from the session archive, one opened there). It stays in place, and so does the worktree; the snapshot is kept.
       const appeared = occupied()
       if (appeared) return appeared
       await this.host.trashSession(target.id, false, false, setAside)
       const appearedSince = occupied()
-      if (appearedSince) return { ok: true, branch, setAside, warning: `The session is in the trash, but worktree ${path} and branch ${branch} were left: ${appearedSince.error}. Recovery files are at ${worktreeRecoveryDir(target.id)}.` }
+      if (appearedSince) return { ok: true, branch, setAside, warning: `The session is in the session archive, but worktree ${path} and branch ${branch} were left: ${appearedSince.error}. Recovery files are at ${worktreeRecoveryDir(target.id)}.` }
       try {
         await gitWorktreeRemove(cwd, path, true, true)
       } catch (e) {
-        return { ok: true, branch, setAside, warning: `The session is in the trash, but worktree ${path} and branch ${branch} were left: ${(e as Error).message}. Recovery files are at ${worktreeRecoveryDir(target.id)}.` }
+        return { ok: true, branch, setAside, warning: `The session is in the session archive, but worktree ${path} and branch ${branch} were left: ${(e as Error).message}. Recovery files are at ${worktreeRecoveryDir(target.id)}.` }
       }
       try {
         await gitBranchDelete(cwd, branch, this.host.gitTrust(target.projectId))
         await clearRecoveredBranchMark(cwd, branch).catch(() => {})
       } catch (e) {
-        return { ok: true, branch, setAside, warning: `The session is in the trash and its worktree was removed, but branch ${branch} was left: ${(e as Error).message}. Recovery files are at ${worktreeRecoveryDir(target.id)}.` }
+        return { ok: true, branch, setAside, warning: `The session is in the session archive and its worktree was removed, but branch ${branch} was left: ${(e as Error).message}. Recovery files are at ${worktreeRecoveryDir(target.id)}.` }
       }
       return { ok: true, branch, setAside }
     } catch (e) {
@@ -490,11 +490,11 @@ export class WorktreeSessions {
 
   /**
    * agent_session delete of a child a hub started here with a worktree (#1161 item 3, `agents.deleteAgentChild`): the
-   * session goes to the trash, and the worktree made for it goes too when nothing would be lost by it. Only that one:
+   * session goes to the session archive, and the worktree made for it goes too when nothing would be lost by it. Only that one:
    * a worktree Centralu made (`base`) on the branch the hub asked for, for a session another session started (its
    * recorded agent depth), so never the project's own folder or a worktree session of the person's. Only when nothing
    * is lost: nothing uncommitted, and every commit of its own on a remote or the trunk (`gitUnpublishedCommits`). Otherwise, or when the cleanup refuses (work still running there,
-   * another session in its folder), the session still goes to the trash, the worktree stays, and the answer says why.
+   * another session in its folder), the session still goes to the session archive, the worktree stays, and the answer says why.
    *
    * The hub stops a running turn before it asks: a turn just stopped is waited out for a few seconds
    * (`STOPPING_WAIT_MS`), since the cleanup refuses a session still in its turn.
@@ -556,7 +556,7 @@ export class WorktreeSessions {
 
   /**
    * Cleanup of a child whose worktree folder is already gone (#715): `gh pr merge --delete-branch` run beside it, or a
-   * person, removed it. Nothing is left to save. The session goes to the trash, git's stale entry is pruned, and the
+   * person, removed it. Nothing is left to save. The session goes to the session archive, git's stale entry is pruned, and the
    * branch stays when it holds commits the trunk lacks (or when that cannot be told), so no work is lost with it.
    * Runs inside cleanUpWorktreeChild, which holds the cleanup mark.
    */
@@ -580,7 +580,7 @@ export class WorktreeSessions {
     } catch (e) {
       return { ok: true, branch, setAside, note: `${gone}, but git's entry for it could not be pruned (${(e as Error).message}); branch ${branch} was left.` }
     }
-    const head = `${gone}; the session is in the trash and ${entry}.`
+    const head = `${gone}; the session is in the session archive and ${entry}.`
     if ((await gitRevParse(cwd, `refs/heads/${branch}`)) === null) {
       return { ok: true, branch, setAside, note: `${head} Branch ${branch} was already gone.` }
     }

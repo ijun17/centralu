@@ -4,12 +4,12 @@ import { treeBytes } from './entry-sizes.js'
 
 /**
  * The folders the host keeps per session in its data folder (attachments, worktree recovery
- * snapshots, handoff notes), sized and removed one way (#850 item 19). The trash shows what a
+ * snapshots, handoff notes), sized and removed one way (#850 item 19). The session archive shows what a
  * session holds on this machine (#204) from these sizes.
  *
  * **Sizing counts regular files only, and never follows a link.** The folders are the host's own,
  * and a link in one points somewhere that is not: following it counted a file outside (or a whole
- * tree) as the session's, and a link to nothing made the recovery size throw, which the trash then
+ * tree) as the session's, and a link to nothing made the recovery size throw, which the session archive then
  * showed as 0 for every byte of the snapshot beside it. An entry that vanishes while it is being read
  * (a purge or a sweep running at the same time) or cannot be read is skipped, not allowed to cost the
  * sum: the number is an estimate shown to a person, never a reason to delete. The walk is the one that sizes what git

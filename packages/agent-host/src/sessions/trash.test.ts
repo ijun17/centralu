@@ -13,9 +13,9 @@ import { BROKER_TOOLS } from '../apps/external/broker.js'
 import { HOST_CAPABILITIES } from '../apps/external/capabilities.js'
 
 /**
- * The trash beyond one session (#204): deleting a project, restoring into a project that is gone, and who can
+ * The session archive beyond one session (#204): deleting a project, restoring into a project that is gone, and who can
  * delete for good. The one-session round trip and the guard across the listing paths are in manager.test.ts
- * ("deleting a session"); the store's side is in the UI's store-sessions.test.ts ("the trash").
+ * ("deleting a session"); the store's side is in the UI's store-sessions.test.ts ("the session archive").
  */
 
 class EchoHandle implements SessionHandle {
@@ -73,7 +73,7 @@ const trash = async () => (await rpc('trash.list', {})) as { sessions: TrashedSe
 const listed = async () => ((await rpc('sessions.list', {})) as SessionInfo[]).map((s) => s.id)
 
 describe('deleting a project', () => {
-  it('moves its sessions to the trash, and restoring one registers the folder again under the same id', async () => {
+  it('moves its sessions to the session archive, and restoring one registers the folder again under the same id', async () => {
     const p = await addProject(folder('alpha'))
     const a = await newSession(p, 'first words')
     const b = await newSession(p)
@@ -85,7 +85,7 @@ describe('deleting a project', () => {
     const before = await trash()
     expect(before.sessions.map((s) => s.id).sort()).toEqual([a.id, b.id].sort())
     expect(before.sessions.every((s) => s.project?.id === p.id && s.project.name === p.name && !s.project.exists)).toBe(true)
-    // Nobody was asked about the tool's file, so emptying the trash would leave it in the tool
+    // Nobody was asked about the tool's file, so deleting all archived sessions would leave it in the tool
     expect(before.sessions.find((s) => s.id === a.id)?.conversationFile).toBe('keep')
 
     const back = (await rpc('trash.restore', { sessionId: a.id })) as { session: SessionInfo; project: ProjectInfo | null }
@@ -99,7 +99,7 @@ describe('deleting a project', () => {
     expect(((await rpc('trash.restore', { sessionId: b.id })) as { project: unknown }).project).toBeNull()
   })
 
-  it('a session whose folder is gone too stays in the trash and says where the folder was', async () => {
+  it('a session whose folder is gone too stays in the session archive and says where the folder was', async () => {
     const dir = folder('beta')
     const p = await addProject(dir)
     const s = await newSession(p)
@@ -128,7 +128,7 @@ describe('deleting a project', () => {
   })
 })
 
-describe('emptying the trash', () => {
+describe('deleting all archived sessions', () => {
   it('deletes every session in it for good, and reports the total it took before', async () => {
     const p = await addProject(folder('delta'))
     const a = await newSession(p, 'one')
@@ -146,30 +146,30 @@ describe('emptying the trash', () => {
 })
 
 /*
- * Nobody but the person decides to delete for good (#204, carried from #96; #1219). The trash is reached through the RPC,
+ * Nobody but the person decides to delete for good (#204, carried from #96; #1219). The session archive is reached through the RPC,
  * which is the UI's socket, and by the central orchestrator's six trash commands, which make the same calls and delete
  * for good only after the person's card (trash-commands.test.ts); the sixth, `delete_session`, only moves a session to the
  * trash, and nothing in it is destroyed. This holds it three ways: no other agent tool, broker tool or host capability is
  * named for it, those six are rare commands of the orchestrator's seat alone, and no code outside the RPC handler calls
  * the manager's purge.
  */
-const ORCHESTRATOR_TRASH_COMMANDS = ['list_trash', 'restore_trashed', 'trash_subagent_steps', 'delete_session', 'delete_trashed', 'empty_trash']
-const TRASH_VERB = /trash|purge|delete_session|restore_session|empty/i
+const ORCHESTRATOR_TRASH_COMMANDS = ['list_archive', 'restore_archived', 'archive_subagent_steps', 'delete_session', 'delete_archived', 'delete_all_archived']
+const TRASH_VERB = /archive|trash|purge|delete_session|restore_session|empty/i
 
 describe('who can delete for good', () => {
-  it("agents and apps have no verb for the trash, but the orchestrator's six commands", () => {
+  it("agents and apps have no verb for the session archive, but the orchestrator's six commands", () => {
     const names = [
       ...ORCHESTRATOR_TOOLS.map((t) => t.name),
       ...BROKER_TOOLS,
       ...HOST_CAPABILITIES,
     ]
     expect(names.length).toBeGreaterThan(10)
-    // A new verb for the trash has to be named in this list, with the card that guards its delete
+    // A new verb for the session archive has to be named in this list, with the card that guards its delete
     expect(names.filter((n) => TRASH_VERB.test(n)).sort()).toEqual([...ORCHESTRATOR_TRASH_COMMANDS].sort())
     expect([...BROKER_TOOLS, ...HOST_CAPABILITIES].filter((n) => TRASH_VERB.test(n))).toEqual([])
   })
 
-  it("the orchestrator's trash commands are its own rare commands: no other seat has them in any tier", () => {
+  it("the orchestrator's session archive commands are its own rare commands: no other seat has them in any tier", () => {
     for (const name of ORCHESTRATOR_TRASH_COMMANDS) {
       expect(RARE_COMMANDS.orchestrator, name).toContain(name)
       for (const tier of RARE_TIERS) {
@@ -200,12 +200,12 @@ describe('who can delete for good', () => {
       'rpc.ts: mgr.purgeSession',
       /*
        * The one deletion the host makes itself (#378): a finished app-agent session, once its record (request, answer,
-       * the whole conversation) is kept in the trash. It reaches the purge only through `agentRunEnded` after a clean run
+       * the whole conversation) is kept in the session archive. It reaches the purge only through `agentRunEnded` after a clean run
        * (app-agents.test.ts holds when it does and when the session stays); the manager hands it the same purge
        */
       'sessions/app-sessions.ts: this.host.purgeSession',
       'sessions/manager.ts: self.purgeSession',
-      // The manager passes the two calls on to its trash (session-trash.ts, #428); the same calls, not other callers
+      // The manager passes the two calls on to its session archive (session-trash.ts, #428); the same calls, not other callers
       'sessions/manager.ts: this.trash.emptyTrash',
       'sessions/manager.ts: this.trash.purgeSession',
       // emptyTrash purges one by one; purgeSession removes the rows through the store

@@ -75,7 +75,7 @@ export function newSessionProjectOf(
 
 /**
  * The sessions explicitly placed on the project screen right now. The
- * trash (#204) needs no rule here — a trashed session is not in `sessions`.
+ * trash (#204) needs no rule here — an archived session is not in `sessions`.
  */
 export function projectScreenSessions(
   s: Pick<

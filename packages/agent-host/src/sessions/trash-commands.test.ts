@@ -12,12 +12,12 @@ import { commandsFor, profileAllows, RARE_TIERS } from './orchestrator-tools.js'
 import { eventually } from '../../../../tooling/test-timing.js'
 
 /**
- * The orchestrator's trash commands (#1219): listing, restoring and moving subagent steps to the trash act at once;
+ * The orchestrator's session archive commands (#1219): listing, restoring and moving subagent steps to the session archive act at once;
  * deleting for good, one item or all of it, waits for a card that names what goes, and never takes what the card did not
  * name. Each makes the window's own call (here the real RPC handler on a real store), so a session id is checked as the
  * window checks it.
  */
-const COMMANDS = ['list_trash', 'restore_trashed', 'trash_subagent_steps', 'delete_session', 'delete_trashed', 'empty_trash'] as const
+const COMMANDS = ['list_archive', 'restore_archived', 'archive_subagent_steps', 'delete_session', 'delete_archived', 'delete_all_archived'] as const
 type Command = (typeof COMMANDS)[number]
 
 let root: string
@@ -87,7 +87,7 @@ async function keptRun() {
   await store.trash.purgeSession('a1')
 }
 
-/** The trash card standing in a session, if one is */
+/** The session archive card standing in a session, if one is */
 function card(sessionId: string) {
   const pending = mgr.listSessions().find((s) => s.id === sessionId)?.pendingApproval
   const d = pending?.detail
@@ -108,14 +108,14 @@ async function answered(orcId: string, command: Command, args: Record<string, un
   return { question, r: await call }
 }
 
-describe('list_trash', () => {
-  it('says the trash is empty', async () => {
+describe('list_archive', () => {
+  it('says the session archive is empty', async () => {
     const orc = await mgr.orchestrator()
-    const r = await run(orc.id, 'list_trash')
-    expect(r.text).toBe('The trash: 0 sessions, 0 app runs, subagent steps of 0 sessions; 0 B in all.\nThe trash is empty.')
+    const r = await run(orc.id, 'list_archive')
+    expect(r.text).toBe('The session archive: 0 sessions, 0 app runs, subagent steps of 0 sessions; 0 B in all.\nThe session archive is empty.')
   })
 
-  it('lists a trashed session with its project, size and what deleting for good takes, the steps in the trash and the sessions holding steps', async () => {
+  it('lists an archived session with its project, size and what deleting for good takes, the steps in the session archive and the sessions holding steps', async () => {
     const gone = await trashed('Old "plan"')
     const other = await newSession('Busy one')
     addSteps(other.id, 3)
@@ -124,56 +124,56 @@ describe('list_trash', () => {
     await rpc('subagents.trash', { sessionId: moved.id })
     await keptRun()
     const orc = await mgr.orchestrator()
-    const r = await run(orc.id, 'list_trash')
+    const r = await run(orc.id, 'list_archive')
     expect(r.isError).toBeFalsy()
-    expect(r.text).toContain('The trash: 1 session, 1 app run, subagent steps of 1 session;')
-    expect(r.text).toMatch(new RegExp(`- "Old \\\\"plan\\\\"" \\[${gone.id}\\]: project "proj"; deleted \\d{4}-\\d\\d-\\d\\d; 0 messages, `))
-    expect(r.text).toContain('Kept app runs (only empty_trash deletes these):')
+    expect(r.text).toContain('The session archive: 1 session, 1 app run, subagent steps of 1 session;')
+    expect(r.text).toMatch(new RegExp(`- "Old \\\\"plan\\\\"" \\[${gone.id}\\]: project "proj"; archived \\d{4}-\\d\\d-\\d\\d; 0 messages, `))
+    expect(r.text).toContain('Kept app runs (only delete_all_archived deletes these):')
     expect(r.text).toContain('- "Notes · agent 10:00" of the app "Notes"')
     expect(r.text).toMatch(new RegExp(`- "Steps away" \\[${moved.id}\\]: 2 steps in 1 run, `))
-    // A session holding steps, not in the trash yet
-    expect(r.text).toMatch(new RegExp(`Sessions holding subagent steps that trash_subagent_steps can move to the trash:\\n- "Busy one" \\[${other.id}\\]: 3 steps in 1 run`))
+    // A session holding steps, not in the session archive yet
+    expect(r.text).toMatch(new RegExp(`Sessions holding subagent steps that archive_subagent_steps can move to the session archive:\\n- "Busy one" \\[${other.id}\\]: 3 steps in 1 run`))
   })
 })
 
-describe('restore_trashed and trash_subagent_steps', () => {
-  it('bring a session back, and move a session\'s subagent steps to the trash and back, with no card', async () => {
+describe('restore_archived and archive_subagent_steps', () => {
+  it('bring a session back, and move a session\'s subagent steps to the session archive and back, with no card', async () => {
     const gone = await trashed('Came back')
     const busy = await newSession('Busy')
     addSteps(busy.id, 4)
     const orc = await mgr.orchestrator()
 
-    const back = await run(orc.id, 'restore_trashed', { sessionId: gone.id })
+    const back = await run(orc.id, 'restore_archived', { sessionId: gone.id })
     expect(back.isError).toBeFalsy()
-    expect(back.text).toBe(`Restored "Came back" [${gone.id}] from the trash.`)
+    expect(back.text).toBe(`Restored "Came back" [${gone.id}] from the session archive.`)
     expect(await live()).toContain(gone.id)
     expect((await trash()).sessions).toEqual([])
 
-    const moved = await run(orc.id, 'trash_subagent_steps', { sessionId: busy.id })
-    expect(moved.text).toMatch(/^Moved 4 subagent steps \(.+\) of .+ to the trash\. Its conversation and launch cards stay/)
+    const moved = await run(orc.id, 'archive_subagent_steps', { sessionId: busy.id })
+    expect(moved.text).toMatch(/^Moved 4 subagent steps \(.+\) of .+ to the session archive\. Its conversation and launch cards stay/)
     expect((await trash()).subagentSteps.map((t) => t.sessionId)).toEqual([busy.id])
 
-    const restored = await run(orc.id, 'restore_trashed', { sessionId: busy.id, what: 'steps' })
+    const restored = await run(orc.id, 'restore_archived', { sessionId: busy.id, what: 'steps' })
     expect(restored.text).toContain('back under their launch cards')
     expect((await trash()).subagentSteps).toEqual([])
     expect(card(orc.id)).toBeUndefined()
   })
 
-  it('says so when a session holds no steps to move, and refuses a session that is not in the trash, as the window does', async () => {
+  it('says so when a session holds no steps to move, and refuses a session that is not in the session archive, as the window does', async () => {
     const live1 = await newSession('Live')
     const orc = await mgr.orchestrator()
-    expect((await run(orc.id, 'trash_subagent_steps', { sessionId: live1.id })).text).toContain('holds no subagent steps to move')
-    const notTrashed = await run(orc.id, 'restore_trashed', { sessionId: live1.id })
+    expect((await run(orc.id, 'archive_subagent_steps', { sessionId: live1.id })).text).toContain('holds no subagent steps to move')
+    const notTrashed = await run(orc.id, 'restore_archived', { sessionId: live1.id })
     expect(notTrashed.isError).toBe(true)
     await expect(rpc('trash.restore', { sessionId: live1.id })).rejects.toThrow()
-    const badId = await run(orc.id, 'restore_trashed', { sessionId: 'not an id' })
+    const badId = await run(orc.id, 'restore_archived', { sessionId: 'not an id' })
     expect(badId.isError).toBe(true)
     expect(badId.text).toContain('Not a session id')
     await expect(rpc('trash.restore', { sessionId: 'not an id' })).rejects.toThrow(/Not a session id/)
   })
 })
 
-describe('restore_trashed of a session whose project was deleted', () => {
+describe('restore_archived of a session whose project was deleted', () => {
   async function trashedWithDeletedProject() {
     const other = join(root, 'other-proj')
     mkdirSync(other)
@@ -187,11 +187,11 @@ describe('restore_trashed of a session whose project was deleted', () => {
   it('asks naming the folder that will be registered again, then restores it on Allow', async () => {
     const { s, other } = await trashedWithDeletedProject()
     const orc = await mgr.orchestrator()
-    const { question, r } = await answered(orc.id, 'restore_trashed', { sessionId: s.id }, 'allow')
+    const { question, r } = await answered(orc.id, 'restore_archived', { sessionId: s.id }, 'allow')
     expect(question).toContain('Its project')
     expect(question).toContain('was deleted, so restoring registers its folder')
     expect(question).toContain('other-proj')
-    expect(r.text).toContain('from the trash.')
+    expect(r.text).toContain('from the session archive.')
     expect(r.text).toContain('had been deleted; its folder is registered again')
     expect(await live()).toContain(s.id)
     expect(((await rpc('projects.list', {})) as { path: string }[]).map((x) => x.path)).toContain(other)
@@ -200,34 +200,34 @@ describe('restore_trashed of a session whose project was deleted', () => {
   it('restores nothing and registers no folder when the person denies it', async () => {
     const { s } = await trashedWithDeletedProject()
     const orc = await mgr.orchestrator()
-    const { r } = await answered(orc.id, 'restore_trashed', { sessionId: s.id }, 'deny')
+    const { r } = await answered(orc.id, 'restore_archived', { sessionId: s.id }, 'deny')
     expect(r.isError).toBe(true)
     expect(r.text).toMatch(/did not approve it, so nothing was restored/)
     expect((await trash()).sessions.map((x) => x.id)).toEqual([s.id])
     expect(await live()).not.toContain(s.id)
   })
 
-  it('asks nothing for a session whose project is still there, and refuses one that is not in the trash', async () => {
+  it('asks nothing for a session whose project is still there, and refuses one that is not in the session archive', async () => {
     const orc = await mgr.orchestrator()
     const gone = await trashed('Plain')
-    expect((await run(orc.id, 'restore_trashed', { sessionId: gone.id })).isError).toBeFalsy()
+    expect((await run(orc.id, 'restore_archived', { sessionId: gone.id })).isError).toBeFalsy()
     expect(card(orc.id)).toBeUndefined()
-    const none = await run(orc.id, 'restore_trashed', { sessionId: gone.id })
+    const none = await run(orc.id, 'restore_archived', { sessionId: gone.id })
     expect(none.isError).toBe(true)
-    expect(none.text).toMatch(/is not in the trash; list_trash shows what is\. Nothing was restored/)
+    expect(none.text).toMatch(/is not in the session archive; list_archive shows what is\. Nothing was restored/)
   })
 })
 
 describe('delete_session', () => {
   const listed = async () => ((await rpc('sessions.list', {})) as SessionInfo[]).map((s) => s.id)
 
-  it("asks, naming what restoring does not bring back, then moves a session that is not the caller's, keeping what the window's delete keeps, and restore_trashed brings it back", async () => {
+  it("asks, naming what restoring does not bring back, then moves a session that is not the caller's, keeping what the window's delete keeps, and restore_archived brings it back", async () => {
     const orc = await mgr.orchestrator()
     const s = await newSession('Old work')
     const denied = await answered(orc.id, 'delete_session', { sessionId: s.id }, 'deny')
-    expect(denied.question).toContain('Move the session "Old work" to the trash?')
+    expect(denied.question).toContain('Archive the session "Old work"?')
     expect(denied.question).toContain('The person started it themselves.')
-    expect(denied.question).toContain("Restoring it from the trash brings back its conversation, its worktree and the tool's own conversation file")
+    expect(denied.question).toContain("Restoring it from the session archive brings back its conversation, its worktree and the tool's own conversation file")
     expect(denied.question).toContain('Nothing else is lost: no one is waiting on it and it owes no report.')
     expect(denied.question).toContain('It is moved only if it is still at rest when you answer')
     expect(denied.r.isError).toBe(true)
@@ -235,14 +235,14 @@ describe('delete_session', () => {
 
     const { r } = await answered(orc.id, 'delete_session', { sessionId: s.id }, 'allow')
     expect(r.isError).toBeFalsy()
-    expect(r.text).toContain(`Moved "Old work" [${s.id}] to the trash.`)
-    expect(r.text).toContain('restore_trashed brings it back')
+    expect(r.text).toContain(`Moved "Old work" [${s.id}] to the session archive.`)
+    expect(r.text).toContain('restore_archived brings it back')
     expect(await listed()).not.toContain(s.id)
     const inTrash = (await trash()).sessions.find((x) => x.id === s.id)!
     // The two boxes of the window's delete stay unchecked: nothing goes for good with it
     expect(inTrash.conversationFile).not.toBe('remove')
     expect(inTrash.worktree?.remove ?? false).toBe(false)
-    const back = await run(orc.id, 'restore_trashed', { sessionId: s.id })
+    const back = await run(orc.id, 'restore_archived', { sessionId: s.id })
     expect(back.isError).toBeFalsy()
     expect(await listed()).toContain(s.id)
   })
@@ -315,7 +315,7 @@ describe('delete_session', () => {
     expect((await trash()).sessions).toEqual([])
   })
 
-  it('refuses a session with a background job still running, which the trash would end for good, and takes it once only ended jobs are left', async () => {
+  it('refuses a session with a background job still running, which the session archive would end for good, and takes it once only ended jobs are left', async () => {
     const orc = await mgr.orchestrator()
     const s = await newSession('Serving')
     const meta = (mgr as unknown as { meta: Map<string, { backgroundTasks: { id: string; kind: string; description: string; status: string }[] }> }).meta.get(s.id)!
@@ -355,13 +355,13 @@ describe('delete_session', () => {
   })
 })
 
-describe('delete_trashed', () => {
+describe('delete_archived', () => {
   it('asks naming the session, what it holds and that it cannot be undone, then deletes it for good on Allow', async () => {
     const gone = await trashed('Old plan')
     const keep = await trashed('Other')
     const orc = await mgr.orchestrator()
-    const { question, r } = await answered(orc.id, 'delete_trashed', { sessionId: gone.id }, 'allow')
-    expect(question).toContain('Delete the trashed session "Old plan" for good?')
+    const { question, r } = await answered(orc.id, 'delete_archived', { sessionId: gone.id }, 'allow')
+    expect(question).toContain('Delete the archived session "Old plan" for good?')
     expect(question).toContain('0 messages')
     expect(question).toContain('attachments and handoff note leave this computer')
     expect(question).toContain('This cannot be undone.')
@@ -374,24 +374,24 @@ describe('delete_trashed', () => {
     const b = await trashed('B')
     const orc = await mgr.orchestrator()
     await mgr.updateSettings(orc.id, { permissionPreset: 'auto' })
-    const denied = await answered(orc.id, 'delete_trashed', { sessionId: a.id }, 'deny')
+    const denied = await answered(orc.id, 'delete_archived', { sessionId: a.id }, 'deny')
     expect(denied.r.isError).toBe(true)
     expect(denied.r.text).toMatch(/did not approve it, so nothing was deleted/)
     expect((await trash()).sessions.length).toBe(2)
-    await answered(orc.id, 'delete_trashed', { sessionId: a.id }, 'always')
+    await answered(orc.id, 'delete_archived', { sessionId: a.id }, 'always')
     // The next one asks again
-    const second = await answered(orc.id, 'delete_trashed', { sessionId: b.id }, 'deny')
+    const second = await answered(orc.id, 'delete_archived', { sessionId: b.id }, 'deny')
     expect(second.r.isError).toBe(true)
     expect((await trash()).sessions.map((s) => s.id)).toEqual([b.id])
   })
 
-  it('refuses a live session, or one that is not there, before any card: only the trash can be deleted from', async () => {
+  it('refuses a live session, or one that is not there, before any card: only the session archive can be deleted from', async () => {
     const liveOne = await newSession('Live')
     const orc = await mgr.orchestrator()
-    const live1 = await run(orc.id, 'delete_trashed', { sessionId: liveOne.id })
+    const live1 = await run(orc.id, 'delete_archived', { sessionId: liveOne.id })
     expect(live1.isError).toBe(true)
-    expect(live1.text).toMatch(/is not in the trash .* Nothing was deleted/)
-    const none = await run(orc.id, 'delete_trashed', { sessionId: 'nothing-like-an-id' })
+    expect(live1.text).toMatch(/is not in the session archive .* Nothing was deleted/)
+    const none = await run(orc.id, 'delete_archived', { sessionId: 'nothing-like-an-id' })
     expect(none.isError).toBe(true)
     expect(card(orc.id)).toBeUndefined()
     expect(await live()).toContain(liveOne.id)
@@ -400,18 +400,18 @@ describe('delete_trashed', () => {
   it('does not delete a session the person restored while the card stood', async () => {
     const gone = await trashed('Changed my mind')
     const orc = await mgr.orchestrator()
-    const { r } = await answered(orc.id, 'delete_trashed', { sessionId: gone.id }, 'allow', async () => {
+    const { r } = await answered(orc.id, 'delete_archived', { sessionId: gone.id }, 'allow', async () => {
       await rpc('trash.restore', { sessionId: gone.id })
     })
     expect(r.isError).toBe(true)
-    expect(r.text).toMatch(/is no longer in the trash \(restored or deleted while the card stood\), so nothing was deleted/)
+    expect(r.text).toMatch(/is no longer in the session archive \(restored or deleted while the card stood\), so nothing was deleted/)
     expect(await live()).toContain(gone.id)
   })
 
   it('does not delete a session that was restored and trashed again while the card stood: it is not what the card named', async () => {
     const gone = await trashed('Round trip')
     const orc = await mgr.orchestrator()
-    const { r } = await answered(orc.id, 'delete_trashed', { sessionId: gone.id }, 'allow', async () => {
+    const { r } = await answered(orc.id, 'delete_archived', { sessionId: gone.id }, 'allow', async () => {
       await rpc('trash.restore', { sessionId: gone.id })
       // A later moment, so the second deletion is stamped later than the first
       await new Promise((resolve) => setTimeout(resolve, 5))
@@ -422,35 +422,35 @@ describe('delete_trashed', () => {
     expect((await trash()).sessions.map((x) => x.id)).toEqual([gone.id])
   })
 
-  it('deletes the trashed subagent steps the card named, and keeps those moved to the trash after it', async () => {
+  it('deletes the archived subagent steps the card named, and keeps those archived after it', async () => {
     const s = await newSession('Stepped')
     addSteps(s.id, 2)
     await rpc('subagents.trash', { sessionId: s.id })
     const orc = await mgr.orchestrator()
-    const { question, r } = await answered(orc.id, 'delete_trashed', { sessionId: s.id, what: 'steps' }, 'allow', async () => {
+    const { question, r } = await answered(orc.id, 'delete_archived', { sessionId: s.id, what: 'steps' }, 'allow', async () => {
       addSteps(s.id, 1, 'toolu_later')
       await rpc('subagents.trash', { sessionId: s.id })
     })
-    expect(question).toContain('Delete the trashed subagent steps of "Stepped" for good? 2 steps in 1 run')
-    expect(question).toContain('The session, its conversation and the steps not in the trash stay.')
-    expect(r.text).toBe('Deleted the trashed subagent steps of "Stepped" for good.')
-    // The step moved after the card was raised is still in the trash
+    expect(question).toContain('Delete the archived subagent steps of "Stepped" for good? 2 steps in 1 run')
+    expect(question).toContain('The session, its conversation and the steps not in the session archive stay.')
+    expect(r.text).toBe('Deleted the archived subagent steps of "Stepped" for good.')
+    // The step moved after the card was raised is still in the session archive
     expect((await trash()).subagentSteps.map((t) => [t.sessionId, t.steps])).toEqual([[s.id, 1]])
     expect(await live()).toContain(s.id)
   })
 
-  it('refuses steps that are not in the trash, before any card', async () => {
+  it('refuses steps that are not in the session archive, before any card', async () => {
     const s = await newSession('No steps')
     const orc = await mgr.orchestrator()
-    const r = await run(orc.id, 'delete_trashed', { sessionId: s.id, what: 'steps' })
+    const r = await run(orc.id, 'delete_archived', { sessionId: s.id, what: 'steps' })
     expect(r.isError).toBe(true)
-    expect(r.text).toMatch(/has no subagent steps in the trash/)
+    expect(r.text).toMatch(/has no subagent steps in the session archive/)
     expect(card(orc.id)).toBeUndefined()
   })
 })
 
-describe('empty_trash', () => {
-  it('asks naming the counts, the size and some names, then deletes the sessions, the kept runs and the trashed steps', async () => {
+describe('delete_all_archived', () => {
+  it('asks naming the counts, the size and some names, then deletes the sessions, the kept runs and the archived steps', async () => {
     await trashed('First')
     await trashed('Second')
     const stepped = await newSession('Stepped')
@@ -458,10 +458,10 @@ describe('empty_trash', () => {
     await rpc('subagents.trash', { sessionId: stepped.id })
     await keptRun()
     const orc = await mgr.orchestrator()
-    const { question, r } = await answered(orc.id, 'empty_trash', {}, 'allow')
-    expect(question).toContain('Empty the trash: delete 2 sessions, 1 kept app run and the trashed subagent steps of 1 session for good')
+    const { question, r } = await answered(orc.id, 'delete_all_archived', {}, 'allow')
+    expect(question).toContain('Delete all archived sessions: delete 2 sessions, 1 kept app run and the archived subagent steps of 1 session for good')
     expect(question).toContain('Sessions: "Second", "First"')
-    expect(question).toContain('What reaches the trash after this card is not deleted. This cannot be undone.')
+    expect(question).toContain('What reaches the session archive after this card is not deleted. This cannot be undone.')
     expect(r.text).toBe('Deleted for good: 2 sessions, 1 app run, the subagent steps of 1 session.')
     const t = await trash()
     expect([t.sessions, t.runs, t.subagentSteps]).toEqual([[], [], []])
@@ -472,7 +472,7 @@ describe('empty_trash', () => {
   it('names how many sessions it leaves out of the list, and what goes with them', async () => {
     for (let i = 1; i <= 12; i++) await trashed(`Session ${i}`)
     const orc = await mgr.orchestrator()
-    const { question } = await answered(orc.id, 'empty_trash', {}, 'deny')
+    const { question } = await answered(orc.id, 'delete_all_archived', {}, 'deny')
     expect(question).toContain('delete 12 sessions')
     expect(question).toContain('and 2 more sessions')
     expect(question).toContain('"Session 3"')
@@ -482,7 +482,7 @@ describe('empty_trash', () => {
   it('deletes nothing when the person denies it', async () => {
     await trashed('Keep me')
     const orc = await mgr.orchestrator()
-    const { r } = await answered(orc.id, 'empty_trash', {}, 'deny')
+    const { r } = await answered(orc.id, 'delete_all_archived', {}, 'deny')
     expect(r.isError).toBe(true)
     expect((await trash()).sessions.length).toBe(1)
   })
@@ -492,14 +492,14 @@ describe('empty_trash', () => {
     await trashed('Goes')
     const orc = await mgr.orchestrator()
     let late = ''
-    const { r } = await answered(orc.id, 'empty_trash', {}, 'allow', async () => {
+    const { r } = await answered(orc.id, 'delete_all_archived', {}, 'allow', async () => {
       await rpc('trash.restore', { sessionId: restored.id })
       late = (await trashed('Late arrival')).id
     })
     expect(r.isError).toBeFalsy()
     expect(r.text).toContain('Deleted for good: 1 session.')
     expect(r.text).toContain('Not what the card named when it was answered (restored, deleted or deleted again meanwhile), so left alone: "Restored meanwhile".')
-    expect(r.text).toContain('The trash now holds 1 session, 0 app runs and subagent steps of 0 sessions.')
+    expect(r.text).toContain('The session archive now holds 1 session, 0 app runs and subagent steps of 0 sessions.')
     expect((await trash()).sessions.map((s) => s.id)).toEqual([late])
     expect(await live()).toContain(restored.id)
   })
@@ -508,7 +508,7 @@ describe('empty_trash', () => {
     const again = await trashed('Again')
     await trashed('Plain')
     const orc = await mgr.orchestrator()
-    const { r } = await answered(orc.id, 'empty_trash', {}, 'allow', async () => {
+    const { r } = await answered(orc.id, 'delete_all_archived', {}, 'allow', async () => {
       await rpc('trash.restore', { sessionId: again.id })
       await new Promise((resolve) => setTimeout(resolve, 5))
       await rpc('agents.deleteSession', { sessionId: again.id })
@@ -518,10 +518,10 @@ describe('empty_trash', () => {
     expect((await trash()).sessions.map((x) => x.id)).toEqual([again.id])
   })
 
-  it('asks nothing when the trash is already empty', async () => {
+  it('asks nothing when the session archive is already empty', async () => {
     const orc = await mgr.orchestrator()
-    const r = await run(orc.id, 'empty_trash')
-    expect(r.text).toBe('The trash is already empty.')
+    const r = await run(orc.id, 'delete_all_archived')
+    expect(r.text).toBe('The session archive is already empty.')
     expect(card(orc.id)).toBeUndefined()
   })
 
@@ -535,7 +535,7 @@ describe('empty_trash', () => {
     })
     await store.trash.trashSession('b1', { projectId, projectName: 'proj', projectPath: dir, removeExternal: false, removeWorktree: false })
     const orc = await mgr.orchestrator()
-    const { question } = await answered(orc.id, 'empty_trash', {}, 'deny')
+    const { question } = await answered(orc.id, 'delete_all_archived', {}, 'deny')
     expect(question).toContain('"Plan' + String.fromCharCode(92) + 'u202egnp.txt"')
   })
 })
@@ -553,7 +553,7 @@ describe('who may run them', () => {
   })
 
   it("refuses an ordinary session's calls by name and through centralu_run, and deletes nothing", async () => {
-    const gone = await trashed('Safe in the trash')
+    const gone = await trashed('Safe in the session archive')
     const caller = await newSession('Ordinary')
     for (const name of COMMANDS) {
       await expect(mgr.runOrchestratorTool(caller.id, name, { sessionId: gone.id }), name).rejects.toThrow(`Not a tool of this session: ${name}`)

@@ -703,7 +703,7 @@ describe('worktree sessions', () => {
     expect(checked()).not.toContain(landed.id)
   })
 
-  describe("cleaning up a started agent's worktree keeps local work in the trash (#608)", () => {
+  describe("cleaning up a started agent's worktree keeps local work in the session archive (#608)", () => {
     const g = (dir: string, args: string[]) =>
       execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', '-c', 'maintenance.auto=false', ...args], { cwd: dir, encoding: 'utf8' })
 
@@ -745,7 +745,7 @@ describe('worktree sessions', () => {
       const dispose = vi.spyOn(adapter.handleOf(s.id)!, 'dispose')
       const r = await remove(s, managerId)
       expect(r.isError).not.toBe(true)
-      expect(r.text).toContain('4 uncommitted files, 0 commits not on the trunk, kept in the trash')
+      expect(r.text).toContain('4 uncommitted files, 0 commits not on the trunk, kept in the session archive')
       expect(dispose).toHaveBeenCalledOnce()
       expect(existsSync(s.worktree!.path)).toBe(false)
       expect(() => g(repo, ['rev-parse', '--verify', `refs/heads/${s.worktree!.branch}`])).toThrow()
@@ -912,7 +912,7 @@ describe('worktree sessions', () => {
       expect(await wtMgr.emptyTrash()).toEqual({ purged: 1, failed: [] })
     })
 
-    it('keeps the recovery files and the trash entry when the database step of a purge fails (#647)', async () => {
+    it('keeps the recovery files and the session archive entry when the database step of a purge fails (#647)', async () => {
       const { s, managerId } = await makeChild('feat/purge-db-error')
       writeFileSync(join(s.worktree!.path, 'wip'), 'local\n')
       expect((await remove(s, managerId)).isError).not.toBe(true)
@@ -1430,7 +1430,7 @@ describe('worktree sessions', () => {
    * deleted for good — moving the folder would leave git's record pointing at nothing. Then it goes, uncommitted
    * changes and all, because the person heard about them in the dialog.
    */
-  it('a worktree chosen for deletion stays registered while in the trash and goes, changes and all, when purged', async () => {
+  it('a worktree chosen for deletion stays registered while in the session archive and goes, changes and all, when purged', async () => {
     const s = await create(true)
     const path = s.worktree!.path
     writeFileSync(join(path, 'a.txt'), 'not committed yet\n')
@@ -1446,7 +1446,7 @@ describe('worktree sessions', () => {
   })
 
   // #841 item 6: a removal that failed was swallowed, and the record went while the folder stayed
-  it('a worktree that cannot be removed keeps its trash entry, named in what failed, and goes on a later try', async () => {
+  it('a worktree that cannot be removed keeps its session archive entry, named in what failed, and goes on a later try', async () => {
     const s = await create(true)
     const path = s.worktree!.path
     await wtRpc('agents.deleteSession', { sessionId: s.id, deleteWorktree: true })
@@ -1472,7 +1472,7 @@ describe('worktree sessions', () => {
     const moved = `${repo}-moved`
     renameSync(repo, moved)
     try {
-      await expect(wtRpc('trash.purge', { sessionId: s.id })).rejects.toThrow(`The project folder ${repo} is not there any more (moved or deleted), so git cannot remove its worktree at ${path}. It stays in the trash: delete that folder yourself, then delete this entry again.`)
+      await expect(wtRpc('trash.purge', { sessionId: s.id })).rejects.toThrow(`The project folder ${repo} is not there any more (moved or deleted), so git cannot remove its worktree at ${path}. It stays in the session archive: delete that folder yourself, then delete this entry again.`)
       rmSync(path, { recursive: true, force: true })
       await wtRpc('trash.purge', { sessionId: s.id })
       expect(store.trash.trashedSession(s.id)).toBeNull()

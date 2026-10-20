@@ -322,13 +322,13 @@ const HANDLERS: ToolHandlers = {
   machine_activity: ({ machine }, call) => machineCommand({ action: 'activity', machine }, call),
   list_ssh_hosts: (_args, call) => machineCommand({ action: 'ssh_hosts' }, call),
 
-  // The trash (#1219): the flow writes each answer; deleting for good waits for the person's card there
-  list_trash: (_args, call) => trashCommand({ action: 'list' }, call),
-  restore_trashed: ({ sessionId, what }, call) => trashCommand({ action: 'restore', sessionId: sessionId.trim(), what: what ?? 'session' }, call),
-  trash_subagent_steps: ({ sessionId }, call) => trashCommand({ action: 'trash_steps', sessionId: sessionId.trim() }, call),
+  // The session archive (#1219): the flow writes each answer; deleting for good waits for the person's card there
+  list_archive: (_args, call) => trashCommand({ action: 'list' }, call),
+  restore_archived: ({ sessionId, what }, call) => trashCommand({ action: 'restore', sessionId: sessionId.trim(), what: what ?? 'session' }, call),
+  archive_subagent_steps: ({ sessionId }, call) => trashCommand({ action: 'archive_steps', sessionId: sessionId.trim() }, call),
   delete_session: ({ sessionId }, call) => trashCommand({ action: 'delete_session', sessionId: sessionId.trim() }, call),
-  delete_trashed: ({ sessionId, what }, call) => trashCommand({ action: 'delete', sessionId: sessionId.trim(), what: what ?? 'session' }, call),
-  empty_trash: (_args, call) => trashCommand({ action: 'empty' }, call),
+  delete_archived: ({ sessionId, what }, call) => trashCommand({ action: 'delete', sessionId: sessionId.trim(), what: what ?? 'session' }, call),
+  delete_all_archived: (_args, call) => trashCommand({ action: 'empty' }, call),
 
   // Trust (#1219): the flow writes each answer; trusting a project waits for the person's card there
   list_projects: (_args, call) => trustCommand({ action: 'list_projects' }, call),
@@ -712,9 +712,9 @@ async function appUpkeepCommand(req: AppUpkeepRequest, { tools, signal }: ToolCa
   return r.ok ? { text: r.text } : { text: `Nothing changed: ${r.error}`, isError: true }
 }
 
-/** One trash command (#1219), through the seat's `trash`; a seat without it is told so */
+/** One session-archive command (#1219), through the seat's `trash` (the archive was called the trash until #1404); a seat without it is told so */
 async function trashCommand(req: TrashRequest, { tools, signal }: ToolCall): Promise<ToolOutput> {
-  if (!tools.trash) return { text: 'This session cannot manage the trash.', isError: true }
+  if (!tools.trash) return { text: 'This session cannot manage the session archive.', isError: true }
   const r = await tools.trash(req, signal)
   return r.ok ? { text: r.text } : { text: `Nothing changed: ${r.error}`, isError: true }
 }

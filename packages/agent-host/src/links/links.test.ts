@@ -2516,7 +2516,7 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
       const r = await unasked(hub, card)
       expect(r).toMatchObject({ ok: false, error: expect.stringContaining('Remote box no longer takes auto from this computer') })
       expect(remote.mgr.listSessions().filter((s) => s.startedFromHub)).toEqual([])
-      // It was given no task, and waits in that machine's trash
+      // It was given no task, and waits in that machine's session archive
       expect(remote.store.trash.listTrash()).toHaveLength(1)
     })
   })
@@ -2538,8 +2538,8 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
     const id = r.sessionId.slice('m1.'.length)
     await eventually(() => remote.mgr.listSessions().find((s) => s.id === id)?.state === 'waiting_approval')
     expect(await agent(r.sessionId, 'stop')).toMatchObject({ ok: true, state: 'stopped' })
-    // Deleted there, into that machine's trash, and no longer the hub's to follow
-    expect(await agent(r.sessionId, 'delete')).toMatchObject({ ok: true, state: 'deleted', notice: expect.stringContaining("Remote box's trash") })
+    // Deleted there, into that machine's session archive, and no longer the hub's to follow
+    expect(await agent(r.sessionId, 'delete')).toMatchObject({ ok: true, state: 'deleted', notice: expect.stringContaining("Remote box's session archive") })
     expect(remote.mgr.listSessions().some((s) => s.id === id)).toBe(false)
     expect(await agent(r.sessionId, 'status')).toMatchObject({ ok: false, error: expect.stringContaining('is not a session this session started') })
     // The stopped turn's report, if one were owed, would have come before the next child's

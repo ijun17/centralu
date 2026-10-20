@@ -344,7 +344,8 @@ export class StepsV28ToV40 extends MigrationRange {
         // An older build shows sessions in the trash as live ones; nothing is lost and nothing fails
         breaksOlderReaders: false,
         /**
-         * The trash (#204): deleting a session stops destroying it.
+         * The session archive (#204; called the trash until #1404, which is why the column below is `trash`): archiving a
+         * session stops destroying it.
          *
          *   deleted_at  when the person moved it to the trash; NULL is a live session. Every query that lists
          *               sessions filters on this one column, so "is it in the trash" is answered in one place

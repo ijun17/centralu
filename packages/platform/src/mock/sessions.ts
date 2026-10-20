@@ -288,9 +288,9 @@ export class SessionsMock {
       if (!s?.worktree) return null
       return { ...s.worktree, dirty: this.mockWorktreeDirty, changedFiles: this.mockWorktreeDirty ? 2 : 0 }
     },
-    // Moves it to the trash (#204) — the tool's file and the worktree wait there until it is deleted for good
+    // Moves it to the session archive (#204) — the tool's file and the worktree wait there until it is deleted for good
     deleteSession: async (sessionId: string, deleteWorktree = false, deleteExternal = false) => {
-      // Already in the trash, or never here: the host says it is gone anyway, so a screen holding a stale row lets go (#999)
+      // Already in the session archive, or never here: the host says it is gone anyway, so a screen holding a stale row lets go (#999)
       if (!this.store.sessions.has(sessionId)) return this.emit({ type: 'session_deleted', sessionId })
       this.trashMock.moveToTrash(sessionId, deleteWorktree, deleteExternal)
     },
@@ -399,7 +399,7 @@ export class SessionsMock {
       this.store.subagentReads += 1
       const key = `${sessionId} ${parentCallId}`
       const all = this.store.subagentMessages.get(key) ?? []
-      // Steps in the trash (#418) are not read under their card
+      // Steps in the session archive (#418) are not read under their card
       return all.filter((m) => m.seq > afterSeq && !this.store.subagentTrashedAt.has(`${key} ${m.seq}`)).slice(0, limit)
     },
     subagentTrashed: async (sessionId: string, parentCallId: string) => {

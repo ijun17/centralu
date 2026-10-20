@@ -326,7 +326,7 @@ export function sidebarSelectionTests(): void {
       await apps.getByTestId(`app-session-row-${appAgent}`).click()
       await expect(apps.getByTestId(`app-session-row-${appAgent}`)).toHaveAttribute('aria-current', 'page')
       await apps.getByTestId(`session-menu-${appAgent}`).click()
-      await expect(page.getByTestId(`session-menu-open-${appAgent}`)).toContainText('Delete session…')
+      await expect(page.getByTestId(`session-menu-open-${appAgent}`)).toContainText('Archive session…')
     })
 
     test('a finished project-app session does not mark its app as asking', async ({ page }) => {

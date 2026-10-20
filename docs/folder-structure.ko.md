@@ -140,7 +140,7 @@ centralu/
 │        │     ├─ migrations/   # 단계 목록을 버전 범위별 파일로 담는다. 새 단계가 따르는 규칙은 index.ts에 있다
 │        │     ├─ migrate-runner.ts  reader-gate.ts   # Store가 상속하는 것: 러너(와 Store.inspect), 최소 읽기 버전 관문
 │        │     ├─ store-keys.ts  # 러너, 관문, vacuum.ts가 app_settings에 두는 관리용 키
-│        │     ├─ projects.ts  sessions.ts  grid.ts  messages.ts  handoff-markers.ts  trash.ts
+│        │     ├─ projects.ts  sessions.ts  grid.ts  messages.ts  handoff-markers.ts  trash.ts (세션 보관함)
 │        │     ├─ settings.ts  permissions.ts  app-runs.ts  child-ownership.ts  linked-machines.ts
 │        │     └─ search-index.ts  vacuum.ts   # 단계와 위의 테이블 모듈이 함께 쓴다. vacuum.ts는 밀린 VACUUM도 돌린다
 │        └─ keeper/             # 키퍼의 자식 서비스: 거기서 띄우는 에이전트와 pty, 다시 붙기 (#280)

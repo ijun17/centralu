@@ -23,7 +23,7 @@ export type KeptDraft = { sessionId: string; name: string | null; text: string }
  *   error    why the last read failed, shown in place of the steps
  */
 /**
- * A launch card's steps as the window holds them (#222). `trashed`: how many of them are in the trash without their
+ * A launch card's steps as the window holds them (#222). `trashed`: how many of them are in the session archive without their
  * session (#418), read with the first page; absent until then, and from a host before it.
  */
 export type SubagentSteps = { open: boolean; rows: StoredMessage[]; more: boolean; loading: boolean; error: string | null; trashed?: number }
@@ -135,7 +135,7 @@ export type ConversationSlice = {
   /** Reads the next page of a launch card's steps */
   loadMoreSubagentSteps(sessionId: string, callId: string): Promise<void>
   /**
-   * Moves a session's subagent steps to the trash, or puts them back (#418), and has its launch cards read them again:
+   * Moves a session's subagent steps to the session archive, or puts them back (#418), and has its launch cards read them again:
    * an open card reads at once, a closed one when it is opened. Returns an error message, or null when it is done.
    */
   trashSubagentSteps(sessionId: string): Promise<string | null>

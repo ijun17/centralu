@@ -116,9 +116,9 @@ export function ConfirmHandoff({
             className="mt-3 rounded-md border border-danger/40 bg-danger-bg px-2.5 py-2 text-xs leading-body text-ink"
             data-testid="handoff-warning"
           >
-            When the new session is ready, this session moves to the trash — and{' '}
+            When the new session is ready, this session is archived — and{' '}
             <span className="text-danger">deleting it for good there deletes the {toolLabel} conversation file
-            too</span>. Until then, Settings → Trash reads it and restores it.
+            too</span>. Until then, Settings → Archive reads it and restores it.
           </p>
         ) : (
           <p className="mt-3 text-xs leading-body text-ink-muted" data-testid="handoff-keep-note">
@@ -137,7 +137,7 @@ export function ConfirmHandoff({
             checked={deleteOld}
             onChange={(e) => setDeleteOld(e.target.checked)}
           />
-          <span>Move this session to the trash after the handoff</span>
+          <span>Archive this session after the handoff</span>
         </label>
 
         <div className="mt-4 flex justify-end gap-2">

@@ -199,7 +199,7 @@ describe('a user-folder app becomes a project in place', () => {
     expect(store.appRuns.listAppRuns(null, 'notes', 10)).toEqual([])
   })
 
-  it('moves its builder into the project, and the builder map names it under the new key; a session in the trash stays there', async () => {
+  it('moves its builder into the project, and the builder map names it under the new key; a session in the session archive stays there', async () => {
     expect(store.sessions.listSessions().find((s) => s.id === 'builder')?.projectId).toBe(project()!.id)
     expect(store.trash.isTrashed('trashed')).toBe(true)
     // This same host, which loaded the session before the move, finds it as the app's builder under the new key
@@ -320,7 +320,7 @@ describe('a user-folder app becomes a project in place', () => {
 /*
  * #1204: a deleted project that a user-folder app had become left its folder in `<data>/apps/`, listed nowhere (the
  * user folder skips adopted folders, no project points at it) and removable by nothing, with what it kept beside it.
- * It is given back once nothing in the trash can restore the project: to `app-trash/`, as a removed user-folder app.
+ * It is given back once nothing in the session archive can restore the project: to `app-trash/`, as a removed user-folder app.
  */
 /**
  * What deleting a project may do to its folder (#1301, `projects.deleteOutlook`): the Delete project dialog asks when it opens, with
@@ -331,7 +331,7 @@ describe('what deleting a project may do to its folder', () => {
     createRpcHandler(mgr, new Map(), { externalApps: rt, deleteOutlook: (id) => adoption.outlook(id) })(name as never, params)
   const outlook = async (projectId: string) => ((await door('projects.deleteOutlook', { projectId })) as { folder: string }).folder
   const gone = async () => {
-    // The adopted project deleted: its builder is in the trash, so the folder stays where it is
+    // The adopted project deleted: its builder is in the session archive, so the folder stays where it is
     await door('projects.delete', { projectId: project()!.id })
     expect(existsSync(appDir())).toBe(true)
   }
@@ -395,7 +395,7 @@ describe('what deleting a project may do to its folder', () => {
     store.projects.addProject({ id: 'elsewhere', path: elsewhere, name: 'elsewhere' })
     expect(await outlook('elsewhere')).toBe('stays')
     await gone()
-    // The adopted project is gone, its folder waits in the trash's hold: a project elsewhere is still not one of it
+    // The adopted project is gone, its folder waits in the session archive's hold: a project elsewhere is still not one of it
     expect(await outlook('elsewhere')).toBe('stays')
   })
 
@@ -425,19 +425,19 @@ describe('a deleted project gives its folder back', () => {
   const trashed = () => (existsSync(join(dataRoot, 'app-trash')) ? readdirSync(join(dataRoot, 'app-trash')) : [])
   const helperDir = () => join(dataRoot, 'apps', 'helper')
   const helperProject = () => store.projects.listProjects().find((p) => p.path === helperDir())!.id
-  /** The doors that delete a project and empty the trash, as main.ts wires them; `settling` is the give-back they started */
+  /** The doors that delete a project and delete all archived sessions, as main.ts wires them; `settling` is the give-back they started */
   let settling: Promise<void> = Promise.resolve()
   const door = (name: string, params: unknown) =>
     createRpcHandler(mgr, new Map(), { externalApps: rt, settleDeletedProjects: () => (settling = adoption.settle()) })(name as never, params)
 
-  it('keeps it while a session of the project is in the trash, so a restore finds it; gives it back, with its data, once none is', async () => {
+  it('keeps it while a session of the project is in the session archive, so a restore finds it; gives it back, with its data, once none is', async () => {
     const pid = project()!.id
     // What the app wrote as the project's app, after its state was carried from the old key
     writeFileSync(join(dataRoot, 'app-data', pid, 'notes', 'state.json'), '{"count":9}')
     writeFileSync(join(dataRoot, 'app-logs', pid, 'notes.log'), 'project log\n')
     await door('projects.delete', { projectId: pid })
     await settling
-    // The builder went to the trash with the project: restoring it needs the folder where it was
+    // The builder was archived with the project: restoring it needs the folder where it was
     expect(existsSync(join(appDir(), MANIFEST_FILE))).toBe(true)
     expect(adopted().notes).toBeDefined()
     expect(trashed()).toEqual([])
@@ -482,7 +482,7 @@ describe('a deleted project gives its folder back', () => {
     expect(readFileSync(join(dataRoot, 'app-data', project()!.id, 'notes', 'state.json'), 'utf8')).toBe('{"count":9}')
   })
 
-  it('a project with nothing in the trash gives it back when deleted; nothing comes back', async () => {
+  it('a project with nothing in the session archive gives it back when deleted; nothing comes back', async () => {
     const pid = helperProject()
     await door('projects.delete', { projectId: pid })
     await settling
@@ -493,7 +493,7 @@ describe('a deleted project gives its folder back', () => {
     expect(store.projects.listProjects().find((p) => p.id === pid || p.path === helperDir())).toBeUndefined()
   })
 
-  it('keeps a folder the person added again as a project when the trash is emptied, and gives it back once that project goes too', async () => {
+  it('keeps a folder the person added again as a project when the session archive is emptied, and gives it back once that project goes too', async () => {
     const pid = project()!.id
     await door('projects.delete', { projectId: pid })
     await settling
@@ -505,7 +505,7 @@ describe('a deleted project gives its folder back', () => {
     expect(adopted().notes).toBeDefined()
     expect(readFileSync(join(dataRoot, 'app-data', '_user', 'notes', 'state.json'), 'utf8')).toBe('{"count":7}')
     expect(trashed()).toEqual([])
-    // That project deleted too, with nothing of either in the trash: the folder is given back
+    // That project deleted too, with nothing of either in the session archive: the folder is given back
     rt.refresh()
     await door('projects.delete', { projectId: 'again' })
     await settling
@@ -622,7 +622,7 @@ describe('a deleted project gives its folder back', () => {
 
   it('a give-back that fails is tried again while the host runs', async () => {
     const retrying = new UserAppAdoption({ rt, store, sessionsMoved: () => {}, changed: () => {}, retryMs: 20 })
-    // The trash folder cannot be made (a file holds its name): the folder cannot move, as one in use on Windows cannot
+    // The session archive folder cannot be made (a file holds its name): the folder cannot move, as one in use on Windows cannot
     writeFileSync(join(dataRoot, 'app-trash'), 'in the way')
     await mgr.deleteProject(helperProject())
     rt.refresh()
