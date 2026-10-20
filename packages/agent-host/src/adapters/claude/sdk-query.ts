@@ -59,6 +59,37 @@ export type ClaudeQueryInputs = {
   canUseTool: (toolName: string, toolInput: Record<string, unknown>, options?: { signal?: AbortSignal }) => ReturnType<ClaudeCards['canUseTool']>
 }
 
+/** What the CLI accepts as `autoCompactWindow` (its settings schema and `--autocompact`): 100k to 1M tokens */
+export const CLAUDE_AUTO_COMPACT_MIN = 100_000
+export const CLAUDE_AUTO_COMPACT_MAX = 1_000_000
+/**
+ * The CLI compacts when context reaches its auto-compact window **minus a buffer of 13,000 tokens** (read in the binary of
+ * CLI 2.1.296: `J4(window) = window - 13000`, the "Autocompact buffer" of `/context`). To land the point at the tokens
+ * Centralu means, the window passed is that many tokens more. Whatever the CLI also holds back for the model's output is not
+ * counted: it may compact up to that much earlier (not measured in a live session).
+ */
+export const CLAUDE_AUTO_COMPACT_BUFFER = 13_000
+
+/** The `autoCompactWindow` that makes the CLI compact at `tokens`, inside what it accepts */
+export function claudeAutoCompactWindow(tokens: number): number {
+  return Math.min(CLAUDE_AUTO_COMPACT_MAX, Math.max(CLAUDE_AUTO_COMPACT_MIN, Math.round(tokens) + CLAUDE_AUTO_COMPACT_BUFFER))
+}
+
+/**
+ * The settings Centralu passes in the CLI's flag layer, for this session alone (no file is touched): language-server
+ * plugins off when code intelligence is (#686), and where the CLI compacts by itself (#1376). `autoCompactEnabled` goes
+ * with the window, so Centralu's control means what it says when the person's own config turned it off. Nothing when
+ * Centralu does not control it. (The CLI's `CLAUDE_CODE_AUTO_COMPACT_WINDOW` environment variable still takes precedence
+ * over a setting.)
+ */
+export function flagSettings(opts: Pick<CreateSessionOpts, 'autoCompactTokens'>, codeIntelligence: ClaudeQueryInputs['codeIntelligence']): { settings?: Record<string, unknown> } {
+  const settings = {
+    ...codeIntelligence.settings,
+    ...(opts.autoCompactTokens ? { autoCompactEnabled: true, autoCompactWindow: claudeAutoCompactWindow(opts.autoCompactTokens) } : {}),
+  }
+  return Object.keys(settings).length ? { settings } : {}
+}
+
 /** The options a session's `query()` starts with */
 export function claudeQueryOptions({ sessionId, opts, executablePath, servers, permissionOptions, codeIntelligence, spawn, canUseTool }: ClaudeQueryInputs) {
   return withoutCrossSessionMessaging({
@@ -135,7 +166,7 @@ export function claudeQueryOptions({ sessionId, opts, executablePath, servers, p
         }
       : {}),
     ...permissionOptions,
-    ...codeIntelligence,
+    ...flagSettings(opts, codeIntelligence),
     // A usage probe starts no server of the person's: those in ~/.claude.json would run for a read that needs none (#726)
     ...(probeIds.has(sessionId) ? { strictMcpConfig: true } : {}),
     /*

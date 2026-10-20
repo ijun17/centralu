@@ -110,6 +110,34 @@ test('Settings: auto from a linked computer starts on, and turning it off is rem
   await expect(page.getByTestId('settings-hub-auto')).not.toBeChecked()
 })
 
+// #1376: Centralu sets when agents compact, at 60% of the model's window, unless the person turns its control off
+test("Settings: when agents compact starts on at 60%, moves in steps of 5, and turning Centralu's control off hides the share", async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const open = async () => {
+    await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
+    await page.getByTestId('settings-tab-orchestrator').click()
+  }
+  const saved = () => page.evaluate(() => (window as any).__store.getState().prefs.autoCompact ?? null)
+  await open()
+  await expect(page.getByTestId('settings-auto-compact')).toBeChecked()
+  const share = page.getByTestId('settings-auto-compact-share')
+  await expect(share).toHaveValue('60')
+  await expect(page.getByTestId('settings-auto-compact-share-value')).toHaveText('60% of the window')
+  await share.focus()
+  await page.keyboard.press('ArrowRight')
+  await expect.poll(saved).toEqual({ controlled: true, share: 0.65 })
+
+  await page.getByTestId('settings-auto-compact').uncheck()
+  await expect.poll(saved).toEqual({ controlled: false, share: 0.65 })
+  await expect(share).toHaveCount(0)
+
+  await page.reload()
+  await open()
+  await expect(page.getByTestId('settings-auto-compact')).not.toBeChecked()
+  await page.getByTestId('settings-auto-compact').check()
+  await expect(share).toHaveValue('65')
+})
+
 test('Settings: running agents per project supports preset defaults and a remembered ceiling', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   const open = async () => {

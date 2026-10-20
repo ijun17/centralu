@@ -1,3 +1,4 @@
+import { ModelWindows } from './auto-compact.js'
 import { repairWorktreeRecoveryRemovals } from '../dev-services/worktree-recovery.js'
 import { windowAround } from './snippet.js'
 import { orchestratorToolsFor, type OrchestratorSeatHost } from './orchestrator-seat.js'
@@ -141,6 +142,8 @@ export class SessionManager {
   >()
   /** Every model request's cache figures over the last day, per tool (docs/agent-host.md §6.1); read by `usageFor` */
   private readonly cacheLedger = new CacheLedger()
+  /** Each model's context window as the tools reported it, for where agents compact (#1376, auto-compact.ts) */
+  private readonly modelWindows: ModelWindows
   /** A project's git panel, file tree and file operations (dev-services/project-files.ts) */
   private readonly files: ProjectFiles
   /** The agent tools this host runs: the default one, labels, accounts, whether one can start now (tool-registry.ts) */
@@ -345,6 +348,7 @@ export class SessionManager {
     this.cards = new RoutedCards(this.parts())
     this.queue = new QueuedRequests(this.parts())
     this.cardRests = new CardRests(appSettingRests(store.settings))
+    this.modelWindows = new ModelWindows(store.settings)
     this.delegationFlow = new DelegationFlow(this.parts())
     this.handoffFlow = new HandoffFlow(this.parts(), keeperOpts.handoffTimings)
     this.askProjectFlow = new AskProjectFlow(this.parts())
@@ -1807,6 +1811,9 @@ export class SessionManager {
       busyForCaller: (...a) => self.queue.busyForCaller(...a),
       get cacheLedger() {
         return self.cacheLedger
+      },
+      get modelWindows() {
+        return self.modelWindows
       },
       get cardRests() {
         return self.cardRests

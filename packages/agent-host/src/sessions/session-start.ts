@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { BackgroundTask, CreateSessionParams, SessionInfo, ToolName } from '@cc/protocol'
-import { sessionLiveDefaults } from '@cc/protocol'
+import { autoCompactTokens } from './auto-compact.js'
+import { autoCompactOf, sessionLiveDefaults } from '@cc/protocol'
 import type { AgentProcess, AgentSpawnSpec, CreateSessionOpts, EventSink, OrchestratorTools, ProcessSource, SessionApps, SessionHandle } from '../adapters/contract.js'
 import type { ToolProfile } from '../apps/contract.js'
 import type { AppRef } from '../apps/external/runtime.js'
@@ -68,7 +69,7 @@ function externalMissingReason(label: string, cwd: string): string {
  * The manager builds it with getters for its fields (`SessionManager.parts`), so each is read when used, never kept.
  */
 export type SessionStartsHost = Pick<DelegationHost, 'adapters' | 'cwdFor' | 'emit' | 'handles' | 'meta' | 'onEvent' | 'running' | 'store' | 'toolProfileOf' | 'uiPreferences'> &
-  Pick<SessionRecordHost, 'cacheLedger'> &
+  Pick<SessionRecordHost, 'cacheLedger' | 'modelWindows'> &
   Pick<SessionTrashHost, 'record' | 'restartPolicy'> &
   Pick<RestartHost, 'lettingGo'> &
   Pick<HostCardsHost, 'settleState'> &
@@ -482,6 +483,16 @@ export class SessionStarts {
   }
 
   /**
+   * `autoCompactTokens` for a session's launch (#1376): Centralu's setting at this moment over the model's window. Said to
+   * `ModelWindows`, so a reading this process gives back under the setting is not taken for the model's window.
+   */
+  private autoCompactFor(m: SessionInfo): Pick<CreateSessionOpts, 'autoCompactTokens'> {
+    const tokens = autoCompactTokens(autoCompactOf(this.host.uiPreferences()), this.host.modelWindows.of(m))
+    this.host.modelWindows.started(m.id, tokens)
+    return tokens === null ? {} : { autoCompactTokens: tokens }
+  }
+
+  /**
    * The options a session's process starts with (#428), the same for a new session (`createSession`) and a wake
    * (`doResumeSession`): what differs between the two is passed in, and the rest is read here, in the order both
    * used to read it. `memory`: the orchestrator's memory handoff rides along (a genuinely new process on a wake).
@@ -509,6 +520,8 @@ export class SessionStarts {
       effort: o.effort,
       verbosity: o.verbosity,
       serviceTier: o.serviceTier,
+      // Where the agent compacts by itself (#1376), read at every start and wake: a change reaches a session when its process next starts
+      ...this.autoCompactFor(m),
       permissionPreset: o.permissionPreset,
       resumeExternalId: o.resumeExternalId,
       ...(o.knownGoal ? { knownGoal: o.knownGoal } : {}),

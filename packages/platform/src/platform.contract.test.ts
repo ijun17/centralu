@@ -1046,6 +1046,15 @@ describe.each([
     })
   })
 
+  describe('the auto-compact setting (#1376)', () => {
+    it('is not in the record until chosen, then a patch changes only the fields it names, in the mock and on the host alike', async () => {
+      expect((await h.platform.prefs.load()).autoCompact).toBeUndefined()
+      expect((await h.platform.prefs.save({ autoCompact: { share: 0.5 } })).autoCompact).toEqual({ controlled: true, share: 0.5 })
+      expect((await h.platform.prefs.save({ autoCompact: { controlled: false } })).autoCompact).toEqual({ controlled: false, share: 0.5 })
+      expect((await h.platform.prefs.load()).autoCompact).toEqual({ controlled: false, share: 0.5 })
+    })
+  })
+
   describe('a fresh install with a snapshot from before #312', () => {
     it('a text size kept in the workspace snapshot moves into the preferences once', async () => {
       await h.platform.workspace.save({ textScale: 4 })

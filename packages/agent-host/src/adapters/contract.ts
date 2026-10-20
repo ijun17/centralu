@@ -58,6 +58,12 @@ export type CreateSessionOpts = {
   verbosity?: string
   /** Response speed (codex's service_tier). Supported tiers are stated by the model list (ModelOption.tiers) */
   serviceTier?: string
+  /**
+   * Where the agent compacts its conversation by itself, in tokens (#1376): Centralu's share of the model's window
+   * (`sessions/auto-compact.ts`). Claude takes it as `autoCompactWindow` (it compacts a little before it, by its own
+   * reserve), Codex as `model_auto_compact_token_limit`. Absent: nothing is passed and the agent's own settings decide.
+   */
+  autoCompactTokens?: number
   permissionPreset: PermissionPreset
   /**
    * Whether this session's working folder is trusted (M4 decision 3, #92, #152) — **whether files

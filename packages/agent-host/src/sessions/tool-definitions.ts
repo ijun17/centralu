@@ -270,6 +270,14 @@ export const ORCHESTRATOR_TOOLS = [
           .strict()
           .optional()
           .describe('The notification switches to change; the rest stay.'),
+        autoCompact: z
+          .object({
+            controlled: z.boolean().optional().describe("Whether Centralu sets when agents compact (default on); off, each agent's own settings decide."),
+            share: z.number().optional().describe("Share of the model's window to compact at, 0.2 to 0.95 (default 0.6)."),
+          })
+          .strict()
+          .optional()
+          .describe('When agents compact by themselves.'),
       })
       .strict(),
   },

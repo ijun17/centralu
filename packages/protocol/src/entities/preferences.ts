@@ -100,6 +100,35 @@ export function readNotifyPolicy(raw: unknown): NotifyPolicy {
   return out
 }
 
+/**
+ * When the agents compact their conversation by themselves (#1376): Centralu sets it as a share of the model's context
+ * window, for Claude and Codex alike, instead of each tool's own default and config (Codex's `config.toml` can hold a
+ * fixed 700000 for a model with a smaller window). `controlled` off passes nothing at all: each agent's own settings
+ * decide, untouched.
+ */
+export type AutoCompact = {
+  /** Whether Centralu sets the point (default on); off, nothing is passed */
+  controlled: boolean
+  /** The share of the model's window at which compaction starts, from `MIN_AUTO_COMPACT_SHARE` to `MAX_AUTO_COMPACT_SHARE` */
+  share: number
+}
+
+export const MIN_AUTO_COMPACT_SHARE = 0.2
+export const MAX_AUTO_COMPACT_SHARE = 0.95
+export const DEFAULT_AUTO_COMPACT: AutoCompact = { controlled: true, share: 0.6 }
+
+/**
+ * Reads the setting field by field: a missing one takes its default, a value that is not a boolean or a number is no
+ * choice, and a share lands inside the range (an older or newer build, a hand edit, never throw the record away).
+ */
+export function readAutoCompact(raw: unknown): AutoCompact {
+  const out = { ...DEFAULT_AUTO_COMPACT }
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return out
+  if ('controlled' in raw && typeof raw.controlled === 'boolean') out.controlled = raw.controlled
+  if ('share' in raw && typeof raw.share === 'number' && Number.isFinite(raw.share)) out.share = Math.min(MAX_AUTO_COMPACT_SHARE, Math.max(MIN_AUTO_COMPACT_SHARE, raw.share))
+  return out
+}
+
 /** Line height (#312 step 5): a factor on the body and code line heights; `normal` is today's values */
 export const LineHeight = z.enum(['compact', 'normal', 'relaxed'])
 export type LineHeight = z.infer<typeof LineHeight>
@@ -208,6 +237,15 @@ export const UiPreferences = z.object({
     .unknown()
     .transform((v) => readNotifyPolicy(v))
     .optional(),
+  /**
+   * When agents compact by themselves (#1376). **Optional**, like `agentDepth`: a record from before it has none and
+   * reads as the default (`autoCompactOf`: on, at 60% of the model's window); an older host ignores the field. Read field
+   * by field (`readAutoCompact`).
+   */
+  autoCompact: z
+    .unknown()
+    .transform((v) => readAutoCompact(v))
+    .optional(),
 })
 export type UiPreferences = z.infer<typeof UiPreferences>
 
@@ -225,6 +263,8 @@ export const UiPreferencesPatch = UiPreferences.partial().extend({
     .object({ approval: z.boolean(), error: z.boolean(), done: z.boolean(), allDone: z.boolean(), whenFocused: z.boolean(), sound: z.boolean() })
     .partial()
     .optional(),
+  /** Only what changes (#1376), merged into the record like the notification switches */
+  autoCompact: z.object({ controlled: z.boolean(), share: z.number().min(MIN_AUTO_COMPACT_SHARE).max(MAX_AUTO_COMPACT_SHARE) }).partial().optional(),
 })
 export type UiPreferencesPatch = z.infer<typeof UiPreferencesPatch>
 
@@ -240,6 +280,11 @@ export const MAX_AGENT_DEPTH = 3
 /** Whether this computer takes `auto` from its hub's `auto` sessions (#1273): on unless the person turned it off */
 export function hubAutoOf(prefs: Pick<UiPreferences, 'hubAuto'>): boolean {
   return prefs.hubAuto !== false
+}
+
+/** The auto-compact setting in force: the saved one, else the default (on, at 60%) */
+export function autoCompactOf(prefs: Pick<UiPreferences, 'autoCompact'>): AutoCompact {
+  return prefs.autoCompact ?? DEFAULT_AUTO_COMPACT
 }
 
 /** The agent depth in force: the saved one, else the default */

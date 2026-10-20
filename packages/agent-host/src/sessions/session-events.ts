@@ -34,7 +34,7 @@ function untrustedSourceSessionNotification(sourceSessionId: string): string {
  * The manager builds it with getters for its fields (`SessionManager.parts`), so each is read when used, never kept.
  */
 export type SessionEventsHost = Pick<DelegationHost, 'agentRuns' | 'children' | 'cwdFor' | 'emit' | 'handles' | 'meta' | 'running' | 'store' | 'turnObservers'> &
-  Pick<SessionRecordHost, 'cacheLedger'> &
+  Pick<SessionRecordHost, 'cacheLedger' | 'modelWindows'> &
   Pick<SessionTrashHost, 'hostCards' | 'record' | 'restartPolicy'> &
   Pick<WorktreeHost, 'cwdOf' | 'resuming'> &
   Pick<SessionStartsHost, 'appSessions' | 'apps' | 'cardRests' | 'launches' | 'openSession' | 'tools'> & {
@@ -313,6 +313,7 @@ export class SessionEvents {
         break
       case 'context_update':
         m.context = nextContext(m.context, e)
+        this.host.modelWindows.note(m, e.window)
         break
       case 'conversation_reset':
         // The old conversation's reading no longer describes anything (#304); the tool reports the new one when the turn ends
