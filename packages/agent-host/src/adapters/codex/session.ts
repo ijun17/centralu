@@ -148,6 +148,18 @@ export class CodexSession implements SessionHandle {
           // The child threads lived in that process (#290) — closed by us or not, they are gone
           this.releaseChildren()
           if (expected) return
+          /*
+           * **An app-server that goes while no turn is running is not a crash** (#1397). A Codex session keeps its app-server
+           * alive while idle (#568), so a Mac shutdown, a logout or an `kill` of the process lands on sessions that were doing
+           * nothing, and each used to show an error. With nothing in flight the process is only gone: the session is asleep
+           * and the next message resumes the thread, with no error and no mark, whatever the exit code. A turn in flight (a
+           * running turn, an input not yet taken, a blocking command) or a process that never finished starting is still a
+           * crash.
+           */
+          if (this.idle()) {
+            this.emit({ type: 'session_live', sessionId: this.sessionId, live: false, reason: 'asleep' })
+            return
+          }
           this.emit({
             type: 'error',
             sessionId: this.sessionId,
@@ -210,6 +222,11 @@ export class CodexSession implements SessionHandle {
     const settings = this.opened
     this.opened = null
     return settings
+  }
+
+  /** Started, and nothing in flight: no turn running, no input waiting for its turn, no blocking command (#1397) */
+  private idle(): boolean {
+    return this.started && this.turns.turnId === null && this.inputReceipts.size === 0 && !this.blockingTurn
   }
 
   private async start(): Promise<void> {

@@ -126,6 +126,35 @@ async function until(ok: () => boolean): Promise<void> {
 const texts = (sessionId: string) =>
   store.messages.loadMessages(sessionId, 100).map((r) => JSON.stringify(r.payload))
 
+describe('a process that goes while its session is idle (#1397)', () => {
+  it('retires the handle and says the session is asleep, with no error and no mark: the next message resumes it', async () => {
+    const id = await newSession()
+    const gone = claude.last
+    gone.emit({ type: 'turn_complete', sessionId: id })
+    const before = events.length
+    gone.emit({ type: 'session_live', sessionId: id, live: false, reason: 'asleep' })
+    expect(gone.disposed).toBe(true)
+    expect(mgr.isLive(id)).toBe(false)
+    const after = events.slice(before)
+    expect(after).toContainEqual({ type: 'session_live', sessionId: id, live: false, reason: 'asleep' })
+    expect(after.some((e) => e.type === 'error')).toBe(false)
+    const s = mgr.listSessions().find((x) => x.id === id)!
+    expect(s.state).not.toBe('error')
+    expect(s.interruption ?? null).toBeNull()
+  })
+
+  it('does not retire the handle for a set-aside process saying it, or when the session is live again', async () => {
+    const id = await newSession()
+    const old = claude.last
+    await rpc('agents.updateSettings', { sessionId: id, effort: 'high' })
+    const fresh = claude.last
+    expect(fresh).not.toBe(old)
+    old.emit({ type: 'session_live', sessionId: id, live: false, reason: 'asleep' })
+    expect(fresh.disposed).toBe(false)
+    expect(mgr.isLive(id)).toBe(true)
+  })
+})
+
 describe('a swapped-out process speaking late (#157)', () => {
   it('keeps the new handle even if the old handle raises adapter_crashed after a restart, and does not record the old turn\'s text or its end', async () => {
     const id = await newSession()

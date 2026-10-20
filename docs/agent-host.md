@@ -2261,6 +2261,7 @@ is in. The SDK adds the end of the CLI's stderr to a failure only for a process 
 adapters add it the same way (`withStderrTail`, `stream-text.ts`): the host's own child and the keeper's each keep the
 last 8 KiB of stderr (`AgentProcess.stderrTail`), decoded as one stream so a character split between two chunks stays
 whole, and Claude's `adapter_crashed` and Codex's "codex app-server exited" carry it, under the keeper too.
+A Codex app-server that exits **while its session has no turn in flight** (nothing running, no input waiting for its turn, no blocking command, and the process had finished starting) is not a crash (#1397): a Codex session keeps its app-server while idle (#568), so a system shutdown, a logout or a kill lands on such sessions. The adapter says `session_live` (`live: false`, `reason: 'asleep'`) instead of an `adapter_crashed` error, whatever the exit code; the manager retires the handle (as for a crash, only from the handle registered now) and the next message resumes the thread. No error, no mark. An exit during a turn is still `adapter_crashed`. Not done: telling a shutdown from a crash during a turn (a `shutdown` interruption with Continue) needs the keeper or host to record the system's shutdown signal first.
 
 **Leaving** (`lifecycle/shutdown.ts`, `stopPlan(mode)`). *Detach* — SIGTERM, SIGINT, SIGHUP, the keeper's pipe closing, an
 uncaught exception, a swap's drain — calls `detach()` on every session handle, terminal and command run: nothing

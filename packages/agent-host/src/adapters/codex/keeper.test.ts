@@ -27,7 +27,7 @@ class FakeAppServer extends EventEmitter {
    * knowing the method.
    */
   constructor(
-    private readonly mode: 'paginated' | 'legacy' = 'legacy',
+    private readonly mode: 'paginated' | 'legacy' | 'idle' = 'legacy',
     /** A process this host spawned answers `initialize`; an adopted one already was initialized */
     private readonly fresh = false,
   ) {
@@ -54,7 +54,8 @@ class FakeAppServer extends EventEmitter {
       return this.reply(m.id, this.fresh ? { result: {} } : { error: { code: -32600, message: 'Already initialized' } })
     }
     if (m.method === 'thread/resume') {
-      const turns = this.mode === 'paginated' ? [] : [{ id: 'turn-9', status: 'inProgress' }]
+      const turns = this.mode === 'paginated' || this.mode === 'idle' ? [] : [{ id: 'turn-9', status: 'inProgress' }]
+      if (this.mode === 'idle') return this.reply(m.id, { result: { thread: { id: 'thread-1', status: { type: 'idle' }, turns } } })
       this.reply(m.id, { result: { thread: { id: 'thread-1', status: { type: 'active', activeFlags: ['waitingOnApproval'] }, turns } } })
       // The approval the old host never answered, re-sent under its old id
       this.stdout.write(`${JSON.stringify({ id: 0, method: 'item/commandExecution/requestApproval', params: { threadId: 'thread-1', turnId: 'turn-9', itemId: 'i1', command: 'touch x', cwd: '/tmp' } })}\n`)
@@ -63,6 +64,7 @@ class FakeAppServer extends EventEmitter {
     if (m.method === 'thread/goal/get') return this.reply(m.id, { result: { goal: null } })
     if (m.method === 'thread/turns/list') {
       if (this.mode === 'legacy') return this.reply(m.id, { error: { code: -32601, message: 'Method not found' } })
+      if (this.mode === 'idle') return this.reply(m.id, { result: { data: [], nextCursor: null, backwardsCursor: null } })
       return this.reply(m.id, { result: { data: [{ id: 'turn-9', status: 'inProgress', items: [], itemsView: 'notLoaded' }], nextCursor: 'c1', backwardsCursor: null } })
     }
     this.reply(m.id, { result: {} })
@@ -76,7 +78,7 @@ class FakeAppServer extends EventEmitter {
   }
 }
 
-async function adopt(mode: 'paginated' | 'legacy' = 'legacy') {
+async function adopt(mode: 'paginated' | 'legacy' | 'idle' = 'legacy') {
   const server = new FakeAppServer(mode)
   const events: { type: string; requestId?: string }[] = []
   const handle = await new CodexAdapter().createSession(
@@ -188,6 +190,32 @@ describe('codex under the keeper', () => {
       code: 'adapter_crashed',
       message: 'codex app-server exited (code 1). stderr: Error: thread already has an active writer',
     })
+  })
+
+  /**
+   * #1397: a Codex session keeps its app-server while idle (#568), so a shutdown or a kill lands on sessions with no turn.
+   * Whatever the exit code, that is only a process gone: asleep, no error. A turn in flight is still a crash.
+   */
+  it.each([0, 1])('an app-server that exits (code %i) while its session is idle only puts the session to sleep, with no error', async (code) => {
+    const { events, server } = await adopt('idle')
+    await eventually(() => server.received.some((m) => m.method === 'thread/goal/get'))
+    await new Promise((r) => setTimeout(r, 20))
+    expect(events.some((e) => e.type === 'approval_request')).toBe(false)
+    server.exitCode = code
+    server.emit('exit', code, null)
+    await eventually(() => events.some((e) => e.type === 'session_live'))
+    expect(events.find((e) => e.type === 'session_live')).toEqual({ type: 'session_live', sessionId: 's1', live: false, reason: 'asleep' })
+    expect(events.some((e) => e.type === 'error')).toBe(false)
+  })
+
+  it.each([0, 1])('an app-server that exits (code %i) in the middle of a turn is still a crash', async (code) => {
+    const { events, server } = await adopt()
+    await eventually(() => events.some((e) => e.type === 'approval_request'))
+    server.exitCode = code
+    server.emit('exit', code, null)
+    await eventually(() => events.some((e) => e.type === 'error'))
+    expect((events.find((e) => e.type === 'error') as unknown as { error: unknown }).error).toMatchObject({ code: 'adapter_crashed' })
+    expect(events.some((e) => e.type === 'session_live')).toBe(false)
   })
 
   it('request ids carry a per-client prefix, so an answer meant for the old host cannot resolve a new request', async () => {
