@@ -165,7 +165,6 @@ packages/agent-host/src/adapters/claude/surface.ts @typescript-eslint/no-unsafe-
 packages/agent-host/src/adapters/claude/task-plan.ts @typescript-eslint/no-non-null-assertion 1
 packages/agent-host/src/adapters/claude/task-plan.ts @typescript-eslint/no-unsafe-type-assertion 1
 packages/agent-host/src/adapters/claude/turn-ending.ts @typescript-eslint/no-unsafe-type-assertion 2
-packages/agent-host/src/adapters/claude/usage.ts @typescript-eslint/no-unsafe-type-assertion 1
 packages/agent-host/src/adapters/claude/windows-start.test.ts @typescript-eslint/no-unnecessary-type-assertion 1
 packages/agent-host/src/adapters/codex/app-bridge.test.ts @typescript-eslint/no-base-to-string 1
 packages/agent-host/src/adapters/codex/app-bridge.test.ts @typescript-eslint/no-unnecessary-type-assertion 3

@@ -10,6 +10,7 @@ import type { NormalizedEvent } from '@cc/protocol'
 import { ClaudeBackgroundTracker } from './normalize.js'
 import { ClaudeTaskPlan } from './task-plan.js'
 import { resultOutput } from './tool-summary.js'
+import { toSnapshot } from './usage.js'
 
 const call = (id: string, name: string, input: Record<string, unknown>) => ({
   type: 'assistant',
@@ -49,5 +50,12 @@ describe('a list from the CLI with something in it that is not an object', () =>
 
   it("a tool result's content, without writing a null out as the text \"null\" (tool-summary.ts)", () => {
     expect(resultOutput([null, { type: 'text', text: 'All done.' }])).toBe('All done.')
+    // Anything else that is not a block is kept as its JSON, as before
+    expect(resultOutput([undefined, 'x', 7, { type: 'tool_reference', name: 'Read' }])).toBe('"x"\n7\n{"type":"tool_reference","name":"Read"}')
+  })
+
+  it("the rate limits of a usage reading (usage.ts), which a null failed whole", () => {
+    const snapshot = toSnapshot({ rate_limits: { limits: [null, { kind: 'five_hour', percent: 40 }] } })
+    expect(snapshot.windows.map((w) => w.percent)).toEqual([40])
   })
 })
