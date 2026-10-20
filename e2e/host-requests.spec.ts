@@ -73,6 +73,19 @@ test('a long question shows whole: a line of parameters with no spaces wraps ins
   await raise(page, `Allow projects.delete? A program on this computer called it with ${JSON.stringify(params)}.`)
   const detail = page.getByTestId('host-request-detail')
   await expect(detail).toContainText('END')
-  const overflow = await detail.evaluate((el) => el.scrollWidth - el.clientWidth)
-  expect(overflow).toBeLessThanOrEqual(0)
+  // Scrolled to its end, the last word lies within the card's width: the line wrapped rather than running off it.
+  // (scrollWidth is no measure here: WebKit counts a vertical scrollbar's width in it)
+  const inside = await detail.evaluate((el) => {
+    el.scrollTop = el.scrollHeight
+    const node = [...el.childNodes].find((n) => n.textContent?.includes('END'))
+    if (!node) return false
+    const range = document.createRange()
+    const at = node.textContent!.indexOf('END')
+    range.setStart(node, at)
+    range.setEnd(node, at + 3)
+    const word = range.getBoundingClientRect()
+    const box = el.getBoundingClientRect()
+    return word.width > 0 && word.left >= box.left && word.right <= box.right
+  })
+  expect(inside).toBe(true)
 })
