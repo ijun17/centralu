@@ -1,5 +1,7 @@
 import {
   PROTOCOL_VERSION,
+  errorMessage,
+  isRecord,
   parseRpcResult,
   parseServerFrame,
   type NormalizedEvent,
@@ -402,7 +404,7 @@ export class RpcClient {
       try {
         result = parseRpcResult(p.method, frame.result)
       } catch (e) {
-        return p.reject(rpcError(`Could not read the host's answer to ${p.method}: ${(e as Error).message}`, 'internal', false))
+        return p.reject(rpcError(`Could not read the host's answer to ${p.method}: ${errorMessage(e)}`, 'internal', false))
       }
       p.resolve(result)
     }
@@ -430,11 +432,11 @@ export class RpcClient {
    */
   private salvage(json: unknown): void {
     if (!this.ready) return
-    const f = json as { kind?: unknown; id?: unknown; error?: { message?: unknown } }
-    if (f?.kind !== 'res' || typeof f.id !== 'string') return
-    const p = this.take(f.id)
+    if (!isRecord(json) || json.kind !== 'res' || typeof json.id !== 'string') return
+    const p = this.take(json.id)
     if (!p) return
-    const message = typeof f.error?.message === 'string' ? f.error.message : 'Malformed response from the host'
+    const error = json.error
+    const message = isRecord(error) && typeof error.message === 'string' ? error.message : 'Malformed response from the host'
     p.reject(rpcError(message, 'internal', false))
   }
 
@@ -493,7 +495,9 @@ export class RpcClient {
    *
    * Now, fixing `commands.ts` **makes the compiler point at every place that has to follow.**
    */
-  call<M extends RpcMethodName>(method: M, params: RpcParams<M>): Promise<RpcResult<M>> {
+  call<M extends RpcMethodName>(method: M, params: RpcParams<M>): Promise<RpcResult<M>>
+  // What resolves a call went through `parseRpcResult` for its method (see `onFrame`), which is what the signature above says
+  call(method: RpcMethodName, params: object): Promise<unknown> {
     // A closed client never sends again — failing now beats waiting out the timeout for nothing (#82)
     if (this.closed) return Promise.reject(rpcError('Connection closed', 'connection_closed', false))
     const id = String(this.nextId++)
@@ -511,7 +515,7 @@ export class RpcClient {
     if (this.queuedBytes + bytes > maxQueued) {
       return Promise.reject(rpcError('Too much is waiting for the host to reconnect; this request was not sent', 'overloaded', true))
     }
-    return new Promise<RpcResult<M>>((resolve, reject) => {
+    return new Promise<unknown>((resolve, reject) => {
       /*
        * The timeout safety net. onclose catches a disconnect, but if the socket is fine and
        * the host swallows the response (a handler bug, a hang), nobody rejects it — pending
@@ -526,7 +530,7 @@ export class RpcClient {
       const ws = this.ready ? this.ws : null
       const viewRead = ['apps.viewFrame', 'apps.recoverView', 'apps.inlineReopen', 'apps.inlineViews', 'apps.holdViews'].includes(method) ||
         (method === 'apps.openView' && 'openKey' in params && typeof params.openKey === 'string')
-      this.pending.set(id, { method, viewRead, resolve: resolve as (v: unknown) => void, reject, timer, frame: ws ? null : frame, bytes })
+      this.pending.set(id, { method, viewRead, resolve, reject, timer, frame: ws ? null : frame, bytes })
       this.queuedBytes += bytes
       ws?.send(frame)
     })

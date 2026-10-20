@@ -23,9 +23,9 @@ import type {
   ProjectPort,
   SystemPort,
   Unsubscribe,
-  WorkspaceSnapshot,
 } from '../ports/index.js'
 import { SUBAGENT_STEPS_PAGE } from '@cc/protocol'
+import { isAppToolResult } from '../app-tool-result.js'
 import { RpcClient } from './rpc-client.js'
 
 /**
@@ -402,7 +402,7 @@ const NO_DESKTOP_REVEAL = 'A browser cannot open a file manager — use the desk
  */
 function viewToolResult(r: { text: string; isError?: boolean; result?: unknown }): AppToolResult {
   const raw = r.result
-  if (raw && typeof raw === 'object' && Array.isArray((raw as { content?: unknown }).content)) return raw as AppToolResult
+  if (isAppToolResult(raw)) return raw
   return { content: [{ type: 'text', text: r.text }], isError: true }
 }
 
@@ -448,7 +448,7 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
               throw e
             })
           : await rpc.call('apps.openView', { ...params, ...(openKey ? { openKey } : {}) })
-        return { ...v, toolResult: v.toolResult as AppToolResult }
+        return v
       },
       closeView: async (instanceId) => {
         await rpc.call('apps.closeView', { instanceId })
@@ -461,7 +461,7 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       inlineViews: (sessionId) => rpc.call('apps.inlineViews', { sessionId }),
       reopenInlineView: async (sessionId, callId) => {
         const { toolResult, ...v } = await rpc.call('apps.inlineReopen', { sessionId, callId })
-        return { ...v, ...(toolResult ? { toolResult: toolResult as AppToolResult } : {}) }
+        return { ...v, ...(isAppToolResult(toolResult) ? { toolResult } : {}) }
       },
       restart: async (appId, projectId, machine) => {
         await rpc.call('apps.restart', { appId, projectId, ...on(machine) })
@@ -659,7 +659,7 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
         await rpc.call('workspace.save', { layout: snapshot })
       },
       async load() {
-        return (await rpc.call('workspace.load', {})) as WorkspaceSnapshot | null
+        return await rpc.call('workspace.load', {})
       },
     },
     /*

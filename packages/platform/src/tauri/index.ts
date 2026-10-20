@@ -6,6 +6,7 @@ import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import type { AlertKind, Platform, RelaunchCheck, RelaunchPort, ShortcutKeys, SystemPort, WindowAction } from '../ports/index.js'
 import type { HostBuild } from '@cc/protocol'
+import { isRecord } from '@cc/protocol'
 import { createWebPlatform } from '../web/index.js'
 import { finishRelaunchSwap, type RelaunchSwapResult } from './relaunch-swap.js'
 import { asError, rethrowAsError, toError } from './to-error.js'
@@ -49,10 +50,12 @@ type HostStatus =
  * object with a state is dropped.
  * @returns a promise of the unsubscribe, settled once the listener is registered
  */
+const isHostStatus = (p: unknown): p is HostStatus => isRecord(p) && typeof p.state === 'string'
+
 function listenHostStatus(cb: (status: HostStatus) => void): Promise<() => void> {
   return listen<unknown>('host-status', (e) => {
     const p = e.payload
-    if (typeof p === 'object' && p !== null && typeof (p as { state?: unknown }).state === 'string') cb(p as HostStatus)
+    if (isHostStatus(p)) cb(p)
   })
 }
 
@@ -224,11 +227,13 @@ export async function hostBuild(): Promise<ShellHostBuild> {
  * Listens for changes to which builds are involved (a host restarted, a switch finished).
  * @returns a promise of the unsubscribe, settled once the listener is registered
  */
+const isHostBuild = (p: unknown): p is ShellHostBuild => isRecord(p) && typeof p.mode === 'string'
+
 function listenHostBuild(cb: (b: ShellHostBuild) => void): Promise<() => void> {
   // Read as `listenHostStatus` reads its report (#972 item 7): anything that is not an object with a mode is dropped
   return listen<unknown>('host-build', (e) => {
     const p = e.payload
-    if (typeof p === 'object' && p !== null && typeof (p as { mode?: unknown }).mode === 'string') cb(p as ShellHostBuild)
+    if (isHostBuild(p)) cb(p)
   })
 }
 

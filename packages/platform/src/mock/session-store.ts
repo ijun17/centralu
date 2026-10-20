@@ -3,6 +3,7 @@ import {
   applySessionState,
   continuesStreamRow,
   endsStreamRow,
+  isRecord,
   keepsSubagentStep,
   nextContext,
   recordedRowKind,
@@ -13,6 +14,9 @@ import {
   type StoredMessage,
 } from '@cc/protocol'
 import type { MockClock } from './clock.js'
+
+/** The event as the host broadcasts it, carrying the number its row was stored under */
+const withSeq = (e: NormalizedEvent, seq: number): NormalizedEvent => Object.assign({}, e, { seq })
 
 /**
  * The mock's sessions and their conversations: the session list, the stored rows, each session's open text row,
@@ -69,7 +73,7 @@ export class SessionStore {
       event.type === 'notice' &&
       event.oncePerSession &&
       (this.messages.get(event.sessionId) ?? []).some(
-        (m) => m.kind === 'marker' && (m.payload as { type?: string; text?: string }).type === 'notice' && (m.payload as { text?: string }).text === event.text,
+        (m) => m.kind === 'marker' && isRecord(m.payload) && m.payload.type === 'notice' && m.payload.text === event.text,
       )
     )
   }
@@ -133,25 +137,26 @@ export class SessionStore {
   record(s: SessionInfo, event: NormalizedEvent, incoming: NormalizedEvent): NormalizedEvent {
     const streamKind = streamRowKind(event)
     if (streamKind) {
-      const piece = (event as { text?: string }).text ?? ''
+      const piece = 'text' in event && typeof event.text === 'string' ? event.text : ''
       const run = this.streams.get(s.id)
       if (run && continuesStreamRow(run, event)) {
-        run.payload = { ...(run.payload as object), text: String((run.payload as { text?: string }).text ?? '') + piece }
+        const before = isRecord(run.payload) ? run.payload : {}
+        run.payload = { ...before, text: (typeof before.text === 'string' ? before.text : '') + piece }
         s.lastSeq = run.seq
-        return { ...incoming, seq: run.seq } as NormalizedEvent
+        return withSeq(incoming, run.seq)
       }
       this.streams.delete(s.id)
       // Does not start a row with an empty chunk — like the real thing, does not carry a number either
       if (!piece) return incoming
       const row = this.append(s, 'assistant', streamKind, event)
       this.streams.set(s.id, row)
-      return { ...incoming, seq: row.seq } as NormalizedEvent
+      return withSeq(incoming, row.seq)
     }
     if (endsStreamRow(event)) this.streams.delete(s.id)
     const recorded = recordedRowKind(event)
     if (recorded) {
       const row = this.append(s, 'system', recorded, event.type === 'app_view' ? appViewRecord(event) : event)
-      return { ...incoming, seq: row.seq } as NormalizedEvent
+      return withSeq(incoming, row.seq)
     }
     /*
      * Two rows the host writes on their own paths (`sendMessage`, `persistImage`). A message that came in from outside
@@ -162,7 +167,7 @@ export class SessionStore {
      */
     if (event.type === 'user_message' || event.type === 'message_image') {
       const row = event.type === 'user_message' ? this.append(s, 'user', 'text', event) : this.append(s, 'system', 'image', event)
-      return { ...incoming, seq: row.seq } as NormalizedEvent
+      return withSeq(incoming, row.seq)
     }
     return incoming
   }

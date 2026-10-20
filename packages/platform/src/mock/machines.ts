@@ -27,8 +27,9 @@ export class MachinesMock {
   hubAutoOff = new Set<string>()
   machineRow(id: string, patch: Partial<MachineInfo>): MachineInfo {
     const at = this.machinesList.findIndex((m) => m.id === id)
-    if (at === -1) throw mockError(`No linked machine ${id}`)
-    const next = { ...this.machinesList[at]!, ...patch }
+    const current = this.machinesList[at]
+    if (at === -1 || !current) throw mockError(`No linked machine ${id}`)
+    const next = { ...current, ...patch }
     this.machinesList[at] = next
     this.emit({ type: 'machine_status', machine: { ...next } })
     return { ...next }

@@ -1,6 +1,7 @@
 import { appKeyOf } from '@cc/protocol'
 import type { AppErrorBundle, AppRun, ExternalAppInfo, NormalizedEvent } from '@cc/protocol'
 import type { AppToolResult } from '../ports/index.js'
+import { isAppToolResult } from '../app-tool-result.js'
 import type { Emit } from './event-bus.js'
 
 /**
@@ -79,7 +80,7 @@ export class AppRegistry {
         rec.instanceId = null
       } else if (event.phase === 'result' && rec) {
         if (event.kept === false) this.inlineRecords.delete(key)
-        else rec.toolResult = event.toolResult as AppToolResult
+        else if (isAppToolResult(event.toolResult)) rec.toolResult = event.toolResult
       } else if (event.phase === 'cancelled' && rec) {
         if (event.kept === false) this.inlineRecords.delete(key)
         else rec.cancelled = event.reason ?? ''

@@ -26,7 +26,7 @@ describe('the mock fan-out', () => {
     m.agents.subscribe((e) => events.push(e))
     m.agents.onConnectionChange(boom)
     m.agents.onConnectionChange((s) => states.push(s))
-    m.emit({ type: 'projects_changed' } as NormalizedEvent)
+    m.emit({ type: 'projects_changed' })
     m.setConnectionState('disconnected')
     expect(events).toHaveLength(1)
     expect(states).toEqual(['disconnected'])

@@ -66,6 +66,7 @@ export class TrashMock {
         .map(({ session: s, messages, deletedAt, project, removeExternal, removeWorktree }) => {
           const live = project ? this.projectStore.list.find((x) => x.id === project.id) : undefined
           const hasFile = !!(s.externalId ?? s.importedFrom)
+          const conversationFile: 'none' | 'remove' | 'keep' = !hasFile ? 'none' : removeExternal ? 'remove' : 'keep'
           return {
             id: s.id,
             name: s.name,
@@ -74,12 +75,12 @@ export class TrashMock {
             deletedAt,
             messages: messages.length,
             bytes: messages.reduce((n, m) => n + JSON.stringify(m.payload).length, 0),
-            conversationFile: (!hasFile ? 'none' : removeExternal ? 'remove' : 'keep') as 'none' | 'remove' | 'keep',
+            conversationFile,
             worktree: s.worktree ? { path: s.worktree.path, branch: s.worktree.branch, remove: removeWorktree } : null,
           }
         })
       const runs = [...this.keptRuns.values()].map((k) => k.run).sort((a, b) => b.keptAt - a.keptAt)
-      const subagentSteps = this.subagentEntries(true) as TrashedSubagentSteps[]
+      const subagentSteps = this.trashedSubagentEntries()
       return { sessions, runs, bytes: [...sessions, ...runs, ...subagentSteps].reduce((n, x) => n + x.bytes, 0), subagentSteps }
     },
     readRun: async (runId: string, limit = 200, beforeSeq?: number) => {
@@ -104,14 +105,15 @@ export class TrashMock {
       if (!t) throw mockError(`Not in the trash: ${sessionId}`, 'session_not_found')
       let registered: ProjectInfo | null = null
       let projectId: string | null = null
-      if (t.project) {
+      const trashedProject = t.project
+      if (trashedProject) {
         const home =
-          this.projectStore.list.find((x) => x.id === t.project!.id) ?? this.projectStore.list.find((x) => x.path === t.project!.path)
+          this.projectStore.list.find((x) => x.id === trashedProject.id) ?? this.projectStore.list.find((x) => x.path === trashedProject.path)
         if (home) projectId = home.id
         else {
           // The mock has no disk: the folder is always there, so the project is registered again under its id
           const p: ProjectInfo = {
-            id: t.project.id, path: t.project.path, name: t.project.name, defaultTool: this.toolsMock.firstRegisteredTool(), defaultModels: {},
+            id: trashedProject.id, path: trashedProject.path, name: trashedProject.name, defaultTool: this.toolsMock.firstRegisteredTool(), defaultModels: {},
             commands: [], worktreeSetup: null, agentInstructions: '', worktreeManager: null, trusted: false,
             git: { branch: 'main', changedFiles: 0, isRepo: true },
           }
@@ -147,7 +149,7 @@ export class TrashMock {
       return { purged: ids.length, failed: [] }
     },
     // A session's subagent steps, to the trash without it and back (#418), with the host's rules
-    subagentUsage: async () => ({ sessions: this.subagentEntries(false) }),
+    subagentUsage: async () => ({ sessions: this.subagentEntries() }),
     trashSubagentSteps: async (sessionId: string) => {
       if (!this.store.sessions.has(sessionId)) {
         throw mockError('That session is no longer here: it was deleted, or is in the trash', 'session_not_found')
@@ -204,8 +206,19 @@ export class TrashMock {
     return trashed
   }
 
-  /** What each live session's subagent steps take, under their cards (largest first) or in the trash (latest first) */
-  private subagentEntries(trashed: boolean): (SubagentStepsHeld & { deletedAt?: number })[] {
+  /** What each live session's subagent steps take, under their cards (largest first) */
+  private subagentEntries(): SubagentStepsHeld[] {
+    return this.heldSubagentSteps(false).sort((a, b) => b.bytes - a.bytes)
+  }
+
+  /** What each session's subagent steps in the trash take (latest first) */
+  private trashedSubagentEntries(): TrashedSubagentSteps[] {
+    return this.heldSubagentSteps(true)
+      .map((held) => ({ ...held, deletedAt: held.deletedAt ?? 0 }))
+      .sort((a, b) => b.deletedAt - a.deletedAt)
+  }
+
+  private heldSubagentSteps(trashed: boolean): (SubagentStepsHeld & { deletedAt?: number })[] {
     const out: (SubagentStepsHeld & { deletedAt?: number })[] = []
     for (const s of this.store.sessions.values()) {
       const steps = this.subagentSteps(s.id, trashed)
@@ -222,7 +235,7 @@ export class TrashMock {
         ...(trashed ? { deletedAt: Math.max(...steps.map(([key, m]) => this.store.subagentTrashedAt.get(`${key} ${m.seq}`) ?? 0)) } : {}),
       })
     }
-    return trashed ? out.sort((a, b) => (b.deletedAt ?? 0) - (a.deletedAt ?? 0)) : out.sort((a, b) => b.bytes - a.bytes)
+    return out
   }
 
   constructor(

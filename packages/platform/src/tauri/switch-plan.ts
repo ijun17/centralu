@@ -426,5 +426,5 @@ export function swapRunning(s: SwapView | undefined): boolean {
 }
 
 function firstLine(text: string): string {
-  return text.split('\n')[0]!.replace(/[.\s]+$/, '')
+  return (text.split('\n')[0] ?? '').replace(/[.\s]+$/, '')
 }

@@ -53,6 +53,12 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({ open: async () => null }))
 /** The host a Tauri implementation being created attaches to, as the shell's `host_info` reports it */
 let shellHost: { port: number; token: string } | null = null
 
+/** A Tauri command rejects with a plain string, not an Error: what the shell layer has to cope with (#972) */
+function rustRejects(reason: string): never {
+  const plain: unknown = reason
+  throw plain
+}
+
 async function fakeShell(cmd: string, args?: Record<string, unknown>): Promise<unknown> {
   switch (cmd) {
     case 'host_info':
@@ -73,10 +79,10 @@ async function fakeShell(cmd: string, args?: Record<string, unknown>): Promise<u
       rmSync(String(args?.path), { recursive: true })
       return null
     case 'reveal_path':
-      if (!existsSync(String(args?.path))) throw `${String(args?.path)} does not exist`
+      if (!existsSync(String(args?.path))) rustRejects(`${String(args?.path)} does not exist`)
       return null
     default:
-      throw `the fake shell has no command ${cmd}`
+      return rustRejects(`the fake shell has no command ${cmd}`)
   }
 }
 
@@ -1315,7 +1321,7 @@ describe('Platform contract: external app list (web + real host)', () => {
       await waitFor(() => platform.agents.listSessions().then(() => true).catch(() => false))
       expect((await platform.apps.list()).map((a) => [a.appId, a.projectId, a.status])).toEqual([['notes', project.id, 'untrusted']])
 
-      mgr.setProjectTrusted(project.id, true)
+      await mgr.setProjectTrusted(project.id, true)
       rt.refresh()
       await waitFor(() => heard.includes('external_apps_changed'))
       expect((await platform.apps.list()).find((a) => a.appId === 'notes')?.status).toBe('stopped')

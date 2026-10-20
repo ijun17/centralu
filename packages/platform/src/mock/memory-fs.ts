@@ -89,14 +89,14 @@ export class MemoryFs {
   place(path: string, text: string): void {
     this.state.files[path] = text
     const segs = wireSegments(path).filter(Boolean)
-    for (let i = 0; i < segs.length; i++) {
+    for (const [i, name] of segs.entries()) {
       const here = wireJoin(...segs.slice(0, i + 1))
       const parent = wireJoin(...segs.slice(0, i))
       const list = this.state.entries[parent] ?? []
       if (list.some((e) => e.path === here)) continue
       this.state.entries[parent] = [
         ...list,
-        { name: segs[i]!, path: here, isDir: i < segs.length - 1, ignored: false },
+        { name, path: here, isDir: i < segs.length - 1, ignored: false },
       ]
     }
   }
