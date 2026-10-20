@@ -75,12 +75,15 @@ export async function tellSessions(now = Date.now()) {
       tellTries.delete(e.seq)
       updateQueue(dataDir(), (fresh) => {
         const ev = fresh.events.find((x) => x.seq === e.seq)
-        if (ev) ev.told = ok ? true : 'failed'
+        if (!ev) return
+        ev.told = ok ? true : 'failed'
+        // When, for posting it again if it stays unacknowledged (#1351)
+        if (ok) ev.toldAt = new Date(now).toISOString()
       })
     }
     // A message that needs attention and is still unacknowledged after 30 minutes is posted again, once (#1351)
     for (const e of dueReposts(readQueue(dataDir()), now).filter((x) => x.to)) {
-      await centralu.notify(e.to, `Merge queue: still not acknowledged after ${Math.round((now - Date.parse(e.at)) / 60_000)} minutes: ${e.text}\n${ackHint(e)}`)
+      await centralu.notify(e.to, `Merge queue: still not acknowledged after ${Math.round((now - Date.parse(e.toldAt)) / 60_000)} minutes: ${e.text}\n${ackHint(e)}`)
       updateQueue(dataDir(), (fresh) => markReposted(fresh, e.seq, new Date(now).toISOString()))
     }
   } catch (err) {
@@ -348,13 +351,13 @@ async function mergeQueue({ all = false, owner }) {
   const v = queueView({ all })
   const who = owner?.trim() || null
   const waiting = unackedView(who)
-  // What its owner has not acknowledged comes first, with how to (#1351)
-  const head = waiting.length
-    ? [
-        `${plural(waiting.length, 'message')} not acknowledged${who ? ` by ${who}` : ''}; act on each, then ack({ owner, seqs }) (or upTo: ${waiting.at(-1).seq}):`,
-        ...waiting.map((e) => `#${e.seq} ${e.owner ? `(${e.owner}) ` : ''}${e.text}`),
-      ]
-    : []
+  // What its owner has not acknowledged comes first, with how to (#1351); without an owner only how many, by owner
+  const owners = [...new Set(waiting.map((e) => e.owner))]
+  const head = !waiting.length
+    ? []
+    : who
+      ? [`${plural(waiting.length, 'message')} not acknowledged by ${who}; act on each, then ack({ owner, seqs }) (or upTo: ${waiting.at(-1).seq}):`, ...waiting.map((e) => `#${e.seq} ${e.text}`)]
+      : [`${plural(waiting.length, 'message')} not acknowledged, for ${owners.map((o) => `${o} (${waiting.filter((e) => e.owner === o).length})`).join(', ')}; merge_queue({ owner }) lists them.`]
   return linesAnswer(v.summary, [['unacked', '', head], ['items', '', v.lines]], { counts: v.counts, queue: v.queue, batches: v.batches, events: v.events, unacked: waiting, pause: v.pause, seq: v.seq })
 }
 

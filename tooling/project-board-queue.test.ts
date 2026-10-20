@@ -3585,14 +3585,44 @@ describe("the merge queue keeps its messages until their owner acknowledges them
     expect(watchStart(q, 'tester')).toBe(q.seq)
   })
 
-  it('posts a message that needs attention again once, when it is still unacknowledged after 30 minutes', () => {
+  it('posts a message that needs attention again once, when it is still unacknowledged 30 minutes after it was posted', () => {
     const q = mailbox()
+    const told = (seq: number, m: number) => Object.assign(q.events.find((e: { seq: number }) => e.seq === seq), { told: true, toldAt: new Date(NOW + m * 60_000).toISOString() })
+    // Not posted yet (Centralu down, or still trying): no repost before its first post, however old
+    expect(dueReposts(q, NOW + 120 * 60_000)).toEqual([])
+    told(1, 0)
+    // Posted late, 60 minutes after it was said: 30 minutes from then, not at once
+    told(3, 60)
     expect(dueReposts(q, NOW + 29 * 60_000)).toEqual([])
-    expect(seqs(dueReposts(q, NOW + 31 * 60_000))).toEqual([1])
+    expect(seqs(dueReposts(q, NOW + 61 * 60_000))).toEqual([1])
     markReposted(q, 1, 'x')
-    expect(seqs(dueReposts(q, NOW + 60 * 60_000))).toEqual([3])
+    expect(dueReposts(q, NOW + 89 * 60_000)).toEqual([])
+    expect(seqs(dueReposts(q, NOW + 91 * 60_000))).toEqual([3])
     acknowledge(q, 'other', { seqs: [3], at: 'x' })
-    expect(dueReposts(q, NOW + 90 * 60_000)).toEqual([])
+    expect(dueReposts(q, NOW + 120 * 60_000)).toEqual([])
+  })
+
+  it('counts what a queue file from before acknowledging already said as acknowledged, and keeps new ones', () => {
+    // A file written before #1351: no acksFrom, its messages never acknowledged, one told long ago
+    const old = mailbox() as Record<string, unknown> & { events: Record<string, unknown>[] }
+    delete old.acksFrom
+    old.events[0].told = true
+    old.events[0].toldAt = new Date(NOW).toISOString()
+    const q = normalize(JSON.parse(JSON.stringify(old)))
+    expect(unacked(q)).toEqual([])
+    expect(dueReposts(q, NOW + 120 * 60_000)).toEqual([])
+    expect(watchStart(q, 'tester')).toBe(q.seq)
+    // What it says from now on is kept, and stays so once written and read again
+    pushEvent(q, { repo: R, pr: 81, owner: 'tester' }, { kind: 'attention', text: '#81 needs attention.', notify: true, at: new Date(NOW).toISOString() })
+    expect(seqs(unacked(normalize(JSON.parse(JSON.stringify(q))), 'tester'))).toEqual([5])
+  })
+
+  it('keeps no message that has no owner to acknowledge it', () => {
+    const q = mailbox()
+    // Main red with no queue item to blame
+    pushEvent(q, { repo: R, pr: 0, owner: null }, { kind: 'main-red', text: 'main is red.', notify: true, at: new Date(NOW).toISOString() })
+    expect(seqs(unacked(q))).toEqual([1, 2, 3])
+    expect(watchStart(q)).toBe(0)
   })
 
   it('lists them first in merge_queue for their owner, acks them with ack, and posts one again into its session once', async () => {
@@ -3613,6 +3643,8 @@ describe("the merge queue keeps its messages until their owner acknowledges them
     expect(listed.data.unacked).toHaveLength(1)
     const seq = listed.data.unacked[0].seq
     expect((await call('merge_queue', { owner: 'someone else' })).data.unacked).toEqual([])
+    // Without an owner, only how many and whose
+    expect((await call('merge_queue', {})).text.split('\n')[1]).toBe('1 message not acknowledged, for tester (1); merge_queue({ owner }) lists them.')
     // Acknowledged: gone from the list
     const acked = await call('ack', { owner: 'tester', seqs: [seq] })
     expect(acked.text).toBe('Acknowledged 1 message for tester; 0 still not acknowledged.')

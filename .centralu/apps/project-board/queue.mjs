@@ -42,7 +42,7 @@ const OK_CONCLUSIONS = new Set(['success', 'neutral', 'skipped'])
 // HAS_HOOKS wait, and say so after UNCLEAN_MS.
 const MERGEABLE_STATES = new Set(['CLEAN'])
 
-export const emptyQueue = () => ({ version: 1, seq: 0, pause: null, items: [], events: [], batches: [], batchSeq: 0, batchOff: null })
+export const emptyQueue = () => ({ version: 1, seq: 0, acksFrom: 0, pause: null, items: [], events: [], batches: [], batchSeq: 0, batchOff: null })
 /** A batch's states that are still running; one at a time is driven (batch.mjs has the batch rules). */
 export const BATCH_ACTIVE = new Set(['building', 'ci', 'landing'])
 
@@ -56,6 +56,8 @@ export function normalize(q) {
     ...base,
     ...q,
     seq: Number.isFinite(q.seq) ? q.seq : 0,
+    // A file from before acknowledging (#1351, notice-acks.mjs): what it already said counts as acknowledged
+    acksFrom: Number.isInteger(q.acksFrom) ? q.acksFrom : Number.isFinite(q.seq) ? q.seq : 0,
     batchSeq: Number.isInteger(q.batchSeq) ? q.batchSeq : Math.max(0, ...batches.map((b) => b.id)),
     batches,
     items: Array.isArray(q.items)

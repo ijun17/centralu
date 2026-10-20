@@ -1487,7 +1487,7 @@
         box.replaceChildren(
           el('div', { class: 'q-head' }, el('span', { id: 'queue-title' }, 'Merge queue'), el('span', { class: 'quiet' }, queue.summary.replace(/^Merge queue: /, ''))),
           // Messages their sessions have not acknowledged (#1351): one line, the sessions ack them with the ack tool
-          ...(queue.unacked?.length ? [el('div', { class: 'q-unacked quiet', id: 'queue-unacked' }, `${queue.unacked.length} message${queue.unacked.length === 1 ? '' : 's'} not acknowledged by ${[...new Set(queue.unacked.map((e) => e.owner ?? 'nobody'))].join(', ')}`)] : []),
+          ...(queue.unacked?.length ? [el('div', { class: 'q-unacked quiet', id: 'queue-unacked' }, `${queue.unacked.length} message${queue.unacked.length === 1 ? '' : 's'} not acknowledged by ${[...new Set(queue.unacked.map((e) => e.owner))].join(', ')}`)] : []),
           el(
             'div',
             { class: 'q-groups' },

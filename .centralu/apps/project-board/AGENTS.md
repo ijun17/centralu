@@ -260,8 +260,11 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
   `owner` lists that owner's unacknowledged messages first, with what to do; `watch` with no `--after`
   starts from the owner's oldest unacknowledged one, and never repeats one acknowledged; the posted
   notice and `watch` add "Ack it with … ack({ owner, seqs })". One that needs attention and is still
-  unacknowledged 30 minutes after it was said is posted into its owner's session once more
-  (`repostedAt`). Kept on the event (`ackedAt`), in the queue file.
+  unacknowledged 30 minutes after it was posted there (`toldAt`) is posted once more (`repostedAt`).
+  Kept on the event (`ackedAt`), in the queue file. `merge_queue` without `owner` only counts them
+  by owner. A message with no owner (main red with no item to blame) is not kept. A queue file from
+  before this counts what it already said as acknowledged (`acksFrom`), so an upgrade replays
+  nothing. The file keeps the last 200 events, so on a very busy queue an old message can still go.
 - **The screen** shows a "Merge queue" section above the board while it has items, or messages not
   acknowledged (one line naming whose): needs attention (with why), CI, waiting, merged in the last
   day, each with Unqueue while active. Nothing tells a
