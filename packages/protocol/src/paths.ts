@@ -129,7 +129,8 @@ export function gitSourceError(url: string): string | null {
   }
   // scp-like: [user@]host:path, where the host has no slash and is not a Windows drive letter
   const scp = /^(?:[A-Za-z0-9._~-]+@)?([A-Za-z0-9.-]+):(.+)$/.exec(u)
-  if (scp && scp[1]!.length > 1 && !scp[1]!.startsWith('-') && !scp[2]!.startsWith('-')) return null
+  const [, scpHost, scpPath] = scp ?? []
+  if (scpHost !== undefined && scpPath !== undefined && scpHost.length > 1 && !scpHost.startsWith('-') && !scpPath.startsWith('-')) return null
   return 'A local folder is not cloned — give an https://, ssh:// or user@host:path address.'
 }
 
@@ -146,23 +147,22 @@ export function gitRemoteKey(url: string): string | null {
   let u = url.trim()
   if (!u) return null
   u = u.replace(/[?#].*$/, '').replace(/[/\\]+$/, '').replace(/\.git$/i, '').replace(/[/\\]+$/, '')
-  const scheme = /^([A-Za-z][A-Za-z0-9+.-]*):\/\/(.*)$/.exec(u)
+  const [, schemeName, rest] = /^([A-Za-z][A-Za-z0-9+.-]*):\/\/(.*)$/.exec(u) ?? []
   let host: string
   let path: string
-  if (scheme) {
-    if (scheme[1]!.toLowerCase() === 'file') return null
+  if (schemeName !== undefined && rest !== undefined) {
+    if (schemeName.toLowerCase() === 'file') return null
     // [user[:password]@]host[:port]/path
-    const rest = scheme[2]!
     const slash = rest.indexOf('/')
     const authority = slash < 0 ? rest : rest.slice(0, slash)
     host = authority.replace(/^.*@/, '').replace(/:\d*$/, '')
     path = slash < 0 ? '' : rest.slice(slash + 1)
   } else {
     // scp-like [user@]host:path, where the host is more than a Windows drive letter; anything else is a local path
-    const scp = /^(?:[^@/\\]+@)?([A-Za-z0-9.-]{2,}):(?![/\\]{2})(.+)$/.exec(u)
-    if (!scp) return null
-    host = scp[1]!
-    path = scp[2]!
+    const [, scpHost, scpPath] = /^(?:[^@/\\]+@)?([A-Za-z0-9.-]{2,}):(?![/\\]{2})(.+)$/.exec(u) ?? []
+    if (scpHost === undefined || scpPath === undefined) return null
+    host = scpHost
+    path = scpPath
   }
   path = path.replace(/\\/g, '/').replace(/^~\//, '').replace(/\/{2,}/g, '/').replace(/^\/+|\/+$/g, '')
   if (!host || !path) return null

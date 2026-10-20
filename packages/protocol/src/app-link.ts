@@ -36,9 +36,9 @@ export function parseAppLink(link: string): AppLinkParse {
   if (url.host !== 'app' || (url.pathname !== '' && url.pathname !== '/')) {
     return { ok: false, error: 'Centralu links open apps: centralu://app?url=…' }
   }
-  const values = url.searchParams.getAll('url')
-  if (values.length !== 1) return { ok: false, error: values.length ? 'The link names more than one url' : 'The link names no url to import from' }
-  const raw = values[0]!
+  const [raw, ...more] = url.searchParams.getAll('url')
+  if (raw === undefined) return { ok: false, error: 'The link names no url to import from' }
+  if (more.length > 0) return { ok: false, error: 'The link names more than one url' }
   let inner: URL
   try {
     inner = new URL(raw)

@@ -1,4 +1,6 @@
 import { z } from 'zod'
+import { errorMessage } from './error-message.js'
+import { isRecord } from './tolerant.js'
 
 /**
  * Theme files (#312).
@@ -195,12 +197,12 @@ export function parseThemeFile(id: string, path: string, text: string): ThemeFil
   try {
     raw = JSON.parse(text)
   } catch (e) {
-    return { id, path, name: id, base: 'dark', tokens: {}, problems: [`Not valid JSON: ${(e as Error).message}`], broken: true }
+    return { id, path, name: id, base: 'dark', tokens: {}, problems: [`Not valid JSON: ${errorMessage(e)}`], broken: true }
   }
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+  if (!isRecord(raw)) {
     return { id, path, name: id, base: 'dark', tokens: {}, problems: ['The file is not a JSON object.'], broken: true }
   }
-  const file = raw as Record<string, unknown>
+  const file = raw
   for (const key of Object.keys(file)) {
     if (!['$schema', 'name', 'base', 'tokens'].includes(key)) problems.push(`Unknown key "${key}" is ignored.`)
   }
@@ -211,10 +213,11 @@ export function parseThemeFile(id: string, path: string, text: string): ThemeFil
   if (file.base === 'dark' || file.base === 'light') base = file.base
   else problems.push('"base" must be "dark" or "light"; "dark" is used.')
   const tokens: Record<string, string> = {}
-  if (file.tokens !== undefined && (typeof file.tokens !== 'object' || file.tokens === null || Array.isArray(file.tokens))) {
+  const rawTokens = file.tokens
+  if (rawTokens !== undefined && !isRecord(rawTokens)) {
     problems.push('"tokens" must be an object of token names to values.')
   } else {
-    for (const [key, value] of Object.entries((file.tokens as Record<string, unknown> | undefined) ?? {})) {
+    for (const [key, value] of Object.entries(rawTokens ?? {})) {
       if (RETIRED_THEME_TOKEN_SET.has(key)) continue
       if (!THEME_TOKEN_BY_KEY.has(key)) problems.push(`Unknown token "${key}" is ignored.`)
       else if (typeof value !== 'string' || !value.trim() || value.length > 400) problems.push(`Token "${key}" needs a CSS value as a string.`)
@@ -256,8 +259,8 @@ export function themeFileJsonSchema(): Record<string, unknown> {
         type: 'object',
         additionalProperties: false,
         properties: Object.fromEntries([
-          ...THEME_TOKENS.map((t) => [t.key, { type: 'string', maxLength: 400, description: `${t.group}: ${t.label}. ${kindText[t.kind]}` }]),
-          ...RETIRED_THEME_TOKENS.map((key) => [key, { type: 'string', description: 'Retired: Centralu no longer uses this token and ignores it.' }]),
+          ...THEME_TOKENS.map((t): [string, object] => [t.key, { type: 'string', maxLength: 400, description: `${t.group}: ${t.label}. ${kindText[t.kind]}` }]),
+          ...RETIRED_THEME_TOKENS.map((key): [string, object] => [key, { type: 'string', description: 'Retired: Centralu no longer uses this token and ignores it.' }]),
         ]),
       },
     },

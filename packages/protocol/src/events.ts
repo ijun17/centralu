@@ -855,16 +855,22 @@ export function parseEventLenient(raw: unknown): NormalizedEvent | null {
  */
 export function withoutToolRecord(e: NormalizedEvent): NormalizedEvent {
   if (e.type === 'subagent_event') {
-    const step = withoutToolRecord(e.step) as SubagentStep
+    const step = withoutStepRecord(e.step)
     return step === e.step ? e : { ...e, step }
   }
-  if (e.type === 'tool_call' && 'input' in e) {
-    const { input: _input, ...card } = e
-    return card
-  }
-  if (e.type === 'tool_result' && 'output' in e) {
-    const { output: _output, ...card } = e
-    return card
-  }
+  if (e.type === 'tool_call' || e.type === 'tool_result') return withoutStepRecord(e)
   return e
+}
+
+/** A subagent's step without a call's `input` or a result's `output`; any other step as it is */
+function withoutStepRecord(step: SubagentStep): SubagentStep {
+  if (step.type === 'tool_call' && 'input' in step) {
+    const { input: _input, ...card } = step
+    return card
+  }
+  if (step.type === 'tool_result' && 'output' in step) {
+    const { output: _output, ...card } = step
+    return card
+  }
+  return step
 }

@@ -15,6 +15,10 @@ describe("frameField — the frame's one-line field (#120)", () => {
     expect(oneLineText(' a \t\u00a0 b ')).toBe('a b')
     expect(oneLineText('abcdef', 3)).toBe('abc…')
     expect(oneLineText(undefined)).toBe('')
+    // A value that is not text: a number is written out, an object is no text (not '[object Object]')
+    expect(oneLineText(42)).toBe('42')
+    expect(oneLineText({ name: 'x' })).toBe('')
+    expect(oneLineText(['a', 'b'])).toBe('')
     // Hidden text in tag characters goes; the joiners a name is written with stay
     expect(oneLineText('ok\u{e0049}\u{e0067}x')).toBe('ok x')
     expect(oneLineText('👩\u200d💻 \u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645 co\u00adop')).toBe('👩\u200d💻 \u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645 co\u00adop')

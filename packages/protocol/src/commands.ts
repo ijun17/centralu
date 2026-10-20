@@ -49,6 +49,7 @@ export type RpcResult<M extends RpcMethodName> = z.output<(typeof RpcMethods)[M]
  * the protocol added with a default has that default even when an older host never sent it (#280 lets a window
  * attach to an older host). Tolerant, not strict — see `parseTolerant`. Call it once, at the client's boundary.
  */
-export function parseRpcResult<M extends RpcMethodName>(method: M, raw: unknown): RpcResult<M> {
-  return parseTolerant(RpcMethods[method].result, raw) as RpcResult<M>
+export function parseRpcResult<M extends RpcMethodName>(method: M, raw: unknown): RpcResult<M>
+export function parseRpcResult(method: RpcMethodName, raw: unknown): unknown {
+  return parseTolerant(RpcMethods[method].result, raw)
 }

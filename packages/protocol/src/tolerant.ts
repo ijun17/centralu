@@ -21,9 +21,13 @@ import type { z } from 'zod'
  * Not a validator. Nothing here rejects; the host's own answers are trusted, and this only fills
  * in what an older one could not have known to send.
  */
-export function parseTolerant<S extends z.ZodType>(schema: S, raw: unknown): z.output<S> {
+export function parseTolerant<S extends z.ZodType>(schema: S, raw: unknown): z.output<S>
+// What was salvaged is the payload as it came, not a parse: declaring it as the schema's output is the point of the
+// function (a tolerant client reads what an older or newer host sent as its own types), so the declaration is here and
+// the implementation answers `unknown`.
+export function parseTolerant(schema: z.ZodType, raw: unknown): unknown {
   const parsed = schema.safeParse(raw)
-  return (parsed.success ? parsed.data : salvage(schema, raw)) as z.output<S>
+  return parsed.success ? parsed.data : salvage(schema, raw)
 }
 
 /** The parts of a schema's definition the piecewise read walks through */
@@ -34,7 +38,7 @@ type Def = {
   catchall?: z.ZodType
   element?: z.ZodType
   valueType?: z.ZodType
-  getter?: () => z.ZodType
+  getter?: () => z.ZodType | undefined
   options?: z.ZodType[]
   discriminator?: string
 }
@@ -42,38 +46,66 @@ type Def = {
 /** A JSON object (not an array, not null): what the tolerant reader and the schema test helpers walk into */
 export const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
 
+const isSchema = (v: unknown): v is z.ZodType => isRecord(v) && typeof v.safeParse === 'function' && isRecord(v.def)
+const isFunction = (v: unknown): v is () => unknown => typeof v === 'function'
+const schemaOrUndefined = (v: unknown): z.ZodType | undefined => (isSchema(v) ? v : undefined)
+
+/** What a schema's definition holds of the parts above; zod's own types do not name them for every kind of schema */
+function defOf(schema: z.ZodType): Def {
+  const d: Record<string, unknown> = isRecord(schema.def) ? schema.def : {}
+  const { shape, getter, options, discriminator } = d
+  return {
+    type: typeof d.type === 'string' ? d.type : '',
+    innerType: schemaOrUndefined(d.innerType),
+    shape: isRecord(shape) ? Object.fromEntries(Object.entries(shape).filter((e): e is [string, z.ZodType] => isSchema(e[1]))) : undefined,
+    catchall: schemaOrUndefined(d.catchall),
+    element: schemaOrUndefined(d.element),
+    valueType: schemaOrUndefined(d.valueType),
+    getter: isFunction(getter) ? () => schemaOrUndefined(getter()) : undefined,
+    options: Array.isArray(options) ? options.filter(isSchema) : undefined,
+    discriminator: typeof discriminator === 'string' ? discriminator : undefined,
+  }
+}
+
 function salvage(schema: z.ZodType, raw: unknown): unknown {
-  const def = schema.def as unknown as Def
+  const def = defOf(schema)
   switch (def.type) {
     case 'optional':
     case 'nullable':
-      return raw === undefined || raw === null ? raw : parseTolerant(def.innerType!, raw)
+      return raw === undefined || raw === null || !def.innerType ? raw : parseTolerant(def.innerType, raw)
     case 'default':
     case 'prefault':
       // A missing value parses to the default on its own, so only a present one can be what failed
-      return raw === undefined ? schema.safeParse(undefined).data : parseTolerant(def.innerType!, raw)
-    case 'lazy':
-      return parseTolerant(def.getter!(), raw)
+      if (raw === undefined) return schema.safeParse(undefined).data
+      return def.innerType ? parseTolerant(def.innerType, raw) : raw
+    case 'lazy': {
+      const inner = def.getter?.()
+      return inner ? parseTolerant(inner, raw) : raw
+    }
     case 'object': {
       if (!isRecord(raw)) return raw
-      const shape = def.shape!
       // A loose object keeps what it does not declare; a plain one drops it, as a successful parse would
       const out: Record<string, unknown> = def.catchall && def.catchall.def.type !== 'never' ? { ...raw } : {}
-      for (const [key, field] of Object.entries(shape)) {
+      for (const [key, field] of Object.entries(def.shape ?? {})) {
         const value = parseTolerant(field, raw[key])
         if (value !== undefined || key in raw) out[key] = value
       }
       return out
     }
-    case 'array':
-      return Array.isArray(raw) ? raw.map((item) => parseTolerant(def.element!, item)) : raw
-    case 'record':
-      return isRecord(raw) ? Object.fromEntries(Object.entries(raw).map(([k, v]) => [k, parseTolerant(def.valueType!, v)])) : raw
+    case 'array': {
+      const element = def.element
+      return Array.isArray(raw) && element ? raw.map((item: unknown) => parseTolerant(element, item)) : raw
+    }
+    case 'record': {
+      const valueType = def.valueType
+      return isRecord(raw) && valueType ? Object.fromEntries(Object.entries(raw).map(([k, v]) => [k, parseTolerant(valueType, v)])) : raw
+    }
     case 'union': {
       // A tagged union can still be read piecewise as the branch its tag names; an untagged one cannot be told apart
-      if (!def.discriminator || !isRecord(raw)) return raw
-      const tag = raw[def.discriminator]
-      const branch = def.options!.find((o) => (o.def as unknown as Def).shape?.[def.discriminator!]?.safeParse(tag).success)
+      const tagName = def.discriminator
+      if (!tagName || !isRecord(raw)) return raw
+      const tag = raw[tagName]
+      const branch = def.options?.find((o) => defOf(o).shape?.[tagName]?.safeParse(tag).success)
       return branch ? salvage(branch, raw) : raw
     }
     default:

@@ -16,8 +16,8 @@ describe('transcript rows', () => {
   })
 
   it('a reasoning chunk with no text is not a recorded chunk (#58)', () => {
-    expect(streamRowKind({ type: 'reasoning_delta', sessionId: 's', estTokens: 10 } as NormalizedEvent)).toBeNull()
-    expect(streamRowKind({ type: 'reasoning_delta', sessionId: 's', text: 'x' } as NormalizedEvent)).toBe('reasoning')
+    expect(streamRowKind({ type: 'reasoning_delta', sessionId: 's', estTokens: 10 })).toBeNull()
+    expect(streamRowKind({ type: 'reasoning_delta', sessionId: 's', text: 'x' })).toBe('reasoning')
   })
 
   it('an error is a marker row and ends the open message (#107)', () => {
