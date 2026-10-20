@@ -53,6 +53,12 @@ describe('the method classification (#1405)', () => {
     for (const m of ['orchestrator.tool', 'orchestrator.tools', 'apps.sessionCall', 'apps.sessionTools']) expect(limitedRight(m, {}), m).toBe('bridge')
   })
 
+  it("never lets the limited credential read or write the person's mail: every mail.* call is the window's (#1347)", () => {
+    const mail = Object.keys(RpcMethods).filter((m) => m.startsWith('mail.'))
+    expect(mail.length).toBeGreaterThan(0)
+    for (const m of mail) expect(limitedRight(m, {}), m).toBe('window')
+  })
+
   it('asks when the parameters widen, runs when they narrow, and asks for parameters it cannot read', () => {
     const cases: [string, unknown, 'asks' | 'everyday'][] = [
       ['agents.createSession', { permissionPreset: 'auto' }, 'asks'],

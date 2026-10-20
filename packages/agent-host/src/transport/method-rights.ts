@@ -101,6 +101,9 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   'agents.exportHandoffRecord': 'everyday',
   'agents.exportHandoffNote': 'everyday',
   'agents.worktreeStatus': 'everyday',
+  /** Reads: who a session's work is owed to (#1377), and where its agent compacts by itself (#1376) */
+  'agents.reportOwed': 'everyday',
+  'agents.autoCompact': 'everyday',
   'agents.restartSession': 'everyday',
   'agents.resumeSession': 'everyday',
   'agents.forkConversation': 'everyday',
@@ -276,11 +279,25 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   'machines.uninstall': 'asks',
   'machines.autostart': 'asks',
   'machines.activity': 'everyday',
+  /** Ends an update's wait for the sessions there (#1399): the update fails and nothing is switched, as Disconnect only narrows */
+  'machines.cancelUpdate': 'everyday',
   /** Without `allowed` it only reads the switch */
   'machines.hubAuto': { asks: (params) => 'allowed' in fields(params) && fields(params).allowed !== false },
   'machines.setAsks': { asks: switchedOn('on') },
   'machines.askConsents': 'everyday',
   'machines.withdrawAsk': 'everyday',
+
+  // The person's side of the mailbox (#1347): what the person writes and decides is theirs by who is asking, so only a
+  // window holding the token speaks as them. An agent's mail goes through its own tool channel (the bridge's), never here
+  'mail.list': 'window',
+  'mail.thread': 'window',
+  'mail.reply': 'window',
+  'mail.close': 'window',
+  'mail.reassign': 'window',
+  'mail.unblock': 'window',
+  'mail.held': 'window',
+  'mail.resume': 'window',
+  'mail.wake': 'window',
 
   // Host to host: a hub linked to this host
   'host.activity': 'everyday',
