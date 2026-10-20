@@ -507,6 +507,11 @@ fn the_window_can_find_why_its_own_content_would_be_refused_without_running_or_c
     assert_eq!((r.check, r.file.as_deref()), (Some("hash-mismatch"), Some("host/main.mjs")));
     assert!(r.message.contains(&content_verify::sha256_file(&same_size.join("host/main.mjs")).unwrap()), "{}", r.message);
     assert!(r.message.contains("the signed manifest lists "), "{}", r.message);
+    // The two hashes travel as fields, for the window to show only if they are hex
+    let (listed, has) = r.hashes.clone().expect("both hashes");
+    assert_eq!(has, content_verify::sha256_file(&same_size.join("host/main.mjs")).unwrap());
+    assert_ne!(listed, has);
+    assert!(listed.len() == 64 && listed.bytes().all(|b| b.is_ascii_hexdigit()));
 
     // A listed file that is gone
     let gone = c.bundle("Gone", "0.2.3");
@@ -519,7 +524,19 @@ fn the_window_can_find_why_its_own_content_would_be_refused_without_running_or_c
     fs::remove_file(link.join("host/main.mjs")).unwrap();
     std::os::unix::fs::symlink("/dev/zero", link.join("host/main.mjs")).unwrap();
     let r = diagnose(&link).expect("a symlink where a file is listed");
-    assert_eq!((r.check, r.file.as_deref()), (Some("not-regular-file"), Some("host/main.mjs")));
+    assert_eq!((r.check, r.file.as_deref()), (Some("symlink"), Some("host/main.mjs")));
+    // A folder on the way to a listed file that is a symlink is not followed either: the same file elsewhere is not read
+    let via = c.bundle("Via", "0.2.7");
+    fs::rename(via.join("host"), c.t.join("elsewhere")).unwrap();
+    std::os::unix::fs::symlink(c.t.join("elsewhere"), via.join("host")).unwrap();
+    let r = diagnose(&via).expect("a folder on the way that is a symlink");
+    // The first listed file under the linked folder
+    assert_eq!(r.check, Some("symlink"));
+    assert!(r.file.as_deref().is_some_and(|f| f.starts_with("host/")), "{:?}", r.file);
+    assert!(r.message.contains("goes through a symlink at \"host\""), "{}", r.message);
+    assert!(hash_listed(&via, "host/main.mjs", 10_000).is_err(), "the hash of a file reached through a symlinked folder is not taken");
+    assert_eq!(through_symlink(&via, "host/main.mjs").as_deref(), Some("host"));
+    assert_eq!(through_symlink(&good, "host/main.mjs"), None);
     let long = c.bundle("Long", "0.2.6");
     fs::write(long.join("host/main.mjs"), vec![b'x'; 5_000_000]).unwrap();
     let r = diagnose(&long).expect("a longer file");

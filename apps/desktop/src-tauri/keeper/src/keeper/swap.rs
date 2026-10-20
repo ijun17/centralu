@@ -123,6 +123,9 @@ pub struct SwapView {
     /// The listed file that refusal is about, when it is about one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub refused_file: Option<String>,
+    /// For a file whose hash differs: the hash the signed manifest lists and the file's, lowercase hex.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refused_hashes: Option<[String; 2]>,
     /// Seconds since the epoch.
     pub started_at: u64,
 }
@@ -142,6 +145,7 @@ impl SwapView {
             refused: None,
             refused_check: None,
             refused_file: None,
+            refused_hashes: None,
             started_at: super::now_secs(),
         }
     }
@@ -617,6 +621,7 @@ pub(crate) mod tests {
             refused: None,
             refused_check: None,
             refused_file: None,
+            refused_hashes: None,
             started_at: 1,
         };
         let text = serde_json::to_string(&v).unwrap();
@@ -632,14 +637,17 @@ pub(crate) mod tests {
             refused: Some("content".into()),
             refused_check: Some("hash-mismatch".into()),
             refused_file: Some("host/main.mjs".into()),
+            refused_hashes: Some(["a".repeat(64), "b".repeat(64)]),
             ..SwapView::begun(Phase::Failed, BuildSource { commit: "abc".into(), ..Default::default() }, None)
         };
         let text = serde_json::to_string(&v).unwrap();
         assert!(text.contains(r#""refusedCheck":"hash-mismatch""#) && text.contains(r#""refusedFile":"host/main.mjs""#), "{text}");
         assert_eq!(serde_json::from_str::<SwapView>(&text).unwrap(), v);
         // A view from a keeper before these fields: they read as absent
-        let old = text.replace(r#","refusedCheck":"hash-mismatch","refusedFile":"host/main.mjs""#, "");
-        assert!(!old.contains("refusedCheck"), "{old}");
+        let hashes = format!(r#","refusedHashes":["{}","{}"]"#, "a".repeat(64), "b".repeat(64));
+        assert!(text.contains(&hashes), "{text}");
+        let old = text.replace(r#","refusedCheck":"hash-mismatch","refusedFile":"host/main.mjs""#, "").replace(&hashes, "");
+        assert!(!old.contains("refusedCheck") && !old.contains("refusedHashes"), "{old}");
         let read = serde_json::from_str::<SwapView>(&old).unwrap();
         assert_eq!((read.refused.as_deref(), read.refused_check, read.refused_file), (Some("content"), None, None));
         // And a view with no refusal does not carry them

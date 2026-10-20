@@ -1391,11 +1391,19 @@ A refusal is **shown by the window itself, in a native dialog** (#634, `apps/des
 - **Why it is drawn there.** The build bar is drawn by the web UI, which the host feeds, and the host is the thing whose
   content failed to verify: it could hide the line or write another. The dialog is drawn by the window process, the signed
   app bundle, from what the window reads itself: the shell's `shell-status.json` and the keeper's swap view over the
-  keeper's socket. Neither passes through the host, and nothing of this is sent to or from it. What it repeats of those is
-  shown as plain text of bounded length (control characters become spaces, 600 characters at most), the version it names for
-  the refused build is the one this window carries, only a refusal of this window's own build is shown (the keeper keeps the
-  last swap's view for a window that attaches later, and another window's refused update is not announced), and dialogs come
-  at most one every 5 seconds.
+  keeper's socket. Neither passes through the host, and nothing of this is sent to or from it. Both
+  can be written by another process of the user (the keeper's socket takes a `switch` naming any folder, and
+  `shell-status.json` is the user's file), so **the dialog repeats no free text from either**: it is built from the kind
+  of check (a fixed list of ids, each with fixed words; an id it does not know is not repeated), the file's name (it comes from
+  the signed manifest; cut to plain text of at most 200 characters), the two hashes (only if each is 64 hex characters) and the
+  window's own version (the running one only if it is a plain version). The sentence the keeper or the shell gave goes to
+  `keeper.log` on one line, which "Show log" reveals.
+- **Only for a switch this window sent.** The window notes the moment before it sends its switch (`Announcer::we_asked`); the
+  first ended swap that began after it, whose target is this window's build, is that request's end, and is shown if it is a
+  refusal; the ask is spent either way. A refusal of a switch another process asked for gets no dialog, however often it asks
+  (the keeper keeps the last swap's view for a window that attaches later, and another window's refused update is not
+  announced either). **One dialog at a time**: none is handed out while one is open (the dialog's own callback clears the
+  flag), and two are at least 5 seconds apart; one that had to wait is shown by a later view.
 - **What it says.** Which version could not be verified and which one keeps running (an update), or that Centralu started
   without the permission shell (a start), and under Details the check that failed (an unknown signing key, a signature that
   does not match, a file whose hash differs, another platform, a version below the floor, a newer shell needed), the file
@@ -1428,10 +1436,12 @@ Limits:
   and the dialog is never shown.
 - The dialog is drawn by the window process, which runs as the same user as everything else here: another process of the
   user could draw over it or close it, and one that reaches the keeper's socket (the host is a child of the keeper and does)
-  can ask for a switch to content it names, which the keeper refuses and the window then announces: a refusal dialog about
-  content the requester chose, naming the folder the keeper looked at, at most one every 5 seconds, only when the request
-  names this window's build. It cannot make the dialog say anything but a refusal, and it cannot suppress one the keeper or the
-  shell made. What it protects against is the host hiding or rewriting a refusal, not the user's own processes.
+  can ask for a switch to content it names, which the keeper refuses: the window shows no dialog for that (only for a switch it
+  sent itself), and a refusal it does show repeats none of the requester's words (its folder name is in the log only). It can,
+  in a race, make the keeper refuse the window's own switch (one swap runs at a time) and so use up the window's one dialog for
+  that request; it cannot make the dialog say more than the check, the file, the hashes and the versions, and it cannot suppress
+  a refusal the keeper or the shell made. What it protects against is the host hiding or rewriting a refusal, not the user's
+  own processes.
 - The text of the shell's refusal is the shell's (pinned) and the window's diagnosis reads the content again: a content changed
   between the shell's refusal and the diagnosis is described as it is then, or, when it verifies then, by the shell's sentence.
 

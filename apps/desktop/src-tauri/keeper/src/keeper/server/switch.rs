@@ -284,6 +284,7 @@ pub(super) fn refuse(k: &Arc<Keeper>, asked: &BuildSource, r: content::Refusal) 
         refused: Some(r.reason.to_string()),
         refused_check: r.check.map(String::from),
         refused_file: r.file,
+        refused_hashes: r.hashes.map(|(a, b)| [a, b]),
         ..SwapView::begun(Phase::Failed, asked.clone(), st.source.clone())
     });
     k.broadcast(&mut st);

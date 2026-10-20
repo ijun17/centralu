@@ -170,11 +170,14 @@ pub struct Refusal {
     pub check: Option<&'static str>,
     /// The listed file the refusal is about, when it is about one.
     pub file: Option<String>,
+    /// For a file whose hash differs: the hash the signed manifest lists and the one the file has, lowercase hex. The
+    /// window may show these (it checks they are hex); `message` is free text for the log only.
+    pub hashes: Option<(String, String)>,
 }
 
 impl Refusal {
     pub fn new(reason: &'static str, message: impl Into<String>) -> Refusal {
-        Refusal { reason, message: message.into(), check: None, file: None }
+        Refusal { reason, message: message.into(), check: None, file: None, hashes: None }
     }
 
     /// Says which check of the verifier this refusal is: its id and the file it is about.
@@ -337,33 +340,54 @@ impl Verifier<'_> {
     fn refusal(&self, e: Error, src: &Path, stage: Stage) -> Refusal {
         let mut r = refusal_text(&e, src, stage).because(&e);
         if let Error::HashMismatch(path) = &e {
-            if let Some(detail) = self.hash_detail(src, path) {
-                r.message = format!("{}; {detail}", r.message);
+            if let Some((expected, found)) = self.hash_detail(src, path) {
+                r.message = format!("{}; the signed manifest lists {expected}, the file is {found}", r.message);
+                r.hashes = Some((expected, found));
             }
         }
         r
     }
 
-    /// "the manifest lists <hash>, the file is <hash>" for `path` in the content at `src`: read again, since the
+    /// (the hash the signed manifest lists, the file's hash) for `path` in the content at `src`: read again, since the
     /// verifier's error names the file and not the hashes (the pinned shell's crate cannot be changed to carry them).
-    fn hash_detail(&self, src: &Path, path: &str) -> Option<String> {
+    fn hash_detail(&self, src: &Path, path: &str) -> Option<(String, String)> {
         let (manifest, _) = read_verified_manifest(src, self.keys, &self.expect()).ok()?;
         let entry = manifest.files.iter().find(|f| f.path == path)?;
-        let found = hash_listed(&src.join(path), entry.size).ok().flatten()?;
-        Some(format!("the signed manifest lists {}, the file is {found}", content_verify::hex(&entry.sha256)))
+        let found = hash_listed(src, path, entry.size).ok().flatten()?;
+        Some((content_verify::hex(&entry.sha256), found))
     }
 }
 
+/// The first component of the listed path `rel` under `root` that is a symlink (the folders on the way as well as the file),
+/// as it is written in `rel`; None when none is. Checked one prefix at a time, as the verifier walks a path.
+fn through_symlink(root: &Path, rel: &str) -> Option<String> {
+    let mut so_far = String::new();
+    for part in rel.split('/') {
+        if !so_far.is_empty() {
+            so_far.push('/');
+        }
+        so_far.push_str(part);
+        if fs::symlink_metadata(root.join(&so_far)).map(|m| m.file_type().is_symlink()).unwrap_or(false) {
+            return Some(so_far);
+        }
+    }
+    None
+}
+
 /**
- * The SHA-256 of a listed file, in lowercase hex, read as the verifier reads one: not through a symlink, not blocking on a
- * FIFO, only a regular file (checked on the opened descriptor), and no further than one byte past `size`. `Ok(None)` when it
- * is longer than that (it cannot be the listed file, and is not read to its end).
+ * The SHA-256 of a listed file `rel` under `root`, in lowercase hex, read as the verifier reads one: no component of the
+ * path a symlink (`through_symlink`, the last one also by `O_NOFOLLOW`), not blocking on a FIFO, only a regular file
+ * (checked on the opened descriptor), and no further than one byte past `size`. `Ok(None)` when it is longer than that (it
+ * cannot be the listed file, and is not read to its end).
  */
-fn hash_listed(path: &Path, size: u64) -> std::io::Result<Option<String>> {
+fn hash_listed(root: &Path, rel: &str, size: u64) -> std::io::Result<Option<String>> {
     use sha2::{Digest, Sha256};
     use std::io::Read;
     use std::os::unix::fs::OpenOptionsExt;
-    let mut f = fs::OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK).open(path)?;
+    if let Some(link) = through_symlink(root, rel) {
+        return Err(std::io::Error::other(format!("{link:?} is a symlink")));
+    }
+    let mut f = fs::OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK).open(root.join(rel))?;
     if !f.metadata()?.is_file() {
         return Err(std::io::Error::other("not a regular file"));
     }
@@ -402,6 +426,9 @@ pub fn diagnose_with(v: &Verifier, data: &Path, src: &Path) -> Option<Refusal> {
             r.file = Some(f.path.clone());
             Some(r)
         };
+        if let Some(link) = through_symlink(src, &f.path) {
+            return found("symlink", format!("{:?} goes through a symlink at {link:?}", f.path));
+        }
         let path = src.join(&f.path);
         let meta = match fs::symlink_metadata(&path) {
             Ok(m) => m,
@@ -413,13 +440,16 @@ pub fn diagnose_with(v: &Verifier, data: &Path, src: &Path) -> Option<Refusal> {
         if meta.len() != f.size {
             return found("size-mismatch", format!("{:?} is {} bytes, the manifest says {}", f.path, meta.len(), f.size));
         }
-        match hash_listed(&path, f.size) {
+        match hash_listed(src, &f.path, f.size) {
             Ok(Some(hash)) if hash == content_verify::hex(&f.sha256) => {}
             Ok(Some(hash)) => {
-                return found(
+                let expected = content_verify::hex(&f.sha256);
+                let mut r = found(
                     "hash-mismatch",
-                    format!("{:?} does not match its hash: the signed manifest lists {}, the file is {hash}", f.path, content_verify::hex(&f.sha256)),
-                )
+                    format!("{:?} does not match its hash: the signed manifest lists {expected}, the file is {hash}", f.path),
+                )?;
+                r.hashes = Some((expected, hash));
+                return Some(r);
             }
             Ok(None) => return found("size-mismatch", format!("{:?} is longer than the {} bytes the manifest says", f.path, f.size)),
             Err(e) => return found("file-unreadable", format!("{:?} cannot be read: {e}", f.path)),
