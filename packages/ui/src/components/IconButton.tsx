@@ -24,6 +24,7 @@ export function IconButton({
   placement = 'bottom',
   align = 'left',
   lit = false,
+  haspopup,
   className = '',
 }: {
   /** Both the tooltip text and the name a screen reader announces — kept as one */
@@ -44,6 +45,8 @@ export function IconButton({
    * to something that can shift between builds. Here, only one of the two is ever attached.
    */
   lit?: boolean
+  /** The button opens a menu (announced to a screen reader) */
+  haspopup?: 'menu'
   className?: string
 }) {
   return (
@@ -56,6 +59,7 @@ export function IconButton({
         onClick={onClick}
         disabled={disabled}
         aria-label={label}
+        aria-haspopup={haspopup}
         data-testid={testId}
       >
         {children}

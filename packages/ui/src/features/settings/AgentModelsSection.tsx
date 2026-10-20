@@ -3,7 +3,8 @@ import { useStore } from '../../store/store.js'
 import { useTools } from '../../store/selectors.js'
 import { useModels } from '../session/SessionSettings.jsx'
 import { OtherInput, OtherOption, SettingsSelect, useOtherChoice } from './OtherChoice.jsx'
-import { Badge } from '../../components/Badge.jsx'
+import { textInputClass } from '../../components/TextField.jsx'
+import { More, SettingsCard } from './SettingsLayout.jsx'
 
 const LEVELS: { id: AgentDifficulty; label: string }[] = [
   { id: 'light', label: 'Light' },
@@ -15,7 +16,7 @@ const LEVELS: { id: AgentDifficulty; label: string }[] = [
  * Background's select, at one width per column: Claude's and Codex's rows line up, and a row does not move when the
  * model list arrives after the first paint
  */
-const MODEL_WIDTH = 'w-44'
+const MODEL_WIDTH = 'w-40'
 const EFFORT_WIDTH = 'w-32'
 
 /**
@@ -40,14 +41,18 @@ export function AgentModelsSection() {
     void setPrefs({ agentModels: next })
   }
   return (
-    <div className="mt-4" data-testid="settings-agent-models">
-      <p className="text-sm text-ink-muted">Models for the agents a session starts</p>
-      <p className="mt-1 text-xs leading-body text-ink-faint">
-        A session starting an agent can say how hard the job is instead of naming a model. Light: lookups, small fixes,
-        reviews of small changes. Heavy: design, security, risk of losing data, large refactors. Default keeps the
-        project&apos;s last choice; a model the session names itself still wins. Efforts come from the tool&apos;s model
-        list, which Claude Code gives only while one of its sessions runs.
-      </p>
+    <div className="space-y-3" data-testid="settings-agent-models">
+      <div className="px-1">
+        <h4 className="text-xs font-medium text-ink-muted">Models for the agents a session starts</h4>
+        <div className="mt-0.5 text-xs leading-body text-ink-faint">
+          A session starting an agent can say how hard the job is instead of naming a model.
+          <More>
+            Light: lookups, small fixes, reviews of small changes. Heavy: design, security, risk of losing data, large
+            refactors. Default keeps the project&apos;s last choice; a model the session names itself still wins. Efforts
+            come from the tool&apos;s model list, which Claude Code gives only while one of its sessions runs.
+          </More>
+        </div>
+      </div>
       {tools.map((t) => (
         <ToolRows key={t.name} tool={t} chosen={models?.[t.name]} onPick={(level, choice) => pick(t.name, level, choice)} />
       ))}
@@ -55,6 +60,7 @@ export function AgentModelsSection() {
   )
 }
 
+/** A card per tool: its name over three rows, Light, Standard and Heavy, whose selects line up in two columns */
 function ToolRows({
   tool,
   chosen,
@@ -66,23 +72,23 @@ function ToolRows({
 }) {
   const { models } = useModels(tool.name, false)
   return (
-    <div className="mt-3" data-testid={`settings-agent-models-${tool.name}`}>
-      <Badge as="p" readout>
-        {tool.label}
-      </Badge>
-      <div className="mt-2 grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2 text-sm text-ink-muted">
-        {LEVELS.map((l) => (
-          <LevelRow
-            key={l.id}
-            testId={`settings-agent-model-${tool.name}-${l.id}`}
-            label={l.label}
-            models={models}
-            value={chosen?.[l.id]}
-            onPick={(choice) => onPick(l.id, choice)}
-          />
-        ))}
+    <SettingsCard testId={`settings-agent-models-${tool.name}`}>
+      <div className="flex items-center gap-2 px-4 py-2">
+        <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink">{tool.label}</span>
+        <span className={`${MODEL_WIDTH} text-2xs text-ink-faint`}>Model</span>
+        <span className={`${EFFORT_WIDTH} text-2xs text-ink-faint`}>Effort</span>
       </div>
-    </div>
+      {LEVELS.map((l) => (
+        <LevelRow
+          key={l.id}
+          testId={`settings-agent-model-${tool.name}-${l.id}`}
+          label={l.label}
+          models={models}
+          value={chosen?.[l.id]}
+          onPick={(choice) => onPick(l.id, choice)}
+        />
+      ))}
+    </SettingsCard>
   )
 }
 
@@ -115,30 +121,31 @@ function LevelRow({
     if (model !== value?.model) onPick({ model })
   }
   return (
-    <>
-      <span>{label}</span>
-      <div className="flex flex-wrap items-center gap-2">
-        <SettingsSelect
-          tone="compact"
-          className={MODEL_WIDTH}
-          aria-label={`${label} model`}
-          data-testid={testId}
-          value={choice.shown(value?.model ?? '')}
-          onChange={(e) =>
-            choice.onSelect(e, listed ? '' : (value?.model ?? ''), (model) =>
-              // A new model takes its own default effort: the effort chosen belonged to the old one
-              onPick(model ? { model } : null),
-            )
-          }
-        >
-          <option value="">Default</option>
-          {options.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.label}
-            </option>
-          ))}
-          <OtherOption />
-        </SettingsSelect>
+    <div className="flex items-center gap-2 px-4 py-2">
+      <span className="min-w-0 flex-1 truncate text-sm text-ink-muted">{label}</span>
+      <SettingsSelect
+        tone="compact"
+        className={MODEL_WIDTH}
+        aria-label={`${label} model`}
+        data-testid={testId}
+        value={choice.shown(value?.model ?? '')}
+        onChange={(e) =>
+          choice.onSelect(e, listed ? '' : (value?.model ?? ''), (model) =>
+            // A new model takes its own default effort: the effort chosen belonged to the old one
+            onPick(model ? { model } : null),
+          )
+        }
+      >
+        <option value="">Default</option>
+        {options.map((m) => (
+          <option key={m.id} value={m.id}>
+            {m.label}
+          </option>
+        ))}
+        <OtherOption />
+      </SettingsSelect>
+      {/* The second column holds its width when empty, so the model selects of every row stay in line */}
+      <span className={`${EFFORT_WIDTH} flex`}>
         {other && (
           <OtherInput
             draft={choice.draft}
@@ -147,14 +154,14 @@ function LevelRow({
             autoFocus={choice.asked}
             placeholder="Model name"
             aria-label={`${label} model name`}
-            className="w-40 rounded border border-line bg-surface-floor px-2 py-1 text-sm text-ink placeholder:text-ink-faint"
+            className={`w-full ${textInputClass({ size: 'sm', text: 'sm' })}`}
             data-testid={`${testId}-other`}
           />
         )}
         {value && !other && effortOptions.length > 0 && (
           <SettingsSelect
             tone="compact"
-            className={EFFORT_WIDTH}
+            className="w-full"
             aria-label={`${label} effort`}
             data-testid={`${testId}-effort`}
             value={value.effort ?? ''}
@@ -168,7 +175,7 @@ function LevelRow({
             ))}
           </SettingsSelect>
         )}
-      </div>
-    </>
+      </span>
+    </div>
   )
 }

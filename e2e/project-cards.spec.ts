@@ -1,9 +1,10 @@
 import { test, expect, type Page } from '@playwright/test'
 
 /**
- * Making a new project (#515): "New folder" beside Add project on this computer, "Create a new folder" in a linked
- * machine's dialog, and the orchestrator's create_project card. The mock answers as the host does: the ~/Centralu of the
- * machine it is for, the name rule (shared through protocol), and a refusal for a name already taken.
+ * The orchestrator's project cards (#515, #82): create_project and add_project raise a card in the approval slot, and
+ * the folder is made or added only on the answer. Neither has an "always": it is one folder. The dialogs that used to
+ * be tested beside these (New folder on this computer, Create a new folder on a linked machine) are gone with the
+ * sidebar's New folder button; the host still makes the folder, and a project it makes on its own joins the sidebar.
  */
 
 async function start(page: Page) {
@@ -12,104 +13,6 @@ async function start(page: Page) {
   await expect(page.getByTestId('orchestrator-suggestions')).toBeVisible()
 }
 
-
-test('New folder: the dialog says where the folder goes as the name is typed, refuses a taken or bad name, and makes it', async ({ page }) => {
-  await start(page)
-  await page.evaluate(() => (window as any).__mock.takenPaths.add('/Users/you/Centralu/taken'))
-  await page.getByTestId('create-project').click()
-  const dialog = page.getByTestId('create-project-dialog')
-  await expect(dialog).toBeVisible()
-  // Before a name, the location: this computer's ~/Centralu
-  await expect(dialog.getByTestId('create-project-parent-shown')).toHaveText('/Users/you/Centralu')
-  await expect(dialog.getByTestId('create-project-confirm')).toBeDisabled()
-
-  await dialog.getByTestId('create-project-name').fill('taken')
-  await expect(dialog.getByTestId('create-project-error')).toContainText('already in /Users/you/Centralu')
-  await expect(dialog.getByTestId('create-project-confirm')).toBeDisabled()
-
-  await dialog.getByTestId('create-project-name').fill('a/b')
-  await expect(dialog.getByTestId('create-project-error')).toContainText('one folder')
-
-  await dialog.getByTestId('create-project-name').fill('game')
-  await expect(dialog.getByTestId('create-project-path')).toHaveText('/Users/you/Centralu/game')
-  await expect(dialog.getByTestId('create-project-error')).toHaveCount(0)
-  await dialog.getByTestId('create-project-confirm').click()
-
-  await expect(dialog).toHaveCount(0)
-  await expect(page.getByTestId('project-game')).toBeVisible()
-  expect(await page.evaluate(() => (window as any).__mock.createProjectCalls)).toEqual([{ name: 'game' }])
-})
-
-test('New folder: another location is a full path, typed or chosen with the picker', async ({ page }) => {
-  await start(page)
-  await page.getByTestId('create-project').click()
-  const dialog = page.getByTestId('create-project-dialog')
-  await dialog.getByTestId('create-project-change-parent').click()
-  await page.evaluate(() => {
-    ;(window as any).__mock.nextPickedDirectory = '/Users/you/code'
-  })
-  await dialog.getByTestId('create-project-pick-parent').click()
-  await expect(dialog.getByTestId('create-project-parent')).toHaveValue('/Users/you/code')
-  await dialog.getByTestId('create-project-name').fill('site')
-  await expect(dialog.getByTestId('create-project-path')).toHaveText('/Users/you/code/site')
-  await dialog.getByTestId('create-project-confirm').click()
-  await expect(page.getByTestId('project-site')).toBeVisible()
-  expect(await page.evaluate(() => (window as any).__mock.createProjectCalls)).toEqual([{ name: 'site', parent: '/Users/you/code' }])
-})
-
-test('New folder: a picker the shell refuses says why in the form (#972)', async ({ page }) => {
-  await start(page)
-  await page.getByTestId('create-project').click()
-  const dialog = page.getByTestId('create-project-dialog')
-  await dialog.getByTestId('create-project-change-parent').click()
-  await page.evaluate(() => ((window as any).__mock.pickFails = 'dialog.open not allowed'))
-  await dialog.getByTestId('create-project-pick-parent').click()
-  await expect(dialog.getByTestId('create-project-error')).toHaveText('dialog.open not allowed')
-})
-
-/**
- * The location comes from the host a moment after the dialog opens (the preview waits 150 ms for typing to pause).
- * Change used to follow that text, so it jumped when the text arrived: a click on it as the dialog opened went down
- * on the button and came up beside it, and the location stayed as it was (a WebKit CI run of the test above). The
- * page's clock is held here, so the press starts before the text arrives and ends after it.
- */
-test('New folder: a click on Change as the dialog opens still opens the location, though the location arrives mid-click', async ({ page }) => {
-  await page.clock.install()
-  await start(page)
-  await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 1_000)
-  await page.getByTestId('create-project').click()
-  const dialog = page.getByTestId('create-project-dialog')
-  await expect(dialog.getByTestId('create-project-parent-shown')).toHaveText('…')
-  const box = (await dialog.getByTestId('create-project-change-parent').boundingBox())!
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
-  await page.mouse.down()
-  await page.clock.runFor(200)
-  await expect(dialog.getByTestId('create-project-parent-shown')).toHaveText('/Users/you/Centralu')
-  await page.mouse.up()
-  await expect(dialog.getByTestId('create-project-parent')).toHaveValue('/Users/you/Centralu')
-  await expect(dialog.getByTestId('create-project-pick-parent')).toBeVisible()
-})
-
-test("a linked Windows machine: Create a new folder is made by that machine's host, in its own ~/Centralu, in its own path terms", async ({ page }) => {
-  await start(page)
-  await page.evaluate(() => (window as any).__mock.machines.add({ name: 'Win', sshTarget: 'me@win', shell: 'powershell' }))
-  await page.getByTestId('add-project').click()
-  await page.getByTestId('add-project-on-win').click()
-  const dialog = page.getByTestId('add-remote-project-dialog')
-  // Adding an existing folder is still the first choice
-  await expect(dialog.getByTestId('add-remote-project-path')).toBeVisible()
-  await dialog.getByTestId('add-remote-project-mode-new').click()
-  await expect(dialog.getByTestId('create-project-parent-shown')).toHaveText('C:\\Users\\you\\Centralu')
-  // What only Windows refuses is refused for a Windows machine
-  await dialog.getByTestId('create-project-name').fill('notes.')
-  await expect(dialog.getByTestId('create-project-error')).toContainText('dot or a space')
-  await dialog.getByTestId('create-project-name').fill('game')
-  await expect(dialog.getByTestId('create-project-path')).toHaveText('C:\\Users\\you\\Centralu\\game')
-  await dialog.getByTestId('create-project-confirm').click()
-  await expect(dialog).toHaveCount(0)
-  await expect(page.getByTestId('project-machine-game')).toHaveText('Win')
-  expect(await page.evaluate(() => (window as any).__mock.createProjectCalls)).toEqual([{ name: 'game', machine: 'win' }])
-})
 
 /**
  * The orchestrator's create_project: the host raises a card in the orchestrator's own approval slot with the full path,
@@ -163,43 +66,6 @@ test('a project the host made on its own joins the sidebar when the host says so
     m.emit({ type: 'projects_changed' })
   })
   await expect(page.getByTestId('project-shop')).toBeVisible()
-})
-
-/**
- * A clone instead of an empty folder (#515): the folder is named after the repository unless a name is given, an
- * address the host would refuse is refused as it is typed, and a clone that fails leaves the form with its sentence.
- */
-test('New folder: clone a repository — named after it, refused addresses said at once, a failed clone keeps its reason', async ({ page }) => {
-  await start(page)
-  await page.getByTestId('create-project').click()
-  const dialog = page.getByTestId('create-project-dialog')
-  await dialog.getByTestId('create-project-clone').check()
-
-  await dialog.getByTestId('create-project-git').fill('ext::sh -c x')
-  await expect(dialog.getByTestId('create-project-error')).toContainText('ext::')
-  await dialog.getByTestId('create-project-git').fill('/Users/you/code/app')
-  await expect(dialog.getByTestId('create-project-error')).toContainText('local folder')
-
-  await dialog.getByTestId('create-project-git').fill('https://github.com/me/game.git')
-  await expect(dialog.getByTestId('create-project-name')).toHaveAttribute('placeholder', 'game')
-  await expect(dialog.getByTestId('create-project-path')).toHaveText('/Users/you/Centralu/game')
-  await expect(dialog.getByTestId('create-project-confirm')).toHaveText('Clone project')
-
-  await page.evaluate(() => {
-    ;(window as any).__mock.nextCloneError = 'https://github.com/me/game.git needs a sign-in this machine does not have saved.'
-  })
-  await dialog.getByTestId('create-project-confirm').click()
-  await expect(dialog.getByTestId('create-project-error')).toContainText('needs a sign-in')
-  await expect(page.getByTestId('project-game')).toHaveCount(0)
-
-  await dialog.getByTestId('create-project-branch').fill('dev')
-  await dialog.getByTestId('create-project-confirm').click()
-  await expect(dialog).toHaveCount(0)
-  await expect(page.getByTestId('project-game')).toBeVisible()
-  expect((await page.evaluate(() => (window as any).__mock.createProjectCalls)).at(-1)).toEqual({
-    name: '',
-    source: { git: 'https://github.com/me/game.git', branch: 'dev' },
-  })
 })
 
 test('create_project on a linked machine: the card names the machine whose disk the path is on (#82 phase 4)', async ({ page }) => {

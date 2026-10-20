@@ -196,15 +196,16 @@ ${parent?.trim() ?? ''}`
                   <span className="min-w-0 flex-1">
                     In <span className="readout break-all text-ink" data-testid="new-app-parent-shown">{where?.parent ?? '…'}</span>
                   </span>
-                  <button
-                    type="button"
-                    className="shrink-0 text-ink-faint underline-offset-2 hover:text-ink hover:underline"
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    className="shrink-0"
                     onClick={() => setParent(where?.parent ?? '')}
                     data-testid="new-app-change-parent"
                     aria-label="Change the folder its folder goes in"
                   >
                     Change
-                  </button>
+                  </Button>
                 </p>
               ) : (
                 <div className="flex items-center gap-2">
@@ -219,9 +220,10 @@ ${parent?.trim() ?? ''}`
                     data-testid="new-app-parent"
                     className="min-w-0 flex-1"
                   />
-                  <button
-                    type="button"
-                    className="shrink-0 rounded-md px-2 py-1 text-xs text-ink-faint hover:text-ink"
+                  <Button
+                    variant="quiet"
+                    size="sm"
+                    className="shrink-0"
                     onClick={async () => {
                       try {
                         const picked = await platform.system.pickDirectory()
@@ -234,7 +236,7 @@ ${parent?.trim() ?? ''}`
                     data-testid="new-app-pick-parent"
                   >
                     Choose…
-                  </button>
+                  </Button>
                 </div>
               )}
               {where?.path && !where.error && (
@@ -277,9 +279,9 @@ ${parent?.trim() ?? ''}`
         <footer className="flex shrink-0 items-center justify-end gap-2 border-t border-line px-4 py-2.5">
           {/* An import lands as a project of its own too (#1141), so its door stands where a new app is made */}
           {projectId === null && (
-            <button
-              type="button"
-              className="mr-auto rounded-md px-2 py-1 text-sm text-ink-faint transition-colors hover:text-ink"
+            <Button
+              variant="ghost"
+              className="mr-auto"
               onClick={() => {
                 onClose()
                 openImport()
@@ -287,13 +289,13 @@ ${parent?.trim() ?? ''}`
               data-testid="new-app-import"
             >
               Import one…
-            </button>
+            </Button>
           )}
-          <button type="button" className="rounded-md px-2 py-1 text-sm text-ink-faint transition-colors hover:text-ink" onClick={onClose}>
+          <Button variant="ghost" onClick={onClose}>
             Cancel
-          </button>
-          <Button type="submit" variant="primary" disabled={!canCreate} data-testid="new-app-create">
-            {busy ? 'Creating…' : 'Create'}
+          </Button>
+          <Button type="submit" variant="primary" disabled={!canCreate} busy={busy} busyText="Creating…" data-testid="new-app-create">
+            Create
           </Button>
         </footer>
       </form>

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, type Page } from '@playwright/test'
 import { setup, newSession, injectApproval, emitEvent } from './fixtures/control.js'
 
 /**
@@ -6,6 +6,15 @@ import { setup, newSession, injectApproval, emitEvent } from './fixtures/control
  * with git (#41, #49). Moved out of control-evidence-git-files.spec.ts by subject; the shared
  * helpers (setup, newSession, emitEvent and the rest) are in fixtures/control.ts.
  */
+
+/**
+ * The changed count lives in the project's tooltip (owner, 2026-10-20: the name line no longer carries it), drawn into
+ * the body while the pointer or the keyboard is on the project's name. This hovers the name and returns the count's row.
+ */
+async function changedRow(page: Page, project: string) {
+  await page.getByTestId(`project-header-${project}`).hover()
+  return page.getByTestId(`project-detail-changed-${project}`)
+}
 
 /**
  * The sidebar's changed count was read once, at attach, and never again (#41).
@@ -40,10 +49,8 @@ test('a finished turn moves the sidebar changed count, once per burst (#41)', as
     for (const s of [...m.sessions.values()] as any[]) m.emit({ type: 'turn_complete', sessionId: s.id })
   })
 
-  const mark = page.getByTestId('mark-changed-alpha')
-  await expect(mark).toHaveText('3')
-  await mark.hover()
-  await expect(page.getByRole('tooltip')).toContainText('3 uncommitted files')
+  await expect(page.getByTestId('mark-changed-alpha')).toHaveCount(0)
+  await expect(await changedRow(page, 'alpha')).toContainText('3 uncommitted files')
 
   // Two turns, one measurement (800ms per project)
   expect(await page.evaluate(() => (window as any).__mock.gitStatusCalls)).toBe(1)
@@ -66,7 +73,7 @@ test('granting a file edit refreshes the project count before the turn ends (#41
   })
 
   await page.getByTestId('approve-allow').click()
-  await expect(page.getByTestId('mark-changed-alpha')).toHaveText('1')
+  await expect(await changedRow(page, 'alpha')).toContainText('1 uncommitted file')
 })
 
 /**
@@ -87,12 +94,12 @@ test("Committing from the narrow panel still updates the sidebar's changed count
   })
   await newSession(page, 'alpha', 'task')
   await emitEvent(page, 0, { type: 'turn_complete' })
-  await expect(page.getByTestId('mark-changed-alpha')).toHaveText('2')
+  await expect(await changedRow(page, 'alpha')).toContainText('2 uncommitted files')
 
   await page.getByTestId('evidence-commit-message').fill('commit from the panel')
   await page.getByTestId('evidence-commit').click()
 
-  await expect(page.getByTestId('mark-changed-alpha')).toHaveText('1')
+  await expect(await changedRow(page, 'alpha')).toContainText('1 uncommitted file')
 })
 
 /**
@@ -156,6 +163,6 @@ test('returning to the window re-reads every project (#41)', async ({ page }) =>
     store.setAppFocused(true)
   })
 
-  await expect(page.getByTestId('mark-changed-alpha')).toHaveText('2')
-  await expect(page.getByTestId('mark-changed-beta')).toHaveText('2')
+  await expect(await changedRow(page, 'alpha')).toContainText('2 uncommitted files')
+  await expect(await changedRow(page, 'beta')).toContainText('2 uncommitted files')
 })

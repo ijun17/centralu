@@ -58,22 +58,25 @@ export function SubagentStepsHeldList({
   onCancel: () => void
 }) {
   return (
-    <section className="mt-6" data-testid="subagent-steps-held">
-      <h3 className="text-sm font-medium text-ink">Subagent steps in sessions</h3>
-      <p className="mt-1 text-xs leading-body text-ink-faint">
-        What the agents a session launched did, kept under their cards in the conversation. Moving them to the trash
-        frees the space and keeps the conversation; the cards then say where the steps went.
-      </p>
+    <section data-testid="subagent-steps-held">
+      <div className="px-1">
+        <h3 className="text-xs font-medium text-ink-muted">Subagent steps in sessions</h3>
+        <p className="mt-0.5 text-xs leading-body text-ink-faint">
+          What the agents a session launched did, kept under their cards in the conversation. Moving them to the trash
+          frees the space and keeps the conversation; the cards then say where the steps went.
+        </p>
+      </div>
       {error ? (
         <LoadFailed what="what subagent steps take" error={error} onRetry={onRetry} className="mt-2" testId="subagent-steps-held-error" />
       ) : sessions === null ? (
-        <p className="readout mt-2 text-xs text-ink-faint">Loading…</p>
+        <p className="readout mt-2 rounded-bubble border border-line bg-surface-raised px-4 py-3 text-xs text-ink-faint">Loading…</p>
       ) : sessions.length === 0 && unreached.length === 0 ? (
-        <p className="mt-2 text-sm text-ink-faint" data-testid="subagent-steps-held-empty">
+        // The empty list keeps the list's card, a quiet line inside it (the other Settings lists' empty state)
+        <p className="mt-2 rounded-bubble border border-line bg-surface-raised px-4 py-3 text-sm text-ink-faint" data-testid="subagent-steps-held-empty">
           No session keeps subagent steps
         </p>
       ) : sessions.length === 0 ? null : (
-        <ul className="mt-2 divide-y divide-line/60 rounded-bubble border border-line bg-surface-raised" data-testid="subagent-steps-held-list">
+        <ul className="mt-2 divide-y divide-line/70 rounded-bubble border border-line bg-surface-raised" data-testid="subagent-steps-held-list">
           {[...sessions]
             .sort((a, b) => b.bytes - a.bytes)
             .map((s) => {
@@ -147,7 +150,7 @@ export function TrashedSubagentStepsRow({
   onCancel: () => void
 }) {
   return (
-    <li className="px-2.5 py-2" data-testid={`trash-steps-row-${s.sessionId}`}>
+    <li className="px-4 py-3" data-testid={`trash-steps-row-${s.sessionId}`}>
       <div className="flex items-baseline gap-2">
         <span className="min-w-0 truncate text-sm text-ink">Subagent steps of {s.name}</span>
         <span className="min-w-0 shrink truncate text-2xs text-ink-muted">{s.project ? s.project.name : 'No project'}</span>

@@ -74,23 +74,18 @@ test('Send key: once enabled, Enter inserts a newline and the modifier+Enter sen
 })
 
 /*
- * The sessions' read-only tools (#320) are on for someone who never opened Settings, and turning
- * them off is remembered — the host reads the same record when a session starts.
+ * The sessions' read-only tools (#320) are always on (owner, 2026-10-20): the switch is gone from Settings and the host
+ * holds the preference true, so nothing a person does can turn them off.
  */
-test("Settings: the sessions' read-only tools start on, and turning them off is remembered", async ({ page }) => {
+test("Settings: the sessions' read-only tools have no switch and read as on", async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  const open = async () => {
-    await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
-    await page.getByTestId('settings-tab-orchestrator').click()
+  await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
+  for (const tab of ['orchestrator', 'agents']) {
+    await page.getByTestId(`settings-tab-${tab}`).click()
+    await expect(page.getByTestId(`settings-tab-${tab}`)).toHaveAttribute('aria-current', 'page')
+    await expect(page.getByTestId('settings-session-tools')).toHaveCount(0)
   }
-  await open()
-  await expect(page.getByTestId('settings-session-tools')).toBeChecked()
-  await page.getByTestId('settings-session-tools').uncheck()
-  await expect.poll(() => page.evaluate(() => (window as any).__store.getState().prefs.sessionTools)).toBe(false)
-
-  await page.reload()
-  await open()
-  await expect(page.getByTestId('settings-session-tools')).not.toBeChecked()
+  await expect.poll(() => page.evaluate(() => (window as any).__store.getState().prefs.sessionTools)).toBe(true)
 })
 
 // #1273: a linked computer's auto session starts agents here under auto unless the person turns it off
@@ -98,7 +93,7 @@ test('Settings: auto from a linked computer starts on, and turning it off is rem
   await setup(page, { projects: ['/tmp/alpha'] })
   const open = async () => {
     await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
-    await page.getByTestId('settings-tab-orchestrator').click()
+    await page.getByTestId('settings-tab-agents').click()
   }
   await open()
   await expect(page.getByTestId('settings-hub-auto')).toBeChecked()
@@ -115,7 +110,7 @@ test("Settings: when agents compact starts on at 60%, moves in steps of 5, and t
   await setup(page, { projects: ['/tmp/alpha'] })
   const open = async () => {
     await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
-    await page.getByTestId('settings-tab-orchestrator').click()
+    await page.getByTestId('settings-tab-agents').click()
   }
   const saved = () => page.evaluate(() => (window as any).__store.getState().prefs.autoCompact ?? null)
   await open()
@@ -142,7 +137,7 @@ test('Settings: running agents per project supports preset defaults and a rememb
   await setup(page, { projects: ['/tmp/alpha'] })
   const open = async () => {
     await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
-    await page.getByTestId('settings-tab-orchestrator').click()
+    await page.getByTestId('settings-tab-agents').click()
   }
   await open()
   const input = page.getByTestId('settings-agent-ceiling')
@@ -163,7 +158,7 @@ test('Settings: how deep agents may start agents is a slider from 1 to 3, starti
   await setup(page, { projects: ['/tmp/alpha'] })
   const open = async () => {
     await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
-    await page.getByTestId('settings-tab-orchestrator').click()
+    await page.getByTestId('settings-tab-agents').click()
   }
   const saved = () => page.evaluate(() => (window as any).__store.getState().prefs.agentDepth ?? null)
   await open()
@@ -196,7 +191,7 @@ test('Settings: a model and effort per tool and difficulty for the agents a sess
   await setup(page, { projects: ['/tmp/alpha'] })
   const open = async () => {
     await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
-    await page.getByTestId('settings-tab-orchestrator').click()
+    await page.getByTestId('settings-tab-agents').click()
   }
   const chosen = () => page.evaluate(() => (window as any).__store.getState().prefs.agentModels ?? null)
   await open()
@@ -405,12 +400,19 @@ test('Settings: turning off a notification policy is persisted (E-5)', async ({ 
   await newSession(page, 'alpha', 'task')
   await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
 
-  await page.getByTestId('notify-allDone').uncheck()
+  await page.getByTestId('notify-done').uncheck()
   const snap = await page.evaluate(() => (window as any).__mock.workspaceSnapshot)
-  expect(snap?.notifyPolicy?.allDone).toBe(false)
+  expect(snap?.notifyPolicy?.done).toBe(false)
 
-  // The shortcuts table is also checked here (FR-17) — it lives under the Shortcuts tab
-  await page.getByTestId('settings-tab-shortcuts').click()
+  // "Error" and "Once when every session finishes" are gone (owner, 2026-10-20): the page has no switch for either
+  await expect(page.getByTestId('notify-error')).toHaveCount(0)
+  await expect(page.getByTestId('notify-allDone')).toHaveCount(0)
+
+  // The shortcuts table is also checked here (FR-17) — it lives in the command palette since 2026-10-20
+  await page.keyboard.press('Escape')
+  await page.keyboard.press('Meta+k')
+  await page.getByTestId('palette-input').fill('keyboard shortcuts')
+  await page.getByTestId('palette-item-action').click()
   await expect(page.getByTestId('shortcut-list')).toContainText('⌘⇧1~4')
 })
 
@@ -604,8 +606,8 @@ test('The session settings menu cannot switch agents — creating a new one cove
  * Three groups used to be stacked into one long scroll. That reads fine at three, but settings
  * only ever grow, and by eight, finding what the person wants gets buried somewhere in the scroll. The
  * tabs are split by **what the person came looking for** — make it stop pinging me
- * (Notifications), undo that auto-allow from earlier (Permissions), what was that key again
- * (Shortcuts). Only one tab is rendered at a time, so a tab not selected must not be on screen.
+ * (Notifications), undo that auto-allow from earlier (Permissions), how does the message box send
+ * (Appearance). Only one tab is rendered at a time, so a tab not selected must not be on screen.
  */
 test('Settings are split into tabs, and only one tab shows at a time', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
@@ -613,17 +615,17 @@ test('Settings are split into tabs, and only one tab shows at a time', async ({ 
 
   // Opening it starts on Notifications — the most frequent reason to come here
   await expect(page.getByTestId('notify-approval')).toBeVisible()
-  await expect(page.getByTestId('shortcut-list')).toBeHidden()
+  await expect(page.getByTestId('settings-send-with-mod-enter')).toBeHidden()
 
-  await page.getByTestId('settings-tab-shortcuts').click()
-  await expect(page.getByTestId('shortcut-list')).toContainText('⌘K')
+  await page.getByTestId('settings-tab-appearance').click()
+  await expect(page.getByTestId('settings-send-with-mod-enter')).toBeVisible()
   // Other tabs are not collapsed, they are absent — staying invisible in the DOM would make this
   // decoration, not a tab
   await expect(page.getByTestId('notify-approval')).toBeHidden()
 
   await page.getByTestId('settings-tab-permissions').click()
   await expect(page.getByTestId('rules-empty')).toBeVisible()
-  await expect(page.getByTestId('shortcut-list')).toBeHidden()
+  await expect(page.getByTestId('settings-send-with-mod-enter')).toBeHidden()
 })
 
 test('Settings opens directly from the top bar', async ({ page }) => {

@@ -11,6 +11,7 @@ import { useToolMeta } from '../../store/selectors.js'
 import { ReaderItem } from './TrashReaderItem.jsx'
 import { TrashRunReader, TrashRuns } from './TrashRuns.jsx'
 import { SubagentStepsHeldList, TrashedSubagentStepsRow, stepsCount } from './SubagentStepsTrash.jsx'
+import { SettingsCard, SettingsEmpty, SettingsPage, SettingsRow } from './SettingsLayout.jsx'
 
 /**
  * Settings → Trash (#204): the way out of a deleted session, built in the same change as the way in.
@@ -161,148 +162,160 @@ export function TrashSection() {
   const steps = trash?.subagentSteps ?? []
   const nothing = sessions.length === 0 && runs.length === 0 && steps.length === 0
   return (
-    <section data-testid="settings-trash">
-      <p className="text-xs leading-body text-ink-faint">
-        Deleted sessions wait here with their conversations. Nothing is emptied on its own — a conversation leaves
-        this machine only when you delete it for good here.
-      </p>
+    <SettingsPage
+      testId="settings-trash"
+      title="Trash"
+      lead="Deleted sessions wait here with their conversations. Nothing is emptied on its own — a conversation leaves this machine only when you delete it for good here."
+    >
+      {(list.error || trash?.unreached?.length) && (
+        <div>
+          {list.error && <LoadFailed what="the trash" error={list.error} onRetry={load} testId="trash-load-error" />}
+          <TrashUnreached unreached={trash?.unreached} />
+        </div>
+      )}
 
-      {list.error && <LoadFailed what="the trash" error={list.error} onRetry={load} className="mt-2" testId="trash-load-error" />}
-      <TrashUnreached unreached={trash?.unreached} />
-
-      <div className="mt-3 flex items-baseline gap-3">
-        <span className="readout text-sm text-ink-muted" data-testid="trash-total">
-          {trash === null
-            ? list.error
-              ? 'Not read'
-              : 'Loading…'
-            : `${sessions.length} ${sessions.length === 1 ? 'session' : 'sessions'}${runs.length ? ` · ${runs.length} app ${runs.length === 1 ? 'run' : 'runs'}` : ''}${
-                steps.length ? ` · subagent steps of ${stepsCount(steps.length, 'session', 'sessions')}` : ''
-              } · ${formatBytes(trash.bytes)}`}
-        </span>
-        <button
-          type="button"
-          className="ml-auto rounded-md px-2 py-0.5 text-xs text-ink-faint transition-colors hover:text-danger disabled:opacity-50 disabled:hover:text-ink-faint"
-          disabled={nothing || busy}
-          onClick={() => setConfirming('all')}
-          data-testid="trash-empty"
+      <SettingsCard>
+        <SettingsRow
+          label={
+            <span className="readout text-ink-muted" data-testid="trash-total">
+              {trash === null
+                ? list.error
+                  ? 'Not read'
+                  : 'Loading…'
+                : `${sessions.length} ${sessions.length === 1 ? 'session' : 'sessions'}${runs.length ? ` · ${runs.length} app ${runs.length === 1 ? 'run' : 'runs'}` : ''}${
+                    steps.length ? ` · subagent steps of ${stepsCount(steps.length, 'session', 'sessions')}` : ''
+                  } · ${formatBytes(trash.bytes)}`}
+            </span>
+          }
+          control={
+            <button
+              type="button"
+              className="rounded-md px-2 py-0.5 text-xs text-ink-faint transition-colors hover:text-danger disabled:opacity-50 disabled:hover:text-ink-faint"
+              disabled={nothing || busy}
+              onClick={() => setConfirming('all')}
+              data-testid="trash-empty"
+            >
+              Empty trash…
+            </button>
+          }
         >
-          Empty trash…
-        </button>
-      </div>
-
-      {confirming === 'all' && (
-        <Confirm
-          text={`Delete all ${sessions.length + runs.length + steps.length} for good? Their conversations, attachments and handoff notes leave this machine, with the tool files and worktrees marked below${runs.length ? ', and the kept app runs' : ''}${
-            steps.length ? ', and the subagent steps listed' : ''
-          }. This cannot be undone.`}
-          busy={busy}
-          onYes={emptyAll}
-          onNo={() => setConfirming(null)}
-        />
-      )}
-      {emptyReport && (
-        <p className="mt-2 text-xs leading-body text-ink" data-testid="trash-empty-report">
-          {emptyReport}
-        </p>
-      )}
-
-      {trash !== null && nothing ? (
-        <p className="mt-2 text-sm text-ink-faint" data-testid="trash-list-empty">
-          The trash is empty
-        </p>
-      ) : sessions.length === 0 ? null : (
-        <ul className="mt-2 divide-y divide-line/60 rounded-md border border-line" data-testid="trash-list">
-          {sessions.map((s) => (
-            <li key={s.id} className="px-2.5 py-2" data-testid={`trash-row-${s.id}`}>
-              <div className="flex items-baseline gap-2">
-                <span className="min-w-0 truncate text-sm text-ink">{s.name}</span>
-                <span className="min-w-0 shrink truncate text-2xs text-ink-muted" data-testid={`trash-project-${s.id}`}>
-                  {s.project ? s.project.name : 'No project'}
-                  {s.project && !s.project.exists && ' (project deleted)'}
-                </span>
-                <span className="readout ml-auto shrink-0 text-2xs text-ink-faint">
-                  {formatDay(s.deletedAt)}
-                </span>
-              </div>
-              <div className="mt-0.5 text-2xs text-ink-faint" data-testid={`trash-holds-${s.id}`}>
-                {s.messages} {s.messages === 1 ? 'message' : 'messages'} · {formatBytes(s.bytes)}
-                <GoesWith session={s} />
-              </div>
-              <div className="mt-1.5 flex gap-3 text-xs">
-                <button
-                  type="button"
-                  className="text-ink-faint hover:text-ink"
-                  onClick={() => setReading(s)}
-                  data-testid={`trash-read-${s.id}`}
-                >
-                  Read
-                </button>
-                <button
-                  type="button"
-                  className="text-ink-faint hover:text-ink disabled:opacity-50"
-                  disabled={busy}
-                  onClick={() => void act(s.id, () => restoreFromTrash(s.id))}
-                  data-testid={`trash-restore-${s.id}`}
-                >
-                  Restore
-                </button>
-                <button
-                  type="button"
-                  className="text-ink-faint hover:text-danger disabled:opacity-50"
-                  disabled={busy}
-                  onClick={() => setConfirming(`session:${s.id}`)}
-                  data-testid={`trash-purge-${s.id}`}
-                >
-                  Delete for good…
-                </button>
-              </div>
-              {rowError?.id === s.id && (
-                <p className="mt-1.5 text-xs leading-body text-ink" data-testid={`trash-error-${s.id}`}>
-                  {rowError.text}
-                </p>
-              )}
-              {confirming === `session:${s.id}` && (
-                <Confirm
-                  text={`Delete “${s.name}” for good? Its conversation, attachments and handoff note leave this machine${goesWithText(s)}. This cannot be undone.`}
-                  busy={busy}
-                  onYes={() => void purge(s)}
-                  onNo={() => setConfirming(null)}
-                />
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-      {steps.length > 0 && (
-        <ul className="mt-2 divide-y divide-line/60 rounded-md border border-line" data-testid="trash-steps-list">
-          {steps.map((t) => (
-            <TrashedSubagentStepsRow
-              key={`${t.machine ?? ''}/${t.sessionId}`}
-              entry={t}
+          {confirming === 'all' && (
+            <Confirm
+              text={`Delete all ${sessions.length + runs.length + steps.length} for good? Their conversations, attachments and handoff notes leave this machine, with the tool files and worktrees marked below${runs.length ? ', and the kept app runs' : ''}${
+                steps.length ? ', and the subagent steps listed' : ''
+              }. This cannot be undone.`}
               busy={busy}
-              confirming={confirming === `steps:${t.sessionId}`}
-              error={errorOf(`steps:${t.sessionId}`)}
-              onRestore={() => void act(`steps:${t.sessionId}`, () => restoreSubagentSteps(t.sessionId))}
-              onAskPurge={() => setConfirming(`steps:${t.sessionId}`)}
-              onPurge={() => void purgeSteps(t)}
-              onCancel={() => setConfirming(null)}
+              onYes={emptyAll}
+              onNo={() => setConfirming(null)}
             />
-          ))}
-        </ul>
-      )}
-      <TrashRuns
-        runs={runs}
-        busy={busy}
-        confirming={confirming?.startsWith('runs:') ? confirming.slice(5) : null}
-        onConfirming={(key) => setConfirming(key === null ? null : `runs:${key}`)}
-        onRead={setReadingRun}
-        onPurge={purgeRuns}
-      />
-      {rowError && runs.some((r) => r.runId === rowError.id || `${r.app.projectId ?? '_user'}/${r.app.id}` === rowError.id) && (
-        <p className="mt-1.5 text-xs leading-body text-ink" data-testid="trash-runs-error">
-          {rowError.text}
-        </p>
+          )}
+          {emptyReport && (
+            <p className="mt-2 text-xs leading-body text-ink" data-testid="trash-empty-report">
+              {emptyReport}
+            </p>
+          )}
+        </SettingsRow>
+
+        {trash !== null && nothing ? (
+          <SettingsEmpty testId="trash-list-empty">The trash is empty</SettingsEmpty>
+        ) : sessions.length === 0 ? null : (
+          <ul className="divide-y divide-line/70" data-testid="trash-list">
+            {sessions.map((s) => (
+              <li key={s.id} className="px-4 py-3" data-testid={`trash-row-${s.id}`}>
+                <div className="flex items-baseline gap-2">
+                  <span className="min-w-0 truncate text-sm text-ink">{s.name}</span>
+                  <span className="min-w-0 shrink truncate text-2xs text-ink-muted" data-testid={`trash-project-${s.id}`}>
+                    {s.project ? s.project.name : 'No project'}
+                    {s.project && !s.project.exists && ' (project deleted)'}
+                  </span>
+                  <span className="readout ml-auto shrink-0 text-2xs text-ink-faint">
+                    {formatDay(s.deletedAt)}
+                  </span>
+                </div>
+                <div className="mt-0.5 text-2xs text-ink-faint" data-testid={`trash-holds-${s.id}`}>
+                  {s.messages} {s.messages === 1 ? 'message' : 'messages'} · {formatBytes(s.bytes)}
+                  <GoesWith session={s} />
+                </div>
+                <div className="mt-1.5 flex gap-3 text-xs">
+                  <button
+                    type="button"
+                    className="text-ink-faint hover:text-ink"
+                    onClick={() => setReading(s)}
+                    data-testid={`trash-read-${s.id}`}
+                  >
+                    Read
+                  </button>
+                  <button
+                    type="button"
+                    className="text-ink-faint hover:text-ink disabled:opacity-50"
+                    disabled={busy}
+                    onClick={() => void act(s.id, () => restoreFromTrash(s.id))}
+                    data-testid={`trash-restore-${s.id}`}
+                  >
+                    Restore
+                  </button>
+                  <button
+                    type="button"
+                    className="text-ink-faint hover:text-danger disabled:opacity-50"
+                    disabled={busy}
+                    onClick={() => setConfirming(`session:${s.id}`)}
+                    data-testid={`trash-purge-${s.id}`}
+                  >
+                    Delete for good…
+                  </button>
+                </div>
+                {rowError?.id === s.id && (
+                  <p className="mt-1.5 text-xs leading-body text-ink" data-testid={`trash-error-${s.id}`}>
+                    {rowError.text}
+                  </p>
+                )}
+                {confirming === `session:${s.id}` && (
+                  <Confirm
+                    text={`Delete “${s.name}” for good? Its conversation, attachments and handoff note leave this machine${goesWithText(s)}. This cannot be undone.`}
+                    busy={busy}
+                    onYes={() => void purge(s)}
+                    onNo={() => setConfirming(null)}
+                  />
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+        {steps.length > 0 && (
+          <ul className="divide-y divide-line/70" data-testid="trash-steps-list">
+            {steps.map((t) => (
+              <TrashedSubagentStepsRow
+                key={`${t.machine ?? ''}/${t.sessionId}`}
+                entry={t}
+                busy={busy}
+                confirming={confirming === `steps:${t.sessionId}`}
+                error={errorOf(`steps:${t.sessionId}`)}
+                onRestore={() => void act(`steps:${t.sessionId}`, () => restoreSubagentSteps(t.sessionId))}
+                onAskPurge={() => setConfirming(`steps:${t.sessionId}`)}
+                onPurge={() => void purgeSteps(t)}
+                onCancel={() => setConfirming(null)}
+              />
+            ))}
+          </ul>
+        )}
+      </SettingsCard>
+
+      {runs.length > 0 && (
+        <div>
+          <TrashRuns
+            runs={runs}
+            busy={busy}
+            confirming={confirming?.startsWith('runs:') ? confirming.slice(5) : null}
+            onConfirming={(key) => setConfirming(key === null ? null : `runs:${key}`)}
+            onRead={setReadingRun}
+            onPurge={purgeRuns}
+          />
+          {rowError && runs.some((r) => r.runId === rowError.id || `${r.app.projectId ?? '_user'}/${r.app.id}` === rowError.id) && (
+            <p className="mt-1.5 px-1 text-xs leading-body text-ink" data-testid="trash-runs-error">
+              {rowError.text}
+            </p>
+          )}
+        </div>
       )}
 
       {held !== undefined && (
@@ -317,7 +330,7 @@ export function TrashSection() {
           onCancel={() => setConfirming(null)}
         />
       )}
-    </section>
+    </SettingsPage>
   )
 }
 

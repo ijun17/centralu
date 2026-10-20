@@ -98,7 +98,6 @@ type LayoutActions = Pick<
   | 'setAppSpan'
   | 'setGridPanelSpan'
   | 'setGridPanels'
-  | 'setFoldComposer'
   | 'setToast'
 >
 
@@ -403,11 +402,6 @@ export const layoutActions = (set: StoreSet, get: StoreGet): LayoutActions => ({
     } catch (e) {
       set({ gridPanels: before, toast: `Could not save layout: ${(e as Error).message}` })
     }
-  },
-
-  setFoldComposer(fold) {
-    set({ foldComposer: fold })
-    get().saveWorkspace()
   },
 
   setToast(toast) {

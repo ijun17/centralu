@@ -13,13 +13,15 @@ test('Grid — a collapsed composer expands in the panel it was dropped into', a
   await newSession(page, 'alpha', 'b')
   const b = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
+  // A short window gives each panel a height that folds its composer (SessionPane's foldWhenShort, below about 285px)
+  await page.setViewportSize({ width: 1280, height: 320 })
   await page.evaluate((ids) => (window as any).__store.getState().setGridPanels(ids.map((sessionId: string) => ({ kind: 'session', sessionId }))), [a, b])
   await page.getByTestId('grid-button').click()
   const cell = page.getByTestId(`grid-panel-${a}`)
   await expect(cell).toBeVisible()
 
   /*
-    The other half of this bug is that the composer defaults to collapsed (foldComposer) — the
+    The other half of this bug is that a short panel folds its composer — the
     one spot that can receive a drop was usually off-screen. If an attachment landed there, it
     would be indistinguishable from nothing happening at all, so it must expand the moment
     something attaches.

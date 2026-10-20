@@ -1,14 +1,19 @@
 import { useState, type ChangeEvent, type InputHTMLAttributes, type SelectHTMLAttributes } from 'react'
 import { isPlainEnter } from '../../app/keys.js'
+import { ChevronIcon } from '../../components/icons.jsx'
 
 /**
  * The selects of the settings, in the two shapes they come in: `compact` (on the floor, a row's
  * quiet value: the idle-sleep time, a model) and `raised` (a value on its own line: a theme, a font).
- * `className` adds what is specific to one place, such as a width.
+ * `className` adds what is specific to one place, such as a width; it goes on the frame around the select.
+ *
+ * Drawn rather than left to the OS (owner, 2026-10-19): the native control's arrow and fill differ per engine and
+ * read as a form dropped into the window. The select underneath is the same element (its props, its test id, its
+ * list), so picking from it works as it always did; only its face and the chevron are ours.
  */
 const SELECT_TONE = {
-  compact: 'rounded-md border border-line bg-surface-floor px-1.5 py-0.5 text-sm text-ink',
-  raised: 'w-fit rounded-md border border-line bg-surface-raised px-2 py-1 text-sm text-ink',
+  compact: 'bg-surface-floor',
+  raised: 'bg-surface-raised',
 } as const
 
 export function SettingsSelect({
@@ -16,7 +21,17 @@ export function SettingsSelect({
   className,
   ...props
 }: { tone: keyof typeof SELECT_TONE } & SelectHTMLAttributes<HTMLSelectElement>) {
-  return <select {...props} className={className ? `${SELECT_TONE[tone]} ${className}` : SELECT_TONE[tone]} />
+  return (
+    <span className={`relative inline-flex min-w-0 ${className ?? ''}`.trim()}>
+      <select
+        {...props}
+        className={`w-full min-w-0 cursor-pointer appearance-none truncate rounded-md border border-line py-1 pl-2 pr-6 text-sm text-ink transition-colors hover:border-line-strong focus:border-line-strong focus:outline-none disabled:cursor-default disabled:opacity-50 ${SELECT_TONE[tone]}`}
+      />
+      <span className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-ink-faint">
+        <ChevronIcon open size={11} />
+      </span>
+    </span>
+  )
 }
 
 /** The value of the "Other…" option: no listed choice can be it */

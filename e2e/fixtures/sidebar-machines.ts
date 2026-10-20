@@ -10,7 +10,7 @@ import { newSession, setup as setupProjects } from './control.js'
 
 type MockWindow = { __mock: any; __store: any }
 
-/** This computer with two projects, alpha and beta, added through Add project before any machine is linked */
+/** This computer with two projects, alpha and beta, added through "Add a folder as a project" before any machine is linked */
 async function setup(page: Page): Promise<void> {
   await setupProjects(page, { projects: ['/tmp/alpha', '/tmp/beta'] })
   // No machine linked: Add project is the folder picker at once, with nothing to choose
@@ -124,12 +124,15 @@ export function sidebarMachinesTests(): void {
       const badge = page.getByTestId('project-machine-api')
       await expect(badge).toHaveAttribute('data-status', 'connected')
       expect(await border(page, 'project-machine-api')).toBe('solid')
+      await expect(badge).toHaveAttribute('title', 'Box — me@box')
       await expect(page.getByTestId('project-api')).not.toHaveAttribute('data-away', 'true')
 
       await setMachine(page, 'box', { status: 'unreachable', error: 'ssh: connect to host box port 22: Operation timed out' })
       await expect(badge).toHaveAttribute('data-status', 'unreachable')
       expect(await border(page, 'project-machine-api')).toBe('dashed')
-      await expect(badge).toHaveAttribute('title', 'ssh: connect to host box port 22: Operation timed out')
+      // The state is said on the badge itself, not by its border alone: a dot before the name, and the tooltip
+      await expect(badge).toHaveAttribute('title', 'Box is not connected — ssh: connect to host box port 22: Operation timed out')
+      await expect(badge.locator('span[aria-hidden]')).toHaveCount(1)
       // The row keeps its dimming for a machine that is away
       await expect(page.getByTestId('project-api')).toHaveAttribute('data-away', 'true')
 
@@ -138,16 +141,69 @@ export function sidebarMachinesTests(): void {
       await setMachine(page, 'box', { status: 'connected', error: null })
       await expect(badge).toHaveAttribute('data-status', 'connected')
       expect(await border(page, 'project-machine-api')).toBe('solid')
+      await expect(badge.locator('span[aria-hidden]')).toHaveCount(0)
     })
 
-    test('pressing the badge opens Settings → Machines, and does not open the project', async ({ page }) => {
+    test("pressing the badge opens the machine's menu, and does not open the project; Machine settings leads on to Settings → Machines", async ({ page }) => {
       await setup(page)
       await link(page, 'Box')
       await addOn(page, 'box', '/home/me/api')
       await page.getByTestId('project-machine-api').click()
+      const menu = page.getByTestId('machine-menu-box')
+      await expect(menu).toBeVisible()
+      await expect(page.getByTestId('settings-machines')).toHaveCount(0)
+      await expect(page.getByTestId('project-header-api')).not.toHaveAttribute('aria-current', 'page')
+      await expect(page.getByTestId('project-machine-api')).toHaveAttribute('aria-expanded', 'true')
+      // A connected machine: its name and state, Disconnect and Machine settings; no error, no last-connected line
+      await expect(menu).toContainText('Box')
+      await expect(page.getByTestId('machine-menu-status-box')).toHaveAttribute('data-status', 'connected')
+      await expect(page.getByTestId('machine-menu-disconnect-box')).toBeVisible()
+      await expect(page.getByTestId('machine-menu-connect-box')).toHaveCount(0)
+      await expect(page.getByTestId('machine-menu-error-box')).toHaveCount(0)
+      await expect(menu).not.toContainText('Last connected')
+
+      await page.getByTestId('machine-menu-settings-box').click()
+      await expect(menu).toHaveCount(0)
       await expect(page.getByTestId('settings-machines')).toBeVisible()
       await expect(page.getByTestId('machine-row-box')).toBeVisible()
       await expect(page.getByTestId('project-header-api')).not.toHaveAttribute('aria-current', 'page')
+    })
+
+    test("the badge's menu says why a machine is not connected and brings it back: Disconnect, then Connect", async ({ page }) => {
+      await setup(page)
+      await link(page, 'Box')
+      await addOn(page, 'box', '/home/me/api')
+      const badge = page.getByTestId('project-machine-api')
+      const menu = page.getByTestId('machine-menu-box')
+
+      // Disconnect from the menu: the menu closes, the badge goes dashed, and the project stays listed (dimmed)
+      await badge.click()
+      await page.getByTestId('machine-menu-disconnect-box').click()
+      await expect(menu).toHaveCount(0)
+      await expect(badge).toHaveAttribute('data-status', 'disconnected')
+      expect(await border(page, 'project-machine-api')).toBe('dashed')
+
+      // Not connected: the state, the link's last error, and when it last connected, with Connect in place of Disconnect
+      await setMachine(page, 'box', { error: 'ssh: connect to host box port 22: Operation timed out', lastConnectedAt: Date.now() - 5 * 60_000 })
+      await badge.click()
+      await expect(menu).toBeVisible()
+      await expect(page.getByTestId('machine-menu-status-box')).toHaveAttribute('data-status', 'disconnected')
+      await expect(page.getByTestId('machine-menu-error-box')).toHaveText('ssh: connect to host box port 22: Operation timed out')
+      await expect(menu).toContainText('Last connected')
+      await expect(page.getByTestId('machine-menu-disconnect-box')).toHaveCount(0)
+      await expect(page.getByTestId('machine-menu-connect-box')).toHaveText('Connect')
+      await page.getByTestId('machine-menu-connect-box').click()
+      await expect(menu).toHaveCount(0)
+      await expect(badge).toHaveAttribute('data-status', 'connected')
+      expect(await border(page, 'project-machine-api')).toBe('solid')
+
+      // A machine that never connected since Centralu started says so; Escape puts the menu away
+      await setMachine(page, 'box', { status: 'unreachable', error: null, lastConnectedAt: null })
+      await badge.click()
+      await expect(menu).toContainText('Has not connected since Centralu started')
+      await expect(page.getByTestId('machine-menu-connect-box')).toHaveText('Reconnect')
+      await page.keyboard.press('Escape')
+      await expect(menu).toHaveCount(0)
     })
 
     test("a project is dragged between two of another machine's: the one order goes to the hub with the machines' ids", async ({ page }) => {
@@ -173,7 +229,8 @@ export function sidebarMachinesTests(): void {
       await link(page, 'Box')
       await link(page, 'Laptop')
       await setMachine(page, 'laptop', { status: 'unreachable' })
-      await expect(page.getByTestId('add-project')).toHaveText('Add project')
+      await expect(page.getByTestId('add-project')).toHaveAccessibleName('Add a folder as a project')
+      await expect(page.getByTestId('add-project')).toHaveAttribute('aria-haspopup', 'menu')
 
       await page.getByTestId('add-project').click()
       const menu = page.getByTestId('add-project-machines')
@@ -198,24 +255,12 @@ export function sidebarMachinesTests(): void {
       await test.step('a linked machine: its path typed, the project added there with its badge', async () => {
         await page.getByTestId('add-project').click()
         await page.getByTestId('add-project-on-box').click()
-        await expect(page.getByTestId('add-remote-project-dialog')).toContainText('Add a project on Box')
+        await expect(page.getByTestId('add-remote-project-dialog')).toContainText('Add a project · Box')
         await page.getByTestId('add-remote-project-path').fill('/home/me/api')
         await page.getByTestId('add-remote-project-confirm').click()
         await expect(page.getByTestId('add-remote-project-dialog')).toHaveCount(0)
         await expect(page.getByTestId('project-machine-api')).toHaveText('Box')
         expect(await listed(page)).toEqual(['alpha', 'beta', 'gamma', 'api'])
-      })
-
-      await test.step('or a new folder made there', async () => {
-        await page.getByTestId('add-project').click()
-        await page.getByTestId('add-project-on-box').click()
-        const dialog = page.getByTestId('add-remote-project-dialog')
-        await dialog.getByTestId('add-remote-project-mode-new').click()
-        await dialog.getByTestId('create-project-name').fill('fresh')
-        await dialog.getByTestId('create-project-confirm').click()
-        await expect(dialog).toHaveCount(0)
-        await expect(page.getByTestId('project-machine-fresh')).toHaveText('Box')
-        expect(await page.evaluate(() => (window as unknown as MockWindow).__mock.createProjectCalls)).toEqual([{ name: 'fresh', machine: 'box' }])
       })
     })
 
@@ -240,8 +285,11 @@ export function sidebarMachinesTests(): void {
       expect(await border(page, 'app-machine-box:_user/notes')).toBe('dashed')
       await expect(item).toHaveCSS('opacity', '0.6')
 
-      // Its badge, pressed, opens Settings → Machines rather than the app
+      // Its badge, pressed, opens the machine's menu rather than the app; Machine settings leads on to Settings → Machines
       await page.getByTestId('app-machine-box:_user/notes').click()
+      await expect(page.getByTestId('machine-menu-box')).toBeVisible()
+      await expect(page.getByTestId('pinned-app-box:_user/notes')).toHaveCount(0)
+      await page.getByTestId('machine-menu-settings-box').click()
       await expect(page.getByTestId('settings-machines')).toBeVisible()
       await expect(page.getByTestId('pinned-app-box:_user/notes')).toHaveCount(0)
     })
@@ -280,11 +328,13 @@ export function sidebarMachinesTests(): void {
       expect(box.x).toBeGreaterThanOrEqual(title.x + title.width)
       expect(box.x - (title.x + title.width)).toBeLessThanOrEqual(10)
       expect(Math.abs(box.y + box.height / 2 - (title.y + title.height / 2))).toBeLessThanOrEqual(1)
-      // From the row, the next Tab stop is the badge (WebKit on macOS reaches buttons with Option-Tab), and Enter opens Settings → Machines
+      // From the row, the next Tab stop is the badge (WebKit on macOS reaches buttons with Option-Tab), and Enter opens the machine's menu (Machine settings in it leads to Settings → Machines)
       await row.focus()
       await page.keyboard.press(browserName === 'webkit' ? 'Alt+Tab' : 'Tab')
       await expect(badge).toBeFocused()
       await page.keyboard.press('Enter')
+      await expect(page.getByTestId('machine-menu-box')).toBeVisible()
+      await page.getByTestId('machine-menu-settings-box').click()
       await expect(page.getByTestId('settings-machines')).toBeVisible()
       await expect(page.getByTestId('pinned-app-box:_user/notes')).toHaveCount(0)
     })

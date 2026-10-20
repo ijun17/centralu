@@ -3,17 +3,17 @@ import { useStore } from '../../store/store.js'
 import { useMachineName } from '../../store/selectors.js'
 import { Modal } from '../../components/Modal.jsx'
 import { Button } from '../../components/Button.jsx'
-import { TextInput } from '../../components/TextField.jsx'
+import { TextField } from '../../components/TextField.jsx'
 import { isPlainEscape } from '../../app/keys.js'
-import { CreateProjectForm } from '../project/CreateProjectDialog.jsx'
 
 /**
  * Adds a folder on a linked machine as a project (#82). The folder picker is this computer's, and cannot see another
  * machine's disk, so the path is typed, in that machine's own terms (`/home/me/app`, `C:\Users\me\app`, or a path
  * inside the WSL distro). The machine's host checks it exists and answers with the project, named as the hub names it.
  *
- * Or a new, empty folder made there (#515): by default in that machine's `~/Centralu`, which only its host can name
- * (its home, in its own path terms), so the form asks it as the person types.
+ * It only adds a folder that is there (owner, 2026-10-21): the "Create a new folder" tab went with the sidebar's
+ * "New folder as a project", so a project comes to be in two ways everywhere, an existing folder or a new app. Drawn as
+ * the other dialogs are (header, body, footer; `TextField`, `Button`), docs/design-system.md §11.
  */
 export function AddRemoteProjectDialog({ machine, onClose }: { machine: string; onClose: () => void }) {
   const name = useMachineName(machine) ?? machine
@@ -21,41 +21,14 @@ export function AddRemoteProjectDialog({ machine, onClose }: { machine: string; 
   const [path, setPath] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [mode, setMode] = useState<'existing' | 'new'>('existing')
-  const tab = (m: 'existing' | 'new', label: string) => (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={mode === m}
-      onClick={() => setMode(m)}
-      data-testid={`add-remote-project-mode-${m}`}
-      className={`rounded-md px-2 py-1 text-xs transition-colors ${mode === m ? 'bg-surface-hover text-ink' : 'text-ink-faint hover:text-ink'}`}
-    >
-      {label}
-    </button>
-  )
-  const tabs = (
-    <div className="mt-2 flex gap-1" role="tablist">
-      {tab('existing', 'Add an existing folder')}
-      {tab('new', 'Create a new folder')}
-    </div>
-  )
-  const shell = 'w-[420px] max-w-[calc(92vw/var(--text-zoom))] rounded-lg border border-line bg-surface-side p-4 shadow-(--shadow-modal)'
-  if (mode === 'new') {
-    return (
-      <Modal onClose={onClose} testId="add-remote-project-dialog">
-        <div className={shell}>
-          <p className="text-md text-ink">Add a project on {name}</p>
-          {tabs}
-          <CreateProjectForm machine={machine} onDone={onClose} onCancel={onClose} />
-        </div>
-      </Modal>
-    )
-  }
   return (
     <Modal onClose={onClose} testId="add-remote-project-dialog">
       <form
-        className={shell}
+        className="flex w-[440px] max-w-[calc(92vw/var(--text-zoom))] flex-col overflow-hidden rounded-lg border border-line bg-surface-side shadow-(--shadow-modal)"
+        onKeyDown={(e) => {
+          // Not the Esc that cancels a composition in the path field (#181)
+          if (isPlainEscape(e.nativeEvent)) onClose()
+        }}
         onSubmit={async (e) => {
           e.preventDefault()
           if (!path.trim()) return
@@ -72,39 +45,54 @@ export function AddRemoteProjectDialog({ machine, onClose }: { machine: string; 
           }
         }}
       >
-        <p className="text-md text-ink">Add a project on {name}</p>
-        {tabs}
-        <p className="mt-1.5 text-xs leading-body text-ink-muted">
-          The folder&apos;s path on {name}, as that machine writes it. Its agents, files and terminals run there.
-        </p>
-        <TextInput
-          autoFocus
-          value={path}
-          onChange={(e) => setPath(e.target.value)}
-          onKeyDown={(e) => {
-            e.stopPropagation()
-            if (isPlainEscape(e.nativeEvent)) onClose()
-          }}
-          placeholder="/home/me/project"
-          spellCheck={false}
-          autoComplete="off"
-          data-testid="add-remote-project-path"
-          font="mono"
-          className="mt-3 w-full"
-        />
-        {error && (
-          <p className="mt-2 text-xs leading-body text-danger" data-testid="add-remote-project-error">
-            {error}
+        <header className="shrink-0 border-b border-line px-4 py-2.5">
+          <h2 className="text-md font-medium text-ink">
+            Add a project <span className="text-ink-faint">·</span> <span className="text-ink-muted">{name}</span>
+          </h2>
+          <p className="mt-1 text-xs leading-body text-ink-faint">
+            A folder on {name}. Its agents, files and terminals run there.
           </p>
-        )}
-        <div className="mt-4 flex justify-end gap-2">
-          <button type="button" className="rounded-md px-2 py-1 text-sm text-ink-faint hover:text-ink" onClick={onClose}>
-            Cancel
-          </button>
-          <Button type="submit" variant="primary" disabled={busy || !path.trim()} data-testid="add-remote-project-confirm">
-            {busy ? 'Adding…' : 'Add project'}
-          </Button>
+        </header>
+
+        <div className="space-y-3 px-4 py-3">
+          <TextField
+            label="Folder"
+            hint={`its path on ${name}, as that machine writes it`}
+            autoFocus
+            value={path}
+            onChange={(e) => setPath(e.target.value)}
+            placeholder="/home/me/project"
+            spellCheck={false}
+            autoComplete="off"
+            font="mono"
+            data-testid="add-remote-project-path"
+          />
+          {error && (
+            <p
+              className="whitespace-pre-wrap break-words rounded-md border border-line bg-surface-raised px-2.5 py-2 text-xs leading-body text-ink"
+              role="alert"
+              data-testid="add-remote-project-error"
+            >
+              {error}
+            </p>
+          )}
         </div>
+
+        <footer className="flex shrink-0 items-center justify-end gap-2 border-t border-line px-4 py-2.5">
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            type="submit"
+            variant="primary"
+            disabled={!path.trim()}
+            busy={busy}
+            busyText="Adding…"
+            data-testid="add-remote-project-confirm"
+          >
+            Add project
+          </Button>
+        </footer>
       </form>
     </Modal>
   )

@@ -30,8 +30,13 @@ export function foldSummary(
   for (const raw of sessions) {
     // An open question is an approval here as it is in the inbox (`listedState`): the line cannot call it working or nothing
     const s = { ...raw, state: listedState(raw) }
-    // Waiting states follow the inbox rule (#669): a read `waiting_input` session is not "waiting on me"
-    if (s.state === 'waiting_input' && !isListedWaiting(s)) continue
+    /*
+     * An idle session is not counted at all, read or unread (owner, 2026-10-20): the chips speak only of what runs and
+     * what needs the person (an approval, a question, an error). An unread answer looked as urgent as an approval, and
+     * whether an idle session counted depended on having opened it, which the line could not show. The inbox lists the
+     * unread ones.
+     */
+    if (s.state === 'waiting_input' && !(s.interruption && isListedWaiting(s))) continue
     // A stopped turn the inbox lists counts with the errors, as the inbox's counters count it (#698)
     const counted = s.interruption && isListedWaiting(s) ? 'error' : s.state
     counts.set(counted, (counts.get(counted) ?? 0) + 1)

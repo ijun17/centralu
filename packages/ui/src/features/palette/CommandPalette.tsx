@@ -8,15 +8,18 @@ import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useNavShortcut, useShortcut } from '../../app/shortcut.js'
 import { Kbd } from '../../components/primitives.jsx'
 import { Badge } from '../../components/Badge.jsx'
+import { Button } from '../../components/Button.jsx'
 import { useFocusReturn } from '../../components/focusReturn.js'
 import { useDialogFocus } from '../../components/dialogFocus.js'
 import { composingKey } from '../../app/keys.js'
 import { enterMayOpen, hitsAnswer, NO_HITS, type FoundHits } from './searchHits.js'
+import { ShortcutTable } from './ShortcutTable.jsx'
 
 type Item =
   | { kind: 'session'; id: string; label: string; sub: string }
   | { kind: 'project'; id: string; label: string; sub: string }
-  | { kind: 'action'; id: string; label: string; sub: string; run: () => void }
+  /** `keepOpen`: the action changes what the palette shows rather than leaving it (the shortcut table) */
+  | { kind: 'action'; id: string; label: string; sub: string; run: () => void; keepOpen?: boolean }
   | { kind: 'message'; id: string; sessionId: string; seq: number; label: string; sub: string }
   | { kind: 'app'; id: string; label: string; sub: string; projectId: string | null; appId: string; machine: string | null }
 
@@ -52,6 +55,11 @@ export function CommandPalette() {
 
   const [query, setQuery] = useState('')
   const [cursor, setCursor] = useState(0)
+  /*
+   * The shortcut table, shown in place of the list (owner, 2026-10-20: it left Settings for here). Esc goes back to the
+   * list, as a second level of anything does; Esc there closes.
+   */
+  const [keys, setKeys] = useState(false)
   // The hits with the query they answer: until the answer to the latest keystroke comes, the rows are an earlier query's
   const [found, setFound] = useState<FoundHits<{ sessionId: string; seq: number; snippet: string }>>(NO_HITS)
   const hits = found.list
@@ -99,6 +107,7 @@ export function CommandPalette() {
     }
     setQuery('')
     setCursor(0)
+    setKeys(false)
   }, [open])
 
   const items = useMemo<Item[]>(() => {
@@ -113,7 +122,8 @@ export function CommandPalette() {
         : []),
       { kind: 'action', id: 'settings', label: 'Open settings', // The window's own categories, in its own order — the palette should not describe a
       // room by a floor plan it no longer has (issue #7)
-      sub: 'Notifications · permissions · shortcuts', run: () => toggleSettings(true) },
+      sub: 'Notifications · appearance · permissions', run: () => toggleSettings(true) },
+      { kind: 'action', id: 'shortcuts', label: 'Keyboard shortcuts', sub: 'The keys on this keyboard', run: () => setKeys(true), keepOpen: true },
       { kind: 'action', id: 'open-git', label: 'Open Git', sub: 'Changes · history · branches', run: () => openGit() },
       // Import (#1141): its sidebar door went with "Your apps"; an imported app lands as a project of its own
       { kind: 'action', id: 'import-app', label: 'Import an app', sub: 'From a folder, a .zip or a link', run: () => useStore.getState().openImport() },
@@ -123,8 +133,9 @@ export function CommandPalette() {
         top bar (issue #33). The bar advertised them next to the count, which is the one
         moment the count itself is what you want to read — and a hint you have already
         learned keeps charging you attention forever. Somewhere they can be found is still
-        owed, though, so they are said twice: named with their keys in Settings → Shortcuts
-        (for looking up), and runnable from here (for doing without knowing the key).
+        owed, though, so they are said twice: named with their keys in the shortcut table
+        (Keyboard shortcuts, above, for looking up), and runnable from here (for doing without
+        knowing the key).
       */
       // Back and forward between screens (#374). The palette lays over the screen and is not one, so back goes to the screen before the one under it
       { kind: 'action', id: 'nav-back', label: 'Go back', sub: `${nav(-1)} · the screen before`, run: () => useStore.getState().goBack() },
@@ -226,7 +237,10 @@ export function CommandPalette() {
       } else if (item.kind === 'app') {
         // As its sidebar row opens it: only a linked machine's user-folder app names its machine (AppRow)
         openApp(item.projectId, item.appId, { machine: item.machine })
-      } else item.run()
+      } else {
+        item.run()
+        if (item.keepOpen) return
+      }
       toggle(false)
     },
     [focusSession, focusProject, askComposerFocus, openSearchHit, openApp, sessions, toggle],
@@ -242,6 +256,13 @@ export function CommandPalette() {
        * typing "설정", and closed the palette under the input method.
        */
       if (composingKey(e)) return
+      if (keys) {
+        if (e.key !== 'Escape') return
+        e.preventDefault()
+        setKeys(false)
+        setTimeout(() => inputRef.current?.focus(), 0)
+        return
+      }
       if (e.key === 'ArrowDown') setCursor((c) => Math.min(c + 1, items.length - 1))
       else if (e.key === 'ArrowUp') setCursor((c) => Math.max(c - 1, 0))
       else if (e.key === 'Enter') {
@@ -254,7 +275,7 @@ export function CommandPalette() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, items, cursor, choose, toggle, hitsFresh])
+  }, [open, keys, items, cursor, choose, toggle, hitsFresh])
 
   /*
    * A dialog with a combobox (#842 item 7): focus stays inside while it is up, the field says it drives the list, and the
@@ -264,6 +285,10 @@ export function CommandPalette() {
   // Leaves with its exit (usePresence below), so focus inside it is given back as it closes (#115)
   useFocusReturn(open, panelRef)
   const dialog = useDialogFocus(panelRef, open)
+  // The table takes the field's place, and the field leaves with its focus: the panel keeps the keyboard (for Esc)
+  useEffect(() => {
+    if (keys) panelRef.current?.focus({ preventScroll: true })
+  }, [keys])
   const listId = useId()
   const optionId = (i: number) => `${listId}-${i}`
 
@@ -299,67 +324,98 @@ export function CommandPalette() {
         onClick={(e) => e.stopPropagation()}
         data-testid="palette-panel"
       >
-        <input
-          ref={inputRef}
-          role="combobox"
-          aria-expanded={items.length > 0}
-          aria-controls={listId}
-          aria-autocomplete="list"
-          aria-activedescendant={items[cursor] ? optionId(cursor) : undefined}
-          aria-label="Search sessions, projects, apps, messages"
-          className="w-full border-b border-line bg-transparent px-4 py-3 text-md text-ink placeholder:text-ink-faint focus:outline-none"
-          placeholder="Search sessions, projects, apps, messages"
-          value={query}
-          onChange={(e) => {
-            setQuery(e.target.value)
-            setCursor(0)
-          }}
-          data-testid="palette-input"
-        />
-        <ul id={listId} role="listbox" aria-label="Results" className="max-h-[calc(50vh/var(--text-zoom))] overflow-y-auto">
-          {items.length === 0 ? (
-            <li role="presentation" className="px-4 py-6 text-center text-sm text-ink-faint" data-testid="palette-empty">
-              No results
-            </li>
-          ) : (
-            items.map((item, i) => (
-              <li key={`${item.kind}-${item.id}`} role="presentation">
-                <button
-                  id={optionId(i)}
-                  role="option"
-                  aria-selected={i === cursor}
-                  tabIndex={-1}
-                  className={`flex w-full items-baseline gap-2 border-l-2 px-3 py-1.5 text-left transition-colors ${
-                    i === cursor ? 'border-l-ink-muted bg-surface-hover/40' : 'border-l-transparent hover:bg-surface-hover/20'
-                  }`}
-                  onClick={() => choose(item)}
-                  data-testid={`palette-item-${item.kind}`}
-                >
-                  <Badge className="w-10 shrink-0">
-                    {item.kind === 'session'
-                      ? 'Session'
-                      : item.kind === 'project'
-                        ? 'Folder'
-                        : item.kind === 'message'
-                          ? 'Chat'
-                          : item.kind === 'app'
-                            ? 'App'
-                            : 'Action'}
-                  </Badge>
-                  <span className="truncate text-md text-ink">{item.label}</span>
-                  <span className="ml-auto shrink-0 truncate text-xs text-ink-faint">{item.sub}</span>
-                </button>
-              </li>
-            ))
-          )}
-        </ul>
-        <footer className="flex items-center gap-1 border-t border-line px-3 py-1.5 text-2xs text-ink-faint">
-          <Kbd>↑</Kbd>
-          <Kbd>↓</Kbd> Move
-          <Kbd>↵</Kbd> Open
-          <Kbd>esc</Kbd> Close
-        </footer>
+        {keys ? (
+          <PaletteShortcuts
+            onBack={() => {
+              setKeys(false)
+              setTimeout(() => inputRef.current?.focus(), 0)
+            }}
+          />
+        ) : (
+          <>
+            <input
+              ref={inputRef}
+              role="combobox"
+              aria-expanded={items.length > 0}
+              aria-controls={listId}
+              aria-autocomplete="list"
+              aria-activedescendant={items[cursor] ? optionId(cursor) : undefined}
+              aria-label="Search sessions, projects, apps, messages"
+              className="w-full border-b border-line bg-transparent px-4 py-3 text-md text-ink placeholder:text-ink-faint focus:outline-none"
+              placeholder="Search sessions, projects, apps, messages"
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value)
+                setCursor(0)
+              }}
+              data-testid="palette-input"
+            />
+            <ul id={listId} role="listbox" aria-label="Results" className="max-h-[calc(50vh/var(--text-zoom))] overflow-y-auto">
+              {items.length === 0 ? (
+                <li role="presentation" className="px-4 py-6 text-center text-sm text-ink-faint" data-testid="palette-empty">
+                  No results
+                </li>
+              ) : (
+                items.map((item, i) => (
+                  <li key={`${item.kind}-${item.id}`} role="presentation">
+                    <button
+                      id={optionId(i)}
+                      role="option"
+                      aria-selected={i === cursor}
+                      tabIndex={-1}
+                      className={`flex w-full items-baseline gap-2 border-l-2 px-3 py-1.5 text-left transition-colors ${
+                        i === cursor ? 'border-l-ink-muted bg-surface-hover/40' : 'border-l-transparent hover:bg-surface-hover/20'
+                      }`}
+                      onClick={() => choose(item)}
+                      data-testid={`palette-item-${item.kind}`}
+                    >
+                      <Badge className="w-10 shrink-0">
+                        {item.kind === 'session'
+                          ? 'Session'
+                          : item.kind === 'project'
+                            ? 'Folder'
+                            : item.kind === 'message'
+                              ? 'Chat'
+                              : item.kind === 'app'
+                                ? 'App'
+                                : 'Action'}
+                      </Badge>
+                      <span className="truncate text-md text-ink">{item.label}</span>
+                      <span className="ml-auto shrink-0 truncate text-xs text-ink-faint">{item.sub}</span>
+                    </button>
+                  </li>
+                ))
+              )}
+            </ul>
+            <footer className="flex items-center gap-1 border-t border-line px-3 py-1.5 text-2xs text-ink-faint">
+              <Kbd>↑</Kbd>
+              <Kbd>↓</Kbd> Move
+              <Kbd>↵</Kbd> Open
+              <Kbd>esc</Kbd> Close
+            </footer>
+          </>
+        )}
       </div>
+    </div>
+  )
+}
+
+/** The shortcut table inside the palette, with the way back to the list (Esc, or the button) */
+function PaletteShortcuts({ onBack }: { onBack: () => void }) {
+  return (
+    <div data-testid="palette-shortcuts">
+      <div className="flex items-center gap-2 border-b border-line px-4 py-3">
+        <h2 className="text-md text-ink">Keyboard shortcuts</h2>
+        <Button variant="ghost" size="sm" className="ml-auto" onClick={onBack} data-testid="palette-shortcuts-back">
+          Back
+        </Button>
+      </div>
+      <div className="max-h-[calc(50vh/var(--text-zoom))] overflow-y-auto">
+        <ShortcutTable />
+      </div>
+      <footer className="flex items-center gap-1 border-t border-line px-3 py-1.5 text-2xs text-ink-faint">
+        <Kbd>esc</Kbd> Back
+      </footer>
     </div>
   )
 }
