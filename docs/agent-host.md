@@ -1785,9 +1785,10 @@ The environment gate disables peer discovery, cross-session sends and inbox bind
 inspected CLI versions 2.1.263–2.1.299. It is undocumented, version-sensitive and undoable by the `env` of the person's user settings, so the
 documented refusal and discovery denies stay as additional controls. They do not alone block
 every outbound send to a known peer if the gate changes. A keeper adoption attaches to an
-already-running process and cannot apply new startup controls; restart processes created by
-an older host to pick up this fix. The auto launch fingerprint is versioned so a retained
-auto process with the old controls restarts through the normal launch-settings handover path. See [security-boundaries.md](security-boundaries.md).
+already-running process and cannot apply new startup controls. The `auto` launch fingerprint is version 3, so the host
+that adopts a retained `auto` process started before the controls restarts it once through the normal launch-settings
+handover path (#589): at once when it is idle, after its current turn otherwise. Nothing needs to be restarted by hand.
+See [security-boundaries.md](security-boundaries.md).
 
 The regression matrix in `sessions/setting-files.test.ts` checks the options for each kind on
 start and resume across trust and permission presets; adapter tests check merging and the keeper
