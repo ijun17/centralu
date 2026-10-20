@@ -14,6 +14,11 @@ mod ide;
 mod os_integration;
 mod path_safety;
 mod quit;
+// Why signed content was refused, in a native window (#634). The words and the once-only rule run everywhere (and
+// are tested everywhere); only a macOS release ever has a refusal to show, so on Windows nothing but the tests calls them
+// (an OS check in this file would be one more for `platform_checks`: this is not one)
+#[allow(dead_code)]
+mod refusal;
 // The window's side of the macOS shell (thin-shell plan §6): only a macOS release build opens it.
 #[cfg(unix)]
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]

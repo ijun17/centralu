@@ -1,3 +1,5 @@
+import { errorMessage } from '@cc/protocol'
+import { isObj } from '../json-value.js'
 import { ensureToolPath } from '../env-path.js'
 import { usesShippedConpty } from '../os.js'
 import type { CommandTag, TerminalTag } from '../keeper/tags.js'
@@ -27,6 +29,11 @@ export type Pty = {
  * node-pty, or the keeper's pty service with the same surface (#280 step 2, `keeper/keeper-pty.ts`).
  * The spawn options also carry a `tag`, which node-pty ignores and the keeper stores for the next host.
  */
+/** Whether a loaded module has what `PtyModule` asks of node-pty: a `spawn` */
+export function isPtyModule(m: unknown): m is PtyModule {
+  return isObj(m) && typeof m.spawn === 'function'
+}
+
 export type PtyModule = {
   spawn(file: string, args: string[] | string, opts: Record<string, unknown>): Pty
 }
@@ -87,7 +94,7 @@ export class PtySlot {
     try {
       mod = load()
     } catch (err) {
-      return this.fail(failure('load', (err as Error).message))
+      return this.fail(failure('load', errorMessage(err)))
     }
     // A GUI app never inherits the login shell's PATH (a problem already run into when creating a session)
     ensureToolPath()
@@ -102,7 +109,7 @@ export class PtySlot {
       })
       this.wire(handle)
     } catch (err) {
-      this.fail(failure('spawn', (err as Error).message))
+      this.fail(failure('spawn', errorMessage(err)))
     }
   }
 
@@ -192,19 +199,23 @@ export function spawnPty(mod: PtyModule, launch: ShellLaunch, opts: Record<strin
     return mod.spawn(launch.file, launch.args, { ...opts, useConptyDll: true })
   } catch (err) {
     // Only a missing or unloadable DLL: any other failure would fail the same way again
-    if (!/conpty\.dll/i.test((err as Error).message)) throw err
-    console.error(`[pty] ${(err as Error).message}; using the console of Windows instead`)
+    if (!/conpty\.dll/i.test(errorMessage(err))) throw err
+    console.error(`[pty] ${errorMessage(err)}; using the console of Windows instead`)
     return mod.spawn(launch.file, launch.args, opts)
   }
 }
 
-/** node-pty's Windows pty, as far as `releaseEnded` reaches into it (node-pty 1.1.0, lib/windowsPtyAgent.js) */
-type WindowsPtyInternals = {
-  _agent?: {
-    _inSocket?: { destroy?: () => void }
-    _outSocket?: { destroy?: () => void }
-    _conoutSocketWorker?: { _worker?: { terminate?: () => Promise<number> } }
-  }
+/** node-pty's Windows pty agent, as far as `releaseEnded` reaches into it (node-pty 1.1.0, lib/windowsPtyAgent.js) */
+type WindowsPtyAgent = {
+  _inSocket?: { destroy?: () => void }
+  _outSocket?: { destroy?: () => void }
+  _conoutSocketWorker?: { _worker?: { terminate?: () => Promise<number> } }
+}
+
+/** The agent a Windows pty holds, if it holds an object there; every part of it is checked again where it is used */
+function windowsAgentOf(handle: Pty): WindowsPtyAgent | undefined {
+  const agent: unknown = Reflect.get(handle, '_agent')
+  return isObj(agent) ? agent : undefined
 }
 
 let warnedInternals = false
@@ -224,7 +235,7 @@ let warnedInternals = false
  * stderr, and is left as node-pty leaves it: never a throw on the way out of a terminal.
  */
 export function releaseEnded(handle: Pty): void {
-  const agent = (handle as WindowsPtyInternals)._agent
+  const agent = windowsAgentOf(handle)
   if (!agent) {
     if (handle.constructor?.name === 'WindowsTerminal') warnInternals('no _agent')
     return
@@ -241,7 +252,7 @@ export function releaseEnded(handle: Pty): void {
     agent._outSocket?.destroy?.()
     void worker?.terminate?.().catch(() => {})
   } catch (err) {
-    warnInternals((err as Error).message)
+    warnInternals(errorMessage(err))
   }
 }
 

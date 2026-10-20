@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { relative, resolve, sep } from 'node:path'
 import type { Attachment, Interruption, NormalizedEvent, SessionInfo } from '@cc/protocol'
 import { applyBackgroundTasks, applySessionState, nextContext, nextStateFor } from '@cc/protocol'
@@ -38,6 +39,8 @@ export type SessionEventsHost = Pick<DelegationHost, 'agentRuns' | 'children' | 
   Pick<WorktreeHost, 'cwdOf' | 'resuming'> &
   Pick<SessionStartsHost, 'appSessions' | 'apps' | 'cardRests' | 'launches' | 'openSession' | 'tools'> & {
     readonly cards: RoutedCards
+    /** Whether the session's tool takes a message into the turn it is running, rather than holding it for the next (`midTurnInput`) */
+    joinsRunningTurn(sessionId: string): boolean
     /** Sessions whose hub task's input is tracked (`sendFromHub`): its own turn takes the depth mark down, no other */
     readonly hubAskTurns: Set<string>
     readonly interruptions: InterruptionWatch
@@ -139,6 +142,8 @@ export class SessionEvents {
          */
         // The queued request being delivered started its turn (#684 review): only now is it off the queue and the store
         if (!wasBusy && inTurn(m.state)) this.host.children.queuedTurnStarted(m.id)
+        // A turn starts (#1377): whose it is comes from the message it started with, else the CLI's own
+        if (!wasBusy && inTurn(m.state)) this.host.children.turnStarted(m.id)
         /*
          * Or the tool refused it outright (#839): an error or a usage limit, and no turn starts. The request is done with
          * all the same, and this is its turn's end: its requester is told, the turn it owned is released, the next request
@@ -197,7 +202,13 @@ export class SessionEvents {
     const waited = runOpen && (!delegation || (delegation.waiters ?? 0) > 0)
     run?.onEvent(e)
     if (e.sessionId) for (const observer of this.host.turnObservers.get(e.sessionId) ?? []) observer.onEvent(e)
-    this.host.emit(seq != null ? ({ ...e, seq } as NormalizedEvent) : e)
+    /*
+     * Whose the turn was (#1377), read once as it ends, from what the tool says it took in: said on the event that ends
+     * it, so a hub that follows this host reads it rather than guessing. The person's own turn is reported to nobody
+     */
+    const turnBy = endedTurn && e.sessionId ? this.host.children.turnEnded(e.sessionId, this.host.handles.get(e.sessionId)?.turnInputs?.()) : undefined
+    const said = turnBy && (e.type === 'turn_complete' || e.type === 'state_change' || e.type === 'error' || e.type === 'limit_reached') ? { ...e, turn: turnBy } : e
+    this.host.emit(seq != null ? ({ ...said, seq } as NormalizedEvent) : said)
     this.closeIntoRest(e)
     // After the event that caused it, so a window reads the error first and the reason for it second (#698)
     const nowInterrupted = e.sessionId ? this.host.meta.get(e.sessionId)?.interruption ?? null : null
@@ -213,8 +224,8 @@ export class SessionEvents {
      * reported, the marker stayed set, and a later, unrelated turn ended up reported as "it finished".
      */
     // A wait settled in an earlier turn holds that turn's answer, not this one's
-    if (endedTurn && e.sessionId && !run?.tracksInputs) void this.host.reports.reportBackIfAwaited(e.sessionId, e, runOpen ? run?.completedAnswer : undefined)
-    if (endedTurn && e.sessionId && !owed) void this.host.reports.tellAskerOfInterruption(e.sessionId, delegation?.callerId)
+    if (endedTurn && e.sessionId && !run?.tracksInputs) void this.host.reports.reportBackIfAwaited(e.sessionId, e, runOpen ? run?.completedAnswer : undefined, undefined, turnBy)
+    if (endedTurn && e.sessionId && !owed && turnBy?.by !== 'person') void this.host.reports.tellAskerOfInterruption(e.sessionId, delegation?.callerId)
     // A card in a delegated turn goes to the session that gave the turn too (#676); a turn-long link ends with the turn
     if ((e.type === 'question_request' || e.type === 'approval_request') && e.sessionId) this.host.cards.routeCard(e.sessionId, e.requestId, e.type === 'question_request' ? 'question' : 'approval')
     if (endedTurn && e.sessionId && this.host.children.turnOwners.get(e.sessionId)?.untilTurnEnd) this.host.children.releaseTurn(e.sessionId)
@@ -405,6 +416,8 @@ export class SessionEvents {
      * either when Centralu puts a line of its own in front of it (`rootAppsNotice`, once).
      */
     fromPerson = false,
+    /** What the person chose for a delegation report the session owes (#1377); the default is "just asking" */
+    intent: 'ask' | 'task' | 'takeover' = 'ask',
   ): Promise<void> {
     const restarting = this.host.restartPolicy.deferredRestarts.get(sessionId)
     if (restarting) await restarting
@@ -466,6 +479,7 @@ export class SessionEvents {
       text,
       ...(from ? { from } : {}),
       ...(fromApp ? { fromApp } : {}),
+      ...(!from && !fromApp && intent !== 'ask' ? { intent } : {}),
       // A message the host injected (an app's composer, C-5) only ever surfaces on screen through this event
       // — attachments have to ride along too, or the bubble is incomplete
       ...(attachments?.length ? { attachments } : {}),
@@ -491,12 +505,17 @@ export class SessionEvents {
     // An orchestrator that had root apps attached reads once why their names are gone (#1205); never stored or shown
     const notice = this.host.apps.rootAppsNotice(sessionId)
     const input = notice ? `[Centralu] ${notice}\n\n${adapterText}` : adapterText
+    // Whose turn this message makes, or joins (#1377): only the person's own message (no source) is theirs
+    const joins = inTurn(m.state) && this.host.joinsRunningTurn(sessionId)
+    // Named, so the turn that ends can say whether it took this message in (`SessionHandle.turnInputs`)
+    const inputId = joins ? randomUUID() : undefined
+    this.host.children.noteMessage(sessionId, !from && !fromApp ? 'person' : 'work', inTurn(m.state), this.host.joinsRunningTurn(sessionId), intent === 'task', inputId)
     // A turn is asked for now, whether or not the tool announces it before its first card (`CardRests`)
     this.host.cardRests.turnAsked(sessionId)
     if (sendInput) sendInput(h, input)
     // Not with a line of Centralu's in front of it: that message is not only the person's words
-    else if (fromPerson && !notice) h.send(input, { origin: { kind: 'human' } })
-    else h.send(input)
+    else if (fromPerson && !notice) h.send(input, { origin: { kind: 'human' }, ...(inputId ? { id: inputId } : {}) })
+    else h.send(input, inputId ? { id: inputId } : undefined)
     // It takes messages again: what could not be told it before goes in now (#1186)
     this.host.reports.deliverHeld(sessionId)
   }

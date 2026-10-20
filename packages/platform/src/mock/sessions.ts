@@ -1,6 +1,6 @@
 import type { Attachment, PermissionPreset, CreateSessionParams, SessionInfo, MessageImage, ToolName } from '@cc/protocol'
 import { isRecord, oneLineText, sessionLiveDefaults, SUBAGENT_STEPS_PAGE, wireSegments } from '@cc/protocol'
-import type { AgentPort } from '../ports/index.js'
+import type { AgentPort, SendIntent } from '../ports/index.js'
 import type { MockClock } from './clock.js'
 import type { SessionStore } from './session-store.js'
 import type { ProjectStore } from './project-store.js'
@@ -31,6 +31,10 @@ export class SessionsMock {
   readonly unresumable = new Set<string>()
   readonly savedAttachments: Attachment[] = []
   readonly sentAttachments: Attachment[] = []
+  /** For tests: every message sent, with the choice it carried for a report the session owes (#1377) */
+  readonly sentIntents: { sessionId: string; text: string; intent: SendIntent | undefined }[] = []
+  /** For tests and the demo: sessions that owe a delegation report, and to whom (#1377) */
+  readonly reportsOwed = new Map<string, { callerId: string; callerName: string }>()
   /** The mock's disk is memory — this is where the bytes the real thing re-reads from an attachments/ file are recovered from */
   readonly attachmentData = new Map<string, string>()
   /** For tests: sessions asked to restart */
@@ -60,7 +64,7 @@ export class SessionsMock {
     s.live = true
     this.emit({ type: 'session_live', sessionId, live: true })
   }
-  readonly agents: Pick<AgentPort, 'createSession' | 'saveAttachment' | 'send' | 'reorderSessions' | 'switchTool' | 'worktreeStatus' | 'deleteSession' | 'updateSettings' | 'restartSession' | 'resumeSession' | 'forkConversation' | 'rename' | 'markRead' | 'listSessions' | 'loadMessages' | 'messageImage' | 'loadSubagentMessages' | 'subagentTrashed'> = {
+  readonly agents: Pick<AgentPort, 'createSession' | 'saveAttachment' | 'send' | 'reportOwed' | 'reorderSessions' | 'switchTool' | 'worktreeStatus' | 'deleteSession' | 'updateSettings' | 'restartSession' | 'resumeSession' | 'forkConversation' | 'rename' | 'markRead' | 'listSessions' | 'loadMessages' | 'messageImage' | 'loadSubagentMessages' | 'subagentTrashed'> = {
     createSession: async (params: CreateSessionParams) => {
       this.lastCreateParams = params
       this.createParamsLog.push(params)
@@ -200,8 +204,12 @@ export class SessionsMock {
       this.attachmentData.set(att.path, dataBase64)
       return att
     },
-    send: async (sessionId: string, text: string, attachments?: Attachment[]) => {
+    reportOwed: async (sessionId: string) => this.reportsOwed.get(sessionId) ?? null,
+    send: async (sessionId: string, text: string, attachments?: Attachment[], intent?: SendIntent) => {
       if (attachments?.length) this.sentAttachments.push(...attachments)
+      this.sentIntents.push({ sessionId, text, intent })
+      // As the host: taking the session over closes the report it owed
+      if (intent === 'takeover') this.reportsOwed.delete(sessionId)
       const s = this.store.sessions.get(sessionId)
       if (!s) throw mockError('Session not found', 'session_not_found')
       // The same rule as the host: if it is asleep, revive it and then send (automatic resume)

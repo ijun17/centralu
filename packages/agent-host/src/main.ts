@@ -615,6 +615,7 @@ const activity = (): ActivitySnapshot => ({
   commandRuns: commandRuns.liveCount(),
 })
 const router: Router = new Router({
+  forwarding: (method, params) => mgr.forwarding(method, params),
   local: createRpcHandler(mgr, adapters, {
     // A deleted project gives back the user-folder app it had become, once the trash cannot restore it (#1204)
     settleDeletedProjects: () => userAppAdoption.settle(),

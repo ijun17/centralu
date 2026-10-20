@@ -638,3 +638,73 @@ describe('the host on its way out, on Windows (#353)', () => {
     await next.handle.dispose()
   })
 })
+
+// #1377: the host names a message it sends mid-turn, and the turn that ends says whether it took it in
+describe('what the turn that ends took in (#1377)', () => {
+  const idA = '11111111-1111-4111-8111-111111111111'
+  const idB = '22222222-2222-4222-8222-222222222222'
+
+  async function watched(a: InstanceType<typeof ClaudeAdapter>) {
+    const seen: (readonly string[] | null | undefined)[] = []
+    const box: { handle?: Awaited<ReturnType<typeof a.createSession>> } = {}
+    const handle = await a.createSession({ sessionId: 'sx', cwd: dir, permissionPreset: 'auto' }, (e) => {
+      // As the host does: while the event that ends the turn is handled
+      if (e.type === 'turn_complete' || e.type === 'error') seen.push(box.handle?.turnInputs?.())
+    })
+    box.handle = handle
+    return { handle, seen, cli: sdk.started.at(-1)! }
+  }
+
+  it('writes the id the host gave an input as its UUID, and names the inputs a result took in while its events are handled', async () => {
+    const { handle, seen, cli } = await watched(adapter())
+    handle.send('first', { id: idA })
+    handle.send('second', { id: idB })
+    expect((await cli.input.next()).value?.uuid).toBe(idA)
+    expect((await cli.input.next()).value?.uuid).toBe(idB)
+    // The turn took only the first in: the second runs as a turn of its own after it
+    cli.push({ type: 'result', subtype: 'success', user_message_uuid: idA, user_message_uuids: [idA] })
+    await eventually(() => seen.length === 1)
+    expect(seen[0]).toEqual([idA])
+    cli.push({ type: 'result', subtype: 'success', user_message_uuid: idB, user_message_uuids: [idB] })
+    await eventually(() => seen.length === 2)
+    expect(seen[1]).toEqual([idB])
+    // Outside the events of a result, it says nothing
+    expect(handle.turnInputs?.()).toBeNull()
+    cli.end()
+    await handle.dispose()
+  })
+
+  it('a result that names none (a background task\'s own turn) took none in', async () => {
+    const { handle, seen, cli } = await watched(adapter())
+    cli.push({ type: 'result', subtype: 'success' })
+    await eventually(() => seen.length === 1)
+    expect(seen[0]).toEqual([])
+    cli.end()
+    await handle.dispose()
+  })
+
+  it('an id that is not a UUID is not used: the CLI takes only a UUID', async () => {
+    const { handle, cli } = await watched(adapter())
+    handle.send('first', { id: 'not-a-uuid' })
+    const got = (await cli.input.next()).value?.uuid
+    expect(got).not.toBe('not-a-uuid')
+    expect(got).toMatch(/^[0-9a-f-]{36}$/)
+    cli.end()
+    await handle.dispose()
+  })
+
+  it('an older CLI that cannot name the inputs says so (null), and never a list', async () => {
+    sdk.version = '2.1.280'
+    try {
+      const { handle, seen, cli } = await watched(adapter())
+      handle.send('first', { id: idA })
+      cli.push({ type: 'result', subtype: 'success', user_message_uuid: idA })
+      await eventually(() => seen.length === 1)
+      expect(seen[0]).toBeNull()
+      cli.end()
+      await handle.dispose()
+    } finally {
+      sdk.version = '2.1.289'
+    }
+  })
+})

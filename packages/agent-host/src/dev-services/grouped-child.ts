@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
+import { constants } from 'node:os'
 import { KILL_GRACE_MS, collectOrphansWindows, hasProcessGroups, stopGroup, type EndedRoot, type KillablePty, type LeftoverOs } from './kill-tree.js'
 
 /**
@@ -29,9 +30,17 @@ export function spawnGrouped(command: string, args: readonly string[], opts: Spa
   return { child, spawnedAt }
 }
 
+const isSignal = (name: string): name is NodeJS.Signals => Object.prototype.hasOwnProperty.call(constants.signals, name)
+
+/** The signal `name` names, or the error `kill` itself throws for one it does not know */
+function signalNamed(name: string): NodeJS.Signals {
+  if (!isSignal(name)) throw new TypeError(`Unknown signal: ${name}`)
+  return name
+}
+
 /** A `ChildProcess` as kill-tree's handle (`killTree`, `stopTree`): its pid and its kill, written once for every caller */
 export function killHandle(child: ChildProcess): KillablePty {
-  return { pid: child.pid, kill: (signal?: string) => void child.kill(signal as NodeJS.Signals | undefined) }
+  return { pid: child.pid, kill: (signal?: string) => void child.kill(signal === undefined ? undefined : signalNamed(signal)) }
 }
 
 /**

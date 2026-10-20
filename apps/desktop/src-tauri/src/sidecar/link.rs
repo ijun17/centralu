@@ -82,6 +82,9 @@ struct LinkState {
     shell: Option<crate::shell::Report>,
     /// The shell did not start a keeper once: every later start in this window's life is direct.
     shell_off: bool,
+    /// What is shown of a refusal of signed content, and when: the shell's refusal of this window's content, and the keeper's
+    /// of a switch this window sent (`refusal::Announcer`).
+    announcer: crate::refusal::Announcer,
 }
 
 pub struct KeeperLink {
@@ -283,11 +286,71 @@ impl KeeperLink {
             return true;
         };
         let started = report.started;
+        // Read before the report is stored: finding out why can take a moment (it hashes the content)
+        let refusal = self.shell_refusal(resources, &report);
         if let Ok(mut st) = self.state.lock() {
             st.shell_off |= !started;
             st.shell = Some(report);
+            st.announcer.shell_refused(refusal);
         }
         started
+    }
+
+    /**
+     * The shell refused this window's content: a refusal to show in a native window (#634), when it is one about
+     * verification and a release says so (`notify`). The shell's status carries a sentence and no hashes, and the
+     * shell cannot change without asking every person for their permissions again, so the window reads its own
+     * content again (`keeper::content::diagnose`: reads and hashes, starts nothing) to say which file or check failed.
+     */
+    fn shell_refusal(&self, resources: &std::path::Path, report: &crate::shell::Report) -> Option<crate::refusal::Refusal> {
+        if report.started || !report.notify {
+            return None;
+        }
+        let reason = report.reason.as_deref()?;
+        let found = (reason == "content")
+            .then(|| crate::keeper::content::diagnose(&self.data, &resources.join("content")))
+            .flatten()
+            .and_then(|r| Some(crate::refusal::Found { check: r.check?.to_string(), file: r.file, hashes: r.hashes, message: r.message }));
+        crate::refusal::Refusal::from_shell(reason, report.message.as_deref().unwrap_or(""), found, env!("CARGO_PKG_VERSION"))
+    }
+
+    /**
+     * Shows each new refusal of signed content in a native window, drawn here and not by the web UI that the host feeds:
+     * the shell's refusal of this window's content, and the keeper's of a new build's (`swap.refused`). Each is shown
+     * once. Shows only: nothing it names is run, trusted or unlocked. Thread-safe to call from any view.
+     */
+    fn announce_refusals(&self, app: &AppHandle) {
+        let (refusal, open) = {
+            let Ok(mut st) = self.state.lock() else { return };
+            // Only a refusal of this window's own build, and only of a switch this window sent (`Announcer::we_asked`): the
+            // keeper keeps the last swap's view for a window that attaches later, and any process of the user can ask it for
+            // a switch of its own
+            let seen = st.view.as_ref().and_then(|v| v.swap.as_ref()).filter(|s| s.is_to(&self.app_build)).map(|s| {
+                let ended = matches!(s.phase, crate::keeper::swap::Phase::Done | crate::keeper::swap::Phase::Failed);
+                // The version is this window's own, not whatever the request that asked for the switch said
+                let refusal = crate::refusal::Refusal::from_swap(
+                    s.refused.as_deref().filter(|_| s.phase == crate::keeper::swap::Phase::Failed),
+                    s.refused_check.as_deref(),
+                    s.refused_file.as_deref(),
+                    s.refused_hashes.as_ref(),
+                    s.message.as_deref(),
+                    Some(env!("CARGO_PKG_VERSION")),
+                    s.from.as_ref().and_then(|b| b.version.as_deref()),
+                );
+                crate::refusal::SwapSeen { started_at: s.started_at, ended, refusal }
+            });
+            st.announcer.view(seen);
+            let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+            (st.announcer.next(now_ms), st.announcer.open_flag())
+        };
+        if let Some(r) = refusal {
+            // The full sentence the shell or the keeper gave is for the log; the dialog is built from the check, the file,
+            // the hashes and this window's version only
+            // One line in the log, whatever the sentence holds (it is another process's text)
+            let sentence: String = r.message.chars().map(|c| if c.is_control() { ' ' } else { c }).take(2_000).collect();
+            crate::shell::log(&self.data, &format!("showing why signed content was refused ({}): {sentence}", r.reason));
+            crate::refusal::show(app, crate::refusal::dialog(&r), crate::keeper::log_path(&self.data), open);
+        }
     }
 
     /// How this window starts a keeper (and, in the same words, how the shell does: `keeper::exe::Start`).
@@ -362,6 +425,8 @@ impl KeeperLink {
         let mode = self.plan(client::alive(&self.sock));
         if mode != StartMode::Attach {
             self.launch_keeper(mode).map_err(|e| format!("could not launch the keeper: {e}"))?;
+            // The shell may have refused the content on the way: said now, not only once a keeper has attached
+            self.announce_refusals(app);
             client::wait_alive(&self.sock, Duration::from_secs(25))?;
         }
         let (closed_tx, closed_rx) = mpsc::channel::<()>();
@@ -431,6 +496,8 @@ impl KeeperLink {
             emit(app, &status);
             let _ = app.emit("host-build", build);
         }
+        // Whether or not the UI heard of it: a refusal is shown by this process itself
+        self.announce_refusals(app);
     }
 
     fn shutting_down(&self) -> bool {
@@ -467,7 +534,18 @@ impl KeeperLink {
                 source.host_dir = Some(host.to_string_lossy().to_string());
             }
         }
-        client::switch(&self.sock, &source, exe.as_deref().filter(|_| !self.dev))
+        // Noted before the request: a refusal is shown only for a switch this window sent (`Announcer`)
+        let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        if let Ok(mut st) = self.state.lock() {
+            st.announcer.we_asked(at);
+        }
+        let sent = client::switch(&self.sock, &source, exe.as_deref().filter(|_| !self.dev));
+        if sent.is_err() {
+            if let Ok(mut st) = self.state.lock() {
+                st.announcer.we_were_refused();
+            }
+        }
+        sent
     }
 
     pub fn background(&self) -> Result<bool, String> {

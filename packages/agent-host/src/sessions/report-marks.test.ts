@@ -223,28 +223,51 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     expect(store.settings.appSetting(`report_paused:${child}`)).toBeNull()
   })
 
-  it('held over background work and ended by the person writing to the child (#1340), it stays ended in the next host', async () => {
+  // #1377: the person's turn in flight at the swap is theirs under the next host too, and the report stays open
+  it("held over background work, with the person's own turn in flight at the swap, it stays open and their turn is not reported by the next host", async () => {
     const verify = { id: 'bg-verify', kind: 'shell' as const, description: 'pnpm verify', status: 'running' as const }
     const a = host()
     const { parent, child } = await parentAndChild(a)
     a.claude.handles.get(child)!.emitEvent({ type: 'background_tasks', sessionId: child, live: [verify] })
     a.claude.handles.get(child)!.answer('waiting for verify')
     await eventually(() => reports(a.claude.handles.get(parent), child).length === 1)
+    // The person writes while it is at rest: their turn starts, and is in flight when this host lets go
     await a.mgr.send(child, 'a question of the person')
-    // Ended in the store as well as in memory: the mark and the stored pause
-    expect(store.children.listReportMarks()).toEqual([])
-    expect(store.settings.appSetting(`report_paused:${child}`)).toBeNull()
-    await eventually(() => reports(a.claude.handles.get(parent), child).length === 2)
+    expect(a.mgr.listSessions().find((s) => s.id === child)!.state).toBe('working')
+    expect(store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
+    expect(JSON.parse(store.settings.appSetting(`report_turn:${child}`)!)).toEqual({ by: 'person' })
     await a.mgr.detachAll()
 
     const b = host(new Set([child]))
-    await b.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() as unknown as AgentProcess }])
-    expect(store.children.listReportMarks()).toEqual([])
-    // The person's turn, running in the kept process, ends under the new host: the child's own, told to no one
-    b.claude.handles.get(child)!.answer('the person\'s answer')
-    await new Promise((r) => setTimeout(r, 20))
+    await b.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() }])
+    expect(b.mgr.listSessions().find((s) => s.id === child)!.state).toBe('working')
+    expect(store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
+    // Their turn ends under the new host: reported to nobody, the report still open
+    const h = b.claude.handles.get(child)!
+    h.answer("the person's answer")
+    await new Promise((r) => setTimeout(r, 30))
     expect(reports(b.claude.handles.get(parent), child)).toEqual([])
-    expect(stored(parent)).toEqual([])
+    expect(store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
+    expect(store.settings.appSetting(`report_turn:${child}`)).toBeNull()
+    // The work ends and the turn that starts reports it
+    h.emitEvent({ type: 'background_tasks', sessionId: child, live: [], ended: [{ ...verify, status: 'completed' }] })
+    h.emitEvent({ type: 'state_change', sessionId: child, state: 'working' })
+    h.answer('verify passed, PR opened')
+    await eventually(() => stored(parent).length === 1)
+    expect(stored(parent)[0]).toContain('verify passed, PR opened')
+    expect(store.children.listReportMarks()).toEqual([])
+  })
+
+  it("a turn of the work in flight at the swap is the work's under the next host: reported when it ends", async () => {
+    const a = host()
+    const { parent, child } = await parentAndChild(a)
+    expect(JSON.parse(store.settings.appSetting(`report_turn:${child}`)!)).toEqual({ by: 'work' })
+    await a.mgr.detachAll()
+    const b = host(new Set([child]))
+    await b.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() }])
+    b.claude.handles.get(child)!.answer('finished under the new host')
+    await eventually(() => reports(b.claude.handles.get(parent), child).length === 1)
+    expect(stored(parent)[0]).toContain('finished under the new host')
   })
 
   it('held over background work, it is dropped by a host that finds no process: the work went with the old one', async () => {

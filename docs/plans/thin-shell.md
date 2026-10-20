@@ -305,3 +305,28 @@ job: a test shell starts keeper A from a verified copy of 0.2.0; a switch to tam
 
 Not checked by tests: a real release bundle's content (signed by the release key) through a real update, which needs
 a pinned shell (§10.2); the step 6 manual check covers it.
+
+### 10.4 A refusal shown in a native window (#634, 2026-10-20)
+
+Until now a refusal reached the person as one line in the build bar, drawn by the web UI, which the host feeds. The host is
+the thing whose content failed to verify, so it could hide that line. The window now draws a native dialog itself
+(`src/refusal.rs`, the dialog plugin from the Rust side), from what it reads without the host. What the plan left open:
+
+| Question | Choice | Why |
+|---|---|---|
+| Show or run | **Show only.** Nothing the dialog names is run, trusted or unlocked; the shell and keeper verify as before, with no override | The owner's recommendation on #634. "Run anyway" (decided 2026-10-14) is not built and needs its own change; it would give unverified content the person's permissions before they read the warning |
+| Which refusals | `content`, `downgrade`, `shell-too-old` (the shell's and the keeper's). Not `copy`, `in-use`, `no-content`, `install`, `open`, `no-report` | Only these say the content is not what was signed. The others are the machine's trouble, and the build bar says them |
+| Where it is drawn | The window process: on the keeper link's views (a failed swap with `refused`) and right after a start through the shell that was refused (`announce_refusals` in `sidecar/link.rs`) | Not the UI: its text would pass through the host. Not the shell: it is pinned and has no window, and a new shell version asks everyone for their permissions again |
+| What the keeper adds | `refusedCheck` and `refusedFile` in the swap view, from `content::check_id` and `file_of` (a match over the verifier's `Error` with no wildcard, so a new refusal there fails to compile until it has an id), and, for a file that does not match, both hashes in the message | Additions only: an older window ignores the fields, an older keeper gives none and the window words the reason |
+| What the shell adds | Nothing. The window reads its own content again after the shell's refusal (`content::diagnose`: the shell's checks, then each file's size and hash) | The shell's crate and the verifier it links are pinned per shell version; the status carries one sentence and no hashes |
+| Buttons | "Show log" (reveals `keeper.log`) and "Close" | The issue proposed "Download again": updates come through npm, which a dialog does not run, so the text names the commands: `npm i -g centralu@<version>` then `centralu install --force` (`centralu update` says "already up to date" for the version just installed) |
+| A start the shell refused | The dialog says the shell did not start Centralu and that it was **started directly from the app, not verified** (the window's own start, §6), and does not say nothing ran | That is what happens (§10.2); the issue's "nothing starts" describes a fresh start before the fallback. An update's refused build, by contrast, was not run: the running keeper kept serving |
+| What is shown | Built only from the check id (a fixed list with fixed words), the file name (from the signed manifest, plain text of at most 200 characters), two hashes if each is 64 hex characters, and this window's own version; the keeper's and the shell's sentence goes to the log only | A process of the user can ask the keeper for a switch naming any folder (its name was in the keeper's sentence) and can rewrite `shell-status.json`: the dialog is the window's own voice and must not repeat their words (RVAR G1, G2) |
+| For which refusals | Only for a switch this window sent (`Announcer`: the moment is noted before the request; the first ended swap after it, to this window's build, is that request's end); one dialog at a time (a flag the dialog's callback clears) and at least 5 s apart | The keeper keeps the last swap's view for a window that attaches later, and any process of the user can ask for switches, each with a new `started_at`: a dialog per switch would be a dialog per request |
+| Reading the content again | `diagnose` and the hash detail open a listed file without following a symlink in any component of its path (`through_symlink`, and `O_NOFOLLOW` for the last) or blocking on a FIFO, only if it is a regular file, and read no further than its listed size | The verifier reads a file that way; a second reader must not be the weak one. A file that is missing or unreadable is `file-unreadable`, not a missing manifest |
+| Windows, Linux | No refusal arises (no shell, no signed content); the words and the once-only rule are tested everywhere, the sources are macOS only | |
+
+Tested: the words and the once-only rule on every platform (`refusal::tests`); the keeper's ids, the check and file of each
+refusal, both hashes and the diagnosis in the keeper crate's tests (Unix; run on Linux in CI and here). Not run by tests: the
+dialog itself on macOS (a real NSAlert), and a real refusal by the pinned shell through LaunchServices (the step 6 manual
+check, which should now also read the dialog).

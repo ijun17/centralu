@@ -63,6 +63,11 @@ export type RouterOptions = {
   machines: () => Iterable<RoutedMachine>
   /** Absent: the order is per machine, the hub's own projects first (as before #734) */
   order?: ProjectOrder
+  /**
+   * A call to a session of a linked machine, seen as it goes (#1377): the hub learns what the person meant by it without
+   * depending on the machine to say so. Returns what to do when the call ends, with whether the machine took it
+   */
+  forwarding?: (method: string, params: unknown) => ((delivered: boolean) => void) | undefined
 }
 
 export class MachineUnreachableError extends Error {
@@ -167,7 +172,15 @@ export class Router {
     const { machine: _machine, ...own } = params
     let p: Obj = { ...(route.orMachine ? own : params), [key]: m.q.strip(params[key], 'The id') }
     if (route.params) p = route.params(p, m.q)
-    const r = await this.forward(m, method, p)
+    const done = this.opts.forwarding?.(method, params)
+    let r: unknown
+    try {
+      r = await this.forward(m, method, p)
+    } catch (e) {
+      done?.(false)
+      throw e
+    }
+    done?.(true)
     return route.result ? route.result(r, m.q) : r
   }
 
