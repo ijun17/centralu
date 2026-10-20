@@ -204,7 +204,10 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
   UNKNOWN wait, and after 30 minutes → attention; one exception, #1015: UNSTABLE when every check on
   the head passed or belongs to a run of a CI workflow that a successful run on the same head made
   moot, cancelled or older, and every commit status succeeded, as a cancelled duplicate pull_request
-  run left #971 UNSTABLE for good; `onlySupersededFailures`. Landed as usual, nothing rerun: a rerun
+  run left #971 UNSTABLE for good; `onlySupersededFailures`. Also a duplicate run whose every failed
+  job succeeded in a twin, another completed run of that workflow on the head, whatever their ids,
+  times or attempts (a skipped job is no twin; #1346: the newer of two same-second runs failed a job on
+  a flake that the other passed on a rerun; `twinPassedSuites`, read by a batch's landing too). Landed as usual, nothing rerun: a rerun
   of the duplicate would spend a whole CI run to change nothing) → every open lower must be inside the top's head
   (compare: the green run, read on that head, ran on all of them) and no lower's own latest CI run on
   its head may have failed at or after the run that proved the top was created, its own or its batch's

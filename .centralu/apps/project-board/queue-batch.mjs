@@ -448,7 +448,7 @@ async function landNext(b, ctx) {
   const checks = pr.state === 'OPEN' && pr.mergeStateStatus === 'UNSTABLE' ? await readChecks(repo, pr.headRefOid) : null
   // UNSTABLE may also come from a run its own successful run made moot (a duplicate started in the same second, #1015),
   // as on the single path: without this, a green batch waited 30 minutes, went back and was batched again, for ever
-  const superseded = checks ? [...supersededSuites((await readWorkflowChecks(repo, pr.headRefOid, { workflows: CI.workflows })).runs)] : []
+  const superseded = checks ? [...supersededSuites((await readWorkflowChecks(repo, pr.headRefOid, { workflows: CI.workflows })).runs, checks)] : []
   const d = decideLanding({ b, step, pr, item: mine, mainTree: main.tree, prevTree, defaultBranch, lowerBranches, checks, superseded, subject, subjectMax: SUBJECT_MAX, now, ref })
   const n = ref(repo, step.pr)
   const view = mine ? { ...mine, title: pr.title } : { repo, pr: step.pr, lowers: [], title: pr.title }

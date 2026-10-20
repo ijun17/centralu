@@ -4,13 +4,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { fakeExe, gitWrapper, rmFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
+import { fakeExe, gitWrapper, removeFakeDir, rmFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 import { ExternalApps, resultText, type AppCaller, type AppRef } from '../packages/agent-host/src/apps/external/runtime.js'
 import { fakeBrokerHost } from '../packages/agent-host/src/apps/external/test-helpers.js'
 import { fakeGh, type FakeGh } from './fake-gh.test-helpers.js'
 import { SLOW } from './test-timing.js'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
-import { decideBefore, decideCi, emptyQueue, enqueue, quickLanded, handoffReason, lowerFailureCounts, noticeKey, dequeue, normalize, onlySupersededFailures, queueOrder, watchState } from '../.centralu/apps/project-board/queue.mjs'
+import { decideBefore, decideCi, emptyQueue, enqueue, supersededSuites, twinPassedSuites, quickLanded, handoffReason, lowerFailureCounts, noticeKey, dequeue, normalize, onlySupersededFailures, queueOrder, watchState } from '../.centralu/apps/project-board/queue.mjs'
 // @ts-expect-error -- a plain .mjs module of the board app, without types
 import { commandEnv, conflictPlan } from '../.centralu/apps/project-board/queue-conflict.mjs'
 // @ts-expect-error -- a plain .mjs module of the board app, without types
@@ -179,6 +179,29 @@ describe('what the merge queue decides for one poll', () => {
     }
   })
 
+  // #1346, 2026-10-19: #1304's head had two build runs created in the same second; in the newer one (39288595041)
+  // `windows tests (vitest 1/2)` failed on a cleanup flake, while the same job of the other (39288594599) passed on a rerun
+  it('counts a job as passed when it passed in its twin run of the same workflow, whatever their ids, times or attempts (#1346)', () => {
+    const wf = (id: number, conclusion: string, suite: number, attempt = 1) => ({ id, workflow_id: 7, check_suite_id: suite, status: 'completed', conclusion, created_at: '2026-10-19T16:30:00Z', run_attempt: attempt })
+    const job = (name: string, conclusion: string, suiteId: number) => ({ kind: 'run', name, status: 'completed', conclusion, suiteId })
+    const runs = [wf(39288594599, 'success', 61, 2), wf(39288595041, 'failure', 62)]
+    const checks = [job('verify', 'success', 61), job('windows tests (vitest 1/2)', 'success', 61), job('verify', 'success', 62), job('windows tests (vitest 1/2)', 'failure', 62)]
+    expect([...twinPassedSuites(runs, checks)]).toEqual([62])
+    expect(onlySupersededFailures(checks, runs)).toBe(true)
+    // …and a batch member UNSTABLE from it lands (the superseded suites a batch's landing reads)
+    expect([...supersededSuites(runs, checks)]).toContain(62)
+    // The same job failing in both runs is a real failure
+    const both = checks.map((c) => (c.name === 'windows tests (vitest 1/2)' ? { ...c, conclusion: 'failure' } : c))
+    expect(twinPassedSuites([wf(39288594599, 'failure', 61), runs[1]], both).size).toBe(0)
+    expect(onlySupersededFailures(both, [wf(39288594599, 'failure', 61), runs[1]])).toBe(false)
+    // A twin of another workflow is no twin
+    expect(twinPassedSuites([{ ...runs[0], workflow_id: 8 }, runs[1]], checks).size).toBe(0)
+    // A skipped job is no twin: a quick or draft run skips the jobs a full run of the same workflow fails
+    const skipped = checks.map((c) => (c.suiteId === 61 && c.name === 'windows tests (vitest 1/2)' ? { ...c, conclusion: 'skipped' } : c))
+    expect(twinPassedSuites(runs, skipped).size).toBe(0)
+    expect(onlySupersededFailures(skipped, runs)).toBe(false)
+  })
+
   it('merges a green UNSTABLE head when only a cancelled duplicate or an older run of the CI workflow did not pass (#1015)', () => {
     const wf = (id: number, conclusion: string | null, created: string, suite: number) => ({ id, workflow_id: 7, check_suite_id: suite, status: conclusion ? 'completed' : 'in_progress', conclusion, created_at: created })
     const job = (conclusion: string | null, suiteId: number) => ({ kind: 'run', name: 'verify', status: conclusion ? 'completed' : 'in_progress', conclusion, suiteId })
@@ -187,8 +210,10 @@ describe('what the merge queue decides for one poll', () => {
     expect(onlySupersededFailures([job('success', 51), job('cancelled', 52)], runs)).toBe(true)
     // An older run that failed, made moot by a newer success
     expect(onlySupersededFailures([job('failure', 50), job('success', 51)], [wf(930, 'failure', '2026-10-17T04:00:00Z', 50), runs[0]])).toBe(true)
-    // Not moot: a newer failure, a run still going, no success at all, a check of another workflow, a failed status
-    expect(onlySupersededFailures([job('success', 51), job('failure', 53)], [runs[0], wf(933, 'failure', '2026-10-17T06:00:00Z', 53)])).toBe(false)
+    // A newer run whose failed job passed in its twin is moot too (#1346); one that failed a job its twin did not run is not
+    expect(onlySupersededFailures([job('success', 51), job('failure', 53)], [runs[0], wf(933, 'failure', '2026-10-17T06:00:00Z', 53)])).toBe(true)
+    expect(onlySupersededFailures([job('success', 51), { ...job('failure', 53), name: 'lint' }], [runs[0], wf(933, 'failure', '2026-10-17T06:00:00Z', 53)])).toBe(false)
+    // Not moot: a run still going, no success at all, a check of another workflow, a failed status
     expect(onlySupersededFailures([job('success', 51), job(null, 53)], [runs[0], wf(933, null, '2026-10-17T06:00:00Z', 53)])).toBe(false)
     expect(onlySupersededFailures([job('cancelled', 52)], [runs[1]])).toBe(false)
     expect(onlySupersededFailures([job('success', 51), job('failure', 70)], runs)).toBe(false)
@@ -934,10 +959,17 @@ beforeEach(() => {
 afterEach(async () => {
   await rt?.dispose()
   rt = null
-  rmFakeDir(root)
+  // Without blocking the event loop while it retries; a folder Windows still holds is left to its temporary-folder cleanup (#1346)
+  await removeFakeDir(root)
 })
 
 const FAST = { PROJECT_BOARD_QUEUE_TICK_MS: '50', PROJECT_BOARD_QUEUE_POLL_MS: '50' }
+/**
+ * Every git the tests and the app run here (#1346): no automatic maintenance. Since git 2.29 a commit, merge or fetch may
+ * start a detached `git maintenance run --auto` that goes on working in the checkout after the command returns, which
+ * kept a test's folder busy for its cleanup on Windows (`EBUSY ... rmdir …\\work`, as #503 saw for fixture repositories).
+ */
+const NO_GIT_MAINTENANCE = { GIT_CONFIG_COUNT: '2', GIT_CONFIG_KEY_0: 'maintenance.auto', GIT_CONFIG_VALUE_0: 'false', GIT_CONFIG_KEY_1: 'gc.auto', GIT_CONFIG_VALUE_1: '0' }
 /** A server that polls only at its start: what a test drives or reads, nothing moves under it */
 const IDLE_SERVER = { PROJECT_BOARD_QUEUE_TICK_MS: String(3_600_000) }
 /**
@@ -965,7 +997,7 @@ function runtime(state?: Gh, env: Record<string, string> = {}, path: string[] = 
     projects: () => [{ id: 'p1', path: REPO_ROOT, trusted: true }],
     dataRoot: join(root, 'data'),
     reservedIds: [],
-    env: fake.env({ ...FAST, ...NO_TIERS, ...NO_CHECKOUT, ...NO_GUARD, ...env }, path),
+    env: fake.env({ ...FAST, ...NO_TIERS, ...NO_CHECKOUT, ...NO_GUARD, ...NO_GIT_MAINTENANCE, ...env }, path),
     timing: { idleMs: 60_000, graceMs: 1_000, backoffBaseMs: 20, connectTimeoutMs: 10_000 },
   })
   rt.refresh()
@@ -1537,7 +1569,7 @@ const BATCH_WAIT_MS = 90_000
 
 // --- Conflicts (#1182): real git, a bare repository standing for GitHub's --------------------------
 
-const GIT_ENV = { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' }
+const GIT_ENV = { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C', ...NO_GIT_MAINTENANCE }
 const g = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, env: GIT_ENV, encoding: 'utf8' }).trim()
 const MIGRATION = 'packages/agent-host/src/dev-services/store/migrations/v55.ts'
 
@@ -2314,6 +2346,31 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
     await until((x) => stateOf(x) === 'merged', 'the merge', BATCH_WAIT_MS)
     expect(writes().map(short2)).toContain('merge 77')
     expect(writes().filter((w) => w[0].startsWith('rerun'))).toEqual([])
+  })
+
+  // #1346: batch 114 (#1304) waited out UNSTABLE for 30 minutes: the newer of two same-second runs failed a job (a
+  // cleanup flake) that the other run passed on a rerun; neither cancelled nor older, so it was not counted as moot
+  it("lands a batch member GitHub calls UNSTABLE because a duplicate run failed a job its twin passed (#1346)", async () => {
+    const own = [ghCheck('full tier', 'skipped', 10, '2026-10-17T08:00:00Z'), ghCheck('verify', 'success', 11, '2026-10-17T08:00:00Z'), ghCheck('windows tests', 'success', 12, '2026-10-17T08:20:00Z')]
+    const dup = [
+      { ...ghCheck('full tier', 'skipped', 20, '2026-10-17T08:00:00Z'), check_suite: { id: 5001 } },
+      { ...ghCheck('verify', 'success', 21, '2026-10-17T08:00:00Z'), check_suite: { id: 5001 } },
+      { ...ghCheck('windows tests', 'failure', 22, '2026-10-17T08:05:00Z'), check_suite: { id: 5001 } },
+    ]
+    runtime(
+      tieredState({
+        prs: { '77': ghPr(77, { mergeStateStatus: 'UNSTABLE' }) },
+        runs: {
+          // The same second; the failing one has the higher id, the passing one passed on its second attempt
+          [SHA]: [ghRun('success', 2, SHA, { id: 900, workflow_id: 7, check_suite_id: 5000 }), ghRun('failure', 1, SHA, { id: 901, workflow_id: 7, check_suite_id: 5001 })],
+        },
+        checks: { [SHA]: [...own, ...dup] },
+      }),
+      TIERS,
+    )
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await until((x) => stateOf(x) === 'merged', 'the merge', BATCH_WAIT_MS)
+    expect(writes().map(short2)).toContain('merge 77')
   })
 
   it('batches four ready pull requests in one run, its quick run still going or finished, cancels what still runs, and lands them in order', async () => {

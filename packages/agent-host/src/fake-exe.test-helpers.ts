@@ -1,8 +1,9 @@
+import { rm } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { chmodSync, copyFileSync, existsSync, linkSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, copyFileSync, existsSync, linkSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 /**
  * A stand-in for a program the code under test starts by name (`ssh`, `gh`): a Node script that
@@ -167,6 +168,41 @@ export function fakeExe(dir: string, name: string, source: string): string {
  */
 export function rmFakeDir(dir: string): void {
   rmSync(dir, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 })
+}
+
+/**
+ * Whether `dir` is strictly inside `base`, both as their real paths: on GitHub's Windows runners the temporary folder
+ * is named with its short name (`C:\Users\RUNNER~1\…`) while a test's folder is often its real path
+ * (`realpathSync.native`, `C:\Users\runneradmin\…`), and comparing the two as written never matched. A path on
+ * another drive, or the base itself, is not inside.
+ */
+export function insideOf(base: string, dir: string): boolean {
+  const real = (p: string) => {
+    try {
+      return realpathSync.native(p)
+    } catch {
+      return resolve(p)
+    }
+  }
+  const rel = relative(real(base), real(dir))
+  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
+}
+
+/**
+ * Removes a test's folder without blocking the event loop, and briefly: 3 retries, about 3 s on Windows (measured: Node's
+ * backoff makes 10 retries last close to a minute on a held folder), inside a hook's time limit. On Windows a folder something still holds (a process whose working
+ * directory is inside it, an antivirus scan: `EBUSY`, `EPERM`, `ENOTEMPTY`) is left to the system's cleanup of the
+ * temporary folder instead of failing the test that used it, when it is inside that folder (#1346, #1312). Anywhere
+ * else, or on another platform, the error stands.
+ */
+export async function removeFakeDir(dir: string, os: { platform: NodeJS.Platform; tmp: string } = { platform: process.platform, tmp: tmpdir() }): Promise<void> {
+  try {
+    await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code ?? ''
+    if (os.platform !== 'win32' || !['EBUSY', 'EPERM', 'ENOTEMPTY'].includes(code) || !insideOf(os.tmp, dir)) throw e
+    console.warn(`[test cleanup] ${dir} is still in use (${code}); left to the system's temporary folder cleanup`)
+  }
 }
 
 /**
