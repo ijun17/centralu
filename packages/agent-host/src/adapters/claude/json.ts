@@ -1,4 +1,4 @@
-import type { SDKAssistantMessage, SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
+import type { SDKActiveGoalMessage, SDKAssistantMessage, SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { isObj } from '../../json-value.js'
 
 /** The loose shape the adapter reads SDK messages in, and the string reader it uses on them (one meaning, json-value.ts, #850) */
@@ -6,13 +6,10 @@ export type Json = Record<string, unknown>
 export { str } from '../../json-value.js'
 
 /**
- * `active_goal`, which the CLI sends (#304) and the SDK's `SDKMessage` does not list. Its `value` is read field by
- * field (cli-messages.ts `activeGoalEvents`).
+ * One message of the stream as the SDK types it (#1339): its `SDKMessage` union, and `active_goal`, which the CLI
+ * sends (#304) and the SDK declares (`SDKActiveGoalMessage`) but leaves out of that union.
  */
-export type ClaudeActiveGoal = { type: 'active_goal'; value?: unknown }
-
-/** One message of the stream as the SDK types it (#1339) */
-export type ClaudeMessage = SDKMessage | ClaudeActiveGoal
+export type ClaudeMessage = SDKMessage | SDKActiveGoalMessage
 
 /** The fields of `T` by the SDK's names, each read as `unknown`: what a reader may ask for, not what it may assume */
 export type Loose<T> = { readonly [K in keyof T]?: unknown }
@@ -50,12 +47,12 @@ export type UsageRead = Loose<SdkUsage>
  * none, and an element that is not an object is left out: the SDK's types say what the CLI sends, and the readers
  * stay as careful as they were for a CLI that strays.
  */
-export function messageBlocks(message: { readonly content?: string | readonly ContentBlock[] } | null | undefined): ContentBlock[] {
+export function messageBlocks(message: { readonly content?: string | readonly ContentBlock[] } | null | undefined): ReadBlock[] {
   return blocksOf(message?.content)
 }
 
 /** A content field as blocks, whatever it holds (see `messageBlocks`): for a transcript row as much as a live message */
-export function blocksOf(content: unknown): ContentBlock[] {
+export function blocksOf(content: unknown): ReadBlock[] {
   if (typeof content === 'string') return content ? [{ type: 'text', text: content }] : []
   return Array.isArray(content) ? content.filter(isContentBlock) : []
 }
@@ -63,11 +60,14 @@ export function blocksOf(content: unknown): ContentBlock[] {
 /** The block types the adapter's readers act on; a block of another type reads as nothing anywhere */
 const READ_TYPES = ['text', 'thinking', 'tool_use', 'tool_result'] as const satisfies readonly ContentBlock['type'][]
 
+/** A block of one of the types the readers act on: all that `messageBlocks` returns */
+export type ReadBlock = Extract<ContentBlock, { readonly type: (typeof READ_TYPES)[number] }>
+
 /**
  * A value is a block the readers act on: an object whose `type` is one of `READ_TYPES`. Its other fields stay `unknown`
  * and are checked as they are read, so this is all a block needs to be one.
  */
-export function isContentBlock(v: unknown): v is ContentBlock {
+export function isContentBlock(v: unknown): v is ReadBlock {
   return isObj(v) && READ_TYPES.some((t) => t === v.type)
 }
 

@@ -110,7 +110,7 @@ describe('claude /goal — the badge from what the CLI says', () => {
   it('once the CLI announces the goal itself (active_goal), its word is the only one', () => {
     const stream = new ClaudeStreamNormalizer(SID)
     stream.goal.commandSent()
-    const announced = stream.push({ type: 'active_goal', value: { condition: COND, iterations: 0, set_at: 1, tokens_at_start: 0 } })
+    const announced = stream.push(sdk({ type: 'active_goal', value: { condition: COND, iterations: 0, set_at: 1, tokens_at_start: 0 } }))
     expect(goals(announced)).toEqual([{ objective: COND, status: 'active', iterations: 0 }])
     expect(goals(stream.push(sdk(synthetic(`Goal set: ${COND}`))))).toEqual([])
     expect(goals(pushAll(stream, [...modelSays('msg_1', 'Done.'), result()]))).toEqual([])

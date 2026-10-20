@@ -101,7 +101,7 @@ describe('an assistant body that arrives with no deltas', () => {
   })
 
   it('active_goal with value=null is a clear notification (including having been achieved)', () => {
-    const events = normalizeMessage({ type: 'active_goal', value: null }, SID)
+    const events = normalizeMessage(sdk({ type: 'active_goal', value: null }), SID)
     expect(events).toEqual([{ type: 'goal', sessionId: SID, goal: null }])
   })
 })
