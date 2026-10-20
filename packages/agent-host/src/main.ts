@@ -571,8 +571,6 @@ const links = new Links({
     ask: (machine, params, signal) => mgr.askFromMachine(machine, params, signal),
     selfName: hubName,
   }),
-  // A machine that connects when needed stays up while a session here waits on a child there (#1134)
-  workOwed: (machineId) => mgr.linkedWorkOwed(machineId),
 })
 /*
  * The other side of it (#550): the hubs linked to this host that let its sessions ask their projects, each called back

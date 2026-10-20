@@ -2907,14 +2907,14 @@ describe('add_project and list_machines on a linked machine (#1220)', () => {
     const listed: MachineInfo[] = await u.call('machines.list')
     const r = await hub.mgr.runOrchestratorTool(orc.id, 'centralu_run', { command: 'list_machines', args: {} })
     const lines = r.text.split('\n').filter((l) => l.startsWith('- '))
-    expect(lines).toEqual(listed.map((m) => `- ${JSON.stringify(m.name)} [${m.id}]: ${m.status}; macOS or Linux, Unix shell; connects at start`))
-    expect(lines).toEqual(['- "Remote box" [m1]: connected; macOS or Linux, Unix shell; connects at start'])
+    expect(lines).toEqual(listed.map((m) => `- ${JSON.stringify(m.name)} [${m.id}]: ${m.status}; macOS or Linux, Unix shell; auto reconnect on`))
+    expect(lines).toEqual(['- "Remote box" [m1]: connected; macOS or Linux, Unix shell; auto reconnect on'])
   })
 })
 
 /**
  * The orchestrator's machine commands against a real hub (#1219): the same calls on the links as the Machines screen's,
- * a card where the change is the person's, none for reconnecting or the connect mode.
+ * a card where the change is the person's, none for reconnecting or Auto reconnect.
  */
 describe('the machine commands on a real hub (#1219)', () => {
   const machineCard = (hub: Hub, orcId: string) => {
@@ -2923,15 +2923,15 @@ describe('the machine commands on a real hub (#1219)', () => {
   }
   const run = (hub: Hub, orcId: string, command: string, args: Record<string, unknown>) => hub.mgr.runOrchestratorTool(orcId, 'centralu_run', { command, args })
 
-  it('sets when a machine connects and reconnects it with no card, as the row does', async () => {
+  it('sets Auto reconnect and reconnects a machine with no card, as the row does', async () => {
     const remote = await remoteHost()
     const hub = await hubHost(() => lineFor(remote.port))
     await eventually(() => status(hub) === 'connected')
     const orc = await hub.mgr.orchestrator()
-    const r = await run(hub, orc.id, 'set_machine_connect', { machine: 'remote box', connect: 'when_needed' })
+    const r = await run(hub, orc.id, 'set_machine_auto_reconnect', { machine: 'remote box', on: false })
     expect(r.isError).toBeFalsy()
-    expect(hub.links.list()[0]!.connect).toBe('when_needed')
-    expect(r.text).toContain('connects when needed')
+    expect(hub.links.list()[0]!.autoReconnect).toBe(false)
+    expect(r.text).toContain('auto reconnect off')
     expect((await run(hub, orc.id, 'reconnect_machine', { machine: 'm1' })).isError).toBeFalsy()
     expect(machineCard(hub, orc.id)).toBeUndefined()
   })

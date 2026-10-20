@@ -2,11 +2,10 @@ import { expect, test, type Page } from '@playwright/test'
 import { setup } from './project-screen.js'
 
 /**
- * When this computer connects to a linked machine (#1134, owner decision 2026-10-18), against the mock: Settings →
- * Machines' "Connect only when needed" box and its Connect and Disconnect, and the window telling the host that it
- * needs such a machine once one of its projects is opened. The host's side (not at start, the hold, a turn there,
- * agents) is links/connect-when-needed.test.ts. A function, because it runs in Chromium and in WebKit: the desktop
- * app is WKWebView.
+ * When this computer reconnects to a linked machine (#1341, owner decision 2026-10-20), against the mock: Settings →
+ * Machines' "Auto reconnect" switch and its Connect and Disconnect. The host's side (one attempt at start, no retry
+ * after a drop, agents answered at once) is links/auto-reconnect.test.ts. A function, because it runs in Chromium and in
+ * WebKit: the desktop app is WKWebView.
  */
 
 type MockWindow = { __mock: any; __store: any }
@@ -26,31 +25,20 @@ async function addMachine(page: Page, name: string): Promise<void> {
   await expect(page.getByTestId('machines-add-form')).toHaveCount(0)
 }
 
-/** A folder on a linked machine as a project, the way the person adds one: Add project, the machine, its path */
-async function addOn(page: Page, machine: string, path: string): Promise<void> {
-  await page.getByTestId('add-project').click()
-  await page.getByTestId(`add-project-on-${machine}`).click()
-  await page.getByTestId('add-remote-project-path').fill(path)
-  await page.getByTestId('add-remote-project-confirm').click()
-  await expect(page.getByTestId('add-remote-project-dialog')).toHaveCount(0)
-}
-
-const statusOf = (page: Page, id: string) => page.evaluate((i) => (window as unknown as MockWindow).__store.getState().machines[i]?.status, id)
-
 export function machineConnectTests(): void {
-  test('a machine connects at start unless told otherwise, and is disconnected and connected again from its row', async ({ page }) => {
+  test('Auto reconnect is on unless turned off, and a machine is disconnected and connected again from its row', async ({ page }) => {
     await setup(page, ['/tmp/alpha'])
     await openMachines(page)
     await addMachine(page, 'Laptop')
-    const box = page.getByTestId('machine-connect-when-needed-laptop')
+    const box = page.getByTestId('machine-auto-reconnect-laptop')
 
-    await test.step('at start by default; when needed once the box is ticked, which says what that means', async () => {
-      await expect(box).not.toBeChecked()
-      await expect(page.getByTestId('machine-connect-note-laptop')).toHaveCount(0)
-      await box.click()
+    await test.step('on by default; turning it off says what that means', async () => {
       await expect(box).toBeChecked()
-      await expect(page.getByTestId('machine-connect-note-laptop')).toContainText('Not connected when Centralu starts')
-      expect(await page.evaluate(() => (window as unknown as MockWindow).__mock.machinesList[0].connect)).toBe('when_needed')
+      await expect(page.getByTestId('machine-auto-reconnect-note-laptop')).toContainText('Connects when Centralu starts')
+      await box.click()
+      await expect(box).not.toBeChecked()
+      await expect(page.getByTestId('machine-auto-reconnect-note-laptop')).toContainText('stays away until you press Connect')
+      expect(await page.evaluate(() => (window as unknown as MockWindow).__mock.machinesList[0].autoReconnect)).toBe(false)
     })
 
     await test.step('Disconnect closes the link and keeps the machine; Connect brings it back', async () => {
@@ -68,44 +56,13 @@ export function machineConnectTests(): void {
 
     await test.step('a refusal is said, and the box stays where the host has it', async () => {
       await page.evaluate(() => {
-        ;(window as unknown as MockWindow).__mock.machines.setConnect = async () => {
-          throw Object.assign(new Error('Unknown method: machines.setConnect'), { code: 'internal' })
+        ;(window as unknown as MockWindow).__mock.machines.setAutoReconnect = async () => {
+          throw Object.assign(new Error('Unknown method: machines.setAutoReconnect'), { code: 'internal' })
         }
       })
       await box.click()
-      await expect(page.getByTestId('toast')).toContainText('Could not change when it connects: Unknown method: machines.setConnect')
-      await expect(box).toBeChecked()
+      await expect(page.getByTestId('toast')).toContainText('Could not change Auto reconnect: Unknown method: machines.setAutoReconnect')
+      await expect(box).not.toBeChecked()
     })
-  })
-
-  test('opening a project of a machine that connects when needed connects it; one connected at start is not asked', async ({ page }) => {
-    await setup(page, ['/tmp/alpha'])
-    await openMachines(page)
-    await addMachine(page, 'Laptop')
-    await addMachine(page, 'Server')
-    await page.getByTestId('machine-connect-when-needed-laptop').click()
-    await expect(page.getByTestId('machine-connect-when-needed-laptop')).toBeChecked()
-    await page.keyboard.press('Escape')
-    await expect(page.getByTestId('settings-machines')).toHaveCount(0)
-    // A project on each, added while both were connected
-    await addOn(page, 'laptop', '/home/me/notes')
-    await addOn(page, 'server', '/srv/site')
-    // Its link closed since, as after a restart of this computer or once nothing needed it
-    await page.evaluate(() => (window as unknown as MockWindow).__mock.machineRow('laptop', { status: 'disconnected' }))
-    await expect.poll(() => statusOf(page, 'laptop')).toBe('disconnected')
-    const needed = () => page.evaluate(() => (window as unknown as MockWindow).__mock.machinesNeeded as string[])
-    const focused = () => page.evaluate(() => (window as unknown as MockWindow).__store.getState().focusedProjectId as string | null)
-
-    await page.getByTestId('project-header-site').click()
-    await expect.poll(focused).toMatch(/^server\./)
-    // Adding a project focuses it: what was said before this point is not what is asked here
-    await page.evaluate(() => {
-      ;(window as unknown as MockWindow).__mock.machinesNeeded.length = 0
-    })
-    expect(await needed()).toEqual([])
-
-    await page.getByTestId('project-header-notes').click()
-    await expect.poll(() => statusOf(page, 'laptop')).toBe('connected')
-    expect(await needed()).toEqual(['laptop'])
   })
 }

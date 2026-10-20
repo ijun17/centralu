@@ -38,15 +38,10 @@ export interface RoutedMachine {
   /** A session of the remote the hub does not show: its orchestrator and coordinators (§3.4) */
   hides(session: unknown): boolean
   /**
-   * Not connected, and connected when something needs it (#1134): its last known lists stand for it until then.
-   * Absent: a machine connected whenever the hub runs
+   * Not connected, and nothing here will connect it until the person presses Connect (#1341): they disconnected it, or
+   * its Auto reconnect is off and the attempt at the hub's start is over. Absent: a machine the hub keeps trying
    */
-  readonly onDemand?: boolean
-  /**
-   * Something needs the machine now (#1134): one that connects when needed is connected, and this resolves once that
-   * attempt ended, connected or not. Any other machine is left as it is. Absent: nothing to do
-   */
-  need?(): Promise<void>
+  readonly waitsForPerson?: boolean
 }
 
 /**

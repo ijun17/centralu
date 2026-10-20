@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { MACHINE_CHANGE, type MachineConnect, type MachineInfo, type MachineProbe, type ToolName } from '@cc/protocol'
+import { MACHINE_CHANGE, type MachineInfo, type MachineProbe, type ToolName } from '@cc/protocol'
 import type { AgentAdapter } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
@@ -14,11 +14,11 @@ import { eventually } from '../../../../tooling/test-timing.js'
 
 /**
  * The orchestrator's commands for linked machines (#1219): each reaches the hub's links as the Machines screen does,
- * a change to a machine or to this computer's reach only after the person's card, reconnecting and the connect mode
+ * a change to a machine or to this computer's reach only after the person's card, reconnecting and Auto reconnect
  * without one, and every refusal that can be known first before any card. The links here record what they were asked;
  * links/links.test.ts runs the same commands against a real hub.
  */
-const COMMANDS = ['add_machine', 'install_machine', 'remove_machine', 'reconnect_machine', 'set_machine_connect', 'set_machine_autostart'] as const
+const COMMANDS = ['add_machine', 'install_machine', 'remove_machine', 'reconnect_machine', 'set_machine_auto_reconnect', 'set_machine_autostart'] as const
 
 let root: string
 let store: Store
@@ -45,6 +45,7 @@ function machine(over: Partial<MachineInfo>): MachineInfo {
     operation: null,
     autostart: null,
     elevated: null,
+    autoReconnect: true,
     connect: 'at_start',
     ...over,
   } as MachineInfo
@@ -86,9 +87,9 @@ function fakeOps() {
       return { ...find(id), status: 'connecting' }
     },
     startHeldBack: () => heldBack,
-    setConnect: (id, connect: MachineConnect) => {
-      calls.push(['setConnect', id, connect])
-      find(id).connect = connect
+    setAutoReconnect: (id, autoReconnect: boolean) => {
+      calls.push(['setAutoReconnect', id, autoReconnect])
+      Object.assign(find(id), { autoReconnect, connect: autoReconnect ? 'at_start' : 'when_needed' })
       return find(id)
     },
     install: async (id) => {
@@ -185,7 +186,7 @@ describe('add_machine', () => {
     expect(ops.calls.map((c) => c[0])).toEqual(['resolve', 'probe', 'add'])
     expect(ops.changes()).toEqual([['add', { name: 'box', sshTarget: 'box', shell: 'posix', wslDistro: null }]])
     expect(r.text).toContain('Linked box as box (macOS or Linux, Unix shell).')
-    expect(r.text).toContain('- "box" [box]: connecting; macOS or Linux, Unix shell; connects at start')
+    expect(r.text).toContain('- "box" [box]: connecting; macOS or Linux, Unix shell; auto reconnect on')
   })
 
   it('links Windows as PowerShell, or the WSL distro named, as the Add machine dialog offers them', async () => {
@@ -340,14 +341,17 @@ describe('reconnect_machine and set_machine_connect', () => {
     const orc = await mgr.orchestrator()
     const re = await run(orc.id, 'reconnect_machine', { machine: 'Laptop' })
     expect(re.isError).toBeFalsy()
-    expect(re.text).toBe('Reconnecting Laptop.\nNow:\n- "Laptop" [laptop]: connecting; Windows, PowerShell; connects at start')
-    const mode = await run(orc.id, 'set_machine_connect', { machine: 'laptop', connect: 'when_needed' })
-    expect(mode.text).toBe('Laptop now connects only when something needs it.\nNow:\n- "Laptop" [laptop]: connected; Windows, PowerShell; connects when needed')
+    expect(re.text).toBe('Reconnecting Laptop.\nNow:\n- "Laptop" [laptop]: connecting; Windows, PowerShell; auto reconnect on')
+    const mode = await run(orc.id, 'set_machine_auto_reconnect', { machine: 'laptop', on: false })
+    expect(mode.text).toBe(
+      'Laptop no longer reconnects by itself: after a drop only the person\'s Connect brings it back, and nothing here connects it.\n' +
+        'Now:\n- "Laptop" [laptop]: connected; Windows, PowerShell; auto reconnect off (only the person connects it again)',
+    )
     expect(card(orc.id)).toBeUndefined()
     // Without a card the link is only opened: the orchestrator's reconnect is no Start (#1143)
     expect(ops.changes()).toEqual([
       ['reconnect', 'laptop', { start: false }],
-      ['setConnect', 'laptop', 'when_needed'],
+      ['setAutoReconnect', 'laptop', false],
     ])
   })
 })

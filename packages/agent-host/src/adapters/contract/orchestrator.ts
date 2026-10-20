@@ -4,7 +4,6 @@ import type {
   GitSource,
   Interruption,
   LineHeight,
-  MachineConnect,
   MachineInfo,
   RpcResult,
   ApprovalDetail,
@@ -20,7 +19,7 @@ import type {
 export type MachineRequest =
   | { action: 'add'; sshTarget: string; name?: string; wslDistro?: string }
   | { action: 'install' | 'update' | 'remove' | 'reconnect'; machine: string }
-  | { action: 'connect'; machine: string; connect: MachineConnect }
+  | { action: 'auto_reconnect'; machine: string; on: boolean }
   | { action: 'autostart'; machine: string; on: boolean }
 
 /** What `set_preferences` changes (#1219, preferences and the trash): each field is one setting the window offers; absent means leave it */
@@ -93,10 +92,20 @@ export type RecallHit = {
 export const NOT_REACHABLE = 'not reachable right now'
 
 /**
+ * Why a machine nothing here will connect cannot be asked (#1341): the person disconnected it, or its Auto reconnect is
+ * off and the attempt at the hub's start is over. No call connects it; only the person's Connect does
+ */
+export const NOT_CONNECTED = 'not connected until the person connects it'
+
+/** What `awayPhrase` says for `NOT_CONNECTED`: the model is told to ask the person, who is the one who can */
+export const NOT_CONNECTED_PHRASE = 'is not connected, and nothing here connects it by itself; ask the person to connect it (Settings, Machines, Connect)'
+
+/**
  * A machine that cannot be asked (`LinkedProject.away`), as the verb phrase after its name: the words a model reads for
- * not reachable, its plain cause for any other
+ * not reachable and for not connected, its plain cause for any other
  */
 export function awayPhrase(why: string): string {
+  if (why === NOT_CONNECTED) return NOT_CONNECTED_PHRASE
   return why === NOT_REACHABLE ? `is ${NOT_REACHABLE}` : `could not be asked just now (${why})`
 }
 
@@ -638,7 +647,7 @@ export type OrchestratorTools = {
   listMachines?(): MachineInfo[]
   /**
    * A change to the linked machines (#1219, the machine commands): add, install or update Centralu, remove, reconnect,
-   * connect mode, start at boot. Those that change a machine or this computer's reach wait for the person's card.
+   * Auto reconnect, start at boot. Those that change a machine or this computer's reach wait for the person's card.
    * The answer is the text the model reads. Absent on seats that cannot.
    */
   machine?(req: MachineRequest, signal?: AbortSignal): Promise<{ ok: true; text: string } | { ok: false; error: string }>

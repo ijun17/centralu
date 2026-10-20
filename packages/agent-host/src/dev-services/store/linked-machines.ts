@@ -12,8 +12,8 @@ export type LinkedMachineRow = {
   slot: number
   addedAt: number
   acceptedVersions: string | null
-  /** When the hub opens its link (#1134, v59); absent or null in the column: at start */
-  connect?: 'at_start' | 'when_needed'
+  /** Auto reconnect (#1341), on by default; kept in the `connect` column (v59), see `connectColumn` */
+  autoReconnect?: boolean
   /** Whether this machine's sessions may ask this computer's projects (#550, v60); off by default */
   asks?: boolean
 }
@@ -35,8 +35,14 @@ const LINK_SLOT_KEY = 'links.slotHighWater'
 /** Marks that a machine's list was mirrored at least once, so an empty mirror reads as empty rather than unknown */
 const MIRRORED_KEY = 'links.mirrored.'
 
-/** `connect` as the column keeps it: null for the default, so a store an older host wrote reads the same (v59) */
-const connectColumn = (c: LinkedMachineRow['connect']): string | null => (c === 'when_needed' ? c : null)
+/**
+ * Auto reconnect as the `connect` column keeps it (#1341; v59 added the column for the connect mode, #1134): null for on,
+ * the default, and `when_needed` for off. No new migration step: the column already holds exactly this, so a machine
+ * that connected when needed reads back with the switch off, and an older build still serving during a host swap reads the
+ * same value as it always did (a machine with the switch off is parked at its start there, and is connected by Connect).
+ * A later release may add a column named for the switch and drop this one (add first, remove later, docs/agent-host.md)
+ */
+const connectColumn = (autoReconnect: boolean | undefined): string | null => (autoReconnect === false ? 'when_needed' : null)
 
 /** Linked machines (#82, v46) and the session and project headers mirrored from them */
 export class LinkedMachineRecords {
@@ -71,8 +77,8 @@ export class LinkedMachineRecords {
       slot: r.slot,
       addedAt: r.added_at,
       acceptedVersions: r.accepted_versions,
-      // Anything but the one other value is the default, as a window reads an unknown one (`MachineConnect`)
-      connect: r.connect === 'when_needed' ? 'when_needed' : 'at_start',
+      // Anything but the one value for off is on, as a window reads an unknown one
+      autoReconnect: r.connect !== 'when_needed',
       asks: r.asks === 1,
     }))
   }
@@ -91,9 +97,9 @@ export class LinkedMachineRecords {
           `INSERT INTO linked_machines (id, name, ssh_target, shell, wsl_distro, command, slot, added_at, accepted_versions, connect)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .run(m.id, m.name, m.sshTarget, m.remote.shell, m.remote.wslDistro ?? null, m.remote.command ?? null, slot, m.addedAt, m.acceptedVersions, connectColumn(m.connect))
+        .run(m.id, m.name, m.sshTarget, m.remote.shell, m.remote.wslDistro ?? null, m.remote.command ?? null, slot, m.addedAt, m.acceptedVersions, connectColumn(m.autoReconnect))
       this.settings.setAppSetting(LINK_SLOT_KEY, String(slot))
-      return { ...m, connect: m.connect ?? 'at_start', slot }
+      return { ...m, autoReconnect: m.autoReconnect !== false, slot }
     })()
   }
 
@@ -128,9 +134,9 @@ export class LinkedMachineRecords {
     this.db.prepare(`UPDATE linked_machines SET accepted_versions = ? WHERE id = ?`).run(key, id)
   }
 
-  /** When the hub opens the machine's link (#1134) */
-  setLinkedMachineConnect(id: string, connect: 'at_start' | 'when_needed'): void {
-    this.db.prepare(`UPDATE linked_machines SET connect = ? WHERE id = ?`).run(connectColumn(connect), id)
+  /** Auto reconnect for the machine's link (#1341) */
+  setLinkedMachineAutoReconnect(id: string, autoReconnect: boolean): void {
+    this.db.prepare(`UPDATE linked_machines SET connect = ? WHERE id = ?`).run(connectColumn(autoReconnect), id)
   }
 
   // ── The reverse direction (#550, v60) ───────────────────────────────────────────────────────

@@ -147,12 +147,12 @@ export const ORCHESTRATOR_TOOLS = [
   {
     // #1220: what to pass as `machine`. Reading only, no card
     name: 'list_machines',
-    description: 'Lists the linked machines: name, status, OS and shell, and whether each connects at start or when needed.',
+    description: 'Lists the linked machines: name, status, OS and shell, and whether each reconnects by itself (Auto reconnect).',
     schema: z.object({}),
   },
   /*
    * #1219: the linked machines, as the Machines screen manages them. Rare commands (RARE_COMMANDS). A change to a
-   * machine or to this computer's reach waits for the person's card; reconnecting and the connect mode do not, except
+   * machine or to this computer's reach waits for the person's card; reconnecting and Auto reconnect do not, except
    * that starting Centralu where it is stopped does (#1143).
    */
   {
@@ -186,9 +186,10 @@ export const ORCHESTRATOR_TOOLS = [
     schema: z.object({ machine: z.string().describe('The machine, by the name list_machines gives.') }),
   },
   {
-    name: 'set_machine_connect',
-    description: 'Sets when this computer connects to a machine: at start, or only when something here needs it. No card.',
-    schema: z.object({ machine: z.string().describe('The machine, by the name list_machines gives.'), connect: z.enum(['at_start', 'when_needed']) }),
+    name: 'set_machine_auto_reconnect',
+    description:
+      "Turns a machine's Auto reconnect on or off. On: this computer connects when it starts and again after every drop. Off: it tries once at start, then only when the person presses Connect; nothing here connects it for you. No card.",
+    schema: z.object({ machine: z.string().describe('The machine, by the name list_machines gives.'), on: z.boolean() }),
   },
   {
     name: 'set_machine_autostart',

@@ -311,7 +311,7 @@ const HANDLERS: ToolHandlers = {
   install_machine: ({ machine, action }, call) => machineCommand({ action: action ?? 'install', machine }, call),
   remove_machine: ({ machine }, call) => machineCommand({ action: 'remove', machine }, call),
   reconnect_machine: ({ machine }, call) => machineCommand({ action: 'reconnect', machine }, call),
-  set_machine_connect: ({ machine, connect }, call) => machineCommand({ action: 'connect', machine, connect }, call),
+  set_machine_auto_reconnect: ({ machine, on }, call) => machineCommand({ action: 'auto_reconnect', machine, on }, call),
   set_machine_autostart: ({ machine, on }, call) => machineCommand({ action: 'autostart', machine, on }, call),
 
   // The trash (#1219): the flow writes each answer; deleting for good waits for the person's card there

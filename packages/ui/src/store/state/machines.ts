@@ -1,7 +1,6 @@
 import type {
   AgentVersions,
   HostActivity,
-  MachineConnect,
   MachineInfo,
   MachineProbe,
   RemoteShell,
@@ -36,15 +35,10 @@ export type MachinesSlice = {
   probeMachine(sshTarget: string): Promise<MachineProbe | null>
   removeMachine(machineId: string): Promise<void>
   reconnectMachine(machineId: string): Promise<void>
-  /** Closes the machine's link until it is connected or needed again; it stays linked (#1134). A refusal is a toast */
+  /** Closes the machine's link until the person connects it again; it stays linked (#1134). A refusal is a toast */
   disconnectMachine(machineId: string): Promise<void>
-  /** When the host opens the machine's link (#1134); false (with a toast) when the host refused */
-  setMachineConnect(machineId: string, connect: MachineConnect): Promise<boolean>
-  /**
-   * The window needs the machine now (#1134): one of its projects or sessions is open. Quiet: a host that does not take
-   * it (an older one) is left alone, and the row says how the link stands
-   */
-  needMachine(machineId: string, repeat?: boolean): Promise<void>
+  /** Auto reconnect on or off for the machine (#1341); false (with a toast) when the host refused */
+  setMachineAutoReconnect(machineId: string, autoReconnect: boolean): Promise<boolean>
   acceptMachineVersions(machineId: string): Promise<void>
   /**
    * Installs, updates, rolls back or removes the Centralu this computer installs on a machine

@@ -122,23 +122,29 @@ export const hostMethods = {
   'machines.remove': { params: z.object({ machineId: MachineId }), result: z.object({ ok: z.literal(true) }) },
   /**
    * Tries the link again now instead of waiting out its backoff. A disconnected machine is connected (the row's
-   * Connect, #1134), and stays connected until `machines.disconnect` or the hub stops, whatever its `connect` says
+   * Connect, #1134), and stays connected until `machines.disconnect` or the hub stops. With Auto reconnect off (#1341) it is
+   * the only way to try again after a drop or a failed attempt
    */
   'machines.reconnect': { params: z.object({ machineId: MachineId }), result: MachineInfo },
   /**
-   * Closes the link and tries none until the person connects it again, something needs a machine that connects when
-   * needed, or the hub starts again (#1134). The machine stays linked, with its sessions and projects listed as last
+   * Closes the link and tries none until the person connects it again or the hub starts again (#1134). The machine stays linked, with its sessions and projects listed as last
    * known; they keep running there. Additive
    */
   'machines.disconnect': { params: z.object({ machineId: MachineId }), result: MachineInfo },
-  /** When the hub opens the link: at start, or when needed (`MachineConnect`, #1134). Kept with the machine. Additive */
+  /**
+   * Auto reconnect on or off for this machine (#1341, `MachineInfo.autoReconnect`). Kept with the machine. Turning it
+   * off while connected leaves the link up; turning it on while the link is away tries again now. Additive
+   */
+  'machines.setAutoReconnect': { params: z.object({ machineId: MachineId, autoReconnect: z.boolean() }), result: MachineInfo },
+  /**
+   * The older connect mode (#1134), kept for one release (#1341): `at_start` is Auto reconnect on, `when_needed` off.
+   * Use `machines.setAutoReconnect`
+   */
   'machines.setConnect': { params: z.object({ machineId: MachineId, connect: MachineConnect }), result: MachineInfo },
   /**
-   * The window needs the machine now: one of its projects is open, or one of its sessions is focused (#1134). A machine
-   * that connects when needed is connected, and kept so for a while after the last of these; the window says it again
-   * while that project or session stays open, with `repeat`, which does not bring back a machine the person
-   * disconnected. Answers at once, not when the link is up. Any other machine is left as it is. Additive: a window
-   * ignores an older host's refusal
+   * Said by a window of the connect mode (#1134) while one of a machine's projects or sessions was open. Nothing connects
+   * a machine on a need any more (#1341): it answers the row as it is and does nothing. Accepted for one release so an
+   * older window does not fail
    */
   'machines.need': { params: z.object({ machineId: MachineId, repeat: z.boolean().optional() }), result: MachineInfo },
   /**

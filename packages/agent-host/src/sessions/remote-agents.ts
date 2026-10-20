@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { gitRemoteKey, type ApprovalDetail, type BackgroundTask, type PermissionPreset, type SessionInfo, type SessionState } from '@cc/protocol'
 import type { AgentListRow, AgentSessionOpts, ChildRunResult, LinkedProject, LinkedSessions, OrchestratedSession, RoutedCard, StartAgentOpts } from '../adapters/contract.js'
-import { NOT_REACHABLE } from '../adapters/contract.js'
+import { awayPhrase, NOT_CONNECTED, NOT_CONNECTED_PHRASE, NOT_REACHABLE } from '../adapters/contract.js'
 import { gitValidBranchName } from '../dev-services/git-worktree.js'
 import { readJsonObjects } from '../dev-services/store/json.js'
 import { inTurn } from '../idle.js'
@@ -1223,16 +1223,19 @@ export class RemoteAgents {
     }
     const all = await reader.projects()
     const away = all.away.find((a) => a.machineId === machine.id)
-    if (away) return { error: `${machine.name} cannot be reached (${away.why}), so nothing was started there. Try again once its link is back.` }
+    if (away) {
+      // Nothing here connects it (#1341): the sentence names the person, who can; no retry on its own is promised
+      if (away.why === NOT_CONNECTED) return { error: `${machine.name} ${awayPhrase(NOT_CONNECTED)}, so nothing was started there. Try again once it is connected.` }
+      return { error: `${machine.name} cannot be reached (${away.why}), so nothing was started there. Try again once its link is back.` }
+    }
     const theirs = all.projects.filter((p) => p.machineId === machine.id)
     const read = await Promise.all(theirs.map(async (p) => ({ p, r: await reader.origin(p) })))
     // A build from before #1038 would not keep the child within the agent depth: a loop of starts between machines
     if (read.some(({ r }) => !r.ok && 'olderBuild' in r)) {
       return { error: `${machine.name} runs an older Centralu, which would not keep a session started from here within the agent depth, so nothing was started there. Update Centralu on ${machine.name}, then try again.` }
     }
-    // Asked and not reached (#1134): a machine that connects when needed lists its projects as last known, and the link
-    // its reads opened failed. That is the machine away, not a machine without the checkout
-    const unreached = read.map(({ r }) => (!r.ok && r.error.includes(NOT_REACHABLE) ? r.error : null))
+    // Asked and not reached: the link went away after the list was read. That is the machine away, not a machine without the checkout
+    const unreached = read.map(({ r }) => (!r.ok && (r.error.includes(NOT_REACHABLE) || r.error.includes(NOT_CONNECTED_PHRASE)) ? r.error : null))
     if (read.length > 0 && unreached.every((e) => e !== null)) {
       return { error: `${machine.name} cannot be reached (${NOT_REACHABLE}), so nothing was started there. Try again once its link is back.` }
     }

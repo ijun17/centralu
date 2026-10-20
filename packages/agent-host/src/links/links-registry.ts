@@ -1,7 +1,6 @@
 import type {
   HostActivity,
   MachineAutostartResult,
-  MachineConnect,
   MachineInfo,
   MachineInstallResult,
   MachineProbe,
@@ -25,14 +24,9 @@ export class Links {
 
   constructor(private readonly deps: LinkDeps) {}
 
-  /**
-   * Starts a link for every machine in the registry, but one that connects when needed (#1134), unless a session here
-   * still waits on a child there: after a restart its report would otherwise not come until something needed the machine
-   */
+  /** Starts a link for every machine in the registry. Auto reconnect (#1341) decides what happens after the first attempt */
   start(): void {
-    for (const record of this.deps.registry.list()) {
-      this.startOne(record, record.connect === 'when_needed' && !this.deps.workOwed?.(record.id))
-    }
+    for (const record of this.deps.registry.list()) this.startOne(record)
   }
 
   all(): LinkedMachine[] {
@@ -116,7 +110,7 @@ export class Links {
     return probeTarget(sshTarget, this.deps.ssh ?? {})
   }
 
-  /** The row's Reconnect, and Connect for a disconnected machine (#1134), which then stays up until disconnected */
+  /** The row's Reconnect, and Connect for a disconnected machine (#1134); with Auto reconnect off (#1341) the only way to try again */
   reconnect(id: string, opts: { start?: boolean } = {}): MachineInfo {
     const m = this.need(id)
     m.connect(opts)
@@ -133,26 +127,24 @@ export class Links {
     const m = this.need(id)
     const op = m.info().operation
     if (op) throw rpcError(`${m.name} is busy with ${op.kind}; disconnect it once that is done`)
-    await m.disconnect('disconnected by the person', true)
+    await m.disconnect('disconnected by the person')
     return m.info()
   }
 
-  /** When the hub opens the machine's link (#1134), kept with the machine */
-  setConnect(id: string, connect: MachineConnect): MachineInfo {
+  /** Auto reconnect on or off for the machine's link (#1341), kept with the machine */
+  setAutoReconnect(id: string, autoReconnect: boolean): MachineInfo {
     const m = this.need(id)
-    this.deps.registry.setConnect(id, connect)
-    m.setConnect(connect)
+    this.deps.registry.setAutoReconnect(id, autoReconnect)
+    m.setAutoReconnect(autoReconnect)
     return m.info()
   }
 
   /**
-   * The window needs the machine now (`machines.need`, #1134); answers at once, the link comes up meanwhile. `repeat`:
-   * said again while the same thing stays open, which leaves a machine the person disconnected as it is
+   * `machines.need`, said by a window of the older connect mode (#1134): nothing connects a machine on a need any more
+   * (#1341), so this answers the row as it is. Accepted for one release so an older window does not fail
    */
-  needs(id: string, repeat = false): MachineInfo {
-    const m = this.need(id)
-    void m.need({ repeat })
-    return m.info()
+  needs(id: string): MachineInfo {
+    return this.need(id).info()
   }
 
   acceptVersions(id: string): MachineInfo {
@@ -213,8 +205,7 @@ export class Links {
 
   /**
    * The machine, connected first when it was disconnected (#1134): what the person asks of it runs over its ssh, which
-   * the link closed, and an update waits for the new host's hello on the link. Not pinned: once the job is done, a
-   * machine that connects when needed lets go after its hold, as after any need
+   * the link closed, and an update waits for the new host's hello on the link
    */
   private active(id: string): LinkedMachine {
     const m = this.need(id)
@@ -239,11 +230,10 @@ export class Links {
     await Promise.all(this.all().map((m) => m.stop()))
   }
 
-  private startOne(record: MachineRecord, parked = false): LinkedMachine {
+  private startOne(record: MachineRecord): LinkedMachine {
     const m = new LinkedMachine(record, this.deps.tunnelFor(record), this.deps)
     this.machines.set(record.id, m)
-    if (parked) m.park()
-    else m.start()
+    m.start()
     return m
   }
 }

@@ -31,7 +31,6 @@ import { useSearchReserve } from './useSearchReserve.js'
 import { ImportAppDialog } from '../features/app-share/ImportAppDialog.jsx'
 import { UpdateLine } from '../features/settings/UpdateLine.jsx'
 import { useAutoApplyUpdate } from '../features/settings/apply-update.js'
-import { useMachineNeeds } from '../features/machines/useMachineNeeds.js'
 import { Notices } from '../features/notices/Notices.jsx'
 import { UsageDonuts } from '../features/usage/UsageDonuts.jsx'
 import { DragRegion } from '../components/DragRegion.jsx'
@@ -62,7 +61,6 @@ export function App({
   const attach = useStore((s) => s.attach)
   const setAppFocused = useStore((s) => s.setAppFocused)
   // The linked machines that connect when needed, while one of their projects or sessions is open here (#1134)
-  useMachineNeeds()
 
   useEffect(() => {
     void attach(platform)
