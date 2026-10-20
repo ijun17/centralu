@@ -285,8 +285,9 @@ file as anywhere else: fix it, do not list it. A file holding fewer than its lin
 line for a file that is gone: a change that only fixes things need not touch a list, and two that fix one
 finding each in the same file do not fail together. `pnpm lint:tighten` lowers such lines (run it when you
 fix listed findings), and a weekly job (`.github/workflows/lint-tighten.yml`) opens a pull request with
-whatever is left. A count moves only with a file git sees renamed: rename a file and run
-`pnpm lint:tighten`, which moves its lines to the new path and says so. Code moved into another file is a
+whatever is left. A count moves only with a file git sees renamed: rename a file (with `git mv`, or `git add` the
+move) and run `pnpm lint:tighten`, which moves its lines to the new path and says so. A file added at a path
+main still has a stale line for holds nothing. Code moved into another file is a
 new finding there, and a count freed in one file is not credit for another. `tooling/type-aware-lint.test.ts`
 compares the lists with main's at the merge base (a push to main with its parent) and refuses any line that
 is new or higher than main's but a renamed file's own (CI's `verify` fetches main's history for it and fails

@@ -92,8 +92,7 @@ export default tseslint.config(
    * package, and `pnpm lint` (tooling/lint.ts) lets a file hold up to its listed count. So `eslint`
    * run by itself, or an editor, also shows those old findings. Adding lines is not the way past a
    * finding: tooling/type-aware-lint.test.ts refuses any line new or higher than main's (a renamed
-   * file's own lines aside), and an
-   * eslint-disable of these rules.
+   * file's own lines aside), and an eslint-disable of these rules.
    */
   {
     files: TYPED_FILES,

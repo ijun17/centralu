@@ -1,5 +1,5 @@
 # Type-aware lint findings that predate the rules (#1339): <file> <rule> <count>, one per line, sorted.
-# Written by `pnpm lint:tighten`, which lowers lines and moves a count along with moved code; no rule may total more than on main.
+# Lowered by `pnpm lint:tighten`, which also moves a file's lines along a rename git sees; no line may be new or higher than main's.
 apps/web/src/harness/app-frame.tsx @typescript-eslint/no-unsafe-type-assertion 1
 apps/web/src/harness/shell-banner.tsx @typescript-eslint/no-non-null-assertion 1
 apps/web/src/harness/shell-banner.tsx @typescript-eslint/no-unsafe-type-assertion 1

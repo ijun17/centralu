@@ -1,13 +1,16 @@
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import type { ESLint, Linter } from 'eslint'
 import { afterEach, describe, expect, it } from 'vitest'
 import { SLOW } from './test-timing.js'
 import {
   ALLOWLIST_DIR,
+  addedSince,
   applyAllowlist,
+  baseCommit,
   compareWithBase,
   countedFiles,
   countFindings,
@@ -26,6 +29,7 @@ import {
 } from './lint-allowlist.js'
 
 const ROOT = join(tmpdir(), 'lint-allowlist-root')
+const REPO = fileURLToPath(new URL('..', import.meta.url))
 const UNSAFE = '@typescript-eslint/no-unsafe-type-assertion'
 const BANG = '@typescript-eslint/no-non-null-assertion'
 
@@ -88,9 +92,7 @@ describe('applying the lists', () => {
     const { over, loose } = applyAllowlist(ROOT, results, list([['packages/a/src/inbox.ts', BANG, 2]]))
     expect(over).toEqual([])
     expect(loose).toHaveLength(1)
-    // What a run knows about it, the loose line included: it is not what fails a run
-    const run = { errorsLeft: results[0]?.errorCount ?? 0, disabled: 0, recording: false, othersLeft: 0, loose: loose.length }
-    expect(lintFailed(run)).toBe(false)
+    expect(lintFailed({ errorsLeft: results[0]?.errorCount ?? 0, disabled: 0, recording: false, othersLeft: 0 })).toBe(false)
   })
 
   it('says a line is above what its file holds only for a file whose findings are known', () => {
@@ -207,6 +209,17 @@ describe("the lists against main's", () => {
     expect(compareWithBase(main, list([['a.ts', UNSAFE, 3], ['b.ts', UNSAFE, 1]]))).toEqual([`a.ts ${UNSAFE} 3 (main: 2)`])
   })
 
+  it('give a file this change adds nothing, even where main has a stale line for a file once deleted there (#1343 review)', () => {
+    const stale = list([['P.ts', UNSAFE, 5]])
+    expect(compareWithBase(stale, list([['P.ts', UNSAFE, 5]]), [], ['P.ts'])).toEqual([`P.ts ${UNSAFE} 5 (main: 0)`])
+    // A file that was there all along keeps its line
+    expect(compareWithBase(stale, list([['P.ts', UNSAFE, 5]]), [], [])).toEqual([])
+    // A rename onto that path brings its own lines, not the stale ones on top
+    expect(compareWithBase(list([['a.ts', UNSAFE, 1], ['P.ts', UNSAFE, 5]]), list([['P.ts', UNSAFE, 6]]), [{ from: 'a.ts', to: 'P.ts' }])).toEqual([
+      `P.ts ${UNSAFE} 6 (main: 1)`,
+    ])
+  })
+
   it("let a renamed file's lines follow it, and only those, and not twice", () => {
     const renames = [{ from: 'b.ts', to: 'c.ts' }]
     expect(compareWithBase(main, list([['a.ts', UNSAFE, 2], ['c.ts', UNSAFE, 1]]), renames)).toEqual([])
@@ -283,6 +296,29 @@ describe("main's lists", () => {
     expect(mainLists(repo, 'main')).toEqual({ kind: 'lists', base: empty, lists: new Map() })
   }, 60_000 * SLOW)
 
+  it("tell a pull request's renames and added files from its merge commit, not main's (a merge ref)", () => {
+    setUp()
+    write('packages/a/src/mine.ts', 'export const m = 1\nexport const n = 2\nexport const o = 3\n')
+    write('packages/a/src/theirs.ts', 'export const t = 1\nexport const u = 2\nexport const v = 3\n')
+    git(repo, 'checkout', '-q', 'main')
+    git(repo, 'checkout', '-q', 'feature', '--', '.')
+    commit('both files on main')
+    git(repo, 'checkout', '-q', 'feature')
+    git(repo, '-c', 'user.name=t', '-c', 'user.email=t@t', 'merge', '-q', '--no-edit', 'main')
+    git(repo, 'mv', 'packages/a/src/mine.ts', 'packages/a/src/mine-renamed.ts')
+    write('packages/a/src/new.ts', 'export const added = 1\n')
+    commit('the branch renames one and adds one')
+    git(repo, 'checkout', '-q', 'main')
+    git(repo, 'mv', 'packages/a/src/theirs.ts', 'packages/a/src/theirs-renamed.ts')
+    commit('main renames another after the branch point')
+    git(repo, 'checkout', '-q', 'feature')
+    git(repo, '-c', 'user.name=t', '-c', 'user.email=t@t', 'merge', '-q', '--no-edit', 'main')
+    const base = baseCommit(repo, 'main')
+    expect(base).toBe(git(repo, 'rev-parse', 'main'))
+    expect(renamesSince(repo, base ?? '')).toEqual([{ from: 'packages/a/src/mine.ts', to: 'packages/a/src/mine-renamed.ts' }])
+    expect(addedSince(repo, base ?? '')).toEqual(['packages/a/src/new.ts'])
+  }, 60_000 * SLOW)
+
   it('tell the renames since the base, committed or only staged, and nothing else as one', () => {
     const base = setUp()
     write('packages/a/src/old.ts', 'export const a = 1\nexport const b = 2\nexport const c = 3\n')
@@ -314,6 +350,12 @@ describe("main's lists", () => {
 })
 
 describe('the lint run', () => {
+  it('exits 2 on a crash, apart from findings (1), so the weekly job can tell them apart', () => {
+    const run = spawnSync(process.execPath, ['--import', 'tsx', join(REPO, 'tooling/lint.ts'), '--no-such-option'], { cwd: REPO, encoding: 'utf8' })
+    expect(run.status).toBe(2)
+    expect(run.stderr).toContain('--no-such-option')
+  }, 60_000 * SLOW)
+
   it('fails on what is left or an eslint-disable; --record-all only on what it could not list', () => {
     const run = { errorsLeft: 0, disabled: 0, recording: false, othersLeft: 0 }
     expect(lintFailed(run)).toBe(false)

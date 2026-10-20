@@ -10,7 +10,10 @@
  *                              other files' lines alone, and those of a file that failed to parse)
  *   --record-all               lists every finding: only for the change that turns a rule on (see
  *                              tooling/type-aware-lint.test.ts `TURNED_ON`); fails when other errors remain
+ *
+ * Exit 0 clean, 1 findings, 2 a crash (tooling/lint-crash.ts).
  */
+import './lint-crash.js'
 import { ESLint } from 'eslint'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
@@ -61,8 +64,10 @@ if (recording) {
 }
 if (flags.has('--tighten')) {
   const base = baseCommit(ROOT, process.env.CC_LINT_BASE ?? 'origin/main')
-  const renames = (base ? renamesSince(ROOT, base) : null) ?? []
-  if (!base) console.log('No merge base with main here: renamed files keep no lines (they are lowered like any other).')
+  const found = base ? renamesSince(ROOT, base) : null
+  const renames = found ?? []
+  if (!base) console.log('No merge base with main here, so no renames: lines are only lowered.')
+  else if (!found) console.log(`git could not list the renames since ${base}: lines are only lowered, and a renamed file's findings stay unlisted.`)
   const { allow: tightened, moves } = tighten(allow, countFindings(ROOT, results), countedFiles(ROOT, results), (file) => existsSync(join(ROOT, file)), renames)
   writeAllowlist(ROOT, tightened)
   for (const m of moves) console.log(`Moved ${m.count} of ${m.rule} from ${m.from} to ${m.to} (renamed).`)

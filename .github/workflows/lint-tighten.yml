@@ -7,7 +7,8 @@
 # the lists with main's), so a stale line lends nothing; this job only keeps the lists true.
 # When `pnpm lint:tighten` changes a list, it opens a pull request with that change and nothing
 # else. A pull request a workflow opens with its own token runs no workflows itself, so whoever
-# queues it starts its CI (an empty commit, or `gh workflow run build.yml --ref <branch>`).
+# queues it starts its CI (an empty commit, or `gh workflow run build.yml --ref <branch>`). Opening it needs
+# the repository setting "Allow GitHub Actions to create and approve pull requests".
 name: lint tighten
 
 on:
@@ -16,9 +17,7 @@ on:
     - cron: '41 20 * * 1'
   workflow_dispatch:
 
-permissions:
-  contents: write
-  pull-requests: write
+permissions: {}
 
 concurrency:
   group: lint-tighten
@@ -28,6 +27,9 @@ jobs:
   tighten:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -40,10 +42,16 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # Lowers the lines whatever else the lint finds: a finding on main is the queue's to answer,
-      # and is said in this step's log, not hidden by it
+      # Lowers the lines whatever findings main has (exit 1: the queue's to answer, said in this log), but a
+      # crash (exit 2: an unreadable list, a config error) fails the job instead of opening nothing for ever
       - name: Lower the lists
-        run: pnpm lint:tighten || echo "pnpm lint:tighten reported findings; the lists were lowered anyway"
+        run: |
+          rc=0
+          pnpm lint:tighten || rc=$?
+          if [ "$rc" -gt 1 ]; then
+            echo "pnpm lint:tighten crashed (exit $rc)"
+            exit "$rc"
+          fi
 
       - name: Open a pull request when a line went down
         env:

@@ -46,7 +46,7 @@ export const LISTABLE_RULES: ReadonlySet<string> = new Set([
 
 const HEADER = [
   '# Type-aware lint findings that predate the rules (#1339): <file> <rule> <count>, one per line, sorted.',
-  '# Written by `pnpm lint:tighten`, which lowers lines and moves a count along with moved code; no rule may total more than on main.',
+  '# Lowered by `pnpm lint:tighten`, which also moves a file\'s lines along a rename git sees; no line may be new or higher than main\'s.',
 ]
 
 /** file → rule → how many findings it may hold */
@@ -214,16 +214,18 @@ const byKey = <T>([a]: [string, T], [b]: [string, T]) => (a < b ? -1 : a > b ? 1
 /** A file git sees renamed (`git diff -M`): the only way a count moves from one file to another */
 export type Rename = { from: string; to: string }
 
-/** The lists as they read after these renames: each old path's lines taken over by its new path */
+/**
+ * The lists as they read after these renames: each old path's lines become its new path's. A rename's new path was not
+ * there before (git pairs a rename onto no existing path), so a line the lists still hold for it is a stale one, left
+ * by a file once deleted there: it is replaced, never added to (#1343 review).
+ */
 export function alongRenames(allow: Allowlist, renames: readonly Rename[]): Allowlist {
   const out: Allowlist = new Map([...allow].map(([file, rules]) => [file, new Map(rules)]))
+  for (const { to } of renames) out.delete(to)
   for (const { from, to } of renames) {
-    const moved = out.get(from)
-    if (!moved) continue
+    const moved = allow.get(from)
     out.delete(from)
-    const into = out.get(to) ?? new Map<string, number>()
-    for (const [rule, n] of moved) into.set(rule, (into.get(rule) ?? 0) + n)
-    out.set(to, into)
+    if (moved) out.set(to, new Map(moved))
   }
   return out
 }
@@ -266,10 +268,12 @@ export function tighten(
 
 /**
  * The lines that list more than main's lists do, after main's are carried along this change's renames: any new or
- * higher line that is not a renamed file's own lines under its new name. No change may list a new finding.
+ * higher line that is not a renamed file's own lines under its new name. A file this change adds holds nothing, even
+ * where main still has a stale line for a file once deleted at that path. No change may list a new finding.
  */
-export function compareWithBase(base: Allowlist, current: Allowlist, renames: readonly Rename[] = []): string[] {
+export function compareWithBase(base: Allowlist, current: Allowlist, renames: readonly Rename[] = [], added: readonly string[] = []): string[] {
   const expected = alongRenames(base, renames)
+  for (const file of added) expected.delete(file)
   const raised: string[] = []
   for (const [file, rules] of [...current].sort(byKey)) {
     for (const [rule, n] of [...rules].sort(byKey)) {
@@ -299,7 +303,16 @@ export function baseCommit(root: string, ref: string): string | null {
   return mergeBase === head ? (runGit(root, 'rev-parse', '--verify', '--quiet', 'HEAD^1')?.trim() ?? null) : mergeBase
 }
 
-/** The files renamed since `base`, as git detects them in the working tree (`git diff -M`); null when git cannot tell */
+/** The files added since `base` (not renamed), in the working tree; null when git cannot tell */
+export function addedSince(root: string, base: string): string[] | null {
+  const out = runGit(root, 'diff', '--name-only', '-M', '--diff-filter=A', base, '--')
+  return out === null ? null : out.split('\n').filter(Boolean)
+}
+
+/**
+ * The files renamed since `base`, as git detects them in the working tree (`git diff -M`); null when git cannot tell.
+ * A file moved without `git mv` or `git add` is not in the diff, so it is no rename: its count stays behind.
+ */
 export function renamesSince(root: string, base: string): Rename[] | null {
   const out = runGit(root, 'diff', '--name-status', '-M', '--diff-filter=R', base, '--')
   if (out === null) return null

@@ -20,7 +20,19 @@ import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
-import { ALLOWLIST_DIR, LISTABLE_RULES, compareWithBase, eslintOptions, formatList, mainLists, packageOf, parseList, readAllowlist, renamesSince } from './lint-allowlist.js'
+import {
+  ALLOWLIST_DIR,
+  LISTABLE_RULES,
+  addedSince,
+  compareWithBase,
+  eslintOptions,
+  formatList,
+  mainLists,
+  packageOf,
+  parseList,
+  readAllowlist,
+  renamesSince,
+} from './lint-allowlist.js'
 import { SLOW } from './test-timing.js'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
@@ -179,8 +191,10 @@ describe('type-aware lint (#1339)', () => {
         return
       }
       const renames = renamesSince(ROOT, main.base)
+      const added = addedSince(ROOT, main.base)
       expect(renames, `the renames since ${main.base}`).not.toBeNull()
-      const raised = compareWithBase(main.lists, readAllowlist(ROOT), renames ?? []).filter((line) => !Object.keys(TURNED_ON).some((rule) => line.includes(` ${rule} `)))
+      expect(added, `the files added since ${main.base}`).not.toBeNull()
+      const raised = compareWithBase(main.lists, readAllowlist(ROOT), renames ?? [], added ?? []).filter((line) => !Object.keys(TURNED_ON).some((rule) => line.includes(` ${rule} `)))
       expect(
         raised,
         `${ALLOWLIST_DIR}/ lists more than main's lists: fix the new findings instead. Only a file git sees renamed takes ` +
@@ -194,7 +208,9 @@ describe('type-aware lint (#1339)', () => {
     // A line above its file is not a lint failure (lintFailed), so something has to lower it
     const job = readFileSync(join(ROOT, '.github/workflows/lint-tighten.yml'), 'utf8')
     expect(job).toMatch(/schedule:\s*\n(\s*#.*\n)*\s*- cron:/)
-    expect(job).toMatch(/run: pnpm lint:tighten/)
+    expect(job).toMatch(/pnpm lint:tighten \|\| rc=\$\?/)
+    // Findings on main (1) do not stop it; a crash (2, tooling/lint-crash.ts) fails it
+    expect(job).toMatch(/if \[ "\$rc" -gt 1 \]; then/)
     expect(job).toMatch(/git add tooling\/lint-allowlist\n/)
     expect(job).toMatch(/gh pr create --base main/)
   })
