@@ -163,8 +163,23 @@ describe('a delivery is told once (M2, §7.6)', () => {
 
     delivered(store, message.id, S2)
     expect(mail.drain(S2)).toEqual({ text: '', messageIds: [], inline: [], pointed: [] })
-    // Not even when a wake is asked to point at what is delivered and unread
-    expect(mail.drain(S2, { again: true })).toEqual({ text: '', messageIds: [], inline: [], pointed: [] })
+    // Asked to point at what is delivered and unread, it points: it does not send the words again
+    const again = mail.drain(S2, { again: true })
+    expect(again).toMatchObject({ inline: [], pointed: [message.id] })
+    expect(again.text).not.toContain('land #12')
+  })
+
+  it('an assign too long for the frame was only pointed at, and is pointed at again with `again`, never sent whole (R1)', () => {
+    const { store, mail } = setup()
+    const { message } = openBy(mail, { by: S1, kind: 'assign', subject: 'work', body: 'x'.repeat(12_000), assignee: S2 })
+    const first = mail.drain(S2)
+    expect(first).toMatchObject({ inline: [], pointed: [message.id] })
+    expect(first.text).toContain('more characters: read the message')
+    delivered(store, message.id, S2)
+    expect(mail.drain(S2).messageIds).toEqual([])
+    const again = mail.drain(S2, { again: true })
+    expect(again).toMatchObject({ inline: [], pointed: [message.id] })
+    expect(again.text).not.toContain('xxxxxxxxxx')
   })
 
   it('a pointer to mail that was delivered and is still unread comes again only when asked, and never as the words themselves', () => {

@@ -290,7 +290,8 @@ export class MailService {
       // The person who opens a thread for someone else is in it; Centralu never is
       if (by.kind === 'person' && !addresses.includes(caller)) this.records.putParticipant(id, PERSON, 'member', now)
 
-      const message = this.insertPost(id, caller, input.kind, body, {}, input, now, undefined)
+      // Stored under its own namespace, so a post in this thread that reuses the key that opened it is a post, not a duplicate
+      const message = this.insertPost(id, caller, input.kind, body, {}, { ...input, dedupeKey: input.dedupeKey === undefined ? undefined : OPENING + input.dedupeKey }, now, undefined)
       const offered = unique((input.follows ?? []).flatMap((f) => this.records.participants(f).filter((p) => p.leftAt === null).map((p) => p.address))).filter(
         (a) => a !== caller,
       )
@@ -673,7 +674,9 @@ export class MailService {
       if (this.policy.mayWrite(message.sender, recipient, thread) !== null) continue
       const sender = parseAddress(message.sender)?.kind
       const down = flowsDown(sender === 'person', sender === 'session' && message.sender === thread.owner, recipient === thread.assignee, message.kind)
-      if (down && receipt.deliveredAt !== null) continue
+      // A body that flows down and was delivered is not sent as the words again: if it is still unread it was only pointed at
+      // (cut to fit, or read by nobody), and `again` points at it once more. Read on acceptance, a whole one is not pending at all
+      const pointerOnly = down && receipt.deliveredAt !== null
       const about = aboutOf(message.facts)
       const outcome = typeof message.facts.outcome === 'string' ? message.facts.outcome : undefined
       items.push({
@@ -684,7 +687,7 @@ export class MailService {
         relation: relationWord(recipient, message.sender, thread),
         ...(about ? { about } : {}),
         ...(outcome ? { outcome } : {}),
-        ...(down ? { inline: message.body } : {}),
+        ...(down && !pointerOnly ? { inline: message.body } : {}),
       })
     }
     const frame = buildMailFrame(items)
@@ -846,12 +849,13 @@ export class MailService {
   private duplicate(threadId: string, sender: string, key: string | undefined): MessageRow | undefined {
     if (key === undefined) return undefined
     checkDedupeKey(key)
+    if (key.startsWith(OPENING)) throw refuse('bad_value', `a dedupe key does not start with ${OPENING}: it is the opening's`)
     return this.records.messageByDedupeKey(threadId, sender, key)
   }
 
   private duplicateOpening(sender: string, key: string): MessageRow | undefined {
     checkDedupeKey(key)
-    return this.records.openingMessageByDedupeKey(sender, key)
+    return this.records.openingMessageByDedupeKey(sender, OPENING + key)
   }
 
   private checkReplyTo(threadId: string, replyTo: string): void {
@@ -927,6 +931,9 @@ function rejectUnknown(input: object, allowed: ReadonlySet<string>, what: string
 function checkDedupeKey(key: string): void {
   if (!key || key.length > MAX_DEDUPE_KEY) throw refuse('bad_value', `a dedupe key is 1 to ${MAX_DEDUPE_KEY} characters`)
 }
+
+/** The key a thread was opened under is stored with this in front, and a post's key may not start with it */
+const OPENING = 'open:'
 
 function unique<T>(list: readonly (T | undefined)[]): T[] {
   return [...new Set(list.filter((x): x is T => x !== undefined))]

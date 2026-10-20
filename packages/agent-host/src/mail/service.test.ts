@@ -867,6 +867,26 @@ describe('a retry after the thread closed (L3), and an opening posted twice (L4)
   })
 })
 
+describe('the key that opened a thread and the keys of its posts (R2)', () => {
+  it('a post that reuses the key its thread was opened under is a post, not a duplicate of the opening', () => {
+    const { mail, records } = setup()
+    const opened = openBy(mail, assignInput({ dedupeKey: 'queue:12' }))
+    const post = mail.post(opened.thread.id, S1, { kind: 'note', body: 'a second word', dedupeKey: 'queue:12' })
+    expect(post.duplicate).toBe(false)
+    expect(post.message.id).not.toBe(opened.message.id)
+    expect(records.messagesAfter(opened.thread.id, 0)).toHaveLength(2)
+    // Each is still once: the same post again is the duplicate, and the same opening again is the same thread
+    expect(mail.post(opened.thread.id, S1, { kind: 'note', body: 'a second word', dedupeKey: 'queue:12' })).toMatchObject({ duplicate: true, message: { id: post.message.id } })
+    expect(openBy(mail, assignInput({ dedupeKey: 'queue:12' })).thread.id).toBe(opened.thread.id)
+  })
+
+  it('a post’s key may not start with the word the opening’s is kept under', () => {
+    const { mail } = setup()
+    const { thread } = openBy(mail, assignInput())
+    expect(refusedFor(() => mail.post(thread.id, S1, { kind: 'note', body: 'x', dedupeKey: 'open:queue:12' }))).toBe('bad_value')
+  })
+})
+
 describe('a reassignment and the person’s own place in a thread', () => {
   it('giving the thread to the assignee it has keeps running; in review it runs again; to another it is open', () => {
     const { mail, records } = setup()
