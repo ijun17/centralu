@@ -33,7 +33,7 @@ function isGoalCommand(text: string): boolean {
 type StopWait = { bound: ReturnType<typeof setTimeout> | undefined; late: boolean; asks: number }
 
 /** A message as the stream loop reads it */
-type StreamMsg = { type?: string; session_id?: string; subtype?: string; slash_commands?: unknown; claude_code_version?: unknown; capabilities?: unknown; user_message_uuid?: string; parent_tool_use_id?: string | null }
+type StreamMsg = { type?: string; session_id?: string; subtype?: string; slash_commands?: unknown; claude_code_version?: unknown; capabilities?: unknown; user_message_uuid?: string; user_message_uuids?: unknown; parent_tool_use_id?: string | null }
 
 /**
  * How this adapter starts Claude processes, shared by every session it creates (#353): where the
@@ -331,7 +331,7 @@ export class ClaudeSession implements SessionHandle {
     let events = this.stream.push(msg)
     const retrying = m.type === 'result' && this.raceRetry.afterResult(msg as RaceMsg)
     // What this result folded in, for the host to read while it handles the events that end the turn (#1377)
-    this.resultInputs = m.type === 'result' && !retrying && this.sendTracked ? ((msg as { user_message_uuids?: string[] }).user_message_uuids ?? []) : null
+    this.resultInputs = m.type === 'result' && !retrying && this.sendTracked ? (Array.isArray(m.user_message_uuids) ? m.user_message_uuids.filter((id): id is string => typeof id === 'string') : []) : null
     if (m.type === 'result' && !retrying) {
       const result = msg as { user_message_uuid?: string; user_message_uuids?: string[] }
       for (const id of result.user_message_uuids ?? (result.user_message_uuid ? [result.user_message_uuid] : [])) this.personInputs.delete(id)

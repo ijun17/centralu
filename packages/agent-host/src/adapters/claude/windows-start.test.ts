@@ -646,11 +646,12 @@ describe('what the turn that ends took in (#1377)', () => {
 
   async function watched(a: InstanceType<typeof ClaudeAdapter>) {
     const seen: (readonly string[] | null | undefined)[] = []
-    let handle: Awaited<ReturnType<typeof a.createSession>> | undefined
-    handle = await a.createSession({ sessionId: 'sx', cwd: dir, permissionPreset: 'auto' }, (e) => {
+    const box: { handle?: Awaited<ReturnType<typeof a.createSession>> } = {}
+    const handle = await a.createSession({ sessionId: 'sx', cwd: dir, permissionPreset: 'auto' }, (e) => {
       // As the host does: while the event that ends the turn is handled
-      if (e.type === 'turn_complete' || e.type === 'error') seen.push(handle?.turnInputs?.())
+      if (e.type === 'turn_complete' || e.type === 'error') seen.push(box.handle?.turnInputs?.())
     })
+    box.handle = handle
     return { handle, seen, cli: sdk.started.at(-1)! }
   }
 
