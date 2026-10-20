@@ -86,6 +86,8 @@ class ControlledTunnel implements Tunnel {
   opens = 0
   closes = 0
   unreachable = false
+  /** What ssh says when `unreachable`; a connect timeout when absent */
+  failure: string | null = null
   /** How long an opening takes, as an ssh to a slow machine */
   openMs = 0
   private downListener: ((reason: string) => void) | undefined
@@ -93,7 +95,7 @@ class ControlledTunnel implements Tunnel {
   async open(): Promise<Endpoint> {
     this.opens++
     if (this.openMs) await new Promise((r) => setTimeout(r, this.openMs))
-    if (this.unreachable) throw new Error('ssh: connect to host laptop port 22: Operation timed out')
+    if (this.unreachable) throw new Error(this.failure ?? 'ssh could not reach laptop: ssh: connect to host laptop port 22: Operation timed out')
     const line = this.line()
     return { url: `ws://127.0.0.1:${line.port}`, token: line.token, line, localPort: line.port }
   }
@@ -268,7 +270,8 @@ describe('a machine with Auto reconnect off (#1341)', () => {
         return tunnel
       },
     })
-    await eventually(() => hub.row().status === 'unreachable')
+    // A connect that timed out: the machine does not answer (#1398)
+    await eventually(() => hub.row().status === 'away')
     await pause(WINDOW_MS)
     expect(tunnel!.opens).toBe(1)
 
@@ -581,6 +584,128 @@ describe('a child working on a machine whose Auto reconnect is off (#1341)', () 
   })
 })
 
+/*
+ * A machine that does not answer at all (#1398): ssh's connect timed out, there is no route, or the name does not resolve. It is
+ * asleep, off or off the network: the row says `away`, with when it was last connected and when the hub tries again, and ssh's
+ * own line as the details. A real failure (a key refused, a host key changed) stays an error, `unreachable`, with its reason.
+ */
+describe('a machine that does not answer (#1398)', () => {
+  const NO_ANSWER = [
+    'ssh could not reach laptop: ssh: connect to host laptop port 22: Operation timed out',
+    'ssh could not reach laptop: ssh: connect to host laptop port 22: Connection timed out',
+    'ssh could not reach laptop: ssh: connect to host laptop port 22: No route to host',
+    'ssh could not reach laptop: ssh: connect to host laptop port 22: Network is unreachable',
+    'ssh could not reach laptop: ssh: Could not resolve hostname jungi.tail3d9122.ts.net: Name or service not known',
+    'ssh could not reach laptop: ssh: Could not resolve hostname laptop: No such host is known.',
+  ]
+  const REAL_FAILURES = [
+    'ssh could not reach laptop: me@laptop: Permission denied (publickey).',
+    'ssh could not reach laptop: Host key verification failed.',
+    'ssh could not reach laptop: @@@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @@@',
+    'ssh could not reach laptop: ssh: connect to host laptop port 22: Connection refused',
+  ]
+
+  async function down(failure: string, deps: Partial<LinkDeps> = {}, autoReconnect = true, port?: number) {
+    let tunnel: ControlledTunnel | undefined
+    const remote = await remoteHost()
+    const hub = await hubHost(() => lineFor(port ?? remote.port), {
+      autoReconnect,
+      deps,
+      tunnel: (line) => {
+        tunnel = new ControlledTunnel(line)
+        tunnel.unreachable = true
+        tunnel.failure = failure
+        return tunnel
+      },
+    })
+    const statuses = () => hub.events.flatMap((e: any) => (e.type === 'machine_status' ? [e.machine.status as string] : []))
+    return { hub, tunnel: () => tunnel as ControlledTunnel, statuses, remote }
+  }
+
+  for (const failure of NO_ANSWER) {
+    it(`shows "${failure.split(': ').slice(-1)[0]}" as away, with ssh's line kept as the details`, async () => {
+      const { hub } = await down(failure)
+      await eventually(() => hub.row().status === 'away')
+      expect(hub.row().error).toBe(failure)
+    })
+  }
+
+  for (const failure of REAL_FAILURES) {
+    it(`keeps "${failure.split(': ').slice(-1)[0]}" an error, with its reason`, async () => {
+      const { hub } = await down(failure)
+      await eventually(() => hub.row().status === 'unreachable')
+      expect(hub.row().error).toBe(failure)
+    })
+  }
+
+  it('says when it was last connected: a machine that was up and went to sleep', async () => {
+    const remote = await remoteHost()
+    const hub = await hubHost(() => lineFor(remote.port))
+    await eventually(() => hub.row().status === 'connected')
+    const connectedAt = hub.row().lastConnectedAt
+    expect(connectedAt).toEqual(expect.any(Number))
+    // The laptop closes: the link drops, and every attempt after it times out
+    hub.tunnel().unreachable = true
+    hub.tunnel().drop()
+    expect(hub.row().status).toBe('unreachable')
+    await eventually(() => hub.row().status === 'away')
+    expect(hub.row().lastConnectedAt).toBe(connectedAt)
+  })
+
+  it('stays away between attempts that fail alike, without flipping to connecting', async () => {
+    const { hub, tunnel, statuses } = await down(NO_ANSWER[0]!)
+    await eventually(() => tunnel().opens >= 5)
+    const seen = statuses()
+    expect(seen).toContain('away')
+    // Connecting came once, at the start; after the first away there is none until something answers
+    expect(seen.slice(seen.indexOf('away'))).not.toContain('connecting')
+    expect(hub.row().status).toBe('away')
+  })
+
+  it('says when the next attempt is due, and tells the windows again at each attempt, though the status does not change', async () => {
+    const { hub, tunnel } = await down(NO_ANSWER[0]!, { retryMs: [150 * SLOW, 150 * SLOW] })
+    await eventually(() => hub.row().status === 'away' && hub.row().nextAttemptAt !== null)
+    expect(hub.row().nextAttemptAt as number).toBeGreaterThan(Date.now() - 50)
+    await eventually(() => tunnel().opens >= 4)
+    // What the windows were told: the row of each attempt carries its own time, later than the one before
+    const told = hub.events.flatMap((e: any) => (e.type === 'machine_status' && e.machine.status === 'away' && e.machine.nextAttemptAt ? [e.machine.nextAttemptAt as number] : []))
+    expect(new Set(told).size).toBeGreaterThanOrEqual(3)
+    expect([...told]).toEqual([...told].sort((a, b) => a - b))
+  })
+
+  it('says no attempt is due when Auto reconnect is off, and tries none', async () => {
+    const { hub, tunnel } = await down(NO_ANSWER[0]!, {}, false)
+    await eventually(() => hub.row().status === 'away')
+    expect(hub.row().nextAttemptAt).toBeNull()
+    const opens = tunnel().opens
+    await pause(WINDOW_MS)
+    expect(tunnel().opens).toBe(opens)
+  })
+
+  it('is connecting while the person\'s Connect tries, and connected at once when the machine answers', async () => {
+    const { hub, tunnel, statuses } = await down(NO_ANSWER[0]!, { retryMs: [60_000, 60_000] })
+    await eventually(() => hub.row().status === 'away')
+    const before = statuses().length
+    tunnel().unreachable = false
+    await hub.call('machines.reconnect', { machineId: 'm1' })
+    await eventually(() => hub.row().status === 'connected')
+    // The person's Connect shows what it does; the backoff's own attempts stay quiet
+    expect(statuses().slice(before)).toContain('connecting')
+    expect(hub.row().nextAttemptAt).toBeNull()
+  })
+
+  it('is not away once ssh answers, whatever comes of the rest of the attempt', async () => {
+    // ssh gets through, but nothing listens at the host there: the link is connecting, not away, while it tries
+    const { hub, tunnel, statuses } = await down(NO_ANSWER[0]!, { retryMs: [200 * SLOW, 200 * SLOW] }, true, 1)
+    await eventually(() => hub.row().status === 'away')
+    const away = statuses().length
+    tunnel().unreachable = false
+    tunnel().failure = null
+    await eventually(() => statuses().length > away)
+    expect(statuses()[away]).toBe('connecting')
+  })
+})
+
 describe('a machine with Auto reconnect on (#1341)', () => {
   it('tries again after a failed attempt, and after a drop, on the backoff as before', async () => {
     const remote = await remoteHost()
@@ -593,7 +718,7 @@ describe('a machine with Auto reconnect on (#1341)', () => {
       },
     })
     await eventually(() => tunnel!.opens >= 3)
-    expect(hub.row().status).toBe('unreachable')
+    expect(hub.row().status).toBe('away')
     tunnel!.unreachable = false
     await eventually(() => hub.row().status === 'connected')
 

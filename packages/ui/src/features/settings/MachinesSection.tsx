@@ -5,6 +5,7 @@ import { useStore } from '../../store/store.js'
 import { InlineConfirm } from '../../components/InlineConfirm.jsx'
 import { Button } from '../../components/Button.jsx'
 import { MachineStatusMark } from '../machines/MachineTag.jsx'
+import { AwayNote } from '../machines/AwayNote.jsx'
 import { AddMachineForm, SHELL_LABEL, withCode } from './AddMachineForm.jsx'
 import { useLoad } from '../../app/useLoad.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
@@ -172,6 +173,7 @@ function MachineRow({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: (ca
         <div className="mt-1.5 text-xs leading-body" data-testid={`machine-problem-${m.id}`}>
           <p className="text-ink">{problem.title}</p>
           {problem.fix && <p className="mt-0.5 text-ink-muted">{withCode(problem.fix)}</p>}
+          <AwayNote m={m} testId={`machine-away-${m.id}`} />
         </div>
       )}
       <VersionPrompt m={m} onOpenCategory={onOpenCategory} />

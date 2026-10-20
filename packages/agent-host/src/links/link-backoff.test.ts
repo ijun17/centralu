@@ -50,6 +50,7 @@ describe('a linked machine that cannot be reached (#1134)', () => {
 
     const gaps = at.slice(1).map((t, i) => Math.round((t - at[i]!) / 1000))
     expect(gaps).toEqual([2, 4, 8, 16, 32, 64, 128, 256, 300, 300, 300])
-    expect(links.list()[0]).toMatchObject({ status: 'unreachable' })
+    // A connect that times out is a machine that does not answer, shown as away between the attempts (#1398)
+    expect(links.list()[0]).toMatchObject({ status: 'away' })
   })
 })

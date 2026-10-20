@@ -883,7 +883,7 @@ describe('a hub linked to another host (#82)', () => {
       await eventually(() => l.asks() >= asked + 2)
       expect(l.statuses.slice(from)).not.toContain('connecting')
       asleep = true
-      await eventually(() => l.row().status === 'unreachable')
+      await eventually(() => l.row().status === 'away')
       expect(l.links.startHeldBack('m1')).toMatch(/^Centralu was stopped on Remote box with `centralu serve --stop`/)
       // The orchestrator's reconnect without its card, then the machine wakes: still held back, nothing started
       l.links.reconnect('m1', { start: false })
@@ -893,10 +893,10 @@ describe('a hub linked to another host (#82)', () => {
       expect(l.links.startHeldBack('m1')).not.toBeNull()
       // A Start pressed while the machine sleeps is spent, not kept for when it wakes (it may have been stopped since)
       asleep = true
-      await eventually(() => l.row().status === 'unreachable')
+      await eventually(() => l.row().status === 'away')
       l.links.reconnect('m1')
       const tried = l.statuses.length
-      await eventually(() => l.statuses.length > tried && l.row().status === 'unreachable')
+      await eventually(() => l.statuses.length > tried && l.row().status === 'away')
       asleep = false
       await eventually(() => l.row().status === 'stopped')
       expect(l.starts).toEqual([])

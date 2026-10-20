@@ -1685,8 +1685,11 @@ ssh -N -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o
 | 토큰은 저장하지 않고 링크가 시작할 때마다 ssh로 묻는다 | 그 기기의 모든 RPC 열쇠다. 시작마다 ssh 왕복 한 번(LAN에서 연결까지 2.1–4.3초 잼)은 싸다 |
 | ssh 프로세스는 허브 호스트의 자식이고 `Tunnel` 인터페이스 뒤에 있다 | 계획 문서의 probe 4(§10.6, 2026-10-08)가 실제 허브 교체를 건너 대안들을 쟀다: 지금 그대로면 교체 한 번에 링크가 약 1.1초 떨어지고, OpenSSH `ControlPersist`면 0.8초(교체마다 포워드를 하나씩 남기고 "완전히 종료"보다 오래 산다), keeper의 자식이면 약 0.14초일 것이다. 원격의 에이전트는 허브 교체를 알아채지도 못하므로 여기에 둔다 |
 
-**링크의 상태**(`MachineInfo.status`, `machine_status`로 보낸다): `connecting`; `connected`; `unreachable`(ssh 실패,
-포워드나 소켓이 끊김. 자동 재연결이 켜져 있으면 2초에서 5분까지 늘려 가며 다시 시도, #1134, #1341; 꺼져 있으면 사람의 Connect 전까지 하지 않는다); `starting`(호스트가 돌지 않아 링크가 `centralu serve --detach`로
+**링크의 상태**(`MachineInfo.status`, `machine_status`로 보낸다): `connecting`; `connected`; `away`(#1398: 기기가 아예
+답하지 않음. ssh 연결 시간 초과, 경로 없음, 이름을 못 찾음(`links/away.ts`). 잠들었거나 꺼졌거나 네트워크에서 벗어난 것이지 오류가 아니다.
+`error`에는 ssh 줄이 자세히 보기용으로 남고, `lastConnectedAt`은 마지막으로 연결된 때, `nextAttemptAt`은 다시 시도할 때다.
+같은 방식으로 실패하는 시도 사이에는 `connecting`으로 뒤집히지 않고 `away`로 머문다); `unreachable`(기기가 답했거나 연결됐다가 실패함:
+ssh가 거절한 키·호스트 키·연결, 끊긴 링크, 포워드나 소켓. 자동 재연결이 켜져 있으면 2초에서 5분까지 늘려 가며 다시 시도, #1134, #1341; 꺼져 있으면 사람의 Connect 전까지 하지 않는다); `starting`(호스트가 돌지 않아 링크가 `centralu serve --detach`로
 띄우는 중. 묻지 않는다, 계획 문서 §10.9 결정 7. WMI가 막힌 기기에서는 포워드의 ssh 세션이 호스트를 돌리고 링크와 함께 끝난다);
 `not_running`(Centralu는 답하지만 `centralu serve`가 돌지 않고, 띄우기도 실패했다. `error`가 까닭. 다시 시도); `versions_differ`; `refused`(토큰이 연달아 두 번 거절됨. 연결 줄은 바로 한 번 다시 읽는다.
 `--rotate-token`은 토큰을 바꾸지만 돌고 있는 serve는 재시작할 때까지 이전 것을 쓰기 때문이다); `disconnected`(#1134: 일부러
