@@ -126,7 +126,7 @@ it("a hub swap keeps a paused report ended by the person's message ended: one no
     hasSession: () => true,
     closing: false,
     deliverReport: async (_to: string, sessionId: string) => void delivered.push(sessionId),
-  } as unknown as LinkedReportsHost)
+  })
   store.settings.setAppSetting(REMOTE_AGENTS_KEY, JSON.stringify([{ ...child, owed: { paused: [task] } }]))
   // The next host: the paused report is owed again from the store
   const ra = agents()
