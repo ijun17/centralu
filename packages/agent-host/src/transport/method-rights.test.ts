@@ -47,7 +47,7 @@ describe('the method classification (#1405)', () => {
   })
 
   it("never lets the limited credential answer the person's cards or speak as a hub or a bridge", () => {
-    for (const m of ['agents.respondApproval', 'agents.answerQuestion', 'apps.answerQuestion', 'updates.answerApply', 'agents.resolveMcpProposal', 'agents.resolveSkillProposal'])
+    for (const m of ['agents.respondApproval', 'agents.answerQuestion', 'apps.answerQuestion', 'updates.answerApply', 'updates.reportApply', 'agents.resolveMcpProposal', 'agents.resolveSkillProposal'])
       expect(limitedRight(m, {}), m).toBe('window')
     for (const m of ['host.send', 'host.hubOffer', 'host.setHubAuto', 'host.readSession']) expect(limitedRight(m, {}), m).toBe('link')
     for (const m of ['orchestrator.tool', 'orchestrator.tools', 'apps.sessionCall', 'apps.sessionTools']) expect(limitedRight(m, {}), m).toBe('bridge')
@@ -59,6 +59,8 @@ describe('the method classification (#1405)', () => {
       ['agents.createSession', { permissionPreset: 'normal' }, 'everyday'],
       ['agents.createSession', { permissionPreset: 'safe' }, 'everyday'],
       ['agents.createSession', { permissionPreset: 7 }, 'asks'],
+      ['agents.createSession', { projectId: 'p1', fromHub: { callerPreset: 'auto' } }, 'asks'],
+      ['agents.createSession', { projectId: 'p1', fromHub: { callerPreset: 'safe' } }, 'asks'],
       ['agents.updateSettings', { sessionId: 's1', permissionPreset: 'auto' }, 'asks'],
       ['agents.updateSettings', { sessionId: 's1', permissionPreset: 'normal' }, 'asks'],
       ['agents.updateSettings', { sessionId: 's1', permissionPreset: 'safe' }, 'everyday'],

@@ -1,6 +1,6 @@
 /** The limited credential (#1405): its derivation, and what a connection holding it may do */
 import { afterEach, describe, expect, it } from 'vitest'
-import { WebSocket } from 'ws'
+import { WebSocket, type RawData } from 'ws'
 import { PROTOCOL_VERSION, type NormalizedEvent } from '@cc/protocol'
 import { HostServer, type RpcContext } from './server.js'
 import { isLimitedToken, limitedToken } from './limited-token.js'
@@ -47,10 +47,13 @@ async function start() {
   return { srv: server, port, calls }
 }
 
+/** A frame's text, whichever form the library hands it in */
+const text = (d: RawData) => (Buffer.isBuffer(d) ? d : Array.isArray(d) ? Buffer.concat(d) : Buffer.from(d)).toString('utf8')
+
 async function hello(port: number, token: string) {
   const ws = new WebSocket(`ws://127.0.0.1:${port}`)
   const frames: Record<string, unknown>[] = []
-  ws.on('message', (d) => frames.push(JSON.parse(String(d))))
+  ws.on('message', (d) => frames.push(JSON.parse(text(d))))
   const closed = new Promise<number>((r) => ws.on('close', (code) => r(code)))
   await new Promise<void>((r) => ws.on('open', () => r()))
   ws.send(JSON.stringify({ kind: 'hello', token, protocolVersion: PROTOCOL_VERSION }))
@@ -78,7 +81,7 @@ const ev = (sessionId: string): NormalizedEvent => ({ type: 'turn_started', sess
  * 2026-10-21): these stay everyday
  */
 const ORCHESTRATION: [string, unknown][] = [
-  ['agents.createSession', { projectId: 'p1', tool: 'claude' }],
+  ['agents.createSession', { projectId: 'p1', cwd: 'C:/work/p1', tool: 'claude' }],
   ['agents.send', { sessionId: 's1', text: 'hi' }],
   ['sessions.rename', { sessionId: 's1', name: 'n' }],
   ['sessions.list', {}],
@@ -97,6 +100,9 @@ const REFUSED: [string, unknown, string][] = [
   ['projects.setTrusted', { projectId: 'p1', trusted: true }, 'asks'],
   ['agents.createSession', { projectId: 'p1', tool: 'claude', permissionPreset: 'auto' }, 'asks'],
   ['agents.updateSettings', { sessionId: 's1', permissionPreset: 'auto' }, 'asks'],
+  // A hub's session carries its preset: an auto one would start this session under auto (#1405 review)
+  ['agents.createSession', { projectId: 'p1', tool: 'claude', fromHub: { callerPreset: 'auto' } }, 'asks'],
+  ['updates.reportApply', { requestId: 'r', ticket: 't', state: 'failed' }, 'window'],
   ['agents.respondApproval', { sessionId: 's1', requestId: 'r', decision: 'allow' }, 'window'],
   ['workspace.save', {}, 'window'],
   ['host.send', { sessionId: 's1', text: 'x' }, 'link'],
@@ -155,11 +161,14 @@ describe('a connection holding the limited credential (#1405)', () => {
     const c = await hello(port, limitedToken(TOKEN))
     await c.call('sessions.list')
     const client = calls[0]!.ctx!.client
-    const pending = srv.call(client, 'hub.projects', {}, { timeoutMs: 400 })
+    // The expectation is attached before anything waits, so the timeout's rejection is never unobserved
+    const pending = expect(srv.call(client, 'hub.projects', {}, { timeoutMs: 1500 })).rejects.toThrow(/did not answer/)
     await c.wait(() => c.frames.some((f) => f.kind === 'rpc'))
     const asked = c.frames.find((f) => f.kind === 'rpc') as { id: string }
+    // Neither an answer nor one in a form the host does not read (which would end the call with that complaint)
     c.ws.send(JSON.stringify({ kind: 'res', id: asked.id, ok: true, result: { projects: [] } }))
-    await expect(pending).rejects.toThrow(/did not answer/)
+    c.ws.send(JSON.stringify({ kind: 'res', id: asked.id, ok: 'not a boolean' }))
+    await pending
     c.ws.close()
   })
 

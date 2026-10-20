@@ -37,12 +37,21 @@ export type Rights =
 
 /** The parameters as an object to read fields from; anything else reads as having none */
 function fields(params: unknown): Record<string, unknown> {
-  return params !== null && typeof params === 'object' && !Array.isArray(params) ? (params as Record<string, unknown>) : {}
+  return isRecord(params) ? params : {}
 }
 
-/** A preset above `normal` (`auto` never asks), or one that cannot be read, asks */
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === 'object' && !Array.isArray(v)
+}
+
+/**
+ * A preset above `normal` (`auto` never asks), or one that cannot be read, asks. So does `fromHub`: a hub's session
+ * carries its own preset with it, and an `auto` one starts this session under `auto` while the hub-auto switch is on
+ * (`presetFromHub`, sessions/hub-preset.ts). Only a hub sends it, and a hub holds the token
+ */
 const presetAbove = (params: unknown): boolean => {
   const p = fields(params).permissionPreset
+  if ('fromHub' in fields(params)) return true
   return p !== undefined && p !== 'safe' && p !== 'normal'
 }
 
@@ -246,7 +255,8 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   'updates.setAutoApply': { asks: switchedOn('enabled') },
   'updates.apply': 'asks',
   'updates.answerApply': 'window',
-  'updates.reportApply': 'everyday',
+  /** The window's report on an apply it was handed (`update_apply_go` carries the ticket to every client) */
+  'updates.reportApply': 'window',
 
   // Linked machines
   'machines.list': 'everyday',
@@ -303,7 +313,9 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
 
 /** What a limited call of `method` with `params` comes to: run it, or which class refuses it */
 export function limitedRight(method: string, params: unknown): 'everyday' | 'asks' | 'window' | 'link' | 'bridge' | 'unknown' {
-  const rights = Object.prototype.hasOwnProperty.call(METHOD_RIGHTS, method) ? METHOD_RIGHTS[method as RpcMethodName] : undefined
+  // Read as a table of any name: an own key only, so `constructor` or `__proto__` is no method
+  const table: Readonly<Record<string, Rights>> = METHOD_RIGHTS
+  const rights = Object.prototype.hasOwnProperty.call(table, method) ? table[method] : undefined
   if (rights === undefined) return 'unknown'
   if (typeof rights === 'object') return rights.asks(params) ? 'asks' : 'everyday'
   return rights
