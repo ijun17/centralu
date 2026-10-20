@@ -78,7 +78,7 @@ export class CommandRunner {
 
   /** The host is leaving and the keeper keeps the runs (#280 step 2): let go without signalling anything. */
   async detachAll(): Promise<void> {
-    await Promise.allSettled([...this.entries.values()].map((e) => e.slot.detach()))
+    await Promise.allSettled([...this.entries.values()].map((e) => e.slot.detach() ?? Promise.resolve()))
     this.entries.clear()
   }
 

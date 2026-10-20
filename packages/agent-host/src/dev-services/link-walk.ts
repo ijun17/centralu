@@ -1,3 +1,4 @@
+import { errnoCode } from './errno.js'
 import { lstatSync, readdirSync, readlinkSync, type Dirent } from 'node:fs'
 import { lstat, readdir, readlink } from 'node:fs/promises'
 import { win32 } from 'node:path'
@@ -78,6 +79,9 @@ type Failed = { failed: string | undefined }
 type Identity = { dev: bigint; ino: bigint }
 type Answer = Dirent[] | string | Identity | Failed
 
+const isIdentity = (a: Answer): a is Identity => typeof a === 'object' && !Array.isArray(a) && 'ino' in a
+const isFailed = (a: Answer): a is Failed => typeof a === 'object' && !Array.isArray(a) && 'failed' in a
+
 /** Entries a short name is looked for among, before the walk gives up and refuses it */
 const MAX_SHORT_NAME_SCAN = 10_000
 
@@ -88,14 +92,14 @@ const MAX_SHORT_NAME_SCAN = 10_000
  */
 function* shortNameEntry(folder: string, part: string, listed: Dirent[]): Generator<Ask, Dirent | null, Answer> {
   const self = yield { identity: win32.join(folder, part) }
-  if (!('ino' in (self as object))) return null
-  const { dev, ino } = self as Identity
-  const first = part[0]!.toLowerCase()
+  if (!isIdentity(self)) return null
+  const { dev, ino } = self
+  const first = part.charAt(0).toLowerCase()
   const likely = (e: Dirent) => (e.name.replace(/^[. ]+/, '')[0]?.toLowerCase() === first ? 0 : 1)
   const order = [...listed].sort((a, b) => likely(a) - likely(b)).slice(0, MAX_SHORT_NAME_SCAN)
   for (const e of order) {
     const other = yield { identity: win32.join(folder, e.name) }
-    if ('ino' in (other as object) && (other as Identity).ino === ino && (other as Identity).dev === dev) return e
+    if (isIdentity(other) && other.ino === ino && other.dev === dev) return e
   }
   return null
 }
@@ -111,7 +115,7 @@ function* walkSteps(abs: string, home: string | undefined): Generator<Ask, LinkW
     for (const [i, part] of parts.entries()) {
       const listed = yield { list: current }
       if (!Array.isArray(listed)) {
-        const code = (listed as Failed).failed
+        const code = isFailed(listed) ? listed.failed : undefined
         if (code === 'ENOENT' || code === 'ENOTDIR') return { ok: true }
         return { ok: false, reason: 'unchecked', why: `${current} cannot be listed (${code})` }
       }
@@ -141,7 +145,7 @@ function* walkSteps(abs: string, home: string | undefined): Generator<Ask, LinkW
   return { ok: false, reason: 'unchecked', why: `more than ${MAX_LINK_HOPS} links lead from ${abs}` }
 }
 
-const failed = (e: unknown): Failed => ({ failed: (e as NodeJS.ErrnoException).code })
+const failed = (e: unknown): Failed => ({ failed: errnoCode(e) })
 
 /**
  * `home`: the share the walk may start on and links may lead to (`shareRoot` of a project's real path), when the

@@ -69,7 +69,9 @@ async function walk(root: string): Promise<string[]> {
   const out: string[] = []
   const queue: { dir: string; rel: string; depth: number }[] = [{ dir: root, rel: '', depth: 0 }]
   while (queue.length > 0 && out.length < MAX_FILES) {
-    const { dir, rel, depth } = queue.shift()!
+    const next = queue.shift()
+    if (!next) break
+    const { dir, rel, depth } = next
     let entries
     try {
       entries = await readdir(dir, { withFileTypes: true })

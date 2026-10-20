@@ -42,14 +42,26 @@ export type Schema = { version: number; tables: SchemaTable[] }
 
 type Db = Database.Database
 
-/** What a store's private parts look like from here. The same reach `Store.inspect` takes into a probe */
-type StoreInternals = {
-  db: Db
-  dbPath: string
-  opts: object
-  migrationsRun: number
-  migrationSteps(): { to: number; run: () => void }[]
-  writeMinReader(version: number): void
+/** A store as this file reaches into it: the same reach `Store.inspect` takes into a probe */
+class SchemaStore extends Store {
+  get database(): Db {
+    return this.db
+  }
+
+  /** A store that never ran its constructor, over `db`: it may only call the migration methods */
+  static probe(db: Db): SchemaStore {
+    const bare: unknown = Object.create(SchemaStore.prototype)
+    if (!(bare instanceof SchemaStore)) throw new Error('A probe made from the store is not a store')
+    return Object.assign(bare, { db, dbPath: ':memory:', opts: {}, migrationsRun: 0 })
+  }
+
+  stepsToReplay(): { to: number; run: () => void }[] {
+    return this.migrationSteps()
+  }
+
+  recordMinReader(version: number): void {
+    this.writeMinReader(version)
+  }
 }
 
 const SCHEMA_SQL = fileURLToPath(new URL('../../../protocol/src/schema/schema.sql', import.meta.url))
@@ -61,8 +73,8 @@ function isInternal(name: string, virtualNames: string[]): boolean {
 
 function tableNames(db: Db): { name: string; virtual: boolean }[] {
   const rows = db
-    .prepare(`SELECT name, sql FROM sqlite_schema WHERE type = 'table' ORDER BY name`)
-    .all() as { name: string; sql: string | null }[]
+    .prepare<unknown[], { name: string; sql: string | null }>(`SELECT name, sql FROM sqlite_schema WHERE type = 'table' ORDER BY name`)
+    .all()
   const virtualNames = rows.filter((r) => /^CREATE VIRTUAL TABLE/i.test(r.sql ?? '')).map((r) => r.name)
   return rows
     .filter((r) => !isInternal(r.name, virtualNames))
@@ -70,35 +82,35 @@ function tableNames(db: Db): { name: string; virtual: boolean }[] {
 }
 
 function columnsOf(db: Db, table: string): Omit<SchemaColumn, 'addedIn'>[] {
-  const rows = db.prepare(`SELECT * FROM pragma_table_info(?) ORDER BY cid`).all(table) as {
+  const rows = db.prepare<unknown[], {
     name: string
     type: string
     notnull: number
     dflt_value: string | null
     pk: number
-  }[]
+  }>(`SELECT * FROM pragma_table_info(?) ORDER BY cid`).all(table)
   return rows.map((r) => ({ name: r.name, type: r.type, notNull: r.notnull === 1, defaultValue: r.dflt_value, pk: r.pk }))
 }
 
 function foreignKeysOf(db: Db, table: string): SchemaForeignKey[] {
-  const rows = db.prepare(`SELECT * FROM pragma_foreign_key_list(?) ORDER BY id, seq`).all(table) as {
+  const rows = db.prepare<unknown[], {
     table: string
     from: string
     to: string | null
     on_delete: string
-  }[]
+  }>(`SELECT * FROM pragma_foreign_key_list(?) ORDER BY id, seq`).all(table)
   return rows.map((r) => ({ from: r.from, table: r.table, to: r.to ?? '(primary key)', onDelete: r.on_delete }))
 }
 
 function indexesOf(db: Db, table: string): SchemaIndex[] {
   // Only the indexes someone wrote: SQLite's own (`sqlite_autoindex_*`) are the primary key and UNIQUE columns again
   const rows = db
-    .prepare(`SELECT name, "unique" AS uq FROM pragma_index_list(?) WHERE origin = 'c' ORDER BY name`)
-    .all(table) as { name: string; uq: number }[]
+    .prepare<unknown[], { name: string; uq: number }>(`SELECT name, "unique" AS uq FROM pragma_index_list(?) WHERE origin = 'c' ORDER BY name`)
+    .all(table)
   return rows.map((r) => ({
     name: r.name,
     unique: r.uq === 1,
-    columns: (db.prepare(`SELECT name FROM pragma_index_info(?) ORDER BY seqno`).all(r.name) as { name: string | null }[]).map(
+    columns: db.prepare<unknown[], { name: string | null }>(`SELECT name FROM pragma_index_info(?) ORDER BY seqno`).all(r.name).map(
       (c) => c.name ?? '(expression)',
     ),
   }))
@@ -120,11 +132,7 @@ function provenance(): { tables: Map<string, string>; columns: Map<string, strin
   try {
     db.pragma('foreign_keys = ON')
     // A probe has no concept modules (store/*.ts): it may only call the migration methods
-    const probe = Object.create(Store.prototype) as StoreInternals
-    probe.db = db
-    probe.dbPath = ':memory:'
-    probe.opts = {}
-    probe.migrationsRun = 0
+    const probe = SchemaStore.probe(db)
     const tables = new Map<string, string>()
     const columns = new Map<string, string>()
     const note = (label: string) => {
@@ -135,9 +143,9 @@ function provenance(): { tables: Map<string, string>; columns: Map<string, strin
     }
     db.exec(readFileSync(SCHEMA_SQL, 'utf8'))
     note('schema.sql')
-    probe.writeMinReader(0)
+    probe.recordMinReader(0)
     note('the migration runner')
-    for (const step of probe.migrationSteps()) {
+    for (const step of probe.stepsToReplay()) {
       step.run()
       note(`v${step.to}`)
     }
@@ -149,9 +157,9 @@ function provenance(): { tables: Map<string, string>; columns: Map<string, strin
 
 /** The schema a new store ends up with, through the real `Store` constructor, so every migration has run */
 export function readSchema(): Schema {
-  const store = new Store(':memory:')
+  const store = new SchemaStore(':memory:')
   try {
-    const db = (store as unknown as StoreInternals).db
+    const db = store.database
     const history = provenance()
     const tables = tableNames(db).map(({ name, virtual }): SchemaTable => ({
       name,
@@ -170,7 +178,7 @@ export function readSchema(): Schema {
     if (real !== replayed) {
       throw new Error(`schema-doc: replaying the steps gave a different schema than the Store\n real: ${real}\n replay: ${replayed}`)
     }
-    return { version: db.pragma('user_version', { simple: true }) as number, tables }
+    return { version: store.schemaVersion, tables }
   } finally {
     store.close()
   }

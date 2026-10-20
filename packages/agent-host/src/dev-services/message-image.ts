@@ -1,3 +1,4 @@
+import { errnoCode } from './errno.js'
 import { constants } from 'node:fs'
 import { open, realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -80,7 +81,7 @@ export function mentions(text: string, written: string): boolean {
       const i = text.indexOf(form, from)
       if (i < 0) break
       const end = i + form.length
-      if ((i === 0 || BEFORE.test(text[i - 1]!)) && (end === text.length || AFTER.test(text[end]!))) return true
+      if ((i === 0 || BEFORE.test(text.charAt(i - 1))) && (end === text.length || AFTER.test(text.charAt(end)))) return true
       from = i + 1
     }
   }
@@ -134,7 +135,7 @@ export async function readMessageImage(abs: string, max: number = IMAGE_PREVIEW_
   try {
     file = await realpath(abs)
   } catch (e) {
-    const code = (e as NodeJS.ErrnoException).code
+    const code = errnoCode(e)
     if (code === 'EACCES' || code === 'EPERM') return refuse('unreadable', `Centralu may not read ${abs}`)
     return refuse('not_found', `There is no file at ${abs}`)
   }
@@ -145,7 +146,7 @@ export async function readMessageImage(abs: string, max: number = IMAGE_PREVIEW_
     // The resolved path, and no other: a link put there since realpath fails here (ELOOP) rather than being followed
     handle = await open(file, OPEN_FLAGS)
   } catch (e) {
-    const code = (e as NodeJS.ErrnoException).code
+    const code = errnoCode(e)
     if (code === 'EACCES' || code === 'EPERM') return refuse('unreadable', `Centralu may not read ${file}`, file)
     return refuse('not_found', `${file} changed or went away while it was being opened`)
   }
