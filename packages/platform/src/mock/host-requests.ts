@@ -16,13 +16,14 @@ export class HostRequestsMock {
   ) {}
 
   /** For tests: a program asks, as the host's `host_request` event says it */
-  raiseHostRequest(question: string, opts: { method?: string; client?: string | null } = {}): string {
+  raiseHostRequest(question: string, opts: { method?: string; client?: string | null; session?: string | null } = {}): string {
     const createdAt = this.clock.now()
     const request: HostRequest = {
       requestId: `hr-${++this.next}`,
       method: opts.method ?? 'trash.purge',
       question,
       client: opts.client ?? null,
+      session: opts.session ?? null,
       createdAt,
       expiresAt: createdAt + 15 * 60_000,
     }

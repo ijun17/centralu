@@ -8,6 +8,7 @@ import { LAST_READ_KEPT_MS, readCredentialFile, verifierOf } from '../lifecycle/
 import { isLimitedToken, limitedToken } from './limited-token.js'
 import { bridgeToken } from './bridge-token.js'
 import { HostRequests } from '../host-requests.js'
+import { sessionToken } from './session-token.js'
 
 describe('the limited credential is derived from the token', () => {
   it('matches the vector the keeper is checked against (#1405 slice 4)', () => {
@@ -507,3 +508,44 @@ describe('a centralu serve host takes as full only the credentials serve.json na
   })
 })
 
+describe("a session's credential at hello (#1405 slice 6)", () => {
+  const SID = '0f8fad5b-d9cb-469f-a165-70867728950e'
+
+  async function startKnowing(known: string[]) {
+    const calls: Call[] = []
+    let asked: { client: string | null; session?: string } | null = null
+    server = new HostServer({
+      port: 0,
+      token: TOKEN,
+      knowsSession: (id) => known.includes(id),
+      onRpc: async (method, params, ctx) => {
+        calls.push({ method, params, ctx })
+        return { ok: true }
+      },
+      onAsk: async (_m, _p, from) => {
+        asked = from
+        return { ok: true }
+      },
+    })
+    const port = await server.listen()
+    return { port, calls, asked: () => asked }
+  }
+
+  it("has the limited credential's rights, and says its session to the handler and to a card", async () => {
+    const { port, calls, asked } = await startKnowing([SID])
+    const c = await hello(port, sessionToken(TOKEN, SID))
+    expect(await c.call('sessions.list')).toMatchObject({ ok: true })
+    expect(calls[0]!.ctx).toMatchObject({ rights: 'limited', session: SID })
+    // Refused what the limited credential is refused
+    expect((await c.call('agents.respondApproval', {})).error?.data).toEqual({ refused: 'rights', rights: 'window' })
+    // And what asks goes to the card with its session named
+    await c.call('trash.purge', { sessionId: SID })
+    expect(asked()).toMatchObject({ session: SID })
+    c.ws.close()
+  })
+
+  it("is refused at hello when it names a session this host does not have", async () => {
+    const { port } = await startKnowing([])
+    expect(await (await hello(port, sessionToken(TOKEN, SID))).closed).toBe(4001)
+  })
+})

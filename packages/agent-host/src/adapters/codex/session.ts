@@ -1,4 +1,5 @@
 import { InputReceipts, isUuid, type InputReceipt } from '../input-receipts.js'
+import { hostAccessEnv } from '../contract.js'
 import type { InputObserver, InputOrigin } from '../contract.js'
 import { launchPreset } from '../edit-grant.js'
 import { endsStreamRow, streamRowKind, type ApprovalDecision, type ApprovalScope, type PermissionPreset } from '@cc/protocol'
@@ -207,6 +208,8 @@ export class CodexSession implements SessionHandle {
         // Under the keeper (#280 step 2) the app-server is spawned there, or adopted from a previous host
         ...(opts.processSource ? { source: opts.processSource } : {}),
         ...(opts.processSource?.adopt ? { process: opts.processSource.adopt.process } : {}),
+        // The host's address and this session's credential, for a script the agent writes (#1405)
+        env: hostAccessEnv(opts.hostAccess),
       },
     )
     this.ready = this.start()

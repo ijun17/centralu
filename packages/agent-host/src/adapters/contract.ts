@@ -237,6 +237,21 @@ export type CreateSessionOpts = {
    * session's bridge calls (`transport/bridge-token.ts`, #382).
    */
   orchestratorBridge?: { url: string; token: string }
+  /**
+   * The host's address and this session's credential (#1405, `transport/session-token.ts`), put in the environment of
+   * the agent's process (`CC_HOST_URL`, `CC_HOST_CREDENTIAL`; `hostAccessEnv`), so a script the agent writes can call
+   * the host the sanctioned way. The credential has the limited credential's rights and names the session on a card.
+   * Not a launch setting: derived from the host's token, the same on every host behind the door
+   */
+  hostAccess?: { url: string; credential: string }
+}
+
+/**
+ * The variables a session's agent finds the host by (#1405): its address and the session's credential. Nothing when the
+ * session has none (a host whose port is not known yet, a test)
+ */
+export function hostAccessEnv(access: CreateSessionOpts['hostAccess']): Record<string, string> {
+  return access ? { CC_HOST_URL: access.url, CC_HOST_CREDENTIAL: access.credential } : {}
 }
 
 /**
