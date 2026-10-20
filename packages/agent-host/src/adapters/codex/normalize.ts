@@ -397,7 +397,7 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
         return [{ type: 'activity', sessionId, activity: 'retrying' }]
       }
       if (str(p.turnId)) return []
-      return [{ type: 'error', sessionId, error: turnError(message) }]
+      return [{ type: 'error', sessionId, error: turnError(message, asObj(p.error).codexErrorInfo) }]
     }
 
     default:

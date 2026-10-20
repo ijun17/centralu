@@ -16,7 +16,14 @@ import { asObj, str } from '../../json-value.js'
 export const MODEL_REJECTED = 'model_rejected'
 
 /** The model a provider's answer refuses, with the provider's own sentence; null when the failure is some other one */
-export function modelRejection(message: string): { model: string; reason: string } | null {
+export function modelRejection(message: string, errorInfo?: unknown): { model: string; reason: string } | null {
+  /*
+   * Codex's own classification (`TurnError.codexErrorInfo`, a bare string such as "badRequest" or an object keyed by the
+   * kind) when it gives one: another kind (a usage limit, a context window, a dropped stream) is never a refused model,
+   * whatever the sentence says, and "badRequest" is the 400 the provider's body would otherwise have to prove.
+   */
+  const kind = typeof errorInfo === 'string' ? errorInfo : errorInfo !== null && typeof errorInfo === 'object' ? Object.keys(errorInfo)[0] : undefined
+  if (kind !== undefined && kind !== 'badRequest') return null
   const body = jsonBody(message)
   const error = asObj(body.error)
   // Codex may name the kind of error on a line of its own after the sentence (turn.error.additionalDetails)
@@ -24,9 +31,11 @@ export function modelRejection(message: string): { model: string; reason: string
     .split('\n')
     .filter((line) => line.trim() !== 'invalid_request_error')
     .join('\n')
-  // A 400 the provider calls invalid_request_error, naming a model it will not serve. Other 400s are not this one
-  if (body.status !== undefined && body.status !== 400) return null
-  if (str(error.type) !== 'invalid_request_error' && !/invalid_request_error/.test(message)) return null
+  // A 400 (Codex's "badRequest", else the provider's invalid_request_error), naming a model it will not serve. Other 400s are not this one
+  if (kind !== 'badRequest') {
+    if (body.status !== undefined && body.status !== 400) return null
+    if (str(error.type) !== 'invalid_request_error' && !/invalid_request_error/.test(message)) return null
+  }
   const model = refusedModelIn(reason)
   if (!model) return null
   return { model, reason }
@@ -49,8 +58,8 @@ function refusedModelIn(sentence: string): string | null {
 }
 
 /** An error event for a turn that failed with `message`: its own kind when the model was refused, else Codex's sentence as it is */
-export function turnError(message: string): ProtocolError {
-  const rejected = modelRejection(message)
+export function turnError(message: string, errorInfo?: unknown): ProtocolError {
+  const rejected = modelRejection(message, errorInfo)
   if (!rejected) return { code: 'internal', message, retryable: true }
   return {
     code: 'internal',

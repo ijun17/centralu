@@ -35,6 +35,17 @@ describe('modelRejection', () => {
     expect(turnError(bad(sentence))).toMatchObject({ code: 'internal', retryable: true })
   })
 
+  it("uses Codex's own classification when it gives one: badRequest stands for the provider's 400, any other kind is never a refusal", () => {
+    const plain = "The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account."
+    expect(modelRejection(plain, 'badRequest')?.model).toBe('gpt-5.5')
+    expect(modelRejection(plain, null)).toBeNull()
+    for (const kind of ['usageLimitExceeded', 'contextWindowExceeded', 'unauthorized', { httpConnectionFailed: { httpStatusCode: 400 } }]) {
+      expect(modelRejection(bad(plain), kind)).toBeNull()
+      expect(turnError(bad(plain), kind)).toMatchObject({ retryable: true })
+    }
+    expect(turnError(plain, 'badRequest')).toMatchObject({ retryable: false, data: { reason: 'model_rejected', model: 'gpt-5.5' } })
+  })
+
   it('needs a 400 invalid_request_error: the same words from a server error are not a refusal', () => {
     expect(modelRejection(JSON.stringify({ status: 500, error: { type: 'server_error', message: "The 'gpt-5.5' model is not supported." } }))).toBeNull()
     expect(modelRejection("The 'gpt-5.5' model is not supported when using Codex.")).toBeNull()
