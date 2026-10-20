@@ -110,10 +110,25 @@ function git(cwd, args, env = {}) {
   return execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...ENV, ...env }, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 256 * 1024 * 1024 })
 }
 
+/**
+ * A path as the file system names it: links followed, and on Windows the 8.3 short names
+ * (`RUNNER~1`) written out. tsc compares files by the path it reached them by, so one folder reached by two
+ * spellings (a temporary folder named in its short form, and a link's target in its long form) is two
+ * folders and one class has two declarations (#1254). A path that does not exist is answered as it is.
+ */
+export function canonical(path) {
+  try {
+    return realpathSync.native(path)
+  } catch {
+    return path
+  }
+}
+
 const tail = (text, lines = 25) => String(text ?? '').trim().split('\n').slice(-lines).join('\n')
 
 /** Runs a Node entry point of the worktree's own node_modules; answers { ok, out }. */
-function nodeBin(dir, bin, args, env = {}, timeout = 0) {
+function nodeBin(worktree, bin, args, env = {}, timeout = 0) {
+  const dir = canonical(worktree)
   try {
     const out = execFileSync(process.execPath, [join(dir, 'node_modules', bin), ...args], { cwd: dir, encoding: 'utf8', timeout, env: { ...ENV, ...env }, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 256 * 1024 * 1024 })
     return { ok: true, out }
@@ -151,8 +166,10 @@ const FOLDER_LINK = process.platform === 'win32' ? 'junction' : 'dir'
  * Running it again over what is there (after the links were taken away) fills in what is missing.
  * Answers how many folders were mirrored. removeWorktree takes every link away before the worktree goes.
  */
-export function mirrorModules(root, dir, folders = nodeModulesDirs(root)) {
-  const rootReal = realpathSync(root)
+export function mirrorModules(root, worktree, folders = nodeModulesDirs(root)) {
+  // Every path below is the file system's own spelling of it, whatever way the caller named the folders (canonical)
+  const rootReal = canonical(root)
+  const dir = canonical(worktree)
   const inWorkspace = (target) => {
     const rel = relative(rootReal, target)
     return rel && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel) && !rel.split(sep).includes('node_modules') ? rel : null
@@ -185,7 +202,7 @@ export function mirrorModules(root, dir, folders = nodeModulesDirs(root)) {
       if (isLink) {
         let target
         try {
-          target = realpathSync(s)
+          target = realpathSync.native(s)
         } catch {
           continue
         }
@@ -201,7 +218,7 @@ export function mirrorModules(root, dir, folders = nodeModulesDirs(root)) {
   for (const rel of folders) {
     const at = join(dir, rel)
     if (!existsSync(dirname(at))) continue
-    mirror(join(root, rel), at)
+    mirror(join(rootReal, rel), at)
     n++
   }
   return n
@@ -499,7 +516,7 @@ export function guardWarnings({ failing, skipped, unchecked }, guards) {
 
 /** Every run keeps its worktrees in one folder of the temporary folder, named after the run. */
 export const RUN_PREFIX = 'cc-pre-pr-'
-export const runDir = (id) => join(tmpdir(), `${RUN_PREFIX}${id}`)
+export const runDir = (id) => join(canonical(tmpdir()), `${RUN_PREFIX}${id}`)
 
 /**
  * Removes every link (a symlink, or a junction on Windows) under `dir` down to `depth` levels,
@@ -586,9 +603,10 @@ const alive = (pid) => {
 /** Removes the folders of earlier runs on this checkout whose process is gone (killed, or the machine slept through a timeout). */
 export function sweepStale(root, { isAlive = alive } = {}) {
   const swept = []
-  for (const name of readdirSync(tmpdir())) {
+  const temp = canonical(tmpdir())
+  for (const name of readdirSync(temp)) {
     if (!name.startsWith(RUN_PREFIX)) continue
-    const dir = join(tmpdir(), name)
+    const dir = join(temp, name)
     let owner
     try {
       owner = JSON.parse(readFileSync(join(dir, 'owner.json'), 'utf8'))

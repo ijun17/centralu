@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process'
+import { execFileSync, execSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -176,12 +176,15 @@ describe('what pre-pr reads', () => {
     }
   })
 
-  // The failure itself (#1254): a class declared in the worktree, and the same file reached through the
-  // checkout's link to the workspace package. Seen on macOS; tsc follows the links the same way on Windows here.
-  it('type-checks a worktree whose workspace package is reached both by path and by name as one declaration', { timeout: 60_000 * SLOW }, () => {
-    const base = mkdtempSync(join(tmpdir(), 'cc-prepr-tsc-'))
-    const root = join(base, 'checkout')
-    const tree = join(base, 'worktree')
+  /**
+   * The failure itself (#1254): a class declared in the worktree, and the same file reached through the checkout's
+   * link to the workspace package. Seen on macOS (/var -> /private/var) and on the Windows runner (a temporary folder
+   * named RUNNER~1 on one side, runneradmin on the other); tsc follows the links the same way on Windows here.
+   * `reach` is the way the caller names the two folders: tsc must see one spelling of each.
+   */
+  function typeChecks(prefix: string, reach: (base: string) => { root: string; tree: string }): void {
+    const base = mkdtempSync(join(tmpdir(), prefix))
+    const { root, tree } = reach(base)
     try {
       const here = dirname(fileURLToPath(import.meta.url))
       const sources: Record<string, string> = {
@@ -215,8 +218,45 @@ describe('what pre-pr reads', () => {
       // Links first: `typescript` in both folders leads into this repository's own node_modules, which no delete may follow
       unlinkLinks(tree)
       unlinkLinks(root)
-      rmSync(base, { recursive: true, force: true })
+      rmSync(realpathSync(base), { recursive: true, force: true })
     }
+  }
+
+  const plain = (base: string) => {
+    const real = realpathSync(base)
+    return { root: join(real, 'checkout'), tree: join(real, 'worktree') }
+  }
+
+  it('type-checks a worktree whose workspace package is reached both by path and by name as one declaration', { timeout: 60_000 * SLOW }, () => {
+    typeChecks('cc-prepr-tsc-', plain)
+  })
+
+  // A folder named by two spellings is two folders to tsc, wherever the second spelling comes from. A link to the
+  // temporary folder stands in for the macOS /var and the Windows short name on every platform
+  it('type-checks a worktree and a checkout that the caller names through a link to their folder', { timeout: 60_000 * SLOW }, () => {
+    typeChecks('cc-prepr-alias-', (base) => {
+      const real = realpathSync(base)
+      mkdirSync(join(real, 'real'))
+      const alias = join(real, 'alias')
+      symlinkSync(join(real, 'real'), alias, 'junction')
+      mkdirSync(join(alias, 'checkout'))
+      mkdirSync(join(alias, 'worktree'))
+      return { root: join(alias, 'checkout'), tree: join(alias, 'worktree') }
+    })
+  })
+
+  // The Windows runner's temporary folder (RUNNER~1 in the user's profile): the same folder in its 8.3 short form
+  it.skipIf(process.platform !== 'win32')('type-checks a worktree and a checkout that the caller names in the 8.3 short form of their folder', { timeout: 60_000 * SLOW }, () => {
+    typeChecks('cc-prepr-short-', (base) => {
+      const real = realpathSync(base)
+      mkdirSync(join(real, 'checkout'))
+      mkdirSync(join(real, 'worktree'))
+      const short = execSync(`for %I in ("${real}") do @echo %~sI`, { encoding: 'utf8', shell: 'cmd.exe' }).trim()
+      // A volume with 8.3 names switched off has none to give: the test would pass without testing anything
+      expect(short.toLowerCase(), '8.3 short names are off on this volume').not.toBe(real.toLowerCase())
+      expect(realpathSync.native(short).toLowerCase()).toBe(real.toLowerCase())
+      return { root: join(short, 'checkout'), tree: join(short, 'worktree') }
+    })
   })
 
   it('reads its arguments, and refuses one it does not know', () => {
