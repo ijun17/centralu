@@ -160,8 +160,7 @@ export const Composer = memo(function Composer({
    */
   const [intent, setIntent] = useState<SendIntent>('ask')
   const [sentCount, setSentCount] = useState(0)
-  const owed = useReportOwed(sessionId, text.trim().length > 0, sentCount)
-  useEffect(() => setIntent('ask'), [sessionId])
+  const { owed, forget: forgetOwed } = useReportOwed(sessionId, text.trim().length > 0, sentCount)
   const attachments = draft.attachments
 
   const patchDraft = useCallback(
@@ -303,7 +302,10 @@ export const Composer = memo(function Composer({
    *
    * Cleared before render (layout). As an effect, someone else's text would flash for one frame.
    */
-  useLayoutEffect(() => setRecall(null), [sessionId])
+  useLayoutEffect(() => {
+    setRecall(null)
+    setIntent('ask')
+  }, [sessionId])
 
   /*
    * The quiet line under a link dropped from an app this session cannot reach (#308): the link went
@@ -554,12 +556,17 @@ export const Composer = memo(function Composer({
         setDraft(sessionId, EMPTY_DRAFT)
         asked.current++
         setAppNotice(null)
-        void send(sessionId, t, attachments, owed ? intent : undefined)
-        setIntent('ask')
-        setSentCount((n) => n + 1)
+        // An answer to an open question is not a turn, so the choice does not apply and stays as it was (`composerTarget`)
+        const choice = owed && target !== 'answer' ? intent : undefined
+        void send(sessionId, t, attachments, choice)
+        if (target !== 'answer') {
+          setIntent('ask')
+          setSentCount((n) => n + 1)
+          if (choice === 'takeover') forgetOwed()
+        }
       }}
     >
-      {owed && <ReportChoice owed={owed} value={intent} onChange={setIntent} />}
+      {owed && target !== 'answer' && <ReportChoice owed={owed} value={intent} onChange={setIntent} />}
       {(attachments.length > 0 || uploading > 0) && (
         <AttachmentStrip attachments={attachments} uploading={uploading} onRemove={removeAttachment} />
       )}

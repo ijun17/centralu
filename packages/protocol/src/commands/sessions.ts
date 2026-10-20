@@ -532,3 +532,11 @@ export type SubagentStepsHeld = z.infer<typeof SubagentStepsHeld>
  */
 export const TrashedSubagentSteps = SubagentStepsHeld.extend({ deletedAt: z.number() })
 export type TrashedSubagentSteps = z.infer<typeof TrashedSubagentSteps>
+
+/**
+ * What a message means to a delegation report the session owes (#1377): `ask` ("Just asking", the default), `task` ("Add
+ * to the task": its turn is the delegated work's, noted as the person's addition) or `takeover` ("Take it over": the
+ * report closes and the caller is told once)
+ */
+export const SendIntent = z.enum(['ask', 'task', 'takeover'])
+export type SendIntent = z.infer<typeof SendIntent>

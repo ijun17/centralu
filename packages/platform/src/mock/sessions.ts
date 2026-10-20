@@ -208,6 +208,8 @@ export class SessionsMock {
     send: async (sessionId: string, text: string, attachments?: Attachment[], intent?: SendIntent) => {
       if (attachments?.length) this.sentAttachments.push(...attachments)
       this.sentIntents.push({ sessionId, text, intent })
+      // As the host: taking the session over closes the report it owed
+      if (intent === 'takeover') this.reportsOwed.delete(sessionId)
       const s = this.store.sessions.get(sessionId)
       if (!s) throw mockError('Session not found', 'session_not_found')
       // The same rule as the host: if it is asleep, revive it and then send (automatic resume)

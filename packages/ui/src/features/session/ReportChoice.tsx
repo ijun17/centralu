@@ -17,7 +17,7 @@ export const CHOICES: readonly { value: SendIntent; label: string; hint: string 
 export type ReportOwed = { callerId: string; callerName: string }
 
 /** Who waits for the session's work, asked once the person starts typing (and again after each message): null when nobody */
-export function useReportOwed(sessionId: string, typing: boolean, sent: number): ReportOwed | null {
+export function useReportOwed(sessionId: string, typing: boolean, sent: number): { owed: ReportOwed | null; forget: () => void } {
   const platform = usePlatform()
   const [owed, setOwed] = useState<{ sessionId: string; value: ReportOwed | null } | null>(null)
   useEffect(() => {
@@ -31,12 +31,16 @@ export function useReportOwed(sessionId: string, typing: boolean, sent: number):
       live = false
     }
   }, [platform, sessionId, typing, sent])
-  return owed?.sessionId === sessionId ? owed.value : null
+  return {
+    owed: owed?.sessionId === sessionId ? owed.value : null,
+    // The report closed (the person took the session over): the choice goes with it, ahead of the next answer
+    forget: () => setOwed({ sessionId, value: null }),
+  }
 }
 
 export function ReportChoice({ owed, value, onChange }: { owed: ReportOwed; value: SendIntent; onChange: (v: SendIntent) => void }) {
   return (
-    <div className="mb-2 text-sm text-ink-muted" role="radiogroup" aria-label={`Working for ${owed.callerName}`} data-testid="report-choice">
+    <div className="mb-2 text-sm text-ink-muted" role="group" aria-label={`Working for ${owed.callerName}`} data-testid="report-choice">
       <span className="mr-2" data-testid="report-choice-for">
         Working for <span className="text-ink">{owed.callerName}</span>
       </span>
@@ -44,9 +48,10 @@ export function ReportChoice({ owed, value, onChange }: { owed: ReportOwed; valu
         <button
           key={c.value}
           type="button"
-          role="radio"
-          aria-checked={value === c.value}
+          aria-pressed={value === c.value}
           title={c.hint}
+          // A click must not take the keyboard from the message being written: Enter then still sends it
+          onMouseDown={(e) => e.preventDefault()}
           data-testid={`report-choice-${c.value}`}
           className={`mr-1 rounded-sm px-1.5 py-0.5 ${value === c.value ? 'text-ink underline underline-offset-4' : 'text-ink-faint hover:text-ink'}`}
           onClick={() => onChange(c.value)}
@@ -54,6 +59,9 @@ export function ReportChoice({ owed, value, onChange }: { owed: ReportOwed; valu
           {c.label}
         </button>
       ))}
+      <span className="mt-0.5 block text-xs text-ink-faint" data-testid="report-choice-hint">
+        {CHOICES.find((c) => c.value === value)?.hint}
+      </span>
     </div>
   )
 }

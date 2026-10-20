@@ -21,14 +21,11 @@ import type {
   QuestionAnswer,
   AgentVersions,
   SleepPolicy,
+  SendIntent,
 } from '@cc/protocol'
-import type { Unsubscribe, ConnectionState, MachineRef } from './common.js'
 
-/**
- * What a message means to a delegation report the session owes (#1377): `ask` ("Just asking", the default), `task` ("Add
- * to the task") or `takeover` ("Take it over")
- */
-export type SendIntent = 'ask' | 'task' | 'takeover'
+export type { SendIntent }
+import type { Unsubscribe, ConnectionState, MachineRef } from './common.js'
 
 export interface AgentPort {
   createSession(params: CreateSessionParams): Promise<SessionInfo>

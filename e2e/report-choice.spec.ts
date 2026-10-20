@@ -33,22 +33,38 @@ test('a session that owes a report shows who waits, defaults to Just asking, and
   await expect(page.getByTestId('report-choice')).toHaveCount(0)
   await page.keyboard.type('quick question')
   await expect(page.getByTestId('report-choice-for')).toContainText('Working for Orchestrator')
-  await expect(page.getByTestId('report-choice-ask')).toHaveAttribute('aria-checked', 'true')
+  await expect(page.getByTestId('report-choice-ask')).toHaveAttribute('aria-pressed', 'true')
   await page.keyboard.press('Enter')
   await expect.poll(async () => (await sent(page)).map((m) => m.intent)).toEqual(['ask'])
 
   // The next message starts at Just asking again, whatever was chosen before
   await page.keyboard.type('also add a changelog line')
   await page.getByTestId('report-choice-task').click()
-  await expect(page.getByTestId('report-choice-task')).toHaveAttribute('aria-checked', 'true')
-  await page.getByTestId('prompt-input').click()
+  await expect(page.getByTestId('report-choice-task')).toHaveAttribute('aria-pressed', 'true')
+  // The click kept the keyboard in the message: Enter sends it
+  await expect(page.getByTestId('prompt-input')).toBeFocused()
   await page.keyboard.press('Enter')
   await expect.poll(async () => (await sent(page)).map((m) => m.intent)).toEqual(['ask', 'task'])
 
   await page.keyboard.type('I will take it from here')
-  await expect(page.getByTestId('report-choice-ask')).toHaveAttribute('aria-checked', 'true')
+  await expect(page.getByTestId('report-choice-ask')).toHaveAttribute('aria-pressed', 'true')
   await page.getByTestId('report-choice-takeover').click()
-  await page.getByTestId('prompt-input').click()
+  // The click kept the keyboard in the message: Enter sends it
+  await expect(page.getByTestId('prompt-input')).toBeFocused()
   await page.keyboard.press('Enter')
   await expect.poll(async () => (await sent(page)).map((m) => m.intent)).toEqual(['ask', 'task', 'takeover'])
+})
+
+test('taking it over closes the choice at once: the next message asks nothing', async ({ page }) => {
+  const sid = await typing(page)
+  await page.evaluate((id) => (window as any).__mock.reportsOwed.set(id, { callerId: 'o1', callerName: 'Orchestrator' }), sid)
+  await page.keyboard.type('mine now')
+  await page.getByTestId('report-choice-takeover').click()
+  await page.keyboard.press('Enter')
+  await expect.poll(async () => (await sent(page)).map((m) => m.intent)).toEqual(['takeover'])
+  await expect(page.getByTestId('report-choice')).toHaveCount(0)
+  await page.keyboard.type('and now?')
+  await expect(page.getByTestId('report-choice')).toHaveCount(0)
+  await page.keyboard.press('Enter')
+  await expect.poll(async () => (await sent(page)).map((m) => m.intent ?? null)).toEqual(['takeover', null])
 })

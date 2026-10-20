@@ -20,6 +20,7 @@ import { MessageImage } from '../files.js'
 import { machineParam } from '../machine-fields.js'
 import { CommandInfo, ProjectInfo } from '../projects.js'
 import {
+  SendIntent,
   CreateSessionParams,
   SUBAGENT_STEPS_PAGE,
   SessionInfo,
@@ -44,7 +45,7 @@ export const sessionMethods = {
        * "Just asking": the person's own turn, not reported), `task` ("Add to the task": its turn is the delegated work's,
        * noted as the person's addition), `takeover` ("Take it over": the report closes and the caller is told once)
        */
-      intent: z.enum(['ask', 'task', 'takeover']).optional(),
+      intent: SendIntent.optional(),
     }),
     result: z.object({ ok: z.literal(true) }),
   },

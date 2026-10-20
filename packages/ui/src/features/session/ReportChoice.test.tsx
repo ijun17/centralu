@@ -19,13 +19,14 @@ describe('the choice the composer offers for a session that owes a report', () =
     for (const c of CHOICES) expect(html).toContain(c.label)
   })
 
-  it('shows the chosen one as checked, and only that one', () => {
+  it('shows the chosen one as pressed, and only that one', () => {
     for (const c of CHOICES) {
       const html = render(c.value)
-      expect(html.match(/aria-checked="true"/g)).toHaveLength(1)
-      expect(html).toMatch(new RegExp(`data-testid="report-choice-${c.value}"[^>]*>`))
-      const checked = html.split('<button').filter((b) => b.includes('aria-checked="true"'))
-      expect(checked[0]).toContain(`report-choice-${c.value}`)
+      expect(html.match(/aria-pressed="true"/g)).toHaveLength(1)
+      const pressed = html.split('<button').filter((b) => b.includes('aria-pressed="true"'))
+      expect(pressed[0]).toContain(`report-choice-${c.value}`)
+      // The hint of the chosen one is shown, not only a tooltip
+      expect(html).toContain(c.hint)
     }
   })
 })
