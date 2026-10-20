@@ -161,7 +161,7 @@ async function build(b, ctx) {
       continue
     }
     const pr = await readPr(repo, m.pr, QUEUE_PR_FIELDS)
-    if (pr.state === 'OPEN' && !pr.isDraft && pr.headRefOid === m.head && pr.mergeStateStatus !== 'DIRTY' && pr.mergeable !== 'CONFLICTING' && batchable(pr)) kept.push({ ...m, title: pr.title })
+    if (pr.state === 'OPEN' && (!pr.isDraft || it.auto) && pr.headRefOid === m.head && pr.mergeStateStatus !== 'DIRTY' && pr.mergeable !== 'CONFLICTING' && batchable(pr)) kept.push({ ...m, title: pr.title })
     else gone.push(m.pr)
   }
   if (kept.length < KEEP_MIN) {
@@ -289,7 +289,7 @@ async function runCi(b, ctx) {
       continue
     }
     const pr = await readPr(repo, s.pr, QUEUE_PR_FIELDS)
-    if (pr.state !== 'OPEN' || pr.isDraft || pr.headRefOid !== s.head) left.push(s.pr)
+    if (pr.state !== 'OPEN' || (pr.isDraft && !it.auto) || pr.headRefOid !== s.head) left.push(s.pr)
   }
   if (left.length) {
     await cancelBatchRuns(b, renew)
@@ -472,17 +472,19 @@ async function landNext(b, ctx) {
   let squash = null
   if (d.do === 'merge') {
     if (!renew()) return { yielded: true }
-    // On the pull request, why it merged with its own run cancelled
-    await postStatus(repo, step.head, {
-      state: 'success',
-      context: STATUS_CONTEXT,
-      description: `Passed CI in ${b.branch}${prs.length > 1 ? ` with ${list(b, prs.filter((p) => p !== step.pr), ref)}` : ''}`,
-      targetUrl: b.run?.url ?? null,
-    }).catch((e) => {
-      if (e instanceof GitHubError && FATAL.has(e.kind)) throw e
-    })
+    // On the pull request, why it merged with its own run cancelled: once land's own checks passed (an integrated
+    // change judged not auto there gets no green status for a head that does not land, #1259 step 3)
+    const status = () =>
+      postStatus(repo, step.head, {
+        state: 'success',
+        context: STATUS_CONTEXT,
+        description: `Passed CI in ${b.branch}${prs.length > 1 ? ` with ${list(b, prs.filter((p) => p !== step.pr), ref)}` : ''}`,
+        targetUrl: b.run?.url ?? null,
+      }).catch((e) => {
+        if (e instanceof GitHubError && FATAL.has(e.kind)) throw e
+      })
     // The batch's run proved it (an older batch file has no time: a lower's failure then counts)
-    const r = await land(view, pr, ref, renew, defaultBranch, { provedAt: b.run?.createdAt ?? null })
+    const r = await land(view, pr, ref, renew, defaultBranch, { provedAt: b.run?.createdAt ?? null, beforeMerge: status })
     if (r.yielded) return { yielded: true }
     if (r.state !== 'merged') {
       const rest = prs.slice(k + 1)
@@ -491,6 +493,8 @@ async function landNext(b, ctx) {
         then: (fq) => {
           const it = findItem(fq, repo, step.pr)
           if (!it) return
+          // An integrated one judged not auto at landing keeps that judgment for its head (#1259 step 3)
+          if (r.tierAt) it.tierAt = r.tierAt
           Object.assign(it, { state: 'attention', reason: r.reason, noticeKey: `${r.reason.kind}:${step.head}:`, updatedAt: at, nextAt: new Date(now + pollMs('attention')).toISOString() })
           pushEvent(fq, it, { kind: 'attention', text: attentionText(it, r.reason, ref), notify: true, at })
         },
