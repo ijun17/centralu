@@ -3,6 +3,7 @@
 // servers"), so this is their git, their credentials and their checkout; stack.mjs works in a
 // temporary worktree and release.mjs in a temporary index, so the checkout itself is never touched.
 import { execFile } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve as resolvePath } from 'node:path'
@@ -195,3 +196,27 @@ export async function commitFiles(dir, parent, files, message) {
 
 /** Pushes a commit to a new ref of the remote. Never forced: git refuses a ref that exists and is not behind it. */
 export const pushRef = (dir, remote, sha, ref) => git(dir, ['push', '--quiet', remote, `${sha}:${ref}`])
+/** Deletes a branch on the remote (never a tag: the caller names a branch) */
+export const deleteRemoteBranch = (dir, remote, branch) => git(dir, ['push', '--quiet', remote, `:refs/heads/${branch}`])
+
+/**
+ * The commits at which this checkout's history stops short (a shallow clone's boundary): a walk that ends on one of them has
+ * not reached the repository's first commit (#1350). Empty for a full clone.
+ */
+export async function shallowBoundary(dir) {
+  try {
+    const path = (await git(dir, ['rev-parse', '--path-format=absolute', '--git-path', 'shallow'])).trim()
+    return new Set(readFileSync(path, 'utf8').split('\n').map((l) => l.trim()).filter(Boolean))
+  } catch {
+    return new Set()
+  }
+}
+
+/** The newest commit on `tip`'s first-parent history that added or removed `text` in `path` (git's pickaxe), or null */
+export async function lastTouching(dir, tip, text, path) {
+  try {
+    return ((await git(dir, ['log', '--first-parent', '-n', '1', '--format=%H', `-S${text}`, tip, '--', path])).trim()) || null
+  } catch {
+    return null
+  }
+}
