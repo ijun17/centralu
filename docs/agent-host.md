@@ -3091,8 +3091,18 @@ sessions resume on the new host through their stored ids, as after any restart.
 | The token is not stored; it is asked over ssh at every link start | It is the key to every RPC on that machine. One ssh round trip per start (measured 2.1 to 4.3 s to connected on a LAN) is cheap |
 | The ssh processes are children of the hub host, behind the `Tunnel` interface | Probe 4 of the plan (§10.6, 2026-10-08) measured the alternatives across real hub swaps: the link is away about 1.1 s per swap as it is, 0.8 s with OpenSSH `ControlPersist` (which leaves a forward behind per swap and outlives "Quit completely"), and would be about 0.14 s as a keeper child. The remote's agents never notice a hub swap, so it stays here |
 
-**The link's states** (`MachineInfo.status`, sent as `machine_status`): `connecting`; `connected`; `unreachable`
-(ssh failed, the forward or the socket dropped; retried with backoff from 2 s to 5 minutes while Auto reconnect is on, #1134, #1341; with it off, not until the person's Connect); `starting` (no host ran
+**The link's states** (`MachineInfo.status`, sent as `machine_status`): `connecting`; `connected`; `away` (#1398: the
+machine does not answer at all: ssh's connect timed out, there is no route, or the name does not resolve (`links/away.ts`, ssh's own
+words, on the whole last line of an exit-255 failure, so a program on the remote that prints "timed out" does not make a machine away, and a
+banner exchange that timed out, which something answered, stays an error); asleep, off or off the network, not an error. `error` keeps ssh's
+line for the details; `lastConnectedAt` says when the link was last up, the moment it dropped and not its hello, kept in the store
+(`app_settings`, `links.lastConnected.<id>`, no migration step) so it survives a restart of this host; and `nextAttemptAt` when the hub
+tries again, told to the windows at each attempt although the status does not change. The status stays `away` between the backoff's attempts
+instead of flipping to `connecting` and back; the person's Connect shows `connecting`, also when it joins an attempt under way, and so
+does the first attempt ssh gets an answer to. The row (Settings → Machines) says "<name> is not reachable: asleep, off or off the network",
+then when it was last connected and when it tries again, then ssh's line; the sidebar's status word stays "away" for it and for `unreachable`. Retried on the backoff below while Auto reconnect is on; with it off, `nextAttemptAt`
+is null); `unreachable` (the machine answered or was linked and then failed: an ssh it refused (a key, a host key, a refused connection), a
+link that dropped, the forward or the socket; `error` says why; retried with backoff from 2 s to 5 minutes while Auto reconnect is on, #1134, #1341; with it off, not until the person's Connect); `starting` (no host ran
 there; the link is starting one, above); `updating` (the hub is stopping, switching or removing the Centralu it installed there; the link waits, above); `not_running` (Centralu answers there but no `centralu serve` runs, and
 starting one failed, `error` says why; retried); `versions_differ`; `refused` (a token refused twice in a row:
 the connection line is read again once at once, since `--rotate-token` changes the token a running serve keeps until

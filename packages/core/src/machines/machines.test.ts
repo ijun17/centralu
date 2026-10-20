@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { MachineInfo, MachineVersions } from '@cc/protocol'
-import { asksRow, autostartRow, elevatedNote, hostStartNote, installNote, isAway, logonNote, MACHINE_STATUS_LABEL, machineProblem, operationNote, updateStops, versionPrompt } from './machines.js'
+import { asksRow, autostartRow, awayNote, elevatedNote, hostStartNote, installNote, isAway, logonNote, MACHINE_STATUS_LABEL, machineProblem, operationNote, updateStops, versionPrompt } from './machines.js'
 
 const machine = (patch: Partial<MachineInfo> = {}): MachineInfo => ({
   id: 'box',
@@ -13,6 +13,7 @@ const machine = (patch: Partial<MachineInfo> = {}): MachineInfo => ({
   error: null,
   versions: null,
   lastConnectedAt: null,
+  nextAttemptAt: null,
   localPort: null,
   sameLocalPort: false,
   hostStarted: null,
@@ -318,5 +319,36 @@ describe('a machine that is away, stopped or disconnected (#1143, #1341)', () =>
   it('is disconnected without a problem to fix, and the row says so', () => {
     expect(machineProblem(machine({ status: 'disconnected' }))).toBeNull()
     expect(MACHINE_STATUS_LABEL.disconnected).toBe('disconnected')
+  })
+})
+
+// #1398: a machine that does not answer at all is a state, not an error
+describe('a machine that is away', () => {
+  it('has a label of its own, apart from a link that failed', () => {
+    // The sidebar's menu says "away" for a link that is down, as it did before the status existed
+    expect(MACHINE_STATUS_LABEL.away).toBe('away')
+    expect(MACHINE_STATUS_LABEL.unreachable).toBe('away')
+  })
+
+  it('says it is asleep, off or off the network, not what ssh said; the row says when it tries again', () => {
+    const p = machineProblem(machine({ status: 'away', error: 'ssh could not reach Box: ssh: connect to host box port 22: Operation timed out' }))
+    expect(p).toEqual({ title: 'Box is not reachable: asleep, off or off the network', fix: null })
+    expect(p?.title).not.toMatch(/ssh|timed out/i)
+  })
+
+  it('says to press Connect when Auto reconnect is off', () => {
+    expect(machineProblem(machine({ status: 'away', error: 'x', autoReconnect: false }))?.fix).toBe('Auto reconnect is off: press Connect to try again')
+  })
+
+  it('still names a real failure by what it is', () => {
+    expect(machineProblem(machine({ status: 'unreachable', error: 'ssh could not reach Box: me@box: Permission denied (publickey).' }))?.title).toMatch(/did not accept your ssh key/)
+  })
+
+  it('tells when it was last connected and when the next attempt is due, in minutes', () => {
+    const now = 10_000_000
+    expect(awayNote({ lastConnectedAt: now - 39 * 60_000, nextAttemptAt: now + 3 * 60_000 - 1 }, now)).toEqual({ lastConnected: '39m ago', next: 'in 3 min' })
+    expect(awayNote({ lastConnectedAt: now - 5 * 3_600_000, nextAttemptAt: now + 20_000 }, now)).toEqual({ lastConnected: '5h ago', next: 'in under a minute' })
+    expect(awayNote({ lastConnectedAt: now - 3 * 86_400_000, nextAttemptAt: null }, now)).toEqual({ lastConnected: '3d ago', next: null })
+    expect(awayNote({ lastConnectedAt: null, nextAttemptAt: now - 1 }, now)).toEqual({ lastConnected: null, next: null })
   })
 })

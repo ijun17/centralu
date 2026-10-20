@@ -479,7 +479,9 @@ own. The UI still talks to one host; everything here is additive, and `PROTOCOL_
   says is not (the remote host restarted without a keeper) is woken.
 - **`MachineInfo`.** `{ id, name, sshTarget, shell, wslDistro, command, status, error, versions,
   lastConnectedAt, localPort, sameLocalPort, hostStarted }`. `shell` is `posix`, `powershell` or
-  `wsl`. `status` is `connecting`, `connected`, `unreachable`, `not_running` (Centralu answers
+  `wsl`. `status` is `connecting`, `connected`, `unreachable`, `away` (#1398, additive; an older window reads it as
+  `unreachable`: the machine does not answer at all, asleep, off or off the network; `error` keeps ssh's line, `lastConnectedAt` is when it was
+  up, `nextAttemptAt` (additive, null otherwise) when the hub tries again), `not_running` (Centralu answers
   there, no `centralu serve` runs, and the hub could not start one: `error` says why), `starting`
   (the hub is starting one, [plans/remote-hub.md](plans/remote-hub.md) §10.9 decision 7; additive,
   an older window reads it as `unreachable`), `versions_differ`, `refused`, `disconnected` or `stopped` (#1143:

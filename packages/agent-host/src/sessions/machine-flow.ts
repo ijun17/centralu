@@ -51,6 +51,7 @@ const MACHINE_STATUS: Record<string, string> = {
   starting: 'connecting (starting Centralu there)',
   updating: 'updating Centralu there',
   unreachable: 'unreachable',
+  away: 'away (asleep, off or off the network)',
   disconnected: 'disconnected',
   not_running: 'unreachable (Centralu is not running there)',
   versions_differ: 'not connected (waiting for the person to align versions)',

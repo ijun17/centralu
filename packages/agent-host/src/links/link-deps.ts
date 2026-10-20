@@ -22,6 +22,8 @@ export type MachineRecord = {
   asks?: boolean
   /** Auto reconnect (#1341); absent: on */
   autoReconnect?: boolean
+  /** When the link was last up (#1398); absent: never, or a registry that does not keep it */
+  lastConnectedAt?: number
 }
 
 export interface MachineRegistry {
@@ -32,6 +34,8 @@ export interface MachineRegistry {
   /** The reverse direction's switch (#550); off also forgets the machine's approved pairs */
   setAsks?(id: string, on: boolean): void
   setAutoReconnect(id: string, autoReconnect: boolean): void
+  /** The link was up at this time (#1398), kept so "last connected" survives a restart; a registry may keep none */
+  setLastConnected?(id: string, at: number): void
 }
 
 /**

@@ -17,6 +17,8 @@ export type LinkedMachineRow = {
   autoReconnect?: boolean
   /** Whether this machine's sessions may ask this computer's projects (#550, v60); off by default */
   asks?: boolean
+  /** When the link to it was last up (#1398), from `app_settings` (`SEEN_KEY`); absent when it never was */
+  lastConnectedAt?: number
 }
 
 /** A pair the person approved for the reverse direction (#550, v60): a session of a linked machine, a project here */
@@ -32,6 +34,12 @@ export type MachineAskConsentRow = {
 
 /** The highest slot ever handed to a linked machine (#82) */
 const LINK_SLOT_KEY = 'links.slotHighWater'
+
+/**
+ * When a machine's link was last up (#1398), in ms, kept per machine so a machine that is away reads "last connected" across
+ * a restart of this host. A setting the previous build never reads, so it needs no migration step
+ */
+const SEEN_KEY = 'links.lastConnected.'
 
 /** Marks that a machine's list was mirrored at least once, so an empty mirror reads as empty rather than unknown */
 const MIRRORED_KEY = 'links.mirrored.'
@@ -81,7 +89,19 @@ export class LinkedMachineRecords {
       // Anything but the one value for off is on, as a window reads an unknown one
       autoReconnect: r.connect !== 'when_needed',
       asks: r.asks === 1,
+      ...this.lastSeen(r.id),
     }))
+  }
+
+  /** When the link to the machine was last up, as `{ lastConnectedAt }`, or nothing when it never was or the setting is not a time */
+  private lastSeen(id: string): { lastConnectedAt?: number } {
+    const at = Number(this.settings.appSetting(`${SEEN_KEY}${id}`))
+    return Number.isSafeInteger(at) && at > 0 ? { lastConnectedAt: at } : {}
+  }
+
+  /** The link to the machine was up at `at` (#1398) */
+  setLinkedMachineSeen(id: string, at: number): void {
+    if (this.db.prepare(`SELECT 1 FROM linked_machines WHERE id = ?`).get(id)) this.settings.setAppSetting(`${SEEN_KEY}${id}`, String(Math.floor(at)))
   }
 
   /**
@@ -126,6 +146,7 @@ export class LinkedMachineRecords {
       this.db.prepare(`DELETE FROM grid_layout WHERE remote_session_id IS NOT NULL AND substr(remote_session_id, 1, ?) = ?`).run(id.length + 1, `${id}.`)
       this.db.prepare(`DELETE FROM grid_layout WHERE remote_app_id IS NOT NULL AND app_machine = ?`).run(id)
       this.db.prepare(`DELETE FROM linked_machines WHERE id = ?`).run(id)
+      this.settings.deleteAppSetting(`${SEEN_KEY}${id}`)
       this.settings.deleteAppSetting(`${MIRRORED_KEY}${id}.session`)
       this.settings.deleteAppSetting(`${MIRRORED_KEY}${id}.project`)
     })()
