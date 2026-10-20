@@ -220,6 +220,8 @@ fn content_signed_with_a_key_this_build_does_not_trust_is_refused() {
     let r = c.check(&src).unwrap_err();
     assert_eq!(r.reason, "content");
     assert!(r.message.contains("not what the project signed") && r.message.contains("unknown key"), "{}", r.message);
+    // The window words the check, not the sentence
+    assert_eq!((r.check, r.file), (Some("unknown-key"), None));
     assert!(!version_dir(&c.data(), "0.2.1").exists());
 }
 
@@ -232,9 +234,32 @@ fn content_changed_after_signing_is_refused_and_nothing_is_left_behind() {
     let r = c.take(&src).unwrap_err();
     assert_eq!(r.reason, "content", "{r}");
     assert!(r.message.contains("host/main.mjs"), "{}", r.message);
+    // A file of another size: which file, and the sizes
+    assert_eq!((r.check, r.file.as_deref()), (Some("size-mismatch"), Some("host/main.mjs")));
+    assert!(r.message.contains("bytes, the manifest says"), "{}", r.message);
     assert!(!version_dir(&c.data(), "0.2.2").exists());
     let left: Vec<_> = fs::read_dir(content_root(&c.data())).unwrap().flatten().map(|e| e.file_name()).collect();
     assert!(left.is_empty(), "no partial copy is left: {left:?}");
+}
+
+/// The same size and other bytes: the hash says it, and the refusal carries both hashes in full.
+#[test]
+fn a_file_of_the_same_size_with_other_bytes_is_refused_with_both_hashes() {
+    let c = Case::new("same-size");
+    let src = c.bundle("X", "0.2.2");
+    let mut bytes = fs::read(src.join("host/main.mjs")).unwrap();
+    bytes[0] ^= 1;
+    fs::write(src.join("host/main.mjs"), &bytes).unwrap();
+    let r = c.take(&src).unwrap_err();
+    assert_eq!((r.reason, r.check, r.file.as_deref()), ("content", Some("hash-mismatch"), Some("host/main.mjs")));
+    assert!(r.message.contains("the signed manifest lists") && r.message.contains(", the file is "), "{}", r.message);
+    let found = r.message.rsplit(", the file is ").next().unwrap();
+    assert_eq!(found.len(), 64, "the file's hash, in full: {found}");
+    assert_eq!(found, content_verify::sha256_file(&src.join("host/main.mjs")).unwrap());
+    let (m, _) = c.check(&src).unwrap();
+    let listed = m.files.iter().find(|f| f.path == "host/main.mjs").unwrap();
+    assert!(r.message.contains(&hex(&listed.sha256)), "the manifest's hash: {}", r.message);
+    assert!(!version_dir(&c.data(), "0.2.2").exists());
 }
 
 #[test]
@@ -248,6 +273,7 @@ fn content_for_another_platform_is_refused() {
     let r = other.check(&c.data(), &src).unwrap_err();
     assert_eq!(r.reason, "content");
     assert!(r.message.contains("linux-x64"), "{}", r.message);
+    assert_eq!(r.check, Some("wrong-platform"));
 }
 
 #[test]
@@ -272,6 +298,7 @@ fn an_older_version_than_the_floor_is_refused_and_the_same_or_newer_is_not() {
     let r = c.check(&c.bundle("Old", "0.2.0")).unwrap_err();
     assert_eq!(r.reason, "downgrade");
     assert!(r.message.contains("0.2.0 is older than 0.2.1"), "{}", r.message);
+    assert_eq!(r.check, Some("downgrade"));
     assert!(c.check(&c.bundle("Same", "0.2.1")).is_ok());
     assert!(c.check(&c.bundle("New", "0.3.0-beta.1")).is_ok());
 }
@@ -450,4 +477,117 @@ fn placing_a_version_knows_whether_it_is_in_use() {
     drop(claim);
     copies.freeze(std::time::Duration::from_secs(1)).unwrap();
     assert_eq!(copies.claim_content(&next, &[], || "frozen", |_| Ok(next.clone())).err(), Some("frozen"));
+}
+
+// ---- why the window's own content would be refused
+
+/// After the shell refuses, the window reads the content again to say which file or check failed.
+#[test]
+fn the_window_can_find_why_its_own_content_would_be_refused_without_running_or_copying_it() {
+    let c = Case::new("diagnose");
+    let diagnose = |src: &Path| c.verify(|v| diagnose_with(v, &c.data(), src));
+
+    // Whole and signed: nothing to say
+    let good = c.bundle("Good", "0.2.0");
+    assert_eq!(diagnose(&good), None);
+
+    // A file changed after signing: which file, and what is wrong with it
+    let changed = c.bundle("Changed", "0.2.1");
+    fs::write(changed.join("host/main.mjs"), "// not what was signed\n").unwrap();
+    let r = diagnose(&changed).expect("a file that does not match");
+    assert_eq!((r.reason, r.check, r.file.as_deref()), ("content", Some("size-mismatch"), Some("host/main.mjs")));
+    assert!(r.message.contains("bytes, the manifest says"), "{}", r.message);
+
+    // Same size, other bytes: the hash says it, with both hashes
+    let same_size = c.bundle("Same", "0.2.2");
+    let mut other = fs::read(same_size.join("host/main.mjs")).unwrap();
+    other[0] ^= 1;
+    fs::write(same_size.join("host/main.mjs"), &other).unwrap();
+    let r = diagnose(&same_size).expect("a hash that differs");
+    assert_eq!((r.check, r.file.as_deref()), (Some("hash-mismatch"), Some("host/main.mjs")));
+    assert!(r.message.contains(&content_verify::sha256_file(&same_size.join("host/main.mjs")).unwrap()), "{}", r.message);
+    assert!(r.message.contains("the signed manifest lists "), "{}", r.message);
+    // The two hashes travel as fields, for the window to show only if they are hex
+    let (listed, has) = r.hashes.clone().expect("both hashes");
+    assert_eq!(has, content_verify::sha256_file(&same_size.join("host/main.mjs")).unwrap());
+    assert_ne!(listed, has);
+    assert!(listed.len() == 64 && listed.bytes().all(|b| b.is_ascii_hexdigit()));
+
+    // A listed file that is gone
+    let gone = c.bundle("Gone", "0.2.3");
+    fs::remove_file(gone.join("host/main.mjs")).unwrap();
+    let r = diagnose(&gone).expect("a file that is gone");
+    assert_eq!((r.check, r.file.as_deref()), (Some("file-unreadable"), Some("host/main.mjs")));
+
+    // A listed file that is a symlink, or longer than listed, is not read through or to its end
+    let link = c.bundle("Link", "0.2.5");
+    fs::remove_file(link.join("host/main.mjs")).unwrap();
+    std::os::unix::fs::symlink("/dev/zero", link.join("host/main.mjs")).unwrap();
+    let r = diagnose(&link).expect("a symlink where a file is listed");
+    assert_eq!((r.check, r.file.as_deref()), (Some("symlink"), Some("host/main.mjs")));
+    // A folder on the way to a listed file that is a symlink is not followed either: the same file elsewhere is not read
+    let via = c.bundle("Via", "0.2.7");
+    fs::rename(via.join("host"), c.t.join("elsewhere")).unwrap();
+    std::os::unix::fs::symlink(c.t.join("elsewhere"), via.join("host")).unwrap();
+    let r = diagnose(&via).expect("a folder on the way that is a symlink");
+    // The first listed file under the linked folder
+    assert_eq!(r.check, Some("symlink"));
+    assert!(r.file.as_deref().is_some_and(|f| f.starts_with("host/")), "{:?}", r.file);
+    assert!(r.message.contains("goes through a symlink at \"host\""), "{}", r.message);
+    assert!(hash_listed(&via, "host/main.mjs", 10_000).is_err(), "the hash of a file reached through a symlinked folder is not taken");
+    assert_eq!(through_symlink(&via, "host/main.mjs").as_deref(), Some("host"));
+    assert_eq!(through_symlink(&good, "host/main.mjs"), None);
+    let long = c.bundle("Long", "0.2.6");
+    fs::write(long.join("host/main.mjs"), vec![b'x'; 5_000_000]).unwrap();
+    let r = diagnose(&long).expect("a longer file");
+    assert_eq!((r.check, r.file.as_deref()), (Some("size-mismatch"), Some("host/main.mjs")));
+
+    // The signature, the platform and the floor are the shell's checks, answered first
+    let unknown = c.t.join("U.app/Contents/Resources/content");
+    write_content(&unknown, "0.2.4", &files("0.2.4"), &key());
+    assert_eq!(diagnose(&unknown).map(|r| r.check), Some(Some("unknown-key")));
+    let log = |_: &str| ();
+    let other_platform = Verifier { keys: &c.keys, platform: "linux-x64".into(), log: &log };
+    assert_eq!(diagnose_with(&other_platform, &c.data(), &good).map(|r| r.check), Some(Some("wrong-platform")));
+    fs::create_dir_all(content_root(&c.data())).unwrap();
+    fs::write(floor_path(&c.data()), "0.3.0\n").unwrap();
+    assert_eq!(diagnose(&good).map(|r| r.check), Some(Some("downgrade")));
+
+    // Nothing was copied or started by looking
+    assert!(!version_dir(&c.data(), "0.2.0").exists() && !version_dir(&c.data(), "0.2.1").exists());
+}
+
+/// The ids are the window's vocabulary: one per refusal of the verifier, none twice, and a file named
+/// for the ones that are about a file.
+#[test]
+fn every_refusal_of_the_verifier_has_its_own_id_and_the_ones_about_a_file_name_it() {
+    let cases: Vec<(Error, &str, Option<&str>)> = vec![
+        (Error::Missing("content-manifest.json"), "missing-file", Some("content-manifest.json")),
+        (Error::BadFile { name: "content-manifest.json.sig", reason: "is a symlink" }, "bad-file", Some("content-manifest.json.sig")),
+        (Error::ManifestMalformed("x".into()), "manifest-malformed", None),
+        (Error::SignatureMalformed("x".into()), "signature-malformed", None),
+        (Error::UnsupportedFormat(2), "unsupported-format", None),
+        (Error::UnknownKey("0011223344556677".into()), "unknown-key", None),
+        (Error::BadSignature, "bad-signature", None),
+        (Error::WrongPlatform { expected: "darwin-arm64".into(), found: "linux-x64".into() }, "wrong-platform", None),
+        (Error::ShellTooOld { needed: 2, have: 1 }, "shell-too-old", None),
+        (Error::BadPath { path: "../x".into(), reason: "has a .. component" }, "bad-path", Some("../x")),
+        (Error::DuplicatePath("a".into()), "duplicate-path", Some("a")),
+        (Error::Symlink("a/b".into()), "symlink", Some("a/b")),
+        (Error::NotRegularFile("a".into()), "not-regular-file", Some("a")),
+        (Error::SizeMismatch { path: "a".into(), expected: 1, found: 2 }, "size-mismatch", Some("a")),
+        (Error::HashMismatch("a".into()), "hash-mismatch", Some("a")),
+        (Error::CopyMismatch("a".into()), "copy-mismatch", Some("a")),
+        (Error::DestinationExists(PathBuf::from("/d")), "destination-exists", None),
+        (Error::BadVersion("x".into()), "bad-version", None),
+        (Error::Downgrade { candidate: "0.1.0".into(), highest: "0.2.0".into() }, "downgrade", None),
+        (Error::Io { context: "read".into(), source: std::io::Error::other("x"), step: content_verify::IoStep::Read }, "io", None),
+    ];
+    let mut ids = std::collections::BTreeSet::new();
+    for (e, id, file) in &cases {
+        assert_eq!(check_id(e), *id, "{e}");
+        assert_eq!(file_of(e), *file, "{e}");
+        ids.insert(*id);
+    }
+    assert_eq!(ids.len(), cases.len(), "an id is used twice");
 }

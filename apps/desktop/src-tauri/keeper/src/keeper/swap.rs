@@ -116,6 +116,16 @@ pub struct SwapView {
     /// words in `message`. Nothing moved. Absent from every other outcome.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub refused: Option<String>,
+    /// Which check of the verifier refused (`unknown-key`, `bad-signature`, `hash-mismatch`, `wrong-platform`, …),
+    /// when one did: the window words it in its own dialog (`refusal` in the app), without the host.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refused_check: Option<String>,
+    /// The listed file that refusal is about, when it is about one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refused_file: Option<String>,
+    /// For a file whose hash differs: the hash the signed manifest lists and the file's, lowercase hex.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refused_hashes: Option<[String; 2]>,
     /// Seconds since the epoch.
     pub started_at: u64,
 }
@@ -133,6 +143,9 @@ impl SwapView {
             cut: Vec::new(),
             keeper_message: None,
             refused: None,
+            refused_check: None,
+            refused_file: None,
+            refused_hashes: None,
             started_at: super::now_secs(),
         }
     }
@@ -606,11 +619,40 @@ pub(crate) mod tests {
             cut: vec!["tool app-board/add_item".into()],
             keeper_message: None,
             refused: None,
+            refused_check: None,
+            refused_file: None,
+            refused_hashes: None,
             started_at: 1,
         };
         let text = serde_json::to_string(&v).unwrap();
         assert!(text.contains(r#""phase":"failed""#) && text.contains(r#""rolledBack":true"#), "{text}");
         assert_eq!(serde_json::from_str::<SwapView>(&text).unwrap(), v);
+    }
+
+    /// What the window words in its own dialog travels in the view, and an older window, which does not read
+    /// these two fields, still reads the rest.
+    #[test]
+    fn a_refusal_names_its_check_and_file_and_an_older_view_still_reads() {
+        let v = SwapView {
+            refused: Some("content".into()),
+            refused_check: Some("hash-mismatch".into()),
+            refused_file: Some("host/main.mjs".into()),
+            refused_hashes: Some(["a".repeat(64), "b".repeat(64)]),
+            ..SwapView::begun(Phase::Failed, BuildSource { commit: "abc".into(), ..Default::default() }, None)
+        };
+        let text = serde_json::to_string(&v).unwrap();
+        assert!(text.contains(r#""refusedCheck":"hash-mismatch""#) && text.contains(r#""refusedFile":"host/main.mjs""#), "{text}");
+        assert_eq!(serde_json::from_str::<SwapView>(&text).unwrap(), v);
+        // A view from a keeper before these fields: they read as absent
+        let hashes = format!(r#","refusedHashes":["{}","{}"]"#, "a".repeat(64), "b".repeat(64));
+        assert!(text.contains(&hashes), "{text}");
+        let old = text.replace(r#","refusedCheck":"hash-mismatch","refusedFile":"host/main.mjs""#, "").replace(&hashes, "");
+        assert!(!old.contains("refusedCheck") && !old.contains("refusedHashes"), "{old}");
+        let read = serde_json::from_str::<SwapView>(&old).unwrap();
+        assert_eq!((read.refused.as_deref(), read.refused_check, read.refused_file), (Some("content"), None, None));
+        // And a view with no refusal does not carry them
+        let plain = serde_json::to_string(&SwapView::begun(Phase::Done, BuildSource::default(), None)).unwrap();
+        assert!(!plain.contains("refusedCheck") && !plain.contains("refusedFile"), "{plain}");
     }
 
     /// A clean commit is one build whatever its build time; a dirty one is told apart by it. The UI

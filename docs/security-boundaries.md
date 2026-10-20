@@ -1417,6 +1417,44 @@ The keeper adds, on a handoff (step 5, [plans/thin-shell.md](plans/thin-shell.md
   (`tooling/keeper-executable.test.ts`). `scripts/keeper-content-integration.mts` builds the test keeper
   and puts the plain one back in the target folder before anything else runs from it.
 
+A refusal is **shown by the window itself, in a native dialog** (#634, `apps/desktop/src-tauri/src/refusal.rs`):
+
+- **Why it is drawn there.** The build bar is drawn by the web UI, which the host feeds, and the host is the thing whose
+  content failed to verify: it could hide the line or write another. The dialog is drawn by the window process, the signed
+  app bundle, from what the window reads itself: the shell's `shell-status.json` and the keeper's swap view over the
+  keeper's socket. Neither passes through the host, and nothing of this is sent to or from it. Both
+  can be written by another process of the user (the keeper's socket takes a `switch` naming any folder, and
+  `shell-status.json` is the user's file), so **the dialog repeats no free text from either**: it is built from the kind
+  of check (a fixed list of ids, each with fixed words; an id it does not know is not repeated), the file's name (it comes from
+  the signed manifest; cut to plain text of at most 200 characters), the two hashes (only if each is 64 hex characters) and the
+  window's own version (the running one only if it is a plain version). The sentence the keeper or the shell gave goes to
+  `keeper.log` on one line, which "Show log" reveals.
+- **Only for a switch this window sent.** The window notes the moment before it sends its switch (`Announcer::we_asked`); the
+  first ended swap that began after it, whose target is this window's build, is that request's end, and is shown if it is a
+  refusal; the ask is spent either way. A refusal of a switch another process asked for gets no dialog, however often it asks
+  (the keeper keeps the last swap's view for a window that attaches later, and another window's refused update is not
+  announced either). **One dialog at a time**: none is handed out while one is open (the dialog's own callback clears the
+  flag), and two are at least 5 seconds apart; one that had to wait is shown by a later view.
+- **What it says.** Which version could not be verified and which one keeps running (an update), or that Centralu started
+  without the permission shell (a start), and under Details the check that failed (an unknown signing key, a signature that
+  does not match, a file whose hash differs, another platform, a version below the floor, a newer shell needed), the file
+  and both hashes. The keeper names the check and the file in its refusal (`check_id`, `file_of` in `keeper/content.rs`;
+  `refusedCheck` and `refusedFile` in the swap view, additions only: a keeper or window of another build ignores them). For
+  the shell's refusal of the window's own content, the window reads that content again (`keeper::content::diagnose`: the
+  shell's checks, then every listed file's size and hash; it reads and hashes and starts, copies and changes nothing),
+  because the shell's status carries one sentence and no hashes and its crate cannot change without a new shell version.
+- **Show, do not run.** The dialog only tells. It starts, trusts and unlocks nothing; what keeps running is what already ran
+  (an update swap) or what the window starts itself when the shell refused (§6 of the plan, unchanged), and the dialog says
+  which: after a refusal by the shell it says that Centralu was started directly from the app and that this start was not
+  verified, not that nothing ran. Its two buttons are "Show log" (reveals `keeper.log`) and "Close"; it names the commands that
+  fetch the build again (`npm i -g centralu@<version>`, then `centralu install --force`: `centralu update` does nothing when
+  the registry's latest is the version already installed). A "run anyway" (the owner's decision of 2026-10-14 on #634) is not
+  built: the shell and keeper still verify by default and there is no override.
+- **Only verification failures** (`content`, `downgrade`, `shell-too-old`) are shown this way. A copy that failed, a folder in
+  use, a shell that would not open and the like stay in the build bar, which is the host's to draw and can be hidden by it.
+- **Once per refusal** in a window's life (the keeper pushes the same failed view on every status change); a second attempt
+  that is refused again is shown again.
+
 Limits:
 
 - Another process of the same user can change the copy after it is verified, or start whatever it likes
@@ -1425,7 +1463,18 @@ Limits:
   Centralu's folders inheriting the grants, not against the user's own processes.
 - Whoever holds a signing key can sign anything; rotating means moving `next` to `current` in a new shell
   version, which is why the shell carries both.
-- Windows has no verifier copy yet (`verify_and_copy` is Unix only); it has no shell either (§8).
+- Windows has no verifier copy yet (`verify_and_copy` is Unix only); it has no shell either (§8), so no refusal arises there
+  and the dialog is never shown.
+- The dialog is drawn by the window process, which runs as the same user as everything else here: another process of the
+  user could draw over it or close it, and one that reaches the keeper's socket (the host is a child of the keeper and does)
+  can ask for a switch to content it names, which the keeper refuses: the window shows no dialog for that (only for a switch it
+  sent itself), and a refusal it does show repeats none of the requester's words (its folder name is in the log only). It can,
+  in a race, make the keeper refuse the window's own switch (one swap runs at a time) and so use up the window's one dialog for
+  that request; it cannot make the dialog say more than the check, the file, the hashes and the versions, and it cannot suppress
+  a refusal the keeper or the shell made. What it protects against is the host hiding or rewriting a refusal, not the user's
+  own processes.
+- The text of the shell's refusal is the shell's (pinned) and the window's diagnosis reads the content again: a content changed
+  between the shell's refusal and the diagnosis is described as it is then, or, when it verifies then, by the shell's sentence.
 
 ### Local content signing (#610)
 
