@@ -1,3 +1,4 @@
+import { execFailure } from './exec-error.js'
 import { isAbsolute, relative, resolve } from 'node:path'
 import { assertExistingPath, isInside, isMissingPathError } from './path-guard.js'
 import type { GitBranch, GitCommit, GitFileStatus } from '@cc/protocol'
@@ -59,7 +60,7 @@ export async function isRepo(cwd: string): Promise<boolean> {
 
 /** What git says of a folder that is no repository (untranslated, `gitEnv`), and a machine with no git at all */
 function notARepository(e: unknown): boolean {
-  const err = e as { stderr?: string; message?: string; code?: unknown }
+  const err = execFailure(e)
   return /not a git repository/i.test(String(err.stderr || err.message || '')) || err.code === 'ENOENT'
 }
 
@@ -110,7 +111,7 @@ export async function gitSummary(cwd: string, trust: GitTrust = {}, limits: Summ
     )
     return { isRepo: true, branch, changedFiles: paths.size, ...(more ? { more: true as const } : {}) }
   } catch (e) {
-    const err = e as { stderr?: string; message?: string; code?: unknown; timedOut?: boolean }
+    const err = execFailure(e)
     const msg = String(err.stderr || err.message || '')
     // macOS TCC: an unsigned app reading a protected folder ends up here
     if (/Operation not permitted|EPERM|EACCES|permission denied/i.test(msg)) return { isRepo: true, branch: '', changedFiles: 0, denied: true }
@@ -135,7 +136,7 @@ export async function gitStatusFiles(cwd: string, trust: GitTrust = {}): Promise
 
   const tokens = stdout.split('\0')
   for (let i = 0; i < tokens.length; i++) {
-    const entry = tokens[i]!
+    const entry = tokens[i] ?? ''
     if (!entry) continue
     if (entry.startsWith('1 ') || entry.startsWith('2 ')) {
       // 1 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <path>
@@ -243,7 +244,7 @@ export async function gitDiff(
       stdout = await git(cwd, ['diff', '--no-color', '--no-ext-diff', '--no-index', '--', '/dev/null', safePath], opts)
     } catch (e) {
       // --no-index exits 1 when there is a difference, so stdout rides along on the error
-      stdout = String((e as { stdout?: string }).stdout ?? '')
+      stdout = execFailure(e).stdout ?? ''
     }
   }
 
