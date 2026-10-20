@@ -520,6 +520,22 @@ export class MailRecords {
     return { ...m, seq, homeSeq: seq }
   }
 
+  /** How many messages `sender` posted since the id `floor` (see `messageIdFloor`): the rate a sender is held to, counted in the store (§7.9) */
+  postsSince(sender: string, host: string, floor: string): number {
+    const row = this.db
+      .prepare<[string, string, string], { n: number }>(`SELECT COUNT(*) AS n FROM mail_messages WHERE id >= ? AND id < ? AND sender = ?`)
+      .get(floor, `${host}.m_~`, sender)
+    return row?.n ?? 0
+  }
+
+  /** The latest message `sender` posted in the thread */
+  lastBy(threadId: string, sender: string): MessageRow | undefined {
+    const row = this.db
+      .prepare<[string, string], MessageSql>(`SELECT * FROM mail_messages WHERE thread_id = ? AND sender = ? ORDER BY seq DESC LIMIT 1`)
+      .get(threadId, sender)
+    return row && toMessage(row)
+  }
+
   message(id: string): MessageRow | undefined {
     const row = this.db.prepare<[string], MessageSql>(`SELECT * FROM mail_messages WHERE id = ?`).get(id)
     return row && toMessage(row)

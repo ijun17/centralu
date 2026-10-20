@@ -403,7 +403,7 @@ type ProtocolError = {
       | 'session_not_found' | 'rate_limited' | 'version_mismatch' | 'refused' | 'internal'
   message: string          // a human-readable explanation (must be displayable in the UI as is)
   retryable: boolean
-  data?: unknown           // extra information per code (rate_limited → resumeAt, refused → reason etc.)
+  data?: unknown           // extra information per code (rate_limited → resumeAt, refused → reason etc.). The mailbox's own limits (30 posts a minute) are `refused` with reason `rate_limited`
 }
 ```
 

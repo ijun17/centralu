@@ -23,7 +23,7 @@ import {
 } from '../dev-services/store/mail.js'
 import { CENTRALU, PERSON, parseAddress, sessionAddress, type Party } from './address.js'
 import { buildMailFrame, type MailFrameItem } from './frame.js'
-import { UlidMaker, messageIdOf, parseMailId, threadIdOf } from './ids.js'
+import { UlidMaker, messageIdFloor, messageIdOf, parseMailId, threadIdOf } from './ids.js'
 import {
   MAX_BLOCKERS,
   NEXT_MAX,
@@ -34,6 +34,8 @@ import {
   mayEditTask,
   mayPostKind,
   pickWorkThread,
+  postsPerMinute,
+  REPEAT_WINDOW_MS,
   wakes,
   refuse,
   refusalReason,
@@ -137,7 +139,13 @@ export type CentraluPost = {
 /** A thread changed (and who has new mail in it): what the delivery engine and the windows hear */
 export type MailChange = { threadId: string; recipients: string[] }
 
-export type PostResult = { message: MessageRow; thread: ThreadRow; duplicate: boolean }
+export type PostResult = {
+  message: MessageRow
+  thread: ThreadRow
+  duplicate: boolean
+  /** The same words, kind and sender in this thread within 10 minutes: not posted again, and this is the first one (§7.9) */
+  repeated?: boolean
+}
 
 export type OpenResult = PostResult & {
   /** The participants of the threads this one follows, who may be added to it (§3.3, "offered as its own") */
@@ -355,11 +363,12 @@ export class MailService {
 
     return this.run(() => {
       const now = this.now()
-      // Opened again under the same key by the same caller: the thread that exists, not a second one
+      // Opened again under the same key by the same caller: the thread that exists, not a second one (also at the limit: a retry is no new post)
       if (input.dedupeKey !== undefined) {
         const first = this.duplicateOpening(caller, input.dedupeKey)
         if (first) return { message: first, thread: this.mustThread(first.threadId), duplicate: true, offered: [] }
       }
+      this.checkRate(by.kind, caller, now)
       for (const follow of input.follows ?? []) {
         const f = this.records.thread(follow)
         if (!f) throw refuse('bad_follows', `thread ${follow} is not here to follow up`)
@@ -417,11 +426,19 @@ export class MailService {
       const existing = this.duplicate(thread.id, caller, input.dedupeKey)
       if (existing) return { message: existing, thread, duplicate: true }
       this.assertWritable(thread)
+      this.checkRate(sender.kind, caller, now)
       const wrong = mayPostKind(sender.kind, standing, input.kind)
       if (wrong) throw refuse('kind_not_allowed', wrong)
       this.checkFlags(sender.kind, input)
       const body = this.checkBody(sender.kind, input.body, false)
       if (input.replyTo !== undefined) this.checkReplyTo(thread.id, input.replyTo)
+      // The same words again from a session or an app: not posted again, and the sender is told (§7.9)
+      if (sender.kind === 'session' || sender.kind === 'app') {
+        const last = this.records.lastBy(thread.id, caller)
+        if (last && last.kind === input.kind && last.body === input.body && now - last.createdAt <= REPEAT_WINDOW_MS) {
+          return { message: last, thread, duplicate: true, repeated: true }
+        }
+      }
 
       // A participant that is gone, or whose seat cannot read mail, gets no receipt: the others are written to all the same. Refused
       // only when there is no one left to take it, so the sender learns why
@@ -486,6 +503,7 @@ export class MailService {
       const existing = this.duplicate(thread.id, caller, input.dedupeKey)
       if (existing) return { message: existing, thread, duplicate: true }
       this.assertWritable(thread)
+      this.checkRate(by.kind, caller, now)
       if (input.assignee === thread.owner) throw refuse('bad_value', 'the owner and the assignee of a thread are two parties')
       const body = this.checkBody(by.kind, input.body, false)
       this.mayWriteOrRefuse(caller, input.assignee, thread)
@@ -1113,6 +1131,15 @@ export class MailService {
     if (!mayBeEmpty && body.trim() === '') throw refuse('empty', 'a post says something')
     if (body.length > bodyLimit(sender)) throw refuse('too_long', `a body from ${sender === 'app' ? 'an app' : 'this sender'} is at most ${bodyLimit(sender)} characters`)
     return body
+  }
+
+  /** A session posts at most 30 a minute and an app 10, counted in the store so that a restart does not reset it (§7.9) */
+  private checkRate(sender: SenderClass, caller: string, now: number): void {
+    const limit = postsPerMinute(sender)
+    if (limit === Infinity) return
+    if (this.records.postsSince(caller, this.host, messageIdFloor(this.host, now - 60_000)) >= limit) {
+      throw refuse('rate_limited', `at most ${limit} posts a minute from ${sender === 'app' ? 'an app' : 'a session'}: wait a minute`)
+    }
   }
 
   private mayWriteOrRefuse(from: string, to: string, thread: ThreadRow | null): void {

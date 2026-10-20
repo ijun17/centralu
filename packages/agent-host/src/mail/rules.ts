@@ -30,6 +30,7 @@ const REFUSALS = [
   'no_blocker',
   'bad_follows',
   'no_mailbox',
+  'rate_limited',
   'bad_value',
   'policy',
 ] as const
@@ -53,6 +54,14 @@ export function refusalReason(err: unknown): MailRefusal | undefined {
 export function bodyLimit(sender: SenderClass): number {
   return sender === 'app' ? 4_000 : 16_000
 }
+
+/** A sender's posts a minute (§7.9): 30 from a session, 10 from an app. The person and Centralu are not limited */
+export function postsPerMinute(sender: SenderClass): number {
+  return sender === 'session' ? 30 : sender === 'app' ? 10 : Infinity
+}
+
+/** The same words from the same sender in the same thread within this long are one post (§7.9) */
+export const REPEAT_WINDOW_MS = 10 * 60_000
 
 export const SUBJECT_MAX = 200
 export const NEXT_MAX = 300
