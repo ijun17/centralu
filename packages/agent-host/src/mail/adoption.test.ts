@@ -227,11 +227,12 @@ describe('closing the work an earlier build finished (rollback, then forward)', 
   describe('mail the session has not taken is work in hand', () => {
     const takeOver = (s: ReturnType<typeof setup>) =>
       takeOverFromEarlierBuild(s.mail, s.store, { info: () => ({ state: 'idle' }), depth: () => 0, paused: () => null })
-    /** Reported, so in review; then the owner or the person sends more, which puts it back to running with mail for the session */
+    /** Reported, so in review; then the owner or the person sends more, and the turn it starts has begun (running) with the mail not yet marked taken */
     const reopened = (s: ReturnType<typeof setup>, by: string) => {
       const thread = going(s)
       s.mail.reportTurn(thread.id, { to: s.addr('caller'), about: s.addr('kid'), outcome: 'finished', body: '[Centralu] The assigned work finished.\nid: kid', then: 'review' })
       const sent = s.mail.post(thread.id, by === 'person' ? 'person' : s.addr(by), { kind: 'note', body: 'one more thing' })
+      s.mail.turnStarted(s.addr('kid'), thread.id, [sent.message.id])
       expect(s.store.mail.thread(thread.id)?.state).toBe('running')
       return { thread, sent }
     }

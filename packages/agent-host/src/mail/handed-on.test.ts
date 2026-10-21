@@ -57,6 +57,26 @@ describe('a thread opened in the work of another', () => {
   })
 })
 
+describe('a child that was sent more is still work going (3.10)', () => {
+  it('a reported child the work sent more into counts until the turn that mail starts begins, and then it is running; mail it has taken, or from a member, does not', () => {
+    const s = setup()
+    const child = s.handOn().thread
+    s.mail.reportTurn(child.id, { to: B, about: C, outcome: 'finished', body: '[Centralu] The assigned work finished.\nid: c', then: 'review' })
+    expect(s.mail.waitingOn(A, B)).toBe(0)
+    const more = s.mail.post(child.id, B, { kind: 'note', body: 'and the docs' })
+    // Posted, not begun: the thread is still in review, and the work still waits for it
+    expect(s.store.mail.thread(child.id)?.state).toBe('review')
+    expect(s.mail.waitingOn(A, B)).toBe(1)
+    s.mail.turnStarted(C, child.id, [more.message.id])
+    expect(s.store.mail.thread(child.id)?.state).toBe('running')
+    expect(s.mail.waitingOn(A, B)).toBe(1)
+    // Taken (read), then reported again: nothing is waiting for
+    s.mail.reportTurn(child.id, { to: B, about: C, outcome: 'finished', body: '[Centralu] The assigned work finished.\nid: c', then: 'review' })
+    s.store.mail.markDelivered(C, [more.message.id], [more.message.id], NOW)
+    expect(s.mail.waitingOn(A, B)).toBe(0)
+  })
+})
+
 describe('a thread opened with the mail tool under work', () => {
   it('names only work the opener is doing: another session cannot hold it running, the person can', () => {
     const s = setup()

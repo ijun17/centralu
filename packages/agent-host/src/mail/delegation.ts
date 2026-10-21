@@ -1,8 +1,8 @@
-import { CENTRALU, PERSON } from './address.js'
+import { CENTRALU, PERSON, parseAddress } from './address.js'
 import type { ThreadOrigin } from '../dev-services/store/mail.js'
 import type { MailRecords } from '../dev-services/store/mail.js'
 import { refusalReason } from './rules.js'
-import type { MailService } from './service.js'
+import type { ClosingHooks, MailService } from './service.js'
 import type { MailTurns, TurnStart } from './turns.js'
 
 /**
@@ -77,6 +77,36 @@ export function personReportRecorder(mail: MailService, records: MailRecords): (
       if (refusalReason(e) !== undefined) return false
       throw e
     }
+  }
+}
+
+/**
+ * What the host does when a thread whose work was going is closed by the person or its owner (3.10, MB): `turnRunning` is whether `mail_turns` says
+ * a turn going in the assignee belongs to this thread, and `closed` stops that turn and tells the helper (`SessionManager.workClosed`)
+ */
+export function closingRecorder(
+  turns: MailTurns,
+  host: {
+    inTurn(sessionId: string): boolean
+    /** The session's turn has ended but its own background work runs, and a report waits on it (`pausedReports`) */
+    paused(sessionId: string, ownerId: string): boolean
+    workClosed(c: { threadOwner: string; helperId: string; stopped: boolean; text: string }): void
+  },
+): ClosingHooks {
+  const sessionOf = (address: string): string | undefined => {
+    const party = parseAddress(address)
+    return party?.kind === 'session' ? party.sessionId : undefined
+  }
+  return {
+    turnRunning: (thread) => {
+      const helper = sessionOf(thread.assignee ?? '')
+      if (helper === undefined) return false
+      if (host.inTurn(helper)) return turns.current(helper)?.threadId === thread.id
+      // Paused over its own background work for this thread's owner: that work is what is going
+      const owner = sessionOf(thread.owner)
+      return owner !== undefined && host.paused(helper, owner)
+    },
+    closed: (c) => host.workClosed({ threadOwner: sessionOf(c.thread.owner) ?? '', helperId: c.helperId, stopped: c.stopped, text: c.text }),
   }
 }
 
@@ -207,6 +237,9 @@ export function reportRecorder(mail: MailService, records: MailRecords): (ownerI
       // The session's own words: the last response a report carried is in the thread as its message too, and is not it closing the work
       const theirs = records.lastWordBy(thread.id, child)
       const ours = records.lastBy(thread.id, owner)
+      // The person closed it and the owner was told (3.10): the end of the turn that was still going is not a second word
+      const closed = records.lastReportBy(thread.id, CENTRALU)
+      if (closed?.facts.closedBy === 'person' && closed.seq > (ours?.seq ?? 0)) return 'closed'
       return theirs?.kind === 'report' && theirs.seq > (ours?.seq ?? 0) ? 'closed' : 'none'
     }
     if (draft.archiving) return 'closed'

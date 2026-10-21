@@ -8,7 +8,7 @@ import { dirname, join } from 'node:path'
 import { mkdirSync, writeSync } from 'node:fs'
 import { APP_VERSION, autoCompactOf, errorMessage, PROTOCOL_VERSION, RESERVED_APP_IDS, type HostHandover, type HostLogon, type NormalizedEvent } from '@cc/protocol'
 import { hostBuild, startActivityReport } from './keeper-link.js'
-import { activityCounts, type ActivitySnapshot } from './idle.js'
+import { activityCounts, inTurn, type ActivitySnapshot } from './idle.js'
 import { connectHeldChildren } from './keeper/held-children.js'
 import { chooseDataDir, dataRoot, keepDataFolderPrivate, migrateLegacyDataDir, privateDataFolderFor } from './data-dir.js'
 import { DEFAULT_ALLOWED_ORIGINS, HostServer, parseAllowedOrigins } from './transport/server.js'
@@ -24,7 +24,7 @@ import { MailDelivery } from './mail/delivery.js'
 import { MailPerson } from './mail/person.js'
 import { takeOverFromEarlierBuild } from './mail/adoption.js'
 import { pausedReportKey, readPausedTasks } from './sessions/child-ownership.js'
-import { answerRecorder, delegationRecorder, finishRecorder, personReportRecorder, personWorkRecorder, reportRecorder, turnRecorder } from './mail/delegation.js'
+import { answerRecorder, closingRecorder, delegationRecorder, finishRecorder, personReportRecorder, personWorkRecorder, reportRecorder, turnRecorder } from './mail/delegation.js'
 import { recordedAgentDepth } from './sessions/agent-depth.js'
 import { COMMAND_CALLS, PLAIN_CALLS } from './mail/frame.js'
 import { MailTool } from './mail/tool.js'
@@ -463,6 +463,17 @@ mgr.useMail({ sessionGone: (id) => void mail.sessionGone(id), sessionChanged: (i
   // Every turn the mailbox did not start is recorded too: whose it is, and the thread it belongs to (§6)
   turnStarted: turnRecorder(mail, store.mail, mailTurns),
 })
+// A thread whose work was going and is closed stops its running turn and tells the helper once (3.10)
+mail.useClosing(
+  closingRecorder(mailTurns, {
+    inTurn: (id) => {
+      const s = mgr.sessionInfo(id)
+      return !!s && inTurn(s.state)
+    },
+    paused: (id, ownerId) => mgr.pausedFor(id, ownerId),
+    workClosed: (c) => void mgr.workClosed(c),
+  }),
+)
 /*
  * Terminal and command output can arrive before the server exists: under the keeper an adopted pty
  * replays its buffered output as soon as it is attached (HO11, lifecycle/gate.ts).

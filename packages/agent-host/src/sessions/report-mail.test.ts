@@ -472,6 +472,16 @@ describe('work handed on', () => {
 })
 
 describe('the person takes the session over', () => {
+  it('the person dropping the thread (3.10) tells the owner once: the turn that was still going is not a second word', async () => {
+    const { parent, child } = await parentAndChild()
+    mail.update(threadOf(parent).id, 'person', { state: 'done', outcome: 'dropped' })
+    expect(reportsIn(threadOf(parent))).toHaveLength(1)
+    expect(reportsIn(threadOf(parent))[0]).toMatchObject({ facts: { outcome: 'dropped', closedBy: 'person' } })
+    await turnEnds(child, 'all merged')
+    expect(oldReports(parent, child)).toEqual([])
+    expect(reportsIn(threadOf(parent))).toHaveLength(1)
+  })
+
   it('closes the thread dropped with one report to its owner, and the work is not followed any more', async () => {
     const { parent, child } = await parentAndChild()
     const reports = (w.mgr as unknown as { reports: { personTookOver(id: string): Promise<void> } }).reports

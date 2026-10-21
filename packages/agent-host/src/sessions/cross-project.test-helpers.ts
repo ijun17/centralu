@@ -31,18 +31,28 @@ export class CrossHandle implements SessionHandle {
   turnInputs?: () => readonly string[] | null
   /** The origin each input was stamped with (`SessionHandle.send`'s `opts.origin`), in the same order */
   origins: unknown[] = []
-  send(text: string, opts?: { id?: string; origin?: unknown }) {
+  /** The inputs that went in without a turn (`SessionHandle.send`'s `opts.quiet`) */
+  quiet: string[] = []
+  send(text: string, opts?: { id?: string; origin?: unknown; quiet?: boolean }) {
     this.origins.push(opts?.origin)
     this.sent.push(text)
     this.ids.push(opts?.id)
+    // Quiet input is taken without a turn: it changes no state
+    if (opts?.quiet) {
+      this.quiet.push(text)
+      return
+    }
     this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'working' })
   }
+  /** A test sets this to make the tool say it took a tracked input as it starts the turn, as Claude does (`InputObserver.accepted`) */
+  acceptsAtOnce = false
   sendTracked(text: string, observer?: InputObserver): Promise<void> {
     const done = new Promise<void>((resolve, reject) => this.receipts.push({
       resolve: () => { observer?.complete(); resolve() },
       reject: (e) => { observer?.fail(e); reject(e) },
     }))
     this.send(text)
+    if (this.acceptsAtOnce) observer?.accepted?.()
     return done
   }
   respondApproval() {
@@ -70,6 +80,10 @@ export class CrossAdapter implements AgentAdapter {
     this.descriptor = { name: tool, label: tool === 'claude' ? 'Claude Code' : 'Codex', mark: 'C', install: 'x', login: 'x' }
   }
   capabilities = { approvals: true, contextUsage: 'exact' as const, resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false, backgroundTasks: false, midTurnInput: true }
+  /** Claude takes input without a turn; Codex starts one for any input (`AgentAdapter.quietInput`) */
+  get quietInput(): boolean {
+    return this.tool === 'claude'
+  }
   handles = new Map<string, CrossHandle>()
   /** A test sets this to give the tool a model list */
   listModels?: () => Promise<import('@cc/protocol').ModelOption[]>

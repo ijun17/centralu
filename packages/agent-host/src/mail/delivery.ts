@@ -47,6 +47,11 @@ export type MailInput = {
   quiet: boolean
   /** The compact line the conversation keeps of it (§9.2), in Centralu's words */
   line: string
+  /**
+   * The turn this starts is the work of a thread the session is the assignee of, owned by this session (§6): the end of the turn is reported to it,
+   * as the end of any turn of work it gave is. The host owes that report from the moment the input goes in, and forgets it if the input is not taken
+   */
+  reportTo?: string
 }
 
 export type MailSessions = {
@@ -438,8 +443,9 @@ export class MailDelivery {
       if (turn !== undefined) this.turns?.cancel(sessionId, turn)
     }
     const delivered: { at?: number } = {}
+    const reportTo = quiet ? undefined : this.reportTarget(recipient, drained.workThread, drained.messageIds)
     try {
-      await this.sessions.deliver(sessionId, { text: drained.text, quiet, line: drained.line }, (e) => {
+      await this.sessions.deliver(sessionId, { text: drained.text, quiet, line: drained.line, ...(reportTo ? { reportTo } : {}) }, (e) => {
         cancelTurn()
         // Told after `deliver` resolved, so the time is set
         if (delivered.at !== undefined) this.takeBack(recipient, drained.messageIds, delivered.at, e)
@@ -457,6 +463,13 @@ export class MailDelivery {
     const deliveredAt = this.now()
     delivered.at = deliveredAt
     this.records.transaction(() => {
+      // A turn it started has begun (no work thread, no move, for mail that starts none): the thread it is the work of is running from here (§3.3)
+      try {
+        this.service.turnStarted(recipient, drained.workThread, drained.messageIds)
+      } catch (e) {
+        // The input is in: a failure here must not roll the delivery back and send it twice (§7.6.5)
+        console.error(`[mail] could not move the thread of a turn that began in ${sessionId.slice(0, 8)} (${errorMessage(e)})`)
+      }
       // Told of and held is not read: the person finds it in the Inbox, with Release, until they have seen it
       const heldIds = new Set(drained.quieted.map((q) => q.messageId))
       this.records.markDelivered(recipient, drained.messageIds, drained.inline.filter((id) => !heldIds.has(id)), deliveredAt)
@@ -472,6 +485,14 @@ export class MailDelivery {
       if (this.crowd?.length === 0) this.crowd = null
       this.crowdChanged()
     }
+  }
+
+  /** The session that gave the work a turn of this delivery is, if a session did: its end is that session's to hear (§6) */
+  private reportTarget(recipient: string, workThread: string | null, messageIds: readonly string[]): string | undefined {
+    const thread = workThread === null ? undefined : this.records.thread(workThread)
+    if (!thread || thread.assignee !== recipient || !this.service.givesWork(thread, messageIds)) return undefined
+    const owner = parseAddress(thread.owner)
+    return owner?.kind === 'session' ? owner.sessionId : undefined
   }
 
   /** What the receiver's guards say about its mail (§7.7, §7.9) */

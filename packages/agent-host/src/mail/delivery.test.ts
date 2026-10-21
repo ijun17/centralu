@@ -2,7 +2,7 @@
  * Delivery to a receiver at rest (#1347, docs/plans/mailbox.md §5, §7.5 to §7.6, §7.9): who is woken when, what is written
  * before and after the tool takes the input, and what waits.
  */
-import { afterEach, describe, expect, it } from 'vitest'
+import { vi, afterEach, describe, expect, it } from 'vitest'
 import { Store } from '../dev-services/store.js'
 import { PERSON, appAddress, sessionAddress } from './address.js'
 import { MailDelivery, MailNotAtRest, type MailInput, type MailSessions, type ReceiverState } from './delivery.js'
@@ -105,6 +105,53 @@ describe('delivery to a receiver at rest (§5)', () => {
     expect(receipt).toMatchObject({ deliveredAt: NOW + 2_000, attemptAt: NOW + 2_000, attempts: 1 })
     // The words went in whole: read on acceptance
     expect(receipt.readAt).toBe(NOW + 2_000)
+  })
+
+  it('more work into a thread in review, and an assign into an open one, run it when the turn they start begins, not when they are posted (3.10)', async () => {
+    const w = world()
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    const { thread } = assign(w)
+    expect(w.store.mail.thread(thread.id)?.state).toBe('open')
+    await w.advance(2_000)
+    expect(w.store.mail.thread(thread.id)?.state).toBe('running')
+    w.mail.update(thread.id, S2, { state: 'review' })
+    w.mail.post(thread.id, S1, { kind: 'note', body: 'one more thing' })
+    // Posted, not yet started: still reported, the owner decides
+    expect(w.store.mail.thread(thread.id)?.state).toBe('review')
+    await w.advance(40_000)
+    expect(w.delivered).toHaveLength(2)
+    expect(w.store.mail.thread(thread.id)?.state).toBe('running')
+  })
+
+  it('a thread that cannot be moved when the turn begins does not undo the delivery: the input is in, and it is not sent twice', async () => {
+    const w = world()
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    vi.spyOn(w.mail, 'turnStarted').mockImplementation(() => {
+      throw new Error('the store is busy')
+    })
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { message } = assign(w)
+    await w.advance(2_000)
+    expect(w.delivered).toHaveLength(1)
+    expect(w.store.mail.receiptsOf(message.id)[0]).toMatchObject({ deliveredAt: expect.any(Number) })
+    await w.advance(120_000)
+    expect(w.delivered).toHaveLength(1)
+    vi.restoreAllMocks()
+  })
+
+  it('a receiver that is busy leaves the thread in review: the move is the turn’s beginning', async () => {
+    const w = world()
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    const { thread } = assign(w)
+    await w.advance(2_000)
+    w.mail.update(thread.id, S2, { state: 'review' })
+    w.states.set('s2', { kind: 'busy', why: 'turn' })
+    w.mail.post(thread.id, S1, { kind: 'note', body: 'one more thing' })
+    await w.advance(5_000)
+    expect(w.store.mail.thread(thread.id)?.state).toBe('review')
   })
 
   it('a burst is one delivery, and nothing is delivered twice', async () => {

@@ -37,6 +37,8 @@ export const MailThreadRow = z.object({
   held: z.number().default(0),
   /** Standing blockers */
   blocked: z.number().default(0),
+  /** A turn of this thread is going in its assignee: closing it stops that turn, so the Inbox asks first (3.10) */
+  working: z.boolean().optional(),
   createdAt: z.number(),
   updatedAt: z.number(),
   /** The latest message that is not an event: who, what kind, its first words */
