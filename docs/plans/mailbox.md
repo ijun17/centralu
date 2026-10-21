@@ -112,7 +112,12 @@ Each is argued where the link points, with the alternatives not taken.
 14. ~~Claude's own cross-session channel under `auto`~~: **decided** (owner, 2026-10-20). It is refused for every
     Centralu session (§9.6, slice 0).
 15. **The maximum hold** (§7.10): 5 minutes for questions and the person's mail, 15 for the rest.
-16. **Store step numbers** come from the orchestrator when a slice is briefed. Here they are named M1, M2 and so on.
+16. **Chain at the session or the computer** (§11.9.2). The owner's first comment on #1455 says "a computer or
+    orchestrator already in the chain"; the second counts by session pair. Proposed: new work may not return to a
+    session already in the chain, nor to an orchestrator whose computer's orchestrator is in it. A *different* ordinary
+    session on a computer already in the chain may get new work, as a hop within the 3. Confirm?
+17. **Hop limit 3, and 5 new threads an hour per session pair** (§11.9.2).
+18. **Store step numbers** come from the orchestrator when a slice is briefed. Here they are named M1, M2 and so on.
 
 ## 2. Words
 
@@ -210,7 +215,7 @@ How the state moves:
   - Done with another outcome (failed, stopped, dropped), it stays standing with an `event` saying how the target ended:
     the owner decides.
   - A target swept by retention counts as resolved.
-  - A target on another host resolves when the home's event arrives (slice 4).
+  - A target on another host resolves when the home's event arrives (slice 4b).
 
 The assignee may move the state with `mail update`, an app assignee included (the queue sets `blocked` on attention and
 `done` on merge). The owner and the person may set any state. Every change of state, assignee, blockers and participation
@@ -740,11 +745,11 @@ step allows.
 | `create_session` with a first message | a thread whose `assign` starts it | slice 3 |
 | `ask_project` | a thread across projects (consent unchanged) | slice 3 |
 | Report marks, paused reports, `delegated_turns`, `queued_requests` | thread state, `mail_turns`, held receipts | written in step with mail from slice 3, dropped by slice 9 (contract) |
-| `ChildReports.held` (memory) | receipts | slice 3 for this host's sessions; kept for linked reports until slice 4 |
+| `ChildReports.held` (memory) | receipts | slice 3 for this host's sessions; kept for linked reports until slice 4b |
 | `agentNoteFrame` sent on stdin into a running delegated turn | mail in that thread, in-turn by the hooks (§7.4) | slice 6, on this host and on linked machines (until then a note into a running turn stays as today) |
 | `tellCardRaised` (#676: a card in a delegated turn) | an `event` in T naming the card and `answer_question` / `agent_session answer`. The card itself is unchanged | slice 3 |
-| `untrustedSourceSessionNotification` (the `relayed` branch of `deliver`) | the wake frame | slice 3 for this host's sessions; the relayed branch stays for linked reports until slice 4 |
-| Linked reports, `owed` in the app setting `remote_agents` | the machine's own report in its own store, forwarded (§11) | slice 4, once both sides run it |
+| `untrustedSourceSessionNotification` (the `relayed` branch of `deliver`) | the wake frame | slice 3 for this host's sessions; the relayed branch stays for linked reports until slice 4b |
+| Linked reports, `owed` in the app setting `remote_agents` | the machine's own report in its own store, forwarded (§11) | slice 4b, once both sides run it |
 | A session started by a script or the RPC with a first message, reporting to nobody | its thread's owner is the person: the report lands in the Inbox (open question 3) | slice 3 |
 
 The report's words stay the ones `outcomeOf` writes today ("The assigned work finished", "…paused…", "…stopped
@@ -860,7 +865,8 @@ issues as threads ("14 open issues not on the board"); it never imports them by 
 | Session → a session it started (`start_agent`) or gave work to | always: the existing `agent_session` relation, in the threads of that work |
 | Session → its own owner (the session that gave the work) | replies in that thread |
 | Session → another project's session | through `ask_project`'s consent (unchanged); then replies in that thread |
-| Session → any session, by id | only the orchestrator (as `send_to_session` today), and a coordinator to its members |
+| Session → an ordinary session of its own project | allowed from slice 4a (owner, #1455: direct first, orchestrators are not gatekeepers), under the chain rules and per-pair limits of §11.9.2 |
+| Session → any session, by id | the orchestrator (as `send_to_session` today), and a coordinator to its members |
 | Any session of this host → the orchestrator, a new thread | allowed from slice 3's last PR (owner, #1447): the session asks the orchestrator, as the person's proxy, for a Centralu-wide act. The rules are §9.7 |
 | Session → the person | always (a question, a report, a review request) |
 | Session → an app it has attached | `assign`, `question`, `note`, if the app declares `receive` |
@@ -868,7 +874,7 @@ issues as threads ("14 open issues not on the board"); it never imports them by 
 | App → a thread it is in | `post` |
 | App → any session of its project, or the orchestrator | **not in this design.** It is task-ledger §13.3's piece 3, an owner decision of its own (a card per app, a lower rate to the orchestrator) |
 | Anyone → a participant of a thread | replies in it. Adding a participant needs the right to write to them anyway |
-| A linked machine's session → this host | §11.7 |
+| A session on another computer → a session here | from slice 4b, when this computer lets that one's sessions write to its sessions (§11.9.4); the chain rules apply |
 
 The relation is read when the mail is posted and again when it is delivered (as `stillAllowed` does today). Trust lost in
 between holds the mail.
@@ -1088,10 +1094,10 @@ host may open a thread to the orchestrator**, once the orchestrator has `mail` (
   - **one open request at a time per session:** a second is refused with the first one's thread id.
 - **What it does not grant.** The asking session gets back only what the orchestrator posts in the thread. Read grants,
   presets and tools never move across, and an answer that names another project's files is quoted text, not access.
-- **Linked machines (after slice 4).** A machine's session asking the hub's orchestrator is the reverse direction. It
-  needs the machine's asks switch on (remote-hub §12.7, `linked_machines.asks`), goes through the outbox like any mail
-  (§11.5), and its cards name the machine as well as the session. A machine's own orchestrator stays hidden (remote-hub
-  §12.1), so the hub's orchestrator is the only one a session ever reaches.
+- **Other computers (after slice 4b, owner, #1455).** A session reaches **its own computer's** orchestrator. Orchestrators
+  reach each other as peers, in mail threads (§11.9.1). A session on another computer writes to a session here directly
+  (§11.9.4), and reaches this computer's orchestrator only for what only it can do. Every such thread carries its chain,
+  and the cards name the whole chain (§11.9.2).
 
 **Why not a small `ask_orchestrator` tool first.**
 - It would be one more resident tool on every ordinary session's requests (its description rides in each one), and it
@@ -1236,7 +1242,7 @@ need a merge rule for each field, and every host stores what it never needed.
 
 ### 11.5 Mail in flight across a link
 
-Tables added in slice 4 (additive): `mail_outbox (peer, out_seq, message_id, recipient, forwarded_at)` and
+Tables added in slice 4b (additive): `mail_outbox (peer, out_seq, message_id, recipient, forwarded_at)` and
 `mail_links (peer, pulled_seq, pushed_seq)`.
 
 **Hub → machine** (the hub's orchestrator assigns work to a machine's session):
@@ -1320,7 +1326,7 @@ The Mac is closed and the laptop and server keep working:
   thread-headers mirror on the hub for the board (the same pattern) and the pull after `machine_resync`.
 - **Linked reports go.** The hub no longer infers a machine's turn ends: the machine attributes its own turns (§6) and
   makes the report. #1342 is fixed by the same rule as #1340. `LinkedReports`, the `owed` field of `remote_agents` and `reportGate` are
-  removed in slice 4, once both sides run it.
+  removed in slice 4b, once both sides run it.
 - **Older builds.** A machine without mail answers `host.mail.deliver` with "Unknown method". The hub then keeps today's
   path for it (`sendLinked`, `LinkedReports`) and says on the machine's row that it needs an update. remote-hub §4 already
   aligns versions on connect.
@@ -1332,6 +1338,102 @@ The Mac is closed and the laptop and server keep working:
     `host.mail.outbox` only).
   
   The sender is the link's own machine, never what the message says.
+
+### 11.9 Cooperating computers: peers, chains, declines (owner, 2026-10-21, #1455)
+
+The owner's direction on #1455 (two comments): the person's computers are **peers**, not a hub and its machines. Each
+computer's orchestrator runs its own side, like a department, and several orchestrators are fine. Two things are hard
+requirements: **work never bounces without end**, and **sessions talk directly**. The mailbox already has the shape for
+both: per-host mailboxes (§11.3), and the asker stays the owner (§3.3). What follows is the rules on top.
+
+The link itself (one symmetric link per pair, trust set per direction, shared settings as one synced value) is #1455's
+own work, still a proposal at the link level. The mailbox depends on it only through one question, asked per direction:
+**may this computer's sessions write to sessions here?** (§11.9.4).
+
+#### 11.9.1 Direct first: orchestrators are not gatekeepers
+
+- **An ordinary session writes to an ordinary session directly**, on this computer or another. For example, the session
+  that owns the code writes to the session that runs the tests. Neither has to go through an orchestrator.
+- **An orchestrator is involved only for what only it can do** (starting or directing sessions there, Centralu-wide acts,
+  §9.7), or when the asker does not know whom to ask.
+- **A session reaches its own computer's orchestrator.** Orchestrators reach each other as peers, by mail threads like any
+  other. This replaces "the only orchestrator a session ever reaches is the hub's" (§9.7) and the hidden machine
+  orchestrator of remote-hub §12.1, for mail.
+- **Finding whom to ask** is a read: the other computer's sessions per project, each with its name, state and the subjects
+  of its open threads (as owner or assignee). It goes behind the same trust setting. The reader set's `list_sessions`
+  already lists linked machines' sessions (#984); it gains the thread subjects. If nobody fits, the asker writes to that
+  computer's orchestrator.
+
+#### 11.9.2 A request carries its chain
+
+- **Every thread records its chain:** the list of hops `{ host, address }` from the first asker to this thread's owner.
+  - A thread opened in a turn of another thread (§6's parent, §3.3) takes its parent's chain plus one hop.
+  - A thread opened from nothing has a chain of one, its owner.
+  - Forwarded across a link, the chain travels with the thread's header, and the receiving host keeps it (`mail_threads.chain`).
+- **No new work back into the chain.** Opening a thread (an `assign` or a `question` that starts one) is refused with
+  reason `chain` when:
+  - the receiver's address is already in the chain; or
+  - the receiver is an orchestrator, and that computer's orchestrator is already in the chain.
+  
+  The asker is told which hop it would repeat.
+- **Answers stay on the thread.** Answers, reports, questions back and notes in an existing thread are never new work and
+  never a hop. A child that needs something from its asker asks in the thread.
+- **Forwarding never closes the asker's thread.** An assignee that hands work on (a child thread elsewhere) stays the
+  assignee of its own thread, which stays `running`, waiting on N (§6). It cannot close that thread by forwarding, and
+  it stays responsible for the answer to its own asker.
+- **Hard limits, as a backstop:**
+  - at most **3 hops** per chain;
+  - §9.7's rates applied **per session pair** across computers (at most 5 new threads an hour from one session to
+    another);
+  - the loop guard (§7.9) counted **per session pair**: two sessions whose threads keep reopening each other (follow-ups
+    included) are held after 20 turns an hour between them.
+  
+  When a limit is hit, the post is refused, an `event` goes on the asker's own thread, and the person sees it in the
+  Inbox.
+- **Cards name the whole chain** when a step needs the person: "the Mac's orchestrator, for session X on the Mac, asks the
+  home PC's orchestrator to …" (§9.7's card, with the chain).
+
+#### 11.9.3 Declining, and a disputed decline
+
+- **A cooperating side may decline**, with a one-line reason: `mail close { outcome: "declined", text: <reason> }`, by
+  the assignee only. The thread is `done` with outcome `declined`. Its owner gets a `report` that wakes it, saying:
+  - the reason, as that side's quoted words;
+  - its two options: accept it (route elsewhere, or tell its own person), or dispute it.
+- **A disputed decline goes to the person.** An asker that judges the reason does not hold does not argue in the thread,
+  and does not route around the refusal. It calls `mail dispute { thread, text: <its one-line reason> }`.
+  - Centralu adds an `event` to the done thread carrying both reasons (a done thread takes Centralu's events, §3.3).
+  - It sets `disputed_at`.
+  - It puts the thread in the person's Inbox with both reasons side by side.
+- **Only the person decides.**
+  - **Let the decline stand:** the thread stays `done`.
+  - **Ask again:** a follow-up thread to the same assignee, opened by the person (`follows` the declined one), so the
+    request is now the person's own. A decline of the person's own request goes straight to the person as a question in
+    that thread. There is no second dispute.
+- **No agent overrules a decline.** While a dispute is open, the host refuses new work from the same owner to the same
+  assignee on the same chain, and the asker is told the person is deciding. Routing elsewhere is not refused (the owner
+  allowed it as the answer to "not now"), but the decline report's words say not to use it to get around a refusal the
+  asker disputes.
+
+#### 11.9.4 Who may write across computers
+
+- **Per direction, this computer decides** what the other's sessions may do here, in #1455's trust setting:
+  - nothing;
+  - write to sessions;
+  - ask projects;
+  - start and direct sessions;
+  - full.
+- **Mail needs "write to sessions" or more.** Between the person's own computers it is on; for a server one reaches over
+  ssh, the default stays as today (off in the reverse direction).
+- **Until #1455's setting exists,** slice 4b reads it from today's link:
+  - the connecting side (the hub) may write to the machine's sessions, which is consented when the link was added;
+  - the machine's sessions may write to the hub's when the machine's asks switch is on (remote-hub §12.7).
+  
+  The check is one function, so #1455 replaces its source and nothing else.
+- **Within one computer** the same "direct first" holds:
+  - A session may write to any ordinary session of **its own project**, not only the ones it started or was started by.
+    This widens §9.1's session-to-session rows.
+  - Another project's session is reached through `ask_project`'s consent, unchanged.
+  - The chain rules and the per-pair limits apply here as across computers.
 
 ## 12. Slices
 
@@ -1347,7 +1449,7 @@ the new ones.)
   says in the pull request what it found.
 - A slice that touches the store, the protocol, host processes, trust or security boundaries goes to the deep review
   as well.
-- **Store step numbers** (M1 to M4 here) are given by the orchestrator when it briefs the slice (the store-step rule),
+- **Store step numbers** (M1 to M5 here) are given by the orchestrator when it briefs the slice (the store-step rule),
   never picked by the implementing session.
 
 | # | Slice | Store step | Ships | Removes |
@@ -1356,12 +1458,13 @@ the new ones.)
 | 1 | **Store and model**: tables, ids (§11.4), `MailService` post/read/update, `mailFrame`, retention. No producers. Built as #1362 → #1363 → #1364 | **M1 = v61** (additive): `mail_threads`, `mail_participants`, `mail_blockers`, `mail_messages`, `mail_receipts`, `mail_turns` (§4.1) | nothing visible; the base, with tests (swap: an older build beside the tables) | — |
 | 2 | **Delivery at rest, and the `mail` tool**: first `MailService.partyGone` wired when a session goes to the trash, and a protocol error code `refused` for mail's refusals (slice 1 sends `internal` with `data.reason`); then `MailDelivery` (§5; §7.1–§7.3 for idle, asleep and must-not-wake receivers, the frame always, `origin` stamped; §7.5–§7.7; §7.9), receipts, rates, guards; `mail` for sessions; the Inbox's Mail and the person's replies; the compact line in the conversation. Mail for a receiver in a turn waits for the turn's end until slice 6 | none. The per-session inbound setting (§7.7) and the `mail` notification switch (§10.1, its own key per §4.2) were left out of slice 2 and go with slice 7; the §7.7 defaults apply to every session meanwhile | agents and the person write to each other durably; mail to the person shows in the Inbox | — |
 | 3 | **Reports become mail**, ending with **3.11, sessions asking the orchestrator** (§9.7, #1447; needs 3.3's turn attribution for the cards that name who asked): `start_agent`, `agent_session`, `send_to_session`, `create_session`, `ask_project`; `mail_turns`; parent threads; adoption of old marks (§4.2) | none (M1's tables) | #1340 fixed by the model (#1344 can land before as the patch); script-started sessions report to the person | for this host's sessions: `ChildReports.held`, `untrustedSourceSessionNotification`. Marks kept in step until slice 9 |
-| 4 | **Linked machines** (§11): outbox, `host.mail.*`, thread-headers mirror, pull on resync, reports made on the machine | **M2** (additive): `mail_outbox`, `mail_links`, the hub's thread-headers mirror | mail across machines, reports made where the turn ran; #1342 fixed | `LinkedReports`, the `owed` field of `remote_agents`, `reportGate`, the relayed-report paths (once both sides run it; an older machine keeps today's path, §11.8) |
+| 4a | **Chains, declines and direct mail, on one computer** (§11.9.1–§11.9.3, owner, #1455): every thread's chain; "no new work back into the chain"; 3 hops; per-pair rates and loop guard; `declined` and `mail dispute` with the person's Inbox decision; a session writing to any ordinary session of its own project; cards naming the chain | **M2** (additive): `mail_threads.chain`, `mail_threads.disputed_at` | work cannot bounce, a refusal can be disputed only to the person, sessions talk directly | — |
+| 4b | **Across computers** (§11, §11.9.4): outbox, `host.mail.*`, thread-headers mirror, pull on resync, the chain forwarded with the header, session-to-session mail across computers behind the per-direction check (today's link until #1455's setting), orchestrators as peers, the directory of sessions and thread subjects, reports made on the machine | **M3** (additive): `mail_outbox`, `mail_links`, the hub's thread-headers mirror | mail across machines, reports made where the turn ran; #1342 fixed | `LinkedReports`, the `owed` field of `remote_agents`, `reportGate`, the relayed-report paths (once both sides run it; an older machine keeps today's path, §11.8) |
 | 5 | **The board app moves** (§8.3), with the app runtime it needs: `uses.mail` `post`, `centralu.mail` `caller` / `open` / `post` / `update` / `read` / `threads` / `handled`, the broker calls, §9.5's wake bounds, the permit and its trust-card lines. Queue items and stacks as threads, acknowledgement from receipts | none (`app_runs` gets no new caller kind until slice 7) | the merge queue's news is durable mail, and the app knows what its owner saw | `watch`, `tellSessions`, #1351's list and `ack` (one release later) |
 | 6 | **In-turn delivery** (§7.2, §7.4, §7.10): Claude's in-process hooks as the primary path, Codex `inject_items` after its live check and with the race check, the maximum hold | none | same-thread mail mid-turn without "the user sent"; a child's question does not wait out a long turn | `agentNoteFrame` over stdin, on this host and on linked machines |
 | 7 | **Apps**: `receive` (§7.8), `tasks` scope, the `notify` shim, an app's inbound line, template and `docs/apps.md` | none; `app_runs` stores caller kind `mail`, a value an older build reads (a `docs/stored-shapes.md` row and an older-reader test) | apps take assigns; any app on mail | — |
-| 8 | **Tasks**: the board screen (§10.2), task rules (§8.6), watches (§8.4), GitHub sync in the board app with `tasks` scope (§8.7) | **M3** (additive): `mail_watches` (source, condition, thread, expiry, last fired key) | the task board; #1324's watches; #1173's triggers | #1335 closed |
-| 9 | **Contract**: one release after slices 3, 5 and 7 | **M4** (`breaksOlderReaders: true`): drops `report_marks`, `delegated_turns`, `queued_requests`; deletes the `report_paused:*` settings | — | the old report tables; `notify` / `uses.notices` |
+| 8 | **Tasks**: the board screen (§10.2), task rules (§8.6), watches (§8.4), GitHub sync in the board app with `tasks` scope (§8.7) | **M4** (additive): `mail_watches` (source, condition, thread, expiry, last fired key) | the task board; #1324's watches; #1173's triggers | #1335 closed |
+| 9 | **Contract**: one release after slices 3, 5 and 7 | **M5** (`breaksOlderReaders: true`): drops `report_marks`, `delegated_turns`, `queued_requests`; deletes the `report_paused:*` settings | — | the old report tables; `notify` / `uses.notices` |
 
 ## 13. Not in this design
 
