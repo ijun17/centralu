@@ -29,8 +29,19 @@ export function landedItem(q, sha, subject) {
   return [...q.items].reverse().find((i) => i.state === 'merged' && i.pr === pr && String(i.repo).toLowerCase() === String(config.repository).toLowerCase()) ?? null
 }
 
-/** What failed, in one line: the jobs and the first failing line */
-export const failureLine = (red) => `${red.jobs?.length ? red.jobs.join(', ') : 'CI'} failed at ${short(red.red)}${red.line ? `: ${red.line}` : ''}`
+/**
+ * What kind of failure the guard found (#1435), in words a reader takes in at once: `infrastructure` (a step that sets the
+ * job up, a timeout or a lost runner failed, so nothing of the commit ran) or `test` (a step of the job's own work
+ * failed). Empty for a hunt recorded before the guard told them apart.
+ */
+export const kindText = (red) =>
+  red?.kind === 'infrastructure' ? 'infrastructure failure' : red?.kind === 'setup' ? 'setup failure, after a rerun' : red?.kind === 'test' ? 'test failure' : ''
+
+/** What failed, in one line: the jobs, the kind of failure and the first failing line */
+export const failureLine = (red) => {
+  const kind = kindText(red)
+  return `${red.jobs?.length ? red.jobs.join(', ') : 'CI'} failed at ${short(red.red)}${kind ? ` (${kind})` : ''}${red.line ? `: ${red.line}` : ''}`
+}
 
 /**
  * A release bump (#1259: never reverted): its squash's subject is the bump's title (`chore(release): …`), or it
@@ -103,16 +114,20 @@ export async function revertCommit({ dir, repo, defaultBranch, sha, branch, mess
 /** The issue a red main files: title and body */
 export function redIssue({ red, culprit, how, why, did, ref }) {
   const pr = culprit ? prOfSubject(culprit.subject) : null
-  const title = culprit ? `Main is red since ${pr ? `${ref(config.repository, pr)} ` : `${short(culprit.sha)} `}${culprit.subject.replace(PR_SUFFIX, '')}`.slice(0, 120) : `Main is red at ${short(red.red)}; the culprit was not found`
+  const infra = !culprit && red.kind === 'infrastructure'
+  const title = infra
+    ? `Main is red at ${short(red.red)}: an infrastructure failure, not reverted`
+    : culprit ? `Main is red since ${pr ? `${ref(config.repository, pr)} ` : `${short(culprit.sha)} `}${culprit.subject.replace(PR_SUFFIX, '')}`.slice(0, 120) : `Main is red at ${short(red.red)}; the culprit was not found`
   const body = [
     `## What failed`,
     '',
     `The full tier on main failed at ${red.red}${red.url ? ` (${red.url})` : ''}: ${red.jobs?.length ? red.jobs.join(', ') : 'see the run'}.`,
+    ...(kindText(red) ? ['', `Kind of failure: **${kindText(red)}**${red.kind === 'infrastructure' ? ' (the runner or its setup, not a commit)' : red.kind === 'setup' ? ` (a step that sets the job up failed on both attempts, and a commit since the last green one changed what it installs${red.touched?.length ? `: ${red.touched.join(', ')}` : ''})` : ' (a step of the job ran and failed)'}.${red.step ? ` The step that failed first: "${red.step}".` : ''}`] : []),
     ...(red.line ? ['', '```', red.line, '```'] : []),
     '',
     `## The culprit`,
     '',
-    culprit ? `${culprit.sha} "${culprit.subject}": ${how}.` : `Not found: ${why}`,
+    culprit ? `${culprit.sha} "${culprit.subject}": ${how}.` : infra ? `None: ${why}` : `Not found: ${why}`,
     ...(red.commits?.length ? ['', `Commits since main was last fully green (${short(red.green)}):`, ...red.commits.map((c) => `- ${short(c.sha)} ${c.subject}`)] : []),
     '',
     `## What the merge queue did`,
@@ -195,7 +210,9 @@ export async function actOnRed(dir, found, { now = Date.now(), ref, update, rene
     }
     const text = culprit
       ? `Merge queue: main went red after ${name} (${culprit.subject}) landed: ${failureLine(red)}. Found as ${how}. ${did} ${ref(repo, issue.number)} has the failure; fix it on a new branch and queue it again.`
-      : `Merge queue: main went red at ${short(red.red)} (${failureLine(red)}), and its culprit was not found: ${why} ${ref(repo, issue.number)} has the failure.`
+      : red.kind === 'infrastructure'
+        ? `Merge queue: main went red at ${short(red.red)}, an infrastructure failure, not a commit's (${failureLine(red)}): ${why} ${ref(repo, issue.number)} has the failure.`
+        : `Merge queue: main went red at ${short(red.red)} (${failureLine(red)}), and its culprit was not found: ${why} ${ref(repo, issue.number)} has the failure.`
     pushEvent(q, item ?? { repo, pr: pr ?? null, owner: null }, { kind: 'main-red', text, notify: true, at, data: { issue: issue.number, ...(revert ? { revert: revert.pr } : {}) } })
     if (q.guard) delete q.guard.acting
   })

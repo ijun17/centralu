@@ -835,6 +835,7 @@ const runOf = (w) => ({
   headSha: w.head_sha,
   url: w.html_url ?? null,
   createdAt: w.created_at ?? null,
+  attempt: w.run_attempt ?? 1,
 })
 
 /** The workflow's latest runs, newest first, for one event, commit and branch when given. */

@@ -14,6 +14,47 @@
 // writes "exceeded the maximum execution time" and "lost communication with the server") tell them apart.
 
 const OK = new Set(['success', 'neutral', 'skipped'])
+
+/**
+ * The steps that set a job up, by the names GitHub gives them in `/actions/runs/{id}/jobs` (#1435): provisioning the
+ * runner, checking out, setting up pnpm or Node, a toolchain or a cache, downloading an artifact, installing the
+ * system libraries or a browser. A job that fails in one of these failed before any test or build of the commit ran:
+ * the runner's or a package source's failure (2026-10-21: packages.microsoft.com answered 403 to `playwright install
+ * --with-deps webkit`), not the code's.
+ */
+const SETUP_STEP = [
+  /^Set up job$/i,
+  /^Initialize containers$/i,
+  /^Run actions\/(?:checkout|setup-[\w-]+|cache|download-artifact)@/i,
+  /^Run pnpm\/action-setup@/i,
+  /^Run (?:dtolnay\/rust-toolchain|swatinem\/rust-cache)@/i,
+  /^(?:Install|Set up) .*\b(?:WebKit|Chromium|Firefox|browsers?|Playwright|system dependencies)\b/i,
+]
+/** A step that fetches packages: a setup step only when the failure names the network or a package source */
+const INSTALL_STEP = /^Run (?:pnpm|npm|yarn) (?:install|ci|i)\b/i
+const FETCH_NOTE = /ERR_PNPM_(?:META_)?FETCH_(?!4\d\d)|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up|\bE: Failed to fetch|Could not resolve host|\b(?:502|503|504)\b.{0,40}(?:Bad Gateway|Service Unavailable|Gateway Time-?out)/i
+
+/**
+ * What the text of a failing step says when the network or a package source is what failed (#1450 review): a refused or
+ * forbidden request, a gateway error, a timeout, a name that does not resolve, a mirror out of step. A status counts
+ * only as a status ("403 Forbidden", "HTTP 403", "status 429", "returned error: 502", "responded with 503"), never as a
+ * number inside a version or a path (2.403.1, foo_1.429-1.deb). Not `E: Failed to fetch` alone: apt writes that for a
+ * 404 too, a package the commit asked for that is not there. A false "network" costs an issue while main stays red; a
+ * false "not the network" blames a commit that did nothing.
+ */
+const NETWORK_LINE = [
+  /\b(?:403|429)\s+(?:Forbidden|Too Many)/i,
+  /\b(?:HTTP(?:\/[\d.]+)?|status(?: code)?|returned error:|responded with|error code)\s*:?\s*(?:403|429|5\d\d)\b/i,
+  /\b50[0-4]\s+(?:Internal|Bad Gateway|Service|Gateway)/i,
+  /\bForbidden\b|Too Many Requests|Bad Gateway|Service Unavailable|Gateway Time-?out/i,
+  /ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up/i,
+  /could not (?:resolve|connect|download)|unable to connect|failed to connect|temporary failure|network is unreachable|connection (?:reset|refused|timed out)|timed out|early EOF|RPC failed/i,
+  /Hash Sum mismatch|(?:is not|no longer) signed|Download failure/i,
+]
+export const looksLikeNetworkError = (text) => NETWORK_LINE.some((re) => re.test(String(text ?? '')))
+
+/** Whether a step with this name, failing with these notes, is part of setting the job up, not of its work. */
+export const isSetupStep = (name, notes = '') => SETUP_STEP.some((re) => re.test(String(name ?? ''))) || (INSTALL_STEP.test(String(name ?? '')) && FETCH_NOTE.test(notes))
 /** What GitHub writes on a job (or a step) that ran out of time. */
 // GitHub's own words only: a test's own "timed out in 5000ms" is a test failure
 export const TIMEOUT_NOTE = /has exceeded the maximum execution time of \d+ minutes|The action '[^']*' has timed out after \d+ minutes/i
@@ -31,9 +72,10 @@ export function onFlakyList(name, list = []) {
 
 /**
  * Why one job did not pass, or null when it did (or has not finished). `job`: `{ name, conclusion,
- * steps: [{ name, conclusion }], notes: [annotation messages] }`. Answers `{ real, cause, step? }`;
+ * steps: [{ name, conclusion }], notes: [annotation messages], log?: the failing line of its log }`. Only `notes`, GitHub's
+ * own words, say a timeout or a lost runner; the log's line only tells a failed install step's network error from a lockfile's. Answers `{ real, cause, step? }`;
  * `cause` is `test` (a step failed), `no-step` (failed outside any step it reports), `timeout`,
- * `runner`, `flaky` or `cancelled`.
+ * `runner`, `setup` (its first failed step set the job up, #1435), `flaky` or `cancelled`.
  */
 export function jobFailure(job, { flaky = [] } = {}) {
   if (!job || job.conclusion == null || OK.has(job.conclusion)) return null
@@ -43,6 +85,9 @@ export function jobFailure(job, { flaky = [] } = {}) {
   if (job.conclusion === 'cancelled') return { real: false, cause: 'cancelled' }
   if (onFlakyList(job.name, flaky)) return { real: false, cause: 'flaky' }
   const step = (job.steps ?? []).find((s) => s.conclusion === 'failure')
+  // The first step that failed set the job up (#1435): nothing of the commit ran. A later step that failed after it
+  // (an artifact upload that runs on failure) says nothing more.
+  if (step && isSetupStep(step.name, `${notes}\n${job.log ?? ''}`)) return { real: false, cause: 'setup', step: step.name }
   // Failed, and no reason to call it the runner's: the session's to look at, never rerun blind
   return { real: true, cause: step ? 'test' : 'no-step', step: step?.name ?? null }
 }
@@ -50,7 +95,7 @@ export function jobFailure(job, { flaky = [] } = {}) {
 /**
  * Why a finished run did not pass: `{ real, cause, job, step?, attempt }`, `job` `{ name, id }` the
  * job to name. Real when any job failed for real (a cancelled run included: fail fast); else
- * infrastructure (the first of timeout, runner, flaky, then cancelled). A run with no failed job and
+ * infrastructure (the first of timeout, runner, setup, flaky, then cancelled). A run with no failed job and
  * a conclusion other than cancelled (a workflow file GitHub would not start) is real.
  */
 export function classifyRun(run, jobs, { flaky = [] } = {}) {
@@ -58,7 +103,7 @@ export function classifyRun(run, jobs, { flaky = [] } = {}) {
   const pick = (x) => ({ real: x.f.real, cause: x.f.cause, step: x.f.step ?? null, job: { name: x.j.name, id: x.j.id != null ? String(x.j.id) : null }, attempt: run.attempt ?? 1 })
   const real = seen.find((x) => x.f.real)
   if (real) return pick(real)
-  for (const cause of ['timeout', 'runner', 'flaky', 'cancelled']) {
+  for (const cause of ['timeout', 'runner', 'setup', 'flaky', 'cancelled']) {
     const x = seen.find((y) => y.f.cause === cause)
     if (x) return pick(x)
   }
@@ -72,6 +117,7 @@ export const CAUSE_TEXT = {
   'no-job': 'a run GitHub did not start any job of',
   timeout: 'a job that hit its timeout',
   runner: 'a lost runner',
+  setup: 'a failure in a setup step',
   flaky: 'a job on the known-flaky list',
   cancelled: 'cancelled, with no failed job',
 }

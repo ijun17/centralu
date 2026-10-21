@@ -86,7 +86,8 @@ script rehearses by default and why nothing publishes automatically.
   the full tier runs on main once it has landed. `merge_when_green` still refuses a head whose own run
   was quick. When main's full run fails, the board's main guard finds the culprit among the commits
   since the last fully green one, reverts it in a pull request at the front of the queue (never a
-  release bump) and files an issue. A release still needs a fully green commit: the release's CI gate
+  release bump) and files an issue. A run that failed only in a setup step (a browser install, a
+  checkout, a cache) is rerun once first and never reverted for the runner's failure. A release still needs a fully green commit: the release's CI gate
   reads main's own push run on that exact commit, never a batch's quick run on it (below). To run the full tier
   on a pull request yourself (before queueing UI work, say):
   `gh workflow run build.yml --ref <branch>`. It runs on the branch's head, and its checks show on

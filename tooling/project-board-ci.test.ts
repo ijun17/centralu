@@ -9,6 +9,7 @@ import { ExternalApps, resultText, type AppCaller, type AppRef } from '../packag
 import {
   decideMerge,
   evaluateChecks,
+  failingStepText,
   firstFailure,
   failureLineIndex,
   matchKnownFailure,
@@ -324,6 +325,27 @@ describe("a failed job's log", () => {
     const error = 'failed to bundle project: error running bundle_dmg.sh: `failed to run /tmp/bundle/dmg/bundle_dmg.sh`'
     const log = ['Bundling Centralu_aarch64.dmg', 'Running bundle_dmg.sh', error, '##[error]Process completed with exit code 1.']
     expect(firstFailure(log.map(stamp).join('\n'))).toEqual({ line: null, error })
+  })
+
+  // 2026-10-21 (#1435): the browser install failed on a 403 from a package source; the artifact upload that runs after a
+  // failure then said "No files were found", and that was the line quoted as the first failure
+  it('quotes the first error line of the step that failed first, not the upload that runs after a failure', () => {
+    const log = readFileSync(join(REPO_ROOT, 'tooling/fixtures/ci-log-webkit-install-403.txt'), 'utf8')
+    expect(firstFailure(log)).toEqual({
+      line: null,
+      error: 'E: Failed to fetch https://packages.microsoft.com/ubuntu/24.04/prod/dists/noble/InRelease 403 Forbidden [IP: 13.107.246.40 443]',
+    })
+    // A step that failed with nothing but its exit code says that, and a later step's error is not quoted instead
+    const bare = ['##[group]Run pnpm lint', 'src/a.ts', '##[error]Process completed with exit code 1.', '##[group]Run actions/upload-artifact@x', '##[error]No files were found with the provided path: blob-report.']
+    expect(firstFailure(bare.map(stamp).join('\n'))).toEqual({ line: null, error: 'Process completed with exit code 1.' })
+    // An action that failed before any command ran: its own error
+    expect(firstFailure(['##[group]Run actions/checkout@x', '##[error]fatal: could not read Username'].map(stamp).join('\n'))).toEqual({ line: null, error: 'fatal: could not read Username' })
+  })
+
+  it('gives every line of the step that failed first, warnings included, and nothing of the steps after it', () => {
+    const log = ['##[group]Run pnpm install', 'W: Could not connect to a mirror', 'E: Unable to locate package x', '##[error]Process completed with exit code 1.', '##[group]Run actions/upload-artifact@x', '##[error]No files were found'].map(stamp).join('\n')
+    expect(failingStepText(log)).toBe(['##[group]Run pnpm install', 'W: Could not connect to a mirror', 'E: Unable to locate package x', '##[error]Process completed with exit code 1.'].join('\n'))
+    expect(failingStepText('nothing failed here')).toBe('')
   })
 
   it('keeps a bundling error that follows a failed test marker', () => {

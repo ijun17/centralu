@@ -82,6 +82,7 @@ const checkoutEnv = process.env.PROJECT_BOARD_QUEUE_CHECKOUT
 // job's, → path prefixes ending in "/" or exact paths): the culprit is then the one commit that touches them.
 // PROJECT_BOARD_QUEUE_GUARD ("on" or "off"): for the tests only
 const guardConf = config.queue?.guard ?? {}
+const DEFAULT_SETUP_INPUTS = ['.github/**/*', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', '**/package.json', '**/rust-toolchain*', '**/Cargo.lock']
 const guardOn = process.env.PROJECT_BOARD_QUEUE_GUARD ? process.env.PROJECT_BOARD_QUEUE_GUARD === 'on' : guardConf.enabled !== false && CI.landTier === 'quick'
 const flaky = process.env.PROJECT_BOARD_QUEUE_FLAKY ? JSON.parse(process.env.PROJECT_BOARD_QUEUE_FLAKY) : config.queue?.flakyJobs
 export const QUEUE = {
@@ -100,6 +101,10 @@ export const QUEUE = {
         jobPaths: Object.fromEntries(
           Object.entries(guardConf.jobPaths ?? {}).filter(([k, v]) => k && Array.isArray(v) && v.every((p) => typeof p === 'string' && p)),
         ),
+        // What the steps that set a job up read (#1435): the browser install takes its version from the lockfile, the system
+        // libraries come from build.yml, the toolchain from its pin. A commit that changes one of these may be what fails
+        // setup, twice, so main's red is hunted when one is among the commits since the last green (path patterns as `release.versionFiles`).
+        setupInputs: (Array.isArray(guardConf.setupInputs) ? guardConf.setupInputs : DEFAULT_SETUP_INPUTS).filter((p) => typeof p === 'string' && p),
       }
     : null,
 }

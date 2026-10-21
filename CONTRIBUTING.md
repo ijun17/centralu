@@ -175,7 +175,8 @@ keeper on your change before it is on main: run `pnpm verify` locally anyway, al
 push, and `pnpm e2e` for anything the UI shows. (`merge_when_green` still refuses a head whose own
 run was quick.) Runs on main are never cancelled by a newer push, and the queue holds landing while
 too many of them are unfinished. When main's full run fails, the board's main guard finds the commit
-that broke it among those since main was last fully green, leaving out what it already reverted and
+that broke it among those since main was last fully green (after rerunning once a job that failed in the runner's own setup, a browser install say, and
+only if it fails again inside the test steps; an infrastructure failure is reported and never reverted), leaving out what it already reverted and
 the reverts (the only one, or by running the full tier on candidates: a suspect by the failed job's
 paths is confirmed that way too), reverts it in a pull request queued at the front of the merge queue
 (never a release bump), files an issue with the failure and tells the session that queued it: fix it
