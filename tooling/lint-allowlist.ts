@@ -294,11 +294,19 @@ const runGit = (root: string, ...args: string[]): string | null => {
 
 /**
  * The commit this branch left main at: the merge base of HEAD and `ref`, or HEAD's first parent when HEAD is on main
- * itself (a push to main, compared with what it landed on). null when this checkout cannot tell (no such history).
+ * itself (a push to main, compared with what it landed on); in a merge not committed yet, the merge's own. null when this checkout cannot tell (no such history).
  */
 export function baseCommit(root: string, ref: string): string | null {
   const head = runGit(root, 'rev-parse', 'HEAD')?.trim()
-  const mergeBase = runGit(root, 'merge-base', 'HEAD', ref)?.trim()
+  let mergeBase = runGit(root, 'merge-base', 'HEAD', ref)?.trim()
+  // A merge not committed yet (the merge queue checks the lists of a conflict it resolved before it commits, #1423): the
+  // commit will have both parents, so its merge base with `ref` is the newer of the two parents'. HEAD alone gives the
+  // branch's old fork point, and every line main gained since looks new.
+  const mergeHead = runGit(root, 'rev-parse', '--verify', '--quiet', 'MERGE_HEAD')?.trim()
+  if (mergeHead) {
+    const other = runGit(root, 'merge-base', mergeHead, ref)?.trim()
+    if (other && (!mergeBase || (other !== mergeBase && runGit(root, 'merge-base', '--is-ancestor', mergeBase, other) !== null))) mergeBase = other
+  }
   if (!head || !mergeBase) return null
   return mergeBase === head ? (runGit(root, 'rev-parse', '--verify', '--quiet', 'HEAD^1')?.trim() ?? null) : mergeBase
 }

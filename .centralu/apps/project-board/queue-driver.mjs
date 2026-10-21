@@ -497,8 +497,8 @@ async function onConflict(item, pr, { now, ref, renew, defaultBranch, landed = [
       ? conflictEvent(`${n}: merged ${defaultBranch} into ${pr.headRefName} in a temporary worktree in ${span(st.ms)}; ${st.files.length ? `conflicts in ${listSome(st.files, 8)}` : 'no conflicts'}.`, { step: 'merge', ms: st.ms, files: st.files })
       : st.step === 'regenerate'
         ? conflictEvent(
-            `${n}: regenerated ${listSome(st.files, 8)} with ${st.commands.join(', ')} in ${span(st.ms)}${st.modules === 'linked' ? " (node_modules linked from the queue's checkout, its lockfile being main's: no install)" : ''}; against ${defaultBranch}: ${st.stat.length ? st.stat.map(statLine).join(', ') : 'no change'}.`,
-            { step: 'regenerate', ms: st.ms, files: st.files, commands: st.commands, stat: st.stat, modules: st.modules },
+            `${n}: regenerated ${listSome(st.files, 8)}${st.also ? ` (and ${listSome(st.also, 8)}, which did not conflict)` : ''} with ${st.commands.join(', ')} in ${span(st.ms)}${st.modules === 'linked' ? " (node_modules linked from the queue's checkout, its lockfile being main's: no install)" : ''}; against ${defaultBranch}: ${st.stat.length ? st.stat.map(statLine).join(', ') : 'no change'}.`,
+            { step: 'regenerate', ms: st.ms, files: st.files, ...(st.also ? { also: st.also } : {}), commands: st.commands, stat: st.stat, modules: st.modules },
           )
         : st.step === 'rebase'
           ? conflictEvent(
