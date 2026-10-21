@@ -1,4 +1,5 @@
 import { parseAddress } from './address.js'
+import { COMMAND_CALLS, PLAIN_CALLS } from './frame.js'
 import type { MailPolicy } from './service.js'
 
 /**
@@ -10,7 +11,7 @@ import type { MailPolicy } from './service.js'
  * |---|---|
  * | Anyone → a party already in the thread | always: replies in it (an app and a member too) |
  * | The person, Centralu → a session | the session is here (not in the session archive) |
- * | Anyone → a session whose seat has no `mail` tool | never: the orchestrator, a coordinator, a builder, an app's agent and a session outside a project cannot read it (`no_mailbox`) |
+ * | Anyone → a session whose seat has no `mail` tool | never: a coordinator, a builder, an app's agent and a session outside a project cannot read it (`no_mailbox`). The orchestrator can: it runs `mail` as a command |
  * | A session → the person | always |
  * | A session → a session it started (`askedBy`) | always |
  * | A session → the session that started it | replies in the thread they share (§9.1); never a new thread |
@@ -25,8 +26,10 @@ import type { MailPolicy } from './service.js'
 export type RelationsHost = {
   /** The relations of a session that is here, or undefined for one that is gone or in the session archive */
   session(id: string): { kind: 'worker' | 'orchestrator' | 'coordinator'; askedBy?: string | null; scopeSessionIds?: readonly string[] | null } | undefined
-  /** Whether the session's seat has the `mail` tool (`toolProfileOf` is `reader`): the only seat that can read what a wake points at */
+  /** Whether the session's seat has the `mail` tool (`toolProfileOf` is `reader` or `orchestrator`): the seats that can read what a wake points at */
   mailTool(sessionId: string): boolean
+  /** Whether the session reaches `mail` as a command behind `centralu_run` (the orchestrator), so the calls it is told of are `centralu_run`'s */
+  mailCommand?(sessionId: string): boolean
   /** Whether the session called the app. Nothing records that before the apps' mail API (slices 5 and 7), so nobody did */
   appCalledBy?(appAddress: string, sessionId: string): boolean
   /** Whether a party is in the thread, so that a reply needs no relation. The service passes the thread itself; this reads its participants */
@@ -35,10 +38,14 @@ export type RelationsHost = {
 
 export function mailRelations(host: RelationsHost): MailPolicy {
   return {
+    calls(to) {
+      const t = parseAddress(to)
+      return t?.kind === 'session' && host.mailCommand?.(t.sessionId) ? COMMAND_CALLS : PLAIN_CALLS
+    },
     cannotRead(to) {
       const t = parseAddress(to)
       if (t?.kind !== 'session' || !host.session(t.sessionId)) return null
-      return host.mailTool(t.sessionId) ? null : 'that session cannot read mail: only an ordinary session in a project has the mail tool'
+      return host.mailTool(t.sessionId) ? null : 'that session cannot read mail: only an ordinary session in a project, or the orchestrator, has the mail tool'
     },
     mayWrite(from, to, thread) {
       const f = parseAddress(from)

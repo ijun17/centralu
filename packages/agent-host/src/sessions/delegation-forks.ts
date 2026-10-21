@@ -156,6 +156,7 @@ export class DelegationForks {
         this.host.children.dropDelegation(key, d)
         return { ok: false, error: `The fork "${child.name}" [${child.id}] was made but did not take the request: ${(e as Error).message}` }
       }
+      this.host.children.delegated(callerId, child.id, via, text)
       return { ok: true, key, d, fork: child }
     } finally {
       place.release()

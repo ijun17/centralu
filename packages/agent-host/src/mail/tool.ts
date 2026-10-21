@@ -2,7 +2,7 @@ import { errorMessage } from '@cc/protocol'
 import type { MailRecords, MessageRow, ThreadRow } from '../dev-services/store/mail.js'
 import { MESSAGE_KINDS, THREAD_OUTCOMES, THREAD_STATES } from '../dev-services/store/mail.js'
 import { PERSON } from './address.js'
-import { escapeFrameTags, quoted } from './frame.js'
+import { escapeFrameTags, PLAIN_CALLS, quoted, type MailCalls } from './frame.js'
 import { parseMailId } from './ids.js'
 import { refusalReason, refuse } from './rules.js'
 import { relationWord, type MailService, type PostResult } from './service.js'
@@ -52,21 +52,23 @@ export class MailTool {
   constructor(
     private readonly service: MailService,
     private readonly records: MailRecords,
+    /** How a session makes the calls an answer names: the tool, or `centralu_run` for the orchestrator */
+    private readonly callsOf: (sessionId: string) => MailCalls = () => PLAIN_CALLS,
   ) {}
 
   run(sessionId: string, args: MailToolArgs): MailToolResult {
     try {
-      return { text: this.dispatch(this.service.sessionAddress(sessionId), args) }
+      return { text: this.dispatch(this.service.sessionAddress(sessionId), args, this.callsOf(sessionId)) }
     } catch (e) {
       const reason = refusalReason(e)
       return { text: reason ? `Refused (${reason}): ${errorMessage(e)}` : `The mailbox could not do that: ${errorMessage(e)}`, isError: true }
     }
   }
 
-  private dispatch(me: string, a: MailToolArgs): string {
+  private dispatch(me: string, a: MailToolArgs, calls: MailCalls): string {
     switch (a.action) {
       case 'inbox':
-        return this.inbox(me)
+        return this.inbox(me, calls)
       case 'read':
         return this.read(me, this.need(a.thread, 'thread'))
       case 'handled': {
@@ -89,7 +91,7 @@ export class MailTool {
     return value.trim()
   }
 
-  private inbox(me: string): string {
+  private inbox(me: string, calls: MailCalls): string {
     const rows = this.records.inboxOf(me)
     if (rows.length === 0) return 'Your mailbox is empty.'
     const lines = rows.map(({ thread, unread }) => {
@@ -97,7 +99,7 @@ export class MailTool {
       const next = thread.next ? `; next: ${plain(thread.next)}` : ''
       return `${thread.id} [${thread.state}] ${plain(thread.subject)} (${role}${unread > 0 ? `; ${unread} unread` : ''}${next})`
     })
-    return `${rows.length} thread${rows.length === 1 ? '' : 's'}, unread first. Read one with mail(action="read", thread="…").\n${lines.join('\n')}`
+    return `${rows.length} thread${rows.length === 1 ? '' : 's'}, unread first. Read one with ${calls('read', '…')}.\n${lines.join('\n')}`
   }
 
   private read(me: string, threadId: string): string {

@@ -813,6 +813,7 @@ export type AppAccessToolName = (typeof APP_ACCESS_TOOLS)[number]['name']
 
 /** start_agent and agent_session (#561), which the orchestrator reaches as commands too (#853) */
 export type AgentToolName = (typeof AGENT_TOOLS)[number]['name']
+export type MailToolName = (typeof MAIL_TOOLS)[number]['name']
 
 /**
  * The ceiling for the app-access set, counted like READER_BUDGET_CHARS (full name, description and

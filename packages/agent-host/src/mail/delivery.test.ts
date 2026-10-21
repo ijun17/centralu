@@ -892,6 +892,25 @@ describe('the loop guard (§7.9)', () => {
     expect(w.store.mail.receiptsOf(word.message.id)[0]!.deliveredAt).not.toBeNull()
   })
 
+  it('Centralu’s own report is never held by it: a turn that ends sends one however many the thread has had', async () => {
+    const w = world()
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    const { thread } = assign(w)
+    await w.advance(2_000)
+    w.delivered.length = 0
+    for (let i = 0; i < 22; i++) w.store.mail.startTurn({ sessionId: 'earlier', turnSeq: i + 1, threadId: thread.id, startedBy: 'mail', startedAt: w.clock.t })
+    expect(w.turns.loopSpent(thread.id)).toBe(true)
+    const { message } = w.mail.reportTurn(thread.id, { to: S1, about: S2, outcome: 'finished', body: '[Centralu] The assigned work finished.', then: 'review' })
+    await w.advance(2_000)
+    expect(w.store.mail.receiptsOf(message.id)[0]).toMatchObject({ held: null, deliveredAt: expect.any(Number) })
+    expect(w.delivered.filter((d) => d.sessionId === 's1')).toHaveLength(1)
+    // The same thread's mail from the other session is still held
+    const held = w.mail.post(thread.id, S2, { kind: 'note', body: 'more' })
+    await w.advance(35_000)
+    expect(w.store.mail.receiptsOf(held.message.id).find((r) => r.recipient === S1)).toMatchObject({ held: 'loop' })
+  })
+
   it('turns of another hour do not count, and neither do those of another thread', () => {
     const w = world()
     const a = assign(w)
@@ -1076,7 +1095,7 @@ describe('the Inbox is told when mail is held for the person (§7.6, §7.7, §7.
     await w.advance(2_000)
     expect(toPerson().map((c) => c.threadId)).not.toContain(thread.id)
     w.lates[0]!(new Error('the session closed with it queued'))
-    expect(w.store.mail.heldReceipts().map((r) => r.held)).toEqual(['failed'])
+    expect(w.store.mail.heldReceipts().map((r) => r.held)).toEqual(['uncertain'])
     expect(toPerson().map((c) => c.threadId)).toContain(thread.id)
   })
 

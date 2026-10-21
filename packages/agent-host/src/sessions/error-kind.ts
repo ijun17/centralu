@@ -21,3 +21,13 @@ export function errorKind(message: string): ErrorKind {
   if (REFUSED.test(message)) return 'refused'
   return 'other'
 }
+
+/** The kind as one word, for a fact the mailbox carries to another session (`usage_limit`): the shape of a field of its wake */
+export function errorKindWord(message: string): string {
+  return kindWord(errorKind(message))
+}
+
+/** An error's kind as the one word of that fact */
+export function kindWord(kind: ErrorKind): string {
+  return kind.replace(' ', '_')
+}

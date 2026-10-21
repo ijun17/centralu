@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest'
 import { Store } from '../dev-services/store.js'
 import { sessionAddress } from './address.js'
+import { COMMAND_CALLS, PLAIN_CALLS } from './frame.js'
 import { MailService } from './service.js'
 import { MailTool, type MailToolArgs } from './tool.js'
 import { openBy } from './mail.test-helpers.js'
@@ -24,6 +25,14 @@ function setup() {
 }
 
 describe('the mail tool', () => {
+  it('names the calls its answers point to in the form the caller makes them', () => {
+    const { store, mail } = setup()
+    const tool = new MailTool(mail, store.mail, (id) => (id === 's2' ? COMMAND_CALLS : PLAIN_CALLS))
+    openBy(mail, { by: S1, kind: 'assign', subject: 'Land #12', body: 'please', assignee: S2 })
+    expect(tool.run('s2', { action: 'inbox' }).text).toContain('Read one with centralu_run(command="mail", args={action: "read", thread: "…"}).')
+    expect(tool.run('s1', { action: 'inbox' }).text).toContain('Read one with mail(action="read", thread="…").')
+  })
+
   it('inbox lists the threads a session is in, unread first, with who they are from and how many are unread; an empty one says so', () => {
     const { mail, call } = setup()
     expect(call('s2', { action: 'inbox' })).toEqual({ text: 'Your mailbox is empty.' })

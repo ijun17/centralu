@@ -132,6 +132,17 @@ describe('the mail tool of an ordinary session', () => {
   })
 })
 
+describe('the mail tool of the orchestrator', () => {
+  it('is a command behind centralu_run, answered by the real tool bundle; called bare it is refused naming centralu_run', async () => {
+    const orc = await w.mgr.createSession({ projectId: null, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal', kind: 'orchestrator' })
+    const { thread } = openBy(mail, { by: 'person', kind: 'assign', subject: 'Land #12', body: 'tell me when it lands', assignee: mail.sessionAddress(orc.id) })
+    const run = (args: Record<string, unknown>) => w.mgr.runOrchestratorTool(orc.id, 'centralu_run', { command: 'mail', args })
+    expect((await run({ action: 'inbox' })).text).toContain(thread.id)
+    expect((await run({ action: 'read', thread: thread.id })).text).toContain('> tell me when it lands')
+    await expect(w.mgr.runOrchestratorTool(orc.id, 'mail', { action: 'inbox' })).rejects.toThrow('centralu_run(command="mail"')
+  })
+})
+
 describe('the turn mail starts (§7.9)', () => {
   it('is recorded when the session is woken, and ends with the session’s turn: empty when nothing was called, acted when a tool was', async () => {
     const worker = await create()

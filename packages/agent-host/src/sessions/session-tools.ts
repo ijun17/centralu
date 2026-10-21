@@ -88,6 +88,8 @@ export class SessionTools {
       findApps: async (query) => this.host.requireAppAccess().find(sessionId, query),
       attachApp: async (app) => this.host.requireAppAccess().attach(sessionId, app),
       detachApp: async (app) => this.host.requireAppAccess().detach(sessionId, app),
+      // The mailbox (#1347): it owns the threads `send_to_session` opens (slice 3); it runs the tool as a command
+      mail: (args) => this.host.mailTool(sessionId, args),
     }
   }
 

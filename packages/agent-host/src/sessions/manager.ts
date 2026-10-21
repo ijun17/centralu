@@ -4,11 +4,15 @@ import { windowAround } from './snippet.js'
 import { orchestratorToolsFor, type OrchestratorSeatHost } from './orchestrator-seat.js'
 import { withHubMark } from './hub-preset.js'
 import type { MailSessions, ReceiverState } from '../mail/delivery.js'
+import type { AnswerGiven } from '../mail/delegation.js'
 import type { MailToolArgs } from '../mail/tool.js'
+import type { TurnStart } from '../mail/turns.js'
+import type { ThreadOrigin } from '../dev-services/store/mail.js'
 import { QueuedRequests, type QueuedRequestsHost } from './queued-requests.js'
 import { RoutedCards, type RoutedCardsHost } from './routed-cards.js'
 import { HandoffChildren, type HandoffChildrenHost } from './handoff-children.js'
 import { ChildReports, type ChildReportsHost } from './child-reports.js'
+import type { ReportDraft, ReportedAs } from '../mail/delegation.js'
 import { InterruptionWatch, type InterruptionWatchHost } from './interruption-watch.js'
 import { LaunchRecords, type LaunchRecordsHost } from './launch-records.js'
 import { MergeChecks, type MergeChecksHost } from './merge-checks.js'
@@ -87,6 +91,16 @@ export type MailHooks = {
   sessionEvent?(e: NormalizedEvent, endedTurn: boolean): void
   /** The `mail` tool of a session */
   tool?(sessionId: string, args: MailToolArgs): { text: string; isError?: boolean }
+  /** A session gave another one work by a tool the host delivered it by (§8.1): the mailbox writes it down */
+  delegated?(callerId: string, childId: string, origin: ThreadOrigin, task: string): void
+  /** A session deleted the session that did work it gave (§3.3): a thread whose work was reported is closed */
+  finishedWith?(callerId: string, childId: string): void
+  /** A turn of delegated work ended, or the person took the session over (§6, §8.1): the report goes in the thread, and the mailbox tells the owner when it can */
+  report?(ownerId: string, childId: string, draft: ReportDraft): ReportedAs
+  /** A call returned the answer of work a session gave another, or read where it stands (§8.1): the reports waiting for the caller are settled */
+  answered?(callerId: string, childId: string, how?: AnswerGiven): void
+  /** A turn started that the mailbox did not start: whose it is and the thread it belongs to (§6) */
+  turnStarted?(sessionId: string, turn: TurnStart): void
 }
 
 export type KeptAgent = { sessionId: string; tool: ToolName; process: AgentProcess; version?: string }
@@ -445,6 +459,7 @@ export class SessionManager {
     // The reports owed of children on linked machines (#1038): each settles once its machine says where it stands
     this.delegationFlow.remote.restore()
     this.children.restoreTurns(this.meta, keeperOpts.keptSessions)
+    this.keptAtStart = new Set(keeperOpts.keptSessions ?? [])
     this.children.restoreQueued(this.meta, (r) => r.via === 'ask_project' && !this.queue.pairConsented(r.callerSessionId, this.meta.get(r.sessionId)!))
     if (this.children.queued.size) {
       setTimeout(() => {
@@ -816,8 +831,22 @@ export class SessionManager {
   /** What the mailbox asks of the sessions (#1347): set once by the host, null in a manager that has no mailbox */
   private mailHooks: MailHooks | null = null
 
+  /** The sessions the keeper handed over from the last host, which this one took over mid-run */
+  private keptAtStart: ReadonlySet<string> = new Set()
+
+  /** Whether the session's turn goes on under the keeper from the host before: its mail turn row is not lost (§6) */
+  keptInTurn(sessionId: string): boolean {
+    const m = this.meta.get(sessionId)
+    return this.keptAtStart.has(sessionId) && !!m && inTurn(m.state)
+  }
+
   useMail(hooks: MailHooks): void {
     this.mailHooks = hooks
+    this.children.onDelegated(hooks.delegated ? (callerId, childId, origin, task) => hooks.delegated?.(callerId, childId, origin, task) : undefined)
+    this.children.onFinishedWith(hooks.finishedWith ? (callerId, childId) => hooks.finishedWith?.(callerId, childId) : undefined)
+    this.reports.useMail(hooks.report ? (ownerId, childId, draft) => hooks.report?.(ownerId, childId, draft) ?? 'none' : undefined)
+    this.children.onAnswered(hooks.answered ? (callerId, childId, how) => hooks.answered?.(callerId, childId, how) : undefined)
+    this.children.onTurnStarted(hooks.turnStarted ? (sessionId, turn) => hooks.turnStarted?.(sessionId, turn) : undefined)
   }
 
   /** How the mailbox's delivery reaches a session (#1347): whether it can take mail now, and the mail. See `MailSessions` (mail/delivery.ts) */
@@ -943,6 +972,8 @@ export class SessionManager {
         // An adopted process does not announce its CLI version again; its tag says what it was started from (#297)
         m.agentVersion = k.version ?? null
         const r = await this.resumeSession(k.sessionId, k.process).catch((err: Error) => ({ resumed: false, reason: err.message }))
+        const adopted = r.resumed ? this.handles.get(k.sessionId) : undefined
+        if (adopted) this.adoptedProcesses.add(adopted)
         // A request queued for it under the old host goes in now if its turn ended during the swap (#677)
         if (this.children.queued.has(k.sessionId)) this.queue.scheduleDrain(k.sessionId)
         if (!r.resumed) {
@@ -2108,6 +2139,8 @@ export class SessionManager {
       sweepOrphanHandoffNotes: (...a) => self.handoffNotes.sweepOrphanHandoffNotes(...a),
       tellSession: (...a) => self.reports.tellSession(...a),
       toolProfileOf: (...a) => self.toolProfileOf(...a),
+      canReadMail: (...a) => self.canReadMail(...a),
+      readsMail: (...a) => self.readsMail(...a),
       toolLabel: (...a) => self.toolRegistry.toolLabel(...a),
       get tools() {
         return self.tools
@@ -2211,6 +2244,38 @@ export class SessionManager {
       checkApp: (ref) => this.checkApp(ref),
       createApp: (params) => this.createApp(params),
     })
+  }
+
+  /** The processes this host took over from an earlier one: they were started with the tools that host gave them, which may not include mail */
+  private readonly adoptedProcesses = new WeakSet<SessionHandle>()
+
+  /**
+   * Whether the session's seat has the mail tool (§9.1): `reader` and `orchestrator`. This is the receive rule (who may be written to, and who
+   * is woken by mail), and it does not look at the process: a process the keeper handed over after a swap is still the session's, and
+   * mail is for the session, so it is mailed and woken as before
+   */
+  canReadMail(sessionId: string): boolean {
+    const profile = this.toolProfileOf(sessionId)
+    return profile === 'reader' || profile === 'orchestrator'
+  }
+
+  /**
+   * Whether the process running the session is known to have the mail tool: its seat has it, and the process was not kept from an earlier host
+   * (which keeps the tools it started with, perhaps of a build before mail). Only for choosing how a report is told: a process in doubt is told
+   * by the relayed message, which any process takes. Never for the receive rule
+   */
+  readsMail(sessionId: string): boolean {
+    if (!this.canReadMail(sessionId)) return false
+    const handle = this.handles.get(sessionId)
+    return !(handle && this.adoptedProcesses.has(handle))
+  }
+
+  /** The seat rules of the mailbox's policy (`mailRelations`): who has the mail tool, and who has it as a command of the orchestrator's `centralu_run` */
+  mailSeats(orchestratorHasMailCommand: () => boolean): { mailTool(id: string): boolean; mailCommand(id: string): boolean } {
+    return {
+      mailTool: (id) => this.canReadMail(id),
+      mailCommand: (id) => this.toolProfileOf(id) === 'orchestrator' && orchestratorHasMailCommand(),
+    }
   }
 
   /** `SessionTools.toolProfileOf` (session-tools.ts), kept on the manager for its callers */

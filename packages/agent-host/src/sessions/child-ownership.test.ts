@@ -96,6 +96,137 @@ describe('delegated turns', () => {
   })
 })
 
+describe('the mailbox hears of a turn that starts (docs/plans/mailbox.md §6)', () => {
+  const heard = () => {
+    const turns: { sessionId: string; by: string; added: boolean; cli: boolean; source: string; ownerId?: string }[] = []
+    own.onTurnStarted((sessionId, turn) => void turns.push({ sessionId, ...turn }))
+    return turns
+  }
+
+  it('says whose the turn is, and the caller it is the work of: the one whose turn it is with a delegation going, else the one a report is owed to', () => {
+    const turns = heard()
+    own.ownTurn('a', 'caller', false)
+    own.setDelegation('caller>a', delegation('caller', 'a'))
+    own.noteMessage('a', 'work', false, false)
+    own.turnStarted('a')
+    own.markReport('b', 'owner')
+    own.noteMessage('b', 'work', false, false)
+    own.turnStarted('b')
+    own.noteMessage('c', 'work', false, false)
+    own.turnStarted('c')
+    expect(turns).toEqual([
+      { sessionId: 'a', by: 'work', added: false, cli: false, source: 'caller', ownerId: 'caller' },
+      { sessionId: 'b', by: 'work', added: false, cli: false, source: 'caller', ownerId: 'owner' },
+      { sessionId: 'c', by: 'work', added: false, cli: false, source: 'caller' },
+    ])
+  })
+
+  it('names no caller for a turn given with no report asked for: it is nobody’s work to report', () => {
+    const turns = heard()
+    // The orchestrator’s send_to_session with reportBack false: it owns the turn’s cards, and no mark or delegation is left
+    own.ownTurn('a', 'orchestrator', true)
+    own.noteMessage('a', 'work', false, false)
+    own.turnStarted('a')
+    // And a delegation that has settled is over
+    own.ownTurn('b', 'caller', false)
+    own.setDelegation('caller>b', delegation('caller', 'b', { settled: true }))
+    own.noteMessage('b', 'work', false, false)
+    own.turnStarted('b')
+    expect(turns.map((t) => t.ownerId)).toEqual([undefined, undefined])
+  })
+
+  it('says a turn no message started is the CLI’s own, the person’s message is theirs, and adding to the task is the work’s with the addition', () => {
+    const turns = heard()
+    own.markReport('a', 'owner')
+    own.turnStarted('a')
+    own.noteMessage('b', 'person', false, false)
+    own.turnStarted('b')
+    own.markReport('c', 'owner')
+    own.noteMessage('c', 'person', false, false, true)
+    own.turnStarted('c')
+    expect(turns).toEqual([
+      { sessionId: 'a', by: 'work', added: false, cli: true, source: 'caller', ownerId: 'owner' },
+      { sessionId: 'b', by: 'person', added: false, cli: false, source: 'caller' },
+      { sessionId: 'c', by: 'work', added: true, cli: false, source: 'caller', ownerId: 'owner' },
+    ])
+  })
+
+  it('says what the work’s message was: a caller’s send, a report about another session, an app’s; the first of the messages of one turn says, and a stale one is forgotten', () => {
+    const turns = heard()
+    own.noteMessage('a', 'work', false, false, false, undefined, 'report')
+    own.turnStarted('a')
+    own.noteMessage('b', 'work', false, false, false, undefined, 'app')
+    own.noteMessage('b', 'work', false, false, false, undefined, 'report')
+    own.turnStarted('b')
+    // The person’s message first, then a report: the turn is the work’s, and the report is what started it
+    own.noteMessage('c', 'person', false, false)
+    own.noteMessage('c', 'work', false, false, false, undefined, 'report')
+    own.turnStarted('c')
+    // Into a running turn, a message the tool did not take in is the next turn’s, and keeps what it was
+    own.noteMessage('d', 'work', true, true, false, 'in-1', 'report')
+    own.turnEnded('d', [])
+    own.turnStarted('d')
+    // No message at all: the CLI’s own, never the source of a message long gone
+    own.noteMessage('e', 'work', false, false, false, undefined, 'report')
+    vi.useFakeTimers()
+    vi.advanceTimersByTime(60_000)
+    own.turnStarted('e')
+    // A message that no turn started from goes stale, and its source with it: the next message says what the next turn is
+    own.noteMessage('f', 'work', false, false, false, undefined, 'report')
+    vi.advanceTimersByTime(60_000)
+    own.noteMessage('f', 'work', false, false, false, undefined, 'app')
+    own.turnStarted('f')
+    expect(turns.map((t) => [t.sessionId, t.source, t.cli])).toEqual([
+      ['a', 'report', false],
+      ['b', 'app', false],
+      ['c', 'report', false],
+      ['d', 'report', false],
+      ['e', 'caller', true],
+      ['f', 'app', false],
+    ])
+  })
+
+  it('never breaks the turn when the mailbox fails', () => {
+    own.onTurnStarted(() => {
+      throw new Error('the store is busy')
+    })
+    expect(() => own.turnStarted('a')).not.toThrow()
+    expect(own.starterOf('a')).toEqual({ by: 'work' })
+  })
+})
+
+describe('the mailbox hears that a call returned an answer (docs/plans/mailbox.md §8.1)', () => {
+  it('is told who read what, and never breaks the call when the mailbox fails', () => {
+    const seen: unknown[] = []
+    own.onAnswered((callerId, childId, how) => void seen.push([callerId, childId, how]))
+    own.answered('caller', 'child', { ok: true, text: 'done' })
+    own.answered('caller', 'child')
+    own.answered('same', 'same', { ok: true, text: 'itself' })
+    expect(seen).toEqual([
+      ['caller', 'child', { ok: true, text: 'done' }],
+      ['caller', 'child', undefined],
+    ])
+    own.onAnswered(() => {
+      throw new Error('the store is busy')
+    })
+    expect(() => own.answered('caller', 'child', { ok: true, text: 'x' })).not.toThrow()
+  })
+})
+
+describe('the mailbox hears that a session is done with work it gave', () => {
+  it('is told who deleted whose work, and never breaks the delete when the mailbox fails', () => {
+    const seen: unknown[] = []
+    own.onFinishedWith((callerId, childId) => void seen.push([callerId, childId]))
+    own.finishedWith('caller', 'child')
+    own.finishedWith('same', 'same')
+    expect(seen).toEqual([['caller', 'child']])
+    own.onFinishedWith(() => {
+      throw new Error('the store is busy')
+    })
+    expect(() => own.finishedWith('caller', 'child')).not.toThrow()
+  })
+})
+
 describe('queued requests', () => {
   it('enqueue answers the place; a delivery is marked and ends when its turn starts', () => {
     expect(own.enqueue(request('q1', 'busy', 'a'))).toBe(1)

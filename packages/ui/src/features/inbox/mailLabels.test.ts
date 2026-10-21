@@ -30,6 +30,8 @@ describe('held mail', () => {
     expect(heldLabel('budget')).toMatchObject({ action: 'Resume', kind: 'resume-session' })
     expect(heldLabel('policy')).toMatchObject({ action: 'Release', kind: 'release' })
     expect(heldLabel('uncertain').action).toBe('Send again')
+    // A restart’s hold and a wake the tool failed late: the session may already have run it
+    expect(heldLabel('uncertain').why).toContain('may already have run')
     expect(heldLabel('failed').action).toBe('Retry')
     expect(heldLabel('newer')).toEqual({ why: 'newer', action: 'Send now', kind: 'release' })
   })

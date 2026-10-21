@@ -25,6 +25,9 @@ export type ThreadOutcome = (typeof THREAD_OUTCOMES)[number]
 export const THREAD_ORIGINS = ['mail', 'start_agent', 'agent_session', 'send_to_session', 'create_session', 'ask_project', 'app', 'watch', 'person'] as const
 export type ThreadOrigin = (typeof THREAD_ORIGINS)[number]
 
+/** The origins a session's delegation tools open threads with (§8.1): work one session gave another, written down by the host */
+export const DELEGATION_ORIGINS = ['start_agent', 'agent_session', 'send_to_session', 'create_session', 'ask_project'] as const satisfies readonly ThreadOrigin[]
+
 /** §3.2 */
 export const MESSAGE_KINDS = ['assign', 'question', 'answer', 'report', 'notice', 'note', 'event'] as const
 export type MessageKind = (typeof MESSAGE_KINDS)[number]
@@ -362,6 +365,19 @@ export class MailRecords {
     return row && toThread(row)
   }
 
+  /**
+   * The newest delegation thread `owner` gave `assignee`, whatever its state: where the next instruction of a delegation goes (§8.1).
+   * Only a thread a delegation tool opened: a task one of them gave through `mail` is another task, with its own assign still to arrive
+   */
+  latestBetween(owner: string, assignee: string): ThreadRow | undefined {
+    const row = this.db
+      .prepare<[string, string], ThreadSql>(
+        `SELECT * FROM mail_threads WHERE owner = ? AND assignee = ? AND origin IN (${DELEGATION_ORIGINS.map((o) => `'${o}'`).join(', ')}) ORDER BY created_at DESC, id DESC LIMIT 1`,
+      )
+      .get(owner, assignee)
+    return row && toThread(row)
+  }
+
   /** Threads a party owns or is assigned, optionally in some states: what the party's departure moves (§3.3) */
   threadsOfParty(address: string, role: 'owner' | 'assignee', states?: readonly ThreadRow['state'][]): ThreadRow[] {
     const column = role === 'owner' ? 'owner' : 'assignee'
@@ -571,6 +587,16 @@ export class MailRecords {
     return row && toMessage(row)
   }
 
+  /** The latest message `sender` wrote itself: not one Centralu put in the thread in its name (`relayed`: a session's last response a report carries) */
+  lastWordBy(threadId: string, sender: string): MessageRow | undefined {
+    const row = this.db
+      .prepare<[string, string], MessageSql>(
+        `SELECT * FROM mail_messages WHERE thread_id = ? AND sender = ? AND COALESCE(CASE WHEN json_valid(facts) THEN json_extract(facts, '$.relayed') END, 0) <> 1 ORDER BY seq DESC LIMIT 1`,
+      )
+      .get(threadId, sender)
+    return row && toMessage(row)
+  }
+
   /** The latest message of a thread that is not an event: what the Inbox shows as its last word */
   lastMessageOf(threadId: string): MessageRow | undefined {
     const row = this.db
@@ -772,6 +798,24 @@ export class MailRecords {
       .run(recipient, JSON.stringify(messageIds))
   }
 
+  /** These messages are read and handled for `recipient`: they were put in a thread for the record, and nothing is to wake it for them */
+  markHandledIds(recipient: string, messageIds: readonly string[], now: number): void {
+    this.db
+      .prepare(`UPDATE mail_receipts SET read_at = COALESCE(read_at, ?), handled_at = COALESCE(handled_at, ?) WHERE recipient = ? AND message_id IN (SELECT value FROM json_each(?))`)
+      .run(now, now, recipient, JSON.stringify(messageIds))
+  }
+
+  /** The reports of Centralu in a thread that `recipient` has not read or handled are read and handled: a call gave it the answer they tell of. Returns how many */
+  markReportsHandled(threadId: string, recipient: string, now: number): number {
+    return this.db
+      .prepare(
+        `UPDATE mail_receipts SET read_at = COALESCE(read_at, ?), handled_at = COALESCE(handled_at, ?)
+          WHERE recipient = ? AND (read_at IS NULL OR handled_at IS NULL)
+            AND message_id IN (SELECT id FROM mail_messages WHERE thread_id = ? AND kind = 'report' AND sender = 'centralu')`,
+      )
+      .run(now, now, recipient, threadId).changes
+  }
+
   /** Sets why mail waits for a person's act (`policy`, `failed`, `loop`, `budget`, `uncertain`), or clears it with null */
   setHeld(recipient: string, messageIds: readonly string[], held: string | null): void {
     this.db
@@ -883,9 +927,19 @@ export class MailRecords {
     return row?.n ?? 0
   }
 
+  /** The turns still open: a running host's, or the ones a previous host left */
+  openTurns(): TurnRow[] {
+    return this.db.prepare<[], TurnSql>(`SELECT * FROM mail_turns WHERE ended_at IS NULL`).all().map(toTurn)
+  }
+
   /** Closes the turns still open, as ones a previous host left (they can never end) */
   closeOpenTurns(now: number, outcome: string): void {
     this.db.prepare(`UPDATE mail_turns SET ended_at = ?, outcome = ? WHERE ended_at IS NULL`).run(now, outcome)
+  }
+
+  /** The thread a running turn belongs to, found after it began */
+  setTurnThread(sessionId: string, turnSeq: number, threadId: string): void {
+    this.db.prepare(`UPDATE mail_turns SET thread_id = ? WHERE session_id = ? AND turn_seq = ? AND ended_at IS NULL AND thread_id IS NULL`).run(threadId, sessionId, turnSeq)
   }
 
   endTurn(sessionId: string, turnSeq: number, now: number, outcome: string): void {

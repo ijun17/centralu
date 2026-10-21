@@ -3,6 +3,7 @@ import { asObj, isObj } from '../json-value.js'
 import {
   BLOCKER_KINDS,
   MESSAGE_KINDS,
+  DELEGATION_ORIGINS,
   THREAD_ORIGINS,
   THREAD_OUTCOMES,
   type BlockerKind,
@@ -22,7 +23,7 @@ import {
   type ThreadState,
 } from '../dev-services/store/mail.js'
 import { CENTRALU, PERSON, parseAddress, sessionAddress, type Party } from './address.js'
-import { buildMailFrame, type MailFrameItem } from './frame.js'
+import { buildMailFrame, type MailCalls, type MailFrameItem } from './frame.js'
 import { UlidMaker, messageIdFloor, messageIdOf, parseMailId, threadIdOf } from './ids.js'
 import {
   MAX_BLOCKERS,
@@ -65,6 +66,8 @@ export type MailPolicy = {
    * it cannot make, §9.3). Asked before anything else about the receiver, also for a reply in a thread it is in
    */
   cannotRead?(to: string): string | null
+  /** How `to` makes the calls a wake names: the tool itself, or `centralu_run` for a seat that reaches `mail` as a command */
+  calls?(to: string): MailCalls
 }
 
 export type MailServiceOptions = {
@@ -145,6 +148,53 @@ export type PostResult = {
   duplicate: boolean
   /** The same words, kind and sender in this thread within 10 minutes: not posted again, and this is the first one (§7.9) */
   repeated?: boolean
+}
+
+/** Work a session gave another through a tool the host already delivered it by (start_agent, ask_project, ...): the host writes it down (§8.1) */
+export type DelegationInput = {
+  assignee: string
+  /** The caller's own words for the task (never a frame or the project's instructions the host adds) */
+  task: string
+  origin: ThreadOrigin
+  projectId?: string | null
+}
+
+export type DelegationResult = { thread: ThreadRow; message: MessageRow; /** The task went into the thread this owner already had with this assignee */ continued: boolean }
+
+const isDelegation = (t: ThreadRow): boolean => (DELEGATION_ORIGINS as readonly string[]).includes(t.origin)
+
+/** Said when a task is cut to the longest a session may post: the child has the whole of it, in its conversation */
+const TASK_CUT = "\n[Centralu: cut here. The full task is in the session's conversation (read_session).]"
+
+/**
+ * How a turn of delegated work ended, told by Centralu to the thread's owner (§6, §8.1). The words of `body` are Centralu's own with the
+ * session's last response behind them; `facts` is what the wake carries (an outcome word, the kind of error, how many tasks are left
+ * running, whether the person wrote into the turn)
+ */
+export type TurnReport = {
+  /** The thread's owner, who is told */
+  to: string
+  /** The session whose turn ended */
+  about: string
+  /**
+   * The session's last response, which are its own words: they go in the thread as a message of the session's, in front of the report, and
+   * are read with the tool under what the session is to the reader. They are never in the words of Centralu's report, which stay words
+   * Centralu wrote (#1186). Recorded read and handled for the owner: the report is what wakes it
+   */
+  answer?: string
+  /** One word of Centralu's: finished, failed, limit_reached, network, interrupted, quit, stopped, paused, settled, swapped, took_over */
+  outcome: string
+  body: string
+  error?: string
+  paused?: number
+  personNote?: boolean
+  /**
+   * The owner has been told already, by the call that returned the answer or by the old way of telling: the report is recorded as
+   * delivered, read and handled for it, and nothing wakes it
+   */
+  told?: boolean
+  /** What the thread becomes: `review` when the work was reported (the owner decides), `running` when it paused on its own background work, `dropped` when the person took it over */
+  then: 'review' | 'running' | 'dropped'
 }
 
 export type OpenResult = PostResult & {
@@ -820,6 +870,7 @@ export class MailService {
       const moved: ThreadRow[] = []
       for (const t of this.records.threadsOfParty(address, 'assignee', ['open', 'running', 'review', 'blocked'])) {
         this.records.leaveParticipant(t.id, address, now)
+        const stopped = t.state === 'running' || t.state === 'open'
         // A blocker still stands: the thread stays blocked, with nobody on it
         const to: ThreadState = t.state === 'blocked' ? 'blocked' : 'open'
         moved.push(
@@ -831,6 +882,20 @@ export class MailService {
             'The assignee is gone: the thread is open with no assignee.',
           ),
         )
+        // The owner of work a delegation tool gave is told once, so it does not wait for work that stopped; it reassigns or closes the thread (§3.3, MB's ruling)
+        if (stopped && isDelegation(t) && t.owner !== address && this.party(t.owner).kind === 'session') {
+          this.insertPost(
+            t.id,
+            CENTRALU,
+            'report',
+            '[Centralu] The session that had this work was archived or deleted before it finished: the work stopped, and the thread is open with nobody on it. Reassign it or close it.',
+            { outcome: 'stopped', reason: 'assignee_archived', about: { session: address } },
+            {},
+            now,
+            undefined,
+            [t.owner],
+          )
+        }
       }
       for (const t of this.records.threadsOfParty(address, 'owner', ['open', 'running', 'review', 'blocked'])) {
         this.records.leaveParticipant(t.id, address, now)
@@ -850,6 +915,86 @@ export class MailService {
       }
       return moved
     })
+  }
+
+  /**
+   * A turn of delegated work ended (§6): Centralu's `report` in the thread, for its owner, and the thread's state moves with it: `review`
+   * when the work was reported, `running` when it paused on the session's own background work, and `done` (`dropped`, taken over) when the
+   * person took the session over. A thread that is done, or whose owner is no longer in it, takes no report: the caller says so and the
+   * old way of telling goes on
+   */
+  reportTurn(threadId: string, input: TurnReport): PostResult {
+    return this.run(() => {
+      const now = this.now()
+      const thread = this.mustThread(threadId)
+      this.assertWritable(thread)
+      if (!this.recipients(thread.id, CENTRALU).includes(input.to)) throw refuse('not_participant', `${input.to} is not in thread ${threadId}`)
+      const body = this.checkBody('centralu', input.body, false)
+      const facts: MailFacts = {
+        outcome: input.outcome,
+        about: { session: input.about },
+        ...(input.error ? { error: input.error } : {}),
+        ...(input.paused ? { paused: input.paused } : {}),
+        ...(input.personNote ? { personNote: true } : {}),
+        ...(input.then === 'dropped' ? { takenOver: true } : {}),
+      }
+      // The session's own words, as its message: only the assignee's, so a reader reads them as the session's and not as Centralu's
+      if (input.answer && input.answer.trim() !== '' && thread.assignee === input.about) {
+        const own = this.insertPost(thread.id, input.about, 'report', this.checkBody('session', input.answer, false), { relayed: true }, {}, now, undefined, [input.to])
+        this.records.markDelivered(input.to, [own.id], [own.id], now)
+        this.records.markHandledIds(input.to, [own.id], now)
+      }
+      const message = this.insertPost(thread.id, CENTRALU, 'report', body, facts, {}, now, undefined, [input.to])
+      if (input.told) {
+        this.records.markDelivered(input.to, [message.id], [message.id], now)
+        this.records.markReportsHandled(thread.id, input.to, now)
+      }
+      let after = thread
+      const to: ThreadState = input.then === 'dropped' ? 'done' : input.then
+      if (to !== thread.state && thread.state !== 'blocked') {
+        after = this.moveState(
+          thread,
+          { state: to, stateSince: now, ...(to === 'done' ? { outcome: 'dropped' as const, doneAt: now } : {}) },
+          now,
+          { change: 'state', from: thread.state, to, by: CENTRALU, ...(to === 'done' ? { outcome: 'dropped' } : {}) },
+          `State: ${thread.state} to ${to}.`,
+        )
+        if (to === 'done') this.releaseWaiters(thread.id, 'dropped', now)
+      }
+      return { message, thread: after, duplicate: false }
+    })
+  }
+
+  /** The old way of telling delivered a report the mailbox holds for `to`: delivered, read and handled, so nothing wakes the owner for it (§8.1) */
+  reportTold(threadId: string, to: string, messageId: string): void {
+    this.run(() => {
+      const now = this.now()
+      this.records.markDelivered(to, [messageId], [messageId], now)
+      this.records.markReportsHandled(threadId, to, now)
+    })
+    this.announce(threadId)
+  }
+
+  /**
+   * A call returned the answer a report told of (§8.1): the caller read it, so the reports of this thread waiting for `owner` are read and
+   * handled, and no wake follows for news the call already gave. The threads of the pair that a delegation tool opened; other mail is left
+   */
+  reportsAnswered(owner: string, assignee: string): void {
+    const thread = this.records.latestBetween(owner, assignee)
+    if (!thread) return
+    const n = this.run(() => this.records.markReportsHandled(thread.id, owner, this.now()))
+    if (n > 0) this.announce(thread.id)
+  }
+
+  /**
+   * The owner finishes with work a delegation tool gave: it deletes the session that did it (`agent_session delete`), once it has the
+   * work's report. A thread in `review` is closed `done` (`finished`): the work is over, and the child's going is no event of it. Work
+   * still going is left to `partyGone` when the session goes
+   */
+  ownerFinished(owner: string, assignee: string): void {
+    const thread = this.records.latestBetween(owner, assignee)
+    if (!thread || thread.state !== 'review') return
+    this.update(thread.id, owner, { state: 'done', outcome: 'finished' })
   }
 
   // ── The wake ──
@@ -937,6 +1082,9 @@ export class MailService {
       threads.add(thread.id)
       const about = aboutOf(message.facts)
       const outcome = typeof message.facts.outcome === 'string' ? message.facts.outcome : undefined
+      const error = typeof message.facts.error === 'string' ? message.facts.error : undefined
+      const reason = typeof message.facts.reason === 'string' ? message.facts.reason : undefined
+      const paused = typeof message.facts.paused === 'number' ? message.facts.paused : undefined
       items.push({
         messageId: message.id,
         threadId: thread.id,
@@ -945,11 +1093,15 @@ export class MailService {
         relation: relationWord(recipient, message.sender, thread),
         ...(about ? { about } : {}),
         ...(outcome ? { outcome } : {}),
+        ...(error ? { error } : {}),
+        ...(reason ? { reason } : {}),
+        ...(paused !== undefined ? { paused } : {}),
+        ...(message.facts.personNote === true ? { personNote: true } : {}),
         ...(receipt.lastError === 'maybe_repeated' ? { maybeRepeated: true } : {}),
         ...(down && !pointerOnly ? { inline: message.body } : {}),
       })
     }
-    const frame = buildMailFrame(items)
+    const frame = buildMailFrame(items, undefined, this.policy.calls?.(recipient))
     return { text: frame.text, messageIds: frame.shown, inline: frame.inline, pointed: frame.shown.filter((id) => !frame.inline.includes(id)), wake, immediate, asks, line: items.length === 0 ? '' : deliveryLine(items.length, threads.size, relations), quieted, heldBack, threads: [...threads], workThread: turnStarts ? workThread : null }
   }
 
@@ -973,26 +1125,52 @@ export class MailService {
       }
       const result: { recipient: string; resent: number; held: number }[] = []
       for (const [recipient, messages] of byRecipient) {
-        const again = messages.filter((m) => m.kind === 'notice' || m.sender === CENTRALU)
-        const unsure = messages.filter((m) => !again.includes(m))
-        if (again.length > 0) {
-          this.records.markMaybeRepeated(recipient, again.map((m) => m.id), now)
-          this.changed(again[0]?.threadId ?? '', [recipient])
-        }
-        if (unsure.length > 0) {
-          this.records.markUncertain(recipient, unsure.map((m) => m.id))
-          for (const threadId of new Set(unsure.map((m) => m.threadId))) {
-            const n = unsure.filter((m) => m.threadId === threadId).length
-            this.insertEvent(threadId, 'A delivery may not have arrived when Centralu restarted. It was not sent again.', { change: 'delivery_uncertain', recipient, messages: n }, now)
-          }
-        }
-        result.push({ recipient, resent: again.length, held: unsure.length })
+        result.push({ recipient, ...this.settleUncertain(recipient, messages, 'restart', now) })
       }
       return result
     })
     // What is held `uncertain` waits for the person's Resend or Dismiss: the Inbox is told
     this.announceMessages(left.map((r) => r.messageId))
     return out
+  }
+
+  /**
+   * A wake the tool failed after the wait for it ran out (§7.6.5, the same uncertainty as a restart's): the tool had been counted as
+   * having taken it, and a failure told this late (a session stopped or closed, a turn that took the input among others ended in an
+   * error) does not prove it never ran it. The receipts that wake delivered (matched by `deliveredAt`) are unread and undelivered
+   * again, in the same transaction, and treated as a restart's: held `uncertain` and said in the thread, or, for news that starts no
+   * work, sent again with the note that it may be a repeat. Mail handled, held or delivered again since is left alone
+   */
+  deliveryFailedLate(recipient: string, messageIds: readonly string[], deliveredAt: number): { resent: number; held: number } {
+    const out = this.run(() => {
+      const ids = this.records.undeliver(recipient, messageIds, deliveredAt)
+      const messages = ids.flatMap((id) => this.records.message(id) ?? [])
+      return this.settleUncertain(recipient, messages, 'late', this.now())
+    })
+    this.announceMessages(messageIds)
+    return out
+  }
+
+  /** Mail whose delivery may or may not have gone: news and Centralu's own words go again, the rest is held for the person */
+  private settleUncertain(recipient: string, messages: readonly MessageRow[], cause: 'restart' | 'late', now: number): { resent: number; held: number } {
+    const again = messages.filter((m) => m.kind === 'notice' || m.sender === CENTRALU)
+    const unsure = messages.filter((m) => !again.includes(m))
+    if (again.length > 0) {
+      this.records.markMaybeRepeated(recipient, again.map((m) => m.id), now)
+      this.changed(again[0]?.threadId ?? '', [recipient])
+    }
+    if (unsure.length > 0) {
+      this.records.markUncertain(recipient, unsure.map((m) => m.id))
+      const said =
+        cause === 'restart'
+          ? 'A delivery may not have arrived when Centralu restarted. It was not sent again.'
+          : 'A delivery may have reached the session although its tool then reported a failure. It was not sent again.'
+      for (const threadId of new Set(unsure.map((m) => m.threadId))) {
+        const n = unsure.filter((m) => m.threadId === threadId).length
+        this.insertEvent(threadId, said, { change: 'delivery_uncertain', cause, recipient, messages: n }, now)
+      }
+    }
+    return { resent: again.length, held: unsure.length }
   }
 
   /** The person says send it (or sent it again after a failure): mail held for a reason that needs them goes now (§7.6.5, Inbox: Resend / Retry) */
@@ -1116,6 +1294,69 @@ export class MailService {
       facts,
       dedupeKey: null,
       createdAt: now,
+    })
+  }
+
+  /**
+   * A session gave another one a task by a tool whose delivery the host already made (§8.1, §4.2): the host writes it down, in step
+   * with the old path, which stays the way the task reaches the child. So the `assign` is recorded delivered and read for the
+   * child: nothing wakes it. The thread is the caller's own (it is the owner, the child the assignee) and `running`. A caller's
+   * later instruction to the same child goes into the thread they already have as a `note`; into one that is `done` it opens a new
+   * thread that follows it. No relation or rate check is made, because the delegation's own checks (consent, trust, ceilings) came
+   * first, and this is the host's act, not an agent's post: an agent reaches the mailbox only through `open` and `post`
+   */
+  recordDelegation(caller: string, input: DelegationInput): DelegationResult {
+    const owner = this.party(caller)
+    const assignee = this.party(input.assignee)
+    if (owner.kind !== 'session' || assignee.kind !== 'session') throw refuse('bad_address', 'a delegation is between two sessions of this host')
+    if (caller === input.assignee) throw refuse('bad_value', 'the owner and the assignee of a thread are two parties')
+    if (!THREAD_ORIGINS.includes(input.origin)) throw refuse('bad_value', `unknown origin ${String(input.origin)}`)
+    const limit = bodyLimit('session')
+    const task = input.task.trim()
+    const body = task.length > limit ? task.slice(0, limit - TASK_CUT.length) + TASK_CUT : task
+    if (body === '') throw refuse('empty', 'a task says something')
+    return this.run(() => {
+      const now = this.now()
+      const last = this.records.latestBetween(caller, input.assignee)
+      let thread: ThreadRow
+      let message: MessageRow
+      if (last && last.state !== 'done') {
+        thread = last
+        message = this.insertPost(thread.id, caller, 'note', body, {}, {}, now, undefined, [input.assignee])
+        // The child has it in hand again: the move the old path would have made when its turn started
+        if (thread.state === 'open' || thread.state === 'review') {
+          thread = this.records.updateThread(thread.id, { state: 'running', stateSince: now }, now, true)
+          this.insertEvent(thread.id, `State: ${last.state} to running.`, { change: 'state', from: last.state, to: 'running', by: CENTRALU }, now)
+        }
+      } else {
+        const subject = oneLineText(body.split(/\r\n|[\n\r\u0085\u2028\u2029]/)[0] ?? '', SUBJECT_MAX) || 'A task'
+        const id = threadIdOf(this.host, this.ulids.next(now))
+        this.records.insertThread(
+          {
+            id,
+            home: this.host,
+            projectId: input.projectId ?? null,
+            subject,
+            origin: input.origin,
+            depth: 0,
+            parentId: null,
+            follows: last ? [last.id] : [],
+            state: 'running',
+            owner: caller,
+            assignee: input.assignee,
+            next: null,
+            links: {},
+          },
+          now,
+        )
+        this.records.putParticipant(id, caller, 'owner', now)
+        this.records.putParticipant(id, input.assignee, 'assignee', now)
+        message = this.insertPost(id, caller, 'assign', body, {}, {}, now, undefined, [input.assignee])
+        thread = this.mustThread(id)
+      }
+      // The old path delivered it already: delivered, and read with it
+      this.records.markDelivered(input.assignee, [message.id], [message.id], now)
+      return { thread, message, continued: last !== undefined && last.state !== 'done' }
     })
   }
 

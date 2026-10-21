@@ -114,5 +114,15 @@ export function sweepMail(db: Database.Database, now: number, limits: Partial<Ma
       excess -= ids.length
     }
   }
+
+  // A turn that belongs to no thread (the person's, the CLI's own) is kept only while it runs, and the session's latest ended one stays (§4.1)
+  const dropTurns = db.prepare<[number], { changes: number }>(
+    `DELETE FROM mail_turns WHERE rowid IN (
+       SELECT t.rowid FROM mail_turns t
+        WHERE t.thread_id IS NULL AND t.ended_at IS NOT NULL
+          AND t.turn_seq < COALESCE((SELECT MAX(l.turn_seq) FROM mail_turns l WHERE l.session_id = t.session_id AND l.ended_at IS NOT NULL), 0)
+        LIMIT ?)`,
+  )
+  while (db.transaction(() => dropTurns.run(l.batch).changes).immediate() > 0);
   return result
 }

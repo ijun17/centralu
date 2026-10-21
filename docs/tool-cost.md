@@ -898,7 +898,10 @@ command before answering without it, on Claude and on Codex; the instructions' l
 ## 13. The mailbox's tool (#1347, slice 2)
 
 `mail` is one tool with an action (`inbox`, `read`, `handled`, `send`, `reply`, `update`, `close`; docs/plans/mailbox.md
-§9.3), an ordinary session's alone: the directing seats are not parties of the mailbox. Its definition is 776 characters
+§9.3), an ordinary session's and the orchestrator's: a coordinator, a builder and an app's agent are not parties of the mailbox. The
+orchestrator (slice 3) reaches it as a **rare command** behind `centralu_run` in the `commands` tier, so its resident cost does not
+change (the command list grows by the name `mail`); the wake it gets names `centralu_run(command="mail", args={action: "read", thread: …})`,
+the form a bare call would be refused in (#850). Its definition is 776 characters
 (`MAIL_BUDGET_CHARS` 800), and the reader seat's resident ceiling rises by that: 5,200 → 5,300 on Codex, which loads every
 tool. On Claude it is **deferred** behind tool search, so its every request carries only the name in the tool-search list
 (no change to the 2,560 resident). It is in the profile from the session's start, because the tool list a session starts

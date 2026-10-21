@@ -5,6 +5,11 @@ export type TurnGuardOptions = {
   now?: () => number
   /** Mail-started turns of one thread an hour, with no word from the person, before its mail is held (20) */
   turnsPerHour?: number
+  /**
+   * Whether the session's turn is still going under the keeper, which this host took over from the last one: its open row stays open and
+   * is read back, and its end is recorded here. Without it every open row is closed `lost`
+   */
+  keepOpen?: (sessionId: string) => boolean
   /** Input tokens an hour that a session's mail-started turns may use before its mail stops waking it (200,000) */
   tokensPerHour?: number
   /** Mail-started turns in a row that ended doing nothing before the same (3) */
@@ -13,8 +18,24 @@ export type TurnGuardOptions = {
 
 const HOUR = 60 * 60_000
 
-/** What is known of a turn mail started while it runs */
-type Open = { seq: number; acted: boolean; tokens: number }
+const STARTED_BY: readonly TurnStartedBy[] = ['mail', 'person', 'caller', 'cli', 'report', 'app']
+/** The starter a stored row names; a word this build does not know is read as a caller's, which no guard counts */
+const turnStartedBy = (stored: string): TurnStartedBy => STARTED_BY.find((s) => s === stored) ?? 'caller'
+
+/**
+ * A turn that started, as the mailbox hears of it (docs/plans/mailbox.md §6): whose it is, whether the CLI ran it on its own, and
+ * the caller it is the work of, when there is one
+ */
+export type TurnStart = { by: 'person' | 'work'; added: boolean; cli: boolean; source: TurnSource; ownerId?: string }
+
+/** What a message of the work that starts a turn is: a caller's own, a report or notice about another session (Centralu's), or an app's */
+export type TurnSource = 'caller' | 'report' | 'app'
+
+/** Who started a turn (§6): the mailbox's delivery, the person, a caller's message, or the CLI on its own */
+export type TurnStartedBy = 'mail' | 'person' | 'caller' | 'cli' | 'report' | 'app'
+
+/** What is known of a turn while it runs. The guards count only the turns mail started */
+type Open = { seq: number; acted: boolean; tokens: number; by: TurnStartedBy; threadId: string | null; /** The caller whose work the turn is, when it is */ owner?: string }
 
 /**
  * The guards against mail that feeds on itself (docs/plans/mailbox.md §7.9). Two agents answering each other, or a session that
@@ -31,7 +52,8 @@ type Open = { seq: number; acted: boolean; tokens: number }
  */
 export class MailTurns {
   private readonly now: () => number
-  private readonly o: Required<Omit<TurnGuardOptions, 'now'>>
+  private readonly o: Required<Omit<TurnGuardOptions, 'now' | 'keepOpen'>>
+  private readonly keepOpen: ((sessionId: string) => boolean) | undefined
   private readonly open = new Map<string, Open>()
   private readonly tokens = new Map<string, { at: number; tokens: number }[]>()
   private readonly empty = new Map<string, number>()
@@ -43,12 +65,22 @@ export class MailTurns {
     opts: TurnGuardOptions = {},
   ) {
     this.now = opts.now ?? Date.now
+    this.keepOpen = opts.keepOpen
     this.o = { turnsPerHour: opts.turnsPerHour ?? 20, tokensPerHour: opts.tokensPerHour ?? 200_000, emptyInARow: opts.emptyInARow ?? 3 }
   }
 
-  /** Turns the previous host left open can never end: they are closed, so a thread does not look busy for ever */
+  /**
+   * Turns the previous host left open: the ones of sessions the keeper handed over that are still in their turn go on, and are read back so
+   * their end is recorded (and the thread still looks busy for as long as it is); the rest can never end and are closed `lost`
+   */
   closeStale(): void {
-    this.records.closeOpenTurns(this.now(), 'lost')
+    for (const row of this.records.openTurns()) {
+      if (this.keepOpen?.(row.sessionId) && !this.open.has(row.sessionId)) {
+        this.open.set(row.sessionId, { seq: row.turnSeq, acted: false, tokens: 0, by: turnStartedBy(row.startedBy), threadId: row.threadId })
+      } else {
+        this.records.endTurn(row.sessionId, row.turnSeq, this.now(), 'lost')
+      }
+    }
   }
 
   /** Mail is about to start a turn of the session (`threadId`: the thread whose mail it is, the first when it is several); the turn's number */
@@ -56,8 +88,39 @@ export class MailTurns {
     this.end(sessionId, 'lost')
     const seq = this.records.nextTurnSeq(sessionId)
     this.records.startTurn({ sessionId, turnSeq: seq, threadId, startedBy: 'mail', startedAt: this.now() })
-    this.open.set(sessionId, { seq, acted: false, tokens: 0 })
+    this.open.set(sessionId, { seq, acted: false, tokens: 0, by: 'mail', threadId })
     return seq
+  }
+
+  /**
+   * A turn the mailbox did not start begins (§6): the person typed, a caller's message came, or the CLI ran on after its background
+   * work. Its thread is the one it belongs to, if any, so its end can be reported as that thread's. When a turn mail started is going, this
+   * is that turn (the wake is its first input), and nothing is added. The guards do not count it
+   */
+  beginOther(sessionId: string, by: Exclude<TurnStartedBy, 'mail'>, threadId: string | null, owner?: string): void {
+    if (this.open.get(sessionId)?.by === 'mail') return
+    this.end(sessionId, 'lost')
+    const seq = this.records.nextTurnSeq(sessionId)
+    this.records.startTurn({ sessionId, turnSeq: seq, threadId, startedBy: by, startedAt: this.now() })
+    this.open.set(sessionId, { seq, acted: false, tokens: 0, by, threadId, ...(owner ? { owner } : {}) })
+  }
+
+  /**
+   * The thread of a turn a caller's message started is known only once the delegation is written down, which the host does after the
+   * task went in and the turn began: the running turn of that kind belongs to it from here
+   */
+  attach(sessionId: string, threadId: string, owner: string): void {
+    const turn = this.open.get(sessionId)
+    // Only the turn that is the work of this caller: another caller's, or a turn that has nothing to do with the delegation, is not bound to it
+    if (!turn || turn.threadId !== null || (turn.by !== 'caller' && turn.by !== 'cli') || turn.owner !== owner) return
+    turn.threadId = threadId
+    this.records.setTurnThread(sessionId, turn.seq, threadId)
+  }
+
+  /** The turn that is going in the session, by whom it was started and the thread it belongs to; none when no turn is recorded */
+  current(sessionId: string): { by: TurnStartedBy; threadId: string | null } | undefined {
+    const turn = this.open.get(sessionId)
+    return turn && { by: turn.by, threadId: turn.threadId }
   }
 
   /**
@@ -77,7 +140,7 @@ export class MailTurns {
     const turn = this.open.get(e.sessionId)
     if (!turn) return
     if (e.type === 'tool_call') turn.acted = true
-    if (e.type === 'usage_update' && e.request) // The input that was new to the model: what it read from its cache again each request is not usage this guard is for (a long
+    if (e.type === 'usage_update' && e.request && turn.by === 'mail') // The input that was new to the model: what it read from its cache again each request is not usage this guard is for (a long
       // conversation reads its whole context from cache on every request)
       turn.tokens += e.request.inputTokens + (e.request.cacheCreationTokens ?? 0)
     if (endedTurn) this.end(e.sessionId, turn.acted ? 'acted' : 'empty')
@@ -89,6 +152,8 @@ export class MailTurns {
     this.open.delete(sessionId)
     const now = this.now()
     this.records.endTurn(sessionId, turn.seq, now, outcome)
+    // The budget is mail's: a turn the person or a caller started is theirs to spend
+    if (turn.by !== 'mail') return
     if (turn.tokens > 0) this.tokens.set(sessionId, [...this.recent(sessionId), { at: now, tokens: turn.tokens }])
     if (outcome === 'empty') this.empty.set(sessionId, (this.empty.get(sessionId) ?? 0) + 1)
     else if (outcome === 'acted') this.empty.delete(sessionId)

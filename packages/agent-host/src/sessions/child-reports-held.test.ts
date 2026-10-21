@@ -23,6 +23,27 @@ describe('notices kept for a session that could not be woken', () => {
     await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(2))
   })
 
+  it('tell what delivered them, now or from the kept ones; one told not to keep is not kept, and the mailbox wakes its owner instead', async () => {
+    let fail = true
+    const deliver = vi.fn(async () => { if (fail) throw new Error('the tool would not start') })
+    const reports = world(deliver)
+    const delivered = vi.fn()
+    // Not kept: a report the mailbox holds for a session that reads mail
+    expect(await reports.tellSession('r', 'note', { sessionId: 'c', name: 'C' }, true, 'note', { keep: false, onDelivered: delivered })).toBe(false)
+    reports.deliverHeld('r')
+    await new Promise((r) => setTimeout(r, 10))
+    expect(deliver).toHaveBeenCalledTimes(1)
+    expect(delivered).not.toHaveBeenCalled()
+    // Kept (the default): told when it finally goes in
+    expect(await reports.tellSession('r', 'note', { sessionId: 'c', name: 'C' }, true, 'note', { onDelivered: delivered })).toBe(false)
+    fail = false
+    reports.deliverHeld('r')
+    await vi.waitFor(() => expect(delivered).toHaveBeenCalledTimes(1))
+    // Delivered at once
+    expect(await reports.tellSession('r', 'again', { sessionId: 'c', name: 'C' }, true, 'again', { onDelivered: delivered })).toBe(true)
+    expect(delivered).toHaveBeenCalledTimes(2)
+  })
+
   it('go with the session when it is deleted', async () => {
     let fail = true
     const deliver = vi.fn(async () => { if (fail) throw new Error('the tool would not start') })

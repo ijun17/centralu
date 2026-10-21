@@ -2733,6 +2733,55 @@ took it is not acted on. The tool keeps the wake in its own record as a user tur
 that read the record back leave the wake out (`mail/wake-text.ts`, used by `stripInjectedBlocks`): the `✉` line the delivery
 wrote is its only trace in the conversation, and `read_session` and `recall` never show it as the person's message.
 
+**Delegations are written down beside the old path** (slice 3 of #1347, docs/plans/mailbox.md §8.1). Each place a session gives another work
+(`start_agent`, `agent_session send`, `ask_project`, the orchestrator's `send_to_session` and `create_session` with `reportBack`, a request
+queued behind a busy session, a fork) calls `ChildOwnership.delegated` once the task has been delivered by the old path, and the mailbox
+(`MailService.recordDelegation`) writes it as a thread the caller owns and the child is assigned, `running`, whose first message is the
+caller's own words and is recorded delivered and read, so nothing wakes the child. A later instruction to the same child is a `note` in
+that thread; into a `done` one it opens a thread that follows it. It makes no relation or rate check (the delegation's own checks came
+first), never throws into a delegation, and skips an auto observer's note and a child on a linked machine. Reports do not use these
+threads yet. A delegation thread is moved when a party is archived as any thread is (§3.3, `MailService.partyGone`), never closed by it: the person becomes the owner of a gone caller's, and a gone child's is `open` with nobody on it. Only a delegation tool's thread is reused for the next instruction to the same child.
+
+**Every turn is recorded** (slice 3). `ChildOwnership.turnStarted`, which already says whose a turn is (#1377), tells the mailbox (`turnRecorder`,
+`mail/delegation.ts`), which writes a `mail_turns` row for a turn it did not start: `person` (no thread, unless they chose to add their message to
+the task), `caller` (a message of the session that gave the work: the thread that session owns with this one), or `cli` (the CLI ran on
+after the work's background tasks, again the thread its owner has). A turn a caller's message started begins before the delegation is written
+down, so `attach` gives it the thread then, only if it is the work of that caller. A report or notice about another session starts a
+turn of its own kind (`report`; an app's message is `app`), which is nobody's send. When a turn mail started is going, the other starter
+adds nothing. The guards of §7.9 count only `mail` turns. A turn of no thread is deleted by retention once the session has a later ended
+one. A host that takes over from another keeps the open rows of the sessions the keeper handed over that are still in their turn, reads
+them back and records their end; every other open row is closed `lost` at start.
+
+**A call that returns the answer is the report** (slice 3). When `start_agent`, `agent_session` (`wait`, `status`) or `ask_project` returns what a
+child answered (or that its turn failed), `ChildOwnership.answered` tells the mailbox (`answerRecorder`): the reports it holds for the caller
+are read and handled, and a thread still `running` gets a `report` recorded as told (delivered, read, handled: nothing wakes the owner for
+news a call gave) and goes to `review`. A turn that left the child's own background work running reports nothing yet; the thread stays
+`running` until that report comes. The child's last response is its own words, so it is put in the thread as a message of the child's
+(`relayed`, clipped, read and handled for the caller) in front of the report; Centralu's report holds only what Centralu knows: how the
+turn ended, the id, the kind of an error and `read_session` for more, never the child's text or an error's text (#1186).
+
+**A turn's end is a report in the thread** (slice 3). `ChildReports.deliverReport` builds the old stored report (Centralu's lines, then the
+session's last response) for the old way and hands the mailbox (`reportRecorder`) the words the model may read (#1186): how the turn ended, the id, the kind of an
+error, how to go on, `read_session`. The session's last response is its own words, so the thread keeps it as a message of the session's (`relayed`, read and handled for the
+owner) in front of the report, and the session's name, project, task text and error text are in no message under Centralu's name. It goes into the thread the owner has with the
+session as a `report` from Centralu, with the facts a wake carries (`outcome`, the kind of `error`, how many tasks are left `paused`,
+`personNote`), and the thread moves (`review` when the work was reported, `running` when the turn left the session's own background work
+running, `done`/`dropped` when the person took the session over). An owner that reads mail (an ordinary session or the orchestrator) is told
+by the mailbox's wake and not by the old relayed message, **unless it is in a turn**: until in-turn delivery by hooks (slice 6) a report that waited for the end of
+a long turn would be a regression, so the relayed message goes into the turn as it always did, the report is recorded undelivered, and it is marked
+delivered when that message is (if it cannot be delivered the notice is not kept: the mailbox wakes the owner when its turn ends). The words (the last response) are read with `mail read`. Centralu's own
+messages are never held by the loop guard: a turn that ends sends a report however many a thread has had. An owner that cannot
+(a coordinator, a builder, an app's agent; also, only for how a report is told, a session whose process was kept from an earlier host and keeps the tools it started with: `SessionManager.readsMail`, whose doubt falls back to the relayed message, which any process takes. The mailbox's receive rule stays on the seat, `canReadMail`: such a session is still written to and woken by mail, so its relayed notice is delivered like a busy owner's: settled when it is delivered, and not kept when it fails, because the mailbox wakes it and a notice kept as well would be a second report) is told the old way as before, including keeping a notice it cannot deliver (`ChildReports.held`) until the
+session takes a message; the report is in the thread, and its receipt is marked delivered when `tellSession` delivers it, now or from the kept ones, and nothing
+tries to wake it. The old relayed path (`held`, the relayed notice) goes at the contract (slice 9), or earlier if every seat gets `mail`; the linked path keeps it until slice 4. No thread for the work, or a thread the
+owner closed: the old way tells alone. A thread the session closed itself by mail, saying how it ended, takes no second report.
+
+When the owner deletes the child (`agent_session delete`) after the work was reported, the thread is closed `done`/`finished` before the child goes. When the
+session that had the work is archived or deleted on its own, `partyGone` leaves the thread `open` with nobody on it, and if the work was
+still going (`running` or `open`) its owner gets one `report` (`stopped`, `reason: assignee_archived`) so it does not wait for work that
+stopped; it reassigns or closes the thread. Archiving a child that is at work stops its turn, and that end is not reported as the work's (the report is `closed`
+for a session being archived, `ChildReports` asks `trashing`): the one `assignee_archived` report is all the owner hears. A gone caller's threads are the person's, as ever.
+
 ### 4.7 Remote mode, phase 1: `centralu serve` (#82)
 
 The app can work with a project on another machine (an SSH server, later a laptop). That machine runs its own,

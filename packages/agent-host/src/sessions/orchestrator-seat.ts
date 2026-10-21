@@ -405,7 +405,10 @@ export function orchestratorToolsFor(
             host.children.releaseTurn(info.id, orchestratorId)
             throw e
           }
-          if (reportBack) host.children.markReport(info.id, orchestratorId)
+          if (reportBack) {
+            host.children.markReport(info.id, orchestratorId)
+            host.children.delegated(orchestratorId, info.id, 'create_session', opts.firstMessage)
+          }
         }
         return { ok: true, sessionId: info.id, name: host.meta.get(info.id)?.name ?? info.name }
       } catch (e) {
@@ -628,7 +631,10 @@ export function orchestratorToolsFor(
         const held = host.children.awaitingReport.get(sessionId)
         if (atRest) {
           // Only comes back when asked for — silent by default
-          if (reportBack) host.children.markReport(sessionId, orchestratorId)
+          if (reportBack) {
+            host.children.markReport(sessionId, orchestratorId)
+            host.children.delegated(orchestratorId, sessionId, 'send_to_session', text)
+          }
           // Instructing again without asking for a report clears this orchestrator's earlier request — the
           // new instruction replaces it (#166)
           else if (held === orchestratorId) host.children.clearReport(sessionId)
@@ -640,7 +646,10 @@ export function orchestratorToolsFor(
          * create_session's first message) used to clear it, and the end went unheard. With `reportBack` it adds this
          * seat's mark only where nobody's stands: one mark per session, and taking another's would leave them untold.
          */
-        if (reportBack && held === undefined) host.children.markReport(sessionId, orchestratorId)
+        if (reportBack && held === undefined) {
+          host.children.markReport(sessionId, orchestratorId)
+          host.children.delegated(orchestratorId, sessionId, 'send_to_session', text)
+        }
         const reportTaken = !!reportBack && held !== undefined && held !== orchestratorId
         return { ok: true, busy: { state: 'noted' as const, sessionId, sessionName: target.name, ...(reportTaken ? { reportTaken: true as const } : {}) } }
       } catch (e) {

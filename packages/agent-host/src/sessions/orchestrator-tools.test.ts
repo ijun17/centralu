@@ -34,7 +34,7 @@ import {
   type RareTier,
 } from './orchestrator-tools.js'
 import { TOOL_PROFILES, definitionChars, residentCost, servedDefinitions } from './tool-cost.js'
-import { commandsSentence, namedCall } from './tool-seats.js'
+import { commandsFor, commandsSentence, namedCall } from './tool-seats.js'
 import { movedChildrenNote } from './handoff-children.js'
 
 const DEFERRED_SERVER = { toolDeferral: true, instructionChannel: 'server' as const }
@@ -506,10 +506,27 @@ describe('the mail tool (#1347)', () => {
     const bad = await runOrchestratorTool(tools, 'mail', { action: 'nope' }, { sessionId: 's', profile: 'reader' })
     expect(bad.isError).toBe(true)
     expect(bad.text).toContain('Wrong arguments for mail')
-    for (const profile of ['orchestrator', 'scoped', 'builder', 'human'] as const) {
+    for (const profile of ['scoped', 'builder', 'human'] as const) {
       const r = await runOrchestratorTool(tools, 'mail', { action: 'inbox' }, { sessionId: 's', profile })
       expect(r).toMatchObject({ isError: true, text: 'Not a tool of this session: mail' })
+      expect(commandsFor(profile), profile).not.toContain('mail')
     }
+  })
+
+  it('is one of the orchestrator’s commands: refused bare, naming centralu_run, and run through it (it owns the threads send_to_session opens)', async () => {
+    const seen: unknown[] = []
+    const tools = toolsWith({ mail: (args) => (seen.push(args), { text: 'ok' }) })
+    const orchestrator = { sessionId: 'o', profile: 'orchestrator' } as const
+    expect(commandsFor('orchestrator', 'commands')).toContain('mail')
+    expect(profileAllows('orchestrator', 'mail', 'commands')).toBe(false)
+    const bare = await runOrchestratorTool(tools, 'mail', { action: 'inbox' }, orchestrator)
+    expect(bare).toMatchObject({ isError: true })
+    expect(bare.text).toContain('centralu_run(command="mail"')
+    expect(await runOrchestratorTool(tools, 'centralu_run', { command: 'mail', args: { action: 'inbox' } }, orchestrator)).toEqual({ text: 'ok' })
+    expect(seen).toEqual([{ action: 'inbox' }])
+    // In the other tiers it is a tool of its own seat, still not a coordinator's or a builder's
+    expect(profileAllows('orchestrator', 'mail', 'resident')).toBe(true)
+    expect(callForm('orchestrator', 'mail', { action: 'read', thread: FILL }, 'commands')).toBe('centralu_run(command="mail", args={action: "read", thread: …})')
   })
 
   it('says so when the host has no mailbox', async () => {

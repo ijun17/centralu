@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { MAIL_FRAME_BUDGET, buildMailFrame, escapeFrameTags, mailFrame, type MailFrameItem } from './frame.js'
+import { COMMAND_CALLS, MAIL_FRAME_BUDGET, PLAIN_CALLS, buildMailFrame, escapeFrameTags, mailFrame, type MailFrameItem } from './frame.js'
 
 const T1 = 'hub-aaaaaaaa.t_01J00000000000000000000001'
 const T2 = 'hub-aaaaaaaa.t_01J00000000000000000000002'
@@ -17,6 +17,30 @@ const item = (n: number, over: Partial<MailFrameItem> = {}): MailFrameItem => ({
 })
 
 describe('the wake frame (§7.3)', () => {
+  it('carries a report’s facts as host fields: the error kind, the tasks left, the person’s note; a value of the wrong shape is left out', () => {
+    const good = mailFrame([item(1, { kind: 'report', from: 'centralu', relation: 'Centralu', outcome: 'failed', error: 'rate_limit', paused: 2, personNote: true })])
+    expect(good).toContain('outcome="failed" error="rate_limit" paused="2" personNote="1"')
+    const bad = mailFrame([item(2, { kind: 'report', from: 'centralu', relation: 'Centralu', outcome: 'failed', error: 'a b"><x', paused: 1_234_567 })])
+    expect(bad).toContain('outcome="failed"')
+    expect(bad).not.toContain('error=')
+    expect(bad).not.toContain('paused=')
+  })
+
+  it('names the calls in the form the receiver makes them: the tool, or centralu_run for the orchestrator, which cannot call a command bare (#850)', () => {
+    const items = [item(1, { inline: 'x'.repeat(12_000) })]
+    const plain = mailFrame(items)
+    const run = mailFrame(items, MAIL_FRAME_BUDGET, COMMAND_CALLS)
+    expect(plain).toContain('Read it with mail(action="read", thread="…")')
+    expect(plain).toContain('read the message with mail(action="read")')
+    expect(run).toContain('Read it with centralu_run(command="mail", args={action: "read", thread: "…"})')
+    expect(run).toContain('read the message with centralu_run(command="mail", args={action: "read"})')
+    expect(run).not.toContain('mail(action=')
+    const many = Array.from({ length: 80 }, (_, n) => item(n, { inline: 'y'.repeat(300) }))
+    expect(mailFrame(many, 3_000, COMMAND_CALLS)).toContain('and ')
+    expect(mailFrame(many, 3_000, COMMAND_CALLS)).toContain('more: centralu_run(command="mail", args={action: "inbox"})')
+    expect(mailFrame(many, 3_000, PLAIN_CALLS)).toContain('more: mail(action="inbox")')
+  })
+
   it('is nothing when there is nothing to say', () => {
     expect(mailFrame([])).toBe('')
   })

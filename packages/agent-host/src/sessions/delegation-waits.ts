@@ -4,6 +4,7 @@ import { ASK_WAIT_MS, answerAt, clipAnswer, pathsIn, readableGrants } from './as
 import { taskList } from './background-stops.js'
 import type { Delegation } from './child-ownership.js'
 import type { DelegationHost } from './delegation-host.js'
+import { errorKindWord } from './error-kind.js'
 import { cleanUpDue } from './own-agents.js'
 import { progressOf } from './transcript-view.js'
 import { turnAnswer } from './turn-answer.js'
@@ -67,6 +68,8 @@ export class DelegationWaits {
   /** A child with nothing of the caller's running: its last final answer (#561), and a report it still owes (#721) */
   agentAtRest(child: SessionInfo, callerId?: string): ChildRunResult {
     const notice = callerId ? this.pausedNotice(child.id, callerId) : undefined
+    // It reads the last answer: the reports of that turn the mailbox holds for the caller are read with it
+    if (callerId) this.host.children.answered(callerId, child.id)
     return {
       ok: true,
       state: 'at_rest',
@@ -179,6 +182,7 @@ export class DelegationWaits {
       case 'bound':
         return this.agentWorking(d, !observing, observing)
       case 'failed':
+        if (!observing) this.host.children.answered(d.callerId, d.sessionId, { ok: false, error: errorKindWord(r.error) })
         return { ok: false, error: `"${name()}" [${d.sessionId}] did not finish: ${r.error}. Tell the person, or give it a clearer task.` }
     }
     if (observing) return {
@@ -197,6 +201,8 @@ export class DelegationWaits {
     }
     const notice = this.pausedNotice(d.sessionId, d.callerId)
     const child = this.host.meta.get(d.sessionId)
+    // The call returned the answer: it is the report, unless the turn left the child's own background work running (that report is still to come)
+    this.host.children.answered(d.callerId, d.sessionId, this.host.children.pausedReports.has(d.sessionId) ? undefined : { ok: true, text: r.answer })
     return {
       ok: true,
       state: 'done',
