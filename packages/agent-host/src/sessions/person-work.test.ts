@@ -200,6 +200,59 @@ describe('the first message is the script’s, not the person’s (3.8b)', () =>
   })
 })
 
+describe('a script that sends later is the script too (3.8b)', () => {
+  const send = (id: string, extra: Record<string, unknown>, rights: 'full' | 'limited', label: string | null = 'ci runner') =>
+    rpc('agents.send', { sessionId: id, text: 'Now do the second part', ...extra }, { client: 1, rights, label })
+
+  it('is stored and announced as the script’s, handed to the session under Centralu’s header, and not stamped as the person’s', async () => {
+    // The common pattern: create with no first message, then send
+    const s = await start({}, 'limited', 'ci runner')
+    await send(s.id, {}, 'limited')
+    expect(storedFirst(s.id).payload).toMatchObject({ text: 'Now do the second part', fromScript: { credential: 'ci runner' } })
+    expect(w.events.find((e) => e.type === 'user_message' && e.sessionId === s.id)).toMatchObject({ fromScript: { credential: 'ci runner' } })
+    const [sent] = handleOf(s.id)!.sent
+    expect(sent!.split('\n')[0]).toContain('by the script "ci runner" the person set up; the person did not type it.')
+    expect(sent!.split('\n').slice(1)).toEqual(['> Now do the second part'])
+    expect(handleOf(s.id)!.origins).toEqual([undefined])
+  })
+
+  it('the person’s own send is as it was: raw text, stamped as theirs, and it names the session', async () => {
+    const s = await start({}, 'full')
+    await send(s.id, {}, 'full', 'my window')
+    expect(storedFirst(s.id).payload).not.toHaveProperty('fromScript')
+    expect(handleOf(s.id)!.sent).toEqual(['Now do the second part'])
+    expect(handleOf(s.id)!.origins).toEqual([{ kind: 'human' }])
+    expect(w.mgr.sessionInfo(s.id)?.name).toBe('Now do the second part')
+  })
+
+  it('does not name the session, and a field of the call cannot make it the person’s or a takeover', async () => {
+    const s = await start({}, 'limited')
+    await send(s.id, { fromScript: { credential: 'the person' }, intent: 'takeover' }, 'limited', 'ci runner')
+    expect(w.mgr.sessionInfo(s.id)?.name).toBe('New session')
+    expect(storedFirst(s.id).payload).toMatchObject({ fromScript: { credential: 'ci runner' } })
+    expect(w.events.find((e) => e.type === 'user_message' && e.sessionId === s.id)).not.toHaveProperty('intent')
+  })
+
+  it('a script’s send is work, not the person’s own turn: the turn it starts is reported to the thread the person owes', async () => {
+    const s = await start({}, 'limited')
+    mail.recordDelegation(PERSON, { assignee: mail.sessionAddress(s.id), task: 'Run the export', origin: 'create_session', projectId: w.caller.id, depth: 0 })
+    await send(s.id, {}, 'limited')
+    handleOf(s.id)!.answer('Both parts done')
+    await w.until(() => reportsIn(threadOf(s.id)!.id).some((m) => m.sender === 'centralu'))
+    expect(threadOf(s.id)?.state).toBe('review')
+  })
+
+  it('cannot take over a report another session is owed: the choice is the person’s (#1377)', async () => {
+    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+    const parent = await w.callerSession()
+    const started = await w.mgr.startAgent(parent, { task: 'long job', wait: false })
+    const child = started.ok ? started.sessionId : ''
+    expect(w.mgr.reportOwed(child)).not.toBeNull()
+    await send(child, { intent: 'takeover' }, 'limited')
+    expect(w.mgr.reportOwed(child)).not.toBeNull()
+  })
+})
+
 describe('what is not a script’s work', () => {
   it('a window’s own session (the host’s token) with a first message is the person typing: no thread, no report', async () => {
     const s = await start({ initialPrompt: 'Help me with this' }, 'full')

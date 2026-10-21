@@ -1230,16 +1230,20 @@ export class SessionManager {
     fromPerson = false,
     /** What the person chose for a delegation report the session owes (#1377); "just asking" unless they said */
     intent: 'ask' | 'task' | 'takeover' = 'ask',
+    /** A script wrote it (the limited credential, §8.1): its words are not the person's, nor are its choices — no `origin: human`, no `intent` */
+    fromScript?: { credential: string },
   ): Promise<void> {
     // The person wrote to it (#378): an app's agent session they wrote to becomes theirs
-    if (!from) this.appSessions.noteTookPart(sessionId, 'wrote')
-    await this.deliver(sessionId, text, attachments, from, false, undefined, 'inline', undefined, undefined, undefined, fromPerson && !from, from ? 'ask' : intent)
+    if (!from && !fromScript) this.appSessions.noteTookPart(sessionId, 'wrote')
+    // Only the person chooses what a message means for a report the session owes (#1377)
+    const chosen = from || fromScript ? 'ask' : intent
+    await this.deliver(sessionId, text, attachments, from, false, undefined, 'inline', undefined, undefined, undefined, fromPerson && !from && !fromScript, chosen, fromScript)
     /*
      * A person's message never closes a delegation report (#1377): its turn is theirs, and not reported, or the work's,
      * when they chose to add it. Only "take it over" closes it, and tells the caller once. After the delivery, so a
      * message that did not reach the session takes nothing over.
      */
-    if (!from && intent === 'takeover') {
+    if (!from && chosen === 'takeover') {
       this.children.takeTurn(sessionId)
       void this.reports.personTookOver(sessionId)
     }
