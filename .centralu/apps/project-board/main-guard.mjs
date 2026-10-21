@@ -17,7 +17,7 @@ import { fetchRefs, git, GitError, remoteFor, topLevel } from './git.mjs'
 import { short } from './util.mjs'
 import { pathMatches } from './versions.mjs'
 import { commitWithout, prOfSubject } from './main-revert.mjs'
-import { CAUSE_TEXT, classifyRun } from './run-failure.mjs'
+import { CAUSE_TEXT, classifyRun, looksLikeNetworkError } from './run-failure.mjs'
 
 export const GUARD_MS = Number(process.env.PROJECT_BOARD_QUEUE_GUARD_MS) || 2 * 60_000
 /** A bisect probe whose run has not finished after this long ends the hunt (no runner, a stuck run): an issue says so */
@@ -142,7 +142,7 @@ export async function diagnose(repo, run, { failingLine, flaky = QUEUE.flakyJobs
 /** How many runs' reruns the guard remembers: a run is rerun once, and the newest are the only ones that can come up again */
 const RERUNS_KEPT = 30
 
-/** The reruns by run id with `id` added, the oldest dropped past RERUNS_KEPT (run ids grow, and integer keys keep their order) */
+/** The reruns by run id with `id` added, the oldest dropped past RERUNS_KEPT (keys keep their insertion order: run ids are too large to be array indexes, which JavaScript would sort) */
 export const boundedReruns = (reruns, id, record) => Object.fromEntries(Object.entries({ ...(reruns ?? {}), [id]: record }).slice(-RERUNS_KEPT))
 
 /** What an infrastructure failure was, in words: `"Install WebKit" in e2e (webkit 4/5): a failure in a setup step` */
@@ -266,6 +266,12 @@ export async function guardTick({ q, update, now = Date.now(), renew, act, dir =
           }
         }
       }
+      // The failing line names the network or a package source (a 403, a gateway error, a timeout): an outage that lasted
+      // through the rerun, whatever the commits touched. Hunting would blame one of them for the runner's failure (#1429's harm).
+      if (touched.length && looksLikeNetworkError(base.line))
+        return stop(
+          `it is an infrastructure failure (${what}), and it failed the same way again after one rerun. Its failing line names the network or a package source, so none of the ${touched.length} commit${touched.length === 1 ? '' : 's'} that changed what the setup installs (${touched.map((c) => short(c.sha)).join(', ')}) is blamed. Nothing was reverted: rerun the job by hand, or look at the runner.`,
+        )
       if (!touched.length)
         return stop(
           `it is an infrastructure failure (${what}), and it failed the same way again after one rerun.${

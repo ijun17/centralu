@@ -594,10 +594,12 @@ looked into).
   each other for ever. A rerun that passes leaves no trace. One that fails inside the test steps is a
   **test** failure and goes on as below. One that fails in setup again is the runner's unless a commit
   since the last green one changed what the setup reads (`queue.guard.setupInputs`, path patterns:
-  `.github/**`, the lockfile, every `package.json`, the Rust toolchain pin and `Cargo.lock` by default;
+  `.github/**/*`, the lockfile, every `package.json`, the Rust toolchain pin and `Cargo.lock` by default;
   the browser's version comes from the lockfile and the system libraries from build.yml, and none of that
-  runs on a pull request, only in main's full tier): then it is a **setup failure** and is hunted like a
-  test failure (a probe without the bad commit passes setup). Otherwise it is reported (an issue and a
+  runs on a pull request, only in main's full tier) and the failing line does not name the network or a
+  package source (a 403, a gateway error, a timeout: `looksLikeNetworkError`; an outage that outlasts the
+  rerun would otherwise blame whatever touched a lockfile): then it is a **setup failure** and is hunted
+  like a test failure (a probe without the bad commit passes setup). Otherwise it is reported (an issue and a
   notice, "an infrastructure failure, not a commit's", naming how many commits it checked), never
   reverted, as is a lost runner again. A timeout, or a job on the flaky list, that fails again is looked
   into as a test failure. A rerun GitHub refuses, or has not started in 10 minutes, is reported the same

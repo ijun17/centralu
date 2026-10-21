@@ -3281,19 +3281,55 @@ describe("the main guard does not revert a commit for the runner's own failure (
     expect(guardOnDisk().hunt).toMatchObject({ kind: 'test', outcome: 'reverting' })
   })
 
-  it('hunts a commit that changed what the setup installs when the setup fails again after the rerun, and says it is a setup failure', async () => {
+  /** The install step failing for a reason of the commit's, not the network: a package that is not there */
+  const UNKNOWN_PACKAGE_LOG = [
+    '2026-10-21T04:11:03.5000000Z ##[group]Run pnpm exec playwright install --with-deps webkit',
+    '2026-10-21T04:11:03.5300000Z ##[endgroup]',
+    '2026-10-21T04:11:07.9000000Z E: Unable to locate package libwebkit-nope',
+    '2026-10-21T04:11:08.0000000Z Failed to install browsers',
+    '2026-10-21T04:11:08.0200000Z ##[error]Process completed with exit code 1.',
+    '2026-10-21T04:11:08.6000000Z ##[error]No files were found with the provided path: blob-report. No artifacts will be uploaded.',
+  ].join('\n')
+
+  it('hunts a commit that changed what the setup installs when the setup fails again for a reason that is not the network, and says it is a setup failure', async () => {
     const repo = mainRepo([{ subject: 'build(deps): bump playwright (#81)', files: ['pnpm-lock.yaml'] }])
     const sha = repo.shas[0]!
     seedQueue([{ repo: R, pr: 81, lowers: [], owner: 'tester', author: 'writer', state: 'merged', commit: sha, title: 'build(deps): bump playwright', updatedAt: new Date().toISOString(), reruns: {} }])
-    guardRuntime(repo, redInSetup(repo, sha, { branchRuns: { main: [secondAttempt(sha, 'failure'), mainRun(980, repo.green, 'success')] } }))
+    guardRuntime(repo, { ...redInSetup(repo, sha, { branchRuns: { main: [secondAttempt(sha, 'failure'), mainRun(980, repo.green, 'success')] } }), logs: { '31': UNKNOWN_PACKAGE_LOG } })
     await call('merge_queue')
     await until(() => guardOnDisk().hunt?.outcome === 'reverting' && mainRedNotices().length > 0, 'the revert')
     expect(reruns()).toHaveLength(1)
     expect(writes().filter((w) => w[0] === 'pr-create')).toHaveLength(1)
     expect(issues()[0]!.body).toContain('Kind of failure: **setup failure, after a rerun**')
     expect(issues()[0]!.body).toContain(`changed what it installs: ${sha.slice(0, 7)}`)
+    expect(issues()[0]!.body).toContain('E: Unable to locate package libwebkit-nope')
     expect(mainRedNotices()[0]!.text).toContain('(setup failure, after a rerun)')
     expect(guardOnDisk().hunt).toMatchObject({ kind: 'setup', step: 'Install WebKit', touched: [sha.slice(0, 7)] })
+  })
+
+  it('hunts the commit that changes the apt list in the workflow file: .github is a setup input', async () => {
+    const repo = mainRepo([{ subject: 'ci: add a system library (#81)', files: ['.github/workflows/build.yml'] }])
+    const sha = repo.shas[0]!
+    seedQueue([{ repo: R, pr: 81, lowers: [], owner: 'tester', author: 'writer', state: 'merged', commit: sha, title: 'ci: add a system library', updatedAt: new Date().toISOString(), reruns: {} }])
+    guardRuntime(repo, { ...redInSetup(repo, sha, { branchRuns: { main: [secondAttempt(sha, 'failure'), mainRun(980, repo.green, 'success')] } }), logs: { '31': UNKNOWN_PACKAGE_LOG } })
+    await call('merge_queue')
+    await until(() => guardOnDisk().hunt?.outcome === 'reverting' && mainRedNotices().length > 0, 'the revert')
+    expect(guardOnDisk().hunt).toMatchObject({ kind: 'setup', touched: [sha.slice(0, 7)] })
+  })
+
+  it('blames no commit for a setup failure that names the network, whatever the commits since the last green one changed (the 2026-10-21 403)', async () => {
+    const repo = mainRepo([{ subject: 'build(deps): bump playwright (#81)', files: ['pnpm-lock.yaml'] }])
+    const sha = repo.shas[0]!
+    seedQueue([{ repo: R, pr: 81, lowers: [], owner: 'tester', author: 'writer', state: 'merged', commit: sha, title: 'build(deps): bump playwright', updatedAt: new Date().toISOString(), reruns: {} }])
+    guardRuntime(repo, redInSetup(repo, sha, { branchRuns: { main: [secondAttempt(sha, 'failure'), mainRun(980, repo.green, 'success')] } }))
+    await call('merge_queue')
+    await until(() => issues().length > 0 && mainRedNotices().length > 0, 'the report')
+    await new Promise((r) => setTimeout(r, 1_000))
+    expect(reruns()).toHaveLength(1)
+    expect(writes().filter((w) => w[0] === 'pr-create')).toEqual([])
+    expect(issues()[0]!.title).toBe(`Main is red at ${sha.slice(0, 7)}: an infrastructure failure, not reverted`)
+    expect(issues()[0]!.body).toContain(`Its failing line names the network or a package source, so none of the 1 commit that changed what the setup installs (${sha.slice(0, 7)}) is blamed`)
+    expect(queueOnDisk().items.filter((i: any) => i.state !== 'merged')).toEqual([])
   })
 
   it('does not rerun two overlapping red runs for each other for ever: each run is rerun once, then reported', async () => {

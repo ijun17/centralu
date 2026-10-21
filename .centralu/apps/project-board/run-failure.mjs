@@ -34,6 +34,14 @@ const SETUP_STEP = [
 const INSTALL_STEP = /^Run (?:pnpm|npm|yarn) (?:install|ci|i)\b/i
 const FETCH_NOTE = /ERR_PNPM_(?:META_)?FETCH_(?!4\d\d)|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up|\bE: Failed to fetch|Could not resolve host|\b(?:502|503|504)\b.{0,40}(?:Bad Gateway|Service Unavailable|Gateway Time-?out)/i
 
+/**
+ * What a failing line says when the network or a package source is what failed (#1450 review): a refused or forbidden
+ * request, a gateway error, a timeout, a name that does not resolve. Not `E: Failed to fetch` alone: apt writes that for a
+ * 404 too, a package the commit asked for that is not there.
+ */
+const NETWORK_LINE = /\b(?:403|429)\b|Forbidden|Too Many Requests|\bHTTP[ /]?5\d\d\b|\b50[0-4]\b.{0,40}(?:Error|Unavailable|Gateway|Time-?out)|Bad Gateway|Service Unavailable|ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up|Could not resolve|Temporary failure|Connection (?:reset|refused|timed out)|Network is unreachable|timed out/i
+export const looksLikeNetworkError = (line) => NETWORK_LINE.test(String(line ?? ''))
+
 /** Whether a step with this name, failing with these notes, is part of setting the job up, not of its work. */
 export const isSetupStep = (name, notes = '') => SETUP_STEP.some((re) => re.test(String(name ?? ''))) || (INSTALL_STEP.test(String(name ?? '')) && FETCH_NOTE.test(notes))
 /** What GitHub writes on a job (or a step) that ran out of time. */

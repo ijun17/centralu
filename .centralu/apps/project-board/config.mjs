@@ -82,7 +82,7 @@ const checkoutEnv = process.env.PROJECT_BOARD_QUEUE_CHECKOUT
 // job's, → path prefixes ending in "/" or exact paths): the culprit is then the one commit that touches them.
 // PROJECT_BOARD_QUEUE_GUARD ("on" or "off"): for the tests only
 const guardConf = config.queue?.guard ?? {}
-const DEFAULT_SETUP_INPUTS = ['.github/**', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', '**/package.json', '**/rust-toolchain*', '**/Cargo.lock']
+const DEFAULT_SETUP_INPUTS = ['.github/**/*', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', '**/package.json', '**/rust-toolchain*', '**/Cargo.lock']
 const guardOn = process.env.PROJECT_BOARD_QUEUE_GUARD ? process.env.PROJECT_BOARD_QUEUE_GUARD === 'on' : guardConf.enabled !== false && CI.landTier === 'quick'
 const flaky = process.env.PROJECT_BOARD_QUEUE_FLAKY ? JSON.parse(process.env.PROJECT_BOARD_QUEUE_FLAKY) : config.queue?.flakyJobs
 export const QUEUE = {
