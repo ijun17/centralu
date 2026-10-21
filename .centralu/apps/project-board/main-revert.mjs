@@ -34,7 +34,8 @@ export function landedItem(q, sha, subject) {
  * job up, a timeout or a lost runner failed, so nothing of the commit ran) or `test` (a step of the job's own work
  * failed). Empty for a hunt recorded before the guard told them apart.
  */
-export const kindText = (red) => (red?.kind === 'infrastructure' ? 'infrastructure failure' : red?.kind === 'test' ? 'test failure' : '')
+export const kindText = (red) =>
+  red?.kind === 'infrastructure' ? 'infrastructure failure' : red?.kind === 'setup' ? 'setup failure, after a rerun' : red?.kind === 'test' ? 'test failure' : ''
 
 /** What failed, in one line: the jobs, the kind of failure and the first failing line */
 export const failureLine = (red) => {
@@ -121,7 +122,7 @@ export function redIssue({ red, culprit, how, why, did, ref }) {
     `## What failed`,
     '',
     `The full tier on main failed at ${red.red}${red.url ? ` (${red.url})` : ''}: ${red.jobs?.length ? red.jobs.join(', ') : 'see the run'}.`,
-    ...(kindText(red) ? ['', `Kind of failure: **${kindText(red)}**${red.kind === 'infrastructure' ? ' (the runner or its setup, not a commit)' : ' (a step of the job ran and failed)'}.${red.step ? ` The step that failed first: "${red.step}".` : ''}`] : []),
+    ...(kindText(red) ? ['', `Kind of failure: **${kindText(red)}**${red.kind === 'infrastructure' ? ' (the runner or its setup, not a commit)' : red.kind === 'setup' ? ` (a step that sets the job up failed on both attempts, and a commit since the last green one changed what it installs${red.touched?.length ? `: ${red.touched.join(', ')}` : ''})` : ' (a step of the job ran and failed)'}.${red.step ? ` The step that failed first: "${red.step}".` : ''}`] : []),
     ...(red.line ? ['', '```', red.line, '```'] : []),
     '',
     `## The culprit`,

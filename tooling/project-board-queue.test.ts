@@ -3227,7 +3227,7 @@ describe("the main guard does not revert a commit for the runner's own failure (
     await until(() => guardOnDisk().green === sha, 'main green again')
     await new Promise((r) => setTimeout(r, 1_000))
     expect(reruns()).toEqual([['rerun-failed', '990']])
-    expect(guardOnDisk().rerun).toMatchObject({ run: 990, attempt: 1 })
+    expect(guardOnDisk().reruns[990]).toMatchObject({ attempt: 1 })
     expect(writes().filter((w) => w[0] === 'pr-create')).toEqual([])
     expect(issues()).toEqual([])
     expect(mainRedNotices()).toEqual([])
@@ -3252,7 +3252,8 @@ describe("the main guard does not revert a commit for the runner's own failure (
     // The first error line of the step that failed first, not the artifact upload's "No files were found"
     expect(issues()[0]!.body).toContain(quoted)
     expect(issues()[0]!.body).not.toContain('No files were found')
-    expect(issues()[0]!.body).toContain('failed the same way again after one rerun, so no commit is to blame. Nothing was reverted')
+    expect(issues()[0]!.body).toContain('failed the same way again after one rerun. None of the 1 commit since the last green one changed what the setup installs')
+    expect(issues()[0]!.body).toContain('Nothing was reverted')
     expect(mainRedNotices()).toHaveLength(1)
     expect(mainRedNotices()[0]!.text).toContain('an infrastructure failure, not a commit')
     expect(mainRedNotices()[0]!.text).toContain('e2e (webkit 4/5) failed at')
@@ -3278,6 +3279,74 @@ describe("the main guard does not revert a commit for the runner's own failure (
     expect(mainRedNotices()[0]!.text).toContain('e2e (webkit 4/5) failed at')
     expect(mainRedNotices()[0]!.text).toContain('(test failure)')
     expect(guardOnDisk().hunt).toMatchObject({ kind: 'test', outcome: 'reverting' })
+  })
+
+  it('hunts a commit that changed what the setup installs when the setup fails again after the rerun, and says it is a setup failure', async () => {
+    const repo = mainRepo([{ subject: 'build(deps): bump playwright (#81)', files: ['pnpm-lock.yaml'] }])
+    const sha = repo.shas[0]!
+    seedQueue([{ repo: R, pr: 81, lowers: [], owner: 'tester', author: 'writer', state: 'merged', commit: sha, title: 'build(deps): bump playwright', updatedAt: new Date().toISOString(), reruns: {} }])
+    guardRuntime(repo, redInSetup(repo, sha, { branchRuns: { main: [secondAttempt(sha, 'failure'), mainRun(980, repo.green, 'success')] } }))
+    await call('merge_queue')
+    await until(() => guardOnDisk().hunt?.outcome === 'reverting' && mainRedNotices().length > 0, 'the revert')
+    expect(reruns()).toHaveLength(1)
+    expect(writes().filter((w) => w[0] === 'pr-create')).toHaveLength(1)
+    expect(issues()[0]!.body).toContain('Kind of failure: **setup failure, after a rerun**')
+    expect(issues()[0]!.body).toContain(`changed what it installs: ${sha.slice(0, 7)}`)
+    expect(mainRedNotices()[0]!.text).toContain('(setup failure, after a rerun)')
+    expect(guardOnDisk().hunt).toMatchObject({ kind: 'setup', step: 'Install WebKit', touched: [sha.slice(0, 7)] })
+  })
+
+  it('does not rerun two overlapping red runs for each other for ever: each run is rerun once, then reported', async () => {
+    const repo = mainRepo([
+      { subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] },
+      { subject: 'feat(ui): change 82 (#82)', files: ['packages/ui/src/b.ts'] },
+    ])
+    const [s1, s2] = repo.shas as [string, string]
+    landedBump(s2, 82)
+    const at = (id: number, sha: string, conclusion: string | null, attempt: number) => ({ ...mainRun(id, sha, conclusion), run_attempt: attempt, ...(conclusion === null ? { status: 'in_progress' } : {}) })
+    const green = mainRun(980, repo.green, 'success')
+    // A rerun in progress is not red, so main's newest red is the other run; each rerun then ends red again
+    guardRuntime(repo, {
+      branchRuns: { main: [at(991, s2, 'failure', 1), at(990, s1, 'failure', 1), green] },
+      jobs: { 990: [webkitJob(31)], 991: [webkitJob(32)] },
+      logs: { '31': WEBKIT_INSTALL_LOG, '32': WEBKIT_INSTALL_LOG },
+      on: {
+        'rerun-failed:991': { branchRuns: { main: [at(991, s2, null, 2), at(990, s1, 'failure', 1), green] } },
+        'rerun-failed:990': { branchRuns: { main: [at(991, s2, 'failure', 2), at(990, s1, null, 2), green] } },
+      },
+    })
+    await call('merge_queue')
+    await until(() => issues().length > 0 && mainRedNotices().length > 0, 'the report')
+    await new Promise((r) => setTimeout(r, 1_500))
+    expect(reruns().map((w) => w[1]).sort()).toEqual(['990', '991'])
+    expect(writes().filter((w) => w[0] === 'pr-create')).toEqual([])
+    expect(Object.keys(guardOnDisk().reruns).sort()).toEqual(['990', '991'])
+  })
+
+  it('reports it, and reverts nothing, when GitHub refuses to rerun the job', async () => {
+    const repo = mainRepo([{ subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] }])
+    const sha = repo.shas[0]!
+    seedQueue([{ repo: R, pr: 81, lowers: [], owner: 'tester', author: 'writer', state: 'merged', commit: sha, title: 'feat(ui): change 81', updatedAt: new Date().toISOString(), reruns: {} }])
+    guardRuntime(repo, { ...redInSetup(repo, sha, {}), rerunError: 'Unable to retry this workflow run because it was created over a month ago (HTTP 403)' })
+    await call('merge_queue')
+    await until(() => issues().length > 0 && mainRedNotices().length > 0, 'the report')
+    expect(issues()[0]!.body).toContain('GitHub refused to rerun the job')
+    expect(issues()[0]!.title).toBe(`Main is red at ${sha.slice(0, 7)}: an infrastructure failure, not reverted`)
+    expect(writes().filter((w) => w[0] === 'pr-create')).toEqual([])
+    expect(mainRedNotices()).toHaveLength(1)
+  })
+
+  it('reports it, and reverts nothing, when the rerun has not started after the time allowed', async () => {
+    const repo = mainRepo([{ subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] }])
+    const sha = repo.shas[0]!
+    seedQueue([{ repo: R, pr: 81, lowers: [], owner: 'tester', author: 'writer', state: 'merged', commit: sha, title: 'feat(ui): change 81', updatedAt: new Date().toISOString(), reruns: {} }])
+    // GitHub took the request and showed nothing new: the run stays at its first attempt
+    guardRuntime(repo, redInSetup(repo, sha, {}), { PROJECT_BOARD_QUEUE_RERUN_STUCK_MS: '300' })
+    await call('merge_queue')
+    await until(() => issues().length > 0 && mainRedNotices().length > 0, 'the report')
+    expect(reruns()).toHaveLength(1)
+    expect(issues()[0]!.body).toMatch(/the rerun asked for at \d\d:\d\d UTC has not started/)
+    expect(writes().filter((w) => w[0] === 'pr-create')).toEqual([])
   })
 
   it('hunts a commit when a job that timed out times out again after the rerun: only a failing setup is the runner own failure', async () => {

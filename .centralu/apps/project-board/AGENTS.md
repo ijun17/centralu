@@ -588,18 +588,26 @@ looked into).
   whose failed jobs all failed in a step that sets the job up (the cause `setup`: "Set up job", checkout,
   pnpm and Node setup, rust toolchain and cache, artifact download, the browser and system-library
   installs; `pnpm install` only when its log names the network or a package source), hit their timeout or
-  lost their runner is **infrastructure**: the guard reruns the failed jobs once (`guard.rerun`, written
-  down before it asks) and does nothing else. A rerun that passes leaves no trace. One that fails inside
-  the test steps is a **test** failure and goes on as below; one that fails in setup or loses its runner
-  again is reported (an issue and a notice, "an infrastructure failure, not a commit's"), never reverted;
-  a timeout, or a job on the flaky list, that fails again is looked into as a test failure. A rerun GitHub has
-  not started in 10 minutes is reported the same way. Any real failure in the run makes it a test failure.
-  The notice, the issue ("Kind of failure: **infrastructure failure**" or "**test failure**") and the revert
+  lost their runner is **infrastructure**: the guard reruns the failed jobs once and does nothing else.
+  Reruns are kept **per run id** (`guard.reruns`, written down before it asks, the newest 30): while a
+  rerun is going, `mainVerdict` shows the older red run, and a single slot had two overlapping reds rerun
+  each other for ever. A rerun that passes leaves no trace. One that fails inside the test steps is a
+  **test** failure and goes on as below. One that fails in setup again is the runner's unless a commit
+  since the last green one changed what the setup reads (`queue.guard.setupInputs`, path patterns:
+  `.github/**`, the lockfile, every `package.json`, the Rust toolchain pin and `Cargo.lock` by default;
+  the browser's version comes from the lockfile and the system libraries from build.yml, and none of that
+  runs on a pull request, only in main's full tier): then it is a **setup failure** and is hunted like a
+  test failure (a probe without the bad commit passes setup). Otherwise it is reported (an issue and a
+  notice, "an infrastructure failure, not a commit's", naming how many commits it checked), never
+  reverted, as is a lost runner again. A timeout, or a job on the flaky list, that fails again is looked
+  into as a test failure. A rerun GitHub refuses, or has not started in 10 minutes, is reported the same
+  way. Any real failure in the run makes it a test failure.
+  The notice, the issue ("Kind of failure: **infrastructure failure**", "**setup failure, after a rerun**" or "**test failure**") and the revert
   pull request say which. The line quoted is the first error line of the step that failed first
   (`firstStepError`, ci.mjs): from its `##[group]Run` line to its `##[error]` line, so the report or
   artifact upload that runs after a failure ("No files were found with the provided path") is never the
   quote. The pull request's own runs use the same classifier: a setup failure is rerun once.
-  A bisect probe that fails in setup is still read as red (not covered).
+  A bisect probe that fails in setup is still read as red (#1453).
 - **The candidates** are the first-parent commits after the last green one up to the red one, with
   their subjects and files, read from the checkout (`QUEUE.conflicts.checkout`, fetched into
   `refs/centralu-guard`; the checkout's branches and work are not touched). No green commit known, or

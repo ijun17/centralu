@@ -15,6 +15,7 @@ import { checkRunNotes, createBranch, deleteBranch, dispatchWorkflow, GitHubErro
 import { CI, config, QUEUE } from './config.mjs'
 import { fetchRefs, git, GitError, remoteFor, topLevel } from './git.mjs'
 import { short } from './util.mjs'
+import { pathMatches } from './versions.mjs'
 import { commitWithout, prOfSubject } from './main-revert.mjs'
 import { CAUSE_TEXT, classifyRun } from './run-failure.mjs'
 
@@ -138,6 +139,12 @@ export async function diagnose(repo, run, { failingLine, flaky = QUEUE.flakyJobs
   return { names: failed.map((j) => j.name), first, kind: why.real ? 'test' : 'infrastructure', cause: why.cause, step: why.step }
 }
 
+/** How many runs' reruns the guard remembers: a run is rerun once, and the newest are the only ones that can come up again */
+const RERUNS_KEPT = 30
+
+/** The reruns by run id with `id` added, the oldest dropped past RERUNS_KEPT (run ids grow, and integer keys keep their order) */
+export const boundedReruns = (reruns, id, record) => Object.fromEntries(Object.entries({ ...(reruns ?? {}), [id]: record }).slice(-RERUNS_KEPT))
+
 /** What an infrastructure failure was, in words: `"Install WebKit" in e2e (webkit 4/5): a failure in a setup step` */
 const infraText = (names, step, cause) => `${step ? `step "${step}" in ` : ''}${names.length ? names.join(', ') : 'the run'}: ${CAUSE_TEXT[cause] ?? cause}`
 
@@ -211,13 +218,16 @@ export async function guardTick({ q, update, now = Date.now(), renew, act, dir =
   // A failure in the runner's setup is not the commit's (#1435, 2026-10-21: a package source answered 403 to the browser
   // install and the queue opened a revert of reviewed work): the job is rerun once, and a commit is looked for only if the
   // rerun fails inside the test steps. A second infrastructure failure is reported, never reverted.
+  let listed = null
   if (jobs.kind === 'infrastructure') {
     const what = infraText(jobs.names, jobs.step, jobs.cause)
-    const rerun = g.rerun
-    if (!rerun || rerun.run !== red.id) {
+    // One record per run (`guard.reruns`, by run id), not one for the newest: while a rerun of one red run is going, `mainVerdict`
+    // shows the older red run, and a single slot would have each rerun the other for ever
+    const rerun = g.reruns?.[red.id] ?? (g.rerun?.run === red.id ? g.rerun : null)
+    if (!rerun) {
       if (renew && !renew()) return { did: 'yielded' }
       // Written down before it is asked for, as the queue does: a rerun asked for twice would spend the one it is allowed
-      save({ rerun: { run: red.id, attempt: red.attempt ?? 1, at: base.at, what } })
+      save({ reruns: boundedReruns(g.reruns, red.id, { attempt: red.attempt ?? 1, at: base.at, what }) })
       try {
         await rerunRun(repo, red.id, { failedOnly: true })
       } catch (e) {
@@ -234,16 +244,42 @@ export async function guardTick({ q, update, now = Date.now(), renew, act, dir =
       }
       return stop(`it is an infrastructure failure (${what}), and the rerun asked for at ${rerun.at.slice(11, 16)} UTC has not started. Nothing was reverted.`)
     }
-    // Failed in setup (or lost its runner) again: the runner's, whoever pushed. A timeout, or a job on the flaky list, that
-    // fails again after a rerun may be the commit's (it hangs, it breaks that job only), so it is looked for as a test failure
+    // A timeout, or a job on the flaky list, that fails again after a rerun may be the commit's (it hangs, it breaks that job
+    // only), so it is looked for as a test failure
     if (jobs.cause !== 'setup' && jobs.cause !== 'runner') base.kind = 'test'
-    else return stop(`it is an infrastructure failure (${what}), and it failed the same way again after one rerun, so no commit is to blame. Nothing was reverted: rerun the job by hand, or look at the runner.`)
+    else {
+      // Failed in setup (or lost its runner) again. Setup runs on the runner, but what it installs is a commit's to change:
+      // the browser's version comes from the lockfile, the system libraries from build.yml, and none of that runs on a pull
+      // request (only main's full tier), so a bad bump lands green and fails here on every attempt (#1450 review). When a
+      // commit since the last green one changed such an input, it is hunted; else the runner's, and reported.
+      let touched = []
+      let unlisted = ''
+      if (jobs.cause === 'setup') {
+        if (!greenSha || !dir) unlisted = ' The commits since the last green one could not be listed to see whether one changed what the setup installs.'
+        else {
+          try {
+            ;({ commits: listed } = await commitsBetween(dir, repo, defaultBranch, greenSha, red.headSha))
+            touched = listed.filter((c) => c.files.some((f) => QUEUE.guard.setupInputs.some((p) => pathMatches(p, f))))
+          } catch (e) {
+            if (!(e instanceof GitError)) throw e
+            unlisted = ` The commits since the last green one could not be listed to see whether one changed what the setup installs: ${e.message}`
+          }
+        }
+      }
+      if (!touched.length)
+        return stop(
+          `it is an infrastructure failure (${what}), and it failed the same way again after one rerun.${
+            listed ? ` None of the ${listed.length} commit${listed.length === 1 ? '' : 's'} since the last green one changed what the setup installs (queue.guard.setupInputs), so none is blamed.` : unlisted || ''
+          } Nothing was reverted: rerun the job by hand, or look at the runner.`,
+        )
+      base.kind = 'setup'
+      base.touched = touched.map((c) => short(c.sha))
+    }
   }
   if (!greenSha) return stop(`no fully green commit of main is known in its last ${runs.length} runs, so the commits to look at are not known.`)
   if (!dir) return stop('the queue has no checkout to list the commits since the last green one in.')
-  let listed
   try {
-    ;({ commits: listed } = await commitsBetween(dir, repo, defaultBranch, greenSha, red.headSha))
+    if (!listed) ({ commits: listed } = await commitsBetween(dir, repo, defaultBranch, greenSha, red.headSha))
   } catch (e) {
     if (!(e instanceof GitError)) throw e
     return stop(`listing the commits since the last green one, ${short(greenSha)}, failed: ${e.message}`)
