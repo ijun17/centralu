@@ -138,7 +138,7 @@ export class MailTool {
     const script = m.facts?.fromScript
     const label = script !== null && typeof script === 'object' && 'credential' in script && typeof script.credential === 'string' ? scriptLabel(script.credential) : undefined
     // A script's message is the owner's work, sent by a script the person set up; the person did not type it (§8.1)
-    const who = label !== undefined ? `a script the person set up (${label}), not typed by the person` : m.sender === me ? 'you' : `${relationWord(me, m.sender, thread)} (${m.sender})`
+    const who = label !== undefined ? `a script the person set up ("${label}"), not typed by the person` : m.sender === me ? 'you' : `${relationWord(me, m.sender, thread)} (${m.sender})`
     return `#${m.seq} ${m.kind}${m.urgent ? ' (urgent)' : ''} from ${who}:\n${body}`
   }
 

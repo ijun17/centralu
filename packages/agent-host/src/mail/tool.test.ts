@@ -154,7 +154,7 @@ describe('the mail tool', () => {
     mail.recordDelegation('person', { assignee: S2, task: 'Triage the build', origin: 'create_session', fromScript: { credential: 'ci runner' } })
     const thread = store.mail.latestBetween('person', S2)!
     const out = call('s2', { action: 'read', thread: thread.id }).text
-    expect(out).toContain('from a script the person set up (ci runner), not typed by the person:')
+    expect(out).toContain('from a script the person set up ("ci runner"), not typed by the person:')
     expect(out).toContain('> Triage the build')
     expect(out).not.toContain('from the person')
   })
