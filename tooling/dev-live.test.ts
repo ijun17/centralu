@@ -210,9 +210,14 @@ describe.skipIf(process.platform === 'win32')('dev:live: launching Vite', () => 
     // Records the env and arguments it was started with, then waits. On a signal it records which one
     // and dies of that same signal, so the exit code the command reports is the shell's 128 + signal.
     writeFileSync(fake, `
-      import { writeFileSync } from 'node:fs'
+      import { renameSync, writeFileSync } from 'node:fs'
       const record = ${JSON.stringify(record)}
-      const write = (extra = {}) => writeFileSync(record, JSON.stringify({ pid: process.pid, token: process.env.VITE_HOST_TOKEN, url: process.env.VITE_HOST_URL, args: process.argv.slice(2), ...extra }))
+      // Written beside and renamed into place: the test reads the record as soon as it exists, and a plain write
+      // could be seen created but still empty (#1469)
+      const write = (extra = {}) => {
+        writeFileSync(record + '.tmp', JSON.stringify({ pid: process.pid, token: process.env.VITE_HOST_TOKEN, url: process.env.VITE_HOST_URL, args: process.argv.slice(2), ...extra }))
+        renameSync(record + '.tmp', record)
+      }
       write()
       for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
         process.on(sig, () => { write({ signal: sig }); process.removeAllListeners(sig); process.kill(process.pid, sig) })
