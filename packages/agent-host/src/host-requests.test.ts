@@ -27,12 +27,14 @@ function harness(opts: { trash?: TrashedSession[]; canShow?: boolean; limits?: H
   }
   /** The rights each call that ran was made with */
   const rights = new Map<string, 'full' | 'limited' | undefined>()
+  /** What the program called itself, as each call that ran was told */
+  const labels = new Map<string, string | null | undefined>()
   const requests = new HostRequests({
     emit: (e) => events.push(e),
     canShow: () => canShow,
     limits: opts.limits,
     rpc: async (method, params, ctx) => {
-      if (!Object.hasOwn(lists, method)) rights.set(method, ctx?.rights)
+      if (!Object.hasOwn(lists, method)) { rights.set(method, ctx?.rights); labels.set(method, ctx?.label) }
       // The lists a card reads to name what a call acts on; every other call is recorded
       const read = Object.hasOwn(lists, method) ? lists[method] : undefined
       if (read) return read()
@@ -62,6 +64,7 @@ function harness(opts: { trash?: TrashedSession[]; canShow?: boolean; limits?: H
     events,
     calls,
     rights,
+    labels,
     raised,
     nextCard,
     setTrash: (t: TrashedSession[]) => (trash = t),
@@ -98,10 +101,12 @@ describe('a host request (#1405)', () => {
 
   it('runs the call it allowed as a limited credential’s, which is what a script’s session is told from a window’s by (§8.1)', async () => {
     const h = harness()
-    const asked = h.requests.ask('agents.deleteSession', { sessionId: 's1' }, { client: null }, new AbortController().signal)
+    const asked = h.requests.ask('agents.deleteSession', { sessionId: 's1' }, { client: 'ci runner' }, new AbortController().signal)
     h.requests.answer((await h.nextCard()).requestId, 'allow')
     await asked
     expect(h.rights.get('agents.deleteSession')).toBe('limited')
+    // And under the name the program gave itself, so a script’s first message carries its label (3.8b)
+    expect(h.labels.get('agents.deleteSession')).toBe('ci runner')
   })
 
   it('names the linked machine, and relays nothing to it before Allow', async () => {

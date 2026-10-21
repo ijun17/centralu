@@ -72,7 +72,9 @@ export function useStickyUser({
         ? `${pinned.from.name} ⤷ ${pinnedText}`
         : pinned.fromApp
           ? `${pinned.fromApp.name} app ⤷ ${pinnedText}`
-          : pinnedText
+          : pinned.fromScript
+            ? `script ${pinned.fromScript.credential} ⤷ ${pinnedText}`
+            : pinnedText
       : null
 
   // Collapsed by default — moving to a different turn does not carry the expanded state along

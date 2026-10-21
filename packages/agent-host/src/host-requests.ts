@@ -126,7 +126,7 @@ export class HostRequests {
       throw refused('not_done', `${method} was not done: what its card named changed while it stood (${now.ok ? `now ${now.text}` : now.why}).`)
     }
     // It runs as the call it was: a limited credential's (a script's createSession is told from a window's by it, §8.1)
-    return this.deps.rpc(method, runs.params, { client: -1, rights: 'limited' })
+    return this.deps.rpc(method, runs.params, { client: -1, rights: 'limited', label: from.client })
   }
 
   /** The requests waiting, oldest first */

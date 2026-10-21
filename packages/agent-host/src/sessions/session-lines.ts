@@ -22,7 +22,7 @@ export type SessionLine = { seq: number; fields: Record<string, unknown> }
 /** Who wrote a line another session or an app sent (#838): a child's report or an app's text is not the person's */
 function byWhom(payload: unknown): Record<string, string> {
   const author = authorOf(payload)
-  return author.kind === 'session' ? { from: author.name } : author.kind === 'app' ? { fromApp: author.name } : {}
+  return author.kind === 'session' ? { from: author.name } : author.kind === 'app' ? { fromApp: author.name } : author.kind === 'script' ? { fromScript: author.name } : {}
 }
 
 const stamp = (ts: number) => new Date(ts).toISOString().slice(0, 16).replace('T', ' ')

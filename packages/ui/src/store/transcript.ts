@@ -52,6 +52,8 @@ export type ChatItem =
         from?: { sessionId: string; name: string }
         /** A message sent by an in-conversation app view (M4 B-1) — the person chose to send it, but the app wrote it */
         fromApp?: { appId: string; projectId: string | null; name: string }
+        /** A first message a script wrote (§8.1) — not typed by the person, drawn as the script's */
+        fromScript?: { credential: string }
       }
     | { kind: 'assistant'; seq: number; text: string }
     /** A reasoning summary (#58). Only codex gives text — claude's thinking shows only through the session's thinkingTokens */
@@ -365,7 +367,7 @@ export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
       // Already confirmed by the merge with history (#79) — a history page arrived before this event
       if (holds(items, e.seq)) return items
       const idx =
-        e.from || e.fromApp ? -1 : items.findIndex((i) => i.kind === 'user' && i.pending && i.text === e.text)
+        e.from || e.fromApp || e.fromScript ? -1 : items.findIndex((i) => i.kind === 'user' && i.pending && i.text === e.text)
       if (idx === -1)
         return [
           ...items,
@@ -376,6 +378,7 @@ export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
             text: e.text,
             ...(e.from ? { from: e.from } : {}),
             ...(e.fromApp ? { fromApp: e.fromApp } : {}),
+            ...(e.fromScript ? { fromScript: e.fromScript } : {}),
             // Attachments of a message inserted by the host (M4 C-5) — only a path and a name. Image bytes come when history is re-read
             ...(e.attachments?.length ? { attachments: e.attachments } : {}),
           },
@@ -586,6 +589,7 @@ function pushStored(items: ChatItem[], m: StoredMessage): void {
         text?: string
         from?: { sessionId: string; name: string }
         fromApp?: { appId: string; projectId: string | null; name: string }
+        fromScript?: { credential: string }
         attachments?: ChatAttachment[]
       }
       items.push({
@@ -595,6 +599,7 @@ function pushStored(items: ChatItem[], m: StoredMessage): void {
         text: String(p?.text ?? ''),
         ...(p?.from ? { from: p.from } : {}),
         ...(p?.fromApp ? { fromApp: p.fromApp } : {}),
+        ...(p?.fromScript ? { fromScript: p.fromScript } : {}),
         // Attachment restoration — image bytes (`data`) come from the host reading the file inside `loadMessages`
         ...(p?.attachments?.length ? { attachments: p.attachments } : {}),
       })

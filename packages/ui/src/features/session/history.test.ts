@@ -23,6 +23,7 @@ describe('collecting sent messages', () => {
       user(1, 'mine before'),
       { kind: 'user', seq: 2, text: 'Fix issue #12. Rules: …', from: { sessionId: 's-parent', name: 'orchestrator' } },
       { kind: 'user', seq: 3, text: 'Open the board', fromApp: { appId: 'board', projectId: null, name: 'Board' } },
+      { kind: 'user', seq: 5, text: 'Triage the build', fromScript: { credential: 'ci runner' } },
       user(4, 'mine after'),
     ]
     expect(sentMessages(chat)).toEqual(['mine before', 'mine after'])

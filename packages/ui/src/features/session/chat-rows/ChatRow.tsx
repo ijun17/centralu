@@ -80,6 +80,12 @@ export const ChatRow = memo(function ChatRow({
             {item.fromApp.name} app ⤷
           </div>
         )}
+        {/* A first message a script wrote (§8.1): the person set the script up, but did not type this */}
+        {item.fromScript && (
+          <div className="pb-0.5 text-xs text-ink-muted" data-testid="msg-user-from-script">
+            script {item.fromScript.credential} ⤷
+          </div>
+        )}
         {/*
           A string with no whitespace, like a long URL or path, does not wrap under the default
           rule. That makes the bubble spill sideways and puts a horizontal scrollbar on the
@@ -112,7 +118,7 @@ export const ChatRow = memo(function ChatRow({
           <div
             data-mine-bubble
             className={`max-w-[75%] whitespace-pre-wrap break-words rounded-bubble border bg-surface-hover px-3 py-2 text-ink ${
-              item.from || item.fromApp ? 'border-dashed border-ink-muted/50' : 'border-ink-faint/40'
+              item.from || item.fromApp || item.fromScript ? 'border-dashed border-ink-muted/50' : 'border-ink-faint/40'
             }`}
           >
             {item.text}

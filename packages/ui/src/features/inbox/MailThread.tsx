@@ -129,16 +129,24 @@ function Message({ m }: { m: MailMessage }) {
       </li>
     )
   }
-  const mine = m.sender.kind === 'person'
+  // A script's message is the owner's work, sent by a script the person set up (§8.1, 3.8b): it is not the person's words, and not drawn as theirs
+  const fromScript = scriptOf(m)
+  const mine = m.sender.kind === 'person' && fromScript === undefined
   return (
     <li className={`flex flex-col gap-0.5 ${mine ? 'items-end' : 'items-start'}`} data-testid={`mail-message-${m.seq}`}>
       <span className="text-2xs text-ink-faint">
-        {partyName(m.sender)} · {m.kind}
+        {fromScript !== undefined ? `script ${fromScript}` : partyName(m.sender)} · {m.kind}
         {m.urgent ? ' · urgent' : ''} · <RelativeAge when={m.createdAt} />
       </span>
       <div className={`max-w-[85%] whitespace-pre-wrap break-words rounded-field border px-3 py-2 text-md text-ink ${mine ? 'border-line-strong bg-surface-hover/40' : 'border-line'}`}>{m.body}</div>
     </li>
   )
+}
+
+/** The label of the script that wrote this message (a fact of the host's, never a field a sender wrote), if one did */
+function scriptOf(m: MailMessage): string | undefined {
+  const s = m.facts.fromScript
+  return s !== null && typeof s === 'object' && 'credential' in s && typeof s.credential === 'string' ? s.credential : undefined
 }
 
 /** The person's words: an answer when the last thing said to them was a question, a note otherwise (§7.1) */

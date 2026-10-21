@@ -307,16 +307,16 @@ export class ChildOwnership {
    * the person's thread. Set by the host when it has a mailbox
    */
   private personWork:
-    | { started(sessionId: string, text: string): void; owes(sessionId: string): boolean; report(sessionId: string, draft: PersonReportDraft): boolean }
+    | { started(sessionId: string, text: string, fromScript?: { credential: string }): void; owes(sessionId: string): boolean; report(sessionId: string, draft: PersonReportDraft): boolean }
     | undefined
   onPersonWork(hooks: ChildOwnership['personWork']): void {
     this.personWork = hooks
   }
 
   /** A script or the RPC starts `sessionId` with `text`: the person owns the work. Never throws */
-  startedForPerson(sessionId: string, text: string): void {
+  startedForPerson(sessionId: string, text: string, fromScript?: { credential: string }): void {
     try {
-      this.personWork?.started(sessionId, text)
+      this.personWork?.started(sessionId, text, fromScript)
     } catch (e) {
       console.error(`[mail] could not write down the work started in ${sessionId.slice(0, 8)} for the person (${errorMessage(e)})`)
     }

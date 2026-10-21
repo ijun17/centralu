@@ -1,3 +1,4 @@
+import { scriptLabel } from './script-label.js'
 import { errorMessage, oneLineText } from '@cc/protocol'
 import { asObj, isObj } from '../json-value.js'
 import {
@@ -163,6 +164,8 @@ export type DelegationInput = {
    */
   parentId?: string | null
   depth?: number
+  /** The task is a script's message (§8.1, 3.8b): a fact on the `assign`, written by the host from the connection, so no reader takes it for the person's words */
+  fromScript?: { credential: string }
 }
 
 export type DelegationResult = { thread: ThreadRow; message: MessageRow; /** The task went into the thread this owner already had with this assignee */ continued: boolean }
@@ -1485,7 +1488,7 @@ export class MailService {
         )
         this.records.putParticipant(id, caller, 'owner', now)
         this.records.putParticipant(id, input.assignee, 'assignee', now)
-        message = this.insertPost(id, caller, 'assign', body, {}, {}, now, undefined, [input.assignee])
+        message = this.insertPost(id, caller, 'assign', body, input.fromScript ? { fromScript: { credential: scriptLabel(input.fromScript.credential) } } : {}, {}, now, undefined, [input.assignee])
         thread = this.mustThread(id)
       }
       // The old path delivered it already: delivered, and read with it

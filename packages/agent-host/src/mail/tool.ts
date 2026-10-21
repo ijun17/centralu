@@ -4,8 +4,9 @@ import { MESSAGE_KINDS, THREAD_OUTCOMES, THREAD_STATES } from '../dev-services/s
 import { PERSON } from './address.js'
 import { escapeFrameTags, PLAIN_CALLS, quoted, type MailCalls } from './frame.js'
 import { parseMailId } from './ids.js'
+import { scriptLabel } from './script-label.js'
 import { refusalReason, refuse } from './rules.js'
-import { relationWord, type MailService, type PostResult } from './service.js'
+import { relationWord, type MailService, type PostResult, type ReadMessage } from './service.js'
 
 /**
  * The arguments of the `mail` tool a session calls (docs/plans/mailbox.md §9.3). The schema that shows them to the model is
@@ -131,10 +132,13 @@ export class MailTool {
     return out.join('\n')
   }
 
-  private shown(me: string, thread: ThreadRow, m: Pick<MessageRow, 'seq' | 'kind' | 'sender' | 'body' | 'urgent'>): string {
+  private shown(me: string, thread: ThreadRow, m: Pick<ReadMessage, 'seq' | 'kind' | 'sender' | 'body' | 'urgent' | 'facts'>): string {
     // Quoted whatever its line breaks and with the frame's tags escaped (§9.2)
     const body = quoted(escapeFrameTags(m.body))
-    const who = m.sender === me ? 'you' : `${relationWord(me, m.sender, thread)} (${m.sender})`
+    const script = m.facts?.fromScript
+    const label = script !== null && typeof script === 'object' && 'credential' in script && typeof script.credential === 'string' ? scriptLabel(script.credential) : undefined
+    // A script's message is the owner's work, sent by a script the person set up; the person did not type it (§8.1)
+    const who = label !== undefined ? `a script the person set up (${label}), not typed by the person` : m.sender === me ? 'you' : `${relationWord(me, m.sender, thread)} (${m.sender})`
     return `#${m.seq} ${m.kind}${m.urgent ? ' (urgent)' : ''} from ${who}:\n${body}`
   }
 

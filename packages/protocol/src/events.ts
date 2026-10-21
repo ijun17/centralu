@@ -280,6 +280,13 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
      */
     fromApp: z.object({ appId: z.string(), projectId: z.string().nullable(), name: z.string() }).optional(),
     /*
+     * A first message a script wrote (#1347 slice 3, §8.1): a process holding the limited credential started the session with it. The
+     * person did not type it, and its text can carry outside words (a CI log, an issue title), so the screen draws it as the script's
+     * and not as the person's bubble. `credential` is what the connection called itself in its hello, cut to a plain label by the host
+     * (`scriptLabel`); written by the host from the connection, never from a field of the call. Additive: an older reader draws it as a message.
+     */
+    fromScript: z.object({ credential: z.string() }).optional(),
+    /*
      * The person's choice for a delegation report the session owes (#1377), carried on the message so a hub that follows
      * a linked machine's session reads it: `task` adds the message to the delegated work, `takeover` takes the session
      * over. Absent: just asking.
