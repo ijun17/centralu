@@ -4,6 +4,7 @@ import { windowAround } from './snippet.js'
 import { orchestratorToolsFor, type OrchestratorSeatHost } from './orchestrator-seat.js'
 import { withHubMark } from './hub-preset.js'
 import type { MailSessions, ReceiverState } from '../mail/delivery.js'
+import type { AnswerGiven } from '../mail/delegation.js'
 import type { MailToolArgs } from '../mail/tool.js'
 import type { TurnStart } from '../mail/turns.js'
 import type { ThreadOrigin } from '../dev-services/store/mail.js'
@@ -91,6 +92,8 @@ export type MailHooks = {
   tool?(sessionId: string, args: MailToolArgs): { text: string; isError?: boolean }
   /** A session gave another one work by a tool the host delivered it by (§8.1): the mailbox writes it down */
   delegated?(callerId: string, childId: string, origin: ThreadOrigin, task: string): void
+  /** A call returned the answer of work a session gave another, or read where it stands (§8.1): the reports waiting for the caller are settled */
+  answered?(callerId: string, childId: string, how?: AnswerGiven): void
   /** A turn started that the mailbox did not start: whose it is and the thread it belongs to (§6) */
   turnStarted?(sessionId: string, turn: TurnStart): void
 }
@@ -835,6 +838,7 @@ export class SessionManager {
   useMail(hooks: MailHooks): void {
     this.mailHooks = hooks
     this.children.onDelegated(hooks.delegated ? (callerId, childId, origin, task) => hooks.delegated?.(callerId, childId, origin, task) : undefined)
+    this.children.onAnswered(hooks.answered ? (callerId, childId, how) => hooks.answered?.(callerId, childId, how) : undefined)
     this.children.onTurnStarted(hooks.turnStarted ? (sessionId, turn) => hooks.turnStarted?.(sessionId, turn) : undefined)
   }
 

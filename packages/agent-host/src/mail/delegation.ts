@@ -21,6 +21,41 @@ export function delegationRecorder(
   }
 }
 
+/** What a call gave back: the child's last response, or that its turn did not finish, with the kind of the error (a word of Centralu's) */
+export type AnswerGiven = { ok: true; text: string } | { ok: false; error: string }
+
+/** The most of the answer a call returned that the thread keeps: the child's own words, as its message, read with the tool */
+const ANSWER_KEPT = 600
+
+/**
+ * What the mailbox does when a call returns the answer of work a session gave another (§8.1): the call is the report. The reports of the
+ * thread that still wait for the caller are read and handled, and a thread that is still `running` is reported on in it (told, with what
+ * the call returned) and goes to `review`: the owner decides. Nothing wakes the owner for news a call already gave. A call that only
+ * read where the work stands, or an answer of a turn that left background work running, reports nothing new
+ */
+export function answerRecorder(mail: MailService, records: MailRecords): (callerId: string, childId: string, how?: AnswerGiven) => void {
+  return (callerId, childId, how) => {
+    const owner = mail.sessionAddress(callerId)
+    const child = mail.sessionAddress(childId)
+    mail.reportsAnswered(owner, child)
+    const thread = records.latestBetween(owner, child)
+    if (!how || !thread || thread.state !== 'running') return
+    const read = `read_session(sessionId="${childId}")`
+    // Centralu's words are its own: how it ended, the id, the kind of error. The session's last response is its own message, behind them
+    mail.reportTurn(thread.id, {
+      to: owner,
+      about: child,
+      outcome: how.ok ? 'finished' : 'failed',
+      body: how.ok
+        ? `[Centralu] The assigned work finished.\nid: ${childId}\n\nIts last response is that session's own words: it is the message above in this thread, and ${read} reads more.`
+        : `[Centralu] The assigned work did not finish.\nid: ${childId}\n\nIts tool's error, by kind: ${how.error}. Its words are its tool's, not Centralu's, so they are not repeated here: ${read} shows them.`,
+      ...(how.ok ? { answer: how.text.length > ANSWER_KEPT ? `${how.text.slice(0, ANSWER_KEPT)}…` : how.text } : { error: how.error }),
+      then: 'review',
+      told: true,
+    })
+  }
+}
+
 /**
  * What the mailbox does when a turn starts that it did not start (§6): it records whose the turn is and which thread it belongs to,
  * so the turn's end can be told as that thread's. The person's own turn belongs to none, except when they chose to add their message

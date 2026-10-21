@@ -788,6 +788,13 @@ export class MailRecords {
       .run(recipient, JSON.stringify(messageIds))
   }
 
+  /** These messages are read and handled for `recipient`: they were put in a thread for the record, and nothing is to wake it for them */
+  markHandledIds(recipient: string, messageIds: readonly string[], now: number): void {
+    this.db
+      .prepare(`UPDATE mail_receipts SET read_at = COALESCE(read_at, ?), handled_at = COALESCE(handled_at, ?) WHERE recipient = ? AND message_id IN (SELECT value FROM json_each(?))`)
+      .run(now, now, recipient, JSON.stringify(messageIds))
+  }
+
   /** The reports of Centralu in a thread that `recipient` has not read or handled are read and handled: a call gave it the answer they tell of. Returns how many */
   markReportsHandled(threadId: string, recipient: string, now: number): number {
     return this.db

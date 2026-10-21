@@ -6,6 +6,7 @@ import type { AgentRunWait } from './app-agents.js'
 import { inTurn } from '../idle.js'
 import { readJsonObjects } from '../dev-services/store/json.js'
 import type { ThreadOrigin } from '../dev-services/store/mail.js'
+import type { AnswerGiven } from '../mail/delegation.js'
 import type { TurnSource, TurnStart } from '../mail/turns.js'
 
 /**
@@ -278,6 +279,26 @@ export class ChildOwnership {
   private delegatedHook: ((callerId: string, childId: string, origin: ThreadOrigin, task: string) => void) | undefined
   onDelegated(hook: ChildOwnership['delegatedHook']): void {
     this.delegatedHook = hook
+  }
+
+  /** The mailbox's way of hearing that a call returned the answer of work it gave (§8.1), set by the host when it has one */
+  private answeredHook: ((callerId: string, childId: string, how?: AnswerGiven) => void) | undefined
+  onAnswered(hook: ChildOwnership['answeredHook']): void {
+    this.answeredHook = hook
+  }
+
+  /**
+   * A call of `callerId` returned what `childId` answered (`how`: it finished with this text, or its turn failed with this reason), or
+   * read where it stands without one: the reports the mailbox holds for the caller are settled, and the thread is reported on by the call.
+   * Never throws
+   */
+  answered(callerId: string, childId: string, how?: AnswerGiven): void {
+    if (callerId === childId || !this.answeredHook) return
+    try {
+      this.answeredHook(callerId, childId, how)
+    } catch (e) {
+      console.error(`[mail] could not settle what ${callerId.slice(0, 8)} read of ${childId.slice(0, 8)} (${errorMessage(e)})`)
+    }
   }
 
   /**

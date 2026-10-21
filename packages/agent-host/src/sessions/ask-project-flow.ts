@@ -1,4 +1,5 @@
 import type { Delegation } from './child-ownership.js'
+import { errorKindWord } from './error-kind.js'
 import { ANSWER_READ_MAX_CHARS, ASK_WAIT_MS, answerAt, askFrame, clipAnswer, matchProjects, pathsIn, projectChoice, taskLine, type AskableProject } from './ask-project.js'
 import { labelOf, lastActiveOf, progressOf } from './transcript-view.js'
 import type { HubAskParams, HubAskResult, SessionState } from '@cc/protocol'
@@ -566,6 +567,7 @@ export class AskProjectFlow {
           ? `The call was cancelled; ${d.target.name}'s session "${sessionName()}" was left running.`
           : `The call was cancelled, so ${d.target.name}'s session "${sessionName()}" was stopped.` }
       case 'failed':
+        this.host.children.answered(d.callerId, d.sessionId, { ok: false, error: errorKindWord(r.error) })
         return {
           ok: false,
           error: d.joinedTurn
@@ -574,6 +576,7 @@ export class AskProjectFlow {
         }
     }
     const { granted, outside } = this.host.grantReads(d.callerId, r.answer, d.target.path)
+    this.host.children.answered(d.callerId, d.sessionId, { ok: true, text: r.answer })
     return { ok: true, state: 'done', ...base, sessionName: sessionName(), answer: clipAnswer(r.answer, sessionName(), answerAt(this.host.store.messages, d.sessionId, r.answer)), readable: granted, outside }
   }
 

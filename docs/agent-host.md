@@ -2747,6 +2747,14 @@ adds nothing. The guards of §7.9 count only `mail` turns. A turn of no thread i
 one. A host that takes over from another keeps the open rows of the sessions the keeper handed over that are still in their turn, reads
 them back and records their end; every other open row is closed `lost` at start.
 
+**A call that returns the answer is the report** (slice 3). When `start_agent`, `agent_session` (`wait`, `status`) or `ask_project` returns what a
+child answered (or that its turn failed), `ChildOwnership.answered` tells the mailbox (`answerRecorder`): the reports it holds for the caller
+are read and handled, and a thread still `running` gets a `report` recorded as told (delivered, read, handled: nothing wakes the owner for
+news a call gave) and goes to `review`. A turn that left the child's own background work running reports nothing yet; the thread stays
+`running` until that report comes. The child's last response is its own words, so it is put in the thread as a message of the child's
+(`relayed`, clipped, read and handled for the caller) in front of the report; Centralu's report holds only what Centralu knows: how the
+turn ended, the id, the kind of an error and `read_session` for more, never the child's text or an error's text (#1186).
+
 ### 4.7 Remote mode, phase 1: `centralu serve` (#82)
 
 The app can work with a project on another machine (an SSH server, later a laptop). That machine runs its own,

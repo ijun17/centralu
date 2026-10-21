@@ -195,6 +195,24 @@ describe('the mailbox hears of a turn that starts (docs/plans/mailbox.md §6)', 
   })
 })
 
+describe('the mailbox hears that a call returned an answer (docs/plans/mailbox.md §8.1)', () => {
+  it('is told who read what, and never breaks the call when the mailbox fails', () => {
+    const seen: unknown[] = []
+    own.onAnswered((callerId, childId, how) => void seen.push([callerId, childId, how]))
+    own.answered('caller', 'child', { ok: true, text: 'done' })
+    own.answered('caller', 'child')
+    own.answered('same', 'same', { ok: true, text: 'itself' })
+    expect(seen).toEqual([
+      ['caller', 'child', { ok: true, text: 'done' }],
+      ['caller', 'child', undefined],
+    ])
+    own.onAnswered(() => {
+      throw new Error('the store is busy')
+    })
+    expect(() => own.answered('caller', 'child', { ok: true, text: 'x' })).not.toThrow()
+  })
+})
+
 describe('queued requests', () => {
   it('enqueue answers the place; a delivery is marked and ends when its turn starts', () => {
     expect(own.enqueue(request('q1', 'busy', 'a'))).toBe(1)

@@ -173,12 +173,23 @@ export type TurnReport = {
   to: string
   /** The session whose turn ended */
   about: string
+  /**
+   * The session's last response, which are its own words: they go in the thread as a message of the session's, in front of the report, and
+   * are read with the tool under what the session is to the reader. They are never in the words of Centralu's report, which stay words
+   * Centralu wrote (#1186). Recorded read and handled for the owner: the report is what wakes it
+   */
+  answer?: string
   /** One word of Centralu's: finished, failed, limit_reached, network, interrupted, quit, stopped, paused, settled, swapped, took_over */
   outcome: string
   body: string
   error?: string
   paused?: number
   personNote?: boolean
+  /**
+   * The owner has been told already, by the call that returned the answer or by the old way of telling: the report is recorded as
+   * delivered, read and handled for it, and nothing wakes it
+   */
+  told?: boolean
   /** What the thread becomes: `review` when the work was reported (the owner decides), `running` when it paused on its own background work, `dropped` when the person took it over */
   then: 'review' | 'running' | 'dropped'
 }
@@ -909,7 +920,17 @@ export class MailService {
         ...(input.personNote ? { personNote: true } : {}),
         ...(input.then === 'dropped' ? { takenOver: true } : {}),
       }
+      // The session's own words, as its message: only the assignee's, so a reader reads them as the session's and not as Centralu's
+      if (input.answer && input.answer.trim() !== '' && thread.assignee === input.about) {
+        const own = this.insertPost(thread.id, input.about, 'report', this.checkBody('session', input.answer, false), { relayed: true }, {}, now, undefined, [input.to])
+        this.records.markDelivered(input.to, [own.id], [own.id], now)
+        this.records.markHandledIds(input.to, [own.id], now)
+      }
       const message = this.insertPost(thread.id, CENTRALU, 'report', body, facts, {}, now, undefined, [input.to])
+      if (input.told) {
+        this.records.markDelivered(input.to, [message.id], [message.id], now)
+        this.records.markReportsHandled(thread.id, input.to, now)
+      }
       let after = thread
       const to: ThreadState = input.then === 'dropped' ? 'done' : input.then
       if (to !== thread.state && thread.state !== 'blocked') {

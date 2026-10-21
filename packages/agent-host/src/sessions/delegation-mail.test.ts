@@ -4,7 +4,7 @@
  * caller's task as the caller wrote it (never the frame the child reads), and nothing in the mailbox wakes the child.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { delegationRecorder, turnRecorder } from '../mail/delegation.js'
+import { answerRecorder, delegationRecorder, turnRecorder } from '../mail/delegation.js'
 import { MailTurns } from '../mail/turns.js'
 import { MailService } from '../mail/service.js'
 import type { ThreadRow } from '../dev-services/store/mail.js'
@@ -23,6 +23,7 @@ beforeEach(async () => {
     sessionChanged: () => {},
     sessionEvent: (e, ended) => turns.observe(e, ended),
     delegated: delegationRecorder(mail, (id) => w.mgr.sessionInfo(id), turns),
+    answered: answerRecorder(mail, w.store.mail),
     turnStarted: turnRecorder(mail, w.store.mail, turns),
   })
 })
@@ -33,7 +34,7 @@ afterEach(async () => {
 const handleOf = (id: string): CrossHandle | undefined => w.adapters.get('claude')!.handles.get(id) ?? w.adapters.get('codex')!.handles.get(id)
 const addr = (id: string) => mail.sessionAddress(id)
 const threadsOf = (owner: string): ThreadRow[] => w.store.mail.threadsOfParty(addr(owner), 'owner')
-const bodies = (t: ThreadRow) => w.store.mail.messagesAfter(t.id, 0).filter((m) => m.kind !== 'event').map((m) => [m.kind, m.sender, m.body])
+const bodies = (t: ThreadRow) => w.store.mail.messagesAfter(t.id, 0).filter((m) => m.kind !== 'event' && m.kind !== 'report').map((m) => [m.kind, m.sender, m.body])
 const askAgents = () => w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
 
 describe('start_agent', () => {
@@ -70,6 +71,112 @@ describe('start_agent', () => {
       ['note', 'use Chromium'],
       ['note', 'and the linter'],
     ])
+  })
+})
+
+describe('a call that returns the answer reports the work', () => {
+  const reports = (t: ThreadRow) => w.store.mail.messagesAfter(t.id, 0).filter((m) => m.kind === 'report' && m.sender === 'centralu')
+  /** What the child answered, as its own message in the thread */
+  const answers = (t: ThreadRow) => w.store.mail.messagesAfter(t.id, 0).filter((m) => m.kind === 'report' && m.sender !== 'centralu')
+
+  it('start_agent that waits: the thread is in review with the answer recorded as told, and nothing wakes the caller', async () => {
+    askAgents()
+    const s = await w.callerSession()
+    const call = w.mgr.startAgent(s, { task: 'long job' })
+    await w.until(() => w.mgr.listSessions().some((x) => x.askedBy === s))
+    const child = w.mgr.listSessions().find((x) => x.askedBy === s)!.id
+    await w.until(() => (handleOf(child)?.sent.length ?? 0) === 1)
+    handleOf(child)!.answer('all done')
+    expect(await call).toMatchObject({ ok: true, state: 'done', answer: 'all done' })
+    const thread = threadsOf(s)[0]!
+    expect(thread.state).toBe('review')
+    expect(reports(thread).map((m) => m.facts.outcome)).toEqual(['finished'])
+    expect(reports(thread)[0]?.body).not.toContain('all done')
+    expect(answers(thread).map((m) => [m.sender, m.body])).toEqual([[addr(child), 'all done']])
+    expect(w.store.mail.receiptsOf(reports(thread)[0]!.id)[0]).toMatchObject({ handledAt: expect.any(Number) })
+    expect(mail.drain(addr(s), {}).messageIds).toEqual([])
+  })
+
+  it('a later agent_session wait that collects a turn given without waiting does the same', async () => {
+    askAgents()
+    const s = await w.callerSession()
+    const started = await w.mgr.startAgent(s, { task: 'long job', wait: false })
+    const child = started.ok ? started.sessionId : ''
+    const waiting = w.mgr.agentSession(s, { sessionId: child, action: 'wait' })
+    handleOf(child)!.answer('collected')
+    expect(await waiting).toMatchObject({ ok: true, state: 'done', answer: 'collected' })
+    expect(threadsOf(s)[0]!.state).toBe('review')
+    expect(reports(threadsOf(s)[0]!)).toHaveLength(1)
+  })
+
+  it('ask_project: the answer it returns reports the work in the thread', async () => {
+    const caller = await w.callerSession()
+    const target = await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'claude', permissionPreset: 'normal' })
+    w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    const call = w.mgr.askProject(caller, { project: w.target.id, session: target.id, task: 'export the sprites' })
+    await w.until(() => (handleOf(target.id)?.sent.length ?? 0) === 1)
+    handleOf(target.id)!.answer('exported')
+    expect(await call).toMatchObject({ ok: true })
+    expect(threadsOf(caller)[0]).toMatchObject({ state: 'review' })
+    expect(reports(threadsOf(caller)[0]!)[0]).toMatchObject({ facts: expect.objectContaining({ outcome: 'finished' }) })
+    expect(answers(threadsOf(caller)[0]!).map((m) => m.body)).toEqual(['exported'])
+  })
+
+  it('a turn that left the child’s own background work running is not yet the report: the thread stays running', async () => {
+    askAgents()
+    const s = await w.callerSession()
+    const started = await w.mgr.startAgent(s, { task: 'start the watcher', wait: false })
+    const child = started.ok ? started.sessionId : ''
+    handleOf(child)!.event({ type: 'background_tasks', sessionId: child, live: [{ id: 't1', kind: 'shell', description: 'pnpm dev', status: 'running' }] })
+    const waiting = w.mgr.agentSession(s, { sessionId: child, action: 'wait' })
+    handleOf(child)!.answer('watcher started')
+    expect(await waiting).toMatchObject({ ok: true, state: 'done' })
+    expect(threadsOf(s)[0]!.state).toBe('running')
+    expect(reports(threadsOf(s)[0]!)).toEqual([])
+  })
+
+  it('reading the answer of a finished child (status, or wait at rest) settles the report the mailbox holds for the caller', async () => {
+    askAgents()
+    const s = await w.callerSession()
+    const started = await w.mgr.startAgent(s, { task: 'long job', wait: false })
+    const child = started.ok ? started.sessionId : ''
+    handleOf(child)!.answer('done')
+    await w.until(() => w.mgr.sessionInfo(child)?.state !== 'working')
+    // The first call collects the turn; the report is the mailbox's own, posted after it
+    await w.mgr.agentSession(s, { sessionId: child, action: 'wait' })
+    const thread = threadsOf(s)[0]!
+    const report = mail.reportTurn(thread.id, { to: addr(s), about: addr(child), outcome: 'finished', body: '[Centralu] The assigned work finished.', then: 'review' })
+    expect(w.store.mail.receiptsOf(report.message.id)[0]).toMatchObject({ handledAt: null })
+    expect(await w.mgr.agentSession(s, { sessionId: child, action: 'status' })).toMatchObject({ ok: true })
+    expect(w.store.mail.receiptsOf(report.message.id)[0]).toMatchObject({ handledAt: expect.any(Number) })
+  })
+
+  it('ask_project whose session fails reports the failure', async () => {
+    const caller = await w.callerSession()
+    const target = await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'claude', permissionPreset: 'normal' })
+    w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    const call = w.mgr.askProject(caller, { project: w.target.id, session: target.id, task: 'export the sprites' })
+    await w.until(() => (handleOf(target.id)?.sent.length ?? 0) === 1)
+    handleOf(target.id)!.event({ type: 'error', sessionId: target.id, error: { code: 'internal', message: 'You have hit your usage limit', retryable: false } })
+    expect(await call).toMatchObject({ ok: false })
+    const failed = reports(threadsOf(caller)[0]!)[0]
+    // The kind of the error, not its words: they are its tool's, and the owner reads them with read_session
+    expect(failed).toMatchObject({ facts: expect.objectContaining({ outcome: 'failed', error: 'usage_limit' }) })
+    expect(failed?.body).not.toContain('usage limit')
+  })
+
+  it('a wait that failed reports the failure', async () => {
+    askAgents()
+    const s = await w.callerSession()
+    const started = await w.mgr.startAgent(s, { task: 'long job', wait: false })
+    const child = started.ok ? started.sessionId : ''
+    const waiting = w.mgr.agentSession(s, { sessionId: child, action: 'wait' })
+    handleOf(child)!.event({ type: 'error', sessionId: child, error: { code: 'internal', message: 'You have hit your usage limit', retryable: false } })
+    expect(await waiting).toMatchObject({ ok: false })
+    const failed = reports(threadsOf(s)[0]!)[0]
+    expect(failed).toMatchObject({ facts: expect.objectContaining({ outcome: 'failed', error: 'usage_limit' }) })
+    expect(failed?.body).not.toContain('usage limit')
+    expect(threadsOf(s)[0]!.state).toBe('review')
   })
 })
 
@@ -123,7 +230,7 @@ describe('a fork of a busy session', () => {
     handleOf(fork.id)!.answer('logs read')
     expect(await forking).toMatchObject({ ok: true, via: 'fork' })
     const thread = w.store.mail.latestBetween(addr(requester), addr(fork.id))!
-    expect(thread).toMatchObject({ origin: 'agent_session', state: 'running' })
+    expect(thread).toMatchObject({ origin: 'agent_session', state: 'review' })
     expect(bodies(thread)).toEqual([['assign', addr(requester), 'read the logs']])
   })
 
@@ -215,7 +322,7 @@ describe('ask_project', () => {
     handleOf(target.id)!.answer('done')
     expect(await call).toMatchObject({ ok: true })
     const [thread] = threadsOf(caller)
-    expect(thread).toMatchObject({ assignee: addr(target.id), origin: 'ask_project', projectId: w.target.id, state: 'running' })
+    expect(thread).toMatchObject({ assignee: addr(target.id), origin: 'ask_project', projectId: w.target.id, state: 'review' })
     expect(bodies(thread!)).toEqual([['assign', addr(caller), 'export the sprites']])
   })
 
