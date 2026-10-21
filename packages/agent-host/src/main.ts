@@ -23,6 +23,7 @@ import { MailService } from './mail/service.js'
 import { MailDelivery } from './mail/delivery.js'
 import { MailPerson } from './mail/person.js'
 import { answerRecorder, delegationRecorder, finishRecorder, reportRecorder, turnRecorder } from './mail/delegation.js'
+import { recordedAgentDepth } from './sessions/agent-depth.js'
 import { COMMAND_CALLS, PLAIN_CALLS } from './mail/frame.js'
 import { MailTool } from './mail/tool.js'
 import { MailTurns } from './mail/turns.js'
@@ -435,7 +436,15 @@ mail.onChange((c) => events.push({ type: 'mail_changed', threadId: c.threadId, t
 // to rest, answers a card or is restored may now take the mail it was holding
 mgr.useMail({ sessionGone: (id) => void mail.sessionGone(id), sessionChanged: (id) => mailDelivery.poke(id), sessionEvent: (e, ended) => mailTurns.observe(e, ended), tool: (id, args) => mailTool.run(id, args),
   // Work a session gave another is written down as a thread, beside the old path that delivered it (§8.1)
-  delegated: delegationRecorder(mail, (id) => mgr.sessionInfo(id), mailTurns),
+  delegated: delegationRecorder(
+    mail,
+    (id) => {
+      const s = mgr.sessionInfo(id)
+      return s && { projectId: s.projectId, depth: recordedAgentDepth(store.settings, id) }
+    },
+    mailTurns,
+  ),
+  waitingOn: (ownerId, childId) => mail.waitingOn(mail.sessionAddress(ownerId), mail.sessionAddress(childId)),
   answered: answerRecorder(mail, store.mail),
   finishedWith: finishRecorder(mail),
   // A turn's end is a report in the thread, and the owner is told as mail when it can read it (§8.1)

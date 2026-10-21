@@ -227,6 +227,23 @@ describe('the mailbox hears that a session is done with work it gave', () => {
   })
 })
 
+describe('the mailbox counts the work a session handed on', () => {
+  it('is asked for the owner and the session, is 0 without a mailbox, and never breaks a report when the mailbox fails', () => {
+    expect(own.waitingOn('caller', 'child')).toBe(0)
+    const seen: unknown[] = []
+    own.onWaitingOn((ownerId, childId) => {
+      seen.push([ownerId, childId])
+      return 2
+    })
+    expect(own.waitingOn('caller', 'child')).toBe(2)
+    expect(seen).toEqual([['caller', 'child']])
+    own.onWaitingOn(() => {
+      throw new Error('the store is busy')
+    })
+    expect(own.waitingOn('caller', 'child')).toBe(0)
+  })
+})
+
 describe('queued requests', () => {
   it('enqueue answers the place; a delivery is marked and ends when its turn starts', () => {
     expect(own.enqueue(request('q1', 'busy', 'a'))).toBe(1)

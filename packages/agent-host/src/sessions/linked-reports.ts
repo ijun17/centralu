@@ -15,6 +15,8 @@ export type ReportWork =
   | { swapped: true }
   /** The person wrote to the session on its machine while the report was paused (#1342): its later turns are theirs */
   | { tookOver: true; paused: readonly BackgroundTask[] }
+  /** Its turn ended while threads it handed on are still going (§6): the work is paused on them, and the report stays owed */
+  | { waitingOn: number }
 
 /**
  * What the linked machines' reports reach (#428): the manager's members they read, with getters for its fields, so

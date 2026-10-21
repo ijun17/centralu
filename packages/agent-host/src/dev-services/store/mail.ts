@@ -378,6 +378,19 @@ export class MailRecords {
     return row && toThread(row)
   }
 
+  /**
+   * The threads opened in the work of `parentId` that are going (`open`, `running`, `blocked`, with someone on them): the work it handed on and
+   * waits for (§6). A thread with nobody on it (its helper was archived or deleted) is not work going: no one is doing it, and the parent would wait for ever
+   */
+  openChildren(parentId: string): ThreadRow[] {
+    const rows = this.db
+      .prepare<[string], ThreadSql>(
+        `SELECT * FROM mail_threads WHERE parent_id = ? AND assignee IS NOT NULL AND state IN ('open', 'running', 'blocked') ORDER BY created_at, id`,
+      )
+      .all(parentId)
+    return rows.map(toThread)
+  }
+
   /** Threads a party owns or is assigned, optionally in some states: what the party's departure moves (§3.3) */
   threadsOfParty(address: string, role: 'owner' | 'assignee', states?: readonly ThreadRow['state'][]): ThreadRow[] {
     const column = role === 'owner' ? 'owner' : 'assignee'
@@ -583,6 +596,36 @@ export class MailRecords {
   lastBy(threadId: string, sender: string): MessageRow | undefined {
     const row = this.db
       .prepare<[string, string], MessageSql>(`SELECT * FROM mail_messages WHERE thread_id = ? AND sender = ? ORDER BY seq DESC LIMIT 1`)
+      .get(threadId, sender)
+    return row && toMessage(row)
+  }
+
+  /** Centralu's latest report of a pause in the thread that was to wake its owner (§6): the one the next pause is compared with */
+  lastWakingPause(threadId: string): MessageRow | undefined {
+    const row = this.db
+      .prepare<[string], MessageSql>(
+        `SELECT * FROM mail_messages WHERE thread_id = ? AND sender = 'centralu' AND kind = 'report' AND (wake IS NULL OR wake <> 'no')
+           AND json_valid(facts) AND json_extract(facts, '$.outcome') = 'paused' ORDER BY seq DESC LIMIT 1`,
+      )
+      .get(threadId)
+    return row && toMessage(row)
+  }
+
+  /** Whether `owner` or the person has posted work, a note, a question or an answer in the thread after `seq` */
+  newWorkSince(threadId: string, seq: number, owner: string): boolean {
+    return (
+      this.db
+        .prepare<[string, number, string], { one: number }>(
+          `SELECT 1 AS one FROM mail_messages WHERE thread_id = ? AND seq > ? AND kind IN ('assign', 'note', 'question', 'answer') AND (sender = ? OR sender = 'person') LIMIT 1`,
+        )
+        .get(threadId, seq, owner) !== undefined
+    )
+  }
+
+  /** The latest `report` `sender` posted in the thread (not an event or a note) */
+  lastReportBy(threadId: string, sender: string): MessageRow | undefined {
+    const row = this.db
+      .prepare<[string, string], MessageSql>(`SELECT * FROM mail_messages WHERE thread_id = ? AND sender = ? AND kind = 'report' ORDER BY seq DESC LIMIT 1`)
       .get(threadId, sender)
     return row && toMessage(row)
   }

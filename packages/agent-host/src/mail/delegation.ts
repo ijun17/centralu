@@ -12,12 +12,21 @@ import type { MailTurns, TurnStart } from './turns.js'
  */
 export function delegationRecorder(
   mail: MailService,
-  sessionOf: (id: string) => { projectId?: string | null } | undefined,
+  sessionOf: (id: string) => { projectId?: string | null; /** The agent depth it was started at (#867) */ depth?: number } | undefined,
   /** The turns the child runs: the one the task started (it began before the thread existed) belongs to the thread from here */
   turns?: MailTurns,
 ): (callerId: string, childId: string, origin: ThreadOrigin, task: string) => void {
   return (callerId, childId, origin, task) => {
-    const { thread } = mail.recordDelegation(mail.sessionAddress(callerId), { assignee: mail.sessionAddress(childId), task, origin, projectId: sessionOf(childId)?.projectId || null })
+    // Handed on in the middle of the work of a thread of its own: this thread is that one's child (§6)
+    const parentId = turns?.current(callerId)?.threadId ?? null
+    const { thread } = mail.recordDelegation(mail.sessionAddress(callerId), {
+      assignee: mail.sessionAddress(childId),
+      task,
+      origin,
+      projectId: sessionOf(childId)?.projectId || null,
+      parentId,
+      depth: sessionOf(childId)?.depth ?? 0,
+    })
     turns?.attach(childId, thread.id, callerId)
   }
 }
@@ -105,6 +114,8 @@ export type ReportDraft = {
    * thread is left to `partyGone`, which says the session is gone and puts the work back on the board
    */
   archiving?: boolean
+  /** The owner is in a turn now: a relayed notice joins it and starts none */
+  ownerInTurn?: boolean
   /** How the owner is told: by the mailbox's wake, by the old relayed message into the turn it is in, or by the old relayed message (it cannot read mail) */
   delivery: ReportDelivery
 }
@@ -162,6 +173,11 @@ export function reportRecorder(mail: MailService, records: MailRecords): (ownerI
       if (refusalReason(e) !== undefined) return 'none'
       throw e
     }
+    // The same pause again (work handed on still going): nothing new to tell
+    if (posted.duplicate) return 'closed'
+    // A pause that does not wake starts no turn (§6, MB): recorded, and read at the owner's next turn. The old way of telling would start one
+    // for an owner at rest, so only an owner in a turn is told
+    if (posted.message.wake === 'no' && draft.delivery !== 'wake' && !draft.ownerInTurn) return 'closed'
     if (draft.delivery === 'wake') return 'mailed'
     const messageId = posted.message.id
     return { keep: draft.delivery === 'old', settle: () => mail.reportTold(thread.id, owner, messageId) }

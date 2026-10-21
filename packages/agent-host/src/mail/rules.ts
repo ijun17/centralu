@@ -127,6 +127,8 @@ export function flowsDown(senderIsPerson: boolean, senderIsOwnerSession: boolean
  */
 export function wakes(sender: SenderClass, m: { kind: MessageKind; wake: 'yes' | 'no' | null; needsOwner: boolean }): boolean {
   if (m.kind === 'event') return false
+  // Centralu's own report of a pause that is not the first of its thread (§6): recorded, read at the next turn, starts none
+  if (sender === 'centralu' && m.wake === 'no') return false
   if (sender !== 'app') return true
   if (m.wake === 'no') return false
   if (m.kind === 'notice') return m.needsOwner || m.wake === 'yes'

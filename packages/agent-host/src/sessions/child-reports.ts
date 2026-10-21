@@ -46,7 +46,7 @@ function outcomeWord(work: ReportWork | undefined, stop: { reason?: string } | n
   if (work && 'tookOver' in work) return 'took_over'
   if (work && 'swapped' in work) return 'swapped'
   if (work && ('machineRemoved' in work || 'linkLost' in work)) return 'stopped'
-  if (work && 'paused' in work) return 'paused'
+  if (work && ('paused' in work || 'waitingOn' in work)) return 'paused'
   if (work && 'settled' in work) return 'settled'
   if (stop?.reason === 'network') return 'network'
   if (stop?.reason === 'interrupted') return 'interrupted'
@@ -55,6 +55,12 @@ function outcomeWord(work: ReportWork | undefined, stop: { reason?: string } | n
   if (ending.type === 'limit_reached') return 'limit_reached'
   if (ending.type === 'turn_complete') return 'finished'
   return 'stopped'
+}
+
+/** The first line of a report held over work the session handed on and waits for (§6): a count, never a thread's words */
+function waitingReportLine(n: number): string {
+  return `[Centralu] The assigned work paused: its turn ended while ${n} thread${n === 1 ? '' : 's'} it handed on ${n === 1 ? 'is' : 'are'} still going.
+`
 }
 
 /** The first line of a report held over the session's own background work (#721) */
@@ -164,7 +170,12 @@ export class ChildReports {
     const owner = this.host.meta.get(ownerId)
     const delivery = !seat ? 'old' : !this.host.readsMail(ownerId) || (owner && inTurn(owner.state)) ? 'in-turn' : 'wake'
     try {
-      return this.mailReport(ownerId, childId, { ...draft, delivery, ...(this.host.trashing.has(childId) ? { archiving: true } : {}) })
+      return this.mailReport(ownerId, childId, {
+        ...draft,
+        delivery,
+        ...(owner && inTurn(owner.state) ? { ownerInTurn: true } : {}),
+        ...(this.host.trashing.has(childId) ? { archiving: true } : {}),
+      })
     } catch (e) {
       console.error(`[mail] could not write the report of ${childId.slice(0, 8)} for ${ownerId.slice(0, 8)} (${errorMessage(e)})`)
       return 'none'
@@ -255,8 +266,12 @@ export class ChildReports {
     const running = ending.type === 'turn_complete' && !settled ? this.ownTasksRunning(sessionId) : []
     const paused = running.length > 0
     const toldPaused = paused && this.host.children.pausedReports.has(sessionId)
+    // Work it handed on that is still going (§6): the turn is not the work's end, and the report stays owed for the turn that ends it
+    const waiting = !paused && ending.type === 'turn_complete' ? this.host.children.waitingOn(orchestratorId, sessionId) : 0
     if (paused) this.pauseReport(sessionId, running)
-    else this.host.children.clearReport(sessionId)
+    else if (waiting === 0) this.host.children.clearReport(sessionId)
+    // Its own background work has ended (settled) and what it handed on has not: the pause on tasks is over, the one on threads is not
+    else this.host.children.unpauseReport(sessionId)
     if (toldPaused) return
 
     const target = this.host.meta.get(sessionId)
@@ -269,7 +284,7 @@ export class ChildReports {
      * raw report is record/screen provenance, and the vendor turn is the trust boundary.
      */
     const { name, project } = this.reportedAs(target)
-    const work = paused ? { paused: running, stoppable: target.askedBy === orchestratorId } : settled ? { settled } : undefined
+    const work = paused ? { paused: running, stoppable: target.askedBy === orchestratorId } : waiting > 0 ? { waitingOn: waiting } : settled ? { settled } : undefined
     const preview = theirs ? NOT_READ : answer !== undefined ? clipPreview(answer, 600) : previewOf(this.host.store.messages, sessionId, 600)
     await this.deliverReport(orchestratorId, sessionId, name, project, preview, ending, work, theirs ? undefined : this.answerSeq(sessionId), turn)
   }
@@ -410,6 +425,7 @@ export class ChildReports {
       : work && 'linkLost' in work ? linkLostReportLine(work.linkLost, work.paused, name)
       : work && 'paused' in work ? pausedReportLine(work.paused, work.stoppable ? this.agentCall(orchestratorId, { action: 'stop' }) : undefined, name)
       : work && 'settled' in work ? settledReportLine(work.settled, name)
+      : work && 'waitingOn' in work ? waitingReportLine(work.waitingOn)
       : stop?.reason === 'network' ? `[Centralu] The assigned work stopped before finishing: a network error ended its turn.\n`
       : stop?.reason === 'interrupted' ? `[Centralu] The assigned work stopped before finishing: its tool interrupted the turn.\n`
       : stop?.reason === 'quit' ? `[Centralu] The assigned work stopped before finishing: Centralu quit or restarted during its turn.\n`
@@ -461,6 +477,8 @@ export class ChildReports {
      */
     // Held over the session's own background work: the thread stays running, and the report says how many tasks are left
     const holding = !!work && 'paused' in work && !('tookOver' in work) && !('machineRemoved' in work) && !('linkLost' in work)
+    // Or held over the work it handed on and waits for (§6)
+    const handedOn = !!work && 'waitingOn' in work
     const reported = this.toMailbox(orchestratorId, sessionId, {
       outcome: outcomeWord(work, stop, ending),
       body: forModel(true),
@@ -468,7 +486,7 @@ export class ChildReports {
       ...(kind ? { error: kindWord(kind) } : {}),
       ...(holding ? { paused: work.paused.length } : {}),
       ...(part?.wrote || part?.added ? { personNote: true } : {}),
-      then: holding ? 'running' : 'review',
+      then: holding || handedOn ? 'running' : 'review',
     })
     if (reported === 'mailed' || reported === 'closed') return
     await this.tellSession(
