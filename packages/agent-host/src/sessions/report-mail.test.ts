@@ -24,6 +24,7 @@ beforeEach(async () => {
     delegated: delegationRecorder(mail, (id) => w.mgr.sessionInfo(id), turns),
     answered: answerRecorder(mail, w.store.mail),
     report: reportRecorder(mail, w.store.mail),
+    waitingOn: (ownerId, childId) => mail.waitingOn(mail.sessionAddress(ownerId), mail.sessionAddress(childId)),
     finishedWith: finishRecorder(mail),
     turnStarted: turnRecorder(mail, w.store.mail, turns),
   })
@@ -277,6 +278,198 @@ describe('a process kept from an earlier host', () => {
     await turnEnds(child, 'all merged')
     expect(oldReports(parent, child)).toHaveLength(1)
     expect(w.store.mail.receiptsOf(reportsIn(threadOf(parent))[0]!.id)[0]).toMatchObject({ deliveredAt: expect.any(Number) })
+  })
+})
+
+describe('work handed on', () => {
+  /** The parent's child hands a part of its work on to a child of its own, without waiting */
+  async function handOn() {
+    w.mgr.setUiPreferences({ agentDepth: 3 })
+    const { parent, child } = await parentAndChild()
+    const started = await w.mgr.startAgent(child, { task: 'write the tests', wait: false })
+    const grandchild = started.ok ? started.sessionId : ''
+    expect(grandchild).not.toBe('')
+    return { parent, child, grandchild }
+  }
+  const asReports = (t: ThreadRow) => reportsIn(t).map((m) => m.facts)
+
+  it('the thread of what is handed on is a child of the work it was handed on from', async () => {
+    const { parent, child, grandchild } = await handOn()
+    const work = threadOf(parent)
+    const [handed] = w.store.mail.threadsOfParty(addr(child), 'owner')
+    expect(handed).toMatchObject({ assignee: addr(grandchild), parentId: work.id, depth: work.depth + 1 })
+  })
+
+  it('a turn that ends while it is going is a pause: the owner is told once, the thread stays running, and the report stays owed for the turn that ends it', async () => {
+    const { parent, child } = await handOn()
+    await turnEnds(child, 'handed the tests on')
+    const work = threadOf(parent)
+    expect(work.state).toBe('running')
+    expect(asReports(work)).toEqual([expect.objectContaining({ outcome: 'paused', waitingOn: [expect.any(String)] })])
+    expect(oldReports(parent, child)).toEqual([])
+    expect(w.mgr.sessionInfo(child)).toBeDefined()
+    expect((w.mgr as unknown as { children: { awaitingReport: Map<string, string> } }).children.awaitingReport.get(child)).toBe(parent)
+    // The owner is woken with a count
+    const later = new MailService(w.store.mail, { hostId: () => 'hub-aaaaaaaa', now: () => Date.now() + 10_000 })
+    expect(later.drain(addr(parent), {}).text).toContain('waitingOn="1"')
+  })
+
+  it('a helper archived while the work waited for it does not hold the work: its next turn is reported as finished, the mark is closed', async () => {
+    const { parent, child, grandchild } = await handOn()
+    await turnEnds(child, 'handed the tests on')
+    expect(asReports(threadOf(parent))).toEqual([expect.objectContaining({ outcome: 'paused' })])
+    await w.mgr.trashSession(grandchild)
+    const [orphan] = w.store.mail.threadsOfParty(addr(child), 'owner')
+    expect(orphan).toMatchObject({ state: 'open', assignee: null })
+    // It wrote the files itself, in a turn the owner started
+    await w.mgr.send(child, 'carry on yourself', undefined, { sessionId: parent, name: 'parent' })
+    await w.until(() => (handleOf(child)?.sent.length ?? 0) >= 2)
+    handleOf(child)!.answer('wrote the tests myself')
+    await w.until(() => asReports(threadOf(parent)).length === 2)
+    expect(asReports(threadOf(parent))[1]).toMatchObject({ outcome: 'finished' })
+    expect(threadOf(parent).state).toBe('review')
+    expect((w.mgr as unknown as { children: { awaitingReport: Map<string, string> } }).children.awaitingReport.has(child)).toBe(false)
+  })
+
+  it('a second pause with other threads going tells an owner that cannot read mail nothing: it would start a turn the pause was not to', async () => {
+    const { parent, child } = await handOn()
+    const real = w.mgr.toolProfileOf.bind(w.mgr)
+    vi.spyOn(w.mgr, 'toolProfileOf').mockImplementation((id: string) => (id === parent ? 'scoped' : real(id)))
+    await turnEnds(child, 'handed the tests on')
+    expect(oldReports(parent, child)).toHaveLength(1)
+    // The notice started a turn of the owner's, which ends: it is at rest again
+    handleOf(parent)!.answer('noted')
+    await w.until(() => w.mgr.sessionInfo(parent)?.state !== 'working')
+    // The session goes on in a turn the owner started, hands a second helper on, and ends its turn
+    await w.mgr.send(child, 'and the docs', undefined, { sessionId: parent, name: 'parent' })
+    await w.until(() => (handleOf(child)?.sent.length ?? 0) >= 2)
+    const second = await w.mgr.startAgent(child, { task: 'write the docs', wait: false })
+    expect(second.ok).toBe(true)
+    handleOf(child)!.answer('handed the docs on')
+    await w.until(() => asReports(threadOf(parent)).length === 2)
+    expect(reportsIn(threadOf(parent)).map((m) => m.wake)).toEqual([null, 'no'])
+    await new Promise((r) => setTimeout(r, 20))
+    expect(oldReports(parent, child)).toHaveLength(1)
+  })
+
+  it('an owner that cannot read mail and is in a turn is told the second pause: the notice joins the turn and starts none', async () => {
+    const { parent, child } = await handOn()
+    const real = w.mgr.toolProfileOf.bind(w.mgr)
+    vi.spyOn(w.mgr, 'toolProfileOf').mockImplementation((id: string) => (id === parent ? 'scoped' : real(id)))
+    await turnEnds(child, 'handed the tests on')
+    expect(oldReports(parent, child)).toHaveLength(1)
+    // The first notice started a turn of the owner's, which is still going
+    expect(w.mgr.sessionInfo(parent)?.state).toBe('working')
+    await w.mgr.send(child, 'and the docs', undefined, { sessionId: parent, name: 'parent' })
+    await w.until(() => (handleOf(child)?.sent.length ?? 0) >= 2)
+    await w.mgr.startAgent(child, { task: 'write the docs', wait: false })
+    handleOf(child)!.answer('handed the docs on')
+    await w.until(() => oldReports(parent, child).length === 2)
+  })
+
+  it('the same, told the old way to an owner that cannot read mail', async () => {
+    const { parent, child, grandchild } = await handOn()
+    const real = w.mgr.toolProfileOf.bind(w.mgr)
+    vi.spyOn(w.mgr, 'toolProfileOf').mockImplementation((id: string) => (id === parent ? 'scoped' : real(id)))
+    await turnEnds(child, 'handed the tests on')
+    await w.mgr.trashSession(grandchild)
+    await w.mgr.send(child, 'carry on yourself', undefined, { sessionId: parent, name: 'parent' })
+    await w.until(() => (handleOf(child)?.sent.length ?? 0) >= 2)
+    handleOf(child)!.answer('wrote the tests myself')
+    await w.until(() => oldReports(parent, child).length === 2)
+    expect(oldReports(parent, child)[0]).toContain('paused')
+    expect(oldReports(parent, child)[1]).toContain('The assigned work finished.')
+  })
+
+  it('a helper that is sent more from the work takes the work as its parent: the owner is not told finished while it works', async () => {
+    w.mgr.setUiPreferences({ agentDepth: 3 })
+    const { parent, child } = await parentAndChild()
+    await turnEnds(child, 'first')
+    expect(threadOf(parent).state).toBe('review')
+    // The person has the session start a helper in a turn of their own: it is no work's
+    await w.mgr.send(child, 'start a helper for the person')
+    const started = await w.mgr.startAgent(child, { task: 'a part', wait: false })
+    const helper = started.ok ? started.sessionId : ''
+    const [earlier] = w.store.mail.threadsOfParty(addr(child), 'owner')
+    expect(earlier).toMatchObject({ assignee: addr(helper), parentId: null })
+    await turnEnds(child, 'started it')
+    await turnEnds(helper, 'a part done')
+    // The owner gives the session more work; in it, the session sends the helper more
+    const again = w.mgr.agentSession(parent, { sessionId: child, action: 'send', text: 'now this' })
+    await w.until(() => (handleOf(child)?.sent.length ?? 0) >= 3)
+    const sentMore = w.mgr.agentSession(child, { sessionId: helper, action: 'send', text: 'and a second part' })
+    await w.until(() => (handleOf(helper)?.sent.length ?? 0) >= 2)
+    expect(w.store.mail.thread(earlier!.id)).toMatchObject({ state: 'running', parentId: threadOf(parent).id })
+    handleOf(child)!.answer('handed the second part on')
+    await again
+    // Not finished: the helper works for this work
+    expect(threadOf(parent).state).toBe('running')
+    handleOf(helper)!.answer('second part done')
+    await sentMore
+  })
+
+  it('its own background work ending while a helper still works is not the work’s end: the settled report waits too', async () => {
+    const { parent, child } = await handOn()
+    await turnEnds(child, 'handed the tests on')
+    const reports = (w.mgr as unknown as { reports: { reportBackIfAwaited(...a: unknown[]): Promise<void>; pauseReport(id: string, running: unknown[]): void } }).reports
+    // It had also paused on its own background work, which has ended with no turn after it
+    reports.pauseReport(child, [{ id: 't1', kind: 'shell', description: 'pnpm dev', status: 'running' }])
+    expect((w.mgr as unknown as { children: { pausedReports: Map<string, unknown> } }).children.pausedReports.has(child)).toBe(true)
+    await reports.reportBackIfAwaited(child, { type: 'turn_complete', sessionId: child }, undefined, [{ id: 't1', kind: 'shell', description: 'pnpm dev', status: 'completed' }])
+    expect(threadOf(parent).state).toBe('running')
+    expect(asReports(threadOf(parent)).map((f) => f.outcome)).not.toContain('settled')
+    const children = (w.mgr as unknown as { children: { awaitingReport: Map<string, string>; pausedReports: Map<string, unknown> } }).children
+    expect(children.awaitingReport.get(child)).toBe(parent)
+    expect(children.pausedReports.has(child)).toBe(false)
+  })
+
+  it('a turn that failed is not a pause: it is reported as it ended, and the report is closed', async () => {
+    const { parent, child } = await handOn()
+    // The helper's thread is under this work: a turn that finished would be a pause
+    expect(w.store.mail.threadsOfParty(addr(child), 'owner')[0]).toMatchObject({ parentId: threadOf(parent).id })
+    handleOf(child)!.event({ type: 'error', sessionId: child, error: { code: 'internal', message: 'rate limit reached, retry later', retryable: false } })
+    await w.until(() => reportsIn(threadOf(parent)).length === 1)
+    expect(asReports(threadOf(parent))).toEqual([expect.objectContaining({ outcome: 'failed' })])
+    expect(threadOf(parent).state).toBe('review')
+    expect((w.mgr as unknown as { children: { awaitingReport: Map<string, string> } }).children.awaitingReport.has(child)).toBe(false)
+  })
+
+  it('an owner that cannot read mail is told the old way, in the words of Centralu: how many threads, nothing of theirs', async () => {
+    const { parent, child } = await handOn()
+    const real = w.mgr.toolProfileOf.bind(w.mgr)
+    vi.spyOn(w.mgr, 'toolProfileOf').mockImplementation((id: string) => (id === parent ? 'scoped' : real(id)))
+    await turnEnds(child, 'handed the tests on')
+    const told = oldReports(parent, child)
+    expect(told).toHaveLength(1)
+    expect(told[0]).toContain('paused: its turn ended while 1 thread it handed on is still going')
+    expect(told[0]).not.toContain('write the tests')
+  })
+
+  it('a call that returns the answer while it is going does not end the work either: still running, still the one report', async () => {
+    const { parent, child } = await handOn()
+    await turnEnds(child, 'handed the tests on')
+    const again = w.mgr.agentSession(parent, { sessionId: child, action: 'send', text: 'status?' })
+    await w.until(() => (handleOf(child)?.sent.length ?? 0) >= 2)
+    handleOf(child)!.answer('still waiting on the tests')
+    expect(await again).toMatchObject({ ok: true, answer: 'still waiting on the tests' })
+    expect(threadOf(parent).state).toBe('running')
+    expect(asReports(threadOf(parent))).toHaveLength(1)
+  })
+
+  it('the turn that ends it is the work’s final report, and the mark is closed with it', async () => {
+    const { parent, child, grandchild } = await handOn()
+    await turnEnds(child, 'handed the tests on')
+    expect(threadOf(parent).state).toBe('running')
+    // The grandchild is done: its thread is closed by its owner, and the child has a turn of its own to say so
+    const [handed] = w.store.mail.threadsOfParty(addr(child), 'owner')
+    mail.update(handed!.id, addr(child), { state: 'done', outcome: 'finished' })
+    expect(grandchild).not.toBe('')
+    const again = w.mgr.agentSession(parent, { sessionId: child, action: 'send', text: 'and then?' })
+    await w.until(() => (handleOf(child)?.sent.length ?? 0) >= 2)
+    handleOf(child)!.answer('all done now')
+    await again
+    expect(threadOf(parent).state).toBe('review')
+    expect((w.mgr as unknown as { children: { awaitingReport: Map<string, string> } }).children.awaitingReport.has(child)).toBe(false)
   })
 })
 

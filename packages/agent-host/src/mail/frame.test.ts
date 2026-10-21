@@ -17,6 +17,19 @@ const item = (n: number, over: Partial<MailFrameItem> = {}): MailFrameItem => ({
 })
 
 describe('the wake frame (§7.3)', () => {
+  it('says how many threads a paused report waits for, and keeps lines that differ in it apart; a value of the wrong shape is left out', () => {
+    const frame = mailFrame([
+      item(1, { outcome: 'paused', waitingOn: 1 }),
+      item(2, { outcome: 'paused', waitingOn: 2 }),
+      item(3, { outcome: 'paused', waitingOn: 2 }),
+      item(4, { outcome: 'paused', waitingOn: -1 }),
+    ])
+    expect(frame).toContain('outcome="paused" waitingOn="1"')
+    expect(frame).toContain('outcome="paused" waitingOn="2"')
+    expect(frame.match(/waitingOn=/g)).toHaveLength(2)
+    expect(frame).toContain('count="2" outcome="paused" waitingOn="2"')
+  })
+
   it('carries a report’s facts as host fields: the error kind, the tasks left, the person’s note; a value of the wrong shape is left out', () => {
     const good = mailFrame([item(1, { kind: 'report', from: 'centralu', relation: 'Centralu', outcome: 'failed', error: 'rate_limit', paused: 2, personNote: true })])
     expect(good).toContain('outcome="failed" error="rate_limit" paused="2" personNote="1"')

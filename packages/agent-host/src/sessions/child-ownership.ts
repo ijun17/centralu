@@ -281,6 +281,23 @@ export class ChildOwnership {
     this.delegatedHook = hook
   }
 
+  /** The mailbox's count of the threads a session handed on in the work it does for `ownerId` that are still going (§6), set by the host when it has one */
+  private waitingHook: ((ownerId: string, childId: string) => number) | undefined
+  onWaitingOn(hook: ChildOwnership['waitingHook']): void {
+    this.waitingHook = hook
+  }
+
+  /** How many threads `childId` handed on in the work it does for `ownerId` are still going; 0 with no mailbox. Never throws */
+  waitingOn(ownerId: string, childId: string): number {
+    if (!this.waitingHook) return 0
+    try {
+      return this.waitingHook(ownerId, childId)
+    } catch (e) {
+      console.error(`[mail] could not count the work ${childId.slice(0, 8)} handed on (${errorMessage(e)})`)
+      return 0
+    }
+  }
+
   /** The mailbox's way of hearing that a session is done with work it gave (it deletes the session that did it), set by the host when it has one */
   private finishedHook: ((callerId: string, childId: string) => void) | undefined
   onFinishedWith(hook: ChildOwnership['finishedHook']): void {

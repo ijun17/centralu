@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 import { Store } from '../dev-services/store.js'
 import { sessionAddress } from './address.js'
 import { delegationRecorder } from './delegation.js'
+import { MailTurns } from './turns.js'
 import { refusalReason } from './rules.js'
 import { MailService } from './service.js'
 import { mailRelations } from './relations.js'
@@ -118,6 +119,23 @@ describe('a delegation written down', () => {
     expect(reason(() => mail.recordDelegation(CALLER, task({ assignee: CALLER })))).toBe('bad_value')
     expect(reason(() => mail.recordDelegation(CALLER, task({ assignee: 'person' })))).toBe('bad_address')
     expect(reason(() => mail.recordDelegation(CALLER, task({ origin: 'nonsense' as never })))).toBe('bad_value')
+  })
+})
+
+describe('a delegation handed on in the middle of work', () => {
+  it('is a child of the thread of the turn the caller is in, and works at the depth the host knows', () => {
+    const { store, mail } = setup()
+    const turns = new MailTurns(store.mail)
+    const record = delegationRecorder(mail, (id) => ({ projectId: null, depth: id === 'grand' ? 2 : 0 }), turns)
+    // 'caller' is doing the work 'boss' gave it, in a turn of that thread
+    const work = mail.recordDelegation(sessionAddress(HOST, 'boss'), { assignee: CALLER, task: 'Land #12', origin: 'start_agent' }).thread
+    turns.beginOther('caller', 'caller', work.id)
+    record('caller', 'grand', 'start_agent', 'Write the tests')
+    expect(store.mail.latestBetween(CALLER, sessionAddress(HOST, 'grand'))).toMatchObject({ parentId: work.id, depth: 2 })
+    // A turn that belongs to no thread (the person's own) hands nothing on from anything
+    turns.beginOther('caller', 'person', null)
+    record('caller', 'other', 'start_agent', 'Another')
+    expect(store.mail.latestBetween(CALLER, sessionAddress(HOST, 'other'))).toMatchObject({ parentId: null, depth: 0 })
   })
 })
 

@@ -37,6 +37,8 @@ export type MailFrameItem = {
   reason?: string
   /** `facts.paused` of a report: how many background tasks the turn left running */
   paused?: number
+  /** `facts.waitingOn` of a report: how many threads the session handed on are still going */
+  waitingOn?: number
   /** `facts.personNote` of a report: the person wrote into the turn (`facts.personNote`) */
   personNote?: boolean
   /** The body, only when the words flow down */
@@ -96,7 +98,7 @@ type Line = { text: string; count: number }
 function listLines(items: readonly MailFrameItem[]): Line[] {
   const lines = new Map<string, Line & { first: MailFrameItem }>()
   for (const item of items) {
-    const key = [item.threadId, item.kind, item.from, item.about ?? '', item.outcome ?? '', item.error ?? '', item.reason ?? '', item.paused ?? '', item.personNote ? 'p' : '', item.inline === undefined ? 'q' : item.messageId, item.maybeRepeated ? 'r' : ''].join('|')
+    const key = [item.threadId, item.kind, item.from, item.about ?? '', item.outcome ?? '', item.error ?? '', item.reason ?? '', item.paused ?? '', item.waitingOn ?? '', item.personNote ? 'p' : '', item.inline === undefined ? 'q' : item.messageId, item.maybeRepeated ? 'r' : ''].join('|')
     const kept = lines.get(key)
     if (kept) kept.count++
     else lines.set(key, { text: '', count: 1, first: item })
@@ -114,6 +116,7 @@ function listLines(items: readonly MailFrameItem[]): Line[] {
       attr('error', i.error, isOutcome) +
       attr('reason', i.reason, isOutcome) +
       attr('paused', i.paused, isCount) +
+      attr('waitingOn', i.waitingOn, isCount) +
       (i.personNote ? ' personNote="1"' : '') +
       (i.maybeRepeated ? ' maybeRepeated="1"' : '') +
       (i.inline === undefined ? '' : attr('message', i.messageId, isMessageId) + ' inline="1"')

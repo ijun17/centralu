@@ -157,9 +157,23 @@ export type DelegationInput = {
   task: string
   origin: ThreadOrigin
   projectId?: string | null
+  /**
+   * The thread of the work the caller is doing as it hands this on (its current turn's, `MailTurns.current`), and the depth the child
+   * works at. The parent counts only when the caller is its assignee and it is not over; otherwise the thread has none (§3.3, §6)
+   */
+  parentId?: string | null
+  depth?: number
 }
 
 export type DelegationResult = { thread: ThreadRow; message: MessageRow; /** The task went into the thread this owner already had with this assignee */ continued: boolean }
+
+const sameStrings = (a: unknown, b: readonly string[]): boolean => Array.isArray(a) && a.length === b.length && a.every((x, i) => x === b[i])
+
+/** The session id of a session's address; an address that is not one stays as it is */
+const sessionIdOf = (address: string): string => {
+  const p = parseAddress(address)
+  return p?.kind === 'session' ? p.sessionId : address
+}
 
 const isDelegation = (t: ThreadRow): boolean => (DELEGATION_ORIGINS as readonly string[]).includes(t.origin)
 
@@ -463,7 +477,12 @@ export class MailService {
         if (!f) throw refuse('bad_follows', `thread ${follow} is not here to follow up`)
         if (f.state !== 'done') throw refuse('bad_follows', `thread ${follow} is not done: post in it instead of opening a follow-up`)
       }
-      if (input.parentId && !this.records.thread(input.parentId)) throw refuse('not_found', `parent thread ${input.parentId} is not here`)
+      const parent = input.parentId ? this.records.thread(input.parentId) : undefined
+      if (input.parentId && !parent) throw refuse('not_found', `parent thread ${input.parentId} is not here`)
+      // A thread kept open under another's work holds that work running (§6): an agent names only work it is doing itself
+      if (parent && by.kind === 'session' && (parent.assignee !== caller || parent.state === 'done')) {
+        throw refuse('bad_value', `parentId is the thread of work you are doing; ${input.parentId} is not one that is going to you`)
+      }
       for (const to of addresses.filter((a) => a !== caller)) this.mayWriteOrRefuse(caller, to, null)
 
       const id = threadIdOf(this.host, this.ulids.next(now))
@@ -929,12 +948,29 @@ export class MailService {
       const thread = this.mustThread(threadId)
       this.assertWritable(thread)
       if (!this.recipients(thread.id, CENTRALU).includes(input.to)) throw refuse('not_participant', `${input.to} is not in thread ${threadId}`)
-      const body = this.checkBody('centralu', input.body, false)
+      /*
+       * Work handed on keeps the thread running (§6): a turn that ended while threads opened in this work are still going is a pause,
+       * not the work's end. Said once for the same threads: the turns that follow, while they are still going, tell nobody anything new
+       */
+      const waiting = input.then === 'dropped' || thread.state === 'blocked' ? [] : this.records.openChildren(thread.id).map((t) => t.id)
+      const holds = waiting.length > 0 && input.then === 'review' && input.outcome === 'finished'
+      if (waiting.length > 0 && (holds || input.then === 'running')) {
+        // Against Centralu's last report of the thread: its events (a state change, a join) between two pauses do not make the second one news
+        const last = this.records.lastReportBy(thread.id, CENTRALU)
+        if (last && last.facts.outcome === 'paused' && sameStrings(last.facts.waitingOn, waiting)) return { message: last, thread, duplicate: true }
+      }
+      const outcome = holds ? 'paused' : input.outcome
+      const body = this.checkBody(
+        'centralu',
+        holds ? `[Centralu] The assigned work paused: its turn ended while ${waiting.length} thread${waiting.length === 1 ? '' : 's'} it handed on ${waiting.length === 1 ? 'is' : 'are'} still going.\nid: ${sessionIdOf(input.about)}` : input.body,
+        false,
+      )
       const facts: MailFacts = {
-        outcome: input.outcome,
+        outcome,
         about: { session: input.about },
         ...(input.error ? { error: input.error } : {}),
         ...(input.paused ? { paused: input.paused } : {}),
+        ...(waiting.length > 0 && (holds || input.then === 'running') ? { waitingOn: waiting } : {}),
         ...(input.personNote ? { personNote: true } : {}),
         ...(input.then === 'dropped' ? { takenOver: true } : {}),
       }
@@ -944,13 +980,20 @@ export class MailService {
         this.records.markDelivered(input.to, [own.id], [own.id], now)
         this.records.markHandledIds(input.to, [own.id], now)
       }
-      const message = this.insertPost(thread.id, CENTRALU, 'report', body, facts, {}, now, undefined, [input.to])
+      /*
+       * A pause wakes its owner once (§6): the first one of a thread, or the first after the owner or the person posted work or a note in
+       * it. The pauses after it are recorded and read at the owner's next turn; the end of the work, a failure and the rest always wake
+       */
+      const pause = outcome === 'paused'
+      const lastWoke = pause ? this.records.lastWakingPause(thread.id) : undefined
+      const quiet = pause && lastWoke !== undefined && !this.records.newWorkSince(thread.id, lastWoke.seq, thread.owner)
+      const message = this.insertPost(thread.id, CENTRALU, 'report', body, facts, quiet ? { wake: false } : {}, now, undefined, [input.to])
       if (input.told) {
         this.records.markDelivered(input.to, [message.id], [message.id], now)
         this.records.markReportsHandled(thread.id, input.to, now)
       }
       let after = thread
-      const to: ThreadState = input.then === 'dropped' ? 'done' : input.then
+      const to: ThreadState = input.then === 'dropped' ? 'done' : holds ? 'running' : input.then
       if (to !== thread.state && thread.state !== 'blocked') {
         after = this.moveState(
           thread,
@@ -963,6 +1006,18 @@ export class MailService {
       }
       return { message, thread: after, duplicate: false }
     })
+  }
+
+  /** Whether `thread` is under work `recipient` is doing: its parent is running with the recipient on it (§6) */
+  private handedOnFrom(thread: ThreadRow, recipient: string): boolean {
+    const parent = thread.parentId ? this.records.thread(thread.parentId) : undefined
+    return !!parent && parent.assignee === recipient && parent.state === 'running'
+  }
+
+  /** How many threads opened in the work `assignee` does for `owner` are still going (§6): the work it handed on and waits for */
+  waitingOn(owner: string, assignee: string): number {
+    const thread = this.records.latestBetween(owner, assignee)
+    return thread && thread.state !== 'done' ? this.records.openChildren(thread.id).length : 0
   }
 
   /** The old way of telling delivered a report the mailbox holds for `to`: delivered, read and handled, so nothing wakes the owner for it (§8.1) */
@@ -1059,11 +1114,17 @@ export class MailService {
     const isWork = (c: Candidate) => c.thread.owner !== recipient
     // Which one: the person's words, urgent mail and what has waited past its hold, then a question, else the oldest due (§5)
     const work = candidates.filter((c) => wakesIt(c) && isWork(c))
-    const workThread = pickWorkThread(
+    const picked = pickWorkThread(
       work.map((c) => ({ threadId: c.thread.id, decides: c.message.urgent || c.sender === 'person', question: c.message.kind === 'question', dueAt: c.receipt.dueAt })),
       this.now(),
     )
     const turnStarts = candidates.some(wakesIt)
+    /*
+     * Mail only for the owner of a thread opened in the work the receiver is doing for someone (a child's report to the session that handed
+     * the work on): the turn it starts is that work's, so its end is reported to whoever gave it (§6)
+     */
+    const handedOn = turnStarts && picked === null ? candidates.find((c) => wakesIt(c) && this.handedOnFrom(c.thread, recipient)) : undefined
+    const workThread = handedOn ? (handedOn.thread.parentId ?? picked) : picked
     const kept = turnStarts ? candidates.filter((c) => !isWork(c) || c.thread.id === workThread) : candidates
 
     const items: MailFrameItem[] = []
@@ -1085,6 +1146,7 @@ export class MailService {
       const error = typeof message.facts.error === 'string' ? message.facts.error : undefined
       const reason = typeof message.facts.reason === 'string' ? message.facts.reason : undefined
       const paused = typeof message.facts.paused === 'number' ? message.facts.paused : undefined
+      const waitingOn = Array.isArray(message.facts.waitingOn) && message.facts.waitingOn.length > 0 ? message.facts.waitingOn.length : undefined
       items.push({
         messageId: message.id,
         threadId: thread.id,
@@ -1096,6 +1158,7 @@ export class MailService {
         ...(error ? { error } : {}),
         ...(reason ? { reason } : {}),
         ...(paused !== undefined ? { paused } : {}),
+        ...(waitingOn !== undefined ? { waitingOn } : {}),
         ...(message.facts.personNote === true ? { personNote: true } : {}),
         ...(receipt.lastError === 'maybe_repeated' ? { maybeRepeated: true } : {}),
         ...(down && !pointerOnly ? { inline: message.body } : {}),
@@ -1324,13 +1387,27 @@ export class MailService {
         thread = last
         message = this.insertPost(thread.id, caller, 'note', body, {}, {}, now, undefined, [input.assignee])
         // The child has it in hand again: the move the old path would have made when its turn started
-        if (thread.state === 'open' || thread.state === 'review') {
+        const restarts = thread.state === 'open' || thread.state === 'review'
+        if (restarts) {
           thread = this.records.updateThread(thread.id, { state: 'running', stateSince: now }, now, true)
           this.insertEvent(thread.id, `State: ${last.state} to running.`, { change: 'state', from: last.state, to: 'running', by: CENTRALU }, now)
+        }
+        /*
+         * Whose work it is now (§6): sent more from inside a turn of work the caller is doing, the helper is working for that work, and the
+         * work waits for it; sent more from a turn that belongs to no thread, it is not working for the work it once was
+         */
+        const parent = input.parentId ? this.records.thread(input.parentId) : undefined
+        const within = parent && parent.assignee === caller && parent.state !== 'done' ? parent : undefined
+        if (within && (thread.parentId !== within.id || thread.depth <= within.depth)) {
+          thread = this.records.updateThread(thread.id, { parentId: within.id, depth: Math.max(thread.depth, within.depth + 1) }, now, true)
+        } else if (!within && restarts && thread.parentId !== null) {
+          thread = this.records.updateThread(thread.id, { parentId: null }, now, true)
         }
       } else {
         const subject = oneLineText(body.split(/\r\n|[\n\r\u0085\u2028\u2029]/)[0] ?? '', SUBJECT_MAX) || 'A task'
         const id = threadIdOf(this.host, this.ulids.next(now))
+        const parent = input.parentId ? this.records.thread(input.parentId) : undefined
+        const within = parent && parent.assignee === caller && parent.state !== 'done' ? parent : undefined
         this.records.insertThread(
           {
             id,
@@ -1338,8 +1415,9 @@ export class MailService {
             projectId: input.projectId ?? null,
             subject,
             origin: input.origin,
-            depth: 0,
-            parentId: null,
+            // One level below the work it was handed on from, at least; never above the depth the host knows the child to be at
+            depth: Math.max(nonNegativeInt(input.depth ?? 0, 'depth'), within ? within.depth + 1 : 0),
+            parentId: within?.id ?? null,
             follows: last ? [last.id] : [],
             state: 'running',
             owner: caller,

@@ -2782,6 +2782,28 @@ still going (`running` or `open`) its owner gets one `report` (`stopped`, `reaso
 stopped; it reassigns or closes the thread. Archiving a child that is at work stops its turn, and that end is not reported as the work's (the report is `closed`
 for a session being archived, `ChildReports` asks `trashing`): the one `assignee_archived` report is all the owner hears. A gone caller's threads are the person's, as ever.
 
+**Work handed on keeps the thread running** (slice 3, §6). A delegation made in the middle of a turn that belongs to a thread (`start_agent`,
+`agent_session send`, `ask_project`, … from a session doing work for someone) opens a thread whose `parentId` is that turn's thread and whose `depth` is one
+below it, or the depth the host knows the child to be at if that is deeper (`recordDelegation`). A helper that is sent more (its thread is continued) takes the work
+it is sent more from as its parent, or none when that turn belongs to no thread. Only the assignee's own work counts as a parent, and a session opening a thread by
+`mail` may name no other (a thread kept open under another's work would hold that work running).
+
+A turn of the parent that ends while such threads are going is a pause, not the work's end. A thread is going while it has an assignee and is `open`, `running`
+or `blocked`: one in `review` has been reported to its owner, which has it, and one with nobody on it (its helper was archived or deleted; `partyGone` told the
+owner) is not work anyone is doing. A blocked parent is not held by it. `ChildReports` passes `waitingOn` work, the report is `paused` with `facts.waitingOn`
+(the thread ids) and the frame's `waitingOn="N"`, in Centralu's words and a count, nothing of the threads; the thread stays `running`, and the report mark stays owed for
+the turn that ends it. Its own background work ending (the 60 s settle) while threads are still going ends only that pause. The same threads are not reported again by
+the turns that follow (the last report of the thread is compared, not its events), and a call that returns an answer meanwhile does not move the thread to `review`
+either (the mailbox holds it, `reportTurn`). A turn that failed or was cut short is reported as it ended.
+
+A pause wakes its owner once (MB): the first pause of a thread, background work or child threads alike, wakes it; the later ones are recorded with `wake: false`
+(read at its next turn, shown on the thread, no turn started) until the owner or the person posts work or a note in the thread. The end of the work, a failure, a
+stop, a card and a blocker always wake. A pause that does not wake starts no turn for an owner told the old way either: `reportRecorder` leaves it recorded
+(`closed`) unless the owner is in a turn, where the relayed notice joins the turn.
+
+The turn a child's report starts, where the report is the only mail for its receiver and the receiver is running the work the child's thread was opened under,
+belongs to that work (`drain`'s `workThread`), so its end is reported to whoever gave it. Mail for other work of the receiver's keeps its own turn.
+
 ### 4.7 Remote mode, phase 1: `centralu serve` (#82)
 
 The app can work with a project on another machine (an SSH server, later a laptop). That machine runs its own,
