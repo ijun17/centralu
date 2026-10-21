@@ -566,7 +566,8 @@ export class AskProjectFlow {
         // Paths in the answer are that machine's: listed, not opened to the caller
         readable: [],
         outside: pathsIn(answer),
-        ...(ask.paused ? { paused: pausedWords(ask) } : {}),
+        // Still paused only while that report is owed: collected after the work's report went out, these are its final words
+        ...(ask.paused && this.host.children.linkedReports.get(ask.sessionId)?.orchestratorId === ask.callerId ? { paused: pausedWords(ask) } : {}),
       }
     } finally {
       if (wake) ask.wake.delete(wake)

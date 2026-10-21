@@ -162,6 +162,50 @@ describe('ask_project to a linked machine whose session ends its turn on its own
     expect(h.reports()[0]).toContain('background work ended (pnpm verify: completed) and no turn followed')
   })
 
+  it('a call that went away before the turn ended still gets the pause when it collects, and the report is not told twice', async () => {
+    const h = await hub()
+    const stop = new AbortController()
+    const call = h.mgr.askProject('h1', { project: 'm1/api', task: 'run the suite' }, stop.signal)
+    await eventually(() => !!h.mgr.listSessions().find((s) => s.id === 'h1')?.pendingApproval)
+    h.mgr.respondApproval('h1', h.mgr.listSessions().find((s) => s.id === 'h1')!.pendingApproval!.requestId, 'allow')
+    await eventually(() => h.sent.length > 0)
+    stop.abort()
+    expect(await call).toMatchObject({ ok: false, error: expect.stringContaining('was left running') })
+    // The turn ends on its background work with nobody waiting: the end is owed all the same
+    h.event({ type: 'message_delta' })
+    h.tasks([verify])
+    h.event({ type: 'turn_complete' })
+    const collected = await h.ask(undefined)
+    expect(collected).toMatchObject({ ok: true, state: 'done', answer: 'started, running in the background', paused: expect.stringContaining('pnpm verify') })
+    h.says('8 pass / 2 fail')
+    h.tasks([], [done])
+    h.turn()
+    await h.settle(1)
+    expect(h.reports()).toHaveLength(1)
+    expect(h.reports()[0]).toContain('8 pass / 2 fail')
+  })
+
+  it('collected after the report of the work went out, the words are the final ones, not a pause', async () => {
+    const h = await hub()
+    const stop = new AbortController()
+    const call = h.mgr.askProject('h1', { project: 'm1/api', task: 'run the suite' }, stop.signal)
+    await eventually(() => !!h.mgr.listSessions().find((s) => s.id === 'h1')?.pendingApproval)
+    h.mgr.respondApproval('h1', h.mgr.listSessions().find((s) => s.id === 'h1')!.pendingApproval!.requestId, 'allow')
+    await eventually(() => h.sent.length > 0)
+    stop.abort()
+    await call
+    h.event({ type: 'message_delta' })
+    h.tasks([verify])
+    h.event({ type: 'turn_complete' })
+    h.says('8 pass / 2 fail')
+    h.tasks([], [done])
+    h.turn()
+    await h.settle(1)
+    const collected = await h.ask(undefined)
+    expect(collected).toMatchObject({ ok: true, state: 'done', answer: '8 pass / 2 fail' })
+    expect((collected as { paused?: string }).paused).toBeUndefined()
+  })
+
   it('a link lost while the work is paused tells the asker so, once', async () => {
     const h = await hub()
     await h.ask('run the suite', () => {
