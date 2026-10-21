@@ -9,7 +9,7 @@ import { inTurn } from '../idle.js'
 import { linkedTurnEnd, type LinkedTurnEvent } from './linked-turn-end.js'
 import type { LinkedReports } from './linked-reports.js'
 import { raceBound } from './with-timeout.js'
-import { taskList } from './background-stops.js'
+import { frameField } from '@cc/protocol'
 import type { BackgroundTask } from '@cc/protocol'
 import type { DelegationFlow, DelegationHost } from './delegation-flow.js'
 import { agentDepthRefusal, depthOf } from './agent-depth.js'
@@ -59,7 +59,7 @@ export type HubsReader = {
  * and the delegation flow's members both flows share. The manager builds it with getters for its fields, so each is
  * read when used, never kept.
  */
-export type AskProjectHost = Pick<DelegationHost, 'agentRuns' | 'applyDeferredRestart' | 'askHost' | 'autoBoundaryOpen' | 'builderRefOf' | 'busyAnswer' | 'busyChoices' | 'busyForCaller' | 'children' | 'deliver' | 'enqueue' | 'ensureProjectAccess' | 'linkedReader' | 'meta' | 'queuedOf' | 'readGrants' | 'routedCards' | 'store' | 'uiPreferences' | 'untilCard'> &
+export type AskProjectHost = Pick<DelegationHost, 'agentRuns' | 'applyDeferredRestart' | 'askHost' | 'autoBoundaryOpen' | 'builderRefOf' | 'busyAnswer' | 'busyChoices' | 'busyForCaller' | 'children' | 'deliver' | 'enqueue' | 'ensureProjectAccess' | 'linkedReader' | 'meta' | 'ownTasksRunning' | 'pauseReport' | 'queuedOf' | 'readGrants' | 'routedCards' | 'store' | 'uiPreferences' | 'untilCard'> &
   Pick<DelegationFlow, 'awaitTurn' | 'grantReads' | 'handedOverReply' | 'startDelegation' | 'untilHandedOver'> & {
     /** The orchestrator's and the askers' reports from linked machines' sessions (linked-reports.ts) */
     readonly linkedReports: Pick<LinkedReports, 'oweAsker' | 'releaseAsker'>
@@ -567,7 +567,7 @@ export class AskProjectFlow {
         readable: [],
         outside: pathsIn(answer),
         // Still paused only while that report is owed: collected after the work's report went out, these are its final words
-        ...(ask.paused && this.host.children.linkedReports.get(ask.sessionId)?.orchestratorId === ask.callerId ? { paused: pausedWords(ask) } : {}),
+        ...(ask.paused && this.host.children.linkedReports.get(ask.sessionId)?.orchestratorId === ask.callerId ? { paused: pausedWords(ask.paused ?? [], ask.sessionId, ' there') } : {}),
       }
     } finally {
       if (wake) ask.wake.delete(wake)
@@ -578,6 +578,7 @@ export class AskProjectFlow {
   private async awaitDelegation(key: string, d: Delegation, signal?: AbortSignal): Promise<AskProjectResult> {
     const sessionName = () => this.host.meta.get(d.sessionId)?.name ?? d.sessionId
     const base = { project: d.target.name, sessionId: d.sessionId }
+    const endedBefore = d.settled
     const r = await this.host.awaitTurn(key, d, { signal, stopWhy: 'the call that asked was cancelled' })
     switch (r.kind) {
       case 'handedOver':
@@ -605,21 +606,35 @@ export class AskProjectFlow {
         }
     }
     const { granted, outside } = this.host.grantReads(d.callerId, r.answer, d.target.path)
-    this.host.children.answered(d.callerId, d.sessionId, { ok: true, text: r.answer })
-    return { ok: true, state: 'done', ...base, sessionName: sessionName(), answer: clipAnswer(r.answer, sessionName(), answerAt(this.host.store.messages, d.sessionId, r.answer)), readable: granted, outside }
+    /*
+     * The turn this call saw end left background work of the session's own running (#721, #1460): the caller reads the
+     * answer now as a pause, and the report is owed for the work's last turn end (marked, so a host swap keeps it and the
+     * mailbox opens its thread there), with no separate notice. As `awaitAgent` does; only a turn this call saw end
+     */
+    const left = this.host.ownTasksRunning(d.sessionId)
+    if (!endedBefore && !this.host.children.pausedReports.has(d.sessionId) && left.length) {
+      this.host.children.markReport(d.sessionId, d.callerId)
+      this.host.pauseReport(d.sessionId, left)
+    }
+    const paused = this.host.children.awaitingReport.get(d.sessionId) === d.callerId ? this.host.children.pausedReports.get(d.sessionId) : undefined
+    this.host.children.answered(d.callerId, d.sessionId, paused ? undefined : { ok: true, text: r.answer })
+    return {
+      ok: true, state: 'done', ...base, sessionName: sessionName(), answer: clipAnswer(r.answer, sessionName(), answerAt(this.host.store.messages, d.sessionId, r.answer)), readable: granted, outside,
+      ...(paused ? { paused: pausedWords(paused, d.sessionId) } : {}),
+    }
   }
 
 }
 
 /**
- * What the caller reads of a turn that ended with the session's own background work still running on a linked machine
- * (#1457), the words of `DelegationWaits.pausedNotice` without the `agent_session stop`, which a project's session there
- * does not have: the work may be a server that never ends, and the report comes only if it does
+ * What the caller reads of a turn that ended with the session's own background work still running (#721, #1457): the
+ * words of `DelegationWaits.pausedNotice` without the `agent_session stop`, which an ask_project target does not have.
+ * The work may be a server that never ends, and the report comes only if it does
  */
-function pausedWords(ask: LinkedAsk): string {
+function pausedWords(tasks: readonly { description: string }[], sessionId: string, there = ''): string {
   return (
-    `its turn ended while its own background work is still running there (${taskList(ask.paused ?? [])}), so the answer is what it said so far. ` +
-    'A final report follows when that work ends and a turn there ends it. If that work is a server or watcher it leaves running, ' +
-    `this answer may be its final one. Read the session with read_session(sessionId="${ask.sessionId}").`
+    `its turn ended while its own background work is still running${there} (${tasks.map((t) => frameField(t.description)).join(', ')}), so the answer is what it said so far. ` +
+    'A final report follows when that work ends and a turn ends it. If that work is a server or watcher it leaves running, ' +
+    `this answer may be its final one. Read the session with read_session(sessionId="${sessionId}").`
   )
 }
