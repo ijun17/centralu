@@ -32,7 +32,7 @@ const SETUP_STEP = [
 ]
 /** A step that fetches packages: a setup step only when the failure names the network or a package source */
 const INSTALL_STEP = /^Run (?:pnpm|npm|yarn) (?:install|ci|i)\b/i
-const FETCH_NOTE = /ERR_PNPM_(?:META_)?FETCH|ERR_PNPM_NO_OFFLINE|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up|\bE: Failed to fetch|Could not resolve host|\b(?:502|503|504)\b.{0,40}(?:Bad Gateway|Service Unavailable|Gateway Time-?out)/i
+const FETCH_NOTE = /ERR_PNPM_(?:META_)?FETCH_(?!4\d\d)|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up|\bE: Failed to fetch|Could not resolve host|\b(?:502|503|504)\b.{0,40}(?:Bad Gateway|Service Unavailable|Gateway Time-?out)/i
 
 /** Whether a step with this name, failing with these notes, is part of setting the job up, not of its work. */
 export const isSetupStep = (name, notes = '') => SETUP_STEP.some((re) => re.test(String(name ?? ''))) || (INSTALL_STEP.test(String(name ?? '')) && FETCH_NOTE.test(notes))
@@ -53,7 +53,8 @@ export function onFlakyList(name, list = []) {
 
 /**
  * Why one job did not pass, or null when it did (or has not finished). `job`: `{ name, conclusion,
- * steps: [{ name, conclusion }], notes: [annotation messages] }`. Answers `{ real, cause, step? }`;
+ * steps: [{ name, conclusion }], notes: [annotation messages], log?: the failing line of its log }`. Only `notes`, GitHub's
+ * own words, say a timeout or a lost runner; the log's line only tells a failed install step's network error from a lockfile's. Answers `{ real, cause, step? }`;
  * `cause` is `test` (a step failed), `no-step` (failed outside any step it reports), `timeout`,
  * `runner`, `setup` (its first failed step set the job up, #1435), `flaky` or `cancelled`.
  */
@@ -67,7 +68,7 @@ export function jobFailure(job, { flaky = [] } = {}) {
   const step = (job.steps ?? []).find((s) => s.conclusion === 'failure')
   // The first step that failed set the job up (#1435): nothing of the commit ran. A later step that failed after it
   // (an artifact upload that runs on failure) says nothing more.
-  if (step && isSetupStep(step.name, notes)) return { real: false, cause: 'setup', step: step.name }
+  if (step && isSetupStep(step.name, `${notes}\n${job.log ?? ''}`)) return { real: false, cause: 'setup', step: step.name }
   // Failed, and no reason to call it the runner's: the session's to look at, never rerun blind
   return { real: true, cause: step ? 'test' : 'no-step', step: step?.name ?? null }
 }

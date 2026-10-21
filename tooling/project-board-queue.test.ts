@@ -181,7 +181,11 @@ describe('what the merge queue decides for one poll', () => {
     expect(classifyRun(failedRun, [job('verify', 'Run pnpm verify')])).toMatchObject({ real: true, cause: 'test' })
     // An install is the runner's only when its log names the network or a package source
     expect(classifyRun(failedRun, [job('verify', 'Run pnpm install --frozen-lockfile')])).toMatchObject({ real: true, cause: 'test' })
-    expect(classifyRun(failedRun, [job('verify', 'Run pnpm install --frozen-lockfile', [' First failure: ERR_PNPM_META_FETCH_FAIL  GET https://registry.npmjs.org/x: 503'])])).toMatchObject({ real: false, cause: 'setup' })
+    const install = (log: string) => ({ ...job('verify', 'Run pnpm install --frozen-lockfile'), log })
+    expect(classifyRun(failedRun, [install(' First failure: ERR_PNPM_META_FETCH_FAIL  GET https://registry.npmjs.org/x: 503')])).toMatchObject({ real: false, cause: 'setup' })
+    expect(classifyRun(failedRun, [install(' First failure: ERR_PNPM_FETCH_404  GET https://registry.npmjs.org/x: Not Found - 404')])).toMatchObject({ real: true, cause: 'test' })
+    // The log's line is no GitHub word for a timeout or a lost runner: a test that says so is still a test failure
+    expect(classifyRun(failedRun, [install(' First failure: Error: has exceeded the maximum execution time of 20 minutes')])).toMatchObject({ real: true })
     // A real failure in another job makes the run real, naming that job
     expect(classifyRun(failedRun, [job('e2e (webkit 4/5)', 'Install WebKit'), job('verify', 'Run pnpm verify')])).toMatchObject({ real: true, job: { name: 'verify' } })
     // The pull request's own run is judged the same way: its setup failure is rerun once, a test failure is not
@@ -3274,6 +3278,22 @@ describe("the main guard does not revert a commit for the runner's own failure (
     expect(mainRedNotices()[0]!.text).toContain('e2e (webkit 4/5) failed at')
     expect(mainRedNotices()[0]!.text).toContain('(test failure)')
     expect(guardOnDisk().hunt).toMatchObject({ kind: 'test', outcome: 'reverting' })
+  })
+
+  it('hunts a commit when a job that timed out times out again after the rerun: only a failing setup is the runner own failure', async () => {
+    const repo = mainRepo([{ subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] }])
+    const sha = repo.shas[0]!
+    seedQueue([{ repo: R, pr: 81, lowers: [], owner: 'tester', author: 'writer', state: 'merged', commit: sha, title: 'feat(ui): change 81', updatedAt: new Date().toISOString(), reruns: {} }])
+    const timedOut = { ...failedJob(31, 'verify'), conclusion: 'timed_out' }
+    guardRuntime(repo, {
+      branchRuns: { main: [mainRun(990, sha, 'failure'), mainRun(980, repo.green, 'success')] },
+      jobs: { 990: [timedOut] },
+      on: { 'rerun-failed:990': { branchRuns: { main: [secondAttempt(sha, 'failure'), mainRun(980, repo.green, 'success')] } } },
+    })
+    await call('merge_queue')
+    await until(() => guardOnDisk().hunt?.outcome === 'reverting' && mainRedNotices().length > 0, 'the revert')
+    expect(reruns()).toHaveLength(1)
+    expect(mainRedNotices()[0]!.text).toContain('(test failure)')
   })
 
   it('reverts at once, with no rerun, a failure in a test step, and says it is a test failure', async () => {

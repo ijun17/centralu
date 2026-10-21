@@ -131,7 +131,7 @@ export async function diagnose(repo, run, { failingLine, flaky = QUEUE.flakyJobs
   for (const j of failed) {
     j.notes = j.id != null ? await checkRunNotes(repo, j.id) : []
     const step = j.steps.find((s) => s.conclusion === 'failure')
-    if (step && /^Run (?:pnpm|npm|yarn) /i.test(step.name) && failingLine && j.id != null) j.notes.push(await failingLine(repo, j))
+    if (step && /^Run (?:pnpm|npm|yarn) /i.test(step.name) && failingLine && j.id != null) j.log = await failingLine(repo, j)
   }
   const why = classifyRun(run, jobs, { flaky })
   const first = (why.job && failed.find((j) => String(j.id) === why.job.id)) ?? failed[0] ?? null
@@ -234,7 +234,10 @@ export async function guardTick({ q, update, now = Date.now(), renew, act, dir =
       }
       return stop(`it is an infrastructure failure (${what}), and the rerun asked for at ${rerun.at.slice(11, 16)} UTC has not started. Nothing was reverted.`)
     }
-    return stop(`it is an infrastructure failure (${what}), and it failed the same way again after one rerun, so no commit is to blame. Nothing was reverted: rerun the job by hand, or look at the runner.`)
+    // Failed in setup (or lost its runner) again: the runner's, whoever pushed. A timeout, or a job on the flaky list, that
+    // fails again after a rerun may be the commit's (it hangs, it breaks that job only), so it is looked for as a test failure
+    if (jobs.cause !== 'setup' && jobs.cause !== 'runner') base.kind = 'test'
+    else return stop(`it is an infrastructure failure (${what}), and it failed the same way again after one rerun, so no commit is to blame. Nothing was reverted: rerun the job by hand, or look at the runner.`)
   }
   if (!greenSha) return stop(`no fully green commit of main is known in its last ${runs.length} runs, so the commits to look at are not known.`)
   if (!dir) return stop('the queue has no checkout to list the commits since the last green one in.')

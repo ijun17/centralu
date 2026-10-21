@@ -590,8 +590,9 @@ looked into).
   installs; `pnpm install` only when its log names the network or a package source), hit their timeout or
   lost their runner is **infrastructure**: the guard reruns the failed jobs once (`guard.rerun`, written
   down before it asks) and does nothing else. A rerun that passes leaves no trace. One that fails inside
-  the test steps is a **test** failure and goes on as below; one that fails in setup again is reported
-  (an issue and a notice, "an infrastructure failure, not a commit's"), never reverted. A rerun GitHub has
+  the test steps is a **test** failure and goes on as below; one that fails in setup or loses its runner
+  again is reported (an issue and a notice, "an infrastructure failure, not a commit's"), never reverted;
+  a timeout, or a job on the flaky list, that fails again is looked into as a test failure. A rerun GitHub has
   not started in 10 minutes is reported the same way. Any real failure in the run makes it a test failure.
   The notice, the issue ("Kind of failure: **infrastructure failure**" or "**test failure**") and the revert
   pull request say which. The line quoted is the first error line of the step that failed first
