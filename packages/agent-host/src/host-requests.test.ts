@@ -199,7 +199,7 @@ describe('a host request (#1405)', () => {
     const asked = h.requests.ask('agents.deleteSession', { sessionId: 'm1.s2', deleteWorktree: true }, { client: null }, new AbortController().signal)
     const card = await h.nextCard()
     expect(card.question).toContain('Allow agents.deleteSession for the session "Remote work" on the linked machine "Laptop"?')
-    expect(card.question).toContain('The session moves to the trash, and its worktree is marked to be deleted when the trash is emptied.')
+    expect(card.question).toContain('The session moves to the session archive, and its worktree is marked to be deleted when the session is deleted from the archive for good.')
     // The schema's defaults are shown: they are what runs
     expect(card.question).toContain('\\"deleteExternal\\":false')
     h.requests.answer(card.requestId, 'deny')

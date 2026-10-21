@@ -12,7 +12,7 @@ import { plainQuoted } from './sessions/tool-answers.js'
  *   that has no effect ("the person asked for this"), and a call the method would refuse is refused before it asks.
  * - **By name.** A session, project, app or linked machine is named as the window's lists name it (`sessions.list`,
  *   `projects.list`, `apps.list`, `machines.list`, read through the router, so a linked machine's rows are there), with
- *   the machine it lives on, as the trash's card names its rows. An id that names nothing is refused: the person would
+ *   the machine it lives on, as the session archive's card names its rows. An id that names nothing is refused: the person would
  *   have nothing to judge. What a delete loses is said in a sentence of its own (`EFFECTS`).
  */
 
@@ -37,12 +37,12 @@ function methodParams(method: string): z.ZodType | null {
 /** What a delete loses, said on its card; a method not named here gets only the card's general sentence */
 const EFFECTS: Record<string, (p: Record<string, unknown>) => string> = {
   'agents.deleteSession': (p) =>
-    'The session moves to the trash' +
-    (p.deleteWorktree === true ? ', and its worktree is marked to be deleted when the trash is emptied' : '') +
+    'The session moves to the session archive' +
+    (p.deleteWorktree === true ? ', and its worktree is marked to be deleted when the session is deleted from the archive for good' : '') +
     (p.deleteExternal === true ? ", and the tool's own conversation file with it" : '') +
     '.',
   'agents.deleteAgentChild': (p) =>
-    `The session moves to the trash, and the worktree on the branch ${plainQuoted(str(p.worktreeBranch), 120)} is deleted when nothing in it would be lost.`,
+    `The session moves to the session archive, and the worktree on the branch ${plainQuoted(str(p.worktreeBranch), 120)} is deleted when nothing in it would be lost.`,
   'agents.deleteOrchestratorSkill': (p) => `The orchestrator skill ${plainQuoted(str(p.name), 120)} is deleted.`,
   'projects.delete': () => "Centralu's records of the project are erased: its sessions, their conversations, its search index and approval rules. Its folder stays.",
   'apps.remove': () => "The app's folder moves to app-trash in the data folder, and it is taken off every session it was attached to.",
