@@ -68,7 +68,7 @@ function externalMissingReason(label: string, cwd: string): string {
  * What starting a session's process reaches of the session manager (#428), typed as the manager declares each member.
  * The manager builds it with getters for its fields (`SessionManager.parts`), so each is read when used, never kept.
  */
-export type SessionStartsHost = Pick<DelegationHost, 'adapters' | 'cwdFor' | 'emit' | 'handles' | 'meta' | 'onEvent' | 'running' | 'store' | 'toolProfileOf' | 'uiPreferences'> &
+export type SessionStartsHost = Pick<DelegationHost, 'adapters' | 'children' | 'cwdFor' | 'emit' | 'handles' | 'meta' | 'onEvent' | 'running' | 'store' | 'toolProfileOf' | 'uiPreferences'> &
   Pick<SessionRecordHost, 'cacheLedger' | 'modelWindows'> &
   Pick<SessionTrashHost, 'record' | 'restartPolicy'> &
   Pick<RestartHost, 'lettingGo'> &
@@ -139,6 +139,11 @@ export class SessionStarts {
        * contract: a window's first message is the person's. Stored and broadcast as that sender's, as `send`'s `from`.
        */
       initialFrom?: { sessionId: string; name: string }
+      /**
+       * A script or the RPC started the session (the connection holds the limited credential, not the window's token): the work is the person's, written
+       * down in the mailbox before the first message goes in, and the turn it starts is reported to their Inbox (§8.1). Not in the RPC contract
+       */
+      byScript?: boolean
       /**
        * Role text pinned on the row and reapplied on every wake — filled only by `createAppBuilder`. A coordinator's
        * role rode here too; nothing creates a coordinator since the control app went (#372), and one already in a
@@ -478,6 +483,7 @@ export class SessionStarts {
       this.host.emit({ type: 'user_message', sessionId: id, seq, text: params.initialPrompt, ...(from ? { from } : {}) })
       this.host.cardRests.turnAsked(id)
       // Never stamped: its only producer is a handoff, whose opening quotes a note written by an agent, not the person's typing
+      if (params.byScript) this.host.children.startedForPerson(id, params.initialPrompt)
       handle.send(params.initialPrompt)
     }
     return info

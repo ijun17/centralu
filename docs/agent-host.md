@@ -2836,6 +2836,19 @@ as going for ever. A `start_agent`, `send_to_session` or `ask_project` thread th
 names the owner), is at rest, holds nothing paused or queued and has no mail it has not taken (the owner or the person sent more into it), goes to `review` with an event (`reason: no_report_owed`) and no report: that build told the owner. Blocked threads and
 threads made with `mail` or `agent_session` are left. The old rows stay, kept in step as before. Queued requests are not adopted yet (#1456).
 
+**Work the person owns** (slice 3, §8.1). A session a script or the RPC starts with a first message has nobody waiting for it: `agents.createSession` called over a
+connection with the limited credential (#1405: every process of the user other than the window) and an `initialPrompt` passes `byScript`, and `createSession` writes the
+work down before the message goes in (`startedForPerson`): a `running` thread owned by the person (origin `create_session`) with the message as its `assign`, already
+read by the session, which wakes for nothing. A call the person had to allow on a card (a preset above `normal`) runs as the limited call it was (`HostRequests`), so it is
+a script's too. A window's own `createSession` is the person typing, and starts no thread. The person owes the work while that thread is `running` (`personOwes`), so it
+survives a host swap in the store and needs no mark of its own. The turns of the session that no one else started (not the person's, not a report's, not another
+session's) belong to the thread while it runs (`turnRecorder`), so work handed on in them is a child thread of it and the turn's end is a pause, as for a session's work (§6).
+
+The end of the first turn that is the work's (`reportToPersonIfOwed`, for a turn no one else is owed and the person did not start) is a report in the person's thread: Centralu's
+words (`personReportLine`: how the turn ended, a count of tasks, nothing of the session's words), the session's last response as its own relayed message beside them, the
+`failed` kind as a fact; the thread goes to `review`, so the turns after it are the person's own and are not reported. A turn that left the session's own background work
+running is a pause: the thread stays `running`, the same count of tasks is said once, and the turn that work's end starts is the report. A turn a quit cut (the next start found the session mid-turn with no process, or a kept process could not be re-attached) is reported as the `quit` it was, and the thread goes to `review`. Not done (#1463): a pause whose background work ends with no turn leaves the thread `running` (report marks have a 60 s settle for this; the person's thread has none), and a first send that throws after the session started leaves its thread `running`. Also not done: a session started on a linked machine has no thread.
+
 ### 4.7 Remote mode, phase 1: `centralu serve` (#82)
 
 The app can work with a project on another machine (an SSH server, later a laptop). That machine runs its own,

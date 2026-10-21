@@ -25,11 +25,14 @@ function harness(opts: { trash?: TrashedSession[]; canShow?: boolean; limits?: H
     'apps.list': () => [{ appId: 'notes', projectId: null, name: 'Notes' }],
     'machines.list': () => [{ id: 'm1', name: 'Laptop' }],
   }
+  /** The rights each call that ran was made with */
+  const rights = new Map<string, 'full' | 'limited' | undefined>()
   const requests = new HostRequests({
     emit: (e) => events.push(e),
     canShow: () => canShow,
     limits: opts.limits,
-    rpc: async (method, params) => {
+    rpc: async (method, params, ctx) => {
+      if (!Object.hasOwn(lists, method)) rights.set(method, ctx?.rights)
       // The lists a card reads to name what a call acts on; every other call is recorded
       const read = Object.hasOwn(lists, method) ? lists[method] : undefined
       if (read) return read()
@@ -58,6 +61,7 @@ function harness(opts: { trash?: TrashedSession[]; canShow?: boolean; limits?: H
     requests,
     events,
     calls,
+    rights,
     raised,
     nextCard,
     setTrash: (t: TrashedSession[]) => (trash = t),
@@ -90,6 +94,14 @@ describe('a host request (#1405)', () => {
     expect(h.purged()).toEqual(['s1'])
     expect(h.events.at(-1)).toEqual({ type: 'host_request_resolved', requestId: card.requestId, outcome: 'allowed' })
     expect(h.requests.list()).toEqual([])
+  })
+
+  it('runs the call it allowed as a limited credential’s, which is what a script’s session is told from a window’s by (§8.1)', async () => {
+    const h = harness()
+    const asked = h.requests.ask('agents.deleteSession', { sessionId: 's1' }, { client: null }, new AbortController().signal)
+    h.requests.answer((await h.nextCard()).requestId, 'allow')
+    await asked
+    expect(h.rights.get('agents.deleteSession')).toBe('limited')
   })
 
   it('names the linked machine, and relays nothing to it before Allow', async () => {

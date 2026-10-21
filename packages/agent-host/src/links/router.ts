@@ -16,7 +16,7 @@ import { rpcError } from '../rpc-error.js'
  */
 
 /** Which window's connection a call came in on (transport/server.ts). Passed to the hub's own handler, never forwarded */
-type RpcContext = { client: number }
+type RpcContext = { client: number; rights?: 'full' | 'limited' }
 export type RpcHandler = (method: string, params: unknown, ctx?: RpcContext) => Promise<unknown>
 
 /** One linked machine, as the router needs it (linked-machine-connection.ts implements it) */

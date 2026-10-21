@@ -6,6 +6,9 @@ import type { AdapterCapabilities, NormalizedEvent, ToolName } from '@cc/protoco
 import type { AgentAdapter, AgentProcess, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
 import { ClaudeAdapter } from '../adapters/claude/index.js'
 import { Store } from '../dev-services/store.js'
+import { PERSON } from '../mail/address.js'
+import { personReportRecorder, personWorkRecorder } from '../mail/delegation.js'
+import { MailService } from '../mail/service.js'
 import { createRpcHandler } from '../rpc.js'
 import { SessionManager, type AgentProcessHost } from './manager.js'
 
@@ -85,7 +88,7 @@ class Adapter implements AgentAdapter {
   }
 }
 
-const processes: AgentProcessHost = { spawn: () => new FakeProcess() as unknown as AgentProcess }
+const processes: AgentProcessHost = { spawn: () => new FakeProcess() }
 
 let store: Store
 let events: NormalizedEvent[]
@@ -240,6 +243,33 @@ describe('a host restart under the keeper', () => {
     expect(b.claude.listed).toBe(0)
   })
 
+  it('work the person owns (a script started the session, §8.1) in a kept process that cannot be re-attached: the person is told it stopped, and the thread closes', async () => {
+    const a = host()
+    const id = await workingSession(a)
+    const mail = new MailService(store.mail, { hostId: () => 'hub-aaaaaaaa' })
+    personWorkRecorder(mail, () => ({ projectId: null, depth: 0 }))(id, 'a long job')
+    await a.mgr.detachAll()
+
+    const b = host(new Set([id]))
+    b.mgr.useMail({
+      sessionGone: () => {},
+      sessionChanged: () => {},
+      sessionEvent: () => {},
+      personWork: {
+        started: personWorkRecorder(mail, () => ({ projectId: null, depth: 0 })),
+        owes: (sid) => mail.personOwes(mail.sessionAddress(sid)),
+        report: personReportRecorder(mail, store.mail),
+      },
+    })
+    b.claude.createSession = async () => {
+      throw new Error('the conversation is gone')
+    }
+    await b.mgr.adoptKept([{ sessionId: id, tool: 'claude', process: new FakeProcess() }])
+    const thread = store.mail.latestBetween(PERSON, mail.sessionAddress(id))!
+    expect(thread.state).toBe('review')
+    expect(store.mail.messagesAfter(thread.id, 0).find((m) => m.sender === 'centralu' && m.kind === 'report')?.facts).toMatchObject({ outcome: 'quit' })
+  })
+
   /** Without the keeper's list the startup reset turns the running session idle — today's rule for a host with no keeper */
   it('a session with no kept process is still reset to idle at startup', async () => {
     const a = host()
@@ -252,7 +282,7 @@ describe('a host restart under the keeper', () => {
   it('a kept process whose session is gone is stopped — nobody could address it', async () => {
     const b = host()
     const kept = new FakeProcess()
-    await b.mgr.adoptKept([{ sessionId: 'deleted', tool: 'claude', process: kept as unknown as AgentProcess }])
+    await b.mgr.adoptKept([{ sessionId: 'deleted', tool: 'claude', process: kept }])
     expect(kept.kills).toEqual(['SIGTERM'])
     expect(b.claude.created).toHaveLength(0)
   })

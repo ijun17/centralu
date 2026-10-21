@@ -57,6 +57,28 @@ function outcomeWord(work: ReportWork | undefined, stop: { reason?: string } | n
   return 'stopped'
 }
 
+/** How a turn of work the person started ended, in Centralu's words for their Inbox (§8.1): a count of tasks, never a task's or the session's words */
+function personReportLine(outcome: string, tasks: number): string {
+  switch (outcome) {
+    case 'finished':
+      return '[Centralu] The session you started finished its turn.'
+    case 'failed':
+      return '[Centralu] The session you started could not finish its turn: it failed.'
+    case 'limit_reached':
+      return '[Centralu] The session you started stopped after hitting a usage limit.'
+    case 'network':
+      return '[Centralu] The session you started stopped before finishing: a network error ended its turn.'
+    case 'interrupted':
+      return '[Centralu] The session you started stopped before finishing: its tool interrupted the turn.'
+    case 'quit':
+      return '[Centralu] The session you started stopped before finishing: Centralu quit or restarted during its turn.'
+    case 'paused':
+      return `[Centralu] The session you started paused: its turn ended while its own background work is still running (${tasks} task${tasks === 1 ? '' : 's'}).`
+    default:
+      return '[Centralu] The session you started stopped before finishing.'
+  }
+}
+
 /** The first line of a report held over work the session handed on and waits for (§6): a count, never a thread's words */
 function waitingReportLine(n: number): string {
   return `[Centralu] The assigned work paused: its turn ended while ${n} thread${n === 1 ? '' : 's'} it handed on ${n === 1 ? 'is' : 'are'} still going.
@@ -180,6 +202,31 @@ export class ChildReports {
       console.error(`[mail] could not write the report of ${childId.slice(0, 8)} for ${ownerId.slice(0, 8)} (${errorMessage(e)})`)
       return 'none'
     }
+  }
+
+  /**
+   * The end of a turn of work the person owns (§8.1): a script or the RPC started the session with a first message, and nobody is waiting for it, so
+   * the report lands in the person's Inbox: Centralu's words for how the turn ended, the session's last response as its own beside them. Only the
+   * turns that are the work's: the person's own are theirs (#1377), and once the thread is reported the turns after it are not reported
+   */
+  async reportToPersonIfOwed(sessionId: string, ending: NormalizedEvent, answer?: string, turn?: TurnStarter): Promise<void> {
+    if (this.host.handingOver || this.host.disposing || turn?.by === 'person') return
+    if (!this.host.children.personOwes(sessionId)) return
+    const stop = this.host.meta.get(sessionId)?.interruption
+    // A turn that completed while its own background work runs is a pause: the turn the work's end starts is the work's end
+    const running = ending.type === 'turn_complete' ? this.ownTasksRunning(sessionId) : []
+    const message = stop?.detail ?? (ending.type === 'error' ? String(ending.error?.message ?? '') : '')
+    const kind = message ? (stop?.reason === 'network' ? 'network' : errorKind(message)) : undefined
+    const outcome = outcomeWord(running.length > 0 ? { paused: running, stoppable: false } : undefined, stop, ending)
+    const words = answer !== undefined ? clipPreview(answer, 600) : previewOf(this.host.store.messages, sessionId, 600)
+    this.host.children.reportedToPerson(sessionId, {
+      outcome,
+      body: personReportLine(outcome, running.length),
+      ...(words ? { answer: words } : {}),
+      ...(kind ? { error: kindWord(kind) } : {}),
+      ...(running.length > 0 ? { paused: running.length } : {}),
+      then: running.length > 0 ? 'running' : 'review',
+    })
   }
 
   /** Holds the session's owed report over its own background work (#721); the mark itself stays as it is */

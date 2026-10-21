@@ -24,7 +24,7 @@ import { MailDelivery } from './mail/delivery.js'
 import { MailPerson } from './mail/person.js'
 import { takeOverFromEarlierBuild } from './mail/adoption.js'
 import { pausedReportKey, readPausedTasks } from './sessions/child-ownership.js'
-import { answerRecorder, delegationRecorder, finishRecorder, reportRecorder, turnRecorder } from './mail/delegation.js'
+import { answerRecorder, delegationRecorder, finishRecorder, personReportRecorder, personWorkRecorder, reportRecorder, turnRecorder } from './mail/delegation.js'
 import { recordedAgentDepth } from './sessions/agent-depth.js'
 import { COMMAND_CALLS, PLAIN_CALLS } from './mail/frame.js'
 import { MailTool } from './mail/tool.js'
@@ -449,6 +449,15 @@ mgr.useMail({ sessionGone: (id) => void mail.sessionGone(id), sessionChanged: (i
   waitingOn: (ownerId, childId) => mail.waitingOn(mail.sessionAddress(ownerId), mail.sessionAddress(childId)),
   answered: answerRecorder(mail, store.mail),
   finishedWith: finishRecorder(mail),
+  // A session a script or the RPC started with a first message: the person owns the work, and its turn is reported to their Inbox (§8.1)
+  personWork: {
+    started: personWorkRecorder(mail, (id) => {
+      const s = mgr.sessionInfo(id)
+      return s && { projectId: s.projectId, depth: recordedAgentDepth(store.settings, id) }
+    }),
+    owes: (id) => mail.personOwes(mail.sessionAddress(id)),
+    report: personReportRecorder(mail, store.mail),
+  },
   // A turn's end is a report in the thread, and the owner is told as mail when it can read it (§8.1)
   report: reportRecorder(mail, store.mail),
   // Every turn the mailbox did not start is recorded too: whose it is, and the thread it belongs to (§6)
@@ -681,7 +690,7 @@ const activity = (): ActivitySnapshot => ({
  */
 const requests: HostRequests = new HostRequests({
   emit: (e) => events.push(e),
-  rpc: (method, params) => hostDrain.track(`request ${method}`, () => router.handle(method, params)),
+  rpc: (method, params, ctx) => hostDrain.track(`request ${method}`, () => router.handle(method, params, ctx)),
   canShow: (): boolean => server.showsHostRequests(),
 })
 const router: Router = new Router({
