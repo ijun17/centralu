@@ -112,11 +112,11 @@ Each is argued where the link points, with the alternatives not taken.
 14. ~~Claude's own cross-session channel under `auto`~~: **decided** (owner, 2026-10-20). It is refused for every
     Centralu session (§9.6, slice 0).
 15. **The maximum hold** (§7.10): 5 minutes for questions and the person's mail, 15 for the rest.
-16. **Chain at the session or the computer** (§11.9.2). The owner's first comment on #1455 says "a computer or
-    orchestrator already in the chain"; the second counts by session pair. Proposed: new work may not return to a
-    session already in the chain, nor to an orchestrator whose computer's orchestrator is in it. A *different* ordinary
-    session on a computer already in the chain may get new work, as a hop within the 3. Confirm?
-17. **Hop limit 3, and 5 new threads an hour per session pair** (§11.9.2).
+16. ~~Chain at the session or the computer~~: **decided** (owner, 2026-10-21, #1455), as proposed. New work may not
+    return to a session already in the chain, nor to an orchestrator whose computer's orchestrator is in it. A different
+    ordinary session on a computer already in the chain may get new work, as a hop (§11.9.2).
+17. ~~Hop limit and per-pair rate~~: **decided** (owner, 2026-10-21, #1455): at most 3 hops per chain, and at most 5 new
+    threads an hour per session pair (§11.9.2).
 18. **Store step numbers** come from the orchestrator when a slice is briefed. Here they are named M1, M2 and so on.
 
 ## 2. Words
@@ -1374,6 +1374,8 @@ own work, still a proposal at the link level. The mailbox depends on it only thr
   reason `chain` when:
   - the receiver's address is already in the chain; or
   - the receiver is an orchestrator, and that computer's orchestrator is already in the chain.
+  - A different ordinary session on a computer already in the chain may get new work; that is a hop (decided by the owner,
+    2026-10-21, #1455).
   
   The asker is told which hop it would repeat.
 - **Answers stay on the thread.** Answers, reports, questions back and notes in an existing thread are never new work and
