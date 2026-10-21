@@ -587,6 +587,16 @@ export class MailRecords {
     return row && toMessage(row)
   }
 
+  /** The latest message `sender` wrote itself: not one Centralu put in the thread in its name (`relayed`: a session's last response a report carries) */
+  lastWordBy(threadId: string, sender: string): MessageRow | undefined {
+    const row = this.db
+      .prepare<[string, string], MessageSql>(
+        `SELECT * FROM mail_messages WHERE thread_id = ? AND sender = ? AND COALESCE(CASE WHEN json_valid(facts) THEN json_extract(facts, '$.relayed') END, 0) <> 1 ORDER BY seq DESC LIMIT 1`,
+      )
+      .get(threadId, sender)
+    return row && toMessage(row)
+  }
+
   /** The latest message of a thread that is not an event: what the Inbox shows as its last word */
   lastMessageOf(threadId: string): MessageRow | undefined {
     const row = this.db

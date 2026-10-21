@@ -147,6 +147,17 @@ describe('background work across a host swap (#648)', () => {
     expect(JSON.parse(store.settings.appSetting(`background_tasks:${id}`)!)).toEqual([])
   })
 
+  it('a process adopted from an earlier host is not one that reads mail: it keeps the tools it started with', async () => {
+    const a = host()
+    const id = await sessionWithShell(a, false)
+    const b = host(new Set([id]))
+    expect(b.mgr.toolProfileOf(id)).toBe('reader')
+    expect(b.mgr.readsMail(id)).toBe(true)
+    await adopt(b, id)
+    expect(b.mgr.toolProfileOf(id)).toBe('reader')
+    expect(b.mgr.readsMail(id)).toBe(false)
+  })
+
   it('a process adopted from a host that kept no record is held as unknown until its tool first lists its work', async () => {
     const a = host()
     const id = await sessionWithShell(a)

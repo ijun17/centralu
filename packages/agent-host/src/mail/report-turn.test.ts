@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest'
 import { Store } from '../dev-services/store.js'
 import { sessionAddress } from './address.js'
-import { answerRecorder, delegationRecorder, type AnswerGiven } from './delegation.js'
+import { answerRecorder, delegationRecorder, reportRecorder, type AnswerGiven } from './delegation.js'
 import { refusalReason } from './rules.js'
 import { MailService, type TurnReport } from './service.js'
 import { MailTool } from './tool.js'
@@ -222,5 +222,66 @@ describe('a call that returned the answer is the report', () => {
   it('is nothing when there is no thread between them', () => {
     const s = setup()
     expect(() => answerRecorder(s.mail, s.store.mail)('owner', 'nobody', { ok: true, text: 'x' })).not.toThrow()
+  })
+})
+
+describe('what the mailbox says of a draft', () => {
+  const draft = { outcome: 'finished', body: '[Centralu] The assigned work finished.', then: 'review', delivery: 'wake' } as const
+
+  it('mailed when the owner is woken: the report waits in the thread for the delivery', () => {
+    const a = setup()
+    expect(reportRecorder(a.mail, a.store.mail)('owner', 'child', draft)).toBe('mailed')
+    expect(a.store.mail.receiptsOf(a.store.mail.messagesAfter(a.thread.id, 0).find((m) => m.kind === 'report')!.id)[0]).toMatchObject({ deliveredAt: null })
+  })
+
+  it('an object when the old way tells too: the report waits undelivered until that message is delivered, and then nothing wakes the owner', () => {
+    for (const [delivery, keep] of [['in-turn', false], ['old', true]] as const) {
+      const a = setup()
+      const reported = reportRecorder(a.mail, a.store.mail)('owner', 'child', { ...draft, delivery })
+      if (typeof reported !== 'object') throw new Error('expected an object')
+      expect(reported.keep).toBe(keep)
+      const id = a.store.mail.messagesAfter(a.thread.id, 0).find((m) => m.kind === 'report')!.id
+      expect(a.store.mail.receiptsOf(id)[0]).toMatchObject({ deliveredAt: null, handledAt: null })
+      reported.settle()
+      expect(a.store.mail.receiptsOf(id)[0]).toMatchObject({ deliveredAt: NOW, readAt: NOW, handledAt: NOW })
+      a.clock.t += 3_000
+      expect(a.mail.drain(OWNER, {}).messageIds).toEqual([])
+    }
+  })
+
+  it('none when there is no thread, when it was closed by the owner, or when the owner has left it: the old way tells', () => {
+    const a = setup()
+    const record = reportRecorder(a.mail, a.store.mail)
+    expect(record('owner', 'nobody', draft)).toBe('none')
+    a.mail.partyGone(OWNER)
+    expect(record('owner', 'child', draft)).toBe('none')
+    const b = setup()
+    b.mail.update(b.thread.id, OWNER, { state: 'done', outcome: 'dropped' })
+    expect(reportRecorder(b.mail, b.store.mail)('owner', 'child', draft)).toBe('none')
+  })
+
+  it('closed when the session closed the thread itself with a report after the owner’s last word', () => {
+    const a = setup()
+    new MailTool(a.mail, a.store.mail).run('child', { action: 'close', thread: a.thread.id, outcome: 'finished', text: 'merged it myself' })
+    expect(reportRecorder(a.mail, a.store.mail)('owner', 'child', draft)).toBe('closed')
+    // The owner spoke after it (a follow-up in a thread the session had closed cannot happen: it is done), so the order decides only while open
+    expect(a.store.mail.messagesAfter(a.thread.id, 0).filter((m) => m.sender === 'centralu' && m.kind === 'report')).toEqual([])
+  })
+
+  it('puts a draft’s answer in the thread as the session’s message, and the session’s own relayed words are not it closing the work', () => {
+    const a = setup()
+    reportRecorder(a.mail, a.store.mail)('owner', 'child', { ...draft, answer: 'merged' })
+    const messages = a.store.mail.messagesAfter(a.thread.id, 0).filter((m) => m.kind === 'report')
+    expect(messages.map((m) => m.sender)).toEqual([CHILD, 'centralu'])
+    // The owner finishes the thread: the session’s relayed words, last of its own, do not read as it having closed the work
+    a.mail.update(a.thread.id, OWNER, { state: 'done', outcome: 'dropped' })
+    expect(reportRecorder(a.mail, a.store.mail)('owner', 'child', draft)).toBe('none')
+  })
+
+  it('carries the pause, the error kind and the person’s note into the facts', () => {
+    const a = setup()
+    reportRecorder(a.mail, a.store.mail)('owner', 'child', { ...draft, outcome: 'paused', then: 'running', paused: 2, error: 'network', personNote: true })
+    const report = a.store.mail.messagesAfter(a.thread.id, 0).find((m) => m.kind === 'report')
+    expect(report?.facts).toEqual({ outcome: 'paused', about: { session: CHILD }, paused: 2, error: 'network', personNote: true })
   })
 })

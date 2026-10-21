@@ -6,7 +6,9 @@ import {
   liveBackgroundTasks,
 } from '@cc/protocol'
 import { inTurn } from '../idle.js'
-import { errorKind } from './error-kind.js'
+import { errorMessage } from '@cc/protocol'
+import { errorKind, kindWord } from './error-kind.js'
+import type { ReportDraft, ReportedAs } from '../mail/delegation.js'
 import { PAUSED_REPORT_SETTLE_MS, type TurnStarter } from './child-ownership.js'
 import { type DelegationHost, taskList } from './delegation-flow.js'
 import type { ReportWork } from './linked-reports.js'
@@ -34,6 +36,25 @@ const FOR_MODEL: Naming = {
     return done === tasks.length ? `${n}, all completed` : `${n}, ${done} completed`
   },
   machine: () => 'its machine',
+}
+
+/** In a report's place of the last response when it is not read: Centralu's words, not the session's */
+const NOT_READ = "(not read: the session's last turn was the person's; read_session shows it)"
+
+/** The one word of Centralu's that says how a turn ended, for the mailbox's wake (the same cases `deliverReport` words in full) */
+function outcomeWord(work: ReportWork | undefined, stop: { reason?: string } | null | undefined, ending: { type: string }): string {
+  if (work && 'tookOver' in work) return 'took_over'
+  if (work && 'swapped' in work) return 'swapped'
+  if (work && ('machineRemoved' in work || 'linkLost' in work)) return 'stopped'
+  if (work && 'paused' in work) return 'paused'
+  if (work && 'settled' in work) return 'settled'
+  if (stop?.reason === 'network') return 'network'
+  if (stop?.reason === 'interrupted') return 'interrupted'
+  if (stop?.reason === 'quit') return 'quit'
+  if (ending.type === 'error') return 'failed'
+  if (ending.type === 'limit_reached') return 'limit_reached'
+  if (ending.type === 'turn_complete') return 'finished'
+  return 'stopped'
 }
 
 /** The first line of a report held over the session's own background work (#721) */
@@ -108,7 +129,12 @@ function settledReportLine(tasks: readonly BackgroundTask[], name: Naming = STOR
  * builds it with getters for its fields (`SessionManager.parts`), so each is read when used, never kept.
  */
 export type ChildReportsHost = Pick<DelegationHost, 'children' | 'deliver' | 'disposing' | 'handingOver' | 'meta' | 'store' | 'trashing'> &
-  Pick<RoutedCardsHost, 'toolProfileOf'> &
+  Pick<RoutedCardsHost, 'toolProfileOf'> & {
+    /** Whether the session's seat has the mail tool: the mailbox can wake it (the receive rule) */
+    canReadMail(sessionId: string): boolean
+    /** Whether the process running the session is known to have it too (not one kept from an earlier host): only how a report is told */
+    readsMail(sessionId: string): boolean
+  } &
   Pick<RestartHost, 'inputsHeld'> &
   Pick<QueuedRequestsHost, 'projectRow'>
 
@@ -120,6 +146,30 @@ export type ChildReportsHost = Pick<DelegationHost, 'children' | 'deliver' | 'di
  */
 export class ChildReports {
   constructor(private readonly host: ChildReportsHost) {}
+
+  /** The mailbox's way of taking a report (§8.1), set by the host when it has one: a thread the report goes in, else the old way tells */
+  private mailReport: ((ownerId: string, childId: string, draft: ReportDraft) => ReportedAs) | undefined
+  useMail(hook: ChildReports['mailReport']): void {
+    this.mailReport = hook
+  }
+
+  /** The draft of a report for the mailbox, and what it answered; `none` when there is no mailbox, or it failed */
+  private toMailbox(ownerId: string, childId: string, draft: Omit<ReportDraft, 'delivery'>): ReportedAs {
+    if (!this.mailReport) return 'none'
+    // A seat that cannot read mail is told the old way, and the notice is kept if it cannot be delivered: nothing else will tell it
+    const seat = this.host.canReadMail(ownerId)
+    // An owner that reads mail and is in a turn keeps today's in-turn delivery until slice 6 (a wake would wait for the turn to end). So does
+    // one whose process may not have the tool (kept from an earlier host): the relayed message tells it, and if that fails the mailbox wakes it
+    // when it can, which is the one report (a notice kept as well would be a second)
+    const owner = this.host.meta.get(ownerId)
+    const delivery = !seat ? 'old' : !this.host.readsMail(ownerId) || (owner && inTurn(owner.state)) ? 'in-turn' : 'wake'
+    try {
+      return this.mailReport(ownerId, childId, { ...draft, delivery })
+    } catch (e) {
+      console.error(`[mail] could not write the report of ${childId.slice(0, 8)} for ${ownerId.slice(0, 8)} (${errorMessage(e)})`)
+      return 'none'
+    }
+  }
 
   /** Holds the session's owed report over its own background work (#721); the mark itself stays as it is */
   pauseReport(sessionId: string, running: readonly BackgroundTask[]): void {
@@ -220,7 +270,7 @@ export class ChildReports {
      */
     const { name, project } = this.reportedAs(target)
     const work = paused ? { paused: running, stoppable: target.askedBy === orchestratorId } : settled ? { settled } : undefined
-    const preview = theirs ? "(not read: the session's last turn was the person's; read_session shows it)" : answer !== undefined ? clipPreview(answer, 600) : previewOf(this.host.store.messages, sessionId, 600)
+    const preview = theirs ? NOT_READ : answer !== undefined ? clipPreview(answer, 600) : previewOf(this.host.store.messages, sessionId, 600)
     await this.deliverReport(orchestratorId, sessionId, name, project, preview, ending, work, theirs ? undefined : this.answerSeq(sessionId), turn)
   }
 
@@ -301,16 +351,24 @@ export class ChildReports {
     if (!target || !this.host.meta.has(callerId)) return
     const { name, project } = this.reportedAs(target)
     const read = `read_session(sessionId="${sessionId}")`
+    const stored =
+      tookOverReportLine(tasks) +
+      `Session: ${frameField(name)}\n` +
+      `id: ${sessionId}\n` +
+      `Project: ${frameField(project)}\n\n` +
+      `If you need more, you can read that session's recent conversation with read_session.`
+    // The thread is closed `dropped` and its owner told once; with no thread, or an owner that cannot read mail, the old way tells as well
+    // Centralu's words alone: the thread and the wake carry no name, project or task text (#1186)
+    const forModel = tookOverReportLine(tasks, FOR_MODEL) + `id: ${sessionId}\n\n${read} shows what the person and the session did since.`
+    const taken = this.toMailbox(callerId, sessionId, { outcome: 'took_over', body: forModel, ...(tasks.length ? { paused: tasks.length } : {}), then: 'dropped' })
+    if (taken === 'mailed' || taken === 'closed') return
     await this.tellSession(
       callerId,
-      tookOverReportLine(tasks) +
-        `Session: ${frameField(name)}\n` +
-        `id: ${sessionId}\n` +
-        `Project: ${frameField(project)}\n\n` +
-        `If you need more, you can read that session's recent conversation with read_session.`,
+      stored,
       { sessionId, name },
       true,
-      tookOverReportLine(tasks, FOR_MODEL) + `id: ${sessionId}\n\n${read} shows what the person and the session did since.`,
+      forModel,
+      typeof taken === 'object' ? { keep: taken.keep, onDelivered: taken.settle } : undefined,
     )
   }
 
@@ -367,35 +425,62 @@ export class ChildReports {
       : ''
     const cleanUp = !work && !stop && ending.type === 'turn_complete' ? this.cleanUpWords(orchestratorId, sessionId) : ''
     const read = `read_session(sessionId="${sessionId}"${answerSeq !== undefined ? `, around=${answerSeq}` : ''})`
+    const kind = message ? (stop?.reason === 'network' ? 'network' : errorKind(message)) : undefined
+    // The session's last response, its own words: when there is one, the thread keeps it as the session's message in front of the report
+    const answered = preview !== '' && preview !== NOT_READ
+    /*
+     * What the model reads (#1186): how the work ended, the session's id, the kind of its tool's error, how to go on, and the read that shows
+     * its last response and that error. Nothing the reported session, its tool, its machine or a name could have written goes in (#120): not
+     * its last response, its error's words, its name, its project's or its tasks' descriptions; read_session lists the names by id.
+     * It used to read only "intersession message available", so a failed run, a usage limit and the way to continue reached the store and the
+     * screen and never the model. The thread's report is these words too: the mailbox shows it under Centralu's name
+     */
+    const forModel = (inThread: boolean) =>
+      outcomeOf(FOR_MODEL) + personPartLine(part) +
+      `id: ${sessionId}\n\n` +
+      (kind ? `Its tool's error, by kind: ${kind}. Its words are its tool's, not Centralu's, so they are not repeated here: ${read} shows them.\n\n` : '') +
+      resume +
+      (inThread && answered
+        ? `Its last response is that session's own words: it is the message above in this thread, and ${read} reads more.`
+        : `Its last response is that session's own words, so it is not repeated here: ${read} reads it${preview ? '' : ' (it had none)'}.`) +
+      cleanUp
+    const stored =
+      outcome +
+      `Session: ${frameField(name)}\n` +
+      `id: ${sessionId}\n` +
+      `Project: ${frameField(project)}\n\n` +
+      failure +
+      resume +
+      `Last response:\n${preview || '(no content)'}\n\n` +
+      `If you need more, you can read that session's recent conversation with read_session.` +
+      cleanUp
+    /*
+     * Into the thread of this work when there is one (§8.1): the mailbox tells the owner as mail (a wake whose facts are the outcome,
+     * the kind of error, the tasks left and the person's note; the words are read with the tool). The old way tells when there is no thread,
+     * or when the owner cannot read mail; either way the thread has the report
+     */
+    // Held over the session's own background work: the thread stays running, and the report says how many tasks are left
+    const holding = !!work && 'paused' in work && !('tookOver' in work) && !('machineRemoved' in work) && !('linkLost' in work)
+    const reported = this.toMailbox(orchestratorId, sessionId, {
+      outcome: outcomeWord(work, stop, ending),
+      body: forModel(true),
+      ...(answered ? { answer: preview } : {}),
+      ...(kind ? { error: kindWord(kind) } : {}),
+      ...(holding ? { paused: work.paused.length } : {}),
+      ...(part?.wrote || part?.added ? { personNote: true } : {}),
+      then: holding ? 'running' : 'review',
+    })
+    if (reported === 'mailed' || reported === 'closed') return
     await this.tellSession(
       orchestratorId,
-      outcome +
-        `Session: ${frameField(name)}\n` +
-        `id: ${sessionId}\n` +
-        `Project: ${frameField(project)}\n\n` +
-        failure +
-        resume +
-        `Last response:\n${preview || '(no content)'}\n\n` +
-        `If you need more, you can read that session's recent conversation with read_session.` +
-        cleanUp,
+      stored,
       // A report is not the person's own words either (FR-11) — the reporting session is tagged as its
       // source
       { sessionId, name },
       true,
-      /*
-       * What the model reads (#1186): how the work ended, the session's id, the kind of its tool's error, how to go on,
-       * and the read that shows its last response and that error. Nothing the reported session, its tool, its machine or
-       * a name could have written goes in (#120): not its last response, its error's words, its name, its project's or
-       * its tasks' descriptions; read_session lists the names by id.
-       * It used to read only "intersession message available", so a failed run, a usage limit and the way to continue
-       * reached the store and the screen and never the model.
-       */
-      outcomeOf(FOR_MODEL) + personPartLine(part) +
-        `id: ${sessionId}\n\n` +
-        (message ? `Its tool's error, by kind: ${stop?.reason === 'network' ? 'network' : errorKind(message)}. Its words are its tool's, not Centralu's, so they are not repeated here: ${read} shows them.\n\n` : '') +
-        resume +
-        `Its last response is that session's own words, so it is not repeated here: ${read} reads it${preview ? '' : ' (it had none)'}.` +
-        cleanUp,
+      forModel(false),
+      // The report is in the thread too: delivered this way, it is marked delivered, and the mailbox does not wake the owner for it
+      typeof reported === 'object' ? { keep: reported.keep, onDelivered: reported.settle } : undefined,
     )
   }
 
@@ -444,24 +529,39 @@ export class ChildReports {
    * log, and delivered once the session takes a message again (`deliverHeld`, #1186); it used to be dropped without a
    * word. Kept in memory only: a host swap in between loses it, as before.
    */
-  async tellSession(sessionId: string, text: string, from: { sessionId: string; name: string }, relayed: boolean, forModel: string = text): Promise<void> {
-    if (this.host.handingOver || this.host.disposing || !this.host.meta.has(sessionId)) return
+  async tellSession(
+    sessionId: string,
+    text: string,
+    from: { sessionId: string; name: string },
+    relayed: boolean,
+    forModel: string = text,
+    /**
+     * `onDelivered`: told when it was delivered, now or from the held notices (a report the mailbox holds is then marked delivered).
+     * `keep: false`: a notice that cannot be delivered is not held (the mailbox still has the report and wakes its owner)
+     */
+    opts: { keep?: boolean; onDelivered?: () => void } = {},
+  ): Promise<boolean> {
+    if (this.host.handingOver || this.host.disposing || !this.host.meta.has(sessionId)) return false
     const modelText = `${forModel}\nsourceSessionId: ${from.sessionId}`
     try {
       await this.host.deliver(sessionId, text, undefined, from, relayed, undefined, 'inline', undefined, undefined, relayed ? modelText : undefined)
+      opts.onDelivered?.()
+      return true
     } catch (e) {
       // The session may be asleep or deleted — a notice must not destabilize the host
-      if (this.host.handingOver || this.host.disposing || !this.host.meta.has(sessionId)) return
+      if (this.host.handingOver || this.host.disposing || !this.host.meta.has(sessionId)) return false
+      if (opts.keep === false) return false
       const list = this.held.get(sessionId) ?? []
       if (list.length >= HELD_NOTICES_MAX) list.shift()
-      list.push({ text, from, relayed, forModel })
+      list.push({ text, from, relayed, forModel, ...(opts.onDelivered ? { onDelivered: opts.onDelivered } : {}) })
       this.held.set(sessionId, list)
       console.error(`[sessions] ${sessionId.slice(0, 8)}: a notice about ${from.sessionId.slice(0, 8)} could not be delivered (${(e as Error).message}); kept for its next message`)
+      return false
     }
   }
 
   /** Notices that could not be delivered, by the session they are for (`tellSession`) */
-  private readonly held = new Map<string, { text: string; from: { sessionId: string; name: string }; relayed: boolean; forModel: string }[]>()
+  private readonly held = new Map<string, { text: string; from: { sessionId: string; name: string }; relayed: boolean; forModel: string; onDelivered?: () => void }[]>()
 
   /** The session was deleted: the notices kept for it go with it (#1186 review) */
   forgetHeld(sessionId: string): void {
@@ -474,7 +574,7 @@ export class ChildReports {
     if (!list) return
     this.held.delete(sessionId)
     void (async () => {
-      for (const n of list) await this.tellSession(sessionId, n.text, n.from, n.relayed, n.forModel)
+      for (const n of list) await this.tellSession(sessionId, n.text, n.from, n.relayed, n.forModel, n.onDelivered ? { onDelivered: n.onDelivered } : {})
     })()
   }
 }

@@ -947,6 +947,16 @@ export class MailService {
     })
   }
 
+  /** The old way of telling delivered a report the mailbox holds for `to`: delivered, read and handled, so nothing wakes the owner for it (§8.1) */
+  reportTold(threadId: string, to: string, messageId: string): void {
+    this.run(() => {
+      const now = this.now()
+      this.records.markDelivered(to, [messageId], [messageId], now)
+      this.records.markReportsHandled(threadId, to, now)
+    })
+    this.announce(threadId)
+  }
+
   /**
    * A call returned the answer a report told of (§8.1): the caller read it, so the reports of this thread waiting for `owner` are read and
    * handled, and no wake follows for news the call already gave. The threads of the pair that a delegation tool opened; other mail is left

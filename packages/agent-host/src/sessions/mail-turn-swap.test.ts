@@ -12,6 +12,8 @@ import type { AdapterCapabilities, NormalizedEvent, ToolName } from '@cc/protoco
 import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { delegationRecorder, turnRecorder } from '../mail/delegation.js'
+import { MailDelivery } from '../mail/delivery.js'
+import { mailRelations } from '../mail/relations.js'
 import { MailService } from '../mail/service.js'
 import { MailTurns } from '../mail/turns.js'
 import { SessionManager, type AgentProcessHost } from './manager.js'
@@ -113,6 +115,44 @@ async function parentAndChild(h: ReturnType<typeof host>) {
   if (!started.ok) throw new Error(started.error)
   return { parent, child: started.sessionId, project }
 }
+
+describe('a session the keeper handed over after a swap', () => {
+  it('can still be mailed (the person’s reply is not refused) and is woken by the mail that was waiting for it', async () => {
+    const a = host()
+    const { child } = await parentAndChild(a)
+    a.claude.handles.get(child)!.answer('first turn')
+    // Mail written under the old host, still waiting when it leaves
+    const waiting = a.mail.open('person', { kind: 'assign', subject: 'More', body: 'also run the linter', assignee: a.mail.sessionAddress(child) })
+    await a.mgr.detachAll()
+
+    const b = host(new Set([child]))
+    await b.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() }])
+    // The process is one an earlier build started, so a report to its owner is told the relayed way; the receive rule is the seat's
+    expect(b.mgr.readsMail(child)).toBe(false)
+    const policy = mailRelations({
+      session: (id) => b.mgr.sessionInfo(id),
+      ...b.mgr.mailSeats(() => true),
+      inThread: (threadId, address) => store.mail.participants(threadId).some((p) => p.address === address && p.leftAt === null),
+    })
+    const mail = new MailService(store.mail, { hostId: () => 'hub-aaaaaaaa', policy, now: () => Date.now() + 10_000 })
+    const reply = mail.post(waiting.thread.id, 'person', { kind: 'note', body: 'and the formatter' })
+    expect(reply.message.body).toBe('and the formatter')
+    const opened = mail.open('person', { kind: 'assign', subject: 'New', body: 'a new thread', assignee: mail.sessionAddress(child) })
+    expect(opened.thread.assignee).toBe(mail.sessionAddress(child))
+
+    const delivery = new MailDelivery(mail, store.mail, b.mgr.mailSessions(), { now: () => Date.now() + 60_000, schedule: () => () => {} })
+    delivery.start()
+    try {
+      await delivery.process(mail.sessionAddress(child))
+    } finally {
+      delivery.stop()
+    }
+    const sent = b.claude.handles.get(child)!.sent
+    expect(sent.some((t) => t.includes('also run the linter'))).toBe(true)
+    expect(sent.some((t) => t.includes('and the formatter'))).toBe(true)
+    expect(store.mail.receiptsOf(waiting.message.id)[0]).toMatchObject({ attempts: 1 })
+  })
+})
 
 describe('the turn of a session the keeper kept', () => {
   it('stays open across the swap, and its end is recorded by the next host; the open rows of the rest are closed lost', async () => {

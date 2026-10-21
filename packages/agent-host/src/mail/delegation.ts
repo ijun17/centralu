@@ -1,5 +1,6 @@
 import type { ThreadOrigin } from '../dev-services/store/mail.js'
 import type { MailRecords } from '../dev-services/store/mail.js'
+import { refusalReason } from './rules.js'
 import type { MailService } from './service.js'
 import type { MailTurns, TurnStart } from './turns.js'
 
@@ -72,5 +73,86 @@ export function turnRecorder(mail: MailService, records: MailRecords, turns: Mai
     else if (turn.source === 'report') turns.beginOther(sessionId, 'report', null)
     else if (turn.source === 'app') turns.beginOther(sessionId, 'app', null)
     else turns.beginOther(sessionId, turn.cli ? 'cli' : 'caller', threadId, turn.ownerId)
+  }
+}
+
+/**
+ * A turn's end as the mailbox is told it (docs/plans/mailbox.md §6, §8.1): Centralu's own words for the thread's owner, with the facts
+ * a wake carries
+ */
+export type ReportDraft = {
+  /** One word of Centralu's: finished, failed, limit_reached, network, interrupted, quit, stopped, paused, settled, swapped, took_over */
+  outcome: string
+  /** The report in Centralu's words alone: how it ended, the id, the kind of error, how to go on, and where the session's words are read (#1186) */
+  body: string
+  /** The session's last response, its own words: they are put in the thread as its message, in front of the report, never in Centralu's */
+  answer?: string
+  /** The kind of error the turn ended in */
+  error?: string
+  /** How many background tasks of the session's own the turn left running */
+  paused?: number
+  /** The person wrote into the turn, or added to the task */
+  personNote?: boolean
+  /** What the thread becomes (`TurnReport.then`) */
+  then: 'review' | 'running' | 'dropped'
+  /** How the owner is told: by the mailbox's wake, by the old relayed message into the turn it is in, or by the old relayed message (it cannot read mail) */
+  delivery: ReportDelivery
+}
+
+/**
+ * `wake`: the owner reads mail and is at rest, so the mailbox wakes it. `in-turn`: it reads mail and is in a turn: until in-turn delivery by
+ * hooks (slice 6) the relayed message goes in as it always did, and if that fails the mailbox wakes it when its turn ends; the same for one
+ * whose process may not have the tool. `old`: its seat cannot read mail (a coordinator, a builder, an app's agent), so the old way tells, and
+ * holds the notice if it cannot be delivered
+ */
+export type ReportDelivery = 'wake' | 'in-turn' | 'old'
+
+/**
+ * What the mailbox did with a draft: `mailed`, the report is in the thread and the mailbox tells the owner; `closed`, the session itself
+ * closed the thread by mail and said how it ended, so the owner has been told; `none`, there is no thread for this work, and the old way
+ * tells; an object, the report is in the thread and the old way tells too: when that message is delivered `settle` marks the report
+ * delivered, so the mailbox does not wake the owner for it. `keep`: hold the notice if it cannot be delivered (an owner that cannot read mail;
+ * an owner that can is woken by the mailbox instead)
+ */
+export type ReportedAs = 'mailed' | 'closed' | 'none' | { settle: () => void; keep: boolean }
+
+
+/**
+ * What the mailbox does with the end of a turn of delegated work (§6, §8.1): the report goes in the thread the owner has with the session,
+ * and the owner is told as mail when it can read it. A thread the session itself closed by mail, saying how it ended, takes no second
+ * report (the owner has been told); a thread that is done any other way, or none at all, leaves the old way of telling
+ */
+export function reportRecorder(mail: MailService, records: MailRecords): (ownerId: string, childId: string, draft: ReportDraft) => ReportedAs {
+  return (ownerId, childId, draft) => {
+    const owner = mail.sessionAddress(ownerId)
+    const child = mail.sessionAddress(childId)
+    const thread = records.latestBetween(owner, child)
+    if (!thread) return 'none'
+    if (thread.state === 'done') {
+      // The session's own words: the last response a report carried is in the thread as its message too, and is not it closing the work
+      const theirs = records.lastWordBy(thread.id, child)
+      const ours = records.lastBy(thread.id, owner)
+      return theirs?.kind === 'report' && theirs.seq > (ours?.seq ?? 0) ? 'closed' : 'none'
+    }
+    let posted
+    try {
+      posted = mail.reportTurn(thread.id, {
+        to: owner,
+        about: child,
+        outcome: draft.outcome,
+        body: draft.body,
+        ...(draft.answer ? { answer: draft.answer } : {}),
+        ...(draft.error ? { error: draft.error } : {}),
+        ...(draft.paused ? { paused: draft.paused } : {}),
+        ...(draft.personNote ? { personNote: true } : {}),
+        then: draft.then,
+      })
+    } catch (e) {
+      if (refusalReason(e) !== undefined) return 'none'
+      throw e
+    }
+    if (draft.delivery === 'wake') return 'mailed'
+    const messageId = posted.message.id
+    return { keep: draft.delivery === 'old', settle: () => mail.reportTold(thread.id, owner, messageId) }
   }
 }

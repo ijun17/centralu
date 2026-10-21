@@ -480,8 +480,9 @@ export class MailDelivery {
     const spent = this.turns && session?.kind === 'session' && this.turns.budgetSpent(session.sessionId)
     return {
       holdBack: (message, receipt, thread) => {
-        // The person's words are never held, and mail the person released has been looked at
-        if (!this.turns || receipt.held === 'released' || message.sender === PERSON) return null
+        // The person's words and Centralu's own are never held (a report is not a session answering a session: a turn that ends sends one
+        // however many a thread has had), and mail the person released has been looked at
+        if (!this.turns || receipt.held === 'released' || message.sender === PERSON || message.sender === CENTRALU) return null
         return this.turns.loopSpent(thread.id) ? 'loop' : null
       },
       quiet: (message, receipt, thread) => {

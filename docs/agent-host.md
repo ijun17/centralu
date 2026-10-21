@@ -2755,6 +2755,22 @@ news a call gave) and goes to `review`. A turn that left the child's own backgro
 (`relayed`, clipped, read and handled for the caller) in front of the report; Centralu's report holds only what Centralu knows: how the
 turn ended, the id, the kind of an error and `read_session` for more, never the child's text or an error's text (#1186).
 
+**A turn's end is a report in the thread** (slice 3). `ChildReports.deliverReport` builds the old stored report (Centralu's lines, then the
+session's last response) for the old way and hands the mailbox (`reportRecorder`) the words the model may read (#1186): how the turn ended, the id, the kind of an
+error, how to go on, `read_session`. The session's last response is its own words, so the thread keeps it as a message of the session's (`relayed`, read and handled for the
+owner) in front of the report, and the session's name, project, task text and error text are in no message under Centralu's name. It goes into the thread the owner has with the
+session as a `report` from Centralu, with the facts a wake carries (`outcome`, the kind of `error`, how many tasks are left `paused`,
+`personNote`), and the thread moves (`review` when the work was reported, `running` when the turn left the session's own background work
+running, `done`/`dropped` when the person took the session over). An owner that reads mail (an ordinary session or the orchestrator) is told
+by the mailbox's wake and not by the old relayed message, **unless it is in a turn**: until in-turn delivery by hooks (slice 6) a report that waited for the end of
+a long turn would be a regression, so the relayed message goes into the turn as it always did, the report is recorded undelivered, and it is marked
+delivered when that message is (if it cannot be delivered the notice is not kept: the mailbox wakes the owner when its turn ends). The words (the last response) are read with `mail read`. Centralu's own
+messages are never held by the loop guard: a turn that ends sends a report however many a thread has had. An owner that cannot
+(a coordinator, a builder, an app's agent; also, only for how a report is told, a session whose process was kept from an earlier host and keeps the tools it started with: `SessionManager.readsMail`, whose doubt falls back to the relayed message, which any process takes. The mailbox's receive rule stays on the seat, `canReadMail`: such a session is still written to and woken by mail, so its relayed notice is delivered like a busy owner's: settled when it is delivered, and not kept when it fails, because the mailbox wakes it and a notice kept as well would be a second report) is told the old way as before, including keeping a notice it cannot deliver (`ChildReports.held`) until the
+session takes a message; the report is in the thread, and its receipt is marked delivered when `tellSession` delivers it, now or from the kept ones, and nothing
+tries to wake it. The old relayed path (`held`, the relayed notice) goes at the contract (slice 9), or earlier if every seat gets `mail`; the linked path keeps it until slice 4. No thread for the work, or a thread the
+owner closed: the old way tells alone. A thread the session closed itself by mail, saying how it ended, takes no second report.
+
 ### 4.7 Remote mode, phase 1: `centralu serve` (#82)
 
 The app can work with a project on another machine (an SSH server, later a laptop). That machine runs its own,
