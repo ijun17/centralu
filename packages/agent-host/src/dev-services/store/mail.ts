@@ -379,6 +379,32 @@ export class MailRecords {
   }
 
   /**
+   * The delegation threads going with someone on them (`open` or `running`) in the origins whose work is tracked by a report mark while it is owed:
+   * what a start-up looks at to find work an earlier build finished (`reconcileFinished`). Threads made with `mail` carry no mark, and are not here
+   */
+  goingMarked(): ThreadRow[] {
+    const rows = this.db
+      .prepare<[], ThreadSql>(
+        `SELECT * FROM mail_threads WHERE origin IN ('start_agent', 'send_to_session', 'ask_project') AND assignee IS NOT NULL AND state IN ('open', 'running') ORDER BY created_at, id`,
+      )
+      .all()
+    return rows.map(toThread)
+  }
+
+  /**
+   * How many threads opened in the work that session `assigneeId` does for session `ownerId` are going (§6), from the two sessions' ids alone. For
+   * the host's start, which knows no address yet: an address ends in `/<session id>`
+   */
+  waitingOnSessions(ownerId: string, assigneeId: string): number {
+    const row = this.db
+      .prepare<[string, string], ThreadSql>(
+        `SELECT * FROM mail_threads WHERE owner LIKE ? AND assignee LIKE ? AND origin IN (${DELEGATION_ORIGINS.map((o) => `'${o}'`).join(', ')}) ORDER BY created_at DESC, id DESC LIMIT 1`,
+      )
+      .get(`session:%/${ownerId}`, `session:%/${assigneeId}`)
+    return row && row.state !== 'done' ? this.openChildren(row.id).length : 0
+  }
+
+  /**
    * The threads opened in the work of `parentId` that are going (`open`, `running`, `blocked`, with someone on them): the work it handed on and
    * waits for (§6). A thread with nobody on it (its helper was archived or deleted) is not work going: no one is doing it, and the parent would wait for ever
    */
@@ -754,6 +780,21 @@ export class MailRecords {
             AND message_id IN (SELECT id FROM mail_messages WHERE thread_id = ? AND seq <= ?)`,
       )
       .run(now, now, recipient, onlyRead ? 1 : 0, threadId, upToSeq).changes
+  }
+
+  /**
+   * Whether `recipient` has mail in the thread it has not taken: not read (handling reads it too), delivered or not, and not held back for the person.
+   * Mail in hand is work in hand: the owner or the person sent more into a thread that was in review, and the session has not got to it. Events have no receipt
+   */
+  hasMailInHand(threadId: string, recipient: string): boolean {
+    return (
+      this.db
+        .prepare<[string, string], { one: number }>(
+          `SELECT 1 AS one FROM mail_receipts r JOIN mail_messages m ON m.id = r.message_id
+            WHERE m.thread_id = ? AND r.recipient = ? AND r.read_at IS NULL AND (r.held IS NULL OR r.held = 'released') LIMIT 1`,
+        )
+        .get(threadId, recipient) !== undefined
+    )
   }
 
   /** The mailboxes that have mail waiting (not read, handled, delivered or held): who the delivery sweep looks at */

@@ -177,6 +177,9 @@ const sessionIdOf = (address: string): string => {
 
 const isDelegation = (t: ThreadRow): boolean => (DELEGATION_ORIGINS as readonly string[]).includes(t.origin)
 
+/** The task of a thread adopted from a report mark: the words the owner gave were not kept, and the session's conversation has them */
+const ADOPTED_TASK = 'Work given before this version of Centralu wrote it down as mail. The conversation of the session that does it shows what was asked.'
+
 /** Said when a task is cut to the longest a session may post: the child has the whole of it, in its conversation */
 const TASK_CUT = "\n[Centralu: cut here. The full task is in the session's conversation (read_session).]"
 
@@ -1012,6 +1015,49 @@ export class MailService {
   private handedOnFrom(thread: ThreadRow, recipient: string): boolean {
     const parent = thread.parentId ? this.records.thread(thread.parentId) : undefined
     return !!parent && parent.assignee === recipient && parent.state === 'running'
+  }
+
+  /**
+   * Work an earlier build finished while it served the store and this build was not the host (§4.2), or that a quit cut: it reports the old way and leaves the
+   * threads this build wrote untouched, so one it finished still reads `running`, and its parent would count it as work going for ever. The thread goes to
+   * `review`, as if it had been reported, with an event that says the session owes no report (not whose doing that is). No report is posted: the owner was told
+   */
+  finishedByEarlierBuild(threadId: string): ThreadRow | undefined {
+    const thread = this.records.thread(threadId)
+    if (!thread || (thread.state !== 'open' && thread.state !== 'running')) return undefined
+    return this.run(() => {
+      const now = this.now()
+      return this.moveState(
+        thread,
+        { state: 'review', stateSince: now },
+        now,
+        { change: 'state', from: thread.state, to: 'review', by: CENTRALU, reason: 'no_report_owed' },
+        `State: ${thread.state} to review. The session that did this work owes no report, and nothing is going on in it.`,
+      )
+    })
+  }
+
+  /**
+   * A report mark an older build wrote, adopted as a thread when this build becomes the active host (§4.2): the owner is the marking caller,
+   * the assignee the session that owes the report, and the thread is `running`. A pause on the session's own background work is an event with
+   * the count of its tasks. Idempotent: a pair that already has a thread that is not over is left as it is. The mark stays until this build
+   * reports, as today, so a rollback finds nothing owed twice and nothing lost
+   */
+  adoptMark(owner: string, assignee: string, input: { origin: ThreadOrigin; projectId?: string | null; depth?: number; paused?: number }): ThreadRow | undefined {
+    const last = this.records.latestBetween(owner, assignee)
+    if (last && last.state !== 'done') return undefined
+    const { thread } = this.recordDelegation(owner, {
+      assignee,
+      task: ADOPTED_TASK,
+      origin: input.origin,
+      ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
+      ...(input.depth !== undefined ? { depth: input.depth } : {}),
+    })
+    return this.run(() => {
+      const now = this.now()
+      this.insertEvent(thread.id, 'Adopted from the report mark an earlier build wrote.', { change: 'adopted', by: CENTRALU, ...(input.paused ? { paused: input.paused } : {}) }, now)
+      return thread
+    })
   }
 
   /** How many threads opened in the work `assignee` does for `owner` are still going (§6): the work it handed on and waits for */

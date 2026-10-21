@@ -6,7 +6,7 @@ import { randomBytes } from 'node:crypto'
 import { hostname } from 'node:os'
 import { dirname, join } from 'node:path'
 import { mkdirSync, writeSync } from 'node:fs'
-import { APP_VERSION, autoCompactOf, PROTOCOL_VERSION, RESERVED_APP_IDS, type HostHandover, type HostLogon, type NormalizedEvent } from '@cc/protocol'
+import { APP_VERSION, autoCompactOf, errorMessage, PROTOCOL_VERSION, RESERVED_APP_IDS, type HostHandover, type HostLogon, type NormalizedEvent } from '@cc/protocol'
 import { hostBuild, startActivityReport } from './keeper-link.js'
 import { activityCounts, type ActivitySnapshot } from './idle.js'
 import { connectHeldChildren } from './keeper/held-children.js'
@@ -22,6 +22,8 @@ import { SessionManager } from './sessions/manager.js'
 import { MailService } from './mail/service.js'
 import { MailDelivery } from './mail/delivery.js'
 import { MailPerson } from './mail/person.js'
+import { takeOverFromEarlierBuild } from './mail/adoption.js'
+import { pausedReportKey, readPausedTasks } from './sessions/child-ownership.js'
 import { answerRecorder, delegationRecorder, finishRecorder, reportRecorder, turnRecorder } from './mail/delegation.js'
 import { recordedAgentDepth } from './sessions/agent-depth.js'
 import { COMMAND_CALLS, PLAIN_CALLS } from './mail/frame.js'
@@ -842,7 +844,19 @@ setTimeout(() => {
  * The mailbox's delivery and its sweep (retention among them) start once the host is ready: by now the host this one replaced
  * is gone, so only one host delivers (§4.2). The sweep is delivery's own, every 60 s.
  */
-setTimeout(() => mailDelivery.start(), 0)
+setTimeout(() => {
+  // What an older build did while it served this store (§4.2): its report marks become threads, and the work it finished is closed here
+  try {
+    takeOverFromEarlierBuild(mail, store, {
+      info: (id) => mgr.sessionInfo(id),
+      depth: (id) => recordedAgentDepth(store.settings, id),
+      paused: (id) => readPausedTasks(store.settings.appSetting(pausedReportKey(id)))?.length ?? null,
+    })
+  } catch (e) {
+    console.error(`[mail] taking over from an older build failed: ${errorMessage(e)}`)
+  }
+  mailDelivery.start()
+}, 0)
 /*
  * The heavy and breaking steps a swap left for later (store.ts, "During a swap"), and a vacuum a
  * stopped host left owed (#396). By the time this timer fires the ready line has gone out and the

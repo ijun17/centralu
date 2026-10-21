@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SessionInfo } from '@cc/protocol'
 import { Store, type QueuedRequest } from '../dev-services/store.js'
+import { MailService } from '../mail/service.js'
 import { ChildOwnership, pausedReportKey, reportTurnKey, type AgentStartRecord, type Delegation } from './child-ownership.js'
 
 /*
@@ -383,6 +384,97 @@ describe('restoring what the previous host left (#646, #676, #677)', () => {
     expect(own.pausedReports.get('kept-paused')).toEqual([{ id: 't1', description: 'dev server' }])
     expect(store.children.listReportMarks().map((r) => r.sessionId).sort()).toEqual(['kept-paused', 'kept-working'])
     expect(store.settings.appSetting(pausedReportKey('gone-process'))).toBeNull()
+  })
+
+  describe('a session at rest that waits for threads it handed on (§6)', () => {
+    const HOST = 'hub-aaaaaaaa'
+    /** The caller gave 'kept-idle' work; in it, 'kept-idle' handed a part on to 'helper' */
+    const handedOn = () => {
+      const mail = new MailService(store.mail, { hostId: () => HOST })
+      const addr = (id: string) => mail.sessionAddress(id)
+      const work = mail.recordDelegation(addr('caller'), { assignee: addr('kept-idle'), task: 'Land it', origin: 'start_agent' }).thread
+      const part = mail.recordDelegation(addr('kept-idle'), { assignee: addr('helper'), task: 'The tests', origin: 'start_agent', parentId: work.id }).thread
+      store.children.setReportMark('kept-idle', 'caller')
+      return { mail, addr, work, part }
+    }
+
+    it('keeps its mark with the swap: the threads are in the store, and the turn their end starts ends under this host', () => {
+      handedOn()
+      own.restoreReports(sessions, kept)
+      expect(own.awaitingReport.get('kept-idle')).toBe('caller')
+      expect(store.children.listReportMarks()).toEqual([{ sessionId: 'kept-idle', callerSessionId: 'caller' }])
+    })
+
+    /** Whether a fresh host, started now with these sessions kept, still owes the report */
+    let lastHost = own
+    const owed = (keptNow: ReadonlySet<string> = kept, sessionsNow: ReadonlyMap<string, SessionInfo> = sessions) => {
+      store.children.setReportMark('kept-idle', 'caller')
+      lastHost = new ChildOwnership(store)
+      lastHost.restoreReports(sessionsNow, keptNow)
+      return lastHost.awaitingReport.get('kept-idle') === 'caller'
+    }
+
+    it('drops it when nothing is going: the helper’s thread is over, or nobody is on it', () => {
+      const { mail, addr, part } = handedOn()
+      // Going, it is kept
+      expect(owed()).toBe(true)
+      mail.update(part.id, addr('kept-idle'), { state: 'done', outcome: 'finished' })
+      expect(owed()).toBe(false)
+      const other = handedOn()
+      expect(owed()).toBe(true)
+      other.mail.sessionGone('helper')
+      expect(owed()).toBe(false)
+    })
+
+    it('drops it when the work itself is over, whatever its helper does', () => {
+      const { mail, addr, work } = handedOn()
+      expect(owed()).toBe(true)
+      mail.update(work.id, addr('caller'), { state: 'done', outcome: 'dropped' })
+      expect(owed()).toBe(false)
+    })
+
+    it('keeps it for a session with no process too (asleep, or the host was quit): the work is the helpers’, and their report wakes it', () => {
+      const { mail, addr, part } = handedOn()
+      store.settings.setAppSetting(pausedReportKey('kept-idle'), JSON.stringify([{ id: 't1', description: 'dev server' }]))
+      expect(owed(new Set())).toBe(true)
+      // What its process held went with it
+      expect(store.settings.appSetting(pausedReportKey('kept-idle'))).toBeNull()
+      expect(lastHost.pausedReports.has('kept-idle')).toBe(false)
+      // With nothing going, a session whose process was not kept loses its mark as it did
+      mail.update(part.id, addr('kept-idle'), { state: 'done', outcome: 'finished' })
+      expect(owed(new Set())).toBe(false)
+      expect(store.children.listReportMarks()).toEqual([])
+    })
+
+    it('drops it when the caller is gone: nobody is left to be told', () => {
+      handedOn()
+      expect(owed()).toBe(true)
+      const withoutCaller = new Map([...sessions].filter(([id]) => id !== 'caller'))
+      expect(owed(kept, withoutCaller)).toBe(false)
+      expect(owed(new Set(), withoutCaller)).toBe(false)
+      // A kept session's pause on its own background work is dropped with it
+      store.settings.setAppSetting(pausedReportKey('kept-idle'), JSON.stringify([{ id: 't1', description: 'dev server' }]))
+      expect(owed()).toBe(true)
+      store.settings.setAppSetting(pausedReportKey('kept-idle'), JSON.stringify([{ id: 't1', description: 'dev server' }]))
+      expect(owed(kept, withoutCaller)).toBe(false)
+    })
+
+    it('does not keep it for a session that is in a turn and whose process was not kept: the turn was lost with the host', () => {
+      handedOn()
+      expect(owed(new Set())).toBe(true)
+      const working = new Map(sessions).set('kept-idle', at('kept-idle', 'working'))
+      expect(owed(new Set(), working)).toBe(false)
+    })
+
+    it('reads the latest thread of the pair: an old one that is done does not hide the new one that is going', () => {
+      const { mail, addr, work } = handedOn()
+      mail.update(work.id, addr('caller'), { state: 'done', outcome: 'finished' })
+      expect(owed()).toBe(false)
+      const next = mail.recordDelegation(addr('caller'), { assignee: addr('kept-idle'), task: 'More work', origin: 'start_agent' }).thread
+      expect(next.id).not.toBe(work.id)
+      mail.recordDelegation(addr('kept-idle'), { assignee: addr('helper2'), task: 'Its part', origin: 'start_agent', parentId: next.id })
+      expect(owed()).toBe(true)
+    })
   })
 
   it('keeps the delegated turn of a kept session still in it, ending with that turn', () => {

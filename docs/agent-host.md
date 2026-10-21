@@ -2804,6 +2804,21 @@ stop, a card and a blocker always wake. A pause that does not wake starts no tur
 The turn a child's report starts, where the report is the only mail for its receiver and the receiver is running the work the child's thread was opened under,
 belongs to that work (`drain`'s `workThread`), so its end is reported to whoever gave it. Mail for other work of the receiver's keeps its own turn.
 
+**Across a host swap** (slice 3, §4.2). A session at rest that waits for threads it handed on keeps the report mark it owes: `restoreReports` runs in
+the manager's constructor, before the mailbox hook is wired, so it asks the store for the threads going (`waitingOnSessions`, the latest thread of the pair), and the turn
+their end starts ends under the new host and is reported once, as the work's end. Waiting needs no process of its own (the work is the helpers', and their report wakes
+the session), so a session that was asleep, or whose host was quit, keeps it too; what its process held (a pause on background work) went with it. A mark of a session with
+nothing going, or whose caller is gone, is dropped as before.
+
+When this host becomes the active one (before delivery starts, `takeOverFromEarlierBuild`) it takes over from an earlier build that served the same store, both ways.
+It **adopts** the report marks that build wrote (`adoptOldMarks`): each is a `running` thread owned by the marking caller (origin `start_agent` when the caller started the
+session, else `send_to_session`) with a stand-in `assign` (the owner's words were not kept; the session's conversation has them) and an `adopted` event that carries the count
+of the tasks a paused report waits on; keyed by the two sessions and idempotent. And it **closes the work that build finished** (`reconcileFinished`): an earlier build reports
+the old way and never moves the threads this build wrote, so after a rollback and a roll forward a finished helper's thread still reads `running`, and its parent would count it
+as going for ever. A `start_agent`, `send_to_session` or `ask_project` thread that is `open` or `running` with someone on it, whose session owes its owner no report mark (the mark
+names the owner), is at rest, holds nothing paused or queued and has no mail it has not taken (the owner or the person sent more into it), goes to `review` with an event (`reason: no_report_owed`) and no report: that build told the owner. Blocked threads and
+threads made with `mail` or `agent_session` are left. The old rows stay, kept in step as before. Queued requests are not adopted yet (#1456).
+
 ### 4.7 Remote mode, phase 1: `centralu serve` (#82)
 
 The app can work with a project on another machine (an SSH server, later a laptop). That machine runs its own,
