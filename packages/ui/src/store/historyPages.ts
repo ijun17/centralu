@@ -72,7 +72,7 @@ function settle(live: ChatItem, row: ChatItem): ChatItem {
  * own errors have carried a number since #161). All three exist in the host's store.
  */
 function sameLine(live: ChatItem, row: ChatItem): boolean {
-  if (live.kind === 'user' && row.kind === 'user') return !!live.pending && !row.from && !row.fromApp && live.text === row.text
+  if (live.kind === 'user' && row.kind === 'user') return !!live.pending && !row.from && !row.fromApp && !row.fromScript && live.text === row.text
   if (live.kind === 'image' && row.kind === 'image') return !!live.data && live.mime === row.mime && live.data === row.data
   if (live.kind === 'mark' && row.kind === 'mark') return live.text === row.text
   return false

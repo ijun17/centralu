@@ -10,6 +10,7 @@ import { inTurn } from '../idle.js'
 import { rpcError } from '../rpc-error.js'
 import { MailNotAtRest } from '../mail/delivery.js'
 import { hubAskDepthKey } from './agent-depth.js'
+import { scriptMessageFrame } from './script-messages.js'
 import { appMessageFrame, type AppMessageSource, type AppMessageVia } from './app-messages.js'
 import type { ChildReports } from './child-reports.js'
 import { HUB_SENDER, type DelegationHost } from './delegation-flow.js'
@@ -486,6 +487,12 @@ export class SessionEvents {
     fromPerson = false,
     /** What the person chose for a delegation report the session owes (#1377); the default is "just asking" */
     intent: 'ask' | 'task' | 'takeover' = 'ask',
+    /**
+     * A script wrote this (a call with the limited credential, `label` from the connection, §8.1): stored and shown as the script's, handed to
+     * the session under Centralu's header (`scriptMessageFrame`), never stamped as the person's and never naming the session. Set by the
+     * host from the connection, not from a field of the call
+     */
+    fromScript?: { credential: string },
   ): Promise<void> {
     const restarting = this.host.restartPolicy.deferredRestarts.get(sessionId)
     if (restarting) await restarting
@@ -520,7 +527,7 @@ export class SessionEvents {
         kind: 'text',
         // An attachment is part of the message too — only its path is kept (D-1), and loadMessages loads the
         // image bytes back in
-        payload: { text, ...(from ? { from } : {}), ...(fromApp ? { fromApp } : {}), ...(attachments?.length ? { attachments } : {}) },
+        payload: { text, ...(from ? { from } : {}), ...(fromApp ? { fromApp } : {}), ...(fromScript ? { fromScript } : {}), ...(attachments?.length ? { attachments } : {}) },
         ts: Date.now(),
       },
     ])
@@ -528,7 +535,7 @@ export class SessionEvents {
     m.lastReadSeq = seq // Something we sent counts as read
     // A session's name is never coined from a message an app or another session sent (ask_project's task, a
     // parent's note, an orchestrator's instruction, #646) — the name always comes from the person's own words
-    if (m.autoNamed && m.name === 'New session' && !fromApp && !from) {
+    if (m.autoNamed && m.name === 'New session' && !fromApp && !from && !fromScript) {
       m.name = truncate(text)
       this.host.emit({ type: 'session_title', sessionId, title: m.name, auto: true })
     }
@@ -547,7 +554,8 @@ export class SessionEvents {
       text,
       ...(from ? { from } : {}),
       ...(fromApp ? { fromApp } : {}),
-      ...(!from && !fromApp && intent !== 'ask' ? { intent } : {}),
+      ...(fromScript ? { fromScript } : {}),
+      ...(!from && !fromApp && !fromScript && intent !== 'ask' ? { intent } : {}),
       // A message the host injected (an app's composer, C-5) only ever surfaces on screen through this event
       // — attachments have to ride along too, or the bubble is incomplete
       ...(attachments?.length ? { attachments } : {}),
@@ -563,6 +571,8 @@ export class SessionEvents {
      */
     const adapterText =
       fromApp ? appMessageFrame(fromApp, text, fromAppVia)
+      // A script's text reaches the session as the script's, quoted under Centralu's header (§8.1)
+      : fromScript ? scriptMessageFrame(fromScript.credential, text)
       // A hub's orchestrator directs as this host's own does (`sendFromHub`)
       : relayed && from && relayedText !== undefined ? relayedText
       : from && (relayed || (this.host.tools.directs(sessionId) && !this.host.tools.directs(from.sessionId) && from.sessionId !== HUB_SENDER))
@@ -577,7 +587,7 @@ export class SessionEvents {
     const joins = inTurn(m.state) && this.host.joinsRunningTurn(sessionId)
     // Named, so the turn that ends can say whether it took this message in (`SessionHandle.turnInputs`)
     const inputId = joins ? randomUUID() : undefined
-    this.host.children.noteMessage(sessionId, !from && !fromApp ? 'person' : 'work', inTurn(m.state), this.host.joinsRunningTurn(sessionId), intent === 'task', inputId, relayed ? 'report' : fromApp ? 'app' : 'caller')
+    this.host.children.noteMessage(sessionId, !from && !fromApp && !fromScript ? 'person' : 'work', inTurn(m.state), this.host.joinsRunningTurn(sessionId), intent === 'task', inputId, relayed ? 'report' : fromApp ? 'app' : 'caller')
     // A turn is asked for now, whether or not the tool announces it before its first card (`CardRests`)
     this.host.cardRests.turnAsked(sessionId)
     if (sendInput) sendInput(h, input)

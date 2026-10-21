@@ -114,6 +114,13 @@ describe('mergePage: the newest page against the rows already on screen', () => 
     expect(merged.map(text)).toEqual(['go', 'go'])
   })
 
+  it('a script’s first message with the same words is not taken for the person’s unconfirmed one (§8.1)', () => {
+    const rows = [said(1, 'go')]
+    rows[0]!.payload = { text: 'go', fromScript: { credential: 'ci runner' } }
+    const merged = mergePage([live({ kind: 'user', text: 'go', pending: true })], read(rows), rows)
+    expect(merged.map(text)).toEqual(['go', 'go'])
+  })
+
   it('two screen rows for one stored number become one row', () => {
     const rows = [said(1, 'q'), answered(2, 'a')]
     const first = live({ kind: 'assistant', storedSeq: 2, text: 'a' })

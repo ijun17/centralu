@@ -41,6 +41,8 @@ export type RpcContext = {
    * may call is already narrowed to its own session's tool channel (`bridgeRefusal`)
    */
   rights: 'full' | 'limited'
+  /** What the program called itself in its hello (#1405), cut and never checked; null when it said nothing. Words of the program's own: a header or a screen takes it through `scriptLabel` */
+  label?: string | null
 }
 
 export type RpcHandler = (method: string, params: unknown, ctx?: RpcContext) => Promise<unknown>
@@ -665,7 +667,7 @@ export class HostServer {
         }
       }
       try {
-        const run = () => this.opts.onRpc(method, params, { client, rights: limited ? 'limited' : 'full' })
+        const run = () => this.opts.onRpc(method, params, { client, rights: limited ? 'limited' : 'full', label })
         const result = await (this.opts.drain ? this.opts.drain.track(`rpc ${method}`, run) : run())
         this.sendTo(ws, JSON.stringify({ kind: 'res', id, ok: true, result }))
       } catch (err) {

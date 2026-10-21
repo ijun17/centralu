@@ -14,6 +14,18 @@ const feed = (events: object[], start: ChatItem[] = []): ChatItem[] =>
 const row = (seq: number, kind: StoredMessage['kind'], payload: object, role: StoredMessage['role'] = 'system'): StoredMessage =>
   ({ sessionId: 's', seq, role, kind, payload, ts: seq }) as StoredMessage
 
+describe('a script’s first message (§8.1)', () => {
+  it('is a message of its own kind live and stored, never absorbed into the person’s pending bubble', () => {
+    const pending: ChatItem[] = [{ kind: 'user', seq: 1, text: 'Triage the build', pending: true }]
+    const live = feed([{ type: 'user_message', seq: 9, text: 'Triage the build', fromScript: { credential: 'ci runner' } }], pending)
+    expect(live).toHaveLength(2)
+    expect(live[0]).toMatchObject({ pending: true })
+    expect(live[1]).toMatchObject({ kind: 'user', storedSeq: 9, fromScript: { credential: 'ci runner' } })
+    const stored = messagesToChat([row(3, 'text', { text: 'Triage the build', fromScript: { credential: 'ci runner' } }, 'user')])
+    expect(stored[0]).toMatchObject({ kind: 'user', fromScript: { credential: 'ci runner' } })
+  })
+})
+
 describe('appendChat — live events', () => {
   it('chunks with the same stored number are one item, a different number starts the next one (#77)', () => {
     const items = feed([

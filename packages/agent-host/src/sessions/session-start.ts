@@ -1,3 +1,4 @@
+import { scriptMessageFrame } from './script-messages.js'
 import { randomUUID } from 'node:crypto'
 import type { BackgroundTask, CreateSessionParams, SessionInfo, ToolName } from '@cc/protocol'
 import { autoCompactPlan } from './auto-compact.js'
@@ -141,9 +142,11 @@ export class SessionStarts {
       initialFrom?: { sessionId: string; name: string }
       /**
        * A script or the RPC started the session (the connection holds the limited credential, not the window's token): the work is the person's, written
-       * down in the mailbox before the first message goes in, and the turn it starts is reported to their Inbox (§8.1). Not in the RPC contract
+       * down in the mailbox before the first message goes in, and the turn it starts is reported to their Inbox (§8.1). The message is the script's, not
+       * the person's: stored and shown as such, and the session reads it under a header of Centralu's (`scriptMessageFrame`). `credential` is the
+       * connection's label (`scriptLabel`). Not in the RPC contract: the host sets it from the connection
        */
-      byScript?: boolean
+      fromScript?: { credential: string }
       /**
        * Role text pinned on the row and reapplied on every wake — filled only by `createAppBuilder`. A coordinator's
        * role rode here too; nothing creates a coordinator since the control app went (#372), and one already in a
@@ -229,7 +232,8 @@ export class SessionStarts {
       ...(params.askedBy ? { askedBy: params.askedBy } : {}),
       name:
         namedByBranch ??
-        (params.initialPrompt ? truncate(params.initialPrompt) : (worktree?.branch ?? 'New session')),
+        // Not named from a script's message (§8.1): the person's own words name a session
+        (params.initialPrompt && !params.fromScript ? truncate(params.initialPrompt) : (worktree?.branch ?? 'New session')),
       autoNamed: !namedByBranch, state: 'idle', lastReadSeq: 0, lastSeq: 0,
       createdAt: Date.now(), waitingSince: null, live: true,
       model: params.model ?? null, effort: params.effort ?? null,
@@ -475,16 +479,17 @@ export class SessionStarts {
       const seq = this.host.store.messages.nextSeq(id)
       const from = params.initialFrom
       this.host.store.messages.appendMessages([
-        { sessionId: id, seq, role: 'user', kind: 'text', payload: { text: params.initialPrompt, ...(from ? { from } : {}) }, ts: Date.now() },
+        { sessionId: id, seq, role: 'user', kind: 'text', payload: { text: params.initialPrompt, ...(from ? { from } : {}), ...(params.fromScript ? { fromScript: params.fromScript } : {}) }, ts: Date.now() },
       ])
       info.lastSeq = seq
       info.lastReadSeq = seq // Something we sent counts as read
       this.host.store.sessions.upsertSession(info)
-      this.host.emit({ type: 'user_message', sessionId: id, seq, text: params.initialPrompt, ...(from ? { from } : {}) })
+      this.host.emit({ type: 'user_message', sessionId: id, seq, text: params.initialPrompt, ...(from ? { from } : {}), ...(params.fromScript ? { fromScript: params.fromScript } : {}) })
       this.host.cardRests.turnAsked(id)
       // Never stamped: its only producer is a handoff, whose opening quotes a note written by an agent, not the person's typing
-      if (params.byScript) this.host.children.startedForPerson(id, params.initialPrompt)
-      handle.send(params.initialPrompt)
+      if (params.fromScript) this.host.children.startedForPerson(id, params.initialPrompt, params.fromScript)
+      // A script's message reaches the session framed as the script's, never stamped as the person's
+      handle.send(params.fromScript ? scriptMessageFrame(params.fromScript.credential, params.initialPrompt) : params.initialPrompt)
     }
     return info
   }

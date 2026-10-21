@@ -1,3 +1,4 @@
+import { scriptLabel } from '../mail/script-label.js'
 import { frameField, oneLineText, type SessionInfo, type StoredMessage } from '@cc/protocol'
 import type { TurnProgress } from '../adapters/contract.js'
 import type { MessageRecords } from '../dev-services/store/messages.js'
@@ -39,14 +40,15 @@ function payloadHasFrom(payload: unknown): boolean {
 
 /**
  * Who wrote a stored message that is not the session's own answer (#838): another session (`from`, a send_to_session
- * or a report), an app (`fromApp`, a view's message or work it asked for), or else the person. Read from the row, so
+ * or a report), an app (`fromApp`, a view's message or work it asked for), a script (`fromScript`, the first message of a session it started, §8.1), or else the person. Read from the row, so
  * a reader can say who wrote each line instead of making all of it the person's.
  */
-export type MessageAuthor = { kind: 'person' } | { kind: 'session'; name: string } | { kind: 'app'; name: string }
+export type MessageAuthor = { kind: 'person' } | { kind: 'session'; name: string } | { kind: 'app'; name: string } | { kind: 'script'; name: string }
 
 export function authorOf(payload: unknown): MessageAuthor {
   if (payload === null || typeof payload !== 'object') return { kind: 'person' }
-  const p = payload as { from?: { name?: unknown }; fromApp?: { name?: unknown } }
+  const p = payload as { from?: { name?: unknown }; fromApp?: { name?: unknown }; fromScript?: { credential?: unknown } }
+  if (p.fromScript && typeof p.fromScript === 'object') return { kind: 'script', name: scriptLabel(typeof p.fromScript.credential === 'string' ? p.fromScript.credential : '') }
   if (p.fromApp && typeof p.fromApp === 'object') return { kind: 'app', name: frameField(String(p.fromApp.name ?? '')) }
   if (p.from && typeof p.from === 'object') return { kind: 'session', name: frameField(String(p.from.name ?? '')) }
   return { kind: 'person' }
@@ -138,7 +140,7 @@ export function contextAt(
     const t = ((r.payload as { text?: string }).text ?? '').slice(0, CONTEXT_MSG_CHARS)
     const author = authorOf(r.payload)
     const mark =
-      r.role !== 'user' ? '[agent]' : author.kind === 'person' ? '[person]' : author.kind === 'session' ? `[session ${JSON.stringify(author.name)}]` : `[app ${JSON.stringify(author.name)}]`
+      r.role !== 'user' ? '[agent]' : author.kind === 'person' ? '[person]' : `[${author.kind} ${JSON.stringify(author.name)}]`
     parts.push(`${mark} ${indentedLines(t)}`)
   }
   return parts.join('\n')

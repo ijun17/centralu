@@ -1,3 +1,4 @@
+import { scriptLabel } from './mail/script-label.js'
 import { relative } from 'node:path'
 import { ThemeFiles } from './themes.js'
 import { RpcMethods, hubAutoOf, noSuchAppText, type RpcMethodName } from '@cc/protocol'
@@ -195,12 +196,14 @@ export function createRpcHandler(
     return updates
   }
 
-  const handlers: { [M in RpcMethodName]: (p: unknown, ctx?: { client: number; rights?: 'full' | 'limited' }) => Promise<unknown> } = {
+  const handlers: { [M in RpcMethodName]: (p: unknown, ctx?: { client: number; rights?: 'full' | 'limited'; label?: string | null }) => Promise<unknown> } = {
     // A script (the limited credential) that starts a session with a first message owes nobody a wait: the work is the person's, reported to their Inbox (§8.1)
-    'agents.createSession': async (p, ctx) => mgr.createSession({ ...RpcMethods['agents.createSession'].params.parse(p), ...(ctx?.rights === 'limited' ? { byScript: true } : {}) }),
-    'agents.send': async (p) => {
+    'agents.createSession': async (p, ctx) => mgr.createSession({ ...RpcMethods['agents.createSession'].params.parse(p), ...(ctx?.rights === 'limited' ? { fromScript: { credential: scriptLabel(ctx.label) } } : {}) }),
+    'agents.send': async (p, ctx) => {
       const { sessionId, text, attachments, intent } = RpcMethods['agents.send'].params.parse(p)
-      await mgr.send(sessionId, text, attachments, undefined, true, intent)
+      // A script (the limited credential) is not the person typing: its text is stored and handed on as the script's, under the label of its connection (§8.1)
+      const fromScript = ctx?.rights === 'limited' ? { credential: scriptLabel(ctx.label) } : undefined
+      await mgr.send(sessionId, text, attachments, undefined, true, intent, fromScript)
       return { ok: true as const }
     },
     'agents.reportOwed': async (p) => ({ owed: mgr.reportOwed(RpcMethods['agents.reportOwed'].params.parse(p).sessionId) }),
@@ -1068,7 +1071,7 @@ export function createRpcHandler(
     },
   }
 
-  return async (method: string, params: unknown, ctx?: { client: number; rights?: 'full' | 'limited' }): Promise<unknown> => {
+  return async (method: string, params: unknown, ctx?: { client: number; rights?: 'full' | 'limited'; label?: string | null }): Promise<unknown> => {
     const name = method as RpcMethodName
     const h = handlers[name]
     /*

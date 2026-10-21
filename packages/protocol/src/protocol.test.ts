@@ -154,6 +154,7 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   { type: 'user_message', sessionId: 's1', seq: 13, text: 'clean up the release notes', from: { sessionId: 'orc-1', name: 'coordinator session' } },
   // A message sent by an inline conversation app screen (M4 B-1, B-4) — a person sent it, but an app wrote it
   { type: 'user_message', sessionId: 's1', seq: 15, text: 'Show details for row 3', fromApp: { appId: 'slider', projectId: 'p1', name: 'Slider' } },
+  { type: 'user_message', sessionId: 's1', seq: 16, text: 'Triage the failing build', fromScript: { credential: 'ci runner' } },
   // An inline conversation app screen (M4 B-1) — open (input), result, cancelled, rejected, closed
   { type: 'app_view', sessionId: 's1', seq: 16, callId: 'toolu_1', appId: 'slider', projectId: 'p1', tool: 'show', phase: 'open', instanceId: 'i-1', toolInput: { q: 'x' } },
   { type: 'app_view', sessionId: 's1', callId: 'toolu_1', appId: 'slider', projectId: 'p1', tool: 'show', phase: 'result', toolResult: { content: [{ type: 'text', text: 'ok' }], structuredContent: { n: 1 } }, kept: true },

@@ -39,9 +39,10 @@ export function delegationRecorder(
 export function personWorkRecorder(
   mail: MailService,
   sessionOf: (id: string) => { projectId?: string | null; depth?: number } | undefined,
-): (sessionId: string, text: string) => void {
-  return (sessionId, text) => {
+): (sessionId: string, text: string, fromScript?: { credential: string }) => void {
+  return (sessionId, text, fromScript) => {
     mail.recordDelegation(PERSON, {
+      ...(fromScript ? { fromScript } : {}),
       assignee: mail.sessionAddress(sessionId),
       task: text,
       origin: 'create_session',

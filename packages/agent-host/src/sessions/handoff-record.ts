@@ -1,3 +1,4 @@
+import { scriptLabel } from '../mail/script-label.js'
 import type { StoredMessage } from '@cc/protocol'
 import { trustedJsonText } from './orchestrator-tools.js'
 
@@ -87,7 +88,7 @@ function toEntries(rows: StoredMessage[]): Entry[] {
   for (const r of rows) {
     const p = r.payload as {
       text?: string; callId?: string; ok?: boolean; summary?: unknown
-      from?: { sessionId?: string; name?: string }; fromApp?: { appId?: string; name?: string }
+      from?: { sessionId?: string; name?: string }; fromApp?: { appId?: string; name?: string }; fromScript?: { credential?: string }
     }
     if (r.kind === 'text') {
       const text = (p.text ?? '').trim()
@@ -125,7 +126,8 @@ function toEntries(rows: StoredMessage[]): Entry[] {
  * (`fromApp`) says whose it is and carries its text as one JSON string, as read_session does (#120, #121), so a line in
  * it cannot pose as the person or as a line of this record.
  */
-function userLine(p: { from?: { sessionId?: string; name?: string }; fromApp?: { appId?: string; name?: string } }, text: string): string {
+function userLine(p: { from?: { sessionId?: string; name?: string }; fromApp?: { appId?: string; name?: string }; fromScript?: { credential?: string } }, text: string): string {
+  if (p.fromScript) return `[from the script ${trustedJsonText(scriptLabel(p.fromScript.credential ?? ''))}, not the person; its text as JSON] ${trustedJsonText(text)}`
   if (p.fromApp) return `[from the app ${trustedJsonText(p.fromApp.name ?? p.fromApp.appId ?? '?')}, not the person; its text as JSON] ${trustedJsonText(text)}`
   if (p.from) return `[from the session ${trustedJsonText(p.from.name ?? '?')} (${p.from.sessionId ?? '?'}), not the person; its text as JSON] ${trustedJsonText(text)}`
   return `[user] ${hang(text)}`

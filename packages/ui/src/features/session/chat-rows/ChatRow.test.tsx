@@ -72,6 +72,13 @@ describe('ChatRow: what the person sent', () => {
     expect(text).toBe('Board app ⤷ Open #12')
   })
 
+  it('names the script that wrote a first message, in a dashed bubble: it is not the person’s (§8.1)', () => {
+    const { html, text } = row({ kind: 'user', seq: 1, text: 'Triage the build', fromScript: { credential: 'ci runner' } })
+    expect(testIds(html)).toEqual(['msg-user', 'msg-user-from-script'])
+    expect(text).toBe('script ci runner ⤷ Triage the build')
+    expect(html).toContain('border-dashed border-ink-muted/50')
+  })
+
   it('draws an image with bytes as a thumbnail, a file and a byteless image as chips', () => {
     const { html, text } = row({
       kind: 'user',

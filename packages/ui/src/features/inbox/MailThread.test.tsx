@@ -77,6 +77,18 @@ describe('the thread in the inbox', () => {
     expect(text).toContain('State: open to running.')
   })
 
+  it('draws a script’s message under the script’s label, not as the person’s own (§8.1)', () => {
+    const { html, text } = render(
+      view({
+        messages: [{ id: 'm1', seq: 1, sender: you, kind: 'assign', urgent: false, body: 'Triage the build', facts: { fromScript: { credential: 'ci runner' } }, createdAt: 1_800_000_000_000 }],
+      }),
+    )
+    expect(text).toContain('script ci runner · assign')
+    expect(text).not.toContain('You · assign')
+    // Drawn on the left, as another party's, not on the right as the person's
+    expect(/<li class="[^"]*items-start[^"]*" data-testid="mail-message-1"/.test(html)).toBe(true)
+  })
+
   it('offers the earlier messages when a long thread was opened at its end, and not otherwise', () => {
     expect(render(view({ older: true })).html).toContain('data-testid="mail-earlier"')
     expect(render(view()).html).not.toContain('data-testid="mail-earlier"')

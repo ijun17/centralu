@@ -7,6 +7,7 @@ import { ATTACHMENT_MAX_BASE64, PROTOCOL_VERSION, parseServerFrame, type Normali
 import { HostServer, parseAllowedOrigins, versionMismatchMessage, type HostServerOptions, type RpcHandler } from './server.js'
 import { deriveHttpSecret, sameSecret, secretError, type HttpRoute } from './http.js'
 import { bridgeToken } from './bridge-token.js'
+import { limitedToken } from './limited-token.js'
 import { hostProof } from './host-proof.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { refuse } from '../mail/rules.js'
@@ -659,6 +660,26 @@ describe('RPC round trip', () => {
     b.ws.terminate()
     await b.wait(() => gone.length === 2)
     expect(gone).toEqual([...of('from-a'), ...of('from-b')])
+  })
+
+  it('says with which rights a call came in, and what the program called itself in its hello (#1405, §8.1)', async () => {
+    const seen: { rights?: string; label?: string | null }[] = []
+    const { port } = await start(async (_m: string, _p: unknown, ctx?: { rights?: string; label?: string | null }) => {
+      seen.push({ rights: ctx?.rights, label: ctx?.label })
+      return {}
+    })
+    const script = connect(port)
+    const window = connect(port)
+    const silent = connect(port)
+    await Promise.all([script.open(), window.open(), silent.open()])
+    script.send({ kind: 'hello', token: limitedToken(TOKEN), protocolVersion: PROTOCOL_VERSION, client: 'ci runner' })
+    window.send({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION })
+    silent.send({ kind: 'hello', token: limitedToken(TOKEN), protocolVersion: PROTOCOL_VERSION })
+    for (const c of [script, window, silent]) c.send({ kind: 'rpc', id: 'r', method: 'sessions.list', params: {} })
+    await Promise.all([script, window, silent].map((c) => c.wait(() => c.frames.some((f) => f.kind === 'res'))))
+    expect(seen).toEqual(expect.arrayContaining([{ rights: 'limited', label: 'ci runner' }, { rights: 'full', label: null }, { rights: 'limited', label: null }]))
+    expect(seen).toHaveLength(3)
+    for (const c of [script, window, silent]) c.ws.close()
   })
 
   it('returns the result', async () => {

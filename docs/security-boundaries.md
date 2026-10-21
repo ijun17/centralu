@@ -24,8 +24,8 @@ sessions (#984), each row of a project nobody trusted marked "(not trusted)"; fr
 own project only, so text planted there cannot search every conversation (the #382 rule).
 
 Who wrote each line travels with it (#838). `read_session` gives a line another session sent `from` and one an app
-sent `fromApp` (`authorOf` in `sessions/transcript-view.ts`); `recall`'s context marks every message
-(`[person]`, `[agent]`, `[session "<name>"]`, `[app "<name>"]`) and indents a message's own later lines, so neither a
+sent `fromApp`, and the first message a script started a session with `fromScript` (`authorOf` in `sessions/transcript-view.ts`); `recall`'s context marks every message
+(`[person]`, `[agent]`, `[session "<name>"]`, `[app "<name>"]`, `[script "<label>"]`) and indents a message's own later lines, so neither a
 child's report nor an app's text reads as the person's, and no text can start a line with a mark of its own. The
 hit's snippet keeps those lines (`windowAroundLines` in `sessions/snippet.ts`): it used to fold every line break into a
 space, which put a mark an app's text wrote on the same footing as a real one, and a snippet cut inside a message starts
@@ -461,8 +461,8 @@ passed every check after the card. Refusals are logged with the caller and the t
 is logged once, by the call that holds the session (#797), so a burst of calls logs one "allowed" and the refusals.
 
 The note defaults to the stored record, so a session's own drift does not write it. The record labels every row
-another session or an app sent (`from`, `fromApp`: a child's report, a parent's or orchestrator's instruction, an app's
-message) with its source and carries its text as one JSON string, as read_session does (#120, #121); only the person's
+another session, an app or a script sent (`from`, `fromApp`, `fromScript`: a child's report, a parent's or orchestrator's instruction, an app's
+message, a script's first message) with its source and carries its text as one JSON string, as read_session does (#120, #121); only the person's
 rows are `[user]`. That holds per line, as the successor reads the file, not only per row (#797): a row starts only at
 the start of a line, and every later line of any row's text is indented, so the session's own multi-line reply or
 compaction summary cannot make a line that starts with `[user]`. A tool's name and title (a multi-line command, a

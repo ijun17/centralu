@@ -29,7 +29,10 @@ export class CrossHandle implements SessionHandle {
    * ends took in, by id (`SessionHandle.turnInputs`). Unset, the tool takes every message into the running turn
    */
   turnInputs?: () => readonly string[] | null
-  send(text: string, opts?: { id?: string }) {
+  /** The origin each input was stamped with (`SessionHandle.send`'s `opts.origin`), in the same order */
+  origins: unknown[] = []
+  send(text: string, opts?: { id?: string; origin?: unknown }) {
+    this.origins.push(opts?.origin)
     this.sent.push(text)
     this.ids.push(opts?.id)
     this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'working' })
