@@ -55,6 +55,11 @@ export class CrossHandle implements SessionHandle {
     if (this.acceptsAtOnce) observer?.accepted?.()
     return done
   }
+  /** The background tasks the host asked this tool to stop (`SessionHandle.stopBackgroundTask`) */
+  stoppedTasks: string[] = []
+  async stopBackgroundTask(taskId: string): Promise<void> {
+    this.stoppedTasks.push(taskId)
+  }
   respondApproval() {
     return false
   }
