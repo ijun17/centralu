@@ -110,7 +110,7 @@ describe('a linked machine (#700)', () => {
   })
 
   it('a stop before the task\'s turn was seen running ends the turn before it, not this one (#428)', () => {
-    const flow = new AskProjectFlow(hostWith({}))
+    const flow = new AskProjectFlow(hostWith({ linkedReports: { oweAsker: () => [], releaseAsker: () => undefined } }))
     const { ask, outcomes } = linkedAsk()
     // The person stops the turn that was running when the task went in
     flow.observeLinkedAsk(ask, { type: 'state_change', state: 'waiting_input', reason: 'interrupted' })

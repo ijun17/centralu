@@ -130,7 +130,10 @@ export function askProjectText(r: AskProjectResult): ToolOutput {
         `To keep waiting, call ask_project again with project "${r.project}", session "${r.sessionId}" and no task; the work goes on meanwhile.`,
     }
   }
-  const lines = [`${r.project} answered (from ${where}), as JSON:`, trustedJsonText(r.answer || '(no final text)')]
+  const lines = [
+    r.paused ? `${r.project} has not finished (from ${where}): ${r.paused} What it said so far, as JSON:` : `${r.project} answered (from ${where}), as JSON:`,
+    trustedJsonText(r.answer || '(no final text)'),
+  ]
   if (r.readable.length) lines.push(`You can read these now: ${r.readable.join(', ')}`)
   if (r.outside.length) lines.push(`Named outside ${r.project}'s folder (not opened for you): ${r.outside.join(', ')}`)
   return { text: lines.join('\n') }

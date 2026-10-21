@@ -217,6 +217,42 @@ export class LinkedReports {
   }
 
   /**
+   * An ask_project task's turn there ended (#1457) with the session's own background work still running: the asker is
+   * owed the work's last turn end, as the orchestrator is for a `reportBack` send (#723). The call that asked answers with
+   * this turn's words and says the work is paused, so this is the report kept for what follows, with no notice of its own
+   * (`observe` finds it paused already and tells nobody). Returns the work it paused on, none when the turn is not one
+   * to pause on (it did not complete, was the person's, the machine lists no such work, or an older machine does not list
+   * its background tasks at all), the report is another session's, or the gate does not let this one through.
+   */
+  oweAsker(sessionId: string, callerId: string, ending: Pick<LinkedEvent, 'type' | 'turn'>): BackgroundTask[] {
+    if (ending.type !== 'turn_complete' || saidTurn(ending.turn)?.by === 'person') return []
+    const running = this.ownTasksRunning(sessionId)
+    if (!running.length) return []
+    const held = this.host.children.linkedReports.get(sessionId)
+    if ((held && held.orchestratorId !== callerId) || this.gate(sessionId) !== 'deliver') return []
+    this.stopSettling(sessionId)
+    this.remember(sessionId)
+    this.host.children.setLinkedReport(sessionId, { orchestratorId: callerId, busy: false, paused: [...running] })
+    return running
+  }
+
+  /**
+   * The asker's new task replaces the report it was owed for its earlier one (#721: new work from the same caller ends
+   * the pause, and that run's own wait tells its end). Returns what puts the report back, for a send that fails; none when
+   * the session owes the asker no paused report.
+   */
+  releaseAsker(sessionId: string, callerId: string): (() => void) | undefined {
+    const held = this.host.children.linkedReports.get(sessionId)
+    if (!held?.paused || held.orchestratorId !== callerId) return undefined
+    this.drop(sessionId)
+    return () => {
+      if (this.host.children.linkedReports.has(sessionId)) return
+      this.host.children.setLinkedReport(sessionId, held)
+      this.restored(sessionId)
+    }
+  }
+
+  /**
    * A message the machine took (#1377). Whose it is: a message with no source is the person's; the hub's instruction,
    * another session's and an app's are the work's. At rest it is what the next turn starts from; into a running turn it
    * joins it, noted when it is the person's into the work's. The person's choice rides on it (`intent`): `takeover` closes

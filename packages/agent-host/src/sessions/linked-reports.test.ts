@@ -605,3 +605,64 @@ describe('a machine removed from Centralu', () => {
     expect(children.linkedReports.size).toBe(0)
   })
 })
+
+describe('an ask_project turn that ended on the session\'s own background work (#1457)', () => {
+  it('owes the asker the work\'s last turn end, and the turn end that told the call says nothing besides', async () => {
+    reports.observe(tasks('m1.w1', [verify]))
+    expect(reports.oweAsker('m1.w1', 'o1', { type: 'turn_complete' })).toEqual([verify])
+    expect(children.linkedReports.get('m1.w1')).toMatchObject({ orchestratorId: 'o1', busy: false, paused: [verify] })
+    // The same event, read by the reports after the ask: paused already, so no notice
+    reports.observe({ type: 'message_delta', sessionId: 'm1.w1' })
+    reports.observe({ type: 'turn_complete', sessionId: 'm1.w1' })
+    await flush()
+    expect(delivered).toEqual([])
+    reports.observe(tasks('m1.w1', [], [{ ...verify, status: 'completed' }]))
+    turn('m1.w1')
+    await flush()
+    expect(delivered).toMatchObject([{ orchestratorId: 'o1', sessionId: 'm1.w1', preview: 'last words of m1.w1' }])
+    expect(delivered[0]!.work).toBeUndefined()
+  })
+
+  it('owes nothing for a turn that did not complete, the person\'s, one with no such work, or a timer', () => {
+    reports.observe(tasks('m1.w1', [verify]))
+    expect(reports.oweAsker('m1.w1', 'o1', { type: 'error' })).toEqual([])
+    expect(reports.oweAsker('m1.w1', 'o1', { type: 'turn_complete', turn: { by: 'person' } })).toEqual([])
+    expect(reports.oweAsker('m1.w2', 'o1', { type: 'turn_complete' })).toEqual([])
+    reports.observe(tasks('m1.w2', [{ id: 'cron', kind: 'other', description: 'every 5 minutes', status: 'running', timer: true }]))
+    expect(reports.oweAsker('m1.w2', 'o1', { type: 'turn_complete' })).toEqual([])
+    expect(children.linkedReports.size).toBe(0)
+  })
+
+  it('does not take over a report another session is owed, nor one the gate does not let through', () => {
+    reports.observe(tasks('m1.w1', [verify]))
+    ask('m1.w1', 'o2')
+    expect(reports.oweAsker('m1.w1', 'o1', { type: 'turn_complete' })).toEqual([])
+    expect(children.linkedReports.get('m1.w1')?.orchestratorId).toBe('o2')
+    children.dropLinkedReport('m1.w1')
+    gateAnswer = 'withhold'
+    expect(reports.oweAsker('m1.w1', 'o1', { type: 'turn_complete' })).toEqual([])
+    expect(children.linkedReports.size).toBe(0)
+  })
+
+  it('releases only the paused report the asker is owed, and the undo puts it back unless something else is owed by then', () => {
+    reports.observe(tasks('m1.w1', [verify]))
+    expect(reports.releaseAsker('m1.w1', 'o1')).toBeUndefined()
+    // A report awaiting a turn, not paused over work, is not the pause's to release
+    ask('m1.w1', 'o1')
+    expect(reports.releaseAsker('m1.w1', 'o1')).toBeUndefined()
+    children.dropLinkedReport('m1.w1')
+    reports.oweAsker('m1.w1', 'o1', { type: 'turn_complete' })
+    expect(reports.releaseAsker('m1.w1', 'o2')).toBeUndefined()
+    const undo = reports.releaseAsker('m1.w1', 'o1')!
+    expect(children.linkedReports.size).toBe(0)
+    undo()
+    expect(children.linkedReports.get('m1.w1')).toMatchObject({ orchestratorId: 'o1', paused: [verify] })
+    // Something else owed meanwhile stays
+    reports.releaseAsker('m1.w1', 'o1')!()
+    expect(children.linkedReports.get('m1.w1')?.paused).toEqual([verify])
+    const again = reports.releaseAsker('m1.w1', 'o1')!
+    ask('m1.w1', 'o2')
+    again()
+    expect(children.linkedReports.get('m1.w1')?.orchestratorId).toBe('o2')
+  })
+})

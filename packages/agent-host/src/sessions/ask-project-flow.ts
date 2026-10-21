@@ -7,7 +7,10 @@ import { awayPhrase } from '../adapters/contract.js'
 import type { AskProjectResult, LinkedProject, LinkedSessions } from '../adapters/contract.js'
 import { inTurn } from '../idle.js'
 import { linkedTurnEnd, type LinkedTurnEvent } from './linked-turn-end.js'
+import type { LinkedReports } from './linked-reports.js'
 import { raceBound } from './with-timeout.js'
+import { taskList } from './background-stops.js'
+import type { BackgroundTask } from '@cc/protocol'
 import type { DelegationFlow, DelegationHost } from './delegation-flow.js'
 import { agentDepthRefusal, depthOf } from './agent-depth.js'
 
@@ -28,6 +31,11 @@ type LinkedAsk = {
   settled: boolean
   /** What the session waits on, when it waits on the person there (an approval, a question) */
   notice?: string
+  /**
+   * The session's own background work the turn ended with (#1457): the asker is owed the work's last turn end
+   * (`LinkedReports.oweAsker`), and the answer to this call says the work is paused
+   */
+  paused?: BackgroundTask[]
   outcome: Promise<{ ok: true } | { ok: false; error: string }>
   settle(r: { ok: true } | { ok: false; error: string }): void
   /** The calls waiting on it, woken when the session stops on a card */
@@ -52,7 +60,10 @@ export type HubsReader = {
  * read when used, never kept.
  */
 export type AskProjectHost = Pick<DelegationHost, 'agentRuns' | 'applyDeferredRestart' | 'askHost' | 'autoBoundaryOpen' | 'builderRefOf' | 'busyAnswer' | 'busyChoices' | 'busyForCaller' | 'children' | 'deliver' | 'enqueue' | 'ensureProjectAccess' | 'linkedReader' | 'meta' | 'queuedOf' | 'readGrants' | 'routedCards' | 'store' | 'uiPreferences' | 'untilCard'> &
-  Pick<DelegationFlow, 'awaitTurn' | 'grantReads' | 'handedOverReply' | 'startDelegation' | 'untilHandedOver'>
+  Pick<DelegationFlow, 'awaitTurn' | 'grantReads' | 'handedOverReply' | 'startDelegation' | 'untilHandedOver'> & {
+    /** The orchestrator's and the askers' reports from linked machines' sessions (linked-reports.ts) */
+    readonly linkedReports: Pick<LinkedReports, 'oweAsker' | 'releaseAsker'>
+  }
 
 /**
  * ask_project (#371 part B): a session asks another project, here or on a linked machine (#700), and waits for the
@@ -95,7 +106,17 @@ export class AskProjectFlow {
       return
     }
     if (step.step === 'card_closed') ask.notice = undefined
-    else if (step.step === 'completed') ask.settle({ ok: true })
+    else if (step.step === 'completed') {
+      /*
+       * A turn that completed with the session's own background work still running there is a pause, as a local child's
+       * is (#721): decided on this event, so the work's later turn is owed to the asker from now on, whether or not the
+       * call is still waiting. The report is kept before the call is told, and `LinkedReports.observe` reads the same
+       * event after this and finds it paused already
+       */
+      const paused = this.host.linkedReports.oweAsker(ask.sessionId, ask.callerId, e)
+      if (paused.length) ask.paused = paused
+      ask.settle({ ok: true })
+    }
     else if (step.step === 'failed') ask.settle({ ok: false, error: step.error })
     else ask.settle({ ok: false, error: 'the session was deleted there before its turn ended' })
   }
@@ -451,6 +472,11 @@ export class AskProjectFlow {
         settle(r)
       },
     }
+    /*
+     * The earlier task's pause ends with this one (#721): this ask's own end is what the asker hears, so the report kept
+     * for the earlier work is not delivered a second time. Put back if the send fails, since that work still runs
+     */
+    const putBack = this.host.linkedReports.releaseAsker(chosen.id, callerId)
     // Registered before the send: the machine's first events can reach the hub before its answer does
     this.linkedAsks.set(chosen.id, ask)
     // The machine counts its session one level below the caller while it works on this (#838): the depth holds across machines
@@ -458,6 +484,7 @@ export class AskProjectFlow {
     const sent = await reader.send(chosen.id, askFrame(callerProject, opts.task, { name: asker, sessionId: callerId }), asker, { depth: depthOf(this.host, callerId) + 1 })
     if (!sent.ok) {
       if (this.linkedAsks.get(chosen.id) === ask) this.linkedAsks.delete(chosen.id)
+      putBack?.()
       return { ok: false, error: `Could not hand the task to ${label}: ${sent.error}` }
     }
     return this.awaitLinkedAsk(ask, reader, signal)
@@ -539,6 +566,8 @@ export class AskProjectFlow {
         // Paths in the answer are that machine's: listed, not opened to the caller
         readable: [],
         outside: pathsIn(answer),
+        // Still paused only while that report is owed: collected after the work's report went out, these are its final words
+        ...(ask.paused && this.host.children.linkedReports.get(ask.sessionId)?.orchestratorId === ask.callerId ? { paused: pausedWords(ask) } : {}),
       }
     } finally {
       if (wake) ask.wake.delete(wake)
@@ -580,4 +609,17 @@ export class AskProjectFlow {
     return { ok: true, state: 'done', ...base, sessionName: sessionName(), answer: clipAnswer(r.answer, sessionName(), answerAt(this.host.store.messages, d.sessionId, r.answer)), readable: granted, outside }
   }
 
+}
+
+/**
+ * What the caller reads of a turn that ended with the session's own background work still running on a linked machine
+ * (#1457), the words of `DelegationWaits.pausedNotice` without the `agent_session stop`, which a project's session there
+ * does not have: the work may be a server that never ends, and the report comes only if it does
+ */
+function pausedWords(ask: LinkedAsk): string {
+  return (
+    `its turn ended while its own background work is still running there (${taskList(ask.paused ?? [])}), so the answer is what it said so far. ` +
+    'A final report follows when that work ends and a turn there ends it. If that work is a server or watcher it leaves running, ' +
+    `this answer may be its final one. Read the session with read_session(sessionId="${ask.sessionId}").`
+  )
 }
