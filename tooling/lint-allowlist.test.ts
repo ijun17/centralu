@@ -297,6 +297,21 @@ describe("main's lists", () => {
     expect(mainLists(repo, 'main')).toEqual({ kind: 'lists', base: empty, lists: new Map() })
   }, 60_000 * SLOW)
 
+  it("are read at main's tip while a conflicted merge of main is not committed yet (the merge queue, #1423)", () => {
+    const fork = setUp()
+    write(`${ALLOWLIST_DIR}/packages-a.txt`, formatList(list([['packages/a/src/x.ts', UNSAFE, 3]])))
+    commit('the branch raises the line')
+    git(repo, 'checkout', '-q', 'main')
+    write(`${ALLOWLIST_DIR}/packages-a.txt`, formatList(list([['packages/a/src/x.ts', UNSAFE, 1]])))
+    const tip = commit('main lowers the same line')
+    git(repo, 'checkout', '-q', 'feature')
+    // Both changed the line: the merge stops with a conflict, MERGE_HEAD set, HEAD still the branch tip
+    expect(() => git(repo, '-c', 'user.name=t', '-c', 'user.email=t@t', 'merge', '--no-edit', 'main')).toThrow()
+    expect(git(repo, 'merge-base', 'HEAD', 'main')).toBe(fork)
+    expect(baseCommit(repo, 'main')).toBe(tip)
+    expect(mainLists(repo, 'main')).toEqual({ kind: 'lists', base: tip, lists: list([['packages/a/src/x.ts', UNSAFE, 1]]) })
+  }, 60_000 * SLOW)
+
   it("tell a pull request's renames and added files from its merge commit, not main's (a merge ref)", () => {
     setUp()
     write('packages/a/src/mine.ts', 'export const m = 1\nexport const n = 2\nexport const o = 3\n')

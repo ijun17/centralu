@@ -2075,6 +2075,8 @@ describe('the merge queue resolves a conflict with main itself, or hands it to t
 
   describe('a conflict in the lint allowlists only (#1423)', () => {
     const LIST = 'tooling/lint-allowlist/packages-agent-host.txt'
+    /** A list that did not conflict, which `lint:tighten` lowers too when it is there */
+    const OTHER = 'tooling/lint-allowlist/packages-ui.txt'
     /**
      * A `pnpm` on the app's PATH standing for the board's real commands: `lint:tighten` records the list it was given
      * (main's version) and lowers it; the allowlist check (`exec vitest run …`) fails when `allowlist-check-fails` is there.
@@ -2092,6 +2094,7 @@ describe('the merge queue resolves a conflict with main itself, or hands it to t
           `if (args[0] === 'lint:tighten') {`,
           `  rec({ args, list: fs.readFileSync(${JSON.stringify(LIST)}, 'utf8'), base: process.env.CC_LINT_BASE })`,
           `  fs.writeFileSync(${JSON.stringify(LIST)}, 'tightened\\n')`,
+          `  if (fs.existsSync(${JSON.stringify(OTHER)})) fs.writeFileSync(${JSON.stringify(OTHER)}, 'lowered\\n')`,
           `} else if (args[0] === 'exec') {`,
           `  rec({ args, list: fs.readFileSync(${JSON.stringify(LIST)}, 'utf8'), base: process.env.CC_LINT_BASE })`,
           `  if (fs.existsSync(${JSON.stringify(join(root, 'allowlist-check-fails'))})) { process.stderr.write('allowlist check failed: a line is higher than main\\n'); process.exit(1) }`,
@@ -2102,7 +2105,7 @@ describe('the merge queue resolves a conflict with main itself, or hands it to t
     }
 
     it("takes main's list, lowers it, runs the allowlist check, and pushes the merge once it passes", async () => {
-      const repo = conflictRepo({ 77: [LIST] })
+      const repo = conflictRepo({ 77: [LIST] }, { base: { [OTHER]: 'file 1\n' } })
       const before = untouched(repo.work)
       const pnpmCalls = lintPnpm(false)
       // The board's own lists, so the commands are the configured ones
@@ -2117,6 +2120,11 @@ describe('the merge queue resolves a conflict with main itself, or hands it to t
       expect(pnpmCalls().slice(1).map((c) => c.base)).toEqual([repo.main, repo.main])
       const tip = tipOf(repo, 77)
       expect(g(repo.origin, 'show', `${tip}:${LIST}`)).toBe('tightened')
+      // A list that did not conflict, lowered by lint:tighten, is in the commit and shown with the rest
+      expect(g(repo.origin, 'show', `${tip}:${OTHER}`)).toBe('lowered')
+      expect(g(repo.origin, 'log', '-1', '--format=%b', tip)).toContain(`The commands also changed ${OTHER}, which did not conflict.`)
+      expect(g(repo.origin, 'log', '-1', '--format=%b', tip)).toContain(`${OTHER} +1 -1`)
+      expect(conflictSteps().find((e) => e.step === 'regenerate')).toMatchObject({ files: [LIST], also: [OTHER] })
       expect(g(repo.origin, 'rev-list', '--parents', '-n', '1', tip).split(' ').slice(1)).toEqual([repo.heads[77], repo.main])
       expect(untouched(repo.work)).toEqual(before)
       expect(notices().filter((e) => e.kind === 'attention')).toEqual([])

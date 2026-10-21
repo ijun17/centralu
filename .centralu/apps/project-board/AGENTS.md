@@ -330,10 +330,15 @@ the git work; `onConflict` in `queue-driver.mjs` decides, once per head.
   requests that each lower counts in the same list conflict once the first lands. The queue takes
   main's version, runs `pnpm lint:tighten` (which lowers every line to what the merged tree holds),
   then the allowlist check (`tooling/type-aware-lint.test.ts`: lists sorted, and no line new or higher
-  than main's, compared with the tip the queue just fetched: `CC_LINT_BASE`), and pushes only if both pass. `lint:tighten` lowers every
-  list the merged tree no longer needs, so the merge commit may carry a lowering in a list that did not conflict. A finding the merged tree has beyond the lists, or a failing
-  check, fails the command, and the conflict goes to the author as any other. A conflict in a list and in
-  code goes to the author without running anything.
+  than main's), and pushes only if both pass. The check runs while the merge is not committed yet;
+  `baseCommit` (`tooling/lint-allowlist.ts`) then takes the newer merge base of the branch tip and of
+  `MERGE_HEAD` with `CC_LINT_BASE`, which the queue sets to the main tip it just fetched, so the
+  comparison is with main's lists as the merge commit will have them, as in CI, not with the branch's old
+  fork point. A finding the merged tree has beyond the lists, or a failing check, fails the command, and
+  the conflict goes to the author as any other. `lint:tighten` lowers every list the merged tree no longer
+  needs, so the merge commit may carry a lowering in a list that did not conflict; the commit message, the
+  `regenerate` event (`also`) and its `stat` list those files too. A conflict in a list and in code goes
+  to the author without running anything.
 - **Mechanical files**: when every conflicted file is named by an entry of `project.json`
   `queue.conflicts.mechanical` (`files`: path patterns as `release.versionFiles`; `run`: commands as
   argument lists, run in order without a shell, each at most `timeoutMinutes`, default 30; on Windows

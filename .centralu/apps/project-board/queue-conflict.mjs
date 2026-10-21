@@ -492,15 +492,18 @@ export async function mergeMain({ repo, pr, defaultBranch, dir, conflicts, renew
       }
       // What regenerating made of each file, against the default branch's version: a golden approved
       // without a person is at least visible to one (the commit and the queue's event both say it)
-      const stat = numstat(await git(tmp, ['diff', '--cached', '--numstat', '--no-renames', mainTip, '--', ...files]))
+      // Files the commands changed that did not conflict (`pnpm lint:tighten` lowers every allowlist the merged tree no longer
+      // needs, #1423) are in the commit too, so they are shown with the rest
+      const extra = named.filter((p) => !files.includes(p))
+      const stat = numstat(await git(tmp, ['diff', '--cached', '--numstat', '--no-renames', mainTip, '--', ...files, ...extra]))
       const body = [
-        `The merge queue merged ${defaultBranch} and regenerated ${listSome(files, 6)} with ${plan.commands.map(commandLine).join(', ')} (project.json queue.conflicts.mechanical, #1182).`,
+        `The merge queue merged ${defaultBranch} and regenerated ${listSome(files, 6)} with ${plan.commands.map(commandLine).join(', ')} (project.json queue.conflicts.mechanical, #1182).${extra.length ? ` The commands also changed ${listSome(extra, 6)}, which did not conflict.` : ''}`,
         '',
         `Regenerated, against ${defaultBranch} at ${short(mainTip)}:`,
         ...(stat.length ? stat.map((x) => `  ${statLine(x)}`) : ['  no change']),
       ].join('\n')
       await git(tmp, [...HOOKS_OFF, 'commit', '--quiet', '-F', '-'], { input: `${message}\n\n${body}\n` })
-      steps.push({ step: 'regenerate', ms: clock() - regenerating, files, commands: plan.commands.map(commandLine), stat, modules })
+      steps.push({ step: 'regenerate', ms: clock() - regenerating, files, ...(extra.length ? { also: extra } : {}), commands: plan.commands.map(commandLine), stat, modules })
     }
     sha = (await git(tmp, ['rev-parse', 'HEAD'])).trim()
     if (!renew()) return { outcome: 'yielded' }
