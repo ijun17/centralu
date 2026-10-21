@@ -398,6 +398,23 @@ Consequences:
   above), and its end is reported to A. The final report comes when a turn of T1 ends with no open child threads and no
   paused work. Today A gets "finished" at B's first turn end while C still works, and B's later turns are reported to
   nobody, because the mark was cleared. This is #721's pause, applied to delegated work.
+- **What a child thread counts as, for "waiting on N".** A child thread keeps its parent paused only while it has an
+  assignee and its state is `open`, `running` or `blocked`.
+  - A child in `review` has reported finished, so it does not count, even if the parent never closes it.
+  - A `done` child does not count.
+  - Nor does a child with no assignee: its assignee was archived or deleted, so `partyGone` already told its owner
+    (`assignee_archived`).
+
+  So the parent's next turn end is reported as usual (finished, or paused for what still runs).
+- **A pause wakes the owner once per thread** (#1448 review, 2026-10-21).
+  - The first `paused` report in a thread (paused on background work or waiting on child threads) wakes the owner, as
+    #721's "told once that the work paused" does today.
+  - Later pauses in the same thread are recorded as `report`s with `wake: false`. Claude reads them with `shouldQuery:
+    false`; Codex at the next turn. The thread and the board show them.
+  - The allowance resets when the owner (or the person) posts new work or a note in the thread. The first pause after
+    that wakes again.
+  - The reports that end a pause always wake: finished, failed, stopped, a card raised in the thread's turn, `blocked`.
+  - Centralu's reports stay exempt from the loop guard, but a pause that does not wake starts no turn, so it cannot loop.
 - **Paused work (#721) carries over.** When a turn of T ends with the session's own background work running, the report is
   `facts.paused = [tasks]` and the thread stays `running`. The turn the CLI starts when that work ends is `cli`, attributed
   to T, and its end is T's final report. The 60 s settle (`PAUSED_REPORT_SETTLE_MS`) stays.
