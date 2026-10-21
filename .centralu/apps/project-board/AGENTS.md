@@ -326,6 +326,13 @@ the git work; `onConflict` in `queue-driver.mjs` decides, once per head.
   off at once (the reason says why). GitHub saying DIRTY of a branch that has the default branch in
   it already ("Already up to date" here) is handed off too: there is nothing to push, and waiting for
   a new head would wait for ever.
+- **The lint allowlists** (#1423): `tooling/lint-allowlist/*.txt` are mechanical files too. Two pull
+  requests that each lower counts in the same list conflict once the first lands. The queue takes
+  main's version, runs `pnpm lint:tighten` (which lowers every line to what the merged tree holds),
+  then the allowlist check (`tooling/type-aware-lint.test.ts`: lists sorted, and no line new or higher
+  than main's), and pushes only if both pass. A finding the merged tree has beyond the lists, or a failing
+  check, fails the command, and the conflict goes to the author as any other. A conflict in a list and in
+  code goes to the author without running anything.
 - **Mechanical files**: when every conflicted file is named by an entry of `project.json`
   `queue.conflicts.mechanical` (`files`: path patterns as `release.versionFiles`; `run`: commands as
   argument lists, run in order without a shell, each at most `timeoutMinutes`, default 30; on Windows
