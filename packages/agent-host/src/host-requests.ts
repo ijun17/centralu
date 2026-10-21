@@ -52,12 +52,17 @@ export type HostRequestsDeps = {
   rpc: WindowRpc
   /** Whether a window that shows host requests is attached with the token (`HostServer.showsHostRequests`) */
   canShow: () => boolean
+  /** A session's name, to say on a card which session's process asked (#1405); null when there is none */
+  sessionName?: (sessionId: string) => string | null
   now?: () => number
   limits?: Partial<typeof HOST_REQUEST_LIMITS>
 }
 
-/** Who asked, as the hello said it: never checked, only shown quoted */
-export type RequestFrom = { client: string | null }
+/**
+ * Who asked, as the hello said it: what the program called itself, never checked, and the session whose credential it
+ * holds (#1405, session-token.ts), which says only which session's process it claims to be
+ */
+export type RequestFrom = { client: string | null; session?: string }
 
 type Waiting = { request: HostRequest; settle: (answer: 'allow' | 'deny' | null, outcome: HostRequestOutcome) => void }
 
@@ -233,6 +238,8 @@ export class HostRequests {
       method,
       question,
       client: from.client === null ? null : quotedName(from.client),
+      // A session credential's session (#1405): its name quoted, its id when it has none
+      session: from.session ? quotedName(this.deps.sessionName?.(from.session) ?? from.session) : null,
       createdAt,
       expiresAt: createdAt + this.limits.lifetimeMs,
     }

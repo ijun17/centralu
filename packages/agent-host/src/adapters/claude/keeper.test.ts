@@ -109,6 +109,29 @@ describe('claude under the keeper', () => {
     sdk.end()
   })
 
+  it("a session's CLI finds the host's address and its own credential, with the environment it inherits (#1405)", async () => {
+    const spawned: AgentSpawnSpec[] = []
+    const handle = await new ClaudeAdapter({ executable: () => null, startGapMs: 0 }).createSession(
+      {
+        sessionId: 'with-access',
+        cwd: '/tmp',
+        permissionPreset: 'safe',
+        hostAccess: { url: 'ws://127.0.0.1:4100', credential: 'ccs1:with-access:mac' },
+        processSource: { spawn: (spec) => (spawned.push(spec), fakeProcess()) },
+      },
+      () => {},
+    )
+    const env = sdk.state.options!.env as AgentSpawnSpec['env']
+    expect(env).toMatchObject({ CC_HOST_URL: 'ws://127.0.0.1:4100', CC_HOST_CREDENTIAL: 'ccs1:with-access:mac' })
+    // The SDK's env replaces the CLI's environment: the host's own still has to be there
+    expect(env.PATH ?? env.Path).toBe(process.env.PATH ?? process.env.Path)
+    const spawn = sdk.state.options!.spawnClaudeCodeProcess as (o: AgentSpawnSpec) => AgentProcess
+    spawn({ command: 'claude', args: [], env })
+    expect(spawned[0]!.env.CC_HOST_CREDENTIAL).toBe('ccs1:with-access:mac')
+    await handle.dispose()
+    sdk.end()
+  })
+
   it('the first spawn adopts the running CLI; a later one spawns through the keeper', async () => {
     const { handle, adopted, spawned, spawn } = await adoptedSession([])
     expect(spawn({ command: 'claude', args: ['--resume=conv-1'], env: {} })).toBe(adopted)

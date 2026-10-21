@@ -18,6 +18,7 @@ import { EventLog } from './event-log.js'
 import { createHttpHandler, sameSecret, type HttpGate } from './http.js'
 import { bridgeRefusal, bridgeSessionOf } from './bridge-token.js'
 import { isLimitedToken } from './limited-token.js'
+import { sessionOfToken } from './session-token.js'
 import { limitedRefusal } from './method-rights.js'
 import { credentialProof, hostProof } from './host-proof.js'
 import { isFullCredential, type FullCredential } from '../lifecycle/serve-credentials.js'
@@ -42,6 +43,11 @@ export type RpcContext = {
    * may call is already narrowed to its own session's tool channel (`bridgeRefusal`)
    */
   rights: 'full' | 'limited'
+  /**
+   * The session whose credential the socket said hello with (#1405, session-token.ts): attribution for a card, never
+   * a right. Absent for the token and the plain limited credential
+   */
+  session?: string
 }
 
 export type RpcHandler = (method: string, params: unknown, ctx?: RpcContext) => Promise<unknown>
@@ -142,7 +148,12 @@ export type HostServerOptions = {
    * after the person did (host-requests.ts). `from.client` is what the program called itself in its hello; `signal`
    * fires when its socket goes. Without it, such a call is refused as before
    */
-  onAsk?: (method: string, params: unknown, from: { client: string | null }, signal: AbortSignal) => Promise<unknown>
+  onAsk?: (method: string, params: unknown, from: { client: string | null; session?: string }, signal: AbortSignal) => Promise<unknown>
+  /**
+   * Whether a session id is one of this host's (#1405): a session credential naming one it does not know is refused at
+   * hello. Without it, any well-formed one is taken
+   */
+  knowsSession?: (sessionId: string) => boolean
   /** How many windows that show host requests are attached, each time it changes (#1405, `HostRequests.showingChanged`) */
   onShowing?: (count: number) => void
   /**
@@ -511,6 +522,8 @@ export class HostServer {
     let bridgeOf: string | null = null
     /** Whether this socket said hello with the limited credential, not the token (#1405) */
     let limited = false
+    /** The session whose credential it said hello with (#1405, session-token.ts): limited rights, named on its cards */
+    let session: string | undefined
     /** What the program called itself in its hello (#1405), for a card its call raises; cut, never checked */
     let label: string | null = null
     /** Fires when this socket goes: a host request its call raised is withdrawn (#1405) */
@@ -591,6 +604,14 @@ export class HostServer {
         if (!full) {
           // Every process of this user but the window holds the limited credential (#1405, limited-token.ts)
           limited = isLimitedToken(this.opts.token, frame.data.token)
+          // A session's processes hold a credential with the same rights, naming the session (session-token.ts)
+          if (!limited) {
+            const of = sessionOfToken(this.opts.token, frame.data.token)
+            if (of !== null && (this.opts.knowsSession?.(of) ?? true)) {
+              limited = true
+              session = of
+            }
+          }
           // A Codex bridge holds a credential for its own session's calls only (bridge-token.ts)
           if (!limited) bridgeOf = bridgeSessionOf(this.opts.token, frame.data.token)
           if (!limited && bridgeOf === null) {
@@ -662,7 +683,7 @@ export class HostServer {
         // What cannot be undone waits for the person instead (host-requests.ts), and the call answers when they did
         if (refusal?.rights === 'asks' && this.opts.onAsk) {
           try {
-            const result = await this.opts.onAsk(method, params, { client: label }, leaving.signal)
+            const result = await this.opts.onAsk(method, params, { client: label, ...(session ? { session } : {}) }, leaving.signal)
             this.sendTo(ws, JSON.stringify({ kind: 'res', id, ok: true, result }))
           } catch (err) {
             // A refusal says why in `data` (host-requests.ts): kept for a program to read
@@ -682,7 +703,7 @@ export class HostServer {
         }
       }
       try {
-        const run = () => this.opts.onRpc(method, params, { client, rights: limited ? 'limited' : 'full' })
+        const run = () => this.opts.onRpc(method, params, { client, rights: limited ? 'limited' : 'full', ...(session ? { session } : {}) })
         const result = await (this.opts.drain ? this.opts.drain.track(`rpc ${method}`, run) : run())
         this.sendTo(ws, JSON.stringify({ kind: 'res', id, ok: true, result }))
       } catch (err) {

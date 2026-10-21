@@ -82,7 +82,7 @@ beforeEach(async () => {
   store = new Store()
   adapter = new CapturingAdapter()
   const adapters = new Map<ToolName, AgentAdapter>([['claude', adapter]])
-  mgr = new SessionManager(store, adapters, () => {}, () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), join(root, 'worktrees'))
+  mgr = new SessionManager(store, adapters, () => {}, () => ({ url: 'ws://127.0.0.1:5999', token: 'tok', credential: 'ccs1-cred' }), join(root, 'worktrees'))
   mgr.prLookup = async () => null
   rt = new ExternalApps({ projects: () => store.projects.projectRoots(), dataRoot, reservedIds: ['control'] })
   mgr.useExternalApps(rt)
@@ -107,6 +107,8 @@ describe('apps handed to a session by the manager (decision 4)', () => {
     expect(o.orchestratorTools).toBeDefined()
     // The path back to the host is still received — Codex's app bridge returns to this address
     expect(o.orchestratorBridge).toEqual({ url: 'ws://127.0.0.1:5999', token: 'tok' })
+    // And every session's agent finds the host and its own credential (#1405): the bridge's credential is not that
+    expect(o.hostAccess).toEqual({ url: 'ws://127.0.0.1:5999', credential: 'ccs1-cred' })
   })
 
   it('a worktree session starts in the worktree, but receives the project root\'s apps', async () => {

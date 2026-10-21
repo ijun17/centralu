@@ -2,6 +2,7 @@ import type { Readable } from 'node:stream'
 import { DEFAULT_DRAIN_MS, type Drain, type DrainReport } from './drain.js'
 import type { StoreInspection } from './dev-services/store.js'
 import { bridgeToken } from './transport/bridge-token.js'
+import { sessionToken } from './transport/session-token.js'
 import { lineSplitter } from './transport/json-lines.js'
 
 /**
@@ -44,9 +45,10 @@ export function bridgeAddress(
   port: number | undefined,
   hostToken: string,
   sessionId: string,
-): { url: string; token: string } | null {
+): { url: string; token: string; credential: string } | null {
   if (!port) return null
-  return { url: frontDoor || `ws://127.0.0.1:${port}`, token: bridgeToken(hostToken, sessionId) }
+  // The bridge's credential, and the session's for its processes (#1405, session-token.ts): both derived, never stored
+  return { url: frontDoor || `ws://127.0.0.1:${port}`, token: bridgeToken(hostToken, sessionId), credential: sessionToken(hostToken, sessionId) }
 }
 
 /**

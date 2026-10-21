@@ -16,6 +16,12 @@ export const HostRequest = z.object({
   question: z.string().max(20_000),
   /** What the program called itself (`hello.client`), quoted; null when it said nothing */
   client: z.string().max(200).nullable(),
+  /**
+   * The session whose credential the program holds (#1405), quoted: it says it runs under that session, which nothing
+   * checks (an agent's environment is readable by every process of its user). Null for the plain limited credential.
+   * Additive: an older host sends none
+   */
+  session: z.string().max(200).nullable().catch(null).default(null),
   createdAt: z.number(),
   expiresAt: z.number(),
 })

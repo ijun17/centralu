@@ -127,7 +127,7 @@ describe('processes.strays', () => {
 /** The person's answers to the limited credential's calls (#1405, host-requests.ts), as the window reaches them */
 describe('requests.list and requests.answer', () => {
   const handler = (services: Parameters<typeof createRpcHandler>[2]) => createRpcHandler({} as SessionManager, new Map(), services)
-  const request = { requestId: 'r1', method: 'trash.purge', question: 'Delete "x" for good?', client: null, createdAt: 1, expiresAt: 2 }
+  const request = { requestId: 'r1', method: 'trash.purge', question: 'Delete "x" for good?', client: null, session: null, createdAt: 1, expiresAt: 2 }
 
   it('lists what waits and passes the answer on, checking its shape first', async () => {
     const answered: [string, string][] = []
