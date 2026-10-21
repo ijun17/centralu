@@ -131,6 +131,7 @@ export class MailPerson {
       unread,
       held,
       blocked: this.records.blockers(thread.id).filter((b) => b.resolvedAt === null).length,
+      working: thread.state !== 'done' && this.service.turnRunning(thread),
       createdAt: thread.createdAt,
       updatedAt: thread.updatedAt,
       last: last ? { sender: this.party(last.sender), kind: last.kind, preview: oneLineText(last.body, PREVIEW_CHARS), at: last.createdAt } : null,

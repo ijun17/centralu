@@ -45,6 +45,8 @@ export class MailMock {
     kind?: string
     state?: string
     assignee?: MailParty | null
+    /** A turn of the thread is going in its assignee: Drop and Mark done ask first (3.10) */
+    working?: boolean
     held?: { reason: string; recipient: MailParty }
   }): string {
     const id = `mock.t_${this.clock.next()}`
@@ -62,6 +64,7 @@ export class MailMock {
       unread: 1,
       held: 0,
       blocked: 0,
+      ...(spec.working ? { working: true } : {}),
       createdAt: now,
       updatedAt: now,
       last: { sender: spec.from, kind: message.kind, preview: spec.body.slice(0, 140), at: now },

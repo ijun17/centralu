@@ -71,6 +71,14 @@ export type MailPolicy = {
   calls?(to: string): MailCalls
 }
 
+/** What the host does with a helper whose thread is closed (3.10, MB): see `MailService.useClosing` */
+export type ClosingHooks = {
+  /** A turn of this thread is going in its assignee: `mail_turns` says the turn belongs to the thread */
+  turnRunning(thread: ThreadRow): boolean
+  /** The person or the owner closed the thread while its work was going: stop the turn when `stopped`, and tell the helper `text` without a wake */
+  closed(c: { thread: ThreadRow; helperId: string; by: string; standing: Standing; outcome: ThreadOutcome; stopped: boolean; text: string }): void
+}
+
 export type MailServiceOptions = {
   /** This host's own id (`hub-` and 8 hex digits), read at the first mail and kept (§11.4) */
   hostId: () => string
@@ -751,7 +759,9 @@ export class MailService {
       if (key === 'assignee') throw refuse('field_not_allowed', 'the assignee changes with assign')
       if (!PATCH_KEYS.has(key)) throw refuse('field_not_allowed', `${key} is not a task field`)
     }
-    return this.run(() => {
+    // What the host does once the close has committed: stop the helper's turn and tell it (3.10)
+    let afterClose: (() => void) | undefined
+    const result = this.run(() => {
       const now = this.now()
       const thread = this.mustThread(threadId)
       this.party(by)
@@ -805,15 +815,54 @@ export class MailService {
         this.records.markHandled(thread.id, by, Number.MAX_SAFE_INTEGER, now)
         // And a thread that waits for this one hears how it ended (§3.3)
         this.releaseWaiters(thread.id, closedAs, now)
-        // The person closing work a session owns (Drop, Mark done in the Inbox): its owner is told once, in Centralu's words (3.10)
-        if (standing === 'person' && parseAddress(thread.owner)?.kind === 'session') this.tellOwnerClosed(thread, closedAs, now)
+        /*
+         * The person or the owner closing work a session was doing (Drop, Mark done, `mail close`): the work is not wanted, so a turn of this
+         * thread that is running is stopped, and the helper is told once without a wake (3.10, MB). The owner hears of the person's close once
+         */
+        const helper = parseAddress(thread.assignee ?? '')
+        const wasGoing = thread.state === 'open' || thread.state === 'running' || thread.state === 'blocked'
+        const closer = standing === 'person' || standing === 'owner'
+        const toldHelper = closer && helper?.kind === 'session' && wasGoing
+        const stopped = toldHelper && (this.closing?.turnRunning(thread) ?? false)
+        if (standing === 'person' && parseAddress(thread.owner)?.kind === 'session') this.tellOwnerClosed(thread, closedAs, now, stopped)
+        if (toldHelper && helper?.kind === 'session') {
+          const text = this.closedWords(thread, by, standing, closedAs, stopped)
+          this.insertEvent(thread.id, text, { change: 'helper_told', stopped, by }, now)
+          const snapshot = thread
+          const sessionId = helper.sessionId
+          afterClose = () => this.closing?.closed({ thread: snapshot, helperId: sessionId, by, standing, outcome: closedAs, stopped, text })
+        }
       }
       return after
     })
+    try {
+      afterClose?.()
+    } catch (e) {
+      console.error(`[mail] could not stop the work of a thread that was closed (${errorMessage(e)})`)
+    }
+    return result
+  }
+
+  /** The words of a close, in Centralu's: for the thread's event and the note the helper gets */
+  private closedWords(thread: ThreadRow, by: string, standing: Standing, outcome: ThreadOutcome, stopped: boolean): string {
+    const who = standing === 'person' ? 'The person' : `The owner (${sessionIdOf(by)})`
+    const what = outcome === 'dropped' ? 'dropped' : outcome === 'finished' ? 'marked done' : 'closed'
+    return `${who} ${what} thread ${thread.id}${stopped ? '; its work was stopped' : ''}. Do not continue it.`
+  }
+
+  /** The host's side of a close (3.10): whether a turn of the thread is going, and what to do about the helper once it is closed */
+  useClosing(hooks: ClosingHooks | undefined): void {
+    this.closing = hooks
+  }
+  private closing: ClosingHooks | undefined
+
+  /** Whether a turn of this thread is going in its assignee (what the Inbox asks before Drop or Mark done, and what a close stops) */
+  turnRunning(thread: ThreadRow): boolean {
+    return this.closing?.turnRunning(thread) ?? false
   }
 
   /** The person closed a thread a session owns: one report from Centralu to the owner, so the work is not waited for or reported on again (3.10) */
-  private tellOwnerClosed(thread: ThreadRow, outcome: ThreadOutcome, now: number): void {
+  private tellOwnerClosed(thread: ThreadRow, outcome: ThreadOutcome, now: number, stopped = false): void {
     const assignee = thread.assignee
     const id = assignee !== null && parseAddress(assignee)?.kind === 'session' ? `
 id: ${sessionIdOf(assignee)}` : ''
@@ -821,13 +870,13 @@ id: ${sessionIdOf(assignee)}` : ''
       outcome === 'dropped' ? 'The person dropped this work: it is not to be done.'
       : outcome === 'finished' ? 'The person marked this work done.'
       : `The person closed this work (${outcome}).`
-    const body = this.checkBody('centralu', `[Centralu] ${words}${id}`, false)
+    const body = this.checkBody('centralu', `[Centralu] ${words}${stopped ? ' Its running turn was stopped.' : ''}${id}`, false)
     this.insertPost(
       thread.id,
       CENTRALU,
       'report',
       body,
-      { outcome: outcome === 'finished' ? 'marked_done' : outcome, closedBy: 'person', ...(assignee !== null ? { about: { session: assignee } } : {}) },
+      { outcome: outcome === 'finished' ? 'marked_done' : outcome, closedBy: 'person', ...(stopped ? { stopped: true } : {}), ...(assignee !== null ? { about: { session: assignee } } : {}) },
       {},
       now,
       undefined,
@@ -1055,12 +1104,7 @@ id: ${sessionIdOf(assignee)}` : ''
     this.run(() => {
       const thread = this.records.thread(threadId)
       if (!thread || thread.assignee !== recipient || (thread.state !== 'review' && thread.state !== 'open')) return
-      const inDelivery = new Set(messageIds)
-      const gives = this.records.messagesAfter(thread.id, 0).some((m) => {
-        if (!inDelivery.has(m.id) || (m.sender !== thread.owner && m.sender !== PERSON)) return false
-        return thread.state === 'review' ? m.kind === 'note' || m.kind === 'question' || m.kind === 'answer' || m.kind === 'assign' : m.kind === 'assign'
-      })
-      if (!gives) return
+      if (!this.givesWork(thread, messageIds)) return
       const now = this.now()
       this.moveState(
         thread,
@@ -1069,6 +1113,21 @@ id: ${sessionIdOf(assignee)}` : ''
         { change: 'state', from: thread.state, to: 'running', by: CENTRALU, reason: 'turn_started' },
         thread.state === 'review' ? 'The owner sent more: the thread is running again.' : 'The assignee started on it: the thread is running.',
       )
+    })
+  }
+
+  /**
+   * Whether the turn a delivery of `messageIds` starts is the work of `thread` (§6): its assignee's, with the thread not over or blocked, and for a
+   * thread in `review` or `open` only when mail that gives it work (the owner's or the person's `note`, `question`, `answer` or `assign`) is in the
+   * delivery. A member's note into a reported thread starts a turn that is not the thread's work
+   */
+  givesWork(thread: ThreadRow, messageIds: readonly string[]): boolean {
+    if (thread.state === 'running') return true
+    if (thread.state !== 'review' && thread.state !== 'open') return false
+    const inDelivery = new Set(messageIds)
+    return this.records.messagesAfter(thread.id, 0).some((m) => {
+      if (!inDelivery.has(m.id) || (m.sender !== thread.owner && m.sender !== PERSON)) return false
+      return thread.state === 'review' ? m.kind === 'note' || m.kind === 'question' || m.kind === 'answer' || m.kind === 'assign' : m.kind === 'assign'
     })
   }
 

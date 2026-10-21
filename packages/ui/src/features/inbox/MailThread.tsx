@@ -20,6 +20,8 @@ export function MailThread({ onOpenSession }: { onOpenSession: (sessionId: strin
   const unblock = useStore((s) => s.unblockMail)
   const older = useStore((s) => s.loadOlderMail)
   const [giving, setGiving] = useState(false)
+  // Closing a thread whose turn is going stops that turn: asked once first, with no way to close and leave it running (3.10)
+  const [confirming, setConfirming] = useState<'finished' | 'dropped' | null>(null)
   const list = useRef<HTMLOListElement>(null)
   // A thread opens at its end, where the newest message is, and follows a message that comes after it; earlier pages added above do not move it
   const newest = view?.messages.at(-1)?.seq
@@ -98,11 +100,32 @@ export function MailThread({ onOpenSession }: { onOpenSession: (sessionId: strin
       ) : (
         <>
           <Reply />
+          {confirming !== null && (
+            <div className="flex items-center gap-2 border-t border-line/60 px-4 py-2 text-sm text-ink" role="alertdialog" data-testid="mail-stop-confirm">
+              <span className="min-w-0">{thread.assignee ? partyName(thread.assignee) : 'The session'} is working on this. Stop its work and close the thread?</span>
+              <Button
+                size="sm"
+                variant="danger"
+                className="ml-auto shrink-0"
+                onClick={() => {
+                  const outcome = confirming
+                  setConfirming(null)
+                  void close(outcome)
+                }}
+                data-testid="mail-stop-close"
+              >
+                Stop and close
+              </Button>
+              <Button size="sm" variant="quiet" className="shrink-0" onClick={() => setConfirming(null)} data-testid="mail-stop-cancel">
+                Cancel
+              </Button>
+            </div>
+          )}
           <div className="flex items-center gap-1.5 border-t border-line/60 px-4 py-2">
-            <Button size="sm" variant="quiet" onClick={() => void close('finished')} data-testid="mail-finish">
+            <Button size="sm" variant="quiet" onClick={() => (thread.working ? setConfirming('finished') : void close('finished'))} data-testid="mail-finish">
               Mark done
             </Button>
-            <Button size="sm" variant="quiet" onClick={() => void close('dropped')} data-testid="mail-drop">
+            <Button size="sm" variant="quiet" onClick={() => (thread.working ? setConfirming('dropped') : void close('dropped'))} data-testid="mail-drop">
               Drop
             </Button>
             <Button size="sm" variant="quiet" className="ml-auto" onClick={() => setGiving((g) => !g)} aria-expanded={giving} data-testid="mail-give">

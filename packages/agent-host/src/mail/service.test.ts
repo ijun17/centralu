@@ -337,6 +337,35 @@ describe('how a thread’s state moves (§3.3)', () => {
     expect(records.messagesAfter(theirs.id, 0).filter((m) => m.kind === 'report')).toEqual([])
   })
 
+  it('only the person or the owner closing work that was going stops it and tells the helper (3.10): the assignee closing its own thread, or a thread that was reported, does not', () => {
+    const { mail } = setup()
+    const closed: { by: string; stopped: boolean; text: string }[] = []
+    mail.useClosing({ turnRunning: () => true, closed: (c) => closed.push({ by: c.by, stopped: c.stopped, text: c.text }) })
+    const own = openBy(mail, assignInput({ subject: 'own' })).thread
+    mail.update(own.id, S2, { state: 'done', outcome: 'finished' })
+    expect(closed).toEqual([])
+
+    const byPerson = openBy(mail, assignInput({ subject: 'by person' })).thread
+    mail.update(byPerson.id, PERSON, { state: 'done', outcome: 'dropped' })
+    expect(closed).toEqual([{ by: PERSON, stopped: true, text: expect.stringContaining(`The person dropped thread ${byPerson.id}; its work was stopped. Do not continue it.`) }])
+
+    const byOwner = openBy(mail, assignInput({ subject: 'by owner' })).thread
+    mail.update(byOwner.id, S1, { state: 'done', outcome: 'stopped' })
+    expect(closed.at(-1)).toMatchObject({ by: S1, stopped: true, text: expect.stringContaining('The owner (s1) closed thread') })
+
+    // Reported already: its work is not going, so there is nothing to stop and nothing to tell
+    const reported = openBy(mail, assignInput({ subject: 'reported' })).thread
+    mail.update(reported.id, S2, { state: 'review' })
+    mail.update(reported.id, PERSON, { state: 'done', outcome: 'finished' })
+    expect(closed).toHaveLength(2)
+
+    // No turn of the thread going: told, not stopped
+    mail.useClosing({ turnRunning: () => false, closed: (c) => closed.push({ by: c.by, stopped: c.stopped, text: c.text }) })
+    const idle = openBy(mail, assignInput({ subject: 'idle' })).thread
+    mail.update(idle.id, PERSON, { state: 'done', outcome: 'dropped' })
+    expect(closed.at(-1)).toMatchObject({ stopped: false, text: expect.stringContaining(`The person dropped thread ${idle.id}. Do not continue it.`) })
+  })
+
   it('who may set which state: the assignee four of them, the owner and the person any, a member none', () => {
     const { mail } = setup()
     const { thread } = openBy(mail, assignInput())

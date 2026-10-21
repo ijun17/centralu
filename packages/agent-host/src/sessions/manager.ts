@@ -866,11 +866,72 @@ export class SessionManager {
   mailSessions(): MailSessions {
     return {
       receiver: (id) => this.mailReceiver(id),
-      deliver: (id, input, late) =>
-        this.events.deliverMail(id, input, { leaving: () => this.handingOver || this.disposing, atRest: () => this.mailReceiver(id).kind === 'ready' }, late),
+      deliver: async (id, input, late) => {
+        /*
+         * A turn the mail starts is the work of the thread it carries (§6): its end is reported to the thread's owner like any turn of work that
+         * session gave, so a report is owed from here. A session already owing one keeps its mark (the turn is that work's), and a mark made
+         * here goes if the input was not taken
+         */
+        const owner = input.quiet ? undefined : input.reportTo
+        const marked = owner !== undefined && !this.children.awaitingReport.has(id) && this.meta.has(owner)
+        if (marked) this.children.markReport(id, owner)
+        const unmark = () => {
+          if (marked && this.children.awaitingReport.get(id) === owner) this.children.clearReport(id)
+        }
+        try {
+          await this.events.deliverMail(id, input, { leaving: () => this.handingOver || this.disposing, atRest: () => this.mailReceiver(id).kind === 'ready' }, (e) => {
+            unmark()
+            late?.(e)
+          })
+        } catch (e) {
+          unmark()
+          throw e
+        }
+      },
       note: (id, text) => {
         if (this.meta.has(id)) this.onEvent({ type: 'notice', sessionId: id, level: 'info', from: 'Centralu', label: 'mail', text })
       },
+    }
+  }
+
+  /** The session's report to `ownerId` is held over its own background work (`pausedReports`) */
+  pausedFor(sessionId: string, ownerId: string): boolean {
+    return this.children.awaitingReport.get(sessionId) === ownerId && this.children.pausedReports.has(sessionId)
+  }
+
+  /**
+   * A thread whose work was going was closed by the person or its owner (docs/plans/mailbox.md §3.3, 3.10): its work is not wanted. A running turn
+   * of the thread is stopped as `agent_session stop` stops it, with the background work it started, and the owner's report is the notice that
+   * the thread was closed (the mark is dropped, so the stopped turn is not reported a second time). The helper is told once, in Centralu's words,
+   * without a wake; a helper in a turn that is not the thread's (the person's own, another thread's) is not interrupted and gets the same note
+   */
+  async workClosed(c: { threadOwner: string; helperId: string; stopped: boolean; text: string }): Promise<void> {
+    const helper = this.meta.get(c.helperId)
+    if (!helper || this.handingOver || this.disposing) return
+    if (c.stopped) {
+      if (this.children.awaitingReport.get(c.helperId) === c.threadOwner) this.children.clearReport(c.helperId)
+      try {
+        this.interrupt(c.helperId)
+      } catch {
+        // No process: there is no turn to stop
+      }
+      for (const t of this.reports.ownTasksRunning(c.helperId)) {
+        try {
+          await this.stopBackgroundTask(c.helperId, t.id)
+        } catch {
+          // Not stoppable from here: the tool ends it with its process
+        }
+      }
+    }
+    /*
+     * Without a wake: into a live process as quiet input. A helper that sleeps has no turn to mislead, and is not woken for a note. A tool that
+     * has no quiet input (Codex starts a turn for any input) is not sent it: that would be a turn nobody reports, so the thread's event is all it has
+     */
+    if (!this.handles.has(c.helperId) || this.adapters.get(helper.tool)?.quietInput !== true) return
+    try {
+      await this.events.deliverMail(c.helperId, { text: `[Centralu] ${c.text}`, quiet: true, line: '✉ Centralu told it a thread of its was closed' })
+    } catch (e) {
+      console.error(`[mail] could not tell ${c.helperId.slice(0, 8)} that its thread was closed (${errorMessage(e)})`)
     }
   }
 

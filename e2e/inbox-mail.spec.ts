@@ -61,6 +61,38 @@ test('Mail: closing a thread ends the reply box, and a thread left open is not t
   await expect(page.getByTestId('mail-thread')).toHaveCount(0)
 })
 
+test('Mail: Drop and Mark done ask first when the helper is working on the thread, and offer no way to close and leave it running (3.10)', async ({ page }) => {
+  await setup(page)
+  const id = await seed(page, { subject: 'Write the files', from: { ...PARSER, address: 'session:mock/s0', sessionId: 's0', name: 'Boss' }, body: 'please', kind: 'assign', state: 'running', assignee: PARSER, working: true })
+  await page.getByTestId('counter').click()
+  await page.getByTestId(`mail-thread-${id}`).click()
+
+  await page.getByTestId('mail-drop').click()
+  await expect(page.getByTestId('mail-stop-confirm')).toContainText('Parser is working on this. Stop its work and close the thread?')
+  await expect(page.getByTestId('mail-thread-state')).not.toHaveText('Done')
+  // Cancel leaves it as it was
+  await page.getByTestId('mail-stop-cancel').click()
+  await expect(page.getByTestId('mail-stop-confirm')).toHaveCount(0)
+  await expect(page.getByTestId('mail-thread-state')).not.toHaveText('Done')
+
+  // Mark done asks the same, and the one answer that closes it says it stops
+  await page.getByTestId('mail-finish').click()
+  await expect(page.getByTestId('mail-stop-confirm')).toBeVisible()
+  await expect(page.getByTestId('mail-stop-close')).toHaveText('Stop and close')
+  await page.getByTestId('mail-stop-close').click()
+  await expect(page.getByTestId('mail-thread-state')).toHaveText('Done')
+})
+
+test('Mail: a thread whose helper is not working closes at once, without asking', async ({ page }) => {
+  await setup(page)
+  const id = await seed(page, { subject: 'Land #12', from: PARSER, body: 'ready for review', kind: 'report' })
+  await page.getByTestId('counter').click()
+  await page.getByTestId(`mail-thread-${id}`).click()
+  await page.getByTestId('mail-drop').click()
+  await expect(page.getByTestId('mail-stop-confirm')).toHaveCount(0)
+  await expect(page.getByTestId('mail-thread-state')).toHaveText('Done (dropped)')
+})
+
 test('Mail: held mail says why and is freed from the list; a crowd of sleeping sessions asks once', async ({ page }) => {
   await setup(page)
   const boss = { ...PARSER, address: 'session:mock/s0', sessionId: 's0', name: 'Boss' }

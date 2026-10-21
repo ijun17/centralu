@@ -73,6 +73,16 @@ describe('what the Inbox lists', () => {
     expect(store.mail.inboxOf(PERSON)).toHaveLength(2)
   })
 
+  it('says a turn of the thread is going, so the Inbox asks before Drop or Mark done stops it (3.10); never for a thread that is done', () => {
+    const { mail, person } = setup()
+    const { thread } = openBy(mail, { by: S1, kind: 'assign', subject: 'Land #12', body: 'please', assignee: S2 })
+    expect(person.thread(thread.id).thread.working).toBeFalsy()
+    mail.useClosing({ turnRunning: () => true, closed: () => {} })
+    expect(person.thread(thread.id).thread.working).toBe(true)
+    person.close(thread.id, 'dropped')
+    expect(person.thread(thread.id).thread.working).toBeFalsy()
+  })
+
   it('mail held for the person is listed with why and for whom, and counts on its thread', () => {
     const { mail, person, store, clock } = setup()
     const { thread, message } = openBy(mail, { by: S1, kind: 'assign', subject: 'Work', body: 'do it', assignee: S2, members: [PERSON] })
