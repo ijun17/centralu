@@ -293,6 +293,8 @@ the batch as `failures`), and `decideRun` decides from it, for an item's head an
   its timeout (conclusion `timed_out`, or GitHub's "has exceeded the maximum execution time of N
   minutes" / "The action '…' has timed out after N minutes"; a test's own "timed out in 5000ms" is a
   test failure); a lost runner ("lost communication with the server", "received a shutdown signal");
+  a job whose first failed step set it up (cause `setup`, #1435: checkout, pnpm and Node setup, the
+  browser and system-library installs, a cache; the main guard reads main's runs the same way, below);
   a failed job on `project.json` `queue.flakyJobs` (exact names, `*` for any characters). A real
   failure beside any of these makes the run real.
 - **The contract with CI** (two sessions built the two sides at once): in a full-tier run, when the
@@ -580,6 +582,23 @@ looked into).
   unfinished, the queue lands nothing and moves nothing (`tick` answers `held`; `merge_queue` says
   "Landing held: N of main's full runs unfinished"): each landing adds a full run, and the runners
   are shared.
+- **Infrastructure before blame** (#1435, 2026-10-21): a browser install got a 403 from a package source,
+  and the queue opened a revert of reviewed work. The guard reads the failed run's jobs and steps as the
+  queue reads a pull request's run (`diagnose`, `classifyRun`), before it looks for a culprit. A run
+  whose failed jobs all failed in a step that sets the job up (the cause `setup`: "Set up job", checkout,
+  pnpm and Node setup, rust toolchain and cache, artifact download, the browser and system-library
+  installs; `pnpm install` only when its log names the network or a package source), hit their timeout or
+  lost their runner is **infrastructure**: the guard reruns the failed jobs once (`guard.rerun`, written
+  down before it asks) and does nothing else. A rerun that passes leaves no trace. One that fails inside
+  the test steps is a **test** failure and goes on as below; one that fails in setup again is reported
+  (an issue and a notice, "an infrastructure failure, not a commit's"), never reverted. A rerun GitHub has
+  not started in 10 minutes is reported the same way. Any real failure in the run makes it a test failure.
+  The notice, the issue ("Kind of failure: **infrastructure failure**" or "**test failure**") and the revert
+  pull request say which. The line quoted is the first error line of the step that failed first
+  (`firstStepError`, ci.mjs): from its `##[group]Run` line to its `##[error]` line, so the report or
+  artifact upload that runs after a failure ("No files were found with the provided path") is never the
+  quote. The pull request's own runs use the same classifier: a setup failure is rerun once.
+  A bisect probe that fails in setup is still read as red (not covered).
 - **The candidates** are the first-parent commits after the last green one up to the red one, with
   their subjects and files, read from the checkout (`QUEUE.conflicts.checkout`, fetched into
   `refs/centralu-guard`; the checkout's branches and work are not touched). No green commit known, or

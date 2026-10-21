@@ -1,0 +1,24 @@
+2026-10-21T04:11:01.1000000Z ##[group]Run pnpm install --frozen-lockfile
+2026-10-21T04:11:01.1100000Z Lockfile is up to date, resolution step is skipped
+2026-10-21T04:11:03.4000000Z Done in 2.3s
+2026-10-21T04:11:03.5000000Z ##[group]Run pnpm exec playwright install --with-deps webkit
+2026-10-21T04:11:03.5100000Z pnpm exec playwright install --with-deps webkit
+2026-10-21T04:11:03.5200000Z shell: /usr/bin/bash -e {0}
+2026-10-21T04:11:03.5300000Z ##[endgroup]
+2026-10-21T04:11:04.0000000Z Installing dependencies...
+2026-10-21T04:11:04.0100000Z Switching to root user to install dependencies...
+2026-10-21T04:11:07.2000000Z Err:5 https://packages.microsoft.com/ubuntu/24.04/prod noble InRelease
+2026-10-21T04:11:07.2100000Z   403  Forbidden [IP: 13.107.246.40 443]
+2026-10-21T04:11:07.9000000Z E: Failed to fetch https://packages.microsoft.com/ubuntu/24.04/prod/dists/noble/InRelease  403  Forbidden [IP: 13.107.246.40 443]
+2026-10-21T04:11:07.9100000Z E: The repository 'https://packages.microsoft.com/ubuntu/24.04/prod noble InRelease' is no longer signed.
+2026-10-21T04:11:08.0000000Z Failed to install browsers
+2026-10-21T04:11:08.0100000Z Error: Installation process exited with code: 100
+2026-10-21T04:11:08.0200000Z ##[error]Process completed with exit code 1.
+2026-10-21T04:11:08.2000000Z ##[group]Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+2026-10-21T04:11:08.2100000Z with:
+2026-10-21T04:11:08.2200000Z   name: e2e-blob-webkit-4
+2026-10-21T04:11:08.2300000Z   path: blob-report
+2026-10-21T04:11:08.2400000Z   if-no-files-found: error
+2026-10-21T04:11:08.2500000Z ##[endgroup]
+2026-10-21T04:11:08.6000000Z ##[error]No files were found with the provided path: blob-report. No artifacts will be uploaded.
+2026-10-21T04:11:08.9000000Z Post job cleanup.

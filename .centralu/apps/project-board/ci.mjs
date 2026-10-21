@@ -441,9 +441,28 @@ export function firstFailure(log) {
   }
   const bundle = lines.find((line) => BUNDLE_ERROR.test(line))
   if (bundle) return { line: null, error: clip(bundle) }
-  const errors = lines.filter((l) => l.startsWith('##[error]')).map((l) => l.slice(9))
-  const telling = errors.find((l) => !/^Process completed with exit code/.test(l)) ?? errors[0]
+  const telling = firstStepError(lines)
   return telling ? { line: null, error: clip(telling) } : { line: null, error: null }
+}
+
+/** A line a command wrote about its own failure: apt's `E:`, `Error: …`, `fatal: …`, npm and pnpm errors, "Failed to …" */
+const STEP_ERROR = /^\s*(?:E: \S|(?:[A-Z]\w*)?Error\b:?|fatal: |npm ERR! |ERR_PNPM_\w+|ERROR\b|error: |curl: \(\d+\)|Failed to \S)/
+
+/**
+ * The first error line of the step that failed first (#1435). A job's steps run in order, and a step that failed ends
+ * with its `##[error]` line, so the first one closes the step to look in; the steps after it (the report and artifact
+ * uploads that run `if: failure()`, whose own "No files were found" is an error line too) say nothing about why the
+ * job failed. Looks from that step's `##[group]Run` line to its `##[error]` line for the first line a command wrote
+ * about its own failure; else the `##[error]` line itself, which has to say more than "Process completed with exit
+ * code N" to be quoted over nothing.
+ */
+export function firstStepError(lines) {
+  const end = lines.findIndex((l) => l.startsWith('##[error]'))
+  if (end < 0) return null
+  let start = end
+  while (start > 0 && !lines[start].startsWith('##[group]Run ')) start--
+  const found = lines.slice(start, end).find((l) => STEP_ERROR.test(l))
+  return found ? found.trim() : lines[end].slice(9)
 }
 
 // --- Known intermittent failures ------------------------------------------------------------------

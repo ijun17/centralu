@@ -163,6 +163,33 @@ describe('what the merge queue decides for one poll', () => {
     expect(onFlakyList('keeper e2e', ['keeper e2e'])).toBe(true)
   })
 
+  // 2026-10-21 (#1435): `Install WebKit` failed on a 403 from a package source, and the queue reverted reviewed work for it
+  it("calls a job that failed in a step that sets it up an infrastructure failure, and one that failed in a test step a real one", () => {
+    const failedRun = { id: 1, attempt: 1, conclusion: 'failure' }
+    const steps = (failing: string, ...others: [string, string][]) => [
+      { name: 'Set up job', conclusion: 'success' },
+      ...others.map(([name, conclusion]) => ({ name, conclusion })),
+      { name: failing, conclusion: 'failure' },
+      { name: 'Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9', conclusion: 'failure' },
+    ]
+    const job = (name: string, failing: string, notes: string[] = []) => ({ id: 31, name, conclusion: 'failure', steps: steps(failing), notes })
+    for (const setup of ['Install WebKit', 'Install Chromium', 'Install Linux system dependencies', 'Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1', 'Run pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413', 'Run actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1', 'Run swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6', 'Set up job']) {
+      expect(classifyRun(failedRun, [job('e2e (webkit 4/5)', setup)]), setup).toMatchObject({ real: false, cause: 'setup', step: setup, job: { name: 'e2e (webkit 4/5)' } })
+    }
+    // The first step that failed counts, not a later one (the upload that runs after a failure)
+    expect(classifyRun(failedRun, [job('e2e (webkit 4/5)', 'pnpm e2e (shard 4/5)')])).toMatchObject({ real: true, cause: 'test', step: 'pnpm e2e (shard 4/5)' })
+    expect(classifyRun(failedRun, [job('verify', 'Run pnpm verify')])).toMatchObject({ real: true, cause: 'test' })
+    // An install is the runner's only when its log names the network or a package source
+    expect(classifyRun(failedRun, [job('verify', 'Run pnpm install --frozen-lockfile')])).toMatchObject({ real: true, cause: 'test' })
+    expect(classifyRun(failedRun, [job('verify', 'Run pnpm install --frozen-lockfile', [' First failure: ERR_PNPM_META_FETCH_FAIL  GET https://registry.npmjs.org/x: 503'])])).toMatchObject({ real: false, cause: 'setup' })
+    // A real failure in another job makes the run real, naming that job
+    expect(classifyRun(failedRun, [job('e2e (webkit 4/5)', 'Install WebKit'), job('verify', 'Run pnpm verify')])).toMatchObject({ real: true, job: { name: 'verify' } })
+    // The pull request's own run is judged the same way: its setup failure is rerun once, a test failure is not
+    const failing = checksOf([check('verify', 'failure'), check('windows tests', 'success')])
+    const setup = { 900: classifyRun({ id: 900, attempt: 1, conclusion: 'failure' }, [job('verify', 'Install WebKit')]) }
+    expect(decideCi({ item: fresh(), pr: openPr(), checks: failing, runs: [run('failure', 1, 900)], failures: setup, defaultBranch: 'main', now: NOW, ref })).toMatchObject({ state: 'ci', action: { type: 'rerun', runId: 900, failedOnly: true } })
+  })
+
   it('lands a stack through its top: retargets it from a lower branch, refuses another base, and keeps the subject within 72', () => {
     const top = openPr({ baseRefName: 'feat/lower' })
     expect(decideCi({ item: fresh({ lowers: [76] }), pr: top, checks: GREEN(), defaultBranch: 'main', lowerBranches: ['feat/lower'], now: NOW, ref })).toMatchObject({ action: { type: 'retarget', base: 'main' } })
@@ -3153,6 +3180,114 @@ describe('the main guard reverts what broke main, at the front of the queue (#12
 function landedBump(commit: string, pr = 90) {
   seedQueue([{ repo: R, pr, lowers: [], owner: 'other', state: 'merged', commit, title: `change ${pr}`, updatedAt: new Date().toISOString(), reruns: {} }])
 }
+
+/**
+ * The log of the e2e (webkit 4/5) job on 2026-10-21 (#1435), as GitHub keeps it: the browser install failed because a package
+ * source answered 403, then the artifact upload that runs after a failure complained too, and was the line quoted.
+ */
+const WEBKIT_INSTALL_LOG = readFileSync(join(REPO_ROOT, 'tooling/fixtures/ci-log-webkit-install-403.txt'), 'utf8')
+
+describe("the main guard does not revert a commit for the runner's own failure (#1435)", { timeout: 120_000 * SLOW }, () => {
+  /** e2e (webkit 4/5) as it ended on 2026-10-21: the browser install failed, the test step never ran, the upload that runs after a failure failed too */
+  const webkitJob = (id: number) => ({
+    id,
+    name: 'e2e (webkit 4/5)',
+    status: 'completed',
+    conclusion: 'failure',
+    steps: [
+      { name: 'Set up job', conclusion: 'success' },
+      { name: 'Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1', conclusion: 'success' },
+      { name: 'Run pnpm install --frozen-lockfile', conclusion: 'success' },
+      { name: 'Install WebKit', conclusion: 'failure' },
+      { name: 'pnpm e2e (shard 4/5)', conclusion: 'skipped' },
+      { name: 'Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9', conclusion: 'failure' },
+    ],
+  })
+  const secondAttempt = (sha: string, conclusion: string) => ({ ...mainRun(990, sha, conclusion), run_attempt: 2 })
+  const quoted = 'E: Failed to fetch https://packages.microsoft.com/ubuntu/24.04/prod/dists/noble/InRelease 403 Forbidden [IP: 13.107.246.40 443]'
+  /** Main red on `sha`'s run 990, a setup failure; `rerun` is what GitHub shows once the job was rerun */
+  const redInSetup = (repo: ReturnType<typeof mainRepo>, sha: string, rerun: Gh) => ({
+    branchRuns: { main: [mainRun(990, sha, 'failure'), mainRun(980, repo.green, 'success')] },
+    jobs: { 990: [webkitJob(31)] },
+    logs: { '31': WEBKIT_INSTALL_LOG },
+    on: { 'rerun-failed:990': rerun },
+  })
+  const reruns = () => writes().filter((w) => w[0] === 'rerun-failed')
+
+  it('reruns the job once, and opens no revert, issue or notice when the rerun passes', async () => {
+    const repo = mainRepo([{ subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] }])
+    const sha = repo.shas[0]!
+    seedQueue([{ repo: R, pr: 81, lowers: [], owner: 'tester', author: 'writer', state: 'merged', commit: sha, title: 'feat(ui): change 81', updatedAt: new Date().toISOString(), reruns: {} }])
+    guardRuntime(repo, redInSetup(repo, sha, { branchRuns: { main: [secondAttempt(sha, 'success'), mainRun(980, repo.green, 'success')] } }))
+    await call('merge_queue')
+    await until(() => guardOnDisk().green === sha, 'main green again')
+    await new Promise((r) => setTimeout(r, 1_000))
+    expect(reruns()).toEqual([['rerun-failed', '990']])
+    expect(guardOnDisk().rerun).toMatchObject({ run: 990, attempt: 1 })
+    expect(writes().filter((w) => w[0] === 'pr-create')).toEqual([])
+    expect(issues()).toEqual([])
+    expect(mainRedNotices()).toEqual([])
+    expect(queueOnDisk().items.filter((i: any) => i.state !== 'merged')).toEqual([])
+  })
+
+  it('reports an infrastructure failure that fails the same way again, once, quoting the step that failed first, and reverts nothing', async () => {
+    const repo = mainRepo([{ subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] }])
+    const sha = repo.shas[0]!
+    seedQueue([{ repo: R, pr: 81, lowers: [], owner: 'tester', author: 'writer', state: 'merged', commit: sha, title: 'feat(ui): change 81', updatedAt: new Date().toISOString(), reruns: {} }])
+    guardRuntime(repo, redInSetup(repo, sha, { branchRuns: { main: [secondAttempt(sha, 'failure'), mainRun(980, repo.green, 'success')] } }))
+    await call('merge_queue')
+    await until(() => issues().length > 0 && mainRedNotices().length > 0, 'the report')
+    await new Promise((r) => setTimeout(r, 1_000))
+    expect(reruns()).toHaveLength(1)
+    expect(writes().filter((w) => w[0] === 'pr-create')).toEqual([])
+    expect(queueOnDisk().items.filter((i: any) => i.state !== 'merged')).toEqual([])
+    expect(issues()).toHaveLength(1)
+    expect(issues()[0]!.title).toBe(`Main is red at ${sha.slice(0, 7)}: an infrastructure failure, not reverted`)
+    expect(issues()[0]!.body).toContain('Kind of failure: **infrastructure failure**')
+    expect(issues()[0]!.body).toContain('The step that failed first: "Install WebKit"')
+    // The first error line of the step that failed first, not the artifact upload's "No files were found"
+    expect(issues()[0]!.body).toContain(quoted)
+    expect(issues()[0]!.body).not.toContain('No files were found')
+    expect(issues()[0]!.body).toContain('failed the same way again after one rerun, so no commit is to blame. Nothing was reverted')
+    expect(mainRedNotices()).toHaveLength(1)
+    expect(mainRedNotices()[0]!.text).toContain('an infrastructure failure, not a commit')
+    expect(mainRedNotices()[0]!.text).toContain('e2e (webkit 4/5) failed at')
+    expect(mainRedNotices()[0]!.text).toContain('(infrastructure failure)')
+    expect(mainRedNotices()[0]!.text).not.toContain('No files were found')
+    expect(guardOnDisk().hunt).toMatchObject({ red: sha, kind: 'infrastructure', step: 'Install WebKit', outcome: 'reported' })
+  })
+
+  it('reverts the culprit, saying it is a test failure, when the rerun fails inside the test steps', async () => {
+    const repo = mainRepo([{ subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] }])
+    const sha = repo.shas[0]!
+    seedQueue([{ repo: R, pr: 81, lowers: [], owner: 'tester', author: 'writer', state: 'merged', commit: sha, title: 'feat(ui): change 81', updatedAt: new Date().toISOString(), reruns: {} }])
+    const testFailure = { id: 32, name: 'e2e (webkit 4/5)', status: 'completed', conclusion: 'failure', steps: webkitJob(32).steps.map((s) => (s.name === 'Install WebKit' ? { ...s, conclusion: 'success' } : s.name === 'pnpm e2e (shard 4/5)' ? { ...s, conclusion: 'failure' } : s)) }
+    guardRuntime(repo, {
+      ...redInSetup(repo, sha, { branchRuns: { main: [secondAttempt(sha, 'failure'), mainRun(980, repo.green, 'success')] }, jobs: { 990: [testFailure] }, logs: { '32': '##[group]Run pnpm e2e\nFAIL e2e/a.spec.ts > opens\nError: expected 1 to be 2\n##[error]Process completed with exit code 1.' } }),
+    })
+    await call('merge_queue')
+    await until(() => guardOnDisk().hunt?.outcome === 'reverting' && mainRedNotices().length > 0, 'the revert')
+    expect(reruns()).toHaveLength(1)
+    expect(writes().filter((w) => w[0] === 'pr-create')).toHaveLength(1)
+    expect(issues()[0]!.title).toBe('Main is red since #81 feat(ui): change 81')
+    expect(issues()[0]!.body).toContain('Kind of failure: **test failure**')
+    expect(mainRedNotices()[0]!.text).toContain('e2e (webkit 4/5) failed at')
+    expect(mainRedNotices()[0]!.text).toContain('(test failure)')
+    expect(guardOnDisk().hunt).toMatchObject({ kind: 'test', outcome: 'reverting' })
+  })
+
+  it('reverts at once, with no rerun, a failure in a test step, and says it is a test failure', async () => {
+    const repo = mainRepo([{ subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] }])
+    const sha = repo.shas[0]!
+    seedQueue([{ repo: R, pr: 81, lowers: [], owner: 'tester', author: 'writer', state: 'merged', commit: sha, title: 'feat(ui): change 81', updatedAt: new Date().toISOString(), reruns: {} }])
+    guardRuntime(repo, { branchRuns: { main: [mainRun(990, sha, 'failure'), mainRun(980, repo.green, 'success')] }, jobs: { 990: [failedJob(31, 'verify')] } })
+    await call('merge_queue')
+    await until(() => guardOnDisk().hunt?.outcome === 'reverting' && mainRedNotices().length > 0, 'the revert')
+    expect(reruns()).toEqual([])
+    expect(mainRedNotices()[0]!.text).toContain('verify failed at')
+    expect(mainRedNotices()[0]!.text).toContain('(test failure)')
+  })
+})
 
 describe('the main guard with overlapping failures, and when it acts again (#1259 review)', { timeout: 180_000 * SLOW }, () => {
   it('finds a second culprit that landed after the first, probing its commit without the first, and never blames a known one or a revert again', async () => {
