@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BackgroundTask } from '@cc/protocol'
 import { crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
+import { ASK_WAIT_MS } from './ask-project.js'
 import { PAUSED_REPORT_SETTLE_MS } from './manager.js'
 import { askProjectText } from './tool-answers.js'
 
@@ -79,6 +80,32 @@ describe('ask_project into a session that waits on its own background work (#146
     // Once: a later turn of the session is not the assigned work
     handleOf(target).event({ type: 'state_change', sessionId: target, state: 'working' })
     handleOf(target).answer('an unrelated later turn')
+    await settle()
+    expect(reports()).toHaveLength(1)
+  })
+
+  it('a turn that ends on its work after the call stopped waiting (past its bound) is paused all the same, and the next call reads the pause', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const flush = async (until: () => boolean) => {
+      for (let i = 0; i < 100 && !until(); i++) await vi.advanceTimersByTimeAsync(0)
+    }
+    const call = ask('run the suite')
+    await flush(() => (handleOf(target)?.sent.length ?? 0) > 0)
+    await vi.advanceTimersByTimeAsync(ASK_WAIT_MS + 1_000)
+    expect(await call).toMatchObject({ ok: true, state: 'working' })
+    // Nobody waits now: the turn ends on its background work
+    handleOf(target).event({ type: 'background_tasks', sessionId: target, live: [verify] })
+    handleOf(target).answer('Started verify; I will summarize when it ends.')
+    await flush(() => w.store.children.listReportMarks().length > 0)
+    expect(w.store.children.listReportMarks()).toEqual([{ sessionId: target, callerSessionId: caller }])
+    expect(reports()).toEqual([])
+    const collected = await ask()
+    expect(collected).toMatchObject({ ok: true, state: 'done', answer: 'Started verify; I will summarize when it ends.', paused: expect.stringContaining('pnpm verify') })
+    verifyEndsAndSessionFinishes()
+    await flush(() => reports().length > 0)
+    vi.useRealTimers()
+    await w.until(() => reports().length === 1)
+    expect(reports()[0]).toContain('8 pass / 2 fail')
     await settle()
     expect(reports()).toHaveLength(1)
   })

@@ -59,7 +59,7 @@ export type HubsReader = {
  * and the delegation flow's members both flows share. The manager builds it with getters for its fields, so each is
  * read when used, never kept.
  */
-export type AskProjectHost = Pick<DelegationHost, 'agentRuns' | 'applyDeferredRestart' | 'askHost' | 'autoBoundaryOpen' | 'builderRefOf' | 'busyAnswer' | 'busyChoices' | 'busyForCaller' | 'children' | 'deliver' | 'enqueue' | 'ensureProjectAccess' | 'linkedReader' | 'meta' | 'ownTasksRunning' | 'pauseReport' | 'queuedOf' | 'readGrants' | 'routedCards' | 'store' | 'uiPreferences' | 'untilCard'> &
+export type AskProjectHost = Pick<DelegationHost, 'agentRuns' | 'applyDeferredRestart' | 'askHost' | 'autoBoundaryOpen' | 'builderRefOf' | 'busyAnswer' | 'busyChoices' | 'busyForCaller' | 'children' | 'deliver' | 'enqueue' | 'ensureProjectAccess' | 'linkedReader' | 'meta' | 'queuedOf' | 'readGrants' | 'routedCards' | 'store' | 'uiPreferences' | 'untilCard'> &
   Pick<DelegationFlow, 'awaitTurn' | 'grantReads' | 'handedOverReply' | 'startDelegation' | 'untilHandedOver'> & {
     /** The orchestrator's and the askers' reports from linked machines' sessions (linked-reports.ts) */
     readonly linkedReports: Pick<LinkedReports, 'oweAsker' | 'releaseAsker'>
@@ -578,7 +578,6 @@ export class AskProjectFlow {
   private async awaitDelegation(key: string, d: Delegation, signal?: AbortSignal): Promise<AskProjectResult> {
     const sessionName = () => this.host.meta.get(d.sessionId)?.name ?? d.sessionId
     const base = { project: d.target.name, sessionId: d.sessionId }
-    const endedBefore = d.settled
     const r = await this.host.awaitTurn(key, d, { signal, stopWhy: 'the call that asked was cancelled' })
     switch (r.kind) {
       case 'handedOver':
@@ -607,15 +606,10 @@ export class AskProjectFlow {
     }
     const { granted, outside } = this.host.grantReads(d.callerId, r.answer, d.target.path)
     /*
-     * The turn this call saw end left background work of the session's own running (#721, #1460): the caller reads the
-     * answer now as a pause, and the report is owed for the work's last turn end (marked, so a host swap keeps it and the
-     * mailbox opens its thread there), with no separate notice. As `awaitAgent` does; only a turn this call saw end
+     * A turn that completed with the session's own background work still running was paused where the delegation ended
+     * (`startDelegation`, #721, #1460), whether or not this call was waiting: the caller reads the answer now as a pause,
+     * with no separate notice, and the report is owed for the work's last turn end
      */
-    const left = this.host.ownTasksRunning(d.sessionId)
-    if (!endedBefore && !this.host.children.pausedReports.has(d.sessionId) && left.length) {
-      this.host.children.markReport(d.sessionId, d.callerId)
-      this.host.pauseReport(d.sessionId, left)
-    }
     const paused = this.host.children.awaitingReport.get(d.sessionId) === d.callerId ? this.host.children.pausedReports.get(d.sessionId) : undefined
     this.host.children.answered(d.callerId, d.sessionId, paused ? undefined : { ok: true, text: r.answer })
     return {
