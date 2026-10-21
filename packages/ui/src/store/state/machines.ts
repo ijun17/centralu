@@ -37,6 +37,8 @@ export type MachinesSlice = {
   reconnectMachine(machineId: string): Promise<void>
   /** Closes the machine's link until the person connects it again; it stays linked (#1134). A refusal is a toast */
   disconnectMachine(machineId: string): Promise<void>
+  /** Withdraws one of a machine's other full credentials there (#1405); a failure is said in a toast */
+  revokeMachineCredential(machineId: string, credentialId: string): Promise<void>
   /** Auto reconnect on or off for the machine (#1341); false (with a toast) when the host refused */
   setMachineAutoReconnect(machineId: string, autoReconnect: boolean): Promise<boolean>
   acceptMachineVersions(machineId: string): Promise<void>

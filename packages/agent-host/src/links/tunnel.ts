@@ -1,4 +1,5 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { oneLineText } from '@cc/protocol'
 import { createHash } from 'node:crypto'
 import { asObj } from '../json-value.js'
 import { createConnection, createServer } from 'node:net'
@@ -35,6 +36,8 @@ export type ConnectionLine = {
    * Absent from a remote that predates it
    */
   others?: RemoteCredential[]
+  /** The label this hub paired under at this link (#1405, `pairLabel`): another credential of it is not this hub's */
+  pairedAs?: string
   version: string
   protocolVersion: number
   dataDir: string
@@ -69,7 +72,7 @@ export type ConnectionLine = {
 }
 
 /** A full credential a linked machine holds, as its `--connection` names it (#1405): who it is for and since when */
-export type RemoteCredential = { id: string; label: string; created: number }
+export type RemoteCredential = { id: string; label: string; created: number; replaced: boolean }
 
 /** The `stopped` field of the connection line, as serve-files.mjs `readStopped` writes it */
 export type RemoteStop = { by: 'stop' | 'quit'; at: number | null }
@@ -182,14 +185,25 @@ export function parseConnectionLine(stdout: string, spec?: RemoteSpec): Connecti
   throw new Error(`The remote did not print a connection line; its Centralu may predate \`${shimNames(spec).centralu} serve\` (update it there: ${npmInstall(spec)})`)
 }
 
-/** The `others` field (#1405), entry by entry: an entry of the wrong shape is left out */
+/** The `others` field (#1405), entry by entry (`credentialsOf`) */
 function othersOf(raw: unknown): { others?: RemoteCredential[] } {
-  if (!Array.isArray(raw)) return {}
-  const others = raw.flatMap((e: unknown) => {
+  const others = credentialsOf(raw)
+  return others ? { others } : {}
+}
+
+/**
+ * A machine's full credentials as its connection line or `host.credentials` lists them (#1405), entry by entry: an id
+ * `--revoke` takes, a label of one line with no format character, a date that is one; anything else is left out. At
+ * most 1,000 are read; the row shows 32 and counts the rest. Null for anything but a list
+ */
+export function credentialsOf(raw: unknown): RemoteCredential[] | null {
+  if (!Array.isArray(raw)) return null
+  return raw.slice(0, 1000).flatMap((e: unknown) => {
     const o = asObj(e)
-    return typeof o.id === 'string' && typeof o.label === 'string' ? [{ id: o.id.slice(0, 16), label: o.label.slice(0, 64), created: typeof o.created === 'number' && Number.isFinite(o.created) ? o.created : 0 }] : []
+    if (typeof o.id !== 'string' || !/^[0-9a-f]{8}$/.test(o.id) || typeof o.label !== 'string') return []
+    const created = typeof o.created === 'number' && Number.isFinite(o.created) && o.created > 0 && o.created < 8.64e15 ? o.created : 0
+    return [{ id: o.id, label: oneLineText(o.label, 80), created, replaced: o.replaced === true }]
   })
-  return { others: others.slice(0, 32) }
 }
 
 /** The `stopped` field, field by field: any object there is a stop; its `by` and `at` only as the words they can be */
@@ -585,6 +599,26 @@ export function autostartCommand(spec: RemoteSpec, action: 'on' | 'off' | 'remov
   return remoteCommand(spec, `serve --autostart ${action}`)
 }
 
+/** `centralu serve --revoke <id>` there (#1405): one full credential withdrawn. `id` is 8 hex characters, checked by the caller's schema */
+export function revokeCommand(spec: RemoteSpec, id: string): string {
+  if (!/^[0-9a-f]{8}$/.test(id)) throw new Error('A credential id is 8 hex characters')
+  return remoteCommand(spec, `serve --revoke ${id}`)
+}
+
+/** `--revoke`'s line: whether there was one to withdraw, or null when it printed none (an older serve refused the option) */
+export function parseRevoke(stdout: string): boolean | null {
+  for (const l of stdout.split('\n').map((x) => x.trim()).reverse()) {
+    try {
+      const v: unknown = JSON.parse(l)
+      const revoked = asObj(v).revoked
+      if (typeof revoked === 'boolean') return revoked
+    } catch {
+      // not the line
+    }
+  }
+  return null
+}
+
 /** `centralu <args>` on the remote, in its shell's terms, through the lookup `connectionCommand` describes */
 function remoteCommand(
   spec: RemoteSpec,
@@ -593,6 +627,7 @@ function remoteCommand(
     | 'serve --detach'
     | `serve --detach --from ${string}`
     | `serve --connection --pair ${string}`
+    | `serve --revoke ${string}`
     | 'serve --stop'
     | 'serve'
     | 'serve --autostart on'
@@ -939,7 +974,9 @@ export class SshTunnel implements Tunnel {
     if (r.code === 255) throw new Error(`ssh could not reach ${this.opts.target}: ${lastLine(r.stderr) || 'no answer'}`)
     if (r.stdout.includes(NOT_FOUND) || (r.code === 127 && !remote.command)) throw notInstalled(this.where, remote)
     try {
-      return parseConnectionLine(r.stdout, remote)
+      const line = parseConnectionLine(r.stdout, remote)
+      // Under which label this hub's own credential was made: another of that label on the row is not this hub's
+      return pair && this.pairs && line.credential ? { ...line, pairedAs: oneLineText(pair, 80) } : line
     } catch (err) {
       // No line: say what the remote said on the way out, if anything
       const why = lastLine(r.stderr)

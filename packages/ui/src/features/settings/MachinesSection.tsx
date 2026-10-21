@@ -172,6 +172,7 @@ function MachineRow({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: (ca
             <p className="mt-0.5 text-ink-muted">{logon.fix}</p>
           </div>
         )}
+        <OtherCredentials m={m} />
         {started && (
           <p className="mt-1.5 text-xs leading-body text-ink-muted" data-testid={`machine-started-${m.id}`} data-how={m.hostStarted?.how}>
             {started}
@@ -629,6 +630,53 @@ function VersionPrompt({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: 
       ) : (
         <p className="mt-2 text-xs leading-body text-ink-muted" data-testid={`machine-versions-refused-${m.id}`}>
           Machines on different protocol versions cannot connect, even anyway.
+        </p>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Who else holds full access to the machine (#1405): each full credential it holds besides this computer's own, by who
+ * it was made for and when, with a way to withdraw it. Another computer linked to it, the machine's own window on
+ * Windows, or a program of that user that asked for one itself: the label is what the asker said, never checked, so it
+ * is shown quoted. Nothing shows while it is not known, or when there is none.
+ */
+function OtherCredentials({ m }: { m: MachineInfo }) {
+  const others = m.otherCredentials
+  if (!others?.length && !m.ownCredentialGone) return null
+  const count = (others?.length ?? 0) + m.otherCredentialsMore
+  return (
+    <div className="mt-1 text-xs leading-body" data-testid={`machine-credentials-${m.id}`}>
+      {m.ownCredentialGone && (
+        <p className="text-ink" data-testid={`machine-own-credential-gone-${m.id}`}>
+          This computer's own access there was replaced or withdrawn by something else. The link stays until it closes, and the next one pairs again.
+        </p>
+      )}
+      {count > 0 && <p className="text-ink">{count === 1 ? 'Something else also has full access to this machine' : `${count} others also have full access to this machine`}</p>}
+      <ul className="mt-0.5">
+        {(others ?? []).map((c) => (
+          <li key={c.id} className="flex items-center gap-2 text-ink-muted" data-testid={`machine-credential-${c.id}`}>
+            <span>
+              {JSON.stringify(c.label)}
+              {c.created ? `, since ${new Date(c.created).toLocaleDateString()}` : ''}
+              {/* A pairing under a label already there is a change, not a silent swap (#1405) */}
+              {c.hubsName ? ', under this computer’s own name but not made by it' : c.replaced ? ', which replaced an earlier one of that name' : ''}
+            </span>
+            <button
+              className="rounded-md px-1.5 py-0.5 text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink"
+              onClick={() => void useStore.getState().revokeMachineCredential(m.id, c.id)}
+              data-testid={`machine-credential-revoke-${c.id}`}
+              title="Its next connection to this machine is refused"
+            >
+              Revoke
+            </button>
+          </li>
+        ))}
+      </ul>
+      {m.otherCredentialsMore > 0 && (
+        <p className="text-ink-muted" data-testid={`machine-credentials-more-${m.id}`}>
+          And {m.otherCredentialsMore} more: <code>centralu serve --connection</code> there lists them all
         </p>
       )}
     </div>

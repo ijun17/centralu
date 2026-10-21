@@ -29,6 +29,7 @@ type MachineActions = Pick<
   | 'removeMachine'
   | 'reconnectMachine'
   | 'disconnectMachine'
+  | 'revokeMachineCredential'
   | 'setMachineAutoReconnect'
   | 'changeMachineInstall'
   | 'cancelMachineUpdate'
@@ -95,6 +96,17 @@ export const machineActions = (set: StoreSet, get: StoreGet): MachineActions => 
       set((s) => ({ machines: withAnswered(s.machines, m) }))
     } catch (e) {
       set({ toast: `Could not disconnect: ${(e as Error).message}` })
+    }
+  },
+
+  async revokeMachineCredential(machineId, credentialId) {
+    const platform = get().platform
+    if (!platform) return
+    try {
+      const m = await platform.machines.revokeCredential(machineId, credentialId)
+      set((s) => ({ machines: withAnswered(s.machines, m) }))
+    } catch (e) {
+      set({ toast: `Could not withdraw that access: ${errorMessage(e)}` })
     }
   },
 

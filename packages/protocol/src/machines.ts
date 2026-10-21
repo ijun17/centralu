@@ -242,6 +242,37 @@ export const MachineInfo = z.object({
    */
   updateWaits: z.boolean().optional(),
   /**
+   * The full credentials the machine holds besides this hub's own (#1405, its `centralu serve --connection`'s `others`,
+   * then `host.credentials` every 30 seconds while connected): who each was made for (`label`, as the one who paired
+   * said it) and when. Never their values. Another hub that pairs with the machine, the machine's own window on
+   * Windows, and anything of that user that ran `--pair` itself show here; the row offers to withdraw each
+   * (`machines.revokeCredential`). `replaced`: its pairing took the place of an earlier credential of its label (a
+   * re-pairing under `window` or a hub's name is a change the person sees). `hubsName`: it carries this hub's own label,
+   * and this hub did not make it. The first 32; `otherCredentialsMore` counts the rest. Null while it is not known: not
+   * connected yet, or a Centralu there from before it. Additive
+   */
+  otherCredentials: z
+    .array(
+      z.object({
+        id: z.string().max(16),
+        label: z.string().max(80),
+        created: z.number(),
+        replaced: z.boolean().catch(false).default(false),
+        hubsName: z.boolean().catch(false).default(false),
+      }),
+    )
+    .max(32)
+    .nullable()
+    .catch(null)
+    .default(null),
+  /** How many of the machine's other full credentials `otherCredentials` leaves out past its first 32 (#1405). Additive */
+  otherCredentialsMore: z.number().int().min(0).catch(0).default(0),
+  /**
+   * This hub's own full credential there is gone (#1405): something paired under its label or withdrew it while the
+   * link was up. The link stays until it closes; the next link pairs again. Additive
+   */
+  ownCredentialGone: z.boolean().catch(false).default(false),
+  /**
    * The same switch as the older connect mode (`MachineConnect`, #1134): `at_start` when `autoReconnect` is on,
    * `when_needed` when it is off. Kept for one release so an older window still reads the row; read `autoReconnect`
    */

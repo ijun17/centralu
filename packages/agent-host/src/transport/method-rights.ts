@@ -273,6 +273,11 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   'machines.remove': 'asks',
   'machines.reconnect': 'everyday',
   'machines.disconnect': 'everyday',
+  /**
+   * It only narrows: a credential there is withdrawn, and nothing gains access by it. The holder pairs again (a hub at
+   * its next link, the window at its next start); the same user could run `serve --revoke` over ssh anyway
+   */
+  'machines.revokeCredential': 'everyday',
   'machines.setAutoReconnect': 'everyday',
   'machines.setConnect': 'everyday',
   'machines.need': 'everyday',
@@ -310,6 +315,7 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   'host.recall': 'link',
   'host.hubAuto': 'link',
   'host.setHubAuto': 'link',
+  'host.credentials': 'link',
   'host.lastAnswer': 'link',
   'host.send': 'link',
   /** What `kill` does anyway; `centralu serve --stop` asks for it */

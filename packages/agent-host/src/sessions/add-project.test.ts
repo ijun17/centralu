@@ -207,6 +207,7 @@ describe('list_machines', () => {
       elevated: null,
       autoReconnect: true,
       connect: 'at_start',
+      otherCredentials: null,
       ...over,
     }) as MachineInfo
 

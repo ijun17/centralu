@@ -6,7 +6,10 @@ import { tmpdir } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
 import {
   pairLabel,
+  credentialsOf,
   hubKeyOf,
+  parseRevoke,
+  revokeCommand,
   autostartCommand,
   connectionCommand,
   detachCommand,
@@ -204,6 +207,11 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
     // Without blocking: a sync rmSync's retries hold the event loop while a just-stopped fake ssh lets go of the
     // folder, and on a loaded Windows machine that once held the worker for 128 s (#845)
     await removeTree(dir)
+  })
+
+  it('says under which label this hub paired, so the row can tell its own from one made under its name', async () => {
+    const ep = await tunnel({ FAKE_SSH_LINE: line({ credential: 'abcd1234' }) }).open()
+    expect(ep.line.pairedAs).toMatch(/^hub:[A-Za-z0-9._-]+$/)
   })
 
   it('asks the remote for its connection line in batch mode, then forwards on loopback only', async () => {
@@ -864,5 +872,45 @@ describe('the proof field of the connection line', () => {
     const base = { v: 1, port: 17175, token: 't', version: '1', protocolVersion: 1, dataDir: '/d', hostRunning: true }
     expect(parseConnectionLine(JSON.stringify({ ...base, proof: true })).proof).toBe(true)
     for (const proof of [undefined, false, 'true', 1]) expect(parseConnectionLine(JSON.stringify({ ...base, proof })).proof).toBeUndefined()
+  })
+})
+
+describe('serve --revoke over ssh (#1405)', () => {
+  it('names one credential by its id, and reads whether there was one', () => {
+    expect(revokeCommand({ shell: 'posix', command: 'x' }, 'abcd1234')).toBe('x serve --revoke abcd1234')
+    expect(() => revokeCommand({ shell: 'posix' }, 'abcd; rm -rf ~')).toThrow(/8 hex characters/)
+    expect(parseRevoke(['motd', '{"v":1,"revoked":true,"id":"abcd1234"}', ''].join('\n'))).toBe(true)
+    expect(parseRevoke('{"v":1,"revoked":false,"id":"abcd1234"}')).toBe(false)
+    // An older serve refuses the option and prints no line
+    expect(parseRevoke('')).toBeNull()
+  })
+
+  it("cleans what a remote names before it reaches a row: an id --revoke takes, one line of label, a real date", () => {
+    const base = { v: 1, port: 1, protocolVersion: 1, takes: ['pair'] }
+    // A bidi override and a line break in the label: written as escapes here, as they come over the wire
+    const tricky = 'evil' + String.fromCharCode(0x202e) + '"label"' + String.fromCharCode(10) + 'next'
+    const line = parseConnectionLine(JSON.stringify({ ...base, others: [
+      { id: 'abcd1234', label: tricky, created: 5 },
+      { id: 'not-hex!', label: 'x', created: 1 },
+      { id: 'ffff0000', label: 'y', created: 1e300 },
+    ] }))
+    expect(line.others?.map((c) => c.id)).toEqual(['abcd1234', 'ffff0000'])
+    const label = line.others![0]!.label
+    expect(label.includes(String.fromCharCode(0x202e)) || label.includes(String.fromCharCode(10))).toBe(false)
+    expect(line.others![1]!.created).toBe(0)
+  })
+
+  it('reads whether a pairing replaced an earlier one of its label, keeps a label whole up to what --pair takes, and reads a long list whole', () => {
+    const listed = credentialsOf([
+      { id: 'abcd1234', label: 'window', created: 5, replaced: true },
+      { id: 'abcd1235', label: 'window', created: 5, replaced: 'yes' },
+      { id: 'abcd1236', label: 'hub:' + 'x'.repeat(76), created: 5 },
+    ])
+    expect(listed?.map((c) => c.replaced)).toEqual([true, false, false])
+    expect(listed?.[2]?.label).toHaveLength(80)
+    // The row shows 32 and counts the rest, so none is dropped here
+    const many = Array.from({ length: 40 }, (_, i) => ({ id: i.toString(16).padStart(8, '0'), label: 'x', created: 1 }))
+    expect(credentialsOf(many)).toHaveLength(40)
+    expect(credentialsOf({ not: 'a list' })).toBeNull()
   })
 })
