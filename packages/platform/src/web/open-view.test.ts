@@ -50,6 +50,10 @@ describe('the result of opening a view', () => {
       const bad = await platform.apps.openView('notes', null, undefined, undefined)
       expect(bad.toolResult).toEqual({ content: [{ type: 'text', text: 'The app answered with a result this window cannot read' }], isError: true })
       expect(bad.instanceId).toBe('i1')
+      // Recovering an open (older host, same variable) is checked the same way
+      call.mockResolvedValueOnce({ ...opened, toolResult: { content: [null] } })
+      const recovered = await platform.apps.openView('notes', null, undefined, key, true)
+      expect(recovered.toolResult).toEqual({ content: [{ type: 'text', text: 'The app answered with a result this window cannot read' }], isError: true })
     } finally {
       await platform.dispose()
       call.mockRestore()

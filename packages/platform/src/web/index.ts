@@ -443,7 +443,7 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       readResource: (appId, uri, from) =>
         rpc.call('apps.readResource', { appId, projectId: from?.projectId ?? null, uri, instanceId: from?.instanceId }),
       list: () => rpc.call('apps.list', {}),
-      // The response's result is exactly the MCP result the app gave — the shape is known to the screen and the app, so this just carries it
+      // The response's result is exactly the MCP result the app gave — the shape is known to the screen and the app, so this carries it as it is when it is one, and as a failed result when it is not
       openView: async (appId, projectId, machine, openKey, recover = false) => {
         // Leased to this window's connection (#392): a reload or a closed window lets the host close it
         const params = { appId, projectId, ...(machine ? { machine } : {}), lease: true }
@@ -456,7 +456,7 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
             })
           : await rpc.call('apps.openView', { ...params, ...(openKey ? { openKey } : {}) })
         // Checked as `callTool`'s and `reopenInlineView`'s results are: a result the screen cannot read is a failed one, not a crash there
-        return isAppToolResult(v.toolResult) ? v : { ...v, toolResult: viewToolResult({ text: 'The app answered with a result this window cannot read', result: v.toolResult }) }
+        return isAppToolResult(v.toolResult) ? v : { ...v, toolResult: viewToolResult({ text: 'The app answered with a result this window cannot read' }) }
       },
       closeView: async (instanceId) => {
         await rpc.call('apps.closeView', { instanceId })
