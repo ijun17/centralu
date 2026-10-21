@@ -24,7 +24,7 @@ import { latestRuns, queueBusy, takeLease, releaseLease } from '../.centralu/app
 // @ts-expect-error — plain .mjs of a Centralu app
 import { attributeByPaths, carried, mainVerdict, nextStep, sortCommits } from '../.centralu/apps/project-board/main-guard.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
-import { classifyRun, onFlakyList } from '../.centralu/apps/project-board/run-failure.mjs'
+import { classifyRun, looksLikeNetworkError, onFlakyList } from '../.centralu/apps/project-board/run-failure.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { batchCandidates, decideLanding, endBatch, formBatch, gathering, markBatchless, onlyCancelledByBatch, splitBatch } from '../.centralu/apps/project-board/batch.mjs'
 
@@ -164,6 +164,36 @@ describe('what the merge queue decides for one poll', () => {
   })
 
   // 2026-10-21 (#1435): `Install WebKit` failed on a 403 from a package source, and the queue reverted reviewed work for it
+  it('tells a network or package-source failure from a commit\'s by the text of the step, a status only as a status', () => {
+    for (const text of [
+      'E: Failed to fetch https://packages.microsoft.com/ubuntu/24.04/prod/dists/noble/InRelease  403  Forbidden [IP: 13.107.246.40 443]',
+      "E: The repository 'https://packages.microsoft.com/ubuntu/24.04/prod noble InRelease' is no longer signed.",
+      'W: Could not connect to archive.ubuntu.com:80 (91.189.91.82), connection timed out',
+      'E: Unable to connect to archive.ubuntu.com:http:',
+      'E: Failed to fetch http://archive.ubuntu.com/x.deb  Hash Sum mismatch',
+      'E: The repository is not signed.',
+      "fatal: unable to access 'https://github.com/x/y/': The requested URL returned error: 502",
+      'Error: Download failure, code=1',
+      'Warning: Cache service responded with 503',
+      'ERR_PNPM_META_FETCH_FAIL GET https://registry.npmjs.org/x: Response Error: HTTP 503',
+      'Request failed with status 429',
+      'info: could not download file from https://static.rust-lang.org/x',
+      'getaddrinfo EAI_AGAIN registry.npmjs.org',
+    ])
+      expect(looksLikeNetworkError(text), text).toBe(true)
+    for (const text of [
+      'E: Failed to fetch http://archive.ubuntu.com/pool/w/libwebkit.deb  404  Not Found [IP: 91.189.91.82 80]',
+      'E: Unable to locate package libwebkit-nope',
+      'Error: Playwright version 1.99.0 not found',
+      // A number in a version or a file name is not a status
+      'Installing playwright 2.403.1',
+      'Unpacking foo_1.429-1_amd64.deb',
+      'Error: Installation process exited with code: 100',
+      '',
+    ])
+      expect(looksLikeNetworkError(text), text).toBe(false)
+  })
+
   it("calls a job that failed in a step that sets it up an infrastructure failure, and one that failed in a test step a real one", () => {
     const failedRun = { id: 1, attempt: 1, conclusion: 'failure' }
     const steps = (failing: string, ...others: [string, string][]) => [
@@ -3317,6 +3347,47 @@ describe("the main guard does not revert a commit for the runner's own failure (
     expect(guardOnDisk().hunt).toMatchObject({ kind: 'setup', touched: [sha.slice(0, 7)] })
   })
 
+  it('hunts the commit when apt answers 404 for a package it asked for: a bare "Failed to fetch" is not the network', async () => {
+    const repo = mainRepo([{ subject: 'build(deps): bump playwright (#81)', files: ['pnpm-lock.yaml'] }])
+    const sha = repo.shas[0]!
+    seedQueue([{ repo: R, pr: 81, lowers: [], owner: 'tester', author: 'writer', state: 'merged', commit: sha, title: 'build(deps): bump playwright', updatedAt: new Date().toISOString(), reruns: {} }])
+    const log = [
+      '2026-10-21T04:11:03.5000000Z ##[group]Run pnpm exec playwright install --with-deps webkit',
+      '2026-10-21T04:11:03.5300000Z ##[endgroup]',
+      '2026-10-21T04:11:07.2000000Z Err:7 http://archive.ubuntu.com/ubuntu noble/universe amd64 libwebkit2gtk-9.9-0 amd64 9.9.1',
+      '2026-10-21T04:11:07.2100000Z   404  Not Found [IP: 91.189.91.82 80]',
+      '2026-10-21T04:11:07.9000000Z E: Failed to fetch http://archive.ubuntu.com/ubuntu/pool/universe/w/webkit2gtk/libwebkit2gtk-9.9-0_9.9.1_amd64.deb  404  Not Found [IP: 91.189.91.82 80]',
+      '2026-10-21T04:11:08.0000000Z Failed to install browsers',
+      '2026-10-21T04:11:08.0200000Z ##[error]Process completed with exit code 1.',
+    ].join('\n')
+    guardRuntime(repo, { ...redInSetup(repo, sha, { branchRuns: { main: [secondAttempt(sha, 'failure'), mainRun(980, repo.green, 'success')] } }), logs: { '31': log } })
+    await call('merge_queue')
+    await until(() => guardOnDisk().hunt?.outcome === 'reverting' && mainRedNotices().length > 0, 'the revert')
+    expect(guardOnDisk().hunt).toMatchObject({ kind: 'setup', touched: [sha.slice(0, 7)] })
+  })
+
+  it('reads every line of the failing step for the network, not only its first error line (warnings come first in a real outage)', async () => {
+    const repo = mainRepo([{ subject: 'build(deps): bump playwright (#81)', files: ['pnpm-lock.yaml'] }])
+    const sha = repo.shas[0]!
+    seedQueue([{ repo: R, pr: 81, lowers: [], owner: 'tester', author: 'writer', state: 'merged', commit: sha, title: 'build(deps): bump playwright', updatedAt: new Date().toISOString(), reruns: {} }])
+    const log = [
+      '2026-10-21T04:11:03.5000000Z ##[group]Run pnpm exec playwright install --with-deps webkit',
+      '2026-10-21T04:11:03.5300000Z ##[endgroup]',
+      '2026-10-21T04:11:06.0000000Z W: Could not connect to archive.ubuntu.com:80 (91.189.91.82), connection timed out',
+      '2026-10-21T04:11:07.9000000Z E: Unable to locate package libwebkit2gtk-4.1-0',
+      '2026-10-21T04:11:08.0000000Z Failed to install browsers',
+      '2026-10-21T04:11:08.0200000Z ##[error]Process completed with exit code 1.',
+    ].join('\n')
+    guardRuntime(repo, { ...redInSetup(repo, sha, { branchRuns: { main: [secondAttempt(sha, 'failure'), mainRun(980, repo.green, 'success')] } }), logs: { '31': log } })
+    await call('merge_queue')
+    await until(() => issues().length > 0 && mainRedNotices().length > 0, 'the report')
+    await new Promise((r) => setTimeout(r, 1_000))
+    // The first error line is "E: Unable to locate package": only the warning before it says the network
+    expect(issues()[0]!.body).toContain('E: Unable to locate package')
+    expect(issues()[0]!.body).toContain('Its failing step names the network or a package source')
+    expect(writes().filter((w) => w[0] === 'pr-create')).toEqual([])
+  })
+
   it('blames no commit for a setup failure that names the network, whatever the commits since the last green one changed (the 2026-10-21 403)', async () => {
     const repo = mainRepo([{ subject: 'build(deps): bump playwright (#81)', files: ['pnpm-lock.yaml'] }])
     const sha = repo.shas[0]!
@@ -3328,7 +3399,7 @@ describe("the main guard does not revert a commit for the runner's own failure (
     expect(reruns()).toHaveLength(1)
     expect(writes().filter((w) => w[0] === 'pr-create')).toEqual([])
     expect(issues()[0]!.title).toBe(`Main is red at ${sha.slice(0, 7)}: an infrastructure failure, not reverted`)
-    expect(issues()[0]!.body).toContain(`Its failing line names the network or a package source, so none of the 1 commit that changed what the setup installs (${sha.slice(0, 7)}) is blamed`)
+    expect(issues()[0]!.body).toContain(`Its failing step names the network or a package source, so none of the 1 commit that changed what the setup installs (${sha.slice(0, 7)}) is blamed`)
     expect(queueOnDisk().items.filter((i: any) => i.state !== 'merged')).toEqual([])
   })
 

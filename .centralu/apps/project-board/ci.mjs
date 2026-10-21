@@ -457,12 +457,26 @@ const STEP_ERROR = /^\s*(?:E: \S|(?:[A-Z]\w*)?Error\b:?|fatal: |npm ERR! |ERR_PN
  * code N" to be quoted over nothing.
  */
 export function firstStepError(lines) {
+  const w = firstStepWindow(lines)
+  if (!w) return null
+  const found = lines.slice(w.start, w.end).find((l) => STEP_ERROR.test(l))
+  return found ? found.trim() : lines[w.end].slice(9)
+}
+
+/** Where the step that failed first begins and ends in a job log's lines (its `##[group]Run` line, its `##[error]` line), or null */
+function firstStepWindow(lines) {
   const end = lines.findIndex((l) => l.startsWith('##[error]'))
   if (end < 0) return null
   let start = end
   while (start > 0 && !lines[start].startsWith('##[group]Run ')) start--
-  const found = lines.slice(start, end).find((l) => STEP_ERROR.test(l))
-  return found ? found.trim() : lines[end].slice(9)
+  return { start, end }
+}
+
+/** Every line of the step that failed first, as one text: what its command wrote before it failed, warnings included (#1450) */
+export function failingStepText(log) {
+  const lines = cleanLog(log)
+  const w = firstStepWindow(lines)
+  return w ? lines.slice(w.start, w.end + 1).join('\n') : ''
 }
 
 // --- Known intermittent failures ------------------------------------------------------------------

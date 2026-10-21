@@ -11,7 +11,8 @@
 // Decisions are pure functions here; `guardTick` reads GitHub and the checkout for them and keeps its
 // state in the queue file (`q.guard`), so it carries on in whichever driver holds the lease, and after
 // either restarts. It runs in the same ticks as the queue, at most once per GUARD_MS.
-import { checkRunNotes, createBranch, deleteBranch, dispatchWorkflow, GitHubError, FATAL, readRepo, rerunRun, runJobSteps, workflowRuns } from './github.mjs'
+import { checkRunNotes, createBranch, deleteBranch, dispatchWorkflow, GitHubError, FATAL, readJobLog, readRepo, rerunRun, runJobSteps, workflowRuns } from './github.mjs'
+import { failingStepText } from './ci.mjs'
 import { CI, config, QUEUE } from './config.mjs'
 import { fetchRefs, git, GitError, remoteFor, topLevel } from './git.mjs'
 import { short } from './util.mjs'
@@ -145,6 +146,17 @@ const RERUNS_KEPT = 30
 /** The reruns by run id with `id` added, the oldest dropped past RERUNS_KEPT (keys keep their insertion order: run ids are too large to be array indexes, which JavaScript would sort) */
 export const boundedReruns = (reruns, id, record) => Object.fromEntries(Object.entries({ ...(reruns ?? {}), [id]: record }).slice(-RERUNS_KEPT))
 
+/** The text of the step that failed first in a failed job's log; empty when the log cannot be read */
+async function failingStep(repo, job) {
+  if (job?.id == null) return ''
+  try {
+    return failingStepText(await readJobLog(repo, job.id))
+  } catch (e) {
+    if (e instanceof GitHubError && FATAL.has(e.kind)) throw e
+    return ''
+  }
+}
+
 /** What an infrastructure failure was, in words: `"Install WebKit" in e2e (webkit 4/5): a failure in a setup step` */
 const infraText = (names, step, cause) => `${step ? `step "${step}" in ` : ''}${names.length ? names.join(', ') : 'the run'}: ${CAUSE_TEXT[cause] ?? cause}`
 
@@ -266,11 +278,13 @@ export async function guardTick({ q, update, now = Date.now(), renew, act, dir =
           }
         }
       }
-      // The failing line names the network or a package source (a 403, a gateway error, a timeout): an outage that lasted
-      // through the rerun, whatever the commits touched. Hunting would blame one of them for the runner's failure (#1429's harm).
-      if (touched.length && looksLikeNetworkError(base.line))
+      // The failing step names the network or a package source (a 403, a gateway error, a timeout, a mirror out of step) on any of
+      // its lines, not only the first error one (a real outage prints "could not connect" as warnings and then "Unable to locate
+      // package"): an outage that lasted through the rerun, whatever the commits touched. Hunting would blame one of them for the
+      // runner's failure (#1429's harm). Leaning to "network" costs an issue while main stays red; the other way blames a commit.
+      if (touched.length && looksLikeNetworkError(`${base.line}\n${await failingStep(repo, jobs.first)}`))
         return stop(
-          `it is an infrastructure failure (${what}), and it failed the same way again after one rerun. Its failing line names the network or a package source, so none of the ${touched.length} commit${touched.length === 1 ? '' : 's'} that changed what the setup installs (${touched.map((c) => short(c.sha)).join(', ')}) is blamed. Nothing was reverted: rerun the job by hand, or look at the runner.`,
+          `it is an infrastructure failure (${what}), and it failed the same way again after one rerun. Its failing step names the network or a package source, so none of the ${touched.length} commit${touched.length === 1 ? '' : 's'} that changed what the setup installs (${touched.map((c) => short(c.sha)).join(', ')}) is blamed. Nothing was reverted: rerun the job by hand, or look at the runner.`,
         )
       if (!touched.length)
         return stop(

@@ -35,12 +35,23 @@ const INSTALL_STEP = /^Run (?:pnpm|npm|yarn) (?:install|ci|i)\b/i
 const FETCH_NOTE = /ERR_PNPM_(?:META_)?FETCH_(?!4\d\d)|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up|\bE: Failed to fetch|Could not resolve host|\b(?:502|503|504)\b.{0,40}(?:Bad Gateway|Service Unavailable|Gateway Time-?out)/i
 
 /**
- * What a failing line says when the network or a package source is what failed (#1450 review): a refused or forbidden
- * request, a gateway error, a timeout, a name that does not resolve. Not `E: Failed to fetch` alone: apt writes that for a
- * 404 too, a package the commit asked for that is not there.
+ * What the text of a failing step says when the network or a package source is what failed (#1450 review): a refused or
+ * forbidden request, a gateway error, a timeout, a name that does not resolve, a mirror out of step. A status counts
+ * only as a status ("403 Forbidden", "HTTP 403", "status 429", "returned error: 502", "responded with 503"), never as a
+ * number inside a version or a path (2.403.1, foo_1.429-1.deb). Not `E: Failed to fetch` alone: apt writes that for a
+ * 404 too, a package the commit asked for that is not there. A false "network" costs an issue while main stays red; a
+ * false "not the network" blames a commit that did nothing.
  */
-const NETWORK_LINE = /\b(?:403|429)\b|Forbidden|Too Many Requests|\bHTTP[ /]?5\d\d\b|\b50[0-4]\b.{0,40}(?:Error|Unavailable|Gateway|Time-?out)|Bad Gateway|Service Unavailable|ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up|Could not resolve|Temporary failure|Connection (?:reset|refused|timed out)|Network is unreachable|timed out/i
-export const looksLikeNetworkError = (line) => NETWORK_LINE.test(String(line ?? ''))
+const NETWORK_LINE = [
+  /\b(?:403|429)\s+(?:Forbidden|Too Many)/i,
+  /\b(?:HTTP(?:\/[\d.]+)?|status(?: code)?|returned error:|responded with|error code)\s*:?\s*(?:403|429|5\d\d)\b/i,
+  /\b50[0-4]\s+(?:Internal|Bad Gateway|Service|Gateway)/i,
+  /\bForbidden\b|Too Many Requests|Bad Gateway|Service Unavailable|Gateway Time-?out/i,
+  /ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up/i,
+  /could not (?:resolve|connect|download)|unable to connect|failed to connect|temporary failure|network is unreachable|connection (?:reset|refused|timed out)|timed out|early EOF|RPC failed/i,
+  /Hash Sum mismatch|(?:is not|no longer) signed|Download failure/i,
+]
+export const looksLikeNetworkError = (text) => NETWORK_LINE.some((re) => re.test(String(text ?? '')))
 
 /** Whether a step with this name, failing with these notes, is part of setting the job up, not of its work. */
 export const isSetupStep = (name, notes = '') => SETUP_STEP.some((re) => re.test(String(name ?? ''))) || (INSTALL_STEP.test(String(name ?? '')) && FETCH_NOTE.test(notes))

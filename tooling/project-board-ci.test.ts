@@ -9,6 +9,7 @@ import { ExternalApps, resultText, type AppCaller, type AppRef } from '../packag
 import {
   decideMerge,
   evaluateChecks,
+  failingStepText,
   firstFailure,
   failureLineIndex,
   matchKnownFailure,
@@ -339,6 +340,12 @@ describe("a failed job's log", () => {
     expect(firstFailure(bare.map(stamp).join('\n'))).toEqual({ line: null, error: 'Process completed with exit code 1.' })
     // An action that failed before any command ran: its own error
     expect(firstFailure(['##[group]Run actions/checkout@x', '##[error]fatal: could not read Username'].map(stamp).join('\n'))).toEqual({ line: null, error: 'fatal: could not read Username' })
+  })
+
+  it('gives every line of the step that failed first, warnings included, and nothing of the steps after it', () => {
+    const log = ['##[group]Run pnpm install', 'W: Could not connect to a mirror', 'E: Unable to locate package x', '##[error]Process completed with exit code 1.', '##[group]Run actions/upload-artifact@x', '##[error]No files were found'].map(stamp).join('\n')
+    expect(failingStepText(log)).toBe(['##[group]Run pnpm install', 'W: Could not connect to a mirror', 'E: Unable to locate package x', '##[error]Process completed with exit code 1.'].join('\n'))
+    expect(failingStepText('nothing failed here')).toBe('')
   })
 
   it('keeps a bundling error that follows a failed test marker', () => {

@@ -596,8 +596,10 @@ looked into).
   since the last green one changed what the setup reads (`queue.guard.setupInputs`, path patterns:
   `.github/**/*`, the lockfile, every `package.json`, the Rust toolchain pin and `Cargo.lock` by default;
   the browser's version comes from the lockfile and the system libraries from build.yml, and none of that
-  runs on a pull request, only in main's full tier) and the failing line does not name the network or a
-  package source (a 403, a gateway error, a timeout: `looksLikeNetworkError`; an outage that outlasts the
+  runs on a pull request, only in main's full tier) and no line of the failing step names the network or a
+  package source (`looksLikeNetworkError`: a status only as a status, "403 Forbidden" or "HTTP 502", never inside a
+  version; a timeout, "could not connect", "Hash Sum mismatch", "is not signed", "Download failure"; not a bare
+  apt "Failed to fetch", which a 404 prints too; real outages print warnings before the error line; an outage that outlasts the
   rerun would otherwise blame whatever touched a lockfile): then it is a **setup failure** and is hunted
   like a test failure (a probe without the bad commit passes setup). Otherwise it is reported (an issue and a
   notice, "an infrastructure failure, not a commit's", naming how many commits it checked), never
