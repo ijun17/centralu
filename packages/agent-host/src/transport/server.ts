@@ -19,7 +19,8 @@ import { createHttpHandler, sameSecret, type HttpGate } from './http.js'
 import { bridgeRefusal, bridgeSessionOf } from './bridge-token.js'
 import { isLimitedToken } from './limited-token.js'
 import { limitedRefusal } from './method-rights.js'
-import { hostProof } from './host-proof.js'
+import { credentialProof, hostProof } from './host-proof.js'
+import { isFullCredential, type FullCredential } from '../lifecycle/serve-credentials.js'
 import { DrainCut, type Drain } from '../drain.js'
 import { rpcError } from '../rpc-error.js'
 
@@ -82,7 +83,17 @@ export type HostServerOptions = {
   port: number
   /** Started by `centralu serve`: a taken port gets serve's advice, not a developer's (#482) */
   servedBy?: 'serve'
+  /**
+   * The host's token: what a full hello says, and the key everything handed out is derived from (the limited
+   * credential, a bridge's, the proof). With `fullCredentials` (a `centralu serve` host, #1405) it is only the key: a
+   * hello with it is not full, and the full ones are those the callback names
+   */
   token: string
+  /**
+   * The full credentials of a `centralu serve` host (#1405, lifecycle/serve-credentials.ts): their verifiers, asked at
+   * each hello and each `prove` naming one, so a pairing or a revocation applies at once
+   */
+  fullCredentials?: () => readonly FullCredential[]
   onRpc: RpcHandler
   allowedOrigins?: readonly string[]
   /**
@@ -560,7 +571,11 @@ export class HostServer {
         if (authed) return
         if (proved) return this.refuse(ws, CLOSE_AUTH, 'not a hello')
         proved = true
-        this.sendTo(ws, JSON.stringify({ kind: 'proof', nonce: frame.data.nonce, mac: hostProof(this.opts.token, frame.data.nonce) }))
+        // A hub that paired names its credential (#1405): the proof is under that credential's verifier
+        const ask = frame.data
+        const named = ask.credential ? this.opts.fullCredentials?.().find((c) => c.id === ask.credential) : undefined
+        const mac = named ? credentialProof(named.verifier, ask.nonce) : hostProof(this.opts.token, ask.nonce)
+        this.sendTo(ws, JSON.stringify({ kind: 'proof', nonce: ask.nonce, mac }))
         return
       }
 
@@ -571,7 +586,9 @@ export class HostServer {
          * delivered seq 2 twice — and the client has no way to tell a repeat from new work.
          */
         if (authed) return
-        if (!sameSecret(frame.data.token, this.opts.token)) {
+        // Full: the token, or for a `centralu serve` host one of the full credentials serve.json names (#1405)
+        const full = this.opts.fullCredentials ? isFullCredential(this.opts.fullCredentials(), frame.data.token) !== null : sameSecret(frame.data.token, this.opts.token)
+        if (!full) {
           // Every process of this user but the window holds the limited credential (#1405, limited-token.ts)
           limited = isLimitedToken(this.opts.token, frame.data.token)
           // A Codex bridge holds a credential for its own session's calls only (bridge-token.ts)

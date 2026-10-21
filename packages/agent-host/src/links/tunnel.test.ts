@@ -5,6 +5,8 @@ import { createServer, type Server } from 'node:net'
 import { tmpdir } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
 import {
+  pairLabel,
+  hubKeyOf,
   autostartCommand,
   connectionCommand,
   detachCommand,
@@ -93,6 +95,11 @@ fs.appendFileSync(process.env.FAKE_SSH_LOG, JSON.stringify({ shell, run: cmd }) 
 const has = (process.env.FAKE_SSH_HAS || '').split('|')
 const line = (over) => JSON.stringify({ ...JSON.parse(process.env.FAKE_SSH_LINE), hostRunning: running(), ...over })
 const answer = () => {
+  // A serve from before #1405 refuses --pair, as it refuses any option it does not know
+  // A remote updated meanwhile: refuses --pair only while this file exists, and prints no token without --pair
+  if (process.env.FAKE_SSH_NO_PAIR_FILE && / --pair /.test(cmd) && fs.existsSync(process.env.FAKE_SSH_NO_PAIR_FILE)) { process.stderr.write('unknown option for serve: --pair' + String.fromCharCode(10)); process.exit(2) }
+  if (process.env.FAKE_SSH_NO_PAIR_FILE && !/ --pair /.test(cmd) && !fs.existsSync(process.env.FAKE_SSH_NO_PAIR_FILE)) return process.stdout.write(line({ token: undefined, takes: ['from', 'window', 'pair'] }) + String.fromCharCode(10))
+  if (process.env.FAKE_SSH_NO_PAIR && / --pair /.test(cmd)) { process.stderr.write('unknown option for serve: --pair' + String.fromCharCode(10)); process.exit(2) }
   // What centralu serve --detach answers, per FAKE_SSH_DETACH; anything else is --connection
   if (/ serve --detach/.test(cmd)) {
     const how = process.env.FAKE_SSH_DETACH
@@ -206,7 +213,7 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
     expect(ep.line).toMatchObject({ port: remotePort, version: '0.1.0-beta.11', hostRunning: true })
     const [ask, forward] = (logged() as unknown[]).filter((x): x is string[] => Array.isArray(x))
     expect(ask!.slice(0, -1)).toEqual(['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '--', 'box'])
-    expect(ask!.at(-1)).toMatch(/^sh -c 'd=.*; m=.*; if \[ -x "\$m" \]; then .*elif command -v centralu .* serve --connection; .*CENTRALU-NOT-FOUND; exit 127; fi'$/)
+    expect(ask!.at(-1)).toMatch(/^sh -c 'd=.*; m=.*; if \[ -x "\$m" \]; then .*elif command -v centralu .* serve --connection --pair hub:[A-Za-z0-9._-]+; .*CENTRALU-NOT-FOUND; exit 127; fi'$/)
     expect(forward).toContain('-N')
     for (const opt of ['BatchMode=yes', 'ExitOnForwardFailure=yes', 'ServerAliveInterval=15', 'GatewayPorts=no']) expect(forward).toContain(opt)
     const spec = forward![forward!.indexOf('-L') + 1]!
@@ -447,7 +454,8 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
     await tunnel({ FAKE_SSH_LINE: line({ port: await freePort() }) }, { shell: 'wsl', wslDistro: 'Ubuntu-24.04' }).open()
     const runs = (logged() as { shell?: string; run?: string }[]).filter((x) => x.shell)
     expect(runs[0]!.shell).toBe('powershell')
-    expect(runs[0]!.run).toContain("elseif (Get-Command centralu.cmd -ErrorAction SilentlyContinue) { & centralu.cmd serve --connection } else { $l = Join-Path $d 'bin\\centralu.cmd'")
+    // A full credential of its own is asked for at each link (#1405): `--pair hub:<this computer>`
+    expect(runs[0]!.run).toMatch(/elseif \(Get-Command centralu\.cmd -ErrorAction SilentlyContinue\) \{ & centralu\.cmd serve --connection --pair hub:[A-Za-z0-9._-]+ \} else \{ \$l = Join-Path \$d 'bin\\centralu\.cmd'/)
     expect(runs[1]!.shell).toBe('wsl:Ubuntu-24.04')
     // Windows' drives are off PATH inside the distro: its npm shim must not answer for the distro
     expect(runs[1]!.run).toMatch(/^PATH=\$\(printf %s "\$PATH" \| tr : '\\n' \| grep -v '\^\/mnt\/' \| paste -sd: -\); d=.*; m=.*; if \[ -x "\$m" \]; then .*elif command -v centralu/)
@@ -458,11 +466,43 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
     expect(forwards[1]).not.toContain('-N')
   })
 
+  it('pairs for a credential of its own, and asks a serve from before pairing as before, once (#1405)', async () => {
+    const t = tunnel({ FAKE_SSH_NO_PAIR: '1' })
+    await expect(t.open()).resolves.toMatchObject({ token: 'tok' })
+    const runs = (logged() as { run?: string }[]).filter((x) => x.run).map((x) => x.run!)
+    expect(runs.map((r) => / --pair hub:/.test(r))).toEqual([true, false])
+    // The refusal is remembered for this link: the next open asks without --pair at once
+    await t.close()
+    await expect(t.open()).resolves.toMatchObject({ token: 'tok' })
+    const after = (logged() as { run?: string }[]).filter((x) => x.run).map((x) => x.run!)
+    expect(after.slice(2).map((r) => / --pair hub:/.test(r))).toEqual([false])
+  })
+
+  it('asks with --pair again once a remote that refused it was updated, rather than linking with no credential (#1405 review)', async () => {
+    const flag = join(dir, `no-pair-${Date.now()}`)
+    writeFileSync(flag, '')
+    const t = tunnel({ FAKE_SSH_NO_PAIR_FILE: flag })
+    await expect(t.open()).resolves.toMatchObject({ token: 'tok' })
+    await t.close()
+    // Updated there: it takes --pair now, and prints no token without it
+    rmSync(flag, { force: true })
+    await expect(t.open()).resolves.toMatchObject({ token: 'tok' })
+    const runs = (logged() as { run?: string }[]).filter((x) => x.run).map((x) => / --pair hub:/.test(x.run!))
+    expect(runs).toEqual([true, false, false, true])
+  })
+
+  it('pairs under a label of its own: its name, and a key that tells it from a hub of the same name', () => {
+    expect(pairLabel('Mac-mini', hubKeyOf('/Users/me/.centralu'))).toMatch(/^hub:Mac-mini-[0-9a-f]{8}$/)
+    expect(pairLabel('Mac-mini', hubKeyOf('/Users/me/.centralu-dev'))).not.toBe(pairLabel('Mac-mini', hubKeyOf('/Users/me/.centralu')))
+    // Never past what --pair takes (80 characters)
+    expect(pairLabel('x'.repeat(64), hubKeyOf('/d')).length).toBeLessThanOrEqual(80)
+  })
+
   it('runs the person’s own command in place of centralu, with no fallback', async () => {
     const cmd = 'CC_DATA_DIR=/tmp/x node /src/packaging/npm/centralu/bin/centralu.mjs'
     await expect(tunnel({ FAKE_SSH_HAS: 'launcher' }, { shell: 'posix', command: cmd }).open()).rejects.toThrow(/No such file or directory/)
     const runs = (logged() as { run?: string }[]).filter((x) => x.run).map((x) => x.run)
-    expect(runs).toEqual([`${cmd} serve --connection`])
+    expect(runs).toEqual([expect.stringMatching(/^CC_DATA_DIR=\/tmp\/x node \/src\/packaging\/npm\/centralu\/bin\/centralu\.mjs serve --connection --pair hub:[A-Za-z0-9._-]+$/)])
     await expect(tunnel({ FAKE_SSH_HAS: cmd }, { shell: 'posix', command: cmd }).open()).resolves.toMatchObject({ token: 'tok' })
   })
 

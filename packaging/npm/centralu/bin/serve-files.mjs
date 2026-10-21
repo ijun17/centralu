@@ -1,23 +1,49 @@
 /**
- * The files `centralu serve` keeps in the data folder: the token and port (serve.json, private to the
- * user), the running launcher's pid (serve.pid), and the host's own lock (host.lock), read to tell a
- * live host of this folder from a stale pid.
+ * The files `centralu serve` keeps in the data folder: the host's key, the verifiers of the full credentials and the
+ * port (serve.json, private to the user), the running launcher's pid (serve.pid), and the host's own lock (host.lock),
+ * read to tell a live host of this folder from a stale pid.
  */
 import { execFileSync } from 'node:child_process'
-import { randomBytes } from 'node:crypto'
+import { createHash, createHmac, randomBytes } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeSync, closeSync } from 'node:fs'
 import { join } from 'node:path'
 import { isAlive, renameRetrying, replaceFile, sleepSync } from './serve-util.mjs'
+import { CREDENTIAL_ID_RE, PAIR_LABEL_RE } from './serve-args.mjs'
 
 /**
- * The file in the data folder that holds the token and the port, mode 0600.
+ * The file in the data folder that holds the host's key, the full credentials' verifiers and the port, mode 0600.
  *
- * The token is generated once, the first time either `serve` or `serve --connection` runs, and kept:
- * the client stores it (in the OS secret store) and has to find the same one after the host
- * restarts. The port is the one the last `serve` actually listened on, which is how
- * `--connection`, a separate process, learns a `--port` given to `serve` in a systemd unit.
+ * Since #1405 (version 2) it holds **no credential that opens the host whole**:
+ *
+ * - `key`: 32 random bytes the host derives what it hands out from (the limited credential `--connection` prints, a
+ *   Codex bridge's, the proof of a launcher's probe). With it a process of this user gets the limited credential;
+ *   it is never a full one (a hello with it is refused as full).
+ * - `full`: one entry per full credential, `{ id, label, verifier, created }`, the verifier being the SHA-256 of the
+ *   credential. The credential itself is printed once, to whoever asked for it (`--pair`: a hub at each link,
+ *   `--window` for the person's own window on Windows), and written nowhere. The host checks a hello against these,
+ *   read again at each hello, so a pairing or a revocation applies at once.
+ * - `legacyHostToken`: only while the installed host is from before verifiers (a rollback): the one token such a
+ *   host knows, given to it and to the hub that pairs, as before #1405.
+ *
+ * The port is the one the last `serve` actually listened on, which is how `--connection`, a separate process, learns a
+ * `--port` given to `serve` in a systemd unit. A version 1 file (`{ token, port }`) is moved to version 2 on first
+ * use: its token becomes a full credential labelled `legacy` (a hub or window still holding it keeps working), which the
+ * next pairing removes.
  */
 export const SERVE_STATE_FILE = 'serve.json'
+
+/** The label of the full credential a version 1 file's token became; removed by the next pairing */
+export const LEGACY_LABEL = 'legacy'
+
+/** A full credential's verifier: the SHA-256 of it, as hex (the host's `serve-credentials.ts` compares the same) */
+export function verifierOf(credential) {
+  return createHash('sha256').update(credential).digest('hex')
+}
+
+/** The limited credential the host derives from `key` (#1405, the host's `transport/limited-token.ts`) */
+export function limitedOf(key) {
+  return `ccl1:${createHmac('sha256', key).update('centralu limited token v1').digest('base64url')}`
+}
 
 /** What a detached serve writes: its own lines, and the host's until it is ready (host.log has the rest) */
 export const SERVE_LOG_FILE = 'serve.log'
@@ -119,14 +145,43 @@ export function readServeState(dataDir, { tries = 5, sleep = sleepSync } = {}) {
   }
 }
 
+/**
+ * The state as the launcher uses it. `token` is the credential the launcher's own probes say hello with, and
+ * `proofKey` what the host proves with to them: the limited credential and the key for version 2, the token for a
+ * version 1 file not moved yet.
+ */
 function parseServeState(raw) {
   try {
     const v = JSON.parse(raw)
+    const port = Number.isInteger(v?.port) && v.port >= 1 && v.port <= 65535 ? v.port : null
+    if (v?.v === 2) {
+      if (typeof v.key !== 'string' || v.key.length < 32) return null
+      // Exactly what the host takes (serve-credentials.ts `isListedEntry`): an entry of another shape is dropped here, so
+      // the next write leaves it out too, and the host refuses it meanwhile
+      const full = (Array.isArray(v.full) ? v.full : []).filter((e) => isListedEntry(e)).map((e) => ({ id: e.id, label: e.label, verifier: e.verifier, created: Number.isFinite(e.created) ? e.created : 0 }))
+      const legacyHostToken = typeof v.legacyHostToken === 'string' && v.legacyHostToken.length >= 32 ? v.legacyHostToken : null
+      return { v: 2, key: v.key, port, full, legacyHostToken, token: limitedOf(v.key), proofKey: v.key }
+    }
     if (typeof v?.token !== 'string' || v.token.length < 32) return null
-    return { token: v.token, port: Number.isInteger(v.port) && v.port >= 1 && v.port <= 65535 ? v.port : null }
+    return { v: 1, token: v.token, proofKey: v.token, port, key: null, full: [], legacyHostToken: null }
   } catch {
     return null
   }
+}
+
+/** An entry the launcher lists, `--revoke` takes and the host accepts: an 8-hex id, a label `--pair` takes, a hex verifier */
+export function isListedEntry(e) {
+  return typeof e?.id === 'string' && CREDENTIAL_ID_RE.test(e.id) && typeof e.label === 'string' && PAIR_LABEL_RE.test(e.label) && typeof e.verifier === 'string' && /^[0-9a-f]{64}$/.test(e.verifier)
+}
+
+/** What version 2 writes for a state */
+function stateFile(state) {
+  return { v: 2, key: state.key, port: state.port, full: state.full, ...(state.legacyHostToken ? { legacyHostToken: state.legacyHostToken } : {}) }
+}
+
+/** A new full credential and its id */
+function mint() {
+  return { token: randomBytes(32).toString('base64url'), id: randomBytes(4).toString('hex') }
 }
 
 /**
@@ -137,41 +192,122 @@ function parseServeState(raw) {
  * that exists but cannot be read as state is refused rather than overwritten: it may be a token
  * the client already holds, and a silent new one would lock that client out with "bad token".
  */
-export function ensureServeState(dataDir, platform = process.platform) {
+export function ensureServeState(dataDir, platform = process.platform, now = Date.now()) {
   mkdirSync(dataDir, { recursive: true })
   const file = join(dataDir, SERVE_STATE_FILE)
   if (!existsSync(file)) {
-    const token = randomBytes(32).toString('base64url')
     try {
-      writePrivate(file, { v: 1, token, port: null }, 'wx')
+      writePrivate(file, { v: 2, key: randomBytes(32).toString('base64url'), port: null, full: [] }, 'wx')
     } catch (e) {
       if (e?.code !== 'EEXIST') throw e
     }
   }
-  const state = readServeState(dataDir)
+  let state = readServeState(dataDir)
   if (!state) throw new Error(`${file} exists but is not a serve state file. Move it aside and run again.`)
+  // A version 1 file (#1405): its token becomes a full credential no longer written down, and a new key is drawn
+  if (state.v === 1) {
+    state = changeServeState(dataDir, (s) =>
+      s.v === 1
+        ? { v: 2, key: randomBytes(32).toString('base64url'), port: s.port, full: [{ id: randomBytes(4).toString('hex'), label: LEGACY_LABEL, verifier: verifierOf(s.token), created: now }], legacyHostToken: null }
+        : s,
+      platform,
+    )
+  }
   keepPrivate(file, platform)
   return state
 }
 
-/** Writes the port `serve` listened on, keeping the token. Atomic: a temp file renamed over it */
-export function recordServePort(dataDir, port, platform = process.platform) {
+/**
+ * Reads the state, changes it with `change` and writes it back, under a lock (`serve.json.lock`) so two changes at once
+ * (a hub pairing while a window starts) do not lose one another. A lock older than 10 s is a crashed writer's and is
+ * taken over. Returns the state written.
+ */
+export function changeServeState(dataDir, change, platform = process.platform, { sleep = sleepSync, nowMs = Date.now } = {}) {
   const file = join(dataDir, SERVE_STATE_FILE)
-  const state = readServeState(dataDir)
-  if (!state) throw new Error(`${file} is missing or unreadable`)
-  if (state.port === port) return
-  replacePrivate(file, { v: 1, token: state.token, port }, platform)
+  const lock = `${file}.lock`
+  for (let i = 0; ; i++) {
+    try {
+      closeSync(openSync(lock, 'wx', 0o600))
+      break
+    } catch (e) {
+      if (e?.code !== 'EEXIST') throw e
+      try {
+        if (nowMs() - statSync(lock).mtimeMs > 10_000) rmSync(lock, { force: true })
+      } catch {
+        // gone meanwhile: try again
+      }
+      // Past the 10 s after which a lock counts as a crashed writer's, so a waiter takes it over rather than giving up first
+      if (i >= 480) throw new Error(`${lock} is held by another serve; try again`)
+      sleep(25)
+    }
+  }
+  try {
+    const before = readServeState(dataDir)
+    if (!before) throw new Error(`${file} is missing or unreadable`)
+    const after = change(before)
+    if (after !== before) replacePrivate(file, stateFile(after), platform)
+    // What was written, as a reader reads it: never null once written
+    return after !== before ? parseServeState(JSON.stringify(stateFile(after))) : before
+  } finally {
+    rmSync(lock, { force: true })
+  }
 }
 
 /**
- * A new token, keeping the port. Only when the person asks (`--rotate-token`): every client that
- * stored the old one has to fetch the new one with `--connection`, and a serve already running
- * keeps answering to the old one until it restarts.
+ * A new full credential for `label` (#1405): written as its verifier only, and returned once. One label holds one
+ * credential: a hub pairing again (each link does) replaces its own, and `window` the window's. The `legacy` one a
+ * version 1 file left goes with a hub's pairing: whoever held it was a hub, which pairs now. Returns `{ token, id, state }`.
+ */
+export function pairServe(dataDir, label, platform = process.platform, now = Date.now()) {
+  ensureServeState(dataDir, platform, now)
+  const { token, id } = mint()
+  const state = changeServeState(dataDir, (s) => ({
+    ...s,
+    // A hub's pairing removes the `legacy` one: whoever held it was a hub of before #1405, which pairs now
+    full: [...s.full.filter((e) => e.label !== label && !(label.startsWith('hub:') && e.label === LEGACY_LABEL)), { id, label, verifier: verifierOf(token), created: now }],
+  }), platform)
+  return { token, id, state }
+}
+
+/** Removes the full credential `id`; true when there was one. A hello with it is refused from then on */
+export function revokeServe(dataDir, id, platform = process.platform) {
+  let found = false
+  changeServeState(dataDir, (s) => {
+    found = s.full.some((e) => e.id === id)
+    return found ? { ...s, full: s.full.filter((e) => e.id !== id) } : s
+  }, platform)
+  return found
+}
+
+/**
+ * The one token an installed host from before verifiers knows (a rollback): kept in the state while such a host is
+ * installed, given to it and to a hub that pairs. Created once; returns it.
+ */
+export function legacyHostTokenOf(dataDir, platform = process.platform) {
+  const state = ensureServeState(dataDir, platform)
+  if (state.legacyHostToken) return state.legacyHostToken
+  const token = randomBytes(32).toString('base64url')
+  return changeServeState(dataDir, (s) => (s.legacyHostToken ? s : { ...s, legacyHostToken: token }), platform).legacyHostToken
+}
+
+/** A host of today runs: the token kept for an older one is not kept any longer */
+export function dropLegacyHostToken(dataDir, platform = process.platform) {
+  changeServeState(dataDir, (s) => (s.legacyHostToken ? { ...s, legacyHostToken: null } : s), platform)
+}
+
+/** Writes the port `serve` listened on, keeping the rest. Atomic: a temp file renamed over it */
+export function recordServePort(dataDir, port, platform = process.platform) {
+  changeServeState(dataDir, (s) => (s.port === port ? s : { ...s, port }), platform)
+}
+
+/**
+ * A new key, and no full credential, keeping the port. Only when the person asks (`--rotate-token`): every hub pairs
+ * again at its next link, the window at its next start, and a serve already running keeps its old key (what it hands
+ * out) until it restarts, while the full credentials end at once.
  */
 export function rotateServeToken(dataDir, platform = process.platform) {
-  const before = ensureServeState(dataDir, platform)
-  replacePrivate(join(dataDir, SERVE_STATE_FILE), { v: 1, token: randomBytes(32).toString('base64url'), port: before.port }, platform)
-  return readServeState(dataDir)
+  ensureServeState(dataDir, platform)
+  return changeServeState(dataDir, (s) => ({ ...s, key: randomBytes(32).toString('base64url'), full: [], legacyHostToken: null }), platform)
 }
 
 /**

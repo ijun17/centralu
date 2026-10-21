@@ -781,14 +781,22 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     const idle = this.client !== null && this.client === this.gaveUp ? this.client : null
     this.gaveUp = null
     if (idle && idle.provesHost === (endpoint.line.proof === true)) {
-      idle.updateEndpoint(endpoint.url, endpoint.token)
+      idle.updateEndpoint(endpoint.url, endpoint.token, endpoint.line.credential)
       return
     }
     this.client?.close()
     this.client = null
     const client = new RemoteClient(
       // A host that can prove it holds the token is asked to, before the token goes out (#838)
-      { redials: LINK_REDIALS, ...this.deps.client, url: endpoint.url, token: endpoint.token, proveHost: endpoint.line.proof === true },
+      {
+        redials: LINK_REDIALS,
+        ...this.deps.client,
+        url: endpoint.url,
+        token: endpoint.token,
+        proveHost: endpoint.line.proof === true,
+        // The credential paired for this hub at this link (#1405): the host proves under its verifier
+        ...(endpoint.line.credential ? { credential: endpoint.line.credential } : {}),
+      },
       {
         hello: (h) => void this.onHello(client, h),
         event: (e) => this.onEvent(e),

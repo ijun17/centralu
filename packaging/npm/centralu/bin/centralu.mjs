@@ -48,6 +48,7 @@ import {
   parseServeArgs,
   printConnection,
   rotateToken,
+  revokeCredential,
   runAutostart,
   runDetach,
   runDetachedChild,
@@ -621,6 +622,11 @@ switch (cmd) {
       break
     }
     try {
+      // One full credential withdrawn (#1405): like --rotate-token, nothing to start or describe
+      if (args.mode === 'revoke') {
+        process.exitCode = revokeCredential({ env: process.env, home: HOME, id: args.revoke })
+        break
+      }
       if (args.mode === 'rotate') {
         process.exitCode = rotateToken({ env: process.env, home: HOME })
         break
@@ -655,7 +661,7 @@ switch (cmd) {
       if (spec) Object.assign(process.env, spec.env)
       // realpath: npm's bin is a symlink to this file, and the launcher must not depend on the link
       const opts = { env: process.env, home: HOME, entry: requireHostEntry(), version: pkg.version, cliPath: realpathSync(process.argv[1]) }
-      if (args.mode === 'connection') process.exitCode = await printConnection(opts)
+      if (args.mode === 'connection') process.exitCode = await printConnection({ ...opts, pair: args.pair ?? null })
       else if (args.mode === 'detach') process.exitCode = await runDetach({ ...opts, port: args.port, from: args.from })
       else if (args.mode === 'stop') process.exitCode = await runStop(opts)
       else if (args.mode === 'window') process.exitCode = await runWindow(opts)

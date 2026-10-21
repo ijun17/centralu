@@ -52,6 +52,7 @@ import { acquireInstanceLock, lockConflictMessage } from './dev-services/instanc
 import { hostLogPath, startupBanner, teeStderrToFile } from './log-file.js'
 import { hostDrain } from './drain.js'
 import { HostRequests } from './host-requests.js'
+import { readFullCredentials } from './lifecycle/serve-credentials.js'
 import { createStopGate } from './lifecycle/stop-gate.js'
 import { stopGitChildren } from './dev-services/git-exec.js'
 import { Gate } from './lifecycle/gate.js'
@@ -64,7 +65,7 @@ import { Links } from './links/links.js'
 import { linkedSessions } from './links/linked-sessions.js'
 import { linkedViews } from './links/linked-views.js'
 import { Router } from './links/router.js'
-import { SshTunnel } from './links/tunnel.js'
+import { SshTunnel, hubKeyOf } from './links/tunnel.js'
 import { hubSelfId, storeMirror, storeProjectOrder, storeRegistry } from './links/stored.js'
 import { LinkedHubs } from './links/linked-hubs.js'
 import { reverseCalls } from './links/reverse-calls.js'
@@ -604,7 +605,7 @@ const links = new Links({
   terminal: screens.push,
   mirror: storeMirror(store),
   registry: storeRegistry(store),
-  tunnelFor: (record) => new SshTunnel({ target: record.sshTarget, remote: record.remote, log: (line) => console.error(line) }),
+  tunnelFor: (record) => new SshTunnel({ target: record.sshTarget, remote: record.remote, hubKey: hubKeyOf(dataRoot()), log: (line) => console.error(line) }),
   installer: { runtime: remoteRuntime, script: installScript },
   log: (line) => console.error(line),
   // A child start_agent started on a machine names the session here that started it as its `askedBy` (#1038); the window draws it in that machine's project and points to it from that session (#1416)
@@ -717,10 +718,17 @@ const elevation = detectToken().then((t) => {
     )
   }
 })
+/** Where a `centralu serve` host's full credentials are (#1405), when it is one */
+const serveState = launch.serveState
 const server = new HostServer({
   port: Number(values.port),
   ...(launch.startedByServe ? { servedBy: 'serve' as const } : {}),
   token,
+  /*
+   * A `centralu serve` host that takes verifiers (#1405): what it was handed is its key, and the full credentials are
+   * the ones serve.json names, read at each hello (lifecycle/serve-credentials.ts)
+   */
+  ...(serveState ? { fullCredentials: () => readFullCredentials(serveState) } : {}),
   allowedOrigins,
   onRpc: router.handle,
   // A limited call that cannot be undone waits for the person's card (#1405)

@@ -120,6 +120,7 @@ describe("the launcher's variables (ST16)", () => {
       serveFrom: null,
       token: 'secret',
       tokenOnStdin: true,
+      serveState: undefined,
     })
     for (const name of LAUNCH_VARIABLES) expect(env, name).not.toHaveProperty(name)
     expect(env).toEqual({ CC_DATA_DIR: '/d', PATH: '/bin' })
@@ -138,6 +139,11 @@ describe("the launcher's variables (ST16)", () => {
     })
     expect(take({ CC_STARTED_BY: 'app' })).toEqual({ startedBy: 'app', serveFrom: null, left: [] })
     expect(take({})).toEqual({ startedBy: null, serveFrom: null, left: [] })
+    // Where a serve host's full credentials are (#1405): read only for a host serve started, and taken out like the rest
+    const serve = { CC_SERVE: '1', CC_SERVE_STATE: '/d/serve.json' }
+    expect(takeLaunchEnv(serve).serveState).toBe('/d/serve.json')
+    expect(serve).toEqual({})
+    expect(takeLaunchEnv({ CC_SERVE_STATE: '/d/serve.json' }).serveState).toBeUndefined()
     // A name that could break the sentence, a value of another shape, or text that is not JSON is left out
     expect(take({ CC_SERVE: '1', CC_SERVE_FROM: JSON.stringify({ hub: 'a b\nc', ssh: 7 }) }).serveFrom).toBeNull()
     expect(take({ CC_SERVE: '1', CC_SERVE_FROM: '{' }).serveFrom).toBeNull()

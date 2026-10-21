@@ -1,4 +1,6 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { asObj } from '../json-value.js'
 import { createConnection, createServer } from 'node:net'
 import { win32 } from 'node:path'
 import { hostname } from 'node:os'
@@ -20,7 +22,19 @@ import { isHostCrash, NodeTooOld } from './node-floor.js'
 export type ConnectionLine = {
   v: number
   port: number
-  token: string
+  /**
+   * A full credential for this hub: since #1405 only `--connection --pair` prints one (`connectionCommand`), made for
+   * the asker and kept there as its hash; an older remote prints its one token always. Absent from a line that was not
+   * a pairing (`--detach`'s)
+   */
+  token?: string
+  /** That credential's id (#1405), which the host's proof is made under (`RemoteClientOptions.credential`) */
+  credential?: string
+  /**
+   * The full credentials that machine holds besides this hub's (#1405): `{ id, label, created }`, never their values.
+   * Absent from a remote that predates it
+   */
+  others?: RemoteCredential[]
   version: string
   protocolVersion: number
   dataDir: string
@@ -53,6 +67,9 @@ export type ConnectionLine = {
    */
   stopped?: RemoteStop
 }
+
+/** A full credential a linked machine holds, as its `--connection` names it (#1405): who it is for and since when */
+export type RemoteCredential = { id: string; label: string; created: number }
 
 /** The `stopped` field of the connection line, as serve-files.mjs `readStopped` writes it */
 export type RemoteStop = { by: 'stop' | 'quit'; at: number | null }
@@ -136,7 +153,10 @@ export function parseConnectionLine(stdout: string, spec?: RemoteSpec): Connecti
     const o = raw as Partial<ConnectionLine>
     if (o && typeof o === 'object' && typeof o.v === 'number') {
       if (o.v !== 1) throw new Error(`The remote's Centralu speaks connection format ${o.v}; update Centralu on this computer`)
-      if (typeof o.port !== 'number' || typeof o.token !== 'string' || typeof o.protocolVersion !== 'number') {
+      // A token is required only of a remote that does not pair (#1405): an older one always printed it
+      const takes: unknown = asObj(raw).takes
+      const pairs = Array.isArray(takes) && takes.includes('pair')
+      if (typeof o.port !== 'number' || (typeof o.token !== 'string' && !pairs) || typeof o.protocolVersion !== 'number') {
         throw new Error('The remote answered with an incomplete connection line')
       }
       const install = parseInstall((o as { install?: unknown }).install)
@@ -144,7 +164,9 @@ export function parseConnectionLine(stdout: string, spec?: RemoteSpec): Connecti
       return {
         v: 1,
         port: o.port,
-        token: o.token,
+        ...(typeof o.token === 'string' ? { token: o.token } : {}),
+        ...(typeof o.credential === 'string' && /^[0-9a-f]{8}$/.test(o.credential) ? { credential: o.credential } : {}),
+        ...othersOf((o as { others?: unknown }).others),
         version: typeof o.version === 'string' ? o.version : 'unknown',
         protocolVersion: o.protocolVersion,
         dataDir: typeof o.dataDir === 'string' ? o.dataDir : '',
@@ -158,6 +180,16 @@ export function parseConnectionLine(stdout: string, spec?: RemoteSpec): Connecti
     }
   }
   throw new Error(`The remote did not print a connection line; its Centralu may predate \`${shimNames(spec).centralu} serve\` (update it there: ${npmInstall(spec)})`)
+}
+
+/** The `others` field (#1405), entry by entry: an entry of the wrong shape is left out */
+function othersOf(raw: unknown): { others?: RemoteCredential[] } {
+  if (!Array.isArray(raw)) return {}
+  const others = raw.flatMap((e: unknown) => {
+    const o = asObj(e)
+    return typeof o.id === 'string' && typeof o.label === 'string' ? [{ id: o.id.slice(0, 16), label: o.label.slice(0, 64), created: typeof o.created === 'number' && Number.isFinite(o.created) ? o.created : 0 }] : []
+  })
+  return { others: others.slice(0, 32) }
 }
 
 /** The `stopped` field, field by field: any object there is a stop; its `by` and `at` only as the words they can be */
@@ -252,7 +284,7 @@ export class DirectTunnel implements Tunnel {
   constructor(private readonly line: () => ConnectionLine | Promise<ConnectionLine>) {}
   async open(): Promise<Endpoint> {
     const line = await this.line()
-    return { url: `ws://127.0.0.1:${line.port}`, token: line.token, line, localPort: line.port }
+    return { url: `ws://127.0.0.1:${line.port}`, token: line.token ?? '', line, localPort: line.port }
   }
   onDown(): void {}
   async close(): Promise<void> {}
@@ -497,8 +529,22 @@ export const NOT_FOUND = 'CENTRALU-NOT-FOUND'
  * A POSIX remote runs the lookup under `sh -c`, so a login shell that is not POSIX (fish) runs it
  * too. `command`, the person's own (`RemoteSpec.command`), runs as given, with no fallback.
  */
-export function connectionCommand(spec: RemoteSpec): string {
-  return remoteCommand(spec, 'serve --connection')
+export function connectionCommand(spec: RemoteSpec, pair: string | null = null): string {
+  return remoteCommand(spec, pair ? `serve --connection --pair ${pair}` : 'serve --connection')
+}
+
+/** A hub's key for its pair label (#1405, `SshTunnelOptions.hubKey`): 8 hex characters of its data folder's SHA-256 */
+export function hubKeyOf(dataDir: string): string {
+  return createHash('sha256').update(dataDir).digest('hex').slice(0, 8)
+}
+
+/**
+ * The label a hub pairs as (#1405): `hub:` and this computer's name, cleaned as `--from` is (`hubNameForRemote`). A
+ * hub pairs again at each link and so replaces its own credential there; the machine's other ones keep their labels.
+ */
+export function pairLabel(name: string, hubKey?: string): string {
+  const key = hubKey && /^[0-9a-f]{1,16}$/.test(hubKey) ? `-${hubKey}` : ''
+  return `hub:${(hubNameForRemote(name) ?? 'hub').slice(0, 56)}${key}`
 }
 
 /**
@@ -546,6 +592,7 @@ function remoteCommand(
     | 'serve --connection'
     | 'serve --detach'
     | `serve --detach --from ${string}`
+    | `serve --connection --pair ${string}`
     | 'serve --stop'
     | 'serve'
     | 'serve --autostart on'
@@ -621,6 +668,12 @@ export type SshTunnelOptions = {
   stdinAckMs?: number
   /** This computer's name, for `serve --detach --from` (#1223); the OS's host name when absent */
   hubName?: string
+  /**
+   * What tells this hub from another of the same name (#1405): its data folder, hashed (`hubKeyOf`). It ends the label
+   * the hub pairs as, so two hubs on computers of one name (or a packaged app and a development host on one computer)
+   * do not replace each other's credential at each link
+   */
+  hubKey?: string
   log?: (line: string) => void
 }
 
@@ -683,7 +736,7 @@ export class SshTunnel implements Tunnel {
     this.ifClosed()
     this.takesFrom = line.takes?.includes('from') === true
     if (!line.hostRunning && !this.linkBound) {
-      return { url: '', token: line.token, line, localPort: 0 }
+      return { url: '', token: line.token ?? '', line, localPort: 0 }
     }
     // A link-bound host is started by the forward itself (`startHost`), so it is not running yet here
     const hosting = !line.hostRunning
@@ -702,7 +755,7 @@ export class SshTunnel implements Tunnel {
       this.ifClosed()
     }
     const served = hosting ? await this.untilServing() : line
-    return { url: `ws://127.0.0.1:${localPort}`, token: served.token, line: served, localPort }
+    return { url: `ws://127.0.0.1:${localPort}`, token: served.token ?? '', line: served, localPort }
   }
 
   /**
@@ -859,10 +912,30 @@ export class SshTunnel implements Tunnel {
     return this.opts.configFile ? ['-F', this.opts.configFile] : []
   }
 
+  /** An older remote refused `--pair` once (#1405): asked without it from then on, for this tunnel's life */
+  private pairs = true
+
   private async connectionLine(): Promise<ConnectionLine> {
     const remote = this.opts.remote ?? { shell: 'posix' }
     const base = [...this.config(), '-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '--', this.opts.target]
-    const r = await this.run([...base, connectionCommand(remote)], undefined, this.opts.commandTimeoutMs ?? SSH_COMMAND_TIMEOUT_MS)
+    /*
+     * A full credential of this hub's own, made there at each link (#1405): `--connection` alone prints none since. A
+     * remote from before it answers `--pair` with "unknown option", and is asked again as before, printing its token
+     */
+    const pair = this.pairs ? pairLabel(this.opts.hubName ?? hostname(), this.opts.hubKey) : null
+    let r = await this.run([...base, connectionCommand(remote, pair)], undefined, this.opts.commandTimeoutMs ?? SSH_COMMAND_TIMEOUT_MS)
+    if (pair && r.code !== 0 && r.code !== 255 && /unknown option for serve: --pair/.test(r.stderr + r.stdout)) {
+      this.pairs = false
+      r = await this.run([...base, connectionCommand(remote)], undefined, this.opts.commandTimeoutMs ?? SSH_COMMAND_TIMEOUT_MS)
+    }
+    /*
+     * A remote updated since it refused `--pair` says it takes it now, and prints no token without it: asked again with
+     * it, once, rather than linking with no credential until this hub restarts (#1405 review)
+     */
+    if (!this.pairs && r.code === 0 && /"takes":\[[^\]]*"pair"/.test(r.stdout) && !/"token":/.test(r.stdout)) {
+      this.pairs = true
+      return this.connectionLine()
+    }
     if (r.code === 255) throw new Error(`ssh could not reach ${this.opts.target}: ${lastLine(r.stderr) || 'no answer'}`)
     if (r.stdout.includes(NOT_FOUND) || (r.code === 127 && !remote.command)) throw notInstalled(this.where, remote)
     try {

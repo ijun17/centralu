@@ -24,14 +24,14 @@
  * (`serve-autostart.mjs`), Windows, WSL and PowerShell (`serve-windows.mjs`), and small helpers
  * (`serve-util.mjs`).
  */
-export { SERVE_STATE_FILE, SERVE_LOG_FILE, SERVE_PID_FILE, serveDataDir, readServeState, ensureServeState, recordServePort, rotateServeToken, heldHere, lockHolderIsAlive, processStartTime, lockHolder, lockHolderPid, readServePid, SERVE_STOPPED_FILE, SERVE_LOGS_KEPT, markStopped, readStopped, rotateServeLog } from './serve-files.mjs'
+export { SERVE_STATE_FILE, SERVE_LOG_FILE, SERVE_PID_FILE, serveDataDir, readServeState, ensureServeState, recordServePort, rotateServeToken, pairServe, revokeServe, verifierOf, limitedOf, legacyHostTokenOf, changeServeState, heldHere, lockHolderIsAlive, processStartTime, lockHolder, lockHolderPid, readServePid, SERVE_STOPPED_FILE, SERVE_LOGS_KEPT, markStopped, readStopped, rotateServeLog } from './serve-files.mjs'
 export { detachHow, windowsArg, wmiScript, parseWmiAnswer, wmiBlockedMessage, windowsPowershell, ownLogon } from './serve-windows.mjs'
 export { DEFAULT_SERVE_PORT, SERVE_PORT_TRIES, chooseServePort, listensHere, parseNetstatListening } from './serve-port.mjs'
-export { SERVE_HELP, AUTOSTART_ACTIONS, parseServeArgs } from './serve-args.mjs'
+export { SERVE_HELP, AUTOSTART_ACTIONS, parseServeArgs, PAIR_LABEL_RE, CREDENTIAL_ID_RE } from './serve-args.mjs'
 export { launcherScript, ensureLauncher, remoteLayout, parsePointer, installInfo, managedLauncherScript } from './serve-install.mjs'
-export { protocolVersionOf, connectionLine, hostEnv, hostCommand, readyPort, mismatchServerVersion, hostProvesOf, probeHost, askHostToStop, askHostRpc, serveFrom, takesTokenOnStdin, tokenLine } from './serve-host.mjs'
+export { protocolVersionOf, connectionLine, hostEnv, hostCommand, readyPort, mismatchServerVersion, hostProvesOf, probeHost, askHostToStop, askHostRpc, serveFrom, takesTokenOnStdin, tokenLine, keyLine, takesVerifiers, ownCredentials } from './serve-host.mjs'
 export { stopServedHost, moveIntoSignIn, HANDOVER_WAIT_MS } from './serve-handover.mjs'
 export { runWindow } from './serve-window.mjs'
 export { AUTOSTART_FILE, AUTOSTART_ENV, autostartHow, autostartUnsupported, pathKey, autostartName, autostartLauncher, systemdUnit, taskActionScript, taskScript, parseTaskAnswer, readAutostartMark, autostartInfo, lingerMessage, runAutostart, startInSignIn } from './serve-autostart.mjs'
-export { printConnection, runServe, rotateToken } from './serve-run.mjs'
+export { printConnection, runServe, rotateToken, revokeCredential } from './serve-run.mjs'
 export { CARRIED_ENV, encodeChildSpec, decodeChildSpec, startDetached, runDetach, runDetachedChild, runStop } from './serve-detach.mjs'
