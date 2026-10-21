@@ -278,10 +278,10 @@ export const statLine = (s) => `${s.file} ${s.added === null ? '(binary)' : `+${
  * shim (pnpm, npx) cannot be started that way, so one that is not found is tried once more through
  * cmd.exe, with its arguments quoted; the list is project.json's, never input from outside.
  */
-function run(cwd, argv, timeoutMs) {
+function run(cwd, argv, timeoutMs, extraEnv = {}) {
   const once = (file, args, extra = {}) =>
     new Promise((resolve, reject) => {
-      execFile(file, args, { cwd, timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024, env: commandEnv(), ...extra }, (error, stdout, stderr) => {
+      execFile(file, args, { cwd, timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024, env: { ...commandEnv(), ...extraEnv }, ...extra }, (error, stdout, stderr) => {
         if (!error) return resolve()
         error.stderr = String(stderr ?? '')
         error.stdout = String(stdout ?? '')
@@ -466,7 +466,8 @@ export async function mergeMain({ repo, pr, defaultBranch, dir, conflicts, renew
         if (!lockfileOnly) await prepare()
         if (install && !lockfileOnly && modules === 'linked') continue
         try {
-          await run(tmp, argv, timeoutMs)
+          // CC_LINT_BASE: the lint allowlist check compares with main's lists at the tip just fetched (#1423), not an `origin/main` the checkout may not have
+          await run(tmp, argv, timeoutMs, { CC_LINT_BASE: mainTip })
         } catch (e) {
           await git(tmp, ['merge', '--abort']).catch(() => {})
           return handoff(`The queue merged ${defaultBranch} into ${branch} itself and could not regenerate ${listSome(files, 6)}: ${failure(argv, e, timeoutMs)}. It pushed nothing.`, files)

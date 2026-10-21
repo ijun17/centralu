@@ -330,7 +330,8 @@ the git work; `onConflict` in `queue-driver.mjs` decides, once per head.
   requests that each lower counts in the same list conflict once the first lands. The queue takes
   main's version, runs `pnpm lint:tighten` (which lowers every line to what the merged tree holds),
   then the allowlist check (`tooling/type-aware-lint.test.ts`: lists sorted, and no line new or higher
-  than main's), and pushes only if both pass. A finding the merged tree has beyond the lists, or a failing
+  than main's, compared with the tip the queue just fetched: `CC_LINT_BASE`), and pushes only if both pass. `lint:tighten` lowers every
+  list the merged tree no longer needs, so the merge commit may carry a lowering in a list that did not conflict. A finding the merged tree has beyond the lists, or a failing
   check, fails the command, and the conflict goes to the author as any other. A conflict in a list and in
   code goes to the author without running anything.
 - **Mechanical files**: when every conflicted file is named by an entry of `project.json`

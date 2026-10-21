@@ -2090,10 +2090,10 @@ describe('the merge queue resolves a conflict with main itself, or hands it to t
           `const rec = (o) => fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify(o) + '\\n')`,
           'const args = process.argv.slice(2)',
           `if (args[0] === 'lint:tighten') {`,
-          `  rec({ args, list: fs.readFileSync(${JSON.stringify(LIST)}, 'utf8') })`,
+          `  rec({ args, list: fs.readFileSync(${JSON.stringify(LIST)}, 'utf8'), base: process.env.CC_LINT_BASE })`,
           `  fs.writeFileSync(${JSON.stringify(LIST)}, 'tightened\\n')`,
           `} else if (args[0] === 'exec') {`,
-          `  rec({ args, list: fs.readFileSync(${JSON.stringify(LIST)}, 'utf8') })`,
+          `  rec({ args, list: fs.readFileSync(${JSON.stringify(LIST)}, 'utf8'), base: process.env.CC_LINT_BASE })`,
           `  if (fs.existsSync(${JSON.stringify(join(root, 'allowlist-check-fails'))})) { process.stderr.write('allowlist check failed: a line is higher than main\\n'); process.exit(1) }`,
           '} else rec({ args })',
         ].join('\n'),
@@ -2113,6 +2113,8 @@ describe('the merge queue resolves a conflict with main itself, or hands it to t
       // lint:tighten started from main's version, not the branch's, and the check ran on what it wrote
       expect(pnpmCalls()[1].list).toBe('main moved\n')
       expect(pnpmCalls()[2].list).toBe('tightened\n')
+      // The check compares with the main tip the queue just fetched, whatever refs the checkout has
+      expect(pnpmCalls().slice(1).map((c) => c.base)).toEqual([repo.main, repo.main])
       const tip = tipOf(repo, 77)
       expect(g(repo.origin, 'show', `${tip}:${LIST}`)).toBe('tightened')
       expect(g(repo.origin, 'rev-list', '--parents', '-n', '1', tip).split(' ').slice(1)).toEqual([repo.heads[77], repo.main])
