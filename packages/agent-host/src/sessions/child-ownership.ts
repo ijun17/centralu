@@ -160,7 +160,7 @@ export type OwnerMove = {
   queued: boolean
 }
 
-type OwnershipStore = Pick<Store, 'children' | 'settings'>
+type OwnershipStore = Pick<Store, 'children' | 'settings' | 'mail'>
 
 /**
  * Who owns a child session's work (#428): the report a child owes and to whom, a report paused over the child's own
@@ -383,6 +383,18 @@ export class ChildOwnership {
       const paused = readPausedTasks(this.store.settings.appSetting(pausedReportKey(mark.sessionId)))
       if (kept && (inTurn(child.state) || paused)) {
         this.adoptReport(mark.sessionId, mark.callerSessionId, paused)
+        continue
+      }
+      /*
+       * A session at rest that waits for threads it handed on (§6) still owes the report: the work is the helpers', which are in the store, and
+       * the turn their end starts ends under this host. It needs no process of its own (asleep, or the host was quit): the helper's report
+       * wakes it. The mailbox's hook is not attached yet, so the store is asked
+       */
+      const waiting = child && sessions.has(mark.callerSessionId) && !inTurn(child.state) ? this.store.mail.waitingOnSessions(mark.callerSessionId, mark.sessionId) : 0
+      if (waiting > 0) {
+        // What a process that is gone held (its background work) went with it
+        if (!kept) this.store.settings.deleteAppSetting(pausedReportKey(mark.sessionId))
+        this.adoptReport(mark.sessionId, mark.callerSessionId, kept ? paused : null)
         continue
       }
       if (child && keptSessions?.has(mark.sessionId)) {
