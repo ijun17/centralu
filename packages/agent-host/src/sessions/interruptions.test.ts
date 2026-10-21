@@ -7,6 +7,9 @@ import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 
 import type { AdapterCapabilities, NormalizedEvent, ToolName } from '@cc/protocol'
 import { INTERRUPTED_BY_TOOL, type AgentAdapter, type AgentProcess, type CreateSessionOpts, type EventSink, type SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
+import { PERSON } from '../mail/address.js'
+import { personReportRecorder, personWorkRecorder } from '../mail/delegation.js'
+import { MailService } from '../mail/service.js'
 import { isNetworkFailure, RECONNECTING_FLAG_MS } from './interruptions.js'
 import { SessionManager, type AgentProcessHost } from './manager.js'
 import { eventually } from '../../../../tooling/test-timing.js'
@@ -333,6 +336,39 @@ describe('a turn a quit stopped (#698)', () => {
     expect(last.payload).toMatchObject({ type: 'notice', level: 'warning', from: 'Centralu' })
     expect(JSON.stringify(last.payload)).toContain('Centralu quit or restarted while this turn was running')
     expect(info(b, s.id).lastSeq).toBe(last.seq)
+  })
+
+  it('work the person owns (a script started the session, §8.1): the next start reports the quit to their Inbox and closes the thread', async () => {
+    const a = host()
+    const project = await a.mgr.addProject(root)
+    const s = await a.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })
+    const mail = new MailService(store.mail, { hostId: () => 'hub-aaaaaaaa' })
+    personWorkRecorder(mail, () => ({ projectId: project.id, depth: 0 }))(s.id, 'a long job')
+    await a.mgr.send(s.id, 'a long job')
+    expect(mail.personOwes(mail.sessionAddress(s.id))).toBe(true)
+
+    const b = host()
+    // The mailbox is wired in the same tick as the host is made, before the start's first moment
+    b.mgr.useMail({
+      sessionGone: () => {},
+      sessionChanged: () => {},
+      sessionEvent: () => {},
+      personWork: {
+        started: personWorkRecorder(mail, () => ({ projectId: project.id, depth: 0 })),
+        owes: (id) => mail.personOwes(mail.sessionAddress(id)),
+        report: personReportRecorder(mail, store.mail),
+      },
+    })
+    const thread = () => store.mail.latestBetween(PERSON, mail.sessionAddress(s.id))!
+    await eventually(() => thread().state === 'review')
+    const report = store.mail.messagesAfter(thread().id, 0).find((m) => m.sender === 'centralu' && m.kind === 'report')!
+    expect(report.facts).toMatchObject({ outcome: 'quit' })
+    expect(report.body).toContain('Centralu quit or restarted during its turn')
+    expect(mail.personOwes(mail.sessionAddress(s.id))).toBe(false)
+    // The start after that finds the session at rest and says nothing more
+    host()
+    await startNoticesRan()
+    expect(store.mail.messagesAfter(thread().id, 0).filter((m) => m.sender === 'centralu' && m.kind === 'report')).toHaveLength(1)
   })
 
   it('a session at rest is left alone by the next start', async () => {

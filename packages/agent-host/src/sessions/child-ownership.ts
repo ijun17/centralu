@@ -162,6 +162,9 @@ export type OwnerMove = {
 
 type OwnershipStore = Pick<Store, 'children' | 'settings' | 'mail'>
 
+/** The end of a turn of work the person owns, as the mailbox takes it (§8.1): Centralu's words, the session's own beside them, and where the thread goes */
+export type PersonReportDraft = { outcome: string; body: string; answer?: string; error?: string; paused?: number; then: 'review' | 'running' }
+
 /**
  * Who owns a child session's work (#428): the report a child owes and to whom, a report paused over the child's own
  * background work, the turn another session gave it, the requests held for it while it is busy, the delegations and
@@ -295,6 +298,47 @@ export class ChildOwnership {
     } catch (e) {
       console.error(`[mail] could not count the work ${childId.slice(0, 8)} handed on (${errorMessage(e)})`)
       return 0
+    }
+  }
+
+  /**
+   * The mailbox's way of keeping work the person owns (§8.1): a session a script or the RPC started with a first message. `started` writes it down
+   * before the message goes in, `owes` says whether the person has work with the session whose turns are reported, `report` posts a turn's end in
+   * the person's thread. Set by the host when it has a mailbox
+   */
+  private personWork:
+    | { started(sessionId: string, text: string): void; owes(sessionId: string): boolean; report(sessionId: string, draft: PersonReportDraft): boolean }
+    | undefined
+  onPersonWork(hooks: ChildOwnership['personWork']): void {
+    this.personWork = hooks
+  }
+
+  /** A script or the RPC starts `sessionId` with `text`: the person owns the work. Never throws */
+  startedForPerson(sessionId: string, text: string): void {
+    try {
+      this.personWork?.started(sessionId, text)
+    } catch (e) {
+      console.error(`[mail] could not write down the work started in ${sessionId.slice(0, 8)} for the person (${errorMessage(e)})`)
+    }
+  }
+
+  /** Whether the person has work with `sessionId` whose turn is reported to them; false with no mailbox. Never throws */
+  personOwes(sessionId: string): boolean {
+    try {
+      return this.personWork?.owes(sessionId) ?? false
+    } catch (e) {
+      console.error(`[mail] could not read the work of the person in ${sessionId.slice(0, 8)} (${errorMessage(e)})`)
+      return false
+    }
+  }
+
+  /** The end of a turn of work the person owns, in their thread; false when it was not taken. Never throws */
+  reportedToPerson(sessionId: string, draft: PersonReportDraft): boolean {
+    try {
+      return this.personWork?.report(sessionId, draft) ?? false
+    } catch (e) {
+      console.error(`[mail] could not report the work of ${sessionId.slice(0, 8)} to the person (${errorMessage(e)})`)
+      return false
     }
   }
 

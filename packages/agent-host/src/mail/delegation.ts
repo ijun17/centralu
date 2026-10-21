@@ -1,3 +1,4 @@
+import { CENTRALU, PERSON } from './address.js'
 import type { ThreadOrigin } from '../dev-services/store/mail.js'
 import type { MailRecords } from '../dev-services/store/mail.js'
 import { refusalReason } from './rules.js'
@@ -28,6 +29,53 @@ export function delegationRecorder(
       depth: sessionOf(childId)?.depth ?? 0,
     })
     turns?.attach(childId, thread.id, callerId)
+  }
+}
+
+/**
+ * A session a script or the RPC started with a first message (`create_session` by a connection with the limited credential, §8.1): the work is the
+ * person's, whose Inbox the report lands in. Written before the first message goes in, so the turn it starts is reported
+ */
+export function personWorkRecorder(
+  mail: MailService,
+  sessionOf: (id: string) => { projectId?: string | null; depth?: number } | undefined,
+): (sessionId: string, text: string) => void {
+  return (sessionId, text) => {
+    mail.recordDelegation(PERSON, {
+      assignee: mail.sessionAddress(sessionId),
+      task: text,
+      origin: 'create_session',
+      projectId: sessionOf(sessionId)?.projectId || null,
+      depth: sessionOf(sessionId)?.depth ?? 0,
+    })
+  }
+}
+
+/** The end of a turn of work the person owns is a report in their thread (Centralu's words, the session's own beside them), and the thread goes where the draft says */
+export function personReportRecorder(mail: MailService, records: MailRecords): (sessionId: string, draft: Pick<ReportDraft, 'outcome' | 'body' | 'answer' | 'error' | 'paused' | 'then'>) => boolean {
+  return (sessionId, draft) => {
+    const assignee = mail.sessionAddress(sessionId)
+    const thread = records.latestBetween(PERSON, assignee)
+    if (!thread || thread.state !== 'running') return false
+    // The same pause on the same background work is said once: a second turn that leaves as many tasks running tells the person nothing new
+    const last = draft.then === 'running' && draft.paused ? records.lastReportBy(thread.id, CENTRALU) : undefined
+    if (last && last.facts.outcome === 'paused' && last.facts.paused === draft.paused) return true
+    try {
+      mail.reportTurn(thread.id, {
+        to: PERSON,
+        about: assignee,
+        outcome: draft.outcome,
+        body: draft.body,
+        ...(draft.answer ? { answer: draft.answer } : {}),
+        ...(draft.error ? { error: draft.error } : {}),
+        ...(draft.paused ? { paused: draft.paused } : {}),
+        then: draft.then,
+      })
+      return true
+    } catch (e) {
+      if (refusalReason(e) !== undefined) return false
+      throw e
+    }
   }
 }
 
@@ -81,12 +129,17 @@ export function turnRecorder(mail: MailService, records: MailRecords, turns: Mai
   return (sessionId, turn) => {
     const thread = turn.ownerId && (turn.by === 'work' || turn.added) ? records.latestBetween(mail.sessionAddress(turn.ownerId), mail.sessionAddress(sessionId)) : undefined
     const threadId = thread && thread.state !== 'done' ? thread.id : null
+    const personWork = (): string | null => {
+      const mine = turn.ownerId ? undefined : records.latestBetween(PERSON, mail.sessionAddress(sessionId))
+      return mine?.state === 'running' ? mine.id : null
+    }
     if (turn.by === 'person') turns.beginOther(sessionId, 'person', null)
     else if (turn.added) turns.beginOther(sessionId, 'person', threadId, turn.ownerId)
     // A report or notice about another session starts a turn of its own kind, not of a caller's send (§6 keeps `caller` for that)
     else if (turn.source === 'report') turns.beginOther(sessionId, 'report', null)
     else if (turn.source === 'app') turns.beginOther(sessionId, 'app', null)
-    else turns.beginOther(sessionId, turn.cli ? 'cli' : 'caller', threadId, turn.ownerId)
+    // The turn the person's own work starts (§8.1) is that thread's: work handed on in it is a child thread of it, and its end waits for that work (§6)
+    else turns.beginOther(sessionId, turn.cli ? 'cli' : 'caller', threadId ?? personWork(), turn.ownerId)
   }
 }
 

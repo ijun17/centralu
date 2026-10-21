@@ -1077,6 +1077,15 @@ export class MailService {
   }
 
   /**
+   * Whether the person has work with this session that its turns are reported on: a thread of theirs that is `running` (§8.1). A script or the RPC
+   * started the session with a first message; the first turn that is the work's closes it into `review`, and the turns after it are the person's own
+   */
+  personOwes(assignee: string): boolean {
+    const thread = this.records.latestBetween(PERSON, assignee)
+    return thread !== undefined && thread.state === 'running'
+  }
+
+  /**
    * A call returned the answer a report told of (§8.1): the caller read it, so the reports of this thread waiting for `owner` are read and
    * handled, and no wake follows for news the call already gave. The threads of the pair that a delegation tool opened; other mail is left
    */
@@ -1417,7 +1426,8 @@ export class MailService {
   recordDelegation(caller: string, input: DelegationInput): DelegationResult {
     const owner = this.party(caller)
     const assignee = this.party(input.assignee)
-    if (owner.kind !== 'session' || assignee.kind !== 'session') throw refuse('bad_address', 'a delegation is between two sessions of this host')
+    // Between two sessions of this host, or the person and a session (a script or the RPC started it with a first message: the person owns the work)
+    if ((owner.kind !== 'session' && owner.kind !== 'person') || assignee.kind !== 'session') throw refuse('bad_address', 'a delegation is between two sessions of this host, or from the person to one')
     if (caller === input.assignee) throw refuse('bad_value', 'the owner and the assignee of a thread are two parties')
     if (!THREAD_ORIGINS.includes(input.origin)) throw refuse('bad_value', `unknown origin ${String(input.origin)}`)
     const limit = bodyLimit('session')

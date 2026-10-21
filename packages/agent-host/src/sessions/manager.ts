@@ -37,7 +37,7 @@ import { ApprovalRules } from './approval-rules.js'
 import { ProjectRegistry, type ProjectRegistryHost } from './project-registry.js'
 import { LaunchInputs, type LaunchInputsHost } from './launch-inputs.js'
 import { SessionLayout, type SessionLayoutHost } from './session-layout.js'
-import { ChildOwnership, PAUSED_REPORT_SETTLE_MS } from './child-ownership.js'
+import { ChildOwnership, PAUSED_REPORT_SETTLE_MS, type PersonReportDraft } from './child-ownership.js'
 import { LinkedReports, type LinkedReportsHost } from './linked-reports.js'
 import { OrchestratorSlot, type OrchestratorSlotHost } from './orchestrator-slot.js'
 import { LinkedHost, type LinkedHostHost } from './linked-host.js'
@@ -95,6 +95,12 @@ export type MailHooks = {
   delegated?(callerId: string, childId: string, origin: ThreadOrigin, task: string): void
   /** How many threads a session handed on in the work it does for another are still going (§6) */
   waitingOn?(ownerId: string, childId: string): number
+  /** A script or the RPC started a session with a first message: the work is the person's (§8.1) */
+  personWork?: {
+    started(sessionId: string, text: string): void
+    owes(sessionId: string): boolean
+    report(sessionId: string, draft: PersonReportDraft): boolean
+  }
   /** A session deleted the session that did work it gave (§3.3): a thread whose work was reported is closed */
   finishedWith?(callerId: string, childId: string): void
   /** A turn of delegated work ended, or the person took the session over (§6, §8.1): the report goes in the thread, and the mailbox tells the owner when it can */
@@ -306,6 +312,8 @@ export class SessionManager {
   private turnObservers = new Map<string, Set<AgentRunWait>>()
   /** Turns a quit cut, and who to tell, waiting for the start to finish (#698, `tellQuitNotices`) */
   private quitNotices: { sessionId: string; requester: string; swapped?: true }[] = []
+  /** Sessions this start found mid-turn with no process: the person is told of the ones whose work is theirs (§8.1), once the mailbox is wired */
+  private quitPersonWork: string[] = []
   /** `disposeAll` has begun (#673): a card it withdraws is not the person's answer, and its request stays stored */
   private disposing = false
   /**
@@ -447,6 +455,7 @@ export class SessionManager {
      *
      * A requester the same quit cut is skipped when the notice is given (`tellAskerOfInterruption`, its `quit`).
      */
+    this.quitPersonWork = stoppedByQuit.map((s) => s.id)
     const marks = new Map(store.children.listReportMarks().map((r) => [r.sessionId, r.callerSessionId]))
     const turnGivers = new Map(store.children.listDelegatedTurns().map((r) => [r.sessionId, r.callerSessionId]))
     for (const s of stoppedByQuit) {
@@ -469,7 +478,7 @@ export class SessionManager {
       }, 0)
     }
     // A requester the keeper kept is told once it is adopted (`adoptKept`), so the note does not start a second process
-    if (this.quitNotices.length) setTimeout(() => this.tellQuitNotices((id) => !keeperOpts.keptSessions?.has(id)), 0)
+    if (this.quitNotices.length || this.quitPersonWork.length) setTimeout(() => this.tellQuitNotices((id) => !keeperOpts.keptSessions?.has(id)), 0)
     /*
      * Sweeps orphaned handoff notes (#106). **Why startup is a safe moment for this**: no handoff is
      * in progress right now — a note being read mid-flight cannot be cleaned up out from under
@@ -846,6 +855,7 @@ export class SessionManager {
     this.mailHooks = hooks
     this.children.onDelegated(hooks.delegated ? (callerId, childId, origin, task) => hooks.delegated?.(callerId, childId, origin, task) : undefined)
     this.children.onWaitingOn(hooks.waitingOn ? (ownerId, childId) => hooks.waitingOn?.(ownerId, childId) ?? 0 : undefined)
+    this.children.onPersonWork(hooks.personWork)
     this.children.onFinishedWith(hooks.finishedWith ? (callerId, childId) => hooks.finishedWith?.(callerId, childId) : undefined)
     this.reports.useMail(hooks.report ? (ownerId, childId, draft) => hooks.report?.(ownerId, childId, draft) ?? 'none' : undefined)
     this.children.onAnswered(hooks.answered ? (callerId, childId, how) => hooks.answered?.(callerId, childId, how) : undefined)
@@ -992,7 +1002,11 @@ export class SessionManager {
             // Whose the turn was (#1377): the person's is reported to nobody
             const turnBy = this.children.turnEnded(m.id, null)
             if (this.children.awaitingReport.has(m.id)) void this.reports.reportBackIfAwaited(m.id, { type: 'state_change', sessionId: m.id, state: 'idle' }, undefined, undefined, turnBy)
-            else if (turnBy.by !== 'person') void this.reports.tellAskerOfInterruption(m.id, this.children.turnOwners.get(m.id)?.callerId)
+            else {
+              if (turnBy.by !== 'person') void this.reports.tellAskerOfInterruption(m.id, this.children.turnOwners.get(m.id)?.callerId)
+              // The work the person owns: the same end, in their Inbox (§8.1)
+              void this.reports.reportToPersonIfOwed(m.id, { type: 'state_change', sessionId: m.id, state: 'idle' }, undefined, turnBy)
+            }
           } else if (this.children.pausedReports.has(m.id)) {
             // The background work its report waited on went with the process (#721): the work stopped
             void this.reports.reportBackIfAwaited(m.id, { type: 'state_change', sessionId: m.id, state: 'idle' })
@@ -1006,10 +1020,20 @@ export class SessionManager {
     this.tellQuitNotices(() => true)
   }
 
+  /** A turn a quit cut in a session whose work the person owns: reported to them. */
+  private tellPersonOfInterruption(sessionId: string): void {
+    if (!this.meta.has(sessionId)) return
+    void this.reports.reportToPersonIfOwed(sessionId, { type: 'state_change', sessionId, state: 'idle' })
+  }
+
   /** Tells each requester of a turn a quit cut, once (#698); `ready` holds back one the keeper still has to hand over */
   private tellQuitNotices(ready: (requester: string) => boolean): void {
     // A host stopping before its first moment tells nobody; the next start does not repeat it either (the reset is done)
     if (this.disposing || this.handingOver) return
+    // The work the person owns (a script started the session, §8.1): the turn a quit cut is reported to their Inbox as it ended
+    const person = this.quitPersonWork
+    this.quitPersonWork = []
+    for (const id of person) this.tellPersonOfInterruption(id)
     const now = this.quitNotices.filter((n) => ready(n.requester))
     this.quitNotices = this.quitNotices.filter((n) => !ready(n.requester))
     for (const n of now) void (n.swapped ? this.reports.tellTurnEndedInSwap(n.sessionId, n.requester) : this.reports.tellAskerOfInterruption(n.sessionId, n.requester))
