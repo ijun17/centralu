@@ -457,6 +457,13 @@ export class MailDelivery {
     const deliveredAt = this.now()
     delivered.at = deliveredAt
     this.records.transaction(() => {
+      // A turn it started has begun (no work thread, no move, for mail that starts none): the thread it is the work of is running from here (§3.3)
+      try {
+        this.service.turnStarted(recipient, drained.workThread, drained.messageIds)
+      } catch (e) {
+        // The input is in: a failure here must not roll the delivery back and send it twice (§7.6.5)
+        console.error(`[mail] could not move the thread of a turn that began in ${sessionId.slice(0, 8)} (${errorMessage(e)})`)
+      }
       // Told of and held is not read: the person finds it in the Inbox, with Release, until they have seen it
       const heldIds = new Set(drained.quieted.map((q) => q.messageId))
       this.records.markDelivered(recipient, drained.messageIds, drained.inline.filter((id) => !heldIds.has(id)), deliveredAt)

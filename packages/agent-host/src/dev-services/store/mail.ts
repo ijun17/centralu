@@ -406,12 +406,20 @@ export class MailRecords {
 
   /**
    * The threads opened in the work of `parentId` that are going (`open`, `running`, `blocked`, with someone on them): the work it handed on and
-   * waits for (§6). A thread with nobody on it (its helper was archived or deleted) is not work going: no one is doing it, and the parent would wait for ever
+   * waits for (§6). A thread with nobody on it (its helper was archived or deleted) is not work going: no one is doing it, and the parent would wait for ever.
+   * So is one in `review` that its owner or the person sent more into, which its assignee has not yet taken: it runs when the turn that mail starts
+   * begins (`MailService.turnStarted`, 3.10), and until then the work is still going
    */
   openChildren(parentId: string): ThreadRow[] {
     const rows = this.db
       .prepare<[string], ThreadSql>(
-        `SELECT * FROM mail_threads WHERE parent_id = ? AND assignee IS NOT NULL AND state IN ('open', 'running', 'blocked') ORDER BY created_at, id`,
+        `SELECT t.* FROM mail_threads t WHERE t.parent_id = ? AND t.assignee IS NOT NULL AND (
+            t.state IN ('open', 'running', 'blocked')
+            OR (t.state = 'review' AND EXISTS (
+              SELECT 1 FROM mail_receipts r JOIN mail_messages m ON m.id = r.message_id
+               WHERE m.thread_id = t.id AND r.recipient = t.assignee AND r.read_at IS NULL AND (r.held IS NULL OR r.held = 'released')
+                 AND m.kind IN ('note', 'question', 'answer', 'assign') AND (m.sender = t.owner OR m.sender = 'person')))
+          ) ORDER BY t.created_at, t.id`,
       )
       .all(parentId)
     return rows.map(toThread)

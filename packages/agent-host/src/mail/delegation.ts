@@ -207,6 +207,9 @@ export function reportRecorder(mail: MailService, records: MailRecords): (ownerI
       // The session's own words: the last response a report carried is in the thread as its message too, and is not it closing the work
       const theirs = records.lastWordBy(thread.id, child)
       const ours = records.lastBy(thread.id, owner)
+      // The person closed it and the owner was told (3.10): the end of the turn that was still going is not a second word
+      const closed = records.lastReportBy(thread.id, CENTRALU)
+      if (closed?.facts.closedBy === 'person' && closed.seq > (ours?.seq ?? 0)) return 'closed'
       return theirs?.kind === 'report' && theirs.seq > (ours?.seq ?? 0) ? 'closed' : 'none'
     }
     if (draft.archiving) return 'closed'

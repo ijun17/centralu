@@ -248,8 +248,10 @@ describe('how a thread’s state moves (§3.3)', () => {
 
     expect(mail.update(thread.id, S2, { state: 'running' })).toMatchObject({ state: 'running', rev: 1 })
     expect(mail.update(thread.id, S2, { state: 'review' }).state).toBe('review')
-    // The owner sends more: running again, and the history says so
-    mail.post(thread.id, S1, { kind: 'note', body: 'one more thing' })
+    // The owner sends more: running again once the turn it starts begins (3.10), and the history says so
+    const more = mail.post(thread.id, S1, { kind: 'note', body: 'one more thing' })
+    expect(mail.read(thread.id, S1, { peek: true }).thread.state).toBe('review')
+    mail.turnStarted(S2, thread.id, [more.message.id])
     expect(mail.read(thread.id, S1, { peek: true }).thread.state).toBe('running')
     mail.update(thread.id, S2, { state: 'review' })
     const closed = mail.update(thread.id, S1, { state: 'done', outcome: 'finished' })
@@ -263,6 +265,76 @@ describe('how a thread’s state moves (§3.3)', () => {
       [CENTRALU, 'running', 'review'],
       [CENTRALU, 'review', 'done'],
     ])
+  })
+
+  it('the move to running is the turn’s beginning (3.10): the assignee’s, the work thread’s, and only for mail that gives it work', () => {
+    const { mail, records } = setup()
+    const { thread } = openBy(mail, assignInput())
+    mail.update(thread.id, S2, { state: 'running' })
+    mail.update(thread.id, S2, { state: 'review' })
+    mail.addMember(thread.id, S1, S3)
+    const note = mail.post(thread.id, S1, { kind: 'note', body: 'one more thing' })
+    const aside = mail.post(thread.id, S3, { kind: 'note', body: 'an aside from a member' })
+    expect(records.thread(thread.id)?.state).toBe('review')
+    // Not the assignee's turn, not this thread's, and not mail that gives it work: it stays in review
+    mail.turnStarted(S3, thread.id, [note.message.id])
+    mail.turnStarted(S2, null, [note.message.id])
+    mail.turnStarted(S2, thread.id, [])
+    mail.turnStarted(S2, thread.id, [aside.message.id])
+    expect(records.thread(thread.id)?.state).toBe('review')
+    mail.turnStarted(S2, thread.id, [note.message.id])
+    expect(records.thread(thread.id)).toMatchObject({ state: 'running' })
+    // The person's reply moves a thread in review too; a note into an open one, and anything into a blocked one, does not
+    mail.update(thread.id, S2, { state: 'review' })
+    const reply = mail.post(thread.id, PERSON, { kind: 'note', body: 'also this' })
+    mail.turnStarted(S2, thread.id, [reply.message.id])
+    expect(records.thread(thread.id)?.state).toBe('running')
+    const fresh = openBy(mail, assignInput({ subject: 'fresh' })).thread
+    const noteIn = mail.post(fresh.id, S1, { kind: 'note', body: 'a note before it began' })
+    mail.turnStarted(S2, fresh.id, [noteIn.message.id])
+    expect(records.thread(fresh.id)?.state).toBe('open')
+    mail.update(fresh.id, S2, { state: 'review' })
+    mail.addBlocker(fresh.id, S1, { kind: 'text', text: 'waiting for a design' })
+    const blockedNote = mail.post(fresh.id, S1, { kind: 'note', body: 'while blocked' })
+    mail.turnStarted(S2, fresh.id, [blockedNote.message.id])
+    expect(records.thread(fresh.id)?.state).toBe('blocked')
+    const events = mail.read(thread.id, S1, { all: true, peek: true }).messages.filter((m) => m.kind === 'event')
+    expect(events.at(-1)?.facts).toMatchObject({ change: 'state', from: 'review', to: 'running', by: CENTRALU, reason: 'turn_started' })
+    // An app has no turns of its own to wait for: a thread opened for one is moved when the owner sends more, as before
+    const forApp = openBy(mail, { by: S1, kind: 'assign', subject: 'for the app', body: 'do it', assignee: APP }).thread
+    mail.update(forApp.id, S1, { state: 'review' })
+    mail.post(forApp.id, S1, { kind: 'note', body: 'one more thing' })
+    expect(records.thread(forApp.id)?.state).toBe('running')
+    // Once running, a second beginning changes nothing
+    const count = events.length
+    mail.turnStarted(S2, thread.id, [note.message.id])
+    expect(mail.read(thread.id, S1, { all: true, peek: true }).messages.filter((m) => m.kind === 'event')).toHaveLength(count)
+  })
+
+  it('the person closing work a session owns tells the owner once, in Centralu’s words; the owner closing its own thread tells nobody (3.10)', () => {
+    const { mail, records, clock } = setup()
+    const dropped = openBy(mail, assignInput()).thread
+    mail.update(dropped.id, PERSON, { state: 'done', outcome: 'dropped' })
+    const told = records.messagesAfter(dropped.id, 0).filter((m) => m.kind === 'report')
+    expect(told).toHaveLength(1)
+    expect(told[0]).toMatchObject({ sender: CENTRALU, facts: { outcome: 'dropped', closedBy: 'person', about: { session: S2 } } })
+    expect(told[0]!.body).toContain('The person dropped this work')
+    expect(records.receiptsOf(told[0]!.id).map((r) => r.recipient)).toEqual([S1])
+    clock.t += 10_000
+    expect(mail.drain(S1, {}).messageIds).toContain(told[0]!.id)
+
+    const done = openBy(mail, assignInput({ subject: 'other' })).thread
+    mail.update(done.id, PERSON, { state: 'done', outcome: 'finished' })
+    expect(records.messagesAfter(done.id, 0).find((m) => m.kind === 'report')).toMatchObject({ body: expect.stringContaining('marked this work done'), facts: { outcome: 'marked_done' } })
+
+    const mine = openBy(mail, assignInput({ subject: 'mine' })).thread
+    mail.update(mine.id, S1, { state: 'done', outcome: 'finished' })
+    expect(records.messagesAfter(mine.id, 0).filter((m) => m.kind === 'report')).toEqual([])
+
+    // Work the person owns has nobody to tell
+    const theirs = openBy(mail, { by: PERSON, kind: 'assign', subject: 'theirs', body: 'go', assignee: S2 }).thread
+    mail.update(theirs.id, PERSON, { state: 'done', outcome: 'dropped' })
+    expect(records.messagesAfter(theirs.id, 0).filter((m) => m.kind === 'report')).toEqual([])
   })
 
   it('who may set which state: the assignee four of them, the owner and the person any, a member none', () => {
@@ -896,14 +968,16 @@ describe('the key that opened a thread and the keys of its posts (R2)', () => {
 })
 
 describe('a reassignment and the person’s own place in a thread', () => {
-  it('giving the thread to the assignee it has keeps running; in review it runs again; to another it is open', () => {
+  it('giving the thread to the assignee it has keeps running; in review it runs again when its turn begins; to another it is open', () => {
     const { mail, records } = setup()
     const { thread } = openBy(mail, assignInput())
     mail.update(thread.id, S2, { state: 'running' })
     mail.assign(thread.id, S1, { assignee: S2, body: 'and this too' })
     expect(records.thread(thread.id)).toMatchObject({ assignee: S2, state: 'running' })
     mail.update(thread.id, S2, { state: 'review' })
-    mail.assign(thread.id, S1, { assignee: S2, body: 'one more thing' })
+    const more = mail.assign(thread.id, S1, { assignee: S2, body: 'one more thing' })
+    expect(records.thread(thread.id)?.state).toBe('review')
+    mail.turnStarted(S2, thread.id, [more.message.id])
     expect(records.thread(thread.id)?.state).toBe('running')
     mail.assign(thread.id, S1, { assignee: S3, body: 'you take it' })
     expect(records.thread(thread.id)).toMatchObject({ assignee: S3, state: 'open' })

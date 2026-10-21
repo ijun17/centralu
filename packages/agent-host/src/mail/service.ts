@@ -572,7 +572,8 @@ export class MailService {
       if (sender.kind === 'person') this.records.putParticipantIfAbsent(thread.id, PERSON, 'member', now)
       const message = this.insertPost(thread.id, caller, input.kind, body, {}, input, now, input.replyTo, reachable)
       let after = thread
-      if (thread.state === 'review' && reopensReview(standing, input.kind)) {
+      // More work for a session moves the thread when the turn it starts begins (`turnStarted`, §3.3); for any other assignee, now
+      if (thread.state === 'review' && reopensReview(standing, input.kind) && !this.assignedToSession(thread)) {
         after = this.moveState(thread, { state: 'running' }, now, { change: 'state', from: 'review', to: 'running', by: caller }, 'The owner sent more: the thread is running again.')
       }
       return { message, thread: after, duplicate: false }
@@ -626,7 +627,7 @@ export class MailService {
       let moved = thread
       if (previous === input.assignee) {
         // The same assignee given more to do: a thread in review runs again, one that is running keeps running
-        if (thread.state === 'review') {
+        if (thread.state === 'review' && !this.assignedToSession(thread)) {
           moved = this.moveState(thread, { state: 'running', stateSince: now }, now, { change: 'state', from: 'review', to: 'running', by: caller }, 'The owner sent more: the thread is running again.')
         }
       } else {
@@ -804,9 +805,34 @@ export class MailService {
         this.records.markHandled(thread.id, by, Number.MAX_SAFE_INTEGER, now)
         // And a thread that waits for this one hears how it ended (§3.3)
         this.releaseWaiters(thread.id, closedAs, now)
+        // The person closing work a session owns (Drop, Mark done in the Inbox): its owner is told once, in Centralu's words (3.10)
+        if (standing === 'person' && parseAddress(thread.owner)?.kind === 'session') this.tellOwnerClosed(thread, closedAs, now)
       }
       return after
     })
+  }
+
+  /** The person closed a thread a session owns: one report from Centralu to the owner, so the work is not waited for or reported on again (3.10) */
+  private tellOwnerClosed(thread: ThreadRow, outcome: ThreadOutcome, now: number): void {
+    const assignee = thread.assignee
+    const id = assignee !== null && parseAddress(assignee)?.kind === 'session' ? `
+id: ${sessionIdOf(assignee)}` : ''
+    const words =
+      outcome === 'dropped' ? 'The person dropped this work: it is not to be done.'
+      : outcome === 'finished' ? 'The person marked this work done.'
+      : `The person closed this work (${outcome}).`
+    const body = this.checkBody('centralu', `[Centralu] ${words}${id}`, false)
+    this.insertPost(
+      thread.id,
+      CENTRALU,
+      'report',
+      body,
+      { outcome: outcome === 'finished' ? 'marked_done' : outcome, closedBy: 'person', ...(assignee !== null ? { about: { session: assignee } } : {}) },
+      {},
+      now,
+      undefined,
+      [thread.owner],
+    )
   }
 
   /** Adds a blocker; the thread is blocked while one stands (§3.3). At most 5 stand at once */
@@ -1011,6 +1037,38 @@ export class MailService {
         if (to === 'done') this.releaseWaiters(thread.id, 'dropped', now)
       }
       return { message, thread: after, duplicate: false }
+    })
+  }
+
+  /** Whether the thread's assignee is a session: its state follows the turns that session runs (`turnStarted`) */
+  private assignedToSession(thread: ThreadRow): boolean {
+    return parseAddress(thread.assignee ?? '')?.kind === 'session'
+  }
+
+  /**
+   * A turn the mailbox started in `recipient` begins (§3.3, 3.10): the thread whose work it is moves then, not when the mail was posted. A
+   * thread in `review` that the owner or the person sent more into, or an `open` one whose `assign` this turn took, is `running` from here. Only
+   * the work thread of the turn, only for its assignee, and only when mail that gives it work is in the delivery
+   */
+  turnStarted(recipient: string, threadId: string | null, messageIds: readonly string[]): void {
+    if (threadId === null) return
+    this.run(() => {
+      const thread = this.records.thread(threadId)
+      if (!thread || thread.assignee !== recipient || (thread.state !== 'review' && thread.state !== 'open')) return
+      const inDelivery = new Set(messageIds)
+      const gives = this.records.messagesAfter(thread.id, 0).some((m) => {
+        if (!inDelivery.has(m.id) || (m.sender !== thread.owner && m.sender !== PERSON)) return false
+        return thread.state === 'review' ? m.kind === 'note' || m.kind === 'question' || m.kind === 'answer' || m.kind === 'assign' : m.kind === 'assign'
+      })
+      if (!gives) return
+      const now = this.now()
+      this.moveState(
+        thread,
+        { state: 'running', stateSince: now },
+        now,
+        { change: 'state', from: thread.state, to: 'running', by: CENTRALU, reason: 'turn_started' },
+        thread.state === 'review' ? 'The owner sent more: the thread is running again.' : 'The assignee started on it: the thread is running.',
+      )
     })
   }
 
