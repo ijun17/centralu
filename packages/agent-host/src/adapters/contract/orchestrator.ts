@@ -381,6 +381,11 @@ export type AskProjectResult =
       readable: string[]
       /** Named paths outside it: listed, not granted */
       outside: string[]
+      /**
+       * The turn ended while the session's own background work still runs there (#1457, a linked machine's): `answer` is
+       * what it said so far, and a report follows when that work's last turn ends
+       */
+      paused?: string
     }
   | {
       ok: true

@@ -7,6 +7,8 @@ export type LinkedTurnEvent = {
   state?: unknown
   reason?: unknown
   error?: { message?: string }
+  /** Whose the turn was, on the event that ends it (#1377) */
+  turn?: unknown
 }
 
 /**
