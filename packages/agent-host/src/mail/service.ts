@@ -76,7 +76,7 @@ export type ClosingHooks = {
   /** A turn of this thread is going in its assignee: `mail_turns` says the turn belongs to the thread */
   turnRunning(thread: ThreadRow): boolean
   /** The person or the owner closed the thread while its work was going: stop the turn when `stopped`, and tell the helper `text` without a wake */
-  closed(c: { thread: ThreadRow; helperId: string; by: string; standing: Standing; outcome: ThreadOutcome; stopped: boolean; text: string }): void
+  closed(c: { thread: ThreadRow; helperId: string; by: string; standing: Standing; outcome: ThreadOutcome; stopped: boolean; text: string; since?: number }): void
 }
 
 export type MailServiceOptions = {

@@ -54,6 +54,7 @@ import type {
   RebuildCause,
   ApprovalDecision,
   Attachment,
+  BackgroundTask,
   ApprovalScope,
   MachineInfo,
   NormalizedEvent,
@@ -942,6 +943,28 @@ export class SessionManager {
     }
   }
 
+  /**
+   * The background work that goes with a turn that is stopped (3.10, #1474): what a paused report for the owner waits on, or, for a turn that is
+   * going, the tasks that turn's own tool calls started (`parentCallId` names the call, and the calls since the turn began are its). Work the
+   * tool cannot place (no `parentCallId`), a dev server the person started and another turn's work are left running
+   */
+  private tasksOfStoppedTurn(sessionId: string, since: number | undefined, ownerId: string): BackgroundTask[] {
+    const running = this.reports.ownTasksRunning(sessionId)
+    if (this.pausedFor(sessionId, ownerId)) {
+      const held = new Set((this.children.pausedReports.get(sessionId) ?? []).map((t) => t.id))
+      return running.filter((t) => held.has(t.id))
+    }
+    if (since === undefined) return []
+    const calls = new Set(
+      this.store.messages
+        .loadMessages(sessionId, 400)
+        .filter((m) => m.kind === 'tool_call' && m.ts >= since)
+        .map((m) => (m.payload as { callId?: unknown }).callId)
+        .filter((id): id is string => typeof id === 'string'),
+    )
+    return running.filter((t) => t.parentCallId !== undefined && calls.has(t.parentCallId))
+  }
+
   /** The session's report to `ownerId` is held over its own background work (`pausedReports`) */
   pausedFor(sessionId: string, ownerId: string): boolean {
     return this.children.awaitingReport.get(sessionId) === ownerId && this.children.pausedReports.has(sessionId)
@@ -953,17 +976,19 @@ export class SessionManager {
    * the thread was closed (the mark is dropped, so the stopped turn is not reported a second time). The helper is told once, in Centralu's words,
    * without a wake; a helper in a turn that is not the thread's (the person's own, another thread's) is not interrupted and gets the same note
    */
-  async workClosed(c: { threadOwner: string; helperId: string; stopped: boolean; text: string }): Promise<void> {
+  async workClosed(c: { threadOwner: string; helperId: string; stopped: boolean; text: string; since?: number }): Promise<void> {
     const helper = this.meta.get(c.helperId)
     if (!helper || this.handingOver || this.disposing) return
     if (c.stopped) {
+      // The work to stop is read before the mark goes: a paused report names the tasks it waits on
+      const tasks = this.tasksOfStoppedTurn(c.helperId, c.since, c.threadOwner)
       if (this.children.awaitingReport.get(c.helperId) === c.threadOwner) this.children.clearReport(c.helperId)
       try {
         this.interrupt(c.helperId)
       } catch {
         // No process: there is no turn to stop
       }
-      for (const t of this.reports.ownTasksRunning(c.helperId)) {
+      for (const t of tasks) {
         try {
           await this.stopBackgroundTask(c.helperId, t.id)
         } catch {

@@ -19,7 +19,7 @@ let clock = { t: 1_800_000_000_000 }
 
 beforeEach(async () => {
   w = await crossWorld()
-  clock = { t: 1_800_000_000_000 }
+  clock = { t: Date.now() }
   mail = new MailService(w.store.mail, { hostId: () => 'hub-aaaaaaaa', now: () => clock.t })
   const turns = new MailTurns(w.store.mail, { now: () => clock.t })
   delivery = new MailDelivery(mail, w.store.mail, w.mgr.mailSessions(), { now: () => clock.t, schedule: () => () => {}, turns })
@@ -241,6 +241,32 @@ describe('a thread closed while its work is going (3.10, MB)', () => {
     expect(w.store.mail.messagesAfter(thread.id, 0).filter((m) => m.kind === 'event').at(-1)?.facts).toMatchObject({ change: 'helper_told', stopped: false })
     const closed = w.store.mail.messagesAfter(thread.id, 0).filter((m) => m.kind === 'report' && m.facts.closedBy === 'person')
     expect(closed[0]!.facts.stopped).toBeUndefined()
+  })
+
+  it('stops the background work the stopped turn started, and leaves a dev server the person started and work of another turn running (#1474)', async () => {
+    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+    Object.assign(w.adapters.get('claude')!.capabilities, { backgroundTasks: true })
+    const owner = await w.callerSession()
+    const helper = await startAgent(owner, 'write the files')
+    const thread = threadBetween(owner, helper)
+    const h = handleOf(helper)
+    // Started before this turn's calls: the person's dev server, and an earlier turn's watcher
+    h.event({ type: 'tool_call', sessionId: helper, callId: 'c-this', summary: { tool: 'Bash', title: 'pnpm test --watch', paths: [] } })
+    h.event({
+      type: 'background_tasks',
+      sessionId: helper,
+      live: [
+        { id: 't-this', kind: 'shell', description: 'pnpm test --watch', status: 'running', stoppable: true, parentCallId: 'c-this' },
+        { id: 't-server', kind: 'shell', description: 'pnpm dev', status: 'running', stoppable: true },
+        { id: 't-old', kind: 'shell', description: 'tail -f log', status: 'running', stoppable: true, parentCallId: 'c-before' },
+      ],
+    })
+    // The earlier call is in the conversation too, from before the turn began
+    w.store.messages.appendMessages([{ sessionId: helper, seq: w.store.messages.nextSeq(helper), role: 'system', kind: 'tool_call', payload: { callId: 'c-before', summary: { tool: 'Bash', title: 'tail -f log', paths: [] } }, ts: Date.now() - 600_000 }])
+    closeAs(PERSON, thread.id)
+    await w.until(() => h.quiet.length === 1)
+    expect(h.interrupted).toBe(1)
+    expect(h.stoppedTasks).toEqual(['t-this'])
   })
 
   it('a tool that has no quiet input (Codex) is not sent the note, which would start a turn nobody reports: its turn is stopped and the thread has the event', async () => {
