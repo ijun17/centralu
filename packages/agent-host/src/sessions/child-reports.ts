@@ -186,11 +186,14 @@ export class ChildReports {
     if (!this.mailReport) return 'none'
     // A seat that cannot read mail is told the old way, and the notice is kept if it cannot be delivered: nothing else will tell it
     const seat = this.host.canReadMail(ownerId)
-    // An owner that reads mail and is in a turn keeps today's in-turn delivery until slice 6 (a wake would wait for the turn to end). So does
-    // one whose process may not have the tool (kept from an earlier host): the relayed message tells it, and if that fails the mailbox wakes it
-    // when it can, which is the one report (a notice kept as well would be a second)
+    /*
+     * An owner that reads mail is told by the mail alone (§8.1, 3.9): at rest the mailbox wakes it; in a turn the mail waits for the turn's end
+     * (delivery's `busy`) and wakes it then. No relayed notice and nothing kept in memory (`held`) is its path. The one exception is a process
+     * kept from an earlier host, whose tools are the ones it started with and may not include mail: the relayed message tells it, and if that
+     * fails the mailbox wakes it when it can, which is the one report (a notice kept as well would be a second)
+     */
     const owner = this.host.meta.get(ownerId)
-    const delivery = !seat ? 'old' : !this.host.readsMail(ownerId) || (owner && inTurn(owner.state)) ? 'in-turn' : 'wake'
+    const delivery = !seat ? 'old' : !this.host.readsMail(ownerId) ? 'in-turn' : 'wake'
     try {
       return this.mailReport(ownerId, childId, {
         ...draft,

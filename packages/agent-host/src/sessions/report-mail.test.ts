@@ -131,27 +131,25 @@ describe('a turn ends, the owner reads mail', () => {
   })
 })
 
-describe('an owner in a turn keeps today’s delivery until in-turn delivery by hooks (slice 6)', () => {
-  it('the relayed message goes into the turn it is in, the report is in the thread, and the receipt is delivered: nothing wakes it when the turn ends', async () => {
+describe('an owner in a turn is told by the mail alone (3.9)', () => {
+  it('no relayed message goes into its turn and nothing is kept for it: the report waits in its mailbox for the turn’s end', async () => {
     const { parent, child } = await parentAndChild()
     // The owner is in a turn of its own
     await w.mgr.send(parent, 'a long job of the owner’s own')
     expect(w.mgr.sessionInfo(parent)?.state).toBe('working')
-    await turnEnds(child, 'all merged')
-    expect(oldReports(parent, child)).toHaveLength(1)
-    const [report] = reportsIn(threadOf(parent))
-    expect(report).toMatchObject({ facts: { outcome: 'finished' } })
-    expect(w.store.mail.receiptsOf(report!.id)[0]).toMatchObject({ deliveredAt: expect.any(Number), readAt: expect.any(Number), handledAt: expect.any(Number) })
-    const later = new MailService(w.store.mail, { hostId: () => 'hub-aaaaaaaa', now: () => Date.now() + 10_000 })
-    expect(later.drain(addr(parent), {}).messageIds).toEqual([])
-  })
-
-  it('an owner at rest is woken by the mailbox, not told the old way', async () => {
-    const { parent, child } = await parentAndChild()
-    expect(w.mgr.sessionInfo(parent)?.state).not.toBe('working')
+    const sentBefore = handleOf(parent)!.sent.length
     await turnEnds(child, 'all merged')
     expect(oldReports(parent, child)).toEqual([])
-    expect(w.store.mail.receiptsOf(reportsIn(threadOf(parent))[0]!.id)[0]).toMatchObject({ deliveredAt: null })
+    expect(handleOf(parent)!.sent).toHaveLength(sentBefore)
+    const [report] = reportsIn(threadOf(parent))
+    expect(report).toMatchObject({ facts: { outcome: 'finished' } })
+    // Not delivered: the mailbox hands it over when the turn ends (delivery's busy 'turn')
+    expect(w.store.mail.receiptsOf(report!.id)[0]).toMatchObject({ deliveredAt: null })
+    const later = new MailService(w.store.mail, { hostId: () => 'hub-aaaaaaaa', now: () => Date.now() + 10_000 })
+    expect(later.drain(addr(parent), {}).messageIds).toContain(report!.id)
+    // A message the person sends meanwhile does not bring a kept notice with it: there is none
+    await w.mgr.send(parent, 'and one more thing')
+    expect(oldReports(parent, child)).toEqual([])
   })
 })
 
@@ -491,14 +489,15 @@ describe('the person takes the session over', () => {
     expect(w.store.children.listReportMarks()).toEqual([])
   })
 
-  it('told the owner in a turn the old way, the report is marked delivered', async () => {
+  it('told the owner in a turn, it is mail like any report: the thread is dropped, nothing is relayed into its turn', async () => {
     const { parent, child } = await parentAndChild()
     await w.mgr.send(parent, 'a long job of the owner’s own')
     const reports = (w.mgr as unknown as { reports: { personTookOver(id: string): Promise<void> } }).reports
     await reports.personTookOver(child)
-    expect(oldReports(parent, child)).toHaveLength(1)
+    expect(oldReports(parent, child)).toEqual([])
     const [report] = reportsIn(threadOf(parent))
-    expect(w.store.mail.receiptsOf(report!.id)[0]).toMatchObject({ deliveredAt: expect.any(Number), handledAt: expect.any(Number) })
+    expect(report).toMatchObject({ facts: { outcome: 'took_over' } })
+    expect(w.store.mail.receiptsOf(report!.id)[0]).toMatchObject({ deliveredAt: null })
   })
 })
 

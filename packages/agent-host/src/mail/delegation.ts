@@ -170,15 +170,15 @@ export type ReportDraft = {
   archiving?: boolean
   /** The owner is in a turn now: a relayed notice joins it and starts none */
   ownerInTurn?: boolean
-  /** How the owner is told: by the mailbox's wake, by the old relayed message into the turn it is in, or by the old relayed message (it cannot read mail) */
+  /** How the owner is told: by the mailbox (`wake`), by the relayed message to a process that may lack the mail tool (`in-turn`), or by the old relayed message (it cannot read mail, `old`) */
   delivery: ReportDelivery
 }
 
 /**
- * `wake`: the owner reads mail and is at rest, so the mailbox wakes it. `in-turn`: it reads mail and is in a turn: until in-turn delivery by
- * hooks (slice 6) the relayed message goes in as it always did, and if that fails the mailbox wakes it when its turn ends; the same for one
- * whose process may not have the tool. `old`: its seat cannot read mail (a coordinator, a builder, an app's agent), so the old way tells, and
- * holds the notice if it cannot be delivered
+ * `wake`: the owner reads mail, so the mailbox tells it: at rest it is woken, in a turn the mail waits for the turn's end (3.9; hooks in
+ * slice 6 will bring it into the turn). `in-turn`: it reads mail, but its process may not have the tool (kept from an earlier host): the relayed
+ * message goes in as it always did, and if that fails the mailbox wakes it when it can. `old`: its seat cannot read mail (a coordinator, a builder,
+ * an app's agent), so the old way tells, and holds the notice if it cannot be delivered
  */
 export type ReportDelivery = 'wake' | 'in-turn' | 'old'
 
