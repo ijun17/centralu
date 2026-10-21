@@ -2771,6 +2771,12 @@ session takes a message; the report is in the thread, and its receipt is marked 
 tries to wake it. The old relayed path (`held`, the relayed notice) goes at the contract (slice 9), or earlier if every seat gets `mail`; the linked path keeps it until slice 4. No thread for the work, or a thread the
 owner closed: the old way tells alone. A thread the session closed itself by mail, saying how it ended, takes no second report.
 
+When the owner deletes the child (`agent_session delete`) after the work was reported, the thread is closed `done`/`finished` before the child goes. When the
+session that had the work is archived or deleted on its own, `partyGone` leaves the thread `open` with nobody on it, and if the work was
+still going (`running` or `open`) its owner gets one `report` (`stopped`, `reason: assignee_archived`) so it does not wait for work that
+stopped; it reassigns or closes the thread. Archiving a child that is at work stops its turn, and that end is not reported as the work's (the report is `closed`
+for a session being archived, `ChildReports` asks `trashing`): the one `assignee_archived` report is all the owner hears. A gone caller's threads are the person's, as ever.
+
 ### 4.7 Remote mode, phase 1: `centralu serve` (#82)
 
 The app can work with a project on another machine (an SSH server, later a laptop). That machine runs its own,

@@ -281,6 +281,22 @@ export class ChildOwnership {
     this.delegatedHook = hook
   }
 
+  /** The mailbox's way of hearing that a session is done with work it gave (it deletes the session that did it), set by the host when it has one */
+  private finishedHook: ((callerId: string, childId: string) => void) | undefined
+  onFinishedWith(hook: ChildOwnership['finishedHook']): void {
+    this.finishedHook = hook
+  }
+
+  /** `callerId` is done with what `childId` did for it, and deletes the session: a thread whose work was reported is closed. Never throws */
+  finishedWith(callerId: string, childId: string): void {
+    if (callerId === childId || !this.finishedHook) return
+    try {
+      this.finishedHook(callerId, childId)
+    } catch (e) {
+      console.error(`[mail] could not close the work ${childId.slice(0, 8)} did for ${callerId.slice(0, 8)} (${errorMessage(e)})`)
+    }
+  }
+
   /** The mailbox's way of hearing that a call returned the answer of work it gave (§8.1), set by the host when it has one */
   private answeredHook: ((callerId: string, childId: string, how?: AnswerGiven) => void) | undefined
   onAnswered(hook: ChildOwnership['answeredHook']): void {

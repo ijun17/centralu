@@ -22,7 +22,7 @@ import { SessionManager } from './sessions/manager.js'
 import { MailService } from './mail/service.js'
 import { MailDelivery } from './mail/delivery.js'
 import { MailPerson } from './mail/person.js'
-import { answerRecorder, delegationRecorder, reportRecorder, turnRecorder } from './mail/delegation.js'
+import { answerRecorder, delegationRecorder, finishRecorder, reportRecorder, turnRecorder } from './mail/delegation.js'
 import { COMMAND_CALLS, PLAIN_CALLS } from './mail/frame.js'
 import { MailTool } from './mail/tool.js'
 import { MailTurns } from './mail/turns.js'
@@ -436,6 +436,7 @@ mgr.useMail({ sessionGone: (id) => void mail.sessionGone(id), sessionChanged: (i
   // Work a session gave another is written down as a thread, beside the old path that delivered it (§8.1)
   delegated: delegationRecorder(mail, (id) => mgr.sessionInfo(id), mailTurns),
   answered: answerRecorder(mail, store.mail),
+  finishedWith: finishRecorder(mail),
   // A turn's end is a report in the thread, and the owner is told as mail when it can read it (§8.1)
   report: reportRecorder(mail, store.mail),
   // Every turn the mailbox did not start is recorded too: whose it is, and the thread it belongs to (§6)

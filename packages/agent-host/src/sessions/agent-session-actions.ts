@@ -179,6 +179,8 @@ export class AgentSessionActions {
             if (!this.host.trashing.has(child.id) && busy && (!d || d.settled || d.callerId !== callerId)) {
               return { ok: false, error: `"${child.name}" is busy with something else; the person may be using it. Wait for that turn and its pending approval or question to finish before deleting it.` }
             }
+            // The caller is done with the work: a thread whose work was reported is closed, before the session goes
+            if (!observing) this.host.children.finishedWith(callerId, child.id)
             // Use the sidebar's stop/flush/trash path, including pending waits and wake withdrawal.
             await this.host.trashSession(child.id)
             if (d) this.host.children.dropDelegation(key, d)
@@ -187,6 +189,7 @@ export class AgentSessionActions {
           if (d && !d.settled) return { ok: false, error: `"${child.name}" is still working on what you gave it — stop it or wait first.` }
           // A timer the tool held (`/loop`) does not hold the cleanup (#718): it ends with the process, and the caller is told
           const timers = this.host.handles.has(child.id) ? liveBackgroundTasks(child.backgroundTasks).filter((t) => t.timer) : []
+          if (!observing) this.host.children.finishedWith(callerId, child.id)
           const r = await this.host.cleanUpWorktreeChild(child)
           if (!r.ok) return r
           if (d) this.host.children.dropDelegation(key, d)

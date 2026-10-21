@@ -164,7 +164,7 @@ export class ChildReports {
     const owner = this.host.meta.get(ownerId)
     const delivery = !seat ? 'old' : !this.host.readsMail(ownerId) || (owner && inTurn(owner.state)) ? 'in-turn' : 'wake'
     try {
-      return this.mailReport(ownerId, childId, { ...draft, delivery })
+      return this.mailReport(ownerId, childId, { ...draft, delivery, ...(this.host.trashing.has(childId) ? { archiving: true } : {}) })
     } catch (e) {
       console.error(`[mail] could not write the report of ${childId.slice(0, 8)} for ${ownerId.slice(0, 8)} (${errorMessage(e)})`)
       return 'none'

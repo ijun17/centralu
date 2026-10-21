@@ -213,6 +213,20 @@ describe('the mailbox hears that a call returned an answer (docs/plans/mailbox.m
   })
 })
 
+describe('the mailbox hears that a session is done with work it gave', () => {
+  it('is told who deleted whose work, and never breaks the delete when the mailbox fails', () => {
+    const seen: unknown[] = []
+    own.onFinishedWith((callerId, childId) => void seen.push([callerId, childId]))
+    own.finishedWith('caller', 'child')
+    own.finishedWith('same', 'same')
+    expect(seen).toEqual([['caller', 'child']])
+    own.onFinishedWith(() => {
+      throw new Error('the store is busy')
+    })
+    expect(() => own.finishedWith('caller', 'child')).not.toThrow()
+  })
+})
+
 describe('queued requests', () => {
   it('enqueue answers the place; a delivery is marked and ends when its turn starts', () => {
     expect(own.enqueue(request('q1', 'busy', 'a'))).toBe(1)

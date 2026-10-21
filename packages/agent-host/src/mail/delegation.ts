@@ -57,6 +57,11 @@ export function answerRecorder(mail: MailService, records: MailRecords): (caller
   }
 }
 
+/** What the mailbox does when a session deletes the session that did work it gave (§3.3): a thread whose work was reported is closed */
+export function finishRecorder(mail: MailService): (callerId: string, childId: string) => void {
+  return (callerId, childId) => mail.ownerFinished(mail.sessionAddress(callerId), mail.sessionAddress(childId))
+}
+
 /**
  * What the mailbox does when a turn starts that it did not start (§6): it records whose the turn is and which thread it belongs to,
  * so the turn's end can be told as that thread's. The person's own turn belongs to none, except when they chose to add their message
@@ -95,6 +100,11 @@ export type ReportDraft = {
   personNote?: boolean
   /** What the thread becomes (`TurnReport.then`) */
   then: 'review' | 'running' | 'dropped'
+  /**
+   * The session is being archived, and archiving stopped the turn this reports: that end is not the work's (#1445 review), and the
+   * thread is left to `partyGone`, which says the session is gone and puts the work back on the board
+   */
+  archiving?: boolean
   /** How the owner is told: by the mailbox's wake, by the old relayed message into the turn it is in, or by the old relayed message (it cannot read mail) */
   delivery: ReportDelivery
 }
@@ -134,6 +144,7 @@ export function reportRecorder(mail: MailService, records: MailRecords): (ownerI
       const ours = records.lastBy(thread.id, owner)
       return theirs?.kind === 'report' && theirs.seq > (ours?.seq ?? 0) ? 'closed' : 'none'
     }
+    if (draft.archiving) return 'closed'
     let posted
     try {
       posted = mail.reportTurn(thread.id, {

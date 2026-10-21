@@ -3,7 +3,7 @@
  * with the session, and the mailbox tells the owner when it can read mail; the old way tells when there is no thread or the owner cannot.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { answerRecorder, delegationRecorder, reportRecorder, turnRecorder } from '../mail/delegation.js'
+import { answerRecorder, delegationRecorder, finishRecorder, reportRecorder, turnRecorder } from '../mail/delegation.js'
 import { MailService } from '../mail/service.js'
 import { MailTool } from '../mail/tool.js'
 import { MailTurns } from '../mail/turns.js'
@@ -18,12 +18,13 @@ beforeEach(async () => {
   mail = new MailService(w.store.mail, { hostId: () => 'hub-aaaaaaaa' })
   const turns = new MailTurns(w.store.mail)
   w.mgr.useMail({
-    sessionGone: () => {},
+    sessionGone: (id) => void mail.sessionGone(id),
     sessionChanged: () => {},
     sessionEvent: (e, ended) => turns.observe(e, ended),
     delegated: delegationRecorder(mail, (id) => w.mgr.sessionInfo(id), turns),
     answered: answerRecorder(mail, w.store.mail),
     report: reportRecorder(mail, w.store.mail),
+    finishedWith: finishRecorder(mail),
     turnStarted: turnRecorder(mail, w.store.mail, turns),
   })
 })
@@ -305,5 +306,45 @@ describe('the person takes the session over', () => {
     expect(oldReports(parent, child)).toHaveLength(1)
     const [report] = reportsIn(threadOf(parent))
     expect(w.store.mail.receiptsOf(report!.id)[0]).toMatchObject({ deliveredAt: expect.any(Number), handledAt: expect.any(Number) })
+  })
+})
+
+describe('the work ends with the session that did it', () => {
+  it('the owner deleting a child whose work it has the report of closes the thread done and finished; the archive does not reopen it', async () => {
+    const { parent, child } = await parentAndChild()
+    await turnEnds(child, 'all merged')
+    expect(threadOf(parent).state).toBe('review')
+    expect(await w.mgr.agentSession(parent, { sessionId: child, action: 'delete' })).toMatchObject({ ok: true, state: 'deleted' })
+    expect(threadOf(parent)).toMatchObject({ state: 'done', outcome: 'finished', assignee: addr(child) })
+    expect(reportsIn(threadOf(parent)).map((m) => m.facts.outcome)).toEqual(['finished'])
+  })
+
+  it('the person archiving a child whose work paused on its background tasks: the thread is open with nobody on it, and the owner is told once more', async () => {
+    const { parent, child } = await parentAndChild()
+    handleOf(child)!.event({ type: 'background_tasks', sessionId: child, live: [{ id: 't1', kind: 'shell', description: 'pnpm dev', status: 'running' }] })
+    await turnEnds(child, 'watcher started')
+    expect(threadOf(parent).state).toBe('running')
+    await w.mgr.trashSession(child)
+    expect(threadOf(parent)).toMatchObject({ state: 'open', assignee: null })
+    expect(reportsIn(threadOf(parent)).map((m) => m.facts)).toEqual([
+      expect.objectContaining({ outcome: 'paused' }),
+      { outcome: 'stopped', reason: 'assignee_archived', about: { session: addr(child) } },
+    ])
+  })
+
+  it('archiving a child at work stops its turn, and that end is not reported as the work finished: the owner is told the session is gone, once', async () => {
+    const { parent, child } = await parentAndChild()
+    await w.mgr.trashSession(child)
+    expect(threadOf(parent)).toMatchObject({ state: 'open', assignee: null })
+    expect(reportsIn(threadOf(parent)).map((m) => m.facts)).toEqual([{ outcome: 'stopped', reason: 'assignee_archived', about: { session: addr(child) } }])
+    expect(wordsIn(threadOf(parent))).toEqual([])
+    expect(oldReports(parent, child)).toEqual([])
+  })
+
+  it('the person archiving the caller: the person owns the thread and the child goes on', async () => {
+    const { parent, child } = await parentAndChild()
+    await w.mgr.trashSession(parent)
+    const [thread] = w.store.mail.threadsOfParty('person', 'owner')
+    expect(thread).toMatchObject({ owner: 'person', assignee: addr(child), state: 'running' })
   })
 })

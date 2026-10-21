@@ -93,6 +93,8 @@ export type MailHooks = {
   tool?(sessionId: string, args: MailToolArgs): { text: string; isError?: boolean }
   /** A session gave another one work by a tool the host delivered it by (§8.1): the mailbox writes it down */
   delegated?(callerId: string, childId: string, origin: ThreadOrigin, task: string): void
+  /** A session deleted the session that did work it gave (§3.3): a thread whose work was reported is closed */
+  finishedWith?(callerId: string, childId: string): void
   /** A turn of delegated work ended, or the person took the session over (§6, §8.1): the report goes in the thread, and the mailbox tells the owner when it can */
   report?(ownerId: string, childId: string, draft: ReportDraft): ReportedAs
   /** A call returned the answer of work a session gave another, or read where it stands (§8.1): the reports waiting for the caller are settled */
@@ -841,6 +843,7 @@ export class SessionManager {
   useMail(hooks: MailHooks): void {
     this.mailHooks = hooks
     this.children.onDelegated(hooks.delegated ? (callerId, childId, origin, task) => hooks.delegated?.(callerId, childId, origin, task) : undefined)
+    this.children.onFinishedWith(hooks.finishedWith ? (callerId, childId) => hooks.finishedWith?.(callerId, childId) : undefined)
     this.reports.useMail(hooks.report ? (ownerId, childId, draft) => hooks.report?.(ownerId, childId, draft) ?? 'none' : undefined)
     this.children.onAnswered(hooks.answered ? (callerId, childId, how) => hooks.answered?.(callerId, childId, how) : undefined)
     this.children.onTurnStarted(hooks.turnStarted ? (sessionId, turn) => hooks.turnStarted?.(sessionId, turn) : undefined)

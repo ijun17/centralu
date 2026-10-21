@@ -3,6 +3,7 @@ import { asObj, isObj } from '../json-value.js'
 import {
   BLOCKER_KINDS,
   MESSAGE_KINDS,
+  DELEGATION_ORIGINS,
   THREAD_ORIGINS,
   THREAD_OUTCOMES,
   type BlockerKind,
@@ -159,6 +160,8 @@ export type DelegationInput = {
 }
 
 export type DelegationResult = { thread: ThreadRow; message: MessageRow; /** The task went into the thread this owner already had with this assignee */ continued: boolean }
+
+const isDelegation = (t: ThreadRow): boolean => (DELEGATION_ORIGINS as readonly string[]).includes(t.origin)
 
 /** Said when a task is cut to the longest a session may post: the child has the whole of it, in its conversation */
 const TASK_CUT = "\n[Centralu: cut here. The full task is in the session's conversation (read_session).]"
@@ -867,6 +870,7 @@ export class MailService {
       const moved: ThreadRow[] = []
       for (const t of this.records.threadsOfParty(address, 'assignee', ['open', 'running', 'review', 'blocked'])) {
         this.records.leaveParticipant(t.id, address, now)
+        const stopped = t.state === 'running' || t.state === 'open'
         // A blocker still stands: the thread stays blocked, with nobody on it
         const to: ThreadState = t.state === 'blocked' ? 'blocked' : 'open'
         moved.push(
@@ -878,6 +882,20 @@ export class MailService {
             'The assignee is gone: the thread is open with no assignee.',
           ),
         )
+        // The owner of work a delegation tool gave is told once, so it does not wait for work that stopped; it reassigns or closes the thread (§3.3, MB's ruling)
+        if (stopped && isDelegation(t) && t.owner !== address && this.party(t.owner).kind === 'session') {
+          this.insertPost(
+            t.id,
+            CENTRALU,
+            'report',
+            '[Centralu] The session that had this work was archived or deleted before it finished: the work stopped, and the thread is open with nobody on it. Reassign it or close it.',
+            { outcome: 'stopped', reason: 'assignee_archived', about: { session: address } },
+            {},
+            now,
+            undefined,
+            [t.owner],
+          )
+        }
       }
       for (const t of this.records.threadsOfParty(address, 'owner', ['open', 'running', 'review', 'blocked'])) {
         this.records.leaveParticipant(t.id, address, now)
@@ -968,6 +986,17 @@ export class MailService {
     if (n > 0) this.announce(thread.id)
   }
 
+  /**
+   * The owner finishes with work a delegation tool gave: it deletes the session that did it (`agent_session delete`), once it has the
+   * work's report. A thread in `review` is closed `done` (`finished`): the work is over, and the child's going is no event of it. Work
+   * still going is left to `partyGone` when the session goes
+   */
+  ownerFinished(owner: string, assignee: string): void {
+    const thread = this.records.latestBetween(owner, assignee)
+    if (!thread || thread.state !== 'review') return
+    this.update(thread.id, owner, { state: 'done', outcome: 'finished' })
+  }
+
   // ── The wake ──
 
   /**
@@ -1054,6 +1083,7 @@ export class MailService {
       const about = aboutOf(message.facts)
       const outcome = typeof message.facts.outcome === 'string' ? message.facts.outcome : undefined
       const error = typeof message.facts.error === 'string' ? message.facts.error : undefined
+      const reason = typeof message.facts.reason === 'string' ? message.facts.reason : undefined
       const paused = typeof message.facts.paused === 'number' ? message.facts.paused : undefined
       items.push({
         messageId: message.id,
@@ -1064,6 +1094,7 @@ export class MailService {
         ...(about ? { about } : {}),
         ...(outcome ? { outcome } : {}),
         ...(error ? { error } : {}),
+        ...(reason ? { reason } : {}),
         ...(paused !== undefined ? { paused } : {}),
         ...(message.facts.personNote === true ? { personNote: true } : {}),
         ...(receipt.lastError === 'maybe_repeated' ? { maybeRepeated: true } : {}),

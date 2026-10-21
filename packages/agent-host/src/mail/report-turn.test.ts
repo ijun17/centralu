@@ -285,3 +285,52 @@ describe('what the mailbox says of a draft', () => {
     expect(report?.facts).toEqual({ outcome: 'paused', about: { session: CHILD }, paused: 2, error: 'network', personNote: true })
   })
 })
+
+describe('the session that had the work is archived or deleted (§3.3, MB’s ruling)', () => {
+  it('the thread is open with nobody on it, and its owner is told once, in a report that says why', () => {
+    const { store, mail, clock, thread } = setup()
+    mail.partyGone(CHILD)
+    expect(store.mail.thread(thread.id)).toMatchObject({ state: 'open', assignee: null, owner: OWNER })
+    const reports = store.mail.messagesAfter(thread.id, 0).filter((m) => m.kind === 'report')
+    expect(reports).toHaveLength(1)
+    expect(reports[0]?.facts).toEqual({ outcome: 'stopped', reason: 'assignee_archived', about: { session: CHILD } })
+    expect(store.mail.receiptsOf(reports[0]!.id).map((r) => r.recipient)).toEqual([OWNER])
+    clock.t += 3_000
+    expect(mail.drain(OWNER, {}).text).toContain(`kind="report" from="centralu" sender="Centralu" about="${CHILD}" outcome="stopped" reason="assignee_archived"`)
+  })
+
+  it('and not for work that was reported already, a task made with mail, or an owner that is gone too', () => {
+    const reported = setup()
+    reported.mail.reportTurn(reported.thread.id, reported.report())
+    reported.mail.partyGone(CHILD)
+    expect(reported.store.mail.thread(reported.thread.id)).toMatchObject({ state: 'open', assignee: null })
+    expect(reported.store.mail.messagesAfter(reported.thread.id, 0).filter((m) => m.kind === 'report')).toHaveLength(1)
+
+    const made = setup()
+    const own = made.mail.open(OWNER, { kind: 'assign', subject: 'Made with mail', body: 'x', assignee: sessionAddress(HOST, 'child9') })
+    made.mail.partyGone(sessionAddress(HOST, 'child9'))
+    expect(made.store.mail.messagesAfter(own.thread.id, 0).filter((m) => m.kind === 'report')).toEqual([])
+
+    const both = setup()
+    both.mail.partyGone(OWNER)
+    both.mail.partyGone(CHILD)
+    expect(both.store.mail.messagesAfter(both.thread.id, 0).filter((m) => m.kind === 'report')).toEqual([])
+  })
+})
+
+describe('the owner deletes the session that did the work', () => {
+  it('closes a thread whose work was reported, done and finished; work still going is left to the archive', () => {
+    const a = setup()
+    a.mail.reportTurn(a.thread.id, a.report())
+    a.mail.ownerFinished(OWNER, CHILD)
+    expect(a.store.mail.thread(a.thread.id)).toMatchObject({ state: 'done', outcome: 'finished' })
+    a.mail.partyGone(CHILD)
+    expect(a.store.mail.thread(a.thread.id)).toMatchObject({ state: 'done', assignee: CHILD })
+    expect(a.store.mail.messagesAfter(a.thread.id, 0).filter((m) => m.kind === 'report')).toHaveLength(1)
+
+    const b = setup()
+    b.mail.ownerFinished(OWNER, CHILD)
+    expect(b.store.mail.thread(b.thread.id)?.state).toBe('running')
+    expect(() => b.mail.ownerFinished(OWNER, sessionAddress(HOST, 'nobody'))).not.toThrow()
+  })
+})
