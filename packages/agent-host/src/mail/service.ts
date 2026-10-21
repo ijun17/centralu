@@ -163,6 +163,26 @@ export type DelegationResult = { thread: ThreadRow; message: MessageRow; /** The
 /** Said when a task is cut to the longest a session may post: the child has the whole of it, in its conversation */
 const TASK_CUT = "\n[Centralu: cut here. The full task is in the session's conversation (read_session).]"
 
+/**
+ * How a turn of delegated work ended, told by Centralu to the thread's owner (§6, §8.1). The words of `body` are Centralu's own with the
+ * session's last response behind them; `facts` is what the wake carries (an outcome word, the kind of error, how many tasks are left
+ * running, whether the person wrote into the turn)
+ */
+export type TurnReport = {
+  /** The thread's owner, who is told */
+  to: string
+  /** The session whose turn ended */
+  about: string
+  /** One word of Centralu's: finished, failed, limit_reached, network, interrupted, quit, stopped, paused, settled, swapped, took_over */
+  outcome: string
+  body: string
+  error?: string
+  paused?: number
+  personNote?: boolean
+  /** What the thread becomes: `review` when the work was reported (the owner decides), `running` when it paused on its own background work, `dropped` when the person took it over */
+  then: 'review' | 'running' | 'dropped'
+}
+
 export type OpenResult = PostResult & {
   /** The participants of the threads this one follows, who may be added to it (§3.3, "offered as its own") */
   offered: string[]
@@ -868,6 +888,55 @@ export class MailService {
     })
   }
 
+  /**
+   * A turn of delegated work ended (§6): Centralu's `report` in the thread, for its owner, and the thread's state moves with it: `review`
+   * when the work was reported, `running` when it paused on the session's own background work, and `done` (`dropped`, taken over) when the
+   * person took the session over. A thread that is done, or whose owner is no longer in it, takes no report: the caller says so and the
+   * old way of telling goes on
+   */
+  reportTurn(threadId: string, input: TurnReport): PostResult {
+    return this.run(() => {
+      const now = this.now()
+      const thread = this.mustThread(threadId)
+      this.assertWritable(thread)
+      if (!this.recipients(thread.id, CENTRALU).includes(input.to)) throw refuse('not_participant', `${input.to} is not in thread ${threadId}`)
+      const body = this.checkBody('centralu', input.body, false)
+      const facts: MailFacts = {
+        outcome: input.outcome,
+        about: { session: input.about },
+        ...(input.error ? { error: input.error } : {}),
+        ...(input.paused ? { paused: input.paused } : {}),
+        ...(input.personNote ? { personNote: true } : {}),
+        ...(input.then === 'dropped' ? { takenOver: true } : {}),
+      }
+      const message = this.insertPost(thread.id, CENTRALU, 'report', body, facts, {}, now, undefined, [input.to])
+      let after = thread
+      const to: ThreadState = input.then === 'dropped' ? 'done' : input.then
+      if (to !== thread.state && thread.state !== 'blocked') {
+        after = this.moveState(
+          thread,
+          { state: to, stateSince: now, ...(to === 'done' ? { outcome: 'dropped' as const, doneAt: now } : {}) },
+          now,
+          { change: 'state', from: thread.state, to, by: CENTRALU, ...(to === 'done' ? { outcome: 'dropped' } : {}) },
+          `State: ${thread.state} to ${to}.`,
+        )
+        if (to === 'done') this.releaseWaiters(thread.id, 'dropped', now)
+      }
+      return { message, thread: after, duplicate: false }
+    })
+  }
+
+  /**
+   * A call returned the answer a report told of (§8.1): the caller read it, so the reports of this thread waiting for `owner` are read and
+   * handled, and no wake follows for news the call already gave. The threads of the pair that a delegation tool opened; other mail is left
+   */
+  reportsAnswered(owner: string, assignee: string): void {
+    const thread = this.records.latestBetween(owner, assignee)
+    if (!thread) return
+    const n = this.run(() => this.records.markReportsHandled(thread.id, owner, this.now()))
+    if (n > 0) this.announce(thread.id)
+  }
+
   // ── The wake ──
 
   /**
@@ -953,6 +1022,8 @@ export class MailService {
       threads.add(thread.id)
       const about = aboutOf(message.facts)
       const outcome = typeof message.facts.outcome === 'string' ? message.facts.outcome : undefined
+      const error = typeof message.facts.error === 'string' ? message.facts.error : undefined
+      const paused = typeof message.facts.paused === 'number' ? message.facts.paused : undefined
       items.push({
         messageId: message.id,
         threadId: thread.id,
@@ -961,6 +1032,9 @@ export class MailService {
         relation: relationWord(recipient, message.sender, thread),
         ...(about ? { about } : {}),
         ...(outcome ? { outcome } : {}),
+        ...(error ? { error } : {}),
+        ...(paused !== undefined ? { paused } : {}),
+        ...(message.facts.personNote === true ? { personNote: true } : {}),
         ...(receipt.lastError === 'maybe_repeated' ? { maybeRepeated: true } : {}),
         ...(down && !pointerOnly ? { inline: message.body } : {}),
       })

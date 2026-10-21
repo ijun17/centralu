@@ -788,6 +788,17 @@ export class MailRecords {
       .run(recipient, JSON.stringify(messageIds))
   }
 
+  /** The reports of Centralu in a thread that `recipient` has not read or handled are read and handled: a call gave it the answer they tell of. Returns how many */
+  markReportsHandled(threadId: string, recipient: string, now: number): number {
+    return this.db
+      .prepare(
+        `UPDATE mail_receipts SET read_at = COALESCE(read_at, ?), handled_at = COALESCE(handled_at, ?)
+          WHERE recipient = ? AND (read_at IS NULL OR handled_at IS NULL)
+            AND message_id IN (SELECT id FROM mail_messages WHERE thread_id = ? AND kind = 'report' AND sender = 'centralu')`,
+      )
+      .run(now, now, recipient, threadId).changes
+  }
+
   /** Sets why mail waits for a person's act (`policy`, `failed`, `loop`, `budget`, `uncertain`), or clears it with null */
   setHeld(recipient: string, messageIds: readonly string[], held: string | null): void {
     this.db

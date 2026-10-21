@@ -31,6 +31,12 @@ export type MailFrameItem = {
   about?: string
   /** `facts.outcome` of a report */
   outcome?: string
+  /** `facts.error` of a report: the kind of error its turn ended in, one word of Centralu's */
+  error?: string
+  /** `facts.paused` of a report: how many background tasks the turn left running */
+  paused?: number
+  /** `facts.personNote` of a report: the person wrote into the turn (`facts.personNote`) */
+  personNote?: boolean
   /** The body, only when the words flow down */
   inline?: string
   /** A previous host may already have delivered it (it died before it knew): the receiver is told it may be a repeat (§7.6.5) */
@@ -88,7 +94,7 @@ type Line = { text: string; count: number }
 function listLines(items: readonly MailFrameItem[]): Line[] {
   const lines = new Map<string, Line & { first: MailFrameItem }>()
   for (const item of items) {
-    const key = [item.threadId, item.kind, item.from, item.about ?? '', item.outcome ?? '', item.inline === undefined ? 'q' : item.messageId, item.maybeRepeated ? 'r' : ''].join('|')
+    const key = [item.threadId, item.kind, item.from, item.about ?? '', item.outcome ?? '', item.error ?? '', item.paused ?? '', item.personNote ? 'p' : '', item.inline === undefined ? 'q' : item.messageId, item.maybeRepeated ? 'r' : ''].join('|')
     const kept = lines.get(key)
     if (kept) kept.count++
     else lines.set(key, { text: '', count: 1, first: item })
@@ -103,6 +109,9 @@ function listLines(items: readonly MailFrameItem[]): Line[] {
       (l.count > 1 ? attr('count', l.count, isCount) : '') +
       attr('about', i.about, isAddress) +
       attr('outcome', i.outcome, isOutcome) +
+      attr('error', i.error, isOutcome) +
+      attr('paused', i.paused, isCount) +
+      (i.personNote ? ' personNote="1"' : '') +
       (i.maybeRepeated ? ' maybeRepeated="1"' : '') +
       (i.inline === undefined ? '' : attr('message', i.messageId, isMessageId) + ' inline="1"')
     return { text, count: l.count }

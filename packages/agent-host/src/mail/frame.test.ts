@@ -17,6 +17,15 @@ const item = (n: number, over: Partial<MailFrameItem> = {}): MailFrameItem => ({
 })
 
 describe('the wake frame (§7.3)', () => {
+  it('carries a report’s facts as host fields: the error kind, the tasks left, the person’s note; a value of the wrong shape is left out', () => {
+    const good = mailFrame([item(1, { kind: 'report', from: 'centralu', relation: 'Centralu', outcome: 'failed', error: 'rate_limit', paused: 2, personNote: true })])
+    expect(good).toContain('outcome="failed" error="rate_limit" paused="2" personNote="1"')
+    const bad = mailFrame([item(2, { kind: 'report', from: 'centralu', relation: 'Centralu', outcome: 'failed', error: 'a b"><x', paused: 1_234_567 })])
+    expect(bad).toContain('outcome="failed"')
+    expect(bad).not.toContain('error=')
+    expect(bad).not.toContain('paused=')
+  })
+
   it('names the calls in the form the receiver makes them: the tool, or centralu_run for the orchestrator, which cannot call a command bare (#850)', () => {
     const items = [item(1, { inline: 'x'.repeat(12_000) })]
     const plain = mailFrame(items)
