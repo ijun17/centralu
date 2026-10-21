@@ -16,6 +16,7 @@ import { ExternalSessionsMock } from './external-sessions.js'
 import { FilesMock } from './files.js'
 import { GitMock } from './git.js'
 import { GridMock } from './grid.js'
+import { HostRequestsMock } from './host-requests.js'
 import { HandoffMock } from './handoff.js'
 import { KeeperMock } from './keeper.js'
 import { MachinesMock } from './machines.js'
@@ -77,6 +78,7 @@ export class MockPlatform implements Platform {
   private readonly filesMock = new FilesMock()
   private readonly handoffMock = new HandoffMock(this.store)
   private readonly updatesMock = new UpdatesMock(this.clock, this.forward)
+  private readonly hostRequestsMock = new HostRequestsMock(this.clock, this.forward)
   private readonly keeperMock = new KeeperMock(this.updatesMock)
   private readonly machinesMock = new MachinesMock(this.forward, this.projectStore)
   private readonly mailMock = new MailMock(this.clock, this.forward)
@@ -122,6 +124,7 @@ export class MockPlatform implements Platform {
   readonly prefs = this.preferencesMock.prefs
   readonly themes = this.themesMock.themes
   readonly updates = this.updatesMock.updates
+  readonly requests = this.hostRequestsMock.requests
   readonly relaunch = this.keeperMock.relaunch
   readonly background = this.keeperMock.background
   readonly processes = this.keeperMock.processes
@@ -473,6 +476,9 @@ export class MockPlatform implements Platform {
   set consentsList(value: RulesMock['consentsList']) { this.rulesMock.consentsList = value }
 
   requestApproval(...args: Parameters<ApprovalsMock['requestApproval']>): ReturnType<ApprovalsMock['requestApproval']> { return this.approvalsMock.requestApproval(...args) }
+  raiseHostRequest(...args: Parameters<HostRequestsMock['raiseHostRequest']>): string { return this.hostRequestsMock.raiseHostRequest(...args) }
+  withdrawHostRequest(requestId: string): void { this.hostRequestsMock.withdrawHostRequest(requestId) }
+  get hostRequestAnswers(): HostRequestsMock['hostRequestAnswers'] { return this.hostRequestsMock.hostRequestAnswers }
   replaceApprovalUnseen(...args: Parameters<ApprovalsMock['replaceApprovalUnseen']>): ReturnType<ApprovalsMock['replaceApprovalUnseen']> { return this.approvalsMock.replaceApprovalUnseen(...args) }
   saveProposal(...args: Parameters<ProposalsMock['saveProposal']>): ReturnType<ProposalsMock['saveProposal']> { return this.proposalsMock.saveProposal(...args) }
   setInstalledVersions(...args: Parameters<AgentVersionsMock['setInstalledVersions']>): ReturnType<AgentVersionsMock['setInstalledVersions']> { return this.agentVersionsMock.setInstalledVersions(...args) }

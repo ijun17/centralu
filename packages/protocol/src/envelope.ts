@@ -18,6 +18,16 @@ export const HelloClient = z.object({
    * honoured only together with the current lifetime's epoch; any other cursor gets a resync.
    */
   streamEpoch: z.string().min(1).max(200).optional(),
+  /**
+   * What this client can show (#1405): a window says `host_requests` (`SHOWS_HOST_REQUESTS`), and the host raises a
+   * request from a limited caller only while a window holding the token said so. Unknown entries are ignored. Additive
+   */
+  shows: z.array(z.string().max(40)).max(16).optional().catch(undefined),
+  /**
+   * What the program calls itself (#1405), for a card its call raises: never checked, shown quoted, cut to 60
+   * characters by the host. Additive
+   */
+  client: z.string().max(200).optional().catch(undefined),
 })
 export type HelloClient = z.infer<typeof HelloClient>
 

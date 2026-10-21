@@ -48,6 +48,8 @@ pub mod exe;
 pub mod front_door;
 pub mod handoff;
 pub mod keys;
+pub mod limited;
+pub mod window_peer;
 pub mod server;
 pub mod source;
 pub mod swap;
@@ -190,6 +192,13 @@ pub struct KeeperView {
     /// until the host says, and for a host from before step 3.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub keeps_agents: Option<bool>,
+    /**
+     * Which credential `status.token` is (#1405): `full`, the front door's token, for a window;
+     * `limited`, the limited credential (`limited.rs`), for any other process. Absent from a keeper
+     * from before #1405, which hands everyone the token.
+     */
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rights: Option<String>,
 }
 
 /// Seconds since the epoch, as every record the keeper keeps writes its times.

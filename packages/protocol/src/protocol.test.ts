@@ -242,6 +242,8 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   { type: 'themes_changed' },
   // The screen preferences changed (#1306) — carries nothing, the screen reads prefs.get again
   { type: 'prefs_changed' },
+  { type: 'host_request', request: { requestId: 'r1', method: 'trash.purge', question: 'Delete "x" for good?', client: null, createdAt: 1, expiresAt: 2 } },
+  { type: 'host_request_resolved', requestId: 'r1', outcome: 'allowed' },
   { type: 'external_app_questions_changed' },
   // An orchestrator proposal list changed (#703): carries nothing, the screen refetches both lists
   { type: 'orchestrator_proposals_changed' },

@@ -20,6 +20,7 @@ Current state: **M2 done, dogfooding** — [what M2 actually produced](plans/m2-
 |---|---|---|
 | [domain-model.md](domain-model.md) | The vocabulary: every concept a newcomer meets (project, session and its roles, approval, app, view, keeper, host, swap, …), how they relate, the session state machine, the process tree, the main flows, and where each is stored and defined | — |
 | [generated/schema.md](generated/schema.md) | The store's tables and columns, generated from a real store by `pnpm docs:schema` (English only) | domain-model |
+| [generated/method-rights.md](generated/method-rights.md) | What the limited credential may call, method by method (#1405), generated from the host's table by `pnpm docs:rights` (English only) | security-boundaries |
 | [product-spec.md](product-spec.md) | The spec: requirements (FR-1–22), screens (focus view, grid, project screen), roadmap, risks | — |
 | [architecture.md](architecture.md) | Axes of change, layers, dependency rules, design patterns, process topology; the keeper, switching builds and applying an update (§4.1–4.5, including a keeper that cannot move: §4.4) | product-spec §6 |
 | [folder-structure.md](folder-structure.md) | How the monorepo is split, and where code for a given change goes | architecture |

@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { SessionId, UpdateStatus } from '../../entities.js'
+import { HostRequest, SessionId, UpdateStatus } from '../../entities.js'
 import { HostHandover } from '../../host-logon.js'
 import {
   HostActivity,
@@ -87,6 +87,20 @@ export const hostMethods = {
   'updates.reportApply': {
     params: z.object({ requestId: z.string(), ticket: z.string(), started: z.boolean().optional(), error: z.string().optional() }),
     result: z.object({}),
+  },
+  /**
+   * The host requests waiting for the person (#1405, `HostRequest`), oldest first: what a window shows after it
+   * connects or reconnects, since a `host_request` event it missed is not sent again. Additive
+   */
+  'requests.list': { params: z.object({}), result: z.array(HostRequest) },
+  /**
+   * The person's answer to a host request (#1405). Only a window holding the token may answer (the limited credential
+   * is refused it). `ok` is false when the request is no longer waiting: answered in another window, withdrawn by the
+   * program that asked, or past its time. Additive
+   */
+  'requests.answer': {
+    params: z.object({ requestId: z.string().min(1).max(100), decision: z.enum(['allow', 'deny']) }),
+    result: z.object({ ok: z.boolean() }),
   },
   /**
    * Linked machines (#82, docs/plans/remote-hub.md). The hub's own: these are never forwarded.

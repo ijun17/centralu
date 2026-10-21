@@ -294,6 +294,8 @@ export const useStore = create<AppState>((rawSet, get) => {
     notifyPolicy: DEFAULT_NOTIFY_POLICY,
     importDialog: null as { source: string; fromLink: boolean; at: number } | null,
     update: null,
+    hostRequests: [],
+    hostRequestsHeard: 0,
     agentVersions: null,
     mail: null,
     mailThread: null,

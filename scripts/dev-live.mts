@@ -5,20 +5,24 @@
  *   pnpm dev:live             # http://127.0.0.1:5173/
  *   PORT=5174 pnpm dev:live   # the other origin the host accepts
  *
- * It asks the keeper for the front door's port and token (`<data>/keeper.sock`, op `status`, the
- * same read the app's window makes) and starts Vite with them in the child's environment only:
- * `VITE_HOST_URL` and `VITE_HOST_TOKEN`. The token is never printed. It only reads from the data
+ * It asks the keeper for the front door's port and a credential (`<data>/keeper.sock`, op `status`)
+ * and starts Vite with them in the child's environment only: `VITE_HOST_URL` and `VITE_HOST_TOKEN`.
+ * The credential is never printed. It is the limited one (#1405, owner decision 2026-10-21): this
+ * script is not a Centralu window, so the keeper hands it the credential every other process gets.
+ * The page reads everything and does the everyday things; what cannot be undone, and the answers
+ * to the person's own cards, are the app's window's: such a click raises a card there, or is refused. It only reads from the data
  * folder (`CC_DATA_DIR`, or `~/.centralu`, or `~/.centralu-dev` with `CC_DEV=1`, as the keeper
  * chooses it, `keeper/mod.rs` `data_dir`) and never writes there.
  *
  * Vite listens on 127.0.0.1, not `localhost`, which may resolve to `::1` held by another server:
  * the host accepts browser connections from `http://127.0.0.1:5173` and `:5174` only
- * (`transport/server.ts`), so the port is strict. The token is the front door's: the keeper makes
+ * (`transport/server.ts`), so the port is strict. The credential comes from the front door's token: the keeper makes
  * it once per keeper lifetime (`front_door.rs`), so it survives host swaps and changes only when
  * the app is fully quit and opened again, and the script has to be run again then.
  *
- * The page carries that token, and a loopback port is not per user, so this is for single-user
- * machines (docs/security-boundaries.md, "Local transport").
+ * The page carries that credential, and a loopback port is not per user, so this is still for
+ * single-user machines: another user could read every conversation and act as an everyday client
+ * (docs/security-boundaries.md, "Local transport").
  *
  * The keeper is built on unix sockets, so there is nothing to read on Windows (the app runs the
  * host directly there); the script says so instead of looking for a pipe that does not exist.
@@ -53,7 +57,11 @@ export function keeperSocketPath(env: Env = process.env, home: string = homedir(
   return join(dataDir(env, home), 'keeper.sock')
 }
 
-export type HostDoor = { port: number; token: string }
+/**
+ * The front door's port, the credential the keeper handed this script, and which one it is (`view.rights`, #1405):
+ * `limited` from a keeper that judges windows, null from one from before it, which hands every process the token
+ */
+export type HostDoor = { port: number; token: string; rights: 'full' | 'limited' | null }
 
 /** One request on the keeper's control socket: a JSON line out, a JSON line back. */
 function ask(sock: string, request: unknown, timeoutMs: number): Promise<unknown> {
@@ -96,7 +104,7 @@ export async function readHostDoor(env: Env = process.env, opts: { platform?: st
   const reply = (await ask(sock, { op: 'status' }, opts.timeoutMs ?? STATUS_TIMEOUT_MS)) as {
     ok?: boolean
     error?: unknown
-    view?: { status?: { state?: string; port?: unknown; token?: unknown; message?: unknown } }
+    view?: { status?: { state?: string; port?: unknown; token?: unknown; message?: unknown }; rights?: unknown }
   } | null
   if (!reply || reply.ok !== true) {
     const why = typeof reply?.error === 'string' ? `: ${reply.error}` : ''
@@ -105,7 +113,8 @@ export async function readHostDoor(env: Env = process.env, opts: { platform?: st
   const status = reply.view?.status
   const state = status?.state
   if (state === 'ready' && typeof status?.port === 'number' && typeof status.token === 'string' && status.token !== '') {
-    return { port: status.port, token: status.token }
+    const rights = reply.view?.rights === 'limited' || reply.view?.rights === 'full' ? reply.view.rights : null
+    return { port: status.port, token: status.token, rights }
   }
   if (state === 'failed') {
     const message = typeof status?.message === 'string' ? ` (${status.message})` : ''
@@ -191,8 +200,10 @@ export async function run(env: Env = process.env, deps: Deps = {}): Promise<numb
       throw new LiveError(`Port ${port} on 127.0.0.1 is already in use. The host accepts only 5173 and 5174: free it, or use PORT=${port === 5173 ? 5174 : 5173}.`)
     }
     log(`Open http://127.0.0.1:${port}/  (127.0.0.1, not localhost)`)
-    log('Warning: the page carries this app\'s host token, and any user of this machine can read it from there. Use this on a single-user machine only.')
-    log('The token stays the same until the app is fully quit and opened again: run this again then.')
+    log('Warning: the page carries a credential to this app\'s host (it reads every conversation), and any user of this machine can read it from there. Use this on a single-user machine only.')
+    // A keeper from before #1405 hands every process the full token: the page can then do anything the window can
+    if (door.rights !== 'limited') log("This app's keeper predates the limited credential: the page carries the full host token, and can delete for good without asking. Update the app to close that.")
+    log('The credential stays the same until the app is fully quit and opened again: run this again then.')
     return await (deps.startVite ?? startVite)({
       args: ['--config', 'vite.config.ts', '--host', '127.0.0.1', '--port', String(port), '--strictPort'],
       cwd: WEB,

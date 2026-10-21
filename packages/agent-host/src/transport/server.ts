@@ -11,10 +11,14 @@ import {
   type NormalizedEvent,
   type ProtocolError,
   parseClientFrame,
+  SHOWS_HOST_REQUESTS,
+  errorMessage,
 } from '@cc/protocol'
 import { EventLog } from './event-log.js'
 import { createHttpHandler, sameSecret, type HttpGate } from './http.js'
 import { bridgeRefusal, bridgeSessionOf } from './bridge-token.js'
+import { isLimitedToken } from './limited-token.js'
+import { limitedRefusal } from './method-rights.js'
 import { hostProof } from './host-proof.js'
 import { DrainCut, type Drain } from '../drain.js'
 import { rpcError } from '../rpc-error.js'
@@ -28,7 +32,16 @@ import { rpcError } from '../rpc-error.js'
  * hello is accepted, never reused within one host's life. Something a window holds for as long as
  * it stays (a leased app view, #392) is tied to it, and let go when `onClientGone` names it.
  */
-export type RpcContext = { client: number }
+export type RpcContext = {
+  client: number
+  /**
+   * What the socket said hello with (#1405): `full`, the host's token (a window, or a hub linked to this host), or
+   * `limited`, the limited credential (`limited-token.ts`) every other process of this user is meant to hold. A limited
+   * call reaches the handler only when `method-rights.ts` lets it; a bridge's calls carry `full`, since what a bridge
+   * may call is already narrowed to its own session's tool channel (`bridgeRefusal`)
+   */
+  rights: 'full' | 'limited'
+}
 
 export type RpcHandler = (method: string, params: unknown, ctx?: RpcContext) => Promise<unknown>
 
@@ -114,6 +127,14 @@ export type HostServerOptions = {
   /** A connection that passed hello has ended (its `RpcContext.client`) */
   onClientGone?: (client: number) => void
   /**
+   * A call made with the limited credential that asks the person (#1405, `asks` in method-rights.ts): what answers it,
+   * after the person did (host-requests.ts). `from.client` is what the program called itself in its hello; `signal`
+   * fires when its socket goes. Without it, such a call is refused as before
+   */
+  onAsk?: (method: string, params: unknown, from: { client: string | null }, signal: AbortSignal) => Promise<unknown>
+  /** How many windows that show host requests are attached, each time it changes (#1405, `HostRequests.showingChanged`) */
+  onShowing?: (count: number) => void
+  /**
    * Tracks every RPC for a planned host swap (#280 step 3, drain.ts): once the drain begins, new
    * RPCs are refused and running ones get its bound to finish. Refused and cut calls are answered
    * `retryable: true`, because the same call reaches the next host.
@@ -195,6 +216,8 @@ export class HostServer {
   private wss: WebSocketServer
   private http: Server
   private clients = new Set<WebSocket>()
+  /** The sockets holding the token that said in their hello they show host requests (#1405): windows of this build on */
+  private showing = new Set<WebSocket>()
   /** The last `RpcContext.client` given out */
   private lastClient = 0
   /** Handshake deadlines of sockets that have not sent a valid hello yet */
@@ -403,9 +426,17 @@ export class HostServer {
     for (const ws of this.clients) this.sendTo(ws, frame)
   }
 
-  /** The connections that said hello with the front door's token: windows, and a hub linked to this host. Never a bridge */
+  /**
+   * The connections that receive events: windows and a hub linked to this host (the token), and the limited
+   * credential's (#1405). Never a bridge
+   */
   get clientCount(): number {
     return this.clients.size
+  }
+
+  /** Whether a window that shows host requests is attached with the token (#1405, `hello.shows`) */
+  showsHostRequests(): boolean {
+    return this.showing.size > 0
   }
 
   /** This host lifetime's id — sent in every `hello_ok` (#82) */
@@ -467,6 +498,12 @@ export class HostServer {
     let authed = false
     /** The session whose bridge credential this socket said hello with; null for the front door's token */
     let bridgeOf: string | null = null
+    /** Whether this socket said hello with the limited credential, not the token (#1405) */
+    let limited = false
+    /** What the program called itself in its hello (#1405), for a card its call raises; cut, never checked */
+    let label: string | null = null
+    /** Fires when this socket goes: a host request its call raised is withdrawn (#1405) */
+    const leaving = new AbortController()
     /** Whether this socket already asked for the host's proof (`prove`, #838): once, before hello */
     let proved = false
     const client = ++this.lastClient
@@ -509,7 +546,7 @@ export class HostServer {
         if (!authed) return this.refuse(ws, CLOSE_AUTH, 'not a hello')
         // An answer to one of this host's calls that does not read still ends that call (#550), as the link client's does
         const f = parsedJson as { kind?: unknown; id?: unknown } | null
-        const call = f?.kind === 'res' && typeof f.id === 'string' && bridgeOf === null ? this.calls.get(ws)?.get(f.id) : undefined
+        const call = f?.kind === 'res' && typeof f.id === 'string' && bridgeOf === null && !limited ? this.calls.get(ws)?.get(f.id) : undefined
         if (call) return call.reject(rpcError('The other side answered in a form this host does not read'))
         return this.sendError(ws, null, { code: 'internal', message: 'Unknown frame', retryable: false })
       }
@@ -535,9 +572,11 @@ export class HostServer {
          */
         if (authed) return
         if (!sameSecret(frame.data.token, this.opts.token)) {
+          // Every process of this user but the window holds the limited credential (#1405, limited-token.ts)
+          limited = isLimitedToken(this.opts.token, frame.data.token)
           // A Codex bridge holds a credential for its own session's calls only (bridge-token.ts)
-          bridgeOf = bridgeSessionOf(this.opts.token, frame.data.token)
-          if (bridgeOf === null) {
+          if (!limited) bridgeOf = bridgeSessionOf(this.opts.token, frame.data.token)
+          if (!limited && bridgeOf === null) {
             this.refuse(ws, CLOSE_AUTH, 'bad token')
             return
           }
@@ -571,6 +610,11 @@ export class HostServer {
         }
         this.clients.add(ws)
         this.byClient.set(client, ws)
+        label = frame.data.client?.trim().slice(0, 60) || null
+        if (!limited && frame.data.shows?.includes(SHOWS_HOST_REQUESTS)) {
+          this.showing.add(ws)
+          this.opts.onShowing?.(this.showing.size)
+        }
         this.greet(ws, frame.data.afterSeq ?? 0, frame.data.streamEpoch)
         return
       }
@@ -580,9 +624,9 @@ export class HostServer {
         return
       }
 
-      // The answer to a call this host sent a hub on this socket (#550); one it never sent is nobody's
+      // The answer to a call this host sent a hub on this socket (#550); one it never sent is nobody's. A hub holds the token
       if (frame.data.kind === 'res') {
-        if (bridgeOf === null) this.answered(ws, frame.data)
+        if (bridgeOf === null && !limited) this.answered(ws, frame.data)
         return
       }
 
@@ -592,8 +636,36 @@ export class HostServer {
         const refusal = bridgeRefusal(bridgeOf, method, params)
         if (refusal !== null) return this.sendError(ws, id, { code: 'internal', message: refusal, retryable: false })
       }
+      /*
+       * The limited credential calls the everyday methods only (#1405, method-rights.ts). Checked here, before the
+       * router, so a call naming a linked machine's session is judged on this host, where it started, and never relayed.
+       */
+      if (limited) {
+        const refusal = limitedRefusal(method, params)
+        // What cannot be undone waits for the person instead (host-requests.ts), and the call answers when they did
+        if (refusal?.rights === 'asks' && this.opts.onAsk) {
+          try {
+            const result = await this.opts.onAsk(method, params, { client: label }, leaving.signal)
+            this.sendTo(ws, JSON.stringify({ kind: 'res', id, ok: true, result }))
+          } catch (err) {
+            // A refusal says why in `data` (host-requests.ts): kept for a program to read
+            const data: unknown = err !== null && typeof err === 'object' && 'data' in err ? err.data : undefined
+            // An allowed call a swap refused or cut says "send it again", as any call does
+            this.sendError(ws, id, { code: 'internal', message: errorMessage(err), retryable: err instanceof DrainCut, ...(data !== undefined ? { data } : {}) })
+          }
+          return
+        }
+        if (refusal !== null) {
+          console.error(`[agent-host] refused ${JSON.stringify(method)} to a connection holding the limited credential (${refusal.rights})`)
+          /*
+           * `internal` with the reason in `data`, not a new error code: a reader from before #1405 parses the code
+           * against its own list, and the refusal is a fact for a program to read, as `version_mismatch`'s data is
+           */
+          return this.sendError(ws, id, { code: 'internal', message: refusal.message, retryable: false, data: { refused: 'rights', rights: refusal.rights } })
+        }
+      }
       try {
-        const run = () => this.opts.onRpc(method, params, { client })
+        const run = () => this.opts.onRpc(method, params, { client, rights: limited ? 'limited' : 'full' })
         const result = await (this.opts.drain ? this.opts.drain.track(`rpc ${method}`, run) : run())
         this.sendTo(ws, JSON.stringify({ kind: 'res', id, ok: true, result }))
       } catch (err) {
@@ -617,6 +689,8 @@ export class HostServer {
       clearTimeout(this.handshakeTimers.get(ws))
       this.handshakeTimers.delete(ws)
       this.clients.delete(ws)
+      if (this.showing.delete(ws)) this.opts.onShowing?.(this.showing.size)
+      leaving.abort()
       if (this.byClient.get(client) === ws) this.byClient.delete(client)
       this.failCalls(ws, 'The connection ended before it answered')
       // 'error' is followed by 'close': said once

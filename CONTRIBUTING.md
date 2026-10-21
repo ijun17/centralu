@@ -118,10 +118,10 @@ pnpm dev:live             # http://127.0.0.1:5173/
 PORT=5174 pnpm dev:live   # the other origin the host accepts
 ```
 
-It reads the front door's port and token from the keeper (`<data folder>/keeper.sock`, op
+It reads the front door's port and a credential from the keeper (`<data folder>/keeper.sock`, op
 `status`; the data folder is `CC_DATA_DIR`, or `~/.centralu`) and starts Vite for `apps/web`
 with them set for that Vite only (`VITE_HOST_URL`, `VITE_HOST_TOKEN`). It reads the data
-folder and never writes there, and it never prints the token. Open the address it prints
+folder and never writes there, and it never prints the credential. Open the address it prints
 with `127.0.0.1`, not `localhost`: the host accepts browser connections only from
 `http://127.0.0.1:5173` and `:5174`, so the port is strict and a taken port is an error, not a
 move to another one. The token stays the same across host swaps and updates and changes only when the app is
@@ -130,9 +130,11 @@ It says in one line when no app is running, when the keeper has no host yet, and
 port is taken. Windows has no keeper (the app runs the host directly there), so use the
 shell recipe above.
 
-That page carries the real host's token, so everything the app can do, the page can do. A
-loopback port is not per user: on a machine with other users, any of them can read the token
-from the page, so use this on a single-user machine only. See
+The credential is the limited one (#1405): the page reads everything and does the everyday
+things, but deleting for good, trusting, installing and answering the app's own cards are the
+app window's. Such a click raises a card in the app's window, or is refused. A loopback port is
+not per user: on a machine with other users, any of them can read the credential from the page
+and every conversation with it, so use this on a single-user machine only. See
 [security boundaries](docs/security-boundaries.md#local-transport).
 
 For the real app rather than the browser:

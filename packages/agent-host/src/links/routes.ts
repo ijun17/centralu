@@ -308,6 +308,9 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'updates.setAutoApply': HUB,
   'updates.apply': HUB,
   // The hub's own windows answer the hub's own host (#665); a linked machine's events never ask them
+  // Host requests are this host's own (#1405): a linked machine's limited callers are refused there, not carded here
+  'requests.list': HUB,
+  'requests.answer': HUB,
   'updates.answerApply': HUB,
   'updates.reportApply': HUB,
   'machines.list': HUB,

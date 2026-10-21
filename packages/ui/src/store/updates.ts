@@ -1,3 +1,4 @@
+import { errorMessage } from '@cc/protocol'
 import type { AppState, StoreGet, StoreSet } from './state.js'
 import { agentApplyVerdict } from '../features/settings/apply-offer.js'
 
@@ -35,6 +36,8 @@ type UpdateActions = Pick<
   | 'answerApplyRequest'
   | 'runApplyRequest'
   | 'checkAgentVersions'
+  | 'refreshHostRequests'
+  | 'answerHostRequest'
   | 'setAgentAutoApply'
   | 'applyAgentVersions'
 >
@@ -144,6 +147,32 @@ export const updateActions = (set: StoreSet, get: StoreGet): UpdateActions => ({
     await platform.updates.reportApply({ requestId, ticket, started: true }).catch(() => {})
     const error = await get().applyUpdateNow()
     await platform.updates.reportApply({ requestId, ticket, ...(error ? { error } : {}) }).catch(() => {})
+  },
+
+  async refreshHostRequests() {
+    const platform = get().platform
+    if (!platform) return
+    const heard = get().hostRequestsHeard
+    try {
+      const hostRequests = await platform.requests.list()
+      // An event that arrived while the list was on its way is newer than the list: the events have kept it current
+      if (get().hostRequestsHeard === heard) set({ hostRequests })
+    } catch {
+      // An older host does not know them, and a host that did not answer is read again on the next reconnect
+    }
+  },
+
+  async answerHostRequest(requestId, decision) {
+    const platform = get().platform
+    if (!platform) return
+    try {
+      const r = await platform.requests.answer(requestId, decision)
+      if (!r.ok) set({ toast: 'That request no longer waits: it was answered in another window, withdrawn by the program, or it expired' })
+    } catch (e) {
+      set({ toast: errorMessage(e) || 'Could not answer the request' })
+    }
+    // Whether it landed or not, the list follows the host's
+    await get().refreshHostRequests()
   },
 
   async checkAgentVersions(force = false) {

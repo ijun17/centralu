@@ -61,6 +61,11 @@ import { scenarioBackgroundOff, scenarioBackgroundOn, scenarioBusyHoldsIdle, sce
 import { scenarioFromACopy, scenarioRelaunch } from './keeper-integration-relaunch.mjs'
 import { scenarioDrainCutsSlowCall, scenarioSwap } from './keeper-integration-swap.mjs'
 
+// The clients here are this Node process, not a Centralu window: a debug keeper started with this also accepts its
+// executable as a window's, so they get the token and may switch and upgrade (#1405, keeper/window_peer.rs). A release
+// keeper ignores it.
+process.env.CC_KEEPER_TEST_WINDOW_EXE = process.execPath
+
 async function main() {
   if (!process.argv.includes('--no-build')) {
     log('bundling the host (pnpm bundle:host)')

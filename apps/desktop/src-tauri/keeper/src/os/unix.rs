@@ -14,7 +14,7 @@ use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
 use std::process::Command;
 
-pub use super::this_unix::{peer_pid, peer_uid};
+pub use super::this_unix::{code_signature_display, exe_of_pid, peer_pid, peer_uid};
 
 /// Every descriptor above stderr this process has open, except those in `keep`: what it inherited,
 /// when it is asked before it opens anything of its own. `/dev/fd` lists them on macOS and Linux

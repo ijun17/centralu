@@ -407,6 +407,17 @@ describe('RpcClient — the starting point for replay (#173)', () => {
  * #82: recovery hardening for the local app. Every test here was run against the code before it
  * and failed; the failures are quoted in the pull request.
  */
+describe('RpcClient — what the window says it shows (#1405)', () => {
+  it("says in its hello that it shows host requests, so a host raises a limited caller's card for it", () => {
+    const rpc = makeClient()
+    rpc.connect()
+    const ws = FakeWebSocket.last
+    ws.open()
+    const hello = JSON.parse(ws.sent[0]!) as { kind: string; shows?: string[] }
+    expect(hello).toMatchObject({ kind: 'hello', shows: ['host_requests'] })
+  })
+})
+
 describe('RpcClient — authenticated readiness (#82)', () => {
   const rpcFrames = (ws: FakeWebSocket) => ws.sent.map((s) => JSON.parse(s) as { kind: string; id?: string }).filter((f) => f.kind === 'rpc')
 

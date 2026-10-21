@@ -128,3 +128,14 @@ pub fn all_pids() -> Vec<i32> {
 fn proc_state(stat: &str) -> Option<char> {
     stat.rsplit_once(')')?.1.trim_start().chars().next()
 }
+
+/// The executable `pid` runs (#1405): `/proc/<pid>/exe`, which names the file the process was
+/// started from, as the kernel recorded it.
+pub fn exe_of_pid(pid: u32) -> io::Result<std::path::PathBuf> {
+    std::fs::read_link(format!("/proc/{pid}/exe"))
+}
+
+/// No code signatures to read here (#1405): a keeper here judges a window by its executable's name.
+pub fn code_signature_display(_exe: &std::path::Path) -> Option<String> {
+    None
+}

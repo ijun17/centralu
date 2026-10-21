@@ -788,6 +788,11 @@ card, and so is one whose machine could not list its apps (they are asked of tha
 (running agents per project, levels that may start agents) bound the
 orchestrator's own children too, so every change to them asks, narrowing as well as widening.
 
+A program that is not a window and holds the limited credential (#1405) is asked through none of the cards above: its
+irreversible calls raise a **host request**, the host's own card with Allow and Deny only, which only a window holding
+the token answers, refused at once with no such window, withdrawn when the program leaves and after 15 minutes ("The card
+for a limited call", under "Who holds full power").
+
 ### Turning things off
 
 The table describes `safe`/`normal`. Under `auto`, project trust and revoked remembered
@@ -1095,20 +1100,113 @@ a frame may be up to 100 MiB (the library's default, set explicitly); a bigger o
 (1009). The token is compared in constant time. An authenticated socket's hello is
 answered once; a repeat is ignored. A hello may carry a Codex bridge's credential instead of the token
 (#382, "The front door" below); that socket receives no events and may call only its own session's
-bridge RPCs.
+bridge RPCs. It may also carry the limited credential, which calls only the everyday methods ("Who holds full power",
+below).
 
-`pnpm dev:live` (#739) is the one script that puts a real token into a browser page. It reads the running app's
-front door port and token from the keeper's `status` and gives them to the Vite it starts, as `VITE_HOST_URL`
-and `VITE_HOST_TOKEN` in that child's environment only (not printed, not written anywhere). Vite bundles
-`VITE_*` values into the page, so the page it serves, on `http://127.0.0.1:5173` or `:5174`, holds the real
-token and can do anything the app's window can. That page does **not** have the protection of the keeper
+`pnpm dev:live` (#739) is the one script that puts a host credential into a browser page. It reads the running
+app's front door port and credential from the keeper's `status` and gives them to the Vite it starts, as
+`VITE_HOST_URL` and `VITE_HOST_TOKEN` in that child's environment only (not printed, not written anywhere). Since
+#1405 the script is not a window to the keeper, so the credential is the limited one (owner, 2026-10-21): the page
+reads every conversation and does the everyday things, and what cannot be undone raises a card in the app's own
+window (or, for the person's own answers, is refused). Vite bundles `VITE_*` values into the page, so the page it
+serves, on `http://127.0.0.1:5173` or `:5174`, holds that credential. That page does **not** have the protection of the keeper
 socket ("The keeper's control socket" below: `0600`, peer uid checked). A loopback TCP port is not per user:
 on a machine with other users, any of them can fetch `http://127.0.0.1:5173/` and read the token from the
-served bundle, and then connect to the front door. So `dev:live` is for single-user machines, and it prints
-a warning saying so. The dev server listens on `127.0.0.1` only (never `0.0.0.0`): do not expose it (no
-`--host` other than `127.0.0.1`, no tunnel). The token is the front door's, which the keeper makes once per
+served bundle, and then connect to the front door and read every conversation. So `dev:live` is for single-user
+machines, and it prints a warning saying so. The dev server listens on `127.0.0.1` only (never `0.0.0.0`): do not expose it (no
+`--host` other than `127.0.0.1`, no tunnel). The credential is derived from the front door's token, which the keeper makes once per
 keeper lifetime and keeps across host swaps and keeper handoffs (`front_door.rs`); it changes only when the
 keeper restarts, that is, when the app is fully quit and opened again, and the script is run again then.
+
+## Who holds full power (#1405)
+
+On 2026-10-21 the orchestrator misread "empty the trash" (the person meant the Windows Recycle Bin), read the front
+door's token from the keeper's `status`, and called `trash.purge` through a script it wrote: the hub relayed it to a
+linked machine, and 108 trashed sessions were deleted with no question. The window asks first; the orchestrator's own
+`delete_trashed` / `empty_trash` raise a card; the raw path asked nothing.
+
+**What this defends against:** a process of the person's own user that is not the person's click in a window (an
+agent, a script it wrote, a tool or MCP server, an app server, a `pnpm dev:live` page) getting full host power from a
+documented interface and using it without the confirmation the window shows. **The honest limit:** such a process runs
+as the same user. It can delete `store.db`, edit it with `sqlite3`, remove the data folder, attach a debugger where the
+OS allows it, start the app's own executable, or ssh to a linked machine with the person's key. None of that is closed.
+What is removed is the path where full, unconfirmed power is one request away; it is not a wall between processes of one
+user, and where it cannot prevent it prefers to be loud.
+
+**Two rights at hello**, besides the Codex bridge's credential above (`transport/server.ts`): the token, which a window and a hub linked to this host hold, calls
+everything; the **limited credential** (`ccl1:<mac>`, an HMAC of a label of its own keyed by the token,
+`transport/limited-token.ts`) calls the everyday methods only. It is derived, not stored, as the bridge's is: the next
+host after a swap accepts it with nothing handed over, and holding it gives nothing toward the token. A socket holding it
+is a client like a window (it gets the event stream: owner, 2026-10-21, to revisit once the orchestrator's tooling no
+longer needs it), but none of its `res` frames answers the host's own calls, which are a hub's.
+
+**Where it is judged:** in the transport, before the router, on the host where the call starts. A limited call naming a
+linked machine's session is refused on the hub and never relayed; the machine does not judge again, since it cannot tell
+a relayed call's origin.
+
+**What it may call** (`transport/method-rights.ts`, keyed by every RPC method with no default, so a method added to the
+protocol does not compile until someone classifies it, and a test compares its keys with the protocol's):
+
+| Class | With the limited credential | Which methods |
+|---|---|---|
+| everyday | runs | reading, creating and messaging sessions (a preset of `normal` or below), renaming, sleep policy, the trash's list, read and restore, git, files, terminals, commands, stopping a process, app upkeep that keeps what it replaces. What the user could do by hand anyway is not held back |
+| asks | waits for the person's card in the window and runs once allowed ("The card for a limited call" below); refused at once when no window that shows the card holds the token | deleting for good (`trash.purge`, `trash.purgeRuns`, `trash.purgeSubagentSteps`, `trash.empty`); deleting a session (#1371: not fully undoable); deleting or adding a project, its trust either way, its commands, worktree setup and agent instructions; removing, enabling, importing apps, sharing one; adding, removing, installing, updating, rolling back, uninstalling a machine, its autostart, its versions, letting it ask or start `auto` here; installing an update or turning automatic updates on; a session created above `normal` or carrying a hub's preset (`fromHub`: an `auto` one starts it under `auto` while the hub-auto switch is on, and only a hub, which holds the token, sends it), or set to any preset but `safe` (the parameters do not say what it was); a preference that sets the agent ceiling or depth, turns hub auto on, or turns approval notifications or their sound off |
+| window | refused, never a card | the person's own answers (approval cards, questions, an update's apply and its report, whose ticket every client hears, MCP and skill proposals), the window's layout written whole, an app's secret, an import's preparing and cancelling, an app view's own calls |
+| link | refused | a hub's `host.*` calls (`host.stop` and `host.activity` are everyday: stopping is what `kill` does) |
+| bridge | refused | `orchestrator.tool(s)`, `apps.sessionTools`, `apps.sessionCall`: through them a caller would act as an `auto` session, whose own cards are skipped |
+
+The full list, method by method, is [generated/method-rights.md](generated/method-rights.md), written from the table by
+`pnpm docs:rights` and checked by a test. A method whose answer depends on its parameters reads them as sent, before they
+are parsed, and asks when it cannot read them. The rule for `asks`: it deletes beyond what the trash brings back, moves out of reach what the trash does not fully
+restore, widens what agents, apps or machines may do without the person, or brings in code that later runs unasked;
+and everything the orchestrator's tools card in every preset is `asks` too. A test reads the orchestrator's flows
+(`sessions/*-flow.ts`) and fails when a window method they call after their card (in the same block) is everyday here,
+unless it is a read made again after Allow; a card raised only in some branches (restoring a session whose project was
+deleted) is not seen by it. A refusal is `ok: false` with
+`data: { refused: 'rights', rights }` and a line in the host's log naming the method; the socket stays open.
+
+**The card for a limited call** (`host-requests.ts`, slice 3). An `asks` call is held, and the host raises a
+**host request**: not a session's card (the program holds no session's rights, and a card in the orchestrator's slot
+would read as the orchestrator's doing) but the host's own, shown over the lanes of every window that said in its hello
+that it shows them (`hello.shows`), one at a time, oldest first.
+
+- **What it names.** The trash's deletes ask through the orchestrator's own trash flow with this card in place of
+  the orchestrator's: the same question, naming each session (quoted on one line), its machine, its size and what goes
+  with it, and the same reading of the trash again after Allow: a session restored meanwhile is not deleted, and
+  `trash.empty` deletes only the rows its card listed, never what arrived while it stood. Any other method's call is
+  parsed by the method's own schema first (`host-request-targets.ts`): a field the method does not take is dropped, so
+  a caller cannot put text on the card that would not run, and a call the method would refuse is refused before it
+  asks. The card names the method, what it acts on by name as the window's lists name it (the session, project, app or
+  linked machine, with the machine it lives on), what a delete loses, and the parsed parameters, quoted on one line with
+  format characters escaped; the call runs with those parameters. An id that names nothing is refused, and after Allow
+  the names are read again: a call whose target was renamed, deleted or unlinked while the card stood does not run.
+  Parameters too long to show whole (over 2,000 characters) are refused rather than cut, since what runs is what the
+  card shows. The card wraps a line anywhere, so a long one is not clipped.
+  The program's own name (`hello.client`) is shown quoted, cut to 60 characters, and said to be what it calls itself:
+  nothing checks it.
+- **Who answers.** Only a window holding the token (`requests.answer` is `window`): never the program, another
+  limited socket, a bridge or an agent. Allow and Deny only, no "always" (owner, 2026-10-21), and no key: a y meant for
+  the composer must not delete something for good. A card's buttons take a click only once it has stood half a second,
+  and one click: the next card appears where the last one was, and the program hears each answer and can ask again.
+- **When it is refused at once.** No window that shows host requests holds the token (owner, 2026-10-21: refused,
+  not left standing): an older window, a hub's link and the limited credential count for nothing. Or 8 already wait,
+  counted again when the card is raised (a trash delete reads the trash first, so many at once cannot pass the bound).
+- **When it ends unanswered.** The program's socket closes, 15 minutes pass (owner, 2026-10-21: the one card with a
+  timer, since a raw call has no turn to end it), no window shows requests for 30 seconds (a window that reloads comes
+  back within it and keeps its cards), or the host stops (its sockets close with it). Nothing is kept across a swap: the caller asks the
+  next host again. An allowed call runs as a call the host serves, so a swap's drain refuses or cuts it like any other.
+- **Linked machines.** The card is raised on the host where the call started, before the router, so a call naming a
+  linked machine's session asks on the hub and is relayed only once allowed (with the hub's link, which holds that
+  machine's token). A linked machine's own limited callers are refused there: no window there shows host requests, and
+  the hub does not show a machine's (`requests.*` are never forwarded).
+- **Residual.** A window built with `dev:live` holds the limited credential and is a window all the same: it shows
+  the card, and its Allow is refused (`window`), so the person answers in the app's own window.
+
+**Who holds what, today.** Built so far: the credential, the classification (slices 1 and 2), the card (slice 3), and
+the keeper handing the token to windows only (slice 4, "The keeper's control socket" below): a script that asks
+`keeper.sock` gets the limited credential. Not yet: the serve host's `serve.json` (below) still holds its token until
+slice 5, which a process of the user on a linked machine, or on Windows where the window attaches to the folder's serve
+host, can read; and the direct host on Windows gives its token only to the window that started it.
 
 ## The remote host (`centralu serve`, #82)
 
@@ -1192,8 +1290,49 @@ A host started with `centralu serve` on another machine is reached by the app th
 ## The keeper's control socket
 
 The keeper (`centralu-keeper`, #280, #440) is a new trust boundary: through its socket a process can read the front
-door's port and token, stop the host, and make the keeper run a host from another folder (`switch`). The rule is the same
-as for the token itself, which only this user can read: **only this user's processes get in.**
+door's port and a credential, stop the host, and make the keeper run a host from another folder (`switch`). The rule:
+**only this user's processes get in, and only a Centralu window gets the token** (#1405).
+
+- **Who is a window** (`keeper/window_peer.rs`). The peer pid the kernel recorded at `connect` (`LOCAL_PEERPID`,
+  `SO_PEERCRED`, as the child socket reads it) names an executable (`proc_pidpath`, `/proc/<pid>/exe`) that is, by
+  exact resolved path, one of the window executables the keeper accepts (`accepted_windows`): the `centralu` beside
+  the keeper's own executable (the macOS bundle's `Contents/MacOS/`, a debug build), unless the keeper runs from
+  `<data>/content/`, where a file dropped beside it proves nothing; and the window of each build the keeper names: its
+  own `--bundle-path` and the bundle of the current host's and the next launch's build, which only a window's `switch`
+  sets (`<bundle>/Contents/MacOS/centralu` for a macOS bundle, the executable itself elsewhere). What a client says
+  about its own build in `attach` counts for nothing. A file named `centralu` anywhere else, a renamed `node` among
+  them, is not a window. Linux's ` (deleted)` mark is taken only after an accepted path (an update replaced the
+  file). On a keeper signed with a team identifier the executable must also be signed by that team (`codesign
+  --display`), and one whose signature cannot be read is not a window; no release is signed with a team today
+  (macOS releases are signed ad hoc), so in every build that ships the path decides. A peer whose pid or executable
+  the kernel does not name is not a window. The keeper judges before it takes its state lock, logs every refusal with
+  the executable, the accepted paths and why, and a window given the limited credential says so in its own log. A
+  window adopted in a keeper handoff is judged again from its socket, whose peer record travels with it. A test runs
+  two copies of the test binary against the socket, one at the accepted path and one named `centralu` elsewhere: only
+  the first gets the token (`only_the_accepted_window_executable_gets_the_token`).
+- **What a window gets.** `status` and `attach` carry the front door's token (`view.rights: "full"`), and so does
+  every status pushed to it. It alone may `switch` and `upgrade`, which start a build of the request's naming and hand
+  it the token.
+- **What anything else gets.** The limited credential in the token's place (`view.rights: "limited"`, `limited.rs`,
+  derived as the host derives it, so it works behind the door across swaps), on `status`, `attach` and every push to
+  it; `switch` and `upgrade` are refused (`window_only`). `stop`, `restart`, `relaunching`, `settings`,
+  `set_background` and `children` hand out no token and stay open to this user. A test sends every op from a process
+  that is not a window and fails if any line it gets back holds the token
+  (`no_reply_carries_the_token_to_a_process_that_is_not_a_window`); the ops are listed once (`OPS`) and a second test
+  checks the list against the dispatcher.
+- **Residuals.** A process of this user can start the app's own executable, which opens a window the person sees, or
+  replace the file at an accepted path (an app bundle is the user's to change). A peer can connect and then `exec` the
+  window's executable, keeping its pid: the window it starts flashes on screen. `codesign --display` reads the file
+  now at the path, not the code running in the peer; a team-signed keeper should judge the peer's audit token
+  (`LOCAL_PEERTOKEN`, `SecCodeCopyGuestWithAttributes`) before releases are signed with a team (#1439). On
+  Linux, where the keeper runs only with `CC_USE_KEEPER=1`, a window runs from its AppImage's mount, whose path
+  changes at every launch: only the window that started or switched the keeper is accepted, and a later launch gets
+  the limited credential until a window of its own starts a keeper; to settle before the Linux keeper runs by
+  default.
+  A debug keeper started with `CC_KEEPER_TEST_WINDOW_EXE=<path>` also accepts that executable, for the integration
+  scripts, which pass the `node` that runs them; a release keeper compiles that out. An older keeper (before #1405) still hands the
+  token to every process until the app is fully quit or the keeper is updated (its update hands over to a keeper that
+  judges windows).
 
 - The socket is `<data>/keeper.sock`, created under `umask 077` so it is born `0600`, with no window before a chmod.
 - Every connection's peer uid is read from the kernel (`getpeereid` on macOS, `SO_PEERCRED` on Linux) and the
@@ -1207,9 +1346,12 @@ as for the token itself, which only this user can read: **only this user's proce
 
 Limits:
 
-- `switch` runs `main.mjs` from whatever host folder the request names. Any process of this user can therefore make
-  the keeper run code of its choosing — which that process could do by itself anyway. It is not a privilege
-  boundary between processes of the same user, and is not meant to be one.
+- `switch` runs `main.mjs` from whatever host folder the request names, and only a window may ask (#1405): it would
+  otherwise hand the token to code of the caller's choosing. A process of this user can still replace the files of a
+  host folder before a window switches to it; that is the same-user residual, not a boundary. The same holds with no
+  window at all: a host the keeper restarts after it exits runs from its copy as the copy is (`<data>/hosts/<key>/`,
+  or `<data>/content/<version>/host/`, not verified again before each launch), so a process that edits the copy and
+  then ends the host (its pid is in `status`) has its own code started with the token.
 - `relaunching` (#352) keeps a keeper with no window running for at most 300 s, whatever background mode says. It
   grants nothing `set_background` does not already, and only for a bounded time.
 - `children` (#538) lists what the keeper holds (each child's id, pid, kind, tag and state), read-only: the child
@@ -1244,11 +1386,12 @@ host. It changes where a client connects, not what it must prove:
   same `sysctl` for pid 1, a root process, failed with `EINVAL`. So what a process is started with stays readable
   to every process of its user for as long as it runs; on Linux `/proc/<pid>/environ` is the same initial block
   (not measured here). That is why the keeper and `centralu serve` stopped putting the token there (#538): a pipe's
-  bytes are read once, by the one process holding its end. What is left: the control socket's `status` and `attach`
-  hand the token to any process of this user, since every window needs it and no window is the keeper's child
-  (the owner kept that path when deciding #538; "The keeper's child socket" below is the one limited to the
-  keeper's own children). So the token is still not a boundary between processes of the same user, and does not
-  try to be one; it is no longer in any process's start environment for one to read.
+  bytes are read once, by the one process holding its end. What was left: the control socket's `status` and `attach`
+  handed the token to any process of this user, since every window needs it and no window is the keeper's child
+  (the owner kept that path when deciding #538). Since #1405 they hand it only to a Centralu window, judged by the
+  exact path of the executable the kernel names for the peer ("The keeper's control socket" above); any other process gets the limited
+  credential. So the token is not one request away any more, though it is still not a wall between processes of the
+  same user (the residuals above); it is no longer in any process's start environment for one to read.
 - **The Codex bridge gets a credential of its own, not the token** (#382, owner question 4, decided 2026-10-11).
   Codex starts the bridge with the front door's address and `CC_BRIDGE_TOKEN`, an HMAC of the bridge's session id
   keyed by the token (`transport/bridge-token.ts`, `bridgeAddress`). Before this the bridge held the token itself,
@@ -1319,11 +1462,10 @@ be on the other end matters as much as on `keeper.sock`.
   at all; there is no socket file to protect with `0600` and none to remove. The incoming keeper
   still reads its peer's uid from the kernel and refuses another user's.
 - The process started is the executable named by `switch` (`keeper.exe`) or `upgrade` (`exe`):
-  the app's own executable inside its bundle. Like `switch`'s host folder, any process of this user
-  can name another one through `keeper.sock`, and the keeper will start it and hand it the token and
-  every handle. That is no new power: the same user can already read the token from the socket and
-  the agents' streams from the child socket. It is not a boundary between processes of the same
-  user.
+  the app's own executable inside its bundle. Only a Centralu window may send either (#1405), since
+  the keeper starts what it names and hands it the token and every handle. A process of this user
+  that replaces a bundle's files before a window switches to it is the same-user residual, not a
+  boundary.
 - Nothing from the channel is logged: the snapshot carries the token, and the log lines name only
   pids, counts and reasons.
 - The incoming keeper proves it holds `keeper.lock` by taking the `flock` on the passed description

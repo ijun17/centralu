@@ -51,6 +51,7 @@ import { parseSleepSetting, SessionSleeper, sleepOverrideFrom, storedSleepSettin
 import { acquireInstanceLock, lockConflictMessage } from './dev-services/instance-lock.js'
 import { hostLogPath, startupBanner, teeStderrToFile } from './log-file.js'
 import { hostDrain } from './drain.js'
+import { HostRequests } from './host-requests.js'
 import { createStopGate } from './lifecycle/stop-gate.js'
 import { stopGitChildren } from './dev-services/git-exec.js'
 import { Gate } from './lifecycle/gate.js'
@@ -652,6 +653,15 @@ const activity = (): ActivitySnapshot => ({
   terminals: terminals.liveCount(),
   commandRuns: commandRuns.liveCount(),
 })
+/**
+ * The limited credential's calls that wait for the person (#1405, host-requests.ts): raised while a window that shows
+ * them is attached, run through the router once allowed, as a call this host serves (a swap's drain refuses or cuts it)
+ */
+const requests: HostRequests = new HostRequests({
+  emit: (e) => events.push(e),
+  rpc: (method, params) => hostDrain.track(`request ${method}`, () => router.handle(method, params)),
+  canShow: (): boolean => server.showsHostRequests(),
+})
 const router: Router = new Router({
   forwarding: (method, params) => mgr.forwarding(method, params),
   local: createRpcHandler(mgr, adapters, {
@@ -682,6 +692,7 @@ const router: Router = new Router({
     updateApply,
     hubs,
     mail: mailPerson,
+    requests,
   }),
   machines: () => links.all(),
   order: storeProjectOrder(store),
@@ -712,6 +723,10 @@ const server = new HostServer({
   token,
   allowedOrigins,
   onRpc: router.handle,
+  // A limited call that cannot be undone waits for the person's card (#1405)
+  onAsk: (method, params, from, signal): Promise<unknown> => requests.ask(method, params, from, signal),
+  // A card nobody can see is withdrawn once no window shows them for a while (host-requests.ts)
+  onShowing: (count) => requests.showingChanged(count),
   // A window's connection ended: the pinned views it leased wait for a claim, then close (#392, view-host.ts)
   onClientGone: (client) => {
     views.holderGone(client)

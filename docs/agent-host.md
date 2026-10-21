@@ -1636,6 +1636,11 @@ window's channel), grouped, and for each group one of three states.
 | Terminals, commands and processes. `terminal.*`, `commands.*`, `processes.strays`, `processes.stop` | **Person** | A shell and run commands on the person's behalf, and stopping a process; the orchestrator has no shell of its own, its sessions do |
 | The orchestrator's own channel. `orchestrator.get`, `orchestrator.peek`, `orchestrator.configure`, `orchestrator.tools`, `orchestrator.tool` | Not an errand | How the window and the bridge reach the orchestrator itself |
 
+The same methods are classified once more for a caller that is neither the window nor the orchestrator (#1405): a
+script or tool holding the limited credential runs the everyday ones and is refused the rest
+(`transport/method-rights.ts`; the classes and the rule in [security-boundaries.md](security-boundaries.md), "Who holds
+full power"). Everything this table cards in every preset is `asks` there.
+
 The linked machines came first (#1238), then the preferences and the session archive (#1309) and the notification switches (#1313).
 The third slice is trust, as the owner asked (2026-10-20): project trust first (`list_projects`, `set_project_trust`),
 then approval rules, app trust and grants, and the orchestrator's own limits. In each, what narrows trust acts at once
@@ -2080,12 +2085,12 @@ be the keeper's own. Newline-delimited JSON, one request per connection except `
 
 | request | answer |
 |---|---|
-| `{"op":"status"}` | `{"ok":true,"view":…}` — host state, the front door's port and token (§4.2), build source, background mode, attached windows, activity, the current or last swap (`swap`), whether the host keeps agents across one (`keepsAgents`), and the keeper's own build (`keeper.build`, since step 4; a window counts a keeper without one as another build, which only "Restart completely" moves, #461) |
+| `{"op":"status"}` | `{"ok":true,"view":…}` — host state, the front door's port and a credential (§4.2: the token for a Centralu window, the limited credential for any other process, and `view.rights` says which, #1405), build source, background mode, attached windows, activity, the current or last swap (`swap`), whether the host keeps agents across one (`keepsAgents`), and the keeper's own build (`keeper.build`, since step 4; a window counts a keeper without one as another build, which only "Restart completely" moves, #461) |
 | `{"op":"attach","protocol":1,"build":…}` | `{"ok":true,"view":…,"sameBuild":bool,"keeperSameBuild":bool,"relaunched":bool}`, then `{"event":"status","view":…}` on every change for as long as the connection is open. An open attach connection is what "a window is attached" means; its closing is the detach. `relaunched`: this window is the one an announced relaunch started (§4.5) |
 | `{"op":"relaunching","graceSecs":n?}` | `{"ok":true,"graceSecs":n}` — the app is about to relaunch itself to apply an update (#352): for `n` s (60 by default, at most 300) no window attached does not stop the keeper, whatever background mode says. The next attach spends it |
 | `{"op":"stop"}` | stops the host and the keeper ("Quit completely", and "Restart completely", after which the window starts a keeper of its own build) |
-| `{"op":"switch","source":…,"keeper":{"exe":…}?}` | a blue-green swap to that build (§4.2; the build stamp is re-read from its folder). With no host up, the next start simply runs that build. With `keeper` (the app sends its build's `centralu-keeper`; an app from before #440 sent its own executable, which is refused since #461, the keeper staying on its build) and a keeper of another build, the keeper first hands itself over to that build's keeper ([architecture.md](architecture.md) §4.4), which then runs the swap. A keeper from verified content starts nothing from the bundle: it verifies and copies the bundle's signed content and hands over to the keeper in that copy (§4.4); a refusal ends the swap as `failed` with `refused` set. A second `switch` during a swap is refused |
-| `{"op":"upgrade","exe":…,"source":…}` | hands the keeper over to the keeper at `exe`, of build `source`, leaving the host alone (§4.4); from verified content, to the keeper in the verified copy of `exe`'s bundle content |
+| `{"op":"switch","source":…,"keeper":{"exe":…}?}` | a window's only (#1405; anything else gets `window_only`): a blue-green swap to that build (§4.2; the build stamp is re-read from its folder). With no host up, the next start simply runs that build. With `keeper` (the app sends its build's `centralu-keeper`; an app from before #440 sent its own executable, which is refused since #461, the keeper staying on its build) and a keeper of another build, the keeper first hands itself over to that build's keeper ([architecture.md](architecture.md) §4.4), which then runs the swap. A keeper from verified content starts nothing from the bundle: it verifies and copies the bundle's signed content and hands over to the keeper in that copy (§4.4); a refusal ends the swap as `failed` with `refused` set. A second `switch` during a swap is refused |
+| `{"op":"upgrade","exe":…,"source":…}` | a window's only (#1405): hands the keeper over to the keeper at `exe`, of build `source`, leaving the host alone (§4.4); from verified content, to the keeper in the verified copy of `exe`'s bundle content |
 | `{"op":"restart"}` | Retry after the host gave up (refused during a swap) |
 | `{"op":"settings"}` / `{"op":"set_background","on":bool}` | background mode, kept in `<data>/keeper-settings.json` |
 

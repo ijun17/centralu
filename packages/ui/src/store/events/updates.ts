@@ -19,6 +19,16 @@ export function updateEvent(e: NormalizedEvent, set: StoreSet, get: StoreGet): b
     void get().runApplyRequest(e.requestId, e.ticket)
     return true
   }
+  // A program's call waiting for the person (#1405): app-wide, so before the session guard
+  if (e.type === 'host_request') {
+    const request = e.request
+    set((s) => ({ hostRequests: [...s.hostRequests.filter((r) => r.requestId !== request.requestId), request], hostRequestsHeard: s.hostRequestsHeard + 1 }))
+    return true
+  }
+  if (e.type === 'host_request_resolved') {
+    set((s) => ({ hostRequests: s.hostRequests.filter((r) => r.requestId !== e.requestId), hostRequestsHeard: s.hostRequestsHeard + 1 }))
+    return true
+  }
   // App-wide like update_status (#297): the installed agent CLIs, read on the host's own schedule
   if (e.type === 'agent_versions') {
     set({ agentVersions: e.status })

@@ -283,3 +283,227 @@ fn a_host_gets_the_token_on_stdin_unless_its_build_is_older_than_that() {
     assert!(said.borrow()[0].contains("older than #538"), "{:?}", said.borrow());
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// #1405: every op the dispatcher answers is in `OPS`, so the token test below sends it.
+#[test]
+fn ops_are_listed() {
+    let src = include_str!("mod.rs");
+    let body = &src[src.find("fn handle(k: Arc<Keeper>").unwrap()..];
+    let body = &body[..body.find("\n}\n").unwrap()];
+    let mut answered: Vec<String> = Vec::new();
+    for line in body.lines().map(str::trim_start) {
+        // `"op" =>`, `"a" | "b" if … =>`
+        if !line.starts_with('"') || !line.contains("=>") {
+            continue;
+        }
+        let arms = line.split("=>").next().unwrap().split(" if ").next().unwrap();
+        for op in arms.split('|').map(|a| a.trim().trim_matches('"')) {
+            if !answered.iter().any(|o| o == op) {
+                answered.push(op.to_string());
+            }
+        }
+    }
+    let mut listed: Vec<String> = OPS.iter().map(|s| s.to_string()).collect();
+    answered.sort();
+    listed.sort();
+    assert_eq!(answered, listed, "an op the dispatcher answers is missing from OPS, or OPS names one it no longer answers");
+}
+
+/// The front door's token as the keeper makes it (32 hex characters).
+const DOOR_TOKEN: &str = "0123456789abcdef0123456789abcdef";
+
+/// A keeper whose host is up behind the door.
+fn keeper_with_a_host(data: &Path) -> Arc<Keeper> {
+    let k = test_keeper(data);
+    k.state.lock().unwrap().status = HostStatus::Ready(HostInfo { port: 4321, token: DOOR_TOKEN.into() });
+    k
+}
+
+/// One request over `keeper.sock` from this process: the lines that come back, read until `want` of them have, the
+/// keeper closes the connection, or 10 s pass (a bound for a stalled keeper, not a wait the test depends on).
+fn ask(sock: &Path, req: &Value, want: usize) -> Vec<String> {
+    use std::io::BufRead;
+    let mut s = UnixStream::connect(sock).unwrap();
+    s.write_all(&json_line(req)).unwrap();
+    s.set_read_timeout(Some(Duration::from_millis(200))).unwrap();
+    let mut r = BufReader::new(s.try_clone().unwrap());
+    let mut lines = Vec::new();
+    let end = Instant::now() + Duration::from_secs(10);
+    let mut line = String::new();
+    while lines.len() < want && Instant::now() < end {
+        match r.read_line(&mut line) {
+            Ok(0) => break,
+            Ok(_) if line.ends_with('\n') => lines.push(std::mem::take(&mut line)),
+            // A timeout, or a line not whole yet: what was read stays in `line`, and the loop reads on
+            _ => continue,
+        }
+    }
+    if !line.is_empty() {
+        lines.push(line);
+    }
+    lines
+}
+
+/**
+ * #1405, the test the design asks for: a process that is not a Centralu window (this test binary)
+ * sends every op `keeper.sock` answers and reads every line that comes back, the pushed status of
+ * an attach included, and none of them carries the front door's token. `status` and `attach` carry
+ * the limited credential in its place; `switch` and `upgrade` are refused. `stop` (it ends this
+ * process) and `restart` (it starts a host) are not sent: neither answer carries a view.
+ */
+#[test]
+fn no_reply_carries_the_token_to_a_process_that_is_not_a_window() {
+    let data = PathBuf::from(format!("/tmp/cck-token-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&data);
+    fs::create_dir_all(&data).unwrap();
+    let k = keeper_with_a_host(&data);
+    let sock = k.sock.clone();
+    {
+        let k = k.clone();
+        thread::spawn(move || accept_loop(&k));
+    }
+    let limited = limited::limited_token(DOOR_TOKEN);
+    for op in OPS.iter().copied().filter(|op| !matches!(*op, "stop" | "restart")) {
+        let req = match op {
+            "attach" => json!({ "op": "attach", "protocol": KEEPER_PROTOCOL }),
+            "set_background" => json!({ "op": "set_background", "on": true }),
+            "switch" => json!({ "op": "switch", "source": { "commit": "abc" } }),
+            "upgrade" => json!({ "op": "upgrade", "exe": "/tmp/centralu-keeper", "source": { "commit": "abc" } }),
+            other => json!({ "op": other }),
+        };
+        // An attach stays open: push statuses to it until its two lines are read
+        let pushing = Arc::new(AtomicBool::new(op == "attach"));
+        if op == "attach" {
+            let (k2, pushing) = (k.clone(), pushing.clone());
+            thread::spawn(move || {
+                while pushing.load(Ordering::SeqCst) {
+                    thread::sleep(Duration::from_millis(50));
+                    if let Ok(mut st) = k2.state.lock() {
+                        k2.broadcast(&mut st);
+                    }
+                }
+            });
+        }
+        // Every other op is answered with one line and the connection closed: read to the end
+        let lines = ask(&sock, &req, if op == "attach" { 2 } else { usize::MAX });
+        pushing.store(false, Ordering::SeqCst);
+        assert!(!lines.is_empty(), "{op} answered nothing");
+        for line in &lines {
+            assert!(!line.contains(DOOR_TOKEN), "{op} handed the token to a process that is not a window: {line}");
+        }
+        match op {
+            "status" | "attach" => {
+                let first: Value = serde_json::from_str(&lines[0]).unwrap();
+                assert_eq!(first["view"]["status"]["token"], json!(limited), "{op}");
+                assert_eq!(first["view"]["rights"], json!("limited"), "{op}");
+                if op == "attach" {
+                    assert!(lines.len() >= 2, "the attach got no pushed status to check");
+                    let pushed: Value = serde_json::from_str(&lines[1]).unwrap();
+                    assert_eq!(pushed["view"]["status"]["token"], json!(limited));
+                }
+            }
+            "switch" | "upgrade" => assert!(lines[0].contains("window_only"), "{op}: {}", lines[0]),
+            _ => {}
+        }
+    }
+    let _ = fs::remove_dir_all(&data);
+}
+
+/// A window's view carries the token, and a push goes to each window in its own credential.
+#[test]
+fn a_window_gets_the_token_and_every_other_client_the_limited_credential() {
+    let data = PathBuf::from(format!("/tmp/cck-rights-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&data);
+    fs::create_dir_all(&data).unwrap();
+    let k = keeper_with_a_host(&data);
+    let token = |v: &KeeperView| match &v.status {
+        HostStatus::Ready(i) => i.token.clone(),
+        _ => panic!("no host"),
+    };
+    {
+        let st = k.state.lock().unwrap();
+        assert_eq!(token(&k.view(&st, true)), DOOR_TOKEN);
+        assert_eq!(k.view(&st, true).rights.as_deref(), Some("full"));
+        assert_eq!(token(&k.view(&st, false)), limited::limited_token(DOOR_TOKEN));
+    }
+    // Two windows adopted from this process (neither is a window by its executable); one marked a
+    // window as `Window::start` marks the app's own
+    let (w1, k1) = UnixStream::pair().unwrap();
+    let (w2, k2) = UnixStream::pair().unwrap();
+    adopt_window(&k, k1);
+    adopt_window(&k, k2);
+    {
+        let mut st = k.state.lock().unwrap();
+        assert!(st.subscribers.iter().all(|w| !w.full), "a process that is not a window was taken for one");
+        st.subscribers[0].full = true;
+        k.broadcast(&mut st);
+    }
+    let read = |s: &UnixStream| {
+        use std::io::BufRead;
+        s.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let mut line = String::new();
+        BufReader::new(s.try_clone().unwrap()).read_line(&mut line).unwrap();
+        line
+    };
+    assert!(read(&w1).contains(DOOR_TOKEN));
+    let other = read(&w2);
+    assert!(!other.contains(DOOR_TOKEN) && other.contains(&limited::limited_token(DOOR_TOKEN)));
+    let _ = fs::remove_dir_all(&data);
+}
+
+/**
+ * #1405, the other side: a process whose executable is the window's, by the exact path this keeper accepts (here the
+ * window of the build it names, `bundle_path`), gets the front door's token; the same executable copied as `centralu`
+ * anywhere else does not. This test binary, copied and run again to make the request, is both processes; the kernel
+ * names its executable, as it names the window's. (A keeper with a team would also want the copy signed by it; no
+ * keeper in a test has one.)
+ */
+#[test]
+fn only_the_accepted_window_executable_gets_the_token() {
+    const NAME: &str = "keeper::server::tests::only_the_accepted_window_executable_gets_the_token";
+    // The copy, run again: it is the client
+    if let Ok(sock) = std::env::var("CCK_TEST_CLIENT_SOCK") {
+        let lines = ask(Path::new(&sock), &json!({ "op": "status" }), 1);
+        // The harness writes its own words before this on the same line: the reader finds the marker anywhere
+        println!("REPLY {}", lines.first().map(|l| l.trim()).unwrap_or(""));
+        return;
+    }
+    let data = PathBuf::from(format!("/tmp/cck-named-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&data);
+    fs::create_dir_all(data.join("elsewhere")).unwrap();
+    let k = keeper_with_a_host(&data);
+    let sock = k.sock.clone();
+    {
+        let k = k.clone();
+        thread::spawn(move || accept_loop(&k));
+    }
+    let window = data.join("centralu");
+    let renamed = data.join("elsewhere").join("centralu");
+    for copy in [&window, &renamed] {
+        fs::copy(std::env::current_exe().unwrap(), copy).unwrap();
+    }
+    // The build this keeper names is the window's: where no bundle is, its executable itself (`window_exe_of`)
+    k.state.lock().unwrap().desired.bundle_path = Some(window.to_string_lossy().to_string());
+    let status_of = |exe: &Path| -> Value {
+        let out = std::process::Command::new(exe)
+            .args(["--exact", NAME, "--nocapture", "--test-threads=1"])
+            .env("CCK_TEST_CLIENT_SOCK", &sock)
+            .env_remove("CC_KEEPER_TEST_WINDOW_EXE")
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let reply = stdout
+            .lines()
+            .find_map(|l| l.find("REPLY ").map(|at| l[at + 6..].to_string()))
+            .unwrap_or_else(|| panic!("the copy made no request: {stdout}"));
+        serde_json::from_str(&reply).unwrap()
+    };
+    let v = status_of(&window);
+    assert_eq!(v["view"]["status"]["token"], json!(DOOR_TOKEN), "{v}");
+    assert_eq!(v["view"]["rights"], json!("full"));
+    // The same bytes, named `centralu`, at a path nothing accepts: a renamed `node` is this case
+    let v = status_of(&renamed);
+    assert_eq!(v["view"]["status"]["token"], json!(limited::limited_token(DOOR_TOKEN)), "{v}");
+    assert_eq!(v["view"]["rights"], json!("limited"));
+    let _ = fs::remove_dir_all(&data);
+}

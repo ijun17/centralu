@@ -5,6 +5,7 @@ import type {
   UpdateStatus,
   AgentVersions,
   SleepPolicy,
+  HostRequest,
 } from '@cc/protocol'
 
 /** Updates, agent versions, screen preferences and theme files. */
@@ -46,6 +47,18 @@ export type PreferencesSlice = {
    * the time it did.
    */
   prefs: UiPreferences
+  /**
+   * The calls of the limited credential waiting for the person (#1405): a program that is not this window asked for
+   * something that cannot be undone, and the host holds it until the person answers. Owned by the host; this is the
+   * last list it gave, kept current by its events and read again after every reconnect.
+   */
+  hostRequests: HostRequest[]
+  /** How many host request events this window has heard: a list read before the latest of them is not laid over it */
+  hostRequestsHeard: number
+  /** Reads the waiting requests again. Never throws; an older host that does not know them leaves the list as it was */
+  refreshHostRequests(): Promise<void>
+  /** The person's answer; a request no longer waiting is said in a toast, and the list is read again */
+  answerHostRequest(requestId: string, decision: 'allow' | 'deny'): Promise<void>
   /** Checks right now (the settings button). A failure stays on screen but is not thrown */
   checkUpdate(force?: boolean): Promise<void>
   /** Turns periodic checking on and off */
