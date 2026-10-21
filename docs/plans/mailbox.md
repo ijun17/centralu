@@ -86,8 +86,8 @@ Each is argued where the link points, with the alternatives not taken.
 
 1. **Task states** (§3.3). The issue lists open, running, review, blocked, done. The ledger also had `queued` (the merge
    queue). Proposed: the issue's five, with "queued" shown as `blocked` on a `pr` blocker. Or keep a sixth state?
-2. **Mail from an ordinary session to the orchestrator** that opens a new thread (not a reply). Proposed: refused in v1;
-   such a session writes to the person. Should a project's lead session be able to raise something with the orchestrator?
+2. ~~Mail from an ordinary session to the orchestrator~~: **decided** (owner, #1447). Any session of this host may open a
+   thread to the orchestrator, with its privileged steps behind cards that name who asked (§9.7).
 3. **Sessions started by a script or the RPC with a first message** (§8.1, "report to nobody"). Proposed: their thread's
    owner is the person, so the report lands in the Inbox. Or report only when the caller asked?
 4. **Retention** (§4.4): done threads keep their messages 30 days, then the header 180 days. Are those the right numbers?
@@ -844,7 +844,7 @@ issues as threads ("14 open issues not on the board"); it never imports them by 
 | Session → its own owner (the session that gave the work) | replies in that thread |
 | Session → another project's session | through `ask_project`'s consent (unchanged); then replies in that thread |
 | Session → any session, by id | only the orchestrator (as `send_to_session` today), and a coordinator to its members |
-| Ordinary session → the orchestrator, a new thread | refused in v1 (open question 2) |
+| Any session of this host → the orchestrator, a new thread | allowed from slice 3's last PR (owner, #1447): the session asks the orchestrator, as the person's proxy, for a Centralu-wide act. The rules are §9.7 |
 | Session → the person | always (a question, a report, a review request) |
 | Session → an app it has attached | `assign`, `question`, `note`, if the app declares `receive` |
 | App → a session that called it | opens a thread for it (`mail.open`, the signed caller address, §9.4), or posts into "notices from <app>" (the `notify` shim) |
@@ -1040,6 +1040,49 @@ What Centralu does today (security-boundaries, "Claude's independent-session mes
 Limits stay as written in security-boundaries: this is a provider-messaging boundary, not OS isolation. A process the
 person started outside Centralu is not configured by this adapter. A peer address already known before the refusal can
 still be written to, though nothing delivers it.
+
+### 9.7 A session asking the orchestrator (#1447)
+
+Today an ordinary session cannot reach the orchestrator at all: there is no send to it, and `ask_project` reaches only
+projects. Some acts are the orchestrator's alone: a handoff, a new project, settings, another project's sessions. A
+session that needs one can only stop and ask the person to relay it. Decided by the owner (#1447): **any session of this
+host may open a thread to the orchestrator**, once the orchestrator has `mail` (slice 3, #1440).
+
+- **The shape is an ordinary delegation, turned around.** The asking session is the thread's owner and the orchestrator
+  its assignee. The orchestrator's turn that the mail starts is a turn of that thread (§6), and its end is reported back
+  to the asking session. Nothing new is needed for delivery, reports or waits.
+- **The words flow up.** The asking session's text never goes inline to the orchestrator, whatever its kind. The wake
+  lists host fields only, and the orchestrator reads the request with `mail read` as quoted data, under Centralu's header
+  naming the session and its project, and whether that project is trusted (§9.2).
+- **Every privileged step asks the person, naming who asked.** In a turn whose thread was opened by a session, every
+  act the orchestrator could not take from an untrusted text alone raises the person's card, whatever the
+  orchestrator's own preset. `auto` does not answer it (`alwaysAsk`, as the machine-asks card of remote-hub §12.7 and
+  #1318's preference cards do). Those acts are anything that changes sessions, projects, settings, machines,
+  installations or apps, starts agents, or deletes. The card says:
+  - "Session <name> in <project> asked the orchestrator to <act>";
+  - the act's own detail, as the card already shows it;
+  - Allow / Deny, with no "always".
+
+  Reading (`list_sessions`, `read_session`, `recall`) and answering in the thread need no card. The orchestrator's
+  instructions say that a session's request is not the person's word.
+- **Inbound.** The orchestrator's mailbox accepts these threads with these defaults:
+  - **an untrusted project:** its sessions' requests are held (`policy`) until the person releases them in the Inbox;
+  - **rates:** at most 5 new threads an hour per asking session, and the §7.9 loop and token guards as for everyone;
+  - **one open request at a time per session:** a second is refused with the first one's thread id.
+- **What it does not grant.** The asking session gets back only what the orchestrator posts in the thread. Read grants,
+  presets and tools never move across, and an answer that names another project's files is quoted text, not access.
+- **Linked machines (after slice 4).** A machine's session asking the hub's orchestrator is the reverse direction. It
+  needs the machine's asks switch on (remote-hub §12.7, `linked_machines.asks`), goes through the outbox like any mail
+  (§11.5), and its cards name the machine as well as the session. A machine's own orchestrator stays hidden (remote-hub
+  §12.1), so the hub's orchestrator is the only one a session ever reaches.
+
+**Why not a small `ask_orchestrator` tool first.**
+- It would be one more resident tool on every ordinary session's requests (its description rides in each one), and it
+  would be removed again once mail does the same.
+- The hard part, the cards that name who asked and the rule that a session's request is not the person's word, has to
+  be built either way.
+- Until 3.11 lands, the stopgap that already exists is mail to the person (slice 2): the session writes to the person,
+  who relays it.
 
 ## 10. The person
 
@@ -1295,7 +1338,7 @@ the new ones.)
 | 0 | **Stamp and shut the side door** (§7.1, §9.6): `origin: { kind: 'human' }` on the person's input (composer, slash commands, Continue). The #569 controls under `auto` too: `crossSessionInbound: 'refuse'`, `ListAgents` / `ListPeers` denied, `CLAUDE_CODE_HARBOR_KITE=0`. Updates `docs/security-boundaries.md`. Independent of mail | none | the person's words pass the CLI's `isHuman()` gates; no Centralu session reaches another past the mailbox | Claude's own cross-session channel for `auto` sessions |
 | 1 | **Store and model**: tables, ids (§11.4), `MailService` post/read/update, `mailFrame`, retention. No producers. Built as #1362 → #1363 → #1364 | **M1 = v61** (additive): `mail_threads`, `mail_participants`, `mail_blockers`, `mail_messages`, `mail_receipts`, `mail_turns` (§4.1) | nothing visible; the base, with tests (swap: an older build beside the tables) | — |
 | 2 | **Delivery at rest, and the `mail` tool**: first `MailService.partyGone` wired when a session goes to the trash, and a protocol error code `refused` for mail's refusals (slice 1 sends `internal` with `data.reason`); then `MailDelivery` (§5; §7.1–§7.3 for idle, asleep and must-not-wake receivers, the frame always, `origin` stamped; §7.5–§7.7; §7.9), receipts, rates, guards; `mail` for sessions; the Inbox's Mail and the person's replies; the compact line in the conversation. Mail for a receiver in a turn waits for the turn's end until slice 6 | none. The per-session inbound setting (§7.7) and the `mail` notification switch (§10.1, its own key per §4.2) were left out of slice 2 and go with slice 7; the §7.7 defaults apply to every session meanwhile | agents and the person write to each other durably; mail to the person shows in the Inbox | — |
-| 3 | **Reports become mail**: `start_agent`, `agent_session`, `send_to_session`, `create_session`, `ask_project`; `mail_turns`; parent threads; adoption of old marks (§4.2) | none (M1's tables) | #1340 fixed by the model (#1344 can land before as the patch); script-started sessions report to the person | for this host's sessions: `ChildReports.held`, `untrustedSourceSessionNotification`. Marks kept in step until slice 9 |
+| 3 | **Reports become mail**, ending with **3.11, sessions asking the orchestrator** (§9.7, #1447; needs 3.3's turn attribution for the cards that name who asked): `start_agent`, `agent_session`, `send_to_session`, `create_session`, `ask_project`; `mail_turns`; parent threads; adoption of old marks (§4.2) | none (M1's tables) | #1340 fixed by the model (#1344 can land before as the patch); script-started sessions report to the person | for this host's sessions: `ChildReports.held`, `untrustedSourceSessionNotification`. Marks kept in step until slice 9 |
 | 4 | **Linked machines** (§11): outbox, `host.mail.*`, thread-headers mirror, pull on resync, reports made on the machine | **M2** (additive): `mail_outbox`, `mail_links`, the hub's thread-headers mirror | mail across machines, reports made where the turn ran; #1342 fixed | `LinkedReports`, the `owed` field of `remote_agents`, `reportGate`, the relayed-report paths (once both sides run it; an older machine keeps today's path, §11.8) |
 | 5 | **The board app moves** (§8.3), with the app runtime it needs: `uses.mail` `post`, `centralu.mail` `caller` / `open` / `post` / `update` / `read` / `threads` / `handled`, the broker calls, §9.5's wake bounds, the permit and its trust-card lines. Queue items and stacks as threads, acknowledgement from receipts | none (`app_runs` gets no new caller kind until slice 7) | the merge queue's news is durable mail, and the app knows what its owner saw | `watch`, `tellSessions`, #1351's list and `ack` (one release later) |
 | 6 | **In-turn delivery** (§7.2, §7.4, §7.10): Claude's in-process hooks as the primary path, Codex `inject_items` after its live check and with the race check, the maximum hold | none | same-thread mail mid-turn without "the user sent"; a child's question does not wait out a long turn | `agentNoteFrame` over stdin, on this host and on linked machines |
