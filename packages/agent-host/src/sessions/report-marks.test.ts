@@ -3,8 +3,8 @@ import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { AdapterCapabilities, NormalizedEvent, ToolName } from '@cc/protocol'
+import { afterEach, beforeEach, describe, expect, it, onTestFinished } from 'vitest'
+import type { AdapterCapabilities, BackgroundTask, NormalizedEvent, ToolName } from '@cc/protocol'
 import type { AgentAdapter, AgentProcess, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { SessionManager, type AgentProcessHost } from './manager.js'
@@ -221,6 +221,48 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     expect(stored(parent)[0]).toContain('verify passed, PR opened')
     expect(store.children.listReportMarks()).toEqual([])
     expect(store.settings.appSetting(`report_paused:${child}`)).toBeNull()
+  })
+
+  /*
+   * #1460: an ask_project into another project's session whose turn ended on its own background work owes the asker the
+   * work's end like a start_agent child does, and the next host delivers it once from the stored mark and pause.
+   */
+  it('held over the work of an asked session (ask_project, #1460), it stays owed in the next host, which tells the end once', async () => {
+    const verify: BackgroundTask = { id: 'bg-verify', kind: 'shell', description: 'pnpm verify', status: 'running' }
+    const a = host()
+    const here = await a.mgr.addProject(root)
+    await a.mgr.setProjectTrusted(here.id, true)
+    const otherRoot = realpathSync(mkdtempSync(join(tmpdir(), 'cc-report-marks-target-')))
+    onTestFinished(() => rmSync(otherRoot, { recursive: true, force: true }))
+    const there = await a.mgr.addProject(otherRoot)
+    store.permissions.setProjectConsent(here.id, there.id, 'delegate')
+    const parent = (await a.mgr.createSession({ projectId: here.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })).id
+    const child = (await a.mgr.createSession({ projectId: there.id, cwd: otherRoot, tool: 'claude', permissionPreset: 'normal' })).id
+    const call = a.mgr.askProject(parent, { project: there.id, session: child, task: 'run the suite' })
+    await eventually(() => (a.claude.handles.get(child)?.sent.length ?? 0) > 0)
+    a.claude.handles.get(child)!.emitEvent({ type: 'background_tasks', sessionId: child, live: [verify] })
+    a.claude.handles.get(child)!.answer('started verify, will summarize when it ends')
+    expect(await call).toMatchObject({ ok: true, state: 'done', paused: expect.stringContaining('pnpm verify') })
+    expect(store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
+    expect(store.settings.appSetting(`report_paused:${child}`)).not.toBeNull()
+    await a.mgr.detachAll()
+
+    const b = host(new Set([child]))
+    await b.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() }])
+    // At rest, yet still owing: the verify runs on in the kept process
+    expect(b.mgr.listSessions().find((s) => s.id === child)!.state).toBe('waiting_input')
+    expect(store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
+    const h = b.claude.handles.get(child)!
+    h.emitEvent({ type: 'background_tasks', sessionId: child, live: [], ended: [{ ...verify, status: 'completed' }] })
+    h.emitEvent({ type: 'state_change', sessionId: child, state: 'working' })
+    h.answer('8 pass / 2 fail')
+    await eventually(() => stored(parent).length === 1)
+    expect(stored(parent)[0]).toContain('8 pass / 2 fail')
+    expect(store.children.listReportMarks()).toEqual([])
+    // Once: a later turn of the session is its own
+    h.answer('an unrelated later turn')
+    await new Promise((r) => setTimeout(r, 20))
+    expect(stored(parent)).toHaveLength(1)
   })
 
   // #1377: the person's turn in flight at the swap is theirs under the next host too, and the report stays open

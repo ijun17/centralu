@@ -116,6 +116,19 @@ export class DelegationFlow {
        * again here, a microtask later, a pause over its own background work (#721) could read as the end once that
        * work has ended. A wait failed with no ending event (a stop, a cancel) is reported only here.
        */
+      /*
+       * An ask_project turn that completed with the session's own background work still running (#721, #1460) is a pause,
+       * decided here so it holds whether or not a call was waiting (one past its bound is not): the report is marked owed
+       * and paused for the work's last turn end, in the store, and the call that reads the answer says so
+       * (`AskProjectFlow.awaitDelegation`). A start_agent child's is `awaitAgent`'s and the report's own
+       */
+      if (!agent && r.ok && !joinedTurn && !this.host.handingOver && this.host.meta.has(d.callerId) && !this.host.children.pausedReports.has(sessionId)) {
+        const left = this.host.ownTasksRunning(sessionId)
+        if (left.length) {
+          this.host.children.markReport(sessionId, d.callerId)
+          this.host.pauseReport(sessionId, left)
+        }
+      }
       if ((agent && !r.ok) || wait.tracksInputs) void this.host.reportBackIfAwaited(sessionId, r.ok
         ? { type: 'turn_complete', sessionId }
         : { type: 'error', sessionId, error: { code: 'internal', message: r.error, retryable: false } }, r.ok ? r.answer : undefined)

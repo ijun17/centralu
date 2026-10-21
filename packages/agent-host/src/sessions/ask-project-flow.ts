@@ -9,7 +9,7 @@ import { inTurn } from '../idle.js'
 import { linkedTurnEnd, type LinkedTurnEvent } from './linked-turn-end.js'
 import type { LinkedReports } from './linked-reports.js'
 import { raceBound } from './with-timeout.js'
-import { taskList } from './background-stops.js'
+import { frameField } from '@cc/protocol'
 import type { BackgroundTask } from '@cc/protocol'
 import type { DelegationFlow, DelegationHost } from './delegation-flow.js'
 import { agentDepthRefusal, depthOf } from './agent-depth.js'
@@ -567,7 +567,7 @@ export class AskProjectFlow {
         readable: [],
         outside: pathsIn(answer),
         // Still paused only while that report is owed: collected after the work's report went out, these are its final words
-        ...(ask.paused && this.host.children.linkedReports.get(ask.sessionId)?.orchestratorId === ask.callerId ? { paused: pausedWords(ask) } : {}),
+        ...(ask.paused && this.host.children.linkedReports.get(ask.sessionId)?.orchestratorId === ask.callerId ? { paused: pausedWords(ask.paused ?? [], ask.sessionId, ' there') } : {}),
       }
     } finally {
       if (wake) ask.wake.delete(wake)
@@ -605,21 +605,30 @@ export class AskProjectFlow {
         }
     }
     const { granted, outside } = this.host.grantReads(d.callerId, r.answer, d.target.path)
-    this.host.children.answered(d.callerId, d.sessionId, { ok: true, text: r.answer })
-    return { ok: true, state: 'done', ...base, sessionName: sessionName(), answer: clipAnswer(r.answer, sessionName(), answerAt(this.host.store.messages, d.sessionId, r.answer)), readable: granted, outside }
+    /*
+     * A turn that completed with the session's own background work still running was paused where the delegation ended
+     * (`startDelegation`, #721, #1460), whether or not this call was waiting: the caller reads the answer now as a pause,
+     * with no separate notice, and the report is owed for the work's last turn end
+     */
+    const paused = this.host.children.awaitingReport.get(d.sessionId) === d.callerId ? this.host.children.pausedReports.get(d.sessionId) : undefined
+    this.host.children.answered(d.callerId, d.sessionId, paused ? undefined : { ok: true, text: r.answer })
+    return {
+      ok: true, state: 'done', ...base, sessionName: sessionName(), answer: clipAnswer(r.answer, sessionName(), answerAt(this.host.store.messages, d.sessionId, r.answer)), readable: granted, outside,
+      ...(paused ? { paused: pausedWords(paused, d.sessionId) } : {}),
+    }
   }
 
 }
 
 /**
- * What the caller reads of a turn that ended with the session's own background work still running on a linked machine
- * (#1457), the words of `DelegationWaits.pausedNotice` without the `agent_session stop`, which a project's session there
- * does not have: the work may be a server that never ends, and the report comes only if it does
+ * What the caller reads of a turn that ended with the session's own background work still running (#721, #1457): the
+ * words of `DelegationWaits.pausedNotice` without the `agent_session stop`, which an ask_project target does not have.
+ * The work may be a server that never ends, and the report comes only if it does
  */
-function pausedWords(ask: LinkedAsk): string {
+function pausedWords(tasks: readonly { description: string }[], sessionId: string, there = ''): string {
   return (
-    `its turn ended while its own background work is still running there (${taskList(ask.paused ?? [])}), so the answer is what it said so far. ` +
-    'A final report follows when that work ends and a turn there ends it. If that work is a server or watcher it leaves running, ' +
-    `this answer may be its final one. Read the session with read_session(sessionId="${ask.sessionId}").`
+    `its turn ended while its own background work is still running${there} (${tasks.map((t) => frameField(t.description)).join(', ')}), so the answer is what it said so far. ` +
+    'A final report follows when that work ends and a turn ends it. If that work is a server or watcher it leaves running, ' +
+    `this answer may be its final one. Read the session with read_session(sessionId="${sessionId}").`
   )
 }

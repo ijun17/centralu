@@ -260,6 +260,20 @@ What one call does (`SessionManager.askProject`, which runs `AskProjectFlow` in 
    #428), so a short name, another case or a link to the root reads as the place it names.
    Outside paths are listed without grants. Claude checks grants on each read through `mayRead`;
    Codex's reads are already unrestricted.
+   A turn that **completes** while the asked session's own background work (timers left out) still runs is a pause, as a
+   `start_agent` child's is (§1.2.1 step 7, #1460; it used to come back as the final answer, with no report owed, so the
+   result of the turn the work's ending started reached no one): the call answers `done` with the words so far and
+   `paused` ("its turn ended while its own background work is still running (…); a final report follows when that work
+   ends and a turn ends it; if it is a server or watcher it leaves running this answer may be the final one;
+   `read_session`"), with no `agent_session stop`, which an asked session does not have. It is decided where the delegation's
+   turn ends (`DelegationFlow.startDelegation`), whether or not a call is still waiting, so a turn that ends after the
+   call's bound is paused too and the next call reads the pause. The report is marked owed and paused (`markReport` +
+   `pauseReport`: the store's `report_marks` and `report_paused:<session>`, so a host swap keeps both and the next host
+   delivers the final report once), and the rest is §1.2.1 step 7's: the report comes when a turn ends with that work gone,
+   or `PAUSED_REPORT_SETTLE_MS` after the work ended with no turn, a turn the person starts there is theirs and not
+   reported (#1377), and a new task from the same caller ends the pause. A note that joined the person's turn is not
+   paused: that turn's work is theirs. Like a child's, work the person left running there (a dev server) holds the
+   report until it ends.
 
 **Long work.** A call waits up to `ASK_WAIT_MS` (240 s), below the Codex MCP ceiling of 300 s and
 bridge wait of 280 s. It then answers still working, naming the session and how to call again with
