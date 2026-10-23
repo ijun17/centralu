@@ -214,8 +214,8 @@ export class WorktreeSessions {
         ? { sha: askedSha, ref: asked, note: `Forked from ${asked}, as asked, at ${askedSha.slice(0, 9)}` }
         : await resolveForkBase(params.cwd, trunk, { trusted: this.host.projectTrusted(params.projectId) })
       if (!asked && forkBase.ref === 'HEAD') console.error(`[worktree] forking from HEAD: ${forkBase.note}`)
-      worktree = await gitWorktreeAdd(params.cwd, path, branch, forkBase.sha, { trusted: true })
-      worktree = { ...worktree, base: forkBase.sha }
+      worktree = await gitWorktreeAdd(params.cwd, path, branch, forkBase.sha ?? undefined, { trusted: true })
+      if (forkBase.sha) worktree = { ...worktree, base: forkBase.sha }
       base = forkBase
     } catch (err) {
       const msg = (err as { stderr?: string; message?: string }).stderr ?? (err as Error).message

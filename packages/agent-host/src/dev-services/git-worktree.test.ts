@@ -119,7 +119,7 @@ describe('the base a new worktree forks from (#1484)', () => {
     expect(base.ref).toBe('origin/main')
     expect(base.note).toBe(`Forked from origin/main at ${remoteTip.slice(0, 9)}, fetched just now`)
     const path = join(root, 'wt')
-    await gitWorktreeAdd(repo, path, 'centralu/x', base.sha, TRUSTED)
+    await gitWorktreeAdd(repo, path, 'centralu/x', base.sha ?? undefined, TRUSTED)
     expect(sha(path, 'HEAD')).toBe(remoteTip)
     // The merge base with the trunk is the trunk's tip, and the new branch tracks nothing
     expect(fixtureGit(path, ['merge-base', 'HEAD', 'origin/main']).trim()).toBe(remoteTip)
@@ -196,5 +196,14 @@ describe('the base a new worktree forks from (#1484)', () => {
     const base = await resolveForkBase(repo, null, { trusted: true })
     expect(base).toMatchObject({ sha: sha(repo, 'HEAD'), ref: 'HEAD' })
     expect(base.note).toMatch(/checkout's HEAD at \w{9}, which may not be the trunk$/)
+  })
+
+  it('a repository with no commit yet has no base to record, and git still makes the worktree', async () => {
+    const empty = join(root, 'empty')
+    fixtureGit(root, ['init', '-q', '-b', 'main', empty])
+    const base = await resolveForkBase(empty, 'main', { trusted: true })
+    expect(base).toEqual({ sha: null, ref: 'HEAD', note: 'This repository has no commit yet, so the worktree starts empty' })
+    const wt = await gitWorktreeAdd(empty, join(root, 'wt-empty'), 'centralu/e', base.sha ?? undefined, TRUSTED)
+    expect(wt.branch).toBe('centralu/e')
   })
 })
