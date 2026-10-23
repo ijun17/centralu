@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { StoredMessage } from '@cc/protocol'
-import { buildHandoffRecord, RECORD_CAP } from './handoff-record.js'
+import { buildHandoffRecord, RECORD_CAP, shiftPartLines } from './handoff-record.js'
 
 /**
  * The handoff record builder (#78 → #102) — a deterministic builder with no summarizer.
@@ -280,9 +280,9 @@ describe('the contents section and the cut results (#1481)', () => {
       ...base,
       rows: rows(),
       children: [
-        { id: 'child-1', name: 'Lexer', state: 'working', how: 'started' },
-        { id: 'child-2', name: 'Parser\nsneaky', state: 'finished', how: 'started' },
-        { id: 'child-3', name: 'Side try', state: 'waiting for the person', how: 'forked' },
+        { id: 'child-1', name: 'Lexer', state: 'working' },
+        { id: 'child-2', name: 'Parser\nsneaky', state: 'finished' },
+        { id: 'child-3', name: 'Side try', state: 'waiting for the person' },
       ],
       background: [
         { id: 'bg-1', kind: 'shell', description: 'usage watcher' },
@@ -295,7 +295,7 @@ describe('the contents section and the cut results (#1481)', () => {
     expect(contents).toContain('Report at seq 2301:\n    Report B')
     expect(contents).toContain('- "Lexer" — working — id: child-1')
     expect(contents).toContain('- "Parser\\nsneaky" — finished — id: child-2')
-    expect(contents).toContain('- "Side try" — waiting for the person (a fork of it) — id: child-3')
+    expect(contents).toContain('- "Side try" — waiting for the person — id: child-3')
     expect(contents).toContain('- shell "usage watcher" — id: bg-1')
     expect(contents).toContain('- other timer "wake" — id: bg-2')
     // The section sits under the header and above the instructions and the record
@@ -351,14 +351,14 @@ describe('the contents section and the cut results (#1481)', () => {
     const none = buildHandoffRecord({ ...base, rows: [row(1, 'user', 'text', { text: 'hi' })] })
     expect(none).not.toContain('previous handoff note')
     const withPrev = buildHandoffRecord({ ...base, previousNote: '/data/handoff/p/abc.md', rows: [row(1, 'user', 'text', { text: 'hi' })] })
-    expect(withPrev.split('\n')[2]).toBe('previous handoff note (this session took over from another): /data/handoff/p/abc.md')
+    expect(withPrev.split('\n')[2]).toBe('previous handoff note (this session took over from another; the file is rewritten by every handoff from that session, and may be gone): /data/handoff/p/abc.md')
   })
 
   it('keeps the cap and the boundary line with the section in place', () => {
     const big: StoredMessage[] = []
     for (let i = 1; i <= 400; i++) big.push(row(i, 'user', 'text', { text: `${i} ${'y'.repeat(1_000)}` }))
     big.push(row(401, 'assistant', 'text', { text: 'last report' }))
-    const text = buildHandoffRecord({ ...base, rows: big, cap: 50_000, children: [{ id: 'c', name: 'K', state: 'finished', how: 'started' }] })
+    const text = buildHandoffRecord({ ...base, rows: big, cap: 50_000, children: [{ id: 'c', name: 'K', state: 'finished' }] })
 
     expect(Buffer.byteLength(text, 'utf8')).toBeLessThanOrEqual(50_000)
     expect(text.split('\n')[1]).toMatch(/^covers seq [\d,]+–401 of 401 · 0\.1 MB cap · earlier material stays/)
@@ -366,6 +366,25 @@ describe('the contents section and the cut results (#1481)', () => {
     expect(text).toContain('- "K" — finished — id: c')
     // The table still points at real lines
     expect(part(text, 'The record from seq').lines[0]).toMatch(/^\[user\] \d+ y/)
+  })
+
+  it('moves the table down by the lines put above it, and leaves a note without a table alone', () => {
+    const text = buildHandoffRecord({ ...base, rows: [row(1, 'user', 'text', { text: 'hi' }), row(2, 'assistant', 'text', { text: 'ok' })] })
+    const lineAt = (t: string, label: string) => Number(new RegExp(`^\\| ${label}.* \\| (\\d+)–`, 'm').exec(t)![1])
+
+    const shifted = shiftPartLines(text, 7)
+    expect(lineAt(shifted, 'Contents')).toBe(lineAt(text, 'Contents') + 7)
+    expect(lineAt(shifted, 'The record from seq')).toBe(lineAt(text, 'The record from seq') + 7)
+    // Only the table moves: nothing else of the note is touched
+    expect(shifted.replace(/^\| .* \| \d+–\d+ \|$/gm, '')).toBe(text.replace(/^\| .* \| \d+–\d+ \|$/gm, ''))
+    expect(shiftPartLines(text, 0)).toBe(text)
+    expect(shiftPartLines('A note the agent wrote.\n| x | 1–2 |\n', 7)).toBe('A note the agent wrote.\n| x | 1–2 |\n')
+  })
+
+  it('cuts a huge report without splitting a surrogate pair', () => {
+    const text = buildHandoffRecord({ ...base, rows: [row(1, 'assistant', 'text', { text: `${'a'.repeat(39_999)}😀${'b'.repeat(500)}` })] })
+    expect(text).not.toMatch(/[\ud800-\udbff](?![\udc00-\udfff])/)
+    expect(text).toContain('more characters cut here')
   })
 
   it('a report is repeated in full unless it is huge, and it can never pose as a line of the section', () => {

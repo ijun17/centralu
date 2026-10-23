@@ -95,7 +95,7 @@ describe('the contents of a handoff record (#1481)', () => {
 
     const out = await mgr.exportHandoffRecord(orig.id)
 
-    expect(out.text).toContain(`previous handoff note (this session took over from another): ${join(process.env.CC_DATA_DIR!, 'handoff', p.id, `${earlier}.md`)}`)
+    expect(out.text).toContain(`previous handoff note (this session took over from another; the file is rewritten by every handoff from that session, and may be gone): ${join(process.env.CC_DATA_DIR!, 'handoff', p.id, `${earlier}.md`)}`)
     expect(out.text).toContain('Report at seq 102:\n    State: the parser is done.')
     expect(out.text).toMatch(new RegExp(`- "${kid.name}" — finished — id: ${kid.id}`))
     expect(out.text).toContain('- shell "usage watcher" — id: bg-run')

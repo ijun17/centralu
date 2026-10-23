@@ -22,7 +22,7 @@ const { ConfirmHandoff, KeepNote } = await import('./ConfirmHandoff.jsx')
 
 const render = (over: Partial<Parameters<typeof ConfirmHandoff>[0]> = {}) =>
   renderToStaticMarkup(
-    <ConfirmHandoff name="Fix login" tool="claude" dead={false} blocked={null} backgroundTasks={0} onConfirm={() => {}} onCancel={() => {}} {...over} />,
+    <ConfirmHandoff name="Fix login" tool="claude" dead={false} blocked={null} backgroundTasks={0} working={false} onConfirm={() => {}} onCancel={() => {}} {...over} />,
   )
 
 /** The archive box's own tag, so a `checked` elsewhere cannot pass for it */
@@ -43,8 +43,12 @@ describe('the handoff dialog defaults (#1477)', () => {
     expect(html).toContain('data-testid="handoff-warning"')
   })
 
-  it('says nothing about background work while the original is archived', () => {
+  it('says nothing of the kept original while it is archived, and what archiving stops when work is running', () => {
     expect(render({ backgroundTasks: 2 })).not.toContain('handoff-background-note')
+    expect(render()).not.toContain('handoff-stops-note')
+    expect(render({ working: true })).toContain('It is working now: the note holds what is stored so far, and archiving ends its turn.')
+    expect(render({ backgroundTasks: 1 })).toContain('Archiving stops it and its 1 background task.')
+    expect(render({ working: true, backgroundTasks: 2 })).toContain('ends its turn, and its 2 background tasks.')
   })
 })
 

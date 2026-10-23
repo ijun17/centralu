@@ -170,6 +170,27 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     await eventually(() => store.children.listDelegatedTurns().length === 0)
   })
 
+  it("keeps the record's table of parts pointing at the right lines once the moved-children block is above it (#1481)", async () => {
+    const h = host()
+    const { project, parent } = await parentOf(h)
+    await startChild(h, parent, 'long work')
+    const record = await h.mgr.exportHandoffRecord(parent, 'claude')
+    await h.mgr.createSession({
+      projectId: project, cwd: root, tool: 'claude', permissionPreset: 'normal', initialPrompt: 'You are taking over. Read the note.',
+      handoff: { from: 'Planner', note: record.text, fromSessionId: parent },
+    })
+
+    const lines = readFileSync(record.path, 'utf8').split('\n')
+    expect(lines[0]).toBe('## Work handed over with this note (added by Centralu)')
+    const row = (label: string) => {
+      const m = /\| (\d+)–(\d+) \|$/.exec(lines.find((l) => l.startsWith(`| ${label}`)) ?? '')
+      return { from: Number(m?.[1]), to: Number(m?.[2]) }
+    }
+    expect(lines[row('Contents').from - 1]).toMatch(/^## Contents /)
+    expect(lines[row('Instructions to you').from - 1]).toMatch(/^Your predecessor session /)
+    expect(row('Contents').to).toBe(row('Instructions to you').from - 1)
+  })
+
   it('lets the new session status and delete the child, and the original neither', async () => {
     const h = host()
     const { project, parent } = await parentOf(h)

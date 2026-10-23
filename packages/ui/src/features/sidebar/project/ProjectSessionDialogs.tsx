@@ -1,4 +1,4 @@
-import { backgroundCount, type SessionSummary } from '@cc/core'
+import { backgroundCount, isInTurn, type SessionSummary } from '@cc/core'
 import { handoffBlockedBy, useStore } from '../../../store/store.js'
 import { ConfirmHandoff } from '../dialogs/ConfirmHandoff.jsx'
 import { ConfirmDelete } from '../dialogs/ConfirmDelete.jsx'
@@ -51,6 +51,10 @@ export function ProjectSessionDialogs({
           blocked={(() => {
             const s = sessions.find((x) => x.id === handingOff)
             return s ? handoffBlockedBy(s) : null
+          })()}
+          working={(() => {
+            const s = sessions.find((x) => x.id === handingOff)
+            return s ? isInTurn(s.state) : false
           })()}
           backgroundTasks={backgroundCount(sessions.find((x) => x.id === handingOff)?.backgroundTasks ?? [])}
           onCancel={() => setHandingOff(null)}

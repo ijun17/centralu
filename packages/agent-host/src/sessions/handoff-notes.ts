@@ -1,6 +1,7 @@
 import type { CreateSessionOpts } from '../adapters/contract.js'
 import { handoffNoteDir, handoffNotePath, sweepHandoffNotes, writeHandoffNote } from '../dev-services/handoff-notes.js'
 import { inTurn } from '../idle.js'
+import { asObj } from '../json-value.js'
 import { rpcError } from '../rpc-error.js'
 import type { DelegationHost } from './delegation-flow.js'
 import { liveBackgroundTasks } from '@cc/protocol'
@@ -128,8 +129,8 @@ export class HandoffNotes {
     // The note of the session this one took over from (#1481): its handoff marker names it. Named in the header, never copied in
     let previousNote: string | null = null
     for (const r of rows) {
-      const p = r.payload as { type?: string; fromSessionId?: string }
-      if (r.kind !== 'marker' || p.type !== 'handoff' || !p.fromSessionId) continue
+      const p = asObj(r.payload)
+      if (r.kind !== 'marker' || p.type !== 'handoff' || typeof p.fromSessionId !== 'string' || !p.fromSessionId) continue
       try {
         previousNote = handoffNotePath(m.projectId, p.fromSessionId)
       } catch {
@@ -144,7 +145,6 @@ export class HandoffNotes {
         id: s.id,
         name: s.name,
         state: s.pendingApproval || s.pendingQuestions.length || s.state === 'waiting_approval' ? 'waiting for the person' : inTurn(s.state) ? 'working' : 'finished',
-        how: s.askedBy === sessionId ? 'started' : 'forked',
       }))
     const background = liveBackgroundTasks(m.backgroundTasks ?? []).map((t) => ({ id: t.id, kind: t.kind, description: t.description, ...(t.timer ? { timer: true } : {}) }))
     const text = buildHandoffRecord({ name: m.name, tool: m.tool, toTool, summary, rows, pivotSeq, previousNote, children, background })

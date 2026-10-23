@@ -205,24 +205,25 @@ function touchedPaths(entries: Entry[]): string[] {
   return seen.slice(0, TOUCHED_MAX)
 }
 
-/** A session the predecessor started or forked, as the contents section lists it (#1481) */
+/** A session the predecessor started (start_agent, or a worktree child of it), as the contents section lists it (#1481) */
 export type RecordChild = {
   id: string
   name: string
   state: 'working' | 'waiting for the person' | 'finished'
-  /** `started`: asked for by the predecessor (start_agent, ask_project); `forked`: a fork of it */
-  how: 'started' | 'forked'
 }
 /** A background task of the predecessor that is running now (#1481) */
 export type RecordBackground = { id: string; kind: string; description: string; timer?: boolean }
 
+/** The first `n` UTF-16 units of `s`, never ending between the two halves of a surrogate pair */
+function cut(s: string, n: number): string {
+  const last = s.charCodeAt(n - 1)
+  return s.slice(0, last >= 0xd800 && last <= 0xdbff ? n - 1 : n)
+}
+
 /** The head of one tool result, with a marker that says how much was cut (#1481). A result within the head is whole */
 export function resultHead(result: string): string {
   if (result.length <= RESULT_HEAD) return result
-  let end = RESULT_HEAD
-  // Never end between the two halves of a surrogate pair
-  const last = result.charCodeAt(end - 1)
-  if (last >= 0xd800 && last <= 0xdbff) end--
+  const end = cut(result, RESULT_HEAD).length
   return `${result.slice(0, end).trimEnd()}\n… (${num(result.length - end)} more characters cut — re-run it to see the rest)`
 }
 
@@ -248,15 +249,16 @@ function contentsSection(c: {
   out.push(`### The predecessor's latest reports, in full${c.reports.length ? ` (${c.reports.length})` : ''}`, '')
   if (!c.reports.length) out.push('None in the record.', '')
   for (const r of c.reports) {
-    const cut = r.text.length > REPORT_MAX
-    out.push(`Report at seq ${r.seq}:`, indent(cut ? r.text.slice(0, REPORT_MAX) : r.text))
-    if (cut) out.push(`    … (${num(r.text.length - REPORT_MAX)} more characters cut here; the record below has the report)`)
+    const over = r.text.length > REPORT_MAX
+    out.push(`Report at seq ${r.seq}:`, indent(over ? cut(r.text, REPORT_MAX) : r.text))
+    if (over) out.push(`    … (${num(r.text.length - cut(r.text, REPORT_MAX).length)} more characters cut here; the record below has the report)`)
     out.push('')
   }
   out.push('### Sessions the predecessor started', '')
   if (!c.children.length) out.push('None.')
+  else out.push("A handoff may have moved some of them to you: the block at the very top of the file says which.", '')
   for (const k of c.children.slice(0, LIST_MAX)) {
-    out.push(`- ${trustedJsonText(k.name)} — ${k.state}${k.how === 'forked' ? ' (a fork of it)' : ''} — id: ${oneLine(k.id)}`)
+    out.push(`- ${trustedJsonText(k.name)} — ${k.state} — id: ${oneLine(k.id)}`)
   }
   if (c.children.length > LIST_MAX) out.push(`- … and ${num(c.children.length - LIST_MAX)} more`)
   out.push('', '### Background work running in the predecessor now', '')
@@ -270,7 +272,7 @@ function contentsSection(c: {
     for (const p of c.parts) out.push(`| ${p.label} | ${p.from}–${p.to} |`)
     out.push(
       '',
-      "A part runs to the line before the next one. Read one with `sed -n 'FROM,TOPp' <this file>`; conversation text is in every part of the record.",
+      "A part runs to the line before the next one. Read one with `sed -n 'FROM,TOp' <this file>` (or your tool's line-range read); conversation text is in every part of the record.",
     )
   }
   out.push('', '---', '', '')
@@ -358,7 +360,7 @@ export function buildHandoffRecord(opts: {
   const touchedLine = touched.length ? `touched: ${touched.map(oneLine).join(', ')}\n` : ''
   // The path is one the host built (the data folder and two checked ids): control characters out, backslashes kept, as a Windows path needs them
   const previousLine = opts.previousNote
-    ? `previous handoff note (this session took over from another): ${opts.previousNote.replace(/[\p{Cc}\p{Zl}\p{Zp}]/gu, '')}\n`
+    ? `previous handoff note (this session took over from another; the file is rewritten by every handoff from that session, and may be gone): ${opts.previousNote.replace(/[\p{Cc}\p{Zl}\p{Zp}]/gu, '')}\n`
     : ''
   // The tool's summary is the session's own words too: indented, so none of its lines can start a row (#797)
   const summarySection = summary ? `## The tool's last compaction summary\n\n${indent(summary)}\n\n` : ''
@@ -413,7 +415,7 @@ export function buildHandoffRecord(opts: {
     }
     const firstOf = (k: PartKey) => {
       const i = kept.findIndex((e) => e.part === k)
-      return i < 0 ? null : lineOf[i]!
+      return lineOf[i] ?? null
     }
     return {
       text: lead + kept.map((e) => e.text).join('\n\n') + '\n',
@@ -439,12 +441,31 @@ export function buildHandoffRecord(opts: {
     `Latest tool calls, results cut to ${RESULT_HEAD} characters`,
   ]
   // The summary section has no start when there is no summary; a part with no start is not in the table
-  const present = (starts: (number | null)[]) => starts.map((at, i) => (i === 2 && !summary ? null : at))
   const rowsOf = (starts: (number | null)[], total: number): Part[] => {
-    const rows = present(starts).flatMap((at, i) => (at == null ? [] : [{ label: names[i]!, at }]))
+    const rows = names.flatMap((label, i) => {
+      const at = i === 2 && !summary ? null : (starts[i] ?? null)
+      return at == null ? [] : [{ label, at }]
+    })
     return rows.map((r, i) => ({ label: r.label, from: r.at, to: (rows[i + 1]?.at ?? total + 1) - 1 }))
   }
   const first = layout(rowsOf(layout([]).starts, 0))
   const total = lineBreaks(first.text)
   return layout(rowsOf(first.starts, total)).text
+}
+
+/**
+ * The record's table of parts after `by` lines were put above it (#1481). The note is written once by
+ * `buildHandoffRecord` and rewritten with the moved-children block in front when the handoff moves live work
+ * (#693); every line number of the table moves by that block's length, or `sed` reads the wrong range. A note with no
+ * table (one the agent wrote) is returned as it is.
+ */
+export function shiftPartLines(note: string, by: number): string {
+  if (by === 0) return note
+  const at = note.indexOf('\n### Parts of this note\n')
+  const end = at < 0 ? -1 : note.indexOf('\n---\n', at)
+  if (end < 0) return note
+  const table = note
+    .slice(at, end)
+    .replace(/^(\| .+ \| )(\d+)–(\d+)( \|)$/gm, (_row, lead: string, from: string, to: string, tail: string) => `${lead}${Number(from) + by}–${Number(to) + by}${tail}`)
+  return note.slice(0, at) + table + note.slice(end)
 }

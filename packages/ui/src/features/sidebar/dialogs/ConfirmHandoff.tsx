@@ -25,6 +25,7 @@ export function ConfirmHandoff({
   dead,
   blocked,
   backgroundTasks,
+  working,
   onConfirm,
   onCancel,
 }: {
@@ -36,6 +37,8 @@ export function ConfirmHandoff({
   blocked: 'question' | 'approval' | null
   /** How many background tasks of this session run now (#290, ambient ones left out): a kept original is woken by each one's end (#1477) */
   backgroundTasks: number
+  /** A turn is running now: the note is built from what is stored so far, and archiving ends the turn (#1477) */
+  working: boolean
   onConfirm: (tool: ToolName, deleteOld: boolean, mode: 'agent' | 'record') => void
   onCancel: () => void
 }) {
@@ -126,6 +129,12 @@ export function ConfirmHandoff({
             When the new session is ready, this session is archived — and{' '}
             <span className="text-danger">deleting it for good there deletes the {toolLabel} conversation file
             too</span>. Until then, Settings → Archive reads it and restores it.
+            {(working || backgroundTasks > 0) && (
+              <span className="mt-1 block text-ink-signal" data-testid="handoff-stops-note">
+                {working ? 'It is working now: the note holds what is stored so far, and archiving ends its turn' : 'Archiving stops it'}
+                {backgroundTasks > 0 ? `${working ? ', and' : ' and'} its ${backgroundTasks} background task${backgroundTasks === 1 ? '' : 's'}` : ''}.
+              </span>
+            )}
           </p>
         ) : (
           <KeepNote backgroundTasks={backgroundTasks} />
