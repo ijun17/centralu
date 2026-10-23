@@ -120,9 +120,7 @@ describe('tool calls left out of a read (#1480)', () => {
     expect(none.map((l) => l.seq)).toEqual([1, 3, 5])
     // The lines "titles" shows, less the tool lines
     expect(sessionLines(turn, { tools: 'titles' }).filter((l) => l.fields.role !== 'tool').map((l) => l.fields.text)).toEqual(none.map((l) => l.fields.text))
-  })
-
-  it('still joins two texts with no call between them into one line', () => {
+    // Two texts with no call between them are still one line
     expect(sessionLines([said(1, 'a'), said(2, 'b')], { tools: 'none' })).toHaveLength(1)
   })
 })
