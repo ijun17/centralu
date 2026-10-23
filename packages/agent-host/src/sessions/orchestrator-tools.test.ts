@@ -209,9 +209,25 @@ describe("a reader's list and reads across projects (#984)", () => {
       { around: undefined, tools: 'full' },
       { around: undefined, tools: 'titles' },
     ])
+    await ask({ before: 12 })
+    await ask({ from: 30, offset: 2000 })
+    expect(seen.slice(4)).toEqual([
+      { around: undefined, tools: 'titles', before: 12 },
+      { around: undefined, tools: 'titles', from: 30, offset: 2000 },
+    ])
+    // The server strips an argument its schema does not list, so every one a note names is in the definitions the seats get,
+    // and `tools: true` (what it was before) is still accepted there, not refused
+    for (const profile of ['reader', 'orchestrator', 'scoped'] as const) {
+      const def = toolDefsFor(profile, 'resident').find((t) => t.name === 'read_session')!
+      for (const key of ['tools', 'maxChars', 'before', 'from', 'offset']) expect(Object.keys(def.schema.shape), `${profile}.${key}`).toContain(key)
+      expect(def.schema.safeParse({ sessionId: 'b', tools: true, before: 3 }).success, profile).toBe(true)
+      expect(def.schema.safeParse({ sessionId: 'b', tools: 'none' }).success, profile).toBe(true)
+      expect(def.schema.safeParse({ sessionId: 'b', tools: 'everything' }).success, profile).toBe(false)
+    }
     const shown = orchestratorToolSchemas('reader').find((t) => t.name === 'read_session')!
     expect(JSON.stringify(shown)).toContain('maxChars')
     expect(JSON.stringify(shown)).toContain('"none","titles","full"')
+    expect(JSON.stringify(shown)).toContain('"boolean"')
   })
 
   it("says a session's project is not trusted before its lines", async () => {
@@ -266,7 +282,7 @@ describe('the reader set', () => {
     // `difficulty` and the words on it and on `worktree` (2,313 -> 2,560; 68 tokens measured live); #861's `name` 2,585;
     // #1038's `machine` 2,612
     const claude = residentCost('reader', DEFERRED_SERVER)
-    expect(claude.residentChars + claude.instructionsChars).toBeLessThanOrEqual(2725)
+    expect(claude.residentChars + claude.instructionsChars).toBeLessThanOrEqual(2825)
   })
 
   it('leaves the instructions out when CC_READER_INSTRUCTIONS=0 asks it to (measurement)', () => {
@@ -594,7 +610,7 @@ function bare(schema: z.ZodType): { properties: Record<string, unknown>; require
 }
 
 /** Arguments the runner reads otherwise than a seat is shown them, each on purpose and said in TOOL_ARGS */
-const READ_OTHERWISE = new Set(['app_guide.topic', 'ask_project.ifBusy', 'centralu_run.args', 'read_session.tools'])
+const READ_OTHERWISE = new Set(['app_guide.topic', 'ask_project.ifBusy', 'centralu_run.args'])
 
 describe('arguments (#850)', () => {
   it('every tool a seat is shown has one schema to run by, and the keys it is shown are that schema\'s', () => {

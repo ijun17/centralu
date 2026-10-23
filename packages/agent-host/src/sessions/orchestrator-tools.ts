@@ -236,6 +236,8 @@ const HANDLERS: ToolHandlers = {
       around: args.around,
       tools: toolLinesOf(args.tools),
       ...(args.maxChars !== undefined ? { maxChars: args.maxChars } : {}),
+      ...(args.before !== undefined ? { before: args.before } : {}),
+      ...(args.from !== undefined ? { from: args.from } : {}),
       ...(args.offset !== undefined ? { offset: args.offset } : {}),
     })
     if (!r.ok) return { text: `Could not read it — ${r.error}`, isError: true }

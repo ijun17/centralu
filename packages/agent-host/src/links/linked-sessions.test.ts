@@ -251,6 +251,58 @@ describe('reading a linked machine for the hub’s orchestrator', () => {
     expect((await linkedSessions(() => [current]).read('m1.w1')).lines).toEqual(['{"note":"n"}', lines[0]])
   })
 
+  // #1480 review: a hub from this build asked for the passage `recall` found; the machine centred its window on it, and the hub kept the newest lines
+  it('keeps the lines nearest the spot of a read around it from a machine from before the budget', async () => {
+    const line = (i: number) => JSON.stringify({ ts: '2026-10-21 09:30', role: 'assistant', text: `${i}`.padEnd(1500, 'x') })
+    // A machine's window of 40 lines centred on the spot: it is the 20th
+    const window = Array.from({ length: 40 }, (_, i) => line(i))
+    const older = machine({ 'host.readSession': { state: 'idle', lines: window } })
+    const read = await linkedSessions(() => [older]).read('m1.w1', 40, { around: 84, maxChars: 6000 })
+    const kept = read.lines!.filter((l) => !l.startsWith('{"note"')).map((l) => Number((JSON.parse(l) as { text: string }).text.split('x')[0]))
+    expect(kept).toContain(20)
+    expect(kept.every((n) => Math.abs(n - 20) <= 2)).toBe(true)
+    expect(read.lines![0]).toContain('older lines of this read are not shown')
+    expect(read.lines!.at(-1)).toContain('newer lines of this read are not shown')
+    // Without a spot it is the newest lines, as before
+    const plain = await linkedSessions(() => [older]).read('m1.w1', 40, { maxChars: 6000 })
+    expect(plain.lines!.at(-1)).toBe(window.at(-1))
+  })
+
+  // #1480 review: a machine that says it held the budget is still bounded here, and its "no tools" held
+  it('bounds the answer of a machine that echoes its budget too, and drops its tool lines for "none"', async () => {
+    const line = (i: number) => JSON.stringify({ ts: '2026-10-21 09:30', role: 'assistant', text: `${i}`.padEnd(1500, 'x') })
+    const tool = JSON.stringify({ ts: '2026-10-21 09:30', role: 'tool', tool: 'Bash', title: 'ls' })
+    const lines = [...Array.from({ length: 30 }, (_, i) => line(i)), tool]
+    const wrong = machine({ 'host.readSession': { state: 'idle', lines, maxChars: 12_000 } })
+    const read = await linkedSessions(() => [wrong]).read('m1.w1', 40, { tools: 'none', maxChars: 5000 })
+    expect(read.lines!.reduce((sum, l) => sum + l.length + 1, 0)).toBeLessThanOrEqual(5000)
+    expect(read.lines!.some((l) => l.includes('"role":"tool"'))).toBe(false)
+    // One that kept to the budget is passed on as it is, with its own notes
+    const kept = ['{"note":"older"}', line(1), line(2), '{"note":"newer"}']
+    const right = machine({ 'host.readSession': { state: 'idle', lines: kept, maxChars: 12_000 } })
+    expect((await linkedSessions(() => [right]).read('m1.w1')).lines).toEqual(kept)
+  })
+
+  // #1480 review: the reads a budget's notes name go to the machine, and an older one that would answer the plain read is said, not shown again
+  it('passes before and from on to a machine, and says a machine from before them cannot continue a read', async () => {
+    const asked: unknown[] = []
+    const current = machine({})
+    current.call = async (method, params) => {
+      asked.push({ method, params })
+      return { state: 'idle', lines: [], maxChars: 12_000 }
+    }
+    await linkedSessions(() => [current]).read('m1.w1', 40, { before: 12 })
+    await linkedSessions(() => [current]).read('m1.w1', 40, { from: 30 })
+    expect(asked).toEqual([
+      { method: 'host.readSession', params: { sessionId: 'w1', limit: 40, before: 12 } },
+      { method: 'host.readSession', params: { sessionId: 'w1', limit: 40, from: 30 } },
+    ])
+    const older = machine({ 'host.readSession': { state: 'idle', lines: ['{"role":"user","text":"hi"}'] } })
+    for (const opts of [{ before: 12 }, { from: 30 }]) {
+      expect(await linkedSessions(() => [older]).read('m1.w1', 40, opts)).toMatchObject({ ok: false, error: expect.stringContaining('from before reading on from a line') })
+    }
+  })
+
   /*
    * #1186 review: an older machine ignores `offset` and answers its plain read, so every read on would show the same cut
    * lines again. That is said, and a machine of this build's answer is passed on

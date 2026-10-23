@@ -648,6 +648,8 @@ export function linkedSessions(
           ...(toolMode === 'full' ? { tools: true } : {}),
           ...(opts?.tools !== undefined ? { toolLines: toolMode } : {}),
           ...(opts?.maxChars !== undefined ? { maxChars: budgetOf(opts.maxChars) } : {}),
+          ...(opts?.before !== undefined ? { before: opts.before } : {}),
+          ...(opts?.from !== undefined ? { from: opts.from } : {}),
           ...(opts?.offset !== undefined ? { offset: opts.offset } : {}),
         })
         const r = HostReadSessionResult.safeParse(answer)
@@ -660,12 +662,20 @@ export function linkedSessions(
           return { ok: false, error: `${m.name} runs a Centralu from before reading a line from an offset, so it cannot show the rest of that line; update it there. Until then its lines stop at 2,000 characters` }
         }
         /*
-         * An older machine gave all its lines, tool lines too (#1480): the budget and "no tools" are held here, so a
-         * linked session's answer is as bounded as a local one's. A machine that echoes the budget has done it
+         * A machine that does not echo the budget is from before it (#1480): it answers every line it has, tool lines too,
+         * and ignores `before` and `from`, whose answer would be the same newest lines again
          */
-        const lines =
-          r.data.maxChars !== undefined ? r.data.lines
-          : fitMachineLines(toolMode === 'none' ? r.data.lines.filter((l) => !isToolLine(l)) : r.data.lines, budgetOf(opts?.maxChars))
+        if (r.data.maxChars === undefined && (opts?.before !== undefined || opts?.from !== undefined)) {
+          return { ok: false, error: `${m.name} runs a Centralu from before reading on from a line, so it cannot continue that read; update it there. recall finds a passage and read_session with its seq as around reads it` }
+        }
+        // The held bounds apply to every answer, a machine's own too: tool lines left out for `none`, then the budget
+        const all = r.data.lines
+        const kept = toolMode === 'none' ? all.filter((l) => !isToolLine(l)) : all
+        // An `around` read: where the spot is in the machine's window, which it centres on it when lines come before it
+        const spot = Math.min(Math.floor(Math.min(limit ?? 40, 200) / 2), all.length - 1)
+        const around = opts?.around !== undefined && opts.before === undefined && opts.from === undefined
+        const center = !around ? null : Math.min(toolMode === 'none' ? all.slice(0, spot).filter((l) => !isToolLine(l)).length : spot, kept.length - 1)
+        const lines = fitMachineLines(kept, budgetOf(opts?.maxChars), center)
         return { ok: true, state: oneLine(r.data.state, 40), lines: lines.map(fencedLine) }
       } catch (err) {
         return { ok: false, error: cause(m, err) }

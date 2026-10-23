@@ -298,6 +298,26 @@ describe("the orchestrator's tools see only this app's sessions", () => {
     for (const full of ['full', true] as const) expect((await tools.readSession(a.id, 40, { tools: full })).lines!.join('\n')).toContain('second line')
   })
 
+  // #1480: with the tool calls gone, the texts they separated were one line cut at its start, and the end of a turn was lost
+  it('read_session with tools "none" keeps the end of a turn that ran tool calls', async () => {
+    const { a, tools } = await setup()
+    const h = adapter.handleOf(a.id)!
+    h.emitDelta('SECTION-A '.padEnd(1500, 'a'))
+    h.emitToolCall('Bash', 'echo one')
+    h.emitDelta('SECTION-B '.padEnd(1500, 'b'))
+    h.emitToolCall('Bash', 'echo two')
+    h.emitDelta('MARKER-TURN-END')
+    h.finishTurn()
+    await new Promise((r) => setTimeout(r, 0))
+    const none = (await tools.readSession(a.id, 40, { tools: 'none' })).lines!
+    expect(none.join('\n')).toContain('MARKER-TURN-END')
+    expect(none.join('\n')).not.toContain('"role":"tool"')
+    expect(none.filter((l) => l.includes('"role":"assistant"'))).toHaveLength(3)
+    // The same texts "titles" shows, less its tool lines
+    const titles = (await tools.readSession(a.id, 40, { tools: 'titles' })).lines!
+    expect(titles.filter((l) => l.includes('"role":"assistant"'))).toEqual(none.filter((l) => l.includes('"role":"assistant"')))
+  })
+
   /*
    * #1480: 40 lines of up to 2,000 characters came back as about 80,000 characters in one call. A call has a total, the
    * newest lines that fit, and says how far it reached and the call that reads on
@@ -306,21 +326,46 @@ describe("the orchestrator's tools see only this app's sessions", () => {
     const long = (i: number) => `message #${i} `.padEnd(1900, 'x')
     const total = (lines: string[]) => lines.join('\n').length
 
-    it('returns at most 12,000 characters of the newest lines, and the call that reads on', async () => {
+    const texts = (lines: string[]) => lines.filter((l) => !l.startsWith('{"note"')).map((l) => (JSON.parse(l) as { text: string }).text.slice(0, 40))
+
+    it('returns at most 12,000 characters in all, notes included, and following its notes back shows every line once', async () => {
       const { a, tools } = await setup()
       for (let i = 1; i <= 30; i++) await rpc('agents.send', { sessionId: a.id, text: long(i) })
-      const r = await tools.readSession(a.id)
-      const lines = r.lines!
-      const note = JSON.parse(lines[0]!) as { note: string }
-      // Each send is two lines of 1,950 characters (the message and its echo): 6 fit 12,000, and the note is not counted
-      expect(total(lines.slice(1))).toBeLessThanOrEqual(12_000)
-      expect(lines.slice(1)).toHaveLength(6)
-      expect(lines.at(-1)).toContain('echo:message #30 ')
-      expect(note.note).toMatch(/Stopped at the 12000-character budget .*: \d+ older lines of this read are not shown/)
-      // The call it names reads on: the line it points at is the next one older, and the budget applies again
-      const around = Number(/around=(\d+)/.exec(note.note)![1])
-      const further = (await tools.readSession(a.id, 40, { around })).lines!.join('\n')
-      expect(further).toContain('echo:message #27 ')
+      let r = await tools.readSession(a.id)
+      expect(total(r.lines!)).toBeLessThanOrEqual(12_000)
+      expect(r.lines!.at(-1)).toContain('echo:message #30 ')
+      expect(JSON.parse(r.lines![0]!).note).toMatch(/Stopped at the 12000-character budget .*: \d+ older lines of this read are not shown/)
+      // Each note names where the next read starts; the lines of all of them, put together, are the session once over
+      const seen: string[] = []
+      for (let reads = 0; reads < 20; reads++) {
+        seen.unshift(...texts(r.lines!))
+        const before = /before=(\d+)/.exec(r.lines![0]!)?.[1]
+        if (before === undefined) break
+        r = await tools.readSession(a.id, 40, { before: Number(before) })
+        expect(total(r.lines!)).toBeLessThanOrEqual(12_000)
+      }
+      expect(new Set(seen).size).toBe(seen.length)
+      expect(seen).toHaveLength(60)
+      expect(seen[0]).toContain('message #1 ')
+    })
+
+    it('a read around a spot is followed back with before and forward with from, with nothing twice', async () => {
+      const { a, tools } = await setup()
+      for (let i = 1; i <= 30; i++) await rpc('agents.send', { sessionId: a.id, text: long(i) })
+      // The user row of the 15th send is seq 29
+      const mid = await tools.readSession(a.id, 40, { around: 29 })
+      expect(total(mid.lines!)).toBeLessThanOrEqual(12_000)
+      const shown = texts(mid.lines!)
+      expect(shown.some((t) => t.includes('message #15 '))).toBe(true)
+      const older = /before=(\d+)/.exec(mid.lines![0]!)![1]!
+      const newer = /from=(\d+)/.exec(mid.lines!.at(-1)!)![1]!
+      const back = texts((await tools.readSession(a.id, 40, { before: Number(older) })).lines!)
+      const forward = texts((await tools.readSession(a.id, 40, { from: Number(newer) })).lines!)
+      expect(back.filter((t) => shown.includes(t))).toEqual([])
+      expect(forward.filter((t) => shown.includes(t))).toEqual([])
+      // The line the forward read starts at is the one after the last shown, and the back read ends at the one before the first
+      expect(forward[0]).not.toBe(shown.at(-1))
+      expect(back.at(-1)).not.toBe(shown[0])
     })
 
     it('takes maxChars to 2,000 at least and 40,000 at most, and a larger one shows more in one call', async () => {

@@ -129,7 +129,7 @@ export class LinkedHost {
    */
   hostReader(): {
     sessions(): Promise<OrchestratedSession[]>
-    read(sessionId: string, limit?: number, opts?: { around?: number; tools?: boolean | 'none' | 'titles' | 'full'; offset?: number; maxChars?: number }): Promise<{ state: string; lines: string[]; maxChars: number }>
+    read(sessionId: string, limit?: number, opts?: { around?: number; tools?: boolean | 'none' | 'titles' | 'full'; offset?: number; maxChars?: number; before?: number; from?: number }): Promise<{ state: string; lines: string[]; maxChars: number }>
     recall(query: string, limit?: number): Promise<RecallHit[]>
     lastAnswer(sessionId: string, maxChars?: number): Promise<{ text: string; length: number; seq: number | null }>
   } {

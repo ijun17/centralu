@@ -475,7 +475,8 @@ export function orchestratorToolsFor(
        */
       const self = sessionId === orchestratorId
       const cut = self ? ownCut() : null
-      if (self && (cut === null || opts?.around == null || opts.around >= cut)) {
+      const spot = opts?.around ?? opts?.from ?? opts?.before
+      if (self && (cut === null || spot == null || spot >= cut)) {
         return {
           ok: false,
           error:
@@ -520,7 +521,17 @@ export function orchestratorToolsFor(
           lines: line ? [lineText(line, opts.offset, opts.maxChars === undefined ? LINE_WINDOW_CHARS : budgetOf(opts.maxChars), true)] : [],
         }
       }
-      const read = around
+      /*
+       * A read on from where a budget stopped one (#1480): `before` the oldest line it showed, back; `from` the first it did
+       * not, forward. The notes of a read name them, so following one shows nothing twice, as `around` (centred) did
+       */
+      const before = opts?.before
+      const fromSeq = opts?.from
+      const read = before != null
+        ? host.store.messages.loadMessages(sessionId, limit * 2, before)
+        : fromSeq != null
+          ? host.store.messages.loadMessagesFrom(sessionId, fromSeq - 1, limit * 2)
+          : around
         ? [
             ...host.store.messages.loadMessages(sessionId, limit, around + 1),
             ...host.store.messages.loadMessagesFrom(sessionId, around, limit),
@@ -538,7 +549,7 @@ export function orchestratorToolsFor(
        * it but cannot get there" state intact.
        */
       const start = around != null && anchor >= 0 ? Math.max(0, anchor - Math.floor(limit / 2)) : -1
-      const picked = start >= 0 ? lines.slice(start, start + limit) : lines.slice(-limit)
+      const picked = before != null ? lines.slice(-limit) : fromSeq != null ? lines.slice(0, limit) : start >= 0 ? lines.slice(start, start + limit) : lines.slice(-limit)
       // The cards of a turn this seat gave it (#676): this read is where a directing seat finds them
       const cards = host.routedCards(sessionId, orchestratorId)
       return {
@@ -546,7 +557,7 @@ export function orchestratorToolsFor(
         state: target.state,
         ...(target.projectId && untrustedMark()(target.projectId) ? { untrusted: true } : {}),
         // At most the call's budget in all (#1480), not 40 lines of 2,000 characters each
-        lines: fitLines(picked, start >= 0 ? anchor - start : null, budgetOf(opts?.maxChars)),
+        lines: fitLines(picked, before != null ? 'back' : fromSeq != null ? 'forward' : start >= 0 && around != null ? { around: anchor - start } : 'back', budgetOf(opts?.maxChars)),
         ...(cards.length ? { cards } : {}),
       }
     },
