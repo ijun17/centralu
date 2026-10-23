@@ -483,7 +483,11 @@ describe('compaction — saying what is currently happening', () => {
       subtype: 'compact_boundary',
       compact_metadata: { trigger: 'manual', pre_tokens: 25485, post_tokens: 3686, duration_ms: 39099 },
     })
-    expect(out).toEqual([{ type: 'compaction', sessionId: SID, failed: false, before: 25485, after: 3686 }])
+    expect(out).toEqual([{ type: 'compaction', sessionId: SID, failed: false, before: 25485, after: 3686, trigger: 'manual' }])
+    // The tool's own at its threshold says so, which Centralu does not take for its compact (#1451)
+    expect(n({ type: 'system', subtype: 'compact_boundary', compact_metadata: { trigger: 'auto', pre_tokens: 900000, post_tokens: 20000 } })).toEqual([
+      { type: 'compaction', sessionId: SID, failed: false, before: 900000, after: 20000, trigger: 'auto' },
+    ])
   })
 })
 
@@ -505,7 +509,7 @@ describe('a message whose content is words, not blocks (after /compact)', () => 
     const stream = new ClaudeStreamNormalizer(SID)
     const events: NormalizedEvent[] = []
     for (const m of afterCompact) expect(() => events.push(...stream.push(sdk(m)))).not.toThrow()
-    expect(events).toContainEqual({ type: 'compaction', sessionId: SID, failed: false, before: 25485, after: 3686 })
+    expect(events).toContainEqual({ type: 'compaction', sessionId: SID, failed: false, before: 25485, after: 3686, trigger: 'manual' })
     // The summary is for the model: nothing of it reaches the screen as a result or a message
     expect(events.map((e) => e.type)).not.toContain('tool_result')
     expect(JSON.stringify(events)).not.toContain('is being continued')

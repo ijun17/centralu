@@ -224,6 +224,10 @@ export class ClaudeAdapter implements AgentAdapter {
   windowCeilingFor(autoCompactTokens: number): number {
     return claudeAutoCompactWindow(autoCompactTokens)
   }
+  /** The CLI's `/compact [instructions]` takes a focus for the summary */
+  compactCommand(focus: string | null): string {
+    return focus ? `/compact ${focus}` : '/compact'
+  }
   readonly capabilities: AdapterCapabilities = {
     approvals: true, // M0 validation: the global bypass can be overridden per session.
     contextUsage: 'exact',

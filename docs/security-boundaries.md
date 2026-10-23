@@ -434,6 +434,7 @@ is not listed for it and a call by name is refused (`Not a tool of this session`
 | `attach_app` | yes | — | — | yes | — |
 | `detach_app` | yes | — | — | yes | — |
 | `mail` | yes | — | — | yes | — |
+| `compact_self` | yes | — | — | yes | — |
 <!-- tool-matrix:end -->
 
 `usage_history` ([agent-host.md](agent-host.md) §6.2) is the orchestrator's alone, a rare command, and read-only: it returns token counts, cache hit

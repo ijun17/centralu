@@ -7,6 +7,7 @@ import {
   COMMAND_TOOLS,
   ORCHESTRATOR_INSTRUCTIONS,
   ORCHESTRATOR_TOOLS,
+  COMPACT_TOOLS,
   AGENT_TOOLS,
   DELEGATE_TOOLS,
   SCOPED_INSTRUCTIONS,
@@ -46,7 +47,7 @@ async function wholeGuide(): Promise<string> {
 }
 
 /** Every tool name in the registry, and the sets beside the reader set (#371: ask_project, and the app-access tools; #561: start_agent) */
-const KNOWN = new Set<string>([...ORCHESTRATOR_TOOLS.map((t) => t.name), ...COMMAND_TOOLS.map((t) => t.name), ...DELEGATE_TOOLS.map((t) => t.name), ...AGENT_TOOLS.map((t) => t.name), ...APP_ACCESS_TOOLS.map((t) => t.name)])
+const KNOWN = new Set<string>([...ORCHESTRATOR_TOOLS.map((t) => t.name), ...COMMAND_TOOLS.map((t) => t.name), ...DELEGATE_TOOLS.map((t) => t.name), ...AGENT_TOOLS.map((t) => t.name), ...APP_ACCESS_TOOLS.map((t) => t.name), ...COMPACT_TOOLS.map((t) => t.name)])
 
 function toolLikeWords(text: string): string[] {
   return [...new Set(text.match(/\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/g) ?? [])]

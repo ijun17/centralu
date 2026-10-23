@@ -35,8 +35,9 @@ const base = { sessionId: z.string() }
  * `wrote`: the person wrote into a turn of the work and the tool took it in; `added`: they chose to add it to the task.
  * Said by the host that ran the turn, so a hub that follows a linked machine reads it rather than guessing from the
  * order of the messages. Absent from a host that does not say.
+ * `compaction`: Centralu started this turn to compact the conversation (#1451); a window raises no "done" for it.
  */
-export const TurnWho = z.object({ by: z.enum(['person', 'work']), wrote: z.literal(true).optional(), added: z.literal(true).optional() })
+export const TurnWho = z.object({ by: z.enum(['person', 'work']), wrote: z.literal(true).optional(), added: z.literal(true).optional(), compaction: z.literal(true).optional() })
 export type TurnWho = z.infer<typeof TurnWho>
 const endsTurn = { turn: TurnWho.optional() }
 
@@ -491,6 +492,11 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
     /** How much it shrank. Only when the tool reports it (Claude compact_metadata) */
     before: z.number().optional(),
     after: z.number().optional(),
+    /**
+     * Who started it, when the tool says (Claude's `compact_metadata.trigger`): `manual` is a `/compact` (the person's or
+     * Centralu's, #1451), `auto` the tool's own at its threshold. Centralu does not take an `auto` one for its own.
+     */
+    trigger: z.enum(['manual', 'auto']).optional(),
   }),
   /**
    * The tool started a fresh conversation inside this session (#304): Claude Code's `/clear`, measured

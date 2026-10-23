@@ -43,6 +43,13 @@ describe('a notice is made for the session on screen too', () => {
     expect(useStore.getState().completion).toMatchObject({ sessionId: 'nr-done' })
   })
 
+  it('not when the turn was Centralu compacting the conversation (#1451): nothing finished that the person waits for', async () => {
+    await onScreen('nr-compact')
+    send({ type: 'turn_complete', sessionId: 'nr-compact', turn: { by: 'work', compaction: true } })
+    expect(noticesOf('nr-compact')).toEqual([])
+    expect(useStore.getState().completion?.sessionId).not.toBe('nr-compact')
+  })
+
   it('when it asks for an approval', async () => {
     await onScreen('nr-appr')
     send({ type: 'approval_request', sessionId: 'nr-appr', requestId: 'r1', detail: { kind: 'command', command: 'make' } })

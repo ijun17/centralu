@@ -58,6 +58,10 @@ export type SessionEventsHost = Pick<DelegationHost, 'agentRuns' | 'children' | 
     mailPoke: (sessionId: string) => void
     /** An event of a session, and whether it ended its turn: what the mail guards count (§7.9). Never throws */
     mailEvent: (e: NormalizedEvent, endedTurn: boolean) => void
+    /** An event of a session, and whether it ended its turn: what compaction at a break reads (#1451, self-compaction.ts). Never throws */
+    compactEvent: (e: NormalizedEvent, endedTurn: boolean) => void
+    /** Whether the session's running turn is one Centralu started to compact it (#1451) */
+    compactTurn: (sessionId: string) => boolean
     resumeSession: (sessionId: string, adopt?: AgentProcess) => Promise<{ session: SessionInfo; resumed: boolean; reason?: string; lockedElsewhere?: boolean }>
   }
 
@@ -269,7 +273,9 @@ export class SessionEvents {
      * Whose the turn was (#1377), read once as it ends, from what the tool says it took in: said on the event that ends
      * it, so a hub that follows this host reads it rather than guessing. The person's own turn is reported to nobody
      */
-    const turnBy = endedTurn && e.sessionId ? this.host.children.turnEnded(e.sessionId, this.host.handles.get(e.sessionId)?.turnInputs?.()) : undefined
+    const owned = endedTurn && e.sessionId ? this.host.children.turnEnded(e.sessionId, this.host.handles.get(e.sessionId)?.turnInputs?.()) : undefined
+    // A turn Centralu started to compact the conversation says so (#1451): the window raises no "done" for it
+    const turnBy = e.sessionId && endedTurn && this.host.compactTurn(e.sessionId) ? { ...(owned ?? { by: 'work' as const }), compaction: true as const } : owned
     const said = turnBy && (e.type === 'turn_complete' || e.type === 'state_change' || e.type === 'error' || e.type === 'limit_reached') ? { ...e, turn: turnBy } : e
     this.host.emit(seq != null ? ({ ...said, seq } as NormalizedEvent) : said)
     this.closeIntoRest(e)
@@ -313,6 +319,7 @@ export class SessionEvents {
     // A turn ended, a card was answered or a state was stated: the mail it was holding may go (#1347)
     // Counted before anything is poked: a delivery it lets go must see the turn that just ended
     if (e.sessionId) this.host.mailEvent(e, endedTurn)
+    if (e.sessionId) this.host.compactEvent(e, endedTurn)
     if (e.sessionId && (endedTurn || e.type === 'state_change' || e.type === 'approval_resolved' || e.type === 'question_resolved')) this.host.mailPoke(e.sessionId)
     // A deferred restart also waits for the session's background work (#648): the moment it ends is a boundary too
     if (e.type === 'background_tasks' && e.sessionId) this.host.restartPolicy.applyDeferredRestart(e.sessionId)
@@ -649,6 +656,20 @@ export class SessionEvents {
     }
     // After the tool took it, so the line is never about a delivery that did not happen; before the answer it starts
     this.onEvent({ type: 'notice', sessionId, level: 'info', from: 'Centralu', label: 'mail', text: input.line })
+  }
+
+  /**
+   * Centralu's own compact command (#1451): the tool's `/compact` as a turn of its own, in no one's name and with no user row,
+   * so nothing in the conversation reads as the person. Only a live process takes it; the caller has checked the session is at
+   * rest or has just ended its turn.
+   */
+  sendCompact(sessionId: string, text: string): void {
+    const handle = this.host.handles.get(sessionId)
+    if (!handle) throw rpcError('The session is not running')
+    this.host.record.closeStream(sessionId)
+    // A turn is asked for now, whether or not the tool announces it before its first card (`CardRests`)
+    this.host.cardRests.turnAsked(sessionId)
+    handle.send(text)
   }
 
   /**

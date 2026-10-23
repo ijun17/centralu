@@ -14,6 +14,8 @@ import type { SessionTrashHost } from './session-trash.js'
  * keys. As one blob, that list belongs to the schema (UiPreferences).
  */
 const UI_PREFS_KEY = 'ui_preferences'
+/** The resting-session share of the auto-compact setting (#1451), stored beside it so an older build's save of `autoCompact` cannot erase it */
+const IDLE_SHARE_KEY = 'autoCompactIdleShare'
 
 /**
  * What the screen preferences reach of the session manager (#428), typed as the manager declares each member. The
@@ -90,6 +92,13 @@ export class UiPreferenceStore {
      * builds, and a false one stored before, or sent by an older window, is not read
      */
     prefs.sessionTools = true
+    /*
+     * The resting-session share (#1451) is stored beside the auto-compact record, not in it. An older build writes
+     * `autoCompact` back as the two fields it knows, so a third inside it was erased by any save there (measured on the
+     * previous build); a top-level field of the record is kept by every build (`{ ...stored, ...written }`).
+     */
+    const idle = stored[IDLE_SHARE_KEY]
+    if (typeof idle === 'number' && Number.isFinite(idle)) prefs.autoCompact = readAutoCompact({ ...(prefs.autoCompact ?? {}), idleShare: idle })
     return prefs
   }
 
@@ -110,8 +119,16 @@ export class UiPreferenceStore {
     const base = current.notifyPolicy ?? readNotifyPolicy(this.loadWorkspace()?.notifyPolicy)
     const notifyPolicy = switches ? { ...base, ...switches } : undefined
     // The auto-compact setting is merged one field at a time too (#1376), over what is stored, field by field read
-    const autoCompact = compact ? { ...readAutoCompact(current.autoCompact), ...compact } : undefined
-    const written = { ...rest, ...(notifyPolicy ? { notifyPolicy } : {}), ...(autoCompact ? { autoCompact } : {}) }
+    const { idleShare, ...compactRest } = compact ?? {}
+    const merged = compact ? { ...readAutoCompact(current.autoCompact), ...compact } : undefined
+    // The record keeps the two fields every build knows; the resting share goes beside it (`IDLE_SHARE_KEY`)
+    const autoCompact = Object.keys(compactRest).length > 0 && merged ? { controlled: merged.controlled, share: merged.share } : undefined
+    const written = {
+      ...rest,
+      ...(notifyPolicy ? { notifyPolicy } : {}),
+      ...(autoCompact ? { autoCompact } : {}),
+      ...(idleShare !== undefined && merged ? { [IDLE_SHARE_KEY]: merged.idleShare } : {}),
+    }
     const stored = this.storedUiPreferences()
     /*
      * A damaged "Allow auto from a linked computer" reads as off (`uiPreferences`), and stays off once rewritten (#1273
@@ -124,7 +141,8 @@ export class UiPreferenceStore {
     // Every window hears it (`prefs_changed`): one that did not make the change reads the record again
     // A patch that only carried the session tools switch (always on, not stored) changed nothing
     if (Object.keys(written).length) this.host.emit({ type: 'prefs_changed' })
-    return { ...current, ...written }
+    const { [IDLE_SHARE_KEY]: _beside, autoCompact: _two, ...shown } = written
+    return { ...current, ...shown, ...(merged ? { autoCompact: merged } : {}) }
   }
 
   /** The stored record as written, every field kept; `{}` for none or for one that is not a JSON object */

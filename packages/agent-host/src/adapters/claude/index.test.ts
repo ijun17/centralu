@@ -103,7 +103,7 @@ describe('when a claude stream ends without warning', () => {
     control.push({ type: 'assistant', message: { id: 'msg_after', role: 'assistant', content: [{ type: 'text', text: 'Carrying on.' }] } })
     await tick()
     expect(events.filter((e) => e.type === 'error')).toEqual([])
-    expect(events).toContainEqual({ type: 'compaction', sessionId: 's-compact', failed: false, before: 25485, after: 3686 })
+    expect(events).toContainEqual({ type: 'compaction', sessionId: 's-compact', failed: false, before: 25485, after: 3686, trigger: 'manual' })
     expect(events.some((e) => e.type === 'message_delta' && e.text === 'Carrying on.')).toBe(true)
     await handle.dispose()
   })
@@ -375,5 +375,13 @@ describe('the CLI version a Claude process runs (#297)', () => {
     await tick()
     expect(events.filter((e) => e.type === 'agent_version')).toEqual([{ type: 'agent_version', sessionId: 'v1', version: '2.1.289' }])
     await handle.dispose()
+  })
+})
+
+describe('the compact command Centralu sends at a break (#1451)', () => {
+  it('is /compact with the focus line after it when there is one', () => {
+    const adapter = new ClaudeAdapter()
+    expect(adapter.compactCommand(null)).toBe('/compact')
+    expect(adapter.compactCommand('keep the PR number')).toBe('/compact keep the PR number')
   })
 })

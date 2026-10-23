@@ -97,6 +97,8 @@ export class FakeAdapter implements AgentAdapter {
     approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: ['image'], verbosities: [], exclusiveWriter: false, backgroundTasks: false,
   }
   launchFingerprint = 'v1'
+  /** A test sets it to read the focus line the way Claude's adapter does (#1451) */
+  compactCommand: AgentAdapter['compactCommand']
   launchSettingsFingerprint(settings: import('../adapters/contract.js').LaunchSettings) {
     return `${this.launchFingerprint}:${settings.cwd}:${settings.permissionPreset}:${settings.projectTrusted ? 'trusted' : 'untrusted'}`
   }

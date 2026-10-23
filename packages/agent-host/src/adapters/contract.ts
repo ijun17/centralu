@@ -364,6 +364,11 @@ export interface AgentAdapter {
    */
   windowCeilingFor?(autoCompactTokens: number): number
   /**
+   * The input that makes this tool compact its conversation (#1451), with the focus line for the summary when it takes one:
+   * what `SessionHandle.send` is given when Centralu compacts a session at a break. Absent: `/compact`.
+   */
+  compactCommand?(focus: string | null): string
+  /**
    * Who this tool is, for the screens that draw a row per tool.
    *
    * It lives on the adapter because the adapter is the only thing that knows the tool

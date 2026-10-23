@@ -947,3 +947,14 @@ A live run of the first version of this change (`tools` and `maxChars` only) mea
 
 Not measured live: tokens through `pnpm measure:tools --live` for the final definitions, and whether a reader with these arguments and
 no description picks `maxChars` by itself when a note says a read stopped early.
+
+## 15. compact_self (#1451)
+
+`compact_self({ focus? })` asks Centralu to compact the calling session when its turn ends (docs/agent-host.md "Compacting at a break"). An
+ordinary session's and the orchestrator's; a coordinator and a builder do not have it. It is **loaded** on Claude, not deferred: its description is the
+instruction on when to use it (work finished and reported; before waiting over a few minutes on a child, CI or the person; switching to an
+unrelated task), and a deferred tool is not read until something searches for it. Counted from the definition: 453 characters
+(`COMPACT_BUDGET_CHARS` 460), which raises the reader seat's Claude resident ceiling 2,850 → 3,310, its Codex ceiling by the same, and the
+orchestrator's 9,710 → 10,170 (its tool list is resident in the commands tier too). The saving it is for is measured in #1451 (cache reads of
+contexts over 300k tokens were 64% of the cost); the tool's own cost is a few dozen tokens per request. Not measured live: how often an agent
+calls it on its own at the right moments.

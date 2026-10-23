@@ -11,6 +11,7 @@ import {
   COMMANDS_INSTRUCTION,
   DELEGATE_TOOLS,
   MAIL_TOOLS,
+  COMPACT_TOOLS,
   ORCHESTRATOR_INSTRUCTIONS,
   ORCHESTRATOR_TOOLS,
   READER_INSTRUCTIONS,
@@ -20,12 +21,13 @@ import {
   SCOPED_TOOL_NAMES,
   type AgentToolName,
   type AppAccessToolName,
+  type CompactToolName,
   type MailToolName,
   type OrchestratorToolName,
 } from './tool-definitions.js'
 
 /** A command a seat may reach through centralu_run */
-export type CommandName = OrchestratorToolName | AgentToolName | AppAccessToolName | MailToolName
+export type CommandName = OrchestratorToolName | AgentToolName | AppAccessToolName | MailToolName | CompactToolName
 
 let readerInstructions = true
 
@@ -259,12 +261,15 @@ function baseAllows(profile: ToolProfile, name: string): boolean {
       DELEGATE_TOOLS.some((t) => t.name === name) ||
       AGENT_TOOLS.some((t) => t.name === name) ||
       APP_ACCESS_TOOLS.some((t) => t.name === name) ||
-      MAIL_TOOLS.some((t) => t.name === name)
+      MAIL_TOOLS.some((t) => t.name === name) ||
+      COMPACT_TOOLS.some((t) => t.name === name)
     )
   }
   // The mailbox is an ordinary session's and the orchestrator's, which owns the threads send_to_session opens and runs it as a command;
   // a coordinator, a builder and an app's agent are not parties of it (#1347)
   if (MAIL_TOOLS.some((t) => t.name === name)) return profile === 'orchestrator'
+  // compact_self (#1451): the two long-lived seats; the reader branch above has it
+  if (COMPACT_TOOLS.some((t) => t.name === name)) return profile === 'orchestrator'
   // ask_project is a reader's alone: every directing seat already works inside its own view. start_agent's pair (#561) is
   // the orchestrator's too (#853), for children outside any project, and so are the app-access tools (#1205), for the
   // root apps it attaches when it needs one
@@ -284,10 +289,10 @@ export function toolDefsFor(
   profile: ToolProfile,
   tier: RareTier = rareTier,
 ): readonly { name: string; description: string; schema: z.ZodObject<z.ZodRawShape>; deferred?: boolean }[] {
-  if (profile === 'reader') return [...READER_TOOLS, ...DELEGATE_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS, ...MAIL_TOOLS]
+  if (profile === 'reader') return [...READER_TOOLS, ...DELEGATE_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS, ...MAIL_TOOLS, ...COMPACT_TOOLS]
   const deferred = deferredFor(profile, tier)
   return [
-    ...[...ORCHESTRATOR_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS, ...MAIL_TOOLS].filter((t) => profileAllows(profile, t.name, tier)).map((t) => (deferred.includes(t.name) ? { ...t, deferred: true } : t)),
+    ...[...ORCHESTRATOR_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS, ...MAIL_TOOLS, ...COMPACT_TOOLS].filter((t) => profileAllows(profile, t.name, tier)).map((t) => (deferred.includes(t.name) ? { ...t, deferred: true } : t)),
     ...(commandsFor(profile, tier).length ? COMMAND_TOOLS : []),
   ]
 }

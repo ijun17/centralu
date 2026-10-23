@@ -30,7 +30,7 @@ const SLEEP_CHOICES = 'a whole number of minutes, or "never"'
 /** The setting in a line */
 function autoCompactText(c: AutoCompact): string {
   return c.controlled
-    ? `agents compact at ${Math.round(c.share * 100)}% of the model's window, set by Centralu`
+    ? `agents compact at ${Math.round(c.share * 100)}% of the model's window, set by Centralu; a session at rest is compacted over ${Math.round(c.idleShare * 100)}%`
     : "Centralu does not set when agents compact; each agent's own settings decide"
 }
 

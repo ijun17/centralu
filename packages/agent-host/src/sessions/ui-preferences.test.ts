@@ -16,7 +16,7 @@ function setup(stored?: string) {
   const events: string[] = []
   const mgr = new SessionManager(store, new Map(), (e) => events.push(e.type))
   const row = () => JSON.parse(store.settings.appSetting(KEY) ?? 'null') as Record<string, unknown>
-  return { mgr, row, events }
+  return { mgr, row, events, store }
 }
 
 afterEach(() => vi.restoreAllMocks())
@@ -55,13 +55,30 @@ describe('screen preferences across builds', () => {
     const { mgr, row } = setup(JSON.stringify({ textSize: 1 }))
     // Not in the record until chosen: an older record reads as the default through autoCompactOf, and nothing is written for it
     expect(mgr.uiPreferences().autoCompact).toBeUndefined()
-    expect(mgr.setUiPreferences({ autoCompact: { share: 0.5 } }).autoCompact).toEqual({ controlled: true, share: 0.5 })
+    expect(mgr.setUiPreferences({ autoCompact: { share: 0.5 } }).autoCompact).toEqual({ controlled: true, share: 0.5, idleShare: 0.3 })
     // One field at a time: the share stays when the control is turned off
-    expect(mgr.setUiPreferences({ autoCompact: { controlled: false } }).autoCompact).toEqual({ controlled: false, share: 0.5 })
+    expect(mgr.setUiPreferences({ autoCompact: { controlled: false } }).autoCompact).toEqual({ controlled: false, share: 0.5, idleShare: 0.3 })
+    // The record keeps the two fields every build knows; the resting share is beside it, not inside (#1451)
     expect(row().autoCompact).toEqual({ controlled: false, share: 0.5 })
+    expect(row().autoCompactIdleShare).toBeUndefined()
     // An older build writing another field keeps what it does not know (#384)
     mgr.setUiPreferences({ sendWithModifierEnter: true })
     expect(row().autoCompact).toEqual({ controlled: false, share: 0.5 })
+  })
+
+  it('the resting share (#1451) is stored beside the auto-compact record, so an older build saving autoCompact cannot erase it', () => {
+    const { mgr, store, row } = setup(JSON.stringify({ textSize: 1 }))
+    expect(mgr.setUiPreferences({ autoCompact: { idleShare: 0.45 } }).autoCompact).toEqual({ controlled: true, share: 0.6, idleShare: 0.45 })
+    expect(row().autoCompactIdleShare).toBe(0.45)
+    expect(row().autoCompact).toBeUndefined()
+    expect(mgr.uiPreferences().autoCompact).toEqual({ controlled: true, share: 0.6, idleShare: 0.45 })
+    // The previous build's save: its merge knows two fields and writes the record back over what it did not read
+    const older = { ...row(), autoCompact: { controlled: true, share: 0.7 } }
+    store.settings.setAppSetting(KEY, JSON.stringify(older))
+    expect(mgr.uiPreferences().autoCompact).toEqual({ controlled: true, share: 0.7, idleShare: 0.45 })
+    // And this build writing the other fields leaves it
+    mgr.setUiPreferences({ autoCompact: { share: 0.5 } })
+    expect(row().autoCompactIdleShare).toBe(0.45)
   })
 
   it('a broken row reads as the defaults, says so once with the row name, and the next change replaces it', () => {

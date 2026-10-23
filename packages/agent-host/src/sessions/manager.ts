@@ -32,6 +32,7 @@ import { SessionTools, type SessionToolsHost } from './session-tools.js'
 import { HandoffNotes, type HandoffNotesHost } from './handoff-notes.js'
 import { SessionStarts, freshStartKey, type SessionStartsHost } from './session-start.js'
 import { SessionEvents, type SessionEventsHost } from './session-events.js'
+import { SelfCompaction } from './self-compaction.js'
 import { ToolRegistry, type ToolRegistryHost } from './tool-registry.js'
 import { ApprovalRules } from './approval-rules.js'
 import { ProjectRegistry, type ProjectRegistryHost } from './project-registry.js'
@@ -241,6 +242,8 @@ export class SessionManager {
   private readonly housekeepingFlow = new HousekeepingFlow()
   /** An agent's update_centralu: check, install and apply, behind its preset and the person's card (updates-asked.ts) */
   private readonly updatesAsked: UpdatesAsked
+  /** Compacting at a turn's end: the agent's `compact_self` and a session at rest over the lower share (#1451, self-compaction.ts) */
+  private readonly selfCompaction: SelfCompaction
   /** Whether a session of one project may reach another, and the consents remembered for it (project-consents.ts) */
   private readonly consents: ProjectConsents
   /** The screen's preferences and workspace layout (ui-preferences.ts) */
@@ -409,6 +412,17 @@ export class SessionManager {
     this.linkedReports = new LinkedReports(this.parts())
     this.starts = new SessionStarts(this.parts())
     this.events = new SessionEvents(this.parts())
+    this.selfCompaction = new SelfCompaction({
+      sessions: () => this.listSessions(),
+      session: (id) => this.meta.get(id),
+      idle: (id) => this.sessionIdle(id),
+      running: (id) => this.handles.has(id),
+      window: (m) => this.modelWindows.of(m),
+      setting: () => autoCompactOf(this.uiPreferences()),
+      command: (tool, focus) => this.adapters.get(tool)?.compactCommand?.(focus) ?? '/compact',
+      send: (id, text) => this.events.sendCompact(id, text),
+      notice: (id, text) => this.onEvent({ type: 'notice', sessionId: id, level: 'info', from: 'Centralu', label: 'compaction', text }),
+    })
     this.orchestratorSlot = new OrchestratorSlot(this.parts())
     const rawEmit = this.emit
     this.emit = (full) => {
@@ -869,6 +883,16 @@ export class SessionManager {
     this.children.onAnswered(hooks.answered ? (callerId, childId, how) => hooks.answered?.(callerId, childId, how) : undefined)
     this.children.onTurnStarted(hooks.turnStarted ? (sessionId, turn) => hooks.turnStarted?.(sessionId, turn) : undefined)
   }
+
+  stopSelfCompaction(): void {
+    this.selfCompaction.stop()
+  }
+
+  /** Starts compacting the sessions at rest over the lower share (#1451); the shutdown plan stops it before the sessions are let go of */
+  startSelfCompaction(): void {
+    this.selfCompaction.start()
+  }
+
 
   /** How the mailbox's delivery reaches a session (#1347): whether it can take mail now, and the mail. See `MailSessions` (mail/delivery.ts) */
   mailSessions(): MailSessions {
@@ -2001,6 +2025,15 @@ export class SessionManager {
       },
       agentSession: (...a) => self.agentSession(...a),
       mailTool: (id, args) => self.mailHooks?.tool?.(id, args) ?? { text: 'The mailbox is not available.', isError: true },
+      compactSelf: (id, focus) => self.selfCompaction.request(id, focus),
+      compactTurn: (id) => self.selfCompaction.compactTurn(id),
+      compactEvent: (e, ended) => {
+        try {
+          self.selfCompaction.observe(e, ended)
+        } catch (err) {
+          console.error(`[compact] ${e.sessionId?.slice(0, 8) ?? '?'}: ${errorMessage(err)}`)
+        }
+      },
       listAgents: (...a) => self.delegationFlow.listAgents(...a),
       get agentRuns() {
         return self.agentRuns
@@ -2703,6 +2736,7 @@ export class SessionManager {
 
   async disposeAll(): Promise<void> {
     this.usageRecorder.stop()
+    this.selfCompaction.stop()
     this.sweepingHandles = true
     try {
       await this.disposeEverything()
@@ -2746,6 +2780,8 @@ export class SessionManager {
    */
   async detachAll(): Promise<void> {
     this.usageRecorder.stop()
+    // A compact now would reach a process the next host is meant to take over, as a sleep would (#568)
+    this.selfCompaction.stop()
     // The kept turns go on under the next host, which owes their reports (#646); failing the waits here must not report
     this.handingOver = true
     this.leaveHost('Centralu is restarting')

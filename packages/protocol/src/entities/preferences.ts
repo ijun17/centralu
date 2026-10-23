@@ -111,11 +111,18 @@ export type AutoCompact = {
   controlled: boolean
   /** The share of the model's window at which compaction starts, from `MIN_AUTO_COMPACT_SHARE` to `MAX_AUTO_COMPACT_SHARE` */
   share: number
+  /**
+   * The lower share (#1451) over which Centralu compacts a session that has been at rest for a while, before its next
+   * turn, instead of waiting for `share` in the middle of one. `share` stays the in-turn backstop. Follows `controlled`:
+   * off, Centralu compacts nothing by itself. From `MIN_IDLE_COMPACT_SHARE` to `MAX_AUTO_COMPACT_SHARE`.
+   */
+  idleShare: number
 }
 
 export const MIN_AUTO_COMPACT_SHARE = 0.2
+export const MIN_IDLE_COMPACT_SHARE = 0.1
 export const MAX_AUTO_COMPACT_SHARE = 0.95
-export const DEFAULT_AUTO_COMPACT: AutoCompact = { controlled: true, share: 0.6 }
+export const DEFAULT_AUTO_COMPACT: AutoCompact = { controlled: true, share: 0.6, idleShare: 0.3 }
 
 /**
  * Reads the setting field by field: a missing one takes its default, a value that is not a boolean or a number is no
@@ -126,6 +133,7 @@ export function readAutoCompact(raw: unknown): AutoCompact {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return out
   if ('controlled' in raw && typeof raw.controlled === 'boolean') out.controlled = raw.controlled
   if ('share' in raw && typeof raw.share === 'number' && Number.isFinite(raw.share)) out.share = Math.min(MAX_AUTO_COMPACT_SHARE, Math.max(MIN_AUTO_COMPACT_SHARE, raw.share))
+  if ('idleShare' in raw && typeof raw.idleShare === 'number' && Number.isFinite(raw.idleShare)) out.idleShare = Math.min(MAX_AUTO_COMPACT_SHARE, Math.max(MIN_IDLE_COMPACT_SHARE, raw.idleShare))
   return out
 }
 
@@ -264,7 +272,14 @@ export const UiPreferencesPatch = UiPreferences.partial().extend({
     .partial()
     .optional(),
   /** Only what changes (#1376), merged into the record like the notification switches */
-  autoCompact: z.object({ controlled: z.boolean(), share: z.number().min(MIN_AUTO_COMPACT_SHARE).max(MAX_AUTO_COMPACT_SHARE) }).partial().optional(),
+  autoCompact: z
+    .object({
+      controlled: z.boolean(),
+      share: z.number().min(MIN_AUTO_COMPACT_SHARE).max(MAX_AUTO_COMPACT_SHARE),
+      idleShare: z.number().min(MIN_IDLE_COMPACT_SHARE).max(MAX_AUTO_COMPACT_SHARE),
+    })
+    .partial()
+    .optional(),
 })
 export type UiPreferencesPatch = z.infer<typeof UiPreferencesPatch>
 

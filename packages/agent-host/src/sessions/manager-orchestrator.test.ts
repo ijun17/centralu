@@ -591,7 +591,7 @@ describe("an ordinary session's reader set (#320)", () => {
 
     // What the bridge (Codex) is offered: exactly the reader set, asking another project, starting agents here (#561) and attaching apps (#371)
     const offered = ((await rpc('orchestrator.tools', { sessionId: a1.id })) as { name: string }[]).map((t) => t.name)
-    expect(offered).toEqual(['update_centralu', 'read_session', 'recall', 'app_guide', 'ask_project', 'start_agent', 'agent_session', 'find_apps', 'attach_app', 'detach_app', 'mail'])
+    expect(offered).toEqual(['update_centralu', 'read_session', 'recall', 'app_guide', 'ask_project', 'start_agent', 'agent_session', 'find_apps', 'attach_app', 'detach_app', 'mail', 'compact_self'])
   })
 
   it("lists, reads and recalls every project's sessions, its own project's first, but never the orchestrator (#984)", async () => {

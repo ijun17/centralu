@@ -79,7 +79,8 @@ export function noticeEvent(e: NormalizedEvent, sessionId: string, set: StoreSet
    * watched, a passing signal would be missed. The two are two faces of the same event, and mutually
    * exclusive.
    */
-  if (e.type === 'turn_complete') {
+  // A turn Centralu started to compact the conversation (#1451) finished nothing the person waits for: no notice, card or sound
+  if (e.type === 'turn_complete' && !e.turn?.compaction) {
     const s = get()
     /*
      * **Seen = the app is in front, and that session is on screen.**

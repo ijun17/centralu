@@ -12,7 +12,7 @@ import type { TrustRequest } from './trust-flow.js'
 import type { AppUpkeepRequest } from './app-upkeep-flow.js'
 import type { HousekeepingRequest } from './housekeeping-flow.js'
 import { ANSWER_FORM, agentListText, agentRunText, askProjectText, busyText, cardsText, listSessionsText, queuedText, trustedJsonText } from './tool-answers.js'
-import { AGENT_TOOLS, APP_ACCESS_TOOLS, MAIL_TOOLS, ORCHESTRATOR_TOOLS, TOOL_ARGS, type CommandToolName } from './tool-definitions.js'
+import { AGENT_TOOLS, APP_ACCESS_TOOLS, COMPACT_TOOLS, MAIL_TOOLS, ORCHESTRATOR_TOOLS, TOOL_ARGS, type CommandToolName } from './tool-definitions.js'
 import { FILL, callForm, commandsFor, guideSeats, namedCall, notAToolText, profileAllows, type CommandName } from './tool-seats.js'
 
 /*
@@ -20,7 +20,7 @@ import { FILL, callForm, commandsFor, guideSeats, namedCall, notAToolText, profi
  * may run which (tool-seats.ts), the texts the answers are built from (tool-answers.ts), and here the runner both
  * paths call. Every name stays importable from here, as before the split.
  */
-export { AGENT_BUDGET_CHARS, AGENT_TOOLS, APP_ACCESS_BUDGET_CHARS, APP_ACCESS_TOOLS, BUILDER_INSTRUCTIONS, BUILDER_TOOL_NAMES, COMMAND_TOOLS, COMMANDS_INSTRUCTION, DELEGATE_BUDGET_CHARS, DELEGATE_TOOLS, MAIL_BUDGET_CHARS, MAIL_TOOLS, ORCHESTRATOR_INSTRUCTIONS, ORCHESTRATOR_TOOLS, READER_BUDGET_CHARS, READER_FIRST, READER_INSTRUCTIONS, READER_INSTRUCTIONS_WITH_APPS, READER_TOOLS, REPO_WORK_FIRST, RESIDENT_BUDGET_CHARS, SCOPED_INSTRUCTIONS, SCOPED_TOOL_NAMES, TOOL_ARGS } from './tool-definitions.js'
+export { AGENT_BUDGET_CHARS, AGENT_TOOLS, APP_ACCESS_BUDGET_CHARS, APP_ACCESS_TOOLS, BUILDER_INSTRUCTIONS, BUILDER_TOOL_NAMES, COMMAND_TOOLS, COMMANDS_INSTRUCTION, COMPACT_BUDGET_CHARS, COMPACT_TOOLS, DELEGATE_BUDGET_CHARS, DELEGATE_TOOLS, MAIL_BUDGET_CHARS, MAIL_TOOLS, ORCHESTRATOR_INSTRUCTIONS, ORCHESTRATOR_TOOLS, READER_BUDGET_CHARS, READER_FIRST, READER_INSTRUCTIONS, READER_INSTRUCTIONS_WITH_APPS, READER_TOOLS, REPO_WORK_FIRST, RESIDENT_BUDGET_CHARS, SCOPED_INSTRUCTIONS, SCOPED_TOOL_NAMES, TOOL_ARGS } from './tool-definitions.js'
 export type { AppAccessToolName, CommandToolName, OrchestratorToolName } from './tool-definitions.js'
 export { callForm, codexToolInstructionsFor, commandsFor, currentRareTier, DEFAULT_RARE_TIER, FILL, instructionsFor, notAToolText, orchestratorToolSchemas, profileAllows, RARE_COMMANDS, RARE_TIERS, rareTierFrom, setRareTier, setReaderInstructions, toolDefsFor, toolInstructionsFor } from './tool-seats.js'
 export type { RareTier } from './tool-seats.js'
@@ -113,6 +113,9 @@ function runParsed<N extends keyof OrchestratorToolArgs>(name: N, args: Orchestr
 }
 
 const HANDLERS: ToolHandlers = {
+  compact_self({ focus }, { tools }) {
+    return tools.compactSelf ? tools.compactSelf(focus) : { text: 'Compacting is not available in this session.', isError: true }
+  },
   mail(args, { tools }) {
     return tools.mail ? tools.mail(args) : { text: 'The mailbox is not available in this session.', isError: true }
   },
@@ -609,7 +612,7 @@ function commandLine(description: string): string {
 }
 
 function commandDef(name: string) {
-  return [...ORCHESTRATOR_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS, ...MAIL_TOOLS].find((t) => t.name === name)
+  return [...ORCHESTRATOR_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS, ...MAIL_TOOLS, ...COMPACT_TOOLS].find((t) => t.name === name)
 }
 
 function commandSchemaText(name: CommandName): string {
