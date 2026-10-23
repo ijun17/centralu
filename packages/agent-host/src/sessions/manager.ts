@@ -44,6 +44,8 @@ import { LinkedHost, type LinkedHostHost } from './linked-host.js'
 import { SessionSettings, type SessionSettingsHost } from './session-settings.js'
 import { AgentRunWait } from './app-agents.js'
 import { CacheLedger } from './cache-ledger.js'
+import { UsageRecorder } from './usage-recorder.js'
+import { usageHistory } from './usage-history.js'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type {
@@ -59,6 +61,8 @@ import type {
   SessionState,
   ToolName,
   MachineAskConsent,
+  UsageHistory,
+  UsageHistoryBy,
 } from '@cc/protocol'
 import {
   autoCompactOf,
@@ -177,6 +181,8 @@ export class SessionManager {
   >()
   /** Every model request's cache figures over the last day, per tool (docs/agent-host.md §6.1); read by `usageFor` */
   private readonly cacheLedger = new CacheLedger()
+  /** The same requests summed per hour and kept, with the limit windows' readings (docs/agent-host.md §6.2) */
+  private readonly usageRecorder: UsageRecorder
   /** Each model's context window as the tools reported it, for where agents compact (#1376, auto-compact.ts) */
   private readonly modelWindows: ModelWindows
   /** A project's git panel, file tree and file operations (dev-services/project-files.ts) */
@@ -365,6 +371,8 @@ export class SessionManager {
     this.sessionSettings = new SessionSettings(this.parts())
     this.approvalRules = new ApprovalRules(this.parts())
     this.children = new ChildOwnership(store)
+    this.usageRecorder = new UsageRecorder(store.usage, { accountOf: async (tool) => (await this.accountFor(tool)).fingerprint ?? '' })
+    this.startUsageHistory()
     this.handoffNotes = new HandoffNotes(this.parts())
     this.tools = new SessionTools(this.parts())
     this.apps = new SessionAppWiring(this.parts())
@@ -1545,6 +1553,35 @@ export class SessionManager {
     return this.toolQueries.usageFor(...a)
   }
 
+  /**
+   * Usage over time (docs/agent-host.md §6.2): the figures an earlier run of this host stored come back into the
+   * cache ledger, and the recorder starts writing this run's. A store that cannot be read costs the history only.
+   */
+  private startUsageHistory(): void {
+    try {
+      this.store.usage.sweepOrphans()
+      const now = Date.now()
+      this.cacheLedger.restore(this.store.usage.buckets(Math.floor((now - 24 * 3_600_000) / 3_600_000) * 3_600_000, now + 3_600_000))
+    } catch (err) {
+      console.error(`[usage] could not restore the cache figures: ${errorMessage(err)}`)
+    }
+    this.usageRecorder.start(
+      () => [...new Set([...this.handles.keys()].map((id) => this.meta.get(id)?.tool).filter((t): t is ToolName => t !== undefined))],
+      (tool) => this.usageFor(tool),
+    )
+  }
+
+  /** `usage.history` (docs/agent-host.md §6.2): what this host stored of the limit windows and of the tokens per hour */
+  usageHistory(p: { from: string; to: string; groupBy: 'day' | 'hour'; by: UsageHistoryBy; tool?: ToolName }): UsageHistory {
+    this.usageRecorder.flush() // what is still in memory counts too
+    const projects = new Map(this.store.projects.listProjects().map((x) => [x.id, x.name]))
+    return usageHistory(
+      this.store.usage,
+      { from: Date.parse(p.from), to: Date.parse(p.to), groupBy: p.groupBy, by: p.by, ...(p.tool ? { tool: p.tool } : {}) },
+      { session: (id) => this.meta.get(id)?.name ?? this.store.trash.trashedSession(id)?.session.name, project: (id) => projects.get(id) },
+    )
+  }
+
   /** `ToolRegistry.accountFor` (tool-registry.ts), kept on the manager for its callers */
   accountFor(...a: Parameters<ToolRegistry['accountFor']>): ReturnType<ToolRegistry['accountFor']> {
     return this.toolRegistry.accountFor(...a)
@@ -2001,6 +2038,14 @@ export class SessionManager {
       get cacheLedger() {
         return self.cacheLedger
       },
+      get usageRecorder() {
+        return self.usageRecorder
+      },
+      forgetUsage: (id) => {
+        self.usageRecorder.forget(id)
+        self.cacheLedger.forget(id)
+      },
+      usageFor: (...a) => self.usageFor(...a),
       get modelWindows() {
         return self.modelWindows
       },
@@ -2332,6 +2377,7 @@ export class SessionManager {
       listAgents: (callerId) => this.delegationFlow.listAgents(callerId),
       handoff: (callerId, target, opts, signal) => this.handoffFlow.handoff(callerId, target, opts, signal),
       handoffWait: (callerId, handle, signal) => this.handoffFlow.wait(callerId, handle, signal),
+      usageHistory: (p) => this.usageHistory(p),
       builderRefOf: (m) => this.appSessions.builderRefOf(m),
       checkApp: (ref) => this.checkApp(ref),
       createApp: (params) => this.createApp(params),
@@ -2656,6 +2702,7 @@ export class SessionManager {
   }
 
   async disposeAll(): Promise<void> {
+    this.usageRecorder.stop()
     this.sweepingHandles = true
     try {
       await this.disposeEverything()
@@ -2698,6 +2745,7 @@ export class SessionManager {
    * nothing is stamped as synced: the conversation goes on.
    */
   async detachAll(): Promise<void> {
+    this.usageRecorder.stop()
     // The kept turns go on under the next host, which owes their reports (#646); failing the waits here must not report
     this.handingOver = true
     this.leaveHost('Centralu is restarting')

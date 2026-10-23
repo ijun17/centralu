@@ -503,6 +503,19 @@ describe('the hub router (docs/plans/remote-hub.md §5)', () => {
     })
   })
 
+  it("asks a linked machine for its own usage history and qualifies the sessions and projects its rows name (§6.2)", async () => {
+    const { router, m1 } = rig()
+    const row = (key: string) => ({ period: '2026-10-12T00:00:00.000Z', key, name: key, requests: 1, inputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0, cacheCreation5mTokens: 0, cacheCreation1hTokens: 0, outputTokens: 0, rebuilds: 0, rebuildCauses: {} })
+    const params = { from: '2026-10-12T00:00:00.000Z', to: '2026-10-13T00:00:00.000Z', groupBy: 'day', machine: 'm1' }
+    m1.answers['usage.history'] = { by: 'session', readings: [], rows: [row('s1'), row('*')] }
+    expect(await router.handle('usage.history', { ...params, by: 'session' })).toMatchObject({ rows: [{ key: 'm1.s1' }, { key: '*' }] })
+    m1.answers['usage.history'] = { by: 'project', readings: [], rows: [row('p1'), row('none')] }
+    expect(await router.handle('usage.history', { ...params, by: 'project' })).toMatchObject({ rows: [{ key: 'm1.p1' }, { key: 'none' }] })
+    // A model or a tool is a name, not an id
+    m1.answers['usage.history'] = { by: 'model', readings: [], rows: [row('opus')] }
+    expect(await router.handle('usage.history', { ...params, by: 'model' })).toMatchObject({ rows: [{ key: 'opus' }] })
+  })
+
   it("qualifies the sessions a machine's prompt cache figures name, so the hub's screen can open them", async () => {
     const { router, m1 } = rig()
     const session = { sessionId: 's1', name: 'Work', requests: 1, inputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 9, rebuilds: 1 }

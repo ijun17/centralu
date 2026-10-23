@@ -347,6 +347,9 @@ export class ClaudeStreamNormalizer {
       ...requestInputTokens(usage),
       ...(subagent ? { agent: str(m.parent_tool_use_id) } : {}),
       ...ttlOf(usage.cache_creation),
+      ...(str(m.message?.model) ? { model: str(m.message?.model) } : {}),
+      // No output count: an assistant message carries the placeholder the stream started with (a few tokens), and the
+      // final count only comes in the stream's message_delta, which this path does not follow (usage history, §6.2)
     }
     if (subagent) {
       return this.lastTokens ? [...events, { type: 'usage_update', sessionId: this.sessionId, tokens: this.lastTokens, request }] : events

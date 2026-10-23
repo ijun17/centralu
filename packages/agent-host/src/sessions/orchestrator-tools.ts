@@ -4,6 +4,7 @@ import type { ToolCaller, ToolOutput } from '../apps/contract.js'
 import { trimmed } from '../json-value.js'
 import { appGuide } from './app-guide.js'
 import { machineLine, type MachineRequest } from './machine-flow.js'
+import { usageHistoryText } from './usage-history.js'
 import type { PreferencesRequest } from './preferences-flow.js'
 import type { TrashRequest } from './trash-flow.js'
 import type { TrustRequest } from './trust-flow.js'
@@ -140,6 +141,11 @@ const HANDLERS: ToolHandlers = {
   },
 
   list_sessions: (_args, { tools, caller }) => listSessionsText(tools, caller),
+  async usage_history(args, { tools }) {
+    if (!tools.usageHistory) return { text: 'This session cannot read the usage history.', isError: true }
+    const days = Math.min(90, Math.max(1, Math.round(args.days !== undefined && Number.isFinite(args.days) ? args.days : 7)))
+    return { text: usageHistoryText(await tools.usageHistory({ days, by: args.by ?? 'session' }), days) }
+  },
 
   centralu_commands: (args, call) => runCommandTool({ name: 'centralu_commands', args }, call),
   centralu_help: (args, call) => runCommandTool({ name: 'centralu_help', args }, call),

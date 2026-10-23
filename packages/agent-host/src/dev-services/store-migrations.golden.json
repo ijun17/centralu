@@ -244,12 +244,16 @@
   {
    "to": 61,
    "breaksOlderReaders": false
+  },
+  {
+   "to": 62,
+   "breaksOlderReaders": false
   }
  ],
- "version": 61,
- "ran": 60,
+ "version": 62,
+ "ran": 61,
  "store": {
-  "userVersion": 61,
+  "userVersion": 62,
   "master": [
    {
     "type": "index",
@@ -274,6 +278,18 @@
     "name": "idx_sessions_project",
     "tbl_name": "sessions",
     "sql": "CREATE INDEX idx_sessions_project ON sessions(project_id)"
+   },
+   {
+    "type": "index",
+    "name": "idx_usage_buckets_session",
+    "tbl_name": "usage_buckets",
+    "sql": "CREATE INDEX idx_usage_buckets_session ON usage_buckets(session_id)"
+   },
+   {
+    "type": "index",
+    "name": "idx_usage_readings_at",
+    "tbl_name": "usage_readings",
+    "sql": "CREATE INDEX idx_usage_readings_at ON usage_readings(at)"
    },
    {
     "type": "index",
@@ -501,6 +517,18 @@
     "type": "index",
     "name": "sqlite_autoindex_subagent_messages_1",
     "tbl_name": "subagent_messages",
+    "sql": null
+   },
+   {
+    "type": "index",
+    "name": "sqlite_autoindex_usage_buckets_1",
+    "tbl_name": "usage_buckets",
+    "sql": null
+   },
+   {
+    "type": "index",
+    "name": "sqlite_autoindex_usage_readings_1",
+    "tbl_name": "usage_readings",
     "sql": null
    },
    {
@@ -733,6 +761,18 @@
    },
    {
     "type": "table",
+    "name": "usage_buckets",
+    "tbl_name": "usage_buckets",
+    "sql": "CREATE TABLE usage_buckets (\n              hour           INTEGER NOT NULL,\n              session_id     TEXT NOT NULL,\n              project_id     TEXT NOT NULL DEFAULT '',\n              tool           TEXT NOT NULL,\n              model          TEXT NOT NULL DEFAULT '',\n              machine        TEXT NOT NULL DEFAULT '',\n              requests       INTEGER NOT NULL DEFAULT 0,\n              input          INTEGER NOT NULL DEFAULT 0,\n              cache_read     INTEGER NOT NULL DEFAULT 0,\n              cache_write    INTEGER NOT NULL DEFAULT 0,\n              cache_write_5m INTEGER NOT NULL DEFAULT 0,\n              cache_write_1h INTEGER NOT NULL DEFAULT 0,\n              output         INTEGER NOT NULL DEFAULT 0,\n              rebuilds       INTEGER NOT NULL DEFAULT 0,\n              causes         TEXT NOT NULL DEFAULT '{}',\n              PRIMARY KEY (hour, session_id, project_id, tool, model, machine)\n            )"
+   },
+   {
+    "type": "table",
+    "name": "usage_readings",
+    "tbl_name": "usage_readings",
+    "sql": "CREATE TABLE usage_readings (\n              tool       TEXT NOT NULL,\n              account    TEXT NOT NULL,\n              window_id  TEXT NOT NULL,\n              scope      TEXT NOT NULL DEFAULT '',\n              label      TEXT NOT NULL DEFAULT '',\n              at         INTEGER NOT NULL,\n              percent    REAL NOT NULL,\n              resets_at  INTEGER,\n              PRIMARY KEY (tool, account, window_id, scope, at)\n            )"
+   },
+   {
+    "type": "table",
     "name": "workspace",
     "tbl_name": "workspace",
     "sql": "CREATE TABLE workspace (\n      id         INTEGER PRIMARY KEY CHECK (id = 1),\n      layout     TEXT NOT NULL,\n      updated_at INTEGER NOT NULL\n    )"
@@ -796,6 +836,26 @@
       "seqno": 0,
       "cid": 1,
       "name": "project_id"
+     }
+    ]
+   },
+   {
+    "name": "idx_usage_buckets_session",
+    "list": [
+     {
+      "seqno": 0,
+      "cid": 1,
+      "name": "session_id"
+     }
+    ]
+   },
+   {
+    "name": "idx_usage_readings_at",
+    "list": [
+     {
+      "seqno": 0,
+      "cid": 5,
+      "name": "at"
      }
     ]
    },
@@ -1030,6 +1090,8 @@
      "match": "NONE"
     }
    ],
+   "usage_buckets": [],
+   "usage_readings": [],
    "workspace": []
   },
   "tables": {
@@ -1692,6 +1754,39 @@
      "payload TEXT notnull=1 default=null pk=0",
      "ts INTEGER notnull=1 default=null pk=0",
      "trashed_at INTEGER notnull=0 default=null pk=0"
+    ],
+    "rows": []
+   },
+   "usage_buckets": {
+    "columns": [
+     "hour INTEGER notnull=1 default=null pk=1",
+     "session_id TEXT notnull=1 default=null pk=2",
+     "project_id TEXT notnull=1 default='' pk=3",
+     "tool TEXT notnull=1 default=null pk=4",
+     "model TEXT notnull=1 default='' pk=5",
+     "machine TEXT notnull=1 default='' pk=6",
+     "requests INTEGER notnull=1 default=0 pk=0",
+     "input INTEGER notnull=1 default=0 pk=0",
+     "cache_read INTEGER notnull=1 default=0 pk=0",
+     "cache_write INTEGER notnull=1 default=0 pk=0",
+     "cache_write_5m INTEGER notnull=1 default=0 pk=0",
+     "cache_write_1h INTEGER notnull=1 default=0 pk=0",
+     "output INTEGER notnull=1 default=0 pk=0",
+     "rebuilds INTEGER notnull=1 default=0 pk=0",
+     "causes TEXT notnull=1 default='{}' pk=0"
+    ],
+    "rows": []
+   },
+   "usage_readings": {
+    "columns": [
+     "tool TEXT notnull=1 default=null pk=1",
+     "account TEXT notnull=1 default=null pk=2",
+     "window_id TEXT notnull=1 default=null pk=3",
+     "scope TEXT notnull=1 default='' pk=4",
+     "label TEXT notnull=1 default='' pk=0",
+     "at INTEGER notnull=1 default=null pk=5",
+     "percent REAL notnull=1 default=null pk=0",
+     "resets_at INTEGER notnull=0 default=null pk=0"
     ],
     "rows": []
    },

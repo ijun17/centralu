@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { relative, resolve, sep } from 'node:path'
-import type { Attachment, Interruption, NormalizedEvent, SessionInfo } from '@cc/protocol'
+import type { Attachment, Interruption, NormalizedEvent, SessionInfo, ToolName } from '@cc/protocol'
 import { applyBackgroundTasks, applySessionState, nextContext, nextStateFor } from '@cc/protocol'
+import type { ToolQueriesHost } from './tool-queries.js'
 import type { AgentProcess, SessionHandle } from '../adapters/contract.js'
 import { gitHeadSha } from '../dev-services/git.js'
 import { looksLikeGitCommit, parseCommitSha } from '../dev-services/git-attrib.js'
@@ -37,6 +38,7 @@ function untrustedSourceSessionNotification(sourceSessionId: string): string {
  */
 export type SessionEventsHost = Pick<DelegationHost, 'agentRuns' | 'children' | 'cwdFor' | 'emit' | 'handles' | 'meta' | 'running' | 'store' | 'turnObservers'> &
   Pick<SessionRecordHost, 'cacheLedger' | 'modelWindows'> &
+  Pick<ToolQueriesHost, 'usageRecorder'> & { usageFor: (tool: ToolName) => Promise<unknown> } &
   Pick<SessionTrashHost, 'hostCards' | 'record' | 'restartPolicy'> &
   Pick<WorktreeHost, 'cwdOf' | 'resuming'> &
   Pick<SessionStartsHost, 'appSessions' | 'apps' | 'cardRests' | 'launches' | 'openSession' | 'tools'> & {
@@ -365,9 +367,15 @@ export class SessionEvents {
    */
   private trackLiveFacts(e: NormalizedEvent, m: SessionInfo): void {
     switch (e.type) {
-      case 'usage_update':
+      case 'usage_update': {
         m.usage = e.tokens
-        if (e.request) this.host.cacheLedger.record(m.tool, m.id, e.request)
+        const counted = e.request && this.host.cacheLedger.record(m.tool, m.id, e.request)
+        if (e.request && counted) this.host.usageRecorder.request({ sessionId: m.id, projectId: m.projectId, tool: m.tool, model: m.model ?? undefined }, e.request, counted)
+        break
+      }
+      case 'turn_complete':
+        // A turn end is when a window has just moved: read the limits (at most every couple of minutes) for the history
+        this.host.usageRecorder.turnEnded(m.tool, (tool) => this.host.usageFor(tool))
         break
       case 'context_update':
         m.context = nextContext(m.context, e)

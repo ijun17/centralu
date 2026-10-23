@@ -1,5 +1,6 @@
 import type { CacheLedger } from './cache-ledger.js'
 import { remember } from './folder-cache.js'
+import type { UsageRecorder } from './usage-recorder.js'
 import type {
   CacheStats,
   ModelOption,
@@ -25,6 +26,7 @@ const MODEL_LIST_RETRY_MS = 60_000
 export type ToolQueriesHost = {
   readonly adapters: Map<string, AgentAdapter>
   readonly cacheLedger: CacheLedger
+  readonly usageRecorder: UsageRecorder
   cwdFor: (m: SessionInfo) => string
   readonly handles: Map<string, SessionHandle>
   readonly meta: Map<string, SessionInfo>
@@ -115,6 +117,8 @@ export class ToolQueries {
     try {
       const snapshot = await withTimeout(adapter.listUsage(), 15_000)
       this.usageCache.set(tool, { snapshot, at: Date.now() })
+      // A fresh reading is kept for the history (§6.2), whoever asked: the gauge, a turn end or the ten-minute sample
+      void this.host.usageRecorder.snapshot(tool, snapshot)
       return { supported: true, usage: snapshot, cache }
     } catch (err) {
       return { supported: false, reason: (err as Error).message, usage: hit?.snapshot ?? null, cache }

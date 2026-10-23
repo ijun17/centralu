@@ -1,4 +1,4 @@
-import type { UsageSnapshot, CacheStats, ToolName } from '@cc/protocol'
+import type { UsageSnapshot, CacheStats, ToolName, UsageHistory } from '@cc/protocol'
 import type { AgentPort, MachineRef } from '../ports/index.js'
 
 /** What the usage gauge reads (`agents.usage`): this computer's usage, each linked machine's, and the cache figures */
@@ -17,7 +17,15 @@ export class UsageMock {
    * `<machine>.<tool>` for a linked machine. None: the answer carries no `cache`, as an older host's does
    */
   cacheStats: Record<string, CacheStats> = {}
-  readonly agents: Pick<AgentPort, 'usage'> = {
+  /** For tests: what the host stored over time (`usage.history`); the same answer for every question */
+  usageHistoryState: UsageHistory = { by: 'session', readings: [], rows: [] }
+  /** For tests: every usage history question, and which machine it went to (null: this computer) */
+  usageHistoryCalls: { by: string; groupBy: string; machine: string | null }[] = []
+  readonly agents: Pick<AgentPort, 'usage' | 'usageHistory'> = {
+    usageHistory: async (range, machine) => {
+      this.usageHistoryCalls.push({ by: range.by, groupBy: range.groupBy, machine: machine ?? null })
+      return { ...this.usageHistoryState, by: range.by }
+    },
     usage: async (tool: ToolName, machine?: MachineRef) => {
       this.usageCalls.push({ tool, machine: machine ?? null })
       const cache = this.cacheStats[machine ? `${machine}.${tool}` : tool]

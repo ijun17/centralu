@@ -122,6 +122,7 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   'agents.models': 'everyday',
   'agents.usage': 'everyday',
   'agents.account': 'everyday',
+  'usage.history': 'everyday',
   'messages.image': 'everyday',
   'messages.search': 'everyday',
   'messages.load': 'everyday',

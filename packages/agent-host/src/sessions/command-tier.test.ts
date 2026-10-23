@@ -233,3 +233,33 @@ describe('the deferred tier', () => {
     for (const p of ['scoped', 'builder'] as const) expect(residentCost(p, DEFERRED_SERVER).deferredChars, p).toBe(0)
   })
 })
+
+describe('usage_history (docs/agent-host.md §6.2)', () => {
+  const history = { by: 'session' as const, readings: [], rows: [] }
+
+  it('is a rare command of the orchestrator alone: listed in centralu_commands, not a tool in every request', async () => {
+    expect(commandsFor('orchestrator')).toContain('usage_history')
+    expect(toolDefsFor('orchestrator').map((t) => t.name)).not.toContain('usage_history')
+    for (const p of ['scoped', 'builder', 'reader'] as const) expect(profileAllows(p, 'usage_history', 'resident'), p).toBe(false)
+    const listed = await runOrchestratorTool(fakeTools(), 'centralu_commands', {}, orchestrator)
+    expect(listed.text).toContain('- usage_history:')
+  })
+
+  it('asks the host for the last days by what was asked, within 1 to 90 days, and answers in words', async () => {
+    const usageHistory = vi.fn(async (_spec: { days: number; by: string }) => history)
+    const tools = { ...fakeTools(), usageHistory } as unknown as OrchestratorTools
+    const run = (args: Record<string, unknown>) => runOrchestratorTool(tools, 'centralu_run', { command: 'usage_history', args }, orchestrator)
+    expect((await run({})).text).toContain('Usage over the last 7 days on this computer, by session')
+    await run({ days: 30, by: 'model' })
+    await run({ days: 500 })
+    // An unknown grouping does not match the command's schema and never reaches the host
+    expect((await run({ by: 'nonsense' })).isError).toBe(true)
+    await run({ days: -3 })
+    expect(usageHistory.mock.calls.map((c) => c[0])).toEqual([
+      { days: 7, by: 'session' },
+      { days: 30, by: 'model' },
+      { days: 90, by: 'session' },
+      { days: 1, by: 'session' },
+    ])
+  })
+})

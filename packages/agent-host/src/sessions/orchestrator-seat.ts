@@ -1,4 +1,4 @@
-import { blockedOnQuestion, RESERVED_APP_IDS, type Attachment, type ExternalAppInfo, type GitSource, type MachineInfo, type NormalizedEvent, type PermissionPreset, type SessionInfo, type SettingsApplied, type ToolName, type UpdateStatus } from '@cc/protocol'
+import { blockedOnQuestion, RESERVED_APP_IDS, type Attachment, type ExternalAppInfo, type GitSource, type MachineInfo, type NormalizedEvent, type PermissionPreset, type SessionInfo, type SettingsApplied, type ToolName, type UpdateStatus, type UsageHistory, type UsageHistoryBy } from '@cc/protocol'
 import { awayPhrase } from '../adapters/contract.js'
 import type { AgentListRow, AgentSessionOpts, BusyAnswer, BusyChoice, ChildRunResult, HandoffResult, LinkedSessions, OrchestratedSession, OrchestratorTools, RecallHit, RoutedCard, StartAgentOpts } from '../adapters/contract.js'
 import type { AppCheckReport, AppRef } from '../apps/external/runtime.js'
@@ -106,6 +106,8 @@ export type OrchestratorSeatHost = {
     opts: { tool?: ToolName; mode?: 'record' | 'agent'; instructions?: string },
     signal?: AbortSignal,
   ): Promise<HandoffResult>
+  /** usage_history (§6.2): `SessionManager.usageHistory` */
+  usageHistory(p: { from: string; to: string; groupBy: 'day' | 'hour'; by: UsageHistoryBy }): UsageHistory
   /** handoff_session's waitFor (#694): `HandoffFlow.wait` */
   handoffWait(callerId: string, handle: string, signal?: AbortSignal): Promise<HandoffResult>
   builderRefOf(m: Pick<SessionInfo, 'id' | 'appId' | 'projectId'>): AppRef | null
@@ -727,6 +729,10 @@ export function orchestratorToolsFor(
      * object also serves a lead's and a reader's view), a session of this computer in its view. The rest of the rule
      * (which sessions, mid-turn, the person's card) is HandoffFlow's.
      */
+    usageHistory: async ({ days, by }) => {
+      const now = Date.now()
+      return host.usageHistory({ from: new Date(now - days * 24 * 3_600_000).toISOString(), to: new Date(now + 3_600_000).toISOString(), groupBy: 'day', by })
+    },
     handoffSession: async (spec, signal) => {
       if (!central) {
         console.error(`[agent-host] handoff_session by ${orchestratorId.slice(0, 8)} refused: not the central orchestrator`)

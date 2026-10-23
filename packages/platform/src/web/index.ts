@@ -12,6 +12,7 @@ import type {
   QuestionAnswer,
   UpdateSettingsParams,
   GitSource,
+  UsageHistoryBy,
 } from '@cc/protocol'
 import type {
   AgentPort,
@@ -229,6 +230,9 @@ class WebAgentPort implements AgentPort {
   }
   usage(tool: ToolName, machine?: MachineRef) {
     return this.rpc.call('agents.usage', { tool, ...on(machine) })
+  }
+  usageHistory(range: { from: string; to: string; groupBy: 'day' | 'hour'; by: UsageHistoryBy; tool?: ToolName }, machine?: MachineRef) {
+    return this.rpc.call('usage.history', { ...range, ...on(machine) })
   }
   capabilities(tool: ToolName, machine?: MachineRef) {
     return this.rpc.call('agents.capabilities', { tool, ...on(machine) })

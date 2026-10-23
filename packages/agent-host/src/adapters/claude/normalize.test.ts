@@ -896,6 +896,13 @@ describe('a model request, for prompt cache accounting', () => {
     expect(requests(stream.push(sdk(sub)))).toEqual([])
   })
 
+  it('carries the model that served the request, so the history keys by it and not by the session setting', () => {
+    const stream = new ClaudeStreamNormalizer(SID)
+    const withModel = (id: string, model?: string) => ({ type: 'assistant', message: { id, role: 'assistant', content: [], usage, ...(model ? { model } : {}) } })
+    expect(requests(stream.push(sdk(withModel('m1', 'claude-haiku-5-5'))))[0]?.model).toBe('claude-haiku-5-5')
+    expect(requests(stream.push(sdk(withModel('m2'))))[0]?.model).toBeUndefined()
+  })
+
   it('says how long its write stays cached, from the API split of the write', () => {
     const withSplit = (id: string, split: Record<string, number>) => ({
       type: 'assistant',

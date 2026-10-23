@@ -9,6 +9,7 @@ import { useStore } from '../../store/store.js'
 import { useToolMeta } from '../../store/selectors.js'
 import { CacheSection } from './CacheSection.jsx'
 import { formatCount, formatDuration } from '../../app/format.js'
+import { HistorySection } from './HistorySection.jsx'
 import { SAME_ACCOUNT_LABEL } from './sameAccount.js'
 import { useLoad } from '../../app/useLoad.js'
 
@@ -52,6 +53,9 @@ export function UsagePanel({ tool, machine = null }: { tool: ToolName; /** A lin
     <CacheSection cache={state.cache} toolLabel={meta.label} canOpen={(id) => id in useStore.getState().sessions} onOpen={openSession} />
   )
 
+  // What the host stored over the last days (§6.2): independent of the limits too, and absent from a host that predates it
+  const history = <HistorySection tool={tool} machine={machine} canOpen={(id) => id in useStore.getState().sessions} onOpen={openSession} />
+
   // Failing to read it and there being none are different — the reason is shown as is
   if (!state.usage || state.usage.windows.length === 0) {
     return (
@@ -61,6 +65,7 @@ export function UsagePanel({ tool, machine = null }: { tool: ToolName; /** A lin
           {state.reason && <span className="mt-1 block text-xs text-ink-faint">{state.reason}</span>}
         </p>
         {cache && <div className="px-4 pb-4 [&>section]:mt-0">{cache}</div>}
+        <div className="px-4 pb-4 [&>section:first-child]:mt-0">{history}</div>
       </>
     )
   }
@@ -90,6 +95,7 @@ export function UsagePanel({ tool, machine = null }: { tool: ToolName; /** A lin
       {/* Only some tools provide daily tokens (Codex does; Claude has no such window at all) */}
       {daily.length > 0 && <DailyTokens daily={daily} />}
       {cache}
+      {history}
     </div>
   )
 }

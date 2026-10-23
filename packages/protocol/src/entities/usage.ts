@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { ToolName } from './ids.js'
 
 /**
  * The tokens reported by a tool (`usage_update`). The three input fields **do not overlap** —
@@ -43,6 +44,8 @@ export const RequestInput = z.object({
   inputTokens: z.number(),
   cacheReadTokens: z.number(),
   cacheCreationTokens: z.number().optional(),
+  /** The tokens the model wrote back, as the tool reported them for this request; absent when it did not say (usage history, §6.2) */
+  outputTokens: z.number().optional(),
   /**
    * The subagent that made the request (Claude: the id of the tool call that launched it); absent for the session's
    * own conversation. A subagent has a prompt and a cache of its own, so its requests are judged apart.
@@ -53,6 +56,8 @@ export const RequestInput = z.object({
    * when the tool does not say, or the request wrote nothing.
    */
   cacheTtl: z.enum(['5m', '1h']).optional(),
+  /** The model that served this request, as the tool reported it (Claude's `message.model`); absent when it does not say (usage history, §6.2) */
+  model: z.string().optional(),
 })
 export type RequestInput = z.infer<typeof RequestInput>
 
@@ -146,6 +151,59 @@ export const CacheStats = z.object({
   windows: z.array(CacheWindowStats),
 })
 export type CacheStats = z.infer<typeof CacheStats>
+
+/**
+ * What `usage.history` groups the token rows by (docs/agent-host.md §6.2); `day` and `hour` are the time axis
+ * (`groupBy`).
+ */
+export const UsageHistoryBy = z.enum(['session', 'project', 'model', 'tool'])
+export type UsageHistoryBy = z.infer<typeof UsageHistoryBy>
+
+/** One tool's limit window over time on one account: the readings the host stored, oldest first */
+export const UsageHistoryReadings = z.object({
+  tool: ToolName,
+  /** An opaque fingerprint of the login (`agents.account`), empty when the tool did not say which */
+  account: z.string(),
+  /** The window as `agents.usage` names it: its id, label and, for a per-model window, the model */
+  window: z.string(),
+  label: z.string(),
+  scope: z.string().nullable(),
+  points: z.array(z.object({ at: z.string(), percent: z.number(), resetsAt: z.string().nullable() })),
+})
+export type UsageHistoryReadings = z.infer<typeof UsageHistoryReadings>
+
+/** The tokens of one hour or day for one key (`by`), summed from the hourly buckets */
+export const UsageHistoryRow = z.object({
+  /** ISO8601, the start of the day (the host's local midnight) or of the hour */
+  period: z.string(),
+  /** The session id, project id, model or tool; `*` for the rows folded into "others", `none` for the sessions of no project */
+  key: z.string(),
+  /** What to call the key; a project that no longer exists is named by its id */
+  name: z.string(),
+  requests: z.number(),
+  inputTokens: z.number(),
+  cacheReadTokens: z.number(),
+  cacheCreationTokens: z.number(),
+  /** Of `cacheCreationTokens`, what the API said stays cached five minutes or an hour (the rest was not said) */
+  cacheCreation5mTokens: z.number(),
+  cacheCreation1hTokens: z.number(),
+  outputTokens: z.number(),
+  rebuilds: z.number(),
+  /** The rebuilds by their likely cause (`RebuildCause`) */
+  rebuildCauses: z.record(z.string(), z.number()),
+})
+export type UsageHistoryRow = z.infer<typeof UsageHistoryRow>
+
+/** The answer of `usage.history`: the limit readings and the token rows of a time range */
+export const UsageHistory = z.object({
+  /** What the rows' keys are, as asked: a hub qualifies the ids of a linked machine's sessions and projects by it */
+  by: UsageHistoryBy,
+  readings: z.array(UsageHistoryReadings),
+  rows: z.array(UsageHistoryRow),
+  /** The oldest token record this host keeps (ISO8601); absent when it keeps none. A range before it is not known */
+  recordedSince: z.string().optional(),
+})
+export type UsageHistory = z.infer<typeof UsageHistory>
 
 /**
  * A usage snapshot — **per account** (unrelated to any particular session or directory).

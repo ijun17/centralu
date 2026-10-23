@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { UsageWindow } from '@cc/protocol'
-import { usageTone, weeklyWindow } from './weekly.js'
+import type { UsageHistoryReadings, UsageWindow } from '@cc/protocol'
+import { usageTone, weeklySeries, weeklyWindow } from './weekly.js'
 
 const w = (over: Partial<UsageWindow>): UsageWindow => ({
   id: 'x', label: 'x', percent: 0, resetsAt: null, scope: null, ...over,
@@ -48,5 +48,28 @@ describe('usageTone', () => {
     expect(usageTone(10)).toBe('text-ink-muted')
     expect(usageTone(70)).toBe('text-ink')
     expect(usageTone(93)).toBe('text-ink-signal')
+  })
+})
+
+describe('weeklySeries', () => {
+  const series = (window: string, label: string, percent: number[], over: Partial<UsageHistoryReadings> = {}): UsageHistoryReadings => ({
+    tool: 'claude', account: 'a', window, label, scope: null,
+    points: percent.map((p, i) => ({ at: new Date(Date.UTC(2026, 9, 12, i)).toISOString(), percent: p, resetsAt: null })), ...over,
+  })
+
+  it('draws the weekly window, not the 5-hour one', () => {
+    expect(weeklySeries([series('session', '5 hours', [10, 90]), series('weekly_all', 'Weekly', [20, 30])])?.window).toBe('weekly_all')
+  })
+
+  it('takes the fullest weekly window, as the donut does', () => {
+    const picked = weeklySeries([series('weekly_all', 'Weekly', [74]), series('weekly_scoped', 'Weekly', [95], { scope: 'Opus' })])
+    expect(picked?.window).toBe('weekly_scoped')
+  })
+
+  it('follows the account read most recently, and is null without a weekly window or any reading', () => {
+    const old = series('weekly_all', 'Weekly', [99], { account: 'old', points: [{ at: '2026-09-01T00:00:00.000Z', percent: 99, resetsAt: null }] })
+    expect(weeklySeries([old, series('weekly_all', 'Weekly', [5])])?.account).toBe('a')
+    expect(weeklySeries([series('session', '5 hours', [5])])).toBeNull()
+    expect(weeklySeries([])).toBeNull()
   })
 })

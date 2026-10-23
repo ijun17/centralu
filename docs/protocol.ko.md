@@ -234,7 +234,7 @@ type ApprovalDetail =
 | git | `git.status, git.diff, git.log, git.commitDetail, git.branches, git.ignoredEntries, git.checkout, git.stage, git.commit, git.push` | dev와 prod 모두 호스트의 `dev-services`가 처리한다. 이름과 달리 prod 경로다([agent-host.ko.md](agent-host.ko.md) §5) |
 | fs | `fs.listDir, fs.watch, fs.readFile, fs.move, fs.importFile, fs.resolve`, `files.search` | 〃 |
 | workspace | `workspace.load, workspace.save` | 창이 기억하는 배치의 스냅숏. 대화는 위의 `messages.*`로 읽고, 쓰는 것은 호스트가 직접 한다 |
-| usage | `agents.usage`, `agents.account` | 계정의 한도 창, 도구 자신에게 묻는다. 호스트가 센 최근 몇 시간의 프롬프트 캐시도 함께 (`cache`, [agent-host.ko.md](agent-host.ko.md) §6, §6.1). `agents.usage { limits: false }`는 캐시만 답하고, 허브가 연결된 기기에 대해 한도가 자기 것이면 `sameAccountAsHub: true`를 단다. `agents.account { tool }`은 로그인의 불투명한 지문(`{ loggedIn, fingerprint }`)으로, 허브가 기기의 것과 견주며 이메일은 나가지 않는다 (#726). 추가만 |
+| usage | `agents.usage`, `agents.account`, `usage.history` | 계정의 한도 창, 도구 자신에게 묻는다. 호스트가 센 최근 몇 시간의 프롬프트 캐시도 함께 (`cache`, [agent-host.ko.md](agent-host.ko.md) §6, §6.1). `agents.usage { limits: false }`는 캐시만 답하고, 허브가 연결된 기기에 대해 한도가 자기 것이면 `sameAccountAsHub: true`를 단다. `agents.account { tool }`은 로그인의 불투명한 지문(`{ loggedIn, fingerprint }`)으로, 허브가 기기의 것과 견주며 이메일은 나가지 않는다 (#726). `usage.history { from, to, groupBy, by, tool?, machine? }`는 호스트가 시간에 따라 저장한 것을 답한다: 한도 창의 측정값과 시간당 토큰을 일·시간별, 세션·프로젝트·모델·도구별로 합한 것([agent-host.ko.md](agent-host.ko.md) §6.2). 읽기 전용이며 답하는 호스트에만 있다. `RequestInput.outputTokens`가 새로 생겼다. 추가만 |
 
 git, fs, workspace RPC의 요청·응답 타입은 **포트 인터페이스와 1:1**이다. 의도된 중복이다 — 포트가 원본 계약이고, RPC가 그 계약을 실어 나른다(git이나 fs를 Rust로 옮기게 되면 Tauri invoke가 두 번째 운반체가 된다).
 
@@ -391,7 +391,7 @@ type ProtocolError = {
   `ExternalAppInfo`, `ProjectConsent`, 승인 규칙). 허브 자신의 것은 없거나 null이다.
 - **라우팅.** 허브는 `sessionId`, `projectId`, `terminalId`가 가리키는 기기로 호출을 보내고, 나머지는
   스스로 답한다. 기기별 질문은 선택적인 `machine` 매개변수를 받는다(없으면 허브): `agents.detect`,
-  `agents.capabilities`, `agents.models`, `agents.usage`, `agents.versions`,
+  `agents.capabilities`, `agents.models`, `agents.usage`, `usage.history`, `agents.versions`,
   `agents.setAutoApplyVersions`, `agents.applyVersions`, `agents.sleepPolicy`, `agents.setSleepPolicy`(#568),
   `projects.add`, `projects.create`,
   `projects.createPreview`(#515), `processes.strays`,

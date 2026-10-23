@@ -193,3 +193,42 @@ test('a near-perfect cache rate stays distinct in the tooltip and dropdown (#587
   await page.getByTestId('usage-donut-codex').click()
   await expect(page.getByTestId('usage-cache-rate')).toHaveText('99.8%')
 })
+
+test('the dropdown shows the last 7 days: the weekly window over time and the sessions that used most, regrouped by project', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const here = await newSession(page, 'alpha', 'the expensive one', { tool: 'claude' })
+  await page.evaluate(
+    ({ here, now }) => {
+      const m = (window as unknown as MockWindow).__mock
+      m.usageState = {
+        supported: true,
+        usage: { plan: 'max', windows: [{ id: 'weekly_all', label: 'Weekly', percent: 41, resetsAt: null, scope: null }], daily: [] },
+      }
+      const row = (key: string, name: string, tokens: number, read: number) => ({
+        period: new Date(now - 2 * 24 * 3600_000).toISOString(), key, name, requests: 40, inputTokens: tokens - read, cacheReadTokens: read, cacheCreationTokens: 0,
+        cacheCreation5mTokens: 0, cacheCreation1hTokens: 0, outputTokens: 0, rebuilds: 1, rebuildCauses: { expired: 1 },
+      })
+      const at = (days: number, percent: number) => ({ at: new Date(now - days * 24 * 3600_000).toISOString(), percent, resetsAt: null })
+      m.usageHistoryState = {
+        by: 'session',
+        readings: [{ tool: 'claude', account: 'a', window: 'weekly_all', label: 'Weekly', scope: null, points: [at(6, 5), at(3, 22), at(0.1, 41)] }],
+        rows: [row(here, 'The expensive one', 4_000_000, 3_760_000), row('gone', 'Older work', 100_000, 50_000)],
+      }
+    },
+    { here, now: Date.now() },
+  )
+  await page.evaluate(() => (window as unknown as MockWindow).__mock.setConnectionState('disconnected'))
+  await page.evaluate(() => (window as unknown as MockWindow).__mock.setConnectionState('connected'))
+  await page.getByTestId('usage-donut-claude').click()
+
+  const section = page.getByTestId('usage-history')
+  await expect(section).toContainText('Last 7 days')
+  await expect(page.getByTestId('usage-history-weekly')).toContainText('41% now')
+  await expect(page.getByTestId(`usage-history-row-${here}`)).toContainText('94.0% hit')
+  await expect(page.getByTestId('usage-history-row-gone')).toContainText('Older work')
+  expect(await page.evaluate(() => (window as unknown as MockWindow).__mock.usageHistoryCalls.map((c: { by: string }) => c.by))).toEqual(['session'])
+
+  await page.getByTestId('usage-history-by-project').click()
+  await expect(page.getByTestId('usage-history-by-project')).toHaveAttribute('aria-pressed', 'true')
+  expect(await page.evaluate(() => (window as unknown as MockWindow).__mock.usageHistoryCalls.map((c: { by: string }) => c.by))).toEqual(['session', 'project'])
+})
