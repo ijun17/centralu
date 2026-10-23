@@ -633,7 +633,7 @@ when the caller is itself a worktree session, so the child starts from the calle
 project's trunk as the remote has it (#1484, `resolveForkBase`): the trunk is fetched (bounded, trusted projects only) and the
 child forks from `origin/<trunk>`, never from the checkout's HEAD, which may be any branch; with no remote, a failed or timed-out fetch, or an
 untrusted project it forks from the newer of the local trunk and the remote-tracking ref last fetched, and with no trunk found at all from HEAD.
-The start answer's `notice` names the base commit and what could not be done. The recorded base (`baseSha`) is that commit. A project that is no git repository is refused before the card. The child shows as every worktree
+The start answer's `notice` names the base commit and what could not be done (a start on a linked machine does not carry it back yet). The recorded base (`baseSha`) is that commit. A project that is no git repository is refused before the card. The child shows as every worktree
 session does (its branch is its name; merged and pull-request state, #69/#76), and paths its answer names in the
 worktree become readable to the caller. A boolean and a name rather than a `workspace` enum: each is cheaper, and
 either alone says what is meant. A worktree child hangs under the session that started it in the sidebar,

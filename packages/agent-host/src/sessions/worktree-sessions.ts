@@ -211,7 +211,7 @@ export class WorktreeSessions {
     try {
       // Inside: a repository git refuses to read throws here first (`isRepo`, #841), and is a worktree that could not be made
       const forkBase: ForkBase = asked && askedSha
-        ? { sha: askedSha, ref: asked, note: `Forked from ${asked}, as asked, at ${askedSha.slice(0, 9)}.` }
+        ? { sha: askedSha, ref: asked, note: `Forked from ${asked}, as asked, at ${askedSha.slice(0, 9)}` }
         : await resolveForkBase(params.cwd, trunk, { trusted: this.host.projectTrusted(params.projectId) })
       if (!asked && forkBase.ref === 'HEAD') console.error(`[worktree] forking from HEAD: ${forkBase.note}`)
       worktree = await gitWorktreeAdd(params.cwd, path, branch, forkBase.sha, { trusted: true })

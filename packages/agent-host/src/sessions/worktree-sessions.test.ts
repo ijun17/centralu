@@ -135,6 +135,6 @@ describe('where a new session worktree forks from (#1484)', () => {
     expect(git(worktree.path, ['rev-parse', 'HEAD'])).toBe(tip)
     expect(git(worktree.path, ['merge-base', 'HEAD', 'origin/main'])).toBe(tip)
     expect(worktree.base).toBe(tip)
-    expect(base.note).toContain(`origin/main at ${tip.slice(0, 9)}`)
+    expect(base.note).toBe(`Forked from origin/main at ${tip.slice(0, 9)}, fetched just now`)
   })
 })

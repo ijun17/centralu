@@ -65,7 +65,7 @@ export async function gitWorktreeAdd(
 /** How long the fetch of a worktree's base may take before the worktree forks from what is here (#1484) */
 export const FORK_FETCH_TIMEOUT_MS = 20_000
 
-/** Where a new worktree forks from (#1484): the commit, the ref it was read from, and a sentence for the start answer */
+/** Where a new worktree forks from (#1484): the commit, the ref it was read from, and a note for the start answer, without a final period (the answer adds its own) */
 export type ForkBase = { sha: string; ref: string; note: string }
 
 const short = (sha: string) => sha.slice(0, 9)
@@ -126,7 +126,7 @@ export async function resolveForkBase(
   if (!branch) {
     const sha = await gitHeadSha(repoCwd)
     if (!sha) throw rpcError('This repository has no commit to fork a worktree from')
-    return { sha, ref: 'HEAD', note: `No trunk is set for this project and none was found (no remote default branch, no main or master), so the worktree forks from the checkout's HEAD at ${short(sha)}, which may not be the trunk.` }
+    return { sha, ref: 'HEAD', note: `No trunk is set for this project and none was found (no remote default branch, no main or master), so the worktree forks from the checkout's HEAD at ${short(sha)}, which may not be the trunk` }
   }
   if (!remote) {
     const own = await configValue(repoCwd, `branch.${branch}.remote`)
@@ -153,7 +153,7 @@ export async function resolveForkBase(
         return {
           sha,
           ref: `${remote}/${branch}`,
-          note: `Forked from ${remote}/${branch} at ${short(sha)}, fetched just now.${onlyLocal ? ` The local ${branch} has ${onlyLocal} commit(s) the remote does not, which the worktree does not have.` : ''}`,
+          note: `Forked from ${remote}/${branch} at ${short(sha)}, fetched just now${onlyLocal ? `. The local ${branch} has ${onlyLocal} commit(s) the remote does not, which the worktree does not have` : ''}`,
         }
       }
       why = `${remote} has no branch ${branch}`
@@ -177,11 +177,11 @@ export async function resolveForkBase(
   if (!ref || !sha) {
     const head = await gitHeadSha(repoCwd)
     if (!head) throw rpcError('This repository has no commit to fork a worktree from')
-    return { sha: head, ref: 'HEAD', note: `${why}, and there is no ${branch} here either, so the worktree forks from the checkout's HEAD at ${short(head)}, which may not be the trunk.` }
+    return { sha: head, ref: 'HEAD', note: `${why}, and there is no ${branch} here either, so the worktree forks from the checkout's HEAD at ${short(head)}, which may not be the trunk` }
   }
   const behindRemote = l && t && sha === l ? await commitCount(repoCwd, `refs/heads/${branch}..${tracking}`) : null
-  const stale = behindRemote ? ` It is ${behindRemote} commit(s) behind the last ${remote}/${branch} fetched.` : ''
-  return { sha, ref, note: `${why}, so the worktree forks from the local ref ${ref} at ${short(sha)}, which may be behind the remote.${stale}` }
+  const stale = behindRemote ? `. It is ${behindRemote} commit(s) behind the last ${remote}/${branch} fetched` : ''
+  return { sha, ref, note: `${why}, so the worktree forks from the local ref ${ref} at ${short(sha)}, which may be behind the remote${stale}` }
 }
 
 /**

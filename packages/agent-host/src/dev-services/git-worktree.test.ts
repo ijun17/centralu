@@ -117,7 +117,7 @@ describe('the base a new worktree forks from (#1484)', () => {
     const base = await resolveForkBase(repo, 'main', { trusted: true })
     expect(base.sha).toBe(remoteTip)
     expect(base.ref).toBe('origin/main')
-    expect(base.note).toContain(`Forked from origin/main at ${remoteTip.slice(0, 9)}`)
+    expect(base.note).toBe(`Forked from origin/main at ${remoteTip.slice(0, 9)}, fetched just now`)
     const path = join(root, 'wt')
     await gitWorktreeAdd(repo, path, 'centralu/x', base.sha, TRUSTED)
     expect(sha(path, 'HEAD')).toBe(remoteTip)
@@ -130,7 +130,7 @@ describe('the base a new worktree forks from (#1484)', () => {
     withRemote()
     commit(repo, 'local-only.txt')
     const base = await resolveForkBase(repo, 'main', { trusted: true })
-    expect(base.note).toContain('The local main has 1 commit(s) the remote does not')
+    expect(base.note).toMatch(/, fetched just now\. The local main has 1 commit\(s\) the remote does not, which the worktree does not have$/)
   })
 
   it('a trunk held as "origin/main" and no trunk at all (the remote default) both fork from the remote tip', async () => {
@@ -152,7 +152,7 @@ describe('the base a new worktree forks from (#1484)', () => {
     commit(repo, 'feature.txt')
     const base = await resolveForkBase(repo, 'main', { trusted: true })
     expect(base).toMatchObject({ sha: mainTip, ref: 'main' })
-    expect(base.note).toContain('no remote')
+    expect(base.note).toBe(`This repository has no remote to fetch from, so the worktree forks from the local ref main at ${mainTip.slice(0, 9)}, which may be behind the remote`)
     // No trunk held: a local main is found
     expect((await resolveForkBase(repo, null, { trusted: true })).sha).toBe(mainTip)
   })
@@ -195,6 +195,6 @@ describe('the base a new worktree forks from (#1484)', () => {
     fixtureGit(repo, ['branch', '-m', 'elsewhere'])
     const base = await resolveForkBase(repo, null, { trusted: true })
     expect(base).toMatchObject({ sha: sha(repo, 'HEAD'), ref: 'HEAD' })
-    expect(base.note).toContain("checkout's HEAD")
+    expect(base.note).toMatch(/checkout's HEAD at \w{9}, which may not be the trunk$/)
   })
 })
