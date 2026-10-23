@@ -37,6 +37,15 @@ describe('the handoff dialog defaults (#1477)', () => {
     expect(html).not.toContain('handoff-keep-note')
   })
 
+  it('wears the ordinary palette: archiving can be undone, so the button and the box are not danger', () => {
+    const html = render()
+    const button = /<button[^>]*data-testid="confirm-handoff-yes"[^>]*>/.exec(html)![0]
+    expect(button).not.toContain('danger')
+    expect(html).not.toContain('bg-danger-bg')
+    // Only the sentence about deleting it for good, later and elsewhere, is marked
+    expect(html.match(/text-danger/g)).toHaveLength(1)
+  })
+
   it('starts on for a dead session too, with the note from the record', () => {
     const html = render({ dead: true })
     expect(archiveBox(html)).toContain('checked')

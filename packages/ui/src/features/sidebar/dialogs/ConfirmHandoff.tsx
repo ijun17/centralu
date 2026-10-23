@@ -10,8 +10,9 @@ import { Segmented } from '../../../components/Segmented.jsx'
  * The handoff confirmation dialog (a dogfooding request).
  *
  * States the whole sequence in sentences — because this one button bundles three steps together:
- * "ask for a note → new session → (by default) actually delete." Since destruction is at the end,
- * the warning stands in the delete palette (the same grammar as project deletion). Typing the name
+ * "ask for a note → new session → (by default) archive." Archiving can be undone (Settings → Archive
+ * restores it), so the dialog and its button use the ordinary palette (#1477): the delete palette is for a
+ * step that cannot be undone, and only the sentence about deleting it for good there is marked. Typing the name
  * is not required: if the last step fails, nothing is lost, there are just two sessions left over,
  * and if it succeeds, the only thing lost is exactly what the person just read and approved.
  *
@@ -123,7 +124,7 @@ export function ConfirmHandoff({
 
         {deleteOld ? (
           <p
-            className="mt-3 rounded-md border border-danger/40 bg-danger-bg px-2.5 py-2 text-xs leading-body text-ink"
+            className="mt-3 rounded-md border border-line bg-surface-raised px-2.5 py-2 text-xs leading-body text-ink"
             data-testid="handoff-warning"
           >
             When the new session is ready, this session is archived — and{' '}
@@ -141,13 +142,13 @@ export function ConfirmHandoff({
         )}
         <label
           className={`mt-2 flex cursor-pointer items-start gap-2 text-xs ${
-            deleteOld ? 'text-danger' : 'text-ink-muted hover:text-ink'
+            'text-ink-muted hover:text-ink'
           }`}
           data-testid="handoff-delete-toggle"
         >
           <input
             type="checkbox"
-            className={`mt-0.5 ${deleteOld ? 'accent-danger' : 'accent-ink-muted'}`}
+            className="mt-0.5 accent-ink-muted"
             checked={deleteOld}
             onChange={(e) => setDeleteOld(e.target.checked)}
           />
@@ -159,7 +160,7 @@ export function ConfirmHandoff({
             Cancel
           </button>
           <Button
-            variant={deleteOld ? 'danger' : 'primary'}
+            variant="primary"
             onClick={() => onConfirm(heirTool, deleteOld, mode)}
             disabled={mode === 'agent' && !!blocked}
             data-testid="confirm-handoff-yes"

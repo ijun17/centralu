@@ -253,9 +253,19 @@ describe('the contents section and the cut results (#1481)', () => {
   }
 
   const rows = (): StoredMessage[] => {
-    const out: StoredMessage[] = [row(1, 'user', 'text', { text: 'ship the parser' })]
-    for (let i = 1; i <= 1_100; i++) out.push(...call(i * 2 + 1, 'Bash', `cmd-${i}`, `out-${i}`))
-    out.push(row(2_300, 'assistant', 'text', { text: 'Report A\nsecond line' }), row(2_301, 'assistant', 'text', { text: 'Report B' }))
+    // Three turns: the first and second end in a reply after narration and tool calls; the third is cut off mid-work
+    const out: StoredMessage[] = [row(1, 'user', 'text', { text: 'ship the parser' }), row(2, 'assistant', 'text', { text: 'Let me look at the lexer first.' })]
+    for (let i = 1; i <= 1_098; i++) out.push(...call(i * 2 + 1, 'Bash', `cmd-${i}`, `out-${i}`))
+    out.push(
+      row(2_200, 'assistant', 'text', { text: 'Report A\nsecond line' }),
+      row(2_201, 'user', 'text', { text: 'and the parser?' }),
+      row(2_202, 'assistant', 'text', { text: 'Checking the parser.' }),
+      ...call(2_203, 'Bash', 'cmd-1099', 'out-1099'),
+      row(2_205, 'assistant', 'text', { text: 'Report B' }),
+      row(2_206, 'user', 'text', { text: 'keep going' }),
+      row(2_207, 'assistant', 'text', { text: 'Starting the tests now.' }),
+      ...call(2_208, 'Bash', 'cmd-1100', 'out-1100'),
+    )
     return out
   }
 
@@ -277,7 +287,7 @@ describe('the contents section and the cut results (#1481)', () => {
     expect(text).not.toMatch(/[\ud800-\udbff](?![\udc00-\udfff])/)
   })
 
-  it('opens with the latest reports in full, the children by state with ids, and the running background work', () => {
+  it('opens with the reply that ended each turn in full, the children by state with ids, and the running background work', () => {
     const text = buildHandoffRecord({
       ...base,
       rows: rows(),
@@ -293,8 +303,15 @@ describe('the contents section and the cut results (#1481)', () => {
     })
     const contents = text.slice(text.indexOf('## Contents'), text.indexOf('Your predecessor session'))
 
-    expect(contents).toContain('Report at seq 2300:\n    Report A\n    second line')
-    expect(contents).toContain('Report at seq 2301:\n    Report B')
+    // The reply that ended each turn, in full — not the narration before a tool call, and not a turn cut off mid-work
+    expect(contents).toContain('Report at seq 2200:\n    Report A\n    second line')
+    expect(contents).toContain('Report at seq 2205:\n    Report B')
+    expect(contents.match(/^Report at seq /gm)).toHaveLength(2)
+    for (const narration of ['Let me look at the lexer first.', 'Checking the parser.', 'Starting the tests now.']) {
+      expect(contents).not.toContain(narration)
+      // It stays in the record below, as the rest of the conversation does
+      expect(text).toContain(narration)
+    }
     expect(contents).toContain('- "Lexer" — working — id: child-1')
     expect(contents).toContain('- "Parser\\nsneaky" — finished — id: child-2')
     expect(contents).toContain('- "Side try" — waiting for the person — id: child-3')

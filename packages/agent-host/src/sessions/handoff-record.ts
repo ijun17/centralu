@@ -26,7 +26,7 @@ import { trustedJsonText } from './orchestrator-tools.js'
  * first.
  *
  * **A contents section opens the note, and old results are cut** (#1481). A 2 MB note with no headings left a successor
- * reading the tail and guessing offsets. The note now starts with the predecessor's latest reports in full, the sessions
+ * reading the tail and guessing offsets. The note now starts with the reply that ended each of the predecessor's last turns, in full, the sessions
  * it started, its running background work and a table of the note's parts with line numbers, all built without a model.
  * The last 40 tool calls no longer carry their whole result either, only its first `RESULT_HEAD` characters and a marker:
  * every call keeps its input, and the note already tells the successor to re-run commands instead of trusting old output.
@@ -205,6 +205,27 @@ function touchedPaths(entries: Entry[]): string[] {
   return seen.slice(0, TOUCHED_MAX)
 }
 
+/**
+ * The reply that ended each turn (#1481): per turn, the last assistant text with no tool activity after it. A turn
+ * starts at a row that is not the assistant's (the person's message, another session's, an image) — a turn's end is not
+ * recorded, so its start is what delimits it. Narration before a tool call ("Now let me check X.") is not a reply: a
+ * tool call after a text drops that text, and a turn cut off mid-work has no reply at all.
+ */
+function endingReplies(entries: Entry[]): { seq: number; text: string }[] {
+  const out: { seq: number; text: string }[] = []
+  let last: { seq: number; text: string } | null = null
+  for (const e of entries) {
+    if (isTool(e)) last = null
+    else if (e.report !== undefined) last = { seq: e.seq, text: e.report }
+    else {
+      if (last) out.push(last)
+      last = null
+    }
+  }
+  if (last) out.push(last)
+  return out
+}
+
 /** A session the predecessor started (start_agent, or a worktree child of it), as the contents section lists it (#1481) */
 export type RecordChild = {
   id: string
@@ -234,7 +255,7 @@ type PartKey = 'collapsed' | 'traces' | 'results'
 
 /**
  * The section a record opens with (#1481), built from the record and the host's own state, never by a model: the
- * predecessor's latest reports in full (its own words for where things stand), the sessions it started, its running
+ * reply that ended each of the predecessor's last turns in full (its own words for where things stand), the sessions it started, its running
  * background work, and a table of the note's parts with line numbers, so a successor reads one part with `sed -n`
  * instead of guessing offsets in a file of up to 2 MB. Everything the session itself wrote is indented, so no line of
  * it can pose as a line of this section or of the record (#797).
@@ -246,7 +267,7 @@ function contentsSection(c: {
   parts: Part[]
 }): string {
   const out: string[] = ['## Contents (added by Centralu from the stored record, without a model)', '']
-  out.push(`### The predecessor's latest reports, in full${c.reports.length ? ` (${c.reports.length})` : ''}`, '')
+  out.push(`### The reply that ended each of the predecessor's last turns, in full${c.reports.length ? ` (${c.reports.length})` : ''}`, '')
   if (!c.reports.length) out.push('None in the record.', '')
   for (const r of c.reports) {
     const over = r.text.length > REPORT_MAX
@@ -347,7 +368,7 @@ export function buildHandoffRecord(opts: {
     'material, not a curated briefing — digest it yourself, then continue the work.',
     'Reply first with a short summary of your understanding of the current state.',
     'Match the language the conversation itself uses.',
-    'The Contents section above gives the latest reports, the sessions it started and line',
+    'The Contents section above gives its last replies, the sessions it started and line',
     'numbers: read one part of this file with sed instead of all of it.',
     'Every tool call appears with its input; only the latest carry a result, and that is cut',
     `to its first ${RESULT_HEAD} characters. Re-read files and re-run commands yourself instead of`,
@@ -365,10 +386,7 @@ export function buildHandoffRecord(opts: {
   // The tool's summary is the session's own words too: indented, so none of its lines can start a row (#797)
   const summarySection = summary ? `## The tool's last compaction summary\n\n${indent(summary)}\n\n` : ''
   const verbatimMark = '── verbatim from here ──\n\n'
-  const reports = all
-    .filter((e): e is TextEntry & { report: string } => !isTool(e) && e.report !== undefined)
-    .slice(-REPORTS_SHOWN)
-    .map((e) => ({ seq: e.seq, text: e.report }))
+  const reports = endingReplies(all).slice(-REPORTS_SHOWN)
   const contentsOf = (parts: Part[]) =>
     contentsSection({ reports, children: opts.children ?? [], background: opts.background ?? [], parts })
 

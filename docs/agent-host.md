@@ -1245,7 +1245,7 @@ so it can replace a session that has drifted, or move its work to the other CLI,
 the original by default since #1477, having kept it from #694 to then): the session being
 replaced is the one least likely to summarize correctly (repeated compaction, stale state, a summary carrying injected
 text), and the record mode asks it nothing (`exportHandoffRecord`, `sessions/handoff-record.ts`; since #1481 the note opens with a contents section built without a model: the
-latest reports in full, the sessions the predecessor started by state with ids, its running background work and a table of the note's
+the reply that ended each of its last turns in full, the sessions the predecessor started by state with ids, its running background work and a table of the note's
 parts with line numbers; the name of the note the predecessor itself took over from is in the header; and a tool result is cut to
 its first 500 characters with a marker, every call keeping its input). Asking
 the session to write it (`mode: "agent"`) stays an option in both.
