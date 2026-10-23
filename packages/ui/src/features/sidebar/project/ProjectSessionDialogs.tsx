@@ -1,4 +1,4 @@
-import type { SessionSummary } from '@cc/core'
+import { backgroundCount, isInTurn, type SessionSummary } from '@cc/core'
 import { handoffBlockedBy, useStore } from '../../../store/store.js'
 import { ConfirmHandoff } from '../dialogs/ConfirmHandoff.jsx'
 import { ConfirmDelete } from '../dialogs/ConfirmDelete.jsx'
@@ -42,7 +42,7 @@ export function ProjectSessionDialogs({
           name={sessions.find((s) => s.id === handingOff)?.name ?? 'Session'}
           tool={sessions.find((s) => s.id === handingOff)?.tool ?? defaultTool}
           // Determining a dead session (#78): one that has errored or hit a rate limit — the other tool is
-          // pre-selected (the note from the record and keeping the original are every session's defaults, #694)
+          // pre-selected (the note from the record is every session's default, #694, and archiving the original is too, #1477)
           dead={(() => {
             const s = sessions.find((x) => x.id === handingOff)
             return s ? s.state === 'error' || !!s.limit : false
@@ -52,6 +52,11 @@ export function ProjectSessionDialogs({
             const s = sessions.find((x) => x.id === handingOff)
             return s ? handoffBlockedBy(s) : null
           })()}
+          working={(() => {
+            const s = sessions.find((x) => x.id === handingOff)
+            return s ? isInTurn(s.state) : false
+          })()}
+          backgroundTasks={backgroundCount(sessions.find((x) => x.id === handingOff)?.backgroundTasks ?? [])}
           onCancel={() => setHandingOff(null)}
           onConfirm={(tool, deleteOld, mode) => {
             // The dialog closes and progress is shown inside the session — the handoff request and its text stay in the conversation as is

@@ -1181,7 +1181,7 @@ new session now takes over the original's **live** work as it is created, before
   still in use, though (finished, reported, waiting for its orchestrator's next instruction), and left with an original
   that goes it belonged to nobody: `askedBy` named a removed session, the sidebar showed it at the top level, its next
   report was owed to the removed session, and a successor that is not `auto` could not `agent_session` it (#738). So:
-  - **A handoff that removes the original** (chosen in the window; its default until #694) says so (`handoff.removesOriginal`, an addition to
+  - **A handoff that removes the original** (chosen in the window; its default since #1477, and before #694) says so (`handoff.removesOriginal`, an addition to
     `createSession`), and every child moves as the session is created, settled ones too, listed in the note as
     "finished; waiting for more work". It is the same move in the same transaction; only `stateOf` gives a settled
     child a state instead of passing it over. The window removes the original as a separate, last step (`store.handoff`,
@@ -1241,10 +1241,13 @@ new session now takes over the original's **live** work as it is created, before
 
 Handoff was the session menu's alone (⋯ → Hand off to a fresh session…). The central orchestrator now has it as a tool,
 so it can replace a session that has drifted, or move its work to the other CLI, the way the person does. The note is
-**from the record by default**, in the tool and in the window alike (owner decision on #694; the window still keeps
-the original by default, the pairing the record mode always had): the session being
+**from the record by default**, in the tool and in the window alike (owner decision on #694; the window archives
+the original by default since #1477, having kept it from #694 to then): the session being
 replaced is the one least likely to summarize correctly (repeated compaction, stale state, a summary carrying injected
-text), and the record mode asks it nothing (`exportHandoffRecord`, `sessions/handoff-record.ts`, unchanged). Asking
+text), and the record mode asks it nothing (`exportHandoffRecord`, `sessions/handoff-record.ts`; since #1481 the note opens with a contents section built without a model: the
+the reply that ended each of its last turns in full, the sessions the predecessor started by state with ids, its running background work and a table of the note's
+parts with line numbers; the name of the note the predecessor itself took over from is in the header; and a tool result is cut to
+its first 500 characters with a marker, every call keeping its input). Asking
 the session to write it (`mode: "agent"`) stays an option in both.
 
 - **Arguments**: the target session, the receiving tool (the same by default), the note mode (`record` by default),
