@@ -105,12 +105,12 @@ describe('when agents compact on a linked machine (#1376)', () => {
     const hub = await hubHost(machine.port)
     await eventually(() => hub.machine().status === 'connected')
     await eventually(() => machine.mgr.uiPreferences().autoCompact?.share === 0.5)
-    expect(machine.mgr.uiPreferences().autoCompact).toEqual({ controlled: true, share: 0.5 })
+    expect(machine.mgr.uiPreferences().autoCompact).toEqual({ controlled: true, share: 0.5, idleShare: 0.3 })
 
     // The person turns Centralu's control off on the hub: the machine hands control back too
     await hub.router.handle('prefs.set', { patch: { autoCompact: { controlled: false } } })
     await eventually(() => machine.mgr.uiPreferences().autoCompact?.controlled === false)
-    expect(machine.mgr.uiPreferences().autoCompact).toEqual({ controlled: false, share: 0.5 })
+    expect(machine.mgr.uiPreferences().autoCompact).toEqual({ controlled: false, share: 0.5, idleShare: 0.3 })
   })
 
   it("a linked session's menu asks the machine what its next start passes", async () => {

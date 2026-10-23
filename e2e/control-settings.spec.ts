@@ -106,7 +106,7 @@ test('Settings: auto from a linked computer starts on, and turning it off is rem
 })
 
 // #1376: Centralu sets when agents compact, at 60% of the model's window, unless the person turns its control off
-test("Settings: when agents compact starts on at 60%, moves in steps of 5, and turning Centralu's control off hides the share", async ({ page }) => {
+test("Settings: when agents compact starts on at 60%, moves in steps of 5, and turning Centralu's control off hides the shares", async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   const open = async () => {
     await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
@@ -120,11 +120,19 @@ test("Settings: when agents compact starts on at 60%, moves in steps of 5, and t
   await expect(page.getByTestId('settings-auto-compact-share-value')).toHaveText('60% of the window')
   await share.focus()
   await page.keyboard.press('ArrowRight')
-  await expect.poll(saved).toEqual({ controlled: true, share: 0.65 })
+  await expect.poll(saved).toEqual({ controlled: true, share: 0.65, idleShare: 0.3 })
+  // #1451: a resting session is compacted over a lower share, moved the same way
+  const idle = page.getByTestId('settings-auto-compact-idle-share')
+  await expect(idle).toHaveValue('30')
+  await expect(page.getByTestId('settings-auto-compact-idle-share-value')).toHaveText('30% of the window')
+  await idle.focus()
+  await page.keyboard.press('ArrowRight')
+  await expect.poll(saved).toEqual({ controlled: true, share: 0.65, idleShare: 0.35 })
 
   await page.getByTestId('settings-auto-compact').uncheck()
-  await expect.poll(saved).toEqual({ controlled: false, share: 0.65 })
+  await expect.poll(saved).toEqual({ controlled: false, share: 0.65, idleShare: 0.35 })
   await expect(share).toHaveCount(0)
+  await expect(idle).toHaveCount(0)
 
   await page.reload()
   await open()

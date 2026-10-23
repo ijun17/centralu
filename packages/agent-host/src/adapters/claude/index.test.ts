@@ -377,3 +377,11 @@ describe('the CLI version a Claude process runs (#297)', () => {
     await handle.dispose()
   })
 })
+
+describe('the compact command Centralu sends at a break (#1451)', () => {
+  it('is /compact with the focus line after it when there is one', () => {
+    const adapter = new ClaudeAdapter()
+    expect(adapter.compactCommand(null)).toBe('/compact')
+    expect(adapter.compactCommand('keep the PR number')).toBe('/compact keep the PR number')
+  })
+})

@@ -11,6 +11,8 @@ import {
   APP_ACCESS_TOOLS,
   MAIL_BUDGET_CHARS,
   MAIL_TOOLS,
+  COMPACT_BUDGET_CHARS,
+  COMPACT_TOOLS,
   DELEGATE_BUDGET_CHARS,
   DELEGATE_TOOLS,
   ORCHESTRATOR_MCP_NAME,
@@ -240,7 +242,7 @@ describe("a reader's list and reads across projects (#984)", () => {
 describe('the reader set', () => {
   it('holds reading, consented updates, delegation and app access without the orchestrator\'s directing tools', () => {
     // The app-access set (#371 part A) changes only the calling session's own tools
-    expect(orchestratorToolSchemas('reader').map((t) => t.name)).toEqual(['update_centralu', 'read_session', 'recall', 'app_guide', 'ask_project', 'start_agent', 'agent_session', 'find_apps', 'attach_app', 'detach_app', 'mail'])
+    expect(orchestratorToolSchemas('reader').map((t) => t.name)).toEqual(['update_centralu', 'read_session', 'recall', 'app_guide', 'ask_project', 'start_agent', 'agent_session', 'find_apps', 'attach_app', 'detach_app', 'mail', 'compact_self'])
     for (const t of ORCHESTRATOR_TOOLS) {
       expect(profileAllows('reader', t.name), t.name).toBe(['update_centralu', 'read_session', 'recall', 'app_guide'].includes(t.name))
     }
@@ -280,9 +282,9 @@ describe('the reader set', () => {
     // #581 adds only its pointer to Claude's every-request cost; the definition must stay deferred.
     // 2,300 until #686's start_agent `lsp` (2,288 -> 2,313, the argument's name and type only); 2,350 until #729's
     // `difficulty` and the words on it and on `worktree` (2,313 -> 2,560; 68 tokens measured live); #861's `name` 2,585;
-    // #1038's `machine` 2,612
+    // #1038's `machine` 2,612; plus #1451's compact_self (453, loaded: its words are the instruction on when to use it)
     const claude = residentCost('reader', DEFERRED_SERVER)
-    expect(claude.residentChars + claude.instructionsChars).toBeLessThanOrEqual(2850)
+    expect(claude.residentChars + claude.instructionsChars).toBeLessThanOrEqual(2850 + COMPACT_BUDGET_CHARS)
   })
 
   it('leaves the instructions out when CC_READER_INSTRUCTIONS=0 asks it to (measurement)', () => {
@@ -312,7 +314,7 @@ describe('the reader set', () => {
   it(`keeps the app-access set within ${APP_ACCESS_BUDGET_CHARS} characters, beside the reader set`, () => {
     expect(sentChars(APP_ACCESS_TOOLS)).toBeLessThanOrEqual(APP_ACCESS_BUDGET_CHARS)
     // Everything the reader seat is sent is in one counted set or another — nothing rides uncounted
-    expect(orchestratorToolSchemas('reader').map((t) => t.name).sort()).toEqual([...READER_TOOLS, ...DELEGATE_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS, ...MAIL_TOOLS].map((t) => t.name).sort())
+    expect(orchestratorToolSchemas('reader').map((t) => t.name).sort()).toEqual([...READER_TOOLS, ...DELEGATE_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS, ...MAIL_TOOLS, ...COMPACT_TOOLS].map((t) => t.name).sort())
   })
 
   it(`keeps the mail tool within ${MAIL_BUDGET_CHARS} characters, deferred on Claude and loaded on Codex, an ordinary session’s alone`, () => {
@@ -320,6 +322,25 @@ describe('the reader set', () => {
     expect(MAIL_TOOLS.every((t) => t.deferred)).toBe(true)
     expect(orchestratorToolSchemas('orchestrator').some((t) => t.name === 'mail')).toBe(false)
     expect(orchestratorToolSchemas('scoped').some((t) => t.name === 'mail')).toBe(false)
+  })
+
+  it(`keeps compact_self within ${COMPACT_BUDGET_CHARS} characters, loaded (its description says when to use it), an ordinary session's and the orchestrator's`, () => {
+    expect(sentChars(COMPACT_TOOLS)).toBeLessThanOrEqual(COMPACT_BUDGET_CHARS)
+    expect(COMPACT_TOOLS.some((t) => 'deferred' in t && t.deferred)).toBe(false)
+    // The three moments it is for are in the words the model reads
+    const words = COMPACT_TOOLS[0].description
+    for (const moment of ['finished and reported', 'child, CI or the person', 'unrelated task']) expect(words).toContain(moment)
+    for (const profile of ['orchestrator', 'reader'] as const) expect(orchestratorToolSchemas(profile).some((t) => t.name === 'compact_self'), profile).toBe(true)
+    for (const profile of ['scoped', 'builder'] as const) expect(orchestratorToolSchemas(profile).some((t) => t.name === 'compact_self'), profile).toBe(false)
+  })
+
+  it('runs compact_self through the seat and says so when the seat cannot', async () => {
+    const asked: (string | undefined)[] = []
+    const ok = await runOrchestratorTool(toolsWith({ compactSelf: (focus) => (asked.push(focus), { text: 'ok' }) }), 'compact_self', { focus: 'keep the PR number' }, { sessionId: 's', profile: 'reader' })
+    expect(ok.text).toBe('ok')
+    expect(asked).toEqual(['keep the PR number'])
+    const none = await runOrchestratorTool(toolsWith({}), 'compact_self', {}, { sessionId: 's', profile: 'reader' })
+    expect(none.isError).toBe(true)
   })
 
   it('lists with read_session and no id — only for the reader; the orchestrator still has to name a session', async () => {
@@ -525,8 +546,8 @@ describe('the resident cost of each profile', () => {
   }
 
   it('counts the reader seat on Codex as exactly its five counted sets, and on Claude only the ones not deferred', () => {
-    expect(residentCost('reader', EAGER_DEVELOPER).residentChars).toBe(sentChars(READER_TOOLS) + sentChars(DELEGATE_TOOLS) + sentChars(AGENT_TOOLS) + sentChars(APP_ACCESS_TOOLS) + sentChars(MAIL_TOOLS))
-    const loaded = [...READER_TOOLS, ...DELEGATE_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS, ...MAIL_TOOLS].filter((t) => !('deferred' in t && t.deferred))
+    expect(residentCost('reader', EAGER_DEVELOPER).residentChars).toBe(sentChars(READER_TOOLS) + sentChars(DELEGATE_TOOLS) + sentChars(AGENT_TOOLS) + sentChars(APP_ACCESS_TOOLS) + sentChars(MAIL_TOOLS) + sentChars(COMPACT_TOOLS))
+    const loaded = [...READER_TOOLS, ...DELEGATE_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS, ...MAIL_TOOLS, ...COMPACT_TOOLS].filter((t) => !('deferred' in t && t.deferred))
     expect(residentCost('reader', DEFERRED_SERVER).residentChars).toBe(sentChars(loaded))
   })
 })

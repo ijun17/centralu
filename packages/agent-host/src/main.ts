@@ -817,6 +817,7 @@ const shutdown = new Shutdown({
       updates,
       agentVersions,
       sleeper,
+      compaction: { stop: () => mgr.stopSelfCompaction() },
       mailDelivery,
       stopActivity: () => stopActivity(),
       git: { stopAll: () => stopGitChildren() },
@@ -906,6 +907,8 @@ links.start()
 agentVersions.start()
 // Idle sessions go to sleep from now on (#568); the clock of each starts here for this host
 sleeper.start()
+// A session at rest over the lower share is compacted before its next turn (#1451)
+mgr.startSelfCompaction()
 
 // The agents a previous host left running come back live, mid-turn if they were (#280 step 2)
 if (held) void mgr.adoptKept(held.kept.agents).then(() => mgr.refreshToolDefinitions())

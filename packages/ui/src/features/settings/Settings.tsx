@@ -1,7 +1,7 @@
 import { TrustProjectButton } from '../project/TrustCard.jsx'
 import { usePresence } from '../../components/presence.js'
 import { useEffect, useRef, useState } from 'react'
-import { MAX_AGENT_DEPTH, MAX_AUTO_COMPACT_SHARE, MIN_AUTO_COMPACT_SHARE, agentDepthOf, autoCompactOf, hubAutoOf, type ToolName, type ToolStatus, type UiPreferencesPatch } from '@cc/protocol'
+import { MAX_AGENT_DEPTH, MAX_AUTO_COMPACT_SHARE, MIN_AUTO_COMPACT_SHARE, MIN_IDLE_COMPACT_SHARE, agentDepthOf, autoCompactOf, hubAutoOf, type ToolName, type ToolStatus, type UiPreferencesPatch } from '@cc/protocol'
 import { appKeyOf, explainGridSpan, type NotifyPolicy } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
@@ -899,8 +899,9 @@ function HubAutoSwitch() {
  * by default at 60%; off, nothing is passed and each agent's own settings decide.
  */
 function AutoCompactSetting({ setPrefs }: { setPrefs: (patch: UiPreferencesPatch) => Promise<void> }) {
-  const { controlled, share } = useStore((s) => autoCompactOf(s.prefs))
+  const { controlled, share, idleShare } = useStore((s) => autoCompactOf(s.prefs))
   const percent = Math.round(share * 100)
+  const idlePercent = Math.round(idleShare * 100)
   return (
     <SettingsGroup title="Compaction">
       <SettingToggle
@@ -914,7 +915,9 @@ function AutoCompactSetting({ setPrefs }: { setPrefs: (patch: UiPreferencesPatch
             alike. Off, Centralu passes nothing and each agent&apos;s own settings decide. On, Centralu also turns auto
             compact on for Claude if you turned it off in your own Claude settings. A running session takes a change when
             its process next starts; a model Centralu has not read a window from yet takes it from its second start.
-            Claude never compacts before 67,000 tokens. Linked computers are told this setting when they connect and when
+            Claude never compacts before 67,000 tokens. Separately, Centralu compacts a session that has been at rest for 10
+            minutes once it is over the second share and over 100,000 tokens (never one waiting for you or running
+            background work), so the next turn starts small. Linked computers are told this setting when they connect and when
             it changes; one from before it applies nothing.
           </>
         }
@@ -937,6 +940,29 @@ function AutoCompactSetting({ setPrefs }: { setPrefs: (patch: UiPreferencesPatch
               />
               <span className="readout w-28 text-sm text-ink" data-testid="settings-auto-compact-share-value" aria-hidden>
                 {percent}% of the window
+              </span>
+            </>
+          }
+        />
+      )}
+      {controlled && (
+        <SettingsRow
+          label={<label htmlFor="settings-auto-compact-idle-share">Compact a resting session over</label>}
+          control={
+            <>
+              <input
+                id="settings-auto-compact-idle-share"
+                type="range"
+                min={Math.round(MIN_IDLE_COMPACT_SHARE * 100)}
+                max={Math.round(MAX_AUTO_COMPACT_SHARE * 100)}
+                step={5}
+                className="w-32 accent-ink-muted"
+                data-testid="settings-auto-compact-idle-share"
+                value={idlePercent}
+                onChange={(e) => void setPrefs({ autoCompact: { idleShare: Number(e.target.value) / 100 } })}
+              />
+              <span className="readout w-28 text-sm text-ink" data-testid="settings-auto-compact-idle-share-value" aria-hidden>
+                {idlePercent}% of the window
               </span>
             </>
           }

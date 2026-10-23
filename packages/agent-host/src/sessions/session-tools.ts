@@ -24,6 +24,8 @@ export type SessionToolsHost = Pick<DelegationHost, 'builderRefOf' | 'meta'> & {
   requireAppAccess: SessionAppWiring['requireAppAccess']
   /** The `mail` tool of a session (#1347): the mailbox answers, or says it is not there */
   mailTool: (sessionId: string, args: MailToolArgs) => { text: string; isError?: boolean }
+  /** The `compact_self` tool of a session (#1451) */
+  compactSelf: (sessionId: string, focus?: string) => { text: string; isError?: boolean }
 }
 
 /**
@@ -90,6 +92,7 @@ export class SessionTools {
       detachApp: async (app) => this.host.requireAppAccess().detach(sessionId, app),
       // The mailbox (#1347): it owns the threads `send_to_session` opens (slice 3); it runs the tool as a command
       mail: (args) => this.host.mailTool(sessionId, args),
+      compactSelf: (focus) => this.host.compactSelf(sessionId, focus),
     }
   }
 
@@ -142,6 +145,7 @@ export class SessionTools {
       detachApp: async (app) => this.host.requireAppAccess().detach(sessionId, app),
       // The mailbox (#1347): the ordinary session's alone, whose seat the tool is defined for
       mail: (args) => this.host.mailTool(sessionId, args),
+      compactSelf: (focus) => this.host.compactSelf(sessionId, focus),
     }
   }
 }

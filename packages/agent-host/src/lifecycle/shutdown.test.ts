@@ -70,6 +70,7 @@ function parts() {
     updates: { stop: rec('updates') },
     agentVersions: { stop: rec('agent versions') },
     sleeper: { stop: rec('sleeper') },
+    compaction: { stop: rec('compaction') },
     mailDelivery: { stop: rec('mail delivery') },
     stopActivity: rec('activity'),
     git: { stopAll: async () => void did.push('git') },
@@ -124,6 +125,16 @@ describe('the stop plan (HO8)', () => {
     f.p.views = { dispose: () => Promise.reject(new Error('a view would not close')) }
     await expect(runSteps(stopPlan('stop', false, f.p), () => {})).rejects.toThrow('a view would not close')
     expect(f.did.slice(-3)).toEqual(['server', 'store', 'children'])
+  })
+
+  it('compacting idle sessions stops before the sessions are let go of too, so a sweep cannot send a compact to a process the next host takes over (#1451)', async () => {
+    for (const mode of ['detach', 'stop'] as const) {
+      const f = parts()
+      f.releaseSessions()
+      await runSteps(stopPlan(mode, false, f.p), () => {})
+      expect(f.did).toContain('compaction')
+      expect(f.did.indexOf('compaction')).toBeLessThan(f.did.indexOf(mode === 'detach' ? 'sessions detach' : 'sessions end'))
+    }
   })
 
   it('putting idle sessions to sleep stops before the sessions are let go of, so a sweep cannot end a process the next host takes over (#568)', async () => {

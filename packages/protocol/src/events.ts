@@ -35,8 +35,9 @@ const base = { sessionId: z.string() }
  * `wrote`: the person wrote into a turn of the work and the tool took it in; `added`: they chose to add it to the task.
  * Said by the host that ran the turn, so a hub that follows a linked machine reads it rather than guessing from the
  * order of the messages. Absent from a host that does not say.
+ * `compaction`: Centralu started this turn to compact the conversation (#1451); a window raises no "done" for it.
  */
-export const TurnWho = z.object({ by: z.enum(['person', 'work']), wrote: z.literal(true).optional(), added: z.literal(true).optional() })
+export const TurnWho = z.object({ by: z.enum(['person', 'work']), wrote: z.literal(true).optional(), added: z.literal(true).optional(), compaction: z.literal(true).optional() })
 export type TurnWho = z.infer<typeof TurnWho>
 const endsTurn = { turn: TurnWho.optional() }
 

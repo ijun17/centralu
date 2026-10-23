@@ -40,6 +40,8 @@ describe('the Claude in-process server', () => {
         detach_app: 'deferred',
         // The mailbox (#1347): the wake that delivers mail names the exact call
         mail: 'deferred',
+        // Compacting at a break (#1451): loaded, its words are the instruction on when to use it
+        compact_self: 'loaded',
       },
       instructions: READER_INSTRUCTIONS,
     })

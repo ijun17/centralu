@@ -50,7 +50,7 @@ export type PreferenceChanges = {
    */
   notifications?: { approval?: boolean; done?: boolean; whenFocused?: boolean; sound?: boolean }
   /** When agents compact by themselves (#1376): whether Centralu sets it, and the share of the model's window; the ones to change */
-  autoCompact?: { controlled?: boolean; share?: number }
+  autoCompact?: { controlled?: boolean; share?: number; idleShare?: number }
 }
 
 /** One request of the orchestrator's preference commands (#1219), as the tool runner reads its arguments */
@@ -672,6 +672,8 @@ export type OrchestratorTools = {
   startAgent(opts: StartAgentOpts, signal?: AbortSignal): Promise<ChildRunResult>
   /** The mailbox for the session that has these tools (#1347, mail): an ordinary session's alone; absent where there is none */
   mail?(args: MailToolArgs): { text: string; isError?: boolean }
+  /** compact_self (#1451): asks Centralu to compact this session when its turn ends, with an optional focus line. The answer says what will happen */
+  compactSelf?(focus?: string): { text: string; isError?: boolean }
   /** Works with a session the caller started (#561, agent_session): status, send more, wait, stop */
   agentSession(opts: AgentSessionOpts, signal?: AbortSignal): Promise<ChildRunResult>
   /** The sessions the caller started with start_agent that are still here (#690, agent_session list) */

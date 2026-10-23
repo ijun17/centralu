@@ -69,6 +69,7 @@ const CENTRALU_LABELS: Record<string, string> = {
   answer_question: 'Answered a card',
   create_session: 'Started a session',
   update_centralu: 'Centralu update',
+  compact_self: 'Asked to compact',
   recall: 'Searched past conversations',
   find_apps: 'Looked for apps',
   attach_app: 'Attached an app',

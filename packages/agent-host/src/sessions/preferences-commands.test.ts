@@ -195,7 +195,7 @@ describe('auto compact (#1376)', () => {
 
     const share = await run(orc.id, 'set_preferences', { autoCompact: { share: 0.5 } })
     expect(share.isError).toBeFalsy()
-    expect(share.text).toBe("Now: agents compact at 50% of the model's window, set by Centralu. It reaches a running session when its process next starts.")
+    expect(share.text).toBe("Now: agents compact at 50% of the model's window, set by Centralu; a session at rest is compacted over 30%. It reaches a running session when its process next starts.")
     expect(await prefs()).toMatchObject({ autoCompact: { controlled: true, share: 0.5 } })
 
     const off = await run(orc.id, 'set_preferences', { autoCompact: { controlled: false } })

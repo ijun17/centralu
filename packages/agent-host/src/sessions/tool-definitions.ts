@@ -279,6 +279,7 @@ export const ORCHESTRATOR_TOOLS = [
           .object({
             controlled: z.boolean().optional().describe("Whether Centralu sets when agents compact (default on); off, each agent's own settings decide."),
             share: z.number().optional().describe("Share of the model's window to compact at, 0.2 to 0.95 (default 0.6)."),
+            idleShare: z.number().optional().describe('Share over which a session at rest for 10 minutes is compacted by Centralu, 0.1 to 0.95 (default 0.3).'),
           })
           .strict()
           .optional()
@@ -804,6 +805,24 @@ export const MAIL_TOOLS = [
 export const MAIL_BUDGET_CHARS = 800
 
 /**
+ * Compacting this session at a break (#1451, sessions/self-compaction.ts). Loaded, not deferred: the description is the
+ * whole instruction on when to use it, and a deferred tool is not read until something searches for it. An ordinary
+ * session's and the orchestrator's: the two seats that live long enough for a context to matter. A coordinator and a
+ * builder do not have it (a builder lives for one app's build; nothing makes a coordinator since #372).
+ */
+export const COMPACT_TOOLS = [
+  {
+    name: 'compact_self',
+    description:
+      'Compacts this conversation when the current turn ends. Use when work is finished and reported, before waiting over a few minutes on a child, CI or the person, or when switching to an unrelated task.',
+    schema: z.object({ focus: z.string().optional().describe('What the summary keeps.') }),
+  },
+] as const satisfies readonly { name: string; description: string; schema: z.ZodObject<z.ZodRawShape>; deferred?: boolean }[]
+
+/** The ceiling for COMPACT_TOOLS, counted like MAIL_BUDGET_CHARS; loaded on both tools, so it rides in every request of the two seats */
+export const COMPACT_BUDGET_CHARS = 460
+
+/**
  * Another project's app tools, on demand (#371 part A) — rides with the reader set, so a project's
  * ordinary session has it, and is counted against its own ceiling below (READER_TOOLS keeps #320's).
  *
@@ -843,6 +862,7 @@ export type AppAccessToolName = (typeof APP_ACCESS_TOOLS)[number]['name']
 /** start_agent and agent_session (#561), which the orchestrator reaches as commands too (#853) */
 export type AgentToolName = (typeof AGENT_TOOLS)[number]['name']
 export type MailToolName = (typeof MAIL_TOOLS)[number]['name']
+export type CompactToolName = (typeof COMPACT_TOOLS)[number]['name']
 
 /**
  * The ceiling for the app-access set, counted like READER_BUDGET_CHARS (full name, description and
@@ -929,10 +949,10 @@ export const READER_BUDGET_CHARS = 1960
  * (1,750 → 1,950: the set is 1,913). #1487 restored `.int().min(0)` on `offset` (it lost them in #1489): +12 in the reader set and the orchestrator, whose ceilings rise by 10 (1,960; 9,710).
  */
 export const RESIDENT_BUDGET_CHARS: Record<ToolProfile, number> = {
-  orchestrator: 9_710,
+  orchestrator: 9_710 + COMPACT_BUDGET_CHARS,
   scoped: 2_600,
   builder: 1_500,
-  reader: READER_BUDGET_CHARS + DELEGATE_BUDGET_CHARS + AGENT_BUDGET_CHARS + APP_ACCESS_BUDGET_CHARS + MAIL_BUDGET_CHARS,
+  reader: READER_BUDGET_CHARS + DELEGATE_BUDGET_CHARS + AGENT_BUDGET_CHARS + APP_ACCESS_BUDGET_CHARS + MAIL_BUDGET_CHARS + COMPACT_BUDGET_CHARS,
 }
 
 /** The building session's MCP guide — the role (the app's place and rules) is applied by roleAppend */
@@ -1059,6 +1079,7 @@ export const TOOL_ARGS = {
   ask_project: DELEGATE_TOOLS[0].schema.extend({ ifBusy: z.enum(['note', 'queue'] as const satisfies readonly IfBusy[]).optional() }),
   ...schemasOf(APP_ACCESS_TOOLS),
   ...schemasOf(MAIL_TOOLS),
+  ...schemasOf(COMPACT_TOOLS),
   ...schemasOf(COMMAND_TOOLS),
   // Codex's exec may hand a command's arguments over as JSON text rather than an object: centralu_run reads either
   centralu_run: COMMAND_TOOLS[2].schema.extend({ args: z.union([z.record(z.string(), z.unknown()), z.string()]).optional() }),
