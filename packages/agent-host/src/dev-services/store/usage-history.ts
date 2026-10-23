@@ -154,7 +154,7 @@ export class UsageRecords {
    * the rows (they would show under the raw id). A trashed session still has its row, so its buckets stay.
    */
   sweepOrphans(): void {
-    this.db.prepare(`/* includes the archive: a trashed session still has its row and keeps its buckets */
+    this.db.prepare(`/* includes the archive: an archived session still has its row and keeps its buckets */
        DELETE FROM usage_buckets WHERE session_id NOT IN (SELECT id FROM sessions)`).run()
   }
 
