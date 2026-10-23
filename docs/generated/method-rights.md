@@ -139,6 +139,7 @@ With the limited credential: runs.
 - `trash.restore`
 - `trash.restoreSubagentSteps`
 - `updates.status`
+- `usage.history`
 - `workspace.load`
 - `worktrees.createManager`
 - `worktrees.setTrunk`

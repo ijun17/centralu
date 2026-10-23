@@ -199,6 +199,7 @@ export class TrashRecords {
       this.db.prepare(`DELETE FROM mail_turns WHERE session_id = ?`).run(sessionId)
       // Every setting kept for it (`<name>:<sessionId>`, `SESSION_SETTING_OF` in store/settings.ts)
       this.db.prepare(`DELETE FROM app_settings WHERE ${SESSION_SETTING_OF}`).run({ sessionId })
+      this.db.prepare(`DELETE FROM usage_buckets WHERE session_id = ?`).run(sessionId)
       this.db.prepare(`DELETE FROM sessions WHERE id = ? AND deleted_at IS NOT NULL`).run(sessionId)
       return true
     })

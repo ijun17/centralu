@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import type { GridPanel, NormalizedEvent, SessionInfo, StoredMessage, ToolName, TrashedSession } from '@cc/protocol'
+import type { GridPanel, NormalizedEvent, SessionInfo, StoredMessage, ToolName, TrashedSession, UsageHistory } from '@cc/protocol'
 import { NormalizedEvent as NormalizedEventSchema } from '@cc/protocol'
 import type { AgentAdapter } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
@@ -667,6 +667,50 @@ describe('while-alive facts are carried in the list', () => {
     const five = r.cache!.windows.find((w) => w.id === '5h')!
     expect(five).toMatchObject({ requests: 2, cacheReadTokens: 30_000, cacheCreationTokens: 30_500, rebuilds: 1 })
     expect(five.sessions).toMatchObject([{ sessionId: s.id, name: 'New session' }])
+  })
+
+  it('keeps the counted requests per hour and answers usage.history with them; a purge takes that session rows (§6.2)', async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
+    const emit = (e: NormalizedEvent) => (adapter.handleOf(s.id)! as unknown as { emit: (e: NormalizedEvent) => void }).emit(e)
+    const tokens = { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheCreationTokens: 0 }
+    emit({ type: 'usage_update', sessionId: s.id, tokens, request: { inputTokens: 5, cacheReadTokens: 0, cacheCreationTokens: 30_000, outputTokens: 70, cacheTtl: '1h' } })
+    emit({ type: 'usage_update', sessionId: s.id, tokens, request: { inputTokens: 5, cacheReadTokens: 30_000, cacheCreationTokens: 500, outputTokens: 30 } })
+    const history = async (by: 'session' | 'project') =>
+      (await rpc('usage.history', { from: new Date(Date.now() - 86_400_000).toISOString(), to: new Date(Date.now() + 3_600_000).toISOString(), groupBy: 'day', by })) as UsageHistory
+
+    // Asking flushes what is still in memory, so the answer already has both requests
+    const bySession = await history('session')
+    expect(bySession.rows).toMatchObject([
+      { key: s.id, name: 'New session', requests: 2, inputTokens: 10, cacheReadTokens: 30_000, cacheCreationTokens: 30_500, cacheCreation1hTokens: 30_000, outputTokens: 100, rebuilds: 1, rebuildCauses: { cold_start: 1 } },
+    ])
+    expect((await history('project')).rows).toMatchObject([{ key: p.id }])
+
+    // A new manager on the same store gets the cache figures back (the restart keeps them)
+    const next = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), () => {})
+    const restored = (await createRpcHandler(next, new Map<ToolName, AgentAdapter>([['claude', adapter]]))('agents.usage', { tool: 'claude' })) as { cache: { windows: { id: string; requests: number }[] } }
+    expect(restored.cache.windows.find((w) => w.id === 'today')!.requests).toBe(2)
+    await next.disposeAll()
+
+    // In the trash the session can come back, and so do its rows; only the purge takes them
+    await rpc('agents.deleteSession', { sessionId: s.id })
+    expect((await history('session')).rows).toHaveLength(1)
+    // Requests counted but not yet written must not bring the rows back after the purge
+    emit({ type: 'usage_update', sessionId: s.id, tokens, request: { inputTokens: 7, cacheReadTokens: 0 } })
+    await rpc('trash.purge', { sessionId: s.id })
+    expect((await history('session')).rows).toEqual([])
+  })
+
+  it('emptying the trash takes the usage rows too, also what was counted a moment before (§6.2)', async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
+    const tokens = { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheCreationTokens: 0 }
+    ;(adapter.handleOf(s.id)! as unknown as { emit: (e: NormalizedEvent) => void }).emit({ type: 'usage_update', sessionId: s.id, tokens, request: { inputTokens: 7, cacheReadTokens: 0 } })
+    await rpc('agents.deleteSession', { sessionId: s.id })
+    await rpc('trash.empty', {})
+    const range = { from: new Date(Date.now() - 86_400_000).toISOString(), to: new Date(Date.now() + 3_600_000).toISOString(), groupBy: 'day', by: 'session' }
+    expect(((await rpc('usage.history', range)) as UsageHistory).rows).toEqual([])
+    expect(store.usage.buckets(0, Date.now() + 3_600_000)).toEqual([])
   })
 
   it('names why each rebuild happened from what the host saw in that session (docs/agent-host.md §6.1)', async () => {

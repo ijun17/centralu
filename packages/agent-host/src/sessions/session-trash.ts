@@ -81,6 +81,8 @@ export type SessionTrashHost = {
   stopWatchingReconnect: (sessionId: string) => void
   readonly store: Store
   sweepOrphanHandoffNotes: (projectId?: string) => Promise<void>
+  /** The purged session's usage counts not yet written are dropped (the store deleted the written ones, §6.2) */
+  forgetUsage: (sessionId: string) => void
   readonly turnObservers: Map<string, Set<AgentRunWait>>
   untilWakeWithdrawn: (sessionId: string, why: string) => Promise<void>
   readonly updateApplyConsents: Set<string>
@@ -613,6 +615,8 @@ export class SessionTrash {
       const recoveryRemoval = await stageWorktreeRecoveryRemoval(sessionId)
       try {
         await this.host.store.trash.purgeSession(sessionId)
+        // Straight after the rows went, with nothing awaited between: a flush cannot bring them back
+        this.host.forgetUsage(sessionId)
         this.host.restartPolicy.forgetBackground(sessionId)
         this.host.store.settings.deleteAppSetting(codeIntelligenceKey(sessionId))
       } catch (e) {

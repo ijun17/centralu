@@ -109,6 +109,7 @@ export const RARE_COMMANDS: Partial<Record<ToolProfile, readonly CommandName[]>>
     'update_centralu',
     'answer_question',
     'handoff_session',
+    'usage_history',
     'start_agent',
     'agent_session',
     'add_project',

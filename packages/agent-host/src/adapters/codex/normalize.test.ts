@@ -440,7 +440,7 @@ describe('state and gauges', () => {
     const odd = { inputTokens: 100, outputTokens: 20, cachedInputTokens: 150, totalTokens: 120 }
     const params = { tokenUsage: { total: odd, last: odd } }
     expect(n('thread/tokenUsage/updated', params)[0]).toMatchObject({ type: 'usage_update', tokens: { inputTokens: 0, cacheReadTokens: 100 } })
-    expect(new CodexRequestInputs().take(params)).toEqual({ inputTokens: 0, cacheReadTokens: 100 })
+    expect(new CodexRequestInputs().take(params)).toEqual({ inputTokens: 0, cacheReadTokens: 100, outputTokens: 20 })
   })
 
   /*
@@ -796,16 +796,16 @@ describe('CodexRequestInputs', () => {
     tokenUsage: { total: breakdown(total, 0), last: breakdown(...last), modelContextWindow: 200_000 },
   })
 
-  it('gives the last request, cached input taken out of the uncached part, and no write figure', () => {
+  it('gives the last request, cached input taken out of the uncached part, its output, and no write figure', () => {
     const r = new CodexRequestInputs()
-    expect(r.take(params(5_000, [5_000, 4_000]))).toEqual({ inputTokens: 1_000, cacheReadTokens: 4_000 })
+    expect(r.take(params(5_000, [5_000, 4_000]))).toEqual({ inputTokens: 1_000, cacheReadTokens: 4_000, outputTokens: 10 })
   })
 
   it('gives nothing for a repeat of the same total, and the next request once the total moves', () => {
     const r = new CodexRequestInputs()
     expect(r.take(params(5_000, [5_000, 4_000]))).toBeDefined()
     expect(r.take(params(5_000, [5_000, 4_000]))).toBeUndefined()
-    expect(r.take(params(11_000, [6_000, 5_000]))).toEqual({ inputTokens: 1_000, cacheReadTokens: 5_000 })
+    expect(r.take(params(11_000, [6_000, 5_000]))).toEqual({ inputTokens: 1_000, cacheReadTokens: 5_000, outputTokens: 10 })
   })
 
   it('gives nothing for a notification without input', () => {

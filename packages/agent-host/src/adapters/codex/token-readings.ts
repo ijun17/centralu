@@ -33,7 +33,8 @@ export class CodexRequestInputs {
     const last = asObj(usage.last)
     const input = finite(last.inputTokens) ?? 0
     if (input <= 0) return undefined
-    return splitInput(input, finite(last.cachedInputTokens) ?? 0)
+    const output = finite(last.outputTokens)
+    return { ...splitInput(input, finite(last.cachedInputTokens) ?? 0), ...(output !== undefined ? { outputTokens: output } : {}) }
   }
 }
 

@@ -25,6 +25,7 @@ import { ProjectRecords } from './store/projects.js'
 import { StoreTooNewError, storeTooNewMessage } from './store/reader-gate.js'
 import { SessionRecords } from './store/sessions.js'
 import { SettingsRecords } from './store/settings.js'
+import { UsageRecords } from './store/usage-history.js'
 import { TrashRecords, type TrashedRow, type TrashRecord } from './store/trash.js'
 import { SubagentStepRecords } from './store/subagent-steps.js'
 
@@ -92,6 +93,8 @@ export class Store extends MigrationRunner {
   /** The mailbox's threads, messages and receipts (#1347, v61) */
   readonly mail: MailRecords
   readonly machines: LinkedMachineRecords
+  /** Limit readings and tokens per hour, kept for the usage history (docs/agent-host.md §6.2) */
+  readonly usage: UsageRecords
   /** User-folder apps registered as projects in place (#1141) */
   readonly adoption: UserAppAdoptionRecords
 
@@ -117,6 +120,7 @@ export class Store extends MigrationRunner {
     this.mail = new MailRecords(this.db)
     this.machines = new LinkedMachineRecords(this.db, this.settings)
     this.adoption = new UserAppAdoptionRecords(this.db, this.settings)
+    this.usage = new UsageRecords(this.db)
     try {
       /*
        * Before anything writes: not the WAL switch, not schema.sql, not a migration. schema.sql alone would already

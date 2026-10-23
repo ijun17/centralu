@@ -279,6 +279,10 @@ export class MockPlatform implements Platform {
   set machineUsage(value: UsageMock['machineUsage']) { this.usageMock.machineUsage = value }
   get usageCalls() { return this.usageMock.usageCalls }
   set usageCalls(value: UsageMock['usageCalls']) { this.usageMock.usageCalls = value }
+  get usageHistoryState() { return this.usageMock.usageHistoryState }
+  set usageHistoryState(value: UsageMock['usageHistoryState']) { this.usageMock.usageHistoryState = value }
+  get usageHistoryCalls() { return this.usageMock.usageHistoryCalls }
+  set usageHistoryCalls(value: UsageMock['usageHistoryCalls']) { this.usageMock.usageHistoryCalls = value }
   get cacheStats() { return this.usageMock.cacheStats }
   set cacheStats(value: UsageMock['cacheStats']) { this.usageMock.cacheStats = value }
 

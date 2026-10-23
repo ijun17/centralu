@@ -140,6 +140,7 @@ describe('purging a session for good', () => {
       adapters: new Map<string, AgentAdapter>([['claude', (o.adapter === false ? {} : { deleteExternalConversation }) as unknown as AgentAdapter]]),
       restartPolicy: { forgetBackground: (i: string) => calls.push(`forgetBackground:${i}`) },
       sweepOrphanHandoffNotes: async () => {},
+      forgetUsage: () => {},
       store: {
         trash: { trashedSession: () => ({ session, record }), purgeSession: async () => void calls.push('rows') },
         sessions: { sessionCwd: () => join(data, 'cwd') },

@@ -1,3 +1,4 @@
+import type { UsageBucket } from '../dev-services/store/usage-history.js'
 import type { CacheSessionStats, CacheStats, CacheWindowStats, RebuildCause, RequestInput, ToolName } from '@cc/protocol'
 
 /**
@@ -44,6 +45,7 @@ const MAX_LANES = 5_000
 /** How many sessions a window names */
 const TOP_SESSIONS = 3
 const FIVE_HOURS_MS = 5 * 60 * 60_000
+const HOUR_MS = 60 * 60_000
 
 /**
  * The causes the host is told about between two requests (`note`), strongest evidence first. Which of them is named
@@ -64,6 +66,24 @@ type Entry = {
   idleMs?: number
 }
 
+/**
+ * Requests an earlier run of this host counted, restored from the stored hourly buckets (`restore`): one entry per
+ * bucket, placed in the middle of its hour, so a window that begins inside that hour takes it or leaves it whole.
+ */
+type Carried = {
+  at: number
+  sessionId: string
+  requests: number
+  input: number
+  read: number
+  write: number
+  rebuilds: number
+  causes: Record<string, number>
+}
+
+/** What `record` counted: whether the request was a rebuild, and why */
+export type Counted = { rebuild: boolean; cause?: RebuildCause }
+
 /** One prompt and its cache: a session's own conversation, or one subagent of it */
 type Lane = { lastAt: number; ttlMs: number | null }
 
@@ -76,12 +96,13 @@ export function isRebuild(r: RequestInput): boolean {
 
 export class CacheLedger {
   private readonly entries = new Map<ToolName, Entry[]>()
+  private readonly carried = new Map<ToolName, Carried[]>()
   /** Tools that have reported a cache write figure at least once (Claude); the others report reads only */
   private readonly reportsWrites = new Set<ToolName>()
   private readonly lanes = new Map<string, Lane>()
   /** What happened in a session since its conversation's last request (`note`), consumed by the next one */
   private readonly notes = new Map<string, Set<RebuildCause>>()
-  private readonly startedAt: number
+  private startedAt: number
 
   constructor(now: number = Date.now()) {
     this.startedAt = now
@@ -100,10 +121,42 @@ export class CacheLedger {
     set.add(cause)
   }
 
-  record(tool: ToolName, sessionId: string, r: RequestInput, at: number = Date.now()): void {
+  /** A session is gone for good: its entries leave the figures, so no window names it with an empty name */
+  forget(sessionId: string): void {
+    for (const [tool, list] of this.entries) this.entries.set(tool, list.filter((e) => e.sessionId !== sessionId))
+    for (const [tool, list] of this.carried) this.carried.set(tool, list.filter((c) => c.sessionId !== sessionId))
+    this.notes.delete(sessionId)
+  }
+
+  /**
+   * Takes the buckets an earlier run stored (`usage_buckets`) as requests this host had already counted, so the figures
+   * outlive a restart or a swap. Called once, before this run's first request: a bucket this run adds to later is
+   * not in the list, so nothing is counted twice. `countingSince` moves back to the oldest hour restored.
+   */
+  restore(buckets: readonly UsageBucket[]): void {
+    for (const b of buckets) {
+      let list = this.carried.get(b.tool)
+      if (!list) this.carried.set(b.tool, (list = []))
+      list.push({
+        at: b.hour + HOUR_MS / 2,
+        sessionId: b.sessionId,
+        requests: b.requests,
+        input: b.input,
+        read: b.cacheRead,
+        write: b.cacheWrite,
+        rebuilds: b.rebuilds,
+        causes: b.causes,
+      })
+      if (b.cacheWrite > 0) this.reportsWrites.add(b.tool)
+      this.startedAt = Math.min(this.startedAt, b.hour)
+    }
+  }
+
+  /** Counts one request. Returns what it counted as, or undefined for a reading that was no request */
+  record(tool: ToolName, sessionId: string, r: RequestInput, at: number = Date.now()): Counted | undefined {
     const write = r.cacheCreationTokens ?? 0
     // A synthesized answer (Claude's local /usage, "<synthetic>") carries zeros: there was no request
-    if (r.inputTokens + r.cacheReadTokens + write <= 0) return
+    if (r.inputTokens + r.cacheReadTokens + write <= 0) return undefined
     if (r.cacheCreationTokens !== undefined) this.reportsWrites.add(tool)
 
     const key = `${sessionId}\n${r.agent ?? ''}`
@@ -128,6 +181,7 @@ export class CacheLedger {
     while (drop < list.length && list[drop]!.at < at - KEEP_MS) drop++
     drop = Math.max(drop, list.length - MAX_ENTRIES)
     if (drop > 0) list.splice(0, drop)
+    return { rebuild, ...(entry.cause ? { cause: entry.cause } : {}) }
   }
 
   /**
@@ -138,13 +192,14 @@ export class CacheLedger {
     const midnight = new Date(now)
     midnight.setHours(0, 0, 0, 0)
     const list = this.entries.get(tool) ?? []
+    const carried = this.carried.get(tool) ?? []
     const writes = this.reportsWrites.has(tool)
     return {
       writes,
       countingSince: new Date(this.startedAt).toISOString(),
       windows: [
-        windowOf(list, '5h', 'last 5 h', now - FIVE_HOURS_MS, writes, nameOf),
-        windowOf(list, 'today', 'today', midnight.getTime(), writes, nameOf),
+        windowOf(list, carried, '5h', 'last 5 h', now - FIVE_HOURS_MS, writes, nameOf),
+        windowOf(list, carried, 'today', 'today', midnight.getTime(), writes, nameOf),
       ],
     }
   }
@@ -177,6 +232,7 @@ function causeOf(
 
 function windowOf(
   list: readonly Entry[],
+  carried: readonly Carried[],
   id: string,
   label: string,
   since: number,
@@ -221,6 +277,30 @@ function windowOf(
     if (e.idleMs !== undefined) {
       const idle = w.expiredIdleMs
       w.expiredIdleMs = idle ? { min: Math.min(idle.min, e.idleMs), max: Math.max(idle.max, e.idleMs) } : { min: e.idleMs, max: e.idleMs }
+    }
+  }
+  // What an earlier run counted (`restore`): the same sums, a bucket at a time
+  for (const c of carried) {
+    if (c.at < since) continue
+    w.requests += c.requests
+    w.inputTokens += c.input
+    w.cacheReadTokens += c.read
+    w.cacheCreationTokens += c.write
+    w.rebuilds += c.rebuilds
+    let s = bySession.get(c.sessionId)
+    if (!s) {
+      s = { sessionId: c.sessionId, name: '', requests: 0, inputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, rebuilds: 0, rebuildCauses: {} }
+      bySession.set(c.sessionId, s)
+    }
+    s.requests += c.requests
+    s.inputTokens += c.input
+    s.cacheReadTokens += c.read
+    s.cacheCreationTokens += c.write
+    s.rebuilds += c.rebuilds
+    const ofSession = (s.rebuildCauses ??= {})
+    for (const [cause, n] of Object.entries(c.causes)) {
+      causes[cause] = (causes[cause] ?? 0) + n
+      ofSession[cause] = (ofSession[cause] ?? 0) + n
     }
   }
   /*

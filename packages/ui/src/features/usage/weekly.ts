@@ -1,4 +1,4 @@
-import type { UsageWindow } from '@cc/protocol'
+import type { UsageHistoryReadings, UsageWindow } from '@cc/protocol'
 
 /**
  * Pick the single **weekly window** the top-bar donut should draw (user request, 2026-09-09).
@@ -35,4 +35,23 @@ function isWeekly(w: UsageWindow): boolean {
 /** How full it is, expressed as brightness (the rule for a screen with no color). The more dangerous, the brighter */
 export function usageTone(percent: number): string {
   return percent >= 90 ? 'text-ink-signal' : percent >= 70 ? 'text-ink' : 'text-ink-muted'
+}
+
+/**
+ * The series of limit readings to draw as the weekly window over time: of the readings the host stored, the weekly
+ * window (as `weeklyWindow` judges it, from each series' latest point) of the account read most recently, so a
+ * person who changed account sees the one in use. Null when there is none: nothing is drawn rather than a guess.
+ */
+export function weeklySeries(readings: readonly UsageHistoryReadings[]): UsageHistoryReadings | null {
+  // A series with no point has nothing to say and is left out; the rest are paired with their latest point
+  const live = readings.flatMap((s) => {
+    const point = s.points[s.points.length - 1]
+    return point ? [{ s, point }] : []
+  })
+  const newest = live.reduce<(typeof live)[number] | null>((a, x) => (!a || Date.parse(x.point.at) > Date.parse(a.point.at) ? x : a), null)
+  if (!newest) return null
+  const ofAccount = live.filter((x) => x.s.account === newest.s.account)
+  const windows = ofAccount.map(({ s, point }) => ({ id: s.window, label: s.label, percent: point.percent, resetsAt: point.resetsAt, scope: s.scope }))
+  const picked = weeklyWindow(windows)
+  return picked ? (ofAccount[windows.indexOf(picked)]?.s ?? null) : null
 }

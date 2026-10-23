@@ -1,5 +1,6 @@
 import type { MailToolArgs } from '../../mail/tool.js'
 import type {
+  UsageHistory,
   AgentDifficulty,
   BackgroundTask,
   GitSource,
@@ -756,6 +757,11 @@ export type OrchestratorTools = {
     spec: { sessionId?: string; tool?: ToolName; mode?: 'record' | 'agent'; instructions?: string; waitFor?: string },
     signal?: AbortSignal,
   ): Promise<HandoffResult>
+  /**
+   * What this computer stored of the limit windows and of the tokens per hour over the last `days` days (usage
+   * over time, docs/agent-host.md §6.2), by session, project, model or tool. The orchestrator's; counts only.
+   */
+  usageHistory?(spec: { days: number; by: 'session' | 'project' | 'model' | 'tool' }): Promise<UsageHistory>
   /**
    * Checks its own app (M4 C-3) — for a session that creates an app only. Which app is decided by
    * the calling session itself (the app it is creating): it takes no name, so there is no way to

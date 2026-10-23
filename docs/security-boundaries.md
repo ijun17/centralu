@@ -422,6 +422,7 @@ is not listed for it and a call by name is refused (`Not a tool of this session`
 | `set_agent_limits` | yes | — | — | — | — |
 | `create_session` | yes | — | — | — | — |
 | `handoff_session` | yes | — | — | — | — |
+| `usage_history` | yes | — | — | — | — |
 | `propose_skill` | yes | — | — | — | — |
 | `propose_mcp_server` | yes | — | — | — | — |
 | `check` | — | — | yes | — | — |
@@ -434,6 +435,9 @@ is not listed for it and a call by name is refused (`Not a tool of this session`
 | `detach_app` | yes | — | — | yes | — |
 | `mail` | yes | — | — | yes | — |
 <!-- tool-matrix:end -->
+
+`usage_history` ([agent-host.md](agent-host.md) §6.2) is the orchestrator's alone, a rare command, and read-only: it returns token counts, cache hit
+rates and the limit windows' percentages kept on this computer, with the names of sessions and projects and no conversation content.
 
 **The mailbox (#1347, [plans/mailbox.md](plans/mailbox.md) §9).** The sender of a post is always what the host knows: the session
 whose tool called, the person for the window's `mail.*` calls, Centralu for its own; no argument of a call names one. Who may write to

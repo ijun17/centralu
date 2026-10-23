@@ -2,7 +2,7 @@
 
 # Store schema
 
-The tables of the host's store (`store.db`) at schema version 61, as a new store has them once
+The tables of the host's store (`store.db`) at schema version 62, as a new store has them once
 schema.sql and every migration step have run. Generated from a real `Store`
 (`packages/agent-host/src/dev-services/schema-doc.ts`); a test fails when this file and the migrations disagree.
 
@@ -355,6 +355,33 @@ erDiagram
     TEXT payload
     INTEGER ts
     INTEGER trashed_at
+  }
+  usage_buckets {
+    INTEGER hour PK
+    TEXT session_id PK
+    TEXT project_id PK
+    TEXT tool PK
+    TEXT model PK
+    TEXT machine PK
+    INTEGER requests
+    INTEGER input
+    INTEGER cache_read
+    INTEGER cache_write
+    INTEGER cache_write_5m
+    INTEGER cache_write_1h
+    INTEGER output
+    INTEGER rebuilds
+    TEXT causes
+  }
+  usage_readings {
+    TEXT tool PK
+    TEXT account PK
+    TEXT window_id PK
+    TEXT scope PK
+    TEXT label
+    INTEGER at PK
+    REAL percent
+    INTEGER resets_at
   }
   workspace {
     INTEGER id PK
@@ -882,6 +909,51 @@ Added in v41.
 Indexes:
 
 - `subagent_messages_trash`: `session_id`, `trashed_at`, `parent_call_id`
+
+### `usage_buckets`
+
+Added in v62.
+
+| Column | Type | Null | Default | Key | Added in |
+|---|---|---|---|---|---|
+| `hour` | INTEGER | no |  | PK 1 | v62 |
+| `session_id` | TEXT | no |  | PK 2 | v62 |
+| `project_id` | TEXT | no | `''` | PK 3 | v62 |
+| `tool` | TEXT | no |  | PK 4 | v62 |
+| `model` | TEXT | no | `''` | PK 5 | v62 |
+| `machine` | TEXT | no | `''` | PK 6 | v62 |
+| `requests` | INTEGER | no | `0` |  | v62 |
+| `input` | INTEGER | no | `0` |  | v62 |
+| `cache_read` | INTEGER | no | `0` |  | v62 |
+| `cache_write` | INTEGER | no | `0` |  | v62 |
+| `cache_write_5m` | INTEGER | no | `0` |  | v62 |
+| `cache_write_1h` | INTEGER | no | `0` |  | v62 |
+| `output` | INTEGER | no | `0` |  | v62 |
+| `rebuilds` | INTEGER | no | `0` |  | v62 |
+| `causes` | TEXT | no | `'{}'` |  | v62 |
+
+Indexes:
+
+- `idx_usage_buckets_session`: `session_id`
+
+### `usage_readings`
+
+Added in v62.
+
+| Column | Type | Null | Default | Key | Added in |
+|---|---|---|---|---|---|
+| `tool` | TEXT | no |  | PK 1 | v62 |
+| `account` | TEXT | no |  | PK 2 | v62 |
+| `window_id` | TEXT | no |  | PK 3 | v62 |
+| `scope` | TEXT | no | `''` | PK 4 | v62 |
+| `label` | TEXT | no | `''` |  | v62 |
+| `at` | INTEGER | no |  | PK 5 | v62 |
+| `percent` | REAL | no |  |  | v62 |
+| `resets_at` | INTEGER | yes |  |  | v62 |
+
+Indexes:
+
+- `idx_usage_readings_at`: `at`
 
 ### `workspace`
 

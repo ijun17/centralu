@@ -83,6 +83,17 @@ const terminal: ResultFix = (r, q) => q.terminal(r)
 const run: ResultFix = (r, q) => q.run(r)
 const appInfo: ResultFix = (r, q) => q.app(r)
 const builderSession = fields({ sessionId: id })
+/** A linked machine's rows keyed by session or project name ids of its own: the hub qualifies them like any other id */
+const historyResult: ResultFix = (r, q) => {
+  if (!isObj(r) || (r.by !== 'session' && r.by !== 'project') || !Array.isArray(r.rows)) return r
+  return {
+    ...r,
+    rows: r.rows.map((row: unknown) =>
+      // `*` (the others) and `none` (no project) are not ids
+      isObj(row) && typeof row.key === 'string' && row.key !== '*' && row.key !== 'none' ? { ...row, key: q.id(row.key) } : row,
+    ),
+  }
+}
 // The sessions the cache figures name are the remote's, so the hub's screen can open them (docs/agent-host.md §6.1)
 const usageResult = fields({ cache: fields({ windows: each(fields({ sessions: each(fields({ sessionId: id })) })) }) })
 
@@ -198,6 +209,7 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'agents.models': { kind: 'machine' },
   'agents.usage': { kind: 'machine', result: usageResult, sharesAccount: true },
   'agents.account': { kind: 'machine' },
+  'usage.history': { kind: 'machine', result: historyResult },
   'projects.add': { kind: 'machine', result: projectInfo },
   // What a folder there is (#1220), read by that machine's host; a project already kept for it named in the hub's terms
   'projects.inspect': { kind: 'machine', result: fields({ project: (p, q) => (isObj(p) ? { ...p, id: q.maybeId(p.id) } : p) }) },

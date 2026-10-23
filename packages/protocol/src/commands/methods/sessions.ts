@@ -6,6 +6,8 @@ import {
   ApprovalScope,
   Attachment,
   CacheStats,
+  UsageHistory,
+  UsageHistoryBy,
   ExternalSession,
   ModelOption,
   ProjectId,
@@ -450,6 +452,25 @@ export const sessionMethods = {
       reason: z.string().optional(),
       models: z.array(ModelOption),
     }),
+  },
+  /**
+   * Limit readings and tokens over time, as this host stored them (docs/agent-host.md §6.2): each window's percent per
+   * tool and account, and the hourly token buckets summed by day or hour and by session, project, model or tool.
+   * Read-only. The hub asks a linked machine with `machine`; each host keeps its own record.
+   */
+  'usage.history': {
+    params: z.object({
+      /** ISO8601, inclusive */
+      from: z.string(),
+      /** ISO8601, exclusive */
+      to: z.string(),
+      groupBy: z.enum(['day', 'hour']),
+      by: UsageHistoryBy,
+      /** Only this tool's readings and requests; absent: every tool */
+      tool: ToolName.optional(),
+      ...machineParam,
+    }),
+    result: UsageHistory,
   },
   'agents.usage': {
     params: z.object({

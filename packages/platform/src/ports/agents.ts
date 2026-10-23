@@ -1,4 +1,6 @@
 import type {
+  UsageHistory,
+  UsageHistoryBy,
   AdapterCapabilities,
   ApprovalDecision,
   ApprovalScope,
@@ -179,6 +181,14 @@ export interface AgentPort {
     tool: ToolName,
     machine?: MachineRef,
   ): Promise<{ supported: boolean; reason?: string; usage: UsageSnapshot | null; cache?: CacheStats; sameAccountAsHub?: boolean }>
+  /**
+   * Limit readings and tokens over time, as that machine's host stored them (`usage.history`, docs/agent-host.md §6.2):
+   * the rows are summed per day or hour and per session, project, model or tool. A host that predates it rejects the call.
+   */
+  usageHistory(
+    range: { from: string; to: string; groupBy: 'day' | 'hour'; by: UsageHistoryBy; tool?: ToolName },
+    machine?: MachineRef,
+  ): Promise<UsageHistory>
   detect(machine?: MachineRef): Promise<ToolStatus[]>
   /**
    * The agent CLIs installed now, and whether idle sessions move to a newer one by themselves (#297). `force: false`

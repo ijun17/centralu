@@ -809,6 +809,7 @@ export function createRpcHandler(
       const { tool, limits } = RpcMethods['agents.usage'].params.parse(p)
       return mgr.usageFor(tool, { limits })
     },
+    'usage.history': async (p) => mgr.usageHistory(RpcMethods['usage.history'].params.parse(p)),
     'agents.account': async (p) => mgr.accountFor(RpcMethods['agents.account'].params.parse(p).tool),
     'files.search': async (p) => {
       const { projectId, query, limit } = RpcMethods['files.search'].params.parse(p)

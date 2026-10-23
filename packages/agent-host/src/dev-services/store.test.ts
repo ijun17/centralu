@@ -1978,6 +1978,7 @@ describe('the session archive (#204)', () => {
       s.appRuns.beginAppRun({ ...run, id: `ran-${id}`, callerSessionId: null, sessionId: id })
       s.appRuns.beginAppRun({ ...run, id: `called-${id}`, callerSessionId: id, sessionId: null })
       s.appRuns.keepAppRunFailure({ runId: `called-${id}`, projectId: 'p1', appId: 'notes', args: '{}', result: null, createdAt: 1 }, 10)
+      s.usage.addBuckets([{ hour: 3_600_000, sessionId: id, projectId: 'p1', tool: 'claude', model: '', machine: '', requests: 1, input: 1, cacheRead: 0, cacheWrite: 0, cacheWrite5m: 0, cacheWrite1h: 0, output: 0, rebuilds: 0, causes: {} }])
     }
     expect(await s.trash.purgeSession('s1')).toBe(false) // a live session has to go through the session archive first
     expect(s.messages.loadMessages('s1', 10)).toHaveLength(3)
@@ -1994,6 +1995,7 @@ describe('the session archive (#204)', () => {
       [`SELECT COUNT(*) as n FROM approval_rules WHERE session_id = ?`, 0],
       [`SELECT COUNT(*) as n FROM commit_sessions WHERE session_id = ?`, 0],
       [`SELECT COUNT(*) as n FROM app_runs WHERE ? IN (session_id, caller_session_id)`, 0],
+      [`SELECT COUNT(*) as n FROM usage_buckets WHERE session_id = ?`, 0],
     ] as const) {
       expect([sql, count(sql, 's1')]).toEqual([sql, left])
       // the other session's rows are all still there

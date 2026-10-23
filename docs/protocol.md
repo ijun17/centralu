@@ -267,7 +267,7 @@ The judgement logic (core/approval) decides from `kind` alone — a worked examp
 | git | `git.status, git.diff, git.log, git.commitDetail, git.branches, git.ignoredEntries, git.checkout, git.stage, git.commit, git.push` | served by the host's `dev-services` in dev and prod alike: despite the name it is the prod path ([agent-host.md](agent-host.md) §5) |
 | fs | `fs.listDir, fs.watch, fs.readFile, fs.move, fs.importFile, fs.resolve`, `files.search` | 〃. `fs.readFile` and `fs.resolve` take an optional `sessionId` (#1209): the path is then that session's, read from its worktree when it has one and refused outside it ([security-boundaries.md](security-boundaries.md), "Project files and native handoff"). Additive: an older host drops the field and reads the project's |
 | workspace | `workspace.load, workspace.save` | the window's snapshot of where things are. Conversations are read through `messages.*` above; the host writes them itself |
-| usage | `agents.usage`, `agents.account` | the account's limit windows, asked of the tool itself, and the prompt cache over the last hours as the host counted it (`cache`, [agent-host.md](agent-host.md) §6, §6.1). `agents.usage { limits: false }` answers the cache alone; a hub's answer for a linked machine carries `sameAccountAsHub: true` when the limits are its own. `agents.account { tool }` is an opaque fingerprint of the login (`{ loggedIn, fingerprint }`) the hub compares with a machine's, never the email (#726). Additive |
+| usage | `agents.usage`, `agents.account`, `usage.history` | the account's limit windows, asked of the tool itself, and the prompt cache over the last hours as the host counted it (`cache`, [agent-host.md](agent-host.md) §6, §6.1). `agents.usage { limits: false }` answers the cache alone; a hub's answer for a linked machine carries `sameAccountAsHub: true` when the limits are its own. `agents.account { tool }` is an opaque fingerprint of the login (`{ loggedIn, fingerprint }`) the hub compares with a machine's, never the email (#726). `usage.history { from, to, groupBy, by, tool?, machine? }` answers what the host stored over time: the limit windows' readings and the tokens per hour summed by day or hour and by session, project, model or tool ([agent-host.md](agent-host.md) §6.2); read-only, local to the host that answers. `RequestInput.outputTokens` is new. Additive |
 
 The request and response types of the git, fs and workspace RPCs are **1:1 with the port interfaces**. Deliberate duplication — the port is the original contract, and the RPC carries it (a Tauri invoke would be a second carrier, if git or fs ever moved to Rust).
 
@@ -437,7 +437,7 @@ own. The UI still talks to one host; everything here is additive, and `PROTOCOL_
 - **Routing.** The hub sends a call to the machine its `sessionId`, `projectId` or `terminalId`
   names, and answers the rest itself. A per-machine question takes an optional `machine`
   parameter, absent meaning the hub: `agents.detect`, `agents.capabilities`, `agents.models`,
-  `agents.usage`, `agents.versions`, `agents.setAutoApplyVersions`, `agents.applyVersions`,
+  `agents.usage`, `usage.history`, `agents.versions`, `agents.setAutoApplyVersions`, `agents.applyVersions`,
   `agents.sleepPolicy`, `agents.setSleepPolicy` (#568),
   `projects.add`, `projects.create`, `projects.createPreview` (#515), `projects.inspect` (#1220), `processes.strays`, `processes.stop`. Lists the UI rebuilds from
   (`sessions.list`, `projects.list`, `trash.list`, `subagents.usage`, `messages.search`, `apps.list`,

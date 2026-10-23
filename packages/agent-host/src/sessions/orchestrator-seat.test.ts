@@ -71,6 +71,7 @@ beforeEach(() => {
     listAgents: vi.fn(async () => []),
     handoff: vi.fn(async () => ({ ok: false as const, error: 'reached the flow' })),
     handoffWait: vi.fn(async () => ({ ok: false as const, error: 'reached the wait' })),
+    usageHistory: vi.fn(() => ({ by: 'session' as const, readings: [], rows: [] })),
     builderRefOf: vi.fn(() => null),
     checkApp: vi.fn(),
     createApp: vi.fn(),

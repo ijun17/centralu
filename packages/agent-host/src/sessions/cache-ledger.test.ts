@@ -218,4 +218,40 @@ describe('CacheLedger rebuild causes', () => {
     for (let i = 0; i < 6_000; i++) l.note(`s${i}`, 'cold_start')
     expect((l as unknown as { notes: Map<string, unknown> }).notes.size).toBe(5_000)
   })
+
+  it('says what it counted, so the history records the same rebuild with the same cause', () => {
+    const l = new CacheLedger(NOW - HOUR)
+    l.note('a', 'model_change')
+    l.record('claude', 'a', req(5_000, 100), NOW - 2 * HOUR) // takes the note, not a rebuild
+    expect(l.record('claude', 'a', req(5_000, 100), NOW - HOUR)).toEqual({ rebuild: false })
+    expect(l.record('claude', 'a', req(0, 40_000), NOW - 1_000)).toEqual({ rebuild: true, cause: 'probably_expired' })
+    // A reading that was no request counts as nothing
+    expect(l.record('claude', 'a', req(0, 0, 0), NOW)).toBeUndefined()
+  })
+
+  it('forgets a purged session, so no window names it with an empty name', () => {
+    const l = new CacheLedger(NOW - 9 * HOUR)
+    l.restore([{ hour: NOW - 3 * HOUR, sessionId: 'a', projectId: 'p', tool: 'claude', model: '', machine: '', requests: 2, input: 1, cacheRead: 1, cacheWrite: 50_000, cacheWrite5m: 0, cacheWrite1h: 0, output: 0, rebuilds: 1, causes: { expired: 1 } }])
+    l.record('claude', 'a', req(0, 40_000), NOW - HOUR)
+    l.record('claude', 'b', req(0, 30_000), NOW - HOUR)
+    l.forget('a')
+    expect(l.stats('claude', nameOf, NOW).windows[0]!.sessions.map((s) => s.sessionId)).toEqual(['b'])
+  })
+
+  it('takes the buckets an earlier run stored, so the figures outlive a restart, and counts them once', () => {
+    const l = new CacheLedger(NOW)
+    const hour = NOW - 3 * HOUR // 12:00
+    const bucket = (over: object) => ({ hour, sessionId: 'a', projectId: 'p', tool: 'claude' as const, model: '', machine: '', requests: 4, input: 40, cacheRead: 9_000, cacheWrite: 41_000, cacheWrite5m: 0, cacheWrite1h: 0, output: 0, rebuilds: 1, causes: { expired: 1 }, ...over })
+    l.restore([bucket({}), bucket({ hour: NOW - 9 * HOUR, requests: 2, cacheWrite: 5, rebuilds: 0, causes: {} })])
+    l.record('claude', 'a', req(1_000, 10), NOW - 1_000)
+    const s = l.stats('claude', nameOf, NOW)
+    expect(s.writes).toBe(true)
+    expect(s.countingSince).toBe(new Date(NOW - 9 * HOUR).toISOString())
+    const [five, today] = s.windows
+    expect(five).toMatchObject({ requests: 5, cacheReadTokens: 10_000, cacheCreationTokens: 41_010, rebuilds: 1, rebuildCauses: { expired: 1 } })
+    expect(today).toMatchObject({ requests: 7, cacheCreationTokens: 41_015 })
+    expect(five!.sessions).toMatchObject([{ sessionId: 'a', requests: 5, rebuilds: 1, rebuildCauses: { expired: 1 } }])
+    // Another tool has nothing of it
+    expect(l.stats('codex', nameOf, NOW).windows[0]).toMatchObject({ requests: 0 })
+  })
 })

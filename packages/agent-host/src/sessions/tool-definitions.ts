@@ -496,6 +496,18 @@ export const ORCHESTRATOR_TOOLS = [
     }),
   },
   {
+    /*
+     * Usage over time (docs/agent-host.md §6.2). A rare command (RARE_COMMANDS): asked when work is paced against a
+     * limit or a change is weighed, so it costs its line in centralu_commands, not a definition in every request.
+     */
+    name: 'usage_history',
+    description: 'Tokens and cache hit rate per session, project, model or tool over the last days, and where the limit windows stood. Counts only, on this computer.',
+    schema: z.object({
+      days: z.number().optional().describe('How many days back (7 by default, 90 at most).'),
+      by: z.enum(['session', 'project', 'model', 'tool']).optional().describe('What to group by (session by default).'),
+    }),
+  },
+  {
     name: 'propose_skill',
     description:
       '**Proposes** a reusable working procedure (a skill) to the person (#71) — when you keep getting the same request, or discover a way of working unique to this user. ' +
