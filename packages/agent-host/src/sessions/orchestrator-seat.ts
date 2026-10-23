@@ -442,37 +442,42 @@ export function orchestratorToolsFor(
       if (own) mine.sort((x, y) => Number(host.meta.get(y.sessionId)?.projectId === own) - Number(host.meta.get(x.sessionId)?.projectId === own))
       /*
        * Its handoff lineage, archived or not (#1487): the archive's index is dropped, so these are searched by their
-       * messages. After the other hits, each marked as the predecessor's; a live predecessor found twice stays one hit.
+       * messages, the nearest predecessor first. They are kept out of the other hits and come after them, each marked as
+       * the predecessor's, but with a share of `limit` of their own: a common word fills the limit with live hits, and the
+       * predecessor would never show.
        */
       const lineage = ownLineage()
-      const seen = new Set(mine.map((h) => `${h.sessionId}:${h.seq}`))
-      for (const h of host.store.messages.searchSessions(lineage, query, limit * 4)) if (!seen.has(`${h.sessionId}:${h.seq}`)) mine.push(h)
+      const earlier = dedupeNearbyHits(host.store.messages.searchSessions(lineage, query, limit * 4))
+      const live = dedupeNearbyHits(mine.filter((h) => !lineage.includes(h.sessionId)))
+      const chosen = live.slice(0, limit - Math.min(earlier.length, Math.ceil(limit / 4)))
+      chosen.push(...earlier.slice(0, limit - chosen.length))
       const out: RecallHit[] = []
       // Asked at once, while this host's own search runs: each machine is a round trip
       const remote = readLinks()?.recall(query, limit)
-      for (const h of dedupeNearbyHits(mine)) {
+      for (const h of chosen) {
         const s = host.meta.get(h.sessionId)
         const predecessor = lineage.includes(h.sessionId)
-        if (!s) {
-          // Only a lineage hit is here without a live session: the predecessor in the archive
-          const stored = host.store.trash.trashedSession(h.sessionId)?.session
-          if (!predecessor || !stored) continue
+        if (predecessor) {
+          // Live or in the archive (where the session row keeps its name and the trash record its project)
+          const stored = s ?? host.store.trash.trashedSession(h.sessionId)?.session
+          if (!stored) continue
+          const projectId = s ? s.projectId : host.store.handoffs.projectOf(stored.id)
           out.push({
             sessionId: stored.id,
-            session: `${labelOf(host.store.messages, stored)} (your predecessor, archived)`,
-            project: projectLabel(null, byId, untrusted),
+            session: `${labelOf(host.store.messages, stored)} (your predecessor${s ? '' : ', archived'})`,
+            project: projectLabel(projectId, byId, untrusted),
             snippet: windowAroundLines(contextAt(host.store.messages, stored.id, h.seq, undefined, true), query, 160),
             seq: h.seq,
             at: timeOf(host.store.messages, h.sessionId, h.seq),
             predecessor: true,
           })
-          if (out.length >= limit) break
           continue
         }
-        const context = contextAt(host.store.messages, s.id, h.seq, s.id === orchestratorId && cut !== null ? cut : undefined, predecessor)
+        if (!s) continue
+        const context = contextAt(host.store.messages, s.id, h.seq, s.id === orchestratorId && cut !== null ? cut : undefined)
         out.push({
           sessionId: s.id,
-          session: s.id === orchestratorId ? `${labelOf(host.store.messages, s)} (this session, before compaction)` : predecessor ? `${labelOf(host.store.messages, s)} (your predecessor)` : labelOf(host.store.messages, s),
+          session: s.id === orchestratorId ? `${labelOf(host.store.messages, s)} (this session, before compaction)` : labelOf(host.store.messages, s),
           project: projectLabel(s.projectId, byId, untrusted),
           // Cut from **the surrounding conversation**, not a single delta chunk (a chunk alone says
           // nothing); its own hit stops at its compaction (#974). Its lines are kept, so the mark of who wrote a message is
@@ -480,9 +485,7 @@ export function orchestratorToolsFor(
           snippet: context ? windowAroundLines(context, query, 160) : windowAround(h.body, query, 160),
           seq: h.seq, // Passed as `around` to read_session, it jumps straight to that spot
           at: timeOf(host.store.messages, h.sessionId, h.seq),
-          ...(predecessor ? { predecessor: true } : {}),
         })
-        if (out.length >= limit) break
       }
       if (!remote) return { hits: out }
       /*
@@ -532,6 +535,8 @@ export function orchestratorToolsFor(
       const target = host.meta.get(sessionId)
       if (!inLineage && (!target || (!self && !readable(target)))) return { ok: false, error: readError(sessionId) }
       const state = target?.state ?? 'archived'
+      // An archived session's project is in its trash record (the row's own is cleared)
+      const targetProject = target ? target.projectId : host.store.handoffs.projectOf(sessionId)
       const mark = (ls: SessionLine[]): SessionLine[] => (inLineage ? asPredecessor(ls, sessionId) : ls)
       const readOn = { tools: toolLinesOf(opts?.tools), ...(opts?.maxChars !== undefined ? { maxChars: opts.maxChars } : {}), ...(hubView ? { viaHub: true } : {}) }
 
@@ -558,7 +563,7 @@ export function orchestratorToolsFor(
           ok: true,
           state,
           ...(inLineage ? { predecessor: sessionId } : {}),
-          ...(target?.projectId && untrustedMark()(target.projectId) ? { untrusted: true } : {}),
+          ...(targetProject && untrustedMark()(targetProject) ? { untrusted: true } : {}),
           lines: line ? [lineText(line, opts.offset, opts.maxChars === undefined ? LINE_WINDOW_CHARS : budgetOf(opts.maxChars), true)] : [],
         }
       }
@@ -597,7 +602,7 @@ export function orchestratorToolsFor(
         ok: true,
         state,
         ...(inLineage ? { predecessor: sessionId } : {}),
-        ...(target?.projectId && untrustedMark()(target.projectId) ? { untrusted: true } : {}),
+        ...(targetProject && untrustedMark()(targetProject) ? { untrusted: true } : {}),
         // At most the call's budget in all (#1480), not 40 lines of 2,000 characters each
         lines: fitLines(picked, before != null ? 'back' : fromSeq != null ? 'forward' : start >= 0 && around != null ? { around: anchor - start } : 'back', budgetOf(opts?.maxChars), readOn),
         ...(cards.length ? { cards } : {}),

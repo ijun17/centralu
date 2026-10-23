@@ -152,7 +152,8 @@ export class MessageRecords {
 
   /**
    * A search over these sessions only, archived ones included (#1487): their search index rows are dropped on archive, so
-   * this reads their messages. What the index holds (`INDEXED_KINDS`), newest first, matched by case-insensitive substring.
+   * this reads their messages. What the index holds (`INDEXED_KINDS`), matched by case-insensitive substring: the first
+   * session named first, each session's newest first.
    */
   searchSessions(sessionIds: readonly string[], query: string, limit = 50): { sessionId: string; seq: number; body: string }[] {
     const q = query.trim()
@@ -163,9 +164,9 @@ export class MessageRecords {
         `SELECT session_id as sessionId, seq, json_extract(payload, '$.text') as body FROM messages
           WHERE session_id IN (${sessionIds.map(() => '?').join(',')}) AND kind IN (${kinds.map(() => '?').join(',')})
             AND json_valid(payload) AND json_extract(payload, '$.text') LIKE ? ESCAPE '\\'
-          ORDER BY seq DESC LIMIT ?`,
+          ORDER BY CASE session_id ${sessionIds.map((_, i) => `WHEN ? THEN ${i}`).join(' ')} END, seq DESC LIMIT ?`,
       )
-      .all(...sessionIds, ...kinds, `%${q.replace(/[\\%_]/g, '\\$&')}%`, limit)
+      .all(...sessionIds, ...kinds, `%${q.replace(/[\\%_]/g, '\\$&')}%`, ...sessionIds, limit)
   }
 
   /**

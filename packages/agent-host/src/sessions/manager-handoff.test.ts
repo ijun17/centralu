@@ -125,6 +125,19 @@ describe('the handoff lineage in a note (#1487)', () => {
     expect(got.text.startsWith(`${line}\n`)).toBe(true)
     expect(got.text).toContain('The agent’s own note')
 
+    // A handoff names a live session of its own project: another project's, an archived one and an unknown id are refused,
+    // so a marker cannot point a session at text it was never given (#1487 review)
+    const otherDir = mkdtempSync(join(tmpdir(), 'cc-1487-other-'))
+    const other = (await rpc('projects.add', { path: otherDir })) as { id: string; path: string }
+    const stranger = (await rpc('agents.createSession', { projectId: other.id, cwd: other.path, tool: 'claude' })) as SessionInfo
+    const offer = (fromSessionId: string, project = p) =>
+      rpc('agents.createSession', { projectId: project.id, cwd: project.path, tool: 'claude', handoff: { from: 'x', note: 'n', fromSessionId } })
+    await expect(offer(stranger.id)).rejects.toThrow(/live session of the same project/)
+    await expect(offer('00000000-0000-4000-8000-000000000000')).rejects.toThrow(/live session of the same project/)
+    const heir = (await offer(orig.id)) as SessionInfo
+    expect(store.handoffs.predecessorOf(heir.id)).toBe(orig.id)
+    rmSync(otherDir, { recursive: true, force: true })
+
     // A predecessor deleted for good ends the list there
     await store.trash.trashSession(mid.id, { projectId: p.id, projectName: null, projectPath: null, removeExternal: false, removeWorktree: false })
     await store.trash.purgeSession(mid.id)

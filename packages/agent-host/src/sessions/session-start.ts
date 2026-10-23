@@ -184,6 +184,15 @@ export class SessionStarts {
     if (params.askedBy && this.host.meta.get(params.askedBy)?.projectId !== params.projectId) {
       throw new Error('A session cannot create a session in another project')
     }
+    /*
+     * A handoff comes from a live session of the same project (#1487): its marker is the evidence a lineage is read from, and
+     * the children it moves and the note it names are that session's. The original is still live here, since the window and
+     * handoff_session archive it after the successor exists; a linked machine's id is stripped before it gets here.
+     */
+    const original = params.handoff?.fromSessionId
+    if (original && (!params.projectId || this.host.meta.get(original)?.projectId !== params.projectId)) {
+      throw rpcError('A handoff comes from a live session of the same project')
+    }
     if (!params.tool) {
       throw rpcError('No agent adapter is available. Install and configure an agent CLI before creating a session.', 'tool_not_installed')
     }

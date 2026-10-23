@@ -94,12 +94,32 @@ export class HandoffMarkers {
     const seen = new Set([sessionId])
     for (let at = sessionId; out.length < max; ) {
       const from = this.predecessorOf(at)
-      if (!from || seen.has(from) || !this.db.prepare(`SELECT 1 FROM sessions WHERE id = ?`).get(from)) break
+      if (!from || seen.has(from)) break
+      /*
+       * A handoff stays inside a project: a marker naming a session of another project, or none, is not a handoff that
+       * was made (the host refuses it at creation) and ends the chain, so a marker written another way, or before that
+       * check, cannot widen what a session reads of the archive.
+       */
+      const here = this.projectOf(at)
+      if (here === null || this.projectOf(from) !== here) break
       out.push(from)
       seen.add(from)
       at = from
     }
     return out
+  }
+
+  /**
+   * The project of a session, live or in the session archive (where the row's own project is cleared and the trash record
+   * keeps it); null for one that does not exist or had none.
+   */
+  projectOf(sessionId: string): string | null {
+    const row = this.db
+      .prepare<unknown[], { project: unknown }>(
+        `SELECT COALESCE(project_id, CASE WHEN json_valid(trash) THEN json_extract(trash, '$.projectId') END) as project FROM sessions WHERE id = ?`,
+      )
+      .get(sessionId)
+    return typeof row?.project === 'string' && row.project ? row.project : null
   }
 
   /**

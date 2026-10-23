@@ -279,7 +279,10 @@ What one call does (`SessionManager.askProject`, which runs `AskProjectFlow` in 
    following it reads the same way, and a read answered to a hub (`hubView`) adds that a hub from before `before` and `from` strips them from the call
    (its schema lacks them, so the newest lines would come back again): "the hub needs an update to read on", and `around=<seq>` reads near the same spot (`ReadOn`
    in `sessions/session-lines.ts`, #1487). **A session reads and recalls its handoff lineage (#1487)**: its predecessor by its newest handoff marker, that one's
-   predecessor, and so on (`HandoffMarkers.lineage`, up to 12 generations), in the session archive too. `read_session` reads these and `recall` searches
+   predecessor, and so on (`HandoffMarkers.lineage`, up to 12 generations), in the session archive too. A handoff stays inside a project: `createSession`
+   takes `handoff.fromSessionId` only for a live session of the same project, and `lineage` ends at a marker naming a session of another project (the archived
+   row's project is in its trash record, `projectOf`), so a marker written another way reads nothing of the archive. `recall` keeps a quarter of its limit
+   for these hits, nearest predecessor first. `read_session` reads these and `recall` searches
    them (by their messages: the archive's search index is dropped, `searchSessions`), and nothing else of the archive; a session deleted for good takes its
    own marker with it and ends the chain. The lines are the predecessor's: `role: predecessor` for the assistant's words, `predecessor: <id>` on every
    line, an opening sentence in the answer, and in `recall` the label "(your predecessor, archived)" with `[predecessor]` in the snippet. The note's
