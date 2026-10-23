@@ -4,8 +4,8 @@ import { inTurn } from '../idle.js'
 import { asObj } from '../json-value.js'
 import { rpcError } from '../rpc-error.js'
 import type { DelegationHost } from './delegation-flow.js'
-import { liveBackgroundTasks } from '@cc/protocol'
-import { buildHandoffRecord, type RecordChild } from './handoff-record.js'
+import { errorMessage, liveBackgroundTasks } from '@cc/protocol'
+import { buildHandoffRecord, lineageLine, type RecordChild } from './handoff-record.js'
 import type { SessionAppWiringHost } from './session-app-wiring.js'
 
 /**
@@ -99,6 +99,17 @@ export class HandoffNotes {
     )
   }
 
+  /** The session's own id and those it took over from, nearest first (#1487): what a note written by it names for the successor */
+  private lineageOf(sessionId: string): string[] {
+    try {
+      return [sessionId, ...this.host.store.handoffs.lineage(sessionId)]
+    } catch (e) {
+      // A note is never held back over its lineage line
+      console.error(`[agent-host] no handoff lineage read for ${sessionId.slice(0, 8)}: ${errorMessage(e)}`)
+      return []
+    }
+  }
+
   /**
    * A dead-agent handoff record (#78) — built **without calling that session's tool.**
    *
@@ -147,7 +158,7 @@ export class HandoffNotes {
         state: s.pendingApproval || s.pendingQuestions.length || s.state === 'waiting_approval' ? 'waiting for the person' : inTurn(s.state) ? 'working' : 'finished',
       }))
     const background = liveBackgroundTasks(m.backgroundTasks ?? []).map((t) => ({ id: t.id, kind: t.kind, description: t.description, ...(t.timer ? { timer: true } : {}) }))
-    const text = buildHandoffRecord({ name: m.name, tool: m.tool, toTool, summary, rows, pivotSeq, previousNote, children, background })
+    const text = buildHandoffRecord({ name: m.name, tool: m.tool, toTool, summary, rows, pivotSeq, previousNote, lineage: this.lineageOf(sessionId), children, background })
     // Written into the data folder (#142) — nothing at all is written into the user's own repository
     return { text, path: await writeHandoffNote(m.projectId, sessionId, text) }
   }
@@ -190,6 +201,9 @@ export class HandoffNotes {
     }
     note = note.trim()
     if (!note) return null
-    return { text: note, path: await writeHandoffNote(m.projectId, sessionId, note) }
+    // The lineage line first (#1487): the agent writes the rest, and the preview in the successor's first message shows it
+    const line = lineageLine(this.lineageOf(sessionId))
+    const text = line ? `${line}\n${note}` : note
+    return { text, path: await writeHandoffNote(m.projectId, sessionId, text) }
   }
 }

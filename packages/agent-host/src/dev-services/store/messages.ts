@@ -3,7 +3,7 @@ import { oneRow } from './rows.js'
 import type Database from 'better-sqlite3'
 import type { StoredMessage } from '@cc/protocol'
 import { parseJson } from './json.js'
-import { indexedText } from './search-index.js'
+import { INDEXED_KINDS, indexedText } from './search-index.js'
 
 /**
  * The condition that keeps the trash out of a search (#204). Its index rows are dropped when it goes to the trash;
@@ -148,6 +148,25 @@ export class MessageRecords {
       // An FTS syntax error (special characters, etc.) quietly returns an empty result — the search box must not break
       return []
     }
+  }
+
+  /**
+   * A search over these sessions only, archived ones included (#1487): their search index rows are dropped on archive, so
+   * this reads their messages. What the index holds (`INDEXED_KINDS`), matched by case-insensitive substring: the first
+   * session named first, each session's newest first.
+   */
+  searchSessions(sessionIds: readonly string[], query: string, limit = 50): { sessionId: string; seq: number; body: string }[] {
+    const q = query.trim()
+    if (!q || sessionIds.length === 0) return []
+    const kinds = [...INDEXED_KINDS]
+    return this.db
+      .prepare<unknown[], { sessionId: string; seq: number; body: string }>(
+        `SELECT session_id as sessionId, seq, json_extract(payload, '$.text') as body FROM messages
+          WHERE session_id IN (${sessionIds.map(() => '?').join(',')}) AND kind IN (${kinds.map(() => '?').join(',')})
+            AND json_valid(payload) AND json_extract(payload, '$.text') LIKE ? ESCAPE '\\'
+          ORDER BY CASE session_id ${sessionIds.map((_, i) => `WHEN ? THEN ${i}`).join(' ')} END, seq DESC LIMIT ?`,
+      )
+      .all(...sessionIds, ...kinds, `%${q.replace(/[\\%_]/g, '\\$&')}%`, ...sessionIds, limit)
   }
 
   /**

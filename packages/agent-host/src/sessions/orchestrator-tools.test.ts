@@ -282,7 +282,7 @@ describe('the reader set', () => {
     // `difficulty` and the words on it and on `worktree` (2,313 -> 2,560; 68 tokens measured live); #861's `name` 2,585;
     // #1038's `machine` 2,612
     const claude = residentCost('reader', DEFERRED_SERVER)
-    expect(claude.residentChars + claude.instructionsChars).toBeLessThanOrEqual(2825)
+    expect(claude.residentChars + claude.instructionsChars).toBeLessThanOrEqual(2850)
   })
 
   it('leaves the instructions out when CC_READER_INSTRUCTIONS=0 asks it to (measurement)', () => {

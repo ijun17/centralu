@@ -937,6 +937,10 @@ Measured in characters (`residentCost`, the budget tests), not live in tokens:
 | orchestrator, Codex (developer instructions) | 9,485 | 9,663 (+178) | 9,500 → 9,700 |
 | scoped, Codex | 2,382 | 2,560 (+178) | 2,400 → 2,600 |
 
+#1487 restored `.int().min(0)` on `offset`, which #1489 had lost: +12 characters in the reader set and the orchestrator's definition. The
+reader set with its instructions is 1,953 against a ceiling now 1,960, the reader on Claude 2,849 against a sum now 2,850, and the
+orchestrator 9,703 against a ceiling now 9,710 (Codex's figures move with them by the same 12).
+
 A live run of the first version of this change (`tools` and `maxChars` only) measured +44 tokens per request for an ordinary session and
 +34 for the orchestrator, against about 3,900 tokens saved by one default read of a long session; the arguments added since (`before`,
 `from`, `offset`, the boolean) cost about 110 characters more and were not measured live.

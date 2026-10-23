@@ -109,6 +109,8 @@ export function contextAt(
   seq: number,
   /** Nothing from this seq on: a session's own hit stops at its compaction (#974), the rest is still in its context */
   untilSeq?: number,
+  /** The reader's handoff predecessor (#1487): its agent's words are marked as the predecessor's, not as an agent's the reader knows */
+  predecessor = false,
 ): string {
   // seq+1: toward the front, including the target row itself, and then toward the back
   const before = reader.loadMessages(sessionId, CONTEXT_SPAN_MSGS, seq + 1)
@@ -140,7 +142,9 @@ export function contextAt(
     const t = ((r.payload as { text?: string }).text ?? '').slice(0, CONTEXT_MSG_CHARS)
     const author = authorOf(r.payload)
     const mark =
-      r.role !== 'user' ? '[agent]' : author.kind === 'person' ? '[person]' : `[${author.kind} ${JSON.stringify(author.name)}]`
+      r.role !== 'user' ? (predecessor ? '[predecessor]' : '[agent]')
+      : author.kind === 'person' ? (predecessor ? '[person, to the predecessor]' : '[person]')
+      : `[${author.kind} ${JSON.stringify(author.name)}]`
     parts.push(`${mark} ${indentedLines(t)}`)
   }
   return parts.join('\n')

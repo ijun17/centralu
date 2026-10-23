@@ -24,7 +24,7 @@ export function windowAround(body: string, query: string, radius: number): strin
 }
 
 /** The mark `contextAt` starts each message's first line with: who wrote it, a name JSON-quoted */
-const MESSAGE_MARK = /^\[(?:agent|person|(?:session|app) "(?:[^"\\]|\\.)*")\]/
+const MESSAGE_MARK = /^\[(?:agent|person|predecessor|person, to the predecessor|(?:session|app) "(?:[^"\\]|\\.)*")\]/
 
 /**
  * `windowAround` for the conversation `contextAt` restores (recall, #838): spaces fold inside a line as there, but

@@ -373,6 +373,18 @@ describe('the contents section and the cut results (#1481)', () => {
     expect(withPrev.split('\n')[2]).toBe('previous handoff note (this session took over from another; the file is rewritten by every handoff from that session, and may be gone): /data/handoff/p/abc.md')
   })
 
+  it('lists the lineage ids in the header: this session and those it took over from, nearest first (#1487)', () => {
+    const rows = [row(1, 'user', 'text', { text: 'hi' })]
+    expect(buildHandoffRecord({ ...base, rows })).not.toContain('handoff lineage')
+    const text = buildHandoffRecord({ ...base, lineage: ['s-3', 's-2', 's-1'], rows })
+    const line = text.split('\n').find((l) => l.startsWith('handoff lineage'))!
+    expect(line.endsWith(': s-3, s-2, s-1')).toBe(true)
+    // In the header, before the contents
+    expect(text.indexOf(line)).toBeLessThan(text.indexOf('## Contents'))
+    // An id the host did not make is not written
+    expect(buildHandoffRecord({ ...base, lineage: ['ok', 'bad\nid'], rows })).toContain(': ok\n')
+  })
+
   it('keeps the cap and the boundary line with the section in place', () => {
     const big: StoredMessage[] = []
     for (let i = 1; i <= 400; i++) big.push(row(i, 'user', 'text', { text: `${i} ${'y'.repeat(1_000)}` }))

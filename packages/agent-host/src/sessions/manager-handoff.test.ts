@@ -13,6 +13,7 @@ import { Store } from '../dev-services/store.js'
 import { SessionManager } from './manager.js'
 import { createRpcHandler } from '../rpc.js'
 import { FakeAdapter, managerWorld } from './manager.test-helpers.js'
+import { lineageLine } from './handoff-record.js'
 
 let store: Store
 let adapter: FakeAdapter
@@ -101,6 +102,51 @@ describe('the contents of a handoff record (#1481)', () => {
     expect(out.text).toContain('- shell "usage watcher" — id: bg-run')
     expect(out.text).not.toContain('finished build')
     expect(out.text).toMatch(/\| Contents \(this section\) \| \d+–\d+ \|/)
+  })
+})
+
+describe('the handoff lineage in a note (#1487)', () => {
+  it('names the session and those it took over from in a record and in an agent’s note, nearest first, deleted ones left out', async () => {
+    const p = await addProject()
+    const make = async () => (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
+    const [grand, mid, orig] = [await make(), await make(), await make()]
+    const handoffFrom = (id: string, from: string) =>
+      store.messages.appendMessages([{ sessionId: id, seq: 101, role: 'system', kind: 'marker', payload: { type: 'handoff', sessionId: id, seq: 101, from: 'x', note: 'n', fromSessionId: from }, ts: 1 }])
+    handoffFrom(mid.id, grand.id)
+    handoffFrom(orig.id, mid.id)
+    const line = lineageLine([orig.id, mid.id, grand.id])
+    expect((await mgr.exportHandoffRecord(orig.id)).text).toContain(line)
+
+    const before = store.messages.loadMessages(orig.id, 1).at(-1)?.seq ?? 0
+    await rpc('agents.send', { sessionId: orig.id, text: 'write the note' })
+    adapter.handleOf(orig.id)!.emitDelta('The agent’s own note')
+    adapter.handleOf(orig.id)!.finishTurn()
+    const got = (await rpc('agents.exportHandoffNote', { sessionId: orig.id, afterSeq: before })) as { text: string }
+    expect(got.text.startsWith(`${line}\n`)).toBe(true)
+    expect(got.text).toContain('The agent’s own note')
+
+    // A handoff names a live session of its own project: another project's, an archived one and an unknown id are refused,
+    // so a marker cannot point a session at text it was never given (#1487 review)
+    const otherDir = mkdtempSync(join(tmpdir(), 'cc-1487-other-'))
+    const other = (await rpc('projects.add', { path: otherDir })) as { id: string; path: string }
+    const stranger = (await rpc('agents.createSession', { projectId: other.id, cwd: other.path, tool: 'claude' })) as SessionInfo
+    const offer = (fromSessionId: string, project = p) =>
+      rpc('agents.createSession', { projectId: project.id, cwd: project.path, tool: 'claude', handoff: { from: 'x', note: 'n', fromSessionId } })
+    await expect(offer(stranger.id)).rejects.toThrow(/live session of the same project/)
+    await expect(offer('00000000-0000-4000-8000-000000000000')).rejects.toThrow(/live session of the same project/)
+    // A session of the same project that is in the session archive is refused the same way
+    const archived = await make()
+    await rpc('agents.deleteSession', { sessionId: archived.id })
+    expect(store.trash.isTrashed(archived.id)).toBe(true)
+    await expect(offer(archived.id)).rejects.toThrow(/live session of the same project/)
+    const heir = (await offer(orig.id)) as SessionInfo
+    expect(store.handoffs.predecessorOf(heir.id)).toBe(orig.id)
+    rmSync(otherDir, { recursive: true, force: true })
+
+    // A predecessor deleted for good ends the list there
+    await store.trash.trashSession(mid.id, { projectId: p.id, projectName: null, projectPath: null, removeExternal: false, removeWorktree: false })
+    await store.trash.purgeSession(mid.id)
+    expect((await mgr.exportHandoffRecord(orig.id)).text).toContain(lineageLine([orig.id]))
   })
 })
 
@@ -326,7 +372,8 @@ describe('a handoff note lives in the data folder (#142)', () => {
     h.emitDelta('# 1. Project and goal\nA note the agent wrote as its answer')
     h.finishTurn()
     const got = (await rpc('agents.exportHandoffNote', { sessionId: s.id, afterSeq: before })) as { text: string; path: string }
-    expect(got).toEqual({ text: '# 1. Project and goal\nA note the agent wrote as its answer', path: expected })
+    // The host's lineage line leads the agent's own words (#1487): this session is the only one before the successor
+    expect(got).toEqual({ text: `${lineageLine([s.id])}\n# 1. Project and goal\nA note the agent wrote as its answer`, path: expected })
     expect(readFileSync(expected, 'utf8')).toBe(got.text)
 
     // The user's repository is unchanged — not a single untracked file.
