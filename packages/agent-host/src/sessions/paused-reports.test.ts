@@ -83,6 +83,9 @@ describe('a child that waits on its own background work (#721)', () => {
     const [paused] = reportsTo(caller, child)
     expect(paused).toContain('[Centralu] The assigned work paused')
     expect(paused).not.toContain('The assigned work finished')
+    // Its work is not over: no word on archiving it yet (#1482)
+    expect(paused).not.toContain('action="delete"')
+    expect(paused).not.toContain('Keep it only if')
     expect(paused).toContain('its own background work is still running (pnpm verify)')
     // Plain about work that may never end: a server or watcher left running
     expect(paused).toContain('If that work is a server or watcher it leaves running, the answer below may be its final one.')
@@ -97,6 +100,7 @@ describe('a child that waits on its own background work (#721)', () => {
     const final = reportsTo(caller, child)[1]!
     expect(final).toContain('[Centralu] The assigned work finished.')
     expect(final).toContain('PR #9 opened; verify passed.')
+    expect(final).toContain('Keep it only if more work on the same thing is coming soon')
     // Woken: a process again, and its model was handed the wake
     expect(w.mgr.listSessions().find((s) => s.id === caller)!.live).toBe(true)
     expect(wakes(caller, child)).toHaveLength(1)
@@ -177,6 +181,8 @@ describe('a child that waits on its own background work (#721)', () => {
     const read = await runOrchestratorTool({ agentSession } as unknown as OrchestratorTools, 'agent_session', { sessionId: child, action: 'status' }, { sessionId: caller, profile: 'reader' })
     expect(read.text).toContain('is not working on anything you gave it')
     expect(read.text).toContain('Its own background work is still running (pnpm verify)')
+    expect(read.text).not.toContain('action="delete"')
+    expect(read.text).not.toContain('Keep it only if')
     verifyEndsAndChildFinishes(child)
     await w.until(() => reportsTo(caller, child).length === 2)
     expect(reportsTo(caller, child)[1]).toContain('PR #9 opened; verify passed.')
