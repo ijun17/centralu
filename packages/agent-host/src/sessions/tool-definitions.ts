@@ -906,7 +906,7 @@ export const READER_INSTRUCTIONS_WITH_APPS = `You are running inside Centralu. U
  * Raising it is a decision about every session's context: a line added to READER_FIRST counts here. #957's
  * REPO_WORK_FIRST is not counted: it rides only where an app is attached, whose own tools cost more than it.
  */
-export const READER_BUDGET_CHARS = 1950
+export const READER_BUDGET_CHARS = 1960
 
 /**
  * The ceiling for what each profile carries in every request (#513), in characters of its resident
@@ -926,10 +926,10 @@ export const READER_BUDGET_CHARS = 1950
  * The reader rises with AGENT_BUDGET_CHARS for #729 (4,200 → 4,450): Claude 2,313 → 2,560, Codex 4,150 → 4,397.
  * #1480 gave read_session `tools` (three words or a boolean), `maxChars`, and the `before`/`from`/`offset` its notes name: the
  * orchestrator rises 9,500 → 9,700 (Codex 9,663), scoped 2,400 → 2,600 (Codex 2,560), and the reader by READER_BUDGET_CHARS' 200
- * (1,750 → 1,950: the set is 1,913).
+ * (1,750 → 1,950: the set is 1,913). #1487 restored `.int().min(0)` on `offset` (it lost them in #1489): +12 in the reader set and the orchestrator, whose ceilings rise by 10 (1,960; 9,710).
  */
 export const RESIDENT_BUDGET_CHARS: Record<ToolProfile, number> = {
-  orchestrator: 9_700,
+  orchestrator: 9_710,
   scoped: 2_600,
   builder: 1_500,
   reader: READER_BUDGET_CHARS + DELEGATE_BUDGET_CHARS + AGENT_BUDGET_CHARS + APP_ACCESS_BUDGET_CHARS + MAIL_BUDGET_CHARS,

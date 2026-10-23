@@ -132,7 +132,8 @@ deferred; Codex, loading all, 4,958 + 465 = 5,423 against 5,500). They are all i
 strips an argument its schema does not list before the tool runs (measured on the SDK's `tool()`), so a read a note names would
 lose its argument. The same arguments cost the orchestrator and the scoped seat 178 characters (a short description for `tools` and
 `maxChars`), whose ceilings rise 9,500 → 9,700 (Codex 9,663) and 2,400 → 2,600 (Codex 2,560). The full reader profile's resident
-and deferred figures for both CLIs are in [tool-cost.md](tool-cost.md) §11 and §14.
+and deferred figures for both CLIs are in [tool-cost.md](tool-cost.md) §11 and §14. #1487 restored `.int().min(0)` on `offset` (the schema had lost it): +12
+characters in the reader set and in the orchestrator's, whose ceilings rise by 10 (1,960 and 9,710), the reader's resident sum by 25 (2,850).
 
 The app-access tools (#371 part A: `find_apps`, `attach_app`, `detach_app`, apps.md §9.4) are the
 orchestrator's too since #1205, as rare commands behind `centralu_run`, for the root apps it attaches
