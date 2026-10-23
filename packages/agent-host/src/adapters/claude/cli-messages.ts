@@ -187,6 +187,7 @@ function compactBoundaryEvents(m: Json, sessionId: string): NormalizedEvent[] {
     failed: false,
     before: typeof meta.pre_tokens === 'number' ? meta.pre_tokens : undefined,
     after: typeof meta.post_tokens === 'number' ? meta.post_tokens : undefined,
+    ...(meta.trigger === 'manual' || meta.trigger === 'auto' ? { trigger: meta.trigger } : {}),
   })
   return out
 }

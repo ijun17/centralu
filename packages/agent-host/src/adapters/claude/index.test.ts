@@ -103,7 +103,7 @@ describe('when a claude stream ends without warning', () => {
     control.push({ type: 'assistant', message: { id: 'msg_after', role: 'assistant', content: [{ type: 'text', text: 'Carrying on.' }] } })
     await tick()
     expect(events.filter((e) => e.type === 'error')).toEqual([])
-    expect(events).toContainEqual({ type: 'compaction', sessionId: 's-compact', failed: false, before: 25485, after: 3686 })
+    expect(events).toContainEqual({ type: 'compaction', sessionId: 's-compact', failed: false, before: 25485, after: 3686, trigger: 'manual' })
     expect(events.some((e) => e.type === 'message_delta' && e.text === 'Carrying on.')).toBe(true)
     await handle.dispose()
   })

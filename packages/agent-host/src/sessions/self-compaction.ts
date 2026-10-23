@@ -65,8 +65,12 @@ export type SelfCompactionHost = {
  */
 type Compacting = { why: string; sentAt: number; started: boolean; compacted: boolean; ended: boolean }
 
-/** A request from `compact_self`: `endedAt` is set once its turn ended and the size of the context is awaited */
-type Request = { focus: string | null; endedAt: number | null }
+/**
+ * A request from `compact_self`. `endedAt` is set once its turn ended and the size of the context is awaited (a timer decides it after
+ * `READING_WAIT_MS`). `held`: a card the host raised was open at the turn's end, so the request waits for it to close at rest, and goes
+ * if a turn starts first (the person's answer is theirs: the request is never carried into it); `size` is what the turn grew to.
+ */
+type Request = { focus: string | null; endedAt: number | null; held: boolean; size: number | null }
 
 export class SelfCompaction {
   private readonly pending = new Map<string, Request>()
@@ -75,6 +79,10 @@ export class SelfCompaction {
   private readonly wasBusy = new Map<string, boolean>()
   /** Sessions whose context was read since their turn began: the reading at the turn's end is then this turn's */
   private readonly read = new Set<string>()
+  /** Sessions whose tool reads the size after the turn ends (Claude) and has not yet: the next reading is the turn before's, even if it lands in the next turn */
+  private readonly late = new Set<string>()
+  /** The timers that decide a request whose turn ended without a size (`READING_WAIT_MS`) */
+  private readonly waits = new Map<string, ReturnType<typeof setTimeout>>()
   /** The size of the last model request of the session's own conversation in the running turn: the size the turn grew to, in both tools */
   private readonly lastRequest = new Map<string, number>()
   private timer: ReturnType<typeof setInterval> | null = null
@@ -90,7 +98,7 @@ export class SelfCompaction {
     if (!this.host.session(sessionId)) return { text: 'This session is not known to Centralu.', isError: true }
     const line = focus?.replace(/\s+/g, ' ').trim().slice(0, FOCUS_MAX_CHARS) || null
     const asked = this.pending.has(sessionId)
-    this.pending.set(sessionId, { focus: line, endedAt: null })
+    this.pending.set(sessionId, { focus: line, endedAt: null, held: false, size: null })
     const then = `Centralu compacts this conversation when the current turn ends, never in the middle of one, if the context is then over ${COMPACT_FLOOR_TOKENS / 1000}k tokens; the next turn starts from the summary. Finish and answer as usual.`
     return { text: asked ? `Already asked${line ? ' (the focus line is replaced)' : ''}. ${then}` : then }
   }
@@ -122,7 +130,9 @@ export class SelfCompaction {
       this.read.delete(id)
       this.lastRequest.delete(id)
     }
-    if (e.type === 'context_update') this.read.add(id)
+    // A reading the tool owes for the turn that ended is that turn's, wherever it lands; any other is this turn's
+    const owed = e.type === 'context_update' && this.late.delete(id)
+    if (e.type === 'context_update' && !owed) this.read.add(id)
     if (e.type === 'usage_update' && e.request && e.request.agent === undefined) {
       this.lastRequest.set(id, e.request.inputTokens + e.request.cacheReadTokens + (e.request.cacheCreationTokens ?? 0))
     }
@@ -132,49 +142,105 @@ export class SelfCompaction {
       if (sent.ended || (sent.compacted && !sent.started)) this.compacting.delete(id)
       else sent.started = true
     }
-    // A turn began while a finished request waited for its size: the request goes to that turn's end
     const req = this.pending.get(id)
-    if (turnStarted && req) req.endedAt = null
+    if (turnStarted && req) {
+      // A request held for a card is not carried into the turn the answer starts; one waiting for its size goes to this turn's end
+      if (req.held) this.settle(id)
+      else this.stopWaiting(id, req)
+    }
     // The tool refused the compact before any turn began: nothing is running, and the session may be tried again
     if (e.type === 'error' && sent && !sent.started && !sent.ended) this.compacting.delete(id)
     const mine = this.compacting.get(id)
-    if (e.type === 'compaction' && mine && !mine.compacted) {
+    // Not the tool's own compaction at its threshold (Claude says so): that is the person's turn running first, not Centralu's compact
+    if (e.type === 'compaction' && mine && !mine.compacted && e.trigger !== 'auto') {
       // Done, or failed (the tool's own marker says why): either way Centralu waits for a turn of the session's own
       mine.compacted = true
       if (!e.failed) this.host.notice(id, `Compacted by Centralu (${mine.why})`)
     }
     // The size at the turn's end has come: a request that waited for it is decided now
-    if (e.type === 'context_update' && req && req.endedAt !== null) return this.decide(id, e.used, m.tool)
+    const live = this.pending.get(id)
+    if (e.type === 'context_update' && live && live.endedAt !== null) return this.decide(id, e.used, m.tool)
+    // A card the host raised was resolved and the session is still at rest: the held request is judged on the size it had
+    if ((e.type === 'approval_resolved' || e.type === 'question_resolved') && live?.held && !busy && !this.cardOpen(id)) {
+      return this.decide(id, live.size ?? m.context?.used ?? 0, m.tool)
+    }
     if (!endedTurn) return
     this.markRest(id)
+    // The tool reads the size after this turn (Claude) unless it was read during it (Codex)
+    if (this.read.has(id)) this.late.delete(id)
+    else this.late.add(id)
+    // The person stopped the turn, or it failed
+    const stopped = m.state === 'error' || e.type === 'limit_reached' || (e.type === 'state_change' && e.reason === 'interrupted')
     const c = this.compacting.get(id)
-    if (c && c.started && c.compacted && !c.ended) {
-      // The turn Centralu's own compact ran in has ended
-      c.ended = true
+    if (c && c.started && !c.ended) {
+      if (c.compacted) {
+        // The turn Centralu's own compact ran in has ended
+        c.ended = true
+        return
+      }
+      // Stopped before the tool reported the compaction: a compaction after this is not Centralu's
+      if (stopped) this.compacting.delete(id)
+    }
+    if (!live) return
+    // The request goes with a turn that was stopped: it is theirs
+    if (stopped) {
+      this.settle(id)
       return
     }
-    if (!req) return
-    // The person stopped the turn, or it failed: it is theirs, and the request goes with it
-    const dropped = m.state === 'error' || e.type === 'limit_reached' || (e.type === 'state_change' && e.reason === 'interrupted')
-    if (dropped) {
-      this.pending.delete(id)
-      return
-    }
-    // A card is open (a question the host raised at this turn's end): the request waits for the next turn's end
-    if (this.cardOpen(id)) return
     // The size the turn grew to: its last model request when the tool said it, else the reading of the context (the tool reads it after
     // the turn ends, Claude, or during it, Codex): decide on one of this turn, else wait for one
-    const grew = this.lastRequest.get(id)
-    if (grew !== undefined) this.decide(id, grew, m.tool)
-    else if (this.read.has(id) && m.context) this.decide(id, m.context.used, m.tool)
-    else req.endedAt = this.now()
+    const grew = this.lastRequest.get(id) ?? (this.read.has(id) && m.context ? m.context.used : null)
+    // A card the host raised is open: the request waits for it to close, at rest (it goes when a turn starts)
+    if (this.cardOpen(id)) {
+      live.held = true
+      live.size = grew
+      return
+    }
+    if (grew !== null) this.decide(id, grew, m.tool)
+    else this.awaitReading(id, live)
+  }
+
+  /** A request whose turn ended with no size: a timer decides it on the reading it has if the tool's own does not come */
+  private awaitReading(id: string, req: Request): void {
+    req.endedAt = this.now()
+    this.clearWait(id)
+    const timer = setTimeout(() => {
+      this.waits.delete(id)
+      try {
+        const live = this.pending.get(id)
+        const m = this.host.session(id)
+        if (live && live.endedAt !== null && m) this.decide(id, m.context?.used ?? 0, m.tool)
+        else if (live && !m) this.settle(id)
+      } catch (err) {
+        console.error(`[compact] ${id.slice(0, 8)}: could not decide the request: ${err instanceof Error ? err.message : String(err)}`)
+      }
+    }, READING_WAIT_MS)
+    timer.unref?.()
+    this.waits.set(id, timer)
+  }
+
+  private stopWaiting(id: string, req: Request): void {
+    req.endedAt = null
+    this.clearWait(id)
+  }
+
+  private clearWait(id: string): void {
+    const t = this.waits.get(id)
+    if (t) clearTimeout(t)
+    this.waits.delete(id)
+  }
+
+  /** Ends the request of a session: decided, dropped or gone */
+  private settle(id: string): void {
+    this.pending.delete(id)
+    this.clearWait(id)
   }
 
   /** The turn ended and the size of the context is known: compacts when it is over the floor, drops the request otherwise */
   private decide(id: string, used: number, tool: ToolName): void {
     const req = this.pending.get(id)
     if (!req) return
-    this.pending.delete(id)
+    this.settle(id)
     if (used < COMPACT_FLOOR_TOKENS) return
     this.fire(id, 'the agent asked to after finishing its turn', req.focus, tool)
   }
@@ -217,13 +283,6 @@ export class SelfCompaction {
   /** Compacts the resting sessions that are over the lower share. Returns the ids it sent a compact to */
   sweep(): string[] {
     const now = this.now()
-    // A request whose turn ended and whose size the tool never read goes by the reading it has
-    for (const [id, req] of [...this.pending]) {
-      if (req.endedAt === null || now - req.endedAt < READING_WAIT_MS) continue
-      const m = this.host.session(id)
-      if (m) this.decide(id, m.context?.used ?? 0, m.tool)
-      else this.pending.delete(id)
-    }
     const setting = this.host.setting()
     const sent: string[] = []
     for (const m of this.host.sessions()) {
@@ -268,6 +327,8 @@ export class SelfCompaction {
   stop(): void {
     if (this.timer) clearInterval(this.timer)
     this.timer = null
+    for (const t of this.waits.values()) clearTimeout(t)
+    this.waits.clear()
   }
 
   private sweepSafely(): void {
@@ -279,7 +340,8 @@ export class SelfCompaction {
   }
 
   private forget(id: string): void {
-    this.pending.delete(id)
+    this.settle(id)
+    this.late.delete(id)
     this.compacting.delete(id)
     this.restSince.delete(id)
     this.wasBusy.delete(id)

@@ -61,6 +61,9 @@ function world(initial: Partial<SessionInfo> = {}) {
 }
 
 describe('compact_self (#1451)', () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
   it('is accepted whatever size was last read, and the floor is checked on the size at the turn’s end', () => {
     // A turn that started under the floor and grew past it (the reading known during a turn is the one from the turn before)
     const grew = world({ context: { used: 24_000, window: 200_000, exactness: 'exact' } })
@@ -111,12 +114,28 @@ describe('compact_self (#1451)', () => {
     w.c.request('s1')
     w.endTurn(undefined, 'none')
     expect(w.sent).toEqual([])
-    w.state.now += 4_000
-    expect(w.c.sweep()).toEqual([])
+    // Its own timer, not the sweep's minute: judged at 5 seconds
+    vi.advanceTimersByTime(4_900)
     expect(w.sent).toEqual([])
-    w.state.now += 2_000
-    w.c.sweep()
+    vi.advanceTimersByTime(200)
     expect(w.sent).toEqual([['s1', '/compact']])
+  })
+
+  it('stops waiting for a reading when the host stops, and when the session is gone', () => {
+    const w = world()
+    w.startTurn()
+    w.c.request('s1')
+    w.endTurn(undefined, 'none')
+    w.c.stop()
+    vi.advanceTimersByTime(10_000)
+    expect(w.sent).toEqual([])
+    const g = world()
+    g.startTurn()
+    g.c.request('s1')
+    g.endTurn(undefined, 'none')
+    g.emit({ type: 'session_deleted', sessionId: 's1' })
+    vi.advanceTimersByTime(10_000)
+    expect(g.sent).toEqual([])
   })
 
   it('leaves a request waiting for the size to the end of a turn the person starts first', () => {
@@ -125,10 +144,48 @@ describe('compact_self (#1451)', () => {
     w.c.request('s1')
     w.endTurn(undefined, 'none')
     w.startTurn()
-    w.state.now += 60_000
-    w.c.sweep()
+    vi.advanceTimersByTime(60_000)
     expect(w.sent).toEqual([])
-    w.endTurn()
+    w.emit({ type: 'usage_update', sessionId: 's1', tokens: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 }, request: { inputTokens: 5_000, cacheReadTokens: 145_000 } })
+    w.endTurn(undefined, 'none')
+    expect(w.sent).toEqual([['s1', '/compact']])
+  })
+
+  it('judges a turn on its own: what the turn before read or asked is not carried into it', () => {
+    // A request size from the turn before is not this turn's
+    const a = world({ context: { used: 24_000, window: 200_000, exactness: 'exact' } })
+    a.startTurn()
+    a.emit({ type: 'usage_update', sessionId: 's1', tokens: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 }, request: { inputTokens: 5_000, cacheReadTokens: 145_000 } })
+    a.endTurn(undefined, 'none')
+    a.startTurn()
+    a.c.request('s1')
+    a.endTurn(undefined, 'after')
+    expect(a.sent).toEqual([])
+
+    // A reading from the turn before is not this turn's either: with none in this one the request waits for it
+    const b = world()
+    b.startTurn()
+    b.endTurn()
+    b.startTurn()
+    b.c.request('s1')
+    b.endTurn(undefined, 'none')
+    expect(b.sent).toEqual([])
+    vi.advanceTimersByTime(5_100)
+    expect(b.sent).toEqual([['s1', '/compact']])
+  })
+
+  it('takes the reading that lands in the next turn for the turn before’s, not for the one running', () => {
+    const w = world({ context: { used: 24_000, window: 200_000, exactness: 'exact' } })
+    w.startTurn()
+    // Claude reads the size after the turn ends: it has not come yet
+    w.endTurn(undefined, 'none')
+    w.startTurn()
+    w.c.request('s1')
+    // The turn before's reading lands now, mid-turn
+    w.read(150_000)
+    w.endTurn(undefined, 'none')
+    expect(w.sent).toEqual([])
+    vi.advanceTimersByTime(5_100)
     expect(w.sent).toEqual([['s1', '/compact']])
   })
 
@@ -182,17 +239,31 @@ describe('compact_self (#1451)', () => {
     expect(w.sent).toEqual([])
   })
 
-  it('waits for the next turn’s end while a card the host raised is open, and drops with a limit', () => {
+  it('holds the request while a card the host raised is open: it goes when the card closes at rest, and is dropped, not carried, into the turn the answer starts', () => {
     const w = world()
     w.startTurn()
     w.c.request('s1')
     w.state.idle = { idle: false, reason: 'question' }
     w.endTurn()
     expect(w.sent).toEqual([])
+    // The answer starts a turn: the request is dropped, and that turn's end sends nothing
     w.state.idle = { idle: true }
     w.startTurn()
     w.endTurn()
-    expect(w.sent).toEqual([['s1', '/compact']])
+    expect(w.sent).toEqual([])
+    // And it no longer blocks the resting compaction
+    w.state.now += 10 * MIN
+    expect(w.c.sweep()).toEqual(['s1'])
+
+    // The card closes and the session stays at rest: the request is judged on the size the turn had
+    const r = world()
+    r.startTurn()
+    r.c.request('s1')
+    r.state.idle = { idle: false, reason: 'approval' }
+    r.endTurn()
+    r.state.idle = { idle: true }
+    r.emit({ type: 'approval_resolved', sessionId: 's1', requestId: 'r1', decision: 'deny' })
+    expect(r.sent).toEqual([['s1', '/compact']])
 
     const l = world()
     l.startTurn()
@@ -238,6 +309,9 @@ describe('compact_self (#1451)', () => {
 })
 
 describe('a session at rest over the lower share (#1451)', () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
   /** A session that ended a turn at `now` and rests */
   function resting(over: Partial<SessionInfo> = {}) {
     const w = world(over)
@@ -451,6 +525,35 @@ describe('a session at rest over the lower share (#1451)', () => {
     expect(w.c.sweep()).toEqual([])
     later(w, 1)
     expect(w.c.sweep()).toEqual(['s1'])
+  })
+
+  it('does not take the tool’s own compaction at its threshold, in a person’s turn that ran first, for Centralu’s', () => {
+    const w = resting()
+    later(w, 10)
+    expect(w.c.sweep()).toEqual(['s1'])
+    w.startTurn()
+    w.emit({ type: 'compaction', sessionId: 's1', failed: false, trigger: 'auto' })
+    expect(w.c.compactTurn('s1')).toBe(false)
+    expect(w.notices).toEqual([])
+    w.endTurn()
+    // The compact’s own turn, a /compact
+    w.startTurn()
+    w.emit({ type: 'compaction', sessionId: 's1', failed: false, trigger: 'manual' })
+    expect(w.c.compactTurn('s1')).toBe(true)
+    expect(w.notices).toHaveLength(1)
+  })
+
+  it('forgets the compact when its turn is interrupted before the compaction, so the person’s own /compact later is not Centralu’s', () => {
+    const w = resting()
+    later(w, 10)
+    expect(w.c.sweep()).toEqual(['s1'])
+    w.startTurn()
+    w.endTurn({ type: 'state_change', sessionId: 's1', state: 'waiting_input', reason: 'interrupted' })
+    // Later, a /compact the person typed
+    w.startTurn()
+    w.emit({ type: 'compaction', sessionId: 's1', failed: false, trigger: 'manual' })
+    expect(w.c.compactTurn('s1')).toBe(false)
+    expect(w.notices).toEqual([])
   })
 
   it('leaves a session with a request pending to the request', () => {
