@@ -125,8 +125,14 @@ from a guess about the app, and the orchestrator has the guide loaded. Codex has
 gets all three. `orchestrator-tools.test.ts` fails if the serialized set and its instructions pass
 `READER_BUDGET_CHARS` (1,000 until #564 gave the set its 392 characters of instructions; 1,400 since,
 the set at 1,375). #581 adds the consented update tool, deferred on Claude like the guide, and its
-instructions pointer: 1,709 characters against a 1,750 ceiling. The full reader profile's resident
-and deferred figures for both CLIs are in [tool-cost.md](tool-cost.md) §11.
+instructions pointer: 1,709 characters against a 1,750 ceiling. #1480 gave `read_session` `tools` (three words or a boolean),
+`maxChars` and the `before`, `from` and `offset` a budget's notes name, all without a description: +204 characters, 1,913 against a
+ceiling raised to 1,950 (the reader's resident sum rises by the same 200: Claude 2,396 definitions + 413 instructions, 2,562 more
+deferred; Codex, loading all, 4,958 + 465 = 5,423 against 5,500). They are all in the definitions because Claude's in-process server
+strips an argument its schema does not list before the tool runs (measured on the SDK's `tool()`), so a read a note names would
+lose its argument. The same arguments cost the orchestrator and the scoped seat 178 characters (a short description for `tools` and
+`maxChars`), whose ceilings rise 9,500 → 9,700 (Codex 9,663) and 2,400 → 2,600 (Codex 2,560). The full reader profile's resident
+and deferred figures for both CLIs are in [tool-cost.md](tool-cost.md) §11 and §14.
 
 The app-access tools (#371 part A: `find_apps`, `attach_app`, `detach_app`, apps.md §9.4) are the
 orchestrator's too since #1205, as rare commands behind `centralu_run`, for the root apps it attaches
@@ -254,7 +260,21 @@ What one call does (`SessionManager.askProject`, which runs `AskProjectFlow` in 
    the cut and the line spell out the call, as recall's hit does `around`. It also goes to a linked machine
    (`host.readSession`'s `offset`, additive: an older machine answers its plain read, and the hub says that machine cannot read from an offset rather than showing the same cut lines again; a read from an offset always says what it shows, which is how the hub tells them apart). The cut used to send the caller
    to the session by name, and read_session cut every line at 2,000 characters of its JSON with no word of it, so
-   the middle of a long answer could not be read back at all. Named files and folders inside the target project, resolved through symlinks, become
+   the middle of a long answer could not be read back at all. **A read has a total, too (#1480)**: 40 lines of 2,000 characters
+   were about 80,000 characters in one call, all read again on every later request of the reader. The lines of one call, notes
+   included, come to at most `maxChars` (12,000 by default, brought to 2,000-40,000), and the first line always comes. A plain read
+   fills from the newest line back; one around a spot, outward from it a side at a time; one `from` a line, forward. One line shows
+   2,000 characters at the default and a sixth of `maxChars` above it, up to 8,000 (`lineCutOf`). When a side is left out a note
+   line says how many lines and the call that reads on from where the read stopped: `before=<seq of the oldest line shown>` back, or
+   `from=<seq of the first line not shown>` forward, so following it shows nothing twice (`around` centres, and showed half of it
+   again). `tools` is `none` (tool calls left out, and the texts a call separated stay separate lines, so the end of a turn is a line of
+   its own), `titles` (one line each, the default, `false`) or `full` (`true`). For a linked machine, `host.readSession` takes
+   `maxChars`, `toolLines`, `before` and `from` (additive; `tools` stays the boolean an older machine's schema accepts) and answers the
+   `maxChars` it held. The hub bounds every answer itself (`fitMachineLines`): tool lines out for `none`, then the budget, keeping the
+   lines nearest the spot of an `around` read (the machine centres its window on it) and the newest otherwise, a machine's own notes
+   counted. A machine from before it answers every line it has and no `maxChars`: its note cannot name the read that goes on, since
+   those lines carry no seq, and says to find the passage with `recall` and read around its seq; `before` and `from` to such a machine
+   are refused, since it would answer the plain read again. Named files and folders inside the target project, resolved through symlinks, become
    readable to the caller for this host's lifetime (`readGrants`); the project root is never granted.
    A grant and each read are compared in one spelling (`canonicalPath`, `isInside` in `dev-services/path-guard.ts`,
    #428), so a short name, another case or a link to the root reads as the place it names.

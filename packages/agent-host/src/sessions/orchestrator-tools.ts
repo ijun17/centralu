@@ -3,6 +3,7 @@ import type { OrchestratorTools } from '../adapters/contract.js'
 import type { ToolCaller, ToolOutput } from '../apps/contract.js'
 import { trimmed } from '../json-value.js'
 import { appGuide } from './app-guide.js'
+import { toolLinesOf } from './session-lines.js'
 import { machineLine, type MachineRequest } from './machine-flow.js'
 import { usageHistoryText } from './usage-history.js'
 import type { PreferencesRequest } from './preferences-flow.js'
@@ -239,7 +240,10 @@ const HANDLERS: ToolHandlers = {
     if (caller.profile === 'reader' && !args.sessionId) return listSessionsText(tools, caller, trimmed(args.project))
     const r = await tools.readSession(args.sessionId ?? '', args.limit, {
       around: args.around,
-      tools: args.tools === true,
+      tools: toolLinesOf(args.tools),
+      ...(args.maxChars !== undefined ? { maxChars: args.maxChars } : {}),
+      ...(args.before !== undefined ? { before: args.before } : {}),
+      ...(args.from !== undefined ? { from: args.from } : {}),
       ...(args.offset !== undefined ? { offset: args.offset } : {}),
     })
     if (!r.ok) return { text: `Could not read it — ${r.error}`, isError: true }

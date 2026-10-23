@@ -283,6 +283,119 @@ describe("the orchestrator's tools see only this app's sessions", () => {
     expect(opened).toContain('second line')
   })
 
+  // #1480: tool calls left out, and the words as well as the old booleans
+  it('read_session leaves tool lines out with tools "none" and shows them whole with "full" or true', async () => {
+    const { a, tools } = await setup()
+    adapter.handleOf(a.id)!.emitToolCall('Bash', 'python3 - <<EOF\na long script body\nsecond line\nEOF')
+    await rpc('agents.send', { sessionId: a.id, text: 'the conversation' })
+    await new Promise((r) => setTimeout(r, 0))
+    const none = (await tools.readSession(a.id, 40, { tools: 'none' })).lines!.join('\n')
+    expect(none).toContain('the conversation')
+    expect(none).not.toContain('"role":"tool"')
+    expect(none).not.toContain('python3')
+    expect((await tools.readSession(a.id, 40, { tools: 'titles' })).lines!.join('\n')).not.toContain('second line')
+    expect((await tools.readSession(a.id, 40, { tools: false })).lines!.join('\n')).toContain('python3')
+    for (const full of ['full', true] as const) expect((await tools.readSession(a.id, 40, { tools: full })).lines!.join('\n')).toContain('second line')
+  })
+
+  // #1480: with the tool calls gone, the texts they separated were one line cut at its start, and the end of a turn was lost
+  it('read_session with tools "none" keeps the end of a turn that ran tool calls', async () => {
+    const { a, tools } = await setup()
+    const h = adapter.handleOf(a.id)!
+    h.emitDelta('SECTION-A '.padEnd(1500, 'a'))
+    h.emitToolCall('Bash', 'echo one')
+    h.emitDelta('SECTION-B '.padEnd(1500, 'b'))
+    h.emitToolCall('Bash', 'echo two')
+    h.emitDelta('MARKER-TURN-END')
+    h.finishTurn()
+    await new Promise((r) => setTimeout(r, 0))
+    const none = (await tools.readSession(a.id, 40, { tools: 'none' })).lines!
+    expect(none.join('\n')).toContain('MARKER-TURN-END')
+    expect(none.join('\n')).not.toContain('"role":"tool"')
+    expect(none.filter((l) => l.includes('"role":"assistant"'))).toHaveLength(3)
+    // The same texts "titles" shows, less its tool lines
+    const titles = (await tools.readSession(a.id, 40, { tools: 'titles' })).lines!
+    expect(titles.filter((l) => l.includes('"role":"assistant"'))).toEqual(none.filter((l) => l.includes('"role":"assistant"')))
+  })
+
+  /*
+   * #1480: 40 lines of up to 2,000 characters came back as about 80,000 characters in one call. A call has a total, the
+   * newest lines that fit, and says how far it reached and the call that reads on
+   */
+  describe('read_session has a total budget', () => {
+    const long = (i: number) => `message #${i} `.padEnd(1900, 'x')
+    const total = (lines: string[]) => lines.join('\n').length
+
+    const texts = (lines: string[]) => lines.filter((l) => !l.startsWith('{"note"')).map((l) => (JSON.parse(l) as { text: string }).text.slice(0, 40))
+
+    it('returns at most 12,000 characters in all, notes included, and following its notes back shows every line once', async () => {
+      const { a, tools } = await setup()
+      for (let i = 1; i <= 30; i++) await rpc('agents.send', { sessionId: a.id, text: long(i) })
+      let r = await tools.readSession(a.id)
+      expect(total(r.lines!)).toBeLessThanOrEqual(12_000)
+      expect(r.lines!.at(-1)).toContain('echo:message #30 ')
+      expect(JSON.parse(r.lines![0]!).note).toMatch(/Stopped at the 12000-character budget .*: \d+ older lines of this read are not shown/)
+      // Each note names where the next read starts; the lines of all of them, put together, are the session once over
+      const seen: string[] = []
+      for (let reads = 0; reads < 20; reads++) {
+        seen.unshift(...texts(r.lines!))
+        const before = /before=(\d+)/.exec(r.lines![0]!)?.[1]
+        if (before === undefined) break
+        r = await tools.readSession(a.id, 40, { before: Number(before) })
+        expect(total(r.lines!)).toBeLessThanOrEqual(12_000)
+      }
+      expect(new Set(seen).size).toBe(seen.length)
+      expect(seen).toHaveLength(60)
+      expect(seen[0]).toContain('message #1 ')
+    })
+
+    it('a read around a spot is followed back with before and forward with from, with nothing twice', async () => {
+      const { a, tools } = await setup()
+      for (let i = 1; i <= 30; i++) await rpc('agents.send', { sessionId: a.id, text: long(i) })
+      // The user row of the 15th send is seq 29
+      const mid = await tools.readSession(a.id, 40, { around: 29 })
+      expect(total(mid.lines!)).toBeLessThanOrEqual(12_000)
+      const shown = texts(mid.lines!)
+      expect(shown.some((t) => t.includes('message #15 '))).toBe(true)
+      const older = /before=(\d+)/.exec(mid.lines![0]!)![1]!
+      const newer = /from=(\d+)/.exec(mid.lines!.at(-1)!)![1]!
+      const back = texts((await tools.readSession(a.id, 40, { before: Number(older) })).lines!)
+      const forward = texts((await tools.readSession(a.id, 40, { from: Number(newer) })).lines!)
+      expect(back.filter((t) => shown.includes(t))).toEqual([])
+      expect(forward.filter((t) => shown.includes(t))).toEqual([])
+      // The line the forward read starts at is the one after the last shown, and the back read ends at the one before the first
+      expect(forward[0]).not.toBe(shown.at(-1))
+      expect(back.at(-1)).not.toBe(shown[0])
+    })
+
+    it('takes maxChars to 2,000 at least and 40,000 at most, and a larger one shows more in one call', async () => {
+      const { a, tools } = await setup()
+      for (let i = 1; i <= 30; i++) await rpc('agents.send', { sessionId: a.id, text: long(i) })
+      const small = (await tools.readSession(a.id, 40, { maxChars: 1 })).lines!
+      // The least is 2,000: one line of 1,900 characters fits, and the newest always comes
+      expect(small.filter((l) => !l.startsWith('{"note"'))).toHaveLength(1)
+      expect(total(small.filter((l) => !l.startsWith('{"note"')))).toBeLessThan(2_300)
+      const big = (await tools.readSession(a.id, 40, { maxChars: 1_000_000 })).lines!
+      expect(big.length).toBeGreaterThan(15)
+      expect(total(big.filter((l) => !l.startsWith('{"note"')))).toBeLessThanOrEqual(40_000)
+      expect(big[0]).toContain('40000-character budget')
+    })
+
+    it('says nothing when everything fits, and fills a read around a spot from both sides', async () => {
+      const { a, tools } = await setup()
+      for (let i = 1; i <= 30; i++) await rpc('agents.send', { sessionId: a.id, text: long(i) })
+      const rows = (await tools.readSession(a.id, 4)).lines!
+      expect(rows.some((l) => l.startsWith('{"note"'))).toBe(false)
+      // Around "message #15" (the user row of the 15th send is seq 29): the spot is there, with lines on both sides
+      const mid = (await tools.readSession(a.id, 40, { around: 29 })).lines!.join('\n')
+      expect(mid).toContain('message #15 ')
+      expect(mid).toContain('message #14 ')
+      expect(mid).toContain('message #16 ')
+      expect(mid).toContain('older lines of this read are not shown')
+      expect(mid).toContain('newer lines of this read are not shown')
+    })
+  })
+
   it("read_session also only reads this app's sessions", async () => {
     const { orc, tools } = await setup()
     expect((await tools.readSession('someone-elses-session')).error).toMatch(/Not a session this app manages/)

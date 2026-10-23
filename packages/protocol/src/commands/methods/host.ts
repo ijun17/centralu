@@ -266,6 +266,17 @@ export const hostMethods = {
        * and says this offset to read on from. Additive: an older machine ignores it and answers the plain read
        */
       offset: z.number().int().min(0).optional(),
+      /**
+       * What to show of a tool call (#1480): `none`, `titles` or `full`; `tools: true` is `full`. Additive, and `tools`
+       * stays a boolean for a machine from before it, which would refuse the words: an older machine ignores this one
+       */
+      toolLines: z.enum(['none', 'titles', 'full']).optional(),
+      /** The most characters the lines come to in all (#1480); 12,000 by default, 2,000 to 40,000. Additive: an older machine ignores it */
+      maxChars: z.number().int().min(2000).max(40_000).optional(),
+      /** The read on a budget's note names (#1480): the lines older than this seq, back from it. Additive: an older machine ignores it */
+      before: z.number().int().optional(),
+      /** The read on a budget's note names (#1480): the lines from this seq on, forward. Additive: an older machine ignores it */
+      from: z.number().int().optional(),
     }),
     result: HostReadSessionResult,
   },

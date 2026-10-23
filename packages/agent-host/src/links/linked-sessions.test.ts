@@ -216,10 +216,91 @@ describe('reading a linked machine for the hub’s orchestrator', () => {
       return { state: 'working', lines: [] }
     }
     await linkedSessions(() => [m]).read('m1.w1', 10, { around: 42, tools: true })
-    expect(asked).toEqual([{ method: 'host.readSession', params: { sessionId: 'w1', limit: 10, around: 42, tools: true } }])
+    expect(asked).toEqual([{ method: 'host.readSession', params: { sessionId: 'w1', limit: 10, around: 42, tools: true, toolLines: 'full' } }])
     // A long line read on from where it was cut (#1186) is the machine's to read, with the same offset
     await linkedSessions(() => [m]).read('m1.w1', 40, { around: 42, offset: 2000 })
     expect(asked[1]).toEqual({ method: 'host.readSession', params: { sessionId: 'w1', limit: 40, around: 42, offset: 2000 } })
+  })
+
+  /*
+   * #1480: a machine from before the budget ignores `maxChars` and `toolLines` and answers every line it has, so the hub
+   * holds both: the answer a linked session gives is as bounded as a local one's, and "no tools" leaves tool lines out
+   */
+  it('bounds what a machine from before the budget answers, and leaves tool lines out when asked', async () => {
+    const asked: unknown[] = []
+    const line = (i: number) => JSON.stringify({ ts: '2026-10-21 09:30', role: 'assistant', text: `${i}`.padEnd(1500, 'x') })
+    const lines = Array.from({ length: 30 }, (_, i) => line(i))
+    const tool = JSON.stringify({ ts: '2026-10-21 09:30', role: 'tool', tool: 'Bash', title: 'ls' })
+    const older = machine({})
+    older.call = async (method, params) => {
+      asked.push({ method, params })
+      return { state: 'idle', lines: [...lines, tool] }
+    }
+    const read = await linkedSessions(() => [older]).read('m1.w1', 40, { tools: 'none', maxChars: 5000 })
+    expect(asked).toEqual([{ method: 'host.readSession', params: { sessionId: 'w1', limit: 40, toolLines: 'none', maxChars: 5000 } }])
+    expect(read.lines!.join('|').length).toBeLessThan(5000 + 500)
+    expect(read.lines!.some((l) => l.includes('"role":"tool"'))).toBe(false)
+    // The newest lines come, and a note says older ones did not, and that it cannot name the read that goes on
+    expect(read.lines!.at(-1)).toBe(lines.at(-1))
+    expect(read.lines![0]).toContain('27 older lines of this read are not shown')
+    // Without a budget given it is the default one, 12,000 characters
+    const dflt = await linkedSessions(() => [older]).read('m1.w1')
+    expect(dflt.lines!.join('|').length).toBeLessThan(12_000 + 500)
+    // A machine of this build says the budget it fitted, and its lines are passed on as they are
+    const current = machine({ 'host.readSession': { state: 'idle', lines: ['{"note":"n"}', lines[0]], maxChars: 12_000 } })
+    expect((await linkedSessions(() => [current]).read('m1.w1')).lines).toEqual(['{"note":"n"}', lines[0]])
+  })
+
+  // #1480 review: a hub from this build asked for the passage `recall` found; the machine centred its window on it, and the hub kept the newest lines
+  it('keeps the lines nearest the spot of a read around it from a machine from before the budget', async () => {
+    const line = (i: number) => JSON.stringify({ ts: '2026-10-21 09:30', role: 'assistant', text: `${i}`.padEnd(1500, 'x') })
+    // A machine's window of 40 lines centred on the spot: it is the 20th
+    const window = Array.from({ length: 40 }, (_, i) => line(i))
+    const older = machine({ 'host.readSession': { state: 'idle', lines: window } })
+    const read = await linkedSessions(() => [older]).read('m1.w1', 40, { around: 84, maxChars: 6000 })
+    const kept = read.lines!.filter((l) => !l.startsWith('{"note"')).map((l) => Number((JSON.parse(l) as { text: string }).text.split('x')[0]))
+    expect(kept).toContain(20)
+    expect(kept.every((n) => Math.abs(n - 20) <= 2)).toBe(true)
+    expect(read.lines![0]).toContain('older lines of this read are not shown')
+    expect(read.lines!.at(-1)).toContain('newer lines of this read are not shown')
+    // Without a spot it is the newest lines, as before
+    const plain = await linkedSessions(() => [older]).read('m1.w1', 40, { maxChars: 6000 })
+    expect(plain.lines!.at(-1)).toBe(window.at(-1))
+  })
+
+  // #1480 review: a machine that says it held the budget is still bounded here, and its "no tools" held
+  it('bounds the answer of a machine that echoes its budget too, and drops its tool lines for "none"', async () => {
+    const line = (i: number) => JSON.stringify({ ts: '2026-10-21 09:30', role: 'assistant', text: `${i}`.padEnd(1500, 'x') })
+    const tool = JSON.stringify({ ts: '2026-10-21 09:30', role: 'tool', tool: 'Bash', title: 'ls' })
+    const lines = [...Array.from({ length: 30 }, (_, i) => line(i)), tool]
+    const wrong = machine({ 'host.readSession': { state: 'idle', lines, maxChars: 12_000 } })
+    const read = await linkedSessions(() => [wrong]).read('m1.w1', 40, { tools: 'none', maxChars: 5000 })
+    expect(read.lines!.reduce((sum, l) => sum + l.length + 1, 0)).toBeLessThanOrEqual(5000)
+    expect(read.lines!.some((l) => l.includes('"role":"tool"'))).toBe(false)
+    // One that kept to the budget is passed on as it is, with its own notes
+    const kept = ['{"note":"older"}', line(1), line(2), '{"note":"newer"}']
+    const right = machine({ 'host.readSession': { state: 'idle', lines: kept, maxChars: 12_000 } })
+    expect((await linkedSessions(() => [right]).read('m1.w1')).lines).toEqual(kept)
+  })
+
+  // #1480 review: the reads a budget's notes name go to the machine, and an older one that would answer the plain read is said, not shown again
+  it('passes before and from on to a machine, and says a machine from before them cannot continue a read', async () => {
+    const asked: unknown[] = []
+    const current = machine({})
+    current.call = async (method, params) => {
+      asked.push({ method, params })
+      return { state: 'idle', lines: [], maxChars: 12_000 }
+    }
+    await linkedSessions(() => [current]).read('m1.w1', 40, { before: 12 })
+    await linkedSessions(() => [current]).read('m1.w1', 40, { from: 30 })
+    expect(asked).toEqual([
+      { method: 'host.readSession', params: { sessionId: 'w1', limit: 40, before: 12 } },
+      { method: 'host.readSession', params: { sessionId: 'w1', limit: 40, from: 30 } },
+    ])
+    const older = machine({ 'host.readSession': { state: 'idle', lines: ['{"role":"user","text":"hi"}'] } })
+    for (const opts of [{ before: 12 }, { from: 30 }]) {
+      expect(await linkedSessions(() => [older]).read('m1.w1', 40, opts)).toMatchObject({ ok: false, error: expect.stringContaining('from before reading on from a line') })
+    }
   })
 
   /*

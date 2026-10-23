@@ -320,7 +320,7 @@ export type LinkedSessions = {
   read(
     sessionId: string,
     limit?: number,
-    opts?: { around?: number; tools?: boolean; offset?: number },
+    opts?: { around?: number; tools?: boolean | 'none' | 'titles' | 'full'; offset?: number; maxChars?: number; before?: number; from?: number },
   ): Promise<{ ok: boolean; error?: string; lines?: string[]; state?: string }>
   /** Each machine's hits in its own rank order, one list per machine, and the machines that could not be searched, as `<name> (<why>)` */
   recall(query: string, limit: number): Promise<{ hits: RecallHit[][]; notSearched: string[] }>
@@ -574,8 +574,17 @@ export type OrchestratorTools = {
     opts?: {
       /** A seq given by recall. Reads around that point — a direct path to the found passage */
       around?: number
-      /** Whether to expand tool-call bodies too. Collapsed by default (a full script's text would bury the conversation) */
-      tools?: boolean
+      /**
+       * What to show of a tool call (#1480): `none` leaves them out, `titles` one line each (the default, and `false`),
+       * `full` expands the body too (`true`): a full script's text would bury the conversation
+       */
+      tools?: boolean | 'none' | 'titles' | 'full'
+      /** The most characters the lines come to in all (12,000 by default, 2,000 to 40,000): the newest lines that fit (#1480) */
+      maxChars?: number
+      /** Lines older than this seq, back from it: the read on a budget's note names for what it left out before its first line (#1480) */
+      before?: number
+      /** Lines from this seq on, forward: the read on a budget's note names for what it left out after its last line (#1480) */
+      from?: number
       /**
        * With `around`, the one line that starts there, read from this character on (#1186): a line past
        * `LINE_MAX_CHARS` is cut, and its cut names this offset to read on from

@@ -2,6 +2,7 @@ import type { OrchestratedSession, RecallHit } from '../adapters/contract.js'
 import { oneLineText } from '@cc/protocol'
 import { rpcError } from '../rpc-error.js'
 import { hubAskDepthKey } from './agent-depth.js'
+import { budgetOf } from './session-lines.js'
 import type { AskProjectFlow } from './ask-project-flow.js'
 import type { DelegationHost } from './delegation-flow.js'
 import type { HandoffFlowHost } from './handoff-flow.js'
@@ -128,7 +129,7 @@ export class LinkedHost {
    */
   hostReader(): {
     sessions(): Promise<OrchestratedSession[]>
-    read(sessionId: string, limit?: number, opts?: { around?: number; tools?: boolean; offset?: number }): Promise<{ state: string; lines: string[] }>
+    read(sessionId: string, limit?: number, opts?: { around?: number; tools?: boolean | 'none' | 'titles' | 'full'; offset?: number; maxChars?: number; before?: number; from?: number }): Promise<{ state: string; lines: string[]; maxChars: number }>
     recall(query: string, limit?: number): Promise<RecallHit[]>
     lastAnswer(sessionId: string, maxChars?: number): Promise<{ text: string; length: number; seq: number | null }>
   } {
@@ -149,7 +150,7 @@ export class LinkedHost {
       read: async (sessionId, limit, opts) => {
         const r = await view.readSession(sessionId, Math.min(limit ?? 40, HOST_READ_MAX_LINES), opts)
         if (!r.ok) throw rpcError(r.error ?? 'Could not read it')
-        return { state: r.state ?? 'idle', lines: r.lines ?? [] }
+        return { state: r.state ?? 'idle', lines: r.lines ?? [], maxChars: budgetOf(opts?.maxChars) }
       },
       recall: async (query, limit) => (await view.recall(query, Math.min(limit ?? 12, HOST_RECALL_MAX_HITS))).hits,
     }

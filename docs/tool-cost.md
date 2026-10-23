@@ -915,3 +915,31 @@ it through tool search by "mail".
 Not measured live: whether a Claude session that has to send a message by itself (with no wake to name the call) finds the
 deferred tool by searching, and the first-call argument errors on each CLI. The numbers above are counted from the
 definitions (`orchestrator-tools.test.ts` holds them to the ceilings).
+
+## 14. read_session's total and its arguments (#1480)
+
+A `read_session` call had no total: 40 lines of up to 2,000 characters came back as about 80,000 characters (about 20k tokens), read
+again on every later request of the reader. It now returns at most `maxChars` (12,000 by default, 2,000 to 40,000, notes included;
+[agent-host.md](agent-host.md) §1.2), `tools` is `none`, `titles` or `full` (or the boolean it was), and the notes of a read that
+stopped early name `before` or `from`, which read on without showing anything twice. All five arguments, with `offset` (#1186), are in
+the orchestrator's and the reader's definitions. The reader's carry **no description**; the orchestrator's and the scoped seat's keep a
+short one for `tools` and `maxChars`. They have to be listed: Claude's in-process server strips an argument its schema does not list
+before the tool runs (checked on the SDK's `tool()`), so an argument that was only in `TOOL_ARGS` (`offset` until this change) never
+reached the host on Claude.
+
+Measured in characters (`residentCost`, the budget tests), not live in tokens:
+
+| Seat | Before | After | Ceiling |
+|---|---|---|---|
+| reader set (`READER_BUDGET_CHARS`) | 1,709 | 1,913 (+204) | 1,750 → 1,950 |
+| reader, Claude resident (definitions + instructions) | 2,605 | 2,809 | sum of the sets' ceilings |
+| reader, Codex (all loaded) | 5,219 | 5,423 | 5,300 → 5,500 |
+| orchestrator, Codex (developer instructions) | 9,485 | 9,663 (+178) | 9,500 → 9,700 |
+| scoped, Codex | 2,382 | 2,560 (+178) | 2,400 → 2,600 |
+
+A live run of the first version of this change (`tools` and `maxChars` only) measured +44 tokens per request for an ordinary session and
++34 for the orchestrator, against about 3,900 tokens saved by one default read of a long session; the arguments added since (`before`,
+`from`, `offset`, the boolean) cost about 110 characters more and were not measured live.
+
+Not measured live: tokens through `pnpm measure:tools --live` for the final definitions, and whether a reader with these arguments and
+no description picks `maxChars` by itself when a note says a read stopped early.
