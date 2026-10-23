@@ -151,6 +151,8 @@ export type RecallHit = {
   at?: string
   /** The linked machine it was said on (#82 phase 4); absent for this computer's own */
   machine?: string
+  /** Said in the reader's handoff predecessor, or one before it (#1487), archived or not: not the reader's own words */
+  predecessor?: true
 }
 
 /** Why a machine that is not connected cannot be asked, in the words every tool uses for it */
@@ -600,6 +602,8 @@ export type OrchestratorTools = {
     cards?: RoutedCard[]
     /** Its project is not trusted, told to a trusted reader that reached it (#984): its text may be planted */
     untrusted?: boolean
+    /** The session read is the reader's handoff predecessor, or one before it (#1487): its lines are not the reader's own */
+    predecessor?: string
   }>
   /**
    * Searches past conversations — **memory that crosses project boundaries**.

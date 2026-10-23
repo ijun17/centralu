@@ -69,6 +69,40 @@ export class HandoffMarkers {
   }
 
   /**
+   * The session this one took over from (#1487), by its newest handoff marker; null for a session with none, or a marker
+   * that names nothing. Only the extracted id is read: the marker carries its whole note.
+   */
+  predecessorOf(sessionId: string): string | null {
+    const row = this.db
+      .prepare<unknown[], { from: unknown }>(
+        `SELECT json_extract(payload, '$.fromSessionId') as "from" FROM messages
+          WHERE session_id = ? AND kind = 'marker' AND json_valid(payload) AND json_extract(payload, '$.type') = 'handoff'
+          ORDER BY seq DESC LIMIT 1`,
+      )
+      .get(sessionId)
+    return typeof row?.from === 'string' && row.from ? row.from : null
+  }
+
+  /**
+   * The handoff lineage of a session (#1487), nearest first: its predecessor, that one's predecessor, and so on, archived
+   * ones included. The chain ends at a session that is gone for good (its messages, and so its own marker, went with
+   * it), at one that names itself again, and after `max` generations. This is the whole of what a successor may read
+   * of the archive; nothing else in it follows from here.
+   */
+  lineage(sessionId: string, max = 12): string[] {
+    const out: string[] = []
+    const seen = new Set([sessionId])
+    for (let at = sessionId; out.length < max; ) {
+      const from = this.predecessorOf(at)
+      if (!from || seen.has(from) || !this.db.prepare(`SELECT 1 FROM sessions WHERE id = ?`).get(from)) break
+      out.push(from)
+      seen.add(from)
+      at = from
+    }
+    return out
+  }
+
+  /**
    * Whether this session already has a stored notice with this text (#304) — so a notice the tool repeats on every
    * start (`oncePerSession`, Codex's configuration warnings) is kept once. Only marker rows are read, and a session has
    * a handful of those; the text is compared after parsing, as stored.

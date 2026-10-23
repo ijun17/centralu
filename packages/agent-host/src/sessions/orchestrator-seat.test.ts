@@ -621,3 +621,101 @@ describe('a long line in read_session', () => {
     expect(JSON.parse((whole as { lines: string[] }).lines[0]!)).toMatchObject({ text: 'short', shown: 'characters 0-5 of 5' })
   })
 })
+
+describe('a successor reads and recalls its archived handoff lineage (#1487)', () => {
+  const stored = (id: string, name = id) =>
+    store.sessions.upsertSession({
+      id, projectId: null, kind: 'worker', tool: 'claude', externalId: null, name, autoNamed: false, state: 'idle',
+      lastReadSeq: 0, lastSeq: 0, createdAt: 1, waitingSince: null, live: false, model: null, effort: null, verbosity: null,
+      serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null,
+      scopeSessionIds: null, roleAppend: null, appId: null, ...sessionLiveDefaults(),
+    })
+  /** A session's conversation: its handoff marker first when it took over from `from`, then the lines, seq from 1 */
+  const put = (id: string, lines: ['user' | 'assistant', string][], from?: string) => {
+    stored(id)
+    store.messages.appendMessages([
+      ...(from ? [{ sessionId: id, seq: 1, ts: 1_700_000_000_000, role: 'system' as const, kind: 'marker' as const, payload: { type: 'handoff', from: 'x', note: 'n', fromSessionId: from } }] : []),
+      ...lines.map(([role, text], i) => ({ sessionId: id, seq: i + 2, ts: 1_700_000_060_000 + i * 60_000, role, kind: 'text' as const, payload: { text } })),
+    ])
+  }
+  const archive = (id: string) => store.trash.trashSession(id, { projectId: 'p1', projectName: null, projectPath: null, removeExternal: false, removeWorktree: false })
+
+  beforeEach(async () => {
+    // a <- old1 <- old0, all archived but a; `stranger` is archived and part of no chain; `gone` was deleted for good
+    put('old0', [['user', 'start the quokkaline port'], ['assistant', 'quokkaline port started in module X']])
+    put('old1', [['user', 'carry on'], ['assistant', 'the second generation did the marmalade step']], 'old0')
+    put('stranger', [['assistant', 'the quokkaline of someone else']])
+    put('a', [['user', 'you are the successor']], 'old1')
+    for (const id of ['old0', 'old1', 'stranger']) await archive(id)
+  })
+
+  it('reads the archived predecessor and its predecessor, every line marked as the predecessor’s', async () => {
+    const reader = orchestratorToolsFor(host, 'a', undefined, true)
+    const one = await reader.readSession('old1')
+    expect(one).toMatchObject({ ok: true, state: 'archived', predecessor: 'old1' })
+    const lines = (one.lines ?? []).map((l) => JSON.parse(l) as Record<string, unknown>)
+    expect(lines.map((l) => [l.role, l.predecessor])).toEqual([['user', 'old1'], ['predecessor', 'old1']])
+    // Never the reader's own role, and the words are there
+    expect(lines.some((l) => l.role === 'assistant')).toBe(false)
+    expect(lines[1]!.text).toContain('marmalade')
+    const two = await reader.readSession('old0')
+    expect(two.ok).toBe(true)
+    expect(two.lines?.join('\n')).toContain('quokkaline port started')
+    expect(two.lines?.every((l) => JSON.parse(l).predecessor === 'old0')).toBe(true)
+    // A line cut and read on from an offset is the predecessor's too
+    const long = await reader.readSession('old0', 40, { around: 2, offset: 6 })
+    expect(JSON.parse(long.lines![0]!)).toMatchObject({ role: 'user', predecessor: 'old0', shown: expect.stringContaining('characters 6-') })
+  })
+
+  it('refuses an archived session that is not in its lineage, as it does a missing one', async () => {
+    const reader = orchestratorToolsFor(host, 'a', undefined, true)
+    expect(await reader.readSession('stranger')).toEqual({ ok: false, error: 'Not a session in this project: stranger' })
+    expect(await reader.readSession('nowhere')).toEqual({ ok: false, error: 'Not a session in this project: nowhere' })
+    // Another session’s lineage is its own: `old1`'s chain does not make `a`'s reader of `stranger`
+    expect(await orchestratorToolsFor(host, 'b', undefined, true).readSession('old0')).toMatchObject({ ok: false })
+    // A hub's view has no caller, so no lineage
+    expect(await orchestratorToolsFor(host, '', undefined, false, true).readSession('old1')).toMatchObject({ ok: false })
+  })
+
+  it('deleting a session for good ends its part of the chain', async () => {
+    await store.trash.purgeSession('old1')
+    const reader = orchestratorToolsFor(host, 'a', undefined, true)
+    expect(await reader.readSession('old1')).toMatchObject({ ok: false })
+    // Its predecessor is no longer reachable through it
+    expect(await reader.readSession('old0')).toMatchObject({ ok: false })
+    expect(store.handoffs.lineage('a')).toEqual([])
+  })
+
+  it('recall finds a word only an archived predecessor said, marked as the predecessor’s', async () => {
+    const reader = orchestratorToolsFor(host, 'a', undefined, true)
+    const hits = (await reader.recall('marmalade')).hits
+    expect(hits).toHaveLength(1)
+    expect(hits[0]).toMatchObject({ sessionId: 'old1', predecessor: true, seq: 3 })
+    expect(hits[0]!.session).toContain('your predecessor, archived')
+    expect(hits[0]!.snippet).toContain('[predecessor]')
+    expect(hits[0]!.snippet).toContain('[person, to the predecessor]')
+    expect(hits[0]!.snippet).not.toContain('[agent]')
+    // The generation before it too; the unrelated archived session stays out
+    expect((await reader.recall('quokkaline')).hits.map((h) => h.sessionId)).toEqual(['old0'])
+    // A session with no lineage finds none of it, and neither does the archive's index
+    expect((await orchestratorToolsFor(host, 'b', undefined, true).recall('marmalade')).hits).toEqual([])
+  })
+
+  it('a note’s call repeats the tools and maxChars given, and tells a reader behind a hub it may be too old for it', async () => {
+    put('big', Array.from({ length: 24 }, (_, i): ['user' | 'assistant', string] => (i % 2 ? ['assistant', `${i}`.padEnd(900, 'z')] : ['user', `q${i}`])))
+    meta.set('big', session('big'))
+    const direct = await orchestratorToolsFor(host, 'orch').readSession('big', 40, { tools: 'full', maxChars: 2000 })
+    expect(JSON.parse(direct.lines![0]!).note).toMatch(/before=\d+ tools=full maxChars=2000 reads on/)
+    expect(JSON.parse(direct.lines![0]!).note).not.toContain('hub')
+    const viaHub = await orchestratorToolsFor(host, '', undefined, false, true).readSession('big', 40, { maxChars: 2000 })
+    expect(JSON.parse(viaHub.lines![0]!).note).toMatch(/before=\d+ maxChars=2000 reads on.*the hub needs an update to read on; until then around=\d+ reads near the same spot/)
+  })
+
+  it('a live session outside the lineage found by the same word is not marked as a predecessor', async () => {
+    put('c', [['assistant', 'the marmalade of c']])
+    meta.set('c', session('c'))
+    store.projects.addProject({ id: 'p1', path: join(tmpdir(), 'p1'), name: 'p1', trusted: true })
+    const hits = (await orchestratorToolsFor(host, 'a', undefined, true).recall('marmalade')).hits
+    expect(hits.map((h) => [h.sessionId, h.predecessor ?? false])).toEqual([['c', false], ['old1', true]])
+  })
+})

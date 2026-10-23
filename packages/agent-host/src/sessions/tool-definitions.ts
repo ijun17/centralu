@@ -67,7 +67,7 @@ export const ORCHESTRATOR_TOOLS = [
       // The read on that a budget's notes name: no words here, the note spells the call out
       before: z.number().optional(),
       from: z.number().optional(),
-      offset: z.number().optional(),
+      offset: z.number().int().min(0).optional(),
     }),
   },
   {
@@ -638,7 +638,7 @@ export const READER_TOOLS = [
       maxChars: z.number().optional(),
       before: z.number().optional(),
       from: z.number().optional(),
-      offset: z.number().optional(),
+      offset: z.number().int().min(0).optional(),
     }),
   },
   {

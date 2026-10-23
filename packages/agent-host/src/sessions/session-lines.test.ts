@@ -77,6 +77,20 @@ describe('the budget of one read (#1480)', () => {
     expect(texts.at(-1)!.note).toContain(`from=${last + 1} `)
   })
 
+  it('repeats the tools and maxChars a reader gave in the call of a note, and no default (#1487)', () => {
+    const plain = parsed(fitLines(lines(10, 1000), 'back', 3500, { tools: 'titles' }))[0]!.note!
+    expect(plain).toContain('before=8 reads on')
+    const given = fitLines(lines(10, 1000), 'back', 3500, { tools: 'full', maxChars: 3500 })
+    expect(parsed(given)[0]!.note).toContain('before=8 tools=full maxChars=3500 reads on')
+    const forward = parsed(fitLines(lines(10, 1000), 'forward', 3500, { tools: 'none', maxChars: 3500 }))
+    expect(forward.at(-1)!.note).toContain('from=4 tools=none maxChars=3500 reads on')
+  })
+
+  it('tells a reader behind a hub what to do when the hub is too old for before and from (#1487)', () => {
+    expect(parsed(fitLines(lines(10, 1000), 'back', 3500, { viaHub: true }))[0]!.note).toContain('the hub needs an update to read on; until then around=8 reads near the same spot')
+    expect(parsed(fitLines(lines(10, 1000), 'back', 3500))[0]!.note).not.toContain('hub')
+  })
+
   it('shows more of a long line as maxChars grows: 2,000 at the default, a sixth of the budget above, 8,000 at most', () => {
     expect([lineCutOf(2000), lineCutOf(12_000), lineCutOf(24_000), lineCutOf(40_000), lineCutOf(100_000)]).toEqual([2000, 2000, 4000, 6666, 8000])
     const one = lines(1, 20_000)

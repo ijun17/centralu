@@ -274,7 +274,15 @@ What one call does (`SessionManager.askProject`, which runs `AskProjectFlow` in 
    lines nearest the spot of an `around` read (the machine centres its window on it) and the newest otherwise, a machine's own notes
    counted. A machine from before it answers every line it has and no `maxChars`: its note cannot name the read that goes on, since
    those lines carry no seq, and says to find the passage with `recall` and read around its seq; `before` and `from` to such a machine
-   are refused, since it would answer the plain read again. Named files and folders inside the target project, resolved through symlinks, become
+   are refused, since it would answer the plain read again. A note's call repeats the `tools` (when not `titles`) and `maxChars` the reader gave, so
+   following it reads the same way, and a read answered to a hub (`hubView`) adds that a hub from before `before` and `from` strips them from the call
+   (its schema lacks them, so the newest lines would come back again): "the hub needs an update to read on", and `around=<seq>` reads near the same spot (`ReadOn`
+   in `sessions/session-lines.ts`, #1487). **A session reads and recalls its handoff lineage (#1487)**: its predecessor by its newest handoff marker, that one's
+   predecessor, and so on (`HandoffMarkers.lineage`, up to 12 generations), in the session archive too. `read_session` reads these and `recall` searches
+   them (by their messages: the archive's search index is dropped, `searchSessions`), and nothing else of the archive; a session deleted for good takes its
+   own marker with it and ends the chain. The lines are the predecessor's: `role: predecessor` for the assistant's words, `predecessor: <id>` on every
+   line, an opening sentence in the answer, and in `recall` the label "(your predecessor, archived)" with `[predecessor]` in the snippet. The note's
+   header lists the lineage ids (`lineageLine`; the record's header, and the first line of an agent's note) and stays the only thing handed over. Named files and folders inside the target project, resolved through symlinks, become
    readable to the caller for this host's lifetime (`readGrants`); the project root is never granted.
    A grant and each read are compared in one spelling (`canonicalPath`, `isInside` in `dev-services/path-guard.ts`,
    #428), so a short name, another case or a link to the root reads as the place it names.

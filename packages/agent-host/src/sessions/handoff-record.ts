@@ -300,6 +300,18 @@ function contentsSection(c: {
   return out.join('\n')
 }
 
+/**
+ * The note's line naming the handoff lineage (#1487): the session that wrote it and the ones it took over from, nearest
+ * first. The successor reads them with read_session and recall, archived or not; the note stays the only thing handed
+ * over. Only ids the host itself made are written; '' when there are none.
+ */
+export function lineageLine(ids: readonly string[]): string {
+  const real = ids.filter((id) => /^[\w-]+$/.test(id))
+  return real.length
+    ? `handoff lineage (the sessions before you, nearest first; read_session and recall read them even when archived, and a deleted one ends the list): ${real.join(', ')}\n`
+    : ''
+}
+
 export function buildHandoffRecord(opts: {
   name: string
   tool: string
@@ -314,6 +326,8 @@ export function buildHandoffRecord(opts: {
   cap?: number
   /** The note of the session the predecessor itself took over from (#1481), named in the header so the chain can be followed; never copied in */
   previousNote?: string | null
+  /** This session's id and the ids it took over from, nearest first (#1487), named in the header; never copied in */
+  lineage?: readonly string[]
   /** The sessions the predecessor started, for the contents section (#1481) */
   children?: RecordChild[]
   /** The predecessor's running background work, for the contents section (#1481) */
@@ -383,6 +397,7 @@ export function buildHandoffRecord(opts: {
   const previousLine = opts.previousNote
     ? `previous handoff note (this session took over from another; the file is rewritten by every handoff from that session, and may be gone): ${opts.previousNote.replace(/[\p{Cc}\p{Zl}\p{Zp}]/gu, '')}\n`
     : ''
+  const lineageText = lineageLine(opts.lineage ?? [])
   // The tool's summary is the session's own words too: indented, so none of its lines can start a row (#797)
   const summarySection = summary ? `## The tool's last compaction summary\n\n${indent(summary)}\n\n` : ''
   const verbatimMark = '── verbatim from here ──\n\n'
@@ -396,7 +411,7 @@ export function buildHandoffRecord(opts: {
    * entirely is announced by the first line.
    */
   // The table of parts is known only after the entries are chosen, so it is paid for by slack
-  const fixed = bytes(instructions + touchedLine + previousLine + summarySection + verbatimMark + contentsOf([])) + 1_400 // slack for the covers line and the table
+  const fixed = bytes(instructions + touchedLine + previousLine + lineageText + summarySection + verbatimMark + contentsOf([])) + 1_400 // slack for the covers line and the table
   // A running total and one slice at the end: re-summing (or shifting) per dropped entry is
   // quadratic, and a long text-only transcript (hundreds of thousands of rows) would hold the
   // host's main thread for minutes.
@@ -414,7 +429,7 @@ export function buildHandoffRecord(opts: {
     `covers seq ${num(from)}–${num(lastSeq)} of ${num(lastSeq)}` +
     ` · ${(cap / 1_000_000).toFixed(1)} MB cap` +
     (dropped > 0 || folded ? " · earlier material stays in the app's records" : '')
-  const header = `# Handoff · ${trustedJsonText(opts.name)} · ${oneLine(opts.tool)}${opts.toTool ? ` → ${oneLine(opts.toTool)}` : ''}\n${covers}\n${previousLine}${touchedLine}\n`
+  const header = `# Handoff · ${trustedJsonText(opts.name)} · ${oneLine(opts.tool)}${opts.toTool ? ` → ${oneLine(opts.toTool)}` : ''}\n${covers}\n${previousLine}${lineageText}${touchedLine}\n`
 
   /*
    * The table of parts holds the line each part starts on, and it sits above them. Its rows change in digits only, never

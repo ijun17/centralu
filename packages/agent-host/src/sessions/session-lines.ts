@@ -156,22 +156,40 @@ function fitWith(texts: readonly string[], start: number, sides: 'older' | 'both
 export type Fill = 'back' | 'forward' | { around: number }
 
 /**
+ * What the call that reads on repeats of this one (#1487): the `tools` and `maxChars` the reader gave, so following a
+ * note reads the same way and not with the defaults; and whether this read is answered to a hub, whose own
+ * read_session may be older than the `before` and `from` the notes name
+ */
+export type ReadOn = { tools?: ToolLines; maxChars?: number; viaHub?: boolean }
+
+/** The arguments a note's call repeats: `tools` when it is not the default, `maxChars` when it was given */
+function repeated(readOn: ReadOn): string {
+  return `${readOn.tools && readOn.tools !== 'titles' ? ` tools=${readOn.tools}` : ''}${readOn.maxChars !== undefined ? ` maxChars=${budgetOf(readOn.maxChars)}` : ''}`
+}
+
+/**
  * The lines of one read, as many as fit `maxChars` in all, **notes included** (#1480). A plain read fills from the newest
  * line back; a read `from` a line, forward; one around a spot, outward from it a side at a time. A side left out gets a
  * note saying how many lines and the call that reads on **from where this read stopped**, so following it shows
  * nothing twice: `before` for what is older than the oldest line shown, `from` for what starts at the first one not
  * shown. The first line always comes: a read is at most a line's cut over the budget.
  */
-export function fitLines(lines: readonly SessionLine[], fill: Fill, maxChars: number): string[] {
+export function fitLines(lines: readonly SessionLine[], fill: Fill, maxChars: number, readOn: ReadOn = {}): string[] {
   const cut = lineCutOf(maxChars)
   const texts = lines.map((l) => lineText(l, 0, cut))
   const stopped = `Stopped at the ${maxChars}-character budget (maxChars, up to ${READ_BUDGET_MAX}, shows more in one call)`
+  const again = repeated(readOn)
+  /*
+   * A hub from before `before` and `from` strips them from the call (its schema lacks them) and the machine answers the
+   * newest lines again: said here, with the call every hub takes (#1487)
+   */
+  const hubNote = (seq: number | undefined) => (readOn.viaHub ? ` If your read_session takes no before or from, the hub needs an update to read on; until then around=${seq} reads near the same spot.` : '')
   const many = (n: number, which: string) => `${n} ${which} ${n === 1 ? 'line' : 'lines'} of this read ${n === 1 ? 'is' : 'are'}`
   const start = fill === 'back' ? lines.length - 1 : fill === 'forward' ? 0 : fill.around
   const sides = fill === 'back' ? 'older' : fill === 'forward' ? 'newer' : 'both'
   return fitWith(texts, start, sides, maxChars, (w) => ({
-    ...(w.lo > 0 ? { older: JSON.stringify({ note: `${stopped}: ${many(w.lo, 'older')} not shown. read_session with before=${lines[w.lo]?.seq} reads on, back from the oldest line shown.` }) } : {}),
-    ...(w.hi < lines.length - 1 ? { newer: JSON.stringify({ note: `${stopped}: ${many(lines.length - 1 - w.hi, 'newer')} not shown. read_session with from=${lines[w.hi + 1]?.seq} reads on, forward from the first line not shown.` }) } : {}),
+    ...(w.lo > 0 ? { older: JSON.stringify({ note: `${stopped}: ${many(w.lo, 'older')} not shown. read_session with before=${lines[w.lo]?.seq}${again} reads on, back from the oldest line shown.${hubNote(lines[w.lo]?.seq)}` }) } : {}),
+    ...(w.hi < lines.length - 1 ? { newer: JSON.stringify({ note: `${stopped}: ${many(lines.length - 1 - w.hi, 'newer')} not shown. read_session with from=${lines[w.hi + 1]?.seq}${again} reads on, forward from the first line not shown.${hubNote(lines[w.hi + 1]?.seq)}` }) } : {}),
   }))
 }
 
@@ -198,4 +216,17 @@ export function fitMachineLines(lines: readonly string[], maxChars: number, cent
     ...(w.hi < body.length - 1 ? { newer: note(body.length - 1 - w.hi, 'newer') } : {}),
   }))
   return [...head, ...out, ...tail]
+}
+
+/**
+ * The lines of a predecessor in the reader's handoff lineage, marked as its (#1487). The assistant's words become the
+ * predecessor's (`role: predecessor`), so they cannot be taken for the reader's own, and every line names the session,
+ * so none reads as the reader's conversation or as an instruction to it. What the person said to the predecessor stays
+ * `user`, as a line of that session.
+ */
+export function asPredecessor(lines: readonly SessionLine[], sessionId: string): SessionLine[] {
+  return lines.map((l) => {
+    const { ts, role, ...rest } = l.fields
+    return { seq: l.seq, fields: { ts, role: role === 'assistant' ? 'predecessor' : role, predecessor: sessionId, ...rest } }
+  })
 }
