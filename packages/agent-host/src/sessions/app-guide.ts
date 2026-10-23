@@ -76,8 +76,7 @@ One session = one agent process (Claude Code or Codex).
   window runs the session in a separate directory and branch, avoiding file conflicts.
 - Handoff: session's ⋯ → Hand off to a fresh session… — the app builds a note from the stored
   conversation (or, if you choose, the current session writes it), and the new session starts from
-  that note. You can choose the receiving tool. The dialog archives the original session after the
-  handoff by default (it can be restored from Settings → Archive); a checkbox keeps it instead. The orchestrator can hand a session off too
+  that note. You can choose the receiving tool. The orchestrator can hand a session off too
   (its handoff_session command), after you approve its card; the original stays. A worktree session cannot be
   handed off yet.
 - Archiving: session's ⋯ → Archive session…. The session leaves the sidebar and goes to the session

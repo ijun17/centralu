@@ -43,7 +43,7 @@ export const handoffActions = (set: StoreSet, get: StoreGet): HandoffActions => 
      * the record mode asks it nothing. It used to be the default only for a session that could not respond (#78).
      */
     const mode = opts?.mode ?? 'record'
-    // Only a fallback for a caller that leaves it out: the dialog always passes its box, which starts on (archive the original, #1477)
+    // The record mode's default is to **preserve** — the original of a session that cannot respond is kept until its successor is confirmed (#78)
     const deleteOld = opts?.deleteOld ?? mode === 'agent'
     // A worktree session cannot hand off yet. A session with worktree children can since #561: they outlive it (they
     // used to pin a worktree manager, whose delete refused while one was unmerged)

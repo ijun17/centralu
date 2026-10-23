@@ -10,23 +10,20 @@ import { Segmented } from '../../../components/Segmented.jsx'
  * The handoff confirmation dialog (a dogfooding request).
  *
  * States the whole sequence in sentences — because this one button bundles three steps together:
- * "ask for a note → new session → (by default) archive." Archiving can be undone (Settings → Archive
- * restores it), so the dialog and its button use the ordinary palette (#1477): the delete palette is for a
- * step that cannot be undone, and only the sentence about deleting it for good there is marked. Typing the name
+ * "ask for a note → new session → (by default) actually delete." Since destruction is at the end,
+ * the warning stands in the delete palette (the same grammar as project deletion). Typing the name
  * is not required: if the last step fails, nothing is lost, there are just two sessions left over,
  * and if it succeeds, the only thing lost is exactly what the person just read and approved.
  *
  * The receiving agent can be chosen (a dogfooding request) — the note is plain text, so it does
- * not lock in a tool. It defaults to the current tool. Archiving is also a checkbox, on by default
- * (#1477): turning it off turns this from switching tools into branching.
+ * not lock in a tool. It defaults to the current tool. Deletion is also a checkbox: turning it off
+ * turns this from switching tools into branching.
  */
 export function ConfirmHandoff({
   name,
   tool,
   dead,
   blocked,
-  backgroundTasks,
-  working,
   onConfirm,
   onCancel,
 }: {
@@ -36,10 +33,6 @@ export function ConfirmHandoff({
   dead: boolean
   /** A card currently up (#174) — while one is up, the agent cannot be asked. The record mode does not ask, so it goes through as is */
   blocked: 'question' | 'approval' | null
-  /** How many background tasks of this session run now (#290, ambient ones left out): a kept original is woken by each one's end (#1477) */
-  backgroundTasks: number
-  /** A turn is running now: the note is built from what is stored so far, and archiving ends the turn (#1477) */
-  working: boolean
   onConfirm: (tool: ToolName, deleteOld: boolean, mode: 'agent' | 'record') => void
   onCancel: () => void
 }) {
@@ -48,14 +41,10 @@ export function ConfirmHandoff({
    * session being replaced is the one least likely to summarize correctly, and a note it writes can
    * carry its drift or injected text. Asking the agent stays one click away.
    *
-   * Archiving defaults to **on**, for both note sources (#1477, owner direction). It was off since #694
-   * (#78's pairing: keep the original until the successor is known to work), but a kept original is not
-   * idle: its process keeps running, and when one of its background tasks ends it wakes for a turn that rewrites
-   * its whole context (after an hour idle the cache has expired), its finished children stay with it
-   * (#1475), and two sessions claim one piece of work. Archiving is not deleting: the original stays in the
-   * archive and can be restored, so the safety the old default gave is still there. The box stays, so
-   * branching (keeping both) is one click, and when it is off and the original has background work running
-   * the dialog says what that costs.
+   * Deletion defaults to off, with the note from the record: the original stays until the
+   * successor is confirmed working (#78's pairing, kept when record became every session's
+   * default, #694 review). Before #694 a live session defaulted to asking the agent and deleting;
+   * the record with deletion was never a default, and a live original is not trashed by default now.
    *
    * For a dead session (#78) the target defaults to **the other tool**: if the service is down and
    * that is why the handoff is happening, defaulting to the same tool is a one-click trap. Only the
@@ -66,7 +55,7 @@ export function ConfirmHandoff({
   const otherTool = tools.find((t) => t.name !== tool)?.name ?? tool
   const [mode, setMode] = useState<'agent' | 'record'>('record')
   const [heirTool, setHeirTool] = useState<ToolName>(dead ? otherTool : tool)
-  const [deleteOld, setDeleteOld] = useState(true)
+  const [deleteOld, setDeleteOld] = useState(false)
   const toolLabel = useToolMeta(tool).label
   return (
     <Modal onClose={onCancel} testId="confirm-handoff">
@@ -124,31 +113,27 @@ export function ConfirmHandoff({
 
         {deleteOld ? (
           <p
-            className="mt-3 rounded-md border border-line bg-surface-raised px-2.5 py-2 text-xs leading-body text-ink"
+            className="mt-3 rounded-md border border-danger/40 bg-danger-bg px-2.5 py-2 text-xs leading-body text-ink"
             data-testid="handoff-warning"
           >
             When the new session is ready, this session is archived — and{' '}
             <span className="text-danger">deleting it for good there deletes the {toolLabel} conversation file
             too</span>. Until then, Settings → Archive reads it and restores it.
-            {(working || backgroundTasks > 0) && (
-              <span className="mt-1 block text-ink-signal" data-testid="handoff-stops-note">
-                {working ? 'It is working now: the note holds what is stored so far, and archiving ends its turn' : 'Archiving stops it'}
-                {backgroundTasks > 0 ? `${working ? ', and' : ' and'} its ${backgroundTasks} background task${backgroundTasks === 1 ? '' : 's'}` : ''}.
-              </span>
-            )}
           </p>
         ) : (
-          <KeepNote backgroundTasks={backgroundTasks} />
+          <p className="mt-3 text-xs leading-body text-ink-muted" data-testid="handoff-keep-note">
+            This session stays — the new one starts from the note alongside it.
+          </p>
         )}
         <label
           className={`mt-2 flex cursor-pointer items-start gap-2 text-xs ${
-            'text-ink-muted hover:text-ink'
+            deleteOld ? 'text-danger' : 'text-ink-muted hover:text-ink'
           }`}
           data-testid="handoff-delete-toggle"
         >
           <input
             type="checkbox"
-            className="mt-0.5 accent-ink-muted"
+            className={`mt-0.5 ${deleteOld ? 'accent-danger' : 'accent-ink-muted'}`}
             checked={deleteOld}
             onChange={(e) => setDeleteOld(e.target.checked)}
           />
@@ -160,7 +145,7 @@ export function ConfirmHandoff({
             Cancel
           </button>
           <Button
-            variant="primary"
+            variant={deleteOld ? 'danger' : 'primary'}
             onClick={() => onConfirm(heirTool, deleteOld, mode)}
             disabled={mode === 'agent' && !!blocked}
             data-testid="confirm-handoff-yes"
@@ -170,23 +155,5 @@ export function ConfirmHandoff({
         </div>
       </div>
     </Modal>
-  )
-}
-
-/**
- * What the dialog says when the original is kept (the box is off). Background work still running in it is the cost worth
- * naming (#1477): the end of each task wakes the session for a turn nobody asked for.
- */
-export function KeepNote({ backgroundTasks }: { backgroundTasks: number }) {
-  return (
-    <div className="mt-3 text-xs leading-body text-ink-muted" data-testid="handoff-keep-note">
-      <p>This session stays — the new one starts from the note alongside it.</p>
-      {backgroundTasks > 0 && (
-        <p className="mt-1 text-ink-signal" data-testid="handoff-background-note">
-          It still has {backgroundTasks} background task{backgroundTasks === 1 ? '' : 's'} running; when{' '}
-          {backgroundTasks === 1 ? 'it ends' : 'one ends'}, this session wakes for a turn.
-        </p>
-      )}
-    </div>
   )
 }

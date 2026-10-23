@@ -76,34 +76,6 @@ describe('the dead-agent handoff record (#78)', () => {
   })
 })
 
-describe('the contents of a handoff record (#1481)', () => {
-  it('lists the children of the original by state, its running background work, and the note it took over from', async () => {
-    const p = await addProject()
-    const orig = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'codex' })) as SessionInfo
-    const kid = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'codex' })) as SessionInfo
-    const meta = (mgr as unknown as { meta: Map<string, SessionInfo> }).meta
-    meta.get(kid.id)!.askedBy = orig.id
-    meta.get(orig.id)!.backgroundTasks = [
-      { id: 'bg-run', kind: 'shell', description: 'usage watcher', status: 'running' },
-      { id: 'bg-done', kind: 'shell', description: 'finished build', status: 'completed' },
-    ]
-    const earlier = '11111111-1111-4111-8111-111111111111'
-    store.messages.appendMessages([
-      { sessionId: orig.id, seq: 101, role: 'system', kind: 'marker', payload: { type: 'handoff', sessionId: orig.id, seq: 101, from: 'x', note: 'n', fromSessionId: earlier }, ts: 1 },
-      { sessionId: orig.id, seq: 102, role: 'assistant', kind: 'text', payload: { text: 'State: the parser is done.' }, ts: 2 },
-    ])
-
-    const out = await mgr.exportHandoffRecord(orig.id)
-
-    expect(out.text).toContain(`previous handoff note (this session took over from another; the file is rewritten by every handoff from that session, and may be gone): ${join(process.env.CC_DATA_DIR!, 'handoff', p.id, `${earlier}.md`)}`)
-    expect(out.text).toContain('Report at seq 102:\n    State: the parser is done.')
-    expect(out.text).toMatch(new RegExp(`- "${kid.name}" — finished — id: ${kid.id}`))
-    expect(out.text).toContain('- shell "usage watcher" — id: bg-run')
-    expect(out.text).not.toContain('finished build')
-    expect(out.text).toMatch(/\| Contents \(this section\) \| \d+–\d+ \|/)
-  })
-})
-
 /**
  * The lifetime of a handoff note (#106).
  *

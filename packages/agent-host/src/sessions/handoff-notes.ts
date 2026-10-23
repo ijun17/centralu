@@ -1,11 +1,9 @@
 import type { CreateSessionOpts } from '../adapters/contract.js'
-import { handoffNoteDir, handoffNotePath, sweepHandoffNotes, writeHandoffNote } from '../dev-services/handoff-notes.js'
+import { handoffNoteDir, sweepHandoffNotes, writeHandoffNote } from '../dev-services/handoff-notes.js'
 import { inTurn } from '../idle.js'
-import { asObj } from '../json-value.js'
 import { rpcError } from '../rpc-error.js'
 import type { DelegationHost } from './delegation-flow.js'
-import { liveBackgroundTasks } from '@cc/protocol'
-import { buildHandoffRecord, type RecordChild } from './handoff-record.js'
+import { buildHandoffRecord } from './handoff-record.js'
 import type { SessionAppWiringHost } from './session-app-wiring.js'
 
 /**
@@ -126,28 +124,7 @@ export class HandoffNotes {
     const summary = externalId
       ? ((await this.host.adapters.get(m.tool)?.lastCompactSummary?.(externalId).catch(() => null)) ?? null)
       : null
-    // The note of the session this one took over from (#1481): its handoff marker names it. Named in the header, never copied in
-    let previousNote: string | null = null
-    for (const r of rows) {
-      const p = asObj(r.payload)
-      if (r.kind !== 'marker' || p.type !== 'handoff' || typeof p.fromSessionId !== 'string' || !p.fromSessionId) continue
-      try {
-        previousNote = handoffNotePath(m.projectId, p.fromSessionId)
-      } catch {
-        // A marker that names no real session names no note
-        previousNote = null
-      }
-    }
-    // The sessions it started (or forked) and its running background work, for the contents section (#1481)
-    const children: RecordChild[] = [...this.host.meta.values()]
-      .filter((s) => s.id !== sessionId && (s.askedBy === sessionId || s.parentSessionId === sessionId))
-      .map((s) => ({
-        id: s.id,
-        name: s.name,
-        state: s.pendingApproval || s.pendingQuestions.length || s.state === 'waiting_approval' ? 'waiting for the person' : inTurn(s.state) ? 'working' : 'finished',
-      }))
-    const background = liveBackgroundTasks(m.backgroundTasks ?? []).map((t) => ({ id: t.id, kind: t.kind, description: t.description, ...(t.timer ? { timer: true } : {}) }))
-    const text = buildHandoffRecord({ name: m.name, tool: m.tool, toTool, summary, rows, pivotSeq, previousNote, children, background })
+    const text = buildHandoffRecord({ name: m.name, tool: m.tool, toTool, summary, rows, pivotSeq })
     // Written into the data folder (#142) — nothing at all is written into the user's own repository
     return { text, path: await writeHandoffNote(m.projectId, sessionId, text) }
   }

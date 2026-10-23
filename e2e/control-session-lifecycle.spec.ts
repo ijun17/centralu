@@ -339,16 +339,13 @@ test('handoff: the note starts a new session and the old one moves to the sessio
   await page.getByTestId(`session-menu-${id}`).click()
   await page.getByTestId(`handoff-session-${id}`).click()
   // The receiving agent defaults to the current tool. The note comes from the record by default, for a live session
-  // too (#694), and the original is archived by default (#1477): asking the agent is chosen, and so is keeping the original
+  // too, and the original is kept by default, as the record has always been (#694): asking the agent and deleting are chosen
   await expect(page.getByTestId('handoff-tool-claude')).toHaveAttribute('aria-checked', 'true')
   await expect(page.getByTestId('handoff-mode-record')).toHaveAttribute('aria-checked', 'true')
-  await expect(page.getByTestId('handoff-delete-toggle').locator('input')).toBeChecked()
-  await expect(page.getByTestId('handoff-warning')).toContainText('is archived')
-  // Keeping the original is one click, and turning the box back on restores the sentence
-  await page.getByTestId('handoff-delete-toggle').locator('input').uncheck()
+  await expect(page.getByTestId('handoff-delete-toggle').locator('input')).not.toBeChecked()
   await expect(page.getByTestId('handoff-keep-note')).toBeVisible()
-  await page.getByTestId('handoff-delete-toggle').locator('input').check()
   await page.getByTestId('handoff-mode-agent').click()
+  await page.getByTestId('handoff-delete-toggle').locator('input').check()
   await expect(page.getByTestId('handoff-warning')).toContainText('is archived')
   await page.getByTestId('confirm-handoff-yes').click()
 
@@ -386,11 +383,11 @@ test('handoff: the note starts a new session and the old one moves to the sessio
 
 /*
  * Handoff from a dead agent (#78): a session whose service has crashed cannot be asked to write
- * a note. The note comes from the record (the default since #694) and the original is archived (the default
- * since #1477; this test turns the box off to keep it), and seeing that state flips the target to the opposite tool. Confirming asks the dead session
+ * a note. The note comes from the record and the original is kept (every session's defaults since
+ * #694), and seeing that state flips the target to the opposite tool. Confirming asks the dead session
  * for nothing at all, and the host's record becomes the successor's first message.
  */
-test('Handoff from a dead session: record mode is preselected, nothing is asked, and the original remains when kept (#78)', async ({
+test('Handoff from a dead session: record mode is preselected, nothing is asked, and the original remains (#78)', async ({
   page,
 }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
@@ -409,13 +406,10 @@ test('Handoff from a dead session: record mode is preselected, nothing is asked,
   await page.getByTestId(`session-menu-${id}`).click()
   await page.getByTestId(`handoff-session-${id}`).click()
 
-  // Record mode (#694) and archiving the original (#1477) are every session's defaults, and the opposite tool
+  // Record mode and keeping the original (every session's defaults since #694), and the opposite tool
   await expect(page.getByTestId('handoff-mode-record')).toHaveAttribute('aria-checked', 'true')
   await expect(page.getByTestId('handoff-tool-codex')).toHaveAttribute('aria-checked', 'true')
-  await expect(page.getByTestId('handoff-delete-toggle').locator('input')).toBeChecked()
-  // This test keeps the original: the box is turned off, as the person branching would
-  await page.getByTestId('handoff-delete-toggle').locator('input').uncheck()
-  await expect(page.getByTestId('handoff-keep-note')).toBeVisible()
+  await expect(page.getByTestId('handoff-delete-toggle').locator('input')).not.toBeChecked()
   await expect(page.getByTestId('handoff-mode-note')).toContainText('not asked')
 
   await page.getByTestId('confirm-handoff-yes').click()
@@ -426,7 +420,8 @@ test('Handoff from a dead session: record mode is preselected, nothing is asked,
     .poll(() => page.evaluate(() => (window as any).__mock.sessions.size), { timeout: 15_000 })
     .toBe(2)
   await expect(page.getByTestId('chat-stream')).toContainText('Handoff Record')
-  // The original remains — the box was turned off
+  // The original remains — preserving it until the successor is confirmed is the default for the
+  // dead-agent mode
   await expect(page.getByTestId(`session-row-${id}`)).toHaveCount(1)
   expect(await page.evaluate(() => (window as any).__mock.externallyDeleted)).not.toContain(id)
 })

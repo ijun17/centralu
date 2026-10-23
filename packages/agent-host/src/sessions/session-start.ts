@@ -17,7 +17,6 @@ import type { CardRests } from './card-rest.js'
 import type { DelegationHost } from './delegation-flow.js'
 import { truncate, type ExternalConversations } from './external-conversations.js'
 import { movedChildrenNote, type HandoffChildren } from './handoff-children.js'
-import { shiftPartLines } from './handoff-record.js'
 import { commandsSentence } from './tool-seats.js'
 import type { HandoffNotes } from './handoff-notes.js'
 import type { HostCardsHost } from './host-cards.js'
@@ -458,9 +457,7 @@ export class SessionStarts {
        */
       const moved = fromSessionId ? this.host.handoffChildren.moveChildren(fromSessionId, id, params.handoff.removesOriginal ? 'all' : 'live') : []
       if (moved.length) {
-        const movedBlock = movedChildrenNote(moved, commandsSentence(this.host.toolProfileOf(id), ['agent_session']))
-        // The record's table of parts names lines; they move down by the block put above them (#1481)
-        note = movedBlock + shiftPartLines(note, movedBlock.split('\n').length - 1)
+        note = movedChildrenNote(moved, commandsSentence(this.host.toolProfileOf(id), ['agent_session'])) + note
         try {
           if (fromSessionId && params.projectId) writeHandoffNoteSync(params.projectId, fromSessionId, note)
         } catch (e) {
