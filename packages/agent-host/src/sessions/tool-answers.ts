@@ -161,7 +161,7 @@ const NEW_ROLE_NEW_AGENT =
  * the parent's or the person's call.
  */
 export function cleanUpLine(sessionId: string, call = `agent_session(sessionId="${sessionId}", action="delete")`): string {
-  return `Once you have used its answer and need nothing more from it, delete it: ${call}. Work not on the trunk is kept in the session archive.`
+  return `Archive it once its answer is used: ${call}. Keep it only if more work on the same thing is coming soon, and archive it when that is done. Work not on the trunk is kept in the session archive.`
 }
 
 /** agent_session list (#690): the caller's own children, each with what deleting it would cost */

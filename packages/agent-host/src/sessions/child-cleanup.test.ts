@@ -47,6 +47,8 @@ describe('a parent is told to clean up the children whose answers it used (#690)
     const first = reportOf(s, one)[0]!
     expect(first).toContain('[Centralu] The assigned work finished.')
     expect(first).toContain(`agent_session(sessionId="${one}", action="delete")`)
+    // And when to keep it instead (#1482)
+    expect(first).toContain('Keep it only if more work on the same thing is coming soon')
     // The other child still works: nothing else is at rest
     expect(first).not.toContain('other finished session')
 
@@ -68,7 +70,7 @@ describe('a parent is told to clean up the children whose answers it used (#690)
     const told = reportOf(orch, two)[0]!
     // The bare agent_session(...) is refused there as "Not a tool of this session"
     expect(told).not.toContain('agent_session(')
-    expect(told).toContain(`delete it: centralu_run(command="agent_session", args={sessionId: "${two}", action: "delete"}).`)
+    expect(told).toContain(`Archive it once its answer is used: centralu_run(command="agent_session", args={sessionId: "${two}", action: "delete"}).`)
     expect(told).toContain('remains: centralu_run(command="agent_session", args={action: "list"}) shows them.')
   })
 
@@ -149,6 +151,9 @@ describe('the answers that hand a child back (#690)', () => {
   it('done and at_rest end with the delete only when it is due; working, stopped and deleted never', () => {
     const del = 'agent_session(sessionId="c1", action="delete")'
     expect(agentRunText({ ...base, state: 'done', answer: 'x', readable: [], outside: [], cleanUp: true }).text).toContain(del)
+    // The wait/status/start_agent answer says when to keep the child instead (#1482)
+    expect(agentRunText({ ...base, state: 'done', answer: 'x', readable: [], outside: [], cleanUp: true }).text).toContain('Keep it only if more work on the same thing is coming soon')
+    expect(agentRunText({ ...base, state: 'done', answer: 'x', readable: [], outside: [] }).text).not.toContain('Keep it only if')
     expect(agentRunText({ ...base, state: 'at_rest', answer: 'x', sessionState: 'idle', cleanUp: true }).text).toContain(del)
     expect(agentRunText({ ...base, state: 'done', answer: 'x', readable: [], outside: [] }).text).not.toContain(del)
     expect(agentRunText({ ...base, state: 'at_rest', answer: 'x', sessionState: 'idle' }).text).not.toContain(del)
