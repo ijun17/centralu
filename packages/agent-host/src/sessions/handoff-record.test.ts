@@ -272,6 +272,8 @@ describe('the contents section and the cut results (#1481)', () => {
 
   it('a result is never cut between the two halves of a surrogate pair', () => {
     const text = buildHandoffRecord({ ...base, rows: call(1, 'Bash', 'cat', `${'a'.repeat(499)}😀${'b'.repeat(100)}`) })
+    // The result is cut at 499 units, one short of the emoji's two halves, and says so
+    expect(text).toContain(`    ${'a'.repeat(499)}\n    … (102 more characters cut`)
     expect(text).not.toMatch(/[\ud800-\udbff](?![\udc00-\udfff])/)
   })
 
