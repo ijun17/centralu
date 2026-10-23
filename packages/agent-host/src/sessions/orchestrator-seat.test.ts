@@ -747,10 +747,14 @@ describe('a successor reads and recalls its archived handoff lineage (#1487)', (
     const predecessors = hits.filter((h) => h.predecessor).map((h) => h.sessionId)
     // old0 is the only one of the chain that said it so far
     expect(predecessors).toEqual(['old0'])
-    // Now the nearer one says it too: it comes first, whatever the order the messages were written in
+    // The farther one's newest word has the higher seq; the nearer one says it too, at a lower seq. The nearer comes first
+    store.messages.appendMessages([{ sessionId: 'old0', seq: 10, ts: 1_700_000_998_000, role: 'assistant', kind: 'text', payload: { text: 'quokkaline again, the farther one' } }])
     store.messages.appendMessages([{ sessionId: 'old1', seq: 4, ts: 1_700_000_999_000, role: 'assistant', kind: 'text', payload: { text: 'quokkaline from the nearer one' } }])
     const both = (await orchestratorToolsFor(host, 'a', undefined, true).recall('quokkaline', 12)).hits.filter((h) => h.predecessor).map((h) => h.sessionId)
     expect(both).toEqual(['old1', 'old0'])
+    // A limit of one is a live hit's: the share is kept for a limit of two or more
+    const one = (await orchestratorToolsFor(host, 'a', undefined, true).recall('quokkaline', 1)).hits
+    expect(one.map((h) => h.predecessor ?? false)).toEqual([false])
   })
 
   it('a live session outside the lineage found by the same word is not marked as a predecessor', async () => {

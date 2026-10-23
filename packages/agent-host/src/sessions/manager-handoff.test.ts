@@ -134,6 +134,11 @@ describe('the handoff lineage in a note (#1487)', () => {
       rpc('agents.createSession', { projectId: project.id, cwd: project.path, tool: 'claude', handoff: { from: 'x', note: 'n', fromSessionId } })
     await expect(offer(stranger.id)).rejects.toThrow(/live session of the same project/)
     await expect(offer('00000000-0000-4000-8000-000000000000')).rejects.toThrow(/live session of the same project/)
+    // A session of the same project that is in the session archive is refused the same way
+    const archived = await make()
+    await rpc('agents.deleteSession', { sessionId: archived.id })
+    expect(store.trash.isTrashed(archived.id)).toBe(true)
+    await expect(offer(archived.id)).rejects.toThrow(/live session of the same project/)
     const heir = (await offer(orig.id)) as SessionInfo
     expect(store.handoffs.predecessorOf(heir.id)).toBe(orig.id)
     rmSync(otherDir, { recursive: true, force: true })

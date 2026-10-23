@@ -449,7 +449,7 @@ export function orchestratorToolsFor(
       const lineage = ownLineage()
       const earlier = dedupeNearbyHits(host.store.messages.searchSessions(lineage, query, limit * 4))
       const live = dedupeNearbyHits(mine.filter((h) => !lineage.includes(h.sessionId)))
-      const chosen = live.slice(0, limit - Math.min(earlier.length, Math.ceil(limit / 4)))
+      const chosen = live.slice(0, limit - Math.min(earlier.length, limit >= 2 ? Math.max(1, Math.floor(limit / 4)) : 0))
       chosen.push(...earlier.slice(0, limit - chosen.length))
       const out: RecallHit[] = []
       // Asked at once, while this host's own search runs: each machine is a round trip
