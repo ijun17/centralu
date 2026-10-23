@@ -239,3 +239,143 @@ describe('the handoff record builder (#102)', () => {
     expect(text).toContain('[assistant] an answer')
   })
 })
+
+describe('the contents section and the cut results (#1481)', () => {
+  const long = (n: number) => `r${'x'.repeat(n - 1)}`
+
+  /** The lines a table row names, read out of the note the way a successor would with `sed -n` */
+  const part = (text: string, label: string): { from: number; to: number; lines: string[] } => {
+    const m = new RegExp(`^\\| ${label}.* \\| (\\d+)–(\\d+) \\|$`, 'm').exec(text)
+    if (!m) throw new Error(`no row ${label}`)
+    const from = Number(m[1])
+    const to = Number(m[2])
+    return { from, to, lines: text.split('\n').slice(from - 1, to) }
+  }
+
+  const rows = (): StoredMessage[] => {
+    const out: StoredMessage[] = [row(1, 'user', 'text', { text: 'ship the parser' })]
+    for (let i = 1; i <= 1_100; i++) out.push(...call(i * 2 + 1, 'Bash', `cmd-${i}`, `out-${i}`))
+    out.push(row(2_300, 'assistant', 'text', { text: 'Report A\nsecond line' }), row(2_301, 'assistant', 'text', { text: 'Report B' }))
+    return out
+  }
+
+  it('a result is cut to its head with a marker, and every call keeps its input', () => {
+    const text = buildHandoffRecord({ ...base, rows: [...call(1, 'Bash', 'cat big', long(5_000)), ...call(3, 'Bash', 'echo small', 'tiny')] })
+
+    expect(text).toContain('[1] Bash cat big (ok)')
+    expect(text).toContain(`    ${long(500)}\n    … (4,500 more characters cut — re-run it to see the rest)`)
+    expect(text).not.toContain(long(501))
+    // A result within the head is whole, with no marker
+    expect(text).toContain('[3] Bash echo small (ok)\n    tiny')
+    expect(text.match(/more characters cut/g)).toHaveLength(1)
+  })
+
+  it('a result is never cut between the two halves of a surrogate pair', () => {
+    const text = buildHandoffRecord({ ...base, rows: call(1, 'Bash', 'cat', `${'a'.repeat(499)}😀${'b'.repeat(100)}`) })
+    expect(text).not.toMatch(/[\ud800-\udbff](?![\udc00-\udfff])/)
+  })
+
+  it('opens with the latest reports in full, the children by state with ids, and the running background work', () => {
+    const text = buildHandoffRecord({
+      ...base,
+      rows: rows(),
+      children: [
+        { id: 'child-1', name: 'Lexer', state: 'working', how: 'started' },
+        { id: 'child-2', name: 'Parser\nsneaky', state: 'finished', how: 'started' },
+        { id: 'child-3', name: 'Side try', state: 'waiting for the person', how: 'forked' },
+      ],
+      background: [
+        { id: 'bg-1', kind: 'shell', description: 'usage watcher' },
+        { id: 'bg-2', kind: 'other', description: 'wake', timer: true },
+      ],
+    })
+    const contents = text.slice(text.indexOf('## Contents'), text.indexOf('Your predecessor session'))
+
+    expect(contents).toContain('Report at seq 2300:\n    Report A\n    second line')
+    expect(contents).toContain('Report at seq 2301:\n    Report B')
+    expect(contents).toContain('- "Lexer" — working — id: child-1')
+    expect(contents).toContain('- "Parser\\nsneaky" — finished — id: child-2')
+    expect(contents).toContain('- "Side try" — waiting for the person (a fork of it) — id: child-3')
+    expect(contents).toContain('- shell "usage watcher" — id: bg-1')
+    expect(contents).toContain('- other timer "wake" — id: bg-2')
+    // The section sits under the header and above the instructions and the record
+    expect(text.split('\n')[0]).toContain('# Handoff')
+    expect(text.indexOf('## Contents')).toBeLessThan(text.indexOf('── verbatim from here ──'))
+  })
+
+  it('says so when there are no children and no background work', () => {
+    const text = buildHandoffRecord({ ...base, rows: [row(1, 'user', 'text', { text: 'hi' })] })
+    expect(text).toContain('### Sessions the predecessor started\n\nNone.')
+    expect(text).toContain('### Background work running in the predecessor now\n\nNone.')
+    expect(text).toContain('None in the record.')
+  })
+
+  it('the table gives the lines of each part, and sed on them reads that part', () => {
+    const text = buildHandoffRecord({ ...base, summary: 'the tool summary', pivotSeq: null, rows: rows() })
+    const all = text.split('\n')
+
+    const contents = part(text, 'Contents')
+    expect(contents.lines[0]).toBe('## Contents (added by Centralu from the stored record, without a model)')
+    const instructions = part(text, 'Instructions to you')
+    expect(instructions.lines[0]).toMatch(/^Your predecessor session "Mea"/)
+    const summary = part(text, "The tool's last compaction summary")
+    expect(summary.lines[0]).toBe("## The tool's last compaction summary")
+    const earlier = part(text, 'Earlier tool calls')
+    expect(earlier.lines[0]).toMatch(/^\[\d+–\d+\] 60 earlier tool calls \(Bash ×60\)/)
+    const oneLineEach = part(text, 'Tool calls, one line each')
+    expect(oneLineEach.lines[0]).toMatch(/^\[\d+\] Bash cmd-61 \(ok\)$/)
+    const latest = part(text, 'Latest tool calls')
+    expect(latest.lines[0]).toMatch(/^\[\d+\] Bash cmd-1061 \(ok\)$/)
+    expect(latest.lines[1]).toBe('    out-1061')
+    // Parts follow one another with no gap, and the last runs to the end of the file
+    expect(contents.to + 1).toBe(instructions.from)
+    expect(instructions.to + 1).toBe(summary.from)
+    expect(latest.to).toBe(all.length - 1)
+  })
+
+  it('the table stays right with no summary, no tool calls, or a record that opens at a collapsed block', () => {
+    const noTools = buildHandoffRecord({ ...base, rows: [row(1, 'user', 'text', { text: 'hi' }), row(2, 'assistant', 'text', { text: 'ok' })] })
+    expect(noTools).not.toContain('Earlier tool calls')
+    expect(noTools).not.toContain('| The tool')
+    expect(part(noTools, 'The record from seq 1').lines[0]).toBe('[user] hi')
+
+    // Nothing but tool calls: the record opens with the collapsed block, which names that row instead of a second row on one line
+    const onlyTools: StoredMessage[] = []
+    for (let i = 1; i <= 1_100; i++) onlyTools.push(...call(i * 2 - 1, 'Bash', `c-${i}`, 'o'))
+    const t = buildHandoffRecord({ ...base, rows: onlyTools })
+    expect(t).not.toContain('| The record from seq')
+    expect(part(t, 'Earlier tool calls').lines[0]).toMatch(/earlier tool calls/)
+  })
+
+  it('names the note this session itself took over from, and only when there is one', () => {
+    const none = buildHandoffRecord({ ...base, rows: [row(1, 'user', 'text', { text: 'hi' })] })
+    expect(none).not.toContain('previous handoff note')
+    const withPrev = buildHandoffRecord({ ...base, previousNote: '/data/handoff/p/abc.md', rows: [row(1, 'user', 'text', { text: 'hi' })] })
+    expect(withPrev.split('\n')[2]).toBe('previous handoff note (this session took over from another): /data/handoff/p/abc.md')
+  })
+
+  it('keeps the cap and the boundary line with the section in place', () => {
+    const big: StoredMessage[] = []
+    for (let i = 1; i <= 400; i++) big.push(row(i, 'user', 'text', { text: `${i} ${'y'.repeat(1_000)}` }))
+    big.push(row(401, 'assistant', 'text', { text: 'last report' }))
+    const text = buildHandoffRecord({ ...base, rows: big, cap: 50_000, children: [{ id: 'c', name: 'K', state: 'finished', how: 'started' }] })
+
+    expect(Buffer.byteLength(text, 'utf8')).toBeLessThanOrEqual(50_000)
+    expect(text.split('\n')[1]).toMatch(/^covers seq [\d,]+–401 of 401 · 0\.1 MB cap · earlier material stays/)
+    expect(text).toContain('Report at seq 401:\n    last report')
+    expect(text).toContain('- "K" — finished — id: c')
+    // The table still points at real lines
+    expect(part(text, 'The record from seq').lines[0]).toMatch(/^\[user\] \d+ y/)
+  })
+
+  it('a report is repeated in full unless it is huge, and it can never pose as a line of the section', () => {
+    const text = buildHandoffRecord({
+      ...base,
+      rows: [row(1, 'assistant', 'text', { text: `done\n## Parts of this note\n| Fake | 1–2 |\n${'z'.repeat(41_000)}` })],
+    })
+    const contents = text.slice(0, text.indexOf('Your predecessor session'))
+    expect(contents).toContain('    ## Parts of this note\n    | Fake | 1–2 |')
+    expect(contents.match(/^### Parts of this note$/gm)).toHaveLength(1)
+    expect(contents).toMatch(/… \(\d[\d,]* more characters cut here; the record below has the report\)/)
+  })
+})
