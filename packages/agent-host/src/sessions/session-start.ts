@@ -176,6 +176,8 @@ export class SessionStarts {
       lsp?: boolean
       /** What the new worktree's setup could not do (#841 item 3), for a caller that tells the agent; the person gets a notice */
       onSetupProblems?: (problems: string[]) => void
+      /** Where the new worktree forked from (#1484), as a sentence naming the commit and what could not be done to make it current */
+      onWorktreeBase?: (note: string) => void
     },
   ): Promise<SessionInfo> {
     if (params.askedBy && this.host.meta.get(params.askedBy)?.projectId !== params.projectId) {
@@ -209,7 +211,10 @@ export class SessionStarts {
     let worktree: Worktree | null = null
     let setupProblems: string[] = []
     if (params.worktree && params.projectId) {
-      ;({ worktree, setupProblems } = await this.host.worktrees.createWorktree({ ...params, projectId: params.projectId }, id))
+      let base: { note: string }
+      ;({ worktree, setupProblems, base } = await this.host.worktrees.createWorktree({ ...params, projectId: params.projectId }, id))
+      // Where it forked from (#1484): the start answer names the base commit
+      params.onWorktreeBase?.(base.note)
     }
 
     /*

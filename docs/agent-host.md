@@ -630,7 +630,10 @@ option (`createSession`'s `worktree`, `worktreeBranch`, `worktreeBase`: the copy
 `auto` delegation may also create a worktree in an untrusted project). The branch is the one asked for (git's own rule checks it) or one named from the job or from the caller's `name` (`agentBranch`:
 `centralu/write-the-parser-1a2b`, at most 40 characters after the prefix, cut at a word, #861), settled before the card, which names it. It forks from the caller's own branch
 when the caller is itself a worktree session, so the child starts from the caller's work; otherwise from the
-project's trunk. A project that is no git repository is refused before the card. The child shows as every worktree
+project's trunk as the remote has it (#1484, `resolveForkBase`): the trunk is fetched (bounded, trusted projects only) and the
+child forks from `origin/<trunk>`, never from the checkout's HEAD, which may be any branch; with no remote, a failed or timed-out fetch, or an
+untrusted project it forks from the newer of the local trunk and the remote-tracking ref last fetched, and with no trunk found at all from HEAD.
+The start answer's `notice` names the base commit and what could not be done. The recorded base (`baseSha`) is that commit. A project that is no git repository is refused before the card. The child shows as every worktree
 session does (its branch is its name; merged and pull-request state, #69/#76), and paths its answer names in the
 worktree become readable to the caller. A boolean and a name rather than a `workspace` enum: each is cheaper, and
 either alone says what is meant. A worktree child hangs under the session that started it in the sidebar,

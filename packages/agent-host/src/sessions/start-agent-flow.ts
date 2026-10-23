@@ -446,10 +446,12 @@ export class AgentStartFlow {
     const cwd = scratch ?? (worktree ? project.path : (this.host.store.sessions.sessionCwd(callerId) ?? caller.worktree?.path ?? project.path))
     let child: SessionInfo
     let setupProblems: string[] = []
+    let forkNote: string | undefined
     progress.stage = 'creating'
     try {
       child = await this.host.createSession({
         onSetupProblems: (problems) => (setupProblems = problems),
+        onWorktreeBase: (note) => (forkNote = note),
         // The orchestrator's children have no project (#853)
         projectId: project.id === ORCHESTRATOR_PLACE ? null : project.id,
         cwd,
@@ -507,7 +509,7 @@ export class AgentStartFlow {
     // The mailbox writes the task down as a thread the caller owns (docs/plans/mailbox.md §8.1): the caller's own words, not the frame
     this.host.children.delegated(callerId, child.id, 'start_agent', choice.task)
     const notice = this.host.handles.get(child.id)?.delegationNotice?.()
-    return { key, d, notice: [unchecked, notice].filter(Boolean).join('; ') || undefined }
+    return { key, d, notice: [unchecked, forkNote, notice].filter(Boolean).join('; ') || undefined }
   }
 
   /** `AgentChoices.agentWorktreeBranch` (agent-choices.ts), kept on the flow for its callers */
