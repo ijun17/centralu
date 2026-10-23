@@ -1,5 +1,8 @@
 import { rpcError } from '../rpc-error.js'
-import { git, gitSummary, isRepo, type GitTrust, type SummaryLimits } from './git.js'
+import { execFailure } from './exec-error.js'
+import { runGit } from './git-exec.js'
+import { git, gitHeadSha, gitRevParse, gitSummary, isRepo, type GitTrust, type SummaryLimits } from './git.js'
+import { cloneEnv } from './project-clone.js'
 import { gitWrite } from './git-write.js'
 
 
@@ -57,6 +60,131 @@ export async function gitWorktreeAdd(
   }
   await gitWrite(repoCwd, ['worktree', 'add', '-b', branch, path, ...(from ? [from] : [])])
   return { path, branch }
+}
+
+/** How long the fetch of a worktree's base may take before the worktree forks from what is here (#1484) */
+export const FORK_FETCH_TIMEOUT_MS = 20_000
+
+/** Where a new worktree forks from (#1484): the commit, the ref it was read from, and a note for the start answer, without a final period (the answer adds its own) */
+export type ForkBase = { sha: string | null; ref: string; note: string }
+
+/** A repository with no commit: git makes the worktree on an unborn branch, with nothing to record as the base */
+const NO_COMMIT: ForkBase = { sha: null, ref: 'HEAD', note: 'This repository has no commit yet, so the worktree starts empty' }
+
+const short = (sha: string) => sha.slice(0, 9)
+
+/** How many commits `range` (`a..b`) holds; null when it cannot be told */
+async function commitCount(cwd: string, range: string): Promise<number | null> {
+  const n = Number((await git(cwd, ['rev-list', '--count', range]).catch(() => '')).trim())
+  return Number.isFinite(n) && n >= 0 ? n : null
+}
+
+async function configValue(cwd: string, key: string): Promise<string> {
+  return (await git(cwd, ['config', '--get', key]).catch(() => '')).trim()
+}
+
+/**
+ * The commit a new worktree for new work forks from (#1484): **the trunk as the remote has it**, not whatever the checkout
+ * has checked out. Forking from the checkout's HEAD gave a session a base 279 commits behind main whenever the checkout sat
+ * on another branch, and the work built on it (a store migration number main had taken) was lost.
+ *
+ * Order, for the trunk the project holds (`trunk`, null when none is set: then the remote's default branch, else a local
+ * `main` or `master`):
+ *   1. fetch the trunk from its remote, bounded (`timeoutMs`), and fork from the remote-tracking ref it updated;
+ *   2. when there is no remote, the fetch failed or timed out, or the project is not trusted (a fetch reads the repository's
+ *      network settings, which name programs: `core.sshCommand`, a credential helper, `core.gitProxy`): the newer of the
+ *      local trunk and the remote-tracking ref last fetched, and the note says why and how far behind it may be;
+ *   3. no trunk found at all: the checkout's HEAD, said as such. Nothing here throws for the fetch.
+ *
+ * It returns a commit, not a ref: `git worktree add -b <branch> <path> origin/main` would make the new branch track
+ * `origin/main`, and the recorded base for merge detection (`baseSha`) is then exactly what the branch started from.
+ * The fetch gives a prompt no one can answer nothing to wait on (`cloneEnv`), as a clone does.
+ */
+export async function resolveForkBase(
+  repoCwd: string,
+  trunk: string | null,
+  opts: { trusted?: boolean; timeoutMs?: number } = {},
+): Promise<ForkBase> {
+  const remotes = (await git(repoCwd, ['remote']).catch(() => '')).split('\n').map((r) => r.trim()).filter(Boolean)
+  const local = async (name: string) => (await gitRevParse(repoCwd, `refs/heads/${name}`)) ? name : null
+  let branch: string | null = null
+  let remote: string | null = null
+  if (trunk) {
+    const prefixed = remotes.find((r) => trunk.startsWith(`${r}/`))
+    if (!(await local(trunk)) && prefixed) {
+      remote = prefixed
+      branch = trunk.slice(prefixed.length + 1)
+    } else {
+      branch = trunk
+    }
+  } else {
+    const head = (await git(repoCwd, ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD']).catch(() => '')).trim()
+    if (head.startsWith('origin/') && remotes.includes('origin')) {
+      remote = 'origin'
+      branch = head.slice('origin/'.length)
+    } else {
+      branch = (await local('main')) ?? (await local('master'))
+    }
+  }
+  if (!branch) {
+    const sha = await gitHeadSha(repoCwd)
+    if (!sha) return NO_COMMIT
+    return { sha, ref: 'HEAD', note: `No trunk is set for this project and none was found (no remote default branch, no main or master), so the worktree forks from the checkout's HEAD at ${short(sha)}, which may not be the trunk` }
+  }
+  if (!remote) {
+    const own = await configValue(repoCwd, `branch.${branch}.remote`)
+    remote = remotes.includes(own) ? own : remotes.includes('origin') ? 'origin' : remotes.length === 1 ? (remotes[0] ?? null) : null
+  }
+  const tracking = remote ? `refs/remotes/${remote}/${branch}` : null
+  let why: string
+  if (!remote || !tracking) {
+    why = 'This repository has no remote to fetch from'
+  } else if (opts.trusted !== true) {
+    why = `Not fetched: the project is not trusted, and a fetch runs the repository's network settings`
+  } else {
+    try {
+      const own = (await configValue(repoCwd, 'core.sshCommand')) !== ''
+      await runGit(repoCwd, ['fetch', '--no-tags', '--no-recurse-submodules', '--quiet', '--', remote, `+refs/heads/${branch}:${tracking}`], {
+        allowRepoPrograms: true,
+        timeout: opts.timeoutMs ?? FORK_FETCH_TIMEOUT_MS,
+        env: cloneEnv(process.env, own),
+      })
+      const sha = await gitRevParse(repoCwd, tracking)
+      if (sha) {
+        // Commits only the local trunk has: not on the remote, so not in the worktree
+        const onlyLocal = (await local(branch)) ? await commitCount(repoCwd, `${tracking}..refs/heads/${branch}`) : null
+        return {
+          sha,
+          ref: `${remote}/${branch}`,
+          note: `Forked from ${remote}/${branch} at ${short(sha)}, fetched just now${onlyLocal ? `. The local ${branch} has ${onlyLocal} commit(s) the remote does not, which the worktree does not have` : ''}`,
+        }
+      }
+      why = `${remote} has no branch ${branch}`
+    } catch (e) {
+      const f = execFailure(e)
+      const said = f.stderr?.trim() || f.message || 'git failed'
+      why = `Could not fetch ${remote} (${said.split('\n')[0]})`
+    }
+  }
+  // Not fetched: the newer of the local trunk and the remote-tracking ref as last fetched
+  const l = await gitRevParse(repoCwd, `refs/heads/${branch}`)
+  const trackingName = remote ? `${remote}/${branch}` : null
+  const t = tracking ? await gitRevParse(repoCwd, tracking) : null
+  let ref: string | null = null
+  let sha: string | null = null
+  if (l && t) {
+    const trackingIsNewer = await git(repoCwd, ['merge-base', '--is-ancestor', l, t]).then(() => true, () => false)
+    ;[ref, sha] = trackingIsNewer ? [trackingName, t] : [branch, l]
+  } else if (l) [ref, sha] = [branch, l]
+  else if (t) [ref, sha] = [trackingName, t]
+  if (!ref || !sha) {
+    const head = await gitHeadSha(repoCwd)
+    if (!head) return NO_COMMIT
+    return { sha: head, ref: 'HEAD', note: `${why}, and there is no ${branch} here either, so the worktree forks from the checkout's HEAD at ${short(head)}, which may not be the trunk` }
+  }
+  const behindRemote = l && t && sha === l ? await commitCount(repoCwd, `refs/heads/${branch}..${tracking}`) : null
+  const stale = behindRemote ? `. It is ${behindRemote} commit(s) behind the last ${remote}/${branch} fetched` : ''
+  return { sha, ref, note: `${why}, so the worktree forks from the local ref ${ref} at ${short(sha)}, which may be behind the remote${stale}` }
 }
 
 /**

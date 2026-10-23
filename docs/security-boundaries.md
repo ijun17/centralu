@@ -1036,6 +1036,13 @@ git-crypt blob) for the session to edit and commit back, and `--no-checkout` wou
 folder. The manager refuses with the reason, and `gitWorktreeAdd` refuses too unless told the
 project is trusted.
 
+A new worktree forks from the project's trunk **as the remote has it** (#1484): `resolveForkBase` runs
+one `git fetch` of the trunk, which reads the repository's network settings (`core.sshCommand`, a
+credential helper, `core.gitProxy`, `url.*.insteadOf`), so it runs only in a trusted project, as
+the checkout does, with a prompt-free environment (`cloneEnv`) and a 20-second bound. An untrusted
+project forks from the local trunk ref and the start answer says it was not fetched. Test:
+`git-worktree.test.ts` "an untrusted project is not fetched".
+
 What a read still does before trust: it reads the repository's files, its configuration and any
 file that configuration includes, and `core.excludesFile`. It does not start a pager (stdout is a
 pipe) or an editor, and it does not touch the network, so `core.sshCommand` and

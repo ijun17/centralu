@@ -20,10 +20,12 @@ import {
 import type { SessionHandle } from '../adapters/contract.js'
 import type { Store } from '../dev-services/store.js'
 import { inTurn, sessionBusy } from '../idle.js'
-import { gitSummary, gitHeadSha, gitRevParse } from '../dev-services/git.js'
+import { gitSummary, gitRevParse } from '../dev-services/git.js'
 import {
   gitBranchDelete,
   gitWorktreeAdd,
+  resolveForkBase,
+  type ForkBase,
   gitValidBranchName,
   type Worktree,
   gitWorktreeRemove,
@@ -147,8 +149,9 @@ export class WorktreeSessions {
   async createWorktree(
     params: { cwd: string; projectId: string; askedBy?: string; worktreeBranch?: string; worktreeBase?: string },
     id: string,
-  ): Promise<{ worktree: Worktree; setupProblems: string[] }> {
+  ): Promise<{ worktree: Worktree; setupProblems: string[]; base: ForkBase }> {
     let worktree: Worktree
+    let base: ForkBase
     const summary = await gitSummary(params.cwd, this.host.gitTrust(params.projectId))
     if (!summary.isRepo || summary.denied) {
       throw rpcError(summary.denied ? 'Cannot read this git repository — grant folder access and try again' : 'Worktrees need a git repository. This directory is not one.')
@@ -177,7 +180,7 @@ export class WorktreeSessions {
     }
     const branch = requested || `${APP_SLUG}/${id.slice(0, 8)}`
     /*
-     * Where it forks from (#76). Order: **what was asked for -> the project's trunk -> HEAD**.
+     * Where it forks from (#76). Order: **what was asked for -> the project's trunk as the remote has it (#1484) -> the local trunk -> HEAD**.
      *
      * Why what was asked for comes first (user feedback, 2026-09-07: "there is no way to say
      * where to fork a new worker from"): the trunk is the project's default, not the answer for
@@ -188,25 +191,32 @@ export class WorktreeSessions {
      * If asked for something that does not exist, it is **rejected.** Silently falling back to
      * HEAD would let the person think it forked from that branch, and the mistake would not show
      * up until commits had already piled up. A trunk that has disappeared is a different case —
-     * that is stale configuration, not something asked for right now, so it falls back to HEAD but
-     * logs it.
+     * that is stale configuration, not something asked for right now, so it falls back to the next
+     * place (`resolveForkBase`) and says so in the start answer.
      */
     const asked = params.worktreeBase?.trim()
-    if (asked && !(await gitRevParse(params.cwd, asked))) {
+    const askedSha = asked ? await gitRevParse(params.cwd, asked) : null
+    if (asked && !askedSha) {
       throw rpcError(`Not a branch in this repository: ${asked}`)
     }
     const trunk = params.projectId ? this.host.trunkOf(params.projectId) : null
-    const fromTrunk = trunk && (await gitRevParse(params.cwd, trunk)) ? trunk : null
-    if (trunk && !fromTrunk) console.error(`[worktree] trunk not found, forking from HEAD instead: ${trunk}`)
-    const from = asked ?? fromTrunk
+    /*
+     * Where new work forks from when nothing was asked for (#1484): the trunk as the remote has it, fetched now, never the
+     * checkout's HEAD, which is whatever branch the person left it on. What was asked for is forked as it is here.
+     * `resolveForkBase` says what it could not do (no remote, a fetch that failed) in `note`, for the start answer.
+     */
     // The baseline for merge detection (#69): the point where the branch forked off. Without it, a
     // freshly created branch would read as "merged" for no reason other than being an ancestor of
     // the trunk.
     try {
       // Inside: a repository git refuses to read throws here first (`isRepo`, #841), and is a worktree that could not be made
-      const baseSha = from ? await gitRevParse(params.cwd, from) : await gitHeadSha(params.cwd)
-      worktree = await gitWorktreeAdd(params.cwd, path, branch, from ?? undefined, { trusted: true })
-      if (baseSha) worktree = { ...worktree, base: baseSha }
+      const forkBase: ForkBase = asked && askedSha
+        ? { sha: askedSha, ref: asked, note: `Forked from ${asked}, as asked, at ${askedSha.slice(0, 9)}` }
+        : await resolveForkBase(params.cwd, trunk, { trusted: this.host.projectTrusted(params.projectId) })
+      if (!asked && forkBase.ref === 'HEAD') console.error(`[worktree] forking from HEAD: ${forkBase.note}`)
+      worktree = await gitWorktreeAdd(params.cwd, path, branch, forkBase.sha ?? undefined, { trusted: true })
+      if (forkBase.sha) worktree = { ...worktree, base: forkBase.sha }
+      base = forkBase
     } catch (err) {
       const msg = (err as { stderr?: string; message?: string }).stderr ?? (err as Error).message
       throw rpcError(`Could not create the worktree: ${String(msg).trim()}`)
@@ -220,7 +230,7 @@ export class WorktreeSessions {
       const left = await this.discardNewWorktree(params.cwd, worktree, params.projectId)
       throw rpcError(`Could not set up the worktree: ${(err as Error).message}${left ? ` (${left})` : ''}`)
     }
-    return { worktree, setupProblems }
+    return { worktree, setupProblems, base }
   }
 
   /**

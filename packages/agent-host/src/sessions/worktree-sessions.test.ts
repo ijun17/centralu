@@ -99,3 +99,42 @@ describe('what a cleanup under way holds still (#647)', () => {
     expect(wt.worktreeCleanupBlocks('unknown')).toBe(false)
   })
 })
+
+describe('where a new session worktree forks from (#1484)', () => {
+  const git = (cwd: string, args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim()
+  const identity = ['-c', 'user.name=t', '-c', 'user.email=t@example.com']
+
+  it('forks from the fetched trunk, not the checkout\'s branch, records it as the base, and names the commit', async () => {
+    const bare = join(root, 'origin.git')
+    execFileSync('git', ['init', '-q', '--bare', '-b', 'main', bare])
+    const dir = join(root, 'checkout')
+    execFileSync('git', ['init', '-q', '-b', 'main', dir])
+    git(dir, [...identity, 'commit', '-q', '--allow-empty', '-m', 'one'])
+    git(dir, ['remote', 'add', 'origin', bare])
+    git(dir, ['push', '-q', '-u', 'origin', 'main'])
+    // The remote moves on; the checkout sits on an unrelated branch, behind
+    const other = join(root, 'other')
+    execFileSync('git', ['clone', '-q', bare, other])
+    git(other, [...identity, 'commit', '-q', '--allow-empty', '-m', 'two'])
+    git(other, ['push', '-q', 'origin', 'main'])
+    const tip = git(other, ['rev-parse', 'HEAD'])
+    git(dir, ['switch', '-q', '--orphan', 'audit'])
+    git(dir, [...identity, 'commit', '-q', '--allow-empty', '-m', 'unrelated'])
+
+    const wt = new WorktreeSessions(
+      hostWith({
+        store,
+        gitTrust: () => ({ trusted: true }),
+        projectTrusted: () => true,
+        trunkOf: () => 'main',
+        worktreeRoot: join(root, 'trees'),
+      }),
+    )
+    const id = '00000000-0000-4000-8000-000000000001'
+    const { worktree, base } = await wt.createWorktree({ cwd: dir, projectId: 'p1' }, id)
+    expect(git(worktree.path, ['rev-parse', 'HEAD'])).toBe(tip)
+    expect(git(worktree.path, ['merge-base', 'HEAD', 'origin/main'])).toBe(tip)
+    expect(worktree.base).toBe(tip)
+    expect(base.note).toBe(`Forked from origin/main at ${tip.slice(0, 9)}, fetched just now`)
+  })
+})
