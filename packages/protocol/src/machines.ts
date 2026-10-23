@@ -403,7 +403,12 @@ export const HostSessionRow = z.object({
 export type HostSessionRow = z.infer<typeof HostSessionRow>
 
 /** One session's conversation, as `read_session` shows it (`host.readSession`): one JSON line per message */
-export const HostReadSessionResult = z.object({ state: z.string(), lines: z.array(z.string()) })
+export const HostReadSessionResult = z.object({
+  state: z.string(),
+  lines: z.array(z.string()),
+  /** The budget the machine fitted these lines to (#1480): absent from a machine that does not, and the hub bounds them itself */
+  maxChars: z.number().int().optional(),
+})
 export type HostReadSessionResult = z.infer<typeof HostReadSessionResult>
 
 /**

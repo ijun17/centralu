@@ -1,6 +1,7 @@
 import { AGENT_INSTRUCTIONS_MAX, BackgroundTask, HostLastAnswerResult, HostReadSessionResult, PermissionPreset, RpcMethods, HostRecallHit, HostSessionRow, oneLineText, SessionId, SessionInfo, ToolName } from '@cc/protocol'
 import { awayPhrase, NOT_CONNECTED, NOT_REACHABLE, type LinkedProject, type LinkedSessions, type OrchestratedSession, type RecallHit } from '../adapters/contract.js'
 import { trustedJsonText } from '../sessions/orchestrator-tools.js'
+import { budgetOf, fitMachineLines, toolLinesOf } from '../sessions/session-lines.js'
 import { clipPreview } from '../sessions/turn-answer.js'
 import { splitQualified } from './machine-ids.js'
 import type { RoutedMachine, RpcHandler } from './router.js'
@@ -75,6 +76,16 @@ function assistantText(line: string): { text: string; cut: boolean } | null {
       }
     }
     return null
+  }
+}
+
+/** Whether a line of a conversation is a tool call's (#1480): a machine from before `tools: "none"` still sends them */
+function isToolLine(line: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(line)
+    return isObj(parsed) && parsed.role === 'tool'
+  } catch {
+    return false
   }
 }
 
@@ -627,12 +638,16 @@ export function linkedSessions(
       if (!m) return { ok: false, error: `Not a session of a linked machine: ${sessionId}` }
       await settle(m)
       if (!m.reachable) return { ok: false, error: m.waitsForPerson ? away(m) : `${m.name} is not reachable right now; read it again once its link is back` }
+      const toolMode = toolLinesOf(opts?.tools)
       try {
         const answer = await m.call('host.readSession', {
           sessionId: m.q.strip(sessionId, 'The session'),
           ...(limit !== undefined ? { limit } : {}),
           ...(opts?.around !== undefined ? { around: opts.around } : {}),
-          ...(opts?.tools ? { tools: true } : {}),
+          // `tools` stays the boolean an older machine knows; `toolLines` is the three words, ignored by one
+          ...(toolMode === 'full' ? { tools: true } : {}),
+          ...(opts?.tools !== undefined ? { toolLines: toolMode } : {}),
+          ...(opts?.maxChars !== undefined ? { maxChars: budgetOf(opts.maxChars) } : {}),
           ...(opts?.offset !== undefined ? { offset: opts.offset } : {}),
         })
         const r = HostReadSessionResult.safeParse(answer)
@@ -644,7 +659,14 @@ export function linkedSessions(
         if (opts?.offset !== undefined && !offsetAnswered(r.data.lines)) {
           return { ok: false, error: `${m.name} runs a Centralu from before reading a line from an offset, so it cannot show the rest of that line; update it there. Until then its lines stop at 2,000 characters` }
         }
-        return { ok: true, state: oneLine(r.data.state, 40), lines: r.data.lines.map(fencedLine) }
+        /*
+         * An older machine gave all its lines, tool lines too (#1480): the budget and "no tools" are held here, so a
+         * linked session's answer is as bounded as a local one's. A machine that echoes the budget has done it
+         */
+        const lines =
+          r.data.maxChars !== undefined ? r.data.lines
+          : fitMachineLines(toolMode === 'none' ? r.data.lines.filter((l) => !isToolLine(l)) : r.data.lines, budgetOf(opts?.maxChars))
+        return { ok: true, state: oneLine(r.data.state, 40), lines: lines.map(fencedLine) }
       } catch (err) {
         return { ok: false, error: cause(m, err) }
       }

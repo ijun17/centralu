@@ -59,10 +59,9 @@ export const ORCHESTRATOR_TOOLS = [
         .number()
         .optional()
         .describe('The seq recall gave. If given, reads around that spot (otherwise the very end).'),
-      tools: z
-        .boolean()
-        .optional()
-        .describe('Whether to expand tool-call bodies too. Collapsed to one line by default — a full script would bury the conversation.'),
+      // `true`/`false` still run (TOOL_ARGS); the definition shows the words, which cost less than saying so
+      tools: z.enum(['none', 'titles', 'full']).optional().describe('Tool calls: one line each (default), whole, or none.'),
+      maxChars: z.number().optional().describe('Most characters returned (12000 default, 40000 at most).'),
     }),
   },
   {
@@ -588,10 +587,12 @@ export const BUILDER_TOOL_NAMES = ['check'] as const satisfies readonly Orchestr
  *     the orchestrator still has the guide loaded. Deferring the whole set was measured and
  *     refused: recall was never called (asked about an earlier conversation, the model said it
  *     had no memory), the same failure the orchestrator measured for send_to_session.
- *   - What is left out of the schemas still runs (read_session's `limit` and `tools`, recall's
+ *   - What is left out of the schemas still runs (read_session's `limit`, recall's
  *     `limit`): the runner reads the same arguments for every profile, and the defaults are what
  *     a session wants nearly every time. `around` goes unexplained: recall's own answer spells
  *     out the call (`read_session(sessionId=…, around=…)`).
+ *   - #1480 put `tools` (three words) and `maxChars` in, with no description: a call without them is bounded anyway (12,000
+ *     characters), and the note an early stop leaves names the call that reads on. +94 characters (docs/tool-cost.md §14).
  *
  * Short instructions go with this set (READER_INSTRUCTIONS, #564): use Centralu's tools first unless the person
  * says otherwise. Until 2026-10-12 it had none, on the principle that Centralu offers tools to the person's
@@ -610,7 +611,13 @@ export const READER_TOOLS = [
   {
     name: 'read_session',
     description: 'Reads another Centralu session. No sessionId: lists them (project narrows).',
-    schema: z.object({ sessionId: z.string().optional(), around: z.number().optional(), project: z.string().optional() }),
+    schema: z.object({
+      sessionId: z.string().optional(),
+      around: z.number().optional(),
+      project: z.string().optional(),
+      tools: z.enum(['none', 'titles', 'full']).optional(),
+      maxChars: z.number().optional(),
+    }),
   },
   {
     name: 'recall',
@@ -871,13 +878,13 @@ export const READER_INSTRUCTIONS_WITH_APPS = `You are running inside Centralu. U
  * description and JSON schema, plus the instructions, including the deferred guide and update
  * definitions since Codex can load them. Measured for #581: 1,709 = 983 existing tool characters
  * + 298 for update_centralu + 428 instructions (392 before its 36-character pointer).
- * The ceiling rises from 1,400 to 1,750 for that addition. On Claude the update definition is
+ * The ceiling rises from 1,400 to 1,750 for that addition, and to 1,850 for #1480 (read_session's `tools` and `maxChars`: +94). On Claude the update definition is
  * deferred: only the pointer rides in every request. The tokens measured for the earlier
  * instructions remain in docs/tool-cost.md §11; these new figures count characters, not tokens.
  * Raising it is a decision about every session's context: a line added to READER_FIRST counts here. #957's
  * REPO_WORK_FIRST is not counted: it rides only where an app is attached, whose own tools cost more than it.
  */
-export const READER_BUDGET_CHARS = 1750
+export const READER_BUDGET_CHARS = 1850
 
 /**
  * The ceiling for what each profile carries in every request (#513), in characters of its resident
@@ -895,10 +902,12 @@ export const READER_BUDGET_CHARS = 1750
  * seat went with the role (#561 part 3). Scoped rises from 2,350 to 2,400 for send_to_session's `ifBusy` (#677, an
  * enum with no words: 2,330 on Claude, 2,382 on Codex); nothing makes a new coordinator since #372.
  * The reader rises with AGENT_BUDGET_CHARS for #729 (4,200 → 4,450): Claude 2,313 → 2,560, Codex 4,150 → 4,397.
+ * #1480 gave read_session `tools` as three words and `maxChars`: the orchestrator rises 9,500 → 9,600 (Codex 9,553), scoped
+ * 2,400 → 2,500 (Codex 2,450), and the reader by READER_BUDGET_CHARS' 100 (1,750 → 1,850: the set is 1,803).
  */
 export const RESIDENT_BUDGET_CHARS: Record<ToolProfile, number> = {
-  orchestrator: 9_500,
-  scoped: 2_400,
+  orchestrator: 9_600,
+  scoped: 2_500,
   builder: 1_500,
   reader: READER_BUDGET_CHARS + DELEGATE_BUDGET_CHARS + AGENT_BUDGET_CHARS + APP_ACCESS_BUDGET_CHARS + MAIL_BUDGET_CHARS,
 }
@@ -1015,7 +1024,12 @@ export const TOOL_ARGS = {
    * The reader lists with read_session and no id (#320, READER_TOOLS); the other seats are shown it required. `offset`
    * (#1186) is shown to no seat: a line cut, and ask_project's cut, spell out the read that uses it, as recall does `around`
    */
-  read_session: ORCHESTRATOR_ARGS.read_session.partial({ sessionId: true }).extend({ project: z.string().optional(), offset: z.number().int().min(0).optional() }),
+  read_session: ORCHESTRATOR_ARGS.read_session.partial({ sessionId: true }).extend({
+    project: z.string().optional(),
+    offset: z.number().int().min(0).optional(),
+    // The definitions show the three words; `true` and `false`, which they were before (#1480), still run
+    tools: z.union([z.enum(['none', 'titles', 'full']), z.boolean()]).optional(),
+  }),
   ...schemasOf(AGENT_TOOLS),
   /*
    * The topic is an enum in the definition (#523), but the guide reads a topic named in other words as the nearest one

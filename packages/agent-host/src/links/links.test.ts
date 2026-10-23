@@ -1949,8 +1949,13 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
     const remote = await remoteHost(0, store)
     const reader = remote.mgr.hostReader()
     for (const [asked, got] of [[1, 1], [40, 40], [199, 199], [200, 200], [201, 200], [5000, 200]] as const) {
-      expect((await reader.read('long', asked)).lines).toHaveLength(got)
+      expect((await reader.read('long', asked, { maxChars: 40_000 })).lines).toHaveLength(got)
     }
+    // The budget (#1480) is the machine's to hold, and it says which it held; a hub from before it reads that as "bounded"
+    expect(await reader.read('long', 1)).toMatchObject({ maxChars: 12_000 })
+    const small = await reader.read('long', 200, { maxChars: 100, tools: 'none' })
+    expect(small.maxChars).toBe(2000)
+    expect(small.lines.join('').length).toBeLessThan(2000 + 600)
     // Hits close together in one session are one story (dedupeNearbyHits), so the cap is reached only with gaps of 40
     talk(store, 'long', Array.from({ length: 2400 }, (_, i): [string, string] => [i % 21 === 0 ? `wombat ${i}` : `filler ${i}`, 'ok']))
     for (const [asked, got] of [[1, 1], [12, 12], [50, 50], [51, 50], [500, 50]] as const) {

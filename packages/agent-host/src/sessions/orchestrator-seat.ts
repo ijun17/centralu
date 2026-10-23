@@ -15,7 +15,7 @@ import type { TrustAnswer, TrustRequest } from './trust-flow.js'
 import type { AppUpkeepAnswer, AppUpkeepRequest } from './app-upkeep-flow.js'
 import type { HousekeepingAnswer, HousekeepingRequest } from './housekeeping-flow.js'
 import { dedupeNearbyHits, takeInTurns, windowAround, windowAroundLines } from './snippet.js'
-import { LINE_WINDOW_CHARS, lineText, sessionLines } from './session-lines.js'
+import { LINE_WINDOW_CHARS, budgetOf, fitLines, lineText, sessionLines } from './session-lines.js'
 import { contextAt, labelOf, lastActiveOf, previewOf, timeOf } from './transcript-view.js'
 
 /**
@@ -517,7 +517,7 @@ export function orchestratorToolsFor(
           ok: true,
           state: target.state,
           ...(target.projectId && untrustedMark()(target.projectId) ? { untrusted: true } : {}),
-          lines: line ? [lineText(line, opts.offset, LINE_WINDOW_CHARS, true)] : [],
+          lines: line ? [lineText(line, opts.offset, opts.maxChars === undefined ? LINE_WINDOW_CHARS : budgetOf(opts.maxChars), true)] : [],
         }
       }
       const read = around
@@ -545,7 +545,8 @@ export function orchestratorToolsFor(
         ok: true,
         state: target.state,
         ...(target.projectId && untrustedMark()(target.projectId) ? { untrusted: true } : {}),
-        lines: picked.map((l) => lineText(l)),
+        // At most the call's budget in all (#1480), not 40 lines of 2,000 characters each
+        lines: fitLines(picked, start >= 0 ? anchor - start : null, budgetOf(opts?.maxChars)),
         ...(cards.length ? { cards } : {}),
       }
     },

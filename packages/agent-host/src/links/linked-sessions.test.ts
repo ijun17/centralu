@@ -216,10 +216,39 @@ describe('reading a linked machine for the hub’s orchestrator', () => {
       return { state: 'working', lines: [] }
     }
     await linkedSessions(() => [m]).read('m1.w1', 10, { around: 42, tools: true })
-    expect(asked).toEqual([{ method: 'host.readSession', params: { sessionId: 'w1', limit: 10, around: 42, tools: true } }])
+    expect(asked).toEqual([{ method: 'host.readSession', params: { sessionId: 'w1', limit: 10, around: 42, tools: true, toolLines: 'full' } }])
     // A long line read on from where it was cut (#1186) is the machine's to read, with the same offset
     await linkedSessions(() => [m]).read('m1.w1', 40, { around: 42, offset: 2000 })
     expect(asked[1]).toEqual({ method: 'host.readSession', params: { sessionId: 'w1', limit: 40, around: 42, offset: 2000 } })
+  })
+
+  /*
+   * #1480: a machine from before the budget ignores `maxChars` and `toolLines` and answers every line it has, so the hub
+   * holds both: the answer a linked session gives is as bounded as a local one's, and "no tools" leaves tool lines out
+   */
+  it('bounds what a machine from before the budget answers, and leaves tool lines out when asked', async () => {
+    const asked: unknown[] = []
+    const line = (i: number) => JSON.stringify({ ts: '2026-10-21 09:30', role: 'assistant', text: `${i}`.padEnd(1500, 'x') })
+    const lines = Array.from({ length: 30 }, (_, i) => line(i))
+    const tool = JSON.stringify({ ts: '2026-10-21 09:30', role: 'tool', tool: 'Bash', title: 'ls' })
+    const older = machine({})
+    older.call = async (method, params) => {
+      asked.push({ method, params })
+      return { state: 'idle', lines: [...lines, tool] }
+    }
+    const read = await linkedSessions(() => [older]).read('m1.w1', 40, { tools: 'none', maxChars: 5000 })
+    expect(asked).toEqual([{ method: 'host.readSession', params: { sessionId: 'w1', limit: 40, toolLines: 'none', maxChars: 5000 } }])
+    expect(read.lines!.join('|').length).toBeLessThan(5000 + 500)
+    expect(read.lines!.some((l) => l.includes('"role":"tool"'))).toBe(false)
+    // The newest lines come, and a note says older ones did not, and that it cannot name the read that goes on
+    expect(read.lines!.at(-1)).toBe(lines.at(-1))
+    expect(read.lines![0]).toContain('27 older lines of this read are not shown')
+    // Without a budget given it is the default one, 12,000 characters
+    const dflt = await linkedSessions(() => [older]).read('m1.w1')
+    expect(dflt.lines!.join('|').length).toBeLessThan(12_000 + 500)
+    // A machine of this build says the budget it fitted, and its lines are passed on as they are
+    const current = machine({ 'host.readSession': { state: 'idle', lines: ['{"note":"n"}', lines[0]], maxChars: 12_000 } })
+    expect((await linkedSessions(() => [current]).read('m1.w1')).lines).toEqual(['{"note":"n"}', lines[0]])
   })
 
   /*

@@ -125,8 +125,12 @@ from a guess about the app, and the orchestrator has the guide loaded. Codex has
 gets all three. `orchestrator-tools.test.ts` fails if the serialized set and its instructions pass
 `READER_BUDGET_CHARS` (1,000 until #564 gave the set its 392 characters of instructions; 1,400 since,
 the set at 1,375). #581 adds the consented update tool, deferred on Claude like the guide, and its
-instructions pointer: 1,709 characters against a 1,750 ceiling. The full reader profile's resident
-and deferred figures for both CLIs are in [tool-cost.md](tool-cost.md) §11.
+instructions pointer: 1,709 characters against a 1,750 ceiling. #1480 gave `read_session` `tools` (three words) and `maxChars`,
+with no description: +94 characters, 1,803 against a ceiling raised to 1,850 (the reader's resident sum rises by the same 100:
+Claude 2,286 definitions + 413 instructions, 2,562 more deferred; Codex, loading all, 4,848 + 465 = 5,313 against 5,400). The same two
+arguments cost the orchestrator and the scoped seat 68 characters (with a short description each, since the words are not obvious there), whose ceilings rise 9,500 → 9,600 (Codex 9,553) and 2,400 → 2,500
+(Codex 2,450). The full reader profile's resident
+and deferred figures for both CLIs are in [tool-cost.md](tool-cost.md) §11 and §14.
 
 The app-access tools (#371 part A: `find_apps`, `attach_app`, `detach_app`, apps.md §9.4) are the
 orchestrator's too since #1205, as rare commands behind `centralu_run`, for the root apps it attaches
@@ -254,7 +258,16 @@ What one call does (`SessionManager.askProject`, which runs `AskProjectFlow` in 
    the cut and the line spell out the call, as recall's hit does `around`. It also goes to a linked machine
    (`host.readSession`'s `offset`, additive: an older machine answers its plain read, and the hub says that machine cannot read from an offset rather than showing the same cut lines again; a read from an offset always says what it shows, which is how the hub tells them apart). The cut used to send the caller
    to the session by name, and read_session cut every line at 2,000 characters of its JSON with no word of it, so
-   the middle of a long answer could not be read back at all. Named files and folders inside the target project, resolved through symlinks, become
+   the middle of a long answer could not be read back at all. **A read has a total, too (#1480)**: 40 lines of 2,000 characters
+   were about 80,000 characters in one call, all read again on every later request of the reader. The lines of one call come to at
+   most `maxChars` (12,000 by default, brought to 2,000-40,000), the newest that fit, and the newest line always comes. A read
+   around a spot fills outward from it, a side at a time. When it stops early a note line at that end says how many lines are not
+   shown and the `around` (the seq of the nearest hidden line) that reads on; the notes are not counted. `tools` is `none` (tool
+   calls left out), `titles` (one line each, the default, `false`) or `full` (`true`), in the orchestrator's and the reader's
+   definition alike (`fitLines`, `toolLinesOf`). For a linked machine, `host.readSession` takes `maxChars` and `toolLines` (additive;
+   `tools` stays the boolean an older machine's schema accepts) and answers the `maxChars` it held. An older machine ignores both and
+   answers every line it has: its answer has no `maxChars`, so the hub leaves tool lines out itself for `none` and keeps the newest lines
+   that fit with a note (`fitMachineLines`) that cannot name the read that goes on, since those lines carry no seq. Named files and folders inside the target project, resolved through symlinks, become
    readable to the caller for this host's lifetime (`readGrants`); the project root is never granted.
    A grant and each read are compared in one spelling (`canonicalPath`, `isInside` in `dev-services/path-guard.ts`,
    #428), so a short name, another case or a link to the root reads as the place it names.

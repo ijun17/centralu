@@ -915,3 +915,28 @@ it through tool search by "mail".
 Not measured live: whether a Claude session that has to send a message by itself (with no wake to name the call) finds the
 deferred tool by searching, and the first-call argument errors on each CLI. The numbers above are counted from the
 definitions (`orchestrator-tools.test.ts` holds them to the ceilings).
+
+## 14. read_session's total and its two arguments (#1480)
+
+A `read_session` call had no total: 40 lines of up to 2,000 characters came back as about 80,000 characters (about 20k tokens), read
+again on every later request of the reader. It now returns at most `maxChars` (12,000 by default, 2,000 to 40,000, the newest lines
+that fit; [agent-host.md](agent-host.md) §1.2), and `tools` is `none`, `titles` or `full`. Both are in the orchestrator's and the
+reader's definitions, the reader's with **no description** (the answer that stops early names the budget and the call that reads on).
+
+Measured in characters (`residentCost`, `pnpm exec vitest run` on the budget tests), not live in tokens:
+
+| Seat | Before | After | Ceiling |
+|---|---|---|---|
+| reader set (`READER_BUDGET_CHARS`) | 1,709 | 1,803 (+94) | 1,750 → 1,850 |
+| reader, Claude resident (definitions + instructions) | 2,605 | 2,699 | sum of the sets' ceilings |
+| reader, Codex (all loaded) | 5,219 | 5,313 | 5,300 → 5,400 |
+| orchestrator, Codex (developer instructions) | 9,485 | 9,553 (+68) | 9,500 → 9,600 |
+| scoped, Codex | 2,382 | 2,450 (+68) | 2,400 → 2,500 |
+
+The orchestrator and scoped definitions keep a short description for each argument (`Tool calls: one line each (default), whole, or
+none.`; `Most characters returned (12000 default, 40000 at most).`): the same two arguments there were 68 characters, and dropping the
+descriptions was not tried live, so whether a model reaches for `tools: "none"` unprompted there is not measured. `true` and `false`
+still run in every seat (`TOOL_ARGS`) and are not shown, which costs less than saying so.
+
+Not measured live: tokens through `pnpm measure:tools --live`, and whether a reader with the enum and no description picks `maxChars`
+by itself when a note says a read stopped early.
