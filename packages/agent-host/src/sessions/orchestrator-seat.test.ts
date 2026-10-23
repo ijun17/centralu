@@ -669,6 +669,8 @@ describe('a successor reads and recalls its archived handoff lineage (#1487)', (
 
   it('refuses an archived session that is not in its lineage, as it does a missing one', async () => {
     const reader = orchestratorToolsFor(host, 'a', undefined, true)
+    // The lineage opens the archive to its own members only: one of them is read, the neighbour in the archive is not
+    expect(await reader.readSession('old1')).toMatchObject({ ok: true })
     expect(await reader.readSession('stranger')).toEqual({ ok: false, error: 'Not a session in this project: stranger' })
     expect(await reader.readSession('nowhere')).toEqual({ ok: false, error: 'Not a session in this project: nowhere' })
     // Another session’s lineage is its own: `old1`'s chain does not make `a`'s reader of `stranger`
