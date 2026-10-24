@@ -282,7 +282,8 @@ describe('compact_self (#1451)', () => {
     a.state.idle = { idle: false, reason: 'approval' }
     a.endTurn()
     expect(a.sent).toEqual([])
-    a.state.idle = { idle: true }
+    // The card is gone while the session runs background work, which is what the request is for: the held path asks only about the card
+    a.state.idle = { idle: false, reason: 'background' }
     a.emit({ type: 'notice', sessionId: 's1', level: 'info', from: 'Centralu', label: 'x', text: 'the card is gone' })
     expect(a.sent).toEqual([['s1', '/compact']])
 
@@ -314,18 +315,6 @@ describe('compact_self (#1451)', () => {
     // Nothing is pending any more: the request did not wait for the next turn to be spent
     expect(c.c.sweep()).toEqual(['s1'])
     err.mockRestore()
-  })
-
-  it('goes on a held request even while background work runs: the rule for a request made in a turn does not ask (#1500)', () => {
-    const w = world()
-    w.startTurn()
-    w.c.request('s1')
-    w.state.idle = { idle: false, reason: 'question' }
-    w.endTurn()
-    // The card closed; the session still runs background work, which is what the request is for
-    w.state.idle = { idle: false, reason: 'background' }
-    w.emit({ type: 'question_resolved', sessionId: 's1', requestId: 'q1' })
-    expect(w.sent).toEqual([['s1', '/compact']])
   })
 
   it('ignores the end of a turn that comes after stop(): no timer, no send (#1500)', () => {

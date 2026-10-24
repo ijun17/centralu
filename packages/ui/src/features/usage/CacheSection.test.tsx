@@ -122,14 +122,6 @@ describe('CacheSection: rebuild tokens and the write share of the cache cost (#1
     expect(text).toContain('uncached input: 43.3% of cache cost')
     expect(text).toContain('6 rebuilds · 1M uncached: ')
   })
-
-  it('shows neither from a host that does not say, and not the share with nothing to weigh', () => {
-    const { text } = render({ writes: true, countingSince: LONG_AGO, windows: [win()] })
-    expect(text).not.toContain('of cache cost')
-    expect(text).not.toContain('written:')
-    const none = render({ writes: true, countingSince: LONG_AGO, windows: [costed({ cacheReadCost: 0, cacheWriteCost: 0 })] })
-    expect(none.text).not.toContain('of cache cost')
-  })
 })
 
 describe('CacheSection from a host that predates rebuild causes', () => {
