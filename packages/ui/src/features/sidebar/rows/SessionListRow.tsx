@@ -2,7 +2,6 @@ import type { Dispatch, SetStateAction } from 'react'
 import { isUnread } from '@cc/core'
 import { childrenGroupKey } from '../../../store/foldGroups.js'
 import { useStore } from '../../../store/store.js'
-import { archiveNeedsAsk } from '../../../store/sessions/lifecycle.js'
 import { BackgroundMark } from '../../session/BackgroundTasks.jsx'
 import { DotsIcon } from '../../../components/icons.jsx'
 import { groupAttention } from '../fold.js'
@@ -231,8 +230,8 @@ export function SessionListRow({
               onClose={() => setSessionMenu(null)}
               onRename={() => setRenaming(s.id)}
               onHandoff={() => setHandingOff(s.id)}
-              // An idle session is archived at once, with Undo on the toast; one that is busy asks first (#1512)
-              onDelete={() => (archiveNeedsAsk(s) ? setConfirming(s.id) : void useStore.getState().deleteSession(s.id, false, true))}
+              // An idle session is archived at once, with Undo on the toast; the host asks first when that would lose something (#1512)
+              onDelete={() => void useStore.getState().archiveSession(s.id).then((asks) => asks && setConfirming(s.id))}
             />
           )}
         </>

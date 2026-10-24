@@ -106,6 +106,93 @@ test('an idle session is archived at once and Undo on the toast brings it back; 
   await expect(page.getByTestId(`session-row-${id}`)).toBeVisible()
 })
 
+// #1512 review: the host decides what an archive loses, and the toast lets go of the pointer
+test('a session the host says would lose something asks first and names it; Cancel archives nothing, Archive offers Undo', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const id = await answeredSession(page, 'alpha', 'what is the answer')
+  // The mock host stands for the real one's rule: a session an agent started owes that agent a report (the mailbox, waits and cards say the same)
+  await page.evaluate((sid: string) => ((window as any).__mock.store.sessions.get(sid).askedBy = 'an-agent'), id)
+  await page.getByTestId(`session-menu-${id}`).click()
+  // The window sees nothing busy, so the menu does not promise a question; the host's answer opens it
+  await page.getByTestId(`delete-session-${id}`).click()
+  await expect(page.getByTestId('confirm-delete')).toBeVisible()
+  await expect(page.getByTestId('delete-losses')).toContainText('owes it a report')
+  await expect(page.getByTestId('delete-losses')).toContainText('Undo does not bring them back')
+  await page.getByRole('button', { name: 'Cancel' }).click()
+  await expect(page.getByTestId(`session-row-${id}`)).toBeVisible()
+  expect(await page.evaluate(() => (window as any).__mock.trashBin.size)).toBe(0)
+
+  await page.getByTestId(`session-menu-${id}`).click()
+  await page.getByTestId(`delete-session-${id}`).click()
+  await page.getByTestId('confirm-delete-yes').click()
+  await expect(page.getByTestId(`session-row-${id}`)).toHaveCount(0)
+  await expect(page.getByTestId('toast-action')).toHaveText('Undo')
+})
+
+test('an archive with uncommitted work in its worktree asks, as the old dialog did', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const id = await answeredSession(page, 'alpha', 'what is the answer')
+  await page.evaluate((sid: string) => {
+    const m = (window as any).__mock
+    m.store.sessions.get(sid).worktree = { path: '/tmp/alpha-wt', branch: 'feat/x' }
+    m.mockWorktreeDirty = true
+    ;(window as any).__store.setState((st: any) => ({ sessions: { ...st.sessions, [sid]: { ...st.sessions[sid], worktree: { path: '/tmp/alpha-wt', branch: 'feat/x' } } } }))
+  }, id)
+  await page.getByTestId(`session-menu-${id}`).click()
+  await page.getByTestId(`delete-session-${id}`).click()
+  await expect(page.getByTestId('confirm-delete')).toBeVisible()
+  await expect(page.getByTestId('worktree-dirty')).toContainText('uncommitted')
+})
+
+// Pressing Undo or Dismiss removes the element under the pointer or the focus, which never says it left: the toast after it must still go by itself
+test.describe('a toast goes by itself after Undo or Dismiss took the previous one away', () => {
+  async function archived(page: Page) {
+    await setup(page, { projects: ['/tmp/alpha'] })
+    const id = await answeredSession(page, 'alpha', 'what is the answer')
+    await deleteSession(page, id)
+    await expect(page.getByTestId('toast-action')).toHaveText('Undo')
+    return id
+  }
+
+  test('Undo clicked', async ({ page }) => {
+    const id = await archived(page)
+    await page.getByTestId('toast-action').click()
+    await expect(page.getByTestId(`session-row-${id}`)).toBeVisible()
+    await page.mouse.move(5, 5)
+    await expect(page.getByTestId('toast')).toContainText('Restored')
+    await expect(page.getByTestId('toast')).toHaveCount(0, { timeout: 6000 })
+  })
+
+  test('Undo pressed with the keyboard', async ({ page }) => {
+    const id = await archived(page)
+    await page.mouse.move(5, 5)
+    await page.getByTestId('toast-action').focus()
+    await page.keyboard.press('Enter')
+    await expect(page.getByTestId(`session-row-${id}`)).toBeVisible()
+    await expect(page.getByTestId('toast')).toContainText('Restored')
+    await expect(page.getByTestId('toast')).toHaveCount(0, { timeout: 6000 })
+  })
+
+  test('Dismiss clicked, then a toast that only says something', async ({ page }) => {
+    await archived(page)
+    await page.getByTestId('toast-dismiss').click()
+    await expect(page.getByTestId('toast')).toHaveCount(0)
+    await page.mouse.move(5, 5)
+    await page.evaluate(() => (window as any).__store.getState().setToast('Something else happened'))
+    await expect(page.getByTestId('toast')).toContainText('Something else happened')
+    await expect(page.getByTestId('toast')).toHaveCount(0, { timeout: 6000 })
+  })
+
+  test('while the pointer rests on a toast with an Undo, it stays past its time', async ({ page }) => {
+    await archived(page)
+    await page.getByTestId('toast').hover()
+    await page.waitForTimeout(9000)
+    await expect(page.getByTestId('toast-action')).toBeVisible()
+    await page.mouse.move(5, 5)
+    await expect(page.getByTestId('toast')).toHaveCount(0, { timeout: 12000 })
+  })
+})
+
 test('deleting all archived sessions asks once and deletes every session in it for good', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   const a = await answeredSession(page, 'alpha', 'first to go')

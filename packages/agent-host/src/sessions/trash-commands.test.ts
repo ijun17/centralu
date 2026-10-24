@@ -10,6 +10,8 @@ import { SessionManager } from './manager.js'
 import { CrossAdapter } from './cross-project.test-helpers.js'
 import { commandsFor, profileAllows, RARE_TIERS } from './orchestrator-tools.js'
 import { eventually } from '../../../../tooling/test-timing.js'
+import { MailService } from '../mail/service.js'
+import { openBy } from '../mail/mail.test-helpers.js'
 
 /**
  * The orchestrator's session archive commands (#1219): listing, restoring and moving subagent steps to the session archive act at once;
@@ -300,6 +302,40 @@ describe('delete_session', () => {
     expect(question).toContain('- A session it started owes it a report; it will not be told, and the report is dropped.')
     expect(r.isError).toBe(true)
     expect(await listed()).toContain(waited.id)
+  })
+
+  it('asks when the session is the assignee of an unfinished mail thread, naming it: restoring does not hand the thread back', async () => {
+    const mail = new MailService(store.mail, { hostId: () => 'hub-aaaaaaaa' })
+    mgr.useMail({ sessionGone: (id) => void mail.sessionGone(id), openWork: (id) => mail.openWorkOf(id), sessionChanged: () => {} })
+    const orc = await mgr.orchestrator()
+    const worker = await newSession('Worker')
+    const giver = await newSession('Giver')
+    const a = mail.sessionAddress(worker.id)
+    const { thread } = openBy(mail, { by: mail.sessionAddress(giver.id), kind: 'assign', subject: 'Land #12', body: 'please', assignee: a })
+    mail.update(thread.id, a, { state: 'running' })
+    const denied = await answered(orc.id, 'delete_session', { sessionId: worker.id }, 'deny')
+    expect(denied.question).toContain('It is the assignee of an unfinished mail thread ("Land #12")')
+    expect(denied.r.isError).toBe(true)
+    expect(await listed()).toContain(worker.id)
+    expect(store.mail.thread(thread.id)).toMatchObject({ assignee: a, state: 'running' })
+  })
+
+  it('asks for a session on a linked machine, which that machine decides on its own: the guard on `local`', async () => {
+    const orc = await mgr.orchestrator()
+    const s = await newSession('Far work')
+    const calls: string[] = []
+    // As the hub sees it: the same session, listed as another machine's, and its delete routed there
+    mgr.useWindowRpc(async (method, params) => {
+      calls.push(method)
+      const out = await rpc(method, params)
+      return method === 'sessions.list' ? (out as SessionInfo[]).map((x) => (x.id === s.id ? { ...x, machine: 'far-box' } : x)) : out
+    })
+    const denied = await answered(orc.id, 'delete_session', { sessionId: s.id }, 'deny')
+    expect(denied.question).toContain('on the linked machine')
+    expect(denied.question).toContain("What a linked machine lets go of when it moves a session is that machine's to say")
+    expect(denied.r.isError).toBe(true)
+    expect(calls).not.toContain('agents.deleteSession')
+    expect(await listed()).toContain(s.id)
   })
 
   it('decides at the last moment: a message the person sends while the card stands keeps the session, and its new turn is not cut', async () => {

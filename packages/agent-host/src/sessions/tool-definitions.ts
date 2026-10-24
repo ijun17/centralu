@@ -317,7 +317,7 @@ export const ORCHESTRATOR_TOOLS = [
   {
     name: 'delete_session',
     description:
-      "Archives a session, as the window's delete does; restore_archived brings it back. Its worktree and the tool's own conversation file stay. For sessions that are not yours: a child you started is deleted with agent_session. The person approves a card first when moving it drops something restoring does not bring back (a caller waiting for its report, reports it owes), and always under the safe preset; an idle session nobody waits on is moved with no card, so tell the person what you archived. Refused while the session is working, waiting on the person or has a background job running.",
+      "Archives a session, as the window's delete does; restore_archived brings it back. Its worktree and the tool's own conversation file stay. For sessions that are not yours: a child you started is deleted with agent_session. The person approves a card first when moving it drops something restoring does not bring back (a caller waiting for its report, reports it owes, unfinished mail threads it is assigned or owns), and always under the safe preset; an idle session nobody waits on is moved with no card, so tell the person what you archived. Refused while the session is working, waiting on the person or has a background job running.",
     schema: z.object({ sessionId: z.string().describe('The id list_sessions gives.') }),
   },
   {

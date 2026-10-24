@@ -354,7 +354,8 @@ Done since the baseline: rank 11 (#1512). An idle session is archived at once an
 Undo, so `delete-session.mouse` is 10 · 6.52 s (Chromium; the baseline above is WebKit on Linux), undoing it from
 the toast is `undo-archive.mouse` (5 · 3.17 s), and the same holds for a session's subagent steps
 (`trash-subagent-steps.mouse`, 13 · 8.63 s, was 19) and for restoring an app version. A session that is working,
-waiting on the person or running a background job still asks first.
+waiting on the person or running a background job still asks first, and so does one the host says holds something the archive
+drops (a report owed, a wait on it, an unfinished mail thread) or a worktree with uncommitted changes.
 
 Not candidates: the one-click tasks, the grid (6.6 s, and the empty grid says how), and the theme
 (8.4 s, but done once).

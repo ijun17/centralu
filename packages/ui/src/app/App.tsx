@@ -744,8 +744,13 @@ function Toast() {
   const toastAt = useStore((s) => s.toastAt)
   const action = useStore((s) => s.toastAction)
   const setToast = useStore((s) => s.setToast)
-  // The pointer or the keyboard on the toast holds it: an Undo that goes while it is being pressed is no Undo (#1512)
-  const [held, setHeld] = useState(false)
+  /*
+   * The pointer or the keyboard on the toast holds it: an Undo that goes while it is being pressed is no Undo (#1512). Held
+   * for one toast, not for the screen: pressing Undo or Dismiss removes the element under the pointer, which then never says it
+   * left, so a flag kept past this toast would hold every later one for good.
+   */
+  const [heldFor, setHeldFor] = useState<number | null>(null)
+  const held = heldFor === toastAt
   useEffect(() => {
     if (!toast || held) return
     // A toast with an Undo stays long enough to be read and pressed (#1512); one that only says something goes as before
@@ -766,10 +771,10 @@ function Toast() {
       className="absolute bottom-5 left-1/2 z-30 flex -translate-x-1/2 items-center gap-2 rounded-md border border-line bg-surface-raised py-2 pl-3 pr-1.5 text-sm text-ink shadow-(--shadow-popover)"
       data-testid="toast"
       role="status"
-      onMouseEnter={() => setHeld(true)}
-      onMouseLeave={() => setHeld(false)}
-      onFocus={() => setHeld(true)}
-      onBlur={() => setHeld(false)}
+      onMouseEnter={() => setHeldFor(toastAt)}
+      onMouseLeave={() => setHeldFor(null)}
+      onFocus={() => setHeldFor(toastAt)}
+      onBlur={() => setHeldFor(null)}
     >
       <span>{toast}</span>
       {action && (

@@ -200,9 +200,8 @@ function OrchestratorChildRow({ s }: { s: SessionSummary }) {
             label={archiveNeedsAsk(s) ? 'Archive session…' : 'Archive session'}
             onClick={() => {
               setMenu(null)
-              // An idle session is archived at once, with Undo on the toast; one that is busy asks first (#1512)
-              if (archiveNeedsAsk(s)) setConfirming(true)
-              else void deleteSession(s.id, false, true)
+              // An idle session is archived at once, with Undo on the toast; the host asks first when that would lose something (#1512)
+              void useStore.getState().archiveSession(s.id).then((asks) => asks && setConfirming(true))
             }}
             testId={`delete-session-${s.id}`}
             danger
