@@ -512,6 +512,9 @@ describe('an orchestrator whose tool cannot put each step to the person is not a
     why = 'the orchestrator runs on a tool that cannot ask the person for each step of a request yet'
     expect(reasonOf(() => mail.post(thread.id, ASKER, { kind: 'note', body: 'and also this' }))).toBe('policy')
     expect(reasonOf(() => openBy(mail, { by: OTHER, kind: 'assign', subject: 's', body: 'b', assignee: ORCH }))).toBe('policy')
+    // A worker’s reply in a thread the orchestrator opened for it is no request, and is not held up by it
+    const given = openBy(mail, { by: ORCH, kind: 'assign', subject: 'a job', body: 'please do it', assignee: OTHER }).thread
+    expect(mail.post(given.id, OTHER, { kind: 'answer', body: 'done' }).duplicate).toBe(false)
     // The orchestrator itself, the person and replies from the orchestrator are not held up by it
     expect(mail.post(thread.id, ORCH, { kind: 'answer', body: 'sorry' }).duplicate).toBe(false)
     expect(mail.post(thread.id, 'person', { kind: 'note', body: 'I will do it' }).duplicate).toBe(false)
@@ -520,24 +523,6 @@ describe('an orchestrator whose tool cannot put each step to the person is not a
 })
 
 describe('what the review of the hook found in the mail (§9.7)', () => {
-  it('a worker’s reply in a thread the orchestrator opened for it is no request: an orchestrator that cannot gate still takes it', () => {
-    const store = new Store()
-    const mail = new MailService(store.mail, {
-      hostId: () => HOST,
-      now: () => NOW,
-      policy: mailRelations({
-        session: (id) => (kinds[id] ? { kind: kinds[id] } : undefined),
-        orchestratorAsks: () => 'the orchestrator runs on a tool that cannot ask the person for each step of a request yet',
-        mailTool: () => true,
-        mailCommand: (id) => id === 'orch',
-        inThread: (t, who) => store.mail.participants(t).some((p) => p.address === who && p.leftAt === null),
-      }),
-    })
-    const { thread } = openBy(mail, { by: ORCH, kind: 'assign', subject: 'a job', body: 'please do it', assignee: OTHER })
-    expect(mail.post(thread.id, OTHER, { kind: 'answer', body: 'done' }).duplicate).toBe(false)
-    store.close()
-  })
-
   it('a retry of the last word that was allowed gets that word back, not a refusal', () => {
     const w = world()
     const { thread } = ask(w)
