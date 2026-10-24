@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process'
-import { chmodSync, copyFileSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -11,11 +11,13 @@ const hasPgrep = sleepBinary !== '' && spawnSync('pgrep', ['-x', 'nothing-by-thi
 /*
  * #1503 (review of #1505): a `playwright install-deps` that hit its step limit is killed by the runner, but the root
  * `apt-get` it started goes on holding dpkg's locks, and the second try's `dpkg --configure -a` then fails at once.
- * The second try first runs this script. The stand-ins here are copies of the real `sleep` binary under a made-up name,
- * started by this test, so nothing of the machine's own is stopped. A copy, not a script: pgrep -x reads the name of the
- * executable, which for a script is its interpreter (`bash`) on macOS, and it keeps at most 15 characters of it.
+ * The second try first runs this script. The stand-ins here are symlinks to the real `sleep` binary under a made-up name,
+ * started by this test, so nothing of the machine's own is stopped. Not a script: pgrep -x reads the name of the
+ * executable, which for a script is its interpreter (`bash`) on macOS, and it keeps at most 15 characters of it. Not a
+ * copy either: macOS kills a copied platform binary at exec (code signing). A process is named after the path it was
+ * exec'd by, not where a link leads, on both systems.
  */
-describe.skipIf(!hasPgrep)('the second try of a browser install first stops what the first left running (#1503)', () => {
+describe.skipIf(!hasPgrep)('the second try of a browser install first stops what the first left running (#1503)', { timeout: 20_000 }, () => {
   const started: number[] = []
   const folders: string[] = []
   afterEach(() => {
@@ -34,8 +36,7 @@ describe.skipIf(!hasPgrep)('the second try of a browser install first stops what
     const dir = mkdtempSync(join(tmpdir(), 'stop-apt-'))
     folders.push(dir)
     const file = join(dir, name)
-    copyFileSync(sleepBinary, file)
-    chmodSync(file, 0o755)
+    symlinkSync(sleepBinary, file)
     // An ignored signal stays ignored through exec, so the stubborn one is the copy started by a shell that ignores SIGTERM
     const child = stubborn
       ? spawn('/bin/sh', ['-c', 'trap "" TERM; exec "$0" 1000', file], { stdio: 'ignore', detached: true })
