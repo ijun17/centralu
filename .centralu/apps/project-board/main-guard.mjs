@@ -18,7 +18,7 @@ import { fetchRefs, git, GitError, remoteFor, topLevel } from './git.mjs'
 import { short } from './util.mjs'
 import { pathMatches } from './versions.mjs'
 import { commitWithout, prOfSubject } from './main-revert.mjs'
-import { CAUSE_TEXT, classifyRun, looksLikeNetworkError } from './run-failure.mjs'
+import { CAUSE_TEXT, classifyRun, jobFailure, looksLikeNetworkError } from './run-failure.mjs'
 
 export const GUARD_MS = Number(process.env.PROJECT_BOARD_QUEUE_GUARD_MS) || 2 * 60_000
 /** A bisect probe whose run has not finished after this long ends the hunt (no runner, a stuck run): an issue says so */
@@ -129,15 +129,21 @@ export async function commitsBetween(dir, repo, defaultBranch, green, red) {
  */
 export async function diagnose(repo, run, { failingLine, flaky = QUEUE.flakyJobs } = {}) {
   const jobs = await runJobSteps(repo, run.id)
-  const failed = jobs.filter((j) => j.conclusion && !['success', 'skipped', 'neutral', 'cancelled'].includes(j.conclusion))
-  for (const j of failed) {
+  let failed = jobs.filter((j) => j.conclusion && !['success', 'skipped', 'neutral', 'cancelled'].includes(j.conclusion))
+  // A job that ran out of time ends 'cancelled', with GitHub's word for it only in its annotation (#1503: three e2e shards,
+  // `playwright install` still running, no failing line). Read those annotations as the queue does, but only when no job
+  // failed: CI cancels the rest of a run when `verify` fails (fail fast), and each of those would cost a call to say nothing.
+  const cancelled = failed.length ? [] : jobs.filter((j) => j.conclusion === 'cancelled')
+  for (const j of [...failed, ...cancelled]) {
     j.notes = j.id != null ? await checkRunNotes(repo, j.id) : []
     const step = j.steps.find((s) => s.conclusion === 'failure')
     if (step && /^Run (?:pnpm|npm|yarn) /i.test(step.name) && failingLine && j.id != null) j.log = await failingLine(repo, j)
   }
+  // Named with the failed jobs: a cancelled job that has a cause (the time limit, a lost runner), not one cancelled with no reason
+  failed = [...failed, ...cancelled.filter((j) => jobFailure(j, { flaky })?.cause !== 'cancelled')]
   const why = classifyRun(run, jobs, { flaky })
   const first = (why.job && failed.find((j) => String(j.id) === why.job.id)) ?? failed[0] ?? null
-  return { names: failed.map((j) => j.name), first, kind: why.real ? 'test' : 'infrastructure', cause: why.cause, step: why.step }
+  return { names: failed.map((j) => j.name), first, kind: why.real ? 'test' : 'infrastructure', cause: why.cause, step: why.step, inSetup: why.inSetup }
 }
 
 /** How many runs' reruns the guard remembers: a run is rerun once, and the newest are the only ones that can come up again */
@@ -257,8 +263,10 @@ export async function guardTick({ q, update, now = Date.now(), renew, act, dir =
       return stop(`it is an infrastructure failure (${what}), and the rerun asked for at ${rerun.at.slice(11, 16)} UTC has not started. Nothing was reverted.`)
     }
     // A timeout, or a job on the flaky list, that fails again after a rerun may be the commit's (it hangs, it breaks that job
-    // only), so it is looked for as a test failure
-    if (jobs.cause !== 'setup' && jobs.cause !== 'runner') base.kind = 'test'
+    // only), so it is looked for as a test failure. Not a timeout inside a step that sets the job up (#1503: three e2e shards
+    // ran out of time in `playwright install`, a slow package mirror): nothing of the commit ran, so it is the runner's, as
+    // a lost runner is, and reported.
+    if (jobs.cause !== 'setup' && jobs.cause !== 'runner' && !jobs.inSetup) base.kind = 'test'
     else {
       // Failed in setup (or lost its runner) again. Setup runs on the runner, but what it installs is a commit's to change:
       // the browser's version comes from the lockfile, the system libraries from build.yml, and none of that runs on a pull

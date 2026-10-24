@@ -150,6 +150,13 @@ describe('what the merge queue decides for one poll', () => {
     expect(classifyRun(failedRun, [job('e2e (webkit 2/5)', 'failure', { ...failedStep, notes: ["The action 'pnpm e2e' has timed out after 25 minutes."] })])).toMatchObject({ real: false, cause: 'timeout' })
     // A test's own timeout is a test failure
     expect(classifyRun(failedRun, [job('verify', 'failure', { ...failedStep, notes: ['Error: Test timed out in 5000ms.'] })])).toMatchObject({ real: true })
+    // #1503: the step the limit ended says where. e2e (webkit 1/5) of 2026-10-23: the job's limit hit inside `Install WebKit`
+    // (the step is 'cancelled', the tests 'skipped'); a step's own limit marks that step 'failure'. Both are setup; the tests' step is not
+    const inStep = (name: string, conclusion: string) => ({ steps: [{ name: 'Set up job', conclusion: 'success' }, { name, conclusion }, { name: 'pnpm e2e (shard 1/5)', conclusion: name.startsWith('pnpm') ? conclusion : 'skipped' }] })
+    expect(classifyRun(cancelledRun, [job('e2e (webkit 1/5)', 'cancelled', { ...inStep('Install WebKit', 'cancelled'), notes: timeoutNote })])).toMatchObject({ real: false, cause: 'timeout', inSetup: true, step: 'Install WebKit' })
+    expect(classifyRun(failedRun, [job('e2e (webkit 1/5)', 'failure', { ...inStep("Install WebKit system libraries, second try", 'failure'), notes: ["The action 'Install WebKit system libraries, second try' has timed out after 3 minutes."] })])).toMatchObject({ real: false, cause: 'timeout', inSetup: true, step: "Install WebKit system libraries, second try" })
+    expect(classifyRun(cancelledRun, [job('e2e (webkit 1/5)', 'cancelled', { ...inStep('pnpm e2e (shard 1/5)', 'cancelled'), notes: timeoutNote })])).toMatchObject({ real: false, cause: 'timeout', inSetup: false })
+    expect(classifyRun(cancelledRun, [job('e2e (webkit 1/5)', 'timed_out')])).toMatchObject({ real: false, cause: 'timeout', inSetup: false })
     // A lost runner
     const lost = ['The hosted runner: GitHub Actions 12 lost communication with the server. Anything in your workflow that terminates the runner process can cause this error.']
     expect(classifyRun(failedRun, [job('windows tests', 'failure', { notes: lost })])).toMatchObject({ real: false, cause: 'runner' })
@@ -3308,6 +3315,61 @@ describe("the main guard does not revert a commit for the runner's own failure (
     expect(issues()[0]!.body).toContain('Kind of failure: **test failure**')
     expect(mainRedNotices()[0]!.text).toContain('e2e (webkit 4/5) failed at')
     expect(mainRedNotices()[0]!.text).toContain('(test failure)')
+    expect(guardOnDisk().hunt).toMatchObject({ kind: 'test', outcome: 'reverting' })
+  })
+
+  // #1503: three e2e shards ran out of time inside `playwright install` (a slow mirror). GitHub ends the job 'cancelled' and writes
+  // the reason only in its annotation, which the guard did not read for a cancelled job, so the second one looked like a plain
+  // cancel and was hunted like a test failure
+  const outOfTime = (id: number, inStep: string) => ({
+    ...webkitJob(id),
+    conclusion: 'cancelled',
+    steps: webkitJob(id).steps.map((s) => (s.name === inStep ? { ...s, conclusion: 'cancelled' } : s.name === 'Install WebKit' ? { ...s, conclusion: 'success' } : s.name.startsWith('Run actions/upload') ? { ...s, conclusion: 'skipped' } : s)),
+  })
+  const limitNote = { '31': [{ message: 'The job has exceeded the maximum execution time of 15 minutes.' }] }
+
+  it('reruns a job that ran out of time in the browser install once, then reports it and reverts nothing, whatever the commits changed', async () => {
+    const repo = mainRepo([{ subject: 'build(deps): bump playwright (#81)', files: ['pnpm-lock.yaml'] }])
+    const sha = repo.shas[0]!
+    seedQueue([{ repo: R, pr: 81, lowers: [], owner: 'tester', author: 'writer', state: 'merged', commit: sha, title: 'build(deps): bump playwright', updatedAt: new Date().toISOString(), reruns: {} }])
+    const stalled = outOfTime(31, 'Install WebKit')
+    guardRuntime(repo, {
+      branchRuns: { main: [mainRun(990, sha, 'failure'), mainRun(980, repo.green, 'success')] },
+      jobs: { 990: [stalled] },
+      annotations: limitNote,
+      logs: { '31': '##[group]Run pnpm exec playwright install --with-deps webkit\nGet:97 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 freepats all 20060219-4build1 [5400 kB]' },
+      on: { 'rerun-failed:990': { branchRuns: { main: [secondAttempt(sha, 'failure'), mainRun(980, repo.green, 'success')] } } },
+    })
+    await call('merge_queue')
+    await until(() => issues().length > 0 && mainRedNotices().length > 0, 'the report')
+    await new Promise((r) => setTimeout(r, 1_000))
+    expect(reruns()).toEqual([['rerun-failed', '990']])
+    expect(writes().filter((w) => w[0] === 'pr-create')).toEqual([])
+    expect(queueOnDisk().items.filter((i: any) => i.state !== 'merged')).toEqual([])
+    expect(issues()).toHaveLength(1)
+    expect(issues()[0]!.title).toBe(`Main is red at ${sha.slice(0, 7)}: an infrastructure failure, not reverted`)
+    expect(issues()[0]!.body).toContain('Kind of failure: **infrastructure failure**')
+    expect(issues()[0]!.body).toContain('step "Install WebKit" in e2e (webkit 4/5): a job that hit its timeout')
+    expect(issues()[0]!.body).toContain('Nothing was reverted')
+    expect(guardOnDisk().hunt).toMatchObject({ red: sha, kind: 'infrastructure', cause: 'timeout', step: 'Install WebKit', outcome: 'reported' })
+  })
+
+  it('still hunts and reverts a commit when the job ran out of time in the tests, after one rerun', async () => {
+    const repo = mainRepo([{ subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] }])
+    const sha = repo.shas[0]!
+    seedQueue([{ repo: R, pr: 81, lowers: [], owner: 'tester', author: 'writer', state: 'merged', commit: sha, title: 'feat(ui): change 81', updatedAt: new Date().toISOString(), reruns: {} }])
+    const hung = outOfTime(31, 'pnpm e2e (shard 4/5)')
+    guardRuntime(repo, {
+      branchRuns: { main: [mainRun(990, sha, 'failure'), mainRun(980, repo.green, 'success')] },
+      jobs: { 990: [hung] },
+      annotations: limitNote,
+      logs: { '31': '##[group]Run pnpm e2e\n  ✓ e2e/a.spec.ts opens' },
+      on: { 'rerun-failed:990': { branchRuns: { main: [secondAttempt(sha, 'failure'), mainRun(980, repo.green, 'success')] } } },
+    })
+    await call('merge_queue')
+    await until(() => guardOnDisk().hunt?.outcome === 'reverting' && mainRedNotices().length > 0, 'the revert')
+    expect(reruns()).toHaveLength(1)
+    expect(writes().filter((w) => w[0] === 'pr-create')).toHaveLength(1)
     expect(guardOnDisk().hunt).toMatchObject({ kind: 'test', outcome: 'reverting' })
   })
 

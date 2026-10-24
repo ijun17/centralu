@@ -604,7 +604,10 @@ looked into).
   like a test failure (a probe without the bad commit passes setup). Otherwise it is reported (an issue and a
   notice, "an infrastructure failure, not a commit's", naming how many commits it checked), never
   reverted, as is a lost runner again. A timeout, or a job on the flaky list, that fails again is looked
-  into as a test failure. A rerun GitHub refuses, or has not started in 10 minutes, is reported the same
+  into as a test failure, except a timeout in a step that sets the job up (#1503: the step the limit ended is the one GitHub
+  marks 'cancelled', or 'failure' for a step's own `timeout-minutes`; "Install WebKit" and the like): nothing of the commit
+  ran, so it is reported as a lost runner is, never hunted. A job cancelled at its time limit carries GitHub's word only in its
+  annotation, so the guard reads the annotations of cancelled jobs too, when no job of the run failed. A rerun GitHub refuses, or has not started in 10 minutes, is reported the same
   way. Any real failure in the run makes it a test failure.
   The notice, the issue ("Kind of failure: **infrastructure failure**", "**setup failure, after a rerun**" or "**test failure**") and the revert
   pull request say which. The line quoted is the first error line of the step that failed first

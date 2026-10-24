@@ -587,13 +587,13 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-webkit
 
-      - name: Install WebKit's system libraries
+      - name: Install WebKit system libraries
         id: libraries
         timeout-minutes: 3
         continue-on-error: true
         run: pnpm exec playwright install-deps webkit
 
-      - name: Install WebKit's system libraries, second try
+      - name: Install WebKit system libraries, second try
         if: steps.libraries.outcome == 'failure'
         timeout-minutes: 3
         run: |
@@ -669,13 +669,13 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-chromium
 
-      - name: Install Chromium's system libraries
+      - name: Install Chromium system libraries
         id: libraries
         timeout-minutes: 3
         continue-on-error: true
         run: pnpm exec playwright install-deps chromium
 
-      - name: Install Chromium's system libraries, second try
+      - name: Install Chromium system libraries, second try
         if: steps.libraries.outcome == 'failure'
         timeout-minutes: 3
         run: |
@@ -813,13 +813,13 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-webkit
 
-      - name: Install WebKit's system libraries
+      - name: Install WebKit system libraries
         id: libraries
         timeout-minutes: 3
         continue-on-error: true
         run: pnpm exec playwright install-deps webkit
 
-      - name: Install WebKit's system libraries, second try
+      - name: Install WebKit system libraries, second try
         if: steps.libraries.outcome == 'failure'
         timeout-minutes: 3
         run: |
