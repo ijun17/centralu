@@ -975,13 +975,16 @@ step shows on the screen.
    data (with `destructiveHint: false`), `'routine'` for an ordinary write of this project's own pull
    requests, issues and queue (no card in a trusted project's own app under `normal`), and
    `'centralu/askWhen': { push: true, path: '*' }` to ask for a call where any named argument holds that value
-   (`'*'`: is set at all). This app declares `ack`, `unqueue` and `mark_answer_recorded` local, and `comment`,
-   `edit_comment`, `file_issue`, `open_pr` and `rebase_stack` (both ask when `path` names a checkout of the
-   caller's choosing, whose scripts and hooks they would run outside the session's sandbox; `rebase_stack` also
-   when `push` is true), `set_item_fields`, `add_item`, `mark_ready`, `queue_merge`, `merge_when_green` and
-   `integrate` routine. `release` and `edit_private_words` declare nothing and always ask (a session refused for
-   a private word must not be able to remove it unasked and post again). A new write declares nothing until its
-   risk is judged.
+   (`'*'`: is set at all), and `'centralu/askUnless'` to ask unless one does. This app declares `ack`, `unqueue`
+   and `mark_answer_recorded` local, and `comment`, `file_issue`, `set_item_fields`, `add_item`, `mark_ready`,
+   `open_pr` and `rebase_stack` routine. `rebase_stack` asks when `path` names a checkout of the caller's choosing
+   (its git would run there) or when `push` is true. `open_pr` asks unless `skipPrePr` is given (or `dryRun`):
+   `pnpm pre-pr` runs the tests and the vitest config of the head the session pushed, outside any sandbox, and also
+   when `path` is set. `merge_when_green`, `queue_merge`, `integrate`, `edit_comment`, `release` and
+   `edit_private_words` declare nothing and always ask. The merges, so a card stays the check on "never merge your
+   own pull request" (the owner's call, 2026-10-24); `edit_comment`, because every comment is under the one gh
+   login and the owner's cannot be told from the session's; the word list, so a session refused for a private
+   word cannot remove it unasked and post again. A new write declares nothing until its risk is judged.
 5. **Visibility**: by default a tool is visible to agents and to the screen. A tool only the screen
    should call gets `_meta: { ui: { visibility: ['app'] } }`; one only agents should call gets
    `['model']`.

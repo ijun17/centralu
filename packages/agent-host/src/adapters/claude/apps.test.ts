@@ -436,6 +436,11 @@ describe('approval of app tools — declared risk x preset x whose app it is', (
     expect(await decide('mcp__app-board__merge')).toEqual(allowed())
     expect(await decide('mcp__app-board__restack', { pr: 3 })).toEqual(allowed({ pr: 3 }))
     expect(await decide('mcp__app-board__restack', { pr: 3, push: true })).toBe('asked-the-human')
+    // `open` is routine only when it runs no code of the head (skipPrePr) or opens nothing (dryRun): the board's open_pr
+    expect(await decide('mcp__app-board__open', { head: 'b' })).toBe('asked-the-human')
+    expect(await decide('mcp__app-board__open', { head: 'b', skipPrePr: 'a fork' })).toEqual(allowed({ head: 'b', skipPrePr: 'a fork' }))
+    expect(await decide('mcp__app-board__open', { head: 'b', dryRun: true })).toEqual(allowed({ head: 'b', dryRun: true }))
+    expect(await decide('mcp__app-board__open', { head: 'b', skipPrePr: 'a fork', path: 'C:/other' })).toBe('asked-the-human')
     expect(await decide('mcp__app-board__liar')).toBe('asked-the-human')
     expect(await decide('mcp__app-board__release')).toBe('asked-the-human')
   })
@@ -473,6 +478,38 @@ describe('approval of app tools — declared risk x preset x whose app it is', (
     expect(await decide('mcp__app-shared__merge')).toBe('asked-the-human')
     // Bookkeeping in its own data is not about whose project it is
     expect(await decide('mcp__app-shared__note')).toEqual(allowed())
+  })
+
+  /**
+   * "Own" needs the session to be a project's and the app to be that project's (`unasked` in session-apps.ts). Each of
+   * its two guards is the only thing between the call and a card in one case the attach rules do not reach on their own:
+   * an app the session attached itself can be any project's, or the user's.
+   */
+  describe('whose app it is, one guard at a time', () => {
+    const attachOnDemand = (ref: { projectId: string | null; appId: string }, server: string) => {
+      hub.dispose()
+      hub = new SessionAppsHub(w.rt, {
+        toolListWaitMs: 10_000,
+        callJoinWaitMs: 300,
+        onDemand: { attached: () => [{ ref, server }], allowed: () => true },
+      })
+    }
+
+    it('a session that belongs to no project is not the owner of a user-folder app, though both project ids are null', async () => {
+      attachOnDemand({ projectId: null, appId: 'userboard' }, 'app-userboard')
+      const h = await start({ id: 'claude-loose', kind: 'worker', projectId: null }, { permissionPreset: 'normal' })
+      await (h as unknown as { opts: CreateSessionOpts }).opts.apps!.tools('app-userboard')
+      expect(await decide('mcp__app-userboard__post')).toBe('asked-the-human')
+      expect(await decide('mcp__app-userboard__note')).toEqual(allowed())
+    })
+
+    it('the orchestrator is not the owner of an app, even one of the project it is recorded under', async () => {
+      attachOnDemand({ projectId: 'p1', appId: 'board' }, 'app-board')
+      const h = await start({ id: 'claude-orch', kind: 'orchestrator', projectId: 'p1' }, { permissionPreset: 'normal' })
+      await (h as unknown as { opts: CreateSessionOpts }).opts.apps!.tools('app-board')
+      expect(await decide('mcp__app-board__post')).toBe('asked-the-human')
+      expect(await decide('mcp__app-board__note')).toEqual(allowed())
+    })
   })
 })
 

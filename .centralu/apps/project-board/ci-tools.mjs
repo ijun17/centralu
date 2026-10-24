@@ -335,7 +335,7 @@ export const tools = {
         detail: detailInput.describe('"full" lists passed and non-required checks too'),
       }),
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
-      _meta: { 'centralu/risk': 'routine', ui: { visibility: ['model'] } },
+      _meta: { ui: { visibility: ['model'] } },
     },
     handler: answering(mergeWhenGreen, 'Not merged: '),
   },

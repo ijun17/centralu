@@ -321,6 +321,7 @@ serveStdio(() => {
       server.registerTool('post', w('routine', { destructiveHint: false, openWorldHint: true }), async () => say('posted'))
       server.registerTool('merge', w('routine', { destructiveHint: true, openWorldHint: true }), async () => say('merged'))
       server.registerTool('restack', w('routine', { destructiveHint: true, openWorldHint: true }, { 'centralu/askWhen': { push: true } }), async () => say('restacked'))
+      server.registerTool('open', w('routine', { destructiveHint: false, openWorldHint: true }, { 'centralu/askWhen': { path: '*' }, 'centralu/askUnless': { skipPrePr: '*', dryRun: true } }), async () => say('opened'))
       server.registerTool('release', { description: 'Declares nothing', annotations: { readOnlyHint: false, destructiveHint: true } }, async () => say('released'))
     }
     // An app asking Claude Code to keep its tool loaded in every request (#513): the flag the SDK sets for `alwaysLoad`

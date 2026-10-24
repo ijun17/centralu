@@ -21,11 +21,15 @@ import type { PermissionPreset } from '@cc/protocol'
  *              and so does `safe`, whose point is to ask.
  *
  * `centralu/askWhen` narrows a `routine` tool: when any argument it names holds the value named (`{ push: true }`), or is set
- * at all for the value "*" (`{ path: "*" }`), the call asks. A declaration that cannot be read (not an object, empty) asks too. Codex fixes a tool's approval at thread start, before any arguments exist, so there a tool with
- * `askWhen` always asks.
+ * at all for the value "*" (`{ path: "*" }`), the call asks. `centralu/askUnless` is the other way round: the call asks
+ * unless some argument it names holds that value (`{ skipPrePr: "*" }`), for a tool that is routine only in one form.
+ * Both name arguments with a plain value (true, false, a string, a number) or "*". A declaration that cannot be read (not an
+ * object, empty, a value that is itself an object or a list, which no argument could ever equal) asks too. Codex fixes a
+ * tool's approval at thread start, before any arguments exist, so there a tool with either one always asks.
  */
 export const RISK_META_KEY = 'centralu/risk'
 export const ASK_WHEN_META_KEY = 'centralu/askWhen'
+export const ASK_UNLESS_META_KEY = 'centralu/askUnless'
 
 export type ToolRisk = 'local' | 'routine'
 
@@ -44,13 +48,21 @@ export function declaredRisk(tool: RiskTool): ToolRisk | null {
   return risk
 }
 
-/** The arguments that make a `routine` tool ask: null when it names none, or names them in a shape that is not an object */
-export function askWhen(tool: RiskTool): Record<string, unknown> | null {
-  const v = tool._meta?.[ASK_WHEN_META_KEY]
+/** The arguments an `askWhen` or `askUnless` declaration names: null when it names none, is not an object, or names a value no argument could equal */
+function namedArguments(tool: RiskTool, key: string): Record<string, unknown> | null {
+  const v = tool._meta?.[key]
   if (typeof v !== 'object' || v === null || Array.isArray(v)) return null
   const named = Object.fromEntries(Object.entries(v))
-  return Object.keys(named).length > 0 ? named : null
+  if (Object.keys(named).length === 0) return null
+  // `{ push: [true] }` would never match, so the tool would never ask: not a licence, unreadable
+  return Object.values(named).every((x) => typeof x === 'boolean' || typeof x === 'string' || typeof x === 'number') ? named : null
 }
+
+/** The arguments that make a `routine` tool ask */
+export const askWhen = (tool: RiskTool): Record<string, unknown> | null => namedArguments(tool, ASK_WHEN_META_KEY)
+
+/** The arguments of which a `routine` tool needs one, or it asks */
+export const askUnless = (tool: RiskTool): Record<string, unknown> | null => namedArguments(tool, ASK_UNLESS_META_KEY)
 
 /** What an `askWhen` entry of this value means: the argument is set at all (a path to another checkout, say), whatever it holds */
 export const ANY_VALUE = '*'
@@ -72,9 +84,15 @@ export function runsUnasked(tool: RiskTool, scope: RiskScope): boolean {
   if (risk === 'local') return true
   if (risk !== 'routine' || !scope.own || scope.preset !== 'normal') return false
   const when = askWhen(tool)
+  const unless = askUnless(tool)
   // A declaration that is there but not readable is not a licence: ask
-  if (!when) return tool._meta?.[ASK_WHEN_META_KEY] === undefined
-  // The arguments are unknown (Codex), or any one of them is what is named: ask
+  if (!when && tool._meta?.[ASK_WHEN_META_KEY] !== undefined) return false
+  if (!unless && tool._meta?.[ASK_UNLESS_META_KEY] !== undefined) return false
+  if (!when && !unless) return true
+  // The arguments are unknown (Codex): ask
   const args = scope.args
-  return args !== undefined && !Object.entries(when).some(([k, v]) => matches(args[k], v))
+  if (args === undefined) return false
+  // Any one argument that is what `askWhen` names asks; so does none being what `askUnless` names
+  if (when && Object.entries(when).some(([k, v]) => matches(args[k], v))) return false
+  return !unless || Object.entries(unless).some(([k, v]) => matches(args[k], v))
 }

@@ -134,9 +134,29 @@ describe('a broken app states what is wrong and where', () => {
     expect(all).not.toContain('[tool fine]')
   })
 
-  it('an askWhen the host cannot read is said: the tool always asks', async () => {
-    app('ask', serverWith(`centralu.tool(server, 'x', { description: 'D', annotations: { readOnlyHint: false }, _meta: { 'centralu/risk': 'routine', 'centralu/askWhen': 'push' } }, async () => ({ content: [] }))`))
-    expect((await make().check(ref('ask'))).text).toContain('must be an object such as { "push": true }; the host cannot read it, so the tool always asks')
+  it('an askWhen or askUnless the host cannot read, or would not look at, is said: the tool asks either way', async () => {
+    const tool = (name: string, risk: string, meta: string) =>
+      `centralu.tool(server, '${name}', { description: 'D', annotations: { readOnlyHint: false, destructiveHint: false }, _meta: { 'centralu/risk': '${risk}', ${meta} } }, async () => ({ content: [] }))`
+    app(
+      'ask',
+      serverWith(
+        [
+          tool('fine', 'routine', "'centralu/askWhen': { push: true, path: '*' }, 'centralu/askUnless': { skipPrePr: '*' }"),
+          tool('notobject', 'routine', "'centralu/askWhen': 'push'"),
+          // A value that is a list or an object never equals an argument, so the tool would never ask: not a licence
+          tool('listvalue', 'routine', "'centralu/askWhen': { push: [true] }"),
+          tool('objectvalue', 'routine', "'centralu/askUnless': { skipPrePr: { is: 'set' } }"),
+          tool('localtool', 'local', "'centralu/askWhen': { push: true }"),
+        ].join(';'),
+      ),
+    )
+    const said = (await make().check(ref('ask'))).text.split(String.fromCharCode(10)).filter((l) => l.includes('centralu/ask'))
+    expect(said).toHaveLength(4)
+    const of = (name: string) => said.filter((l) => l.includes(`[tool ${name}]`)).join(' ')
+    expect(of('fine')).toBe('')
+    for (const name of ['notobject', 'listvalue', 'objectvalue']) expect(of(name), name).toContain('the host cannot read it, so the tool always asks')
+    expect(of('objectvalue')).toContain('askUnless')
+    expect(of('localtool')).toContain('does nothing here')
   })
 
   it('home has no screen / home is closed to the screen / home is not in the tool list', async () => {

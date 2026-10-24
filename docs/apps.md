@@ -850,15 +850,19 @@ has no rule key, so nothing it remembers reaches the next call. A tool may say, 
 | `_meta["centralu/risk"]` | Means | No card when |
 |---|---|---|
 | `"local"` | Writes only this app's own data on this computer, and can be undone | Always, under every preset and in any attached app. Only next to `annotations.destructiveHint: false` (the MCP default is `true`), so a tool that is silent about it still asks |
-| `"routine"` | An ordinary write its own project would do anyway (a comment, a pull request, a merge the app's own checks gate) | The app belongs to the session's own project (a trusted project: an untrusted project's apps do not attach), under `normal`. Not for a user-folder app, an app attached from another project, the orchestrator, or `safe` |
+| `"routine"` | An ordinary write its own project would do anyway (a comment, a pull request). Not one that merges or releases: leave those undeclared, so a card stays the check on them | The app belongs to the session's own project (a trusted project: an untrusted project's apps do not attach), under `normal`. Not for a user-folder app, an app attached from another project, the orchestrator, or `safe` |
 | absent | Anything else | Never: it asks as before |
 
 `_meta["centralu/askWhen"]`, an object such as `{ "push": true, "path": "*" }`, makes a `routine` tool ask when any
-named argument holds the value named (`"*"`: is set at all). One the host cannot read asks always. Codex fixes a tool's
-approval when the thread starts, before any arguments exist, so there a tool with `askWhen` always asks. A declaration
+named argument holds the value named (`"*"`: is set at all). `_meta["centralu/askUnless"]`, such as
+`{ "skipPrePr": "*", "dryRun": true }`, is the other way round: the call asks unless some named argument holds that
+value, for a tool that is routine in one form only. The values are `true`, `false`, a string, a number or `"*"`; a
+declaration the host cannot read (not an object, empty, a value that is a list or an object, which no argument could
+equal) asks always. Codex fixes a tool's approval when the thread starts, before any arguments exist, so there a tool
+with `askWhen` or `askUnless` always asks. A declaration
 is a claim in the same way `readOnlyHint` is: it is read from the tool list of an attached app, never from a name; the
 project's trust decides only `routine`, which is honoured for no app but the session's own project's. `check` warns
-about a declaration the host ignores.
+about a declaration the host ignores or cannot read, and about an `askWhen` or `askUnless` on a tool that is not `routine`.
 
 A call from a view is never asked about: the view is the control surface the app offers the
 person. It is recorded as `view`.
