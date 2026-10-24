@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { isInTurn } from '@cc/core'
+import { errorMessage } from '@cc/protocol'
 import { App, confirmKeyAction, prepareFirstPaint, useStore } from '@cc/ui'
 import {
   autoSwitch,
@@ -133,7 +134,7 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
     try {
       if (!(await platform.background?.set(true))) throw new Error('The keeper did not turn background mode on')
     } catch (e) {
-      setQuitError((e as Error).message)
+      setQuitError(errorMessage(e))
       return
     }
     await quitApp().catch((e: Error) => setQuitError(e.message))
