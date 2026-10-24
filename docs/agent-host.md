@@ -3374,7 +3374,8 @@ the person did not remove what the hub installed there, neither side runs a loca
   installed, and the update fails, nothing switched, the row saying to update from Settings. It also fails before the hold once automatic updates go off or the hub begins a swap while it waits. A swap
   that comes after the hold finds it as it finds the person's update (§4.7).
 - **How often.** Once per version of the hub's, and once more 10 minutes after a failure (`FOLLOW_RETRY_MS`); never
-  again for that version after the person cancels its wait (which shows no failure). A spent version (cancelled, or both
+  again for that version after the person cancels its wait (which shows no failure). Every update nobody approved counts as a try for
+  the hub's version, the hub's own and an agent's card-less one alike (`unaskedRun`). A spent version (cancelled, or both
   tries failed) makes `followsHub` false, so an agent cannot start it again without a card. A limited caller's
   `machines.cancelUpdate` (everyday) can end it too, until the hub's next version. A retry whose time comes while the
   machine is busy or away runs when that ends or at the next connect. A failure shows on the row as `MachineInfo.followHub`

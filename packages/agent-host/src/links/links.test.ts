@@ -1765,6 +1765,37 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
       expect(ran()).toContain('stop')
     })
 
+    // #1508 re-review: an agent's card-less update counts against the version as the hub's own does, so a cancel spends it
+    it("spends the version when the person cancels an agent's card-less update, so the agent cannot start it again unasked", async () => {
+      const a = auto(false)
+      const { hub, u, ran, stepsSeen } = await waiting({ deps: a.deps, old: a.old })
+      a.state.on = true
+      expect(hub.links.followsHub('m1')).toBe(true)
+      const agents = hub.links.update('m1', { when: 'idle', unasked: true })
+      const failed = expect(agents).rejects.toThrow(/was cancelled while it waited/)
+      await eventually(() => stepsSeen().includes('wait_idle'))
+      await u.call('machines.cancelUpdate', { machineId: 'm1' })
+      await failed
+      expect(hub.links.followsHub('m1')).toBe(false)
+      expect(hub.links.list()[0]!.followHub ?? null).toBeNull()
+      expect(ran()).not.toContain('stop')
+    })
+
+    it('tries the read of what runs again before it gives up on installing, as the wait does', async () => {
+      const a = auto(false)
+      const { hub, ran, idle, activity, breakReads } = await waiting({ deps: a.deps, old: a.old })
+      idle()
+      Object.assign(activity, { terminals: 0, commandRuns: 0 })
+      a.state.on = true
+      breakReads(true)
+      const agents = hub.links.update('m1', { when: 'idle', unasked: true })
+      // One failed reading is not the end: it reads again, a poll later
+      await new Promise((r) => setTimeout(r, 20))
+      breakReads(false)
+      await agents
+      expect(ran()).toContain('stop')
+    })
+
     it("is not tried again once the person cancelled the hub's own update", async () => {
       const a = auto()
       const { hub, u, ran, stepsSeen } = await waiting({ deps: a.deps, old: a.old })
