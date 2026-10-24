@@ -37,6 +37,12 @@ export class CodexRequests {
    * with it, or an answer goes to a request id nobody is waiting on.
    */
   readonly approvals = new PendingCards<OpenRequest>()
+  /**
+   * Requests whose folder grant (`edits`, #1525) is being checked on the disk, by Codex's request id. One that Codex ends
+   * meanwhile (`noteRequestEnded`) is dropped from here, and its check then neither answers nor raises a card for a
+   * request that is gone.
+   */
+  private readonly grants = new Map<string, OpenRequest>()
   /** The ids of the cards this handle raises (see `CardIds`) */
   private readonly ids = new CardIds()
   private alwaysAllow = new AlwaysAllowRules()
@@ -62,12 +68,14 @@ export class CodexRequests {
     if (n.method === 'serverRequest/resolved') {
       if (typeof p.requestId !== 'string' && typeof p.requestId !== 'number') return
       const serverId = String(p.requestId)
+      this.grants.delete(serverId)
       this.closeApprovals((a) => String(a.serverId) === serverId)
       return
     }
     if (n.method !== 'turn/completed' && n.method !== 'turn/failed') return
     const turn = turnIdOf(n.params)
     if (typeof p.threadId !== 'string' || !turn) return
+    for (const [id, g] of this.grants) if (g.threadId === p.threadId && g.turnId === turn) this.grants.delete(id)
     this.closeApprovals((a) => a.threadId === p.threadId && a.turnId === turn)
   }
 
@@ -199,7 +207,11 @@ export class CodexRequests {
     const folder = this.host.editsFolder()
     const changes = r.method === 'applyPatchApproval' ? changesOfLegacy(params) : this.fileChanges.get(itemId)?.changes
     if (folder && changes && (r.method === 'item/fileChange/requestApproval' || r.method === 'applyPatchApproval') && !params.grantRoot && !params.reason) {
+      const key = String(r.id)
+      this.grants.set(key, requestOrigin(r))
       void this.mayGrantEdit(folder, changes).then((ok) => {
+        // Codex ended the request while it was checked: nothing to answer, no card to raise
+        if (!this.grants.delete(key)) return
         if (ok) this.host.respond(r.id, { decision: 'accept' })
         else this.raiseCard(r, detail)
       })

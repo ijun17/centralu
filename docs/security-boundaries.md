@@ -588,7 +588,7 @@ would. `normal` keeps its meaning (the person approves each step).
 
 - **Preset, not a hidden default.** A default that made `normal` accept edits in a trusted project would put a word
   on the picker that is not true of the session, and an explicit `normal` could not be told from the default. So the
-  picker lists `edits` ("Edits go through"), and the **default** is what changed: the window names the preset when the
+  picker lists `edits` ("No card in project"), and the **default** is what changed: the window names the preset when the
   person starts a session without choosing one, `edits` in a **trusted** project and `normal` in an untrusted one
   (`defaultPresetFor`, `@cc/core`, read in `createSession` of the store). A preset named in the start, the settings menu,
   a handoff or a fork always wins and is never raised. The host's own default stays `normal`, so a client that names none
@@ -606,24 +606,30 @@ would. `normal` keeps its meaning (the person approves each step).
 - **Mapping to Codex.** Codex has no mode that accepts patches and asks for commands: its approval policies gate the
   sandbox boundary, not the kind of action (`on-request` runs sandboxed commands without a card). So `edits` is
   `normal`'s launch (the person's own policy and sandbox, network off) and the adapter answers an
-  `item/fileChange/requestApproval` with accept when every change of the patch is an add or an update inside the folder
+  `item/fileChange/requestApproval` (or the older `applyPatchApproval`) with accept when every change of the patch is an add or an update inside the folder
   (`adapters/codex/server-requests.ts`, `adapters/edit-grant.ts`). A delete, a move, a request that names extra access
   (`grantRoot`, a `reason`), or a path outside asks. Under Codex's default
   config (workspace-write, on-request) in-folder patches already ran without a card, so there `edits` and `normal`
   differ only where the person's config asks.
 - **What is never granted.** The folder is the session's `cwd` after symlinks are resolved (a link out of it is
-  outside), compared by path segment (`/proj-other` is not inside `/proj`). Inside it, the places that decide what
-  runs or what is allowed still ask: `.git`, `.claude`, `.codex`, `.mcp.json`, `.vscode`, `.idea`, `.husky`,
-  `.centralu`. A path that cannot be resolved asks. A person who picks `edits` in an untrusted project gets the
-  grant too (their choice wins); only the default is tied to trust.
+  outside, and so is a link whose target does not exist yet), compared by path segment (`/proj-other` is not inside
+  `/proj`). A folder that is the person's home folder, or holds it, gets no grant. Inside the folder, the names that
+  decide what runs or what is allowed still ask, at any depth and in any case: `.git`, `.gitconfig`, `.gitmodules`,
+  `.githooks`, `.husky`, `.pre-commit-config.yaml`, `.claude`, `.claude.json`, `.codex`, `.mcp.json`, `.vscode`,
+  `.idea`, `.centralu`, the shell startup files (`.bashrc`, `.zshrc`, `.profile`, ...), `.envrc`, `.ripgreprc` and
+  `node_modules` (a hard link there reaches other projects). A segment with a `:` asks (a Windows stream such as
+  `.mcp.json::$DATA` writes the file it names). A path that cannot be resolved asks. The check reads the disk once,
+  before the write: another process that swaps a link in between is not stopped by it. A person who picks `edits` in an
+  untrusted project gets the grant too (their choice wins); only the default is tied to trust. A change to the preset
+  applies as any preset change does (the next turn or restart), not in the middle of a call.
 - **Agent-started sessions.** The default applies only to a session the person's window starts. `start_agent`'s child
   gets the caller's preset, never above it (`presetWithin`, rank updated), so a `normal` caller's child is `normal`
   in a trusted project and an `edits` caller's is `edits`. `edits` is treated as `normal` by the consent (the project's
   trust is a `normal` or `edits` caller's consent, #673), the ceiling (4, `auto` has none), `ask_project`, the answer
   rules and `update_centralu`. A linked machine's child (`start_agent` with `machine`, `create_session`, the hub's
   `normal` at most) is `normal` for an `edits` caller: `edits` is not carried over the link, so an older machine never
-  sees a value it does not know. A build from before this preset reads a stored `edits` as `safe` (its store parses
-  unknown presets to `safe`), which asks more, never less.
+  sees a value it does not know. A build since #1171 reads a stored `edits` as `safe` (its store parses unknown presets
+  to `safe`), and an earlier one passes it through as an unknown preset that asks like `normal`: neither asks less.
 
 ### When the person is asked
 

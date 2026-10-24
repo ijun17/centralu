@@ -1,4 +1,5 @@
-import { realpath } from 'node:fs/promises'
+import { lstat, realpath } from 'node:fs/promises'
+import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 /**
@@ -17,7 +18,13 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
  * Any path segment with one of these names asks, however deep, and whatever the case (the folder may be on a
  * case-insensitive disk).
  */
-const PROTECTED_NAMES: ReadonlySet<string> = new Set(['.git', '.claude', '.codex', '.mcp.json', '.vscode', '.idea', '.husky', '.centralu'])
+const PROTECTED_NAMES: ReadonlySet<string> = new Set([
+  '.git', '.gitconfig', '.gitmodules', '.githooks', '.husky', '.pre-commit-config.yaml',
+  '.claude', '.claude.json', '.codex', '.mcp.json', '.vscode', '.idea', '.centralu',
+  '.bashrc', '.bash_profile', '.profile', '.zshrc', '.zprofile', '.zshenv', '.envrc', '.ripgreprc',
+  // Hard links to the shared store of pnpm and the like make an edit in place reach other projects
+  'node_modules',
+])
 
 /** The deepest part of `path` that exists, resolved through links, with the rest of the path put back after it */
 async function realPathOf(path: string): Promise<string | null> {
@@ -30,6 +37,8 @@ async function realPathOf(path: string): Promise<string | null> {
       // Only a missing part is walked past (a file about to be made); anything else (a loop, no access) asks
       const code = typeof e === 'object' && e !== null && 'code' in e ? e.code : null
       if (code !== 'ENOENT' && code !== 'ENOTDIR') return null
+      // Missing to `realpath` but present to `lstat`: a link whose target does not exist yet, and writing through it makes the target
+      if (await lstat(at).then(() => true, () => false)) return null
       const up = dirname(at)
       if (up === at) return null
       tail.push(at.slice(up.length).replace(/^[\\/]+/, ''))
@@ -48,6 +57,12 @@ export async function insideFolder(folder: string, targets: readonly string[]): 
   // The folder itself must exist: a session's folder that is gone has nothing to be inside of
   const root = await realpath(folder).catch(() => null)
   if (root === null) return false
+  // A broad folder (the home folder, or one holding it, the disk's root included) is not a project to grant edits in
+  const home = await realpath(homedir()).catch(() => null)
+  if (home !== null) {
+    const toHome = relative(root, home)
+    if (toHome === '' || (!isAbsolute(toHome) && toHome !== '..' && !toHome.startsWith(`..${sep}`))) return false
+  }
   for (const target of targets) {
     if (!target) return false
     const real = await realPathOf(resolve(folder, target))
@@ -55,8 +70,9 @@ export async function insideFolder(folder: string, targets: readonly string[]): 
     const inside = relative(root, real)
     // Empty: the folder itself. Absolute: another drive. `..`: outside
     if (inside === '' || isAbsolute(inside) || inside === '..' || inside.startsWith(`..${sep}`)) return false
-    // Windows drops a trailing dot or space from a name, so `.git.` is `.git` there
-    if (inside.split(sep).some((part) => PROTECTED_NAMES.has(part.toLowerCase().replace(/[. ]+$/, '')))) return false
+    // Windows drops a trailing dot or space from a name, so `.git.` is `.git` there; and `:` there makes a stream of the
+    // file (`.mcp.json::$DATA`) or the folder (`.claude::$INDEX_ALLOCATION`), so a segment with one asks
+    if (inside.split(sep).some((part) => part.includes(':') || PROTECTED_NAMES.has(part.toLowerCase().replace(/[. ]+$/, '')))) return false
   }
   return true
 }

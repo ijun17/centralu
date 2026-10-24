@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { homedir } from 'node:os'
+import { dirname, join } from 'node:path'
 import { removeTree, tempRoot } from '../temp-dir.test-helpers.js'
 import { claudeEditInside, insideFolder } from './edit-grant.js'
 
@@ -50,6 +51,26 @@ describe('insideFolder', () => {
       expect(await insideFolder(folder, [join(folder, p)]), p).toBe(false)
     }
     expect(await insideFolder(folder, [join(folder, '.gitignore'), join(folder, 'CLAUDE.md'), join(folder, '.github', 'ci.yml')])).toBe(true)
+  })
+
+  it('refuses the shell and tool files that decide what runs, node_modules, and a Windows stream of a protected name', async () => {
+    for (const p of ['.gitconfig', '.gitmodules', '.githooks/pre-push', '.bashrc', '.zshrc', '.envrc', '.claude.json', 'node_modules/.pnpm/x/index.js', '.mcp.json::$DATA', '.claude::$INDEX_ALLOCATION/settings.json', 'notes.txt:stream']) {
+      expect(await insideFolder(folder, [join(folder, p)]), p).toBe(false)
+    }
+  })
+
+  it('refuses a link whose target does not exist yet: writing through it makes the target, outside the folder', async () => {
+    try {
+      symlinkSync(join(base, 'outside', 'not-yet.txt'), join(folder, 'dangling'), process.platform === 'win32' ? 'file' : undefined)
+    } catch {
+      return // Windows without the privilege to make a file link: the case cannot be built there
+    }
+    expect(await insideFolder(folder, [join(folder, 'dangling')])).toBe(false)
+  })
+
+  it('grants nothing in a folder that is the home folder or holds it', async () => {
+    expect(await insideFolder(homedir(), [join(homedir(), 'notes.txt')])).toBe(false)
+    expect(await insideFolder(dirname(homedir()), [join(dirname(homedir()), 'notes.txt')])).toBe(false)
   })
 
   it('needs every target inside, and at least one target', async () => {

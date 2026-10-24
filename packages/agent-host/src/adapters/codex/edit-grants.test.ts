@@ -43,7 +43,7 @@ async function run(editsFolder: string | null, changes: Change[], extra: Record<
   requests.noteFileChange({ method: 'item/started', params: { threadId: 't1', item: { type: 'fileChange', id: 'i1', status: 'inProgress', changes: changes.map((c) => ({ ...c, diff: '@@' })) } } })
   requests.onServerRequest({ id: 7, method: 'item/fileChange/requestApproval', params: { threadId: 't1', turnId: 'u1', itemId: 'i1', reason: null, grantRoot: null, ...extra } })
   // The grant is checked on the disk; wait until the request was answered or a card went up
-  for (let i = 0; i < 200 && answers.length === 0 && events.length === 0; i++) await new Promise((r) => setImmediate(r))
+  for (let end = Date.now() + 20_000; answers.length === 0 && events.length === 0 && Date.now() < end; ) await new Promise((r) => setTimeout(r, 2))
   return { answers, cards: events.filter((e) => e.type === 'approval_request').length }
 }
 
@@ -89,6 +89,32 @@ describe('the edits preset, Codex (#1525)', () => {
     requests.onServerRequest({ id: 8, method: 'item/commandExecution/requestApproval', params: { threadId: 't1', turnId: 'u1', itemId: 'c1', command: 'rm -rf src', cwd: folder } })
     expect(answers).toEqual([])
     expect(events.filter((e) => e.type === 'approval_request')).toHaveLength(1)
+  })
+
+  it('leaves a request alone that Codex ended while the folder was being checked: no answer, no card that never closes', async () => {
+    const events: NormalizedEvent[] = []
+    const answers: unknown[] = []
+    const requests = new CodexRequests({ sessionId: 's1', emit: (e) => events.push(e), respond: (_i, r) => answers.push(r), threadId: () => 't1', appServers: () => new Set(), ownServer: () => false, editsFolder: () => folder })
+    const changes = [{ ...update(join(base, 'outside', 'x.ts')), diff: '@@' }] // would be a card
+    requests.noteFileChange({ method: 'item/started', params: { threadId: 't1', item: { type: 'fileChange', id: 'i1', changes } } })
+    requests.onServerRequest({ id: 7, method: 'item/fileChange/requestApproval', params: { threadId: 't1', turnId: 'u1', itemId: 'i1' } })
+    requests.noteRequestEnded({ method: 'serverRequest/resolved', params: { threadId: 't1', requestId: 7 } })
+    // The check reads the disk; give it far longer than it takes
+    await new Promise((r) => setTimeout(r, 300))
+    expect({ answers, cards: events.length }).toEqual({ answers: [], cards: 0 })
+  })
+
+  it('answers the older applyPatchApproval the same way: an update inside accepts, a delete asks', async () => {
+    const ask = async (fileChanges: Record<string, unknown>) => {
+      const events: NormalizedEvent[] = []
+      const answers: unknown[] = []
+      const requests = new CodexRequests({ sessionId: 's1', emit: (e) => events.push(e), respond: (_i, r) => answers.push(r), threadId: () => 't1', appServers: () => new Set(), ownServer: () => false, editsFolder: () => folder })
+      requests.onServerRequest({ id: 9, method: 'applyPatchApproval', params: { conversationId: 't1', callId: 'c1', fileChanges } })
+      for (let end = Date.now() + 20_000; answers.length === 0 && events.length === 0 && Date.now() < end; ) await new Promise((r) => setTimeout(r, 2))
+      return { answers, cards: events.filter((e) => e.type === 'approval_request').length }
+    }
+    expect(await ask({ [join(folder, 'src', 'a.ts')]: { type: 'update', unified_diff: '@@', move_path: null } })).toEqual({ answers: [{ decision: 'accept' }], cards: 0 })
+    expect(await ask({ [join(folder, 'src', 'a.ts')]: { type: 'delete', content: '' } })).toEqual({ answers: [], cards: 1 })
   })
 
   it('launches as normal does, and its app tools follow the person\'s policy as normal\'s', () => {
