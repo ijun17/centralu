@@ -35,7 +35,6 @@ describe.skipIf(!hasPgrep)('the second try of a browser install first stops what
     writeFileSync(file, `#!/bin/bash\n${stubborn ? "trap '' TERM\n" : ''}while true; do sleep 1; done\n`)
     chmodSync(file, 0o755)
     const child = spawn(file, [], { stdio: 'ignore', detached: true })
-    child.unref()
     started.push(child.pid!)
     // Until pgrep sees it by its name
     for (let i = 0; i < 100; i++) {
@@ -44,13 +43,22 @@ describe.skipIf(!hasPgrep)('the second try of a browser install first stops what
     }
     throw new Error(`${name} never started`)
   }
-  const run = (name: string) => spawnSync('bash', [script, name], { env: { ...process.env, SUDO: '', WAIT: '3' }, encoding: 'utf8' })
+  /** Asynchronous: the stand-ins are children of this process, and a blocked event loop would not collect them once killed (a zombie still shows to pgrep) */
+  const run = (name: string) =>
+    new Promise<{ status: number | null; stdout: string; stderr: string }>((resolve) => {
+      const child = spawn('bash', [script, name], { env: { ...process.env, SUDO: '', WAIT: '3' } })
+      let stdout = ''
+      let stderr = ''
+      child.stdout.on('data', (d) => (stdout += d))
+      child.stderr.on('data', (d) => (stderr += d))
+      child.on('close', (status) => resolve({ status, stdout, stderr }))
+    })
   const alive = (name: string) => spawnSync('pgrep', ['-x', name]).status === 0
 
   it('asks what is left to stop, and returns once it is gone', async () => {
     const name = `fkapt${process.pid % 100000}a`
     await standIn(name, false)
-    const r = run(name)
+    const r = await run(name)
     expect(r.status, r.stdout + r.stderr).toBe(0)
     expect(r.stdout).toContain('left running: stopping it')
     expect(alive(name)).toBe(false)
@@ -59,14 +67,14 @@ describe.skipIf(!hasPgrep)('the second try of a browser install first stops what
   it('kills what ignores the request, rather than leave the lock held', async () => {
     const name = `fkapt${process.pid % 100000}b`
     await standIn(name, true)
-    const r = run(name)
+    const r = await run(name)
     expect(r.status, r.stdout + r.stderr).toBe(0)
     expect(r.stdout).toContain('did not stop in 3s: killing it')
     expect(alive(name)).toBe(false)
   })
 
-  it('does nothing when nothing is left', () => {
-    const r = run(`fkapt${process.pid % 100000}c`)
+  it('does nothing when nothing is left', async () => {
+    const r = await run(`fkapt${process.pid % 100000}c`)
     expect(r.status, r.stdout + r.stderr).toBe(0)
     expect(r.stdout).not.toContain('stopping it')
   })
