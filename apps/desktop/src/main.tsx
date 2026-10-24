@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
+import { isInTurn } from '@cc/core'
 import { App, confirmKeyAction, prepareFirstPaint, useStore } from '@cc/ui'
 import {
   autoSwitch,
@@ -106,6 +107,8 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
    */
   const [background, setBackground] = useState<boolean | null>(null)
   const [quitError, setQuitError] = useState<string | null>(null)
+  // Sessions in a turn now: with background mode off, quitting ends them, so the dialog offers to keep them going
+  const running = useStore((s) => Object.values(s.sessions).filter((x) => isInTurn(x.state)).length)
   const quit = useCallback(
     async (stopAgents = false) => {
       if (alsoStop && strays.length > 0) {
@@ -122,6 +125,19 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
     },
     [alsoStop, strays, platform],
   )
+
+  const keepRunning = useCallback(async () => {
+    if (alsoStop && strays.length > 0) await platform.processes.stop(strays.map((s) => s.pid)).catch(() => {})
+    // Turned on first: quitting with the mode still off would stop the turns the person just asked to keep. If the
+    // keeper cannot be told, say why and stay open
+    try {
+      if (!(await platform.background?.set(true))) throw new Error('The keeper did not turn background mode on')
+    } catch (e) {
+      setQuitError((e as Error).message)
+      return
+    }
+    await quitApp().catch((e: Error) => setQuitError(e.message))
+  }, [alsoStop, strays, platform])
 
   useEffect(() => {
     setQuitAsker(() => {
@@ -379,9 +395,11 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
           straysError={straysError}
           alsoStop={alsoStop}
           error={quitError}
+          running={running}
           dialogRef={dialogRef}
           onAlsoStop={setAlsoStop}
           onCancel={() => setAskQuit(false)}
+          onKeepRunning={() => void keepRunning()}
           onQuit={(completely) => void quit(completely)}
         />
       )}

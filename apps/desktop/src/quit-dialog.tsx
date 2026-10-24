@@ -17,6 +17,10 @@ export type Stray = { pid: number; command: string; cwd: string }
  * - **On**: **Quit** (Enter) closes the window and leaves everything running in the background;
  *   **Quit completely** stops it all anyway.
  *
+ * - **Off, with turns running**: **Quit and keep running** is offered beside it (#1512). It turns background mode on and
+ *   then quits, so the turns go on; the dialog says it turns the setting on, since nothing else asks. Without a turn
+ *   running there is nothing to keep, so it is not offered.
+ *
  * "Quit completely" used to read "Quit and stop agents", which undersold it: it also ends every
  * terminal, running command and app process. What each button does did not change: off, both
  * paths are the plain quit, which the keeper turns into a full stop; on, "Quit completely" is the
@@ -32,9 +36,11 @@ export function QuitDialog({
   straysError = null,
   alsoStop,
   error,
+  running = 0,
   dialogRef,
   onAlsoStop,
   onCancel,
+  onKeepRunning,
   onQuit,
 }: {
   /** Background mode: true on, false off, null unknown or not offered (no keeper) */
@@ -47,14 +53,19 @@ export function QuitDialog({
   straysError?: string | null
   alsoStop: boolean
   error: string | null
+  /** How many sessions are in a turn now: with background mode off, quitting ends them */
+  running?: number
   dialogRef?: Ref<HTMLDivElement>
   onAlsoStop: (on: boolean) => void
   onCancel: () => void
+  /** Turns background mode on, then quits plainly. Offered only with the mode off and a turn running */
+  onKeepRunning?: () => void
   /** `completely`: the keeper is told to stop everything, whatever background mode says */
   onQuit: (completely: boolean) => void
 }) {
   useOpenLayer()
   const keepsRunning = background === true
+  const offersKeep = background === false && running > 0 && onKeepRunning !== undefined
   /*
    * Drawn in the app's current dialog style (owner, 2026-10-20): a title and one muted line, what is left running as a
    * card of rows with a switch, and the shared buttons with their keys as keycaps. What each button does is unchanged.
@@ -79,6 +90,13 @@ export function QuitDialog({
         ) : (
           <p className="mt-1.5 text-sm leading-body text-ink-muted" data-testid="confirm-quit-stops">
             {COMPLETELY_STOPS} Conversations are saved and resume when you come back.
+          </p>
+        )}
+        {offersKeep && (
+          <p className="mt-2 text-xs leading-body text-ink-faint" data-testid="confirm-quit-running">
+            {running === 1 ? '1 session is' : `${running} sessions are`} working now. Quit and keep running turns on “Keep
+            agents running after Centralu quits” (Settings), so {running === 1 ? 'it goes' : 'they go'} on in the
+            background.
           </p>
         )}
         {error && <p className="mt-3 text-xs text-danger">{error}</p>}
@@ -111,6 +129,11 @@ export function QuitDialog({
           <Button variant="ghost" onClick={onCancel} data-testid="confirm-quit-no" className="flex items-center gap-1.5">
             Cancel <kbd className="keycap">esc</kbd>
           </Button>
+          {offersKeep && (
+            <Button variant="quiet" onClick={onKeepRunning} data-testid="confirm-quit-keep">
+              Quit and keep running
+            </Button>
+          )}
           {keepsRunning && (
             <Button variant="quiet" onClick={() => onQuit(true)} title={COMPLETELY_STOPS} data-testid="confirm-quit-stop">
               Quit completely

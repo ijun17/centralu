@@ -66,3 +66,23 @@ test('says nothing of it when the list was read', async ({ page }) => {
   await open(page, 'off')
   await expect(page.getByTestId('quit-strays-unknown')).toHaveCount(0)
 })
+
+// #1512: with background mode off and a turn running, the person can keep the turns going instead of ending them
+test('background mode off and a turn running: "Quit and keep running" turns the mode on, then quits', async ({ page }) => {
+  await page.goto('/shell-banner.html?dialog=quit&background=off&running=2')
+  await expect(page.getByTestId('confirm-quit-running')).toContainText('2 sessions are working now')
+  await expect(page.getByTestId('confirm-quit-running')).toContainText('Keep agents running after Centralu quits')
+  // The plain choice is unchanged beside it
+  await expect(page.getByTestId('confirm-quit-yes')).toHaveText(/^Quit completely/)
+  await page.getByTestId('confirm-quit-keep').click()
+  expect(await calls(page)).toEqual(['set_background_mode', 'quit_app'])
+})
+
+test('nothing running, or background mode on: no "Quit and keep running"', async ({ page }) => {
+  await page.goto('/shell-banner.html?dialog=quit&background=off&running=0')
+  await expect(page.getByTestId('confirm-quit')).toBeVisible()
+  await expect(page.getByTestId('confirm-quit-keep')).toHaveCount(0)
+  await page.goto('/shell-banner.html?dialog=quit&background=on&running=2')
+  await expect(page.getByTestId('confirm-quit')).toBeVisible()
+  await expect(page.getByTestId('confirm-quit-keep')).toHaveCount(0)
+})
