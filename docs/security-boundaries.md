@@ -443,13 +443,26 @@ rates and the limit windows' percentages kept on this computer, with the names o
 **The mailbox (#1347, [plans/mailbox.md](plans/mailbox.md) §9).** The sender of a post is always what the host knows: the session
 whose tool called, the person for the window's `mail.*` calls, Centralu for its own; no argument of a call names one. Who may write to
 whom is `mail/relations.ts` (§9.1): a session to the sessions it started, the one that started it and the person; the orchestrator
-to any session; the person and Centralu to any session here; nobody to an app before slice 7; an app to a session that called it; and nobody, the person and Centralu included, to a session whose seat has no `mail` tool (a coordinator, a builder, an app's agent, a session outside a project), refused as `no_mailbox` because the wake names a call it cannot make. A
+to any session; any session to the orchestrator, a new thread too (3.11, below); the person and Centralu to any session here; nobody to an app before slice 7; an app to a session that called it; and nobody, the person and Centralu included, to a session whose seat has no `mail` tool (a coordinator, a builder, an app's agent, a session outside a project), refused as `no_mailbox` because the wake names a call it cannot make. A
 session that runs `auto` holds, without waking, what another session or an app that is only in a thread sends it (§7.7), and the person
 releases it. What another party wrote reaches a model only inside the wake frame (`mail/frame.ts`) or the `mail` tool's `read`, both
 quoting every line (U+2028, U+2029 and U+0085 included) behind `> `, escaping the frame's tags, and naming the sender by Centralu's
 word for how it stands to the reader. The `mail.*` methods are the window's: they are not in the orchestrator's window-call list, and
 the `mail` tool is the ordinary session's and the orchestrator's alone (matrix above), which runs it as a command behind `centralu_run` and is told of mail in that form, because it owns the threads `send_to_session` opens (slice 3); a coordinator, a builder and an app's agent are not parties of the mailbox. The delivery stamps its input as Centralu's channel, and sends it
 as the CLI's own input, never as a message of the person's.
+
+**A session asking the orchestrator (#1447, [plans/mailbox.md](plans/mailbox.md) §9.7).** Any session of this host may open a thread to the orchestrator
+(`mail send` with `to: "orchestrator"`, an `assign`): the session owns it and the orchestrator is its assignee. The request is a session's text, so it
+is not the person's word, and three things follow. (1) Its words never go inline: the wake lists host fields and calls the sender "a session asking you
+for something", and `mail read` quotes the words under a header Centralu writes from its own record (the session's name, its project, whether the
+project is trusted). (2) In a turn whose thread is such a request, every tool or command of the orchestrator that is not on a short list of reading acts
+(`sessions/asked-acts.ts`: reads, and answering in the request's own thread) raises the person's card first, naming the session and its project, under
+every preset (`alwaysAsk`, so `auto` does not answer it), Allow or Deny only (`ORCHESTRATOR_CHANGE`); the list fails closed, so a command added later
+asks until it is listed as a read. The Allow is for that one call: the cards the call would raise itself meanwhile are covered by it (`HostCards.cover`),
+so there is one card, and no "always" is offered or kept. A turn that is not a request (the person's, or a thread the person gave) is as it was. (3) Limits:
+a request from a project nobody trusted is held (`policy`) until the person releases it in the Inbox, a session has one request open at a time (a second
+is refused with the first one's thread), and at most 5 new requests an hour. Nothing moves across with the answer: the asking session gets back only
+what the orchestrator posts in the thread. A linked machine's sessions asking the hub's orchestrator are slice 4's (§9.7, "Linked machines").
 
 `handoff_session` (#694) is the orchestrator's alone, and among its commands the one that acts on another session's
 place in the person's work: it starts a successor from a note and moves the original's live children to it. Its

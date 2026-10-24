@@ -2,6 +2,8 @@ import { ModelWindows, autoCompactPlan } from './auto-compact.js'
 import { repairWorktreeRecoveryRemovals } from '../dev-services/worktree-recovery.js'
 import { windowAround } from './snippet.js'
 import { orchestratorToolsFor, type OrchestratorSeatHost } from './orchestrator-seat.js'
+import { AskedGate } from './asked-gate.js'
+import type { Asker } from '../mail/asked-by.js'
 import { withHubMark } from './hub-preset.js'
 import type { MailSessions, ReceiverState } from '../mail/delivery.js'
 import type { AnswerGiven } from '../mail/delegation.js'
@@ -74,6 +76,7 @@ import {
   withoutToolRecord,
   alwaysAllowKey,
   errorMessage,
+  ORCHESTRATOR_CHANGE,
 } from '@cc/protocol'
 import type { AgentAdapter, AgentProcess, AgentSpawnSpec, EventSink, LinkedSessions, OrchestratorTools, SessionHandle } from '../adapters/contract.js'
 import type { MemoryGate } from './memory-gate.js'
@@ -116,6 +119,8 @@ export type MailHooks = {
   answered?(callerId: string, childId: string, how?: AnswerGiven): void
   /** A turn started that the mailbox did not start: whose it is and the thread it belongs to (§6) */
   turnStarted?(sessionId: string, turn: TurnStart): void
+  /** The session whose request the orchestrator's turn is, if a session asked for it (#1447, §9.7): its steps that change something ask the person, naming it */
+  askedBy?(orchestratorId: string): Asker | null
 }
 
 export type KeptAgent = { sessionId: string; tool: ToolName; process: AgentProcess; version?: string }
@@ -280,6 +285,8 @@ export class SessionManager {
   private readonly worktrees: WorktreeSessions
   /** The cards the host raises in a session's approval slot, and the screen's capability questions (host-cards.ts) */
   private readonly hostCards: HostCards
+  /** The orchestrator's steps that ask the person when a session asked for the turn (#1447) */
+  private readonly askedGate: AskedGate
   /** The orchestrator's reports from linked machines' sessions, and the work they pause on (linked-reports.ts) */
   private readonly linkedReports: LinkedReports
   /** A session's process brought up, for a new session or a wake, and what it launches with (session-start.ts) */
@@ -413,6 +420,15 @@ export class SessionManager {
     this.restartPolicy = new RestartPolicy(this.parts())
     this.worktrees = new WorktreeSessions(this.parts())
     this.hostCards = new HostCards(this.parts())
+    this.askedGate = new AskedGate({
+      askedBy: (id) => this.mailHooks?.askedBy?.(id) ?? null,
+      // Allow or deny only, under every preset: `auto` does not answer a session's request for the person (§9.7)
+      ask: async (id, question, signal) => {
+        const answer = await this.hostCards.askHost(id, { kind: 'other', about: ORCHESTRATOR_CHANGE, raw: question }, signal, { alwaysAsk: true, uncovered: true })
+        return answer === null ? null : answer === 'deny' ? 'deny' : 'allow'
+      },
+      cover: (id, run) => this.hostCards.cover(id, run),
+    })
     this.linkedReports = new LinkedReports(this.parts())
     this.starts = new SessionStarts(this.parts())
     this.events = new SessionEvents(this.parts())
@@ -2071,6 +2087,7 @@ export class SessionManager {
       },
       agentSession: (...a) => self.agentSession(...a),
       mailTool: (id, args) => self.mailHooks?.tool?.(id, args) ?? { text: 'The mailbox is not available.', isError: true },
+      whenAsked: (id, call, signal, run) => self.askedGate.when(id, call, signal, run),
       compactSelf: (id, focus) => self.selfCompaction.request(id, focus),
       compactTurn: (id) => self.selfCompaction.compactTurn(id),
       compactEvent: (e, ended) => {
@@ -2502,6 +2519,11 @@ export class SessionManager {
       mailTool: (id) => this.canReadMail(id),
       mailCommand: (id) => this.toolProfileOf(id) === 'orchestrator' && orchestratorHasMailCommand(),
     }
+  }
+
+  /** The central orchestrator's session id, or none while it has not been made (#1447: `mail send to "orchestrator"`) */
+  orchestratorId(): string | undefined {
+    return [...this.meta.values()].find((m) => m.kind === 'orchestrator')?.id
   }
 
   /** `SessionTools.toolProfileOf` (session-tools.ts), kept on the manager for its callers */
