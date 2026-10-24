@@ -360,8 +360,8 @@ The steps by hand:
    branch while that pull request's CI runs, not after the merge (#1035, about 27 min off the
    critical path): the board's `rehearse` does that while main's version is still the released
    one. `guard` reads the version from that branch's `brand.ts` and checks the ref only for a
-   tag push, so a dispatch on any branch rehearses (`tooling/release-workflow.test.ts` runs its
-   script); publishing from a branch is refused by the `npm-publish` environment's branch
+   tag push, so a dispatch on any branch rehearses (`scripts/release-guard.mjs`, run by
+   `tooling/release-guard.test.ts`); publishing from a branch is refused by the `npm-publish` environment's branch
    policy (main and `v*` only). The squash gives main a new commit with the same tree, and
    `tag` accepts a successful rehearsal on the bump branch whose commit has main's tree, as
    it accepts the bump PR's CI (#629). Rehearse only once the branch is up to date with main:
@@ -407,6 +407,35 @@ The steps by hand:
    shim), it does not approve. A cancelled call approves nothing.
 
 5. Verify from a machine that has never had it: `npm i -g centralu@beta && centralu`.
+
+### The tag scheme (#1501)
+
+Three full CI runs per release (main after the last merge, the bump PR, main again on the bump's squash) become one:
+the version is stamped at build time from the tag, so no file carries it and no bump PR or bump commit exists. The tag
+goes on a commit of main that is already fully green. This lands in steps: the guard and the board's path first (both
+schemes accepted, nothing changes until the switch), then the stamp and the switch, then the old path goes. The design
+and its review are on #1501.
+
+- **Which scheme.** `release.yml`'s guard (`scripts/release-guard.mjs`) reads `brand.ts`: a literal `APP_VERSION` is the
+  brand scheme above; none is the tag scheme. The board follows `release.scheme` in its `project.json` ("brand" by
+  default, "tag" to switch).
+- **Only a tag push publishes.** Under the tag scheme a manual run is always a rehearsal, whatever `dry_run` says: a
+  manual publish of a free version would leave it on npm with no tag. A rehearsal builds its `version` input, or the next
+  prerelease after the newest tag, and is named `rehearse <version>` (`run-name`) so the board can tell which version it was.
+- **What the guard holds a tag to** (the tree no longer ties a run to a version, so a tag pushed by hand meets these too):
+  it is the newest `v[0-9]*` tag; the previous one is an ancestor of the tagged commit (the guard's checkout has the whole
+  history, `fetch-depth: 0`); the commit is on the default branch; the previous version's `centralu` is on the registry
+  (two tags at once would race for the dist-tags); and `centralu@<version>` is absent, or from this very commit (a
+  re-run of the same release). The guard's `version` reaches the platform and shim jobs as `CENTRALU_VERSION`, at job
+  level so `pnpm install` sees it too.
+- **The board.** `bump` refuses. `release_status`, `rehearse` and `tag` take the next prerelease after the newest tag (or
+  `version`) and the newest commit of main since that tag whose own push run of CI is fully green, the full tier
+  included (or `commit`). `tag` needs a successful rehearsal of that version on that commit (or its tree), and pushes an
+  annotated tag whose message is the notes: with no bump PR, the tag is where they are kept (owner default, 2026-10-24:
+  no GitHub Release). `approve` reads only the tagged commit's own CI, which was green before it was tagged; the shim's
+  gate is unchanged. Status follows the newest tag until its release run succeeded or its shim is on the registry.
+- **Remote dev builds** refuse a working copy whose version files carry the placeholder `0.0.0-dev` (`pnpm remote-dev`):
+  a build of it would say it is `0.0.0-dev.local.N`, older than every release.
 
 ### What the job graph guarantees
 

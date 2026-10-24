@@ -836,6 +836,8 @@ const runOf = (w) => ({
   url: w.html_url ?? null,
   createdAt: w.created_at ?? null,
   attempt: w.run_attempt ?? 1,
+  // The run's name (`run-name`): release.yml names a rehearsal after the version it builds (#1501)
+  title: w.display_title ?? null,
 })
 
 /** The workflow's latest runs, newest first, for one event, commit and branch when given. */

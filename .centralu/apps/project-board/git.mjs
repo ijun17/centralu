@@ -194,6 +194,15 @@ export async function commitFiles(dir, parent, files, message) {
   }
 }
 
+/**
+ * An annotated tag object for `commit`, named `name`, with `message`, written to the object store only: no tag ref is made
+ * in the checkout (the release pushes it by id). The tagger is the person's git identity, as for their commits.
+ */
+export async function tagObject(dir, commit, name, message) {
+  const tagger = await out(dir, ['var', 'GIT_COMMITTER_IDENT'])
+  return (await git(dir, ['mktag'], { input: `object ${commit}\ntype commit\ntag ${name}\ntagger ${tagger}\n\n${message.replace(/\s+$/, '')}\n` })).trim()
+}
+
 /** Pushes a commit to a new ref of the remote. Never forced: git refuses a ref that exists and is not behind it. */
 export const pushRef = (dir, remote, sha, ref) => git(dir, ['push', '--quiet', remote, `${sha}:${ref}`])
 /** Deletes a branch on the remote (never a tag: the caller names a branch) */
