@@ -892,7 +892,7 @@ export async function jobNotes(repo, jobId) {
   try {
     const shutdown = String(await readJobLog(repo, jobId))
       .split(/\r?\n/)
-      .map((l) => l.replace(/^﻿?\d{4}-\d\d-\d\dT[\d:.]+Z ?/, ''))
+      .map((l) => l.replace(/^\uFEFF?\d{4}-\d\d-\d\dT[\d:.]+Z ?/, ''))
       .find((l) => RUNNER_SHUTDOWN.test(l))
     return shutdown ? [...notes, shutdown.replace(/^\s*##\[error\]/, '')] : notes
   } catch (e) {

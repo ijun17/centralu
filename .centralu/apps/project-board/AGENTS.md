@@ -189,6 +189,11 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
   without a new `author`, the first author's).
 - **`merge_queue`** (`all?`; read-only, agents and the screen) and **`unqueue`** (`pr`; changes nothing
   on GitHub).
+- **A draft the queuing session opened** (#1509 item 4): a pull request found a draft that `open_pr` opened
+  for the same session that queued it (`opened-prs.json`, the notice address on both) is marked ready by the
+  queue, as that session would have, instead of needing attention. A draft another session opened, or that
+  `open_pr` did not (a draft may be work in progress), still needs attention (`draft`), and so does a record
+  handed over with `integrate` when found ready (it is turned back into a draft, below).
 - **Each poll** reads one item (`decideBefore`, `decideCi`): no maintain or admin, a draft, DIRTY
   (which the queue first tries to resolve itself, below), BEHIND, BLOCKED, a squash subject over 72 characters, or a base that is not the default branch or a
   lower's branch → attention. Only the CI workflows' own checks count (`readWorkflowChecks`, their
@@ -412,10 +417,23 @@ the git work; `onConflict` in `queue-driver.mjs` decides, once per head.
   and every script exists.
 - **The hand-off** (any other conflict, a command that failed, a push refused): attention `conflict`,
   with the files and `relay` (`to`: the item's author session, `branch`, `text`: "Merge main into
-  <branch> and push again; conflicted files: …"). Until an app can message a session (#1173) the
-  attention event names the author session and carries that instruction for the queuing session to
-  relay; with no author recorded it says so, and that a session started on the branch needs that
-  instruction. Once per head; queued again, the merge is tried again (main may have moved).
+  <branch> and push again; conflicted files: …"). Where it goes (#1509 item 4, `authorRoute`): `open_pr`
+  notes which session opened each pull request (`opened-prs.json` in the data folder, `opened.mjs`: the
+  session's notice address, never shown). The author is the queuing session itself when it opened the
+  pull request or is the named author: the attention message says to fix it there. It is another session that
+  opened it through `open_pr`: the queue posts the instruction into that session itself (an event of kind
+  `handoff`, to its address, beside the attention message to the queuing session, which says it was
+  posted). Otherwise (the author is named but never called this app) the attention message carries the
+  instruction for the queuing session to relay, as before; with no author recorded it says so, and that a
+  session started on the branch needs that instruction. Once per head; queued again, the merge is tried
+  again (main may have moved).
+- **A stack's top whose lower merged** (#1509 item 4): a DIRTY pull request based on another branch than the
+  default one, from this repository, is restacked by the queue with `rebaseStack` (`stack.mjs`, push on:
+  the lower one's merge commit, its own commits replayed in a temporary worktree, the change confirmed to be
+  the tested one by patch id, a lease on the head read, then the base moved), as `rebase_stack` would be run
+  by a session; the new head runs CI before it lands. The procedure's refusals (the lower one not merged,
+  built on an older version of it, a replay that conflicts, a moved branch, no checkout) hand it to the
+  author as above, with the refusal in the text. Event `conflict`, step `restack`.
 - **The front of the queue**: a pull request fixed after a conflict (a new head that no longer
   conflicts, the queue's push or a session's, or queued again after one) gets `front`, and goes
   first: batches take it before older items, and `merge_queue` lists it first in its state
@@ -543,7 +561,11 @@ the required set: it judges main's runs and its probes by their conclusion, and 
   a release bump, or a full run a person started on its branch), or a batch's. A head whose own run
   finished, ran less than the full tier and passed what it ran (`quickGreen`) waits for a batch
   (`ci.verdict` `quick`); one the queue cannot batch (a fork's, a release bump's quick run, batches
-  off) → attention `full-tier`, saying how to start the full tier on it.
+  off): from a branch of this repository, the queue starts the full tier on its branch itself, once per
+  head (`workflow_dispatch` of the CI workflows, no inputs; `fullDispatch` on the item; #1509 item 4), and
+  lands it when that run is green; attention `full-tier` only when no full run has reported in 15 minutes
+  (`FULL_START_MS`) or GitHub refused to start it, saying how to start it by hand. A fork's branch is never
+  run here: attention `full-tier` as before.
 - **Every item lands through a batch** then, **a batch of one included**: `min` may be 1 (this
   repository's), and the fewest left after a split, a conflict or a change is 1, whatever `min`. A batch also takes
   items whose quick tier passed, oldest first; one sent back from a batch on its head (`batchless`)
@@ -949,7 +971,8 @@ step shows on the screen.
 - `markdown.mjs` — GitHub Markdown to safe HTML for the reader, and the decision summary parser (pure).
 - `rules.mjs` — the rules for public text, commit messages and the pull request template (pure).
 - `answers.mjs` — the owner's saved answers: save, delete, mark recorded (pure; decision-tools.mjs keeps them in the data folder).
-- `stack.mjs`, `git.mjs` — rebase_stack's procedure, and local git through `execFile`.
+- `stack.mjs`, `git.mjs` — rebase_stack's procedure (the queue runs it too, for a stack top), and local git through `execFile`.
+- `opened.mjs` — which session opened each pull request (`open_pr`'s note, `opened-prs.json`), read by the queue (#1509 item 4).
 - `pre-pr.mjs` — open_pr's run of the repository's `scripts/pre-pr.mjs` on the pushed branches.
 - `release.mjs`, `versions.mjs` — the release procedure, and the version rules (pure).
 - `cache.mjs`, `util.mjs` — the short cache the board and the threads share, and small helpers

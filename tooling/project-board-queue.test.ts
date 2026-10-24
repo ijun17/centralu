@@ -12,7 +12,7 @@ import { acknowledge, dueReposts, markReposted, noticeText, unacked, watchStart 
 import { fakeGh, type FakeGh } from './fake-gh.test-helpers.js'
 import { SLOW } from './test-timing.js'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
-import { decideBefore, decideCi, emptyQueue, enqueue, pushEvent, supersededSuites, twinPassedSuites, quickLanded, handoffReason, lowerFailureCounts, noticeKey, dequeue, normalize, onlySupersededFailures, queueOrder, watchState } from '../.centralu/apps/project-board/queue.mjs'
+import { decideBefore, decideCi, emptyQueue, enqueue, pushEvent, supersededSuites, twinPassedSuites, quickLanded, handoffReason, authorRoute, resetFor, lowerFailureCounts, noticeKey, dequeue, normalize, onlySupersededFailures, queueOrder, watchState } from '../.centralu/apps/project-board/queue.mjs'
 // @ts-expect-error -- a plain .mjs module of the board app, without types
 import { commandEnv, conflictPlan } from '../.centralu/apps/project-board/queue-conflict.mjs'
 // @ts-expect-error -- a plain .mjs module of the board app, without types
@@ -657,6 +657,27 @@ describe('what the merge queue decides with two tiers of CI', () => {
     expect(ci({ item: fresh({ alone: { head: SHA2, text: 'x' } }) })).toMatchObject({ state: 'ci', quick: true })
   })
 
+  // #1509 item 4: what the attention above told a session to type (gh workflow run build.yml --ref <branch>), the queue does
+  it('starts the full tier itself on a branch of this repository it cannot batch, once per head, and says so when no full run reports', () => {
+    const first = ci({ canBatch: false })
+    expect(first).toMatchObject({ state: 'ci', action: { type: 'dispatch-full', branch: 'feat/queue' }, patch: { fullDispatch: { head: SHA } } })
+    expect(first.event).toContain('started the full tier on feat/queue')
+    const sentAt = (minutesAgo: number) => fresh({ fullDispatch: { head: SHA, at: new Date(NOW - minutesAgo * 60_000).toISOString() } })
+    // Started: it waits for that run, and does not start another
+    expect(ci({ canBatch: false, item: sentAt(2) })).toEqual({ state: 'ci', patch: { noCiSince: null, missingSince: null } })
+    // Nothing reported in 15 minutes: the session hears it, with the command for doing it by hand
+    const late = ci({ canBatch: false, item: sentAt(20) })
+    expect(late).toMatchObject({ state: 'attention', reason: { kind: 'full-tier' } })
+    expect(late.reason.text).toContain('no full run has reported on c0ffee0 in 15 minutes')
+    expect(late.reason.text).toContain('gh workflow run build.yml --ref feat/queue')
+    // Started for another head: on this one it starts again
+    expect(ci({ canBatch: false, item: fresh({ fullDispatch: { head: SHA2, at: new Date(NOW).toISOString() } }) })).toMatchObject({ action: { type: 'dispatch-full' } })
+    // A fork's branch is never run here
+    expect(ci({ canBatch: false, pr: openPr({ isCrossRepository: true }) })).toMatchObject({ state: 'attention', reason: { kind: 'full-tier' } })
+    // A new head forgets what was started for the old one
+    expect(resetFor(fresh({ fullDispatch: { head: SHA, at: 'x' } }), SHA2)).toMatchObject({ head: SHA2, fullDispatch: null })
+  })
+
   it('keeps a pull request that failed alone in a batch in attention, without rerunning its own run the batch cancelled', () => {
     const reason = { kind: 'failed', text: '#77 failed alone in batch queue/batch-3: "verify" failed.', job: { name: 'verify', id: '61' } }
     const cancelled = tiered([check(TIER, 'skipped'), check('verify', 'cancelled'), check('windows tests', 'cancelled')])
@@ -827,7 +848,18 @@ describe('which conflicts the merge queue regenerates itself (#1182)', () => {
     const files = ['packages/ui/src/app.tsx']
     const to = handoffReason({ item: fresh({ author: 'writer' }), pr, files, why: 'Not mechanical.', ref })
     expect(to.reason).toMatchObject({ kind: 'conflict', files, relay: { to: 'writer', branch: 'feat/b77', text: 'Merge main into feat/b77 and push again; conflicted files: packages/ui/src/app.tsx.' } })
-    expect(to.reason.text).toContain('Author session: writer. Relay this to it (the queue cannot message a session yet, #1173): "Merge main into feat/b77 and push again; conflicted files: packages/ui/src/app.tsx."')
+    expect(to.reason.text).toContain('Author session: writer. Relay this to it (it has not called this app, so the queue has no address to post to): "Merge main into feat/b77 and push again; conflicted files: packages/ui/src/app.tsx."')
+    // Where the instruction goes (#1509 item 4): this session when it is the author, the author's own session when it opened the pull request through open_pr
+    const own = handoffReason({ item: fresh({ author: 'me', owner: 'me' }), pr, files, why: 'Not mechanical.', ref, route: 'self' })
+    expect(own.reason.text).toContain('#77 is your own pull request (author session: me): fix it in this session: "Merge main into feat/b77')
+    const direct = handoffReason({ item: fresh({ author: 'writer' }), pr, files, why: 'Not mechanical.', ref, route: 'direct' })
+    expect(direct.reason.text).toContain('Author session: writer. The queue posted this to it itself, so nothing needs relaying: "Merge main into feat/b77')
+    expect(direct.reason.relay.route).toBe('direct')
+    // authorRoute: the session that opened it through open_pr decides; failing that, an author who is the owner
+    expect(authorRoute(fresh({ notice: 'a', author: 'writer' }), { notice: 'a' })).toEqual({ route: 'self', to: 'a' })
+    expect(authorRoute(fresh({ notice: 'a', author: 'writer' }), { notice: 'b' })).toEqual({ route: 'direct', to: 'b' })
+    expect(authorRoute(fresh({ notice: 'a', author: 'me', owner: 'me' }), null)).toEqual({ route: 'self', to: 'a' })
+    expect(authorRoute(fresh({ notice: 'a', author: 'writer', owner: 'me' }), null)).toEqual({ route: 'relay', to: null })
     const none = handoffReason({ item: fresh({ author: null }), pr, files, why: 'Not mechanical.', ref })
     expect(none.reason.relay.to).toBeNull()
     expect(none.reason.text).toContain('No author session is recorded for #77 (queue_merge author). Start a session on its branch feat/b77 with this instruction: "Merge main into feat/b77')
@@ -1457,7 +1489,7 @@ describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, (
     await morePolls()
     expect(writes()).toEqual([])
     expect(notices().map((e) => e.text)).toEqual([
-      'Merge queue: #77 (feat(apps): change 77) needs attention: conflict. #77 conflicts with main at c0ffee0. The queue has no checkout to merge it in. Author session: tester. Relay this to it (the queue cannot message a session yet, #1173): "Merge main into feat/b77 and push again; conflicted files: not known (GitHub says it conflicts)." The queue takes the new head by itself, at the front of the queue. Or take it out with unqueue.',
+      'Merge queue: #77 (feat(apps): change 77) needs attention: conflict. #77 conflicts with main at c0ffee0. The queue has no checkout to merge it in. #77 is your own pull request (author session: tester): fix it in this session: "Merge main into feat/b77 and push again; conflicted files: not known (GitHub says it conflicts)." The queue takes the new head by itself, at the front of the queue. Or take it out with unqueue.',
     ])
     const listed = await call('merge_queue')
     expect(listed.text).toContain('Merge queue: 1 need attention.')
@@ -2031,8 +2063,8 @@ describe('the merge queue resolves a conflict with main itself, or hands it to t
     const told = notices().filter((e) => e.kind === 'attention')
     expect(told).toHaveLength(1)
     expect(told[0]!.text).toContain("src/app.ts is not on project.json's list of mechanical files (queue.conflicts.mechanical)")
-    expect(told[0]!.text).toContain('Author session: writer. Relay this to it (the queue cannot message a session yet, #1173): "Merge main into feat/b77 and push again; conflicted files: pnpm-lock.yaml, src/app.ts."')
-    expect((told[0] as any).relay).toEqual({ to: 'writer', branch: 'feat/b77', text: 'Merge main into feat/b77 and push again; conflicted files: pnpm-lock.yaml, src/app.ts.' })
+    expect(told[0]!.text).toContain('Author session: writer. Relay this to it (it has not called this app, so the queue has no address to post to): "Merge main into feat/b77 and push again; conflicted files: pnpm-lock.yaml, src/app.ts."')
+    expect((told[0] as any).relay).toEqual({ to: 'writer', branch: 'feat/b77', text: 'Merge main into feat/b77 and push again; conflicted files: pnpm-lock.yaml, src/app.ts.', route: 'relay' })
     expect(conflictSteps().map((e) => [e.step, e.by ?? null])).toEqual([
       ['merge', null],
       ['handoff', 'session'],
@@ -4302,5 +4334,199 @@ describe("the merge queue keeps its messages until their owner acknowledges them
     const quiet = await watch(['watch', '--data', dir, '--owner', 'tester', '--minutes', '0.02'])
     expect(quiet.code).toBe(6)
     expect(quiet.out).not.toContain('needs attention')
+  })
+})
+
+/*
+ * #1509 item 4: what the queue used to tell a session to do by hand, it does. The app against the fake `gh`, with a queue
+ * file seeded the way `queue_merge` writes it (the notice address of the queuing session on the item) and `opened-prs.json`
+ * as `open_pr` writes it (the notice address of the session that opened the pull request).
+ */
+describe('the merge queue does by itself what it told a session to do by hand (#1509 item 4)', { timeout: 120_000 * SLOW }, () => {
+  const dataDir = () => join(root, 'data', 'app-data', 'p1', 'project-board')
+  const seedOpened = (opened: Record<string, unknown>) => {
+    mkdirSync(dataDir(), { recursive: true })
+    writeFileSync(join(dataDir(), 'opened-prs.json'), JSON.stringify(opened))
+  }
+  const item = (extra: Record<string, unknown> = {}) => ({
+    repo: R,
+    pr: 77,
+    lowers: [],
+    owner: 'tester',
+    author: 'tester',
+    notice: 'addr-tester',
+    state: 'ci',
+    title: 'feat(apps): change 77',
+    queuedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    reruns: {},
+    ...extra,
+  })
+  const events = () => queueOnDisk().events as { kind: string; notify: boolean; text: string; to?: string }[]
+  const dirty = () => ghState({ prs: { '77': ghPr(77, { mergeStateStatus: 'DIRTY', mergeable: 'CONFLICTING' }) } })
+  const opened = (notice: string) => ({ [`${R}#77`]: { notice, draft: false, at: new Date().toISOString() } })
+
+  describe('a conflict it cannot fix goes to the author session', () => {
+    it('posts it into the author session itself when that session opened the pull request through open_pr, and tells the queuing session it did', async () => {
+      seedQueue([item({ author: 'writer' })])
+      seedOpened(opened('addr-writer'))
+      runtime(dirty())
+      await until((x) => stateOf(x) === 'attention', 'the hand-off')
+      const attention = events().filter((e) => e.kind === 'attention')
+      expect(attention).toHaveLength(1)
+      expect(attention[0]!.to).toBe('addr-tester')
+      expect(attention[0]!.text).toContain('Author session: writer. The queue posted this to it itself, so nothing needs relaying: "Merge main into feat/b77 and push again')
+      expect(attention[0]!.text).not.toContain('Relay this to it')
+      const posted = events().filter((e) => e.kind === 'handoff')
+      expect(posted).toHaveLength(1)
+      expect(posted[0]).toMatchObject({ notify: true, to: 'addr-writer' })
+      expect(posted[0]!.text).toBe('Merge queue: #77 (feat(apps): change 77) is your pull request and it conflicts with main: Merge main into feat/b77 and push again; conflicted files: not known (GitHub says it conflicts).')
+      // Once per head
+      await morePolls()
+      expect(events().filter((e) => e.kind === 'handoff')).toHaveLength(1)
+      // A reader of merge_queue never sees an address
+      expect(JSON.stringify((await call('merge_queue', { all: true })).data)).not.toContain('addr-')
+    })
+
+    it('says so, and posts nothing else, when the queuing session is the one that opened it', async () => {
+      seedQueue([item()])
+      seedOpened(opened('addr-tester'))
+      runtime(dirty())
+      await until((x) => stateOf(x) === 'attention', 'the hand-off')
+      expect(events().filter((e) => e.kind === 'handoff')).toEqual([])
+      const attention = events().find((e) => e.kind === 'attention')!
+      expect(attention.text).toContain('#77 is your own pull request (author session: tester): fix it in this session: "Merge main into feat/b77')
+    })
+
+    it('still asks the queuing session to relay it when the author never called this app, so the queue has no address for it', async () => {
+      seedQueue([item({ author: 'writer' })])
+      runtime(dirty())
+      await until((x) => stateOf(x) === 'attention', 'the hand-off')
+      expect(events().filter((e) => e.kind === 'handoff')).toEqual([])
+      expect(events().find((e) => e.kind === 'attention')!.text).toContain('Author session: writer. Relay this to it (it has not called this app, so the queue has no address to post to)')
+    })
+  })
+
+  describe('a draft', () => {
+    it('is marked ready by the queue when the session that queued it opened it through open_pr, and lands when green', async () => {
+      seedQueue([item()])
+      seedOpened(opened('addr-tester'))
+      runtime(ghState({ prs: { '77': ghPr(77, { isDraft: true, mergeStateStatus: 'DRAFT' }) } }))
+      await until((x) => stateOf(x) === 'merged', 'the merge')
+      expect(writes().map((w) => w[0])).toEqual(['ready', 'merge', 'delete'])
+      expect(events().find((e) => e.kind === 'action')!.text).toContain('was a draft that the session queuing it opened; the queue marked it ready for review')
+    })
+
+    it('is left to its session when another one opened it, or the app did not open it: a draft may be work in progress', async () => {
+      seedQueue([item()])
+      seedOpened(opened('addr-someone-else'))
+      runtime(ghState({ prs: { '77': ghPr(77, { isDraft: true, mergeStateStatus: 'DRAFT' }) } }))
+      const q = await until((x) => stateOf(x) === 'attention', 'attention')
+      expect(q.queue[0].reason.kind).toBe('draft')
+      await morePolls()
+      expect(writes()).toEqual([])
+    })
+  })
+
+  describe('a pull request the queue cannot batch', () => {
+    const quick = [ghCheck('full tier', 'skipped', 10), ghCheck('verify', 'success', 11), ghCheck('windows tests', 'success', 12)]
+    const bump = (extra: Record<string, unknown> = {}) =>
+      ghState({
+        prs: { '77': ghPr(77, { headRefName: 'chore/release-9.9.9-beta.1', title: 'chore(release): 9.9.9-beta.1', ...extra }) },
+        checks: { [SHA]: quick },
+        runs: { [SHA]: [ghRun('success')] },
+      })
+
+    it('has the full tier started on its branch, once, when it passed only the quick tier', async () => {
+      seedQueue([item({ title: 'chore(release): 9.9.9-beta.1' })])
+      runtime(bump(), TIERS)
+      await until(() => writes().some((w) => w[0] === 'dispatch'), 'the dispatch')
+      await morePolls()
+      expect(writes().filter((w) => w[0] === 'dispatch')).toEqual([['dispatch', 'chore/release-9.9.9-beta.1']])
+      expect(gh().dispatched).toEqual([{ ref: 'chore/release-9.9.9-beta.1', inputs: null }])
+      expect(events().find((e) => e.kind === 'action')!.text).toContain('started the full tier on chore/release-9.9.9-beta.1')
+      expect(queueOnDisk().items[0].fullDispatch).toMatchObject({ head: SHA })
+    })
+
+    it("does not run a fork's branch here: it still asks its session", async () => {
+      seedQueue([item()])
+      runtime(bump({ isCrossRepository: true }), TIERS)
+      await until((x) => stateOf(x) === 'attention', 'attention')
+      expect(writes()).toEqual([])
+      expect(queueOnDisk().items[0].reason.kind).toBe('full-tier')
+    })
+  })
+
+  describe('a stack top whose lower merged', () => {
+    /** `up` (#77) is based on `low` (#76), which was squash-merged into main; origin.git stands for GitHub */
+    function restackable({ lowerMerged = true }: { lowerMerged?: boolean } = {}) {
+      const origin = join(root, 'origin.git')
+      const work = join(root, 'work')
+      g(root, 'init', '-q', '--bare', '-b', 'main', origin)
+      g(root, 'init', '-q', '-b', 'main', work)
+      g(work, 'config', 'user.name', 'Tester')
+      g(work, 'config', 'user.email', 'tester@example.test')
+      g(work, 'config', 'commit.gpgsign', 'false')
+      g(work, 'remote', 'add', 'origin', 'https://github.com/ijun17/centralu.git')
+      g(work, 'config', `url.${origin}.insteadOf`, 'https://github.com/ijun17/centralu.git')
+      const commit = (file: string, text: string, message: string) => {
+        writeFileSync(join(work, file), text)
+        g(work, 'add', file)
+        g(work, 'commit', '-q', '-m', message)
+        return g(work, 'rev-parse', 'HEAD')
+      }
+      commit('a.txt', 'a\n', 'base')
+      g(work, 'checkout', '-q', '-b', 'low')
+      const low = commit('b.txt', '1\n', 'low 1')
+      g(work, 'checkout', '-q', '-b', 'up')
+      const up = commit('c.txt', 'u\n', 'up 1')
+      g(work, 'checkout', '-q', 'main')
+      g(work, 'merge', '-q', '--squash', 'low')
+      g(work, 'commit', '-q', '-m', 'low (#76)')
+      const squash = g(work, 'rev-parse', 'HEAD')
+      g(work, 'push', '-q', 'origin', 'main', 'low', 'up', `${low}:refs/pull/76/head`)
+      g(work, 'checkout', '-q', '-b', 'mine', squash)
+      return { work, origin, low, up, squash, lowerMerged }
+    }
+    const stackState = (s: ReturnType<typeof restackable>) =>
+      ghState({
+        prs: {
+          '76': ghPr(76, { headRefName: 'low', headRefOid: s.low, state: s.lowerMerged ? 'MERGED' : 'OPEN', mergeCommit: s.lowerMerged ? { oid: s.squash } : null }),
+          '77': ghPr(77, { headRefName: 'up', headRefOid: s.up, baseRefName: 'low', mergeStateStatus: 'DIRTY', mergeable: 'CONFLICTING' }),
+        },
+      })
+    const stackRuntime = (s: ReturnType<typeof restackable>) => {
+      mkdirSync(appTmp(), { recursive: true })
+      const tmp = { TMPDIR: appTmp(), TEMP: appTmp(), TMP: appTmp() }
+      return runtime(stackState(s), { PROJECT_BOARD_QUEUE_CHECKOUT: s.work, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: join(root, 'no-gitconfig'), ...tmp }, gitWrapper(fake.bin))
+    }
+
+    it("is restacked onto the lower one's merge commit and pushed with a lease, as rebase_stack would, with nobody told to run it", async () => {
+      const s = restackable()
+      seedQueue([item()])
+      stackRuntime(s)
+      await until(() => events().some((e) => e.kind === 'conflict'), 'the restack')
+      const pushed = g(s.work, '--git-dir', s.origin, 'rev-parse', 'refs/heads/up')
+      expect(pushed).not.toBe(s.up)
+      // Replayed onto the squash commit: its parent is the lower one's merge commit, and it holds the upper one's own change only
+      expect(g(s.work, '--git-dir', s.origin, 'rev-parse', `${pushed}^`)).toBe(s.squash)
+      expect(g(s.work, '--git-dir', s.origin, 'show', `${pushed}:c.txt`)).toBe('u')
+      expect(writes().map((w) => w[0])).toContain('base')
+      const step = events().find((e) => e.kind === 'conflict')!
+      expect(step.text).toContain('restacked onto the merge commit of the pull request under it, as rebase_stack would')
+      expect(events().filter((e) => e.kind === 'attention')).toEqual([])
+      // The person's checkout is as it was
+      expect(g(s.work, 'branch', '--show-current')).toBe('mine')
+    })
+
+    it('hands it to its author as before when the pull request under it has not merged', async () => {
+      const s = restackable({ lowerMerged: false })
+      seedQueue([item({ author: 'writer' })])
+      stackRuntime(s)
+      const q = await until((x) => stateOf(x) === 'attention', 'the hand-off')
+      expect(g(s.work, '--git-dir', s.origin, 'rev-parse', 'refs/heads/up')).toBe(s.up)
+      expect(q.queue[0].reason.kind).toBe('conflict')
+      expect(q.queue[0].reason.text).toContain('Restacking it was tried and refused')
+    })
   })
 })

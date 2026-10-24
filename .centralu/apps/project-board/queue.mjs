@@ -27,6 +27,8 @@ export const SUBJECT_MAX = 72
 export const POLL_MS = { waiting: 15_000, ci: 90_000, acted: 60_000, attention: 120_000, error: 60_000 }
 /** No run started on a head for this long: CI did not start, which is the session's to look at. */
 export const NO_CI_MS = 15 * 60_000
+/** How long the full tier the queue started on a branch it cannot batch may take to report before it says so (#1509 item 4) */
+export const FULL_START_MS = 15 * 60_000
 /** A rerun asked for that GitHub has not started after this long. */
 export const RERUN_STUCK_MS = 10 * 60_000
 /** A required check not reported while nothing else runs (a renamed job, a path-filtered workflow). */
@@ -93,9 +95,11 @@ const refIn = (defaultRepo) => (repo, n) => (String(repo).toLowerCase() === Stri
  * A message for the session whose item has a notice address (#1161 item 1) carries it as `to`: the server posts it
  * into that session (queue-tools.mjs `tellSessions`) and marks it `told`.
  */
-export function pushEvent(q, item, { kind, text, notify = false, at, data = null }) {
+export function pushEvent(q, item, { kind, text, notify = false, at, data = null, to: addressed = null }) {
   q.seq += 1
-  const to = notify && item.notice ? { to: item.notice } : {}
+  // `addressed`: a session other than the item's owner, with its own notice address (the author of a conflicting pull request)
+  const address = addressed ?? item.notice
+  const to = notify && address ? { to: address } : {}
   q.events.push({ seq: q.seq, at, repo: item.repo, pr: item.pr, owner: item.owner ?? null, kind, notify, text, ...(data ?? {}), ...to })
   if (q.events.length > MAX_EVENTS) q.events.splice(0, q.events.length - MAX_EVENTS)
   return q.seq
@@ -239,31 +243,51 @@ export function conflictInstruction({ base, branch, files }) {
 }
 
 /**
+ * Where a conflict goes (#1509 item 4): the queuing session when it is the author (`self`: the author is the owner, or
+ * the session that opened the pull request through `open_pr` is the one that queued it); the session that opened it
+ * through `open_pr` when that is another (`direct`, `to` its notice address, which `open_pr` noted, opened.mjs); else
+ * the queuing session relays it (`relay`), as before. `opened` is `openedBy`'s record, or null.
+ */
+export function authorRoute(item, opened = null) {
+  const opener = opened?.notice ?? null
+  if (opener && item.notice && opener === item.notice) return { route: 'self', to: item.notice }
+  if (opener) return { route: 'direct', to: opener }
+  if (item.author && item.author === item.owner) return { route: 'self', to: item.notice ?? null }
+  return { route: 'relay', to: null }
+}
+
+/**
  * A conflict the queue hands to the pull request's author session (#1182): kind `conflict`, the
  * files, and `relay` (`to`: the author session, or null when none is recorded; `text`: the exact
- * instruction). Until an app can message a session (#1173), the attention event names the author
- * and carries the instruction, and the queuing session relays it; with no author recorded, it says
- * so and that a session started on the branch needs that instruction.
+ * instruction). Where the instruction goes depends on `route` (`authorRoute`): `self`, the queuing session is the
+ * author, so it fixes it there; `direct`, the author is another session that opened the pull request through this
+ * app, and the queue posts the instruction into it itself; `relay`, the author is named but the queue has no address
+ * for it, and the queuing session relays the instruction. With no author recorded, it says so and that a session
+ * started on the branch needs that instruction.
  */
-export function handoffReason({ item, pr, files = [], why, ref, instruction = null }) {
+export function handoffReason({ item, pr, files = [], why, ref, instruction = null, route = 'relay' }) {
   const n = ref(item.repo, item.pr)
   const branch = pr.headRefName
   const text = instruction ?? conflictInstruction({ base: pr.baseRefName, branch, files })
   const author = item.author ?? null
   const where = files.length ? ` in ${files.length > 8 ? `${files.slice(0, 8).join(', ')} and ${files.length - 8} more` : files.join(', ')}` : ''
   const to = author
-    ? `Author session: ${author}. Relay this to it (the queue cannot message a session yet, #1173): "${text}"`
+    ? route === 'self'
+      ? `${n} is your own pull request (author session: ${author}): fix it in this session: "${text}"`
+      : route === 'direct'
+        ? `Author session: ${author}. The queue posted this to it itself, so nothing needs relaying: "${text}"`
+        : `Author session: ${author}. Relay this to it (it has not called this app, so the queue has no address to post to): "${text}"`
     : `No author session is recorded for ${n} (queue_merge author). Start a session on its branch ${branch} with this instruction: "${text}"`
   return {
     state: 'attention',
-    reason: { kind: 'conflict', text: `${n} conflicts with ${pr.baseRefName} at ${short(pr.headRefOid)}${where}. ${why} ${to} The queue takes the new head by itself, at the front of the queue.`, files, relay: { to: author, branch, text } },
+    reason: { kind: 'conflict', text: `${n} conflicts with ${pr.baseRefName} at ${short(pr.headRefOid)}${where}. ${why} ${to} The queue takes the new head by itself, at the front of the queue.`, files, relay: { to: author, branch, text, route } },
   }
 }
 
 /** The fields that start again when the head moved: reruns, the no-CI clock, the required set. */
 export function resetFor(item, head) {
   if (item.head === head) return {}
-  return { head, reruns: {}, failures: {}, noCiSince: null, missingSince: null, uncleanSince: null, required: null }
+  return { head, reruns: {}, failures: {}, noCiSince: null, missingSince: null, uncleanSince: null, required: null, fullDispatch: null }
 }
 
 /**
@@ -397,7 +421,26 @@ export function decideCi({ item, pr, checks, runs = [], failures = {}, defaultBr
         'full-tier',
         `${n} passed the quick tier of CI, and lands only from a full run, but its batch of one ended without landing it: ${alone.text} Fix it and push (the queue takes the new head), or queue it again to try once more.`,
       )
-    if (!canBatch) return attention('full-tier', `${quickTierReason(n, pr.headRefName)} The queue cannot batch it (${pr.isCrossRepository ? "a fork's pull request" : 'batches are off, or it is a release bump'}), and lands it once its own full run is green.`)
+    if (!canBatch) {
+      const why = pr.isCrossRepository ? "a fork's pull request" : 'batches are off, or it is a release bump'
+      // A branch of this repository: the queue starts the full tier on it itself, once per head (#1509 item 4), as the
+      // reason below would have a session do by hand. A fork's branch is not run here: its code is not trusted with this
+      // repository's runners and secrets
+      if (!pr.isCrossRepository) {
+        const sent = item.fullDispatch?.head === head ? item.fullDispatch : null
+        if (!sent)
+          return {
+            state: 'ci',
+            action: { type: 'dispatch-full', branch: pr.headRefName },
+            patch: { noCiSince: null, missingSince: null, fullDispatch: { head, at } },
+            event: `${n}: its quick tier passed and the queue cannot batch it (${why}); started the full tier on ${pr.headRefName}.`,
+          }
+        // Started: its full run reports on this head, and the merge follows when it is green
+        if (now - Date.parse(sent.at) <= FULL_START_MS) return { state: 'ci', patch: { noCiSince: null, missingSince: null } }
+        return attention('full-tier', `${quickTierReason(n, pr.headRefName)} The queue started the full tier on ${pr.headRefName} at ${sent.at.slice(11, 16)} UTC, and no full run has reported on ${short(head)} in ${Math.round(FULL_START_MS / 60_000)} minutes. Start it by hand, or push again.`)
+      }
+      return attention('full-tier', `${quickTierReason(n, pr.headRefName)} The queue cannot batch it (${why}), and lands it once its own full run is green.`)
+    }
     // Waits for a batch (batch.mjs batchCandidates), which runs the full tier on it
     return { state: 'ci', quick: true, patch: { noCiSince: null, missingSince: null } }
   }

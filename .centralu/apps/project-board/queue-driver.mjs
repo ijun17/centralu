@@ -14,18 +14,20 @@
 // or an outage pauses the whole queue with a growing wait.
 import { readFileSync, renameSync, unlinkSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { evaluateChecks, firstFailure, squashMessage, workflowCheckNames } from './ci.mjs'
+import { canMerge, evaluateChecks, firstFailure, squashMessage, workflowCheckNames } from './ci.mjs'
 import { CI, config, QUEUE } from './config.mjs'
 import {
   closePr,
   containsCommit,
   deleteBranch,
+  dispatchWorkflow,
   FATAL,
   GitHubError,
   markDraft,
   markReady,
   mergePr,
   openPrsOnBase,
+  prsWithHead,
   QUEUE_PR_FIELDS,
   readChecks,
   readJobLog,
@@ -42,6 +44,7 @@ import {
 import {
   ACTIVE,
   attentionText,
+  authorRoute,
   cannotMergeBase,
   decideBefore,
   decideCi,
@@ -60,9 +63,12 @@ import {
   rerunRefused,
   resetFor,
 } from './queue.mjs'
+import { GitError } from './git.mjs'
+import { openedBy, readOpened } from './opened.mjs'
 import { mergeMain, statLine } from './queue-conflict.mjs'
 import { judgeHead, labelReason } from './queue-integrate.mjs'
 import { classifyRun } from './run-failure.mjs'
+import { rebaseStack, StackRefusal } from './stack.mjs'
 import { activeBatch } from './batch.mjs'
 import { batchTick, batchWork, formDue } from './queue-batch.mjs'
 import { listSome, plural, short, span } from './util.mjs'
@@ -451,7 +457,7 @@ const conflictEvent = (text, data) => ({ kind: 'conflict', text, data })
  * while it works, since regenerating can take minutes. Answers `{ decision, patch?, events }`, or
  * `{ yielded }` when another driver took the queue.
  */
-async function onConflict(item, pr, { now, ref, renew, defaultBranch, landed = [] }) {
+async function onConflict(item, pr, { now, ref, renew, defaultBranch, landed = [], opened = null }) {
   const n = ref(item.repo, item.pr)
   const head = pr.headRefOid
   const at = new Date(now).toISOString()
@@ -462,13 +468,20 @@ async function onConflict(item, pr, { now, ref, renew, defaultBranch, landed = [
   if (done?.outcome === 'handoff' && done.reason) return { decision: { state: 'attention', reason: done.reason }, events: [] }
   const since = item.conflict?.at ?? at
   const hand = (why, files, steps = [], instruction = null) => {
-    const d = handoffReason({ item, pr, files, why, ref, instruction })
+    // Where the instruction goes (queue.mjs authorRoute): this session when it is the author, the author's own session when
+    // it opened the pull request through open_pr, else the queuing session relays it
+    const where = item.author || opened?.notice ? authorRoute(item, opened) : { route: 'relay', to: null }
+    const d = handoffReason({ item, pr, files, why, ref, instruction, route: where.route })
     const to = d.reason.relay.to
     return {
       decision: d,
       patch: { conflict: { head, at: since, outcome: 'handoff', files, reason: d.reason } },
       events: [
         ...steps,
+        // Posted into the author session itself, beside the owner's attention message (once per head, like it)
+        ...(where.route === 'direct'
+          ? [{ kind: 'handoff', notify: true, to: where.to, text: `Merge queue: ${n}${item.title ? ` (${item.title})` : ''} is your pull request and it conflicts with ${pr.baseRefName}: ${d.reason.relay.text}` }]
+          : []),
         conflictEvent(`${n}: conflict handed to ${to ? `its author session ${to}` : 'a session on its branch (no author session recorded)'}${files.length ? `; conflicted files: ${listSome(files, 8)}` : ''}.`, {
           step: 'handoff',
           ms: Date.now() - now,
@@ -480,6 +493,33 @@ async function onConflict(item, pr, { now, ref, renew, defaultBranch, landed = [
     }
   }
   const not = cannotMergeBase(pr, defaultBranch)
+  // A stack's top, based on the branch of a pull request that has merged since (#1509 item 4): restacked onto its merge
+  // commit as rebase_stack does, which proves the change is the one CI tested and pushes with a lease, instead of telling a
+  // session to run rebase_stack. One whose lower is not merged, was built on an older lower, or does not replay cleanly
+  // is refused by the same procedure and handed to its author, as before
+  if (not && !pr.isCrossRepository && pr.baseRefName !== defaultBranch && QUEUE.conflicts?.checkout) {
+    const keep = setInterval(() => renew(), Math.max(1_000, LEASE_MS / 6))
+    keep.unref?.()
+    const began = Date.now()
+    let restacked
+    try {
+      restacked = await rebaseStack({ repo: item.repo, pr: item.pr, dir: QUEUE.conflicts.checkout, push: true }, { readPr, prsWithHead, setPrBase, openPrsOnBase }, (k) => ref(item.repo, k))
+    } catch (e) {
+      if (!(e instanceof StackRefusal) && !(e instanceof GitError)) throw e
+      return hand(`${not} Restacking it was tried and refused: ${e.message}`, [])
+    } finally {
+      clearInterval(keep)
+    }
+    if (restacked.pushed && !restacked.partial) {
+      const ms = Date.now() - began
+      return {
+        decision: { state: 'waiting' },
+        patch: { conflict: { head, at: since, outcome: 'pushed', sha: restacked.rebased, files: [] } },
+        events: [conflictEvent(`${n}: restacked onto the merge commit of the pull request under it, as rebase_stack would, in ${span(ms)}: ${restacked.summary} CI runs on the new head before it lands.`, { step: 'restack', ms, sha: restacked.rebased, by: 'queue', lease: true })],
+      }
+    }
+    return hand(`${not} Restacking it ${restacked.partial ? 'pushed the branch but could not move its base' : 'had nothing to push'}: ${restacked.summary}`, [])
+  }
   if (not) return hand(not, [])
   // Regenerating can take minutes: hold the lease meanwhile (every write still asks renew first)
   const keep = setInterval(() => renew(), Math.max(1_000, LEASE_MS / 6))
@@ -520,12 +560,15 @@ async function onConflict(item, pr, { now, ref, renew, defaultBranch, landed = [
   return hand(r.why, r.files, steps, r.instruction ?? null)
 }
 
+/** Whether the session that queued this item is the one that opened its pull request through `open_pr` (opened.mjs) */
+const ownDraft = (item, opened) => Boolean(opened?.notice) && opened.notice === item.notice
+
 /**
  * Reads one item's pull request and CI, decides, and acts. Answers what to write back: the new state
  * and fields, the events, and when to read it again. Throws only what stops every item (rate limit,
  * no network, no login).
  */
-async function pollItem(item, { now, ref, renew, save, landed = [], stillIntegrated = () => true }) {
+async function pollItem(item, { now, ref, renew, save, landed = [], stillIntegrated = () => true, opened = null }) {
   const repo = item.repo
   const at = new Date(now).toISOString()
   const { permissions, defaultBranch } = await permissionsOf(repo, now)
@@ -544,10 +587,20 @@ async function pollItem(item, { now, ref, renew, save, landed = [], stillIntegra
     Object.assign(pr, { isDraft: true, mergeStateStatus: 'DRAFT' })
     events.push({ kind: 'action', text: `${ref(repo, item.pr)} was ready for review; turned back into a draft: a record handed over with integrate stays one until the queue squashes it, so nothing else (merge_when_green, an older board, a merge by hand) can land it unjudged.` })
   }
+  // A draft that the session queuing it opened itself (open_pr noted which session, opened.mjs) is ready as far as that
+  // session is concerned: it queued it to land. Marked ready here, as `mark_ready` would be, instead of asking it to.
+  // Not a record handed over with integrate (a draft on purpose until it lands), and not one a stack made a lower:
+  // that one is not queued by the session that opened it as its top
+  if (pr.state === 'OPEN' && pr.isDraft && !item.auto && canMerge(permissions) && ownDraft(item, opened)) {
+    if (!renew()) return { yielded: true }
+    await markReady(repo, item.pr)
+    Object.assign(pr, { isDraft: false, mergeStateStatus: 'UNKNOWN' })
+    events.push({ kind: 'action', text: `${ref(repo, item.pr)} was a draft that the session queuing it opened; the queue marked it ready for review, as that session would have.` })
+  }
   let d = decideBefore({ item: view, permissions, pr, defaultBranch, ref })
   if (d?.reason?.kind === 'dirty') {
     if (!renew()) return { yielded: true }
-    const c = await onConflict(view, pr, { now, ref, renew, defaultBranch, landed })
+    const c = await onConflict(view, pr, { now, ref, renew, defaultBranch, landed, opened })
     if (c.yielded) return { yielded: true }
     d = c.decision
     Object.assign(base, c.patch ?? {})
@@ -618,6 +671,19 @@ async function pollItem(item, { now, ref, renew, save, landed = [], stillIntegra
       if (!(e instanceof GitHubError) || FATAL.has(e.kind)) throw e
       patch.reruns = { ...patch.reruns, [d.action.kind]: { ...patch.reruns[d.action.kind], error: e.message } }
       d = rerunRefused(ref(repo, item.pr), d.action.runId, e.message)
+      wait = pollMs('attention')
+    }
+  } else if (d.action?.type === 'dispatch-full') {
+    if (!renew()) return { yielded: true }
+    // Written down before asking, so a refusal or a driver stopped mid-call never starts it twice
+    save({ ...base, fullDispatch: patch.fullDispatch })
+    try {
+      // No inputs: the full tier (a release bump, or a manual run with no tier asked for, is full, .github/scripts/ci-changes.mjs)
+      for (const w of CI.workflows) await dispatchWorkflow(repo, w.split('/').pop(), d.action.branch)
+      wait = pollMs('acted')
+    } catch (e) {
+      if (!(e instanceof GitHubError) || FATAL.has(e.kind)) throw e
+      d = { state: 'attention', reason: { kind: 'full-tier', text: `${ref(repo, item.pr)}: its quick tier passed, the queue cannot batch it, and GitHub refused to start the full tier on ${d.action.branch}: ${e.message} Start it by hand (gh workflow run build.yml --ref ${d.action.branch}); the queue lands it once that run is green.` } }
       wait = pollMs('attention')
     }
   } else if (d.action?.type === 'retarget') {
@@ -702,7 +768,7 @@ export async function tick(dir, { holder, now = Date.now(), ref = queueRef }) {
     .map((i) => ({ pr: i.pr, head: i.head }))
   let r
   try {
-    r = await pollItem(item, { now, ref, renew, save, landed, stillIntegrated: () => readQueue(dir).items.some((i) => itemKey(i) === key && ACTIVE.has(i.state) && i.auto) })
+    r = await pollItem(item, { now, ref, renew, save, landed, opened: openedBy(readOpened(dir), item.repo, item.pr), stillIntegrated: () => readQueue(dir).items.some((i) => itemKey(i) === key && ACTIVE.has(i.state) && i.auto) })
   } catch (e) {
     const fatal = e instanceof GitHubError && FATAL.has(e.kind)
     const message = e instanceof GitHubError ? e.message : `Unexpected error: ${e?.message ?? e}`
@@ -737,7 +803,7 @@ export async function tick(dir, { holder, now = Date.now(), ref = queueRef }) {
     const target = it ?? { ...item }
     Object.assign(target, r.patch, { state: r.state, updatedAt: at, lastError: null, nextAt: new Date(now + r.wait).toISOString() })
     if (r.state !== 'attention' && target.reason) target.reason = null
-    for (const ev of r.events) pushEvent(fresh, target, { kind: ev.kind, text: ev.text, notify: ev.notify === true, at, data: ev.data ?? null })
+    for (const ev of r.events) pushEvent(fresh, target, { kind: ev.kind, text: ev.text, notify: ev.notify === true, at, data: ev.data ?? null, to: ev.to ?? null })
   })
   return { did: 'polled', key, state: r.state }
 }
