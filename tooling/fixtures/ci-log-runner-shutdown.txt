@@ -1,0 +1,44 @@
+2026-10-24T04:37:32.1050870Z ##[group]Run pnpm e2e --shard=1/5 --reporter=list,blob,./e2e/flaky-report.ts --trace=retain-on-failure
+2026-10-24T04:37:32.1051593Z [36;1mpnpm e2e --shard=1/5 --reporter=list,blob,./e2e/flaky-report.ts --trace=retain-on-failure[0m
+2026-10-24T04:37:32.1116576Z shell: /usr/bin/bash -e {0}
+2026-10-24T04:37:32.1116826Z env:
+2026-10-24T04:37:32.1117070Z   CC_DATA_DIR: /home/runner/work/_temp/centralu-data
+2026-10-24T04:37:32.1117431Z   PNPM_HOME: /home/runner/setup-pnpm/node_modules/.bin
+2026-10-24T04:37:32.1117749Z   E2E_BROWSER: chromium
+2026-10-24T04:37:32.1117991Z   PLAYWRIGHT_BLOB_OUTPUT_DIR: blob-report
+2026-10-24T04:37:32.1118289Z   PLAYWRIGHT_BLOB_OUTPUT_NAME: report-1.zip
+2026-10-24T04:37:32.1118558Z ##[endgroup]
+2026-10-24T04:39:50.9263902Z   ✓   58 [app] › e2e/app-share.spec.ts:369:3 › versions (E-1) › project app: since git is the versioning, only the commits that touched that app show, read-only, with no restore button (3.1s)
+2026-10-24T04:39:51.4662229Z   ✓   59 [app] › e2e/app-share.spec.ts:402:3 › app links (E-4) › a centralu://app?url= link handed off by the OS opens the import dialog with that source, and nothing reaches the host before Review is clicked (3.3s)
+2026-10-24T04:39:53.5560729Z   ✓   60 [app] › e2e/app-share.spec.ts:428:3 › app links (E-4) › a malformed link does not open the dialog and states the reason in one line — http, a path, or a different destination (2.6s)
+2026-10-24T04:39:55.1165917Z   ✓   61 [app] › e2e/fixtures/app-theme.ts:177:3 › a view receives every style variable, the real theme and Centralu's own variables, and a theme switch reaches it without a reload (3.6s)
+2026-10-24T04:39:57.4597863Z   ✓   62 [app] › e2e/fixtures/app-theme.ts:295:5 › the project board takes its colours, type and shape from the theme: hc-dark (3.8s)
+2026-10-24T04:39:57.8828612Z   ✓   63 [app] › e2e/fixtures/app-theme.ts:210:3 › the body and code fonts and the line height reach a view, and a change is sent to it without a reload (#312 step 5) (2.7s)
+2026-10-24T04:40:01.2451700Z   ✓   65 [app] › e2e/fixtures/app-theme.ts:232:3 › the template applies what it receives: its colours, the danger colour and the scrollbar follow the theme (3.3s)
+2026-10-24T04:41:02.2060304Z   ✓   96 [app] › e2e/apps.spec.ts:399:3 › pinned views (B-2, B-4, B-6, B-7) › an app with no view kept running for background work says why on its row and in Settings, and is stopped from either (#1236) (3.8s)
+2026-10-24T04:41:03.4619582Z   ✓   97 [app] › e2e/apps.spec.ts:806:3 › pinned views (B-2, B-4, B-6, B-7) › a linked machine's user-folder app dropped on the Grid button stands on the grid with its machine (#1143 U5) (3.3s)
+2026-10-24T04:41:05.9951068Z   ✓   98 [app] › e2e/apps.spec.ts:422:3 › pinned views (B-2, B-4, B-6, B-7) › an app from an untrusted project: the row shows a reason, opening it gives the reason and a trust button, and clicking it opens the view right there (3.8s)
+2026-10-24T04:41:07.4382275Z   ✓   99 [app] › e2e/apps.spec.ts:815:3 › pinned views (B-2, B-4, B-6, B-7) › a project whose folder has the manifest at its root is an app (#1141): its line carries the app mark, the mark and the menu open it, and it is not a row under itself (3.9s)
+2026-10-24T04:41:09.9015432Z   ✓  100 [app] › e2e/apps.spec.ts:446:3 › pinned views (B-2, B-4, B-6, B-7) › turning off trust also takes down an open view — the view's HTML is code from that project too (3.9s)
+2026-10-24T04:41:10.1308614Z   ✓  101 [app] › e2e/apps.spec.ts:845:3 › pinned views (B-2, B-4, B-6, B-7) › a root app that cannot run says why on its mark, dimmed, and the manifest going takes the mark away (2.7s)
+2026-10-24T04:41:13.1806855Z   ✓  103 [app] › e2e/apps.spec.ts:861:3 › pinned views (B-2, B-4, B-6, B-7) › the trust card lists the project's apps, root and inner alike, with what each may ask for; the menu's trust row opens it again (3.0s)
+2026-10-24T04:41:13.6957632Z   ✓  102 [app] › e2e/apps.spec.ts:463:3 › pinned views (B-2, B-4, B-6, B-7) › when an app disappears, its open view goes down and the instance is released (3.8s)
+2026-10-24T04:41:17.0327863Z   ✓  104 [app] › e2e/apps.spec.ts:897:3 › pinned views (B-2, B-4, B-6, B-7) › an app a trusted project gains stands once in the inbox with what it may ask for; opening it opens the app, and it does not come back (3.8s)
+2026-10-24T04:41:17.2147649Z   ✓  105 [app] › e2e/apps.spec.ts:481:3 › pinned views (B-2, B-4, B-6, B-7) › B-6: a skeleton shows while an app is launching, keeps covering it while the view is loading, and clears once it initializes (3.5s)
+2026-10-24T04:41:19.8926364Z   ✓  106 [app] › e2e/apps.spec.ts:920:3 › pinned views (B-2, B-4, B-6, B-7) › a long list of apps scrolls inside the trust card (2.8s)
+2026-10-24T04:41:21.0674201Z   ✓  107 [app] › e2e/apps.spec.ts:512:3 › pinned views (B-2, B-4, B-6, B-7) › B-6: an app that repeatedly failed to launch shows the reason and Restart, and clicking it launches again then opens the view (3.8s)
+2026-10-24T04:41:24.1715878Z   ✓  108 [app] › e2e/apps.spec.ts:930:3 › pinned views (B-2, B-4, B-6, B-7) › a root app has no share switch, in Settings or on its screen: its project's trust decides (4.2s)
+2026-10-24T04:41:25.3037587Z   ✓  109 [app] › e2e/apps.spec.ts:529:3 › pinned views (B-2, B-4, B-6, B-7) › B-6: when a running app dies, the reason and Restart appear over the view, and clicking it sends teardown then reopens as a new instance (4.2s)
+2026-10-24T04:41:30.2403737Z   ✓  110 [app] › e2e/archive.spec.ts:37:1 › a deleted session waits in the session archive, reads there, comes back, and is deleted for good only from there (6.0s)
+2026-10-24T04:41:30.9551625Z   ✓  111 [app] › e2e/archive.spec.ts:91:1 › deleting all archived sessions asks once and deletes every session in it for good (5.6s)
+2026-10-24T04:41:34.9616897Z   ✓  112 [app] › e2e/archive.spec.ts:108:1 › a deleted project sends its sessions to the session archive, and restoring one brings the project back (4.7s)
+2026-10-24T04:41:36.0230494Z   ✓  113 [app] › e2e/archive.spec.ts:130:1 › restoring a worktree session offers its recovery patch and bundle in the conversation (5.0s)
+2026-10-24T04:41:39.2918593Z   ✓  114 [app] › e2e/archive.spec.ts:163:1 › the records of finished app-agent runs are listed by app, read, and deleted for good from the session archive (4.3s)
+2026-10-24T04:41:40.6890423Z   ✓  115 [app] › e2e/archive.spec.ts:210:1 › an archive that could not be read says so and offers a retry, instead of loading for good (4.6s)
+2026-10-24T04:41:43.7402968Z ##[error]The runner has received a shutdown signal. This can happen when the runner service is stopped, or a manually started runner is canceled.
+2026-10-24T04:41:44.0247819Z   ✘  117 [app] › e2e/archive.spec.ts:281:1 › an earlier page that overlaps what is shown does not draw a message twice (3.2s)
+2026-10-24T04:41:44.0271589Z [ELIFECYCLE] Command failed.
+2026-10-24T04:41:44.7157883Z   ✘  116 [app] › e2e/archive.spec.ts:252:1 › pressing "Load earlier messages" twice in a row reads one page and shows each message once (5.1s)
+2026-10-24T04:41:44.7873018Z ##[error]The operation was canceled.
+2026-10-24T04:41:44.7982607Z Evaluate and set job outputs
+2026-10-24T04:41:44.7989327Z Cleaning up orphan processes

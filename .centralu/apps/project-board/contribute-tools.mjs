@@ -1,5 +1,5 @@
 // The contribution procedure: comment, edit_comment, file_issue, open_pr, commit_check, rebase_stack.
-import { z } from './runtime/centralu-app-runtime.mjs'
+import { centralu, z } from './runtime/centralu-app-runtime.mjs'
 import { commentIdOf } from './answers.mjs'
 import { itemInput, itemOf, itemRef, pathInput, REF_HELP, refOf, repoInput, repoOf } from './board.mjs'
 import { APP_DIR, config } from './config.mjs'
@@ -8,6 +8,7 @@ import { addLabels, createIssue, createPr, editComment, FATAL, GitHubError, mark
 import { progress } from './ci-tools.mjs'
 import { answering, serially } from './handlers.mjs'
 import { renderMarkdown } from './markdown.mjs'
+import { noteOpened } from './opened.mjs'
 import { runPrePr } from './pre-pr.mjs'
 import { answer, asError, linesAnswer } from './reply.mjs'
 import { commitProblems, DEFAULT_CONVENTIONS, fillTemplate, foreignBareIssueWarnings, parseConventions, publicTextProblems, subjectProblems } from './rules.mjs'
@@ -158,6 +159,12 @@ export async function openPr({ title, head, base, draft, repo, sections, dryRun,
   // A call cancelled while it waited for its turn opens nothing
   if (signal?.aborted) throw new GitHubError('input', 'the call was cancelled; nothing was sent to GitHub.')
   const pr = await createPr(r, { title, head, base: target, body: filled.body, draft })
+  // Which session opened it (opened.mjs): the merge queue marks a draft ready when that session queues it, and posts a conflict to it
+  try {
+    noteOpened(centralu.dataDir, { repo: r, number: pr.number, notice: centralu.noticeAddress(), draft: draft === true })
+  } catch (e) {
+    console.error(`[project-board] open_pr: could not note which session opened ${refOf(r, pr.number)}: ${e?.message ?? e}`)
+  }
   // The tier label (#1259): the pull request is open either way, so any failure here is a warning beside its number
   let labelled = ''
   if (labels.length) {

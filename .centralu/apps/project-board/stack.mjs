@@ -11,7 +11,7 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { GitError, changedFiles, commitCount, fetchRefs, git, isAncestor, patchId, remoteFor, topLevel, treeOf } from './git.mjs'
+import { GitError, changedFiles, commitCount, fetchRefs, git, isAncestor, isNetworkFailure, patchId, remoteFor, topLevel, treeOf } from './git.mjs'
 import { listSome, plural, short } from './util.mjs'
 
 /** A refusal: nothing was pushed or changed. */
@@ -113,6 +113,8 @@ export async function rebaseStack({ repo, pr, lower: lowerNumber, dir, push = fa
       try {
         await git(root, ['push', '--quiet', `--force-with-lease=refs/heads/${branch}:${tested}`, remote, `${rebased}:refs/heads/${branch}`])
       } catch (e) {
+        // The network, not the change: not a refusal. The push may have gone through, so it is not said to have changed nothing
+        if (isNetworkFailure(e)) throw new GitError(`Pushing ${branch} failed on the network, so it may or may not have gone through: ${e.message}`, e.stderr, e.code)
         refuse(`Pushing ${branch} failed, so nothing changed: ${e.message}${/stale info|rejected/.test(e.message) ? ' It moved on the remote after it was read; call again.' : ''}`)
       }
       lines.push(`Pushed ${short(rebased)} to ${branch} on ${remote}, where it was ${short(tested)}.`)
@@ -131,7 +133,8 @@ export async function rebaseStack({ repo, pr, lower: lowerNumber, dir, push = fa
       lines.push(`${U} is a draft, and no open pull request is based on ${branch}: if it is its stack's top now, mark it ready for review (mark_ready, or gh pr ready ${upper.number}) so CI runs on it.`)
     return { summary: `${U} restacked onto ${base}${alreadyIn ? '' : ` at ${short(rebased)}`}.`, lines, pushed: !alreadyIn, rebased, sameTree }
   } catch (e) {
-    if (e instanceof StackRefusal || !(e instanceof GitError)) throw e
+    // A network failure is not a refusal: the caller tries again later (the queue pauses), and says it as an error
+    if (e instanceof StackRefusal || !(e instanceof GitError) || isNetworkFailure(e)) throw e
     throw new StackRefusal(`${e.message} Nothing was pushed.`)
   } finally {
     if (tmp) {

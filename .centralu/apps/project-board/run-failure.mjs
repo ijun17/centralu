@@ -61,7 +61,32 @@ export const TIMEOUT_NOTE = /has exceeded the maximum execution time of \d+ minu
 const JOB_LIMIT_NOTE = /has exceeded the maximum execution time of \d+ minutes/i
 const STEP_LIMIT_NOTE = /The action '(.*)' has timed out after \d+ minutes/gi
 /** What GitHub writes on a job whose runner went away. */
+const SHUTDOWN_NOTE = /runner has received a shutdown signal/i
 export const LOST_RUNNER_NOTE = /lost communication with the server|runner has received a shutdown signal|hosted runner encountered an error|runner .{0,80}(?:did not connect|is offline|was lost|has been deprovisioned)/i
+
+/**
+ * The line a job's log holds when its runner was stopped under it (#1507): `##[error]The runner has received a shutdown
+ * signal. This can happen when the runner service is stopped, or a manually started runner is canceled.` GitHub writes
+ * no such note on the job: its annotation is only "The operation was canceled.", and the job's step says `failure`, so
+ * this is the one place the cause is. Everything the log says after this line was cut short by it: the tests the
+ * runner stopped under are reported failed (`✘ 117 …`), though nothing of the commit failed (job 120780406901, run
+ * 40063018693, `e2e (chromium 1/5)` of the release bump #1506, tooling/fixtures/ci-log-runner-shutdown.txt).
+ *
+ * Only the runner's own line counts: at the start of the line (a test that prints the line indents it, or quotes it in a
+ * diff), and followed by the `##[error]The operation was canceled.` that the cancelled step ends with (`shutdownAt`).
+ * A test that only prints the text, then really fails, keeps its failure.
+ */
+export const RUNNER_SHUTDOWN = /^##\[error\]The runner has received a shutdown signal/
+/** The line a cancelled step ends with: the runner's word, after the shutdown line, that it was this which ended the job */
+const STEP_CANCELED = /^##\[error\]The operation was canceled\.?\s*$/
+
+/** Where the runner's own shutdown line is in a log's lines (colour codes and timestamps already off), or -1: the last one before the step's cancellation. */
+export function shutdownAt(lines) {
+  const end = lines.findLastIndex((l) => STEP_CANCELED.test(l))
+  return end < 0 ? -1 : lines.slice(0, end).findLastIndex((l) => RUNNER_SHUTDOWN.test(l))
+}
+/** What GitHub writes on a job a shutdown cut short: the only thing its annotations say, and the cue to read the log for the rest */
+export const CANCELED_NOTE = /^The operation was canceled\.?$/i
 
 /** Whether a job's name is on the known-flaky list: exact names, `*` for any run of characters. */
 export function onFlakyList(name, list = []) {
@@ -95,7 +120,8 @@ export function jobFailure(job, { flaky = [] } = {}) {
     if (ended && isSetupStep(ended.name, notes)) return { real: false, cause: 'timeout', step: ended.name, inSetup: true }
     return { real: false, cause: 'timeout' }
   }
-  if (LOST_RUNNER_NOTE.test(notes)) return { real: false, cause: 'runner' }
+  // `shutdown`: the runner was stopped under the job. A lost connection is the network's; a shutdown can be a commit that exhausted the runner's memory or disk (the main guard hunts the second time)
+  if (LOST_RUNNER_NOTE.test(notes)) return { real: false, cause: 'runner', ...(SHUTDOWN_NOTE.test(notes) ? { shutdown: true } : {}) }
   if (job.conclusion === 'cancelled') return { real: false, cause: 'cancelled' }
   if (onFlakyList(job.name, flaky)) return { real: false, cause: 'flaky' }
   const step = (job.steps ?? []).find((s) => s.conclusion === 'failure')
@@ -114,7 +140,7 @@ export function jobFailure(job, { flaky = [] } = {}) {
  */
 export function classifyRun(run, jobs, { flaky = [] } = {}) {
   const seen = (jobs ?? []).map((j) => ({ j, f: jobFailure(j, { flaky }) })).filter((x) => x.f)
-  const pick = (x) => ({ real: x.f.real, cause: x.f.cause, step: x.f.step ?? null, inSetup: x.f.inSetup === true, job: { name: x.j.name, id: x.j.id != null ? String(x.j.id) : null }, attempt: run.attempt ?? 1 })
+  const pick = (x) => ({ real: x.f.real, cause: x.f.cause, step: x.f.step ?? null, inSetup: x.f.inSetup === true, shutdown: x.f.shutdown === true, job: { name: x.j.name, id: x.j.id != null ? String(x.j.id) : null }, attempt: run.attempt ?? 1 })
   const real = seen.find((x) => x.f.real)
   if (real) return pick(real)
   for (const cause of ['timeout', 'runner', 'setup', 'flaky', 'cancelled']) {
