@@ -124,7 +124,8 @@ export type MachinesPort = {
   needs(id: string): MachineInfo
   acceptVersions(id: string): MachineInfo
   install(id: string): Promise<MachineInstallResult>
-  update(id: string, opts?: { when?: 'idle' | 'now' }): Promise<MachineInstallResult>
+  /** `unasked`: no one approved it, automatic updates cover it (#1508); it stops no session it cannot see */
+  update(id: string, opts?: { when?: 'idle' | 'now'; unasked?: boolean }): Promise<MachineInstallResult>
   /** Ends an update's wait for the sessions there to finish (#1399) */
   cancelUpdate(id: string): MachineInfo
   rollback(id: string): Promise<MachineInstallResult>
@@ -140,6 +141,8 @@ export type MachinesPort = {
   hubAuto(id: string, allowed?: boolean): Promise<'on' | 'off' | 'older' | 'unreachable'>
   /** The reverse direction's switch for one machine (#550) */
   setAsks(id: string, on: boolean): Promise<MachineInfo>
+  /** Every connected machine on an older release starts following this hub's version (#1508), as automatic updates went on */
+  followHub?(): void
 }
 
 /** The sessions of a grid list, in order — the pre-#288 shape of `grid.get` / `grid.set` */
@@ -196,7 +199,7 @@ export function createRpcHandler(
     return updates
   }
 
-  const handlers: { [M in RpcMethodName]: (p: unknown, ctx?: { client: number; rights?: 'full' | 'limited'; label?: string | null }) => Promise<unknown> } = {
+  const handlers: { [M in RpcMethodName]: (p: unknown, ctx?: { client: number; rights?: 'full' | 'limited'; label?: string | null; covered?: boolean }) => Promise<unknown> } = {
     // A script (the limited credential) that starts a session with a first message owes nobody a wait: the work is the person's, reported to their Inbox (§8.1)
     'agents.createSession': async (p, ctx) => mgr.createSession({ ...RpcMethods['agents.createSession'].params.parse(p), ...(ctx?.rights === 'limited' ? { fromScript: { credential: scriptLabel(ctx.label) } } : {}) }),
     'agents.send': async (p, ctx) => {
@@ -959,9 +962,14 @@ export function createRpcHandler(
     // An older window's need (#1134): answers the row and does nothing else (#1341)
     'machines.need': async (p) => requireMachines().needs(RpcMethods['machines.need'].params.parse(p).machineId),
     'machines.install': async (p) => requireMachines().install(RpcMethods['machines.install'].params.parse(p).machineId),
-    'machines.update': async (p) => {
+    'machines.update': async (p, ctx) => {
       const { machineId, when } = RpcMethods['machines.update'].params.parse(p)
-      return requireMachines().update(machineId, { when: when ?? 'idle' })
+      /*
+       * A limited caller's update that went without a card (#1508, method-rights.ts; the transport's verdict, not judged again here)
+       * stops no session it cannot see and gives up once automatic updates go off, as the hub's own catch-up does
+       */
+      const unasked = ctx?.covered === true
+      return requireMachines().update(machineId, { when: when ?? 'idle', ...(unasked ? { unasked } : {}) })
     },
     'machines.cancelUpdate': async (p) => requireMachines().cancelUpdate(RpcMethods['machines.cancelUpdate'].params.parse(p).machineId),
     'machines.rollback': async (p) => requireMachines().rollback(RpcMethods['machines.rollback'].params.parse(p).machineId),
@@ -1035,8 +1043,13 @@ export function createRpcHandler(
       requireMachines().acceptVersions(RpcMethods['machines.acceptVersions'].params.parse(p).machineId),
     'updates.status': async (p) => requireUpdates().check(RpcMethods['updates.status'].params.parse(p).force),
     'updates.setAuto': async (p) => requireUpdates().setAuto(RpcMethods['updates.setAuto'].params.parse(p).enabled),
-    'updates.setAutoApply': async (p) =>
-      requireUpdates().setAutoApply(RpcMethods['updates.setAutoApply'].params.parse(p).enabled),
+    'updates.setAutoApply': async (p) => {
+      const enabled = RpcMethods['updates.setAutoApply'].params.parse(p).enabled
+      const status = requireUpdates().setAutoApply(enabled)
+      // Automatic updates cover the linked machines too (#1508): one found older starts following now, not at its next connect
+      if (enabled) machines?.followHub?.()
+      return status
+    },
     // Answers once the install has started, not once it has finished — see the note on
     // `updates.apply` in the protocol. The rest arrives as `update_status` events.
     'updates.apply': async () => requireUpdates().apply(),
@@ -1079,7 +1092,7 @@ export function createRpcHandler(
     },
   }
 
-  return async (method: string, params: unknown, ctx?: { client: number; rights?: 'full' | 'limited'; label?: string | null }): Promise<unknown> => {
+  return async (method: string, params: unknown, ctx?: { client: number; rights?: 'full' | 'limited'; label?: string | null; covered?: boolean }): Promise<unknown> => {
     const name = method as RpcMethodName
     const h = handlers[name]
     /*

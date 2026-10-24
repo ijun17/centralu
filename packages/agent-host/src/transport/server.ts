@@ -18,7 +18,7 @@ import { EventLog } from './event-log.js'
 import { createHttpHandler, sameSecret, type HttpGate } from './http.js'
 import { bridgeRefusal, bridgeSessionOf } from './bridge-token.js'
 import { isLimitedToken } from './limited-token.js'
-import { limitedRefusal } from './method-rights.js'
+import { conditionalRight, limitedRefusal, type RightsHost } from './method-rights.js'
 import { hostProof } from './host-proof.js'
 import { DrainCut, type Drain } from '../drain.js'
 import { rpcError } from '../rpc-error.js'
@@ -43,6 +43,11 @@ export type RpcContext = {
   rights: 'full' | 'limited'
   /** What the program called itself in its hello (#1405), cut and never checked; null when it said nothing. Words of the program's own: a header or a screen takes it through `scriptLabel` */
   label?: string | null
+  /**
+   * A limited call that ran with no card because a conditional right let it through (#1508, method-rights.ts `{ asks, when }`):
+   * judged once, in the transport. Never set on a call the person allowed on a card (host-requests.ts), nor on a full one
+   */
+  covered?: boolean
 }
 
 export type RpcHandler = (method: string, params: unknown, ctx?: RpcContext) => Promise<unknown>
@@ -134,6 +139,8 @@ export type HostServerOptions = {
    * fires when its socket goes. Without it, such a call is refused as before
    */
   onAsk?: (method: string, params: unknown, from: { client: string | null }, signal: AbortSignal) => Promise<unknown>
+  /** The host's state a conditional right reads (method-rights.ts `RightsHost`); without it every such call asks */
+  rightsHost?: RightsHost
   /** How many windows that show host requests are attached, each time it changes (#1405, `HostRequests.showingChanged`) */
   onShowing?: (count: number) => void
   /**
@@ -643,7 +650,7 @@ export class HostServer {
        * router, so a call naming a linked machine's session is judged on this host, where it started, and never relayed.
        */
       if (limited) {
-        const refusal = limitedRefusal(method, params)
+        const refusal = limitedRefusal(method, params, this.opts.rightsHost ?? null)
         // What cannot be undone waits for the person instead (host-requests.ts), and the call answers when they did
         if (refusal?.rights === 'asks' && this.opts.onAsk) {
           try {
@@ -667,7 +674,9 @@ export class HostServer {
         }
       }
       try {
-        const run = () => this.opts.onRpc(method, params, { client, rights: limited ? 'limited' : 'full', label })
+        // A limited call a conditional right let through with no card says so (#1508): the handler holds it to that, rather than judging again
+        const covered = limited && conditionalRight(method)
+        const run = () => this.opts.onRpc(method, params, { client, rights: limited ? 'limited' : 'full', label, ...(covered ? { covered: true } : {}) })
         const result = await (this.opts.drain ? this.opts.drain.track(`rpc ${method}`, run) : run())
         this.sendTo(ws, JSON.stringify({ kind: 'res', id, ok: true, result }))
       } catch (err) {

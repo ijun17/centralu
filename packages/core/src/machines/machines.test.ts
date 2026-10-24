@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { HostActivity, MachineInfo, MachineVersions } from '@cc/protocol'
-import { asksRow, autostartRow, awayNote, elevatedNote, hostStartNote, installNote, isAway, logonNote, MACHINE_STATUS_LABEL, machineProblem, operationNote, updateStops, updateWaits, versionPrompt } from './machines.js'
+import { asksRow, autostartRow, awayNote, elevatedNote, followHubLead, followHubNote, hostStartNote, installNote, isAway, logonNote, MACHINE_STATUS_LABEL, machineProblem, operationNote, updateStops, updateWaits, versionPrompt } from './machines.js'
 
 const machine = (patch: Partial<MachineInfo> = {}): MachineInfo => ({
   id: 'box',
@@ -384,5 +384,26 @@ describe('a machine that is away', () => {
     expect(awayNote({ lastConnectedAt: now - 5 * 3_600_000, nextAttemptAt: now + 20_000 }, now)).toEqual({ lastConnected: '5h ago', next: 'in under a minute' })
     expect(awayNote({ lastConnectedAt: now - 3 * 86_400_000, nextAttemptAt: null }, now)).toEqual({ lastConnected: '3d ago', next: null })
     expect(awayNote({ lastConnectedAt: null, nextAttemptAt: now - 1 }, now)).toEqual({ lastConnected: null, next: null })
+  })
+})
+
+// #1508: the hub's automatic updates cover the linked machines; Settings says so, and a row says when its catch-up did not go through
+describe("linked machines following this computer's version (#1508)", () => {
+  it('says so in Settings only while automatic updates are on', () => {
+    expect(followHubLead(true)).toBe(
+      "While automatic updates are on, linked machines follow this computer's version: each one on an older release is updated once no session there is in a turn.",
+    )
+    expect(followHubLead(false)).toBeNull()
+  })
+
+  it('says why the update of its own did not go through, and whether it tries once more', () => {
+    expect(followHubNote({ followHub: null })).toBeNull()
+    expect(followHubNote({})).toBeNull()
+    expect(followHubNote({ followHub: { version: '0.2.0', failed: 'The registry did not answer.', retryAt: 5 } })).toBe(
+      'Updating it to 0.2.0 by itself did not go through: The registry did not answer. This computer tries once more in a few minutes.',
+    )
+    expect(followHubNote({ followHub: { version: '0.2.0', failed: 'Cancelled', retryAt: null } })).toBe(
+      'Updating it to 0.2.0 by itself did not go through: Cancelled. This computer does not try again for this version; Update it here.',
+    )
   })
 })

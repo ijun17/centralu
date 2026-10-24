@@ -266,6 +266,9 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     return this.held
   }
 
+  /** The link has just connected, its hello and lists read; `LinkedMachine` looks at the versions then (#1508) */
+  protected connectedNow(): void {}
+
   info(): MachineInfo {
     return {
       id: this.record.id,
@@ -913,6 +916,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
      * connect, replay or not: the UI read the mirror while the link was away, marked unreachable.
      */
     this.deps.broadcast({ type: 'machine_resync', machineId: this.id })
+    // A machine on an older release follows the hub's version when its automatic updates are on (#1508)
+    this.connectedNow()
   }
 
   private onEvent(raw: unknown): void {

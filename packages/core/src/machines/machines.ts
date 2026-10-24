@@ -320,6 +320,27 @@ export function operationNote(m: Pick<MachineInfo, 'operation'>): string | null 
 }
 
 /**
+ * What Settings, Machines says while this computer's automatic updates are on (#1508): they cover the linked machines too.
+ * Null while they are off, when every update of a machine is the person's
+ */
+export function followHubLead(autoApply: boolean): string | null {
+  return autoApply
+    ? "While automatic updates are on, linked machines follow this computer's version: each one on an older release is updated once no session there is in a turn."
+    : null
+}
+
+/**
+ * The row's line when this computer's own update of the machine to its version did not go through (#1508, `followHub`): why,
+ * and whether it tries once more. Null while none failed
+ */
+export function followHubNote(m: Pick<MachineInfo, 'followHub'>): string | null {
+  const f = m.followHub
+  if (!f) return null
+  const next = f.retryAt !== null ? 'This computer tries once more in a few minutes.' : 'This computer does not try again for this version; Update it here.'
+  return `Updating it to ${f.version} by itself did not go through: ${f.failed.replace(/[.\s]+$/, '')}. ${next}`
+}
+
+/**
  * What to tell a person to type on the machine: a Windows PowerShell gets the `.cmd` shims, as the bare
  * names resolve to the `.ps1` ones a default execution policy blocks (#688)
  */

@@ -180,6 +180,36 @@ describe('a connection holding the limited credential (#1405)', () => {
   })
 })
 
+// #1508: an idle update of a linked machine that follows the hub's version runs; the server reads that from the host it was given
+describe("a limited machines.update reads the host's state (#1508)", () => {
+  it('runs when the host says the machine follows the hub, and is refused as asks otherwise, or by a server given no host state', async () => {
+    const follows = new Set(['m1'])
+    const calls: Call[] = []
+    server = new HostServer({
+      port: 0,
+      token: TOKEN,
+      onRpc: async (method, params, ctx) => {
+        calls.push({ method, params, ctx })
+        return { ok: true }
+      },
+      rightsHost: { followsHub: (id) => follows.has(id) },
+    })
+    const script = await hello(await server.listen(), limitedToken(TOKEN))
+    expect((await script.call('machines.update', { machineId: 'm1' })).ok).toBe(true)
+    expect((await script.call('machines.update', { machineId: 'm1', when: 'now' })).error?.data).toEqual({ refused: 'rights', rights: 'asks' })
+    expect((await script.call('machines.update', { machineId: 'm2' })).error?.data).toEqual({ refused: 'rights', rights: 'asks' })
+    // Automatic updates went off meanwhile: read at the call, not once
+    follows.delete('m1')
+    expect((await script.call('machines.update', { machineId: 'm1' })).error?.data).toEqual({ refused: 'rights', rights: 'asks' })
+    // The transport's verdict reaches the handler, which holds the call to it rather than judging again
+    expect(calls.map((c) => [c.method, c.params, c.ctx?.rights, c.ctx?.covered])).toEqual([['machines.update', { machineId: 'm1' }, 'limited', true]])
+    await server.close()
+    const bare = await start()
+    const other = await hello(bare.port, limitedToken(TOKEN))
+    expect((await other.call('machines.update', { machineId: 'm1' })).error?.data).toEqual({ refused: 'rights', rights: 'asks' })
+  })
+})
+
 describe('a limited call that asks the person, over the sockets (#1405 slice 3)', () => {
   /** A host whose limited `asks` calls go to host requests, with a trash of one session */
   async function startWithRequests() {

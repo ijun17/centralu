@@ -242,6 +242,18 @@ export const MachineInfo = z.object({
    */
   updateWaits: z.boolean().optional(),
   /**
+   * The hub's own update of this machine to the hub's version (#1508), started by itself while the hub's automatic updates
+   * are on, that did not go through: `version` is the one it tried to install, `failed` says why, and `retryAt` is when it
+   * tries once more (null: it will not try again for this version; the person's Update still can). Null or absent while none
+   * failed.
+   * Additive
+   */
+  followHub: z
+    .object({ version: z.string(), failed: z.string(), retryAt: z.number().nullable().catch(null) })
+    .nullable()
+    .optional()
+    .catch(undefined),
+  /**
    * The same switch as the older connect mode (`MachineConnect`, #1134): `at_start` when `autoReconnect` is on,
    * `when_needed` when it is off. Kept for one release so an older window still reads the row; read `autoReconnect`
    */
