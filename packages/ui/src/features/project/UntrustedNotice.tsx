@@ -19,7 +19,6 @@ const putAway = new Set<string>()
  */
 export function UntrustedNotice({ projectId, className = '' }: { projectId: string | null; className?: string }) {
   const project = useStore((s) => (projectId ? s.projects[projectId] : undefined))
-  const trust = useStore((s) => s.setProjectTrusted)
   const [, bump] = useState(0)
   const [open, setOpen] = useState(false)
   if (!project || project.trusted || putAway.has(project.id)) return null
@@ -54,7 +53,7 @@ export function UntrustedNotice({ projectId, className = '' }: { projectId: stri
             ids={trustCardIds('untrusted-notice-trust-card')}
             onAnswer={(yes) => {
               setOpen(false)
-              if (yes) void trust(project.id, true)
+              if (yes) void useStore.getState().setProjectTrusted(project.id, true)
             }}
           />
         </div>
