@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import type { ApprovalDecision, ApprovalScope, PermissionPreset, QuestionAnswer } from '@cc/protocol'
 import { AlwaysAllowRules, alwaysAllowKey } from '../always-allow.js'
 import type { CreateSessionOpts, EventSink } from '../contract.js'
+import { claudeEditInside } from '../edit-grant.js'
 import { CardIds, PendingCards } from '../session-kit.js'
 import { newFile } from './new-file.js'
 import { approvalDetail } from './normalize.js'
@@ -97,6 +98,16 @@ export class ClaudeCards {
     if (READ_TOOLS.has(toolName) && this.host.opts.mayRead) {
       const target = readTarget(toolName, toolInput)
       if (target && this.host.opts.mayRead(target)) return { behavior: 'allow' as const, updatedInput: toolInput }
+    }
+
+    /*
+     * **`edits`: a file edit inside the session's folder needs no card** (#1525). Not the SDK's `acceptEdits` mode,
+     * which also approves `rm`, `mv`, `sed` and the like in the folder: the mode stays `normal`'s and this one grant
+     * rides on the card the SDK is about to raise. A path outside the folder (links resolved) or under a protected
+     * name (`.git`, `.claude`, ...) still asks. See `edit-grant.ts`.
+     */
+    if (preset === 'edits' && (await claudeEditInside(this.host.opts.cwd, toolName, toolInput))) {
+      return { behavior: 'allow' as const, updatedInput: toolInput }
     }
 
     /*

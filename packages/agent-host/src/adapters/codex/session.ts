@@ -132,6 +132,7 @@ export class CodexSession implements SessionHandle {
       threadId: () => this.threadId,
       appServers: () => this.threadServers.appServers,
       ownServer: () => this.threadServers.ownServer,
+      editsFolder: () => (opts.permissionPreset === 'edits' ? opts.cwd : null),
     })
     this.client = new CodexClient(
       {

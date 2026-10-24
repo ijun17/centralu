@@ -241,10 +241,10 @@ async function appAgent(tool: ToolName, appProjectId: string | null, appId: stri
   })
 }
 
-const PRESETS: PermissionPreset[] = ['safe', 'normal', 'auto']
+const PRESETS: PermissionPreset[] = ['safe', 'normal', 'edits', 'auto']
 // No defaultMode is configured in these fixtures: normal must request manual approvals explicitly (#578).
-const CLAUDE_PERMISSION: Record<PermissionPreset, string> = { safe: 'default', normal: 'default', auto: 'bypassPermissions' }
-const CODEX_PERMISSION: Record<PermissionPreset, string> = { safe: 'untrusted/workspace-write', normal: 'from-settings', auto: 'never/workspace-write' }
+const CLAUDE_PERMISSION: Record<PermissionPreset, string> = { safe: 'default', normal: 'default', edits: 'default', auto: 'bypassPermissions' }
+const CODEX_PERMISSION: Record<PermissionPreset, string> = { safe: 'untrusted/workspace-write', normal: 'from-settings', edits: 'from-settings', auto: 'never/workspace-write' }
 /** Codex does not turn off the user's ~/.codex per thread — only the store layer can be turned off, so none and user share the same value */
 const CODEX_FILES: Record<Files, string> = { none: 'repo-off', user: 'repo-off', all: 'all' }
 

@@ -31,6 +31,7 @@ import { useStore } from '../../store/store.js'
 const PRESETS: { value: PermissionPreset; label: string; hint: string }[] = [
   { value: 'safe', label: 'Safe', hint: 'Asks for everything' },
   { value: 'normal', label: 'Normal', hint: 'Asks when risky' },
+  { value: 'edits', label: 'Edits', hint: 'Edits go through' },
   { value: 'auto', label: 'Auto', hint: 'Never asks' },
 ]
 

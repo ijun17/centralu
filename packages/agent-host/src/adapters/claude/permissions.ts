@@ -81,7 +81,7 @@ export function readTarget(toolName: string, input: Record<string, unknown>): st
 }
 
 /**
- * Normal follows the selected settings, with manual approvals when no mode was chosen.
+ * Normal (and `edits`, which differs only in `canUseTool`) follows the selected settings, with manual approvals when no mode was chosen.
  * Since SDK 0.3.286, omitting permissionMode can select the CLI's automatic classifier
  * instead. Resolve with the SDK's own merge engine and trust filter, then pass the mode
  * explicitly on start and resume. In particular, a committed project file cannot turn
@@ -90,6 +90,7 @@ export function readTarget(toolName: string, input: Record<string, unknown>): st
 export async function permissionOptionsFor(opts: CreateSessionOpts): Promise<{ permissionMode: PermissionMode }> {
   if (opts.permissionPreset === 'auto') return { permissionMode: 'bypassPermissions' }
   if (opts.permissionPreset === 'safe') return { permissionMode: 'default' }
+  // `edits` (#1525) launches as `normal` does; its one grant, edits inside the folder, is `canUseTool`'s (not `acceptEdits`)
   if (opts.noSettingFiles) return { permissionMode: (await personsDefaultMode()) ?? 'default' }
   try {
     const resolved = await resolveSettings({ cwd: opts.cwd, ...settingSourcesFor(opts) })

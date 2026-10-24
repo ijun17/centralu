@@ -558,3 +558,38 @@ describe('newSessionProjectOf (#529)', () => {
     expect(newSessionProjectOf({ ...base, projects: {} })).toBeNull()
   })
 })
+
+/*
+ * The preset a new session starts with (#1525): `edits` in a trusted project, `normal` in an untrusted one, and the
+ * person's own choice always wins. The window sends the preset itself, so a client that names none (a script, the
+ * limited credential) still gets `normal` from the host.
+ */
+describe('the preset a new session starts with (#1525)', () => {
+  async function started(trusted: boolean, opts?: { permissionPreset?: 'safe' | 'normal' | 'edits' | 'auto' }, machine?: string) {
+    const mock = new MockPlatform()
+    const p = await mock.projects.add('/tmp/preset-project')
+    await mock.projects.setTrusted(p.id, trusted)
+    await useStore.getState().attach(mock)
+    if (machine) useStore.setState((st) => ({ projects: { ...st.projects, [p.id]: { ...st.projects[p.id]!, machine } } }))
+    const created = await useStore.getState().createSession(p.id, { tool: 'claude', ...opts })
+    return { sent: useStore.getState().sessions[created.id]!.permissionPreset, shown: created.permissionPreset }
+  }
+
+  it('a trusted project starts accepting edits inside the project', async () => {
+    expect(await started(true)).toEqual({ sent: 'edits', shown: 'edits' })
+  })
+
+  it('an untrusted project keeps normal', async () => {
+    expect(await started(false)).toEqual({ sent: 'normal', shown: 'normal' })
+  })
+
+  it('an explicit choice wins in a trusted project, normal included, and is never raised', async () => {
+    expect((await started(true, { permissionPreset: 'normal' })).sent).toBe('normal')
+    expect((await started(true, { permissionPreset: 'safe' })).sent).toBe('safe')
+    expect((await started(false, { permissionPreset: 'edits' })).sent).toBe('edits')
+  })
+
+  it('a project on a linked machine keeps normal: that machine may not know edits yet', async () => {
+    expect((await started(true, undefined, 'other-machine')).sent).toBe('normal')
+  })
+})

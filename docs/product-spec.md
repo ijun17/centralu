@@ -214,7 +214,7 @@ Lives in the right-hand **evidence panel**, whose tabs are **Git / History / Fil
 
 #### FR-7. Per-project and per-session tool selection
 
-- Chosen in the session creation dialog: **tool** (Claude Code / Codex) → **model** → **permission preset** (safe/normal/auto-approve) → starting prompt.
+- Chosen in the session creation dialog: **tool** (Claude Code / Codex) → **model** → **permission preset** (safe/normal/edits/auto-approve; `edits` is `normal` plus edits inside the project folder without a card, and the default in a trusted project, #1525) → starting prompt.
 - **The permission preset overrides the CLI's global setting per session** (verified in M0 — see §2). Regardless of the user's global bypass setting, a session created in Centralu behaves according to the chosen preset.
 - The model & effort menu also carries per-tool knobs the tools expose: Claude effort levels, **Codex `model_verbosity`** (issue #54, shipped 2026-08-25 — measured on real runs to change output length before being surfaced).
 - Per-project defaults saved ("this project defaults to Codex + gpt-5.x").
