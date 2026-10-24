@@ -454,6 +454,27 @@ describe('approval of app tools — declared risk x preset x whose app it is', (
     expect(await decide('mcp__app-userboard__note')).toEqual(allowed())
   })
 
+  it("an app another project shares, which the session attached itself (attach_app), asks for its routine writes though its project is trusted", async () => {
+    w.trust.p2 = true
+    w.plant('p2', 'shared', ['--mode', 'attach', '--risks'])
+    w.rt.refresh()
+    hub.dispose()
+    hub = new SessionAppsHub(w.rt, {
+      toolListWaitMs: 10_000,
+      callJoinWaitMs: 300,
+      onDemand: { attached: () => [{ ref: { projectId: 'p2', appId: 'shared' }, server: 'app-shared' }], allowed: () => true },
+    })
+    const h = await start(WORKER, { permissionPreset: 'normal' })
+    await (h as unknown as { opts: CreateSessionOpts }).opts.apps!.tools('app-shared')
+    // Its own project's app, in the same session, is still covered
+    await (h as unknown as { opts: CreateSessionOpts }).opts.apps!.tools('app-board')
+    expect(await decide('mcp__app-board__post')).toEqual(allowed())
+    expect(await decide('mcp__app-shared__post')).toBe('asked-the-human')
+    expect(await decide('mcp__app-shared__merge')).toBe('asked-the-human')
+    // Bookkeeping in its own data is not about whose project it is
+    expect(await decide('mcp__app-shared__note')).toEqual(allowed())
+  })
+
   it("another project's session does not get this project's trust: the app is not even attached to it", async () => {
     await start({ id: 'claude-s2', kind: 'worker', projectId: 'p2' }, { permissionPreset: 'normal' })
     expect(await decide('mcp__app-board__post')).toBe('asked-the-human')

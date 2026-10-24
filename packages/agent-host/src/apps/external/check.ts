@@ -2,7 +2,7 @@ import type { ReadResourceResult, Tool } from '@modelcontextprotocol/client'
 import type { AppManifest } from './manifest.js'
 import { toolNameError } from './manifest.js'
 import { resourceUriOf, visibilityOf } from './visibility.js'
-import { declaredRisk, RISK_META_KEY } from './tool-risk.js'
+import { askWhen, ASK_WHEN_META_KEY, declaredRisk, RISK_META_KEY } from './tool-risk.js'
 import { isViewMimeType, viewHtmlOf, VIEW_MIME_TYPE } from '../../views/view-document.js'
 
 /**
@@ -87,6 +87,8 @@ export function checkTools(manifest: AppManifest, tools: readonly Tool[]): { fin
         ),
       )
     }
+    if (t._meta?.[ASK_WHEN_META_KEY] !== undefined && !askWhen(t))
+      findings.push(warning(where, `_meta["${ASK_WHEN_META_KEY}"] must be an object such as { "push": true }; the host cannot read it, so the tool always asks`))
     if (!t.description?.trim()) findings.push(warning(where, 'no description — agents pick a tool by reading its description'))
 
     // The same judgment as the side that opens the fixed screen (`homeView`) — the screen must not

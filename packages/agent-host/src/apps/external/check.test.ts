@@ -134,6 +134,11 @@ describe('a broken app states what is wrong and where', () => {
     expect(all).not.toContain('[tool fine]')
   })
 
+  it('an askWhen the host cannot read is said: the tool always asks', async () => {
+    app('ask', serverWith(`centralu.tool(server, 'x', { description: 'D', annotations: { readOnlyHint: false }, _meta: { 'centralu/risk': 'routine', 'centralu/askWhen': 'push' } }, async () => ({ content: [] }))`))
+    expect((await make().check(ref('ask'))).text).toContain('must be an object such as { "push": true }; the host cannot read it, so the tool always asks')
+  })
+
   it('home has no screen / home is closed to the screen / home is not in the tool list', async () => {
     app('nohome-ui', serverWith('', `centralu.tool(server, 'show', { description: 'Show', annotations: { readOnlyHint: true } }, async () => ({ content: [] }))`))
     app('hidden-home', serverWith('', `centralu.tool(server, 'show', { description: 'Show', annotations: { readOnlyHint: true }, _meta: { ui: { resourceUri: 'ui://x/index.html', visibility: ['model'] } } }, async () => ({ content: [] }))`))

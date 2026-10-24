@@ -25,7 +25,7 @@ const ALL = { ...boardTools, ...ciTools, ...contributeTools, ...decisionTools, .
 const own = { own: true, preset: 'normal' } as const
 
 describe("the project board's writes and the cards they raise", () => {
-  const local = ['ack', 'unqueue', 'mark_answer_recorded', 'edit_private_words']
+  const local = ['ack', 'unqueue', 'mark_answer_recorded']
   const routine = ['comment', 'edit_comment', 'file_issue', 'open_pr', 'set_item_fields', 'add_item', 'mark_ready', 'rebase_stack', 'queue_merge', 'merge_when_green', 'integrate']
 
   it('declares the bookkeeping writes local, and the host honours it', () => {
@@ -47,11 +47,18 @@ describe("the project board's writes and the cards they raise", () => {
     }
   })
 
-  it('still asks for release, and for a rebase_stack that pushes', () => {
+  it('still asks for release, for editing the private word list, and for a push or a checkout of its own choosing', () => {
     expect(declaredRisk(ALL.release!.config)).toBeNull()
     expect(runsUnasked(ALL.release!.config, { ...own, args: { action: 'tag', confirm: true } })).toBe(false)
-    expect(askWhen(ALL.rebase_stack!.config)).toEqual({ push: true })
-    expect(runsUnasked(ALL.rebase_stack!.config, { ...own, args: { pr: 7 } })).toBe(true)
+    // The list is the owner's guard against a leak: a session that was refused a word must not be able to remove it unasked and post again
+    expect(declaredRisk(ALL.edit_private_words!.config)).toBeNull()
+    expect(runsUnasked(ALL.edit_private_words!.config, { ...own, args: { remove: ['x'] } })).toBe(false)
+    // open_pr and rebase_stack run the repository's own scripts and git in a checkout: one the caller names is the caller's code
+    for (const name of ['open_pr', 'rebase_stack']) {
+      expect(askWhen(ALL[name]!.config), name).toMatchObject({ path: '*' })
+      expect(runsUnasked(ALL[name]!.config, { ...own, args: { pr: 7 } }), name).toBe(true)
+      expect(runsUnasked(ALL[name]!.config, { ...own, args: { pr: 7, path: 'C:/work/other' } }), name).toBe(false)
+    }
     expect(runsUnasked(ALL.rebase_stack!.config, { ...own, args: { pr: 7, push: true } })).toBe(false)
   })
 

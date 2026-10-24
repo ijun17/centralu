@@ -853,11 +853,12 @@ has no rule key, so nothing it remembers reaches the next call. A tool may say, 
 | `"routine"` | An ordinary write its own project would do anyway (a comment, a pull request, a merge the app's own checks gate) | The app belongs to the session's own project (a trusted project: an untrusted project's apps do not attach), under `normal`. Not for a user-folder app, an app attached from another project, the orchestrator, or `safe` |
 | absent | Anything else | Never: it asks as before |
 
-`_meta["centralu/askWhen"]`, an object such as `{ "push": true }`, makes a `routine` tool ask when the call's arguments
-hold every named value. Codex fixes a tool's approval when the thread starts, before any arguments exist, so there a
-tool with `askWhen` always asks. A declaration is a claim in the same way `readOnlyHint` is: it is read from the tool
-list of an app that is attached because the person trusted its project, never from a name. `check` warns about a
-declaration the host ignores.
+`_meta["centralu/askWhen"]`, an object such as `{ "push": true, "path": "*" }`, makes a `routine` tool ask when any
+named argument holds the value named (`"*"`: is set at all). One the host cannot read asks always. Codex fixes a tool's
+approval when the thread starts, before any arguments exist, so there a tool with `askWhen` always asks. A declaration
+is a claim in the same way `readOnlyHint` is: it is read from the tool list of an attached app, never from a name; the
+project's trust decides only `routine`, which is honoured for no app but the session's own project's. `check` warns
+about a declaration the host ignores.
 
 A call from a view is never asked about: the view is the control surface the app offers the
 person. It is recorded as `view`.

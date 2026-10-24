@@ -20,8 +20,8 @@ import type { PermissionPreset } from '@cc/protocol'
  *              app, an app another project shared and an app the session attached itself keep their cards,
  *              and so does `safe`, whose point is to ask.
  *
- * `centralu/askWhen` narrows a `routine` tool: when the call's arguments hold every named value (`{ push: true }`),
- * it asks. Codex fixes a tool's approval at thread start, before any arguments exist, so there a tool with
+ * `centralu/askWhen` narrows a `routine` tool: when any argument it names holds the value named (`{ push: true }`), or is set
+ * at all for the value "*" (`{ path: "*" }`), the call asks. A declaration that cannot be read (not an object, empty) asks too. Codex fixes a tool's approval at thread start, before any arguments exist, so there a tool with
  * `askWhen` always asks.
  */
 export const RISK_META_KEY = 'centralu/risk'
@@ -44,13 +44,19 @@ export function declaredRisk(tool: RiskTool): ToolRisk | null {
   return risk
 }
 
-/** The values that make a `routine` tool ask: null when it names none, or names them in a shape that is not an object of values */
+/** The arguments that make a `routine` tool ask: null when it names none, or names them in a shape that is not an object */
 export function askWhen(tool: RiskTool): Record<string, unknown> | null {
   const v = tool._meta?.[ASK_WHEN_META_KEY]
   if (typeof v !== 'object' || v === null || Array.isArray(v)) return null
   const named = Object.fromEntries(Object.entries(v))
   return Object.keys(named).length > 0 ? named : null
 }
+
+/** What an `askWhen` entry of this value means: the argument is set at all (a path to another checkout, say), whatever it holds */
+export const ANY_VALUE = '*'
+
+/** Whether one argument of a call is what an `askWhen` entry names: the same value, or any value that is set for `ANY_VALUE` */
+const matches = (given: unknown, named: unknown): boolean => (named === ANY_VALUE ? given !== undefined && given !== null && given !== '' : given === named)
 
 export type RiskScope = {
   /** The app belongs to the session's own project (its project's session, not the orchestrator, not an app attached from elsewhere) */
@@ -66,8 +72,9 @@ export function runsUnasked(tool: RiskTool, scope: RiskScope): boolean {
   if (risk === 'local') return true
   if (risk !== 'routine' || !scope.own || scope.preset !== 'normal') return false
   const when = askWhen(tool)
-  if (!when) return true
-  // The arguments are unknown, or hold every value named: ask
+  // A declaration that is there but not readable is not a licence: ask
+  if (!when) return tool._meta?.[ASK_WHEN_META_KEY] === undefined
+  // The arguments are unknown (Codex), or any one of them is what is named: ask
   const args = scope.args
-  return args !== undefined && !Object.entries(when).every(([k, v]) => args[k] === v)
+  return args !== undefined && !Object.entries(when).some(([k, v]) => matches(args[k], v))
 }

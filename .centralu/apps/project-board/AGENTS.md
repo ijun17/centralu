@@ -974,11 +974,14 @@ step shows on the screen.
    "A write can declare how risky it is"): `'centralu/risk': 'local'` for bookkeeping in this app's own
    data (with `destructiveHint: false`), `'routine'` for an ordinary write of this project's own pull
    requests, issues and queue (no card in a trusted project's own app under `normal`), and
-   `'centralu/askWhen': { push: true }` to ask for a call whose arguments hold those values. This app
-   declares `ack`, `unqueue`, `mark_answer_recorded` and `edit_private_words` local, and `comment`,
-   `edit_comment`, `file_issue`, `open_pr`, `set_item_fields`, `add_item`, `mark_ready`, `rebase_stack`
-   (asking when `push` is true), `queue_merge`, `merge_when_green` and `integrate` routine; `release`
-   declares nothing and always asks. A new write declares nothing until its risk is judged.
+   `'centralu/askWhen': { push: true, path: '*' }` to ask for a call where any named argument holds that value
+   (`'*'`: is set at all). This app declares `ack`, `unqueue` and `mark_answer_recorded` local, and `comment`,
+   `edit_comment`, `file_issue`, `open_pr` and `rebase_stack` (both ask when `path` names a checkout of the
+   caller's choosing, whose scripts and hooks they would run outside the session's sandbox; `rebase_stack` also
+   when `push` is true), `set_item_fields`, `add_item`, `mark_ready`, `queue_merge`, `merge_when_green` and
+   `integrate` routine. `release` and `edit_private_words` declare nothing and always ask (a session refused for
+   a private word must not be able to remove it unasked and post again). A new write declares nothing until its
+   risk is judged.
 5. **Visibility**: by default a tool is visible to agents and to the screen. A tool only the screen
    should call gets `_meta: { ui: { visibility: ['app'] } }`; one only agents should call gets
    `['model']`.

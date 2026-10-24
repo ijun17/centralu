@@ -39,12 +39,24 @@ describe('whether a declared write runs with no card', () => {
     expect(runsUnasked(t, { own: true, preset: 'safe' })).toBe(false)
   })
 
-  it('a routine tool with askWhen asks when the arguments hold the named values, and when they are not known', () => {
+  it('a routine tool with askWhen asks when any named argument matches, and when the arguments are not known', () => {
     const t = tool('routine', {}, { 'centralu/askWhen': { push: true } })
     expect(runsUnasked(t, { ...own, args: { pr: 1 } })).toBe(true)
     expect(runsUnasked(t, { ...own, args: { push: false } })).toBe(true)
     expect(runsUnasked(t, { ...own, args: { push: true } })).toBe(false)
     expect(runsUnasked(t, own)).toBe(false)
+    // "*" is any value that is set: a path to another checkout; one entry matching is enough
+    const two = tool('routine', {}, { 'centralu/askWhen': { push: true, path: '*' } })
+    expect(runsUnasked(two, { ...own, args: { pr: 1 } })).toBe(true)
+    expect(runsUnasked(two, { ...own, args: { pr: 1, path: 'C:/other' } })).toBe(false)
+    expect(runsUnasked(two, { ...own, args: { pr: 1, path: '' } })).toBe(true)
+    expect(runsUnasked(two, { ...own, args: { push: true } })).toBe(false)
+  })
+
+  it('a declaration it cannot read asks, never runs unasked', () => {
+    for (const bad of ['push', ['push'], true, {}, null, 7]) expect(runsUnasked(tool('routine', {}, { 'centralu/askWhen': bad }), { ...own, args: { push: true } }), String(JSON.stringify(bad))).toBe(false)
+    // A value of the wrong type does not match what is named, so a string "true" does not make push a no-ask
+    expect(runsUnasked(tool('routine', {}, { 'centralu/askWhen': { push: true } }), { ...own, args: { push: 'true' } })).toBe(true)
   })
 
   it('a tool that declares nothing never runs unasked here', () => {
