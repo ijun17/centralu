@@ -187,6 +187,8 @@ export class HostRequests {
     /** How the card ended, once one was raised: the flow says only that it did not run */
     const asked: Ended[] = []
     const flow = new TrashFlow({
+      // The window's own purge commands name no calling session: the card is always raised for them
+      meta: new Map(),
       askHost: async (_caller, detail, cardSignal): Promise<HostAskAnswer> => {
         const answer = await this.card(method, 'raw' in detail ? detail.raw : '', from, cardSignal ?? signal)
         asked.push(answer)

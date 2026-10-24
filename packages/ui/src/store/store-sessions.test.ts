@@ -522,7 +522,7 @@ describe('the session archive (#204)', () => {
 
     await useStore.getState().deleteSession(s.id)
     expect(useStore.getState().sessions[s.id]).toBeUndefined()
-    expect(useStore.getState().toast).toBe(`Archived ${s.name}`)
+    expect(useStore.getState().toast).toBe(`Archived ${s.name} · Settings → Archive keeps it`)
     expect(useStore.getState().toastAction?.label).toBe('Undo')
 
     await mock.projects.remove(p.id)
@@ -572,6 +572,8 @@ describe('Undo on the archive toast (#1512)', () => {
     expect(archiveNeedsAsk({ ...idle, pendingQuestions: [{ requestId: 'q', questions: [] }] } as never)).toBe(true)
     expect(archiveNeedsAsk({ ...idle, backgroundTasks: [{ id: 'dev', kind: 'shell', description: 'npm run dev', status: 'running' }] } as never)).toBe(true)
     expect(archiveNeedsAsk({ ...idle, backgroundTasks: [{ id: 'dev', kind: 'shell', description: 'npm run dev', status: 'completed' }] } as never)).toBe(false)
+    // A session an agent started may owe that agent a report
+    expect(archiveNeedsAsk({ ...idle, askedBy: 'orchestrator-1' } as never)).toBe(true)
   })
 })
 

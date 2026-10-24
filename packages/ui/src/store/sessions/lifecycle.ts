@@ -18,8 +18,9 @@ import { bumpChatKeysAbove, messagesToChat, nextChatKey, type ChatItem } from '.
  * once; one the archive would cut short asks: a turn under way, a card waiting for the person, or a background job
  * running (moving it ends its process, and with it the job, which the archive does not bring back).
  */
-export function archiveNeedsAsk(s: Pick<SessionSummary, 'state' | 'pendingApproval' | 'pendingQuestions' | 'backgroundTasks'>): boolean {
-  return isInTurn(s.state) || !!s.pendingApproval || s.pendingQuestions.length > 0 || backgroundCount(s.backgroundTasks) > 0
+export function archiveNeedsAsk(s: Pick<SessionSummary, 'state' | 'pendingApproval' | 'pendingQuestions' | 'backgroundTasks' | 'askedBy'>): boolean {
+  // A session an agent started may owe that agent its report, which the archive drops and Undo does not bring back: the host knows, the window does not
+  return isInTurn(s.state) || !!s.pendingApproval || s.pendingQuestions.length > 0 || backgroundCount(s.backgroundTasks) > 0 || !!s.askedBy
 }
 
 /**
@@ -276,7 +277,7 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
       // Undo is the archive's own Restore: the conversation comes back as it was, and Settings → Archive still has it after the toast is gone
       set(
         {
-          toast: `Archived ${name}`,
+          toast: `Archived ${name} · Settings → Archive keeps it`,
           toastAction: {
             label: 'Undo',
             run: () => {

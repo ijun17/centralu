@@ -48,11 +48,15 @@ export function VersionsPanel({ app }: { app: ExternalCatalogApp }) {
     setBusy(true)
     setRestoreError(null)
     try {
-      const wasCurrent = (versions?.kind === 'snapshots' ? versions.snapshots : []).find((s) => s.current)
+      // Read just before, not from the panel's last reading: the way back is whatever is current now
+      const before = await platform.apps.versions(app.appId, app.projectId, machine)
+      const kept = before.kind === 'snapshots' ? before.snapshots : []
+      const wasCurrent = kept.find((s) => s.current)
       await platform.apps.restoreVersion(app.appId, app.projectId, snap.id, userAppMachine(app.info))
       const now = await platform.apps.versions(app.appId, app.projectId, machine).catch(() => null)
-      const kept = now?.kind === 'snapshots' ? now.snapshots.find((s) => s.reason === 'before restore') : undefined
-      const back = wasCurrent && wasCurrent.id !== snap.id ? wasCurrent : kept && kept.id !== snap.id ? kept : null
+      // The copy the host made for this restore is the one that was not there before; an older 'before restore' is another restore's
+      const copy = now?.kind === 'snapshots' ? now.snapshots.find((s) => s.reason === 'before restore' && !kept.some((k) => k.id === s.id)) : undefined
+      const back = wasCurrent && wasCurrent.id !== snap.id ? wasCurrent : copy && copy.id !== snap.id ? copy : null
       const text = `Restored ${app.title} to the version from ${when(snap.at)}`
       setToast(text, !undo && back ? { label: 'Undo', run: () => void restore(back, true) } : undefined)
       void refresh()

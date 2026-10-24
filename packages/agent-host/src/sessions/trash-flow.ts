@@ -1,4 +1,4 @@
-import { ORCHESTRATOR_CHANGE, SessionId, type TrashedRun, type TrashedSession, type TrashedSubagentSteps } from '@cc/protocol'
+import { ORCHESTRATOR_CHANGE, SessionId, type PermissionPreset, type TrashedRun, type TrashedSession, type TrashedSubagentSteps } from '@cc/protocol'
 import type { TrashRequest } from '../adapters/contract.js'
 import type { HostCards } from './host-cards.js'
 import { plainQuoted } from './tool-answers.js'
@@ -9,7 +9,7 @@ export type { TrashRequest }
 export type TrashAnswer = { ok: true; text: string } | { ok: false; error: string }
 
 /** What the session archive commands reach of the session manager: its cards */
-export type TrashFlowHost = Pick<HostCards, 'askHost'>
+export type TrashFlowHost = Pick<HostCards, 'askHost'> & { readonly meta: ReadonlyMap<string, { permissionPreset: PermissionPreset }> }
 
 /** What `delete_session` reaches of this host's own sessions (`SessionTrash`): what a delete drops, and the delete decided in the step that moves the session */
 export type SessionOps = {
@@ -162,8 +162,8 @@ export class TrashFlow {
   }
 
   /**
-   * delete_session (#1219, fourth slice): moves a session that is not the caller's child to the session archive. It **asks, every
-   * time**: what comes back with `restore_archived` is the conversation, the worktree and the tool's file, but the host lets go
+   * delete_session (#1219, fourth slice): moves a session that is not the caller's child to the session archive. It **asks**
+   * unless moving it loses nothing and the caller does not run under `safe` (#1512): what comes back with `restore_archived` is the conversation, the worktree and the tool's file, but the host lets go
    * of what the session held when it leaves (a caller's wait for its report, delegations, its children's reports, the
    * start_agent cards it raised, what the person allowed it), and the card names what is lost for this session
    * (`SessionTrash.lossesOf`). A worker the person started themselves is named as theirs.
@@ -210,12 +210,14 @@ export class TrashFlow {
       .filter(Boolean)
       .join('\n')
     /*
-     * No card when moving it loses nothing (#1512): an idle session on this host that nobody waits on and that owes no report.
+     * No card when moving it loses nothing (#1512): an idle session on this host that nobody waits on and that owes no report,
+     * asked by a caller that does not run under `safe` (that preset asks about everything, and a caller under it is the one an
+     * injected text is likeliest to steer).
      * The archive brings back its conversation, worktree and the tool's file, so the move is undone from Settings → Archive or
      * with restore_archived, and the step that moves it decides at the last moment (below). A card stays for a session that
      * would drop something the archive does not bring back, and for a linked machine's, which that machine decides on its own.
      */
-    const nothingLost = local && ops && lost.length === 0
+    const nothingLost = local && ops && lost.length === 0 && (this.host.meta.get(caller)?.permissionPreset ?? 'safe') !== 'safe'
     const refused = nothingLost ? null : await this.ask(caller, question, signal, 'archived')
     if (refused) return { ok: false, error: refused }
     if (local && ops) {

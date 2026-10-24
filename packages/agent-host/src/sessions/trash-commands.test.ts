@@ -239,6 +239,16 @@ describe('delete_session', () => {
     expect(await listed()).toContain(s.id)
   })
 
+  it('asks even when nothing is lost under the safe preset', async () => {
+    const orc = await mgr.orchestrator()
+    await mgr.updateSettings(orc.id, { permissionPreset: 'safe' })
+    const s = await newSession('Idle one')
+    const denied = await answered(orc.id, 'delete_session', { sessionId: s.id }, 'deny')
+    expect(denied.question).toContain('Nothing else is lost: no one is waiting on it and it owes no report.')
+    expect(denied.r.isError).toBe(true)
+    expect(await listed()).toContain(s.id)
+  })
+
   it('asks when moving the session drops something the session archive does not bring back, and moves nothing on Deny', async () => {
     const orc = await mgr.orchestrator()
     const s = await newSession('Old work')
