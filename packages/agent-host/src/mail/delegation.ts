@@ -1,6 +1,5 @@
 import { CENTRALU, PERSON, parseAddress } from './address.js'
-import type { ThreadOrigin } from '../dev-services/store/mail.js'
-import type { MailRecords } from '../dev-services/store/mail.js'
+import type { MailRecords, ThreadOrigin, ThreadRow } from '../dev-services/store/mail.js'
 import { refusalReason } from './rules.js'
 import type { ClosingHooks, MailService } from './service.js'
 import type { MailTurns, TurnStart } from './turns.js'
@@ -226,6 +225,12 @@ export type ReportDelivery = 'wake' | 'in-turn' | 'old'
 export type ReportedAs = 'mailed' | 'closed' | 'none' | { settle: () => void; keep: boolean }
 
 
+/** The thread a session opened to ask the orchestrator (§9.7): a `mail` thread, which `latestBetween` does not take for a delegation's */
+function askedOf(mail: MailService, records: MailRecords, owner: string, assignee: string): ThreadRow | undefined {
+  const thread = records.latestBetween(owner, assignee, ['mail'])
+  return thread && mail.isAsk(thread) ? thread : undefined
+}
+
 /**
  * What the mailbox does with the end of a turn of delegated work (§6, §8.1): the report goes in the thread the owner has with the session,
  * and the owner is told as mail when it can read it. A thread the session itself closed by mail, saying how it ended, takes no second
@@ -235,7 +240,7 @@ export function reportRecorder(mail: MailService, records: MailRecords): (ownerI
   return (ownerId, childId, draft) => {
     const owner = mail.sessionAddress(ownerId)
     const child = mail.sessionAddress(childId)
-    const thread = records.latestBetween(owner, child)
+    const thread = records.latestBetween(owner, child) ?? askedOf(mail, records, owner, child)
     if (!thread) return 'none'
     if (thread.state === 'done') {
       // The session's own words: the last response a report carried is in the thread as its message too, and is not it closing the work

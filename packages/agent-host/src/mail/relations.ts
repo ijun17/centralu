@@ -19,9 +19,8 @@ import type { MailPolicy } from './service.js'
  * | A coordinator → a member of its scope | always |
  * | An app → a session | the session called the app (the signed caller address, §9.4) |
  * | Anything → an app | not yet: apps take mail from slice 7 |
+ * | Any session → the orchestrator | always, a new thread too (§9.7, #1447): it asks the orchestrator as the person's proxy. What the orchestrator then does for it asks the person |
  * | Any other session → a session | no: the orchestrator is the way, or `ask_project` (slice 3) |
- *
- * An ordinary session cannot open a thread with the orchestrator (§1.2, question 2): it writes to the person.
  */
 export type RelationsHost = {
   /** The relations of a session that is here, or undefined for one that is gone or in the session archive */
@@ -38,6 +37,10 @@ export type RelationsHost = {
 
 export function mailRelations(host: RelationsHost): MailPolicy {
   return {
+    isOrchestrator(address) {
+      const t = parseAddress(address)
+      return t?.kind === 'session' && host.session(t.sessionId)?.kind === 'orchestrator'
+    },
     calls(to) {
       const t = parseAddress(to)
       return t?.kind === 'session' && host.mailCommand?.(t.sessionId) ? COMMAND_CALLS : PLAIN_CALLS
@@ -64,6 +67,8 @@ export function mailRelations(host: RelationsHost): MailPolicy {
       const receiver = host.session(t.sessionId)
       if (!sender || !receiver) return 'that session is gone: it is in the session archive or deleted'
       if (sender.kind === 'orchestrator') return null
+      // Any session of this host may ask the orchestrator (§9.7); the limits of asking are the service's (`MailService.open`) and the delivery's
+      if (receiver.kind === 'orchestrator') return null
       if (sender.kind === 'coordinator' && sender.scopeSessionIds?.includes(t.sessionId)) return null
       if (receiver.askedBy === f.sessionId) return null
       return 'a session writes to the sessions it started, to the person, and replies in a thread it shares with another; the orchestrator is the way to another'

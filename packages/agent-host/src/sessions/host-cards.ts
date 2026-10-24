@@ -77,6 +77,24 @@ export class HostCards {
   readonly answeredApprovals = new Map<string, string>()
 
   /**
+   * Sessions whose cards are covered by an Allow the person just gave for the call under way (#1447, `AskedGate`): the orchestrator, in a turn a
+   * session's request started, runs a step the person allowed on that session's behalf, and the step's own cards are not raised a second time
+   */
+  private readonly covered = new Map<string, number>()
+
+  /** Runs `run` with `sessionId`'s host cards covered by the person's Allow for it (see `covered`) */
+  async cover<T>(sessionId: string, run: () => Promise<T>): Promise<T> {
+    this.covered.set(sessionId, (this.covered.get(sessionId) ?? 0) + 1)
+    try {
+      return await run()
+    } finally {
+      const n = (this.covered.get(sessionId) ?? 1) - 1
+      if (n > 0) this.covered.set(sessionId, n)
+      else this.covered.delete(sessionId)
+    }
+  }
+
+  /**
    * Capability question for a chain started from the screen (M4 D-4) — drawn by that app's pinned
    * view and the sidebar's app row (`apps.questions`). id -> question.
    */
@@ -86,10 +104,11 @@ export class HostCards {
    * Auto allows and logs; other presets raise a host card, withdrawn if the signal fires. `requestId` is given when the
    * caller tracks the card itself (a start_agent request, #673); `shown` raises one the conversation already records
    * (a request carried over from the previous host) without recording it again; `log` is what auto's log line names;
-   * `alwaysAsk` raises the card for auto too.
+   * `alwaysAsk` raises the card for auto too. `uncovered` raises it even while an Allow covers the session's cards (`cover`): the card that asks for that Allow.
    */
-  askHost(sessionId: string, detail: HostAsk['detail'], signal?: AbortSignal, card: { requestId?: string; shown?: boolean; log?: string; alwaysAsk?: boolean } = {}): Promise<HostAskAnswer> {
+  askHost(sessionId: string, detail: HostAsk['detail'], signal?: AbortSignal, card: { requestId?: string; shown?: boolean; log?: string; alwaysAsk?: boolean; uncovered?: boolean } = {}): Promise<HostAskAnswer> {
     if (signal?.aborted) return Promise.resolve(null)
+    if (!card.uncovered && this.covered.has(sessionId)) return Promise.resolve('allow')
     const note = detail.kind === 'project_access' && !detail.to.trusted ? ' (target not trusted)' : ''
     // `log` names what an `other` card is about in the auto log line, which would otherwise say only "other" (#694 review)
     // `alwaysAsk`: a card auto does not answer either (#1038 review: start_agent on another computer)
