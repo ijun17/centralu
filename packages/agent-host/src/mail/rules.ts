@@ -60,6 +60,9 @@ export function postsPerMinute(sender: SenderClass): number {
   return sender === 'session' ? 30 : sender === 'app' ? 10 : Infinity
 }
 
+/** A session's new requests to the orchestrator an hour (§9.7, #1447) */
+export const ASKS_PER_HOUR = 5
+
 /** The same words from the same sender in the same thread within this long are one post (§7.9) */
 export const REPEAT_WINDOW_MS = 10 * 60_000
 

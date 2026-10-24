@@ -262,6 +262,43 @@ describe('calling', () => {
     expect(w.rt.runs({ projectId: null, appId: 'helper' })).toEqual([])
   })
 
+  /*
+   * A session's request to the orchestrator (docs/plans/mailbox.md §9.7, #1447): an attached app's tool is a step that changes something, and under
+   * auto the CLI never asks about it. Every call of an agent passes through `Attachment.call`, on both CLIs, so the host's gate sits there.
+   */
+  it('in a session’s request an app tool that is not a read goes through the host’s gate and does not run when the gate refuses; a read is not asked about', async () => {
+    const asked: string[] = []
+    let allow = false
+    const gated = new SessionAppsHub(w.rt, {
+      toolListWaitMs: 10_000,
+      callJoinWaitMs: 300,
+      whenAsked: async (id, call, _signal, run, refused) => {
+        asked.push(`${id} ${call.name} ${JSON.stringify(call.args)}`)
+        return allow ? run() : refused('Nothing was done: the person did not allow it.')
+      },
+    })
+    try {
+      const a = gated.attach(worker('p1', 'orc-like'))
+      // The read-only hint is known only from the list the model has seen
+      await a.tools('app-notes')
+      const peek = await a.call('app-notes', 'peek', {})
+      expect(peek.isError).toBe(false)
+      expect(asked).toEqual([])
+
+      const refused = await a.call('app-notes', 'poke', { to: 9 })
+      expect(refused.isError).toBe(true)
+      expect(JSON.stringify(refused.content)).toContain('the person did not allow it')
+      expect(asked).toEqual(['orc-like app-notes.poke {"to":9}'])
+      expect(w.rt.runs({ projectId: 'p1', appId: 'notes' }).map((r) => r.tool)).toEqual(['peek'])
+
+      allow = true
+      expect((await a.call('app-notes', 'poke', { to: 10 })).isError).toBe(false)
+      expect(w.rt.runs({ projectId: 'p1', appId: 'notes' }).map((r) => r.tool).sort()).toEqual(['peek', 'poke'])
+    } finally {
+      gated.dispose()
+    }
+  })
+
   it('a call after trust is lost is blocked — checked again on every call, not only when it attached', async () => {
     const a = hub.attach(worker('p1'))
     w.trust.p1 = false

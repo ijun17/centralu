@@ -907,6 +907,11 @@ tool. On Claude it is **deferred** behind tool search, so its every request carr
 (no change to the 2,560 resident). It is in the profile from the session's start, because the tool list a session starts
 with is its prompt prefix and may not change under it; a session that began before this build gets it at its next spawn.
 
+**#1447 (a session asking the orchestrator).** A session cannot list the orchestrator, so the definition names its address: `send to "orchestrator"` (+35 characters;
+the definition is 811, `MAIL_BUDGET_CHARS` 800 → 820, and the reader seat's ceilings rise by 20). The orchestrator's instructions gain one line saying a session's
+mailed request is not the person's word and is answered in its thread (about 130 characters; its ceiling 9,710 → 9,910, resident in the commands tier too). Nothing else is added to a request: the card
+that asks the person is the host's, and the rule behind it is code.
+
 Every field but `action` is optional and has no description: each word rides in every Codex request, and the answers say
 what a call lacks ("thread is needed for this action", "kind is one of …"). The wake that delivers mail names the exact
 call (`mail(action="read", thread="…")`), which is how a deferred tool is found; a session that opens a thread itself finds

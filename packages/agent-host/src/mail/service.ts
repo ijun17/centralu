@@ -38,6 +38,7 @@ import {
   pickWorkThread,
   postsPerMinute,
   REPEAT_WINDOW_MS,
+  ASKS_PER_HOUR,
   wakes,
   refuse,
   refusalReason,
@@ -69,6 +70,13 @@ export type MailPolicy = {
   cannotRead?(to: string): string | null
   /** How `to` makes the calls a wake names: the tool itself, or `centralu_run` for a seat that reaches `mail` as a command */
   calls?(to: string): MailCalls
+  /** Whether `address` is the Centralu orchestrator's mailbox: the one a session of this host may open a thread with (§9.7, #1447) */
+  isOrchestrator?(address: string): boolean
+  /**
+   * The project and the root session of a session that can ask (§9.7): the root is the first session of the chain that started it. The limits of
+   * asking count over the sessions that share either, so starting more sessions does not buy more asks. Null for an address that is not a session here
+   */
+  askGroup?(address: string): { project: string | null; root: string } | null
 }
 
 /** What the host does with a helper whose thread is closed (3.10, MB): see `MailService.useClosing` */
@@ -498,6 +506,7 @@ export class MailService {
         throw refuse('bad_value', `parentId is the thread of work you are doing; ${input.parentId} is not one that is going to you`)
       }
       for (const to of addresses.filter((a) => a !== caller)) this.mayWriteOrRefuse(caller, to, null)
+      this.checkAsk(by, caller, addresses, input.kind, now)
 
       const id = threadIdOf(this.host, this.ulids.next(now))
       const state: ThreadState = assigneeAddress !== null && input.state === 'running' ? 'running' : 'open'
@@ -560,6 +569,11 @@ export class MailService {
         if (last && last.kind === input.kind && last.body === input.body && now - last.createdAt <= REPEAT_WINDOW_MS) {
           return { message: last, thread, duplicate: true, repeated: true }
         }
+      }
+      // A session writing into its own request to the orchestrator counts against the hour's words, as a new request does (§9.7). After the checks that
+      // hand back a post that was stored, so a retry of the last allowed word is not refused
+      if (sender.kind === 'session' && this.isAsk(thread) && thread.owner === caller && thread.assignee !== null) {
+        this.checkAskRate(this.groupAsks(caller, thread.assignee), now)
       }
 
       // A participant that is gone, or whose seat cannot read mail, gets no receipt: the others are written to all the same. Refused
@@ -1264,7 +1278,10 @@ id: ${sessionIdOf(assignee)}` : ''
         continue
       }
       const sender = parseAddress(message.sender)?.kind
-      const down = flowsDown(sender === 'person', sender === 'session' && message.sender === thread.owner, recipient === thread.assignee, message.kind)
+      // The words of a session asking the orchestrator never go inline, whatever their kind: it reads them with `mail read`, quoted (§9.7)
+      const down =
+        flowsDown(sender === 'person', sender === 'session' && message.sender === thread.owner, recipient === thread.assignee, message.kind) &&
+        !(sender === 'session' && this.isAsk(thread))
       candidates.push({
         receipt,
         message,
@@ -1314,7 +1331,7 @@ id: ${sessionIdOf(assignee)}` : ''
       else if (wakes(sender ?? 'session', message)) wake = true
       if (message.urgent || sender === 'person') immediate = true
       if (message.kind === 'question') asks = true
-      relations.add(relationWord(recipient, message.sender, thread))
+      relations.add(relationWord(recipient, message.sender, thread, this.isAsk(thread)))
       threads.add(thread.id)
       const about = aboutOf(message.facts)
       const outcome = typeof message.facts.outcome === 'string' ? message.facts.outcome : undefined
@@ -1327,7 +1344,7 @@ id: ${sessionIdOf(assignee)}` : ''
         threadId: thread.id,
         kind: message.kind,
         from: message.sender,
-        relation: relationWord(recipient, message.sender, thread),
+        relation: relationWord(recipient, message.sender, thread, this.isAsk(thread)),
         ...(about ? { about } : {}),
         ...(outcome ? { outcome } : {}),
         ...(error ? { error } : {}),
@@ -1697,6 +1714,72 @@ id: ${sessionIdOf(assignee)}` : ''
     return body
   }
 
+  /**
+   * A session's request to the orchestrator (§9.7, #1447): the session owns the thread and the orchestrator is its assignee, so it is an
+   * `assign`. One request is open at a time (a second is refused, with the first one's thread when it is the session's own), and at most
+   * `ASKS_PER_HOUR` new ones an hour. Both are counted over the sessions of the asker's project and the sessions under its root session, not
+   * over its id alone: a session that starts sessions, or a project with many of them, does not multiply the limit. A request waiting for the
+   * person's Release counts as open. One the orchestrator has answered (`review`) or the session closed does not, so an answered request never
+   * blocks the next
+   */
+  private checkAsk(by: Party, caller: string, addresses: readonly string[], kind: MessageKind, now: number): void {
+    if (by.kind !== 'session') return
+    const orchestrator = addresses.find((a) => a !== caller && this.policy.isOrchestrator?.(a))
+    if (orchestrator === undefined) return
+    if (kind !== 'assign') throw refuse('kind_not_allowed', 'the orchestrator takes a request as an assign: leave kind out, or say assign')
+    const mine = this.groupAsks(caller, orchestrator)
+    const open = mine.find((t) => t.state === 'open' || t.state === 'running' || t.state === 'blocked')
+    if (open?.owner === caller) {
+      throw refuse('not_allowed', `you already have a request open with the orchestrator (thread ${open.id}): wait for its answer (a request from a project nobody trusted waits for the person to release it), or close that thread first`, { thread: open.id })
+    }
+    if (open) {
+      throw refuse('not_allowed', 'a request from another session of your project, or under the same root session, is open with the orchestrator: wait for its answer, or ask the person')
+    }
+    this.checkAskRate(mine, now)
+  }
+
+  /** The requests to the orchestrator of the sessions that share the caller's project or root session, the caller's own included */
+  private groupAsks(caller: string, orchestrator: string): ThreadRow[] {
+    const group = this.policy.askGroup?.(caller)
+    const sameGroup = (owner: string): boolean => {
+      if (owner === caller) return true
+      const other = group ? this.policy.askGroup?.(owner) : null
+      return !!group && !!other && ((group.project !== null && other.project === group.project) || other.root === group.root)
+    }
+    return this.records.threadsOfParty(orchestrator, 'assignee').filter((t) => this.isAsk(t) && sameGroup(t.owner))
+  }
+
+  /**
+   * At most `ASKS_PER_HOUR` words an hour from those sessions to the orchestrator, counting a request's first word and every word a session
+   * writes into one after: a follow-up in an answered request wakes the orchestrator as a new request does, so it is not a way round the limit
+   */
+  private checkAskRate(asks: readonly ThreadRow[], now: number): void {
+    const since = now - 60 * 60_000
+    const words = asks.reduce((n, t) => n + this.records.messagesAfter(t.id, 0).filter((m) => m.sender === t.owner && m.createdAt > since).length, 0)
+    if (words >= ASKS_PER_HOUR) {
+      throw refuse('rate_limited', `at most ${ASKS_PER_HOUR} words an hour to the orchestrator from the sessions of one project or one root session, a follow-up in an answered request included: wait, or ask the person`)
+    }
+  }
+
+  /**
+   * The session whose request a thread is, or none (§9.7). The thread's first word says it, not its owner now: a session that is gone leaves the
+   * thread to the person (`partyGone`), and the words in it are still the session's. A thread nobody asked in, or one the orchestrator is not
+   * the assignee of, is nobody's request
+   */
+  requestedBy(thread: Pick<ThreadRow, 'id' | 'owner' | 'assignee'>): string | undefined {
+    if (thread.assignee === null || this.policy.isOrchestrator?.(thread.assignee) !== true) return undefined
+    const owner = parseAddress(thread.owner)
+    if (owner?.kind === 'session') return owner.sessionId
+    const first = this.records.messagesAfter(thread.id, 0, 1)[0]
+    const from = first ? parseAddress(first.sender) : undefined
+    return first && from?.kind === 'session' && first.sender !== thread.assignee ? from.sessionId : undefined
+  }
+
+  /** Whether a thread is a session's request to the orchestrator (§9.7): a session owns it and the orchestrator is its assignee */
+  isAsk(thread: Pick<ThreadRow, 'owner' | 'assignee'>): boolean {
+    return thread.assignee !== null && parseAddress(thread.owner)?.kind === 'session' && this.policy.isOrchestrator?.(thread.assignee) === true
+  }
+
   /** A session posts at most 30 a minute and an app 10, counted in the store so that a restart does not reset it (§7.9) */
   private checkRate(sender: SenderClass, caller: string, now: number): void {
     const limit = postsPerMinute(sender)
@@ -1803,11 +1886,14 @@ function deliveryLine(messages: number, threads: number, relations: ReadonlySet<
 }
 
 /** Centralu's word for how the sender stands to the receiver in this thread (§7.3). Never a name another party wrote */
-export function relationWord(recipient: string, sender: string, thread: ThreadRow): string {
+export function relationWord(recipient: string, sender: string, thread: ThreadRow, asked = false): string {
   const party = parseAddress(sender)
   if (party?.kind === 'centralu') return 'Centralu'
   if (party?.kind === 'person') return 'the person'
   if (party?.kind === 'app') return recipient === thread.owner ? 'an app you called' : 'an app in this thread'
+  // A session's request to the orchestrator turns the delegation around: its words are a request, not an instruction (§9.7)
+  if (asked && sender === thread.owner) return 'a session asking you for something'
+  if (asked && sender === thread.assignee && recipient === thread.owner) return 'the orchestrator you asked'
   if (sender === thread.owner) return 'the session that gave you this work'
   if (sender === thread.assignee && recipient === thread.owner) return 'the session you gave this work to'
   return 'another session in this thread'

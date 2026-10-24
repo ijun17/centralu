@@ -21,6 +21,8 @@ import { UserAppAdoption, adoptedProjectOf, adoptedUserApp } from './user-app-ad
 import { SessionManager } from './sessions/manager.js'
 import { MailService } from './mail/service.js'
 import { MailDelivery } from './mail/delivery.js'
+import { askedBy, askerFacts, type AskedByHost } from './mail/asked-by.js'
+import { parseAddress } from './mail/address.js'
 import { MailPerson } from './mail/person.js'
 import { takeOverFromEarlierBuild } from './mail/adoption.js'
 import { pausedReportKey, readPausedTasks } from './sessions/child-ownership.js'
@@ -409,15 +411,43 @@ const mail = new MailService(store.mail, {
   // Who may write to whom (§9.1), read from the sessions that are here
   policy: mailRelations({
     session: (id) => mgr.sessionInfo(id),
+    orchestratorAsks: () => mgr.orchestratorAsks(),
     ...mgr.mailSeats(() => commandsFor('orchestrator').includes('mail')),
     inThread: (threadId, address) => store.mail.participants(threadId).some((p) => p.address === address && p.leftAt === null),
   }),
 })
-const mailTool = new MailTool(mail, store.mail, (id) => (mgr.toolProfileOf(id) === 'orchestrator' && commandsFor('orchestrator').includes('mail') ? COMMAND_CALLS : PLAIN_CALLS))
+// What the host knows of a session and its project, for the cards and headers over a session's request to the orchestrator (§9.7)
+const askedByHost: AskedByHost = {
+  session: (id) => {
+    const s = mgr.sessionInfo(id)
+    return s && { name: s.name, projectId: s.projectId }
+  },
+  project: (id) => store.projects.listProjects().find((p) => p.id === id),
+}
 // The loop and token guards (§7.9): what turns mail started, and what they used
-const mailTurns = new MailTurns(store.mail, { keepOpen: (id) => mgr.keptInTurn(id) })
+const mailTurns = new MailTurns(store.mail, {
+  keepOpen: (id) => mgr.keptInTurn(id),
+  // Whose request a turn is, fixed when it begins (§9.7)
+  askerOf: (threadId) => {
+    const thread = store.mail.thread(threadId)
+    return thread ? mail.requestedBy(thread) : undefined
+  },
+})
+const mailTool = new MailTool(
+  mail,
+  store.mail,
+  (id) => (mgr.toolProfileOf(id) === 'orchestrator' && commandsFor('orchestrator').includes('mail') ? COMMAND_CALLS : PLAIN_CALLS),
+  (id) => askerFacts(askedByHost, id),
+  () => mgr.orchestratorId(),
+  (id) => mailTurns.current(id)?.threadId ?? null,
+)
 const mailDelivery = new MailDelivery(mail, store.mail, mgr.mailSessions(), {
   turns: mailTurns,
+  // A request to the orchestrator from a project nobody trusted waits for the person's Release (§9.7)
+  untrustedAsker: (address) => {
+    const from = parseAddress(address)
+    return from?.kind === 'session' && !askerFacts(askedByHost, from.sessionId).trusted
+  },
   // When it last ran: a host that was off a long while does not wake a crowd of sleeping sessions (§7.9). A setting the previous build never reads
   heartbeat: {
     read: () => Number(store.settings.appSetting('mail.heartbeat')) || null,
@@ -436,7 +466,7 @@ const mailPerson = new MailPerson(mail, store.mail, mailDelivery, {
 mail.onChange((c) => events.push({ type: 'mail_changed', threadId: c.threadId, toPerson: c.recipients.includes('person') }))
 // A session that goes to the trash leaves the work it held in the mailbox to the person or to nobody (§3.3); one that comes
 // to rest, answers a card or is restored may now take the mail it was holding
-mgr.useMail({ sessionGone: (id) => void mail.sessionGone(id), sessionChanged: (id) => mailDelivery.poke(id), sessionEvent: (e, ended) => mailTurns.observe(e, ended), tool: (id, args) => mailTool.run(id, args),
+mgr.useMail({ askedBy: (id) => askedBy(askedByHost, mailTurns, id), sessionGone: (id) => void mail.sessionGone(id), sessionChanged: (id) => mailDelivery.poke(id), sessionEvent: (e, ended) => mailTurns.observe(e, ended), tool: (id, args) => mailTool.run(id, args),
   // Work a session gave another is written down as a thread, beside the old path that delivered it (§8.1)
   delegated: delegationRecorder(
     mail,
@@ -459,7 +489,7 @@ mgr.useMail({ sessionGone: (id) => void mail.sessionGone(id), sessionChanged: (i
     report: personReportRecorder(mail, store.mail),
   },
   // A turn's end is a report in the thread, and the owner is told as mail when it can read it (§8.1)
-  report: reportRecorder(mail, store.mail),
+  report: reportRecorder(mail, store.mail, (id) => mailTurns.threadOf(id)),
   // Every turn the mailbox did not start is recorded too: whose it is, and the thread it belongs to (§6)
   turnStarted: turnRecorder(mail, store.mail, mailTurns),
 })

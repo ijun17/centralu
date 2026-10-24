@@ -236,6 +236,17 @@ export class SessionAppsHub {
       names?: AppNameBook
       /** A project's name, for the name of a later app with an id another app of the session already has */
       projectName?: (projectId: string) => string | undefined
+      /**
+       * Asks the person before an app tool runs when the session's turn is a session's request (§9.7, #1447): the one door every call of an agent
+       * passes through, whatever the CLI and its preset. It runs `run` at once in any other turn
+       */
+      whenAsked?: (
+        sessionId: string,
+        call: { name: string; args: Record<string, unknown> },
+        signal: AbortSignal | undefined,
+        run: () => Promise<AppToolResult>,
+        refused: (text: string) => AppToolResult,
+      ) => Promise<AppToolResult>
     } = {},
   ) {
     this.stopListening = rt.onAppsChanged(() => {
@@ -588,6 +599,19 @@ class Attachment implements SessionApps {
     tool: string,
     args: Record<string, unknown>,
     opts: { signal?: AbortSignal; waitMs?: number; callId?: string } = {},
+  ): Promise<AppToolResult> {
+    const gate = this.hub.opts.whenAsked
+    // A tool that only reads is not asked about, as for the CLI's own card (`readOnly`); anything else of an app asks when a session's request is the turn
+    if (!gate || this.closed || !this.find(server) || this.readOnly(server, tool)) return this.callNow(server, tool, args, opts)
+    // Named with a dot so no app tool can pass for one of the orchestrator's own reading tools
+    return gate(this.session.id, { name: `${server}.${tool}`, args }, opts.signal, () => this.callNow(server, tool, args, opts), failure)
+  }
+
+  private async callNow(
+    server: string,
+    tool: string,
+    args: Record<string, unknown>,
+    opts: { signal?: AbortSignal; waitMs?: number; callId?: string },
   ): Promise<AppToolResult> {
     const hit = this.find(server)
     // An unattached app never reaches the runtime — the only apps this session can call are the ones decision 4 gave it

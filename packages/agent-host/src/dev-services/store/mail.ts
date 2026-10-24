@@ -369,10 +369,10 @@ export class MailRecords {
    * The newest delegation thread `owner` gave `assignee`, whatever its state: where the next instruction of a delegation goes (§8.1).
    * Only a thread a delegation tool opened: a task one of them gave through `mail` is another task, with its own assign still to arrive
    */
-  latestBetween(owner: string, assignee: string): ThreadRow | undefined {
+  latestBetween(owner: string, assignee: string, origins: readonly ThreadOrigin[] = DELEGATION_ORIGINS): ThreadRow | undefined {
     const row = this.db
       .prepare<[string, string], ThreadSql>(
-        `SELECT * FROM mail_threads WHERE owner = ? AND assignee = ? AND origin IN (${DELEGATION_ORIGINS.map((o) => `'${o}'`).join(', ')}) ORDER BY created_at DESC, id DESC LIMIT 1`,
+        `SELECT * FROM mail_threads WHERE owner = ? AND assignee = ? AND origin IN (${origins.map((o) => `'${o}'`).join(', ')}) ORDER BY created_at DESC, id DESC LIMIT 1`,
       )
       .get(owner, assignee)
     return row && toThread(row)
