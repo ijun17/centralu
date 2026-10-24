@@ -35,7 +35,7 @@ export type TurnSource = 'caller' | 'report' | 'app'
 export type TurnStartedBy = 'mail' | 'person' | 'caller' | 'cli' | 'report' | 'app'
 
 /** What is known of a turn while it runs. The guards count only the turns mail started */
-type Open = { seq: number; acted: boolean; tokens: number; by: TurnStartedBy; threadId: string | null; /** The caller whose work the turn is, when it is */ owner?: string }
+type Open = { seq: number; startedAt: number; acted: boolean; tokens: number; by: TurnStartedBy; threadId: string | null; /** The caller whose work the turn is, when it is */ owner?: string }
 
 /**
  * The guards against mail that feeds on itself (docs/plans/mailbox.md §7.9). Two agents answering each other, or a session that
@@ -76,7 +76,7 @@ export class MailTurns {
   closeStale(): void {
     for (const row of this.records.openTurns()) {
       if (this.keepOpen?.(row.sessionId) && !this.open.has(row.sessionId)) {
-        this.open.set(row.sessionId, { seq: row.turnSeq, acted: false, tokens: 0, by: turnStartedBy(row.startedBy), threadId: row.threadId })
+        this.open.set(row.sessionId, { seq: row.turnSeq, startedAt: row.startedAt, acted: false, tokens: 0, by: turnStartedBy(row.startedBy), threadId: row.threadId })
       } else {
         this.records.endTurn(row.sessionId, row.turnSeq, this.now(), 'lost')
       }
@@ -88,7 +88,7 @@ export class MailTurns {
     this.end(sessionId, 'lost')
     const seq = this.records.nextTurnSeq(sessionId)
     this.records.startTurn({ sessionId, turnSeq: seq, threadId, startedBy: 'mail', startedAt: this.now() })
-    this.open.set(sessionId, { seq, acted: false, tokens: 0, by: 'mail', threadId })
+    this.open.set(sessionId, { seq, startedAt: this.now(), acted: false, tokens: 0, by: 'mail', threadId })
     return seq
   }
 
@@ -102,7 +102,7 @@ export class MailTurns {
     this.end(sessionId, 'lost')
     const seq = this.records.nextTurnSeq(sessionId)
     this.records.startTurn({ sessionId, turnSeq: seq, threadId, startedBy: by, startedAt: this.now() })
-    this.open.set(sessionId, { seq, acted: false, tokens: 0, by, threadId, ...(owner ? { owner } : {}) })
+    this.open.set(sessionId, { seq, startedAt: this.now(), acted: false, tokens: 0, by, threadId, ...(owner ? { owner } : {}) })
   }
 
   /**
@@ -115,6 +115,11 @@ export class MailTurns {
     if (!turn || turn.threadId !== null || (turn.by !== 'caller' && turn.by !== 'cli') || turn.owner !== owner) return
     turn.threadId = threadId
     this.records.setTurnThread(sessionId, turn.seq, threadId)
+  }
+
+  /** When the turn that is going in the session began; none when no turn is recorded */
+  startedAt(sessionId: string): number | undefined {
+    return this.open.get(sessionId)?.startedAt
   }
 
   /** The turn that is going in the session, by whom it was started and the thread it belongs to; none when no turn is recorded */

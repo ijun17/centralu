@@ -54,6 +54,7 @@ import type {
   RebuildCause,
   ApprovalDecision,
   Attachment,
+  BackgroundTask,
   ApprovalScope,
   MachineInfo,
   NormalizedEvent,
@@ -917,14 +918,19 @@ export class SessionManager {
       deliver: async (id, input, late) => {
         /*
          * A turn the mail starts is the work of the thread it carries (§6): its end is reported to the thread's owner like any turn of work that
-         * session gave, so a report is owed from here. A session already owing one keeps its mark (the turn is that work's), and a mark made
+         * session gave, so a report is owed from here. A session already owing the same owner keeps its mark (the turn is that work's); one owing
+         * another owner keeps that mark and its pause, and this turn is reported to its own owner when it ends (#1474). A mark or a note made
          * here goes if the input was not taken
          */
         const owner = input.quiet ? undefined : input.reportTo
-        const marked = owner !== undefined && !this.children.awaitingReport.has(id) && this.meta.has(owner)
+        const known = owner !== undefined && this.meta.has(owner)
+        const marked = known && !this.children.awaitingReport.has(id)
+        const other = known && this.children.awaitingReport.has(id) && this.children.awaitingReport.get(id) !== owner
         if (marked) this.children.markReport(id, owner)
+        if (other) this.children.markMailTurn(id, owner)
         const unmark = () => {
           if (marked && this.children.awaitingReport.get(id) === owner) this.children.clearReport(id)
+          if (other) this.children.clearMailTurn(id, owner)
         }
         try {
           await this.events.deliverMail(id, input, { leaving: () => this.handingOver || this.disposing, atRest: () => this.mailReceiver(id).kind === 'ready' }, (e) => {
@@ -942,6 +948,27 @@ export class SessionManager {
     }
   }
 
+  /**
+   * The background work that goes with a turn that is stopped (3.10, #1474): what a paused report for the owner waits on, or, for a turn that is
+   * going, the tasks that turn's own tool calls started (`parentCallId` names the call, and the calls since the turn began are its). Work the
+   * tool cannot place (no `parentCallId`), a dev server the person started and another turn's work are left running
+   */
+  private tasksOfStoppedTurn(sessionId: string, since: number | undefined, ownerId: string): BackgroundTask[] {
+    const running = this.reports.ownTasksRunning(sessionId)
+    // What a paused report for the owner waits on; the turn that is going may have started more, so this is not instead of the turn's own
+    const held = this.pausedFor(sessionId, ownerId) ? new Set((this.children.pausedReports.get(sessionId) ?? []).map((t) => t.id)) : new Set<string>()
+    const calls = new Set(
+      since === undefined
+        ? []
+        : this.store.messages
+            .loadMessages(sessionId, 400)
+            .filter((m) => m.kind === 'tool_call' && m.ts >= since)
+            .map((m) => (typeof m.payload === 'object' && m.payload !== null && 'callId' in m.payload ? m.payload.callId : undefined))
+            .filter((id): id is string => typeof id === 'string'),
+    )
+    return running.filter((t) => held.has(t.id) || (t.parentCallId !== undefined && calls.has(t.parentCallId)))
+  }
+
   /** The session's report to `ownerId` is held over its own background work (`pausedReports`) */
   pausedFor(sessionId: string, ownerId: string): boolean {
     return this.children.awaitingReport.get(sessionId) === ownerId && this.children.pausedReports.has(sessionId)
@@ -953,17 +980,20 @@ export class SessionManager {
    * the thread was closed (the mark is dropped, so the stopped turn is not reported a second time). The helper is told once, in Centralu's words,
    * without a wake; a helper in a turn that is not the thread's (the person's own, another thread's) is not interrupted and gets the same note
    */
-  async workClosed(c: { threadOwner: string; helperId: string; stopped: boolean; text: string }): Promise<void> {
+  async workClosed(c: { threadOwner: string; helperId: string; stopped: boolean; text: string; since?: number }): Promise<void> {
     const helper = this.meta.get(c.helperId)
     if (!helper || this.handingOver || this.disposing) return
     if (c.stopped) {
+      // The work to stop is read before the mark goes: a paused report names the tasks it waits on
+      const tasks = this.tasksOfStoppedTurn(c.helperId, c.since, c.threadOwner)
       if (this.children.awaitingReport.get(c.helperId) === c.threadOwner) this.children.clearReport(c.helperId)
+      this.children.closeMailTurn(c.helperId, c.threadOwner)
       try {
         this.interrupt(c.helperId)
       } catch {
         // No process: there is no turn to stop
       }
-      for (const t of this.reports.ownTasksRunning(c.helperId)) {
+      for (const t of tasks) {
         try {
           await this.stopBackgroundTask(c.helperId, t.id)
         } catch {

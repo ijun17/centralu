@@ -90,7 +90,7 @@ export function closingRecorder(
     inTurn(sessionId: string): boolean
     /** The session's turn has ended but its own background work runs, and a report waits on it (`pausedReports`) */
     paused(sessionId: string, ownerId: string): boolean
-    workClosed(c: { threadOwner: string; helperId: string; stopped: boolean; text: string }): void
+    workClosed(c: { threadOwner: string; helperId: string; stopped: boolean; text: string; since?: number }): void
   },
 ): ClosingHooks {
   const sessionOf = (address: string): string | undefined => {
@@ -106,7 +106,11 @@ export function closingRecorder(
       const owner = sessionOf(thread.owner)
       return owner !== undefined && host.paused(helper, owner)
     },
-    closed: (c) => host.workClosed({ threadOwner: sessionOf(c.thread.owner) ?? '', helperId: c.helperId, stopped: c.stopped, text: c.text }),
+    closed: (c) => {
+      // When the turn that is stopped began: only the background work it started is stopped with it
+      const since = turns.startedAt(c.helperId)
+      host.workClosed({ threadOwner: sessionOf(c.thread.owner) ?? '', helperId: c.helperId, stopped: c.stopped, text: c.text, ...(since !== undefined ? { since } : {}) })
+    },
   }
 }
 

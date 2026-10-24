@@ -304,8 +304,20 @@ export class SessionEvents {
      * too would end the state as "awaiting input" and hide the failure). So a failed run was never
      * reported, the marker stayed set, and a later, unrelated turn ended up reported as "it finished".
      */
-    // A wait settled in an earlier turn holds that turn's answer, not this one's
-    if (endedTurn && e.sessionId && !run?.tracksInputs) void this.host.reports.reportBackIfAwaited(e.sessionId, e, runOpen ? run?.completedAnswer : undefined, undefined, turnBy)
+    /*
+     * A turn the mailbox started for another owner's thread than the one this session owes a report (#1474) is that owner's alone: the mark, its pause and
+     * the tasks it waits on are not this turn's. Taken at every end, so a later turn is not read as it
+     */
+    const mailTurn = endedTurn && e.sessionId ? this.host.children.takeMailTurn(e.sessionId) : undefined
+    if (mailTurn && e.sessionId) {
+      // Not held by `tracksInputs`: that is a wait of the first owner's, and this turn is not its
+      if (!mailTurn.closed) void this.host.reports.reportMailTurn(e.sessionId, mailTurn.ownerId, e, runOpen ? run?.completedAnswer : undefined, turnBy)
+      // The first owner's paused work may have ended during this turn, which then set no timer for it (a turn running reports at its own end)
+      if (this.host.children.pausedReports.has(e.sessionId)) this.host.reports.settlePausedReport(e.sessionId)
+    } else if (endedTurn && e.sessionId && !run?.tracksInputs) {
+      // A wait settled in an earlier turn holds that turn's answer, not this one's
+      void this.host.reports.reportBackIfAwaited(e.sessionId, e, runOpen ? run?.completedAnswer : undefined, undefined, turnBy)
+    }
     // Work the person owns (a script or the RPC started the session with a first message) is reported to their Inbox when nobody else is owed it (§8.1)
     if (endedTurn && e.sessionId && !owed && !run?.tracksInputs) void this.host.reports.reportToPersonIfOwed(e.sessionId, e, runOpen ? run?.completedAnswer : undefined, turnBy)
     if (endedTurn && e.sessionId && !owed && turnBy?.by !== 'person') void this.host.reports.tellAskerOfInterruption(e.sessionId, delegation?.callerId)

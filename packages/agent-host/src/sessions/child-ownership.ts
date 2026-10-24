@@ -391,6 +391,29 @@ export class ChildOwnership {
     }
   }
 
+  /**
+   * The owner of a turn the mailbox started in a session that already owes another owner a report (#1474): that turn is the work of the thread it
+   * carries, so its end is reported to this owner, and the other mark and its pause are left as they are. Taken (once) as the turn ends
+   */
+  private readonly mailTurns = new Map<string, { ownerId: string; closed: boolean }>()
+  markMailTurn(sessionId: string, ownerId: string): void {
+    this.mailTurns.set(sessionId, { ownerId, closed: false })
+  }
+  /** The input was not taken: no turn started for `ownerId` */
+  clearMailTurn(sessionId: string, ownerId: string): void {
+    if (this.mailTurns.get(sessionId)?.ownerId === ownerId) this.mailTurns.delete(sessionId)
+  }
+  /** The thread was closed while its turn went: the stopped turn is reported to nobody, and it is not the other owner's either */
+  closeMailTurn(sessionId: string, ownerId: string): void {
+    const turn = this.mailTurns.get(sessionId)
+    if (turn?.ownerId === ownerId) turn.closed = true
+  }
+  takeMailTurn(sessionId: string): { ownerId: string; closed: boolean } | undefined {
+    const turn = this.mailTurns.get(sessionId)
+    this.mailTurns.delete(sessionId)
+    return turn
+  }
+
   /** A new mark is new work: a pause of the work before it is not this work's, nor one an older build left stored */
   markReport(sessionId: string, callerId: string): void {
     this.unpauseReport(sessionId)
