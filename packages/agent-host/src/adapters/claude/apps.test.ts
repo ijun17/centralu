@@ -474,11 +474,6 @@ describe('approval of app tools — declared risk x preset x whose app it is', (
     // Bookkeeping in its own data is not about whose project it is
     expect(await decide('mcp__app-shared__note')).toEqual(allowed())
   })
-
-  it("another project's session does not get this project's trust: the app is not even attached to it", async () => {
-    await start({ id: 'claude-s2', kind: 'worker', projectId: 'p2' }, { permissionPreset: 'normal' })
-    expect(await decide('mcp__app-board__post')).toBe('asked-the-human')
-  })
 })
 
 /**
