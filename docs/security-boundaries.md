@@ -465,7 +465,7 @@ Allow that arrives after the request's turn ended runs nothing. A turn that is n
 session, so under `auto` a request that makes it use them is not asked about; and a turn that a relayed report starts (the old path of a kept
 process) belongs to no thread. (3) Limits:
 a request from a project nobody trusted is held (`policy`) until the person releases it in the Inbox, and `mail inbox` and `mail read` show the orchestrator none of
-its words meanwhile, a session has one request open at a time (a second
+its words meanwhile, whether or not the hold is written yet, while marking it handled, answering and closing it are refused, a session has one request open at a time (a second
 is refused with the first one's thread), and at most 5 new requests an hour. Nothing moves across with the answer: the asking session gets back only
 what the orchestrator posts in the thread. A linked machine's sessions asking the hub's orchestrator are slice 4's (§9.7, "Linked machines").
 
