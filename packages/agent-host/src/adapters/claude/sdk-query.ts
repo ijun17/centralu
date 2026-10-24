@@ -56,7 +56,7 @@ export type ClaudeQueryInputs = {
   /** Starts the CLI's process: in the keeper, or here (see `spawnClaudeCodeProcess` below) */
   spawn: (o: LocalSpawnSpec) => AgentProcess
   /** The session's approval and question cards, for the preset it runs under */
-  canUseTool: (toolName: string, toolInput: Record<string, unknown>, options?: { signal?: AbortSignal }) => ReturnType<ClaudeCards['canUseTool']>
+  canUseTool: (toolName: string, toolInput: Record<string, unknown>, options?: { signal?: AbortSignal; matchedAskRule?: unknown; decisionReason?: string }) => ReturnType<ClaudeCards['canUseTool']>
 }
 
 /** What the CLI accepts as `autoCompactWindow` (its settings schema and `--autocompact`): 100k to 1M tokens */

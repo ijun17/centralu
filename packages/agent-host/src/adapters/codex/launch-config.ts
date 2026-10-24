@@ -23,6 +23,9 @@ import type { AgentProcess, CreateSessionOpts, ProcessSource } from '../contract
  * `.codex/config.toml` only enters the picture when the project is trusted (repoFilesConfig, #92).
  */
 export function permissionOptionsFor(preset: PermissionPreset): Record<string, unknown> {
+  // `edits` (#1525) launches as `normal` does: the person's own policy and sandbox. Its one grant, a patch inside the
+  // folder, is answered by the adapter (`server-requests.ts`, `edit-grant.ts`), since Codex has no mode that
+  // accepts patches and asks for commands
   if (preset === 'safe') return { approvalPolicy: 'untrusted', sandbox: 'workspace-write' } // asks about everything
   if (preset === 'auto') return { approvalPolicy: 'never', sandbox: 'danger-full-access' } // asks about nothing
   return {} // defer to the user's own settings
@@ -129,9 +132,13 @@ function realPathOr(path: string): string {
  */
 export const APP_APPROVAL_MODE: Record<PermissionPreset, 'approve' | 'writes' | 'prompt'> = {
   auto: 'approve',
+  edits: 'writes',
   normal: 'writes',
   safe: 'prompt',
 }
+
+/** The presets that leave the thread's approval policy and sandbox to the person's own Codex settings: `normal`, and `edits` (#1525), which is `normal` plus a grant */
+export const followsPersonsPolicy = (preset: PermissionPreset): boolean => preset === 'normal' || preset === 'edits'
 
 export type AppApprovalMode = 'approve' | 'writes' | 'prompt'
 
@@ -142,7 +149,7 @@ export type AppApprovalMode = 'approve' | 'writes' | 'prompt'
  * person's policy refuses, as before.
  */
 export function appApprovalModeFor(preset: PermissionPreset, personsPolicy: unknown): AppApprovalMode {
-  if (preset !== 'normal') return APP_APPROVAL_MODE[preset]
+  if (!followsPersonsPolicy(preset)) return APP_APPROVAL_MODE[preset]
   return personsPolicy === 'never' ? 'approve' : 'writes'
 }
 

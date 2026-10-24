@@ -122,6 +122,13 @@ const shownRemote = (url: string | null): string => (url === null ? 'no origin' 
 const remotePreset = (caller: PermissionPreset): PermissionPreset => (presetWithin(caller, 'normal') ? caller : 'normal')
 
 /**
+ * The caller's preset as `fromHub` carries it (#1273). The machine reads only `auto` from it; `edits` (#1525) is never put
+ * on the link, because a machine from before it refuses a whole start for a value it does not know: it goes as `normal`,
+ * the preset the child there runs under.
+ */
+const carriedPreset = (caller: PermissionPreset): PermissionPreset => (caller === 'auto' ? 'auto' : remotePreset(caller))
+
+/**
  * What a machine says of an `auto` caller's child (#1273, `LinkedSessions.hubAuto`): `auto`, it runs under `auto` there
  * too and no card is raised; otherwise why it runs under `normal` (its switch is off, or its Centralu predates it)
  */
@@ -447,7 +454,7 @@ export class RemoteAgents {
       ...(name ? { name } : {}),
       // `normal` at most, which a machine from before #1273 keeps; the preset carried says `auto` only where it is taken
       preset: remotePreset(c.preset),
-      callerPreset: c.preset,
+      callerPreset: carriedPreset(c.preset),
       ...(model ? { model } : {}),
       ...(effort ? { effort } : {}),
       ...(branch ? { worktreeBranch: branch } : {}),

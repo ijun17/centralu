@@ -208,10 +208,11 @@ describe('settings files and permissions the adapter passes to the CLI (#92)', (
   const PERMISSION: Record<PermissionPreset, Record<string, unknown>> = {
     safe: { permissionMode: 'default' },
     normal: { permissionMode: 'default' },
+    edits: { permissionMode: 'default' },
     auto: { permissionMode: 'bypassPermissions' },
   }
 
-  for (const preset of ['safe', 'normal', 'auto'] as const) {
+  for (const preset of ['safe', 'normal', 'edits', 'auto'] as const) {
     it(`${preset}: a trusted project reads everything as before, an untrusted project reads only the user settings — the permission options stay the same`, async () => {
       const make = (projectTrusted: boolean | undefined) =>
         new ClaudeAdapter().createSession({ sessionId: 's', cwd: root, permissionPreset: preset, projectTrusted }, () => {})

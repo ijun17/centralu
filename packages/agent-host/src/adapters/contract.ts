@@ -311,6 +311,13 @@ export interface SessionHandle {
    * background resume) comes as a `settings_changed` the tool made. Left unimplemented by a tool that always runs what it is asked.
    */
   takeOpenedSettings?(): { model: string | null; effort: string | null } | null
+  /**
+   * The preset the session is set to now, for the one grant that is decided on the host's side of a call and needs no
+   * new process: `edits` (#1525) differs from `normal` only in what the adapter answers itself, so lowering `edits` to
+   * `normal` (or raising `normal` to `edits`) takes effect at once, in the next call. Called with every saved change of
+   * the preset; a change that does alter the launch still restarts the process (`settingsDrifted`)
+   */
+  setPermissionPreset?(preset: PermissionPreset): void
   /** Changes model or permission (starting next turn). Left unimplemented if unsupported */
   updateSettings?(settings: {
     model?: string | null

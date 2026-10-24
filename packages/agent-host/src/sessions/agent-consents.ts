@@ -45,9 +45,10 @@ export class AgentConsents {
     return this.agentConsentFrom(callerId, detail.project.id, await this.host.askHost(callerId, detail, signal, { requestId }))
   }
 
-  /** A `normal` caller in a trusted project needs no card to start agents (#673): the project's trust, read now */
+  /** A `normal` or `edits` caller in a trusted project needs no card to start agents (#673): the project's trust, read now */
   private trustIsAgentConsent(callerId: string, projectId: string): boolean {
-    if (this.host.meta.get(callerId)?.permissionPreset !== 'normal') return false
+    const preset = this.host.meta.get(callerId)?.permissionPreset
+    if (preset !== 'normal' && preset !== 'edits') return false
     return this.host.store.projects.listProjects().find((p) => p.id === projectId)?.trusted === true
   }
 

@@ -1,7 +1,7 @@
 import { bridgePath } from './bridge-path.js'
 import { ORCHESTRATOR_MCP_NAME } from '../../sessions/orchestrator-tools.js'
 import type { CreateSessionOpts } from '../contract.js'
-import { APP_CALL_WAIT_MS, APP_STARTUP_TIMEOUT_SEC, appApprovalModeFor, CODEX_TOOL_TIMEOUT_SEC, repoFilesConfig, type AppApprovalMode } from './launch-config.js'
+import { APP_CALL_WAIT_MS, APP_STARTUP_TIMEOUT_SEC, appApprovalModeFor, CODEX_TOOL_TIMEOUT_SEC, followsPersonsPolicy, repoFilesConfig, type AppApprovalMode } from './launch-config.js'
 
 /** What the thread's servers read of the session they belong to */
 export type ServersHost = {
@@ -91,7 +91,7 @@ export class CodexServers {
    * until the next start; said in the log so it can be found (#382).
    */
   checkAppMode(res: Record<string, unknown> | undefined): void {
-    if (this.appModeLoaded === null || this.host.opts.permissionPreset !== 'normal') return
+    if (this.appModeLoaded === null || !followsPersonsPolicy(this.host.opts.permissionPreset)) return
     const policy = res?.approvalPolicy
     if (policy === undefined) return
     const expected = appApprovalModeFor('normal', policy)
@@ -135,7 +135,7 @@ export class CodexServers {
        * A session with no attached app never reaches this line.
        */
       const lists = await Promise.all(attached.map((a) => (a.tools ? Promise.resolve(a.tools) : apps.tools(a.server))))
-      const mode = appApprovalModeFor(this.host.opts.permissionPreset, this.host.opts.permissionPreset === 'normal' ? await this.personsApprovalPolicy() : null)
+      const mode = appApprovalModeFor(this.host.opts.permissionPreset, followsPersonsPolicy(this.host.opts.permissionPreset) ? await this.personsApprovalPolicy() : null)
       this.appModeLoaded = mode
       attached.forEach((a, i) => {
         servers[a.server] = {
