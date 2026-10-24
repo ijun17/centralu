@@ -180,6 +180,65 @@ describe('new work sent by mail into a thread in review', () => {
     expect(w.mgr.reportOwed(helper)).toBeNull()
     expect(w.store.mail.thread(thread.id)?.state).toBe('review')
   })
+
+  it('a helper that already owes owner A a report is sent work by owner B: B’s turn is reported to B, and A’s paused report is left as it was (#1474)', async () => {
+    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+    Object.assign(w.adapters.get('claude')!.capabilities, { backgroundTasks: true })
+    const a = await w.callerSession()
+    const b = await w.callerSession()
+    const helper = await startAgent(a, 'start the server')
+    handleOf(helper).event({ type: 'background_tasks', sessionId: helper, live: [{ id: 't1', kind: 'shell', description: 'pnpm dev', status: 'running', stoppable: true }] })
+    await turnEnds(helper, 'server started')
+    const threadA = threadBetween(a, helper)
+    await w.until(() => outcomes(threadA).includes('paused'))
+    expect(w.mgr.pausedFor(helper, a)).toBe(true)
+
+    // B gave the helper work earlier (it was reported), and sends it more by mail: the helper takes the turn while its task for A still runs
+    const threadB = mail.recordDelegation(addr(b), { assignee: addr(helper), task: 'write the docs', origin: 'send_to_session' }).thread
+    mail.reportTurn(threadB.id, { to: addr(b), about: addr(helper), outcome: 'finished', body: '[Centralu] The assigned work finished.', then: 'review' })
+    expect(w.store.mail.thread(threadB.id)?.state).toBe('review')
+    handleOf(helper).acceptsAtOnce = true
+    mail.post(threadB.id, addr(b), { kind: 'note', body: 'and the changelog' })
+    await due(helper)
+    expect(handleOf(helper).sent).toHaveLength(2)
+    expect(w.store.mail.thread(threadB.id)?.state).toBe('running')
+    await turnEnds(helper, 'docs written')
+    await w.until(() => outcomes(threadB).length === 2)
+
+    // B hears of its own turn; A is not told this turn ended, and still waits for its task
+    expect(outcomes(threadB)).toEqual(['finished', 'finished'])
+    expect(w.store.mail.thread(threadB.id)?.state).toBe('review')
+    expect(outcomes(threadA)).toEqual(['paused'])
+    expect(w.mgr.pausedFor(helper, a)).toBe(true)
+    expect(w.mgr.reportOwed(helper)?.callerId).toBe(a)
+  })
+
+  it.each(['person', 'B itself'])('B’s thread closed by %s while that turn runs: the stopped turn is not A’s to hear of, nor B’s (#1474)', async (who) => {
+    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+    Object.assign(w.adapters.get('claude')!.capabilities, { backgroundTasks: true })
+    const a = await w.callerSession()
+    const b = await w.callerSession()
+    const helper = await startAgent(a, 'start the server')
+    handleOf(helper).event({ type: 'background_tasks', sessionId: helper, live: [{ id: 't1', kind: 'shell', description: 'pnpm dev', status: 'running', stoppable: true }] })
+    await turnEnds(helper, 'server started')
+    const threadA = threadBetween(a, helper)
+    await w.until(() => outcomes(threadA).includes('paused'))
+    const threadB = mail.recordDelegation(addr(b), { assignee: addr(helper), task: 'write the docs', origin: 'send_to_session' }).thread
+    mail.reportTurn(threadB.id, { to: addr(b), about: addr(helper), outcome: 'finished', body: '[Centralu] The assigned work finished.', then: 'review' })
+    handleOf(helper).acceptsAtOnce = true
+    mail.post(threadB.id, addr(b), { kind: 'note', body: 'and the changelog' })
+    await due(helper)
+    expect(w.mgr.sessionInfo(helper)?.state).toBe('working')
+    if (who === 'person') mail.update(threadB.id, PERSON, { state: 'done', outcome: 'dropped' })
+    else mail.update(threadB.id, addr(b), { state: 'done', outcome: 'finished' })
+    await w.until(() => handleOf(helper).interrupted === 1)
+    await turnEnds(helper, 'stopped')
+    await new Promise((r) => setTimeout(r, 30))
+    expect(outcomes(threadA)).toEqual(['paused'])
+    expect(w.mgr.pausedFor(helper, a)).toBe(true)
+    expect(outcomes(threadB)).toEqual(who === 'person' ? ['finished', 'dropped'] : ['finished'])
+    expect(handleOf(b).sent.filter((t) => t.includes(`sourceSessionId: ${helper}`))).toEqual([])
+  })
 })
 
 describe('a thread closed while its work is going (3.10, MB)', () => {

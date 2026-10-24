@@ -918,14 +918,19 @@ export class SessionManager {
       deliver: async (id, input, late) => {
         /*
          * A turn the mail starts is the work of the thread it carries (§6): its end is reported to the thread's owner like any turn of work that
-         * session gave, so a report is owed from here. A session already owing one keeps its mark (the turn is that work's), and a mark made
+         * session gave, so a report is owed from here. A session already owing the same owner keeps its mark (the turn is that work's); one owing
+         * another owner keeps that mark and its pause, and this turn is reported to its own owner when it ends (#1474). A mark or a note made
          * here goes if the input was not taken
          */
         const owner = input.quiet ? undefined : input.reportTo
-        const marked = owner !== undefined && !this.children.awaitingReport.has(id) && this.meta.has(owner)
+        const known = owner !== undefined && this.meta.has(owner)
+        const marked = known && !this.children.awaitingReport.has(id)
+        const other = known && this.children.awaitingReport.has(id) && this.children.awaitingReport.get(id) !== owner
         if (marked) this.children.markReport(id, owner)
+        if (other) this.children.markMailTurn(id, owner)
         const unmark = () => {
           if (marked && this.children.awaitingReport.get(id) === owner) this.children.clearReport(id)
+          if (other) this.children.clearMailTurn(id, owner)
         }
         try {
           await this.events.deliverMail(id, input, { leaving: () => this.handingOver || this.disposing, atRest: () => this.mailReceiver(id).kind === 'ready' }, (e) => {
@@ -959,7 +964,7 @@ export class SessionManager {
       this.store.messages
         .loadMessages(sessionId, 400)
         .filter((m) => m.kind === 'tool_call' && m.ts >= since)
-        .map((m) => (m.payload as { callId?: unknown }).callId)
+        .map((m) => (typeof m.payload === 'object' && m.payload !== null && 'callId' in m.payload ? m.payload.callId : undefined))
         .filter((id): id is string => typeof id === 'string'),
     )
     return running.filter((t) => t.parentCallId !== undefined && calls.has(t.parentCallId))
@@ -983,6 +988,7 @@ export class SessionManager {
       // The work to stop is read before the mark goes: a paused report names the tasks it waits on
       const tasks = this.tasksOfStoppedTurn(c.helperId, c.since, c.threadOwner)
       if (this.children.awaitingReport.get(c.helperId) === c.threadOwner) this.children.clearReport(c.helperId)
+      this.children.closeMailTurn(c.helperId, c.threadOwner)
       try {
         this.interrupt(c.helperId)
       } catch {

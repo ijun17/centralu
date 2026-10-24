@@ -339,6 +339,20 @@ export class ChildReports {
     await this.deliverReport(orchestratorId, sessionId, name, project, preview, ending, work, theirs ? undefined : this.answerSeq(sessionId), turn)
   }
 
+  /**
+   * The end of a turn the mailbox started for `ownerId`'s thread in a session that owes another owner a report (#1474): reported to `ownerId` as the
+   * end of its work, with no pause, and the other owner's mark, its pause and its tasks are left as they are. The person's own turn is reported to nobody
+   */
+  async reportMailTurn(sessionId: string, ownerId: string, ending: NormalizedEvent, answer: string | undefined, turn: TurnStarter | undefined): Promise<void> {
+    if (this.host.handingOver || turn?.by === 'person') return
+    const target = this.host.meta.get(sessionId)
+    if (!target || !this.host.meta.has(ownerId)) return
+    const waiting = ending.type === 'turn_complete' ? this.host.children.waitingOn(ownerId, sessionId) : 0
+    const { name, project } = this.reportedAs(target)
+    const preview = answer !== undefined ? clipPreview(answer, 600) : previewOf(this.host.store.messages, sessionId, 600)
+    await this.deliverReport(ownerId, sessionId, name, project, preview, ending, waiting > 0 ? { waitingOn: waiting } : undefined, this.answerSeq(sessionId), turn)
+  }
+
   /** Where the session's last response starts, as its preview reads it (#1186): the report names the read that shows it */
   private answerSeq(sessionId: string): number | undefined {
     return lastResponseSeq(this.host.store.messages.loadMessages(sessionId, 50)) ?? undefined
