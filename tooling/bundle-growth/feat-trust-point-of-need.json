@@ -1,0 +1,4 @@
+{
+  "bytes": 3100,
+  "reason": "The untrusted-project notice with its Trust button, the worktree chips (install command and .env files) with their lockfile and ignored-file helpers, and the wording of what an untrusted project turns off (#1512). Measured against main at d1e1938a9: +3,088 B, all in the main chunk. Main itself is 1,899,301 B, 699 B under the ceiling, so any UI change over 700 B needs a declaration; this one is plain components and strings with no dependency, and lazy loading would not lower the total, which counts every chunk."
+}
