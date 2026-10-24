@@ -1,7 +1,7 @@
 import { APP_ID_MAX_LENGTH, appKeyOf } from '@cc/protocol'
-import type { AppReach, ExternalAppInfo, SessionKind } from '@cc/protocol'
+import type { AppReach, ExternalAppInfo, PermissionPreset, SessionKind } from '@cc/protocol'
 import type { AppToolResult, AppToolSpec, AttachedApp, SessionApps, SessionHandle } from '../adapters/contract.js'
-import { appMcpServerName } from '../apps/contract.js'
+import { appMcpServerName, runsUnasked } from '../apps/contract.js'
 import type { AppCallOutcome, AppRef, ExternalApps } from '../apps/external/runtime.js'
 import { raceTimeout } from '../timing.js'
 import { withTimeout } from './with-timeout.js'
@@ -717,6 +717,22 @@ class Attachment implements SessionApps {
      */
     const found = this.hub.rt.knownTools(hit.ref, 'model')?.find((t) => t.name === tool)
     return found?.annotations?.readOnlyHint === true
+  }
+
+  unasked(server: string, tool: string, preset: PermissionPreset, args?: Record<string, unknown>): boolean {
+    if (this.readOnly(server, tool)) return true
+    const hit = this.find(server)
+    if (!hit) return false
+    const found = this.hub.rt.knownTools(hit.ref, 'model')?.find((t) => t.name === tool)
+    if (!found) return false
+    /*
+     * "Own" is read from the session, not from the app: the app is a project's own when the session belongs to that
+     * project (`givesApp`), and `find` only finds an app whose project is trusted. The orchestrator has no project,
+     * and an app the session attached itself (`attach_app`) belongs to another project or to the user: neither is
+     * covered by this project's trust, so their tools keep asking.
+     */
+    const own = this.session.kind !== 'orchestrator' && hit.ref.projectId !== null && hit.ref.projectId === this.session.projectId
+    return runsUnasked(found, { own, preset, args })
   }
 
   cancelAll(): void {

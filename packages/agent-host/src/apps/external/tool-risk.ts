@@ -1,0 +1,73 @@
+import type { PermissionPreset } from '@cc/protocol'
+
+/**
+ * What an app says about the risk of a tool that changes something, and what the host does with it.
+ *
+ * `annotations.readOnlyHint: true` already lets a tool run with no card (decision 5). That left every other write,
+ * from a note in the app's own data folder to a merge on GitHub, behind a card under `safe` and `normal`, and
+ * "always" is not remembered for an app tool on Claude (`alwaysAllowKey` has no key for an `other` card), so a
+ * session that worked through an app was asked again for each call. This adds two levels an app can declare in
+ * the tool's `_meta`, and the host decides what each is worth. A declaration is a claim, like `readOnlyHint`:
+ * it is read from the tool list of an app the person turned on (or trusted with its project), never from a
+ * name, and an undeclared tool keeps asking.
+ *
+ *   `local`    the tool writes only this app's own data on this computer, and can be undone. No card under any
+ *              preset, as for a read. Only honoured next to `destructiveHint: false` (the MCP default is true),
+ *              so an app that says both "local" and "destructive" asks.
+ *   `routine`  an ordinary write the app's own project would do anyway (a comment, a pull request, a merge
+ *              that the app's own checks gate). No card under `normal`, **capped by project trust**: only for
+ *              the app of the session's own project, which attaches only while the project is trusted. A user-folder
+ *              app, an app another project shared and an app the session attached itself keep their cards,
+ *              and so does `safe`, whose point is to ask.
+ *
+ * `centralu/askWhen` narrows a `routine` tool: when the call's arguments hold every named value (`{ push: true }`),
+ * it asks. Codex fixes a tool's approval at thread start, before any arguments exist, so there a tool with
+ * `askWhen` always asks.
+ */
+export const RISK_META_KEY = 'centralu/risk'
+export const ASK_WHEN_META_KEY = 'centralu/askWhen'
+
+export type ToolRisk = 'local' | 'routine'
+
+/** The parts of an MCP tool this judgment reads */
+export type RiskTool = {
+  annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean } | undefined
+  _meta?: Record<string, unknown> | undefined
+}
+
+/** The level a tool declares, or null when it declares none, an unknown one, or one its annotations contradict */
+export function declaredRisk(tool: RiskTool): ToolRisk | null {
+  const risk = tool._meta?.[RISK_META_KEY]
+  if (risk !== 'local' && risk !== 'routine') return null
+  if (tool.annotations?.readOnlyHint === true) return null // a read needs no level: it never asks
+  if (risk === 'local' && tool.annotations?.destructiveHint !== false) return null
+  return risk
+}
+
+/** The values that make a `routine` tool ask: null when it names none, or names them in a shape that is not an object of values */
+export function askWhen(tool: RiskTool): Record<string, unknown> | null {
+  const v = tool._meta?.[ASK_WHEN_META_KEY]
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return null
+  const named = Object.fromEntries(Object.entries(v))
+  return Object.keys(named).length > 0 ? named : null
+}
+
+export type RiskScope = {
+  /** The app belongs to the session's own project (its project's session, not the orchestrator, not an app attached from elsewhere) */
+  own: boolean
+  preset: PermissionPreset
+  /** The call's arguments; absent where they are not known yet (Codex fixes approval before the call) */
+  args?: Record<string, unknown> | undefined
+}
+
+/** Whether a tool runs with no card, by what it declares and where it is called. Reads are decided before this (`readOnlyHint`). */
+export function runsUnasked(tool: RiskTool, scope: RiskScope): boolean {
+  const risk = declaredRisk(tool)
+  if (risk === 'local') return true
+  if (risk !== 'routine' || !scope.own || scope.preset !== 'normal') return false
+  const when = askWhen(tool)
+  if (!when) return true
+  // The arguments are unknown, or hold every value named: ask
+  const args = scope.args
+  return args !== undefined && !Object.entries(when).every(([k, v]) => args[k] === v)
+}

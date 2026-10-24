@@ -110,6 +110,30 @@ describe('a broken app states what is wrong and where', () => {
     expect(r.text).toContain('save — no readOnlyHint, model+app')
   })
 
+  it('a declared risk the host would ignore is said, a honoured one is not', async () => {
+    const tool = (name: string, ann: string, risk: string) =>
+      `centralu.tool(server, '${name}', { description: 'D', annotations: { ${ann} }, _meta: { 'centralu/risk': '${risk}' } }, async () => ({ content: [] }))`
+    app(
+      'risk',
+      serverWith(
+        [
+          tool('fine', 'readOnlyHint: false, destructiveHint: false', 'local'),
+          tool('silent', 'readOnlyHint: false', 'local'),
+          tool('typo', 'readOnlyHint: false', 'routin'),
+          tool('reads', 'readOnlyHint: true', 'routine'),
+        ].join(';'),
+      ),
+    )
+    const r = await make().check(ref('risk'))
+    const said = r.text.split(String.fromCharCode(10)).filter((l) => l.includes('centralu/risk'))
+    expect(said).toHaveLength(3)
+    const all = said.join(' ')
+    expect(all).toContain('[tool silent]')
+    expect(all).toContain('[tool typo]')
+    expect(all).toContain('[tool reads]')
+    expect(all).not.toContain('[tool fine]')
+  })
+
   it('home has no screen / home is closed to the screen / home is not in the tool list', async () => {
     app('nohome-ui', serverWith('', `centralu.tool(server, 'show', { description: 'Show', annotations: { readOnlyHint: true } }, async () => ({ content: [] }))`))
     app('hidden-home', serverWith('', `centralu.tool(server, 'show', { description: 'Show', annotations: { readOnlyHint: true }, _meta: { ui: { resourceUri: 'ui://x/index.html', visibility: ['model'] } } }, async () => ({ content: [] }))`))

@@ -151,6 +151,24 @@ describe('thread/start — one bridge per app', () => {
   }
 })
 
+describe('thread/start — a write the app declares local or routine (tool-risk.ts)', () => {
+  beforeEach(() => {
+    w.plant('p1', 'board', ['--mode', 'attach', '--risks'])
+    w.rt.refresh()
+  })
+  const approved = (c: Fake) => Object.keys(mcpServers(c)!['app-board']!.tools as object).sort()
+
+  it("normal: local and routine writes are approve for the project's own app; a tool with askWhen, an unsure one and an undeclared one are not", async () => {
+    const c = await start(WORKER, { permissionPreset: 'normal' })
+    expect(approved(c)).toEqual(['merge', 'note', 'peek', 'post', 'run_status'])
+  })
+
+  it('safe: only the local write joins the read-only tools', async () => {
+    const c = await start(WORKER, { permissionPreset: 'safe' })
+    expect(approved(c)).toEqual(['note', 'peek', 'run_status'])
+  })
+})
+
 /*
  * Owner decision 2026-10-11 (#382, question 1): under normal, an app write tool follows the person's own Codex
  * policy, as Claude's normal follows the person's bypass. With `writes` and the person's `approval_policy =

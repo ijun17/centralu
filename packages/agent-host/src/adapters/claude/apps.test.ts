@@ -410,6 +410,57 @@ describe('approval of app tools — read-only x preset', () => {
 })
 
 /**
+ * A write an app declares `local` or `routine` (`tool-risk.ts`) runs with no card where the person's trust covers it,
+ * and asks everywhere else. The tools: `note` (local), `post` and `merge` (routine), `restack` (routine, asks when
+ * `push` is true), `liar` (says local, but not that it is undoable), `release` (declares nothing).
+ */
+describe('approval of app tools — declared risk x preset x whose app it is', () => {
+  async function decide(toolName: string, input: Record<string, unknown> = {}): Promise<unknown> {
+    const canUseTool = captured.options?.canUseTool as (n: string, i: Record<string, unknown>) => Promise<unknown>
+    const r = await answerOrCard(() => canUseTool(toolName, input), () => cards)
+    return r === 'still asking' ? 'asked-the-human' : r
+  }
+  const allowed = (input: Record<string, unknown> = {}) => ({ behavior: 'allow', updatedInput: input })
+
+  beforeEach(() => {
+    w.plant('p1', 'board', ['--mode', 'attach', '--risks'])
+    w.plant('user', 'userboard', ['--mode', 'attach', '--risks'])
+    w.rt.refresh()
+  })
+
+  it("normal, the session's own project's app: bookkeeping and routine writes run unasked; undeclared, contradicted and push ask", async () => {
+    const h = await start(WORKER, { permissionPreset: 'normal' })
+    await (h as unknown as { opts: CreateSessionOpts }).opts.apps!.tools('app-board')
+    expect(await decide('mcp__app-board__note')).toEqual(allowed())
+    expect(await decide('mcp__app-board__post')).toEqual(allowed())
+    expect(await decide('mcp__app-board__merge')).toEqual(allowed())
+    expect(await decide('mcp__app-board__restack', { pr: 3 })).toEqual(allowed({ pr: 3 }))
+    expect(await decide('mcp__app-board__restack', { pr: 3, push: true })).toBe('asked-the-human')
+    expect(await decide('mcp__app-board__liar')).toBe('asked-the-human')
+    expect(await decide('mcp__app-board__release')).toBe('asked-the-human')
+  })
+
+  it('safe asks for a routine write but not for a local one', async () => {
+    const h = await start(WORKER, { permissionPreset: 'safe' })
+    await (h as unknown as { opts: CreateSessionOpts }).opts.apps!.tools('app-board')
+    expect(await decide('mcp__app-board__note')).toEqual(allowed())
+    expect(await decide('mcp__app-board__post')).toBe('asked-the-human')
+  })
+
+  it("a user-folder app's routine write asks: no project's trust stands behind it, while its local write still runs", async () => {
+    const h = await start({ id: 'claude-orch', kind: 'orchestrator', projectId: null }, { permissionPreset: 'normal' })
+    await (h as unknown as { opts: CreateSessionOpts }).opts.apps!.tools('app-userboard')
+    expect(await decide('mcp__app-userboard__post')).toBe('asked-the-human')
+    expect(await decide('mcp__app-userboard__note')).toEqual(allowed())
+  })
+
+  it("another project's session does not get this project's trust: the app is not even attached to it", async () => {
+    await start({ id: 'claude-s2', kind: 'worker', projectId: 'p2' }, { permissionPreset: 'normal' })
+    expect(await decide('mcp__app-board__post')).toBe('asked-the-human')
+  })
+})
+
+/**
  * A slow call — Claude's in-process server effectively has no call timeout (the SDK's default is
  * about 28 hours, sdk.d.ts `createSdkMcpServer`). So it waits, rather than returning early.
  * `run_status` still shows up in the list — both tools see the same list.

@@ -843,6 +843,22 @@ from a server name that starts with `app-`.
 | `normal` | No card | As the person's own settings decide, like any other tool. Claude: the CLI decides whether to ask. Codex: `writes`, which asks about tools that are not read-only |
 | `auto` | No card | No card. Claude: no callback. Codex: `approve`; without it Codex, under `approvalPolicy: never`, refuses an unannotated tool itself |
 
+**A write can declare how risky it is** (`apps/external/tool-risk.ts`). Everything that is not read-only used to
+ask, from a note in the app's own data folder to a merge, and "always" does not help on Claude: an app tool's card
+has no rule key, so nothing it remembers reaches the next call. A tool may say, in its `_meta`:
+
+| `_meta["centralu/risk"]` | Means | No card when |
+|---|---|---|
+| `"local"` | Writes only this app's own data on this computer, and can be undone | Always, under every preset and in any attached app. Only next to `annotations.destructiveHint: false` (the MCP default is `true`), so a tool that is silent about it still asks |
+| `"routine"` | An ordinary write its own project would do anyway (a comment, a pull request, a merge the app's own checks gate) | The app belongs to the session's own project (a trusted project: an untrusted project's apps do not attach), under `normal`. Not for a user-folder app, an app attached from another project, the orchestrator, or `safe` |
+| absent | Anything else | Never: it asks as before |
+
+`_meta["centralu/askWhen"]`, an object such as `{ "push": true }`, makes a `routine` tool ask when the call's arguments
+hold every named value. Codex fixes a tool's approval when the thread starts, before any arguments exist, so there a
+tool with `askWhen` always asks. A declaration is a claim in the same way `readOnlyHint` is: it is read from the tool
+list of an app that is attached because the person trusted its project, never from a name. `check` warns about a
+declaration the host ignores.
+
 A call from a view is never asked about: the view is the control surface the app offers the
 person. It is recorded as `view`.
 

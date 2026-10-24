@@ -82,9 +82,14 @@ export class ClaudeCards {
      * criterion as Codex's `writes` approach, so the two adapters behave the same way.
      *
      * This is separate from the centralu exception above — that exception is never widened.
+     *
+     * `unasked` is that read-only judgment plus the two levels an app can declare for a write (`tool-risk.ts`):
+     * `local` (its own data on this computer), and `routine` for the app of this session's own project under
+     * `normal`. "Always" cannot do this job: an app tool's card is an `other` one, which has no rule key, so
+     * nothing it remembers reaches the next call.
      */
     const appTool = appToolOf(toolName)
-    if (appTool && this.host.opts.apps?.readOnly(appTool.server, appTool.tool)) {
+    if (appTool && this.host.opts.apps?.unasked(appTool.server, appTool.tool, preset, toolInput)) {
       return { behavior: 'allow' as const, updatedInput: toolInput }
     }
 

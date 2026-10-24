@@ -2,6 +2,7 @@ import type { ReadResourceResult, Tool } from '@modelcontextprotocol/client'
 import type { AppManifest } from './manifest.js'
 import { toolNameError } from './manifest.js'
 import { resourceUriOf, visibilityOf } from './visibility.js'
+import { declaredRisk, RISK_META_KEY } from './tool-risk.js'
 import { isViewMimeType, viewHtmlOf, VIEW_MIME_TYPE } from '../../views/view-document.js'
 
 /**
@@ -71,6 +72,20 @@ export function checkTools(manifest: AppManifest, tools: readonly Tool[]): { fin
       )
     } else if (readOnly && ann?.destructiveHint === true) {
       findings.push(warning(where, 'readOnlyHint: true together with destructiveHint: true — one of them is wrong'))
+    }
+    // A declared risk the host would ignore is said here, not left to a card that keeps coming (tool-risk.ts)
+    const declared = t._meta?.[RISK_META_KEY]
+    if (declared !== undefined && !declaredRisk(t)) {
+      findings.push(
+        warning(
+          where,
+          declared === 'local' || declared === 'routine'
+            ? readOnly === true
+              ? `_meta["${RISK_META_KEY}"] on a read-only tool does nothing — it never asks`
+              : `_meta["${RISK_META_KEY}"]: "local" counts only next to annotations.destructiveHint: false — the host ignores it, and the tool still asks`
+            : `_meta["${RISK_META_KEY}"] is ${JSON.stringify(declared)} — the host knows "local" and "routine" only, and ignores this`,
+        ),
+      )
     }
     if (!t.description?.trim()) findings.push(warning(where, 'no description — agents pick a tool by reading its description'))
 
