@@ -274,6 +274,66 @@ describe('compact_self (#1451)', () => {
     expect(l.sent).toEqual([])
   })
 
+  it('judges a held request when its card closes without a resolved event, and drops it when the session has no process (#1500)', () => {
+    // A card withdrawn or closed by the session's stop says no `approval_resolved`: any later event, or the sweep, finds it closed
+    const a = world()
+    a.startTurn()
+    a.c.request('s1')
+    a.state.idle = { idle: false, reason: 'approval' }
+    a.endTurn()
+    expect(a.sent).toEqual([])
+    // The card is gone while the session runs background work, which is what the request is for: the held path asks only about the card
+    a.state.idle = { idle: false, reason: 'background' }
+    a.emit({ type: 'notice', sessionId: 's1', level: 'info', from: 'Centralu', label: 'x', text: 'the card is gone' })
+    expect(a.sent).toEqual([['s1', '/compact']])
+
+    // The sweep is the backstop when no event comes at all
+    const b = world()
+    b.startTurn()
+    b.c.request('s1')
+    b.state.idle = { idle: false, reason: 'question' }
+    b.endTurn()
+    b.state.idle = { idle: true }
+    b.c.sweep()
+    expect(b.sent).toEqual([['s1', '/compact']])
+
+    // A stopped session has no process to take it: dropped, not sent into nothing
+    const c = world()
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    c.startTurn()
+    c.c.request('s1')
+    c.state.idle = { idle: false, reason: 'approval' }
+    c.endTurn()
+    c.state.running = false
+    c.state.idle = { idle: true }
+    c.emit({ type: 'session_live', sessionId: 's1', live: false })
+    expect(c.sent).toEqual([])
+    expect(err).not.toHaveBeenCalled()
+    c.state.running = true
+    c.c.sweep()
+    c.state.now += 10 * MIN
+    // Nothing is pending any more: the request did not wait for the next turn to be spent
+    expect(c.c.sweep()).toEqual(['s1'])
+    err.mockRestore()
+  })
+
+  it('ignores the end of a turn that comes after stop(): no timer, no send (#1500)', () => {
+    const w = world()
+    w.startTurn()
+    w.c.request('s1')
+    w.c.stop()
+    w.endTurn(undefined, 'none')
+    vi.advanceTimersByTime(10_000)
+    expect(w.sent).toEqual([])
+    // With the size known at the turn's end it would otherwise send at once
+    const known = world()
+    known.startTurn()
+    known.c.request('s1')
+    known.c.stop()
+    known.endTurn()
+    expect(known.sent).toEqual([])
+  })
+
   it('says “Compacted by Centralu” with the reason once the tool reports it, and nothing for a failed compaction', () => {
     const w = world()
     w.startTurn()

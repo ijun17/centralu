@@ -16,6 +16,18 @@ export function cacheHitRate(w: Input): number | null {
   return total > 0 ? w.cacheReadTokens / total : null
 }
 
+/**
+ * The share of what the cache cost that went to writes, 0 to 1 (#1492): the host weights the tokens read and written by the price
+ * ratios to uncached input (`CacheWindowStats.cacheReadCost` and `cacheWriteCost`, no money), because the hit rate by tokens hides
+ * that a write costs far more than a read (96% by tokens, about 43% of the cost). For a tool that reports no writes (Codex) the
+ * "writes" are the input it did not read. Null when the host does not say (one that predates it) or there is nothing to judge.
+ */
+export function cacheWriteShare(w: Pick<CacheWindowStats, 'cacheReadCost' | 'cacheWriteCost'>): number | null {
+  if (w.cacheReadCost === undefined || w.cacheWriteCost === undefined) return null
+  const total = w.cacheReadCost + w.cacheWriteCost
+  return total > 0 ? w.cacheWriteCost / total : null
+}
+
 /** Keep one decimal for every partial rate, without presenting a rounded rate as zero or perfect. */
 export function percentOf(rate: number): string {
   if (rate === 0 || rate === 1) return String(rate * 100)

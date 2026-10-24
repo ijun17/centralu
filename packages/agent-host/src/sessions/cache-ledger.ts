@@ -1,4 +1,6 @@
 import type { UsageBucket } from '../dev-services/store/usage-history.js'
+import type { CacheBilling } from '../adapters/contract.js'
+import { cacheCost } from './cache-cost.js'
 import type { CacheSessionStats, CacheStats, CacheWindowStats, RebuildCause, RequestInput, ToolName } from '@cc/protocol'
 
 /**
@@ -60,6 +62,11 @@ type Entry = {
   read: number
   write: number
   rebuild: boolean
+  /** What the request wrote to the cache that was paid again, for a rebuild (`paidTokens`) */
+  rebuildTokens: number
+  /** What the cache cost it in units of an uncached input token (`cacheCost`, #1492) */
+  readCost: number
+  writeCost: number
   /** The likely cause, for a rebuild */
   cause?: RebuildCause
   /** How long the lane had been idle, for a rebuild put down to expiry */
@@ -78,6 +85,10 @@ type Carried = {
   read: number
   write: number
   rebuilds: number
+  /** null: rebuilds an earlier build stored without their tokens (the column did not exist), so the sum is not known */
+  rebuildTokens: number | null
+  readCost: number
+  writeCost: number
   causes: Record<string, number>
 }
 
@@ -87,10 +98,15 @@ export type Counted = { rebuild: boolean; cause?: RebuildCause }
 /** One prompt and its cache: a session's own conversation, or one subagent of it */
 type Lane = { lastAt: number; ttlMs: number | null }
 
+/** What a request paid for at the write price: what it wrote to the cache, and for a tool that reports no writes (Codex) the input it did not read */
+export function paidTokens(r: RequestInput): number {
+  return r.cacheCreationTokens ?? r.inputTokens
+}
+
 /** Whether one request rewrote most of its prompt to the cache (the rule above) */
 export function isRebuild(r: RequestInput): boolean {
   const total = r.inputTokens + r.cacheReadTokens + (r.cacheCreationTokens ?? 0)
-  const paid = r.cacheCreationTokens ?? r.inputTokens
+  const paid = paidTokens(r)
   return paid >= REBUILD_MIN_TOKENS && paid >= total * REBUILD_SHARE
 }
 
@@ -104,7 +120,11 @@ export class CacheLedger {
   private readonly notes = new Map<string, Set<RebuildCause>>()
   private startedAt: number
 
-  constructor(now: number = Date.now()) {
+  /** `billingOf`: whose price ratios a tool's model is billed by (`AgentAdapter.cacheBilling`) */
+  constructor(
+    now: number = Date.now(),
+    private readonly billingOf: (tool: ToolName) => CacheBilling = () => 'anthropic',
+  ) {
     this.startedAt = now
   }
 
@@ -145,6 +165,11 @@ export class CacheLedger {
         read: b.cacheRead,
         write: b.cacheWrite,
         rebuilds: b.rebuilds,
+        // A rebuild is at least `REBUILD_MIN_TOKENS`: fewer tokens than that for the rebuilds counted means some were stored before
+        // the figure was (an older build kept adding rebuilds to an hour this one had written), and the sum is not known
+        rebuildTokens: b.rebuildTokens < b.rebuilds * REBUILD_MIN_TOKENS ? null : b.rebuildTokens,
+        // The ratios depend on the tool and the model, which a bucket has one of, so its sums are weighted at once
+        ...this.costOfBucket(b),
         causes: b.causes,
       })
       if (b.cacheWrite > 0) this.reportsWrites.add(b.tool)
@@ -152,8 +177,11 @@ export class CacheLedger {
     }
   }
 
-  /** Counts one request. Returns what it counted as, or undefined for a reading that was no request */
-  record(tool: ToolName, sessionId: string, r: RequestInput, at: number = Date.now()): Counted | undefined {
+  /**
+   * Counts one request. Returns what it counted as, or undefined for a reading that was no request. `model` is the one the session
+   * runs when the request does not say (the Codex price of a read and a write depends on it)
+   */
+  record(tool: ToolName, sessionId: string, r: RequestInput, at: number = Date.now(), model?: string | null): Counted | undefined {
     const write = r.cacheCreationTokens ?? 0
     // A synthesized answer (Claude's local /usage, "<synthetic>") carries zeros: there was no request
     if (r.inputTokens + r.cacheReadTokens + write <= 0) return undefined
@@ -165,7 +193,8 @@ export class CacheLedger {
     const notes = r.agent ? undefined : this.notes.get(sessionId)
     if (!r.agent) this.notes.delete(sessionId)
     const rebuild = isRebuild(r)
-    const entry: Entry = { at, sessionId, input: r.inputTokens, read: r.cacheReadTokens, write, rebuild }
+    const cost = cacheCost(this.billingOf(tool), r.model ?? model, { input: r.inputTokens, read: r.cacheReadTokens, write, write1h: r.cacheWrite1hTokens ?? (r.cacheTtl === '1h' ? write : 0) }, r.cacheCreationTokens !== undefined)
+    const entry: Entry = { at, sessionId, input: r.inputTokens, read: r.cacheReadTokens, write, rebuild, rebuildTokens: rebuild ? paidTokens(r) : 0, readCost: cost.read, writeCost: cost.write }
     if (rebuild) Object.assign(entry, causeOf(r, lane, notes, at))
 
     this.lanes.delete(key) // re-inserted last, so the lane idle longest is the one let go below
@@ -182,6 +211,14 @@ export class CacheLedger {
     drop = Math.max(drop, list.length - MAX_ENTRIES)
     if (drop > 0) list.splice(0, drop)
     return { rebuild, ...(entry.cause ? { cause: entry.cause } : {}) }
+  }
+
+  /** A stored bucket's cache cost: the ratios belong to its tool and model, so its sums are weighted at once (`cacheCost`) */
+  private costOfBucket(b: UsageBucket): { readCost: number; writeCost: number } {
+    const billing = this.billingOf(b.tool)
+    // A tool billed like Anthropic's reports writes; for one that does not, every bucket has none and the input it did not read stands in
+    const { read, write } = cacheCost(billing, b.model, { input: b.input, read: b.cacheRead, write: b.cacheWrite, write1h: b.cacheWrite1h }, billing === 'anthropic' || b.cacheWrite > 0)
+    return { readCost: read, writeCost: write }
   }
 
   /**
@@ -249,9 +286,14 @@ function windowOf(
     cacheCreationTokens: 0,
     rebuilds: 0,
     rebuildCauses: {},
+    rebuildTokens: 0,
+    cacheReadCost: 0,
+    cacheWriteCost: 0,
     sessions: [],
   }
   const causes = w.rebuildCauses!
+  /** Sessions with rebuilds an earlier build stored without their tokens: their sum, and the window's, is not known */
+  const unknownTokens = new Set<string>()
   const bySession = new Map<string, CacheSessionStats>()
   for (const e of list) {
     if (e.at < since) continue
@@ -261,16 +303,20 @@ function windowOf(
     w.cacheCreationTokens += e.write
     let s = bySession.get(e.sessionId)
     if (!s) {
-      s = { sessionId: e.sessionId, name: '', requests: 0, inputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, rebuilds: 0, rebuildCauses: {} }
+      s = { sessionId: e.sessionId, name: '', requests: 0, inputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, rebuilds: 0, rebuildCauses: {}, rebuildTokens: 0 }
       bySession.set(e.sessionId, s)
     }
     s.requests++
     s.inputTokens += e.input
     s.cacheReadTokens += e.read
     s.cacheCreationTokens += e.write
+    w.cacheReadCost = (w.cacheReadCost ?? 0) + e.readCost
+    w.cacheWriteCost = (w.cacheWriteCost ?? 0) + e.writeCost
     if (!e.rebuild) continue
     w.rebuilds++
     s.rebuilds++
+    w.rebuildTokens = (w.rebuildTokens ?? 0) + e.rebuildTokens
+    s.rebuildTokens = (s.rebuildTokens ?? 0) + e.rebuildTokens
     const cause = e.cause ?? 'unknown'
     causes[cause] = (causes[cause] ?? 0) + 1
     s.rebuildCauses![cause] = (s.rebuildCauses![cause] ?? 0) + 1
@@ -287,9 +333,13 @@ function windowOf(
     w.cacheReadTokens += c.read
     w.cacheCreationTokens += c.write
     w.rebuilds += c.rebuilds
+    if (c.rebuildTokens === null) unknownTokens.add(c.sessionId)
+    else w.rebuildTokens = (w.rebuildTokens ?? 0) + c.rebuildTokens
+    w.cacheReadCost = (w.cacheReadCost ?? 0) + c.readCost
+    w.cacheWriteCost = (w.cacheWriteCost ?? 0) + c.writeCost
     let s = bySession.get(c.sessionId)
     if (!s) {
-      s = { sessionId: c.sessionId, name: '', requests: 0, inputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, rebuilds: 0, rebuildCauses: {} }
+      s = { sessionId: c.sessionId, name: '', requests: 0, inputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, rebuilds: 0, rebuildCauses: {}, rebuildTokens: 0 }
       bySession.set(c.sessionId, s)
     }
     s.requests += c.requests
@@ -297,12 +347,15 @@ function windowOf(
     s.cacheReadTokens += c.read
     s.cacheCreationTokens += c.write
     s.rebuilds += c.rebuilds
+    if (c.rebuildTokens !== null) s.rebuildTokens = (s.rebuildTokens ?? 0) + c.rebuildTokens
     const ofSession = (s.rebuildCauses ??= {})
     for (const [cause, n] of Object.entries(c.causes)) {
       causes[cause] = (causes[cause] ?? 0) + n
       ofSession[cause] = (ofSession[cause] ?? 0) + n
     }
   }
+  if (unknownTokens.size > 0) delete w.rebuildTokens
+  for (const id of unknownTokens) delete bySession.get(id)?.rebuildTokens
   /*
    * What a session cost the cache: what it wrote, for a tool that says so. A tool that reports reads only (Codex)
    * is ranked by the input it did not read from cache, which is what it paid in full.

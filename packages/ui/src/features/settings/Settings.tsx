@@ -1,7 +1,7 @@
 import { TrustProjectButton } from '../project/TrustCard.jsx'
 import { usePresence } from '../../components/presence.js'
 import { useEffect, useRef, useState } from 'react'
-import { MAX_AGENT_DEPTH, MAX_AUTO_COMPACT_SHARE, MIN_AUTO_COMPACT_SHARE, MIN_IDLE_COMPACT_SHARE, agentDepthOf, autoCompactOf, hubAutoOf, type ToolName, type ToolStatus, type UiPreferencesPatch } from '@cc/protocol'
+import { MAX_AGENT_DEPTH, MAX_AUTO_COMPACT_SHARE, MAX_NUDGE_SHARE, MIN_AUTO_COMPACT_SHARE, MIN_IDLE_COMPACT_SHARE, MIN_NUDGE_SHARE, NUDGE_MARGIN, agentDepthOf, autoCompactOf, hubAutoOf, nudgeShares, type ToolName, type ToolStatus, type UiPreferencesPatch } from '@cc/protocol'
 import { appKeyOf, explainGridSpan, type NotifyPolicy } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
@@ -899,9 +899,14 @@ function HubAutoSwitch() {
  * by default at 60%; off, nothing is passed and each agent's own settings decide.
  */
 function AutoCompactSetting({ setPrefs }: { setPrefs: (patch: UiPreferencesPatch) => Promise<void> }) {
-  const { controlled, share, idleShare } = useStore((s) => autoCompactOf(s.prefs))
+  const setting = useStore((s) => autoCompactOf(s.prefs))
+  const { controlled, share, idleShare, nudge } = setting
   const percent = Math.round(share * 100)
   const idlePercent = Math.round(idleShare * 100)
+  const { first, second } = nudgeShares(setting)
+  const firstPercent = Math.round(first * 100)
+  const secondPercent = Math.round(second * 100)
+  const secondMax = Math.min(Math.round(MAX_NUDGE_SHARE * 100), percent - Math.round(NUDGE_MARGIN * 100))
   return (
     <SettingsGroup title="Compaction">
       <SettingToggle
@@ -963,6 +968,71 @@ function AutoCompactSetting({ setPrefs }: { setPrefs: (patch: UiPreferencesPatch
               />
               <span className="readout w-28 text-sm text-ink" data-testid="settings-auto-compact-idle-share-value" aria-hidden>
                 {idlePercent}% of the window
+              </span>
+            </>
+          }
+        />
+      )}
+      {controlled && (
+        <SettingToggle
+          checked={nudge}
+          onChange={(next) => setPrefs({ autoCompact: { nudge: next } })}
+          label="Remind a growing session to compact"
+          testId="settings-auto-compact-nudge"
+          hint={
+            <>
+              When a session&apos;s context passes the first share, Centralu tells it once, quietly with its next message or
+              tool result, to call compact_self when the step it is on is done; it tells it once more at the second share,
+              which stays below the share agents compact at, where the compaction would come in the middle of work. It
+              never starts or interrupts a turn, and starts again after the session compacts. Only sessions that have
+              compact_self, and over 100,000 tokens.
+            </>
+          }
+        />
+      )}
+      {controlled && nudge && (
+        <SettingsRow
+          label={<label htmlFor="settings-auto-compact-nudge-first">First reminder at</label>}
+          control={
+            <>
+              <input
+                id="settings-auto-compact-nudge-first"
+                type="range"
+                min={Math.round(MIN_NUDGE_SHARE * 100)}
+                // Under a second share the person chose: the host refuses a first one that is not below it
+                max={setting.nudgeSecond === null ? Math.round(MAX_NUDGE_SHARE * 100) : Math.max(Math.round(MIN_NUDGE_SHARE * 100), secondPercent - Math.round(NUDGE_MARGIN * 100))}
+                step={5}
+                className="w-32 accent-ink-muted"
+                data-testid="settings-auto-compact-nudge-first"
+                value={firstPercent}
+                onChange={(e) => void setPrefs({ autoCompact: { nudgeFirst: Number(e.target.value) / 100 } })}
+              />
+              <span className="readout w-28 text-sm text-ink" data-testid="settings-auto-compact-nudge-first-value" aria-hidden>
+                {firstPercent}% of the window
+              </span>
+            </>
+          }
+        />
+      )}
+      {controlled && nudge && (
+        <SettingsRow
+          label={<label htmlFor="settings-auto-compact-nudge-second">Second reminder at</label>}
+          control={
+            <>
+              <input
+                id="settings-auto-compact-nudge-second"
+                type="range"
+                min={Math.min(secondMax, Math.max(Math.round(MIN_NUDGE_SHARE * 100), firstPercent + Math.round(NUDGE_MARGIN * 100)))}
+                // Above the first share, and below the share agents compact at: a second reminder after the tool's own compaction would say nothing
+                max={secondMax}
+                step={5}
+                className="w-32 accent-ink-muted"
+                data-testid="settings-auto-compact-nudge-second"
+                value={secondPercent}
+                onChange={(e) => void setPrefs({ autoCompact: { nudgeSecond: Number(e.target.value) / 100 } })}
+              />
+              <span className="readout w-28 text-sm text-ink" data-testid="settings-auto-compact-nudge-second-value" aria-hidden>
+                {secondPercent}% of the window
               </span>
             </>
           }

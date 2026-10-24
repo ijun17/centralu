@@ -86,6 +86,8 @@ export class SelfCompaction {
   /** The size of the last model request of the session's own conversation in the running turn: the size the turn grew to, in both tools */
   private readonly lastRequest = new Map<string, number>()
   private timer: ReturnType<typeof setInterval> | null = null
+  /** `stop()` was called: a late event of a turn that was running is not acted on (it would start the timer or send) */
+  private stopped = false
 
   constructor(private readonly host: SelfCompactionHost) {}
 
@@ -116,7 +118,9 @@ export class SelfCompaction {
   /** Hears every event of every session. Never throws into the caller's event */
   observe(e: NormalizedEvent, endedTurn: boolean): void {
     const id = e.sessionId
-    if (!id) return
+    if (!id || this.stopped) return
+    // The context figure Centralu moves from a request's size during a turn (#1492) is no reading by the tool: this rule counts those only
+    if (e.type === 'context_update' && e.exactness === 'estimate') return
     if (e.type === 'session_deleted') return this.forget(id)
     const m = this.host.session(id)
     if (!m) return
@@ -160,10 +164,9 @@ export class SelfCompaction {
     // The size at the turn's end has come: a request that waited for it is decided now
     const live = this.pending.get(id)
     if (e.type === 'context_update' && live && live.endedAt !== null) return this.decide(id, e.used, m.tool)
-    // A card the host raised was resolved and the session is still at rest: the held request is judged on the size it had
-    if ((e.type === 'approval_resolved' || e.type === 'question_resolved') && live?.held && !busy && !this.cardOpen(id)) {
-      return this.decide(id, live.size ?? m.context?.used ?? 0, m.tool)
-    }
+    // The card the host raised is gone and the session is still at rest: the held request is judged on the size it had. Any event
+    // can say so, not only the card's own `*_resolved`: a card also closes with the session's stop or the host's swap, and says nothing then
+    if (live?.held && this.releaseHeld(id, m)) return
     if (!endedTurn) return
     this.markRest(id)
     // The tool reads the size after this turn (Claude) unless it was read during it (Codex)
@@ -198,6 +201,25 @@ export class SelfCompaction {
     }
     if (grew !== null) this.decide(id, grew, m.tool)
     else this.awaitReading(id, live)
+  }
+
+  /**
+   * A request held for a card: judged now if the card is closed and the session at rest, dropped if it has no process any more.
+   * Returns whether it was settled. **Not asked: background work.** The held path goes on `!busy && !cardOpen` even while the session
+   * runs background work, as the rule for every request made in a turn does (the request does not ask whether it runs: waiting for
+   * CI in the background is what it is for, docs/agent-host.md "Compacting at a break"); `sessionIdle`'s rule for the rest compaction is
+   * stricter on purpose, so this is not to be made to match it.
+   */
+  private releaseHeld(id: string, m: SessionInfo): boolean {
+    const req = this.pending.get(id)
+    if (!req?.held) return false
+    if (!this.host.running(id)) {
+      this.settle(id)
+      return true
+    }
+    if (inTurn(m.state) || this.cardOpen(id)) return false
+    this.decide(id, req.size ?? m.context?.used ?? 0, m.tool)
+    return true
   }
 
   /** A request whose turn ended with no size: a timer decides it on the reading it has if the tool's own does not come */
@@ -286,6 +308,8 @@ export class SelfCompaction {
     const setting = this.host.setting()
     const sent: string[] = []
     for (const m of this.host.sessions()) {
+      // A held request whose card closed without an event is judged here at the latest (`releaseHeld`)
+      if (this.pending.get(m.id)?.held) this.releaseHeld(m.id, m)
       if (!this.due(m, setting, now)) continue
       this.fire(m.id, `at rest for ${IDLE_COMPACT_MINUTES} minutes, over ${Math.round(setting.idleShare * 100)}% of the window`, null, m.tool)
       if (this.compacting.has(m.id)) sent.push(m.id)
@@ -319,12 +343,14 @@ export class SelfCompaction {
   /** Starts the sweep. A host that never calls it still serves `compact_self` */
   start(): void {
     if (this.timer) return
+    this.stopped = false
     this.timer = setInterval(() => this.sweepSafely(), SWEEP_MS)
     // A sweep is no reason to keep the host alive
     this.timer.unref?.()
   }
 
   stop(): void {
+    this.stopped = true
     if (this.timer) clearInterval(this.timer)
     this.timer = null
     for (const t of this.waits.values()) clearTimeout(t)

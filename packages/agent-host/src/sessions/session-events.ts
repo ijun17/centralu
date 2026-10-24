@@ -11,6 +11,7 @@ import { inTurn } from '../idle.js'
 import { rpcError } from '../rpc-error.js'
 import { MailNotAtRest } from '../mail/delivery.js'
 import { hubAskDepthKey } from './agent-depth.js'
+import { ContextMeter } from './context-meter.js'
 import { scriptMessageFrame } from './script-messages.js'
 import { appMessageFrame, type AppMessageSource, type AppMessageVia } from './app-messages.js'
 import type { ChildReports } from './child-reports.js'
@@ -45,6 +46,8 @@ export type SessionEventsHost = Pick<DelegationHost, 'agentRuns' | 'children' | 
     readonly cards: RoutedCards
     /** Whether the session's tool takes a message into the turn it is running, rather than holding it for the next (`midTurnInput`) */
     joinsRunningTurn(sessionId: string): boolean
+    /** Whether the session's tool reads the context size with every request, so a turn needs no estimate of it (`contextAtRequest`) */
+    contextAtRequest(sessionId: string): boolean
     /** Sessions whose hub task's input is tracked (`sendFromHub`): its own turn takes the depth mark down, no other */
     readonly hubAskTurns: Set<string>
     readonly interruptions: InterruptionWatch
@@ -117,6 +120,9 @@ async function takeInput(handle: SessionHandle, text: string, late?: (e: Error) 
 }
 
 export class SessionEvents {
+  /** The context figure during a turn, from each request's size (#1492, context-meter.ts) */
+  private readonly meter = new ContextMeter()
+
   constructor(private readonly host: SessionEventsHost) {}
 
   /** Receive event -> update metadata -> persist message -> broadcast */
@@ -162,6 +168,12 @@ export class SessionEvents {
     }
     if (e.type === 'subagent_event') {
       this.host.record.recordSubagentStep(e)
+      return
+    }
+    // The tool's reading of the turn before, landing after this turn's own requests moved the figure, would put an older size over a newer one (#1492)
+    if (e.type === 'context_update' && this.meter.stale(e)) {
+      // The compaction rule still hears it: it decides a request on the size the turn ended at
+      this.host.compactEvent(e, false)
       return
     }
     if (e.type === 'settings_changed' && e.by === 'tool') {
@@ -320,6 +332,10 @@ export class SessionEvents {
     // Counted before anything is poked: a delivery it lets go must see the turn that just ended
     if (e.sessionId) this.host.mailEvent(e, endedTurn)
     if (e.sessionId) this.host.compactEvent(e, endedTurn)
+    // A request of the turn moves the context figure before the turn's end brings the tool's reading (#1492)
+    const meta = e.sessionId ? this.host.meta.get(e.sessionId) : undefined
+    const estimate = meta ? this.meter.observe(e, meta, this.host.contextAtRequest(meta.id)) : null
+    if (estimate) this.onEvent(estimate)
     if (e.sessionId && (endedTurn || e.type === 'state_change' || e.type === 'approval_resolved' || e.type === 'question_resolved')) this.host.mailPoke(e.sessionId)
     // A deferred restart also waits for the session's background work (#648): the moment it ends is a boundary too
     if (e.type === 'background_tasks' && e.sessionId) this.host.restartPolicy.applyDeferredRestart(e.sessionId)
@@ -376,7 +392,7 @@ export class SessionEvents {
     switch (e.type) {
       case 'usage_update': {
         m.usage = e.tokens
-        const counted = e.request && this.host.cacheLedger.record(m.tool, m.id, e.request)
+        const counted = e.request && this.host.cacheLedger.record(m.tool, m.id, e.request, undefined, m.model)
         if (e.request && counted) this.host.usageRecorder.request({ sessionId: m.id, projectId: m.projectId, tool: m.tool, model: m.model ?? undefined }, e.request, counted)
         break
       }
@@ -386,7 +402,8 @@ export class SessionEvents {
         break
       case 'context_update':
         m.context = nextContext(m.context, e)
-        this.host.modelWindows.note(m, e.window, e.model)
+        // An estimate from a request (#1492) is no reading of the model's window: the tool's own readings say that
+        if (e.exactness !== 'estimate') this.host.modelWindows.note(m, e.window, e.model)
         break
       case 'conversation_reset':
         // The old conversation's reading no longer describes anything (#304); the tool reports the new one when the turn ends

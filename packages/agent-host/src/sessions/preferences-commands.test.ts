@@ -195,7 +195,7 @@ describe('auto compact (#1376)', () => {
 
     const share = await run(orc.id, 'set_preferences', { autoCompact: { share: 0.5 } })
     expect(share.isError).toBeFalsy()
-    expect(share.text).toBe("Now: agents compact at 50% of the model's window, set by Centralu; a session at rest is compacted over 30%. It reaches a running session when its process next starts.")
+    expect(share.text).toBe("Now: agents compact at 50% of the model's window, set by Centralu; a session at rest is compacted over 30%; a session is told quietly to call compact_self at 30% and 40%. It reaches a running session when its process next starts.")
     expect(await prefs()).toMatchObject({ autoCompact: { controlled: true, share: 0.5 } })
 
     const off = await run(orc.id, 'set_preferences', { autoCompact: { controlled: false } })
@@ -203,6 +203,22 @@ describe('auto compact (#1376)', () => {
     expect(await prefs()).toMatchObject({ autoCompact: { controlled: false, share: 0.5 } })
     expect((await run(orc.id, 'get_preferences')).text).toContain("- Centralu does not set when agents compact; each agent's own settings decide")
     expect(card(orc.id)).toBeUndefined()
+  })
+
+  it('sets the notices that tell a growing session to call compact_self, and refuses a second share at or above the share agents compact at (#1492)', async () => {
+    const orc = await mgr.orchestrator()
+    expect((await run(orc.id, 'get_preferences')).text).toContain('a session is told quietly to call compact_self at 30% and 50%')
+    const set = await run(orc.id, 'set_preferences', { autoCompact: { nudgeFirst: 0.4, nudgeSecond: 0.55 } })
+    expect(set.isError).toBeFalsy()
+    expect(set.text).toContain('at 40% and 55%')
+    expect(await prefs()).toMatchObject({ autoCompact: { nudge: true, nudgeFirst: 0.4, nudgeSecond: 0.55 } })
+    for (const second of [0.6, 0.8]) {
+      const refused = await run(orc.id, 'set_preferences', { autoCompact: { nudgeSecond: second } })
+      expect(refused.text).toMatch(/Auto compact: .*must be at least 5 points below the share agents compact at \(60%\)/)
+    }
+    expect(await prefs()).toMatchObject({ autoCompact: { nudgeSecond: 0.55 } })
+    expect((await run(orc.id, 'set_preferences', { autoCompact: { nudgeSecond: null } })).text).toContain('at 40% and 50%')
+    expect((await run(orc.id, 'set_preferences', { autoCompact: { nudge: false } })).text).toContain('a session is not told to call compact_self')
   })
 
   it('refuses a share outside what the setting takes, and changes nothing', async () => {

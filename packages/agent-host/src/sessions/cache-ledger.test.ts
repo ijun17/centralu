@@ -231,7 +231,7 @@ describe('CacheLedger rebuild causes', () => {
 
   it('forgets a purged session, so no window names it with an empty name', () => {
     const l = new CacheLedger(NOW - 9 * HOUR)
-    l.restore([{ hour: NOW - 3 * HOUR, sessionId: 'a', projectId: 'p', tool: 'claude', model: '', machine: '', requests: 2, input: 1, cacheRead: 1, cacheWrite: 50_000, cacheWrite5m: 0, cacheWrite1h: 0, output: 0, rebuilds: 1, causes: { expired: 1 } }])
+    l.restore([{ hour: NOW - 3 * HOUR, sessionId: 'a', projectId: 'p', tool: 'claude', model: '', machine: '', requests: 2, input: 1, cacheRead: 1, cacheWrite: 50_000, cacheWrite5m: 0, cacheWrite1h: 0, output: 0, rebuilds: 1, rebuildTokens: 50_000, causes: { expired: 1 } }])
     l.record('claude', 'a', req(0, 40_000), NOW - HOUR)
     l.record('claude', 'b', req(0, 30_000), NOW - HOUR)
     l.forget('a')
@@ -241,7 +241,7 @@ describe('CacheLedger rebuild causes', () => {
   it('takes the buckets an earlier run stored, so the figures outlive a restart, and counts them once', () => {
     const l = new CacheLedger(NOW)
     const hour = NOW - 3 * HOUR // 12:00
-    const bucket = (over: object) => ({ hour, sessionId: 'a', projectId: 'p', tool: 'claude' as const, model: '', machine: '', requests: 4, input: 40, cacheRead: 9_000, cacheWrite: 41_000, cacheWrite5m: 0, cacheWrite1h: 0, output: 0, rebuilds: 1, causes: { expired: 1 }, ...over })
+    const bucket = (over: object) => ({ hour, sessionId: 'a', projectId: 'p', tool: 'claude' as const, model: '', machine: '', requests: 4, input: 40, cacheRead: 9_000, cacheWrite: 41_000, cacheWrite5m: 0, cacheWrite1h: 0, output: 0, rebuilds: 1, rebuildTokens: 41_000, causes: { expired: 1 }, ...over })
     l.restore([bucket({}), bucket({ hour: NOW - 9 * HOUR, requests: 2, cacheWrite: 5, rebuilds: 0, causes: {} })])
     l.record('claude', 'a', req(1_000, 10), NOW - 1_000)
     const s = l.stats('claude', nameOf, NOW)
@@ -253,5 +253,102 @@ describe('CacheLedger rebuild causes', () => {
     expect(five!.sessions).toMatchObject([{ sessionId: 'a', requests: 5, rebuilds: 1, rebuildCauses: { expired: 1 } }])
     // Another tool has nothing of it
     expect(l.stats('codex', nameOf, NOW).windows[0]).toMatchObject({ requests: 0 })
+  })
+})
+
+describe('what the rebuilds wrote, and what the cache cost (#1492)', () => {
+  it('puts a rebuild’s writes into rebuildTokens, per window and per session, and a steady write is not in it', () => {
+    const l = new CacheLedger(NOW - 9 * HOUR)
+    // Steady work: reads what it had, writes what is new
+    l.record('claude', 'a', req(80_000, 2_000), NOW - 3 * HOUR)
+    l.record('claude', 'a', req(82_000, 1_500), NOW - 2 * HOUR)
+    // Two rebuilds of one session and one of another
+    expect(l.record('claude', 'a', req(0, 60_000), NOW - HOUR)).toMatchObject({ rebuild: true })
+    l.record('claude', 'a', req(500, 25_000), NOW - 30 * 60_000)
+    l.record('claude', 'b', req(0, 40_000), NOW - 20 * 60_000)
+    const [five] = l.stats('claude', nameOf, NOW).windows
+    expect(five).toMatchObject({ rebuilds: 3, rebuildTokens: 125_000, cacheCreationTokens: 128_500 })
+    const bySession = Object.fromEntries(five!.sessions.map((s) => [s.sessionId, s]))
+    expect(bySession.a).toMatchObject({ rebuilds: 2, rebuildTokens: 85_000, cacheCreationTokens: 88_500 })
+    expect(bySession.b).toMatchObject({ rebuilds: 1, rebuildTokens: 40_000 })
+    // No rebuild: none written
+    const calm = new CacheLedger(NOW - HOUR)
+    calm.record('claude', 'a', req(80_000, 2_000), NOW - 1_000)
+    expect(calm.stats('claude', nameOf, NOW).windows[0]).toMatchObject({ rebuilds: 0, rebuildTokens: 0 })
+    // A tool that reports reads only: the input it did not read stands in
+    const codex = new CacheLedger(NOW - HOUR)
+    codex.record('codex', 'a', req(0, undefined, 50_000), NOW - 1_000)
+    codex.record('codex', 'a', req(80_000, undefined, 2_000), NOW - 500)
+    expect(codex.stats('codex', nameOf, NOW).windows[0]).toMatchObject({ rebuilds: 1, rebuildTokens: 50_000 })
+  })
+
+  it('weights the cache cost by the price ratios, with a mix of five-minute and one-hour writes', () => {
+    const l = new CacheLedger(NOW - HOUR)
+    // read 0.1, five-minute write 1.25, one-hour write 2: 90,000 read; 3,000 written for five minutes and 1,000 for an hour
+    l.record('claude', 'a', { ...req(90_000, 4_000, 0), cacheWrite5mTokens: 3_000, cacheWrite1hTokens: 1_000, cacheTtl: '1h' }, NOW - 1_000)
+    const w = l.stats('claude', nameOf, NOW).windows[0]!
+    expect(w.cacheReadCost).toBeCloseTo(9_000)
+    expect(w.cacheWriteCost).toBeCloseTo(3_000 * 1.25 + 1_000 * 2)
+    // The write share of what the cache cost: 5,750 of 14,750, where the hit rate by tokens is 96%
+    expect(w.cacheWriteCost! / (w.cacheReadCost! + w.cacheWriteCost!)).toBeCloseTo(5_750 / 14_750)
+    // A request that did not split its writes is priced as five minutes, and one under a single reported lifetime by that
+    const plain = new CacheLedger(NOW - HOUR)
+    plain.record('claude', 'a', req(1_000, 2_000, 0), NOW - 2_000)
+    plain.record('claude', 'a', { ...req(0, 1_000, 0), cacheTtl: '1h' }, NOW - 1_000)
+    expect(plain.stats('claude', nameOf, NOW).windows[0]).toMatchObject({ cacheReadCost: 100, cacheWriteCost: 2_000 * 1.25 + 1_000 * 2 })
+  })
+
+  it('prices Codex by model: GPT-5.6 on reads at 0.1, Sol at 0.05, and a 30-minute write at 1.25; an older model has no write price', () => {
+    const cost = (model: string) => {
+      const l = new CacheLedger(NOW - HOUR, (tool) => (tool === 'codex' ? 'openai' : 'anthropic'))
+      l.record('codex', 'a', req(10_000, undefined, 1_000), NOW - 1_000, model)
+      const w = l.stats('codex', nameOf, NOW).windows[0]!
+      return [w.cacheReadCost, w.cacheWriteCost]
+    }
+    expect(cost('gpt-5.6')).toEqual([1_000, 1_250])
+    expect(cost('gpt-5.7-codex')).toEqual([1_000, 1_250])
+    expect(cost('gpt-5.6-sol')).toEqual([500, 1_250])
+    expect(cost('gpt-5.5')).toEqual([1_000, 1_000])
+    // A name that says no generation (a session on the tool's default that did not say which model it runs) is the current one
+    expect(cost('')).toEqual([1_000, 1_250])
+    const unnamed = new CacheLedger(NOW - HOUR, () => 'openai')
+    unnamed.record('codex', 'a', req(10_000, undefined, 1_000), NOW - 1_000, null)
+    expect(unnamed.stats('codex', nameOf, NOW).windows[0]).toMatchObject({ cacheReadCost: 1_000, cacheWriteCost: 1_250 })
+    // The request's own model wins over the session's setting, and an hour stored with none is priced the same way
+    const own = new CacheLedger(NOW - HOUR, () => 'openai')
+    own.record('codex', 'a', { ...req(10_000, undefined, 1_000), model: 'gpt-5.6-sol' }, NOW - 1_000, null)
+    expect(own.stats('codex', nameOf, NOW).windows[0]).toMatchObject({ cacheReadCost: 500, cacheWriteCost: 1_250 })
+  })
+
+  it('takes both from the buckets an earlier run stored, and says the tokens are not known for rebuilds stored without them', () => {
+    const l = new CacheLedger(NOW)
+    const bucket = (over: object) => ({ hour: NOW - 3 * HOUR, sessionId: 'a', projectId: 'p', tool: 'claude' as const, model: '', machine: '', requests: 4, input: 40, cacheRead: 9_000, cacheWrite: 41_000, cacheWrite5m: 1_000, cacheWrite1h: 40_000, output: 0, rebuilds: 1, rebuildTokens: 40_000, causes: { expired: 1 }, ...over })
+    l.restore([bucket({})])
+    l.record('claude', 'a', req(0, 30_000), NOW - 1_000)
+    const [five] = l.stats('claude', nameOf, NOW).windows
+    expect(five).toMatchObject({ rebuilds: 2, rebuildTokens: 70_000 })
+    expect(five!.cacheReadCost).toBeCloseTo(900)
+    expect(five!.cacheWriteCost).toBeCloseTo(40_000 * 2 + 1_000 * 1.25 + 30_000 * 1.25)
+    expect(five!.sessions[0]).toMatchObject({ rebuildTokens: 70_000 })
+
+    // An hour from before the column had rebuilds counted and no tokens: the sum is not known, and is not shown as smaller
+    const old = new CacheLedger(NOW)
+    old.restore([bucket({ rebuildTokens: 0 }), bucket({ sessionId: 'b', rebuildTokens: 20_000 })])
+    const o = old.stats('claude', nameOf, NOW).windows[0]!
+    expect(o.rebuilds).toBe(2)
+    expect(o).not.toHaveProperty('rebuildTokens')
+    const sessions = Object.fromEntries(o.sessions.map((x) => [x.sessionId, x]))
+    expect(sessions.a).not.toHaveProperty('rebuildTokens')
+    expect(sessions.b).toMatchObject({ rebuildTokens: 20_000 })
+
+    // An hour a newer build wrote and an older one then added rebuilds to: the tokens cover fewer rebuilds than were counted
+    const mixed = new CacheLedger(NOW)
+    mixed.restore([bucket({ rebuilds: 5, rebuildTokens: 10_000 }), bucket({ sessionId: 'b', rebuilds: 2, rebuildTokens: 9_000 })])
+    const m = mixed.stats('claude', nameOf, NOW).windows[0]!
+    expect(m.rebuilds).toBe(7)
+    expect(m).not.toHaveProperty('rebuildTokens')
+    const bySession = Object.fromEntries(m.sessions.map((x) => [x.sessionId, x]))
+    expect(bySession.a).not.toHaveProperty('rebuildTokens')
+    expect(bySession.b).toMatchObject({ rebuildTokens: 9_000 })
   })
 })

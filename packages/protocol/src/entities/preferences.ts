@@ -117,12 +117,43 @@ export type AutoCompact = {
    * off, Centralu compacts nothing by itself. From `MIN_IDLE_COMPACT_SHARE` to `MAX_AUTO_COMPACT_SHARE`.
    */
   idleShare: number
+  /**
+   * Whether Centralu tells a session, quietly, to call `compact_self` once its context passes `nudgeFirst` and again at
+   * `nudgeSecond` (#1492). Follows `controlled`: off, Centralu says nothing about compacting by itself.
+   */
+  nudge: boolean
+  /** The first share, from `MIN_NUDGE_SHARE` to `MAX_NUDGE_SHARE`. A share at or above `share` is never told: the tool compacts first */
+  nudgeFirst: number
+  /**
+   * The second share, or null for the default: `NUDGE_SECOND_GAP` below `share`, following it when it moves. Always at least
+   * `NUDGE_MARGIN` below `share` (`nudgeShares`): the second notice must come before the tool's own compaction.
+   */
+  nudgeSecond: number | null
 }
 
 export const MIN_AUTO_COMPACT_SHARE = 0.2
 export const MIN_IDLE_COMPACT_SHARE = 0.1
 export const MAX_AUTO_COMPACT_SHARE = 0.95
-export const DEFAULT_AUTO_COMPACT: AutoCompact = { controlled: true, share: 0.6, idleShare: 0.3 }
+export const MIN_NUDGE_SHARE = 0.1
+export const MAX_NUDGE_SHARE = 0.9
+/** How far below the tool's own compaction the second notice sits when the person chose no share */
+export const NUDGE_SECOND_GAP = 0.1
+/** The least the second notice may sit below the tool's own compaction share */
+export const NUDGE_MARGIN = 0.05
+export const DEFAULT_AUTO_COMPACT: AutoCompact = { controlled: true, share: 0.6, idleShare: 0.3, nudge: true, nudgeFirst: 0.3, nudgeSecond: null }
+
+const hundredths = (n: number): number => Math.round(n * 100) / 100
+
+/**
+ * The two shares a session is told at (#1492), as they are in force: the first as chosen, the second chosen or
+ * `NUDGE_SECOND_GAP` below the tool's own share, and in every case at least `NUDGE_MARGIN` below it. A first share at or
+ * above `share` stays as it is and is never told by the host (the tool compacts before it).
+ */
+export function nudgeShares(c: Pick<AutoCompact, 'share' | 'nudgeFirst' | 'nudgeSecond'>): { first: number; second: number } {
+  const ceiling = hundredths(c.share - NUDGE_MARGIN)
+  const second = hundredths(c.nudgeSecond ?? c.share - NUDGE_SECOND_GAP)
+  return { first: c.nudgeFirst, second: Math.min(ceiling, Math.max(MIN_NUDGE_SHARE, second)) }
+}
 
 /**
  * Reads the setting field by field: a missing one takes its default, a value that is not a boolean or a number is no
@@ -134,7 +165,23 @@ export function readAutoCompact(raw: unknown): AutoCompact {
   if ('controlled' in raw && typeof raw.controlled === 'boolean') out.controlled = raw.controlled
   if ('share' in raw && typeof raw.share === 'number' && Number.isFinite(raw.share)) out.share = Math.min(MAX_AUTO_COMPACT_SHARE, Math.max(MIN_AUTO_COMPACT_SHARE, raw.share))
   if ('idleShare' in raw && typeof raw.idleShare === 'number' && Number.isFinite(raw.idleShare)) out.idleShare = Math.min(MAX_AUTO_COMPACT_SHARE, Math.max(MIN_IDLE_COMPACT_SHARE, raw.idleShare))
-  return out
+  if ('nudge' in raw && typeof raw.nudge === 'boolean') out.nudge = raw.nudge
+  if ('nudgeFirst' in raw && typeof raw.nudgeFirst === 'number' && Number.isFinite(raw.nudgeFirst)) out.nudgeFirst = Math.min(MAX_NUDGE_SHARE, Math.max(MIN_NUDGE_SHARE, raw.nudgeFirst))
+  if ('nudgeSecond' in raw && typeof raw.nudgeSecond === 'number' && Number.isFinite(raw.nudgeSecond)) out.nudgeSecond = Math.min(MAX_NUDGE_SHARE, Math.max(MIN_NUDGE_SHARE, raw.nudgeSecond))
+  return settledSecond(out)
+}
+
+/**
+ * A chosen second share that does not fit the rest is held to it, so the setting as read is one that can be saved again whole
+ * (#1504 review): a share lowered under it takes it down to `NUDGE_MARGIN` below the share, and one that cannot then stay above
+ * the first share goes back to the default (null), which follows the share. A person's own choice that does not fit is refused
+ * where it is made (`UiPreferenceStore.setUiPreferences`); this is for the share that moved under a choice made before.
+ */
+export function settledSecond(c: AutoCompact): AutoCompact {
+  if (c.nudgeSecond === null) return c
+  const held = Math.min(c.nudgeSecond, hundredths(c.share - NUDGE_MARGIN))
+  const nudgeSecond = held > c.nudgeFirst ? held : null
+  return nudgeSecond === c.nudgeSecond ? c : { ...c, nudgeSecond }
 }
 
 /** Line height (#312 step 5): a factor on the body and code line heights; `normal` is today's values */
@@ -277,6 +324,10 @@ export const UiPreferencesPatch = UiPreferences.partial().extend({
       controlled: z.boolean(),
       share: z.number().min(MIN_AUTO_COMPACT_SHARE).max(MAX_AUTO_COMPACT_SHARE),
       idleShare: z.number().min(MIN_IDLE_COMPACT_SHARE).max(MAX_AUTO_COMPACT_SHARE),
+      nudge: z.boolean(),
+      nudgeFirst: z.number().min(MIN_NUDGE_SHARE).max(MAX_NUDGE_SHARE),
+      /** null: back to the default, below `share` by `NUDGE_SECOND_GAP` */
+      nudgeSecond: z.number().min(MIN_NUDGE_SHARE).max(MAX_NUDGE_SHARE).nullable(),
     })
     .partial()
     .optional(),

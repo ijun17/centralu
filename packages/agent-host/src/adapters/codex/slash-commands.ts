@@ -8,8 +8,8 @@ export type SlashCommandsHost = {
   /** A request on the session's connection */
   request<T = unknown>(method: string, params?: unknown): Promise<T>
   threadId(): string | null
-  /** An unsteerable turn (compact/review) we started is running, or no longer is (see the session's `pendingInputs`) */
-  setBlockingTurn(on: boolean): void
+  /** An unsteerable turn (compact/review) we started is running, or no longer is (see the session's `pendingInputs`); `compact`: it is a compaction */
+  setBlockingTurn(on: boolean, compact?: boolean): void
   /** Sends what was queued behind such a turn */
   flushPending(): void
 }
@@ -36,7 +36,7 @@ export class CodexSlashCommands {
      * receives as-is. (No `thread/compacted` on 0.147.0, 0.153.4 or 0.160.0 — #303.)
      */
     if (text.trim() === '/compact') {
-      this.host.setBlockingTurn(true)
+      this.host.setBlockingTurn(true, true)
       return this.host
         .request('thread/compact/start', { threadId: this.host.threadId() })
         .catch((e: unknown) => {

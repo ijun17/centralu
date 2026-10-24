@@ -1,6 +1,6 @@
 import { errorMessage, type RequestInput, type ToolName, type UsageSnapshot } from '@cc/protocol'
 import { HOUR_MS, type StoredWindow, type UsageBucket, type UsageRecords } from '../dev-services/store/usage-history.js'
-import type { Counted } from './cache-ledger.js'
+import { paidTokens, type Counted } from './cache-ledger.js'
 
 /**
  * Keeps usage over time (docs/agent-host.md §6.2): the requests `CacheLedger` counts, summed into hourly buckets and
@@ -58,7 +58,7 @@ export class UsageRecorder {
     if (!b) {
       this.buckets.set(
         id,
-        (b = { hour, sessionId: src.sessionId, projectId, tool: src.tool, model, machine: '', requests: 0, input: 0, cacheRead: 0, cacheWrite: 0, cacheWrite5m: 0, cacheWrite1h: 0, output: 0, rebuilds: 0, causes: {} }),
+        (b = { hour, sessionId: src.sessionId, projectId, tool: src.tool, model, machine: '', requests: 0, input: 0, cacheRead: 0, cacheWrite: 0, cacheWrite5m: 0, cacheWrite1h: 0, output: 0, rebuilds: 0, rebuildTokens: 0, causes: {} }),
       )
     }
     const write = r.cacheCreationTokens ?? 0
@@ -66,11 +66,13 @@ export class UsageRecorder {
     b.input += r.inputTokens
     b.cacheRead += r.cacheReadTokens
     b.cacheWrite += write
-    if (r.cacheTtl === '5m') b.cacheWrite5m += write
-    if (r.cacheTtl === '1h') b.cacheWrite1h += write
+    // The API's own split of what the request wrote (#1492), else the whole write under the one lifetime it reported
+    b.cacheWrite1h += r.cacheWrite1hTokens ?? (r.cacheTtl === '1h' ? write : 0)
+    b.cacheWrite5m += r.cacheWrite5mTokens ?? (r.cacheTtl === '5m' ? write : 0)
     b.output += r.outputTokens ?? 0
     if (counted.rebuild) {
       b.rebuilds++
+      b.rebuildTokens += paidTokens(r)
       const cause = counted.cause ?? 'unknown'
       b.causes[cause] = (b.causes[cause] ?? 0) + 1
     }

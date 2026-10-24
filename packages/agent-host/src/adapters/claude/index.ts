@@ -170,6 +170,7 @@ export class ClaudeAdapter implements AgentAdapter {
   readonly tool = 'claude' as const
   /** `shouldQuery: false` (sdk.d.ts, measured on the Mac 2026-10-20: no turn, merged into the next message) */
   readonly quietInput = true
+  readonly cacheBilling = 'anthropic' as const
   /** What Claude Code offers against what this adapter limits (#270) */
   readonly surface = CLAUDE_SURFACE
   private readonly launch: ClaudeLaunch

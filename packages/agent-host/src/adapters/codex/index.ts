@@ -45,6 +45,8 @@ void _allVerbositiesListed
 
 export class CodexAdapter implements AgentAdapter {
   readonly tool = 'codex' as const
+  readonly cacheBilling = 'openai' as const
+  readonly contextAtRequest = true
   /** What Codex offers against what this adapter limits (#270) */
   readonly surface = CODEX_SURFACE
 

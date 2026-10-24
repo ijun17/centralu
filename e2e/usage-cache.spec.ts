@@ -23,10 +23,13 @@ function figures(here: string) {
     cacheReadTokens: read,
     cacheCreationTokens: 1_940_000,
     rebuilds,
+    rebuildTokens: rebuilds * 170_000,
+    cacheReadCost: read * 0.1,
+    cacheWriteCost: 2_380_000,
     rebuildCauses: rebuilds === 6 ? { expired: 3, model_change: 1, compaction: 1, launch_settings: 1 } : { expired: 6, model_change: 3 },
     expiredIdleMs: { min: 64 * 60_000, max: 64 * 60_000 },
     sessions: [
-      { sessionId: here, name: 'Cached work', requests: 9, inputTokens: 1, cacheReadTokens: 1, cacheCreationTokens: 1_120_000, rebuilds: 3, rebuildCauses: { expired: 2, model_change: 1 } },
+      { sessionId: here, name: 'Cached work', requests: 9, inputTokens: 1, cacheReadTokens: 1, cacheCreationTokens: 1_120_000, rebuilds: 3, rebuildTokens: 600_000, rebuildCauses: { expired: 2, model_change: 1 } },
       { sessionId: 'gone', name: '', requests: 2, inputTokens: 1, cacheReadTokens: 1, cacheCreationTokens: 540_000, rebuilds: 1 },
     ],
   })
@@ -115,8 +118,11 @@ test('the gauge says the cache hit rate on hover, and its dropdown breaks it dow
     await expect(page.getByTestId('usage-cache-uncached')).toContainText('18.4k')
     await expect(page.getByTestId('usage-cache-rebuilds')).toContainText('6 of 412 requests')
     await expect(page.getByTestId('usage-cache-causes')).toHaveText(
-      '6 rebuilds: 3 cache expired (idle 64 min) · 1 model change · 1 compaction · 1 launch settings changed',
+      '6 rebuilds · 1M written: 3 cache expired (idle 64 min) · 1 model change · 1 compaction · 1 launch settings changed',
     )
+    // #1492: the writes weigh more than their tokens say: 96% by tokens (reads 0.1, writes 1.25 to 2) is 43% of the cache cost
+    await expect(page.getByTestId('usage-cache-write-share')).toHaveText('writes: 43.3% of cache cost')
+    await expect(page.getByTestId('usage-cache-sessions')).toContainText('1.1M · 3 rebuilds (600k)')
     await expect(page.getByTestId(`usage-cache-session-causes-${cached}`)).toHaveText('2 cache expired · 1 model change')
     await expect(page.getByTestId('usage-cache-sessions')).toContainText('Most cache writes')
     await expect(page.getByTestId('usage-cache-reads-only')).toHaveCount(0)
@@ -127,7 +133,8 @@ test('the gauge says the cache hit rate on hover, and its dropdown breaks it dow
     await expect(page.getByTestId('usage-cache')).toHaveAttribute('data-window', 'today')
     await expect(page.getByTestId('usage-cache-rate')).toHaveText('71.9%')
     await expect(page.getByTestId('usage-cache-rebuilds')).toContainText('9 of 412 requests')
-    await expect(page.getByTestId('usage-cache-causes')).toHaveText('9 rebuilds: 6 cache expired (idle 64 min) · 3 model change')
+    await expect(page.getByTestId('usage-cache-causes')).toHaveText('9 rebuilds · 1.5M written: 6 cache expired (idle 64 min) · 3 model change')
+    await expect(page.getByTestId('usage-cache-write-share')).toHaveText('writes: 82.6% of cache cost')
   })
 
   await test.step('a session that is gone is named, not a button', async () => {

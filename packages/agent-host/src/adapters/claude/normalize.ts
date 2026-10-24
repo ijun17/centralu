@@ -191,10 +191,17 @@ export const CLAUDE_KNOWN_TYPES: ReadonlySet<string> = new Set([
  * keys and overage, with `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL` and the `promptCacheTtl` setting
  * over it), and that decision is not visible from outside; what the API reports it wrote is.
  */
-function ttlOf(split: unknown): { cacheTtl?: '5m' | '1h' } {
+function ttlOf(split: unknown): { cacheTtl?: '5m' | '1h'; cacheWrite1hTokens?: number; cacheWrite5mTokens?: number } {
   const c = asObj(split)
-  if (Number(c.ephemeral_1h_input_tokens ?? 0) > 0) return { cacheTtl: '1h' }
-  if (Number(c.ephemeral_5m_input_tokens ?? 0) > 0) return { cacheTtl: '5m' }
+  const hour = Number(c.ephemeral_1h_input_tokens ?? 0)
+  const five = Number(c.ephemeral_5m_input_tokens ?? 0)
+  // The two amounts as well (#1492): they are priced apart, and one request can write both
+  const amounts = {
+    ...(Number.isFinite(hour) && 'ephemeral_1h_input_tokens' in c ? { cacheWrite1hTokens: Math.max(0, hour) } : {}),
+    ...(Number.isFinite(five) && 'ephemeral_5m_input_tokens' in c ? { cacheWrite5mTokens: Math.max(0, five) } : {}),
+  }
+  if (hour > 0) return { cacheTtl: '1h', ...amounts }
+  if (five > 0) return { cacheTtl: '5m', ...amounts }
   return {}
 }
 

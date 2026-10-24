@@ -10,7 +10,7 @@ const names = { session: (id: string) => ({ a: 'Session A', b: 'Session B' })[id
 
 const bucket = (over: Partial<UsageBucket>): UsageBucket => ({
   hour: DAY + 9 * HOUR, sessionId: 'a', projectId: 'p1', tool: 'claude', model: 'opus', machine: '',
-  requests: 1, input: 10, cacheRead: 0, cacheWrite: 0, cacheWrite5m: 0, cacheWrite1h: 0, output: 0, rebuilds: 0, causes: {}, ...over,
+  requests: 1, input: 10, cacheRead: 0, cacheWrite: 0, cacheWrite5m: 0, cacheWrite1h: 0, output: 0, rebuilds: 0, rebuildTokens: 0, causes: {}, ...over,
 })
 
 describe('historyRows (docs/agent-host.md §6.2)', () => {

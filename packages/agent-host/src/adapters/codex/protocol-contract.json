@@ -14,6 +14,7 @@
     "thread/compact/start",
     "review/start",
     "turn/start",
+    "turn/steer",
     "turn/interrupt",
     "model/list",
     "skills/list",
@@ -37,6 +38,14 @@
         "model",
         "effort",
         "outputSchema"
+      ]
+    },
+    "turn/steer": {
+      "type": "TurnSteerParams",
+      "send": [
+        "threadId",
+        "input",
+        "expectedTurnId"
       ]
     },
     "turn/interrupt": {

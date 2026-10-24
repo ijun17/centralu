@@ -956,5 +956,13 @@ instruction on when to use it (work finished and reported; before waiting over a
 unrelated task), and a deferred tool is not read until something searches for it. Counted from the definition: 453 characters
 (`COMPACT_BUDGET_CHARS` 460), which raises the reader seat's Claude resident ceiling 2,850 → 3,310, its Codex ceiling by the same, and the
 orchestrator's 9,710 → 10,170 (its tool list is resident in the commands tier too). The saving it is for is measured in #1451 (cache reads of
-contexts over 300k tokens were 64% of the cost); the tool's own cost is a few dozen tokens per request. Not measured live: how often an agent
-calls it on its own at the right moments.
+contexts over 300k tokens were 64% of the cost); the tool's own cost is a few dozen tokens per request.
+
+**Whether an agent calls it on its own (#1492, one run, 2026-10-24).** An agent cannot see its context size, so Centralu tells it quietly when it
+passes shares (docs/agent-host.md "Telling a growing session"). Claude on its cheapest model (`haiku`, window 1,000,000 as the CLI reported it), an
+in-process host on a temporary store, the shares set to 10% and 25% (the defaults are 30% and 10 points under the tool's 60%, which a 1M window only
+reaches at 300k and 500k), one turn of three steps that read thirty 30 KB files (about 8,800 tokens each), write a summary and report. The meter moved
+with every request (18 estimates, one per 3 s, from 35k to 301k; the tool's reading at the turn's end replaced the last, 301,480). The notices arrived
+at 11% (106k) and 26% (256k), once each, in the middle of the Read calls, with no turn started. The agent **kept reading** to the end of the step it was
+on, wrote the summary, and **called `compact_self` once right after it** (its answer: "Asked to compact"), not at either notice: the behaviour the
+notice asks for ("when this step of the work is done"). One run on one model: not a rate. Codex was not run (no Codex CLI on the machine that did it).

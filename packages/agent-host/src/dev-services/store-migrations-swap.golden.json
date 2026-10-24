@@ -1,6 +1,6 @@
 {
  "mid": {
-  "version": 62,
+  "version": 63,
   "deferred": [
    3,
    11,
@@ -13,7 +13,7 @@
   ],
   "minReader": 0
  },
- "userVersion": 62,
+ "userVersion": 63,
  "master": [
   {
    "type": "index",
@@ -523,7 +523,7 @@
    "type": "table",
    "name": "usage_buckets",
    "tbl_name": "usage_buckets",
-   "sql": "CREATE TABLE usage_buckets (\n              hour           INTEGER NOT NULL,\n              session_id     TEXT NOT NULL,\n              project_id     TEXT NOT NULL DEFAULT '',\n              tool           TEXT NOT NULL,\n              model          TEXT NOT NULL DEFAULT '',\n              machine        TEXT NOT NULL DEFAULT '',\n              requests       INTEGER NOT NULL DEFAULT 0,\n              input          INTEGER NOT NULL DEFAULT 0,\n              cache_read     INTEGER NOT NULL DEFAULT 0,\n              cache_write    INTEGER NOT NULL DEFAULT 0,\n              cache_write_5m INTEGER NOT NULL DEFAULT 0,\n              cache_write_1h INTEGER NOT NULL DEFAULT 0,\n              output         INTEGER NOT NULL DEFAULT 0,\n              rebuilds       INTEGER NOT NULL DEFAULT 0,\n              causes         TEXT NOT NULL DEFAULT '{}',\n              PRIMARY KEY (hour, session_id, project_id, tool, model, machine)\n            )"
+   "sql": "CREATE TABLE usage_buckets (\n              hour           INTEGER NOT NULL,\n              session_id     TEXT NOT NULL,\n              project_id     TEXT NOT NULL DEFAULT '',\n              tool           TEXT NOT NULL,\n              model          TEXT NOT NULL DEFAULT '',\n              machine        TEXT NOT NULL DEFAULT '',\n              requests       INTEGER NOT NULL DEFAULT 0,\n              input          INTEGER NOT NULL DEFAULT 0,\n              cache_read     INTEGER NOT NULL DEFAULT 0,\n              cache_write    INTEGER NOT NULL DEFAULT 0,\n              cache_write_5m INTEGER NOT NULL DEFAULT 0,\n              cache_write_1h INTEGER NOT NULL DEFAULT 0,\n              output         INTEGER NOT NULL DEFAULT 0,\n              rebuilds       INTEGER NOT NULL DEFAULT 0,\n              causes         TEXT NOT NULL DEFAULT '{}', rebuild_tokens INTEGER NOT NULL DEFAULT 0,\n              PRIMARY KEY (hour, session_id, project_id, tool, model, machine)\n            )"
   },
   {
    "type": "table",

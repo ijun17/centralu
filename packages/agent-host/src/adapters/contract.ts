@@ -271,6 +271,14 @@ export interface SessionHandle {
    */
   send(text: string, opts?: { origin?: InputOrigin; id?: string; quiet?: boolean }): void
   /**
+   * A note for the model that never starts a turn and never interrupts one (#1492): Claude takes it as quiet input, read with
+   * the next message or at the running turn's next tool round; Codex steers it into the regular turn that is running
+   * (`turn/steer`, which names the turn and is refused for one that has ended). Says whether the tool took it: false when Codex has
+   * no turn it can steer (none running, or a compact or review one) or refuses the steer, where a send would start a turn. A tool
+   * that only knows later (Codex) answers with a promise. Absent: the tool takes no such note.
+   */
+  nudge?(text: string): boolean | Promise<boolean>
+  /**
    * Which of the inputs given an `id` the turn that just ended took in (#1377), read while the event that ends it is
    * handled. Absent: the tool takes every message into the turn it is running (Codex steers an active turn). Present:
    * a message sent mid-turn may instead run as a turn of its own after (Claude folds one in only at a tool round);
@@ -351,8 +359,18 @@ export interface SessionHandle {
   detach?(): Promise<void>
 }
 
+/** Whose price ratios between uncached input, a cache read and a cache write the tool's model is billed by (`sessions/cache-cost.ts`, #1492) */
+export type CacheBilling = 'anthropic' | 'openai'
+
 export interface AgentAdapter {
   readonly tool: ToolName
+  /** Absent: Anthropic's, the ratios the cache figures were first drawn with */
+  readonly cacheBilling?: CacheBilling
+  /**
+   * The tool says the context size itself with every request's token count (Codex's `thread/tokenUsage/updated`), so the figure
+   * needs no estimate from the request during a turn (`ContextMeter`). Absent: it reads it once at a turn's end (Claude).
+   */
+  readonly contextAtRequest?: boolean
   /** Whether a live session takes a `quiet` input (see `SessionHandle.send`): the mailbox sends mail that must not wake only to such a tool */
   readonly quietInput?: boolean
   readonly capabilities: AdapterCapabilities

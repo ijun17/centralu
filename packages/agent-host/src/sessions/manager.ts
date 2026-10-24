@@ -33,6 +33,7 @@ import { HandoffNotes, type HandoffNotesHost } from './handoff-notes.js'
 import { SessionStarts, freshStartKey, type SessionStartsHost } from './session-start.js'
 import { SessionEvents, type SessionEventsHost } from './session-events.js'
 import { SelfCompaction } from './self-compaction.js'
+import { ContextNudges } from './context-nudges.js'
 import { ToolRegistry, type ToolRegistryHost } from './tool-registry.js'
 import { ApprovalRules } from './approval-rules.js'
 import { ProjectRegistry, type ProjectRegistryHost } from './project-registry.js'
@@ -181,7 +182,7 @@ export class SessionManager {
     { model: string | null; effort: string | null; verbosity: string | null; serviceTier: string | null; permissionPreset: PermissionPreset }
   >()
   /** Every model request's cache figures over the last day, per tool (docs/agent-host.md §6.1); read by `usageFor` */
-  private readonly cacheLedger = new CacheLedger()
+  private readonly cacheLedger = new CacheLedger(Date.now(), (tool) => this.adapters.get(tool)?.cacheBilling ?? 'anthropic')
   /** The same requests summed per hour and kept, with the limit windows' readings (docs/agent-host.md §6.2) */
   private readonly usageRecorder: UsageRecorder
   /** Each model's context window as the tools reported it, for where agents compact (#1376, auto-compact.ts) */
@@ -244,6 +245,8 @@ export class SessionManager {
   private readonly updatesAsked: UpdatesAsked
   /** Compacting at a turn's end: the agent's `compact_self` and a session at rest over the lower share (#1451, self-compaction.ts) */
   private readonly selfCompaction: SelfCompaction
+  /** The quiet notices that tell a growing session to call `compact_self` (#1492, context-nudges.ts) */
+  private readonly contextNudges: ContextNudges
   /** Whether a session of one project may reach another, and the consents remembered for it (project-consents.ts) */
   private readonly consents: ProjectConsents
   /** The screen's preferences and workspace layout (ui-preferences.ts) */
@@ -421,6 +424,18 @@ export class SessionManager {
       setting: () => autoCompactOf(this.uiPreferences()),
       command: (tool, focus) => this.adapters.get(tool)?.compactCommand?.(focus) ?? '/compact',
       send: (id, text) => this.events.sendCompact(id, text),
+      notice: (id, text) => this.onEvent({ type: 'notice', sessionId: id, level: 'info', from: 'Centralu', label: 'compaction', text }),
+    })
+    this.contextNudges = new ContextNudges({
+      session: (id) => this.meta.get(id),
+      window: (m) => this.modelWindows.of(m),
+      setting: () => autoCompactOf(this.uiPreferences()),
+      // The two seats that have the tool (tool-seats.ts): an ordinary session and the orchestrator
+      hasCompactTool: (id) => {
+        const profile = this.toolProfileOf(id)
+        return profile === 'reader' || profile === 'orchestrator'
+      },
+      nudge: (id, text) => this.handles.get(id)?.nudge?.(text) ?? false,
       notice: (id, text) => this.onEvent({ type: 'notice', sessionId: id, level: 'info', from: 'Centralu', label: 'compaction', text }),
     })
     this.orchestratorSlot = new OrchestratorSlot(this.parts())
@@ -886,6 +901,7 @@ export class SessionManager {
 
   stopSelfCompaction(): void {
     this.selfCompaction.stop()
+    this.contextNudges.stop()
   }
 
   /** Starts compacting the sessions at rest over the lower share (#1451); the shutdown plan stops it before the sessions are let go of */
@@ -2033,6 +2049,11 @@ export class SessionManager {
         } catch (err) {
           console.error(`[compact] ${e.sessionId?.slice(0, 8) ?? '?'}: ${errorMessage(err)}`)
         }
+        try {
+          self.contextNudges.observe(e)
+        } catch (err) {
+          console.error(`[compact] ${e.sessionId?.slice(0, 8) ?? '?'}: ${errorMessage(err)}`)
+        }
       },
       listAgents: (...a) => self.delegationFlow.listAgents(...a),
       get agentRuns() {
@@ -2091,6 +2112,10 @@ export class SessionManager {
       joinsRunningTurn: (sessionId) => {
         const tool = self.meta.get(sessionId)?.tool
         return tool !== undefined && self.adapters.get(tool)?.capabilities.midTurnInput === true
+      },
+      contextAtRequest: (sessionId) => {
+        const tool = self.meta.get(sessionId)?.tool
+        return tool !== undefined && self.adapters.get(tool)?.contextAtRequest === true
       },
       get children() {
         return self.children
@@ -2737,6 +2762,7 @@ export class SessionManager {
   async disposeAll(): Promise<void> {
     this.usageRecorder.stop()
     this.selfCompaction.stop()
+    this.contextNudges.stop()
     this.sweepingHandles = true
     try {
       await this.disposeEverything()
@@ -2782,6 +2808,7 @@ export class SessionManager {
     this.usageRecorder.stop()
     // A compact now would reach a process the next host is meant to take over, as a sleep would (#568)
     this.selfCompaction.stop()
+    this.contextNudges.stop()
     // The kept turns go on under the next host, which owes their reports (#646); failing the waits here must not report
     this.handingOver = true
     this.leaveHost('Centralu is restarting')

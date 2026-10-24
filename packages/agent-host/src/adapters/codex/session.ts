@@ -63,6 +63,8 @@ export class CodexSession implements SessionHandle {
   private inputGroups = new Map<string, InputReceipt[]>()
   /** An unsteerable turn (compact/review) is running — we know because we are the ones who started it */
   private blockingTurn = false
+  /** The unsteerable turn is a compaction we started (`/compact`), not a review: a compaction event in it is manual */
+  private compactTurn = false
   /** Messages sent while the thread was still coming up, and those a Stop reclaimed (see `WakingSends`, #168) */
   private readonly sends = new WakingSends()
   /** Codex is reconnecting on its own (#168): the `retrying` activity and what it puts back (see `RetryActivity`) */
@@ -110,8 +112,9 @@ export class CodexSession implements SessionHandle {
       emit: (e) => this.emit(e),
       request: (method, params) => this.client.request(method, params),
       threadId: () => this.threadId,
-      setBlockingTurn: (on) => {
+      setBlockingTurn: (on, compact) => {
         this.blockingTurn = on
+        this.compactTurn = on && compact === true
       },
       flushPending: () => this.flushPending(),
     })
@@ -365,6 +368,7 @@ export class CodexSession implements SessionHandle {
     // Where compact/review ends — if messages piled up during it, they go out now
     if (n.method === 'turn/completed' && this.blockingTurn) {
       this.blockingTurn = false
+      this.compactTurn = false
       this.flushPending()
     }
     if (n.method === 'thread/settings/updated') {
@@ -389,7 +393,13 @@ export class CodexSession implements SessionHandle {
 
   /** A notification of this thread's own, as the events it maps to (`normalizeNotification`), each the way it goes out */
   private emitNotification(n: { method: string; params?: unknown }): void {
-    for (const e of normalizeNotification(this.sessionId, n)) {
+    for (const said of normalizeNotification(this.sessionId, n)) {
+      /*
+       * Codex does not say why it compacted. A compaction inside the compact turn this session started (`/compact`, Centralu's
+       * own compaction or the person's) is manual; any other is the tool's own, in the middle of a turn (#1500): the host does not
+       * take it for a compaction it asked for
+       */
+      const e = said.type === 'compaction' ? { ...said, trigger: this.compactTurn ? ('manual' as const) : ('auto' as const) } : said
       if (e.type === 'error' && this.inputReceipts.size) this.interrupt(new Error(e.error.message))
       /*
        * An image that arrived carrying only a path gets its bytes filled in here (#40). normalize
@@ -407,7 +417,13 @@ export class CodexSession implements SessionHandle {
       if (e.type === 'usage_update') {
         const request = this.requests.take(n.params)
         if (request) {
-          this.emit({ ...e, request })
+          /*
+           * Codex's token count does not say which model served it, and a session on the tool's default has none recorded: the
+           * price ratios of the cache (`cache-cost.ts`) and the usage history need the one the thread runs (#1504 review).
+           * What the turns ask for first, else what the thread answered when it opened
+           */
+          const model = this.shown?.model ?? this.opts.model ?? this.threadSettings?.model ?? null
+          this.emit({ ...e, request: model ? { ...request, model } : request })
           continue
         }
       }
@@ -441,6 +457,23 @@ export class CodexSession implements SessionHandle {
   }
 
   send(text: string): void { this.sendInput(text) }
+
+  /**
+   * A note steered into the regular turn that is running, starting nothing (#1492). `turn/start` would do it only while a turn is
+   * running: with none, it starts a turn of its own (Codex sends a request's token count just before `turn/completed`, so a note for
+   * the last request of a turn went out after the turn had ended and ran as a turn nobody asked for, #1504 review), and behind a
+   * compact or review turn it queues the note and runs it as a turn. `turn/steer` names the turn it is for (`expectedTurnId`) and
+   * is refused by Codex when that turn is not the one running, so a note for a turn that has ended starts nothing. The answer says
+   * whether it was taken: a refused note is not told, and waits for a later request of a running turn (`ContextNudges`).
+   */
+  nudge(text: string): boolean | Promise<boolean> {
+    const turnId = this.turns.turnId
+    if (this.closed || !this.started || !this.threadId || turnId === null || this.blockingTurn || this.pendingInputs.length > 0) return false
+    return this.client.request('turn/steer', { threadId: this.threadId, input: [{ type: 'text', text }], expectedTurnId: turnId }).then(
+      () => true,
+      () => false,
+    )
+  }
 
   private sendInput(text: string, receipt?: InputReceipt): void {
     const nth = this.sends.issue()

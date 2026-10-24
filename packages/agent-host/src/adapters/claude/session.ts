@@ -471,6 +471,13 @@ export class ClaudeSession implements SessionHandle {
     this.sendInput(text, opts?.id !== undefined && isUuid(opts.id) ? opts.id : randomUUID(), undefined, opts?.origin, opts?.quiet)
   }
 
+  /** A note read with the next message or at the running turn's next tool round, starting nothing (#1492): quiet input, stamped as Centralu's */
+  nudge(text: string): boolean {
+    if (this.closed) return false
+    this.send(text, { origin: { kind: 'channel', server: 'centralu' }, quiet: true })
+    return true
+  }
+
   /** The inputs the result being handled names (#1377); null when the CLI cannot name them, and outside a result */
   private resultInputs: readonly string[] | null = null
   turnInputs(): readonly string[] | null {
