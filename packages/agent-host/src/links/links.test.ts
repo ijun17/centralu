@@ -1413,6 +1413,7 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
   const NODE = '24.21.0'
   const classifyUpdate = (cmd: string): string => {
     if (cmd.includes('serve --stop')) return 'stop'
+    if (cmd.includes('serve --autostart')) return 'autostart'
     const b64 = /^printf %s (\S+) \|/.exec(cmd)?.[1]
     const script = b64 ? Buffer.from(b64, 'base64').toString('utf8') : ''
     if (script.includes('CENTRALU-PREFLIGHT')) return 'preflight'
@@ -1424,7 +1425,7 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
   }
 
   /** A hub with a remote whose sessions are in a turn (`activity`, changed by the test), recording what ran there */
-  async function waiting(o: { noActivity?: boolean; script?: (Partial<HostActivity> | 'fail')[]; fails?: boolean; deps?: Partial<LinkDeps>; old?: string } = {}) {
+  async function waiting(o: { noActivity?: boolean; script?: (Partial<HostActivity> | 'fail')[]; fails?: boolean; deps?: Partial<LinkDeps>; old?: string; gate?: Promise<void> } = {}) {
     /** The version the machine runs before the update */
     const was = o.old ?? '0.0.1'
     const reg = await fakeRegistry(['centralu', '@centralu/linux-x64'].map((name) => ({ name, version: APP_VERSION, files: { 'package.json': '{}' } })))
@@ -1450,6 +1451,7 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
       const kind = classifyUpdate(cmd)
       runs.push(kind)
       const out = (stdout: string) => ({ code: 0, stderr: '', stdout })
+      if (kind === 'autostart' && o.gate) await o.gate
       switch (kind) {
         case 'preflight':
           return out('CENTRALU-PREFLIGHT os=Linux arch=x86_64 glibc=2.39 musl=0 freeKb=99999999 tar=1 gzip=1 fetch=curl sha=sha256sum\n')
@@ -1640,13 +1642,15 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
 
     it('starts an idle update by itself once it finds the machine older, waits for the turns there, then switches', async () => {
       const a = auto()
-      const { hub, ran, idle, stepsSeen } = await waiting({ deps: a.deps, old: a.old })
+      const { hub, ran, idle, stepsSeen, activity } = await waiting({ deps: a.deps, old: a.old })
       expect(hub.links.followsHub('m1')).toBe(true)
       await eventually(() => stepsSeen().includes('wait_idle'))
       await new Promise((r) => setTimeout(r, 200))
       // Sessions are in a turn there: nothing was stopped
       expect(ran()).toEqual(['preflight', 'node', 'install_beside'])
       idle()
+      // Nothing it would stop is open there either: no turn, no terminal, no command (#1508 review)
+      Object.assign(activity, { terminals: 0, commandRuns: 0 })
       await eventually(() => ran().includes('prune'))
       expect(ran()).toEqual(['preflight', 'node', 'install_beside', 'stop', 'pointers', 'start', 'prune'])
       await eventually(() => hub.links.list()[0]!.versions?.remote.version === APP_VERSION && status(hub) === 'connected')
@@ -1669,8 +1673,9 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
 
     it('starts when automatic updates go on, for a machine already connected', async () => {
       const a = auto(false)
-      const { hub, ran, idle } = await waiting({ deps: a.deps, old: a.old })
+      const { hub, ran, idle, activity } = await waiting({ deps: a.deps, old: a.old })
       idle()
+      Object.assign(activity, { terminals: 0, commandRuns: 0 })
       a.state.on = true
       hub.links.followHub()
       await eventually(() => ran().includes('prune'))
@@ -1687,16 +1692,65 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
       expect(hub.links.list()[0]!.operation).toBeNull()
     })
 
-    it('never stops a host it cannot ask what runs; it tries once more later, then leaves it to the person', async () => {
+    it('never stops a host it cannot ask what runs, nor installs there; it tries once more later, then leaves it to the person', async () => {
       const a = auto()
       const { hub, ran } = await waiting({ noActivity: true, deps: a.deps, old: a.old })
       await eventually(() => hub.links.list()[0]!.followHub?.retryAt != null)
       expect(hub.links.list()[0]!.followHub?.failed).toMatch(/cannot tell what runs on Remote box, so it does not update it by itself/)
       // The retry, after `followRetryMs`; then no more for this version
-      await eventually(() => ran().filter((k) => k === 'install_beside').length === 2 && hub.links.list()[0]!.followHub?.retryAt === null)
+      await eventually(() => hub.links.list()[0]!.followHub?.retryAt === null)
       await new Promise((r) => setTimeout(r, 400))
-      expect(ran().filter((k) => k === 'install_beside')).toHaveLength(2)
+      // Found out before anything was installed there (#1508 review)
+      expect(ran()).toEqual([])
+      // Spent for this version: an agent's update asks again (#1508 review)
+      expect(hub.links.followsHub('m1')).toBe(false)
+    })
+
+    // #1508 review: the person's Update stops terminals and commands knowingly; one nobody approved waits for them, bounded
+    it('waits for terminals and commands there too, then gives up without closing any, and is spent after its retry', async () => {
+      const a = auto()
+      const { hub, ran, idle, activity } = await waiting({ deps: { ...a.deps, openWorkWaitMs: 200 }, old: a.old })
+      idle()
+      Object.assign(activity, { terminals: 2, commandRuns: 1 })
+      await eventually(() => hub.links.list()[0]!.followHub?.retryAt != null)
+      expect(hub.links.list()[0]!.followHub?.failed).toMatch(/Terminals or project commands stayed open on Remote box/)
+      await eventually(() => ran().filter((k) => k === 'install_beside').length === 2 && hub.links.list()[0]!.operation === null && hub.links.list()[0]!.followHub?.retryAt === null)
       expect(ran()).not.toContain('stop')
+      expect(hub.links.followsHub('m1')).toBe(false)
+      // Two failures spent it: a reconnect starts nothing
+      hub.links.reconnect('m1')
+      await eventually(() => status(hub) === 'connected')
+      await new Promise((r) => setTimeout(r, 300))
+      expect(ran().filter((k) => k === 'install_beside')).toHaveLength(2)
+    })
+
+    it('starts nothing at a reconnect while its retry waits for its time', async () => {
+      const a = auto()
+      const { hub, ran, idle, activity } = await waiting({ deps: { ...a.deps, followRetryMs: 60_000, openWorkWaitMs: 100 }, old: a.old })
+      idle()
+      Object.assign(activity, { terminals: 1 })
+      await eventually(() => hub.links.list()[0]!.followHub?.retryAt != null)
+      expect(ran().filter((k) => k === 'install_beside')).toHaveLength(1)
+      hub.links.reconnect('m1')
+      await eventually(() => status(hub) === 'connected')
+      await new Promise((r) => setTimeout(r, 300))
+      expect(ran().filter((k) => k === 'install_beside')).toHaveLength(1)
+    })
+
+    it('runs a retry that came due while another operation held the machine, once that one ends', async () => {
+      let release!: () => void
+      const gate = new Promise<void>((r) => (release = r))
+      const a = auto()
+      const { hub } = await waiting({ noActivity: true, deps: { ...a.deps, followRetryMs: 100 }, old: a.old, gate })
+      await eventually(() => hub.links.list()[0]!.followHub?.retryAt != null)
+      // Start at boot holds the machine past the retry's time
+      const autostart = hub.links.autostart('m1', true).catch(() => undefined)
+      await new Promise((r) => setTimeout(r, 300))
+      expect(hub.links.list()[0]!.followHub?.retryAt).not.toBeNull()
+      release()
+      await autostart
+      // The retry ran once the machine was free: its failure says there are no more tries
+      await eventually(() => hub.links.list()[0]!.followHub?.retryAt === null)
     })
 
     // An agent's machines.update that went without a card (method-rights.ts) is held to what the hub's own catch-up is held to
@@ -1719,6 +1773,8 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
       await eventually(() => hub.links.list()[0]!.operation === null)
       await new Promise((r) => setTimeout(r, 400))
       expect(ran().filter((k) => k === 'install_beside')).toHaveLength(1)
+      // Nor restarted by an agent without a card (#1508 review)
+      expect(hub.links.followsHub('m1')).toBe(false)
       // The person's own choice: the row shows no failure for it
       expect(hub.links.list()[0]!.followHub ?? null).toBeNull()
     })

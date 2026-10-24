@@ -3368,12 +3368,15 @@ the person did not remove what the hub installed there, neither side runs a loca
   reaches its machines, since the next host links again and finds them older. And when the person turns automatic
   updates on (`updates.setAutoApply`, `Links.followHub`), for the machines already connected.
 - **What.** The same update as `machines.update { when: 'idle' }`, marked `unasked`: it waits for the turns there as
-  above, and on top of that it stops no host it cannot ask what runs (a Centralu from before `host.activity`, or one
-  whose every reading failed): the update fails before the hold, nothing switched, and the row says to update from
-  Settings. It also fails before the hold once automatic updates go off or the hub begins a swap while it waits. A swap
+  above, and also for terminals and project commands there, which the person's Update stops knowingly and it must not
+  (`OPEN_WORK_WAIT_MS`: once only they are left for 30 minutes it gives up, nothing switched). It stops no host it cannot
+  ask what runs (a Centralu from before `host.activity`, or one whose reading fails): that is read before anything is
+  installed, and the update fails, nothing switched, the row saying to update from Settings. It also fails before the hold once automatic updates go off or the hub begins a swap while it waits. A swap
   that comes after the hold finds it as it finds the person's update (§4.7).
 - **How often.** Once per version of the hub's, and once more 10 minutes after a failure (`FOLLOW_RETRY_MS`); never
-  again for that version after the person cancels its wait (which shows no failure). A retry whose time comes while the
+  again for that version after the person cancels its wait (which shows no failure). A spent version (cancelled, or both
+  tries failed) makes `followsHub` false, so an agent cannot start it again without a card. A limited caller's
+  `machines.cancelUpdate` (everyday) can end it too, until the hub's next version. A retry whose time comes while the
   machine is busy or away runs when that ends or at the next connect. A failure shows on the row as `MachineInfo.followHub`
   (`{ version, failed, retryAt }`, additive and optional) while the machine is still behind, and its steps show as any
   update's do.

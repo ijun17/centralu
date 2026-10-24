@@ -1176,7 +1176,12 @@ on, `when` is `idle` or absent, and the machine runs an older release of the hub
 hub's own version (#1508, owner 2026-10-24; `LinkedMachine.followsHub`, the one place the condition lives, which the
 orchestrator's `install_machine` reads too). The person already chose that with "Automatic updates", which brings the
 hub itself to that version unasked, and the hub runs the same update by itself (agent-host.md §4.8). Such an update
-waits for the turns there, stops no host it cannot ask what runs, and gives up once automatic updates go off. `now`,
+waits for the turns there and for its terminals and project commands (it closes none of them; after 30 minutes it gives
+up), stops no host it cannot ask what runs (found out before anything is installed), and gives up once automatic updates
+go off. Once spent for a version (the person cancelled it, or its two tries failed) `followsHub` is false, so an agent's
+update of that machine asks again. `machines.cancelUpdate` stays everyday: a limited caller can end the hub's own
+catch-up of a machine while it waits, and that stops it until the hub's next version (the person's Update still works).
+Stopping an update is what the person's Cancel does and changes nothing there, so it is not held back. `now`,
 `machines.rollback`, `machines.uninstall`, `machines.install` and `machines.acceptVersions` still ask. The rule for `asks`: it deletes beyond what the trash brings back, moves out of reach what the trash does not fully
 restore, widens what agents, apps or machines may do without the person, or brings in code that later runs unasked;
 and everything the orchestrator's tools card in every preset is `asks` too. A test reads the orchestrator's flows

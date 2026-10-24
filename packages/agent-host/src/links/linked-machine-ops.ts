@@ -24,6 +24,11 @@ const ACTIVITY_POLL_MS = 15_000
 const ACTIVITY_SETTLE_MS = 3_000
 /** How many times a reading that failed is repeated before the update stops waiting for what it cannot see (#1399) */
 const ACTIVITY_UNREAD_RETRIES = 2
+/**
+ * How long an update nobody approved waits for terminals and project commands there to close once no session is in a turn
+ * (#1508 review): it stops none of them, and they can stay open for hours, so it gives up and leaves the update to its retry
+ */
+const OPEN_WORK_WAIT_MS = 30 * 60_000
 /** How long after a failed update of its own the hub tries once more (#1508) */
 const FOLLOW_RETRY_MS = 10 * 60_000
 /** How many updates of its own the hub runs for one version of its own: the first, and one retry (#1508) */
@@ -105,6 +110,8 @@ export class LinkedMachine extends LinkedMachineConnection {
    * call that went without a card (`followsHub`). It stops nothing it cannot see and gives up when automatic updates go off
    */
   async update(opts: { when?: 'idle' | 'now'; unasked?: boolean } = {}): Promise<MachineInstallResult> {
+    // An update nobody approved stops no host it cannot ask what runs: found out before anything is installed (#1508 review)
+    if (opts.unasked === true && (await this.readActivity()).activity === null) throw linkError(this.blindSentence())
     const pick = await this.versionToInstall()
     // Never down: a local build whose base is unpublished may be handed an older release than the remote runs. A dev
     // build put there from a commit (`<base>.local.N`, `pnpm remote-dev`, #1036) going back to its own release is no downgrade
@@ -201,32 +208,44 @@ export class LinkedMachine extends LinkedMachineConnection {
       }
       const unread = () => show('wait_unread', 'what runs there cannot be read now; the update keeps waiting, since the sessions there may be in a turn (Cancel ends it)')
       const busy = (n: number) => show('wait_idle', `the update waits for ${n} ${n === 1 ? 'session' : 'sessions'} in a turn`)
+      /*
+       * An update nobody approved also waits for terminals and project commands there (#1508 review): the person's Update stops them
+       * knowingly, the hub's own catch-up must not. Bounded, since they stay open for hours: it gives up, nothing switched
+       */
+      const open = (a: HostActivity) => (unasked ? a.terminals + a.commandRuns : 0)
+      const holding = (a: HostActivity) => turnsRunning(a) + open(a)
+      let openSince: number | null = null
+      const openLimit = this.deps.openWorkWaitMs ?? OPEN_WORK_WAIT_MS
       for (;;) {
         const r = await read()
         if (r.activity) {
           seen = true
           blind = 0
-          const running = turnsRunning(r.activity)
+          if (turnsRunning(r.activity) === 0 && open(r.activity) > 0) {
+            openSince ??= Date.now()
+            if (Date.now() - openSince >= openLimit) {
+              throw new Error(
+                `Terminals or project commands stayed open on ${this.name}, and an update this computer starts by itself closes none of them; nothing was switched`,
+              )
+            }
+          } else openSince = null
+          const running = holding(r.activity)
           if (running === 0) {
             await pause(settle, wait.signal)
             const again = await read()
             // Only a reading that succeeded and shows nobody in a turn lets the host be stopped: a failed one proves nothing
-            if (again.activity && turnsRunning(again.activity) === 0) {
+            if (again.activity && holding(again.activity) === 0) {
               if (shown) c.step('stop')
               return null
             }
-            if (again.activity) busy(turnsRunning(again.activity))
+            if (again.activity) busy(holding(again.activity))
             else unread()
           } else busy(running)
         } else if (seen) {
           unread()
         } else if (r.cannot || ++blind > ACTIVITY_UNREAD_RETRIES) {
           // Never read: there is nothing to wait for that could be seen, and waiting on it would never end
-          if (unasked) {
-            throw new Error(
-              `This computer cannot tell what runs on ${this.name}, so it does not update it by itself and stops no session there; nothing was switched. Update it from Settings, Machines`,
-            )
-          }
+          if (unasked) throw new Error(this.blindSentence())
           this.deps.log?.(`[links] ${this.name}: it cannot be told what runs there, so the update does not wait for it`)
           return null
         }
@@ -235,6 +254,11 @@ export class LinkedMachine extends LinkedMachineConnection {
     } finally {
       if (this.idleWait === wait) this.idleWait = null
     }
+  }
+
+  /** Why an update nobody approved does not run on a machine that cannot say what runs there (#1508) */
+  private blindSentence(): string {
+    return `This computer cannot tell what runs on ${this.name}, so it does not update it by itself and stops no session there; nothing was switched. Update it from Settings, Machines`
   }
 
   // ── Following the hub's version (#1508) ─────────────────────────────────────────────────────
@@ -260,6 +284,9 @@ export class LinkedMachine extends LinkedMachineConnection {
     const v = this.versions
     const hub = this.deps.hub.version
     if (!v || v.hub.version !== hub || isLocalBuildVersion(hub) || isLocalBuildVersion(v.remote.version)) return false
+    // Spent for this version: the person cancelled it, or both tries failed. Nobody restarts it without a card (#1508 review)
+    const f = this.follow
+    if (f?.version === hub && (f.cancelled === true || f.tries >= FOLLOW_TRIES)) return false
     return v.older === 'remote'
   }
 
