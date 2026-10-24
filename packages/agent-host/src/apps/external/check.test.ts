@@ -110,6 +110,55 @@ describe('a broken app states what is wrong and where', () => {
     expect(r.text).toContain('save — no readOnlyHint, model+app')
   })
 
+  it('a declared risk the host would ignore is said, a honoured one is not', async () => {
+    const tool = (name: string, ann: string, risk: string) =>
+      `centralu.tool(server, '${name}', { description: 'D', annotations: { ${ann} }, _meta: { 'centralu/risk': '${risk}' } }, async () => ({ content: [] }))`
+    app(
+      'risk',
+      serverWith(
+        [
+          tool('fine', 'readOnlyHint: false, destructiveHint: false', 'local'),
+          tool('silent', 'readOnlyHint: false', 'local'),
+          tool('typo', 'readOnlyHint: false', 'routin'),
+          tool('reads', 'readOnlyHint: true', 'routine'),
+        ].join(';'),
+      ),
+    )
+    const r = await make().check(ref('risk'))
+    const said = r.text.split(String.fromCharCode(10)).filter((l) => l.includes('centralu/risk'))
+    expect(said).toHaveLength(3)
+    const all = said.join(' ')
+    expect(all).toContain('[tool silent]')
+    expect(all).toContain('[tool typo]')
+    expect(all).toContain('[tool reads]')
+    expect(all).not.toContain('[tool fine]')
+  })
+
+  it('an askWhen or askUnless the host cannot read, or would not look at, is said: the tool asks either way', async () => {
+    const tool = (name: string, risk: string, meta: string) =>
+      `centralu.tool(server, '${name}', { description: 'D', annotations: { readOnlyHint: false, destructiveHint: false }, _meta: { 'centralu/risk': '${risk}', ${meta} } }, async () => ({ content: [] }))`
+    app(
+      'ask',
+      serverWith(
+        [
+          tool('fine', 'routine', "'centralu/askWhen': { push: true, path: '*' }, 'centralu/askUnless': { skipPrePr: '*' }"),
+          tool('notobject', 'routine', "'centralu/askWhen': 'push'"),
+          // A value that is a list or an object never equals an argument, so the tool would never ask: not a licence
+          tool('listvalue', 'routine', "'centralu/askWhen': { push: [true] }"),
+          tool('objectvalue', 'routine', "'centralu/askUnless': { skipPrePr: { is: 'set' } }"),
+          tool('localtool', 'local', "'centralu/askWhen': { push: true }"),
+        ].join(';'),
+      ),
+    )
+    const said = (await make().check(ref('ask'))).text.split(String.fromCharCode(10)).filter((l) => l.includes('centralu/ask'))
+    expect(said).toHaveLength(4)
+    const of = (name: string) => said.filter((l) => l.includes(`[tool ${name}]`)).join(' ')
+    expect(of('fine')).toBe('')
+    for (const name of ['notobject', 'listvalue', 'objectvalue']) expect(of(name), name).toContain('the host cannot read it, so the tool always asks')
+    expect(of('objectvalue')).toContain('askUnless')
+    expect(of('localtool')).toContain('does nothing here')
+  })
+
   it('home has no screen / home is closed to the screen / home is not in the tool list', async () => {
     app('nohome-ui', serverWith('', `centralu.tool(server, 'show', { description: 'Show', annotations: { readOnlyHint: true } }, async () => ({ content: [] }))`))
     app('hidden-home', serverWith('', `centralu.tool(server, 'show', { description: 'Show', annotations: { readOnlyHint: true }, _meta: { ui: { resourceUri: 'ui://x/index.html', visibility: ['model'] } } }, async () => ({ content: [] }))`))
