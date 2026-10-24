@@ -40,13 +40,10 @@ describe('who may write to whom (§9.1)', () => {
     expect(may(OTHER, PERSON)).toBeNull()
   })
 
-  it('and to nobody else: another session or a sibling', () => {
+  it('and to nobody else but the orchestrator, which any session may ask, a new thread too (§9.7, #1447): a stranger, a child, a coordinator', () => {
     expect(may(OTHER, CHILD)).toMatch(/orchestrator is the way/)
     expect(may(CHILD, OTHER)).toMatch(/orchestrator is the way/)
     expect(may(CHILD, a('child2'))).toMatch(/gone/)
-  })
-
-  it('any session may ask the orchestrator, a new thread too (§9.7, #1447): a stranger, a child, a coordinator', () => {
     expect(may(OTHER, ORCH)).toBeNull()
     expect(may(CHILD, ORCH)).toBeNull()
     expect(may(COORD, ORCH)).toBeNull()

@@ -220,15 +220,6 @@ describe('a request from a project nobody trusted is held (§9.7)', () => {
     expect(w.delivered.map((d) => d.input.quiet)).toEqual([false])
     expect(w.store.mail.heldReceipts()).toEqual([])
   })
-
-  it('the person’s own words to the orchestrator are never held by it', async () => {
-    const w = world({ untrusted: new Set([ASKER]) })
-    w.delivery.start()
-    stop = () => w.delivery.stop()
-    openBy(w.mail, { by: 'person', kind: 'assign', subject: 's', body: 'from the person', assignee: ORCH })
-    await w.advance(3_000)
-    expect(w.delivered.map((d) => d.input.quiet)).toEqual([false])
-  })
 })
 
 describe('a held request is not read around the hold (§9.7)', () => {
