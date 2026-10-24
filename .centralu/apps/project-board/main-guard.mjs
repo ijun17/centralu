@@ -11,7 +11,7 @@
 // Decisions are pure functions here; `guardTick` reads GitHub and the checkout for them and keeps its
 // state in the queue file (`q.guard`), so it carries on in whichever driver holds the lease, and after
 // either restarts. It runs in the same ticks as the queue, at most once per GUARD_MS.
-import { checkRunNotes, createBranch, deleteBranch, dispatchWorkflow, GitHubError, FATAL, readJobLog, readRepo, rerunRun, runJobSteps, workflowRuns } from './github.mjs'
+import { createBranch, deleteBranch, dispatchWorkflow, GitHubError, FATAL, jobNotes, readJobLog, readRepo, rerunRun, runJobSteps, workflowRuns } from './github.mjs'
 import { failingStepText } from './ci.mjs'
 import { CI, config, QUEUE } from './config.mjs'
 import { fetchRefs, git, GitError, remoteFor, topLevel } from './git.mjs'
@@ -135,7 +135,7 @@ export async function diagnose(repo, run, { failingLine, flaky = QUEUE.flakyJobs
   // failed: CI cancels the rest of a run when `verify` fails (fail fast), and each of those would cost a call to say nothing.
   const cancelled = failed.length ? [] : jobs.filter((j) => j.conclusion === 'cancelled')
   for (const j of [...failed, ...cancelled]) {
-    j.notes = j.id != null ? await checkRunNotes(repo, j.id) : []
+    j.notes = j.id != null ? await jobNotes(repo, j.id) : []
     const step = j.steps.find((s) => s.conclusion === 'failure')
     if (step && /^Run (?:pnpm|npm|yarn) /i.test(step.name) && failingLine && j.id != null) j.log = await failingLine(repo, j)
   }

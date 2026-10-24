@@ -10,6 +10,7 @@ import {
   decideMerge,
   evaluateChecks,
   failingStepText,
+  cleanLog,
   firstFailure,
   failureLineIndex,
   matchKnownFailure,
@@ -340,6 +341,18 @@ describe("a failed job's log", () => {
     expect(firstFailure(bare.map(stamp).join('\n'))).toEqual({ line: null, error: 'Process completed with exit code 1.' })
     // An action that failed before any command ran: its own error
     expect(firstFailure(['##[group]Run actions/checkout@x', '##[error]fatal: could not read Username'].map(stamp).join('\n'))).toEqual({ line: null, error: 'fatal: could not read Username' })
+  })
+
+  // 2026-10-24 (#1507): the runner was shut down under e2e (chromium 1/5) of the release bump; the tests it stopped
+  // under were reported failed after the shutdown line, and the first of them was quoted as the failure
+  it("never names a test the runner's shutdown cut short: the shutdown is the failure", () => {
+    const log = readFileSync(join(REPO_ROOT, 'tooling/fixtures/ci-log-runner-shutdown.txt'), 'utf8')
+    const error = 'The runner has received a shutdown signal. This can happen when the runner service is stopped, or a manually started runner is canceled.'
+    expect(firstFailure(log)).toEqual({ line: null, error })
+    expect(cleanLog(log).join('\n')).not.toContain('archive.spec.ts:281')
+    // A test that failed before the shutdown is still the first failure
+    const before = ['  ✘   3 [app] › e2e/a.spec.ts:5:1 › opens (1.0s)', ...cleanLog(log).slice(-4)].join('\n')
+    expect(firstFailure(before).line).toContain('e2e/a.spec.ts:5:1')
   })
 
   it('gives every line of the step that failed first, warnings included, and nothing of the steps after it', () => {

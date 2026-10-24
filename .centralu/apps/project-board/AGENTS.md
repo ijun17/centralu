@@ -292,7 +292,11 @@ the batch as `failures`), and `decideRun` decides from it, for an item's head an
 - **Infrastructure** (rerun once per head): a run or job cancelled with no failed job; a job that hit
   its timeout (conclusion `timed_out`, or GitHub's "has exceeded the maximum execution time of N
   minutes" / "The action '…' has timed out after N minutes"; a test's own "timed out in 5000ms" is a
-  test failure); a lost runner ("lost communication with the server", "received a shutdown signal");
+  test failure); a lost runner ("lost communication with the server", "received a shutdown signal"; a shutdown
+  leaves no such note on the job, only "The operation was canceled." and a failed step, so for a job with that
+  note alone `jobNotes` reads the log for the line `##[error]The runner has received a shutdown signal`, #1507;
+  `cleanLog` ends a log at that line, so a test the shutdown cut short is never quoted as the first failure, and
+  the main guard reruns such a job once and reports a second time, never hunting or reverting);
   a job whose first failed step set it up (cause `setup`, #1435: checkout, pnpm and Node setup, the
   browser and system-library installs, a cache; the main guard reads main's runs the same way, below);
   a failed job on `project.json` `queue.flakyJobs` (exact names, `*` for any characters). A real

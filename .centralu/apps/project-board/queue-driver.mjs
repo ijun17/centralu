@@ -35,7 +35,7 @@ import {
   readWorkflowChecks,
   rerunRun,
   runJobSteps,
-  checkRunNotes,
+  jobNotes,
   sameRepo,
   setPrBase,
 } from './github.mjs'
@@ -269,7 +269,7 @@ export async function runFailures(repo, runs, known = {}) {
       continue
     }
     const jobs = await runJobSteps(repo, run.id)
-    for (const j of jobs) j.notes = j.conclusion && !OK_RUN.has(j.conclusion) && j.id != null ? await checkRunNotes(repo, j.id) : []
+    for (const j of jobs) j.notes = j.conclusion && !OK_RUN.has(j.conclusion) && j.id != null ? await jobNotes(repo, j.id) : []
     out[run.id] = classifyRun(run, jobs, { flaky: QUEUE.flakyJobs })
   }
   return out

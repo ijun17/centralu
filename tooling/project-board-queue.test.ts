@@ -1417,6 +1417,39 @@ describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, (
     expect(writes().map((w) => w[0])).toEqual(['rerun-failed', 'merge', 'delete'])
   })
 
+  // 2026-10-24 (#1507, run 40063018693, job 120780406901): the runner was shut down under e2e (chromium 1/5) of the release
+  // bump. GitHub's only note on the job is "The operation was canceled."; its step says failure; the log holds the shutdown
+  // line and, after it, the tests the shutdown cut short
+  const SHUTDOWN_LOG = readFileSync(join(REPO_ROOT, 'tooling/fixtures/ci-log-runner-shutdown.txt'), 'utf8')
+  const shutDown = (extra: Record<string, unknown> = {}) =>
+    ghState({
+      checks: { [SHA]: [ghCheck('verify', 'success', 11), ghCheck('windows tests', 'failure', 12)] },
+      runs: { [SHA]: [ghRun('failure')] },
+      jobs: { 900: [{ id: 11, name: 'verify', conclusion: 'success', steps: [] }, { id: 12, name: 'windows tests', conclusion: 'failure', steps: [{ name: 'pnpm e2e --shard=1/5', conclusion: 'failure' }] }] },
+      annotations: { '12': [{ message: 'The operation was canceled.' }] },
+      logs: { '12': SHUTDOWN_LOG },
+      ...extra,
+    })
+
+  it('reruns once a job the runner shut down under, though only the log says so, and lands it when the rerun passes', async () => {
+    runtime(shutDown({ on: { 'rerun-failed:900': { runs: { [SHA]: [ghRun('success', 2)] }, checks: { [SHA]: green() } } } }))
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await until((x) => stateOf(x) === 'merged', 'the merge after the rerun')
+    expect(writes().map((w) => w[0])).toEqual(['rerun-failed', 'merge', 'delete'])
+  })
+
+  it('asks for attention when the shutdown happens again after the rerun, and names no test the shutdown cut short', async () => {
+    runtime(shutDown({ on: { 'rerun-failed:900': { runs: { [SHA]: [ghRun('failure', 2)] }, annotations: { '12': [{ message: 'The operation was canceled.' }] } } } }))
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    const q = await until((x) => stateOf(x) === 'attention', 'attention')
+    await morePolls()
+    expect(writes().map((w) => w[0])).toEqual(['rerun-failed'])
+    expect(q.queue[0].reason).toMatchObject({ kind: expect.stringMatching(/failed|failing/) })
+    expect(notices()).toHaveLength(1)
+    expect(notices()[0]!.text).not.toContain('archive.spec.ts')
+    expect(notices()[0]!.text).toContain('shutdown signal')
+  })
+
   it('tells the session once when a pull request goes DIRTY and the queue has no checkout to merge it in, and never merges it', async () => {
     runtime(ghState({ prs: { '77': ghPr(77, { mergeStateStatus: 'DIRTY', mergeable: 'CONFLICTING' }) } }))
     await call('queue_merge', { pr: 77, owner: 'tester' })
@@ -3337,6 +3370,31 @@ describe("the main guard does not revert a commit for the runner's own failure (
     conclusion: 'cancelled',
     steps: webkitJob(id).steps.map((s) => (s.name === inStep ? { ...s, conclusion: 'cancelled' } : s.name === 'Install WebKit' ? { ...s, conclusion: 'success' } : s.name.startsWith('Run actions/upload') ? { ...s, conclusion: 'skipped' } : s)),
   })
+  // #1507: the runner shut down under a job's tests; only the log says so. Not a commit's failure, after a rerun either.
+  it('reruns a job the runner shut down under once, and when it happens again reports it and hunts and reverts nothing', async () => {
+    const repo = mainRepo([{ subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] }, { subject: 'feat(ui): change 82 (#82)', files: ['packages/ui/src/b.ts'] }])
+    const sha = repo.shas[1]!
+    seedQueue([{ repo: R, pr: 82, lowers: [], owner: 'tester', author: 'writer', state: 'merged', commit: sha, title: 'feat(ui): change 82', updatedAt: new Date().toISOString(), reruns: {} }])
+    const cutShort = { id: 31, name: 'e2e (chromium 1/5)', status: 'completed', conclusion: 'failure', steps: [{ name: 'Set up job', conclusion: 'success' }, { name: 'pnpm e2e (shard 1/5)', conclusion: 'failure' }] }
+    guardRuntime(repo, {
+      branchRuns: { main: [mainRun(990, sha, 'failure'), mainRun(980, repo.green, 'success')] },
+      jobs: { 990: [cutShort] },
+      annotations: { '31': [{ message: 'The operation was canceled.' }] },
+      logs: { '31': readFileSync(join(REPO_ROOT, 'tooling/fixtures/ci-log-runner-shutdown.txt'), 'utf8') },
+      on: { 'rerun-failed:990': { branchRuns: { main: [secondAttempt(sha, 'failure'), mainRun(980, repo.green, 'success')] } } },
+    })
+    await call('merge_queue')
+    await until(() => issues().length > 0 && mainRedNotices().length > 0, 'the report')
+    await new Promise((r) => setTimeout(r, 1_000))
+    expect(reruns()).toEqual([['rerun-failed', '990']])
+    expect(writes().filter((w) => w[0] === 'pr-create')).toEqual([])
+    expect(issues()).toHaveLength(1)
+    expect(issues()[0]!.title).toBe(`Main is red at ${sha.slice(0, 7)}: an infrastructure failure, not reverted`)
+    expect(issues()[0]!.body).toContain('a lost runner')
+    expect(issues()[0]!.body).not.toContain('archive.spec.ts')
+    expect(guardOnDisk().hunt).toMatchObject({ red: sha, kind: 'infrastructure', cause: 'runner', outcome: 'reported' })
+  })
+
   const limitNote = { '31': [{ message: 'The job has exceeded the maximum execution time of 15 minutes.' }] }
 
   it('reruns a job that ran out of time in the browser install once, then reports it and reverts nothing when no commit changed what the setup installs', async () => {

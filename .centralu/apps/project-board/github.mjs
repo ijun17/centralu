@@ -5,6 +5,7 @@
 // short in-memory cache and nothing on disk.
 import { execFile } from 'node:child_process'
 import { tmpdir } from 'node:os'
+import { CANCELED_NOTE, LOST_RUNNER_NOTE, RUNNER_SHUTDOWN } from './run-failure.mjs'
 import { mapLimit, short } from './util.mjs'
 
 const GH_TIMEOUT_MS = 30_000
@@ -877,6 +878,27 @@ export async function checkRunNotes(repo, checkRunId) {
   checkRepo(repo)
   const r = await restJson(`repos/${repo}/check-runs/${Number(checkRunId)}/annotations?per_page=50`, { missing: [404] })
   return (Array.isArray(r) ? r : []).map((a) => String(a?.message ?? '')).filter(Boolean)
+}
+
+/**
+ * What GitHub and the job's log say about a job that did not pass: its annotations (`checkRunNotes`) and, when the
+ * only one is "The operation was canceled." (what a shutdown of the runner leaves, #1507: the job's step says `failure`
+ * and no annotation names the runner), the log's shutdown line. Best effort: a log that cannot be read leaves the
+ * annotations as they were; a fatal error (no network, no login, the rate limit) is thrown as everywhere else.
+ */
+export async function jobNotes(repo, jobId) {
+  const notes = await checkRunNotes(repo, jobId)
+  if (notes.some((n) => LOST_RUNNER_NOTE.test(n)) || !notes.some((n) => CANCELED_NOTE.test(n.trim()))) return notes
+  try {
+    const shutdown = String(await readJobLog(repo, jobId))
+      .split(/\r?\n/)
+      .map((l) => l.replace(/^﻿?\d{4}-\d\d-\d\dT[\d:.]+Z ?/, ''))
+      .find((l) => RUNNER_SHUTDOWN.test(l))
+    return shutdown ? [...notes, shutdown.replace(/^\s*##\[error\]/, '')] : notes
+  } catch (e) {
+    if (e instanceof GitHubError && FATAL.has(e.kind)) throw e
+    return notes
+  }
 }
 
 /** The environments a run waits on for approval, and whether this login may give it. */

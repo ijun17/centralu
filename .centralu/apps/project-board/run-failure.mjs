@@ -63,6 +63,18 @@ const STEP_LIMIT_NOTE = /The action '(.*)' has timed out after \d+ minutes/gi
 /** What GitHub writes on a job whose runner went away. */
 export const LOST_RUNNER_NOTE = /lost communication with the server|runner has received a shutdown signal|hosted runner encountered an error|runner .{0,80}(?:did not connect|is offline|was lost|has been deprovisioned)/i
 
+/**
+ * The line a job's log holds when its runner was stopped under it (#1507): `##[error]The runner has received a shutdown
+ * signal. This can happen when the runner service is stopped, or a manually started runner is canceled.` GitHub writes
+ * no such note on the job: its annotation is only "The operation was canceled.", and the job's step says `failure`, so
+ * this is the one place the cause is. Everything the log says after this line was cut short by it: the tests the
+ * runner stopped under are reported failed (`✘ 117 …`), though nothing of the commit failed (job 120780406901, run
+ * 40063018693, `e2e (chromium 1/5)` of the release bump #1506, tooling/fixtures/ci-log-runner-shutdown.txt).
+ */
+export const RUNNER_SHUTDOWN = /^\s*##\[error\]The runner has received a shutdown signal/
+/** What GitHub writes on a job a shutdown cut short: the only thing its annotations say, and the cue to read the log for the rest */
+export const CANCELED_NOTE = /^The operation was canceled\.?$/i
+
 /** Whether a job's name is on the known-flaky list: exact names, `*` for any run of characters. */
 export function onFlakyList(name, list = []) {
   return list.some((p) => {
