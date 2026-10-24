@@ -57,7 +57,9 @@ export const looksLikeNetworkError = (text) => NETWORK_LINE.some((re) => re.test
 export const isSetupStep = (name, notes = '') => SETUP_STEP.some((re) => re.test(String(name ?? ''))) || (INSTALL_STEP.test(String(name ?? '')) && FETCH_NOTE.test(notes))
 /** What GitHub writes on a job (or a step) that ran out of time. */
 // GitHub's own words only: a test's own "timed out in 5000ms" is a test failure
-export const TIMEOUT_NOTE = /has exceeded the maximum execution time of \d+ minutes|The action '[^']*' has timed out after \d+ minutes/i
+export const TIMEOUT_NOTE = /has exceeded the maximum execution time of \d+ minutes|The action '.*' has timed out after \d+ minutes/i
+const JOB_LIMIT_NOTE = /has exceeded the maximum execution time of \d+ minutes/i
+const STEP_LIMIT_NOTE = /The action '(.*)' has timed out after \d+ minutes/gi
 /** What GitHub writes on a job whose runner went away. */
 export const LOST_RUNNER_NOTE = /lost communication with the server|runner has received a shutdown signal|hosted runner encountered an error|runner .{0,80}(?:did not connect|is offline|was lost|has been deprovisioned)/i
 
@@ -74,13 +76,25 @@ export function onFlakyList(name, list = []) {
  * Why one job did not pass, or null when it did (or has not finished). `job`: `{ name, conclusion,
  * steps: [{ name, conclusion }], notes: [annotation messages], log?: the failing line of its log }`. Only `notes`, GitHub's
  * own words, say a timeout or a lost runner; the log's line only tells a failed install step's network error from a lockfile's. Answers `{ real, cause, step? }`;
- * `cause` is `test` (a step failed), `no-step` (failed outside any step it reports), `timeout`,
+ * `cause` is `test` (a step failed), `no-step` (failed outside any step it reports), `timeout` (`inSetup`, with its `step`, when the step the limit ended set the job up, #1503),
  * `runner`, `setup` (its first failed step set the job up, #1435), `flaky` or `cancelled`.
  */
 export function jobFailure(job, { flaky = [] } = {}) {
   if (!job || job.conclusion == null || OK.has(job.conclusion)) return null
   const notes = (job.notes ?? []).join('\n')
-  if (job.conclusion === 'timed_out' || TIMEOUT_NOTE.test(notes)) return { real: false, cause: 'timeout' }
+  // The step the limit ended (#1503): GitHub marks the step that was running when the job ran out of time 'cancelled'
+  // (e2e (webkit 1/5), 2026-10-23: `Install WebKit` cancelled at 893 s, the tests skipped), and one that ran out of its own
+  // `timeout-minutes` 'failure'. In a step that sets the job up, nothing of the commit ran: the mirror was slow.
+  const ended = (job.steps ?? []).find((s) => s.conclusion === 'cancelled' || s.conclusion === 'failure')
+  // A step's own limit counts only when its annotation names the step that ended the job. A step with `continue-on-error`
+  // (the first try of the browser install) that ran out of time leaves the same annotation on a job that goes on, and on
+  // to fail in its tests: that failure is the tests', not a timeout (#1503, review of #1505, job 120762088185).
+  const limitedSteps = [...notes.matchAll(STEP_LIMIT_NOTE)].map((m) => m[1])
+  const stepLimit = limitedSteps.length > 0 && (!(job.steps ?? []).length || (ended != null && limitedSteps.includes(ended.name)))
+  if (job.conclusion === 'timed_out' || JOB_LIMIT_NOTE.test(notes) || stepLimit) {
+    if (ended && isSetupStep(ended.name, notes)) return { real: false, cause: 'timeout', step: ended.name, inSetup: true }
+    return { real: false, cause: 'timeout' }
+  }
   if (LOST_RUNNER_NOTE.test(notes)) return { real: false, cause: 'runner' }
   if (job.conclusion === 'cancelled') return { real: false, cause: 'cancelled' }
   if (onFlakyList(job.name, flaky)) return { real: false, cause: 'flaky' }
@@ -100,7 +114,7 @@ export function jobFailure(job, { flaky = [] } = {}) {
  */
 export function classifyRun(run, jobs, { flaky = [] } = {}) {
   const seen = (jobs ?? []).map((j) => ({ j, f: jobFailure(j, { flaky }) })).filter((x) => x.f)
-  const pick = (x) => ({ real: x.f.real, cause: x.f.cause, step: x.f.step ?? null, job: { name: x.j.name, id: x.j.id != null ? String(x.j.id) : null }, attempt: run.attempt ?? 1 })
+  const pick = (x) => ({ real: x.f.real, cause: x.f.cause, step: x.f.step ?? null, inSetup: x.f.inSetup === true, job: { name: x.j.name, id: x.j.id != null ? String(x.j.id) : null }, attempt: run.attempt ?? 1 })
   const real = seen.find((x) => x.f.real)
   if (real) return pick(real)
   for (const cause of ['timeout', 'runner', 'setup', 'flaky', 'cancelled']) {

@@ -132,15 +132,74 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
   })
 
   // 2026-10-19 (owner): one e2e shard hung 35 minutes and held a merge batch; GitHub's default limit is 6 hours
-  it('gives every job that does real work a time limit near its slowest green run, the e2e shards 15 minutes', () => {
+  it("gives every job that does real work a time limit near its slowest green run, the e2e shards 25 minutes (the browser install's 9 at worst, #1503, and 12 for the tests)", () => {
     const limit = (id: string) => Number(/^ {4}timeout-minutes: (\d+)$/m.exec(job(id).body)?.[1])
     // A job with only an echo (the stand-ins, `full tier`) or `changes` needs none
     const working = jobs.filter((j) => j.id !== 'changes' && !/^ {6}- run: echo /m.test(j.body) && !/^ {4}steps:\n {6}- run: echo [^\n]*\n*$/.test(j.body))
     expect(working.map((j) => j.id).sort()).toEqual(['bundle', 'content-verify', 'e2e', 'e2e-chromium', 'e2e-report', 'fail-fast', 'host-tests-remote-node', 'keeper', 'keeper-linux', 'ux-tasks', 'verify', 'windows-tests', 'windows-tests-unit'])
     for (const j of working) expect(limit(j.id), j.id).toBeGreaterThan(0)
-    expect(limit('e2e')).toBe(15)
-    expect(limit('e2e-chromium')).toBe(15)
+    expect(limit('e2e')).toBe(25)
+    expect(limit('e2e-chromium')).toBe(25)
+    expect(limit('ux-tasks')).toBe(20)
     for (const j of working) expect(limit(j.id), j.id).toBeLessThanOrEqual(30)
+  })
+
+  // #1503: three e2e shards were cancelled at their 15 minute limit inside `playwright install --with-deps`, which downloaded
+  // about 140 apt packages from a slow mirror (usually 20 to 45 s, 244 to 893 s on some shards), before any test ran. The
+  // install is its own steps now, each limited and retried once, and the tests keep a limit of their own, so a slow
+  // mirror costs a retry and not the shard. A container image with the browsers was tried first and does not fit: it has
+  // no make or g++, which node-pty and better-sqlite3 need at `pnpm install`.
+  it("installs the browser of every job that runs one in steps of its own: cached by Playwright's version, each try limited, one retry, the tests limited apart", () => {
+    const browserJobs = [
+      { id: 'e2e', browser: 'webkit', Browser: 'WebKit', tests: 'pnpm e2e', testLimit: 12 },
+      { id: 'e2e-chromium', browser: 'chromium', Browser: 'Chromium', tests: 'pnpm e2e', testLimit: 12 },
+      { id: 'ux-tasks', browser: 'webkit', Browser: 'WebKit', tests: 'pnpm ux', testLimit: 5 },
+    ]
+    for (const { id, browser, Browser, tests, testLimit } of browserJobs) {
+      const body = job(id).body
+      const start = body.indexOf("      - name: Read Playwright's version\n")
+      const end = body.indexOf(`      - name: ${tests}`)
+      expect(start, id).toBeGreaterThan(0)
+      expect(end, id).toBeGreaterThan(start)
+      expect(body.slice(start, end), id).toBe(
+        [
+          "      - name: Read Playwright's version",
+          '        id: playwright',
+          `        run: echo "version=$(pnpm exec playwright --version | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"`,
+          '',
+          '      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0',
+          '        with:',
+          '          path: ~/.cache/ms-playwright',
+          `          key: playwright-\${{ runner.os }}-\${{ steps.playwright.outputs.version }}-${browser}`,
+          '',
+          `      - name: Install ${Browser} system libraries`,
+          '        id: libraries',
+          '        timeout-minutes: 3',
+          '        continue-on-error: true',
+          `        run: pnpm exec playwright install-deps ${browser}`,
+          '',
+          `      - name: Install ${Browser} system libraries, second try`,
+          "        if: steps.libraries.outcome == 'failure'",
+          '        timeout-minutes: 3',
+          '        run: |',
+          '          bash .github/scripts/stop-leftover-apt.sh',
+          '          sudo dpkg --configure -a || true',
+          `          pnpm exec playwright install-deps ${browser}`,
+          '',
+          `      - name: Install ${Browser}`,
+          '        timeout-minutes: 3',
+          `        run: pnpm exec playwright install ${browser}`,
+          '',
+          '',
+        ].join('\n'),
+      )
+      // The tests keep a budget of their own, whatever the install took
+      const step = body.slice(end).split(/^ {6}- /m)[1]!
+      expect(step, id).toMatch(new RegExp(`^ {8}(?:id: e2e\\n {8})?timeout-minutes: ${testLimit}$`, 'm'))
+    }
+    // The old one-step install, with the system libraries inside the tests' budget, is gone
+    expect(workflow).not.toMatch(/--with-deps/)
+    expect(workflow.match(/playwright install-deps /g)).toHaveLength(browserJobs.length * 2)
   })
 
   // #1259: changes land after the fast tier, so every push to main needs its full run to the end; a pull request's are superseded

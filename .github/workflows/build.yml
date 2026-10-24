@@ -537,7 +537,9 @@ jobs:
   # timeout soon after any honest run would have ended. The numbers, in minutes, slowest/limit:
   # e2e shards 9.7/15 (WebKit; Chromium 8.3), verify 10.8/20, Windows unit tests 13.1/25 (14.9 in the
   # last 100 pushes to main), Windows lint and types 2.6/10, the host's tests on the remotes' Node
-  # 12.8/20, content verify 1.8/10, ux tasks 2.8/10. Jobs that build Rust with a cache get more, for
+  # 12.8/20, content verify 1.8/10, ux tasks 2.8/10. The three jobs that install a browser (#1503, 2026-10-24) limit
+  # the install apart from the tests: each of its tries 3 minutes, so the job holds the install's 9 at worst, the
+  # tests' own step limit (12 for a shard, 5 for ux tasks) and about 4 for the rest: shards 25, ux tasks 20. Jobs that build Rust with a cache get more, for
   # the run that misses it: bundles 5.8/30 (8.9 in the last 100 pushes), keeper e2e 4.0/20 (Linux
   # 4.4/20). Raise a limit when its job grows, not when one run hangs.
   e2e:
@@ -546,7 +548,7 @@ jobs:
     if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-24.04
     # See the time limits above
-    timeout-minutes: 15
+    timeout-minutes: 25
     outputs:
       # `true` when a test of a shard passed only on retry (e2e/flaky-report.ts); a shard without one leaves it unset
       flaky: ${{ steps.e2e.outputs.flaky }}
@@ -572,12 +574,42 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # WebKit at the build this lockfile's Playwright expects, with the system libraries it needs
+      # WebKit at the build this lockfile's Playwright expects (the browsers are cached by its version), and the system
+      # libraries it needs. The libraries are about 140 apt packages from a mirror that was sometimes slow (usually 20 to
+      # 45 s, 244 to 893 s on some shards, which cancelled three shards at the job's limit, #1503), so each try has a
+      # limit of its own and one retry: the install may take its 9 minutes at worst, and the tests keep theirs. The
+      # runner kills the step of a try that hit its limit, not the root apt-get it started, which goes on holding
+      # dpkg's locks; the second try stops it first (.github/scripts/stop-leftover-apt.sh).
+      - name: Read Playwright's version
+        id: playwright
+        run: echo "version=$(pnpm exec playwright --version | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-webkit
+
+      - name: Install WebKit system libraries
+        id: libraries
+        timeout-minutes: 3
+        continue-on-error: true
+        run: pnpm exec playwright install-deps webkit
+
+      - name: Install WebKit system libraries, second try
+        if: steps.libraries.outcome == 'failure'
+        timeout-minutes: 3
+        run: |
+          bash .github/scripts/stop-leftover-apt.sh
+          sudo dpkg --configure -a || true
+          pnpm exec playwright install-deps webkit
+
       - name: Install WebKit
-        run: pnpm exec playwright install --with-deps webkit
+        timeout-minutes: 3
+        run: pnpm exec playwright install webkit
 
       - name: pnpm e2e (shard ${{ matrix.shard }}/${{ matrix.shards }})
         id: e2e
+        timeout-minutes: 12
         env:
           E2E_BROWSER: webkit
           PLAYWRIGHT_BLOB_OUTPUT_DIR: blob-report
@@ -605,7 +637,7 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     # See the time limits above the WebKit job
-    timeout-minutes: 15
+    timeout-minutes: 25
     outputs:
       flaky: ${{ steps.e2e.outputs.flaky }}
     strategy:
@@ -630,12 +662,37 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # Chromium at the build this lockfile's Playwright expects, with the system libraries it needs
+      # As the WebKit job's install: the browser cached by Playwright's version, each try limited, one retry (#1503)
+      - name: Read Playwright's version
+        id: playwright
+        run: echo "version=$(pnpm exec playwright --version | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-chromium
+
+      - name: Install Chromium system libraries
+        id: libraries
+        timeout-minutes: 3
+        continue-on-error: true
+        run: pnpm exec playwright install-deps chromium
+
+      - name: Install Chromium system libraries, second try
+        if: steps.libraries.outcome == 'failure'
+        timeout-minutes: 3
+        run: |
+          bash .github/scripts/stop-leftover-apt.sh
+          sudo dpkg --configure -a || true
+          pnpm exec playwright install-deps chromium
+
       - name: Install Chromium
-        run: pnpm exec playwright install --with-deps chromium
+        timeout-minutes: 3
+        run: pnpm exec playwright install chromium
 
       - name: pnpm e2e (shard ${{ matrix.shard }}/${{ matrix.shards }})
         id: e2e
+        timeout-minutes: 12
         env:
           E2E_BROWSER: chromium
           PLAYWRIGHT_BLOB_OUTPUT_DIR: blob-report
@@ -733,7 +790,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -750,10 +807,36 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # As the WebKit shards' install (#1503)
+      - name: Read Playwright's version
+        id: playwright
+        run: echo "version=$(pnpm exec playwright --version | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-webkit
+
+      - name: Install WebKit system libraries
+        id: libraries
+        timeout-minutes: 3
+        continue-on-error: true
+        run: pnpm exec playwright install-deps webkit
+
+      - name: Install WebKit system libraries, second try
+        if: steps.libraries.outcome == 'failure'
+        timeout-minutes: 3
+        run: |
+          bash .github/scripts/stop-leftover-apt.sh
+          sudo dpkg --configure -a || true
+          pnpm exec playwright install-deps webkit
+
       - name: Install WebKit
-        run: pnpm exec playwright install --with-deps webkit
+        timeout-minutes: 3
+        run: pnpm exec playwright install webkit
 
       - name: pnpm ux
+        timeout-minutes: 5
         env:
           UX_REPORT: ux-report/report.json
           UX_BASELINE: e2e/ux/baseline.json
