@@ -906,6 +906,7 @@ function AutoCompactSetting({ setPrefs }: { setPrefs: (patch: UiPreferencesPatch
   const { first, second } = nudgeShares(setting)
   const firstPercent = Math.round(first * 100)
   const secondPercent = Math.round(second * 100)
+  const secondMax = Math.min(Math.round(MAX_NUDGE_SHARE * 100), percent - Math.round(NUDGE_MARGIN * 100))
   return (
     <SettingsGroup title="Compaction">
       <SettingToggle
@@ -998,7 +999,8 @@ function AutoCompactSetting({ setPrefs }: { setPrefs: (patch: UiPreferencesPatch
                 id="settings-auto-compact-nudge-first"
                 type="range"
                 min={Math.round(MIN_NUDGE_SHARE * 100)}
-                max={Math.round(MAX_NUDGE_SHARE * 100)}
+                // Under a second share the person chose: the host refuses a first one that is not below it
+                max={setting.nudgeSecond === null ? Math.round(MAX_NUDGE_SHARE * 100) : Math.max(Math.round(MIN_NUDGE_SHARE * 100), secondPercent - Math.round(NUDGE_MARGIN * 100))}
                 step={5}
                 className="w-32 accent-ink-muted"
                 data-testid="settings-auto-compact-nudge-first"
@@ -1020,9 +1022,9 @@ function AutoCompactSetting({ setPrefs }: { setPrefs: (patch: UiPreferencesPatch
               <input
                 id="settings-auto-compact-nudge-second"
                 type="range"
-                min={Math.round(MIN_NUDGE_SHARE * 100)}
-                // Below the share agents compact at: a second reminder after the tool's own compaction would say nothing
-                max={Math.min(Math.round(MAX_NUDGE_SHARE * 100), percent - Math.round(NUDGE_MARGIN * 100))}
+                min={Math.min(secondMax, Math.max(Math.round(MIN_NUDGE_SHARE * 100), firstPercent + Math.round(NUDGE_MARGIN * 100)))}
+                // Above the first share, and below the share agents compact at: a second reminder after the tool's own compaction would say nothing
+                max={secondMax}
                 step={5}
                 className="w-32 accent-ink-muted"
                 data-testid="settings-auto-compact-nudge-second"

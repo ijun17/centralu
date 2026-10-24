@@ -46,6 +46,8 @@ export type SessionEventsHost = Pick<DelegationHost, 'agentRuns' | 'children' | 
     readonly cards: RoutedCards
     /** Whether the session's tool takes a message into the turn it is running, rather than holding it for the next (`midTurnInput`) */
     joinsRunningTurn(sessionId: string): boolean
+    /** Whether the session's tool reads the context size with every request, so a turn needs no estimate of it (`contextAtRequest`) */
+    contextAtRequest(sessionId: string): boolean
     /** Sessions whose hub task's input is tracked (`sendFromHub`): its own turn takes the depth mark down, no other */
     readonly hubAskTurns: Set<string>
     readonly interruptions: InterruptionWatch
@@ -332,7 +334,7 @@ export class SessionEvents {
     if (e.sessionId) this.host.compactEvent(e, endedTurn)
     // A request of the turn moves the context figure before the turn's end brings the tool's reading (#1492)
     const meta = e.sessionId ? this.host.meta.get(e.sessionId) : undefined
-    const estimate = meta ? this.meter.observe(e, meta) : null
+    const estimate = meta ? this.meter.observe(e, meta, this.host.contextAtRequest(meta.id)) : null
     if (estimate) this.onEvent(estimate)
     if (e.sessionId && (endedTurn || e.type === 'state_change' || e.type === 'approval_resolved' || e.type === 'question_resolved')) this.host.mailPoke(e.sessionId)
     // A deferred restart also waits for the session's background work (#648): the moment it ends is a boundary too

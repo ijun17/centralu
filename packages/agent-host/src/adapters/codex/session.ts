@@ -417,7 +417,13 @@ export class CodexSession implements SessionHandle {
       if (e.type === 'usage_update') {
         const request = this.requests.take(n.params)
         if (request) {
-          this.emit({ ...e, request })
+          /*
+           * Codex's token count does not say which model served it, and a session on the tool's default has none recorded: the
+           * price ratios of the cache (`cache-cost.ts`) and the usage history need the one the thread runs (#1504 review).
+           * What the turns ask for first, else what the thread answered when it opened
+           */
+          const model = this.shown?.model ?? this.opts.model ?? this.threadSettings?.model ?? null
+          this.emit({ ...e, request: model ? { ...request, model } : request })
           continue
         }
       }
@@ -453,14 +459,20 @@ export class CodexSession implements SessionHandle {
   send(text: string): void { this.sendInput(text) }
 
   /**
-   * A note steered into the regular turn that is running, starting nothing (#1492): Codex merges the input of a `turn/start` into
-   * an active regular turn, and would start a turn of its own when none is running, or queue the note behind a compact or review
-   * turn it cannot steer and then run it as a turn. Neither is wanted, so with no such turn the note is not taken.
+   * A note steered into the regular turn that is running, starting nothing (#1492). `turn/start` would do it only while a turn is
+   * running: with none, it starts a turn of its own (Codex sends a request's token count just before `turn/completed`, so a note for
+   * the last request of a turn went out after the turn had ended and ran as a turn nobody asked for, #1504 review), and behind a
+   * compact or review turn it queues the note and runs it as a turn. `turn/steer` names the turn it is for (`expectedTurnId`) and
+   * is refused by Codex when that turn is not the one running, so a note for a turn that has ended starts nothing. The answer says
+   * whether it was taken: a refused note is not told, and waits for a later request of a running turn (`ContextNudges`).
    */
-  nudge(text: string): boolean {
-    if (this.closed || !this.started || this.turns.turnId === null || this.blockingTurn || this.pendingInputs.length > 0) return false
-    this.sendInput(text)
-    return true
+  nudge(text: string): boolean | Promise<boolean> {
+    const turnId = this.turns.turnId
+    if (this.closed || !this.started || !this.threadId || turnId === null || this.blockingTurn || this.pendingInputs.length > 0) return false
+    return this.client.request('turn/steer', { threadId: this.threadId, input: [{ type: 'text', text }], expectedTurnId: turnId }).then(
+      () => true,
+      () => false,
+    )
   }
 
   private sendInput(text: string, receipt?: InputReceipt): void {

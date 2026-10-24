@@ -168,7 +168,20 @@ export function readAutoCompact(raw: unknown): AutoCompact {
   if ('nudge' in raw && typeof raw.nudge === 'boolean') out.nudge = raw.nudge
   if ('nudgeFirst' in raw && typeof raw.nudgeFirst === 'number' && Number.isFinite(raw.nudgeFirst)) out.nudgeFirst = Math.min(MAX_NUDGE_SHARE, Math.max(MIN_NUDGE_SHARE, raw.nudgeFirst))
   if ('nudgeSecond' in raw && typeof raw.nudgeSecond === 'number' && Number.isFinite(raw.nudgeSecond)) out.nudgeSecond = Math.min(MAX_NUDGE_SHARE, Math.max(MIN_NUDGE_SHARE, raw.nudgeSecond))
-  return out
+  return settledSecond(out)
+}
+
+/**
+ * A chosen second share that does not fit the rest is held to it, so the setting as read is one that can be saved again whole
+ * (#1504 review): a share lowered under it takes it down to `NUDGE_MARGIN` below the share, and one that cannot then stay above
+ * the first share goes back to the default (null), which follows the share. A person's own choice that does not fit is refused
+ * where it is made (`UiPreferenceStore.setUiPreferences`); this is for the share that moved under a choice made before.
+ */
+export function settledSecond(c: AutoCompact): AutoCompact {
+  if (c.nudgeSecond === null) return c
+  const held = Math.min(c.nudgeSecond, hundredths(c.share - NUDGE_MARGIN))
+  const nudgeSecond = held > c.nudgeFirst ? held : null
+  return nudgeSecond === c.nudgeSecond ? c : { ...c, nudgeSecond }
 }
 
 /** Line height (#312 step 5): a factor on the body and code line heights; `normal` is today's values */

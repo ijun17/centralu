@@ -165,8 +165,9 @@ export class CacheLedger {
         read: b.cacheRead,
         write: b.cacheWrite,
         rebuilds: b.rebuilds,
-        // A rebuild is at least `REBUILD_MIN_TOKENS`: rebuilds with none counted were stored before the figure was
-        rebuildTokens: b.rebuilds > 0 && b.rebuildTokens === 0 ? null : b.rebuildTokens,
+        // A rebuild is at least `REBUILD_MIN_TOKENS`: fewer tokens than that for the rebuilds counted means some were stored before
+        // the figure was (an older build kept adding rebuilds to an hour this one had written), and the sum is not known
+        rebuildTokens: b.rebuildTokens < b.rebuilds * REBUILD_MIN_TOKENS ? null : b.rebuildTokens,
         // The ratios depend on the tool and the model, which a bucket has one of, so its sums are weighted at once
         ...this.costOfBucket(b),
         causes: b.causes,

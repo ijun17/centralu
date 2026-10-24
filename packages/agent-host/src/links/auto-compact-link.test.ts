@@ -113,11 +113,24 @@ describe('when agents compact on a linked machine (#1376)', () => {
     expect(machine.mgr.uiPreferences().autoCompact).toEqual({ controlled: false, share: 0.5, idleShare: 0.3, nudge: true, nudgeFirst: 0.3, nudgeSecond: null })
 
     // The notices' settings are the hub's too (#1492), also the one that follows the share
-    await hub.router.handle('prefs.set', { patch: { autoCompact: { nudge: false, nudgeFirst: 0.4, nudgeSecond: 0.4 } } })
+    await hub.router.handle('prefs.set', { patch: { autoCompact: { nudge: false, nudgeFirst: 0.4, nudgeSecond: 0.45 } } })
     await eventually(() => machine.mgr.uiPreferences().autoCompact?.nudgeFirst === 0.4)
-    expect(machine.mgr.uiPreferences().autoCompact).toEqual({ controlled: false, share: 0.5, idleShare: 0.3, nudge: false, nudgeFirst: 0.4, nudgeSecond: 0.4 })
+    expect(machine.mgr.uiPreferences().autoCompact).toEqual({ controlled: false, share: 0.5, idleShare: 0.3, nudge: false, nudgeFirst: 0.4, nudgeSecond: 0.45 })
     await hub.router.handle('prefs.set', { patch: { autoCompact: { nudgeSecond: null } } })
     await eventually(() => machine.mgr.uiPreferences().autoCompact?.nudgeSecond === null)
+  })
+
+  it('a hub that lowers its share under a second reminder it chose before still gets the whole setting accepted by the machine (#1504 review)', async () => {
+    const machine = await machineHost()
+    const hub = await hubHost(machine.port)
+    await eventually(() => hub.machine().status === 'connected')
+    await hub.router.handle('prefs.set', { patch: { autoCompact: { nudgeFirst: 0.2, nudgeSecond: 0.45 } } })
+    await eventually(() => machine.mgr.uiPreferences().autoCompact?.nudgeSecond === 0.45)
+    // The share alone moves under the second one: the hub takes the second down with it, and the machine takes all of it
+    await hub.router.handle('prefs.set', { patch: { autoCompact: { share: 0.4 } } })
+    await eventually(() => machine.mgr.uiPreferences().autoCompact?.share === 0.4)
+    expect(machine.mgr.uiPreferences().autoCompact).toEqual({ controlled: true, share: 0.4, idleShare: 0.3, nudge: true, nudgeFirst: 0.2, nudgeSecond: 0.35 })
+    expect(hub.mgr.uiPreferences().autoCompact).toEqual(machine.mgr.uiPreferences().autoCompact)
   })
 
   it("a linked session's menu asks the machine what its next start passes", async () => {

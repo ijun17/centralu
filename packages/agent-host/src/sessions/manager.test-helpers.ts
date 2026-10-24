@@ -106,6 +106,8 @@ export class FakeAdapter implements AgentAdapter {
     approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: ['image'], verbosities: [], exclusiveWriter: false, backgroundTasks: false,
   }
   launchFingerprint = 'v1'
+  /** A test sets it for a tool that reads the context size with every request, as Codex does (`AgentAdapter.contextAtRequest`) */
+  contextAtRequest = false
   /** A test sets it to read the focus line the way Claude's adapter does (#1451) */
   compactCommand: AgentAdapter['compactCommand']
   launchSettingsFingerprint(settings: import('../adapters/contract.js').LaunchSettings) {

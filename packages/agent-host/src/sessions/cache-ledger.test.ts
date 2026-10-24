@@ -309,7 +309,15 @@ describe('what the rebuilds wrote, and what the cache cost (#1492)', () => {
     expect(cost('gpt-5.7-codex')).toEqual([1_000, 1_250])
     expect(cost('gpt-5.6-sol')).toEqual([500, 1_250])
     expect(cost('gpt-5.5')).toEqual([1_000, 1_000])
-    expect(cost('')).toEqual([1_000, 1_000])
+    // A name that says no generation (a session on the tool's default that did not say which model it runs) is the current one
+    expect(cost('')).toEqual([1_000, 1_250])
+    const unnamed = new CacheLedger(NOW - HOUR, () => 'openai')
+    unnamed.record('codex', 'a', req(10_000, undefined, 1_000), NOW - 1_000, null)
+    expect(unnamed.stats('codex', nameOf, NOW).windows[0]).toMatchObject({ cacheReadCost: 1_000, cacheWriteCost: 1_250 })
+    // The request's own model wins over the session's setting, and an hour stored with none is priced the same way
+    const own = new CacheLedger(NOW - HOUR, () => 'openai')
+    own.record('codex', 'a', { ...req(10_000, undefined, 1_000), model: 'gpt-5.6-sol' }, NOW - 1_000, null)
+    expect(own.stats('codex', nameOf, NOW).windows[0]).toMatchObject({ cacheReadCost: 500, cacheWriteCost: 1_250 })
   })
 
   it('takes both from the buckets an earlier run stored, and says the tokens are not known for rebuilds stored without them', () => {
@@ -332,5 +340,15 @@ describe('what the rebuilds wrote, and what the cache cost (#1492)', () => {
     const sessions = Object.fromEntries(o.sessions.map((x) => [x.sessionId, x]))
     expect(sessions.a).not.toHaveProperty('rebuildTokens')
     expect(sessions.b).toMatchObject({ rebuildTokens: 20_000 })
+
+    // An hour a newer build wrote and an older one then added rebuilds to: the tokens cover fewer rebuilds than were counted
+    const mixed = new CacheLedger(NOW)
+    mixed.restore([bucket({ rebuilds: 5, rebuildTokens: 10_000 }), bucket({ sessionId: 'b', rebuilds: 2, rebuildTokens: 9_000 })])
+    const m = mixed.stats('claude', nameOf, NOW).windows[0]!
+    expect(m.rebuilds).toBe(7)
+    expect(m).not.toHaveProperty('rebuildTokens')
+    const bySession = Object.fromEntries(m.sessions.map((x) => [x.sessionId, x]))
+    expect(bySession.a).not.toHaveProperty('rebuildTokens')
+    expect(bySession.b).toMatchObject({ rebuildTokens: 9_000 })
   })
 })

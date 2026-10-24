@@ -2,6 +2,7 @@ import type { AutoCompact, UiPreferences, UiPreferencesPatch } from '@cc/protoco
 import { NUDGE_MARGIN, parseUiPreferences, readAutoCompact, readNotifyPolicy, textSizeFromLegacyStep } from '@cc/protocol'
 import { parseJson } from '../dev-services/store/json.js'
 import { isObj } from '../json-value.js'
+import { rpcError, type RpcError } from '../rpc-error.js'
 import type { AppAccess } from './app-access.js'
 import type { DelegationHost } from './delegation-flow.js'
 import type { SessionTrashHost } from './session-trash.js'
@@ -129,18 +130,27 @@ export class UiPreferenceStore {
     const base = current.notifyPolicy ?? readNotifyPolicy(this.loadWorkspace()?.notifyPolicy)
     const notifyPolicy = switches ? { ...base, ...switches } : undefined
     // The auto-compact setting is merged one field at a time too (#1376), over what is stored, field by field read
-    const merged: AutoCompact | undefined = compact ? { ...readAutoCompact(current.autoCompact), ...withoutUndefined(compact) } : undefined
-    // The second notice sits below the tool's own compaction share (#1492): a patch that sets both is judged on the new share
-    if (compact && merged && typeof compact.nudgeSecond === 'number' && compact.nudgeSecond > merged.share - NUDGE_MARGIN + 1e-9) {
-      throw new Error(
-        `The second reminder (${Math.round(compact.nudgeSecond * 100)}%) must be at least ${Math.round(NUDGE_MARGIN * 100)} points below the share agents compact at (${Math.round(merged.share * 100)}%): the tool's own compaction would come first.`,
-      )
+    const before = readAutoCompact(current.autoCompact)
+    const asked: AutoCompact | undefined = compact ? { ...before, ...withoutUndefined(compact) } : undefined
+    // The whole setting that would result is judged, not the patch (#1504 review): the two notice shares sit in order, below the
+    // tool's own compaction share, and a patch that moves both is judged on the new share. A person's choice that does not fit
+    // is refused; a share moved under a second share chosen before is not a choice, and takes it down (`settledSecond`).
+    if (compact && asked && asked.nudgeSecond !== null && (compact.nudgeSecond != null || compact.nudgeFirst !== undefined)) {
+      const second = Math.round(asked.nudgeSecond * 100)
+      if (asked.nudgeSecond > asked.share - NUDGE_MARGIN + 1e-9) {
+        throw refusal(`The second reminder (${second}%) must be at least ${Math.round(NUDGE_MARGIN * 100)} points below the share agents compact at (${Math.round(asked.share * 100)}%): the tool's own compaction would come first.`)
+      }
+      if (asked.nudgeSecond <= asked.nudgeFirst + 1e-9) {
+        throw refusal(`The second reminder (${second}%) must be above the first (${Math.round(asked.nudgeFirst * 100)}%).`)
+      }
     }
+    const merged = asked ? readAutoCompact(asked) : undefined
     // The record keeps the two fields every build knows; the others go beside it (`COMPACT_BESIDE`)
     const compactKeys = Object.keys(withoutUndefined(compact ?? {}))
     const autoCompact = merged && compactKeys.some((k) => !(k in COMPACT_BESIDE)) ? { controlled: merged.controlled, share: merged.share } : undefined
     const besides: Record<string, unknown> = {}
-    if (compact && merged) for (const field of COMPACT_BESIDE_FIELDS) if (compact[field] !== undefined) besides[COMPACT_BESIDE[field]] = merged[field]
+    // A field the patch sets, and the second share when it was held to a share that moved
+    if (compact && merged) for (const field of COMPACT_BESIDE_FIELDS) if (compact[field] !== undefined || merged[field] !== before[field]) besides[COMPACT_BESIDE[field]] = merged[field]
     const written = {
       ...rest,
       ...(notifyPolicy ? { notifyPolicy } : {}),
@@ -184,6 +194,11 @@ export class UiPreferenceStore {
     const raw = this.host.store.settings.appSetting(UI_PREFS_KEY)
     return raw !== null && !isObj(parseJson(raw))
   }
+}
+
+/** The host understood the change and said no: the `refused` code, not a fault of the host (`internal`) */
+function refusal(message: string): RpcError {
+  return rpcError(message, 'refused', { retryable: false, data: { reason: 'bad_value' } })
 }
 
 /** A patch's fields that are set: `undefined` is no change, `null` is (the second notice's share back to the default) */

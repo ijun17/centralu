@@ -2113,6 +2113,10 @@ export class SessionManager {
         const tool = self.meta.get(sessionId)?.tool
         return tool !== undefined && self.adapters.get(tool)?.capabilities.midTurnInput === true
       },
+      contextAtRequest: (sessionId) => {
+        const tool = self.meta.get(sessionId)?.tool
+        return tool !== undefined && self.adapters.get(tool)?.contextAtRequest === true
+      },
       get children() {
         return self.children
       },

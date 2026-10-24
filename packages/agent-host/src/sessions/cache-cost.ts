@@ -8,7 +8,9 @@ import type { CacheBilling } from '../adapters/contract.js'
  *
  *  - **Anthropic** (Claude): a read is 0.1, a five-minute write 1.25, a one-hour write 2. The split is the API's own (`cache_creation`).
  *  - **OpenAI** (Codex), by model: from GPT-5.6 on a read is 0.1 (0.05 on Sol) and a write, for a cache that lives 30 minutes, 1.25;
- *    before it caching was automatic and a write cost the same as uncached input (1). Codex does not report writes, so the input it
+ *    before it caching was automatic and a write cost the same as uncached input (1). A model whose name says no generation (a
+ *    session on the tool's default before the adapter stamped the model it runs, an hour stored without one) is priced as the
+ *    current generation, not the old. Codex does not report writes, so the input it
  *    did not read from the cache stands in for them: it is what the provider caches for the next request, as for a rebuild.
  */
 
@@ -23,7 +25,8 @@ function gptGeneration(model: string | null | undefined): number | null {
 export function cachePrices(billing: CacheBilling, model?: string | null): CachePrices {
   if (billing === 'anthropic') return { read: 0.1, write5m: 1.25, write1h: 2 }
   const generation = gptGeneration(model)
-  if (generation !== null && generation >= 5.06) return { read: /(^|[^a-z])sol([^a-z]|$)/i.test(model ?? '') ? 0.05 : 0.1, write5m: 1.25, write1h: 1.25 }
+  // A name we cannot read is billed as the current generation: only a model named as an older one has the old ratios
+  if (generation === null || generation >= 5.06) return { read: /(^|[^a-z])sol([^a-z]|$)/i.test(model ?? '') ? 0.05 : 0.1, write5m: 1.25, write1h: 1.25 }
   return { read: 0.1, write5m: 1, write1h: 1 }
 }
 

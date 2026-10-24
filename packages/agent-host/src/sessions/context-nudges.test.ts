@@ -21,6 +21,8 @@ function world(over: { window?: number | null; setting?: Partial<typeof DEFAULT_
     tool: true,
     takes: true,
     throws: false,
+    /** When set, the tool answers later (Codex's steer): the test settles each note */
+    answers: null as null | ((ok: boolean) => void)[],
   }
   const host: ContextNudgesHost = {
     session: () => session,
@@ -30,6 +32,14 @@ function world(over: { window?: number | null; setting?: Partial<typeof DEFAULT_
     nudge: (_id, text) => {
       if (state.throws) throw new Error('closed')
       if (!state.takes) return false
+      if (state.answers) {
+        return new Promise<boolean>((resolve) =>
+          state.answers?.push((ok) => {
+            if (ok) told.push(text)
+            resolve(ok)
+          }),
+        )
+      }
       told.push(text)
       return true
     },
@@ -180,6 +190,33 @@ describe('telling a growing session to call compact_self (#1492)', () => {
     expect(w.told[0]).toMatch(/about 33% full/)
     w.request(330_000)
     expect(w.told).toHaveLength(1)
+  })
+
+  it('holds a note the tool refuses when it answers later (a steer into a turn that has ended), and tells it with a later request, once (#1504 review)', async () => {
+    const w = world()
+    w.state.answers = []
+    w.request(320_000)
+    expect(w.state.answers).toHaveLength(1)
+    // More requests while the answer is awaited send nothing more
+    w.request(325_000)
+    expect(w.state.answers).toHaveLength(1)
+    w.state.answers[0]?.(false)
+    await Promise.resolve()
+    await Promise.resolve()
+    // Refused: not told, no notice, the share is still owed
+    expect(w.told).toEqual([])
+    expect(w.notices).toEqual([])
+    // The next turn's first request carries it
+    w.request(330_000)
+    expect(w.state.answers).toHaveLength(2)
+    w.state.answers[1]?.(true)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(w.told).toHaveLength(1)
+    expect(w.told[0]).toMatch(/about 33% full/)
+    expect(w.notices).toHaveLength(1)
+    w.request(340_000)
+    expect(w.state.answers).toHaveLength(2)
   })
 
   it('does not repeat a note whose send failed with every request', () => {

@@ -22,6 +22,8 @@ const state = vi.hoisted(() => ({
   /** If true, that status stays even after clearing and setting again — the "still does not come back" case */
   goalSetSticky: false,
   turnStartReply: null as null | (() => Promise<unknown>),
+  /** The model the app-server says a thread it starts runs (a session on the tool's default is told one) */
+  threadModel: null as string | null,
 }))
 
 vi.mock('./client.js', () => ({
@@ -32,7 +34,7 @@ vi.mock('./client.js', () => ({
     request(method: string, params?: Record<string, unknown>): Promise<unknown> {
       state.requests.push({ method, params })
       if (state.failMethods.has(method)) return Promise.reject(new Error(`${method} failed (test)`))
-      if (method === 'thread/start') return Promise.resolve({ thread: { id: 't1' } })
+      if (method === 'thread/start') return Promise.resolve({ thread: { id: 't1' }, ...(state.threadModel ? { model: state.threadModel } : {}) })
       if (method === 'turn/start' && state.turnStartReply) return state.turnStartReply()
       if (method === 'thread/goal/set') {
         const status = state.goalStatus
@@ -66,6 +68,7 @@ beforeEach(() => {
   state.goalStatus = 'active'
   state.goalSetSticky = false
   state.turnStartReply = null
+  state.threadModel = null
 })
 
 async function session(emit: (e: unknown) => void = () => {}) {
@@ -190,6 +193,69 @@ describe('codex /compact — runs as a function', () => {
     ])
     expect(methods()).not.toContain('turn/interrupt')
     expect(events.slice(before)).toEqual([])
+    await h.dispose()
+  })
+
+  it('a token count of a session on the tool’s default model carries the model the thread runs, so cache costs use its price ratios (#1504 review)', async () => {
+    const events: NormalizedEvent[] = []
+    state.threadModel = 'gpt-5.6-sol'
+    const h = await session((e) => events.push(e as NormalizedEvent))
+    const count = (input: number) =>
+      state.handlers!.onNotification({
+        method: 'thread/tokenUsage/updated',
+        params: { threadId: 't1', turnId: 'turn-1', tokenUsage: { total: { totalTokens: input + 10, inputTokens: input, cachedInputTokens: 0, outputTokens: 10 }, last: { totalTokens: input + 10, inputTokens: input, cachedInputTokens: 0, outputTokens: 10 }, modelContextWindow: 400_000 } },
+      })
+    count(5_000)
+    const usage = events.flatMap((e) => (e.type === 'usage_update' && e.request ? [e.request] : []))
+    expect(usage).toHaveLength(1)
+    expect(usage[0]?.model).toBe('gpt-5.6-sol')
+    await h.dispose()
+  })
+
+  it('a quiet note is steered into the running turn by name, and starts no turn (#1492)', async () => {
+    const h = await session()
+    h.send('long job')
+    await tick()
+    state.handlers!.onNotification({ method: 'turn/started', params: { threadId: 't1', turn: { id: 'turn-1' } } })
+    await expect(h.nudge!('context is 40% full')).resolves.toBe(true)
+    expect(state.requests.filter((r) => r.method === 'turn/steer')).toEqual([
+      { method: 'turn/steer', params: { threadId: 't1', input: [{ type: 'text', text: 'context is 40% full' }], expectedTurnId: 'turn-1' } },
+    ])
+    // The one turn/start is the person's message
+    expect(state.requests.filter((r) => r.method === 'turn/start')).toHaveLength(1)
+    await h.dispose()
+  })
+
+  it('a quiet note for a turn that has ended starts no turn: not sent between turns, and refused when the turn ends on the way (#1504 review)', async () => {
+    const h = await session()
+    // No turn at all
+    expect(h.nudge!('early')).toBe(false)
+    h.send('job')
+    await tick()
+    state.handlers!.onNotification({ method: 'turn/started', params: { threadId: 't1', turn: { id: 'turn-1' } } })
+    // Codex sends the last request's token count just before the turn completes: the note goes out, the turn ends, and Codex
+    // refuses a steer for a turn that is not the one running
+    state.failMethods.add('turn/steer')
+    const late = h.nudge!('about 13% full')
+    state.handlers!.onNotification({ method: 'turn/completed', params: { threadId: 't1', turn: { id: 'turn-1' } } })
+    await expect(late).resolves.toBe(false)
+    // After the turn: nothing is sent at all
+    state.requests.length = 0
+    expect(h.nudge!('after')).toBe(false)
+    await tick()
+    expect(methods()).toEqual([])
+    await h.dispose()
+  })
+
+  it('a quiet note is not taken in a compact turn the session started', async () => {
+    const h = await session()
+    h.send('/compact')
+    await tick()
+    state.handlers!.onNotification({ method: 'turn/started', params: { threadId: 't1', turn: { id: 'compact-1' } } })
+    state.requests.length = 0
+    expect(h.nudge!('note')).toBe(false)
+    await tick()
+    expect(methods()).toEqual([])
     await h.dispose()
   })
 

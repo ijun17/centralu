@@ -30,14 +30,14 @@ export type ContextNudgesHost = {
   setting(): AutoCompact
   /** Whether `compact_self` is one of the session's tools */
   hasCompactTool(sessionId: string): boolean
-  /** `SessionHandle.nudge`: whether the tool took the note. False for a session with no process */
-  nudge(sessionId: string, text: string): boolean
+  /** `SessionHandle.nudge`: whether the tool took the note (a promise when it knows later). False for a session with no process */
+  nudge(sessionId: string, text: string): boolean | Promise<boolean>
   /** A line in the conversation, in Centralu's name */
   notice(sessionId: string, text: string): void
 }
 
 /** What a session was last told, and what is waiting to be told */
-type Cycle = { told: Set<'first' | 'second'>; waiting: 'first' | 'second' | null; size: number }
+type Cycle = { told: Set<'first' | 'second'>; waiting: 'first' | 'second' | null; size: number; sending: boolean }
 
 export class ContextNudges {
   private readonly cycles = new Map<string, Cycle>()
@@ -70,7 +70,7 @@ export class ContextNudges {
 
   private cycle(id: string): Cycle {
     let c = this.cycles.get(id)
-    if (!c) this.cycles.set(id, (c = { told: new Set(), waiting: null, size: 0 }))
+    if (!c) this.cycles.set(id, (c = { told: new Set(), waiting: null, size: 0, sending: false }))
     return c
   }
 
@@ -97,25 +97,48 @@ export class ContextNudges {
 
   private deliver(id: string, c: Cycle, m: SessionInfo, window: number, setting: AutoCompact): void {
     const which = c.waiting
-    if (!which) return
+    // A note is on its way and the tool has not said yet whether it took it: one at a time
+    if (!which || c.sending) return
     const percent = Math.round((c.size / window) * 100)
     const used = `${Math.round(c.size / 1000)}k of ${Math.round(window / 1000)}k tokens`
     const text =
       which === 'second'
         ? `[Centralu] Your context is now about ${percent}% full (${used}), and the tool compacts it by itself in the middle of work at ${Math.round(setting.share * 100)}%. Call compact_self when the current step is done, at the latest; do not stop what you are doing for it.`
         : `[Centralu] Your context is now about ${percent}% full (${used}). When this step of the work is done, call compact_self so the next step starts from a summary; do not stop what you are doing for it.`
-    let took = false
-    try {
-      took = this.host.nudge(id, text)
-    } catch (err) {
+    const failed = (err: unknown) => {
       // Not told: the share stays told, so a failing send is not repeated with every request
       c.waiting = null
       console.error(`[compact] ${id.slice(0, 8)}: could not send the context notice: ${err instanceof Error ? err.message : String(err)}`)
+    }
+    const answered = (took: boolean) => {
+      // Not taken (a turn that has ended, or none that can be steered): it waits for a later request of a running turn
+      if (!took) return
+      c.waiting = null
+      this.host.notice(id, `Centralu told it its context is ${percent}% full: call compact_self when this step is done`)
+    }
+    let took: boolean | Promise<boolean>
+    try {
+      took = this.host.nudge(id, text)
+    } catch (err) {
+      failed(err)
       return
     }
-    if (!took) return
-    c.waiting = null
-    this.host.notice(id, `Centralu told it its context is ${percent}% full: call compact_self when this step is done`)
+    if (typeof took === 'boolean') {
+      answered(took)
+      return
+    }
+    c.sending = true
+    void took.then(
+      (ok) => {
+        c.sending = false
+        // A compaction while it was on its way started a new cycle: this note belongs to the one before
+        if (!this.stopped && this.cycles.get(id) === c) answered(ok)
+      },
+      (err: unknown) => {
+        c.sending = false
+        if (!this.stopped && this.cycles.get(id) === c) failed(err)
+      },
+    )
   }
 
   /** The host is leaving: nothing is told after this, and nothing waits to be */

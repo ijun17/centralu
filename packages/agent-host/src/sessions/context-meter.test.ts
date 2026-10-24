@@ -15,16 +15,16 @@ function world() {
   const clock = { now: 1_000_000 }
   const meter = new ContextMeter(() => clock.now)
   /** An event as the pipeline hands it over: stale readings are asked first, then the state moves, then the meter hears it */
-  const feed = (e: NormalizedEvent): NormalizedEvent | null => {
+  const feed = (e: NormalizedEvent, perRequest = false): NormalizedEvent | null => {
     if (e.type === 'context_update' && meter.stale(e)) return null
     if (e.type === 'state_change') m.state = e.state
     if (e.type === 'context_update') m.context = { used: e.used, window: e.window, exactness: e.exactness }
-    const estimate = meter.observe(e, m)
+    const estimate = meter.observe(e, m, perRequest)
     if (estimate?.type === 'context_update') m.context = { used: estimate.used, window: estimate.window, exactness: estimate.exactness }
     return estimate
   }
-  const request = (size: number, agent?: string) =>
-    feed({ type: 'usage_update', sessionId: 's1', tokens: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 }, request: { inputTokens: 1_000, cacheReadTokens: size - 6_000, cacheCreationTokens: 5_000, ...(agent ? { agent } : {}) } })
+  const request = (size: number, agent?: string, perRequest = false) =>
+    feed({ type: 'usage_update', sessionId: 's1', tokens: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 }, request: { inputTokens: 1_000, cacheReadTokens: size - 6_000, cacheCreationTokens: 5_000, ...(agent ? { agent } : {}) } }, perRequest)
   const start = () => feed({ type: 'state_change', sessionId: 's1', state: 'working' })
   const end = () => feed({ type: 'state_change', sessionId: 's1', state: 'waiting_input' })
   const read = (used: number) => feed({ type: 'context_update', sessionId: 's1', used, window: WINDOW, exactness: 'exact' })
@@ -118,6 +118,23 @@ describe('ContextMeter', () => {
     expect(w.m.context?.used).toBe(91_000)
   })
 
+  it('makes no estimate for a tool that reads the size with every request, which would only flicker in front of its reading (#1504 review)', () => {
+    const w = world()
+    w.start()
+    expect(w.request(60_000, undefined, true)).toBeNull()
+    w.read(60_500)
+    expect(w.m.context).toEqual({ used: 60_500, window: WINDOW, exactness: 'exact' })
+    w.clock.now += 10_000
+    expect(w.request(90_000, undefined, true)).toBeNull()
+    w.read(90_400)
+    expect(w.m.context).toEqual({ used: 90_400, window: WINDOW, exactness: 'exact' })
+    // The turn's end and the next turn behave as for any tool
+    w.end()
+    w.start()
+    expect(w.request(95_000, undefined, true)).toBeNull()
+    expect(w.request(95_000)).not.toBeNull()
+  })
+
   it('says nothing for a subagent’s request, with no window known, outside a turn, or for a session that is gone', () => {
     const w = world()
     w.start()
@@ -179,6 +196,18 @@ describe('on the session manager (#1492)', () => {
       tokens: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
       request: { inputTokens: 1_000, cacheReadTokens: size - 1_000, cacheCreationTokens: 0 },
     })
+
+  it('leaves the figure to the tool’s own reading for a tool that reads it with every request (#1504 review)', async () => {
+    world.adapter.contextAtRequest = true
+    const { id, h } = await session()
+    h.emitEvent({ type: 'state_change', sessionId: id, state: 'working' })
+    world.events.length = 0
+    request(h, id, 60_000)
+    expect(context(id)).toEqual({ used: 20_000, window: 200_000, exactness: 'exact' })
+    expect(world.events.filter((e) => e.type === 'context_update')).toEqual([])
+    h.emitContext(60_400, 200_000)
+    expect(context(id)).toEqual({ used: 60_400, window: 200_000, exactness: 'exact' })
+  })
 
   it('moves the meter with the assistant messages of a turn before it ends, tells the window, and leaves the end to the tool’s reading', async () => {
     const { id, h } = await session()

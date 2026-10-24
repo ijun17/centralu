@@ -53,8 +53,12 @@ export class ContextMeter {
     return false
   }
 
-  /** After an event is applied (`m` is the session as it now is): the estimate it brings, if any, as the event to apply */
-  observe(e: NormalizedEvent, m: SessionInfo): NormalizedEvent | null {
+  /**
+   * After an event is applied (`m` is the session as it now is): the estimate it brings, if any, as the event to apply.
+   * `perRequest`: the tool reads the size with every request (Codex sends it right after the request's token count), so the
+   * figure is exact without an estimate, which could only flicker in front of it (#1504 review)
+   */
+  observe(e: NormalizedEvent, m: SessionInfo, perRequest = false): NormalizedEvent | null {
     const s = this.state(m.id)
     if (e.type === 'session_deleted') {
       this.sessions.delete(m.id)
@@ -68,7 +72,7 @@ export class ContextMeter {
     // A turn that ended with no reading in it owes one: the tool reads after the turn ends (the next one to come is its)
     if (s.working && !working) s.owed = !s.readThisTurn
     s.working = working
-    if (e.type !== 'usage_update' || !e.request || e.request.agent !== undefined) return null
+    if (perRequest || e.type !== 'usage_update' || !e.request || e.request.agent !== undefined) return null
     // A subagent has a prompt of its own, and the tool's reading is in this turn already
     if (!working || s.readThisTurn || !m.context || m.context.window <= 0) return null
     const used = Math.min(m.context.window, e.request.inputTokens + e.request.cacheReadTokens + (e.request.cacheCreationTokens ?? 0))
