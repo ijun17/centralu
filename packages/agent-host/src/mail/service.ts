@@ -553,10 +553,6 @@ export class MailService {
       if (sender.kind === 'centralu') throw refuse('not_allowed', 'Centralu posts with postAsCentralu')
       const standing = this.standing(thread, caller)
       if (!standing) throw refuse('not_participant', `${caller} is not in thread ${threadId}`)
-      // A session writing into its own request to the orchestrator counts against the hour's words, as a new request does (§9.7)
-      if (sender.kind === 'session' && this.isAsk(thread) && thread.owner === caller && thread.assignee !== null) {
-        this.checkAskRate(this.groupAsks(caller, thread.assignee), now)
-      }
       // A retry of a post that was stored gets that post, also when the thread has been closed since: it was not lost
       const existing = this.duplicate(thread.id, caller, input.dedupeKey)
       if (existing) return { message: existing, thread, duplicate: true }
@@ -573,6 +569,11 @@ export class MailService {
         if (last && last.kind === input.kind && last.body === input.body && now - last.createdAt <= REPEAT_WINDOW_MS) {
           return { message: last, thread, duplicate: true, repeated: true }
         }
+      }
+      // A session writing into its own request to the orchestrator counts against the hour's words, as a new request does (§9.7). After the checks that
+      // hand back a post that was stored, so a retry of the last allowed word is not refused
+      if (sender.kind === 'session' && this.isAsk(thread) && thread.owner === caller && thread.assignee !== null) {
+        this.checkAskRate(this.groupAsks(caller, thread.assignee), now)
       }
 
       // A participant that is gone, or whose seat cannot read mail, gets no receipt: the others are written to all the same. Refused

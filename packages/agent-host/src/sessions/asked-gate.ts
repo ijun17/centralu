@@ -52,7 +52,7 @@ export class AskedGate {
   async askCli(orchestratorId: string, tool: string, input: Record<string, unknown>, signal?: AbortSignal): Promise<RequestTurnAnswer> {
     const asker = this.host.askedBy(orchestratorId)
     if (!asker || askedAct(tool, input, asker.threadId) === null) return { allowed: true, asked: false }
-    if (outlivesTheTurn(tool)) {
+    if (outlivesTheTurn(tool, input)) {
       return {
         allowed: false,
         message: `Nothing was done: ${tool} would go on after this turn, where the person's card for the session's request no longer applies, so a request's turn does not start it. Do the work in this turn, or tell the session to ask the person.`,

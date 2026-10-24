@@ -56,12 +56,18 @@ const READS: ReadonlySet<string> = new Set([
  * with no asker and no card (found by the review of #1516: a subagent's later steps, a cron prompt's, ran unasked under auto). So a request's turn is
  * refused them outright, not asked about
  */
-const OUTLIVES_THE_TURN: ReadonlySet<string> = new Set(['Agent', 'Task', 'CronCreate', 'ScheduleWakeup', 'Workflow', 'Monitor'])
+const OUTLIVES_THE_TURN: ReadonlySet<string> = new Set(['Agent', 'Task', 'CronCreate', 'ScheduleWakeup', 'Workflow', 'Monitor', 'RemoteTrigger'])
 
-/** Whether the CLI's tool would outlive the turn it is called in (see `OUTLIVES_THE_TURN`) */
-export function outlivesTheTurn(name: string): boolean {
-  return OUTLIVES_THE_TURN.has(name)
+/**
+ * Whether the CLI's tool would outlive the turn it is called in (see `OUTLIVES_THE_TURN`). Also a command started in the background: when it ends
+ * the CLI starts a turn of its own, which runs the rest of what the request asked for with no asker and no card
+ */
+export function outlivesTheTurn(name: string, input: Record<string, unknown>): boolean {
+  return OUTLIVES_THE_TURN.has(name) || ((name === 'Bash' || name === 'PowerShell') && input.run_in_background === true)
 }
+
+/** The CLI's own tools are named in capitals (`Bash`, `Write`) or by their MCP server (`mcp__…`); Centralu's tools and commands in lower case with underscores */
+const isCliTool = (name: string): boolean => /^[A-Z]/.test(name) || name.startsWith('mcp__')
 
 /** `agent_session` actions that only look */
 const AGENT_READS: ReadonlySet<string> = new Set(['list', 'status', 'wait'])
@@ -94,11 +100,16 @@ const FREE_TEXT: ReadonlySet<string> = new Set([
 const FREE_CHARS = 300
 /** The most a card shows of a step: past it the step is not asked about and not done, since part of it would be hidden */
 const ACT_MAX = 2000
+/** The most a card shows of a step of the CLI's own, whose payload is not cut */
+const CLI_ACT_MAX = 6000
 
-/** The arguments as one line of JSON, free text cut and marked with its length, the rest whole */
-function argsLine(args: Record<string, unknown>): string {
+/**
+ * The arguments as one line of JSON. For Centralu's own tools long free text is cut and marked with its length, the rest whole. For the CLI's own tools
+ * nothing is cut: what a `Write` puts in a file, an `Edit` swaps in or a message sends is the payload the person decides on, not commentary on it
+ */
+function argsLine(args: Record<string, unknown>, cut: boolean): string {
   return JSON.stringify(args, (key: string, value: unknown): unknown =>
-    key !== '' && FREE_TEXT.has(key) && typeof value === 'string' && value.length > FREE_CHARS ? `${value.slice(0, FREE_CHARS)}… (${value.length} characters)` : value,
+    cut && key !== '' && FREE_TEXT.has(key) && typeof value === 'string' && value.length > FREE_CHARS ? `${value.slice(0, FREE_CHARS)}… (${value.length} characters)` : value,
   )
 }
 
@@ -120,9 +131,10 @@ export function askedAct(name: string, args: Record<string, unknown>, thread: st
     if ((action === 'reply' || action === 'update' || action === 'close' || action === 'handled') && args.thread === thread) return null
     if (action === 'send' && typeof args.to === 'string' && args.to.trim() === 'person') return null
   }
-  const shown = argsLine(args)
+  const cli = isCliTool(name)
+  const shown = argsLine(args, !cli)
   const act = `run ${name} ${shown === '{}' ? '' : shown}`.trim()
-  return act.length > ACT_MAX ? { tooLong: true } : { act }
+  return act.length > (cli ? CLI_ACT_MAX : ACT_MAX) ? { tooLong: true } : { act }
 }
 
 /** The card's question (§9.7): who asked, from the host's record of the session and its project, and what for */

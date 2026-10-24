@@ -79,10 +79,20 @@ describe('which steps of the orchestrator ask the person when a session asked fo
   })
 
   it('a step too long to show whole is not asked about: it is refused rather than shown in part', () => {
-    expect(askedAct('Bash', { command: 'echo ' + 'x'.repeat(3_000) }, THREAD)).toEqual({ tooLong: true })
+    expect(askedAct('Bash', { command: 'echo ' + 'x'.repeat(7_000) }, THREAD)).toEqual({ tooLong: true })
     expect(askedAct('start_agent', { task: 't', machine: 'm'.repeat(3_000) }, THREAD)).toEqual({ tooLong: true })
     // A long free text alone is cut, not refused
     expect(askedAct('send_to_session', { sessionId: 's', text: 'x'.repeat(50_000) }, THREAD)).toHaveProperty('act')
+  })
+
+  it('the CLI’s own steps are shown whole: what a Write puts in a file or a message sends is the payload the person decides on', () => {
+    const content = 'name: ci ' + 'step '.repeat(400)
+    expect(line('Write', { file_path: '.github/workflows/x.yml', content })).toContain(JSON.stringify(content))
+    expect(line('SendMessage', { to: 'a', message: 'm'.repeat(2_000) })).toContain('m'.repeat(2_000))
+    // Centralu’s own tools keep cutting long free text
+    expect(line('send_to_session', { sessionId: 's', text: 'x'.repeat(2_000) })).toContain('(2000 characters)')
+    // And one too long even for that is refused
+    expect(askedAct('Write', { file_path: 'a', content: 'x'.repeat(7_000) }, THREAD)).toEqual({ tooLong: true })
   })
 
   it('the question names the session and its project, and says when the project is not trusted', () => {

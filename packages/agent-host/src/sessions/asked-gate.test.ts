@@ -75,7 +75,7 @@ describe('the gate around the orchestrator’s steps (§9.7)', () => {
   it('a step too long to show whole is neither asked about nor run: a card that hid part of it would not be a fair question', async () => {
     const w = world()
     const r = ran()
-    const out = await w.gate.when('orc', { name: 'Bash', args: { command: 'echo ' + 'x'.repeat(3_000) } }, undefined, r.run, refused)
+    const out = await w.gate.when('orc', { name: 'Bash', args: { command: 'echo ' + 'x'.repeat(7_000) } }, undefined, r.run, refused)
     expect(out.isError).toBe(true)
     expect(out.text).toContain('too long to show the person')
     expect(w.asked).toEqual([])
@@ -104,11 +104,17 @@ describe('the gate around the orchestrator’s steps (§9.7)', () => {
 
   it('a step that would outlive the turn is refused without a question: a subagent, a scheduled prompt, a watched command', async () => {
     const w = world({ answer: 'allow' })
-    for (const tool of ['Agent', 'Task', 'CronCreate', 'ScheduleWakeup', 'Workflow', 'Monitor']) {
+    for (const tool of ['Agent', 'Task', 'CronCreate', 'ScheduleWakeup', 'Workflow', 'Monitor', 'RemoteTrigger']) {
       const r = await w.gate.askCli('orc', tool, { prompt: 'x' })
       expect(r, tool).toMatchObject({ allowed: false, message: expect.stringContaining('would go on after this turn') })
     }
-    expect(w.asked).toEqual([])
+    // A command started in the background ends in a turn of the CLI’s own, with no asker: refused too; in the foreground it is asked about
+    for (const tool of ['Bash', 'PowerShell']) {
+      expect(await w.gate.askCli('orc', tool, { command: 'sleep 8 && echo x', run_in_background: true }), tool).toMatchObject({ allowed: false })
+      expect(await w.gate.askCli('orc', tool, { command: 'echo x', run_in_background: false }), tool).toEqual({ allowed: true, asked: true })
+    }
+    // (nobody was asked about the refused ones: the only questions are the two foreground commands)
+    expect(w.asked.filter((q) => !q.includes('"run_in_background":false'))).toEqual([])
     // And in a turn that is nobody’s request they are the CLI’s own, as before
     const none = world({ asker: () => null })
     expect(await none.gate.askCli('orc', 'Agent', {})).toEqual({ allowed: true, asked: false })

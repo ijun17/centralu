@@ -137,7 +137,8 @@ describe('a hook in front of every tool call of a session’s request', () => {
     w.turn.answer = { allowed: false, message: 'no' }
     const withApps = w.hookWithApps(['app-board'])
     expect(await w.hook('mcp__centralu__read_session')).toEqual({})
-    expect(await withApps('mcp__app-board__merge_when_green')).toEqual({})
+    // (allowed here, so the CLI puts no card of its own before the one the call raises, naming the session)
+    expect(await withApps('mcp__app-board__merge_when_green')).toEqual({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow' } })
     expect(await w.hook('AskUserQuestion', { questions: [] })).toEqual({})
     expect(w.turn.asked).toEqual([])
     // A server called app-x that this session was never given is not Centralu’s: it asks like any other (#93)
@@ -154,6 +155,15 @@ describe('a hook in front of every tool call of a session’s request', () => {
     w.turn.active = true
     w.turn.fails = true
     expect(await w.hook('Bash', { command: 'ls' })).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny', permissionDecisionReason: expect.stringContaining('could not ask the person') } })
+    await handle.dispose()
+  })
+
+  it('a turn that cannot be told is refused, not let through: a hook that throws would let the tool run', async () => {
+    const w = world('auto')
+    const handle = await w.start('h9b')
+    const broken = requestTurnHooks({ requestTurn: { active: () => { throw new Error('the store is gone') }, ask: async () => ALLOWED } }, () => true)!.PreToolUse[0]!.hooks[0]!
+    const out = (await broken({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: {} } as never, 'toolu_4', { signal: new AbortController().signal })) as HookOutput
+    expect(out).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } })
     await handle.dispose()
   })
 
