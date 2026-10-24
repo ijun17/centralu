@@ -1,4 +1,4 @@
-import { query, type PermissionMode, type SettingSource } from '@anthropic-ai/claude-agent-sdk'
+import { query, type SettingSource } from '@anthropic-ai/claude-agent-sdk'
 import { randomUUID } from 'node:crypto'
 import { InputReceipts, type InputReceipt } from '../input-receipts.js'
 import type { InputObserver } from '../contract.js'
@@ -17,6 +17,7 @@ import { ClaudeServers } from './session-servers.js'
 import { appToolOf, isOrchestratorTool, permissionOptionsFor, settingSourcesFor } from './permissions.js'
 import { liveQueries, probeIds, querySessions } from './live-queries.js'
 import type { ClaudeMessage } from './json.js'
+import { requestTurnHooks } from './request-hook.js'
 import { claudeAutoCompactWindow, claudeQueryOptions, compactPointOff, type ClaudeInput, type QueryHandle } from './sdk-query.js'
 import { ClaudeRaceRetry, type RaceMsg } from './refresh-race.js'
 import { tracksInputs } from './tracked-input.js'
@@ -85,11 +86,6 @@ export class ClaudeSession implements SessionHandle {
   private turnOpen = false
   /** The live query — the channel for asking about slash commands and context. */
   private query: QueryHandle | null = null
-  /** The permission mode the CLI starts in, and returns to after a session's request (see `syncMode`) */
-  private baseMode: PermissionMode = 'default'
-  /** The mode the CLI runs in now; null when a process another host started may be in another (it is set at the next input) */
-  private modeNow: PermissionMode | null = null
-  private modeQueue: Promise<void> = Promise.resolve()
   private readonly stream: ClaudeStreamNormalizer
   /** The approval and question cards (see `ClaudeCards`) */
   private readonly cards: ClaudeCards
@@ -187,8 +183,6 @@ export class ClaudeSession implements SessionHandle {
     this.servers.load()
     const servers = this.servers.mcpServers()
     const permissionOptions = await permissionOptionsFor(this.opts)
-    this.baseMode = permissionOptions.permissionMode
-    this.modeNow = this.opts.processSource?.adopt && this.opts.requestTurn ? null : this.baseMode
     // Code intelligence off for this session alone (#686): its language-server plugins disabled in the flag layer
     const codeIntelligence = this.opts.noCodeIntelligence
       ? { settings: await noCodeIntelligenceSettings(this.opts.cwd, settingSourcesFor(this.opts) as { settingSources?: SettingSource[] }) }
@@ -214,6 +208,7 @@ export class ClaudeSession implements SessionHandle {
         codeIntelligence,
         spawn: (o) => (this.opts.processSource ? this.spawnProcess(o) : (this.proc = spawnLocalAgent(o))),
         canUseTool: (toolName, toolInput, options) => this.cards.canUseTool(preset, toolName, toolInput, options),
+        hooks: requestTurnHooks(this.opts, () => this.servers.orchestratorServer !== null),
       }),
     }))
     // A usage probe (#726) is not a session anyone else may borrow: a model list asked meanwhile would use a query about to close
@@ -235,33 +230,11 @@ export class ClaudeSession implements SessionHandle {
     void this.read(q)
   }
 
-  /**
-   * The CLI's permission mode for the turn that is about to run (docs/plans/mailbox.md §9.7, #1447). The orchestrator's turn that a session's request
-   * is runs under `default`, whatever the session's preset: under auto the CLI is in `bypassPermissions` and never asks, so a request could have it run
-   * a command or write a file unasked. Any other turn runs in the session's own mode. Measured on a live query, bypass to default and back
-   * (scripts/probe-request-turn-mode.mts). Calls run in order, each reading the host's answer when it runs
-   */
-  private syncMode(): Promise<void> {
-    const next = this.modeQueue.then(async () => {
-      const q = this.query
-      if (!q || this.closed || !this.opts.requestTurn) return
-      const want: PermissionMode = this.opts.requestTurn.active() ? 'default' : this.baseMode
-      if (this.modeNow === want) return
-      await q.setPermissionMode(want)
-      this.modeNow = want
-    })
-    this.modeQueue = next.catch(() => {})
-    return next
-  }
-
   /** What the CLI reads: each message queued for it, in order, until the session closes */
   private async *input() {
     while (!this.closed) {
       const next = this.queue.shift()
       if (next !== undefined) {
-        // A turn that a session's request starts runs under the narrower mode, set before the CLI reads its first word. If it cannot be set the
-        // input is not sent: the stream ends in an error, and the request's steps are never run unasked
-        if (!next.quiet) await this.syncMode()
         if (!next.quiet) this.raceRetry.read(next)
         // A quiet input starts no turn and has no result to settle it, so nothing waits for it
         if (!next.parentNote && !next.quiet) this.personInputs.add(next.uuid)
@@ -404,8 +377,6 @@ export class ClaudeSession implements SessionHandle {
       if (e.type === 'error' || e.type === 'limit_reached') this.endStopWait()
     }
     this.resultInputs = null
-    // After the events: the host has heard the turn end, so a session's request is no longer the turn and the CLI goes back to its own mode
-    if (m.type === 'result' && !retrying && this.opts.requestTurn) void this.syncMode().catch((err: Error) => console.error(`[claude] ${this.sessionId.slice(0, 8)}: could not restore the permission mode: ${err.message}`))
     // A result ends the open turn: a Stop still waiting for the interrupt's answer is confirmed by it (see `interrupt`)
     if (m.type === 'result') this.confirmStop()
     this.schedules.arm()

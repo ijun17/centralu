@@ -7,6 +7,7 @@ import { probeIds } from './live-queries.js'
 import type { ModelQuery } from './models.js'
 import { settingSourcesFor } from './permissions.js'
 import type { ClaudeMessage } from './json.js'
+import type { requestTurnHooks } from './request-hook.js'
 import type { ClaudeCards } from './session-cards.js'
 import type { UsageQuery } from './usage.js'
 
@@ -25,8 +26,6 @@ export type QueryHandle = AsyncIterable<ClaudeMessage> &
     getContextUsage(): Promise<{ totalTokens?: number; maxTokens?: number; model?: string; autoCompactThreshold?: number } | undefined>
     /** Interrupts the turn in progress. Only works in streaming input mode — which is the mode we use. */
     interrupt(options?: { cancelQueued: boolean }): Promise<unknown>
-    /** Changes the permission mode of the running session (sdk.d.ts: streaming input only). A session's request runs under `default` (§9.7) */
-    setPermissionMode(mode: PermissionMode): Promise<void>
     /** Optional on older SDKs; cancel_async_message removes one UUID-stamped queued input. */
     cancelAsyncMessage?(uuid: string): Promise<boolean>
     /** Stops one background task; a task_notification with status 'stopped' follows (sdk.d.ts, measured — #290). */
@@ -57,6 +56,8 @@ export type ClaudeQueryInputs = {
   codeIntelligence: { settings?: { enabledPlugins: Record<string, false> } }
   /** Starts the CLI's process: in the keeper, or here (see `spawnClaudeCodeProcess` below) */
   spawn: (o: LocalSpawnSpec) => AgentProcess
+  /** The person's card for every step of the CLI's own in a session's request (`requestTurnHooks`); none for a session that is not given a request turn */
+  hooks?: ReturnType<typeof requestTurnHooks>
   /** The session's approval and question cards, for the preset it runs under */
   canUseTool: (toolName: string, toolInput: Record<string, unknown>, options?: { signal?: AbortSignal }) => ReturnType<ClaudeCards['canUseTool']>
 }
@@ -107,7 +108,7 @@ export function flagSettings(opts: Pick<CreateSessionOpts, 'autoCompactTokens'>,
 }
 
 /** The options a session's `query()` starts with */
-export function claudeQueryOptions({ sessionId, opts, executablePath, servers, permissionOptions, codeIntelligence, spawn, canUseTool }: ClaudeQueryInputs) {
+export function claudeQueryOptions({ sessionId, opts, executablePath, servers, permissionOptions, codeIntelligence, spawn, canUseTool, hooks }: ClaudeQueryInputs) {
   return withoutCrossSessionMessaging({
     cwd: opts.cwd,
     model: opts.model,
@@ -182,6 +183,8 @@ export function claudeQueryOptions({ sessionId, opts, executablePath, servers, p
         }
       : {}),
     ...permissionOptions,
+    // Every tool call of a session's request in front of the person, in any permission mode (request-hook.ts)
+    ...(hooks ? { hooks } : {}),
     ...flagSettings(opts, codeIntelligence),
     // A usage probe starts no server of the person's: those in ~/.claude.json would run for a read that needs none (#726)
     ...(probeIds.has(sessionId) ? { strictMcpConfig: true } : {}),

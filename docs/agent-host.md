@@ -2965,10 +2965,10 @@ a script's too. A window's own `createSession` is the person typing, and starts 
 survives a host swap in the store and needs no mark of its own. The turns of the session that no one else started (not the person's, not a report's, not another
 session's) belong to the thread while it runs (`turnRecorder`), so work handed on in them is a child thread of it and the turn's end is a pause, as for a session's work (§6).
 
-**A session asking the orchestrator** (3.11, #1447, §9.7). `mailRelations` lets any session write to the orchestrator (unless its tool cannot run a request's turn narrowed:
-`orchestratorAsks`, from the adapter's `narrowsTurn`), and `MailService.open` holds the limits of asking (`checkAsk`): the request is an `assign` (a thread with the session as owner
+**A session asking the orchestrator** (3.11, #1447, §9.7). `mailRelations` lets any session write to the orchestrator (unless its tool cannot put each step of a request to the host:
+`orchestratorAsks`, from the adapter's `gatesSteps`; checked before a reply in an existing thread, so a request opened earlier does not wake it either), and `MailService.open` holds the limits of asking (`checkAsk`): the request is an `assign` (a thread with the session as owner
 and the orchestrator as assignee, `MailService.isAsk`), one is open at a time (`open`, `running` or `blocked`; one the orchestrator has answered, `review`, is not open), at most
-`ASKS_PER_HOUR` (5) are opened an hour, both counted over the asker's project and its root session (`MailPolicy.askGroup`), and the refusal names the open thread when it is the
+`ASKS_PER_HOUR` (5) words an hour go to the orchestrator, a request's first word and each word written into it after (`checkAskRate`, also in `post`), both limits counted over the asker's project and its root session (`MailPolicy.askGroup`), and the refusal names the open thread when it is the
 session's own (`refused` with `data.thread`). `MailService.requestedBy` is the session whose request a thread is, from the thread's first word and not its owner now, which
 `partyGone` changes. The request's words are never inline (`drain`): the orchestrator's wake lists host fields (`relationWord`: "a session asking you for something") and
 `mail read` adds the header over the quoted words (`MailTool`'s `asker`, from `AskedByHost`), in the request's own turn only (`MailTurns.current(...).threadId`), where another turn is
@@ -2977,8 +2977,11 @@ held `policy` by the delivery (`untrustedAsker`) until the person releases it. `
 follow the thread's owner. The end of the orchestrator's turn is reported to the asking session as any turn of work is, in the thread of the turn that ended (`MailTurns.threadOf`, else `askedOf`),
 and for a request in Centralu's words alone (`askedReportBody`): no last response, no `read_session` pointer. The privileged steps are gated by `AskedGate` (`sessions/asked-gate.ts`):
 `runParsed` calls it around every tool and command, `SessionApps.call` around every app tool, and the Claude adapter around every step of the CLI's own (`CreateSessionOpts.requestTurn`:
-`syncMode` sets `default` through `Query.setPermissionMode` before the wake of a request is written, as measured in `scripts/probe-request-turn-mode.mts`, and `canUseTool` asks `AskedGate.askCli`;
-an app's tool is let through there because its own call asks, so the person is asked once). When the orchestrator's open turn is a request (`askedBy`), a step that `askedAct` does not list as
+`requestTurnHooks` puts a `PreToolUse` hook in front of every tool call, in any permission mode, with a `timeout` long enough for a person, and it asks `AskedGate.askCli`: a read is left to the CLI's
+own flow, an Allow is returned as the hook's `allow` so the CLI does not ask again, a Deny as `deny` with the words the model reads, and a question that cannot be asked as `deny`; a tool of Centralu's own
+server and an attached app's are left to their own gates, so the person is asked once. A permission mode narrowed per turn (`setPermissionMode`) was built first and dropped: tools that need no permission never reach
+the permission callback in it. `scripts/probe-pretooluse-hook.mts` measures the hook with the real CLI). `askCli` refuses without a question what would go on after the turn (`OUTLIVES_THE_TURN`: a subagent, a scheduled prompt,
+a watched command). When the orchestrator's open turn is a request (`askedBy`), a step that `askedAct` does not list as
 a read raises an `other` card (`ORCHESTRATOR_CHANGE`, `alwaysAsk`, not covered) with "Session "…" in project "…" asked the orchestrator to run …", and Allow runs it with the
 orchestrator's own cards covered for the call (`HostCards.cover`: answered `allow` once, never persisted, only for work the call itself started and only until it returns or its signal fires; an Allow that arrives after the request's turn ended runs nothing). A request held for an untrusted project is shown to the orchestrator as waiting, with none of its words, so reading it cannot take it off the person's Release list. A turn kept under the keeper across a host swap is read back from `mail_turns` (`MailTurns.closeStale`) and is still the request; a lost one is closed,
 and its steps are not asked about, since its tool calls are gone with it. Not done: a linked machine's session asking the hub's orchestrator (slice 4, the machine's asks

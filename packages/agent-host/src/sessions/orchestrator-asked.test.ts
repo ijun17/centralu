@@ -91,8 +91,8 @@ beforeEach(async () => {
     turnStarted: turnRecorder(mail, w.store.mail, turns),
   })
   delivery.start()
-  // Claude's adapter runs a request's turn under a narrower mode (`narrowsTurn`); the fake one has no CLI to narrow, and says it can
-  w.adapter.capabilities.narrowsTurn = true
+  // Claude's adapter runs a request's turn under a narrower mode (`gatesSteps`); the fake one has no CLI to narrow, and says it can
+  w.adapter.capabilities.gatesSteps = true
   // The orchestrator runs without asking: the preset that would answer every card by itself
   orc = await w.mgr.createSession({ projectId: null, cwd: tmpdir(), tool: 'claude', permissionPreset: 'auto', kind: 'orchestrator' })
   orcOpts = w.adapter.lastOpts
@@ -305,7 +305,7 @@ describe('the CLI’s own steps in a request’s turn (§9.7)', () => {
     await due(orc.id)
     expect(turn.active()).toBe(true)
 
-    expect(await turn.ask('Read', { file_path: 'a.txt' })).toEqual({ allowed: true })
+    expect(await turn.ask('Read', { file_path: 'a.txt' })).toEqual({ allowed: true, asked: false })
     expect(card()).toBeUndefined()
     const bash = turn.ask('Bash', { command: 'echo pwned > file' })
     await eventually(() => !!card())
@@ -318,7 +318,11 @@ describe('the CLI’s own steps in a request’s turn (§9.7)', () => {
     const write = turn.ask('Write', { file_path: 'b.txt', content: 'x' })
     await eventually(() => !!card())
     w.mgr.respondApproval(orc.id, card()!.requestId, 'allow')
-    expect(await write).toEqual({ allowed: true })
+    expect(await write).toEqual({ allowed: true, asked: true })
+
+    // A subagent or a scheduled prompt would go on after the turn: refused, with no card
+    expect(await turn.ask('Agent', { prompt: 'do it' })).toMatchObject({ allowed: false, message: expect.stringContaining('would go on after this turn') })
+    expect(card()).toBeUndefined()
 
     // The turn ends: it is not a request’s turn, and the CLI’s steps are the orchestrator’s own again
     handleOf(orc.id).finishTurn()
@@ -327,7 +331,7 @@ describe('the CLI’s own steps in a request’s turn (§9.7)', () => {
   })
 
   it('where the orchestrator’s tool cannot narrow a turn, a session cannot ask it: refused, in words, before anything is written', async () => {
-    w.adapter.capabilities.narrowsTurn = false
+    w.adapter.capabilities.gatesSteps = false
     const acme = await project('Acme', true)
     const asker = await sessionIn(acme)
     const r = await askOrchestrator(asker, 'please write a file')

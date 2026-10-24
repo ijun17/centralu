@@ -46,7 +46,22 @@ const READS: ReadonlySet<string> = new Set([
   'Grep',
   'TodoWrite',
   'AskUserQuestion',
+  // Looks up the definition of a tool the CLI keeps back; the call of that tool is what is decided
+  'ToolSearch',
 ])
+
+/**
+ * The CLI's own tools that start work which goes on after the turn that started it, or start a turn of the CLI's own later: a subagent, a prompt
+ * scheduled for later, a stream of events from a watched command. The person's card belongs to the request's turn; what runs on after it would run
+ * with no asker and no card (found by the review of #1516: a subagent's later steps, a cron prompt's, ran unasked under auto). So a request's turn is
+ * refused them outright, not asked about
+ */
+const OUTLIVES_THE_TURN: ReadonlySet<string> = new Set(['Agent', 'Task', 'CronCreate', 'ScheduleWakeup', 'Workflow', 'Monitor'])
+
+/** Whether the CLI's tool would outlive the turn it is called in (see `OUTLIVES_THE_TURN`) */
+export function outlivesTheTurn(name: string): boolean {
+  return OUTLIVES_THE_TURN.has(name)
+}
 
 /** `agent_session` actions that only look */
 const AGENT_READS: ReadonlySet<string> = new Set(['list', 'status', 'wait'])
@@ -100,8 +115,9 @@ export function askedAct(name: string, args: Record<string, unknown>, thread: st
   if (name === 'agent_session' && typeof args.action === 'string' && AGENT_READS.has(args.action)) return null
   if (name === 'mail') {
     const action = args.action
-    if (action === 'inbox' || action === 'read' || action === 'handled') return null
-    if ((action === 'reply' || action === 'update' || action === 'close') && args.thread === thread) return null
+    if (action === 'inbox' || action === 'read') return null
+    // Answering, and marking handled, in the request's own thread; marking another thread handled would keep the orchestrator from being woken for it
+    if ((action === 'reply' || action === 'update' || action === 'close' || action === 'handled') && args.thread === thread) return null
     if (action === 'send' && typeof args.to === 'string' && args.to.trim() === 'person') return null
   }
   const shown = argsLine(args)

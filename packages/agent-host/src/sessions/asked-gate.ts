@@ -1,5 +1,6 @@
+import type { RequestTurnAnswer } from '../adapters/contract.js'
 import type { Asker } from '../mail/asked-by.js'
-import { askedAct, askedQuestion } from './asked-acts.js'
+import { askedAct, askedQuestion, outlivesTheTurn } from './asked-acts.js'
 
 /**
  * The orchestrator's privileged steps, asked about when a session asked for them (docs/plans/mailbox.md §9.7, #1447).
@@ -44,16 +45,20 @@ export class AskedGate {
     return this.host.askedBy(orchestratorId) !== null
   }
 
-  /** The orchestrator's CLI wants to run a step of its own (a command, a file written, a page fetched): the person is asked, or it is a read */
-  async askCli(orchestratorId: string, tool: string, input: Record<string, unknown>, signal?: AbortSignal): Promise<{ allowed: true } | { allowed: false; message: string }> {
-    const answer = await this.when<{ allowed: true } | { allowed: false; message: string }>(
-      orchestratorId,
-      { name: tool, args: input },
-      signal,
-      async () => ({ allowed: true }),
-      (message) => ({ allowed: false, message }),
-    )
-    return answer
+  /**
+   * The orchestrator's CLI is about to run a step of its own (a command, a file written, a page fetched): the person is asked, unless it is a read
+   * (`asked: false`), and a step that would outlive the turn is refused without a question
+   */
+  async askCli(orchestratorId: string, tool: string, input: Record<string, unknown>, signal?: AbortSignal): Promise<RequestTurnAnswer> {
+    const asker = this.host.askedBy(orchestratorId)
+    if (!asker || askedAct(tool, input, asker.threadId) === null) return { allowed: true, asked: false }
+    if (outlivesTheTurn(tool)) {
+      return {
+        allowed: false,
+        message: `Nothing was done: ${tool} would go on after this turn, where the person's card for the session's request no longer applies, so a request's turn does not start it. Do the work in this turn, or tell the session to ask the person.`,
+      }
+    }
+    return this.when<RequestTurnAnswer>(orchestratorId, { name: tool, args: input }, signal, async () => ({ allowed: true, asked: true }), (message) => ({ allowed: false, message }))
   }
 
   async when<T>(

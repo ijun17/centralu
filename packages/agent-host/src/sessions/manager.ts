@@ -2524,12 +2524,12 @@ export class SessionManager {
 
   /**
    * Why sessions may not ask the orchestrator now, or null when they may (§9.7, #1447). A request is run with every step that is not a read behind the
-   * person's card; that needs the orchestrator's tool to run a turn under a narrower permission mode (`narrowsTurn`). Where it cannot, a request
-   * could have the orchestrator run a command or write a file unasked, so it is not taken
+   * person's card; that needs the orchestrator's tool to put each step of its own to the host (`gatesSteps`). Where it cannot, a request could have
+   * the orchestrator run a command or write a file unasked, so it is not taken
    */
   orchestratorAsks(): string | null {
     const orchestrator = [...this.meta.values()].find((m) => m.kind === 'orchestrator')
-    if (!orchestrator || this.adapters.get(orchestrator.tool)?.capabilities.narrowsTurn === true) return null
+    if (!orchestrator || this.adapters.get(orchestrator.tool)?.capabilities.gatesSteps === true) return null
     return 'the orchestrator runs on a tool that cannot ask the person for each step of a request yet, so a session cannot ask it: write to the person instead'
   }
 
