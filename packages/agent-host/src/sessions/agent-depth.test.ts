@@ -65,7 +65,7 @@ describe('the refusal (#867)', () => {
 
   it('names the setting, where it is, and its value', () => {
     expect(agentDepthRefusal(host(2, chain), 'g', 'start agents')).toBe(
-      'This session is 2 levels below a session the person started, and "How deep agents may start agents" in Settings → Orchestrator is 2, so it cannot start agents. Say in your answer what is needed instead; the person can raise that setting.',
+      'This session is 2 levels below a session the person started, and "How deep agents may start agents" in Settings → Agents is 2, so it cannot start agents. Say in your answer what is needed instead; the person can raise that setting.',
     )
   })
 })

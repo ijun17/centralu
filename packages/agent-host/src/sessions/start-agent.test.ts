@@ -313,7 +313,7 @@ describe('starting another agent in the same project', () => {
       const s = await session()
       const r = await w.mgr.startAgent(s, { task: 'design it', tool: 'codex', difficulty: 'heavy', wait: false })
       expect(r).toMatchObject({ ok: false, error: expect.stringContaining('has no model "gpt-retired". Its models: gpt-big, gpt-small') })
-      expect(!r.ok && r.error).toContain("the person's choice for heavy work in Settings → Orchestrator")
+      expect(!r.ok && r.error).toContain("the person's choice for heavy work in Settings → Agents")
       expect(childrenOf(s)).toHaveLength(0)
     })
 
@@ -322,7 +322,7 @@ describe('starting another agent in the same project', () => {
       const s = await session()
       const own = await w.mgr.startAgent(s, { task: 'design it', tool: 'codex', difficulty: 'heavy', wait: false })
       expect(own).toMatchObject({ ok: false, error: expect.stringContaining('gpt-big has no effort "turbo"') })
-      expect(!own.ok && own.error).toContain("That is the person's choice for heavy work in Settings → Orchestrator")
+      expect(!own.ok && own.error).toContain("That is the person's choice for heavy work in Settings → Agents")
       const callers = await w.mgr.startAgent(s, { task: 'design it', tool: 'codex', difficulty: 'heavy', effort: 'fast', wait: false })
       expect(callers).toMatchObject({ ok: false, error: expect.stringContaining('gpt-big has no effort "fast"') })
       expect(!callers.ok && callers.error).not.toContain("the person's choice")
@@ -335,7 +335,7 @@ describe('starting another agent in the same project', () => {
       const r = await w.mgr.startAgent(s, { task: 'design it', tool: 'codex', difficulty: 'heavy', wait: false })
       expect(r).toMatchObject({ ok: true, notice: expect.stringContaining('not checked') })
       const notice = r.ok ? (r.notice ?? '') : ''
-      expect(notice).toContain("name a model (it is the person's choice for heavy work in Settings → Orchestrator)")
+      expect(notice).toContain("name a model (it is the person's choice for heavy work in Settings → Agents)")
       expect(notice).not.toContain('start again without it')
     }, 20_000 * SLOW)
 

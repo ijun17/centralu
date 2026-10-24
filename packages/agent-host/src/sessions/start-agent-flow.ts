@@ -225,7 +225,7 @@ export class AgentStartFlow {
     const { model, effort, difficulty } = agentChoice(opts, fromOrchestrator ? undefined : this.host.store.projects.projectToolDefaults(project.id)[tool], this.host.uiPreferences().agentModels?.[tool])
     // A setting's choice is checked as a named one is: a model retired since it was picked is refused with the list.
     // The caller never named it, so the remedy it reads is to tell the person or name a model, not to leave it out
-    const setting = difficulty ? `the person's choice for ${difficulty} work in Settings → Orchestrator` : ''
+    const setting = difficulty ? `the person's choice for ${difficulty} work in Settings → Agents` : ''
     const checked = await this.agentChoiceError(
       tool, difficulty ? model : opts.model, difficulty ? effort : opts.effort, model,
       difficulty ? `name a model (it is ${setting})` : undefined,

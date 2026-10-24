@@ -51,7 +51,7 @@ describe('the gates read before anything is asked', () => {
       autoBoundaryOpen: (id, boundary) => (opened.push(`${id}:${boundary ?? ''}`), true),
     }))
     // No depth saved reads as 1; auto is never asked about the depth
-    expect(flow.askGateError('asked')).toMatch(/^This session is 1 level below a session the person started, and "How deep agents may start agents" in Settings → Orchestrator is 1, so it cannot ask a project\./)
+    expect(flow.askGateError('asked')).toMatch(/^This session is 1 level below a session the person started, and "How deep agents may start agents" in Settings → Agents is 1, so it cannot ask a project\./)
     agentDepth = 1
     expect(flow.askGateError('asked')).toMatch(/so it cannot ask a project/)
     expect(opened).toEqual([])
