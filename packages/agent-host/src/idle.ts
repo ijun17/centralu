@@ -33,7 +33,7 @@ export const inTurn = (state: SessionState): boolean => isInTurn(state)
  * `mgr.listSessions()`) carries all of them.
  */
 export type IdleActivity = Pick<SessionInfo, 'state' | 'live'> &
-  Partial<Pick<SessionInfo, 'pendingApproval' | 'pendingQuestions' | 'backgroundTasks'>>
+  Partial<Pick<SessionInfo, 'id' | 'pendingApproval' | 'pendingQuestions' | 'backgroundTasks'>>
 
 export type ActivitySnapshot = {
   sessions: IdleActivity[]
@@ -71,6 +71,15 @@ export function sessionBusy(s: IdleActivity): boolean {
  */
 export function hostBusy(s: ActivitySnapshot): boolean {
   return s.terminals > 0 || s.commandRuns > 0 || s.sessions.some(sessionBusy)
+}
+
+/**
+ * `hostBusy` for a question one of the sessions asks itself, such as an agent applying an update: that session is in a
+ * turn by the very act of asking, so its turn is not counted. What else it holds (a card waiting, background work) still is,
+ * and every other session counts as it does for `hostBusy`.
+ */
+export function hostBusyBesides(s: ActivitySnapshot, sessionId: string): boolean {
+  return hostBusy({ ...s, sessions: s.sessions.map((x) => (x.id === sessionId ? { ...x, state: 'waiting_input' as const } : x)) })
 }
 
 /**

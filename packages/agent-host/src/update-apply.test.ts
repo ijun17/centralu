@@ -202,3 +202,27 @@ describe('UpdateApplyBroker (#665)', () => {
     expect(await out).toEqual({ ready: false, error: NO_WINDOW })
   })
 })
+
+describe('an apply with no card (#1509)', () => {
+  it('reads the host once more after the second ask, and tells the window it went unasked', async () => {
+    const h = host([{ ready: true }])
+    expect(await h.broker.apply(allow, () => null)).toMatchObject({ ok: true })
+    expect(h.lastGo().unasked).toBe(true)
+  })
+
+  it('stops when something started meanwhile, and relaunches nothing', async () => {
+    const h = host([{ ready: true }])
+    expect(await h.broker.apply(allow, () => 'Something started running.')).toEqual({ ok: false, error: 'Something started running.' })
+    expect(h.events.some((e) => e.type === 'update_apply_go')).toBe(false)
+    expect(h.relaunched).toEqual([])
+  })
+
+  it('a card that stood for it, or no second look, sends a go without the mark', async () => {
+    const h = host([{ ready: true }])
+    expect(await h.broker.apply(allow, () => undefined)).toMatchObject({ ok: true })
+    expect(h.lastGo()).not.toHaveProperty('unasked')
+    const g = host([{ ready: true }])
+    expect(await g.broker.apply(allow)).toMatchObject({ ok: true })
+    expect(g.lastGo()).not.toHaveProperty('unasked')
+  })
+})

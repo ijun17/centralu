@@ -35,7 +35,7 @@ beforeEach(() => {
   store.projects.addProject({ id: 'p1', path: '/work/p1', name: 'P1' })
   const t = target()
   store.sessions.upsertSession(t)
-  meta = new Map([['t1', t], ['orch', target({ id: 'orch', name: 'Orchestrator', kind: 'orchestrator', projectId: null })]])
+  meta = new Map([['t1', t], ['orch', target({ id: 'orch', name: 'Orchestrator', kind: 'orchestrator', projectId: null, permissionPreset: 'safe' })]])
   turnObservers = new Map()
   steps = []
   created = []
@@ -146,6 +146,82 @@ describe('from the record', () => {
   })
 })
 
+// #1509 (owner, 2026-10-24): the card guards nothing for a session at rest whose preset the orchestrator has itself
+describe('no card when the handoff guards nothing', () => {
+  const callerWith = (permissionPreset: SessionInfo['permissionPreset']) =>
+    meta.set('orch', target({ id: 'orch', name: 'Orchestrator', kind: 'orchestrator', projectId: null, permissionPreset }))
+
+  it('hands off without a card when the successor\'s preset (the original\'s) is within the orchestrator\'s', async () => {
+    quiet()
+    callerWith('normal')
+    expect(await flowOf().handoff('orch', meta.get('t1')!, {})).toMatchObject({ ok: true, state: 'done' })
+    expect(steps).toEqual(['toolProblem claude', 'record t1 claude', 'create', 'rename heir Long run', 'notice t1'])
+    callerWith('auto')
+    steps = []
+    expect(await flowOf().handoff('orch', meta.get('t1')!, {})).toMatchObject({ ok: true })
+    expect(steps).not.toContain('card other')
+  })
+
+  it('asks when the original\'s preset is above the orchestrator\'s, or the orchestrator cannot be read', async () => {
+    quiet()
+    callerWith('safe')
+    await flowOf().handoff('orch', meta.get('t1')!, {})
+    expect(steps).toContain('card other')
+    callerWith('normal')
+    meta.set('t1', target({ permissionPreset: 'auto' }))
+    steps = []
+    await flowOf().handoff('orch', meta.get('t1')!, {})
+    expect(steps).toContain('card other')
+    meta.delete('orch')
+    steps = []
+    await flowOf().handoff('orch', meta.get('t1')!, {})
+    expect(steps).toContain('card other')
+  })
+
+  it('agent mode reads the presets again where the successor starts: one raised while it wrote its note is not handed off unasked', async () => {
+    quiet()
+    callerWith('normal')
+    const flow = flowOf()
+    const call = flow.handoff('orch', meta.get('t1')!, { mode: 'agent' })
+    await vi.waitFor(() => expect(steps).toContain('send t1 from Orchestrator (the handoff prompt)'))
+    meta.set('t1', target({ permissionPreset: 'auto' }))
+    turnEvent({ type: 'turn_complete' })
+    expect(await call).toMatchObject({ ok: false, error: expect.stringContaining('changed before the successor started') })
+    expect(created).toEqual([])
+  })
+
+  it('refuses a session mid-turn with no card all the same', async () => {
+    quiet()
+    callerWith('normal')
+    meta.set('t1', target({ state: 'working' }))
+    expect(await flowOf().handoff('orch', meta.get('t1')!, {})).toMatchObject({ ok: false, error: expect.stringContaining('is mid-turn') })
+    expect(steps).toEqual([])
+  })
+
+  it('reads the presets again before it starts: one raised while the tool was checked is not handed off unasked', async () => {
+    quiet()
+    callerWith('normal')
+    host.toolProblem = async () => {
+      meta.set('t1', target({ permissionPreset: 'auto' }))
+      return null
+    }
+    expect(await flowOf().handoff('orch', meta.get('t1')!, {})).toMatchObject({ ok: false, error: expect.stringContaining('preset of "Long run" or of the orchestrator changed') })
+    expect(created).toEqual([])
+  })
+
+  it('a card-free call grants no "always": a session above the orchestrator asks next', async () => {
+    quiet()
+    callerWith('normal')
+    const flow = flowOf()
+    await flow.handoff('orch', meta.get('t1')!, {})
+    // A session above the orchestrator asks: nothing carried over from the card-free call
+    meta.set('t1', target({ permissionPreset: 'auto' }))
+    steps = []
+    await flow.handoff('orch', meta.get('t1')!, {})
+    expect(steps).toContain('card other')
+  })
+})
+
 describe('the checks and the card', () => {
   it('a tool that cannot start a session is refused before any card', async () => {
     quiet()
@@ -176,7 +252,7 @@ describe('the checks and the card', () => {
     steps = []
     await flow.handoff('orch', meta.get('t1')!, {})
     expect(steps).not.toContain('card other')
-    meta.set('orch2', target({ id: 'orch2', name: 'Other orchestrator', kind: 'orchestrator', projectId: null }))
+    meta.set('orch2', target({ id: 'orch2', name: 'Other orchestrator', kind: 'orchestrator', projectId: null, permissionPreset: 'safe' }))
     answer = 'allow'
     await flow.handoff('orch2', meta.get('t1')!, {})
     expect(steps).toContain('card other')

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { activityCounts, hostBusy, type ActivitySnapshot, type IdleActivity } from './idle.js'
+import { activityCounts, hostBusy, hostBusyBesides, type ActivitySnapshot, type IdleActivity } from './idle.js'
 
 describe('activityCounts (host.activity, for the "Update <machine>" prompt)', () => {
   const live = (over: Partial<IdleActivity>): IdleActivity => ({ state: 'waiting_input', live: true, ...over })
@@ -31,5 +31,25 @@ describe('activityCounts (host.activity, for the "Update <machine>" prompt)', ()
       commandRuns: 0,
     }
     expect(activityCounts(s)).toMatchObject({ approvals: 0, questions: 1 })
+  })
+})
+
+describe('hostBusyBesides (an agent applying an update, #1509)', () => {
+  const live = (over: Partial<IdleActivity>): IdleActivity => ({ state: 'waiting_input', live: true, ...over })
+  const snap = (...sessions: IdleActivity[]): ActivitySnapshot => ({ sessions, terminals: 0, commandRuns: 0 })
+
+  it('does not count the asking session\'s own turn, and counts every other session as hostBusy does', () => {
+    expect(hostBusy(snap(live({ id: 'me', state: 'working' })))).toBe(true)
+    expect(hostBusyBesides(snap(live({ id: 'me', state: 'working' })), 'me')).toBe(false)
+    expect(hostBusyBesides(snap(live({ id: 'me', state: 'working' }), live({ id: 'other', state: 'working' })), 'me')).toBe(true)
+    expect(hostBusyBesides(snap(live({ id: 'me', state: 'working' }), live({ id: 'other' })), 'me')).toBe(false)
+  })
+
+  it('still counts what the asking session holds besides its turn, and terminals and commands', () => {
+    const task = { id: 't', kind: 'other', description: 'dev server', status: 'running' } as const
+    expect(hostBusyBesides(snap(live({ id: 'me', state: 'working', backgroundTasks: [task] })), 'me')).toBe(true)
+    expect(hostBusyBesides(snap(live({ id: 'me', state: 'working', pendingQuestions: [{ requestId: 'q', questions: [] }] })), 'me')).toBe(true)
+    expect(hostBusyBesides({ ...snap(live({ id: 'me', state: 'working' })), terminals: 1 }, 'me')).toBe(true)
+    expect(hostBusyBesides({ ...snap(live({ id: 'me', state: 'working' })), commandRuns: 1 }, 'me')).toBe(true)
   })
 })

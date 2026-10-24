@@ -16,7 +16,7 @@ export function updateEvent(e: NormalizedEvent, set: StoreSet, get: StoreGet): b
     return true
   }
   if (e.type === 'update_apply_go') {
-    void get().runApplyRequest(e.requestId, e.ticket)
+    void get().runApplyRequest(e.requestId, e.ticket, e.unasked === true)
     return true
   }
   // A program's call waiting for the person (#1405): app-wide, so before the session guard

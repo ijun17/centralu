@@ -36,6 +36,7 @@ describe('the method classification (#1405)', () => {
       'machines.uninstall',
       'machines.autostart',
       'machines.acceptVersions',
+      // Asks with no host state to read; runs only while Automatic updates are on and the host is idle (below)
       'updates.apply',
     ]
     for (const m of asks) expect(limitedRight(m, {}), m).toBe('asks')
@@ -97,7 +98,7 @@ describe('the method classification (#1405)', () => {
 
   // #1508 (owner, 2026-10-24): the hub's automatic updates cover a linked machine's catch-up to the hub's version, and nothing more
   it("runs an idle update of a machine that follows the hub's version, and asks for every other update or machine change", () => {
-    const follows = { followsHub: (id: string) => id === 'm1' }
+    const follows = { followsHub: (id: string) => id === 'm1', updateAtRest: () => false }
     const cases: [string, unknown, RightsHost | null, 'asks' | 'everyday'][] = [
       ['machines.update', { machineId: 'm1', when: 'idle' }, follows, 'everyday'],
       // No `when` is `idle`, the default
@@ -119,6 +120,21 @@ describe('the method classification (#1405)', () => {
     for (const [m, p, host, want] of cases) expect(limitedRight(m, p, host), `${m} ${JSON.stringify(p)} ${host ? 'follows' : 'no host'}`).toBe(want)
     expect(limitedRefusal('machines.update', { machineId: 'm1' }, follows)).toBeNull()
     expect(limitedRefusal('machines.update', { machineId: 'm1' })?.rights).toBe('asks')
+  })
+
+  // #1509 (owner, 2026-10-24): applying asks unless the person's Automatic updates are on and the host is idle; the host would do it itself then
+  it('runs updates.apply while Automatic updates are on and the host is idle, and asks otherwise', () => {
+    const rest = (atRest: boolean): RightsHost => ({ followsHub: () => false, updateAtRest: () => atRest })
+    expect(limitedRight('updates.apply', {}, rest(true))).toBe('everyday')
+    expect(limitedRight('updates.apply', {}, rest(false))).toBe('asks')
+    // A host that gives no state asks
+    expect(limitedRight('updates.apply', {}, null)).toBe('asks')
+    expect(limitedRight('updates.apply', {})).toBe('asks')
+    expect(limitedRefusal('updates.apply', {}, rest(true))).toBeNull()
+    expect(limitedRefusal('updates.apply', {}, rest(false))?.rights).toBe('asks')
+    // Turning the switch on stays the person's: this is the apply, not the setting
+    expect(limitedRight('updates.setAutoApply', { enabled: true }, rest(true))).toBe('asks')
+    expect(limitedRight('updates.setAuto', { enabled: true }, rest(true))).toBe('asks')
   })
 
   it('refuses a name that is not a method, including one from the object prototype', () => {

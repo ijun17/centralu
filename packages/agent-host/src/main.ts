@@ -8,7 +8,7 @@ import { dirname, join } from 'node:path'
 import { mkdirSync, writeSync } from 'node:fs'
 import { APP_VERSION, autoCompactOf, errorMessage, PROTOCOL_VERSION, RESERVED_APP_IDS, type HostHandover, type HostLogon, type NormalizedEvent } from '@cc/protocol'
 import { hostBuild, startActivityReport } from './keeper-link.js'
-import { activityCounts, inTurn, type ActivitySnapshot } from './idle.js'
+import { activityCounts, hostBusy, hostBusyBesides, inTurn, type ActivitySnapshot } from './idle.js'
 import { connectHeldChildren } from './keeper/held-children.js'
 import { chooseDataDir, dataRoot, keepDataFolderPrivate, migrateLegacyDataDir, privateDataFolderFor } from './data-dir.js'
 import { DEFAULT_ALLOWED_ORIGINS, HostServer, parseAllowedOrigins } from './transport/server.js'
@@ -698,6 +698,14 @@ const activity = (): ActivitySnapshot => ({
   commandRuns: commandRuns.liveCount(),
 })
 /**
+ * Whether the person's Automatic updates are on and the host is idle (#1509): applying an update then is what the host does by
+ * itself, so the cards that guard it (an agent's `update_centralu` apply, a script's `updates.apply`) are not raised. `besides`
+ * is the session asking, whose own turn is not counted (`hostBusyBesides`). Never while the host drains for a swap
+ */
+const updateAtRest = (besides?: string): boolean =>
+  autoApplyUpdates.read() && !hostDrain.draining && !(besides === undefined ? hostBusy(activity()) : hostBusyBesides(activity(), besides))
+mgr.useUpdateAtRest(updateAtRest)
+/**
  * The limited credential's calls that wait for the person (#1405, host-requests.ts): raised while a window that shows
  * them is attached, run through the router once allowed, as a call this host serves (a swap's drain refuses or cuts it)
  */
@@ -769,8 +777,8 @@ const server = new HostServer({
   onRpc: router.handle,
   // A limited call that cannot be undone waits for the person's card (#1405)
   onAsk: (method, params, from, signal): Promise<unknown> => requests.ask(method, params, from, signal),
-  // What a conditional right reads of this host (method-rights.ts): an idle update of a machine that follows this hub (#1508)
-  rightsHost: { followsHub: (machineId) => links.followsHub(machineId) },
+  // What a conditional right reads of this host (method-rights.ts): an idle update of a machine that follows this hub (#1508), and whether applying an update is what Automatic updates would do now (#1509)
+  rightsHost: { followsHub: (machineId) => links.followsHub(machineId), updateAtRest: () => updateAtRest() },
   // A card nobody can see is withdrawn once no window shows them for a while (host-requests.ts)
   onShowing: (count) => requests.showingChanged(count),
   // A window's connection ended: the pinned views it leased wait for a claim, then close (#392, view-host.ts)

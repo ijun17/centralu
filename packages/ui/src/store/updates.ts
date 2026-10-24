@@ -1,6 +1,7 @@
 import { errorMessage } from '@cc/protocol'
 import type { AppState, StoreGet, StoreSet } from './state.js'
 import { agentApplyVerdict } from '../features/settings/apply-offer.js'
+import { typedWithin, TYPING_QUIET_MS } from '../features/settings/typing.js'
 
 /**
  * What the host installs and runs: Centralu's own update (checked, applied, and applied at an agent's
@@ -130,7 +131,7 @@ export const updateActions = (set: StoreSet, get: StoreGet): UpdateActions => ({
     else setTimeout(() => applyTickets.get(requestId) === answer && applyTickets.delete(requestId), APPLY_TICKET_MS)
   },
 
-  async runApplyRequest(requestId, ticket) {
+  async runApplyRequest(requestId, ticket, unasked) {
     // Only the window holding this ticket relaunches, and only once: a replayed go finds it gone (#665)
     const mine = applyTickets.get(requestId)
     if (!mine || (await mine) !== ticket || applyTickets.get(requestId) !== mine) return
@@ -140,6 +141,10 @@ export const updateActions = (set: StoreSet, get: StoreGet): UpdateActions => ({
     // Checked again at the go, as the shell checks again when the button is pressed: the bundle may have changed since
     const verdict = await agentApplyVerdict(platform.relaunch, get().update)
     if (!verdict.ready) return void (await platform.updates.reportApply({ requestId, ticket, error: verdict.reason }).catch(() => {}))
+    // No card stood between the agent and this relaunch (#1509): the window waits out someone typing, as its own automatic apply does
+    if (unasked && typedWithin(TYPING_QUIET_MS)) {
+      return void (await platform.updates.reportApply({ requestId, ticket, error: 'Someone is typing in Centralu, so nothing was relaunched. Try again in a minute.' }).catch(() => {}))
+    }
     /*
      * Said, and heard, before the relaunch: the host counts this window closing as the relaunch only after it (#665
      * review). Not heard (the host gone mid-swap), the relaunch goes ahead anyway, as the button's would.

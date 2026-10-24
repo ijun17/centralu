@@ -752,8 +752,10 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
   /**
    * The one window holding `ticket` (from its `updates.answerApply`) relaunches now, through the same path as its
    * "Apply now" button, and reports with `updates.reportApply`. Every other window ignores it: only one relaunches.
+   * `unasked` (additive, #1509): no card stood between the agent and this relaunch, because Automatic updates are on and the
+   * host is idle, so the window also waits out someone typing, as its own automatic apply does. A window that predates it ignores it
    */
-  z.object({ ...appScoped, type: z.literal('update_apply_go'), requestId: z.string(), ticket: z.string() }),
+  z.object({ ...appScoped, type: z.literal('update_apply_go'), requestId: z.string(), ticket: z.string(), unasked: z.boolean().optional() }),
   /**
    * An external app's tool call finished (M4 A-4). Deliberately coarse: it never carries what
    * changed, only that the receiving side should refetch. An external app's state lives inside the
