@@ -103,6 +103,7 @@ export class MailTool {
     const rows = this.records.inboxOf(me)
     if (rows.length === 0) return 'Your mailbox is empty.'
     const lines = rows.map(({ thread, unread }) => {
+      if (this.waitingForRelease(me, thread)) return `${thread.id} [${thread.state}] (a request waiting for the person to release it; it is not shown until then)`
       const role = thread.owner === me ? 'you gave this work' : thread.assignee === me ? 'given to you' : 'you are in it'
       const next = thread.next ? `; next: ${plain(thread.next)}` : ''
       return `${thread.id} [${thread.state}] ${plain(thread.subject)} (${role}${unread > 0 ? `; ${unread} unread` : ''}${next})`
@@ -110,7 +111,20 @@ export class MailTool {
     return `${rows.length} thread${rows.length === 1 ? '' : 's'}, unread first. Read one with ${calls('read', '…')}.\n${lines.join('\n')}`
   }
 
+  /**
+   * Whether the thread is a request to the orchestrator that the person has not released (held `policy`: its project is not trusted, §9.7). The
+   * hold is on the wake, and a model that reads it anyway would have the words and take them off the person's list, so it is not shown
+   */
+  private waitingForRelease(me: string, thread: ThreadRow): boolean {
+    if (thread.assignee !== me || !this.service.isAsk(thread)) return false
+    return this.records.heldReceipts().some((r) => r.recipient === me && r.held === 'policy' && this.records.message(r.messageId)?.threadId === thread.id)
+  }
+
   private read(me: string, threadId: string): string {
+    const waiting = this.records.thread(threadId)
+    if (waiting && this.waitingForRelease(me, waiting)) {
+      return `Thread ${threadId} is a request that waits for the person to release it, because the session's project is not trusted. Its words are not shown until they do; say nothing of it to anyone.`
+    }
     // At most READ_LIMIT messages and about READ_CHARS of them, and always whole ones: a body may be 16,000 characters, and what is not
     // returned is not marked read, so the next read goes on from there
     const ahead = this.service.read(threadId, me, { limit: READ_LIMIT, peek: true })

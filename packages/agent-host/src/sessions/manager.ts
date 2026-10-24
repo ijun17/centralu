@@ -427,7 +427,7 @@ export class SessionManager {
         const answer = await this.hostCards.askHost(id, { kind: 'other', about: ORCHESTRATOR_CHANGE, raw: question }, signal, { alwaysAsk: true, uncovered: true })
         return answer === null ? null : answer === 'deny' ? 'deny' : 'allow'
       },
-      cover: (id, run) => this.hostCards.cover(id, run),
+      cover: (id, run, signal) => this.hostCards.cover(id, run, signal),
     })
     this.linkedReports = new LinkedReports(this.parts())
     this.starts = new SessionStarts(this.parts())

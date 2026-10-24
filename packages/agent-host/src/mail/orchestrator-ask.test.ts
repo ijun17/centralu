@@ -8,6 +8,7 @@ import { sessionAddress } from './address.js'
 import { MailDelivery, type MailInput, type MailSessions } from './delivery.js'
 import { mailRelations } from './relations.js'
 import { refusalReason, ASKS_PER_HOUR } from './rules.js'
+import { reportRecorder } from './delegation.js'
 import { MailService } from './service.js'
 import { MailTool } from './tool.js'
 import { openBy } from './mail.test-helpers.js'
@@ -224,5 +225,42 @@ describe('a request from a project nobody trusted is held (§9.7)', () => {
     openBy(w.mail, { by: 'person', kind: 'assign', subject: 's', body: 'from the person', assignee: ORCH })
     await w.advance(3_000)
     expect(w.delivered.map((d) => d.input.quiet)).toEqual([false])
+  })
+})
+
+describe('a held request is not read around the hold (§9.7)', () => {
+  it('the orchestrator is told it waits for the person and is shown none of its words, so Release stays on the person’s list', async () => {
+    const w = world({ untrusted: new Set([ASKER]) })
+    w.delivery.start()
+    stop = () => w.delivery.stop()
+    const { thread, message } = ask(w, ASKER, 'delete everything')
+    await w.advance(3_000)
+    const read = w.tool.run('orch', { action: 'read', thread: thread.id }).text
+    expect(read).toContain('waits for the person to release it')
+    expect(read).not.toContain('delete everything')
+    const inbox = w.tool.run('orch', { action: 'inbox' }).text
+    expect(inbox).toContain('waiting for the person to release it')
+    expect(inbox).not.toContain('"a request"')
+    expect(w.store.mail.heldReceipts().map((r) => r.messageId)).toEqual([message.id])
+
+    // Released, it reads as any request
+    w.mail.resendHeld(ORCH, [message.id])
+    await w.advance(3_000)
+    expect(w.tool.run('orch', { action: 'read', thread: thread.id }).text).toContain('> delete everything')
+  })
+})
+
+describe('the end of the orchestrator’s turn is reported into the request whose work is going (§9.7, §6)', () => {
+  it('not into a newer request the session opened after the first was answered', () => {
+    const w = world()
+    const first = ask(w).thread
+    w.mail.update(first.id, ORCH, { state: 'review' })
+    // The session writes more into the answered request, and opens another one while the first is not open
+    const second = ask(w).thread
+    w.mail.update(first.id, 'person', { state: 'running' })
+    const draft = { outcome: 'finished', body: '[Centralu] The assigned work finished.', then: 'review' as const, delivery: 'wake' as const }
+    expect(reportRecorder(w.mail, w.store.mail)('asker', 'orch', draft)).toBe('mailed')
+    expect(w.store.mail.thread(first.id)?.state).toBe('review')
+    expect(w.store.mail.thread(second.id)?.state).toBe('open')
   })
 })

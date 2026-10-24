@@ -2977,7 +2977,7 @@ a delegation tool's threads were looked at before, so the request leaves `runnin
 `AskedGate` (`sessions/asked-gate.ts`), which `runParsed` calls around every tool and command: when the orchestrator's open turn (`MailTurns.current`)
 is a thread a session owns and the orchestrator is the assignee of (`askedBy`), a step that `askedAct` does not list as a read raises an `other` card
 (`ORCHESTRATOR_CHANGE`, `alwaysAsk`, not covered) with "Session "…" in project "…" asked the orchestrator to run …", and Allow runs it with the
-orchestrator's own cards covered for the call (`HostCards.cover`: they are answered `allow` once, never persisted). A turn kept under the keeper across a host swap is read back from `mail_turns` (`MailTurns.closeStale`) and is still the request; a lost one is closed,
+orchestrator's own cards covered for the call (`HostCards.cover`: answered `allow` once, never persisted, only for work the call itself started and only until it returns or its signal fires; an Allow that arrives after the request's turn ended runs nothing). A request held for an untrusted project is shown to the orchestrator as waiting, with none of its words, so reading it cannot take it off the person's Release list. The end of the turn is reported into the request whose work is going (`askedOf`), the latest otherwise. A turn kept under the keeper across a host swap is read back from `mail_turns` (`MailTurns.closeStale`) and is still the request; a lost one is closed,
 and its steps are not asked about, since its tool calls are gone with it. Not done: a linked machine's session asking the hub's orchestrator (slice 4, the machine's asks
 switch and a card that names the machine too).
 

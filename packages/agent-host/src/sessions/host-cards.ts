@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { randomUUID } from 'node:crypto'
 import type { CapabilityQuestion } from '../apps/external/runtime.js'
 import type {
@@ -77,21 +78,29 @@ export class HostCards {
   readonly answeredApprovals = new Map<string, string>()
 
   /**
-   * Sessions whose cards are covered by an Allow the person just gave for the call under way (#1447, `AskedGate`): the orchestrator, in a turn a
-   * session's request started, runs a step the person allowed on that session's behalf, and the step's own cards are not raised a second time
+   * The Allow the person just gave for one call (#1447, `AskedGate`): the orchestrator, in a turn a session's request started, runs a step the person
+   * allowed on that session's behalf, and the cards that step raises itself are not raised a second time. It belongs to the call, not to the session:
+   * it travels with the call's own async work (a card of another call, or of the same session raised from elsewhere, is not covered), and it ends
+   * when the call returns or its signal fires, so a step that outlives its turn does not answer the person's later cards
    */
-  private readonly covered = new Map<string, number>()
+  private readonly allowed = new AsyncLocalStorage<{ sessionId: string; live: boolean }>()
 
-  /** Runs `run` with `sessionId`'s host cards covered by the person's Allow for it (see `covered`) */
-  async cover<T>(sessionId: string, run: () => Promise<T>): Promise<T> {
-    this.covered.set(sessionId, (this.covered.get(sessionId) ?? 0) + 1)
+  /** Runs `run` with the cards `sessionId` raises inside it covered by the person's Allow for this call (see `allowed`) */
+  async cover<T>(sessionId: string, run: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    const cover = { sessionId, live: true }
+    const end = () => void (cover.live = false)
+    signal?.addEventListener('abort', end, { once: true })
     try {
-      return await run()
+      return await this.allowed.run(cover, run)
     } finally {
-      const n = (this.covered.get(sessionId) ?? 1) - 1
-      if (n > 0) this.covered.set(sessionId, n)
-      else this.covered.delete(sessionId)
+      end()
+      signal?.removeEventListener('abort', end)
     }
+  }
+
+  private isCovered(sessionId: string): boolean {
+    const cover = this.allowed.getStore()
+    return cover !== undefined && cover.live && cover.sessionId === sessionId
   }
 
   /**
@@ -108,7 +117,7 @@ export class HostCards {
    */
   askHost(sessionId: string, detail: HostAsk['detail'], signal?: AbortSignal, card: { requestId?: string; shown?: boolean; log?: string; alwaysAsk?: boolean; uncovered?: boolean } = {}): Promise<HostAskAnswer> {
     if (signal?.aborted) return Promise.resolve(null)
-    if (!card.uncovered && this.covered.has(sessionId)) return Promise.resolve('allow')
+    if (!card.uncovered && this.isCovered(sessionId)) return Promise.resolve('allow')
     const note = detail.kind === 'project_access' && !detail.to.trusted ? ' (target not trusted)' : ''
     // `log` names what an `other` card is about in the auto log line, which would otherwise say only "other" (#694 review)
     // `alwaysAsk`: a card auto does not answer either (#1038 review: start_agent on another computer)

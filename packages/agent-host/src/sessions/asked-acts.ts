@@ -32,13 +32,10 @@ const READS: ReadonlySet<string> = new Set([
   'agent_status',
   'agent_models',
   'project_git_status',
-  'search_project_files',
   'list_app_versions',
-  'check_app',
   'list_app_runs',
   'list_app_errors',
   'app_usage',
-  'check',
   // The three tools that list and run commands: the command that is run is asked about by its own name
   'centralu_commands',
   'centralu_help',
@@ -77,6 +74,7 @@ export function askedAct(name: string, args: Record<string, unknown>, thread: st
 
 /** The card's question (§9.7): who asked, from the host's record of the session and its project, and what for */
 export function askedQuestion(asker: { name: string; project: string | null; trusted: boolean }, act: string): string {
-  const where = asker.project === null ? 'with no project' : `in project "${oneLineText(asker.project, 80)}"${asker.trusted ? '' : ' (not trusted)'}`
-  return `Session "${oneLineText(asker.name, 80)}" ${where} asked the orchestrator to ${act}. It is the session's request, not yours.`
+  // JSON-quoted: a session named `x" in project "centralu` cannot pass as another project
+  const where = asker.project === null ? 'with no project' : `in project ${JSON.stringify(oneLineText(asker.project, 80))}${asker.trusted ? '' : ' (not trusted)'}`
+  return `Session ${JSON.stringify(oneLineText(asker.name, 80))} ${where} asked the orchestrator to ${act}. It is the session's request, not yours.`
 }
