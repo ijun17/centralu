@@ -58,6 +58,8 @@ export const isSetupStep = (name, notes = '') => SETUP_STEP.some((re) => re.test
 /** What GitHub writes on a job (or a step) that ran out of time. */
 // GitHub's own words only: a test's own "timed out in 5000ms" is a test failure
 export const TIMEOUT_NOTE = /has exceeded the maximum execution time of \d+ minutes|The action '.*' has timed out after \d+ minutes/i
+const JOB_LIMIT_NOTE = /has exceeded the maximum execution time of \d+ minutes/i
+const STEP_LIMIT_NOTE = /The action '(.*)' has timed out after \d+ minutes/gi
 /** What GitHub writes on a job whose runner went away. */
 export const LOST_RUNNER_NOTE = /lost communication with the server|runner has received a shutdown signal|hosted runner encountered an error|runner .{0,80}(?:did not connect|is offline|was lost|has been deprovisioned)/i
 
@@ -80,11 +82,16 @@ export function onFlakyList(name, list = []) {
 export function jobFailure(job, { flaky = [] } = {}) {
   if (!job || job.conclusion == null || OK.has(job.conclusion)) return null
   const notes = (job.notes ?? []).join('\n')
-  if (job.conclusion === 'timed_out' || TIMEOUT_NOTE.test(notes)) {
-    // The step the limit ended (#1503): GitHub marks the step that was running when the job ran out of time 'cancelled'
-    // (e2e (webkit 1/5), 2026-10-23: `Install WebKit` cancelled at 893 s, the tests skipped), and one that ran out of its own
-    // `timeout-minutes` 'failure'. In a step that sets the job up, nothing of the commit ran: the mirror was slow.
-    const ended = (job.steps ?? []).find((s) => s.conclusion === 'cancelled' || s.conclusion === 'failure')
+  // The step the limit ended (#1503): GitHub marks the step that was running when the job ran out of time 'cancelled'
+  // (e2e (webkit 1/5), 2026-10-23: `Install WebKit` cancelled at 893 s, the tests skipped), and one that ran out of its own
+  // `timeout-minutes` 'failure'. In a step that sets the job up, nothing of the commit ran: the mirror was slow.
+  const ended = (job.steps ?? []).find((s) => s.conclusion === 'cancelled' || s.conclusion === 'failure')
+  // A step's own limit counts only when its annotation names the step that ended the job. A step with `continue-on-error`
+  // (the first try of the browser install) that ran out of time leaves the same annotation on a job that goes on, and on
+  // to fail in its tests: that failure is the tests', not a timeout (#1503, review of #1505, job 120762088185).
+  const limitedSteps = [...notes.matchAll(STEP_LIMIT_NOTE)].map((m) => m[1])
+  const stepLimit = limitedSteps.length > 0 && (!(job.steps ?? []).length || (ended != null && limitedSteps.includes(ended.name)))
+  if (job.conclusion === 'timed_out' || JOB_LIMIT_NOTE.test(notes) || stepLimit) {
     if (ended && isSetupStep(ended.name, notes)) return { real: false, cause: 'timeout', step: ended.name, inSetup: true }
     return { real: false, cause: 'timeout' }
   }

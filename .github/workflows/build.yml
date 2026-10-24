@@ -577,7 +577,9 @@ jobs:
       # WebKit at the build this lockfile's Playwright expects (the browsers are cached by its version), and the system
       # libraries it needs. The libraries are about 140 apt packages from a mirror that was sometimes slow (usually 20 to
       # 45 s, 244 to 893 s on some shards, which cancelled three shards at the job's limit, #1503), so each try has a
-      # limit of its own and one retry: the install may take its 9 minutes at worst, and the tests keep theirs.
+      # limit of its own and one retry: the install may take its 9 minutes at worst, and the tests keep theirs. The
+      # runner kills the step of a try that hit its limit, not the root apt-get it started, which goes on holding
+      # dpkg's locks; the second try stops it first (.github/scripts/stop-leftover-apt.sh).
       - name: Read Playwright's version
         id: playwright
         run: echo "version=$(pnpm exec playwright --version | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"
@@ -597,6 +599,7 @@ jobs:
         if: steps.libraries.outcome == 'failure'
         timeout-minutes: 3
         run: |
+          bash .github/scripts/stop-leftover-apt.sh
           sudo dpkg --configure -a
           pnpm exec playwright install-deps webkit
 
@@ -679,6 +682,7 @@ jobs:
         if: steps.libraries.outcome == 'failure'
         timeout-minutes: 3
         run: |
+          bash .github/scripts/stop-leftover-apt.sh
           sudo dpkg --configure -a
           pnpm exec playwright install-deps chromium
 
@@ -823,6 +827,7 @@ jobs:
         if: steps.libraries.outcome == 'failure'
         timeout-minutes: 3
         run: |
+          bash .github/scripts/stop-leftover-apt.sh
           sudo dpkg --configure -a
           pnpm exec playwright install-deps webkit
 

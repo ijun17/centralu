@@ -263,9 +263,9 @@ export async function guardTick({ q, update, now = Date.now(), renew, act, dir =
       return stop(`it is an infrastructure failure (${what}), and the rerun asked for at ${rerun.at.slice(11, 16)} UTC has not started. Nothing was reverted.`)
     }
     // A timeout, or a job on the flaky list, that fails again after a rerun may be the commit's (it hangs, it breaks that job
-    // only), so it is looked for as a test failure. Not a timeout inside a step that sets the job up (#1503: three e2e shards
-    // ran out of time in `playwright install`, a slow package mirror): nothing of the commit ran, so it is the runner's, as
-    // a lost runner is, and reported.
+    // only), so it is looked for as a test failure. A timeout inside a step that sets the job up (#1503: three e2e shards
+    // ran out of time in `playwright install`, a slow package mirror) is the setup's, like a failure there: nothing of the
+    // commit's tests ran, so it is the runner's unless a commit since the last green one changed what the setup installs.
     if (jobs.cause !== 'setup' && jobs.cause !== 'runner' && !jobs.inSetup) base.kind = 'test'
     else {
       // Failed in setup (or lost its runner) again. Setup runs on the runner, but what it installs is a commit's to change:
@@ -274,7 +274,7 @@ export async function guardTick({ q, update, now = Date.now(), renew, act, dir =
       // commit since the last green one changed such an input, it is hunted; else the runner's, and reported.
       let touched = []
       let unlisted = ''
-      if (jobs.cause === 'setup') {
+      if (jobs.cause === 'setup' || jobs.inSetup) {
         if (!greenSha || !dir) unlisted = ' The commits since the last green one could not be listed to see whether one changed what the setup installs.'
         else {
           try {
