@@ -1,11 +1,26 @@
-import { useState } from 'react'
+import { useState, useSyncExternalStore } from 'react'
 import { Button } from '../../components/Button.jsx'
 import { CloseIcon } from '../../components/icons.jsx'
 import { useStore } from '../../store/store.js'
 import { TrustCard, trustCardIds, UNTRUSTED_OFF } from './TrustCard.jsx'
 
-/** Projects whose notice the person put away in this window, so a session switch does not bring it back */
+/**
+ * Projects whose notice the person put away in this window, so a session switch does not bring it back. Read through
+ * `useSyncExternalStore`: two panels of one project in a grid both let it go when either does.
+ */
 const putAway = new Set<string>()
+const listeners = new Set<() => void>()
+let putAwayCount = 0
+const subscribe = (fn: () => void) => {
+  listeners.add(fn)
+  return () => void listeners.delete(fn)
+}
+const isPutAway = (id: string) => putAway.has(id)
+function putAwayNow(id: string): void {
+  putAway.add(id)
+  putAwayCount++
+  for (const fn of listeners) fn()
+}
 
 /**
  * What is off in a project the person has not trusted, said where they work in it (#1512). Until now nothing said that
@@ -19,9 +34,10 @@ const putAway = new Set<string>()
  */
 export function UntrustedNotice({ projectId, className = '' }: { projectId: string | null; className?: string }) {
   const project = useStore((s) => (projectId ? s.projects[projectId] : undefined))
-  const [, bump] = useState(0)
   const [open, setOpen] = useState(false)
-  if (!project || project.trusted || putAway.has(project.id)) return null
+  // The count is the snapshot: it changes exactly when a notice is put away, and every instance re-reads its own project
+  useSyncExternalStore(subscribe, () => putAwayCount)
+  if (!project || project.trusted || isPutAway(project.id)) return null
   return (
     <div className={className} role="status" data-testid="untrusted-notice">
       <div className="flex items-center gap-2 text-xs text-ink-muted">
@@ -38,10 +54,7 @@ export function UntrustedNotice({ projectId, className = '' }: { projectId: stri
           className="shrink-0 rounded-sm p-0.5 text-ink-faint hover:text-ink"
           aria-label="Dismiss"
           data-testid="untrusted-notice-dismiss"
-          onClick={() => {
-            putAway.add(project.id)
-            bump((n) => n + 1)
-          }}
+          onClick={() => putAwayNow(project.id)}
         >
           <CloseIcon />
         </button>

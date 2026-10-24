@@ -32,10 +32,10 @@ export const trustCardIds = (testId: string): TrustCardIds => ({
  * What stays off in a project that is not trusted (#1512), said by the card, the project row and the notice in a session.
  * The repository's own instruction files are the part nothing said before: an untrusted project's `CLAUDE.md` and
  * `AGENTS.md`, hooks and commands are not read (the session reads only the person's own settings), and starting
- * agents and worktrees are refused there.
+ * agents and worktrees are refused there (a session under `auto` is let through the host's gates, so the text says so).
  */
 export const UNTRUSTED_OFF =
-  "its CLAUDE.md and AGENTS.md, hooks and commands are ignored, its apps don't run, and its sessions can't start agents or use worktrees"
+  "its CLAUDE.md and AGENTS.md, hooks and commands are ignored, its apps don't run, and its sessions can't start agents or use worktrees unless they run under auto"
 
 export function TrustCard({ project, onAnswer, ids }: { project: ProjectInfo; onAnswer: (trust: boolean) => void; ids: TrustCardIds }) {
   const apps = useProjectApps(project.id)

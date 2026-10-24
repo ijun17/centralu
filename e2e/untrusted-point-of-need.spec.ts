@@ -17,7 +17,7 @@ test('a session of an untrusted project says its instruction files are ignored, 
   await expect(notice).toContainText('alpha is not trusted')
   await expect(notice).toContainText('CLAUDE.md and AGENTS.md')
   // The rest of what is off stands in the hover text, so a narrow panel keeps one line
-  await expect(notice.locator('span').first()).toHaveAttribute('title', /can't start agents or use worktrees/)
+  await expect(notice.locator('span').first()).toHaveAttribute('title', /can't start agents or use worktrees unless they run under auto/)
 
   // The decision stays the person's: the card with the project's apps opens in place, and Trust is its answer
   await page.getByTestId('untrusted-notice-trust').click()
@@ -52,9 +52,12 @@ test('a worktree in an untrusted project is refused before the press, with Trust
   await openSessionDialog(page, 'alpha')
   await page.getByTestId('worktree-toggle').locator('input').check()
   await expect(page.getByTestId('worktree-untrusted')).toContainText('A worktree needs a trusted project')
+  // Nothing is saved or refused by pressing: Start waits until the project is trusted
+  await expect(page.getByTestId('create-session-confirm')).toBeDisabled()
   await page.getByTestId('worktree-untrusted-trust').click()
   await page.getByTestId('worktree-untrusted-trust-card-yes').click()
   await expect(page.getByTestId('worktree-untrusted')).toHaveCount(0)
+  await expect(page.getByTestId('create-session-confirm')).toBeEnabled()
 })
 
 test('the first worktree offers the install command and the .env files as chips that fill their fields', async ({ page }) => {

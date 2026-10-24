@@ -631,7 +631,8 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
             variant="primary"
             /* Since the input field is gone, Enter means start — this needs to hold the default focus */
             autoFocus
-            disabled={busy || blocked}
+            // A worktree is refused in a project that is not trusted, and the setup typed here would be saved before that: trust it first (#1512)
+            disabled={busy || blocked || (worktree && !!project && !project.trusted)}
             data-testid="create-session-confirm"
           >
             {busy ? (resume ? 'Loading…' : 'Starting…') : resume ? 'Load' : 'Start'}

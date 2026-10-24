@@ -207,7 +207,7 @@ either to act.
   screen, its row in Settings, the New app dialog), in place (`TrustCard`).
   The card, the project's row and a one-line notice above a session's composer also say what stays off until
   then: the project's `CLAUDE.md` and `AGENTS.md`, hooks and commands are ignored, its apps do not run, and its
-  sessions cannot start agents or use worktrees (#1512). The notice and the New session dialog's worktree option
+  sessions cannot start agents or use worktrees unless they run under `auto` (#1512). The notice and the New session dialog's worktree option
   carry the same card, so the person can trust where they met the limit. A first worktree (nothing saved yet)
   offers the install command its lockfile names and the ignored `.env` files as chips that fill the setup fields.
 - **An app a trusted project gains later** (a manifest a `git pull` brought, root or inside) is
