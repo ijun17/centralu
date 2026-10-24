@@ -160,11 +160,11 @@ describe('auto Centralu boundaries (#603)', () => {
       const r = await start(child)
       expect(r).toEqual({
         ok: false,
-        error: `${levelsBelow(1)}, and "${DEPTH_SETTING}" in Settings → Orchestrator is 1, so it cannot start agents. Say in your answer what is needed instead; the person can raise that setting.`,
+        error: `${levelsBelow(1)}, and "${DEPTH_SETTING}" in Settings → Agents is 1, so it cannot start agents. Say in your answer what is needed instead; the person can raise that setting.`,
       })
       expect(await w.mgr.askProject(child, { project: w.target.id, task: 'x' })).toMatchObject({
         ok: false,
-        error: expect.stringContaining(`${levelsBelow(1)}, and "${DEPTH_SETTING}" in Settings → Orchestrator is 1, so it cannot ask a project`),
+        error: expect.stringContaining(`${levelsBelow(1)}, and "${DEPTH_SETTING}" in Settings → Agents is 1, so it cannot ask a project`),
       })
       expect(w.mgr.listSessions().filter((s) => s.askedBy === child)).toEqual([])
       expect(w.events.filter((e) => e.type === 'approval_request')).toEqual([])
@@ -177,7 +177,7 @@ describe('auto Centralu boundaries (#603)', () => {
       const r = await start(above)
       expect(r).toMatchObject({ ok: true, state: 'working' })
       const at = r.ok ? r.sessionId : ''
-      expect(await start(at)).toMatchObject({ ok: false, error: expect.stringContaining(`${levelsBelow(limit)}, and "${DEPTH_SETTING}" in Settings → Orchestrator is ${limit}`) })
+      expect(await start(at)).toMatchObject({ ok: false, error: expect.stringContaining(`${levelsBelow(limit)}, and "${DEPTH_SETTING}" in Settings → Agents is ${limit}`) })
       expect(w.mgr.listSessions().filter((s) => s.askedBy === at)).toEqual([])
     })
 

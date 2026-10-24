@@ -468,7 +468,7 @@ What one `start_agent` call does (`SessionManager.startAgent`, also `AgentStartF
 below retained for `safe` and `normal`:
 
 1. **Who may.** An ordinary session (`reader` profile) of a trusted project (#382's rule), above the agent depth
-   (#867, `sessions/agent-depth.ts`). Settings → Orchestrator → How deep agents may start agents, a slider from 1 to 3,
+   (#867, `sessions/agent-depth.ts`). Settings → Agents → How deep agents may start agents, a slider from 1 to 3,
    persists `prefs.agentDepth`; a record without it reads as 1 (`agentDepthOf`), so it needs no store migration. A
    session the person started is depth 0; one marked `askedBy`, or working on a task another session gave it (an
    unsettled delegation: ask_project, a fork, agent_session), is one deeper than that session, the deepest link
@@ -482,7 +482,7 @@ below retained for `safe` and `normal`:
    under every preset, `auto` included, with an error that names the setting and where it is; at 1, a child cannot
    start agents, and neither can a session handling an active ask_project task. The setting is read at each call
    (and again after the card, below), so lowering it applies to the next start. Forks and ask_project read the same.
-2. **How many.** Settings → Orchestrator → Running agents per project persists `prefs.agentCeiling`,
+2. **How many.** Settings → Agents → Running agents per project persists `prefs.agentCeiling`,
    read at call time. Empty/null means no ceiling under `auto`, `AGENT_CEILING` (4) otherwise;
    zero is unlimited, and a positive integer sets a ceiling per project over all its sessions.
    A child counts while a delegated turn runs; a child on a linked machine (#1038) counts under its parent's project
@@ -503,7 +503,7 @@ below retained for `safe` and `normal`:
    cached list lacks is refused only after a fresh read (the CLI may have been updated).
 
    **By difficulty** (#729). A `difficulty` with no `model` takes the person's model and effort for that tool and
-   difficulty instead, from Settings → Orchestrator → Models for the agents a session starts (`prefs.agentModels`, the
+   difficulty instead, from Settings → Agents → Models for the agents a session starts (`prefs.agentModels`, the
    whole map in one patch; nothing chosen for it falls back to the remembered choice). A model named still wins
    (`agentChoice` in `sessions/start-agent.ts`). The card names a model the setting chose, "(gpt-6, your choice for
    heavy work)". The setting's model and effort are checked as named ones are: a retired one is refused with the list,

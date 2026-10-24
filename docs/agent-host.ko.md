@@ -299,7 +299,7 @@ Codex에 넘기고 결과만 검토하는 식이다. 앱이 보여 주지 않는
 `start_agent` 한 번(`SessionManager.startAgent`, 역시 start-agent-flow.ts의 `AgentStartFlow`):
 
 1. **Who may.** An ordinary session (`reader` profile) of a trusted project (#382's rule), above the agent depth
-   (#867): 설정 → Orchestrator → How deep agents may start agents(1~3, 기본 1, `prefs.agentDepth`). 사람이 시작한
+   (#867): 설정 → Agents → How deep agents may start agents(1~3, 기본 1, `prefs.agentDepth`). 사람이 시작한
    세션이 깊이 0이고, `askedBy`나 끝나지 않은 위임(ask_project, fork, agent_session)으로 이어진 세션은 그보다 하나
    깊다. 그 깊이 이상인 세션은 `auto`를 포함한 모든 프리셋에서 거절되고, 오류가 설정 이름과 위치를 말한다.
    오케스트레이터가 만든 포크(`askedBy` 없이 `forkedFrom`만 있음)는 계속 1로 세고, `auto` 호출자가 agent_session으로
@@ -327,7 +327,7 @@ Codex에 넘기고 결과만 검토하는 식이다. 앱이 보여 주지 않는
    `wait: true`의 기다림은 `START_AGENT_CALL_MS`(270초)에서 남은 만큼으로 줄어, 시작 과정과 기다림을 합쳐도 브리지
    한도 안에 끝난다. 넘기면 답은 `working`이고 보고가 걸린다.
 
-   **난이도로 고르기**(#729). `model` 없이 `difficulty`를 주면 사람이 설정 → Orchestrator → Models for the agents a
+   **난이도로 고르기**(#729). `model` 없이 `difficulty`를 주면 사람이 설정 → Agents → Models for the agents a
    session starts에서 그 도구와 난이도에 고른 모델과 effort를 쓴다(`prefs.agentModels`, 패치 하나에 맵 전체. 그
    난이도에 고른 것이 없으면 기억한 선택으로 돌아간다). 이름을 댄 모델이 여전히 이긴다(`sessions/start-agent.ts`의
    `agentChoice`). 설정이 고른 모델은 카드에 "(gpt-6, your choice for heavy work)"처럼 적힌다. 설정의 모델과 effort는

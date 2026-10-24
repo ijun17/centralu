@@ -54,7 +54,7 @@ boundaries (#603), with a log line instead of a card or refusal (Claude's own cr
 - **Never above the caller**: the child gets the caller's preset; a child the person raised above it takes no
   more work from the caller.
 - **The agent depth** (#867): a setting, 1 to 3 and 1 by default ("How deep agents may start agents" in Settings →
-  Orchestrator, `prefs.agentDepth`). A session the person started is depth 0; one started by another (`askedBy`), or
+  Agents, `prefs.agentDepth`). A session the person started is depth 0; one started by another (`askedBy`), or
   working on a task another session gave it (an unsettled delegation: `ask_project`, a fork, `agent_session`), is one
   deeper than that session, the deepest link counting; a fork whose requester is gone is at least 1, so a fork the
   orchestrator made (no `askedBy`) counts 1 for good, and a session an `auto` caller reached through `agent_session`
@@ -95,7 +95,7 @@ boundaries (#603), with a log line instead of a card or refusal (Claude's own cr
   project's trust stands in for it), with "always for this project" kept as always for the orchestrator while the host
   serves it, since there is no project to remember it for; `auto` opens it. `agent_session` acts only on a child whose
   `askedBy` is the orchestrator, in every preset. The depth binds as for any caller: the orchestrator is at 0.
-- **A ceiling**: Settings → Orchestrator → Running agents per project (`prefs.agentCeiling`).
+- **A ceiling**: Settings → Agents → Running agents per project (`prefs.agentCeiling`).
   Empty uses the preset default: no ceiling under `auto`, 4 otherwise (`AGENT_CEILING`); zero
   explicitly removes the ceiling, and a positive integer limits all running children in each project.
 - **Visible**: each child is an ordinary session in the sidebar with its own approval cards and Stop, and outlives

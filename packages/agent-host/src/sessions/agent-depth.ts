@@ -79,7 +79,7 @@ export function depthOf(host: Parameters<typeof agentDepthRefusal>[0], sessionId
 }
 
 /** Where the person changes the setting, as every refusal names it */
-export const AGENT_DEPTH_SETTING = '"How deep agents may start agents" in Settings → Orchestrator'
+export const AGENT_DEPTH_SETTING = '"How deep agents may start agents" in Settings → Agents'
 
 /**
  * The refusal for a caller at or past the depth (#867): what it is, the setting and where it is, and what to do instead.
