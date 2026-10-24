@@ -22,19 +22,22 @@ const isRecord = (value: unknown): value is Record<string, unknown> => typeof va
  * Left to their own gates, which ask in the call itself: Centralu's own tools (`runParsed`) and an attached app's (`SessionApps.call`), the latter
  * only for a server this session really has attached, never by name alone (#93).
  *
- * Fails closed: a question that cannot be asked refuses the step. Nothing here runs in a turn that is not a request.
+ * Fails closed: a question that cannot be asked, or a turn that cannot be told, refuses the step (a hook that throws would let the tool run). Nothing
+ * else here runs in a turn that is not a request.
  */
 export function requestTurnHooks(opts: Pick<CreateSessionOpts, 'requestTurn' | 'apps'>, ownServer: () => boolean): { PreToolUse: HookCallbackMatcher[] } | undefined {
   const request = opts.requestTurn
   if (!request) return undefined
   const hook: HookCallback = async (input, _toolUseId, { signal }) => {
-    if (input.hook_event_name !== 'PreToolUse' || !request.active()) return {}
+    if (input.hook_event_name !== 'PreToolUse') return {}
     const name = input.tool_name
-    if (name === 'AskUserQuestion') return {}
-    if (isOrchestratorTool(name) && ownServer()) return {}
-    const app = appToolOf(name)
-    if (app && opts.apps?.current().some((a) => a.server === app.server)) return {}
     try {
+      if (!request.active()) return {}
+      if (name === 'AskUserQuestion') return {}
+      if (isOrchestratorTool(name) && ownServer()) return {}
+      // An attached app's tool asks in the call itself (`SessionApps.call`), naming the session: allowed here so the CLI does not put a card of its own first
+      const app = appToolOf(name)
+      if (app && opts.apps?.current().some((a) => a.server === app.server)) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow' } }
       const answer = await request.ask(name, isRecord(input.tool_input) ? input.tool_input : {}, signal)
       if (!answer.allowed) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: answer.message } }
       return answer.asked ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow' } } : {}

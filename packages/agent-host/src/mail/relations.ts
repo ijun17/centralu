@@ -26,8 +26,8 @@ export type RelationsHost = {
   /** The relations of a session that is here, or undefined for one that is gone or in the session archive */
   session(id: string): { kind: 'worker' | 'orchestrator' | 'coordinator'; askedBy?: string | null; projectId?: string | null; scopeSessionIds?: readonly string[] | null } | undefined
   /**
-   * A reason in words when sessions may not ask the orchestrator now (§9.7): its tool cannot run the turn of a request under a narrower
-   * permission mode, so a privileged step of that turn could not be put to the person. Null when they may
+   * A reason in words when sessions may not ask the orchestrator now (§9.7): its tool cannot put each step of a request's turn to the person,
+   * so a privileged step of that turn could not be asked about. Null when they may
    */
   orchestratorAsks?(): string | null
   /** Whether the session's seat has the `mail` tool (`toolProfileOf` is `reader` or `orchestrator`): the seats that can read what a wake points at */
@@ -77,7 +77,8 @@ export function mailRelations(host: RelationsHost): MailPolicy {
       if (t.kind === 'session' && !host.session(t.sessionId)) return 'that session is gone: it is in the session archive or deleted'
       // A session writing to the orchestrator, in a thread it is in or not, needs an orchestrator that can put each step of a request to the person: a request
       // opened while it ran on one tool must not wake it after it was changed to another (§9.7)
-      if (t.kind === 'session' && f.kind === 'session' && host.session(t.sessionId)?.kind === 'orchestrator' && host.session(f.sessionId)?.kind !== 'orchestrator') {
+      // (only the session's own requests: a worker's reply in a thread the orchestrator opened for it is no request)
+      if (t.kind === 'session' && f.kind === 'session' && (thread === null || thread.owner === from) && host.session(t.sessionId)?.kind === 'orchestrator' && host.session(f.sessionId)?.kind !== 'orchestrator') {
         const why = host.orchestratorAsks?.()
         if (why) return why
       }

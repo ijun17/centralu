@@ -466,7 +466,8 @@ tools, its shell, file edits, fetches and the rest (Claude: a `PreToolUse` hook,
 decision stands in for its own question, so the person is asked about each step whatever the preset, and an "always" the person once saved for such a step is not consulted. A narrower
 permission mode alone was tried and is not enough: a tool that needs no permission never reaches the CLI's permission callback in it, and the review of #1516 ran a subagent and a cron prompt
 through it unasked). A request's turn is refused, without a question, the tools that go on after the turn: a subagent, a prompt scheduled for later, a watched command
-(`OUTLIVES_THE_TURN`), since the person's card belongs to the turn and what they start would run later with no asker. The Allow is for that one step: the
+(`OUTLIVES_THE_TURN`) and a command started in the background, since the person's card belongs to the turn and what they start would run later with no asker. The card shows a step of the CLI's own whole (a
+file's content, an edit's text, a message), refusing one over 6,000 characters; only Centralu's own tools have their long free text cut. The Allow is for that one step: the
 cards the step would raise itself meanwhile are covered by it (`HostCards.cover`, kept by the call's own async work and ended with the call or its signal), so there is one
 card, and no "always" is offered or kept; an Allow that arrives after the request's turn ended runs nothing. The card shows every argument whole except long free text,
 which is cut and says how long it was; a step too long to show whole is refused, not asked about in part. Whose request the turn is is fixed when the turn begins
@@ -475,8 +476,8 @@ or a thread the person gave) is as it was. **Where the orchestrator's tool canno
 is not yet measured here), a session cannot ask the orchestrator at all, in a thread it opened before as well: the write is refused with a reason, because its shell and edits could not be put to the person.
 **Not covered, and named:** a turn that a relayed report starts (the old path of a kept process) belongs to no thread, so a request's words do not reach it; an app tool its app marks read-only
 (`readOnlyHint`) is not asked about, on the app's word, as for every session; `read_session` and `recall` of the asking session show what it wrote, so the words are reachable by them in any turn
-(reading needs no card, §9.7); a turn that an old build's kept process was already in when this build took it over is not narrowed; an output of a command the person allowed can start
-a turn of the CLI's own later, as the output of any command can. (3) Limits:
+(reading needs no card, §9.7); a turn that an old build's kept process was already in when this build took it over has no hook until it restarts; the output of a command the person allowed can start a turn of the CLI's own
+later, as the output of any command can (a command started in the background is refused in a request's turn, since it would start that turn on purpose). (3) Limits:
 a request from a project nobody trusted is held (`policy`) until the person releases it in the Inbox, and `mail inbox` and `mail read` show the orchestrator none of
 its words meanwhile, whether or not the hold is written yet, while marking it handled, answering and closing it are refused; one request is open at a time and at most 5 words an hour (a request's first word and every word written into it after, so a follow-up in an answered request is no way round the
 limit), both counted over the sessions of the asker's project and the sessions under its root session, so starting sessions does not multiply them (a refusal names the open

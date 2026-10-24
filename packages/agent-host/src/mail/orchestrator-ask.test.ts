@@ -518,3 +518,38 @@ describe('an orchestrator whose tool cannot put each step to the person is not a
     store.close()
   })
 })
+
+describe('what the review of the hook found in the mail (§9.7)', () => {
+  it('a worker’s reply in a thread the orchestrator opened for it is no request: an orchestrator that cannot gate still takes it', () => {
+    const store = new Store()
+    const mail = new MailService(store.mail, {
+      hostId: () => HOST,
+      now: () => NOW,
+      policy: mailRelations({
+        session: (id) => (kinds[id] ? { kind: kinds[id] } : undefined),
+        orchestratorAsks: () => 'the orchestrator runs on a tool that cannot ask the person for each step of a request yet',
+        mailTool: () => true,
+        mailCommand: (id) => id === 'orch',
+        inThread: (t, who) => store.mail.participants(t).some((p) => p.address === who && p.leftAt === null),
+      }),
+    })
+    const { thread } = openBy(mail, { by: ORCH, kind: 'assign', subject: 'a job', body: 'please do it', assignee: OTHER })
+    expect(mail.post(thread.id, OTHER, { kind: 'answer', body: 'done' }).duplicate).toBe(false)
+    store.close()
+  })
+
+  it('a retry of the last word that was allowed gets that word back, not a refusal', () => {
+    const w = world()
+    const { thread } = ask(w)
+    w.mail.update(thread.id, ORCH, { state: 'review' })
+    let last: ReturnType<typeof w.mail.post> | undefined
+    for (let i = 0; i < ASKS_PER_HOUR - 1; i++) {
+      w.clock.t += 1_000
+      last = w.mail.post(thread.id, ASKER, { kind: 'note', body: `follow-up ${i}`, dedupeKey: `k${i}` })
+    }
+    // The fifth word is stored; the same call again is the same word, whatever the hour's count says
+    const again = w.mail.post(thread.id, ASKER, { kind: 'note', body: `follow-up ${ASKS_PER_HOUR - 2}`, dedupeKey: `k${ASKS_PER_HOUR - 2}` })
+    expect(again.duplicate).toBe(true)
+    expect(again.message.id).toBe(last!.message.id)
+  })
+})
