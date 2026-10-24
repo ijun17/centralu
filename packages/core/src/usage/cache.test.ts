@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { CacheStats, CacheWindowStats } from '@cc/protocol'
-import { cacheHitRate, cacheTooltipLine, cacheWindowName, percentOf, rebuildBreakdown } from './cache.js'
+import { cacheHitRate, cacheTooltipLine, cacheWriteShare, cacheWindowName, percentOf, rebuildBreakdown } from './cache.js'
 
 describe('rebuildBreakdown', () => {
   it('labels launch policy restarts separately from changed tools', () => {
@@ -54,6 +54,22 @@ function win(over: Partial<CacheWindowStats> = {}): CacheWindowStats {
 function stats(w: CacheWindowStats, countingSince = new Date(NOW - 24 * 3600_000).toISOString()): CacheStats {
   return { writes: true, countingSince, windows: [w] }
 }
+
+describe('cacheWriteShare (#1492)', () => {
+  it('is what the writes were of the weighted cache cost, where the hit rate by tokens says 96%', () => {
+    // 96,000 read at 0.1 and 3,500 written for five minutes at 1.25 and 500 for an hour at 2, per 100,000 input tokens
+    const w = { inputTokens: 0, cacheReadTokens: 96_000, cacheCreationTokens: 4_000, cacheReadCost: 9_600, cacheWriteCost: 3_500 * 1.25 + 500 * 2 }
+    expect(cacheHitRate(w)).toBeCloseTo(0.96)
+    expect(cacheWriteShare(w)).toBeCloseTo(5_375 / 14_975)
+  })
+
+  it('is unknown from a host that does not say, and with nothing to weigh', () => {
+    expect(cacheWriteShare({})).toBeNull()
+    expect(cacheWriteShare({ cacheReadCost: 5 })).toBeNull()
+    expect(cacheWriteShare({ cacheReadCost: 0, cacheWriteCost: 0 })).toBeNull()
+    expect(cacheWriteShare({ cacheReadCost: 0, cacheWriteCost: 50 })).toBe(1)
+  })
+})
 
 describe('cacheHitRate', () => {
   it('is what was read from cache over all input: uncached, read and written', () => {

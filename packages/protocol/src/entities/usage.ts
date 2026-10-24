@@ -56,6 +56,13 @@ export const RequestInput = z.object({
    * when the tool does not say, or the request wrote nothing.
    */
   cacheTtl: z.enum(['5m', '1h']).optional(),
+  /**
+   * Of `cacheCreationTokens`, what the API said stays cached an hour and five minutes (Claude's `cache_creation` split, #1492):
+   * the two are priced apart (docs/agent-host.md §6.1), so the weighting of writes needs them, not only which one the request had
+   * most of. Absent when the tool did not split its writes; the part that is in neither is priced as a five-minute write.
+   */
+  cacheWrite1hTokens: z.number().optional(),
+  cacheWrite5mTokens: z.number().optional(),
   /** The model that served this request, as the tool reported it (Claude's `message.model`); absent when it does not say (usage history, §6.2) */
   model: z.string().optional(),
 })
@@ -104,6 +111,12 @@ export const CacheSessionStats = z.object({
   rebuilds: z.number(),
   /** The rebuilds by their likely cause (`RebuildCause`); absent from a host that predates it */
   rebuildCauses: z.record(z.string(), z.number()).optional(),
+  /**
+   * What the rebuilds wrote to the cache, in tokens (#1492): the sum of the cache writes of the requests counted as rebuilds, so the
+   * steady writes every new message needs are not in it. For a tool that does not report writes (Codex) the input it did not read
+   * from the cache stands in. Absent from a host that predates it, and from hours an earlier build stored.
+   */
+  rebuildTokens: z.number().optional(),
 })
 export type CacheSessionStats = z.infer<typeof CacheSessionStats>
 
@@ -129,6 +142,17 @@ export const CacheWindowStats = z.object({
   rebuilds: z.number(),
   /** The rebuilds by their likely cause (`RebuildCause`); absent from a host that predates it */
   rebuildCauses: z.record(z.string(), z.number()).optional(),
+  /** What the rebuilds wrote to the cache, in tokens (`CacheSessionStats.rebuildTokens`) */
+  rebuildTokens: z.number().optional(),
+  /**
+   * What the cache cost in units of an uncached input token (#1492), for the share the writes were of it: the tokens read from the cache
+   * times the price of a read, and the tokens written times the price of a write, each as a ratio to uncached input (Anthropic: read 0.1,
+   * five-minute write 1.25, one-hour write 2; Codex by model, docs/agent-host.md §6.1). No money: the ratios, not the prices. For a tool
+   * that does not report writes (Codex) the write units are those of the input it did not read from the cache. Absent from a host that
+   * predates them.
+   */
+  cacheReadCost: z.number().optional(),
+  cacheWriteCost: z.number().optional(),
   /**
    * The shortest and longest idle time before a rebuild put down to the cache expiring (`expired`, `probably_expired`),
    * in milliseconds; absent when there was none

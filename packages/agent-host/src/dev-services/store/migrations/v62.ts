@@ -1,6 +1,6 @@
 import { MigrationRange, type MigrationStep } from './context.js'
 
-/** The migration step v62. The rule it follows is written above `migrationSteps` in `index.ts` */
+/** The migration steps v62 and v63. The rule it follows is written above `migrationSteps` in `index.ts` */
 export class StepsV62 extends MigrationRange {
   steps(): MigrationStep[] {
     return [
@@ -60,6 +60,27 @@ export class StepsV62 extends MigrationRange {
             );
             CREATE INDEX IF NOT EXISTS idx_usage_buckets_session ON usage_buckets(session_id);
           `)
+        },
+      },
+      {
+        to: 63,
+        breaksOlderReaders: false,
+        /**
+         * What the rebuilds wrote to the cache, per hour bucket (#1492): `usage_buckets.rebuild_tokens`, the sum of the cache writes
+         * of the requests counted in `rebuilds` (for a tool that reports no writes, the input it did not read), so the usage panel can
+         * say "7 rebuilds · 1.0M written" after a restart too. Hours stored before it have 0 with rebuilds counted: they are read as
+         * "not known" rather than as nothing written.
+         *
+         * **Expand only (#292's rule).** A defaulted column. An older host names its columns in every read and insert: it neither
+         * reads this one nor fails on it, and the row it adds or adds to keeps its sum (the upsert never touches the column), which
+         * leaves that hour's rebuilds with fewer tokens than rebuilds, as an hour from before. `IF` because a store from a test's
+         * partial schema has no such table.
+         */
+        run: () => {
+          const cols = this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(usage_buckets)`).all()
+          if (cols.length > 0 && !cols.some((c) => c.name === 'rebuild_tokens')) {
+            this.db.exec(`ALTER TABLE usage_buckets ADD COLUMN rebuild_tokens INTEGER NOT NULL DEFAULT 0`)
+          }
         },
       },
     ]

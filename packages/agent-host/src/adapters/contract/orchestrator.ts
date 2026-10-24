@@ -50,7 +50,7 @@ export type PreferenceChanges = {
    */
   notifications?: { approval?: boolean; done?: boolean; whenFocused?: boolean; sound?: boolean }
   /** When agents compact by themselves (#1376): whether Centralu sets it, and the share of the model's window; the ones to change */
-  autoCompact?: { controlled?: boolean; share?: number; idleShare?: number }
+  autoCompact?: { controlled?: boolean; share?: number; idleShare?: number; nudge?: boolean; nudgeFirst?: number; nudgeSecond?: number | null }
 }
 
 /** One request of the orchestrator's preference commands (#1219), as the tool runner reads its arguments */

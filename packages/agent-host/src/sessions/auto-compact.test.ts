@@ -15,13 +15,13 @@ describe('autoCompactTokens', () => {
   it('is 60% of the window by default: 120k of a 200k model, 600k of a 1M one', () => {
     expect(autoCompactTokens(on, 200_000)).toBe(120_000)
     expect(autoCompactTokens(on, 1_000_000)).toBe(600_000)
-    expect(autoCompactTokens({ controlled: true, share: 0.2, idleShare: 0.3 }, 128_000)).toBe(25_600)
-    expect(autoCompactTokens({ controlled: true, share: 0.6, idleShare: 0.3 }, 258_400)).toBe(155_040)
-    expect(autoCompactTokens({ controlled: true, share: 0.2, idleShare: 0.3 }, 1)).toBe(1)
+    expect(autoCompactTokens({ controlled: true, share: 0.2, idleShare: 0.3, nudge: true, nudgeFirst: 0.3, nudgeSecond: null }, 128_000)).toBe(25_600)
+    expect(autoCompactTokens({ controlled: true, share: 0.6, idleShare: 0.3, nudge: true, nudgeFirst: 0.3, nudgeSecond: null }, 258_400)).toBe(155_040)
+    expect(autoCompactTokens({ controlled: true, share: 0.2, idleShare: 0.3, nudge: true, nudgeFirst: 0.3, nudgeSecond: null }, 1)).toBe(1)
   })
 
   it("passes nothing when Centralu does not control it, or the model's window is not known", () => {
-    expect(autoCompactTokens({ controlled: false, share: 0.6, idleShare: 0.3 }, 200_000)).toBeNull()
+    expect(autoCompactTokens({ controlled: false, share: 0.6, idleShare: 0.3, nudge: true, nudgeFirst: 0.3, nudgeSecond: null }, 200_000)).toBeNull()
     expect(autoCompactTokens(on, null)).toBeNull()
     expect(autoCompactTokens(on, 0)).toBeNull()
   })
@@ -29,14 +29,14 @@ describe('autoCompactTokens', () => {
 
 describe('the setting as stored', () => {
   it('reads as on at 60% for a record from before it, and field by field otherwise', () => {
-    expect(autoCompactOf({})).toEqual({ controlled: true, share: 0.6, idleShare: 0.3 })
-    expect(readAutoCompact({ controlled: false })).toEqual({ controlled: false, share: 0.6, idleShare: 0.3 })
-    expect(readAutoCompact({ share: 0.75 })).toEqual({ controlled: true, share: 0.75, idleShare: 0.3 })
+    expect(autoCompactOf({})).toEqual({ controlled: true, share: 0.6, idleShare: 0.3, nudge: true, nudgeFirst: 0.3, nudgeSecond: null })
+    expect(readAutoCompact({ controlled: false })).toEqual({ controlled: false, share: 0.6, idleShare: 0.3, nudge: true, nudgeFirst: 0.3, nudgeSecond: null })
+    expect(readAutoCompact({ share: 0.75 })).toEqual({ controlled: true, share: 0.75, idleShare: 0.3, nudge: true, nudgeFirst: 0.3, nudgeSecond: null })
     // A value from another build or a hand edit lands inside the range, or is no choice at all
     expect(readAutoCompact({ share: 5 }).share).toBe(0.95)
     expect(readAutoCompact({ share: 0.01 }).share).toBe(0.2)
-    expect(readAutoCompact({ controlled: 'no', share: 'half' })).toEqual({ controlled: true, share: 0.6, idleShare: 0.3 })
-    expect(readAutoCompact('x')).toEqual({ controlled: true, share: 0.6, idleShare: 0.3 })
+    expect(readAutoCompact({ controlled: 'no', share: 'half' })).toEqual({ controlled: true, share: 0.6, idleShare: 0.3, nudge: true, nudgeFirst: 0.3, nudgeSecond: null })
+    expect(readAutoCompact('x')).toEqual({ controlled: true, share: 0.6, idleShare: 0.3, nudge: true, nudgeFirst: 0.3, nudgeSecond: null })
   })
 })
 
@@ -284,6 +284,6 @@ describe('what a session is launched with', () => {
     await world.mgr.resumeSession(s.id)
     expect(world.codexAdapter.lastOpts?.autoCompactTokens).toBeUndefined()
     // The share stays for when it is turned back on
-    expect(((await world.rpc('prefs.get', {})) as { autoCompact: unknown }).autoCompact).toEqual({ controlled: false, share: 0.5, idleShare: 0.3 })
+    expect(((await world.rpc('prefs.get', {})) as { autoCompact: unknown }).autoCompact).toEqual({ controlled: false, share: 0.5, idleShare: 0.3, nudge: true, nudgeFirst: 0.3, nudgeSecond: null })
   })
 })

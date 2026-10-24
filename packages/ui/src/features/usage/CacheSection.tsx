@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import type { CacheSessionStats, CacheStats, CacheWindowStats } from '@cc/protocol'
-import { cacheHitRate, cacheWindowName, percentOf, rebuildBreakdown } from '@cc/core'
+import { cacheHitRate, cacheWindowName, cacheWriteShare, percentOf, rebuildBreakdown } from '@cc/core'
 import { Tooltip } from '../../components/primitives.jsx'
 import { Badge } from '../../components/Badge.jsx'
 import { formatCount } from '../../app/format.js'
@@ -34,6 +34,7 @@ export function CacheSection({
   if (!w) return null
   const name = cacheWindowName(w, cache.countingSince)
   const rate = cacheHitRate(w)
+  const writeShare = cacheWriteShare(w)
 
   return (
     <section className="mt-5 border-t border-line pt-3" data-testid="usage-cache" data-window={w.id}>
@@ -73,6 +74,24 @@ export function CacheSection({
               cache hit · {name}
             </span>
           </p>
+          {writeShare !== null && (
+            <p className="mt-0.5 text-xs text-ink-muted" data-testid="usage-cache-write-share">
+              <Tooltip
+                testId="usage-cache-write-share-tip"
+                content={
+                  <span className="block max-w-[260px] text-ink-muted">
+                    {cache.writes
+                      ? 'What writing to the cache cost, of everything the cache cost: reads count 0.1 of an uncached input token, a five-minute write 1.25 and an hour-long write 2 (Anthropic). The hit rate counts tokens, which hides that a write costs far more than a read.'
+                      : 'What the input not read from the cache cost, of everything the cache cost: a read counts a tenth of an uncached input token or less, the rest at its full price (a 30-minute write is 1.25 for GPT-5.6 and later). This tool reports no writes, so the uncached input stands in.'}
+                  </span>
+                }
+              >
+                <span className="underline decoration-dotted decoration-ink-faint underline-offset-2">
+                  {cache.writes ? 'writes' : 'uncached input'}: {percentOf(writeShare)}% of cache cost
+                </span>
+              </Tooltip>
+            </p>
+          )}
           <InputBar w={w} writes={cache.writes} />
           <dl className="mt-2 space-y-0.5 text-xs" data-testid="usage-cache-figures">
             <Figure swatch="bg-ink-muted" label="Read from cache" value={formatCount(w.cacheReadTokens)} testId="read" />
@@ -106,7 +125,9 @@ export function CacheSection({
           </dl>
           {w.rebuilds > 0 && w.rebuildCauses && (
             <p className="mt-1 pl-3.5 text-2xs leading-body text-ink-faint" data-testid="usage-cache-causes">
-              {w.rebuilds} rebuild{w.rebuilds === 1 ? '' : 's'}: {rebuildBreakdown(w.rebuildCauses, w.expiredIdleMs)}
+              {`${w.rebuilds} rebuild${w.rebuilds === 1 ? '' : 's'}${
+                w.rebuildTokens !== undefined ? ` · ${formatCount(w.rebuildTokens)} ${cache.writes ? 'written' : 'uncached'}` : ''
+              }: ${rebuildBreakdown(w.rebuildCauses, w.expiredIdleMs)}`}
             </p>
           )}
           {!cache.writes && (
@@ -202,7 +223,7 @@ function TopSessions({
         {sessions.map((s) => {
           const title = s.name || 'Deleted session'
           const figure = `${formatCount(writes ? s.cacheCreationTokens : s.inputTokens)}${
-            s.rebuilds ? ` · ${s.rebuilds} rebuild${s.rebuilds === 1 ? '' : 's'}` : ''
+            s.rebuilds ? ` · ${s.rebuilds} rebuild${s.rebuilds === 1 ? '' : 's'}${s.rebuildTokens !== undefined ? ` (${formatCount(s.rebuildTokens)})` : ''}` : ''
           }`
           // Why this session rebuilt, under its name: the question the row answers is "what made it write"
           const causes = s.rebuilds > 0 ? rebuildBreakdown(s.rebuildCauses) : ''

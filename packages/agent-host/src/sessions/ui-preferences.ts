@@ -1,5 +1,5 @@
-import type { UiPreferences, UiPreferencesPatch } from '@cc/protocol'
-import { parseUiPreferences, readAutoCompact, readNotifyPolicy, textSizeFromLegacyStep } from '@cc/protocol'
+import type { AutoCompact, UiPreferences, UiPreferencesPatch } from '@cc/protocol'
+import { NUDGE_MARGIN, parseUiPreferences, readAutoCompact, readNotifyPolicy, textSizeFromLegacyStep } from '@cc/protocol'
 import { parseJson } from '../dev-services/store/json.js'
 import { isObj } from '../json-value.js'
 import type { AppAccess } from './app-access.js'
@@ -14,8 +14,17 @@ import type { SessionTrashHost } from './session-trash.js'
  * keys. As one blob, that list belongs to the schema (UiPreferences).
  */
 const UI_PREFS_KEY = 'ui_preferences'
-/** The resting-session share of the auto-compact setting (#1451), stored beside it so an older build's save of `autoCompact` cannot erase it */
-const IDLE_SHARE_KEY = 'autoCompactIdleShare'
+/**
+ * The fields of the auto-compact setting an older build does not know (#1451, #1492), each stored beside the record so an
+ * older build's save of `autoCompact` cannot erase it. `controlled` and `share` stay inside it, where every build reads them.
+ */
+const COMPACT_BESIDE = {
+  idleShare: 'autoCompactIdleShare',
+  nudge: 'autoCompactNudge',
+  nudgeFirst: 'autoCompactNudgeFirst',
+  nudgeSecond: 'autoCompactNudgeSecond',
+} as const satisfies Record<Exclude<keyof AutoCompact, 'controlled' | 'share'>, string>
+const COMPACT_BESIDE_FIELDS = ['idleShare', 'nudge', 'nudgeFirst', 'nudgeSecond'] as const satisfies readonly (keyof typeof COMPACT_BESIDE)[]
 
 /**
  * What the screen preferences reach of the session manager (#428), typed as the manager declares each member. The
@@ -93,12 +102,13 @@ export class UiPreferenceStore {
      */
     prefs.sessionTools = true
     /*
-     * The resting-session share (#1451) is stored beside the auto-compact record, not in it. An older build writes
-     * `autoCompact` back as the two fields it knows, so a third inside it was erased by any save there (measured on the
-     * previous build); a top-level field of the record is kept by every build (`{ ...stored, ...written }`).
+     * The resting-session share (#1451) and the notices' settings (#1492) are stored beside the auto-compact record, not in
+     * it. An older build writes `autoCompact` back as the two fields it knows, so a third inside it was erased by any save
+     * there (measured on the previous build); a top-level field of the record is kept by every build (`{ ...stored, ...written }`).
      */
-    const idle = stored[IDLE_SHARE_KEY]
-    if (typeof idle === 'number' && Number.isFinite(idle)) prefs.autoCompact = readAutoCompact({ ...(prefs.autoCompact ?? {}), idleShare: idle })
+    const beside: Record<string, unknown> = {}
+    for (const field of COMPACT_BESIDE_FIELDS) if (COMPACT_BESIDE[field] in stored) beside[field] = stored[COMPACT_BESIDE[field]]
+    if (Object.keys(beside).length > 0) prefs.autoCompact = readAutoCompact({ ...(prefs.autoCompact ?? {}), ...beside })
     return prefs
   }
 
@@ -119,15 +129,23 @@ export class UiPreferenceStore {
     const base = current.notifyPolicy ?? readNotifyPolicy(this.loadWorkspace()?.notifyPolicy)
     const notifyPolicy = switches ? { ...base, ...switches } : undefined
     // The auto-compact setting is merged one field at a time too (#1376), over what is stored, field by field read
-    const { idleShare, ...compactRest } = compact ?? {}
-    const merged = compact ? { ...readAutoCompact(current.autoCompact), ...compact } : undefined
-    // The record keeps the two fields every build knows; the resting share goes beside it (`IDLE_SHARE_KEY`)
-    const autoCompact = Object.keys(compactRest).length > 0 && merged ? { controlled: merged.controlled, share: merged.share } : undefined
+    const merged: AutoCompact | undefined = compact ? { ...readAutoCompact(current.autoCompact), ...withoutUndefined(compact) } : undefined
+    // The second notice sits below the tool's own compaction share (#1492): a patch that sets both is judged on the new share
+    if (compact && merged && typeof compact.nudgeSecond === 'number' && compact.nudgeSecond > merged.share - NUDGE_MARGIN + 1e-9) {
+      throw new Error(
+        `The second reminder (${Math.round(compact.nudgeSecond * 100)}%) must be at least ${Math.round(NUDGE_MARGIN * 100)} points below the share agents compact at (${Math.round(merged.share * 100)}%): the tool's own compaction would come first.`,
+      )
+    }
+    // The record keeps the two fields every build knows; the others go beside it (`COMPACT_BESIDE`)
+    const compactKeys = Object.keys(withoutUndefined(compact ?? {}))
+    const autoCompact = merged && compactKeys.some((k) => !(k in COMPACT_BESIDE)) ? { controlled: merged.controlled, share: merged.share } : undefined
+    const besides: Record<string, unknown> = {}
+    if (compact && merged) for (const field of COMPACT_BESIDE_FIELDS) if (compact[field] !== undefined) besides[COMPACT_BESIDE[field]] = merged[field]
     const written = {
       ...rest,
       ...(notifyPolicy ? { notifyPolicy } : {}),
       ...(autoCompact ? { autoCompact } : {}),
-      ...(idleShare !== undefined && merged ? { [IDLE_SHARE_KEY]: merged.idleShare } : {}),
+      ...besides,
     }
     const stored = this.storedUiPreferences()
     /*
@@ -141,7 +159,8 @@ export class UiPreferenceStore {
     // Every window hears it (`prefs_changed`): one that did not make the change reads the record again
     // A patch that only carried the session tools switch (always on, not stored) changed nothing
     if (Object.keys(written).length) this.host.emit({ type: 'prefs_changed' })
-    const { [IDLE_SHARE_KEY]: _beside, autoCompact: _two, ...shown } = written
+    const { autoCompact: _two, ...shown } = written
+    for (const key of Object.values(COMPACT_BESIDE)) delete (shown as Record<string, unknown>)[key]
     return { ...current, ...shown, ...(merged ? { autoCompact: merged } : {}) }
   }
 
@@ -164,5 +183,17 @@ export class UiPreferenceStore {
   private brokenRow(): boolean {
     const raw = this.host.store.settings.appSetting(UI_PREFS_KEY)
     return raw !== null && !isObj(parseJson(raw))
+  }
+}
+
+/** A patch's fields that are set: `undefined` is no change, `null` is (the second notice's share back to the default) */
+function withoutUndefined(o: Partial<AutoCompact>): Partial<AutoCompact> {
+  return {
+    ...(o.controlled !== undefined ? { controlled: o.controlled } : {}),
+    ...(o.share !== undefined ? { share: o.share } : {}),
+    ...(o.idleShare !== undefined ? { idleShare: o.idleShare } : {}),
+    ...(o.nudge !== undefined ? { nudge: o.nudge } : {}),
+    ...(o.nudgeFirst !== undefined ? { nudgeFirst: o.nudgeFirst } : {}),
+    ...(o.nudgeSecond !== undefined ? { nudgeSecond: o.nudgeSecond } : {}),
   }
 }

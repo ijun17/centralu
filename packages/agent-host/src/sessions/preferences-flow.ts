@@ -1,4 +1,4 @@
-import { DEFAULT_NOTIFY_POLICY, ORCHESTRATOR_CHANGE, SessionId, autoCompactOf, type AutoCompact, TEXT_SIZES, THEME_PRESETS, UiPreferencesPatch, nearestTextSize, type UiPreferences, type UpdateStatus } from '@cc/protocol'
+import { DEFAULT_NOTIFY_POLICY, ORCHESTRATOR_CHANGE, SessionId, autoCompactOf, nudgeShares, type AutoCompact, TEXT_SIZES, THEME_PRESETS, UiPreferencesPatch, nearestTextSize, type UiPreferences, type UpdateStatus } from '@cc/protocol'
 import type { PreferenceChanges, PreferencesRequest } from '../adapters/contract.js'
 import type { HostCards } from './host-cards.js'
 import { plainQuoted } from './tool-answers.js'
@@ -29,9 +29,10 @@ const SLEEP_CHOICES = 'a whole number of minutes, or "never"'
 
 /** The setting in a line */
 function autoCompactText(c: AutoCompact): string {
-  return c.controlled
-    ? `agents compact at ${Math.round(c.share * 100)}% of the model's window, set by Centralu; a session at rest is compacted over ${Math.round(c.idleShare * 100)}%`
-    : "Centralu does not set when agents compact; each agent's own settings decide"
+  if (!c.controlled) return "Centralu does not set when agents compact; each agent's own settings decide"
+  const n = nudgeShares(c)
+  const nudge = c.nudge ? `a session is told quietly to call compact_self at ${Math.round(n.first * 100)}% and ${Math.round(n.second * 100)}%` : 'a session is not told to call compact_self'
+  return `agents compact at ${Math.round(c.share * 100)}% of the model's window, set by Centralu; a session at rest is compacted over ${Math.round(c.idleShare * 100)}%; ${nudge}`
 }
 
 /**

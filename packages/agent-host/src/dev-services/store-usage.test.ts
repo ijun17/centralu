@@ -12,7 +12,7 @@ import type { UsageBucket } from './store/usage-history.js'
 
 const bucket = (over: Partial<UsageBucket> = {}): UsageBucket => ({
   hour: 3_600_000, sessionId: 's1', projectId: 'p1', tool: 'claude', model: 'opus', machine: '',
-  requests: 1, input: 10, cacheRead: 100, cacheWrite: 1000, cacheWrite5m: 0, cacheWrite1h: 1000, output: 5, rebuilds: 1, causes: { expired: 1 }, ...over,
+  requests: 1, input: 10, cacheRead: 100, cacheWrite: 1000, cacheWrite5m: 0, cacheWrite1h: 1000, output: 5, rebuilds: 1, rebuildTokens: 1000, causes: { expired: 1 }, ...over,
 })
 
 describe('v62 usage tables', () => {
@@ -29,12 +29,60 @@ describe('v62 usage tables', () => {
       raw.close()
 
       const s = new Store(file)
-      expect(s.schemaVersion).toBe(62)
+      expect(s.schemaVersion).toBe(63)
       expect(s.projects.listProjects().map((p) => p.id)).toEqual(['p1'])
       s.usage.addBuckets([bucket()])
       expect(s.usage.buckets(0, 10 * 3_600_000)).toHaveLength(1)
       s.close()
     } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('v63 rebuild tokens (#1492)', () => {
+  it('adds the column to a v62 store, reads its rows as none counted, and an older build’s insert still works over it', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-usage-v63-'))
+    const open: { close(): void }[] = []
+    try {
+      const file = join(dir, 'store.db')
+      new Store(file).close()
+      // The state a v62 build left: the table without the column, with an hour a rebuild was counted in
+      const raw = new Database(file)
+      open.push(raw)
+      raw.exec(`DROP TABLE usage_buckets; PRAGMA user_version = 62`)
+      raw.exec(`CREATE TABLE usage_buckets (hour INTEGER NOT NULL, session_id TEXT NOT NULL, project_id TEXT NOT NULL DEFAULT '', tool TEXT NOT NULL,
+          model TEXT NOT NULL DEFAULT '', machine TEXT NOT NULL DEFAULT '', requests INTEGER NOT NULL DEFAULT 0, input INTEGER NOT NULL DEFAULT 0,
+          cache_read INTEGER NOT NULL DEFAULT 0, cache_write INTEGER NOT NULL DEFAULT 0, cache_write_5m INTEGER NOT NULL DEFAULT 0,
+          cache_write_1h INTEGER NOT NULL DEFAULT 0, output INTEGER NOT NULL DEFAULT 0, rebuilds INTEGER NOT NULL DEFAULT 0,
+          causes TEXT NOT NULL DEFAULT '{}', PRIMARY KEY (hour, session_id, project_id, tool, model, machine))`)
+      raw.exec(`INSERT INTO usage_buckets (hour, session_id, tool, requests, rebuilds) VALUES (3600000, 's1', 'claude', 3, 1)`)
+      raw.close()
+
+      const s = new Store(file)
+      open.push(s)
+      expect(s.schemaVersion).toBe(63)
+      expect(s.usage.buckets(0, 2 * 3_600_000)).toMatchObject([{ sessionId: 's1', requests: 3, rebuilds: 1, rebuildTokens: 0 }])
+      s.close()
+      // The previous build names its columns and has none of this one: its insert takes the default
+      const older = new Database(file)
+      open.push(older)
+      older.exec(`INSERT INTO usage_buckets (hour, session_id, tool, requests, rebuilds) VALUES (7200000, 's2', 'claude', 1, 1)`)
+      older.close()
+      const again = new Store(file)
+      open.push(again)
+      expect(again.usage.buckets(0, 3 * 3_600_000).map((b) => b.rebuildTokens)).toEqual([0, 0])
+      // This build adds to an hour of the older one's: the tokens add to what is there
+      again.usage.addBuckets([bucket({ sessionId: 's2', projectId: '', model: '', hour: 7_200_000, rebuilds: 1, rebuildTokens: 400 })])
+      expect(again.usage.buckets(7_200_000, 3 * 3_600_000)).toMatchObject([{ rebuilds: 2, rebuildTokens: 400 }])
+    } finally {
+      for (const d of open) {
+        try {
+          d.close()
+        } catch {
+          /* closed already */
+        }
+      }
       rmSync(dir, { recursive: true, force: true })
     }
   })
@@ -47,7 +95,7 @@ describe('UsageRecords', () => {
     s.usage.addBuckets([bucket({ requests: 2, input: 3, cacheWrite: 7, cacheWrite1h: 0, cacheWrite5m: 7, rebuilds: 2, causes: { expired: 1, model_change: 1 } })])
     s.usage.addBuckets([bucket({ requests: 1, rebuilds: 0, causes: {} })])
     expect(s.usage.buckets(0, 2 * 3_600_000)).toEqual([
-      bucket({ requests: 4, input: 23, cacheRead: 300, cacheWrite: 2007, cacheWrite5m: 7, cacheWrite1h: 1000 + 1000, output: 15, rebuilds: 3, causes: { expired: 2, model_change: 1 } }),
+      bucket({ requests: 4, input: 23, cacheRead: 300, cacheWrite: 2007, cacheWrite5m: 7, cacheWrite1h: 1000 + 1000, output: 15, rebuilds: 3, rebuildTokens: 3000, causes: { expired: 2, model_change: 1 } }),
     ])
   })
 

@@ -2,7 +2,7 @@
 
 # Store schema
 
-The tables of the host's store (`store.db`) at schema version 62, as a new store has them once
+The tables of the host's store (`store.db`) at schema version 63, as a new store has them once
 schema.sql and every migration step have run. Generated from a real `Store`
 (`packages/agent-host/src/dev-services/schema-doc.ts`); a test fails when this file and the migrations disagree.
 
@@ -372,6 +372,7 @@ erDiagram
     INTEGER output
     INTEGER rebuilds
     TEXT causes
+    INTEGER rebuild_tokens
   }
   usage_readings {
     TEXT tool PK
@@ -931,6 +932,7 @@ Added in v62.
 | `output` | INTEGER | no | `0` |  | v62 |
 | `rebuilds` | INTEGER | no | `0` |  | v62 |
 | `causes` | TEXT | no | `'{}'` |  | v62 |
+| `rebuild_tokens` | INTEGER | no | `0` |  | v63 |
 
 Indexes:
 

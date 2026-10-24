@@ -336,6 +336,10 @@ function demoCache(
         rebuilds: n(3, scale) + 3 * n(1, scale),
         rebuildCauses: { expired: n(3, scale), model_change: n(1, scale), compaction: n(1, scale), unknown: n(1, scale) },
         expiredIdleMs: { min: 64 * 60_000, max: 3 * 3600_000 },
+        // What the rebuilds wrote, and the cache cost weighted by the price ratios (reads 0.1, writes 1.25 to 2): writes are ~43% of it
+        rebuildTokens: n(1_020_000, scale),
+        cacheReadCost: n(3_120_000, scale),
+        cacheWriteCost: n(2_380_000, scale),
         sessions: claude.map((s) => ({
           sessionId: s.sessionId,
           name: s.name,
@@ -344,6 +348,7 @@ function demoCache(
           cacheReadTokens: n(9_800_000, scale),
           cacheCreationTokens: n(s.write, scale),
           rebuilds: Object.values(s.causes).reduce((sum, k) => sum + n(k, scale), 0),
+          rebuildTokens: n(Math.round(s.write * 0.6), scale),
           rebuildCauses: Object.fromEntries(Object.entries(s.causes).map(([c, k]) => [c, n(k, scale)])),
         })),
       })),

@@ -17,12 +17,21 @@ export class FakeHandle implements SessionHandle {
   /** The origin each of `sent` was handed with, in the same order (`InputOrigin`): undefined when none */
   origins: (InputOrigin | undefined)[] = []
   approvals: { requestId: string; decision: ApprovalDecision }[] = []
+  /** The quiet notes the host gave it (`SessionHandle.nudge`, #1492); none is a message, so `sent` does not hold them */
+  nudges: string[] = []
+  /** Whether the tool takes a note now (Codex between turns does not) */
+  takesNudges = true
   disposed = false
   constructor(readonly sessionId: string, private emit: EventSink) {}
   send(text: string, opts?: { origin?: InputOrigin }) {
     this.sent.push(text)
     this.origins.push(opts?.origin)
     this.emit({ type: 'message_delta', sessionId: this.sessionId, role: 'assistant', text: `echo:${text}` })
+  }
+  nudge(text: string): boolean {
+    if (!this.takesNudges) return false
+    this.nudges.push(text)
+    return true
   }
   /**
    * When the process is swapped out, the pending approval map comes back empty — this simulates that

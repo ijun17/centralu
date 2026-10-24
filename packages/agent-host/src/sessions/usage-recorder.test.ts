@@ -35,6 +35,18 @@ describe('UsageRecorder requests (docs/agent-host.md §6.2)', () => {
     })
   })
 
+  it('sums what the rebuilds wrote, and the API’s split of the writes into one hour and five minutes (#1492)', () => {
+    const { store, rec } = setup()
+    // A rebuild that wrote for an hour and for five minutes at once; a steady write; a rebuild of a tool that reports reads only
+    rec.request(src, { inputTokens: 5, cacheReadTokens: 0, cacheCreationTokens: 30_000, cacheTtl: '1h', cacheWrite1hTokens: 20_000, cacheWrite5mTokens: 10_000 }, rebuild)
+    rec.request(src, { inputTokens: 5, cacheReadTokens: 30_000, cacheCreationTokens: 500, cacheTtl: '5m', cacheWrite5mTokens: 500, cacheWrite1hTokens: 0 }, plain)
+    rec.request({ ...src, tool: 'codex' }, { inputTokens: 9_000, cacheReadTokens: 0 }, rebuild)
+    rec.flush()
+    const rows = store.usage.buckets(0, T0 + HOUR)
+    expect(rows.find((r) => r.tool === 'claude')).toMatchObject({ cacheWrite: 30_500, cacheWrite1h: 20_000, cacheWrite5m: 10_500, rebuilds: 1, rebuildTokens: 30_000 })
+    expect(rows.find((r) => r.tool === 'codex')).toMatchObject({ cacheWrite: 0, rebuilds: 1, rebuildTokens: 9_000 })
+  })
+
   it('keys a request by the model that served it when the tool says, else by the session setting', () => {
     const { store, rec } = setup()
     rec.request(src, { inputTokens: 1, cacheReadTokens: 0, model: 'claude-haiku-5-5' }, plain)

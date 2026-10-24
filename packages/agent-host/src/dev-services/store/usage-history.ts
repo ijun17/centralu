@@ -30,6 +30,8 @@ export type UsageBucket = {
   cacheWrite1h: number
   output: number
   rebuilds: number
+  /** What the rebuilds wrote to the cache (`rebuild_tokens`, v63): 0 for hours stored before the column, whose rebuilds are not counted in it */
+  rebuildTokens: number
   /** The rebuilds by `RebuildCause` */
   causes: Record<string, number>
 }
@@ -49,12 +51,13 @@ type BucketRow = {
   cacheWrite1h: number
   output: number
   rebuilds: number
+  rebuildTokens: number
   causes: string
 }
 
 const BUCKET_COLUMNS = `hour, session_id AS sessionId, project_id AS projectId, tool, model, machine, requests, input,
   cache_read AS cacheRead, cache_write AS cacheWrite, cache_write_5m AS cacheWrite5m, cache_write_1h AS cacheWrite1h,
-  output, rebuilds, causes`
+  output, rebuilds, rebuild_tokens AS rebuildTokens, causes`
 
 /**
  * What the host keeps of usage over time (docs/agent-host.md §6.2): the limit windows' readings and the tokens per
@@ -117,14 +120,14 @@ export class UsageRecords {
     )
     const upsert = this.db.prepare(
       `INSERT INTO usage_buckets (hour, session_id, project_id, tool, model, machine, requests, input, cache_read, cache_write,
-                                  cache_write_5m, cache_write_1h, output, rebuilds, causes)
+                                  cache_write_5m, cache_write_1h, output, rebuilds, rebuild_tokens, causes)
        VALUES (@hour, @sessionId, @projectId, @tool, @model, @machine, @requests, @input, @cacheRead, @cacheWrite,
-               @cacheWrite5m, @cacheWrite1h, @output, @rebuilds, @causes)
+               @cacheWrite5m, @cacheWrite1h, @output, @rebuilds, @rebuildTokens, @causes)
        ON CONFLICT(hour, session_id, project_id, tool, model, machine) DO UPDATE SET
          requests = requests + excluded.requests, input = input + excluded.input, cache_read = cache_read + excluded.cache_read,
          cache_write = cache_write + excluded.cache_write, cache_write_5m = cache_write_5m + excluded.cache_write_5m,
          cache_write_1h = cache_write_1h + excluded.cache_write_1h, output = output + excluded.output,
-         rebuilds = rebuilds + excluded.rebuilds, causes = excluded.causes`,
+         rebuilds = rebuilds + excluded.rebuilds, rebuild_tokens = rebuild_tokens + excluded.rebuild_tokens, causes = excluded.causes`,
     )
     this.db.transaction(() => {
       for (const b of buckets) {

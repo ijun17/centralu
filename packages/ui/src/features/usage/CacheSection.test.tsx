@@ -99,6 +99,39 @@ describe('CacheSection', () => {
   })
 })
 
+describe('CacheSection: rebuild tokens and the write share of the cache cost (#1492)', () => {
+  const costed = (over: Partial<CacheWindowStats> = {}) =>
+    win({
+      rebuildTokens: 1_020_000,
+      cacheReadCost: 3_120_000,
+      cacheWriteCost: 2_380_000,
+      sessions: [{ sessionId: 'here', name: 'Finish the composer', requests: 9, inputTokens: 1, cacheReadTokens: 1, cacheCreationTokens: 1_120_000, rebuilds: 3, rebuildTokens: 600_000 }],
+      ...over,
+    })
+
+  it('says what the rebuilds wrote beside their count, per window and per session, and the writes’ share of the cost beside the hit rate', () => {
+    const { text } = render({ writes: true, countingSince: LONG_AGO, windows: [costed()] })
+    expect(text).toContain('94.1% cache hit · last 5 h')
+    expect(text).toContain('writes: 43.3% of cache cost')
+    expect(text).toContain('6 rebuilds · 1M written: 3 cache expired (idle 64 min)')
+    expect(text).toContain('Finish the composer 1.1M · 3 rebuilds (600k)')
+  })
+
+  it('names the uncached input for a tool that reports reads only, which stands in for writes', () => {
+    const { text } = render({ writes: false, countingSince: LONG_AGO, windows: [costed({ cacheCreationTokens: 0 })] }, 'Codex')
+    expect(text).toContain('uncached input: 43.3% of cache cost')
+    expect(text).toContain('6 rebuilds · 1M uncached: ')
+  })
+
+  it('shows neither from a host that does not say, and not the share with nothing to weigh', () => {
+    const { text } = render({ writes: true, countingSince: LONG_AGO, windows: [win()] })
+    expect(text).not.toContain('of cache cost')
+    expect(text).not.toContain('written:')
+    const none = render({ writes: true, countingSince: LONG_AGO, windows: [costed({ cacheReadCost: 0, cacheWriteCost: 0 })] })
+    expect(none.text).not.toContain('of cache cost')
+  })
+})
+
 describe('CacheSection from a host that predates rebuild causes', () => {
   it('shows the rebuild count without a breakdown', () => {
     const { rebuildCauses: _c, expiredIdleMs: _i, ...old } = win()

@@ -280,6 +280,9 @@ export const ORCHESTRATOR_TOOLS = [
             controlled: z.boolean().optional().describe("Whether Centralu sets when agents compact (default on); off, each agent's own settings decide."),
             share: z.number().optional().describe("Share of the model's window to compact at, 0.2 to 0.95 (default 0.6)."),
             idleShare: z.number().optional().describe('Share over which a session at rest for 10 minutes is compacted by Centralu, 0.1 to 0.95 (default 0.3).'),
+            nudge: z.boolean().optional().describe('Whether Centralu quietly tells a session to call compact_self as its context grows (default on).'),
+            nudgeFirst: z.number().optional().describe('Share of the window for the first notice, 0.1 to 0.9 (default 0.3).'),
+            nudgeSecond: z.number().nullable().optional().describe('Share for the second notice, 0.1 to 0.9 and 5+ points below share; null for the default, 10 points below share.'),
           })
           .strict()
           .optional()

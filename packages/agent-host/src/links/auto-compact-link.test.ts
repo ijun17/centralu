@@ -105,12 +105,19 @@ describe('when agents compact on a linked machine (#1376)', () => {
     const hub = await hubHost(machine.port)
     await eventually(() => hub.machine().status === 'connected')
     await eventually(() => machine.mgr.uiPreferences().autoCompact?.share === 0.5)
-    expect(machine.mgr.uiPreferences().autoCompact).toEqual({ controlled: true, share: 0.5, idleShare: 0.3 })
+    expect(machine.mgr.uiPreferences().autoCompact).toEqual({ controlled: true, share: 0.5, idleShare: 0.3, nudge: true, nudgeFirst: 0.3, nudgeSecond: null })
 
     // The person turns Centralu's control off on the hub: the machine hands control back too
     await hub.router.handle('prefs.set', { patch: { autoCompact: { controlled: false } } })
     await eventually(() => machine.mgr.uiPreferences().autoCompact?.controlled === false)
-    expect(machine.mgr.uiPreferences().autoCompact).toEqual({ controlled: false, share: 0.5, idleShare: 0.3 })
+    expect(machine.mgr.uiPreferences().autoCompact).toEqual({ controlled: false, share: 0.5, idleShare: 0.3, nudge: true, nudgeFirst: 0.3, nudgeSecond: null })
+
+    // The notices' settings are the hub's too (#1492), also the one that follows the share
+    await hub.router.handle('prefs.set', { patch: { autoCompact: { nudge: false, nudgeFirst: 0.4, nudgeSecond: 0.4 } } })
+    await eventually(() => machine.mgr.uiPreferences().autoCompact?.nudgeFirst === 0.4)
+    expect(machine.mgr.uiPreferences().autoCompact).toEqual({ controlled: false, share: 0.5, idleShare: 0.3, nudge: false, nudgeFirst: 0.4, nudgeSecond: 0.4 })
+    await hub.router.handle('prefs.set', { patch: { autoCompact: { nudgeSecond: null } } })
+    await eventually(() => machine.mgr.uiPreferences().autoCompact?.nudgeSecond === null)
   })
 
   it("a linked session's menu asks the machine what its next start passes", async () => {

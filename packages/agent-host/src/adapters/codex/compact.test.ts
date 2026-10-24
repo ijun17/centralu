@@ -376,10 +376,23 @@ describe('codex compaction — one marker per compaction', () => {
   }
 
   it('codex-cli 0.160.0 (the item only) leaves one marker per compaction', async () => {
+    // Codex does not say why it compacted, and nothing here was asked for with `/compact`: the tool's own (#1500)
     expect(await markers('none')).toEqual([
-      { type: 'compaction', sessionId: 's1', failed: false },
-      { type: 'compaction', sessionId: 's1', failed: false },
+      { type: 'compaction', sessionId: 's1', failed: false, trigger: 'auto' },
+      { type: 'compaction', sessionId: 's1', failed: false, trigger: 'auto' },
     ])
+  })
+
+  it("says a compaction inside the compact turn the session started is manual, and the next one in a turn of its own is not (#1500)", async () => {
+    const events: { type: string; trigger?: string }[] = []
+    const h = await session((e) => events.push(e as { type: string; trigger?: string }))
+    h.send('/compact')
+    await tick()
+    for (const n of compactionTurn('u1', 'none')) state.handlers!.onNotification(n)
+    // Codex's own compaction in the middle of a regular turn that ran after it
+    for (const n of compactionTurn('u2', 'none')) state.handlers!.onNotification(n)
+    await tick()
+    expect(events.filter((e) => e.type === 'compaction').map((e) => e.trigger)).toEqual(['manual', 'auto'])
   })
 
   it('a CLI that also sends thread/compacted, after or before the item, still leaves one per compaction', async () => {

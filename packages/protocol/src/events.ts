@@ -494,7 +494,8 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
     after: z.number().optional(),
     /**
      * Who started it, when the tool says (Claude's `compact_metadata.trigger`): `manual` is a `/compact` (the person's or
-     * Centralu's, #1451), `auto` the tool's own at its threshold. Centralu does not take an `auto` one for its own.
+     * Centralu's, #1451), `auto` the tool's own at its threshold. Centralu does not take an `auto` one for its own. Codex does
+     * not say why; its adapter says `manual` for a compaction inside the compact turn the session started, `auto` otherwise (#1500).
      */
     trigger: z.enum(['manual', 'auto']).optional(),
   }),
