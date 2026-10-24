@@ -970,6 +970,15 @@ step shows on the screen.
    a tool that is not `readOnlyHint: true` tells this app's open screens to read again (rule 8). A
    read tool left unannotated costs a refresh cycle each time it is called, and screens that re-read
    with it keep refreshing each other.
+   A write may also declare its risk in `_meta`, so the person is not asked for every call (docs/apps.md,
+   "A write can declare how risky it is"): `'centralu/risk': 'local'` for bookkeeping in this app's own
+   data (with `destructiveHint: false`), `'routine'` for an ordinary write of this project's own pull
+   requests, issues and queue (no card in a trusted project's own app under `normal`), and
+   `'centralu/askWhen': { push: true }` to ask for a call whose arguments hold those values. This app
+   declares `ack`, `unqueue`, `mark_answer_recorded` and `edit_private_words` local, and `comment`,
+   `edit_comment`, `file_issue`, `open_pr`, `set_item_fields`, `add_item`, `mark_ready`, `rebase_stack`
+   (asking when `push` is true), `queue_merge`, `merge_when_green` and `integrate` routine; `release`
+   declares nothing and always asks. A new write declares nothing until its risk is judged.
 5. **Visibility**: by default a tool is visible to agents and to the screen. A tool only the screen
    should call gets `_meta: { ui: { visibility: ['app'] } }`; one only agents should call gets
    `['model']`.
