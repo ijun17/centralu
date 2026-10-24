@@ -30,7 +30,7 @@ describe('which steps of the orchestrator ask the person when a session asked fo
   })
 
   it('the CLI’s own tools: reading and planning are free; a command, a file written or edited, a page fetched and a subagent ask', () => {
-    for (const name of ['Read', 'Glob', 'Grep', 'TodoWrite', 'AskUserQuestion']) expect(askedAct(name, {}, THREAD), name).toBeNull()
+    for (const name of ['Read', 'Glob', 'Grep', 'TodoWrite', 'AskUserQuestion', 'ToolSearch']) expect(askedAct(name, {}, THREAD), name).toBeNull()
     for (const name of ['Bash', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'Agent', 'Task', 'mcp__elsewhere__tool']) {
       expect(askedAct(name, {}, THREAD), name).not.toBeNull()
     }
@@ -50,8 +50,8 @@ describe('which steps of the orchestrator ask the person when a session asked fo
   })
 
   it('mail: reading and answering in the request’s own thread are free; a word to anyone else, or in another thread, asks', () => {
-    for (const action of ['inbox', 'read', 'handled']) expect(askedAct('mail', { action, thread: 'other' }, THREAD), action).toBeNull()
-    for (const action of ['reply', 'update', 'close']) {
+    for (const action of ['inbox', 'read']) expect(askedAct('mail', { action, thread: 'other' }, THREAD), action).toBeNull()
+    for (const action of ['reply', 'update', 'close', 'handled']) {
       expect(askedAct('mail', { action, thread: THREAD }, THREAD), action).toBeNull()
       expect(askedAct('mail', { action, thread: 'hub-aaaaaaaa.t_02' }, THREAD), action).not.toBeNull()
     }

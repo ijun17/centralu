@@ -95,8 +95,23 @@ describe('the gate around the orchestrator’s steps (§9.7)', () => {
     const w = world({ answer: 'deny' })
     expect(await w.gate.askCli('orc', 'Bash', { command: 'echo pwned > file' })).toMatchObject({ allowed: false })
     expect(w.asked[0]).toContain('asked the orchestrator to run Bash {"command":"echo pwned > file"}')
-    expect(await w.gate.askCli('orc', 'Read', { file_path: 'a' })).toEqual({ allowed: true })
+    expect(await w.gate.askCli('orc', 'Read', { file_path: 'a' })).toEqual({ allowed: true, asked: false })
     expect(w.asked).toHaveLength(1)
+    // Allowed on the card: it runs, and the CLI is told the person was asked
+    const allowing = world({ answer: 'allow' })
+    expect(await allowing.gate.askCli('orc', 'Bash', { command: 'ls' })).toEqual({ allowed: true, asked: true })
+  })
+
+  it('a step that would outlive the turn is refused without a question: a subagent, a scheduled prompt, a watched command', async () => {
+    const w = world({ answer: 'allow' })
+    for (const tool of ['Agent', 'Task', 'CronCreate', 'ScheduleWakeup', 'Workflow', 'Monitor']) {
+      const r = await w.gate.askCli('orc', tool, { prompt: 'x' })
+      expect(r, tool).toMatchObject({ allowed: false, message: expect.stringContaining('would go on after this turn') })
+    }
+    expect(w.asked).toEqual([])
+    // And in a turn that is nobody’s request they are the CLI’s own, as before
+    const none = world({ asker: () => null })
+    expect(await none.gate.askCli('orc', 'Agent', {})).toEqual({ allowed: true, asked: false })
   })
 })
 

@@ -553,6 +553,10 @@ export class MailService {
       if (sender.kind === 'centralu') throw refuse('not_allowed', 'Centralu posts with postAsCentralu')
       const standing = this.standing(thread, caller)
       if (!standing) throw refuse('not_participant', `${caller} is not in thread ${threadId}`)
+      // A session writing into its own request to the orchestrator counts against the hour's words, as a new request does (§9.7)
+      if (sender.kind === 'session' && this.isAsk(thread) && thread.owner === caller && thread.assignee !== null) {
+        this.checkAskRate(this.groupAsks(caller, thread.assignee), now)
+      }
       // A retry of a post that was stored gets that post, also when the thread has been closed since: it was not lost
       const existing = this.duplicate(thread.id, caller, input.dedupeKey)
       if (existing) return { message: existing, thread, duplicate: true }
@@ -1722,13 +1726,7 @@ id: ${sessionIdOf(assignee)}` : ''
     const orchestrator = addresses.find((a) => a !== caller && this.policy.isOrchestrator?.(a))
     if (orchestrator === undefined) return
     if (kind !== 'assign') throw refuse('kind_not_allowed', 'the orchestrator takes a request as an assign: leave kind out, or say assign')
-    const group = this.policy.askGroup?.(caller)
-    const sameGroup = (owner: string): boolean => {
-      if (owner === caller) return true
-      const other = group ? this.policy.askGroup?.(owner) : null
-      return !!group && !!other && ((group.project !== null && other.project === group.project) || other.root === group.root)
-    }
-    const mine = this.records.threadsOfParty(orchestrator, 'assignee').filter((t) => this.isAsk(t) && sameGroup(t.owner))
+    const mine = this.groupAsks(caller, orchestrator)
     const open = mine.find((t) => t.state === 'open' || t.state === 'running' || t.state === 'blocked')
     if (open?.owner === caller) {
       throw refuse('not_allowed', `you already have a request open with the orchestrator (thread ${open.id}): wait for its answer (a request from a project nobody trusted waits for the person to release it), or close that thread first`, { thread: open.id })
@@ -1736,8 +1734,29 @@ id: ${sessionIdOf(assignee)}` : ''
     if (open) {
       throw refuse('not_allowed', 'a request from another session of your project, or under the same root session, is open with the orchestrator: wait for its answer, or ask the person')
     }
-    if (mine.filter((t) => t.createdAt > now - 60 * 60_000).length >= ASKS_PER_HOUR) {
-      throw refuse('rate_limited', `at most ${ASKS_PER_HOUR} new requests to the orchestrator an hour from the sessions of one project or one root session: wait, or ask the person`)
+    this.checkAskRate(mine, now)
+  }
+
+  /** The requests to the orchestrator of the sessions that share the caller's project or root session, the caller's own included */
+  private groupAsks(caller: string, orchestrator: string): ThreadRow[] {
+    const group = this.policy.askGroup?.(caller)
+    const sameGroup = (owner: string): boolean => {
+      if (owner === caller) return true
+      const other = group ? this.policy.askGroup?.(owner) : null
+      return !!group && !!other && ((group.project !== null && other.project === group.project) || other.root === group.root)
+    }
+    return this.records.threadsOfParty(orchestrator, 'assignee').filter((t) => this.isAsk(t) && sameGroup(t.owner))
+  }
+
+  /**
+   * At most `ASKS_PER_HOUR` words an hour from those sessions to the orchestrator, counting a request's first word and every word a session
+   * writes into one after: a follow-up in an answered request wakes the orchestrator as a new request does, so it is not a way round the limit
+   */
+  private checkAskRate(asks: readonly ThreadRow[], now: number): void {
+    const since = now - 60 * 60_000
+    const words = asks.reduce((n, t) => n + this.records.messagesAfter(t.id, 0).filter((m) => m.sender === t.owner && m.createdAt > since).length, 0)
+    if (words >= ASKS_PER_HOUR) {
+      throw refuse('rate_limited', `at most ${ASKS_PER_HOUR} words an hour to the orchestrator from the sessions of one project or one root session, a follow-up in an answered request included: wait, or ask the person`)
     }
   }
 

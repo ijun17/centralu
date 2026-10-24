@@ -75,6 +75,12 @@ export function mailRelations(host: RelationsHost): MailPolicy {
       if (t.kind === 'centralu') return 'Centralu only sends'
       // A session that is gone takes no new mail (§7.1), also in a thread it was in
       if (t.kind === 'session' && !host.session(t.sessionId)) return 'that session is gone: it is in the session archive or deleted'
+      // A session writing to the orchestrator, in a thread it is in or not, needs an orchestrator that can put each step of a request to the person: a request
+      // opened while it ran on one tool must not wake it after it was changed to another (§9.7)
+      if (t.kind === 'session' && f.kind === 'session' && host.session(t.sessionId)?.kind === 'orchestrator' && host.session(f.sessionId)?.kind !== 'orchestrator') {
+        const why = host.orchestratorAsks?.()
+        if (why) return why
+      }
       if (thread && host.inThread(thread.id, to)) return null
       if (t.kind === 'app') return 'apps take no mail yet'
       if (f.kind === 'centralu' || f.kind === 'person') return null
@@ -86,7 +92,7 @@ export function mailRelations(host: RelationsHost): MailPolicy {
       if (!sender || !receiver) return 'that session is gone: it is in the session archive or deleted'
       if (sender.kind === 'orchestrator') return null
       // Any session of this host may ask the orchestrator (§9.7); the limits of asking are the service's (`MailService.open`) and the delivery's
-      if (receiver.kind === 'orchestrator') return host.orchestratorAsks?.() ?? null
+      if (receiver.kind === 'orchestrator') return null
       if (sender.kind === 'coordinator' && sender.scopeSessionIds?.includes(t.sessionId)) return null
       if (receiver.askedBy === f.sessionId) return null
       return 'a session writes to the sessions it started, to the person, and replies in a thread it shares with another; the orchestrator is the way to another'

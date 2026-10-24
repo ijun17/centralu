@@ -465,3 +465,56 @@ describe('a request is read in the turn mail starts for it (§9.7)', () => {
     expect(w.tool.run('asker', { action: 'read', thread: thread.id }).text).toContain('> the answer')
   })
 })
+
+describe('a follow-up in an answered request counts as a new request (§9.7)', () => {
+  it('at most 5 words an hour to the orchestrator from a session, the request’s first word and the ones written into it after', () => {
+    const w = world()
+    const { thread } = ask(w)
+    w.mail.update(thread.id, ORCH, { state: 'review' })
+    for (let i = 0; i < ASKS_PER_HOUR - 1; i++) {
+      w.clock.t += 60_000
+      expect(w.mail.post(thread.id, ASKER, { kind: 'note', body: `a follow-up ${i}` }).duplicate).toBe(false)
+    }
+    w.clock.t += 60_000
+    expect(reasonOf(() => w.mail.post(thread.id, ASKER, { kind: 'note', body: 'one more' }))).toBe('rate_limited')
+    // A new request is no way round it, and the hour passes
+    w.mail.update(thread.id, ORCH, { state: 'review' })
+    expect(reasonOf(() => ask(w))).toBe('rate_limited')
+    w.clock.t += 60 * 60_000
+    expect(w.mail.post(thread.id, ASKER, { kind: 'note', body: 'later' }).duplicate).toBe(false)
+  })
+
+  it('and the orchestrator’s own words in the thread are not counted against the session', () => {
+    const w = world()
+    const { thread } = ask(w)
+    for (let i = 0; i < 10; i++) w.mail.post(thread.id, ORCH, { kind: 'note', body: `an answer ${i}` })
+    expect(w.mail.post(thread.id, ASKER, { kind: 'note', body: 'thanks' }).duplicate).toBe(false)
+  })
+})
+
+describe('an orchestrator whose tool cannot put each step to the person is not asked (§9.7)', () => {
+  it('a session cannot open a request, and a request opened before is not written into either', () => {
+    let why: string | null = null
+    const store = new Store()
+    const mail = new MailService(store.mail, {
+      hostId: () => HOST,
+      now: () => NOW,
+      policy: mailRelations({
+        session: (id) => (kinds[id] ? { kind: kinds[id] } : undefined),
+        orchestratorAsks: () => why,
+        mailTool: () => true,
+        mailCommand: (id) => id === 'orch',
+        inThread: (t, who) => store.mail.participants(t).some((p) => p.address === who && p.leftAt === null),
+      }),
+    })
+    const { thread } = openBy(mail, { by: ASKER, kind: 'assign', subject: 'a request', body: 'please rename', assignee: ORCH })
+    // The orchestrator is changed to a tool that cannot: the thread opened before no longer wakes it
+    why = 'the orchestrator runs on a tool that cannot ask the person for each step of a request yet'
+    expect(reasonOf(() => mail.post(thread.id, ASKER, { kind: 'note', body: 'and also this' }))).toBe('policy')
+    expect(reasonOf(() => openBy(mail, { by: OTHER, kind: 'assign', subject: 's', body: 'b', assignee: ORCH }))).toBe('policy')
+    // The orchestrator itself, the person and replies from the orchestrator are not held up by it
+    expect(mail.post(thread.id, ORCH, { kind: 'answer', body: 'sorry' }).duplicate).toBe(false)
+    expect(mail.post(thread.id, 'person', { kind: 'note', body: 'I will do it' }).duplicate).toBe(false)
+    store.close()
+  })
+})

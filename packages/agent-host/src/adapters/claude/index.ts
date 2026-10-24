@@ -252,8 +252,8 @@ export class ClaudeAdapter implements AgentAdapter {
     peerMessaging: true,
     // The query's prompt iterator reads queued user messages while the current turn continues.
     midTurnInput: true,
-    // `Query.setPermissionMode` switches a live query between turns (scripts/probe-request-turn-mode.mts)
-    narrowsTurn: true,
+    // A `PreToolUse` hook sees every tool call in every permission mode (scripts/probe-pretooluse-hook.mts)
+    gatesSteps: true,
     /*
      * An idle session may be put to sleep (#568): a resumed process read the prompt cache as the live one did (~100% at
      * 2, 6 and 10 min on the 1 h lifetime, CLI 2.1.29x with haiku, #561) for +0.7 s (p50) / +1.8 s (p95) before the first
