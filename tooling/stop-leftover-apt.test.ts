@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import { SLOW } from './test-timing.js'
 
 const script = new URL('../.github/scripts/stop-leftover-apt.sh', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
 const sleepBinary = process.platform === 'win32' ? '' : spawnSync('/bin/sh', ['-c', 'command -v sleep'], { encoding: 'utf8' }).stdout.trim()
@@ -17,7 +18,7 @@ const hasPgrep = sleepBinary !== '' && spawnSync('pgrep', ['-x', 'nothing-by-thi
  * copy either: macOS kills a copied platform binary at exec (code signing). A process is named after the path it was
  * exec'd by, not where a link leads, on both systems.
  */
-describe.skipIf(!hasPgrep)('the second try of a browser install first stops what the first left running (#1503)', { timeout: 20_000 }, () => {
+describe.skipIf(!hasPgrep)('the second try of a browser install first stops what the first left running (#1503)', { timeout: 20_000 * SLOW }, () => {
   const started: number[] = []
   const folders: string[] = []
   afterEach(() => {
