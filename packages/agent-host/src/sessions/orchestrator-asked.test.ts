@@ -170,7 +170,7 @@ describe('in the turn a request starts, every step that changes something asks t
     const call = run('rename_session', { sessionId: other.id, name: 'Renamed by request' })
     await eventually(() => !!card())
     expect(card()!.text).toBe(
-      `Session "${asker.name}" in project "${acme.name}" asked the orchestrator to run rename_session {"sessionId":"${other.id}","name":"Renamed by request"}. It is the session's request, not yours.`,
+      `Session ${JSON.stringify(asker.name)} in project ${JSON.stringify(acme.name)} asked the orchestrator to run rename_session {"sessionId":"${other.id}","name":"Renamed by request"}. It is the session's request, not yours.`,
     )
     w.mgr.respondApproval(orc.id, card()!.requestId, 'deny')
     const r = await call

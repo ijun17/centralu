@@ -225,10 +225,13 @@ export type ReportDelivery = 'wake' | 'in-turn' | 'old'
 export type ReportedAs = 'mailed' | 'closed' | 'none' | { settle: () => void; keep: boolean }
 
 
-/** The thread a session opened to ask the orchestrator (§9.7): a `mail` thread, which `latestBetween` does not take for a delegation's */
+/**
+ * The thread a session opened to ask the orchestrator (§9.7): a `mail` thread, which `latestBetween` does not take for a delegation's. The one
+ * whose work is going if there is one (the session may have written in an answered request and opened another), else the latest
+ */
 function askedOf(mail: MailService, records: MailRecords, owner: string, assignee: string): ThreadRow | undefined {
-  const thread = records.latestBetween(owner, assignee, ['mail'])
-  return thread && mail.isAsk(thread) ? thread : undefined
+  const asks = records.threadsOfParty(owner, 'owner').filter((t) => t.assignee === assignee && t.origin === 'mail' && mail.isAsk(t))
+  return asks.findLast((t) => t.state === 'running') ?? asks.at(-1)
 }
 
 /**

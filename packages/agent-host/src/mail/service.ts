@@ -1718,7 +1718,7 @@ id: ${sessionIdOf(assignee)}` : ''
     const mine = this.records.threadsOfParty(caller, 'owner').filter((t) => t.assignee === orchestrator)
     const open = mine.find((t) => t.state === 'open' || t.state === 'running' || t.state === 'blocked')
     if (open) {
-      throw refuse('not_allowed', `you already have a request open with the orchestrator (thread ${open.id}): wait for its answer, or close that thread first`, { thread: open.id })
+      throw refuse('not_allowed', `you already have a request open with the orchestrator (thread ${open.id}): wait for its answer (a request from a project nobody trusted waits for the person to release it), or close that thread first`, { thread: open.id })
     }
     if (mine.filter((t) => t.createdAt > now - 60 * 60_000).length >= ASKS_PER_HOUR) {
       throw refuse('rate_limited', `at most ${ASKS_PER_HOUR} new requests to the orchestrator an hour from one session: wait, or ask the person`)

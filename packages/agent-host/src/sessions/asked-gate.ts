@@ -21,7 +21,7 @@ export type AskedGateHost = {
   /** The person's card with the question, Allow or Deny only; not covered by a step's own Allow */
   ask(orchestratorId: string, question: string, signal?: AbortSignal): Promise<'allow' | 'deny' | null>
   /** Runs `run` while the cards the orchestrator raises are covered by the Allow just given */
-  cover(orchestratorId: string, run: () => Promise<ToolOutput>): Promise<ToolOutput>
+  cover(orchestratorId: string, run: () => Promise<ToolOutput>, signal?: AbortSignal): Promise<ToolOutput>
 }
 
 export class AskedGate {
@@ -33,7 +33,11 @@ export class AskedGate {
     const act = askedAct(call.name, call.args, asker.threadId)
     if (act === null) return run()
     const answer = await this.host.ask(orchestratorId, askedQuestion(asker, act), signal)
-    if (answer === 'allow') return this.host.cover(orchestratorId, run)
+    // The person may answer long after the turn the card was raised in: an Allow for a request's step is for that request's turn, not a later one
+    if (answer === 'allow' && this.host.askedBy(orchestratorId)?.threadId !== asker.threadId) {
+      return { text: 'Nothing was done: the turn this was asked in has ended. Ask again in the thread if it is still wanted.', isError: true }
+    }
+    if (answer === 'allow') return this.host.cover(orchestratorId, run, signal)
     return {
       text:
         answer === null

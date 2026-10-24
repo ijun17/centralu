@@ -455,12 +455,17 @@ as the CLI's own input, never as a message of the person's.
 (`mail send` with `to: "orchestrator"`, an `assign`): the session owns it and the orchestrator is its assignee. The request is a session's text, so it
 is not the person's word, and three things follow. (1) Its words never go inline: the wake lists host fields and calls the sender "a session asking you
 for something", and `mail read` quotes the words under a header Centralu writes from its own record (the session's name, its project, whether the
-project is trusted). (2) In a turn whose thread is such a request, every tool or command of the orchestrator that is not on a short list of reading acts
+project is trusted). (2) In a turn whose thread is such a request, every Centralu tool or command of the orchestrator that is not on a short list of reading acts
 (`sessions/asked-acts.ts`: reads, and answering in the request's own thread) raises the person's card first, naming the session and its project, under
 every preset (`alwaysAsk`, so `auto` does not answer it), Allow or Deny only (`ORCHESTRATOR_CHANGE`); the list fails closed, so a command added later
-asks until it is listed as a read. The Allow is for that one call: the cards the call would raise itself meanwhile are covered by it (`HostCards.cover`),
-so there is one card, and no "always" is offered or kept. A turn that is not a request (the person's, or a thread the person gave) is as it was. (3) Limits:
-a request from a project nobody trusted is held (`policy`) until the person releases it in the Inbox, a session has one request open at a time (a second
+asks until it is listed as a read. The Allow is for that one call: the cards the call would raise itself meanwhile are covered by it
+(`HostCards.cover`, kept by the call's own async work and ended with the call or its signal), so there is one card, and no "always" is offered or kept; an
+Allow that arrives after the request's turn ended runs nothing. A turn that is not a request (the person's, or a thread the person gave) is as it was.
+**Not covered:** the orchestrator's own CLI tools (its shell, file edits, its subagents) stay under its own preset and the CLI's own cards, as for any
+session, so under `auto` a request that makes it use them is not asked about; and a turn that a relayed report starts (the old path of a kept
+process) belongs to no thread. (3) Limits:
+a request from a project nobody trusted is held (`policy`) until the person releases it in the Inbox, and `mail inbox` and `mail read` show the orchestrator none of
+its words meanwhile, a session has one request open at a time (a second
 is refused with the first one's thread), and at most 5 new requests an hour. Nothing moves across with the answer: the asking session gets back only
 what the orchestrator posts in the thread. A linked machine's sessions asking the hub's orchestrator are slice 4's (§9.7, "Linked machines").
 
