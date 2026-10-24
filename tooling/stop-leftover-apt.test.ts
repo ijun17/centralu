@@ -1,17 +1,19 @@
 import { spawn, spawnSync } from 'node:child_process'
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, copyFileSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 const script = new URL('../.github/scripts/stop-leftover-apt.sh', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
-const hasPgrep = process.platform !== 'win32' && spawnSync('pgrep', ['-x', 'nothing-by-this-name']).error === undefined
+const sleepBinary = process.platform === 'win32' ? '' : spawnSync('/bin/sh', ['-c', 'command -v sleep'], { encoding: 'utf8' }).stdout.trim()
+const hasPgrep = sleepBinary !== '' && spawnSync('pgrep', ['-x', 'nothing-by-this-name']).error === undefined
 
 /*
  * #1503 (review of #1505): a `playwright install-deps` that hit its step limit is killed by the runner, but the root
  * `apt-get` it started goes on holding dpkg's locks, and the second try's `dpkg --configure -a` then fails at once.
- * The second try first runs this script. The stand-ins here are scripts named like apt-get would be (pgrep -x reads the
- * process's name, at most 15 characters), started by this test, so nothing of the machine's own is stopped.
+ * The second try first runs this script. The stand-ins here are copies of the real `sleep` binary under a made-up name,
+ * started by this test, so nothing of the machine's own is stopped. A copy, not a script: pgrep -x reads the name of the
+ * executable, which for a script is its interpreter (`bash`) on macOS, and it keeps at most 15 characters of it.
  */
 describe.skipIf(!hasPgrep)('the second try of a browser install first stops what the first left running (#1503)', () => {
   const started: number[] = []
@@ -32,9 +34,12 @@ describe.skipIf(!hasPgrep)('the second try of a browser install first stops what
     const dir = mkdtempSync(join(tmpdir(), 'stop-apt-'))
     folders.push(dir)
     const file = join(dir, name)
-    writeFileSync(file, `#!/bin/bash\n${stubborn ? "trap '' TERM\n" : ''}while true; do sleep 1; done\n`)
+    copyFileSync(sleepBinary, file)
     chmodSync(file, 0o755)
-    const child = spawn(file, [], { stdio: 'ignore', detached: true })
+    // An ignored signal stays ignored through exec, so the stubborn one is the copy started by a shell that ignores SIGTERM
+    const child = stubborn
+      ? spawn('/bin/sh', ['-c', 'trap "" TERM; exec "$0" 1000', file], { stdio: 'ignore', detached: true })
+      : spawn(file, ['1000'], { stdio: 'ignore', detached: true })
     started.push(child.pid!)
     // Until pgrep sees it by its name
     for (let i = 0; i < 100; i++) {
@@ -61,6 +66,8 @@ describe.skipIf(!hasPgrep)('the second try of a browser install first stops what
     const r = await run(name)
     expect(r.status, r.stdout + r.stderr).toBe(0)
     expect(r.stdout).toContain(`left ${name} running: stopping it`)
+    // Gone on the request, not by the kill after the wait: with the SIGTERM step removed this would still end, by the fallback
+    expect(r.stdout).not.toContain('did not stop in')
     expect(alive(name)).toBe(false)
   })
 

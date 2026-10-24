@@ -600,7 +600,7 @@ jobs:
         timeout-minutes: 3
         run: |
           bash .github/scripts/stop-leftover-apt.sh
-          sudo dpkg --configure -a
+          sudo dpkg --configure -a || true
           pnpm exec playwright install-deps webkit
 
       - name: Install WebKit
@@ -683,7 +683,7 @@ jobs:
         timeout-minutes: 3
         run: |
           bash .github/scripts/stop-leftover-apt.sh
-          sudo dpkg --configure -a
+          sudo dpkg --configure -a || true
           pnpm exec playwright install-deps chromium
 
       - name: Install Chromium
@@ -828,7 +828,7 @@ jobs:
         timeout-minutes: 3
         run: |
           bash .github/scripts/stop-leftover-apt.sh
-          sudo dpkg --configure -a
+          sudo dpkg --configure -a || true
           pnpm exec playwright install-deps webkit
 
       - name: Install WebKit

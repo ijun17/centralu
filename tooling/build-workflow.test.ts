@@ -183,7 +183,7 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
           '        timeout-minutes: 3',
           '        run: |',
           '          bash .github/scripts/stop-leftover-apt.sh',
-          '          sudo dpkg --configure -a',
+          '          sudo dpkg --configure -a || true',
           `          pnpm exec playwright install-deps ${browser}`,
           '',
           `      - name: Install ${Browser}`,
