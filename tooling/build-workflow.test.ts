@@ -143,6 +143,26 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     for (const j of working) expect(limit(j.id), j.id).toBeLessThanOrEqual(30)
   })
 
+  // #1503: three e2e shards were cancelled at their limit inside `playwright install --with-deps`, which downloaded about
+  // 140 apt packages from a slow mirror (usually 20 to 45 s, but 244 to 893 s on some shards). The jobs that run a
+  // browser run in Playwright's image instead, which carries the browsers and their libraries, so nothing is installed
+  // at run time. The image's browsers are the build its own Playwright version expects: a lockfile bump without the
+  // image bump would run the tests on browsers the library does not drive (Playwright then fails to launch: "Executable
+  // doesn't exist"), so this holds the two together, and holds the install back out.
+  it("runs every job that drives a browser in the Playwright image of the lockfile's version, installing nothing", () => {
+    const lock = readFileSync(new URL('../pnpm-lock.yaml', import.meta.url), 'utf8')
+    const version = /^ {6}'@playwright\/test':\n {8}specifier: [^\n]+\n {8}version: (\d+\.\d+\.\d+)$/m.exec(lock)?.[1]
+    expect(version, "the root importer's @playwright/test in pnpm-lock.yaml").toBeDefined()
+    const browserJobs = jobs.filter((j) => /pnpm (?:e2e|ux)\b/.test(j.body) && !/^ {4}steps:\n {6}- run: echo /m.test(j.body))
+    expect(browserJobs.map((j) => j.id).sort()).toEqual(['e2e', 'e2e-chromium', 'ux-tasks'])
+    for (const j of browserJobs) {
+      expect(j.body, j.id).toMatch(new RegExp(`^ {4}container:\\n {6}image: mcr\\.microsoft\\.com/playwright:v${version!.replaceAll('.', '\\.')}-noble\\n {6}options: --ipc=host --init\\n`, 'm'))
+      expect(j.body, j.id).not.toMatch(/playwright install/)
+    }
+    expect(workflow).not.toMatch(/playwright install|install-deps|--with-deps/)
+    expect(workflow.match(/mcr\.microsoft\.com\/playwright:/g)).toHaveLength(browserJobs.length)
+  })
+
   // #1259: changes land after the fast tier, so every push to main needs its full run to the end; a pull request's are superseded
   it("never cancels a run on main for a newer push, and still supersedes a branch's or pull request's run", () => {
     const block = /^concurrency:\n((?: {2}.*\n)+)/m.exec(workflow)?.[1] ?? ''

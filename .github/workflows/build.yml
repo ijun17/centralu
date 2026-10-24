@@ -545,6 +545,10 @@ jobs:
     needs: changes
     if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-24.04
+    # The browsers and their system libraries come in the image: no apt at run time (#1503)
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.1-noble
+      options: --ipc=host --init
     # See the time limits above
     timeout-minutes: 15
     outputs:
@@ -571,10 +575,6 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
-
-      # WebKit at the build this lockfile's Playwright expects, with the system libraries it needs
-      - name: Install WebKit
-        run: pnpm exec playwright install --with-deps webkit
 
       - name: pnpm e2e (shard ${{ matrix.shard }}/${{ matrix.shards }})
         id: e2e
@@ -604,6 +604,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.1-noble
+      options: --ipc=host --init
     # See the time limits above the WebKit job
     timeout-minutes: 15
     outputs:
@@ -629,10 +632,6 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
-
-      # Chromium at the build this lockfile's Playwright expects, with the system libraries it needs
-      - name: Install Chromium
-        run: pnpm exec playwright install --with-deps chromium
 
       - name: pnpm e2e (shard ${{ matrix.shard }}/${{ matrix.shards }})
         id: e2e
@@ -733,6 +732,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.1-noble
+      options: --ipc=host --init
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -749,9 +751,6 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
-
-      - name: Install WebKit
-        run: pnpm exec playwright install --with-deps webkit
 
       - name: pnpm ux
         env:
