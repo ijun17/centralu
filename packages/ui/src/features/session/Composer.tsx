@@ -24,6 +24,7 @@ import { appendPath, isFileDrag, isOsFileDrag, readDragPath } from '../files/dra
 import type { AppLinkDrop } from '../app-frame/dragRelay.js'
 import { droppedPiece, droppedText, insertAtCaret, isTextDrag, type DroppedText } from './dragLink.js'
 import { appReachNotice } from './appReachNotice.js'
+import { UntrustedNotice } from '../project/UntrustedNotice.jsx'
 import { usePlatform } from '../../app/PlatformProvider.js'
 import { ComposerFooter } from './ComposerFooter.jsx'
 import { EMPTY_CHAT, EMPTY_QUESTIONS } from './empty.js'
@@ -570,6 +571,7 @@ export const Composer = memo(function Composer({
       {(attachments.length > 0 || uploading > 0) && (
         <AttachmentStrip attachments={attachments} uploading={uploading} onRemove={removeAttachment} />
       )}
+      <UntrustedNotice projectId={projectId} className="mb-2" />
       {appNotice && (
         <div className="mb-2 flex items-start gap-2 text-sm text-ink-muted" role="status" data-testid="composer-app-notice" data-reason={appNotice.reason}>
           <span className="min-w-0 flex-1">{appNotice.text}</span>

@@ -28,14 +28,23 @@ export const trustCardIds = (testId: string): TrustCardIds => ({
   app: (key) => `${testId}-app-${key}`,
 })
 
+/**
+ * What stays off in a project that is not trusted (#1512), said by the card, the project row and the notice in a session.
+ * The repository's own instruction files are the part nothing said before: an untrusted project's `CLAUDE.md` and
+ * `AGENTS.md`, hooks and commands are not read (the session reads only the person's own settings), and starting
+ * agents and worktrees are refused there.
+ */
+export const UNTRUSTED_OFF =
+  "its CLAUDE.md and AGENTS.md, hooks and commands are ignored, its apps don't run, and its sessions can't start agents or use worktrees"
+
 export function TrustCard({ project, onAnswer, ids }: { project: ProjectInfo; onAnswer: (trust: boolean) => void; ids: TrustCardIds }) {
   const apps = useProjectApps(project.id)
   return (
     <div className="rounded-md border border-line bg-surface-raised px-2.5 py-2" role="group" aria-label={`Trust ${project.name}?`} data-testid={ids.card}>
       <p className="text-sm text-ink">Trust this project?</p>
       <p className="mt-1 text-xs leading-body text-ink-muted">
-        Trusting lets this project&apos;s apps run and its settings apply. Trust it only if you trust the code in this
-        folder.
+        Trusting lets this project&apos;s apps run and its settings apply. Until then {UNTRUSTED_OFF}. Trust it only if
+        you trust the code in this folder.
       </p>
       {apps.length > 0 && (
         <>
