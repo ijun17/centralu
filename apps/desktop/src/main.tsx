@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
+import { backgroundCount, isInTurn } from '@cc/core'
+import { errorMessage } from '@cc/protocol'
 import { App, confirmKeyAction, prepareFirstPaint, useStore } from '@cc/ui'
 import {
   autoSwitch,
   buildBar,
   createTauriPlatform,
   focusWindow,
+  keepRunningThenQuit,
   listenForQuit,
   onHostStatus,
   quitAndStopAgents,
@@ -106,8 +109,18 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
    */
   const [background, setBackground] = useState<boolean | null>(null)
   const [quitError, setQuitError] = useState<string | null>(null)
+  /*
+   * Work on this computer that a plain quit ends: a session in a turn, or one with a background job running. A session on a
+   * linked machine runs on that machine's own host, which quitting here does not stop, and one that cannot be reached has
+   * only a last-known state, so neither counts.
+   */
+  const running = useStore((s) => Object.values(s.sessions).filter((x) => !x.machine && !x.unreachable && (isInTurn(x.state) || backgroundCount(x.backgroundTasks) > 0)).length)
+  // "Quit and keep running" is under way (the keeper is being told): the buttons and Enter wait for its answer
+  const [leaving, setLeaving] = useState(false)
+  const leavingRef = useRef(false)
   const quit = useCallback(
     async (stopAgents = false) => {
+      if (leavingRef.current) return
       if (alsoStop && strays.length > 0) {
         // A failure here does not block quitting — what the person clicked was "quit".
         await platform.processes.stop(strays.map((s) => s.pid)).catch(() => {})
@@ -122,6 +135,28 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
     },
     [alsoStop, strays, platform],
   )
+
+  const keepRunning = useCallback(async () => {
+    if (leavingRef.current) return
+    leavingRef.current = true
+    setLeaving(true)
+    setQuitError(null)
+    // Background mode first: quitting with it still off would stop the turns the person just asked to keep. If the keeper
+    // cannot be told, say why and stay open, with the ticked processes still running
+    try {
+      await keepRunningThenQuit({
+        background: platform.background,
+        stopStrays: async () => {
+          if (alsoStop && strays.length > 0) await platform.processes.stop(strays.map((s) => s.pid))
+        },
+        quit: quitApp,
+      })
+    } catch (e) {
+      leavingRef.current = false
+      setLeaving(false)
+      setQuitError(errorMessage(e))
+    }
+  }, [alsoStop, strays, platform])
 
   useEffect(() => {
     setQuitAsker(() => {
@@ -379,9 +414,12 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
           straysError={straysError}
           alsoStop={alsoStop}
           error={quitError}
+          running={running}
+          busy={leaving}
           dialogRef={dialogRef}
           onAlsoStop={setAlsoStop}
           onCancel={() => setAskQuit(false)}
+          onKeepRunning={() => void keepRunning()}
           onQuit={(completely) => void quit(completely)}
         />
       )}

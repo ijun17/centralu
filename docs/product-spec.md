@@ -251,7 +251,7 @@ Lives in the right-hand **evidence panel**, whose tabs are **Git / History / Fil
 - **Background mode** (#280, decision 1 — a setting, off by default). Off: quitting the app stops the host and its
   agents, as before. On: closing or quitting the app leaves the host and its running turns going, and reopening the
   app re-attaches to them with nothing to restore — a waiting approval is still waiting. The quit dialog follows
-  the setting: off, its one button is **Quit completely**; on, **Quit** closes the window and leaves everything
+  the setting: off, its main button is **Quit completely**, and while a turn is running **Quit and keep running** turns the setting on and quits; on, **Quit** closes the window and leaves everything
   running, and **Quit completely** stops the keeper, the host and every agent, terminal and running command anyway. An unwatched host stops by itself after 30 minutes with no window open and
   nothing running. A reopened app of a different build says so and offers to switch the host to its own build.
   Switching is a blue-green swap (#280 step 3): the new build starts next to the running host, which gets up to

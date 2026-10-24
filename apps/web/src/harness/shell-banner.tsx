@@ -34,7 +34,7 @@ import '../../../../packages/ui/src/styles/index.css'
  *     "Message too long", the second click), `keeper-later-first`: the same on the first click
  *   - `shell`: everything on this build, but a release started its keeper without the permission
  *     shell (thin-shell plan §6), which refused the content
- * `?dialog=quit&background=on|off` opens the quit question instead; `?dialog=switch` and `?dialog=restart` the
+ * `?dialog=quit&background=on|off` (`&running=n`: sessions in a turn) opens the quit question instead; `?dialog=switch` and `?dialog=restart` the
  * switch-build and restart-completely questions (e2e/desktop-dialog-layers.spec.ts).
  *
  * Only on the dev server: `vite build`'s only input is index.html.
@@ -173,8 +173,14 @@ function Quit() {
       straysError={params.get('strays') === 'unknown' ? 'The keeper could not say which processes it holds for this host, so leftover processes cannot be told apart; try again' : null}
       alsoStop={false}
       error={null}
+      running={Number(params.get('running') ?? 0)}
       onAlsoStop={() => {}}
       onCancel={() => setOpen(false)}
+      onKeepRunning={() => {
+        // What main.tsx's keepRunning() runs: background mode on, then the plain quit
+        calls.push('set_background_mode', 'quit_app')
+        setOpen(false)
+      }}
       onQuit={(completely) => {
         // What main.tsx's quit() runs: the keeper's stop, or the plain quit
         calls.push(completely ? 'quit_and_stop_agents' : 'quit_app')
