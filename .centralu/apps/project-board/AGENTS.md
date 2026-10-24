@@ -911,6 +911,19 @@ step shows on the screen.
     if any changes; no job listed as waiting is "not yet"; an aborted call never approves.
   - With duplicate tag runs, status chooses one waiting on the configured environment (otherwise the
     newest active run), names the duplicates, and offers `cancel_duplicate` only before publishing.
+- **`release.scheme: "tag"` (#1501)**, off by default ("brand", everything above): no file carries the
+  release version, the build stamps it from the tag, and no bump PR or bump commit exists. `bump` refuses.
+  The next release is `version` (default the next prerelease after the newest tag), after every tag and
+  untagged, cut from `commit` (default the newest commit on main's first-parent history since the newest
+  tag whose **own push run** of CI is fully green with the full tier, of the newest 20; a batch's quick run
+  never counts). `rehearse` dispatches the workflow with `rehearsalInputs` plus `version` (on main, or on
+  `branchPrefix` + the version made at that commit), and `tag` counts only a successful rehearsal on that
+  commit (or that branch, same tree) whose run name is `rehearse <version>` (release.yml's `run-name`). `tag`
+  pushes an **annotated** tag whose message is the notes (their only record; `git mktag` in the object
+  store, no local ref), by id. `approve` reads only the tagged commit's own CI (no bump PR to stand for it);
+  the shim's registry gate is unchanged. `release_status` follows the newest tag until its release run
+  succeeded or its shim is on the registry, then the next release, or "nothing landed since". The release
+  workflow's guard (`scripts/release-guard.mjs`) holds a tag pushed by hand to the same rules.
 - **Never run a `release` step against the real repository in a test**: the tests use a fake `gh`
   and push to a bare repository through `pushurl`.
 - Tests: `tooling/project-board-release.test.ts`. It also holds `versionFiles` to this repository: the

@@ -148,6 +148,9 @@ describe('remote-install.mjs: a dev build from a commit (#1036)', () => {
     rmSync(root, { recursive: true, force: true })
     expect(refusal(() => build(setup({ base: '1.0.0' })))).toBe('dev_base 1.0.0')
     rmSync(root, { recursive: true, force: true })
+    // A working copy on the tag scheme (#1501): its files carry a placeholder, not the release it was cut from
+    expect(refusal(() => build(setup({ base: '0.0.0-dev' })))).toBe('dev_base 0.0.0-dev')
+    rmSync(root, { recursive: true, force: true })
     const bare = setup()
     rmSync(join(bare.repo, 'node_modules'), { recursive: true })
     expect(refusal(() => build(bare))).toMatch(/^dev_deps /)
