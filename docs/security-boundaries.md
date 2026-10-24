@@ -459,7 +459,9 @@ orchestrator is `auto` or the handoff guards nothing (#1509, owner 2026-10-24): 
 preset the successor takes, the original's, is within the orchestrator's own (`HandoffFlow.covered`, read again before anything
 starts and where the successor starts, so a preset raised meanwhile, while an agent wrote its note too, is not handed off unasked). The original stays, so nothing is lost, and the
 orchestrator hands over no power it lacks. A session above the orchestrator's preset (a `safe` orchestrator and a `normal`
-session, or a `normal` orchestrator and an `auto` one) still asks. What injected text in the orchestrator's context can reach depends on that consent: under
+session, or a `normal` orchestrator and an `auto` one) still asks. A covered handoff can create a fresh session in an untrusted
+project without a card, as `send_to_session` already reaches that project's sessions without one; the successor runs under the
+original's preset, and the project's trust gates what it may do as it does for the original. What injected text in the orchestrator's context can reach depends on that consent: under
 `normal` or `safe`, a card for each handoff, and after the person answered "always" on one, handoffs of any eligible
 session without a card for as long as the host serves that orchestrator; under `auto`, handoffs of any eligible session
 with only a log line (`[permissions] … session_handoff of <id> … allowed`). In every case it cannot reach an ineligible
@@ -555,7 +557,7 @@ apart from check and install), `safe` and app agents are refused. The window sti
 makes, so an agent can only ask for what the person could click. `normal` asks no card while the person's Automatic updates are
 on and nothing but the caller's own turn is running (#1509, `UpdatesAsked.updateAtRest`, main.ts `updateAtRest`): the window's own
 auto-apply would relaunch at that moment. It is judged after a window said it is ready and again right before the relaunch (`update_apply_go.unasked`, on which the window also waits
-out someone typing, as its own auto-apply does), and remembers nothing.
+out someone typing, as its own auto-apply does), and remembers nothing, except that a card-free relaunch that failed brings the card back for that installed version, for every session, so an agent cannot retry it in a loop with no one asked.
 
 **The rare-commands tier** (#512, the default since 2026-10-12). The matrix is drawn for
 `CC_RARE_COMMANDS=resident`, where every command is a tool. By default (`CC_RARE_COMMANDS` unset, or

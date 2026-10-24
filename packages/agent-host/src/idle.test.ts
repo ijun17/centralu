@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { activityCounts, hostBusy, hostBusyBesides, type ActivitySnapshot, type IdleActivity } from './idle.js'
+import { activityCounts, hostBusy, hostBusyBesides, updateAtRest, type ActivitySnapshot, type IdleActivity } from './idle.js'
 
 describe('activityCounts (host.activity, for the "Update <machine>" prompt)', () => {
   const live = (over: Partial<IdleActivity>): IdleActivity => ({ state: 'waiting_input', live: true, ...over })
@@ -51,5 +51,33 @@ describe('hostBusyBesides (an agent applying an update, #1509)', () => {
     expect(hostBusyBesides(snap(live({ id: 'me', state: 'working', pendingQuestions: [{ requestId: 'q', questions: [] }] })), 'me')).toBe(true)
     expect(hostBusyBesides({ ...snap(live({ id: 'me', state: 'working' })), terminals: 1 }, 'me')).toBe(true)
     expect(hostBusyBesides({ ...snap(live({ id: 'me', state: 'working' })), commandRuns: 1 }, 'me')).toBe(true)
+  })
+})
+
+describe('updateAtRest (Automatic updates on and the host idle, #1509)', () => {
+  const live = (over: Partial<IdleActivity>): IdleActivity => ({ state: 'waiting_input', live: true, ...over })
+  const quiet: ActivitySnapshot = { sessions: [live({ id: 'a' })], terminals: 0, commandRuns: 0 }
+  const base = { automatic: true, draining: false, activity: quiet }
+
+  it('is true with the switch on, no swap draining and nothing running', () => {
+    expect(updateAtRest(base)).toBe(true)
+  })
+
+  it('is false while the host drains for a swap', () => {
+    expect(updateAtRest({ ...base, draining: true })).toBe(false)
+  })
+
+  it('is false with Automatic updates off', () => {
+    expect(updateAtRest({ ...base, automatic: false })).toBe(false)
+  })
+
+  it('is false while anything runs, apart from the asking session\'s own turn', () => {
+    const busy: ActivitySnapshot = { sessions: [live({ id: 'me', state: 'working' }), live({ id: 'other', state: 'working' })], terminals: 0, commandRuns: 0 }
+    expect(updateAtRest({ ...base, activity: busy })).toBe(false)
+    expect(updateAtRest({ ...base, activity: busy, besides: 'me' })).toBe(false)
+    const mine: ActivitySnapshot = { sessions: [live({ id: 'me', state: 'working' })], terminals: 0, commandRuns: 0 }
+    expect(updateAtRest({ ...base, activity: mine })).toBe(false)
+    expect(updateAtRest({ ...base, activity: mine, besides: 'me' })).toBe(true)
+    expect(updateAtRest({ ...base, activity: { ...quiet, terminals: 1 } })).toBe(false)
   })
 })

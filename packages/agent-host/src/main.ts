@@ -8,7 +8,7 @@ import { dirname, join } from 'node:path'
 import { mkdirSync, writeSync } from 'node:fs'
 import { APP_VERSION, autoCompactOf, errorMessage, PROTOCOL_VERSION, RESERVED_APP_IDS, type HostHandover, type HostLogon, type NormalizedEvent } from '@cc/protocol'
 import { hostBuild, startActivityReport } from './keeper-link.js'
-import { activityCounts, hostBusy, hostBusyBesides, inTurn, type ActivitySnapshot } from './idle.js'
+import { activityCounts, inTurn, updateAtRest as updateAtRestOf, type ActivitySnapshot } from './idle.js'
 import { connectHeldChildren } from './keeper/held-children.js'
 import { chooseDataDir, dataRoot, keepDataFolderPrivate, migrateLegacyDataDir, privateDataFolderFor } from './data-dir.js'
 import { DEFAULT_ALLOWED_ORIGINS, HostServer, parseAllowedOrigins } from './transport/server.js'
@@ -703,7 +703,7 @@ const activity = (): ActivitySnapshot => ({
  * is the session asking, whose own turn is not counted (`hostBusyBesides`). Never while the host drains for a swap
  */
 const updateAtRest = (besides?: string): boolean =>
-  autoApplyUpdates.read() && !hostDrain.draining && !(besides === undefined ? hostBusy(activity()) : hostBusyBesides(activity(), besides))
+  updateAtRestOf({ automatic: autoApplyUpdates.read(), draining: hostDrain.draining, activity: activity(), ...(besides !== undefined ? { besides } : {}) })
 mgr.useUpdateAtRest(updateAtRest)
 /**
  * The limited credential's calls that wait for the person (#1405, host-requests.ts): raised while a window that shows

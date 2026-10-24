@@ -83,6 +83,16 @@ export function hostBusyBesides(s: ActivitySnapshot, sessionId: string): boolean
 }
 
 /**
+ * Whether applying an update is what the person's Automatic updates would do now (#1509): the switch is on, no swap is draining,
+ * and nothing is running (`hostBusy`; `besides` is a session asking, whose own turn is not counted, `hostBusyBesides`).
+ * Pure, so each condition is tested by itself; main.ts reads the switch, the drain and the activity into it
+ */
+export function updateAtRest(i: { automatic: boolean; draining: boolean; activity: ActivitySnapshot; besides?: string }): boolean {
+  if (!i.automatic || i.draining) return false
+  return !(i.besides === undefined ? hostBusy(i.activity) : hostBusyBesides(i.activity, i.besides))
+}
+
+/**
  * What `hostBusy` counts, counted (`host.activity`, for a hub's "Update <machine>" prompt, plan §10.5).
  * Each busy session counts once, under the first of: an approval waiting, a question waiting, a
  * turn running, background work. `hostBusy(s)` is true exactly when one of the counts is above zero

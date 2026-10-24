@@ -29,6 +29,11 @@ export class UpdatesAsked {
    * main.ts). Null on a host that cannot tell (tests): then every apply is carded
    */
   updateAtRest: ((besidesSessionId: string) => boolean) | null = null
+  /**
+   * The installed version whose card-free relaunch failed (#1509): for it the card comes back, so an agent cannot retry a
+   * relaunch that does not work in a loop with no one asked. Host-wide, as a failure is the host's, not one session's
+   */
+  private uncardedFailedFor: string | null = null
   /** Sessions whose "always" covers applying (#665), kept apart from check and install: a relaunch is the person's window */
   readonly updateApplyConsents = new Set<string>()
 
@@ -76,9 +81,12 @@ export class UpdatesAsked {
     }
     // Whether the consent went with no card because the host is at rest (#1509); judged again right before the relaunch
     let uncarded = false
+    // Whether a go was sent with no card, and for which installed version
+    let wentUncarded = false
+    const installed = this.updates?.current().latest ?? ''
     const outcome = await broker.apply(async () => {
       if (this.updateApplyConsents.has(sessionId)) return null
-      if (this.updateAtRest?.(sessionId) === true) {
+      if (this.uncardedFailedFor !== installed && this.updateAtRest?.(sessionId) === true) {
         uncarded = true
         return null
       }
@@ -90,9 +98,15 @@ export class UpdatesAsked {
       return null
     }, () => {
       if (!uncarded) return undefined
-      return this.updateAtRest?.(sessionId) === true ? null : 'Something started running while the windows were asked, so nothing was relaunched. Call again to be asked.'
+      if (this.updateAtRest?.(sessionId) !== true) return 'Something started running while the windows were asked, so nothing was relaunched. Call again to be asked.'
+      wentUncarded = true
+      return null
     })
-    if (!outcome.ok) return { ok: false, error: outcome.error }
+    if (!outcome.ok) {
+      // A relaunch sent with no card that did not happen: the next apply for this version asks the person
+      if (wentUncarded) this.uncardedFailedFor = installed
+      return { ok: false, error: outcome.error }
+    }
     console.error(`[updates] session ${sessionId} applied the installed update: a window is relaunching${outcome.version ? ` into ${outcome.version}` : ''}`)
     return { ok: true, relaunched: outcome.version ? { version: outcome.version } : {} }
   }

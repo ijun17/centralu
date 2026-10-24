@@ -2612,7 +2612,7 @@ asked. `normal` raises no card while the person's Automatic updates are on and t
 turn (#1509, owner 2026-10-24: the window's own auto-apply would relaunch at that moment; `updateAtRest` in main.ts,
 `hostBusyBesides` in `idle.ts`). That is judged in the consent step, after a window said it is ready, and again after the second ask of the
 windows, right before `update_apply_go`, which then carries `unasked` (additive): the window waits out someone typing
-(`TYPING_QUIET_MS`) as its own automatic apply does, and reports that instead of relaunching. Nothing is remembered. The limited credential's `updates.apply` reads the same state (`RightsHost.updateAtRest`). After consent the windows are asked again, since a card can stand for minutes, and `update_apply_go` names the
+(`TYPING_QUIET_MS`) as its own automatic apply does, and reports that instead of relaunching. Nothing is remembered, except that a card-free relaunch that failed brings the card back for that installed version, for every session, so an agent cannot retry it in a loop with no one asked. The limited credential's `updates.apply` reads the same state (`RightsHost.updateAtRest`). After consent the windows are asked again, since a card can stand for minutes, and `update_apply_go` names the
 first ready window's ticket. That window alone checks again, reports `started` through `updates.reportApply`, runs
 `applyUpdateNow` (the keeper is told, then the shell relaunches) and reports the outcome. Only after `started` does its
 connection ending count as the relaunch, since a relaunching window can close before its last report; ending before

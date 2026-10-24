@@ -198,14 +198,16 @@ describe('no card when the handoff guards nothing', () => {
     expect(steps).toEqual([])
   })
 
-  it('reads the presets again before it starts: one raised while the tool was checked is not handed off unasked', async () => {
+  it('reads the preset after the tool check: one raised while the tool was checked asks', async () => {
     quiet()
     callerWith('normal')
     host.toolProblem = async () => {
       meta.set('t1', target({ permissionPreset: 'auto' }))
       return null
     }
-    expect(await flowOf().handoff('orch', meta.get('t1')!, {})).toMatchObject({ ok: false, error: expect.stringContaining('preset of "Long run" or of the orchestrator changed') })
+    answer = 'deny'
+    expect(await flowOf().handoff('orch', meta.get('t1')!, {})).toMatchObject({ ok: false, error: expect.stringContaining('did not allow') })
+    expect(steps).toContain('card other')
     expect(created).toEqual([])
   })
 

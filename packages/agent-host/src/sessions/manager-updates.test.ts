@@ -219,7 +219,7 @@ describe('applying an installed update for an agent (#665)', () => {
    * One window, played by the test: it answers each request the way the store does (ready or not) and, told to go,
    * counts a relaunch and reports it started. `ready: false` with a reason stands for "nothing installed".
    */
-  function windowWith(verdict: { ready: true; version?: string } | { ready: false; reason: string }) {
+  function windowWith(verdict: { ready: true; version?: string } | { ready: false; reason: string }, failGo?: string) {
     const relaunches: string[] = []
     const asked: NormalizedEvent[] = []
     const tickets = new Map<string, string>()
@@ -235,7 +235,7 @@ describe('applying an installed update for an agent (#665)', () => {
           }
           if (e.type === 'update_apply_go' && tickets.get(e.requestId) === e.ticket) {
             relaunches.push(e.ticket)
-            broker.report(1, { requestId: e.requestId, ticket: e.ticket })
+            broker.report(1, { requestId: e.requestId, ticket: e.ticket, ...(failGo ? { error: failGo } : {}) })
           }
         })
       },
@@ -331,6 +331,38 @@ describe('applying an installed update for an agent (#665)', () => {
     const out = await mgr.runOrchestratorTool(session.id, 'update_centralu', { action: 'apply' })
     expect(out).toMatchObject({ isError: true, text: expect.stringContaining('Something started running') })
     expect(w.relaunches).toEqual([])
+    expect(card(session.id)).toBeUndefined()
+  })
+
+  it('normal: once a card-free relaunch failed, the next apply asks the person, so an agent cannot retry it in a loop', async () => {
+    const w = windowWith({ ready: true }, 'The shell refused to relaunch.')
+    mgr.useUpdateAtRest(() => true)
+    const project = await addProject()
+    const session = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
+    const first = await mgr.runOrchestratorTool(session.id, 'update_centralu', { action: 'apply' })
+    expect(first).toMatchObject({ isError: true, text: expect.stringContaining('The shell refused to relaunch.') })
+    expect(card(session.id)).toBeUndefined()
+    // The host is still at rest, yet the second call is carded; so is another session's, as the failure is the host's
+    const again = mgr.runOrchestratorTool(session.id, 'update_centralu', { action: 'apply' })
+    await vi.waitFor(() => expect(card(session.id)?.detail).toEqual({ kind: 'other', raw: CENTRALU_APPLY_QUESTION, about: CENTRALU_APPLY }))
+    mgr.respondApproval(session.id, card(session.id)!.requestId, 'deny')
+    expect((await again).isError).toBe(true)
+    const other = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
+    const third = mgr.runOrchestratorTool(other.id, 'update_centralu', { action: 'apply' })
+    await vi.waitFor(() => expect(card(other.id)).toBeTruthy())
+    mgr.respondApproval(other.id, card(other.id)!.requestId, 'deny')
+    await third
+    expect(w.relaunches).toHaveLength(1)
+  })
+
+  it('normal: a card-free relaunch that was refused before it was sent (something started) does not bring the card back', async () => {
+    windowWith({ ready: true })
+    let looks = 0
+    mgr.useUpdateAtRest(() => ++looks % 2 === 1)
+    const project = await addProject()
+    const session = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
+    expect((await mgr.runOrchestratorTool(session.id, 'update_centralu', { action: 'apply' })).isError).toBe(true)
+    expect((await mgr.runOrchestratorTool(session.id, 'update_centralu', { action: 'apply' })).isError).toBe(true)
     expect(card(session.id)).toBeUndefined()
   })
 

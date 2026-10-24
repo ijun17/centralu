@@ -167,7 +167,8 @@ export class HandoffFlow {
      * burst of calls logged "allowed" for each before all but one were refused. Asked here without logging.
      */
     const viaAuto = this.host.autoBoundaryOpen(callerId)
-    const covered = this.covered(callerId, target)
+    // The session as it is after the tool check awaited, not the object the call came with
+    const covered = this.covered(callerId, this.host.meta.get(target.id) ?? target)
     uncarded = !viaAuto && covered && !this.always.has(callerId)
     if (!viaAuto && !covered && !this.always.has(callerId)) {
       const decision = await this.host.askHost(
@@ -185,8 +186,6 @@ export class HandoffFlow {
     if (!now) return this.refuse(callerId, target.id, `${trustedJsonText(target.name)} is gone.`)
     const again = this.refusal(callerId, now, mode)
     if (again) return this.refuse(callerId, now.id, again)
-    // Judged on the session as it is now: one that was given a higher preset since went without the card on the old one
-    if (covered && !this.covered(callerId, now)) return this.refuse(callerId, now.id, `The preset of ${trustedJsonText(now.name)} or of the orchestrator changed while the handoff was being checked; call again to be asked.`)
     // "Always" counts only for a call that went through every check (#694 review): a refused one grants nothing
     if (always) this.always.add(callerId)
 
