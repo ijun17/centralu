@@ -16,7 +16,8 @@ test('a session of an untrusted project says its instruction files are ignored, 
   const notice = page.getByTestId('untrusted-notice')
   await expect(notice).toContainText('alpha is not trusted')
   await expect(notice).toContainText('CLAUDE.md and AGENTS.md')
-  await expect(notice).toContainText("can't start agents")
+  // The rest of what is off stands in the hover text, so a narrow panel keeps one line
+  await expect(notice.locator('span').first()).toHaveAttribute('title', /can't start agents or use worktrees/)
 
   // The decision stays the person's: the card with the project's apps opens in place, and Trust is its answer
   await page.getByTestId('untrusted-notice-trust').click()
