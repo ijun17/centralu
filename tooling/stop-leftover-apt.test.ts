@@ -60,7 +60,7 @@ describe.skipIf(!hasPgrep)('the second try of a browser install first stops what
     await standIn(name, false)
     const r = await run(name)
     expect(r.status, r.stdout + r.stderr).toBe(0)
-    expect(r.stdout).toContain('left running: stopping it')
+    expect(r.stdout).toContain(`left ${name} running: stopping it`)
     expect(alive(name)).toBe(false)
   })
 
