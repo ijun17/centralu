@@ -12,6 +12,8 @@ import { finishRelaunchSwap, type RelaunchSwapResult } from './relaunch-swap.js'
 import { asError, rethrowAsError, toError } from './to-error.js'
 import type { ShellStart, SwapView } from './switch-plan.js'
 
+export { keepRunningThenQuit } from './keep-running.js'
+
 export {
   autoSwitch,
   buildBar,

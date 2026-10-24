@@ -37,6 +37,7 @@ export function QuitDialog({
   alsoStop,
   error,
   running = 0,
+  busy = false,
   dialogRef,
   onAlsoStop,
   onCancel,
@@ -55,6 +56,8 @@ export function QuitDialog({
   error: string | null
   /** How many sessions are in a turn now: with background mode off, quitting ends them */
   running?: number
+  /** "Quit and keep running" is waiting on the keeper: nothing else may be pressed meanwhile */
+  busy?: boolean
   dialogRef?: Ref<HTMLDivElement>
   onAlsoStop: (on: boolean) => void
   onCancel: () => void
@@ -94,7 +97,7 @@ export function QuitDialog({
         )}
         {offersKeep && (
           <p className="mt-2 text-xs leading-body text-ink-faint" data-testid="confirm-quit-running">
-            {running === 1 ? '1 session is' : `${running} sessions are`} working now. Quit and keep running turns on “Keep
+            {running === 1 ? '1 session is' : `${running} sessions are`} busy now. Quit and keep running turns on “Keep
             agents running after Centralu quits” (Settings), so {running === 1 ? 'it goes' : 'they go'} on in the
             background.
           </p>
@@ -126,16 +129,16 @@ export function QuitDialog({
           </div>
         )}
         <div className="mt-5 flex items-center justify-end gap-2">
-          <Button variant="ghost" onClick={onCancel} data-testid="confirm-quit-no" className="flex items-center gap-1.5">
+          <Button variant="ghost" onClick={onCancel} disabled={busy} data-testid="confirm-quit-no" className="flex items-center gap-1.5">
             Cancel <kbd className="keycap">esc</kbd>
           </Button>
           {offersKeep && (
-            <Button variant="quiet" onClick={onKeepRunning} data-testid="confirm-quit-keep">
+            <Button variant="quiet" onClick={onKeepRunning} busy={busy} busyText="Turning it on…" data-testid="confirm-quit-keep">
               Quit and keep running
             </Button>
           )}
           {keepsRunning && (
-            <Button variant="quiet" onClick={() => onQuit(true)} title={COMPLETELY_STOPS} data-testid="confirm-quit-stop">
+            <Button variant="quiet" onClick={() => onQuit(true)} disabled={busy} title={COMPLETELY_STOPS} data-testid="confirm-quit-stop">
               Quit completely
             </Button>
           )}
@@ -143,6 +146,7 @@ export function QuitDialog({
             variant={keepsRunning ? 'primary' : 'danger'}
             // Off, the plain quit is the complete one: the keeper stops everything when the last window goes
             onClick={() => onQuit(false)}
+            disabled={busy}
             title={keepsRunning ? 'Close the window; everything keeps running in the background' : COMPLETELY_STOPS}
             data-testid="confirm-quit-yes"
             className="flex items-center gap-1.5"
