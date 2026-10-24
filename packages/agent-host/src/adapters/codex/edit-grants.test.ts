@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdirSync, symlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import type { NormalizedEvent } from '@cc/protocol'
@@ -12,6 +12,24 @@ import { permissionOptionsFor, appApprovalModeFor } from './launch-config.js'
  * `CodexRequests` is driven with its notifications and requests as the app-server sends them (approvals.ts records the
  * measured shapes).
  */
+/** The session's own client is a stand-in that keeps the handlers it was given, so a server request can be sent to the session */
+const state = vi.hoisted(() => ({ onServerRequest: null as null | ((r: { id: number | string; method: string; params?: unknown }) => void), responses: [] as { id: number | string; result: unknown }[] }))
+vi.mock('./client.js', () => ({
+  CodexClient: class {
+    constructor(handlers: { onServerRequest: NonNullable<typeof state.onServerRequest> }) {
+      state.onServerRequest = handlers.onServerRequest
+    }
+    request(method: string): Promise<unknown> {
+      return Promise.resolve(method === 'thread/start' || method === 'thread/resume' ? { thread: { id: 't1' } } : {})
+    }
+    notify(): void {}
+    respond(id: number | string, result: unknown): void {
+      state.responses.push({ id, result })
+    }
+    async dispose(): Promise<void> {}
+  },
+}))
+
 let base: string
 let folder: string
 beforeEach(() => {
@@ -115,6 +133,28 @@ describe('the edits preset, Codex (#1525)', () => {
     }
     expect(await ask({ [join(folder, 'src', 'a.ts')]: { type: 'update', unified_diff: '@@', move_path: null } })).toEqual({ answers: [{ decision: 'accept' }], cards: 0 })
     expect(await ask({ [join(folder, 'src', 'a.ts')]: { type: 'delete', content: '' } })).toEqual({ answers: [], cards: 1 })
+  })
+
+  it('reads the preset live: lowering edits to normal takes effect at once, and raising it back too, with no new process', async () => {
+    const { CodexAdapter } = await import('./index.js')
+    state.responses.length = 0
+    const events: NormalizedEvent[] = []
+    const handle = await new CodexAdapter().createSession({ sessionId: 's1', cwd: folder, permissionPreset: 'edits' }, (e) => events.push(e))
+    const announce = (id: string, path: string) => (handle as unknown as { onNotification(n: unknown): void }).onNotification({ method: 'item/started', params: { threadId: 't1', item: { type: 'fileChange', id, changes: [{ path, kind: { type: 'update', move_path: null }, diff: '@@' }] } } })
+    const ask = async (id: string, path: string) => {
+      announce(id, path)
+      const before = { answers: state.responses.length, cards: events.filter((e) => e.type === 'approval_request').length }
+      state.onServerRequest!({ id: 'srv-' + id, method: 'item/fileChange/requestApproval', params: { threadId: 't1', turnId: 'u1', itemId: id } })
+      for (let end = Date.now() + 20_000; state.responses.length === before.answers && events.filter((e) => e.type === 'approval_request').length === before.cards && Date.now() < end; ) await new Promise((r) => setTimeout(r, 2))
+      return state.responses.length > before.answers ? 'accepted' : 'card'
+    }
+    const file = join(folder, 'src', 'a.ts')
+    expect(await ask('i1', file)).toBe('accepted')
+    handle.setPermissionPreset!('normal')
+    expect(await ask('i2', file)).toBe('card')
+    handle.setPermissionPreset!('edits')
+    expect(await ask('i3', file)).toBe('accepted')
+    await handle.dispose()
   })
 
   it('launches as normal does, and its app tools follow the person\'s policy as normal\'s', () => {

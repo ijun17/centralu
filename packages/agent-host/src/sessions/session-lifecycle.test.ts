@@ -32,6 +32,11 @@ class Handle implements SessionHandle {
     return true
   }
   interrupt() {}
+  /** The presets the host told this process it is set to now (`setPermissionPreset`, #1525) */
+  presets: string[] = []
+  setPermissionPreset(preset: string) {
+    this.presets.push(preset)
+  }
   /** What the process still says while it goes down, after dispose began and before it finished (#213) */
   lastWords: (() => void) | null = null
   async dispose() {
@@ -109,7 +114,7 @@ beforeEach(() => {
   rpc = createRpcHandler(mgr, adapters)
 })
 
-async function newSession(preset: 'safe' | 'normal' | 'auto' = 'normal'): Promise<string> {
+async function newSession(preset: 'safe' | 'normal' | 'edits' | 'auto' = 'normal'): Promise<string> {
   const p = (await rpc('projects.add', { path: tmpdir() })) as { id: string }
   const s = (await rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude', permissionPreset: preset })) as {
     id: string
@@ -568,6 +573,24 @@ describe('a setting changed mid-turn is applied once the turn ends (#164)', () =
     running.emit({ type: 'error', sessionId: id, error: { code: 'internal', message: 'API Error: 500', retryable: true } })
     await until(() => claude.last !== running)
     expect(claude.last.opts.permissionPreset).toBe('auto')
+  })
+
+  it('edits and normal replace no process: the running one is told the preset at once (#1525)', async () => {
+    const id = await newSession('edits')
+    const running = claude.last
+    const r = (await rpc('agents.updateSettings', { sessionId: id, permissionPreset: 'normal' })) as { applied?: string }
+    expect(r.applied).toBe('saved')
+    expect(claude.last).toBe(running)
+    expect(running.disposed).toBe(false)
+    expect(running.presets).toEqual(['normal'])
+    await rpc('agents.updateSettings', { sessionId: id, permissionPreset: 'edits' })
+    expect(claude.last).toBe(running)
+    expect(running.presets).toEqual(['normal', 'edits'])
+    // Anything that changes the launch still replaces the process
+    const safe = (await rpc('agents.updateSettings', { sessionId: id, permissionPreset: 'safe' })) as { applied?: string }
+    expect(safe.applied).toBe('restarted')
+    expect(claude.last).not.toBe(running)
+    expect(claude.last.opts.permissionPreset).toBe('safe')
   })
 
   it('an idle session is swapped right away, and the response says so', async () => {

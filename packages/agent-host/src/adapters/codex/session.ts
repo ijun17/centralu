@@ -1,6 +1,7 @@
 import { InputReceipts, type InputReceipt } from '../input-receipts.js'
 import type { InputObserver, InputOrigin } from '../contract.js'
-import type { ApprovalDecision, ApprovalScope } from '@cc/protocol'
+import { launchPreset } from '../edit-grant.js'
+import type { ApprovalDecision, ApprovalScope, PermissionPreset } from '@cc/protocol'
 import { toolCommand } from '../../tool-launch.js'
 import { INTERRUPTED_BY_TOOL, type CreateSessionOpts, type EventSink, type SessionHandle } from '../contract.js'
 import { CodexClient } from './client.js'
@@ -97,11 +98,19 @@ export class CodexSession implements SessionHandle {
   /** Thread ready — awaited at construction time to obtain externalId */
   readonly ready: Promise<void>
 
+  /** The preset the session is set to now (#1525), which can differ from the one it launched under only between `normal` and `edits` */
+  private livePreset: PermissionPreset
+
+  setPermissionPreset(preset: PermissionPreset): void {
+    this.livePreset = preset
+  }
+
   constructor(
     private opts: CreateSessionOpts,
     private emit: EventSink,
   ) {
     this.sessionId = opts.sessionId
+    this.livePreset = opts.permissionPreset
     // An app's mark only for an app attached here (#730 review): a repository's own server may be named `app-<x>`
     const sink = emit
     this.emit = (e) => sink(keepAttachedAppMarks(e, () => (opts.apps?.current() ?? []).map((a) => a.server)))
@@ -132,7 +141,7 @@ export class CodexSession implements SessionHandle {
       threadId: () => this.threadId,
       appServers: () => this.threadServers.appServers,
       ownServer: () => this.threadServers.ownServer,
-      editsFolder: () => (opts.permissionPreset === 'edits' ? opts.cwd : null),
+      editsFolder: () => (this.livePreset === 'edits' && launchPreset(opts.permissionPreset) === 'normal' ? opts.cwd : null),
     })
     this.client = new CodexClient(
       {

@@ -9,6 +9,7 @@ import {
   liveBackgroundTasks,
 } from '@cc/protocol'
 import type { SessionHandle } from '../adapters/contract.js'
+import { launchPreset } from '../adapters/edit-grant.js'
 import type { Store } from '../dev-services/store.js'
 import { inTurn } from '../idle.js'
 
@@ -181,7 +182,7 @@ export class RestartPolicy {
         live.effort !== m.effort ||
         live.verbosity !== m.verbosity ||
         live.serviceTier !== m.serviceTier ||
-        live.permissionPreset !== m.permissionPreset)
+        launchPreset(live.permissionPreset) !== launchPreset(m.permissionPreset))
     )
   }
 
@@ -232,7 +233,7 @@ export class RestartPolicy {
     return (
       this.launchSettingsRestartAfterTurn.has(sessionId) ||
       this.definitionsRestartAfterTurn.has(sessionId) ||
-      (!!m && !!live && live.permissionPreset !== m.permissionPreset)
+      (!!m && !!live && launchPreset(live.permissionPreset) !== launchPreset(m.permissionPreset))
     )
   }
 

@@ -22,9 +22,14 @@ const PROTECTED_NAMES: ReadonlySet<string> = new Set([
   '.git', '.gitconfig', '.gitmodules', '.githooks', '.husky', '.pre-commit-config.yaml',
   '.claude', '.claude.json', '.codex', '.mcp.json', '.vscode', '.idea', '.centralu',
   '.bashrc', '.bash_profile', '.profile', '.zshrc', '.zprofile', '.zshenv', '.envrc', '.ripgreprc',
+  // Agent instructions folders, dev containers and package-manager config run code or fetch it from elsewhere
+  '.agents', '.devcontainer', '.npmrc', '.yarnrc', '.yarnrc.yml', '.pnpmfile.cjs',
   // Hard links to the shared store of pnpm and the like make an edit in place reach other projects
   'node_modules',
 ])
+
+/** Protected places named by two segments in a row, wherever they sit: CI workflows, cargo's config (`CLAUDE.md` and `AGENTS.md` stay editable) */
+const PROTECTED_PAIRS: readonly (readonly [string, string])[] = [['.github', 'workflows'], ['.cargo', 'config'], ['.cargo', 'config.toml']]
 
 /** The deepest part of `path` that exists, resolved through links, with the rest of the path put back after it */
 async function realPathOf(path: string): Promise<string | null> {
@@ -57,7 +62,8 @@ export async function insideFolder(folder: string, targets: readonly string[]): 
   // The folder itself must exist: a session's folder that is gone has nothing to be inside of
   const root = await realpath(folder).catch(() => null)
   if (root === null) return false
-  // A broad folder (the home folder, or one holding it, the disk's root included) is not a project to grant edits in
+  // A broad folder (the home folder, or one holding it, or any disk's root) is not a project to grant edits in
+  if (dirname(root) === root) return false
   const home = await realpath(homedir()).catch(() => null)
   if (home !== null) {
     const toHome = relative(root, home)
@@ -72,7 +78,9 @@ export async function insideFolder(folder: string, targets: readonly string[]): 
     if (inside === '' || isAbsolute(inside) || inside === '..' || inside.startsWith(`..${sep}`)) return false
     // Windows drops a trailing dot or space from a name, so `.git.` is `.git` there; and `:` there makes a stream of the
     // file (`.mcp.json::$DATA`) or the folder (`.claude::$INDEX_ALLOCATION`), so a segment with one asks
-    if (inside.split(sep).some((part) => part.includes(':') || PROTECTED_NAMES.has(part.toLowerCase().replace(/[. ]+$/, '')))) return false
+    const parts = inside.split(sep).map((part) => part.toLowerCase().replace(/[. ]+$/, ''))
+    if (inside.split(sep).some((part) => part.includes(':')) || parts.some((part) => PROTECTED_NAMES.has(part))) return false
+    if (parts.some((part, i) => PROTECTED_PAIRS.some(([a, b]) => part === a && parts[i + 1] === b))) return false
   }
   return true
 }
@@ -87,3 +95,10 @@ export async function claudeEditInside(folder: string, toolName: string, input: 
   const path = input[field]
   return typeof path === 'string' && (await insideFolder(folder, [path]))
 }
+
+/**
+ * The preset as the process is launched under it: `edits` is `normal` (#1525), its one grant being answered by the
+ * adapter on the host's side. So changing between the two replaces no process (`settingsDrifted`, the launch fingerprint)
+ * and reaches the session at once (`SessionHandle.setPermissionPreset`).
+ */
+export const launchPreset = <P extends string>(preset: P): P | 'normal' => (preset === 'edits' ? 'normal' : preset)

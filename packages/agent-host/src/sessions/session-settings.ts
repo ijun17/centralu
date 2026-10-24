@@ -96,6 +96,8 @@ export class SessionSettings {
 
     const handle = this.host.handles.get(sessionId)
     handle?.updateSettings?.(s)
+    // `normal` <-> `edits` replaces no process (`launchPreset`): the adapter reads the preset at each call (#1525)
+    if (s.permissionPreset) handle?.setPermissionPreset?.(m.permissionPreset)
 
     // The comparison baseline is not the screen's value (meta) but **the configuration the running process
     // actually has**

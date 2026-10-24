@@ -602,7 +602,11 @@ would. `normal` keeps its meaning (the person approves each step).
   commands through. `edits` launches exactly as `normal` does (the trusted settings mode, else `default`) and `canUseTool`
   allows `Edit`, `MultiEdit`, `Write` and `NotebookEdit` whose target is inside the session's folder
   (`adapters/edit-grant.ts`, the shape of the read grant, #371). A person's `acceptEdits` or bypass setting stays as it is
-  (it decides before `canUseTool`).
+  (it decides before `canUseTool`). **The person's own `ask` rules win**: when their settings (the sources the session
+  reads, the policy tier included) have an `ask` rule for `Edit`, `Write`, `MultiEdit` or `NotebookEdit`, or the settings
+  cannot be read, the session has no grant at all (`editAskRuleExists`; the rule's path pattern is the CLI's syntax and is
+  not matched, so `ask: ["Write(secret/**)"]` leaves every edit of that session asking). An ask the CLI says a rule forced
+  (`matchedAskRule`) or a safety check raised (a `decisionReason` naming one) is a card too.
 - **Mapping to Codex.** Codex has no mode that accepts patches and asks for commands: its approval policies gate the
   sandbox boundary, not the kind of action (`on-request` runs sandboxed commands without a card). So `edits` is
   `normal`'s launch (the person's own policy and sandbox, network off) and the adapter answers an
@@ -613,22 +617,28 @@ would. `normal` keeps its meaning (the person approves each step).
   differ only where the person's config asks.
 - **What is never granted.** The folder is the session's `cwd` after symlinks are resolved (a link out of it is
   outside, and so is a link whose target does not exist yet), compared by path segment (`/proj-other` is not inside
-  `/proj`). A folder that is the person's home folder, or holds it, gets no grant. Inside the folder, the names that
+  `/proj`). A folder that is the person's home folder, holds it, or is the root of any disk gets no grant. Inside the folder, the names that
   decide what runs or what is allowed still ask, at any depth and in any case: `.git`, `.gitconfig`, `.gitmodules`,
-  `.githooks`, `.husky`, `.pre-commit-config.yaml`, `.claude`, `.claude.json`, `.codex`, `.mcp.json`, `.vscode`,
-  `.idea`, `.centralu`, the shell startup files (`.bashrc`, `.zshrc`, `.profile`, ...), `.envrc`, `.ripgreprc` and
-  `node_modules` (a hard link there reaches other projects). A segment with a `:` asks (a Windows stream such as
+  `.githooks`, `.husky`, `.pre-commit-config.yaml`, `.github/workflows`, `.claude`, `.claude.json`, `.codex`, `.agents`,
+  `.mcp.json`, `.vscode`, `.idea`, `.devcontainer`, `.centralu`, the shell startup files (`.bashrc`, `.zshrc`, `.profile`,
+  ...), `.envrc`, `.ripgreprc`, the package managers' config (`.npmrc`, `.yarnrc`, `.yarnrc.yml`, `.pnpmfile.cjs`,
+  `.cargo/config.toml`) and `node_modules` (a hard link there reaches other projects). `CLAUDE.md` and `AGENTS.md` stay
+  editable. A segment with a `:` asks (a Windows stream such as
   `.mcp.json::$DATA` writes the file it names). A path that cannot be resolved asks. The check reads the disk once,
   before the write: another process that swaps a link in between is not stopped by it. A person who picks `edits` in an
-  untrusted project gets the grant too (their choice wins); only the default is tied to trust. A change to the preset
-  applies as any preset change does (the next turn or restart), not in the middle of a call.
+  untrusted project gets the grant too (their choice wins); only the default is tied to trust. The preset is read at each call: changing between `normal` and `edits` replaces no
+  process (`launchPreset`, `SessionHandle.setPermissionPreset`) and takes effect in the next call, while a change that alters
+  the launch (to or from `safe` or `auto`) still restarts at the end of the turn.
+  **What the grant is not:** edits to project files are code the person later runs. Under `edits`, an `allow` rule (or the
+  person's bypass) for a command that runs project code (`npm test`, `make`, a script) amounts to running anything the agent
+  wrote into the project, with no card for it. The protected names narrow where that starts; they do not close it.
 - **Agent-started sessions.** The default applies only to a session the person's window starts. `start_agent`'s child
   gets the caller's preset, never above it (`presetWithin`, rank updated), so a `normal` caller's child is `normal`
   in a trusted project and an `edits` caller's is `edits`. `edits` is treated as `normal` by the consent (the project's
   trust is a `normal` or `edits` caller's consent, #673), the ceiling (4, `auto` has none), `ask_project`, the answer
   rules and `update_centralu`. A linked machine's child (`start_agent` with `machine`, `create_session`, the hub's
-  `normal` at most) is `normal` for an `edits` caller: `edits` is not carried over the link, so an older machine never
-  sees a value it does not know. A build since #1171 reads a stored `edits` as `safe` (its store parses unknown presets
+  `normal` at most) is `normal` for an `edits` caller, and the caller's preset that `fromHub` carries goes as `normal` too
+  (`carriedPreset`, `makeChild`): `edits` is never put on the link, so an older machine never sees a value it does not know. A build since #1171 reads a stored `edits` as `safe` (its store parses unknown presets
   to `safe`), and an earlier one passes it through as an unknown preset that asks like `normal`: neither asks less.
 
 ### When the person is asked

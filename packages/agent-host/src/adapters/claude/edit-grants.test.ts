@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdirSync, symlinkSync } from 'node:fs'
+import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { NormalizedEvent, PermissionPreset } from '@cc/protocol'
 import { answerOrCard } from '../approval-outcome.test-helpers.js'
@@ -10,10 +10,12 @@ import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
  * outside the folder and the places that decide what runs still ask; `normal` and `safe` ask for all of them. The SDK is
  * a fake and `canUseTool` is called directly, as in read-grants.test.ts.
  */
-type CanUseTool = (name: string, input: Record<string, unknown>) => Promise<{ behavior: string }>
+type CanUseTool = (name: string, input: Record<string, unknown>, options?: Record<string, unknown>) => Promise<{ behavior: string }>
 const sdk = vi.hoisted(() => ({ canUseTool: null as CanUseTool | null, modes: [] as unknown[] }))
 
-vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
+vi.mock('@anthropic-ai/claude-agent-sdk', async (importOriginal) => ({
+  // The settings engine is the SDK's own: the ask rules are read the way the CLI reads them
+  ...(await importOriginal<typeof import('@anthropic-ai/claude-agent-sdk')>()),
   query: ({ options }: { options: { canUseTool?: CanUseTool; permissionMode?: unknown } }) => {
     sdk.canUseTool = options.canUseTool ?? null
     sdk.modes.push(options.permissionMode)
@@ -34,14 +36,21 @@ const { ClaudeAdapter } = await import('./index.js')
 
 let base: string
 let folder: string
+const claudeConfigDir = process.env.CLAUDE_CONFIG_DIR
 beforeEach(() => {
   base = tempRoot('claude-edits')
+  // The person's own ~/.claude (and its ask rules) is not part of these cases
+  process.env.CLAUDE_CONFIG_DIR = join(base, 'claude-config')
   folder = join(base, 'proj')
   mkdirSync(join(folder, 'src'), { recursive: true })
   mkdirSync(join(base, 'outside'))
   sdk.modes.length = 0
 })
-afterEach(() => removeTree(base))
+afterEach(() => {
+  if (claudeConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR
+  else process.env.CLAUDE_CONFIG_DIR = claudeConfigDir
+  return removeTree(base)
+})
 
 async function askedUnder(preset: PermissionPreset, calls: [string, Record<string, unknown>][]): Promise<string[]> {
   const events: NormalizedEvent[] = []
@@ -91,5 +100,69 @@ describe('the edits preset, Claude (#1525)', () => {
     await askedUnder('edits', [])
     expect(sdk.modes).toEqual(['default', 'default'])
     expect(sdk.modes).not.toContain('acceptEdits') // that mode also approves rm, mv and sed in the folder
+  })
+})
+
+describe('the edits grant and a person own rules, and the live preset (#1525)', () => {
+  const secretWrite = (): [string, Record<string, unknown>] => ['Write', { file_path: join(folder, 'secret', 'key.txt'), content: 'x' }]
+  const plainWrite = (): [string, Record<string, unknown>] => ['Write', { file_path: join(folder, 'src', 'a.ts'), content: 'x' }]
+
+  async function open(preset: PermissionPreset, settings?: unknown) {
+    const events: NormalizedEvent[] = []
+    if (settings) {
+      mkdirSync(join(folder, '.claude'), { recursive: true })
+      writeFileSync(join(folder, '.claude', 'settings.json'), JSON.stringify(settings))
+    }
+    const handle = await new ClaudeAdapter().createSession({ sessionId: 's1', cwd: folder, permissionPreset: preset, projectTrusted: true }, (e) => events.push(e))
+    const asks = () => events.filter((e) => e.type === 'approval_request').length
+    const call = async ([name, input]: [string, Record<string, unknown>], options?: Record<string, unknown>) => {
+      const r = await answerOrCard(() => sdk.canUseTool!(name, input, options), asks)
+      return r === 'still asking' ? 'card' : r.behavior
+    }
+    return { handle, call }
+  }
+
+  it('a person ask rule for an editing tool wins: Write(secret/**) still raises a card under edits', async () => {
+    const { handle, call } = await open('edits', { permissions: { ask: ['Write(secret/**)'] } })
+    expect(await call(secretWrite())).toBe('card')
+    // The rule path pattern is the CLI syntax and is not matched here: any such rule leaves the session without the grant
+    expect(await call(plainWrite())).toBe('card')
+    await handle.dispose()
+  })
+
+  it('an ask rule for another tool leaves the grant alone', async () => {
+    const { handle, call } = await open('edits', { permissions: { ask: ['Bash(git push:*)'] } })
+    expect(await call(plainWrite())).toBe('allow')
+    await handle.dispose()
+  })
+
+  it('an ask the CLI says a rule or a safety check forced is a card, with no rule in the settings to read', async () => {
+    const { handle, call } = await open('edits')
+    expect(await call(plainWrite())).toBe('allow')
+    expect(await call(plainWrite(), { matchedAskRule: { source: 'userSettings', toolName: 'Write' } })).toBe('card')
+    expect(await call(plainWrite(), { decisionReason: 'Sensitive file: needs manual approval' })).toBe('card')
+    await handle.dispose()
+  })
+
+  it('reads the preset live: lowering edits to normal takes effect at once, raising it back too, with no new process', async () => {
+    const { handle, call } = await open('edits')
+    expect(await call(plainWrite())).toBe('allow')
+    handle.setPermissionPreset!('normal')
+    expect(await call(plainWrite())).toBe('card')
+    handle.setPermissionPreset!('edits')
+    expect(await call(plainWrite())).toBe('allow')
+    expect(sdk.modes).toHaveLength(1)
+    await handle.dispose()
+  })
+
+  it('a session launched under normal takes the grant when raised to edits, and one launched under safe does not until it restarts', async () => {
+    const normal = await open('normal')
+    normal.handle.setPermissionPreset!('edits')
+    expect(await normal.call(plainWrite())).toBe('allow')
+    await normal.handle.dispose()
+    const safe = await open('safe')
+    safe.handle.setPermissionPreset!('edits')
+    expect(await safe.call(plainWrite())).toBe('card')
+    await safe.handle.dispose()
   })
 })

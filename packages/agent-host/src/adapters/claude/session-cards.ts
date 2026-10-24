@@ -18,6 +18,8 @@ export type CardsHost = {
   emit: EventSink
   /** This session was given Centralu's own server (#382) */
   ownServer(): boolean
+  /** The preset the session is set to now (#1525): the grant of `edits` is read from it at each call */
+  livePreset(): PermissionPreset
 }
 
 /**
@@ -32,14 +34,29 @@ export class ClaudeCards {
   private alwaysAllow = new AlwaysAllowRules()
   /** The ids of the cards this handle raises (see `CardIds`) */
   private readonly ids = new CardIds()
+  /** The person's settings have an ask rule for an editing tool (`editAskRuleExists`): no `edits` grant (#1525) */
+  editAskRule = true
 
   constructor(private readonly host: CardsHost) {}
+
+  /**
+   * Whether the `edits` grant is on for this call (#1525): the preset it launched under is `normal`'s or `edits`'s (a
+   * launch under `safe` waits for its restart), the session is set to `edits` now (read live, so lowering it takes effect at
+   * once), the person's settings have no ask rule for an editing tool, and the CLI did not say this ask was forced by one
+   * (`matchedAskRule`) or by a safety check (`decisionReason`).
+   */
+  private mayGrantEdit(launched: PermissionPreset, options?: { matchedAskRule?: unknown; decisionReason?: string }): boolean {
+    if (launched !== 'normal' && launched !== 'edits') return false
+    if (this.host.livePreset() !== 'edits' || this.editAskRule) return false
+    if (options?.matchedAskRule) return false
+    return !(typeof options?.decisionReason === 'string' && /ask rule|safety|sensitive|protected|dangerous/i.test(options.decisionReason))
+  }
 
   /**
    * The permission callback (`canUseTool`, see the query options in `ClaudeSession.start` for why auto still reaches
    * it).
    */
-  async canUseTool(preset: PermissionPreset, toolName: string, toolInput: Record<string, unknown>, options?: { signal?: AbortSignal }): Promise<PermissionResult> {
+  async canUseTool(preset: PermissionPreset, toolName: string, toolInput: Record<string, unknown>, options?: { signal?: AbortSignal; matchedAskRule?: unknown; decisionReason?: string }): Promise<PermissionResult> {
     /*
      * **We vouch for our own tools ourselves.**
      *
@@ -106,7 +123,7 @@ export class ClaudeCards {
      * rides on the card the SDK is about to raise. A path outside the folder (links resolved) or under a protected
      * name (`.git`, `.claude`, ...) still asks. See `edit-grant.ts`.
      */
-    if (preset === 'edits' && (await claudeEditInside(this.host.opts.cwd, toolName, toolInput))) {
+    if (this.mayGrantEdit(preset, options) && (await claudeEditInside(this.host.opts.cwd, toolName, toolInput))) {
       return { behavior: 'allow' as const, updatedInput: toolInput }
     }
 

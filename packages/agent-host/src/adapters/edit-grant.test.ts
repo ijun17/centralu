@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import * as os from 'node:os'
+import { dirname, join, parse } from 'node:path'
 import { removeTree, tempRoot } from '../temp-dir.test-helpers.js'
 import { claudeEditInside, insideFolder } from './edit-grant.js'
 
@@ -9,6 +9,13 @@ import { claudeEditInside, insideFolder } from './edit-grant.js'
  * The `edits` preset's one grant (#1525): where a file edit counts as inside the session's folder. Real folders and a
  * real link, since the point is what the disk says after links are resolved.
  */
+/** The home folder is the real one unless a case sets another, to tell the disk-root rule from the home rule */
+const home = vi.hoisted(() => ({ set: null as string | null }))
+vi.mock('node:os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:os')>()
+  return { ...actual, homedir: () => home.set ?? actual.homedir() }
+})
+
 let base: string
 let folder: string
 beforeEach(() => {
@@ -19,7 +26,10 @@ beforeEach(() => {
   mkdirSync(join(base, 'outside'))
   writeFileSync(join(folder, 'src', 'a.ts'), 'a')
 })
-afterEach(() => removeTree(base))
+afterEach(() => {
+  home.set = null
+  return removeTree(base)
+})
 
 describe('insideFolder', () => {
   it('accepts an existing file, a new file in an existing folder, and a new file in a folder not made yet', async () => {
@@ -69,8 +79,26 @@ describe('insideFolder', () => {
   })
 
   it('grants nothing in a folder that is the home folder or holds it', async () => {
-    expect(await insideFolder(homedir(), [join(homedir(), 'notes.txt')])).toBe(false)
-    expect(await insideFolder(dirname(homedir()), [join(dirname(homedir()), 'notes.txt')])).toBe(false)
+    expect(await insideFolder(os.homedir(), [join(os.homedir(), 'notes.txt')])).toBe(false)
+    expect(await insideFolder(dirname(os.homedir()), [join(dirname(os.homedir()), 'notes.txt')])).toBe(false)
+  })
+
+  it('refuses workflows, agent folders, dev containers and package-manager config, and keeps the agent instruction files editable', async () => {
+    for (const p of ['.github/workflows/ci.yml', 'sub/.GitHub/Workflows/x.yml', '.agents/skills/x.md', '.devcontainer/devcontainer.json', '.npmrc', 'packages/a/.npmrc', '.yarnrc.yml', '.pnpmfile.cjs', '.cargo/config.toml', 'crate/.cargo/config']) {
+      expect(await insideFolder(folder, [join(folder, p)]), p).toBe(false)
+    }
+    for (const p of ['CLAUDE.md', 'AGENTS.md', '.github/ISSUE_TEMPLATE/bug.md', '.github/CODEOWNERS', '.cargo/registry.txt', 'docs/workflows/x.md']) {
+      expect(await insideFolder(folder, [join(folder, p)]), p).toBe(true)
+    }
+  })
+
+  it('grants nothing at the root of a disk, whichever disk: a home folder elsewhere does not change that', async () => {
+    // A home folder that does not exist reads as none, so only the root rule is left to refuse
+    home.set = join(base, 'no-such-home')
+    const root = parse(folder).root
+    expect(await insideFolder(root, [join(root, 'notes.txt')])).toBe(false)
+    // The project one level down is a project again with that home
+    expect(await insideFolder(folder, [join(folder, 'notes.txt')])).toBe(true)
   })
 
   it('needs every target inside, and at least one target', async () => {
