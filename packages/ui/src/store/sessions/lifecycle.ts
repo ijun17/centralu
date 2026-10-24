@@ -1,4 +1,4 @@
-import { APP_ARRIVAL_ID_PREFIX, isAppArrivalId } from '@cc/core'
+import { APP_ARRIVAL_ID_PREFIX, backgroundCount, isAppArrivalId, isInTurn, type SessionSummary } from '@cc/core'
 import type { NormalizedEvent, ToolDefaults, ToolName } from '@cc/protocol'
 import { initialSession, markRead as markReadPure, rename as renamePure } from '@cc/core'
 import type { Platform } from '@cc/platform/ports'
@@ -12,6 +12,15 @@ import { bumpChatKeysAbove, messagesToChat, nextChatKey, type ChatItem } from '.
  * A session's place in the list: opening the new-session dialog or starting one at once, creating it,
  * moving it to the session archive and back, its name, its read position and its order.
  */
+
+/**
+ * Whether archiving a session still asks first (#1512). Archiving is undone from the toast, so an idle session goes at
+ * once; one the archive would cut short asks: a turn under way, a card waiting for the person, or a background job
+ * running (moving it ends its process, and with it the job, which the archive does not bring back).
+ */
+export function archiveNeedsAsk(s: Pick<SessionSummary, 'state' | 'pendingApproval' | 'pendingQuestions' | 'backgroundTasks'>): boolean {
+  return isInTurn(s.state) || !!s.pendingApproval || s.pendingQuestions.length > 0 || backgroundCount(s.backgroundTasks) > 0
+}
 
 /**
  * Of the model and effort this project has remembered for this tool, keep only what **that tool
@@ -264,7 +273,22 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
     const name = get().sessions[sessionId]?.name ?? 'Session'
     try {
       await platform.agents.deleteSession(sessionId, deleteWorktree, deleteExternal)
-      set({ toast: `Archived: ${name} — Settings → Archive restores it` })
+      // Undo is the archive's own Restore: the conversation comes back as it was, and Settings → Archive still has it after the toast is gone
+      set(
+        {
+          toast: `Archived ${name}`,
+          toastAction: {
+            label: 'Undo',
+            run: () => {
+              void get()
+                .restoreFromTrash(sessionId)
+                .then((error) => {
+                  if (error) set({ toast: `Could not undo: ${error}` })
+                })
+            },
+          },
+        },
+      )
     } catch (e) {
       set({ toast: `Could not delete: ${(e as Error).message}` })
     }

@@ -246,11 +246,13 @@ export function askProjectTests(): void {
       await row.click()
       await expect.poll(() => page.evaluate(() => (window as any).__store.getState().focusedSessionId)).toBe('orc-child-1')
 
-      // Its ⋯ menu deletes it, through the same dialog as a project's session (#994 review)
+      // Its ⋯ menu archives it, as a project's session is: at once when it is idle (#994 review, #1512)
       await row.hover()
       await page.getByTestId('session-menu-orc-child-1').click()
       await page.getByTestId('delete-session-orc-child-1').click()
-      await expect(page.getByTestId('confirm-delete')).toBeVisible()
+      await expect(page.getByTestId('confirm-delete')).toHaveCount(0)
+      await expect(page.getByTestId('toast')).toContainText('Archived')
+      await expect(row).toHaveCount(0)
     })
 
     // #994 review: a child whose orchestrator was replaced kept no row

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { isInTurn, isUnread, type SessionSummary } from '@cc/core'
 import { useStore } from '../../store/store.js'
+import { archiveNeedsAsk } from '../../store/sessions/lifecycle.js'
 import { useSelectedSessionId } from '../../store/selectors.js'
 import { INDENT, GUIDE } from './layout.js'
 import { approvalLine } from './rows/SessionRow.jsx'
@@ -196,10 +197,12 @@ function OrchestratorChildRow({ s }: { s: SessionSummary }) {
             />
           )}
           <ActionRow
-            label="Archive session…"
+            label={archiveNeedsAsk(s) ? 'Archive session…' : 'Archive session'}
             onClick={() => {
               setMenu(null)
-              setConfirming(true)
+              // An idle session is archived at once, with Undo on the toast; one that is busy asks first (#1512)
+              if (archiveNeedsAsk(s)) setConfirming(true)
+              else void deleteSession(s.id, false, true)
             }}
             testId={`delete-session-${s.id}`}
             danger

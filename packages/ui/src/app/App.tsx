@@ -36,6 +36,7 @@ import { HostRequestCards } from '../features/host-requests/HostRequestCards.jsx
 import { UsageDonuts } from '../features/usage/UsageDonuts.jsx'
 import { DragRegion } from '../components/DragRegion.jsx'
 import { IconButton } from '../components/IconButton.jsx'
+import { Button } from '../components/Button.jsx'
 import { InboxPill } from '../features/inbox/InboxPill.jsx'
 import { WindowControls } from './WindowControls.jsx'
 import { CloseIcon, GearIcon, StepIcon } from '../components/icons.jsx'
@@ -741,12 +742,14 @@ function Toast() {
   const toast = useStore((s) => s.toast)
   // Every toast said, the same words again included: the timer restarts on each (#842 item 14)
   const toastAt = useStore((s) => s.toastAt)
+  const action = useStore((s) => s.toastAction)
   const setToast = useStore((s) => s.setToast)
   useEffect(() => {
     if (!toast) return
-    const t = setTimeout(() => setToast(null), 2500)
+    // A toast with an Undo stays long enough to be read and pressed (#1512); one that only says something goes as before
+    const t = setTimeout(() => setToast(null), action ? 8000 : 2500)
     return () => clearTimeout(t)
-  }, [toast, toastAt, setToast])
+  }, [toast, toastAt, action, setToast])
   if (!toast) return null
   return (
     /*
@@ -763,6 +766,20 @@ function Toast() {
       role="status"
     >
       <span>{toast}</span>
+      {action && (
+        <Button
+          variant="subtle"
+          size="sm"
+          data-testid="toast-action"
+          onClick={() => {
+            // Put away first: a second press while the action runs must not run it twice
+            setToast(null)
+            action.run()
+          }}
+        >
+          {action.label}
+        </Button>
+      )}
       {/* Gone before it was read is the toast's whole risk; one that is in the way can be put away (#842 item 14) */}
       <IconButton
         label="Dismiss"

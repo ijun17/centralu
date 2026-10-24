@@ -209,8 +209,16 @@ export class TrashFlow {
     ]
       .filter(Boolean)
       .join('\n')
-    const refused = await this.ask(caller, question, signal, 'archived')
-    if (refused) return { ok: false, error: refused }
+    /*
+     * No card when moving it loses nothing (#1512): an idle session on this host that nobody waits on and that owes no report.
+     * The archive brings back its conversation, worktree and the tool's file, so the move is undone from Settings → Archive or
+     * with restore_archived, and the step that moves it decides at the last moment (below). A card stays for a session that
+     * would drop something the archive does not bring back, and for a linked machine's, which that machine decides on its own.
+     */
+    if (!(local && ops && lost.length === 0)) {
+      const refused = await this.ask(caller, question, signal, 'archived')
+      if (refused) return { ok: false, error: refused }
+    }
     if (local && ops) {
       // Decided in the step that moves it: at rest, and losing exactly what the card said
       const moved = await ops.deleteIfQuiet(id, () => JSON.stringify(ops.lossesOf(id)) === JSON.stringify(lost))

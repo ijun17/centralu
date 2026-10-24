@@ -21,10 +21,12 @@ async function answeredSession(page: Page, projectName: string, prompt: string):
   return id
 }
 
+/** Archives an idle session from its row's menu: at once, no question (#1512) */
 async function deleteSession(page: Page, id: string) {
   await page.getByTestId(`session-menu-${id}`).click()
+  await expect(page.getByTestId(`delete-session-${id}`)).toHaveText('Archive session')
   await page.getByTestId(`delete-session-${id}`).click()
-  await page.getByTestId('confirm-delete-yes').click()
+  await expect(page.getByTestId('confirm-delete')).toHaveCount(0)
   await expect(page.getByTestId(`session-row-${id}`)).toHaveCount(0)
 }
 
@@ -40,15 +42,10 @@ test('a deleted session waits in the session archive, reads there, comes back, a
   await setup(page, { projects: ['/tmp/alpha'] })
   const id = await answeredSession(page, 'alpha', 'what is the answer')
 
-  // The dialog says where it goes and the two ways out, before anything happens
-  await page.getByTestId(`session-menu-${id}`).click()
-  await page.getByTestId(`delete-session-${id}`).click()
-  await expect(page.getByTestId('confirm-delete')).toContainText('Archive this session?')
-  await expect(page.getByTestId('delete-trash-note')).toContainText('Settings → Archive reads it, restores it, or deletes it for good')
-  await expect(page.getByTestId('confirm-delete-yes')).toHaveText('Archive')
-  await page.getByTestId('confirm-delete-yes').click()
-  await expect(page.getByTestId(`session-row-${id}`)).toHaveCount(0)
+  // An idle session goes at once: the toast says where it went and offers Undo (#1512)
+  await deleteSession(page, id)
   await expect(page.getByTestId('toast')).toContainText('Archived')
+  await expect(page.getByTestId('toast-action')).toHaveText('Undo')
   // Nothing the dialog chose has happened yet: the tool's conversation file waits with it
   expect(await page.evaluate(() => (window as any).__mock.externallyDeleted)).toEqual([])
 
@@ -86,6 +83,27 @@ test('a deleted session waits in the session archive, reads there, comes back, a
   await expect(page.getByTestId('trash-list-empty')).toBeVisible()
   await expect(page.getByTestId('trash-total')).toContainText('0 sessions')
   expect(await page.evaluate(() => (window as any).__mock.externallyDeleted)).toEqual([id])
+})
+
+// #1512: archiving an idle session asks nothing, and Undo on the toast puts it back
+test('an idle session is archived at once and Undo on the toast brings it back; a busy one still asks first', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const id = await answeredSession(page, 'alpha', 'what is the answer')
+  await deleteSession(page, id)
+  await expect(page.getByTestId('toast')).toContainText('Archived')
+  await page.getByTestId('toast-action').click()
+  await expect(page.getByTestId(`session-row-${id}`)).toBeVisible()
+  await expect(page.getByTestId('toast')).toContainText('Restored')
+  await expect(page.getByTestId('toast-action')).toHaveCount(0)
+  expect(await page.evaluate(() => (window as any).__mock.trashBin.size)).toBe(0)
+
+  // A turn under way is cut short by the archive: that one asks
+  await page.evaluate((sid: string) => (window as any).__mock.emit({ type: 'state_change', sessionId: sid, state: 'working' }), id)
+  await page.getByTestId(`session-menu-${id}`).click()
+  await expect(page.getByTestId(`delete-session-${id}`)).toHaveText('Archive session…')
+  await page.getByTestId(`delete-session-${id}`).click()
+  await expect(page.getByTestId('confirm-delete')).toContainText('Archive this session?')
+  await expect(page.getByTestId(`session-row-${id}`)).toBeVisible()
 })
 
 test('deleting all archived sessions asks once and deletes every session in it for good', async ({ page }) => {
@@ -319,7 +337,6 @@ test('"Delete all archived sessions" and a "Delete for good" of subagent steps o
   }, sessionId)
   await openArchive(page)
   await page.getByTestId(`subagent-steps-move-${sessionId}`).click()
-  await page.getByTestId('subagent-steps-confirm-yes').click()
   await expect(page.getByTestId(`trash-steps-row-${sessionId}`)).toBeVisible()
 
   const confirm = page.getByTestId('trash-confirm')

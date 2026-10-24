@@ -221,19 +221,11 @@ describe('restore_archived of a session whose project was deleted', () => {
 describe('delete_session', () => {
   const listed = async () => ((await rpc('sessions.list', {})) as SessionInfo[]).map((s) => s.id)
 
-  it("asks, naming what restoring does not bring back, then moves a session that is not the caller's, keeping what the window's delete keeps, and restore_archived brings it back", async () => {
+  it("moves an idle session that nobody waits on with no card, keeping what the window's delete keeps, and restore_archived brings it back (#1512)", async () => {
     const orc = await mgr.orchestrator()
     const s = await newSession('Old work')
-    const denied = await answered(orc.id, 'delete_session', { sessionId: s.id }, 'deny')
-    expect(denied.question).toContain('Archive the session "Old work"?')
-    expect(denied.question).toContain('The person started it themselves.')
-    expect(denied.question).toContain("Restoring it from the session archive brings back its conversation, its worktree and the tool's own conversation file")
-    expect(denied.question).toContain('Nothing else is lost: no one is waiting on it and it owes no report.')
-    expect(denied.question).toContain('It is moved only if it is still at rest when you answer')
-    expect(denied.r.isError).toBe(true)
-    expect(await listed()).toContain(s.id)
-
-    const { r } = await answered(orc.id, 'delete_session', { sessionId: s.id }, 'allow')
+    const r = await run(orc.id, 'delete_session', { sessionId: s.id })
+    expect(card(orc.id)).toBeUndefined()
     expect(r.isError).toBeFalsy()
     expect(r.text).toContain(`Moved "Old work" [${s.id}] to the session archive.`)
     expect(r.text).toContain('restore_archived brings it back')
@@ -247,11 +239,36 @@ describe('delete_session', () => {
     expect(await listed()).toContain(s.id)
   })
 
-  it('asks again under auto, and "always" is not offered', async () => {
+  it('asks when moving the session drops something the session archive does not bring back, and moves nothing on Deny', async () => {
+    const orc = await mgr.orchestrator()
+    const s = await newSession('Old work')
+    const caller = await newSession('Caller')
+    const children = (mgr as unknown as { children: { markReport(sessionId: string, callerId: string): void } }).children
+    children.markReport(s.id, caller.id)
+    const denied = await answered(orc.id, 'delete_session', { sessionId: s.id }, 'deny')
+    expect(denied.question).toContain('Archive the session "Old work"?')
+    expect(denied.question).toContain('The person started it themselves.')
+    expect(denied.question).toContain("Restoring it from the session archive brings back its conversation, its worktree and the tool's own conversation file")
+    expect(denied.question).toContain('Restoring does not bring back what the host lets go of when it leaves:')
+    expect(denied.question).toContain('It is moved only if it is still at rest when you answer')
+    expect(denied.r.isError).toBe(true)
+    expect(await listed()).toContain(s.id)
+
+    const { r } = await answered(orc.id, 'delete_session', { sessionId: s.id }, 'allow')
+    expect(r.isError).toBeFalsy()
+    expect(r.text).toContain('(not what the card listed as dropped)')
+    expect(await listed()).not.toContain(s.id)
+  })
+
+  it('asks again under auto when it would drop something, and "always" is not offered', async () => {
     const orc = await mgr.orchestrator()
     await mgr.updateSettings(orc.id, { permissionPreset: 'auto' })
     const one = await newSession('One')
     const two = await newSession('Two')
+    const caller = await newSession('Caller')
+    const children = (mgr as unknown as { children: { markReport(sessionId: string, callerId: string): void } }).children
+    children.markReport(one.id, caller.id)
+    children.markReport(two.id, caller.id)
     expect((await answered(orc.id, 'delete_session', { sessionId: one.id }, 'allow')).r.isError).toBeFalsy()
     const second = await answered(orc.id, 'delete_session', { sessionId: two.id }, 'deny')
     expect(second.r.isError).toBe(true)
@@ -278,6 +295,9 @@ describe('delete_session', () => {
   it('decides at the last moment: a message the person sends while the card stands keeps the session, and its new turn is not cut', async () => {
     const orc = await mgr.orchestrator()
     const s = await newSession('Mine')
+    const caller = await newSession('Caller')
+    const children = (mgr as unknown as { children: { markReport(sessionId: string, callerId: string): void } }).children
+    children.markReport(s.id, caller.id)
     const { r } = await answered(orc.id, 'delete_session', { sessionId: s.id }, 'allow', async () => {
       await mgr.send(s.id, 'one more thing')
     })
@@ -291,8 +311,10 @@ describe('delete_session', () => {
   it('does not move a session whose losses changed while the card stood: it is not what the card named', async () => {
     const orc = await mgr.orchestrator()
     const s = await newSession('Changing')
+    const first = await newSession('First caller')
     const caller = await newSession('Late caller')
     const children = (mgr as unknown as { children: { markReport(sessionId: string, callerId: string): void } }).children
+    children.markReport(s.id, first.id)
     const { r } = await answered(orc.id, 'delete_session', { sessionId: s.id }, 'allow', async () => void children.markReport(s.id, caller.id))
     expect(r.isError).toBe(true)
     expect(r.text).toContain('what moving it drops changed')
@@ -325,7 +347,7 @@ describe('delete_session', () => {
     expect(r.text).toContain('"Serving" has 1 background job still running ("npm run dev"); deleting it would end it for good.')
     expect(await listed()).toContain(s.id)
     meta.backgroundTasks = [{ id: 'dev', kind: 'shell', description: 'npm run dev', status: 'completed' }]
-    expect((await answered(orc.id, 'delete_session', { sessionId: s.id }, 'allow')).r.isError).toBeFalsy()
+    expect((await run(orc.id, 'delete_session', { sessionId: s.id })).isError).toBeFalsy()
     expect(await listed()).not.toContain(s.id)
   })
 

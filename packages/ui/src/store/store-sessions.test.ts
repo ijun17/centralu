@@ -12,6 +12,7 @@ import { sessionGridPanel } from '@cc/core'
 import { MockPlatform } from '@cc/platform/mock'
 import { newSessionProjectOf, useStore } from './store.js'
 import { resetStore, sessionInfo } from './store.test-helpers.js'
+import { archiveNeedsAsk } from './sessions/lifecycle.js'
 
 beforeEach(resetStore)
 
@@ -521,7 +522,8 @@ describe('the session archive (#204)', () => {
 
     await useStore.getState().deleteSession(s.id)
     expect(useStore.getState().sessions[s.id]).toBeUndefined()
-    expect(useStore.getState().toast).toMatch(/Archived: .* Settings → Archive/)
+    expect(useStore.getState().toast).toBe(`Archived ${s.name}`)
+    expect(useStore.getState().toastAction?.label).toBe('Undo')
 
     await mock.projects.remove(p.id)
     useStore.setState((st) => ({ projects: Object.fromEntries(Object.entries(st.projects).filter(([id]) => id !== p.id)) }))
@@ -532,6 +534,44 @@ describe('the session archive (#204)', () => {
     // Registered again is added again: it is asked about trust as a new project is
     expect(st.trustAsk).toBe(p.id)
     expect(await useStore.getState().restoreFromTrash(s.id)).toMatch(/Not in the session archive/)
+  })
+})
+
+describe('Undo on the archive toast (#1512)', () => {
+  it('brings the archived session back, and the next toast does not carry the old Undo', async () => {
+    const mock = new MockPlatform()
+    const p = await mock.projects.add('/tmp/undo-a')
+    await useStore.getState().attach(mock)
+    const s = await mock.agents.createSession({ projectId: p.id, cwd: p.path, tool: 'claude', permissionPreset: 'normal' })
+    useStore.getState().dispatchEvent({ type: 'session_created', sessionId: s.id, session: s })
+
+    await useStore.getState().deleteSession(s.id, false, true)
+    expect(useStore.getState().sessions[s.id]).toBeUndefined()
+    useStore.getState().toastAction?.run()
+    await vi.waitFor(() => expect(useStore.getState().sessions[s.id]).toBeDefined())
+    expect(useStore.getState().toast).toBe(`Restored: ${s.name}`)
+    // Restored has no Undo of its own: a toast says its own action or none
+    expect(useStore.getState().toastAction).toBeNull()
+  })
+
+  it('says nothing of Undo when a toast is said with no action, and clears it when put away', () => {
+    useStore.getState().setToast('Archived x', { label: 'Undo', run: () => {} })
+    expect(useStore.getState().toastAction?.label).toBe('Undo')
+    useStore.getState().setToast('Could not do that')
+    expect(useStore.getState().toastAction).toBeNull()
+    useStore.getState().setToast('Archived y', { label: 'Undo', run: () => {} })
+    useStore.getState().setToast(null)
+    expect(useStore.getState().toastAction).toBeNull()
+  })
+
+  it('asks first only for a session the archive would cut short', () => {
+    const idle = { state: 'idle', pendingApproval: null, pendingQuestions: [], backgroundTasks: [] } as const
+    expect(archiveNeedsAsk(idle as never)).toBe(false)
+    expect(archiveNeedsAsk({ ...idle, state: 'working' } as never)).toBe(true)
+    expect(archiveNeedsAsk({ ...idle, pendingApproval: { requestId: 'r', detail: {} } } as never)).toBe(true)
+    expect(archiveNeedsAsk({ ...idle, pendingQuestions: [{ requestId: 'q', questions: [] }] } as never)).toBe(true)
+    expect(archiveNeedsAsk({ ...idle, backgroundTasks: [{ id: 'dev', kind: 'shell', description: 'npm run dev', status: 'running' }] } as never)).toBe(true)
+    expect(archiveNeedsAsk({ ...idle, backgroundTasks: [{ id: 'dev', kind: 'shell', description: 'npm run dev', status: 'completed' }] } as never)).toBe(false)
   })
 })
 
