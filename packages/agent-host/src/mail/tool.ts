@@ -62,6 +62,8 @@ export class MailTool {
     private readonly askerOf: (sessionId: string) => AskerFacts | undefined = () => undefined,
     /** The orchestrator's session id, or none while there is no orchestrator yet: what `to: "orchestrator"` names (§9.7) */
     private readonly orchestratorOf: () => string | undefined = () => undefined,
+    /** The thread of the session's turn that is going (`MailTurns.current`): a request's words are read in its own turn only (§9.7) */
+    private readonly turnThread: (sessionId: string) => string | null = () => null,
   ) {}
 
   run(sessionId: string, args: MailToolArgs): MailToolResult {
@@ -108,6 +110,9 @@ export class MailTool {
     if (rows.length === 0) return 'Your mailbox is empty.'
     const lines = rows.map(({ thread, unread }) => {
       if (this.waitingForRelease(me, thread)) return `${thread.id} [${thread.state}] (a request waiting for the person to release it; it is not shown until then)`
+      // What a session wrote (its subject, its next step) is read with the thread, under the header that says who it is, and not in a list above one
+      const from = this.requestFrom(me, thread)
+      if (from) return `${thread.id} [${thread.state}] a request from ${from}${unread > 0 ? `; ${unread} unread` : ''}; the person did not write it`
       const role = thread.owner === me ? 'you gave this work' : thread.assignee === me ? 'given to you' : 'you are in it'
       const next = thread.next ? `; next: ${plain(thread.next)}` : ''
       return `${thread.id} [${thread.state}] ${plain(thread.subject)} (${role}${unread > 0 ? `; ${unread} unread` : ''}${next})`
@@ -122,10 +127,27 @@ export class MailTool {
    * them off the person's list
    */
   private waitingForRelease(me: string, thread: ThreadRow): boolean {
-    if (thread.assignee !== me || !this.service.isAsk(thread)) return false
-    const owner = parseAddress(thread.owner)
-    if (owner?.kind !== 'session' || this.askerOf(owner.sessionId)?.trusted !== false) return false
-    return this.records.messagesAfter(thread.id, 0).some((m) => m.sender === thread.owner && this.records.receiptsOf(m.id).some((r) => r.recipient === me && r.held !== 'released'))
+    if (thread.assignee !== me) return false
+    // The session that asked, not the thread's owner now: a session that went to the trash left the thread to the person, and its words are its still
+    const asker = this.service.requestedBy(thread)
+    if (asker === undefined || this.askerOf(asker)?.trusted !== false) return false
+    const from = this.service.sessionAddress(asker)
+    return this.records.messagesAfter(thread.id, 0).some((m) => m.sender === from && this.records.receiptsOf(m.id).some((r) => r.recipient === me && r.held !== 'released'))
+  }
+
+  /** Who a request to the orchestrator is from, as the header says it, when the thread is one assigned to `me`; from the host's record, not from the words */
+  private requestFrom(me: string, thread: ThreadRow): string | undefined {
+    if (thread.assignee !== me) return undefined
+    const asker = this.service.requestedBy(thread)
+    const facts = asker === undefined ? undefined : this.askerOf(asker)
+    if (!facts) return undefined
+    return `session ${plain(facts.name)}, ${facts.project === null ? 'no project' : `project ${plain(facts.project)}, ${facts.trusted ? 'trusted' : 'NOT trusted'}`}`
+  }
+
+  /** Whether the thread is the one the session's turn that is going belongs to */
+  private inOwnTurn(me: string, thread: ThreadRow): boolean {
+    const id = parseAddress(me)
+    return id?.kind === 'session' && this.turnThread(id.sessionId) === thread.id
   }
 
   /** The same refusal for what would settle or answer a request nobody has released */
@@ -138,6 +160,12 @@ export class MailTool {
     const waiting = this.records.thread(threadId)
     if (waiting && this.waitingForRelease(me, waiting)) {
       return `Thread ${threadId} is a request that waits for the person to release it, because the session's project is not trusted. Its words are not shown until they do; say nothing of it to anyone.`
+    }
+    // A request is read in the turn mail starts for it, where what is done for it asks the person (§9.7). Read in another turn, it would be a
+    // session's words in a turn that has no card for them, so only who it is from is shown, and it is left unread for its own turn
+    const from = waiting && this.requestFrom(me, waiting)
+    if (waiting && from && !this.inOwnTurn(me, waiting)) {
+      return `Thread ${threadId} [${waiting.state}] is a request from ${from}; the person did not write it. Its words are not shown in this turn: mail starts a turn of its own for a request, and its words are read there, where what is done for it asks the person first.`
     }
     // At most READ_LIMIT messages and about READ_CHARS of them, and always whole ones: a body may be 16,000 characters, and what is not
     // returned is not marked read, so the next read goes on from there
@@ -152,10 +180,15 @@ export class MailTool {
     const view = take === 0 ? ahead : this.service.read(threadId, me, { limit: take })
     const { thread } = view
     const asked = this.service.isAsk(thread)
-    const out = [`Thread ${thread.id} [${thread.state}] ${plain(thread.subject)}${thread.outcome ? ` (${thread.outcome})` : ''}`]
+    const requester = this.requestFrom(me, thread)
+    const out = [
+      requester
+        ? `Thread ${thread.id} [${thread.state}] a request from ${requester}; the person did not write it. Its subject, quoted: ${plain(thread.subject)}${thread.outcome ? ` (${thread.outcome})` : ''}`
+        : `Thread ${thread.id} [${thread.state}] ${plain(thread.subject)}${thread.outcome ? ` (${thread.outcome})` : ''}`,
+    ]
     const others = view.participants.filter((p) => p.leftAt === null && p.address !== me)
     if (others.length > 0) out.push(`With: ${others.map((p) => `${relationWord(me, p.address, thread, asked)} (${p.address})`).join('; ')}`)
-    if (thread.next) out.push(`Next: ${plain(thread.next)}`)
+    if (thread.next) out.push(`${requester ? 'Next, quoted' : 'Next'}: ${plain(thread.next)}`)
     const standing = view.blockers.filter((b) => b.resolvedAt === null)
     if (standing.length > 0) out.push(`Blocked by: ${standing.map((b) => `#${b.n} ${b.kind}${b.ref ? ` ${b.ref}` : ''}${b.text ? ` ${plain(b.text)}` : ''}`).join('; ')}`)
     if (view.messages.length === 0) {
@@ -175,17 +208,17 @@ export class MailTool {
     const label = script !== null && typeof script === 'object' && 'credential' in script && typeof script.credential === 'string' ? scriptLabel(script.credential) : undefined
     // A script's message is the owner's work, sent by a script the person set up; the person did not type it (§8.1)
     const who = label !== undefined ? `a script the person set up ("${label}"), not typed by the person` : m.sender === me ? 'you' : `${relationWord(me, m.sender, thread, asked)} (${m.sender})`
-    return `#${m.seq} ${m.kind}${m.urgent ? ' (urgent)' : ''} from ${who}${this.asker(me, thread, m.sender, asked)}:\n${body}`
+    return `#${m.seq} ${m.kind}${m.urgent ? ' (urgent)' : ''} from ${who}${this.asker(me, thread, m.sender)}:\n${body}`
   }
 
   /**
    * Under the words of a session asking the orchestrator, who it is, from the host's record and not from the words (§9.7): its name, its
    * project, whether that project is trusted. A request is not the person's word, and one from a project nobody trusted may be planted text
    */
-  private asker(me: string, thread: ThreadRow, sender: string, asked: boolean): string {
-    if (!asked || sender !== thread.owner || me !== thread.assignee) return ''
+  private asker(me: string, thread: ThreadRow, sender: string): string {
     const id = parseAddress(sender)
-    const facts = id?.kind === 'session' ? this.askerOf(id.sessionId) : undefined
+    if (me !== thread.assignee || id?.kind !== 'session' || this.service.requestedBy(thread) !== id.sessionId) return ''
+    const facts = this.askerOf(id.sessionId)
     if (!facts) return ''
     const project = facts.project === null ? 'no project' : `project ${plain(facts.project)}, ${facts.trusted ? 'trusted' : 'NOT trusted'}`
     return ` — session ${plain(facts.name)}, ${project}; the person did not write this`

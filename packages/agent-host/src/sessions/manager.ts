@@ -2087,7 +2087,8 @@ export class SessionManager {
       },
       agentSession: (...a) => self.agentSession(...a),
       mailTool: (id, args) => self.mailHooks?.tool?.(id, args) ?? { text: 'The mailbox is not available.', isError: true },
-      whenAsked: (id, call, signal, run) => self.askedGate.when(id, call, signal, run),
+      whenAsked: (id, call, signal, run, refused) => self.askedGate.when(id, call, signal, run, refused),
+      requestTurn: (id) => ({ active: () => self.askedGate.active(id), ask: (tool, input, signal) => self.askedGate.askCli(id, tool, input, signal) }),
       compactSelf: (id, focus) => self.selfCompaction.request(id, focus),
       compactTurn: (id) => self.selfCompaction.compactTurn(id),
       compactEvent: (e, ended) => {
@@ -2519,6 +2520,17 @@ export class SessionManager {
       mailTool: (id) => this.canReadMail(id),
       mailCommand: (id) => this.toolProfileOf(id) === 'orchestrator' && orchestratorHasMailCommand(),
     }
+  }
+
+  /**
+   * Why sessions may not ask the orchestrator now, or null when they may (§9.7, #1447). A request is run with every step that is not a read behind the
+   * person's card; that needs the orchestrator's tool to run a turn under a narrower permission mode (`narrowsTurn`). Where it cannot, a request
+   * could have the orchestrator run a command or write a file unasked, so it is not taken
+   */
+  orchestratorAsks(): string | null {
+    const orchestrator = [...this.meta.values()].find((m) => m.kind === 'orchestrator')
+    if (!orchestrator || this.adapters.get(orchestrator.tool)?.capabilities.narrowsTurn === true) return null
+    return 'the orchestrator runs on a tool that cannot ask the person for each step of a request yet, so a session cannot ask it: write to the person instead'
   }
 
   /** The central orchestrator's session id, or none while it has not been made (#1447: `mail send to "orchestrator"`) */

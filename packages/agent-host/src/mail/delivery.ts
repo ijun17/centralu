@@ -515,7 +515,9 @@ export class MailDelivery {
         // is told of and never a reason to wake it, until the person releases it
         if (state.auto && receipt.held !== 'released' && holdsInbound(message, thread)) return 'policy'
         // A request to the orchestrator from a session of a project nobody trusted may be planted text: it waits for the person's Release, whatever the orchestrator's preset (§9.7)
-        if (receipt.held !== 'released' && message.sender === thread.owner && this.service.isAsk(thread) && this.untrustedAsker?.(message.sender)) return 'policy'
+        // (the session that asked, not the thread's owner now: a session in the trash left the thread to the person, and its words are its still)
+        const asker = receipt.held !== 'released' ? this.service.requestedBy(thread) : undefined
+        if (asker !== undefined && message.sender === this.service.sessionAddress(asker) && this.untrustedAsker?.(message.sender)) return 'policy'
         // A session whose mail has used up its budget is told of what comes, and not woken for it (Centralu's own are never held)
         if (spent && receipt.held !== 'released' && message.sender !== PERSON && message.sender !== CENTRALU) return 'budget'
         return null

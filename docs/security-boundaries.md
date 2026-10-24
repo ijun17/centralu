@@ -453,21 +453,29 @@ as the CLI's own input, never as a message of the person's.
 
 **A session asking the orchestrator (#1447, [plans/mailbox.md](plans/mailbox.md) §9.7).** Any session of this host may open a thread to the orchestrator
 (`mail send` with `to: "orchestrator"`, an `assign`): the session owns it and the orchestrator is its assignee. The request is a session's text, so it
-is not the person's word, and three things follow. (1) Its words never go inline: the wake lists host fields and calls the sender "a session asking you
+is not the person's word, and these follow. (1) Its words never go inline: the wake lists host fields and calls the sender "a session asking you
 for something", and `mail read` quotes the words under a header Centralu writes from its own record (the session's name, its project, whether the
-project is trusted). (2) In a turn whose thread is such a request, every Centralu tool or command of the orchestrator that is not on a short list of reading acts
+project is trusted). The words are read in the turn mail starts for the request and in no other: read in the person's turn, or in another request's, they would be a session's
+words in a turn that has no card for them, so `mail read` gives only who the request is from there, and `mail inbox` lists a request by that header and not by the
+subject the session wrote. (2) In a turn whose thread is such a request, every step of the orchestrator that is not on a short list of reading acts
 (`sessions/asked-acts.ts`: reads, and answering in the request's own thread) raises the person's card first, naming the session and its project, under
 every preset (`alwaysAsk`, so `auto` does not answer it), Allow or Deny only (`ORCHESTRATOR_CHANGE`); the list fails closed, so a command added later
-asks until it is listed as a read. The Allow is for that one call: the cards the call would raise itself meanwhile are covered by it
-(`HostCards.cover`, kept by the call's own async work and ended with the call or its signal), so there is one card, and no "always" is offered or kept; an
-Allow that arrives after the request's turn ended runs nothing. A turn that is not a request (the person's, or a thread the person gave) is as it was.
-**Not covered:** the orchestrator's own CLI tools (its shell, file edits, its subagents) stay under its own preset and the CLI's own cards, as for any
-session, so under `auto` a request that makes it use them is not asked about; and a turn that a relayed report starts (the old path of a kept
-process) belongs to no thread. (3) Limits:
+asks until it is listed as a read. That is three doors, each closed where every call passes through it: Centralu's own tools and commands (`runParsed`, on both CLIs);
+an attached app's tools (`SessionApps`' `call`, on both CLIs: a request could otherwise have the orchestrator call a project app's `merge_when_green`); and the CLI's own
+tools, its shell, file edits, fetches and subagents (Claude: the adapter runs the request's turn under `default` through the live query's `setPermissionMode`, so the CLI asks for
+each step whatever the preset, and puts the mode back when the turn ends; the adapter ignores any "always" the person once saved for such a step). The Allow is for that one step: the
+cards the step would raise itself meanwhile are covered by it (`HostCards.cover`, kept by the call's own async work and ended with the call or its signal), so there is one
+card, and no "always" is offered or kept; an Allow that arrives after the request's turn ended runs nothing. The card shows every argument whole except long free text,
+which is cut and says how long it was; a step too long to show whole is refused, not asked about in part. Whose request the turn is is fixed when the turn begins
+(`MailTurns`), so the session going to the trash, or the thread passing to the person, does not lift the gate or unhide a held request. A turn that is not a request (the person's,
+or a thread the person gave) is as it was. **Where the orchestrator's tool cannot run a turn under a narrower mode** (`narrowsTurn`; Codex, whose per-turn approval policy
+is not yet measured here), a session cannot ask the orchestrator at all: the write is refused with a reason, because its shell and edits could not be put to the person.
+**Not covered:** a turn that a relayed report starts (the old path of a kept process) belongs to no thread, so a request's words do not reach it (3) Limits:
 a request from a project nobody trusted is held (`policy`) until the person releases it in the Inbox, and `mail inbox` and `mail read` show the orchestrator none of
-its words meanwhile, whether or not the hold is written yet, while marking it handled, answering and closing it are refused, a session has one request open at a time (a second
-is refused with the first one's thread), and at most 5 new requests an hour. Nothing moves across with the answer: the asking session gets back only
-what the orchestrator posts in the thread. A linked machine's sessions asking the hub's orchestrator are slice 4's (§9.7, "Linked machines").
+its words meanwhile, whether or not the hold is written yet, while marking it handled, answering and closing it are refused; one request is open at a time and at most 5 new
+requests an hour, both counted over the sessions of the asker's project and the sessions under its root session, so starting sessions does not multiply them (a refusal names the open
+request only when it is the session's own). Nothing moves across with the answer: the asking session gets back only what the orchestrator posts in the thread, and the end of the
+orchestrator's turn is reported in Centralu's words alone, never with the orchestrator's last response (which may be addressed to the person) or a pointer to its conversation. A linked machine's sessions asking the hub's orchestrator are slice 4's (§9.7, "Linked machines").
 
 `handoff_session` (#694) is the orchestrator's alone, and among its commands the one that acts on another session's
 place in the person's work: it starts a successor from a note and moves the original's live children to it. Its

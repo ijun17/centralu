@@ -24,7 +24,12 @@ import type { MailPolicy } from './service.js'
  */
 export type RelationsHost = {
   /** The relations of a session that is here, or undefined for one that is gone or in the session archive */
-  session(id: string): { kind: 'worker' | 'orchestrator' | 'coordinator'; askedBy?: string | null; scopeSessionIds?: readonly string[] | null } | undefined
+  session(id: string): { kind: 'worker' | 'orchestrator' | 'coordinator'; askedBy?: string | null; projectId?: string | null; scopeSessionIds?: readonly string[] | null } | undefined
+  /**
+   * A reason in words when sessions may not ask the orchestrator now (§9.7): its tool cannot run the turn of a request under a narrower
+   * permission mode, so a privileged step of that turn could not be put to the person. Null when they may
+   */
+  orchestratorAsks?(): string | null
   /** Whether the session's seat has the `mail` tool (`toolProfileOf` is `reader` or `orchestrator`): the seats that can read what a wake points at */
   mailTool(sessionId: string): boolean
   /** Whether the session reaches `mail` as a command behind `centralu_run` (the orchestrator), so the calls it is told of are `centralu_run`'s */
@@ -40,6 +45,19 @@ export function mailRelations(host: RelationsHost): MailPolicy {
     isOrchestrator(address) {
       const t = parseAddress(address)
       return t?.kind === 'session' && host.session(t.sessionId)?.kind === 'orchestrator'
+    },
+    askGroup(address) {
+      const t = parseAddress(address)
+      const s = t?.kind === 'session' ? host.session(t.sessionId) : undefined
+      if (t?.kind !== 'session' || !s) return null
+      // The session that started it, and the one that started that: a session that can start agents cannot multiply its own limits
+      let root = t.sessionId
+      for (let i = 0; i < 16; i++) {
+        const up = host.session(root)?.askedBy
+        if (!up || !host.session(up)) break
+        root = up
+      }
+      return { project: s.projectId ?? null, root }
     },
     calls(to) {
       const t = parseAddress(to)
@@ -68,7 +86,7 @@ export function mailRelations(host: RelationsHost): MailPolicy {
       if (!sender || !receiver) return 'that session is gone: it is in the session archive or deleted'
       if (sender.kind === 'orchestrator') return null
       // Any session of this host may ask the orchestrator (§9.7); the limits of asking are the service's (`MailService.open`) and the delivery's
-      if (receiver.kind === 'orchestrator') return null
+      if (receiver.kind === 'orchestrator') return host.orchestratorAsks?.() ?? null
       if (sender.kind === 'coordinator' && sender.scopeSessionIds?.includes(t.sessionId)) return null
       if (receiver.askedBy === f.sessionId) return null
       return 'a session writes to the sessions it started, to the person, and replies in a thread it shares with another; the orchestrator is the way to another'

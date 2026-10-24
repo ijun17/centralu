@@ -5,8 +5,8 @@ import { oneLineText } from '@cc/protocol'
  *
  * A turn whose thread a session opened is that session's request, and a session's words are not the person's. So in such a turn every
  * step the orchestrator could not take from an untrusted text alone raises the person's card, whatever the orchestrator's own preset:
- * anything that changes sessions, projects, settings, machines, installations or apps, starts agents, or deletes. Reading, and
- * answering in the thread that asked, need no card.
+ * anything that changes sessions, projects, settings, machines, installations or apps, starts agents, deletes, runs a command or writes a
+ * file. Reading, and answering in the thread that asked, need no card.
  *
  * **Fail closed.** The reading acts are listed; every other tool or command asks, so a command added later asks until someone says it only reads.
  */
@@ -40,25 +40,61 @@ const READS: ReadonlySet<string> = new Set([
   'centralu_commands',
   'centralu_help',
   'centralu_run',
+  // The CLI's own tools that only read or only plan: a command, a file written, a page fetched or a subagent started is not among them
+  'Read',
+  'Glob',
+  'Grep',
+  'TodoWrite',
+  'AskUserQuestion',
 ])
 
 /** `agent_session` actions that only look */
 const AGENT_READS: ReadonlySet<string> = new Set(['list', 'status', 'wait'])
 
-const ARG_CHARS = 200
-const ACT_CHARS = 500
+/**
+ * The arguments that are free text, which the card cuts when they are long. Every other argument is shown whole: a machine, a project, a
+ * session, a branch, a name, a command, a path or an argument list is what the person decides on, and a card that cut it could hide
+ * the one that matters
+ */
+const FREE_TEXT: ReadonlySet<string> = new Set([
+  'text',
+  'task',
+  'message',
+  'body',
+  'prompt',
+  'firstMessage',
+  'description',
+  'instructions',
+  'content',
+  'why',
+  'reason',
+  'subject',
+  'next',
+  'blocker',
+  'old_string',
+  'new_string',
+])
 
-/** The arguments as one short line of JSON: a long string is cut, so a card stays a card and not the model's whole message */
+/** The most of one free-text argument the card shows */
+const FREE_CHARS = 300
+/** The most a card shows of a step: past it the step is not asked about and not done, since part of it would be hidden */
+const ACT_MAX = 2000
+
+/** The arguments as one line of JSON, free text cut and marked with its length, the rest whole */
 function argsLine(args: Record<string, unknown>): string {
-  const cut = Object.fromEntries(Object.entries(args).map(([k, v]) => [k, typeof v === 'string' && v.length > ARG_CHARS ? `${v.slice(0, ARG_CHARS)}…` : v]))
-  return JSON.stringify(cut)
+  return JSON.stringify(args, (key: string, value: unknown): unknown =>
+    key !== '' && FREE_TEXT.has(key) && typeof value === 'string' && value.length > FREE_CHARS ? `${value.slice(0, FREE_CHARS)}… (${value.length} characters)` : value,
+  )
 }
+
+/** What the person is asked to allow: the step as one line, or that it does not fit a card */
+export type AskedStep = { act: string } | { tooLong: true }
 
 /**
  * What the person is asked to allow, or null when the call needs no card. `thread` is the thread of the turn (the session's request): a post
  * in it is the answer, and needs no card; a post in another thread, or mail to anyone but the person, reaches someone else and asks
  */
-export function askedAct(name: string, args: Record<string, unknown>, thread: string): string | null {
+export function askedAct(name: string, args: Record<string, unknown>, thread: string): AskedStep | null {
   if (READS.has(name)) return null
   if (name === 'update_centralu' && args.action === 'check') return null
   if (name === 'agent_session' && typeof args.action === 'string' && AGENT_READS.has(args.action)) return null
@@ -69,7 +105,8 @@ export function askedAct(name: string, args: Record<string, unknown>, thread: st
     if (action === 'send' && typeof args.to === 'string' && args.to.trim() === 'person') return null
   }
   const shown = argsLine(args)
-  return oneLineText(`run ${name} ${shown === '{}' ? '' : shown}`.trim(), ACT_CHARS)
+  const act = `run ${name} ${shown === '{}' ? '' : shown}`.trim()
+  return act.length > ACT_MAX ? { tooLong: true } : { act }
 }
 
 /** The card's question (§9.7): who asked, from the host's record of the session and its project, and what for */

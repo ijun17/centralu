@@ -14,6 +14,11 @@ export type TurnGuardOptions = {
   tokensPerHour?: number
   /** Mail-started turns in a row that ended doing nothing before the same (3) */
   emptyInARow?: number
+  /**
+   * The session whose request a thread is (`MailService.requestedBy`, §9.7). Read once when a turn of the thread begins, and kept on the turn: who
+   * asked for a turn does not change while it runs, whatever becomes of the session or of the thread's owner
+   */
+  askerOf?: (threadId: string) => string | undefined
 }
 
 const HOUR = 60 * 60_000
@@ -35,7 +40,18 @@ export type TurnSource = 'caller' | 'report' | 'app'
 export type TurnStartedBy = 'mail' | 'person' | 'caller' | 'cli' | 'report' | 'app'
 
 /** What is known of a turn while it runs. The guards count only the turns mail started */
-type Open = { seq: number; startedAt: number; acted: boolean; tokens: number; by: TurnStartedBy; threadId: string | null; /** The caller whose work the turn is, when it is */ owner?: string }
+type Open = {
+  seq: number
+  startedAt: number
+  acted: boolean
+  tokens: number
+  by: TurnStartedBy
+  threadId: string | null
+  /** The caller whose work the turn is, when it is */
+  owner?: string
+  /** The session whose request the turn is (§9.7), fixed when the turn began */
+  askedBy?: string
+}
 
 /**
  * The guards against mail that feeds on itself (docs/plans/mailbox.md §7.9). Two agents answering each other, or a session that
@@ -52,11 +68,14 @@ type Open = { seq: number; startedAt: number; acted: boolean; tokens: number; by
  */
 export class MailTurns {
   private readonly now: () => number
-  private readonly o: Required<Omit<TurnGuardOptions, 'now' | 'keepOpen'>>
+  private readonly o: Required<Omit<TurnGuardOptions, 'now' | 'keepOpen' | 'askerOf'>>
   private readonly keepOpen: ((sessionId: string) => boolean) | undefined
+  private readonly askerOf: TurnGuardOptions['askerOf']
   private readonly open = new Map<string, Open>()
   private readonly tokens = new Map<string, { at: number; tokens: number }[]>()
   private readonly empty = new Map<string, number>()
+  /** The thread of each session's last turn that ended; replaced when the next turn begins */
+  private readonly lastEnded = new Map<string, string | null>()
   /** Since when the turns of a thread are counted anew: the person pressed Resume */
   private readonly loopFrom = new Map<string, number>()
 
@@ -66,6 +85,7 @@ export class MailTurns {
   ) {
     this.now = opts.now ?? Date.now
     this.keepOpen = opts.keepOpen
+    this.askerOf = opts.askerOf
     this.o = { turnsPerHour: opts.turnsPerHour ?? 20, tokensPerHour: opts.tokensPerHour ?? 200_000, emptyInARow: opts.emptyInARow ?? 3 }
   }
 
@@ -76,7 +96,7 @@ export class MailTurns {
   closeStale(): void {
     for (const row of this.records.openTurns()) {
       if (this.keepOpen?.(row.sessionId) && !this.open.has(row.sessionId)) {
-        this.open.set(row.sessionId, { seq: row.turnSeq, startedAt: row.startedAt, acted: false, tokens: 0, by: turnStartedBy(row.startedBy), threadId: row.threadId })
+        this.open.set(row.sessionId, { seq: row.turnSeq, startedAt: row.startedAt, acted: false, tokens: 0, by: turnStartedBy(row.startedBy), threadId: row.threadId, ...this.asked(row.startedBy, row.threadId) })
       } else {
         this.records.endTurn(row.sessionId, row.turnSeq, this.now(), 'lost')
       }
@@ -88,8 +108,14 @@ export class MailTurns {
     this.end(sessionId, 'lost')
     const seq = this.records.nextTurnSeq(sessionId)
     this.records.startTurn({ sessionId, turnSeq: seq, threadId, startedBy: 'mail', startedAt: this.now() })
-    this.open.set(sessionId, { seq, startedAt: this.now(), acted: false, tokens: 0, by: 'mail', threadId })
+    this.open.set(sessionId, { seq, startedAt: this.now(), acted: false, tokens: 0, by: 'mail', threadId, ...this.asked('mail', threadId) })
     return seq
+  }
+
+  /** The asker of a turn that mail started, when its thread is a session's request: a turn of any other kind is nobody's request */
+  private asked(startedBy: string, threadId: string | null): { askedBy: string } | Record<string, never> {
+    const asker = startedBy === 'mail' && threadId !== null ? this.askerOf?.(threadId) : undefined
+    return asker === undefined ? {} : { askedBy: asker }
   }
 
   /**
@@ -123,9 +149,18 @@ export class MailTurns {
   }
 
   /** The turn that is going in the session, by whom it was started and the thread it belongs to; none when no turn is recorded */
-  current(sessionId: string): { by: TurnStartedBy; threadId: string | null } | undefined {
+  current(sessionId: string): { by: TurnStartedBy; threadId: string | null; askedBy?: string } | undefined {
     const turn = this.open.get(sessionId)
-    return turn && { by: turn.by, threadId: turn.threadId }
+    return turn && { by: turn.by, threadId: turn.threadId, ...(turn.askedBy ? { askedBy: turn.askedBy } : {}) }
+  }
+
+  /**
+   * The thread of the session's turn that is going, or else of the one that ended last: the end of a turn is reported once it ends, and the
+   * report belongs to that turn's thread whichever of the two the report is made in
+   */
+  threadOf(sessionId: string): string | null {
+    const turn = this.open.get(sessionId)
+    return turn ? turn.threadId : (this.lastEnded.get(sessionId) ?? null)
   }
 
   /**
@@ -155,6 +190,7 @@ export class MailTurns {
     const turn = this.open.get(sessionId)
     if (!turn) return
     this.open.delete(sessionId)
+    this.lastEnded.set(sessionId, turn.threadId)
     const now = this.now()
     this.records.endTurn(sessionId, turn.seq, now, outcome)
     // The budget is mail's: a turn the person or a caller started is theirs to spend

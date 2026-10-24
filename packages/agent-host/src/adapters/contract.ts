@@ -45,6 +45,16 @@ export * from './contract/surface.js'
  */
 export const INTERRUPTED_BY_TOOL = 'interrupted_by_tool'
 
+/** The person's answer to a step of the CLI's own in a session's request: let it run, or the words the model reads instead */
+export type RequestTurnAnswer = { allowed: true } | { allowed: false; message: string }
+
+/** What the adapter reaches of the host for the orchestrator's turn that a session's request is (`CreateSessionOpts.requestTurn`) */
+export type RequestTurn = {
+  /** Whether the session's turn that is going is a session's request: read before each input is sent and each time the CLI asks permission */
+  active(): boolean
+  /** Asks the person about a step of the CLI's own (its name and arguments), naming who asked; a read is answered at once */
+  ask(tool: string, input: Record<string, unknown>, signal?: AbortSignal): Promise<RequestTurnAnswer>
+}
 
 export type CreateSessionOpts = {
   /** Absent: the adapter spawns its tool itself, as a child of this host */
@@ -137,6 +147,12 @@ export type CreateSessionOpts = {
    * there and is allowed without a card when this says yes); Codex does not restrict reads, so it has no use for it.
    */
   mayRead?: (path: string) => boolean
+  /**
+   * Given to the orchestrator: whether its turn that is going is a session's request (docs/plans/mailbox.md §9.7, #1447), and the person's card for a
+   * step of the CLI's own. In such a turn the adapter runs the CLI under a narrower permission mode than the session's, so that every step that is not a
+   * read reaches `ask` (which names who asked, and is Allow or Deny only), whatever the session's preset and whatever the person once allowed "always"
+   */
+  requestTurn?: RequestTurn
   resumeExternalId?: string
   /**
    * The goal the host last heard of for this conversation, when a new process resumes it (the badge's

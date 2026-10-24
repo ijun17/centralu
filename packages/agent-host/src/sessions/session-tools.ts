@@ -5,6 +5,7 @@ import type { ToolProfile } from '../apps/contract.js'
 import type { AskProjectFlow } from './ask-project-flow.js'
 import type { DelegationFlow, DelegationHost } from './delegation-flow.js'
 import type { AgentStartFlow } from './start-agent-flow.js'
+import type { WhenAsked } from './asked-gate.js'
 import type { SessionAppWiring } from './session-app-wiring.js'
 import { toolBundleFor, toolProfileFor, type ToolProfileFacts } from './tool-profiles.js'
 import type { UpdatesAsked } from './updates-asked.js'
@@ -27,12 +28,7 @@ export type SessionToolsHost = Pick<DelegationHost, 'builderRefOf' | 'meta'> & {
   /** The `compact_self` tool of a session (#1451) */
   compactSelf: (sessionId: string, focus?: string) => { text: string; isError?: boolean }
   /** One step of the orchestrator, asked about when a session's request is its turn (#1447) */
-  whenAsked: (
-    sessionId: string,
-    call: { name: string; args: Record<string, unknown> },
-    signal: AbortSignal | undefined,
-    run: () => Promise<{ text: string; isError?: boolean }>,
-  ) => Promise<{ text: string; isError?: boolean }>
+  whenAsked: WhenAsked
 }
 
 /**
@@ -101,7 +97,7 @@ export class SessionTools {
       mail: (args) => this.host.mailTool(sessionId, args),
       compactSelf: (focus) => this.host.compactSelf(sessionId, focus),
       // A session may have asked for the turn the orchestrator is in (#1447): its steps that change something ask the person first
-      whenAsked: (call, signal, run) => this.host.whenAsked(sessionId, call, signal, run),
+      whenAsked: (call, signal, run) => this.host.whenAsked(sessionId, call, signal, run, (text) => ({ text, isError: true })),
     }
   }
 

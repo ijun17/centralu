@@ -4,6 +4,14 @@ import { askedAct, askedQuestion } from './asked-acts.js'
 
 const THREAD = 'hub-aaaaaaaa.t_01'
 
+/** The line the card shows for a step, or null when it needs no card */
+function line(name: string, args: Record<string, unknown>, thread = THREAD): string | null {
+  const step = askedAct(name, args, thread)
+  if (step === null) return null
+  if ('tooLong' in step) throw new Error(`${name} did not fit a card`)
+  return step.act
+}
+
 describe('which steps of the orchestrator ask the person when a session asked for them (§9.7)', () => {
   it('reading needs no card', () => {
     for (const name of ['list_sessions', 'read_session', 'recall', 'usage_history', 'get_preferences', 'list_machines', 'list_projects', 'project_git_status', 'list_app_runs', 'find_apps', 'centralu_commands', 'centralu_help']) {
@@ -21,8 +29,16 @@ describe('which steps of the orchestrator ask the person when a session asked fo
     expect(askedAct('agent_session', { action: 'delete', sessionId: 's' }, THREAD)).not.toBeNull()
   })
 
+  it('the CLI’s own tools: reading and planning are free; a command, a file written or edited, a page fetched and a subagent ask', () => {
+    for (const name of ['Read', 'Glob', 'Grep', 'TodoWrite', 'AskUserQuestion']) expect(askedAct(name, {}, THREAD), name).toBeNull()
+    for (const name of ['Bash', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'Agent', 'Task', 'mcp__elsewhere__tool']) {
+      expect(askedAct(name, {}, THREAD), name).not.toBeNull()
+    }
+    expect(line('Bash', { command: 'echo pwned > file' })).toBe('run Bash {"command":"echo pwned > file"}')
+  })
+
   it('a command nobody classified asks: the list of what only reads is the short one', () => {
-    expect(askedAct('some_command_added_later', {}, THREAD)).toMatch(/^run some_command_added_later/)
+    expect(line('some_command_added_later', {})).toMatch(/^run some_command_added_later/)
   })
 
   it('every tool the orchestrator is shown is either on the reading list or asks, and nothing that only reads was left asking by mistake', () => {
@@ -43,11 +59,30 @@ describe('which steps of the orchestrator ask the person when a session asked fo
     expect(askedAct('mail', { action: 'send', to: 'some-session', text: 'x' }, THREAD)).not.toBeNull()
   })
 
-  it('the act is one short line, with a long argument cut', () => {
-    const act = askedAct('send_to_session', { sessionId: 's1', text: 'x'.repeat(5_000) + '\nsecond line' }, THREAD)!
+  it('the act is one line, and a long free-text argument is cut and says how long it was', () => {
+    const act = line('send_to_session', { sessionId: 's1', text: 'x'.repeat(5_000) + '\nsecond line' })!
     expect(act).not.toContain('\n')
-    expect(act.length).toBeLessThanOrEqual(500)
     expect(act).toMatch(/^run send_to_session \{"sessionId":"s1"/)
+    expect(act).toContain('… (5012 characters)')
+    expect(act.length).toBeLessThan(500)
+  })
+
+  it('an argument that says what is acted on is never cut: a long task before it cannot push the machine off the card', () => {
+    // The order is the schema's: the long task comes first, the machine last
+    const args = { task: 'do this '.repeat(500), worktree: true, branch: 'feature/' + 'b'.repeat(400), name: 'n'.repeat(300), machine: 'other-computer' }
+    const act = line('start_agent', args)!
+    expect(act).toContain(`"branch":"${args.branch}"`)
+    expect(act).toContain(`"name":"${args.name}"`)
+    expect(act).toContain('"machine":"other-computer"')
+    // A list of arguments (an MCP server to be run) is shown whole too
+    expect(line('propose_mcp_server', { name: 's', command: 'npx', args: ['-y', 'a'.repeat(250), 'b'.repeat(250)] })).toContain('b'.repeat(250))
+  })
+
+  it('a step too long to show whole is not asked about: it is refused rather than shown in part', () => {
+    expect(askedAct('Bash', { command: 'echo ' + 'x'.repeat(3_000) }, THREAD)).toEqual({ tooLong: true })
+    expect(askedAct('start_agent', { task: 't', machine: 'm'.repeat(3_000) }, THREAD)).toEqual({ tooLong: true })
+    // A long free text alone is cut, not refused
+    expect(askedAct('send_to_session', { sessionId: 's', text: 'x'.repeat(50_000) }, THREAD)).toHaveProperty('act')
   })
 
   it('the question names the session and its project, and says when the project is not trusted', () => {
@@ -57,6 +92,6 @@ describe('which steps of the orchestrator ask the person when a session asked fo
     expect(askedQuestion({ name: 'Fix login', project: 'Wild', trusted: false }, 'x')).toContain('in project "Wild" (not trusted) asked')
     expect(askedQuestion({ name: 'S', project: null, trusted: false }, 'x')).toContain('Session "S" with no project asked')
     // A name cannot close its quote and pass for a project
-    expect(askedQuestion({ name: 'x" in project "centralu', project: 'P', trusted: true }, 'y')).toContain('Session "x\\" in project \\"centralu" in project "P" asked')
+    expect(askedQuestion({ name: 'x" in project "centralu', project: 'P', trusted: true }, 'y')).toContain(String.raw`Session "x\" in project \"centralu" in project "P" asked`)
   })
 })

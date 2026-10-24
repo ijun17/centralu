@@ -72,6 +72,11 @@ export type MailPolicy = {
   calls?(to: string): MailCalls
   /** Whether `address` is the Centralu orchestrator's mailbox: the one a session of this host may open a thread with (§9.7, #1447) */
   isOrchestrator?(address: string): boolean
+  /**
+   * The project and the root session of a session that can ask (§9.7): the root is the first session of the chain that started it. The limits of
+   * asking count over the sessions that share either, so starting more sessions does not buy more asks. Null for an address that is not a session here
+   */
+  askGroup?(address: string): { project: string | null; root: string } | null
 }
 
 /** What the host does with a helper whose thread is closed (3.10, MB): see `MailService.useClosing` */
@@ -1706,23 +1711,48 @@ id: ${sessionIdOf(assignee)}` : ''
 
   /**
    * A session's request to the orchestrator (§9.7, #1447): the session owns the thread and the orchestrator is its assignee, so it is an
-   * `assign`. A session has one request open at a time (a second is refused with the first one's thread), and at most
-   * `ASKS_PER_HOUR` new ones an hour. A request waiting for the person's Release counts as open. One the orchestrator has answered
-   * (`review`) or the session closed does not, so an answered request never blocks the next
+   * `assign`. One request is open at a time (a second is refused, with the first one's thread when it is the session's own), and at most
+   * `ASKS_PER_HOUR` new ones an hour. Both are counted over the sessions of the asker's project and the sessions under its root session, not
+   * over its id alone: a session that starts sessions, or a project with many of them, does not multiply the limit. A request waiting for the
+   * person's Release counts as open. One the orchestrator has answered (`review`) or the session closed does not, so an answered request never
+   * blocks the next
    */
   private checkAsk(by: Party, caller: string, addresses: readonly string[], kind: MessageKind, now: number): void {
     if (by.kind !== 'session') return
     const orchestrator = addresses.find((a) => a !== caller && this.policy.isOrchestrator?.(a))
     if (orchestrator === undefined) return
     if (kind !== 'assign') throw refuse('kind_not_allowed', 'the orchestrator takes a request as an assign: leave kind out, or say assign')
-    const mine = this.records.threadsOfParty(caller, 'owner').filter((t) => t.assignee === orchestrator)
+    const group = this.policy.askGroup?.(caller)
+    const sameGroup = (owner: string): boolean => {
+      if (owner === caller) return true
+      const other = group ? this.policy.askGroup?.(owner) : null
+      return !!group && !!other && ((group.project !== null && other.project === group.project) || other.root === group.root)
+    }
+    const mine = this.records.threadsOfParty(orchestrator, 'assignee').filter((t) => this.isAsk(t) && sameGroup(t.owner))
     const open = mine.find((t) => t.state === 'open' || t.state === 'running' || t.state === 'blocked')
-    if (open) {
+    if (open?.owner === caller) {
       throw refuse('not_allowed', `you already have a request open with the orchestrator (thread ${open.id}): wait for its answer (a request from a project nobody trusted waits for the person to release it), or close that thread first`, { thread: open.id })
     }
-    if (mine.filter((t) => t.createdAt > now - 60 * 60_000).length >= ASKS_PER_HOUR) {
-      throw refuse('rate_limited', `at most ${ASKS_PER_HOUR} new requests to the orchestrator an hour from one session: wait, or ask the person`)
+    if (open) {
+      throw refuse('not_allowed', 'a request from another session of your project, or under the same root session, is open with the orchestrator: wait for its answer, or ask the person')
     }
+    if (mine.filter((t) => t.createdAt > now - 60 * 60_000).length >= ASKS_PER_HOUR) {
+      throw refuse('rate_limited', `at most ${ASKS_PER_HOUR} new requests to the orchestrator an hour from the sessions of one project or one root session: wait, or ask the person`)
+    }
+  }
+
+  /**
+   * The session whose request a thread is, or none (§9.7). The thread's first word says it, not its owner now: a session that is gone leaves the
+   * thread to the person (`partyGone`), and the words in it are still the session's. A thread nobody asked in, or one the orchestrator is not
+   * the assignee of, is nobody's request
+   */
+  requestedBy(thread: Pick<ThreadRow, 'id' | 'owner' | 'assignee'>): string | undefined {
+    if (thread.assignee === null || this.policy.isOrchestrator?.(thread.assignee) !== true) return undefined
+    const owner = parseAddress(thread.owner)
+    if (owner?.kind === 'session') return owner.sessionId
+    const first = this.records.messagesAfter(thread.id, 0, 1)[0]
+    const from = first ? parseAddress(first.sender) : undefined
+    return first && from?.kind === 'session' && first.sender !== thread.assignee ? from.sessionId : undefined
   }
 
   /** Whether a thread is a session's request to the orchestrator (§9.7): a session owns it and the orchestrator is its assignee */
