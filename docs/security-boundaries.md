@@ -95,7 +95,7 @@ boundaries (#603), with a log line instead of a card or refusal (Claude's own cr
   project's trust stands in for it), with "always for this project" kept as always for the orchestrator while the host
   serves it, since there is no project to remember it for; `auto` opens it. `agent_session` acts only on a child whose
   `askedBy` is the orchestrator, in every preset. The depth binds as for any caller: the orchestrator is at 0.
-- **A ceiling**: Settings → Orchestrator → Running agents per project (`prefs.agentCeiling`).
+- **A ceiling**: Settings → Agents → Running agents per project (`prefs.agentCeiling`).
   Empty uses the preset default: no ceiling under `auto`, 4 otherwise (`AGENT_CEILING`); zero
   explicitly removes the ceiling, and a positive integer limits all running children in each project.
 - **Visible**: each child is an ordinary session in the sidebar with its own approval cards and Stop, and outlives
