@@ -219,7 +219,7 @@ describe('applying an installed update for an agent (#665)', () => {
    * One window, played by the test: it answers each request the way the store does (ready or not) and, told to go,
    * counts a relaunch and reports it started. `ready: false` with a reason stands for "nothing installed".
    */
-  function windowWith(verdict: { ready: true; version?: string } | { ready: false; reason: string }) {
+  function windowWith(verdict: { ready: true; version?: string } | { ready: false; reason: string }, failGo?: string) {
     const relaunches: string[] = []
     const asked: NormalizedEvent[] = []
     const tickets = new Map<string, string>()
@@ -235,7 +235,7 @@ describe('applying an installed update for an agent (#665)', () => {
           }
           if (e.type === 'update_apply_go' && tickets.get(e.requestId) === e.ticket) {
             relaunches.push(e.ticket)
-            broker.report(1, { requestId: e.requestId, ticket: e.ticket })
+            broker.report(1, { requestId: e.requestId, ticket: e.ticket, ...(failGo ? { error: failGo } : {}) })
           }
         })
       },
@@ -302,6 +302,114 @@ describe('applying an installed update for an agent (#665)', () => {
     await vi.waitFor(() => expect(card(session.id)?.detail).toEqual({ kind: 'other', raw: CENTRALU_APPLY_QUESTION, about: CENTRALU_APPLY }))
     mgr.respondApproval(session.id, card(session.id)!.requestId, 'deny')
     expect((await apply).isError).toBe(true)
+  })
+
+  // #1509 (owner, 2026-10-24): with Automatic updates on and nothing else running, the window would relaunch by itself, so no card
+  it('normal: with Automatic updates on and the host at rest, relaunches with no card, apart from the asking session', async () => {
+    const w = windowWith({ ready: true, version: '9.9.9' })
+    const asked: string[] = []
+    mgr.useUpdateAtRest((besides) => (asked.push(besides), true))
+    const project = await addProject()
+    const session = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
+    const out = await mgr.runOrchestratorTool(session.id, 'update_centralu', { action: 'apply' })
+    expect(out.isError).toBeUndefined()
+    expect(out.text).toContain('relaunching into 9.9.9')
+    expect(w.relaunches).toHaveLength(1)
+    expect(card(session.id)).toBeUndefined()
+    // The caller's own turn is not "busy": the host's answer is asked for this session, at the consent and again right before the relaunch
+    expect(asked).toEqual([session.id, session.id])
+    // Nothing is remembered: it is judged at each apply
+    expect(mgr['updatesAsked'].updateApplyConsents.has(session.id)).toBe(false)
+  })
+
+  it('normal: something that starts while the windows are asked stops the card-free relaunch', async () => {
+    const w = windowWith({ ready: true })
+    let looks = 0
+    mgr.useUpdateAtRest(() => ++looks === 1)
+    const project = await addProject()
+    const session = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
+    const out = await mgr.runOrchestratorTool(session.id, 'update_centralu', { action: 'apply' })
+    expect(out).toMatchObject({ isError: true, text: expect.stringContaining('Something started running') })
+    expect(w.relaunches).toEqual([])
+    expect(card(session.id)).toBeUndefined()
+  })
+
+  it('normal: once a card-free relaunch failed, the next apply asks the person, so an agent cannot retry it in a loop', async () => {
+    const w = windowWith({ ready: true }, 'The shell refused to relaunch.')
+    mgr.useUpdateAtRest(() => true)
+    const project = await addProject()
+    const session = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
+    const first = await mgr.runOrchestratorTool(session.id, 'update_centralu', { action: 'apply' })
+    expect(first).toMatchObject({ isError: true, text: expect.stringContaining('The shell refused to relaunch.') })
+    expect(card(session.id)).toBeUndefined()
+    // The host is still at rest, yet the second call is carded; so is another session's, as the failure is the host's
+    const again = mgr.runOrchestratorTool(session.id, 'update_centralu', { action: 'apply' })
+    await vi.waitFor(() => expect(card(session.id)?.detail).toEqual({ kind: 'other', raw: CENTRALU_APPLY_QUESTION, about: CENTRALU_APPLY }))
+    mgr.respondApproval(session.id, card(session.id)!.requestId, 'deny')
+    expect((await again).isError).toBe(true)
+    const other = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
+    const third = mgr.runOrchestratorTool(other.id, 'update_centralu', { action: 'apply' })
+    await vi.waitFor(() => expect(card(other.id)).toBeTruthy())
+    mgr.respondApproval(other.id, card(other.id)!.requestId, 'deny')
+    await third
+    expect(w.relaunches).toHaveLength(1)
+  })
+
+  it('normal: a card-free relaunch that was refused before it was sent (something started) does not bring the card back', async () => {
+    windowWith({ ready: true })
+    let looks = 0
+    mgr.useUpdateAtRest(() => ++looks % 2 === 1)
+    const project = await addProject()
+    const session = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
+    expect((await mgr.runOrchestratorTool(session.id, 'update_centralu', { action: 'apply' })).isError).toBe(true)
+    expect((await mgr.runOrchestratorTool(session.id, 'update_centralu', { action: 'apply' })).isError).toBe(true)
+    expect(card(session.id)).toBeUndefined()
+  })
+
+  it('normal: the go it sends with no card says so, for the window to wait out typing', async () => {
+    const w = windowWith({ ready: true })
+    mgr.useUpdateAtRest(() => true)
+    const project = await addProject()
+    const session = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
+    await mgr.runOrchestratorTool(session.id, 'update_centralu', { action: 'apply' })
+    expect(w.asked.find((e) => e.type === 'update_apply_go')).toMatchObject({ unasked: true })
+  })
+
+  it('normal: asks as before when the setting is off or something else is running', async () => {
+    const w = windowWith({ ready: true })
+    let atRest = false
+    mgr.useUpdateAtRest(() => atRest)
+    const project = await addProject()
+    const session = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
+    const call = mgr.runOrchestratorTool(session.id, 'update_centralu', { action: 'apply' })
+    await vi.waitFor(() => expect(card(session.id)?.detail).toEqual({ kind: 'other', raw: CENTRALU_APPLY_QUESTION, about: CENTRALU_APPLY }))
+    expect(w.relaunches).toEqual([])
+    mgr.respondApproval(session.id, card(session.id)!.requestId, 'deny')
+    expect((await call).isError).toBe(true)
+    // At rest from now on: the same session is not asked
+    atRest = true
+    expect((await mgr.runOrchestratorTool(session.id, 'update_centralu', { action: 'apply' })).isError).toBeUndefined()
+    expect(w.relaunches).toHaveLength(1)
+  })
+
+  it('at rest, safe is still refused and an agent an app started still cannot apply', async () => {
+    const w = windowWith({ ready: true })
+    mgr.useUpdateAtRest(() => true)
+    const project = await addProject()
+    const safe = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'safe' })
+    expect(await mgr.runOrchestratorTool(safe.id, 'update_centralu', { action: 'apply' })).toMatchObject({ isError: true, text: expect.stringContaining('preset is safe') })
+    const agent = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'auto', appId: 'agent', appAgent: {} })
+    await expect(mgr.runOrchestratorTool(agent.id, 'update_centralu', { action: 'apply' })).rejects.toThrow()
+    expect(w.asked).toEqual([])
+  })
+
+  it('at rest, nothing installed still says so and relaunches nothing', async () => {
+    const w = windowWith({ ready: false, reason: 'No update is installed to apply.' })
+    mgr.useUpdateAtRest(() => true)
+    const project = await addProject()
+    const session = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
+    expect(await mgr.runOrchestratorTool(session.id, 'update_centralu', { action: 'apply' })).toMatchObject({ isError: true, text: expect.stringContaining('No update is installed to apply.') })
+    expect(w.relaunches).toEqual([])
   })
 
   it('safe: refused without asking the windows or the person', async () => {

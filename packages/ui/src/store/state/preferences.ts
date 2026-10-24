@@ -107,5 +107,5 @@ export type PreferencesSlice = {
    */
   answerApplyRequest(requestId: string): Promise<void>
   /** The `update_apply_go` naming this window's ticket: checks again, runs `applyUpdateNow`, reports the outcome */
-  runApplyRequest(requestId: string, ticket: string): Promise<void>
+  runApplyRequest(requestId: string, ticket: string, unasked?: boolean): Promise<void>
 }

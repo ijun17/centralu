@@ -24,6 +24,16 @@ export class UpdatesAsked {
   readonly updateConsents = new Set<string>()
   /** Asking a window to apply the installed update (#665); null on a host with no windows to ask (tests) */
   updateApply: UpdateApplyBroker | null = null
+  /**
+   * Whether the person's Automatic updates are on and nothing but the asking session runs (#1509; the host's `updateAtRest`,
+   * main.ts). Null on a host that cannot tell (tests): then every apply is carded
+   */
+  updateAtRest: ((besidesSessionId: string) => boolean) | null = null
+  /**
+   * The installed version whose card-free relaunch failed (#1509): for it the card comes back, so an agent cannot retry a
+   * relaunch that does not work in a loop with no one asked. Host-wide, as a failure is the host's, not one session's
+   */
+  private uncardedFailedFor: string | null = null
   /** Sessions whose "always" covers applying (#665), kept apart from check and install: a relaunch is the person's window */
   readonly updateApplyConsents = new Set<string>()
 
@@ -51,6 +61,11 @@ export class UpdatesAsked {
    * the caller (after a window said it is ready, so "nothing installed" never asks), `safe` is refused, as is an agent an
    * app started. "Always" on the card covers applying for this session only, apart from check and install. The window
    * still makes every check its button makes (update-apply.ts), so an agent can only ask for what the person could click.
+   *
+   * No card either when the person's Automatic updates are on and nothing else runs (#1509, owner 2026-10-24): the window's own
+   * auto-apply would relaunch at that moment, so the card guards nothing. Judged in the consent step, after a window said
+   * it is ready, and again after the windows were asked a second time, right before the relaunch; the window also waits out
+   * someone typing (`update_apply_go.unasked`). `safe` is refused before that, as it was.
    */
   private async applyUpdateAsked(sessionId: string, signal?: AbortSignal): Promise<{ ok: boolean; error?: string; relaunched?: { version?: string } }> {
     const broker = this.updateApply
@@ -64,16 +79,34 @@ export class UpdatesAsked {
         error: "This session's preset is safe, which cannot relaunch Centralu. Tell the person the update is ready to apply from the update line; do not ask again unless they tell you to.",
       }
     }
+    // Whether the consent went with no card because the host is at rest (#1509); judged again right before the relaunch
+    let uncarded = false
+    // Whether a go was sent with no card, and for which installed version
+    let wentUncarded = false
+    const installed = this.updates?.current().latest ?? ''
     const outcome = await broker.apply(async () => {
       if (this.updateApplyConsents.has(sessionId)) return null
+      if (this.uncardedFailedFor !== installed && this.updateAtRest?.(sessionId) === true) {
+        uncarded = true
+        return null
+      }
       // As `other` with its whole question as the text: a released window drops a detail it cannot parse (#665 review)
       const decision = await this.host.askHost(sessionId, { kind: 'other', raw: CENTRALU_APPLY_QUESTION, about: CENTRALU_APPLY }, signal)
       if (decision === 'always') this.updateApplyConsents.add(sessionId)
       else if (decision === null) return 'The question to the person was withdrawn before they answered, so nothing was relaunched.'
       else if (decision !== 'allow') return 'The person did not allow this session to apply the Centralu update. Do not ask again unless they tell you to.'
       return null
+    }, () => {
+      if (!uncarded) return undefined
+      if (this.updateAtRest?.(sessionId) !== true) return 'Something started running while the windows were asked, so nothing was relaunched. Call again to be asked.'
+      wentUncarded = true
+      return null
     })
-    if (!outcome.ok) return { ok: false, error: outcome.error }
+    if (!outcome.ok) {
+      // A relaunch sent with no card that did not happen: the next apply for this version asks the person
+      if (wentUncarded) this.uncardedFailedFor = installed
+      return { ok: false, error: outcome.error }
+    }
     console.error(`[updates] session ${sessionId} applied the installed update: a window is relaunching${outcome.version ? ` into ${outcome.version}` : ''}`)
     return { ok: true, relaunched: outcome.version ? { version: outcome.version } : {} }
   }

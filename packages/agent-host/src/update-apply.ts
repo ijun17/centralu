@@ -81,15 +81,20 @@ export class UpdateApplyBroker {
   /**
    * The whole call: ask, then the caller's consent (null to go on, or why not), then ask again and relaunch one window.
    * `consent` runs only when a window was ready, so "nothing installed" never raises a card.
+   * `unasked` is for a consent that went without a card (#1509): read again after the second probe, it answers null to go on
+   * (the window then also waits out typing), a reason to stop, or undefined when a person's card stood for it.
    */
-  async apply(consent: () => Promise<string | null>): Promise<ApplyOutcome> {
+  async apply(consent: () => Promise<string | null>, unasked?: () => string | null | undefined): Promise<ApplyOutcome> {
     const first = await this.probe()
     if (!first.ready) return { ok: false, error: first.error }
     const refused = await consent()
     if (refused) return { ok: false, error: refused }
     const ready = await this.probe()
     if (!ready.ready) return { ok: false, error: ready.error }
-    return this.go(ready)
+    // Read once more right before the relaunch: the second probe takes up to `answerMs`, and a turn may have started meanwhile
+    const late = unasked?.()
+    if (typeof late === 'string') return { ok: false, error: late }
+    return this.go(ready, late === null)
   }
 
   /** Asks every window whether its "Apply now" could relaunch now; resolves with the first ready one */
@@ -136,7 +141,7 @@ export class UpdateApplyBroker {
    * reload, a lost socket — is not a success: the window is given `goneGraceMs` to come back and report under the same
    * ticket, then the answer says whether it relaunched is not known.
    */
-  go(ready: Extract<ApplyProbe, { ready: true }>): Promise<ApplyOutcome> {
+  go(ready: Extract<ApplyProbe, { ready: true }>, unasked = false): Promise<ApplyOutcome> {
     return new Promise<ApplyOutcome>((resolve) => {
       const g: Go = {
         requestId: ready.requestId,
@@ -162,7 +167,7 @@ export class UpdateApplyBroker {
         this.opts.outcomeMs ?? OUTCOME_MS,
       )
       this.goes.set(ready.ticket, g)
-      this.opts.push({ type: 'update_apply_go', requestId: ready.requestId, ticket: ready.ticket })
+      this.opts.push({ type: 'update_apply_go', requestId: ready.requestId, ticket: ready.ticket, ...(unasked ? { unasked } : {}) })
     })
   }
 

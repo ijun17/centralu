@@ -192,7 +192,7 @@ describe("a limited machines.update reads the host's state (#1508)", () => {
         calls.push({ method, params, ctx })
         return { ok: true }
       },
-      rightsHost: { followsHub: (id) => follows.has(id) },
+      rightsHost: { followsHub: (id) => follows.has(id), updateAtRest: () => false },
     })
     const script = await hello(await server.listen(), limitedToken(TOKEN))
     expect((await script.call('machines.update', { machineId: 'm1' })).ok).toBe(true)
@@ -207,6 +207,32 @@ describe("a limited machines.update reads the host's state (#1508)", () => {
     const bare = await start()
     const other = await hello(bare.port, limitedToken(TOKEN))
     expect((await other.call('machines.update', { machineId: 'm1' })).error?.data).toEqual({ refused: 'rights', rights: 'asks' })
+  })
+})
+
+// #1509: applying an update runs while Automatic updates are on and the host is idle, and the answer is read at each call
+describe("a limited updates.apply reads the host's state (#1509)", () => {
+  it('runs when the host is at rest, asks otherwise, and tells the handler it went uncarded', async () => {
+    let atRest = true
+    const calls: Call[] = []
+    server = new HostServer({
+      port: 0,
+      token: TOKEN,
+      onRpc: async (method, params, ctx) => {
+        calls.push({ method, params, ctx })
+        return { ok: true }
+      },
+      rightsHost: { followsHub: () => false, updateAtRest: () => atRest },
+    })
+    const script = await hello(await server.listen(), limitedToken(TOKEN))
+    expect((await script.call('updates.apply', {})).ok).toBe(true)
+    atRest = false
+    expect((await script.call('updates.apply', {})).error?.data).toEqual({ refused: 'rights', rights: 'asks' })
+    expect(calls.map((c) => [c.method, c.ctx?.rights, c.ctx?.covered])).toEqual([['updates.apply', 'limited', true]])
+    await server.close()
+    const bare = await start()
+    const other = await hello(bare.port, limitedToken(TOKEN))
+    expect((await other.call('updates.apply', {})).error?.data).toEqual({ refused: 'rights', rights: 'asks' })
   })
 })
 
