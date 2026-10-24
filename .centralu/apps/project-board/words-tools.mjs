@@ -52,6 +52,7 @@ export const tools = {
         remove: z.array(z.string()).max(500).optional(),
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+      _meta: { 'centralu/risk': 'local' },
     },
     // One at a time like every other write: each edit reads the list and writes it whole
     handler: serially(
