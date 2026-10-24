@@ -670,6 +670,8 @@ describe('what the merge queue decides with two tiers of CI', () => {
     expect(late).toMatchObject({ state: 'attention', reason: { kind: 'full-tier' } })
     expect(late.reason.text).toContain('no full run has reported on c0ffee0 in 15 minutes')
     expect(late.reason.text).toContain('gh workflow run build.yml --ref feat/queue')
+    // GitHub refused to start it: said, and not flipped back to waiting on the next poll
+    expect(ci({ canBatch: false, item: fresh({ fullDispatch: { head: SHA, at: new Date(NOW - 60_000).toISOString(), refused: 'Workflow does not have workflow_dispatch trigger' } }) })).toMatchObject({ state: 'attention', reason: { kind: 'full-tier' } })
     // Started for another head: on this one it starts again
     expect(ci({ canBatch: false, item: fresh({ fullDispatch: { head: SHA2, at: new Date(NOW).toISOString() } }) })).toMatchObject({ action: { type: 'dispatch-full' } })
     // A fork's branch is never run here
@@ -853,7 +855,9 @@ describe('which conflicts the merge queue regenerates itself (#1182)', () => {
     const own = handoffReason({ item: fresh({ author: 'me', owner: 'me' }), pr, files, why: 'Not mechanical.', ref, route: 'self' })
     expect(own.reason.text).toContain('#77 is your own pull request (author session: me): fix it in this session: "Merge main into feat/b77')
     const direct = handoffReason({ item: fresh({ author: 'writer' }), pr, files, why: 'Not mechanical.', ref, route: 'direct' })
-    expect(direct.reason.text).toContain('Author session: writer. The queue posted this to it itself, so nothing needs relaying: "Merge main into feat/b77')
+    expect(direct.reason.text).toContain('Author session: writer. The queue is posting this into it itself, so relay it only if it does not answer: "Merge main into feat/b77')
+    // No author named, but the opener is known: still posted to it
+    expect(handoffReason({ item: fresh({ author: null }), pr, files, why: 'Not mechanical.', ref, route: 'direct' }).reason.text).toContain('Author session: the session that opened it. The queue is posting this into it itself')
     expect(direct.reason.relay.route).toBe('direct')
     // authorRoute: the session that opened it through open_pr decides; failing that, an author who is the owner
     expect(authorRoute(fresh({ notice: 'a', author: 'writer' }), { notice: 'a' })).toEqual({ route: 'self', to: 'a' })
@@ -4364,7 +4368,7 @@ describe('the merge queue does by itself what it told a session to do by hand (#
   })
   const events = () => queueOnDisk().events as { kind: string; notify: boolean; text: string; to?: string }[]
   const dirty = () => ghState({ prs: { '77': ghPr(77, { mergeStateStatus: 'DIRTY', mergeable: 'CONFLICTING' }) } })
-  const opened = (notice: string) => ({ [`${R}#77`]: { notice, draft: false, at: new Date().toISOString() } })
+  const opened = (notice: string, draft = false) => ({ [`${R}#77`]: { notice, draft, at: new Date().toISOString() } })
 
   describe('a conflict it cannot fix goes to the author session', () => {
     it('posts it into the author session itself when that session opened the pull request through open_pr, and tells the queuing session it did', async () => {
@@ -4375,11 +4379,11 @@ describe('the merge queue does by itself what it told a session to do by hand (#
       const attention = events().filter((e) => e.kind === 'attention')
       expect(attention).toHaveLength(1)
       expect(attention[0]!.to).toBe('addr-tester')
-      expect(attention[0]!.text).toContain('Author session: writer. The queue posted this to it itself, so nothing needs relaying: "Merge main into feat/b77 and push again')
+      expect(attention[0]!.text).toContain('Author session: writer. The queue is posting this into it itself, so relay it only if it does not answer: "Merge main into feat/b77 and push again')
       expect(attention[0]!.text).not.toContain('Relay this to it')
       const posted = events().filter((e) => e.kind === 'handoff')
       expect(posted).toHaveLength(1)
-      expect(posted[0]).toMatchObject({ notify: true, to: 'addr-writer' })
+      expect(posted[0]).toMatchObject({ notify: true, to: 'addr-writer', owner: null })
       expect(posted[0]!.text).toBe('Merge queue: #77 (feat(apps): change 77) is your pull request and it conflicts with main: Merge main into feat/b77 and push again; conflicted files: not known (GitHub says it conflicts).')
       // Once per head
       await morePolls()
@@ -4408,19 +4412,24 @@ describe('the merge queue does by itself what it told a session to do by hand (#
   })
 
   describe('a draft', () => {
-    it('is marked ready by the queue when the session that queued it opened it through open_pr, and lands when green', async () => {
+    it('is marked ready by the queue when the session that queued it opened it through open_pr as a draft, and lands when green', async () => {
       seedQueue([item()])
-      seedOpened(opened('addr-tester'))
+      seedOpened(opened('addr-tester', true))
       runtime(ghState({ prs: { '77': ghPr(77, { isDraft: true, mergeStateStatus: 'DRAFT' }) } }))
       await until((x) => stateOf(x) === 'merged', 'the merge')
       expect(writes().map((w) => w[0])).toEqual(['ready', 'merge', 'delete'])
-      expect(events().find((e) => e.kind === 'action')!.text).toContain('was a draft that the session queuing it opened; the queue marked it ready for review')
+      expect(events().find((e) => e.kind === 'action')!.text).toContain('was opened as a draft by the session queuing it; the queue marked it ready for review')
     })
 
-    it('is left to its session when another one opened it, or the app did not open it: a draft may be work in progress', async () => {
+    it.each([
+      ['another session opened it', opened('addr-someone-else', true), {}],
+      ['it was opened ready and a person (or open_pr, for a stack) made it a draft since', opened('addr-tester', false), {}],
+      ['a pull request is stacked on its branch: it is a stack lower', opened('addr-tester', true), { basedOn: { 'feat/b77': [{ number: 78 }] } }],
+      ['the app did not open it', {}, {}],
+    ])('is left to its session when %s: a draft may be a hold', async (_why, record, more) => {
       seedQueue([item()])
-      seedOpened(opened('addr-someone-else'))
-      runtime(ghState({ prs: { '77': ghPr(77, { isDraft: true, mergeStateStatus: 'DRAFT' }) } }))
+      seedOpened(record)
+      runtime(ghState({ prs: { '77': ghPr(77, { isDraft: true, mergeStateStatus: 'DRAFT' }) }, ...more }))
       const q = await until((x) => stateOf(x) === 'attention', 'attention')
       expect(q.queue[0].reason.kind).toBe('draft')
       await morePolls()

@@ -190,10 +190,12 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
 - **`merge_queue`** (`all?`; read-only, agents and the screen) and **`unqueue`** (`pr`; changes nothing
   on GitHub).
 - **A draft the queuing session opened** (#1509 item 4): a pull request found a draft that `open_pr` opened
-  for the same session that queued it (`opened-prs.json`, the notice address on both) is marked ready by the
-  queue, as that session would have, instead of needing attention. A draft another session opened, or that
-  `open_pr` did not (a draft may be work in progress), still needs attention (`draft`), and so does a record
-  handed over with `integrate` when found ready (it is turned back into a draft, below).
+  **as a draft** for the same session that queued it (`opened-prs.json`: the notice address on both, and
+  `draft`), with no open pull request based on its branch, is marked ready by the queue, as that session
+  would have, instead of needing attention. A draft another session opened, one opened ready and made a draft
+  since (a person's hold, or `open_pr` making a stack's lower one a draft), a stack lower, or one `open_pr`
+  did not open still needs attention (`draft`), and so does a record handed over with `integrate` when found
+  ready (it is turned back into a draft, below).
 - **Each poll** reads one item (`decideBefore`, `decideCi`): no maintain or admin, a draft, DIRTY
   (which the queue first tries to resolve itself, below), BEHIND, BLOCKED, a squash subject over 72 characters, or a base that is not the default branch or a
   lower's branch → attention. Only the CI workflows' own checks count (`readWorkflowChecks`, their

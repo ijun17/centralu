@@ -97,10 +97,12 @@ const refIn = (defaultRepo) => (repo, n) => (String(repo).toLowerCase() === Stri
  */
 export function pushEvent(q, item, { kind, text, notify = false, at, data = null, to: addressed = null }) {
   q.seq += 1
+  // A message for another session than the item's owner is not the owner's news: `watch` for the owner never prints it
+  const owner = addressed ? null : (item.owner ?? null)
   // `addressed`: a session other than the item's owner, with its own notice address (the author of a conflicting pull request)
   const address = addressed ?? item.notice
   const to = notify && address ? { to: address } : {}
-  q.events.push({ seq: q.seq, at, repo: item.repo, pr: item.pr, owner: item.owner ?? null, kind, notify, text, ...(data ?? {}), ...to })
+  q.events.push({ seq: q.seq, at, repo: item.repo, pr: item.pr, owner, kind, notify, text, ...(data ?? {}), ...to })
   if (q.events.length > MAX_EVENTS) q.events.splice(0, q.events.length - MAX_EVENTS)
   return q.seq
 }
@@ -270,12 +272,14 @@ export function handoffReason({ item, pr, files = [], why, ref, instruction = nu
   const branch = pr.headRefName
   const text = instruction ?? conflictInstruction({ base: pr.baseRefName, branch, files })
   const author = item.author ?? null
+  // Posted into the session that opened it through open_pr, whether or not an author was named
+  const who = author ?? (route === 'direct' ? 'the session that opened it' : null)
   const where = files.length ? ` in ${files.length > 8 ? `${files.slice(0, 8).join(', ')} and ${files.length - 8} more` : files.join(', ')}` : ''
-  const to = author
+  const to = who
     ? route === 'self'
       ? `${n} is your own pull request (author session: ${author}): fix it in this session: "${text}"`
       : route === 'direct'
-        ? `Author session: ${author}. The queue posted this to it itself, so nothing needs relaying: "${text}"`
+        ? `Author session: ${who}. The queue is posting this into it itself, so relay it only if it does not answer: "${text}"`
         : `Author session: ${author}. Relay this to it (it has not called this app, so the queue has no address to post to): "${text}"`
     : `No author session is recorded for ${n} (queue_merge author). Start a session on its branch ${branch} with this instruction: "${text}"`
   return {
@@ -436,8 +440,9 @@ export function decideCi({ item, pr, checks, runs = [], failures = {}, defaultBr
             event: `${n}: its quick tier passed and the queue cannot batch it (${why}); started the full tier on ${pr.headRefName}.`,
           }
         // Started: its full run reports on this head, and the merge follows when it is green
+        if (sent.refused) return attention('full-tier', `${quickTierReason(n, pr.headRefName)} GitHub refused to start the full tier on ${pr.headRefName}: ${sent.refused}`)
         if (now - Date.parse(sent.at) <= FULL_START_MS) return { state: 'ci', patch: { noCiSince: null, missingSince: null } }
-        return attention('full-tier', `${quickTierReason(n, pr.headRefName)} The queue started the full tier on ${pr.headRefName} at ${sent.at.slice(11, 16)} UTC, and no full run has reported on ${short(head)} in ${Math.round(FULL_START_MS / 60_000)} minutes. Start it by hand, or push again.`)
+        return attention('full-tier', `${quickTierReason(n, pr.headRefName)} The queue started the full tier on ${pr.headRefName} at ${sent.at.slice(11, 16)} UTC, and no full run has reported on ${short(head)} in ${Math.round(FULL_START_MS / 60_000)} minutes (a run queued behind others may still be coming: look at the runs of the build workflow on the branch before starting another).`)
       }
       return attention('full-tier', `${quickTierReason(n, pr.headRefName)} The queue cannot batch it (${why}), and lands it once its own full run is green.`)
     }

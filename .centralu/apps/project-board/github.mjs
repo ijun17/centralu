@@ -888,7 +888,7 @@ export async function checkRunNotes(repo, checkRunId) {
  */
 export async function jobNotes(repo, jobId) {
   const notes = await checkRunNotes(repo, jobId)
-  if (notes.some((n) => LOST_RUNNER_NOTE.test(n)) || !notes.some((n) => CANCELED_NOTE.test(n.trim()))) return notes
+  if (notes.some((n) => LOST_RUNNER_NOTE.test(n)) || !notes.length || !notes.every((n) => CANCELED_NOTE.test(n.trim()))) return notes
   try {
     const shutdown = String(await readJobLog(repo, jobId))
       .split(/\r?\n/)

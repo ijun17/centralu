@@ -8,9 +8,10 @@
 //
 // `notice` is the opening session's notice address (`centralu.noticeAddress()`, docs/apps.md §10): a MAC over (app,
 // session), stable across calls and restarts, which opens only for a session that called this app. It is never shown
-// in an answer. A pull request opened by an older Centralu, or by the release tool, has none, and then nothing here
-// applies to it.
-import { readFileSync, renameSync, writeFileSync } from 'node:fs'
+// in an answer. A pull request opened by an older Centralu has none, and then nothing here applies to it. `draft` is
+// whether it was opened as a draft: the queue marks a draft ready only for a pull request opened as one (a later
+// draft is someone's hold).
+import { readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 export const OPENED_FILE = 'opened-prs.json'
@@ -38,7 +39,24 @@ export function noteOpened(dir, { repo, number, notice = null, draft = false, at
   const kept = Object.fromEntries(Object.entries(all).slice(-OPENED_MAX))
   const tmp = join(dir, `${OPENED_FILE}.${process.pid}.tmp`)
   writeFileSync(tmp, `${JSON.stringify(kept)}\n`)
-  renameSync(tmp, join(dir, OPENED_FILE))
+  // Windows refuses a rename onto a file another process has open for a moment: try again shortly
+  for (let i = 0; ; i++) {
+    try {
+      renameSync(tmp, join(dir, OPENED_FILE))
+      return
+    } catch (e) {
+      if (i >= 20 || !['EPERM', 'EACCES', 'EBUSY'].includes(e.code)) {
+        try {
+          unlinkSync(tmp)
+        } catch {
+          // nothing left to remove
+        }
+        throw e
+      }
+      const until = Date.now() + 25
+      while (Date.now() < until);
+    }
+  }
 }
 
 /** The record of a pull request, or null. */

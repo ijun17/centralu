@@ -518,7 +518,9 @@ async function onConflict(item, pr, { now, ref, renew, defaultBranch, landed = [
         events: [conflictEvent(`${n}: restacked onto the merge commit of the pull request under it, as rebase_stack would, in ${span(ms)}: ${restacked.summary} CI runs on the new head before it lands.`, { step: 'restack', ms, sha: restacked.rebased, by: 'queue', lease: true })],
       }
     }
-    return hand(`${not} Restacking it ${restacked.partial ? 'pushed the branch but could not move its base' : 'had nothing to push'}: ${restacked.summary}`, [])
+    // Its commits were in the lower one's merge already (it was merged, not squashed): only the base moved
+    if (!restacked.partial) return { decision: { state: 'waiting' }, events: [conflictEvent(`${n}: ${restacked.summary}`, { step: 'restack', ms: Date.now() - began, by: 'queue' })] }
+    return hand(`${not} Restacking it pushed the branch but could not move its base: ${restacked.summary}`, [])
   }
   if (not) return hand(not, [])
   // Regenerating can take minutes: hold the lease meanwhile (every write still asks renew first)
@@ -560,8 +562,12 @@ async function onConflict(item, pr, { now, ref, renew, defaultBranch, landed = [
   return hand(r.why, r.files, steps, r.instruction ?? null)
 }
 
-/** Whether the session that queued this item is the one that opened its pull request through `open_pr` (opened.mjs) */
-const ownDraft = (item, opened) => Boolean(opened?.notice) && opened.notice === item.notice
+/**
+ * Whether the session that queued this item opened its pull request through `open_pr` **as a draft** (opened.mjs). A pull
+ * request opened ready and turned into a draft later is someone's hold (a person stopping it, or `open_pr` making a stack's
+ * lower one a draft): not undone here.
+ */
+const ownDraft = (item, opened) => opened?.draft === true && Boolean(opened.notice) && opened.notice === item.notice
 
 /**
  * Reads one item's pull request and CI, decides, and acts. Answers what to write back: the new state
@@ -591,11 +597,11 @@ async function pollItem(item, { now, ref, renew, save, landed = [], stillIntegra
   // session is concerned: it queued it to land. Marked ready here, as `mark_ready` would be, instead of asking it to.
   // Not a record handed over with integrate (a draft on purpose until it lands), and not one a stack made a lower:
   // that one is not queued by the session that opened it as its top
-  if (pr.state === 'OPEN' && pr.isDraft && !item.auto && canMerge(permissions) && ownDraft(item, opened)) {
+  if (pr.state === 'OPEN' && pr.isDraft && !item.auto && canMerge(permissions) && ownDraft(item, opened) && (await openPrsOnBase(repo, pr.headRefName)).length === 0) {
     if (!renew()) return { yielded: true }
     await markReady(repo, item.pr)
     Object.assign(pr, { isDraft: false, mergeStateStatus: 'UNKNOWN' })
-    events.push({ kind: 'action', text: `${ref(repo, item.pr)} was a draft that the session queuing it opened; the queue marked it ready for review, as that session would have.` })
+    events.push({ kind: 'action', text: `${ref(repo, item.pr)} was opened as a draft by the session queuing it; the queue marked it ready for review, as that session would have.` })
   }
   let d = decideBefore({ item: view, permissions, pr, defaultBranch, ref })
   if (d?.reason?.kind === 'dirty') {
@@ -683,6 +689,7 @@ async function pollItem(item, { now, ref, renew, save, landed = [], stillIntegra
       wait = pollMs('acted')
     } catch (e) {
       if (!(e instanceof GitHubError) || FATAL.has(e.kind)) throw e
+      patch.fullDispatch = { ...patch.fullDispatch, refused: e.message }
       d = { state: 'attention', reason: { kind: 'full-tier', text: `${ref(repo, item.pr)}: its quick tier passed, the queue cannot batch it, and GitHub refused to start the full tier on ${d.action.branch}: ${e.message} Start it by hand (gh workflow run build.yml --ref ${d.action.branch}); the queue lands it once that run is green.` } }
       wait = pollMs('attention')
     }
