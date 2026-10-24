@@ -1,7 +1,7 @@
 /** What the limited credential may call (#1405, docs/security-boundaries.md "Who holds full power") */
 import { describe, expect, it } from 'vitest'
 import { RpcMethods } from '@cc/protocol'
-import { METHOD_RIGHTS, limitedRefusal, limitedRight } from './method-rights.js'
+import { METHOD_RIGHTS, limitedRefusal, limitedRight, type RightsHost } from './method-rights.js'
 
 describe('the method classification (#1405)', () => {
   it('classifies every RPC method the protocol has, and nothing else', () => {
@@ -93,6 +93,32 @@ describe('the method classification (#1405)', () => {
       ['prefs.set', null, 'everyday'],
     ]
     for (const [m, p, want] of cases) expect(limitedRight(m, p), `${m} ${JSON.stringify(p)}`).toBe(want)
+  })
+
+  // #1508 (owner, 2026-10-24): the hub's automatic updates cover a linked machine's catch-up to the hub's version, and nothing more
+  it("runs an idle update of a machine that follows the hub's version, and asks for every other update or machine change", () => {
+    const follows = { followsHub: (id: string) => id === 'm1' }
+    const cases: [string, unknown, RightsHost | null, 'asks' | 'everyday'][] = [
+      ['machines.update', { machineId: 'm1', when: 'idle' }, follows, 'everyday'],
+      // No `when` is `idle`, the default
+      ['machines.update', { machineId: 'm1' }, follows, 'everyday'],
+      // `now` stops what runs there
+      ['machines.update', { machineId: 'm1', when: 'now' }, follows, 'asks'],
+      ['machines.update', { machineId: 'm1', when: 'later' }, follows, 'asks'],
+      // Automatic updates off, the machine on the hub's version or newer, or not linked: followsHub says no
+      ['machines.update', { machineId: 'm2' }, follows, 'asks'],
+      ['machines.update', { machineId: 7 }, follows, 'asks'],
+      ['machines.update', {}, follows, 'asks'],
+      // A host that gives no state asks
+      ['machines.update', { machineId: 'm1' }, null, 'asks'],
+      ['machines.rollback', { machineId: 'm1' }, follows, 'asks'],
+      ['machines.uninstall', { machineId: 'm1' }, follows, 'asks'],
+      ['machines.install', { machineId: 'm1' }, follows, 'asks'],
+      ['machines.acceptVersions', { machineId: 'm1' }, follows, 'asks'],
+    ]
+    for (const [m, p, host, want] of cases) expect(limitedRight(m, p, host), `${m} ${JSON.stringify(p)} ${host ? 'follows' : 'no host'}`).toBe(want)
+    expect(limitedRefusal('machines.update', { machineId: 'm1' }, follows)).toBeNull()
+    expect(limitedRefusal('machines.update', { machineId: 'm1' })?.rights).toBe('asks')
   })
 
   it('refuses a name that is not a method, including one from the object prototype', () => {

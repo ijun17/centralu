@@ -18,7 +18,7 @@ import { EventLog } from './event-log.js'
 import { createHttpHandler, sameSecret, type HttpGate } from './http.js'
 import { bridgeRefusal, bridgeSessionOf } from './bridge-token.js'
 import { isLimitedToken } from './limited-token.js'
-import { limitedRefusal } from './method-rights.js'
+import { limitedRefusal, type RightsHost } from './method-rights.js'
 import { hostProof } from './host-proof.js'
 import { DrainCut, type Drain } from '../drain.js'
 import { rpcError } from '../rpc-error.js'
@@ -134,6 +134,8 @@ export type HostServerOptions = {
    * fires when its socket goes. Without it, such a call is refused as before
    */
   onAsk?: (method: string, params: unknown, from: { client: string | null }, signal: AbortSignal) => Promise<unknown>
+  /** The host's state a conditional right reads (method-rights.ts `RightsHost`); without it every such call asks */
+  rightsHost?: RightsHost
   /** How many windows that show host requests are attached, each time it changes (#1405, `HostRequests.showingChanged`) */
   onShowing?: (count: number) => void
   /**
@@ -643,7 +645,7 @@ export class HostServer {
        * router, so a call naming a linked machine's session is judged on this host, where it started, and never relayed.
        */
       if (limited) {
-        const refusal = limitedRefusal(method, params)
+        const refusal = limitedRefusal(method, params, this.opts.rightsHost ?? null)
         // What cannot be undone waits for the person instead (host-requests.ts), and the call answers when they did
         if (refusal?.rights === 'asks' && this.opts.onAsk) {
           try {

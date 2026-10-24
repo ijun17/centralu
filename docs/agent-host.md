@@ -1616,7 +1616,8 @@ the params with the method's schema and reads the answer with its result schema,
   itself (`CC_STARTED_BY=app`, Windows and Linux), or one the keeper runs from the installed app (`CC_HOST_SOURCE`'s
   `bundlePath` is `installedCopyPath()`, macOS). Every other host keeps installing off unless turned on: a `centralu
   serve` host, since on a linked machine the hub keeps its version (`machines.update`, the managed install under
-  `<data>/remote`) and one installing by itself would race it; a host from source; and one a script or test harness
+  `<data>/remote`) and one installing by itself would race it; with the hub's own installing on, it brings each linked
+  machine to its version by itself (#1508, §4.8 "Following the hub"); a host from source; and one a script or test harness
   started (no `CC_STARTED_BY`, a keeper running a build output or debug bundle, `CI` set), which must not install the
   published package globally on the machine running it. The wire default of `UpdateStatus.autoApply`
   stays false, for older hosts. `set_preferences autoUpdate: true` asks first, in every preset, whenever either half is
@@ -3355,6 +3356,28 @@ at a time per machine, and the remote's `install.lock` guards the files.
 | Start | `serve --detach` (`Tunnel.startHost`) | the same | — |
 | Check | The link opens again; only a hello whose `build.version` is the target ends it, within 30 s | the same | — |
 | After | Success: `action: 'prune'` removes what neither pointer names. Failure: the end of `host.log`, `serve --stop` again, the old pointers back (none, after a first update over an npm install: then the launcher goes too), the old version started if one was running, and the call fails with that sentence | Failure: the same, towards the version it left | The link opens again and finds what is left (an npm install, or nothing) |
+
+**Following the hub** (#1508, owner 2026-10-24). While the hub's "Automatic updates" are on (`updates.autoApply`;
+`LinkDeps.autoUpdate`, which main.ts reads as off while the hub drains for a swap), a linked machine on an older release
+of the hub's channel follows the hub's version with no one's click: one switch covers both. The condition is
+`LinkedMachine.followsHub` and lives there only: automatic updates on, the hub can update the machine (`operationRefusal`),
+the person did not remove what the hub installed there, neither side runs a local build (`<base>.local.N`), and
+`versions.older` is `remote`. Versions of two channels are never ranked, so a stable machine does not follow a beta hub.
+
+- **When.** At every connect (`connectedNow`, after the hello and the lists): that is also how the hub's own update
+  reaches its machines, since the next host links again and finds them older. And when the person turns automatic
+  updates on (`updates.setAutoApply`, `Links.followHub`), for the machines already connected.
+- **What.** The same update as `machines.update { when: 'idle' }`, marked `unasked`: it waits for the turns there as
+  above, and on top of that it stops no host it cannot ask what runs (a Centralu from before `host.activity`, or one
+  whose every reading failed): the update fails before the hold, nothing switched, and the row says to update from
+  Settings. It also fails before the hold once automatic updates go off or the hub begins a swap while it waits. A swap
+  that comes after the hold finds it as it finds the person's update (§4.7).
+- **How often.** Once per version of the hub's, and once more 10 minutes after a failure (`FOLLOW_RETRY_MS`); never
+  again for that version after the person cancels its wait. A failure shows on the row as `MachineInfo.followHub`
+  (`{ version, failed, retryAt }`, additive and optional), while its steps show as any update's do.
+- **An agent's call.** A limited caller's `machines.update` with `when` `idle` or absent runs without a card when
+  `followsHub` holds (transport/method-rights.ts `RightsHost`, security-boundaries.md "Who holds full power"), and the
+  orchestrator's `install_machine` (update) goes without its card on the same check; both run `unasked`.
 
 **Starting a machine's host at boot** (plan §10.4, owner decision 4; `autostart.ts`). `machines.autostart { machineId,
 on? }` (additive) runs `centralu serve --autostart on|off|status` there through the lookup, and the Centralu found

@@ -80,6 +80,8 @@ function fakeOps() {
   let slowUpdateMs = 0
   /** Why an update fails once it has run for `slowUpdateMs`, or null */
   let updateFails: string | null = null
+  /** Whether the machines follow this hub's version under its automatic updates (#1508, `Links.followsHub`) */
+  let follows = false
   const find = (id: string) => machines.find((m) => m.id === id)!
   const o: MachineOps = {
     list: () => machines.map((m) => ({ ...m })),
@@ -116,7 +118,7 @@ function fakeOps() {
       return { machine: find(id), current: { version: '9.9.9-test.1' } }
     },
     update: async (id, opts) => {
-      calls.push(opts?.when ? ['update', id, opts.when] : ['update', id])
+      calls.push(opts?.when ? ['update', id, opts.when, ...(opts.unasked ? ['unasked'] : [])] : ['update', id])
       if (slowUpdateMs > 0) await new Promise((r) => setTimeout(r, slowUpdateMs))
       if (updateFails) throw new Error(updateFails)
       return { machine: find(id), current: { version: '9.9.9-test.1' } }
@@ -125,6 +127,7 @@ function fakeOps() {
       calls.push(['autostart', id, on])
       return { machine: find(id), autostart: { on: on === true, how: 'task', linger: null } }
     },
+    followsHub: () => follows,
     installRefusal: (id, kind) => {
       calls.push(['installRefusal', id, kind])
       return refusal
@@ -170,6 +173,9 @@ function fakeOps() {
     patch: (over: Partial<MachineInfo>) => void Object.assign(machines[0]!, over),
     holdBack: (why: string | null) => {
       heldBack = why
+    },
+    follow: (on: boolean) => {
+      follows = on
     },
     failUpdate: (why: string | null) => {
       updateFails = why
@@ -360,6 +366,21 @@ describe('install_machine', () => {
     expect(update.question).toContain('the call is answered while it waits')
     expect(update.question).not.toContain('a turn in progress is lost')
     expect(ops.changes()).toEqual([['update', 'laptop', 'idle']])
+  })
+
+  // #1508: the catch-up the hub's automatic updates cover needs no card, as machines.update does not; it still waits for the turns
+  it('updates without a card when the machine follows this hub under its automatic updates, waiting for the turns there', async () => {
+    ops.running({ working: 2 })
+    ops.follow(true)
+    const orc = await mgr.orchestrator()
+    const r = await run(orc.id, 'install_machine', { machine: 'laptop', action: 'update' })
+    expect(card(orc.id)).toBeUndefined()
+    expect(r.isError).toBeFalsy()
+    expect(r.text).toContain('Updated to Centralu 9.9.9-test.1 on Laptop.')
+    expect(ops.changes()).toEqual([['update', 'laptop', 'idle', 'unasked']])
+    // An install is never a catch-up: it still asks
+    const install = await answered(orc.id, 'install_machine', { machine: 'laptop' }, 'deny')
+    expect(install.question).toContain('Install')
   })
 
   it('says one session is in a turn in the singular, and runs nothing on Deny', async () => {

@@ -84,6 +84,14 @@ export type LinkDeps = {
    */
   autoCompact?: () => AutoCompact
   reverse?: ReverseCalls
+  /**
+   * Whether this hub's "Automatic updates" are on (`updates.autoApply`, update-switches.ts) and it may start work of its own
+   * now (it is not handing over to another build): then a linked machine on an older release follows this hub's version
+   * by itself (#1508, `LinkedMachine.followsHub`). Without it no machine follows, and every `machines.update` asks
+   */
+  autoUpdate?: () => boolean
+  /** For tests: how long after a failed update of its own the hub tries once more (10 minutes when absent, #1508) */
+  followRetryMs?: number
   /** For tests: the client's options beyond url and token */
   client?: Partial<RemoteClientOptions>
   /** Backoff between attempts while a machine is away; doubles up to the second value (2 s to 5 minutes when absent) */

@@ -1,6 +1,20 @@
 import { useState } from 'react'
 import type { HostActivity, MachineAskConsent, MachineInfo } from '@cc/protocol'
-import { asksRow, autostartRow, updateWaits, elevatedNote, hostStartNote, installNote, logonNote, machineProblem, operationNote, updateStops, versionPrompt } from '@cc/core'
+import {
+  asksRow,
+  autostartRow,
+  updateWaits,
+  elevatedNote,
+  followHubLead,
+  followHubNote,
+  hostStartNote,
+  installNote,
+  logonNote,
+  machineProblem,
+  operationNote,
+  updateStops,
+  versionPrompt,
+} from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { InlineConfirm } from '../../components/InlineConfirm.jsx'
 import { Button } from '../../components/Button.jsx'
@@ -24,6 +38,8 @@ import { More, SettingsCard, SettingsPage, SettingsRow } from './SettingsLayout.
  */
 export function MachinesSection({ onOpenCategory }: { onOpenCategory: (category: 'updates') => void }) {
   const machines = useStore((s) => s.machines)
+  // Automatic updates cover the linked machines too (#1508): each one on an older release follows this computer's version
+  const follows = followHubLead(useStore((s) => s.update?.autoApply === true))
   const list = Object.values(machines)
   const [adding, setAdding] = useState(list.length === 0)
   return (
@@ -37,6 +53,11 @@ export function MachinesSection({ onOpenCategory }: { onOpenCategory: (category:
             Their sessions and projects show here, each under its own name in the sidebar. Each one runs Centralu itself
             (<code className="font-mono">centralu serve</code>); this computer reaches it over your own ssh and keys.
           </More>
+          {follows && (
+            <span className="mt-1 block" data-testid="machines-follow-hub">
+              {follows}
+            </span>
+          )}
         </>
       }
     >
@@ -79,6 +100,7 @@ function MachineRow({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: (ca
   const problem = machineProblem(m)
   const started = hostStartNote(m)
   const operation = operationNote(m)
+  const followFailed = followHubNote(m)
   const elevated = elevatedNote(m)
   const logon = logonNote(m)
   const where = [m.sshTarget, SHELL_LABEL[m.shell], m.shell === 'wsl' ? m.wslDistro : null, m.command ? `runs ${m.command}` : null]
@@ -158,6 +180,11 @@ function MachineRow({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: (ca
                 </Button>
               </>
             )}
+          </p>
+        )}
+        {followFailed && !m.operation && (
+          <p className="mt-1.5 text-xs leading-body text-ink-muted" data-testid={`machine-follow-failed-${m.id}`}>
+            {followFailed}
           </p>
         )}
         {elevated && (

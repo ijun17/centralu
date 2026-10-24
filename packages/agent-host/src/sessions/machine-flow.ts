@@ -23,12 +23,17 @@ export type MachineOps = {
   setAutoReconnect(id: string, autoReconnect: boolean): MachineInfo
   install(id: string): Promise<{ machine: MachineInfo; current: { version: string }; note?: string }>
   /** `when: 'idle'`: waits until no session there is in a turn before it stops the host (#1399), which can take hours */
-  update(id: string, opts?: { when?: 'idle' | 'now' }): Promise<{ machine: MachineInfo; current: { version: string }; note?: string }>
+  update(id: string, opts?: { when?: 'idle' | 'now'; unasked?: boolean }): Promise<{ machine: MachineInfo; current: { version: string }; note?: string }>
   /** For tests: how long an install or update call is waited for before it is answered as still under way (`UPDATE_ANSWER_MS` when absent) */
   updateAnswerMs?: number
   autostart(id: string, on?: boolean): Promise<{ machine: MachineInfo; autostart: { on: boolean; how: string | null; linger: boolean | null } }>
   /** Why an install, update, rollback or uninstall would be refused before it starts, or null (`LinkedMachine.operationRefusal`) */
   installRefusal(id: string, kind: 'install' | 'update' | 'rollback' | 'uninstall'): string | null
+  /**
+   * Whether an idle update of the machine is the catch-up to this hub's version its automatic updates cover (#1508,
+   * `LinkedMachine.followsHub`): then it goes without a card, as `machines.update` does (transport/method-rights.ts)
+   */
+  followsHub?(id: string): boolean
   /** The row's Disconnect (#1134): the link closes and none is tried; the machine and its lists stay */
   disconnect(id: string): Promise<MachineInfo>
   /** Back to the version installed before, one step (`machines.rollback`) */
@@ -203,9 +208,14 @@ export class MachineFlow {
            * An update never stops a turn that runs there on the orchestrator's say (#1399): with sessions in a turn the card says so
            * and Allow means "update when idle". Forcing it is the person's, from Settings
            */
-          const seen = req.action === 'update' ? await ops.activity(m.id).catch(() => null) : null
+          /*
+           * The catch-up the hub's automatic updates cover goes without a card (#1508), as `machines.update` does: it waits for the
+           * turns there and stops no session it cannot see (`unasked`)
+           */
+          const unasked = req.action === 'update' && ops.followsHub?.(m.id) === true
+          const seen = req.action === 'update' && !unasked ? await ops.activity(m.id).catch(() => null) : null
           const running = turnsRunning(seen)
-          const refused = await this.ask(
+          const refused = unasked ? null : await this.ask(
             sessionId,
             req.action === 'install'
               ? `Install ${version} on ${m.name} (${m.sshTarget}, ${osOf(m)})? Over ssh it downloads Node and the npm packages there, checked against the ` +
@@ -227,7 +237,7 @@ export class MachineFlow {
            * cut by its caller (the Codex bridge at 280 s) while the update goes on unannounced. The update goes on; list_machines shows
            * it, and the person can cancel the wait from Settings
            */
-          const run = req.action === 'install' ? ops.install(m.id) : ops.update(m.id, { when: 'idle' })
+          const run = req.action === 'install' ? ops.install(m.id) : ops.update(m.id, { when: 'idle', ...(unasked ? { unasked } : {}) })
           const waited = ops.updateAnswerMs ?? UPDATE_ANSWER_MS
           const r = await Promise.race([run, new Promise<null>((resolve) => setTimeout(() => resolve(null), waited).unref?.())])
           if (!r) {

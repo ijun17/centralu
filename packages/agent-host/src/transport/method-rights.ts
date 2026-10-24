@@ -23,6 +23,8 @@ import type { RpcMethodName } from '@cc/protocol'
  * `{ asks, when }` is for a method that asks only for some parameters (raising a preset, turning a switch
  * on); the function is given the parameters as sent, before they are parsed, so it reads them
  * defensively and asks when in doubt. `when` says it in words, for docs/generated/method-rights.md.
+ * A method whose answer depends on the host's state too reads it from `RightsHost`, the second argument;
+ * a host that gives none (a test, a server without it) makes every such call ask.
  *
  * The table is keyed by `RpcMethodName` with no default, as `ROUTES` is (`links/routes.ts`): a method
  * added to the protocol does not compile until someone decides what the limited credential does with
@@ -31,10 +33,19 @@ import type { RpcMethodName } from '@cc/protocol'
 export type Rights =
   | 'everyday'
   | 'asks'
-  | { readonly asks: (params: unknown) => boolean; readonly when: string }
+  | { readonly asks: (params: unknown, host: RightsHost | null) => boolean; readonly when: string }
   | 'window'
   | 'link'
   | 'bridge'
+
+/** What of the host's state a conditional right reads (main.ts wires it into the server) */
+export type RightsHost = {
+  /**
+   * Whether an idle update of this linked machine is the catch-up to this hub's own version that its automatic updates
+   * cover (#1508, `LinkedMachine.followsHub`, the one place the condition lives). False for an id that is not linked
+   */
+  followsHub(machineId: string): boolean
+}
 
 /** The parameters as an object to read fields from; anything else reads as having none */
 function fields(params: unknown): Record<string, unknown> {
@@ -79,6 +90,17 @@ const prefsWiden = (params: unknown): boolean => {
   if ('hubAuto' in patch && patch.hubAuto !== false) return true
   const notify = fields(patch.notifyPolicy)
   return notify.approval === false || notify.sound === false
+}
+
+/**
+ * An update of a linked machine asks unless it is the catch-up the hub's automatic updates already cover (#1508, owner
+ * 2026-10-24): `when` is `idle` or absent (its default), and the machine follows this hub's version (`RightsHost.followsHub`).
+ * `now` stops what runs there, so it always asks
+ */
+const updateAsks = (params: unknown, host: RightsHost | null): boolean => {
+  const p = fields(params)
+  if (p.when !== undefined && p.when !== 'idle') return true
+  return typeof p.machineId !== 'string' || host === null || !host.followsHub(p.machineId)
 }
 
 export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
@@ -279,7 +301,10 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   'machines.need': 'everyday',
   'machines.acceptVersions': 'asks',
   'machines.install': 'asks',
-  'machines.update': 'asks',
+  'machines.update': {
+    asks: updateAsks,
+    when: "`when` is `now`, or the hub's automatic updates are off, or the machine does not run an older release that the update brings to the hub's own version",
+  },
   'machines.rollback': 'asks',
   'machines.uninstall': 'asks',
   'machines.autostart': 'asks',
@@ -334,12 +359,12 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
 }
 
 /** What a limited call of `method` with `params` comes to: run it, or which class refuses it */
-export function limitedRight(method: string, params: unknown): 'everyday' | 'asks' | 'window' | 'link' | 'bridge' | 'unknown' {
+export function limitedRight(method: string, params: unknown, host: RightsHost | null = null): 'everyday' | 'asks' | 'window' | 'link' | 'bridge' | 'unknown' {
   // Read as a table of any name: an own key only, so `constructor` or `__proto__` is no method
   const table: Readonly<Record<string, Rights>> = METHOD_RIGHTS
   const rights = Object.prototype.hasOwnProperty.call(table, method) ? table[method] : undefined
   if (rights === undefined) return 'unknown'
-  if (typeof rights === 'object') return rights.asks(params) ? 'asks' : 'everyday'
+  if (typeof rights === 'object') return rights.asks(params, host) ? 'asks' : 'everyday'
   return rights
 }
 
@@ -348,8 +373,12 @@ export function limitedRight(method: string, params: unknown): 'everyday' | 'ask
  * that refuses it and a sentence to show. An `asks` call goes to the person's card instead
  * (host-requests.ts) where the host has one; this sentence is for a host without it.
  */
-export function limitedRefusal(method: string, params: unknown): { rights: Exclude<ReturnType<typeof limitedRight>, 'everyday'>; message: string } | null {
-  const rights = limitedRight(method, params)
+export function limitedRefusal(
+  method: string,
+  params: unknown,
+  host: RightsHost | null = null,
+): { rights: Exclude<ReturnType<typeof limitedRight>, 'everyday'>; message: string } | null {
+  const rights = limitedRight(method, params, host)
   switch (rights) {
     case 'everyday':
       return null

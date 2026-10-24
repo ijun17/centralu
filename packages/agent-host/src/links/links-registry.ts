@@ -165,8 +165,22 @@ export class Links {
     return this.active(id).install()
   }
 
-  update(id: string, opts: { when?: 'idle' | 'now' } = {}): Promise<MachineInstallResult> {
+  update(id: string, opts: { when?: 'idle' | 'now'; unasked?: boolean } = {}): Promise<MachineInstallResult> {
     return this.active(id).update(opts)
+  }
+
+  /**
+   * Whether an idle `machines.update` of this machine is the catch-up to this hub's version that automatic updates cover
+   * (#1508, `LinkedMachine.followsHub`): the check transport/method-rights.ts asks for an agent's call. False for a machine
+   * that is not linked
+   */
+  followsHub(id: string): boolean {
+    return this.machines.get(id)?.followsHub() ?? false
+  }
+
+  /** Every connected machine on an older release starts following this hub's version (#1508): automatic updates went on */
+  followHub(): void {
+    for (const m of this.machines.values()) m.followHub()
   }
 
   /** Ends an update's wait for the sessions there to finish (#1399) */

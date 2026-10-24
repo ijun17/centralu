@@ -161,7 +161,6 @@ With the limited credential: waits for the person's card in the window and runs 
 - `machines.remove`
 - `machines.rollback`
 - `machines.uninstall`
-- `machines.update`
 - `projects.add`
 - `projects.create`
 - `projects.delete`
@@ -182,6 +181,7 @@ Asks only for some parameters (everyday otherwise):
 - `apps.setShared`, when it shares the app
 - `machines.hubAuto`, when it turns the switch on
 - `machines.setAsks`, when it turns the switch on
+- `machines.update`, when `when` is `now`, or the hub's automatic updates are off, or the machine does not run an older release that the update brings to the hub's own version
 - `prefs.set`, when it sets the agent ceiling or depth, turns hub auto on, or turns approval notifications or their sound off
 - `updates.setAuto`, when it turns automatic updates on
 - `updates.setAutoApply`, when it turns automatic applying on

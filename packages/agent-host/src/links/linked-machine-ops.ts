@@ -1,5 +1,5 @@
-import { errorMessage, HostActivity, isNewerVersion, releaseOf, turnsRunning } from '@cc/protocol'
-import type { MachineAutostartResult, MachineInstallResult, MachineOperation, MachineUninstallResult } from '@cc/protocol'
+import { errorMessage, HostActivity, isLocalBuildVersion, isNewerVersion, releaseOf, turnsRunning } from '@cc/protocol'
+import type { MachineAutostartResult, MachineInfo, MachineInstallResult, MachineOperation, MachineUninstallResult } from '@cc/protocol'
 import { autostartRemote } from './autostart.js'
 import { installRemote, type InstallResult } from './install.js'
 import type { LinkInstaller } from './link-deps.js'
@@ -24,6 +24,10 @@ const ACTIVITY_POLL_MS = 15_000
 const ACTIVITY_SETTLE_MS = 3_000
 /** How many times a reading that failed is repeated before the update stops waiting for what it cannot see (#1399) */
 const ACTIVITY_UNREAD_RETRIES = 2
+/** How long after a failed update of its own the hub tries once more (#1508) */
+const FOLLOW_RETRY_MS = 10 * 60_000
+/** How many updates of its own the hub runs for one version of its own: the first, and one retry (#1508) */
+const FOLLOW_TRIES = 2
 
 /** Why a signal was aborted, as an Error */
 const reasonOf = (signal: AbortSignal): Error => (signal.reason instanceof Error ? signal.reason : new Error(String(signal.reason)))
@@ -43,6 +47,16 @@ function pause(ms: number, signal: AbortSignal): Promise<void> {
     }
     signal.addEventListener('abort', onAbort, { once: true })
   })
+}
+
+/** The hub's own updates of a machine for one version of the hub's (#1508, `LinkedMachine.followHub`) */
+type FollowState = {
+  version: string
+  tries: number
+  failed: string | null
+  retryAt: number | null
+  due: boolean
+  timer?: ReturnType<typeof setTimeout>
 }
 
 export class LinkedMachine extends LinkedMachineConnection {
@@ -84,9 +98,11 @@ export class LinkedMachine extends LinkedMachineConnection {
 
   /**
    * `machines.update` (update.ts, plan §10.5): install beside, wait until no turn runs there (`when: 'idle'`, the default, #1399),
-   * stop, switch, start, check, or put back. `when: 'now'`: no wait, the turns running are stopped and the answer says so
+   * stop, switch, start, check, or put back. `when: 'now'`: no wait, the turns running are stopped and the answer says so.
+   * `unasked`: an update nobody approved, which automatic updates cover (#1508): the hub's own catch-up (`followHub`), or an agent's
+   * call that went without a card (`followsHub`). It stops nothing it cannot see and gives up when automatic updates go off
    */
-  async update(opts: { when?: 'idle' | 'now' } = {}): Promise<MachineInstallResult> {
+  async update(opts: { when?: 'idle' | 'now'; unasked?: boolean } = {}): Promise<MachineInstallResult> {
     const pick = await this.versionToInstall()
     // Never down: a local build whose base is unpublished may be handed an older release than the remote runs. A dev
     // build put there from a commit (`<base>.local.N`, `pnpm remote-dev`, #1036) going back to its own release is no downgrade
@@ -96,7 +112,7 @@ export class LinkedMachine extends LinkedMachineConnection {
     }
     return this.operate('update', pick.version, async (c, installer) => {
       if (pick.note) this.deps.log?.(`[links] ${this.name}: ${pick.note}`)
-      c.beforeStop = () => this.beforeStop(c, opts.when ?? 'idle')
+      c.beforeStop = () => this.beforeStop(c, opts.when ?? 'idle', opts.unasked === true)
       const r = await updateRemote(c, {
         version: pick.version,
         runtime: installer.runtime(),
@@ -116,12 +132,15 @@ export class LinkedMachine extends LinkedMachineConnection {
   cancelUpdate(): boolean {
     const wait = this.idleWait
     if (!wait) return false
+    // The person ended the hub's own update: it is not tried again for this version (#1508)
+    if (this.followRun && this.follow === this.followRun) this.follow.tries = FOLLOW_TRIES
     wait.abort(new Error(`The update of ${this.name} was cancelled while it waited for the sessions there to finish; nothing was switched`))
     return true
   }
 
   /** Removed, or the hub stopping: nothing waits for sessions of a machine that is gone */
   override async stop(): Promise<void> {
+    clearTimeout(this.follow?.timer)
     this.idleWait?.abort(new Error(`The update of ${this.name} ended while it waited for the sessions there to finish, since the machine was removed or the hub stopped; nothing was switched`))
     await super.stop()
   }
@@ -134,9 +153,13 @@ export class LinkedMachine extends LinkedMachineConnection {
    * every answer failed is read again twice, then not waited for either: waiting on what was never seen would never end. Once an
    * answer has come, though, the wait goes on through failed readings (the row says `wait_unread`) and the host is stopped only on
    * a successful reading of none in a turn, since a busy or dropped remote reads as failed too; Cancel or Update now are the ways
-   * out. `now`: stops at once, and the answer says how many turns that ended
+   * out. `now`: stops at once, and the answer says how many turns that ended.
+   *
+   * `unasked` (#1508): an update nobody approved stops nothing it cannot see, so a machine that cannot be told what runs there is
+   * not updated by it (the person's Update still can), and it gives up once automatic updates go off or the hub hands over
+   * to another build (`LinkDeps.autoUpdate`). Either way it ends before the host is held, so nothing was switched
    */
-  private async beforeStop(c: HostControl, when: 'idle' | 'now'): Promise<string | null> {
+  private async beforeStop(c: HostControl, when: 'idle' | 'now', unasked = false): Promise<string | null> {
     if (when === 'now') {
       const running = turnsRunning(await this.activity())
       if (running === 0) return null
@@ -149,10 +172,17 @@ export class LinkedMachine extends LinkedMachineConnection {
     const poll = this.deps.activityPollMs ?? ACTIVITY_POLL_MS
     const settle = Math.min(poll, ACTIVITY_SETTLE_MS)
     /** Reads what runs; throws the reason when the wait was ended while the reading was out */
+    const stillOn = () => {
+      if (unasked && this.deps.autoUpdate?.() !== true) {
+        throw new Error(`Automatic updates went off, or this computer began switching to another build, while the update of ${this.name} waited; nothing was switched`)
+      }
+    }
     const read = async () => {
       wait.signal.throwIfAborted()
+      stillOn()
       const r = await this.readActivity()
       wait.signal.throwIfAborted()
+      stillOn()
       return r
     }
     try {
@@ -190,6 +220,11 @@ export class LinkedMachine extends LinkedMachineConnection {
           unread()
         } else if (r.cannot || ++blind > ACTIVITY_UNREAD_RETRIES) {
           // Never read: there is nothing to wait for that could be seen, and waiting on it would never end
+          if (unasked) {
+            throw new Error(
+              `This computer cannot tell what runs on ${this.name}, so it does not update it by itself and stops no session there; nothing was switched. Update it from Settings, Machines`,
+            )
+          }
           this.deps.log?.(`[links] ${this.name}: it cannot be told what runs there, so the update does not wait for it`)
           return null
         }
@@ -198,6 +233,92 @@ export class LinkedMachine extends LinkedMachineConnection {
     } finally {
       if (this.idleWait === wait) this.idleWait = null
     }
+  }
+
+  // ── Following the hub's version (#1508) ─────────────────────────────────────────────────────
+
+  /**
+   * The hub's own updates of this machine for one version of the hub's: how many ran (at most `FOLLOW_TRIES`), why the last
+   * failed, and the retry's timer. `due`: the retry's time has come, and it runs at the next chance (connected, not busy)
+   */
+  private follow: FollowState | null = null
+  /** The hub's own update that runs now, if one does */
+  private followRun: FollowState | null = null
+
+  /**
+   * Whether an idle update of this machine is the hub's catch-up that needs no one's approval (#1508): the hub's automatic
+   * updates are on (`LinkDeps.autoUpdate`), this hub can update it (`operationRefusal`), the person did not remove what the
+   * hub installed there, and the machine runs an older release of the hub's channel, which the update brings to this hub's
+   * own version. A local build on either side never follows: the hub's is not what it would install, and the machine's was
+   * put there on purpose. The one check for both the hub starting an update by itself (`followHub`) and an agent's
+   * `machines.update` going without a card (transport/method-rights.ts, `RightsHost.followsHub`)
+   */
+  followsHub(): boolean {
+    if (this.deps.autoUpdate?.() !== true || this.removedByPerson || this.operationRefusal('update') !== null) return false
+    const v = this.versions
+    const hub = this.deps.hub.version
+    if (!v || v.hub.version !== hub || isLocalBuildVersion(hub) || isLocalBuildVersion(v.remote.version)) return false
+    return v.older === 'remote'
+  }
+
+  /** At every connect: a machine found on an older release follows the hub (#1508) */
+  protected override connectedNow(): void {
+    this.followHub()
+  }
+
+  /**
+   * Starts the hub's own idle update of this machine (#1508) when it follows the hub (`followsHub`), the link is up and
+   * nothing else runs there: once per version of the hub's, and once more `FOLLOW_RETRY_MS` after a failure. Sessions in a
+   * turn there are waited for (`machines.update { when: 'idle' }`, #1399); the steps show on the row as the person's do
+   */
+  followHub(): void {
+    if (this.stopped || this.busy || this.status !== 'connected' || !this.followsHub()) return
+    const version = this.deps.hub.version
+    if (this.follow?.version === version && !this.follow.due) return
+    if (this.follow?.version !== version) {
+      clearTimeout(this.follow?.timer)
+      this.follow = { version, tries: 0, failed: null, retryAt: null, due: false }
+    }
+    const f = this.follow
+    f.tries += 1
+    f.due = false
+    f.retryAt = null
+    this.followRun = f
+    this.deps.log?.(
+      `[links] ${this.name}: runs Centralu ${this.versions?.remote.version ?? 'an older version'}, older than this computer's ${version}; updating it once no session there is in a turn, since automatic updates are on`,
+    )
+    this.update({ when: 'idle', unasked: true })
+      .then(
+        () => {
+          if (this.follow !== f) return
+          f.failed = null
+          this.deps.broadcast({ type: 'machine_status', machine: this.info() })
+        },
+        (err: unknown) => {
+          if (this.follow !== f || this.stopped) return
+          f.failed = errorMessage(err)
+          if (f.tries < FOLLOW_TRIES) {
+            const ms = this.deps.followRetryMs ?? FOLLOW_RETRY_MS
+            f.retryAt = Date.now() + ms
+            f.timer = setTimeout(() => {
+              f.timer = undefined
+              f.retryAt = null
+              f.due = true
+              this.followHub()
+            }, ms)
+            f.timer.unref?.()
+          }
+          this.deps.broadcast({ type: 'machine_status', machine: this.info() })
+        },
+      )
+      .finally(() => {
+        if (this.followRun === f) this.followRun = null
+      })
+  }
+
+  override info(): MachineInfo {
+    const f = this.follow
+    return { ...super.info(), followHub: f?.failed ? { version: f.version, failed: f.failed, retryAt: f.retryAt } : null }
   }
 
   /**
