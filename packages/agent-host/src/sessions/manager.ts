@@ -955,19 +955,18 @@ export class SessionManager {
    */
   private tasksOfStoppedTurn(sessionId: string, since: number | undefined, ownerId: string): BackgroundTask[] {
     const running = this.reports.ownTasksRunning(sessionId)
-    if (this.pausedFor(sessionId, ownerId)) {
-      const held = new Set((this.children.pausedReports.get(sessionId) ?? []).map((t) => t.id))
-      return running.filter((t) => held.has(t.id))
-    }
-    if (since === undefined) return []
+    // What a paused report for the owner waits on; the turn that is going may have started more, so this is not instead of the turn's own
+    const held = this.pausedFor(sessionId, ownerId) ? new Set((this.children.pausedReports.get(sessionId) ?? []).map((t) => t.id)) : new Set<string>()
     const calls = new Set(
-      this.store.messages
-        .loadMessages(sessionId, 400)
-        .filter((m) => m.kind === 'tool_call' && m.ts >= since)
-        .map((m) => (typeof m.payload === 'object' && m.payload !== null && 'callId' in m.payload ? m.payload.callId : undefined))
-        .filter((id): id is string => typeof id === 'string'),
+      since === undefined
+        ? []
+        : this.store.messages
+            .loadMessages(sessionId, 400)
+            .filter((m) => m.kind === 'tool_call' && m.ts >= since)
+            .map((m) => (typeof m.payload === 'object' && m.payload !== null && 'callId' in m.payload ? m.payload.callId : undefined))
+            .filter((id): id is string => typeof id === 'string'),
     )
-    return running.filter((t) => t.parentCallId !== undefined && calls.has(t.parentCallId))
+    return running.filter((t) => held.has(t.id) || (t.parentCallId !== undefined && calls.has(t.parentCallId)))
   }
 
   /** The session's report to `ownerId` is held over its own background work (`pausedReports`) */

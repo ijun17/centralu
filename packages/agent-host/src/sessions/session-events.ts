@@ -310,7 +310,10 @@ export class SessionEvents {
      */
     const mailTurn = endedTurn && e.sessionId ? this.host.children.takeMailTurn(e.sessionId) : undefined
     if (mailTurn && e.sessionId) {
-      if (!mailTurn.closed && !run?.tracksInputs) void this.host.reports.reportMailTurn(e.sessionId, mailTurn.ownerId, e, runOpen ? run?.completedAnswer : undefined, turnBy)
+      // Not held by `tracksInputs`: that is a wait of the first owner's, and this turn is not its
+      if (!mailTurn.closed) void this.host.reports.reportMailTurn(e.sessionId, mailTurn.ownerId, e, runOpen ? run?.completedAnswer : undefined, turnBy)
+      // The first owner's paused work may have ended during this turn, which then set no timer for it (a turn running reports at its own end)
+      if (this.host.children.pausedReports.has(e.sessionId)) this.host.reports.settlePausedReport(e.sessionId)
     } else if (endedTurn && e.sessionId && !run?.tracksInputs) {
       // A wait settled in an earlier turn holds that turn's answer, not this one's
       void this.host.reports.reportBackIfAwaited(e.sessionId, e, runOpen ? run?.completedAnswer : undefined, undefined, turnBy)

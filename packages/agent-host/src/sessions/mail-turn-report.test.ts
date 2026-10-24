@@ -10,6 +10,7 @@ import { MailDelivery } from '../mail/delivery.js'
 import { MailService } from '../mail/service.js'
 import { MailTurns } from '../mail/turns.js'
 import type { ThreadRow } from '../dev-services/store/mail.js'
+import { ChildReports } from './child-reports.js'
 import { crossWorld, type CrossHandle, type CrossWorld } from './cross-project.test-helpers.js'
 
 let w: CrossWorld
@@ -213,6 +214,29 @@ describe('new work sent by mail into a thread in review', () => {
     expect(w.mgr.reportOwed(helper)?.callerId).toBe(a)
   })
 
+  it('A’s paused work ending during B’s turn is settled when that turn ends: nothing else would start its timer (#1474)', async () => {
+    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+    Object.assign(w.adapters.get('claude')!.capabilities, { backgroundTasks: true })
+    const a = await w.callerSession()
+    const b = await w.callerSession()
+    const helper = await startAgent(a, 'start the server')
+    handleOf(helper).event({ type: 'background_tasks', sessionId: helper, live: [{ id: 't1', kind: 'shell', description: 'pnpm dev', status: 'running', stoppable: true }] })
+    await turnEnds(helper, 'server started')
+    await w.until(() => outcomes(threadBetween(a, helper)).includes('paused'))
+    const threadB = mail.recordDelegation(addr(b), { assignee: addr(helper), task: 'write the docs', origin: 'send_to_session' }).thread
+    mail.reportTurn(threadB.id, { to: addr(b), about: addr(helper), outcome: 'finished', body: '[Centralu] The assigned work finished.', then: 'review' })
+    handleOf(helper).acceptsAtOnce = true
+    mail.post(threadB.id, addr(b), { kind: 'note', body: 'and the changelog' })
+    await due(helper)
+    expect(w.mgr.sessionInfo(helper)?.state).toBe('working')
+    // The server ends in the middle of B's turn
+    handleOf(helper).event({ type: 'background_tasks', sessionId: helper, live: [] })
+    const settle = vi.spyOn(ChildReports.prototype, 'settlePausedReport')
+    await turnEnds(helper, 'docs written')
+    await w.until(() => outcomes(threadB).length === 2)
+    expect(settle).toHaveBeenCalledWith(helper)
+  })
+
   it.each(['person', 'B itself'])('B’s thread closed by %s while that turn runs: the stopped turn is not A’s to hear of, nor B’s (#1474)', async (who) => {
     w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
     Object.assign(w.adapters.get('claude')!.capabilities, { backgroundTasks: true })
@@ -360,6 +384,36 @@ describe('a thread closed while its work is going (3.10, MB)', () => {
     await w.until(() => handleOf(helper).quiet.length === 1)
     expect(w.mgr.reportOwed(helper)).toBeNull()
     expect(w.store.mail.messagesAfter(thread.id, 0).filter((m) => m.kind === 'report' && m.facts.closedBy === 'person')[0]!.facts.stopped).toBe(true)
+  })
+
+  it('a helper paused for the owner that is sent more and starts new work: the stop takes the paused work and the work the new turn started (#1474)', async () => {
+    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+    Object.assign(w.adapters.get('claude')!.capabilities, { backgroundTasks: true })
+    const owner = await w.callerSession()
+    const helper = await startAgent(owner, 'start the server')
+    const h = handleOf(helper)
+    h.event({ type: 'background_tasks', sessionId: helper, live: [{ id: 't1', kind: 'shell', description: 'pnpm dev', status: 'running', stoppable: true }] })
+    await turnEnds(helper, 'server started')
+    const thread = threadBetween(owner, helper)
+    await w.until(() => outcomes(thread).includes('paused'))
+    h.acceptsAtOnce = true
+    mail.post(thread.id, addr(owner), { kind: 'note', body: 'and run the tests too' })
+    await due(helper)
+    expect(w.mgr.sessionInfo(helper)?.state).toBe('working')
+    // The call is in the conversation after the turn began (the test's clock is ahead of the real one)
+    w.store.messages.appendMessages([{ sessionId: helper, seq: w.store.messages.nextSeq(helper), role: 'system', kind: 'tool_call', payload: { callId: 'c2', summary: { tool: 'Bash', title: 'pnpm test --watch', paths: [] } }, ts: clock.t + 1_000 }])
+    h.event({
+      type: 'background_tasks',
+      sessionId: helper,
+      live: [
+        { id: 't1', kind: 'shell', description: 'pnpm dev', status: 'running', stoppable: true },
+        { id: 't2', kind: 'shell', description: 'pnpm test --watch', status: 'running', stoppable: true, parentCallId: 'c2' },
+      ],
+    })
+    closeAs(PERSON, thread.id)
+    await w.until(() => h.quiet.length === 1)
+    expect(h.interrupted).toBe(1)
+    expect([...h.stoppedTasks].sort()).toEqual(['t1', 't2'])
   })
 
   it('a thread whose work was reported and is marked done tells the helper nothing', async () => {
