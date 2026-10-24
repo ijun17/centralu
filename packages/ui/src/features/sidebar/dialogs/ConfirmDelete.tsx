@@ -6,6 +6,7 @@ import { Modal } from '../../../components/Modal.jsx'
 import { Button } from '../../../components/Button.jsx'
 import { formatChangedCount } from '../../../app/format.js'
 import { useLoad } from '../../../app/useLoad.js'
+import { archiveAsksOf } from '../../../store/sessions/lifecycle.js'
 
 /**
  * Delete confirmation.
@@ -53,11 +54,23 @@ export function ConfirmDelete({
   // Unknown until the host answers, and when it cannot: the dialog then says nothing about a worktree
   const wt = useLoad(() => platform.agents.worktreeStatus(sessionId), [platform, sessionId]).data ?? null
   const [deleteWorktree, setDeleteWorktree] = useState(false)
+  // What the host said the archive would lose and Undo does not bring back (#1512): the reason this asks at all, when it is one
+  const [losses] = useState(() => archiveAsksOf(sessionId))
   return (
     <Modal onClose={onCancel} testId="confirm-delete">
       <div className="w-[380px] max-w-[calc(90vw/var(--text-zoom))] rounded-lg border border-line bg-surface-side p-4 shadow-(--shadow-modal)">
         <p className="text-md text-ink">Archive this session?</p>
         <p className="mt-1.5 truncate text-sm text-ink-muted">{name}</p>
+        {losses.length > 0 && (
+          <div className="mt-2 rounded-md border border-danger/40 bg-danger-bg px-2 py-1.5 text-xs leading-body text-ink" data-testid="delete-losses">
+            <p>Archiving it drops these, and Undo does not bring them back:</p>
+            <ul className="mt-1 list-disc space-y-0.5 pl-4">
+              {losses.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          </div>
+        )}
         <p className="mt-2 text-xs leading-body text-ink-faint" data-testid="delete-trash-note">
           Chat history and attachments stay in Centralu’s session archive, out of the sidebar, search and the agents’ reach.{' '}
           <span className="text-ink">Settings → Archive</span> reads it, restores it, or deletes it for good.

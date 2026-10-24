@@ -27,7 +27,6 @@ export function VersionsPanel({ app }: { app: ExternalCatalogApp }) {
   const refresh = useStore((s) => s.refreshExternalApps)
   // A restore that failed; reading the list fails on its own (`read.error`)
   const [restoreError, setRestoreError] = useState<string | null>(null)
-  const [asking, setAsking] = useState<AppSnapshot | null>(null)
   const [busy, setBusy] = useState(false)
   // A linked machine's user-folder app (#82): its versions are that machine's
   const machine = userAppMachine(app.info)
@@ -39,13 +38,27 @@ export function VersionsPanel({ app }: { app: ExternalCatalogApp }) {
   // A list read again after a failed restore clears that failure, as it did before useLoad
   useEffect(() => setRestoreError(null), [read.data])
 
-  const restore = async (snap: AppSnapshot) => {
+  /*
+   * Restores one version at once (#1512): the host keeps the current files as a version first, so the restore can be undone,
+   * and the toast's Undo does that. The way back is the version that was current before, or when the code had been edited
+   * and not yet started, the copy the host just kept (`before restore`). `undo` marks a restore that is itself the way
+   * back: it offers none, since the first one stays in the list.
+   */
+  const restore = async (snap: AppSnapshot, undo = false) => {
     setBusy(true)
     setRestoreError(null)
     try {
+      // Read just before, not from the panel's last reading: the way back is whatever is current now
+      const before = await platform.apps.versions(app.appId, app.projectId, machine)
+      const kept = before.kind === 'snapshots' ? before.snapshots : []
+      const wasCurrent = kept.find((s) => s.current)
       await platform.apps.restoreVersion(app.appId, app.projectId, snap.id, userAppMachine(app.info))
-      setAsking(null)
-      setToast(`Restored ${app.title} to the version from ${when(snap.at)}`)
+      const now = await platform.apps.versions(app.appId, app.projectId, machine).catch(() => null)
+      // The copy the host made for this restore is the one that was not there before; an older 'before restore' is another restore's
+      const copy = now?.kind === 'snapshots' ? now.snapshots.find((s) => s.reason === 'before restore' && !kept.some((k) => k.id === s.id)) : undefined
+      const back = wasCurrent && wasCurrent.id !== snap.id ? wasCurrent : copy && copy.id !== snap.id ? copy : null
+      const text = `Restored ${app.title} to the version from ${when(snap.at)}`
+      setToast(text, !undo && back ? { label: 'Undo', run: () => void restore(back, true) } : undefined)
       void refresh()
       void read.reload()
     } catch (e) {
@@ -77,33 +90,19 @@ export function VersionsPanel({ app }: { app: ExternalCatalogApp }) {
             <p className="px-3 pt-2 text-xs leading-body text-ink-faint">
               Kept on this machine each time the app starts on new code. The last five stay.
             </p>
-            {previous && !asking && (
-              <Button variant="primary" size="sm" className="mx-3 mt-2" onClick={() => setAsking(previous)} data-testid="versions-restore-previous">
+            {previous && (
+              <Button
+                variant="primary"
+                size="sm"
+                className="mx-3 mt-2"
+                onClick={() => void restore(previous)}
+                busy={busy}
+                busyText="Restoring…"
+                title="The current files are kept as a version first, and the app restarts on the restored code"
+                data-testid="versions-restore-previous"
+              >
                 Restore previous version
               </Button>
-            )}
-            {asking && (
-              <div className="mx-3 mt-2 rounded-md border border-line bg-surface-floor px-2.5 py-2" data-testid="versions-confirm">
-                <p className="text-xs leading-body text-ink-muted">
-                  Replace {app.title}&apos;s files with the version from {when(asking.at)}? The current files are kept as a version first, and the app
-                  restarts on the restored code.
-                </p>
-                <div className="mt-1.5 flex justify-end gap-2">
-                  <button type="button" className="rounded-md px-2 py-0.5 text-xs text-ink-faint transition-colors hover:text-ink" onClick={() => setAsking(null)} data-testid="versions-confirm-cancel">
-                    Cancel
-                  </button>
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    onClick={() => void restore(asking)}
-                    busy={busy}
-                    busyText="Restoring…"
-                    data-testid="versions-confirm-yes"
-                  >
-                    Restore
-                  </Button>
-                </div>
-              </div>
             )}
             {snaps.length === 0 && <p className="px-3 py-3 text-xs text-ink-faint">No versions yet. One is kept the first time the app starts.</p>}
             <ol className="mt-2">
@@ -122,7 +121,8 @@ export function VersionsPanel({ app }: { app: ExternalCatalogApp }) {
                       <button
                         type="button"
                         className="ml-auto shrink-0 rounded-md px-1.5 py-0.5 text-ink-faint transition-colors hover:text-ink"
-                        onClick={() => setAsking(s)}
+                        onClick={() => void restore(s)}
+                        disabled={busy}
                         data-testid="version-restore"
                       >
                         Restore

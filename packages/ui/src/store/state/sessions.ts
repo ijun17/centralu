@@ -144,6 +144,12 @@ export type SessionsSlice = {
   /** Moves the session to the session archive (#204); the two flags say what goes with it when it is deleted for good */
   deleteSession(sessionId: string, deleteWorktree?: boolean, deleteExternal?: boolean): Promise<void>
   /**
+   * Archives a session the menu offers, the host deciding that nothing it holds is lost (#1512). Null: archived (the toast
+   * offers Undo) or failed (the toast says why). Lines: not archived, the person is asked first; the lines are what the host
+   * said would be lost (`archiveAsksOf`), empty when the window itself saw a reason to ask.
+   */
+  archiveSession(sessionId: string): Promise<string[] | null>
+  /**
    * Brings a session back from the session archive (#204). A project its restore registered again is added here, and asked
    * about trust as a newly added one is. Returns an error message, or null when it is back.
    */
