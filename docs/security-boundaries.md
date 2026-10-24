@@ -578,6 +578,49 @@ A name a session has seen an app under (`app-<id>`) stays bound to that app for 
 (`session_app_names:<session>`), so a later app of the same id, a repository's included, cannot take
 calls meant for another (`SessionAppsHub.named`).
 
+### The `edits` preset (#1525, owner 2026-10-24)
+
+A fourth preset, between `normal` and `auto` (`safe` < `normal` < `edits` < `auto`). **`edits` is `normal` plus one
+grant**: a file edit inside the session's project folder (or its worktree) raises no card. Everything else is
+`normal`'s, in every row of the table below: commands, deletes, paths outside the folder, network access and runs
+outside the sandbox ask; the person's own bypass applies as under `normal`, and `edits` never asks more than `normal`
+would. `normal` keeps its meaning (the person approves each step).
+
+- **Preset, not a hidden default.** A default that made `normal` accept edits in a trusted project would put a word
+  on the picker that is not true of the session, and an explicit `normal` could not be told from the default. So the
+  picker lists `edits` ("Edits go through"), and the **default** is what changed: a session the person's window
+  starts without naming a preset (`CreateSessionParams.permissionPreset` is optional now; the window no longer sends
+  `normal` on the person's behalf) gets `edits` in a **trusted** project and `normal` in an untrusted one, decided by
+  the host that holds the project, at the start (`defaultPresetFor`). A preset named in the request, the settings
+  menu, a handoff or a fork always wins and is never raised. The stored and shown preset is the one the session
+  runs under.
+- **Mapping to Claude.** Not `acceptEdits`. The SDK's mode also approves `rm`, `rmdir`, `mv`, `cp`, `sed`, `mkdir` and
+  `touch` inside the working directory (Claude Code's documentation, "acceptEdits"), which would let deletes and
+  commands through. `edits` launches exactly as `normal` does (the trusted settings mode, else `default`) and `canUseTool`
+  allows `Edit`, `MultiEdit`, `Write` and `NotebookEdit` whose target is inside the session's folder
+  (`adapters/claude/edit-grant.ts`, the shape of the read grant, #371). A person's `acceptEdits` or bypass setting stays as it is
+  (it decides before `canUseTool`).
+- **Mapping to Codex.** Codex has no mode that accepts patches and asks for commands: its approval policies gate the
+  sandbox boundary, not the kind of action (`on-request` runs sandboxed commands without a card). So `edits` is
+  `normal`'s launch (the person's own policy and sandbox, network off) and the adapter answers an
+  `item/fileChange/requestApproval` with accept when every change of the patch is an add or an update inside the folder
+  (`adapters/codex/edit-grant.ts`). A delete, a move out of the folder, or a path outside asks. Under Codex's default
+  config (workspace-write, on-request) in-folder patches already ran without a card, so there `edits` and `normal`
+  differ only where the person's config asks.
+- **What is never granted.** The folder is the session's `cwd` after symlinks are resolved (a link out of it is
+  outside), compared by path segment (`/proj-other` is not inside `/proj`). Inside it, the places that decide what
+  runs or what is allowed still ask: `.git`, `.claude`, `.codex`, `.mcp.json`, `.vscode`, `.idea`, `.husky`,
+  `.centralu`. A path that cannot be resolved asks. A person who picks `edits` in an untrusted project gets the
+  grant too (their choice wins); only the default is tied to trust.
+- **Agent-started sessions.** The default applies only to a session the person's window starts. `start_agent`'s child
+  gets the caller's preset, never above it (`presetWithin`, rank updated), so a `normal` caller's child is `normal`
+  in a trusted project and an `edits` caller's is `edits`. `edits` is treated as `normal` by the consent (the project's
+  trust is a `normal` or `edits` caller's consent, #673), the ceiling (4, `auto` has none), `ask_project`, the answer
+  rules and `update_centralu`. A linked machine's child (`start_agent` with `machine`, `create_session`, the hub's
+  `normal` at most) is `normal` for an `edits` caller: `edits` is not carried over the link, so an older machine never
+  sees a value it does not know. A build from before this preset reads a stored `edits` as `safe` (its store parses
+  unknown presets to `safe`), which asks more, never less.
+
 ### When the person is asked
 
 "Open" means the calling session's own `auto` preset opens that permission boundary (#603),
