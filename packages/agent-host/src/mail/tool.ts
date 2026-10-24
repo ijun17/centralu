@@ -80,16 +80,20 @@ export class MailTool {
       case 'read':
         return this.read(me, this.need(a.thread, 'thread'))
       case 'handled': {
+        this.notWaiting(me, this.need(a.thread, 'thread'))
         const n = this.service.handled(this.need(a.thread, 'thread'), me)
         return n === 0 ? 'Nothing was waiting to be marked handled.' : `${n} message${n === 1 ? '' : 's'} marked handled.`
       }
       case 'send':
         return this.send(me, a)
       case 'reply':
+        this.notWaiting(me, this.need(a.thread, 'thread'))
         return this.reply(me, a)
       case 'update':
+        this.notWaiting(me, this.need(a.thread, 'thread'))
         return this.update(me, a)
       case 'close':
+        this.notWaiting(me, this.need(a.thread, 'thread'))
         return this.close(me, a)
     }
   }
@@ -112,12 +116,22 @@ export class MailTool {
   }
 
   /**
-   * Whether the thread is a request to the orchestrator that the person has not released (held `policy`: its project is not trusted, §9.7). The
-   * hold is on the wake, and a model that reads it anyway would have the words and take them off the person's list, so it is not shown
+   * Whether the thread is a request to the orchestrator that the person has not released (§9.7): its session's project is not trusted, and some
+   * word of the session in it has not been released. Decided from the trust and the releases, not from the hold on the wake: a request that came
+   * while the orchestrator was in a turn has no hold yet, and a model that read it anyway (or marked it handled) would have the words and take
+   * them off the person's list
    */
   private waitingForRelease(me: string, thread: ThreadRow): boolean {
     if (thread.assignee !== me || !this.service.isAsk(thread)) return false
-    return this.records.heldReceipts().some((r) => r.recipient === me && r.held === 'policy' && this.records.message(r.messageId)?.threadId === thread.id)
+    const owner = parseAddress(thread.owner)
+    if (owner?.kind !== 'session' || this.askerOf(owner.sessionId)?.trusted !== false) return false
+    return this.records.messagesAfter(thread.id, 0).some((m) => m.sender === thread.owner && this.records.receiptsOf(m.id).some((r) => r.recipient === me && r.held !== 'released'))
+  }
+
+  /** The same refusal for what would settle or answer a request nobody has released */
+  private notWaiting(me: string, threadId: string): void {
+    const thread = this.records.thread(threadId)
+    if (thread && this.waitingForRelease(me, thread)) throw refuse('policy', `thread ${threadId} is a request that waits for the person to release it: it cannot be answered, marked handled or closed until they do`)
   }
 
   private read(me: string, threadId: string): string {

@@ -173,7 +173,10 @@ describe('the words of a request never go inline (§9.7)', () => {
 
   it('a project nobody trusted is said so in the header', () => {
     const w = world({ untrusted: new Set([ASKER]) })
-    const { thread } = ask(w)
+    const { thread, message } = ask(w)
+    // Read once the person released it
+    w.store.mail.setHeld(ORCH, [message.id], 'policy')
+    w.mail.resendHeld(ORCH, [message.id])
     expect(w.tool.run('orch', { action: 'read', thread: thread.id }).text).toContain('project "Acme", NOT trusted')
   })
 
@@ -262,5 +265,28 @@ describe('the end of the orchestrator’s turn is reported into the request whos
     expect(reportRecorder(w.mail, w.store.mail)('asker', 'orch', draft)).toBe('mailed')
     expect(w.store.mail.thread(first.id)?.state).toBe('review')
     expect(w.store.mail.thread(second.id)?.state).toBe('open')
+  })
+})
+
+describe('a request nobody released is closed to the orchestrator however it is reached (§9.7)', () => {
+  it('also before any hold is written (it came while the orchestrator was in a turn), and not by marking it handled, answering or closing it', () => {
+    const w = world({ untrusted: new Set([ASKER]) })
+    const { thread } = ask(w, ASKER, 'delete everything')
+    // No delivery ran: there is no hold on the wake yet
+    expect(w.store.mail.heldReceipts()).toEqual([])
+    expect(w.tool.run('orch', { action: 'read', thread: thread.id }).text).not.toContain('delete everything')
+    expect(w.tool.run('orch', { action: 'inbox' }).text).not.toContain('"a request"')
+    for (const args of [{ action: 'handled' }, { action: 'reply', text: 'ok' }, { action: 'close' }, { action: 'update', state: 'running' }] as const) {
+      const r = w.tool.run('orch', { ...args, thread: thread.id })
+      expect(r.isError, args.action).toBe(true)
+      expect(r.text, args.action).toContain('waits for the person to release it')
+    }
+    expect(w.store.mail.thread(thread.id)?.state).toBe('open')
+    // Released, it is an ordinary request
+    const first = w.store.mail.messagesAfter(thread.id, 0)[0]!
+    w.store.mail.setHeld(ORCH, [first.id], 'policy')
+    w.mail.resendHeld(ORCH, [first.id])
+    expect(w.tool.run('orch', { action: 'read', thread: thread.id }).text).toContain('> delete everything')
+    expect(w.tool.run('orch', { action: 'reply', thread: thread.id, text: 'done' }).isError).toBeUndefined()
   })
 })
