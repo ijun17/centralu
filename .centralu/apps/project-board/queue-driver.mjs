@@ -63,8 +63,8 @@ import {
   rerunRefused,
   resetFor,
 } from './queue.mjs'
-import { GitError } from './git.mjs'
-import { openedBy, readOpened } from './opened.mjs'
+import { GitError, isNetworkFailure } from './git.mjs'
+import { noteReadied, openedBy, readOpened } from './opened.mjs'
 import { mergeMain, statLine } from './queue-conflict.mjs'
 import { judgeHead, labelReason } from './queue-integrate.mjs'
 import { classifyRun } from './run-failure.mjs'
@@ -482,7 +482,7 @@ async function onConflict(item, pr, { now, ref, renew, defaultBranch, landed = [
         ...(where.route === 'direct'
           ? [{ kind: 'handoff', notify: true, to: where.to, text: `Merge queue: ${n}${item.title ? ` (${item.title})` : ''} is your pull request and it conflicts with ${pr.baseRefName}: ${d.reason.relay.text}` }]
           : []),
-        conflictEvent(`${n}: conflict handed to ${to ? `its author session ${to}` : 'a session on its branch (no author session recorded)'}${files.length ? `; conflicted files: ${listSome(files, 8)}` : ''}.`, {
+        conflictEvent(`${n}: conflict handed to ${where.route === 'direct' ? 'the session that opened it, which the queue told itself' : where.route === 'self' ? 'the session that queued it, its author' : to ? `its author session ${to}` : 'a session on its branch (no author session recorded)'}${files.length ? `; conflicted files: ${listSome(files, 8)}` : ''}.`, {
           step: 'handoff',
           ms: Date.now() - now,
           files,
@@ -505,6 +505,9 @@ async function onConflict(item, pr, { now, ref, renew, defaultBranch, landed = [
     try {
       restacked = await rebaseStack({ repo: item.repo, pr: item.pr, dir: QUEUE.conflicts.checkout, push: true }, { readPr, prsWithHead, setPrBase, openPrsOnBase }, (k) => ref(item.repo, k))
     } catch (e) {
+      // The remote did not answer (a fetch, or the push): not the pull request's conflict, so nothing is handed to its author.
+      // A GitHubError of kind network pauses the queue and tries this item again, as any lost network does
+      if (isNetworkFailure(e)) throw new GitHubError('network', `git could not reach the remote while restacking ${n}: ${e.message} The queue tries again when the network is back.`)
       if (!(e instanceof StackRefusal) && !(e instanceof GitError)) throw e
       return hand(`${not} Restacking it was tried and refused: ${e.message}`, [])
     } finally {
@@ -562,19 +565,29 @@ async function onConflict(item, pr, { now, ref, renew, defaultBranch, landed = [
   return hand(r.why, r.files, steps, r.instruction ?? null)
 }
 
+/** Writes down that the item's pull request was seen ready; a file that cannot be written is a nicety lost, never a reason to stop */
+function rememberReadied(dir, item) {
+  try {
+    noteReadied(dir, item.repo, item.pr)
+  } catch (e) {
+    console.error('[project-board] merge queue: could not record that', item.repo, item.pr, 'was seen ready:', e?.message ?? e)
+  }
+}
+
 /**
- * Whether the session that queued this item opened its pull request through `open_pr` **as a draft** (opened.mjs). A pull
- * request opened ready and turned into a draft later is someone's hold (a person stopping it, or `open_pr` making a stack's
- * lower one a draft): not undone here.
+ * Whether the session that queued this item opened its pull request through `open_pr` **as a draft** (opened.mjs), and
+ * it was never seen ready since. A pull request opened ready and turned into a draft later is someone's hold (a person
+ * stopping it, or `open_pr` making a stack's lower one a draft); so is one that was ready once and is a draft again, which
+ * `readied` remembers (a person turned the queue's own mark back, or the session's): not undone here.
  */
-const ownDraft = (item, opened) => opened?.draft === true && Boolean(opened.notice) && opened.notice === item.notice
+const ownDraft = (item, opened) => opened?.draft === true && opened.readied !== true && Boolean(opened.notice) && opened.notice === item.notice
 
 /**
  * Reads one item's pull request and CI, decides, and acts. Answers what to write back: the new state
  * and fields, the events, and when to read it again. Throws only what stops every item (rate limit,
  * no network, no login).
  */
-async function pollItem(item, { now, ref, renew, save, landed = [], stillIntegrated = () => true, opened = null }) {
+async function pollItem(item, { now, ref, renew, save, landed = [], stillIntegrated = () => true, opened = null, readied = () => {} }) {
   const repo = item.repo
   const at = new Date(now).toISOString()
   const { permissions, defaultBranch } = await permissionsOf(repo, now)
@@ -597,9 +610,12 @@ async function pollItem(item, { now, ref, renew, save, landed = [], stillIntegra
   // session is concerned: it queued it to land. Marked ready here, as `mark_ready` would be, instead of asking it to.
   // Not a record handed over with integrate (a draft on purpose until it lands), and not one a stack made a lower:
   // that one is not queued by the session that opened it as its top
+  // Seen ready for review, by the session or a person: a draft it becomes after that is a hold, which is not undone (ownDraft)
+  if (pr.state === 'OPEN' && !pr.isDraft && opened?.draft === true && opened.readied !== true) readied()
   if (pr.state === 'OPEN' && pr.isDraft && !item.auto && canMerge(permissions) && ownDraft(item, opened) && (await openPrsOnBase(repo, pr.headRefName)).length === 0) {
     if (!renew()) return { yielded: true }
     await markReady(repo, item.pr)
+    readied()
     Object.assign(pr, { isDraft: false, mergeStateStatus: 'UNKNOWN' })
     events.push({ kind: 'action', text: `${ref(repo, item.pr)} was opened as a draft by the session queuing it; the queue marked it ready for review, as that session would have.` })
   }
@@ -775,7 +791,7 @@ export async function tick(dir, { holder, now = Date.now(), ref = queueRef }) {
     .map((i) => ({ pr: i.pr, head: i.head }))
   let r
   try {
-    r = await pollItem(item, { now, ref, renew, save, landed, opened: openedBy(readOpened(dir), item.repo, item.pr), stillIntegrated: () => readQueue(dir).items.some((i) => itemKey(i) === key && ACTIVE.has(i.state) && i.auto) })
+    r = await pollItem(item, { now, ref, renew, save, landed, opened: openedBy(readOpened(dir), item.repo, item.pr), readied: () => rememberReadied(dir, item), stillIntegrated: () => readQueue(dir).items.some((i) => itemKey(i) === key && ACTIVE.has(i.state) && i.auto) })
   } catch (e) {
     const fatal = e instanceof GitHubError && FATAL.has(e.kind)
     const message = e instanceof GitHubError ? e.message : `Unexpected error: ${e?.message ?? e}`

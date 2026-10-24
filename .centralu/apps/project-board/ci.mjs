@@ -5,7 +5,7 @@
 // pending, nothing failed" and merged #380 before its CI had started. The rule kept here is the
 // opposite: a check is green only once it is reported and passed, and a required check nobody has
 // reported is waited for, never assumed.
-import { RUNNER_SHUTDOWN } from './run-failure.mjs'
+import { shutdownAt } from './run-failure.mjs'
 
 const MAX_LINE = 300
 
@@ -377,13 +377,14 @@ const STAMP = /^\uFEFF?\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z ?/
  * A job log as plain lines: no colour codes, no timestamps, and nothing after the line that says the runner was shut down
  * (#1507). What follows it was cut short by the shutdown: the tests it stopped under are reported failed (`✘ 117 …`), and
  * a reader that took the first of them as the failure named a test that had done nothing wrong. The shutdown line itself
- * stays, as the one error the log has to give.
+ * stays, as the one error the log has to give. Only the runner's own line cuts (`shutdownAt`): the same words in a test's
+ * output leave the log whole, with its real failure.
  */
 export const cleanLog = (text) => {
   const lines = String(text ?? '')
     .split(/\r?\n/)
     .map((l) => l.replace(ANSI, '').replace(STAMP, ''))
-  const cut = lines.findIndex((l) => RUNNER_SHUTDOWN.test(l))
+  const cut = shutdownAt(lines)
   return cut < 0 ? lines : lines.slice(0, cut + 1)
 }
 

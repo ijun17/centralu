@@ -193,8 +193,9 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
   **as a draft** for the same session that queued it (`opened-prs.json`: the notice address on both, and
   `draft`), with no open pull request based on its branch, is marked ready by the queue, as that session
   would have, instead of needing attention. A draft another session opened, one opened ready and made a draft
-  since (a person's hold, or `open_pr` making a stack's lower one a draft), a stack lower, or one `open_pr`
-  did not open still needs attention (`draft`), and so does a record handed over with `integrate` when found
+  since (a person's hold, or `open_pr` making a stack's lower one a draft), one that was ready once since
+  (seen ready by the queue's poll or marked by the queue: the record gets `readied`, so a person who turns it
+  back into a draft is not undone), a stack lower, or one `open_pr` did not open still needs attention (`draft`), and so does a record handed over with `integrate` when found
   ready (it is turned back into a draft, below).
 - **Each poll** reads one item (`decideBefore`, `decideCi`): no maintain or admin, a draft, DIRTY
   (which the queue first tries to resolve itself, below), BEHIND, BLOCKED, a squash subject over 72 characters, or a base that is not the default branch or a
@@ -302,8 +303,11 @@ the batch as `failures`), and `decideRun` decides from it, for an item's head an
   test failure); a lost runner ("lost communication with the server", "received a shutdown signal"; a shutdown
   leaves no such note on the job, only "The operation was canceled." and a failed step, so for a job with that
   note alone `jobNotes` reads the log for the line `##[error]The runner has received a shutdown signal`, #1507;
-  `cleanLog` ends a log at that line, so a test the shutdown cut short is never quoted as the first failure, and
-  the main guard reruns such a job once and reports a second time, never hunting or reverting);
+  `cleanLog` ends a log at that line, so a test the shutdown cut short is never quoted as the first failure. Only
+  the runner's own line counts (`shutdownAt`): at the start of a line and followed by the step's
+  `##[error]The operation was canceled.`, so a test that prints the same words keeps its failure and its quote.
+  The main guard reruns such a job once and, when the same job is shut down again, hunts it like a test failure
+  and reverts what the hunt finds: a commit can exhaust the runner's memory or disk);
   a job whose first failed step set it up (cause `setup`, #1435: checkout, pnpm and Node setup, the
   browser and system-library installs, a cache; the main guard reads main's runs the same way, below);
   a failed job on `project.json` `queue.flakyJobs` (exact names, `*` for any characters). A real
@@ -425,9 +429,10 @@ the git work; `onConflict` in `queue-driver.mjs` decides, once per head.
   pull request or is the named author: the attention message says to fix it there. It is another session that
   opened it through `open_pr`: the queue posts the instruction into that session itself (an event of kind
   `handoff`, to its address, beside the attention message to the queuing session, which says it was
-  posted). Otherwise (the author is named but never called this app) the attention message carries the
-  instruction for the queuing session to relay, as before; with no author recorded it says so, and that a
-  session started on the branch needs that instruction. Once per head; queued again, the merge is tried
+  posted). The text names the session it goes to (the one that opened it, with the author `queue_merge`
+  named beside it when that is another), not the named author alone. Otherwise (the author is named but never
+  called this app) the attention message carries the instruction for the queuing session to relay, as before;
+  with no author recorded it says so, and that a session started on the branch needs that instruction. Once per head; queued again, the merge is tried
   again (main may have moved).
 - **A stack's top whose lower merged** (#1509 item 4): a DIRTY pull request based on another branch than the
   default one, from this repository, is restacked by the queue with `rebaseStack` (`stack.mjs`, push on:
@@ -435,7 +440,9 @@ the git work; `onConflict` in `queue-driver.mjs` decides, once per head.
   the tested one by patch id, a lease on the head read, then the base moved), as `rebase_stack` would be run
   by a session; the new head runs CI before it lands. The procedure's refusals (the lower one not merged,
   built on an older version of it, a replay that conflicts, a moved branch, no checkout) hand it to the
-  author as above, with the refusal in the text. Event `conflict`, step `restack`.
+  author as above, with the refusal in the text. A remote that cannot be reached (a fetch or the push fails on the
+  network: `isNetworkFailure`, git.mjs) is not a refusal: it is thrown as a network error, which pauses the queue and tries
+  the item again, and `rebase_stack` itself answers it as an error rather than "nothing was pushed". Event `conflict`, step `restack`.
 - **The front of the queue**: a pull request fixed after a conflict (a new head that no longer
   conflicts, the queue's push or a session's, or queued again after one) gets `front`, and goes
   first: batches take it before older items, and `merge_queue` lists it first in its state
@@ -631,7 +638,8 @@ looked into).
   rerun would otherwise blame whatever touched a lockfile): then it is a **setup failure** and is hunted
   like a test failure (a probe without the bad commit passes setup). Otherwise it is reported (an issue and a
   notice, "an infrastructure failure, not a commit's", naming how many commits it checked), never
-  reverted, as is a lost runner again. A timeout, or a job on the flaky list, that fails again is looked
+  reverted, as is a lost connection to the runner again (a runner *shutdown* under the same job again is hunted:
+  `shutdown` on the failure, kept with the rerun's job names). A timeout, or a job on the flaky list, that fails again is looked
   into as a test failure, except a timeout in a step that sets the job up (#1503: the step the limit ended is the one GitHub
   marks 'cancelled', or 'failure' for a step's own `timeout-minutes`; "Install WebKit" and the like): nothing of the commit
   ran, so it is read as a setup failure is: reported unless a commit since the last green one changed what the setup installs

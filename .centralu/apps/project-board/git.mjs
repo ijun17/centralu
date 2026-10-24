@@ -16,6 +16,14 @@ export class GitError extends Error {
   }
 }
 
+// What git prints when it could not reach the remote, or the remote did not answer: a failure of the moment, not of the
+// change. Not "Permission denied" or "Authentication failed", which a retry does not mend
+const UNREACHABLE = /could not resolve host|unable to access|connection (?:timed out|refused|reset)|failed to connect|network is unreachable|temporary failure in name resolution|early eof|rpc failed|hung up unexpectedly|could not read from remote repository|ssl[_ ]|operation timed out|did not finish within/i
+
+/** Whether a git failure is the network's (or the remote's being away) rather than the change's: worth trying again, never a conflict */
+export const isNetworkFailure = (e) => e instanceof GitError && UNREACHABLE.test(`${e.message}
+${e.stderr}`)
+
 const firstLine = (s) =>
   String(s ?? '')
     .split('\n')

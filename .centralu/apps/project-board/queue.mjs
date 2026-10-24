@@ -272,19 +272,23 @@ export function handoffReason({ item, pr, files = [], why, ref, instruction = nu
   const branch = pr.headRefName
   const text = instruction ?? conflictInstruction({ base: pr.baseRefName, branch, files })
   const author = item.author ?? null
-  // Posted into the session that opened it through open_pr, whether or not an author was named
-  const who = author ?? (route === 'direct' ? 'the session that opened it' : null)
   const where = files.length ? ` in ${files.length > 8 ? `${files.slice(0, 8).join(', ')} and ${files.length - 8} more` : files.join(', ')}` : ''
-  const to = who
-    ? route === 'self'
-      ? `${n} is your own pull request (author session: ${author}): fix it in this session: "${text}"`
+  // The text names the session the route uses, not the one `queue_merge author` named when that is another (authorRoute
+  // goes by who opened the pull request): a named author the route does not use is said beside it
+  const named = author ? ` (queue_merge named ${author} as its author)` : ''
+  const to =
+    route === 'self'
+      ? `${n} is your own pull request${author && author === item.owner ? ` (author session: ${author})` : named}: fix it in this session: "${text}"`
       : route === 'direct'
-        ? `Author session: ${who}. The queue is posting this into it itself, so relay it only if it does not answer: "${text}"`
-        : `Author session: ${author}. Relay this to it (it has not called this app, so the queue has no address to post to): "${text}"`
-    : `No author session is recorded for ${n} (queue_merge author). Start a session on its branch ${branch} with this instruction: "${text}"`
+        ? `Author session: the session that opened it${named}. The queue is posting this into it itself, so relay it only if it does not answer: "${text}"`
+        : author
+          ? `Author session: ${author}. Relay this to it (it has not called this app, so the queue has no address to post to): "${text}"`
+          : `No author session is recorded for ${n} (queue_merge author). Start a session on its branch ${branch} with this instruction: "${text}"`
+  // `relay.to` is who the instruction is for: the session the queue posts to, this one, or the one the queuing session relays to
+  const who = route === 'direct' ? 'the session that opened it' : route === 'self' ? (item.owner ?? author ?? 'the queuing session') : author
   return {
     state: 'attention',
-    reason: { kind: 'conflict', text: `${n} conflicts with ${pr.baseRefName} at ${short(pr.headRefOid)}${where}. ${why} ${to} The queue takes the new head by itself, at the front of the queue.`, files, relay: { to: author, branch, text, route } },
+    reason: { kind: 'conflict', text: `${n} conflicts with ${pr.baseRefName} at ${short(pr.headRefOid)}${where}. ${why} ${to} The queue takes the new head by itself, at the front of the queue.`, files, relay: { to: who, branch, text, route } },
   }
 }
 

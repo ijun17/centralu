@@ -355,6 +355,30 @@ describe("a failed job's log", () => {
     expect(firstFailure(before).line).toContain('e2e/a.spec.ts:5:1')
   })
 
+  // Only the runner's own line cuts: a test that prints the same words (reading the fixture above, say) and then really fails
+  // keeps its failure and its quote
+  it("cuts a log only at the runner's own shutdown line, followed by its cancellation; the same words in a test's output cut nothing", () => {
+    const said = '##[error]The runner has received a shutdown signal. This can happen when the runner service is stopped, or a manually started runner is canceled.'
+    const tail = [' FAIL  unit  packages/a/a.test.ts > prints a log > is read', 'AssertionError: expected 1 to be 2', '##[error]Process completed with exit code 1.']
+    const logOf = (...lines: string[]) => lines.map(stamp).join('\n')
+    const whole = (log: string) => cleanLog(log).length === log.split('\n').length
+    for (const printed of [`    ${said}`, `+ ${said}`, `  at ${said}`]) {
+      const log = logOf('##[group]Run pnpm test', printed, ...tail)
+      expect(whole(log), printed).toBe(true)
+      expect(firstFailure(log).line, printed).toContain('packages/a/a.test.ts')
+    }
+    // At the start of a line, as a test that logs it prints it, but the step was not cancelled: it failed on its own
+    const bare = logOf('##[group]Run pnpm test', said, ...tail)
+    expect(whole(bare)).toBe(true)
+    expect(firstFailure(bare).line).toContain('packages/a/a.test.ts')
+    // Another case, or another words, is not the runner's
+    expect(whole(logOf('##[group]Run pnpm test', said.replace('The runner', 'the runner'), ...tail, '##[error]The operation was canceled.'))).toBe(true)
+    // The runner's own line cuts at the last one before the cancellation, whatever a test printed at the start of a line earlier
+    const both = logOf('##[group]Run pnpm e2e', said, '  ✓   1 [app] › e2e/a.spec.ts:5:1 › opens (1.0s)', said, '  ✘   2 [app] › e2e/a.spec.ts:9:1 › closes (1.0s)', '##[error]The operation was canceled.')
+    expect(cleanLog(both)).toHaveLength(4)
+    expect(cleanLog(both).at(-1)).toBe(said)
+  })
+
   it('gives every line of the step that failed first, warnings included, and nothing of the steps after it', () => {
     const log = ['##[group]Run pnpm install', 'W: Could not connect to a mirror', 'E: Unable to locate package x', '##[error]Process completed with exit code 1.', '##[group]Run actions/upload-artifact@x', '##[error]No files were found'].map(stamp).join('\n')
     expect(failingStepText(log)).toBe(['##[group]Run pnpm install', 'W: Could not connect to a mirror', 'E: Unable to locate package x', '##[error]Process completed with exit code 1.'].join('\n'))

@@ -10,7 +10,8 @@
 // session), stable across calls and restarts, which opens only for a session that called this app. It is never shown
 // in an answer. A pull request opened by an older Centralu has none, and then nothing here applies to it. `draft` is
 // whether it was opened as a draft: the queue marks a draft ready only for a pull request opened as one (a later
-// draft is someone's hold).
+// draft is someone's hold). `readied` is set the first time the pull request is seen ready for review, by the queue or
+// by anyone: after that a draft is a hold (a person turned it back), and the queue does not mark it ready again.
 import { readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -36,6 +37,19 @@ export function noteOpened(dir, { repo, number, notice = null, draft = false, at
   const all = readOpened(dir)
   delete all[keyOf(repo, number)]
   all[keyOf(repo, number)] = { notice, draft: draft === true, at }
+  writeAll(dir, all)
+}
+
+/** Records that the pull request was seen ready for review, so a draft it becomes later is a hold. No record, nothing to do. */
+export function noteReadied(dir, repo, number) {
+  const all = readOpened(dir)
+  const record = all[keyOf(repo, number)]
+  if (!record || record.readied === true) return
+  all[keyOf(repo, number)] = { ...record, readied: true }
+  writeAll(dir, all)
+}
+
+function writeAll(dir, all) {
   const kept = Object.fromEntries(Object.entries(all).slice(-OPENED_MAX))
   const tmp = join(dir, `${OPENED_FILE}.${process.pid}.tmp`)
   writeFileSync(tmp, `${JSON.stringify(kept)}\n`)
