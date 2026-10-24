@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import type { BackgroundTask, CreateSessionParams, SessionInfo, ToolName } from '@cc/protocol'
 import { autoCompactPlan } from './auto-compact.js'
 import { autoCompactOf, sessionLiveDefaults } from '@cc/protocol'
-import type { AgentProcess, AgentSpawnSpec, CreateSessionOpts, EventSink, OrchestratorTools, ProcessSource, SessionApps, SessionHandle } from '../adapters/contract.js'
+import type { AgentProcess, AgentSpawnSpec, CreateSessionOpts, EventSink, OrchestratorTools, ProcessSource, RequestTurn, SessionApps, SessionHandle } from '../adapters/contract.js'
 import type { ToolProfile } from '../apps/contract.js'
 import type { AppRef } from '../apps/external/runtime.js'
 import type { Worktree } from '../dev-services/git-worktree.js'
@@ -95,6 +95,8 @@ export type SessionStartsHost = Pick<DelegationHost, 'adapters' | 'children' | '
     listCommands: ToolQueries['listCommands']
     /** Whether another project handed this path back to the session (#371 part B) */
     mayRead: (sessionId: string, path: string, cwd: string) => boolean
+    /** The orchestrator's turn being a session's request, and the person's card for the CLI's own steps in it (§9.7, #1447) */
+    requestTurn: (sessionId: string) => RequestTurn
     /** A session's row that is not being removed, or `session_not_found` */
     openSession: (sessionId: string) => SessionInfo
     /** The orchestrator's memory handoff for a new process */
@@ -575,6 +577,7 @@ export class SessionStarts {
       ...this.host.handoffNotes.handoffReadDirs(m.projectId, o.inheritsHandoff),
       // Paths another project handed back to this session (#371), asked on every read
       mayRead: (path: string) => this.host.mayRead(m.id, path, o.cwd),
+      ...(m.kind === 'orchestrator' ? { requestTurn: this.host.requestTurn(m.id) } : {}),
       // An orchestrator gets all of them, a builder session (M4 C-3) just its own app's check (the bundle blocks
       // the rest), an ordinary session its own project, read-only (#320, #561)
       /*

@@ -6,6 +6,7 @@ import type { AppRef, BrokerHost, ExternalApps } from '../apps/external/runtime.
 import { inTurn } from '../idle.js'
 import { rpcError } from '../rpc-error.js'
 import { AppAccess, writeShared } from './app-access.js'
+import type { WhenAsked } from './asked-gate.js'
 import type { AppSessions, AppSessionsHost } from './app-sessions.js'
 import type { DelegationHost } from './delegation-flow.js'
 import type { HostCards } from './host-cards.js'
@@ -43,6 +44,8 @@ export type SessionAppWiringHost = Pick<DelegationHost, 'adapters' | 'autoBounda
     agentRunEnded: AppSessions['agentRunEnded']
     askCapability: HostCards['askCapability']
     migrateApprovedMcpServers: OrchestratorProposals['migrateApprovedMcpServers']
+    /** An app tool's call, asked about when a session's request is the session's turn (§9.7, #1447) */
+    whenAsked: WhenAsked
   }
 
 /**
@@ -85,6 +88,7 @@ export class SessionAppWiring {
     const settings = this.host.store.settings
     this.appsHub = new SessionAppsHub(rt, {
       ...opts,
+      whenAsked: (id, call, signal, run, refused) => this.host.whenAsked(id, call, signal, run, refused),
       // The names a session has seen stay with their apps for its life (#1141), kept with the session
       names: {
         load: (id) => {

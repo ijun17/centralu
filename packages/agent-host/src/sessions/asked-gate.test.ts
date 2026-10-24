@@ -5,6 +5,9 @@ import { HostCards } from './host-cards.js'
 
 const ASKER: Asker = { threadId: 't1', name: 'Fix login', project: 'Acme', trusted: true }
 
+type Out = { text: string; isError?: boolean }
+const refused = (text: string): Out => ({ text, isError: true })
+
 function world(over: { asker?: () => Asker | null; answer?: 'allow' | 'deny' | null; afterAsk?: () => void } = {}) {
   const asked: string[] = []
   const covered: boolean[] = []
@@ -24,14 +27,14 @@ function world(over: { asker?: () => Asker | null; answer?: 'allow' | 'deny' | n
 }
 const ran = () => {
   const calls: number[] = []
-  return { calls, run: async () => (calls.push(1), { text: 'did it' }) }
+  return { calls, run: async (): Promise<Out> => (calls.push(1), { text: 'did it' }) }
 }
 
 describe('the gate around the orchestrator’s steps (§9.7)', () => {
   it('a step that changes something asks first, and runs once the person allows it', async () => {
     const w = world()
     const r = ran()
-    expect(await w.gate.when('orc', { name: 'rename_session', args: { sessionId: 's' } }, undefined, r.run)).toEqual({ text: 'did it' })
+    expect(await w.gate.when('orc', { name: 'rename_session', args: { sessionId: 's' } }, undefined, r.run, refused)).toEqual({ text: 'did it' })
     expect(w.asked).toHaveLength(1)
     expect(w.asked[0]).toContain('Session "Fix login" in project "Acme" asked the orchestrator to run rename_session')
     expect(r.calls).toHaveLength(1)
@@ -42,7 +45,7 @@ describe('the gate around the orchestrator’s steps (§9.7)', () => {
     for (const answer of ['deny', null] as const) {
       const w = world({ answer })
       const r = ran()
-      const out = await w.gate.when('orc', { name: 'delete_session', args: {} }, undefined, r.run)
+      const out = await w.gate.when('orc', { name: 'delete_session', args: {} }, undefined, r.run, refused)
       expect(out.isError).toBe(true)
       expect(r.calls).toEqual([])
     }
@@ -51,9 +54,9 @@ describe('the gate around the orchestrator’s steps (§9.7)', () => {
   it('a read, and a turn that is not a request, run at once with no card', async () => {
     const w = world()
     const r = ran()
-    await w.gate.when('orc', { name: 'list_sessions', args: {} }, undefined, r.run)
+    await w.gate.when('orc', { name: 'list_sessions', args: {} }, undefined, r.run, refused)
     const none = world({ asker: () => null })
-    await none.gate.when('orc', { name: 'delete_session', args: {} }, undefined, r.run)
+    await none.gate.when('orc', { name: 'delete_session', args: {} }, undefined, r.run, refused)
     expect(w.asked).toEqual([])
     expect(none.asked).toEqual([])
     expect(r.calls).toHaveLength(2)
@@ -63,10 +66,37 @@ describe('the gate around the orchestrator’s steps (§9.7)', () => {
     let now: Asker | null = ASKER
     const w = world({ asker: () => now, afterAsk: () => void (now = null) })
     const r = ran()
-    const out = await w.gate.when('orc', { name: 'delete_session', args: {} }, undefined, r.run)
+    const out = await w.gate.when('orc', { name: 'delete_session', args: {} }, undefined, r.run, refused)
     expect(out.isError).toBe(true)
     expect(out.text).toContain('the turn this was asked in has ended')
     expect(r.calls).toEqual([])
+  })
+
+  it('a step too long to show whole is neither asked about nor run: a card that hid part of it would not be a fair question', async () => {
+    const w = world()
+    const r = ran()
+    const out = await w.gate.when('orc', { name: 'Bash', args: { command: 'echo ' + 'x'.repeat(3_000) } }, undefined, r.run, refused)
+    expect(out.isError).toBe(true)
+    expect(out.text).toContain('too long to show the person')
+    expect(w.asked).toEqual([])
+    expect(r.calls).toEqual([])
+  })
+
+  it('the step’s result keeps its own shape: an app tool gets an app tool’s refusal, not a tool output', async () => {
+    const w = world({ answer: 'deny' })
+    const out = await w.gate.when('orc', { name: 'server.tool', args: {} }, undefined, async () => ({ content: [{ type: 'text', text: 'ran' }], isError: false }), (text) => ({
+      content: [{ type: 'text', text }],
+      isError: true,
+    }))
+    expect(out).toMatchObject({ isError: true, content: [{ type: 'text', text: expect.stringContaining('did not allow it') }] })
+  })
+
+  it('the CLI’s own steps ask the same way: a command is asked about, a read is not', async () => {
+    const w = world({ answer: 'deny' })
+    expect(await w.gate.askCli('orc', 'Bash', { command: 'echo pwned > file' })).toMatchObject({ allowed: false })
+    expect(w.asked[0]).toContain('asked the orchestrator to run Bash {"command":"echo pwned > file"}')
+    expect(await w.gate.askCli('orc', 'Read', { file_path: 'a' })).toEqual({ allowed: true })
+    expect(w.asked).toHaveLength(1)
   })
 })
 

@@ -25,6 +25,8 @@ export type QueryHandle = AsyncIterable<ClaudeMessage> &
     getContextUsage(): Promise<{ totalTokens?: number; maxTokens?: number; model?: string; autoCompactThreshold?: number } | undefined>
     /** Interrupts the turn in progress. Only works in streaming input mode — which is the mode we use. */
     interrupt(options?: { cancelQueued: boolean }): Promise<unknown>
+    /** Changes the permission mode of the running session (sdk.d.ts: streaming input only). A session's request runs under `default` (§9.7) */
+    setPermissionMode(mode: PermissionMode): Promise<void>
     /** Optional on older SDKs; cancel_async_message removes one UUID-stamped queued input. */
     cancelAsyncMessage?(uuid: string): Promise<boolean>
     /** Stops one background task; a task_notification with status 'stopped' follows (sdk.d.ts, measured — #290). */

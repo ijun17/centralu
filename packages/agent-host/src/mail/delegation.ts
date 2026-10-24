@@ -235,16 +235,38 @@ function askedOf(mail: MailService, records: MailRecords, owner: string, assigne
 }
 
 /**
+ * The end of the orchestrator's turn on a session's request, in Centralu's words (§9.7). The asking session gets back what the orchestrator
+ * posted in the thread and nothing else of the turn: not its last response, which may be addressed to the person, nor anything the person
+ * wrote into the turn, and no pointer to read the orchestrator's conversation, which an ordinary session is refused
+ */
+function askedReportBody(draft: Pick<ReportDraft, 'outcome'>): string {
+  return draft.outcome === 'finished'
+    ? '[Centralu] The orchestrator ended its turn on your request. What it posted in this thread is its answer; if it posted nothing, it had none to give. Its other words in that turn are not passed on.'
+    : `[Centralu] The orchestrator's turn on your request did not finish (${draft.outcome}). What it posted in this thread, if anything, is above. Ask again, or ask the person.`
+}
+
+/**
  * What the mailbox does with the end of a turn of delegated work (§6, §8.1): the report goes in the thread the owner has with the session,
  * and the owner is told as mail when it can read it. A thread the session itself closed by mail, saying how it ended, takes no second
- * report (the owner has been told); a thread that is done any other way, or none at all, leaves the old way of telling
+ * report (the owner has been told); a thread that is done any other way, or none at all, leaves the old way of telling.
+ *
+ * `turnThread` is the thread of the turn that ended (`MailTurns.threadOf`): a session's request is reported in the thread its turn was,
+ * not in one chosen among the pair's threads
  */
-export function reportRecorder(mail: MailService, records: MailRecords): (ownerId: string, childId: string, draft: ReportDraft) => ReportedAs {
+export function reportRecorder(
+  mail: MailService,
+  records: MailRecords,
+  turnThread: (sessionId: string) => string | null = () => null,
+): (ownerId: string, childId: string, draft: ReportDraft) => ReportedAs {
   return (ownerId, childId, draft) => {
     const owner = mail.sessionAddress(ownerId)
     const child = mail.sessionAddress(childId)
-    const thread = records.latestBetween(owner, child) ?? askedOf(mail, records, owner, child)
+    const turn = turnThread(childId)
+    const turnAsk = turn === null ? undefined : records.thread(turn)
+    const ownTurn = turnAsk && turnAsk.owner === owner && turnAsk.assignee === child && mail.isAsk(turnAsk) ? turnAsk : undefined
+    const thread = ownTurn ?? records.latestBetween(owner, child) ?? askedOf(mail, records, owner, child)
     if (!thread) return 'none'
+    const asked = mail.isAsk(thread)
     if (thread.state === 'done') {
       // The session's own words: the last response a report carried is in the thread as its message too, and is not it closing the work
       const theirs = records.lastWordBy(thread.id, child)
@@ -261,8 +283,8 @@ export function reportRecorder(mail: MailService, records: MailRecords): (ownerI
         to: owner,
         about: child,
         outcome: draft.outcome,
-        body: draft.body,
-        ...(draft.answer ? { answer: draft.answer } : {}),
+        body: asked ? askedReportBody(draft) : draft.body,
+        ...(draft.answer && !asked ? { answer: draft.answer } : {}),
         ...(draft.error ? { error: draft.error } : {}),
         ...(draft.paused ? { paused: draft.paused } : {}),
         ...(draft.personNote ? { personNote: true } : {}),

@@ -1,4 +1,3 @@
-import type { ToolOutput } from '../apps/contract.js'
 import type { Asker } from '../mail/asked-by.js'
 import { askedAct, askedQuestion } from './asked-acts.js'
 
@@ -21,29 +20,66 @@ export type AskedGateHost = {
   /** The person's card with the question, Allow or Deny only; not covered by a step's own Allow */
   ask(orchestratorId: string, question: string, signal?: AbortSignal): Promise<'allow' | 'deny' | null>
   /** Runs `run` while the cards the orchestrator raises are covered by the Allow just given */
-  cover(orchestratorId: string, run: () => Promise<ToolOutput>, signal?: AbortSignal): Promise<ToolOutput>
+  cover<T>(orchestratorId: string, run: () => Promise<T>, signal?: AbortSignal): Promise<T>
 }
+
+/**
+ * `T` is what the step gives back: a tool's result for the orchestrator's own tools, an app tool's for an attached app's. `refused` makes the
+ * refusal in that shape
+ */
+/** `AskedGate.when` as the places that call it hold it: a session's step is run when it is not a request's turn, or the person allows it */
+export type WhenAsked = <T>(
+  sessionId: string,
+  call: { name: string; args: Record<string, unknown> },
+  signal: AbortSignal | undefined,
+  run: () => Promise<T>,
+  refused: (text: string) => T,
+) => Promise<T>
 
 export class AskedGate {
   constructor(private readonly host: AskedGateHost) {}
 
-  async when(orchestratorId: string, call: { name: string; args: Record<string, unknown> }, signal: AbortSignal | undefined, run: () => Promise<ToolOutput>): Promise<ToolOutput> {
+  /** Whether the orchestrator's turn that is going is a session's request */
+  active(orchestratorId: string): boolean {
+    return this.host.askedBy(orchestratorId) !== null
+  }
+
+  /** The orchestrator's CLI wants to run a step of its own (a command, a file written, a page fetched): the person is asked, or it is a read */
+  async askCli(orchestratorId: string, tool: string, input: Record<string, unknown>, signal?: AbortSignal): Promise<{ allowed: true } | { allowed: false; message: string }> {
+    const answer = await this.when<{ allowed: true } | { allowed: false; message: string }>(
+      orchestratorId,
+      { name: tool, args: input },
+      signal,
+      async () => ({ allowed: true }),
+      (message) => ({ allowed: false, message }),
+    )
+    return answer
+  }
+
+  async when<T>(
+    orchestratorId: string,
+    call: { name: string; args: Record<string, unknown> },
+    signal: AbortSignal | undefined,
+    run: () => Promise<T>,
+    refused: (text: string) => T,
+  ): Promise<T> {
     const asker = this.host.askedBy(orchestratorId)
     if (!asker) return run()
-    const act = askedAct(call.name, call.args, asker.threadId)
-    if (act === null) return run()
-    const answer = await this.host.ask(orchestratorId, askedQuestion(asker, act), signal)
+    const step = askedAct(call.name, call.args, asker.threadId)
+    if (step === null) return run()
+    if ('tooLong' in step) {
+      return refused('Nothing was done: this step is too long to show the person in a card whole, and a card that hid part of it would not be a fair question. Ask for it in smaller parts, or leave it for the person.')
+    }
+    const answer = await this.host.ask(orchestratorId, askedQuestion(asker, step.act), signal)
     // The person may answer long after the turn the card was raised in: an Allow for a request's step is for that request's turn, not a later one
     if (answer === 'allow' && this.host.askedBy(orchestratorId)?.threadId !== asker.threadId) {
-      return { text: 'Nothing was done: the turn this was asked in has ended. Ask again in the thread if it is still wanted.', isError: true }
+      return refused('Nothing was done: the turn this was asked in has ended. Ask again in the thread if it is still wanted.')
     }
     if (answer === 'allow') return this.host.cover(orchestratorId, run, signal)
-    return {
-      text:
-        answer === null
-          ? 'Nothing was done: the person did not answer the card, which asked whether to do this for the session. Say so in the thread, and leave it for the person.'
-          : 'Nothing was done: the person did not allow it. Tell the session that asked, in the thread, that the person declined.',
-      isError: true,
-    }
+    return refused(
+      answer === null
+        ? 'Nothing was done: the person did not answer the card, which asked whether to do this for the session. Say so in the thread, and leave it for the person.'
+        : 'Nothing was done: the person did not allow it. Tell the session that asked, in the thread, that the person declined.',
+    )
   }
 }

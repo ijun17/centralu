@@ -63,6 +63,19 @@ export class ClaudeCards {
     if (isOrchestratorTool(toolName) && this.host.ownServer()) {
       return { behavior: 'allow' as const, updatedInput: toolInput }
     }
+    /*
+     * **A session's request is not the person's word** (docs/plans/mailbox.md §9.7, #1447). In the orchestrator's turn that a session's request is,
+     * the CLI runs under `default` whatever the preset (`ClaudeSession.syncMode`), so this callback hears of every step that is not a read, and the
+     * person is asked about each one, naming who asked: also under auto, which does not answer, and for a command or a tool the person once allowed
+     * "always" (a rule is a promise about the person's own turns). An attached app's tool asks in the call itself, in the host's gate around every
+     * app call (`SessionApps`), so it is let through here and the person is asked once.
+     */
+    const request = this.host.opts.requestTurn
+    if (request?.active() && toolName !== 'AskUserQuestion') {
+      if (appToolOf(toolName)) return { behavior: 'allow' as const, updatedInput: toolInput }
+      const answer = await request.ask(toolName, toolInput, options?.signal)
+      return answer.allowed ? { behavior: 'allow' as const, updatedInput: toolInput } : { behavior: 'deny' as const, message: answer.message }
+    }
     if (preset === 'auto' && toolName !== 'AskUserQuestion') {
       return {
         behavior: 'deny' as const,
