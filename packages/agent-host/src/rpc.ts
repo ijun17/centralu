@@ -126,8 +126,6 @@ export type MachinesPort = {
   install(id: string): Promise<MachineInstallResult>
   /** `unasked`: no one approved it, automatic updates cover it (#1508); it stops no session it cannot see */
   update(id: string, opts?: { when?: 'idle' | 'now'; unasked?: boolean }): Promise<MachineInstallResult>
-  /** Whether an idle update of the machine is the catch-up automatic updates cover (#1508, `LinkedMachine.followsHub`) */
-  followsHub?(id: string): boolean
   /** Ends an update's wait for the sessions there to finish (#1399) */
   cancelUpdate(id: string): MachineInfo
   rollback(id: string): Promise<MachineInstallResult>
@@ -201,7 +199,7 @@ export function createRpcHandler(
     return updates
   }
 
-  const handlers: { [M in RpcMethodName]: (p: unknown, ctx?: { client: number; rights?: 'full' | 'limited'; label?: string | null }) => Promise<unknown> } = {
+  const handlers: { [M in RpcMethodName]: (p: unknown, ctx?: { client: number; rights?: 'full' | 'limited'; label?: string | null; covered?: boolean }) => Promise<unknown> } = {
     // A script (the limited credential) that starts a session with a first message owes nobody a wait: the work is the person's, reported to their Inbox (§8.1)
     'agents.createSession': async (p, ctx) => mgr.createSession({ ...RpcMethods['agents.createSession'].params.parse(p), ...(ctx?.rights === 'limited' ? { fromScript: { credential: scriptLabel(ctx.label) } } : {}) }),
     'agents.send': async (p, ctx) => {
@@ -967,10 +965,10 @@ export function createRpcHandler(
     'machines.update': async (p, ctx) => {
       const { machineId, when } = RpcMethods['machines.update'].params.parse(p)
       /*
-       * A limited caller's idle update of a machine that follows this hub went without a card (#1508, method-rights.ts), so it
+       * A limited caller's update that went without a card (#1508, method-rights.ts; the transport's verdict, not judged again here)
        * stops no session it cannot see and gives up once automatic updates go off, as the hub's own catch-up does
        */
-      const unasked = ctx?.rights === 'limited' && (when ?? 'idle') === 'idle' && machines?.followsHub?.(machineId) === true
+      const unasked = ctx?.covered === true
       return requireMachines().update(machineId, { when: when ?? 'idle', ...(unasked ? { unasked } : {}) })
     },
     'machines.cancelUpdate': async (p) => requireMachines().cancelUpdate(RpcMethods['machines.cancelUpdate'].params.parse(p).machineId),
@@ -1094,7 +1092,7 @@ export function createRpcHandler(
     },
   }
 
-  return async (method: string, params: unknown, ctx?: { client: number; rights?: 'full' | 'limited'; label?: string | null }): Promise<unknown> => {
+  return async (method: string, params: unknown, ctx?: { client: number; rights?: 'full' | 'limited'; label?: string | null; covered?: boolean }): Promise<unknown> => {
     const name = method as RpcMethodName
     const h = handlers[name]
     /*

@@ -1705,7 +1705,7 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
       const { hub, ran } = await waiting({ noActivity: true, deps: a.deps, old: a.old })
       a.state.on = true
       const rpc = createRpcHandler(hub.mgr, new Map(), { machines: hub.links })
-      await expect(rpc('machines.update', { machineId: 'm1' }, { client: 1, rights: 'limited' })).rejects.toThrow(/cannot tell what runs on Remote box/)
+      await expect(rpc('machines.update', { machineId: 'm1' }, { client: 1, rights: 'limited', covered: true })).rejects.toThrow(/cannot tell what runs on Remote box/)
       expect(ran()).not.toContain('stop')
       await rpc('machines.update', { machineId: 'm1' }, { client: 1, rights: 'full' })
       expect(ran()).toContain('stop')
@@ -1716,10 +1716,31 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
       const { hub, u, ran, stepsSeen } = await waiting({ deps: a.deps, old: a.old })
       await eventually(() => stepsSeen().includes('wait_idle'))
       await u.call('machines.cancelUpdate', { machineId: 'm1' })
-      await eventually(() => hub.links.list()[0]!.followHub !== null && hub.links.list()[0]!.followHub !== undefined)
-      expect(hub.links.list()[0]!.followHub?.retryAt).toBeNull()
+      await eventually(() => hub.links.list()[0]!.operation === null)
       await new Promise((r) => setTimeout(r, 400))
       expect(ran().filter((k) => k === 'install_beside')).toHaveLength(1)
+      // The person's own choice: the row shows no failure for it
+      expect(hub.links.list()[0]!.followHub ?? null).toBeNull()
+    })
+
+    // #1508 review: a retry that comes due while the machine is busy runs once that ends, and a note goes once the machine is up
+    it("runs a retry that came due while the person's update ran, and drops the failure once the machine is on the hub's version", async () => {
+      const a = auto()
+      a.deps.followRetryMs = 100
+      const { hub, u, ran, stepsSeen, idle } = await waiting({ deps: a.deps, old: a.old })
+      await eventually(() => stepsSeen().includes('wait_idle'))
+      // The hub's first try ends (automatic updates off for a moment), with a retry set
+      a.state.on = false
+      await eventually(() => hub.links.list()[0]!.followHub?.retryAt != null)
+      a.state.on = true
+      // The person's own update holds the machine past the retry's time: it then succeeds, and the retry finds nothing to do
+      const mine = u.call('machines.update', { machineId: 'm1' })
+      await new Promise((r) => setTimeout(r, 250))
+      idle()
+      await mine
+      await eventually(() => hub.links.list()[0]!.versions?.remote.version === APP_VERSION)
+      expect(hub.links.list()[0]!.followHub ?? null).toBeNull()
+      expect(ran().filter((k) => k === 'install_beside')).toHaveLength(2)
     })
   })
 })

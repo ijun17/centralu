@@ -201,7 +201,8 @@ describe("a limited machines.update reads the host's state (#1508)", () => {
     // Automatic updates went off meanwhile: read at the call, not once
     follows.delete('m1')
     expect((await script.call('machines.update', { machineId: 'm1' })).error?.data).toEqual({ refused: 'rights', rights: 'asks' })
-    expect(calls.map((c) => [c.method, c.params, c.ctx?.rights])).toEqual([['machines.update', { machineId: 'm1' }, 'limited']])
+    // The transport's verdict reaches the handler, which holds the call to it rather than judging again
+    expect(calls.map((c) => [c.method, c.params, c.ctx?.rights, c.ctx?.covered])).toEqual([['machines.update', { machineId: 'm1' }, 'limited', true]])
     await server.close()
     const bare = await start()
     const other = await hello(bare.port, limitedToken(TOKEN))

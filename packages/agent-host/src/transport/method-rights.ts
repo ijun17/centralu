@@ -368,6 +368,12 @@ export function limitedRight(method: string, params: unknown, host: RightsHost |
   return rights
 }
 
+/** Whether `method`'s right depends on its parameters or the host (`{ asks, when }`): a limited call of it that runs went without a card */
+export function conditionalRight(method: string): boolean {
+  const table: Readonly<Record<string, Rights>> = METHOD_RIGHTS
+  return Object.prototype.hasOwnProperty.call(table, method) && typeof table[method] === 'object'
+}
+
 /**
  * Why a connection holding the limited credential may not make this call, or null if it may: the class
  * that refuses it and a sentence to show. An `asks` call goes to the person's card instead

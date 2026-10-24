@@ -52,6 +52,8 @@ function pause(ms: number, signal: AbortSignal): Promise<void> {
 /** The hub's own updates of a machine for one version of the hub's (#1508, `LinkedMachine.followHub`) */
 type FollowState = {
   version: string
+  /** The person cancelled its wait: no retry, and nothing shown as failed */
+  cancelled?: boolean
   tries: number
   failed: string | null
   retryAt: number | null
@@ -133,7 +135,7 @@ export class LinkedMachine extends LinkedMachineConnection {
     const wait = this.idleWait
     if (!wait) return false
     // The person ended the hub's own update: it is not tried again for this version (#1508)
-    if (this.followRun && this.follow === this.followRun) this.follow.tries = FOLLOW_TRIES
+    if (this.followRun && this.follow === this.followRun) Object.assign(this.follow, { tries: FOLLOW_TRIES, cancelled: true })
     wait.abort(new Error(`The update of ${this.name} was cancelled while it waited for the sessions there to finish; nothing was switched`))
     return true
   }
@@ -296,13 +298,14 @@ export class LinkedMachine extends LinkedMachineConnection {
         },
         (err: unknown) => {
           if (this.follow !== f || this.stopped) return
-          f.failed = errorMessage(err)
+          // The person's Cancel is their choice, not a failure to show
+          f.failed = f.cancelled ? null : errorMessage(err)
           if (f.tries < FOLLOW_TRIES) {
             const ms = this.deps.followRetryMs ?? FOLLOW_RETRY_MS
             f.retryAt = Date.now() + ms
             f.timer = setTimeout(() => {
               f.timer = undefined
-              f.retryAt = null
+              // Run now, or at the next chance: the next connect, or the end of what keeps the machine busy (`begin`)
               f.due = true
               this.followHub()
             }, ms)
@@ -318,7 +321,8 @@ export class LinkedMachine extends LinkedMachineConnection {
 
   override info(): MachineInfo {
     const f = this.follow
-    return { ...super.info(), followHub: f?.failed ? { version: f.version, failed: f.failed, retryAt: f.retryAt } : null }
+    // Shown only while the machine is still behind: an update of the person's that brought it up ends the note
+    return { ...super.info(), followHub: f?.failed && this.versions?.older === 'remote' ? { version: f.version, failed: f.failed, retryAt: f.retryAt } : null }
   }
 
   /**
@@ -473,6 +477,8 @@ export class LinkedMachine extends LinkedMachineConnection {
       this.busy = null
       this.operation = null
       then?.()
+      // A retry of the hub's own update that came due while this ran goes now (#1508)
+      if (this.follow?.due) queueMicrotask(() => this.followHub())
       this.deps.broadcast({ type: 'machine_status', machine: this.info() })
     }
   }

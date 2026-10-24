@@ -5,7 +5,7 @@ import { RpcMethods, parseRpcResult, type RpcMethodName, type RpcParams, type Rp
  * and the trash call (#1219), so each makes the call the window makes, with the checks the window's call meets: the
  * method's own schema, the router's routing to a linked machine, and the host's handler.
  */
-export type WindowRpc = (method: string, params: unknown, ctx?: { client: number; rights?: 'full' | 'limited'; label?: string | null }) => Promise<unknown>
+export type WindowRpc = (method: string, params: unknown, ctx?: { client: number; rights?: 'full' | 'limited'; label?: string | null; covered?: boolean }) => Promise<unknown>
 
 /**
  * The methods the orchestrator's settings and trash commands may call, and no others. A list, not "any method": the

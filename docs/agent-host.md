@@ -3373,11 +3373,15 @@ the person did not remove what the hub installed there, neither side runs a loca
   Settings. It also fails before the hold once automatic updates go off or the hub begins a swap while it waits. A swap
   that comes after the hold finds it as it finds the person's update (§4.7).
 - **How often.** Once per version of the hub's, and once more 10 minutes after a failure (`FOLLOW_RETRY_MS`); never
-  again for that version after the person cancels its wait. A failure shows on the row as `MachineInfo.followHub`
-  (`{ version, failed, retryAt }`, additive and optional), while its steps show as any update's do.
+  again for that version after the person cancels its wait (which shows no failure). A retry whose time comes while the
+  machine is busy or away runs when that ends or at the next connect. A failure shows on the row as `MachineInfo.followHub`
+  (`{ version, failed, retryAt }`, additive and optional) while the machine is still behind, and its steps show as any
+  update's do.
+- **Not covered.** A machine on another protocol is held at `versions_differ`, where neither its hello nor what runs there
+  can be read, so it stays the person's to update (no protocol bump has happened yet: `PROTOCOL_VERSION` is 1).
 - **An agent's call.** A limited caller's `machines.update` with `when` `idle` or absent runs without a card when
-  `followsHub` holds (transport/method-rights.ts `RightsHost`, security-boundaries.md "Who holds full power"), and the
-  orchestrator's `install_machine` (update) goes without its card on the same check; both run `unasked`.
+  `followsHub` holds (transport/method-rights.ts `RightsHost`, security-boundaries.md "Who holds full power"); the
+  transport judges it once and tells the handler (`RpcContext.covered`), and the orchestrator's `install_machine` (update) goes without its card on the same check; both run `unasked`.
 
 **Starting a machine's host at boot** (plan §10.4, owner decision 4; `autostart.ts`). `machines.autostart { machineId,
 on? }` (additive) runs `centralu serve --autostart on|off|status` there through the lookup, and the Centralu found
