@@ -1,7 +1,7 @@
 import type { RequestTurnAnswer } from '../adapters/contract.js'
 import type { Asker } from '../mail/asked-by.js'
 import { askedAct, askedQuestion, outlivesTheTurn, stepOf, type AskedStep } from './asked-acts.js'
-import { outOfReach, readScope, type Reach } from './asked-reach.js'
+import { outOfReach, readScope, type Reach, type ReadScope } from './asked-reach.js'
 
 /**
  * The orchestrator's privileged steps, asked about when a session asked for them (docs/plans/mailbox.md §9.7, #1447).
@@ -24,7 +24,7 @@ export type AskedGateHost = {
   /** Runs `run` while the cards the orchestrator raises are covered by the Allow just given */
   cover<T>(orchestratorId: string, run: () => Promise<T>, signal?: AbortSignal): Promise<T>
   /** What the asking session reaches itself: its folders (working folder, project folder, what it was handed back) and its project */
-  reach(sessionId: string): Reach
+  reach(sessionId: string): Omit<Reach, 'thread'>
   /** The project of a session: null for none, undefined when there is no such session */
   projectOf(sessionId: string): string | null | undefined
 }
@@ -43,30 +43,56 @@ export type WhenAsked = <T>(
 ) => Promise<T>
 
 export class AskedGate {
-  /** What each orchestrator's turn has read that the asking session could not read itself, for the turn it was read in (§9.7) */
-  private readonly reached = new Map<string, { turn: number; what: string }>()
+  /**
+   * What each orchestrator's conversation has read, as the scope of each read (§9.7). The conversation keeps what it read across turns, requests,
+   * the person's own turns and compaction (a summary can carry the data), so this is kept until a new conversation begins and is judged against the
+   * reach of whoever asks when words are written (`readIn`)
+   */
+  private readonly reads = new Map<string, { name: string; scope: ReadScope }[]>()
+  /** The orchestrators whose conversation began in this host process, so that everything it read is in `reads` */
+  private readonly begun = new Set<string>()
 
   constructor(private readonly host: AskedGateHost) {}
 
   /**
-   * Remembers a read of this turn that the asker could not make itself: a file outside its folders, the conversations of another project. Reading stays
-   * free; the answer in the thread then asks (`askedAct`), because it could carry what was read to the session
+   * A new conversation of the orchestrator begins (no conversation to resume): what an earlier one read is not in this one. A conversation this
+   * process did not see begin (the host restarted, a kept process was adopted) is not known to have read nothing, and is treated as having read everything
    */
-  private noteRead(orchestratorId: string, asker: Asker, name: string, args: Record<string, unknown>): void {
-    const scope = readScope(name, args)
-    if (scope === null || this.reached.get(orchestratorId)?.turn === asker.turn) return
-    let what: string | null
-    try {
-      what = outOfReach(name, scope, this.host.reach(asker.sessionId), (id) => this.host.projectOf(id))
-    } catch {
-      what = `${name} (what the session reaches could not be told)`
-    }
-    if (what !== null) this.reached.set(orchestratorId, { turn: asker.turn, what })
+  beginConversation(orchestratorId: string): void {
+    this.begun.add(orchestratorId)
+    this.reads.delete(orchestratorId)
   }
 
+  /** The orchestrator read something in a turn that was not a request (the person's own): kept, since a later request's reply could carry it */
+  seen(orchestratorId: string, name: string, args: Record<string, unknown>): void {
+    this.noteRead(orchestratorId, name, args)
+  }
+
+  /**
+   * Remembers a read. Reading stays free; what the conversation read matters when words go to a session (`askedAct`), because they could carry it
+   */
+  private noteRead(orchestratorId: string, name: string, args: Record<string, unknown>): void {
+    const scope = readScope(name, args)
+    if (scope === null) return
+    const list = this.reads.get(orchestratorId) ?? []
+    // (bounded: past a few hundred distinct reads it is simply "everything")
+    if (list.length >= 300) this.reads.set(orchestratorId, [{ name: 'reads', scope: { everywhere: true } }])
+    else if (!list.some((r) => r.name === name && JSON.stringify(r.scope) === JSON.stringify(scope))) this.reads.set(orchestratorId, [...list, { name, scope }])
+  }
+
+  /** The first read of this conversation that the asker could not make itself, in words, or null */
   private readIn(orchestratorId: string, asker: Asker): string | null {
-    const r = this.reached.get(orchestratorId)
-    return r && r.turn === asker.turn ? r.what : null
+    if (!this.begun.has(orchestratorId)) return 'an earlier conversation of the orchestrator, from before this host started'
+    try {
+      const reach = { ...this.host.reach(asker.sessionId), thread: asker.threadId }
+      for (const { name, scope } of this.reads.get(orchestratorId) ?? []) {
+        const what = outOfReach(name, scope, reach, (id) => this.host.projectOf(id))
+        if (what !== null) return what
+      }
+      return null
+    } catch {
+      return 'a read, with what the session reaches not known'
+    }
   }
 
   /** Whether the orchestrator's turn that is going is a session's request */
@@ -80,7 +106,7 @@ export class AskedGate {
    */
   async askCli(orchestratorId: string, tool: string, input: Record<string, unknown>, signal?: AbortSignal): Promise<RequestTurnAnswer> {
     const asker = this.host.askedBy(orchestratorId)
-    if (asker) this.noteRead(orchestratorId, asker, tool, input)
+    this.noteRead(orchestratorId, tool, input)
     if (!asker || askedAct(tool, input, asker.threadId) === null) return { allowed: true, asked: false }
     if (outlivesTheTurn(tool, input)) {
       return {
@@ -98,7 +124,7 @@ export class AskedGate {
   async askCliRead(orchestratorId: string, tool: string, input: Record<string, unknown>, signal?: AbortSignal): Promise<RequestTurnAnswer> {
     const asker = this.host.askedBy(orchestratorId)
     if (!asker) return { allowed: true, asked: false }
-    this.noteRead(orchestratorId, asker, tool, input)
+    this.noteRead(orchestratorId, tool, input)
     return this.put<RequestTurnAnswer>(orchestratorId, asker, stepOf(tool, input), signal, async () => ({ allowed: true, asked: true }), (message) => ({ allowed: false, message }))
   }
 
@@ -110,8 +136,8 @@ export class AskedGate {
     refused: (text: string) => T,
   ): Promise<T> {
     const asker = this.host.askedBy(orchestratorId)
+    this.noteRead(orchestratorId, call.name, call.args)
     if (!asker) return run()
-    this.noteRead(orchestratorId, asker, call.name, call.args)
     const step = askedAct(call.name, call.args, asker.threadId, this.readIn(orchestratorId, asker))
     if (step === null) return run()
     return this.put(orchestratorId, asker, step, signal, run, refused)
@@ -130,7 +156,7 @@ export class AskedGate {
     }
     if (answer === 'allow') return this.host.cover(orchestratorId, run, signal)
     if ('afterRead' in step) {
-      return refused('Nothing was sent: the person did not allow this answer, which could hand the session what this turn read outside its reach. Answer without it, or leave the thread for the person.')
+      return refused('Nothing was sent: the person did not allow these words, which could hand the session what the orchestrator read outside its reach. Leave that out, or leave it for the person.')
     }
     return refused(
       answer === null

@@ -97,6 +97,8 @@ export type SessionStartsHost = Pick<DelegationHost, 'adapters' | 'children' | '
     mayRead: (sessionId: string, path: string, cwd: string) => boolean
     /** The orchestrator's turn being a session's request, and the person's card for the CLI's own steps in it (§9.7, #1447) */
     requestTurn: (sessionId: string) => RequestTurn
+    /** A new conversation of the orchestrator begins: what an earlier one read is not in it (`AskedGate.beginConversation`) */
+    newConversation: (sessionId: string) => void
     /** A session's row that is not being removed, or `session_not_found` */
     openSession: (sessionId: string) => SessionInfo
     /** The orchestrator's memory handoff for a new process */
@@ -545,6 +547,8 @@ export class SessionStarts {
     },
   ): CreateSessionOpts {
     const { profile, tools } = o.choice
+    // A conversation with nothing to resume is a new one; a process taken over from an earlier host, or one resumed, is not known to be
+    if (m.kind === 'orchestrator' && !o.resumeExternalId && !o.adopt) this.host.newConversation(m.id)
     return {
       sessionId: m.id,
       cwd: o.cwd,

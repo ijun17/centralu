@@ -236,7 +236,7 @@ describe('in the turn a request starts, every step that changes something asks t
     // A word to another session, or to a thread that is not this request, is a step that reaches someone: it asks
     const sent = run('mail', { action: 'send', to: other.id, text: 'a word to the other session' })
     await eventually(() => !!card())
-    expect(card()!.text).toContain('asked the orchestrator to run mail')
+    expect(card()!.text).toContain('run mail')
     w.mgr.respondApproval(orc.id, card()!.requestId, 'deny')
     expect((await sent).isError).toBe(true)
     expect(w.store.mail.threadsOfParty(mail.sessionAddress(orc.id), 'owner')).toEqual([])
@@ -270,6 +270,33 @@ describe('in the turn a request starts, every step that changes something asks t
     w.mgr.respondApproval(orc.id, card()!.requestId, 'allow')
     expect((await again).isError).toBeFalsy()
     expect(words().join(' ')).toContain('hunter2')
+  })
+
+  it('what the orchestrator read in the person’s own turn, and in an earlier request, reaches a later request’s reply', async () => {
+    // The person's turn, before any request: the hook of the CLI tells the host the orchestrator read a file anywhere
+    orcOpts!.requestTurn!.seen('Read', { file_path: join(tmpdir(), 'somewhere-else', 'notes.txt') })
+    const { asker } = await asked()
+    const thread = w.store.mail.threadsOfParty(mail.sessionAddress(asker.id), 'owner')[0]!
+    const reply = run('mail', { action: 'reply', thread: thread.id, text: 'here is what the file said' })
+    await eventually(() => !!card())
+    expect(card()!.text).toContain('here is what the file said')
+    expect(card()!.text).toContain('somewhere-else')
+    w.mgr.respondApproval(orc.id, card()!.requestId, 'deny')
+    expect((await reply).isError).toBe(true)
+
+    // A later turn, for a later request, still has it
+    handleOf(orc.id).finishTurn()
+    await settle()
+    await eventually(() => w.store.mail.thread(thread.id)?.state === 'review')
+    expect((await askOrchestrator(asker, 'and one more thing')).isError).toBeUndefined()
+    clock.t += 60_000
+    await due(orc.id)
+    // (its second request is a thread of its own, in a turn of its own)
+    const second = w.store.mail.threadsOfParty(mail.sessionAddress(asker.id), 'owner').find((t) => t.id !== thread.id)!
+    const again = run('mail', { action: 'reply', thread: second.id, text: 'second answer' })
+    await eventually(() => !!card())
+    w.mgr.respondApproval(orc.id, card()!.requestId, 'allow')
+    expect((await again).isError).toBeFalsy()
   })
 
   it('the turn’s end is reported to the session that asked, and the next step is the orchestrator’s own again', async () => {

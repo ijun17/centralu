@@ -7,7 +7,9 @@ import { oneLineText } from '@cc/protocol'
  *
  * Reading needs no card, but what the orchestrator reads it can also write back: it answers in the asking session's thread, and the session reads
  * the answer. So a turn that read a file outside the asker's folders, or the conversations of another project, must not hand the asker that in a
- * reply without the person's say: `AskedGate` remembers it for the turn and puts the reply to the person (`askedAct`). Reads themselves stay free.
+ * reply without the person's say: `AskedGate` remembers the read for the orchestrator's whole conversation and puts the words that go back to a
+ * session to the person (`askedAct`). Reads themselves stay free. What is remembered is the scope of the read, judged against the reach of whoever asks
+ * when the words are written: the conversation keeps what it read across turns, requests and compaction.
  *
  * Fail closed: a path that is not absolute, or that cannot be told, is out of reach; so is a session that cannot be found.
  */
@@ -18,11 +20,15 @@ export type ReadScope =
   | { paths: readonly string[] }
   /** One session's conversation, or null when the call does not say which */
   | { session: string | null }
+  /** A project's own state (its branch, an app's runs and errors), or null when the call names none */
+  | { project: string | null }
+  /** A mail thread, or null when the call names none */
+  | { thread: string | null }
   /** Conversations across projects, whichever they are (`recall`, the list of sessions, the archive) */
   | { everywhere: true }
 
-/** What the asking session reaches itself */
-export type Reach = { folders: readonly string[]; project: string | null }
+/** What the asking session reaches itself: its folders, its project (id and name) and the thread of its request */
+export type Reach = { folders: readonly string[]; project: string | null; projectName?: string | null; thread: string }
 
 /** The CLI's reads of files, and the host's reads of conversations; null for any other tool or command */
 export function readScope(name: string, args: Record<string, unknown>): ReadScope | null {
@@ -38,9 +44,18 @@ export function readScope(name: string, args: Record<string, unknown>): ReadScop
       return { session: text(args.sessionId) }
     case 'agent_session':
       return args.action === 'status' || args.action === 'wait' || args.action === 'list' ? { session: text(args.sessionId) } : null
+    case 'mail':
+      // A thread read other than the request's own is some other session's words (the one thread that is the asker's own is judged at reply time)
+      return args.action === 'read' ? { thread: text(args.thread)?.trim() || null } : null
+    case 'project_git_status':
+    case 'list_app_runs':
+    case 'list_app_errors':
+    case 'app_usage':
+      return { project: text(args.project) }
     case 'recall':
     case 'list_sessions':
     case 'list_archive':
+    case 'machine_activity':
       return { everywhere: true }
     default:
       return null
@@ -97,6 +112,13 @@ export function outOfReach(name: string, scope: ReadScope, reach: Reach, project
     if (scope.session === null) return name
     const project = projectOf(scope.session)
     return project !== undefined && project !== null && project === reach.project ? null : named(scope.session)
+  }
+  if ('thread' in scope) return scope.thread !== null && scope.thread === reach.thread ? null : scope.thread === null ? name : named(scope.thread)
+  if ('project' in scope) {
+    const asked = scope.project?.trim().toLowerCase()
+    if (!asked) return name
+    const mine = [reach.project, reach.projectName].filter((p): p is string => typeof p === 'string' && p !== '')
+    return mine.some((p) => p.toLowerCase() === asked) ? null : named(scope.project ?? '')
   }
   const folders = reach.folders.filter((f) => isAbsolute(f)).map(real)
   for (const path of scope.paths) {

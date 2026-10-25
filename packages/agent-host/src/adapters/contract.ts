@@ -65,6 +65,11 @@ export type RequestTurn = {
    * asked, with Allow or Deny only, instead of the CLI's own with its "always"
    */
   askRead(tool: string, input: Record<string, unknown>, signal?: AbortSignal): Promise<RequestTurnAnswer>
+  /**
+   * A tool call in a turn that is not a request (the person's own), told to the host as it is made: what the conversation reads there can be carried to a
+   * session by a later request's reply. Never throws, never holds the call
+   */
+  seen(tool: string, input: Record<string, unknown>): void
 }
 
 export type CreateSessionOpts = {

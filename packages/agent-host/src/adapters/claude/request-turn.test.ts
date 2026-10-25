@@ -45,7 +45,7 @@ afterEach(() => {
 const ALLOWED: RequestTurnAnswer = { allowed: true, asked: true }
 
 function world(preset: 'auto' | 'normal' = 'auto') {
-  const turn = { active: false, asked: [] as { tool: string; input: Record<string, unknown>; signal?: AbortSignal }[], read: [] as { tool: string; input: Record<string, unknown>; signal?: AbortSignal }[], answer: ALLOWED, fails: false }
+  const turn = { active: false, asked: [] as { tool: string; input: Record<string, unknown>; signal?: AbortSignal }[], read: [] as { tool: string; input: Record<string, unknown>; signal?: AbortSignal }[], seen: [] as { tool: string; input: Record<string, unknown> }[], seenFails: false, answer: ALLOWED, fails: false }
   const requestTurn: RequestTurn = {
     active: () => turn.active,
     ask: async (tool, input, signal) => {
@@ -56,6 +56,10 @@ function world(preset: 'auto' | 'normal' = 'auto') {
     askRead: async (tool, input, signal) => {
       turn.read.push({ tool, input, ...(signal ? { signal } : {}) })
       return turn.answer
+    },
+    seen: (tool, input) => {
+      if (turn.seenFails) throw new Error('the gate is gone')
+      turn.seen.push({ tool, input })
     },
   }
   const events: NormalizedEvent[] = []
@@ -90,6 +94,16 @@ describe('a hook in front of every tool call of a session’s request', () => {
     const handle = await w.start('h3')
     expect(await w.hook('Bash', { command: 'ls' })).toEqual({})
     expect(w.turn.asked).toEqual([])
+    await handle.dispose()
+  })
+
+  it('but it tells the host what the person’s own turn reads, since a later request’s reply could carry it; a host that cannot note it never holds the tool', async () => {
+    const w = world('auto')
+    const handle = await w.start('h3b')
+    expect(await w.hook('Read', { file_path: '/elsewhere/a.txt' })).toEqual({})
+    expect(w.turn.seen).toEqual([{ tool: 'Read', input: { file_path: '/elsewhere/a.txt' } }])
+    w.turn.seenFails = true
+    expect(await w.hook('Read', { file_path: '/elsewhere/b.txt' })).toEqual({})
     await handle.dispose()
   })
 
@@ -165,7 +179,7 @@ describe('a hook in front of every tool call of a session’s request', () => {
   it('a turn that cannot be told is refused, not let through: a hook that throws would let the tool run', async () => {
     const w = world('auto')
     const handle = await w.start('h9b')
-    const broken = requestTurnHooks({ requestTurn: { active: () => { throw new Error('the store is gone') }, ask: async () => ALLOWED, askRead: async () => ALLOWED } }, () => true)!.PreToolUse[0]!.hooks[0]!
+    const broken = requestTurnHooks({ requestTurn: { active: () => { throw new Error('the store is gone') }, ask: async () => ALLOWED, askRead: async () => ALLOWED, seen: () => {} } }, () => true)!.PreToolUse[0]!.hooks[0]!
     const out = (await broken({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: {} } as never, 'toolu_4', { signal: new AbortController().signal })) as HookOutput
     expect(out).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } })
     await handle.dispose()
