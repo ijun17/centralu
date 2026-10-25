@@ -23,7 +23,7 @@ export const APP_ID = 'app.centralu'
  * The app's version: never written in git (#1501). `version.generated.ts` holds the placeholder
  * `0.0.0-dev`, which development builds and tests run with; a packaging build stamps the version
  * it resolves (`scripts/app-version.mjs`: `CENTRALU_VERSION`, else the release tag) into that file
- * and the other carriers (`scripts/stamp-version.mts`), and `tooling/brand.test.ts` fails on a
+ * and the other carriers (`scripts/stamp-version.mjs`), and `tooling/brand.test.ts` fails on a
  * stamped carrier committed by accident.
  *
  * The version says beta up front. "0.1.0" reads like a finished first release, while

@@ -43,7 +43,7 @@ import { holdStamp } from './stamp-version.mjs'
 import { CONPTY_FILES as CONPTY_FILES_JS } from './conpty-files.mjs'
 import { checkStaged, shellToCarry, stageBundle, stageContent, type CarriedShell } from './bundle-stage.mjs'
 import { resolveSigningKey, trustedKeys, verifyContent, type SigningKey } from './content-manifest.mjs'
-import { hostPackageDir, hostPackageProblems, remotePlatforms, stageHostPackage } from './host-package.mjs'
+import { floorDiffers, hostPackageDir, hostPackageProblems, remotePlatforms, stageHostPackage } from './host-package.mjs'
 const CONPTY_FILES = CONPTY_FILES_JS as readonly string[]
 import { publishStep, stillMissing, viewPublished, VISIBLE_DELAY_MS, VISIBLE_TRIES } from './release-registry.mjs'
 
@@ -233,9 +233,8 @@ function checkRemoteRuntime(hostDir: string): void {
   // The Node floor a hub checks machines against is `engines.node` of the npm package; the host carries a copy (#699)
   const floor = join(hostDir, 'centralu-package.json')
   if (!existsSync(floor)) fail(`${floor} is missing: a hub on this build could not tell which Node a machine needs`)
-  if (readFileSync(floor, 'utf8') !== readFileSync(join(ROOT, 'packaging/npm/centralu/package.json'), 'utf8')) {
-    fail(`${floor} differs from packaging/npm/centralu/package.json: the host was bundled before the Node floor moved. Run pnpm bundle:host again`)
-  }
+  const why = floorDiffers(readFileSync(floor, 'utf8'), readFileSync(join(ROOT, 'packaging/npm/centralu/package.json'), 'utf8'))
+  if (why) fail(`${floor} differs from packaging/npm/centralu/package.json: ${why}. Run pnpm bundle:host again`)
   console.log('  Node floor present (centralu-package.json)')
 }
 

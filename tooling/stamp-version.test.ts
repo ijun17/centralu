@@ -10,10 +10,13 @@ import { constants as osConstants, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
+import { SLOW } from './test-timing.js'
 // @ts-expect-error — plain JavaScript, read by bundle.mjs and the signing workflow under plain node
 import { checkAppVersion, PLACEHOLDER, releaseTag, resolveAppVersion } from '../scripts/app-version.mjs'
 // @ts-expect-error — as above
 import { runSteps, stampedFiles, stampVersion, versionOnlyDirt } from '../scripts/stamp-version.mjs'
+// @ts-expect-error — as above
+import { buildId } from '../packages/agent-host/scripts/build-id.mjs'
 
 const dirs: string[] = []
 const temp = () => {
@@ -137,7 +140,7 @@ await runSteps(process.cwd(), '0.2.0-beta.4', [[process.execPath, ['-e', ${JSON.
       while (alive() && Date.now() < gone) await new Promise((r) => setTimeout(r, 50))
       expect(alive()).toBe(false)
     },
-    30_000,
+    30_000 * SLOW,
   )
 
   it('release-npm holds its stamp through holdStamp, after the clean-tree check and before verify, so a signal restores too', () => {
@@ -161,5 +164,20 @@ await runSteps(process.cwd(), '0.2.0-beta.4', [[process.execPath, ['-e', ${JSON.
     git(root, 'checkout', '--', 'apps/desktop/src-tauri/tauri.conf.json')
     writeFileSync(join(root, 'notes.txt'), 'x\n')
     expect(versionOnlyDirt(root)).toEqual(['?? notes.txt'])
+  })
+
+  it('names a stamped tree by its commit in the bundled host, and any other change -dirty (bundle.mjs)', () => {
+    const root = carriers()
+    const sha = git(root, 'rev-parse', '--short', 'HEAD')
+    stampVersion(root, '0.2.0-beta.4')
+    expect(buildId(root)).toBe(sha)
+    writeFileSync(join(root, 'notes.txt'), 'x\n')
+    expect(buildId(root)).toBe(`${sha}-dirty`)
+    // bundle.mjs bakes that id into the host and its bundle record, from the repository root
+    const bundle = readFileSync(resolve('packages/agent-host/scripts/bundle.mjs'), 'utf8')
+    expect(bundle).toContain("import { buildId } from './build-id.mjs'")
+    expect(bundle).toContain('const BUILD_ID = buildId(ROOT)')
+    expect(bundle).toContain('__CC_BUILD__: JSON.stringify(BUILD_ID)')
+    expect(bundle).toContain('commit: BUILD_ID,')
   })
 })

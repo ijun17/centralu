@@ -49,6 +49,27 @@ export function stageHostPackage(hostSrc: string, pkgDir: string): void {
  * copy of the npm package's manifest that holds the Node floor, the
  * manifest that ships exactly `host/`, and nothing of the window.
  */
+/**
+ * Why the host's copy of the launcher manifest (`centralu-package.json`) differs from the launcher's, or null when it
+ * does not. Since #1501 the manifest carries the stamped version, so a host bundled before the stamp differs by its
+ * version fields alone: say so, rather than blame the Node floor.
+ */
+export function floorDiffers(bundled: string, launcher: string): string | null {
+  if (bundled === launcher) return null
+  const versionless = (text: string): string | null => {
+    try {
+      const m = JSON.parse(text) as { version?: unknown; optionalDependencies?: Record<string, unknown> }
+      return JSON.stringify({ ...m, version: null, optionalDependencies: Object.keys(m.optionalDependencies ?? {}) })
+    } catch {
+      return null
+    }
+  }
+  const a = versionless(bundled)
+  return a !== null && a === versionless(launcher)
+    ? 'the host was bundled before the version was stamped (bundle it from the stamped tree, as release-npm does)'
+    : 'the host was bundled before the Node floor moved'
+}
+
 export function hostPackageProblems(pkgDir: string, platform: string, pinFile = PIN_FILE, launcherFile = LAUNCHER_PACKAGE_FILE): string[] {
   const problems: string[] = []
   const manifest = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8')) as { name?: string; files?: string[] }
@@ -70,7 +91,10 @@ export function hostPackageProblems(pkgDir: string, platform: string, pinFile = 
   else if (readFileSync(runtime, 'utf8') !== readFileSync(pinFile, 'utf8')) problems.push('host/remote-runtime.json differs from packaging/remote-runtime.json: the host was bundled before the Node pin moved')
   const floor = join(host, 'centralu-package.json')
   if (!existsSync(floor)) problems.push('host/centralu-package.json is missing: a hub on this version could not tell which Node a machine needs')
-  else if (readFileSync(floor, 'utf8') !== readFileSync(launcherFile, 'utf8')) problems.push('host/centralu-package.json differs from packaging/npm/centralu/package.json: the host was bundled before the Node floor moved')
+  else {
+    const why = floorDiffers(readFileSync(floor, 'utf8'), readFileSync(launcherFile, 'utf8'))
+    if (why) problems.push(`host/centralu-package.json differs from packaging/npm/centralu/package.json: ${why}`)
+  }
   const extra = readdirSync(pkgDir).filter((n) => !['host', 'package.json', 'README.md'].includes(n))
   if (extra.length) problems.push(`the package folder holds more than the host: ${extra.join(', ')}`)
   return problems
