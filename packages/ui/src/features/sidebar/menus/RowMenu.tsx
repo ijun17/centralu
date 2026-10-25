@@ -1,4 +1,5 @@
 import { useRef, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { useAnchoredPlacement } from '../../../components/anchored.js'
 import { useDismiss } from '../../../components/useDismiss.js'
 
@@ -56,7 +57,14 @@ export function RowMenu({
    */
   useDismiss({ onClose, refs: [ref, { current: anchorEl }], returnFocusTo: anchorEl?.querySelector('button') ?? anchorEl })
 
-  return (
+  /*
+   * **Drawn into the body, not inside the row that opened it** (#1531). `position: fixed` frees a box from clipping, not
+   * from its ancestors' paint: an `opacity` on any ancestor applies to every descendant, fixed ones included, so the
+   * menu of a project on a machine that is away (its block is `opacity-60`) came up half transparent, the rows under it
+   * showing through. Opacity on an ancestor cannot be undone by a child; outside it the menu is whole — the same reason
+   * the tooltip is portaled. It also covers any other menu inside a faded or transformed ancestor.
+   */
+  return createPortal(
     <div
       ref={ref}
       role="menu"
@@ -70,6 +78,7 @@ export function RowMenu({
       }}
     >
       {children}
-    </div>
+    </div>,
+    document.body,
   )
 }

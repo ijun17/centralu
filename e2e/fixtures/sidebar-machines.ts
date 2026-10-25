@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 import { newSession, setup as setupProjects } from './control.js'
 
 /**
@@ -57,6 +57,15 @@ const midY = (page: Page, testId: string, closest?: string) =>
     const r = line.getBoundingClientRect()
     return r.top + r.height / 2
   }, closest)
+
+/** The computed opacity of an element, and of every ancestor of it up to the root: what an element is drawn at is their product */
+const opacities = (loc: Locator) =>
+  loc.evaluate((el) => {
+    const out: number[] = []
+    for (let n: Element | null = el; n; n = n.parentElement) out.push(Number(getComputedStyle(n).opacity))
+    return out
+  })
+const opacity = async (loc: Locator) => (await opacities(loc))[0]!
 
 const NOTES = {
   appId: 'notes',
@@ -204,6 +213,29 @@ export function sidebarMachinesTests(): void {
       await expect(page.getByTestId('machine-menu-connect-box')).toHaveText('Reconnect')
       await page.keyboard.press('Escape')
       await expect(menu).toHaveCount(0)
+    })
+
+    test("the menu of a project on a machine that is away is whole, not see-through, and so is its tooltip (#1531)", async ({ page }) => {
+      await setup(page)
+      await link(page, 'Box')
+      await addOn(page, 'box', '/home/me/api')
+      await setMachine(page, 'box', { status: 'unreachable', error: 'ssh: connect to host box port 22: Operation timed out' })
+      // The block is dimmed, as before: this is the case that made the menu inherit the dimming
+      await expect(page.getByTestId('project-api')).toHaveAttribute('data-away', 'true')
+      expect(await opacity(page.getByTestId('project-api'))).toBeLessThan(1)
+
+      await page.getByTestId('project-menu-api').click()
+      const menu = page.getByTestId('project-menu-open-api')
+      await expect(menu).toBeVisible()
+      // The menu and every ancestor of it are fully opaque: an ancestor's opacity multiplies into everything inside it
+      expect((await opacities(menu)).every((o) => o === 1)).toBe(true)
+      await page.keyboard.press('Escape')
+      await expect(menu).toHaveCount(0)
+
+      await page.getByTestId('project-header-api').hover()
+      const tip = page.getByTestId('project-tip-api')
+      await expect(tip).toBeVisible()
+      expect((await opacities(tip)).every((o) => o === 1)).toBe(true)
     })
 
     test("a project is dragged between two of another machine's: the one order goes to the hub with the machines' ids", async ({ page }) => {
