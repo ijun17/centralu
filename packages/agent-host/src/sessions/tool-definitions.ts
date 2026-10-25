@@ -495,7 +495,7 @@ export const ORCHESTRATOR_TOOLS = [
     name: 'handoff_session',
     description:
       'Hands a session off to a fresh one that starts from a note: built from its stored conversation by default, or written by the session (mode "agent"). ' +
-      'Its live children move to the new session; the original stays. Refused while it is mid-turn; asks the person unless you are auto.',
+      'Its live children move to the new session; the original stays. Refused while it is mid-turn; asks the person unless you are auto or the session runs under a preset no higher than yours.',
     schema: z.object({
       sessionId: z.string().optional().describe('The session id from list_sessions.'),
       tool: ToolName.optional().describe("The new session's tool. If omitted, the same tool."),

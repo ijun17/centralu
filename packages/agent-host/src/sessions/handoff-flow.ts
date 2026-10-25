@@ -6,6 +6,7 @@ import { inTurn } from '../idle.js'
 import { AgentRunWait } from './app-agents.js'
 import type { HostAsk, HostAskAnswer } from './host-cards.js'
 import { trustedJsonText } from './orchestrator-tools.js'
+import { presetWithin } from './start-agent.js'
 import { raceBound } from './with-timeout.js'
 
 /**
@@ -80,9 +81,11 @@ type Run = {
  * those only a project's ordinary session: never itself, an orchestrator or coordinator, an app's session (an app's
  * agent or its builder, whose tie to the app the successor would not carry), a worktree session (refused with the
  * window's reason), or a session mid-turn (refused, never cut short). The person's consent is a card in the
- * orchestrator's own session for each handoff, unless the orchestrator runs under `auto` (#603, logged) or the person
- * answered "always" on an earlier card, which lasts while this host serves that orchestrator. The checks run again
- * after the card, since the target may have started a turn while it stood.
+ * orchestrator's own session for each handoff, unless the orchestrator runs under `auto` (#603, logged), the person
+ * answered "always" on an earlier card (which lasts while this host serves that orchestrator), or the handoff
+ * guards nothing (#1509, owner 2026-10-24): the target is at rest (never mid-turn, above) and the successor's preset,
+ * which is the original's, is within the orchestrator's own (`covered`). The original stays, so nothing is lost and
+ * no power is added. The checks run again after the card, since the target may have started a turn while it stood.
  *
  * What moves is what the person's own handoff moves: the live children go to the successor, which is then owed their
  * reports; `moveChildren` checks no authority itself, which is why every check above precedes it. The original always
@@ -117,6 +120,16 @@ export class HandoffFlow {
     return null
   }
 
+  /**
+   * Whether this handoff needs no card (#1509): the successor runs under the original's preset (`succeed`), so it is never
+   * above it, and it is within the orchestrator's own, so the orchestrator hands over no power it lacks. The target being
+   * at rest is `refusal`'s, checked before and after. A caller that cannot be read asks
+   */
+  private covered(callerId: string, target: SessionInfo): boolean {
+    const caller = this.host.meta.get(callerId)
+    return caller !== undefined && presetWithin(target.permissionPreset, caller.permissionPreset)
+  }
+
   /** A refusal, logged with who asked and for which session (#694 review) */
   private refuse(callerId: string, targetId: string, error: string): HandoffResult {
     console.error(`[agent-host] handoff_session by ${callerId.slice(0, 8)} of ${targetId.slice(0, 8)} refused: ${error}`)
@@ -147,12 +160,17 @@ export class HandoffFlow {
     if (problem) return this.refuse(callerId, target.id, `Nothing was handed off: ${problem}`)
 
     let always = false
+    // Whether no card stood for this call (#1509); the presets are then read once more where the successor starts, as an agent's note takes minutes
+    let uncarded = false
     /*
      * Under `auto` no card is raised, and the allowance is logged only once this call holds the session (#797): a
      * burst of calls logged "allowed" for each before all but one were refused. Asked here without logging.
      */
     const viaAuto = this.host.autoBoundaryOpen(callerId)
-    if (!viaAuto && !this.always.has(callerId)) {
+    // The session as it is after the tool check awaited, not the object the call came with
+    const covered = this.covered(callerId, this.host.meta.get(target.id) ?? target)
+    uncarded = !viaAuto && covered && !this.always.has(callerId)
+    if (!viaAuto && !covered && !this.always.has(callerId)) {
       const decision = await this.host.askHost(
         callerId,
         { kind: 'other', about: SESSION_HANDOFF, raw: this.question(target, tool, mode, instructions) },
@@ -181,7 +199,7 @@ export class HandoffFlow {
       this.runs.delete(run.id)
       return this.refuse(callerId, now.id, 'This session left the auto preset while the handoff was being checked; call again to be asked.')
     }
-    run.done = (mode === 'record' ? this.fromRecord(callerId, now, tool, instructions) : this.fromAgent(callerId, now, tool, instructions)).then((r) => {
+    run.done = (mode === 'record' ? this.fromRecord(callerId, now, tool, instructions, uncarded) : this.fromAgent(callerId, now, tool, instructions, uncarded)).then((r) => {
       if (this.running.get(now.id) === run) this.running.delete(now.id)
       if (!run.detached) this.runs.delete(run.id)
       else {
@@ -194,10 +212,10 @@ export class HandoffFlow {
     return this.waitOn(run, started, signal)
   }
 
-  private async fromRecord(callerId: string, target: SessionInfo, tool: ToolName, instructions: string | undefined): Promise<HandoffResult> {
+  private async fromRecord(callerId: string, target: SessionInfo, tool: ToolName, instructions: string | undefined, uncarded: boolean): Promise<HandoffResult> {
     try {
       const note = await this.host.exportHandoffRecord(target.id, tool)
-      return await this.succeed(callerId, target, tool, note, 'record', instructions)
+      return await this.succeed(callerId, target, tool, note, 'record', instructions, uncarded)
     } catch (e) {
       return { ok: false, error: `Nothing was handed off: ${(e as Error).message}` }
     }
@@ -207,7 +225,7 @@ export class HandoffFlow {
    * Agent mode: the session is asked, as the window asks it, with the orchestrator named as the sender. The note is
    * read from the store once the turn ends (`exportHandoffNote`), never from the screen.
    */
-  private async fromAgent(callerId: string, target: SessionInfo, tool: ToolName, instructions: string | undefined): Promise<HandoffResult> {
+  private async fromAgent(callerId: string, target: SessionInfo, tool: ToolName, instructions: string | undefined, uncarded: boolean): Promise<HandoffResult> {
     const before = this.host.store.messages.loadMessages(target.id, 1).at(-1)?.seq ?? 0
     // Watched before the send, since an adapter can emit the turn's events while sending
     const turn = new AgentRunWait(() => {}, () => target.name)
@@ -220,7 +238,7 @@ export class HandoffFlow {
       } catch (e) {
         return { ok: false, error: `Could not ask ${trustedJsonText(target.name)} for its note: ${(e as Error).message}` }
       }
-      return await this.awaitNote(callerId, target, tool, before, instructions, turn)
+      return await this.awaitNote(callerId, target, tool, before, instructions, turn, uncarded)
     } finally {
       readers.delete(turn)
       if (readers.size === 0 && this.host.turnObservers.get(target.id) === readers) this.host.turnObservers.delete(target.id)
@@ -249,7 +267,7 @@ export class HandoffFlow {
    * The turn's end is read as start_agent reads a child's (`AgentRunWait`, #428): one that failed, hit a limit or was
    * stopped answers at once and says how, where polling the session's state waited out the whole bound and blamed it.
    */
-  private async awaitNote(callerId: string, target: SessionInfo, tool: ToolName, before: number, instructions: string | undefined, turn: AgentRunWait): Promise<HandoffResult> {
+  private async awaitNote(callerId: string, target: SessionInfo, tool: ToolName, before: number, instructions: string | undefined, turn: AgentRunWait, uncarded: boolean): Promise<HandoffResult> {
     const name = trustedJsonText(target.name)
     try {
       const r = await raceBound(turn.done.then(() => null, (e: Error) => e), this.timings.noteMs)
@@ -259,7 +277,7 @@ export class HandoffFlow {
       if (!cur) return { ok: false, error: `${name} disappeared while writing its note; nothing was handed off.` }
       const got = await this.host.exportHandoffNote(target.id, before)
       if (!got) return { ok: false, error: `${name} ended its turn without a note; nothing was handed off. Hand it off from the record (mode "record").` }
-      return await this.succeed(callerId, cur, tool, got, 'agent', instructions)
+      return await this.succeed(callerId, cur, tool, got, 'agent', instructions, uncarded)
     } catch (e) {
       return { ok: false, error: `Nothing was handed off: ${(e as Error).message}` }
     }
@@ -277,7 +295,12 @@ export class HandoffFlow {
     note: { text: string; path: string },
     mode: 'record' | 'agent',
     instructions: string | undefined,
+    uncarded: boolean,
   ): Promise<HandoffResult> {
+    // No card stood for this call, so the successor's preset must still be within the orchestrator's: the original may have been raised while it wrote its note
+    if (uncarded && !this.covered(callerId, target)) {
+      return { ok: false, error: `The preset of ${trustedJsonText(target.name)} or of the orchestrator changed before the successor started; nothing was handed off. Call again to be asked.` }
+    }
     const same = tool === target.tool
     const callerName = this.host.meta.get(callerId)?.name ?? 'Orchestrator'
     const info = await this.host.createSession({

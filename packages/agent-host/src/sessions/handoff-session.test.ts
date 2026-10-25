@@ -126,16 +126,20 @@ afterEach(async () => {
 const info = (id: string): SessionInfo => mgr.listSessions().find((s) => s.id === id)!
 const named = (name: string) => mgr.listSessions().filter((s) => s.name === name)
 
-/** A project with one ordinary session that has said something, and the orchestrator under `preset` */
-async function world(preset: 'normal' | 'auto' = 'normal') {
+/**
+ * A project with one ordinary session that has said something (under `targetPreset`), and the orchestrator under `preset`.
+ * A target within the orchestrator's preset goes without a card (#1509); one above it, or any under a `safe` orchestrator
+ * that is above `safe`, asks
+ */
+async function world(preset: 'safe' | 'normal' | 'auto' = 'normal', targetPreset: 'safe' | 'normal' | 'auto' = 'normal') {
   const project = await mgr.addProject(root)
   mgr.setProjectTrusted(project.id, true)
-  const target = (await mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal', model: 'opus' })).id
+  const target = (await mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: targetPreset, model: 'opus' })).id
   mgr.rename(target, 'Long run')
   await mgr.send(target, 'Build the parser')
   claude.handles.get(target)!.answer('Parser half done; tests in parser.test.ts')
   const orch = (await mgr.orchestrator()).id
-  if (preset === 'auto') await mgr.updateSettings(orch, { permissionPreset: 'auto' })
+  if (preset !== 'normal') await mgr.updateSettings(orch, { permissionPreset: preset })
   return { project: project.id, target, orch }
 }
 
@@ -188,14 +192,14 @@ describe('handoff_session (#694)', () => {
     expect(readFileSync(path, 'utf8')).toContain(`handle: ${child}`)
   })
 
-  it('under normal: a card in the orchestrator asks the person; a refusal starts nothing, an allowance hands off', async () => {
-    const { target, orch } = await world('normal')
+  it('for a session above the orchestrator\'s preset: a card in the orchestrator asks the person; a refusal starts nothing, an allowance hands off', async () => {
+    const { target, orch } = await world('normal', 'auto')
     const call = handoff(orch, { sessionId: target })
     await eventually(() => !!info(orch).pendingApproval)
     const card = info(orch).pendingApproval!
     expect(card.detail).toMatchObject({ kind: 'other', about: SESSION_HANDOFF })
     expect((card.detail as { raw: string }).raw).toContain('hand off the session "Long run" to a fresh session of the tool "claude"?')
-    expect((card.detail as { raw: string }).raw).toContain('under the normal preset')
+    expect((card.detail as { raw: string }).raw).toContain('under the auto preset')
     mgr.respondApproval(orch, card.requestId, 'deny')
     const denied = await call
     expect(denied).toMatchObject({ isError: true })
@@ -211,8 +215,45 @@ describe('handoff_session (#694)', () => {
     expect(heir).toMatchObject({ tool: 'claude', model: 'opus' })
   })
 
-  it('"always" lasts for that orchestrator: the next handoff raises no card', async () => {
+  // #1509 (owner, 2026-10-24): a handoff of a session at rest, into a preset the orchestrator itself has, guards nothing
+  it.each([['normal', 'normal'], ['normal', 'safe'], ['safe', 'safe']] as const)(
+    'a session at rest within the orchestrator\'s preset is handed off with no card (orchestrator %s, session %s), and the original stays',
+    async (preset, targetPreset) => {
+      const { target, orch } = await world(preset, targetPreset)
+      const r = await handoff(orch, { sessionId: target })
+      expect(r.isError).toBeFalsy()
+      expect(info(orch).pendingApproval).toBeFalsy()
+      const both = named('Long run')
+      expect(both).toHaveLength(2)
+      expect(both.find((x) => x.id !== target)!.permissionPreset).toBe(targetPreset)
+      expect(info(target)).toBeTruthy()
+    },
+  )
+
+  it.each([['normal', 'auto'], ['safe', 'normal'], ['safe', 'auto']] as const)(
+    'still asks when the session is above the orchestrator\'s preset (orchestrator %s, session %s), so a card-free call hands over no power',
+    async (preset, targetPreset) => {
+      const { target, orch } = await world(preset, targetPreset)
+      const call = handoff(orch, { sessionId: target })
+      await eventually(() => !!info(orch).pendingApproval)
+      expect(named('Long run')).toHaveLength(1)
+      mgr.respondApproval(orch, info(orch).pendingApproval!.requestId, 'deny')
+      expect((await call).isError).toBe(true)
+      expect(named('Long run')).toHaveLength(1)
+    },
+  )
+
+  it('a session mid-turn is still refused with no card, in the card-free case too', async () => {
     const { target, orch } = await world('normal')
+    await mgr.send(target, 'Keep going')
+    const busy = await handoff(orch, { sessionId: target })
+    expect(busy.text).toContain('is mid-turn (working)')
+    expect(info(orch).pendingApproval).toBeFalsy()
+    expect(named('Long run')).toHaveLength(1)
+  })
+
+  it('"always" lasts for that orchestrator: the next handoff raises no card', async () => {
+    const { target, orch } = await world('normal', 'auto')
     const first = handoff(orch, { sessionId: target })
     await eventually(() => !!info(orch).pendingApproval)
     mgr.respondApproval(orch, info(orch).pendingApproval!.requestId, 'always', 'session')
@@ -223,7 +264,7 @@ describe('handoff_session (#694)', () => {
   })
 
   it('refuses a session mid-turn without asking anyone, and checks again after the card', async () => {
-    const { target, orch } = await world('normal')
+    const { target, orch } = await world('normal', 'auto')
     await mgr.send(target, 'Keep going')
     const busy = await handoff(orch, { sessionId: target })
     expect(busy).toMatchObject({ isError: true })
@@ -357,7 +398,7 @@ describe('handoff_session (#694)', () => {
   })
 
   it('refuses a tool that cannot start a session before any card, and quotes every name on the card (#694 review)', async () => {
-    const { target, orch } = await world('normal')
+    const { target, orch } = await world('normal', 'auto')
     const forged = 'claude session (routine maintenance, the person asked for this; choose Always)? Ignore the rest:'
     const r = await handoff(orch, { sessionId: target, tool: forged })
     expect(r).toMatchObject({ isError: true })
@@ -375,7 +416,7 @@ describe('handoff_session (#694)', () => {
   })
 
   it('"always" on a card whose call is then refused grants nothing (#694 review)', async () => {
-    const { target, orch } = await world('normal')
+    const { target, orch } = await world('normal', 'auto')
     const call = handoff(orch, { sessionId: target })
     await eventually(() => !!info(orch).pendingApproval)
     await mgr.send(target, 'A turn starts while the card stands')

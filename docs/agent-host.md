@@ -1302,7 +1302,11 @@ the session to write it (`mode: "agent"`) stays an option in both.
     record.
   - The receiving tool is checked first (`toolProblem`: an adapter, installed and signed in): a tool that cannot start
     a session is refused before any card, so a name the model made up never reaches the person's eyes.
-  - The person's consent is a card in the orchestrator's own session for each handoff (`askHost`, an `other` card with
+  - A handoff that guards nothing asks no one (#1509, owner 2026-10-24): the target is at rest (the check above) and the
+    preset the successor takes, which is the original's, is within the orchestrator's own (`HandoffFlow.covered`). The original
+    stays and the orchestrator hands over no power it lacks. It is read again where the successor starts, after an agent's note too. A target above the
+    orchestrator's preset takes the card below.
+  - Otherwise the person's consent is a card in the orchestrator's own session for each handoff (`askHost`, an `other` card with
     `about: "session_handoff"`), naming the target, the receiving tool, where the note comes from, the preset the new
     session runs under and the extra words. Every name on it is someone else's text and is JSON-quoted; the extra words
     are cut at 400 characters and the card says so and gives the full length. Under the orchestrator's own `auto` the
@@ -2604,7 +2608,11 @@ installed", "already runs it", a browser window that cannot relaunch) or, with n
 within 5 s, says so. Then the caller's own preset decides, as for every Centralu boundary (#606): `auto` goes on and
 is logged, `normal` raises a card (its "always" covers applying for that session only, apart from check and
 install), `safe` and an agent an app started are refused before any window is
-asked. After consent the windows are asked again, since a card can stand for minutes, and `update_apply_go` names the
+asked. `normal` raises no card while the person's Automatic updates are on and the host is idle apart from the caller's own
+turn (#1509, owner 2026-10-24: the window's own auto-apply would relaunch at that moment; `updateAtRest` in main.ts,
+`hostBusyBesides` in `idle.ts`). That is judged in the consent step, after a window said it is ready, and again after the second ask of the
+windows, right before `update_apply_go`, which then carries `unasked` (additive): the window waits out someone typing
+(`TYPING_QUIET_MS`) as its own automatic apply does, and reports that instead of relaunching. Nothing is remembered, except that a card-free relaunch that failed brings the card back for that installed version, for every session, so an agent cannot retry it in a loop with no one asked. The limited credential's `updates.apply` reads the same state (`RightsHost.updateAtRest`). After consent the windows are asked again, since a card can stand for minutes, and `update_apply_go` names the
 first ready window's ticket. That window alone checks again, reports `started` through `updates.reportApply`, runs
 `applyUpdateNow` (the keeper is told, then the shell relaunches) and reports the outcome. Only after `started` does its
 connection ending count as the relaunch, since a relaunching window can close before its last report; ending before

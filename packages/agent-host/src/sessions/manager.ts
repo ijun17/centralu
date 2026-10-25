@@ -2670,6 +2670,11 @@ export class SessionManager {
     this.updatesAsked.updateApply = broker
   }
 
+  /** Whether Automatic updates are on and the host idle, for an agent's apply to go with no card (#1509, updates-asked.ts) — wired by the host */
+  useUpdateAtRest(atRest: (besidesSessionId: string) => boolean): void {
+    this.updatesAsked.updateAtRest = atRest
+  }
+
   /** `SessionSettings.noteAgentMoved` (session-settings.ts), kept on the manager for its callers */
   noteAgentMoved(...a: Parameters<SessionSettings['noteAgentMoved']>): ReturnType<SessionSettings['noteAgentMoved']> {
     return this.sessionSettings.noteAgentMoved(...a)
