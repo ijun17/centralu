@@ -1,4 +1,5 @@
 import { scriptMessageFrame } from './script-messages.js'
+import { unfitError } from './tool-fit.js'
 import { randomUUID } from 'node:crypto'
 import type { BackgroundTask, CreateSessionParams, SessionInfo, ToolName } from '@cc/protocol'
 import { autoCompactPlan } from './auto-compact.js'
@@ -985,5 +986,5 @@ function startFit(adapter: AgentAdapter, opts: CreateSessionOpts, sink: EventSin
     noSettingFiles: opts.noSettingFiles,
     roleText: !!opts.systemPromptAppend,
   })
-  return reason ? Promise.reject(rpcError(reason, 'refused', { retryable: false, data: { reason: 'tool_unfit' } })) : adapter.createSession(opts, sink)
+  return reason ? Promise.reject(unfitError(reason)) : adapter.createSession(opts, sink)
 }

@@ -64,7 +64,7 @@ export function useToolChoice(initial: ToolName, machine?: MachineRef, demands?:
 }
 
 /** What the orchestrator's seat asks of a tool: its role as text, and no setting files read (#92) */
-export const ORCHESTRATOR_DEMANDS: LaunchDemands = { permissionPreset: 'normal', projectTrusted: false, noSettingFiles: true, roleText: true }
+export { ORCHESTRATOR_DEMANDS } from '@cc/protocol'
 
 /**
  * Why each of `tools` cannot run a start that asks `demands`, in the host's words (`launchRefusal`, the rule the host

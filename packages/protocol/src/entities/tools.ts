@@ -168,6 +168,9 @@ export type LaunchDemands = {
   roleText?: boolean
 }
 
+/** What the orchestrator asks of its tool: Normal, no project's files, and Centralu's role text (`OrchestratorSlot`) */
+export const ORCHESTRATOR_DEMANDS: LaunchDemands = { permissionPreset: 'normal', projectTrusted: false, noSettingFiles: true, roleText: true }
+
 /**
  * Why `label`'s tool cannot run a session that demands this, or null when it can. The one rule for both sides: the host
  * refuses a launch with it, and a picker shows the same words beside a tool it greys out.

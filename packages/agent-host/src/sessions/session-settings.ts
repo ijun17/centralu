@@ -2,6 +2,7 @@ import type { NormalizedEvent, PermissionPreset, SessionInfo, SettingsApplied } 
 import { applyBackgroundTasks, oneLineText } from '@cc/protocol'
 import { inTurn } from '../idle.js'
 import { rpcError } from '../rpc-error.js'
+import { unfitError } from './tool-fit.js'
 import type { DelegationHost } from './delegation-flow.js'
 import type { RestartHost } from './restart-policy.js'
 import type { SessionEventsHost } from './session-events.js'
@@ -21,8 +22,8 @@ export type SessionSettingsHost = Pick<DelegationHost, 'meta' | 'store' | 'emit'
   Pick<SessionRecordHost, 'cacheLedger' | 'sessionOf'> &
   Pick<SessionEventsHost, 'queue' | 'requireHandle'> &
   Pick<WorktreeHost, 'resuming'> & {
-    /** Why the session's tool cannot run under a preset, or null (`ToolRegistry.presetRefusal`) */
-    presetRefusal: (tool: string, preset: PermissionPreset) => string | null
+    /** Why a tool cannot run the session under a preset, or null (`SessionManager.toolRefusal`) */
+    toolRefusal: (m: SessionInfo, tool?: string, preset?: PermissionPreset) => string | null
   }
 
 /**
@@ -41,8 +42,8 @@ export class SessionSettings {
     const m = this.host.openSession(sessionId)
     // Checked before anything is changed: a preset the tool cannot keep would be saved, shown as in force, and refuse the
     // session's next wake
-    const refused = s.permissionPreset ? this.host.presetRefusal(m.tool, s.permissionPreset) : null
-    if (refused) throw rpcError(refused, 'refused', { retryable: false, data: { reason: 'tool_unfit' } })
+    const refused = s.permissionPreset ? this.host.toolRefusal(m, m.tool, s.permissionPreset) : null
+    if (refused) throw unfitError(refused)
 
     // Another model reads none of this one's cache (§6.1), whether it applies live or through a restart
     if (s.model !== undefined && s.model !== m.model) this.host.cacheLedger.note(sessionId, 'model_change')

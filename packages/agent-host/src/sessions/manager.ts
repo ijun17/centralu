@@ -44,6 +44,7 @@ import { SessionLayout, type SessionLayoutHost } from './session-layout.js'
 import { ChildOwnership, PAUSED_REPORT_SETTLE_MS, type PersonReportDraft } from './child-ownership.js'
 import { LinkedReports, type LinkedReportsHost } from './linked-reports.js'
 import { OrchestratorSlot, type OrchestratorSlotHost } from './orchestrator-slot.js'
+import { sessionDemands, unfitError } from './tool-fit.js'
 import { LinkedHost, type LinkedHostHost } from './linked-host.js'
 import { SessionSettings, type SessionSettingsHost } from './session-settings.js'
 import { AgentRunWait } from './app-agents.js'
@@ -1470,6 +1471,11 @@ export class SessionManager {
    * A session is a slot, and the agent is a tool — the slot (name, order, history, grid panel) is left
    * untouched, and only the tool underneath it is swapped.
    */
+  /** Why `tool` cannot run this session as its next launch would, under `preset` (its own by default), or null (`tool-fit.ts`) */
+  toolRefusal(m: SessionInfo, tool: ToolName = m.tool, preset: PermissionPreset = m.permissionPreset): string | null {
+    return this.toolRegistry.refusal(tool, sessionDemands(m, this.launchInputs.settingFilesFor(m), preset))
+  }
+
   async switchTool(sessionId: string, tool: ToolName): Promise<SessionInfo> {
     this.notBeingRemoved(sessionId)
     this.refuseWhileLettingGo()
@@ -1478,6 +1484,9 @@ export class SessionManager {
 
     const adapter = this.adapters.get(tool)
     if (!adapter) throw rpcError(`Unknown tool: ${tool}`, 'tool_not_installed')
+    // Before anything is let go: a session switched to a tool that cannot run it would refuse every send after
+    const refused = this.toolRefusal(m, tool)
+    if (refused) throw unfitError(refused)
 
     /*
      * Checks whether the new tool is usable before switching to it.
@@ -2415,7 +2424,8 @@ export class SessionManager {
       },
       nameOf: (...a) => self.reports.nameOf(...a),
       toolProblem: (...a) => self.toolRegistry.toolProblem(...a),
-      presetRefusal: (...a) => self.toolRegistry.presetRefusal(...a),
+      toolRefusal: (...a) => self.toolRefusal(...a),
+      refusal: (...a) => self.toolRegistry.refusal(...a),
       trashSession: (...a) => self.trashSession(...a),
       purgeSession: (...a) => self.purgeSession(...a),
       trashIf: (...a) => self.trash.trashIf(...a),

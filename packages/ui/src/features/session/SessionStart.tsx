@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { ToolName } from '@cc/protocol'
 import { useStore } from '../../store/store.js'
 import { useTools } from '../../store/selectors.js'
@@ -51,7 +51,12 @@ function ToolSwitch({ sessionId, projectId, tool }: { sessionId: string; project
   const [busy, setBusy] = useState<ToolName | null>(null)
   // A tool that cannot keep what this project asks (an untrusted project, `launchRefusal`) is left out like one not installed
   const trusted = useStore((s) => !!s.projects[projectId]?.trusted)
-  const refusal = useRefusals(found.data ?? null, { permissionPreset: 'normal', projectTrusted: trusted }, machine ?? undefined)
+  // Asked with the session's own preset and role (#1562 review): the switch keeps both, so a tool must keep them too
+  const preset = useStore((s) => s.sessions[sessionId]?.permissionPreset ?? 'normal')
+  // Role text by its kind; a builder's fixed role the window does not hold, and the host refuses that switch itself
+  const roleText = useStore((s) => s.sessions[sessionId]?.kind === 'orchestrator' || s.sessions[sessionId]?.kind === 'coordinator')
+  const demands = useMemo(() => ({ permissionPreset: preset, projectTrusted: trusted, roleText }), [preset, trusted, roleText])
+  const refusal = useRefusals(found.data ?? null, demands, machine ?? undefined)
 
   /*
    * Only the tools that can run on the project's machine are offered (owner, 2026-10-18): one not installed or not

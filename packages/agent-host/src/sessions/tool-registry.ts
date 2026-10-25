@@ -1,4 +1,4 @@
-import type { PermissionPreset, ToolName } from '@cc/protocol'
+import type { LaunchDemands, ToolName } from '@cc/protocol'
 import { launchRefusal } from '@cc/protocol'
 import type { AgentAdapter } from '../adapters/contract.js'
 import { registeredTool } from '../adapters/registry.js'
@@ -60,13 +60,12 @@ export class ToolRegistry {
   }
 
   /**
-   * Why `tool` cannot run under `preset` (it declared it has no way to keep it), or null: the same rule a launch is held
-   * to (`launchRefusal`), for a preset changed on a running session
+   * Why `tool` cannot run a session that demands this (`launchRefusal`), or null: the one rule, for every path that puts
+   * a tool on a session (`tool-fit.ts`). A tool this host does not run is `toolProblem`'s to say
    */
-  presetRefusal(tool: ToolName, preset: PermissionPreset): string | null {
+  refusal(tool: ToolName, demands: LaunchDemands): string | null {
     const adapter = this.host.adapters.get(tool)
-    // Only the preset is asked here: the rest (trust, role text) was the launch's to check
-    return adapter ? launchRefusal(adapter.capabilities, adapter.descriptor.label, { permissionPreset: preset, projectTrusted: true }) : null
+    return adapter ? launchRefusal(adapter.capabilities, adapter.descriptor.label, demands) : null
   }
 
   /** Why `tool` cannot start a session here now (not registered, not installed, not logged in), or null when it can */

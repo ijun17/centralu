@@ -46,3 +46,17 @@ test('a tool that takes no role text cannot be picked for the orchestrator, and 
   await expect(page.getByTestId('orchestrator-tool-codex')).toHaveAttribute('title', /cannot run the orchestrator/)
   await expect(page.getByTestId('orchestrator-tool-claude')).toBeEnabled()
 })
+
+test("the empty session's tool switch offers only the tools that keep the session's own preset", async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'], trusted: true })
+  await limitCodex(page)
+  await openSessionDialog(page, 'alpha')
+  await page.getByTestId('create-session-confirm').click()
+  await expect(page.getByTestId('session-start-tool-claude')).toHaveAttribute('aria-checked', 'true')
+  await expect(page.getByTestId('session-start-tool-codex')).toBeVisible()
+  // Safe: the limited tool would be saved as a session it cannot run, so the switch leaves it out (as one not installed)
+  await page.getByTestId('settings-open').click()
+  await page.getByTestId('settings-preset-safe').click()
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('session-start-tool-codex')).toHaveCount(0)
+})

@@ -58,6 +58,24 @@ describe('launching a tool that declares limits', () => {
     expect(kept.find((x) => x.id === s.id)?.permissionPreset).toBe('normal')
   })
 
+  it('refuses switching a session to a tool that cannot keep its preset, and leaves it on its tool', async () => {
+    const world = limitedWorld()
+    const p = (await world.rpc('projects.add', { path: dir })) as { id: string }
+    await world.rpc('projects.setTrusted', { projectId: p.id, trusted: true })
+    const s = (await world.rpc('agents.createSession', { projectId: p.id, cwd: dir, tool: 'claude', permissionPreset: 'safe' })) as { id: string }
+    await expect(world.rpc('agents.switchTool', { sessionId: s.id, tool: 'codex' })).rejects.toThrow(/Limited.*Safe/)
+    const kept = (await world.rpc('sessions.list', {})) as { id: string; tool: string; permissionPreset?: string }[]
+    expect(kept.find((x) => x.id === s.id)).toMatchObject({ tool: 'claude', permissionPreset: 'safe' })
+    expect(world.codexAdapter.lastOpts).toBeNull()
+  })
+
+  it('refuses a tool that takes no role text as the orchestrator, and keeps the one chosen', async () => {
+    const world = limitedWorld()
+    await world.rpc('orchestrator.configure', { tool: 'claude' })
+    await expect(world.rpc('orchestrator.configure', { tool: 'codex' })).rejects.toThrow(/Limited.*role instructions/)
+    expect(world.store.settings.appSetting('orchestrator_tool')).toBe('claude')
+  })
+
   it('leaves a tool without limits as it was', async () => {
     const world = managerWorld()
     const p = (await world.rpc('projects.add', { path: dir })) as { id: string }
