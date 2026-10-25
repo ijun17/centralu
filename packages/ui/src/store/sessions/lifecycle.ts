@@ -1,4 +1,4 @@
-import { APP_ARRIVAL_ID_PREFIX, backgroundCount, isAppArrivalId, isInTurn, sessionPanelId, withPanel, type SessionSummary } from '@cc/core'
+import { APP_ARRIVAL_ID_PREFIX, backgroundCount, defaultPresetFor, isAppArrivalId, isInTurn, sessionPanelId, withPanel, type SessionSummary } from '@cc/core'
 import { errorMessage, type NormalizedEvent, type ToolDefaults, type ToolName } from '@cc/protocol'
 import { initialSession, markRead as markReadPure, rename as renamePure } from '@cc/core'
 import type { Platform } from '@cc/platform/ports'
@@ -246,7 +246,7 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
           effort: opts?.effort ?? remembered.effort ?? undefined,
           verbosity: opts?.verbosity,
           serviceTier: opts?.serviceTier,
-          permissionPreset: opts?.permissionPreset ?? 'normal',
+          permissionPreset: opts?.permissionPreset ?? defaultPresetFor(project),
           initialPrompt: opts?.initialPrompt,
           handoff: opts?.handoff,
           resumeExternalId: opts?.resumeExternalId,

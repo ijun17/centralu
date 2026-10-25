@@ -12,7 +12,7 @@ import { acknowledge, dueReposts, markReposted, noticeText, unacked, watchStart 
 import { fakeGh, type FakeGh } from './fake-gh.test-helpers.js'
 import { SLOW } from './test-timing.js'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
-import { decideBefore, decideCi, emptyQueue, enqueue, pushEvent, supersededSuites, twinPassedSuites, quickLanded, handoffReason, lowerFailureCounts, noticeKey, dequeue, normalize, onlySupersededFailures, queueOrder, watchState } from '../.centralu/apps/project-board/queue.mjs'
+import { decideBefore, decideCi, emptyQueue, enqueue, pushEvent, supersededSuites, twinPassedSuites, quickLanded, handoffReason, authorRoute, resetFor, lowerFailureCounts, noticeKey, dequeue, normalize, onlySupersededFailures, queueOrder, watchState } from '../.centralu/apps/project-board/queue.mjs'
 // @ts-expect-error -- a plain .mjs module of the board app, without types
 import { commandEnv, conflictPlan } from '../.centralu/apps/project-board/queue-conflict.mjs'
 // @ts-expect-error -- a plain .mjs module of the board app, without types
@@ -25,6 +25,8 @@ import { latestRuns, queueBusy, takeLease, releaseLease } from '../.centralu/app
 import { attributeByPaths, carried, mainVerdict, nextStep, sortCommits } from '../.centralu/apps/project-board/main-guard.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { classifyRun, looksLikeNetworkError, onFlakyList } from '../.centralu/apps/project-board/run-failure.mjs'
+// @ts-expect-error — plain .mjs of a Centralu app
+import { GitError, isNetworkFailure } from '../.centralu/apps/project-board/git.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { batchCandidates, decideLanding, endBatch, formBatch, gathering, markBatchless, onlyCancelledByBatch, splitBatch } from '../.centralu/apps/project-board/batch.mjs'
 
@@ -210,6 +212,36 @@ describe('what the merge queue decides for one poll', () => {
       '',
     ])
       expect(looksLikeNetworkError(text), text).toBe(false)
+  })
+
+  // The restack pauses the queue and tries again for these; a failure that says the same next time goes to the author
+  it('tells git being unable to reach the remote from git being refused by it: only the first is tried again', () => {
+    const git = (stderr: string) => new GitError(`git failed: ${stderr}`, stderr, 128)
+    for (const stderr of [
+      "fatal: unable to access 'https://github.com/x/y.git/': Could not resolve host: github.com",
+      "fatal: unable to access 'https://github.com/x/y.git/': Failed to connect to github.com port 443 after 21034 ms: Couldn't connect to server",
+      "fatal: unable to access 'https://github.com/x/y.git/': Connection timed out after 300001 milliseconds",
+      "fatal: unable to access 'https://github.com/x/y.git/': Recv failure: Connection reset by peer",
+      "fatal: unable to access 'https://github.com/x/y.git/': The requested URL returned error: 502",
+      "fatal: unable to access 'https://github.com/x/y.git/': The requested URL returned error: 429",
+      'error: RPC failed; curl 56 Recv failure: Connection was reset\nfatal: the remote end hung up unexpectedly',
+      'ssh: connect to host github.com port 22: Connection timed out\nfatal: Could not read from remote repository.',
+      'fatal: early EOF',
+    ])
+      expect(isNetworkFailure(git(stderr)), stderr).toBe(true)
+    for (const stderr of [
+      "fatal: unable to access 'https://github.com/x/y.git/': The requested URL returned error: 403",
+      "fatal: unable to access 'https://github.com/x/y.git/': The requested URL returned error: 404",
+      "fatal: unable to access 'https://github.com/x/y.git/': SSL certificate problem: unable to get local issuer certificate",
+      "fatal: unable to access 'https://github.com/x/y.git/': SSL: no alternative certificate subject name matches target host name 'github.com'",
+      'git@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights',
+      "fatal: Authentication failed for 'https://github.com/x/y.git/'",
+      'error: failed to push some refs to x\nhint: Updates were rejected because the tip of your current branch is behind',
+      'error: cannot lock ref: is at abc but expected def',
+    ])
+      expect(isNetworkFailure(git(stderr)), stderr).toBe(false)
+    // Not a git failure at all
+    expect(isNetworkFailure(new Error('Could not resolve host'))).toBe(false)
   })
 
   it("calls a job that failed in a step that sets it up an infrastructure failure, and one that failed in a test step a real one", () => {
@@ -657,6 +689,29 @@ describe('what the merge queue decides with two tiers of CI', () => {
     expect(ci({ item: fresh({ alone: { head: SHA2, text: 'x' } }) })).toMatchObject({ state: 'ci', quick: true })
   })
 
+  // #1509 item 4: what the attention above told a session to type (gh workflow run build.yml --ref <branch>), the queue does
+  it('starts the full tier itself on a branch of this repository it cannot batch, once per head, and says so when no full run reports', () => {
+    const first = ci({ canBatch: false })
+    expect(first).toMatchObject({ state: 'ci', action: { type: 'dispatch-full', branch: 'feat/queue' }, patch: { fullDispatch: { head: SHA } } })
+    expect(first.event).toContain('started the full tier on feat/queue')
+    const sentAt = (minutesAgo: number) => fresh({ fullDispatch: { head: SHA, at: new Date(NOW - minutesAgo * 60_000).toISOString() } })
+    // Started: it waits for that run, and does not start another
+    expect(ci({ canBatch: false, item: sentAt(2) })).toEqual({ state: 'ci', patch: { noCiSince: null, missingSince: null } })
+    // Nothing reported in 15 minutes: the session hears it, with the command for doing it by hand
+    const late = ci({ canBatch: false, item: sentAt(20) })
+    expect(late).toMatchObject({ state: 'attention', reason: { kind: 'full-tier' } })
+    expect(late.reason.text).toContain('no full run has reported on c0ffee0 in 15 minutes')
+    expect(late.reason.text).toContain('gh workflow run build.yml --ref feat/queue')
+    // GitHub refused to start it: said, and not flipped back to waiting on the next poll
+    expect(ci({ canBatch: false, item: fresh({ fullDispatch: { head: SHA, at: new Date(NOW - 60_000).toISOString(), refused: 'Workflow does not have workflow_dispatch trigger' } }) })).toMatchObject({ state: 'attention', reason: { kind: 'full-tier' } })
+    // Started for another head: on this one it starts again
+    expect(ci({ canBatch: false, item: fresh({ fullDispatch: { head: SHA2, at: new Date(NOW).toISOString() } }) })).toMatchObject({ action: { type: 'dispatch-full' } })
+    // A fork's branch is never run here
+    expect(ci({ canBatch: false, pr: openPr({ isCrossRepository: true }) })).toMatchObject({ state: 'attention', reason: { kind: 'full-tier' } })
+    // A new head forgets what was started for the old one
+    expect(resetFor(fresh({ fullDispatch: { head: SHA, at: 'x' } }), SHA2)).toMatchObject({ head: SHA2, fullDispatch: null })
+  })
+
   it('keeps a pull request that failed alone in a batch in attention, without rerunning its own run the batch cancelled', () => {
     const reason = { kind: 'failed', text: '#77 failed alone in batch queue/batch-3: "verify" failed.', job: { name: 'verify', id: '61' } }
     const cancelled = tiered([check(TIER, 'skipped'), check('verify', 'cancelled'), check('windows tests', 'cancelled')])
@@ -827,7 +882,28 @@ describe('which conflicts the merge queue regenerates itself (#1182)', () => {
     const files = ['packages/ui/src/app.tsx']
     const to = handoffReason({ item: fresh({ author: 'writer' }), pr, files, why: 'Not mechanical.', ref })
     expect(to.reason).toMatchObject({ kind: 'conflict', files, relay: { to: 'writer', branch: 'feat/b77', text: 'Merge main into feat/b77 and push again; conflicted files: packages/ui/src/app.tsx.' } })
-    expect(to.reason.text).toContain('Author session: writer. Relay this to it (the queue cannot message a session yet, #1173): "Merge main into feat/b77 and push again; conflicted files: packages/ui/src/app.tsx."')
+    expect(to.reason.text).toContain('Author session: writer. Relay this to it (it has not called this app, so the queue has no address to post to): "Merge main into feat/b77 and push again; conflicted files: packages/ui/src/app.tsx."')
+    // Where the instruction goes (#1509 item 4): this session when it is the author, the author's own session when it opened the pull request through open_pr
+    const own = handoffReason({ item: fresh({ author: 'me', owner: 'me' }), pr, files, why: 'Not mechanical.', ref, route: 'self' })
+    expect(own.reason.text).toContain('#77 is your own pull request (author session: me): fix it in this session: "Merge main into feat/b77')
+    // The text names the session the queue posts to: the one that opened it, not the one queue_merge named when that is another
+    const direct = handoffReason({ item: fresh({ author: 'writer' }), pr, files, why: 'Not mechanical.', ref, route: 'direct' })
+    expect(direct.reason.text).toContain('Author session: the session that opened it (queue_merge named writer as its author). The queue is posting this into it itself, so relay it only if it does not answer: "Merge main into feat/b77')
+    expect(direct.reason.relay).toMatchObject({ route: 'direct', to: 'the session that opened it' })
+    // No author named, but the opener is known: still posted to it
+    expect(handoffReason({ item: fresh({ author: null }), pr, files, why: 'Not mechanical.', ref, route: 'direct' }).reason.text).toContain('Author session: the session that opened it. The queue is posting this into it itself')
+    // The queuing session opened it and no author was named: not "no author session is recorded"
+    const mine = handoffReason({ item: fresh({ author: null, owner: 'me' }), pr, files, why: 'Not mechanical.', ref, route: 'self' })
+    expect(mine.reason.text).toContain('#77 is your own pull request: fix it in this session: "Merge main into feat/b77')
+    expect(mine.reason.text).not.toContain('No author session is recorded')
+    expect(mine.reason.relay).toMatchObject({ route: 'self', to: 'me' })
+    // ... or another was named, which this route does not use: said beside it, not as "fix it in this session" for that one
+    expect(handoffReason({ item: fresh({ author: 'writer', owner: 'me' }), pr, files, why: 'Not mechanical.', ref, route: 'self' }).reason.text).toContain('#77 is your own pull request (queue_merge named writer as its author): fix it in this session')
+    // authorRoute: the session that opened it through open_pr decides; failing that, an author who is the owner
+    expect(authorRoute(fresh({ notice: 'a', author: 'writer' }), { notice: 'a' })).toEqual({ route: 'self', to: 'a' })
+    expect(authorRoute(fresh({ notice: 'a', author: 'writer' }), { notice: 'b' })).toEqual({ route: 'direct', to: 'b' })
+    expect(authorRoute(fresh({ notice: 'a', author: 'me', owner: 'me' }), null)).toEqual({ route: 'self', to: 'a' })
+    expect(authorRoute(fresh({ notice: 'a', author: 'writer', owner: 'me' }), null)).toEqual({ route: 'relay', to: null })
     const none = handoffReason({ item: fresh({ author: null }), pr, files, why: 'Not mechanical.', ref })
     expect(none.reason.relay.to).toBeNull()
     expect(none.reason.text).toContain('No author session is recorded for #77 (queue_merge author). Start a session on its branch feat/b77 with this instruction: "Merge main into feat/b77')
@@ -1417,6 +1493,69 @@ describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, (
     expect(writes().map((w) => w[0])).toEqual(['rerun-failed', 'merge', 'delete'])
   })
 
+  // 2026-10-24 (#1507, run 40063018693, job 120780406901): the runner was shut down under e2e (chromium 1/5) of the release
+  // bump. GitHub's only note on the job is "The operation was canceled."; its step says failure; the log holds the shutdown
+  // line and, after it, the tests the shutdown cut short
+  const SHUTDOWN_LOG = readFileSync(join(REPO_ROOT, 'tooling/fixtures/ci-log-runner-shutdown.txt'), 'utf8')
+  const shutDown = (extra: Record<string, unknown> = {}) =>
+    ghState({
+      checks: { [SHA]: [ghCheck('verify', 'success', 11), ghCheck('windows tests', 'failure', 12)] },
+      runs: { [SHA]: [ghRun('failure')] },
+      jobs: { 900: [{ id: 11, name: 'verify', conclusion: 'success', steps: [] }, { id: 12, name: 'windows tests', conclusion: 'failure', steps: [{ name: 'pnpm e2e --shard=1/5', conclusion: 'failure' }] }] },
+      annotations: { '12': [{ message: 'The operation was canceled.' }] },
+      logs: { '12': SHUTDOWN_LOG },
+      ...extra,
+    })
+
+  it('reruns once a job the runner shut down under, though only the log says so, and lands it when the rerun passes', async () => {
+    runtime(shutDown({ on: { 'rerun-failed:900': { runs: { [SHA]: [ghRun('success', 2)] }, checks: { [SHA]: green() } } } }))
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await until((x) => stateOf(x) === 'merged', 'the merge after the rerun')
+    expect(writes().map((w) => w[0])).toEqual(['rerun-failed', 'merge', 'delete'])
+  })
+
+  it('asks for attention when the shutdown happens again after the rerun, and names no test the shutdown cut short', async () => {
+    runtime(shutDown({ on: { 'rerun-failed:900': { runs: { [SHA]: [ghRun('failure', 2)] }, annotations: { '12': [{ message: 'The operation was canceled.' }] } } } }))
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    const q = await until((x) => stateOf(x) === 'attention', 'attention')
+    await morePolls()
+    expect(writes().map((w) => w[0])).toEqual(['rerun-failed'])
+    expect(q.queue[0].reason).toMatchObject({ kind: expect.stringMatching(/failed|failing/) })
+    expect(notices()).toHaveLength(1)
+    expect(notices()[0]!.text).not.toContain('archive.spec.ts')
+    expect(notices()[0]!.text).toContain('shutdown signal')
+  })
+
+  // The log is read for the shutdown line only when the cancellation is all GitHub wrote on the job (`every`): a job that
+  // also carries another note failed for that, and the cancellation is CI's, the fail-fast kind
+  it('does not read the log for a shutdown when the job has another note beside the cancellation: a failed step is attention at once, not a rerun', async () => {
+    runtime(shutDown({ annotations: { '12': [{ message: 'The operation was canceled.' }, { message: 'Process completed with exit code 1.' }] } }))
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    const q = await until((x) => stateOf(x) === 'attention', 'attention')
+    await morePolls()
+    expect(writes()).toEqual([])
+    expect(q.queue[0].reason.kind).toMatch(/failed|failing/)
+  })
+
+  // The job carries only the runner's cancellation note, so jobNotes reads the log; each log below has a line that looks
+  // like the runner's and is not, and each of the three rules (start of line, exact case, cancellation after it) is the
+  // only thing that tells it apart
+  const said = '##[error]The runner has received a shutdown signal. This can happen when the runner service is stopped, or a manually started runner is canceled.'
+  const failure = [' FAIL  unit  packages/a/a.test.ts > prints a log > is read', '##[error]Process completed with exit code 1.']
+  it.each([
+    ['a test printed it, indented', ['##[group]Run pnpm test', `    ${said}`, ...failure, '##[error]The operation was canceled.']],
+    ['a test printed it in another case, at the start of a line', ['##[group]Run pnpm test', said.replace('The runner has received', 'the runner has received'), ...failure, '##[error]The operation was canceled.']],
+    ['the line is the runner\'s but nothing says the step was cancelled after it', ['##[group]Run pnpm test', said, ...failure]],
+  ])("does not take a look-alike for the runner's shutdown (%s)", async (_why, lines) => {
+    const printed = lines.join('\n')
+    runtime(shutDown({ logs: { '12': printed } }))
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    const q = await until((x) => stateOf(x) === 'attention', 'attention')
+    await morePolls()
+    expect(writes()).toEqual([])
+    expect(q.queue[0].reason.kind).toMatch(/failed|failing/)
+  })
+
   it('tells the session once when a pull request goes DIRTY and the queue has no checkout to merge it in, and never merges it', async () => {
     runtime(ghState({ prs: { '77': ghPr(77, { mergeStateStatus: 'DIRTY', mergeable: 'CONFLICTING' }) } }))
     await call('queue_merge', { pr: 77, owner: 'tester' })
@@ -1424,7 +1563,7 @@ describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, (
     await morePolls()
     expect(writes()).toEqual([])
     expect(notices().map((e) => e.text)).toEqual([
-      'Merge queue: #77 (feat(apps): change 77) needs attention: conflict. #77 conflicts with main at c0ffee0. The queue has no checkout to merge it in. Author session: tester. Relay this to it (the queue cannot message a session yet, #1173): "Merge main into feat/b77 and push again; conflicted files: not known (GitHub says it conflicts)." The queue takes the new head by itself, at the front of the queue. Or take it out with unqueue.',
+      'Merge queue: #77 (feat(apps): change 77) needs attention: conflict. #77 conflicts with main at c0ffee0. The queue has no checkout to merge it in. #77 is your own pull request (author session: tester): fix it in this session: "Merge main into feat/b77 and push again; conflicted files: not known (GitHub says it conflicts)." The queue takes the new head by itself, at the front of the queue. Or take it out with unqueue.',
     ])
     const listed = await call('merge_queue')
     expect(listed.text).toContain('Merge queue: 1 need attention.')
@@ -1998,8 +2137,8 @@ describe('the merge queue resolves a conflict with main itself, or hands it to t
     const told = notices().filter((e) => e.kind === 'attention')
     expect(told).toHaveLength(1)
     expect(told[0]!.text).toContain("src/app.ts is not on project.json's list of mechanical files (queue.conflicts.mechanical)")
-    expect(told[0]!.text).toContain('Author session: writer. Relay this to it (the queue cannot message a session yet, #1173): "Merge main into feat/b77 and push again; conflicted files: pnpm-lock.yaml, src/app.ts."')
-    expect((told[0] as any).relay).toEqual({ to: 'writer', branch: 'feat/b77', text: 'Merge main into feat/b77 and push again; conflicted files: pnpm-lock.yaml, src/app.ts.' })
+    expect(told[0]!.text).toContain('Author session: writer. Relay this to it (it has not called this app, so the queue has no address to post to): "Merge main into feat/b77 and push again; conflicted files: pnpm-lock.yaml, src/app.ts."')
+    expect((told[0] as any).relay).toEqual({ to: 'writer', branch: 'feat/b77', text: 'Merge main into feat/b77 and push again; conflicted files: pnpm-lock.yaml, src/app.ts.', route: 'relay' })
     expect(conflictSteps().map((e) => [e.step, e.by ?? null])).toEqual([
       ['merge', null],
       ['handoff', 'session'],
@@ -3337,6 +3476,54 @@ describe("the main guard does not revert a commit for the runner's own failure (
     conclusion: 'cancelled',
     steps: webkitJob(id).steps.map((s) => (s.name === inStep ? { ...s, conclusion: 'cancelled' } : s.name === 'Install WebKit' ? { ...s, conclusion: 'success' } : s.name.startsWith('Run actions/upload') ? { ...s, conclusion: 'skipped' } : s)),
   })
+  // #1507: the runner shut down under a job's tests; only the log says so. The first time it is the runner's, and the job is rerun.
+  const SHUTDOWN_FIXTURE = readFileSync(join(REPO_ROOT, 'tooling/fixtures/ci-log-runner-shutdown.txt'), 'utf8')
+  const cutShort = (id: number, name: string) => ({ id, name, status: 'completed', conclusion: 'failure', steps: [{ name: 'Set up job', conclusion: 'success' }, { name: 'pnpm e2e (shard 1/5)', conclusion: 'failure' }] })
+
+  it('hunts and reverts the commit when the runner is shut down under the same job again after the rerun: it can be the commit that exhausts the runner', async () => {
+    const repo = mainRepo([{ subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] }])
+    const sha = repo.shas[0]!
+    seedQueue([{ repo: R, pr: 81, lowers: [], owner: 'tester', author: 'writer', state: 'merged', commit: sha, title: 'feat(ui): change 81', updatedAt: new Date().toISOString(), reruns: {} }])
+    guardRuntime(repo, {
+      branchRuns: { main: [mainRun(990, sha, 'failure'), mainRun(980, repo.green, 'success')] },
+      jobs: { 990: [cutShort(31, 'e2e (chromium 1/5)')] },
+      annotations: { '31': [{ message: 'The operation was canceled.' }] },
+      logs: { '31': SHUTDOWN_FIXTURE },
+      on: { 'rerun-failed:990': { branchRuns: { main: [secondAttempt(sha, 'failure'), mainRun(980, repo.green, 'success')] } } },
+    })
+    await call('merge_queue')
+    await until(() => guardOnDisk().hunt?.outcome === 'reverting' && mainRedNotices().length > 0, 'the revert')
+    // Once: the first shutdown is the runner's, the second on the same job is looked into as a test failure
+    expect(reruns()).toEqual([['rerun-failed', '990']])
+    expect(writes().filter((w) => w[0] === 'pr-create')).toHaveLength(1)
+    expect(guardOnDisk().hunt).toMatchObject({ red: sha, kind: 'test', cause: 'runner', outcome: 'reverting' })
+    // The quote is the shutdown, not a test the shutdown cut short
+    expect(JSON.stringify(guardOnDisk().hunt)).not.toContain('archive.spec.ts')
+  })
+
+  it('only reports a shutdown that hits another job on the rerun: it is not the same job failing again, and nothing is reverted', async () => {
+    const repo = mainRepo([{ subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] }, { subject: 'feat(ui): change 82 (#82)', files: ['packages/ui/src/b.ts'] }])
+    const sha = repo.shas[1]!
+    seedQueue([{ repo: R, pr: 82, lowers: [], owner: 'tester', author: 'writer', state: 'merged', commit: sha, title: 'feat(ui): change 82', updatedAt: new Date().toISOString(), reruns: {} }])
+    guardRuntime(repo, {
+      branchRuns: { main: [mainRun(990, sha, 'failure'), mainRun(980, repo.green, 'success')] },
+      jobs: { 990: [cutShort(31, 'e2e (chromium 1/5)')] },
+      annotations: { '31': [{ message: 'The operation was canceled.' }], '32': [{ message: 'The operation was canceled.' }] },
+      logs: { '31': SHUTDOWN_FIXTURE, '32': SHUTDOWN_FIXTURE },
+      on: { 'rerun-failed:990': { branchRuns: { main: [secondAttempt(sha, 'failure'), mainRun(980, repo.green, 'success')] }, jobs: { 990: [cutShort(32, 'e2e (chromium 2/5)')] } } },
+    })
+    await call('merge_queue')
+    await until(() => issues().length > 0 && mainRedNotices().length > 0, 'the report')
+    await new Promise((r) => setTimeout(r, 1_000))
+    expect(reruns()).toEqual([['rerun-failed', '990']])
+    expect(writes().filter((w) => w[0] === 'pr-create')).toEqual([])
+    expect(issues()).toHaveLength(1)
+    expect(issues()[0]!.title).toBe(`Main is red at ${sha.slice(0, 7)}: an infrastructure failure, not reverted`)
+    expect(issues()[0]!.body).toContain('a lost runner')
+    expect(issues()[0]!.body).not.toContain('archive.spec.ts')
+    expect(guardOnDisk().hunt).toMatchObject({ red: sha, kind: 'infrastructure', cause: 'runner', outcome: 'reported' })
+  })
+
   const limitNote = { '31': [{ message: 'The job has exceeded the maximum execution time of 15 minutes.' }] }
 
   it('reruns a job that ran out of time in the browser install once, then reports it and reverts nothing when no commit changed what the setup installs', async () => {
@@ -4244,5 +4431,308 @@ describe("the merge queue keeps its messages until their owner acknowledges them
     const quiet = await watch(['watch', '--data', dir, '--owner', 'tester', '--minutes', '0.02'])
     expect(quiet.code).toBe(6)
     expect(quiet.out).not.toContain('needs attention')
+  })
+})
+
+/*
+ * #1509 item 4: what the queue used to tell a session to do by hand, it does. The app against the fake `gh`, with a queue
+ * file seeded the way `queue_merge` writes it (the notice address of the queuing session on the item) and `opened-prs.json`
+ * as `open_pr` writes it (the notice address of the session that opened the pull request).
+ */
+describe('the merge queue does by itself what it told a session to do by hand (#1509 item 4)', { timeout: 120_000 * SLOW }, () => {
+  const dataDir = () => join(root, 'data', 'app-data', 'p1', 'project-board')
+  const seedOpened = (opened: Record<string, unknown>) => {
+    mkdirSync(dataDir(), { recursive: true })
+    writeFileSync(join(dataDir(), 'opened-prs.json'), JSON.stringify(opened))
+  }
+  const item = (extra: Record<string, unknown> = {}) => ({
+    repo: R,
+    pr: 77,
+    lowers: [],
+    owner: 'tester',
+    author: 'tester',
+    notice: 'addr-tester',
+    state: 'ci',
+    title: 'feat(apps): change 77',
+    queuedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    reruns: {},
+    ...extra,
+  })
+  const events = () => queueOnDisk().events as { kind: string; notify: boolean; text: string; to?: string }[]
+  const dirty = () => ghState({ prs: { '77': ghPr(77, { mergeStateStatus: 'DIRTY', mergeable: 'CONFLICTING' }) } })
+  const opened = (notice: string, draft = false) => ({ [`${R}#77`]: { notice, draft, at: new Date().toISOString() } })
+
+  describe('a conflict it cannot fix goes to the author session', () => {
+    it('posts it into the author session itself when that session opened the pull request through open_pr, and tells the queuing session it did', async () => {
+      seedQueue([item({ author: 'writer' })])
+      seedOpened(opened('addr-writer'))
+      runtime(dirty())
+      await until((x) => stateOf(x) === 'attention', 'the hand-off')
+      const attention = events().filter((e) => e.kind === 'attention')
+      expect(attention).toHaveLength(1)
+      expect(attention[0]!.to).toBe('addr-tester')
+      expect(attention[0]!.text).toContain('Author session: the session that opened it (queue_merge named writer as its author). The queue is posting this into it itself, so relay it only if it does not answer: "Merge main into feat/b77 and push again')
+      expect(attention[0]!.text).not.toContain('Relay this to it')
+      const posted = events().filter((e) => e.kind === 'handoff')
+      expect(posted).toHaveLength(1)
+      expect(posted[0]).toMatchObject({ notify: true, to: 'addr-writer', owner: null })
+      expect(posted[0]!.text).toBe('Merge queue: #77 (feat(apps): change 77) is your pull request and it conflicts with main: Merge main into feat/b77 and push again; conflicted files: not known (GitHub says it conflicts).')
+      // Once per head
+      await morePolls()
+      expect(events().filter((e) => e.kind === 'handoff')).toHaveLength(1)
+      // A reader of merge_queue never sees an address
+      expect(JSON.stringify((await call('merge_queue', { all: true })).data)).not.toContain('addr-')
+    })
+
+    it('says so, and posts nothing else, when the queuing session is the one that opened it', async () => {
+      seedQueue([item()])
+      seedOpened(opened('addr-tester'))
+      runtime(dirty())
+      await until((x) => stateOf(x) === 'attention', 'the hand-off')
+      expect(events().filter((e) => e.kind === 'handoff')).toEqual([])
+      const attention = events().find((e) => e.kind === 'attention')!
+      expect(attention.text).toContain('#77 is your own pull request (author session: tester): fix it in this session: "Merge main into feat/b77')
+    })
+
+    it('says the same when no author was named at queue time, and the event names the session it went to', async () => {
+      seedQueue([item({ author: null })])
+      seedOpened(opened('addr-tester'))
+      runtime(dirty())
+      await until((x) => stateOf(x) === 'attention', 'the hand-off')
+      const attention = events().find((e) => e.kind === 'attention')!
+      expect(attention.text).toContain('#77 is your own pull request: fix it in this session: "Merge main into feat/b77')
+      expect(attention.text).not.toContain('No author session is recorded')
+      expect(events().find((e) => e.kind === 'conflict' && e.text.includes('handed to'))!.text).toContain('conflict handed to the session that queued it, its author')
+    })
+
+    it('still asks the queuing session to relay it when the author never called this app, so the queue has no address for it', async () => {
+      seedQueue([item({ author: 'writer' })])
+      runtime(dirty())
+      await until((x) => stateOf(x) === 'attention', 'the hand-off')
+      expect(events().filter((e) => e.kind === 'handoff')).toEqual([])
+      expect(events().find((e) => e.kind === 'attention')!.text).toContain('Author session: writer. Relay this to it (it has not called this app, so the queue has no address to post to)')
+    })
+  })
+
+  describe('a draft', () => {
+    it('is marked ready by the queue when the session that queued it opened it through open_pr as a draft, and lands when green', async () => {
+      seedQueue([item()])
+      seedOpened(opened('addr-tester', true))
+      runtime(ghState({ prs: { '77': ghPr(77, { isDraft: true, mergeStateStatus: 'DRAFT' }) } }))
+      await until((x) => stateOf(x) === 'merged', 'the merge')
+      expect(writes().map((w) => w[0])).toEqual(['ready', 'merge', 'delete'])
+      expect(events().find((e) => e.kind === 'action')!.text).toContain('was opened as a draft by the session queuing it; the queue marked it ready for review')
+    })
+
+    it.each([
+      ['it was ready once since, and a person turned it back into a draft to hold it', { [`${R}#77`]: { notice: 'addr-tester', draft: true, readied: true, at: new Date().toISOString() } }, {}],
+      ['another session opened it', opened('addr-someone-else', true), {}],
+      ['it was opened ready and a person (or open_pr, for a stack) made it a draft since', opened('addr-tester', false), {}],
+      ['a pull request is stacked on its branch: it is a stack lower', opened('addr-tester', true), { basedOn: { 'feat/b77': [{ number: 78 }] } }],
+      ['the app did not open it', {}, {}],
+    ])('is left to its session when %s: a draft may be a hold', async (_why, record, more) => {
+      seedQueue([item()])
+      seedOpened(record)
+      runtime(ghState({ prs: { '77': ghPr(77, { isDraft: true, mergeStateStatus: 'DRAFT' }) }, ...more }))
+      const q = await until((x) => stateOf(x) === 'attention', 'attention')
+      expect(q.queue[0].reason.kind).toBe('draft')
+      await morePolls()
+      expect(writes()).toEqual([])
+    })
+  })
+
+  describe('a draft, remembered once it was ready', () => {
+    const recordOf = () => JSON.parse(readFileSync(join(dataDir(), 'opened-prs.json'), 'utf8'))[`${R}#77`]
+
+    it('is written down when the queue marks it ready, so a person who turns it back into a draft is not undone', async () => {
+      seedQueue([item()])
+      seedOpened(opened('addr-tester', true))
+      runtime(ghState({ prs: { '77': ghPr(77, { isDraft: true, mergeStateStatus: 'DRAFT' }) } }))
+      await until((x) => stateOf(x) === 'merged', 'the merge')
+      expect(writes().map((w) => w[0])).toEqual(['ready', 'merge', 'delete'])
+      expect(recordOf()).toMatchObject({ notice: 'addr-tester', draft: true, readied: true })
+    })
+
+    it('is written down when it is seen ready without the queue (the session marked it itself)', async () => {
+      seedQueue([item()])
+      seedOpened(opened('addr-tester', true))
+      runtime(ghState())
+      await until((x) => stateOf(x) === 'merged', 'the merge')
+      expect(writes().map((w) => w[0])).toEqual(['merge', 'delete'])
+      expect(recordOf()).toMatchObject({ notice: 'addr-tester', draft: true, readied: true })
+    })
+
+    it('is not written for a pull request that was opened ready: there is nothing to hold', async () => {
+      seedQueue([item()])
+      seedOpened(opened('addr-tester', false))
+      runtime(ghState())
+      await until((x) => stateOf(x) === 'merged', 'the merge')
+      expect(recordOf().readied).toBeUndefined()
+    })
+  })
+
+  describe('a pull request the queue cannot batch', () => {
+    const quick = [ghCheck('full tier', 'skipped', 10), ghCheck('verify', 'success', 11), ghCheck('windows tests', 'success', 12)]
+    const bump = (extra: Record<string, unknown> = {}) =>
+      ghState({
+        prs: { '77': ghPr(77, { headRefName: 'chore/release-9.9.9-beta.1', title: 'chore(release): 9.9.9-beta.1', ...extra }) },
+        checks: { [SHA]: quick },
+        runs: { [SHA]: [ghRun('success')] },
+      })
+
+    it('has the full tier started on its branch, once, when it passed only the quick tier', async () => {
+      seedQueue([item({ title: 'chore(release): 9.9.9-beta.1' })])
+      runtime(bump(), TIERS)
+      await until(() => writes().some((w) => w[0] === 'dispatch'), 'the dispatch')
+      await morePolls()
+      expect(writes().filter((w) => w[0] === 'dispatch')).toEqual([['dispatch', 'chore/release-9.9.9-beta.1']])
+      expect(gh().dispatched).toEqual([{ ref: 'chore/release-9.9.9-beta.1', inputs: null }])
+      expect(events().find((e) => e.kind === 'action')!.text).toContain('started the full tier on chore/release-9.9.9-beta.1')
+      expect(queueOnDisk().items[0].fullDispatch).toMatchObject({ head: SHA })
+    })
+
+    it('writes the dispatch down before asking for it, so a call the network cuts off is not repeated into a second run', async () => {
+      seedQueue([item({ title: 'chore(release): 9.9.9-beta.1' })])
+      runtime(
+        ghState({
+          prs: { '77': ghPr(77, { headRefName: 'chore/release-9.9.9-beta.1', title: 'chore(release): 9.9.9-beta.1' }) },
+          checks: { [SHA]: quick },
+          runs: { [SHA]: [ghRun('success')] },
+          // gh cannot reach GitHub at the dispatch: the queue pauses, and the item remembers it was asked for on this head
+          dispatchError: 'dial tcp: lookup api.github.com: no such host',
+        }),
+        TIERS,
+      )
+      await until(() => queueOnDisk().pause?.kind === 'network', 'the pause')
+      expect(queueOnDisk().items[0].fullDispatch).toMatchObject({ head: SHA })
+      expect(queueOnDisk().items[0].fullDispatch.refused).toBeUndefined()
+    })
+
+    it("does not run a fork's branch here: it still asks its session", async () => {
+      seedQueue([item()])
+      runtime(bump({ isCrossRepository: true }), TIERS)
+      await until((x) => stateOf(x) === 'attention', 'attention')
+      expect(writes()).toEqual([])
+      expect(queueOnDisk().items[0].reason.kind).toBe('full-tier')
+    })
+  })
+
+  describe('a stack top whose lower merged', () => {
+    /** `up` (#77) is based on `low` (#76), which was squash-merged into main; origin.git stands for GitHub */
+    function restackable({ lowerMerged = true }: { lowerMerged?: boolean } = {}) {
+      const origin = join(root, 'origin.git')
+      const work = join(root, 'work')
+      g(root, 'init', '-q', '--bare', '-b', 'main', origin)
+      g(root, 'init', '-q', '-b', 'main', work)
+      g(work, 'config', 'user.name', 'Tester')
+      g(work, 'config', 'user.email', 'tester@example.test')
+      g(work, 'config', 'commit.gpgsign', 'false')
+      g(work, 'remote', 'add', 'origin', 'https://github.com/ijun17/centralu.git')
+      g(work, 'config', `url.${origin}.insteadOf`, 'https://github.com/ijun17/centralu.git')
+      const commit = (file: string, text: string, message: string) => {
+        writeFileSync(join(work, file), text)
+        g(work, 'add', file)
+        g(work, 'commit', '-q', '-m', message)
+        return g(work, 'rev-parse', 'HEAD')
+      }
+      commit('a.txt', 'a\n', 'base')
+      g(work, 'checkout', '-q', '-b', 'low')
+      const low = commit('b.txt', '1\n', 'low 1')
+      g(work, 'checkout', '-q', '-b', 'up')
+      const up = commit('c.txt', 'u\n', 'up 1')
+      g(work, 'checkout', '-q', 'main')
+      g(work, 'merge', '-q', '--squash', 'low')
+      g(work, 'commit', '-q', '-m', 'low (#76)')
+      const squash = g(work, 'rev-parse', 'HEAD')
+      g(work, 'push', '-q', 'origin', 'main', 'low', 'up', `${low}:refs/pull/76/head`)
+      g(work, 'checkout', '-q', '-b', 'mine', squash)
+      return { work, origin, low, up, squash, lowerMerged }
+    }
+    const stackState = (s: ReturnType<typeof restackable>) =>
+      ghState({
+        prs: {
+          '76': ghPr(76, { headRefName: 'low', headRefOid: s.low, state: s.lowerMerged ? 'MERGED' : 'OPEN', mergeCommit: s.lowerMerged ? { oid: s.squash } : null }),
+          '77': ghPr(77, { headRefName: 'up', headRefOid: s.up, baseRefName: 'low', mergeStateStatus: 'DIRTY', mergeable: 'CONFLICTING' }),
+        },
+      })
+    const stackRuntime = (s: ReturnType<typeof restackable>) => {
+      mkdirSync(appTmp(), { recursive: true })
+      const tmp = { TMPDIR: appTmp(), TEMP: appTmp(), TMP: appTmp() }
+      return runtime(stackState(s), { PROJECT_BOARD_QUEUE_CHECKOUT: s.work, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: join(root, 'no-gitconfig'), ...tmp }, gitWrapper(fake.bin))
+    }
+
+    it("is restacked onto the lower one's merge commit and pushed with a lease, as rebase_stack would, with nobody told to run it", async () => {
+      const s = restackable()
+      seedQueue([item()])
+      stackRuntime(s)
+      await until(() => events().some((e) => e.kind === 'conflict'), 'the restack')
+      const pushed = g(s.work, '--git-dir', s.origin, 'rev-parse', 'refs/heads/up')
+      expect(pushed).not.toBe(s.up)
+      // Replayed onto the squash commit: its parent is the lower one's merge commit, and it holds the upper one's own change only
+      expect(g(s.work, '--git-dir', s.origin, 'rev-parse', `${pushed}^`)).toBe(s.squash)
+      expect(g(s.work, '--git-dir', s.origin, 'show', `${pushed}:c.txt`)).toBe('u')
+      expect(writes().map((w) => w[0])).toContain('base')
+      const step = events().find((e) => e.kind === 'conflict')!
+      expect(step.text).toContain('restacked onto the merge commit of the pull request under it, as rebase_stack would')
+      expect(events().filter((e) => e.kind === 'attention')).toEqual([])
+      // The person's checkout is as it was
+      expect(g(s.work, 'branch', '--show-current')).toBe('mine')
+    })
+
+    it('hands it to its author as before when the pull request under it has not merged', async () => {
+      const s = restackable({ lowerMerged: false })
+      seedQueue([item({ author: 'writer' })])
+      stackRuntime(s)
+      const q = await until((x) => stateOf(x) === 'attention', 'the hand-off')
+      expect(g(s.work, '--git-dir', s.origin, 'rev-parse', 'refs/heads/up')).toBe(s.up)
+      expect(q.queue[0].reason.kind).toBe('conflict')
+      expect(q.queue[0].reason.text).toContain('Restacking it was tried and refused')
+    })
+
+    it("pushes with a lease on the head it read, in a checkout whose own record of the branch is old (a single-branch clone's)", async () => {
+      const s = restackable()
+      // Fetching the branch does not refresh a record this clone does not track: a bare --force-with-lease would expect the old head
+      g(s.work, 'config', 'remote.origin.fetch', '+refs/heads/main:refs/remotes/origin/main')
+      g(s.work, 'update-ref', 'refs/remotes/origin/up', s.low)
+      seedQueue([item()])
+      stackRuntime(s)
+      await until(() => events().some((e) => e.kind === 'conflict'), 'the restack')
+      const pushed = g(s.work, '--git-dir', s.origin, 'rev-parse', 'refs/heads/up')
+      expect(pushed).not.toBe(s.up)
+      expect(g(s.work, '--git-dir', s.origin, 'rev-parse', `${pushed}^`)).toBe(s.squash)
+      expect(events().filter((e) => e.kind === 'attention')).toEqual([])
+    })
+
+    it('does not overwrite a push that lands after the queue read the branch: the lease refuses it and the author is told', async () => {
+      const s = restackable()
+      // The author's push arrives between the queue's read and its own push (git runs this hook just before it sends anything), and
+      // the person's own fetch in this checkout moves its record of the remote branch to match: a bare --force-with-lease would trust
+      // that record and overwrite the author, where a lease on the head the queue tested refuses
+      const hook = join(s.work, '.git', 'hooks', 'pre-push')
+      const slash = (p: string) => p.replace(/\\/g, '/')
+      writeFileSync(hook, `#!/bin/sh\ngit --git-dir="${slash(s.origin)}" update-ref refs/heads/up ${s.low}\ngit update-ref refs/remotes/origin/up ${s.low}\n`, { mode: 0o755 })
+      seedQueue([item({ author: 'writer' })])
+      stackRuntime(s)
+      const q = await until((x) => stateOf(x) === 'attention', 'the hand-off')
+      // The author's head stands: nothing of the queue's was forced over it
+      expect(g(s.work, '--git-dir', s.origin, 'rev-parse', 'refs/heads/up')).toBe(s.low)
+      expect(q.queue[0].reason.kind).toBe('conflict')
+      expect(q.queue[0].reason.text).toContain('Pushing up failed')
+    })
+
+    it('does not hand a restack to its author when the remote cannot be reached: the network pauses the queue, as any lost network does', async () => {
+      const s = restackable()
+      // GitHub's stand-in is gone: nothing listens there
+      g(s.work, 'config', '--replace-all', `url.http://127.0.0.1:9/gone.git.insteadOf`, 'https://github.com/ijun17/centralu.git')
+      g(s.work, 'config', '--unset-all', `url.${s.origin}.insteadOf`)
+      seedQueue([item({ author: 'writer' })])
+      stackRuntime(s)
+      await until(() => queueOnDisk().pause?.kind === 'network', 'the pause')
+      const it = queueOnDisk().items[0]
+      expect(it.state).not.toBe('attention')
+      expect(it.lastError).toContain('could not reach the remote while restacking')
+      expect(events().filter((e) => e.kind === 'attention' || e.kind === 'handoff')).toEqual([])
+    })
   })
 })

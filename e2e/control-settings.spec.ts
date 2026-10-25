@@ -663,19 +663,38 @@ test('Settings opens directly from the top bar', async ({ page }) => {
  * (dogfooding finding: "Normal" was invisible in the permission group). Because the hint is
  * shrink-0, the label shrank all the way to 0 in the narrow menu (w-56) — a row with the
  * description intact and the very name to pick gone. This directly measures whether the label
- * is clipped in all three rows.
+ * is clipped in every row.
  */
 test('Permission preset names are never squeezed out by their descriptions', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'first instruction')
   await page.getByTestId('settings-open').click()
   await expect(page.getByTestId('settings-menu')).toBeVisible()
-  for (const v of ['safe', 'normal', 'auto']) {
+  for (const v of ['safe', 'normal', 'edits', 'auto']) {
     const label = page.getByTestId(`settings-preset-${v}`).locator('span').nth(1)
     await expect(label, v).not.toBeEmpty()
     expect(await label.evaluate((el) => el.scrollWidth <= el.clientWidth), `${v} label clipped`).toBe(true)
   }
 })
+
+/*
+ * The preset a new session starts with (#1525): Edits in a trusted project, Normal in an untrusted one. The picker says
+ * what the session may do, and the host holds the same preset as the picker shows.
+ */
+for (const [trusted, preset] of [[true, 'edits'], [false, 'normal']] as const) {
+  test(`A new session in ${trusted ? 'a trusted' : 'an untrusted'} project starts under ${preset}, and the person can still pick another (#1525)`, async ({ page }) => {
+    await setup(page, { projects: ['/tmp/alpha'], trusted })
+    await newSession(page, 'alpha', 'first instruction')
+    await page.getByTestId('settings-open').click()
+    await expect(page.getByTestId(`settings-preset-${preset}`)).toHaveAttribute('aria-checked', 'true')
+    const other = preset === 'edits' ? 'normal' : 'edits'
+    await expect(page.getByTestId(`settings-preset-${other}`)).toHaveAttribute('aria-checked', 'false')
+    expect((await page.evaluate(() => [...(window as any).__mock.sessions.values()]))[0]).toMatchObject({ permissionPreset: preset })
+    // The person's own choice wins: an explicit Normal in a trusted project stays Normal
+    await pickSetting(page, 'settings-preset-normal')
+    expect((await page.evaluate(() => [...(window as any).__mock.sessions.values()]))[0]).toMatchObject({ permissionPreset: 'normal' })
+  })
+}
 
 /*
  * Checkboxes are drawn by us (dogfooding finding: when the window loses key focus, the check's

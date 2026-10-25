@@ -81,6 +81,8 @@ export type MailDeliveryOptions = {
   maxAttempts?: number
   /** The loop and token guards (§7.9); without them mail is held by nothing but the receiver's policy */
   turns?: MailTurns
+  /** Whether a session's project is one nobody trusted: its requests to the orchestrator are held until the person releases them (§9.7). Without it none is */
+  untrustedAsker?: (senderAddress: string) => boolean
   /** When the delivery last ran, kept by the host: how long it was off tells how to start (§7.9) */
   heartbeat?: { read(): number | null; write(ms: number): void }
   /** A host that was off longer than this wakes a sleeping session only for mail that needs it (30 minutes) */
@@ -96,9 +98,10 @@ const DEFAULTS = { sweepEveryMs: 60_000, minWakeGapMs: 30_000, retryBaseMs: 5_00
 export class MailDelivery {
   private readonly now: () => number
   private readonly schedule: (ms: number, fn: () => void) => () => void
-  private readonly o: Required<Omit<MailDeliveryOptions, 'now' | 'schedule' | 'heartbeat' | 'turns'>>
+  private readonly o: Required<Omit<MailDeliveryOptions, 'now' | 'schedule' | 'heartbeat' | 'turns' | 'untrustedAsker'>>
   private readonly heartbeat: MailDeliveryOptions['heartbeat']
   private readonly turns: MailTurns | undefined
+  private readonly untrustedAsker: MailDeliveryOptions['untrustedAsker']
   /** One delivery in flight per mailbox; a change that comes meanwhile is looked at when it ends */
   private readonly inFlight = new Set<string>()
   private readonly again = new Set<string>()
@@ -138,8 +141,9 @@ export class MailDelivery {
         return () => clearTimeout(t)
       })
     this.heartbeat = opts.heartbeat
+    this.untrustedAsker = opts.untrustedAsker
     this.turns = opts.turns
-    this.o = { ...DEFAULTS, ...Object.fromEntries(Object.entries(opts).filter(([k]) => k !== 'now' && k !== 'schedule' && k !== 'heartbeat' && k !== 'turns')) }
+    this.o = { ...DEFAULTS, ...Object.fromEntries(Object.entries(opts).filter(([k]) => k !== 'now' && k !== 'schedule' && k !== 'heartbeat' && k !== 'turns' && k !== 'untrustedAsker')) }
   }
 
   /** Begins hearing the mailbox and sweeping. A host that is leaving does not (`stop`) */
@@ -510,6 +514,10 @@ export class MailDelivery {
         // The person's words and Centralu's own are never held. Another session's or an app's, to a session that runs without asking,
         // is told of and never a reason to wake it, until the person releases it
         if (state.auto && receipt.held !== 'released' && holdsInbound(message, thread)) return 'policy'
+        // A request to the orchestrator from a session of a project nobody trusted may be planted text: it waits for the person's Release, whatever the orchestrator's preset (§9.7)
+        // (the session that asked, not the thread's owner now: a session in the trash left the thread to the person, and its words are its still)
+        const asker = receipt.held !== 'released' ? this.service.requestedBy(thread) : undefined
+        if (asker !== undefined && message.sender === this.service.sessionAddress(asker) && this.untrustedAsker?.(message.sender)) return 'policy'
         // A session whose mail has used up its budget is told of what comes, and not woken for it (Centralu's own are never held)
         if (spent && receipt.held !== 'released' && message.sender !== PERSON && message.sender !== CENTRALU) return 'budget'
         return null

@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import type { BackgroundTask, CreateSessionParams, SessionInfo, ToolName } from '@cc/protocol'
 import { autoCompactPlan } from './auto-compact.js'
 import { autoCompactOf, sessionLiveDefaults } from '@cc/protocol'
-import type { AgentProcess, AgentSpawnSpec, CreateSessionOpts, EventSink, OrchestratorTools, ProcessSource, SessionApps, SessionHandle } from '../adapters/contract.js'
+import type { AgentProcess, AgentSpawnSpec, CreateSessionOpts, EventSink, OrchestratorTools, ProcessSource, RequestTurn, SessionApps, SessionHandle } from '../adapters/contract.js'
 import type { ToolProfile } from '../apps/contract.js'
 import type { AppRef } from '../apps/external/runtime.js'
 import type { Worktree } from '../dev-services/git-worktree.js'
@@ -95,6 +95,10 @@ export type SessionStartsHost = Pick<DelegationHost, 'adapters' | 'children' | '
     listCommands: ToolQueries['listCommands']
     /** Whether another project handed this path back to the session (#371 part B) */
     mayRead: (sessionId: string, path: string, cwd: string) => boolean
+    /** The orchestrator's turn being a session's request, and the person's card for the CLI's own steps in it (§9.7, #1447) */
+    requestTurn: (sessionId: string) => RequestTurn
+    /** A new conversation of the orchestrator begins: what an earlier one read is not in it (`AskedGate.beginConversation`) */
+    newConversation: (sessionId: string, fresh: boolean) => void
     /** A session's row that is not being removed, or `session_not_found` */
     openSession: (sessionId: string) => SessionInfo
     /** The orchestrator's memory handoff for a new process */
@@ -543,6 +547,12 @@ export class SessionStarts {
     },
   ): CreateSessionOpts {
     const { profile, tools } = o.choice
+    // The past conversation handed over in the prompt when the tool changed (the person's words and the orchestrator's own answers)
+    const past = m.kind === 'orchestrator' && o.memory ? this.host.orchestratorMemory(m.id) : ''
+    // A conversation with nothing to resume is a new one, and one with nothing handed over is a clean one; a process taken over from an earlier host
+    // or one resumed is the conversation it was; one that starts from a summary of an earlier conversation (whose answers may carry what it
+    // read) is not known to have read nothing
+    if (m.kind === 'orchestrator' && !o.resumeExternalId && !o.adopt) this.host.newConversation(m.id, past === '')
     return {
       sessionId: m.id,
       cwd: o.cwd,
@@ -575,6 +585,7 @@ export class SessionStarts {
       ...this.host.handoffNotes.handoffReadDirs(m.projectId, o.inheritsHandoff),
       // Paths another project handed back to this session (#371), asked on every read
       mayRead: (path: string) => this.host.mayRead(m.id, path, o.cwd),
+      ...(m.kind === 'orchestrator' ? { requestTurn: this.host.requestTurn(m.id) } : {}),
       // An orchestrator gets all of them, a builder session (M4 C-3) just its own app's check (the bundle blocks
       // the rest), an ordinary session its own project, read-only (#320, #561)
       /*
@@ -600,7 +611,7 @@ export class SessionStarts {
         m.kind === 'orchestrator'
           ? // Skills (#71) always ride along; the memory handoff only for a genuinely new process
             // (unchanged rule)
-            orchestratorRole() + this.host.skillsPrompt() + (o.memory ? this.host.orchestratorMemory(m.id) : '')
+            orchestratorRole() + this.host.skillsPrompt() + past
           : // A builder session's (M4 C-2) role is entirely the roleAppend fixed at creation
             // Reapplying the fixed role text — for a coordinator session an older build left (#372), and
             // for a builder session (C-2) even if the app is broken

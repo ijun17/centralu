@@ -129,6 +129,9 @@ describe('a session a linked computer starts, under the preset it carries (#1273
     expect(await create({ permissionPreset: 'normal', fromHub: { callerPreset: 'normal' } })).toMatchObject({ permissionPreset: 'normal' })
     expect(await create({ permissionPreset: 'safe', fromHub: { callerPreset: 'safe' } })).toMatchObject({ permissionPreset: 'safe' })
     expect(await create({ permissionPreset: 'auto', fromHub: { callerPreset: 'normal' } })).toMatchObject({ permissionPreset: 'normal' })
+    // `edits` (#1525) is above normal: a linked machine's child gets no more than normal, while the window's own start keeps it
+    expect(await create({ permissionPreset: 'edits', fromHub: { callerPreset: 'normal' } })).toMatchObject({ permissionPreset: 'normal' })
+    expect(await create({ permissionPreset: 'edits' })).toMatchObject({ permissionPreset: 'edits' })
     const own = await create({ permissionPreset: 'auto' })
     expect(own.permissionPreset).toBe('auto')
     expect(own.startedFromHub).toBeUndefined()

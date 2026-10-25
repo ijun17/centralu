@@ -443,13 +443,60 @@ rates and the limit windows' percentages kept on this computer, with the names o
 **The mailbox (#1347, [plans/mailbox.md](plans/mailbox.md) §9).** The sender of a post is always what the host knows: the session
 whose tool called, the person for the window's `mail.*` calls, Centralu for its own; no argument of a call names one. Who may write to
 whom is `mail/relations.ts` (§9.1): a session to the sessions it started, the one that started it and the person; the orchestrator
-to any session; the person and Centralu to any session here; nobody to an app before slice 7; an app to a session that called it; and nobody, the person and Centralu included, to a session whose seat has no `mail` tool (a coordinator, a builder, an app's agent, a session outside a project), refused as `no_mailbox` because the wake names a call it cannot make. A
+to any session; any session to the orchestrator, a new thread too (3.11, below); the person and Centralu to any session here; nobody to an app before slice 7; an app to a session that called it; and nobody, the person and Centralu included, to a session whose seat has no `mail` tool (a coordinator, a builder, an app's agent, a session outside a project), refused as `no_mailbox` because the wake names a call it cannot make. A
 session that runs `auto` holds, without waking, what another session or an app that is only in a thread sends it (§7.7), and the person
 releases it. What another party wrote reaches a model only inside the wake frame (`mail/frame.ts`) or the `mail` tool's `read`, both
 quoting every line (U+2028, U+2029 and U+0085 included) behind `> `, escaping the frame's tags, and naming the sender by Centralu's
 word for how it stands to the reader. The `mail.*` methods are the window's: they are not in the orchestrator's window-call list, and
 the `mail` tool is the ordinary session's and the orchestrator's alone (matrix above), which runs it as a command behind `centralu_run` and is told of mail in that form, because it owns the threads `send_to_session` opens (slice 3); a coordinator, a builder and an app's agent are not parties of the mailbox. The delivery stamps its input as Centralu's channel, and sends it
 as the CLI's own input, never as a message of the person's.
+
+**A session asking the orchestrator (#1447, [plans/mailbox.md](plans/mailbox.md) §9.7).** Any session of this host may open a thread to the orchestrator
+(`mail send` with `to: "orchestrator"`, an `assign`): the session owns it and the orchestrator is its assignee. The request is a session's text, so it
+is not the person's word, and these follow. (1) Its words never go inline: the wake lists host fields and calls the sender "a session asking you
+for something", and `mail read` quotes the words under a header Centralu writes from its own record (the session's name, its project, whether the
+project is trusted). The words are read in the turn mail starts for the request and in no other: read in the person's turn, or in another request's, they would be a session's
+words in a turn that has no card for them, so `mail read` gives only who the request is from there, and `mail inbox` lists a request by that header and not by the
+subject the session wrote. (2) In a turn whose thread is such a request, every step of the orchestrator that is not on a short list of reading acts
+(`sessions/asked-acts.ts`: reads, and answering in the request's own thread) raises the person's card first, naming the session and its project, under
+every preset (`alwaysAsk`, so `auto` does not answer it), Allow or Deny only (`ORCHESTRATOR_CHANGE`); the list fails closed, so a command added later
+asks until it is listed as a read. That is three doors, each closed where every call passes through it: Centralu's own tools and commands (`runParsed`, on both CLIs);
+an attached app's tools (`SessionApps`' `call`, on both CLIs: a request could otherwise have the orchestrator call a project app's `merge_when_green`); and the CLI's own
+tools, its shell, file edits, fetches and the rest (Claude: a `PreToolUse` hook, `adapters/claude/request-hook.ts`, which the CLI runs before every tool call in every permission mode and whose
+decision stands in for its own question, so the person is asked about each step whatever the preset, and an "always" the person once saved for such a step is not consulted. A narrower
+permission mode alone was tried and is not enough: a tool that needs no permission never reaches the CLI's permission callback in it, and the review of #1516 ran a subagent and a cron prompt
+through it unasked). A request's turn is refused, without a question, the tools that go on after the turn: a subagent, a prompt scheduled for later, a watched command
+(`OUTLIVES_THE_TURN`) and a command started in the background, since the person's card belongs to the turn and what they start would run later with no asker. The card shows a step of the CLI's own whole (a
+file's content, an edit's text, a message), refusing one over 6,000 characters; only Centralu's own tools have their long free text cut. The Allow is for that one step: the
+cards the step would raise itself meanwhile are covered by it (`HostCards.cover`, kept by the call's own async work and ended with the call or its signal), so there is one
+card, and no "always" is offered or kept; an Allow that arrives after the turn it was asked in ended (also when the thread's next turn has begun) runs nothing. The card shows every argument whole except long free text of
+Centralu's own tools, which is cut and says how long it was; a step too long to show whole is refused, not asked about in part. **What the orchestrator has read, and who reads it after.** Reading needs
+no card, but the orchestrator writes to sessions and the session reads what it wrote, and its conversation keeps what it read, so a read could hand a session what it cannot read itself. Reads stay free. The host
+remembers the scope of every read of the orchestrator's whole conversation (`sessions/asked-reach.ts`, `AskedGate`), in the person's own turns, in other sessions' requests and across compaction (a summary can carry the data), and only a new
+conversation clears it; a conversation the host did not see begin (the host restarted, a kept process was adopted), or one that starts from a summary of an earlier conversation handed over in the prompt (the tool was switched, and the summary carries the orchestrator's own answers), is not known to have read nothing, and counts as having read everything. The scopes are judged
+against the reach of whoever asks at the moment words are written. What counts is an allowlist, fail closed: only a call that gives back nothing anybody read (the CLI's `Write`, `Edit`, `TodoWrite`, a `mail` that sends, replies, closes or marks handled, `compact_self`) or whose scope is exact
+(`Read`, `Grep` and `Glob` by path, `agent_session` `status` or `wait` of a named session, a named project, a mail thread, read or updated) is classified; every other tool, a name the host has not heard of included, counts as reading everything: a Bash or PowerShell command, a fetch, a search, a tool of an attached app (also one
+the app marks read-only, which is never asked about) or of another MCP server, `ask_project` naming no project, a worker's reply (`agent_session` send or answer, `start_agent`), the mail inbox, `agent_session` `list` (it ignores the session named and lists every worker of every project), a list or a check of anything else. A `mail` `update` gives back the thread's state, and its next step only when the call set it, so it is judged by its thread as a read is. The person's answer to `AskUserQuestion` counts in a request's turn (the asker could have got the person to type something and receive it with no card); in the person's own turn it is the person's word to the orchestrator and does not. A path is pinned to where it was when it was read, so a link swapped afterwards does not change what was read. A step is noted after it is judged, so what it gives back is not in its own card. Out of reach for a session: a file outside its folders (its working folder, its project's folder, its worktree, what another
+project handed it back; a path is judged as the file system has it, links followed; a relative path, a pattern aimed elsewhere or a path that climbs out counts as outside), a conversation of another project (`read_session`, `agent_session`
+status), anything across projects (`recall`, `list_sessions`, `list_archive`, `machine_activity`), another project's state or none named (`project_git_status`, `list_app_runs`, `list_app_errors`, `app_usage`), and a mail thread other than its own request (`mail read`).
+**In a request's turn** (and only there: in the person's own turns the orchestrator writes to its workers as before, with no card, since the asker cannot start those turns), once the conversation has read something out of the asker's reach, every word to a
+session raises the person's card with the whole text, naming the asker and the read: `mail` `reply`, `update` and `close`, in the request's thread or any other, and `mail send` (a new thread to the asker included); a thread id is taken trimmed, as the
+mail tool takes it. Other steps that pass words on show them whole as well. Deny sends nothing, and a text too long for the card is refused. Marking the thread handled, and mail to the person, stay free. Expect most replies to carry a card in practice; the
+limit of 5 words an hour bounds that. This replaces "read grants never move across" (§9.7, "What it does not grant") with a gate on the way back.
+Under a preset that asks about a read, a read the CLI itself asks about in a request's turn is the host's card (Allow or Deny, naming the session), not the CLI's own with its "always". Whose request the turn is is fixed when the turn begins
+(`MailTurns`), so the session going to the trash, or the thread passing to the person, does not lift the gate or unhide a held request. A turn that is not a request (the person's,
+or a thread the person gave) is as it was. **Where the orchestrator's tool cannot put each step of its own to the host** (`gatesSteps`; Codex, whose per-turn approval policy
+is not yet measured here), a session cannot ask the orchestrator at all, in a thread it opened before as well: the write is refused with a reason, because its shell and edits could not be put to the person.
+**Not covered, and named:** a turn that a relayed report starts (the old path of a kept process) belongs to no thread, so a request's words do not reach it; an app tool its app marks read-only
+(`readOnlyHint`) is not asked about, on the app's word, as for every session; `read_session` and `recall` of the asking session show what it wrote, so the words are reachable by them in any turn
+(reading needs no card, §9.7); a step whose card would pass 6,000 characters (a `Write` of more than about 6 KB) is refused, with no way through but smaller parts; what the conversation has read is kept in memory, so after a host swap or restart it is treated as having read everything (every word to a session in a request asks) until a new conversation begins; a turn that an old build's kept process was already in when this build took it over has no hook until it restarts; the output of a command the person allowed can start a turn of the CLI's own
+later, as the output of any command can (a command started in the background is refused in a request's turn, since it would start that turn on purpose). (3) Limits:
+a request from a project nobody trusted is held (`policy`) until the person releases it in the Inbox, and `mail inbox` and `mail read` show the orchestrator none of
+its words meanwhile, whether or not the hold is written yet, while marking it handled, answering and closing it are refused; one request is open at a time and at most 5 words an hour (a request's first word and every word written into it after, so a follow-up in an answered request is no way round the
+limit), both counted over the sessions of the asker's project and the sessions under its root session, so starting sessions does not multiply them (a refusal names the open
+request only when it is the session's own). The sessions the orchestrator itself started are not one group: the walk up to the root stops before the orchestrator, so its sessions in
+other projects each have their own request and their own five an hour. Nothing moves across with the answer: the asking session gets back only what the orchestrator posts in the thread, and the end of the
+orchestrator's turn is reported in Centralu's words alone, never with the orchestrator's last response (which may be addressed to the person) or a pointer to its conversation. A linked machine's sessions asking the hub's orchestrator are slice 4's (§9.7, "Linked machines").
 
 `handoff_session` (#694) is the orchestrator's alone, and among its commands the one that acts on another session's
 place in the person's work: it starts a successor from a note and moves the original's live children to it. Its
@@ -587,6 +634,71 @@ A name a session has seen an app under (`app-<id>`) stays bound to that app for 
 (`session_app_names:<session>`), so a later app of the same id, a repository's included, cannot take
 calls meant for another (`SessionAppsHub.named`).
 
+### The `edits` preset (#1525, owner 2026-10-24)
+
+A fourth preset, between `normal` and `auto` (`safe` < `normal` < `edits` < `auto`). **`edits` is `normal` plus one
+grant**: a file edit inside the session's project folder (or its worktree) raises no card. Everything else is
+`normal`'s, in every row of the table below: commands, deletes, paths outside the folder, network access and runs
+outside the sandbox ask; the person's own bypass applies as under `normal`, and `edits` never asks more than `normal`
+would. `normal` keeps its meaning (the person approves each step).
+
+- **Preset, not a hidden default.** A default that made `normal` accept edits in a trusted project would put a word
+  on the picker that is not true of the session, and an explicit `normal` could not be told from the default. So the
+  picker lists `edits` ("No card in project"), and the **default** is what changed: the window names the preset when the
+  person starts a session without choosing one, `edits` in a **trusted** project and `normal` in an untrusted one
+  (`defaultPresetFor`, `@cc/core`, read in `createSession` of the store). A preset named in the start, the settings menu,
+  a handoff or a fork always wins and is never raised. The host's own default stays `normal`, so a client that names none
+  (a script, the limited credential, an older window) never gets `edits` unasked, and naming it as the limited credential
+  does asks first (`presetAbove`, `transport/method-rights.ts`). A project on a linked machine keeps `normal` as the
+  default: that machine may run a build from before `edits`, which refuses a value it does not know. The stored and shown
+  preset is the one the session runs under. There is no per-project default preset to override (the "per project" choice
+  of #1525 is the project's trust).
+- **Mapping to Claude.** Not `acceptEdits`. The SDK's mode also approves `rm`, `rmdir`, `mv`, `cp`, `sed`, `mkdir` and
+  `touch` inside the working directory (Claude Code's documentation, "acceptEdits"), which would let deletes and
+  commands through. `edits` launches exactly as `normal` does (the trusted settings mode, else `default`) and `canUseTool`
+  allows `Edit`, `MultiEdit`, `Write` and `NotebookEdit` whose target is inside the session's folder
+  (`adapters/edit-grant.ts`, the shape of the read grant, #371). A person's `acceptEdits` or bypass setting stays as it is
+  (it decides before `canUseTool`). **The person's own `ask` rules win**: when their settings (the sources the session
+  reads, the policy tier included) have an `ask` rule for `Edit`, `Write`, `MultiEdit` or `NotebookEdit`, or the settings
+  cannot be read, the session has no grant at all (`editAskRuleExists`; the rule's path pattern is the CLI's syntax and is
+  not matched, so `ask: ["Write(secret/**)"]` leaves every edit of that session asking). An ask the CLI says a rule forced
+  (`matchedAskRule`) is a card too, and so is an ask whose `decisionReason` is anything but empty or the permission mode asking: the SDK documents it as free text, so only a short allowlist of known benign reasons
+  grants (`benignAskReason`) and an unknown or reworded reason fails closed. These two options are a second line: measured on Claude Code 2.1.296, an `ask` rule reached `canUseTool` with
+  both undefined, so the card for a plain ask rule comes only from `editAskRuleExists`.
+- **Mapping to Codex.** Codex has no mode that accepts patches and asks for commands: its approval policies gate the
+  sandbox boundary, not the kind of action (`on-request` runs sandboxed commands without a card). So `edits` is
+  `normal`'s launch (the person's own policy and sandbox, network off) and the adapter answers an
+  `item/fileChange/requestApproval` (or the older `applyPatchApproval`) with accept when every change of the patch is an add or an update inside the folder
+  (`adapters/codex/server-requests.ts`, `adapters/edit-grant.ts`). A delete, a move, a request that names extra access
+  (`grantRoot`, a `reason`), or a path outside asks. Under Codex's default
+  config (workspace-write, on-request) in-folder patches already ran without a card, so there `edits` and `normal`
+  differ only where the person's config asks.
+- **What is never granted.** The folder is the session's `cwd` after symlinks are resolved (a link out of it is
+  outside, and so is a link whose target does not exist yet), compared by path segment (`/proj-other` is not inside
+  `/proj`). A folder that is the person's home folder, holds it, or is the root of any disk gets no grant. Inside the folder, the names that
+  decide what runs or what is allowed still ask, at any depth and in any case: `.git`, `.gitconfig`, `.gitmodules`,
+  `.githooks`, `.husky`, `.pre-commit-config.yaml`, `.github/workflows`, `.claude`, `.claude.json`, `.codex`, `.agents`,
+  `.mcp.json`, `.vscode`, `.idea`, `.devcontainer`, `.centralu`, the shell startup files (`.bashrc`, `.zshrc`, `.profile`,
+  ...), `.envrc`, `.ripgreprc`, the package managers' config (`.npmrc`, `.yarnrc`, `.yarnrc.yml`, `.pnpmfile.cjs`,
+  `.cargo/config`, `.cargo/config.toml`) and `node_modules` (a hard link there reaches other projects). `CLAUDE.md` and `AGENTS.md` stay
+  editable. A segment with a `:` asks (a Windows stream such as
+  `.mcp.json::$DATA` writes the file it names). A path that cannot be resolved asks. The check reads the disk once,
+  before the write: another process that swaps a link in between is not stopped by it. A person who picks `edits` in an
+  untrusted project gets the grant too (their choice wins); only the default is tied to trust. The preset is read at each call: changing between `normal` and `edits` replaces no
+  process (`launchPreset`, `SessionHandle.setPermissionPreset`) and takes effect in the next call, while a change that alters
+  the launch (to or from `safe` or `auto`) still restarts at the end of the turn.
+  **What the grant is not:** edits to project files are code the person later runs. Under `edits`, an `allow` rule (or the
+  person's bypass) for a command that runs project code (`npm test`, `make`, a script) amounts to running anything the agent
+  wrote into the project, with no card for it. The protected names narrow where that starts; they do not close it.
+- **Agent-started sessions.** The default applies only to a session the person's window starts. `start_agent`'s child
+  gets the caller's preset, never above it (`presetWithin`, rank updated), so a `normal` caller's child is `normal`
+  in a trusted project and an `edits` caller's is `edits`. `edits` is treated as `normal` by the consent (the project's
+  trust is a `normal` or `edits` caller's consent, #673), the ceiling (4, `auto` has none), `ask_project`, the answer
+  rules and `update_centralu`. A linked machine's child (`start_agent` with `machine`, `create_session`, the hub's
+  `normal` at most) is `normal` for an `edits` caller, and the caller's preset that `fromHub` carries goes as `normal` too
+  (`carriedPreset`, `makeChild`): `edits` is never put on the link, so an older machine never sees a value it does not know. A build since #1171 reads a stored `edits` as `safe` (its store parses unknown presets
+  to `safe`), and an earlier one passes it through as an unknown preset that asks like `normal`: neither asks less.
+
 ### When the person is asked
 
 "Open" means the calling session's own `auto` preset opens that permission boundary (#603),
@@ -596,7 +708,8 @@ and the target's own preset still apply. Global bypass under `normal` does not o
 "Allowed" runs without a card, "asks" raises a card in the calling session, "refused" fails the call
 without asking. "Bypass" is the person's own global setting (`defaultMode: "bypassPermissions"` in
 `~/.claude/settings.json`; `approval_policy = "never"` in `~/.codex/config.toml`), which only the
-`normal` preset reads.
+`normal` and `edits` presets read. The table has no `edits` column: `edits` is the `normal` column in every row, except
+the row for a file edit inside the session's folder, where it is allowed.
 
 For Claude, `normal` passes the trusted settings mode explicitly, falling back to `default` when no
 valid mode is configured or settings cannot be read (#578). Omitting the SDK mode can now select
@@ -615,6 +728,7 @@ processes after adoption, at idle or when their current turn finishes (#589).
 | A Centralu tool the profile has | allowed | allowed | allowed | open | allowed | allowed | allowed | open | Claude: `canUseTool`, `isOrchestratorTool` and only when the session was given the server, checked before auto's refusal (`adapters/claude/session-cards.ts`). Codex: `default_tools_approval_mode: 'approve'` on the bridge, and an elicitation for it accepted only on a thread that has it (`adapters/codex/thread-servers.ts` `mcpConfig`, `adapters/codex/server-requests.ts` `onServerRequest`) |
 | A Centralu tool the profile does not have | refused | refused | refused | refused | refused | refused | refused | refused | `profileAllows` (exposure and execution) |
 | `read_session` and `recall` of the caller's own handoff lineage, archived ones included (#1487) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `ownLineage` in `orchestratorToolsFor` (`sessions/orchestrator-seat.ts`): the session's predecessor by its newest handoff marker, that one's, and so on (`HandoffMarkers.lineage`), whatever the project or whether live or in the session archive, and **nothing else of the archive**: any other archived session is refused as a missing one, and `recall` searches only these sessions' own messages in the archive (`searchSessions`, since the archive's search index is dropped). The chain also ends at a marker naming a session of another project, and `createSession` accepts `handoff.fromSessionId` only for a live session of the same project, so a forged marker cannot point a session at text it was never given. A session deleted for good ends the chain there, and a hub's view has no caller, so no lineage. Every line is the predecessor's, never the reader's own or the person's: `role: predecessor` for what it said, `predecessor: <id>` on each line, `[predecessor]` and `[person, to the predecessor]` in a hit's snippet, and a hit says "(your predecessor, archived)"; the answer opens by saying so. The note names the ids (`lineageLine`) and stays the only thing handed over |
+| A file edit inside the session's folder (`Edit`, `MultiEdit`, `Write`, `NotebookEdit`; a Codex patch that adds or updates files) (#1525) | asks | asks | allowed | open | asks | asks (or allowed, where the person's own policy and sandbox let a patch through) | allowed | open | **`edits` allows it**, with no card, for a path inside the folder (links resolved) that is under none of the protected names; a delete, a move, a command and every other path ask as under `normal`. `adapters/edit-grant.ts` (`insideFolder`), Claude `canUseTool` (`session-cards.ts`), Codex `item/fileChange/requestApproval` (`server-requests.ts`) |
 | `ask_project`, first time for a pair of projects | asks (consent card) | asks | asks | open | asks | asks | asks | open | `ensureProjectAccess` in `SessionManager.askProject`; "always" is kept in `project_consents` |
 | `ask_project` from a session at the agent depth (default 1: one that was itself started or asked) | refused | refused | refused | refused | refused | refused | refused | refused | `askGateError`, `agentDepthRefusal` (`prefs.agentDepth`, #867) |
 | `ask_project` from an untrusted project | refused | refused | refused | open | refused | refused | refused | open | `askProject` (the caller's project trust, #382) |

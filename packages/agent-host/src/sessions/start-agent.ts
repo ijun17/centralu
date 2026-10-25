@@ -19,7 +19,13 @@ import { worktreeSetupFrame } from './worktree-sessions.js'
  */
 export const AGENT_CEILING = 4
 
-const PRESET_RANK: Record<PermissionPreset, number> = { safe: 0, normal: 1, auto: 2 }
+/** The presets, lowest first (#1525 put `edits` between `normal` and `auto`) */
+const PRESET_RANK: Record<PermissionPreset, number> = { safe: 0, normal: 1, edits: 2, auto: 3 }
+
+/** The lowest of these presets (none: `auto`, the identity) */
+export function lowestPreset(...presets: readonly PermissionPreset[]): PermissionPreset {
+  return presets.reduce<PermissionPreset>((low, p) => (PRESET_RANK[p] < PRESET_RANK[low] ? p : low), 'auto')
+}
 
 /** Whether a session under `child` may act for a session under `parent`: never with more than the parent's own permissions */
 export function presetWithin(child: PermissionPreset, parent: PermissionPreset): boolean {
