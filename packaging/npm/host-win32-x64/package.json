@@ -1,6 +1,6 @@
 {
   "name": "@centralu/host-win32-x64",
-  "version": "0.1.0-beta.36",
+  "version": "0.1.0-beta.37",
   "description": "Centralu's host without the window, for Windows on x86-64: what a hub installs on a linked machine",
   "license": "MIT",
   "author": "ijun17",
