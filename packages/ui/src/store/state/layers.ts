@@ -23,9 +23,6 @@ export type Overlay =
     }
   | null
 
-/** A button on a toast. `run` is called at most once: pressing it puts the toast away */
-export type ToastAction = { label: string; run: () => void }
-
 /** Layers over the screen: overlay, inbox, palette, usage, settings, the file viewer and the toast. */
 export type LayersSlice = {
   /**
@@ -36,11 +33,6 @@ export type LayersSlice = {
   overlay: Overlay
   inboxOpen: boolean
   toast: string | null
-  /**
-   * The one action a toast carries (#1512): "Undo" on an archive. It lives as long as the toast and no longer: every write
-   * that says a toast without an action clears it (`stampToasts`), so a later failure never shows an old Undo.
-   */
-  toastAction: ToastAction | null
   /**
    * Counts every toast said, the same words again included (#842 item 14). The toast's timer restarts on it: keyed on
    * the words alone, a failure said twice in a row did not restart it, and the second one vanished early or at once.
@@ -103,5 +95,5 @@ export type LayersSlice = {
   togglePalette(open?: boolean): void
   toggleUsage(open?: boolean): void
   toggleSettings(open?: boolean): void
-  setToast(msg: string | null, action?: ToastAction): void
+  setToast(msg: string | null): void
 }

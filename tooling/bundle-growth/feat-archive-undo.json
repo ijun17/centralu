@@ -1,4 +1,0 @@
-{
-  "bytes": 2600,
-  "reason": "Archive with Undo (#1512): the toast gains an Undo action and a hold while the pointer or focus is on it, the archive asks the host (archiveSession) and its dialog names what the host says would be lost, and Undo puts back the unsent draft and the grid place. Measured against main at d1e1938a9 (1,899,301 B): +2,587 B, all in the main chunk. Plain components and store code with no dependency; lazy loading would not lower the total, which counts every chunk, and main sits under the ceiling by less than this."
-}

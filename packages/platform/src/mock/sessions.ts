@@ -64,7 +64,7 @@ export class SessionsMock {
     s.live = true
     this.emit({ type: 'session_live', sessionId, live: true })
   }
-  readonly agents: Pick<AgentPort, 'createSession' | 'saveAttachment' | 'send' | 'reportOwed' | 'reorderSessions' | 'switchTool' | 'worktreeStatus' | 'autoCompact' | 'deleteSession' | 'archiveIfAtRest' | 'updateSettings' | 'restartSession' | 'resumeSession' | 'forkConversation' | 'rename' | 'markRead' | 'listSessions' | 'loadMessages' | 'messageImage' | 'loadSubagentMessages' | 'subagentTrashed'> = {
+  readonly agents: Pick<AgentPort, 'createSession' | 'saveAttachment' | 'send' | 'reportOwed' | 'reorderSessions' | 'switchTool' | 'worktreeStatus' | 'autoCompact' | 'deleteSession' | 'updateSettings' | 'restartSession' | 'resumeSession' | 'forkConversation' | 'rename' | 'markRead' | 'listSessions' | 'loadMessages' | 'messageImage' | 'loadSubagentMessages' | 'subagentTrashed'> = {
     createSession: async (params: CreateSessionParams) => {
       this.lastCreateParams = params
       this.createParamsLog.push(params)
@@ -293,14 +293,6 @@ export class SessionsMock {
       // Already in the session archive, or never here: the host says it is gone anyway, so a screen holding a stale row lets go (#999)
       if (!this.store.sessions.has(sessionId)) return this.emit({ type: 'session_deleted', sessionId })
       this.trashMock.moveToTrash(sessionId, deleteWorktree, deleteExternal)
-    },
-    // The host's own rule is not in the mock: a session an agent started stands for "something it holds would be lost" (#1512)
-    archiveIfAtRest: async (sessionId: string, deleteExternal = false) => {
-      const s = this.store.sessions.get(sessionId)
-      if (!s) return { archived: false as const, asks: [] }
-      if (s.askedBy) return { archived: false as const, asks: ['A session it started owes it a report; it will not be told, and the report is dropped.'] }
-      this.trashMock.moveToTrash(sessionId, false, deleteExternal)
-      return { archived: true as const }
     },
     updateSettings: async (
       sessionId: string,

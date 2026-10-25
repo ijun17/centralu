@@ -82,12 +82,6 @@ export interface AgentPort {
    * the worktree, and the tool's own conversation file (codex rollout, claude JSONL). Both stay until then.
    */
   deleteSession(sessionId: string, deleteWorktree?: boolean, deleteExternal?: boolean): Promise<void>
-  /**
-   * The archive for a session that looks idle (#1512), decided by the host at the last moment: it moves the session only when
-   * nothing it holds would be lost and it is at rest; otherwise nothing moves and `asks` says what would be lost (empty when it
-   * was only busy). A host from before it throws "Unknown method", and the caller asks first as it always did.
-   */
-  archiveIfAtRest(sessionId: string, deleteExternal?: boolean): Promise<{ archived: true } | { archived: false; asks: string[] }>
   /** Where the session's agent will compact next time its process starts (#1376), as the host that runs it decides */
   autoCompact(sessionId: string): Promise<{ controlled: boolean; share: number; tokens: number | null }>
   /** The material needed to ask the person whether it is fine to delete. Null if it is not a worktree session */

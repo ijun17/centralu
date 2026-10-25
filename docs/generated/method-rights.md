@@ -148,7 +148,6 @@ With the limited credential: runs.
 
 With the limited credential: waits for the person's card in the window and runs once allowed; refused at once when no window that shows the card is attached.
 
-- `agents.archiveIfAtRest`
 - `agents.deleteAgentChild`
 - `agents.deleteOrchestratorSkill`
 - `agents.deleteSession`

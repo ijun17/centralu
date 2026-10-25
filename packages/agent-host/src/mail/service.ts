@@ -358,20 +358,6 @@ export class MailService {
   }
 
   /**
-   * The subjects of the unfinished threads a session holds, the work `sessionGone` would move on: those it is assigned and those it
-   * owns. Read only (it makes no party and no host id), so the session archive can name them before it moves the session (#1512)
-   */
-  openWorkOf(sessionId: string): { assigned: string[]; owned: string[] } {
-    if (!this.records.hasThreads()) return { assigned: [], owned: [] }
-    const address = this.sessionAddress(sessionId)
-    const open = ['open', 'running', 'review', 'blocked'] as const
-    return {
-      assigned: this.records.threadsOfParty(address, 'assignee', open).map((t) => t.subject),
-      owned: this.records.threadsOfParty(address, 'owner', open).map((t) => t.subject),
-    }
-  }
-
-  /**
    * Hears every change to a thread once it has committed: a post (and who it is for), a state change, a member. The delivery
    * engine wakes its receivers from it (§5). A listener that throws is said on stderr and does not undo the change
    */
