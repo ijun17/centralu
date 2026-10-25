@@ -209,7 +209,7 @@ export type SessionsSlice = {
    * Done (#669, #1549): reads a finished turn or a stopped one, and clears a session's error, which moves it to idle.
    * The error line stays in the conversation and nothing is retried or continued.
    */
-  markDone(sessionId: string): Promise<void>
+  markDone: (sessionId: string) => Promise<void>
   /**
    * The person has an app's agent session on screen (#378): the host keeps it as theirs instead of deleting it when its
    * run ends. Said at once, with nothing unread too, which `markRead` skips

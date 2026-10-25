@@ -208,7 +208,7 @@ export function inboxDoneTests() {
       { sid: id, m: message },
     )
   const stateOf = (page: Page, id: string) => page.evaluate((sid) => (window as any).__store.getState().sessions[sid].state as string, id)
-  const hostStateOf = (page: Page, id: string) => page.evaluate((sid) => (((window as any).__mock as any).sessions.get(sid).state as string), id)
+  const hostStateOf = (page: Page, id: string) => page.evaluate((sid) => (((window as any).__mock).sessions.get(sid).state as string), id)
 
   test('Done on an error row moves the session to idle and takes the row off; the error line stays; a new error marks it again (#1549)', async ({ page }) => {
     const { target } = await twoSessions(page)
@@ -245,6 +245,7 @@ export function inboxDoneTests() {
   test('Done on the session itself clears its error and its inbox row (#1549)', async ({ page }) => {
     const { target } = await twoSessions(page)
     await fail(page, target, 'app-server exited (code 0)')
+    await page.evaluate((sid) => ((window as any).__mock as Mock).emit({ type: 'interruption', sessionId: sid, interruption: { reason: 'network', at: Date.now(), detail: 'ECONNRESET' } }), target)
     await expect.poll(() => stateOf(page, target)).toBe('error')
     await page.evaluate((sid) => (window as any).__store.getState().focusSession(sid), target)
     await expect(page.getByTestId('error-note')).toBeVisible()
@@ -256,7 +257,7 @@ export function inboxDoneTests() {
     expect(await hostStateOf(page, target)).toBe('idle')
     await expect(waitingCount(page)).toContainText('0')
     await expect(page.getByTestId('session-view')).toContainText('app-server exited (code 0)')
-    // Done does not stop or continue anything: Continue is still there for a retryable error
-    expect(await page.evaluate((sid) => (window as any).__mock.sessions.get(sid).state, target)).toBe('idle')
+    // Done stops and continues nothing: a stopped turn the person may go on with still offers Continue
+    await expect(page.getByTestId('interrupted-continue')).toBeVisible()
   })
 }

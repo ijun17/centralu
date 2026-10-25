@@ -117,6 +117,7 @@ With the limited credential: runs.
 - `projects.origin`
 - `projects.reorder`
 - `requests.list`
+- `sessions.clearError`
 - `sessions.list`
 - `sessions.markRead`
 - `sessions.rename`

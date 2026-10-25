@@ -457,9 +457,10 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
 
   async markDone(sessionId) {
     const s = get().sessions[sessionId]
-    if (s?.state !== 'error') return get().markRead(sessionId)
+    const platform = get().platform
+    if (s?.state !== 'error' || !platform) return get().markRead(sessionId)
     try {
-      await get().platform!.agents.clearError(sessionId)
+      await platform.agents.clearError(sessionId)
     } catch (e) {
       set({ toast: `Could not clear the error: ${(e as Error).message}` })
       return
