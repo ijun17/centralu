@@ -1,6 +1,7 @@
 import { blockedOnQuestion, RESERVED_APP_IDS, type Attachment, type ExternalAppInfo, type GitSource, type MachineInfo, type NormalizedEvent, type PermissionPreset, type SessionInfo, type SettingsApplied, type ToolName, type UpdateStatus, type UsageHistory, type UsageHistoryBy } from '@cc/protocol'
 import { awayPhrase } from '../adapters/contract.js'
-import type { AgentListRow, AgentSessionOpts, BusyAnswer, BusyChoice, ChildRunResult, HandoffResult, LinkedSessions, OrchestratedSession, OrchestratorTools, RecallHit, RoutedCard, StartAgentOpts } from '../adapters/contract.js'
+import { awayFor, matchProjects } from './ask-project.js'
+import type { AgentListRow, AgentSessionOpts, BusyAnswer, BusyChoice, ChildRunResult, HandoffResult, LinkedProject, LinkedSessions, OrchestratedSession, OrchestratorTools, RecallHit, RoutedCard, StartAgentOpts } from '../adapters/contract.js'
 import type { AppCheckReport, AppRef } from '../apps/external/runtime.js'
 import type { QueuedRequest, Store } from '../dev-services/store.js'
 import { inTurn } from '../idle.js'
@@ -349,24 +350,29 @@ export function orchestratorToolsFor(
       // this computer's own id, which is exact (as ask_project's rule is)
       const reader = linked()
       const exactHere = all.some((p) => p.id === opts.project)
-      // ask_project's rule: the exact name, else the same in any case
-      const sameName = (p: { name: string }) => p.name.toLowerCase() === (opts.project ?? '').toLowerCase()
-      const local = all.some((p) => p.id === opts.project || p.name === opts.project)
-        ? all.filter((p) => p.id === opts.project || p.name === opts.project)
-        : all.filter(sameName)
-      const named = (p: { id: string; name: string }) => p.id === opts.project || p.name === opts.project
-      let there = reader && opts.project && !exactHere ? await reader.projects({ ref: opts.project }) : null
-      let remote = there ? there.projects.filter(named) : []
+      const wanted = opts.project ?? ''
+      // The same match as ask_project's: the id, the exact name, `<machine>/<name>`, then the name in any case; two of one name on this computer are still refused
+      const found = (machineProjects: readonly LinkedProject[]) =>
+        matchProjects(
+          wanted,
+          [
+            ...all.map((p) => ({ id: p.id, name: p.name, machine: null, machineId: null })),
+            ...machineProjects.map((p) => ({ id: p.id, name: p.name, machine: p.machine, machineId: p.machineId })),
+          ],
+          { everyOne: true },
+        )
+      let there = reader && wanted && !exactHere ? await reader.projects({ ref: wanted }) : null
+      let matched = found(there?.projects ?? [])
       // Named nowhere (#1547): a machine that is down may hold a project its mirror lacks, so those are tried now (once per window)
-      if (reader && there && !local.length && !remote.length) {
-        there = await reader.projects({ ref: opts.project, anyDown: true, prior: there })
-        remote = there.projects.filter(named)
+      if (reader && there && !matched.length) {
+        there = await reader.projects({ ref: wanted, anyDown: true, prior: there })
+        matched = found(there.projects)
       }
-      if (!local.length && !remote.length && there?.away.length) {
-        return {
-          ok: false,
-          error: `No such project: ${opts.project}. Not asked, and its projects may be missing: ${there.away.map((a) => `${a.machine} (${a.why})`).join(', ')}.`,
-        }
+      const local = matched.flatMap((m) => all.filter((p) => m.machineId === null && p.id === m.id))
+      const remote = matched.flatMap((m) => (there?.projects ?? []).filter((p) => m.machineId !== null && p.id === m.id))
+      const missing = there && !matched.length ? awayFor(wanted, there.away, there.projects.map((p) => p.machineId)) : []
+      if (missing.length) {
+        return { ok: false, error: `No such project: ${wanted}. Not asked, and its projects may be missing: ${missing.map((a) => `${a.machine} (${a.why})`).join(', ')}.` }
       }
       if (local.length + remote.length > 1) {
         // One name on two machines: guessing would start the work on the wrong disk. A machine that cannot be asked just

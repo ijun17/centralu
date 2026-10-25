@@ -111,8 +111,6 @@ function fencedLine(line: string): string {
  * project on this computer or on another machine; the link's own call timeout is much longer
  */
 const LOOKUP_MS = 4000
-/** How long a call that guessed a down machine holds the next ones off it: `CALL_WINDOW_MS`, the window of an attempt a call starts */
-const GUESS_WINDOW_MS = 15_000
 /** What a linked machine's lookup answers past its bound (`raceTimeout`) */
 const TIMED_OUT = Symbol('timed out')
 
@@ -140,10 +138,9 @@ export function linkedSessions(
   /** This computer, as a machine names who sent an instruction (`host.send`): the orchestrator is not that machine's own */
   hubName?: string,
   /** How long resolving a project name waits for one machine's project list (`lookupMs`); tests shorten it */
-  options: { lookupMs?: number; guessWindowMs?: number } = {},
+  options: { lookupMs?: number } = {},
 ): LinkedSessions {
   const lookupMs = options.lookupMs ?? LOOKUP_MS
-  const guessWindowMs = options.guessWindowMs ?? GUESS_WINDOW_MS
   const owner = (sessionId: string): RoutedMachine | null => {
     const split = splitQualified(sessionId)
     if (!split) return null
@@ -298,13 +295,15 @@ export function linkedSessions(
 
   /**
    * A down machine tried for a name nobody could place (`anyDown`, #1547), when, and the wait that is still going. Inside the
-   * window a call joins that wait or, once it is over, is answered at once, so a run of unknown names waits on a machine
-   * once, not once each: `reachForCall` joins any attempt under way without a window of its own
+   * machine's call window (`callWindowMs`) a call joins that wait or, once it is over, is answered at once, so a run of
+   * unknown names waits on a machine once, not once each: `reachForCall` joins any attempt under way without a window of its
+   * own. The window runs from the guess, whether the wait started an attempt or only joined one under way: a guess is a
+   * wait, and what the person can do about a typo is the same either way
    */
   const guessed = new Map<string, { at: number; wait: Promise<void> | null }>()
   const guess = async (m: RoutedMachine): Promise<void> => {
     const g = guessed.get(m.id)
-    if (g && Date.now() - g.at < guessWindowMs) return g.wait ?? undefined
+    if (g && Date.now() - g.at < (m.callWindowMs ?? 0)) return g.wait ?? undefined
     const entry: { at: number; wait: Promise<void> | null } = { at: Date.now(), wait: null }
     entry.wait = settle(m).finally(() => {
       entry.wait = null
@@ -315,24 +314,26 @@ export function linkedSessions(
 
   /**
    * Every machine's projects, each machine asked within `lookupMs` (#700). One that cannot be asked gives what the headers
-   * mirror last held, each project marked `away` with why. Looking a name up (`findProjects`) goes through this too, so
-   * a stalled link holds it up no longer than it holds the list, and a project there is found as away, never as missing.
+   * mirror last held, each project marked `away` with why. A name looked up goes through this too, so a stalled link holds
+   * it up no longer than it holds the list, and a project there is found as away, never as missing.
    *
    * With `need`, the machines the act needs that are down are tried first (#1532, `settle`) and listed again after: only
    * those. A list does not wait on a machine the act does not need, nor on an attempt to one (it never did).
-   * `need.anyDown` (#1547): the caller found the bare name nowhere, so the mirror cannot say where it is (it is empty after
-   * a restart, or older than the project): every down machine is a candidate then, once per window (`guess`), unless the name
-   * is qualified (`<machine or hub>/<name>`, or a machine's id). The machines that are up are not asked again: their rows
-   * are the caller's `prior` answer, and with no machine down that answer is the result
+   * `need.anyDown` with `need.prior` (#1547): the caller found a bare name nowhere in its first answer, `prior`, so the mirror
+   * cannot say where it is (it is empty after a restart, or older than the project): every down machine is a candidate,
+   * once per window (`guess`). Nothing else is asked again: the machines that are up, and those that did not answer, stand
+   * as `prior` held them, and a name that is qualified (`<machine or hub>/<name>`, a machine's id) is answered by `prior`
+   * whole, its machine having been tried by the first lookup
    */
   const everyProject: LinkedSessions['projects'] = async (need) => {
     const all = [...machines()]
     const ref = need?.ref?.trim()
-    const anyDown = !!need?.anyDown && !!ref && !ref.includes('/') && !all.some((m) => qualifiedWith(m, ref))
+    const bare = !!ref && !ref.includes('/') && !all.some((m) => qualifiedWith(m, ref))
+    const anyDown = !!need?.anyDown && bare
+    const prior = need?.prior
+    if (prior && !anyDown) return prior
     const named = (m: RoutedMachine): boolean => !!need && needs(m, need)
     const wanted = all.filter((m) => !m.reachable && (anyDown || named(m)))
-    const prior = anyDown ? need?.prior : undefined
-    if (prior && !wanted.length) return prior
     // A machine the act needs is listed after its attempt, once: the others are listed meanwhile
     const parts = await Promise.all(
       all.map(async (m): Promise<Listed> => {
@@ -340,10 +341,7 @@ export function linkedSessions(
           await (anyDown && !named(m) ? guess(m) : settle(m))
           return projectsOf(m, true)
         }
-        // Up and listed by the caller already, unless it was away then (`prior` holds its mirror) and is up now
-        if (prior && !prior.away.some((a) => a.machineId === m.id)) {
-          return { projects: prior.projects.filter((p) => p.machineId === m.id), away: [] }
-        }
+        if (prior) return { projects: prior.projects.filter((p) => p.machineId === m.id), away: prior.away.filter((a) => a.machineId === m.id) }
         return projectsOf(m)
       }),
     )
@@ -364,12 +362,6 @@ export function linkedSessions(
       const m = owner(sessionId)
       if (!m) return { ok: false, error: `Not a session of a linked machine: ${sessionId}` }
       return attempt(m, async () => ({ info: (await route('agents.updateSettings', { sessionId, ...s, by: 'orchestrator' })) as SessionInfo & { applied?: string } }))
-    },
-
-    async findProjects(ref) {
-      const wanted = ref.trim()
-      // The machine the name belongs to is tried if it is down (#1532): the act that follows creates a session there
-      return (await everyProject({ ref: wanted })).projects.filter((p) => p.id === wanted || p.name === wanted)
     },
 
     projects: everyProject,

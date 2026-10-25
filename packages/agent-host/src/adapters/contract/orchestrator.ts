@@ -187,7 +187,7 @@ export type ProjectNeed = {
    * waited for once per window, so a later call inside it is answered at once and names the machine as not asked
    */
   anyDown?: boolean
-  /** With `anyDown`: the answer of the lookup that found nothing, so the machines that are up are not asked again */
+  /** With `anyDown`: the answer of the lookup that found nothing, so only the machines that are down are tried now */
   prior?: { projects: LinkedProject[]; away: { machine: string; machineId: string; why: string }[] }
 }
 
@@ -225,12 +225,6 @@ export type LinkedSessions = {
     sessionId: string,
     s: { model?: string | null; effort?: string | null; verbosity?: string | null },
   ): Promise<Outcome<{ info: SessionInfo & { applied?: string } }>>
-  /**
-   * The projects of `projects()` whose name or qualified id is `ref`, under the same per-machine bound: one on a machine
-   * that cannot be asked just now comes from the mirror, marked `away`, so it is found as unreachable, never as missing.
-   * The machine the name belongs to is tried first if it is down (#1532)
-   */
-  findProjects(ref: string): Promise<LinkedProject[]>
   /**
    * Every linked machine's projects (ask_project, #700). A machine that cannot be asked contributes what the headers
    * mirror last held, each project marked `away` with why, and is named in `away` whether or not the mirror held

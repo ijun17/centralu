@@ -80,12 +80,13 @@ export function projectChoice(p: AskableProject): string {
  *   3. `<machine>/<name>`, the machine by its id or the name the person gave it, case aside
  *   4. the name, case aside
  *
- * One project per machine counts: two projects of one name on this computer were never refused (the first is taken), and
+ * One project per machine counts (unless `everyOne`, for the caller that refuses two of one name on this computer): two projects of one name on this computer were never refused (the first is taken), and
  * a machine's two are no different. What is left is more than one only when the same name is on two machines, and the
  * caller then refuses and lists them, because guessing would send the work to the wrong disk.
  */
-export function matchProjects(wanted: string, projects: readonly AskableProject[]): AskableProject[] {
+export function matchProjects(wanted: string, projects: readonly AskableProject[], o: { everyOne?: boolean } = {}): AskableProject[] {
   const firstPerMachine = (found: AskableProject[]): AskableProject[] => {
+    if (o.everyOne) return found
     const seen = new Set<string | null>()
     return found.filter((p) => !seen.has(p.machineId) && !!seen.add(p.machineId))
   }
@@ -217,4 +218,17 @@ export function underGrant(path: string, grants: Iterable<string>, cwd: string):
    */
   for (const g of grants) if (isInside(g, r)) return true
   return false
+}
+
+/**
+ * Of the machines a lookup could not ask, those a missing `wanted` may be on: all, for a bare name, but only the machine
+ * a qualified name (`<machine>/<name>`, or an id that starts with a machine's) is qualified with, so that a name for a
+ * machine that is up does not talk of another that is down. `known`: every machine the lookup saw, up or not
+ */
+export function awayFor<A extends { machine: string; machineId: string }>(wanted: string, away: readonly A[], known: readonly string[]): A[] {
+  const slash = wanted.indexOf('/')
+  const prefix = slash > 0 ? wanted.slice(0, slash).trim().toLowerCase() : null
+  const byId = [...known, ...away.map((a) => a.machineId)].some((id) => wanted.startsWith(`${id}.`))
+  if (prefix === null && !byId) return [...away]
+  return away.filter((a) => a.machineId === prefix || a.machine.toLowerCase() === prefix || wanted.startsWith(`${a.machineId}.`))
 }

@@ -1,6 +1,6 @@
 import type { Delegation } from './child-ownership.js'
 import { errorKindWord } from './error-kind.js'
-import { ANSWER_READ_MAX_CHARS, ASK_WAIT_MS, answerAt, askFrame, clipAnswer, matchProjects, pathsIn, projectChoice, taskLine, type AskableProject } from './ask-project.js'
+import { ANSWER_READ_MAX_CHARS, ASK_WAIT_MS, answerAt, askFrame, awayFor, clipAnswer, matchProjects, pathsIn, projectChoice, taskLine, type AskableProject } from './ask-project.js'
 import { labelOf, lastActiveOf, progressOf } from './transcript-view.js'
 import type { HubAskParams, HubAskResult, SessionState } from '@cc/protocol'
 import { awayPhrase } from '../adapters/contract.js'
@@ -225,7 +225,8 @@ export class AskProjectFlow {
         ...there.projects.map((p) => `${p.name} (on ${p.machine}${p.away ? `, ${p.away}` : ''})`),
         ...fromHubs.projects.map((p) => `${p.name} (on ${p.hub}${p.away ? `, ${p.away}` : ''})`),
       ]
-      const unasked = awayAll.length ? ` Not asked, and its projects may be missing: ${awayAll.map((a) => `${a.machine} (${a.why})`).join(', ')}.` : ''
+      const missing = awayFor(wanted, awayAll, [...there.projects.map((p) => p.machineId), ...fromHubs.projects.map((p) => p.hubId)])
+      const unasked = missing.length ? ` Not asked, and its projects may be missing: ${missing.map((a) => `${a.machine} (${a.why})`).join(', ')}.` : ''
       return {
         ok: false,
         error: others.length

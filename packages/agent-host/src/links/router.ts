@@ -52,6 +52,8 @@ export interface RoutedMachine {
    * The caller reads `reachable` after. Absent: nothing to try
    */
   reachForCall?(): Promise<void>
+  /** How long after a call started an attempt on it another may not (#1532): the window a guess for a name is held off by too (#1547). Absent: no window kept */
+  readonly callWindowMs?: number
   /** The attempt to connect it that a call made or waited on, as a clause for the answer to a call it could not take (it is still under way, or it failed and why); null when up or unsaid */
   readonly whyDown?: string | null
 }

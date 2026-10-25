@@ -613,7 +613,7 @@ describe('a project lookup connects only the machine the act needs (#1532)', () 
 
   it('waits for a down machine once per window for a name it does not hold, then answers at once and says it was not asked (#1547)', async () => {
     const { m: far, tried } = downMachine('far', 'Far box', 300 * SLOW, { comesBack: false, why: 'the attempt to connect it just now failed: Operation timed out' })
-    const reader = linkedSessions(() => [far])
+    const reader = linkedSessions(() => [{ ...far, callWindowMs: 15_000 }])
     const t0 = Date.now()
     const first = await again(reader, 'typo1')
     expect(Date.now() - t0).toBeGreaterThanOrEqual(250 * SLOW)
@@ -660,7 +660,8 @@ describe('a project lookup connects only the machine the act needs (#1532)', () 
     const { m: far } = downMachine('far', 'Far box', 10, { comesBack: false })
     const reader = linkedSessions(() => [stalled, far], undefined, undefined, { lookupMs: 40 })
     const prior = await reader.projects({ ref: 'typo' })
-    expect(prior.away.map((a) => a.machineId).sort()).toEqual(['far', 'm1'])
+    // Far box is connecting, so the first answer does not call it away; the one that stalled is
+    expect(prior.away.map((a) => a.machineId)).toEqual(['m1'])
     const after = await reader.projects({ ref: 'typo', anyDown: true, prior })
     expect(lists).toBe(1)
     // The machine that stalled is still said not to have been asked

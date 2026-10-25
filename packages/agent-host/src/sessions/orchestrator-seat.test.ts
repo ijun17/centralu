@@ -534,8 +534,8 @@ describe('create_session by name across machines (#1547)', () => {
   const laptopDown = { machine: 'Laptop', machineId: 'm1', why: 'not reachable right now' }
   const rig = (projects: object[], away: object[] = []) => {
     store.projects.addProject({ id: 'p1', path: tmpdir(), name: 'site' })
-    host.createSession = vi.fn(async () => ({ ...session('new'), permissionPreset: 'safe' }) as SessionInfo)
-    host.firstTool = vi.fn(() => 'claude' as ToolName)
+    host.createSession = vi.fn(async () => ({ ...session('new'), permissionPreset: 'safe' as const }))
+    host.firstTool = vi.fn((): ToolName => 'claude')
     const createSession = vi.fn(async () => ({ ok: true as const, sessionId: 'm2.s', name: 's' }))
     const lookups: unknown[] = []
     linked = {

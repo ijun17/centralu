@@ -1350,6 +1350,7 @@ describe('a bare project name that only a down machine holds (#1547)', () => {
       q: new Qualifier('m3', 3),
       reachable: false,
       attemptUnderWay: true,
+      callWindowMs: 15_000,
       settled: async () => {
         await pause(400 * SLOW)
       },
