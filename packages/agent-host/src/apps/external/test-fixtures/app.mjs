@@ -313,6 +313,17 @@ serveStdio(() => {
     const extraFrom = arg('extra-from')
     const extra = extraFrom && existsSync(extraFrom) ? JSON.parse(readFileSync(extraFrom, 'utf8')) : []
     for (const name of extra) server.registerTool(name, { description: `Extra tool ${name}` }, async () => say(`${name} ran`))
+    // Tools that declare how risky a write is (`tool-risk.ts`): --risks adds them, so the lists other tests count stay as they were
+    if (process.argv.includes('--risks')) {
+      const w = (risk, ann, extra = {}) => ({ description: `Declares ${risk}`, inputSchema: z.object({ push: z.boolean().optional() }), annotations: { readOnlyHint: false, ...ann }, _meta: { 'centralu/risk': risk, ...extra } })
+      server.registerTool('note', w('local', { destructiveHint: false, openWorldHint: false }), async () => say('noted'))
+      server.registerTool('liar', w('local', { openWorldHint: false }), async () => say('lied'))
+      server.registerTool('post', w('routine', { destructiveHint: false, openWorldHint: true }), async () => say('posted'))
+      server.registerTool('merge', w('routine', { destructiveHint: true, openWorldHint: true }), async () => say('merged'))
+      server.registerTool('restack', w('routine', { destructiveHint: true, openWorldHint: true }, { 'centralu/askWhen': { push: true } }), async () => say('restacked'))
+      server.registerTool('open', w('routine', { destructiveHint: false, openWorldHint: true }, { 'centralu/askWhen': { path: '*' }, 'centralu/askUnless': { skipPrePr: '*', dryRun: true } }), async () => say('opened'))
+      server.registerTool('release', { description: 'Declares nothing', annotations: { readOnlyHint: false, destructiveHint: true } }, async () => say('released'))
+    }
     // An app asking Claude Code to keep its tool loaded in every request (#513): the flag the SDK sets for `alwaysLoad`
     if (process.argv.includes('--resident')) {
       server.registerTool('pinned', { description: 'Asks to stay loaded', _meta: { 'anthropic/alwaysLoad': true } }, async () => say('pinned ran'))

@@ -148,6 +148,7 @@ With the limited credential: runs.
 
 With the limited credential: waits for the person's card in the window and runs once allowed; refused at once when no window that shows the card is attached.
 
+- `agents.archiveIfAtRest`
 - `agents.deleteAgentChild`
 - `agents.deleteOrchestratorSkill`
 - `agents.deleteSession`
@@ -172,7 +173,6 @@ With the limited credential: waits for the person's card in the window and runs 
 - `trash.purge`
 - `trash.purgeRuns`
 - `trash.purgeSubagentSteps`
-- `updates.apply`
 
 Asks only for some parameters (everyday otherwise):
 
@@ -183,6 +183,7 @@ Asks only for some parameters (everyday otherwise):
 - `machines.setAsks`, when it turns the switch on
 - `machines.update`, when `when` is `now`, or the hub's automatic updates are off, or the machine does not run an older release that the update brings to the hub's own version
 - `prefs.set`, when it sets the agent ceiling or depth, turns hub auto on, or turns approval notifications or their sound off
+- `updates.apply`, when the person's Automatic updates are off, or something is running (a turn, a card waiting, background work, a terminal or a command)
 - `updates.setAuto`, when it turns automatic updates on
 - `updates.setAutoApply`, when it turns automatic applying on
 

@@ -112,3 +112,7 @@ export function proposedMcpServerNameError(name: string): string | null {
   return null
 }
 
+
+// How risky an app says a write is, and what the host does with it (an app tool's approval, `tool-risk.ts`)
+export { RISK_META_KEY, ASK_WHEN_META_KEY, declaredRisk, askWhen, runsUnasked } from './external/tool-risk.js'
+export type { ToolRisk, RiskTool, RiskScope } from './external/tool-risk.js'

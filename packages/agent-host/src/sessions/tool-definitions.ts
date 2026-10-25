@@ -317,7 +317,7 @@ export const ORCHESTRATOR_TOOLS = [
   {
     name: 'delete_session',
     description:
-      "Archives a session, as the window's delete does; restore_archived brings it back. Its worktree and the tool's own conversation file stay. For sessions that are not yours: a child you started is deleted with agent_session. The person approves a card first, which names what the host drops that restoring does not bring back (a caller waiting for its report, reports it owes). Refused while the session is working, waiting on the person or has a background job running.",
+      "Archives a session, as the window's delete does; restore_archived brings it back. Its worktree and the tool's own conversation file stay. For sessions that are not yours: a child you started is deleted with agent_session. The person approves a card first when moving it drops something restoring does not bring back (a caller waiting for its report, reports it owes, unfinished mail threads it is assigned or owns), and always under the safe preset; an idle session nobody waits on is moved with no card, so tell the person what you archived. Refused while the session is working, waiting on the person or has a background job running.",
     schema: z.object({ sessionId: z.string().describe('The id list_sessions gives.') }),
   },
   {
@@ -495,7 +495,7 @@ export const ORCHESTRATOR_TOOLS = [
     name: 'handoff_session',
     description:
       'Hands a session off to a fresh one that starts from a note: built from its stored conversation by default, or written by the session (mode "agent"). ' +
-      'Its live children move to the new session; the original stays. Refused while it is mid-turn; asks the person unless you are auto.',
+      'Its live children move to the new session; the original stays. Refused while it is mid-turn; asks the person unless you are auto or the session runs under a preset no higher than yours.',
     schema: z.object({
       sessionId: z.string().optional().describe('The session id from list_sessions.'),
       tool: ToolName.optional().describe("The new session's tool. If omitted, the same tool."),

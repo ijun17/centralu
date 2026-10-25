@@ -45,6 +45,11 @@ export type RightsHost = {
    * cover (#1508, `LinkedMachine.followsHub`, the one place the condition lives). False for an id that is not linked
    */
   followsHub(machineId: string): boolean
+  /**
+   * Whether the person's Automatic updates are on and nothing is running (`hostBusy`, idle.ts): installing the update now is
+   * what the host does by itself then (#1509, `UpdateService.setAutoApply`). False while the host drains for a swap
+   */
+  updateAtRest(): boolean
 }
 
 /** The parameters as an object to read fields from; anything else reads as having none */
@@ -103,6 +108,12 @@ const updateAsks = (params: unknown, host: RightsHost | null): boolean => {
   return typeof p.machineId !== 'string' || host === null || !host.followsHub(p.machineId)
 }
 
+/**
+ * Applying an update asks unless the person's Automatic updates are on and the host is idle (#1509, owner 2026-10-24): then the
+ * host would install it by itself, and asking guards nothing. A host that gives no state asks
+ */
+const applyAsks = (_params: unknown, host: RightsHost | null): boolean => host === null || !host.updateAtRest()
+
 export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   // Sessions
   'agents.createSession': { asks: presetAbove, when: "the preset is above `normal`, or it carries a hub's preset (`fromHub`)" },
@@ -114,6 +125,8 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   'agents.clearBackgroundTasks': 'everyday',
   /** Moving to the trash drops owed reports, delegations, grants and waiting cards (owner, #1371) */
   'agents.deleteSession': 'asks',
+  /** Moves the session to the archive when that loses nothing, and says so otherwise (#1512): the card names the move */
+  'agents.archiveIfAtRest': 'asks',
   'agents.deleteAgentChild': 'asks',
   'agents.mcpProposals': 'everyday',
   'agents.resolveMcpProposal': 'window',
@@ -280,7 +293,7 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   'updates.status': 'everyday',
   'updates.setAuto': { asks: switchedOn('enabled'), when: 'it turns automatic updates on' },
   'updates.setAutoApply': { asks: switchedOn('enabled'), when: 'it turns automatic applying on' },
-  'updates.apply': 'asks',
+  'updates.apply': { asks: applyAsks, when: "the person's Automatic updates are off, or something is running (a turn, a card waiting, background work, a terminal or a command)" },
   'requests.list': 'everyday',
   /** The person's answer to a host request: a card answering itself means nothing */
   'requests.answer': 'window',

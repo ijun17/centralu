@@ -94,6 +94,8 @@ export type AgentProcessHost = {
 /** What the mailbox hears from the manager (#1347): a session gone, a session that may now take mail, an event the guards count */
 export type MailHooks = {
   sessionGone(sessionId: string): void
+  /** The subjects of the unfinished threads the session is assigned or owns, which `sessionGone` would move on (#1512) */
+  openWork?(sessionId: string): { assigned: string[]; owned: string[] }
   sessionChanged(sessionId: string): void
   sessionEvent?(e: NormalizedEvent, endedTurn: boolean): void
   /** The `mail` tool of a session */
@@ -1235,6 +1237,11 @@ export class SessionManager {
     return this.trash.trashSession(...a)
   }
 
+  /** `SessionTrash.archiveIfAtRest` (session-trash.ts, #1512): `agents.archiveIfAtRest` */
+  archiveIfAtRest(...a: Parameters<SessionTrash['archiveIfAtRest']>): ReturnType<SessionTrash['archiveIfAtRest']> {
+    return this.trash.archiveIfAtRest(...a)
+  }
+
   /** The startup repair of recovery folders an interrupted purge left aside (#647) */
   private recoveryRepair: Promise<void> = Promise.resolve()
 
@@ -2205,6 +2212,14 @@ export class SessionManager {
           console.error(`[mail] ${e.sessionId?.slice(0, 8) ?? '?'}: ${errorMessage(err)}`)
         }
       },
+      mailWork: (id) => {
+        try {
+          return self.mailHooks?.openWork?.(id) ?? { assigned: [], owned: [] }
+        } catch (e) {
+          console.error(`[mail] ${id.slice(0, 8)}: its open work could not be read (${errorMessage(e)})`)
+          return null
+        }
+      },
       mailGone: (id) => {
         try {
           self.mailHooks?.sessionGone(id)
@@ -2668,6 +2683,11 @@ export class SessionManager {
   /** The windows' "Apply now" for an agent (#665, update-apply.ts) — wired by the host, which owns the event stream */
   useUpdateApply(broker: UpdateApplyBroker): void {
     this.updatesAsked.updateApply = broker
+  }
+
+  /** Whether Automatic updates are on and the host idle, for an agent's apply to go with no card (#1509, updates-asked.ts) — wired by the host */
+  useUpdateAtRest(atRest: (besidesSessionId: string) => boolean): void {
+    this.updatesAsked.updateAtRest = atRest
   }
 
   /** `SessionSettings.noteAgentMoved` (session-settings.ts), kept on the manager for its callers */

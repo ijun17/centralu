@@ -149,9 +149,10 @@ export class CodexServers {
             CC_APP_WAIT_MS: String(APP_CALL_WAIT_MS),
           },
           default_tools_approval_mode: mode,
-          // A tool the app itself declares read-only is never asked about, under any preset (decision 5)
+          // A tool the app itself declares read-only is never asked about, under any preset (decision 5); nor is
+          // a write it declares `local`, or `routine` for the app of this project (`SessionApps.unasked`, no arguments yet)
           tools: Object.fromEntries(
-            (lists[i] ?? []).filter((t) => t.annotations?.readOnlyHint === true).map((t) => [t.name, { approval_mode: 'approve' }]),
+            (lists[i] ?? []).filter((t) => apps.unasked(a.server, t.name, this.host.opts.permissionPreset)).map((t) => [t.name, { approval_mode: 'approve' }]),
           ),
           tool_timeout_sec: CODEX_TOOL_TIMEOUT_SEC,
           startup_timeout_sec: APP_STARTUP_TIMEOUT_SEC,

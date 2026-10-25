@@ -1302,7 +1302,11 @@ the session to write it (`mode: "agent"`) stays an option in both.
     record.
   - The receiving tool is checked first (`toolProblem`: an adapter, installed and signed in): a tool that cannot start
     a session is refused before any card, so a name the model made up never reaches the person's eyes.
-  - The person's consent is a card in the orchestrator's own session for each handoff (`askHost`, an `other` card with
+  - A handoff that guards nothing asks no one (#1509, owner 2026-10-24): the target is at rest (the check above) and the
+    preset the successor takes, which is the original's, is within the orchestrator's own (`HandoffFlow.covered`). The original
+    stays and the orchestrator hands over no power it lacks. It is read again where the successor starts, after an agent's note too. A target above the
+    orchestrator's preset takes the card below.
+  - Otherwise the person's consent is a card in the orchestrator's own session for each handoff (`askHost`, an `other` card with
     `about: "session_handoff"`), naming the target, the receiving tool, where the note comes from, the preset the new
     session runs under and the extra words. Every name on it is someone else's text and is JSON-quoted; the extra words
     are cut at 400 characters and the card says so and gives the full length. Under the orchestrator's own `auto` the
@@ -1720,7 +1724,7 @@ window's channel), grouped, and for each group one of three states.
 | Sessions: start, message, stop. `agents.createSession`, `agents.send`, `agents.interrupt`, `agents.forkConversation`, `agents.switchTool`, `agents.exportHandoff*`, `agents.updateSettings` | Has it | `create_session`, `send_to_session`, `agent_session` (`stop`, `send`), `start_agent` (a fork), `handoff_session`, `update_session_settings`, each behind the target's preset |
 | Reading sessions. `sessions.list`, `messages.load`, `messages.subagent`, `messages.search`, `agents.worktreeStatus`, `agents.autoCompact` | Has it | `list_sessions`, `read_session`, `recall`, `agent_session` (`status`, `list`) |
 | Answering a waiting session. `agents.respondApproval`, `agents.answerQuestion` | Has it | `answer_question`, the target's preset and the delegation rules decide (security-boundaries.md) |
-| Deleting a session. `agents.deleteSession` | Has it: its own children (`agent_session delete`), and any other worker session behind a card (`delete_session`, #1219 fourth slice) | A move to the session archive keeps the conversation, the worktree and the tool's file but not what the host holds for the session (a caller's wait for its report, delegations, grants, standing start_agent cards), so `delete_session` **asks**, naming that, and the host decides in the step that moves it (a message the person sent meanwhile keeps the session). It refuses the caller itself, an orchestrator or coordinator, a child of the caller (that is `agent_session delete`, #637), a session that is working, waiting on the person or running a background job (archiving ends its process), and one on a machine that cannot be reached |
+| Deleting a session. `agents.deleteSession` | Has it: its own children (`agent_session delete`), and any other worker session behind a card (`delete_session`, #1219 fourth slice) | A move to the session archive keeps the conversation, the worktree and the tool's file but not what the host holds for the session (a caller's wait for its report, delegations, grants, standing start_agent cards), so `delete_session` **asks**, naming that (the unfinished mail threads it is assigned or owns too, since restoring hands none back), when moving the session drops any of it (#1512: the window's own archive of an idle session asks the host the same question first, `agents.archiveIfAtRest`, and moves it only when the list is empty and the session is still at rest; an idle local session nobody waits on is moved with no card unless the caller runs under `safe`, since the move is undone with `restore_archived` or Settings → Archive), and the host decides in the step that moves it (a message the person sent meanwhile keeps the session). It refuses the caller itself, an orchestrator or coordinator, a child of the caller (that is `agent_session delete`, #637), a session that is working, waiting on the person or running a background job (archiving ends its process), and one on a machine that cannot be reached |
 | Restart or resume. `agents.restartSession`, `agents.resumeSession` | Has it | A send to an asleep or stopped session wakes it |
 | Housekeeping of a session. `sessions.rename`, `agents.clearBackgroundTasks` | Has it (#1219, fourth slice) | `rename_session` (a worker session; the answer quotes the old name, so it can be set back) and `clear_background_tasks` (ended tasks only; running ones stay): no card |
 | Reading how the agent CLIs stand. `agents.detect`, `agents.usage`, `agents.models` | Has it (#1219, fourth slice) | `agent_status` (installed, logged in, plan and limits) and `agent_models`: read only |
@@ -2604,7 +2608,11 @@ installed", "already runs it", a browser window that cannot relaunch) or, with n
 within 5 s, says so. Then the caller's own preset decides, as for every Centralu boundary (#606): `auto` goes on and
 is logged, `normal` raises a card (its "always" covers applying for that session only, apart from check and
 install), `safe` and an agent an app started are refused before any window is
-asked. After consent the windows are asked again, since a card can stand for minutes, and `update_apply_go` names the
+asked. `normal` raises no card while the person's Automatic updates are on and the host is idle apart from the caller's own
+turn (#1509, owner 2026-10-24: the window's own auto-apply would relaunch at that moment; `updateAtRest` in main.ts,
+`hostBusyBesides` in `idle.ts`). That is judged in the consent step, after a window said it is ready, and again after the second ask of the
+windows, right before `update_apply_go`, which then carries `unasked` (additive): the window waits out someone typing
+(`TYPING_QUIET_MS`) as its own automatic apply does, and reports that instead of relaunching. Nothing is remembered, except that a card-free relaunch that failed brings the card back for that installed version, for every session, so an agent cannot retry it in a loop with no one asked. The limited credential's `updates.apply` reads the same state (`RightsHost.updateAtRest`). After consent the windows are asked again, since a card can stand for minutes, and `update_apply_go` names the
 first ready window's ticket. That window alone checks again, reports `started` through `updates.reportApply`, runs
 `applyUpdateNow` (the keeper is told, then the shell relaunches) and reports the outcome. Only after `started` does its
 connection ending count as the relaunch, since a relaunching window can close before its last report; ending before

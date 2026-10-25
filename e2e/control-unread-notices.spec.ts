@@ -159,8 +159,8 @@ test('A finished notice goes away when that session is deleted', async ({ page }
   await expect.poll(() => doneNotices(page)).toEqual([first])
 
   await page.getByTestId(`session-menu-${first}`).click()
+  // Finished, so idle: archived at once, with no question (#1512)
   await page.getByTestId(`delete-session-${first}`).click()
-  await page.getByTestId('confirm-delete-yes').click()
   await expect(page.getByTestId(`session-row-${first}`)).toBeHidden()
 
   await expect.poll(() => doneNotices(page)).toEqual([])

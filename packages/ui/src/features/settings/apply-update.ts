@@ -3,6 +3,7 @@ import { APP_VERSION, type UpdateStatus } from '@cc/protocol'
 import type { RelaunchCheck } from '@cc/platform/ports'
 import { useStore } from '../../store/store.js'
 import { applyOffer, installedUpdate, type ApplyOffer } from './apply-offer.js'
+import { trackTyping, typedWithin, TYPING_QUIET_MS } from './typing.js'
 
 /**
  * Applying an installed update (#352): what the update line offers once the host has installed a
@@ -12,13 +13,7 @@ import { applyOffer, installedUpdate, type ApplyOffer } from './apply-offer.js'
  */
 
 export { applyOffer, installedUpdate, agentApplyVerdict, type ApplyOffer, type AgentApplyVerdict } from './apply-offer.js'
-
-/**
- * How long after the last keystroke in a text field the window counts as "someone is typing". A
- * relaunch reloads the window; the composer keeps a draft, but a sentence half typed into a dialog
- * would be lost, and a window swapping itself out under someone's fingers reads as a crash.
- */
-export const TYPING_QUIET_MS = 20_000
+export { typedWithin, TYPING_QUIET_MS } from './typing.js'
 
 export type AutoApplyInput = {
   update: UpdateStatus | null
@@ -50,29 +45,6 @@ export function autoApplyDecision(i: AutoApplyInput): { apply: boolean; waitingF
   if (i.busy !== false) return { apply: false, waitingFor: 'something is running' }
   if (i.typing) return { apply: false, waitingFor: 'you are typing' }
   return { apply: true }
-}
-
-/*
- * Typing, seen from the window: the last keydown in an editable field. One capture listener for
- * the whole window, installed on first use; cheap enough to leave on.
- */
-let lastTypedAt = 0
-let typingTracked = false
-function isEditable(t: EventTarget | null): boolean {
-  if (!(t instanceof HTMLElement)) return false
-  return t.isContentEditable || t.tagName === 'TEXTAREA' || (t.tagName === 'INPUT' && (t as HTMLInputElement).type !== 'checkbox')
-}
-function trackTyping(): void {
-  if (typingTracked || typeof window === 'undefined') return
-  typingTracked = true
-  const mark = (e: Event) => {
-    if (isEditable(e.target)) lastTypedAt = Date.now()
-  }
-  window.addEventListener('keydown', mark, true)
-  window.addEventListener('compositionupdate', mark, true)
-}
-export function typedWithin(ms: number, now = Date.now()): boolean {
-  return lastTypedAt > 0 && now - lastTypedAt < ms
 }
 
 /**
