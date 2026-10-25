@@ -50,7 +50,7 @@ it('reads the scheme from brand.ts: the literal of this repository, the tag sche
   expect(schemeOf("import { APP_VERSION } from './version.generated.js'\r\nexport const CLIENT_INFO = { version: APP_VERSION }\r\n")).toEqual({ scheme: 'tag' })
   expect(schemeOf("export const APP_NAME = 'Centralu'\n")).toEqual({ scheme: 'tag' })
   // A declaration the literal's pattern misses is not the tag scheme: that would let a tag of any version publish (review item 2)
-  for (const text of ['export const APP_VERSION = "1.0.0-beta.2"', "export const APP_VERSION: string = '1.0.0-beta.2'", 'export const APP_VERSION = readVersion()', "export const APP_VERSION = '1.0.0'\nexport { APP_VERSION } from './version.generated.js'"])
+  for (const text of ['export const APP_VERSION = "1.0.0-beta.2"', "export const APP_VERSION: string = '1.0.0-beta.2'", 'export const APP_VERSION = readVersion()', "export const APP_VERSION = '1.0.0'\nexport { APP_VERSION } from './version.generated.js'", "import { APP_VERSION } from './version.generated.js'\nexport const APP_VERSION = \"1\""])
     expect(schemeOf(text), text).toMatchObject({ scheme: null })
 })
 
