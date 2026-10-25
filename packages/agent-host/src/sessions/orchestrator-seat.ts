@@ -349,8 +349,8 @@ export function orchestratorToolsFor(
       // A linked machine's project, by its name or qualified id (#82 phase 4). Asked only when links exist, and not for
       // this computer's own id, which is exact (as ask_project's rule is)
       const reader = linked()
-      const exactHere = all.some((p) => p.id === opts.project)
-      const wanted = opts.project ?? ''
+      const wanted = (opts.project ?? '').trim()
+      const exactHere = all.some((p) => p.id === wanted)
       // The same match as ask_project's: the id, the exact name, `<machine>/<name>`, then the name in any case; two of one name on this computer are still refused
       const found = (machineProjects: readonly LinkedProject[]) =>
         matchProjects(
@@ -370,7 +370,7 @@ export function orchestratorToolsFor(
       }
       const local = matched.flatMap((m) => all.filter((p) => m.machineId === null && p.id === m.id))
       const remote = matched.flatMap((m) => (there?.projects ?? []).filter((p) => m.machineId !== null && p.id === m.id))
-      const missing = there && !matched.length ? awayFor(wanted, there.away, there.projects.map((p) => p.machineId)) : []
+      const missing = there && !matched.length ? awayFor(wanted, there.away, there.machines.map((m) => m.machineId)) : []
       if (missing.length) {
         return { ok: false, error: `No such project: ${wanted}. Not asked, and its projects may be missing: ${missing.map((a) => `${a.machine} (${a.why})`).join(', ')}.` }
       }

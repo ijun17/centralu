@@ -191,7 +191,7 @@ export class AskProjectFlow {
      * rules as a linked machine's: `<hub>/<name>`, a qualified id, or a unique bare name
      */
     const hubs = this.hubs
-    const none = { projects: [], away: [] }
+    const none = { projects: [], away: [], machines: [] }
     // Nothing is awaited when neither is asked: a call naming a project of this computer by id goes on in the same tick
     const [first, fromHubs] =
       (reader || hubs) && !exactHere ? await Promise.all([reader ? reader.projects({ ref: wanted }) : none, hubs ? hubs.projects() : none]) : [none, none]
@@ -225,7 +225,7 @@ export class AskProjectFlow {
         ...there.projects.map((p) => `${p.name} (on ${p.machine}${p.away ? `, ${p.away}` : ''})`),
         ...fromHubs.projects.map((p) => `${p.name} (on ${p.hub}${p.away ? `, ${p.away}` : ''})`),
       ]
-      const missing = awayFor(wanted, awayAll, [...there.projects.map((p) => p.machineId), ...fromHubs.projects.map((p) => p.hubId)])
+      const missing = awayFor(wanted, awayAll, [...there.machines.map((m) => m.machineId), ...fromHubs.projects.map((p) => p.hubId)])
       const unasked = missing.length ? ` Not asked, and its projects may be missing: ${missing.map((a) => `${a.machine} (${a.why})`).join(', ')}.` : ''
       return {
         ok: false,

@@ -345,7 +345,7 @@ export function linkedSessions(
         return projectsOf(m)
       }),
     )
-    return { projects: parts.flatMap((p) => p.projects), away: parts.flatMap((p) => p.away) }
+    return { projects: parts.flatMap((p) => p.projects), away: parts.flatMap((p) => p.away), machines: all.map((m) => ({ machine: m.name, machineId: m.id })) }
   }
 
   return {

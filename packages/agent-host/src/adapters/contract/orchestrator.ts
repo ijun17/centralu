@@ -188,7 +188,17 @@ export type ProjectNeed = {
    */
   anyDown?: boolean
   /** With `anyDown`: the answer of the lookup that found nothing, so only the machines that are down are tried now */
-  prior?: { projects: LinkedProject[]; away: { machine: string; machineId: string; why: string }[] }
+  prior?: ProjectLookup
+}
+
+/**
+ * What a lookup of projects answers: the projects, the machines it could not ask (`away`), and every machine it saw, up
+ * or not and with projects or not (`machines`), which a name qualified with a machine's id is told from a bare name by (#1547)
+ */
+export type ProjectLookup = {
+  projects: LinkedProject[]
+  away: { machine: string; machineId: string; why: string }[]
+  machines: { machine: string; machineId: string }[]
 }
 
 /** A project on a linked machine, as the hub's orchestrator names it (#82 phase 4) */
@@ -231,7 +241,7 @@ export type LinkedSessions = {
    * anything: a project there is reported as unreachable, never as missing. `need` is what the act is about (#1532): a
    * machine it needs that is down is tried to connect, bounded, before it is listed; one it does not need is never waited for
    */
-  projects(need?: ProjectNeed): Promise<{ projects: LinkedProject[]; away: { machine: string; machineId: string; why: string }[] }>
+  projects(need?: ProjectNeed): Promise<ProjectLookup>
   /** A machine project's ordinary sessions (its workers, not an app's) as that machine reports them now; ids qualified */
   projectSessions(project: LinkedProject): Promise<Outcome<{ sessions: { id: string; name: string; state: string }[] }>>
   /**

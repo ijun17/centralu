@@ -84,7 +84,8 @@ export function projectChoice(p: AskableProject): string {
  * a machine's two are no different. What is left is more than one only when the same name is on two machines, and the
  * caller then refuses and lists them, because guessing would send the work to the wrong disk.
  */
-export function matchProjects(wanted: string, projects: readonly AskableProject[], o: { everyOne?: boolean } = {}): AskableProject[] {
+export function matchProjects(asked: string, projects: readonly AskableProject[], o: { everyOne?: boolean } = {}): AskableProject[] {
+  const wanted = asked.trim()
   const firstPerMachine = (found: AskableProject[]): AskableProject[] => {
     if (o.everyOne) return found
     const seen = new Set<string | null>()
