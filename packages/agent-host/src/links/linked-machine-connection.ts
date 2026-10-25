@@ -198,11 +198,10 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   private nextAttemptAt: number | null = null
   /** Calls waiting for an attempt to connect to end (`settled`) */
   private statusWaiters = new Set<() => void>()
-  /** When a call last started an attempt (`reachForCall`), and until when the calls that find it under way wait for it */
+  /** When a call last started an attempt (`reachForCall`), and how the attempt a call waited on ended, with when */
   private lastCallAttemptAt = 0
   private callFailure: string | null = null
   private callFailureAt = 0
-  private callAttemptUntil = 0
 
   constructor(
     protected record: MachineRecord,
@@ -304,10 +303,9 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     // The client dials the same forward again after a drop, about 6 s and no ssh (`LINK_REDIALS`): let it, it may be back
     await this.waitUntil(() => this.reachable || !this.redialing, left())
     if (this.reachable) return
-    // An attempt under way is joined, whoever started it; one a call started is waited for to that call's bound
+    // An attempt under way is joined, whoever started it, and waited for to this call's own bound
     if (this.attemptUnderWay) {
-      const bound = this.callAttemptUntil > Date.now() ? this.callAttemptUntil - Date.now() : undefined
-      await this.settled(bound)
+      await this.settled(Math.min(left(), this.deps.attemptWaitMs ?? ATTEMPT_WAIT_MS))
       return this.noteCallFailure()
     }
     if (this.stopped || this.parked || this.held || this.inOperation() || !this.autoReconnect || this.redialing) return
@@ -315,26 +313,29 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     const now = Date.now()
     if (now - this.lastCallAttemptAt < (this.deps.callWindowMs ?? CALL_WINDOW_MS)) return
     this.lastCallAttemptAt = now
-    this.callAttemptUntil = now + left()
     // Not the person's Start: it starts no host the link would not start by itself
     this.connect({ start: false, keepBackoff: true })
-    await this.settled(left())
+    await this.settled(Math.min(left(), this.deps.attemptWaitMs ?? ATTEMPT_WAIT_MS))
     this.noteCallFailure()
   }
 
-  /** What the attempt a call waited on came to when it did not connect: the machine's own words, or that it is still going */
+  /** How the attempt a call waited on ended when it did not connect: the machine's own words. One still going is told as it is (`whyDown`) */
   private noteCallFailure(): void {
-    if (this.reachable) return
-    this.callFailure = this.attemptUnderWay ? 'it is still connecting' : (this.error?.replace(NEXT_STEP, '') ?? null)
+    if (this.reachable || this.attemptUnderWay) return
+    this.callFailure = this.error?.replace(NEXT_STEP, '') ?? null
     this.callFailureAt = Date.now()
   }
 
   /**
-   * Why the attempt a call made last did not connect (#1532), for the answer to that call; null once the link is up, and
-   * before any call made one
+   * What the answer to a call that could not take it says of the attempt to connect the machine (#1532), as a clause: that
+   * one is still under way, or that the one a call made last failed, with the machine's own words. Null once the link is
+   * up, and when no attempt was made or told of
    */
   get whyDown(): string | null {
-    return this.reachable || Date.now() - this.callFailureAt > CALL_FAILURE_KEPT_MS ? null : this.callFailure
+    if (this.reachable) return null
+    if (this.attemptUnderWay) return 'an attempt to connect it is still under way'
+    if (!this.callFailure || Date.now() - this.callFailureAt > CALL_FAILURE_KEPT_MS) return null
+    return `the attempt to connect it just now failed: ${this.callFailure}`
   }
 
   /** An install, update or other operation the person started is running: its retries are part of it (`retryLater`) */

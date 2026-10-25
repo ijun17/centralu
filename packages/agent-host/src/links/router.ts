@@ -52,7 +52,7 @@ export interface RoutedMachine {
    * The caller reads `reachable` after. Absent: nothing to try
    */
   reachForCall?(): Promise<void>
-  /** Why the link is down, as the machine's row says it, for the answer to a call it could not take; null when up or unsaid */
+  /** The attempt to connect it that a call made or waited on, as a clause for the answer to a call it could not take (it is still under way, or it failed and why); null when up or unsaid */
   readonly whyDown?: string | null
 }
 
@@ -83,7 +83,8 @@ export class MachineUnreachableError extends Error {
   readonly retryable = true
   readonly data: { machine: string; reason: 'unreachable' }
   constructor(machine: RoutedMachine) {
-    super(`${machine.name} is not reachable right now; this works again once its link is back`)
+    // With the attempt a call just made to connect it, and how it went (#1532): once, as part of the same sentence
+    super(`${machine.name} is not reachable right now${machine.whyDown ? `; ${machine.whyDown}` : ''}; this works again once its link is back`)
     this.data = { machine: machine.id, reason: 'unreachable' }
   }
 }

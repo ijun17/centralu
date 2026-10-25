@@ -3471,13 +3471,15 @@ away with that reason. A machine with the switch on that is away between attempt
 needs it starts one attempt at once, `LinkedMachineConnection.reachForCall` through the same `connect` that the row's Connect,
 the badge's menu, the project menu's Reconnect and the orchestrator's `reconnect_machine` use (`keepBackoff`: the backoff goes on
 from the step it was at instead of starting over, and a call starts no host the link would not start by itself), and waits for it
-`CALL_WAIT_MS` (10 s). Connected in time, the call goes through; not, it is answered "not reachable right now; the attempt to
-connect it just now failed: <ssh's words>" (or "it is still connecting"), and the backoff stands. One attempt at a time per machine:
+(or for the attempt it found under way) at most `CALL_WAIT_MS` (10 s) from the moment it asks. Connected in time, the call goes through; not, it is answered "not reachable right now; the attempt to
+connect it just now failed: <ssh's words>" (or "an attempt to connect it is still under way"), and the backoff stands. One attempt at a time per machine:
 a call that finds one under way (the backoff's, the person's press, another call's) waits on it and starts none, so a press and a
 call at the same moment make one attempt. Calls cannot defeat the backoff: a machine takes at most one attempt started by a call
 per `CALL_WINDOW_MS` (15 s); a call inside the window is answered at once with the last attempt's reason. The calls are those that
-reach the machine through `linkedSessions` (`start_agent` and `ask_project` through their project lookup, `agent_session`, a send to
-or a read of one of its sessions) and the router's calls that have no window behind them (no `ctx`: an agent's, an app view's);
+reach the machine through `linkedSessions` (`start_agent`, `ask_project` and `create_session` through their project lookup, but
+only for the machine the act needs: `start_agent`'s `machine`, or the one a project name, qualified id or `machine/name` points to
+(`projects(need)`); a lookup never waits on another machine, nor on an attempt to one; `agent_session`, a send to or a read of one
+of its sessions) and the router's calls that have no window behind them (no `ctx`: an agent's, an app view's);
 a window's own calls start nothing, they poll. Not for a machine that waits for the person, one whose host the person stopped
 there, one at `versions_differ` or `updating`, or one held by an operation. What a child there reported meanwhile is read once the
 link is up again. A parent waiting on a child whose turn is running is
