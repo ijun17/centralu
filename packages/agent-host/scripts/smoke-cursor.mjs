@@ -12,11 +12,12 @@
  * Spends a few calls of the person's Cursor plan on its default model. Never touches the real data folder: the host runs
  * with a temporary `CC_DATA_DIR` and `--db`. Run with: node packages/agent-host/scripts/smoke-cursor.mjs
  */
-import { spawn, execFileSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { mkdtempSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { WebSocket } from 'ws'
+import { agentProcesses, processes } from './smoke-processes.mjs'
 
 const TOKEN = 'smoke-cursor'
 const DATA = mkdtempSync(join(tmpdir(), 'cc-cursor-data-'))
@@ -94,28 +95,10 @@ function connect(port) {
 const textOf = (events, sessionId) => events.filter((e) => e.sessionId === sessionId && e.type === 'message_delta').map((e) => e.text).join('')
 
 /**
- * The `agent acp` processes running now, as pids; `index.js acp` is how the adapter starts it. On macOS and Linux the host
- * watch's subshell is the agent's child with the same command line (#1562 Mac re-check), so a match whose parent matches
- * too is not counted: one per agent, by parent, not by name
+ * The `agent acp` processes running now, as pids; `index.js acp` is how the adapter starts it. Its host watch is not one
+ * (`agentProcesses`)
  */
-function acpPids() {
-  try {
-    if (process.platform === 'win32') {
-      const query = "(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'cursor-agent' -and $_.CommandLine -match 'index.js.? acp' }).ProcessId -join ','"
-      const out = execFileSync('powershell', ['-NoProfile', '-Command', query], { encoding: 'utf8' })
-      return out.trim().split(',').filter(Boolean)
-    }
-    const rows = execFileSync('ps', ['-A', '-o', 'pid=,ppid=,command='], { encoding: 'utf8' })
-      .split('\n')
-      .map((l) => /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(l))
-      .filter((m) => m && /cursor-agent.* acp/.test(m[3]) && !/^(pgrep|ps)\b/.test(m[3]))
-      .map((m) => ({ pid: m[1], ppid: m[2] }))
-    const pids = new Set(rows.map((r) => r.pid))
-    return rows.filter((r) => !pids.has(r.ppid)).map((r) => r.pid)
-  } catch {
-    return []
-  }
-}
+const acpPids = () => agentProcesses(processes(), (cmd) => /cursor-agent.* acp/.test(cmd)).map((p) => p.pid)
 
 const before = new Set(acpPids())
 const first = await startHost()

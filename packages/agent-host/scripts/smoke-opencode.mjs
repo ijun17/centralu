@@ -13,11 +13,12 @@
  * are this run's. It counts and stops only the agent processes its own hosts started. Run with:
  * node packages/agent-host/scripts/smoke-opencode.mjs
  */
-import { spawn, execFileSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { WebSocket } from 'ws'
+import { agentProcesses, processes } from './smoke-processes.mjs'
 
 const TOKEN = 'smoke-opencode'
 const DATA = mkdtempSync(join(tmpdir(), 'cc-opencode-data-'))
@@ -125,25 +126,10 @@ function openCodeError() {
   return said ? `; OpenCode logged: ${said.slice(0, 200)}` : ''
 }
 
-/** Every process running now: pid, parent pid, and its command line */
-function processes() {
-  try {
-    const out =
-      process.platform === 'win32'
-        ? execFileSync('powershell', ['-NoProfile', '-Command', 'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.ParentProcessId) $($_.CommandLine)" }'], { encoding: 'utf8', maxBuffer: 64 << 20 })
-        : execFileSync('ps', ['-A', '-o', 'pid=,ppid=,args='], { encoding: 'utf8', maxBuffer: 64 << 20 })
-    return out.split('\n').flatMap((l) => {
-      const m = l.trim().match(/^(\d+)\s+(\d+)\s*(.*)$/)
-      return m ? [{ pid: m[1], ppid: m[2], cmd: m[3] }] : []
-    })
-  } catch {
-    return []
-  }
-}
-
 /**
  * The `opencode acp` processes of this run still running: the descendants of a host it started, read while that host
- * runs (a killed host's children keep its pid as their parent's), and those seen before. Never another on the machine
+ * runs (a killed host's children keep its pid as their parent's), and those seen before; its host watch is not one
+ * (`agentProcesses`). Never another on the machine
  */
 const ours = new Set()
 function acpPidsOf(hostPid) {
@@ -153,7 +139,7 @@ function acpPidsOf(hostPid) {
     grew = false
     for (const p of all) if (tree.has(p.ppid) && !tree.has(p.pid)) (tree.add(p.pid), (grew = true))
   }
-  for (const p of all) if (tree.has(p.pid) && /opencode/i.test(p.cmd) && /\bacp\b/.test(p.cmd)) ours.add(p.pid)
+  for (const p of agentProcesses(all, (cmd) => /opencode/i.test(cmd) && /\bacp\b/.test(cmd))) if (tree.has(p.pid)) ours.add(p.pid)
   const alive = new Set(all.map((p) => p.pid))
   return [...ours].filter((pid) => alive.has(pid))
 }
