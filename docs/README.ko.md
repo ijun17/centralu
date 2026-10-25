@@ -49,6 +49,7 @@
 | [plans/beta-release-checklist.md](plans/beta-release-checklist.md) | 공개 릴리스를 막고 있는 것들. §2는 npm을 배포 채널로 만든 서명·격리 측정 |
 | [plans/remote-hub.md](plans/remote-hub.md) | 연결된 호스트로서의 원격 모드 (#82): 모양, 라우팅, 버전, 1단계가 만든 것; §10에 3단계(ssh로 원격을 설치·시작·업데이트·제거)와 probe 4(허브 교체를 건너 허브의 ssh가 어디서 사는가), [spikes/2026-10-remote-install/](spikes/2026-10-remote-install/)의 스크립트로 Windows와 WSL에서 측정 |
 | [plans/runtime-unification.md](plans/runtime-unification.md) | 프로세스 런타임을 단계별로 다시 설계 (주인, 2026-10-08): macOS·Linux·Windows·원격에서 하나의 구조(런처 → 키퍼 → 호스트), 하나의 OS 계층, 하나의 시작 계획, 어디서나 검증된 콘텐츠; 단계 순서, 원격 3–4단계와 Windows 키퍼(#14)와의 관계, 완료의 정의. [runtime-lessons.md](runtime-lessons.md)가 각 단계의 관문 |
+| [plans/acp-adapter.md](plans/acp-adapter.md) | Cursor CLI를 첫 도구로 하는 범용 Agent Client Protocol 어댑터 (#59, #1476, 2026-10-26 제안): Cursor 2026.10.22와 OpenCode 1.19.4에서 측정한 프레임, 세션마다 프로세스 하나, `authenticate`를 부르지 않는 이유, resume보다 load, 업데이트 대응표, 승인은 한 번씩 답하고 규칙은 여기서 지킨다, 턴 중 입력은 호스트가 줄 세운다, 컨텍스트 비율과 압축, stdio 브리지로 가는 Centralu의 도구, 능력 목록, 녹화를 재생하는 테스트(#1498), 런타임에 SDK를 쓰지 않는 이유, PR 분할과 열린 질문 (영어만) |
 | [plans/root-apps.md](plans/root-apps.md) | 폴더에 `centralu.app.json`이 있는 프로젝트가 앱이다(#1141, 2026-10-18 결정): 루트 앱의 키, 매니페스트를 지웠을 때 남는 것, 사용자 폴더 앱을 프로젝트로 옮기기, 어느 세션이 그 도구를 받는가 |
 
 ## 문서를 쓰는 규칙
