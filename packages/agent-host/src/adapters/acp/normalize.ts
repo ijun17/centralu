@@ -74,9 +74,23 @@ export class AcpNormalizer {
     }
   }
 
-  /** What this turn has heard of a call, merged with `u` (a permission request names the call it asks about) */
-  call(u: ToolCallFields): ToolCallFields {
-    return ToolCallFields.parse({ ...this.known.get(u.toolCallId), ...definedFields(u) })
+  /** Calls the person (or a Stop) refused this turn: whatever the agent says of them after, they did not run as asked */
+  private readonly refused = new Set<string>()
+
+  /**
+   * What this turn has heard of a call, merged with `u`. `asked`: `u` is a permission request's, which may carry less than
+   * the call did (no input, measured on Cursor) and a looser kind: Cursor asks about a `delete` call as `kind: edit`
+   * (measured), so the call's own kind wins over the request's label
+   */
+  call(u: ToolCallFields, asked = false): ToolCallFields {
+    const before = this.known.get(u.toolCallId)
+    const merged = { ...before, ...definedFields(u) }
+    return ToolCallFields.parse(asked && before?.kind ? { ...merged, kind: before.kind } : merged)
+  }
+
+  /** The call was answered no (a reject, or cancelled by a Stop): its end is said as not ok */
+  refuse(callId: string): void {
+    this.refused.add(callId)
   }
 
   private toolCall(u: ToolCallFields): NormalizedEvent[] {
@@ -105,7 +119,11 @@ export class AcpNormalizer {
     }
     if (u.status === 'completed' || u.status === 'failed') {
       this.open.delete(id)
-      events.push(toolResultEvent(this.sessionId, id, u.status === 'completed', output ?? rawOutputText(u.rawOutput) ?? call.output, 'no output'))
+      const refused = this.refused.delete(id)
+      // Measured on Cursor: a refused call ends `completed` with nothing else
+      const ok = u.status === 'completed' && !refused && rawOutputOk(u.rawOutput)
+      const text = output ?? rawOutputText(u.rawOutput) ?? call.output
+      events.push(toolResultEvent(this.sessionId, id, ok, text || (refused ? 'Not run: the request was refused.' : ''), 'no output'))
     }
     return events
   }
@@ -115,6 +133,7 @@ export class AcpNormalizer {
     const events = [...this.open.keys()].map((id) => toolResultEvent(this.sessionId, id, false, '', 'the turn ended before this call finished'))
     this.open.clear()
     this.known.clear()
+    this.refused.clear()
     this.lastChunk = 'other'
     return events
   }
@@ -171,12 +190,25 @@ function outputOf(u: ToolCallFields): string | null {
     .join('')
 }
 
+/**
+ * A call's output from its `rawOutput` when its content carries none: OpenCode's `{output}`, Cursor's command
+ * `{exitCode, stdout, stderr}` (measured), an `{error}`
+ */
 function rawOutputText(raw: unknown): string | null {
   if (typeof raw === 'string') return raw
   const o = asObj(raw)
   if (typeof o.output === 'string') return o.output
+  const streams = [o.stdout, o.stderr].filter((s): s is string => typeof s === 'string' && s.length > 0)
+  if (streams.length) return streams.join(streams[0]?.endsWith('\n') ? '' : '\n')
   if (typeof o.error === 'string') return o.error
   return null
+}
+
+/** What `rawOutput` says of the call's success: a command that exited non-zero, or an MCP call's `success: false`, failed */
+function rawOutputOk(raw: unknown): boolean {
+  const o = asObj(raw)
+  if (typeof o.exitCode === 'number' && o.exitCode !== 0) return false
+  return o.success !== false
 }
 
 /** The command an `execute` call runs, as its input names it */

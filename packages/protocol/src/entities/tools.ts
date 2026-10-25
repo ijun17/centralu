@@ -180,7 +180,9 @@ export function launchRefusal(caps: AdapterCapabilities, label: string, demands:
     return `${label} cannot be kept from reading a project's own files (such as AGENTS.md and its rules), so it runs only in trusted projects.`
   }
   if (caps.presets && !caps.presets.includes(demands.permissionPreset)) {
-    return `${label} has no way to ask before every change, so it cannot run under ${PRESET_LABEL[demands.permissionPreset]}.`
+    const kept = caps.presets.map((p) => PRESET_LABEL[p]).join(' or ')
+    const asked = PRESET_LABEL[demands.permissionPreset]
+    return `${label} cannot be made to ask before a change as ${asked} does, so it cannot run under ${asked}${kept ? ` (only under ${kept})` : ''}.`
   }
   return null
 }

@@ -74,15 +74,15 @@ const ToolCallContent = z.looseObject({
 })
 export type ToolCallContent = z.infer<typeof ToolCallContent>
 
-export const ToolStatus = z.enum(['pending', 'in_progress', 'completed', 'failed'])
-export type ToolStatus = z.infer<typeof ToolStatus>
+export const CallStatus = z.enum(['pending', 'in_progress', 'completed', 'failed'])
+export type CallStatus = z.infer<typeof CallStatus>
 
 /** `tool_call` and `tool_call_update` share one shape: an upsert by id, every field but the id optional on an update */
 export const ToolCallFields = z.looseObject({
   toolCallId: z.string(),
   title: nullish(z.string()),
   kind: nullish(z.string()),
-  status: nullish(z.union([ToolStatus, z.string()])),
+  status: nullish(z.union([CallStatus, z.string()])),
   rawInput: z.unknown().optional(),
   rawOutput: z.unknown().optional(),
   content: nullish(z.array(ToolCallContent)),

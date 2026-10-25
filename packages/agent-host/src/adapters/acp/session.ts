@@ -44,7 +44,7 @@ export type AcpSessionDeps = {
 
 type Input = { text: string; id?: string; observer?: InputObserver; done?: { resolve(): void; reject(e: Error): void } }
 
-type Card = { options: PermissionOption[]; answer(outcome: PermissionOutcome): void }
+type Card = { callId: string; options: PermissionOption[]; answer(outcome: PermissionOutcome): void }
 
 /**
  * One prompt and what was asked of it. Each turn has its own: a Stop belongs to the turn it was pressed in, so a cancel the
@@ -315,6 +315,12 @@ export class AcpSession implements SessionHandle {
     this.conn.notify('session/cancel', { sessionId: this.externalId })
   }
 
+  /** Answers a question cancelled, and remembers the call did not run as asked */
+  private refused(callId: string): PermissionOutcome {
+    this.normalizer.refuse(callId)
+    return CANCELLED
+  }
+
   /** Whether a question asked now belongs to a turn that still runs: none after Stop or after the turn's end */
   private askable(turn: Turn | null): boolean {
     return this.phase !== 'closed' && turn !== null && this.turn === turn && !turn.stopAsked
@@ -328,17 +334,17 @@ export class AcpSession implements SessionHandle {
     const req = RequestPermission.parse(params)
     const turn = this.turn
     this.resendLostCancel()
-    if (!this.askable(turn)) return CANCELLED
-    const call = this.normalizer.call(req.toolCall)
+    if (!this.askable(turn)) return this.refused(req.toolCall.toolCallId)
+    const call = this.normalizer.call(req.toolCall, true)
     const detail = detailOf(call, this.opts.cwd)
     const once = pick(req.options, 'allow_once')
     const granted = once !== undefined && (await this.grantedWithoutCard(detail, call))
     // Stop, or the turn's end, may have come while the folder was being checked
-    if (!this.askable(turn)) return CANCELLED
+    if (!this.askable(turn)) return this.refused(req.toolCall.toolCallId)
     if (granted && once) return selected(once)
     const requestId = this.cardIds.next('acp-req')
     return new Promise<PermissionOutcome>((resolve) => {
-      this.cards.set(requestId, { options: req.options, answer: resolve })
+      this.cards.set(requestId, { callId: req.toolCall.toolCallId, options: req.options, answer: resolve })
       this.emit({ type: 'approval_request', sessionId: this.sessionId, requestId, detail })
     })
   }
@@ -361,6 +367,7 @@ export class AcpSession implements SessionHandle {
     // "Always" stays Centralu's rule: passing `allow_always` on would write it into the tool's own allowlist (§5.3)
     if (decision === 'always' && matcher) this.rules.add(matcher)
     const option = pick(card.options, decision === 'deny' ? 'reject_once' : 'allow_once')
+    if (decision === 'deny' || !option) this.normalizer.refuse(card.callId)
     card.answer(option ? selected(option) : CANCELLED)
     this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId, decision })
     return true
@@ -380,6 +387,7 @@ export class AcpSession implements SessionHandle {
 
   private closeCards(): void {
     this.cards.release((requestId, card) => {
+      this.normalizer.refuse(card.callId)
       card.answer(CANCELLED)
       this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId, decision: 'deny' })
     })

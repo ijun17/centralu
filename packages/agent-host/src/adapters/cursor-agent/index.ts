@@ -11,8 +11,11 @@ const exec = promisify(execFile)
 
 /**
  * What Cursor through ACP can keep (docs/plans/acp-adapter.md §7). Measured on agent 2026.10.22-27dcf5f, or read in its
- * bundle where said: no `usage_update` (bundle), so no context share is shown rather than a guessed one; no switch makes
- * it ask before every change, so no `safe`; nothing keeps it from reading `.cursor/rules` and `AGENTS.md`, so trusted
+ * bundle where said: no `usage_update` (bundle), so no context share is shown rather than a guessed one. It writes files
+ * without asking, inside the folder or outside it, whatever the client advertises (`fs.writeTextFile` included: it calls no
+ * `fs/*` method and sends no `session/request_permission` for a write, measured on Windows and macOS), and asks only for
+ * commands and deletes: so Safe, Normal and Edits, which ask before a change, cannot be kept, and it runs under Auto only
+ * (owner to decide whether Cursor stays offered so); nothing keeps it from reading `.cursor/rules` and `AGENTS.md`, so trusted
  * projects only; ACP has no field for Centralu's role text, so it cannot be the orchestrator, a coordinator or an app's
  * agent yet.
  */
@@ -33,7 +36,7 @@ const CAPABILITIES: AdapterCapabilities = {
   builtInSubagents: false,
   peerMessaging: false,
   sleep: false,
-  presets: ['normal', 'edits', 'auto'],
+  presets: ['auto'],
   keepsRepoFilesOut: false,
   roleText: false,
 }

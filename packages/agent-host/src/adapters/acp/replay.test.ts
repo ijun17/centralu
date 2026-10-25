@@ -63,6 +63,13 @@ for (const dir of readdirSync(RECORDINGS)) {
         expect(of(events, 'approval_resolved').map((e) => e.decision)).toEqual(['allow', 'deny', 'always'])
         expect(of(events, 'turn_complete')).toHaveLength(4)
       })
+
+      it('approval: each command reads its output, and the refused one ends not ok', async () => {
+        const { events } = await replay(dir, 'approval')
+        const results = of(events, 'tool_result').filter((r) => events.some((e) => e.type === 'tool_call' && e.callId === r.callId && e.summary.tool === 'Bash'))
+        expect(results.map((r) => r.ok)).toEqual([true, false, true, true])
+        expect(results.map((r) => r.summary.trim())).toEqual(['probe-1', expect.stringMatching(/\S/), 'probe-3', 'probe-3'])
+      })
     }
 
     if (names.includes('interrupt-approval')) {
