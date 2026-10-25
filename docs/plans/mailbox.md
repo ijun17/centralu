@@ -1094,6 +1094,20 @@ host may open a thread to the orchestrator**, once the orchestrator has `mail` (
   - **one open request at a time per session:** a second is refused with the first one's thread id.
 - **What it does not grant.** The asking session gets back only what the orchestrator posts in the thread. Read grants,
   presets and tools never move across, and an answer that names another project's files is quoted text, not access.
+  Reading itself needs no card, so the one way a read could cross is the orchestrator's own words, and that is gated
+  (decided on #1516):
+  - **The record.** The host remembers the scope of every read of the orchestrator's whole conversation: in the person's
+    own turns, in other sessions' requests, and across compaction (a summary can carry the data). Only a new conversation
+    clears it; a conversation the host did not see begin (a restart, an adopted process) counts as having read everything.
+    Kept in memory, not stored.
+  - **What counts.** A file outside the asker's folders (links followed), a conversation of another project, anything
+    across projects (`recall`, `list_sessions`, `list_archive`, `machine_activity`), another project's state, a mail thread
+    other than the request's own, and anything a shell command, a fetch or an app's tool returned (fail closed).
+  - **The gate.** It is judged against the reach of whoever asks, when words are written. In a request's turn, once
+    something out of the asker's reach was read, every `mail` `reply`, `update`, `close` and `send` to a session raises
+    the person's card with the whole text, naming the asker and the read. Deny sends nothing; marking handled and mail to
+    the person stay free. In the person's own turns nothing is asked. Expect most replies to carry a card in practice;
+    the five words an hour bound that.
 - **Other computers (after slice 4b, owner, #1455).** A session reaches **its own computer's** orchestrator. Orchestrators
   reach each other as peers, in mail threads (§11.9.1). A session on another computer writes to a session here directly
   (§11.9.4), and reaches this computer's orchestrator only for what only it can do. Every such thread carries its chain,
