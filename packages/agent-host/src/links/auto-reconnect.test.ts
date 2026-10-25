@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { APP_VERSION, MachineInfo, PROTOCOL_VERSION, sessionLiveDefaults, type NormalizedEvent, type SessionInfo } from '@cc/protocol'
@@ -1298,4 +1298,102 @@ describe('an answer that a machine could not be reached says what was tried, onc
     expect(hub.tunnel().opens).toBe(opens)
   })
 
+})
+
+describe('a bare project name that only a down machine holds (#1547)', () => {
+  /**
+   * The hub restarted after `newproj` was created on Laptop: its mirror of Laptop is empty, Laptop is down (the backoff's
+   * next step is far off), and ssh answers again. Desk is a machine that is up, a stand-in
+   */
+  async function rig(o: { deskHas?: string } = {}) {
+    const named = (name: string) => {
+      const dir = join(folder(), name)
+      mkdirSync(dir)
+      return dir
+    }
+    const remoteStore = new Store()
+    remoteStore.projects.addProject({ id: 'p-new', path: named('newproj'), name: 'newproj' })
+    const remote = await remoteHost(remoteStore)
+    const hubStore = new Store()
+    hubStore.projects.addProject({ id: 'p-hub', path: named('hubapp'), name: 'hubapp' })
+    hubStore.projects.addProject({ id: 'p-site', path: named('site'), name: 'site' })
+    seedSession(hubStore, 'p-hub', 'h1', 'worker', 'ext-h1')
+    seedSession(hubStore, null, 'orch', 'orchestrator', 'ext-orch')
+    const hub = await hubHost(() => lineFor(remote.port), {
+      store: hubStore,
+      tunnel: (line) => Object.assign(new ControlledTunnel(line), { unreachable: true }),
+      deps: { retryMs: [60_000, 300_000] },
+    })
+    await hub.mgr.setProjectTrusted('p-hub', true)
+    await eventually(() => hub.row().status === 'away')
+    hub.tunnel().unreachable = false
+    const desk: RoutedMachine = {
+      id: 'm2',
+      name: 'Desk',
+      q: new Qualifier('m2', 2),
+      reachable: true,
+      call: async (method) => {
+        if (method === 'projects.list') return o.deskHas ? [{ id: 'p-d', name: o.deskHas, path: '/srv/d', defaultTool: null }] : []
+        throw new Error(`Unknown method: ${method}`)
+      },
+      lastKnown: () => null,
+      observe: () => {},
+      hides: () => false,
+    }
+    hub.mgr.useLinkedReader(linkedSessions(() => [...hub.links.all(), desk], (method, params) => hub.call(method, params), 'Hub mac'))
+    return { hub, remote, opens: hub.tunnel().opens }
+  }
+  const notFound = expect.stringContaining('No project named')
+
+  it('ask_project tries the down machine and finds the project there', async () => {
+    const { hub, opens } = await rig()
+    const r = await hub.mgr.askProject('h1', { project: 'newproj', task: 'say hello' })
+    expect(r).not.toMatchObject({ ok: false, error: notFound })
+    expect(hub.tunnel().opens).toBe(opens + 1)
+    expect(hub.row().status).toBe('connected')
+  })
+
+  it('create_session by the bare name tries it too', async () => {
+    const { hub, opens, remote } = await rig()
+    const r = await hub.mgr.runOrchestratorTool('orch', 'create_session', { project: 'newproj' })
+    expect(r).toMatchObject({ isError: false })
+    expect(hub.tunnel().opens).toBe(opens + 1)
+    expect(remote.mgr.listSessions().filter((s) => s.projectId === 'p-new')).toHaveLength(1)
+  })
+
+  it('a name that is nowhere is still answered as missing, and the machine it tried is not tried again inside the window', async () => {
+    const { hub, opens } = await rig()
+    const r = await hub.mgr.askProject('h1', { project: 'typo', task: 'say hello' })
+    expect(r).toMatchObject({ ok: false, error: notFound })
+    expect(hub.tunnel().opens).toBe(opens + 1)
+  })
+
+  it('a name that a machine that is up holds waits on no down machine and tries none', async () => {
+    const { hub, opens } = await rig({ deskHas: 'deskproj' })
+    hub.tunnel().openMs = 5_000 * SLOW
+    const at = Date.now()
+    const r = await hub.mgr.askProject('h1', { project: 'deskproj', task: 'say hello' })
+    expect(r).not.toMatchObject({ ok: false, error: notFound })
+    expect(Date.now() - at).toBeLessThan(2_000 * SLOW)
+    expect(hub.tunnel().opens).toBe(opens)
+  })
+
+  it('a project of this computer waits on no down machine and tries none', async () => {
+    const { hub, opens } = await rig()
+    hub.tunnel().openMs = 5_000 * SLOW
+    const at = Date.now()
+    expect(await hub.mgr.runOrchestratorTool('orch', 'create_session', { project: 'site' })).toMatchObject({ isError: false })
+    expect(Date.now() - at).toBeLessThan(2_000 * SLOW)
+    expect(hub.tunnel().opens).toBe(opens)
+  })
+
+  it('a name qualified with a machine that is up tries no other machine', async () => {
+    const { hub, opens } = await rig()
+    hub.tunnel().openMs = 5_000 * SLOW
+    const at = Date.now()
+    const r = await hub.mgr.askProject('h1', { project: 'Desk/newproj', task: 'say hello' })
+    expect(r).toMatchObject({ ok: false, error: notFound })
+    expect(Date.now() - at).toBeLessThan(2_000 * SLOW)
+    expect(hub.tunnel().opens).toBe(opens)
+  })
 })
