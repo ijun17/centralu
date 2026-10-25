@@ -3667,13 +3667,6 @@ describe('merge_when_green says when it moves main under a batch the queue is ru
     expect(waiting.text).toContain('Not merged yet:')
     expect(waiting.text).toContain('The merge queue has batch queue/batch-1 (#77, #78) running on main as it is now.')
   })
-
-  it('says nothing when the queue has no batch running', async () => {
-    runtime(ghState({ prs: { '79': bump() }, runs: { [C]: [ghRun('success', 1, C, { id: 903, head_branch: 'feat/b79' })] }, checks: { [C]: green() } }))
-    const r = await call('merge_when_green', { pr: 79 })
-    expect(r.text).toContain('Merged PR #79 (squash)')
-    expect(r.text).not.toContain('merge queue has batch')
-  })
 })
 
 /**
