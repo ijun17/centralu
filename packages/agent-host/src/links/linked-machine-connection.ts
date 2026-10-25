@@ -87,6 +87,8 @@ const ATTEMPT_WAIT_MS = 60_000
  * answered as not reachable and the attempt goes on
  */
 const CALL_WAIT_MS = 10_000
+/** How long the reason a call's attempt failed is still given to the calls that follow it: past it, a stale reason would be told of a new drop */
+const CALL_FAILURE_KEPT_MS = 60_000
 /** At most one attempt started by a call per machine within this window, so calls cannot defeat the backoff (#1532) */
 const CALL_WINDOW_MS = 15_000
 /** Statuses of a link that is away between attempts: turning Auto reconnect on tries again now */
@@ -199,6 +201,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   /** When a call last started an attempt (`reachForCall`), and until when the calls that find it under way wait for it */
   private lastCallAttemptAt = 0
   private callFailure: string | null = null
+  private callFailureAt = 0
   private callAttemptUntil = 0
 
   constructor(
@@ -323,6 +326,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   private noteCallFailure(): void {
     if (this.reachable) return
     this.callFailure = this.attemptUnderWay ? 'it is still connecting' : (this.error?.replace(NEXT_STEP, '') ?? null)
+    this.callFailureAt = Date.now()
   }
 
   /**
@@ -330,7 +334,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
    * before any call made one
    */
   get whyDown(): string | null {
-    return this.reachable ? null : this.callFailure
+    return this.reachable || Date.now() - this.callFailureAt > CALL_FAILURE_KEPT_MS ? null : this.callFailure
   }
 
   /** An install, update or other operation the person started is running: its retries are part of it (`retryLater`) */
@@ -1091,6 +1095,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     // The link was up until now (#1398): that is when the machine was last seen, not when it said hello
     if (this.status === 'connected' && status !== 'connected') this.seen()
     const changed = status !== this.status || error !== this.error
+    if (status === 'connected') this.callFailure = null
     this.status = status
     this.error = error
     if (changed) {
