@@ -11,7 +11,7 @@
 // Decisions are pure functions here; `guardTick` reads GitHub and the checkout for them and keeps its
 // state in the queue file (`q.guard`), so it carries on in whichever driver holds the lease, and after
 // either restarts. It runs in the same ticks as the queue, at most once per GUARD_MS.
-import { checkRunNotes, createBranch, deleteBranch, dispatchWorkflow, GitHubError, FATAL, readJobLog, readRepo, rerunRun, runJobSteps, workflowRuns } from './github.mjs'
+import { createBranch, deleteBranch, dispatchWorkflow, GitHubError, FATAL, jobNotes, readJobLog, readRepo, rerunRun, runJobSteps, workflowRuns } from './github.mjs'
 import { failingStepText } from './ci.mjs'
 import { CI, config, QUEUE } from './config.mjs'
 import { fetchRefs, git, GitError, remoteFor, topLevel } from './git.mjs'
@@ -135,7 +135,7 @@ export async function diagnose(repo, run, { failingLine, flaky = QUEUE.flakyJobs
   // failed: CI cancels the rest of a run when `verify` fails (fail fast), and each of those would cost a call to say nothing.
   const cancelled = failed.length ? [] : jobs.filter((j) => j.conclusion === 'cancelled')
   for (const j of [...failed, ...cancelled]) {
-    j.notes = j.id != null ? await checkRunNotes(repo, j.id) : []
+    j.notes = j.id != null ? await jobNotes(repo, j.id) : []
     const step = j.steps.find((s) => s.conclusion === 'failure')
     if (step && /^Run (?:pnpm|npm|yarn) /i.test(step.name) && failingLine && j.id != null) j.log = await failingLine(repo, j)
   }
@@ -143,7 +143,7 @@ export async function diagnose(repo, run, { failingLine, flaky = QUEUE.flakyJobs
   failed = [...failed, ...cancelled.filter((j) => jobFailure(j, { flaky })?.cause !== 'cancelled')]
   const why = classifyRun(run, jobs, { flaky })
   const first = (why.job && failed.find((j) => String(j.id) === why.job.id)) ?? failed[0] ?? null
-  return { names: failed.map((j) => j.name), first, kind: why.real ? 'test' : 'infrastructure', cause: why.cause, step: why.step, inSetup: why.inSetup }
+  return { names: failed.map((j) => j.name), first, kind: why.real ? 'test' : 'infrastructure', cause: why.cause, step: why.step, inSetup: why.inSetup, shutdown: why.shutdown }
 }
 
 /** How many runs' reruns the guard remembers: a run is rerun once, and the newest are the only ones that can come up again */
@@ -245,7 +245,7 @@ export async function guardTick({ q, update, now = Date.now(), renew, act, dir =
     if (!rerun) {
       if (renew && !renew()) return { did: 'yielded' }
       // Written down before it is asked for, as the queue does: a rerun asked for twice would spend the one it is allowed
-      save({ reruns: boundedReruns(g.reruns, red.id, { attempt: red.attempt ?? 1, at: base.at, what }) })
+      save({ reruns: boundedReruns(g.reruns, red.id, { attempt: red.attempt ?? 1, at: base.at, what, shutdown: jobs.shutdown === true, jobs: jobs.names }) })
       try {
         await rerunRun(repo, red.id, { failedOnly: true })
       } catch (e) {
@@ -266,7 +266,12 @@ export async function guardTick({ q, update, now = Date.now(), renew, act, dir =
     // only), so it is looked for as a test failure. A timeout inside a step that sets the job up (#1503: three e2e shards
     // ran out of time in `playwright install`, a slow package mirror) is the setup's, like a failure there: nothing of the
     // commit's tests ran, so it is the runner's unless a commit since the last green one changed what the setup installs.
-    if (jobs.cause !== 'setup' && jobs.cause !== 'runner' && !jobs.inSetup) base.kind = 'test'
+    //
+    // A runner shutdown (#1507) that hits the same job again on the rerun is not a blip: a commit can exhaust the runner's
+    // memory or disk, and GitHub then says only that the runner was shut down. It is looked for as a test failure, and
+    // reverted if the hunt finds it. The first time, and a different job's, are still the runner's: rerun, and reported.
+    const again = jobs.shutdown === true && rerun.shutdown === true && jobs.names.some((name) => (rerun.jobs ?? []).includes(name))
+    if (again || (jobs.cause !== 'setup' && jobs.cause !== 'runner' && !jobs.inSetup)) base.kind = 'test'
     else {
       // Failed in setup (or lost its runner) again. Setup runs on the runner, but what it installs is a commit's to change:
       // the browser's version comes from the lockfile, the system libraries from build.yml, and none of that runs on a pull

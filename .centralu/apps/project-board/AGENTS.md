@@ -189,6 +189,14 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
   without a new `author`, the first author's).
 - **`merge_queue`** (`all?`; read-only, agents and the screen) and **`unqueue`** (`pr`; changes nothing
   on GitHub).
+- **A draft the queuing session opened** (#1509 item 4): a pull request found a draft that `open_pr` opened
+  **as a draft** for the same session that queued it (`opened-prs.json`: the notice address on both, and
+  `draft`), with no open pull request based on its branch, is marked ready by the queue, as that session
+  would have, instead of needing attention. A draft another session opened, one opened ready and made a draft
+  since (a person's hold, or `open_pr` making a stack's lower one a draft), one that was ready once since
+  (seen ready by the queue's poll or marked by the queue: the record gets `readied`, so a person who turns it
+  back into a draft is not undone), a stack lower, or one `open_pr` did not open still needs attention (`draft`), and so does a record handed over with `integrate` when found
+  ready (it is turned back into a draft, below).
 - **Each poll** reads one item (`decideBefore`, `decideCi`): no maintain or admin, a draft, DIRTY
   (which the queue first tries to resolve itself, below), BEHIND, BLOCKED, a squash subject over 72 characters, or a base that is not the default branch or a
   lower's branch → attention. Only the CI workflows' own checks count (`readWorkflowChecks`, their
@@ -292,7 +300,14 @@ the batch as `failures`), and `decideRun` decides from it, for an item's head an
 - **Infrastructure** (rerun once per head): a run or job cancelled with no failed job; a job that hit
   its timeout (conclusion `timed_out`, or GitHub's "has exceeded the maximum execution time of N
   minutes" / "The action '…' has timed out after N minutes"; a test's own "timed out in 5000ms" is a
-  test failure); a lost runner ("lost communication with the server", "received a shutdown signal");
+  test failure); a lost runner ("lost communication with the server", "received a shutdown signal"; a shutdown
+  leaves no such note on the job, only "The operation was canceled." and a failed step, so for a job with that
+  note alone `jobNotes` reads the log for the line `##[error]The runner has received a shutdown signal`, #1507;
+  `cleanLog` ends a log at that line, so a test the shutdown cut short is never quoted as the first failure. Only
+  the runner's own line counts (`shutdownAt`): at the start of a line and followed by the step's
+  `##[error]The operation was canceled.`, so a test that prints the same words keeps its failure and its quote.
+  The main guard reruns such a job once and, when the same job is shut down again, hunts it like a test failure
+  and reverts what the hunt finds: a commit can exhaust the runner's memory or disk);
   a job whose first failed step set it up (cause `setup`, #1435: checkout, pnpm and Node setup, the
   browser and system-library installs, a cache; the main guard reads main's runs the same way, below);
   a failed job on `project.json` `queue.flakyJobs` (exact names, `*` for any characters). A real
@@ -408,10 +423,26 @@ the git work; `onConflict` in `queue-driver.mjs` decides, once per head.
   and every script exists.
 - **The hand-off** (any other conflict, a command that failed, a push refused): attention `conflict`,
   with the files and `relay` (`to`: the item's author session, `branch`, `text`: "Merge main into
-  <branch> and push again; conflicted files: …"). Until an app can message a session (#1173) the
-  attention event names the author session and carries that instruction for the queuing session to
-  relay; with no author recorded it says so, and that a session started on the branch needs that
-  instruction. Once per head; queued again, the merge is tried again (main may have moved).
+  <branch> and push again; conflicted files: …"). Where it goes (#1509 item 4, `authorRoute`): `open_pr`
+  notes which session opened each pull request (`opened-prs.json` in the data folder, `opened.mjs`: the
+  session's notice address, never shown). The author is the queuing session itself when it opened the
+  pull request or is the named author: the attention message says to fix it there. It is another session that
+  opened it through `open_pr`: the queue posts the instruction into that session itself (an event of kind
+  `handoff`, to its address, beside the attention message to the queuing session, which says it was
+  posted). The text names the session it goes to (the one that opened it, with the author `queue_merge`
+  named beside it when that is another), not the named author alone. Otherwise (the author is named but never
+  called this app) the attention message carries the instruction for the queuing session to relay, as before;
+  with no author recorded it says so, and that a session started on the branch needs that instruction. Once per head; queued again, the merge is tried
+  again (main may have moved).
+- **A stack's top whose lower merged** (#1509 item 4): a DIRTY pull request based on another branch than the
+  default one, from this repository, is restacked by the queue with `rebaseStack` (`stack.mjs`, push on:
+  the lower one's merge commit, its own commits replayed in a temporary worktree, the change confirmed to be
+  the tested one by patch id, a lease on the head read, then the base moved), as `rebase_stack` would be run
+  by a session; the new head runs CI before it lands. The procedure's refusals (the lower one not merged,
+  built on an older version of it, a replay that conflicts, a moved branch, no checkout) hand it to the
+  author as above, with the refusal in the text. A remote that cannot be reached (a fetch or the push fails on the
+  network: `isNetworkFailure`, git.mjs: a lookup, connection or timeout failure, a dropped transfer or a 5xx/408/429, never a 403/404, a certificate or an authentication failure, which say the same next time and go to the author) is not a refusal: it is thrown as a network error, which pauses the queue and tries
+  the item again, and `rebase_stack` itself answers it as an error rather than "nothing was pushed". Event `conflict`, step `restack`.
 - **The front of the queue**: a pull request fixed after a conflict (a new head that no longer
   conflicts, the queue's push or a session's, or queued again after one) gets `front`, and goes
   first: batches take it before older items, and `merge_queue` lists it first in its state
@@ -539,7 +570,11 @@ the required set: it judges main's runs and its probes by their conclusion, and 
   a release bump, or a full run a person started on its branch), or a batch's. A head whose own run
   finished, ran less than the full tier and passed what it ran (`quickGreen`) waits for a batch
   (`ci.verdict` `quick`); one the queue cannot batch (a fork's, a release bump's quick run, batches
-  off) → attention `full-tier`, saying how to start the full tier on it.
+  off): from a branch of this repository, the queue starts the full tier on its branch itself, once per
+  head (`workflow_dispatch` of the CI workflows, no inputs; `fullDispatch` on the item; #1509 item 4), and
+  lands it when that run is green; attention `full-tier` only when no full run has reported in 15 minutes
+  (`FULL_START_MS`) or GitHub refused to start it, saying how to start it by hand. A fork's branch is never
+  run here: attention `full-tier` as before.
 - **Every item lands through a batch** then, **a batch of one included**: `min` may be 1 (this
   repository's), and the fewest left after a split, a conflict or a change is 1, whatever `min`. A batch also takes
   items whose quick tier passed, oldest first; one sent back from a batch on its head (`batchless`)
@@ -603,7 +638,8 @@ looked into).
   rerun would otherwise blame whatever touched a lockfile): then it is a **setup failure** and is hunted
   like a test failure (a probe without the bad commit passes setup). Otherwise it is reported (an issue and a
   notice, "an infrastructure failure, not a commit's", naming how many commits it checked), never
-  reverted, as is a lost runner again. A timeout, or a job on the flaky list, that fails again is looked
+  reverted, as is a lost connection to the runner again (a runner *shutdown* under the same job again is hunted:
+  `shutdown` on the failure, kept with the rerun's job names). A timeout, or a job on the flaky list, that fails again is looked
   into as a test failure, except a timeout in a step that sets the job up (#1503: the step the limit ended is the one GitHub
   marks 'cancelled', or 'failure' for a step's own `timeout-minutes`; "Install WebKit" and the like): nothing of the commit
   ran, so it is read as a setup failure is: reported unless a commit since the last green one changed what the setup installs
@@ -962,7 +998,8 @@ step shows on the screen.
 - `markdown.mjs` — GitHub Markdown to safe HTML for the reader, and the decision summary parser (pure).
 - `rules.mjs` — the rules for public text, commit messages and the pull request template (pure).
 - `answers.mjs` — the owner's saved answers: save, delete, mark recorded (pure; decision-tools.mjs keeps them in the data folder).
-- `stack.mjs`, `git.mjs` — rebase_stack's procedure, and local git through `execFile`.
+- `stack.mjs`, `git.mjs` — rebase_stack's procedure (the queue runs it too, for a stack top), and local git through `execFile`.
+- `opened.mjs` — which session opened each pull request (`open_pr`'s note, `opened-prs.json`), read by the queue (#1509 item 4).
 - `pre-pr.mjs` — open_pr's run of the repository's `scripts/pre-pr.mjs` on the pushed branches.
 - `release.mjs`, `versions.mjs` — the release procedure, and the version rules (pure).
 - `cache.mjs`, `util.mjs` — the short cache the board and the threads share, and small helpers
