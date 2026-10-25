@@ -695,6 +695,13 @@ describe('a project lookup connects only the machine the act needs (#1532)', () 
     expect(tried.count).toBe(2)
   })
 
+  it('names every machine it saw, a machine that is up with no projects too (#1547)', async () => {
+    const empty = machine({ 'projects.list': [] })
+    const { m: far } = downMachine('far', 'Far box', 10, { comesBack: false })
+    const { machines } = await linkedSessions(() => [empty, far]).projects({ ref: 'typo' })
+    expect(machines).toEqual([{ machine: 'Box', machineId: 'm1' }, { machine: 'Far box', machineId: 'far' }])
+  })
+
   it('names the machine and what became of the attempt when it stays down, once', async () => {
     const { m: far } = downMachine('far', 'Far box', 10, { comesBack: false, why: 'the attempt to connect it just now failed: Operation timed out' })
     const reader = linkedSessions(() => [far])

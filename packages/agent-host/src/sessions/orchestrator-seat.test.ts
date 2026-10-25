@@ -532,7 +532,8 @@ describe('a session the orchestrator creates', () => {
 describe('create_session by name across machines (#1547)', () => {
   const desk = (name: string) => ({ id: 'm2.pd', name, machine: 'Desk', machineId: 'm2', path: '/d' })
   const laptopDown = { machine: 'Laptop', machineId: 'm1', why: 'not reachable right now' }
-  const rig = (projects: object[], away: object[] = []) => {
+  const deskUp = { machine: 'Desk', machineId: 'm2' }
+  const rig = (projects: object[], away: object[] = [], machines: object[] = [deskUp]) => {
     store.projects.addProject({ id: 'p1', path: tmpdir(), name: 'site' })
     host.createSession = vi.fn(async () => ({ ...session('new'), permissionPreset: 'safe' as const }))
     host.firstTool = vi.fn((): ToolName => 'claude')
@@ -541,7 +542,7 @@ describe('create_session by name across machines (#1547)', () => {
     linked = {
       projects: async (need: unknown) => {
         lookups.push(need)
-        return { projects, away }
+        return { projects, away, machines }
       },
       createSession,
       send: async () => ({ ok: true as const }),
@@ -565,6 +566,28 @@ describe('create_session by name across machines (#1547)', () => {
   it('still refuses one name that is on this computer and on a machine, in the same case', async () => {
     rig([desk('site')])
     expect(await orchestratorToolsFor(host, 'orch').createSession({ project: 'site' })).toMatchObject({ ok: false, error: expect.stringContaining('More than one project is called that') })
+  })
+
+  it('refuses two projects of one name on this computer and lists both', async () => {
+    rig([])
+    store.projects.addProject({ id: 'p2', path: join(tmpdir(), 'site-two'), name: 'site' })
+    const r = await orchestratorToolsFor(host, 'orch').createSession({ project: 'site' })
+    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('More than one project is called that') })
+    expect((r as { error: string }).error).toContain('[p1]')
+    expect((r as { error: string }).error).toContain('[p2]')
+  })
+
+  it('trims the name, as ask_project does', async () => {
+    rig([])
+    expect(await orchestratorToolsFor(host, 'orch').createSession({ project: '  site ' })).toMatchObject({ ok: true })
+    expect(host.createSession).toHaveBeenCalledWith(expect.objectContaining({ projectId: 'p1' }))
+  })
+
+  it("a qualified id of a machine that is up with no projects speaks of no other machine", async () => {
+    rig([], [laptopDown])
+    const r = await orchestratorToolsFor(host, 'orch').createSession({ project: 'm2.typo' })
+    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('No such project') })
+    expect((r as { error: string }).error).not.toContain('Laptop')
   })
 
   it('a qualified name that is nowhere speaks only of its own machine, not of another that is down', async () => {
