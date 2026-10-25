@@ -453,8 +453,10 @@ export function boardReaderTests(): void {
       expect(at.cardBottom).toBeLessThanOrEqual(at.view)
       expect(at.sideways).toBeLessThanOrEqual(0)
       // Opening it lists them, and the section scrolls inside itself instead of growing past a third of the view
-      await toggle.click()
+      await toggle.focus()
+      await page.keyboard.press('Enter')
       await expect(queue.locator('.q-row[data-state="merged"]')).toHaveCount(13)
+      await expect(toggle).toBeFocused()
       const open = await v.locator('body').evaluate(() => ({ height: document.querySelector('#queue')!.getBoundingClientRect().height, view: window.innerHeight }))
       expect(open.height).toBeLessThanOrEqual(open.view / 3 + 2)
       await toggle.click()

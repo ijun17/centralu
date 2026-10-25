@@ -1485,6 +1485,9 @@
           return
         }
         box.hidden = false
+        // A re-render (the toggle, the 15 s read) keeps the list where it was scrolled and the keyboard on the toggle
+        const scrolled = box.querySelector('.q-groups')?.scrollTop ?? 0
+        const refocus = document.activeElement?.id === 'queue-merged-toggle'
         const attention = items.some((i) => i.state === 'attention')
         box.className = `queue${attention ? ' attention' : ''}`
         const groups = QUEUE_GROUPS.map(([state, label]) => ({ state, label, items: items.filter((i) => i.state === state || (state === 'merged' && i.state === 'closed')) })).filter((g) => g.items.length)
@@ -1509,6 +1512,9 @@
             ),
           ) : null,
         )
+        const list = box.querySelector('.q-groups')
+        if (list) list.scrollTop = scrolled
+        if (refocus) $('queue-merged-toggle')?.focus()
       }
 
       function show(result) {
