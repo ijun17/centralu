@@ -193,8 +193,9 @@ export class AskProjectFlow {
     const hubs = this.hubs
     const none = { projects: [], away: [] }
     // Nothing is awaited when neither is asked: a call naming a project of this computer by id goes on in the same tick
-    let [there, fromHubs] =
+    const [first, fromHubs] =
       (reader || hubs) && !exactHere ? await Promise.all([reader ? reader.projects({ ref: wanted }) : none, hubs ? hubs.projects() : none]) : [none, none]
+    let there = first
     const askableOf = (): AskableProject[] => [
       ...projects.map((p) => ({ id: p.id, name: p.name, machine: null, machineId: null })),
       ...there.projects.map((p) => ({ id: p.id, name: p.name, machine: p.machine, machineId: p.machineId })),
