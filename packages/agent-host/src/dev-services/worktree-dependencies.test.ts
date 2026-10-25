@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process'
+import { SYMLINK_SKIP_REASON, canSymlink, itSymlink, linkDirAsync } from '../link.test-helpers.js'
 import { lstatSync, realpathSync, rmdirSync, symlinkSync } from 'node:fs'
 import { lstat, mkdir, mkdtemp, readFile, readlink, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -23,17 +24,20 @@ afterEach(() => rm(root, { recursive: true, force: true }))
 const lock = async (name = 'pnpm-lock.yaml') => {
   for (const cwd of [main, child]) await writeFile(join(cwd, name), 'same lock')
 }
-const installed = async (folder = '') => {
+// A relative link is what pnpm makes with symlink rights; without them (a junction is always absolute) it is a junction
+const installed = async (folder = '', relative = false) => {
   const modules = join(main, folder, 'node_modules')
   await mkdir(join(modules, '.store', 'dep'), { recursive: true })
   await writeFile(join(modules, '.store', 'dep', 'index.js'), 'original')
-  await symlink('.store/dep', join(modules, 'dep'), 'dir')
+  if (relative) await symlink('.store/dep', join(modules, 'dep'), 'dir')
+  else await linkDirAsync('.store/dep', join(modules, 'dep'))
 }
 
-it.each(['pnpm-lock.yaml', 'package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock', 'bun.lock', 'bun.lockb'])(
-  '%s: reuses dependencies as independent files, retaining internal package links', async (name) => {
+it.for(['pnpm-lock.yaml', 'package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock', 'bun.lock', 'bun.lockb'])(
+  '%s: reuses dependencies as independent files, retaining internal package links', async (name, ctx) => {
+    if (!canSymlink) return ctx.skip(SYMLINK_SKIP_REASON) // the relative link is the point, and a junction is never relative
     await lock(name)
-    await installed()
+    await installed('', true)
     await prepareWorktreeDependencies(main, child)
     const path = join(child, 'node_modules', 'dep', 'index.js')
     expect(await readFile(path, 'utf8')).toBe('original')
@@ -45,15 +49,15 @@ it.each(['pnpm-lock.yaml', 'package-lock.json', 'npm-shrinkwrap.json', 'yarn.loc
   },
 )
 
-it('copies workspace package dependencies before checking sibling links, and removes links outside the child', async () => {
+itSymlink('copies workspace package dependencies before checking sibling links, and removes links outside the child', async () => {
   await lock()
-  await installed()
+  await installed('', true)
   for (const pkg of ['a', 'b']) {
     for (const cwd of [main, child]) {
       await mkdir(join(cwd, 'packages', pkg), { recursive: true })
       await writeFile(join(cwd, 'packages', pkg, 'package.json'), '{}')
     }
-    await installed(join('packages', pkg))
+    await installed(join('packages', pkg), true)
   }
   await symlink('../../b/node_modules/dep', join(main, 'packages', 'a', 'node_modules', 'sibling'), 'dir')
   await symlink(main, join(main, 'node_modules', 'escape'), 'dir')
@@ -177,8 +181,9 @@ describe.skipIf(process.platform !== 'win32')('junctions on Windows', () => {
   })
 })
 
-it.each(['no lock', 'different lock', 'different manifest', 'no source modules', 'existing modules', 'existing broken link', 'source escape'])(
-  '%s: does not overwrite or reuse unsuitable dependencies', async (kind) => {
+it.for(['no lock', 'different lock', 'different manifest', 'no source modules', 'existing modules', 'existing broken link', 'source escape'])(
+  '%s: does not overwrite or reuse unsuitable dependencies', async (kind, ctx) => {
+    if (kind === 'existing broken link' && !canSymlink) return ctx.skip(SYMLINK_SKIP_REASON) // a relative link to nothing
     if (kind !== 'no lock') await lock()
     if (kind !== 'no source modules') await installed()
     if (kind === 'different lock') await writeFile(join(child, 'pnpm-lock.yaml'), 'other lock')
@@ -190,7 +195,7 @@ it.each(['no lock', 'different lock', 'different manifest', 'no source modules',
     if (kind === 'existing broken link') await symlink('missing', join(child, 'node_modules'), 'dir')
     if (kind === 'source escape') {
       await rm(join(main, 'node_modules'), { recursive: true })
-      await symlink(root, join(main, 'node_modules'), 'dir')
+      await linkDirAsync(root, join(main, 'node_modules'))
     }
     await prepareWorktreeDependencies(main, child)
     if (kind === 'existing modules') {

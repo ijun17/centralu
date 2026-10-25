@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ExternalApps } from './runtime.js'
@@ -6,6 +6,7 @@ import { MANIFEST_FILE } from './manifest.js'
 import { PROJECT_APPS, plantApp } from './test-helpers.js'
 import { SLOW, eventually } from '../../../../../tooling/test-timing.js'
 import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
+import { linkDir } from '../../link.test-helpers.js'
 
 /**
  * Discovery and trust (M4 A-2).
@@ -97,7 +98,7 @@ describe('discovery', () => {
     plantApp(outside, 'escapee')
     const apps = join(projRoot, ...PROJECT_APPS)
     mkdirSync(apps, { recursive: true })
-    symlinkSync(join(outside, 'escapee'), join(apps, 'escapee'), 'dir')
+    linkDir(join(outside, 'escapee'), join(apps, 'escapee'))
     rt.refresh()
 
     expect(byId('escapee')).toMatchObject({ status: 'invalid', error: expect.stringContaining('a link that points outside its root') })

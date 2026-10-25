@@ -34,6 +34,7 @@ import { SessionManager } from './manager.js'
 import { createRpcHandler } from '../rpc.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { CwdFiledAdapter, FakeAdapter, managerWorld } from './manager.test-helpers.js'
+import { itSymlink, linkDir } from '../link.test-helpers.js'
 
 let store: Store
 let adapter: FakeAdapter
@@ -283,7 +284,7 @@ describe('worktree sessions', () => {
     expect(events.some((e) => e.type === 'notice' && e.sessionId === clean.id && e.label === 'worktree setup')).toBe(false)
   })
 
-  it('the session still comes up even if the tree being copied has an unreadable file — the copy failure is logged and said in the session (#167, #841)', async () => {
+  itSymlink('the session still comes up even if the tree being copied has an unreadable file — the copy failure is logged and said in the session (#167, #841)', async () => {
     const nm = join(repo, 'node_modules')
     mkdirSync(join(nm, 'pkg'), { recursive: true })
     writeFileSync(join(nm, 'pkg', 'index.js'), 'module.exports = 1\n')
@@ -459,7 +460,7 @@ describe('worktree sessions', () => {
    * `cp -Rc` carried the link across as a link, leaving a window open in the worktree. To the
    * agent it looks like an ordinary `.env` inside its own tree.
    */
-  it('a link pointing outside is not copied — judged by its resolved location, not its text (#95)', async () => {
+  itSymlink('a link pointing outside is not copied — judged by its resolved location, not its text (#95)', async () => {
     const secret = join(root, 'id_rsa')
     writeFileSync(secret, 'ssh-private-key\n')
     symlinkSync(secret, join(repo, '.env'))
@@ -480,7 +481,7 @@ describe('worktree sessions', () => {
     writeFileSync(join(outside, 'id_rsa'), 'ssh-private-key\n')
     mkdirSync(join(repo, 'vendor', 'deep'), { recursive: true })
     writeFileSync(join(repo, 'vendor', 'deep', 'blob.bin'), 'payload\n')
-    symlinkSync(outside, join(repo, 'vendor', 'leak'))
+    linkDir(outside, join(repo, 'vendor', 'leak'))
     store.projects.setWorktreeSetup(project.id, { command: '', copyFiles: ['vendor'] })
 
     const s = (await wtRpc('agents.createSession', {
@@ -493,7 +494,7 @@ describe('worktree sessions', () => {
     expect(() => lstatSync(join(s.worktree!.path, 'vendor', 'leak'))).toThrow()
   })
 
-  it('a link that pointed inside the project arrives as a file — not a window back to the original repository (#95)', async () => {
+  itSymlink('a link that pointed inside the project arrives as a file — not a window back to the original repository (#95)', async () => {
     mkdirSync(join(repo, 'secrets'))
     writeFileSync(join(repo, 'secrets', 'real.env'), 'SECRET=1\n')
     symlinkSync(join(repo, 'secrets', 'real.env'), join(repo, '.env'))
@@ -511,7 +512,7 @@ describe('worktree sessions', () => {
     expect(readFileSync(join(repo, 'secrets', 'real.env'), 'utf8')).toBe('SECRET=1\n')
   })
 
-  it('a pnpm symlink forest crosses over as links — stripping even links that point inward would break node_modules (#95)', async () => {
+  itSymlink('a pnpm symlink forest crosses over as links — stripping even links that point inward would break node_modules (#95)', async () => {
     const inner = join(repo, 'node_modules', '.pnpm', 'pkg@1.0.0', 'node_modules', 'pkg')
     mkdirSync(inner, { recursive: true })
     writeFileSync(join(inner, 'index.js'), 'module.exports = 1\n')
@@ -529,7 +530,7 @@ describe('worktree sessions', () => {
     expect(realpathSync(farmed).startsWith(realpathSync(s.worktree!.path))).toBe(true)
   })
 
-  it('does not step through a link on the worktree side and write outside — the destination is checked at every level too (#95)', async () => {
+  itSymlink('does not step through a link on the worktree side and write outside — the destination is checked at every level too (#95)', async () => {
     // The repository tracks a symlink: a new worktree checks it out as a link too.
     const outside = join(root, 'elsewhere')
     mkdirSync(outside)

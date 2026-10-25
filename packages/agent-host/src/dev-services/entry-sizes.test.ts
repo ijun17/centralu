@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { treeBytes } from './entry-sizes.js'
+import { itSymlink } from '../link.test-helpers.js'
 
 let dir = ''
 
@@ -14,20 +15,6 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true })
 })
 
-/** Windows creates a symbolic link only with a privilege (developer mode, or an administrator); without it the link cases are skipped */
-function canLink(): boolean {
-  const probe = mkdtempSync(join(tmpdir(), 'cc-tree-bytes-probe-'))
-  try {
-    writeFileSync(join(probe, 'f'), '')
-    symlinkSync(join(probe, 'f'), join(probe, 'l'))
-    return true
-  } catch {
-    return false
-  } finally {
-    rmSync(probe, { recursive: true, force: true })
-  }
-}
-const links = canLink() ? it : it.skip
 
 /*
  * #849 review: one folder of a million files queued a million lstat calls at once. The walk measures in batches,
@@ -55,7 +42,7 @@ describe('the file system walk that sizes an ignored entry', () => {
    * The walk and the data folders' sizing (`dataBytes`) are one function since #850 item 19. The data folders already
    * counted a link given as the path itself as nothing; the walk counted the link's own few bytes.
    */
-  links('a link counts for nothing and is not followed, the path itself included', async () => {
+  itSymlink('a link counts for nothing and is not followed, the path itself included', async () => {
     const outside = join(dir, 'outside.bin')
     writeFileSync(outside, Buffer.alloc(10_000))
     const tree = join(dir, 'tree')

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DirWatchers, MAX_WATCHED_DIRS } from './watch.js'
 import { eventually } from '../../../../tooling/test-timing.js'
+import { itSymlink, linkDir } from '../link.test-helpers.js'
 
 /**
  * Checked against the real filesystem — this module's contract is not "when the OS gives an
@@ -122,13 +123,13 @@ describe('DirWatchers — watches only expanded directories (#34)', () => {
   it('a link directory pointing outside is never watched', () => {
     const root = tmp()
     const outside = tmp()
-    symlinkSync(outside, join(root, 'linked'), 'dir')
+    linkDir(outside, join(root, 'linked'))
     const w = makeWatcher(() => {})
 
     expect(w.setWatched('p1', root, ['linked'])).toBe(0)
   })
 
-  it('a broken link is never turned into a missing-folder notification', async () => {
+  itSymlink('a broken link is never turned into a missing-folder notification', async () => {
     const root = tmp()
     const got: string[][] = []
     symlinkSync(join(root, 'missing'), join(root, 'dangling'))
@@ -238,8 +239,8 @@ describe('a .. past a symlink cannot watch outside (#119)', () => {
     const outside = tmp()
     mkdirSync(join(root, 'sub', 'deep'), { recursive: true })
     mkdirSync(join(root, 'sub', 'evil'))
-    symlinkSync(join(root, 'sub', 'deep'), join(root, 'link'))
-    symlinkSync(outside, join(root, 'evil'))
+    linkDir(join(root, 'sub', 'deep'), join(root, 'link'))
+    linkDir(outside, join(root, 'evil'))
 
     const w = makeWatcher(() => {})
     watchers.push(w)

@@ -8,6 +8,7 @@ import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '
 import { Store } from '../dev-services/store.js'
 import { SessionManager } from './manager.js'
 import { createRpcHandler } from '../rpc.js'
+import { itSymlink } from '../link.test-helpers.js'
 
 /**
  * `messages.image` through the RPC handler and a real store: an image a reply names is read wherever it is, and every
@@ -149,7 +150,7 @@ describe('a path no reply of this session names', () => {
 })
 
 describe('a path a reply names that is not an image to show', () => {
-  it('is refused as not an image by its bytes, and a link to text as well, without its contents', async () => {
+  itSymlink('is refused as not an image by its bytes, and a link to text as well, without its contents', async () => {
     writeFileSync(join(elsewhere, 'notes.png'), 'password=hunter2')
     symlinkSync(join(elsewhere, 'notes.png'), join(elsewhere, 'link.png'))
     agent().say(`![a](${join(elsewhere, 'notes.png')}) ![b](${join(elsewhere, 'link.png')})`)

@@ -1,9 +1,10 @@
 import type { BigIntStats, Stats } from 'node:fs'
-import { mkdtemp, mkdir, rename, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { readTextFile } from './fs.js'
+import { linkDirAsync } from '../link.test-helpers.js'
 
 /*
  * The identity checks on a read must hold with NTFS file ids (#368). There a file id is 64 bits, with the record's
@@ -59,7 +60,7 @@ afterEach(async () => {
 it('a file swapped for one outside the project is caught even when both ids are the same as Numbers', async () => {
   hooks.beforeOpen = async () => {
     await rename(join(root, 'dir'), join(root, 'saved-dir'))
-    await symlink(join(fixture, 'outside'), join(root, 'dir'), 'dir')
+    await linkDirAsync(join(fixture, 'outside'), join(root, 'dir'))
   }
   await expect(readTextFile(root, 'dir/file.txt')).rejects.toThrow(/changed/i)
 })

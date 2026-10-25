@@ -6,6 +6,7 @@ import { ASK_WAIT_MS, askFrame, clipAnswer, matchProjects, pathsIn, projectChoic
 import { SessionManager } from './manager.js'
 import { askProjectText } from './tool-answers.js'
 import { crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
+import { itSymlink, linkDir } from '../link.test-helpers.js'
 
 /**
  * ask_project (#371 part B): a session in one project asks another project to do a task, and reads the answer
@@ -95,7 +96,7 @@ describe('what the caller may read', () => {
     writeFileSync(join(project, 'out', 'a.png'), 'x')
     writeFileSync(join(project, 'README.md'), 'x')
     writeFileSync(join(root, 'secret.txt'), 'x')
-    symlinkSync(root, join(project, 'escape'))
+    linkDir(root, join(project, 'escape'))
   })
   afterEach(() => rmSync(root, { recursive: true, force: true }))
 
@@ -108,7 +109,7 @@ describe('what the caller may read', () => {
     expect(r.outside).toEqual([project, join(root, 'secret.txt'), join(project, 'escape', 'secret.txt'), join(project, 'gone.png')])
   })
 
-  it('a granted file opens that file only; a granted folder opens what is under it', () => {
+  itSymlink('a granted file opens that file only; a granted folder opens what is under it', () => {
     const grants = [join(project, 'README.md'), join(project, 'out')]
     expect(underGrant(join(project, 'README.md'), grants, '/')).toBe(true)
     expect(underGrant(join(project, 'out', 'a.png'), grants, '/')).toBe(true)
@@ -123,7 +124,7 @@ describe('what the caller may read', () => {
   it('a granted folder later swapped for a link opens nothing new: the grant is the folder it was (#428)', () => {
     const grants = readableGrants([join(project, 'out')], project).granted
     rmSync(join(project, 'out'), { recursive: true, force: true })
-    symlinkSync(root, join(project, 'out'))
+    linkDir(root, join(project, 'out'))
     expect(underGrant(join(project, 'out', 'secret.txt'), grants, '/')).toBe(false)
   })
 
