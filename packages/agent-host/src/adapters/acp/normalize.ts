@@ -36,8 +36,8 @@ export class AcpNormalizer {
 
   constructor(
     private readonly sessionId: string,
-    /** Who passes a call's output on: an empty one can be a command that printed nothing or output the tool did not pass on
-     *  (measured on Cursor: 60 KB arrived as `stdout: ""`), and which it was cannot be told, so it is said as the tool's */
+    /** Who returns a call's output: an empty one can be a command that printed nothing or output the tool did not return
+     *  (measured on Cursor: 60 KB arrived as `stdout: ""`), and which it was cannot be told: said as the tool not returning it */
     private readonly label = 'The tool',
   ) {}
 
@@ -128,7 +128,7 @@ export class AcpNormalizer {
       // Measured on Cursor: a refused call ends `completed` with nothing else
       const ok = u.status === 'completed' && !refused && rawOutputOk(seen.rawOutput)
       const text = output ?? rawOutputText(seen.rawOutput) ?? call.output
-      events.push(toolResultEvent(this.sessionId, id, ok, text || (refused ? 'Not run: the request was refused.' : ''), `${this.label} passed on no output`))
+      events.push(toolResultEvent(this.sessionId, id, ok, text || (refused ? 'Not run: the request was refused.' : ''), `${this.label} did not return the output`))
     }
     return events
   }

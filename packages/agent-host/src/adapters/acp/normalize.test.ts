@@ -14,8 +14,8 @@ describe('a call’s result', () => {
   })
 })
 
-describe('a call that ends with no output passed on', () => {
-  it('says the tool passed on none, not that the command printed none (#1562 Mac re-check: 60 KB of output arrived as "")', async () => {
+describe('a call that ends with no output returned', () => {
+  it('says the tool did not return the output, not that the command printed none (#1562 Mac re-check: 60 KB of output arrived as "")', async () => {
     const { fileURLToPath } = await import('node:url')
     const { loadRecording } = await import('../frames/replay.test-helpers.js')
     const recording = loadRecording(fileURLToPath(new URL('./recordings/cursor-agent-2026.10.22/big-output.jsonl', import.meta.url)))
@@ -25,6 +25,6 @@ describe('a call that ends with no output passed on', () => {
       return f.dir === 'in' && msg?.method === 'session/update' && msg.params?.update ? n.update(msg.params.update) : []
     })
     const result = results.find((e) => e.type === 'tool_result')
-    expect(result).toMatchObject({ type: 'tool_result', ok: true, summary: '(Cursor passed on no output)' })
+    expect(result).toMatchObject({ type: 'tool_result', ok: true, summary: '(Cursor did not return the output)' })
   })
 })
