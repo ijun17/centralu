@@ -213,6 +213,9 @@ class WebAgentPort implements AgentPort {
   async markRead(sessionId: string, seq: number) {
     await this.rpc.call('sessions.markRead', { sessionId, seq })
   }
+  async clearError(sessionId: string) {
+    await this.rpc.call('sessions.clearError', { sessionId })
+  }
   listSessions() {
     return this.rpc.call('sessions.list', {})
   }

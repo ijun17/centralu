@@ -2817,6 +2817,19 @@ export class SessionManager {
     return this.sessionSettings.rename(...a)
   }
 
+  /**
+   * Done on a session in error (#1549): the person has read why, and nothing is left to do about the mark. It goes to `idle`
+   * (the table allows error → idle) through the statement a resume makes, so every window hears it and a new error marks the
+   * session again. The error line stays in the conversation; nothing is stopped or sent. Its last answer is read, so a stopped
+   * turn that waits unread in the inbox goes too.
+   */
+  clearError(sessionId: string): void {
+    const m = this.meta.get(sessionId)
+    if (!m) return
+    if (m.state === 'error') this.events.settleState(m, { type: 'state_change', sessionId, state: 'idle', reason: 'error_cleared' })
+    this.markRead(sessionId, m.lastSeq)
+  }
+
   /** `SessionSettings.markRead` (session-settings.ts), kept on the manager for its callers */
   markRead(...a: Parameters<SessionSettings['markRead']>): ReturnType<SessionSettings['markRead']> {
     return this.sessionSettings.markRead(...a)

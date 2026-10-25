@@ -1,6 +1,6 @@
 import { APP_ARRIVAL_ID_PREFIX, backgroundCount, defaultPresetFor, isAppArrivalId, isInTurn, sessionPanelId, withPanel, type SessionSummary } from '@cc/core'
 import { errorMessage, type NormalizedEvent, type ToolDefaults, type ToolName } from '@cc/protocol'
-import { initialSession, markRead as markReadPure, rename as renamePure } from '@cc/core'
+import { applyEvent, initialSession, markRead as markReadPure, rename as renamePure } from '@cc/core'
 import type { Platform } from '@cc/platform/ports'
 import type { AppState, StoreGet, StoreSet } from '../state.js'
 import { ifSessionStill, inOrder, stillInOrder } from '../patch.js'
@@ -164,6 +164,7 @@ type LifecycleActions = Pick<
   | 'restoreFromTrash'
   | 'rename'
   | 'markRead'
+  | 'markDone'
   | 'markOpened'
   | 'reorderSessions'
 >
@@ -450,6 +451,26 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
     set(
       ifSessionStill(sessionId, (st, cur) => ({
         sessions: { ...st.sessions, [sessionId]: markReadPure(cur, s.lastSeq) },
+      })),
+    )
+  },
+
+  async markDone(sessionId) {
+    const s = get().sessions[sessionId]
+    if (s?.state !== 'error') return get().markRead(sessionId)
+    try {
+      await get().platform!.agents.clearError(sessionId)
+    } catch (e) {
+      set({ toast: `Could not clear the error: ${(e as Error).message}` })
+      return
+    }
+    // The host says idle to every window; this one reads it at once so the mark and the row do not wait for the event
+    set(
+      ifSessionStill(sessionId, (st, cur) => ({
+        sessions: {
+          ...st.sessions,
+          [sessionId]: markReadPure(applyEvent(cur, { type: 'state_change', sessionId, state: 'idle' }, Date.now()), cur.lastSeq),
+        },
       })),
     )
   },

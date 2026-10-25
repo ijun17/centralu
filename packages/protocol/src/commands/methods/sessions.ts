@@ -406,6 +406,15 @@ export const sessionMethods = {
     params: z.object({ sessionId: SessionId, seq: z.number() }),
     result: z.object({ ok: z.literal(true) }),
   },
+  /**
+   * Done on a session in `error` (#1549): it moves to `idle` and its last answer is read, so the sidebar's mark and the inbox row
+   * go. Nothing is stopped, retried or continued, and the error line stays in the conversation. A session not in `error` is
+   * left as it is.
+   */
+  'sessions.clearError': {
+    params: z.object({ sessionId: SessionId }),
+    result: z.object({ ok: z.literal(true) }),
+  },
   'messages.load': {
     params: z.object({ sessionId: SessionId, limit: z.number().default(200), beforeSeq: z.number().optional() }),
     result: z.array(StoredMessage),

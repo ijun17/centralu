@@ -154,6 +154,8 @@ export interface AgentPort {
   updateSettings(sessionId: string, settings: Omit<UpdateSettingsParams, 'sessionId'>): Promise<UpdateSettingsResult>
   rename(sessionId: string, name: string): Promise<void>
   markRead(sessionId: string, seq: number): Promise<void>
+  /** Done on a session in error (#1549): it goes to idle and its last answer is read; the error line stays in the conversation */
+  clearError(sessionId: string): Promise<void>
   listSessions(): Promise<SessionInfo[]>
   loadMessages(sessionId: string, limit?: number, beforeSeq?: number): Promise<StoredMessage[]>
   /**

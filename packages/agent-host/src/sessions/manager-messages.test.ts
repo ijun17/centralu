@@ -774,3 +774,43 @@ describe('resets, notices and switches the tool made (#304)', () => {
     expect(adapter.lastOpts?.model).toBe('haiku')
   })
 })
+
+/** Done on a session in error (#1549): the mark goes, the transcript keeps the error line */
+describe('clearing a session\'s error (#1549)', () => {
+  const failed = async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
+    adapter.handleOf(s.id)!.emitError('app-server exited (code 0)')
+    const row = async () => ((await rpc('sessions.list', {})) as SessionInfo[]).find((x) => x.id === s.id)!
+    return { s, row }
+  }
+
+  it('moves an error session to idle and reads it, and keeps the error line in the transcript', async () => {
+    const { s, row } = await failed()
+    expect((await row()).state).toBe('error')
+    await rpc('sessions.clearError', { sessionId: s.id })
+    const after = await row()
+    expect(after.state).toBe('idle')
+    expect(after.lastReadSeq).toBeGreaterThanOrEqual(after.lastSeq)
+    const line = store.messages.loadMessages(s.id, 50).find((r) => r.kind === 'marker')
+    expect(line!.payload).toMatchObject({ type: 'error', error: { message: 'app-server exited (code 0)' } })
+  })
+
+  it('says idle to every window, and marks the session again on a later error', async () => {
+    const { s, row } = await failed()
+    const mark = events.length
+    await rpc('sessions.clearError', { sessionId: s.id })
+    expect(events.slice(mark)).toContainEqual(expect.objectContaining({ type: 'state_change', sessionId: s.id, state: 'idle' }))
+    adapter.handleOf(s.id)!.emitError('a new failure')
+    expect((await row()).state).toBe('error')
+  })
+
+  it('does not touch a session that is not in error', async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
+    await rpc('agents.send', { sessionId: s.id, text: 'x' })
+    const before = ((await rpc('sessions.list', {})) as SessionInfo[]).find((x) => x.id === s.id)!.state
+    await rpc('sessions.clearError', { sessionId: s.id })
+    expect(((await rpc('sessions.list', {})) as SessionInfo[]).find((x) => x.id === s.id)!.state).toBe(before)
+  })
+})

@@ -167,6 +167,7 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   'sessions.list': 'everyday',
   'sessions.rename': 'everyday',
   'sessions.markRead': 'everyday',
+  'sessions.clearError': 'everyday',
 
   // The trash: reading and restoring run; deleting for good asks
   'trash.list': 'everyday',

@@ -64,7 +64,7 @@ export class SessionsMock {
     s.live = true
     this.emit({ type: 'session_live', sessionId, live: true })
   }
-  readonly agents: Pick<AgentPort, 'createSession' | 'saveAttachment' | 'send' | 'reportOwed' | 'reorderSessions' | 'switchTool' | 'worktreeStatus' | 'autoCompact' | 'deleteSession' | 'archiveIfAtRest' | 'updateSettings' | 'restartSession' | 'resumeSession' | 'forkConversation' | 'rename' | 'markRead' | 'listSessions' | 'loadMessages' | 'messageImage' | 'loadSubagentMessages' | 'subagentTrashed'> = {
+  readonly agents: Pick<AgentPort, 'createSession' | 'saveAttachment' | 'send' | 'reportOwed' | 'reorderSessions' | 'switchTool' | 'worktreeStatus' | 'autoCompact' | 'deleteSession' | 'archiveIfAtRest' | 'updateSettings' | 'restartSession' | 'resumeSession' | 'forkConversation' | 'rename' | 'markRead' | 'clearError' | 'listSessions' | 'loadMessages' | 'messageImage' | 'loadSubagentMessages' | 'subagentTrashed'> = {
     createSession: async (params: CreateSessionParams) => {
       this.lastCreateParams = params
       this.createParamsLog.push(params)
@@ -392,6 +392,15 @@ export class SessionsMock {
     markRead: async (sessionId: string, seq: number) => {
       const s = this.store.sessions.get(sessionId)
       if (s) s.lastReadSeq = Math.max(s.lastReadSeq, seq)
+    },
+    clearError: async (sessionId: string) => {
+      const s = this.store.sessions.get(sessionId)
+      if (!s) return
+      s.lastReadSeq = Math.max(s.lastReadSeq, s.lastSeq)
+      if (s.state === 'error') {
+        s.state = 'idle'
+        this.emit({ type: 'state_change', sessionId, state: 'idle', reason: 'error_cleared' })
+      }
     },
     listSessions: async () => [...this.store.sessions.values()].map((s) => ({ ...s })),
     loadMessages: async (sessionId: string, limit = 200, beforeSeq?: number) => {
