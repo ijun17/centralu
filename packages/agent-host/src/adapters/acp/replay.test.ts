@@ -4,6 +4,9 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import type { AdapterCapabilities, NormalizedEvent } from '@cc/protocol'
 import { AcpAdapter } from './adapter.js'
+import { AcpNormalizer } from './normalize.js'
+import { detailOf } from './session.js'
+import { readUpdate, RequestPermission } from './wire.js'
 import type { AcpProfile } from './profile.js'
 import { loadRecording, replaySpawner } from '../frames/replay.test-helpers.js'
 import { drive, SCENARIOS } from '../frames/scenarios.test-helpers.js'
@@ -69,6 +72,30 @@ for (const dir of readdirSync(RECORDINGS)) {
         const results = of(events, 'tool_result').filter((r) => events.some((e) => e.type === 'tool_call' && e.callId === r.callId && e.summary.tool === 'Bash'))
         expect(results.map((r) => r.ok)).toEqual([true, false, true, true])
         expect(results.map((r) => r.summary.trim())).toEqual(['probe-1', expect.stringMatching(/\S/), 'probe-3', 'probe-3'])
+      })
+    }
+
+    if (names.includes('files')) {
+      it('files: a request about a delete reads as a delete, whatever kind the request itself says', () => {
+        // The card as the session makes it: the call's frames so far, then the request (`AcpSession.onRequest`)
+        const recording = loadRecording(join(RECORDINGS, dir, 'files.jsonl'))
+        const normalizer = new AcpNormalizer('s')
+        const asked: { said: string | undefined; detail: ReturnType<typeof detailOf> }[] = []
+        for (const f of recording.frames) {
+          const msg = f.msg as { method?: string; params?: unknown } | undefined
+          if (f.dir !== 'in' || !msg?.method) continue
+          if (msg.method === 'session/update') {
+            const read = readUpdate(msg.params)
+            if (read && 'update' in read) normalizer.update(read.update)
+          }
+          if (msg.method === 'session/request_permission') {
+            const req = RequestPermission.parse(msg.params)
+            asked.push({ said: req.toolCall.kind ?? undefined, detail: detailOf(normalizer.call(req.toolCall, true), '/work') })
+          }
+        }
+        const deletes = asked.filter((a) => a.detail.kind === 'file_edit' && a.detail.change === 'delete')
+        expect(deletes.length).toBeGreaterThan(0)
+        expect(asked.filter((a) => /^Delete/.test(JSON.stringify(a.detail)) && !(a.detail.kind === 'file_edit' && a.detail.change === 'delete'))).toEqual([])
       })
     }
 

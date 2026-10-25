@@ -105,6 +105,14 @@ export const SCENARIOS: readonly Scenario[] = [
     },
   },
   {
+    // Writes, then a delete: what a tool asks about each, and how it names the call it asks about (#1562 review)
+    name: 'files',
+    preset: 'auto',
+    async run(d) {
+      await turn(d, 'Using your file tools, not the shell: create a file named gone.txt containing x, then delete gone.txt. Then say done.')
+    },
+  },
+  {
     name: 'compact',
     async run(d) {
       await turn(d, 'Reply with exactly: one')
