@@ -41,6 +41,7 @@ const EFFECTS: Record<string, (p: Record<string, unknown>) => string> = {
     (p.deleteWorktree === true ? ', and its worktree is marked to be deleted when the session is deleted from the archive for good' : '') +
     (p.deleteExternal === true ? ", and the tool's own conversation file with it" : '') +
     '.',
+  'agents.archiveIfAtRest': () => 'The session moves to the session archive if that loses nothing it holds.',
   'agents.deleteAgentChild': (p) =>
     `The session moves to the session archive, and the worktree on the branch ${plainQuoted(str(p.worktreeBranch), 120)} is deleted when nothing in it would be lost.`,
   'agents.deleteOrchestratorSkill': (p) => `The orchestrator skill ${plainQuoted(str(p.name), 120)} is deleted.`,

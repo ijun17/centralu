@@ -330,7 +330,7 @@ test.describe('import (E-3)', () => {
 test.describe('versions (E-1)', () => {
   const snap = (id: string, at: number, reason: string, current = false) => ({ id, at, files: 4, bytes: 2048, reason, current })
 
-  test('user-folder app: saved versions show, and "Restore previous version" asks once then reverts to the version right before the current one', async ({ page }) => {
+  test('user-folder app: saved versions show, and "Restore previous version" reverts at once to the version right before the current one, with Undo', async ({ page }) => {
     await page.goto('/?mock=1')
     await page.evaluate(
       (v) => (window as any).__mock.appVersions.set('_user/notes', v),
@@ -346,22 +346,24 @@ test.describe('versions (E-1)', () => {
     await expect(panel.getByTestId('version-row').nth(2)).toContainText('As imported')
 
     const restored = () => page.evaluate(() => (window as any).__mock.restoredVersions as { appId: string; id: string }[])
+    // No question first (#1512): the host keeps the current files as a version, and the toast's Undo restores the one that was current
     await panel.getByTestId('versions-restore-previous').click()
-    await expect(panel.getByTestId('versions-confirm')).toContainText('The current files are kept as a version first')
-    // Nothing goes out while it is asking — cancelling leaves everything as it was
-    await panel.getByTestId('versions-confirm-cancel').click()
-    expect(await restored()).toEqual([])
-
-    await panel.getByTestId('versions-restore-previous').click()
-    await panel.getByTestId('versions-confirm-yes').click()
+    await expect(panel.getByTestId('versions-confirm')).toHaveCount(0)
     await expect.poll(restored).toEqual([{ appId: 'notes', id: 's2' }])
     // The restored version becomes the current one
     await expect(panel.getByTestId('version-row').nth(1).getByTestId('version-current')).toHaveText('current')
-    // An older version can also be restored, row by row
-    await panel.getByTestId('version-row').nth(2).getByTestId('version-restore').click()
-    await panel.getByTestId('versions-confirm-yes').click()
+    await expect(page.getByTestId('toast')).toContainText('Restored Notes')
+    await page.getByTestId('toast-action').click()
     await expect.poll(restored).toEqual([
       { appId: 'notes', id: 's2' },
+      { appId: 'notes', id: 's3' },
+    ])
+    await expect(panel.getByTestId('version-row').first().getByTestId('version-current')).toHaveText('current')
+    // An older version can also be restored, row by row
+    await panel.getByTestId('version-row').nth(2).getByTestId('version-restore').click()
+    await expect.poll(restored).toEqual([
+      { appId: 'notes', id: 's2' },
+      { appId: 'notes', id: 's3' },
       { appId: 'notes', id: 's1' },
     ])
   })
