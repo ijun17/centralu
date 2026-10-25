@@ -1350,8 +1350,12 @@ describe('a bare project name that only a down machine holds (#1547)', () => {
       q: new Qualifier('m3', 3),
       reachable: false,
       attemptUnderWay: true,
-      settled: async () => pause(400 * SLOW),
-      reachForCall: async () => pause(400 * SLOW),
+      settled: async () => {
+        await pause(400 * SLOW)
+      },
+      reachForCall: async () => {
+        await pause(400 * SLOW)
+      },
       lastKnown: () => null,
     }
     hub.mgr.useLinkedReader(linkedSessions(() => [...hub.links.all(), desk, ...(o.dead ? [dead] : [])], (method, params) => hub.call(method, params), 'Hub mac'))

@@ -624,7 +624,7 @@ describe('a project lookup connects only the machine the act needs (#1532)', () 
   })
 
   it('has calls at once for the same machine wait on one attempt, and tries again once the window is over (#1547)', async () => {
-    const { m: far, tried } = downMachine('far', 'Far box', 60, { comesBack: false })
+    const { m: far, tried } = downMachine('far', 'Far box', 60 * SLOW, { comesBack: false })
     const reader = linkedSessions(() => [far], undefined, undefined, { guessWindowMs: 200 * SLOW })
     const t0 = Date.now()
     await Promise.all([again(reader, 'a'), again(reader, 'b'), again(reader, 'c')])

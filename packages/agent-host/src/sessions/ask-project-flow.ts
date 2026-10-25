@@ -204,7 +204,7 @@ export class AskProjectFlow {
     let found = matchProjects(wanted, askableOf())
     // Nowhere (#1547): the mirror of a machine that is down may lack a project made since, so those are tried now, once, bounded
     if (!found.length && reader && !exactHere) {
-      there = await reader.projects({ ref: wanted, anyDown: true })
+      there = await reader.projects({ ref: wanted, anyDown: true, prior: there })
       found = matchProjects(wanted, askableOf())
     }
     const awayAll = [...there.away, ...fromHubs.away.map((a) => ({ machineId: a.hubId, machine: a.hub, why: a.why }))]

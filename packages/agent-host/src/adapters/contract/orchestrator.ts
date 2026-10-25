@@ -183,9 +183,12 @@ export type ProjectNeed = {
   machineId?: string
   /**
    * `ref` matched no project the caller can see, here or on a machine that is up (#1547): try every machine that is down,
-   * as the mirror of one may lack a project made since. Not for a name that is qualified with a machine
+   * as the mirror of one may lack a project made since. Not for a name that is qualified with a machine. A down machine is
+   * waited for once per window, so a later call inside it is answered at once and names the machine as not asked
    */
   anyDown?: boolean
+  /** With `anyDown`: the answer of the lookup that found nothing, so the machines that are up are not asked again */
+  prior?: { projects: LinkedProject[]; away: { machine: string; machineId: string; why: string }[] }
 }
 
 /** A project on a linked machine, as the hub's orchestrator names it (#82 phase 4) */
@@ -225,9 +228,9 @@ export type LinkedSessions = {
   /**
    * The projects of `projects()` whose name or qualified id is `ref`, under the same per-machine bound: one on a machine
    * that cannot be asked just now comes from the mirror, marked `away`, so it is found as unreachable, never as missing.
-   * The machine the name belongs to is tried first if it is down (#1532); no other machine is, unless `anyDown` (#1547, see `ProjectNeed`)
+   * The machine the name belongs to is tried first if it is down (#1532)
    */
-  findProjects(ref: string, o?: { anyDown?: boolean }): Promise<LinkedProject[]>
+  findProjects(ref: string): Promise<LinkedProject[]>
   /**
    * Every linked machine's projects (ask_project, #700). A machine that cannot be asked contributes what the headers
    * mirror last held, each project marked `away` with why, and is named in `away` whether or not the mirror held

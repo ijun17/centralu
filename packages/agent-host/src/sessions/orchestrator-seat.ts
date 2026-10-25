@@ -345,14 +345,29 @@ export function orchestratorToolsFor(
 
     createSession: async (opts) => {
       const all = host.store.projects.listProjects()
-      const local = all.filter((p) => p.id === opts.project || p.name === opts.project)
       // A linked machine's project, by its name or qualified id (#82 phase 4). Asked only when links exist, and not for
       // this computer's own id, which is exact (as ask_project's rule is)
       const reader = linked()
       const exactHere = all.some((p) => p.id === opts.project)
-      let remote = reader && opts.project && !exactHere ? await reader.findProjects(opts.project) : []
-      // Named nowhere (#1547): a machine that is down may hold a project its mirror lacks, so those are tried now, once, bounded
-      if (reader && opts.project && !exactHere && !local.length && !remote.length) remote = await reader.findProjects(opts.project, { anyDown: true })
+      // ask_project's rule: the exact name, else the same in any case
+      const sameName = (p: { name: string }) => p.name.toLowerCase() === (opts.project ?? '').toLowerCase()
+      const local = all.some((p) => p.id === opts.project || p.name === opts.project)
+        ? all.filter((p) => p.id === opts.project || p.name === opts.project)
+        : all.filter(sameName)
+      const named = (p: { id: string; name: string }) => p.id === opts.project || p.name === opts.project
+      let there = reader && opts.project && !exactHere ? await reader.projects({ ref: opts.project }) : null
+      let remote = there ? there.projects.filter(named) : []
+      // Named nowhere (#1547): a machine that is down may hold a project its mirror lacks, so those are tried now (once per window)
+      if (reader && there && !local.length && !remote.length) {
+        there = await reader.projects({ ref: opts.project, anyDown: true, prior: there })
+        remote = there.projects.filter(named)
+      }
+      if (!local.length && !remote.length && there?.away.length) {
+        return {
+          ok: false,
+          error: `No such project: ${opts.project}. Not asked, and its projects may be missing: ${there.away.map((a) => `${a.machine} (${a.why})`).join(', ')}.`,
+        }
+      }
       if (local.length + remote.length > 1) {
         // One name on two machines: guessing would start the work on the wrong disk. A machine that cannot be asked just
         // now counts too (`away`): its project may be the one meant, and dropping it used to start the work here instead

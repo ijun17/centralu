@@ -518,7 +518,7 @@ describe('a session the orchestrator creates', () => {
     meta.set('orch', { ...meta.get('orch')!, permissionPreset: 'safe' })
     const createSession = vi.fn(async () => ({ ok: true as const, sessionId: 'm1/s', name: 's' }))
     const send = vi.fn(async () => ({ ok: true as const }))
-    linked = { findProjects: async () => [{ id: 'm1.p9', name: 'far', machine: 'Far', path: '/x' }], createSession, send } as unknown as LinkedSessions
+    linked = { projects: async () => ({ projects: [{ id: 'm1.p9', name: 'far', machine: 'Far', path: '/x' }], away: [] }), createSession, send } as unknown as LinkedSessions
     expect(await orchestratorToolsFor(host, 'orch').createSession({ project: 'far', firstMessage: 'go' })).toMatchObject({ ok: true })
     expect(createSession).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ preset: 'safe' }))
     expect(send).toHaveBeenCalledWith('m1/s', 'go', 'Orchestrator')
