@@ -211,7 +211,7 @@ export async function seedDemo(mock: MockPlatform, scene: DemoScene = 'focus'): 
     role: 'assistant',
     text: "Since it's `z-index: 1`, the collapsed card (z-20) was covering the bottom edge. I'll raise the ring above it.",
   })
-  mock.emit({ type: 'context_update', sessionId: working.id, used: 74_000, window: 200_000, exactness: 'exact' })
+  mock.emit({ type: 'context_update', sessionId: working.id, used: 74_000, window: 200_000, exactness: 'exact', compactAt: 120_000 })
   mock.emit({ type: 'state_change', sessionId: working.id, state: 'working' })
   /*
    * The plan checklist is sent **after the screen has attached**.
@@ -507,7 +507,7 @@ async function seedShot(mock: MockPlatform): Promise<void> {
     role: 'assistant',
     text: 'Three callers. Two are in the billing path and one is in a script that has not run since March.',
   })
-  mock.emit({ type: 'context_update', sessionId: working.id, used: 74_000, window: 200_000, exactness: 'exact' })
+  mock.emit({ type: 'context_update', sessionId: working.id, used: 74_000, window: 200_000, exactness: 'exact', compactAt: 120_000 })
   mock.emit({ type: 'state_change', sessionId: working.id, state: 'working' })
 
   /*

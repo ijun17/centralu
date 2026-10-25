@@ -1,4 +1,5 @@
 import { memo } from 'react'
+import { contextShare } from '@cc/protocol'
 import { formatCount } from '../../app/format.js'
 import { useStore } from '../../store/store.js'
 import { SessionSettings } from './SessionSettings.jsx'
@@ -24,11 +25,12 @@ export const ComposerFooter = memo(function ComposerFooter({
 }) {
   const session = useStore((s) => s.sessions[sessionId])
   if (!session) return null
-  // A window of 0 (a model the host could not size) has no percentage to give
-  const ctxPct =
-    session.context && session.context.window > 0
-      ? Math.round((session.context.used / session.context.window) * 100)
-      : null
+  // The share is used / the model's full window (#1553), whichever tool; the host says which window that is. A window of 0 (a model
+  // the host could not size) has no percentage to give. `capped`: only a floor under the model's window is known, so the figure is
+  // an upper bound and says so.
+  const share = contextShare(session.context)
+  const ctxPct = share ? Math.round(share.fraction * 100) : null
+  const compactPct = share?.compactAt?.fraction != null ? Math.round(share.compactAt.fraction * 100) : null
   const mark = session.context?.exactness === 'estimate' ? '≈' : ''
   return (
     <div className="mt-1.5 flex items-center gap-2">
@@ -86,17 +88,33 @@ export const ComposerFooter = memo(function ComposerFooter({
           session.context
             ? `Context ${mark}${formatCount(session.context.used)} / ${formatCount(session.context.window)} tokens${
                 mark && ' (estimated until the next turn ends)'
+              }${
+                share?.capped
+                  ? " — the model's full window is not known yet, so this is the share of the smaller window the tool reported (at most the real share)"
+                  : ''
+              }${
+                share?.compactAt
+                  ? ` · compacts at ${formatCount(share.compactAt.tokens)} tokens${compactPct !== null ? ` (${compactPct}%)` : ''}`
+                  : ''
               }`
             : 'Context unknown — this session has never reported one'
         }
       >
-        <span className="leading-none">Context {ctxPct === null ? '—' : `${mark}${ctxPct}%`}</span>
-        <span className="block h-1 overflow-hidden rounded-full bg-line" aria-hidden>
+        <span className="leading-none">Context {ctxPct === null ? '—' : `${mark}${share?.capped ? '≤' : ''}${ctxPct}%`}</span>
+        <span className="relative block h-1 overflow-hidden rounded-full bg-line" aria-hidden>
           {ctxPct !== null && (
             <span
               className={`block h-full rounded-full ${ctxPct >= 80 ? 'bg-ink' : 'bg-ink-faint'}`}
               style={{ width: `${Math.min(100, Math.max(0, ctxPct))}%` }}
               data-testid="context-gauge-fill"
+            />
+          )}
+          {/* Where the tool compacts by itself: a mark on the bar, not its end (#1553) */}
+          {compactPct !== null && compactPct > 0 && compactPct < 100 && (
+            <span
+              className="absolute inset-y-0 w-px bg-ink"
+              style={{ left: `${compactPct}%` }}
+              data-testid="context-gauge-compact-mark"
             />
           )}
         </span>

@@ -1,4 +1,5 @@
 import type { AutoCompact, NormalizedEvent, SessionInfo, ToolName } from '@cc/protocol'
+import { fullWindow } from './auto-compact.js'
 import { inTurn, type SessionIdle } from '../idle.js'
 
 /**
@@ -44,7 +45,7 @@ export type SelfCompactionHost = {
   session(sessionId: string): SessionInfo | undefined
   /** `SessionManager.sessionIdle`: in a turn, a card, a question or background work make it not idle */
   idle(sessionId: string): SessionIdle
-  /** The model's own context window when Centralu has read it, else null (`ModelWindows.of`) */
+  /** The model's own context window when Centralu has read it, else null (`ModelWindows.of`); `fullWindow` settles what to divide by (#1553) */
   window(session: SessionInfo): number | null
   /** Whether a process of the session runs */
   running(sessionId: string): boolean
@@ -335,8 +336,9 @@ export class SelfCompaction {
     if (now - since < IDLE_COMPACT_MINUTES * 60_000) return false
     const ctx = m.context
     if (!ctx || ctx.window <= 0) return false
-    // The model's own window when it is known: a Claude process started under the CLI's compaction setting reports a smaller one
-    const window = this.host.window(m) ?? ctx.window
+    // The model's full window, as the gauge shows the share (#1553); a floor under it is no window to take a share of
+    const window = fullWindow(this.host.window(m), ctx)
+    if (window === null) return false
     return ctx.used >= COMPACT_FLOOR_TOKENS && ctx.used >= window * setting.idleShare
   }
 

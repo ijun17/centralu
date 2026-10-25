@@ -1521,7 +1521,7 @@ the params with the method's schema and reads the answer with its result schema,
   (Settings says so). **Codex** gets `model_auto_compact_token_limit` in the per-thread `config` of `thread/start` and `thread/resume`,
   which overrides the person's `config.toml` for that thread. Off (`controlled: false`), nothing is passed and each agent's own settings
   decide, untouched.
-  The window is the one the context gauge shows, which a tool reports with its token readings. `ModelWindows` keeps it, with the model the
+  The window is the model's own, which a tool reports with its token readings. `ModelWindows` keeps it, with the model the
   tool resolved the name to (`context_update.model`), per tool and model name (a default model per project) in the app settings. Claude's CLI
   reports the smaller of the model's window and the `autoCompactWindow` it was started with (a 1M model started at 153,000 reports 153,000; a
   200k one started at 633,000 reports 200,000), so `AgentAdapter.windowCeilingFor` gives the largest window a process started with the
@@ -1533,6 +1533,19 @@ the params with the method's schema and reads the answer with its result schema,
   setting says by then; one adopted without a kept ceiling (a host from before) can only say "at least". The row is dropped when the session has no process to adopt: when it sleeps, is deleted, or its start fails (a purge of the trash takes any left, by its `<name>:<id>` shape). The adopted process is handed the ceiling (`CreateSessionOpts.autoCompactCeiling`), and the adapter's once-only log of a compaction point that differs from the one asked for compares against it, not against what the setting gives now. Codex reports the model's own window, so its readings always replace the
   known one. A model nobody has read a window from passes nothing at its first start and the value from the next (Settings, and the
   session's own settings menu, say so).
+  **One context share (#1553).** The share shown anywhere is used / the model's full window, for Claude and Codex alike: 100% is the whole window
+  (a 1M model: 1,000k), and the compaction point is a mark on it, not its end. The reading a tool gives is for learning from (`ModelWindows.note` reads it
+  against the ceiling, as above); what leaves the host is made from it once, in `SessionEvents.shareOf`, before the event is applied, stored or sent: the
+  `context_update` (and so `SessionInfo.context`) carries `window` = the model's full window (`ModelWindows.shareWindow`: the reading when it is under the
+  ceiling or the process has none, else the window kept for the model), `compactAt` = the tokens the process was started to compact at
+  (`ModelWindows.started`, kept with the session as `auto_compact_at:<id>` for a host swap; absent when Centralu's control did not start it, or an adopted
+  process whose host kept none), and `capped: true` when the full window is not known (a reading at the ceiling with no record for that model: an adopted
+  process without a kept ceiling, or a model name that moved to another model). Then `window` is only the tool's reading, a floor under the model's. A screen or a text for an agent
+  turns the reading into a share with `contextShare` (protocol) and divides by nothing else; the nudges and the rest rule take the model's window from
+  `fullWindow` (the record, else an uncapped reading, else none: a capped reading is no window to take a share of, so they say and do nothing).
+  What is shown for an unknown full window: the gauge reads "≤N%" (an upper bound) with a tooltip that says the model's full window is not known yet,
+  until the tool's next reading under a process with no ceiling teaches it (usually the next start). The stored `context_window` is the share window; `capped` and `compactAt` are not stored
+  and come back with the next reading (an older record may still hold the tool's smaller window until then).
   **Compacting at a break (#1451).** The share above stays the in-turn backstop (60%); two things compact a session at a break instead
   (`sessions/self-compaction.ts`, `SelfCompaction`), because a long-lived session's whole context is rewritten into the cache after every
   long wait and a compaction in the middle of work breaks the flow. Both send the tool's own command as a turn of its own (`SessionEvents.sendCompact`:
@@ -1587,7 +1600,7 @@ the params with the method's schema and reads the answer with its result schema,
     token count; a subagent's request is not the conversation's), because the tool's own reading comes at a turn's end (Claude reads it just after the turn
     ends). The same figure moves the window's meter (`sessions/context-meter.ts`, `ContextMeter`): each request becomes a `context_update` marked
     `exactness: 'estimate'` (the window draws "≈"; a hub and an older window read it as a reading), **at most one per 3 seconds per session**, in the
-    window the tool's readings use (`SessionInfo.context.window`, so the meter never changes its denominator in a turn; none until a reading gave one). **The
+    window of the session's last reading (`SessionInfo.context.window`, the model's full window when known, #1553, so the meter never changes its denominator in a turn; none until a reading gave one), carrying its `capped` and `compactAt`. **The
     tool's reading stays the authority** at the turn's end whatever the estimates said, and estimates stop for the rest of a turn in which the tool read the
     size. Codex reads it with every request, right after the request's token count (`AgentAdapter.contextAtRequest`), so it gets no estimate at all: the exact
     figure is there at once, and an estimate could only flicker in front of it. **A reading owed for the turn before cannot overwrite this turn's:** a turn that ended with no reading in it owes

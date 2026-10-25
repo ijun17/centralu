@@ -17,9 +17,9 @@ import { inTurn } from '../idle.js'
  *    asked for nothing yet). A turn that ended with no reading in it owes one.
  *  - **Throttled** to one estimate per `ESTIMATE_GAP_MS` per session: a tool-heavy turn makes a request every second or less, and the
  *    window need not redraw the meter for each. The turn's end brings the reading.
- *  - **Denominator.** The window the tool's readings use (`SessionInfo.context.window`), not the model's own: a Claude process started
- *    under the compaction setting reports a smaller one, and the meter must not change its denominator in the middle of a turn. With
- *    no reading yet there is no window and no estimate.
+ *  - **Denominator.** The window of the session's last reading (`SessionInfo.context.window`: the model's full window when the host
+ *    knows it, #1553), so the meter does not change its denominator in the middle of a turn, and carries the reading's `capped` and
+ *    `compactAt` along. With no reading yet there is no window and no estimate.
  */
 
 /** At most one estimate per session in this time */
@@ -80,6 +80,14 @@ export class ContextMeter {
     if (used === m.context.used || now - s.at < ESTIMATE_GAP_MS) return null
     s.at = now
     s.estimated = true
-    return { type: 'context_update', sessionId: m.id, used, window: m.context.window, exactness: 'estimate' }
+    return {
+      type: 'context_update',
+      sessionId: m.id,
+      used,
+      window: m.context.window,
+      exactness: 'estimate',
+      ...(m.context.capped ? { capped: true } : {}),
+      ...(m.context.compactAt !== undefined ? { compactAt: m.context.compactAt } : {}),
+    }
   }
 }

@@ -24,6 +24,16 @@ export function autoCompactPlan(setting: AutoCompact, windows: ModelWindows, m: 
   return { controlled: setting.controlled, share: setting.share, tokens: autoCompactTokens(setting, windows.of(m)) }
 }
 
+/**
+ * The model's full window for a share the host works out or tells (#1553: the nudges, the rest rule): what `ModelWindows` kept
+ * for the model (`known`), else the session's own last reading when that is the full window (a process started without the
+ * setting, or Codex, reports it), else null. A reading that is only a floor (`context.capped`) is not a window to divide by.
+ */
+export function fullWindow(known: number | null, context: SessionInfo['context']): number | null {
+  if (known !== null) return known
+  return context && !context.capped && context.window > 0 ? context.window : null
+}
+
 /** A model's window as last read, and the model the tool said it was for (an alias such as `haiku` moves between models) */
 type Known = { window: number; model: string | null }
 
@@ -51,6 +61,8 @@ export class ModelWindows {
   private readonly known = new Map<string, Known | null>()
   /** The largest window each running process can report because of what it was started with; 'unknown' for an adopted process that did not say */
   private readonly ceilings = new Map<string, number | 'unknown'>()
+  /** Where each running process compacts by itself, in tokens, as it was started (the setting may have moved since); absent: not controlled or not known */
+  private readonly compactAts = new Map<string, number>()
 
   constructor(private readonly settings: WindowSettings) {}
 
@@ -65,19 +77,32 @@ export class ModelWindows {
    * not recomputed. Kept from a host that did not write it, the ceiling is unknown, and the process's readings can only
    * say "at least" (they drop a record, never lower it).
    */
-  started(sessionId: string, ceiling: number | null, adopted = false): void {
+  started(sessionId: string, ceiling: number | null, adopted = false, compactAt: number | null = null): void {
     const key = `auto_compact_ceiling:${sessionId}`
+    const atKey = `auto_compact_at:${sessionId}`
     if (adopted) {
       const raw = this.settings.appSetting(key)
       const kept = raw === null || raw === '' ? Number.NaN : Number(raw)
       if (Number.isNaN(kept)) this.ceilings.set(sessionId, 'unknown')
       else if (kept > 0) this.ceilings.set(sessionId, kept)
       else this.ceilings.delete(sessionId)
+      // The point it was started with, whatever the setting says by now; none kept (a host from before): no mark
+      const at = Number(this.settings.appSetting(atKey))
+      if (at > 0) this.compactAts.set(sessionId, at)
+      else this.compactAts.delete(sessionId)
       return
     }
     this.settings.setAppSetting(key, String(ceiling ?? 0))
+    this.settings.setAppSetting(atKey, String(compactAt ?? 0))
     if (ceiling === null) this.ceilings.delete(sessionId)
     else this.ceilings.set(sessionId, ceiling)
+    if (compactAt === null || !(compactAt > 0)) this.compactAts.delete(sessionId)
+    else this.compactAts.set(sessionId, compactAt)
+  }
+
+  /** Where the session's running process compacts by itself, in tokens, or null when Centralu's control did not start it (or it is not known) */
+  compactAtOf(sessionId: string): number | null {
+    return this.compactAts.get(sessionId) ?? null
   }
 
   /** The ceiling a running or adopted process was started with, or null when none is known */
@@ -93,7 +118,9 @@ export class ModelWindows {
    */
   forget(sessionId: string): void {
     this.ceilings.delete(sessionId)
+    this.compactAts.delete(sessionId)
     this.settings.deleteAppSetting(`auto_compact_ceiling:${sessionId}`)
+    this.settings.deleteAppSetting(`auto_compact_at:${sessionId}`)
   }
 
   /** A reading of the session's window, with the model the tool says it is for when it says */
@@ -110,6 +137,20 @@ export class ModelWindows {
     }
     if (known && known.window === window && known.model === (resolved ?? null)) return
     this.write(key, { window, model: resolved ?? null })
+  }
+
+  /**
+   * The window a session's context share is read against (#1553): the model's full window, whatever the process reported. Asked
+   * right after `note` took the same reading. A reading under the process's ceiling is the model's own window; one at it is a
+   * floor, and the model's window is then what `note` kept (the record for this model), or unknown: the reading stands in as
+   * `capped`, which the screen says. A tool with no ceiling (Codex, a process started without the setting) reports the model's own.
+   */
+  shareWindow(m: Pick<SessionInfo, 'id' | 'tool' | 'model' | 'projectId'>, reported: number): { window: number; capped: boolean } {
+    const ceiling = this.ceilings.get(m.id)
+    const atCeiling = ceiling === 'unknown' || (ceiling !== undefined && reported >= ceiling)
+    if (!atCeiling) return { window: reported, capped: false }
+    const known = this.of(m)
+    return known === null ? { window: reported, capped: true } : { window: Math.max(known, reported), capped: false }
   }
 
   /** The model's window, or null when no session has read one */

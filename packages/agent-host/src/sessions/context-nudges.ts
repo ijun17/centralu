@@ -1,4 +1,5 @@
 import { nudgeShares, type AutoCompact, type NormalizedEvent, type SessionInfo } from '@cc/protocol'
+import { fullWindow } from './auto-compact.js'
 import { COMPACT_FLOOR_TOKENS } from './self-compaction.js'
 
 /**
@@ -25,7 +26,7 @@ import { COMPACT_FLOOR_TOKENS } from './self-compaction.js'
 
 export type ContextNudgesHost = {
   session(sessionId: string): SessionInfo | undefined
-  /** The model's own context window when Centralu has read it, else null (`ModelWindows.of`) */
+  /** The model's own context window when Centralu has read it, else null (`ModelWindows.of`); `fullWindow` settles what to divide by (#1553) */
   window(session: SessionInfo): number | null
   setting(): AutoCompact
   /** Whether `compact_self` is one of the session's tools */
@@ -80,8 +81,9 @@ export class ContextNudges {
     const setting = this.host.setting()
     const m = this.host.session(id)
     if (!m || !setting.controlled || !setting.nudge || !this.host.hasCompactTool(id)) return
-    const window = this.host.window(m) ?? m.context?.window ?? 0
-    if (window <= 0) return
+    // The model's full window, as the gauge shows the share (#1553); a floor under it is no window to take a share of
+    const window = fullWindow(this.host.window(m), m.context)
+    if (window === null) return
     const c = this.cycle(id)
     c.size = size
     const share = size / window

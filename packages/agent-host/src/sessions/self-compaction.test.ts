@@ -488,6 +488,15 @@ describe('a session at rest over the lower share (#1451)', () => {
     expect(w.c.sweep()).toEqual(['s1'])
   })
 
+  it('takes no share of a window that is only a floor under the model’s (capped): the full one is not known (#1553)', () => {
+    const w = resting({ context: { used: 190_000, window: 200_000, exactness: 'exact', capped: true } })
+    later(w, 60)
+    expect(w.c.sweep()).toEqual([])
+    // The same reading against a window that is the model's own is over the share
+    w.m().context = { used: 190_000, window: 200_000, exactness: 'exact' }
+    expect(w.c.sweep()).toEqual(['s1'])
+  })
+
   it('may try again when the tool refused the compact before any turn began', () => {
     const w = resting()
     later(w, 10)
