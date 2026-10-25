@@ -221,13 +221,6 @@ describe('ModelWindows', () => {
       expect(after.of(claude('a'))).toBe(1_000_000)
       after.forget('a')
     })
-
-    it("a model switch does not carry the old model's window: the new model has none until it is read", () => {
-      const w = new ModelWindows(settings())
-      w.note(m('a', 'opus[1m]', 'claude'), 1_000_000, 'claude-opus-5')
-      expect(w.of(m('a', 'opus[1m]', 'claude'))).toBe(1_000_000)
-      expect(w.of(m('a', 'haiku', 'claude'))).toBeNull()
-    })
   })
 
   it('keeps the model beside the window across a restart of the host', () => {

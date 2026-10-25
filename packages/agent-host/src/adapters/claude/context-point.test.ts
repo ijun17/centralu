@@ -47,13 +47,11 @@ async function reading(opts: Record<string, unknown>): Promise<Extract<Normalize
 }
 
 describe('the context reading a Claude session sends', () => {
-  it("carries the CLI's own threshold when Centralu's control started the process", async () => {
+  it("carries the CLI's own threshold when Centralu's control started the process, and none for a process it did not start to compact", async () => {
     expect(await reading({ autoCompactTokens: 600_000 })).toMatchObject({ used: 100_000, window: 633_000, compactAt: 600_000 })
-  })
-
-  it('carries none for a process Centralu did not start to compact, whatever threshold the CLI reports', async () => {
-    const e = await reading({})
-    expect(e).toMatchObject({ used: 100_000, window: 633_000 })
-    expect(e).not.toHaveProperty('compactAt')
+    // The CLI reports a threshold whether or not anyone set it
+    const plain = await reading({})
+    expect(plain).toMatchObject({ used: 100_000, window: 633_000 })
+    expect(plain).not.toHaveProperty('compactAt')
   })
 })
