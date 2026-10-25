@@ -131,6 +131,22 @@ export const sessionMethods = {
     result: z.object({ ok: z.literal(true) }),
   },
   /**
+   * The archive the window offers for a session that looks idle (#1512), decided by the host at the last moment: it moves the
+   * session (as `agents.deleteSession` with the worktree and the tool's file kept) only when nothing it holds would be lost,
+   * the same rule as the orchestrator's `delete_session` (reports owed to or by it, waits and cards on it, what the person
+   * allowed it, unfinished mail threads) and it is at rest in the step that moves it. Otherwise nothing moves and `asks` says
+   * what would be lost, for the window's dialog (empty when the session was only busy, or is gone). A build from before it
+   * answers "Unknown method", and the window asks first as it always did.
+   */
+  'agents.archiveIfAtRest': {
+    params: z.object({
+      sessionId: SessionId,
+      /** As `agents.deleteSession`'s: the tool's conversation file goes when the session is deleted for good (the dialog's default); ignored for a tool that cannot delete it */
+      deleteExternal: z.boolean().default(false),
+    }),
+    result: z.union([z.object({ archived: z.literal(true) }), z.object({ archived: z.literal(false), asks: z.array(z.string()) })]),
+  },
+  /**
    * agent_session delete of a child a hub's session started here with a worktree (#1161 item 3): the session goes to the
    * trash, and the worktree Centralu made for it on `worktreeBranch` goes too when nothing would be lost (nothing
    * uncommitted, every commit of its own on a remote or the trunk). `kept` says why it stayed; `none`, the session had

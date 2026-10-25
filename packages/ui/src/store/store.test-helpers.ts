@@ -99,6 +99,7 @@ export function resetStore() {
     externalAppChangedBy: {},
     externalApps: [],
     trustAsk: null,
+    toastAction: null,
     pinnedViews: [],
     focusedApp: null,
   })

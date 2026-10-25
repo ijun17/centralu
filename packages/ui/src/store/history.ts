@@ -222,7 +222,20 @@ export const historyActions = (set: StoreSet, get: StoreGet): HistoryActions => 
        * The person is on Settings → Archive, where the entry now stands with its Restore: the toast says what moved and
        * points nowhere (docs/ux-writing.md §1.1)
        */
-      set({ toast: `Moved ${formatCount(steps)} subagent ${steps === 1 ? 'step' : 'steps'} of ${name} to the session archive` })
+      set({
+        toast: `Moved ${formatCount(steps)} subagent ${steps === 1 ? 'step' : 'steps'} of ${name} to the session archive`,
+        // Archiving them is undone by the archive's own Restore, so it needs no question first (#1512)
+        toastAction: {
+          label: 'Undo',
+          run: () => {
+            void get()
+              .restoreSubagentSteps(sessionId)
+              .then((error) => {
+                if (error) set({ toast: `Could not undo: ${error}` })
+              })
+          },
+        },
+      })
       return null
     } catch (e) {
       return (e as Error).message
