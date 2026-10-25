@@ -16,6 +16,8 @@ export class FakeHandle implements SessionHandle {
   sent: string[] = []
   /** The origin each of `sent` was handed with, in the same order (`InputOrigin`): undefined when none */
   origins: (InputOrigin | undefined)[] = []
+  /** Whether each of `sent` was Centralu's own compact command (`compact`), in the same order */
+  compacts: boolean[] = []
   approvals: { requestId: string; decision: ApprovalDecision }[] = []
   /** The quiet notes the host gave it (`SessionHandle.nudge`, #1492); none is a message, so `sent` does not hold them */
   nudges: string[] = []
@@ -23,9 +25,10 @@ export class FakeHandle implements SessionHandle {
   takesNudges = true
   disposed = false
   constructor(readonly sessionId: string, private emit: EventSink) {}
-  send(text: string, opts?: { origin?: InputOrigin }) {
+  send(text: string, opts?: { origin?: InputOrigin; compact?: boolean }) {
     this.sent.push(text)
     this.origins.push(opts?.origin)
+    this.compacts.push(!!opts?.compact)
     this.emit({ type: 'message_delta', sessionId: this.sessionId, role: 'assistant', text: `echo:${text}` })
   }
   nudge(text: string): boolean {

@@ -110,7 +110,12 @@ export const SessionUpdate = z.discriminatedUnion('sessionUpdate', [
     ),
   }),
   z.looseObject({ sessionUpdate: z.literal('session_info_update'), title: nullish(z.string()) }),
-  z.looseObject({ sessionUpdate: z.literal('usage_update'), used: z.number(), size: z.number() }),
+  z.looseObject({
+    sessionUpdate: z.literal('usage_update'),
+    used: z.number(),
+    size: z.number(),
+    cost: z.looseObject({ amount: z.number(), currency: z.string() }).nullish(),
+  }),
   z.looseObject({ sessionUpdate: z.literal('current_mode_update'), currentModeId: z.string() }),
   z.looseObject({ sessionUpdate: z.literal('config_option_update'), configOptions: z.array(ConfigOption) }),
   z.looseObject({

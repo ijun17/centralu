@@ -305,9 +305,10 @@ export interface SessionHandle {
   /**
    * `id`: a name the host gives the input, which `turnInputs` then reports back (a UUID). `quiet`: appended to the conversation without
    * starting a turn, and read with the next message that does (Claude's `shouldQuery: false`). Only an adapter with `quietInput` takes
-   * it; the mailbox's mail that must not wake goes this way
+   * it; the mailbox's mail that must not wake goes this way. `compact`: this is Centralu's own compact command
+   * (`SessionEvents.sendCompact`), for a tool that can tell its compaction only from that turn (ACP, §5.6); others ignore it
    */
-  send(text: string, opts?: { origin?: InputOrigin; id?: string; quiet?: boolean }): void
+  send(text: string, opts?: { origin?: InputOrigin; id?: string; quiet?: boolean; compact?: boolean }): void
   /**
    * A note for the model that never starts a turn and never interrupts one (#1492): Claude takes it as quiet input, read with
    * the next message or at the running turn's next tool round; Codex steers it into the regular turn that is running

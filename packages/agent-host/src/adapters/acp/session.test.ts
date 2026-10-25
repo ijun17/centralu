@@ -35,7 +35,7 @@ const base: PeerScript = (method) => {
   return { result: null }
 }
 
-function world(script: PeerScript = base, opts: Partial<CreateSessionOpts> = {}) {
+function world(script: PeerScript = base, opts: Partial<CreateSessionOpts> = {}, withProfile: AcpProfile = profile) {
   const peers: FakeAcpPeer[] = []
   const spawn = () => {
     const p = new FakeAcpPeer(script)
@@ -55,7 +55,7 @@ function world(script: PeerScript = base, opts: Partial<CreateSessionOpts> = {})
     const seen = events.find(pick)
     return seen ? Promise.resolve(seen) : new Promise<NormalizedEvent>((resolve) => waiting.push({ pick, resolve }))
   }
-  const adapter = new FakeAdapter(profile, spawn, 60_000)
+  const adapter = new FakeAdapter(withProfile, spawn, 60_000)
   const start = () => adapter.createSession({ sessionId: 's1', cwd: '/work', permissionPreset: 'normal', projectTrusted: true, ...opts }, emit)
   return { peers, events, event, start, adapter }
 }
@@ -207,6 +207,73 @@ describe('the ACP session against a scripted agent', () => {
     await w.event((e) => e.type === 'tool_call')
     await s.dispose()
     expect(w.events.filter((e) => e.type === 'tool_result')).toMatchObject([{ callId: 'call-1', ok: false }])
+  })
+
+  describe('a tool whose /compact leaves no protocol frame', () => {
+    const inferring: AcpProfile = { ...profile, infersCompaction: true }
+    const end = { result: { stopReason: 'end_turn' } }
+
+    /** One ordinary turn read at `before`, then `text` sent as given, read at `after` */
+    async function compactAfter(text: string, sendOpts: { compact?: boolean }, withProfile: AcpProfile, before = 9_889, after = 429) {
+      const w = world(base, {}, withProfile)
+      const s = await w.start()
+      const peer = w.peers[0]!
+      s.send('first')
+      await peer.next(isPrompt)
+      peer.update(SID, { sessionUpdate: 'usage_update', used: before, size: 200_000 })
+      peer.release('session/prompt', end)
+      await w.event((e) => e.type === 'turn_complete')
+      s.send(text, sendOpts)
+      await peer.next((m) => isPrompt(m) && JSON.stringify(m).includes(text))
+      peer.update(SID, { sessionUpdate: 'usage_update', used: after, size: 200_000 })
+      peer.release('session/prompt', end)
+      await w.event((e) => e.type === 'turn_complete' && w.events.filter((x) => x.type === 'turn_complete').length === 2)
+      return w.events
+    }
+
+    it('marks a compaction at the end of the compact turn Centralu started, when the reading went down', async () => {
+      const events = await compactAfter('/compact', { compact: true }, inferring)
+      expect(events.filter((e) => e.type === 'compaction')).toEqual([{ type: 'compaction', sessionId: 's1', failed: false, trigger: 'manual' }])
+      // Before the turn's end, so the ending event is the compact's
+      expect(events.findIndex((e) => e.type === 'compaction')).toBeLessThan(events.findLastIndex((e) => e.type === 'turn_complete'))
+    })
+
+    it('marks none for the person typing /compact, a reading that did not go down, or a tool that does not infer', async () => {
+      expect((await compactAfter('/compact', {}, inferring)).some((e) => e.type === 'compaction')).toBe(false)
+      expect((await compactAfter('/compact', { compact: true }, inferring, 9_889, 9_950)).some((e) => e.type === 'compaction')).toBe(false)
+      expect((await compactAfter('/compact', { compact: true }, profile)).some((e) => e.type === 'compaction')).toBe(false)
+    })
+  })
+
+  it("says a compaction in protocol frames is manual inside Centralu's compact turn, and auto elsewhere", async () => {
+    const w = world()
+    const s = await w.start()
+    const peer = w.peers[0]!
+    for (const [text, opts] of [['go', {}], ['/compact', { compact: true }]] as const) {
+      s.send(text, opts)
+      await peer.next((m) => isPrompt(m) && JSON.stringify(m).includes(text))
+      peer.update(SID, { sessionUpdate: 'compaction_update', compactionId: text, status: 'completed' })
+      peer.release('session/prompt', { result: { stopReason: 'end_turn' } })
+      await w.event((e) => e.type === 'turn_complete' && w.events.filter((x) => x.type === 'compaction').length === (text === 'go' ? 1 : 2))
+    }
+    expect(w.events.filter((e) => e.type === 'compaction').map((e) => e.type === 'compaction' && e.trigger)).toEqual(['auto', 'manual'])
+  })
+
+  it("takes a turn's cost as what it added to the running total the agent sends, and none for the first turn it reads", async () => {
+    const w = world()
+    const s = await w.start()
+    const peer = w.peers[0]!
+    const usage = { inputTokens: 10, outputTokens: 2, totalTokens: 12 }
+    for (const [text, total] of [['one', 0.1], ['two', 0.25]] as const) {
+      s.send(text)
+      await peer.next((m) => isPrompt(m) && JSON.stringify(m).includes(text))
+      peer.update(SID, { sessionUpdate: 'usage_update', used: 1_000, size: 200_000, cost: { amount: total, currency: 'USD' } })
+      peer.release('session/prompt', { result: { stopReason: 'end_turn', usage } })
+      await w.event((e) => e.type === 'turn_complete' && w.events.filter((x) => x.type === 'usage_update').length === (text === 'one' ? 1 : 2))
+    }
+    const costs = w.events.flatMap((e) => (e.type === 'usage_update' ? [e.tokens.costUsd] : []))
+    expect(costs[0]).toBeUndefined()
+    expect(costs[1]).toBeCloseTo(0.15)
   })
 
   it('closes a process a previous host left (with its open calls), and opens the conversation again in a new one', async () => {
