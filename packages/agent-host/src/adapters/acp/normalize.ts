@@ -128,9 +128,9 @@ export class AcpNormalizer {
     return events
   }
 
-  /** Calls still open when the turn ended: closed as failed, so no card spins forever */
-  endTurn(): NormalizedEvent[] {
-    const events = [...this.open.keys()].map((id) => toolResultEvent(this.sessionId, id, false, '', 'the turn ended before this call finished'))
+  /** Calls still open when the turn ended: closed as failed, so no card spins forever (`why`: what ended them) */
+  endTurn(why = 'the turn ended before this call finished'): NormalizedEvent[] {
+    const events = [...this.open.keys()].map((id) => toolResultEvent(this.sessionId, id, false, '', why))
     this.open.clear()
     this.known.clear()
     this.refused.clear()

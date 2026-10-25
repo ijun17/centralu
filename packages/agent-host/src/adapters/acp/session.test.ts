@@ -197,6 +197,18 @@ describe('the ACP session against a scripted agent', () => {
     expect(w.events.filter((e) => e.type === 'error')).toEqual([])
   })
 
+  it('closes the calls a turn had open when the session is disposed mid-turn, so no card spins after a restart', async () => {
+    const w = world()
+    const s = await w.start()
+    s.send('go')
+    const peer = w.peers[0]!
+    await peer.next(isPrompt)
+    peer.update(SID, { sessionUpdate: 'tool_call', toolCallId: 'call-1', kind: 'execute', title: 'sleep 42', status: 'in_progress', rawInput: { command: 'sleep 42' } })
+    await w.event((e) => e.type === 'tool_call')
+    await s.dispose()
+    expect(w.events.filter((e) => e.type === 'tool_result')).toMatchObject([{ callId: 'call-1', ok: false }])
+  })
+
   it('closes a process a previous host left (with its open calls), and opens the conversation again in a new one', async () => {
     const old = new FakeAcpPeer(base)
     let oldGone = false

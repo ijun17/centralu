@@ -59,6 +59,11 @@ const CANCELLED: PermissionOutcome = { outcome: { outcome: 'cancelled' } }
 
 export class AcpSession implements SessionHandle {
   externalId: string | null = null
+  /**
+   * A process a previous host left is ended and the conversation opened again in a new one (`AcpAdapter`): a turn it was
+   * running is not carried on, so the host ends it as one the restart stopped (`SessionManager.adoptKept`)
+   */
+  readonly takesOverTurn = false
   readonly ready: Promise<void>
   private phase: Phase = 'opening'
   private readonly conn: AcpConnection
@@ -434,6 +439,10 @@ export class AcpSession implements SessionHandle {
     this.phase = 'closed'
     this.closeCards()
     this.dropQueue('were still queued when the session closed')
+    if (turn) {
+      // The calls it had open end with it (#1562 review: a host stopped mid-command left the card spinning after its restart)
+      for (const e of this.normalizer.endTurn('Centralu stopped this session while the call ran')) this.emit(e)
+    }
     if (turn && this.externalId) {
       if (turn.stopTimer) clearTimeout(turn.stopTimer)
       this.conn.notify('session/cancel', { sessionId: this.externalId })

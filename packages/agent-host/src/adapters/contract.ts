@@ -294,6 +294,12 @@ export type InputOrigin = { kind: 'human' } | { kind: 'channel'; server: 'centra
 export interface SessionHandle {
   readonly sessionId: string
   readonly externalId: string | null
+  /**
+   * For a process this host adopted (`ProcessSource.adopt`): false when the adapter could not take over the turn it was
+   * running (it ended that process and reopened the conversation in a new one, ACP), so that turn is over. Absent: the
+   * process is the same one, and its turn goes on (`state_change` `reattached`)
+   */
+  readonly takesOverTurn?: boolean
   /** Limits the parent should know before delegating more work; decided by the adapter's effective settings. */
   delegationNotice?(): string | undefined
   /**

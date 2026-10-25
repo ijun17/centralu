@@ -1134,6 +1134,28 @@ export class SessionManager {
   }
 
   /**
+   * The turn a kept process was running is over after a swap (#698): the session goes idle with the quit mark and its line,
+   * and the report it owed goes now, rather than naming a later turn
+   */
+  private turnLostInSwap(m: SessionInfo): void {
+    // The same statement the window gets, through the same rules (#428)
+    const change = { type: 'state_change' as const, sessionId: m.id, state: 'idle' as const, reason: 'reattach_failed' }
+    this.events.applyStateHint(change, m)
+    this.interruptions.markStoppedByQuit(m, true)
+    this.store.sessions.upsertSession(m)
+    this.emit(change)
+    // Its turn is over: the report it owed says so now, rather than naming a later turn (#698)
+    // Whose the turn was (#1377): the person's is reported to nobody
+    const turnBy = this.children.turnEnded(m.id, null)
+    if (this.children.awaitingReport.has(m.id)) void this.reports.reportBackIfAwaited(m.id, { type: 'state_change', sessionId: m.id, state: 'idle' }, undefined, undefined, turnBy)
+    else {
+      if (turnBy.by !== 'person') void this.reports.tellAskerOfInterruption(m.id, this.children.turnOwners.get(m.id)?.callerId)
+      // The work the person owns: the same end, in their Inbox (§8.1)
+      void this.reports.reportToPersonIfOwed(m.id, { type: 'state_change', sessionId: m.id, state: 'idle' }, undefined, turnBy)
+    }
+  }
+
+  /**
    * Re-attaches the tool processes a previous host left running in the keeper (#280 step 2), so
    * those sessions come back live — mid-turn, with a waiting approval re-delivered by the tool —
    * instead of interrupted. Runs through `resumeSession`, so a screen asking to wake the same session
@@ -1154,26 +1176,14 @@ export class SessionManager {
         const r = await this.resumeSession(k.sessionId, k.process).catch((err: Error) => ({ resumed: false, reason: err.message }))
         const adopted = r.resumed ? this.handles.get(k.sessionId) : undefined
         if (adopted) this.adoptedProcesses.add(adopted)
+        // Reopened in a new process rather than taken over (ACP, #1562 review): the turn it ran is over, as if not re-attached
+        if (adopted?.takesOverTurn === false && inTurn(m.state)) this.turnLostInSwap(m)
         // A request queued for it under the old host goes in now if its turn ended during the swap (#677)
         if (this.children.queued.has(k.sessionId)) this.queue.scheduleDrain(k.sessionId)
         if (!r.resumed) {
           console.error(`[agent-host] could not re-attach ${k.sessionId.slice(0, 8)}: ${r.reason ?? 'unknown'}`)
           if (inTurn(m.state)) {
-            // The same statement the window gets, through the same rules (#428)
-            const change = { type: 'state_change' as const, sessionId: m.id, state: 'idle' as const, reason: 'reattach_failed' }
-            this.events.applyStateHint(change, m)
-            this.interruptions.markStoppedByQuit(m, true)
-            this.store.sessions.upsertSession(m)
-            this.emit(change)
-            // Its turn is over: the report it owed says so now, rather than naming a later turn (#698)
-            // Whose the turn was (#1377): the person's is reported to nobody
-            const turnBy = this.children.turnEnded(m.id, null)
-            if (this.children.awaitingReport.has(m.id)) void this.reports.reportBackIfAwaited(m.id, { type: 'state_change', sessionId: m.id, state: 'idle' }, undefined, undefined, turnBy)
-            else {
-              if (turnBy.by !== 'person') void this.reports.tellAskerOfInterruption(m.id, this.children.turnOwners.get(m.id)?.callerId)
-              // The work the person owns: the same end, in their Inbox (§8.1)
-              void this.reports.reportToPersonIfOwed(m.id, { type: 'state_change', sessionId: m.id, state: 'idle' }, undefined, turnBy)
-            }
+            this.turnLostInSwap(m)
           } else if (this.children.pausedReports.has(m.id)) {
             // The background work its report waited on went with the process (#721): the work stopped
             void this.reports.reportBackIfAwaited(m.id, { type: 'state_change', sessionId: m.id, state: 'idle' })
