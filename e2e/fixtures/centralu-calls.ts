@@ -61,5 +61,41 @@ export function centraluCallTests(): void {
       await centralu.getByTestId('centralu-call-open').click()
       await expect.poll(() => page.evaluate(() => (window as any).__store.getState().focusedSessionId)).toBe(child)
     })
+
+    test('a failed agent step says why, and its mark never overlaps the session pill (#1544)', async ({ page }) => {
+      await setup(page, ['/tmp/consumer'])
+      const child = await newSession(page, 'consumer')
+      const parent = await newSession(page, 'consumer')
+      await emit(page, child, { type: 'session_title', title: 'Release without bump PR (design review of the long name)', auto: false })
+      await emit(page, parent, { type: 'state_change', state: 'working' })
+      await emit(page, parent, {
+        type: 'tool_call',
+        callId: 'call-send',
+        summary: {
+          tool: 'mcp__centralu__agent_session',
+          title: 'Good. Merge the release PR now and tell me when it is done',
+          paths: [],
+          centralu: { tool: 'agent_session', label: 'Sent more to an agent', sessionId: child },
+        },
+      })
+      await emit(page, parent, {
+        type: 'tool_result',
+        callId: 'call-send',
+        ok: false,
+        summary: 'The session "Release" is busy with a turn that is not yours (working). Nothing was sent.',
+      })
+      const card = page.getByTestId('tool-card').first()
+      for (const width of [1280, 900, 480]) {
+        await page.setViewportSize({ width, height: 800 })
+        const mark = card.getByTestId('centralu-call-failed')
+        const pill = card.getByTestId('centralu-call-open')
+        await expect(mark).toBeVisible()
+        await expect(pill).toBeVisible()
+        const [a, b] = await Promise.all([mark.boundingBox(), pill.boundingBox()])
+        const apart = a!.x + a!.width <= b!.x + 0.5 || b!.x + b!.width <= a!.x + 0.5 || a!.y + a!.height <= b!.y + 0.5 || b!.y + b!.height <= a!.y + 0.5
+        expect(apart, `at ${width}px the failed mark ${JSON.stringify(a)} overlaps the pill ${JSON.stringify(b)}`).toBe(true)
+      }
+      await expect(card.getByTestId('centralu-call-reason')).toContainText('busy with a turn')
+    })
   })
 }

@@ -305,7 +305,7 @@ describe('ChatRow: rows that point elsewhere', () => {
 
   it('tells a refusal, a session still working and the other project state apart', () => {
     const refused = row(tool({ tool: 'ask_project', title: 'ask_project', result: 'No such project', ok: false }))
-    expect(refused.text).toBe('Asked another project did not finish')
+    expect(refused.text).toBe('Asked another project did not finish No such project')
     expect(refused.html).toContain('border-dashed')
     state = { sessions: { d1: session('d1', { projectId: 'p2' }) } }
     // The host's wording (orchestrator-tools.ts): the session's name and id, then the project
@@ -383,6 +383,22 @@ describe("ChatRow: Centralu's own tool calls (#730)", () => {
     expect(text).toBe('Started an agent write the parser (codex, heavy) Parser →')
     expect(text).not.toContain('mcp__centralu__start_agent')
     expect(html).toContain('title="Open Parser"')
+  })
+
+  it('says why a failed call failed in the host\'s first sentence, and lets the label give way (#1544)', () => {
+    state = { sessions: { c1: session('c1', { name: 'Parser' }) } }
+    const { html, text } = row(
+      tool({
+        tool: 'mcp__centralu__agent_session',
+        title: 'Good. Merge it',
+        centralu: { tool: 'agent_session', label: 'Sent more to an agent', sessionId: 'c1' },
+        result: 'The session "Parser" is busy with a turn that is not yours (working). Nothing was sent.\nSecond line.',
+        ok: false,
+      }),
+    )
+    expect(text).toBe('Sent more to an agent Failed Good. Merge it The session "Parser" is busy with a turn that is not yours (working). Parser →')
+    // The label truncates instead of pushing the mark over the chip
+    expect(html).toMatch(/min-w-0 truncate[^"]*"[^>]*data-testid="centralu-call-label"/)
   })
 
   it('reads a Claude name an older host stored without the mark, and gives no link to the session it is in', () => {

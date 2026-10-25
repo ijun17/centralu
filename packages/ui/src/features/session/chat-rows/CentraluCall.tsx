@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { centraluCallLabel, centraluCallTitle, type ToolSummary } from '@cc/protocol'
 import { useStore, type ChatItem } from '../../../store/store.js'
+import { Pill } from '../../../components/Pill.jsx'
 import { AppIcon, CentraluMarkIcon, ChevronIcon } from '../../../components/icons.jsx'
 
 type ToolItem = Extract<ChatItem, { kind: 'tool' }>
@@ -66,6 +67,17 @@ function askStatus(item: ToolItem, session: { state: string } | undefined): stri
 }
 
 /**
+ * Why a failed call failed, in the host's own words: the first sentence of its answer, cut short. The rest of the answer
+ * is in the card once opened (#1544: the row said only that the call failed).
+ */
+export function failureReason(result: string | undefined): string | null {
+  const first = result?.trim().split('\n')[0]?.trim()
+  if (!first) return null
+  const sentence = first.match(/^.*?[.!?](?=\s|$)/)?.[0] ?? first
+  return sentence.length > 160 ? `${sentence.slice(0, 159)}…` : sentence
+}
+
+/**
  * The title row of a call to Centralu's own tools (#730): the Centralu mark (an app's window icon and name for an app's
  * tool) and what the call did in words, where an ordinary card shows the raw tool name; the argument the call is
  * followed by; and the way to the session it names. The person most wants to follow these calls: they are where an
@@ -99,6 +111,7 @@ export function CentraluCallHeader({
   const focus = useStore((s) => s.focusSession)
   const running = item.result === undefined && item.ok === undefined
   const status = ask ? askStatus(item, named) : null
+  const reason = item.ok === false ? failureReason(item.result) : null
   return (
     <div className="flex w-full items-center gap-2 py-2 pl-2.5 pr-2">
       <button
@@ -117,9 +130,9 @@ export function CentraluCallHeader({
         </span>
         <span className="min-w-0 flex-1">
           <span className="flex items-baseline gap-1.5">
-            {/* A project's name is the person's own and may be long: it gives way before the status does */}
+            {/* A project's name is the person's own and may be long, and a narrow card has little room: the words give way before the mark and the session chip do */}
             <span
-              className={`${ask ? 'min-w-0 truncate' : 'shrink-0'} text-sm font-medium text-ink`}
+              className="min-w-0 truncate text-sm font-medium text-ink"
               data-testid="centralu-call-label"
             >
               {label}
@@ -134,13 +147,22 @@ export function CentraluCallHeader({
             ) : (
               <>
                 {running && <span className="readout shrink-0 text-2xs text-ink-faint" data-testid="centralu-call-running">running…</span>}
-                {item.ok === false && <span className="shrink-0 text-2xs text-ink-muted" data-testid="centralu-call-failed">failed</span>}
+                {item.ok === false && (
+                  <Pill edge="quiet" size="label" tone="muted" data-testid="centralu-call-failed">
+                    Failed
+                  </Pill>
+                )}
               </>
             )}
           </span>
           {title && (
             <span className="mt-0.5 block truncate text-xs text-ink-muted" data-testid="tool-card-title">
               {title}
+            </span>
+          )}
+          {reason && (
+            <span className="mt-0.5 line-clamp-2 block text-xs text-ink-muted" data-testid="centralu-call-reason">
+              {reason}
             </span>
           )}
         </span>
