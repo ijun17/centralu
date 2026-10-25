@@ -1,14 +1,10 @@
 import { z } from 'zod'
 import { GitSource } from './git.js'
-import { AppId } from './ids.js'
+import { AppId, PermissionPreset } from './ids.js'
 import { AgentDifficulty } from './tools.js'
 
-/**
- * Permission preset — overrides the CLI's global setting on a per-session basis (validated at M0). In rank order,
- * lowest first. `edits` (#1525) is `normal` plus edits inside the session's folder without a card.
- */
-export const PermissionPreset = z.enum(['safe', 'normal', 'edits', 'auto'])
-export type PermissionPreset = z.infer<typeof PermissionPreset>
+/** Defined beside the ids, so `tools.ts` (which this file imports) can name it too without an import cycle */
+export { PermissionPreset } from './ids.js'
 
 export const ApprovalDecision = z.enum(['allow', 'deny', 'always'])
 export type ApprovalDecision = z.infer<typeof ApprovalDecision>

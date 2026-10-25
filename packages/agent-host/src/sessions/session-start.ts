@@ -2,8 +2,8 @@ import { scriptMessageFrame } from './script-messages.js'
 import { randomUUID } from 'node:crypto'
 import type { BackgroundTask, CreateSessionParams, SessionInfo, ToolName } from '@cc/protocol'
 import { autoCompactPlan } from './auto-compact.js'
-import { autoCompactOf, sessionLiveDefaults } from '@cc/protocol'
-import type { AgentProcess, AgentSpawnSpec, CreateSessionOpts, EventSink, OrchestratorTools, ProcessSource, RequestTurn, SessionApps, SessionHandle } from '../adapters/contract.js'
+import { autoCompactOf, launchRefusal, sessionLiveDefaults } from '@cc/protocol'
+import type { AgentAdapter, AgentProcess, AgentSpawnSpec, CreateSessionOpts, EventSink, OrchestratorTools, ProcessSource, RequestTurn, SessionApps, SessionHandle } from '../adapters/contract.js'
 import type { ToolProfile } from '../apps/contract.js'
 import type { AppRef } from '../apps/external/runtime.js'
 import type { Worktree } from '../dev-services/git-worktree.js'
@@ -307,7 +307,8 @@ export class SessionStarts {
         ...(params.lsp !== undefined ? { lsp: params.lsp } : {}),
       })
       const from = this.host.handleSink()
-      handle = await adapter.createSession(
+      handle = await startFit(
+        adapter,
         this.launchOptions(info, {
           tool: params.tool, cwd, model: params.model, effort: params.effort,
           verbosity: params.verbosity,
@@ -791,7 +792,8 @@ export class SessionStarts {
     // What the previous host saw running in the process this one adopts (#648); null when it kept no list
     const kept = adopt ? this.host.launches.keptBackgroundTasks(sessionId) : null
     try {
-      const creating = adapter.createSession(
+      const creating = startFit(
+        adapter,
         this.launchOptions(m, {
           tool,
           cwd,
@@ -969,4 +971,19 @@ export class SessionStarts {
       return { session: m, resumed: false, reason: (err as Error).message, lockedElsewhere: locked || undefined }
     }
   }
+}
+
+/**
+ * The tool's session, unless the launch asks what the tool declared it cannot keep (`launchRefusal`): then it is refused
+ * before any process starts. Every start and wake passes here, so the host is the gate whatever path asked (a picker,
+ * start_agent, an app's agent, a fork, a handoff); a picker greys the tool with the same words.
+ */
+function startFit(adapter: AgentAdapter, opts: CreateSessionOpts, sink: EventSink): Promise<SessionHandle> {
+  const reason = launchRefusal(adapter.capabilities, adapter.descriptor.label, {
+    permissionPreset: opts.permissionPreset,
+    projectTrusted: opts.projectTrusted,
+    noSettingFiles: opts.noSettingFiles,
+    roleText: !!opts.systemPromptAppend,
+  })
+  return reason ? Promise.reject(rpcError(reason, 'refused', { retryable: false, data: { reason: 'tool_unfit' } })) : adapter.createSession(opts, sink)
 }
