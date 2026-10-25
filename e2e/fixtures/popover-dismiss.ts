@@ -59,6 +59,22 @@ export function popoverDismissTests(): void {
       expect(await focusedTestId(page)).toBe('project-menu-alpha')
     })
 
+    test('Tab goes from the button into the sidebar menu, and Shift+Tab back (the menu is drawn into the body, #1531)', async ({ page }) => {
+      await setup(page, ['/tmp/alpha'])
+      await page.getByTestId('project-menu-alpha').focus()
+      await page.keyboard.press('Enter')
+      await expect(page.getByTestId('project-menu-open-alpha')).toBeVisible()
+      await page.keyboard.press('Tab')
+      expect(await focusedTestId(page)).toBe('new-session-alpha')
+      await page.keyboard.press('Tab')
+      expect(await focusedTestId(page)).not.toBe('project-menu-alpha')
+      await page.keyboard.press('Shift+Tab')
+      expect(await focusedTestId(page)).toBe('new-session-alpha')
+      await page.keyboard.press('Shift+Tab')
+      expect(await focusedTestId(page)).toBe('project-menu-alpha')
+      await expect(page.getByTestId('project-menu-open-alpha')).toBeVisible()
+    })
+
     test('the sidebar menu closes when the window loses focus', async ({ page }) => {
       await setup(page, ['/tmp/alpha'])
       await page.getByTestId('project-menu-alpha').click()

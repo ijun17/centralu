@@ -1,7 +1,8 @@
-import { useRef, type ReactNode } from 'react'
+import { useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useAnchoredPlacement } from '../../../components/anchored.js'
 import { useDismiss } from '../../../components/useDismiss.js'
+import { SIDEBAR_VARS } from '../layout.js'
 
 /**
  * The shared shell for sidebar row menus — placement (zoom compensation, flipping, edge handling)
@@ -55,7 +56,33 @@ export function RowMenu({
    * The trigger is inside `refs`: its click toggles the menu (`setMenuOpen(v => !v)`), so pressing it must not also count as
    * a press outside, or the menu closes on mousedown and the click opens it again.
    */
-  useDismiss({ onClose, refs: [ref, { current: anchorEl }], returnFocusTo: anchorEl?.querySelector('button') ?? anchorEl })
+  const trigger = anchorEl?.querySelector('button') ?? anchorEl
+  useDismiss({ onClose, refs: [ref, { current: anchorEl }], returnFocusTo: trigger })
+
+  /*
+   * **Tab goes from the button into the menu, and Shift+Tab comes back** (#1531 review). The menu used to stand in the
+   * DOM right after its button, so Tab from the button reached its first row. Drawn into the body it is the last thing in
+   * the page, and Tab went on to the next control of the sidebar with the menu left open, out of the keyboard's reach. The
+   * order the document no longer gives is given here.
+   */
+  const firstItem = (): HTMLElement | null => ref.current?.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)') ?? null
+  useEffect(() => {
+    if (!trigger) return
+    const into = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab' || e.shiftKey || e.target !== trigger) return
+      const first = firstItem()
+      if (!first) return
+      e.preventDefault()
+      first.focus()
+    }
+    trigger.addEventListener('keydown', into)
+    return () => trigger.removeEventListener('keydown', into)
+  }, [trigger])
+  const back = (e: ReactKeyboardEvent) => {
+    if (e.key !== 'Tab' || !e.shiftKey || e.target !== firstItem() || !(trigger instanceof HTMLElement)) return
+    e.preventDefault()
+    trigger.focus()
+  }
 
   /*
    * **Drawn into the body, not inside the row that opened it** (#1531). `position: fixed` frees a box from clipping, not
@@ -69,8 +96,11 @@ export function RowMenu({
       ref={ref}
       role="menu"
       data-testid={testId}
+      onKeyDown={back}
       className={`fixed z-30 ${className} overflow-y-auto rounded-lg border border-line bg-surface-raised p-1 shadow-(--shadow-popover)`}
       style={{
+        // The sidebar's own line colour (SIDEBAR_VARS), which a menu drawn into the body no longer inherits
+        ...SIDEBAR_VARS,
         top: place?.top ?? 0,
         left: place?.left ?? 0,
         maxHeight: place?.maxHeight,

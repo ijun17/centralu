@@ -229,6 +229,9 @@ export function sidebarMachinesTests(): void {
       await expect(menu).toBeVisible()
       // The menu and every ancestor of it are fully opaque: an ancestor's opacity multiplies into everything inside it
       expect((await opacities(menu)).every((o) => o === 1)).toBe(true)
+      // Drawn into the body it still wears the sidebar's line colour, as it did inside it
+      const line = (id: string) => page.getByTestId(id).evaluate((el) => getComputedStyle(el).getPropertyValue('--color-line').trim())
+      expect(await line('project-menu-open-api')).toBe(await line('sidebar'))
       await page.keyboard.press('Escape')
       await expect(menu).toHaveCount(0)
 
