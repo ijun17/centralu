@@ -441,7 +441,7 @@ the git work; `onConflict` in `queue-driver.mjs` decides, once per head.
   by a session; the new head runs CI before it lands. The procedure's refusals (the lower one not merged,
   built on an older version of it, a replay that conflicts, a moved branch, no checkout) hand it to the
   author as above, with the refusal in the text. A remote that cannot be reached (a fetch or the push fails on the
-  network: `isNetworkFailure`, git.mjs) is not a refusal: it is thrown as a network error, which pauses the queue and tries
+  network: `isNetworkFailure`, git.mjs: a lookup, connection or timeout failure, a dropped transfer or a 5xx/408/429, never a 403/404, a certificate or an authentication failure, which say the same next time and go to the author) is not a refusal: it is thrown as a network error, which pauses the queue and tries
   the item again, and `rebase_stack` itself answers it as an error rather than "nothing was pushed". Event `conflict`, step `restack`.
 - **The front of the queue**: a pull request fixed after a conflict (a new head that no longer
   conflicts, the queue's push or a session's, or queued again after one) gets `front`, and goes

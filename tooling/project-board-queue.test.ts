@@ -26,6 +26,8 @@ import { attributeByPaths, carried, mainVerdict, nextStep, sortCommits } from '.
 // @ts-expect-error — plain .mjs of a Centralu app
 import { classifyRun, looksLikeNetworkError, onFlakyList } from '../.centralu/apps/project-board/run-failure.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
+import { GitError, isNetworkFailure } from '../.centralu/apps/project-board/git.mjs'
+// @ts-expect-error — plain .mjs of a Centralu app
 import { batchCandidates, decideLanding, endBatch, formBatch, gathering, markBatchless, onlyCancelledByBatch, splitBatch } from '../.centralu/apps/project-board/batch.mjs'
 
 /**
@@ -210,6 +212,36 @@ describe('what the merge queue decides for one poll', () => {
       '',
     ])
       expect(looksLikeNetworkError(text), text).toBe(false)
+  })
+
+  // The restack pauses the queue and tries again for these; a failure that says the same next time goes to the author
+  it('tells git being unable to reach the remote from git being refused by it: only the first is tried again', () => {
+    const git = (stderr: string) => new GitError(`git failed: ${stderr}`, stderr, 128)
+    for (const stderr of [
+      "fatal: unable to access 'https://github.com/x/y.git/': Could not resolve host: github.com",
+      "fatal: unable to access 'https://github.com/x/y.git/': Failed to connect to github.com port 443 after 21034 ms: Couldn't connect to server",
+      "fatal: unable to access 'https://github.com/x/y.git/': Connection timed out after 300001 milliseconds",
+      "fatal: unable to access 'https://github.com/x/y.git/': Recv failure: Connection reset by peer",
+      "fatal: unable to access 'https://github.com/x/y.git/': The requested URL returned error: 502",
+      "fatal: unable to access 'https://github.com/x/y.git/': The requested URL returned error: 429",
+      'error: RPC failed; curl 56 Recv failure: Connection was reset\nfatal: the remote end hung up unexpectedly',
+      'ssh: connect to host github.com port 22: Connection timed out\nfatal: Could not read from remote repository.',
+      'fatal: early EOF',
+    ])
+      expect(isNetworkFailure(git(stderr)), stderr).toBe(true)
+    for (const stderr of [
+      "fatal: unable to access 'https://github.com/x/y.git/': The requested URL returned error: 403",
+      "fatal: unable to access 'https://github.com/x/y.git/': The requested URL returned error: 404",
+      "fatal: unable to access 'https://github.com/x/y.git/': SSL certificate problem: unable to get local issuer certificate",
+      "fatal: unable to access 'https://github.com/x/y.git/': SSL: no alternative certificate subject name matches target host name 'github.com'",
+      'git@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights',
+      "fatal: Authentication failed for 'https://github.com/x/y.git/'",
+      'error: failed to push some refs to x\nhint: Updates were rejected because the tip of your current branch is behind',
+      'error: cannot lock ref: is at abc but expected def',
+    ])
+      expect(isNetworkFailure(git(stderr)), stderr).toBe(false)
+    // Not a git failure at all
+    expect(isNetworkFailure(new Error('Could not resolve host'))).toBe(false)
   })
 
   it("calls a job that failed in a step that sets it up an infrastructure failure, and one that failed in a test step a real one", () => {
@@ -1505,9 +1537,17 @@ describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, (
     expect(q.queue[0].reason.kind).toMatch(/failed|failing/)
   })
 
-  it("does not take a test's own print of the shutdown text for the runner's: only the runner's line, at the start of a line, with its cancellation after it", async () => {
-    const said = '##[error]The runner has received a shutdown signal. This can happen when the runner service is stopped, or a manually started runner is canceled.'
-    const printed = ['##[group]Run pnpm test', `    ${said}`, ' FAIL  unit  packages/a/a.test.ts > prints a log > is read', '##[error]Process completed with exit code 1.', '##[error]The operation was canceled.'].join('\n')
+  // The job carries only the runner's cancellation note, so jobNotes reads the log; each log below has a line that looks
+  // like the runner's and is not, and each of the three rules (start of line, exact case, cancellation after it) is the
+  // only thing that tells it apart
+  const said = '##[error]The runner has received a shutdown signal. This can happen when the runner service is stopped, or a manually started runner is canceled.'
+  const failure = [' FAIL  unit  packages/a/a.test.ts > prints a log > is read', '##[error]Process completed with exit code 1.']
+  it.each([
+    ['a test printed it, indented', ['##[group]Run pnpm test', `    ${said}`, ...failure, '##[error]The operation was canceled.']],
+    ['a test printed it in another case, at the start of a line', ['##[group]Run pnpm test', said.replace('The runner has received', 'the runner has received'), ...failure, '##[error]The operation was canceled.']],
+    ['the line is the runner\'s but nothing says the step was cancelled after it', ['##[group]Run pnpm test', said, ...failure]],
+  ])("does not take a look-alike for the runner's shutdown (%s)", async (_why, lines) => {
+    const printed = lines.join('\n')
     runtime(shutDown({ logs: { '12': printed } }))
     await call('queue_merge', { pr: 77, owner: 'tester' })
     const q = await until((x) => stateOf(x) === 'attention', 'attention')
