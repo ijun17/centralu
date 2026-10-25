@@ -14,6 +14,7 @@ import { SessionManager } from './manager.js'
 import { createRpcHandler } from '../rpc.js'
 import { FakeAdapter, managerWorld } from './manager.test-helpers.js'
 import { lineageLine } from './handoff-record.js'
+import { canSymlink, itSymlink, linkDir } from '../link.test-helpers.js'
 
 let store: Store
 let adapter: FakeAdapter
@@ -306,6 +307,7 @@ describe('a handoff note lives in the data folder (#142)', () => {
     data = mkdtempSync(join(tmpdir(), 'cc-142-data-'))
     vi.stubEnv('CC_DATA_DIR', data)
     // A real repository — commits README.md and a `.centralu/handoff` link pointing at the repository root.
+    // (the link is a tracked symlink to an ancestor, which a junction cannot stand in for: git would walk into it)
     repo = realpathSync(mkdtempSync(join(tmpdir(), 'cc-142-repo-')))
     outside = realpathSync(mkdtempSync(join(tmpdir(), 'cc-142-outside-')))
     const git = (...a: string[]) => execFileSync('git', a, { cwd: repo, stdio: 'pipe' })
@@ -313,7 +315,7 @@ describe('a handoff note lives in the data folder (#142)', () => {
     writeFileSync(join(repo, 'README.md'), '# User README\n')
     writeFileSync(join(repo, 'CHANGELOG.md'), '# User changelog\n')
     mkdirSync(join(repo, '.centralu'))
-    symlinkSync('..', join(repo, '.centralu', 'handoff'))
+    if (canSymlink) symlinkSync('..', join(repo, '.centralu', 'handoff'))
     git('add', '-A')
     git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'init')
     writeFileSync(join(outside, 'NOTES.md'), 'a note outside the repository')
@@ -325,7 +327,7 @@ describe('a handoff note lives in the data folder (#142)', () => {
   const status = () => execFileSync('git', ['status', '--porcelain'], { cwd: repo, encoding: 'utf8' })
   const repoFiles = () => ['README.md', 'CHANGELOG.md'].map((f) => existsSync(join(repo, f)))
 
-  it("startup cleanup and session deletion do not follow the link and delete files in the user's repository", async () => {
+  itSymlink("startup cleanup and session deletion do not follow the link and delete files in the user's repository", async () => {
     const p = (await rpc('projects.add', { path: repo })) as { id: string }
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: repo, tool: 'claude' })) as SessionInfo
     // Exactly the shape the old cleanup used to delete: a `*.md` named anything but a session id — both at
@@ -343,14 +345,14 @@ describe('a handoff note lives in the data folder (#142)', () => {
     // Session deletion triggers cleanup too — the same holds even when the link points outside the
     // repository.
     rmSync(join(repo, '.centralu', 'handoff'))
-    symlinkSync(outside, join(repo, '.centralu', 'handoff'))
+    linkDir(outside, join(repo, '.centralu', 'handoff'))
     await mgr.trashSession(s.id)
     await mgr.purgeSession(s.id)
     expect(repoFiles()).toEqual([true, true])
     expect(readdirSync(outside)).toEqual(['NOTES.md'])
   })
 
-  it('both record mode and agent mode write to the same location (the data folder), and nothing is written to the repository', async () => {
+  itSymlink('both record mode and agent mode write to the same location (the data folder), and nothing is written to the repository', async () => {
     const p = (await rpc('projects.add', { path: repo })) as { id: string }
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: repo, tool: 'claude' })) as SessionInfo
     const expected = join(data, 'handoff', p.id, `${s.id}.md`)
@@ -381,7 +383,7 @@ describe('a handoff note lives in the data folder (#142)', () => {
     expect(readdirSync(repo).sort()).toEqual(['.centralu', '.git', 'CHANGELOG.md', 'README.md'])
   })
 
-  it('a successor is granted read access to the note folder — at creation and on wake-up, only for a session that inherited one', async () => {
+  itSymlink('a successor is granted read access to the note folder — at creation and on wake-up, only for a session that inherited one', async () => {
     const p = (await rpc('projects.add', { path: repo })) as { id: string }
     const dying = (await rpc('agents.createSession', { projectId: p.id, cwd: repo, tool: 'claude' })) as SessionInfo
     expect(adapter.lastOpts?.readableDirs).toBeUndefined() // A session that did not inherit anything gets nothing extra.

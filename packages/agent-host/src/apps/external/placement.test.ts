@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { AppFolderTaken, appFolderTaken, nameTaken, placeAppFolder } from './placement.js'
 import { ExternalApps } from './runtime.js'
 import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
+import { linkDir } from '../../link.test-helpers.js'
 
 /**
  * Where an app folder is placed (`placement.ts`) — every door that writes a new app folder goes
@@ -35,13 +36,13 @@ const server = { command: process.execPath, args: ['server.mjs'] }
 
 describe('a new user-folder app is placed through the path guard', () => {
   it('an approved MCP server is refused when the data folder\'s apps/ is a link pointing outside it — nothing is written there', () => {
-    symlinkSync(outside, join(dataRoot, 'apps'))
+    linkDir(outside, join(dataRoot, 'apps'))
     expect(() => rt.installUserApp({ id: 'db', name: 'db', description: 'a server', server })).toThrow(/Could not write the app folder/)
     expect(readdirSync(outside)).toEqual([])
   })
 
   it('a new app from the template is refused the same way', () => {
-    symlinkSync(outside, join(dataRoot, 'apps'))
+    linkDir(outside, join(dataRoot, 'apps'))
     expect(() => rt.createApp({ projectId: null, id: 'notes', name: 'Notes' })).toThrow(/Could not make the app folder/)
     expect(readdirSync(outside)).toEqual([])
   })

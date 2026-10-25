@@ -10,6 +10,7 @@ import { SessionManager } from './manager.js'
 import { projectsHome } from '../dev-services/project-folder.js'
 import { CrossAdapter } from './cross-project.test-helpers.js'
 import { eventually } from '../../../../tooling/test-timing.js'
+import { itSymlink } from '../link.test-helpers.js'
 
 /**
  * Making a new project (#515): `projects.create` from a dialog, and the orchestrator's create_project behind an approval
@@ -97,7 +98,7 @@ describe('projects.create', () => {
     await expect(rpc('projects.create', { name: 'x', parent: 'code' })).rejects.toThrow(/full path/)
   })
 
-  it('never reuses what is there: a folder, a file or a broken link of that name is refused, and left as it was', async () => {
+  itSymlink('never reuses what is there: a folder, a file or a broken link of that name is refused, and left as it was', async () => {
     mkdirSync(centralu)
     mkdirSync(join(centralu, 'taken'))
     writeFileSync(join(centralu, 'taken', 'keep.txt'), 'mine')

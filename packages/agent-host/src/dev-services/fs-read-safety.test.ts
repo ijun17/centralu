@@ -1,9 +1,10 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtemp, mkdir, realpath, rename, rm, symlink, writeFile, type FileHandle } from 'node:fs/promises'
+import { mkdtemp, mkdir, realpath, rename, rm, writeFile, type FileHandle } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi, type MockInstance } from 'vitest'
 import { readTextFile, resolveExisting } from './fs.js'
+import { linkDirAsync } from '../link.test-helpers.js'
 
 const hooks = vi.hoisted((): {
   beforeOpen?: () => Promise<void>
@@ -52,7 +53,7 @@ afterEach(async () => {
 it('rejects an opened object changed after validation without reading its contents', async () => {
   hooks.beforeOpen = async () => {
     await rename(join(root, 'dir'), join(root, 'saved-dir'))
-    await symlink(join(fixture, 'outside'), join(root, 'dir'), 'dir')
+    await linkDirAsync(join(fixture, 'outside'), join(root, 'dir'))
   }
   await expect(readTextFile(root, 'dir/file.txt')).rejects.toThrow(/changed/i)
   expect(hooks.read).not.toHaveBeenCalled()
@@ -70,7 +71,7 @@ it.skipIf(process.platform === 'win32')('rejects a FIFO before opening or waitin
 
 it('returns canonical paths for project-root aliases before native handoff', async () => {
   const alias = join(fixture, 'project-alias')
-  await symlink(root, alias, 'dir')
+  await linkDirAsync(root, alias)
   expect(await resolveExisting(alias, 'dir/file.txt')).toBe(await realpath(join(root, 'dir/file.txt')))
 })
 
@@ -79,7 +80,7 @@ it('rejects a target redirected outside the project during canonical resolution'
     if (path !== join(root, 'dir/file.txt')) return
     delete hooks.beforeRealpath
     await rename(join(root, 'dir'), join(root, 'saved-dir'))
-    await symlink(join(fixture, 'outside'), join(root, 'dir'), 'dir')
+    await linkDirAsync(join(fixture, 'outside'), join(root, 'dir'))
   }
   await expect(resolveExisting(root, 'dir/file.txt')).rejects.toThrow(/outside the project|changed/i)
 })

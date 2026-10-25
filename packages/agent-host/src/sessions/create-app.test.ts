@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -12,6 +12,7 @@ import { createRpcHandler } from '../rpc.js'
 import { SessionManager } from './manager.js'
 import { DEFAULT_RARE_TIER, profileAllows, setRareTier } from './orchestrator-tools.js'
 import { eventually } from '../../../../tooling/test-timing.js'
+import { linkDir } from '../link.test-helpers.js'
 
 /**
  * Creating a new app (M4 C-1b) — whether the `apps.create` RPC and the orchestrator's `create_app`
@@ -181,7 +182,7 @@ describe('apps.create', () => {
   it('does not create if a project\'s .centralu is a link pointing outside its repository — writes nothing outside it', async () => {
     const outside = join(root, 'outside')
     mkdirSync(outside)
-    symlinkSync(outside, join(repo, '.centralu'))
+    linkDir(outside, join(repo, '.centralu'))
     await expect(create({ projectId, id: 'escape', name: 'Escape' })).rejects.toThrow(/Could not make the app folder/)
     expect(readdirSync(outside)).toEqual([])
   })

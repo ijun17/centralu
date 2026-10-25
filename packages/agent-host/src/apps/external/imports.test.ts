@@ -12,6 +12,7 @@ import { until } from './test-helpers.js'
 import { makeZip } from './zip.test-helpers.js'
 import { readZipEntries } from './zip.js'
 import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
+import { itSymlink, linkDir } from '../../link.test-helpers.js'
 
 const fileIds = vi.hoisted(() => new Map<string, bigint>())
 /** Folders whose listing fails (EMFILE), and how often each was listed */
@@ -728,7 +729,7 @@ describe('what never gets brought in', () => {
     expect(stagingLeft()).toEqual([])
   })
 
-  it('a link inside the folder that points outside is refused (stating what it points at), and a link pointing inside is never moved', async () => {
+  itSymlink('a link inside the folder that points outside is refused (stating what it points at), and a link pointing inside is never moved', async () => {
     make()
     const outside = join(root, 'outside')
     mkdirSync(outside)
@@ -740,7 +741,7 @@ describe('what never gets brought in', () => {
       `lib/key is a link to ${realpathSync.native(join(outside, 'id_rsa'))}, outside the folder. Links are not followed; remove it and import again`,
     )
     rmSync(join(dir, 'lib', 'key'))
-    symlinkSync(outside, join(dir, 'escape-dir'))
+    linkDir(outside, join(dir, 'escape-dir'))
     expect(await refusal(rt.prepareImport(dir))).toContain('escape-dir is a link to')
     rmSync(join(dir, 'escape-dir'))
     symlinkSync('real.mjs', join(dir, 'lib', 'alias.mjs'))

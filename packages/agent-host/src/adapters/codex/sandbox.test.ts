@@ -1,7 +1,8 @@
-import { mkdirSync, symlinkSync } from 'node:fs'
+import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fixtureGit, removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
+import { linkDir } from '../../link.test-helpers.js'
 
 const state = vi.hoisted(() => ({
   requests: [] as { method: string; params?: Record<string, unknown> }[],
@@ -81,7 +82,7 @@ describe('Codex worktree sandbox (#582)', () => {
 
   it('resolves a worktree reached through a symlink, including a cwd below its root', async () => {
     mkdirSync(join(worktree, 'package'))
-    symlinkSync(worktree, join(root, 'alias'), 'dir')
+    linkDir(worktree, join(root, 'alias'))
     const h = await new CodexAdapter().createSession({ sessionId: 's1', cwd: join(root, 'alias', 'package'), permissionPreset: 'auto' }, () => {})
     expect(state.requests.find((r) => r.method === 'thread/start')!.params!.config).toMatchObject({
       'sandbox_workspace_write.writable_roots': [join(main, '.git')],

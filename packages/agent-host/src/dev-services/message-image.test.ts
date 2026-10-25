@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { IMAGE_PREVIEW_MAX_BYTES } from '@cc/protocol'
 import { localLinkTarget } from './link-walk.js'
 import { mentions, readMessageImage, resolveWrittenPath, sniffImage } from './message-image.js'
+import { itSymlink } from '../link.test-helpers.js'
 
 /** The smallest bytes each format's signature accepts, padded so the file is not empty past the signature */
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13])
@@ -173,7 +174,7 @@ describe('readMessageImage', () => {
     expect(got).not.toHaveProperty('file')
   })
 
-  it('follows a link to an image and reads the target, and refuses a link to something that is not one', async () => {
+  itSymlink('follows a link to an image and reads the target, and refuses a link to something that is not one', async () => {
     writeFileSync(join(dir, 'real.png'), PNG)
     writeFileSync(join(dir, 'secret.txt'), 'token=abc')
     symlinkSync(join(dir, 'real.png'), join(dir, 'to-image.png'))
@@ -217,7 +218,7 @@ describe('readMessageImage', () => {
    * machine's own administrative share, so the old code reached only localhost; the image behind them is real, so
    * following them would have shown it.
    */
-  it.skipIf(process.platform !== 'win32')('refuses a link, or a folder link along the path, that leads to a share, without following it', async () => {
+  itSymlink.skipIf(process.platform !== 'win32')('refuses a link, or a folder link along the path, that leads to a share, without following it', async () => {
     writeFileSync(join(dir, 'real.png'), PNG)
     const share = `\\\\localhost\\${dir[0]}$${dir.slice(2)}`
     symlinkSync(`${share}\\real.png`, join(dir, 'shot.png'), 'file')
@@ -241,7 +242,7 @@ describe('readMessageImage', () => {
    * readlink cannot read (lstat follows it and calls it a folder); the image behind it is real and local, which is
    * why only the refusal shows that it was not followed unjudged.
    */
-  it.skipIf(process.platform !== 'win32')('refuses a path through a link it cannot read, and one through too many links', async () => {
+  it.skipIf(process.platform !== 'win32')('refuses a path through a link it cannot read', async () => {
     mkdirSync(join(dir, 'kept'))
     writeFileSync(join(dir, 'kept', 'real.png'), PNG)
     const mountvol = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'mountvol.exe')
@@ -255,6 +256,9 @@ describe('readMessageImage', () => {
     } finally {
       rmdirSync(shots) // as a link: a recursive rm would go through it
     }
+  })
+
+  itSymlink.skipIf(process.platform !== 'win32')('refuses a path through too many links', async () => {
     symlinkSync(join(dir, 'b.png'), join(dir, 'a.png'), 'file')
     symlinkSync(join(dir, 'a.png'), join(dir, 'b.png'), 'file')
     expect(await readMessageImage(join(dir, 'a.png'))).toMatchObject({ ok: false, reason: 'unreadable' })

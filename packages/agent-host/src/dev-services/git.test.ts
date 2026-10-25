@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { chmodSync, copyFileSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, copyFileSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { changedFileCount } from '@cc/protocol'
 import { join } from 'node:path'
@@ -8,6 +8,7 @@ import { GIT_DIFF_MAX_CHARS, gitBranches, gitCommitDetail, gitDiff, gitIgnoredEn
 import { gitCheckout, gitCommit, gitStage } from './git-write.js'
 import { gitWorktreeDirty } from './git-worktree.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
+import { linkDir } from '../link.test-helpers.js'
 
 /**
  * porcelain v2 parsing is checked against real git output — a hand-written string could
@@ -407,7 +408,7 @@ describe('git path containment', () => {
     const outside = mkdtempSync(join(tmpdir(), 'cc-git-outside-'))
     dirs.push(outside)
     writeFileSync(join(outside, 'secret.txt'), 'secret\n')
-    symlinkSync(outside, join(d, 'linked-out'), 'dir')
+    linkDir(outside, join(d, 'linked-out'))
 
     await expect(gitDiff(d, 'linked-out/secret.txt')).rejects.toThrow(/outside the project/i)
     await expect(gitStage(d, ['linked-out/secret.txt'])).rejects.toThrow(/outside the project/i)
@@ -464,8 +465,8 @@ describe('a .. past a symlink cannot reveal an outside file\'s content (#119)', 
     writeFileSync(join(outside, 'secret.txt'), 'OUTSIDE SECRET')
     mkdirSync(join(d, 'sub', 'deep'), { recursive: true })
     mkdirSync(join(d, 'sub', 'evil'), { recursive: true })
-    symlinkSync(join(d, 'sub', 'deep'), join(d, 'link'))
-    symlinkSync(outside, join(d, 'evil'))
+    linkDir(join(d, 'sub', 'deep'), join(d, 'link'))
+    linkDir(outside, join(d, 'evil'))
 
     await expect(gitDiff(d, 'link/../evil/secret.txt')).rejects.toThrow(/outside the project/i)
   })
