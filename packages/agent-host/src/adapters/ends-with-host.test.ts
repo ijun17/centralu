@@ -97,6 +97,26 @@ describe('a CLI that must end with its host', () => {
     expect(await goneWithin(helper, 10_000)).toBe(true)
   })
 
+  it.skipIf(!unix)('ends such a helper when its host is SIGKILLed the moment it starts, before any of its tree was noted', async () => {
+    // #1562 Mac re-check: a host killed within 2 s of a command's start (before `noteTree`'s clock) left the shell alive
+    dir = mkdtempSync(join(tmpdir(), 'cc-ends-with-host-'))
+    const host = join(dir, 'host.mts')
+    writeFileSync(
+      host,
+      [
+        `import { spawnLocalAgent } from ${JSON.stringify(pathToFileURL(join(import.meta.dirname, 'local-process.ts')).href)}`,
+        `const p = spawnLocalAgent({ command: process.execPath, args: ['-e', ${JSON.stringify(helperCli)}], env: process.env, endsWithHost: true })`,
+        "p.stdout.on('data', (d) => process.stdout.write(d))",
+        'setInterval(() => {}, 1000)',
+      ].join('\n'),
+    )
+    const h = spawn(process.execPath, ['--import', 'tsx', host], { stdio: ['ignore', 'pipe', 'inherit'] })
+    const helper = await helperPid(h.stdout)
+    started.push(helper, h.pid!)
+    h.kill('SIGKILL')
+    expect(await goneWithin(helper, 10_000)).toBe(true)
+  })
+
   it('starts as before without it, and where there are no process groups', async () => {
     const p = spawnLocalAgent({ command: process.execPath, args: ['-e', "process.stdout.write(process.pid + '\\n')"], env: process.env })
     const pid = await helperPid(p.stdout)

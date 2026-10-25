@@ -162,8 +162,9 @@ another kind titled as the bridge's would pass as Centralu's own (only kind `oth
 
 A re-check on macOS with real Cursor, at those fixes, found four more, also fixed: a command Cursor ran (`zsh -c`, a
 `sleep 300`) sat in a group of its own and outlived a SIGKILLed host, since only the host knew its group (the host now
-tells the host watch each helper group as it notes and drops it, and the watch ends them first); 60 KB of a command's
-output arrived as `stdout: ""` and read "(no output)" (an empty result now says the tool passed on no output, as it
+tells the host watch each helper group as it notes and drops it, and the watch ends them first; a second re-check found a host killed within 2 s of a command's start, before the
+host's note, still left it, so the watch also reads the CLI's descendants by parent links when its pipe closes); 60 KB of a command's
+output arrived as `stdout: ""` and read "(no output)" (an empty result now says the tool did not return the output, as it
 cannot be told from a command that printed none; recording `big-output`); `smoke:cursor` counted the watch's subshell as
 a second agent (counted by parent now); and removing `endsWithHost` or Cursor's `presets` failed no unit test (now each
 does, `acp/adapter.test.ts`).

@@ -45,12 +45,28 @@ export type LocalSpawnSpec = AgentSpawnSpec & {
  * reader on fd 3, a pipe whose other end only this host holds, and `exec`s the CLI in its place with fd 3 closed. The
  * kernel closes the host's end when the host goes, however it goes (SIGKILL included), and the reader then ends the whole
  * group (`kill -9 0`): the CLI, its MCP servers and the shells in its group. It needs no stdin's end to reach anyone.
- * Before that it ends the helper groups the host told it of on the pipe (`+<pgid>` noted, `-<pgid>` dropped once empty,
- * `noteTree`): a shell the CLI starts in a group of its own, and what that shell runs.
+ * Before that it ends the helper groups a shell the CLI starts in a group of its own lives in, and what that shell runs:
+ * those of the CLI's descendants then (`watchTreeGroups`, read by parent links when the pipe closes, so a command
+ * started a moment before the host died is reached too; #1562 Mac re-check), and those the host told it of on the pipe
+ * (`+<pgid>` noted, `-<pgid>` dropped once empty, `noteTree`), which reach a helper whose shell has gone.
  */
 export const HOST_WATCH =
   '{ g=; while read -r l; do case $l in +*) g="$g ${l#+}";; -*) n=; for p in $g; do [ "$p" = "${l#-}" ] || n="$n $p"; done; g=$n;; esac; done; ' +
-  'for p in $g; do kill -9 -"$p" 2>/dev/null; done; kill -9 0 2>/dev/null; } <&3 >/dev/null 2>&1 & exec "$@" 3<&-'
+  'for p in $g $(' +
+  watchTreeGroups() +
+  '); do kill -9 -"$p" 2>/dev/null; done; kill -9 0 2>/dev/null; } <&3 >/dev/null 2>&1 & exec "$@" 3<&-'
+
+/**
+ * The process groups of the CLI's descendants, its own aside, as the watch reads them: `$$` in the watch's subshell is the
+ * CLI's pid (the `sh` that `exec`ed it)
+ */
+function watchTreeGroups(): string {
+  return (
+    'ps -A -o pid= -o ppid= -o pgid= 2>/dev/null | awk -v r="$$" \'{ p[$1] = $2; g[$1] = $3 } END { d[r] = 1; ' +
+    'do { c = 0; for (k in p) if (!(k in d) && (p[k] in d)) { d[k] = 1; c = 1 } } while (c); ' +
+    'for (k in d) if (g[k] != g[r] && g[k] > 1) print g[k] }\''
+  )
+}
 
 /** How often held helper groups are read again (`noteTree`) */
 const GROUP_CHECK_MS = 2_000
