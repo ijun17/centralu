@@ -404,7 +404,7 @@ export const layoutActions = (set: StoreSet, get: StoreGet): LayoutActions => ({
     }
   },
 
-  setToast(toast) {
-    set({ toast })
+  setToast(toast, action) {
+    set({ toast, toastAction: toast === null ? null : (action ?? null) })
   },
 })

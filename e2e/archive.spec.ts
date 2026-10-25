@@ -21,10 +21,12 @@ async function answeredSession(page: Page, projectName: string, prompt: string):
   return id
 }
 
+/** Archives an idle session from its row's menu: at once, no question (#1512) */
 async function deleteSession(page: Page, id: string) {
   await page.getByTestId(`session-menu-${id}`).click()
+  await expect(page.getByTestId(`delete-session-${id}`)).toHaveText('Archive session')
   await page.getByTestId(`delete-session-${id}`).click()
-  await page.getByTestId('confirm-delete-yes').click()
+  await expect(page.getByTestId('confirm-delete')).toHaveCount(0)
   await expect(page.getByTestId(`session-row-${id}`)).toHaveCount(0)
 }
 
@@ -40,15 +42,10 @@ test('a deleted session waits in the session archive, reads there, comes back, a
   await setup(page, { projects: ['/tmp/alpha'] })
   const id = await answeredSession(page, 'alpha', 'what is the answer')
 
-  // The dialog says where it goes and the two ways out, before anything happens
-  await page.getByTestId(`session-menu-${id}`).click()
-  await page.getByTestId(`delete-session-${id}`).click()
-  await expect(page.getByTestId('confirm-delete')).toContainText('Archive this session?')
-  await expect(page.getByTestId('delete-trash-note')).toContainText('Settings → Archive reads it, restores it, or deletes it for good')
-  await expect(page.getByTestId('confirm-delete-yes')).toHaveText('Archive')
-  await page.getByTestId('confirm-delete-yes').click()
-  await expect(page.getByTestId(`session-row-${id}`)).toHaveCount(0)
+  // An idle session goes at once: the toast says where it went and offers Undo (#1512)
+  await deleteSession(page, id)
   await expect(page.getByTestId('toast')).toContainText('Archived')
+  await expect(page.getByTestId('toast-action')).toHaveText('Undo')
   // Nothing the dialog chose has happened yet: the tool's conversation file waits with it
   expect(await page.evaluate(() => (window as any).__mock.externallyDeleted)).toEqual([])
 
@@ -86,6 +83,114 @@ test('a deleted session waits in the session archive, reads there, comes back, a
   await expect(page.getByTestId('trash-list-empty')).toBeVisible()
   await expect(page.getByTestId('trash-total')).toContainText('0 sessions')
   expect(await page.evaluate(() => (window as any).__mock.externallyDeleted)).toEqual([id])
+})
+
+// #1512: archiving an idle session asks nothing, and Undo on the toast puts it back
+test('an idle session is archived at once and Undo on the toast brings it back; a busy one still asks first', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const id = await answeredSession(page, 'alpha', 'what is the answer')
+  await deleteSession(page, id)
+  await expect(page.getByTestId('toast')).toContainText('Archived')
+  await page.getByTestId('toast-action').click()
+  await expect(page.getByTestId(`session-row-${id}`)).toBeVisible()
+  await expect(page.getByTestId('toast')).toContainText('Restored')
+  await expect(page.getByTestId('toast-action')).toHaveCount(0)
+  expect(await page.evaluate(() => (window as any).__mock.trashBin.size)).toBe(0)
+
+  // A turn under way is cut short by the archive: that one asks
+  await page.evaluate((sid: string) => (window as any).__mock.emit({ type: 'state_change', sessionId: sid, state: 'working' }), id)
+  await page.getByTestId(`session-menu-${id}`).click()
+  await expect(page.getByTestId(`delete-session-${id}`)).toHaveText('Archive session…')
+  await page.getByTestId(`delete-session-${id}`).click()
+  await expect(page.getByTestId('confirm-delete')).toContainText('Archive this session?')
+  await expect(page.getByTestId(`session-row-${id}`)).toBeVisible()
+})
+
+// #1512 review: the host decides what an archive loses, and the toast lets go of the pointer
+test('a session the host says would lose something asks first and names it; Cancel archives nothing, Archive offers Undo', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const id = await answeredSession(page, 'alpha', 'what is the answer')
+  // The mock host stands for the real one's rule: a session an agent started owes that agent a report (the mailbox, waits and cards say the same)
+  await page.evaluate((sid: string) => ((window as any).__mock.store.sessions.get(sid).askedBy = 'an-agent'), id)
+  await page.getByTestId(`session-menu-${id}`).click()
+  // The window sees nothing busy, so the menu does not promise a question; the host's answer opens it
+  await page.getByTestId(`delete-session-${id}`).click()
+  await expect(page.getByTestId('confirm-delete')).toBeVisible()
+  await expect(page.getByTestId('delete-losses')).toContainText('owes it a report')
+  await expect(page.getByTestId('delete-losses')).toContainText('Undo does not bring them back')
+  await page.getByRole('button', { name: 'Cancel' }).click()
+  await expect(page.getByTestId(`session-row-${id}`)).toBeVisible()
+  expect(await page.evaluate(() => (window as any).__mock.trashBin.size)).toBe(0)
+
+  await page.getByTestId(`session-menu-${id}`).click()
+  await page.getByTestId(`delete-session-${id}`).click()
+  await page.getByTestId('confirm-delete-yes').click()
+  await expect(page.getByTestId(`session-row-${id}`)).toHaveCount(0)
+  await expect(page.getByTestId('toast-action')).toHaveText('Undo')
+})
+
+test('an archive with uncommitted work in its worktree asks, as the old dialog did', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const id = await answeredSession(page, 'alpha', 'what is the answer')
+  await page.evaluate((sid: string) => {
+    const m = (window as any).__mock
+    m.store.sessions.get(sid).worktree = { path: '/tmp/alpha-wt', branch: 'feat/x' }
+    m.mockWorktreeDirty = true
+    ;(window as any).__store.setState((st: any) => ({ sessions: { ...st.sessions, [sid]: { ...st.sessions[sid], worktree: { path: '/tmp/alpha-wt', branch: 'feat/x' } } } }))
+  }, id)
+  await page.getByTestId(`session-menu-${id}`).click()
+  await page.getByTestId(`delete-session-${id}`).click()
+  await expect(page.getByTestId('confirm-delete')).toBeVisible()
+  await expect(page.getByTestId('worktree-dirty')).toContainText('uncommitted')
+})
+
+// Pressing Undo or Dismiss removes the element under the pointer or the focus, which never says it left: the toast after it must still go by itself
+test.describe('a toast goes by itself after Undo or Dismiss took the previous one away', () => {
+  async function archived(page: Page) {
+    await setup(page, { projects: ['/tmp/alpha'] })
+    const id = await answeredSession(page, 'alpha', 'what is the answer')
+    await deleteSession(page, id)
+    await expect(page.getByTestId('toast-action')).toHaveText('Undo')
+    return id
+  }
+
+  test('Undo clicked', async ({ page }) => {
+    const id = await archived(page)
+    await page.getByTestId('toast-action').click()
+    await expect(page.getByTestId(`session-row-${id}`)).toBeVisible()
+    await page.mouse.move(5, 5)
+    await expect(page.getByTestId('toast')).toContainText('Restored')
+    await expect(page.getByTestId('toast')).toHaveCount(0, { timeout: 6000 })
+  })
+
+  test('Undo pressed with the keyboard', async ({ page }) => {
+    const id = await archived(page)
+    await page.mouse.move(5, 5)
+    await page.getByTestId('toast-action').focus()
+    await page.keyboard.press('Enter')
+    await expect(page.getByTestId(`session-row-${id}`)).toBeVisible()
+    await expect(page.getByTestId('toast')).toContainText('Restored')
+    await expect(page.getByTestId('toast')).toHaveCount(0, { timeout: 6000 })
+  })
+
+  test('Dismiss clicked, then a toast that only says something', async ({ page }) => {
+    await archived(page)
+    await page.getByTestId('toast-dismiss').click()
+    await expect(page.getByTestId('toast')).toHaveCount(0)
+    await page.mouse.move(5, 5)
+    await page.evaluate(() => (window as any).__store.getState().setToast('Something else happened'))
+    await expect(page.getByTestId('toast')).toContainText('Something else happened')
+    await expect(page.getByTestId('toast')).toHaveCount(0, { timeout: 6000 })
+  })
+
+  test('while the pointer rests on a toast with an Undo, it stays past its time', async ({ page }) => {
+    await archived(page)
+    await page.getByTestId('toast').hover()
+    await page.waitForTimeout(9000)
+    await expect(page.getByTestId('toast-action')).toBeVisible()
+    await page.mouse.move(5, 5)
+    await expect(page.getByTestId('toast')).toHaveCount(0, { timeout: 12000 })
+  })
 })
 
 test('deleting all archived sessions asks once and deletes every session in it for good', async ({ page }) => {
@@ -319,7 +424,6 @@ test('"Delete all archived sessions" and a "Delete for good" of subagent steps o
   }, sessionId)
   await openArchive(page)
   await page.getByTestId(`subagent-steps-move-${sessionId}`).click()
-  await page.getByTestId('subagent-steps-confirm-yes').click()
   await expect(page.getByTestId(`trash-steps-row-${sessionId}`)).toBeVisible()
 
   const confirm = page.getByTestId('trash-confirm')
