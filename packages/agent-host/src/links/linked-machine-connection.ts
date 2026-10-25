@@ -81,8 +81,18 @@ const WAITS_FOR_PERSON = 'press Connect to try again'
 const NEXT_STEP = new RegExp(`; (${KEEPS_TRYING}|asking the machine again|${WAITS_FOR_PERSON})$`)
 /** How long a call waits for an attempt to connect that is under way before it is answered as not reachable */
 const ATTEMPT_WAIT_MS = 60_000
+/**
+ * How long a call that needs a machine which is down waits for the attempt it starts (#1532): the ssh to a machine that is
+ * up answers in 2 to 4 s, and one that does not answer would hold the agent for the whole timeout. Past it the call is
+ * answered as not reachable and the attempt goes on
+ */
+const CALL_WAIT_MS = 10_000
+/** At most one attempt started by a call per machine within this window, so calls cannot defeat the backoff (#1532) */
+const CALL_WINDOW_MS = 15_000
 /** Statuses of a link that is away between attempts: turning Auto reconnect on tries again now */
 const AWAY: ReadonlySet<MachineStatus> = new Set(['unreachable', 'away', 'not_running', 'refused', 'stopped'])
+/** Statuses a call's attempt can help (#1532): a host the person stopped there, a version gate or an operation need more than a try */
+const CALL_RETRIES: ReadonlySet<MachineStatus> = new Set(['unreachable', 'away', 'not_running', 'refused'])
 
 export abstract class LinkedMachineConnection implements RoutedMachine {
   readonly q: Qualifier
@@ -186,6 +196,10 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   private nextAttemptAt: number | null = null
   /** Calls waiting for an attempt to connect to end (`settled`) */
   private statusWaiters = new Set<() => void>()
+  /** When a call last started an attempt (`reachForCall`), and until when the calls that find it under way wait for it */
+  private lastCallAttemptAt = 0
+  private callFailure: string | null = null
+  private callAttemptUntil = 0
 
   constructor(
     protected record: MachineRecord,
@@ -245,7 +259,12 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
 
   /** Resolves once no attempt is under way, or after `waitMs` (a minute): connecting took 2 to 4 s on a LAN, a host started there adds its start */
   settled(waitMs = this.deps.attemptWaitMs ?? ATTEMPT_WAIT_MS): Promise<void> {
-    if (!this.attemptUnderWay) return Promise.resolve()
+    return this.waitUntil(() => !this.attemptUnderWay, waitMs)
+  }
+
+  /** Resolves once `ready()` holds (checked at every change of status and at the end of every opening), or after `waitMs` */
+  private waitUntil(ready: () => boolean, waitMs: number): Promise<void> {
+    if (ready()) return Promise.resolve()
     return new Promise<void>((resolve) => {
       const done = () => {
         clearTimeout(timer)
@@ -253,12 +272,65 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
         resolve()
       }
       const waiter = () => {
-        if (!this.attemptUnderWay) done()
+        if (ready()) done()
       }
       const timer = setTimeout(done, waitMs)
       timer.unref?.()
       this.statusWaiters.add(waiter)
     })
+  }
+
+  /**
+   * An agent's call needs this machine (#1532): with Auto reconnect on and the link down, it does what the person's Connect
+   * does (`connect`, the one action that opens a link now) instead of waiting out the backoff, and waits for it a short
+   * bound (`CALL_WAIT_MS`). The caller reads `reachable` afterwards: connected in time, the call goes through; not, it is
+   * answered as not reachable with `whyDown`, and the backoff goes on from where it was (`keepBackoff`).
+   *
+   * - one attempt at a time: a call that finds one under way (the backoff's, the person's press, another call's) waits on
+   *   it and starts none; so do ten calls at once, and a press at the same moment as a call;
+   * - calls cannot defeat the backoff: at most one attempt started by a call per machine within `CALL_WINDOW_MS`; a call
+   *   inside the window waits for nothing and is answered at once;
+   * - with Auto reconnect off nothing is started (#1341): the call is answered as not connected, and the person is named.
+   *   Neither does it when the person disconnected the machine, the host was stopped there, an operation holds the link
+   *   or the versions differ: a Connect does not help those, or is the person's to press
+   */
+  async reachForCall(): Promise<void> {
+    if (this.reachable) return
+    const until = Date.now() + (this.deps.callWaitMs ?? CALL_WAIT_MS)
+    const left = (): number => Math.max(0, until - Date.now())
+    // The client dials the same forward again after a drop, about 6 s and no ssh (`LINK_REDIALS`): let it, it may be back
+    await this.waitUntil(() => this.reachable || !this.redialing, left())
+    if (this.reachable) return
+    // An attempt under way is joined, whoever started it; one a call started is waited for to that call's bound
+    if (this.attemptUnderWay) {
+      const bound = this.callAttemptUntil > Date.now() ? this.callAttemptUntil - Date.now() : undefined
+      await this.settled(bound)
+      return this.noteCallFailure()
+    }
+    if (this.stopped || this.parked || this.held || this.inOperation() || !this.autoReconnect || this.redialing) return
+    if (!CALL_RETRIES.has(this.status)) return
+    const now = Date.now()
+    if (now - this.lastCallAttemptAt < (this.deps.callWindowMs ?? CALL_WINDOW_MS)) return
+    this.lastCallAttemptAt = now
+    this.callAttemptUntil = now + left()
+    // Not the person's Start: it starts no host the link would not start by itself
+    this.connect({ start: false, keepBackoff: true })
+    await this.settled(left())
+    this.noteCallFailure()
+  }
+
+  /** What the attempt a call waited on came to when it did not connect: the machine's own words, or that it is still going */
+  private noteCallFailure(): void {
+    if (this.reachable) return
+    this.callFailure = this.attemptUnderWay ? 'it is still connecting' : (this.error?.replace(NEXT_STEP, '') ?? null)
+  }
+
+  /**
+   * Why the attempt a call made last did not connect (#1532), for the answer to that call; null once the link is up, and
+   * before any call made one
+   */
+  get whyDown(): string | null {
+    return this.reachable ? null : this.callFailure
   }
 
   /** An install, update or other operation the person started is running: its retries are part of it (`retryLater`) */
@@ -413,16 +485,18 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
    * The person's Connect (`machines.reconnect`, #1134): opens now, forgetting the backoff, also a disconnected link and
    * also with Auto reconnect off (#1341), where it is the only way to try again. It is also the person's Start
    * (#1143): a host is started there even where they stopped it or the link stopped starting them. `start: false` is
-   * the orchestrator's reconnect without its card, which opens the link and starts nothing the link would not
+   * the orchestrator's reconnect without its card, which opens the link and starts nothing the link would not.
+   * `keepBackoff` is an agent's call that needs the machine (`reachForCall`, #1532): it opens now too, but the backoff
+   * goes on from the step it was at instead of starting over, so calls cannot hold it at its short steps
    */
-  connect(opts: { start?: boolean } = {}): void {
+  connect(opts: { start?: boolean; keepBackoff?: boolean } = {}): void {
     if (opts.start !== false) {
       this.startAsked = true
       this.autoStarts = []
       this.restartsSpent = false
     }
     if (this.parked) return this.start()
-    this.reconnect()
+    this.reconnect(opts.keepBackoff === true)
   }
 
   /**
@@ -475,9 +549,9 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   }
 
   /** Opens again now, forgetting the backoff (`machines.reconnect`, or the person accepted the versions) */
-  reconnect(): void {
+  reconnect(keepBackoff = false): void {
     this.clearRetry()
-    this.attempt = 0
+    if (!keepBackoff) this.attempt = 0
     /*
      * An opening already under way answers this one (`open`). Its retry, if it set one, was just cleared: once it ends
      * without a client of its own it opens again now, or the link would wait for nothing (#1293 re-review)

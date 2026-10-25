@@ -3467,8 +3467,20 @@ it, or its switch is off and the attempt at the hub's start is over: `LinkedMach
 at once: `start_agent` with the machine, `ask_project` on one of its projects, `agent_session`, a send to or a read of
 one of its sessions say "is not connected, and nothing here connects it by itself; ask the person to connect it (Settings,
 Machines, Connect)" (`NOT_CONNECTED` / `awayPhrase`, `adapters/contract/orchestrator.ts`), and its projects are listed as
-away with that reason. A machine with the switch on that is away between attempts is still "not reachable right now;
-try again once its link is back". What a child there reported meanwhile is read once the link is up again. A parent waiting on a child whose turn is running is
+away with that reason. A machine with the switch on that is away between attempts is not waited out either (#1532): a call that
+needs it starts one attempt at once, `LinkedMachineConnection.reachForCall` through the same `connect` that the row's Connect,
+the badge's menu, the project menu's Reconnect and the orchestrator's `reconnect_machine` use (`keepBackoff`: the backoff goes on
+from the step it was at instead of starting over, and a call starts no host the link would not start by itself), and waits for it
+`CALL_WAIT_MS` (10 s). Connected in time, the call goes through; not, it is answered "not reachable right now; the attempt to
+connect it just now failed: <ssh's words>" (or "it is still connecting"), and the backoff stands. One attempt at a time per machine:
+a call that finds one under way (the backoff's, the person's press, another call's) waits on it and starts none, so a press and a
+call at the same moment make one attempt. Calls cannot defeat the backoff: a machine takes at most one attempt started by a call
+per `CALL_WINDOW_MS` (15 s); a call inside the window is answered at once with the last attempt's reason. The calls are those that
+reach the machine through `linkedSessions` (`start_agent` and `ask_project` through their project lookup, `agent_session`, a send to
+or a read of one of its sessions) and the router's calls that have no window behind them (no `ctx`: an agent's, an app view's);
+a window's own calls start nothing, they poll. Not for a machine that waits for the person, one whose host the person stopped
+there, one at `versions_differ` or `updating`, or one held by an operation. What a child there reported meanwhile is read once the
+link is up again. A parent waiting on a child whose turn is running is
 told when the machine starts waiting for the person (`LinkedReports.linkChanged`: a link-lost report saying Auto reconnect is off and to ask
 the person to connect it), judged by the link itself (`waitsForPerson`, sent with the `machine_status` of the moment it gives up) and not by
 the row, which says `unreachable` while the client still redials, an attempt is under way or an install or update holds the machine: the

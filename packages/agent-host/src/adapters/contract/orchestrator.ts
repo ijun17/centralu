@@ -173,7 +173,8 @@ export const NOT_CONNECTED_PHRASE = 'is not connected, and nothing here connects
  */
 export function awayPhrase(why: string): string {
   if (why === NOT_CONNECTED) return NOT_CONNECTED_PHRASE
-  return why === NOT_REACHABLE ? `is ${NOT_REACHABLE}` : `could not be asked just now (${why})`
+  // "not reachable right now", alone or with the attempt a call just made to connect it and how that failed (#1532)
+  return why === NOT_REACHABLE || why.startsWith(`${NOT_REACHABLE};`) ? `is ${why}` : `could not be asked just now (${why})`
 }
 
 /** A project on a linked machine, as the hub's orchestrator names it (#82 phase 4) */

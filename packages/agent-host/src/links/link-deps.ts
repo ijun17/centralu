@@ -102,6 +102,10 @@ export type LinkDeps = {
   activityPollMs?: number
   /** For tests: how long a call waits for an attempt to connect that is under way (60 s when absent, #1341) */
   attemptWaitMs?: number
+  /** For tests: how long a call that needs a machine which is down waits for the attempt it starts (10 s when absent, #1532) */
+  callWaitMs?: number
+  /** For tests: the window within which a machine takes at most one attempt started by a call (15 s when absent, #1532) */
+  callWindowMs?: number
   /** For tests: how long a link held at `versions_differ` waits before it looks at the versions again (60 s when absent) */
   versionsRetryMs?: number
   /** For tests: how long a host stays up before the backoff starts over (60 s when absent, #1143) */

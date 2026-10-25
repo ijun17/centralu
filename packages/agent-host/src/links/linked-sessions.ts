@@ -157,13 +157,22 @@ export function linkedSessions(
    * says so at once and names who can: the person. No call connects a machine by itself
    */
   const away = (m: RoutedMachine): string =>
-    m.waitsForPerson ? `${m.name} ${awayPhrase(NOT_CONNECTED)}, then try again` : `${m.name} is ${NOT_REACHABLE}; try again once its link is back`
+    m.waitsForPerson ? `${m.name} ${awayPhrase(NOT_CONNECTED)}, then try again` : `${m.name} is ${notReachable(m)}; try again once its link is back`
+  /**
+   * `NOT_REACHABLE`, with why when a call just tried to connect the machine and did not (#1532): the attempt's own words,
+   * so the agent can tell a machine that is off from one whose ssh is refused
+   */
+  const notReachable = (m: RoutedMachine): string =>
+    m.whyDown ? `${NOT_REACHABLE}; the attempt to connect it just now failed: ${oneLine(m.whyDown, 300)}` : NOT_REACHABLE
   /**
    * A machine that is connecting is waited for, bounded (#1341): the act that needs it goes through once the attempt ends,
    * as it did when a need connected it. With nothing trying, the call is answered at once
    */
   const settle = async (m: RoutedMachine): Promise<void> => {
-    if (m.attemptUnderWay) await m.settled?.()
+    if (m.reachable) return
+    // A call that needs a machine which is down tries to connect it (#1532, `reachForCall`); one that cannot do that waits for an attempt under way
+    if (m.reachForCall) await m.reachForCall()
+    else if (m.attemptUnderWay) await m.settled?.()
   }
   /** The router's call, its refusal as the sentence the model reads */
   const attempt = async <T>(m: RoutedMachine, run: () => Promise<T>): Promise<({ ok: true } & T) | { ok: false; error: string }> => {
@@ -260,9 +269,15 @@ export function linkedSessions(
           away.push({ machine: m.name, machineId: m.id, why })
           return lastProjects(m).map((p) => ({ ...p, away: why }))
         }
+        /*
+         * Looking a project up is the first step of the act that needs its machine (start_agent, ask_project, a session
+         * start): a machine that is down is tried once here (#1532), bounded and at most once per window, so the act
+         * does not fail on a link the backoff would have brought back minutes from now
+         */
+        if (!m.reachable) await settle(m)
         // Not away while it is connecting: its projects stand as last listed, and the act that follows waits for the link
         if (!m.reachable && m.attemptUnderWay) return lastProjects(m)
-        if (!m.reachable) return mirrored(m.waitsForPerson ? NOT_CONNECTED : NOT_REACHABLE)
+        if (!m.reachable) return mirrored(m.waitsForPerson ? NOT_CONNECTED : notReachable(m))
         try {
           const list = await raceTimeout(m.call('projects.list', {}), lookupMs, TIMED_OUT)
           if (list === TIMED_OUT) throw new Error(notWithin(lookupMs))
@@ -591,7 +606,7 @@ export function linkedSessions(
       const m = owner(sessionId)
       if (!m) return { ok: false, error: `Not a session of a linked machine: ${sessionId}` }
       await settle(m)
-      if (!m.reachable) return { ok: false, error: m.waitsForPerson ? away(m) : `${m.name} is ${NOT_REACHABLE}` }
+      if (!m.reachable) return { ok: false, error: m.waitsForPerson ? away(m) : `${m.name} is ${notReachable(m)}` }
       try {
         const answer = await m.call('host.lastAnswer', { sessionId: m.q.strip(sessionId, 'The session'), maxChars: Math.min(maxChars, ANSWER_MAX_CHARS) })
         const r = HostLastAnswerResult.safeParse(answer)
@@ -637,7 +652,7 @@ export function linkedSessions(
       const m = owner(sessionId)
       if (!m) return { ok: false, error: `Not a session of a linked machine: ${sessionId}` }
       await settle(m)
-      if (!m.reachable) return { ok: false, error: m.waitsForPerson ? away(m) : `${m.name} is not reachable right now; read it again once its link is back` }
+      if (!m.reachable) return { ok: false, error: m.waitsForPerson ? away(m) : `${m.name} is ${notReachable(m)}; read it again once its link is back` }
       const toolMode = toolLinesOf(opts?.tools)
       try {
         const answer = await m.call('host.readSession', {

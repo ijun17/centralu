@@ -2329,18 +2329,22 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
 
     await remote.close()
     await eventually(() => status(hub) !== 'connected')
-    // The project is known from the headers mirror, so the refusal says why it cannot be asked
+    // The project is known from the headers mirror, so the refusal says why it cannot be asked. The first ask tried to
+    // connect the machine (#1532) and says how that failed, in the machine's words; the next within the window tries nothing
+    const failed = 'Remote box is not reachable right now; the attempt to connect it just now failed: '
     for (const project of [name, `m1/${name}`]) {
-      expect(await ask({ project, task: 'x' })).toMatchObject({
-        ok: false,
-        error: `Remote box is not reachable right now, so ${name} on Remote box cannot be asked. Try again once its link is back.`,
-      })
+      const { error } = (await ask({ project, task: 'x' })) as { error: string }
+      expect(error.startsWith(failed)).toBe(true)
+      expect(error.endsWith(`, so ${name} on Remote box cannot be asked. Try again once its link is back.`)).toBe(true)
     }
-    expect(((await ask({ project: 'no-such-project', task: 'x' })) as { error: string }).error).toBe(
-      `No project named "no-such-project". The other projects are: ${name} (on Remote box, not reachable right now). Not asked, and its projects may be missing: Remote box (not reachable right now).`,
-    )
+    const listed = ((await ask({ project: 'no-such-project', task: 'x' })) as { error: string }).error
+    expect(listed.startsWith(`No project named "no-such-project". The other projects are: ${name} (on Remote box, not reachable right now; the attempt to connect it just now failed: `)).toBe(true)
+    expect(listed).toContain('. Not asked, and its projects may be missing: Remote box (not reachable right now; the attempt to connect it just now failed: ')
     // A project the hub never saw, on a machine that is down
-    expect(await ask({ project: 'm1/never-seen', task: 'x' })).toMatchObject({ ok: false, error: expect.stringContaining('Remote box is not reachable right now, so "m1/never-seen" cannot be asked there') })
+    const never = (await ask({ project: 'm1/never-seen', task: 'x' })) as { ok: boolean; error: string }
+    expect(never.ok).toBe(false)
+    expect(never.error.startsWith(failed)).toBe(true)
+    expect(never.error).toContain(', so "m1/never-seen" cannot be asked there')
   })
 
   it('says the session is waiting on the person there, and waits again for the answer once it is given', async () => {
