@@ -6,8 +6,10 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
 import { workflowCheckNames, workflowEventJobs } from '../.centralu/apps/project-board/ci.mjs'
+// @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
+import { onFlakyList } from '../.centralu/apps/project-board/run-failure.mjs'
 // @ts-expect-error — a plain .mjs script the workflow runs with the runner's own Node
-import { changedFiles, classify, draftOf, failFastOf, outputs, tierOf, VERSION_SOURCE } from '../.github/scripts/ci-changes.mjs'
+import { changedFiles, classify, draftOf, failFastOf, outputs, screenChanged, screenFiles, tierOf, VERSION_SOURCE } from '../.github/scripts/ci-changes.mjs'
 
 // Like release-workflow.test.ts, inspect the workflow without adding a YAML dependency.
 const workflow = readFileSync(new URL('../.github/workflows/build.yml', import.meta.url), 'utf8')
@@ -516,5 +518,110 @@ describe('what a commit needs, from the files it changes (.github/scripts/ci-cha
     } finally {
       f.done()
     }
+  })
+})
+
+/*
+ * Which changes reach the screen (#1538, the owner's decision of 2026-10-26): the merge queue runs the heavy jobs (the
+ * e2e shards, chromium and webkit) before it lands a batch holding one, and the fast tier alone for the others. The one
+ * definition is `screenFiles` in ci-changes.mjs, beside the mapping of files to jobs; the queue asks it (`--screen`) and
+ * keeps no list of paths of its own.
+ */
+describe('which changes reach the screen, for the merge queue (.github/scripts/ci-changes.mjs, #1538)', () => {
+  const SCRIPT = fileURLToPath(new URL('../.github/scripts/ci-changes.mjs', import.meta.url))
+  /** One of each kind of file the mapping tells apart: the window, the host and protocol, scenarios, tests, tools, build config, documents */
+  const SAMPLES = {
+    screen: [
+      'packages/ui/src/App.tsx',
+      'packages/ui/src/components/Button.css',
+      'packages/platform/src/ports.ts',
+      'packages/core/src/layout.ts',
+      'apps/web/src/main.tsx',
+      'packages/agent-host/src/sessions/x.ts',
+      'packages/protocol/src/messages.ts',
+      'e2e/some.spec.ts',
+      'e2e/fixtures/linked-hosts-ui-scenarios.ts',
+      'e2e/ux/baseline.json',
+      'package.json',
+      'apps/desktop/package.json',
+      'pnpm-lock.yaml',
+      'packages/ui/tsconfig.json',
+      '.github/workflows/build.yml',
+      '.github/scripts/ci-changes.mjs',
+      'vite.config.ts',
+    ],
+    quiet: [
+      'docs/README.md',
+      'README.md',
+      'CONTRIBUTING.md',
+      '.github/PULL_REQUEST_TEMPLATE.md',
+      'packages/ui/src/App.test.tsx',
+      'packages/agent-host/src/sessions/x.test.ts',
+      'packages/protocol/src/messages.test.ts',
+      'packages/agent-host/src/fake-exe.test-helpers.ts',
+      'tooling/project-board-queue.test.ts',
+      'tooling/fixtures/node-floor.json',
+      'vitest.config.ts',
+      'apps/desktop/src-tauri/src/main.rs',
+      'scripts/pre-pr.mjs',
+      '.centralu/apps/project-board/queue.mjs',
+      'packaging/remote-runtime.json',
+    ],
+  }
+
+  it('says a change reaches the screen when it touches the window, the host or the protocol outside their tests, the scenarios, or the build', () => {
+    for (const f of SAMPLES.screen) expect(screenChanged([f]), f).toBe(true)
+    for (const f of SAMPLES.quiet) expect(screenChanged([f]), f).toBe(false)
+    expect(screenFiles(['docs/a.md', 'packages/ui/src/App.tsx', 'tooling/x.test.ts'])).toEqual(['packages/ui/src/App.tsx'])
+    // A file moved out of the window into docs/ is a change to where it was (the queue lists both names)
+    expect(screenChanged(['docs/moved.md', 'packages/ui/src/old.tsx'])).toBe(true)
+    // Nothing known: the heavy jobs, as a run that does not know its files runs everything
+    expect(screenFiles(null)).toBeNull()
+    expect(screenChanged(null)).toBe(true)
+    expect(screenChanged([])).toBe(false)
+  })
+
+  // The two answers are one mapping: whatever reaches the screen is something the UI scenarios (the `code` group) run for,
+  // and whatever only documents or the build's own tests change does not reach it. Over every pair and every generated list.
+  it('is part of what the e2e jobs run for: a change that reaches the screen is always one the UI scenarios run for', () => {
+    const all = [...SAMPLES.screen, ...SAMPLES.quiet]
+    let seed = 7
+    const next = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 2 ** 32)
+    const lists: string[][] = all.map((f) => [f])
+    for (const a of all) for (const b of all) lists.push([a, b])
+    for (let i = 0; i < 400; i++) lists.push(all.filter(() => next() < 0.25))
+    for (const files of lists) {
+      const screen = screenChanged(files)
+      const code = classify(files).code
+      if (screen) expect(code, files.join(', ')).toBe(true)
+      // Documents alone never reach it
+      if (files.every((f) => SAMPLES.quiet.slice(0, 4).includes(f))) expect(screen, files.join(', ')).toBe(false)
+      // It is a property of the files, and of nothing around them
+      expect(screen).toBe(files.some((f) => screenChanged([f])))
+    }
+  })
+
+  it('answers the merge queue from a list of file names on stdin, as the default branch\'s own copy of the script', () => {
+    const ask = (files: unknown) => JSON.parse(execFileSync(process.execPath, [SCRIPT, '--screen'], { input: JSON.stringify(files), encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] }))
+    expect(ask(['docs/a.md', 'packages/ui/src/App.tsx'])).toEqual({ screen: true, file: 'packages/ui/src/App.tsx', count: 2 })
+    expect(ask(['docs/a.md', 'tooling/x.test.ts'])).toEqual({ screen: false, file: null, count: 2 })
+    expect(() => ask({ not: 'a list' })).toThrow()
+  })
+
+  it('is the only list of paths the merge queue uses: its source names none of the window, the host or the scenarios', () => {
+    for (const file of ['queue-screen.mjs', 'batch.mjs', 'queue-batch.mjs', 'queue.mjs', 'config.mjs', 'ci-tools.mjs']) {
+      const text = readFileSync(new URL(`../.centralu/apps/project-board/${file}`, import.meta.url), 'utf8')
+      expect(text, file).not.toMatch(/packages\/(ui|platform|core|agent-host|protocol)\/|apps\/web\/|\be2e\//)
+    }
+    // project.json names the judge and the heavy checks, and the checks are jobs build.yml has
+    const project = JSON.parse(readFileSync(new URL('../.centralu/apps/project-board/project.json', import.meta.url), 'utf8'))
+    expect(project.ci.screen.judge).toBe('.github/scripts/ci-changes.mjs')
+    const jobNames = workflowCheckNames(readFileSync(new URL('../.github/workflows/build.yml', import.meta.url), 'utf8')).names as string[]
+    for (const pattern of project.ci.screen.checks as string[]) {
+      expect(jobNames.some((n) => onFlakyList(n, [pattern])), pattern).toBe(true)
+    }
+    // The inputs it starts a run with are the workflow's own: the full tier, and the files leaving out what they cannot affect
+    expect(project.ci.screen.inputs).toEqual({ tier: 'full', everything: 'false' })
+    expect(workflow).toMatch(/everything:\n(?: {8}[^\n]*\n)*? {8}type: boolean/)
   })
 })

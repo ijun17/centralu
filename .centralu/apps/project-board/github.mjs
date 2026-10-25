@@ -588,6 +588,21 @@ export async function containsCommit(repo, ancestor, head) {
   return c?.status === 'ahead' || c?.status === 'identical'
 }
 
+/** GitHub lists at most this many files of a comparison: a list this long may have been cut. */
+export const COMPARE_FILES_MAX = 300
+
+/**
+ * The files `head` adds to `base` (GitHub's comparison from their merge base), a renamed file under both names, as
+ * ci-changes.mjs reads a change (`--no-renames`). `null` when they are not known: the comparison or its file list is
+ * missing, or long enough that GitHub may have cut it.
+ */
+export async function readCompareFiles(repo, base, head) {
+  checkRepo(repo)
+  const c = await restJson(`repos/${repo}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}`, { missing: [404] })
+  if (!c || !Array.isArray(c.files) || c.files.length >= COMPARE_FILES_MAX) return null
+  return c.files.flatMap((f) => [f.filename, f.previous_filename]).filter((f) => typeof f === 'string' && f)
+}
+
 /** The open pull requests whose base is `branch` (deleting it would close them). */
 export async function openPrsOnBase(repo, branch) {
   checkRepo(repo)

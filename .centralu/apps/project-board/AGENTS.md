@@ -133,7 +133,10 @@ intermittent failures (#368), and how long a merge may wait.
   so the PR author stays the author. Pending answers at once unless `wait: true`, which polls every
   `pollSeconds` up to `waitMinutes`, sends a progress notification each poll (Centralu ends a call
   after 10 minutes without one), and stops if the PR's head moves. A Codex session gets an early
-  "still running" at 240 s and follows the call with `run_status`.
+  "still running" at 240 s and follows the call with `run_status`. When the merge queue has a batch running on the
+  same default branch (`mergeWarning`, batch.mjs), the answer says so, merged or still waiting: merging here moves the
+  default branch under the batch, which then stops before it lands and is built again (#1548, below), a CI run lost; it
+  offers `queue_merge` instead. A warning, never a refusal: a release bump goes through here.
 - **`mark_ready`** (`pr`, `note?`, `detail?`): the end of a contributor's flow (#386 merge policy:
   merging is the maintainer's act, and `merge_when_green`/`queue_merge` refuse without maintain or
   admin). Marks a draft ready for review (`gh pr ready`) unless a required check failed, which it
@@ -522,9 +525,21 @@ default 4: the owner's, 2026-10-19, this repository's too).
   run: `supersededSuites`, as on the single path, #1015), or a mix of both (`onlyCancelledByBatch`;
   queue/batch-89 sat in landing for a same-second duplicate and looped back); anything else waits 30
   minutes, then the rest go back. Before each merge
-  a `merge-queue` success status on its head names the batch run. The default branch moved by
-  something else, a head moved, a draft, DIRTY, BEHIND, BLOCKED, a long subject: that member and the
-  rest go back to their own CI (where the usual attention says what is wrong). Found merged with the
+  a `merge-queue` success status on its head names the batch run. A head moved, a draft,
+  DIRTY, BEHIND, BLOCKED, a long subject: that member and the rest go back to their own CI (where the usual attention
+  says what is wrong).
+- **The default branch moved under the batch** (#1548, 2026-10-26: batch-209 had #1542 green when the release bump #1545
+  landed through `merge_when_green`; the stop marked it `alone` and its session was told to queue it again by hand,
+  for a pull request whose tests had passed). That stop alone ("something else landed", `decideLanding`'s `moved`) is not
+  the members' fault: the ones not landed are put into a **new batch on the new default branch at once**
+  (`rebatchAfterMove`, called as the old batch ends), with no `batchless`, no `alone`, no message to a session, and
+  without the round through their own CI that sending them back costs. This covers a batch of several: the members after
+  the point it stopped at stay together. **Capped**: each member is batched again at most `MOVED_CAP` (3) times per head
+  (`moved: { head, n }` on the item; a new head or queueing it again starts over), so a busy default branch cannot
+  keep a pull request from landing for ever, nor the queue forming the same batch for ever. Past the cap it is treated
+  as before: a batch of one marks it `alone` with why (and "batched again 3 times"), so its session is told once; one of
+  several is kept out of a batch with others (`batchless`) and goes alone next. Without tiers a batch needs two, so one
+  member left cannot form one and goes back to its own CI, unmarked. Every other stop keeps the old rule. Found merged with the
   batch's tree after it (a driver stopped before writing it down), it counts as landed. The batch
   branch is deleted when the batch ends, whatever the end, but only once the queue has written down
   that it made it (`branchMade`), and only while it is still the driver.
@@ -582,6 +597,29 @@ the required set: it judges main's runs and its probes by their conclusion, and 
   items whose quick tier passed, oldest first; one sent back from a batch on its head (`batchless`)
   is taken alone, when it is the oldest. The batch's run must have passed the full tier's check too,
   or nothing lands from it (the batch is dropped).
+- **A batch that changes the screen runs the heavy jobs first** (#1538, the owner's decision of 2026-10-26; after
+  `batch-194` landed #1521 from the fast tier and main's full run failed in four e2e shards, the revert did not apply and
+  main stayed red). With `landTier` "quick" and project.json `ci.screen`, each batch is judged as it is built
+  (`judgeBatch`, queue-screen.mjs): the files it adds to the default branch (GitHub's comparison, a renamed file under both
+  names) go to the default branch's own `.github/scripts/ci-changes.mjs --screen` (`screenFiles`: the window, the host and the
+  protocol outside their tests, the scenarios, the build). **This app keeps no list of paths of its own**: that script is
+  the one definition, beside the mapping of files to e2e jobs (`code`), and `tooling/build-workflow.test.ts` holds the two
+  together (a change that reaches the screen is always one the UI scenarios run for) and holds the app's source free of
+  such paths. A batch that cannot be judged (the script not on the default branch yet, an older one without `--screen`, a
+  crash, more files than GitHub lists) counts as changing the screen. The batch's `tier` is then `full`: its run is
+  started with `ci.screen.inputs` (`tier: full`, `everything: false`: the files still leave out the jobs they cannot
+  affect), and it lands only from a run where the full tier's check passed **and each check named in `ci.screen.checks`**
+  (`e2e (webkit *)`, `e2e (chromium *)`) was reported and **succeeded**: skipped, left out or never reported is not a
+  pass, whatever it counts for in the required set (`screenLanded`, `gateGreen`). The shards are waited for (a batch in
+  `ci` while they run). Any other batch has `tier` `quick` and lands as before, from the fast tier. Where the owner's
+  project.json has no `ci.screen`, or `landTier` is "full", nothing changes (the full tier, always).
+- **Which tier a batch ran is said**: its line (`CI at <sha>, the full tier`, `green (the fast tier); landed 1 of 2`), its start
+  event (with why: "it changes the screen (packages/ui/src/App.tsx)", or "it changes nothing the UI scenarios see (4
+  files)"), its pass event, the `merge-queue` status on a member's head (`Passed the full tier of CI in queue/batch-N`),
+  the message a member's session gets when it lands ("Tested in batch …, in the fast tier."), and the attention for a
+  batch of one that ended without landing (`alone.tier`: "its batch of one ran the fast tier and ended without landing
+  it", and what the pull request lands from, `landsFrom`, not "only from a full run" under `landTier` "quick").
+  `PROJECT_BOARD_CI_SCREEN` ("off", or the object as JSON) sets it for tests only.
 - **Bisect** (2026-10-19): a red batch is split in halves, each a batch of its own built in turn on
   the default branch as it is then, so a half that passes lands before the other half is tried, and a
   red half is split again. **A pull request red alone** (the end of a bisect, or a batch of one) needs
@@ -996,7 +1034,8 @@ step shows on the screen.
 - `ci.mjs` — the CI and merge decisions as pure functions (no gh, no IO).
 - `queue.mjs`, `queue-driver.mjs`, `bin/merge-queue.mjs` — the merge queue's decisions (pure), its file,
   lease and polls, and the watch command. `batch.mjs`, `queue-batch.mjs` — its batches: the rules
-  (pure) and their steps on GitHub. `run-failure.mjs` — why a CI run failed, real or infrastructure
+  (pure) and their steps on GitHub. `queue-screen.mjs` — which tier a batch must run (#1538): it asks the default
+  branch's `ci-changes.mjs` whether the batch changes the screen. `run-failure.mjs` — why a CI run failed, real or infrastructure
   (pure: the rerun policy). `queue-conflict.mjs` — the git work of a conflict. `queue-integrate.mjs` —
   the integrator's judge of a branch's tier, and the record's texts (#1259 step 3).
 - `markdown.mjs` — GitHub Markdown to safe HTML for the reader, and the decision summary parser (pure).

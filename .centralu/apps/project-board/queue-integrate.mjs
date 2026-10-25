@@ -140,7 +140,7 @@ export function recordVerified(j, { branch, defaultBranch, owner, verified }) {
   return [
     String(verified ?? '').trim(),
     `${j.line} Judged by the integrator (#1259 step 3) from the diff of ${branch} at ${short(j.head)} against ${defaultBranch} at ${short(j.main)}, with ${defaultBranch}'s ${TIER_SCRIPT} and ${TIER_RULES}.`,
-    `Handed over with the board's integrate${owner ? ` by ${owner}` : ''}: this pull request is the record. The merge queue lands it after the fast gate (a batch's quick tier on ${defaultBranch}); an auto-tier change gets no review beyond the checks.`,
+    `Handed over with the board's integrate${owner ? ` by ${owner}` : ''}: this pull request is the record. The merge queue lands it after the fast gate (a batch's quick tier on ${defaultBranch}, and the heavy jobs too when the batch changes the screen); an auto-tier change gets no review beyond the checks.`,
   ]
     .filter(Boolean)
     .join('\n\n')

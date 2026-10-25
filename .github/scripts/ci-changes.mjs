@@ -76,6 +76,8 @@ const TESTS = [/\.test\.(ts|tsx|mts|mjs)$/, /\.test-helpers\.(ts|mts)$/, /^e2e\/
 const HOST_TEST_INPUTS = [/^tooling\/fixtures\/node-floor\.json$/]
 /** The window: what the host, the keeper and the content verifier never load */
 const WINDOW = [/^packages\/(ui|core|platform)\//, /^apps\/web\//]
+/** The product the UI scenarios start and speak to besides the window: the host and the protocol between them */
+const HOST_PRODUCT = [/^packages\/(agent-host|protocol)\//]
 /** What the builds, the type checker or CI itself read, wherever it sits: a change to one runs everything */
 const EVERYTHING = [
   /(^|\/)tsconfig[^/]*\.json$/,
@@ -109,6 +111,26 @@ export function classify(files) {
     code: nonDocs.length > 0,
   }
 }
+
+/**
+ * The files of a change that can alter what the UI scenarios (e2e, both browsers) see (2026-10-26, #1538): the part of
+ * `code` that is behaviour. The window and the host and protocol it talks to, outside their tests; the scenarios and
+ * their fixtures (`e2e/`) themselves; and whatever makes `classify` run everything (the builds, the lockfile, CI
+ * itself). Not documents, and not a unit test or a tool's own tests (`tooling/`): those are in `code`, but no
+ * scenario can see them. `null` when the files are not known.
+ *
+ * This is the one definition of "a change to the screen". The merge queue does not keep a path list of its own: it
+ * asks this function, read from the default branch (`node .github/scripts/ci-changes.mjs --screen`, the files as a JSON
+ * list on stdin), when it decides how far a batch is tested before it lands (project.json `ci.screen`). A test holds
+ * it inside `code`: a change that reaches the screen is always one the UI scenarios run for.
+ */
+export function screenFiles(files) {
+  if (files === null) return null
+  return files.filter((f) => !matches(DOCS, f) && (matches(EVERYTHING, f) || f.startsWith('e2e/') || (!matches(TESTS, f) && (matches(WINDOW, f) || matches(HOST_PRODUCT, f)))))
+}
+
+/** Whether a change reaches the screen (see `screenFiles`); files that are not known are taken to. */
+export const screenChanged = (files) => screenFiles(files)?.length !== 0
 
 /**
  * The tier of a run (see the header), with why. `onMain`: HEAD is already on main. `dispatch`: a
@@ -181,7 +203,16 @@ export function changedFiles(cwd = process.cwd(), main = 'origin/main') {
   return { files: out.split('\0').filter(Boolean), why: `against its merge-base with ${main}, ${base.slice(0, 12)}` }
 }
 
+/** `--screen`: the merge queue's question (see `screenFiles`). Reads a JSON list of file names on stdin, answers `{ screen, file, count }`. */
+function screenMain() {
+  const files = JSON.parse(readFileSync(0, 'utf8'))
+  if (!Array.isArray(files) || !files.every((f) => typeof f === 'string')) throw new Error('a JSON list of file names was expected on stdin')
+  const hits = screenFiles(files)
+  console.log(JSON.stringify({ screen: hits.length > 0, file: hits[0] ?? null, count: files.length }))
+}
+
 function main() {
+  if (process.argv.includes('--screen')) return screenMain()
   // A manual run sets the workflow_dispatch input; a push or a pull request leaves it empty
   const dispatch = process.env.EVERYTHING === 'true' || process.env.EVERYTHING === 'false'
   const changed = changedFiles()

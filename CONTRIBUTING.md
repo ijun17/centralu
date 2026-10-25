@@ -169,10 +169,12 @@ the **quick tier**: `pnpm verify` on Linux and the unit tests on Windows. Everyt
 scenarios in both engines, the bundles, the keeper, the host's tests on the remotes' Node) is the
 **full tier**, which runs on main and on a release bump. A change lands after the **fast tier**
 (#1259, the owner's decision of 2026-10-19): the merge queue (`queue_merge`) lands a pull request
-through a batch built on main that runs the quick tier on what lands, a batch of one included; the
-full tier then runs on main, after it landed. So nothing has run the UI scenarios, the bundles or the
-keeper on your change before it is on main: run `pnpm verify` locally anyway, all of it, before you
-push, and `pnpm e2e` for anything the UI shows. (`merge_when_green` still refuses a head whose own
+through a batch built on main that runs the quick tier on what lands, a batch of one included, and
+the e2e shards of both browsers too when the batch holds a change to the screen (#1538, the owner's
+decision of 2026-10-26: `screenFiles` in `.github/scripts/ci-changes.mjs`); the full tier then runs on
+main, after it landed. So, unless your change reaches the screen, nothing has run the UI scenarios, the
+bundles or the keeper on it before it is on main: run `pnpm verify` locally anyway, all of it, before
+you push, and `pnpm e2e` for anything the UI shows. (`merge_when_green` still refuses a head whose own
 run was quick.) Runs on main are never cancelled by a newer push, and the queue holds landing while
 too many of them are unfinished. When main's full run fails, the board's main guard finds the commit
 that broke it among those since main was last fully green (after rerunning once a job that failed in the runner's own setup, a browser install say, and

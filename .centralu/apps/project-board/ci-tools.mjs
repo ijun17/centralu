@@ -1,5 +1,7 @@
 // CI: ci_status, merge_when_green, mark_ready and read_failed_job.
-import { z } from './runtime/centralu-app-runtime.mjs'
+import { centralu, z } from './runtime/centralu-app-runtime.mjs'
+import { mergeWarning } from './batch.mjs'
+import { readQueue, queueRef } from './queue-driver.mjs'
 import { detailInput, itemOf, itemRef, REF_HELP, refOf, repoInput, repoOf } from './board.mjs'
 import { canMerge, cleanLog, clip, decideMerge, evaluateChecks, failureLineIndex, firstFailure, matchKnownFailure, NO_PERMISSION, squashMessage, workflowCheckNames } from './ci.mjs'
 import { CI, config } from './config.mjs'
@@ -153,11 +155,25 @@ async function mergeWhenGreen({ pr, body, wait = false, waitMinutes, deleteBranc
   const want = itemOf(pr)
   const repo = want.repo
   const what = `PR ${want.ref}`
+  // A merge outside the queue moves the default branch under a batch it is running (#1548): said in the answer. Read fresh
+  // each time, since a batch may start or end while this waits; a queue file that does not read is no reason to refuse
+  const queueNote = (p) => {
+    try {
+      return mergeWarning(readQueue(centralu.dataDir), { repo, pr: want.number, baseRefName: p.baseRefName, defaultBranch, ref: queueRef })
+    } catch {
+      return null
+    }
+  }
+  const noted = (summary, p) => {
+    const note = queueNote(p)
+    return note ? `${summary}
+${note}` : summary
+  }
   const refused = (reason, ci, extra = {}) =>
     ci ? ciAnswer(`Not merged: ${reason}`, ci, { outcome: 'refused', merged: false, ...extra }, { isError: true }) : asError(answer(`Not merged: ${reason}`, { outcome: 'refused', merged: false, ...extra }))
 
   // Who is asking comes first: a contributor's agent gets no further (#386, merge policy).
-  const { permissions } = await readRepo(repo)
+  const { permissions, defaultBranch } = await readRepo(repo)
   if (!canMerge(permissions)) return refused(NO_PERMISSION.reason, null, { kind: 'permission' })
 
   let p = await readPr(repo, want.number)
@@ -175,7 +191,7 @@ async function mergeWhenGreen({ pr, body, wait = false, waitMinutes, deleteBranc
       const ci = ciLines(what, p.headRefOid, req, checks, d.kind === 'failing' ? await failureDetails(repo, checks) : [], detail)
       return refused(d.reason, ci, { kind: d.kind, verdict: checks.verdict })
     }
-    if (d.action === 'merge') return doMerge(repo, what, p, body, del, ciLines(what, p.headRefOid, req, checks, [], detail))
+    if (d.action === 'merge') return doMerge(repo, what, p, body, del, ciLines(what, p.headRefOid, req, checks, [], detail), queueNote(p))
     // wait
     let pause = CI.pollMs
     if (d.kind === 'mergeable' && quick < MERGEABLE_RETRIES) {
@@ -183,10 +199,10 @@ async function mergeWhenGreen({ pr, body, wait = false, waitMinutes, deleteBranc
       pause = MERGEABLE_WAIT_MS
     } else if (!wait) {
       const ci = ciLines(what, p.headRefOid, req, checks, [], detail)
-      return ciAnswer(`Not merged yet: ${d.reason} Call again later, or with wait: true to wait for them.`, ci, { outcome: 'pending', merged: false, verdict: checks.verdict })
+      return ciAnswer(noted(`Not merged yet: ${d.reason} Call again later, or with wait: true to wait for them.`, p), ci, { outcome: 'pending', merged: false, verdict: checks.verdict })
     } else if (Date.now() - started + pause > limitMs) {
       const ci = ciLines(what, p.headRefOid, req, checks, [], detail)
-      return ciAnswer(`Not merged: still not green after ${span(Date.now() - started)} of waiting (limit ${span(limitMs)}). ${d.reason}`, ci, {
+      return ciAnswer(noted(`Not merged: still not green after ${span(Date.now() - started)} of waiting (limit ${span(limitMs)}). ${d.reason}`, p), ci, {
         outcome: 'timeout',
         merged: false,
         verdict: checks.verdict,
@@ -202,7 +218,7 @@ async function mergeWhenGreen({ pr, body, wait = false, waitMinutes, deleteBranc
   }
 }
 
-async function doMerge(repo, what, p, body, del, ci) {
+async function doMerge(repo, what, p, body, del, ci, note = null) {
   const msg = squashMessage({ number: p.number, title: p.title, body, description: p.body })
   const why = await mergePr(repo, p.number, p.headRefOid, msg.subject, msg.body)
   if (why) return ciAnswer(`Not merged: GitHub refused the merge: ${why}`, ci, { outcome: 'refused', merged: false, kind: 'github' }, { isError: true })
@@ -220,7 +236,8 @@ async function doMerge(repo, what, p, body, del, ci) {
       extra.push(e ? `Branch ${p.headRefName} not deleted: ${e}` : `Deleted branch ${p.headRefName}.`)
     }
   }
-  const summary = `Merged ${what} (squash) as ${short(commit)}: "${msg.subject}".${extra.length ? ` ${extra.join(' ')}` : ''}`
+  const summary = `Merged ${what} (squash) as ${short(commit)}: "${msg.subject}".${extra.length ? ` ${extra.join(' ')}` : ''}${note ? `
+${note}` : ''}`
   return ciAnswer(summary, ci, { outcome: 'merged', merged: true, commit, subject: msg.subject })
 }
 
