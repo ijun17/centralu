@@ -359,6 +359,8 @@ describe('what a session is launched with', () => {
 
     it('a point the adapter says that is not under the window is dropped: the window shrank since the process was started', async () => {
       const s = await create()
+      handle(s.id).emitContext(10_000, 258_400, undefined, 155_040)
+      expect(shown(s.id)).toEqual({ used: 10_000, window: 258_400, exactness: 'exact', compactAt: 155_040 })
       handle(s.id).emitContext(10_000, 258_400, undefined, 300_000)
       expect(shown(s.id)).toEqual({ used: 10_000, window: 258_400, exactness: 'exact' })
     })

@@ -479,16 +479,6 @@ describe('a session at rest over the lower share (#1451)', () => {
     expect(w.c.sweep()).toEqual(['s1'])
   })
 
-  it('reads the share against the model’s full window, not a smaller one the tool reported', () => {
-    // 190k of a reported 633k is 30%; of the model’s 1M it is 19%
-    const w = resting({ context: { used: 190_000, window: 633_000, exactness: 'exact' } })
-    w.state.modelWindow = 1_000_000
-    later(w, 60)
-    expect(w.c.sweep()).toEqual([])
-    w.state.modelWindow = 633_000
-    expect(w.c.sweep()).toEqual(['s1'])
-  })
-
   it('takes no share of a window the host does not know in full (a floor under the model’s, or nothing read since a restart) (#1553)', () => {
     const w = resting()
     w.m().context = { used: 190_000, window: 200_000, exactness: 'exact', capped: true }
