@@ -172,6 +172,25 @@ does, `acp/adapter.test.ts`).
 A live Normal to Auto change restarted the process (about 10 s): with Cursor under Auto only, it has no other preset to
 change to.
 
+### 0.7 OpenCode (PR 3), on the core as reviewed
+
+`adapters/opencode/` is a profile and nothing else; the core is PR 1's as fixed after its review.
+
+| Part | OpenCode 1.19.4, measured |
+|---|---|
+| Presets | All four. Safe adds `{permission: {edit: 'ask', bash: 'ask'}}` through `OPENCODE_CONFIG_CONTENT`, which wins over the project's own `opencode.json` and is merged with the person's own value (`config.ts`); it then asks for each edit and command. Normal, Edits and Auto add nothing: Normal follows the person's own OpenCode settings, as it follows the person's policy for Codex (#382), and OpenCode's default asks nothing |
+| Trust and role | Trusted projects only (it reads `AGENTS.md` and the project's `opencode.json`, which can add plugins and servers); no role text, so not the orchestrator, a coordinator or an app's agent |
+| Centralu's own tools | Not asked about under any preset (only `edit` and `bash` ask), so no `centraluToolOf` is needed |
+| Compaction | Its `/compact` sends no protocol frame. Marked only at the end of the compact turn Centralu itself started (`SessionEvents.sendCompact`, `compact: true`), ended `end_turn` with a context reading smaller than the one before it: `trigger: manual`, no summary. A `/compact` the person types is never taken for one (`AcpSessionDeps.infersCompaction`) |
+| Input during a turn | Folded into the running turn by OpenCode; Centralu queues it for the turn's end instead (`midTurnInput: false`), the fold off |
+| Cost | `usage_update.cost` is the session's running total (read in its binary); a turn's cost is what it added, none for the first turn read |
+| Writes | After an asked edit it calls `fs/write_text_file` even with `fs` not advertised; the method-not-found answer is harmless (it writes itself) |
+| Ending | Started behind the host watch like every ACP CLI (§0.6) |
+
+`smoke:opencode` (`packages/agent-host/scripts/smoke-opencode.mjs`) runs it on a temporary host. Once, a reopened
+turn's text began with a stray `</think>` from OpenCode's free model; it did not come back in two recorded runs, so
+nothing strips it (open question 3).
+
 ## 1. What was measured
 
 Everything below rests on frames captured from the real tools on Windows 11 (ijun1, 2026-10-26), with a scratch
@@ -719,3 +738,5 @@ Questions 1 to 6 of the design were answered (§0.1). Left open:
    stays offered so, and how a session gets Auto (the new-session dialog has no preset choice and starts under Normal),
    is the owner's to decide.
 2. **Cursor on Linux.** The layout `findCursor` reads there is measured on macOS only; the weekly drift job will say.
+3. **A reasoning tag in OpenCode's text.** Seen once (§0.7), not recorded. If a recording shows it, the normalizer may
+   drop a model's reasoning tags from message text.

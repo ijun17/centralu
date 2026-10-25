@@ -801,7 +801,7 @@ interface AdapterCapabilities {
   exclusiveWriter: boolean      // 우리가 쥐고 있는 동안 다른 누구도 대화에 쓸 수 없다
   backgroundTasks: boolean      // 백그라운드 작업을 `background_tasks`로 알린다 (#290)
   sleep?: boolean               // #568: 유휴 세션을 재울 수 있다(재개가 캐시를 지킨다고 측정됨). §4.6.1
-  presets?: PermissionPreset[]  // 지킬 수 있는 프리셋. 없으면 전부 (Cursor는 `safe`가 없다, plans/acp-adapter.md §0.1)
+  presets?: PermissionPreset[]  // 지킬 수 있는 프리셋. 없으면 전부 (Cursor는 `auto`만 지킨다, plans/acp-adapter.md §0.1)
   keepsRepoFilesOut?: boolean   // 신뢰하지 않는 프로젝트에서 그 프로젝트 자신의 파일을 못 읽게 할 수 있는가 (#92). 없으면 true
   roleText?: boolean            // Centralu의 역할 글(`systemPromptAppend`)을 받는가. 없으면 true
 }
