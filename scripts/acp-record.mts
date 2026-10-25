@@ -4,7 +4,7 @@
  *
  *   pnpm exec tsx scripts/acp-record.mts <cursor-agent | opencode> [scenario ...]
  *
- * Each scenario (`adapters/acp/scenarios.test-helpers.ts`) drives the real adapter, as the host would, in a new
+ * Each scenario (`adapters/frames/scenarios.test-helpers.ts`) drives the real adapter, as the host would, in a new
  * temporary folder; the adapter's own recorder writes the frames, and they are scrubbed into
  * `adapters/acp/recordings/<tool>-<version>/<scenario>.jsonl`, which `replay.test.ts` plays back. A tool update shows as
  * a diff in those files. It spends model calls: OpenCode's run is free (its free models, no login); Cursor's spends the
@@ -18,13 +18,13 @@ import { fileURLToPath } from 'node:url'
 import type { AdapterCapabilities } from '@cc/protocol'
 import { AcpAdapter } from '../packages/agent-host/src/adapters/acp/adapter.js'
 import type { AcpProfile } from '../packages/agent-host/src/adapters/acp/profile.js'
-import { drive, SCENARIOS, type Scenario } from '../packages/agent-host/src/adapters/acp/scenarios.test-helpers.js'
+import { drive, SCENARIOS, type Scenario } from '../packages/agent-host/src/adapters/frames/scenarios.test-helpers.js'
 import type { AgentProcess, AgentSpawnSpec } from '../packages/agent-host/src/adapters/contract.js'
 import { cursorProfile } from '../packages/agent-host/src/adapters/cursor-agent/index.js'
 import { spawnLocalAgent } from '../packages/agent-host/src/adapters/local-process.js'
 import { whichTool } from '../packages/agent-host/src/env-path.js'
 import { launchFor } from '../packages/agent-host/src/tool-launch.js'
-import { scrub } from './acp-scrub.mts'
+import { scrub } from './frames-scrub.mts'
 
 const OUT = fileURLToPath(new URL('../packages/agent-host/src/adapters/acp/recordings/', import.meta.url))
 
@@ -65,7 +65,7 @@ async function main(): Promise<number> {
   for (const scenario of chosen) {
     const cwd = mkdtempSync(join(tmpdir(), `acp-record-${scenario.name}-`))
     const raw = mkdtempSync(join(tmpdir(), 'acp-raw-'))
-    process.env.CC_ACP_RECORD = raw
+    process.env.CC_RECORD_FRAMES = raw
     let last: AgentProcess | null = null
     const spawn = (spec: AgentSpawnSpec) => (last = spawnLocalAgent(spec))
     const adapter = adapterFor(tool, scenario, spawn)

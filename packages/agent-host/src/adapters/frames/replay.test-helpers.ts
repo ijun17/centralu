@@ -5,10 +5,10 @@ import { isDeepStrictEqual } from 'node:util'
 import type { AgentProcess, AgentSpawnSpec } from '../contract.js'
 
 /**
- * Plays a recording (docs/plans/acp-adapter.md §10.2) into the adapter as the agent: each frame the adapter writes is
- * matched against the next recorded outgoing one (same method; an answer to the agent's request with the same result),
- * then the recorded incoming frames up to the next outgoing one are written back, with the ids of answers rewritten to
- * the adapter's own. A recording holds every process a scenario started, one after another, each ended by its `exit`.
+ * Plays a recording (docs/plans/acp-adapter.md §10.2) into an adapter as its tool: each line the adapter writes is
+ * matched against the next recorded outgoing one, then the recorded incoming lines up to the next outgoing one are
+ * written back. What "the same frame" means is the protocol's (`FrameCodec`): JSON-RPC (ACP) matches by method and
+ * rewrites answer ids; a stream-json CLI's lines match by their `type`. Tool-neutral, like the recorder. A recording holds every process a scenario started, one after another, each ended by its `exit`.
  * Nothing waits on a clock: a frame goes out when the adapter has sent what precedes it.
  */
 
@@ -25,7 +25,41 @@ export function loadRecording(path: string): Recording {
 /** What went wrong in a replay; a test asserts it stays empty and that every frame was used */
 export type ReplayState = { problems: string[]; left(): number; spawned: number }
 
-export function replaySpawner(recording: Recording): { spawn: (spec: AgentSpawnSpec) => AgentProcess; state: ReplayState; peers: ReplayPeer[] } {
+/** What "the same frame" means for one protocol */
+export type FrameCodec = {
+  /** Null when `sent` is the recorded outgoing frame, else why not; `ids` maps recorded ids to the adapter's own */
+  match(sent: Record<string, unknown>, recorded: Record<string, unknown>, ids: Map<string, string | number>): string | null
+  /** A recorded incoming frame as it is written to the adapter */
+  rewrite(incoming: Record<string, unknown>, ids: Map<string, string | number>): Record<string, unknown>
+}
+
+/** JSON-RPC 2.0 (ACP): a request or notification by its method, an answer to the tool's request by its id and result */
+export const jsonRpcCodec: FrameCodec = {
+  match(sent, want, ids) {
+    if (typeof want.method === 'string') {
+      if (sent.method !== want.method) return `the adapter sent ${describe(sent)} where the recording sends ${describe(want)}`
+      if (want.id !== undefined) ids.set(String(want.id), sent.id as string | number)
+      return null
+    }
+    if (String(sent.id) !== String(want.id) || !isDeepStrictEqual(sent.result ?? null, want.result ?? null)) {
+      return `the adapter answered ${JSON.stringify(sent)} where the recording answers ${JSON.stringify(want)}`
+    }
+    return null
+  },
+  rewrite(incoming, ids) {
+    const msg = { ...incoming }
+    if (msg.id !== undefined && msg.method === undefined) msg.id = ids.get(String(msg.id)) ?? msg.id
+    return msg
+  },
+}
+
+/** JSON lines with a `type` (a stream-json CLI): the same type, the rest as the tool chose */
+export const jsonLinesCodec: FrameCodec = {
+  match: (sent, want) => (sent.type === want.type ? null : `the adapter sent ${String(sent.type)} where the recording sends ${String(want.type)}`),
+  rewrite: (incoming) => incoming,
+}
+
+export function replaySpawner(recording: Recording, codec: FrameCodec = jsonRpcCodec): { spawn: (spec: AgentSpawnSpec) => AgentProcess; state: ReplayState; peers: ReplayPeer[] } {
   let cursor = 0
   const frames = recording.frames
   const peers: ReplayPeer[] = []
@@ -40,7 +74,7 @@ export function replaySpawner(recording: Recording): { spawn: (spec: AgentSpawnS
   return {
     spawn: () => {
       state.spawned++
-      const peer = new ReplayPeer(take(), state.problems)
+      const peer = new ReplayPeer(take(), state.problems, codec)
       peers.push(peer)
       return peer
     },
@@ -73,6 +107,7 @@ export class ReplayPeer extends EventEmitter implements AgentProcess {
   constructor(
     private readonly frames: Rec[],
     private readonly problems: string[],
+    private readonly codec: FrameCodec = jsonRpcCodec,
   ) {
     super()
     this.stdin.on('data', (d: Buffer) => {
@@ -98,15 +133,9 @@ export class ReplayPeer extends EventEmitter implements AgentProcess {
       this.problems.push(`the adapter sent ${describe(msg)} where the recording has ${expected ? describeRec(expected) : 'nothing more'}`)
       return
     }
-    const want = expected.msg
-    if (typeof want.method === 'string') {
-      if (msg.method !== want.method) {
-        this.problems.push(`the adapter sent ${describe(msg)} where the recording sends ${describe(want)}`)
-        return
-      }
-      if (want.id !== undefined) this.ids.set(String(want.id), msg.id as string | number)
-    } else if (String(msg.id) !== String(want.id) || !isDeepStrictEqual(msg.result ?? null, want.result ?? null)) {
-      this.problems.push(`the adapter answered ${JSON.stringify(msg)} where the recording answers ${JSON.stringify(want)}`)
+    const problem = this.codec.match(msg, expected.msg, this.ids)
+    if (problem) {
+      this.problems.push(problem)
       return
     }
     this.i++
@@ -122,8 +151,7 @@ export class ReplayPeer extends EventEmitter implements AgentProcess {
         this.finish(f.code ?? null, (f.signal as NodeJS.Signals | null) ?? null)
         return
       }
-      const msg = { ...f.msg }
-      if (msg.id !== undefined && msg.method === undefined) msg.id = this.ids.get(String(msg.id)) ?? msg.id
+      const msg = this.codec.rewrite(f.msg ?? {}, this.ids)
       this.stdout.write(`${JSON.stringify(msg)}\n`)
     }
   }

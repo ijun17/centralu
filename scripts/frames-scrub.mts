@@ -1,10 +1,10 @@
 #!/usr/bin/env -S npx tsx
 /**
- * Turns a raw ACP recording into a fixture (docs/plans/acp-adapter.md §10.1, #1498).
+ * Turns a raw recording of a tool's frames (ACP or any JSON-lines protocol) into a fixture (docs/plans/acp-adapter.md §10.1, #1498).
  *
- *   pnpm exec tsx scripts/acp-scrub.mts <raw.jsonl> <out.jsonl> --tool <name> --version <v> --scenario <name> --cwd <path>
+ *   pnpm exec tsx scripts/frames-scrub.mts <raw.jsonl> <out.jsonl> --tool <name> --version <v> --scenario <name> --cwd <path>
  *
- * The raw file is the host's (`CC_ACP_RECORD`, lines `{t, dir, line}`) or a probe's (`{t, dir, msg}`). The fixture is one
+ * The raw file is the host's (`CC_RECORD_FRAMES`, lines `{t, dir, line}`) or a probe's (`{t, dir, msg}`). The fixture is one
  * header line, then `{t, dir: 'in' | 'out', msg}` per frame and `{t, dir: 'exit', code, signal}` when the process ended.
  * Scrubbed: the working folder and the home folder become `<cwd>` and `<home>`; session, tool call and message ids become
  * stable placeholders; anything shaped like a credential or an email address is removed; command and model lists keep
@@ -69,7 +69,7 @@ export function scrub(frames: readonly Frame[], cwd: string, home: string = home
   return out
 }
 
-if (import.meta.url === `file://${process.argv[1]?.replace(/\\/g, '/')}` || process.argv[1]?.endsWith('acp-scrub.mts')) {
+if (import.meta.url === `file://${process.argv[1]?.replace(/\\/g, '/')}` || process.argv[1]?.endsWith('frames-scrub.mts')) {
   const [input, output] = process.argv.slice(2)
   const flag = (name: string) => {
     const i = process.argv.indexOf(`--${name}`)
@@ -77,7 +77,7 @@ if (import.meta.url === `file://${process.argv[1]?.replace(/\\/g, '/')}` || proc
   }
   const cwd = flag('cwd')
   if (!input || !output || !cwd || !flag('tool') || !flag('version') || !flag('scenario')) {
-    console.error('usage: acp-scrub.mts <raw.jsonl> <out.jsonl> --tool <name> --version <v> --scenario <name> --cwd <path>')
+    console.error('usage: frames-scrub.mts <raw.jsonl> <out.jsonl> --tool <name> --version <v> --scenario <name> --cwd <path>')
     process.exit(2)
   }
   const frames = readFileSync(input, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as Frame)

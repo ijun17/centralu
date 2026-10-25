@@ -30,7 +30,8 @@ export const AUTH_REQUIRED = -32000
 export const RESOURCE_NOT_FOUND = -32002
 
 /** Which way a line went, for the recorder (§10.1) */
-export type FrameDirection = 'in' | 'out'
+export type { FrameDirection } from '../frames/recorder.js'
+import type { FrameDirection } from '../frames/recorder.js'
 
 export type AcpConnectionHandlers = {
   onNotification(method: string, params: unknown): void

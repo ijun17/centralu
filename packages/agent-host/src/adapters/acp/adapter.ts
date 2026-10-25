@@ -4,7 +4,7 @@ import type { AgentAdapter, AgentProcess, AgentSpawnSpec, CreateSessionOpts, Eve
 import { toolResultEvent } from '../tool-result.js'
 import { spawnLocalAgent } from '../local-process.js'
 import type { AcpProfile } from './profile.js'
-import { frameRecorder } from './recorder.js'
+import { frameRecorder } from '../frames/recorder.js'
 import { AcpSession } from './session.js'
 
 /** How long a Stop waits for the agent's `cancelled` before the person hears it has not taken effect (Claude's bound) */

@@ -5,8 +5,8 @@ import { describe, expect, it } from 'vitest'
 import type { AdapterCapabilities, NormalizedEvent } from '@cc/protocol'
 import { AcpAdapter } from './adapter.js'
 import type { AcpProfile } from './profile.js'
-import { loadRecording, replaySpawner } from './replay.test-helpers.js'
-import { drive, SCENARIOS } from './scenarios.test-helpers.js'
+import { loadRecording, replaySpawner } from '../frames/replay.test-helpers.js'
+import { drive, SCENARIOS } from '../frames/scenarios.test-helpers.js'
 
 /**
  * The adapter against recordings of the real tools (docs/plans/acp-adapter.md §10, #1498). Each recording was made by
@@ -34,7 +34,7 @@ async function replay(dir: string, name: string): Promise<{ events: NormalizedEv
   const scenario = SCENARIOS.find((s) => s.name === name)!
   const { spawn, state, peers } = replaySpawner(recording)
   const adapter = new ReplayAdapter(profile(String(recording.header.version)), spawn, 60_000)
-  const events = await drive(adapter, scenario, '/work', `replay-${name}`, 10_000, () => peers.at(-1)?.kill('SIGKILL'))
+  const events = await drive(adapter, scenario, '/work', `replay-${name}`, 0, () => peers.at(-1)?.kill('SIGKILL'))
   return { events, problems: state.problems, left: state.left() }
 }
 
