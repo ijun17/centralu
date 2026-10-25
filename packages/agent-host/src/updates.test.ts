@@ -32,6 +32,7 @@ function make(
     schedule?: (fn: () => void, ms: number) => () => void
     /** The version the build carries; RELEASE when not given, `null` for the build's own (`APP_VERSION`) */
     current?: string | null
+    build?: string
   } = {},
 ) {
   const published: UpdateStatus[] = []
@@ -42,6 +43,7 @@ function make(
   let now = 1000
   const svc = new UpdateService((s) => published.push(s), {
     ...(opts.current === null ? {} : { current: opts.current ?? RELEASE }),
+    ...(opts.build === undefined ? {} : { build: opts.build }),
     fetchLatest: async (timeoutMs): Promise<LatestResult> => {
       fetches++
       if (opts.fetchLatest) return opts.fetchLatest(timeoutMs)
@@ -650,6 +652,24 @@ describe('UpdateService', () => {
       await settle()
       expect(h.calls[0]).toEqual(['npm', ['i', '-g', '--prefer-online', 'centralu@9999.0.0']])
       expect(h.svc.current().phase).toBe('restart_required')
+    })
+
+    // #1501 review: a stored "on" in the real data folder ran npm i -g under `pnpm host`, whose version is the placeholder
+    it.each([
+      ['a host from source', { build: 'dev' }],
+      ['an unstamped build (a source tree, a remote dev build)', { current: '0.0.0-dev' }],
+      ['the build as this source tree carries it', { current: null }],
+    ])('never installs by itself on %s, and still shows the release, which a click installs', async (_, o) => {
+      const failures: number[] = []
+      const h = make({ registry: '9999.0.0', autoApply: true, ...o, schedule: (fn) => { failures.push(1); fn(); return () => {} } })
+      expect(await h.svc.check(true)).toMatchObject({ phase: 'idle', newer: true, latest: '9999.0.0', autoApply: true })
+      expect(h.svc.setAutoApply(true).phase).toBe('idle')
+      await settle()
+      expect(h.calls).toEqual([])
+      expect(failures).toEqual([])
+      expect((await h.svc.apply()).phase).not.toBe('idle')
+      await settle()
+      expect(h.calls[0]).toEqual(['npm', ['i', '-g', '--prefer-online', 'centralu@9999.0.0']])
     })
 
     it('does nothing when the registry has nothing newer', async () => {

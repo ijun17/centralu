@@ -59,7 +59,7 @@ const CARRIERS = filesNamed(RELEASE.versionFiles, TRACKED).sort() as string[]
  * The fixture's release: this repository's last under the brand scheme. Since #1501 the repository's carriers hold the
  * placeholder and brand.ts declares nothing, so a fixture of the brand scheme is made from them (`brandSchemeText`).
  */
-const BRAND_VERSION = '0.1.0-beta.36'
+const BRAND_VERSION = '0.1.0-beta.37'
 const PLACEHOLDER = '0.0.0-dev'
 const NEXT = nextVersion(BRAND_VERSION) as string
 /** A carrier of this repository as it was under the brand scheme at `version`: brand.ts declaring it, the rest carrying it */

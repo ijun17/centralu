@@ -65,7 +65,7 @@ describe('which version a build carries (app-version.mjs)', () => {
   })
 
   it('checks a version as SemVer without build metadata, which the content check in Rust refuses', () => {
-    for (const ok of ['0.1.0-beta.37', '1.0.0', '0.2.0-beta.20.local.3', '1.0.0-rc.1']) expect(checkAppVersion(ok), ok).toBe(ok)
+    for (const ok of ['0.2.0-beta.4', '1.0.0', '0.2.0-beta.20.local.3', '1.0.0-rc.1']) expect(checkAppVersion(ok), ok).toBe(ok)
     for (const bad of ['1.0.0+x', '1.0', ' 1.0.0', '1.0.0-', '1.0.0-beta..1', '9007199254740992.0.0', 1]) expect(() => checkAppVersion(bad), String(bad)).toThrow()
   })
 })

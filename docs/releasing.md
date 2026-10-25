@@ -415,7 +415,7 @@ the version is stamped at build time from the tag, so no file carries it and no 
 goes on a commit of main that is already fully green. This lands in steps: the guard and the board's path first (both
 schemes accepted, nothing changes until the switch), then the stamp and the switch, then the old path goes. The design
 and its review are on #1501. **This repository is on the tag scheme** since the switch (`release.scheme: "tag"`,
-`brand.ts` importing the version): the bump steps above describe releases up to 0.1.0-beta.36, and stay until the old
+`brand.ts` importing the version): the bump steps above describe releases up to 0.1.0-beta.37, and stay until the old
 path is removed.
 
 - **Where a build's version comes from.** Git holds none. `scripts/app-version.mjs` resolves it: `CENTRALU_VERSION`,
@@ -431,7 +431,8 @@ path is removed.
   fields alone. Nothing is compiled into Rust: the window reads the stamped `tauri.conf.json` at run time
   (`package_info()`) and passes it to the keeper as `--app-version`, which a keeper running a built host now requires.
   `pnpm dev`, `pnpm host`, `pnpm app:dev` and the tests run with `0.0.0-dev`: such a host is `dev`, installs
-  nothing on linked machines, and its update line shows the latest release as newer.
+  nothing on linked machines, never installs a release by itself whatever "Automatic updates" holds (`installsByItself`),
+  and its update line shows the latest release as newer.
   `version.generated.ts` is committed, not gitignored and written at install as first designed: `pnpm pre-pr`
   type-checks in worktrees that never install, where a missing file would fail. The stamper is `.mjs`, since
   `bundle.mjs` runs it under plain node. CI's `bundle` job fetches the tags and stamps the newest one before building,

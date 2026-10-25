@@ -542,6 +542,8 @@ const themes = new ThemeFiles(join(dataRoot(), 'themes'), () => events.push({ ty
 await themes.start().catch((e: Error) => console.error(`[themes] the themes folder is unavailable: ${e.message}`))
 
 const updates = new UpdateService((status) => events.push({ type: 'update_status', status }), {
+  // A host from source never installs by itself, whatever is stored (#1501 review, `installsByItself`)
+  build: BUILD,
   // On by default when nothing has been saved yet. Since the check is read-only and every failure
   // is swallowed, leaving it on costs nothing, while leaving it off traps **someone who never once
   // opens settings** on an old version forever — that person is exactly the one most likely to stay
