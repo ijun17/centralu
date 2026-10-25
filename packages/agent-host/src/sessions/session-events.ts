@@ -359,7 +359,7 @@ export class SessionEvents {
 
   /**
    * The tool's reading of the context, as the rest of the host and the screens see it (#1553): `window` is the model's full window
-   * (`ModelWindows.shareWindow`), `capped` says it is not known, `compactAt` is where the session's process compacts. The reading
+   * (`ModelWindows.shareWindow`), `capped` says it is not known, `compactAt` is where the adapter says the session's process compacts. The reading
    * itself is what `ModelWindows` learns the model's window from, so it is noted first, against the window the tool reported. An
    * estimate from a request (#1492) is no reading of the model's window and carries what the last reading did (`ContextMeter`).
    */
@@ -368,8 +368,10 @@ export class SessionEvents {
     if (!m) return e
     this.host.modelWindows.note(m, e.window, e.model)
     const { window, capped } = this.host.modelWindows.shareWindow(m, e.window)
-    const compactAt = this.host.modelWindows.compactAtOf(m.id)
-    return { ...e, window, ...(capped ? { capped: true } : {}), ...(compactAt !== null ? { compactAt } : {}) }
+    // The adapter's point, where the process really compacts; one not under the window says nothing (a window that shrank since the start)
+    const { compactAt: said, ...rest } = e
+    const compactAt = said !== undefined && said > 0 && said < window ? said : null
+    return { ...rest, window, ...(capped ? { capped: true } : {}), ...(compactAt !== null ? { compactAt } : {}) }
   }
 
   /** A state hint, for storage: the core reducer's rules on the host's copy (`applySessionState`, protocol session-state.ts) */

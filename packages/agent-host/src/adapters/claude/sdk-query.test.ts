@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { claudeAutoCompactWindow, claudeQueryOptions, compactPointOff, flagSettings } from './sdk-query.js'
+import { claudeAutoCompactWindow, claudeCompactAt, claudeQueryOptions, compactPointOff, flagSettings } from './sdk-query.js'
 
 /**
  * What Claude Code is told in the flag layer (#1376): where it compacts by itself, per session and without touching a file,
@@ -69,5 +69,23 @@ describe('compactPointOff', () => {
 
   it('does not blame the buffer for a model whose own window is smaller than the one passed', () => {
     expect(compactPointOff(633_000, 167_000, 200_000)).toBeNull()
+  })
+})
+
+describe('claudeCompactAt (#1553)', () => {
+  it("is the point the CLI says, not the tokens asked for: asked 40k on a 200k model it compacts at 67k", () => {
+    expect(claudeCompactAt({ autoCompactTokens: 40_000 }, 67_000)).toBe(67_000)
+    expect(claudeCompactAt({ autoCompactTokens: 190_000 }, 167_000)).toBe(167_000)
+  })
+
+  it('is nothing for a process Centralu did not start to compact, whatever threshold the CLI reports', () => {
+    expect(claudeCompactAt({}, 167_000)).toBeUndefined()
+    // An adopted process: the ceiling its host kept says whether it was; the setting now does not
+    expect(claudeCompactAt({ processSource: { spawn: {} as never, adopt: {} as never }, autoCompactTokens: 120_000 }, 167_000)).toBeUndefined()
+    expect(claudeCompactAt({ processSource: { spawn: {} as never, adopt: {} as never }, autoCompactCeiling: 153_000 }, 120_000)).toBe(120_000)
+  })
+
+  it('is nothing when the CLI reports no threshold', () => {
+    expect(claudeCompactAt({ autoCompactTokens: 120_000 }, 0)).toBeUndefined()
   })
 })

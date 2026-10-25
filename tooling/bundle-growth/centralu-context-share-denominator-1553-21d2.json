@@ -1,4 +1,4 @@
 {
-  "bytes": 600,
-  "reason": "One context share against the model's full window (#1553): the gauge's tooltip says when the full window is not known and where the tool compacts, a mark on the bar, and the protocol's contextShare with the two added reading fields (capped, compactAt). Local build: 1,908,938 B, 438 B over the 1,908,500 B ceiling. Plain strings and a pure function with no dependency; lazy loading would not lower the total, which counts every chunk."
+  "bytes": 1000,
+  "reason": "One context share against the model's full window (#1553): the gauge's mark on the bar with its tooltip lines (where the tool compacts, when the full window is not known), the warning that follows the mark, and the protocol's contextShare with the two added reading fields (capped, compactAt). Measured against main at 4ecc7c744 (1,908,018 B on a production build): +964 B (1,908,982 B), all in the main chunk. Plain strings and a pure function with no dependency; lazy loading would not lower the total, which counts every chunk."
 }

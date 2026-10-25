@@ -28,7 +28,7 @@ const KEEP_ALL = { projectId: 'p1', projectName: 'p1', projectPath: '/tmp/p1', r
  */
 const PER_SESSION = [
   'agent_depth', 'hub_ask_depth', 'report_paused', 'fresh_start', 'code_intelligence',
-  'background_tasks', 'tool_prefix', 'launch_settings', 'auto_compact_ceiling', 'auto_compact_at', 'external_synced', 'session_apps', 'session_app_names',
+  'background_tasks', 'tool_prefix', 'launch_settings', 'auto_compact_ceiling', 'external_synced', 'session_apps', 'session_app_names',
   // Where a list setting sets aside a value it could not read (#384, `asideKeyOf`)
   asideKeyOf('session_apps:x').slice(0, -2),
 ]

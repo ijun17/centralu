@@ -20,6 +20,7 @@ vi.mock('./client.js', () => ({
 }))
 
 const { CodexAdapter } = await import('./index.js')
+const { codexCompactAt } = await import('./thread-open.js')
 const configOf = (method: string) => state.requests.find((r) => r.method === method)?.params?.config as Record<string, unknown> | undefined
 
 beforeEach(() => {
@@ -41,5 +42,13 @@ describe('model_auto_compact_token_limit', () => {
     await new CodexAdapter().createSession({ sessionId: 's1', cwd: '/tmp', permissionPreset: 'normal', resumeExternalId: 'ext-1' }, () => {})
     expect(configOf('thread/start')).not.toHaveProperty('model_auto_compact_token_limit')
     expect(configOf('thread/resume')).not.toHaveProperty('model_auto_compact_token_limit')
+  })
+})
+
+describe('the point told with a context reading (#1553)', () => {
+  it('is the limit the thread was started with, and nothing when Centralu did not set one or the process was adopted', () => {
+    expect(codexCompactAt({ autoCompactTokens: 155_040 })).toBe(155_040)
+    expect(codexCompactAt({})).toBeUndefined()
+    expect(codexCompactAt({ autoCompactTokens: 155_040, processSource: { spawn: {} as never, adopt: {} as never } })).toBeUndefined()
   })
 })

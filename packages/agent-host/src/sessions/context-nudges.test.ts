@@ -11,13 +11,17 @@ import { ContextNudges, type ContextNudgesHost } from './context-nudges.js'
 
 const WINDOW = 1_000_000
 
-function world(over: { window?: number | null; setting?: Partial<typeof DEFAULT_AUTO_COMPACT> } = {}) {
-  const session = { id: 's1', tool: 'claude', state: 'working', live: true, context: { used: 0, window: WINDOW, exactness: 'exact' } } as SessionInfo
+function world(over: { window?: number | null; setting?: Partial<typeof DEFAULT_AUTO_COMPACT>; point?: number | null } = {}) {
+  const setting = { ...DEFAULT_AUTO_COMPACT, ...over.setting }
+  const modelWindow = over.window === undefined ? WINDOW : over.window
+  // Where the session's running process compacts, as its last reading said: the setting it was started with, by default
+  const point = over.point === undefined ? (modelWindow ? Math.round(modelWindow * setting.share) : null) : over.point
+  const session = { id: 's1', tool: 'claude', state: 'working', live: true, context: { used: 0, window: WINDOW, exactness: 'exact', ...(point ? { compactAt: point } : {}) } } as SessionInfo
   const told: string[] = []
   const notices: string[] = []
   const state = {
-    setting: { ...DEFAULT_AUTO_COMPACT, ...over.setting },
-    modelWindow: over.window === undefined ? WINDOW : over.window,
+    setting,
+    modelWindow,
     tool: true,
     takes: true,
     throws: false,
@@ -59,15 +63,30 @@ function world(over: { window?: number | null; setting?: Partial<typeof DEFAULT_
 }
 
 describe('telling a growing session to call compact_self (#1492)', () => {
-  it('says nothing when the only window known is a floor under the model’s: a share of it would be told wrong (#1553)', () => {
+  it('says nothing when the host knows no full window of the model: a share of a floor under it would be told wrong (#1553)', () => {
     const w = world({ window: null })
     w.session.context = { used: 0, window: 633_000, exactness: 'exact', capped: true }
     w.request(400_000)
     expect(w.told).toEqual([])
-    // A reading that is the model's own window stands in for the record
-    w.session.context = { used: 0, window: 633_000, exactness: 'exact' }
-    w.request(400_000)
-    expect(w.told[0]).toMatch(/about 63% full/)
+  })
+
+  it('states the point the running process compacts at, not the setting as it is now (#1553)', () => {
+    // Started at 60%, then the share was changed to 40% without a restart: the process still compacts at 600k
+    const w = world()
+    w.state.setting = { ...w.state.setting, share: 0.4 }
+    w.request(310_000)
+    w.request(520_000)
+    expect(w.told[1]).toMatch(/in the middle of work at 60%/)
+    // Nothing is told below a point the process does not have: at 40% by the new setting, the second share would be 30%
+    expect(w.told).toHaveLength(2)
+  })
+
+  it('tells the first share only, and never states a point, while the process has said none (a restart, or a process Centralu did not start to compact)', () => {
+    const w = world({ point: null })
+    w.request(310_000)
+    w.request(560_000)
+    expect(w.told).toHaveLength(1)
+    expect(w.told[0]).not.toMatch(/compacts it by itself/)
   })
 
   it('tells it once past 30% in the middle of a turn, with its size, and again at 10 points below the share the tool compacts at', () => {
@@ -275,7 +294,7 @@ describe('on the session manager (#1492)', () => {
     const h = adapter.last!
     await mgr.send(s.id, 'hello')
     // The reading of the turn before gives the window; the turn then grows past the share on its own
-    h.emitContext(20_000, window)
+    h.emitContext(20_000, window, undefined, Math.round(window * 0.6))
     h.finishTurn()
     return { id: s.id, h }
   }

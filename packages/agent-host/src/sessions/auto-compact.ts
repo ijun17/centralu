@@ -24,16 +24,6 @@ export function autoCompactPlan(setting: AutoCompact, windows: ModelWindows, m: 
   return { controlled: setting.controlled, share: setting.share, tokens: autoCompactTokens(setting, windows.of(m)) }
 }
 
-/**
- * The model's full window for a share the host works out or tells (#1553: the nudges, the rest rule): what `ModelWindows` kept
- * for the model (`known`), else the session's own last reading when that is the full window (a process started without the
- * setting, or Codex, reports it), else null. A reading that is only a floor (`context.capped`) is not a window to divide by.
- */
-export function fullWindow(known: number | null, context: SessionInfo['context']): number | null {
-  if (known !== null) return known
-  return context && !context.capped && context.window > 0 ? context.window : null
-}
-
 /** A model's window as last read, and the model the tool said it was for (an alias such as `haiku` moves between models) */
 type Known = { window: number; model: string | null }
 
@@ -61,8 +51,8 @@ export class ModelWindows {
   private readonly known = new Map<string, Known | null>()
   /** The largest window each running process can report because of what it was started with; 'unknown' for an adopted process that did not say */
   private readonly ceilings = new Map<string, number | 'unknown'>()
-  /** Where each running process compacts by itself, in tokens, as it was started (the setting may have moved since); absent: not controlled or not known */
-  private readonly compactAts = new Map<string, number>()
+  /** The model's full window as the last reading of each session in this host gave it; absent after a capped reading (a floor is no window) and after a restart of the host */
+  private readonly seen = new Map<string, number>()
 
   constructor(private readonly settings: WindowSettings) {}
 
@@ -77,32 +67,19 @@ export class ModelWindows {
    * not recomputed. Kept from a host that did not write it, the ceiling is unknown, and the process's readings can only
    * say "at least" (they drop a record, never lower it).
    */
-  started(sessionId: string, ceiling: number | null, adopted = false, compactAt: number | null = null): void {
+  started(sessionId: string, ceiling: number | null, adopted = false): void {
     const key = `auto_compact_ceiling:${sessionId}`
-    const atKey = `auto_compact_at:${sessionId}`
     if (adopted) {
       const raw = this.settings.appSetting(key)
       const kept = raw === null || raw === '' ? Number.NaN : Number(raw)
       if (Number.isNaN(kept)) this.ceilings.set(sessionId, 'unknown')
       else if (kept > 0) this.ceilings.set(sessionId, kept)
       else this.ceilings.delete(sessionId)
-      // The point it was started with, whatever the setting says by now; none kept (a host from before): no mark
-      const at = Number(this.settings.appSetting(atKey))
-      if (at > 0) this.compactAts.set(sessionId, at)
-      else this.compactAts.delete(sessionId)
       return
     }
     this.settings.setAppSetting(key, String(ceiling ?? 0))
-    this.settings.setAppSetting(atKey, String(compactAt ?? 0))
     if (ceiling === null) this.ceilings.delete(sessionId)
     else this.ceilings.set(sessionId, ceiling)
-    if (compactAt === null || !(compactAt > 0)) this.compactAts.delete(sessionId)
-    else this.compactAts.set(sessionId, compactAt)
-  }
-
-  /** Where the session's running process compacts by itself, in tokens, or null when Centralu's control did not start it (or it is not known) */
-  compactAtOf(sessionId: string): number | null {
-    return this.compactAts.get(sessionId) ?? null
   }
 
   /** The ceiling a running or adopted process was started with, or null when none is known */
@@ -118,9 +95,8 @@ export class ModelWindows {
    */
   forget(sessionId: string): void {
     this.ceilings.delete(sessionId)
-    this.compactAts.delete(sessionId)
+    this.seen.delete(sessionId)
     this.settings.deleteAppSetting(`auto_compact_ceiling:${sessionId}`)
-    this.settings.deleteAppSetting(`auto_compact_at:${sessionId}`)
   }
 
   /** A reading of the session's window, with the model the tool says it is for when it says */
@@ -148,9 +124,20 @@ export class ModelWindows {
   shareWindow(m: Pick<SessionInfo, 'id' | 'tool' | 'model' | 'projectId'>, reported: number): { window: number; capped: boolean } {
     const ceiling = this.ceilings.get(m.id)
     const atCeiling = ceiling === 'unknown' || (ceiling !== undefined && reported >= ceiling)
-    if (!atCeiling) return { window: reported, capped: false }
-    const known = this.of(m)
-    return known === null ? { window: reported, capped: true } : { window: Math.max(known, reported), capped: false }
+    const known = atCeiling ? this.of(m) : null
+    const share = !atCeiling ? { window: reported, capped: false } : known === null ? { window: reported, capped: true } : { window: Math.max(known, reported), capped: false }
+    if (share.capped) this.seen.delete(m.id)
+    else this.seen.set(m.id, share.window)
+    return share
+  }
+
+  /**
+   * The model's full window for a share the host works out or tells (the nudges, the rest rule): what was kept for the model, else
+   * the full window this host has read for the session. A stored reading is not one: it may be a floor (`capped` is not stored), so
+   * after a restart of the host nothing is divided until a reading says the window.
+   */
+  fullWindowOf(m: Pick<SessionInfo, 'id' | 'tool' | 'model' | 'projectId'>): number | null {
+    return this.of(m) ?? this.seen.get(m.id) ?? null
   }
 
   /** The model's window, or null when no session has read one */

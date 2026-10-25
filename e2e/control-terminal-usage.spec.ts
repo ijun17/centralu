@@ -99,10 +99,20 @@ test('The context gauge reads against the model’s full window and marks where 
   await expect(page.getByTestId('context-gauge')).toHaveAttribute('title', /Context 304k \/ 1M tokens · compacts at 600k tokens \(60%\)/)
   await expect(page.getByTestId('context-gauge-compact-mark')).toHaveAttribute('style', /left: 60%/)
 
+  // The bar warns near the tool's compaction point, not at a fixed 80% the tool never reaches: 30% is quiet, 52% of a 60% point is not
+  await expect(page.getByTestId('context-gauge-fill')).toHaveClass(/bg-ink-faint/)
+  await emitEvent(page, 0, { type: 'context_update', used: 520000, window: 1000000, exactness: 'exact', compactAt: 600000 })
+  await expect(page.getByTestId('context-gauge')).toHaveText('Context 52%')
+  await expect(page.getByTestId('context-gauge-fill')).toHaveClass(/bg-ink(?!-)/)
+
   // Only a floor under the model's window is known: the figure says it is at most that, and the mark has no place on the bar
   await emitEvent(page, 0, { type: 'context_update', used: 100000, window: 153000, exactness: 'exact', capped: true, compactAt: 120000 })
   await expect(page.getByTestId('context-gauge')).toHaveText('Context ≤65%')
-  await expect(page.getByTestId('context-gauge')).toHaveAttribute('title', /full window is not known yet/)
+  await expect(page.getByTestId('context-gauge')).toHaveAttribute('title', /full window is not known yet.*the real share is at most this/)
+  // An estimate in a floor is a floor first: one glyph, the tooltip says estimated
+  await emitEvent(page, 0, { type: 'context_update', used: 21000, window: 153000, exactness: 'estimate', capped: true })
+  await expect(page.getByTestId('context-gauge')).toHaveText('Context ≤14%')
+  await expect(page.getByTestId('context-gauge')).toHaveAttribute('title', /estimated until the next turn ends/)
   await expect(page.getByTestId('context-gauge-compact-mark')).toHaveCount(0)
 
   // No control, no mark

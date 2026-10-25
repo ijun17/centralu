@@ -1537,15 +1537,23 @@ the params with the method's schema and reads the answer with its result schema,
   (a 1M model: 1,000k), and the compaction point is a mark on it, not its end. The reading a tool gives is for learning from (`ModelWindows.note` reads it
   against the ceiling, as above); what leaves the host is made from it once, in `SessionEvents.shareOf`, before the event is applied, stored or sent: the
   `context_update` (and so `SessionInfo.context`) carries `window` = the model's full window (`ModelWindows.shareWindow`: the reading when it is under the
-  ceiling or the process has none, else the window kept for the model), `compactAt` = the tokens the process was started to compact at
-  (`ModelWindows.started`, kept with the session as `auto_compact_at:<id>` for a host swap; absent when Centralu's control did not start it, or an adopted
-  process whose host kept none), and `capped: true` when the full window is not known (a reading at the ceiling with no record for that model: an adopted
-  process without a kept ceiling, or a model name that moved to another model). Then `window` is only the tool's reading, a floor under the model's. A screen or a text for an agent
-  turns the reading into a share with `contextShare` (protocol) and divides by nothing else; the nudges and the rest rule take the model's window from
-  `fullWindow` (the record, else an uncapped reading, else none: a capped reading is no window to take a share of, so they say and do nothing).
-  What is shown for an unknown full window: the gauge reads "≤N%" (an upper bound) with a tooltip that says the model's full window is not known yet,
-  until the tool's next reading under a process with no ceiling teaches it (usually the next start). The stored `context_window` is the share window; `capped` and `compactAt` are not stored
-  and come back with the next reading (an older record may still hold the tool's smaller window until then).
+  ceiling or the process has none, else the window kept for the model), `compactAt` = where the process compacts by itself, and `capped: true` when the full
+  window is not known (a reading at the ceiling with no record for that model: an adopted process without a kept ceiling, or a model name that moved to another
+  model); then `window` is only the tool's reading, a floor under the model's. **`compactAt` is said by the adapter, per reading, for a process Centralu's control
+  started** (`claudeCompactAt`: the CLI's own `getContextUsage().autoCompactThreshold`, which is not the tokens asked for when the CLI clamps them to its
+  range and the model's window: asked 40k on a 200k model it compacts at 67k; an adopted process counts as controlled only with the ceiling its host kept.
+  `codexCompactAt`: the limit the thread was started with, Codex not reporting one; none for an adopted thread). Nothing is stored for it, so a rollback to a build that
+  writes no such row cannot leave a stale one, and the point belongs to the process: a new process clears the host's copy at its start (`autoCompactFor`),
+  and its first reading says the new one. The host drops a `compactAt` that is not under `window`. A screen or a text for an agent turns the reading into a
+  share with `contextShare` (protocol) and divides by nothing else. The nudges and the rest rule take the model's window from `ModelWindows.fullWindowOf`: the
+  record kept for the model, else the full window this host has read for the session since it started. **A stored reading is never one**, because `capped`
+  is not stored: after a restart of the host they say and do nothing until a reading gives the window. The nudges also state the process's point
+  (`context.compactAt`), not the setting as it is now (the setting reaches a process at its next start); without one known (just after a start, or a process
+  Centralu did not start to compact) only the first share is told, and no compaction point is named.
+  What is shown for an unknown full window: the gauge reads "≤N%" (an upper bound) with a tooltip that says the model's full window is not known yet and the real
+  share is at most this, until the tool's next reading under a process with no ceiling teaches it (usually the next start). The stored `context_window` is the
+  share window; `capped` and `compactAt` are not stored and come back with the next reading (a record from before may still hold the tool's smaller window until then).
+  The gauge's bar warns (darker fill) within 10 points of the mark, and at 80% when no mark is known.
   **Compacting at a break (#1451).** The share above stays the in-turn backstop (60%); two things compact a session at a break instead
   (`sessions/self-compaction.ts`, `SelfCompaction`), because a long-lived session's whole context is rewritten into the cache after every
   long wait and a compaction in the middle of work breaks the flow. Both send the tool's own command as a turn of its own (`SessionEvents.sendCompact`:

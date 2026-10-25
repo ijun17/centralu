@@ -1,5 +1,4 @@
 import { nudgeShares, type AutoCompact, type NormalizedEvent, type SessionInfo } from '@cc/protocol'
-import { fullWindow } from './auto-compact.js'
 import { COMPACT_FLOOR_TOKENS } from './self-compaction.js'
 
 /**
@@ -26,7 +25,7 @@ import { COMPACT_FLOOR_TOKENS } from './self-compaction.js'
 
 export type ContextNudgesHost = {
   session(sessionId: string): SessionInfo | undefined
-  /** The model's own context window when Centralu has read it, else null (`ModelWindows.of`); `fullWindow` settles what to divide by (#1553) */
+  /** The model's full context window when it is known, else null (`ModelWindows.fullWindowOf`, #1553): a floor under it is not one */
   window(session: SessionInfo): number | null
   setting(): AutoCompact
   /** Whether `compact_self` is one of the session's tools */
@@ -38,7 +37,7 @@ export type ContextNudgesHost = {
 }
 
 /** What a session was last told, and what is waiting to be told */
-type Cycle = { told: Set<'first' | 'second'>; waiting: 'first' | 'second' | null; size: number; sending: boolean }
+type Cycle = { told: Set<'first' | 'second'>; waiting: 'first' | 'second' | null; size: number; sending: boolean; point: number | null }
 
 export class ContextNudges {
   private readonly cycles = new Map<string, Cycle>()
@@ -71,7 +70,7 @@ export class ContextNudges {
 
   private cycle(id: string): Cycle {
     let c = this.cycles.get(id)
-    if (!c) this.cycles.set(id, (c = { told: new Set(), waiting: null, size: 0, sending: false }))
+    if (!c) this.cycles.set(id, (c = { told: new Set(), waiting: null, size: 0, sending: false, point: null }))
     return c
   }
 
@@ -81,31 +80,38 @@ export class ContextNudges {
     const setting = this.host.setting()
     const m = this.host.session(id)
     if (!m || !setting.controlled || !setting.nudge || !this.host.hasCompactTool(id)) return
-    // The model's full window, as the gauge shows the share (#1553); a floor under it is no window to take a share of
-    const window = fullWindow(this.host.window(m), m.context)
-    if (window === null) return
+    // The model's full window, as the gauge shows the share (#1553); with only a floor under it known, a share of it would be told wrong
+    const window = this.host.window(m)
+    if (window === null || window <= 0) return
     const c = this.cycle(id)
     c.size = size
     const share = size / window
-    const { first, second } = nudgeShares(setting)
-    // A share at or above the tool's own is never told: the tool compacts before the session gets there
-    const crossed = (['first', 'second'] as const).filter((k) => !c.told.has(k) && (k === 'first' ? first : second) < setting.share && (k === 'first' ? first : second) <= share)
+    // Where the session's running process compacts, as the tool said it (`context.compactAt`), not what the setting says now: the setting reaches a process at its next start
+    const point = m.context?.compactAt !== undefined && m.context.compactAt < window ? m.context.compactAt / window : null
+    c.point = point
+    const { first, second } = nudgeShares({ ...setting, share: point ?? setting.share })
+    // A share at or above the tool's own is never told: the tool compacts before the session gets there. The second share is below that point, so without a known point it is not told at all
+    const shares = [
+      ['first', first],
+      ['second', second],
+    ] as const
+    const crossed = shares.filter(([k, at]) => !c.told.has(k) && (point === null ? k === 'first' : at < point) && at <= share).map(([k]) => k)
     if (crossed.length > 0) {
       for (const k of crossed) c.told.add(k)
       c.waiting = crossed.includes('second') ? 'second' : 'first'
     }
-    if (c.waiting) this.deliver(id, c, m, window, setting)
+    if (c.waiting) this.deliver(id, c, m, window)
   }
 
-  private deliver(id: string, c: Cycle, m: SessionInfo, window: number, setting: AutoCompact): void {
+  private deliver(id: string, c: Cycle, m: SessionInfo, window: number): void {
     const which = c.waiting
     // A note is on its way and the tool has not said yet whether it took it: one at a time
     if (!which || c.sending) return
     const percent = Math.round((c.size / window) * 100)
     const used = `${Math.round(c.size / 1000)}k of ${Math.round(window / 1000)}k tokens`
     const text =
-      which === 'second'
-        ? `[Centralu] Your context is now about ${percent}% full (${used}), and the tool compacts it by itself in the middle of work at ${Math.round(setting.share * 100)}%. Call compact_self when the current step is done, at the latest; do not stop what you are doing for it.`
+      which === 'second' && c.point !== null
+        ? `[Centralu] Your context is now about ${percent}% full (${used}), and the tool compacts it by itself in the middle of work at ${Math.round(c.point * 100)}%. Call compact_self when the current step is done, at the latest; do not stop what you are doing for it.`
         : `[Centralu] Your context is now about ${percent}% full (${used}). When this step of the work is done, call compact_self so the next step starts from a summary; do not stop what you are doing for it.`
     const failed = (err: unknown) => {
       // Not told: the share stays told, so a failing send is not repeated with every request

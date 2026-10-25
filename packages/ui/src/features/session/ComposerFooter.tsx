@@ -16,6 +16,9 @@ import { SessionSettings } from './SessionSettings.jsx'
  * they belong here, where the hand and eye already are, rather than in the header at the
  * opposite end of the screen.
  */
+/** Points below the compaction mark where the bar starts to warn */
+const WARN_BEFORE_COMPACT = 10
+
 export const ComposerFooter = memo(function ComposerFooter({
   sessionId,
   onMenuOpenChange,
@@ -32,6 +35,8 @@ export const ComposerFooter = memo(function ComposerFooter({
   const ctxPct = share ? Math.round(share.fraction * 100) : null
   const compactPct = share?.compactAt?.fraction != null ? Math.round(share.compactAt.fraction * 100) : null
   const mark = session.context?.exactness === 'estimate' ? '≈' : ''
+  // The bar warns when the tool is about to compact: within 10 points of its mark. With no mark known, at 80% (FR-14)
+  const warn = ctxPct !== null && ctxPct >= (compactPct !== null ? Math.max(1, compactPct - WARN_BEFORE_COMPACT) : 80)
   return (
     <div className="mt-1.5 flex items-center gap-2">
       <SessionSettings
@@ -81,7 +86,7 @@ export const ComposerFooter = memo(function ComposerFooter({
       */}
       <span
         className={`ml-auto flex shrink-0 flex-col items-stretch gap-[1.5px] text-xs tabular-nums ${
-          ctxPct === null ? 'text-ink-faint/50' : ctxPct >= 80 ? 'text-ink' : 'text-ink-faint'
+          ctxPct === null ? 'text-ink-faint/50' : warn ? 'text-ink' : 'text-ink-faint'
         }`}
         data-testid="context-gauge"
         title={
@@ -90,7 +95,7 @@ export const ComposerFooter = memo(function ComposerFooter({
                 mark && ' (estimated until the next turn ends)'
               }${
                 share?.capped
-                  ? " — the model's full window is not known yet, so this is the share of the smaller window the tool reported (at most the real share)"
+                  ? " — the model's full window is not known yet, so this is the share of a smaller window the tool reported: the real share is at most this"
                   : ''
               }${
                 share?.compactAt
@@ -100,11 +105,11 @@ export const ComposerFooter = memo(function ComposerFooter({
             : 'Context unknown — this session has never reported one'
         }
       >
-        <span className="leading-none">Context {ctxPct === null ? '—' : `${mark}${share?.capped ? '≤' : ''}${ctxPct}%`}</span>
+        <span className="leading-none">Context {ctxPct === null ? '—' : `${share?.capped ? '≤' : mark}${ctxPct}%`}</span>
         <span className="relative block h-1 overflow-hidden rounded-full bg-line" aria-hidden>
           {ctxPct !== null && (
             <span
-              className={`block h-full rounded-full ${ctxPct >= 80 ? 'bg-ink' : 'bg-ink-faint'}`}
+              className={`block h-full rounded-full ${warn ? 'bg-ink' : 'bg-ink-faint'}`}
               style={{ width: `${Math.min(100, Math.max(0, ctxPct))}%` }}
               data-testid="context-gauge-fill"
             />

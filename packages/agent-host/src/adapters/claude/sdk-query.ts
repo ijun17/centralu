@@ -87,6 +87,17 @@ export function compactPointOff(passed: number | undefined, reported: number, mo
   return expected
 }
 
+/**
+ * The compaction point to tell with a context reading (#1553): where the CLI says it compacts (`getContextUsage().autoCompactThreshold`),
+ * which is not always the tokens Centralu asked for (the CLI clamps the window to its range and to the model's: asked 40k on a
+ * 200k model it compacts at 67k). Only for a process Centralu's control started: a fresh one given `autoCompactTokens`, an adopted one
+ * with the ceiling its host kept; the CLI reports a threshold whether or not anyone set it.
+ */
+export function claudeCompactAt(opts: Pick<CreateSessionOpts, 'autoCompactTokens' | 'autoCompactCeiling' | 'processSource'>, threshold: number): number | undefined {
+  const controlled = opts.processSource?.adopt ? opts.autoCompactCeiling !== undefined : opts.autoCompactTokens !== undefined
+  return controlled && threshold > 0 ? threshold : undefined
+}
+
 /** The `autoCompactWindow` that makes the CLI compact at `tokens`, inside what it accepts */
 export function claudeAutoCompactWindow(tokens: number): number {
   return Math.min(CLAUDE_AUTO_COMPACT_MAX, Math.max(CLAUDE_AUTO_COMPACT_MIN, Math.round(tokens) + CLAUDE_AUTO_COMPACT_BUFFER))
