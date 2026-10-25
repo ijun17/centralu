@@ -42,7 +42,7 @@ const DESCRIPTOR: ToolDescriptor = {
   name: 'cursor-agent',
   label: 'Cursor',
   mark: '▲',
-  install: process.platform === 'win32' ? "irm 'https://cursor.com/install?win32=true' | iex" : 'curl https://cursor.com/install -fsS | bash',
+  install: "curl https://cursor.com/install -fsS | bash (Windows: irm 'https://cursor.com/install?win32=true' | iex)",
   login: 'agent login',
 }
 

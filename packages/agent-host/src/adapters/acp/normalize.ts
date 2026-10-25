@@ -1,8 +1,9 @@
 import type { NormalizedEvent, TokenUsage, ToolSummary } from '@cc/protocol'
+import { asObj } from '../../json-value.js'
 import { planUpdate } from '../plan.js'
 import { toolResultEvent } from '../tool-result.js'
 import { firstLine } from '../tool-titles.js'
-import { blockText, type PromptResult, type SessionUpdate, type ToolCallFields } from './wire.js'
+import { blockText, ToolCallFields, type PromptResult, type SessionUpdate } from './wire.js'
 
 /**
  * `session/update` → NormalizedEvent (docs/plans/acp-adapter.md §5). One instance per session: ACP sends a tool call as
@@ -27,8 +28,6 @@ type OpenCall = { output: string }
 export class AcpNormalizer {
   /** Calls announced as `tool_call` and not yet ended, by `toolCallId` */
   private readonly open = new Map<string, OpenCall>()
-  /** Calls seen but not yet announced: ACP's first frame comes before the input (measured) */
-  private readonly unannounced = new Map<string, ToolCallFields>()
   /** Every field said of each call this turn, merged: a permission request may carry less than the call did (measured, Cursor) */
   private readonly known = new Map<string, ToolCallFields>()
   private readonly compactions = new Map<string, string>()
@@ -77,29 +76,27 @@ export class AcpNormalizer {
 
   /** What this turn has heard of a call, merged with `u` (a permission request names the call it asks about) */
   call(u: ToolCallFields): ToolCallFields {
-    return { ...this.known.get(u.toolCallId), ...definedFields(u) } as ToolCallFields
+    return ToolCallFields.parse({ ...this.known.get(u.toolCallId), ...definedFields(u) })
   }
 
   private toolCall(u: ToolCallFields): NormalizedEvent[] {
     const id = u.toolCallId
-    this.known.set(id, this.call(u))
+    const seen = this.call(u)
+    this.known.set(id, seen)
     const events: NormalizedEvent[] = []
-    if (!this.open.has(id)) {
-      const seen = { ...this.unannounced.get(id), ...definedFields(u) } as ToolCallFields
+    let call = this.open.get(id)
+    if (!call) {
+      // ACP's first frame of a call comes before its input (measured): it is announced once the input or a status is there
       const ready = hasInput(seen.rawInput) || (seen.status !== undefined && seen.status !== 'pending')
-      if (!ready) {
-        this.unannounced.set(id, seen)
-        return []
-      }
-      this.unannounced.delete(id)
-      this.open.set(id, { output: '' })
+      if (!ready) return []
+      call = { output: '' }
+      this.open.set(id, call)
       events.push({ type: 'tool_call', sessionId: this.sessionId, callId: id, summary: summaryOf(seen), ...(seen.rawInput === undefined ? {} : { input: seen.rawInput }) })
       if (seen.kind === 'edit' || seen.kind === 'delete' || seen.kind === 'move') {
         const paths = pathsOf(seen)
         if (paths.length) events.push({ type: 'files_touched', sessionId: this.sessionId, paths })
       }
     }
-    const call = this.open.get(id)!
     const output = outputOf(u)
     // An update's content is the whole output so far (measured), so the delta is what it adds
     if (output !== null && output.startsWith(call.output) && output.length > call.output.length && u.status !== 'completed' && u.status !== 'failed') {
@@ -117,7 +114,6 @@ export class AcpNormalizer {
   endTurn(): NormalizedEvent[] {
     const events = [...this.open.keys()].map((id) => toolResultEvent(this.sessionId, id, false, '', 'the turn ended before this call finished'))
     this.open.clear()
-    this.unannounced.clear()
     this.known.clear()
     this.lastChunk = 'other'
     return events
@@ -147,6 +143,7 @@ export function tokenUsage(result: PromptResult): TokenUsage | null {
 }
 
 function definedFields(u: ToolCallFields): Partial<ToolCallFields> {
+  // The fields this frame said: an update leaves out what did not change
   return Object.fromEntries(Object.entries(u).filter(([k, v]) => v !== undefined && k !== 'sessionUpdate'))
 }
 
@@ -176,16 +173,14 @@ function outputOf(u: ToolCallFields): string | null {
 
 function rawOutputText(raw: unknown): string | null {
   if (typeof raw === 'string') return raw
-  if (typeof raw === 'object' && raw !== null) {
-    const o = raw as Record<string, unknown>
-    if (typeof o.output === 'string') return o.output
-    if (typeof o.error === 'string') return o.error
-  }
+  const o = asObj(raw)
+  if (typeof o.output === 'string') return o.output
+  if (typeof o.error === 'string') return o.error
   return null
 }
 
 /** The command an `execute` call runs, as its input names it */
 export function commandOf(u: ToolCallFields): string {
-  const input = u.rawInput
-  return typeof input === 'object' && input !== null && typeof (input as { command?: unknown }).command === 'string' ? (input as { command: string }).command : ''
+  const command = asObj(u.rawInput).command
+  return typeof command === 'string' ? command : ''
 }

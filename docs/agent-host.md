@@ -1815,6 +1815,9 @@ interface AdapterCapabilities {
   peerMessaging: boolean        // the CLI has a direct session-to-session path (#575)
   midTurnInput?: boolean         // send accepts a message during a running turn without interrupting it (#592)
   sleep?: boolean               // #568: an idle session may be put to sleep (resume measured to keep the cache); §4.6.1
+  presets?: PermissionPreset[]  // the presets it can keep; absent: all (Cursor has no `safe`, plans/acp-adapter.md §0.1)
+  keepsRepoFilesOut?: boolean   // can be kept from a project's own files when untrusted (#92); absent: true
+  roleText?: boolean            // takes Centralu's role text (`systemPromptAppend`); absent: true
 }
 ```
 
@@ -1957,6 +1960,10 @@ Implementation rules:
   literal character (#838; it was a wildcard at the end, which made "always" on `cat logs/*` a prefix rule). The copies had drifted: a command with surrounding whitespace never matched its own rule,
   and core's preview read a `*` in the middle as a wildcard the host did not honour.
 - Process management (spawning the CLI, crash detection) is the adapter's own responsibility. A crash is emitted as an `error` event and the host does not die.
+- **A launch a tool declared it cannot keep is refused before any process starts** (`presets`, `keepsRepoFilesOut`,
+  `roleText`; `launchRefusal` in protocol, applied by `startFit` in `sessions/session-start.ts` at every start and wake).
+  The host is the gate whatever path asked; the pickers ask the same rule and grey the tool with the same words.
+  Claude and Codex declare none of the three, so nothing changes for them ([plans/acp-adapter.md](plans/acp-adapter.md) §0.1).
 - A capability is not necessarily a static declaration; it can be **decided at detect() time** (e.g. if whether approvals work depends on the Codex version, decide after detecting the version — the C4 response).
 
 ### 2.1 Claude query options and independent-session messaging (#569)
@@ -2001,7 +2008,11 @@ sets a temporary `CC_DATA_DIR`, and never starts a host or uses `~/.centralu`.
 2. Add the tool to `ToolName` and give it a `TOOL_META` entry in `@cc/protocol` — display
    name, one-glyph mark, install command, login command. Then register the adapter in the
    `adapters` Map in `main.ts`.
-3. Add contract tests: recorded raw response fixtures → NormalizedEvent snapshot verification.
+3. Add contract tests: recorded raw response fixtures → NormalizedEvent snapshot verification. For a new tool, record
+   with the tool-neutral frame tooling in `adapters/frames/` (#1498): the recorder (`CC_RECORD_FRAMES`), the scrubber
+   (`scripts/frames-scrub.mts`), the replayer with the protocol's `FrameCodec`, and the scenarios driven at the
+   `SessionHandle` level, so the fixtures are what the adapter itself sent and received (the ACP adapter's are made by
+   `scripts/acp-record.mts`, [plans/acp-adapter.md](plans/acp-adapter.md) §0.5 and §10).
 4. Write down the vendor surface you depend on, and give it a drift check (see §3.1) —
    hand-won protocol knowledge rots silently otherwise. Fill in the contract's `surface`
    (`adapters/contract/surface.ts`, #270) too: how to read what the tool offers without a turn,

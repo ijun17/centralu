@@ -25,6 +25,8 @@ export function loadRecording(path: string): Recording {
 /** What went wrong in a replay; a test asserts it stays empty and that every frame was used */
 export type ReplayState = { problems: string[]; left(): number; spawned: number }
 
+const idOf = (v: unknown): string => (typeof v === 'string' || typeof v === 'number' ? String(v) : '')
+
 /** What "the same frame" means for one protocol */
 export type FrameCodec = {
   /** Null when `sent` is the recorded outgoing frame, else why not; `ids` maps recorded ids to the adapter's own */
@@ -38,17 +40,17 @@ export const jsonRpcCodec: FrameCodec = {
   match(sent, want, ids) {
     if (typeof want.method === 'string') {
       if (sent.method !== want.method) return `the adapter sent ${describe(sent)} where the recording sends ${describe(want)}`
-      if (want.id !== undefined) ids.set(String(want.id), sent.id as string | number)
+      if (want.id !== undefined && (typeof sent.id === 'string' || typeof sent.id === 'number')) ids.set(idOf(want.id), sent.id)
       return null
     }
-    if (String(sent.id) !== String(want.id) || !isDeepStrictEqual(sent.result ?? null, want.result ?? null)) {
+    if (idOf(sent.id) !== idOf(want.id) || !isDeepStrictEqual(sent.result ?? null, want.result ?? null)) {
       return `the adapter answered ${JSON.stringify(sent)} where the recording answers ${JSON.stringify(want)}`
     }
     return null
   },
   rewrite(incoming, ids) {
     const msg = { ...incoming }
-    if (msg.id !== undefined && msg.method === undefined) msg.id = ids.get(String(msg.id)) ?? msg.id
+    if (msg.id !== undefined && msg.method === undefined) msg.id = ids.get(idOf(msg.id)) ?? msg.id
     return msg
   },
 }

@@ -13,6 +13,8 @@ export type Answer = { result: unknown } | { error: { code: number; message: str
 
 export type PeerScript = (method: string, params: Record<string, unknown>, peer: FakeAcpPeer) => Answer | Promise<Answer>
 
+const idOf = (v: unknown): string => (typeof v === 'string' || typeof v === 'number' ? String(v) : '')
+
 export class FakeAcpPeer extends EventEmitter implements AgentProcess {
   readonly stdin = new PassThrough()
   readonly stdout = new PassThrough()
@@ -67,7 +69,7 @@ export class FakeAcpPeer extends EventEmitter implements AgentProcess {
     this.received.push(m)
     for (const f of [...this.sent]) f(m)
     if (m.method === undefined && m.id !== undefined) {
-      this.answers.get(String(m.id))?.(m.result ?? m.error)
+      this.answers.get(idOf(m.id))?.(m.result ?? m.error)
       return
     }
     if (typeof m.method !== 'string') return

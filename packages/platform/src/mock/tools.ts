@@ -68,6 +68,8 @@ export class ToolsMock {
       ready: true,
       commands: [],
     }
+  /** For tests: what a tool declares it cannot keep (`presets`, `keepsRepoFilesOut`, `roleText`), by tool */
+  capabilityLimits: Record<ToolName, Partial<AdapterCapabilities>> = {}
   /** For tests: when set, the slash command list fails with this reason (a machine away, a call that timed out) */
   commandsError: string | null = null
   readonly agents: Pick<AgentPort, 'models' | 'commands' | 'capabilities' | 'detect'> = {
@@ -86,6 +88,7 @@ export class ToolsMock {
       exclusiveWriter: false,
       backgroundTasks: true,
       ...this.mockToolProfiles.get(tool)?.capabilities,
+      ...this.capabilityLimits[tool],
     }),
     /** A linked machine answers `machineDetected[machine]` when a test set one (#82), else what this computer has */
     detect: async (machine?: MachineRef) => (machine && this.machineDetected[machine]) || this.detected,

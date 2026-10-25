@@ -1,11 +1,12 @@
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { errorMessage } from '@cc/protocol'
 /** Which way a line went: to the tool, or from it */
 export type FrameDirection = 'in' | 'out'
 
 export type FrameRecorder = {
-  frame(direction: FrameDirection, line: string): void
-  exit(code: number | null, signal: string | null): void
+  frame: (direction: FrameDirection, line: string) => void
+  exit: (code: number | null, signal: string | null) => void
 }
 
 /**
@@ -29,7 +30,7 @@ export function frameRecorder(sessionId: string, env: NodeJS.ProcessEnv = proces
     try {
       appendFileSync(file, `${JSON.stringify({ t: Date.now() - start, ...entry })}\n`)
     } catch (e) {
-      console.error('[acp] recorder could not write', file, (e as Error).message)
+      console.error('[acp] recorder could not write', file, errorMessage(e))
     }
   }
   return {

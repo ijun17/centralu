@@ -3,6 +3,7 @@ import type { ToolName } from '@cc/protocol'
 import { useStore } from '../../store/store.js'
 import { useTools } from '../../store/selectors.js'
 import { useLoad } from '../../app/useLoad.js'
+import { useRefusals } from '../project/useToolChoice.js'
 import { PastConversations } from './PastConversations.jsx'
 
 /**
@@ -48,6 +49,9 @@ function ToolSwitch({ sessionId, projectId, tool }: { sessionId: string; project
     [platform, machine],
   )
   const [busy, setBusy] = useState<ToolName | null>(null)
+  // A tool that cannot keep what this project asks (an untrusted project, `launchRefusal`) is left out like one not installed
+  const trusted = useStore((s) => !!s.projects[projectId]?.trusted)
+  const refusal = useRefusals(found.data ?? null, { permissionPreset: 'normal', projectTrusted: trusted }, machine ?? undefined)
 
   /*
    * Only the tools that can run on the project's machine are offered (owner, 2026-10-18): one not installed or not
@@ -59,7 +63,7 @@ function ToolSwitch({ sessionId, projectId, tool }: { sessionId: string; project
   const ready = (t: ToolName) => {
     if (found.error) return true
     const d = found.data?.find((x) => x.name === t)
-    return !!d && d.installed && d.loggedIn
+    return !!d && d.installed && d.loggedIn && refusal(t) === null
   }
   const shown = tools.filter((t) => t.name === tool || ready(t.name))
   // Still asking the machine: the session's own tool, and a placeholder where the others will stand

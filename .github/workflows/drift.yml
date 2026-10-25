@@ -154,6 +154,11 @@ jobs:
           npm install -g @anthropic-ai/claude-code@latest @openai/codex@latest
           claude --version
           codex --version
+          # Cursor CLI is not on npm: its own installer puts `cursor-agent` and `agent` in ~/.local/bin. Its surface is
+          # read from `--help`, the ACP server's `initialize` (no login needed) and its bundle (adapters/cursor-agent/surface.ts)
+          curl https://cursor.com/install -fsS | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/cursor-agent" --version
 
       - run: pnpm drift:surface --file-issue
         env:

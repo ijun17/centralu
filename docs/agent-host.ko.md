@@ -801,6 +801,9 @@ interface AdapterCapabilities {
   exclusiveWriter: boolean      // 우리가 쥐고 있는 동안 다른 누구도 대화에 쓸 수 없다
   backgroundTasks: boolean      // 백그라운드 작업을 `background_tasks`로 알린다 (#290)
   sleep?: boolean               // #568: 유휴 세션을 재울 수 있다(재개가 캐시를 지킨다고 측정됨). §4.6.1
+  presets?: PermissionPreset[]  // 지킬 수 있는 프리셋. 없으면 전부 (Cursor는 `safe`가 없다, plans/acp-adapter.md §0.1)
+  keepsRepoFilesOut?: boolean   // 신뢰하지 않는 프로젝트에서 그 프로젝트 자신의 파일을 못 읽게 할 수 있는가 (#92). 없으면 true
+  roleText?: boolean            // Centralu의 역할 글(`systemPromptAppend`)을 받는가. 없으면 true
 }
 ```
 
@@ -934,6 +937,10 @@ interface AdapterCapabilities {
   복사본들이 어긋나 있었다: 앞뒤에 공백이 있는 명령은 자기 규칙에 끝내 맞지 않았고, core의 미리보기는 중간의 `*`를
   호스트가 따르지 않는 와일드카드로 읽었다.
 - 프로세스 관리(CLI spawn, 크래시 감지)는 어댑터 자신의 책임이다. 크래시는 `error` 이벤트로 방출되고 호스트는 죽지 않는다.
+- **도구가 지킬 수 없다고 밝힌 시작은 프로세스가 뜨기 전에 거절된다** (`presets`, `keepsRepoFilesOut`, `roleText`.
+  protocol의 `launchRefusal`을 `sessions/session-start.ts`의 `startFit`이 모든 시작과 깨우기에서 적용한다). 어느 경로로
+  요청했든 호스트가 관문이고, 선택기들은 같은 규칙에 물어 같은 문장으로 그 도구를 흐리게 보인다. Claude와 Codex는 셋 다
+  밝히지 않으므로 그들에겐 바뀌는 것이 없다 ([plans/acp-adapter.md](plans/acp-adapter.md) §0.1).
 - capability는 반드시 정적 선언일 필요가 없다 — **detect() 시점에 결정**할 수도 있다 (예: 승인 동작 여부가 Codex 버전에 달려 있다면, 버전을 감지한 뒤 결정한다 — C4에 대한 대응).
 
 ## 3. 새 도구 추가 절차 (C3 — 이 문서가 존재하는 이유)
@@ -941,7 +948,10 @@ interface AdapterCapabilities {
 1. `adapters/<tool>/`을 만들고 `AgentAdapter`를 구현한다 (이벤트 변환 + detect + capability).
 2. `@cc/protocol`의 `ToolName`에 도구를 넣고 `TOOL_META` 항목을 준다 — 표시 이름, 한 글자
    마크, 설치 명령, 로그인 명령. 그다음 `main.ts`의 `adapters` Map에 어댑터를 등록한다.
-3. 계약 테스트를 추가한다: 녹화해 둔 raw 응답 픽스처 → NormalizedEvent 스냅샷 검증.
+3. 계약 테스트를 추가한다: 녹화해 둔 raw 응답 픽스처 → NormalizedEvent 스냅샷 검증. 새 도구는 `adapters/frames/`의
+   도구 중립 프레임 도구로 녹화한다 (#1498): 녹화기(`CC_RECORD_FRAMES`), 스크러버(`scripts/frames-scrub.mts`), 프로토콜의
+   `FrameCodec`을 쓰는 재생기, `SessionHandle` 수준에서 도는 시나리오. 그래서 픽스처는 어댑터 자신이 보내고 받은 그대로다
+   (ACP 어댑터의 것은 `scripts/acp-record.mts`가 만든다, [plans/acp-adapter.md](plans/acp-adapter.md) §0.5와 §10).
 4. 의존하는 벤더 표면을 적어 두고 드리프트 체크를 만든다 (§3.1). 계약의 `surface`(#270)도 채운다 —
    측정으로 얻은 프로토콜 지식은 그냥 두면 조용히 썩는다.
 5. 끝. **ui, core, platform은 변경되지 않고**, protocol은 2번의 두 항목만큼만 바뀐다.

@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { z } from 'zod'
+import { errorMessage } from '@cc/protocol'
 import type { AgentProcess } from '../contract.js'
 import { waitForExit } from '../../timing.js'
 import { lineSplitter, PendingRequests } from '../../transport/json-lines.js'
@@ -129,15 +130,16 @@ export class AcpConnection {
       const result = await this.handlers.onRequest(id, method, params)
       this.write({ jsonrpc: '2.0', id, result: result ?? null })
     } catch (err) {
-      const e = err instanceof RpcError ? err : new RpcError(-32603, (err as Error).message ?? 'internal error')
+      const e = err instanceof RpcError ? err : new RpcError(-32603, errorMessage(err))
       this.write({ jsonrpc: '2.0', id, error: { code: e.code, message: e.message, ...(e.data === undefined ? {} : { data: e.data }) } })
     }
   }
 
-  request<T = unknown>(method: string, params: unknown, timeoutMs = 120_000): Promise<T> {
+  /** The answer, unread: each caller parses it with the schema of what it asked (`wire.ts`) */
+  request(method: string, params: unknown, timeoutMs = 120_000): Promise<unknown> {
     if (this.closed) return Promise.reject(new Error(`${this.label} has already exited`))
     const id = `${this.idPrefix}${this.nextId++}`
-    const answer = this.pending.wait(id, timeoutMs, `No response for ${method}`) as Promise<T>
+    const answer = this.pending.wait(id, timeoutMs, `No response for ${method}`)
     this.write({ jsonrpc: '2.0', id, method, params })
     return answer
   }

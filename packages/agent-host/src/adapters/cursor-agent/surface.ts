@@ -2,6 +2,8 @@ import { execFile } from 'node:child_process'
 import { readdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { promisify } from 'node:util'
+import { z } from 'zod'
+import { asObj } from '../../json-value.js'
 import type { AdapterSurface, SurfaceInputs, ToolSurface } from '../contract.js'
 import { spawnLocalAgent } from '../local-process.js'
 import { AcpConnection } from '../acp/connection.js'
@@ -9,6 +11,8 @@ import { findCursor } from './install.js'
 import { SURFACE_BASELINE } from './surface-baseline.js'
 
 const exec = promisify(execFile)
+
+const Initialized = z.looseObject({ agentCapabilities: z.unknown().optional(), authMethods: z.array(z.looseObject({ id: z.string() })).optional() })
 
 /**
  * What the installed Cursor CLI offers (#270), read without a session and without a login: its `--help` commands, the
@@ -33,8 +37,10 @@ async function gather(): Promise<SurfaceInputs> {
   for (const f of readdirSync(dir).filter((n) => n.endsWith('.js'))) {
     const text = readFileSync(join(dir, f), 'utf8')
     if (!text.includes('session/request_permission') && !text.includes('cursor_login')) continue
-    for (const m of text.matchAll(/sessionUpdate:"([a-z_]+)"/g)) names.add(m[1]!)
-    for (const m of text.matchAll(/"(cursor\/[a-z_]+)"/g)) names.add(m[1]!)
+    for (const m of text.matchAll(/sessionUpdate:"([a-z_]+)"|"(cursor\/[a-z_]+)"/g)) {
+      const name = m[1] ?? m[2]
+      if (name) names.add(name)
+    }
   }
   return { version: install.version, help, initialize: JSON.stringify(init), bundle: JSON.stringify([...names].sort()) }
 }
@@ -42,15 +48,15 @@ async function gather(): Promise<SurfaceInputs> {
 /** Keys of a capability object, flattened (`sessionCapabilities.list`), so a new one shows as a new name */
 function capabilityNames(value: unknown, prefix = ''): string[] {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return prefix ? [prefix] : []
-  const entries = Object.entries(value as Record<string, unknown>)
+  const entries = Object.entries(asObj(value))
   if (entries.length === 0) return prefix ? [prefix] : []
   return entries.flatMap(([k, v]) => (typeof v === 'object' && v !== null ? capabilityNames(v, prefix ? `${prefix}.${k}` : k) : [prefix ? `${prefix}.${k}` : k]))
 }
 
 export function readCursorSurface(inputs: SurfaceInputs): ToolSurface {
-  const init = JSON.parse(inputs.initialize ?? '{}') as { agentCapabilities?: unknown; authMethods?: { id: string }[] }
-  const commands = [...(inputs.help ?? '').matchAll(/^ {2}([a-z][\w-]*)(?: |$)/gm)].map((m) => m[1]!)
-  const bundle = JSON.parse(inputs.bundle ?? '[]') as string[]
+  const init = Initialized.parse(JSON.parse(inputs.initialize ?? '{}'))
+  const commands = [...(inputs.help ?? '').matchAll(/^ {2}([a-z][\w-]*)(?: |$)/gm)].flatMap((m) => (m[1] ? [m[1]] : []))
+  const bundle = z.array(z.string()).parse(JSON.parse(inputs.bundle ?? '[]'))
   return {
     version: `agent ${inputs.version ?? 'unknown'}`,
     offered: {

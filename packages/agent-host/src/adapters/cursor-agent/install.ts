@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, realpathSync } from 'node:fs'
 import { dirname, join, win32 } from 'node:path'
 import { whichTool } from '../../env-path.js'
+import { installsCliAsVersionFolders, type Platform } from '../../os.js'
 
 /**
  * Where Cursor CLI is installed and how to start its ACP server (docs/plans/acp-adapter.md §3.2).
@@ -57,8 +58,8 @@ export function newestVersion(names: readonly string[]): string | null {
   return dated[0]?.n ?? null
 }
 
-export function findCursor(env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform, fs: Fs = realFs): CursorInstall | null {
-  if (platform === 'win32') {
+export function findCursor(env: NodeJS.ProcessEnv = process.env, platform?: Platform, fs: Fs = realFs): CursorInstall | null {
+  if (installsCliAsVersionFolders(platform)) {
     const roots = [whichTool('agent', env, platform), whichTool('cursor-agent', env, platform)]
       .flatMap((p) => (p ? [win32.dirname(p)] : []))
       .concat(env.LOCALAPPDATA ? [win32.join(env.LOCALAPPDATA, 'cursor-agent')] : [])

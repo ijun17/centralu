@@ -3,6 +3,7 @@ import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useLoad } from '../../app/useLoad.js'
 import { LoadFailed } from '../../components/LoadFailed.jsx'
+import { ORCHESTRATOR_DEMANDS, useRefusals } from '../project/useToolChoice.js'
 
 /**
  * The intro screen (#63) — exactly once, on the very first run: "meet your orchestrator."
@@ -31,7 +32,9 @@ export function Intro() {
   const tools = detected.data ?? null
   const detect = detected.reload
 
-  const ready = (t: ToolStatus) => t.installed && t.loggedIn
+  // A tool that cannot take the orchestrator's role is shown with the reason, as one not connected is
+  const refusal = useRefusals(tools, ORCHESTRATOR_DEMANDS)
+  const ready = (t: ToolStatus) => t.installed && t.loggedIn && refusal(t.name) === null
   const anyReady = (tools ?? []).some(ready)
   // detect returns **every** tool along with its status — the reason even an uninstalled tool gets a card
   const cards = tools ?? []
@@ -81,11 +84,13 @@ export function Intro() {
                   <>
                     {/* The diagnosis at a glance, the prescription right below it — an eye that does not know a terminal comes first */}
                     <span className="mt-1 block text-sm text-ink-muted" data-testid={`intro-card-${t.name}-status`}>
-                      Not connected
+                      {refusal(t.name) ?? 'Not connected'}
                     </span>
-                    <code className="mt-1.5 block truncate rounded-md bg-surface-side px-1.5 py-1 font-mono text-2xs text-ink-faint">
-                      {t.installed ? t.login : t.install}
-                    </code>
+                    {refusal(t.name) === null && (
+                      <code className="mt-1.5 block truncate rounded-md bg-surface-side px-1.5 py-1 font-mono text-2xs text-ink-faint">
+                        {t.installed ? t.login : t.install}
+                      </code>
+                    )}
                   </>
                 )}
               </button>

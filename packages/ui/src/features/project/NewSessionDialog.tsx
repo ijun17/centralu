@@ -78,9 +78,11 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
    */
   const allTools = useTools()
   const machine = project?.machine ?? null
-  const { tool, setTool, toolMeta, tools, info, usable, blocked, detectError, redetect } = useToolChoice(
+  // What the start asks of the tool: the project's trust, and the preset a new session starts with
+  const { tool, setTool, toolMeta, tools, info, usable, refusal, blocked, detectError, redetect } = useToolChoice(
     project?.defaultTool ?? allTools[0]?.name ?? '',
     machine,
+    { permissionPreset: 'normal', projectTrusted: !!project?.trusted },
   )
   const [busy, setBusy] = useState(false)
   /**
@@ -298,16 +300,17 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
               value: t.name,
               label: t.label,
               testId: `tool-option-${t.name}`,
-              title: info(t.name)?.detail,
+              title: refusal(t.name) ?? info(t.name)?.detail,
               dim: !!tools && !usable(t.name),
             }))}
           />
           {/* The reason it cannot be used is not hidden — a disabled button alone would look like it just does nothing */}
           {blocked && (
             <p className="mt-2 text-xs leading-body text-ink-muted" data-testid="tool-blocked">
-              {info(tool)?.installed
-                ? `${toolMeta.label} needs a login — run ${toolMeta.login} in a terminal`
-                : `${toolMeta.label} not found (${info(tool)?.detail ?? 'not installed'})`}
+              {refusal(tool) ??
+                (info(tool)?.installed
+                  ? `${toolMeta.label} needs a login — run ${toolMeta.login} in a terminal`
+                  : `${toolMeta.label} not found (${info(tool)?.detail ?? 'not installed'})`)}
             </p>
           )}
           {detectError && (

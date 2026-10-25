@@ -1,11 +1,122 @@
 # The ACP adapter, and Cursor as its first tool (#59, #1476, #1498)
 
-Proposed 2026-10-26. A design to agree on before code: what was measured, the shape of a generic Agent Client
+Proposed and approved 2026-10-26; §0 is what PR 1 settled. A design to agree on before code: what was measured, the shape of a generic Agent Client
 Protocol (ACP) client adapter in `packages/agent-host`, how Cursor CLI (`agent acp`) runs through it, how it is
 tested from recorded frames (#1498), and how the work is split. OpenCode (`opencode acp`) is the second tool on the
 same core; Antigravity (`agy`, stream-json, no ACP) gets its own adapter later and is out of scope here. A record like
 the rest of `plans/`, so not mirrored in Korean; [agent-host.md](../agent-host.md) §2–3 gains the lasting parts in
 the same pull request as the code.
+
+## 0. What PR 1 settled
+
+Added 2026-10-26, after the design below was approved and PR 1 built. Where this section and a later one disagree,
+this one is the newer: the later sections are the design as proposed, kept for its reasoning.
+
+### 0.1 The owner's answers
+
+| Question (§14) | Answer | What PR 1 does |
+|---|---|---|
+| Role text | Left out | An ACP tool declares `roleText: false`: it cannot be the orchestrator, a coordinator or an app's agent yet. Later: measure whether a leading prompt block marked as Centralu's carries it |
+| Untrusted projects | Not offered (fail safe) | `keepsRepoFilesOut: false`: refused in an untrusted project; revisited when what each tool reads is known |
+| OpenCode's `/compact` | Accepted for PR 3 only | Not in PR 1: only inside the compact turn Centralu started, ended `end_turn`, next reading smaller; `trigger: manual`, no summary |
+| `safe` on Cursor | Not offered | `presets: ['normal', 'edits', 'auto']`. Not mapped to Cursor's `ask` mode, which is a different promise |
+| Idle sleep | Measure first | `sleep: false`; memory measured below, decided with the numbers |
+| Subscription tools | Like Claude and Codex | The official CLI runs; Centralu never reads or reuses its login (`agent status` is asked, as a terminal would) |
+
+The three limits are new optional capabilities (`AdapterCapabilities.presets`, `keepsRepoFilesOut`, `roleText`;
+absent means what Claude and Codex always did) with one rule over them, `launchRefusal` in `@cc/protocol`. **The
+host is the gate**: every start and wake passes `startFit` (`sessions/session-start.ts`) and is refused before any
+process starts, whatever path asked (a picker, `start_agent`, an app's agent, a fork, a handoff). The pickers ask the
+same rule and grey the tool with the same words: the new-session and new-app dialogs, the orchestrator's cards in the
+intro and its picker in Settings, and the preset menu (a preset the tool cannot keep is greyed). The empty session's
+tool switch (`SessionStart`) leaves a refused tool out instead, as it leaves out one not installed (owner,
+2026-10-18: not shown greyed there).
+
+### 0.2 Cursor, measured logged in (agent 2026.10.22-27dcf5f, Windows 11, model Auto)
+
+Recorded through the adapter itself (`scripts/acp-record.mts`, §10.5) in eight scenarios; they replay in
+`adapters/acp/replay.test.ts`. What the bundle reading of §1.1 said, and what the runs showed:
+
+- **No `usage_update`, no compaction updates** in any run. `/compact` is answered with ordinary text and `end_turn`.
+  So `contextUsage: 'none'` and no `compactCommand` (§5.5 and §5.6 hold).
+- **`session/load` replays** the conversation (user, thought and message chunks) before its answer, as OpenCode's
+  does; the replay is dropped from the live stream (§4.3 holds). No `session/resume`.
+- **A permission request carries less than the call.** Its `toolCall` has no `rawInput` and a title in backticks, with
+  a content line `Not in allowlist: echo`; the command itself came on the `tool_call` frame before it. The card is
+  drawn from both (`AcpNormalizer.call`), so it and the "always" rule read `echo probe-1`. Found by the first Cursor
+  recording; the replay test that failed on it is "approval: asks with a card the command reads on". Option ids are
+  `allow-once`, `allow-always` and `reject-once`, with ACP's kinds.
+- **Setting a model persists.** `session/set_config_option {configId: model}` writes the choice to
+  `~/.cursor/acp-config.json` (`selectedModelVariantId`), the default of every Cursor session the person runs. A probe
+  did it once (and it was put back to `default[]`); PR 1 never sets a model, and the model menu (PR 2) has to choose a
+  model without changing the person's default.
+- **It does not end on stdin EOF while a session is open** (still running 60 s after EOF; 1.7 s with no session). The
+  adapter's `dispose` kills the tree after its 2 s grace. The MCP servers it started from the person's own
+  `~/.cursor/mcp.json` ended by themselves once it was killed.
+- **Shell commands run on Windows** (`echo`), on a machine whose PATH has Git's `cmd` but not its `bin`, and where
+  `bash` on PATH is WSL's. Which shell Cursor used is not reported. Git Bash is needed by `agent worker start`, not by
+  `agent acp`.
+- **Sessions are named by the tool** (`session_info_update`), and it answered in the person's language from their own
+  rules.
+- **Memory** (working set of the agent's own Node): 153 MB after `initialize`, 145 MB idle with a session, 149 MB after
+  a turn. A session also starts the person's own MCP servers (here one `npx` server, +~170 MB, which a terminal
+  session of Cursor starts too). Mac numbers: to be recorded on the Mac.
+- An account without access to a model answers a prompt with the text "Upgrade your plan to continue" and `end_turn`,
+  no error. It reads as an ordinary reply, and is shown as one.
+
+### 0.3 What changed against the design
+
+- **Layout.** Cursor's profile and adapter are `adapters/cursor-agent/` (as `claude/` and `codex/`), and the registry's
+  tool name is `cursor-agent`, Cursor's own binary name: the adapter-identity lint bans a registered tool's name as any
+  literal or object key outside the adapters, and `cursor` is a CSS property and an MCP pagination key.
+- **No take-over after a swap yet** (§4.4 is PR 2). A process the previous host left is closed with its tree, the tool
+  calls it left open are closed as failed, and the conversation is opened again with `session/load`
+  (`closeAdopted`). Under the keeper the process is the keeper's child, which it sweeps if the host dies; without the
+  keeper, Windows ends the host's children with it, and on macOS and Linux a Cursor with a session open would outlive
+  a crashed host (the EOF finding above), which is why the keeper's spawn is used whenever the host has one.
+- **No apps** are attached to an ACP agent in PR 1 (`appAttachment` answers `failed`): an app's tool calls would reach
+  the agent's own approval, which is not Centralu's per-app policy (#382). Centralu's own tools are attached (§6).
+- **No model list, modes or effort** (PR 2): Cursor runs its default model.
+- **Mid-turn cancel.** A cancel that reaches the agent before its turn has begun is lost (ACP's cancel is a
+  notification, answered only by the turn's end); the turn going on after it gets the cancel once more. Measured on
+  OpenCode: the updates after a cancel are the call it aborted, flushed, so the second cancel is harmless there.
+
+### 0.4 The lessons PR 1 is held to
+
+1. **A turn's end says whether the session is still usable.** A clean end is `turn_complete`, or `state_change
+   waiting_input` with `interrupted` (our Stop) or `interrupted_by_tool` (the agent's own `cancelled`). A failed prompt
+   (a JSON-RPC error) is an `error` that leaves the session usable. A process that ended in a turn is `error
+   adapter_crashed`, on which the manager drops the handle and the next message opens the conversation again; one that
+   ended while idle is `session_live` with `asleep`. A refusal is a non-retryable `error`.
+2. **The answer to a cancel is not the end of the turn.** Only the prompt's own answer ends it, and a Stop belongs to
+   the turn it was pressed in (`Turn.stopAsked`), so a late `cancelled` or a late `end_turn` can never end the next one.
+   A Stop the agent does not confirm within 10 s is said as a notice (`stopNotConfirmed`), not an error.
+3. **Orphans after a restart are closed,** not left spinning: the adopted process with its tree, and its open calls as
+   failed results (the cards stop). Sub-agents are not reported in PR 1 (`builtInSubagents: false`), so none can be
+   left behind.
+4. **Tests wait for events, never for time.** The replayer writes a frame when the adapter has sent what precedes it;
+   the scenario driver resolves on the event; `adapters/frames/no-sleeps.test.ts` fails a test in `acp/`, `frames/` or
+   `cursor-agent/` that calls `setTimeout`, `sleep` or a fake clock.
+5. **Windows.** Nothing starts through a shell: Cursor's newest version folder is found as its own launcher finds it
+   and its `node.exe index.js acp` started directly; OpenCode's npm shim is read by `launchFor`. Tools are found with
+   `whichTool`, which reads the login shell's PATH in the packaged app, and Cursor's default install folder
+   (`%LOCALAPPDATA%\cursor-agent`) is looked in too.
+
+### 0.5 What other adapters take from this
+
+The parts that know no protocol live outside `adapters/acp/`, for OpenCode (PR 3, on the ACP core) and for the
+Antigravity adapter (`agy`, stream-json, not ACP), which is designed in parallel:
+
+| Part | Where | Antigravity can take it |
+|---|---|---|
+| Process start and tree teardown | `adapters/local-process.ts`, the keeper's `ProcessSource` (shared already) | as is |
+| The frame recorder | `adapters/frames/recorder.ts` (`CC_RECORD_FRAMES=<folder>`, one file per process, lines both ways and the exit) | as is: it records lines of any protocol |
+| The scrubber | `scripts/frames-scrub.mts` | as is; its id keys (`sessionId`, `toolCallId`, `messageId`) may need the tool's own |
+| The replayer | `adapters/frames/replay.test-helpers.ts`, with a `FrameCodec` | with `jsonLinesCodec` (lines matched by `type`) instead of `jsonRpcCodec` |
+| The scenarios and their driver | `adapters/frames/scenarios.test-helpers.ts`, at `SessionHandle` level | as is, with a record script of its own |
+| The no-sleeps guard | `adapters/frames/no-sleeps.test.ts` | add its folder to the list |
+| The capability limits and `launchRefusal` | `@cc/protocol` | declare what it cannot keep; the host and the pickers follow |
+| The fake peer | `adapters/acp/fake-peer.test-helpers.ts` | no: it speaks JSON-RPC |
 
 ## 1. What was measured
 
@@ -536,34 +647,21 @@ capabilities and the model list. Checked in PR 1 with the mock platform: the des
 
 ## 13. The pull requests
 
-1. **`feat(agent-host): ACP adapter core with Cursor turns`** (this branch, `feat/acp-cursor`): this document,
-   `adapters/acp/` (connection, process, handshake, new/load, cancel, teardown, the update table, approvals, the input
-   queue, context share and compaction from protocol frames), the Cursor profile (launch, detect, basic turns, no
-   models list yet: the tool's default model), the recorder, replayer and fake peer, the OpenCode recordings above as
-   core fixtures, Cursor's once logged in. agent-host.md §2–3 updated.
-2. **Cursor, the rest:** the model list and effort, modes, question cards (`cursor/ask_question`), sub-agents,
-   import, adoption checked on a real swap.
-3. **OpenCode on the same core:** its profile, its permission preset through config, cost, its `/compact` boundary.
-4. **The ACP drift check** in the weekly surface run.
+1. **PR 1, `feat/acp-cursor`**: this document, the capability limits and `launchRefusal` with the host's gate and the
+   pickers, `adapters/acp/` (connection, wire types, normalizer, session, adapter, fake peer), `adapters/frames/`
+   (recorder, replayer, scenarios), `adapters/cursor-agent/` (launch, detect, surface, default model), the recordings
+   of both tools, and agent-host.md §2–3.
+2. **Cursor, the rest:** the model list and effort without changing the person's default (§0.2), modes, question cards
+   (`cursor/ask_question`), sub-agents, import, apps, taking over a process after a swap.
+3. **OpenCode on the same core:** its profile, its permission preset through config, cost, its `/compact` boundary
+   (§0.1).
+4. **The ACP drift check** beyond the surface reading PR 1 already gives Cursor (the weekly job installs Cursor's CLI).
 
 ## 14. Open questions
 
-1. **Cursor login.** No Cursor turn is recorded yet; §1.1's Cursor turn facts come from the bundle. PR 1's Cursor
-   recordings, and the confirmation of `usage_update` (absent), the shell tool on Windows (Git Bash or not), and the
-   memory per process, wait for `agent login`.
-2. **Centralu's role text** (`systemPromptAppend`) for an ACP tool: ACP has no system-prompt field. Options: leave it
-   out (the MCP instructions carry Centralu's tool rules), per-tool configuration (OpenCode's `instructions`), or a
-   first-prompt preamble. Proposed: leave it out in PR 1, which means **an ACP tool cannot be the orchestrator or a
-   coordinator yet**, and is offered only for ordinary and child sessions.
-3. **Repository trust** (`projectTrusted`, `noSettingFiles`, #92): ACP cannot tell an agent not to read
-   `.cursor/rules`, `AGENTS.md` or the repository's own config. Proposed: an ACP tool is offered in an untrusted
-   project only with that said on the start sheet, and never for a session that must read no setting files (the
-   orchestrator), which question 2 already rules out. Is that acceptable, or is an untrusted project closed to ACP
-   tools?
-4. **OpenCode's `/compact`** leaves no protocol marker. Accept the boundary inferred from Centralu's own compact turn
-   (§5.6), or treat OpenCode as unable to compact until it sends `compaction_update`?
-5. **`safe` on Cursor:** no per-process way to make Cursor ask before every write and command was found. Leave `safe`
-   unavailable for Cursor (the preset menu would not offer it), or answer it with Cursor's `ask` mode, which makes no
-   edits and runs no commands at all?
-6. **Memory:** one Cursor process per session (§3.1) is to be measured; if it is heavy, is putting idle Cursor sessions
-   to sleep sooner acceptable, once resume is measured?
+Questions 1 to 6 of the design were answered (§0.1). Left open:
+
+1. **Cursor on macOS and Linux.** The install layout `findCursor` reads there (`~/.local/bin/agent` linking into
+   `…/cursor-agent/versions/<version>/`) is from the installer's description, not measured; the Mac run and the weekly
+   drift job (Linux) will say.
+2. **Mac memory** of one `agent acp` (idle, after a turn), for the sleep decision.
