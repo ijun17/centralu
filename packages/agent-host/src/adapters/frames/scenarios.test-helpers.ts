@@ -28,8 +28,8 @@ export type Scenario = {
 }
 
 const ended = (e: NormalizedEvent) => e.type === 'turn_complete' || e.type === 'error' || (e.type === 'state_change' && e.state === 'waiting_input')
-const turn = async (d: Driver, text: string) => {
-  d.session().send(text)
+const turn = async (d: Driver, text: string, opts?: { compact?: boolean }) => {
+  d.session().send(text, opts)
   return d.waitFor(`the end of the turn "${text.slice(0, 30)}"`, ended)
 }
 
@@ -116,7 +116,8 @@ export const SCENARIOS: readonly Scenario[] = [
     name: 'compact',
     async run(d) {
       await turn(d, 'Reply with exactly: one')
-      await turn(d, '/compact')
+      // As Centralu sends its own compact (`SessionEvents.sendCompact`)
+      await turn(d, '/compact', { compact: true })
       await turn(d, 'What did I ask you to reply with first? One word.')
     },
   },

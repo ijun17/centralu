@@ -2,7 +2,9 @@ import { readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import type { AdapterCapabilities, NormalizedEvent } from '@cc/protocol'
+import { PermissionPreset, type NormalizedEvent } from '@cc/protocol'
+import { cursorProfile } from '../cursor-agent/index.js'
+import { openCodeProfile } from '../opencode/index.js'
 import { AcpAdapter } from './adapter.js'
 import { AcpNormalizer } from './normalize.js'
 import { detailOf } from './session.js'
@@ -23,20 +25,23 @@ class ReplayAdapter extends AcpAdapter {
   readonly tool = 'replay'
 }
 
-const profile = (version: string): AcpProfile => ({
-  descriptor: { name: 'replay', label: 'Agent', mark: 'R', install: 'install it', login: 'log in' },
-  capabilities: { approvals: true, contextUsage: 'exact', resume: true, autoTitle: true } as AdapterCapabilities,
-  surface: undefined as never,
-  launch: async () => ({ command: 'agent', args: ['acp'] }),
-  detect: async () => ({ tool: 'replay', installed: true, loggedIn: true, detail: '' }),
-  installedVersion: async () => version,
-})
+/** The tool's own profile, by the recording's folder (`<tool>-<version>`), started on the recording instead of its CLI */
+const PROFILES: Record<string, () => AcpProfile> = { 'cursor-agent': cursorProfile, opencode: openCodeProfile }
+
+const profile = (dir: string, version: string): AcpProfile => {
+  const tool = Object.keys(PROFILES).find((t) => dir.startsWith(`${t}-`))
+  if (!tool) throw new Error(`no profile for the recordings in ${dir}`)
+  return { ...PROFILES[tool]!(), launch: async () => ({ command: 'agent', args: ['acp'] }), installedVersion: async () => version }
+}
 
 async function replay(dir: string, name: string): Promise<{ events: NormalizedEvent[]; problems: string[]; left: number }> {
   const recording = loadRecording(join(RECORDINGS, dir, `${name}.jsonl`))
-  const scenario = SCENARIOS.find((s) => s.name === name)!
+  const named = SCENARIOS.find((s) => s.name === name)!
+  // Driven under the preset it was recorded with (`acp-record.mts` writes it; older recordings ran under Normal)
+  const preset = PermissionPreset.safeParse(recording.header.preset)
+  const scenario = preset.success ? { ...named, preset: preset.data } : named
   const { spawn, state, peers } = replaySpawner(recording)
-  const adapter = new ReplayAdapter(profile(String(recording.header.version)), spawn, 60_000)
+  const adapter = new ReplayAdapter(profile(dir, String(recording.header.version)), spawn, 60_000)
   const events = await drive(adapter, scenario, '/work', `replay-${name}`, 0, () => peers.at(-1)?.kill('SIGKILL'))
   return { events, problems: state.problems, left: state.left() }
 }
@@ -144,9 +149,12 @@ for (const dir of readdirSync(RECORDINGS)) {
     }
 
     if (names.includes('compact')) {
-      it('compact: a /compact answered with ordinary text leaves no compaction marker', async () => {
+      // A /compact answered with text only: a compaction is read from it only for a tool that says so (`infersCompaction`),
+      // and only where its context reading went down (OpenCode); Cursor reads none
+      const infers = !!profile(dir, '').infersCompaction
+      it(`compact: Centralu's /compact answered with ordinary text leaves ${infers ? 'one manual compaction marker' : 'no compaction marker'}`, async () => {
         const { events } = await replay(dir, 'compact')
-        expect(of(events, 'compaction')).toEqual([])
+        expect(of(events, 'compaction')).toEqual(infers ? [{ type: 'compaction', sessionId: 'replay-compact', failed: false, trigger: 'manual' }] : [])
         expect(of(events, 'turn_complete')).toHaveLength(3)
       })
     }
