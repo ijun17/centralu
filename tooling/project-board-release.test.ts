@@ -430,7 +430,15 @@ type Repo = { work: string; origin: string; released: string; tip: string }
  * - `bumped`: the bump to NEXT is merged too, untagged (the state before tag); `inBump` changes more files in that same commit
  *   (the release commit is the bump's own, #1350: what the evidence reads is what the bump carried, not what landed after it)
  */
-function repo({ bumped = false, version = APP_VERSION, inBump }: { bumped?: boolean; version?: string; inBump?: (work: string) => void } = {}): Repo {
+const BRAND_PATH = 'packages/protocol/src/brand.ts'
+/** brand.ts as the tag scheme has it (#1501): the version imported from the generated file, no literal */
+const switchBrand = (work: string) => {
+  const path = join(work, BRAND_PATH)
+  writeFileSync(path, readFileSync(path, 'utf8').replace(/^export const APP_VERSION = '[^']*'$/m, "export { APP_VERSION } from './version.generated.js'"))
+}
+
+/** `switchAt`: brand.ts loses its literal from that commit on ("one" or the tip "two"), as on the tag scheme's switch */
+function repo({ bumped = false, version = APP_VERSION, inBump, switchAt }: { bumped?: boolean; version?: string; inBump?: (work: string) => void; switchAt?: 'one' | 'two' } = {}): Repo {
   const origin = join(root, 'origin.git')
   const work = join(root, 'work')
   g(root, 'init', '-q', '--bare', '-b', 'main', origin)
@@ -447,8 +455,10 @@ function repo({ bumped = false, version = APP_VERSION, inBump }: { bumped?: bool
   g(work, 'tag', `v${version}`)
   write(work, '.github/workflows/build.yml', 'on:\n  push:\n    branches: [main]\n  pull_request:\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo test\n')
   write(work, 'a.txt', 'one\n')
+  if (switchAt === 'one') switchBrand(work)
   commitAll(work, 'feat(ui): one (#10)')
   write(work, 'b.txt', 'two\n')
+  if (switchAt === 'two') switchBrand(work)
   let tip = commitAll(work, 'fix: two (#11)')
   if (bumped) {
     for (const f of CARRIERS) write(work, f, bumpText(readFileSync(join(work, f), 'utf8'), version, NEXT).text)
@@ -1913,7 +1923,7 @@ describe('release under release.scheme "tag" (#1501)', { timeout: 60_000 * SLOW 
     })
 
   it('cuts the next prerelease from the newest fully green commit, rehearses it by version, and tags it annotated with the notes', async () => {
-    const s = repo()
+    const s = repo({ switchAt: 'one' })
     const at = one(s)
     // The tip's own run passed only the quick tier; the commit before it ran the full tier
     fullTier(s, 'success', 'skipped')
@@ -1957,7 +1967,7 @@ describe('release under release.scheme "tag" (#1501)', { timeout: 60_000 * SLOW 
   })
 
   it('refuses while no commit since the newest tag has a fully green run of its own, and names a commit given that is not releasable', async () => {
-    const s = repo()
+    const s = repo({ switchAt: 'one' })
     fullTier(s, 'skipped', 'skipped')
     patchState((st) => (st.ciBySha = { [s.tip]: 'pending' }))
     tagScheme()
@@ -1980,7 +1990,7 @@ describe('release under release.scheme "tag" (#1501)', { timeout: 60_000 * SLOW 
   })
 
   it('follows the newest tag until its release run succeeded, then says nothing landed since', async () => {
-    const s = repo()
+    const s = repo({ switchAt: 'one' })
     g(s.work, 'push', '-q', 'origin', `${s.tip}:refs/tags/v${NEXT}`)
     patchState((st) => st.runs.push(run({ id: 61, event: 'push', head_branch: `v${NEXT}`, head_sha: s.tip, status: 'in_progress', conclusion: null })))
     tagScheme()
@@ -1993,7 +2003,7 @@ describe('release under release.scheme "tag" (#1501)', { timeout: 60_000 * SLOW 
   })
 
   it("approves only on the tagged commit's own CI: no bump PR's run stands for it", async () => {
-    const s = repo()
+    const s = repo({ switchAt: 'one' })
     g(s.work, 'push', '-q', 'origin', `${s.tip}:refs/tags/v${NEXT}`)
     // A merged PR whose head has the tip's tree, as a bump PR's would: the brand scheme takes its run while main's is pending
     const prHead = g(s.work, 'commit-tree', g(s.work, 'rev-parse', `${s.tip}^{tree}`), '-p', one(s), '-m', 'pr head')
@@ -2015,5 +2025,63 @@ describe('release under release.scheme "tag" (#1501)', { timeout: 60_000 * SLOW 
     const approved = await call('release', { step: 'approve', path: s.work, confirm: true })
     expect(approved.isError, approved.text).toBe(false)
     expect(approved.data.approved).toBe(true)
+  })
+
+  it('passes over a commit whose brand.ts still declares the version, read as the release guard reads it', async () => {
+    // Right after the switch merges, the newest fully green commit can be one from before it: a tag there is refused by the
+    // guard, and the number is spent on a tag that never publishes (#1501 review item 1)
+    const s = repo({ switchAt: 'two' })
+    fullTier(s, 'success', 'skipped')
+    tagScheme()
+    const status = await call('release_status', { path: s.work })
+    expect(status.data.summary).toContain('Not releasable yet')
+    expect(status.data.summary).toContain('1 of them still declaring the version')
+    for (const step of ['rehearse', 'tag']) {
+      const r = await call('release', { step, path: s.work, skipRehearsal: true, confirm: true })
+      expect(r.isError, `${step}: ${r.text}`).toBe(true)
+    }
+    const named = await call('release', { step: 'tag', path: s.work, commit: one(s), skipRehearsal: true, confirm: true })
+    expect(named.data.problems.join(' ')).toContain(`${one(s).slice(0, 7)} still declares ${APP_VERSION} in ${BRAND_PATH} (the brand scheme)`)
+    expect(ghWrites()).toEqual([])
+    expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBeNull()
+    // Once the switch's own commit has its full run, it is the release
+    patchState((st) => (st.fullTierBySha = { [one(s)]: 'success', [s.tip]: 'success' }))
+    const ready = await call('release_status', { path: s.work })
+    expect(ready.data).toMatchObject({ phase: 'ready-to-tag', version: NEXT, releaseCommit: s.tip })
+  })
+
+  it('says no commit is under the tag scheme yet while every one since the newest tag declares the version', async () => {
+    const s = repo()
+    fullTier(s, 'success', 'success')
+    tagScheme()
+    const r = await call('release', { step: 'tag', path: s.work, skipRehearsal: true, confirm: true })
+    expect(r.isError).toBe(true)
+    expect(r.data.problems.join(' ')).toContain(`No commit of main since v${APP_VERSION} is under the tag scheme yet`)
+    expect(r.data.problems.join(' ')).toContain("would be refused by the release workflow's guard")
+    expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBeNull()
+  })
+
+  it('refuses to rehearse or tag the next version while the newest tag is still being released', async () => {
+    // The guard refuses a newer tag until the previous version is on the registry (#1501 review item 4)
+    const s = repo({ switchAt: 'one' })
+    fullTier(s, 'success', 'success')
+    g(s.work, 'push', '-q', 'origin', `${one(s)}:refs/tags/v${NEXT}`)
+    patchState((st) => {
+      st.registry = {}
+      st.runs.push(run({ id: 61, event: 'push', head_branch: `v${NEXT}`, head_sha: one(s), status: 'waiting', conclusion: null }))
+    })
+    tagScheme()
+    expect((await call('release_status', { path: s.work })).data).toMatchObject({ version: NEXT, releaseCommit: one(s) })
+    for (const step of ['rehearse', 'tag']) {
+      const r = await call('release', { step, path: s.work, skipRehearsal: true, confirm: true })
+      expect(r.isError, `${step}: ${r.text}`).toBe(true)
+      expect(r.data.problems.join(' ')).toContain(`v${NEXT}, the newest release tag, is not released yet`)
+    }
+    expect(ghWrites()).toEqual([])
+    // Its shim on the registry: released, and the next one goes ahead on the tip
+    patchState((st) => (st.registry = { centralu: one(s) }))
+    const next = await call('release', { step: 'tag', path: s.work, skipRehearsal: true })
+    expect(next.isError, next.text).toBe(false)
+    expect(next.data.lines.join(' ')).toContain(nextVersion(NEXT) as string)
   })
 })

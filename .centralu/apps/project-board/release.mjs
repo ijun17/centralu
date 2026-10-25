@@ -52,7 +52,7 @@ import {
   topLevel,
   treeOf,
 } from './git.mjs'
-import { bumpText, compareVersions, declaredVersion, filesNamed, nextVersion, parseVersion, releaseNotes, versionLines } from './versions.mjs'
+import { bumpText, compareVersions, declaredVersion, filesNamed, nextVersion, parseVersion, releaseNotes, sourceScheme, versionLines } from './versions.mjs'
 import { listSome, plural, short, sleep, span } from './util.mjs'
 
 /** A refusal: nothing was pushed, tagged, started or approved. */
@@ -74,7 +74,13 @@ export function releaseConfig(c = {}) {
   return {
     // "brand": the version is declared in `source` and bumped in `versionFiles`; "tag": the tag alone states it (#1501)
     scheme: c.scheme === 'tag' ? 'tag' : 'brand',
-    source: { path: c.source?.path ?? 'packages/protocol/src/brand.ts', pattern: c.source?.pattern ?? "APP_VERSION = '([^']+)'" },
+    // `marker` and `name`: how `sourceScheme` (versions.mjs) tells a commit of the tag scheme from one that still declares the version
+    source: {
+      path: c.source?.path ?? 'packages/protocol/src/brand.ts',
+      pattern: c.source?.pattern ?? "APP_VERSION = '([^']+)'",
+      marker: c.source?.marker ?? String.raw`^(?:import|export) \{ APP_VERSION \} from '\./version\.generated(?:\.js)?';?$`,
+      name: c.source?.name ?? 'APP_VERSION',
+    },
     versionFiles: c.versionFiles ?? [],
     ignore: c.ignore ?? [],
     tagPrefix: c.tagPrefix ?? 'v',
@@ -145,6 +151,16 @@ const WALK_LIMIT = 500
 
 const tagScheme = (cfg) => cfg.scheme === 'tag'
 
+/**
+ * Why `sha` cannot be released under the tag scheme, or null when it can: its `release.source` must be in the tag scheme by
+ * `sourceScheme`, the same reading the release workflow's guard makes of it (#1501 review item 1).
+ */
+async function notTagScheme(s, cfg, sha) {
+  const r = sourceScheme(await showFile(s.root, sha, cfg.source.path), cfg.source)
+  if (r.scheme === 'tag') return null
+  return r.scheme === 'brand' ? `still declares ${r.version} in ${cfg.source.path} (the brand scheme).` : `cannot be read for its scheme: ${cfg.source.path} ${r.problem}`
+}
+
 /** How many of main's newest commits since the last tag are asked for their CI, looking for a releasable one (#1501) */
 const CANDIDATE_LOOK = 20
 
@@ -187,29 +203,45 @@ async function nextRelease(s, cfg, ci, { version, commit } = {}) {
   }
   let at = -1
   let evidence = null
+  let why = null
   if (commit !== undefined) {
     const named = String(commit).trim()
     const sha = /^[0-9a-f]{4,40}$/i.test(named) ? await git(s.root, ['rev-parse', '--verify', '--quiet', `${named}^{commit}`]).then((t) => t.trim(), () => null) : null
     if (!sha) problems.push(`"${named}" is not a commit this checkout has; fetch ${s.remote} first, and give its id.`)
     else if ((at = log.indexOf(sha)) === -1) problems.push(`${short(sha)} is not a commit of ${s.main}'s history (first parents) after ${s.last?.name ?? 'the start'}, so it cannot be released.`)
-    else {
+    else if ((why = await notTagScheme(s, cfg, sha))) {
+      problems.push(`${short(sha)} ${why}`)
+      at = -1
+    } else {
       evidence = await ci(sha, { own: true })
       if (!releasable(evidence)) problems.push(`CI on ${s.main} at ${short(sha)} is not fully green: ${evidence.verdict !== 'green' ? evidence.summary : "its run did not run the full tier (the full tier's check did not pass)"}.`)
     }
   } else {
     let first = null
-    for (let i = 0; i < Math.min(log.length, CANDIDATE_LOOK); i++) {
+    // A commit that still declares the version (from before the switch, or in a form that cannot be read) is passed over: the
+    // guard refuses a tag on it, and its number would be spent on a tag that never publishes (#1501 review item 1)
+    const looked = Math.min(log.length, CANDIDATE_LOOK)
+    let passed = 0
+    let reason = null
+    for (let i = 0; i < looked; i++) {
+      if ((why = await notTagScheme(s, cfg, log[i]))) {
+        passed++
+        reason ??= `${short(log[i])} ${why}`
+        continue
+      }
       const r = await ci(log[i], { own: true })
-      if (i === 0) first = r
+      first ??= { sha: log[i], r }
       if (releasable(r)) {
         at = i
         evidence = r
         break
       }
     }
-    if (at === -1)
+    if (at === -1 && passed === looked)
+      problems.push(`No commit of ${s.main} since ${s.last?.name ?? 'the start'} is under the tag scheme yet (looked at the newest ${plural(looked, 'commit')}; ${reason}). A tag on one would be refused by the release workflow's guard; release it with the brand scheme, or wait for a commit after the switch.`)
+    else if (at === -1)
       problems.push(
-        `No commit of ${s.main} since ${s.last?.name ?? 'the start'} has a fully green push run of its own yet (looked at the newest ${plural(Math.min(log.length, CANDIDATE_LOOK), 'commit')}; ${short(log[0])}: ${first?.summary ?? 'not read'}). Wait for ${s.main}'s CI, or name a commit.`,
+        `No commit of ${s.main} since ${s.last?.name ?? 'the start'} has a fully green push run of its own yet (looked at the newest ${plural(looked, 'commit')}${passed ? `, ${passed} of them still declaring the version` : ''}; ${first ? `${short(first.sha)}: ${first.r.summary}` : 'none read'}). Wait for ${s.main}'s CI, or name a commit.`,
       )
   }
   s.at = at === -1 ? s.tip : log[at]
@@ -562,6 +594,22 @@ async function shimPublished(s, cfg, registry, sha, version) {
   }
 }
 
+/**
+ * Under the tag scheme, whether the newest tag (`s.tagged`, before `nextRelease` moves on) is released: its release run
+ * succeeded, or its shim is on the registry (a run GitHub no longer lists, a release published by hand). Until then status
+ * follows it, and rehearse and tag refuse the next version, which the guard would refuse while it publishes (#1501 review item 4).
+ */
+async function newestTagDone(s, cfg, gh, registry) {
+  const runs = await gh.workflowRuns(s.repo, workflowFile(cfg), { event: 'push', headSha: s.tagged.sha })
+  return runs.some((r) => r.headBranch === s.tag && r.status === 'completed' && r.conclusion === 'success') || (await shimPublished(s, cfg, registry, s.tagged.sha, s.version))
+}
+
+/** The tag scheme's refusal while the newest tag is still being released; empty once it is done (or there is none). */
+async function stillPublishing(s, cfg, gh, registry) {
+  if (!s.tagged || (await newestTagDone(s, cfg, gh, registry))) return []
+  return [`${s.tag}, the newest release tag, is not released yet: its release run has not succeeded and its shim is not on the registry. Finish it (release step approve) or abandon it first; the release workflow's guard refuses a newer tag until the previous version is on the registry.`]
+}
+
 /** Where the release stands and the next step. Read-only. */
 export async function releaseStatus({ repo, dir, cfg, gh, ci, registry }) {
   const s = { repo, ...(await readState({ repo, dir, cfg, gh })) }
@@ -569,11 +617,7 @@ export async function releaseStatus({ repo, dir, cfg, gh, ci, registry }) {
   // The tag scheme (#1501) follows the newest tag until its release run has succeeded, then the next release
   let next = null
   if (tagScheme(cfg)) {
-    // Released: its run succeeded, or its shim is on the registry (a run GitHub no longer lists, a release published by hand)
-    const done =
-      s.tagged &&
-      ((await gh.workflowRuns(repo, workflowFile(cfg), { event: 'push', headSha: s.tagged.sha })).some((r) => r.headBranch === s.tag && r.status === 'completed' && r.conclusion === 'success') ||
-        (await shimPublished(s, cfg, registry, s.tagged.sha, s.version)))
+    const done = s.tagged && (await newestTagDone(s, cfg, gh, registry))
     if (!s.tagged || done) {
       if (s.tagged) lines.push(`${s.tag} is released.`)
       next = await nextRelease(s, cfg, ci)
@@ -799,14 +843,15 @@ async function findRun(gh, repo, file, filter, match, after) {
  * open bump PR's head (#1035), beside its CI, which the tag accepts once the squash gives main the
  * same tree.
  */
-export async function rehearseRelease({ repo, dir, cfg, gh, ci, permissions }, { version, commit, confirm = false }) {
+export async function rehearseRelease({ repo, dir, cfg, gh, ci, permissions, registry }, { version, commit, confirm = false }) {
   if (!canMerge(permissions)) throw new ReleaseRefusal([NOT_MAINTAINER])
   const s = { repo, ...(await readState({ repo, dir, cfg, gh })) }
   let evidence
   if (tagScheme(cfg)) {
     // The next version on the newest fully green commit since the newest tag (#1501); no bump PR to rehearse
+    const publishing = await stillPublishing(s, cfg, gh, registry)
     const nr = await nextRelease(s, cfg, ci, { version, commit })
-    evidence = { problems: nr.problems, lines: nr.lines }
+    evidence = { problems: [...publishing, ...nr.problems], lines: nr.lines }
   } else {
     if (s.tagged) return rehearseBumpPr(s, cfg, gh, { version, confirm })
     await releaseCommit(s, cfg, { version, commit })
@@ -924,7 +969,7 @@ async function rehearseBumpPr(s, cfg, gh, { version, confirm }) {
 // --- tag ----------------------------------------------------------------------------------------------
 
 /** The tag is the release: pushed on main's commit once everything says that commit is the one. */
-export async function tagRelease({ repo, dir, cfg, gh, ci, permissions }, { version, commit, skipRehearsal = false, confirm = false }) {
+export async function tagRelease({ repo, dir, cfg, gh, ci, permissions, registry }, { version, commit, skipRehearsal = false, confirm = false }) {
   if (!canMerge(permissions)) throw new ReleaseRefusal([NOT_MAINTAINER])
   const s = { repo, ...(await readState({ repo, dir, cfg, gh })) }
   const problems = [...(await checkoutProblems(s, { dirtyOnly: true }))]
@@ -935,10 +980,11 @@ export async function tagRelease({ repo, dir, cfg, gh, ci, permissions }, { vers
   if (tagScheme(cfg)) {
     // The version after the newest tag, on a commit of main since it whose own push run is fully green (#1501): the
     // guard of the release run checks the same descent and the registry again, for a tag pushed by hand too
+    const publishing = await stillPublishing(s, cfg, gh, registry)
     const nr = await nextRelease(s, cfg, ci, { version, commit })
-    evidence = { problems: nr.problems, lines: nr.lines }
-    problems.push(...nr.problems)
-    if (!nr.problems.length) located = { sha: s.at }
+    evidence = { problems: [...publishing, ...nr.problems], lines: nr.lines }
+    problems.push(...evidence.problems)
+    if (!evidence.problems.length) located = { sha: s.at }
   } else {
     let notLocated = []
     try {

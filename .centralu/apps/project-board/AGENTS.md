@@ -916,7 +916,11 @@ step shows on the screen.
   The next release is `version` (default the next prerelease after the newest tag), after every tag and
   untagged, cut from `commit` (default the newest commit on main's first-parent history since the newest
   tag whose **own push run** of CI is fully green with the full tier, of the newest 20; a batch's quick run
-  never counts). `rehearse` dispatches the workflow with `rehearsalInputs` plus `version` (on main, or on
+  never counts), and under the tag scheme by `sourceScheme` (`versions.mjs`, from `release.source`'s `pattern`,
+  `marker` and `name`): a commit whose source still declares the version, or declares it in a form neither reading
+  understands, is passed over (named, it is refused). The release workflow's guard imports the same function and reads
+  the same `release.source`, so the two never disagree about a commit. `rehearse` and `tag` refuse while the newest
+  tag is not released (the check status uses: its run succeeded or its shim is on the registry). `rehearse` dispatches the workflow with `rehearsalInputs` plus `version` (on main, or on
   `branchPrefix` + the version made at that commit), and `tag` counts only a successful rehearsal on that
   commit (or that branch, same tree) whose run name is `rehearse <version>` (release.yml's `run-name`). `tag`
   pushes an **annotated** tag whose message is the notes (their only record; `git mktag` in the object
