@@ -51,6 +51,7 @@
 | [plans/os-layer.md](plans/os-layer.md) | OS 계층 (#1599, 2026-10-26 제안): Windows 단위 테스트 시간이 어디에 드는지 파일별 측정, 계층이 무엇이고 어떤 OS 의미를 맡는지, 린트 규칙과 줄기만 하는 허용 목록, 같은 규칙에서 Windows 잡의 테스트를 고르는 법, 호스트 영역을 옮기는 순서, 주인에게 남은 질문 |
 | [plans/runtime-unification.md](plans/runtime-unification.md) | 프로세스 런타임을 단계별로 다시 설계 (주인, 2026-10-08): macOS·Linux·Windows·원격에서 하나의 구조(런처 → 키퍼 → 호스트), 하나의 OS 계층, 하나의 시작 계획, 어디서나 검증된 콘텐츠; 단계 순서, 원격 3–4단계와 Windows 키퍼(#14)와의 관계, 완료의 정의. [runtime-lessons.md](runtime-lessons.md)가 각 단계의 관문 |
 | [plans/acp-adapter.md](plans/acp-adapter.md) | Cursor CLI를 첫 도구로 하는 범용 Agent Client Protocol 어댑터 (#59, #1476, 2026-10-26 제안): Cursor 2026.10.22와 OpenCode 1.19.4에서 측정한 프레임, 세션마다 프로세스 하나, `authenticate`를 부르지 않는 이유, resume보다 load, 업데이트 대응표, 승인은 한 번씩 답하고 규칙은 여기서 지킨다, 턴 중 입력은 호스트가 줄 세운다, 컨텍스트 비율과 압축, stdio 브리지로 가는 Centralu의 도구, 능력 목록, 녹화를 재생하는 테스트(#1498), 런타임에 SDK를 쓰지 않는 이유, PR 분할과 열린 질문 (영어만) |
+| [plans/antigravity-adapter.md](plans/antigravity-adapter.md) | ACP가 없는 Antigravity CLI(`agy`)의 어댑터 (#59, #1498, 2026-10-26 제안): print 모드에서 stream-json으로 입출력할 때 `agy` 1.4.7이 하는 일을 측정한 결과, `--add-dir`로 넘기는 세션별 플러그인 폴더의 막는 `PreToolUse` 훅으로 받는 승인(사람의 설정이나 저장소에는 아무것도 쓰지 않는다), 중단하면 프로세스가 끝나고 다음 입력이 이어 받는다, 없는 대화 id의 함정, print 모드에는 컨텍스트 창도 압축도 없다, Centralu의 도구와 역할 글, 능력 목록, 녹화를 재생하는 테스트, ACP 작업에서 가져오는 것, 열린 질문 (영어만) |
 | [plans/root-apps.md](plans/root-apps.md) | 폴더에 `centralu.app.json`이 있는 프로젝트가 앱이다(#1141, 2026-10-18 결정): 루트 앱의 키, 매니페스트를 지웠을 때 남는 것, 사용자 폴더 앱을 프로젝트로 옮기기, 어느 세션이 그 도구를 받는가 |
 
 ## 문서를 쓰는 규칙
