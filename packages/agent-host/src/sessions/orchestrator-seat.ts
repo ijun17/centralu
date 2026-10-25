@@ -1,6 +1,7 @@
 import { blockedOnQuestion, RESERVED_APP_IDS, type Attachment, type ExternalAppInfo, type GitSource, type MachineInfo, type NormalizedEvent, type PermissionPreset, type SessionInfo, type SettingsApplied, type ToolName, type UpdateStatus, type UsageHistory, type UsageHistoryBy } from '@cc/protocol'
 import { awayPhrase } from '../adapters/contract.js'
-import type { AgentListRow, AgentSessionOpts, BusyAnswer, BusyChoice, ChildRunResult, HandoffResult, LinkedSessions, OrchestratedSession, OrchestratorTools, RecallHit, RoutedCard, StartAgentOpts } from '../adapters/contract.js'
+import { awayFor, matchProjects } from './ask-project.js'
+import type { AgentListRow, AgentSessionOpts, BusyAnswer, BusyChoice, ChildRunResult, HandoffResult, LinkedProject, LinkedSessions, OrchestratedSession, OrchestratorTools, RecallHit, RoutedCard, StartAgentOpts } from '../adapters/contract.js'
 import type { AppCheckReport, AppRef } from '../apps/external/runtime.js'
 import type { QueuedRequest, Store } from '../dev-services/store.js'
 import { inTurn } from '../idle.js'
@@ -345,12 +346,34 @@ export function orchestratorToolsFor(
 
     createSession: async (opts) => {
       const all = host.store.projects.listProjects()
-      const local = all.filter((p) => p.id === opts.project || p.name === opts.project)
       // A linked machine's project, by its name or qualified id (#82 phase 4). Asked only when links exist, and not for
       // this computer's own id, which is exact (as ask_project's rule is)
       const reader = linked()
-      const exactHere = all.some((p) => p.id === opts.project)
-      const remote = reader && opts.project && !exactHere ? await reader.findProjects(opts.project) : []
+      const wanted = (opts.project ?? '').trim()
+      const exactHere = all.some((p) => p.id === wanted)
+      // The same match as ask_project's: the id, the exact name, `<machine>/<name>`, then the name in any case; two of one name on this computer are still refused
+      const found = (machineProjects: readonly LinkedProject[]) =>
+        matchProjects(
+          wanted,
+          [
+            ...all.map((p) => ({ id: p.id, name: p.name, machine: null, machineId: null })),
+            ...machineProjects.map((p) => ({ id: p.id, name: p.name, machine: p.machine, machineId: p.machineId })),
+          ],
+          { everyOne: true },
+        )
+      let there = reader && wanted && !exactHere ? await reader.projects({ ref: wanted }) : null
+      let matched = found(there?.projects ?? [])
+      // Named nowhere (#1547): a machine that is down may hold a project its mirror lacks, so those are tried now (once per window)
+      if (reader && there && !matched.length) {
+        there = await reader.projects({ ref: wanted, anyDown: true, prior: there })
+        matched = found(there.projects)
+      }
+      const local = matched.flatMap((m) => all.filter((p) => m.machineId === null && p.id === m.id))
+      const remote = matched.flatMap((m) => (there?.projects ?? []).filter((p) => m.machineId !== null && p.id === m.id))
+      const missing = there && !matched.length ? awayFor(wanted, there.away, there.machines.map((m) => m.machineId)) : []
+      if (missing.length) {
+        return { ok: false, error: `No such project: ${wanted}. Not asked, and its projects may be missing: ${missing.map((a) => `${a.machine} (${a.why})`).join(', ')}.` }
+      }
       if (local.length + remote.length > 1) {
         // One name on two machines: guessing would start the work on the wrong disk. A machine that cannot be asked just
         // now counts too (`away`): its project may be the one meant, and dropping it used to start the work here instead

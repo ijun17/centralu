@@ -319,6 +319,11 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     this.noteCallFailure()
   }
 
+  /** The window in which a call starts at most one attempt (`reachForCall`) */
+  get callWindowMs(): number {
+    return this.deps.callWindowMs ?? CALL_WINDOW_MS
+  }
+
   /** How the attempt a call waited on ended when it did not connect: the machine's own words. One still going is told as it is (`whyDown`) */
   private noteCallFailure(): void {
     if (this.reachable || this.attemptUnderWay) return
