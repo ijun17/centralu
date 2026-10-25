@@ -27,14 +27,19 @@
 #
 # Two things are deliberate about the triggers:
 #
-#   * A tag push is a real release. That is the whole point — the version already lives in
-#     `brand.ts`, so the tag is the one place a human states "this one, now", and `guard`
-#     refuses the run if the two disagree.
+#   * A tag push is a real release. That is the whole point: the tag is the one place a human
+#     states "this one, now". While the version lives in `brand.ts`, `guard` refuses the run if
+#     the two disagree; once brand.ts carries no version (the tag scheme, #1501), the tag is the
+#     version and `guard` holds it to the previous release instead (scripts/release-guard.mjs).
+#     Under the tag scheme a manual run never publishes, whatever `dry_run` says.
 #   * `workflow_dispatch` exists to rehearse (`dry_run`, default true). The darwin release
 #     path has only ever run on the developer's Mac; the Linux one had never run anywhere
 #     until it did, and its first run found two mac-only assumptions in `pnpm verify`. The
 #     first run of *this* workflow must be able to be a rehearsal, not a release.
 name: release
+# A rehearsal names the version it builds, so the board can tell which version a rehearsal was of
+# (the tag scheme, #1501: the tree no longer carries one). A tag push is named by its tag.
+run-name: ${{ github.event_name == 'workflow_dispatch' && format('rehearse {0}', inputs.version || 'next') || github.ref_name }}
 
 on:
   push:
@@ -49,6 +54,11 @@ on:
         description: 'Also move the `latest` dist-tag to this version (correct only while no stable release exists — drop at 1.0)'
         type: boolean
         default: true
+      version:
+        description: 'The version to rehearse (empty: the next prerelease after the newest tag). Under the brand scheme it must be the APP_VERSION the commit declares'
+        type: string
+        required: false
+        default: ''
 
 # Never cancel a release in flight. `build.yml` cancels freely because a newer push makes an
 # older build irrelevant; here a cancelled job could be one that has already put a package on
@@ -80,86 +90,39 @@ jobs:
       # compares against the literal "false"/"true" for that reason.
       dry_run: ${{ steps.plan.outputs.dry_run }}
       also_latest: ${{ steps.plan.outputs.also_latest }}
+      # "brand" while brand.ts declares the version, "tag" once the tag alone does (#1501)
+      scheme: ${{ steps.plan.outputs.scheme }}
       # "true" only on a tag push whose tree a successful rehearsal built and verified (#1042)
       skip_verify: ${{ steps.rehearsal.outputs.skip_verify }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The history and the tags: under the tag scheme the guard checks that the previous release
+          # tag is an ancestor of this commit and that the commit is on main (#1501). Without them a
+          # tag pushed by hand on an older commit would ship without the previous release's changes.
+          fetch-depth: 0
 
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      # Which version this run builds, and whether it publishes: scripts/release-guard.mjs, for both
+      # schemes (brand.ts's literal, or the tag alone). The inputs go through the environment instead
+      # of pasting `${{ inputs.* }}` into a script: an expression is substituted before anything
+      # parses the line, so a value carrying a quote would be executed rather than compared.
       - id: plan
         env:
-          # Read the inputs through the environment instead of pasting `${{ inputs.* }}`
-          # into the script body. An expression is substituted before the shell ever sees
-          # the line, so a value carrying a quote would be *executing* rather than being
-          # compared. These two are booleans today; the habit is what keeps the next input
-          # from being the exception nobody notices.
           INPUT_DRY_RUN: ${{ inputs.dry_run }}
           INPUT_ALSO_LATEST: ${{ inputs.also_latest }}
-        run: |
-          set -euo pipefail
-
-          # `brand.ts` is the single source for the version — tauri.conf.json, Cargo.toml
-          # and both npm package.json files are checked against it by tooling/brand.test.ts,
-          # which `pnpm verify` runs inside every job below. So matching the tag against
-          # this one declaration matches it against all of them.
-          version=$(sed -n "s/^export const APP_VERSION = '\([^']*\)'.*/\1/p" packages/protocol/src/brand.ts)
-          if [ -z "$version" ]; then
-            echo "::error file=packages/protocol/src/brand.ts::could not read APP_VERSION — has the declaration changed shape?"
-            exit 1
-          fi
-
-          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
-            if [ "$GITHUB_REF_NAME" != "v$version" ]; then
-              echo "::error::tag $GITHUB_REF_NAME does not match APP_VERSION $version — expected v$version."
-              echo "::error::Either the version bump was never committed, or the tag went on the wrong commit. Delete the tag, fix, tag again."
-              exit 1
-            fi
-            # A tag push *is* the release. There is no rehearsing one, so the only way to
-            # rehearse is workflow_dispatch — which is why that trigger exists.
-            dry_run=false
-            # No stable release exists yet, so `npm i -g centralu` (no tag) has to resolve
-            # to the beta or it fails outright with "No matching version found for
-            # centralu@latest". Flip this to false the day 1.0 ships: after that, moving
-            # `latest` onto a prerelease hands betas to people who asked for stable.
-            also_latest=true
-          else
-            # Default to the reversible answer when the value is missing or unexpected.
-            # Both wrong answers exist; only one of them can be taken back.
-            dry_run="${INPUT_DRY_RUN:-true}"
-            also_latest="${INPUT_ALSO_LATEST:-true}"
-          fi
-
-          {
-            echo "version=$version"
-            echo "dry_run=$dry_run"
-            echo "also_latest=$also_latest"
-          } >> "$GITHUB_OUTPUT"
-
-          # Say out loud what the jobs after this one are about to do, on the run's summary page.
-          # Reading it off the job graph means already knowing this file.
-          {
-            echo "## centralu $version"
-            echo
-            if [ "$dry_run" = "false" ]; then
-              echo "**Publishing.** Each publish waits for approval on the \`npm-publish\` environment."
-            else
-              echo "**Rehearsal.** Builds and \`npm pack\` only — nothing reaches the registry and no approval is asked for."
-              echo ""
-              echo "The shim job will warn that the platform packages are not on the registry at this version. That is correct: this run published none."
-            fi
-            echo
-            echo "- move the \`latest\` dist-tag: \`$also_latest\`"
-            echo "- triggered by: \`$GITHUB_EVENT_NAME\` \`$GITHUB_REF_NAME\`"
-          } >> "$GITHUB_STEP_SUMMARY"
+          INPUT_VERSION: ${{ inputs.version }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: node scripts/release-guard.mjs
 
       # The Node a remote runs (docs/plans/remote-hub.md §10.3). Every platform package carries
       # packaging/remote-runtime.json in its host, and a hub sends the remote the hash for its
       # platform from there. Checked here, before anything is built, against nodejs.org's
       # SHASUMS256.txt and its signature by the releaser the pin names (key from nodejs/release-keys
       # at the pinned commit). Node's own modules and `gpgv`, which ubuntu images carry, so no install.
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 22
-
       - name: Check the pinned Node against its signed SHASUMS256.txt
         run: node scripts/node-pin.mjs
 
@@ -224,6 +187,10 @@ jobs:
     # per attempt — three were spent on failing rehearsals before `c7e3864` learned that.
     # An expression evaluating to '' means "no environment" to GitHub.
     environment: ${{ needs.guard.outputs.dry_run == 'false' && 'npm-publish' || '' }}
+    # The version the guard decided, for every step of the job, `pnpm install` included (#1501,
+    # review item 7). Nothing reads it while brand.ts declares the version; the tag scheme's stamp will.
+    env:
+      CENTRALU_VERSION: ${{ needs.guard.outputs.version }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -345,6 +312,8 @@ jobs:
     # publishes — the wrong place to be the first to try a newer image.
     runs-on: ubuntu-22.04
     environment: ${{ needs.guard.outputs.dry_run == 'false' && 'npm-publish' || '' }}
+    env:
+      CENTRALU_VERSION: ${{ needs.guard.outputs.version }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

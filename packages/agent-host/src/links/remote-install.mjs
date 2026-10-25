@@ -461,6 +461,12 @@ function atLeast(a, b) {
 
 /** A release a dev build can be cut from: a prerelease, since `<base>.local.N` is SemVer only on one (`isLocalBuildVersion`) */
 const DEV_BASE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*$/
+/**
+ * The placeholder a working copy's version files carry once its release version is stamped from the tag at build time
+ * (#1501). A dev build of it would say it is `0.0.0-dev.local.N`, older than every release, so it is refused, by hubs
+ * carrying this from before the switch lands.
+ */
+const PLACEHOLDER = /^0\.0\.0-dev(?:\.|$)/
 
 /** git in the working copy, by name on PATH as the person runs it there; what it printed, or a refusal */
 function git(repo, args) {
@@ -509,7 +515,7 @@ export function devBuild(p, { dataDir = process.env.CC_DATA_DIR || join(homedir(
     if (changes > 0 && !p.allowDirty) throw new Refusal('dev_dirty', String(changes))
     const shim = JSON.parse(readFileSync(join(repo, 'packaging', 'npm', 'centralu', 'package.json'), 'utf8'))
     const base = String(shim.version ?? '')
-    if (!DEV_BASE.test(base) || base.includes('.local.')) throw new Refusal('dev_base', base)
+    if (!DEV_BASE.test(base) || base.includes('.local.') || PLACEHOLDER.test(base)) throw new Refusal('dev_base', base)
     const protocol = Number(/export const PROTOCOL_VERSION = (\d+)/.exec(readFileSync(join(repo, 'packages', 'protocol', 'src', 'envelope.ts'), 'utf8'))?.[1])
     if (protocol !== p.protocol) throw new Refusal('dev_protocol', `${protocol} ${p.protocol}`)
     const floor = /(\d+\.\d+\.\d+)/.exec(String(shim.engines?.node ?? ''))?.[1]

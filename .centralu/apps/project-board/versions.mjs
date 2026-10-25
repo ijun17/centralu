@@ -67,6 +67,36 @@ export function declaredVersion(text, pattern) {
 const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 /**
+ * Which release scheme a commit's version source is in (#1501), read the same way by the release workflow's guard
+ * (scripts/release-guard.mjs) and by the board, so the two never disagree about a commit. `source`: project.json
+ * `release.source`, `{ pattern, marker, name }`.
+ * - `{ scheme: 'brand', version }`: `pattern` finds the literal, and `marker` is absent.
+ * - `{ scheme: 'tag' }` only on positive evidence: the `marker` line (the version imported from the generated file),
+ *   with no other declaration of `name`; or `name` not in the file at all.
+ * - `{ scheme: null, problem }` for anything else: a declaration it cannot read (other quotes, a type annotation, a
+ *   computed value) is never taken for the tag scheme, which would let a tag of any version through.
+ */
+export function sourceScheme(text, { pattern, marker, name } = {}) {
+  const t = String(text ?? '')
+  const version = pattern ? declaredVersion(t, pattern) : null
+  const marked = marker ? new RegExp(marker, 'm').test(t) : false
+  if (version !== null && !marked) return { scheme: 'brand', version }
+  const id = name ? escape(name) : null
+  // A declaration of the name other than the marker: `const NAME`, `let NAME`, `NAME =`, `NAME: string =`
+  const declares = id ? new RegExp(`\\b(?:const|let|var|function|class)\\s+${id}\\b|\\b${id}\\s*(?::[^=\\n]*)?=(?![=>])`).test(t) : false
+  if (marked && version === null && !declares) return { scheme: 'tag' }
+  if (id && !marked && !new RegExp(`\\b${id}\\b`).test(t)) return { scheme: 'tag' }
+  const what = name ?? 'the version'
+  return {
+    scheme: null,
+    problem:
+      version !== null
+        ? `declares ${what} as "${version}" and also imports it from the generated file; it must be one or the other.`
+        : `declares ${what} in a form that cannot be read: neither a literal matching ${pattern ?? '(no pattern)'} nor ${marker ? `the line matching ${marker}` : 'a marker (none configured)'}.`,
+  }
+}
+
+/**
  * Where a file carries `version`: the exact version as a whole quoted string, `"1.2.0-beta.3"` or
  * `'1.2.0-beta.3'`. That is how every file of this repository writes it (package.json, Cargo.toml,
  * Cargo.lock, tauri.conf.json, brand.ts), and it leaves the version alone in prose ("released in
