@@ -16,7 +16,7 @@ import { checkAppVersion, PLACEHOLDER, releaseTag, resolveAppVersion } from '../
 // @ts-expect-error — as above
 import { holdStamp, runSteps, stampedFiles, stampVersion, versionOnlyDirt } from '../scripts/stamp-version.mjs'
 // @ts-expect-error — as above
-import { verifyThenStamp } from '../scripts/release-verify.mjs'
+import { verifyThenStamp, withoutVersion } from '../scripts/release-verify.mjs'
 // @ts-expect-error — as above
 import { buildId } from '../packages/agent-host/scripts/build-id.mjs'
 
@@ -167,32 +167,63 @@ await runSteps(process.cwd(), '0.2.0-beta.4', [[process.execPath, ['-e', ${JSON.
   it('verifies at the placeholder with no CENTRALU_VERSION, then stamps (release-verify.mjs)', () => {
     const root = carriers()
     const generated = 'packages/protocol/src/version.generated.ts'
-    const seen: { script: string; stamped: boolean; version: string | undefined }[] = []
-    verifyThenStamp({
-      scripts: ['lint', 'verify'],
-      skipVerify: false,
-      env: { CENTRALU_VERSION: '0.2.0-beta.4', PATH: 'x' },
-      run: (cmd: string, args: string[], env: NodeJS.ProcessEnv) => {
-        expect(cmd).toBe('pnpm')
-        seen.push({ script: args[0] ?? '', stamped: read(root, generated).includes('0.2.0-beta.4'), version: env.CENTRALU_VERSION })
-      },
-      stamp: () => (holdStamp as (r: string, v: string) => () => void)(root, '0.2.0-beta.4')(),
-    })
-    expect(seen).toEqual([
-      { script: 'lint', stamped: false, version: undefined },
-      { script: 'verify', stamped: false, version: undefined },
-    ])
+    const seen: { what: string; stamped?: boolean; version?: string | undefined; other?: string | undefined }[] = []
+    let restore: (() => void) | undefined
+    try {
+      verifyThenStamp({
+        scripts: ['lint', 'verify'],
+        skipVerify: false,
+        cwd: root,
+        env: { CENTRALU_VERSION: '0.2.0-beta.4', KEEP: 'yes', PATH: 'x' },
+        exec: (cmd: string, args: string[], options: { env: NodeJS.ProcessEnv; cwd: string }) => {
+          expect(cmd).toBe('pnpm')
+          expect(options.cwd).toBe(root)
+          // Read at the moment verify runs: a stamp held before this call would show here
+          seen.push({ what: args[0] ?? '', stamped: read(root, generated).includes('0.2.0-beta.4'), version: options.env.CENTRALU_VERSION, other: options.env.KEEP })
+        },
+        // Held, not put back at once, so a stamp that comes first is still in the tree when verify runs
+        stamp: () => {
+          seen.push({ what: 'stamp' })
+          restore = (holdStamp as (r: string, v: string) => () => void)(root, '0.2.0-beta.4')
+        },
+      })
+      expect(seen).toEqual([
+        { what: 'lint', stamped: false, version: undefined, other: 'yes' },
+        { what: 'verify', stamped: false, version: undefined, other: 'yes' },
+        { what: 'stamp' },
+      ])
+      expect(read(root, generated)).toContain("'0.2.0-beta.4'")
+    } finally {
+      restore?.()
+    }
+  })
+
+  it('leaves CENTRALU_VERSION out of the verify environment whatever its case on Windows, and only there', () => {
+    expect(withoutVersion({ CENTRALU_VERSION: 'a', Centralu_Version: 'b', centralu_version: 'c', KEEP: '1' }, 'win32')).toEqual({ KEEP: '1' })
+    // POSIX names are case-sensitive: another case is another variable
+    expect(withoutVersion({ CENTRALU_VERSION: 'a', Centralu_Version: 'b', KEEP: '1' }, 'linux')).toEqual({ Centralu_Version: 'b', KEEP: '1' })
+    const seen: unknown[] = []
+    verifyThenStamp({ scripts: ['verify'], skipVerify: false, platform: 'win32', env: { Centralu_Version: '1', Path: 'p' }, exec: (_c: string, _a: string[], o: { env: unknown }) => seen.push(o.env), stamp: () => {} })
+    expect(seen).toEqual([{ Path: 'p' }])
+  })
+
+  it('release-npm starts no verify child of its own: only verifyThenStamp does, with the environment it strips', () => {
+    const release = readFileSync(resolve('scripts/release-npm.mts'), 'utf8')
+    const start = release.indexOf('verifyThenStamp({')
+    const call = release.slice(start, release.indexOf('\n})', start))
+    expect(call).not.toMatch(/\b(run|exec|env)\s*:/)
+    expect(call).toContain('cwd: ROOT')
   })
 
   it('stamps after verify even when verify is skipped, and does not stamp when verify fails', () => {
     const calls: string[] = []
-    verifyThenStamp({ scripts: ['verify'], skipVerify: true, run: () => calls.push('run'), stamp: () => calls.push('stamp') })
+    verifyThenStamp({ scripts: ['verify'], skipVerify: true, exec: () => calls.push('run'), stamp: () => calls.push('stamp') })
     expect(calls).toEqual(['stamp'])
     expect(() =>
       verifyThenStamp({
         scripts: ['verify'],
         skipVerify: false,
-        run: () => {
+        exec: () => {
           throw new Error('tests failed')
         },
         stamp: () => calls.push('stamp again'),

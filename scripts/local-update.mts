@@ -5,6 +5,8 @@ import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+// @ts-expect-error — plain .mjs, as the other scripts import theirs
+import { isMain } from './is-main.mjs'
 import { checkStaged, CONTENT_IN_BUNDLE, shellToCarry, stageBundle, stageContent } from './bundle-stage.mjs'
 import { MANIFEST_NAME, SIGNATURE_NAME, throwawayKey, trustedKeys, verifyContent } from './content-manifest.mjs'
 import { lockEntryFor, readLock, shellVersionInSource } from './shell-bundle.mjs'
@@ -160,7 +162,7 @@ async function main(): Promise<void> {
   }
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (isMain(import.meta.url)) {
   await main().catch((e: Error) => {
     console.error(`local-update: ${e.message}`)
     process.exitCode = 1

@@ -601,7 +601,8 @@ if (skipVerify) console.log('\n  --skip-verify: a rehearsal on this tree verifie
 verifyThenStamp({
   scripts: target?.verify ?? ['verify'],
   skipVerify,
-  run: (cmd, args, env) => execFileSync(cmd, args, { cwd: ROOT, stdio: 'inherit', encoding: 'utf8', shell: viaShell(cmd), env }),
+  cwd: ROOT,
+  shell: viaShell('pnpm'),
   // The version goes into every carrier (`stamp-version.mjs`) for the build: the UI and host read
   // version.generated.ts, Tauri and the window tauri.conf.json, npm the manifests. A child (the build) reads
   // CENTRALU_VERSION. Put back on exit and on Ctrl-C, SIGTERM or SIGHUP (`holdStamp`; Node's exit event skips a
