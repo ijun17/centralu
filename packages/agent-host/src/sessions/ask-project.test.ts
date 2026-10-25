@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, 
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
-import { ASK_WAIT_MS, askFrame, clipAnswer, matchProjects, pathsIn, projectChoice, readableGrants, taskLine, underGrant, type AskableProject } from './ask-project.js'
+import { ASK_WAIT_MS, askFrame, awayFor, clipAnswer, matchProjects, pathsIn, projectChoice, readableGrants, taskLine, underGrant, type AskableProject } from './ask-project.js'
 import { SessionManager } from './manager.js'
 import { askProjectText } from './tool-answers.js'
 import { crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
@@ -19,8 +19,18 @@ describe('the projects a name points at, here and on linked machines (#700)', ()
   const there = (machineId: string, machine: string, id: string, name: string): AskableProject => ({ id: `${machineId}.${id}`, name, machine, machineId })
   const all = [here('p1', 'vibe'), here('p2', 'cc'), there('ijun1', 'Windows PC', 'p9', 'cc'), there('ijun1', 'Windows PC', 'p8', 'solo'), there('box', 'Linux box', 'p3', 'Solo')]
 
+  it('says of a missing name only the machines it may be on: all for a bare name, its own for a qualified one (#1547)', () => {
+    const laptop = { machine: 'Laptop', machineId: 'm1', why: 'not reachable right now' }
+    expect(awayFor('typo', [laptop], ['m2'])).toEqual([laptop])
+    expect(awayFor('m2.typo', [laptop], ['m2'])).toEqual([])
+    expect(awayFor('Desk/typo', [laptop], ['m2'])).toEqual([])
+    expect(awayFor('laptop/typo', [laptop], ['m2'])).toEqual([laptop])
+    expect(awayFor('m1.typo', [laptop], ['m2'])).toEqual([laptop])
+  })
+
   it('takes a name that exists once, wherever it is, and an id or a machine-qualified form always', () => {
     expect(matchProjects('vibe', all).map((p) => p.id)).toEqual(['p1'])
+    expect(matchProjects('  vibe ', all).map((p) => p.id)).toEqual(['p1'])
     expect(matchProjects('solo', all).map((p) => p.id)).toEqual(['ijun1.p8'])
     expect(matchProjects('ijun1.p9', all).map((p) => p.id)).toEqual(['ijun1.p9'])
     expect(matchProjects('p2', all).map((p) => p.id)).toEqual(['p2'])

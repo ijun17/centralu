@@ -1,6 +1,6 @@
 import type { Delegation } from './child-ownership.js'
 import { errorKindWord } from './error-kind.js'
-import { ANSWER_READ_MAX_CHARS, ASK_WAIT_MS, answerAt, askFrame, clipAnswer, matchProjects, pathsIn, projectChoice, taskLine, type AskableProject } from './ask-project.js'
+import { ANSWER_READ_MAX_CHARS, ASK_WAIT_MS, answerAt, askFrame, awayFor, clipAnswer, matchProjects, pathsIn, projectChoice, taskLine, type AskableProject } from './ask-project.js'
 import { labelOf, lastActiveOf, progressOf } from './transcript-view.js'
 import type { HubAskParams, HubAskResult, SessionState } from '@cc/protocol'
 import { awayPhrase } from '../adapters/contract.js'
@@ -191,18 +191,24 @@ export class AskProjectFlow {
      * rules as a linked machine's: `<hub>/<name>`, a qualified id, or a unique bare name
      */
     const hubs = this.hubs
-    const none = { projects: [], away: [] }
+    const none = { projects: [], away: [], machines: [] }
     // Nothing is awaited when neither is asked: a call naming a project of this computer by id goes on in the same tick
-    const [there, fromHubs] =
+    const [first, fromHubs] =
       (reader || hubs) && !exactHere ? await Promise.all([reader ? reader.projects({ ref: wanted }) : none, hubs ? hubs.projects() : none]) : [none, none]
-    const askable: AskableProject[] = [
+    let there = first
+    const askableOf = (): AskableProject[] => [
       ...projects.map((p) => ({ id: p.id, name: p.name, machine: null, machineId: null })),
       ...there.projects.map((p) => ({ id: p.id, name: p.name, machine: p.machine, machineId: p.machineId })),
       ...fromHubs.projects.map((p) => ({ id: p.id, name: p.name, machine: p.hub, machineId: p.hubId })),
     ]
+    let found = matchProjects(wanted, askableOf())
+    // Nowhere (#1547): the mirror of a machine that is down may lack a project made since, so those are tried now, once, bounded
+    if (!found.length && reader && !exactHere) {
+      there = await reader.projects({ ref: wanted, anyDown: true, prior: there })
+      found = matchProjects(wanted, askableOf())
+    }
     const awayAll = [...there.away, ...fromHubs.away.map((a) => ({ machineId: a.hubId, machine: a.hub, why: a.why }))]
     const elsewhere = !!reader || fromHubs.projects.length > 0 || fromHubs.away.length > 0
-    const found = matchProjects(wanted, askable)
     if (found.length > 1) {
       return {
         ok: false,
@@ -219,7 +225,8 @@ export class AskProjectFlow {
         ...there.projects.map((p) => `${p.name} (on ${p.machine}${p.away ? `, ${p.away}` : ''})`),
         ...fromHubs.projects.map((p) => `${p.name} (on ${p.hub}${p.away ? `, ${p.away}` : ''})`),
       ]
-      const unasked = awayAll.length ? ` Not asked, and its projects may be missing: ${awayAll.map((a) => `${a.machine} (${a.why})`).join(', ')}.` : ''
+      const missing = awayFor(wanted, awayAll, [...there.machines.map((m) => m.machineId), ...fromHubs.projects.map((p) => p.hubId)])
+      const unasked = missing.length ? ` Not asked, and its projects may be missing: ${missing.map((a) => `${a.machine} (${a.why})`).join(', ')}.` : ''
       return {
         ok: false,
         error: others.length

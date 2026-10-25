@@ -790,6 +790,10 @@ export function createRpcHandler(
       mgr.rename(sessionId, name)
       return { ok: true as const }
     },
+    'sessions.clearError': async (p) => {
+      const { sessionId, seq } = RpcMethods['sessions.clearError'].params.parse(p)
+      return { ok: true as const, ...mgr.clearError(sessionId, seq) }
+    },
     'sessions.markRead': async (p) => {
       const { sessionId, seq } = RpcMethods['sessions.markRead'].params.parse(p)
       mgr.markRead(sessionId, seq)

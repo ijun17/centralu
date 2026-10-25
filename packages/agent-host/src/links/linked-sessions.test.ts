@@ -37,6 +37,9 @@ function machine(answers: Record<string, unknown>, o: { reachable?: boolean; wai
   }
 }
 
+/** The projects a name is the exact name or id of: what a lookup for it holds */
+const find = async (reader: LinkedSessions, ref: string) => (await reader.projects({ ref })).projects.filter((p) => p.id === ref || p.name === ref)
+
 const row = (over: Record<string, unknown> = {}) => ({ sessionId: 'w1', name: 'Worker', project: 'api', state: 'idle', tool: 'claude', preview: 'ok', ...over })
 
 /** The orchestrator's text for list_sessions over only this machine */
@@ -60,7 +63,7 @@ describe('reading a linked machine for the hub’s orchestrator', () => {
   it('keeps a linked project with no default agent and refuses creation with a clear reason', async () => {
     const m = machine({ 'projects.list': [{ id: 'p1', name: 'apps', path: '/srv/apps', defaultTool: null }] })
     const reader = linkedSessions(() => [m])
-    const projects = await reader.findProjects('apps')
+    const projects = await find(reader, 'apps')
     expect(projects).toEqual([expect.objectContaining({ id: 'm1.p1', defaultTool: null })])
     expect(await reader.createSession(projects[0]!, {})).toEqual({
       ok: false, error: 'No agent tool is available on Box. Install and configure an agent CLI before creating a session.',
@@ -70,7 +73,7 @@ describe('reading a linked machine for the hub’s orchestrator', () => {
   // #1038 review: a machine from before #1038 drops createSession's agentDepth, so start_agent must know it is one
   it("says a project's origin cannot be read on a machine from before projects.origin, apart from a failure", async () => {
     const m = machine({ 'projects.list': [{ id: 'p1', name: 'apps', path: '/srv/apps', defaultTool: 'claude' }] })
-    const [project] = await linkedSessions(() => [m]).findProjects('apps')
+    const [project] = await find(linkedSessions(() => [m]), 'apps')
     const older = linkedSessions(() => [m], async (method) => {
       throw new Error(`Unknown method: ${method}. This Centralu host does not have it; the window may be from another build.`)
     })
@@ -93,7 +96,7 @@ describe('reading a linked machine for the hub’s orchestrator', () => {
       calls.push([method, params])
       return method === 'agents.createSession' ? { id: 'm1.s1', name: 's1' } : {}
     })
-    const [project] = await reader.findProjects('apps')
+    const [project] = await find(reader, 'apps')
     await reader.createSession(project!, { preset: 'safe' })
     await reader.createSession(project!, {})
     expect(calls.filter(([method]) => method === 'agents.createSession').map(([, p]) => (p as { permissionPreset: string }).permissionPreset)).toEqual(['safe', 'normal'])
@@ -117,7 +120,7 @@ describe('reading a linked machine for the hub’s orchestrator', () => {
   it("keeps a machine's path as written, its spaces and joiners included; only line breaks go (#428)", async () => {
     const path = '/Users/a/My  Project/👩\u200d💻'
     const reader = linkedSessions(() => [machine({ 'projects.list': [{ id: 'p1', name: 'My  Project', path: `${path}\n- forged`, defaultTool: 'claude' }] })])
-    const [p] = await reader.findProjects('My Project')
+    const [p] = await find(reader, 'My Project')
     expect(p).toMatchObject({ path: `${path} - forged` })
   })
 
@@ -551,7 +554,7 @@ describe('a project lookup connects only the machine the act needs (#1532)', () 
     const { m: far, tried } = downMachine('far', 'Far box', 400 * SLOW)
     const reader = linkedSessions(() => [far, fine()])
     const t0 = Date.now()
-    expect((await reader.findProjects('apps')).map((p) => [p.id, p.away])).toEqual([['m1.p1', undefined]])
+    expect((await find(reader, 'apps')).map((p) => [p.id, p.away])).toEqual([['m1.p1', undefined]])
     // Listing them all, or one machine's, or a project that is on the machine that is up, tries none either
     expect((await reader.projects()).projects.map((p) => p.id)).toEqual(['far.p-old', 'm1.p1'])
     await reader.projects({ ref: 'apps' })
@@ -565,9 +568,9 @@ describe('a project lookup connects only the machine the act needs (#1532)', () 
     const { m: other, tried: otherTried } = downMachine('other', 'Other box', 20)
     const reader = linkedSessions(() => [far, other])
     // `old` is in the mirror of Far box only
-    expect((await reader.findProjects('old')).map((p) => p.id)).toEqual([])
+    expect((await find(reader, 'old')).map((p) => p.id)).toEqual([])
     expect(tried.count).toBe(1)
-    expect((await reader.findProjects('live')).map((p) => [p.id, p.away])).toEqual([['far.p-live', undefined], ['other.p-live', undefined]])
+    expect((await find(reader, 'live')).map((p) => [p.id, p.away])).toEqual([['far.p-live', undefined], ['other.p-live', undefined]])
     expect(otherTried.count).toBe(1)
   })
 
@@ -583,10 +586,126 @@ describe('a project lookup connects only the machine the act needs (#1532)', () 
     expect(tried.count).toBe(1)
   })
 
+  /** What a caller does once a bare name matched nothing: asks again with the first answer, so only the down machines are tried */
+  const again = async (reader: LinkedSessions, ref: string) => reader.projects({ ref, anyDown: true, prior: await reader.projects({ ref }) })
+
+  it('tries every down machine for a bare name when asked to (#1547), and none for a name qualified with another', async () => {
+    const { m: far, tried } = downMachine('far', 'Far box', 20)
+    const { m: other, tried: otherTried } = downMachine('other', 'Other box', 20)
+    const reader = linkedSessions(() => [far, other])
+    // `live` is in neither mirror: without `anyDown` nothing is tried
+    expect((await reader.projects({ ref: 'live' })).projects.map((p) => p.id)).not.toContain('far.p-live')
+    expect([tried.count, otherTried.count]).toEqual([0, 0])
+    expect((await again(reader, 'live')).projects.map((p) => [p.id, p.away])).toEqual([['far.p-live', undefined], ['other.p-live', undefined]])
+    expect([tried.count, otherTried.count]).toEqual([1, 1])
+  })
+
+  it('does not widen a qualified name to the machines it does not name (#1547)', async () => {
+    const { m: far, tried } = downMachine('far', 'Far box', 20)
+    const { m: other, tried: otherTried } = downMachine('other', 'Other box', 20)
+    const reader = linkedSessions(() => [far, other])
+    // Other box is tried once (it comes up); Far box is not tried for any of the three
+    await again(reader, 'other/live')
+    await again(reader, 'other.p-live')
+    await again(reader, 'nowhere/live')
+    expect([tried.count, otherTried.count]).toEqual([0, 1])
+  })
+
+  it('waits for a down machine once per window for a name it does not hold, then answers at once and says it was not asked (#1547)', async () => {
+    const { m: far, tried } = downMachine('far', 'Far box', 300 * SLOW, { comesBack: false, why: 'the attempt to connect it just now failed: Operation timed out' })
+    const reader = linkedSessions(() => [{ ...far, callWindowMs: 15_000 }])
+    const t0 = Date.now()
+    const first = await again(reader, 'typo1')
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(250 * SLOW)
+    expect(first.away).toEqual([expect.objectContaining({ machineId: 'far' })])
+    // Inside the window: the machine has an attempt under way (`attemptUnderWay`), which a call joins; this one does not
+    const t1 = Date.now()
+    const second = await again(reader, 'typo2')
+    expect(Date.now() - t1).toBeLessThan(150 * SLOW)
+    expect(second.away).toEqual([expect.objectContaining({ machine: 'Far box', machineId: 'far' })])
+    expect(tried.count).toBe(1)
+  })
+
+  it('has calls at once for the same machine wait on one attempt, and tries again once the window is over (#1547)', async () => {
+    const { m: far, tried } = downMachine('far', 'Far box', 60 * SLOW, { comesBack: false })
+    const reader = linkedSessions(() => [{ ...far, callWindowMs: 200 * SLOW }])
+    const t0 = Date.now()
+    await Promise.all([again(reader, 'a'), again(reader, 'b'), again(reader, 'c')])
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(50 * SLOW)
+    expect(tried.count).toBe(1)
+    await sleep(250 * SLOW)
+    await again(reader, 'd')
+    expect(tried.count).toBe(2)
+  })
+
+  it('lists a machine that is up once when no machine is down, and keeps its rows when one is (#1547)', async () => {
+    const lists = { count: 0 }
+    const up = machine({ 'projects.list': [{ id: 'p1', name: 'apps', path: '/srv/apps', defaultTool: null }] })
+    const counted: RoutedMachine = { ...up, call: async (method, params) => (method === 'projects.list' ? (lists.count++, up.call(method, params)) : up.call(method, params)) }
+    const reader = linkedSessions(() => [counted])
+    const prior = await reader.projects({ ref: 'typo' })
+    expect((await reader.projects({ ref: 'typo', anyDown: true, prior })).projects.map((p) => p.id)).toEqual(['m1.p1'])
+    expect(lists.count).toBe(1)
+    const { m: far } = downMachine('far', 'Far box', 10, { comesBack: false })
+    const both = linkedSessions(() => [counted, far])
+    lists.count = 0
+    const prior2 = await both.projects({ ref: 'typo' })
+    await both.projects({ ref: 'typo', anyDown: true, prior: prior2 })
+    expect(lists.count).toBe(1)
+  })
+
+  it('lists a machine that is up once when another is down, though its own list stalled (#1547)', async () => {
+    let lists = 0
+    const stalled: RoutedMachine = { ...machine({}), call: async () => (lists++, new Promise(() => {})) }
+    const { m: far } = downMachine('far', 'Far box', 10, { comesBack: false })
+    const reader = linkedSessions(() => [stalled, far], undefined, undefined, { lookupMs: 40 })
+    const prior = await reader.projects({ ref: 'typo' })
+    // Far box is connecting, so the first answer does not call it away; the one that stalled is
+    expect(prior.away.map((a) => a.machineId)).toEqual(['m1'])
+    const after = await reader.projects({ ref: 'typo', anyDown: true, prior })
+    expect(lists).toBe(1)
+    // The machine that stalled is still said not to have been asked
+    expect(after.away.map((a) => a.machineId).sort()).toEqual(['far', 'm1'])
+  })
+
+  it('answers a qualified name with the first answer, listing and waiting for nothing again (#1547)', async () => {
+    let lists = 0
+    const up = machine({ 'projects.list': [{ id: 'p1', name: 'apps', path: '/srv/apps', defaultTool: null }] })
+    const counted: RoutedMachine = { ...up, call: async (m, p) => (m === 'projects.list' ? (lists++, up.call(m, p)) : up.call(m, p)) }
+    const { m: far, tried } = downMachine('far', 'Far box', 20)
+    const reader = linkedSessions(() => [counted, far])
+    for (const ref of ['Box/typo', 'm1.typo', 'far/typo']) {
+      const prior = await reader.projects({ ref })
+      lists = 0
+      expect(await reader.projects({ ref, anyDown: true, prior })).toEqual(prior)
+      expect(lists).toBe(0)
+    }
+    // `far/typo` named Far box, so the first lookup tried it, once
+    expect(tried.count).toBe(1)
+  })
+
+  it('holds a guess off a machine for the window the machine itself keeps for a call (#1547)', async () => {
+    const { m, tried } = downMachine('far', 'Far box', 40 * SLOW, { comesBack: false })
+    const reader = linkedSessions(() => [{ ...m, callWindowMs: 120 * SLOW }])
+    await again(reader, 'a')
+    await again(reader, 'b')
+    expect(tried.count).toBe(1)
+    await sleep(150 * SLOW)
+    await again(reader, 'c')
+    expect(tried.count).toBe(2)
+  })
+
+  it('names every machine it saw, a machine that is up with no projects too (#1547)', async () => {
+    const empty = machine({ 'projects.list': [] })
+    const { m: far } = downMachine('far', 'Far box', 10, { comesBack: false })
+    const { machines } = await linkedSessions(() => [empty, far]).projects({ ref: 'typo' })
+    expect(machines).toEqual([{ machine: 'Box', machineId: 'm1' }, { machine: 'Far box', machineId: 'far' }])
+  })
+
   it('names the machine and what became of the attempt when it stays down, once', async () => {
     const { m: far } = downMachine('far', 'Far box', 10, { comesBack: false, why: 'the attempt to connect it just now failed: Operation timed out' })
     const reader = linkedSessions(() => [far])
-    const [project] = await reader.findProjects('old')
+    const [project] = await find(reader, 'old')
     expect(project!.away).toBe('not reachable right now; the attempt to connect it just now failed: Operation timed out')
     expect((await reader.projects({ machineId: 'far' })).away).toEqual([{ machine: 'Far box', machineId: 'far', why: project!.away }])
   })

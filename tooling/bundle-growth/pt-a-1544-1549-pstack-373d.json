@@ -1,0 +1,4 @@
+{
+  "bytes": 2400,
+  "reason": "Done clears an error's mark (#1549) and a failed agent step keeps its words readable (#1544). Measured against main at bab6469 (1,908,018 B): +2,333 B, all in the main chunk: the error note with its Done, markDone and its toasts in the store, the unread condition in the sidebar's look, the clearError port (web and mock), and the failed step's Pill and reason line. Plain components and store code with no dependency; lazy loading would not lower the total, which counts every chunk."
+}

@@ -23,6 +23,30 @@ export function AwayNote({ machine }: { machine: string | null }) {
   )
 }
 
+/**
+ * A session whose last turn ended in an error (#1549). The error line is in the conversation with its reason; this is the
+ * one control that takes the mark off the sidebar and the inbox once the person has read it. Done stops, retries and
+ * continues nothing, and a new error marks the session again.
+ */
+export function ErrorNote({ sessionId }: { sessionId: string }) {
+  const done = useStore((s) => s.markDone)
+  return (
+    <p className="flex items-center gap-2 border-t border-line px-4 py-1.5 text-xs leading-body text-ink-muted" data-testid="error-note">
+      <span className="min-w-0 flex-1 break-words">The last turn ended in an error. The reason is in the conversation.</span>
+      <Button
+        variant="secondary"
+        size="sm"
+        className="shrink-0"
+        onClick={() => void done(sessionId)}
+        title="Clears the error mark. Nothing is stopped or sent."
+        data-testid="error-done"
+      >
+        Done
+      </Button>
+    </p>
+  )
+}
+
 export function InterruptedNote({
   sessionId,
   interruption,

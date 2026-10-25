@@ -732,6 +732,40 @@ describe('the pen for events before registration is bounded (#392)', () => {
   })
 })
 
+describe('Done on an error that nothing cleared says so (#1549)', () => {
+  const failed = (platform: MockPlatform) => {
+    useStore.setState({ platform, sessions: { e: sessionInfo('e', { state: 'error', lastSeq: 4, lastReadSeq: 1 }) as never } })
+  }
+
+  it('against an older host the answer is read and the toast says the error stays', async () => {
+    const platform = new MockPlatform()
+    vi.spyOn(platform.agents, 'clearError').mockResolvedValue({ cleared: false, newer: false, olderHost: true })
+    failed(platform)
+    await useStore.getState().markDone('e')
+    expect(useStore.getState().sessions.e!.lastReadSeq).toBe(4)
+    expect(useStore.getState().sessions.e!.state).toBe('error')
+    expect(useStore.getState().toast).toBe('Marked as read. This host is too old to clear an error: it stays until the host is updated')
+  })
+
+  it('when a newer error exists the mark stays and the toast says so', async () => {
+    const platform = new MockPlatform()
+    vi.spyOn(platform.agents, 'clearError').mockResolvedValue({ cleared: false, newer: true, olderHost: false })
+    failed(platform)
+    await useStore.getState().markDone('e')
+    expect(useStore.getState().sessions.e!.state).toBe('error')
+    expect(useStore.getState().toast).toBe('A newer error arrived. It stays marked')
+  })
+
+  it('a cleared error says nothing', async () => {
+    const platform = new MockPlatform()
+    vi.spyOn(platform.agents, 'clearError').mockResolvedValue({ cleared: true, newer: false, olderHost: false })
+    failed(platform)
+    useStore.setState({ toast: null })
+    await useStore.getState().markDone('e')
+    expect(useStore.getState().toast).toBeNull()
+  })
+})
+
 describe('markRead offline (#842 item 14)', () => {
   it('a mark the host refuses resolves, says so, and the session stays unread', async () => {
     const platform = new MockPlatform()

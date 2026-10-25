@@ -14,7 +14,7 @@ import { ChatStream } from './chat-stream/ChatStream.jsx'
 import { SessionStart } from './SessionStart.jsx'
 import { Composer, type ComposerDrop } from './Composer.jsx'
 import { SessionHeader } from './SessionHeader.jsx'
-import { AwayNote, DormantNote, InterruptedNote } from './SessionNotes.jsx'
+import { AwayNote, DormantNote, ErrorNote, InterruptedNote } from './SessionNotes.jsx'
 import { EMPTY_CHAT } from './empty.js'
 import { UntrustedNotice } from '../project/UntrustedNotice.jsx'
 
@@ -456,6 +456,8 @@ export function SessionPane({
         own interrupt. Said above the composer with the one action that goes on, since the state alone (error, idle,
         waiting for input) looks the same as a turn that ended.
       */}
+      {session.state === 'error' && !away && <ErrorNote sessionId={session.id} />}
+
       {canContinue(session.interruption) && !isInTurn(session.state) && !away && (
         <InterruptedNote sessionId={session.id} interruption={session.interruption} />
       )}

@@ -164,6 +164,7 @@ type LifecycleActions = Pick<
   | 'restoreFromTrash'
   | 'rename'
   | 'markRead'
+  | 'markDone'
   | 'markOpened'
   | 'reorderSessions'
 >
@@ -452,6 +453,28 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
         sessions: { ...st.sessions, [sessionId]: markReadPure(cur, s.lastSeq) },
       })),
     )
+  },
+
+  async markDone(sessionId) {
+    const s = get().sessions[sessionId]
+    const platform = get().platform
+    if (s?.state !== 'error' || !platform) return get().markRead(sessionId)
+    let result: { cleared: boolean; newer: boolean; olderHost: boolean }
+    try {
+      result = await platform.agents.clearError(sessionId, s.lastSeq)
+    } catch (e) {
+      set({ toast: `Could not clear the error: ${(e as Error).message}` })
+      return
+    }
+    /*
+     * The state is the host's to say: it sends `idle` when it cleared the error, and sends nothing when something newer
+     * happened (a Continue from another window that already failed again or is waiting on an approval). Forcing `idle` here
+     * wiped such a card. Only the read mark is this window's to move.
+     */
+    set(ifSessionStill(sessionId, (st, cur) => ({ sessions: { ...st.sessions, [sessionId]: markReadPure(cur, s.lastSeq) } })))
+    // Done that cleared nothing says why, instead of seeming to do nothing
+    if (result.olderHost) set({ toast: 'Marked as read. This host is too old to clear an error: it stays until the host is updated' })
+    else if (result.newer) set({ toast: 'A newer error arrived. It stays marked' })
   },
 
   /*

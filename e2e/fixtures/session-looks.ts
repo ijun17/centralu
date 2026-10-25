@@ -8,7 +8,7 @@ import { addSessionPanels, newSession, setup } from './project-screen.js'
  *
  *   idle       a thin grey line
  *   answering  a light grey (ink-muted) solid line
- *   stopped    a thick white dashed line on grey (error, limited, an interruption)
+ *   stopped    a thick white dashed line on grey (error, limited, an unread interruption)
  *   waiting    a thick white solid line on grey (an approval, an open question)
  */
 
@@ -21,7 +21,9 @@ const CASES: { name: string; look: Look; patch: Record<string, unknown> }[] = [
   { name: 'working', look: 'answering', patch: { state: 'working' } },
   { name: 'error', look: 'stopped', patch: { state: 'error' } },
   { name: 'limited', look: 'stopped', patch: { state: 'limited' } },
-  { name: 'an interruption', look: 'stopped', patch: { state: 'waiting_input', interruption: { reason: 'quit', at: 1 } } },
+  // The interruption marks the session while its answer is unread; once read (Done, or opening it) the mark goes and Continue stays (#1549)
+  { name: 'an unread interruption', look: 'stopped', patch: { state: 'waiting_input', lastSeq: 5, lastReadSeq: 0, interruption: { reason: 'quit', at: 1 } } },
+  { name: 'a read interruption', look: 'idle', patch: { state: 'waiting_input', lastSeq: 5, lastReadSeq: 5, interruption: { reason: 'quit', at: 1 } } },
   { name: 'waiting_approval', look: 'waiting', patch: { state: 'waiting_approval' } },
   { name: 'an open question', look: 'waiting', patch: { state: 'idle', pendingQuestions: [{ requestId: 'q-look', questions: [] }] } },
 ]
