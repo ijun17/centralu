@@ -109,11 +109,16 @@ describe('stamping the carriers (stamp-version.mjs)', () => {
   it('runs the stamped steps with the version and the rest with the placeholder back, also when a step fails', async () => {
     const root = carriers()
     const seen = (name: string) => [process.execPath, ['-e', `require('fs').copyFileSync('packages/protocol/src/version.generated.ts', '${name}')`]]
+    const count = () => ['exit', 'SIGINT', 'SIGTERM', 'SIGHUP'].map((e) => process.listenerCount(e))
+    const before = count()
     await runSteps(root, '0.2.0-beta.4', [seen('a'), seen('b')], { stamped: 1 })
+    // #1501 re-check: every listener a run adds goes again, also after a failed step (below)
+    expect(count()).toEqual(before)
     expect(read(root, 'a')).toContain("'0.2.0-beta.4'")
     expect(read(root, 'b')).toContain(`'${PLACEHOLDER}'`)
     await expect(runSteps(root, '0.2.0-beta.4', [[process.execPath, ['-e', 'process.exit(3)']], seen('c')], { stamped: 2 })).rejects.toThrow(/exited with 3/)
     expect(existsSync(join(root, 'c'))).toBe(false)
+    expect(count()).toEqual(before)
     expect(git(root, 'status', '--porcelain').split('\n').sort()).toEqual(['?? a', '?? b'])
   })
 

@@ -50,7 +50,7 @@ import { ThemeFiles } from './themes.js'
 import { TerminalService } from './dev-services/terminal.js'
 import { CommandRunner } from './dev-services/commands.js'
 import { ensureToolPath } from './env-path.js'
-import { UpdateService } from './updates.js'
+import { hubUpdatesMachines, UpdateService } from './updates.js'
 import { installsByDefault, updateSwitches } from './update-switches.js'
 import { installedCopyPath } from './os.js'
 import { AgentVersionService } from './agent-versions.js'
@@ -691,7 +691,7 @@ const links = new Links({
   // When agents compact: this hub's setting governs the machines it links (#1376)
   autoCompact: () => autoCompactOf(mgr.uiPreferences()),
   // Automatic updates cover the linked machines too (#1508): one on an older release follows this hub's version; none starts mid-swap
-  autoUpdate: () => autoApplyUpdates.read() && !hostDrain.draining,
+  autoUpdate: () => hubUpdatesMachines({ build: BUILD, current: APP_VERSION, autoApply: autoApplyUpdates.read(), draining: hostDrain.draining }),
   reverse: reverseCalls({
     allowed: (machineId) => store.machines.linkedMachineAsks(machineId),
     projects: () => mgr.projectsForMachines(),

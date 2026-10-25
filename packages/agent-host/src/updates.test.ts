@@ -9,7 +9,7 @@ import { APP_VERSION, type UpdateStatus } from '@cc/protocol'
 const RELEASE = '0.1.0-beta.20'
 import { installedCopyVersionSource } from './os.js'
 import { resolveCommand } from './tool-launch.js'
-import { UpdateService, commandFor, failureDetail, installedCopyPath, readInstalledCopyVersion, runCommand, type LatestResult } from './updates.js'
+import { UpdateService, hubUpdatesMachines, commandFor, failureDetail, installedCopyPath, readInstalledCopyVersion, runCommand, type LatestResult } from './updates.js'
 // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
 import { bundleVersionCommand, installedPaths } from '../../../packaging/npm/centralu/bin/platform.mjs'
 
@@ -890,6 +890,20 @@ const CENTRALU_SHIM = [
  * `npm` and `centralu` are batch files there, which `execFile` without a shell cannot start, and
  * the copy `centralu install` makes was never looked for, so it was never refreshed.
  */
+// #1501 re-check: a dev hub, or one at the placeholder, never updates its linked machines by itself
+describe('the hub updating its linked machines (hubUpdatesMachines)', () => {
+  it('follows only from a build that may install by itself, with automatic updates on and no swap under way', () => {
+    const on = { build: 'abc1234', current: '0.2.0-beta.4', autoApply: true, draining: false }
+    expect(hubUpdatesMachines(on)).toBe(true)
+    expect(hubUpdatesMachines({ ...on, build: 'dev' })).toBe(false)
+    expect(hubUpdatesMachines({ ...on, current: '0.0.0-dev' })).toBe(false)
+    expect(hubUpdatesMachines({ ...on, autoApply: false })).toBe(false)
+    expect(hubUpdatesMachines({ ...on, draining: true })).toBe(false)
+    const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8')
+    expect(main).toContain('autoUpdate: () => hubUpdatesMachines({ build: BUILD, current: APP_VERSION,')
+  })
+})
+
 describe('updating on Windows', () => {
   const nodeDir = 'C:\\Program Files\\nodejs'
   const npmDir = 'C:\\Users\\Jane Doe\\AppData\\Roaming\\npm'

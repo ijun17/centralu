@@ -88,6 +88,15 @@ export function installsByItself(build: string | undefined, current: string): bo
 }
 
 /**
+ * Whether this hub updates its linked machines by itself to its own version (#1508, `LinkDeps.autoUpdate`): with
+ * "Automatic updates" on, not mid-swap, and only from a build that may install by itself (`installsByItself`). A dev
+ * hub's machines would also refuse on their own (`channel('0.0.0-dev')` is `dev`), but this does not lean on that.
+ */
+export function hubUpdatesMachines(f: { build: string; current: string; autoApply: boolean; draining: boolean }): boolean {
+  return installsByItself(f.build, f.current) && f.autoApply && !f.draining
+}
+
+/**
  * Seams, and why they exist.
  *
  * Two of them, both for the same reason: without them a test of this file reaches the

@@ -43,13 +43,6 @@ export function stageHostPackage(hostSrc: string, pkgDir: string): void {
 }
 
 /**
- * What would make the staged package fail on a remote, one sentence each; empty when none. The files
- * `centralu serve` cannot start without, a host bundled for this platform, the pinned Node beside it
- * (a hub on this version reads it from its own host, and a remote's host must carry the same one), the
- * copy of the npm package's manifest that holds the Node floor, the
- * manifest that ships exactly `host/`, and nothing of the window.
- */
-/**
  * Why the host's copy of the launcher manifest (`centralu-package.json`) differs from the launcher's, or null when it
  * does not. Since #1501 the manifest carries the stamped version, so a host bundled before the stamp differs by its
  * version fields alone: say so, rather than blame the Node floor.
@@ -70,6 +63,13 @@ export function floorDiffers(bundled: string, launcher: string): string | null {
     : 'the host was bundled before the Node floor moved'
 }
 
+/**
+ * What would make the staged package fail on a remote, one sentence each; empty when none. The files
+ * `centralu serve` cannot start without, a host bundled for this platform, the pinned Node beside it
+ * (a hub on this version reads it from its own host, and a remote's host must carry the same one), the
+ * copy of the npm package's manifest that holds the Node floor, the
+ * manifest that ships exactly `host/`, and nothing of the window.
+ */
 export function hostPackageProblems(pkgDir: string, platform: string, pinFile = PIN_FILE, launcherFile = LAUNCHER_PACKAGE_FILE): string[] {
   const problems: string[] = []
   const manifest = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8')) as { name?: string; files?: string[] }

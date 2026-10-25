@@ -83,14 +83,17 @@ export const STOP_SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP']
  * Stamps `version` into `root`'s carriers and holds it until the returned `restore` runs, or the process ends: on exit,
  * and on each of `STOP_SIGNALS`, which Node's `exit` event does not cover (#1501 review). A signal calls `onStop` first
  * (to stop a child), puts the placeholder back and exits with 128 + its number, so nothing after it runs. A stamped
- * carrier left in the tree would be committed. `restore` is idempotent.
+ * carrier left in the tree would be committed. `restore` is idempotent and removes the listeners it added.
  */
 export function holdStamp(root, version, { onStop } = {}) {
   stampVersion(root, version)
   let held = true
+  const listeners = STOP_SIGNALS.map((signal) => [signal, () => stop(signal, onStop, restore)])
   const restore = () => {
     if (!held) return
     held = false
+    process.off('exit', restore)
+    for (const [signal, fn] of listeners) process.off(signal, fn)
     try {
       stampVersion(root, PLACEHOLDER)
     } catch (e) {
@@ -98,17 +101,18 @@ export function holdStamp(root, version, { onStop } = {}) {
     }
   }
   process.on('exit', restore)
-  for (const signal of STOP_SIGNALS) {
-    process.on(signal, () => {
-      try {
-        onStop?.(signal)
-      } finally {
-        restore()
-        process.exit(128 + (osConstants.signals[signal] ?? 1))
-      }
-    })
-  }
+  for (const [signal, fn] of listeners) process.on(signal, fn)
   return restore
+}
+
+/** A stop signal: `onStop` (a child), then `restore`, then exit with 128 + its number */
+function stop(signal, onStop, restore) {
+  try {
+    onStop?.(signal)
+  } finally {
+    restore?.()
+    process.exit(128 + (osConstants.signals[signal] ?? 1))
+  }
 }
 
 /**
@@ -119,7 +123,11 @@ export function holdStamp(root, version, { onStop } = {}) {
  */
 export async function runSteps(root, version, steps, { stamped = steps.length, env = process.env } = {}) {
   let child = null
-  const restore = holdStamp(root, version, { onStop: (signal) => child?.kill(signal) })
+  const kill = (signal) => child?.kill(signal)
+  // For the whole run, the unstamped steps too; added first, so a signal reaches the child before the exit
+  const listeners = STOP_SIGNALS.map((signal) => [signal, () => stop(signal, kill, restore)])
+  for (const [signal, fn] of listeners) process.on(signal, fn)
+  const restore = holdStamp(root, version)
   try {
     for (const [i, [cmd, args]] of steps.entries()) {
       if (i === stamped) restore()
@@ -135,6 +143,7 @@ export async function runSteps(root, version, steps, { stamped = steps.length, e
     }
   } finally {
     restore()
+    for (const [signal, fn] of listeners) process.off(signal, fn)
   }
 }
 
