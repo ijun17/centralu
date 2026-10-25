@@ -36,10 +36,20 @@ const SAFE_ASKS = ['edit', 'bash', 'webfetch', 'websearch']
 /** OpenCode's own agents that run tools (1.19.4; `compaction`, `title` and `summary` run none) */
 const NATIVE_AGENTS = ['build', 'plan', 'general', 'explore']
 
+/**
+ * Normal's base, under each tool's own key (`bash*`, see `safeEnv`): ask, then every rule of the person's for that tool in
+ * the order OpenCode reads them, so each of theirs still decides the calls it names (`git *`). A tool whose every call
+ * a rule of theirs decides (`bash: allow`, `*`, a one-word `permission`, `tools`) gets none.
+ */
 function normalEnv(theirs: Obj, all: Obj[]): Record<string, string> {
-  const base = NORMAL_ASKS.filter((tool) => !all.some((c) => keysOf(c.permission).some((k) => matches(tool, k)) || toolKeys(c.tools).some((k) => matches(tool, k))))
+  const rules = all.flatMap(rulesOf)
+  const base = NORMAL_ASKS.flatMap((tool) => {
+    const named = rules.flatMap((p) => Object.entries(p).filter(([key]) => matches(tool, key)).map(([, v]) => v))
+    if (named.some((v) => !isObj(v) || '*' in v)) return []
+    return [[ownKey(tool), { '*': 'ask', ...Object.assign({}, ...named) }]]
+  })
   if (base.length === 0) return {}
-  return { OPENCODE_CONFIG_CONTENT: JSON.stringify({ ...theirs, permission: { ...Object.fromEntries(base.map((t) => [t, 'ask'])), ...permissionOf(theirs.permission) } }) }
+  return { OPENCODE_CONFIG_CONTENT: JSON.stringify({ ...theirs, permission: { ...withoutOwnKeys(permissionOf(theirs.permission)), ...Object.fromEntries(base) } }) }
 }
 
 /**
@@ -54,9 +64,9 @@ function safeEnv(theirs: Obj, all: Obj[], agentFiles: string[], permissionEnv: s
   const named = (group: 'agent' | 'mode') => all.flatMap((c) => Object.keys(asObj(c[group])))
   const modes = new Set(named('mode'))
   const held = [...new Set([...NATIVE_AGENTS, ...named('agent'), ...agentFiles, ...modes])]
-  const globalRules = all.map((c) => c.permission)
-  const rulesFor = (name: string) => [...globalRules, ...all.flatMap((c) => [asObj(asObj(c.agent)[name]).permission, asObj(asObj(c.mode)[name]).permission])]
-  const hold = (own: unknown, rules: unknown[]) => ({ ...withoutSafeKeys(permissionOf(own)), ...safeRules(rules, held) })
+  const globalRules = all.flatMap(rulesOf)
+  const rulesFor = (name: string) => [...globalRules, ...all.flatMap((c) => [...rulesOf(asObj(asObj(c.agent)[name])), ...rulesOf(asObj(asObj(c.mode)[name]))])]
+  const hold = (own: unknown, rules: Obj[]) => ({ ...withoutOwnKeys(permissionOf(own)), ...safeRules(rules, held) })
   const entries = (group: 'agent' | 'mode', names: string[]) =>
     Object.fromEntries(names.map((name) => [name, { ...asObj(asObj(theirs[group])[name]), permission: hold(asObj(asObj(theirs[group])[name]).permission, rulesFor(name)) }]))
   const config = {
@@ -71,29 +81,39 @@ function safeEnv(theirs: Obj, all: Obj[], agentFiles: string[], permissionEnv: s
   return out
 }
 
-/** Safe's rules, each under its own key: ask, then the person's denies for that tool; `task` lets the held agents run */
-function safeRules(rules: unknown[], held: string[]): Obj {
+/**
+ * Safe's rules, each under its own key: ask, then the person's denies for that tool; `task` lets the held agents run,
+ * unless the person denies every `task`
+ */
+function safeRules(rules: Obj[], held: string[]): Obj {
   const denies = (tool: string) => Object.fromEntries(rules.flatMap((p) => denied(p, tool)).map((pattern) => [pattern, 'deny']))
+  const taskDenies = denies('task')
   return {
-    ...Object.fromEntries(SAFE_ASKS.map((tool) => [safeKey(tool), { '*': 'ask', ...denies(tool) }])),
-    [safeKey('task')]: { '*': 'ask', ...Object.fromEntries(held.map((n) => [n, 'allow'])), ...denies('task') },
+    ...Object.fromEntries(SAFE_ASKS.map((tool) => [ownKey(tool), { '*': 'ask', ...denies(tool) }])),
+    [ownKey('task')]: { '*': 'ask', ...('*' in taskDenies ? {} : Object.fromEntries(held.map((n) => [n, 'allow']))), ...taskDenies },
   }
 }
 
-const safeKey = (tool: string) => `${tool}*`
-const SAFE_KEYS = new Set([...SAFE_ASKS, 'task'].map(safeKey))
-const withoutSafeKeys = (p: Obj): Obj => Object.fromEntries(Object.entries(p).filter(([k]) => !SAFE_KEYS.has(k)))
+/** Centralu's key for a tool's rules: new to every permission object it joins (`safeEnv`) */
+const ownKey = (tool: string) => `${tool}*`
+const OWN_KEYS = new Set([...SAFE_ASKS, 'task'].map(ownKey))
+const withoutOwnKeys = (p: Obj): Obj => Object.fromEntries(Object.entries(p).filter(([k]) => !OWN_KEYS.has(k)))
 
 /** A permission as OpenCode reads it: one word is that word for every tool */
 const permissionOf = (p: unknown): Obj => (typeof p === 'string' ? { '*': p } : asObj(p))
-const keysOf = (p: unknown): string[] => (p === undefined ? [] : Object.keys(permissionOf(p)))
 
-/** The legacy `tools` switches, as the permission names OpenCode turns them into */
-const toolKeys = (tools: unknown): string[] => Object.keys(asObj(tools)).map((t) => (['write', 'patch'].includes(t) ? 'edit' : t))
+/**
+ * A config's (or an agent's) rules as OpenCode reads them, in its order: the legacy `tools` switches (`false` a deny,
+ * `write` and `patch` under `edit`), then `permission`
+ */
+function rulesOf(c: Obj): Obj[] {
+  const tools = Object.entries(asObj(c.tools)).map(([t, on]) => [['write', 'patch'].includes(t) ? 'edit' : t, on ? 'allow' : 'deny'])
+  return [...(tools.length ? [Object.fromEntries(tools)] : []), ...(c.permission === undefined ? [] : [permissionOf(c.permission)])]
+}
 
 /** The patterns a permission denies for a tool, under any key that names it */
-function denied(p: unknown, tool: string): string[] {
-  return Object.entries(permissionOf(p))
+function denied(p: Obj, tool: string): string[] {
+  return Object.entries(p)
     .filter(([key]) => matches(tool, key))
     .flatMap(([, v]) => (v === 'deny' ? ['*'] : isObj(v) ? Object.entries(v).filter(([, a]) => a === 'deny').map(([pattern]) => pattern) : []))
 }

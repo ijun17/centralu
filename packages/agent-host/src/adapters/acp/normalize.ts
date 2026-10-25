@@ -100,6 +100,7 @@ export class AcpNormalizer {
    * until the next one says whether it is one. The reasoning before it stays reply text: it was shown as it came.
    */
   private messageText(messageId: string, text: string): NormalizedEvent[] {
+    const before = this.lastMessage === messageId ? [] : this.releaseHeld()
     const m = this.messages.get(messageId) ?? { held: '', settled: false, trim: false }
     this.messages.set(messageId, m)
     let out = m.held + text
@@ -124,7 +125,7 @@ export class AcpNormalizer {
       }
     }
     this.lastMessage = messageId
-    return out ? [{ type: 'message_delta', sessionId: this.sessionId, role: 'assistant', text: out, messageId }] : []
+    return [...before, ...(out ? [{ type: 'message_delta' as const, sessionId: this.sessionId, role: 'assistant' as const, text: out, messageId }] : [])]
   }
 
   /** What a message held back, once something else comes: it was no tag */

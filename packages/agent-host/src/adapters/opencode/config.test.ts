@@ -135,6 +135,19 @@ describe("OpenCode's Safe, through its inline config", () => {
     expect(decides(setup, env, 'build', 'bash', 'ls')).toBe('ask')
     expect(decides(setup, env, 'build', 'webfetch')).toBe('deny')
     expect(decides(setup, env, 'general', 'edit', 'a.env')).toBe('deny')
+    const legacy = { before: [{ tools: { bash: false, write: false } }] }
+    expect(decides(legacy, envFor('safe', legacy), 'build', 'bash')).toBe('deny')
+    expect(decides(legacy, envFor('safe', legacy), 'build', 'edit')).toBe('deny')
+  })
+
+  it('keeps the person’s deny of handing work to other agents, for all of them or for one (second review of PR 3)', () => {
+    for (const before of [[{ permission: { task: 'deny' } }], [{ permission: { '*': 'deny', read: 'allow' } }]]) {
+      const setup = { before }
+      for (const agent of ['general', 'explore']) expect(decides(setup, envFor('safe', setup), 'build', 'task', agent)).toBe('deny')
+    }
+    const one = { before: [{ permission: { task: { general: 'deny' } } }] }
+    expect(decides(one, envFor('safe', one), 'build', 'task', 'general')).toBe('deny')
+    expect(decides(one, envFor('safe', one), 'build', 'task', 'explore')).toBe('allow')
   })
 
   it('keeps a config the person passes the same way, and holds what it allows', () => {
@@ -164,6 +177,10 @@ describe("OpenCode's Normal and Edits: Centralu's base under the person's own ru
       const setup = { before }
       expect(`${JSON.stringify(before)}: ${decides(setup, envFor('normal', setup), 'build', 'bash')}`).toBe(`${JSON.stringify(before)}: allow`)
     }
+    const partial = { before: [{ permission: { bash: { 'git *': 'allow', 'rm *': 'deny' } } }] }
+    expect(decides(partial, envFor('normal', partial), 'build', 'bash', 'git status')).toBe('allow')
+    expect(decides(partial, envFor('normal', partial), 'build', 'bash', 'rm -rf x')).toBe('deny')
+    expect(decides(partial, envFor('normal', partial), 'build', 'bash', 'curl x')).toBe('ask')
     const theirs = { env: { OPENCODE_PERMISSION: JSON.stringify({ edit: 'allow' }) } }
     expect(decides(theirs, envFor('normal', theirs), 'build', 'edit')).toBe('allow')
     expect(decides(theirs, envFor('normal', theirs), 'build', 'bash')).toBe('ask')

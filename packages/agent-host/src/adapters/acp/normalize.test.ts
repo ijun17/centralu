@@ -67,4 +67,9 @@ describe('a message’s text', () => {
     expect(text(events, 'c')).toBe('a </table>')
     expect(text(events, 'd')).toBe('ends with <')
   })
+
+  it('says a message’s held text before the next message’s (second review of PR 3)', () => {
+    const events = said(new AcpNormalizer('s'), [['a', 'x </th'], ['b', 'next']])
+    expect(events.map((e) => (e.type === 'message_delta' ? `${e.messageId}:${e.text}` : e.type))).toEqual(['a:x ', 'a:</th', 'b:next'])
+  })
 })
