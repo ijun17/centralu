@@ -45,8 +45,12 @@ export type LocalSpawnSpec = AgentSpawnSpec & {
  * reader on fd 3, a pipe whose other end only this host holds, and `exec`s the CLI in its place with fd 3 closed. The
  * kernel closes the host's end when the host goes, however it goes (SIGKILL included), and the reader then ends the whole
  * group (`kill -9 0`): the CLI, its MCP servers and the shells in its group. It needs no stdin's end to reach anyone.
+ * Before that it ends the helper groups the host told it of on the pipe (`+<pgid>` noted, `-<pgid>` dropped once empty,
+ * `noteTree`): a shell the CLI starts in a group of its own, and what that shell runs.
  */
-export const HOST_WATCH = '{ cat <&3 >/dev/null 2>&1; kill -9 0 2>/dev/null; } & exec "$@" 3<&-'
+export const HOST_WATCH =
+  '{ g=; while read -r l; do case $l in +*) g="$g ${l#+}";; -*) n=; for p in $g; do [ "$p" = "${l#-}" ] || n="$n $p"; done; g=$n;; esac; done; ' +
+  'for p in $g; do kill -9 -"$p" 2>/dev/null; done; kill -9 0 2>/dev/null; } <&3 >/dev/null 2>&1 & exec "$@" 3<&-'
 
 /** How often held helper groups are read again (`noteTree`) */
 const GROUP_CHECK_MS = 2_000
@@ -81,6 +85,8 @@ export class LocalAgentProcess extends EventEmitter implements AgentProcess {
     // Always read: a CLI whose stderr nobody drains blocks once the pipe is full
     child.stderr?.on('data', (d: Buffer) => this.tail.push(d))
     child.stdin?.on('error', () => {})
+    // The host-watch pipe: a write after its reader has gone is no error of the host's
+    child.stdio[3]?.on('error', () => {})
     child.on('error', (e) => {
       this.emit('error', e)
       /*
@@ -133,6 +139,7 @@ export class LocalAgentProcess extends EventEmitter implements AgentProcess {
     this.noting ??= noteGroups(pid, this.groups, this.os?.platform)
       .then((groups) => {
         if (this.ended) return
+        this.tellWatch(this.groups, groups)
         this.groups = groups
         if (groups.size === 0) this.stopGroupClock()
         else if (!this.groupClock) {
@@ -144,6 +151,18 @@ export class LocalAgentProcess extends EventEmitter implements AgentProcess {
         this.noting = null
       })
     return this.noting
+  }
+
+  /**
+   * The host watch (`HOST_WATCH`) is told each helper group as it is noted and as it is dropped, so a host killed outright
+   * still ends them: they are in groups of their own, which the watch's own `kill -9 0` does not reach (#1562 Mac re-check:
+   * Cursor's `zsh -c` and its `sleep 300` outlived a SIGKILLed host)
+   */
+  private tellWatch(before: ReadonlySet<number>, after: ReadonlySet<number>): void {
+    const watch = this.child.stdio[3]
+    if (!watch || !('write' in watch) || watch.destroyed) return
+    const lines = [...[...after].filter((g) => !before.has(g)).map((g) => `+${g}`), ...[...before].filter((g) => !after.has(g)).map((g) => `-${g}`)]
+    if (lines.length) watch.write(lines.join('\n') + '\n')
   }
 
   private stopGroupClock(): void {

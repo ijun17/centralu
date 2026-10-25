@@ -29,6 +29,16 @@ afterEach(() => {
 /** A CLI that takes no notice of stdin's end (Cursor with a session open, measured): it runs until something kills it */
 const deafCli = { command: process.execPath, args: ['-e', "process.stdout.write(process.pid + '\\n'); process.stdin.resume(); setInterval(() => {}, 1000)"] }
 
+/** A CLI that starts a helper leading a group of its own, as Cursor's shell does (the CLI's own group's sweep does not reach
+ * it), and writes the helper's pid */
+const helperCli = [
+  "const { spawn } = require('node:child_process')",
+  "const helper = spawn(process.execPath, ['-e', \"console.log('up'); setInterval(() => {}, 1000)\"], { stdio: ['ignore', 'pipe', 'ignore'], detached: true })",
+  "helper.stdout.once('data', () => { process.stdout.write(helper.pid + '\\n'); helper.stdout.destroy() })",
+  'process.stdin.resume()',
+  'setInterval(() => {}, 1000)',
+].join('\n')
+
 describe('a CLI that must end with its host', () => {
   it('starts behind the host watch, which ends the group once the host’s end of its pipe closes', () => {
     expect(HOST_WATCH).toContain('exec "$@" 3<&-')
@@ -56,15 +66,7 @@ describe('a CLI that must end with its host', () => {
   })
 
   it.skipIf(!unix)('ends, with it, a helper it started in a group of its own, once its tree was noted', async () => {
-    // The helper leads a group of its own, as Cursor's shell does: the CLI's own group's sweep does not reach it
-    const script = [
-      "const { spawn } = require('node:child_process')",
-      "const helper = spawn(process.execPath, ['-e', \"console.log('up'); setInterval(() => {}, 1000)\"], { stdio: ['ignore', 'pipe', 'ignore'], detached: true })",
-      "helper.stdout.once('data', () => { process.stdout.write(helper.pid + '\\n'); helper.stdout.destroy() })",
-      'process.stdin.resume()',
-      'setInterval(() => {}, 1000)',
-    ].join('\n')
-    const p = spawnLocalAgent({ command: process.execPath, args: ['-e', script], env: process.env, endsWithHost: true })
+    const p = spawnLocalAgent({ command: process.execPath, args: ['-e', helperCli], env: process.env, endsWithHost: true })
     const helper = await helperPid(p.stdout)
     started.push(helper, p.pid!)
     await p.noteTree()
@@ -73,6 +75,26 @@ describe('a CLI that must end with its host', () => {
     process.kill(p.pid!, 'SIGKILL')
     await exited
     expect(await goneWithin(helper, KILL_GRACE_MS + 5000)).toBe(true)
+  })
+
+  it.skipIf(!unix)('ends, when its host is SIGKILLed, a helper it started in a group of its own, once its tree was noted', async () => {
+    // #1562 Mac re-check: Cursor's `zsh -c …` and the `sleep 300` it ran, in a group of their own, outlived a killed host
+    dir = mkdtempSync(join(tmpdir(), 'cc-ends-with-host-'))
+    const host = join(dir, 'host.mts')
+    writeFileSync(
+      host,
+      [
+        `import { spawnLocalAgent } from ${JSON.stringify(pathToFileURL(join(import.meta.dirname, 'local-process.ts')).href)}`,
+        `const p = spawnLocalAgent({ command: process.execPath, args: ['-e', ${JSON.stringify(helperCli)}], env: process.env, endsWithHost: true })`,
+        "p.stdout.once('data', async (d) => { await p.noteTree(); process.stdout.write(d) })",
+        'setInterval(() => {}, 1000)',
+      ].join('\n'),
+    )
+    const h = spawn(process.execPath, ['--import', 'tsx', host], { stdio: ['ignore', 'pipe', 'inherit'] })
+    const helper = await helperPid(h.stdout)
+    started.push(helper, h.pid!)
+    h.kill('SIGKILL')
+    expect(await goneWithin(helper, 10_000)).toBe(true)
   })
 
   it('starts as before without it, and where there are no process groups', async () => {
