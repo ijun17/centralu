@@ -394,6 +394,44 @@ describe('what the orchestrator’s whole conversation has read (§9.7)', () => 
     expect(w.asked[1]).not.toContain('characters)')
   })
 
+  it('a command, a fetch or an app’s data in the person’s own turn counts as reading everything: a later request’s reply asks', async () => {
+    const names: [string, Record<string, unknown>][] = [
+      ['Bash', { command: 'cat ~/.ssh/config' }],
+      ['PowerShell', { command: 'Get-Content C:/secret.txt' }],
+      ['WebFetch', { url: 'https://example.com' }],
+      ['WebSearch', { query: 'x' }],
+      ['mcp__app-board__list_items', {}],
+      ['mcp__notion__search', { query: 'x' }],
+    ]
+    for (const [name, args] of names) {
+      let asker: Asker | null = null
+      const w = world({ asker: () => asker, folders: [HOME], answer: 'allow' })
+      // The person's turn: only the hook's `seen`, nothing is asked
+      w.gate.seen('orc', name, args)
+      expect(w.asked).toEqual([])
+      asker = ASKER
+      await send(w, reply())
+      expect(w.asked, name).toHaveLength(1)
+    }
+  })
+
+  it('so does an app tool the app calls read-only, which is never asked about but whose answer is in the conversation; Centralu’s own tools through the CLI do not', async () => {
+    const w = world({ folders: [HOME], answer: 'allow' })
+    const r = ran()
+    // In a request's turn: runs with no card
+    await w.gate.when('orc', { name: 'app-board.list_items', args: {}, readOnly: true }, undefined, r.run, refused)
+    expect(r.calls).toHaveLength(1)
+    expect(w.asked).toEqual([])
+    await send(w, reply())
+    expect(w.asked).toHaveLength(1)
+
+    const own = world({ folders: [HOME], answer: 'allow' })
+    own.gate.seen('orc', 'mcp__centralu__centralu_run', { command: 'rename_session' })
+    own.gate.seen('orc', 'mcp__centralu__mail', { action: 'inbox' })
+    await send(own, reply())
+    expect(own.asked).toEqual([])
+  })
+
   it('a project’s own state counts when it is another project’s or none is named; a machine’s activity always counts', async () => {
     const outs: [string, Record<string, unknown>][] = [
       ['project_git_status', { project: 'zed' }],

@@ -36,7 +36,8 @@ export type AskedGateHost = {
 /** `AskedGate.when` as the places that call it hold it: a session's step is run when it is not a request's turn, or the person allows it */
 export type WhenAsked = <T>(
   sessionId: string,
-  call: { name: string; args: Record<string, unknown> },
+  /** `readOnly`: the app says the tool only reads, so it is never asked about, but what it returns is a read */
+  call: { name: string; args: Record<string, unknown>; readOnly?: boolean },
   signal: AbortSignal | undefined,
   run: () => Promise<T>,
   refused: (text: string) => T,
@@ -130,14 +131,14 @@ export class AskedGate {
 
   async when<T>(
     orchestratorId: string,
-    call: { name: string; args: Record<string, unknown> },
+    call: { name: string; args: Record<string, unknown>; readOnly?: boolean },
     signal: AbortSignal | undefined,
     run: () => Promise<T>,
     refused: (text: string) => T,
   ): Promise<T> {
     const asker = this.host.askedBy(orchestratorId)
     this.noteRead(orchestratorId, call.name, call.args)
-    if (!asker) return run()
+    if (!asker || call.readOnly === true) return run()
     const step = askedAct(call.name, call.args, asker.threadId, this.readIn(orchestratorId, asker))
     if (step === null) return run()
     return this.put(orchestratorId, asker, step, signal, run, refused)

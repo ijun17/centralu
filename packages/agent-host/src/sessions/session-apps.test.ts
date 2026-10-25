@@ -268,11 +268,17 @@ describe('calling', () => {
    */
   it('in a session’s request an app tool that is not a read goes through the host’s gate and does not run when the gate refuses; a read is not asked about', async () => {
     const asked: string[] = []
+    const reads: string[] = []
     let allow = false
     const gated = new SessionAppsHub(w.rt, {
       toolListWaitMs: 10_000,
       callJoinWaitMs: 300,
       whenAsked: async (id, call, _signal, run, refused) => {
+        // As the real gate: it hears of a read (what it returns is a read of the conversation) and runs it with no question
+        if (call.readOnly) {
+          reads.push(call.name)
+          return run()
+        }
         asked.push(`${id} ${call.name} ${JSON.stringify(call.args)}`)
         return allow ? run() : refused('Nothing was done: the person did not allow it.')
       },
@@ -284,6 +290,7 @@ describe('calling', () => {
       const peek = await a.call('app-notes', 'peek', {})
       expect(peek.isError).toBe(false)
       expect(asked).toEqual([])
+      expect(reads).toEqual(['app-notes.peek'])
 
       const refused = await a.call('app-notes', 'poke', { to: 9 })
       expect(refused.isError).toBe(true)

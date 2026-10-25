@@ -30,7 +30,7 @@ export type ReadScope =
 /** What the asking session reaches itself: its folders, its project (id and name) and the thread of its request */
 export type Reach = { folders: readonly string[]; project: string | null; projectName?: string | null; thread: string }
 
-/** The CLI's reads of files, and the host's reads of conversations; null for any other tool or command */
+/** The CLI's reads of files, and the host's reads of conversations, projects and mail; what a command, a fetch or an app can read is everything. Null for any other tool or command */
 export function readScope(name: string, args: Record<string, unknown>): ReadScope | null {
   const text = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? v : null)
   switch (name) {
@@ -56,11 +56,21 @@ export function readScope(name: string, args: Record<string, unknown>): ReadScop
     case 'list_sessions':
     case 'list_archive':
     case 'machine_activity':
+    case 'Bash':
+    case 'PowerShell':
+    case 'WebFetch':
+    case 'WebSearch':
       return { everywhere: true }
     default:
-      return null
+      return isAppTool(name) ? { everywhere: true } : null
   }
 }
+
+/**
+ * A tool of an attached app or of another MCP server returns data from outside the asker's reach, and nothing says which: fail closed. Centralu's own
+ * tools are named by their command (a command with a dot cannot exist), and an app's tool through `SessionApps` as `server.tool`
+ */
+const isAppTool = (name: string): boolean => (name.startsWith('mcp__') && !name.startsWith('mcp__centralu__')) || name.includes('.')
 
 /** The folder a Glob looks in, and the fixed start of its pattern (`/tmp/x/*.txt` looks under `/tmp/x`, whatever the folder says) */
 function globPaths(path: string | null, pattern: string | null): string[] {
