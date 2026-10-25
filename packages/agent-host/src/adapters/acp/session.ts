@@ -95,7 +95,7 @@ export class AcpSession implements SessionHandle {
     private readonly deps: AcpSessionDeps,
   ) {
     this.preset = opts.permissionPreset
-    this.normalizer = new AcpNormalizer(opts.sessionId)
+    this.normalizer = new AcpNormalizer(opts.sessionId, deps.label)
     this.unmapped = new UnmappedTypes(deps.label, opts.sessionId, KNOWN_UPDATES)
     this.conn = new AcpConnection(
       deps.process,
