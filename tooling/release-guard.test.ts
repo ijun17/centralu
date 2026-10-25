@@ -19,7 +19,7 @@ type Facts = Record<string, unknown>
 type Decision = { ok: boolean; scheme: string; version: string; dryRun: string; alsoLatest: string; errors: string[]; notes: string[] }
 
 // @ts-expect-error: a plain .mjs script the workflow runs with the runner's own Node
-const load = async () => (await import('../scripts/release-guard.mjs')) as { decide: (f: Facts) => Promise<Decision>; literalVersion: (t: string) => string | null }
+const load = async () => (await import('../scripts/release-guard.mjs')) as { decide: (f: Facts) => Promise<Decision>; schemeOf: (t: string) => { scheme: string | null; version?: string; problem?: string } }
 
 const WORKFLOW = readFileSync(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8')
 const brand = readFileSync(new URL('../packages/protocol/src/brand.ts', import.meta.url), 'utf8')
@@ -31,34 +31,50 @@ const facts = (over: Facts = {}): Facts => ({
   event: 'push',
   ref: 'v1.0.0-beta.2',
   inputs: {},
-  literal: null,
+  source: { scheme: 'tag' },
   tags: ['v1.0.0-beta.1', 'v1.0.0-beta.2', 'shell-v1'],
   head: HEAD,
+  shallow: false,
   ancestor: async () => true,
   onMain: async () => true,
   registry: async (_: string, v: string) => (v === '1.0.0-beta.1' ? { state: 'present', gitHead: 'b'.repeat(40) } : { state: 'absent' }),
+  published: async () => ['1.0.0-beta.1'],
   ...over,
 })
 const errors = (d: Decision) => d.errors.join(' ')
 
-it('reads the scheme from brand.ts: the literal of this repository, none once it re-exports', async () => {
-  const { literalVersion } = await load()
-  expect(literalVersion(brand)).toBe(version)
-  expect(literalVersion("export { APP_VERSION } from './version.generated.js'\n")).toBeNull()
+it('reads the scheme from brand.ts: the literal of this repository, the tag scheme only on its marker or no APP_VERSION at all', async () => {
+  const { schemeOf } = await load()
+  expect(schemeOf(brand)).toEqual({ scheme: 'brand', version })
+  expect(schemeOf("export { APP_VERSION } from './version.generated.js'\n")).toEqual({ scheme: 'tag' })
+  expect(schemeOf("import { APP_VERSION } from './version.generated.js'\r\nexport const CLIENT_INFO = { version: APP_VERSION }\r\n")).toEqual({ scheme: 'tag' })
+  expect(schemeOf("export const APP_NAME = 'Centralu'\n")).toEqual({ scheme: 'tag' })
+  // A declaration the literal's pattern misses is not the tag scheme: that would let a tag of any version publish (review item 2)
+  for (const text of ['export const APP_VERSION = "1.0.0-beta.2"', "export const APP_VERSION: string = '1.0.0-beta.2'", 'export const APP_VERSION = readVersion()', "export const APP_VERSION = '1.0.0'\nexport { APP_VERSION } from './version.generated.js'"])
+    expect(schemeOf(text), text).toMatchObject({ scheme: null })
+})
+
+it('stops, building nothing, when brand.ts declares the version in a form it cannot read', async () => {
+  const { decide, schemeOf } = await load()
+  for (const event of ['push', 'workflow_dispatch']) {
+    const r = await decide(facts({ event, source: schemeOf('export const APP_VERSION = "1.0.0-beta.2"') }))
+    expect(r, event).toMatchObject({ ok: false, dryRun: 'true', version: '' })
+    expect(errors(r)).toContain('in a form that cannot be read')
+  }
 })
 
 describe('the brand scheme, as before #1501', () => {
   it('publishes a tag push of the declared version and refuses any other tag', async () => {
     const { decide } = await load()
-    expect(await decide(facts({ literal: version, ref: `v${version}` }))).toMatchObject({ ok: true, scheme: 'brand', version, dryRun: 'false', alsoLatest: 'true' })
-    const r = await decide(facts({ literal: version, ref: 'v0.0.0' }))
+    expect(await decide(facts({ source: { scheme: 'brand', version }, ref: `v${version}` }))).toMatchObject({ ok: true, scheme: 'brand', version, dryRun: 'false', alsoLatest: 'true' })
+    const r = await decide(facts({ source: { scheme: 'brand', version }, ref: 'v0.0.0' }))
     expect(r.ok).toBe(false)
     expect(errors(r)).toContain('does not match APP_VERSION')
   })
 
   it('rehearses a manual run on any branch by default, publishes one only with dry_run unticked, and refuses another version input', async () => {
     const { decide } = await load()
-    const run = (inputs: Facts) => decide(facts({ literal: version, event: 'workflow_dispatch', ref: `chore/release-${version}`, inputs }))
+    const run = (inputs: Facts) => decide(facts({ source: { scheme: 'brand', version }, event: 'workflow_dispatch', ref: `chore/release-${version}`, inputs }))
     expect(await run({ dryRun: 'true', alsoLatest: 'true' })).toMatchObject({ ok: true, version, dryRun: 'true' })
     // An empty or unexpected input is a rehearsal too: the reversible answer
     expect(await run({ dryRun: '', alsoLatest: '' })).toMatchObject({ ok: true, dryRun: 'true', alsoLatest: 'true' })
@@ -126,6 +142,20 @@ describe('the tag scheme (#1501)', () => {
     expect(errors(await decide(facts({ registry: async () => Promise.reject(new Error('HTTP 503')) })))).toContain('did not answer (HTTP 503)')
   })
 
+  it('refuses a shallow checkout, a tag below what npm has, and a first tag while npm already has centralu', async () => {
+    // With no other tag visible the descent and previous-version checks had nothing to check (review item 3)
+    const { decide } = await load()
+    expect(errors(await decide(facts({ shallow: true })))).toContain('This checkout is shallow')
+    expect(errors(await decide(facts({ event: 'workflow_dispatch', ref: 'main', shallow: true })))).toContain('This checkout is shallow')
+    const alone = { tags: ['v0.9.0'], ref: 'v0.9.0' }
+    const r = await decide(facts({ ...alone, published: async () => ['0.2.0-beta.4', '1.0.0-beta.1'] }))
+    expect(errors(r)).toContain('0.9.0 is not after centralu@1.0.0-beta.1')
+    expect(errors(r)).toContain('No release tag before v0.9.0 is visible, but the registry has centralu')
+    // The very first release: no tag, nothing on npm
+    expect(await decide(facts({ ...alone, published: async () => [] }))).toMatchObject({ ok: true, version: '0.9.0' })
+    expect(errors(await decide(facts({ published: async () => Promise.reject(new Error('HTTP 503')) })))).toContain('did not answer (HTTP 503)')
+  })
+
   it('refuses a tag that is not a version, build metadata included', async () => {
     const { decide } = await load()
     for (const ref of ['v1.0', 'v1.0.0+build.1', 'release-1.0.0', 'v01.0.0']) expect((await decide(facts({ ref }))).ok, ref).toBe(false)
@@ -149,9 +179,12 @@ describe('run as the workflow runs it', () => {
   async function run(setup: (dir: string) => void, env: Record<string, string>, published: Record<string, string>) {
     const dir = mkdtempSync(join(tmpdir(), 'cc-release-guard-'))
     const server = createServer((req, res) => {
-      const at = published[decodeURIComponent(req.url ?? '')]
-      res.writeHead(at === undefined ? 404 : 200, { 'content-type': 'application/json' })
-      res.end(JSON.stringify(at === undefined ? { error: 'not found' } : { gitHead: at }))
+      const path = decodeURIComponent(req.url ?? '')
+      // A package's document (every version), or one version's
+      const versions = Object.fromEntries(Object.entries(published).filter(([p]) => p.startsWith(`${path}/`)).map(([p, gitHead]) => [p.slice(path.length + 1), { gitHead }]))
+      const body = published[path] !== undefined ? { gitHead: published[path] } : Object.keys(versions).length ? { versions } : undefined
+      res.writeHead(body === undefined ? 404 : 200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify(body ?? { error: 'not found' }))
     })
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
     try {
@@ -205,6 +238,25 @@ describe('run as the workflow runs it', () => {
     expect(r.stdout).toContain('::error::v1.0.0-beta.1, the release before v1.0.0-beta.2, is not an ancestor')
     expect(r.stdout).toContain('is not on the default branch')
     expect(r.summary).toContain('**Refused.**')
+  })
+
+  it('stops in a shallow checkout, which shows no previous tag', async () => {
+    const r = await run(
+      (d) => {
+        const src = `${d}-src`
+        mkdirSync(join(src, 'packages/protocol/src'), { recursive: true })
+        git(src, 'init', '-q', '-b', 'main')
+        history(src, 'main')
+        git(d, 'fetch', '-q', '--depth', '1', `file://${src.replace(/\\/g, '/')}`, '+refs/heads/main:refs/remotes/origin/main', '+refs/tags/v1.0.0-beta.2:refs/tags/v1.0.0-beta.2')
+        git(d, 'checkout', '-q', 'refs/tags/v1.0.0-beta.2')
+        rmSync(src, { recursive: true, force: true })
+      },
+      { GITHUB_EVENT_NAME: 'push', GITHUB_REF_NAME: 'v1.0.0-beta.2' },
+      { '/centralu/1.0.0-beta.1': 'x' },
+    )
+    expect(r.status, r.stdout).toBe(1)
+    expect(r.stdout).toContain('::error::This checkout is shallow')
+    expect(r.stdout).toContain('No release tag before v1.0.0-beta.2 is visible, but the registry has centralu')
   })
 
   it("rehearses this repository's brand.ts as the old guard did", async () => {

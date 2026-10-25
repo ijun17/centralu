@@ -416,21 +416,28 @@ goes on a commit of main that is already fully green. This lands in steps: the g
 schemes accepted, nothing changes until the switch), then the stamp and the switch, then the old path goes. The design
 and its review are on #1501.
 
-- **Which scheme.** `release.yml`'s guard (`scripts/release-guard.mjs`) reads `brand.ts`: a literal `APP_VERSION` is the
-  brand scheme above; none is the tag scheme. The board follows `release.scheme` in its `project.json` ("brand" by
-  default, "tag" to switch).
+- **Which scheme.** `release.yml`'s guard (`scripts/release-guard.mjs`) reads `brand.ts` with `sourceScheme`
+  (the board's `versions.mjs`, from `project.json` `release.source`): a literal `APP_VERSION` is the brand scheme
+  above. The tag scheme needs positive evidence: the line importing `APP_VERSION` from `./version.generated.js`, or no
+  `APP_VERSION` in the file at all. Any other declaration (other quotes, a type annotation, a computed value) stops the
+  run: guessing "tag" would let a tag of any version publish. The board follows `release.scheme` in its
+  `project.json` ("brand" by default, "tag" to switch), and reads each commit it would release with the same function.
 - **Only a tag push publishes.** Under the tag scheme a manual run is always a rehearsal, whatever `dry_run` says: a
   manual publish of a free version would leave it on npm with no tag. A rehearsal builds its `version` input, or the next
   prerelease after the newest tag, and is named `rehearse <version>` (`run-name`) so the board can tell which version it was.
 - **What the guard holds a tag to** (the tree no longer ties a run to a version, so a tag pushed by hand meets these too):
-  it is the newest `v[0-9]*` tag; the previous one is an ancestor of the tagged commit (the guard's checkout has the whole
-  history, `fetch-depth: 0`); the commit is on the default branch; the previous version's `centralu` is on the registry
-  (two tags at once would race for the dist-tags); and `centralu@<version>` is absent, or from this very commit (a
-  re-run of the same release). The guard's `version` reaches the platform and shim jobs as `CENTRALU_VERSION`, at job
+  it is the newest `v[0-9]*` tag; the previous one is an ancestor of the tagged commit; the checkout is not shallow (the
+  guard's has the whole history, `fetch-depth: 0`: a shallow one shows no previous tag, and the checks against it would
+  pass unasked); the commit is on the default branch; the version is after every version of `centralu` on the registry,
+  and with no previous tag visible the registry has none; the previous version's `centralu` is on the registry (two
+  tags at once would race for the dist-tags); and `centralu@<version>` is absent, or from this very commit (a re-run of
+  the same release). The guard's `version` reaches the platform and shim jobs as `CENTRALU_VERSION`, at job
   level so `pnpm install` sees it too.
 - **The board.** `bump` refuses. `release_status`, `rehearse` and `tag` take the next prerelease after the newest tag (or
   `version`) and the newest commit of main since that tag whose own push run of CI is fully green, the full tier
-  included (or `commit`). `tag` needs a successful rehearsal of that version on that commit (or its tree), and pushes an
+  included (or `commit`), passing over a commit whose `brand.ts` still declares the version (the guard would refuse a
+  tag there, and its number would be spent). Both refuse while the newest tag is not released yet (its run has not
+  succeeded and its shim is not on the registry), which the guard would refuse too. `tag` needs a successful rehearsal of that version on that commit (or its tree), and pushes an
   annotated tag whose message is the notes: with no bump PR, the tag is where they are kept (owner default, 2026-10-24:
   no GitHub Release). `approve` reads only the tagged commit's own CI, which was green before it was tagged; the shim's
   gate is unchanged. Status follows the newest tag until its release run succeeded or its shim is on the registry.

@@ -54,7 +54,12 @@
     }
   },
   "release": {
-    "source": { "path": "packages/protocol/src/brand.ts", "pattern": "^export const APP_VERSION = '([^']+)'" },
+    "source": {
+      "path": "packages/protocol/src/brand.ts",
+      "pattern": "^export const APP_VERSION = '([^']+)'",
+      "marker": "^(?:import|export) \\{ APP_VERSION \\} from '\\./version\\.generated(?:\\.js)?';?$",
+      "name": "APP_VERSION"
+    },
     "versionFiles": [
       "packages/protocol/src/brand.ts",
       "apps/desktop/package.json",

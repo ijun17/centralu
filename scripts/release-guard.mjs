@@ -7,14 +7,20 @@
 //   equal to every other version file by tooling/brand.test.ts. A tag push must name exactly that
 //   version; a manual run rehearses it, or publishes when `dry_run` is unticked (the hand fallback in
 //   docs/releasing.md). A `version` input, if given, must be that version.
-// * **tag** (once brand.ts holds no literal): no file carries the release version; the tag is the
-//   only statement of it, and the build stamps it. Since the tree no longer ties a run to a version,
+// * **tag** (once brand.ts imports the version from the generated file, or does not name it at all):
+//   no file carries the release version; the tag is the only statement of it, and the build stamps it.
+//   Told by `sourceScheme`, which the project board reads commits with too, from project.json
+//   `release.source`: only positive evidence is the tag scheme, and a declaration neither reading
+//   understands stops the run (#1501 review item 2). Since the tree no longer ties a run to a version,
 //   the guard does what the literal used to:
 //   - only a tag push publishes; a manual run is always a rehearsal, whatever `dry_run` says (a manual
 //     publish of a free version would leave a version on npm with no tag, and the next release stuck);
 //   - the tag is the newest `v[0-9]*` tag, and the previous one is an ancestor of the tagged commit
 //     (a tag on an older commit would ship without the previous release's fixes);
-//   - the tagged commit is on the default branch;
+//   - the tagged commit is on the default branch, in a checkout with its whole history (a shallow one
+//     shows no previous tag, and every check against it would pass unasked);
+//   - the version is after every version of `centralu` on the registry, and with no previous tag
+//     visible the registry must have none (the tags were not fetched, or were deleted);
 //   - the previous version's `centralu` is on the registry (two tags at once: the older one's shim
 //     finishing last would leave `latest` on it);
 //   - `centralu@<version>` is not on the registry from another commit (a re-run of this release's
@@ -28,18 +34,18 @@
 import { execFileSync } from 'node:child_process'
 import { appendFileSync, readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
+import { sourceScheme } from '../.centralu/apps/project-board/versions.mjs'
 
-export const BRAND = 'packages/protocol/src/brand.ts'
-const LITERAL = /^export const APP_VERSION = '([^']*)'/m
+// Where the version is declared and how its two schemes read: the board's release configuration, one definition for both
+const SOURCE = JSON.parse(readFileSync(new URL('../.centralu/apps/project-board/project.json', import.meta.url), 'utf8')).release.source
+export const BRAND = SOURCE.path
 // SemVer without build metadata: content-verify's Rust parser refuses `+meta`, and npm drops it
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?$/
 export const TAG_PREFIX = 'v'
 export const SHIM = 'centralu'
 
-/** The literal brand.ts declares, or null when it declares none (the tag scheme). */
-export function literalVersion(text) {
-  return LITERAL.exec(String(text ?? ''))?.[1] ?? null
-}
+/** brand.ts's scheme: `{ scheme: 'brand', version }`, `{ scheme: 'tag' }`, or `{ scheme: null, problem }` (`sourceScheme`). */
+export const schemeOf = (text) => sourceScheme(text, SOURCE)
 
 export function parseVersion(text) {
   const m = SEMVER.exec(String(text ?? ''))
@@ -93,22 +99,29 @@ const truthy = (v, fallback) => (v === 'true' || v === 'false' ? v : fallback)
 
 /**
  * The guard's answer. `facts`: `event` (GITHUB_EVENT_NAME), `ref` (GITHUB_REF_NAME), `inputs`
- * (`dryRun`, `alsoLatest`, `version`, as the workflow gives them: strings, maybe empty), `literal`
- * (brand.ts's, or null), `tags` (every tag name), `head` (the commit being built), and three
- * questions: `ancestor(tag)` (is that tag's commit an ancestor of head), `onMain()` (is head on the
- * default branch), `registry(name, version)` (`{ state: 'absent' }` or `{ state: 'present', gitHead }`;
- * throws when the registry does not answer). Answers `{ ok, scheme, version, dryRun, alsoLatest,
+ * (`dryRun`, `alsoLatest`, `version`, as the workflow gives them: strings, maybe empty), `source`
+ * (brand.ts's `schemeOf`), `tags` (every tag name), `head` (the commit being built), `shallow` (the
+ * checkout's history is cut short), and four questions: `ancestor(tag)` (is that tag's commit an
+ * ancestor of head), `onMain()` (is head on the default branch), `registry(name, version)`
+ * (`{ state: 'absent' }` or `{ state: 'present', gitHead }`), `published(name)` (every version the
+ * registry has of it, empty when none); the last two throw when the registry does not answer. Answers `{ ok, scheme, version, dryRun, alsoLatest,
  * errors, notes }`; `ok` false means the run stops here.
  */
 export async function decide(facts) {
-  const { event, ref, inputs = {}, literal } = facts
+  const { event, ref, inputs = {}, source = { scheme: null, problem: 'was not read.' } } = facts
+  const literal = source.scheme === 'brand' ? source.version : null
   const errors = []
   const notes = []
   const push = event === 'push'
   const want = String(inputs.version ?? '').trim().replace(/^v/, '')
   const answer = (scheme, version, dryRun, alsoLatest) => ({ ok: errors.length === 0, scheme, version, dryRun, alsoLatest, errors, notes })
 
-  if (literal !== null && literal !== undefined) {
+  if (source.scheme === null) {
+    // Never the tag scheme by default: a literal in another form would let a tag of any version publish
+    errors.push(`${BRAND} ${source.problem} Nothing is built until it reads as one scheme or the other.`)
+    return answer(null, '', 'true', 'true')
+  }
+  if (literal !== null) {
     // The brand scheme, as before #1501
     if (!literal) errors.push(`${BRAND} declares an empty APP_VERSION.`)
     if (push) {
@@ -127,6 +140,7 @@ export async function decide(facts) {
 
   // The tag scheme (#1501)
   const tags = releaseTags(facts.tags ?? [])
+  if (facts.shallow) errors.push('This checkout is shallow: without the whole history and every tag, the previous release cannot be seen, and the checks against it would pass unasked. Check out with fetch-depth: 0.')
   if (push) {
     const version = ref?.startsWith(TAG_PREFIX) ? ref.slice(TAG_PREFIX.length) : ''
     if (!parseVersion(version)) {
@@ -167,6 +181,11 @@ export async function decide(facts) {
 
 async function registryChecks({ facts, version, previous, errors }) {
   try {
+    // After everything npm has (the design's check): a tag below a published version, on an old commit with no tag before it, passed every other check
+    const all = (await facts.published(SHIM)).filter((v) => parseVersion(v)).sort(compareVersions)
+    const newest = all.at(-1) ?? null
+    if (newest && !all.includes(version) && compareVersions(version, newest) <= 0) errors.push(`${version} is not after ${SHIM}@${newest}, the newest version on the registry.`)
+    if (!previous && all.length) errors.push(`No release tag before ${TAG_PREFIX}${version} is visible, but the registry has ${SHIM} (newest ${newest}): the tags were not fetched, or were deleted. Fetch them (fetch-depth: 0) and run again.`)
     const p = await facts.registry(SHIM, version)
     if (p.state === 'present' && p.gitHead !== facts.head)
       errors.push(`${SHIM}@${version} is on the registry already, published from ${p.gitHead ? short(p.gitHead) : 'an unknown commit'}, not ${short(facts.head)}: npm never takes a version twice. Release the next version instead.`)
@@ -182,6 +201,14 @@ async function registryChecks({ facts, version, previous, errors }) {
 const short = (sha) => String(sha ?? '').slice(0, 12)
 
 const REGISTRY = String(process.env.RELEASE_GUARD_REGISTRY || 'https://registry.npmjs.org').replace(/\/+$/, '')
+
+/** Every version of `name` the registry has; empty when it has none. */
+async function published(name) {
+  const r = await fetch(`${REGISTRY}/${encodeURIComponent(name).replace('%40', '@')}`, { headers: { accept: 'application/vnd.npm.install-v1+json' }, signal: AbortSignal.timeout(20_000) })
+  if (r.status === 404) return []
+  if (!r.ok) throw new Error(`HTTP ${r.status}`)
+  return Object.keys((await r.json()).versions ?? {})
+}
 
 async function registry(name, version) {
   const r = await fetch(`${REGISTRY}/${encodeURIComponent(name).replace('%40', '@')}/${encodeURIComponent(version)}`, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(20_000) })
@@ -212,16 +239,18 @@ async function main() {
     event: env.GITHUB_EVENT_NAME,
     ref: env.GITHUB_REF_NAME,
     inputs: { dryRun: env.INPUT_DRY_RUN ?? '', alsoLatest: env.INPUT_ALSO_LATEST ?? '', version: env.INPUT_VERSION ?? '' },
-    literal: literalVersion(readFileSync(BRAND, 'utf8')),
+    source: schemeOf(readFileSync(BRAND, 'utf8')),
     tags: git(['tag', '--list', `${TAG_PREFIX}[0-9]*`]).split('\n').filter(Boolean),
     head,
+    shallow: git(['rev-parse', '--is-shallow-repository']) === 'true',
     ancestor: async (tag) => isAncestor(`refs/tags/${tag}^{commit}`, head),
     onMain: async () => isAncestor(head, `refs/remotes/origin/${main}`),
     registry,
+    published,
   })
   for (const n of result.notes) console.log(`::notice::${n}`)
   for (const e of result.errors) console.log(`::error::${e}`)
-  if (env.GITHUB_OUTPUT) appendFileSync(env.GITHUB_OUTPUT, `version=${result.version}\ndry_run=${result.dryRun}\nalso_latest=${result.alsoLatest}\nscheme=${result.scheme}\n`)
+  if (env.GITHUB_OUTPUT) appendFileSync(env.GITHUB_OUTPUT, `version=${result.version}\ndry_run=${result.dryRun}\nalso_latest=${result.alsoLatest}\nscheme=${result.scheme ?? ''}\n`)
   // Say out loud what the jobs after this one are about to do, on the run's summary page
   if (env.GITHUB_STEP_SUMMARY) {
     const lines = [`## centralu ${result.version || '(no version)'}`, '']
@@ -229,7 +258,7 @@ async function main() {
     else if (result.dryRun === 'false') lines.push('**Publishing.** Each publish waits for approval on the `npm-publish` environment.', '')
     else lines.push('**Rehearsal.** Builds and `npm pack` only: nothing reaches the registry and no approval is asked for.', '', 'The shim job will warn that the platform packages are not on the registry at this version. That is correct: this run published none.', '')
     for (const n of result.notes) lines.push(`- ${n}`)
-    lines.push(`- version from: ${result.scheme === 'brand' ? `\`${BRAND}\`` : 'the tag (or the rehearsal input)'}`, `- move the \`latest\` dist-tag: \`${result.alsoLatest}\``, `- triggered by: \`${env.GITHUB_EVENT_NAME}\` \`${env.GITHUB_REF_NAME}\``)
+    lines.push(`- version from: ${result.scheme === 'brand' ? `\`${BRAND}\`` : result.scheme === 'tag' ? 'the tag (or the rehearsal input)' : 'not read'}`, `- move the \`latest\` dist-tag: \`${result.alsoLatest}\``, `- triggered by: \`${env.GITHUB_EVENT_NAME}\` \`${env.GITHUB_REF_NAME}\``)
     appendFileSync(env.GITHUB_STEP_SUMMARY, `${lines.join('\n')}\n`)
   }
   process.exitCode = result.ok ? 0 : 1
