@@ -25,11 +25,11 @@ export const NO_CONFIGS: OpenCodeConfigs = { layers: [], agentFiles: [] }
  * the turn is stopped (#1565 Mac re-check, case E). So under `safe` and `normal`, what would ask under any other agent
  * is denied: the subagent is told so and its turn ends, and the agent Centralu runs, which can ask, may try itself.
  */
-export function presetEnv(preset: PermissionPreset, env: Readonly<Record<string, string | undefined>>, configs: OpenCodeConfigs): Record<string, string> {
+export function presetEnv(preset: PermissionPreset, env: Readonly<Record<string, string | undefined>>, configs: OpenCodeConfigs, platform: NodeJS.Platform = process.platform): Record<string, string> {
   if (preset === 'auto') return {}
   const theirs = jsonObject(env.OPENCODE_CONFIG_CONTENT ?? '')
   const all = [...configs.layers, theirs, ...(env.OPENCODE_PERMISSION === undefined ? [] : [{ permission: jsonObject(env.OPENCODE_PERMISSION) }])]
-  return holdEnv(preset === 'safe' ? 'safe' : 'normal', theirs, all, configs.agentFiles, env.OPENCODE_PERMISSION)
+  return holdEnv(preset === 'safe' ? 'safe' : 'normal', theirs, all, configs.agentFiles, env.OPENCODE_PERMISSION, matcher(platform))
 }
 
 /** What Normal asks before where the person decided nothing: OpenCode lets every rule of theirs win over it */
@@ -58,13 +58,13 @@ type Rules = Array<[string, string]>
 /**
  * OpenCode reads an agent's rules as the defaults, the config's `permission`, then the agent's own, and the last rule
  * that matches decides; within one object a key keeps the place it had in the first config that named it. So Centralu's
- * rules sit under keys of their own (`BASH` for `bash`), new to every object they join and so read after the person's
+ * rules sit under keys of their own (`bash*` for `bash`), new to every object they join and so read after the person's
  * rules there: in the config's `permission` (for an agent Centralu cannot see), and under each agent, its own in
  * `agent`, or in `mode` for one the person lists there, since OpenCode copies `mode` over `agent` last (and an agent
  * named there becomes primary, so no other is). The agent Centralu runs gets the preset's asks; every other only runs
  * as a subagent, where an ask is never answered, so each ask there is a deny.
  */
-function holdEnv(hold: Hold, theirs: Obj, all: Obj[], agentFiles: string[], permissionEnv: string | undefined): Record<string, string> {
+function holdEnv(hold: Hold, theirs: Obj, all: Obj[], agentFiles: string[], permissionEnv: string | undefined, matches: Match): Record<string, string> {
   const named = (group: 'agent' | 'mode') => all.flatMap((c) => Object.keys(asObj(c[group])))
   const modes = new Set(named('mode'))
   const configured = [...new Set([...named('agent'), ...modes])]
@@ -75,7 +75,7 @@ function holdEnv(hold: Hold, theirs: Obj, all: Obj[], agentFiles: string[], perm
   const entered = hold === 'safe' ? held : [...new Set([primary, ...NATIVE_AGENTS, ...configured])]
   const globalLevel = level(all)
   const levelOf = (name: string) => level([...all.map((c) => asObj(asObj(c.agent)[name])), ...all.map((c) => asObj(asObj(c.mode)[name]))])
-  const rulesFor = (levels: Obj[], asks: boolean) => ({ ...ownRules(hold, levels, asks), ...taskRules(hold, levels, held, primary, asks) })
+  const rulesFor = (levels: Obj[], asks: boolean) => ({ ...ownRules(hold, levels, asks, matches), ...taskRules(hold, levels, held, primary, asks, matches) })
   const globalRules = rulesFor([globalLevel], false)
   const entries = (group: 'agent' | 'mode', names: string[]) =>
     Object.fromEntries(
@@ -103,18 +103,24 @@ function holdEnv(hold: Hold, theirs: Obj, all: Obj[], agentFiles: string[], perm
  * the agent can ask (`asks`), Safe's tools ask but where the person denies, and Normal's ask but where a rule of the
  * person's decides; every other tool keeps what its rules decide. Where it cannot, each of those asks is a deny.
  */
-function ownRules(hold: Hold, levels: Obj[], asks: boolean): Obj {
+function ownRules(hold: Hold, levels: Obj[], asks: boolean, matches: Match): Obj {
   const presetTools = hold === 'safe' ? SAFE_ASKS : NORMAL_ASKS
   const askedHere = levels.flatMap((l) => Object.entries(l).filter(([key, v]) => !/[*?]/.test(key) && key !== 'task' && rulesOfValue(v).some(([, a]) => a === 'ask')).map(([key]) => key))
   const tools = [...new Set([...Object.keys(DEFAULT_ASKS), ...askedHere, ...presetTools])]
   return Object.fromEntries(
-    tools.map((tool) => {
-      const theirs = levels.flatMap((l) => toolRules(l, tool))
+    tools.flatMap((tool) => {
+      const theirs = levels.flatMap((l) => toolRules(l, tool, matches))
       const rules =
         hold === 'safe' && SAFE_ASKS.includes(tool)
-          ? [['*', asks ? 'ask' : 'deny'] as [string, string], ...theirs.filter(([, a]) => a === 'deny')]
+          ? [['*', 'ask'] as [string, string], ...theirs.filter(([, a]) => a === 'deny')]
           : [...(DEFAULT_ASKS[tool] ?? (presetTools.includes(tool) ? [['*', 'ask'] as [string, string]] : [])), ...theirs]
-      return [ownKey(tool), inOrder(asks ? rules : rules.map(([p, a]) => [p, a === 'ask' ? 'deny' : a]))]
+      // From the first ask on: the rules before it are read under the tool's own key already, and the key, `bash*`, also
+      // matches a tool whose name starts the same (an MCP tool `read_notes`), which only an ask of this tool's should reach
+      const ordered = Object.entries(inOrder(rules))
+      const first = ordered.findIndex(([, a]) => a === 'ask')
+      if (first < 0) return []
+      const fromAsk = ordered.slice(first)
+      return [[ownKey(tool), Object.fromEntries(asks ? fromAsk : fromAsk.map(([p, a]) => [p, a === 'ask' ? 'deny' : a]))]]
     }),
   )
 }
@@ -124,8 +130,8 @@ function ownRules(hold: Hold, levels: Obj[], asks: boolean): Obj {
  * person denies; under both, never hands work to the agent Centralu runs, as a subagent, where it could not ask; and
  * where the agent cannot ask (`asks`), each ask is a deny, as in `ownRules`
  */
-function taskRules(hold: Hold, levels: Obj[], held: string[], primary: string, asks: boolean): Obj {
-  const theirs = levels.flatMap((l) => toolRules(l, 'task'))
+function taskRules(hold: Hold, levels: Obj[], held: string[], primary: string, asks: boolean, matches: Match): Obj {
+  const theirs = levels.flatMap((l) => toolRules(l, 'task', matches))
   const denies = theirs.filter(([, a]) => a === 'deny')
   const base: Rules = hold === 'safe' ? [['*', 'ask'], ...(denies.some(([p]) => p === '*') ? [] : held.map((n): [string, string] => [n, 'allow']))] : theirs
   const rules: Rules = [...base, [primary, 'deny'], ...denies]
@@ -133,10 +139,10 @@ function taskRules(hold: Hold, levels: Obj[], held: string[], primary: string, a
 }
 
 /**
- * Centralu's key for a tool's rules: the tool's name in capitals, new to every permission object it joins (`holdEnv`),
- * and matched by OpenCode to that tool alone, since its match ignores case (1.19.4, `Wildcard.match`, `si`)
+ * Centralu's key for a tool's rules: new to every permission object it joins (`holdEnv`). Not the name in other
+ * letters: OpenCode's match ignores case on Windows only (`matcher`), so `BASH` is not `bash` on macOS or Linux.
  */
-const ownKey = (tool: string) => tool.toUpperCase()
+const ownKey = (tool: string) => `${tool}*`
 
 /** A permission with Centralu's rules after the person's, a key of theirs Centralu also sets moved to the end */
 const withRules = (p: unknown, rules: Obj): Obj => ({ ...Object.fromEntries(Object.entries(permissionOf(p)).filter(([k]) => !(k in rules))), ...rules })
@@ -168,7 +174,7 @@ const rulesOfValue = (v: unknown): Rules =>
   typeof v === 'string' ? [['*', v]] : Object.entries(asObj(v)).flatMap(([p, a]): Rules => (typeof a === 'string' ? [[p, a]] : []))
 
 /** A level's rules for a tool, under any key that names it, in the level's key order */
-const toolRules = (l: Obj, tool: string): Rules => Object.entries(l).filter(([key]) => matches(tool, key)).flatMap(([, v]) => rulesOfValue(v))
+const toolRules = (l: Obj, tool: string, matches: Match): Rules => Object.entries(l).filter(([key]) => matches(tool, key)).flatMap(([, v]) => rulesOfValue(v))
 
 /**
  * Rules as one object OpenCode reads in the same order: a later rule for a pattern moves to the end, and a later `*`
@@ -184,8 +190,16 @@ function inOrder(rules: Rules): Obj {
   return Object.fromEntries(out)
 }
 
-/** OpenCode's match of a permission name or pattern (1.19.4, `Wildcard.match`): `*` any run, `?` one character, any case */
-function matches(value: string, pattern: string): boolean {
-  const re = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')
-  return new RegExp(`^${re.endsWith(' .*') ? `${re.slice(0, -3)}( .*)?` : re}$`, 'si').test(value)
+type Match = (value: string, pattern: string) => boolean
+
+/**
+ * OpenCode's match of a permission name or pattern (1.19.4, `Wildcard.match`, read in its Windows, macOS and Linux
+ * builds): `*` any run, `?` one character; any case on Windows only (its flags are `si` there, `s` elsewhere)
+ */
+function matcher(platform: NodeJS.Platform): Match {
+  const flags = platform === 'win32' ? 'si' : 's'
+  return (value, pattern) => {
+    const re = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')
+    return new RegExp(`^${re.endsWith(' .*') ? `${re.slice(0, -3)}( .*)?` : re}$`, flags).test(value)
+  }
 }

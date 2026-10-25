@@ -20,9 +20,12 @@ function merge(a: unknown, b: unknown): unknown {
   return out
 }
 
-/** OpenCode's permission key and pattern match (`Wildcard.match`): `*` and `?`, any case */
-const glob = (value: string, pattern: string) =>
-  new RegExp(`^${pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`, 'si').test(value)
+/**
+ * OpenCode's permission key and pattern match (`Wildcard.match`, read in its Windows, macOS and Linux builds): `*` and
+ * `?`, any case on Windows only (its flags `si` there, `s` elsewhere)
+ */
+const glob = (platform: Platform, value: string, pattern: string) =>
+  new RegExp(`^${pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`, platform === 'win32' ? 'si' : 's').test(value)
 
 type Rule = { permission: string; pattern: string; action: string }
 const rules = (p: unknown): Rule[] =>
@@ -63,7 +66,7 @@ const NATIVE: Record<string, Obj> = {
  * `OPENCODE_PERMISSION` over the config's `permission`; an agent's rules are the defaults, its native ones, the
  * config's `permission`, then its own, and the last rule that matches decides
  */
-function decides(setup: Setup, env: Record<string, string>, agent: string, tool: string, pattern = 'x'): string {
+function decidesOn(platform: Platform, setup: Setup, env: Record<string, string>, agent: string, tool: string, pattern: string): string {
   const all = { ...setup.env, ...env }
   let s: Obj = {}
   for (const layer of setup.before ?? []) s = merge(s, decoded(layer)) as Obj
@@ -78,12 +81,32 @@ function decides(setup: Setup, env: Record<string, string>, agent: string, tool:
   }
   const own = isObj(s.agent) && isObj(s.agent[agent]) ? (s.agent[agent] as Obj) : {}
   const ruleset = [...rules(DEFAULTS), ...rules(NATIVE[agent] ?? {}), ...rules(s.permission ?? {}), ...rules(own.permission ?? {})]
-  return ruleset.findLast((r) => glob(tool, r.permission) && glob(pattern, r.pattern))?.action ?? 'ask'
+  return ruleset.findLast((r) => glob(platform, tool, r.permission) && glob(platform, pattern, r.pattern))?.action ?? 'ask'
+}
+
+type Platform = 'win32' | 'darwin' | 'linux'
+const PLATFORMS: Platform[] = ['win32', 'darwin', 'linux']
+
+/** Each env `envFor` made, with the one it made for each platform */
+const perPlatform = new WeakMap<object, Record<Platform, Record<string, string>>>()
+
+/**
+ * What OpenCode decides on every platform, with the env Centralu passes there; the platforms' answers when they differ,
+ * so no assertion passes on one platform's match alone (#1565 Mac re-check of 4ca7a9fda: keys `BASH` held only on Windows)
+ */
+function decides(setup: Setup, env: Record<string, string>, agent: string, tool: string, pattern = 'x'): string {
+  const envs = perPlatform.get(env)
+  const said = PLATFORMS.map((p) => decidesOn(p, setup, envs?.[p] ?? env, agent, tool, pattern))
+  return said.every((a) => a === said[0]) ? said[0]! : PLATFORMS.map((p, i) => `${p} ${said[i]}`).join(', ')
 }
 
 /** The configs the launch reads, for a setup: every layer, and the agents its files define */
 const seen = (setup: Setup): OpenCodeConfigs => ({ layers: [...(setup.before ?? []), ...(setup.after ?? [])], agentFiles: Object.keys(setup.files ?? {}) })
-const envFor = (preset: Parameters<typeof presetEnv>[0], setup: Setup = {}) => presetEnv(preset, setup.env ?? {}, seen(setup))
+function envFor(preset: Parameters<typeof presetEnv>[0], setup: Setup = {}): Record<string, string> {
+  const envs = Object.fromEntries(PLATFORMS.map((p) => [p, presetEnv(preset, setup.env ?? {}, seen(setup), p)])) as Record<Platform, Record<string, string>>
+  perPlatform.set(envs.darwin, envs)
+  return envs.darwin
+}
 const inline = (env: Record<string, string>) => JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? 'null') as Obj | null
 
 const SAFE_ASKS = ['edit', 'bash', 'webfetch', 'websearch']
@@ -226,12 +249,12 @@ describe('an ask under a subagent, which OpenCode never sends over ACP', () => {
     }
   })
 
-  it('holds each tool under a key OpenCode matches to that tool alone, not to one whose name starts the same', () => {
+  it('never loosens a tool whose name starts as a held one’s, which its key `bash*` also matches (review of the subagent fix)', () => {
     const setup = { before: [{ permission: { read_notes: 'deny', bash_server: 'allow' } }] }
     for (const preset of ['safe', 'normal'] as const) {
       const env = envFor(preset, setup)
-      expect(decides(setup, env, 'build', 'read_notes')).toBe('deny')
-      expect(decides(setup, env, 'build', 'bash_server')).toBe('allow')
+      for (const agent of ['build', 'general']) expect(decides(setup, env, agent, 'read_notes')).toBe('deny')
+      expect(decides(setup, env, 'build', 'bash_server')).toBe('ask')
       expect(decides(setup, env, 'build', 'bash')).toBe('ask')
     }
   })
