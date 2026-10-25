@@ -4,6 +4,9 @@ import { tmpdir } from 'node:os'
 import { join, win32 } from 'node:path'
 import { afterAll, describe, expect, it, vi } from 'vitest'
 import { APP_VERSION, type UpdateStatus } from '@cc/protocol'
+
+/** The release this build is in these tests: a source tree carries the placeholder 0.0.0-dev (#1501), older than all */
+const RELEASE = '0.1.0-beta.20'
 import { installedCopyVersionSource } from './os.js'
 import { resolveCommand } from './tool-launch.js'
 import { UpdateService, commandFor, failureDetail, installedCopyPath, readInstalledCopyVersion, runCommand, type LatestResult } from './updates.js'
@@ -27,6 +30,8 @@ function make(
     wait?: (ms: number) => Promise<void>
     now?: () => number
     schedule?: (fn: () => void, ms: number) => () => void
+    /** The version the build carries; RELEASE when not given, `null` for the build's own (`APP_VERSION`) */
+    current?: string | null
   } = {},
 ) {
   const published: UpdateStatus[] = []
@@ -36,6 +41,7 @@ function make(
   let fetches = 0
   let now = 1000
   const svc = new UpdateService((s) => published.push(s), {
+    ...(opts.current === null ? {} : { current: opts.current ?? RELEASE }),
     fetchLatest: async (timeoutMs): Promise<LatestResult> => {
       fetches++
       if (opts.fetchLatest) return opts.fetchLatest(timeoutMs)
@@ -133,7 +139,7 @@ describe('UpdateService', () => {
       expect(h.published).toContainEqual(expect.objectContaining({ phase: 'updating', error: notice }))
     })
 
-    it.each(['9999.0.0', APP_VERSION, '0.0.1'])('keeps the stored newer release when a stale edge returns %s (#636 review)', async (fresh) => {
+    it.each(['9999.0.0', RELEASE, '0.0.1'])('keeps the stored newer release when a stale edge returns %s (#636 review)', async (fresh) => {
       const h = make({ registry: '9999.0.1' })
       await h.svc.check(true)
       h.elapse(60_000)
@@ -148,9 +154,9 @@ describe('UpdateService', () => {
       const h = make({ registry: '9999.0.1' })
       await h.svc.check(true)
       h.elapse(6 * 3600_000)
-      h.offer(APP_VERSION)
+      h.offer(RELEASE)
       await h.svc.check(force)
-      expect(h.svc.current()).toMatchObject({ latest: APP_VERSION, newer: false, phase: 'idle' })
+      expect(h.svc.current()).toMatchObject({ latest: RELEASE, newer: false, phase: 'idle' })
       expect(h.calls).toEqual([])
     })
 
@@ -166,7 +172,7 @@ describe('UpdateService', () => {
       expect(h.svc.current().latest).toBe(target)
     })
 
-    it.each([APP_VERSION, '0.0.1'])('does not install when an old stored version is replaced by a fresh tag at %s (#636 rollback)', async (fresh) => {
+    it.each([RELEASE, '0.0.1'])('does not install when an old stored version is replaced by a fresh tag at %s (#636 rollback)', async (fresh) => {
       const h = make({ registry: '9999.0.1' })
       await h.svc.check(true)
       h.elapse(3600_001)
@@ -303,7 +309,8 @@ describe('UpdateService', () => {
    * published packages, checked by `tooling/brand.test.ts`.
    */
   it('the current version is the value the build carries', () => {
-    expect(make().svc.current().current).toBe(APP_VERSION)
+    expect(make({ current: null }).svc.current().current).toBe(APP_VERSION)
+    expect(make().svc.current().current).toBe(RELEASE)
   })
 
   it('reports it when the registry has something newer (does not install it)', async () => {
@@ -426,11 +433,11 @@ describe('UpdateService', () => {
    */
   describe('install with nothing newer known (#645)', () => {
     it.each([true, false])('refreshes first and answers up to date as a result, not a failure (automatic checks=%s)', async (auto) => {
-      const h = make({ registry: APP_VERSION })
+      const h = make({ registry: RELEASE })
       if (!auto) await h.svc.setAuto(false)
       const before = h.published.length
       const s = await h.svc.apply()
-      expect(s).toMatchObject({ phase: 'idle', latest: APP_VERSION, newer: false, error: null })
+      expect(s).toMatchObject({ phase: 'idle', latest: RELEASE, newer: false, error: null })
       expect(h.fetches).toBe(1)
       expect(h.calls).toEqual([])
       // "Checking…" while it looks, never "Installing…" or "Update failed"
@@ -438,7 +445,7 @@ describe('UpdateService', () => {
     })
 
     it('installs what the refresh finds when the stored answer said up to date', async () => {
-      const h = make({ registry: APP_VERSION })
+      const h = make({ registry: RELEASE })
       await h.svc.check(true)
       h.elapse(3600_000)
       h.offer('9999.0.1')

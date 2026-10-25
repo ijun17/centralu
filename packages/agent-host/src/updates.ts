@@ -82,6 +82,11 @@ export type LatestResult = { ok: true; version: string } | { ok: false; reason: 
  * not a test, it is a side effect. Everything else here is the real thing.
  */
 export type UpdateDeps = {
+  /**
+   * The version this build is: `APP_VERSION` when not given. Tests give a release, since a source tree carries the
+   * placeholder `0.0.0-dev` (#1501) and every release is newer than that
+   */
+  current?: string
   /** Ask the registry what `latest` points at */
   fetchLatest?: (timeoutMs: number) => Promise<LatestResult>
   /** Run a command to completion, rejecting with its stderr */
@@ -224,6 +229,7 @@ export class UpdateService {
     deps: UpdateDeps = {},
   ) {
     this.deps = {
+      current: deps.current ?? APP_VERSION,
       fetchLatest: deps.fetchLatest ?? fetchLatestFromRegistry,
       run: deps.run ?? runCommand,
       installedCopy: deps.installedCopy ?? existingInstalledCopy,
@@ -250,13 +256,13 @@ export class UpdateService {
       /*
        * The honest source for "which build is this".
        *
-       * `APP_VERSION` is what the app was compiled from, and `tooling/brand.test.ts`
-       * fails the build if it disagrees with the npm packages that carry it. The
-       * workspace root's package.json is not it — that one is private, has no version
-       * anyone installs, and would have read `0.0.0` forever without ever being wrong
-       * enough to notice.
+       * `APP_VERSION` is what the app was compiled from: the version a release stamped
+       * into the build with the npm packages that carry it (#1501, `tooling/brand.test.ts`),
+       * or the placeholder `0.0.0-dev` of a source tree. The workspace root's package.json
+       * is not it — that one is private, has no version anyone installs, and would have
+       * read `0.0.0` forever without ever being wrong enough to notice.
        */
-      current: APP_VERSION,
+      current: this.deps.current,
       latest: null,
       newer: false,
       auto: this.deps.readAuto(),

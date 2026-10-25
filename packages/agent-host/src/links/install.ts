@@ -308,8 +308,8 @@ function failure(target: string, code: string, detail: string): string {
     case 'dev_dirty':
       return `The working copy on ${target} has ${detail} uncommitted change${detail === '1' ? '' : 's'}; commit or stash them, or pass --allow-dirty to build them too. Nothing was built`
     case 'dev_base':
-      if (/^0\.0\.0-dev(?:\.|$)/.test(detail))
-        return `The working copy on ${target} carries no release version (${detail}): its version is stamped from a release tag at build time (#1501), which this dev build cannot do. Nothing was built`
+      if (!detail || /^0\.0\.0-dev(?:\.|$)/.test(detail))
+        return `The working copy on ${target} has no release tag (v*) reachable from its HEAD, which a dev build takes its version from (#1501); fetch the tags there (git fetch --tags) and try again. Nothing was built`
       return `The working copy on ${target} is version ${detail || '(none)'}; a dev build is cut from a prerelease (x.y.z-beta.N)`
     case 'dev_protocol': {
       const [have = '?', want = '?'] = detail.split(' ')
