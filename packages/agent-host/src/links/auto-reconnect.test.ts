@@ -1114,7 +1114,7 @@ describe("an agent's call that needs a machine whose link is down makes it conne
     await drop(r, { sshAnswers: true })
     const opens = r.tunnel.opens
     expect((await r.reader.projects()).away).toEqual([expect.objectContaining({ machineId: 'm1' })])
-    expect(await r.reader.findProjects('no-such-project')).toEqual([])
+    expect((await r.reader.projects({ ref: 'no-such-project' })).projects.filter((p) => p.name === 'no-such-project')).toEqual([])
     await pause(100)
     expect(r.tunnel.opens).toBe(opens)
     expect(r.hub.row().status).not.toBe('connected')

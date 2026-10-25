@@ -525,6 +525,56 @@ describe('a session the orchestrator creates', () => {
   })
 })
 
+/*
+ * #1547 re-check: create_session names a project as ask_project does (one tiered match, exact then any case, over this
+ * computer and the machines), and a qualified name speaks only of its own machine.
+ */
+describe('create_session by name across machines (#1547)', () => {
+  const desk = (name: string) => ({ id: 'm2.pd', name, machine: 'Desk', machineId: 'm2', path: '/d' })
+  const laptopDown = { machine: 'Laptop', machineId: 'm1', why: 'not reachable right now' }
+  const rig = (projects: object[], away: object[] = []) => {
+    store.projects.addProject({ id: 'p1', path: tmpdir(), name: 'site' })
+    host.createSession = vi.fn(async () => ({ ...session('new'), permissionPreset: 'safe' }) as SessionInfo)
+    host.firstTool = vi.fn(() => 'claude' as ToolName)
+    const createSession = vi.fn(async () => ({ ok: true as const, sessionId: 'm2.s', name: 's' }))
+    const lookups: unknown[] = []
+    linked = {
+      projects: async (need: unknown) => {
+        lookups.push(need)
+        return { projects, away }
+      },
+      createSession,
+      send: async () => ({ ok: true as const }),
+    } as unknown as LinkedSessions
+    return { createSession, lookups }
+  }
+
+  it("takes the machine's exact name before this computer's name in another case, as ask_project does", async () => {
+    const { createSession } = rig([desk('Site')])
+    expect(await orchestratorToolsFor(host, 'orch').createSession({ project: 'Site' })).toMatchObject({ ok: true })
+    expect(createSession).toHaveBeenCalledWith(expect.objectContaining({ id: 'm2.pd' }), expect.anything())
+  })
+
+  it("finds a machine's project in another case at once, without trying a machine that is down", async () => {
+    const { createSession, lookups } = rig([desk('Notes')], [laptopDown])
+    expect(await orchestratorToolsFor(host, 'orch').createSession({ project: 'notes' })).toMatchObject({ ok: true })
+    expect(createSession).toHaveBeenCalled()
+    expect(lookups).toHaveLength(1)
+  })
+
+  it('still refuses one name that is on this computer and on a machine, in the same case', async () => {
+    rig([desk('site')])
+    expect(await orchestratorToolsFor(host, 'orch').createSession({ project: 'site' })).toMatchObject({ ok: false, error: expect.stringContaining('More than one project is called that') })
+  })
+
+  it('a qualified name that is nowhere speaks only of its own machine, not of another that is down', async () => {
+    rig([desk('apps')], [laptopDown])
+    const r = await orchestratorToolsFor(host, 'orch').createSession({ project: 'Desk/typo' })
+    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('No such project') })
+    expect((r as { error: string }).error).not.toContain('Laptop')
+  })
+})
+
 // read_session said only role "user" for every message in, so a child's report or an app's text read as the person's (#838)
 describe('what read_session says of who wrote a line', () => {
   it('a line another session or an app sent carries its name; the person’s carries none', async () => {
