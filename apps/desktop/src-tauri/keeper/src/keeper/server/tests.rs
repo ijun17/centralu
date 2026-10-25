@@ -52,6 +52,27 @@ fn a_built_host_needs_the_app_version_and_the_keeper_reports_it() {
     assert_eq!(KeeperInfo::of_this_process(&dir, own_build(&by_hand)).version, crate::keeper::DEV_VERSION);
 }
 
+/// #1501 review: `run` itself refuses a built host without `--app-version`, before it touches the data
+/// folder. The folder here sits under a file, so a keeper that went on would fail creating it, with 1.
+#[test]
+fn a_keeper_told_a_built_host_without_the_app_version_does_not_start() {
+    let base = std::env::temp_dir().join(format!("ckr-usage-{}", std::process::id()));
+    fs::write(&base, b"a file, not a folder").unwrap();
+    let data = base.join("data");
+    let args = |extra: &[&str]| -> Vec<String> {
+        ["centralu-keeper", "--data-dir", data.to_str().unwrap(), "--host-source", "/nonexistent/0.2.0-beta.4/host"]
+            .iter()
+            .chain(extra)
+            .map(|s| s.to_string())
+            .collect()
+    };
+    assert_eq!(run(&args(&[])), EXIT_USAGE);
+    assert_eq!(run(&args(&["--app-version", "  "])), EXIT_USAGE);
+    // Told the version, it goes on, and here fails on the folder instead
+    assert_eq!(run(&args(&["--app-version", "0.2.0-beta.4"])), 1);
+    let _ = fs::remove_file(&base);
+}
+
 /// Step 5: only a keeper running from verified content takes the new build's content; one
 /// started directly hands over to the `centralu-keeper` it is given, exactly as before (a debug
 /// build, Linux, the window's fallback, a keeper of #444).

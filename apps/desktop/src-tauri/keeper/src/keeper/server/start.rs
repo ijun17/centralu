@@ -56,6 +56,10 @@ pub(in crate::keeper) fn missing_option(o: &Options) -> Option<&'static str> {
         .then_some("--host-source without --app-version: the app's version is not compiled in, so a keeper running a built host must be told it")
 }
 
+/// The exit code of a keeper started with options it cannot run with (`missing_option`), told apart
+/// from 1 (could not start) and 3 (another keeper holds the folder)
+pub(in crate::keeper) const EXIT_USAGE: i32 = 2;
+
 /// The keeper's entry point. Returns the process exit code.
 pub fn run(args: &[String]) -> i32 {
     // Before anything opens a descriptor; a keeper that takes over from another raises its own.
@@ -73,7 +77,7 @@ pub fn run(args: &[String]) -> i32 {
     }
     if let Some(why) = missing_option(&opts) {
         log(&format!("not starting: {why}"));
-        return 1;
+        return EXIT_USAGE;
     }
     // Started by another keeper to take its place (step 4): everything comes from that keeper.
     if let Some(fd) = opts.take_over_fd {

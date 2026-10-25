@@ -73,7 +73,7 @@ pub use self::start::{parse_args, run, Options};
 pub(super) use self::host::{launcher, sink};
 pub(super) use self::start::{log_origin, own_build, record_lock_holder};
 #[cfg(test)]
-use self::start::missing_option;
+use self::start::{missing_option, EXIT_USAGE};
 pub(super) use self::switch::{begin_switch, host_dirs_in_use};
 pub(super) use self::windows::{adopt_window, WINDOW_WRITE_TIMEOUT};
 // What the moved parts name as `super::…` (the keeper module itself).
