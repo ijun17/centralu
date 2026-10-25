@@ -380,6 +380,7 @@ export class MockPlatform implements Platform {
   get hubAutoOff() { return this.machinesMock.hubAutoOff }
   get reconnectPlan() { return this.machinesMock.reconnectPlan }
   set reconnectPlan(value: MachinesMock['reconnectPlan']) { this.machinesMock.reconnectPlan = value }
+  finishReconnect(...args: Parameters<MachinesMock['finishReconnect']>): void { this.machinesMock.finishReconnect(...args) }
 
   // git.ts
   get gitDiffCalls() { return this.gitMock.gitDiffCalls }

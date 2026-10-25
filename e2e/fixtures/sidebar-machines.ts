@@ -247,6 +247,7 @@ export function sidebarMachinesTests(): void {
       await addOn(page, 'box', '/home/me/api')
       const menu = page.getByTestId('project-menu-open-api')
       const reconnect = page.getByTestId('reconnect-api')
+      const result = page.getByTestId('reconnect-result-api')
       const open = async () => {
         await page.getByTestId('project-menu-api').click()
         await expect(menu).toBeVisible()
@@ -262,24 +263,32 @@ export function sidebarMachinesTests(): void {
         await page.keyboard.press('Escape')
       })
 
-      await test.step('not connected: Reconnect is the first row of the menu', async () => {
+      await test.step('not connected: Reconnect is the first row of the menu, with no result from before standing under it', async () => {
         await setMachine(page, 'box', { status: 'unreachable', error: 'ssh: connect to host box port 22: Operation timed out' })
         await open()
         await expect(reconnect).toHaveText('Reconnect')
         await expect(reconnect).toBeEnabled()
         await expect(menu.getByRole('menuitem').first()).toHaveAttribute('data-testid', 'reconnect-api')
+        // The machine's old error is not the answer to a press that has not been made
+        await expect(result).toHaveText('')
       })
 
-      await test.step('a failed attempt: connecting, the menu stays open, then the reason in plain words and Reconnect again', async () => {
+      await test.step('a failed attempt: connecting (held), the menu stays open and keeps the focus on the row, then the reason in plain words', async () => {
         await page.evaluate(() => {
-          ;(window as unknown as MockWindow).__mock.reconnectPlan = { afterMs: 600, status: 'refused', error: 'box@box: Permission denied (publickey).' }
+          ;(window as unknown as MockWindow).__mock.reconnectPlan = { status: 'refused', error: 'box@box: Permission denied (publickey).' }
         })
-        await reconnect.click()
+        await reconnect.focus()
+        await page.keyboard.press('Enter')
         await expect(reconnect).toHaveText('Connecting…')
-        await expect(reconnect).toBeDisabled()
+        await expect(reconnect).toHaveAttribute('aria-disabled', 'true')
+        await expect(reconnect).toBeFocused()
         await expect(menu).toBeVisible()
-        await expect(page.getByTestId('reconnect-result-api')).toHaveCount(0)
-        await expect(page.getByTestId('reconnect-result-api')).toContainText('Could not connect: Box did not accept your ssh key')
+        await expect(result).toHaveText('')
+        // Pressed again while it tries: nothing more is asked
+        await reconnect.click({ force: true })
+        expect(await page.evaluate(() => (window as unknown as MockWindow).__mock.machinesList.filter((m: { status: string }) => m.status === 'connecting').length)).toBe(1)
+        await page.evaluate(() => (window as unknown as MockWindow & { __mock: { finishReconnect(id: string): void } }).__mock.finishReconnect('box'))
+        await expect(result).toContainText('Could not connect: Box did not accept your ssh key')
         await expect(reconnect).toHaveText('Reconnect')
         await expect(reconnect).toBeEnabled()
         await expect(menu).toBeVisible()
@@ -287,10 +296,13 @@ export function sidebarMachinesTests(): void {
 
       await test.step('a good attempt: connecting, then the menu closes and the badge is solid', async () => {
         await page.evaluate(() => {
-          ;(window as unknown as MockWindow).__mock.reconnectPlan = { afterMs: 600, status: 'connected', error: null }
+          ;(window as unknown as MockWindow).__mock.reconnectPlan = { status: 'connected', error: null }
         })
         await reconnect.click()
         await expect(reconnect).toHaveText('Connecting…')
+        await expect(result).toHaveText('')
+        await expect(menu).toBeVisible()
+        await page.evaluate(() => (window as unknown as MockWindow & { __mock: { finishReconnect(id: string): void } }).__mock.finishReconnect('box'))
         await expect(menu).toHaveCount(0)
         await expect(page.getByTestId('project-machine-api')).toHaveAttribute('data-status', 'connected')
         await open()

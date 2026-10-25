@@ -50,12 +50,20 @@ describe('Reconnect in a project menu', () => {
     expect(render(machine({ status: 'stopped' }))).toContain('>Start<')
   })
 
-  it('shows it is connecting, and cannot be pressed again, while an attempt is under way', () => {
+  it('shows it is connecting, and cannot be pressed again, while an attempt is under way; it stays focusable', () => {
     for (const status of ['connecting', 'starting', 'updating'] as const) {
       const html = render(machine({ status }))
       expect(html).toContain('Connecting…')
-      expect(html).toContain('disabled=""')
+      expect(html).toContain('aria-disabled="true"')
+      expect(html).not.toContain(' disabled=""')
     }
+  })
+
+  it('tells no result before the person has pressed it, whatever error the machine holds from before', () => {
+    const html = render(machine({ status: 'refused', error: 'box@box: Permission denied (publickey).' }))
+    expect(html).toContain('data-testid="reconnect-result-api"')
+    expect(html).not.toContain('Could not connect')
+    expect(html).not.toContain('ssh key')
   })
 
   it('is not pressable while an install or update runs there, and says why', () => {

@@ -1,4 +1,4 @@
 {
-  "bytes": 1500,
-  "reason": "Reconnect in the menu of a project whose machine is away (#1533): one menu row component with its connecting and failed states, and the menu's keyboard hand-over into and out of the body (#1531). Measured against main at 0d7fc67c0 (1,905,210 B): +1,849 B in all, of which the portaled menu's Tab handling is 455 B (#1531) and the row 1,394 B, all in the main chunk. Main sits 490 B under the ceiling, so any UI change over that needs a declaration; this one is plain components and strings with no dependency, and lazy loading would not lower the total, which counts every chunk."
+  "bytes": 1900,
+  "reason": "Reconnect in the menu of a project whose machine is away (#1533): one menu row component with its connecting and failed states, and the menu's keyboard hand-over into and out of the body (#1531). Measured against main at 0d7fc67c0 (1,905,210 B): +2,375 B in all, of which the portaled menu's Tab handling is 455 B (#1531) and the row with its pending state 1,920 B, all in the main chunk. Main sits 490 B under the ceiling, so any UI change over that needs a declaration; this one is plain components and strings with no dependency, and lazy loading would not lower the total, which counts every chunk."
 }

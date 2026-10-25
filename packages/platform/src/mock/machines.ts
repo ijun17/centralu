@@ -28,11 +28,19 @@ export class MachinesMock {
   /** Each mock machine's "Allow auto from a linked computer" (#1273): on unless a test turned it off */
   hubAutoOff = new Set<string>()
   /**
-   * How a Connect that finds the machine not connected ends (#1533): it stands as `connecting` for `afterMs`, then moves to
-   * `status` with `error` (a failed attempt keeps its reason). Unset: the mock's old rule, a disconnected machine connects at
-   * once and any other state stays as it is
+   * How a Connect that finds the machine not connected ends (#1533): the machine stands as `connecting`, then moves to
+   * `status` with `error` (a failed attempt keeps its reason) after `afterMs`, or, with no `afterMs`, when the test calls
+   * `finishReconnect` (so it can look at the connecting state for as long as it needs). Unset: the mock's old rule, a
+   * disconnected machine connects at once and any other state stays as it is
    */
-  reconnectPlan: { afterMs: number; status: MachineInfo['status']; error: string | null } | null = null
+  reconnectPlan: { afterMs?: number; status: MachineInfo['status']; error: string | null } | null = null
+  private heldReconnects = new Map<string, () => void>()
+  /** Ends an attempt the plan held, as its plan says */
+  finishReconnect(machineId: string): void {
+    const end = this.heldReconnects.get(machineId)
+    this.heldReconnects.delete(machineId)
+    end?.()
+  }
   machineRow(id: string, patch: Partial<MachineInfo>): MachineInfo {
     const at = this.machinesList.findIndex((m) => m.id === id)
     const current = this.machinesList[at]
@@ -115,9 +123,11 @@ export class MachinesMock {
       const plan = this.reconnectPlan
       if (plan && was !== undefined && was !== 'connected') {
         const row = this.machineRow(machineId, { status: 'connecting', error: null })
-        setTimeout(() => {
+        const end = () => {
           if (this.machinesList.some((m) => m.id === machineId)) this.machineRow(machineId, { status: plan.status, error: plan.error })
-        }, plan.afterMs)
+        }
+        if (plan.afterMs === undefined) this.heldReconnects.set(machineId, end)
+        else setTimeout(end, plan.afterMs)
         return row
       }
       return this.machineRow(machineId, was === 'disconnected' ? { status: 'connected', error: null } : {})
