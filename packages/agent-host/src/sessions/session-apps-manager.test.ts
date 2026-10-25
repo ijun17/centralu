@@ -136,7 +136,7 @@ describe('apps handed to a session by the manager (decision 4)', () => {
    * under auto the CLI never asks about it. The gate is in the call itself, so it holds on both CLIs and under every preset.
    */
   it('in a session’s request an app tool of the orchestrator asks the person, naming the session, and a refused call never reaches the app', async () => {
-    mgr.useMail({ askedBy: () => ({ threadId: 'hub-aaaaaaaa.t_01', name: 'Fix login', project: 'Acme', trusted: true }), sessionGone: () => {}, sessionChanged: () => {} })
+    mgr.useMail({ askedBy: () => ({ threadId: 'hub-aaaaaaaa.t_01', sessionId: 'asker', turn: 1, name: 'Fix login', project: 'Acme', trusted: true }), sessionGone: () => {}, sessionChanged: () => {} })
     const orc = await mgr.orchestrator()
     const apps = adapter.last().apps!
     const card = () => {

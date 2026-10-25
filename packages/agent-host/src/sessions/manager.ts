@@ -428,6 +428,15 @@ export class SessionManager {
         return answer === null ? null : answer === 'deny' ? 'deny' : 'allow'
       },
       cover: (id, run, signal) => this.hostCards.cover(id, run, signal),
+      reach: (sessionId) => {
+        const m = this.meta.get(sessionId)
+        const folders = [this.store.sessions.sessionCwd(sessionId), m?.projectId ? this.projectRegistry.cwdOf(m.projectId) : null, m?.worktree?.path, ...(this.readGrants.get(sessionId) ?? [])]
+        return { folders: folders.filter((f): f is string => typeof f === 'string' && f !== ''), project: m?.projectId ?? null }
+      },
+      projectOf: (sessionId) => {
+        const m = this.meta.get(sessionId)
+        return m ? (m.projectId ?? null) : undefined
+      },
     })
     this.linkedReports = new LinkedReports(this.parts())
     this.starts = new SessionStarts(this.parts())
@@ -2088,7 +2097,7 @@ export class SessionManager {
       agentSession: (...a) => self.agentSession(...a),
       mailTool: (id, args) => self.mailHooks?.tool?.(id, args) ?? { text: 'The mailbox is not available.', isError: true },
       whenAsked: (id, call, signal, run, refused) => self.askedGate.when(id, call, signal, run, refused),
-      requestTurn: (id) => ({ active: () => self.askedGate.active(id), ask: (tool, input, signal) => self.askedGate.askCli(id, tool, input, signal) }),
+      requestTurn: (id) => ({ active: () => self.askedGate.active(id), ask: (tool, input, signal) => self.askedGate.askCli(id, tool, input, signal), askRead: (tool, input, signal) => self.askedGate.askCliRead(id, tool, input, signal) }),
       compactSelf: (id, focus) => self.selfCompaction.request(id, focus),
       compactTurn: (id) => self.selfCompaction.compactTurn(id),
       compactEvent: (e, ended) => {

@@ -469,19 +469,28 @@ through it unasked). A request's turn is refused, without a question, the tools 
 (`OUTLIVES_THE_TURN`) and a command started in the background, since the person's card belongs to the turn and what they start would run later with no asker. The card shows a step of the CLI's own whole (a
 file's content, an edit's text, a message), refusing one over 6,000 characters; only Centralu's own tools have their long free text cut. The Allow is for that one step: the
 cards the step would raise itself meanwhile are covered by it (`HostCards.cover`, kept by the call's own async work and ended with the call or its signal), so there is one
-card, and no "always" is offered or kept; an Allow that arrives after the request's turn ended runs nothing. The card shows every argument whole except long free text,
-which is cut and says how long it was; a step too long to show whole is refused, not asked about in part. Whose request the turn is is fixed when the turn begins
+card, and no "always" is offered or kept; an Allow that arrives after the turn it was asked in ended (also when the thread's next turn has begun) runs nothing. The card shows every argument whole except long free text of
+Centralu's own tools, which is cut and says how long it was; a step too long to show whole is refused, not asked about in part. **What a request's turn reads, and who reads it after.** Reading needs
+no card, but the orchestrator answers in the asking session's thread and the session reads the answer, so a read could hand the asker what it cannot read itself. Reads stay free. The host
+remembers, for the turn, the first read that the asker could not make (`sessions/asked-reach.ts`): a file outside the asker's folders (its working folder, its project's folder, its worktree, what another
+project handed it back; a relative path, a pattern aimed elsewhere or a path that climbs out counts as outside), a conversation of another project (`read_session`, `agent_session`
+status), and anything across projects (`recall`, `list_sessions`, `list_archive`). From then on a word the orchestrator writes into the request's thread (`reply`, `update`, `close`) raises the person's
+card with the whole text, naming the asker and the read; Deny sends nothing, and a text too long for the card is refused. Marking the thread handled, and mail to the person, stay free. What the
+turn has read is of that turn: the next turn of the thread starts clean. This replaces "read grants never move across" (§9.7, "What it does not grant") with a gate on the one way back, the reply.
+Under a preset that asks about a read, a read the CLI itself asks about in a request's turn is the host's card (Allow or Deny, naming the session), not the CLI's own with its "always". Whose request the turn is is fixed when the turn begins
 (`MailTurns`), so the session going to the trash, or the thread passing to the person, does not lift the gate or unhide a held request. A turn that is not a request (the person's,
 or a thread the person gave) is as it was. **Where the orchestrator's tool cannot put each step of its own to the host** (`gatesSteps`; Codex, whose per-turn approval policy
 is not yet measured here), a session cannot ask the orchestrator at all, in a thread it opened before as well: the write is refused with a reason, because its shell and edits could not be put to the person.
 **Not covered, and named:** a turn that a relayed report starts (the old path of a kept process) belongs to no thread, so a request's words do not reach it; an app tool its app marks read-only
 (`readOnlyHint`) is not asked about, on the app's word, as for every session; `read_session` and `recall` of the asking session show what it wrote, so the words are reachable by them in any turn
-(reading needs no card, §9.7); a turn that an old build's kept process was already in when this build took it over has no hook until it restarts; the output of a command the person allowed can start a turn of the CLI's own
+(reading needs no card, §9.7); a step whose card would pass 6,000 characters (a `Write` of more than about 6 KB) is refused, with no way through but smaller parts; what a request's turn has read is kept in memory, so a host
+swap in the middle of the turn forgets it; a turn that an old build's kept process was already in when this build took it over has no hook until it restarts; the output of a command the person allowed can start a turn of the CLI's own
 later, as the output of any command can (a command started in the background is refused in a request's turn, since it would start that turn on purpose). (3) Limits:
 a request from a project nobody trusted is held (`policy`) until the person releases it in the Inbox, and `mail inbox` and `mail read` show the orchestrator none of
 its words meanwhile, whether or not the hold is written yet, while marking it handled, answering and closing it are refused; one request is open at a time and at most 5 words an hour (a request's first word and every word written into it after, so a follow-up in an answered request is no way round the
 limit), both counted over the sessions of the asker's project and the sessions under its root session, so starting sessions does not multiply them (a refusal names the open
-request only when it is the session's own). Nothing moves across with the answer: the asking session gets back only what the orchestrator posts in the thread, and the end of the
+request only when it is the session's own). The sessions the orchestrator itself started are not one group: the walk up to the root stops before the orchestrator, so its sessions in
+other projects each have their own request and their own five an hour. Nothing moves across with the answer: the asking session gets back only what the orchestrator posts in the thread, and the end of the
 orchestrator's turn is reported in Centralu's words alone, never with the orchestrator's last response (which may be addressed to the person) or a pointer to its conversation. A linked machine's sessions asking the hub's orchestrator are slice 4's (§9.7, "Linked machines").
 
 `handoff_session` (#694) is the orchestrator's alone, and among its commands the one that acts on another session's

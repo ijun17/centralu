@@ -154,6 +154,11 @@ export class MailTurns {
     return turn && { by: turn.by, threadId: turn.threadId, ...(turn.askedBy ? { askedBy: turn.askedBy } : {}) }
   }
 
+  /** The number of the turn that is going in the session (it grows with every turn, so it tells one turn of a thread from the next); none when no turn is recorded */
+  numberOf(sessionId: string): number | undefined {
+    return this.open.get(sessionId)?.seq
+  }
+
   /**
    * The thread of the session's turn that is going, or else of the one that ended last: the end of a turn is reported once it ends, and the
    * report belongs to that turn's thread whichever of the two the report is made in

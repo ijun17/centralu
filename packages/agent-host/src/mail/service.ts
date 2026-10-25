@@ -73,7 +73,7 @@ export type MailPolicy = {
   /** Whether `address` is the Centralu orchestrator's mailbox: the one a session of this host may open a thread with (§9.7, #1447) */
   isOrchestrator?(address: string): boolean
   /**
-   * The project and the root session of a session that can ask (§9.7): the root is the first session of the chain that started it. The limits of
+   * The project and the root session of a session that can ask (§9.7): the root is the first session of the chain that started it, short of the orchestrator (which starts sessions everywhere). The limits of
    * asking count over the sessions that share either, so starting more sessions does not buy more asks. Null for an address that is not a session here
    */
   askGroup?(address: string): { project: string | null; root: string } | null
@@ -1733,20 +1733,24 @@ id: ${sessionIdOf(assignee)}` : ''
       throw refuse('not_allowed', `you already have a request open with the orchestrator (thread ${open.id}): wait for its answer (a request from a project nobody trusted waits for the person to release it), or close that thread first`, { thread: open.id })
     }
     if (open) {
-      throw refuse('not_allowed', 'a request from another session of your project, or under the same root session, is open with the orchestrator: wait for its answer, or ask the person')
+      const why = this.sharedWith(caller, open.owner) === 'project' ? 'another session of your project' : 'a session started by the same session as yours'
+      throw refuse('not_allowed', `a request from ${why} is open with the orchestrator: wait for its answer, or ask the person`)
     }
     this.checkAskRate(mine, now)
   }
 
   /** The requests to the orchestrator of the sessions that share the caller's project or root session, the caller's own included */
   private groupAsks(caller: string, orchestrator: string): ThreadRow[] {
-    const group = this.policy.askGroup?.(caller)
-    const sameGroup = (owner: string): boolean => {
-      if (owner === caller) return true
-      const other = group ? this.policy.askGroup?.(owner) : null
-      return !!group && !!other && ((group.project !== null && other.project === group.project) || other.root === group.root)
-    }
-    return this.records.threadsOfParty(orchestrator, 'assignee').filter((t) => this.isAsk(t) && sameGroup(t.owner))
+    return this.records.threadsOfParty(orchestrator, 'assignee').filter((t) => this.isAsk(t) && (t.owner === caller || this.sharedWith(caller, t.owner) !== null))
+  }
+
+  /** What two sessions' requests are counted together by: the same project, or the same root session (see `MailPolicy.askGroup`) */
+  private sharedWith(caller: string, other: string): 'project' | 'root' | null {
+    const a = this.policy.askGroup?.(caller)
+    const b = a ? this.policy.askGroup?.(other) : null
+    if (!a || !b) return null
+    if (a.project !== null && b.project === a.project) return 'project'
+    return b.root === a.root ? 'root' : null
   }
 
   /**

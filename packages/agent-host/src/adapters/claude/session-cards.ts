@@ -63,6 +63,16 @@ export class ClaudeCards {
     if (isOrchestratorTool(toolName) && this.host.ownServer()) {
       return { behavior: 'allow' as const, updatedInput: toolInput }
     }
+    /*
+     * **A read the CLI itself asks about, in a session's request** (§9.7): a file outside the working folder under a preset that asks. The card is the
+     * host's, which names the session that asked and offers Allow or Deny only; the CLI's own would not name it and would offer "always". A read the CLI
+     * does not ask about never gets here, and is free.
+     */
+    const request = this.host.opts.requestTurn
+    if (request && READ_TOOLS.has(toolName) && request.active()) {
+      const answer = await request.askRead(toolName, toolInput, options?.signal)
+      return answer.allowed ? { behavior: 'allow' as const, updatedInput: toolInput } : { behavior: 'deny' as const, message: answer.message }
+    }
     if (preset === 'auto' && toolName !== 'AskUserQuestion') {
       return {
         behavior: 'deny' as const,

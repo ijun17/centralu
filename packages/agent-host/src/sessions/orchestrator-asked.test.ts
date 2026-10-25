@@ -226,10 +226,11 @@ describe('in the turn a request starts, every step that changes something asks t
   it('reading and answering in the thread need no card; mail to anyone else does', async () => {
     const { asker, other } = await asked()
     const thread = w.store.mail.threadsOfParty(mail.sessionAddress(asker.id), 'owner')[0]!
-    expect(await settled(w.mgr.runOrchestratorTool(orc.id, 'list_sessions', {}))).toMatchObject({ text: expect.stringContaining(other.id) })
     expect(await settled(run('mail', { action: 'inbox' }))).toMatchObject({ text: expect.stringContaining(thread.id) })
     const reply = await settled(run('mail', { action: 'reply', thread: thread.id, text: 'done: it is renamed' }))
     expect(reply).toMatchObject({ text: expect.stringContaining('Posted') })
+    // Reading is free (what it read can matter to the answer after it: see the test on reads out of the asker's reach)
+    expect(await settled(w.mgr.runOrchestratorTool(orc.id, 'list_sessions', {}))).toMatchObject({ text: expect.stringContaining(other.id) })
     expect(card()).toBeUndefined()
 
     // A word to another session, or to a thread that is not this request, is a step that reaches someone: it asks
@@ -239,6 +240,36 @@ describe('in the turn a request starts, every step that changes something asks t
     w.mgr.respondApproval(orc.id, card()!.requestId, 'deny')
     expect((await sent).isError).toBe(true)
     expect(w.store.mail.threadsOfParty(mail.sessionAddress(orc.id), 'owner')).toEqual([])
+  })
+
+  it('an answer after a read the asker could not make asks the person with its words, naming the asker; a read in its reach does not', async () => {
+    const { asker, other } = await asked()
+    const thread = w.store.mail.threadsOfParty(mail.sessionAddress(asker.id), 'owner')[0]!
+    const words = () => w.store.mail.messagesAfter(thread.id, 0).filter((m) => m.sender === mail.sessionAddress(orc.id)).map((m) => m.body)
+    // A conversation of the asker's own project: reading it hands the asker nothing new
+    expect(await settled(w.mgr.runOrchestratorTool(orc.id, 'read_session', { sessionId: other.id }))).not.toBe('pending')
+    expect(await settled(run('mail', { action: 'reply', thread: thread.id, text: 'first answer' }))).toMatchObject({ text: expect.stringContaining('Posted') })
+    expect(card()).toBeUndefined()
+
+    // A conversation of another project: the answer in the thread is put to the person first
+    const elsewhere = await project('Elsewhere', true)
+    const foreign = await sessionIn(elsewhere)
+    expect(await settled(w.mgr.runOrchestratorTool(orc.id, 'read_session', { sessionId: foreign.id }))).not.toBe('pending')
+    const reply = run('mail', { action: 'reply', thread: thread.id, text: 'the other project said: hunter2' })
+    await eventually(() => !!card())
+    expect(card()!.text).toContain(`Session ${JSON.stringify(asker.name)} in project`)
+    expect(card()!.text).toContain('the other project said: hunter2')
+    expect(card()!.text).toContain(`read_session of ${JSON.stringify(foreign.id)}`)
+    w.mgr.respondApproval(orc.id, card()!.requestId, 'deny')
+    expect((await reply).isError).toBe(true)
+    expect(words().join(' ')).not.toContain('hunter2')
+
+    // Allowed, it is sent
+    const again = run('mail', { action: 'reply', thread: thread.id, text: 'the other project said: hunter2' })
+    await eventually(() => !!card())
+    w.mgr.respondApproval(orc.id, card()!.requestId, 'allow')
+    expect((await again).isError).toBeFalsy()
+    expect(words().join(' ')).toContain('hunter2')
   })
 
   it('the turn’s end is reported to the session that asked, and the next step is the orchestrator’s own again', async () => {

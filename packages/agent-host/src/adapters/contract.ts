@@ -60,6 +60,11 @@ export type RequestTurn = {
    * would outlive the turn (a subagent, a scheduled prompt): it is refused, since the person's card belongs to the turn
    */
   ask(tool: string, input: Record<string, unknown>, signal?: AbortSignal): Promise<RequestTurnAnswer>
+  /**
+   * The CLI is itself about to ask the person about a read (a file outside its working folder, in a preset that asks): the card is the host's, naming who
+   * asked, with Allow or Deny only, instead of the CLI's own with its "always"
+   */
+  askRead(tool: string, input: Record<string, unknown>, signal?: AbortSignal): Promise<RequestTurnAnswer>
 }
 
 export type CreateSessionOpts = {

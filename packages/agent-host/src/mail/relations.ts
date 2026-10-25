@@ -50,11 +50,12 @@ export function mailRelations(host: RelationsHost): MailPolicy {
       const t = parseAddress(address)
       const s = t?.kind === 'session' ? host.session(t.sessionId) : undefined
       if (t?.kind !== 'session' || !s) return null
-      // The session that started it, and the one that started that: a session that can start agents cannot multiply its own limits
+      // The session that started it, and the one that started that: a session that can start agents cannot multiply its own limits. The walk stops
+      // before the orchestrator: it starts sessions in every project, so they are not one group (only their project is)
       let root = t.sessionId
       for (let i = 0; i < 16; i++) {
         const up = host.session(root)?.askedBy
-        if (!up || !host.session(up)) break
+        if (!up || !host.session(up) || host.session(up)?.kind === 'orchestrator') break
         root = up
       }
       return { project: s.projectId ?? null, root }

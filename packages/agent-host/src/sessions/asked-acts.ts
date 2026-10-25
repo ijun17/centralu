@@ -114,13 +114,15 @@ function argsLine(args: Record<string, unknown>, cut: boolean): string {
 }
 
 /** What the person is asked to allow: the step as one line, or that it does not fit a card */
-export type AskedStep = { act: string } | { tooLong: true }
+export type AskedStep = { act: string; afterRead?: true } | { tooLong: true }
 
 /**
  * What the person is asked to allow, or null when the call needs no card. `thread` is the thread of the turn (the session's request): a post
- * in it is the answer, and needs no card; a post in another thread, or mail to anyone but the person, reaches someone else and asks
+ * in it is the answer, and needs no card; a post in another thread, or mail to anyone but the person, reaches someone else and asks.
+ * `reached` says what the turn read that the asking session could not read itself (`AskedGate`): after that the answer in the thread asks too, with
+ * its words shown whole, since it could carry what was read to the session
  */
-export function askedAct(name: string, args: Record<string, unknown>, thread: string): AskedStep | null {
+export function askedAct(name: string, args: Record<string, unknown>, thread: string, reached: string | null = null): AskedStep | null {
   if (READS.has(name)) return null
   if (name === 'update_centralu' && args.action === 'check') return null
   if (name === 'agent_session' && typeof args.action === 'string' && AGENT_READS.has(args.action)) return null
@@ -128,9 +130,18 @@ export function askedAct(name: string, args: Record<string, unknown>, thread: st
     const action = args.action
     if (action === 'inbox' || action === 'read') return null
     // Answering, and marking handled, in the request's own thread; marking another thread handled would keep the orchestrator from being woken for it
-    if ((action === 'reply' || action === 'update' || action === 'close' || action === 'handled') && args.thread === thread) return null
+    if ((action === 'reply' || action === 'update' || action === 'close' || action === 'handled') && args.thread === thread) {
+      if (reached === null || action === 'handled') return null
+      const act = `answer it; this turn made a read the session could not make itself (${reached}): run mail ${argsLine(args, false)}`
+      return act.length > CLI_ACT_MAX ? { tooLong: true } : { act, afterRead: true }
+    }
     if (action === 'send' && typeof args.to === 'string' && args.to.trim() === 'person') return null
   }
+  return stepOf(name, args)
+}
+
+/** The step as the card shows it, whatever the call is: `run <name> <arguments>`, or that it does not fit */
+export function stepOf(name: string, args: Record<string, unknown>): AskedStep {
   const cli = isCliTool(name)
   const shown = argsLine(args, !cli)
   const act = `run ${name} ${shown === '{}' ? '' : shown}`.trim()

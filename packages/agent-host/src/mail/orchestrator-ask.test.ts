@@ -20,11 +20,11 @@ const ORCH = a('orch')
 const ASKER = a('asker')
 const OTHER = a('other')
 
-const kinds: Record<string, 'worker' | 'orchestrator'> = { orch: 'orchestrator', asker: 'worker', other: 'worker', worker: 'worker', mate: 'worker', child: 'worker', grandchild: 'worker' }
+const kinds: Record<string, 'worker' | 'orchestrator'> = { orch: 'orchestrator', asker: 'worker', other: 'worker', worker: 'worker', mate: 'worker', child: 'worker', grandchild: 'worker', x: 'worker', y: 'worker' }
 /** The project of a session, where it has one: `asker` and `mate` share one, `other` and `worker` are each in their own */
-const projects: Record<string, string> = { asker: 'p1', mate: 'p1', other: 'p2', worker: 'p3' }
-/** Who started a session: `child` was started by `asker`, `grandchild` by `child` */
-const startedBy: Record<string, string> = { child: 'asker', grandchild: 'child' }
+const projects: Record<string, string> = { asker: 'p1', mate: 'p1', other: 'p2', worker: 'p3', x: 'p4', y: 'p5' }
+/** Who started a session: `child` was started by `asker`, `grandchild` by `child`; `x` and `y`, in two projects, by the orchestrator */
+const startedBy: Record<string, string> = { child: 'asker', grandchild: 'child', x: 'orch', y: 'orch' }
 
 function world(over: { untrusted?: Set<string> } = {}) {
   const store = new Store()
@@ -335,6 +335,37 @@ describe('the limits count over a project and over a root session, not over one 
     // `child` was started by `asker`, `grandchild` by `child`; neither is in a project
     expect(reasonOf(() => ask(w, CHILD))).toBe('not_allowed')
     expect(reasonOf(() => ask(w, GRANDCHILD))).toBe('not_allowed')
+  })
+
+  it('but not over everything the orchestrator started: its sessions in other projects are no one group', () => {
+    const w = world()
+    w.mail.update(ask(w, a('x')).thread.id, ORCH, { state: 'review' })
+    // `y` is in another project and was started by the same orchestrator: not in x's way, and its asks are counted apart
+    expect(ask(w, a('y')).thread.owner).toBe(a('y'))
+    for (let i = 0; i < ASKS_PER_HOUR - 1; i++) {
+      w.clock.t += 60_000
+      const { thread } = ask(w, a('x'), `again ${i}`)
+      w.mail.update(thread.id, ORCH, { state: 'review' })
+    }
+    expect(reasonOf(() => ask(w, a('x')))).toBe('rate_limited')
+    w.mail.update(w.store.mail.threadsOfParty(a('y'), 'owner')[0]!.id, ORCH, { state: 'review' })
+    expect(ask(w, a('y'), 'one more').thread.owner).toBe(a('y'))
+  })
+
+  it('a refusal names the real reason: the same project, or the same session that started them', () => {
+    const w = world()
+    ask(w)
+    const why = (fn: () => unknown): string => {
+      try {
+        fn()
+      } catch (e) {
+        return (e as Error).message
+      }
+      return ''
+    }
+    expect(why(() => ask(w, MATE))).toContain('another session of your project')
+    expect(why(() => ask(w, CHILD))).toContain('started by the same session')
+    expect(why(() => ask(w, CHILD))).not.toContain('your project')
   })
 
   it('at most 5 new requests an hour over the sessions of a project', () => {
