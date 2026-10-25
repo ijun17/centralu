@@ -286,9 +286,9 @@ export class AcpSession implements SessionHandle {
     if (!proc.noteTree) return
     if (e.type === 'tool_call' && e.summary.tool === 'Bash') {
       this.commandsRunning.add(e.callId)
-      proc.noteTree()
+      void proc.noteTree()
       if (!this.treeClock) {
-        this.treeClock = setInterval(() => proc.noteTree?.(), TREE_NOTE_MS)
+        this.treeClock = setInterval(() => void proc.noteTree?.(), TREE_NOTE_MS)
         this.treeClock.unref?.()
       }
     } else if (e.type === 'tool_result') {

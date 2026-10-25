@@ -1,7 +1,7 @@
 import type { ChildProcess } from 'node:child_process'
 import { EventEmitter } from 'node:events'
 import { PassThrough, type Readable, type Writable } from 'node:stream'
-import { KILL_GRACE_MS, hasProcessGroups, killTree, stopGroup, stopTree, treeGroups, type KillOs, type LeftoverOs } from '../dev-services/kill-tree.js'
+import { KILL_GRACE_MS, hasProcessGroups, killTree, noteGroups, stopGroup, stopTree, type KillOs, type LeftoverOs } from '../dev-services/kill-tree.js'
 import { killHandle, spawnGrouped, sweepExited } from '../dev-services/grouped-child.js'
 import { ExitAfterDrain } from '../exit-after-drain.js'
 import { Tail } from '../stream-text.js'
@@ -48,6 +48,9 @@ export type LocalSpawnSpec = AgentSpawnSpec & {
  */
 export const HOST_WATCH = '{ cat <&3 >/dev/null 2>&1; kill -9 0 2>/dev/null; } & exec "$@" 3<&-'
 
+/** How often held helper groups are read again (`noteTree`) */
+const GROUP_CHECK_MS = 2_000
+
 /** The end of stderr kept for a failure message: the SDK only keeps it for processes it spawns itself */
 const STDERR_TAIL = 8 * 1024
 
@@ -57,8 +60,11 @@ export class LocalAgentProcess extends EventEmitter implements AgentProcess {
   readonly stderr: Readable | null
   killed = false
   private readonly tail = new Tail(STDERR_TAIL)
-  /** The groups its tree had when last asked (`noteTree`), swept with its own once it has gone */
-  private readonly groups = new Set<number>()
+  /** The helper groups its tree had when last asked (`noteTree`) and that still have a member, swept once it has gone */
+  private groups = new Set<number>()
+  /** While groups are held: they are read again, so one that has emptied is dropped before its number is reused */
+  private groupClock: ReturnType<typeof setInterval> | null = null
+  private noting: Promise<void> | null = null
   /** Reported once the output has all arrived, so a reader never sees the exit before the last line */
   private readonly exitReport = new ExitAfterDrain(() => this.emit('exit', this.child.exitCode, this.child.signalCode))
 
@@ -121,10 +127,28 @@ export class LocalAgentProcess extends EventEmitter implements AgentProcess {
     return this.child.signalCode
   }
 
-  noteTree(): void {
+  noteTree(): Promise<void> {
     const pid = this.child.pid
-    if (pid === undefined || this.ended || !this.grouped) return
-    for (const g of treeGroups(pid, this.os?.platform)) if (g !== pid) this.groups.add(g)
+    if (pid === undefined || this.ended || !this.grouped) return Promise.resolve()
+    this.noting ??= noteGroups(pid, this.groups, this.os?.platform)
+      .then((groups) => {
+        if (this.ended) return
+        this.groups = groups
+        if (groups.size === 0) this.stopGroupClock()
+        else if (!this.groupClock) {
+          this.groupClock = setInterval(() => void this.noteTree(), GROUP_CHECK_MS)
+          this.groupClock.unref?.()
+        }
+      })
+      .finally(() => {
+        this.noting = null
+      })
+    return this.noting
+  }
+
+  private stopGroupClock(): void {
+    if (this.groupClock) clearInterval(this.groupClock)
+    this.groupClock = null
   }
 
   /** The end of what the CLI wrote to stderr */
@@ -174,6 +198,7 @@ export class LocalAgentProcess extends EventEmitter implements AgentProcess {
     const pid = this.child.pid
     if (pid === undefined) return
     // Groups of its own its helpers started (a shell, measured: Cursor's), which its group's sweep does not reach
+    this.stopGroupClock()
     for (const g of this.groups) stopGroup(g, KILL_GRACE_MS)
     const root = { pid, spawnedAt: this.spawnedAt, exitedAt: Date.now() }
     void sweepExited(root, this.os?.platform, this.os?.listProcesses ? { listProcesses: this.os.listProcesses, taskkill: this.os.taskkill } : undefined).then((ended) => {

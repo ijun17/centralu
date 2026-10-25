@@ -67,7 +67,7 @@ describe('a CLI that must end with its host', () => {
     const p = spawnLocalAgent({ command: process.execPath, args: ['-e', script], env: process.env, endsWithHost: true })
     const helper = await helperPid(p.stdout)
     started.push(helper, p.pid!)
-    p.noteTree()
+    await p.noteTree()
     const exited = new Promise((r) => p.once('exit', r))
     // Killed from outside, as a crash: not this host's stop, which ends the tree while it is still a tree
     process.kill(p.pid!, 'SIGKILL')

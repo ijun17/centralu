@@ -236,10 +236,29 @@ function shoot(handle: KillablePty, signal: 'SIGTERM' | 'SIGKILL', os: KillOs = 
   return rows.filter((r) => tree.has(r.pid))
 }
 
-/** The process groups of `root`'s tree now (`killTargets`), for a sweep after it has gone; none on Windows or when ps cannot be read */
-export function treeGroups(root: number, platform: NodeJS.Platform = process.platform): number[] {
-  if (platform === 'win32') return []
-  return killTargets(snapshot(), root, process.pid)
+/**
+ * The helper groups to sweep once `root` has gone, as now known: those of its tree now (`killTargets`, its own group
+ * aside), and those noted before that still have a member. A noted group with no one left in it is dropped: its number
+ * may go to someone else's group, which a sweep must never reach (#1562 review). Unchanged when ps could not be read.
+ */
+export function notedGroups(rows: readonly ProcRow[], root: number, known: ReadonlySet<number>, self: number): Set<number> {
+  if (rows.length === 0) return new Set(known)
+  const live = new Set(rows.map((r) => r.pgid))
+  const kept = new Set([...known].filter((g) => live.has(g)))
+  if (rows.some((r) => r.pid === root)) for (const g of killTargets([...rows], root, self)) if (g !== root) kept.add(g)
+  return kept
+}
+
+/** `notedGroups` from a ps read that does not hold up the host (it runs every few seconds while a command runs); none on Windows */
+export async function noteGroups(root: number, known: ReadonlySet<number>, platform: NodeJS.Platform = process.platform): Promise<Set<number>> {
+  if (platform === 'win32') return new Set()
+  let rows: ProcRow[] = []
+  try {
+    rows = parsePs((await runFile('ps', ['-A', '-o', 'pid=,ppid=,pgid='], { encoding: 'utf8', timeout: 2000, windowsHide: true })).stdout)
+  } catch {
+    // Not read: what is known stays
+  }
+  return notedGroups(rows, root, known, process.pid)
 }
 
 /** Fires one signal at the tree. Falls back to pty.kill as before when the pid is unknown (a fake pty). On Windows, taskkill (shootWindows) */

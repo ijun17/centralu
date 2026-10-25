@@ -34,9 +34,10 @@ export interface AgentProcess {
   /**
    * Remembers the process groups its tree has now (macOS and Linux), so what it started in a group of its own is ended
    * with it even after it has gone: once a CLI has died, its helpers are under init and no longer found under it. An
-   * adapter calls it when the tool runs a command (#1562 review: Cursor's shell outlived Cursor)
+   * adapter calls it when the tool runs a command (#1562 review: Cursor's shell outlived Cursor). It reads `ps` without
+   * holding up the host, and drops a group once no one is left in it, so a sweep hours later reaches no reused number
    */
-  noteTree?(): void
+  noteTree?(): Promise<void>
 }
 
 /**

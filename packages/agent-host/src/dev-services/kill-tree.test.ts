@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { collectOrphansWindows, killTargets, killTree, orphansOf, parsePs, parseWinProcs, stopTree, survivorTargets, type KillOs } from './kill-tree.js'
+import { collectOrphansWindows, killTargets, killTree, notedGroups, orphansOf, parsePs, parseWinProcs, stopTree, survivorTargets, type KillOs } from './kill-tree.js'
 import { alive as isAlive, cleanUp, plantTreeScript, settle as settleOn, treePids } from './process-tree.test-helpers.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { alive } from '../process.test-helpers.js'
@@ -388,5 +388,30 @@ describe('leftovers of an ended process on Windows', () => {
       },
     }
     expect(await collectOrphansWindows(root, os)).toEqual([200])
+  })
+})
+
+describe('notedGroups', () => {
+  const rows = (s: string) => parsePs(s)
+
+  it('adds the helper groups of the tree now, not its own nor the host’s', () => {
+    // CLI 100 (pgid 100) -> shell 200 in a group of its own; the host is 900
+    const table = rows('  100  900  100\n  200  100  200\n  900   50  900\n')
+    expect([...notedGroups(table, 100, new Set(), 900)]).toEqual([200])
+  })
+
+  it('keeps a noted group while someone is still in it, though no longer under the CLI', () => {
+    // The shell has died; its child 300, now under init, is still in group 200
+    const table = rows('  100  900  100\n  300    1  200\n  900   50  900\n')
+    expect([...notedGroups(table, 100, new Set([200]), 900)]).toEqual([200])
+  })
+
+  it('drops a noted group no one is left in, so a later sweep cannot reach the number reused', () => {
+    const table = rows('  100  900  100\n  900   50  900\n')
+    expect([...notedGroups(table, 100, new Set([200]), 900)]).toEqual([])
+  })
+
+  it('keeps what it knew when ps could not be read', () => {
+    expect([...notedGroups([], 100, new Set([200]), 900)]).toEqual([200])
   })
 })
