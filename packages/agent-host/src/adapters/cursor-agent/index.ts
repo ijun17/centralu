@@ -52,9 +52,10 @@ const DESCRIPTOR: ToolDescriptor = {
 
 /**
  * Cursor asks about an MCP call titled `<server>-<tool>: <tool>` (measured: `centralu-recall: recall`, kind `other`, no
- * `rawInput`); its `tool_call` says only `MCP: tool`
+ * `rawInput`); its `tool_call` says only `MCP: tool`. Read by the bridge's server name, as Claude's and Codex's calls are
  */
-export function centraluToolOfCall(call: { title?: string | null }): string | null {
+export function centraluToolOfCall(call: { title?: string | null; kind?: string | null }): string | null {
+  if (call.kind !== 'other') return null
   const m = /^([\w-]+): ([\w-]+)$/.exec(call.title ?? '')
   return m?.[2] && m[1] === `${ORCHESTRATOR_MCP_NAME}-${m[2]}` ? m[2] : null
 }

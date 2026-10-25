@@ -61,10 +61,12 @@ async function ask(title: unknown) {
 describe("Centralu's own tools from Cursor", () => {
   it('reads which tool the recorded request is, and no other server as ours', () => {
     expect(REQUEST.toolCall.title).toBe('centralu-recall: recall')
-    expect(centraluToolOfCall({ title: 'centralu-recall: recall' })).toBe('recall')
+    expect(centraluToolOfCall({ title: 'centralu-recall: recall', kind: 'other' })).toBe('recall')
     expect(centraluToolOfCall({ title: 'github-search: search' })).toBeNull()
     expect(centraluToolOfCall({ title: 'centralu-recall: mail' })).toBeNull()
     expect(centraluToolOfCall({ title: 'Delete `x`' })).toBeNull()
+    // A call that does something else under the same name is no MCP call
+    expect(centraluToolOfCall({ title: 'centralu-recall: recall', kind: 'edit' })).toBeNull()
   })
 
   it('answers the recorded call allow-once with no card, under Normal', async () => {
