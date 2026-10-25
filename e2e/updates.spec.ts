@@ -197,7 +197,8 @@ test('an older build on disk is not offered as the installed update, to the pers
   await start(page)
   await page.evaluate(() => {
     const m = (window as any).__mock
-    m.relaunchCheck = { ready: true, version: '0.0.5' }
+    // Older than any window, the unstamped 0.0.0-dev included (#1501: e2e runs on the placeholder)
+    m.relaunchCheck = { ready: true, version: '0.0.0-alpha' }
     m.offerUpdate('9.9.1')
   })
   await page.getByTestId('update-line').click()
@@ -208,6 +209,6 @@ test('an older build on disk is not offered as the installed update, to the pers
   await expect(page.getByTestId('update-apply-now')).toHaveCount(0)
   const out = await page.evaluate(() => (window as any).__mock.agentApply())
   expect(out.ok).toBe(false)
-  expect(out.error).toContain('0.0.5')
+  expect(out.error).toContain('0.0.0-alpha')
   expect(await page.evaluate(() => (window as any).__mock.relaunches)).toBe(0)
 })
