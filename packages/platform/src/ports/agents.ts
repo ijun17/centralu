@@ -154,6 +154,12 @@ export interface AgentPort {
   updateSettings(sessionId: string, settings: Omit<UpdateSettingsParams, 'sessionId'>): Promise<UpdateSettingsResult>
   rename(sessionId: string, name: string): Promise<void>
   markRead(sessionId: string, seq: number): Promise<void>
+  /**
+   * Done on a session in error (#1549): it goes to idle and what the window saw (up to `seq`) is read; the error line stays in the
+   * conversation. `cleared` is false when a newer row exists (`newer`: a later error) and the state is left for the person to look at; `olderHost` when the host could only read the answer.
+   * A host from before it is asked `markRead` instead.
+   */
+  clearError(sessionId: string, seq: number): Promise<{ cleared: boolean; newer: boolean; olderHost: boolean }>
   listSessions(): Promise<SessionInfo[]>
   loadMessages(sessionId: string, limit?: number, beforeSeq?: number): Promise<StoredMessage[]>
   /**

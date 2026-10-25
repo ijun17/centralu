@@ -135,7 +135,7 @@ export function SessionListRow({
               state. A separate dot right next to the mark would read as overlapping the
               two, and blur both instead.
             */}
-            <ToolMark tool={s.tool} state={s.state} asleep={!s.live && !s.unreachable} interruption={s.interruption ?? null} openQuestions={s.pendingQuestions.length} />
+            <ToolMark tool={s.tool} state={s.state} asleep={!s.live && !s.unreachable} interruption={s.interruption ?? null} openQuestions={s.pendingQuestions.length} unread={isUnread(s)} />
             <span className={`truncate ${unread && !focused ? 'text-ink' : ''}`}>{s.name}</span>
             {/* Started from a linked computer (#1273): its preset, which an auto caller carries there */}
             <PresetTag preset={s.permissionPreset} startedFromHub={s.startedFromHub} testId={`session-preset-${s.id}`} />

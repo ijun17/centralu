@@ -7,6 +7,7 @@ import {
   explainGridSpan,
   gridPanelKey,
   gridSpanRoom,
+  isUnread,
   packGrid,
   parseAppKey,
   spanClamped,
@@ -274,7 +275,7 @@ export function GridView() {
           {order.map((id, i) => {
             const panel = byKey.get(id)!
             const session = panel.kind === 'session' ? sessions[id] : undefined
-            const look = session ? lookOf({ ...session, openQuestions: session.pendingQuestions.length }) : 'idle'
+            const look = session ? lookOf({ ...session, openQuestions: session.pendingQuestions.length, unread: isUnread(session) }) : 'idle'
             const cell = laid.cells[i]!
             const asked = askedOf(id)
             return (

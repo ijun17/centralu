@@ -130,6 +130,7 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'attachments.save': session(),
   'sessions.rename': session(),
   'sessions.markRead': session(),
+  'sessions.clearError': session(),
   'messages.load': session(messages),
   'messages.subagent': session(messages),
   'messages.subagentTrashed': session(),

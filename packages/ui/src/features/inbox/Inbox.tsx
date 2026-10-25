@@ -37,7 +37,7 @@ export function Inbox() {
   // Before any effect below that moves focus, so the composer, not this layer, is what gets it back (#115)
   const toggle = useStore((s) => s.toggleInbox)
   const openWaiting = useStore((s) => s.openWaiting)
-  const markRead = useStore((s) => s.markRead)
+  const markDone = useStore((s) => s.markDone)
   const send = useStore((s) => s.send)
   const projects = useStore((s) => s.projects)
   const items = useInbox(Date.now())
@@ -94,8 +94,8 @@ export function Inbox() {
           toggle(false)
         }
       } else if (action === 'done') {
-        // Done (#669): marks a finished turn read without opening it. Approvals and errors have no Done.
-        if (item && doneable(item)) void markRead(item.id)
+        // Done (#669): marks a finished turn read without opening it; on an error (#1549) it clears the mark. Approvals have no Done.
+        if (item && doneable(item)) void markDone(item.id)
       } else if (action === 'allow' || action === 'deny') {
         /*
          * Allow and Deny on the row under the cursor (#543), the approval card's own letters. The key presses the row's
@@ -113,7 +113,7 @@ export function Inbox() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, items, cursor, openWaiting, toggle, markRead, mailThread, closeMailThread])
+  }, [open, items, cursor, openWaiting, toggle, markDone, mailThread, closeMailThread])
 
   // Goes back up the way it came down (usePresence keeps it for its exit)
   const { shown, leaving } = usePresence(open)
@@ -237,7 +237,7 @@ export function Inbox() {
                   {doneable(it) && (
                     <button
                       className="mr-2 shrink-0 rounded-full border border-line px-2.5 py-0.5 text-xs text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink"
-                      onClick={() => void markRead(it.id)}
+                      onClick={() => void markDone(it.id)}
                       aria-label={`Done: ${it.name}`}
                       data-testid={`inbox-done-${it.id}`}
                     >
@@ -279,9 +279,9 @@ function WaitingTime({ since }: { since: number | null }) {
   )
 }
 
-/** Rows Done applies to (#669): a finished turn, and a turn a quit stopped (#698), both listed only while unread */
+/** Rows Done applies to (#669): a finished turn, and a turn a quit stopped (#698), both listed only while unread; and an error (#1549) */
 function doneable(it: { state: string; interruption?: { reason: string } | null }): boolean {
-  return it.state === 'waiting_input' || (it.state === 'idle' && !!it.interruption)
+  return it.state === 'waiting_input' || it.state === 'error' || (it.state === 'idle' && !!it.interruption)
 }
 
 /**

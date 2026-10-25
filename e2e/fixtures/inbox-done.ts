@@ -3,7 +3,7 @@ import { newSession, setup } from './project-screen.js'
 
 /**
  * The inbox lists a finished turn (`waiting_input`) only while it is unread, and Done marks one read without
- * opening it (#669). Approvals and errors stay listed whatever the read mark says.
+ * opening it (#669). Approvals and errors stay listed whatever the read mark says; Done on an error clears its mark (#1549).
  *
  * A function, like the other fixtures, because it runs in Chromium (inbox-done.spec.ts) and in WebKit
  * (inbox-done-webkit.spec.ts): the keys and the row's two buttons are what the desktop app's WKWebView has to get right.
@@ -164,7 +164,7 @@ export function inboxDoneTests() {
     await expect(waitingCount(page)).toContainText('1')
   })
 
-  test('approvals and errors are listed whether read or not, and have no Done', async ({ page }) => {
+  test('approvals and errors are listed whether read or not, and only an error has Done', async ({ page }) => {
     await setup(page, ['/tmp/alpha'])
     const approval = await newSession(page, 'alpha')
     const error = await newSession(page, 'alpha')
@@ -191,10 +191,99 @@ export function inboxDoneTests() {
     await expect(item(page, approval)).toBeVisible()
     await expect(item(page, error)).toBeVisible()
     await expect(page.getByTestId(`inbox-done-${approval}`)).toHaveCount(0)
-    await expect(page.getByTestId(`inbox-done-${error}`)).toHaveCount(0)
-    // d on an approval or an error does nothing
+    await expect(page.getByTestId(`inbox-done-${error}`)).toBeVisible()
+    // d on the approval under the cursor does nothing
     await page.keyboard.press('d')
     await expect(item(page, approval)).toBeVisible()
     await expect(item(page, error)).toBeVisible()
+  })
+
+  const fail = (page: Page, id: string, message: string) =>
+    page.evaluate(
+      ({ sid, m }) => {
+        const mock = (window as any).__mock as Mock
+        mock.emit({ type: 'message_delta', sessionId: sid, role: 'assistant', text: 'working on it' })
+        mock.emit({ type: 'error', sessionId: sid, error: { code: 'adapter_crashed', message: m, retryable: true } })
+      },
+      { sid: id, m: message },
+    )
+  const stateOf = (page: Page, id: string) => page.evaluate((sid) => (window as any).__store.getState().sessions[sid].state as string, id)
+  const hostStateOf = (page: Page, id: string) => page.evaluate((sid) => (((window as any).__mock).sessions.get(sid).state as string), id)
+
+  test('Done on an error row moves the session to idle and takes the row off; the error line stays; a new error marks it again (#1549)', async ({ page }) => {
+    const { target } = await twoSessions(page)
+    await fail(page, target, 'app-server exited (code 0)')
+    await expect.poll(() => stateOf(page, target)).toBe('error')
+    await openInbox(page)
+    await expect(item(page, target)).toBeVisible()
+
+    await page.getByTestId(`inbox-done-${target}`).click()
+
+    await expect(item(page, target)).toHaveCount(0)
+    await expect(waitingCount(page)).toContainText('0')
+    expect(await stateOf(page, target)).toBe('idle')
+    expect(await hostStateOf(page, target)).toBe('idle')
+    // The transcript keeps the error line and its reason
+    await page.evaluate((sid) => (window as any).__store.getState().focusSession(sid), target)
+    await expect(page.getByTestId('session-view')).toContainText('The agent could not finish this turn — app-server exited (code 0)')
+
+    await fail(page, target, 'a second failure')
+    await expect.poll(() => stateOf(page, target)).toBe('error')
+    await expect(waitingCount(page)).toContainText('1')
+  })
+
+  test('Done by keyboard on an error row clears it', async ({ page }) => {
+    const { target } = await twoSessions(page)
+    await fail(page, target, 'boom')
+    await page.keyboard.press('Meta+i')
+    await expect(item(page, target)).toBeVisible()
+    await page.keyboard.press('d')
+    await expect(item(page, target)).toHaveCount(0)
+    expect(await stateOf(page, target)).toBe('idle')
+  })
+
+  test('Done on the session itself clears its error and its inbox row (#1549)', async ({ page }) => {
+    const { target } = await twoSessions(page)
+    await fail(page, target, 'app-server exited (code 0)')
+    await page.evaluate((sid) => ((window as any).__mock as Mock).emit({ type: 'interruption', sessionId: sid, interruption: { reason: 'network', at: Date.now(), detail: 'ECONNRESET' } }), target)
+    await expect.poll(() => stateOf(page, target)).toBe('error')
+    await page.evaluate((sid) => (window as any).__store.getState().focusSession(sid), target)
+    await expect(page.getByTestId('error-note')).toBeVisible()
+    const mark = page.getByTestId(`session-row-${target}`).locator('[data-look]')
+    await expect(mark).toHaveAttribute('data-look', 'stopped')
+
+    await page.getByTestId('error-done').click()
+
+    await expect(page.getByTestId('error-note')).toHaveCount(0)
+    expect(await stateOf(page, target)).toBe('idle')
+    expect(await hostStateOf(page, target)).toBe('idle')
+    await expect(waitingCount(page)).toContainText('0')
+    await expect(page.getByTestId('session-view')).toContainText('app-server exited (code 0)')
+    // The sidebar's mark goes with it, the stopped turn's interruption notwithstanding
+    await expect(mark).toHaveAttribute('data-look', 'idle')
+    // Done stops and continues nothing: a stopped turn the person may go on with still offers Continue
+    await expect(page.getByTestId('interrupted-continue')).toBeVisible()
+  })
+
+  test('Done never forces idle: what the host did meanwhile stands, an approval card included (#1549 review)', async ({ page }) => {
+    const { target } = await twoSessions(page)
+    await fail(page, target, 'app-server exited (code 0)')
+    await expect.poll(() => stateOf(page, target)).toBe('error')
+    await page.evaluate((sid) => (window as any).__store.getState().focusSession(sid), target)
+    // Another window pressed Continue: before this window's Done returns, the turn ran and now waits on an approval
+    await page.evaluate((sid) => {
+      const mock = (window as any).__mock as Mock
+      const agents = (window as any).__store.getState().platform.agents
+      agents.clearError = async () => {
+        mock.emit({ type: 'state_change', sessionId: sid, state: 'working' })
+        void mock.requestApproval(sid, { kind: 'command', command: 'ls', cwd: '/tmp/alpha' })
+        return { cleared: false }
+      }
+    }, target)
+
+    await page.getByTestId('error-done').click()
+
+    await expect.poll(() => stateOf(page, target)).toBe('waiting_approval')
+    await expect(page.getByTestId('approval-card')).toBeVisible()
   })
 }

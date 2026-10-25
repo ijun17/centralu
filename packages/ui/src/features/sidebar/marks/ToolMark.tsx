@@ -23,10 +23,10 @@ import { lookOf } from '../../session/look.js'
  * nothing the person has to act on (using the session wakes it), and a fade would be mistaken for a stalled session
  * (#670). So a finished turn still looks finished and idle still looks idle. `data-asleep` stays for tests.
  */
-export function ToolMark({ tool, state, asleep = false, interruption = null, openQuestions = 0 }: { tool: ToolName; state: SessionState; asleep?: boolean; interruption?: Interruption | null; openQuestions?: number }) {
+export function ToolMark({ tool, state, asleep = false, interruption = null, openQuestions = 0, unread = true }: { tool: ToolName; state: SessionState; asleep?: boolean; interruption?: Interruption | null; openQuestions?: number; unread?: boolean }) {
   const meta = useToolMeta(tool)
   const label = `${meta.label} · ${stateLabel(state)}${interruption ? ` · ${interruptionLabel(interruption)}` : ''}`
-  const look = lookOf({ state, interruption, openQuestions })
+  const look = lookOf({ state, interruption, openQuestions, unread })
 
   return (
     <Tooltip content={label} testId={`tool-mark-tip-${tool}`} className="shrink-0">

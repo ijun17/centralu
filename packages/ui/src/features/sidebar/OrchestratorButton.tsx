@@ -165,7 +165,7 @@ function OrchestratorChildRow({ s }: { s: SessionSummary }) {
           focused ? 'border-l-ink-muted bg-surface-hover/40 text-ink' : 'border-l-transparent text-ink-muted hover:bg-surface-hover/20 hover:text-ink'
         }`}
       >
-        <ToolMark tool={s.tool} state={s.state} asleep={!s.live && !s.unreachable} interruption={s.interruption ?? null} openQuestions={s.pendingQuestions.length} />
+        <ToolMark tool={s.tool} state={s.state} asleep={!s.live && !s.unreachable} interruption={s.interruption ?? null} openQuestions={s.pendingQuestions.length} unread={isUnread(s)} />
         <span className={`truncate ${unread && !focused ? 'text-ink' : ''}`}>{s.name}</span>
       </button>
       <span

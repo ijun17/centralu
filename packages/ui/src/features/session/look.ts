@@ -21,9 +21,14 @@ export function lookOf(s: {
   interruption?: Interruption | null
   /** The number of open questions; a card is waiting on the person whatever the state says */
   openQuestions?: number
+  /**
+   * Whether the session's last answer is unread (default: it is). A stopped turn's interruption marks the session only while
+   * unread, as the inbox lists it: Done reads it (#1549) and takes the mark off, while the interruption stays for Continue.
+   */
+  unread?: boolean
 }): SessionLook {
   if (needsAnswer({ state: s.state, pendingQuestions: { length: s.openQuestions ?? 0 } })) return 'waiting'
   if (s.state === 'working') return 'answering'
-  if (s.state === 'error' || s.state === 'limited' || s.interruption) return 'stopped'
+  if (s.state === 'error' || s.state === 'limited' || (s.interruption && (s.unread ?? true))) return 'stopped'
   return 'idle'
 }
