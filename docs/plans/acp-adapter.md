@@ -200,7 +200,7 @@ temporary XDG folders; it counts and stops only the `opencode acp` processes its
 |---|---|
 | A `mode.<name>` entry in the project's or the global `opencode.json` beat Safe: OpenCode copies `mode` over `agent` after the inline config; a command ran and a file was written with no card | Safe is put under `mode` for each name the person lists there (no other name, since one listed there becomes primary). The test's model of OpenCode's precedence now has `mode`, the merge's key order and the file layers |
 | A project subagent (`.opencode/agent/helper.md`, `bash`/`edit` allowed) reached through `task` ran unasked | Every agent the markdown files define is held; `task` to an agent it cannot see asks |
-| Within one object a key keeps its first place, and the last matching rule decides, so `{bash: allow, "*": allow}` under an agent beat Safe's `bash` (found while fixing the above) | Safe's rules sit under keys of their own, read after the person's, then the person's denies: the tool's name in capitals (`BASH`), which OpenCode's case-blind match reads as that tool alone (first `bash*`, which also matched a tool named `bash_…`) |
+| Within one object a key keeps its first place, and the last matching rule decides, so `{bash: allow, "*": allow}` under an agent beat Safe's `bash` (found while fixing the above) | Safe's rules sit under keys of their own (`bash*`), read after the person's, then the person's denies. Such a key also matches a tool whose name starts the same (an MCP tool `read_notes`), so it starts at its tool's first ask and holds that tool at most more strictly |
 | `webfetch` ran unasked under Safe | Safe asks before `webfetch` and `websearch` |
 | Normal and Edits asked nothing (OpenCode's default allows everything) | Normal asks before edits and commands under the person's own rules; Edits as Normal with the folder's edits allowed |
 | A project plugin runs code at the session's start | Inherent to trusted projects only; said above |
@@ -212,16 +212,29 @@ A second-model review of these fixes found more, also fixed and measured the sam
 
 The owner's re-check on macOS (OpenCode 1.19.4, its free model) held every case but one: under Safe, case E's subagent
 asked, OpenCode logged the ask, and no card came, so the turn waited until its bound (three runs of three). The ask is
-dropped by OpenCode itself (Subagents, above), so a subagent's asks are now denies; checked on the binary with
-`opencode debug agent`, and against the log's own calls in `config.test.ts`. The same re-check found `smoke:opencode`
+dropped by OpenCode itself (Subagents, above), so a subagent's asks are now denies; checked by runs (below), and against the log's own
+calls in `config.test.ts`. The same re-check found `smoke:opencode`
 counting the host watch's subshell as a second agent process on macOS, as `smoke:cursor` once did; both smokes now
 count through one helper (`scripts/smoke-processes.mjs`). A second-model review of that fix found three more ways a
 subagent could still ask (`task` to an agent Centralu cannot see, the person's own `task` asks, and Normal's
 `OPENCODE_PERMISSION` asks under OpenCode's own subagents) and a key that also matched other tools (`read*` for an MCP
 tool `read_…`); each fixed with a test that fails without it.
 
-Measured on the binary itself, without a model: `opencode debug agent <name>` prints an agent's rules as 1.19.4 builds
-them, so each case's decision was read before and after the change.
+That key fix broke Safe on macOS (the owner's next re-check: no card in any case, the files written): it named each
+tool in capitals (`BASH`), taking OpenCode's match to ignore case. It does on Windows only: its `Wildcard.match` has
+the flags `si` in the Windows build and `s` in the macOS and Linux builds of 1.19.4 (read in all three). The keys are
+`bash*` again, each starting at its tool's first ask (so `read*` never carries an allow to `read_notes`), and the test's
+model of OpenCode decides every case on each platform's match and fails where they differ.
+
+How a claim here is checked: `opencode debug agent <name>` only lists an agent's rules; the order it prints says
+nothing about how they match on the platform at hand, and an evaluation by hand on that listing used Windows' match.
+A claim about what OpenCode allows or asks is checked by a run: `opencode acp` itself, with a local stand-in model (an
+OpenAI-compatible server that answers with scripted tool calls, so no quota), counting the cards and the files written,
+on the Windows build and the Linux build (under WSL, whose match is macOS's). Measured so for 9c37862df, 4ca7a9fda and
+the fix, cases baseline Safe, C, D, G, J, a deny, E (a markdown subagent), E through OpenCode's `general`, Normal, and
+Normal with the person's `bash: allow`: 4ca7a9fda asked nothing on Linux and wrote both files; 9c37862df held all but
+E, which waited with OpenCode's log saying `bash*` asked in the subagent; the fix holds every case on both builds and
+E ends with nothing written.
 
 ## 1. What was measured
 
