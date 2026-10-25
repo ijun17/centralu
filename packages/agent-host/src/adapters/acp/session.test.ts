@@ -259,6 +259,23 @@ describe('the ACP session against a scripted agent', () => {
     expect(w.events.filter((e) => e.type === 'compaction').map((e) => e.type === 'compaction' && e.trigger)).toEqual(['auto', 'manual'])
   })
 
+  it("carries a turn's spend to the next turn it reports when it ended with no usage to carry the cost (review of PR 3)", async () => {
+    const w = world()
+    const s = await w.start()
+    const peer = w.peers[0]!
+    const usage = { inputTokens: 10, outputTokens: 2, totalTokens: 12 }
+    for (const [text, total, withUsage] of [['one', 0.1, true], ['two', 0.25, false], ['three', 0.3, true]] as const) {
+      s.send(text)
+      await peer.next((m) => isPrompt(m) && JSON.stringify(m).includes(text))
+      peer.update(SID, { sessionUpdate: 'usage_update', used: 1_000, size: 200_000, cost: { amount: total, currency: 'USD' } })
+      peer.release('session/prompt', { result: { stopReason: 'end_turn', ...(withUsage ? { usage } : {}) } })
+      await w.event((e) => e.type === 'turn_complete' && w.events.filter((x) => x.type === 'turn_complete').length === (text === 'one' ? 1 : text === 'two' ? 2 : 3))
+    }
+    const costs = w.events.flatMap((e) => (e.type === 'usage_update' ? [e.tokens.costUsd] : []))
+    expect(costs).toHaveLength(2)
+    expect(costs[1]).toBeCloseTo(0.2)
+  })
+
   it("takes a turn's cost as what it added to the running total the agent sends, and none for the first turn it reads", async () => {
     const w = world()
     const s = await w.start()

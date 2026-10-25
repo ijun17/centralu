@@ -275,7 +275,8 @@ export class AcpSession implements SessionHandle {
   private endTurn(result: PromptResult, turn: Turn): void {
     const sessionId = this.sessionId
     const tokens = tokenUsage(result)
-    const cost = this.turnCost(turn)
+    // A turn with no usage reports no cost: its spend stays in the total and is said with the next turn that reports
+    const cost = tokens ? this.turnCost(turn) : null
     if (tokens) this.emit({ type: 'usage_update', sessionId, tokens: cost === null ? tokens : { ...tokens, costUsd: cost } })
     if (result.stopReason === 'end_turn' && this.inferredCompaction(turn)) {
       this.emit({ type: 'compaction', sessionId, failed: false, trigger: 'manual' })
