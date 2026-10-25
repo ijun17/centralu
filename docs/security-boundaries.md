@@ -606,7 +606,9 @@ would. `normal` keeps its meaning (the person approves each step).
   reads, the policy tier included) have an `ask` rule for `Edit`, `Write`, `MultiEdit` or `NotebookEdit`, or the settings
   cannot be read, the session has no grant at all (`editAskRuleExists`; the rule's path pattern is the CLI's syntax and is
   not matched, so `ask: ["Write(secret/**)"]` leaves every edit of that session asking). An ask the CLI says a rule forced
-  (`matchedAskRule`) or a safety check raised (a `decisionReason` naming one) is a card too.
+  (`matchedAskRule`) is a card too, and so is an ask whose `decisionReason` is anything but empty or the permission mode asking: the SDK documents it as free text, so only a short allowlist of known benign reasons
+  grants (`benignAskReason`) and an unknown or reworded reason fails closed. These two options are a second line: measured on Claude Code 2.1.296, an `ask` rule reached `canUseTool` with
+  both undefined, so the card for a plain ask rule comes only from `editAskRuleExists`.
 - **Mapping to Codex.** Codex has no mode that accepts patches and asks for commands: its approval policies gate the
   sandbox boundary, not the kind of action (`on-request` runs sandboxed commands without a card). So `edits` is
   `normal`'s launch (the person's own policy and sandbox, network off) and the adapter answers an
@@ -622,7 +624,7 @@ would. `normal` keeps its meaning (the person approves each step).
   `.githooks`, `.husky`, `.pre-commit-config.yaml`, `.github/workflows`, `.claude`, `.claude.json`, `.codex`, `.agents`,
   `.mcp.json`, `.vscode`, `.idea`, `.devcontainer`, `.centralu`, the shell startup files (`.bashrc`, `.zshrc`, `.profile`,
   ...), `.envrc`, `.ripgreprc`, the package managers' config (`.npmrc`, `.yarnrc`, `.yarnrc.yml`, `.pnpmfile.cjs`,
-  `.cargo/config.toml`) and `node_modules` (a hard link there reaches other projects). `CLAUDE.md` and `AGENTS.md` stay
+  `.cargo/config`, `.cargo/config.toml`) and `node_modules` (a hard link there reaches other projects). `CLAUDE.md` and `AGENTS.md` stay
   editable. A segment with a `:` asks (a Windows stream such as
   `.mcp.json::$DATA` writes the file it names). A path that cannot be resolved asks. The check reads the disk once,
   before the write: another process that swaps a link in between is not stopped by it. A person who picks `edits` in an

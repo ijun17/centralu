@@ -144,6 +144,16 @@ describe('the edits grant and a person own rules, and the live preset (#1525)', 
     await handle.dispose()
   })
 
+  it('the reason text is free text: only none, or the permission mode asking, grants; any other reason, known or not, is a card', async () => {
+    const { handle, call } = await open('edits')
+    expect(await call(plainWrite(), { decisionReason: '' })).toBe('allow')
+    expect(await call(plainWrite(), { decisionReason: 'Current permission mode (Default) requires approval for this Write command' })).toBe('allow')
+    for (const reason of ['Reworded: please look at this one', 'Write to a path that needs a human', 'Path is on the deny list', 'ask rule from userSettings']) {
+      expect(await call(plainWrite(), { decisionReason: reason }), reason).toBe('card')
+    }
+    await handle.dispose()
+  })
+
   it('reads the preset live: lowering edits to normal takes effect at once, raising it back too, with no new process', async () => {
     const { handle, call } = await open('edits')
     expect(await call(plainWrite())).toBe('allow')

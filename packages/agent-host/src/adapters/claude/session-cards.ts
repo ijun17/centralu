@@ -23,6 +23,16 @@ export type CardsHost = {
 }
 
 /**
+ * The reasons the CLI gives for asking about an edit that do not stand for a decision of the person's or a safety check
+ * (`decisionReason` is free text in the SDK, so only these are known to be benign): none at all, or the permission mode
+ * itself asking, as it does for any edit in `default` mode. Any other reason, known or not, keeps the card (#1525).
+ */
+const BENIGN_ASK_REASONS: readonly RegExp[] = [/^(the )?(current )?permission mode[^.]*(requires|needs)[^.]*(approval|permission)/i]
+
+/** Whether the `decisionReason` of an ask is empty or one of the known benign ones (`BENIGN_ASK_REASONS`) */
+export const benignAskReason = (reason: string | undefined): boolean => reason === undefined || reason.trim() === '' || BENIGN_ASK_REASONS.some((re) => re.test(reason.trim()))
+
+/**
  * A Claude session's approval and question cards: the permission callback the SDK calls (`canUseTool`), the cards it
  * raises, their answers, and their release when the CLI withdraws them or the session stops.
  */
@@ -49,7 +59,7 @@ export class ClaudeCards {
     if (launched !== 'normal' && launched !== 'edits') return false
     if (this.host.livePreset() !== 'edits' || this.editAskRule) return false
     if (options?.matchedAskRule) return false
-    return !(typeof options?.decisionReason === 'string' && /ask rule|safety|sensitive|protected|dangerous/i.test(options.decisionReason))
+    return benignAskReason(options?.decisionReason)
   }
 
   /**
