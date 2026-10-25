@@ -193,6 +193,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The release tags, without file contents: the artifact carries the release this commit was cut from (#1501)
+          fetch-depth: 0
+          filter: blob:none
 
       - name: Install Linux system dependencies
         if: runner.os == 'Linux'
@@ -239,6 +243,13 @@ jobs:
           key: ${{ matrix.target }}
 
       - run: pnpm install --frozen-lockfile
+
+      - name: Stamp the version
+        # Git holds none (#1501): the newest release tag reachable from this commit, as `pnpm app` builds locally, so a
+        # person trying this artifact on a machine that ran that release is not refused as a downgrade. A fork without
+        # tags keeps the placeholder. The release itself stamps in release-npm.mts, from the tag it publishes.
+        shell: bash
+        run: node scripts/stamp-version.mjs "$(node scripts/app-version.mjs --fallback)"
 
       - name: Build bundle
         if: runner.os != 'macOS'

@@ -34,7 +34,7 @@ import { lstatSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 // @ts-expect-error — dependency-free policy also runs directly in the signing workflow
-import { readAppVersion, validateLocalManifest } from './local-manifest.mjs'
+import { readReleaseBase, validateLocalManifest } from './local-manifest.mjs'
 
 export const MANIFEST_NAME = 'content-manifest.json'
 export const SIGNATURE_NAME = 'content-manifest.json.sig'
@@ -347,7 +347,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const platform = flag('--platform')
   if (command === 'sign-local' && dir) {
     const manifest = readFileSync(dir)
-    const local = validateLocalManifest(manifest, readAppVersion())
+    const local = validateLocalManifest(manifest, readReleaseBase())
     const dryRun = process.argv.includes('--dry-run')
     const pem = process.env.CONTENT_SIGNING_KEY
     delete process.env.CONTENT_SIGNING_KEY

@@ -587,7 +587,7 @@ pub(super) fn take(opts: Options, fd: RawFd) -> i32 {
         "op": "hello",
         "protocol": HANDOFF_PROTOCOL,
         "pid": std::process::id(),
-        "version": env!("CARGO_PKG_VERSION"),
+        "version": build.version.clone().unwrap_or_else(|| super::DEV_VERSION.to_string()),
         "build": build,
     });
     if wire::send_op(&mut ch, &hello).is_err() {

@@ -187,13 +187,15 @@ bump는 원격 main에서 git이 추적하는 모든 텍스트 파일을 검사�
 
 ### 태그 방식 (#1501)
 
-릴리스마다 세 번 돌던 전체 CI(마지막 머지 뒤의 main, bump PR, bump squash 뒤의 main)가 한 번이 된다: 버전은 빌드할 때 태그에서 찍히므로 어느 파일에도 없고, bump PR도 bump 커밋도 없다. 태그는 이미 완전히 초록인 main의 커밋에 붙는다. 단계로 들어간다: 먼저 guard와 보드의 경로(두 방식을 모두 받으며, 전환 전까지 아무것도 바뀌지 않는다), 그다음 찍기와 전환, 마지막으로 옛 경로 제거. 설계와 리뷰는 #1501에 있다.
+릴리스마다 세 번 돌던 전체 CI(마지막 머지 뒤의 main, bump PR, bump squash 뒤의 main)가 한 번이 된다: 버전은 빌드할 때 태그에서 찍히므로 어느 파일에도 없고, bump PR도 bump 커밋도 없다. 태그는 이미 완전히 초록인 main의 커밋에 붙는다. 단계로 들어간다: 먼저 guard와 보드의 경로(두 방식을 모두 받으며, 전환 전까지 아무것도 바뀌지 않는다), 그다음 찍기와 전환, 마지막으로 옛 경로 제거. 설계와 리뷰는 #1501에 있다. **이 저장소는 전환 뒤 태그 방식이다**(`release.scheme: "tag"`, `brand.ts`가 버전을 가져온다): 위의 bump 단계는 0.1.0-beta.37까지의 릴리스를 설명하며, 옛 경로를 지울 때까지 남는다.
+
+- **빌드의 버전이 오는 곳.** git에는 버전이 없다. `scripts/app-version.mjs`가 정한다: `CENTRALU_VERSION`, 없으면 HEAD에서 닿는 최신 `v[0-9]*` 태그, 그것도 없으면 패키징 빌드는 거부한다(shallow checkout, fork). 버전을 담는 파일은 자리표시자 `0.0.0-dev`로 커밋된다(찍힌 채 커밋되면 `tooling/brand.test.ts`가 실패한다): `packages/protocol/src/version.generated.ts`(UI, 호스트, 스크립트의 `APP_VERSION`), `tauri.conf.json`, `apps/desktop/package.json`, `Cargo.toml`과 `Cargo.lock`, shim의 고정 버전을 포함한 모든 `packaging/npm/*/package.json`. `scripts/stamp-version.mjs`가 `version.generated.ts`, `tauri.conf.json`, npm 매니페스트에 버전을 쓰고, `--restore`가 자리표시자로 되돌린다. `release-npm.mts`는 깨끗한 트리 검사 바로 뒤, `pnpm verify`와 빌드 전에 찍고, 그 버전으로 콘텐츠 매니페스트에 서명한다. `pnpm app`(`scripts/app-build.mts`)은 찍고, 빌드하고, 실패나 Ctrl-C에도 되돌린다. `local-update`는 버리는 클론에 찍는다. `bundle.mjs`는 그 버전 필드만 다른 트리를 dirty로 보지 않는다. Rust에는 아무것도 컴파일되어 들어가지 않는다: 창은 찍힌 `tauri.conf.json`을 실행 중에 읽고(`package_info()`) 키퍼에 `--app-version`으로 넘기며, 빌드된 호스트를 돌리는 키퍼는 이제 이것을 요구한다. `pnpm dev`, `pnpm host`, `pnpm app:dev`와 테스트는 `0.0.0-dev`로 돈다: 그런 호스트는 `dev`이고, 연결된 머신에 아무것도 설치하지 않고, "자동 업데이트"에 무엇이 저장되어 있든 릴리스를 스스로 설치하지 않으며(`installsByItself`), 업데이트 줄은 최신 릴리스를 더 새 버전으로 보여 준다. `version.generated.ts`는 처음 설계처럼 gitignore하고 설치 때 쓰는 대신 커밋된다: `pnpm pre-pr`는 설치하지 않은 worktree에서 타입 검사를 하므로, 파일이 없으면 실패한다. 찍는 스크립트는 `bundle.mjs`가 그냥 node로 돌리므로 `.mjs`다. CI의 `bundle` 잡은 태그를 가져와 가장 새 태그를 빌드 전에 찍으므로, 그 산출물은 커밋이 잘려 나온 릴리스를 담는다(태그 없는 fork는 자리표시자를 유지한다).
 
 - **어느 방식인가.** `release.yml`의 guard(`scripts/release-guard.mjs`)가 `brand.ts`를 `sourceScheme`(보드의 `versions.mjs`, `project.json`의 `release.source`)으로 읽는다: 리터럴 `APP_VERSION`이 있으면 위의 brand 방식이다. 태그 방식에는 긍정적인 근거가 필요하다: `./version.generated.js`에서 `APP_VERSION`을 가져오는 줄, 또는 파일에 `APP_VERSION`이 아예 없는 것. 그 밖의 선언(다른 따옴표, 타입 표기, 계산된 값)은 실행을 멈춘다: "tag"로 짐작하면 어떤 버전의 태그든 배포되기 때문이다. 보드는 `project.json`의 `release.scheme`을 따르며(기본 "brand", 전환하면 "tag"), 릴리스할 각 커밋을 같은 함수로 읽는다.
 - **태그 push만 배포한다.** 태그 방식에서 수동 실행은 `dry_run`이 무엇이든 언제나 리허설이다: 자유로운 버전의 수동 배포는 태그 없는 버전을 npm에 남긴다. 리허설은 `version` 입력, 없으면 최신 태그 다음 prerelease를 빌드하고, 보드가 어느 버전의 리허설인지 알 수 있도록 `rehearse <version>`이라는 이름을 갖는다(`run-name`).
 - **guard가 태그에 요구하는 것**(트리가 더 이상 버전을 묶지 않으므로, 손으로 push한 태그도 이것을 지나야 한다): 최신 `v[0-9]*` 태그일 것, 이전 태그가 태그된 커밋의 조상일 것, checkout이 shallow가 아닐 것(guard의 checkout은 전체 히스토리, `fetch-depth: 0`: shallow면 이전 태그가 보이지 않아 그에 대한 검사가 묻지도 않고 통과한다), 커밋이 기본 브랜치에 있을 것, 버전이 레지스트리에 있는 `centralu`의 모든 버전보다 뒤일 것, 이전 태그가 보이지 않으면 레지스트리에 `centralu`가 하나도 없을 것, 이전 버전의 `centralu`가 레지스트리에 있을 것(동시에 두 태그가 dist-tag를 두고 경쟁하지 않도록), `centralu@<version>`이 없거나 바로 이 커밋에서 배포된 것일 것(같은 릴리스의 재실행). guard의 `version`은 플랫폼과 shim 잡에 잡 수준의 `CENTRALU_VERSION`으로 전해져 `pnpm install`도 본다.
 - **보드.** `bump`는 거부한다. `release_status`, `rehearse`, `tag`는 최신 태그 다음 prerelease(또는 `version`)와, 그 태그 이후 main의 커밋 중 자기 push 실행의 CI가 전체 tier까지 완전히 초록인 가장 새로운 것(또는 `commit`)을 쓰되, `brand.ts`가 아직 버전을 선언하는 커밋은 건너뛴다(guard가 그 태그를 거부해 번호만 소모된다). 최신 태그가 아직 릴리스되지 않았으면(실행이 성공하지 않았고 shim이 레지스트리에 없으면) 둘 다 거부한다. guard도 거부할 것이기 때문이다. `tag`는 그 커밋(또는 같은 트리)에서 그 버전의 리허설이 성공했어야 하며, 메시지가 릴리스 노트인 annotated 태그를 push한다: bump PR이 없으므로 노트는 태그에 남는다(소유자 기본값, 2026-10-24: GitHub Release 없음). `approve`는 태그된 커밋 자신의 CI만 읽는다. shim의 게이트는 그대로다. 상태는 최신 태그의 릴리스 실행이 성공하거나 그 shim이 레지스트리에 올라갈 때까지 그 태그를 따른다.
-- **원격 dev 빌드**는 버전 파일이 자리표시자 `0.0.0-dev`인 작업 사본을 거부한다(`pnpm remote-dev`): 그 빌드는 모든 릴리스보다 오래된 `0.0.0-dev.local.N`이 된다.
+- **원격 dev 빌드**(`pnpm remote-dev`)는 그곳 작업 사본의 HEAD에서 닿는 최신 릴리스 태그에서 잘라 낸다. `app-version.mjs`가 로컬 빌드의 버전을 정하는 방식과 같다: `<tag>.local.N`. 태그가 없는 클론은 `git fetch --tags`를 안내하며 거부한다(전환 전 커밋은 자기 버전을 아직 담고 있어 그것을 쓴다). 자리표시자는 기준이 되지 않는다: `0.0.0-dev.local.N`은 모든 릴리스보다 오래된 버전이 되기 때문이다. 전환 전의 허브는 그런 작업 사본을 그냥 거부한다. 실행되는 스크립트는 허브의 것이기 때문이다.
 
 ### 잡 그래프가 보장하는 것
 
@@ -375,9 +377,9 @@ SemVer가 아니므로, 셸/키퍼의 버전 규칙을 바꾸는 대신 거부�
 작은 잡 하나가 JSON을 검증하고 그 바이트 그대로 업로드한다. 실행 요약에는 매니페스트 해시,
 버전과 신고된 소스 정보가 나온다. 허용하는 것은 format 1, shell 1, `darwin-arm64`뿐이며,
 파일 목록은 크기가 제한되고 정렬되어 있어야 한다. 키퍼와 필수 호스트 진입점, 안전한 경로,
-파일 크기, SHA-256 해시와 실행 비트도 확인한다. 두 검증 단계 모두 체크아웃한 main 커밋의
-`packages/protocol/src/brand.ts`에서 `APP_VERSION`을 읽고, 신고된 기준 버전이 그 값과 같은지
-확인한 뒤 그 값에서 다음 릴리스와 상한을 계산한다. 업로드한 정보만으로 `beta.999` 같은 미래의
+파일 크기, SHA-256 해시와 실행 비트도 확인한다. 두 검증 단계 모두 체크아웃한 main 커밋에서
+기준 버전을 읽는다: 그 커밋에서 닿는 최신 릴리스 태그다(`readReleaseBase`, #1501; 두 잡 모두 태그를
+위해 전체 히스토리를 체크아웃한다). 신고된 기준 버전이 그 값과 같은지 확인한 뒤 그 값에서 다음 릴리스와 상한을 계산한다. 업로드한 정보만으로 `beta.999` 같은 미래의
 기준 버전을 고를 수는 없다. 서명 잡은 다운로드한 뒤 다시 검증하고, `release.yml`과 같은
 `scripts/content-manifest.mts`의 `signatureBytes`로 서명한다. 의존성을 설치하지 않으며
 업로드된 코드를 실행하지도 않는다. 수정하지 않은 워크플로는 실제 서명에서 `GITHUB_REF == main`을

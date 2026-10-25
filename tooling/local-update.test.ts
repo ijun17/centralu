@@ -5,26 +5,46 @@ import { tmpdir } from 'node:os'
 import { delimiter, join, resolve } from 'node:path'
 import { installLocalBundle, requestSignature, stampLocalVersion } from '../scripts/local-update.mjs'
 import { buildManifest, MANIFEST_NAME, SIGNATURE_NAME, verifyManifest } from '../scripts/content-manifest.mjs'
-import { APP_VERSION } from '../packages/protocol/src/brand.js'
 import { fakeGh } from './fake-gh.test-helpers.js'
 // @ts-expect-error — plain JavaScript policy runs in Actions without installing dependencies
-import { assertLocalVersion, chooseLocalVersion, MAX_LOCAL_MANIFEST_BYTES, nextReleaseVersion, readAppVersion, validateLocalManifest } from '../scripts/local-manifest.mjs'
+import { assertLocalVersion, chooseLocalVersion, MAX_LOCAL_MANIFEST_BYTES, nextReleaseVersion, readReleaseBase, validateLocalManifest } from '../scripts/local-manifest.mjs'
+// @ts-expect-error — plain JavaScript, shared with release-npm and bundle.mjs
+import { stampedFiles } from '../scripts/stamp-version.mjs'
 
 const dirs: string[] = []
 const temp = () => { const dir = mkdtempSync(join(tmpdir(), 'cc-local-update-')); dirs.push(dir); return dir }
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }) })
 const base = '0.2.0-beta.20'
 const allowedBase = base
+const git = (cwd: string, ...args: string[]) =>
+  execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', '-c', 'core.autocrlf=false', ...args], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+/**
+ * A checkout holding `paths` of this repository, committed, with `tag` on it (none when null): since #1501 the base a
+ * local build is cut from is the newest release tag reachable from the checkout's HEAD, not a file
+ */
+function taggedCheckout(paths: string[], tag: string | null = `v${base}`): string {
+  const root = temp()
+  for (const path of paths) {
+    mkdirSync(join(root, path, '..'), { recursive: true })
+    cpSync(resolve(path), join(root, path))
+  }
+  git(root, 'init', '-q')
+  git(root, 'add', '-A')
+  git(root, 'commit', '-q', '-m', 'release')
+  if (tag) git(root, 'tag', '-a', tag, '-m', tag)
+  return root
+}
+const SIGNER = ['scripts/content-manifest.mts', 'scripts/local-manifest.mjs', 'scripts/app-version.mjs', 'packaging/npm/centralu/bin/semver.mjs', 'packaging/shell/keys.json']
 function fixture() {
   const paths = ['centralu-keeper', 'host/main.mjs', 'host/bundle-info.json', 'host/schema.sql', 'host/node_modules/better-sqlite3/package.json', 'host/node_modules/node-pty/package.json']
   return {
-    format: 1, appVersion: `${APP_VERSION}.local.1`, platform: 'darwin-arm64', minShellVersion: 1,
+    format: 1, appVersion: `${base}.local.1`, platform: 'darwin-arm64', minShellVersion: 1,
     files: paths.sort().map((path) => ({ path, size: 1, sha256: 'a'.repeat(64), executable: path === 'centralu-keeper' })),
-    local: { baseVersion: APP_VERSION, installedVersion: APP_VERSION, nextRelease: nextReleaseVersion(APP_VERSION), commit: 'a'.repeat(40), dirty: true, requestId: 'b'.repeat(32) },
+    local: { baseVersion: base, installedVersion: base, nextRelease: nextReleaseVersion(base), commit: 'a'.repeat(40), dirty: true, requestId: 'b'.repeat(32) },
   }
 }
 const bytes = (m: unknown) => Buffer.from(`${JSON.stringify(m, null, 2)}\n`)
-const validate = (input: Buffer) => validateLocalManifest(input, APP_VERSION)
+const validate = (input: Buffer) => validateLocalManifest(input, base)
 
 describe('local update version bounds', () => {
   it('increments local counters only when the installed and next-release bounds permit it', () => {
@@ -53,16 +73,20 @@ describe('local update version bounds', () => {
 })
 
 describe('version stamping', () => {
-  it('embeds the same version in the UI, host, window, keeper and Info.plist configuration', () => {
+  it('stamps the version the UI and host compile in and the window reads, which it passes to the keeper (#1501)', () => {
     const root = temp()
-    for (const path of ['packages/protocol/src/brand.ts', 'apps/desktop/src-tauri/Cargo.toml', 'apps/desktop/package.json', 'apps/desktop/src-tauri/tauri.conf.json']) {
+    for (const path of [...(stampedFiles() as string[]), 'apps/desktop/src-tauri/Cargo.toml']) {
       mkdirSync(join(root, path, '..'), { recursive: true })
       cpSync(resolve(path), join(root, path))
     }
-    stampLocalVersion(root, APP_VERSION, `${APP_VERSION}.local.2`)
-    expect(readFileSync(join(root, 'packages/protocol/src/brand.ts'), 'utf8')).toContain(`${APP_VERSION}.local.2`)
-    expect(readFileSync(join(root, 'apps/desktop/src-tauri/Cargo.toml'), 'utf8')).toContain(`version = "${APP_VERSION}.local.2"`)
-    for (const path of ['apps/desktop/package.json', 'apps/desktop/src-tauri/tauri.conf.json']) expect(JSON.parse(readFileSync(join(root, path), 'utf8')).version).toBe(`${APP_VERSION}.local.2`)
+    const version = `${base}.local.2`
+    stampLocalVersion(root, version)
+    expect(readFileSync(join(root, 'packages/protocol/src/version.generated.ts'), 'utf8')).toContain(`export const APP_VERSION: string = '${version}'`)
+    // The bundle's version (Info.plist) and what the window reads at run time, then gives the keeper as --app-version
+    expect(JSON.parse(readFileSync(join(root, 'apps/desktop/src-tauri/tauri.conf.json'), 'utf8')).version).toBe(version)
+    expect(JSON.parse(readFileSync(join(root, 'packaging/npm/centralu/package.json'), 'utf8')).version).toBe(version)
+    // Nothing compiled into Rust any more: Cargo.toml keeps the placeholder
+    expect(readFileSync(join(root, 'apps/desktop/src-tauri/Cargo.toml'), 'utf8')).toBe(readFileSync(resolve('apps/desktop/src-tauri/Cargo.toml'), 'utf8'))
   })
 })
 
@@ -86,9 +110,11 @@ it('keeps real signing behind approval, and runs no dependency installs or suppl
   const workflow = readFileSync(resolve('.github/workflows/local-content-sign.yml'), 'utf8')
   expect(workflow).toContain("inputs.dry_run == false && 'npm-publish' || ''")
   expect(workflow).toContain("GITHUB_REF !== 'refs/heads/main'")
-  expect(workflow).toContain('validateLocalManifest(bytes, readAppVersion())')
+  expect(workflow).toContain('validateLocalManifest(bytes, readReleaseBase())')
+  // Both jobs read the base from the release tags, which a shallow checkout lacks (#1501)
+  expect(workflow.match(/ {10}fetch-depth: 0\n {10}filter: blob:none\n/g)).toHaveLength(2)
   expect(workflow.match(/ref: \$\{\{ github.sha \}\}/g)).toHaveLength(2)
-  expect(readFileSync(resolve('scripts/content-manifest.mts'), 'utf8')).toContain('validateLocalManifest(manifest, readAppVersion())')
+  expect(readFileSync(resolve('scripts/content-manifest.mts'), 'utf8')).toContain('validateLocalManifest(manifest, readReleaseBase())')
   expect(workflow).toContain('sign-local manifest-data/content-manifest.json')
   expect(workflow).not.toMatch(/pnpm install|npm install|eval\(/)
 })
@@ -96,21 +122,19 @@ it('keeps real signing behind approval, and runs no dependency installs or suppl
 
 describe('the data-only manifest boundary', () => {
   it('derives the signing bounds from checkout data rather than an uploaded future release', () => {
-    expect(readAppVersion()).toBe(APP_VERSION)
-    const file = join(temp(), 'brand.ts')
-    writeFileSync(file, `export const APP_VERSION = '${base}'\nthrow new Error('brand.ts must never execute')\n`)
-    expect(readAppVersion(file)).toBe(base)
-    writeFileSync(file, 'export const APP_VERSION = uploaded.version\n')
-    expect(() => readAppVersion(file)).toThrow(/checked-out APP_VERSION is missing/)
+    // The newest release tag reachable from the checkout's HEAD; another tag is not a release
+    expect(readReleaseBase(taggedCheckout(['scripts/local-manifest.mjs']))).toBe(base)
+    const untagged = taggedCheckout(['scripts/local-manifest.mjs'], 'nightly')
+    expect(() => readReleaseBase(untagged)).toThrow(/no release tag \(v\*\) is reachable/)
     expect(() => validateLocalManifest(bytes(fixture()))).toThrow(/invalid version/)
 
-    const future = `${APP_VERSION.split('-')[0]}-beta.999`
+    const future = `${base.split('-')[0]}-beta.999`
     const crafted = {
       ...fixture(), appVersion: `${future}.local.1`,
       local: { ...fixture().local, baseVersion: future, installedVersion: future, nextRelease: nextReleaseVersion(future) },
     }
-    expect(() => validate(bytes(crafted))).toThrow(/baseVersion must match checked-out APP_VERSION/)
-    expect(() => validate(bytes({ ...crafted, local: { ...crafted.local, baseVersion: APP_VERSION } }))).toThrow(/must be <base>\.local/)
+    expect(() => validate(bytes(crafted))).toThrow(/baseVersion must match the release tag of the checkout/)
+    expect(() => validate(bytes({ ...crafted, local: { ...crafted.local, baseVersion: base } }))).toThrow(/must be <base>\.local/)
     expect(() => validate(bytes({ ...fixture(), local: { ...fixture().local, nextRelease: crafted.local.nextRelease } }))).toThrow(/incorrect next release/)
   })
 
@@ -121,7 +145,7 @@ describe('the data-only manifest boundary', () => {
       { appVersion: base }, { appVersion: `${base}-local.1` }, { files: [] }, { local: {} }, { code: 'process.exit()' },
       { local: { ...fixture().local, dirty: 'true' } }, { local: { ...fixture().local, commit: 'bad' } },
       { local: { ...fixture().local, nextRelease: '9.0.0' } },
-      { local: { ...fixture().local, installedVersion: `${APP_VERSION}.local.1` } },
+      { local: { ...fixture().local, installedVersion: `${base}.local.1` } },
     ]
     for (const mutation of bad) expect(() => validate(bytes({ ...fixture(), ...mutation })), JSON.stringify(mutation)).toThrow()
     for (const path of ['/host/a', 'host/../a', 'host/./a', 'host//a', 'host/a\\b', 'host/a\n', 'evil.mjs', 'host', 'content-manifest.json']) {
@@ -153,6 +177,8 @@ describe('the data-only manifest boundary', () => {
   })
 
   it('rehearses the exact workflow signer with a throwaway key and preserves the original bytes', () => {
+    // The signer in a checkout released as the fixture's base, as the workflow's is
+    const checkout = taggedCheckout(SIGNER)
     const root = temp()
     const content = join(root, 'content')
     mkdirSync(content)
@@ -170,24 +196,20 @@ describe('the data-only manifest boundary', () => {
     const original = Buffer.from('  ' + JSON.stringify({ ...generated, local: m.local }, null, 4) + '\n\n')
     const manifestPath = join(content, MANIFEST_NAME)
     writeFileSync(manifestPath, original)
-    const stdout = execFileSync(process.execPath, ['--experimental-strip-types', resolve('scripts/content-manifest.mts'), 'sign-local', manifestPath, '--dry-run'], { encoding: 'utf8', env: { ...process.env, CONTENT_SIGNING_KEY: 'invalid-secret-must-never-be-printed' } })
+    const stdout = execFileSync(process.execPath, ['--experimental-strip-types', join(checkout, 'scripts/content-manifest.mts'), 'sign-local', manifestPath, '--dry-run'], { encoding: 'utf8', env: { ...process.env, CONTENT_SIGNING_KEY: 'invalid-secret-must-never-be-printed' } })
     expect(stdout).toContain('throwaway')
     expect(stdout).not.toContain('invalid-secret')
     expect(readFileSync(manifestPath).equals(original)).toBe(true)
     const signature = readFileSync(join(content, SIGNATURE_NAME))
     expect(JSON.parse(signature.toString()).comment).toContain('throwaway')
     expect(() => verifyManifest(original, signature, { keys: [] })).toThrow(/unknown key/)
-    expect(() => execFileSync(process.execPath, ['--experimental-strip-types', resolve('scripts/content-manifest.mts'), 'sign-local', manifestPath], { stdio: 'pipe', env: { ...process.env, CONTENT_SIGNING_KEY: '' } })).toThrow()
+    expect(() => execFileSync(process.execPath, ['--experimental-strip-types', join(checkout, 'scripts/content-manifest.mts'), 'sign-local', manifestPath], { stdio: 'pipe', env: { ...process.env, CONTENT_SIGNING_KEY: '' } })).toThrow()
   })
 
   // The workflow's run blocks are bash for GitHub's Linux runner (they are what this runs), and a local update is
   // darwin-arm64 only (`pnpm local-update` refuses anywhere else), so there is no Windows run of either to check
   it.skipIf(process.platform === 'win32')('rehearses both workflow run blocks locally without environment secrets', () => {
-    const root = temp()
-    for (const path of ['scripts/content-manifest.mts', 'scripts/local-manifest.mjs', 'packaging/npm/centralu/bin/semver.mjs', 'packaging/shell/keys.json', 'packages/protocol/src/brand.ts']) {
-      mkdirSync(join(root, path, '..'), { recursive: true })
-      cpSync(resolve(path), join(root, path))
-    }
+    const root = taggedCheckout(SIGNER)
     const workflow = readFileSync(resolve('.github/workflows/local-content-sign.yml'), 'utf8')
     const blocks = [...workflow.matchAll(/ {8}run: \|\n((?: {10}.*\n|\n)+)/g)].map((match) => match[1]!.split('\n').map((line) => line.slice(10)).join('\n'))
     expect(blocks).toHaveLength(2)
@@ -200,7 +222,7 @@ describe('the data-only manifest boundary', () => {
     expect(readFileSync(summary, 'utf8')).toContain('Dirty: true')
     expect(() => execFileSync('/bin/bash', ['-e', '-u', '-o', 'pipefail', '-c', blocks[0]!], { cwd: root, env: { ...env, DRY_RUN: 'false' }, stdio: 'pipe' })).toThrow(/real signing runs only from main/)
 
-    const future = `${APP_VERSION.split('-')[0]}-beta.999`
+    const future = `${base.split('-')[0]}-beta.999`
     const crafted = bytes({
       ...fixture(), appVersion: `${future}.local.1`,
       local: { ...fixture().local, baseVersion: future, installedVersion: future, nextRelease: nextReleaseVersion(future) },
@@ -208,7 +230,7 @@ describe('the data-only manifest boundary', () => {
     rmSync(join(root, 'manifest-data'), { recursive: true, force: true })
     expect(() => execFileSync('/bin/bash', ['-e', '-u', '-o', 'pipefail', '-c', blocks[0]!], {
       cwd: root, env: { ...env, INPUT_MANIFEST: crafted.toString('utf8') }, stdio: 'pipe',
-    })).toThrow(/baseVersion must match checked-out APP_VERSION/)
+    })).toThrow(/baseVersion must match the release tag of the checkout/)
     expect(existsSync(join(root, 'manifest-data', MANIFEST_NAME))).toBe(false)
 
     // The signer must independently refuse the same data if it reaches the artifact boundary.
@@ -216,7 +238,7 @@ describe('the data-only manifest boundary', () => {
     writeFileSync(join(root, 'manifest-data', MANIFEST_NAME), crafted)
     expect(() => execFileSync('/bin/bash', ['-e', '-u', '-o', 'pipefail', '-c', blocks[1]!], {
       cwd: root, env, stdio: 'pipe',
-    })).toThrow(/baseVersion must match checked-out APP_VERSION/)
+    })).toThrow(/baseVersion must match the release tag of the checkout/)
     expect(existsSync(join(root, 'manifest-data', SIGNATURE_NAME))).toBe(false)
   })
 
@@ -235,7 +257,7 @@ if (args[1] === 'download') { const dest = args[args.indexOf('--dir') + 1]; fs.m
     vi.stubEnv('FAKE_GH_STATE', env.FAKE_GH_STATE)
     vi.stubEnv('FAKE_GH_LOG', env.FAKE_GH_LOG)
     const original = bytes(fixture())
-    const signature = await requestSignature(original, root)
+    const signature = await requestSignature(original, root, base)
     expect(readFileSync(signature, 'utf8')).toBe('signature-data')
     expect(JSON.parse(gh.state().input)).toEqual({ manifest: original.toString('utf8'), dry_run: 'false' })
     const calls = JSON.stringify(gh.calls().map((c) => c.args))

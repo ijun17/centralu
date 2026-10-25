@@ -39,17 +39,26 @@ pub fn parse_args(args: &[String]) -> Options {
     o
 }
 
-/// The build this keeper's executable is from, as the options name it (`--host-source`).
+/// The build this keeper's executable is from, as the options name it (`--host-source`, `--app-version`).
 pub(in crate::keeper) fn own_build(o: &Options) -> BuildSource {
     match &o.host_source {
-        Some(dir) => BuildSource::from_host_dir(
-            dir,
-            o.bundle_path.clone(),
-            o.app_version.clone().or_else(|| Some(env!("CARGO_PKG_VERSION").to_string())),
-        ),
+        Some(dir) => BuildSource::from_host_dir(dir, o.bundle_path.clone(), o.app_version.clone()),
         None => BuildSource::dev(),
     }
 }
+
+/// Why these options cannot start a keeper, or None. A built host (`--host-source`) needs the app's
+/// version (`--app-version`): git holds none, so nothing compiled in can stand for it (#1501), and the
+/// content folder, the build record and the handoff are named after it. Every starter passes it: the
+/// window and the shell (`exe::Start`), and a keeper handing over to its successor (`handoff`).
+pub(in crate::keeper) fn missing_option(o: &Options) -> Option<&'static str> {
+    (o.host_source.is_some() && o.app_version.as_deref().is_none_or(|v| v.trim().is_empty()))
+        .then_some("--host-source without --app-version: the app's version is not compiled in, so a keeper running a built host must be told it")
+}
+
+/// The exit code of a keeper started with options it cannot run with (`missing_option`), told apart
+/// from 1 (could not start) and 3 (another keeper holds the folder)
+pub(in crate::keeper) const EXIT_USAGE: i32 = 2;
 
 /// The keeper's entry point. Returns the process exit code.
 pub fn run(args: &[String]) -> i32 {
@@ -65,6 +74,10 @@ pub fn run(args: &[String]) -> i32 {
     }
     if let Some((from, to)) = raised {
         log(&format!("descriptor limit raised from {from} to {to}"));
+    }
+    if let Some(why) = missing_option(&opts) {
+        log(&format!("not starting: {why}"));
+        return EXIT_USAGE;
     }
     // Started by another keeper to take its place (step 4): everything comes from that keeper.
     if let Some(fd) = opts.take_over_fd {

@@ -36,7 +36,6 @@ import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, read
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { APP_VERSION } from '../packages/protocol/src/brand.js'
 import { MANIFEST_NAME, throwawayKey, verifyContent, writeContentManifest, type SigningKey, type TrustedKey } from './content-manifest.mjs'
 import {
   APP_DIR_NAME,
@@ -127,15 +126,20 @@ export async function shellToCarry(opts: { usePinned: boolean; out: string; targ
 /**
  * Writes the content into `dir` from the bundle's keeper and host, and signs it. Returns the
  * manifest's bytes, which the copy in the bundle must still have.
+ *
+ * `appVersion` is the version the bundle was stamped with (#1501): the keeper names the content
+ * folder after the version the window passes it, which is the bundle's, and refuses a manifest that
+ * says another. No default: `APP_VERSION` imported here is the placeholder of the source, evaluated
+ * before any stamp.
  */
-export function stageContent(dir: string, opts: { bundle: string; key: SigningKey; platform: string; appVersion?: string }): Buffer {
+export function stageContent(dir: string, opts: { bundle: string; key: SigningKey; platform: string; appVersion: string }): Buffer {
   rmSync(dir, { recursive: true, force: true })
   mkdirSync(dir, { recursive: true })
   // `dereference`: a symlink in the host would be refused by the manifest and dropped by npm.
   cpSync(join(opts.bundle, HOST_IN_BUNDLE), join(dir, 'host'), { recursive: true, dereference: true })
   cpSync(join(opts.bundle, KEEPER_IN_BUNDLE), join(dir, KEEPER_EXE))
   chmodSync(join(dir, KEEPER_EXE), 0o755)
-  return writeContentManifest(dir, { appVersion: opts.appVersion ?? APP_VERSION, platform: opts.platform }, opts.key).manifest
+  return writeContentManifest(dir, { appVersion: opts.appVersion, platform: opts.platform }, opts.key).manifest
 }
 
 const DITTO_CLEAN = ['--norsrc', '--noextattr', '--noqtn', '--noacl']
@@ -193,7 +197,11 @@ async function stageLocal(bundle: string, targetDir: string): Promise<void> {
   const key = throwawayKey()
   const platform = `${process.platform}-${process.arch}`
   const contentDir = join(release, 'content')
-  const manifest = stageContent(contentDir, { bundle, key, platform })
+  // The version `pnpm app` stamped the bundle with (app-build.mts), as the window reads it
+  const plist = readFileSync(join(bundle, 'Contents/Info.plist'), 'utf8')
+  const appVersion = /<key>CFBundleShortVersionString<\/key>\s*<string>([^<]+)<\/string>/.exec(plist)?.[1]
+  if (!appVersion) throw new Error(`no CFBundleShortVersionString in ${bundle}/Contents/Info.plist`)
+  const manifest = stageContent(contentDir, { bundle, key, platform, appVersion })
   stageBundle(bundle, { shell, contentDir })
   checkStaged(bundle, { keys: [{ name: 'throwaway', keyId: key.keyId, publicKey: key.publicKey }], platform, manifest })
   console.log(`staged shell ${shell.version} (unpinned) and content signed with a throwaway key into ${bundle}`)

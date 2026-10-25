@@ -48,7 +48,7 @@ const git = (cwd: string, ...args: string[]) =>
   execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', '-c', 'core.autocrlf=false', ...args], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
 
 /** A Centralu working copy at one commit: the launcher package of release `base`, the protocol, and a stand-in bundler */
-function fakeRepo(dir: string, o: { base?: string; protocol?: number; floor?: string } = {}): { repo: string; commit: string } {
+function fakeRepo(dir: string, o: { base?: string; protocol?: number; floor?: string; tag?: string } = {}): { repo: string; commit: string } {
   const repo = join(dir, 'repo')
   const files: Record<string, string> = {
     '.gitignore': 'node_modules/\n',
@@ -67,6 +67,8 @@ function fakeRepo(dir: string, o: { base?: string; protocol?: number; floor?: st
   git(repo, 'init', '-q')
   git(repo, 'add', '-A')
   git(repo, 'commit', '-q', '-m', 'a host change')
+  // A release tag on it, as a working copy of main after #1501 has: its files carry the placeholder
+  if (o.tag) git(repo, 'tag', '-a', o.tag, '-m', o.tag)
   return { repo, commit: git(repo, 'rev-parse', 'HEAD') }
 }
 
@@ -148,12 +150,22 @@ describe('remote-install.mjs: a dev build from a commit (#1036)', () => {
     rmSync(root, { recursive: true, force: true })
     expect(refusal(() => build(setup({ base: '1.0.0' })))).toBe('dev_base 1.0.0')
     rmSync(root, { recursive: true, force: true })
-    // A working copy on the tag scheme (#1501): its files carry a placeholder, not the release it was cut from
-    expect(refusal(() => build(setup({ base: '0.0.0-dev' })))).toBe('dev_base 0.0.0-dev')
+    // A working copy on the tag scheme (#1501) without its tags: its files carry the placeholder, never a base
+    expect(refusal(() => build(setup({ base: '0.0.0-dev' })))).toBe('dev_base')
     rmSync(root, { recursive: true, force: true })
     const bare = setup()
     rmSync(join(bare.repo, 'node_modules'), { recursive: true })
     expect(refusal(() => build(bare))).toMatch(/^dev_deps /)
+  })
+
+  it('cuts a working copy on the tag scheme from the newest release tag reachable from its HEAD (#1501)', () => {
+    // Its files carry the placeholder; the release it was cut from is the tag, as scripts/app-version.mjs resolves it
+    const s = setup({ base: '0.0.0-dev', tag: `v${BASE}` })
+    expect(build(s).installed.version).toBe(`${BASE}.local.1`)
+    expect(JSON.parse(readFileSync(s.r('versions', `${BASE}.local.1`, 'node_modules', 'centralu', 'package.json'), 'utf8')).version).toBe(`${BASE}.local.1`)
+    rmSync(root, { recursive: true, force: true })
+    // The tag is the base even where the files still say a version (a commit from before the switch)
+    expect(build(setup({ base: '9.9.0-beta.7', tag: `v${BASE}` })).installed.version).toBe(`${BASE}.local.1`)
   })
 
   it('places nothing when the build fails, and says its last line', () => {

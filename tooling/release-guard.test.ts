@@ -22,8 +22,11 @@ type Decision = { ok: boolean; scheme: string; version: string; dryRun: string; 
 const load = async () => (await import('../scripts/release-guard.mjs')) as { decide: (f: Facts) => Promise<Decision>; schemeOf: (t: string) => { scheme: string | null; version?: string; problem?: string } }
 
 const WORKFLOW = readFileSync(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8')
-const brand = readFileSync(new URL('../packages/protocol/src/brand.ts', import.meta.url), 'utf8')
-const version = /^export const APP_VERSION = '([^']+)'/m.exec(brand)![1]
+/** This repository's brand.ts: under the tag scheme since #1501 (the version imported from the generated file) */
+const ownBrand = readFileSync(new URL('../packages/protocol/src/brand.ts', import.meta.url), 'utf8')
+/** A brand.ts of the brand scheme, as this repository's was until #1501 */
+const version = '0.2.0-beta.4'
+const brand = `/** Values that identify the app. */\nexport const APP_NAME = 'Centralu'\n\nexport const APP_VERSION = '${version}'\n\nexport const CLIENT_INFO = { name: 'centralu', title: APP_NAME, version: APP_VERSION } as const\n`
 const HEAD = 'a'.repeat(40)
 
 /** A release that is all in order: v1.0.0-beta.2 after v1.0.0-beta.1, on main, nothing of it on the registry yet. */
@@ -46,11 +49,13 @@ const errors = (d: Decision) => d.errors.join(' ')
 it('reads the scheme from brand.ts: the literal of this repository, the tag scheme only on its marker or no APP_VERSION at all', async () => {
   const { schemeOf } = await load()
   expect(schemeOf(brand)).toEqual({ scheme: 'brand', version })
+  // This repository's own, since the switch: a tag of any version is held to the tag scheme's rules
+  expect(schemeOf(ownBrand)).toEqual({ scheme: 'tag' })
   expect(schemeOf("export { APP_VERSION } from './version.generated.js'\n")).toEqual({ scheme: 'tag' })
   expect(schemeOf("import { APP_VERSION } from './version.generated.js'\r\nexport const CLIENT_INFO = { version: APP_VERSION }\r\n")).toEqual({ scheme: 'tag' })
   expect(schemeOf("export const APP_NAME = 'Centralu'\n")).toEqual({ scheme: 'tag' })
   // A declaration the literal's pattern misses is not the tag scheme: that would let a tag of any version publish (review item 2)
-  for (const text of ['export const APP_VERSION = "1.0.0-beta.2"', "export const APP_VERSION: string = '1.0.0-beta.2'", 'export const APP_VERSION = readVersion()', "export const APP_VERSION = '1.0.0'\nexport { APP_VERSION } from './version.generated.js'"])
+  for (const text of ['export const APP_VERSION = "1.0.0-beta.2"', "export const APP_VERSION: string = '1.0.0-beta.2'", 'export const APP_VERSION = readVersion()', "export const APP_VERSION = '1.0.0'\nexport { APP_VERSION } from './version.generated.js'", "import { APP_VERSION } from './version.generated.js'\nexport const APP_VERSION = \"1\""])
     expect(schemeOf(text), text).toMatchObject({ scheme: null })
 })
 
@@ -259,7 +264,7 @@ describe('run as the workflow runs it', () => {
     expect(r.stdout).toContain('No release tag before v1.0.0-beta.2 is visible, but the registry has centralu')
   })
 
-  it("rehearses this repository's brand.ts as the old guard did", async () => {
+  it('rehearses a brand.ts of the brand scheme as the old guard did', async () => {
     const r = await run(
       (d) => commit(d, 'packages/protocol/src/brand.ts', brand, 'c0'),
       { GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF_NAME: `chore/release-${version}`, INPUT_DRY_RUN: 'true', INPUT_ALSO_LATEST: 'true', INPUT_VERSION: '' },

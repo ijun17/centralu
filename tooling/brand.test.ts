@@ -19,6 +19,14 @@ const LEGACY_MARK = 'legacy-name'
 const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8')
 const json = (p: string) => JSON.parse(read(p)) as Record<string, unknown>
 
+/**
+ * The version every carrier holds (#1501): git holds no release version, so each is committed as the placeholder, and
+ * a stamped carrier committed by accident fails here. A release stamps the tree before `pnpm verify` runs in it
+ * (`release-npm.mts`, with `CENTRALU_VERSION` set): there the stamped carriers must hold that version.
+ */
+const PLACEHOLDER = '0.0.0-dev'
+const STAMPED = process.env.CENTRALU_VERSION || PLACEHOLDER
+
 describe('the name is decided in one place', () => {
   it('the window title and bundle name match APP_NAME', () => {
     const tauri = json('apps/desktop/src-tauri/tauri.conf.json')
@@ -36,10 +44,28 @@ describe('the name is decided in one place', () => {
     }
   })
 
-  it('the version matches in all three places', () => {
-    expect(json('apps/desktop/src-tauri/tauri.conf.json').version).toBe(APP_VERSION)
-    expect(json('apps/desktop/package.json').version).toBe(APP_VERSION)
-    expect(read('apps/desktop/src-tauri/Cargo.toml')).toContain(`version = "${APP_VERSION}"`)
+  it('no carrier holds a release version: the placeholder, or what a release stamped into it (#1501)', () => {
+    expect(APP_VERSION).toBe(STAMPED)
+    expect(read('packages/protocol/src/version.generated.ts')).toContain(`export const APP_VERSION: string = '${STAMPED}'`)
+    expect(json('apps/desktop/src-tauri/tauri.conf.json').version).toBe(STAMPED)
+    // Never stamped: nothing reads them for the version (the window reads tauri.conf.json at run time)
+    expect(json('apps/desktop/package.json').version).toBe(PLACEHOLDER)
+    expect(read('apps/desktop/src-tauri/Cargo.toml')).toContain(`[workspace.package]\nversion = "${PLACEHOLDER}"`)
+    for (const name of ['centralu', 'centralu-keeper-core']) {
+      expect(read('apps/desktop/src-tauri/Cargo.lock'), name).toContain(`name = "${name}"\nversion = "${PLACEHOLDER}"`)
+    }
+    // brand.ts declares none: it imports the generated module, as the release guard's tag scheme expects
+    expect(read('packages/protocol/src/brand.ts')).toMatch(/^import \{ APP_VERSION \} from '\.\/version\.generated\.js'$/m)
+    expect(read('packages/protocol/src/brand.ts')).not.toMatch(/^export const APP_VERSION\b/m)
+  })
+
+  it('the window and the keeper read the version at run time, never the placeholder compiled in (#1501)', () => {
+    // CARGO_PKG_VERSION is Cargo.toml's 0.0.0-dev: the window reads tauri.conf.json (`package_info()`) and tells the
+    // keeper (`--app-version`), which names the content folder and its build record after it
+    const rust = execFileSync('git', ['ls-files', 'apps/desktop/src-tauri/src', 'apps/desktop/src-tauri/keeper/src'], { encoding: 'utf8' }).trim().split('\n').filter((f) => f.endsWith('.rs'))
+    expect(rust.length).toBeGreaterThan(10)
+    expect(rust.filter((f) => read(f).includes('CARGO_PKG_VERSION'))).toEqual([])
+    expect(read('apps/desktop/src-tauri/src/sidecar/mod.rs')).toContain('app.package_info().version.to_string()')
   })
 
   it('the npm package name and version follow brand.ts', () => {
@@ -48,7 +74,7 @@ describe('the name is decided in one place', () => {
     // back too.
     const main = json('packaging/npm/centralu/package.json')
     expect(main.name).toBe(APP_SLUG)
-    expect(main.version).toBe(APP_VERSION)
+    expect(main.version).toBe(STAMPED)
 
     /*
      * One entry per platform package. The bundle name is what the launcher looks for by
@@ -67,10 +93,10 @@ describe('the name is decided in one place', () => {
     for (const { dir, bundle, name } of platforms) {
       const arch = json(`packaging/npm/${dir}/package.json`)
       expect(arch.name, dir).toBe(name)
-      expect(arch.version, dir).toBe(APP_VERSION)
+      expect(arch.version, dir).toBe(STAMPED)
       // The shell and the contents have to be **exactly the same version** (left as a range,
       // they could drift apart).
-      expect((main.optionalDependencies as Record<string, string>)[arch.name as string], dir).toBe(APP_VERSION)
+      expect((main.optionalDependencies as Record<string, string>)[arch.name as string], dir).toBe(STAMPED)
       // The bundle name carried by the architecture package also follows APP_NAME.
       expect(arch.files, dir).toContain(bundle)
     }

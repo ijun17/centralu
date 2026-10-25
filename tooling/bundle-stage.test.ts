@@ -81,11 +81,13 @@ describe('where the bundle carries the shell and the content', () => {
     expect(release.indexOf('await stageShellAndContent(')).toBeLessThan(release.indexOf("sh('npm', ['publish'"))
   })
 
-  it('`pnpm app` stages its build too, before opening it', () => {
-    const app = (JSON.parse(read('package.json')) as { scripts: Record<string, string> }).scripts.app ?? ''
-    const order = ['tauri build', 'scripts/bundle-stage.mts', 'open ']
+  it('`pnpm app` stamps the version, builds, puts the placeholder back, then stages its build, before opening it', () => {
+    expect((JSON.parse(read('package.json')) as { scripts: Record<string, string> }).scripts.app).toBe('tsx scripts/app-build.mts')
+    const app = read('scripts/app-build.mts')
+    // runSteps (stamp-version.mjs) stamps for the first step only, and restores on a signal: tooling/stamp-version.test.ts
+    const order = ['await run(', "'tauri', 'build'", 'scripts/bundle-stage.mts', "['open', [bundle]]", '{ stamped: 1,']
     const idx = order.map((s) => app.indexOf(s))
-    expect(idx.every((i) => i > -1)).toBe(true)
+    expect(idx.every((i) => i > -1), JSON.stringify(idx)).toBe(true)
     expect([...idx].sort((a, b) => a - b)).toEqual(idx)
   })
 })

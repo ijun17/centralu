@@ -1804,9 +1804,11 @@ are self-reported; signing does not attest that the code came from that commit o
 CI treats the manifest as data and never executes the uploaded code, but the resulting signature
 grants that code the same content trust as a release.
 
-Both validation passes read `APP_VERSION` as data from `packages/protocol/src/brand.ts` in the
-checked-out workflow commit (the dispatched `main` commit for this workflow). The uploaded
-`local.baseVersion` must equal it, and the next release and upper bound are derived from it.
+Both validation passes read the base version as data from the checked-out workflow commit (the
+dispatched `main` commit for this workflow): the newest release tag reachable from it
+(`readReleaseBase`; since #1501 no file holds the version, and both jobs check out the whole history
+for its tags). Tags are pushed only by maintainers, as main is. The uploaded `local.baseVersion`
+must equal it, and the next release and upper bound are derived from it.
 A manifest claiming `beta.999` cannot advance the shell's highest-seen floor when main is on
 `beta.20`. The reported installed version is not an attestation of any machine's state.
 

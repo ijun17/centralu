@@ -966,9 +966,11 @@ step shows on the screen.
   workflow's guard (`scripts/release-guard.mjs`) holds a tag pushed by hand to the same rules.
 - **Never run a `release` step against the real repository in a test**: the tests use a fake `gh`
   and push to a bare repository through `pushurl`.
-- Tests: `tooling/project-board-release.test.ts`. It also holds `versionFiles` to this repository: the
-  files they name are exactly the files that carry `APP_VERSION` as a quoted string, and a bump of the
-  real files leaves none of them behind.
+- Tests: `tooling/project-board-release.test.ts`. It also holds `versionFiles` to this repository, which
+  is on the tag scheme since #1501: every file they name holds the placeholder `0.0.0-dev`, `brand.ts`
+  declares nothing, and the last brand-scheme version is left in no other file. Its fixture repositories
+  are of the brand scheme, made from those files (`brandSchemeText`), and run with `release.scheme` set
+  back to "brand" unless a test says "tag".
 
 ## Files
 

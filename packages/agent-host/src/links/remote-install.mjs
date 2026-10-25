@@ -462,11 +462,23 @@ function atLeast(a, b) {
 /** A release a dev build can be cut from: a prerelease, since `<base>.local.N` is SemVer only on one (`isLocalBuildVersion`) */
 const DEV_BASE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*$/
 /**
- * The placeholder a working copy's version files carry once its release version is stamped from the tag at build time
- * (#1501). A dev build of it would say it is `0.0.0-dev.local.N`, older than every release, so it is refused, by hubs
- * carrying this from before the switch lands.
+ * The placeholder a working copy's version files carry since its release version is stamped from the tag at build time
+ * (#1501). Never a dev build's base: `0.0.0-dev.local.N` would be older than every release.
  */
 const PLACEHOLDER = /^0\.0\.0-dev(?:\.|$)/
+
+/**
+ * The release a dev build of the working copy is cut from, as `scripts/app-version.mjs` resolves it for a local build
+ * (#1501): the newest release tag reachable from HEAD there. A commit from before the switch, in a clone without tags,
+ * still carries its version in the shim's manifest, which is taken then. An empty string when neither says.
+ */
+function devBase(repo, shim) {
+  const r = spawnSync('git', ['-C', repo, 'describe', '--tags', '--abbrev=0', '--match', 'v[0-9]*'], { cwd: repo, encoding: 'utf8', windowsHide: true })
+  const tag = r.status === 0 ? String(r.stdout).trim().replace(/^v/, '') : ''
+  if (tag) return tag
+  const own = String(shim.version ?? '')
+  return PLACEHOLDER.test(own) ? '' : own
+}
 
 /** git in the working copy, by name on PATH as the person runs it there; what it printed, or a refusal */
 function git(repo, args) {
@@ -514,7 +526,7 @@ export function devBuild(p, { dataDir = process.env.CC_DATA_DIR || join(homedir(
     const changes = git(repo, ['status', '--porcelain']).split('\n').filter((line) => line.trim()).length
     if (changes > 0 && !p.allowDirty) throw new Refusal('dev_dirty', String(changes))
     const shim = JSON.parse(readFileSync(join(repo, 'packaging', 'npm', 'centralu', 'package.json'), 'utf8'))
-    const base = String(shim.version ?? '')
+    const base = devBase(repo, shim)
     if (!DEV_BASE.test(base) || base.includes('.local.') || PLACEHOLDER.test(base)) throw new Refusal('dev_base', base)
     const protocol = Number(/export const PROTOCOL_VERSION = (\d+)/.exec(readFileSync(join(repo, 'packages', 'protocol', 'src', 'envelope.ts'), 'utf8'))?.[1])
     if (protocol !== p.protocol) throw new Refusal('dev_protocol', `${protocol} ${p.protocol}`)

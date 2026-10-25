@@ -316,7 +316,7 @@ function continuous(ns) {
 
 /** A third keeper on the same folder: refused (exit 3) while someone holds the lock and answers */
 function thirdKeeperRefused(b, data) {
-  const r = spawnSync(b.keeper, ['--data-dir', data, '--host-source', b.host], {
+  const r = spawnSync(b.keeper, ['--data-dir', data, '--host-source', b.host, '--app-version', '0.0.0-test'], {
     env: { ...process.env, CC_DATA_DIR: data },
     timeout: 20_000,
     encoding: 'utf8',

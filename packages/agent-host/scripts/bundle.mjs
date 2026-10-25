@@ -24,6 +24,7 @@ import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { CONPTY_FILES } from '../../../scripts/conpty-files.mjs'
+import { buildId } from './build-id.mjs'
 import { bundleOutFolder } from './bundle-out.mjs'
 
 const require = createRequire(import.meta.url)
@@ -34,23 +35,8 @@ rmSync(OUT, { recursive: true, force: true })
 mkdirSync(OUT, { recursive: true })
 
 // 1) JS bundle — native addons cannot be bundled, so they are kept external
-/**
- * **Makes the build output state which commit it came from, on its own.**
- *
- * During dogfooding, answering "which commit is the running app" required matching the binary's
- * mtime against commit times — a guess, and one that breaks the moment it is rebuilt. Embedded in
- * the first line of the startup log instead. The build continues even if git is absent or fails
- * ('unknown' is better than a failed build).
- */
-function buildId() {
-  try {
-    const sha = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim()
-    const dirty = execFileSync('git', ['status', '--porcelain'], { cwd: ROOT, encoding: 'utf8' }).trim()
-    return dirty ? `${sha}-dirty` : sha
-  } catch {
-    return 'unknown'
-  }
-}
+// The commit this build is from, not dirty for a stamped version alone (build-id.mjs)
+const BUILD_ID = buildId(ROOT)
 
 await build({
   entryPoints: [join(ROOT, 'packages/agent-host/src/main.ts')],
@@ -65,7 +51,7 @@ await build({
     '@cc/protocol': join(ROOT, 'packages/protocol/src/index.ts'),
   },
   define: {
-    __CC_BUILD__: JSON.stringify(buildId()),
+    __CC_BUILD__: JSON.stringify(BUILD_ID),
   },
   banner: {
     // Lets the ESM bundle load a CJS dependency (better-sqlite3) via require
@@ -266,7 +252,7 @@ writeFileSync(
   join(OUT, 'bundle-info.json'),
   JSON.stringify(
     {
-      commit: buildId(),
+      commit: BUILD_ID,
       protocolVersion: protocolVersion(),
       // The host answers a `prove` before hello (#838): `centralu serve` reads this to say `proof` in the connection line
       hostProof: 1,

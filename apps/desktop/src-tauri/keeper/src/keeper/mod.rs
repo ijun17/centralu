@@ -67,6 +67,10 @@ use swap::SwapView;
 /// rather than guessing at its answers.
 pub const KEEPER_PROTOCOL: u32 = 1;
 
+/// The version of a keeper that runs no built host (started by hand, or a debug window's): what the
+/// version carriers hold in git (#1501, `scripts/app-version.mjs`).
+pub const DEV_VERSION: &str = "0.0.0-dev";
+
 /// The flag the window's `main()` looks for before anything graphical exists. Only a debug window
 /// passes it, to run the keeper in its own executable; anything else that passes it to the window's
 /// executable is refused there (`exe::run_from_window`, #461). `centralu-keeper` ignores it.
@@ -224,12 +228,13 @@ pub struct KeeperInfo {
 
 impl KeeperInfo {
     /// This process, started now, serving `data`, from the build `build`. A fresh keeper and one
-    /// that took over from another describe themselves the same way.
+    /// that took over from another describe themselves the same way. The version is the build's, as
+    /// the app passed it (`--app-version`); a keeper running the source host has none (`DEV_VERSION`).
     pub(super) fn of_this_process(data: &Path, build: BuildSource) -> KeeperInfo {
         KeeperInfo {
             pid: std::process::id(),
             protocol: KEEPER_PROTOCOL,
-            version: env!("CARGO_PKG_VERSION").to_string(),
+            version: build.version.clone().unwrap_or_else(|| DEV_VERSION.to_string()),
             started_at: now_secs(),
             data_dir: data.to_string_lossy().to_string(),
             build: Some(build),

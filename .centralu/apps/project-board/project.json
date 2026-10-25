@@ -54,6 +54,7 @@
     }
   },
   "release": {
+    "scheme": "tag",
     "source": {
       "path": "packages/protocol/src/brand.ts",
       "pattern": "^export const APP_VERSION = '([^']+)'",

@@ -15,6 +15,18 @@ const workflow = readFileSync(new URL('../.github/workflows/build.yml', import.m
 const bundle = workflow.split('  bundle:\n')[1]?.split(/^ {2}\S/m)[0] ?? ''
 const steps = bundle.split(/^ {6}- /m).slice(1)
 
+describe('CI bundles carry the release their commit was cut from (#1501)', () => {
+  it('fetches the tags and stamps the resolved version before building, on every platform', () => {
+    expect(steps[0]).toMatch(/^uses: actions\/checkout@[0-9a-f]{40} # v[\d.]+\n {8}with:\n(?: {10}#[^\n]*\n)* {10}fetch-depth: 0\n {10}filter: blob:none\n/)
+    const stamp = steps.findIndex((s) => s.startsWith('name: Stamp the version'))
+    const build = steps.findIndex((s) => s.startsWith('name: Build bundle'))
+    expect(stamp).toBeGreaterThan(-1)
+    expect(stamp).toBeLessThan(build)
+    expect(steps[stamp]).not.toContain('if:')
+    expect(steps[stamp]).toContain('run: node scripts/stamp-version.mjs "$(node scripts/app-version.mjs --fallback)"\n')
+  })
+})
+
 describe('CI proves the macOS app bundles without making an unused disk image', () => {
   it('builds only the app on macOS and keeps the default bundles on other platforms', () => {
     const builds = steps.filter((step) => /run:.*tauri build/.test(step))

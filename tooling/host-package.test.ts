@@ -14,7 +14,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { APP_VERSION } from '../packages/protocol/src/brand.js'
 import { hostOnlyPackage, type RemotePlatform } from '../packages/agent-host/src/links/install.js'
-import { hostPackageDir, hostPackageProblems, LAUNCHER_PACKAGE_FILE, PIN_FILE, remotePlatforms, stageHostPackage } from '../scripts/host-package.mjs'
+import { floorDiffers, hostPackageDir, hostPackageProblems, LAUNCHER_PACKAGE_FILE, PIN_FILE, remotePlatforms, stageHostPackage } from '../scripts/host-package.mjs'
 // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
 import { HOST_PACKAGES } from '../packaging/npm/centralu/bin/platform.mjs'
 
@@ -33,7 +33,9 @@ describe('one host-only package per platform a hub installs on', () => {
     it(`@centralu/host-${p} ships host/ only, at this version, for the machines its platform package installs on`, () => {
       const pkg = json(join(hostPackageDir(p), 'package.json'))
       expect(pkg.name).toBe(`@centralu/host-${p}`)
+      // The placeholder in git, or the version a release stamped into it before verifying (#1501, brand.test.ts)
       expect(pkg.version).toBe(APP_VERSION)
+      expect(pkg.version).toBe(process.env.CENTRALU_VERSION || '0.0.0-dev')
       expect(pkg.files).toEqual(['host'])
       const app = json(root(`packaging/npm/${p}/package.json`))
       expect(pkg.os).toEqual(app.os)
@@ -122,6 +124,13 @@ describe('staging and checking one (release-npm.mts)', () => {
       'host/centralu-package.json differs from packaging/npm/centralu/package.json: the host was bundled before the Node floor moved',
       'the package folder holds more than the host: centralu.exe',
     ])
+    // #1501 review: the manifest carries the stamped version; a host bundled before the stamp differs by it alone
+    const launcher = readFileSync(LAUNCHER_PACKAGE_FILE, 'utf8')
+    writeFileSync(join(pkg, 'host', 'centralu-package.json'), launcher.split('"0.0.0-dev"').join('"0.2.0-beta.4"'))
+    expect(hostPackageProblems(pkg, 'win32-x64')).toContain(
+      'host/centralu-package.json differs from packaging/npm/centralu/package.json: the host was bundled before the version was stamped (bundle it from the stamped tree, as release-npm does)',
+    )
+    expect(floorDiffers(launcher, launcher)).toBeNull()
     rmSync(join(pkg, 'host', 'centralu-package.json'))
     expect(hostPackageProblems(pkg, 'win32-x64')).toContain('host/centralu-package.json is missing: a hub on this version could not tell which Node a machine needs')
   })

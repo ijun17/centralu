@@ -74,6 +74,28 @@ const NPM_RETRY_WINDOW_MS = 10 * 60 * 1000
  */
 export type LatestResult = { ok: true; version: string } | { ok: false; reason: string }
 
+/** What a source tree's version carriers hold until a build stamps them (#1501, `scripts/app-version.mjs` PLACEHOLDER) */
+export const UNSTAMPED_VERSION = '0.0.0-dev'
+
+/**
+ * Whether this build may install a release by itself (#1501 review): never a host run from source (`build` `dev`), nor
+ * one whose version is the placeholder (a source tree, or a remote dev build's host bundle). Every release is newer than
+ * `0.0.0-dev`, so a stored "Automatic updates" on would otherwise run `npm i -g centralu@<latest>` on the machine of
+ * whoever runs `pnpm host` against their own data folder. The update line still shows the release; a click installs it.
+ */
+export function installsByItself(build: string | undefined, current: string): boolean {
+  return build !== 'dev' && current !== UNSTAMPED_VERSION
+}
+
+/**
+ * Whether this hub updates its linked machines by itself to its own version (#1508, `LinkDeps.autoUpdate`): with
+ * "Automatic updates" on, not mid-swap, and only from a build that may install by itself (`installsByItself`). A dev
+ * hub's machines would also refuse on their own (`channel('0.0.0-dev')` is `dev`), but this does not lean on that.
+ */
+export function hubUpdatesMachines(f: { build: string; current: string; autoApply: boolean; draining: boolean }): boolean {
+  return installsByItself(f.build, f.current) && f.autoApply && !f.draining
+}
+
 /**
  * Seams, and why they exist.
  *
@@ -82,6 +104,13 @@ export type LatestResult = { ok: true; version: string } | { ok: false; reason: 
  * not a test, it is a side effect. Everything else here is the real thing.
  */
 export type UpdateDeps = {
+  /**
+   * The version this build is: `APP_VERSION` when not given. Tests give a release, since a source tree carries the
+   * placeholder `0.0.0-dev` (#1501) and every release is newer than that
+   */
+  current?: string
+  /** The bundled build id, `dev` for a host run from source (`BUILD`); it never installs by itself (`installsByItself`) */
+  build?: string
   /** Ask the registry what `latest` points at */
   fetchLatest?: (timeoutMs: number) => Promise<LatestResult>
   /** Run a command to completion, rejecting with its stderr */
@@ -224,6 +253,8 @@ export class UpdateService {
     deps: UpdateDeps = {},
   ) {
     this.deps = {
+      current: deps.current ?? APP_VERSION,
+      build: deps.build ?? '',
       fetchLatest: deps.fetchLatest ?? fetchLatestFromRegistry,
       run: deps.run ?? runCommand,
       installedCopy: deps.installedCopy ?? existingInstalledCopy,
@@ -250,13 +281,13 @@ export class UpdateService {
       /*
        * The honest source for "which build is this".
        *
-       * `APP_VERSION` is what the app was compiled from, and `tooling/brand.test.ts`
-       * fails the build if it disagrees with the npm packages that carry it. The
-       * workspace root's package.json is not it — that one is private, has no version
-       * anyone installs, and would have read `0.0.0` forever without ever being wrong
-       * enough to notice.
+       * `APP_VERSION` is what the app was compiled from: the version a release stamped
+       * into the build with the npm packages that carry it (#1501, `tooling/brand.test.ts`),
+       * or the placeholder `0.0.0-dev` of a source tree. The workspace root's package.json
+       * is not it — that one is private, has no version anyone installs, and would have
+       * read `0.0.0` forever without ever being wrong enough to notice.
        */
-      current: APP_VERSION,
+      current: this.deps.current,
       latest: null,
       newer: false,
       auto: this.deps.readAuto(),
@@ -351,6 +382,7 @@ export class UpdateService {
    */
   private installIfAutomatic(): void {
     if (!this.status.autoApply || !this.status.newer || !this.status.latest) return
+    if (!installsByItself(this.deps.build, this.deps.current)) return
     if (this.status.phase === 'idle') {
       void this.apply()
       return
@@ -377,6 +409,7 @@ export class UpdateService {
       this.retryTimer = null
       // The timer is the backoff; by the time it fires, the attempt is due
       if (this.stopped || !this.status.autoApply || this.status.phase !== 'failed' || !this.status.newer || !this.status.latest) return
+      if (!installsByItself(this.deps.build, this.deps.current)) return
       void this.apply()
     }, delay)
   }

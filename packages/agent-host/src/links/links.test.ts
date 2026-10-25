@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 import { fakeExe } from '../fake-exe.test-helpers.js'
-import { APP_VERSION, PROTOCOL_VERSION, sessionLiveDefaults, type HostActivity, type HostLogon, type MachineInfo, type NormalizedEvent, type SessionInfo } from '@cc/protocol'
+import { PROTOCOL_VERSION, sessionLiveDefaults, type HostActivity, type HostLogon, type MachineInfo, type NormalizedEvent, type SessionInfo } from '@cc/protocol'
 import { Store } from '../dev-services/store.js'
 import { SessionManager } from '../sessions/manager.js'
 import { createRpcHandler } from '../rpc.js'
@@ -21,6 +21,9 @@ import { readHoldCommand } from './swap-hold.js'
 import { storeMirror, storeRegistry } from './stored.js'
 import { scriptedAdapters } from './scripted-agent.test-helpers.js'
 import { SLOW, eventually } from '../../../../tooling/test-timing.js'
+
+/** The version the hub and its hosts are in these tests: a source tree carries the placeholder 0.0.0-dev (#1501), older than every release */
+const RELEASE = '0.1.0-beta.20'
 
 /**
  * Two real hosts in one process (#82): each with its own store, session manager, RPC handler and
@@ -70,7 +73,7 @@ async function remoteHost(
     port,
     token: TOKEN,
     onRpc: without(createRpcHandler(mgr, adapters, o.activity ? { activity: o.activity } : {}), o.without ?? [], o.onCall),
-    build: { commit: 'abc1234', protocolVersion: PROTOCOL_VERSION, version: o.version ?? APP_VERSION },
+    build: { commit: 'abc1234', protocolVersion: PROTOCOL_VERSION, version: o.version ?? RELEASE },
     ...(o.elevated ? { elevated: o.elevated } : {}),
     ...(o.logon ? { logon: o.logon } : {}),
     ...(o.handover ? { handover: o.handover } : {}),
@@ -105,7 +108,7 @@ async function hubHost(line: () => ConnectionLine, store = new Store(), add = tr
   const registry = storeRegistry(store)
   if (add && !registry.list().length) registry.add({ id: 'm1', name: 'Remote box', sshTarget: 'box', remote: { shell: 'posix' }, addedAt: 1, acceptedVersions: null })
   const links = new Links({
-    hub: { version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dev: false },
+    hub: { version: RELEASE, protocolVersion: PROTOCOL_VERSION, dev: false },
     broadcast: (e) => {
       server.broadcast(e)
       mgr.observeLinked(e)
@@ -167,7 +170,7 @@ const lineFor = (port: number, over: Partial<ConnectionLine> = {}): ConnectionLi
   v: 1,
   port,
   token: TOKEN,
-  version: APP_VERSION,
+  version: RELEASE,
   protocolVersion: PROTOCOL_VERSION,
   dataDir: '/remote',
   hostRunning: true,
@@ -499,7 +502,7 @@ describe('a hub linked to another host (#82)', () => {
     const dev = await hubHost(() => lineFor(1), store, false, {
       installer: { runtime: () => ({ node: { version: '24.21.0', archives: {} } }), script: () => '', registry: {} },
       tunnelFor: () => Object.assign(new DirectTunnel(() => lineFor(1)), { exec: async () => ({ code: 0, stderr: '', stdout: '' }) }),
-      hub: { version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dev: true },
+      hub: { version: RELEASE, protocolVersion: PROTOCOL_VERSION, dev: true },
     })
     await expect((await ui(dev.port)).call('machines.install', { machineId: 'm1' })).rejects.toThrow(/\(npm\.cmd i -g centralu\)/)
   })
@@ -610,7 +613,7 @@ describe('a hub linked to another host (#82)', () => {
     const registry = storeRegistry(store)
     registry.add({ id: 'm1', name: 'Remote box', sshTarget: 'box', remote: { shell: 'posix' }, addedAt: 1, acceptedVersions: null })
     const links = new Links({
-      hub: { version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dev: false },
+      hub: { version: RELEASE, protocolVersion: PROTOCOL_VERSION, dev: false },
       broadcast: () => {},
       terminal: () => {},
       mirror: storeMirror(store),
@@ -648,7 +651,7 @@ describe('a hub linked to another host (#82)', () => {
       const statuses: string[] = []
       const logs: string[] = []
       const links = new Links({
-        hub: { version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dev: false },
+        hub: { version: RELEASE, protocolVersion: PROTOCOL_VERSION, dev: false },
         broadcast: (e) => {
           if (e.type === 'machine_status') statuses.push(e.machine.status)
         },
@@ -676,7 +679,7 @@ describe('a hub linked to another host (#82)', () => {
           return { code: 0, stdout: hold ? `CENTRALU-HOLD ${hold}\n` : '', stderr: '' }
         },
         // A swap needs an install the hub manages there
-        { install: { managed: true, current: { version: APP_VERSION, node: '24.21.0' }, previous: null, node: '24.21.0' } },
+        { install: { managed: true, current: { version: RELEASE, node: '24.21.0' }, previous: null, node: '24.21.0' } },
       )
       await eventually(() => asked.length >= 2 && l.links.list()[0]!.status === 'updating')
       expect(l.starts()).toBe(0)
@@ -725,7 +728,7 @@ describe('a hub linked to another host (#82)', () => {
       registry.add({ id: 'm1', name: 'Remote box', sshTarget: 'box', remote: { shell: 'posix' }, addedAt: 1, acceptedVersions: null })
       const statuses: string[] = []
       const links = new Links({
-        hub: { version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dev: false },
+        hub: { version: RELEASE, protocolVersion: PROTOCOL_VERSION, dev: false },
         broadcast: (e) => {
           if (e.type === 'machine_status') statuses.push(e.machine.status)
         },
@@ -796,7 +799,7 @@ describe('a hub linked to another host (#82)', () => {
       const registry = storeRegistry(store)
       registry.add({ id: 'm1', name: 'Remote box', sshTarget: 'box', remote: { shell: 'posix' }, addedAt: 1, acceptedVersions: null })
       const links: Links = new Links({
-        hub: { version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dev: false },
+        hub: { version: RELEASE, protocolVersion: PROTOCOL_VERSION, dev: false },
         broadcast: (e) => {
           if (e.type !== 'machine_status') return
           statuses.push(e.machine.status)
@@ -992,27 +995,27 @@ describe('a hub linked to another host (#82)', () => {
 
 describe('machines.install (#82, plan §10.2)', () => {
   it('installs the hub’s version through the machine’s own shell, step by step, and refuses where it cannot', async () => {
-    const reg = await fakeRegistry(['centralu', '@centralu/linux-x64'].map((name) => ({ name, version: APP_VERSION, files: { 'package.json': '{}' } })))
+    const reg = await fakeRegistry(['centralu', '@centralu/linux-x64'].map((name) => ({ name, version: RELEASE, files: { 'package.json': '{}' } })))
     cleanups.push(() => reg.close())
     const runs: string[] = []
     const answers = [
       'motd\nCENTRALU-PREFLIGHT os=Linux arch=x86_64 glibc=2.39 musl=0 freeKb=99999999 tar=1 gzip=1 fetch=curl sha=sha256sum\n',
       'CENTRALU-INSTALL node ok\n',
-      `CENTRALU-INSTALL done ${JSON.stringify({ current: { version: APP_VERSION, node: '24.21.0' }, previous: { version: '0.0.1', node: '24.21.0' }, removed: ['0.0.0'], left: [] })}\n`,
+      `CENTRALU-INSTALL done ${JSON.stringify({ current: { version: RELEASE, node: '24.21.0' }, previous: { version: '0.0.1', node: '24.21.0' }, removed: ['0.0.0'], left: [] })}\n`,
     ]
     const tunnel = Object.assign(new DirectTunnel(() => lineFor(1)), { exec: async (cmd: string) => ({ code: 0, stderr: '', stdout: answers[runs.push(cmd) - 1] ?? '' }) })
     const installer = { runtime: () => ({ node: { version: '24.21.0', archives: { 'linux-x64': { file: 'node-v24.21.0-linux-x64.tar.gz', sha256: 'a'.repeat(64) } } } }), script: () => '// the installer', registry: { registry: reg.url } }
     const hub = await hubHost(() => lineFor(1), new Store(), true, { tunnelFor: () => tunnel, installer })
     const u = await ui(hub.port)
     const r = await u.call('machines.install', { machineId: 'm1' })
-    expect(r).toMatchObject({ machine: { id: 'm1' }, current: { version: APP_VERSION }, previous: { version: '0.0.1' }, removed: ['0.0.0'] })
+    expect(r).toMatchObject({ machine: { id: 'm1' }, current: { version: RELEASE }, previous: { version: '0.0.1' }, removed: ['0.0.0'] })
     // Preflight, Node, then the installer, each a script for the machine’s shell
     expect(runs).toHaveLength(3)
     expect(runs.every((c) => c.startsWith('printf %s '))).toBe(true)
     expect(Buffer.from(runs[2]!.split(' ')[2]!, 'base64').toString('utf8')).toContain('/node/v24.21.0/bin/node')
     // Refused where it cannot: an unknown machine, and a development hub, whose version is not published
     await expect(u.call('machines.install', { machineId: 'nope' })).rejects.toThrow(/No linked machine/)
-    const dev = await hubHost(() => lineFor(1), new Store(), true, { tunnelFor: () => tunnel, installer, hub: { version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dev: true } })
+    const dev = await hubHost(() => lineFor(1), new Store(), true, { tunnelFor: () => tunnel, installer, hub: { version: RELEASE, protocolVersion: PROTOCOL_VERSION, dev: true } })
     await expect((await ui(dev.port)).call('machines.install', { machineId: 'm1' })).rejects.toThrow(/development build is not published/)
     expect(runs).toHaveLength(3)
   })
@@ -1021,7 +1024,7 @@ describe('machines.install (#82, plan §10.2)', () => {
 describe('a machine whose Node is below the floor (#699)', () => {
   const PINNED = '24.21.0'
   const OLD = { managed: false, current: null, previous: null, node: '22.12.0' }
-  const MANAGED = { managed: true, current: { version: APP_VERSION, node: PINNED }, previous: null, node: PINNED }
+  const MANAGED = { managed: true, current: { version: RELEASE, node: PINNED }, previous: null, node: PINNED }
 
   /**
    * A machine on Node 22.12.0 (what its connection line reports), linked from a hub that can install.
@@ -1038,7 +1041,7 @@ describe('a machine whose Node is below the floor (#699)', () => {
     /** What the commands after the install answer (an uninstall); the machine is then back as it was */
     later?: string[]
   }) {
-    const reg = await fakeRegistry(['centralu', '@centralu/linux-x64'].map((name) => ({ name, version: APP_VERSION, files: { 'package.json': '{}' } })))
+    const reg = await fakeRegistry(['centralu', '@centralu/linux-x64'].map((name) => ({ name, version: RELEASE, files: { 'package.json': '{}' } })))
     cleanups.push(() => reg.close())
     const remote = await remoteHost()
     const runs: string[] = []
@@ -1051,7 +1054,7 @@ describe('a machine whose Node is below the floor (#699)', () => {
     const answers = [
       'CENTRALU-PREFLIGHT os=Linux arch=x86_64 glibc=2.39 musl=0 freeKb=99999999 tar=1 gzip=1 fetch=curl sha=sha256sum\n',
       'CENTRALU-INSTALL node ok\n',
-      `CENTRALU-INSTALL done ${JSON.stringify({ current: { version: APP_VERSION, node: PINNED }, previous: null, removed: [], left: [] })}\n`,
+      `CENTRALU-INSTALL done ${JSON.stringify({ current: { version: RELEASE, node: PINNED }, previous: null, removed: [], left: [] })}\n`,
     ]
     const tunnel = Object.assign(new DirectTunnel(() => (opens++, lineFor(remote.port, { hostRunning: running, install: installed ? MANAGED : OLD, ...o.line }))), {
       exec: async (cmd: string) => {
@@ -1082,7 +1085,7 @@ describe('a machine whose Node is below the floor (#699)', () => {
     storeRegistry(store).add({ id: 'm1', name: 'Remote box', sshTarget: 'box', remote: o.remote ?? { shell: 'posix' }, addedAt: 1, acceptedVersions: null })
     const logs: string[] = []
     const links = new Links({
-      hub: { version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dev: o.dev === true },
+      hub: { version: RELEASE, protocolVersion: PROTOCOL_VERSION, dev: o.dev === true },
       broadcast: () => {},
       terminal: () => {},
       mirror: storeMirror(store),
@@ -1216,27 +1219,27 @@ describe('a machine whose Node is below the floor (#699)', () => {
 
 describe('machines.install from a hub running a local build (#689)', () => {
   it('installs the release the local build was cut from, and says so; the row it leaves connects although the versions differ', async () => {
-    const reg = await fakeRegistry(['centralu', '@centralu/linux-x64'].map((name) => ({ name, version: APP_VERSION, files: { 'package.json': '{}' } })))
+    const reg = await fakeRegistry(['centralu', '@centralu/linux-x64'].map((name) => ({ name, version: RELEASE, files: { 'package.json': '{}' } })))
     cleanups.push(() => reg.close())
     const remote = await remoteHost()
     const runs: string[] = []
     const answers = [
       'CENTRALU-PREFLIGHT os=Linux arch=x86_64 glibc=2.39 musl=0 freeKb=99999999 tar=1 gzip=1 fetch=curl sha=sha256sum\n',
       'CENTRALU-INSTALL node ok\n',
-      `CENTRALU-INSTALL done ${JSON.stringify({ current: { version: APP_VERSION, node: '24.21.0' }, previous: null, removed: [], left: [] })}\n`,
+      `CENTRALU-INSTALL done ${JSON.stringify({ current: { version: RELEASE, node: '24.21.0' }, previous: null, removed: [], left: [] })}\n`,
     ]
     const tunnel = Object.assign(new DirectTunnel(() => lineFor(remote.port)), { exec: async (cmd: string) => ({ code: 0, stderr: '', stdout: answers[runs.push(cmd) - 1] ?? '' }) })
     const installer = { runtime: () => ({ node: { version: '24.21.0', archives: { 'linux-x64': { file: 'node-v24.21.0-linux-x64.tar.gz', sha256: 'a'.repeat(64) } } } }), script: () => '// the installer', registry: { registry: reg.url } }
-    const local = `${APP_VERSION}.local.2`
+    const local = `${RELEASE}.local.2`
     const logs: string[] = []
     const hub = await hubHost(() => lineFor(remote.port), new Store(), true, { tunnelFor: () => tunnel, installer, log: (l) => logs.push(l), hub: { version: local, protocolVersion: PROTOCOL_VERSION, dev: false } })
     const u = await ui(hub.port)
     const r = await u.call('machines.install', { machineId: 'm1' })
-    expect(r).toMatchObject({ current: { version: APP_VERSION }, note: expect.stringContaining(`local build ${local}`) })
+    expect(r).toMatchObject({ current: { version: RELEASE }, note: expect.stringContaining(`local build ${local}`) })
     const script = Buffer.from(runs[2]!.split(' ')[2]!, 'base64').toString('utf8')
     const params = JSON.parse(Buffer.from(/"\$f" "([A-Za-z0-9+/=]+)"/.exec(script)![1]!, 'base64').toString('utf8')) as { version: string; hub: string }
-    expect(params.version).toBe(APP_VERSION)
-    expect(logs.some((l) => l.includes(`installing the release it was cut from, ${APP_VERSION}`))).toBe(true)
+    expect(params.version).toBe(RELEASE)
+    expect(logs.some((l) => l.includes(`installing the release it was cut from, ${RELEASE}`))).toBe(true)
     // The remote now runs the base release, not the hub's exact version, and the link takes it
     await eventually(() => status(hub) === 'connected')
     expect(hub.links.list()[0]!.versions).toMatchObject({ older: null, compatible: true })
@@ -1252,13 +1255,13 @@ describe('machines.update never installs an older release than the remote runs (
     const hub = await hubHost(() => lineFor(remote.port, { version: '9.0.0' }), new Store(), true, { tunnelFor: () => tunnel, installer })
     await eventually(() => status(hub) === 'connected' && hub.links.list()[0]!.versions?.remote.version === '9.0.0')
     const u = await ui(hub.port)
-    await expect(u.call('machines.update', { machineId: 'm1' })).rejects.toThrow(new RegExp(`Remote box runs Centralu 9\\.0\\.0, newer than ${APP_VERSION.replaceAll('.', '\\.')}.*would downgrade`))
+    await expect(u.call('machines.update', { machineId: 'm1' })).rejects.toThrow(new RegExp(`Remote box runs Centralu 9\\.0\\.0, newer than ${RELEASE.replaceAll('.', '\\.')}.*would downgrade`))
     expect(ran).toEqual([])
     expect(hub.links.list()[0]!.operation).toBeNull()
   })
 
   it('takes a dev build put there from a commit (`<base>.local.N`, #1036) back to its own release: that is no downgrade', async () => {
-    const dev = `${APP_VERSION}.local.3`
+    const dev = `${RELEASE}.local.3`
     const remote = await remoteHost(0, new Store(), { version: dev })
     const ran: string[] = []
     // The first step answers nothing the installer can read: what matters is that the update got that far
@@ -1290,7 +1293,7 @@ describe('machines.update through the link (#82, plan §10.5)', () => {
   }
 
   async function setup(o: { startsVersion: string; busy?: boolean; noActivity?: boolean }) {
-    const reg = await fakeRegistry(['centralu', '@centralu/linux-x64'].map((name) => ({ name, version: APP_VERSION, files: { 'package.json': '{}' } })))
+    const reg = await fakeRegistry(['centralu', '@centralu/linux-x64'].map((name) => ({ name, version: RELEASE, files: { 'package.json': '{}' } })))
     cleanups.push(() => reg.close())
     const activity: HostActivity = { working: o.busy === false ? 0 : 2, approvals: o.busy === false ? 0 : 1, questions: 0, background: 0, terminals: 1, commandRuns: 0 }
     const idle = () => Object.assign(activity, { working: 0, approvals: 0, questions: 0, background: 0 })
@@ -1298,7 +1301,7 @@ describe('machines.update through the link (#82, plan §10.5)', () => {
     let line = lineFor(running.port, { version: '0.0.1' })
     const runs: string[] = []
     const old = { version: '0.0.1', node: NODE }
-    const next = { version: APP_VERSION, node: NODE }
+    const next = { version: RELEASE, node: NODE }
     const done = (o: unknown) => `CENTRALU-INSTALL done ${JSON.stringify(o)}\n`
     let hub: Hub | null = null
     const exec = async (cmd: string) => {
@@ -1336,7 +1339,7 @@ describe('machines.update through the link (#82, plan §10.5)', () => {
       running = await remoteHost(0, new Store(), { version: runs.includes('tail') ? '0.0.1' : starts })
       line = lineFor(running.port, { version: running === null ? '' : runs.includes('tail') ? '0.0.1' : starts })
       // What the pointers say once that host runs: after an update the old one is kept to go back to
-      if (starts === APP_VERSION && !runs.includes('tail')) line = { ...line, install: { managed: true, current: next, previous: old, node: NODE } }
+      if (starts === RELEASE && !runs.includes('tail')) line = { ...line, install: { managed: true, current: next, previous: old, node: NODE } }
       else if (starts === '0.0.1') line = { ...line, install: { managed: true, current: old, previous: null, node: NODE } }
       return { how: 'detached', note: null }
     }
@@ -1358,7 +1361,7 @@ describe('machines.update through the link (#82, plan §10.5)', () => {
   it('rolls back to the version before, which is older than this hub, and checks it by its connection line (measured 2026-10-11)', async () => {
     // A rolled-back host is older than the hub, so the link does not open to it (plan §4) and no hello
     // comes: on a real Windows PC every rollback timed out and put the newer version back
-    const { hub, u, setStarts } = await setup({ startsVersion: APP_VERSION, busy: false })
+    const { hub, u, setStarts } = await setup({ startsVersion: RELEASE, busy: false })
     await u.call('machines.update', { machineId: 'm1' })
     await eventually(() => status(hub) === 'connected')
     setStarts('0.0.1')
@@ -1368,14 +1371,14 @@ describe('machines.update through the link (#82, plan §10.5)', () => {
   })
 
   it('says what would stop, holds the link while the host is down, reports each step, and answers once the new version said hello', async () => {
-    const { hub, u, runs, activity, idle } = await setup({ startsVersion: APP_VERSION })
+    const { hub, u, runs, activity, idle } = await setup({ startsVersion: RELEASE })
     // The prompt's question, asked of the remote over a connection of its own while the link waits on versions
     expect(await u.call('machines.activity', { machineId: 'm1' })).toEqual({ activity })
     expect(hub.links.list()[0]!.install).toBeNull()
     // Nothing is in a turn by the time the person updates (with turns running the update waits, below)
     idle()
     const r = await u.call('machines.update', { machineId: 'm1' })
-    expect(r).toMatchObject({ current: { version: APP_VERSION }, previous: { version: '0.0.1' }, machine: { install: { managed: true, current: { version: APP_VERSION } } } })
+    expect(r).toMatchObject({ current: { version: RELEASE }, previous: { version: '0.0.1' }, machine: { install: { managed: true, current: { version: RELEASE } } } })
     // The row as it is after the operation, not mid-way: it said `updating` with the last step (#482)
     expect(r.machine.status).not.toBe('updating')
     expect(r.machine.operation).toBeNull()
@@ -1428,7 +1431,7 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
   async function waiting(o: { noActivity?: boolean; script?: (Partial<HostActivity> | 'fail')[]; fails?: boolean; deps?: Partial<LinkDeps>; old?: string; gate?: Promise<void> } = {}) {
     /** The version the machine runs before the update */
     const was = o.old ?? '0.0.1'
-    const reg = await fakeRegistry(['centralu', '@centralu/linux-x64'].map((name) => ({ name, version: APP_VERSION, files: { 'package.json': '{}' } })))
+    const reg = await fakeRegistry(['centralu', '@centralu/linux-x64'].map((name) => ({ name, version: RELEASE, files: { 'package.json': '{}' } })))
     cleanups.push(() => reg.close())
     const activity: HostActivity = { working: 2, approvals: 1, questions: 0, background: 0, terminals: 1, commandRuns: 0 }
     /** How many times the remote was asked what runs, and how many when the host was stopped */
@@ -1445,7 +1448,7 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
     let line = lineFor(running.port, { version: was })
     const runs: string[] = []
     const old = { version: was, node: NODE }
-    const next = { version: APP_VERSION, node: NODE }
+    const next = { version: RELEASE, node: NODE }
     const done = (x: unknown) => `CENTRALU-INSTALL done ${JSON.stringify(x)}\n`
     const exec = async (cmd: string) => {
       const kind = classifyUpdate(cmd)
@@ -1474,8 +1477,8 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
     }
     const startHost = async (): Promise<HostStart> => {
       runs.push('start')
-      running = await remoteHost(0, new Store(), { version: APP_VERSION })
-      line = { ...lineFor(running.port, { version: APP_VERSION }), install: { managed: true, current: next, previous: old, node: NODE } }
+      running = await remoteHost(0, new Store(), { version: RELEASE })
+      line = { ...lineFor(running.port, { version: RELEASE }), install: { managed: true, current: next, previous: old, node: NODE } }
       return { how: 'detached', note: null }
     }
     const tunnel = Object.assign(new DirectTunnel(() => line), { exec, startHost })
@@ -1503,7 +1506,7 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
     expect(hub.links.list()[0]!.updateWaits).toBe(true)
     idle()
     const r = await call
-    expect(r).toMatchObject({ current: { version: APP_VERSION } })
+    expect(r).toMatchObject({ current: { version: RELEASE } })
     expect(r.note).toBeUndefined()
     expect(ran()).toEqual(['preflight', 'node', 'install_beside', 'stop', 'pointers', 'start', 'prune'])
   })
@@ -1638,7 +1641,7 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
       return { state, deps: { autoUpdate: () => state.on, followRetryMs: 150 } satisfies Partial<LinkDeps>, old: OLDER }
     }
     /** An older release of the hub's own channel: versions of two channels are never ranked, so none is older */
-    const OLDER = APP_VERSION.includes('-') ? APP_VERSION.replace(/\d+$/, '0') : '0.0.1'
+    const OLDER = RELEASE.includes('-') ? RELEASE.replace(/\d+$/, '0') : '0.0.1'
 
     it('starts an idle update by itself once it finds the machine older, waits for the turns there, then switches', async () => {
       const a = auto()
@@ -1653,7 +1656,7 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
       Object.assign(activity, { terminals: 0, commandRuns: 0 })
       await eventually(() => ran().includes('prune'))
       expect(ran()).toEqual(['preflight', 'node', 'install_beside', 'stop', 'pointers', 'start', 'prune'])
-      await eventually(() => hub.links.list()[0]!.versions?.remote.version === APP_VERSION && status(hub) === 'connected')
+      await eventually(() => hub.links.list()[0]!.versions?.remote.version === RELEASE && status(hub) === 'connected')
       // On the hub's version now: no more catch-up, and nothing runs again on the next connect
       expect(hub.links.followsHub('m1')).toBe(false)
       expect(hub.links.list()[0]!.followHub ?? null).toBeNull()
@@ -1825,7 +1828,7 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
       await new Promise((r) => setTimeout(r, 250))
       idle()
       await mine
-      await eventually(() => hub.links.list()[0]!.versions?.remote.version === APP_VERSION)
+      await eventually(() => hub.links.list()[0]!.versions?.remote.version === RELEASE)
       expect(hub.links.list()[0]!.followHub ?? null).toBeNull()
       expect(ran().filter((k) => k === 'install_beside')).toHaveLength(2)
     })

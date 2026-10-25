@@ -50,7 +50,7 @@ import { ThemeFiles } from './themes.js'
 import { TerminalService } from './dev-services/terminal.js'
 import { CommandRunner } from './dev-services/commands.js'
 import { ensureToolPath } from './env-path.js'
-import { UpdateService } from './updates.js'
+import { hubUpdatesMachines, UpdateService } from './updates.js'
 import { installsByDefault, updateSwitches } from './update-switches.js'
 import { installedCopyPath } from './os.js'
 import { AgentVersionService } from './agent-versions.js'
@@ -542,6 +542,8 @@ const themes = new ThemeFiles(join(dataRoot(), 'themes'), () => events.push({ ty
 await themes.start().catch((e: Error) => console.error(`[themes] the themes folder is unavailable: ${e.message}`))
 
 const updates = new UpdateService((status) => events.push({ type: 'update_status', status }), {
+  // A host from source never installs by itself, whatever is stored (#1501 review, `installsByItself`)
+  build: BUILD,
   // On by default when nothing has been saved yet. Since the check is read-only and every failure
   // is swallowed, leaving it on costs nothing, while leaving it off traps **someone who never once
   // opens settings** on an old version forever — that person is exactly the one most likely to stay
@@ -689,7 +691,7 @@ const links = new Links({
   // When agents compact: this hub's setting governs the machines it links (#1376)
   autoCompact: () => autoCompactOf(mgr.uiPreferences()),
   // Automatic updates cover the linked machines too (#1508): one on an older release follows this hub's version; none starts mid-swap
-  autoUpdate: () => autoApplyUpdates.read() && !hostDrain.draining,
+  autoUpdate: () => hubUpdatesMachines({ build: BUILD, current: APP_VERSION, autoApply: autoApplyUpdates.read(), draining: hostDrain.draining }),
   reverse: reverseCalls({
     allowed: (machineId) => store.machines.linkedMachineAsks(machineId),
     projects: () => mgr.projectsForMachines(),

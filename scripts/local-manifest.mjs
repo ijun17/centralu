@@ -1,7 +1,7 @@
 /** Data-only policy for local signing; also used by the command before dispatch. */
 import { Buffer } from 'node:buffer'
-import { readFileSync } from 'node:fs'
 import { isNewer } from '../packaging/npm/centralu/bin/semver.mjs'
+import { releaseTag, ROOT } from './app-version.mjs'
 
 export const MAX_LOCAL_MANIFEST_BYTES = 60_000
 const VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/
@@ -44,12 +44,16 @@ export function chooseLocalVersion(base, installed, requested) {
   return version
 }
 
-/** Read trusted checkout data, without executing brand.ts or accepting an uploaded version. */
-export function readAppVersion(file = new URL('../packages/protocol/src/brand.ts', import.meta.url)) {
-  const match = /^export const APP_VERSION = '([^']+)'/m.exec(readFileSync(file, 'utf8'))
-  if (!match) throw new Error('checked-out APP_VERSION is missing')
-  checkVersion(match[1])
-  return match[1]
+/**
+ * The release a local build is cut from: the newest release tag reachable from the checkout's HEAD
+ * (#1501; git holds no version in a file). Read from trusted checkout data, never from an uploaded
+ * manifest; the checkout must have its tags (the signing workflow fetches the whole history).
+ */
+export function readReleaseBase(cwd = ROOT) {
+  const tag = releaseTag(cwd)
+  if (!tag) throw new Error('no release tag (v*) is reachable from the checkout, so there is no base version; fetch the tags')
+  checkVersion(tag)
+  return tag
 }
 
 function record(value, name) {
@@ -72,7 +76,7 @@ export function validateLocalManifest(bytes, appVersion) {
   fields(local, ['baseVersion', 'installedVersion', 'nextRelease', 'commit', 'dirty', 'requestId'], 'provenance')
   if (typeof local.requestId !== 'string' || !/^[0-9a-f]{32}$/.test(local.requestId)) throw new Error('request id is required')
   if (typeof local.commit !== 'string' || !/^[0-9a-f]{40}$/.test(local.commit) || typeof local.dirty !== 'boolean') throw new Error('commit and dirty flag are required')
-  if (local.baseVersion !== appVersion) throw new Error('local baseVersion must match checked-out APP_VERSION')
+  if (local.baseVersion !== appVersion) throw new Error('local baseVersion must match the release tag of the checkout')
   if (assertLocalVersion(m.appVersion, appVersion, local.installedVersion) !== local.nextRelease) throw new Error('incorrect next release')
   if (!Array.isArray(m.files) || m.files.length < 2) throw new Error('content files are required')
   const seen = new Set()
