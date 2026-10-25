@@ -184,12 +184,15 @@ test.describe('a toast goes by itself after Undo or Dismiss took the previous on
   })
 
   test('while the pointer rests on a toast with an Undo, it stays past its time', async ({ page }) => {
+    // The 8 s are the page's clock, run forward here: waiting them out took 20 s on a CI runner, which is the test's own limit
+    await page.clock.install()
     await archived(page)
     await page.getByTestId('toast').hover()
-    await page.waitForTimeout(9000)
+    await page.clock.runFor(9000)
     await expect(page.getByTestId('toast-action')).toBeVisible()
     await page.mouse.move(5, 5)
-    await expect(page.getByTestId('toast')).toHaveCount(0, { timeout: 12000 })
+    await page.clock.runFor(9000)
+    await expect(page.getByTestId('toast')).toHaveCount(0)
   })
 })
 
