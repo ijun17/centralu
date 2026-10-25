@@ -16,6 +16,7 @@ import { Composer, type ComposerDrop } from './Composer.jsx'
 import { SessionHeader } from './SessionHeader.jsx'
 import { AwayNote, DormantNote, InterruptedNote } from './SessionNotes.jsx'
 import { EMPTY_CHAT } from './empty.js'
+import { UntrustedNotice } from '../project/UntrustedNotice.jsx'
 
 /**
  * The detection zone (in px, measured up from the bottom of the pane) that makes a collapsed
@@ -404,6 +405,9 @@ export function SessionPane({
         headerExtra={headerExtra}
         headerDrag={headerDrag}
       />
+
+      {/* Outside the composer: its height decides when a grid panel folds the composer, and a line of notice is not part of that */}
+      <UntrustedNotice projectId={session.projectId} className="shrink-0 border-b border-line px-4 py-1.5" />
 
       {starting && session?.projectId && (
         <SessionStart sessionId={sessionId} projectId={session.projectId} tool={session.tool} />

@@ -57,7 +57,7 @@ export function ProjectDetail({ project }: { project: ProjectInfo }) {
         <span className="text-ink-faint">Not a git repository</span>
       )}
       <span className="border-t border-line pt-1.5 text-ink-muted" data-testid={`project-trust-${project.name}`}>
-        {project.trusted ? 'Trusted — its apps can run' : "Not trusted — its apps don't run"}
+        {project.trusted ? 'Trusted — its apps can run' : "Not trusted — its CLAUDE.md and AGENTS.md are ignored, its apps don't run"}
       </span>
     </span>
   )

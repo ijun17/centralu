@@ -15,6 +15,8 @@ import { Segmented } from '../../components/Segmented.jsx'
 import { TextInput } from '../../components/TextField.jsx'
 import { MachineTag } from '../machines/MachineTag.jsx'
 import { useToolChoice } from './useToolChoice.js'
+import { TrustProjectButton } from './TrustCard.jsx'
+import { envFilesOf, installCommandFor } from './worktreeSuggestions.js'
 
 /**
  * The state of the past sessions list.
@@ -144,6 +146,20 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
 
   const ignored: { path: string; bytes: number | null }[] | null =
     useLoad(() => (isRepo && worktree ? platform.git.ignoredEntries(projectId) : null), [isRepo, worktree, platform, projectId]).data ?? null
+
+  /*
+   * The first worktree of a project (#1512): nothing saved yet, so the dialog points at what a new worktree lacks, the
+   * install command its lockfile names and the `.env` files git ignores, as chips that fill the two fields below.
+   * Read only then, and only once a worktree is asked for.
+   */
+  const lockfileNames: string[] | null =
+    useLoad(
+      () =>
+        isRepo && worktree && !savedSetup ? platform.fs.listDir(projectId, '').then((rows) => rows.filter((r) => !r.isDir).map((r) => r.name)) : null,
+      [isRepo, worktree, savedSetup, platform, projectId],
+    ).data ?? null
+  const installCommand = lockfileNames ? installCommandFor(lockfileNames) : null
+  const envFiles = envFilesOf((ignored ?? []).map((e) => e.path))
 
   // The past session to resume. null means 'new session' (the default)
   const [resume, setResume] = useState<ExternalSession | null>(null)
@@ -410,6 +426,13 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
               className="mt-2 space-y-2.5 rounded-md border border-line bg-surface-raised p-2.5"
               data-testid="worktree-options"
             >
+              {/* Refused by the host for a project that is not trusted (checking out runs its hooks): said before the press, with the way out (#1512) */}
+              {project && !project.trusted && (
+                <div className="text-xs leading-body text-ink-muted" data-testid="worktree-untrusted">
+                  <p>A worktree needs a trusted project: checking it out runs the repository&apos;s hooks.</p>
+                  <TrustProjectButton projectId={project.id} testId="worktree-untrusted-trust" className="mt-1.5" />
+                </div>
+              )}
               {/*
                 States what an empty field results in (dogfooding, 2026-09-07: "if I don't enter a
                 name, what does the branch get called?"). "blank = auto" only states the fact that
@@ -455,6 +478,37 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
             */}
               {setupOpen ? (
                 <div className="space-y-2.5" data-testid="worktree-setup-edit">
+                  {/* Offered only before anything is saved: pressing one fills the field it names, and pressing it again takes it out */}
+                  {!savedSetup && (installCommand || envFiles.length > 0) && (
+                    <div className="flex flex-wrap items-center gap-1.5" data-testid="worktree-first-suggestions">
+                      <span className="text-2xs text-ink-faint">Suggested for a new worktree:</span>
+                      {installCommand && (
+                        <Button
+                          variant="subtle"
+                          size="xs"
+                          className="font-mono"
+                          data-testid="suggest-install"
+                          onClick={() => setSetupCommand(setupCommand.trim() === installCommand ? '' : installCommand)}
+                        >
+                          {setupCommand.trim() === installCommand ? '✓ ' : ''}run {installCommand}
+                        </Button>
+                      )}
+                      {envFiles.length > 0 && (
+                        <Button
+                          variant="subtle"
+                          size="xs"
+                          className="font-mono"
+                          data-testid="suggest-env"
+                          onClick={() => {
+                            const all = envFiles.every((f) => picks.includes(f))
+                            setCopyFiles((all ? picks.filter((f) => !envFiles.includes(f)) : [...new Set([...picks, ...envFiles])]).join(', '))
+                          }}
+                        >
+                          {envFiles.every((f) => picks.includes(f)) ? '✓ ' : ''}copy {envFiles.join(', ')}
+                        </Button>
+                      )}
+                    </div>
+                  )}
                   <Field label="Setup command" hint="runs once, in the new worktree">
                     <TextInput
                       type="text"
@@ -577,7 +631,8 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
             variant="primary"
             /* Since the input field is gone, Enter means start — this needs to hold the default focus */
             autoFocus
-            disabled={busy || blocked}
+            // A worktree is refused in a project that is not trusted, and the setup typed here would be saved before that: trust it first (#1512)
+            disabled={busy || blocked || (worktree && !!project && !project.trusted)}
             data-testid="create-session-confirm"
           >
             {busy ? (resume ? 'Loading…' : 'Starting…') : resume ? 'Load' : 'Start'}

@@ -73,6 +73,11 @@ test('↑/↓ pressed inside a field of the new-session dialog do not select a p
       ],
     }
   })
+  // A worktree waits for a trusted project (Start is held otherwise, #1512), and this test focuses Start
+  await page.evaluate(async () => {
+    const m = (window as any).__mock
+    for (const p of m.projectsList) await m.projects.setTrusted(p.id, true)
+  })
   await openSessionDialog(page, 'alpha')
   await expect(page.getByTestId('past-ext-0')).toBeVisible()
   await page.getByTestId('worktree-toggle').click()
