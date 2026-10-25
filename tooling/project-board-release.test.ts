@@ -940,7 +940,7 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
 
     const r = await call('release', { step: 'bump', path: s.work, confirm: true, notes: 'Ship the two changes.', closes: 'Refs #386' })
     expect(r.isError).toBe(false)
-    expect(r.data.summary).toBe(`Opened the bump to ${NEXT}: https://github.com/ijun17/centralu/pull/900. Rehearse it now (release step rehearse) while its CI runs, merge it once CI is green (merge_when_green), then tag.`)
+    expect(r.data.summary).toBe(`Opened the bump to ${NEXT}: https://github.com/ijun17/centralu/pull/900. Rehearse it now (release step rehearse) while its CI runs, merge it once CI is green (merge_when_green with intoBatch: true: while the merge queue has a batch running it merges nothing without it), then tag.`)
     expect(r.data.lines).not.toContain(`Merged since v${BRAND_VERSION} (2):`)
     const pushed = remoteHas(s.origin, `refs/heads/chore/release-${NEXT}`)!
     expect(g(s.origin, 'rev-parse', `${pushed}^`)).toBe(s.tip)

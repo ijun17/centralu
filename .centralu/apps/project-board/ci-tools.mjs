@@ -197,7 +197,7 @@ ${note}` : summary
       const note = queueNote(p)
       const ci = ciLines(what, p.headRefOid, req, checks, [], detail)
       if (note && !intoBatch)
-        return ciAnswer(`Not merged: ${note} Call again with intoBatch: true to merge it anyway (a release bump goes through here).`, ci, { outcome: 'batch-running', merged: false, verdict: checks.verdict })
+        return ciAnswer(`Not merged: ${note} Call again with intoBatch: true to merge it anyway (a release bump goes through here).`, ci, { outcome: 'batch-running', merged: false, verdict: checks.verdict }, { isError: true })
       return doMerge(repo, what, p, body, del, ci, note)
     }
     // wait

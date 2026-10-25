@@ -788,6 +788,43 @@ describe('every file the UI scenarios render or read reaches the screen (#1538)'
     expect(missed).toEqual([])
   })
 
+  /*
+   * The limit of a static walk (the re-check of #1563): a path built at run time (`join(ROOT, 'scripts', n + '.mjs')`, a
+   * template string, `import(`…${n}`)`) names no file the walk can see. So a computed path in what the scenarios run is
+   * refused here unless it is listed with why it points nowhere in the repository; a new one is a decision to make (name
+   * the file literally, or add the folder to `screenFiles` and list it here).
+   */
+  it('has no path built at run time in the scenarios that points into the repository, except the ones listed', () => {
+    const roots = [...tracked].filter((f) => (f.startsWith('e2e/') || f.startsWith('apps/web/') || f === 'scripts/e2e-web-server.mjs') && /\.(m?[jt]sx?|cjs)$/.test(f))
+    const PATTERNS = [
+      /import\(\s*(?!['"][^'"`$]*['"]\s*\))[^)]*\)/g,
+      /new URL\(\s*(?:`[^`]*\$\{[^`]*`|[A-Za-z_][\w.]*\s*\+|[A-Za-z_][\w.]*\s*,\s*import\.meta\.url)/g,
+      /\b(?:join|resolve|readFileSync|readFile|readdirSync|existsSync|statSync|copyFileSync|cpSync|require)\(([^()]*(?:`[^`]*\$\{[^`]*`|['"]\s*\+|\+\s*['"])[^()]*)\)/g,
+    ]
+    // file, the start of the call, and why it does not point at a file of the repository
+    const LISTED: [string, string, string][] = [
+      ['apps/web/vite.config.ts', 'new URL(p, import.meta.url', 'the helper r(): every call passes a literal path into packages/, all of it screen'],
+      ['e2e/fixtures/heavy-store.ts', 'join(dir, `${ts}-${images}.png`)', 'a file the fixture writes in a temporary folder'],
+      ['e2e/fixtures/linked-hosts.ts', 'join(dir, `${name}-project`)', 'a folder under a temporary one'],
+      ['e2e/fixtures/public-apps.ts', 'join(CACHE_DIR, `${app.pkg.replace(', 'the cache of downloaded packages, outside the repository'],
+      ['e2e/fixtures/real-host.ts', 'readFileSync(`/proc/${pid}/environ`', 'a process of this machine'],
+      ['e2e/perf-memory.mts', "resolve(dir, '.' + path)", 'serves a request path from the built bundle folder it was given'],
+      ['e2e/style-snapshot.spec.ts', 'join(OUT!, THEME ?', 'where it writes its pictures'],
+      ['e2e/style-snapshot.spec.ts', 'join(dir, `${scene}.json`)', 'where it writes and reads its pictures'],
+      ['e2e/style-snapshot.spec.ts', 'join(dir, `${scene}.png`)', 'where it writes and reads its pictures'],
+      ['e2e/style-snapshot.spec.ts', 'join(dir, `${scene}.png.sha256`)', 'where it writes and reads its pictures'],
+    ]
+    const hits: [string, string][] = []
+    for (const f of roots) {
+      const src = stripComments(readFileSync(join(ROOT, f), 'utf8'))
+      for (const re of PATTERNS) for (const m of src.matchAll(re)) hits.push([f, m[0].replace(/\s+/g, ' ')])
+    }
+    expect(hits.length, 'the patterns find the listed calls, so they are not blind').toBeGreaterThanOrEqual(LISTED.length)
+    const unlisted = hits.filter(([f, text]) => !LISTED.some(([lf, start]) => lf === f && text.startsWith(start))).map(([f, text]) => `${f}: ${text}`)
+    expect(unlisted).toEqual([])
+    for (const [f, start] of LISTED) expect(hits.some(([hf, text]) => hf === f && text.startsWith(start)), `${f}: ${start} is still there (remove the entry when the call goes)`).toBe(true)
+  })
+
   it('counts what .centralu/tiers.json calls the e2e harness: its paths are changes to the screen', () => {
     const rule = JSON.parse(readFileSync(new URL('../.centralu/tiers.json', import.meta.url), 'utf8')).rules.find((r: { id: string }) => r.id === 'e2e-harness')
     expect(rule, 'tiers.json has an e2e-harness rule').toBeDefined()

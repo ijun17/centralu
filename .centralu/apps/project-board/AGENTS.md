@@ -137,9 +137,9 @@ intermittent failures (#368), and how long a merge may wait.
   after 10 minutes without one), and stops if the PR's head moves. A Codex session gets an early
   "still running" at 240 s and follows the call with `run_status`. When the merge queue has a batch running on the
   same default branch (`mergeWarning`, batch.mjs), the call that would merge **merges nothing and says so first**
-  ("Not merged: …", `outcome: 'batch-running'`): merging here moves the default branch under the batch, which then stops
+  ("Not merged: …", `outcome: 'batch-running'`, `isError`: it is not a success an agent could read as merged): merging here moves the default branch under the batch, which then stops
   before it lands and is built again (#1548, below), a CI run lost. It offers `queue_merge` instead, and
-  `intoBatch: true` merges anyway (a release bump goes through here; the answer then says it again). A call that only waits
+  `intoBatch: true` merges anyway (a release bump goes through here, and `release`'s bump summary says to pass it; the answer then says it again). A call that only waits
   carries the same note.
 - **`mark_ready`** (`pr`, `note?`, `detail?`): the end of a contributor's flow (#386 merge policy:
   merging is the maintainer's act, and `merge_when_green`/`queue_merge` refuse without maintain or
@@ -613,7 +613,9 @@ the required set: it judges main's runs and its probes by their conclusion, and 
   for), holds the app's source free of such paths, and holds the definition to **coverage, not a subset**: it walks what
   `e2e/` and `apps/web` import (relative paths, workspace packages, `new URL(…, import.meta.url)`) and what a fixture
   names as a path (`join`, strings, the app folders it serves), and fails on any file reached that is neither a document nor
-  a test and that `screenFiles` leaves out; `.centralu/tiers.json`'s `e2e-harness` paths must be in it too. A batch that
+  a test and that `screenFiles` leaves out (**a static walk's limit**: a path built at run time, `join(ROOT, 'scripts', n + '.mjs')`,
+  a template string or a computed import, names no file it can see, so the test also fails on such a path in `e2e/`,
+  `apps/web` and the dev server script unless it is listed there with why it points outside the repository); `.centralu/tiers.json`'s `e2e-harness` paths must be in it too. A batch that
   cannot be judged (the script not on the default branch yet, an older one without `--screen`, a crash, more files than
   GitHub lists) counts as changing the screen, and so does a batch with **no `tier`** at all (made by an older board, a watch
   command that ran for days): it fails closed (`needsFull`). The batch's `tier` is then `full`: its run is
