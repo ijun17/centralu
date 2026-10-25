@@ -93,7 +93,11 @@ function connect(port) {
 
 const textOf = (events, sessionId) => events.filter((e) => e.sessionId === sessionId && e.type === 'message_delta').map((e) => e.text).join('')
 
-/** The `agent acp` processes running now, as pids; `index.js acp` is how the adapter starts it */
+/**
+ * The `agent acp` processes running now, as pids; `index.js acp` is how the adapter starts it. On macOS and Linux the host
+ * watch's subshell is the agent's child with the same command line (#1562 Mac re-check), so a match whose parent matches
+ * too is not counted: one per agent, by parent, not by name
+ */
 function acpPids() {
   try {
     if (process.platform === 'win32') {
@@ -101,7 +105,13 @@ function acpPids() {
       const out = execFileSync('powershell', ['-NoProfile', '-Command', query], { encoding: 'utf8' })
       return out.trim().split(',').filter(Boolean)
     }
-    return execFileSync('sh', ['-c', 'pgrep -f "cursor-agent.* acp" || true'], { encoding: 'utf8' }).trim().split('\n').filter(Boolean)
+    const rows = execFileSync('ps', ['-A', '-o', 'pid=,ppid=,command='], { encoding: 'utf8' })
+      .split('\n')
+      .map((l) => /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(l))
+      .filter((m) => m && /cursor-agent.* acp/.test(m[3]) && !/^(pgrep|ps)\b/.test(m[3]))
+      .map((m) => ({ pid: m[1], ppid: m[2] }))
+    const pids = new Set(rows.map((r) => r.pid))
+    return rows.filter((r) => !pids.has(r.ppid)).map((r) => r.pid)
   } catch {
     return []
   }
