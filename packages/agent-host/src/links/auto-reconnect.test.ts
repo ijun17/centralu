@@ -1305,7 +1305,7 @@ describe('a bare project name that only a down machine holds (#1547)', () => {
    * The hub restarted after `newproj` was created on Laptop: its mirror of Laptop is empty, Laptop is down (the backoff's
    * next step is far off), and ssh answers again. Desk is a machine that is up, a stand-in
    */
-  async function rig(o: { deskHas?: string } = {}) {
+  async function rig(o: { deskHas?: string; dead?: boolean } = {}) {
     const named = (name: string) => {
       const dir = join(folder(), name)
       mkdirSync(dir)
@@ -1327,12 +1327,14 @@ describe('a bare project name that only a down machine holds (#1547)', () => {
     await hub.mgr.setProjectTrusted('p-hub', true)
     await eventually(() => hub.row().status === 'away')
     hub.tunnel().unreachable = false
+    const deskLists = { count: 0 }
     const desk: RoutedMachine = {
       id: 'm2',
       name: 'Desk',
       q: new Qualifier('m2', 2),
       reachable: true,
       call: async (method) => {
+        if (method === 'projects.list') deskLists.count++
         if (method === 'projects.list') return o.deskHas ? [{ id: 'p-d', name: o.deskHas, path: '/srv/d', defaultTool: null }] : []
         throw new Error(`Unknown method: ${method}`)
       },
@@ -1340,8 +1342,20 @@ describe('a bare project name that only a down machine holds (#1547)', () => {
       observe: () => {},
       hides: () => false,
     }
-    hub.mgr.useLinkedReader(linkedSessions(() => [...hub.links.all(), desk], (method, params) => hub.call(method, params), 'Hub mac'))
-    return { hub, remote, opens: hub.tunnel().opens }
+    // A machine that is down and has an attempt under way that takes a while, as a backoff's ssh to a machine that hangs
+    const dead: RoutedMachine = {
+      ...desk,
+      id: 'm3',
+      name: 'Dead',
+      q: new Qualifier('m3', 3),
+      reachable: false,
+      attemptUnderWay: true,
+      settled: async () => pause(400 * SLOW),
+      reachForCall: async () => pause(400 * SLOW),
+      lastKnown: () => null,
+    }
+    hub.mgr.useLinkedReader(linkedSessions(() => [...hub.links.all(), desk, ...(o.dead ? [dead] : [])], (method, params) => hub.call(method, params), 'Hub mac'))
+    return { hub, remote, opens: hub.tunnel().opens, deskLists }
   }
   const notFound = expect.stringContaining('No project named')
 
@@ -1361,11 +1375,53 @@ describe('a bare project name that only a down machine holds (#1547)', () => {
     expect(remote.mgr.listSessions().filter((s) => s.projectId === 'p-new')).toHaveLength(1)
   })
 
-  it('a name that is nowhere is still answered as missing, and the machine it tried is not tried again inside the window', async () => {
+  it('a name that is nowhere is answered as missing after the machine is tried once, and not tried again inside the window', async () => {
     const { hub, opens } = await rig()
-    const r = await hub.mgr.askProject('h1', { project: 'typo', task: 'say hello' })
-    expect(r).toMatchObject({ ok: false, error: notFound })
+    expect(await hub.mgr.askProject('h1', { project: 'typo', task: 'say hello' })).toMatchObject({ ok: false, error: notFound })
     expect(hub.tunnel().opens).toBe(opens + 1)
+    // The machine is up now, so a second call has nothing to try; the window is for one that stays down (the next test)
+    expect(await hub.mgr.askProject('h1', { project: 'typo', task: 'say hello' })).toMatchObject({ ok: false, error: notFound })
+    expect(hub.tunnel().opens).toBe(opens + 1)
+  })
+
+  it('a second unknown name inside the window does not wait again on a machine with an attempt under way', async () => {
+    const { hub } = await rig({ dead: true })
+    const first = Date.now()
+    expect(await hub.mgr.askProject('h1', { project: 'typo1', task: 'say hello' })).toMatchObject({ ok: false, error: notFound })
+    expect(Date.now() - first).toBeGreaterThanOrEqual(300 * SLOW)
+    const at = Date.now()
+    const r = await hub.mgr.askProject('h1', { project: 'typo2', task: 'say hello' })
+    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('Dead') })
+    expect(Date.now() - at).toBeLessThan(250 * SLOW)
+    const create = Date.now()
+    expect(await hub.mgr.runOrchestratorTool('orch', 'create_session', { project: 'typo3' })).toMatchObject({ isError: true, text: expect.stringContaining('Dead') })
+    expect(Date.now() - create).toBeLessThan(250 * SLOW)
+  })
+
+  it('a name found nowhere lists a machine that is up once, with a machine down', async () => {
+    const { hub, deskLists } = await rig()
+    await hub.mgr.askProject('h1', { project: 'typo', task: 'say hello' })
+    expect(deskLists.count).toBe(1)
+    deskLists.count = 0
+    await hub.mgr.runOrchestratorTool('orch', 'create_session', { project: 'typo' })
+    expect(deskLists.count).toBe(1)
+  })
+
+  it('create_session names the machine it could not ask, as ask_project does', async () => {
+    const { hub } = await rig()
+    hub.tunnel().unreachable = true
+    const r = await hub.mgr.runOrchestratorTool('orch', 'create_session', { project: 'newproj' })
+    expect(r).toMatchObject({ isError: true, text: expect.stringMatching(/Laptop.*not reachable right now/) })
+    expect(r.text).toContain('may be missing')
+  })
+
+  it('create_session takes a project of this computer by its name in another case, trying no machine', async () => {
+    const { hub, opens } = await rig()
+    hub.tunnel().openMs = 5_000 * SLOW
+    const at = Date.now()
+    expect(await hub.mgr.runOrchestratorTool('orch', 'create_session', { project: 'Site' })).toMatchObject({ isError: false })
+    expect(Date.now() - at).toBeLessThan(2_000 * SLOW)
+    expect(hub.tunnel().opens).toBe(opens)
   })
 
   it('a name that a machine that is up holds waits on no down machine and tries none', async () => {
