@@ -62,6 +62,22 @@ function world(script: PeerScript = base, opts: Partial<CreateSessionOpts> = {},
 
 const isPrompt = (m: Record<string, unknown>) => m.method === 'session/prompt'
 
+const near = (n: number) => expect.closeTo(n, 6)
+
+/** The cost each turn reports, one turn per running total the agent sends at its end */
+async function turnCosts(w: ReturnType<typeof world>, s: Awaited<ReturnType<ReturnType<typeof world>['start']>>, totals: number[]) {
+  const peer = w.peers.at(-1)!
+  const usage = { inputTokens: 10, outputTokens: 2, totalTokens: 12 }
+  for (const [i, total] of totals.entries()) {
+    s.send(`turn ${i}`)
+    await peer.next((m) => isPrompt(m) && JSON.stringify(m).includes(`turn ${i}`))
+    peer.update(SID, { sessionUpdate: 'usage_update', used: 1_000, size: 200_000, cost: { amount: total, currency: 'USD' } })
+    peer.release('session/prompt', { result: { stopReason: 'end_turn', usage } })
+    await w.event((e) => e.type === 'turn_complete' && w.events.filter((x) => x.type === 'usage_update').length === i + 1)
+  }
+  return w.events.flatMap((e) => (e.type === 'usage_update' ? [e.tokens.costUsd] : []))
+}
+
 describe('the ACP session against a scripted agent', () => {
   it('never calls authenticate, and says the tool is not logged in', async () => {
     const w = world((method) => (method === 'session/new' ? { error: { code: -32000, message: 'Authentication required' } } : base(method, {}, null as never)))
@@ -276,21 +292,21 @@ describe('the ACP session against a scripted agent', () => {
     expect(costs[1]).toBeCloseTo(0.2)
   })
 
-  it("takes a turn's cost as what it added to the running total the agent sends, and none for the first turn it reads", async () => {
-    const w = world()
+  it("takes a turn's cost as what it added to the running total the agent sends, a new conversation's from 0", async () => {
+    const kept: number[] = []
+    const w = world(base, { runningCost: { last: 5, keep: (t) => kept.push(t) } })
     const s = await w.start()
-    const peer = w.peers[0]!
-    const usage = { inputTokens: 10, outputTokens: 2, totalTokens: 12 }
-    for (const [text, total] of [['one', 0.1], ['two', 0.25]] as const) {
-      s.send(text)
-      await peer.next((m) => isPrompt(m) && JSON.stringify(m).includes(text))
-      peer.update(SID, { sessionUpdate: 'usage_update', used: 1_000, size: 200_000, cost: { amount: total, currency: 'USD' } })
-      peer.release('session/prompt', { result: { stopReason: 'end_turn', usage } })
-      await w.event((e) => e.type === 'turn_complete' && w.events.filter((x) => x.type === 'usage_update').length === (text === 'one' ? 1 : 2))
-    }
-    const costs = w.events.flatMap((e) => (e.type === 'usage_update' ? [e.tokens.costUsd] : []))
-    expect(costs[0]).toBeUndefined()
-    expect(costs[1]).toBeCloseTo(0.15)
+    expect(await turnCosts(w, s, [0.1, 0.25])).toEqual([0.1, 0.15].map(near))
+    expect(kept).toEqual([0, 0.1, 0.25])
+  })
+
+  it("keeps the total across a new process, so the first turn after a restart or a host swap has its cost (review of PR 3)", async () => {
+    const kept: number[] = []
+    const resumed = world(base, { resumeExternalId: SID, runningCost: { last: 0.1, keep: (t) => kept.push(t) } })
+    expect(await turnCosts(resumed, await resumed.start(), [0.25])).toEqual([near(0.15)])
+    expect(kept).toEqual([0.25])
+    const unknown = world(base, { resumeExternalId: SID, runningCost: { last: null, keep: () => {} } })
+    expect(await turnCosts(unknown, await unknown.start(), [0.25, 0.3])).toEqual([undefined, near(0.05)])
   })
 
   it('closes a process a previous host left (with its open calls), and opens the conversation again in a new one', async () => {

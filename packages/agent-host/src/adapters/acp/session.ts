@@ -167,10 +167,13 @@ export class AcpSession implements SessionHandle {
           this.replaying = false
         }
         this.externalId = resume
+        this.costTotal = this.opts.runningCost?.last ?? null
       } else {
         const opened = OpenedSession.parse(await this.conn.request('session/new', base, 120_000))
         if (!opened.sessionId) throw new Error(`${this.deps.label} opened a session without an id`)
         this.externalId = opened.sessionId
+        this.costTotal = 0
+        this.opts.runningCost?.keep(0)
       }
       this.phase = 'ready'
       this.next()
@@ -330,11 +333,12 @@ export class AcpSession implements SessionHandle {
     this.treeClock = null
   }
 
-  /** What this turn added to the session's running cost, once a total from before it is known; null otherwise */
+  /** What this turn added to the conversation's running cost, once a total from before it is known (`CreateSessionOpts.runningCost`); null otherwise */
   private turnCost(turn: Turn): number | null {
     if (turn.costTotal === null) return null
     const before = this.costTotal
     this.costTotal = turn.costTotal
+    this.opts.runningCost?.keep(turn.costTotal)
     return before === null || turn.costTotal < before ? null : turn.costTotal - before
   }
 

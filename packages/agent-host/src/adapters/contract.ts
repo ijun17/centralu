@@ -171,6 +171,12 @@ export type CreateSessionOpts = {
   requestTurn?: RequestTurn
   resumeExternalId?: string
   /**
+   * The running cost of the conversation, for a tool that reports only its total (an ACP tool's `usage_update.cost`, OpenCode's):
+   * `last` is the total the session's previous process read last, null when none is known (a new conversation starts from 0, an
+   * import or a fork from nothing); `keep` saves each new one, so a turn after a restart or a host swap still has its cost
+   */
+  runningCost?: { last: number | null; keep(total: number): void }
+  /**
    * The goal the host last heard of for this conversation, when a new process resumes it (the badge's
    * `goal` event). Codex has no use for it — it asks the thread (`thread/goal/get`). Claude does: its
    * CLI restores the goal from the transcript and says nothing about it on the stream (measured

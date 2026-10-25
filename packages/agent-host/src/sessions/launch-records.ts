@@ -61,6 +61,21 @@ export class LaunchRecords {
     this.host.store.settings.setAppSetting(this.backgroundTasksKey(m.id), JSON.stringify(m.backgroundTasks.filter((t) => t.status === 'running')))
   }
 
+  /**
+   * The running cost total of the conversation a session's tool reports (`CreateSessionOpts.runningCost`), as its last process
+   * read it: kept so the next process, after a restart, a wake or a host swap, takes a turn's cost as what it added. Read only
+   * for a resumed conversation; anything but a number at or above 0 is none.
+   */
+  runningCostFor(sessionId: string, resumed: boolean): NonNullable<CreateSessionOpts['runningCost']> {
+    const key = `running_cost:${sessionId}`
+    const raw = resumed ? this.host.store.settings.appSetting(key) : null
+    const last = raw === null ? null : Number(raw)
+    return {
+      last: last !== null && Number.isFinite(last) && last >= 0 ? last : null,
+      keep: (total) => this.host.store.settings.setAppSetting(key, String(total)),
+    }
+  }
+
   /** The persisted prefix a process was started with. It is separate from SessionInfo: a screen never needs it. */
   toolPrefixKey(sessionId: string): string {
     return `tool_prefix:${sessionId}`
