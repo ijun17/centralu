@@ -160,6 +160,14 @@ could by then be someone else's number (it is now dropped once empty, `notedGrou
 synchronously every 2 s while a command ran (now asynchronous); a result's ok read only the last update; a call of
 another kind titled as the bridge's would pass as Centralu's own (only kind `other` does now).
 
+A re-check on macOS with real Cursor, at those fixes, found four more, also fixed: a command Cursor ran (`zsh -c`, a
+`sleep 300`) sat in a group of its own and outlived a SIGKILLed host, since only the host knew its group (the host now
+tells the host watch each helper group as it notes and drops it, and the watch ends them first); 60 KB of a command's
+output arrived as `stdout: ""` and read "(no output)" (an empty result now says the tool passed on no output, as it
+cannot be told from a command that printed none; recording `big-output`); `smoke:cursor` counted the watch's subshell as
+a second agent (counted by parent now); and removing `endsWithHost` or Cursor's `presets` failed no unit test (now each
+does, `acp/adapter.test.ts`).
+
 A live Normal to Auto change restarted the process (about 10 s): with Cursor under Auto only, it has no other preset to
 change to.
 
