@@ -31,9 +31,20 @@ export interface AgentProcess {
    * keep it here.
    */
   stderrTail?(): string
+  /**
+   * Remembers the process groups its tree has now (macOS and Linux), so what it started in a group of its own is ended
+   * with it even after it has gone: once a CLI has died, its helpers are under init and no longer found under it. An
+   * adapter calls it when the tool runs a command (#1562 review: Cursor's shell outlived Cursor)
+   */
+  noteTree?(): void
 }
 
-export type AgentSpawnSpec = { command: string; args: string[]; cwd?: string; env: Record<string, string | undefined> }
+/**
+ * `endsWithHost`: the process must end when this host does, even killed outright, whatever it does with stdin's end
+ * (#1562 review: Cursor with Centralu's bridge attached outlived a SIGKILLed host on macOS). A process the keeper holds
+ * outlives the host by design and ignores it.
+ */
+export type AgentSpawnSpec = { command: string; args: string[]; cwd?: string; env: Record<string, string | undefined>; endsWithHost?: boolean }
 
 /**
  * Where a session's tool process comes from, when not from the adapter's own `spawn` (#280 step 2).

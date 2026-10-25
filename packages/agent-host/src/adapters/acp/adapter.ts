@@ -54,7 +54,8 @@ export abstract class AcpAdapter implements AgentAdapter {
     const source = opts.processSource
     if (source?.adopt) await closeAdopted(source.adopt, opts.sessionId, emit)
     // Under the keeper the process is the keeper's child, which it sweeps with its tree if this host goes (§3.3)
-    const proc = source ? source.spawn(spec) : this.spawn(spec)
+    // Started here, it must end with this host however the host ends (`endsWithHost`, #1562 review)
+    const proc = source ? source.spawn(spec) : this.spawn({ ...spec, endsWithHost: true })
     if (recorder) proc.once('exit', (code, signal) => recorder.exit(code, signal))
     const session = new AcpSession(opts, emit, {
       label,

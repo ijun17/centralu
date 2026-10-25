@@ -1,5 +1,5 @@
 import { isAbsolute, join } from 'node:path'
-import type { ApprovalDecision, ApprovalDetail, PermissionPreset } from '@cc/protocol'
+import type { ApprovalDecision, ApprovalDetail, NormalizedEvent, PermissionPreset } from '@cc/protocol'
 import { ORCHESTRATOR_MCP_NAME } from '../../apps/contract.js'
 import { rpcError } from '../../rpc-error.js'
 import { asObj } from '../../json-value.js'
@@ -54,6 +54,9 @@ type Card = { callId: string; options: PermissionOption[]; answer(outcome: Permi
  */
 type Turn = { input: Input; stopAsked: boolean; cancelResent: boolean; stopTimer?: ReturnType<typeof setTimeout> }
 
+/** While a command runs, how often its process tree is noted (`AgentProcess.noteTree`): a shell it starts may be late */
+const TREE_NOTE_MS = 2_000
+
 /** What a session is doing; the queue drains only in `ready` with no turn */
 type Phase = 'opening' | 'ready' | 'closed'
 
@@ -82,6 +85,9 @@ export class AcpSession implements SessionHandle {
   private preset: PermissionPreset
   private commands: { name: string; description?: string; argumentHint?: string }[] = []
   private lastTurnInputs: string[] = []
+  /** Commands running now, by call id, and the clock that notes the tree while any runs */
+  private readonly commandsRunning = new Set<string>()
+  private treeClock: ReturnType<typeof setInterval> | null = null
 
   constructor(
     private readonly opts: CreateSessionOpts,
@@ -228,6 +234,7 @@ export class AcpSession implements SessionHandle {
     if (turn.stopTimer) clearTimeout(turn.stopTimer)
     if (this.phase === 'closed') return
     for (const e of this.normalizer.endTurn()) this.emit(e)
+    this.stopTreeClock()
     this.closeCards()
     this.lastTurnInputs = input.id ? [input.id] : []
     this.turn = null
@@ -270,6 +277,32 @@ export class AcpSession implements SessionHandle {
     }
   }
 
+  /**
+   * A command the tool runs may start helpers in a group of their own (Cursor's shell, measured on macOS), which outlive
+   * the tool if it is killed: its tree is noted while a command runs, so they are ended with it (`noteTree`)
+   */
+  private watchCommands(e: NormalizedEvent): void {
+    const proc = this.deps.process
+    if (!proc.noteTree) return
+    if (e.type === 'tool_call' && e.summary.tool === 'Bash') {
+      this.commandsRunning.add(e.callId)
+      proc.noteTree()
+      if (!this.treeClock) {
+        this.treeClock = setInterval(() => proc.noteTree?.(), TREE_NOTE_MS)
+        this.treeClock.unref?.()
+      }
+    } else if (e.type === 'tool_result') {
+      this.commandsRunning.delete(e.callId)
+      if (this.commandsRunning.size === 0) this.stopTreeClock()
+    }
+  }
+
+  private stopTreeClock(): void {
+    this.commandsRunning.clear()
+    if (this.treeClock) clearInterval(this.treeClock)
+    this.treeClock = null
+  }
+
   interrupt(): void {
     const turn = this.turn
     if (!turn || this.phase !== 'ready') return
@@ -307,7 +340,10 @@ export class AcpSession implements SessionHandle {
         if (u.used > 0 && u.size > 0) this.emit({ type: 'context_update', sessionId: this.sessionId, used: u.used, window: u.size, exactness: 'exact' })
         return
       default:
-        for (const e of this.normalizer.update(u)) this.emit(e)
+        for (const e of this.normalizer.update(u)) {
+          this.watchCommands(e)
+          this.emit(e)
+        }
     }
   }
 
@@ -412,6 +448,7 @@ export class AcpSession implements SessionHandle {
     const failure = new Error(`${this.deps.label} exited${code === null ? '' : ` (code ${code})`}`)
     if (turn) {
       for (const e of this.normalizer.endTurn()) this.emit(e)
+      this.stopTreeClock()
       turn.input.observer?.fail(failure)
       turn.input.done?.reject(failure)
     }
@@ -444,6 +481,7 @@ export class AcpSession implements SessionHandle {
     if (turn) {
       // The calls it had open end with it (#1562 review: a host stopped mid-command left the card spinning after its restart)
       for (const e of this.normalizer.endTurn('Centralu stopped this session while the call ran')) this.emit(e)
+      this.stopTreeClock()
     }
     if (turn && this.externalId) {
       if (turn.stopTimer) clearTimeout(turn.stopTimer)

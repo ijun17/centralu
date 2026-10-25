@@ -236,6 +236,12 @@ function shoot(handle: KillablePty, signal: 'SIGTERM' | 'SIGKILL', os: KillOs = 
   return rows.filter((r) => tree.has(r.pid))
 }
 
+/** The process groups of `root`'s tree now (`killTargets`), for a sweep after it has gone; none on Windows or when ps cannot be read */
+export function treeGroups(root: number, platform: NodeJS.Platform = process.platform): number[] {
+  if (platform === 'win32') return []
+  return killTargets(snapshot(), root, process.pid)
+}
+
 /** Fires one signal at the tree. Falls back to pty.kill as before when the pid is unknown (a fake pty). On Windows, taskkill (shootWindows) */
 export function killTree(handle: KillablePty, signal: 'SIGTERM' | 'SIGKILL', os: KillOs = REAL_OS): void {
   shoot(handle, signal, os)

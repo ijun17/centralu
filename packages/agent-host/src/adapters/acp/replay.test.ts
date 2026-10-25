@@ -98,7 +98,7 @@ for (const dir of readdirSync(RECORDINGS)) {
         // The card as the session makes it: the call's frames so far, then the request (`AcpSession.onRequest`)
         const recording = loadRecording(join(RECORDINGS, dir, 'files.jsonl'))
         const normalizer = new AcpNormalizer('s')
-        const asked: { said: string | undefined; detail: ReturnType<typeof detailOf> }[] = []
+        const asked: { title: string; detail: ReturnType<typeof detailOf> }[] = []
         for (const f of recording.frames) {
           const msg = f.msg as { method?: string; params?: unknown } | undefined
           if (f.dir !== 'in' || !msg?.method) continue
@@ -108,12 +108,13 @@ for (const dir of readdirSync(RECORDINGS)) {
           }
           if (msg.method === 'session/request_permission') {
             const req = RequestPermission.parse(msg.params)
-            asked.push({ said: req.toolCall.kind ?? undefined, detail: detailOf(normalizer.call(req.toolCall, true), '/work') })
+            asked.push({ title: req.toolCall.title ?? '', detail: detailOf(normalizer.call(req.toolCall, true), '/work') })
           }
         }
         const deletes = asked.filter((a) => a.detail.kind === 'file_edit' && a.detail.change === 'delete')
         expect(deletes.length).toBeGreaterThan(0)
-        expect(asked.filter((a) => /^Delete/.test(JSON.stringify(a.detail)) && !(a.detail.kind === 'file_edit' && a.detail.change === 'delete'))).toEqual([])
+        // Every request the agent titled a delete reads as one (Cursor: "Delete `<path>`", its kind `edit`)
+        expect(asked.filter((a) => /^Delete\b/.test(a.title) && !(a.detail.kind === 'file_edit' && a.detail.change === 'delete'))).toEqual([])
       })
     }
 

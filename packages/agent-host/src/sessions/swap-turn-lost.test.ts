@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { PassThrough } from 'node:stream'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { AdapterCapabilities, NormalizedEvent, ToolName } from '@cc/protocol'
-import type { AgentAdapter, AgentProcess, CreateSessionOpts, EventSink, ExternalSessionSummary, SessionHandle } from '../adapters/contract.js'
+import type { AgentAdapter, CreateSessionOpts, EventSink, ExternalSessionSummary, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
 import { SessionManager, type AgentProcessHost } from './manager.js'
@@ -68,7 +68,7 @@ class Adapter implements AgentAdapter {
   }
 }
 
-const processes: AgentProcessHost = { spawn: () => new FakeProcess() as unknown as AgentProcess }
+const processes: AgentProcessHost = { spawn: () => new FakeProcess() }
 
 let store: Store
 let events: NormalizedEvent[]
@@ -94,7 +94,7 @@ async function swapMidTurn(takesOverTurn: boolean | undefined) {
   a.adapter.last.emit({ type: 'state_change', sessionId: s.id, state: 'working' })
   await a.mgr.detachAll()
   const b = host(takesOverTurn, new Set([s.id]))
-  await b.mgr.adoptKept([{ sessionId: s.id, tool: 'claude', process: new FakeProcess() as unknown as AgentProcess }])
+  await b.mgr.adoptKept([{ sessionId: s.id, tool: 'claude', process: new FakeProcess() }])
   return { b, id: s.id }
 }
 
