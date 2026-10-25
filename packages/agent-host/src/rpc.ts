@@ -791,9 +791,8 @@ export function createRpcHandler(
       return { ok: true as const }
     },
     'sessions.clearError': async (p) => {
-      const { sessionId } = RpcMethods['sessions.clearError'].params.parse(p)
-      mgr.clearError(sessionId)
-      return { ok: true as const }
+      const { sessionId, seq } = RpcMethods['sessions.clearError'].params.parse(p)
+      return { ok: true as const, cleared: mgr.clearError(sessionId, seq) }
     },
     'sessions.markRead': async (p) => {
       const { sessionId, seq } = RpcMethods['sessions.markRead'].params.parse(p)

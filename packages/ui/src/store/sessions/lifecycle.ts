@@ -1,6 +1,6 @@
 import { APP_ARRIVAL_ID_PREFIX, backgroundCount, defaultPresetFor, isAppArrivalId, isInTurn, sessionPanelId, withPanel, type SessionSummary } from '@cc/core'
 import { errorMessage, type NormalizedEvent, type ToolDefaults, type ToolName } from '@cc/protocol'
-import { applyEvent, initialSession, markRead as markReadPure, rename as renamePure } from '@cc/core'
+import { initialSession, markRead as markReadPure, rename as renamePure } from '@cc/core'
 import type { Platform } from '@cc/platform/ports'
 import type { AppState, StoreGet, StoreSet } from '../state.js'
 import { ifSessionStill, inOrder, stillInOrder } from '../patch.js'
@@ -460,20 +460,17 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
     const platform = get().platform
     if (s?.state !== 'error' || !platform) return get().markRead(sessionId)
     try {
-      await platform.agents.clearError(sessionId)
+      await platform.agents.clearError(sessionId, s.lastSeq)
     } catch (e) {
       set({ toast: `Could not clear the error: ${(e as Error).message}` })
       return
     }
-    // The host says idle to every window; this one reads it at once so the mark and the row do not wait for the event
-    set(
-      ifSessionStill(sessionId, (st, cur) => ({
-        sessions: {
-          ...st.sessions,
-          [sessionId]: markReadPure(applyEvent(cur, { type: 'state_change', sessionId, state: 'idle' }, Date.now()), cur.lastSeq),
-        },
-      })),
-    )
+    /*
+     * The state is the host's to say: it sends `idle` when it cleared the error, and sends nothing when something newer
+     * happened (a Continue from another window that already failed again or is waiting on an approval). Forcing `idle` here
+     * wiped such a card. Only the read mark is this window's to move.
+     */
+    set(ifSessionStill(sessionId, (st, cur) => ({ sessions: { ...st.sessions, [sessionId]: markReadPure(cur, s.lastSeq) } })))
   },
 
   /*

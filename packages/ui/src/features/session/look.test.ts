@@ -31,3 +31,13 @@ describe('lookOf: every state maps to one of the four looks (#736)', () => {
     expect(lookOf({ state: 'error', openQuestions: 2 })).toBe('waiting')
   })
 })
+
+describe('lookOf: a read interruption no longer marks the session (#1549)', () => {
+  it('stops a session with an interruption only while its last answer is unread', () => {
+    const interruption = { reason: 'network', at: 1 } as const
+    expect(lookOf({ state: 'idle', interruption, unread: true })).toBe('stopped')
+    expect(lookOf({ state: 'idle', interruption, unread: false })).toBe('idle')
+    // An error is a stopped turn whatever the read mark says
+    expect(lookOf({ state: 'error', unread: false })).toBe('stopped')
+  })
+})

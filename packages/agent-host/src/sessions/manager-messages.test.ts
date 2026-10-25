@@ -776,7 +776,7 @@ describe('resets, notices and switches the tool made (#304)', () => {
 })
 
 /** Done on a session in error (#1549): the mark goes, the transcript keeps the error line */
-describe('clearing a session\'s error (#1549)', () => {
+describe("clearing a session's error (#1549)", () => {
   const failed = async () => {
     const p = await addProject()
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
@@ -787,11 +787,12 @@ describe('clearing a session\'s error (#1549)', () => {
 
   it('moves an error session to idle and reads it, and keeps the error line in the transcript', async () => {
     const { s, row } = await failed()
+    const seen = (await row()).lastSeq
     expect((await row()).state).toBe('error')
-    await rpc('sessions.clearError', { sessionId: s.id })
+    expect(await rpc('sessions.clearError', { sessionId: s.id, seq: seen })).toEqual({ ok: true, cleared: true })
     const after = await row()
     expect(after.state).toBe('idle')
-    expect(after.lastReadSeq).toBeGreaterThanOrEqual(after.lastSeq)
+    expect(after.lastReadSeq).toBe(seen)
     const line = store.messages.loadMessages(s.id, 50).find((r) => r.kind === 'marker')
     expect(line!.payload).toMatchObject({ type: 'error', error: { message: 'app-server exited (code 0)' } })
   })
@@ -799,18 +800,41 @@ describe('clearing a session\'s error (#1549)', () => {
   it('says idle to every window, and marks the session again on a later error', async () => {
     const { s, row } = await failed()
     const mark = events.length
-    await rpc('sessions.clearError', { sessionId: s.id })
+    await rpc('sessions.clearError', { sessionId: s.id, seq: (await row()).lastSeq })
     expect(events.slice(mark)).toContainEqual(expect.objectContaining({ type: 'state_change', sessionId: s.id, state: 'idle' }))
     adapter.handleOf(s.id)!.emitError('a new failure')
     expect((await row()).state).toBe('error')
   })
 
-  it('does not touch a session that is not in error', async () => {
+  it('clears only the error the person saw: a later error stays and is not read', async () => {
+    const { s, row } = await failed()
+    const seenA = (await row()).lastSeq
+    adapter.handleOf(s.id)!.emitError('error B, after a Continue the person did not see')
+    const b = await row()
+    expect(b.lastSeq).toBeGreaterThan(seenA)
+    const mark = events.length
+    expect(await rpc('sessions.clearError', { sessionId: s.id, seq: seenA })).toEqual({ ok: true, cleared: false })
+    const after = await row()
+    expect(after.state).toBe('error')
+    expect(after.lastReadSeq).toBe(seenA)
+    expect(after.lastReadSeq).toBeLessThan(b.lastSeq)
+    expect(events.slice(mark).filter((e) => e.type === 'state_change')).toEqual([])
+  })
+
+  it('leaves a session that is not in error exactly as it is, and says so', async () => {
     const p = await addProject()
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
     await rpc('agents.send', { sessionId: s.id, text: 'x' })
-    const before = ((await rpc('sessions.list', {})) as SessionInfo[]).find((x) => x.id === s.id)!.state
-    await rpc('sessions.clearError', { sessionId: s.id })
-    expect(((await rpc('sessions.list', {})) as SessionInfo[]).find((x) => x.id === s.id)!.state).toBe(before)
+    const row = async () => ((await rpc('sessions.list', {})) as SessionInfo[]).find((x) => x.id === s.id)!
+    const before = await row()
+    expect(before.state).not.toBe('error')
+    const mark = events.length
+    expect(await rpc('sessions.clearError', { sessionId: s.id, seq: before.lastSeq })).toEqual({ ok: true, cleared: false })
+    expect((await row()).state).toBe(before.state)
+    expect(events.slice(mark).filter((e) => e.type === 'state_change')).toEqual([])
+  })
+
+  it('refuses a session that does not exist', async () => {
+    await expect(rpc('sessions.clearError', { sessionId: 'no-such-session', seq: 1 })).rejects.toThrow(/not found/i)
   })
 })

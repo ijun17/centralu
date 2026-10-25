@@ -117,7 +117,6 @@ With the limited credential: runs.
 - `projects.origin`
 - `projects.reorder`
 - `requests.list`
-- `sessions.clearError`
 - `sessions.list`
 - `sessions.markRead`
 - `sessions.rename`
@@ -221,6 +220,7 @@ With the limited credential: refused, never a card: the person's own answers and
 - `mail.unblock`
 - `mail.wake`
 - `requests.answer`
+- `sessions.clearError`
 - `updates.answerApply`
 - `updates.reportApply`
 - `workspace.save`

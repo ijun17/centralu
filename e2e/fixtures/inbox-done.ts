@@ -249,6 +249,8 @@ export function inboxDoneTests() {
     await expect.poll(() => stateOf(page, target)).toBe('error')
     await page.evaluate((sid) => (window as any).__store.getState().focusSession(sid), target)
     await expect(page.getByTestId('error-note')).toBeVisible()
+    const mark = page.getByTestId(`session-row-${target}`).locator('[data-look]')
+    await expect(mark).toHaveAttribute('data-look', 'stopped')
 
     await page.getByTestId('error-done').click()
 
@@ -257,7 +259,31 @@ export function inboxDoneTests() {
     expect(await hostStateOf(page, target)).toBe('idle')
     await expect(waitingCount(page)).toContainText('0')
     await expect(page.getByTestId('session-view')).toContainText('app-server exited (code 0)')
+    // The sidebar's mark goes with it, the stopped turn's interruption notwithstanding
+    await expect(mark).toHaveAttribute('data-look', 'idle')
     // Done stops and continues nothing: a stopped turn the person may go on with still offers Continue
     await expect(page.getByTestId('interrupted-continue')).toBeVisible()
+  })
+
+  test('Done never forces idle: what the host did meanwhile stands, an approval card included (#1549 review)', async ({ page }) => {
+    const { target } = await twoSessions(page)
+    await fail(page, target, 'app-server exited (code 0)')
+    await expect.poll(() => stateOf(page, target)).toBe('error')
+    await page.evaluate((sid) => (window as any).__store.getState().focusSession(sid), target)
+    // Another window pressed Continue: before this window's Done returns, the turn ran and now waits on an approval
+    await page.evaluate((sid) => {
+      const mock = (window as any).__mock as Mock
+      const agents = (window as any).__store.getState().platform.agents
+      agents.clearError = async () => {
+        mock.emit({ type: 'state_change', sessionId: sid, state: 'working' })
+        void mock.requestApproval(sid, { kind: 'command', command: 'ls', cwd: '/tmp/alpha' })
+        return { cleared: false }
+      }
+    }, target)
+
+    await page.getByTestId('error-done').click()
+
+    await expect.poll(() => stateOf(page, target)).toBe('waiting_approval')
+    await expect(page.getByTestId('approval-card')).toBeVisible()
   })
 }

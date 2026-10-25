@@ -113,9 +113,10 @@ export function CentraluCallHeader({
   const status = ask ? askStatus(item, named) : null
   const reason = item.ok === false ? failureReason(item.result) : null
   return (
-    <div className="flex w-full items-center gap-2 py-2 pl-2.5 pr-2">
+    /* Wraps: in a narrow card the session chip drops under the words instead of taking their room (#1544) */
+    <div className="flex w-full flex-wrap items-center gap-x-2 gap-y-1 py-2 pl-2.5 pr-2">
       <button
-        className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
+        className="flex min-w-40 flex-1 basis-40 items-center gap-2.5 text-left"
         onClick={onToggle}
         aria-expanded={open}
         data-testid={ask ? 'ask-project-toggle' : 'tool-card-toggle'}
@@ -129,10 +130,10 @@ export function CentraluCallHeader({
           {call.app ? <AppIcon size={13} /> : <CentraluMarkIcon size={13} />}
         </span>
         <span className="min-w-0 flex-1">
-          <span className="flex items-baseline gap-1.5">
+          <span className="flex flex-wrap items-baseline gap-x-1.5">
             {/* A project's name is the person's own and may be long, and a narrow card has little room: the words give way before the mark and the session chip do */}
             <span
-              className="min-w-0 truncate text-sm font-medium text-ink"
+              className="max-w-full min-w-0 truncate text-sm font-medium text-ink"
               data-testid="centralu-call-label"
             >
               {label}
@@ -171,7 +172,7 @@ export function CentraluCallHeader({
         /* The session it reached, as a chip that opens it: where the person most wants to go from here */
         <button
           type="button"
-          className="flex h-6 max-w-[200px] shrink-0 items-center gap-1 rounded-full border border-line bg-surface-hover/30 px-2.5 text-xs text-ink-muted transition-colors hover:border-line-strong hover:text-ink"
+          className="flex h-6 max-w-full min-w-0 items-center gap-1 rounded-full border border-line bg-surface-hover/30 px-2.5 text-xs text-ink-muted transition-colors hover:border-line-strong hover:text-ink"
           onClick={() => focus(named.id)}
           data-testid={ask ? 'ask-project-open' : 'centralu-call-open'}
           title={`Open ${named.name}`}
@@ -182,7 +183,7 @@ export function CentraluCallHeader({
       )}
       <button
         type="button"
-        className="shrink-0 rounded-md p-1 text-ink-faint transition-colors hover:text-ink"
+        className="ml-auto shrink-0 rounded-md p-1 text-ink-faint transition-colors hover:text-ink"
         onClick={onToggle}
         aria-label={open ? 'Hide the answer' : 'Show the answer'}
         tabIndex={-1}

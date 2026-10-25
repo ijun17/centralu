@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent } from 'react'
-import { appPanelId, arrangePanels, columnsFor, parsePanelId, rowsFor, sessionPanelId, withPanel, withOrder } from '@cc/core'
+import { appPanelId, arrangePanels, columnsFor, isUnread, parsePanelId, rowsFor, sessionPanelId, withPanel, withOrder } from '@cc/core'
 import { externalAppKey, useStore } from '../../store/store.js'
 import { useSessionsOf } from '../../store/selectors.js'
 import { useProjectApps } from '../../store/app-catalog.js'
@@ -211,7 +211,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
               const p = parsePanelId(id)
               const sessionId = p?.kind === 'session' ? p.id : null
               const session = sessionId ? sessions.find((s) => s.id === sessionId) : undefined
-              const look = session ? lookOf({ ...session, openQuestions: session.pendingQuestions.length }) : 'idle'
+              const look = session ? lookOf({ ...session, openQuestions: session.pendingQuestions.length, unread: isUnread(session) }) : 'idle'
               return (
                 <div
                   key={id}

@@ -94,6 +94,12 @@ export function centraluCallTests(): void {
         const [a, b] = await Promise.all([mark.boundingBox(), pill.boundingBox()])
         const apart = a!.x + a!.width <= b!.x + 0.5 || b!.x + b!.width <= a!.x + 0.5 || a!.y + a!.height <= b!.y + 0.5 || b!.y + b!.height <= a!.y + 0.5
         expect(apart, `at ${width}px the failed mark ${JSON.stringify(a)} overlaps the pill ${JSON.stringify(b)}`).toBe(true)
+        // A zero-width box overlaps nothing: what the person reads must keep a usable width (a card narrower than 200px has no room to)
+        const cardBox = await card.boundingBox()
+        for (const [id, least] of [['centralu-call-label', 80], ['tool-card-title', 80], ['centralu-call-reason', 100]] as const) {
+          const box = await card.getByTestId(id).boundingBox()
+          if (cardBox!.width >= 200) expect(box!.width, `at ${width}px (card ${cardBox!.width}px) ${id} is ${box!.width}px wide`).toBeGreaterThanOrEqual(least)
+        }
       }
       await expect(card.getByTestId('centralu-call-reason')).toContainText('busy with a turn')
     })
