@@ -121,8 +121,8 @@ export class AcpNormalizer {
       this.open.delete(id)
       const refused = this.refused.delete(id)
       // Measured on Cursor: a refused call ends `completed` with nothing else
-      const ok = u.status === 'completed' && !refused && rawOutputOk(u.rawOutput)
-      const text = output ?? rawOutputText(u.rawOutput) ?? call.output
+      const ok = u.status === 'completed' && !refused && rawOutputOk(seen.rawOutput)
+      const text = output ?? rawOutputText(seen.rawOutput) ?? call.output
       events.push(toolResultEvent(this.sessionId, id, ok, text || (refused ? 'Not run: the request was refused.' : ''), 'no output'))
     }
     return events
