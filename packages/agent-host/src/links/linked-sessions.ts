@@ -329,14 +329,15 @@ export function linkedSessions(
     const all = [...machines()]
     const ref = need?.ref?.trim()
     const anyDown = !!need?.anyDown && !!ref && !ref.includes('/') && !all.some((m) => qualifiedWith(m, ref))
-    const wanted = need ? all.filter((m) => !m.reachable && (anyDown || needs(m, need))) : []
+    const named = (m: RoutedMachine): boolean => !!need && needs(m, need)
+    const wanted = all.filter((m) => !m.reachable && (anyDown || named(m)))
     const prior = anyDown ? need?.prior : undefined
     if (prior && !wanted.length) return prior
     // A machine the act needs is listed after its attempt, once: the others are listed meanwhile
     const parts = await Promise.all(
       all.map(async (m): Promise<Listed> => {
         if (wanted.includes(m)) {
-          await (anyDown && !needs(m, need!) ? guess(m) : settle(m))
+          await (anyDown && !named(m) ? guess(m) : settle(m))
           return projectsOf(m, true)
         }
         // Up and listed by the caller already, unless it was away then (`prior` holds its mirror) and is up now
