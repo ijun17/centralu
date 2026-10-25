@@ -35,7 +35,7 @@ describe('what a call reads is an allowlist (§9.7)', () => {
     expect(paths({ pattern: 'C:\\secret\\*.txt' })).toEqual(['C:/secret'])
     expect(paths({ pattern: '//server/share/*' })).toEqual([''])
     expect(paths({ pattern: '**/*.ts', path: '/work/acme' })).toEqual(['/work/acme'])
-    expect(paths({ pattern: 'src/*.ts', path: '/work/acme' })[1]).toMatch(/src$/)
+    expect(paths({ pattern: 'src/*.ts', path: '/work/acme' })?.[1]).toMatch(/src$/)
   })
 
   it('a path is pinned to where it was when it was read', () => {
