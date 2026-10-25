@@ -18,7 +18,7 @@ import { appToolOf, editAskRuleExists, isOrchestratorTool, permissionOptionsFor,
 import { liveQueries, probeIds, querySessions } from './live-queries.js'
 import type { ClaudeMessage } from './json.js'
 import { requestTurnHooks } from './request-hook.js'
-import { claudeAutoCompactWindow, claudeQueryOptions, compactPointOff, type ClaudeInput, type QueryHandle } from './sdk-query.js'
+import { claudeAutoCompactWindow, claudeCompactAt, claudeQueryOptions, compactPointOff, type ClaudeInput, type QueryHandle } from './sdk-query.js'
 import { ClaudeRaceRetry, type RaceMsg } from './refresh-race.js'
 import { tracksInputs } from './tracked-input.js'
 import { initSurfaceLines } from './surface.js'
@@ -606,8 +606,10 @@ export class ClaudeSession implements SessionHandle {
       if (window > 0 && used >= 0) {
         // The model the CLI resolved the name to: an alias moves between models, and the host keeps windows per model (#1376)
         const model = typeof usage?.model === 'string' && usage.model ? usage.model : undefined
-        this.emit({ type: 'context_update', sessionId: this.sessionId, used, window, exactness: 'exact', ...(model ? { model } : {}) })
-        this.checkCompactPoint(Number(usage?.autoCompactThreshold ?? 0))
+        const threshold = Number(usage?.autoCompactThreshold ?? 0)
+        const compactAt = claudeCompactAt(this.opts, threshold)
+        this.emit({ type: 'context_update', sessionId: this.sessionId, used, window, exactness: 'exact', ...(model ? { model } : {}), ...(compactAt !== undefined ? { compactAt } : {}) })
+        this.checkCompactPoint(threshold)
       }
     } catch {
       // The conversation continues even if context usage cannot be read.

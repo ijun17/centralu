@@ -361,7 +361,16 @@ export const SessionInfo = z.object({
    * `null` here means "this session has never reported one" rather than "we forgot".
    */
   context: z
-    .object({ used: z.number(), window: z.number(), exactness: z.enum(['exact', 'estimate']) })
+    .object({
+      used: z.number(),
+      /** The model's full window when known (`capped` absent), else the tool's own reading of it (#1553, `contextShare`) */
+      window: z.number(),
+      exactness: z.enum(['exact', 'estimate']),
+      /** `window` is a floor under the model's window, not the window itself */
+      capped: z.boolean().optional(),
+      /** The size in tokens at which the session's process compacts by itself, when Centralu's control started it */
+      compactAt: z.number().optional(),
+    })
     .nullable()
     .default(null),
 })

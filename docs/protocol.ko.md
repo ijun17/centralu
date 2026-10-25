@@ -75,7 +75,7 @@ type NormalizedEvent =
   | { type: 'turn_complete';    sessionId }
   | { type: 'state_change';     sessionId, state: SessionState, reason? }
   | { type: 'usage_update';     sessionId, tokens: TokenUsage, request?: RequestInput }  // request: 모델 요청 하나의 입력, 프롬프트 캐시용 (agent-host.ko.md §6.1)
-  | { type: 'context_update';   sessionId, used, window, exactness: 'exact'|'estimate' }
+  | { type: 'context_update';   sessionId, used, window, exactness: 'exact'|'estimate', model?, capped?, compactAt? }  // model: 도구가 이름을 풀어낸 모델 (#1376); window: 호스트가 말하는 모델의 전체 윈도우, capped: 그보다 작은 바닥만 안다, compactAt: 프로세스가 스스로 압축하는 지점, 토큰 (#1553)
   | { type: 'limit_reached';    sessionId, resumeAt?, usedPercent?, windowMins? }
   | { type: 'session_title';    sessionId, title, auto }        // auto=false: 사람이 지은 이름 — 자동 이름이 덮지 않는다
   | { type: 'settings_changed'; sessionId, model, effort, verbosity, serviceTier?, permissionPreset?, by?, person? }  // #30: 사람 아닌 손이 설정을 바꿨다. by 'tool': 에이전트 도구가 스스로 바꿨다 (#304). person: 클라이언트가 agents.updateSettings를 불렀다 (#659)

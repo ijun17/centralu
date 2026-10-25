@@ -1,4 +1,5 @@
 import { memo } from 'react'
+import { contextShare } from '@cc/protocol'
 import { formatCount } from '../../app/format.js'
 import { useStore } from '../../store/store.js'
 import { SessionSettings } from './SessionSettings.jsx'
@@ -15,6 +16,9 @@ import { SessionSettings } from './SessionSettings.jsx'
  * they belong here, where the hand and eye already are, rather than in the header at the
  * opposite end of the screen.
  */
+/** Points below the compaction mark where the bar starts to warn */
+const WARN_BEFORE_COMPACT = 10
+
 export const ComposerFooter = memo(function ComposerFooter({
   sessionId,
   onMenuOpenChange,
@@ -24,12 +28,15 @@ export const ComposerFooter = memo(function ComposerFooter({
 }) {
   const session = useStore((s) => s.sessions[sessionId])
   if (!session) return null
-  // A window of 0 (a model the host could not size) has no percentage to give
-  const ctxPct =
-    session.context && session.context.window > 0
-      ? Math.round((session.context.used / session.context.window) * 100)
-      : null
+  // The share is used / the model's full window (#1553), whichever tool; the host says which window that is. A window of 0 (a model
+  // the host could not size) has no percentage to give. `capped`: only a floor under the model's window is known, so the figure is
+  // an upper bound and says so.
+  const share = contextShare(session.context)
+  const ctxPct = share ? Math.round(share.fraction * 100) : null
+  const compactPct = share?.compactAt?.fraction != null ? Math.round(share.compactAt.fraction * 100) : null
   const mark = session.context?.exactness === 'estimate' ? '≈' : ''
+  // The bar warns when the tool is about to compact: within 10 points of its mark. With no mark known, at 80% (FR-14)
+  const warn = ctxPct !== null && ctxPct >= (compactPct !== null ? Math.max(1, compactPct - WARN_BEFORE_COMPACT) : 80)
   return (
     <div className="mt-1.5 flex items-center gap-2">
       <SessionSettings
@@ -79,24 +86,45 @@ export const ComposerFooter = memo(function ComposerFooter({
       */}
       <span
         className={`ml-auto flex shrink-0 flex-col items-stretch gap-[1.5px] text-xs tabular-nums ${
-          ctxPct === null ? 'text-ink-faint/50' : ctxPct >= 80 ? 'text-ink' : 'text-ink-faint'
+          ctxPct === null ? 'text-ink-faint/50' : warn ? 'text-ink' : 'text-ink-faint'
         }`}
         data-testid="context-gauge"
         title={
           session.context
             ? `Context ${mark}${formatCount(session.context.used)} / ${formatCount(session.context.window)} tokens${
                 mark && ' (estimated until the next turn ends)'
+              }${
+                share?.capped
+                  ? " — the model's full window is not known yet, so this is the share of a smaller window the tool reported: the real share is at most this"
+                  : ''
+              }${
+                share?.compactAt
+                  ? ` · compacts at ${formatCount(share.compactAt.tokens)} tokens${compactPct !== null ? ` (${compactPct}%)` : ''}`
+                  : ''
               }`
             : 'Context unknown — this session has never reported one'
         }
       >
-        <span className="leading-none">Context {ctxPct === null ? '—' : `${mark}${ctxPct}%`}</span>
-        <span className="block h-1 overflow-hidden rounded-full bg-line" aria-hidden>
-          {ctxPct !== null && (
+        <span className="leading-none">Context {ctxPct === null ? '—' : `${share?.capped ? '≤' : mark}${ctxPct}%`}</span>
+        <span className="relative block h-1" aria-hidden>
+          <span className="block h-full overflow-hidden rounded-full bg-line">
+            {ctxPct !== null && (
+              <span
+                className={`block h-full rounded-full ${warn ? 'bg-ink' : 'bg-ink-faint'}`}
+                style={{ width: `${Math.min(100, Math.max(0, ctxPct))}%` }}
+                data-testid="context-gauge-fill"
+              />
+            )}
+          </span>
+          {/*
+            Where the tool compacts by itself: a mark on the bar, not its end (#1553). It stands out of the track above and below, so it
+            still shows once the fill has passed it (the fill and the mark are both ink there).
+          */}
+          {compactPct !== null && compactPct > 0 && compactPct < 100 && (
             <span
-              className={`block h-full rounded-full ${ctxPct >= 80 ? 'bg-ink' : 'bg-ink-faint'}`}
-              style={{ width: `${Math.min(100, Math.max(0, ctxPct))}%` }}
-              data-testid="context-gauge-fill"
+              className="absolute -inset-y-[1.5px] w-px bg-ink"
+              style={{ left: `${compactPct}%` }}
+              data-testid="context-gauge-compact-mark"
             />
           )}
         </span>

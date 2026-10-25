@@ -77,8 +77,8 @@ export class FakeHandle implements SessionHandle {
    * The tool answers **once, at the end of a turn** — claude in the `result` message, codex in
    * tokenUsage. Both adapters funnel into this one event, so simulating it here covers both.
    */
-  emitContext(used: number, window: number, model?: string) {
-    this.emit({ type: 'context_update', sessionId: this.sessionId, used, window, exactness: 'exact', ...(model ? { model } : {}) })
+  emitContext(used: number, window: number, model?: string, compactAt?: number) {
+    this.emit({ type: 'context_update', sessionId: this.sessionId, used, window, exactness: 'exact', ...(model ? { model } : {}), ...(compactAt ? { compactAt } : {}) })
   }
   /** The turn ended in an error (#107) — the only way an adapter reports failure. */
   emitError(message: string) {

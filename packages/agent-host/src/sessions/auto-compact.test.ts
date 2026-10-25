@@ -153,6 +153,76 @@ describe('ModelWindows', () => {
     expect(after.ceilingOf('a')).toBeNull()
   })
 
+  describe('the window a share is read against (#1553)', () => {
+    const claude = (id: string) => m(id, 'opus[1m]', 'claude')
+
+    it("is the model's full window when the reading was taken under the compaction setting: 633k reported, 1M known", () => {
+      const w = new ModelWindows(settings())
+      w.note(claude('a'), 1_000_000, 'claude-opus-5')
+      w.started('a', 633_000)
+      w.note(claude('a'), 633_000, 'claude-opus-5')
+      expect(w.shareWindow(claude('a'), 633_000)).toEqual({ window: 1_000_000, capped: false })
+      expect(w.of(claude('a'))).toBe(1_000_000)
+    })
+
+    it("is the reading itself with the control off, and for a tool that reports the model's own window", () => {
+      const w = new ModelWindows(settings())
+      w.started('a', null)
+      w.note(claude('a'), 1_000_000, 'claude-opus-5')
+      expect(w.shareWindow(claude('a'), 1_000_000)).toEqual({ window: 1_000_000, capped: false })
+      const codex = m('c', 'gpt-5.6')
+      w.started('c', null)
+      w.note(codex, 258_400)
+      expect(w.shareWindow(codex, 258_400)).toEqual({ window: 258_400, capped: false })
+    })
+
+    it('a reading under the ceiling is the real window of a smaller model, whatever was known', () => {
+      const w = new ModelWindows(settings())
+      w.note(claude('a'), 1_000_000, 'claude-haiku-5-5')
+      w.started('a', 633_000)
+      w.note(claude('a'), 200_000, 'claude-haiku-4-5')
+      expect(w.shareWindow(claude('a'), 200_000)).toEqual({ window: 200_000, capped: false })
+    })
+
+    it("is only the tool's reading, said to be capped, when the reading is at the ceiling and the model's window is not known", () => {
+      const w = new ModelWindows(settings())
+      // An adopted process without a kept ceiling can only say "at least"
+      w.started('a', 155_400, true)
+      w.note(claude('a'), 153_000, 'claude-haiku-5-5')
+      expect(w.shareWindow(claude('a'), 153_000)).toEqual({ window: 153_000, capped: true })
+      // The record was dropped because the alias moved to another model
+      const b = new ModelWindows(settings())
+      b.note(claude('b'), 200_000, 'claude-haiku-4-5')
+      b.started('b', 153_000)
+      b.note(claude('b'), 153_000, 'claude-haiku-5-5')
+      expect(b.shareWindow(claude('b'), 153_000)).toEqual({ window: 153_000, capped: true })
+    })
+
+    it("the window to divide by is the model's own record: a capped reading leaves none, and another model has none until it is read", () => {
+      const store = settings()
+      const w = new ModelWindows(store)
+      w.note(claude('a'), 200_000, 'claude-haiku-4-5')
+      w.started('a', 153_000)
+      w.note(claude('a'), 153_000, 'claude-haiku-4-5')
+      expect(w.shareWindow(claude('a'), 153_000)).toEqual({ window: 200_000, capped: false })
+      expect(w.of(claude('a'))).toBe(200_000)
+      // The alias moved to another model: the record is dropped and the reading is a floor
+      w.note(claude('a'), 153_000, 'claude-haiku-5-5')
+      expect(w.shareWindow(claude('a'), 153_000)).toEqual({ window: 153_000, capped: true })
+      expect(w.of(claude('a'))).toBeNull()
+      // A host that starts afterwards has read nothing for the session: the stored window may be that floor (capped is not stored)
+      const after = new ModelWindows(store)
+      after.started('a', 153_000, true)
+      expect(after.of(claude('a'))).toBeNull()
+      // A reading of the whole window (the next start passes nothing) is one
+      after.started('a', null)
+      after.note(claude('a'), 1_000_000, 'claude-haiku-5-5')
+      expect(after.shareWindow(claude('a'), 1_000_000)).toEqual({ window: 1_000_000, capped: false })
+      expect(after.of(claude('a'))).toBe(1_000_000)
+      after.forget('a')
+    })
+  })
+
   it('keeps the model beside the window across a restart of the host', () => {
     const store = settings()
     new ModelWindows(store).note(m('a', 'haiku', 'claude'), 200_000, 'claude-haiku-4-5')
@@ -260,6 +330,77 @@ describe('what a session is launched with', () => {
     await expect(world.rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'codex', model: 'gpt-5.6' })).rejects.toThrow('no tool')
     expect(sets).toHaveLength(1)
     expect(world.store.settings.appSetting(sets[0]!)).toBeNull()
+  })
+
+  describe('the context a session shows is against the full window of its model (#1553)', () => {
+    const shown = (id: string) => world.mgr.listSessions().find((x) => x.id === id)!.context
+    /** Reads a window, then wakes the session on the point the setting gives */
+    const restarted = async (id: string, used: number, window: number, model?: string) => {
+      handle(id).emitContext(used, window, model)
+      expect(await world.mgr.sleepSession(id)).toBe(true)
+      await world.mgr.resumeSession(id)
+    }
+    const lastUpdate = () => world.events.filter((e) => e.type === 'context_update').at(-1)
+
+    it("Claude with the control on: the CLI's 633k is told as the 1M model's window, with the point the CLI says it compacts at", async () => {
+      Object.assign(world.codexAdapter, { windowCeilingFor: (tokens: number) => tokens + 33_000 })
+      const s = await create()
+      await restarted(s.id, 10_000, 1_000_000, 'opus-1m')
+      expect(world.codexAdapter.lastOpts?.autoCompactTokens).toBe(600_000)
+      // The CLI under autoCompactWindow 633,000 reports min(1M, 633k), and its own threshold
+      handle(s.id).emitContext(304_000, 633_000, 'opus-1m', 600_000)
+      expect(shown(s.id)).toEqual({ used: 304_000, window: 1_000_000, exactness: 'exact', compactAt: 600_000 })
+      // The same on the event a window follows
+      expect(lastUpdate()).toMatchObject({ used: 304_000, window: 1_000_000, compactAt: 600_000 })
+      expect(lastUpdate()).not.toHaveProperty('capped')
+      // Nothing about the point is kept in the store: a build that writes none (a rollback) cannot leave a stale one for a later host to adopt
+      expect(world.store.settings.appSetting(`auto_compact_at:${s.id}`)).toBeNull()
+    })
+
+    it('a point the adapter says that is not under the window is dropped: the window shrank since the process was started', async () => {
+      const s = await create()
+      handle(s.id).emitContext(10_000, 258_400, undefined, 155_040)
+      expect(shown(s.id)).toEqual({ used: 10_000, window: 258_400, exactness: 'exact', compactAt: 155_040 })
+      handle(s.id).emitContext(10_000, 258_400, undefined, 300_000)
+      expect(shown(s.id)).toEqual({ used: 10_000, window: 258_400, exactness: 'exact' })
+    })
+
+    it("Claude with the control turned off after it was on: the reported 1M is the window, and the point goes with the process", async () => {
+      Object.assign(world.codexAdapter, { windowCeilingFor: (tokens: number) => tokens + 33_000 })
+      const s = await create()
+      await restarted(s.id, 10_000, 1_000_000, 'opus-1m')
+      handle(s.id).emitContext(304_000, 633_000, 'opus-1m', 600_000)
+      expect(shown(s.id)).toEqual({ used: 304_000, window: 1_000_000, exactness: 'exact', compactAt: 600_000 })
+      await world.rpc('prefs.set', { patch: { autoCompact: { controlled: false } } })
+      expect(await world.mgr.sleepSession(s.id)).toBe(true)
+      await world.mgr.resumeSession(s.id)
+      expect(world.codexAdapter.lastOpts?.autoCompactTokens).toBeUndefined()
+      // The new process was not started to compact anywhere: the old one's point is not carried into it (neither by the host's copy)
+      expect(shown(s.id)).toEqual({ used: 304_000, window: 1_000_000, exactness: 'exact' })
+      handle(s.id).emitContext(304_000, 1_000_000, 'opus-1m')
+      expect(shown(s.id)).toEqual({ used: 304_000, window: 1_000_000, exactness: 'exact' })
+    })
+
+    it("Codex reports the model's own window and the point it was started with", async () => {
+      const s = await create()
+      await restarted(s.id, 10_000, 258_400)
+      handle(s.id).emitContext(100_000, 258_400, undefined, 155_040)
+      expect(shown(s.id)).toEqual({ used: 100_000, window: 258_400, exactness: 'exact', compactAt: 155_040 })
+    })
+
+    it('a window that is only a floor is told as such: the reading stands in for it, marked capped, until the real one is learnt', async () => {
+      Object.assign(world.codexAdapter, { windowCeilingFor: (tokens: number) => tokens + 33_000 })
+      const s = await create()
+      await restarted(s.id, 10_000, 200_000, 'haiku-4')
+      // The alias now means another model, and the CLI reports its ceiling (153,000): the 200k record is dropped, nothing replaces it
+      handle(s.id).emitContext(100_000, 153_000, 'haiku-5', 120_000)
+      expect(shown(s.id)).toEqual({ used: 100_000, window: 153_000, exactness: 'exact', capped: true, compactAt: 120_000 })
+      // The next start passes nothing, and the real window is learnt
+      expect(await world.mgr.sleepSession(s.id)).toBe(true)
+      await world.mgr.resumeSession(s.id)
+      handle(s.id).emitContext(100_000, 1_000_000, 'haiku-5')
+      expect(shown(s.id)).toEqual({ used: 100_000, window: 1_000_000, exactness: 'exact' })
+    })
   })
 
   it('a new session of a model another session has read the window of gets the value at once', async () => {

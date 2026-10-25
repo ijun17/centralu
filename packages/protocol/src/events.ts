@@ -447,6 +447,17 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
      * names a different model over time), when it says. With the window it is what `ModelWindows` keeps per model (#1376).
      */
     model: z.string().optional(),
+    /**
+     * (#1553) `window` is the model's full context window as the host says it, so the share is used / the model's window whatever
+     * the tool reported (Claude's CLI reports the smaller of the model's window and the compaction point it was started with).
+     * The host sets `window` and `capped`; `capped`: the full window is not known (an adopted process with no kept ceiling, a model
+     * name that moved to another model), so `window` is only the tool's own reading, a floor under the model's.
+     * `compactAt`: the size in tokens at which this session's process compacts by itself, said by the adapter of a process Centralu's
+     * control started (Claude: the CLI's own threshold from every reading; Codex: the limit it was started with). The host drops one
+     * that is not under `window`.
+     */
+    capped: z.boolean().optional(),
+    compactAt: z.number().optional(),
   }),
   z.object({
     ...base,

@@ -48,6 +48,14 @@ export function autoCompactConfig(opts: Pick<CreateSessionOpts, 'autoCompactToke
   return opts.autoCompactTokens ? { model_auto_compact_token_limit: opts.autoCompactTokens } : {}
 }
 
+/**
+ * The compaction point to tell with a context reading (#1553): the limit this thread's process was started with. Codex does not
+ * report where it compacts. An adopted process was started with a limit this host did not keep, so none is told.
+ */
+export function codexCompactAt(opts: Pick<CreateSessionOpts, 'autoCompactTokens' | 'processSource'>): number | undefined {
+  return opts.autoCompactTokens && !opts.processSource?.adopt ? opts.autoCompactTokens : undefined
+}
+
 /** What `thread/resume` is sent: `servers` are the MCP servers (`CodexServers.mcpConfig`), `workspaceConfig` the sandbox's (`sandboxConfig`) */
 export function resumeThreadParams(opts: CreateSessionOpts, servers: Record<string, unknown>, workspaceConfig: Record<string, unknown>): Record<string, unknown> {
   return {

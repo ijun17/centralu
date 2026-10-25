@@ -127,7 +127,7 @@ export class SessionEvents {
 
   /** Receive event -> update metadata -> persist message -> broadcast */
   onEvent(raw: NormalizedEvent, from: SessionHandle | null = null): void {
-    const e = raw.type === 'files_touched' ? this.projectRelative(raw) : raw
+    let e = raw.type === 'files_touched' ? this.projectRelative(raw) : raw
     /*
      * **A message from a handle that has already been set aside is never accepted** (#157) — anything
      * not from the handle currently registered for that session is dropped. It never enters the crash
@@ -176,6 +176,8 @@ export class SessionEvents {
       this.host.compactEvent(e, false)
       return
     }
+    // What the tool read is against the window it reports; what the screen and the agent are told is against the model's (#1553)
+    if (e.type === 'context_update' && e.exactness !== 'estimate') e = this.shareOf(e)
     if (e.type === 'settings_changed' && e.by === 'tool') {
       this.host.record.recordToolSettings(e)
       return
@@ -355,6 +357,23 @@ export class SessionEvents {
     if (e.type === 'background_tasks' && e.sessionId && this.host.children.pausedReports.has(e.sessionId)) this.host.reports.settlePausedReport(e.sessionId)
   }
 
+  /**
+   * The tool's reading of the context, as the rest of the host and the screens see it (#1553): `window` is the model's full window
+   * (`ModelWindows.shareWindow`), `capped` says it is not known, `compactAt` is where the adapter says the session's process compacts. The reading
+   * itself is what `ModelWindows` learns the model's window from, so it is noted first, against the window the tool reported. An
+   * estimate from a request (#1492) is no reading of the model's window and carries what the last reading did (`ContextMeter`).
+   */
+  private shareOf(e: Extract<NormalizedEvent, { type: 'context_update' }>): NormalizedEvent {
+    const m = this.host.meta.get(e.sessionId)
+    if (!m) return e
+    this.host.modelWindows.note(m, e.window, e.model)
+    const { window, capped } = this.host.modelWindows.shareWindow(m, e.window)
+    // The adapter's point, where the process really compacts; one not under the window says nothing (a window that shrank since the start)
+    const { compactAt: said, ...rest } = e
+    const compactAt = said !== undefined && said > 0 && said < window ? said : null
+    return { ...rest, window, ...(capped ? { capped: true } : {}), ...(compactAt !== null ? { compactAt } : {}) }
+  }
+
   /** A state hint, for storage: the core reducer's rules on the host's copy (`applySessionState`, protocol session-state.ts) */
   applyStateHint(e: NormalizedEvent, m: SessionInfo): void {
     const from = m.state
@@ -414,8 +433,6 @@ export class SessionEvents {
         break
       case 'context_update':
         m.context = nextContext(m.context, e)
-        // An estimate from a request (#1492) is no reading of the model's window: the tool's own readings say that
-        if (e.exactness !== 'estimate') this.host.modelWindows.note(m, e.window, e.model)
         break
       case 'conversation_reset':
         // The old conversation's reading no longer describes anything (#304); the tool reports the new one when the turn ends

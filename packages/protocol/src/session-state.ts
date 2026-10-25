@@ -264,15 +264,39 @@ export type ContextReading = SessionInfo['context']
 export function nextContext(context: ContextReading, e: NormalizedEvent): ContextReading {
   switch (e.type) {
     case 'context_update':
-      return { used: e.used, window: e.window, exactness: e.exactness }
+      return { used: e.used, window: e.window, exactness: e.exactness, ...(e.capped ? { capped: true } : {}), ...(e.compactAt !== undefined ? { compactAt: e.compactAt } : {}) }
     case 'conversation_reset':
       return null
     case 'compaction':
       if (e.failed || e.after === undefined || !context) return context
-      return { used: e.after, window: context.window, exactness: 'estimate' }
+      return { ...context, used: e.after, exactness: 'estimate' }
     default:
       return context
   }
+}
+
+/** What a context reading says about how full the conversation is (`contextShare`) */
+export type ContextShare = {
+  /** used / the window; not clamped, so a reading past the window shows */
+  fraction: number
+  window: number
+  /** The window is a floor under the model's (the full one is not known), so `fraction` is a ceiling over the real share */
+  capped: boolean
+  /** Where the session's process compacts by itself; `fraction` is null when the window is only a floor */
+  compactAt: { tokens: number; fraction: number | null } | null
+}
+
+/**
+ * The one definition of a session's context share (#1553): used / the model's full context window, for Claude and Codex alike,
+ * so 100% is the whole window (a 1M model: 1,000k) and the compaction point is a mark on it, not its end. The host says which
+ * window that is (`context_update.window`, from `ModelWindows`); a screen or a text for an agent reads it here and does not
+ * divide by anything else. Null with no reading, or a window of 0 (a model the host could not size).
+ */
+export function contextShare(context: ContextReading): ContextShare | null {
+  if (!context || !(context.window > 0)) return null
+  const capped = context.capped === true
+  const compactAt = context.compactAt !== undefined && context.compactAt > 0 ? { tokens: context.compactAt, fraction: capped ? null : context.compactAt / context.window } : null
+  return { fraction: context.used / context.window, window: context.window, capped, compactAt }
 }
 
 /**

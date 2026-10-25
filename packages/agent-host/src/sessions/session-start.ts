@@ -523,6 +523,11 @@ export class SessionStarts {
   private autoCompactFor(m: SessionInfo, adopted: boolean): Pick<CreateSessionOpts, 'autoCompactTokens' | 'autoCompactCeiling'> {
     const { tokens } = autoCompactPlan(autoCompactOf(this.host.uiPreferences()), this.host.modelWindows, m)
     this.host.modelWindows.started(m.id, tokens === null ? null : (this.host.adapters.get(m.tool)?.windowCeilingFor?.(tokens) ?? null), adopted)
+    // The point of the process before this one is not this one's: its first reading says the new (#1553)
+    if (m.context?.compactAt !== undefined) {
+      const { compactAt: _before, ...rest } = m.context
+      m.context = rest
+    }
     const kept = adopted ? this.host.modelWindows.ceilingOf(m.id) : null
     return { ...(tokens === null ? {} : { autoCompactTokens: tokens }), ...(kept === null ? {} : { autoCompactCeiling: kept }) }
   }

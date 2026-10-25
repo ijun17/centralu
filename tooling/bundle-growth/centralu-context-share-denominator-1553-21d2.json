@@ -1,0 +1,4 @@
+{
+  "bytes": 1100,
+  "reason": "One context share against the model's full window (#1553): the gauge's mark on the bar (standing out of the track so it shows past the fill) with its tooltip lines (where the tool compacts, when the full window is not known), the warning that follows the mark, and the protocol's contextShare with the two added reading fields (capped, compactAt). Measured on a production build with this pull request's UI, protocol and platform sources and with main's (origin/main at 4efe61bb1, the same tree otherwise): 1,911,382 B against 1,910,351 B, +1,031 B, all in the main chunk. Plain strings and a pure function with no dependency; lazy loading would not lower the total, which counts every chunk."
+}

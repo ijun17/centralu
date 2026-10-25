@@ -48,6 +48,19 @@ describe('ContextMeter', () => {
     expect(w.request(80_000)).toBeNull()
   })
 
+  it('carries the reading’s capped mark and the process’s compaction point into the estimate (#1553)', () => {
+    const w = world()
+    w.m.context = { used: 20_000, window: WINDOW, exactness: 'exact', capped: true, compactAt: 120_000 }
+    w.start()
+    expect(w.request(60_000)).toMatchObject({ used: 60_000, window: WINDOW, exactness: 'estimate', capped: true, compactAt: 120_000 })
+    // A reading with neither leaves an estimate with neither
+    const plain = world()
+    plain.start()
+    const estimate = plain.request(60_000)
+    expect(estimate).not.toHaveProperty('capped')
+    expect(estimate).not.toHaveProperty('compactAt')
+  })
+
   it('leaves the figure to the tool’s reading at the turn’s end, whatever the estimates said', () => {
     const w = world()
     w.start()

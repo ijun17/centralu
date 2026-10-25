@@ -23,7 +23,7 @@ import { CodexChildThreads } from './child-threads.js'
 import { CodexSlashCommands } from './slash-commands.js'
 import { runningTurnOf, threadIdOf, turnIdOf } from './turn-reads.js'
 import { spawnInKeeper } from './launch-config.js'
-import { initializeAppServer, latestRunningTurn, networkAccessOf, resumeFailure, resumeThreadParams, startThreadParams } from './thread-open.js'
+import { codexCompactAt, initializeAppServer, latestRunningTurn, networkAccessOf, resumeFailure, resumeThreadParams, startThreadParams } from './thread-open.js'
 import { CodexTurns } from './turns.js'
 import { WakingSends, watchBackgroundResume } from './background-resume.js'
 import { keepAttachedAppMarks } from '../tool-titles.js'
@@ -409,7 +409,10 @@ export class CodexSession implements SessionHandle {
        * own compaction or the person's) is manual; any other is the tool's own, in the middle of a turn (#1500): the host does not
        * take it for a compaction it asked for
        */
-      const e = said.type === 'compaction' ? { ...said, trigger: this.compactTurn ? ('manual' as const) : ('auto' as const) } : said
+      const sort = said.type === 'compaction' ? { ...said, trigger: this.compactTurn ? ('manual' as const) : ('auto' as const) } : said
+      // The point a thread of this process was started to compact at, with its window readings (#1553); an adopted one was started with a limit this host did not keep
+      const compactAt = codexCompactAt(this.opts)
+      const e = sort.type === 'context_update' && compactAt !== undefined ? { ...sort, compactAt } : sort
       if (e.type === 'error' && this.inputReceipts.size) this.interrupt(new Error(e.error.message))
       /*
        * An image that arrived carrying only a path gets its bytes filled in here (#40). normalize

@@ -20,13 +20,14 @@ function world(initial: Partial<SessionInfo> = {}) {
   const sessions = new Map<string, SessionInfo>([['s1', info(initial)]])
   const sent: [string, string][] = []
   const notices: [string, string][] = []
-  const state = { now: 1_000_000, idle: { idle: true } as SessionIdle, running: true, setting: { ...DEFAULT_AUTO_COMPACT }, failSend: false, modelWindow: null as number | null }
+  const state = { now: 1_000_000, idle: { idle: true } as SessionIdle, running: true, setting: { ...DEFAULT_AUTO_COMPACT }, failSend: false, modelWindow: undefined as number | null | undefined }
   const host: SelfCompactionHost = {
     sessions: () => [...sessions.values()],
     session: (id) => sessions.get(id),
     idle: () => state.idle,
     running: () => state.running,
-    window: () => state.modelWindow,
+    // undefined: the host has read the session's window in full (the reading's own); null: it knows none of the model
+    window: (s) => (state.modelWindow === undefined ? (s.context?.window ?? null) : state.modelWindow),
     setting: () => state.setting,
     command: (tool, focus) => (tool === 'claude' && focus ? `/compact ${focus}` : '/compact'),
     send: (id, text) => {
@@ -478,13 +479,13 @@ describe('a session at rest over the lower share (#1451)', () => {
     expect(w.c.sweep()).toEqual(['s1'])
   })
 
-  it('reads the share against the model’s own window when it is known, not the smaller one a Claude process reports', () => {
-    // 190k of a reported 633k is 30%; of the model’s 1M it is 19%
-    const w = resting({ context: { used: 190_000, window: 633_000, exactness: 'exact' } })
-    w.state.modelWindow = 1_000_000
+  it('takes no share of a window the host does not know in full (a floor under the model’s, or nothing read since a restart) (#1553)', () => {
+    const w = resting()
+    w.m().context = { used: 190_000, window: 200_000, exactness: 'exact', capped: true }
+    w.state.modelWindow = null
     later(w, 60)
     expect(w.c.sweep()).toEqual([])
-    w.state.modelWindow = null
+    w.state.modelWindow = 200_000
     expect(w.c.sweep()).toEqual(['s1'])
   })
 
@@ -715,6 +716,22 @@ describe('on the session manager (#1451)', () => {
     const own = world.events.find((e) => e.type === 'turn_complete')
     expect(own).toBeDefined()
     expect(own).not.toMatchObject({ turn: { compaction: true } })
+  })
+
+  it('leaves a resting session alone after a model switch until the new model’s window is read: the old one’s is not its window (#1553)', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] })
+    const { id, h } = await session()
+    h.finishTurn()
+    await world.rpc('agents.updateSettings', { sessionId: id, model: 'sonnet' })
+    const now = world.adapter.last!
+    world.mgr.startSelfCompaction()
+    await vi.advanceTimersByTimeAsync(30 * MIN)
+    expect(now.sent).not.toContain('/compact')
+    expect(h.sent).not.toContain('/compact')
+    // The new model's reading gives its window: the same size is now over the share
+    now.emitContext(150_000, 200_000)
+    await vi.advanceTimersByTimeAsync(12 * MIN)
+    expect(now.sent).toContain('/compact')
   })
 
   it('compacts a resting session over the share after ten minutes, and not with the switch off', async () => {

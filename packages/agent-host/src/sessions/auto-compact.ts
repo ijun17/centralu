@@ -112,6 +112,20 @@ export class ModelWindows {
     this.write(key, { window, model: resolved ?? null })
   }
 
+  /**
+   * The window a session's context share is read against (#1553): the model's full window, whatever the process reported. Asked
+   * right after `note` took the same reading. A reading under the process's ceiling is the model's own window; one at it is a
+   * floor, and the model's window is then what `note` kept (the record for this model), or unknown: the reading stands in as
+   * `capped`, which the screen says. A tool with no ceiling (Codex, a process started without the setting) reports the model's own.
+   */
+  shareWindow(m: Pick<SessionInfo, 'id' | 'tool' | 'model' | 'projectId'>, reported: number): { window: number; capped: boolean } {
+    const ceiling = this.ceilings.get(m.id)
+    const atCeiling = ceiling === 'unknown' || (ceiling !== undefined && reported >= ceiling)
+    const known = atCeiling ? this.of(m) : null
+    if (!atCeiling) return { window: reported, capped: false }
+    return known === null ? { window: reported, capped: true } : { window: Math.max(known, reported), capped: false }
+  }
+
   /** The model's window, or null when no session has read one */
   of(m: Pick<SessionInfo, 'tool' | 'model' | 'projectId'>): number | null {
     return this.read(this.key(m))?.window ?? null

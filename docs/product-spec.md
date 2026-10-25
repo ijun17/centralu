@@ -388,8 +388,14 @@ idle → working → (waiting_approval | waiting_input | limited | error) → wo
 
 #### FR-14. Context usage display
 
-- A context gauge in the session header: tokens used / context window (%). Updated from streaming usage events.
-- Threshold warning (e.g. at 80%, change the gauge colour + a "compaction/degradation may be near" tooltip).
+- A context gauge in the session header: tokens used / **the model's full context window** (%), the same for every tool (#1553):
+  100% is the whole window (a 1M model: 1,000k), whatever window the tool reports under Centralu's compaction setting. The
+  point where the tool compacts by itself is a mark on the bar and in the tooltip ("compacts at 600k tokens (60%)"), as the tool says it
+  (not as asked for: the CLI clamps what it is given). When the
+  model's full window is not known yet the gauge says so ("≤N%", the tooltip names why) instead of passing a smaller window
+  off as the full one. Updated from streaming usage events.
+- Threshold warning: the gauge changes colour within 10 points of the compaction mark (the tool compacts at 60% by default, so an
+  80% threshold would never show before it); where no mark is known, at 80%.
 - Show a marker in the conversation view when compaction (summarisation) happens.
 - Show a marker when the tool starts a fresh conversation inside the session (Claude Code's `/clear`, #304), and empty
   the gauge until the tool reports the new conversation's size.

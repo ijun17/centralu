@@ -86,6 +86,52 @@ test('A compaction moves the context gauge to its reported size, as an estimate 
   await expect(page.getByTestId('context-gauge')).toHaveText('Context 1%')
 })
 
+/*
+ * The share is used / the model's full window, with the compaction point as a mark on the bar (#1553). The host says the window: a
+ * 1M model started under the compaction setting reports 633k to the tool's reader, and the gauge is told 1,000k.
+ */
+test('The context gauge reads against the model’s full window and marks where the tool compacts (#1553)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'task')
+
+  await emitEvent(page, 0, { type: 'context_update', used: 304000, window: 1000000, exactness: 'exact', compactAt: 600000 })
+  await expect(page.getByTestId('context-gauge')).toHaveText('Context 30%')
+  await expect(page.getByTestId('context-gauge')).toHaveAttribute('title', /Context 304k \/ 1M tokens · compacts at 600k tokens \(60%\)/)
+  await expect(page.getByTestId('context-gauge-compact-mark')).toHaveAttribute('style', /left: 60%/)
+
+  // The bar warns near the tool's compaction point, not at a fixed 80% the tool never reaches: 30% is quiet, 52% of a 60% point is not
+  await expect(page.getByTestId('context-gauge-fill')).toHaveClass(/bg-ink-faint/)
+  await emitEvent(page, 0, { type: 'context_update', used: 520000, window: 1000000, exactness: 'exact', compactAt: 600000 })
+  await expect(page.getByTestId('context-gauge')).toHaveText('Context 52%')
+  await expect(page.getByTestId('context-gauge-fill')).toHaveClass(/bg-ink(?!-)/)
+
+  // Past the mark the fill and the mark are both ink: the mark stands out of the track above and below, so it shows
+  await emitEvent(page, 0, { type: 'context_update', used: 800000, window: 1000000, exactness: 'exact', compactAt: 600000 })
+  await expect(page.getByTestId('context-gauge')).toHaveText('Context 80%')
+  const fill = await page.getByTestId('context-gauge-fill').boundingBox()
+  const tick = await page.getByTestId('context-gauge-compact-mark').boundingBox()
+  expect(fill && tick).toBeTruthy()
+  expect(tick!.y).toBeLessThan(fill!.y)
+  expect(tick!.y + tick!.height).toBeGreaterThan(fill!.y + fill!.height)
+  expect(tick!.x).toBeLessThan(fill!.x + fill!.width)
+  await test.info().attach('gauge-past-the-mark.png', { body: await page.getByTestId('context-gauge').screenshot(), contentType: 'image/png' })
+
+  // Only a floor under the model's window is known: the figure says it is at most that, and the mark has no place on the bar
+  await emitEvent(page, 0, { type: 'context_update', used: 100000, window: 153000, exactness: 'exact', capped: true, compactAt: 120000 })
+  await expect(page.getByTestId('context-gauge')).toHaveText('Context ≤65%')
+  await expect(page.getByTestId('context-gauge')).toHaveAttribute('title', /full window is not known yet.*the real share is at most this/)
+  // An estimate in a floor is a floor first: one glyph, the tooltip says estimated
+  await emitEvent(page, 0, { type: 'context_update', used: 21000, window: 153000, exactness: 'estimate', capped: true })
+  await expect(page.getByTestId('context-gauge')).toHaveText('Context ≤14%')
+  await expect(page.getByTestId('context-gauge')).toHaveAttribute('title', /estimated until the next turn ends/)
+  await expect(page.getByTestId('context-gauge-compact-mark')).toHaveCount(0)
+
+  // No control, no mark
+  await emitEvent(page, 0, { type: 'context_update', used: 304000, window: 1000000, exactness: 'exact' })
+  await expect(page.getByTestId('context-gauge')).toHaveText('Context 30%')
+  await expect(page.getByTestId('context-gauge-compact-mark')).toHaveCount(0)
+})
+
 test('A terminal belongs to the project, so it persists across switching sessions', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'first session')
