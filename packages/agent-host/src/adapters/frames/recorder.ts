@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { errorMessage } from '@cc/protocol'
 /** Which way a line went: to the tool, or from it */
@@ -22,7 +22,9 @@ export function frameRecorder(sessionId: string, env: NodeJS.ProcessEnv = proces
   const dir = env.CC_RECORD_FRAMES
   if (!dir) return undefined
   mkdirSync(dir, { recursive: true })
-  const n = (processes.get(sessionId) ?? 0) + 1
+  // The count is this host's; one already on disk is an earlier host's process (a restart, a swap), never appended to
+  let n = (processes.get(sessionId) ?? 0) + 1
+  while (existsSync(join(dir, `${sessionId}.${n}.jsonl`))) n++
   processes.set(sessionId, n)
   const file = join(dir, `${sessionId}.${n}.jsonl`)
   const start = Date.now()

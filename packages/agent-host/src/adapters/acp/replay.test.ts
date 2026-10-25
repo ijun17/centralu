@@ -41,6 +41,21 @@ async function replay(dir: string, name: string): Promise<{ events: NormalizedEv
   return { events, problems: state.problems, left: state.left() }
 }
 
+/** What is wrong with the calls' order: a result before its call, a call with no result or two */
+function callOrder(events: NormalizedEvent[]): string[] {
+  const wrong: string[] = []
+  const results = new Map<string, number>()
+  const called = new Set<string>()
+  for (const e of events) {
+    if (e.type === 'tool_call') called.add(e.callId)
+    if (e.type !== 'tool_result') continue
+    if (!called.has(e.callId)) wrong.push(`${e.callId}: a result before its call`)
+    results.set(e.callId, (results.get(e.callId) ?? 0) + 1)
+  }
+  for (const id of called) if (results.get(id) !== 1) wrong.push(`${id}: ${results.get(id) ?? 0} results`)
+  return wrong
+}
+
 const of = <T extends NormalizedEvent['type']>(events: NormalizedEvent[], type: T) => events.filter((e): e is Extract<NormalizedEvent, { type: T }> => e.type === type)
 
 for (const dir of readdirSync(RECORDINGS)) {
@@ -53,6 +68,9 @@ for (const dir of readdirSync(RECORDINGS)) {
         const r = await replay(dir, name)
         expect(r.problems).toEqual([])
         expect(r.left).toBe(0)
+        // Every call the agent announced ends once, after it: a recording whose frames came out of order reads wrong here
+        // (#1562 review: a `completed` moved before its `tool_call` passed every other check)
+        expect(callOrder(r.events)).toEqual([])
       })
     }
 
