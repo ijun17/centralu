@@ -1,7 +1,7 @@
 import type { RequestTurnAnswer } from '../adapters/contract.js'
 import type { Asker } from '../mail/asked-by.js'
 import { askedAct, askedQuestion, outlivesTheTurn, stepOf, type AskedStep } from './asked-acts.js'
-import { outOfReach, readScope, type Reach, type ReadScope } from './asked-reach.js'
+import { outOfReach, pinned, readScope, type Reach, type ReadScope } from './asked-reach.js'
 
 /**
  * The orchestrator's privileged steps, asked about when a session asked for them (docs/plans/mailbox.md §9.7, #1447).
@@ -56,12 +56,15 @@ export class AskedGate {
   constructor(private readonly host: AskedGateHost) {}
 
   /**
-   * A new conversation of the orchestrator begins (no conversation to resume): what an earlier one read is not in this one. A conversation this
+   * A new conversation of the orchestrator begins (no conversation to resume, and no past one handed over as a summary): what an earlier one read is
+   * not in this one. One that starts from such a summary (`fresh` false) is treated as having read everything. A conversation this
    * process did not see begin (the host restarted, a kept process was adopted) is not known to have read nothing, and is treated as having read everything
    */
-  beginConversation(orchestratorId: string): void {
-    this.begun.add(orchestratorId)
+  beginConversation(orchestratorId: string, fresh = true): void {
     this.reads.delete(orchestratorId)
+    // Not fresh: it starts from a summary of an earlier conversation, whose answers can carry what that read, so it is not known to have read nothing
+    if (fresh) this.begun.add(orchestratorId)
+    else this.begun.delete(orchestratorId)
   }
 
   /** The orchestrator read something in a turn that was not a request (the person's own): kept, since a later request's reply could carry it */
@@ -73,8 +76,10 @@ export class AskedGate {
    * Remembers a read. Reading stays free; what the conversation read matters when words go to a session (`askedAct`), because they could carry it
    */
   private noteRead(orchestratorId: string, name: string, args: Record<string, unknown>): void {
-    const scope = readScope(name, args)
-    if (scope === null) return
+    const read = readScope(name, args)
+    if (read === null) return
+    // Where a path really is, now: a link swapped later does not change what was read
+    const scope = pinned(read)
     const list = this.reads.get(orchestratorId) ?? []
     // (bounded: past a few hundred distinct reads it is simply "everything")
     if (list.length >= 300) this.reads.set(orchestratorId, [{ name: 'reads', scope: { everywhere: true } }])
@@ -83,7 +88,7 @@ export class AskedGate {
 
   /** The first read of this conversation that the asker could not make itself, in words, or null */
   private readIn(orchestratorId: string, asker: Asker): string | null {
-    if (!this.begun.has(orchestratorId)) return 'an earlier conversation of the orchestrator, from before this host started'
+    if (!this.begun.has(orchestratorId)) return 'an earlier conversation of the orchestrator, not seen from its beginning'
     try {
       const reach = { ...this.host.reach(asker.sessionId), thread: asker.threadId }
       for (const { name, scope } of this.reads.get(orchestratorId) ?? []) {
@@ -107,8 +112,10 @@ export class AskedGate {
    */
   async askCli(orchestratorId: string, tool: string, input: Record<string, unknown>, signal?: AbortSignal): Promise<RequestTurnAnswer> {
     const asker = this.host.askedBy(orchestratorId)
-    this.noteRead(orchestratorId, tool, input)
-    if (!asker || askedAct(tool, input, asker.threadId) === null) return { allowed: true, asked: false }
+    if (!asker || askedAct(tool, input, asker.threadId) === null) {
+      this.noteRead(orchestratorId, tool, input)
+      return { allowed: true, asked: false }
+    }
     if (outlivesTheTurn(tool, input)) {
       return {
         allowed: false,
@@ -137,9 +144,13 @@ export class AskedGate {
     refused: (text: string) => T,
   ): Promise<T> {
     const asker = this.host.askedBy(orchestratorId)
-    this.noteRead(orchestratorId, call.name, call.args)
-    if (!asker || call.readOnly === true) return run()
+    if (!asker || call.readOnly === true) {
+      this.noteRead(orchestratorId, call.name, call.args)
+      return run()
+    }
     const step = askedAct(call.name, call.args, asker.threadId, this.readIn(orchestratorId, asker))
+    // Noted after the step is judged: what it gives back cannot be in its own words
+    this.noteRead(orchestratorId, call.name, call.args)
     if (step === null) return run()
     return this.put(orchestratorId, asker, step, signal, run, refused)
   }

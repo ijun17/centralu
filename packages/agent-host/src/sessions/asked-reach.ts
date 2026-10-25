@@ -16,8 +16,11 @@ import { oneLineText } from '@cc/protocol'
 
 /** What a read looks at */
 export type ReadScope =
-  /** Files or folders by path; `''` stands for the orchestrator's own working folder (a path left out), which is nobody's request */
-  | { paths: readonly string[] }
+  /**
+   * Files or folders by path; `''` stands for the orchestrator's own working folder (a path left out), which is nobody's request. `real` is each
+   * path as the file system had it when it was read (`pinned`): a link swapped afterwards does not change what was read
+   */
+  | { paths: readonly string[]; real?: readonly string[] }
   /** One session's conversation, or null when the call does not say which */
   | { session: string | null }
   /** A project's own state (its branch, an app's runs and errors), or null when the call names none */
@@ -30,9 +33,36 @@ export type ReadScope =
 /** What the asking session reaches itself: its folders, its project (id and name) and the thread of its request */
 export type Reach = { folders: readonly string[]; project: string | null; projectName?: string | null; thread: string }
 
-/** The CLI's reads of files, and the host's reads of conversations, projects and mail; what a command, a fetch or an app can read is everything. Null for any other tool or command */
+/**
+ * Tools that return nothing anybody read: the CLI's writes and plans, and the Centralu tools that only list their own commands or move the
+ * orchestrator's own turn. Everything else gives back data, and counts as reading everything unless `readScope` can judge its scope exactly
+ */
+const GIVES_NOTHING: ReadonlySet<string> = new Set([
+  'Write',
+  'Edit',
+  'NotebookEdit',
+  'TodoWrite',
+  'AskUserQuestion',
+  'ToolSearch',
+  'compact_self',
+  // The three tools that list and run commands: the command that is run is noted by its own name
+  'centralu_commands',
+  'centralu_help',
+  'centralu_run',
+])
+
+/** The `mail` actions that put words out and give back only that they were put */
+const MAIL_WRITES: ReadonlySet<string> = new Set(['handled', 'send', 'reply', 'update', 'close'])
+
+/**
+ * What a call reads, as an allowlist (fail closed): a scope only where it is provable from the call (a path, a named session, a named project, a
+ * mail thread), nothing for a call that gives back nothing, and every other tool or command, a name not known included, reads everything: a
+ * command, a fetch, an app's or another MCP server's data, the reply of a worker or another project, a search. A Centralu tool the CLI's hook sees
+ * as `mcp__centralu__…` is noted in its own call (`runParsed`), so the hook's sight of it is nothing
+ */
 export function readScope(name: string, args: Record<string, unknown>): ReadScope | null {
   const text = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? v : null)
+  if (GIVES_NOTHING.has(name) || name.startsWith('mcp__centralu__')) return null
   switch (name) {
     case 'Read':
       return { paths: [text(args.file_path) ?? ''] }
@@ -43,34 +73,25 @@ export function readScope(name: string, args: Record<string, unknown>): ReadScop
     case 'read_session':
       return { session: text(args.sessionId) }
     case 'agent_session':
-      return args.action === 'status' || args.action === 'wait' || args.action === 'list' ? { session: text(args.sessionId) } : null
+      // Only looking is judged by the session looked at; a message to a worker gives back its reply, which is anything
+      return args.action === 'status' || args.action === 'wait' || args.action === 'list' ? { session: text(args.sessionId) } : { everywhere: true }
+    case 'ask_project':
+      // The answer is the other project's own agent's, which reads what that project reaches
+      return { project: text(args.project) }
     case 'mail':
-      // A thread read other than the request's own is some other session's words (the one thread that is the asker's own is judged at reply time)
-      return args.action === 'read' ? { thread: text(args.thread)?.trim() || null } : null
+      // The inbox lists subjects other sessions wrote; a thread read other than the request's own is some other session's words (the one thread that
+      // is the asker's own is judged at reply time)
+      if (typeof args.action === 'string' && MAIL_WRITES.has(args.action)) return null
+      return args.action === 'read' ? { thread: text(args.thread)?.trim() || null } : { everywhere: true }
     case 'project_git_status':
     case 'list_app_runs':
     case 'list_app_errors':
     case 'app_usage':
       return { project: text(args.project) }
-    case 'recall':
-    case 'list_sessions':
-    case 'list_archive':
-    case 'machine_activity':
-    case 'Bash':
-    case 'PowerShell':
-    case 'WebFetch':
-    case 'WebSearch':
-      return { everywhere: true }
     default:
-      return isAppTool(name) ? { everywhere: true } : null
+      return { everywhere: true }
   }
 }
-
-/**
- * A tool of an attached app or of another MCP server returns data from outside the asker's reach, and nothing says which: fail closed. Centralu's own
- * tools are named by their command (a command with a dot cannot exist), and an app's tool through `SessionApps` as `server.tool`
- */
-const isAppTool = (name: string): boolean => (name.startsWith('mcp__') && !name.startsWith('mcp__centralu__')) || name.includes('.')
 
 /** The folder a Glob looks in, and the fixed start of its pattern (`/tmp/x/*.txt` looks under `/tmp/x`, whatever the folder says) */
 function globPaths(path: string | null, pattern: string | null): string[] {
@@ -86,6 +107,11 @@ function globPaths(path: string | null, pattern: string | null): string[] {
     if (start !== '') out.push(isAbsolute(start) || path === null ? start : join(path, start))
   }
   return out.length > 0 ? out : ['']
+}
+
+/** The read as it was when it was made: a path scope with each path's real place noted now, any other scope as it is */
+export function pinned(scope: ReadScope): ReadScope {
+  return 'paths' in scope ? { paths: scope.paths, real: scope.paths.map((p) => (isAbsolute(p) ? real(p) : p)) } : scope
 }
 
 /** A path as the file system has it: `..` and links followed as far as the path exists, so a link inside a folder does not stand for the folder */
@@ -131,9 +157,9 @@ export function outOfReach(name: string, scope: ReadScope, reach: Reach, project
     return mine.some((p) => p.toLowerCase() === asked) ? null : named(scope.project ?? '')
   }
   const folders = reach.folders.filter((f) => isAbsolute(f)).map(real)
-  for (const path of scope.paths) {
+  for (const [i, path] of scope.paths.entries()) {
     if (!isAbsolute(path)) return path === '' ? name : named(path)
-    const there = real(path)
+    const there = scope.real?.[i] ?? real(path)
     if (!folders.some((f) => inside(f, there))) return named(path)
   }
   return null

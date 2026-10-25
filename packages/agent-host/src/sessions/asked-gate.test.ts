@@ -1,4 +1,6 @@
-import { resolve } from 'node:path'
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { Asker } from '../mail/asked-by.js'
 import { AskedGate, type AskedGateHost } from './asked-gate.js'
@@ -324,7 +326,7 @@ describe('what the orchestrator’s whole conversation has read (§9.7)', () => 
     const w = world({ begun: false, folders: [HOME] })
     await send(w, reply())
     expect(w.asked).toHaveLength(1)
-    expect(w.asked[0]).toContain('from before this host started')
+    expect(w.asked[0]).toContain('not seen from its beginning')
     w.gate.beginConversation('orc')
     w.gate.seen('orc', 'Read', { file_path: OUTSIDE })
     await send(w, reply())
@@ -332,12 +334,15 @@ describe('what the orchestrator’s whole conversation has read (§9.7)', () => 
     w.gate.beginConversation('orc')
     await send(w, reply())
     expect(w.asked).toHaveLength(2)
+    // One that starts from a summary of an earlier conversation carries its answers, and is not known to have read nothing
+    w.gate.beginConversation('orc', false)
+    await send(w, reply())
+    expect(w.asked).toHaveLength(3)
   })
 
   it('a mail thread other than the request’s counts as read out of reach; its own thread does not', async () => {
     const own = world({ folders: [HOME] })
     await own.gate.when('orc', { name: 'mail', args: { action: 'read', thread: ' t1 ' } }, undefined, ran().run, refused)
-    await own.gate.when('orc', { name: 'mail', args: { action: 'inbox' } }, undefined, ran().run, refused)
     await send(own, reply())
     expect(own.asked).toEqual([])
     const other = world({ folders: [HOME] })
@@ -386,6 +391,8 @@ describe('what the orchestrator’s whole conversation has read (§9.7)', () => 
 
   it('other steps that pass words on show them whole after a recorded read, not cut', async () => {
     const w = world({ folders: [HOME], answer: 'allow' })
+    // (a read inside the asker's reach, so far: the first card cuts)
+    w.gate.seen('orc', 'Read', { file_path: resolve(HOME, 'notes.txt') })
     await w.gate.when('orc', { name: 'send_to_session', args: { sessionId: 's', text: 'z'.repeat(1_000) } }, undefined, ran().run, refused)
     expect(w.asked[0]).toContain('(1000 characters)')
     w.gate.seen('orc', 'Read', { file_path: OUTSIDE })
@@ -430,6 +437,95 @@ describe('what the orchestrator’s whole conversation has read (§9.7)', () => 
     own.gate.seen('orc', 'mcp__centralu__mail', { action: 'inbox' })
     await send(own, reply())
     expect(own.asked).toEqual([])
+  })
+
+  it('only a call that provably gives back nothing, or whose scope is exact, stays out of the record: an unknown tool counts as reading everything', async () => {
+    const reads: [string, Record<string, unknown>][] = [
+      ['a_tool_added_next_year', {}],
+      ['ask_project', { project: 'zed' }],
+      ['ask_project', {}],
+      ['start_agent', { task: 'x', wait: true }],
+      ['agent_session', { action: 'send', sessionId: 'w1', text: 'x' }],
+      ['agent_session', { action: 'answer', sessionId: 'w1' }],
+      ['search_project_files', { query: 'x' }],
+      ['check_app', { app: 'board' }],
+      ['ReadMcpResourceTool', { server: 's', uri: 'u' }],
+      ['ListMcpResourcesTool', {}],
+      ['BashOutput', { bash_id: '1' }],
+      ['TaskOutput', { task_id: '1' }],
+      ['list_projects', {}],
+      ['find_apps', {}],
+      ['app_guide', {}],
+      ['usage_history', {}],
+      ['list_app_versions', { app: 'board' }],
+      ['list_app_grants', {}],
+      ['mail', { action: 'inbox' }],
+      ['agent_session', { action: 'status' }],
+    ]
+    for (const [name, args] of reads) {
+      const w = world({ folders: [HOME] })
+      w.gate.seen('orc', name, args)
+      await send(w, reply())
+      expect(w.asked, `${name} ${JSON.stringify(args)}`).toHaveLength(1)
+    }
+    // Calls that give back nothing anybody read, and those whose scope is exact and inside the asker's reach
+    const nothing: [string, Record<string, unknown>][] = [
+      ['Write', { file_path: OUTSIDE, content: 'x' }],
+      ['Edit', { file_path: OUTSIDE }],
+      ['TodoWrite', { todos: [] }],
+      ['NotebookEdit', { notebook_path: OUTSIDE }],
+      ['ToolSearch', { query: 'x' }],
+      ['AskUserQuestion', { questions: [] }],
+      ['compact_self', {}],
+      ['centralu_run', { command: 'list_sessions' }],
+      ['centralu_help', { command: 'recall' }],
+      ['mail', { action: 'send', to: 'person', text: 'x' }],
+      ['mail', { action: 'handled', thread: 't1' }],
+      ['ask_project', { project: 'p1' }],
+      ['agent_session', { action: 'status', sessionId: 'mine' }],
+    ]
+    for (const [name, args] of nothing) {
+      const w = world({ folders: [HOME], projects: { mine: 'p1' } })
+      w.gate.seen('orc', name, args)
+      await send(w, reply())
+      expect(w.asked, `${name} ${JSON.stringify(args)}`).toEqual([])
+    }
+  })
+
+  it('where a path was when it was read is what counts, not where a link there points by the time the reply is written', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'cc-gate-swap-'))
+    try {
+      const project = join(root, 'project')
+      const elsewhere = join(root, 'elsewhere')
+      mkdirSync(join(project, 'inner'), { recursive: true })
+      mkdirSync(elsewhere)
+      writeFileSync(join(elsewhere, 'secret.txt'), 'hunter2')
+      writeFileSync(join(project, 'inner', 'secret.txt'), 'mine')
+      const link = join(project, 'link')
+      try {
+        symlinkSync(elsewhere, link, 'junction')
+      } catch (err) {
+        console.warn(`asked-gate.test: no link could be made here (${err instanceof Error ? err.message : String(err)}); the case is not exercised`)
+        return
+      }
+      const w = world({ folders: [project], answer: 'allow' })
+      // Read through the link while it points outside, then the link is made to point inside
+      w.gate.seen('orc', 'Read', { file_path: join(link, 'secret.txt') })
+      rmSync(link, { recursive: true, force: true })
+      symlinkSync(join(project, 'inner'), link, 'junction')
+      await send(w, reply())
+      expect(w.asked).toHaveLength(1)
+      expect(w.asked[0]).toContain('Read of')
+      // And the other way round: read while inside, swapped to outside afterwards, is still a read inside
+      const inside = world({ folders: [project], answer: 'allow' })
+      inside.gate.seen('orc', 'Read', { file_path: join(link, 'secret.txt') })
+      rmSync(link, { recursive: true, force: true })
+      symlinkSync(elsewhere, link, 'junction')
+      await send(inside, reply())
+      expect(inside.asked).toEqual([])
+    } finally {
+      rmSync(root, { recursive: true, force: true, maxRetries: 5 })
+    }
   })
 
   it('a project’s own state counts when it is another project’s or none is named; a machine’s activity always counts', async () => {

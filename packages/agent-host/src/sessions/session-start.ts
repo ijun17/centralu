@@ -98,7 +98,7 @@ export type SessionStartsHost = Pick<DelegationHost, 'adapters' | 'children' | '
     /** The orchestrator's turn being a session's request, and the person's card for the CLI's own steps in it (§9.7, #1447) */
     requestTurn: (sessionId: string) => RequestTurn
     /** A new conversation of the orchestrator begins: what an earlier one read is not in it (`AskedGate.beginConversation`) */
-    newConversation: (sessionId: string) => void
+    newConversation: (sessionId: string, fresh: boolean) => void
     /** A session's row that is not being removed, or `session_not_found` */
     openSession: (sessionId: string) => SessionInfo
     /** The orchestrator's memory handoff for a new process */
@@ -547,8 +547,12 @@ export class SessionStarts {
     },
   ): CreateSessionOpts {
     const { profile, tools } = o.choice
-    // A conversation with nothing to resume is a new one; a process taken over from an earlier host, or one resumed, is not known to be
-    if (m.kind === 'orchestrator' && !o.resumeExternalId && !o.adopt) this.host.newConversation(m.id)
+    // The past conversation handed over in the prompt when the tool changed (the person's words and the orchestrator's own answers)
+    const past = m.kind === 'orchestrator' && o.memory ? this.host.orchestratorMemory(m.id) : ''
+    // A conversation with nothing to resume is a new one, and one with nothing handed over is a clean one; a process taken over from an earlier host
+    // or one resumed is the conversation it was; one that starts from a summary of an earlier conversation (whose answers may carry what it
+    // read) is not known to have read nothing
+    if (m.kind === 'orchestrator' && !o.resumeExternalId && !o.adopt) this.host.newConversation(m.id, past === '')
     return {
       sessionId: m.id,
       cwd: o.cwd,
@@ -607,7 +611,7 @@ export class SessionStarts {
         m.kind === 'orchestrator'
           ? // Skills (#71) always ride along; the memory handoff only for a genuinely new process
             // (unchanged rule)
-            orchestratorRole() + this.host.skillsPrompt() + (o.memory ? this.host.orchestratorMemory(m.id) : '')
+            orchestratorRole() + this.host.skillsPrompt() + past
           : // A builder session's (M4 C-2) role is entirely the roleAppend fixed at creation
             // Reapplying the fixed role text — for a coordinator session an older build left (#372), and
             // for a builder session (C-2) even if the app is broken

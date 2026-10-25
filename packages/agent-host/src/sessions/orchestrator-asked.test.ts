@@ -226,10 +226,10 @@ describe('in the turn a request starts, every step that changes something asks t
   it('reading and answering in the thread need no card; mail to anyone else does', async () => {
     const { asker, other } = await asked()
     const thread = w.store.mail.threadsOfParty(mail.sessionAddress(asker.id), 'owner')[0]!
-    expect(await settled(run('mail', { action: 'inbox' }))).toMatchObject({ text: expect.stringContaining(thread.id) })
     const reply = await settled(run('mail', { action: 'reply', thread: thread.id, text: 'done: it is renamed' }))
     expect(reply).toMatchObject({ text: expect.stringContaining('Posted') })
     // Reading is free (what it read can matter to the answer after it: see the test on reads out of the asker's reach)
+    expect(await settled(run('mail', { action: 'inbox' }))).toMatchObject({ text: expect.stringContaining(thread.id) })
     expect(await settled(w.mgr.runOrchestratorTool(orc.id, 'list_sessions', {}))).toMatchObject({ text: expect.stringContaining(other.id) })
     expect(card()).toBeUndefined()
 
@@ -297,6 +297,40 @@ describe('in the turn a request starts, every step that changes something asks t
     await eventually(() => !!card())
     w.mgr.respondApproval(orc.id, card()!.requestId, 'allow')
     expect((await again).isError).toBeFalsy()
+  })
+
+  /** The orchestrator's tool is switched to Codex and back: Claude's new process has nothing to resume, and may be handed a summary of the past */
+  const switchAndBack = async () => {
+    await w.mgr.switchTool(orc.id, 'codex')
+    await w.mgr.switchTool(orc.id, 'claude')
+    await w.mgr.resumeSession(orc.id)
+    orcOpts = w.adapter.lastOpts
+  }
+
+  it('a new conversation with nothing handed over starts clean: what an earlier one read is not in it', async () => {
+    orcOpts!.requestTurn!.seen('Read', { file_path: join(tmpdir(), 'somewhere-else', 'notes.txt') })
+    await switchAndBack()
+    expect(orcOpts!.systemPromptAppend ?? '').not.toContain('Past conversation')
+    const { asker } = await asked()
+    const thread = w.store.mail.threadsOfParty(mail.sessionAddress(asker.id), 'owner')[0]!
+    expect(await settled(run('mail', { action: 'reply', thread: thread.id, text: 'nothing was read' }))).toMatchObject({ text: expect.stringContaining('Posted') })
+    expect(card()).toBeUndefined()
+  })
+
+  it('one that starts from a summary of the earlier conversation, whose answers may carry what it read, is not known to have read nothing', async () => {
+    w.store.messages.appendMessages([
+      { sessionId: orc.id, seq: w.store.messages.nextSeq(orc.id), role: 'assistant', kind: 'text', payload: { text: 'The file said hunter2.' }, ts: Date.now() },
+    ])
+    await switchAndBack()
+    expect(orcOpts!.systemPromptAppend).toContain('Past conversation')
+    const { asker } = await asked()
+    const thread = w.store.mail.threadsOfParty(mail.sessionAddress(asker.id), 'owner')[0]!
+    const reply = run('mail', { action: 'reply', thread: thread.id, text: 'the summary said hunter2' })
+    await eventually(() => !!card())
+    expect(card()!.text).toContain('the summary said hunter2')
+    expect(card()!.text).toContain('not seen from its beginning')
+    w.mgr.respondApproval(orc.id, card()!.requestId, 'deny')
+    expect((await reply).isError).toBe(true)
   })
 
   it('the turn’s end is reported to the session that asked, and the next step is the orchestrator’s own again', async () => {

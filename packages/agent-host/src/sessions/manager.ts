@@ -2097,7 +2097,7 @@ export class SessionManager {
       agentSession: (...a) => self.agentSession(...a),
       mailTool: (id, args) => self.mailHooks?.tool?.(id, args) ?? { text: 'The mailbox is not available.', isError: true },
       whenAsked: (id, call, signal, run, refused) => self.askedGate.when(id, call, signal, run, refused),
-      newConversation: (id) => self.askedGate.beginConversation(id),
+      newConversation: (id, fresh) => self.askedGate.beginConversation(id, fresh),
       requestTurn: (id) => ({ active: () => self.askedGate.active(id), ask: (tool, input, signal) => self.askedGate.askCli(id, tool, input, signal), askRead: (tool, input, signal) => self.askedGate.askCliRead(id, tool, input, signal), seen: (tool, input) => self.askedGate.seen(id, tool, input) }),
       compactSelf: (id, focus) => self.selfCompaction.request(id, focus),
       compactTurn: (id) => self.selfCompaction.compactTurn(id),

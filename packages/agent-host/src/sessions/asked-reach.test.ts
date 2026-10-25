@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { outOfReach, readScope } from './asked-reach.js'
+import { outOfReach, pinned, readScope } from './asked-reach.js'
 
 const dirs: string[] = []
 afterEach(() => {
@@ -14,6 +14,23 @@ const check = (name: string, args: Record<string, unknown>, folder: string) => {
   const scope = readScope(name, args)
   return scope && outOfReach(name, scope, reachOf(folder), () => undefined)
 }
+
+describe('what a call reads is an allowlist (§9.7)', () => {
+  it('a tool not known counts as reading everything; the CLI’s sight of a Centralu tool is nothing, since its own call is noted', () => {
+    expect(readScope('a_tool_added_next_year', {})).toEqual({ everywhere: true })
+    expect(readScope('Task', {})).toEqual({ everywhere: true })
+    expect(readScope('mcp__centralu__list_sessions', {})).toBeNull()
+    expect(readScope('Write', { file_path: '/x' })).toBeNull()
+    expect(readScope('Read', { file_path: '/x' })).toEqual({ paths: ['/x'] })
+    expect(readScope('ask_project', { project: 'zed' })).toEqual({ project: 'zed' })
+  })
+
+  it('a path is pinned to where it was when it was read', () => {
+    const scope = pinned({ paths: [process.cwd()] })
+    expect('real' in scope && scope.real).toHaveLength(1)
+    expect(pinned({ everywhere: true })).toEqual({ everywhere: true })
+  })
+})
 
 describe('what a read reaches, as the file system has it (§9.7)', () => {
   it('a link inside the asker’s folder to a place outside it is that place, not the folder', () => {
