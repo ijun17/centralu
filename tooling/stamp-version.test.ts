@@ -4,15 +4,16 @@
  * `scripts/stamp-version.mjs` writes it into the carriers and puts the placeholder back. Run against temporary git
  * repositories and copies of this repository's carriers, so nothing here touches the checkout.
  */
-import { execFileSync } from 'node:child_process'
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { execFileSync, spawn } from 'node:child_process'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { constants as osConstants, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 // @ts-expect-error — plain JavaScript, read by bundle.mjs and the signing workflow under plain node
 import { checkAppVersion, PLACEHOLDER, releaseTag, resolveAppVersion } from '../scripts/app-version.mjs'
 // @ts-expect-error — as above
-import { stampedFiles, stampVersion, versionOnlyDirt } from '../scripts/stamp-version.mjs'
+import { runSteps, stampedFiles, stampVersion, versionOnlyDirt } from '../scripts/stamp-version.mjs'
 
 const dirs: string[] = []
 const temp = () => {
@@ -100,6 +101,53 @@ describe('stamping the carriers (stamp-version.mjs)', () => {
     expect(() => stampVersion(root, '0.2.0-beta.4')).toThrow(/version\.generated\.ts: no `export const APP_VERSION: string = '…'` line to stamp/)
     // Every file read and stamped before the first is written
     expect(git(root, 'status', '--porcelain')).toBe('')
+  })
+
+  it('runs the stamped steps with the version and the rest with the placeholder back, also when a step fails', async () => {
+    const root = carriers()
+    const seen = (name: string) => [process.execPath, ['-e', `require('fs').copyFileSync('packages/protocol/src/version.generated.ts', '${name}')`]]
+    await runSteps(root, '0.2.0-beta.4', [seen('a'), seen('b')], { stamped: 1 })
+    expect(read(root, 'a')).toContain("'0.2.0-beta.4'")
+    expect(read(root, 'b')).toContain(`'${PLACEHOLDER}'`)
+    await expect(runSteps(root, '0.2.0-beta.4', [[process.execPath, ['-e', 'process.exit(3)']], seen('c')], { stamped: 2 })).rejects.toThrow(/exited with 3/)
+    expect(existsSync(join(root, 'c'))).toBe(false)
+    expect(git(root, 'status', '--porcelain').split('\n').sort()).toEqual(['?? a', '?? b'])
+  })
+
+  // #1501 review: Node's exit event skips a signal, and a blocking child held it off. POSIX signals: CI's Linux and macOS
+  it.skipIf(process.platform === 'win32').each(['SIGINT', 'SIGTERM', 'SIGHUP'])(
+    'on %s to the runner alone, stops the running step, puts the placeholder back and runs nothing after',
+    async (signal) => {
+      const root = carriers()
+      const step = `require('fs').writeFileSync('started', String(process.pid)); setTimeout(() => {}, 60000)`
+      const runner = `import { runSteps } from ${JSON.stringify(pathToFileURL(resolve('scripts/stamp-version.mjs')).href)}
+await runSteps(process.cwd(), '0.2.0-beta.4', [[process.execPath, ['-e', ${JSON.stringify(step)}]], [process.execPath, ['-e', "require('fs').writeFileSync('after', '')"]]])`
+      const child = spawn(process.execPath, ['--input-type=module', '-e', runner], { cwd: root, stdio: 'ignore' })
+      const exited = new Promise<number | null>((done) => child.on('exit', (code) => done(code)))
+      const deadline = Date.now() + 20_000
+      while (!existsSync(join(root, 'started')) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50))
+      expect(read(root, 'packages/protocol/src/version.generated.ts')).toContain("'0.2.0-beta.4'")
+      const stepPid = Number(read(root, 'started'))
+      child.kill(signal as NodeJS.Signals)
+      expect(await exited).toBe(128 + osConstants.signals[signal as NodeJS.Signals])
+      expect(git(root, 'status', '--porcelain')).toBe('?? started')
+      expect(existsSync(join(root, 'after'))).toBe(false)
+      const gone = Date.now() + 10_000
+      const alive = () => { try { process.kill(stepPid, 0); return true } catch { return false } }
+      while (alive() && Date.now() < gone) await new Promise((r) => setTimeout(r, 50))
+      expect(alive()).toBe(false)
+    },
+    30_000,
+  )
+
+  it('release-npm holds its stamp through holdStamp, after the clean-tree check and before verify, so a signal restores too', () => {
+    const release = readFileSync(resolve('scripts/release-npm.mts'), 'utf8')
+    const at = (s: string) => release.indexOf(s)
+    expect(at('(holdStamp as')).toBeGreaterThan(at("fail('the working tree is not clean"))
+    expect(at('(holdStamp as')).toBeLessThan(at("sh('pnpm', [script])"))
+    // No restore of its own on the exit event alone, which a signal skips (#1501 review)
+    expect(release).not.toMatch(/process\.on\('exit'/)
+    expect(release).not.toMatch(/\bstampVersion\b/)
   })
 
   it('does not count a stamped tree as a dirty build, but any other change, in a carrier or elsewhere', () => {

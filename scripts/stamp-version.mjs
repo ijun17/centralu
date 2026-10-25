@@ -19,9 +19,10 @@
  *
  * Dependency-free JavaScript, for `bundle.mjs` under plain node.
  */
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { constants as osConstants } from 'node:os'
+import { isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { checkAppVersion, PLACEHOLDER, ROOT } from './app-version.mjs'
 
@@ -73,6 +74,68 @@ export function stampVersion(root, version) {
   })
   for (const f of next) if (f.after !== f.before) writeFileSync(join(root, f.path), f.after)
   return next.filter((f) => f.after !== f.before).map((f) => f.path)
+}
+
+/** The signals a run by hand ends with: Ctrl-C, `kill`, and a closed terminal */
+export const STOP_SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP']
+
+/**
+ * Stamps `version` into `root`'s carriers and holds it until the returned `restore` runs, or the process ends: on exit,
+ * and on each of `STOP_SIGNALS`, which Node's `exit` event does not cover (#1501 review). A signal calls `onStop` first
+ * (to stop a child), puts the placeholder back and exits with 128 + its number, so nothing after it runs. A stamped
+ * carrier left in the tree would be committed. `restore` is idempotent.
+ */
+export function holdStamp(root, version, { onStop } = {}) {
+  stampVersion(root, version)
+  let held = true
+  const restore = () => {
+    if (!held) return
+    held = false
+    try {
+      stampVersion(root, PLACEHOLDER)
+    } catch (e) {
+      console.error(`could not put ${PLACEHOLDER} back: ${e.message}`)
+    }
+  }
+  process.on('exit', restore)
+  for (const signal of STOP_SIGNALS) {
+    process.on(signal, () => {
+      try {
+        onStop?.(signal)
+      } finally {
+        restore()
+        process.exit(128 + (osConstants.signals[signal] ?? 1))
+      }
+    })
+  }
+  return restore
+}
+
+/**
+ * Runs `steps` (`[cmd, args]`) one after another in `root`, the first `stamped` of them with `version` stamped
+ * (`holdStamp`), the rest after the placeholder is back. Children run asynchronously, so a signal is handled at once,
+ * not once a blocking child has exited (#1501 review: SIGTERM to `pnpm app` alone left the tree stamped and ran the
+ * later steps): it stops the running child, restores, and exits. A failing step throws, after the restore.
+ */
+export async function runSteps(root, version, steps, { stamped = steps.length, env = process.env } = {}) {
+  let child = null
+  const restore = holdStamp(root, version, { onStop: (signal) => child?.kill(signal) })
+  try {
+    for (const [i, [cmd, args]] of steps.entries()) {
+      if (i === stamped) restore()
+      await new Promise((done, failed) => {
+        child = spawn(cmd, args, { cwd: root, env, stdio: 'inherit', shell: process.platform === 'win32' && !isAbsolute(cmd) })
+        child.on('error', failed)
+        child.on('exit', (code, signal) => {
+          child = null
+          if (code === 0) done()
+          else failed(new Error(`${cmd} ${args.join(' ')} exited with ${code ?? signal}`))
+        })
+      })
+    }
+  } finally {
+    restore()
+  }
 }
 
 /**

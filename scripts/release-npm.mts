@@ -36,9 +36,9 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { APP_NAME } from '../packages/protocol/src/brand.js'
 // @ts-expect-error — plain .mjs, read by bundle.mjs and the local signing workflow under plain node
-import { PLACEHOLDER, resolveAppVersion } from './app-version.mjs'
+import { resolveAppVersion } from './app-version.mjs'
 // @ts-expect-error — plain .mjs, as above
-import { stampVersion } from './stamp-version.mjs'
+import { holdStamp } from './stamp-version.mjs'
 // @ts-expect-error — plain .mjs, so bundle.mjs reads the same list under plain node
 import { CONPTY_FILES as CONPTY_FILES_JS } from './conpty-files.mjs'
 import { checkStaged, shellToCarry, stageBundle, stageContent, type CarriedShell } from './bundle-stage.mjs'
@@ -587,17 +587,12 @@ if (out('git', ['status', '--porcelain'])) {
 
 // The version goes into every carrier (`stamp-version.mjs`) before anything is verified or built:
 // the UI and host read version.generated.ts, Tauri and the window tauri.conf.json, npm the manifests.
-// A child (pnpm verify, the build) reads CENTRALU_VERSION. Put back on exit, so a run by hand leaves
-// the tree as it found it; the release job's checkout is thrown away anyway.
-;(stampVersion as (root: string, v: string) => string[])(ROOT, VERSION)
+// A child (pnpm verify, the build) reads CENTRALU_VERSION. Put back on exit and on Ctrl-C, SIGTERM or
+// SIGHUP (`holdStamp`; Node's exit event skips a signal, #1501 review), so a run by hand leaves the tree
+// as it found it; the release job's checkout is thrown away anyway. A child running then gets the
+// same Ctrl-C from the terminal; a signal sent to this process alone is handled once it returns.
+;(holdStamp as (root: string, v: string) => () => void)(ROOT, VERSION)
 process.env.CENTRALU_VERSION = VERSION
-process.on('exit', () => {
-  try {
-    ;(stampVersion as (root: string, v: string) => string[])(ROOT, PLACEHOLDER as string)
-  } catch (e) {
-    console.error(`  could not put ${PLACEHOLDER as string} back: ${(e as Error).message}`)
-  }
-})
 
 if (publish) {
   // Getting blocked on auth after running the whole build wastes minutes — checked first.
