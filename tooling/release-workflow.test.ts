@@ -219,6 +219,6 @@ describe('a tagged run skips verify only after a rehearsal on the same tree', ()
     }
     const script = readFileSync(new URL('../scripts/release-npm.mts', import.meta.url), 'utf8')
     expect(script).toContain("const skipVerify = process.argv.includes('--skip-verify')")
-    expect(script).toMatch(/if \(skipVerify\) console\.log\([^\n]*\)\nelse for \(const script of target\?\.verify \?\? \['verify'\]\) sh\('pnpm', \[script\]\)/)
+    expect(script).toMatch(/verifyThenStamp\(\{\n {2}scripts: target\?\.verify \?\? \['verify'\],\n {2}skipVerify,\n/)
   })
 })

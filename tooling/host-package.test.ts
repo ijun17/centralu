@@ -33,9 +33,9 @@ describe('one host-only package per platform a hub installs on', () => {
     it(`@centralu/host-${p} ships host/ only, at this version, for the machines its platform package installs on`, () => {
       const pkg = json(join(hostPackageDir(p), 'package.json'))
       expect(pkg.name).toBe(`@centralu/host-${p}`)
-      // The placeholder in git, or the version a release stamped into it before verifying (#1501, brand.test.ts)
+      // The placeholder: a release verifies before it stamps (#1501, scripts/release-verify.mjs, brand.test.ts)
       expect(pkg.version).toBe(APP_VERSION)
-      expect(pkg.version).toBe(process.env.CENTRALU_VERSION || '0.0.0-dev')
+      expect(pkg.version).toBe('0.0.0-dev')
       expect(pkg.files).toEqual(['host'])
       const app = json(root(`packaging/npm/${p}/package.json`))
       expect(pkg.os).toEqual(app.os)

@@ -34,7 +34,8 @@ import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+// @ts-expect-error — plain .mjs, as the other scripts import theirs
+import { isMain } from './is-main.mjs'
 
 import { MANIFEST_NAME, throwawayKey, verifyContent, writeContentManifest, type SigningKey, type TrustedKey } from './content-manifest.mjs'
 import {
@@ -208,7 +209,7 @@ async function stageLocal(bundle: string, targetDir: string): Promise<void> {
   console.log('  this build starts its keeper directly; the reason is in keeper.log (docs/plans/thin-shell.md §10.2)')
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (isMain(import.meta.url)) {
   const bundle = process.argv[2]
   const i = process.argv.indexOf('--target-dir')
   const targetDir = i === -1 ? join(TAURI_DIR, 'target') : process.argv[i + 1]

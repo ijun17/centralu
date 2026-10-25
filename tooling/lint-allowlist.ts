@@ -30,6 +30,15 @@ export const ALLOWLIST_DIR = 'tooling/lint-allowlist'
  */
 export const LINT_OPTIONS = { concurrency: 2 } as const satisfies ESLint.Options
 
+/**
+ * The heap each ESLint thread may grow to. A thread starts with V8's default limit, which follows the machine's
+ * memory (about 2 GB on the 7 GB macOS runner), and a type-aware lint needs about 2.9 GB per thread: the release
+ * rehearsals of beta.37 and beta.38 died there with ERR_WORKER_OUT_OF_MEMORY. ESLint gives its threads no
+ * `resourceLimits`, so the limit is raised for the process (`v8.setFlagsFromString`, which new threads follow)
+ * to half the memory, 4 GB at most, 2 GB at least (never below what V8 gave it).
+ */
+export const lintHeapMb = (totalMemBytes: number): number => Math.min(4096, Math.max(2048, Math.floor((totalMemBytes / 1048576) * 0.5)))
+
 /** The options tooling/lint.ts creates ESLint with */
 export const eslintOptions = (cwd: string): ESLint.Options => ({ cwd, ...LINT_OPTIONS })
 
