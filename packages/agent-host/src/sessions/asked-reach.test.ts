@@ -25,6 +25,19 @@ describe('what a call reads is an allowlist (§9.7)', () => {
     expect(readScope('ask_project', { project: 'zed' })).toEqual({ project: 'zed' })
   })
 
+  it('a pattern is read under either separator, and a root or a network path is not lost', () => {
+    const paths = (args: Record<string, unknown>) => {
+      const scope = readScope('Glob', args)
+      return scope && 'paths' in scope ? scope.paths : null
+    }
+    expect(paths({ pattern: '/tmp/x/*.txt' })).toEqual(['/tmp/x'])
+    expect(paths({ pattern: '/*' })).toEqual(['/'])
+    expect(paths({ pattern: 'C:\\secret\\*.txt' })).toEqual(['C:/secret'])
+    expect(paths({ pattern: '//server/share/*' })).toEqual([''])
+    expect(paths({ pattern: '**/*.ts', path: '/work/acme' })).toEqual(['/work/acme'])
+    expect(paths({ pattern: 'src/*.ts', path: '/work/acme' })[1]).toMatch(/src$/)
+  })
+
   it('a path is pinned to where it was when it was read', () => {
     const scope = pinned({ paths: [process.cwd()] })
     expect('real' in scope && scope.real).toHaveLength(1)

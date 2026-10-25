@@ -296,7 +296,10 @@ export class MailTool {
       this.service.update(threadId, me, { ...(state ? { state } : {}), ...(a.next !== undefined ? { next: a.next.trim() || null } : {}) })
     }
     const now = this.records.thread(threadId)
-    return now ? `Thread ${now.id} is ${now.state}${now.next ? `; next: ${plain(now.next)}` : ''}.` : 'Updated.'
+    // What the thread was last told to do next is echoed only when this call set it: otherwise it is another session's words, which a call that
+    // changed something else did not ask for
+    const echoed = a.next !== undefined && now?.next ? `; next: ${plain(now.next)}` : ''
+    return now ? `Thread ${now.id} is ${now.state}${echoed}.` : 'Updated.'
   }
 
   private close(me: string, a: MailToolArgs): string {

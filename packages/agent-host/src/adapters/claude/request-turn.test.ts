@@ -159,6 +159,8 @@ describe('a hook in front of every tool call of a session’s request', () => {
     expect(await withApps('mcp__app-board__merge_when_green')).toEqual({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow' } })
     expect(await w.hook('AskUserQuestion', { questions: [] })).toEqual({})
     expect(w.turn.asked).toEqual([])
+    // ...but the gate is told, as the person’s answer is read in a request’s turn
+    expect(w.turn.seen).toEqual([{ tool: 'AskUserQuestion', input: { questions: [] } }])
     // A server called app-x that this session was never given is not Centralu’s: it asks like any other (#93)
     expect(await withApps('mcp__app-evil__run')).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } })
     // Nor is Centralu’s own name on a server that is not Centralu’s (it has three parts, and the server is the one the session was given)

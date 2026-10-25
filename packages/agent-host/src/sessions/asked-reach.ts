@@ -1,6 +1,6 @@
 import { realpathSync } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
-import { oneLineText } from '@cc/protocol'
+import { oneLineText, wireJoin, wireSegments } from '@cc/protocol'
 
 /**
  * What a request's turn reads that the asking session could not read itself (docs/plans/mailbox.md §9.7, #1447).
@@ -42,7 +42,6 @@ const GIVES_NOTHING: ReadonlySet<string> = new Set([
   'Edit',
   'NotebookEdit',
   'TodoWrite',
-  'AskUserQuestion',
   'ToolSearch',
   'compact_self',
   // The three tools that list and run commands: the command that is run is noted by its own name
@@ -52,7 +51,7 @@ const GIVES_NOTHING: ReadonlySet<string> = new Set([
 ])
 
 /** The `mail` actions that put words out and give back only that they were put */
-const MAIL_WRITES: ReadonlySet<string> = new Set(['handled', 'send', 'reply', 'update', 'close'])
+const MAIL_WRITES: ReadonlySet<string> = new Set(['handled', 'send', 'reply', 'close'])
 
 /**
  * What a call reads, as an allowlist (fail closed): a scope only where it is provable from the call (a path, a named session, a named project, a
@@ -73,16 +72,18 @@ export function readScope(name: string, args: Record<string, unknown>): ReadScop
     case 'read_session':
       return { session: text(args.sessionId) }
     case 'agent_session':
-      // Only looking is judged by the session looked at; a message to a worker gives back its reply, which is anything
-      return args.action === 'status' || args.action === 'wait' || args.action === 'list' ? { session: text(args.sessionId) } : { everywhere: true }
+      // Only `status` and `wait` are judged by the session looked at. `list` ignores the session and gives every worker of every project, and a
+      // message to a worker gives back its reply, which is anything
+      return args.action === 'status' || args.action === 'wait' ? { session: text(args.sessionId) } : { everywhere: true }
     case 'ask_project':
       // The answer is the other project's own agent's, which reads what that project reaches
       return { project: text(args.project) }
     case 'mail':
       // The inbox lists subjects other sessions wrote; a thread read other than the request's own is some other session's words (the one thread that
-      // is the asker's own is judged at reply time)
+      // is the asker's own is judged at reply time). An `update` gives back the thread's state and what it was last told to do next, which another
+      // session may have written, so it is judged by its thread as a read is
       if (typeof args.action === 'string' && MAIL_WRITES.has(args.action)) return null
-      return args.action === 'read' ? { thread: text(args.thread)?.trim() || null } : { everywhere: true }
+      return args.action === 'read' || args.action === 'update' ? { thread: text(args.thread)?.trim() || null } : { everywhere: true }
     case 'project_git_status':
     case 'list_app_runs':
     case 'list_app_errors':
@@ -99,12 +100,18 @@ function globPaths(path: string | null, pattern: string | null): string[] {
   if (path !== null) out.push(path)
   if (pattern !== null) {
     const fixed: string[] = []
-    for (const segment of pattern.split(/[\\/]/)) {
+    // Either separator ends a segment (the pattern may be a Windows one); the segments are the wire's
+    for (const segment of wireSegments(pattern.replace(/\\/g, '/'))) {
       if (/[*?[\]{}!]/.test(segment)) break
       fixed.push(segment)
     }
-    const start = fixed.join('/')
-    if (start !== '') out.push(isAbsolute(start) || path === null ? start : join(path, start))
+    // A first segment that is empty is a root (`/tmp/x`); two of them start a network path, which is not told here: out of reach
+    const rooted = fixed[0] === ''
+    if (rooted && fixed[1] === '') out.push('')
+    else {
+      const start = rooted ? `/${wireJoin(...fixed)}` : wireJoin(...fixed)
+      if (start !== '') out.push(isAbsolute(start) || path === null ? start : join(path, start))
+    }
   }
   return out.length > 0 ? out : ['']
 }

@@ -41,7 +41,11 @@ export function requestTurnHooks(opts: Pick<CreateSessionOpts, 'requestTurn' | '
         }
         return {}
       }
-      if (name === 'AskUserQuestion') return {}
+      if (name === 'AskUserQuestion') {
+        // Answered by the person with no card of this gate, and the answer is text the asker could have got the person to type: read, for the record
+        request.seen(name, isRecord(input.tool_input) ? input.tool_input : {})
+        return {}
+      }
       if (isOrchestratorTool(name) && ownServer()) return {}
       // An attached app's tool asks in the call itself (`SessionApps.call`), naming the session: allowed here so the CLI does not put a card of its own first
       const app = appToolOf(name)

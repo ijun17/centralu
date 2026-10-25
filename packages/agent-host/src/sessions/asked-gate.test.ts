@@ -461,9 +461,14 @@ describe('what the orchestrator’s whole conversation has read (§9.7)', () => 
       ['list_app_grants', {}],
       ['mail', { action: 'inbox' }],
       ['agent_session', { action: 'status' }],
+      // `list` ignores the session named and gives every worker of every project
+      ['agent_session', { action: 'list', sessionId: 'mine' }],
+      // An update gives back the thread's next step, which another session may have written: another thread's is out of reach
+      ['mail', { action: 'update', thread: 't9', state: 'running' }],
+      ['mail', { action: 'update', state: 'running' }],
     ]
     for (const [name, args] of reads) {
-      const w = world({ folders: [HOME] })
+      const w = world({ folders: [HOME], projects: { mine: 'p1' } })
       w.gate.seen('orc', name, args)
       await send(w, reply())
       expect(w.asked, `${name} ${JSON.stringify(args)}`).toHaveLength(1)
@@ -475,12 +480,12 @@ describe('what the orchestrator’s whole conversation has read (§9.7)', () => 
       ['TodoWrite', { todos: [] }],
       ['NotebookEdit', { notebook_path: OUTSIDE }],
       ['ToolSearch', { query: 'x' }],
-      ['AskUserQuestion', { questions: [] }],
       ['compact_self', {}],
       ['centralu_run', { command: 'list_sessions' }],
       ['centralu_help', { command: 'recall' }],
       ['mail', { action: 'send', to: 'person', text: 'x' }],
       ['mail', { action: 'handled', thread: 't1' }],
+      ['mail', { action: 'update', thread: ' t1 ', state: 'review' }],
       ['ask_project', { project: 'p1' }],
       ['agent_session', { action: 'status', sessionId: 'mine' }],
     ]
@@ -490,6 +495,23 @@ describe('what the orchestrator’s whole conversation has read (§9.7)', () => 
       await send(w, reply())
       expect(w.asked, `${name} ${JSON.stringify(args)}`).toEqual([])
     }
+  })
+
+  it('the person’s answer to a question is read in a request’s turn, where the asker could have got the person to type it; in the person’s own turn it is not', async () => {
+    const request = world({ folders: [HOME] })
+    request.gate.seen('orc', 'AskUserQuestion', { questions: [] })
+    await send(request, reply())
+    expect(request.asked).toHaveLength(1)
+    const own = world({ asker: () => null, folders: [HOME] })
+    own.gate.seen('orc', 'AskUserQuestion', { questions: [] })
+    expect(own.asked).toEqual([])
+    // (the same conversation, later asked by a session)
+    let asker: Asker | null = null
+    const later = world({ asker: () => asker, folders: [HOME], answer: 'allow' })
+    later.gate.seen('orc', 'AskUserQuestion', { questions: [] })
+    asker = ASKER
+    await send(later, reply())
+    expect(later.asked).toEqual([])
   })
 
   it('where a path was when it was read is what counts, not where a link there points by the time the reply is written', async () => {

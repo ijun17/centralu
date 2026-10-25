@@ -76,6 +76,9 @@ export class AskedGate {
    * Remembers a read. Reading stays free; what the conversation read matters when words go to a session (`askedAct`), because they could carry it
    */
   private noteRead(orchestratorId: string, name: string, args: Record<string, unknown>): void {
+    // The person's answer to a question the orchestrator asks it is read in a request's turn only: there the asker could have got the person to type
+    // it and receive it with no card; in the person's own turn it is the person's own word to the orchestrator
+    if (name === 'AskUserQuestion' && this.host.askedBy(orchestratorId) === null) return
     const read = readScope(name, args)
     if (read === null) return
     // Where a path really is, now: a link swapped later does not change what was read
