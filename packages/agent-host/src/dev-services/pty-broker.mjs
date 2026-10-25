@@ -7,7 +7,7 @@
  * host, as it does on macOS and Linux, while agents, Run commands, git and app servers end with it.
  *
  * A plain `.mjs`, started with `node <path>` in development and beside the bundled host alike (the Codex bridge's way,
- * `adapters/codex/bridge-path.ts`). Its whole protocol is one JSON object per line: the host's requests on stdin,
+ * `adapters/bridge-path.ts`). Its whole protocol is one JSON object per line: the host's requests on stdin,
  * what the terminals do on stdout.
  *
  * - in: `{op:'spawn', id, file, args, cwd, env, cols, rows}` · `{op:'write', id, data}` · `{op:'resize', id, cols, rows}`

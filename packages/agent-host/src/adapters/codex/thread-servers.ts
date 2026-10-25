@@ -1,4 +1,4 @@
-import { bridgePath } from './bridge-path.js'
+import { bridgePath } from '../bridge-path.js'
 import { ORCHESTRATOR_MCP_NAME } from '../../sessions/orchestrator-tools.js'
 import type { CreateSessionOpts } from '../contract.js'
 import { APP_CALL_WAIT_MS, APP_STARTUP_TIMEOUT_SEC, appApprovalModeFor, CODEX_TOOL_TIMEOUT_SEC, followsPersonsPolicy, repoFilesConfig, type AppApprovalMode } from './launch-config.js'
