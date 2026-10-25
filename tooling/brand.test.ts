@@ -21,11 +21,11 @@ const json = (p: string) => JSON.parse(read(p)) as Record<string, unknown>
 
 /**
  * The version every carrier holds (#1501): git holds no release version, so each is committed as the placeholder, and
- * a stamped carrier committed by accident fails here. A release stamps the tree before `pnpm verify` runs in it
- * (`release-npm.mts`, with `CENTRALU_VERSION` set): there the stamped carriers must hold that version.
+ * a stamped carrier committed by accident fails here. A release verifies the tree before it stamps it, and without
+ * `CENTRALU_VERSION` (`verifyThenStamp`, `scripts/release-verify.mjs`), so this holds in a release too.
  */
 const PLACEHOLDER = '0.0.0-dev'
-const STAMPED = process.env.CENTRALU_VERSION || PLACEHOLDER
+const STAMPED = PLACEHOLDER
 
 describe('the name is decided in one place', () => {
   it('the window title and bundle name match APP_NAME', () => {
@@ -44,7 +44,7 @@ describe('the name is decided in one place', () => {
     }
   })
 
-  it('no carrier holds a release version: the placeholder, or what a release stamped into it (#1501)', () => {
+  it('no carrier holds a release version: the placeholder (#1501)', () => {
     expect(APP_VERSION).toBe(STAMPED)
     expect(read('packages/protocol/src/version.generated.ts')).toContain(`export const APP_VERSION: string = '${STAMPED}'`)
     expect(json('apps/desktop/src-tauri/tauri.conf.json').version).toBe(STAMPED)

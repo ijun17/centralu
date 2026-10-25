@@ -23,6 +23,7 @@ import { describe, expect, it } from 'vitest'
 import {
   ALLOWLIST_DIR,
   LISTABLE_RULES,
+  lintHeapMb,
   addedSince,
   compareWithBase,
   eslintOptions,
@@ -345,6 +346,18 @@ describe('type-aware lint (#1339)', () => {
     // Each thread builds the whole program: six took 13.6 GB on a 12-thread PC, two 5.8 GB (#1343 review)
     expect(eslintOptions(ROOT).concurrency).toBeLessThanOrEqual(2)
     expect(readFileSync(join(ROOT, 'tooling/lint.ts'), 'utf8')).toMatch(/new ESLint\(eslintOptions\(ROOT\)\)/)
+  })
+
+  it('sizes the heap of each ESLint thread for the runner and raises it before the threads start', () => {
+    const GB = 1024 ** 3
+    // The 7 GB macOS runner got V8's ~2 GB default and ran out (beta.37, beta.38 rehearsals)
+    expect(lintHeapMb(7 * GB)).toBe(2867)
+    expect(lintHeapMb(2 * GB)).toBe(2048)
+    expect(lintHeapMb(64 * GB)).toBe(4096)
+    const lint = readFileSync(join(ROOT, 'tooling/lint.ts'), 'utf8')
+    const flag = lint.indexOf('setFlagsFromString(`--max-old-space-size=${lintHeapMb(totalmem())}`)')
+    expect(flag).toBeGreaterThan(-1)
+    expect(flag).toBeLessThan(lint.indexOf('new ESLint('))
   })
 
   it(

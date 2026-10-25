@@ -16,8 +16,10 @@
 import './lint-crash.js'
 import { ESLint } from 'eslint'
 import { existsSync } from 'node:fs'
+import { totalmem } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { setFlagsFromString } from 'node:v8'
 import {
   applyAllowlist,
   ALLOWLIST_DIR,
@@ -27,6 +29,7 @@ import {
   disabledFindings,
   eslintOptions,
   LISTABLE_RULES,
+  lintHeapMb,
   lintFailed,
   lintHints,
   listFileOf,
@@ -52,6 +55,8 @@ if (recording && paths.length > 0) throw new Error('--record-all lints the whole
 
 // Read first: a list that cannot be read fails before a lint of half a minute, not after. --record-all writes them anew.
 const allow = recording ? new Map<string, Map<string, number>>() : readAllowlist(ROOT)
+// Before ESLint starts its threads: they take the limit that is set when they start (lintHeapMb)
+setFlagsFromString(`--max-old-space-size=${lintHeapMb(totalmem())}`)
 const eslint = new ESLint(eslintOptions(ROOT))
 const results = await eslint.lintFiles(paths.length > 0 ? paths : ['.'])
 const disabled = disabledFindings(ROOT, results)

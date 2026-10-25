@@ -14,7 +14,9 @@ import { SLOW } from './test-timing.js'
 // @ts-expect-error — plain JavaScript, read by bundle.mjs and the signing workflow under plain node
 import { checkAppVersion, PLACEHOLDER, releaseTag, resolveAppVersion } from '../scripts/app-version.mjs'
 // @ts-expect-error — as above
-import { runSteps, stampedFiles, stampVersion, versionOnlyDirt } from '../scripts/stamp-version.mjs'
+import { holdStamp, runSteps, stampedFiles, stampVersion, versionOnlyDirt } from '../scripts/stamp-version.mjs'
+// @ts-expect-error — as above
+import { verifyThenStamp } from '../scripts/release-verify.mjs'
 // @ts-expect-error — as above
 import { buildId } from '../packages/agent-host/scripts/build-id.mjs'
 
@@ -148,14 +150,55 @@ await runSteps(process.cwd(), '0.2.0-beta.4', [[process.execPath, ['-e', ${JSON.
     30_000 * SLOW,
   )
 
-  it('release-npm holds its stamp through holdStamp, after the clean-tree check and before verify, so a signal restores too', () => {
+  it('release-npm holds its stamp through holdStamp, after the clean-tree check and after verify, so a signal restores too', () => {
     const release = readFileSync(resolve('scripts/release-npm.mts'), 'utf8')
     const at = (s: string) => release.indexOf(s)
     expect(at('(holdStamp as')).toBeGreaterThan(at("fail('the working tree is not clean"))
-    expect(at('(holdStamp as')).toBeLessThan(at("sh('pnpm', [script])"))
+    // Verify is inside verifyThenStamp, which stamps after it; nothing stamps before that call
+    expect(at('verifyThenStamp({')).toBeGreaterThan(at("fail('the working tree is not clean"))
+    expect(at('(holdStamp as')).toBeGreaterThan(at('verifyThenStamp({'))
+    expect(release).not.toMatch(/sh\('pnpm', \[script\]\)/)
     // No restore of its own on the exit event alone, which a signal skips (#1501 review)
     expect(release).not.toMatch(/process\.on\('exit'/)
     expect(release).not.toMatch(/\bstampVersion\b/)
+  })
+
+  // beta.38 rehearsal: verify ran on a stamped tree and 17 guard tests failed on every Linux job
+  it('verifies at the placeholder with no CENTRALU_VERSION, then stamps (release-verify.mjs)', () => {
+    const root = carriers()
+    const generated = 'packages/protocol/src/version.generated.ts'
+    const seen: { script: string; stamped: boolean; version: string | undefined }[] = []
+    verifyThenStamp({
+      scripts: ['lint', 'verify'],
+      skipVerify: false,
+      env: { CENTRALU_VERSION: '0.2.0-beta.4', PATH: 'x' },
+      run: (cmd: string, args: string[], env: NodeJS.ProcessEnv) => {
+        expect(cmd).toBe('pnpm')
+        seen.push({ script: args[0] ?? '', stamped: read(root, generated).includes('0.2.0-beta.4'), version: env.CENTRALU_VERSION })
+      },
+      stamp: () => (holdStamp as (r: string, v: string) => () => void)(root, '0.2.0-beta.4')(),
+    })
+    expect(seen).toEqual([
+      { script: 'lint', stamped: false, version: undefined },
+      { script: 'verify', stamped: false, version: undefined },
+    ])
+  })
+
+  it('stamps after verify even when verify is skipped, and does not stamp when verify fails', () => {
+    const calls: string[] = []
+    verifyThenStamp({ scripts: ['verify'], skipVerify: true, run: () => calls.push('run'), stamp: () => calls.push('stamp') })
+    expect(calls).toEqual(['stamp'])
+    expect(() =>
+      verifyThenStamp({
+        scripts: ['verify'],
+        skipVerify: false,
+        run: () => {
+          throw new Error('tests failed')
+        },
+        stamp: () => calls.push('stamp again'),
+      }),
+    ).toThrow('tests failed')
+    expect(calls).toEqual(['stamp'])
   })
 
   it('does not count a stamped tree as a dirty build, but any other change, in a carrier or elsewhere', () => {
