@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 import { newSession, setup as setupProjects } from './control.js'
 
 /**
@@ -57,6 +57,15 @@ const midY = (page: Page, testId: string, closest?: string) =>
     const r = line.getBoundingClientRect()
     return r.top + r.height / 2
   }, closest)
+
+/** The computed opacity of an element, and of every ancestor of it up to the root: what an element is drawn at is their product */
+const opacities = (loc: Locator) =>
+  loc.evaluate((el) => {
+    const out: number[] = []
+    for (let n: Element | null = el; n; n = n.parentElement) out.push(Number(getComputedStyle(n).opacity))
+    return out
+  })
+const opacity = async (loc: Locator) => (await opacities(loc))[0]!
 
 const NOTES = {
   appId: 'notes',
@@ -204,6 +213,129 @@ export function sidebarMachinesTests(): void {
       await expect(page.getByTestId('machine-menu-connect-box')).toHaveText('Reconnect')
       await page.keyboard.press('Escape')
       await expect(menu).toHaveCount(0)
+    })
+
+    test("the menu of a project on a machine that is away is whole, not see-through, and so is its tooltip (#1531)", async ({ page }) => {
+      await setup(page)
+      await link(page, 'Box')
+      await addOn(page, 'box', '/home/me/api')
+      await setMachine(page, 'box', { status: 'unreachable', error: 'ssh: connect to host box port 22: Operation timed out' })
+      // The block is dimmed, as before: this is the case that made the menu inherit the dimming
+      await expect(page.getByTestId('project-api')).toHaveAttribute('data-away', 'true')
+      expect(await opacity(page.getByTestId('project-api'))).toBeLessThan(1)
+
+      await page.getByTestId('project-menu-api').click()
+      const menu = page.getByTestId('project-menu-open-api')
+      await expect(menu).toBeVisible()
+      // The menu and every ancestor of it are fully opaque: an ancestor's opacity multiplies into everything inside it
+      expect((await opacities(menu)).every((o) => o === 1)).toBe(true)
+      // Drawn into the body it still wears the sidebar's line colour, as it did inside it
+      const line = (id: string) => page.getByTestId(id).evaluate((el) => getComputedStyle(el).getPropertyValue('--color-line').trim())
+      expect(await line('project-menu-open-api')).toBe(await line('sidebar'))
+      await page.keyboard.press('Escape')
+      await expect(menu).toHaveCount(0)
+
+      await page.getByTestId('project-header-api').hover()
+      const tip = page.getByTestId('project-tip-api')
+      await expect(tip).toBeVisible()
+      expect((await opacities(tip)).every((o) => o === 1)).toBe(true)
+    })
+
+    test("a project's menu offers Reconnect only while its machine is not connected, and it shows connecting, then the result (#1533)", async ({ page }) => {
+      await setup(page)
+      await link(page, 'Box')
+      await addOn(page, 'box', '/home/me/api')
+      const menu = page.getByTestId('project-menu-open-api')
+      const reconnect = page.getByTestId('reconnect-api')
+      const result = page.getByTestId('reconnect-result-api')
+      const open = async () => {
+        await page.getByTestId('project-menu-api').click()
+        await expect(menu).toBeVisible()
+      }
+
+      await test.step('connected, and a project of this computer: nothing to reconnect', async () => {
+        await open()
+        await expect(reconnect).toHaveCount(0)
+        await page.keyboard.press('Escape')
+        await page.getByTestId('project-menu-alpha').click()
+        await expect(page.getByTestId('project-menu-open-alpha')).toBeVisible()
+        await expect(page.getByTestId('reconnect-alpha')).toHaveCount(0)
+        await page.keyboard.press('Escape')
+      })
+
+      await test.step('not connected: Reconnect is the first row of the menu, with no result from before standing under it', async () => {
+        await setMachine(page, 'box', { status: 'unreachable', error: 'ssh: connect to host box port 22: Operation timed out' })
+        await open()
+        await expect(reconnect).toHaveText('Reconnect')
+        await expect(reconnect).toBeEnabled()
+        await expect(menu.getByRole('menuitem').first()).toHaveAttribute('data-testid', 'reconnect-api')
+        // The machine's old error is not the answer to a press that has not been made
+        await expect(result).toHaveText('')
+      })
+
+      await test.step('a failed attempt: connecting (held), the menu stays open and keeps the focus on the row, then the reason in plain words', async () => {
+        await page.evaluate(() => {
+          ;(window as unknown as MockWindow).__mock.reconnectPlan = { status: 'refused', error: 'box@box: Permission denied (publickey).' }
+        })
+        await reconnect.focus()
+        await page.keyboard.press('Enter')
+        await expect(reconnect).toHaveText('Connecting…')
+        await expect(reconnect).toHaveAttribute('aria-disabled', 'true')
+        await expect(reconnect).toBeFocused()
+        await expect(menu).toBeVisible()
+        await expect(result).toHaveText('')
+        // Pressed again while it tries: nothing more is asked
+        await reconnect.click({ force: true })
+        expect(await page.evaluate(() => (window as unknown as MockWindow).__mock.machinesList.filter((m: { status: string }) => m.status === 'connecting').length)).toBe(1)
+        await page.evaluate(() => (window as unknown as MockWindow & { __mock: { finishReconnect(id: string): void } }).__mock.finishReconnect('box'))
+        await expect(result).toContainText('Could not connect: Box did not accept your ssh key')
+        await expect(reconnect).toHaveText('Reconnect')
+        await expect(reconnect).toBeEnabled()
+        await expect(menu).toBeVisible()
+        // The reason is read with the row, from a live region that is not a status standing among the menu's items
+        await expect(menu.getByRole('status')).toHaveCount(0)
+        await expect(result).toHaveAttribute('aria-live', 'polite')
+        await expect(reconnect).toHaveAttribute('aria-describedby', (await result.getAttribute('id'))!)
+      })
+
+      await test.step('a good attempt: connecting, then the menu closes and the badge is solid', async () => {
+        await page.evaluate(() => {
+          ;(window as unknown as MockWindow).__mock.reconnectPlan = { status: 'connected', error: null }
+        })
+        await reconnect.click()
+        await expect(reconnect).toHaveText('Connecting…')
+        await expect(result).toHaveText('')
+        await expect(menu).toBeVisible()
+        await page.evaluate(() => (window as unknown as MockWindow & { __mock: { finishReconnect(id: string): void } }).__mock.finishReconnect('box'))
+        await expect(menu).toHaveCount(0)
+        await expect(page.getByTestId('project-machine-api')).toHaveAttribute('data-status', 'connected')
+        // The focus the row held did not fall to the body with it: it is on the button that opened the menu
+        await expect(page.getByTestId('project-menu-api')).toBeFocused()
+        await open()
+        await expect(reconnect).toHaveCount(0)
+        await page.keyboard.press('Escape')
+      })
+
+      await test.step('the machine comes back by itself while the row holds the focus: the menu stays and the focus returns to its button', async () => {
+        await setMachine(page, 'box', { status: 'unreachable', error: 'ssh: connect to host box port 22: Operation timed out' })
+        await open()
+        await reconnect.focus()
+        await expect(reconnect).toBeFocused()
+        await setMachine(page, 'box', { status: 'connected', error: null })
+        await expect(reconnect).toHaveCount(0)
+        await expect(menu).toBeVisible()
+        await expect(page.getByTestId('project-menu-api')).toBeFocused()
+        await page.keyboard.press('Escape')
+      })
+
+      await test.step('a machine the person disconnected says Connect, as its badge menu does', async () => {
+        await page.getByTestId('project-machine-api').click()
+        await page.getByTestId('machine-menu-disconnect-box').click()
+        await expect(page.getByTestId('project-machine-api')).toHaveAttribute('data-status', 'disconnected')
+        await open()
+        await expect(reconnect).toHaveText('Connect')
+        await expect(page.getByTestId('machine-menu-connect-box')).toHaveCount(0)
+      })
     })
 
     test("a project is dragged between two of another machine's: the one order goes to the hub with the machines' ids", async ({ page }) => {

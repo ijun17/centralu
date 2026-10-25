@@ -1,6 +1,7 @@
 import type { ProjectInfo } from '@cc/protocol'
 import { RowMenu } from './RowMenu.jsx'
 import { ActionRow } from './ActionRow.jsx'
+import { ReconnectRow } from './ReconnectRow.jsx'
 
 /**
  * The action menu on a project row.
@@ -51,6 +52,8 @@ export function ProjectMenu({
   }
   return (
     <RowMenu anchorEl={anchorEl} testId={`project-menu-open-${project.name}`} onClose={onClose}>
+      {/* A project on a machine that is not connected: bringing it back comes first (#1533); nothing here for one that is connected or on this computer */}
+      {project.machine && <ReconnectRow machine={project.machine} projectName={project.name} anchorEl={anchorEl} onClose={onClose} />}
       {/*
         The only way to start a session from the sidebar since its `+` went (owner, 2026-10-18). It starts one at once:
         the empty screen switches the tool and offers past conversations, so no window of options is needed here.

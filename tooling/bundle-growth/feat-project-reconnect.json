@@ -1,0 +1,4 @@
+{
+  "bytes": 2800,
+  "reason": "Reconnect in the menu of a project whose machine is away (#1533): one menu row component with its connecting and failed states, a live region the row is described by, focus returned to the menu's button when the row goes, and the menu's keyboard hand-over into and out of the body (#1531). Measured against main at 0d7fc67c0 (1,905,210 B): +2,710 B in all, of which the portaled menu's Tab handling is 455 B (#1531), the row with its pending state 1,920 B and its accessibility and focus handling 335 B, all in the main chunk. Main sits a few hundred bytes under the ceiling, so any UI change over that needs a declaration; this one is plain components and strings with no dependency, and lazy loading would not lower the total, which counts every chunk."
+}

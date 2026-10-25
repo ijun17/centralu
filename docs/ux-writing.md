@@ -65,7 +65,8 @@ more before anything happens.
   (`settings/ArchiveSection.tsx`, then "Delete for good" on the confirmation itself).
 - The same character means "in progress" on a label that changes while it works: "Restarting the agent…"
   (`session/SessionHeader.tsx`), "Deleting…" (`project/DeleteProjectDialog.tsx`), "Looking for Claude Code
-  and Codex…" (`onboarding/Intro.tsx`), "Asking <machine> what is running…" (`settings/MachinesSection.tsx`).
+  and Codex…" (`onboarding/Intro.tsx`), "Asking <machine> what is running…" (`settings/MachinesSection.tsx`),
+  "Connecting…" (`machines/MachineMenu.tsx`, and the project menu's Reconnect row, `sidebar/menus/ReconnectRow.tsx`).
 - Breaks it: "Add a folder as a project" (`sidebar/Sidebar.tsx`) opens a folder picker
   without "…"; "running…" (`session/chat-rows/CentraluCall.tsx`) is the one progress word in lower case.
 
