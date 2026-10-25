@@ -182,7 +182,7 @@ export const tools = {
         'Mark the owner\'s saved answer on an item recorded, with the address of the English decision comment posted on it with comment (https://github.com/owner/name/issues/N#issuecomment-ID). The comment is read back from GitHub: it must be on that item, hold "Decision (owner, YYYY-MM-DD)" and be in English.',
       inputSchema: z.object({ item: itemInput, url: z.string().describe("The decision comment's address on GitHub") }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-      _meta: { ui: { visibility: ['model'] } },
+      _meta: { 'centralu/risk': 'local', ui: { visibility: ['model'] } },
     },
     handler: serially(answering(markOwnerAnswer)),
   },

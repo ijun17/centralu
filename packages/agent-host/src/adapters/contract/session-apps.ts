@@ -1,3 +1,5 @@
+import type { PermissionPreset } from '@cc/protocol'
+
 /**
  * A single tool of an external app attached to a session — carries the exact shape of an MCP
  * `Tool` (minus outputSchema).
@@ -107,6 +109,13 @@ export type SessionApps = {
    * list. Defaults to false when unknown (leans toward asking).
    */
   readOnly(server: string, tool: string): boolean
+  /**
+   * Whether this call runs with no approval card: a read-only tool, or a write the app declared `local` or
+   * (for the app of this session's own project, under `normal`) `routine` (`apps/external/tool-risk.ts`). Judged
+   * from the attached app's already-read tool list, like `readOnly`; `false` when unknown. `args` is absent where
+   * the arguments are not known yet (Codex decides before the call), and then a tool whose risk depends on them asks.
+   */
+  unasked(server: string, tool: string, preset: PermissionPreset, args?: Record<string, unknown>): boolean
   /**
    * Cancels every app call this session made — used when stopping the session (interrupt).
    * Includes a call that already returned early (`waitMs`): work from a session the person
