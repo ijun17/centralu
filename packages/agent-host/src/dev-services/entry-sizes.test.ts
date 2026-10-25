@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { treeBytes } from './entry-sizes.js'
-import { itSymlink, linkDir } from '../link.test-helpers.js'
+import { itSymlink } from '../link.test-helpers.js'
 
 let dir = ''
 
@@ -48,9 +48,9 @@ describe('the file system walk that sizes an ignored entry', () => {
     const tree = join(dir, 'tree')
     mkdirSync(tree)
     writeFileSync(join(tree, 'a.bin'), Buffer.alloc(100))
-    linkDir(outside, join(tree, 'out'))
+    symlinkSync(outside, join(tree, 'out'))
     symlinkSync(join(dir, 'nowhere'), join(tree, 'dangling'))
-    linkDir(outside, join(dir, 'link'))
+    symlinkSync(outside, join(dir, 'link'))
     symlinkSync(join(dir, 'nowhere'), join(dir, 'dangling'))
 
     expect(await treeBytes(tree, Date.now() + 60_000)).toBe(100)

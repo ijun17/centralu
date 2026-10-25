@@ -11,7 +11,8 @@ import { it, type TestContext } from 'vitest'
  * runners are administrators, an ordinary user's machine is not (#1550). A junction needs no right
  * and is what pnpm and npm workspaces make there, and every guard under test (containment, escape
  * refusal, dependency copies) treats a junction as a link. So a test that needs "a link to a
- * folder" makes it with `linkDir`: a junction on Windows, a symlink everywhere else.
+ * folder" makes it with `linkDir`: a symlink where the process may make one, a junction on a Windows
+ * machine that may not.
  *
  * What a junction cannot be (a link to a file, a relative link, a link to a share, a link whose
  * point is that it is a Windows symlink) is made with `linkFile` / `symlinkSync` and run with
@@ -43,14 +44,17 @@ function junctionTarget(target: string, path: string): string {
   return resolve(dirname(path), target)
 }
 
-/** A link to a folder: a junction on Windows (no right needed), a symlink elsewhere. A relative target is read from the link's folder. */
+/**
+ * A link to a folder: a symlink wherever this process may make one (CI's administrator runners keep their old coverage), a
+ * junction on a Windows machine without the right. A relative target is read from the link's folder.
+ */
 export function linkDir(target: string, path: string): void {
-  if (process.platform === 'win32') symlinkSync(junctionTarget(target, path), path, 'junction')
+  if (!canSymlink) symlinkSync(junctionTarget(target, path), path, 'junction')
   else symlinkSync(target, path, 'dir')
 }
 
 export async function linkDirAsync(target: string, path: string): Promise<void> {
-  if (process.platform === 'win32') await symlink(junctionTarget(target, path), path, 'junction')
+  if (!canSymlink) await symlink(junctionTarget(target, path), path, 'junction')
   else await symlink(target, path, 'dir')
 }
 
