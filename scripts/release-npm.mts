@@ -34,7 +34,11 @@ import {
 } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { APP_NAME, APP_VERSION } from '../packages/protocol/src/brand.js'
+import { APP_NAME } from '../packages/protocol/src/brand.js'
+// @ts-expect-error — plain .mjs, read by bundle.mjs and the local signing workflow under plain node
+import { PLACEHOLDER, resolveAppVersion } from './app-version.mjs'
+// @ts-expect-error — plain .mjs, as above
+import { stampVersion } from './stamp-version.mjs'
 // @ts-expect-error — plain .mjs, so bundle.mjs reads the same list under plain node
 import { CONPTY_FILES as CONPTY_FILES_JS } from './conpty-files.mjs'
 import { checkStaged, shellToCarry, stageBundle, stageContent, type CarriedShell } from './bundle-stage.mjs'
@@ -115,11 +119,24 @@ delete process.env.CONTENT_SIGNING_KEY_NEXT
 const requireContentKey = process.argv.includes('--require-content-key')
 
 /**
+ * The version this run releases (#1501): `CENTRALU_VERSION`, which the release workflow sets from
+ * the tag, else the newest release tag reachable from HEAD; no placeholder. Git holds none, so
+ * `APP_VERSION` from `brand.ts` is the source's `0.0.0-dev` here (imported before any stamp) and is
+ * never what is released. Stamped into the tree after the clean-tree check below.
+ */
+let VERSION: string
+try {
+  VERSION = (resolveAppVersion as (o?: object) => string)()
+} catch (e) {
+  fail((e as Error).message)
+}
+
+/**
  * A prerelease (`0.1.0-beta.1`) must always carry a tag — npm refuses to publish one
  * untagged. Otherwise the beta becomes `latest`, and anyone who installs without thinking
  * about it gets the beta.
  */
-const tag = APP_VERSION.includes('-') ? 'beta' : 'latest'
+const tag = VERSION.includes('-') ? 'beta' : 'latest'
 
 /**
  * On Windows `npm` and `pnpm` are `.cmd` files, which Node will only start through a shell
@@ -568,6 +585,20 @@ if (out('git', ['status', '--porcelain'])) {
   fail('the working tree is not clean. Commit or revert, then run this again.')
 }
 
+// The version goes into every carrier (`stamp-version.mjs`) before anything is verified or built:
+// the UI and host read version.generated.ts, Tauri and the window tauri.conf.json, npm the manifests.
+// A child (pnpm verify, the build) reads CENTRALU_VERSION. Put back on exit, so a run by hand leaves
+// the tree as it found it; the release job's checkout is thrown away anyway.
+;(stampVersion as (root: string, v: string) => string[])(ROOT, VERSION)
+process.env.CENTRALU_VERSION = VERSION
+process.on('exit', () => {
+  try {
+    ;(stampVersion as (root: string, v: string) => string[])(ROOT, PLACEHOLDER as string)
+  } catch (e) {
+    console.error(`  could not put ${PLACEHOLDER as string} back: ${(e as Error).message}`)
+  }
+})
+
 if (publish) {
   // Getting blocked on auth after running the whole build wastes minutes — checked first.
   try {
@@ -581,7 +612,7 @@ if (skipVerify) console.log('\n  --skip-verify: a rehearsal on this tree verifie
 else for (const script of target?.verify ?? ['verify']) sh('pnpm', [script])
 
 console.log(
-  `  ${target?.id ?? 'centralu (shim only)'} · version ${APP_VERSION} · tag ${tag} · commit ${out('git', ['rev-parse', '--short', 'HEAD'])}`,
+  `  ${target?.id ?? 'centralu (shim only)'} · version ${VERSION} · tag ${tag} · commit ${out('git', ['rev-parse', '--short', 'HEAD'])}`,
 )
 
 // ── 2-4. The bundle (--shim-only has nothing to bundle, so this whole block is skipped) ──
@@ -641,22 +672,22 @@ if (target && ARCH_PKG) {
   }
 }
 
-// ── 5. Read the version from one place (brand.ts) and write it everywhere ──────────────
+// ── 5. The version in every package (stamped above; written again for the packages staged since) ──
 step('Aligning package versions')
 for (const pkgDir of [...(HOST_PKG ? [HOST_PKG] : []), ...(ARCH_PKG ? [ARCH_PKG] : []), MAIN_PKG]) {
   const file = join(pkgDir, 'package.json')
   const json = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>
-  json.version = APP_VERSION
+  json.version = VERSION
   if (json.optionalDependencies) {
     // The main package has to point at the **exact version**. Left as a range (^), only the
     // architecture package could end up on a newer version, and the shell and the contents
     // would drift apart.
     json.optionalDependencies = Object.fromEntries(
-      Object.keys(json.optionalDependencies as object).map((k) => [k, APP_VERSION]),
+      Object.keys(json.optionalDependencies as object).map((k) => [k, VERSION]),
     )
   }
   writeFileSync(file, `${JSON.stringify(json, null, 2)}\n`)
-  console.log(`  ${json.name as string}@${APP_VERSION}`)
+  console.log(`  ${json.name as string}@${VERSION}`)
 }
 
 /**
@@ -687,7 +718,7 @@ async function stageShellAndContent(platform: string, bundle: string): Promise<v
     fail('--require-content-key: CONTENT_SIGNING_KEY is not set. Is this job running in the npm-publish environment?')
   }
   const contentDir = join(release, 'content')
-  const manifest = stageContent(contentDir, { bundle, key, platform })
+  const manifest = stageContent(contentDir, { bundle, key, platform, appVersion: VERSION })
   const keys = key.throwaway ? [{ name: 'throwaway', keyId: key.keyId, publicKey: key.publicKey }] : trustedKeys()
   try {
     verifyContent(contentDir, { platform, keys })
@@ -737,7 +768,7 @@ async function stageShellAndContent(platform: string, bundle: string): Promise<v
  */
 /** `name@<this version>` is visible on the registry (`release-registry.mts`) */
 function onRegistry(name: string): boolean {
-  return viewPublished(name, APP_VERSION, viaShell('npm')).state === 'present'
+  return viewPublished(name, VERSION, viaShell('npm')).state === 'present'
 }
 
 async function assertPinnedPlatformsPublished() {
@@ -758,7 +789,7 @@ async function assertPinnedPlatformsPublished() {
   })
   if (missing.length === 0) return
   const note =
-    `${missing.join(', ')} @${APP_VERSION} is not on the registry yet.\n` +
+    `${missing.join(', ')} @${VERSION} is not on the registry yet.\n` +
     '  Publish every platform package first — that is what the platform jobs in the release\n' +
     '  workflow do — then re-run with --shim-only to publish the shim last.'
   if (publish) fail(note)
@@ -783,10 +814,10 @@ for (const pkgDir of [...(HOST_PKG ? [HOST_PKG] : []), ...(ARCH_PKG ? [ARCH_PKG]
   const name = (JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8')) as { name: string }).name
   if (pkgDir === MAIN_PKG) await assertPinnedPlatformsPublished()
   if (publish) {
-    const next = publishStep(viewPublished(name, APP_VERSION, viaShell('npm')), HEAD, `${name}@${APP_VERSION}`)
+    const next = publishStep(viewPublished(name, VERSION, viaShell('npm')), HEAD, `${name}@${VERSION}`)
     if (next.do === 'stop') fail(next.why)
     if (next.do === 'skip') {
-      step(`Already published from this commit: ${name}@${APP_VERSION} (an earlier attempt of this release); not publishing it again`)
+      step(`Already published from this commit: ${name}@${VERSION} (an earlier attempt of this release); not publishing it again`)
     } else {
       step(`Publishing: ${name}`)
       sh('npm', ['publish', '--access', 'public', '--tag', tag, ...(otp ? ['--otp', otp] : [])], pkgDir)
@@ -794,7 +825,7 @@ for (const pkgDir of [...(HOST_PKG ? [HOST_PKG] : []), ...(ARCH_PKG ? [ARCH_PKG]
     if (alsoLatest && tag !== 'latest') {
       // Moving a tag, unlike publishing, **can be undone** (a dist-tag can always be repointed),
       // and adding one that is already there changes nothing, so a re-run does it again.
-      sh('npm', ['dist-tag', 'add', `${name}@${APP_VERSION}`, 'latest', ...(otp ? ['--otp', otp] : [])], pkgDir)
+      sh('npm', ['dist-tag', 'add', `${name}@${VERSION}`, 'latest', ...(otp ? ['--otp', otp] : [])], pkgDir)
     }
   } else {
     step(`Rehearsal (pack): ${name}`)

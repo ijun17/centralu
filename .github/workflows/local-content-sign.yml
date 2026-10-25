@@ -22,6 +22,9 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+          # The base version is the newest release tag reachable from this commit (#1501): history and tags, no blobs
+          fetch-depth: 0
+          filter: blob:none
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
@@ -33,11 +36,11 @@ jobs:
           node --input-type=module <<'JS'
           import { createHash } from 'node:crypto'
           import { mkdirSync, writeFileSync, appendFileSync } from 'node:fs'
-          import { readAppVersion, validateLocalManifest } from './scripts/local-manifest.mjs'
+          import { readReleaseBase, validateLocalManifest } from './scripts/local-manifest.mjs'
           // Advisory check; enforce ref access with environment deployment branch rules.
           if (process.env.DRY_RUN !== 'true' && process.env.GITHUB_REF !== 'refs/heads/main') throw new Error('real signing runs only from main')
           const bytes = Buffer.from(process.env.INPUT_MANIFEST, 'utf8')
-          const m = validateLocalManifest(bytes, readAppVersion())
+          const m = validateLocalManifest(bytes, readReleaseBase())
           mkdirSync('manifest-data')
           writeFileSync('manifest-data/content-manifest.json', bytes)
           appendFileSync(process.env.GITHUB_STEP_SUMMARY, `Version: ${m.appVersion}\n\nInstalled (reported): ${m.local.installedVersion}\n\nNext release: ${m.local.nextRelease}\n\nCommit (reported): ${m.local.commit}\n\nDirty: ${m.local.dirty}\n\nFiles: ${m.files.length}\n\nManifest SHA-256: ${createHash('sha256').update(bytes).digest('hex')}\n\nDry run: ${process.env.DRY_RUN}\n`)
@@ -58,6 +61,8 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+          fetch-depth: 0
+          filter: blob:none
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22

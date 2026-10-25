@@ -1,16 +1,17 @@
 /** Local release build; only its manifest goes to the environment-gated signer. */
 import { execFileSync } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { APP_VERSION } from '../packages/protocol/src/brand.js'
 import { checkStaged, CONTENT_IN_BUNDLE, shellToCarry, stageBundle, stageContent } from './bundle-stage.mjs'
 import { MANIFEST_NAME, SIGNATURE_NAME, throwawayKey, trustedKeys, verifyContent } from './content-manifest.mjs'
 import { lockEntryFor, readLock, shellVersionInSource } from './shell-bundle.mjs'
 // @ts-expect-error — dependency-free JavaScript shared with the workflow
-import { assertLocalVersion, chooseLocalVersion, nextReleaseVersion, validateLocalManifest } from './local-manifest.mjs'
+import { assertLocalVersion, chooseLocalVersion, nextReleaseVersion, readReleaseBase, validateLocalManifest } from './local-manifest.mjs'
+// @ts-expect-error — dependency-free JavaScript, shared with release-npm and bundle.mjs
+import { stampVersion } from './stamp-version.mjs'
 // @ts-expect-error — reuse the npm launcher's atomic install, which has no declaration file
 import { swapInto } from '../packaging/npm/centralu/bin/swap.mjs'
 
@@ -30,28 +31,17 @@ export function installLocalBundle(bundle: string, target: string): { replaced: 
   return swapInto(target, (staging: string) => run('/usr/bin/ditto', [bundle, staging]))
 }
 
-/** Stamp only the disposable checkout, including versions compiled into Rust and the UI/host. */
-export function stampLocalVersion(root: string, base: string, version: string): void {
-  const brand = join(root, 'packages/protocol/src/brand.ts')
-  const source = readFileSync(brand, 'utf8')
-  const before = `export const APP_VERSION = '${base}'`
-  if (!source.includes(before)) throw new Error('APP_VERSION changed while taking the snapshot')
-  writeFileSync(brand, source.replace(before, `export const APP_VERSION = '${version}'`))
-  const cargo = join(root, 'apps/desktop/src-tauri/Cargo.toml')
-  const text = readFileSync(cargo, 'utf8')
-  if (!text.includes(`version = "${base}"`)) throw new Error('Cargo version disagrees with APP_VERSION')
-  writeFileSync(cargo, text.replace(`version = "${base}"`, `version = "${version}"`))
-  for (const path of ['apps/desktop/package.json', 'apps/desktop/src-tauri/tauri.conf.json']) {
-    const file = join(root, path)
-    const json = JSON.parse(readFileSync(file, 'utf8')) as { version: string }
-    if (json.version !== base) throw new Error(`${path} disagrees with APP_VERSION`)
-    json.version = version
-    writeFileSync(file, `${JSON.stringify(json, null, 2)}\n`)
-  }
+/**
+ * Stamp only the disposable checkout (#1501, `stamp-version.mjs`): the UI and host read
+ * version.generated.ts, the bundle and the window tauri.conf.json, and the window passes its version
+ * to the keeper. Nothing is compiled into Rust any more, so Cargo.toml stays at the placeholder.
+ */
+export function stampLocalVersion(root: string, version: string): void {
+  ;(stampVersion as (root: string, version: string) => string[])(root, version)
 }
 
-export async function requestSignature(manifest: Buffer, work: string, ref = 'main'): Promise<string> {
-  const m = validateLocalManifest(manifest, APP_VERSION)
+export async function requestSignature(manifest: Buffer, work: string, base: string, ref = 'main'): Promise<string> {
+  const m = validateLocalManifest(manifest, base)
   // stdin preserves newlines and avoids both shell interpolation and command-line size limits.
   execFileSync('gh', ['workflow', 'run', WORKFLOW, '--ref', ref, '--json'], {
     cwd: ROOT, input: JSON.stringify({ manifest: manifest.toString('utf8'), dry_run: 'false' }), stdio: ['pipe', 'inherit', 'inherit'],
@@ -93,8 +83,10 @@ async function main(): Promise<void> {
   const flag = (name: string) => args.includes(name) ? args[args.indexOf(name) + 1] : undefined
   const target = resolve(flag('--target') ?? '/Applications/Centralu.app')
   const installed = installedVersion(target)
-  const version = chooseLocalVersion(APP_VERSION, installed, flag('--version')) as string
-  console.log(`Local update: ${installed} → ${version} (next release: ${nextReleaseVersion(APP_VERSION)}) at ${target}`)
+  // The release this checkout was cut from: its newest reachable release tag, as the signing workflow reads it
+  const BASE = readReleaseBase(ROOT) as string
+  const version = chooseLocalVersion(BASE, installed, flag('--version')) as string
+  console.log(`Local update: ${installed} → ${version} (next release: ${nextReleaseVersion(BASE)}) at ${target}`)
   if (args.includes('--plan')) return
   // Persistent temporary Cargo cache makes subsequent local updates incremental. The lock covers
   // snapshot creation through install; it is separate from the machine-wide Playwright lock.
@@ -117,7 +109,7 @@ async function main(): Promise<void> {
       mkdirSync(dirname(to), { recursive: true })
       cpSync(from, to, { recursive: true, dereference: true })
     }
-    stampLocalVersion(source, APP_VERSION, version)
+    stampLocalVersion(source, version)
     const env: NodeJS.ProcessEnv = { ...process.env, CARGO_TARGET_DIR: join(work, 'cargo-target'), CC_DATA_DIR: join(work, 'data') }
     delete env.CONTENT_SIGNING_KEY
     delete env.CONTENT_SIGNING_KEY_NEXT
@@ -131,9 +123,9 @@ async function main(): Promise<void> {
     const original = stageContent(contentDir, { bundle, key, platform: 'darwin-arm64', appVersion: version })
     const manifest = Buffer.from(`${JSON.stringify({
       ...JSON.parse(original.toString('utf8')),
-      local: { baseVersion: APP_VERSION, installedVersion: installed, nextRelease: nextReleaseVersion(APP_VERSION), commit, dirty, requestId: randomBytes(16).toString('hex') },
+      local: { baseVersion: BASE, installedVersion: installed, nextRelease: nextReleaseVersion(BASE), commit, dirty, requestId: randomBytes(16).toString('hex') },
     }, null, 2)}\n`)
-    validateLocalManifest(manifest, APP_VERSION)
+    validateLocalManifest(manifest, BASE)
     writeFileSync(join(contentDir, MANIFEST_NAME), manifest)
     // Fetch the release-pinned shell; never build a new identity for a local update.
     const lockEntries = readLock()
@@ -144,7 +136,7 @@ async function main(): Promise<void> {
     if (dryRun) {
       run(process.execPath, ['--experimental-strip-types', join(ROOT, 'scripts/content-manifest.mts'), 'sign-local', join(contentDir, MANIFEST_NAME), '--dry-run'])
     } else {
-      cpSync(await requestSignature(manifest, work), join(contentDir, SIGNATURE_NAME))
+      cpSync(await requestSignature(manifest, work, BASE), join(contentDir, SIGNATURE_NAME))
     }
     // The dry-run signer generated its own key and verified internally; it is intentionally
     // untrusted. Real installs must verify against the exact keys already compiled into the shell.
@@ -158,7 +150,7 @@ async function main(): Promise<void> {
     checkStaged(bundle, { keys, platform: 'darwin-arm64', manifest, lock: shell.lock })
     if (installedVersion(bundle) !== version) throw new Error('bundle version does not match the signed manifest')
     // Approval may take hours. Never replace a newer app installed during that wait.
-    assertLocalVersion(version, APP_VERSION, installedVersion(target))
+    assertLocalVersion(version, BASE, installedVersion(target))
     const { leftAt } = installLocalBundle(bundle, target)
     if (leftAt) console.log(`Previous copy left at ${leftAt}; remove it after it is no longer in use.`)
     verifyContent(join(target, CONTENT_IN_BUNDLE), { keys, platform: 'darwin-arm64' })

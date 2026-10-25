@@ -24,6 +24,7 @@ import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { CONPTY_FILES } from '../../../scripts/conpty-files.mjs'
+import { versionOnlyDirt } from '../../../scripts/stamp-version.mjs'
 import { bundleOutFolder } from './bundle-out.mjs'
 
 const require = createRequire(import.meta.url)
@@ -40,13 +41,13 @@ mkdirSync(OUT, { recursive: true })
  * During dogfooding, answering "which commit is the running app" required matching the binary's
  * mtime against commit times — a guess, and one that breaks the moment it is rebuilt. Embedded in
  * the first line of the startup log instead. The build continues even if git is absent or fails
- * ('unknown' is better than a failed build).
+ * ('unknown' is better than a failed build). A tree the release stamped its version into (#1501,
+ * `stamp-version.mjs`) is not dirty: it differs from the commit by those version fields alone.
  */
 function buildId() {
   try {
     const sha = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim()
-    const dirty = execFileSync('git', ['status', '--porcelain'], { cwd: ROOT, encoding: 'utf8' }).trim()
-    return dirty ? `${sha}-dirty` : sha
+    return versionOnlyDirt(ROOT).length ? `${sha}-dirty` : sha
   } catch {
     return 'unknown'
   }

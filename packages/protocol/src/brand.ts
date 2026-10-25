@@ -11,6 +11,8 @@
  * test guards them instead (`tooling/brand.test.ts`).
  */
 
+import { APP_VERSION } from './version.generated.js'
+
 /** The human-facing name. A contract test checks that the static files match this value. */
 export const APP_NAME = 'Centralu'
 
@@ -18,13 +20,16 @@ export const APP_NAME = 'Centralu'
 export const APP_ID = 'app.centralu'
 
 /**
- * Three places (tauri.conf.json, Cargo.toml, apps/desktop/package.json) and two npm packages
- * must match this value — `tooling/brand.test.ts` catches it if they drift.
+ * The app's version: never written in git (#1501). `version.generated.ts` holds the placeholder
+ * `0.0.0-dev`, which development builds and tests run with; a packaging build stamps the version
+ * it resolves (`scripts/app-version.mjs`: `CENTRALU_VERSION`, else the release tag) into that file
+ * and the other carriers (`scripts/stamp-version.mts`), and `tooling/brand.test.ts` fails on a
+ * stamped carrier committed by accident.
  *
  * The version says beta up front. "0.1.0" reads like a finished first release, while
  * "0.1.0-beta.1" lowers expectations on its own — the reader knows even without reading the docs.
  */
-export const APP_VERSION = '0.1.0-beta.36'
+export { APP_VERSION }
 
 /** The machine-read name — unlike the display name, it stays lowercase and hyphenated. */
 export const APP_SLUG = 'centralu'

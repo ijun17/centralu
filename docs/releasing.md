@@ -414,7 +414,24 @@ Three full CI runs per release (main after the last merge, the bump PR, main aga
 the version is stamped at build time from the tag, so no file carries it and no bump PR or bump commit exists. The tag
 goes on a commit of main that is already fully green. This lands in steps: the guard and the board's path first (both
 schemes accepted, nothing changes until the switch), then the stamp and the switch, then the old path goes. The design
-and its review are on #1501.
+and its review are on #1501. **This repository is on the tag scheme** since the switch (`release.scheme: "tag"`,
+`brand.ts` importing the version): the bump steps above describe releases up to 0.1.0-beta.36, and stay until the old
+path is removed.
+
+- **Where a build's version comes from.** Git holds none. `scripts/app-version.mjs` resolves it: `CENTRALU_VERSION`,
+  else the newest `v[0-9]*` tag reachable from HEAD, else a packaging build refuses (a shallow checkout, a fork). The
+  carriers are committed as the placeholder `0.0.0-dev` (`tooling/brand.test.ts` fails on a stamped one):
+  `packages/protocol/src/version.generated.ts` (`APP_VERSION` for the UI, the host and the scripts),
+  `tauri.conf.json`, `apps/desktop/package.json`, `Cargo.toml` and `Cargo.lock`, and every
+  `packaging/npm/*/package.json` with the shim's pins. `scripts/stamp-version.mjs` writes the version into
+  `version.generated.ts`, `tauri.conf.json` and the npm manifests, and `--restore` puts the placeholder back.
+  `release-npm.mts` stamps right after its clean-tree check, before `pnpm verify` and the build, and signs the content
+  manifest with that version; `pnpm app` (`scripts/app-build.mts`) stamps, builds and restores, also on failure or
+  Ctrl-C; `local-update` stamps its disposable clone. `bundle.mjs` does not call a tree dirty for those version
+  fields alone. Nothing is compiled into Rust: the window reads the stamped `tauri.conf.json` at run time
+  (`package_info()`) and passes it to the keeper as `--app-version`, which a keeper running a built host now requires.
+  `pnpm dev`, `pnpm host`, `pnpm app:dev` and the tests run with `0.0.0-dev`: such a host is `dev`, installs
+  nothing on linked machines, and its update line shows the latest release as newer.
 
 - **Which scheme.** `release.yml`'s guard (`scripts/release-guard.mjs`) reads `brand.ts` with `sourceScheme`
   (the board's `versions.mjs`, from `project.json` `release.source`): a literal `APP_VERSION` is the brand scheme
@@ -441,8 +458,11 @@ and its review are on #1501.
   annotated tag whose message is the notes: with no bump PR, the tag is where they are kept (owner default, 2026-10-24:
   no GitHub Release). `approve` reads only the tagged commit's own CI, which was green before it was tagged; the shim's
   gate is unchanged. Status follows the newest tag until its release run succeeded or its shim is on the registry.
-- **Remote dev builds** refuse a working copy whose version files carry the placeholder `0.0.0-dev` (`pnpm remote-dev`):
-  a build of it would say it is `0.0.0-dev.local.N`, older than every release.
+- **Remote dev builds** (`pnpm remote-dev`) are cut from the newest release tag reachable from the working copy's HEAD
+  there, as `app-version.mjs` resolves a local build: `<tag>.local.N`. A clone without its tags is refused with a
+  pointer to `git fetch --tags` (a commit from before the switch still carries its own version, which is taken then);
+  the placeholder is never a base, since `0.0.0-dev.local.N` would be older than every release. Hubs from before the
+  switch refuse such a working copy outright: the script that runs there is the hub's.
 
 ### What the job graph guarantees
 
@@ -626,9 +646,10 @@ The command dispatches from `main`, so the workflow must first be merged there. 
 validates the JSON and uploads only those exact bytes; its summary shows the manifest hash,
 version and reported source provenance. It allows only format 1, shell 1, `darwin-arm64`,
 a bounded sorted file list containing the keeper and required host entry points, safe paths,
-file sizes, SHA-256 hashes and executable bits. Both validation passes read `APP_VERSION`
-from `packages/protocol/src/brand.ts` in the checked-out main commit, require the reported
-base to match it, and derive the next release and upper bound from it. Uploaded claims cannot
+file sizes, SHA-256 hashes and executable bits. Both validation passes read the base from
+the checked-out main commit: the newest release tag reachable from it (`readReleaseBase`,
+#1501; both jobs check out the whole history for its tags), require the reported base to match
+it, and derive the next release and upper bound from it. The local build takes the same base. Uploaded claims cannot
 choose a future base such as `beta.999`. The signing job validates again after download,
 then uses `signatureBytes` in `scripts/content-manifest.mts`, the same Ed25519 routine as
 `release.yml`. It installs no dependencies and executes no uploaded code. The unmodified
