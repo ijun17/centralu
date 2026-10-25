@@ -168,11 +168,14 @@
        * The merge queue (#956): above the board, only while it has items. What needs attention waits
        * on someone, so it takes the signal colour, like the decision column.
        */
-      .queue { margin: 12px 16px 0; border: var(--border) solid var(--edge); border-radius: var(--radius-lg); background: var(--surface); }
+      .queue { margin: 12px 16px 0; border: var(--border) solid var(--edge); border-radius: var(--radius-lg); background: var(--surface); display: flex; flex-direction: column; max-height: 33vh; }
+      .queue > * { flex: none; }
+      .queue > .q-groups { flex: 0 1 auto; min-height: 0; overflow-y: auto; }
       .queue[hidden] { display: none; }
       .queue.attention { border-color: var(--edge-strong); }
       .q-head { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; padding: 8px 10px 4px; color: var(--ink-2); font-weight: var(--semibold); }
       .q-head .quiet { font-weight: var(--regular); }
+      .q-head .q-merged-toggle { margin-left: auto; padding: 0 6px; font-size: var(--text-sm); font-weight: var(--regular); }
       .q-groups { display: flex; flex-direction: column; gap: 2px; padding: 0 10px 8px; }
       .q-group { display: grid; grid-template-columns: 9.5em 1fr; gap: 0 10px; }
       .q-group > .q-label { color: var(--ink-2); padding-top: 2px; }
@@ -1416,6 +1419,7 @@
         ['waiting', 'Waiting'],
         ['merged', 'Merged'],
       ]
+      let mergedOpen = false // history: collapsed until the person opens it; anything else always shows
       const QUEUE_POLL_MS = 15_000
       let queue = null // merge_queue's structuredContent
       let queueTimer = null
@@ -1484,14 +1488,18 @@
         const attention = items.some((i) => i.state === 'attention')
         box.className = `queue${attention ? ' attention' : ''}`
         const groups = QUEUE_GROUPS.map(([state, label]) => ({ state, label, items: items.filter((i) => i.state === state || (state === 'merged' && i.state === 'closed')) })).filter((g) => g.items.length)
+        const mergedCount = groups.find((g) => g.state === 'merged')?.items.length ?? 0
+        const shown = groups.filter((g) => g.state !== 'merged' || mergedOpen)
+        const toggle = mergedCount ? el('button', { type: 'button', class: 'q-merged-toggle', id: 'queue-merged-toggle', 'aria-expanded': String(mergedOpen) }, `${mergedOpen ? 'Hide merged' : 'Merged'} (${mergedCount})`) : null
+        toggle?.addEventListener('click', () => ((mergedOpen = !mergedOpen), renderQueue()))
         box.replaceChildren(
-          el('div', { class: 'q-head' }, el('span', { id: 'queue-title' }, 'Merge queue'), el('span', { class: 'quiet' }, queue.summary.replace(/^Merge queue: /, ''))),
+          el('div', { class: 'q-head' }, el('span', { id: 'queue-title' }, 'Merge queue'), el('span', { class: 'quiet' }, queue.summary.replace(/^Merge queue: /, '')), toggle),
           // Messages their sessions have not acknowledged (#1351): one line, the sessions ack them with the ack tool
           ...(queue.unacked?.length ? [el('div', { class: 'q-unacked quiet', id: 'queue-unacked' }, `${queue.unacked.length} message${queue.unacked.length === 1 ? '' : 's'} not acknowledged by ${[...new Set(queue.unacked.map((e) => e.owner))].join(', ')}`)] : []),
-          el(
+          shown.length ? el(
             'div',
             { class: 'q-groups' },
-            ...groups.map((g) =>
+            ...shown.map((g) =>
               el(
                 'section',
                 { class: `q-group ${g.state}`, 'aria-label': g.label },
@@ -1499,7 +1507,7 @@
                 el('ul', { class: 'q-rows' }, ...g.items.map(queueRow)),
               ),
             ),
-          ),
+          ) : null,
         )
       }
 
