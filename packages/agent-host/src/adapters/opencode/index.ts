@@ -66,7 +66,7 @@ export function openCodeProfile(): AcpProfile {
     infersCompaction: true,
     async launch(opts) {
       const l = findOpenCode()
-      return l ? { command: l.command, args: [...l.args, 'acp'], env: presetEnv(opts.permissionPreset, process.env.OPENCODE_CONFIG_CONTENT) } : null
+      return l ? { command: l.command, args: [...l.args, 'acp'], env: presetEnv(opts.permissionPreset, process.env) } : null
     },
     installedVersion: version,
     async detect(): Promise<DetectResult> {
