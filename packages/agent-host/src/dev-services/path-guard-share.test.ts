@@ -3,7 +3,8 @@ import { mkdirSync, mkdtempSync, realpathSync, rmdirSync, rmSync, symlinkSync, w
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, vi } from 'vitest'
+import { itSymlink } from '../link.test-helpers.js'
 
 /*
  * Every realpath the guard asks, so a test can see that a link was never followed: following one that leads to a share
@@ -94,7 +95,7 @@ describe.skipIf(process.platform !== 'win32')('a link leading to a share, on the
     symlinkSync(target, join(root, name), type)
     if (type !== 'file') links.push(join(root, name))
   }
-  it('refuses it without following it, on the async walk and on the sync one, however the link is reached', async () => {
+  itSymlink('refuses it without following it, on the async walk and on the sync one, however the link is reached', async () => {
     const mountvol = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'mountvol.exe')
     const volume = execFileSync(mountvol, [top.slice(0, 2), '/L'], { encoding: 'utf8' }).trim()
     link(`${share(top)}\\kept\\secret.txt`, 'shot-link.txt', 'file')
@@ -115,7 +116,7 @@ describe.skipIf(process.platform !== 'win32')('a link leading to a share, on the
     }
   })
 
-  it('still follows a local link inside the project', async () => {
+  itSymlink('still follows a local link inside the project', async () => {
     link('inside\\a.txt', 'near.txt', 'file')
     link(join(root, 'inside'), 'folder-link', 'junction')
     for (const rel of ['near.txt', 'folder-link/a.txt']) {
@@ -130,7 +131,7 @@ describe.skipIf(process.platform !== 'win32')('a link leading to a share, on the
    * refused as "cannot be checked" (review of #1072). A short name is now matched to the entry it names; a short name
    * of a link to a share is still that link, refused unread (the case above).
    */
-  it('follows links whose targets, and a project root, are spelled with short names', async () => {
+  itSymlink('follows links whose targets, and a project root, are spelled with short names', async () => {
     const long = join(top, 'a-long-folder-name-for-short-names')
     mkdirSync(join(long, 'project', 'inside'), { recursive: true })
     writeFileSync(join(long, 'project', 'inside', 'a.txt'), 'inside')
@@ -158,7 +159,7 @@ describe.skipIf(process.platform !== 'win32')('a link leading to a share, on the
    * link leading to another host or another share is refused (review of #1072: every link there was refused, since the
    * walk took drive paths only).
    */
-  it('on a project opened from a share, follows links that stay on it and refuses one to another host or share', async () => {
+  itSymlink('on a project opened from a share, follows links that stay on it and refuses one to another host or share', async () => {
     const onShare = share(root)
     link(join(root, 'inside'), 'nm', 'junction')
     link('inside\\a.txt', 'rel.txt', 'file')

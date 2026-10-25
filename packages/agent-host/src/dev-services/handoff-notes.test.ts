@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { handoffNoteDir, handoffNotePath, sweepHandoffNotes, writeHandoffNote, writeHandoffNoteSync } from './handoff-notes.js'
+import { itSymlink, linkDir } from '../link.test-helpers.js'
 
 /**
  * Where a handoff note lives (#142) — under the data folder at
@@ -32,14 +33,14 @@ describe('where a note lives (#142)', () => {
     expect(() => handoffNotePath('..', 's1')).toThrow(/Not a project id/)
   })
 
-  it('cleanup never follows a link — whether it sits at the folder\'s spot or the file\'s', async () => {
+  itSymlink('cleanup never follows a link — whether it sits at the folder\'s spot or the file\'s', async () => {
     const outside = mkdtempSync(join(tmpdir(), 'cc-handoff-outside-'))
     try {
       writeFileSync(join(outside, 'NOTES.md'), 'outside text')
       await writeHandoffNote('p1', 'gone', 'orphaned text')
       // Someone placed a link inside the data folder — one at the project folder's spot, one at the note's spot
       mkdirSync(join(data, 'handoff'), { recursive: true })
-      symlinkSync(outside, join(data, 'handoff', 'p2'))
+      linkDir(outside, join(data, 'handoff', 'p2'))
       symlinkSync(join(outside, 'NOTES.md'), join(data, 'handoff', 'p1', 'link.md'))
 
       await sweepHandoffNotes(() => false)
@@ -62,11 +63,11 @@ describe('a note written over a link (#850)', () => {
     try {
       writeFileSync(join(outside, 'keep.txt'), 'keep')
       mkdirSync(handoffNoteDir('p1'), { recursive: true })
-      symlinkSync(outside, handoffNotePath('p1', 's1'))
+      linkDir(outside, handoffNotePath('p1', 's1'))
       await writeHandoffNote('p1', 's1', 'async')
       expect(readFileSync(handoffNotePath('p1', 's1'), 'utf8')).toBe('async')
       rmSync(handoffNotePath('p1', 's1'))
-      symlinkSync(outside, handoffNotePath('p1', 's1'))
+      linkDir(outside, handoffNotePath('p1', 's1'))
       writeHandoffNoteSync('p1', 's1', 'sync')
       expect(readFileSync(handoffNotePath('p1', 's1'), 'utf8')).toBe('sync')
       expect(readFileSync(join(outside, 'keep.txt'), 'utf8')).toBe('keep')

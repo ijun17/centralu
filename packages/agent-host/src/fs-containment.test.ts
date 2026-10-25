@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -8,6 +8,7 @@ import type { AgentAdapter } from './adapters/contract.js'
 import { Store } from './dev-services/store.js'
 import { SessionManager } from './sessions/manager.js'
 import { createRpcHandler } from './rpc.js'
+import { canSymlink, itSymlink, linkDir, linkFile } from './link.test-helpers.js'
 
 /**
  * Never steps through a link inside the project and out — **from the RPC door** (#86).
@@ -41,7 +42,8 @@ const git = (args: string[]) => execFileSync('git', args, { cwd: root, stdio: 'i
 
 /** The place all three decoys are run through — blocking only one is useless if the rest are windows */
 const ESCAPING_DIRS = ['leak', 'nest/leak', 'link/../evil'] as const
-const ESCAPING_FILES = ['leakfile', 'leak/secret.txt', 'nest/leak/secret.txt', 'link/../evil/secret.txt'] as const
+// `leakfile` is a link to a file, which a junction cannot be: without symlink rights on Windows it is not planted (and not asserted on)
+const ESCAPING_FILES = [...(canSymlink ? ['leakfile'] : []), 'leak/secret.txt', 'nest/leak/secret.txt', 'link/../evil/secret.txt']
 
 beforeEach(async () => {
   // native: on Windows the temp folder can be an 8.3 short name (C:\Users\RUNNER~1), which only the native call expands,
@@ -59,15 +61,15 @@ beforeEach(async () => {
 
   writeFileSync(join(root, 'inside.txt'), 'inside\n')
   mkdirSync(join(root, 'dst'))
-  symlinkSync(outside, join(root, 'leak'), 'dir')
-  symlinkSync(join(outside, 'secret.txt'), join(root, 'leakfile'))
+  linkDir(outside, join(root, 'leak'))
+  if (canSymlink) linkFile(join(outside, 'secret.txt'), join(root, 'leakfile'))
   mkdirSync(join(root, 'nest'))
-  symlinkSync(outside, join(root, 'nest', 'leak'), 'dir')
+  linkDir(outside, join(root, 'nest', 'leak'))
   // The link's target sits deeper than the link itself — the shape where the guard and the syscall used to disagree (#119)
   mkdirSync(join(root, 'sub', 'deep'), { recursive: true })
   mkdirSync(join(root, 'sub', 'evil'))
-  symlinkSync(join(root, 'sub', 'deep'), join(root, 'link'), 'dir')
-  symlinkSync(outside, join(root, 'evil'), 'dir')
+  linkDir(join(root, 'sub', 'deep'), join(root, 'link'))
+  linkDir(outside, join(root, 'evil'))
   // Lets the repository track the link — a link planted by a checkout is this item's threat model
   git(['add', '-A'])
   git(['commit', '-qm', 'plant'])
@@ -138,7 +140,7 @@ describe('surface 4 — write destination', () => {
     expect(readdirSync(outside)).toEqual(['secret.txt'])
   })
 
-  it('does not move a link pointing outside, even the link itself', async () => {
+  itSymlink('does not move a link pointing outside, even the link itself', async () => {
     await expect(rpc('fs.move', { projectId, from: 'leakfile', toDir: 'dst' })).rejects.toThrow(
       /outside the project/i,
     )
@@ -181,7 +183,7 @@ describe('surface 5 — paths passed through to the OS', () => {
    * For the trash the entry is the link; for revealing or opening, the target, never the project folder.
    */
   it('a link to the project folder: the trash gets the link, reveal and open are refused', async () => {
-    symlinkSync('.', join(root, 'old-build'), 'dir')
+    linkDir('.', join(root, 'old-build'))
     await expect(rpc('fs.resolve', { projectId, path: 'old-build', purpose: 'trash' })).resolves.toEqual({ path: join(realpathSync(root), 'old-build') })
     for (const purpose of [undefined, 'reveal', 'open'] as const) {
       await expect(rpc('fs.resolve', { projectId, path: 'old-build', ...(purpose ? { purpose } : {}) }), String(purpose)).rejects.toThrow(/project folder itself/)
@@ -193,7 +195,7 @@ describe('surface 5 — paths passed through to the OS', () => {
 
   // "Delete project and trash folder" has its own door (#838 review): the file tree's trash never reaches the folder
   it('the project folder goes to the trash only through its own purpose, or an older window’s literal root', async () => {
-    symlinkSync('.', join(root, 'old-build'), 'dir')
+    linkDir('.', join(root, 'old-build'))
     const folder = { path: realpathSync(root) }
     await expect(rpc('fs.resolve', { projectId, path: 'anything', purpose: 'project' })).resolves.toEqual(folder)
     // An older window's dialog sends '.' with no purpose
@@ -203,16 +205,16 @@ describe('surface 5 — paths passed through to the OS', () => {
     await expect(rpc('fs.resolve', { projectId, path: 'old-build' })).rejects.toThrow(/project folder itself/)
   })
 
-  it('the trash gets a link that points outside as the link, and still refuses a folder link in the middle', async () => {
+  itSymlink('the trash gets a link that points outside as the link, and still refuses a folder link in the middle', async () => {
     await expect(rpc('fs.resolve', { projectId, path: 'leakfile', purpose: 'trash' })).resolves.toEqual({ path: join(realpathSync(root), 'leakfile') })
     for (const path of ['leak/secret.txt', 'nest/leak/secret.txt', 'link/../evil/secret.txt']) {
       await expect(rpc('fs.resolve', { projectId, path, purpose: 'trash' }), path).rejects.toThrow(/outside the project/i)
     }
   })
 
-  it('reveal and open follow a link inside the project to its target (CLAUDE.md -> AGENTS.md)', async () => {
+  itSymlink('reveal and open follow a link inside the project to its target (CLAUDE.md -> AGENTS.md)', async () => {
     writeFileSync(join(root, 'AGENTS.md'), 'rules\n')
-    symlinkSync('AGENTS.md', join(root, 'CLAUDE.md'))
+    linkFile('AGENTS.md', join(root, 'CLAUDE.md'))
     await expect(rpc('fs.resolve', { projectId, path: 'CLAUDE.md', purpose: 'open' })).resolves.toEqual({ path: realpathSync(join(root, 'AGENTS.md')) })
   })
 })

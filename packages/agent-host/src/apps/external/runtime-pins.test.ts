@@ -1,9 +1,10 @@
 import { execFileSync, spawnSync } from 'node:child_process'
-import { copyFileSync, mkdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { delimiter, dirname, join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
+import { linkDir } from '../../link.test-helpers.js'
 
 /**
  * The version check in the runtime build script (M4 C-1, `scripts/build-app-runtime.mjs --check`) —
@@ -60,7 +61,7 @@ describe('the version check reads from the install side, not the hoisted side', 
   /** Links `target` as `name` into `into` (a node_modules folder) */
   function link(into: string, name: string, target: string): void {
     mkdirSync(dirname(join(into, name)), { recursive: true })
-    symlinkSync(target, join(into, name))
+    linkDir(target, join(into, name))
   }
   /** The node_modules folder that holds that package — where pnpm links what it installs */
   const beside = (dir: string) => dir.slice(0, dir.lastIndexOf(`${sep}node_modules${sep}`) + `${sep}node_modules`.length)

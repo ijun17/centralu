@@ -30,6 +30,7 @@ import {
   safeJoin,
 } from './fs.js'
 import { runGit } from './git-exec.js'
+import { itSymlink, linkDir } from '../link.test-helpers.js'
 
 /**
  * Checks the side that **changes** files (#18, #19).
@@ -212,7 +213,7 @@ describe('copyTree — the ordinary copy after a clone stops partway (#167)', ()
    * of that died trying to overwrite a directory symlink that had already come across, so the
    * fallback path failed to actually fall back.
    */
-  it('deletes the half-finished result and copies again from scratch', async () => {
+  itSymlink('deletes the half-finished result and copies again from scratch', async () => {
     const src = join(root, 'src')
     mkdirSync(join(src, 'pkg'), { recursive: true })
     writeFileSync(join(src, 'pkg', 'index.js'), 'module.exports = 1\n')
@@ -276,12 +277,12 @@ describe('a symlink is only resolved within the project root', () => {
     const outside = outsideDir()
     mkdirSync(join(outside, 'nested'))
     writeFileSync(join(outside, 'nested', 'secret.txt'), 'leak')
-    symlinkSync(outside, join(root, 'linked'), 'dir')
+    linkDir(outside, join(root, 'linked'))
 
     await expect(listDir(root, 'linked/nested')).rejects.toThrow(/outside the project/i)
   })
 
-  it('Given a link at the end of the path points to a file outside When a shell path is created Then it is rejected as outside the project', async () => {
+  itSymlink('Given a link at the end of the path points to a file outside When a shell path is created Then it is rejected as outside the project', async () => {
     const outside = outsideDir()
     writeFileSync(join(outside, 'secret.txt'), 'leak')
     symlinkSync(join(outside, 'secret.txt'), join(root, 'secret.txt'))
@@ -289,7 +290,7 @@ describe('a symlink is only resolved within the project root', () => {
     await expect(resolveExisting(root, 'secret.txt')).rejects.toThrow(/outside the project/i)
   })
 
-  it('Given the item to move is a link pointing outside When it is moved Then the outside file is never moved', async () => {
+  itSymlink('Given the item to move is a link pointing outside When it is moved Then the outside file is never moved', async () => {
     const outside = outsideDir()
     writeFileSync(join(outside, 'secret.txt'), 'leak')
     mkdirSync(join(root, 'dst'))
@@ -301,7 +302,7 @@ describe('a symlink is only resolved within the project root', () => {
   it('Given the destination folder is a link pointing outside When moving Then nothing is written outside', async () => {
     const outside = outsideDir()
     writeFileSync(join(root, 'a.ts'), 'inside')
-    symlinkSync(outside, join(root, 'drop'), 'dir')
+    linkDir(outside, join(root, 'drop'))
 
     await expect(moveEntry(root, 'a.ts', 'drop')).rejects.toThrow(/outside the project/i)
     expect(readFileSync(join(root, 'a.ts'), 'utf8')).toBe('inside')
@@ -309,12 +310,12 @@ describe('a symlink is only resolved within the project root', () => {
 
   it('Given the import destination folder is a link When a file is written Then it is not created outside the link', async () => {
     const outside = outsideDir()
-    symlinkSync(outside, join(root, 'drop'), 'dir')
+    linkDir(outside, join(root, 'drop'))
 
     await expect(importFile(root, 'drop', 'a.ts', Buffer.from('inside'))).rejects.toThrow(/outside the project/i)
   })
 
-  it('Given the file to read is a link When text is opened Then the link target is never read', async () => {
+  itSymlink('Given the file to read is a link When text is opened Then the link target is never read', async () => {
     const outside = outsideDir()
     writeFileSync(join(outside, 'secret.txt'), 'leak')
     symlinkSync(join(outside, 'secret.txt'), join(root, 'secret.txt'))
@@ -322,7 +323,7 @@ describe('a symlink is only resolved within the project root', () => {
     await expect(readTextFile(root, 'secret.txt')).rejects.toThrow(/outside the project/i)
   })
 
-  it('Given a broken link When a shell path is created Then it is rejected as a missing file', async () => {
+  itSymlink('Given a broken link When a shell path is created Then it is rejected as a missing file', async () => {
     symlinkSync(join(root, 'missing.txt'), join(root, 'dangling.txt'))
 
     await expect(resolveExisting(root, 'dangling.txt')).rejects.toThrow(/no longer there/i)
@@ -331,7 +332,7 @@ describe('a symlink is only resolved within the project root', () => {
   it('Given the link points inside the project When a file is read Then it is allowed like an ordinary file', async () => {
     mkdirSync(join(root, 'actual'))
     writeFileSync(join(root, 'actual', 'inside.txt'), 'inside')
-    symlinkSync(join(root, 'actual'), join(root, 'linked'), 'dir')
+    linkDir(join(root, 'actual'), join(root, 'linked'))
 
     await expect(readTextFile(root, 'linked/inside.txt')).resolves.toMatchObject({ text: 'inside', binary: false })
   })
@@ -340,7 +341,7 @@ describe('a symlink is only resolved within the project root', () => {
     mkdirSync(join(root, 'store/pkg'), { recursive: true })
     writeFileSync(join(root, 'store/pkg', 'index.js'), 'export {}')
     mkdirSync(join(root, 'node_modules'))
-    symlinkSync(join(root, 'store/pkg'), join(root, 'node_modules/pkg'), 'dir')
+    linkDir(join(root, 'store/pkg'), join(root, 'node_modules/pkg'))
 
     await expect(listDir(root, 'node_modules/pkg')).resolves.toEqual([
       { name: 'index.js', path: 'node_modules/pkg/index.js', isDir: false, ignored: false },
@@ -481,14 +482,14 @@ describe('resolveExisting — the absolute path handed to the shell', () => {
  * inside the project, but never to the project folder.
  */
 describe('resolveEntry — the entry itself, for the trash', () => {
-  it('gives a link as the link: to the project folder, above it, to a file or a folder', async () => {
+  itSymlink('gives a link as the link: to the project folder, above it, to a file or a folder', async () => {
     const real = realpathSync.native(root)
     writeFileSync(join(root, 'a.ts'), 'x')
     mkdirSync(join(root, 'src'))
-    symlinkSync('.', join(root, 'old-build'), 'dir')
-    symlinkSync('..', join(root, 'up'), 'dir')
+    linkDir('.', join(root, 'old-build'))
+    linkDir('..', join(root, 'up'))
     symlinkSync(join(root, 'a.ts'), join(root, 'alias.ts'))
-    symlinkSync(join(root, 'src'), join(root, 'src-link'), 'dir')
+    linkDir(join(root, 'src'), join(root, 'src-link'))
     for (const name of ['old-build', 'up', 'alias.ts', 'src-link']) expect(await resolveEntry(root, name), name).toBe(join(real, name))
   })
 
@@ -501,17 +502,17 @@ describe('resolveEntry — the entry itself, for the trash', () => {
 
   it('still refuses a path outside the project, a folder link in the middle that leaves it, and a missing entry', async () => {
     await expect(resolveEntry(root, '../x')).rejects.toThrow(/outside the project/)
-    symlinkSync(outsideDir(), join(root, 'out'), 'dir')
+    linkDir(outsideDir(), join(root, 'out'))
     await expect(resolveEntry(root, 'out/anything')).rejects.toThrow(/outside the project/)
     await expect(resolveEntry(root, 'gone.ts')).rejects.toThrow(/no longer there/)
   })
 })
 
 describe('resolveTarget — what an entry is, for reveal and open', () => {
-  it('follows a link inside the project, and refuses one to the project folder', async () => {
+  itSymlink('follows a link inside the project, and refuses one to the project folder', async () => {
     writeFileSync(join(root, 'AGENTS.md'), 'x')
     symlinkSync('AGENTS.md', join(root, 'CLAUDE.md'))
-    symlinkSync('.', join(root, 'old-build'), 'dir')
+    linkDir('.', join(root, 'old-build'))
     expect(await resolveTarget(root, 'CLAUDE.md')).toBe(await resolveExisting(root, 'AGENTS.md'))
     await expect(resolveTarget(root, 'old-build')).rejects.toThrow(/project folder itself/)
     await expect(resolveTarget(root, '')).rejects.toThrow(/project folder itself/)
@@ -540,8 +541,8 @@ describe('a .. past a symlink cannot split the guard from the syscall (#119)', (
     mkdirSync(join(root, 'sub', 'deep'), { recursive: true })
     // The bait the guard will end up walking. Its name has to match the outside link's
     mkdirSync(join(root, 'sub', 'evil'))
-    symlinkSync(join(root, 'sub', 'deep'), join(root, 'link'))
-    symlinkSync(outside, join(root, 'evil'))
+    linkDir(join(root, 'sub', 'deep'), join(root, 'link'))
+    linkDir(outside, join(root, 'evil'))
   })
 
   it('cannot be listed', async () => {
@@ -582,7 +583,7 @@ describe('a .. past a symlink cannot split the guard from the syscall (#119)', (
  * link.**
  */
 describe('links left in a copied tree', () => {
-  it('a broken link is judged by the text it points to too — becoming a window the moment its target comes to exist', async () => {
+  itSymlink('a broken link is judged by the text it points to too — becoming a window the moment its target comes to exist', async () => {
     const outside = outsideDir()
     symlinkSync(join(outside, 'not-yet'), join(root, 'later'))
     symlinkSync('also-not-yet', join(root, 'inside-later'))
@@ -595,14 +596,14 @@ describe('links left in a copied tree', () => {
 
   it('never walks into a link — never gets caught in a cycle', async () => {
     mkdirSync(join(root, 'a'))
-    symlinkSync(join(root, 'a'), join(root, 'a', 'self'))
+    linkDir(join(root, 'a'), join(root, 'a', 'self'))
 
     await expect(dropEscapingLinks(root, root)).resolves.toEqual([])
   })
 
   it('creates nothing and writes nothing when the destination\'s parent is a link', async () => {
     const outside = outsideDir()
-    symlinkSync(outside, join(root, 'out'))
+    linkDir(outside, join(root, 'out'))
 
     await expect(prepareCopyTarget(root, 'out/app.env')).rejects.toThrow(/outside the project/i)
     expect(existsSync(join(outside, 'app.env'))).toBe(false)
