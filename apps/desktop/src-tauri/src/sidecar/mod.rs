@@ -224,7 +224,7 @@ impl Supervisor {
             if let Ok(mut c) = self.inner.lock() {
                 *c = Choice::Keeper;
             }
-            let link = Arc::new(link::KeeperLink::new(start.facts, start.bundled, start.resources));
+            let link = Arc::new(link::KeeperLink::new(start.facts, start.bundled, start.resources, app.package_info().version.to_string()));
             if let Ok(mut k) = self.keeper.lock() {
                 *k = Some(link.clone());
             }

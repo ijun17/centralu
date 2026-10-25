@@ -99,11 +99,14 @@ pub struct KeeperLink {
     app_build: BuildSource,
     /// The window's resource folder, where the shell and the signed content are carried.
     resources: Option<PathBuf>,
+    /// This app's version, read at run time from the bundle's configuration (`package_info()`): git holds
+    /// none, and the release stamps it into `tauri.conf.json` (#1501). The keeper is told it (`--app-version`).
+    app_version: String,
     state: Mutex<LinkState>,
 }
 
 impl KeeperLink {
-    pub fn new(facts: Facts, bundled: Option<PathBuf>, resources: Option<PathBuf>) -> Self {
+    pub fn new(facts: Facts, bundled: Option<PathBuf>, resources: Option<PathBuf>, app_version: String) -> Self {
         let plan = start_plan::plan(&facts);
         // A debug build opted into the keeper runs the source host and uses the dev data
         // folder, like its direct path.
@@ -118,7 +121,7 @@ impl KeeperLink {
             Some(dir) => BuildSource::from_host_dir(
                 dir,
                 Some(client::bundle_of(&exe).to_string_lossy().to_string()),
-                Some(env!("CARGO_PKG_VERSION").to_string()),
+                Some(app_version.clone()),
             ),
             None => BuildSource::dev(),
         };
@@ -133,6 +136,7 @@ impl KeeperLink {
             host_dir,
             app_build,
             resources,
+            app_version,
             state: Mutex::new(LinkState::default()),
         }
     }
@@ -262,7 +266,7 @@ impl KeeperLink {
         let me = std::env::current_exe().ok()?;
         let host = self.host_dir.as_deref()?;
         let keeper = keeper_exe::beside(&me);
-        let what = crate::keeper::carried::Carried { keeper: &keeper, host, version: env!("CARGO_PKG_VERSION") };
+        let what = crate::keeper::carried::Carried { keeper: &keeper, host, version: &self.app_version };
         match crate::keeper::carried::place(&self.data, &what, replace, &|m: &str| eprintln!("[keeper] {m}")) {
             Ok(dir) => Some(dir),
             Err(r) => {
@@ -311,7 +315,7 @@ impl KeeperLink {
             .then(|| crate::keeper::content::diagnose(&self.data, &resources.join("content")))
             .flatten()
             .and_then(|r| Some(crate::refusal::Found { check: r.check?.to_string(), file: r.file, hashes: r.hashes, message: r.message }));
-        crate::refusal::Refusal::from_shell(reason, report.message.as_deref().unwrap_or(""), found, env!("CARGO_PKG_VERSION"))
+        crate::refusal::Refusal::from_shell(reason, report.message.as_deref().unwrap_or(""), found, &self.app_version)
     }
 
     /**
@@ -334,7 +338,7 @@ impl KeeperLink {
                     s.refused_file.as_deref(),
                     s.refused_hashes.as_ref(),
                     s.message.as_deref(),
-                    Some(env!("CARGO_PKG_VERSION")),
+                    Some(self.app_version.as_str()),
                     s.from.as_ref().and_then(|b| b.version.as_deref()),
                 );
                 crate::refusal::SwapSeen { started_at: s.started_at, ended, refusal }
@@ -359,7 +363,7 @@ impl KeeperLink {
             data_dir: self.data.clone(),
             host_source: self.host_dir.clone(),
             bundle_path: self.app_build.bundle_path.clone(),
-            app_version: env!("CARGO_PKG_VERSION").into(),
+            app_version: self.app_version.clone(),
             dev: self.dev,
             in_process,
         }

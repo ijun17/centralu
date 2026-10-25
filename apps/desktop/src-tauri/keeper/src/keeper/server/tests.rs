@@ -26,6 +26,32 @@ fn reads_the_options_the_app_passes() {
     }
 }
 
+/// #1501: the app's version is not compiled in, so a keeper running a built host must be told it,
+/// and describes itself (`KeeperInfo`, the handoff hello) with what it was told
+#[test]
+fn a_built_host_needs_the_app_version_and_the_keeper_reports_it() {
+    let argv = |extra: &[&str]| -> Vec<String> {
+        ["centralu-keeper", "--data-dir", "/tmp/d"].iter().chain(extra).map(|s| s.to_string()).collect()
+    };
+    let host = ["--host-source", "/c/0.2.0-beta.4/host"];
+    let mut o = parse_args(&argv(&host));
+    o.host_source = Some(PathBuf::from(host[1]));
+    assert!(missing_option(&o).is_some_and(|w| w.contains("--app-version")));
+    o.app_version = Some(" ".into());
+    assert!(missing_option(&o).is_some());
+    o.app_version = Some("0.2.0-beta.4".into());
+    assert_eq!(missing_option(&o), None);
+    let dir = std::env::temp_dir();
+    let info = KeeperInfo::of_this_process(&dir, own_build(&o));
+    assert_eq!(info.version, "0.2.0-beta.4");
+    assert_eq!(info.build.and_then(|b| b.version).as_deref(), Some("0.2.0-beta.4"));
+    // Started by hand on the source host: nothing to be told, and it says the placeholder
+    let mut by_hand = parse_args(&argv(&[]));
+    by_hand.host_source = None;
+    assert_eq!(missing_option(&by_hand), None);
+    assert_eq!(KeeperInfo::of_this_process(&dir, own_build(&by_hand)).version, crate::keeper::DEV_VERSION);
+}
+
 /// Step 5: only a keeper running from verified content takes the new build's content; one
 /// started directly hands over to the `centralu-keeper` it is given, exactly as before (a debug
 /// build, Linux, the window's fallback, a keeper of #444).
