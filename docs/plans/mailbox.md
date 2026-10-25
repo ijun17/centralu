@@ -1098,11 +1098,14 @@ host may open a thread to the orchestrator**, once the orchestrator has `mail` (
   (decided on #1516):
   - **The record.** The host remembers the scope of every read of the orchestrator's whole conversation: in the person's
     own turns, in other sessions' requests, and across compaction (a summary can carry the data). Only a new conversation
-    clears it; a conversation the host did not see begin (a restart, an adopted process) counts as having read everything.
-    Kept in memory, not stored.
-  - **What counts.** A file outside the asker's folders (links followed), a conversation of another project, anything
-    across projects (`recall`, `list_sessions`, `list_archive`, `machine_activity`), another project's state, a mail thread
-    other than the request's own, and anything a shell command, a fetch or an app's tool returned (fail closed).
+    clears it; a conversation the host did not see begin (a restart, an adopted process), or one that starts from a summary
+    of an earlier conversation handed over in the prompt (a tool switch), counts as having read everything. Kept in memory,
+    not stored.
+  - **What counts.** An allowlist, fail closed: only a call that gives back nothing (the CLI's writes, mail that sends or
+    replies) or whose scope is provable is classified: a file inside the asker's folders (links followed, pinned when it
+    was read), a conversation or a project of the asker's own, the request's own thread. Every other tool, one not known
+    included, counts as reading everything: a shell command, a fetch, an app's tool, a worker's reply, the mail inbox,
+    another project's conversation or state, a search or a list.
   - **The gate.** It is judged against the reach of whoever asks, when words are written. In a request's turn, once
     something out of the asker's reach was read, every `mail` `reply`, `update`, `close` and `send` to a session raises
     the person's card with the whole text, naming the asker and the read. Deny sends nothing; marking handled and mail to
