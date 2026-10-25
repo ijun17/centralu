@@ -432,6 +432,10 @@ path is removed.
   (`package_info()`) and passes it to the keeper as `--app-version`, which a keeper running a built host now requires.
   `pnpm dev`, `pnpm host`, `pnpm app:dev` and the tests run with `0.0.0-dev`: such a host is `dev`, installs
   nothing on linked machines, and its update line shows the latest release as newer.
+  `version.generated.ts` is committed, not gitignored and written at install as first designed: `pnpm pre-pr`
+  type-checks in worktrees that never install, where a missing file would fail. The stamper is `.mjs`, since
+  `bundle.mjs` runs it under plain node. CI's `bundle` job fetches the tags and stamps the newest one before building,
+  so its artifacts carry the release their commit was cut from (a fork without tags keeps the placeholder).
 
 - **Which scheme.** `release.yml`'s guard (`scripts/release-guard.mjs`) reads `brand.ts` with `sourceScheme`
   (the board's `versions.mjs`, from `project.json` `release.source`): a literal `APP_VERSION` is the brand scheme
