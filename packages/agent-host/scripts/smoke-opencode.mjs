@@ -36,11 +36,28 @@ const check = (ok, label, extra = '') => {
   if (!ok) failures++
 }
 
+/** The hosts this run started: a run that fails part way stops them, and their agents, as it exits */
+const hosts = []
+process.on('exit', () => {
+  for (const host of hosts) {
+    const agents = acpPidsOf(host.pid)
+    if (host.exitCode === null && host.signalCode === null) host.kill('SIGKILL')
+    for (const pid of agents) {
+      try {
+        process.kill(Number(pid))
+      } catch {
+        /* already gone */
+      }
+    }
+  }
+})
+
 function startHost() {
   const host = spawn(process.execPath, ['--import', 'tsx', 'packages/agent-host/src/main.ts', '--port', '0', '--token', TOKEN, '--db', DB], {
     stdio: ['ignore', 'pipe', 'inherit'],
     env: { ...process.env, ...XDG, CC_DATA_DIR: DATA },
   })
+  hosts.push(host)
   return new Promise((resolve, reject) => {
     host.on('exit', (code) => reject(new Error(`host exited before ready (${code})`)))
     host.stdout.on('data', (d) => {
