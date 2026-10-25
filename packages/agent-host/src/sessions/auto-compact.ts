@@ -51,8 +51,6 @@ export class ModelWindows {
   private readonly known = new Map<string, Known | null>()
   /** The largest window each running process can report because of what it was started with; 'unknown' for an adopted process that did not say */
   private readonly ceilings = new Map<string, number | 'unknown'>()
-  /** The model's full window as the last reading of each session in this host gave it; absent after a capped reading (a floor is no window) and after a restart of the host */
-  private readonly seen = new Map<string, number>()
 
   constructor(private readonly settings: WindowSettings) {}
 
@@ -95,7 +93,6 @@ export class ModelWindows {
    */
   forget(sessionId: string): void {
     this.ceilings.delete(sessionId)
-    this.seen.delete(sessionId)
     this.settings.deleteAppSetting(`auto_compact_ceiling:${sessionId}`)
   }
 
@@ -125,19 +122,8 @@ export class ModelWindows {
     const ceiling = this.ceilings.get(m.id)
     const atCeiling = ceiling === 'unknown' || (ceiling !== undefined && reported >= ceiling)
     const known = atCeiling ? this.of(m) : null
-    const share = !atCeiling ? { window: reported, capped: false } : known === null ? { window: reported, capped: true } : { window: Math.max(known, reported), capped: false }
-    if (share.capped) this.seen.delete(m.id)
-    else this.seen.set(m.id, share.window)
-    return share
-  }
-
-  /**
-   * The model's full window for a share the host works out or tells (the nudges, the rest rule): what was kept for the model, else
-   * the full window this host has read for the session. A stored reading is not one: it may be a floor (`capped` is not stored), so
-   * after a restart of the host nothing is divided until a reading says the window.
-   */
-  fullWindowOf(m: Pick<SessionInfo, 'id' | 'tool' | 'model' | 'projectId'>): number | null {
-    return this.of(m) ?? this.seen.get(m.id) ?? null
+    if (!atCeiling) return { window: reported, capped: false }
+    return known === null ? { window: reported, capped: true } : { window: Math.max(known, reported), capped: false }
   }
 
   /** The model's window, or null when no session has read one */

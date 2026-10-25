@@ -106,18 +106,23 @@ export const ComposerFooter = memo(function ComposerFooter({
         }
       >
         <span className="leading-none">Context {ctxPct === null ? '—' : `${share?.capped ? '≤' : mark}${ctxPct}%`}</span>
-        <span className="relative block h-1 overflow-hidden rounded-full bg-line" aria-hidden>
-          {ctxPct !== null && (
-            <span
-              className={`block h-full rounded-full ${warn ? 'bg-ink' : 'bg-ink-faint'}`}
-              style={{ width: `${Math.min(100, Math.max(0, ctxPct))}%` }}
-              data-testid="context-gauge-fill"
-            />
-          )}
-          {/* Where the tool compacts by itself: a mark on the bar, not its end (#1553) */}
+        <span className="relative block h-1" aria-hidden>
+          <span className="block h-full overflow-hidden rounded-full bg-line">
+            {ctxPct !== null && (
+              <span
+                className={`block h-full rounded-full ${warn ? 'bg-ink' : 'bg-ink-faint'}`}
+                style={{ width: `${Math.min(100, Math.max(0, ctxPct))}%` }}
+                data-testid="context-gauge-fill"
+              />
+            )}
+          </span>
+          {/*
+            Where the tool compacts by itself: a mark on the bar, not its end (#1553). It stands out of the track above and below, so it
+            still shows once the fill has passed it (the fill and the mark are both ink there).
+          */}
           {compactPct !== null && compactPct > 0 && compactPct < 100 && (
             <span
-              className="absolute inset-y-0 w-px bg-ink"
+              className="absolute -inset-y-[1.5px] w-px bg-ink"
               style={{ left: `${compactPct}%` }}
               data-testid="context-gauge-compact-mark"
             />

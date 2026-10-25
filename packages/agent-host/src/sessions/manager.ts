@@ -448,7 +448,7 @@ export class SessionManager {
       session: (id) => this.meta.get(id),
       idle: (id) => this.sessionIdle(id),
       running: (id) => this.handles.has(id),
-      window: (m) => this.modelWindows.fullWindowOf(m),
+      window: (m) => this.modelWindows.of(m),
       setting: () => autoCompactOf(this.uiPreferences()),
       command: (tool, focus) => this.adapters.get(tool)?.compactCommand?.(focus) ?? '/compact',
       send: (id, text) => this.events.sendCompact(id, text),
@@ -456,7 +456,7 @@ export class SessionManager {
     })
     this.contextNudges = new ContextNudges({
       session: (id) => this.meta.get(id),
-      window: (m) => this.modelWindows.fullWindowOf(m),
+      window: (m) => this.modelWindows.of(m),
       setting: () => autoCompactOf(this.uiPreferences()),
       // The two seats that have the tool (tool-seats.ts): an ordinary session and the orchestrator
       hasCompactTool: (id) => {

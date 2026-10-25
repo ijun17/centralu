@@ -105,6 +105,17 @@ test('The context gauge reads against the model’s full window and marks where 
   await expect(page.getByTestId('context-gauge')).toHaveText('Context 52%')
   await expect(page.getByTestId('context-gauge-fill')).toHaveClass(/bg-ink(?!-)/)
 
+  // Past the mark the fill and the mark are both ink: the mark stands out of the track above and below, so it shows
+  await emitEvent(page, 0, { type: 'context_update', used: 800000, window: 1000000, exactness: 'exact', compactAt: 600000 })
+  await expect(page.getByTestId('context-gauge')).toHaveText('Context 80%')
+  const fill = await page.getByTestId('context-gauge-fill').boundingBox()
+  const tick = await page.getByTestId('context-gauge-compact-mark').boundingBox()
+  expect(fill && tick).toBeTruthy()
+  expect(tick!.y).toBeLessThan(fill!.y)
+  expect(tick!.y + tick!.height).toBeGreaterThan(fill!.y + fill!.height)
+  expect(tick!.x).toBeLessThan(fill!.x + fill!.width)
+  await test.info().attach('gauge-past-the-mark.png', { body: await page.getByTestId('context-gauge').screenshot(), contentType: 'image/png' })
+
   // Only a floor under the model's window is known: the figure says it is at most that, and the mark has no place on the bar
   await emitEvent(page, 0, { type: 'context_update', used: 100000, window: 153000, exactness: 'exact', capped: true, compactAt: 120000 })
   await expect(page.getByTestId('context-gauge')).toHaveText('Context ≤65%')

@@ -25,7 +25,7 @@ import { COMPACT_FLOOR_TOKENS } from './self-compaction.js'
 
 export type ContextNudgesHost = {
   session(sessionId: string): SessionInfo | undefined
-  /** The model's full context window when it is known, else null (`ModelWindows.fullWindowOf`, #1553): a floor under it is not one */
+  /** The model's own context window when Centralu has read it, else null (`ModelWindows.of`, #1553): the record for this tool and model, which a floor is never written to */
   window(session: SessionInfo): number | null
   setting(): AutoCompact
   /** Whether `compact_self` is one of the session's tools */
@@ -90,12 +90,12 @@ export class ContextNudges {
     const point = m.context?.compactAt !== undefined && m.context.compactAt < window ? m.context.compactAt / window : null
     c.point = point
     const { first, second } = nudgeShares({ ...setting, share: point ?? setting.share })
-    // A share at or above the tool's own is never told: the tool compacts before the session gets there. The second share is below that point, so without a known point it is not told at all
+    // A share at or above the tool's own is never told: the tool compacts before the session gets there (the process's point, else the setting's share while it has said none). The second share is below that point, so without a known point it is not told at all
     const shares = [
       ['first', first],
       ['second', second],
     ] as const
-    const crossed = shares.filter(([k, at]) => !c.told.has(k) && (point === null ? k === 'first' : at < point) && at <= share).map(([k]) => k)
+    const crossed = shares.filter(([k, at]) => !c.told.has(k) && (k === 'first' ? at < (point ?? setting.share) : point !== null && at < point) && at <= share).map(([k]) => k)
     if (crossed.length > 0) {
       for (const k of crossed) c.told.add(k)
       c.waiting = crossed.includes('second') ? 'second' : 'first'

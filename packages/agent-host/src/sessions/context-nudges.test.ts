@@ -89,6 +89,13 @@ describe('telling a growing session to call compact_self (#1492)', () => {
     expect(w.told[0]).not.toMatch(/compacts it by itself/)
   })
 
+  it('tells no first share at or above the share of the setting while the process has said no point (the old rule)', () => {
+    // First share 70%, share 60%: the tool compacts before 70% is reached
+    const w = world({ point: null, setting: { nudgeFirst: 0.7 } })
+    w.request(750_000)
+    expect(w.told).toEqual([])
+  })
+
   it('tells it once past 30% in the middle of a turn, with its size, and again at 10 points below the share the tool compacts at', () => {
     const w = world()
     w.request(250_000)
@@ -326,6 +333,20 @@ describe('on the session manager (#1492)', () => {
     h.emitEvent({ type: 'compaction', sessionId: id, failed: false })
     request(h, id, 330_000)
     expect(h.nudges).toHaveLength(3)
+  })
+
+  it('says nothing after a model switch until the new model’s window is read: the old one’s is not its window (#1553)', async () => {
+    const { id, h } = await session()
+    await world.rpc('agents.updateSettings', { sessionId: id, model: 'sonnet' })
+    const now = world.adapter.last!
+    now.emitEvent({ type: 'state_change', sessionId: id, state: 'working' })
+    request(now, id, 330_000)
+    expect(now.nudges).toEqual([])
+    expect(h.nudges).toEqual([])
+    // Read once, the window is known and the same request is over the first share
+    now.emitContext(20_000, 1_000_000, undefined, 600_000)
+    request(now, id, 340_000)
+    expect(now.nudges).toHaveLength(1)
   })
 
   it('says nothing with the notices off, and takes the shares from the preferences', async () => {

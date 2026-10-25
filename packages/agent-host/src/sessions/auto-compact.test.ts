@@ -162,7 +162,7 @@ describe('ModelWindows', () => {
       w.started('a', 633_000)
       w.note(claude('a'), 633_000, 'claude-opus-5')
       expect(w.shareWindow(claude('a'), 633_000)).toEqual({ window: 1_000_000, capped: false })
-      expect(w.fullWindowOf(claude('a'))).toBe(1_000_000)
+      expect(w.of(claude('a'))).toBe(1_000_000)
     })
 
     it("is the reading itself with the control off, and for a tool that reports the model's own window", () => {
@@ -198,28 +198,35 @@ describe('ModelWindows', () => {
       expect(b.shareWindow(claude('b'), 153_000)).toEqual({ window: 153_000, capped: true })
     })
 
-    it("the window to divide by is the model's, or one this host read in full: a capped reading is none, and nothing stored is one", () => {
+    it("the window to divide by is the model's own record: a capped reading leaves none, and another model has none until it is read", () => {
       const store = settings()
       const w = new ModelWindows(store)
       w.note(claude('a'), 200_000, 'claude-haiku-4-5')
       w.started('a', 153_000)
       w.note(claude('a'), 153_000, 'claude-haiku-4-5')
       expect(w.shareWindow(claude('a'), 153_000)).toEqual({ window: 200_000, capped: false })
-      expect(w.fullWindowOf(claude('a'))).toBe(200_000)
+      expect(w.of(claude('a'))).toBe(200_000)
       // The alias moved to another model: the record is dropped and the reading is a floor
       w.note(claude('a'), 153_000, 'claude-haiku-5-5')
       expect(w.shareWindow(claude('a'), 153_000)).toEqual({ window: 153_000, capped: true })
-      expect(w.fullWindowOf(claude('a'))).toBeNull()
+      expect(w.of(claude('a'))).toBeNull()
       // A host that starts afterwards has read nothing for the session: the stored window may be that floor (capped is not stored)
       const after = new ModelWindows(store)
       after.started('a', 153_000, true)
-      expect(after.fullWindowOf(claude('a'))).toBeNull()
+      expect(after.of(claude('a'))).toBeNull()
       // A reading of the whole window (the next start passes nothing) is one
       after.started('a', null)
       after.note(claude('a'), 1_000_000, 'claude-haiku-5-5')
       expect(after.shareWindow(claude('a'), 1_000_000)).toEqual({ window: 1_000_000, capped: false })
-      expect(after.fullWindowOf(claude('a'))).toBe(1_000_000)
+      expect(after.of(claude('a'))).toBe(1_000_000)
       after.forget('a')
+    })
+
+    it("a model switch does not carry the old model's window: the new model has none until it is read", () => {
+      const w = new ModelWindows(settings())
+      w.note(m('a', 'opus[1m]', 'claude'), 1_000_000, 'claude-opus-5')
+      expect(w.of(m('a', 'opus[1m]', 'claude'))).toBe(1_000_000)
+      expect(w.of(m('a', 'haiku', 'claude'))).toBeNull()
     })
   })
 

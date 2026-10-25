@@ -718,6 +718,22 @@ describe('on the session manager (#1451)', () => {
     expect(own).not.toMatchObject({ turn: { compaction: true } })
   })
 
+  it('leaves a resting session alone after a model switch until the new model’s window is read: the old one’s is not its window (#1553)', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] })
+    const { id, h } = await session()
+    h.finishTurn()
+    await world.rpc('agents.updateSettings', { sessionId: id, model: 'sonnet' })
+    const now = world.adapter.last!
+    world.mgr.startSelfCompaction()
+    await vi.advanceTimersByTimeAsync(30 * MIN)
+    expect(now.sent).not.toContain('/compact')
+    expect(h.sent).not.toContain('/compact')
+    // The new model's reading gives its window: the same size is now over the share
+    now.emitContext(150_000, 200_000)
+    await vi.advanceTimersByTimeAsync(12 * MIN)
+    expect(now.sent).toContain('/compact')
+  })
+
   it('compacts a resting session over the share after ten minutes, and not with the switch off', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] })
     const { id, h } = await session()
