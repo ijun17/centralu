@@ -19,20 +19,22 @@ this one is the newer: the later sections are the design as proposed, kept for i
 | Role text | Left out | An ACP tool declares `roleText: false`: it cannot be the orchestrator, a coordinator or an app's agent yet. Later: measure whether a leading prompt block marked as Centralu's carries it |
 | Untrusted projects | Not offered (fail safe) | `keepsRepoFilesOut: false`: refused in an untrusted project; revisited when what each tool reads is known |
 | OpenCode's `/compact` | Accepted for PR 3 only | Not in PR 1: only inside the compact turn Centralu started, ended `end_turn`, next reading smaller; `trigger: manual`, no summary |
-| `safe` on Cursor | Not offered | `presets: ['normal', 'edits', 'auto']`. Not mapped to Cursor's `ask` mode, which is a different promise |
+| `safe` on Cursor | Not offered | Not mapped to Cursor's `ask` mode, which is a different promise. Since the review of #1562, Normal and Edits are not offered either (§0.6): `presets: ['auto']`, and whether Cursor stays offered under Auto only is the owner's to decide |
 | Idle sleep | Measure first | `sleep: false`; memory measured below, decided with the numbers |
 | Subscription tools | Like Claude and Codex | The official CLI runs; Centralu never reads or reuses its login (`agent status` is asked, as a terminal would) |
 
 The three limits are new optional capabilities (`AdapterCapabilities.presets`, `keepsRepoFilesOut`, `roleText`;
 absent means what Claude and Codex always did) with one rule over them, `launchRefusal` in `@cc/protocol`. **The
 host is the gate**: every start and wake passes `startFit` (`sessions/session-start.ts`) and is refused before any
-process starts, whatever path asked (a picker, `start_agent`, an app's agent, a fork, a handoff). A preset changed on a
-running session is held to the same rule (`ToolRegistry.presetRefusal` in `updateSettings`), or it would be saved,
-shown as in force, and refuse the session's next wake. The pickers ask the
+process starts, whatever path asked (a picker, `start_agent`, an app's agent, a fork, a handoff). Every other path that puts a tool
+or a preset on a session is held to the same rule, read the one way (`sessionDemands` in `sessions/tool-fit.ts`, through
+`ToolRegistry.refusal`) and refused before anything changes: a tool switch (`agents.switchTool`), a preset changed on
+a running session (`updateSettings`), and the orchestrator's tool (`orchestrator.configure`, `ORCHESTRATOR_DEMANDS`).
+Unchecked, each saved a session its tool cannot run, which refused every send after (review of #1562). The pickers ask the
 same rule and grey the tool with the same words: the new-session and new-app dialogs, the orchestrator's cards in the
 intro and its picker in Settings, and the preset menu (a preset the tool cannot keep is greyed). The empty session's
 tool switch (`SessionStart`) leaves a refused tool out instead, as it leaves out one not installed (owner,
-2026-10-18: not shown greyed there).
+2026-10-18: not shown greyed there), asked with the session's own preset and role.
 
 ### 0.2 Cursor, measured logged in (agent 2026.10.22-27dcf5f, Windows 11, model Auto)
 
@@ -54,15 +56,30 @@ Recorded through the adapter itself (`scripts/acp-record.mts`, §10.5) in eight 
   model without changing the person's default.
 - **It does not end on stdin EOF while a session is open** (still running 60 s after EOF; 1.7 s with no session). The
   adapter's `dispose` kills the tree after its 2 s grace. The MCP servers it started from the person's own
-  `~/.cursor/mcp.json` ended by themselves once it was killed.
+  `~/.cursor/mcp.json` ended by themselves once it was killed. On macOS, with Centralu's bridge attached, it and the
+  bridge outlived a SIGKILLed host by 60 s and more (alone it exits 2.5 s after EOF), and a shell it started outlived
+  it when it was killed: hence the host watch and the tree notes of §0.6.
 - **Shell commands run on Windows** (`echo`), on a machine whose PATH has Git's `cmd` but not its `bin`, and where
   `bash` on PATH is WSL's. Which shell Cursor used is not reported. Git Bash is needed by `agent worker start`, not by
   `agent acp`.
 - **Sessions are named by the tool** (`session_info_update`), and it answered in the person's language from their own
   rules.
-- **Memory** (working set of the agent's own Node): 153 MB after `initialize`, 145 MB idle with a session, 149 MB after
-  a turn. A session also starts the person's own MCP servers (here one `npx` server, +~170 MB, which a terminal
-  session of Cursor starts too). Mac numbers: to be recorded on the Mac.
+- **Memory.** Windows (working set of the agent's own Node): 153 MB after `initialize`, 145 MB idle with a session,
+  149 MB after a turn. macOS (RSS, no MCP servers of the person's; the review of #1562): 232 MB after `initialize`,
+  262 MB idle with a session, 264 MB after a turn, 202 MB 30 s later; Centralu's bridge adds about 49 MB. A session
+  also starts the person's own MCP servers (here one `npx` server, +~170 MB, which a terminal session of Cursor starts
+  too).
+- **It writes without asking** (Windows; macOS in the review of #1562). Asked to create a file in the folder, write one
+  outside it, change one and delete one, it sent no `session/request_permission` for any write, inside or outside the
+  folder, also with the client advertising `fs.readTextFile` and `fs.writeTextFile` (it then called no `fs/*` method
+  either). It asked only for the delete, as `kind: edit` while its `tool_call` said `delete`. So a preset that asks
+  before a change cannot be kept: Cursor runs under Auto only (§0.6).
+- **Results.** A command's output comes in `rawOutput {exitCode, stdout, stderr}` with no `content`; a refused call
+  ends `completed` with nothing else; an MCP call's ends `rawOutput {success}`. A call to Centralu's bridge is asked
+  about as `<server>-<tool>: <tool>` (`centralu-recall: recall`, kind `other`); its `tool_call` says `MCP: tool`.
+- **macOS layout** (the review of #1562): `~/.local/bin/{agent,cursor-agent}` link to
+  `versions/<version>/cursor-agent`, a script that runs the bundled Node; `findCursor` resolves it, also from a bare
+  PATH once the host's PATH is filled in.
 - An account without access to a model answers a prompt with the text "Upgrade your plan to continue" and `end_turn`,
   no error. It reads as an ordinary reply, and is shown as one.
 
@@ -71,9 +88,11 @@ Recorded through the adapter itself (`scripts/acp-record.mts`, §10.5) in eight 
 - **Layout.** Cursor's profile and adapter are `adapters/cursor-agent/` (as `claude/` and `codex/`), and the registry's
   tool name is `cursor-agent`, Cursor's own binary name: the adapter-identity lint bans a registered tool's name as any
   literal or object key outside the adapters, and `cursor` is a CSS property and an MCP pagination key.
-- **No take-over after a swap yet** (§4.4 is PR 2). A process the previous host left is closed with its tree, the tool
-  calls it left open are closed as failed, and the conversation is opened again with `session/load`
-  (`closeAdopted`). Under the keeper the process is the keeper's child, which it sweeps if the host dies; without the
+- **No take-over after a swap yet** (§4.4 is PR 2). A process the previous host left is closed with its tree (and waited
+  for), the tool calls it left open are closed as failed, and the conversation is opened again with `session/load`
+  (`closeAdopted`). The turn it was running is over, and is said so: the handle reports `takesOverTurn: false`, and the
+  manager ends that turn as one a quit cut (`turnLostInSwap`: idle, the quit mark and its line, the owed report to the
+  caller or the person), not `working` with nothing behind it. Under the keeper the process is the keeper's child, which it sweeps if the host dies; without the
   keeper, Windows ends the host's children with it, and on macOS and Linux a Cursor with a session open would outlive
   a crashed host (the EOF finding above), which is why the keeper's spawn is used whenever the host has one.
 - **No apps** are attached to an ACP agent in PR 1 (`appAttachment` answers `failed`): an app's tool calls would reach
@@ -119,6 +138,25 @@ Antigravity adapter (`agy`, stream-json, not ACP), which is designed in parallel
 | The no-sleeps guard | `adapters/frames/no-sleeps.test.ts` | add its folder to the list |
 | The capability limits and `launchRefusal` | `@cc/protocol` | declare what it cannot keep; the host and the pickers follow |
 | The fake peer | `adapters/acp/fake-peer.test-helpers.ts` | no: it speaks JSON-RPC |
+| Ending with the host, and what it started | `adapters/local-process.ts` (`endsWithHost`, `noteTree`) | yes: start with `endsWithHost`, note the tree while a command runs |
+| The recordings scan | `adapters/frames/recordings-private.test.ts` | add its recordings folder to `ROOTS` |
+
+### 0.6 The deep review of #1562 (macOS, real Cursor) and what it changed
+
+| Found | Now |
+|---|---|
+| Edits and Normal held no folder boundary: Cursor writes without asking, and a delete it asks about as `kind: edit` was granted under Edits | Cursor runs under Auto only (`presets: ['auto']`; the refusal says which presets remain). A request's kind never overrides the call's own (`AcpNormalizer.call(…, asked)`); tested on a real recording (`files`) |
+| A tool switch and `orchestrator.configure` skipped the gate; the empty session's switch asked with Normal | One reading and one rule on every path (§0.1) |
+| `ToolStatus` in `acp/wire.ts` shadowed a protocol name; the bundle was over its ceiling | `CallStatus`; the growth measured (+2,299 B) and declared (`tooling/bundle-growth/feat-acp-cursor.json`) |
+| Every result read "(no output)"; a refused command read ok | `rawOutput`'s `stdout` and `stderr` are read; a refused call, a non-zero exit and `success: false` end not ok |
+| Cursor and the bridge outlived a SIGKILLed host on macOS | A process the adapter starts runs behind a host watch (`HOST_WATCH` in `local-process.ts`): a pipe only the host holds the other end of, whose close kills the group, whatever happens to stdin |
+| A restart mid-call left its card spinning; a swap left the session `working` with no turn | `dispose` closes the open calls; a swap ends the turn as a quit does (§0.3) |
+| The scrubber missed a path split across chunks, macOS temp folders, the person's skill names and the bridge token | Chunks are scrubbed joined; every system's home and temp folders, the user name, secret-named environment values and the command list are scrubbed; every recording was scrubbed again, and `frames/recordings-private.test.ts` reads them all |
+| Each call to Centralu's own tools was a raw-JSON card | `AcpProfile.centraluToolOf`: answered without a card, as Claude and Codex take the bridge |
+| A shell outlived a killed Cursor; the recorder appended a second host to the first one's file; a reordered recording still replayed | The tree is noted while a command runs and its groups swept after; the next free file number; every call must end once, after it |
+
+A live Normal to Auto change restarted the process (about 10 s): with Cursor under Auto only, it has no other preset to
+change to.
 
 ## 1. What was measured
 
@@ -663,7 +701,7 @@ capabilities and the model list. Checked in PR 1 with the mock platform: the des
 
 Questions 1 to 6 of the design were answered (§0.1). Left open:
 
-1. **Cursor on macOS and Linux.** The install layout `findCursor` reads there (`~/.local/bin/agent` linking into
-   `…/cursor-agent/versions/<version>/`) is from the installer's description, not measured; the Mac run and the weekly
-   drift job (Linux) will say.
-2. **Mac memory** of one `agent acp` (idle, after a turn), for the sleep decision.
+1. **Cursor under Auto only.** It writes without asking (§0.2), so it cannot run under Safe, Normal or Edits. Whether it
+   stays offered so, and how a session gets Auto (the new-session dialog has no preset choice and starts under Normal),
+   is the owner's to decide.
+2. **Cursor on Linux.** The layout `findCursor` reads there is measured on macOS only; the weekly drift job will say.

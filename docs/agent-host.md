@@ -1961,8 +1961,9 @@ Implementation rules:
   and core's preview read a `*` in the middle as a wildcard the host did not honour.
 - Process management (spawning the CLI, crash detection) is the adapter's own responsibility. A crash is emitted as an `error` event and the host does not die.
 - **A launch a tool declared it cannot keep is refused before any process starts** (`presets`, `keepsRepoFilesOut`,
-  `roleText`; `launchRefusal` in protocol, applied by `startFit` in `sessions/session-start.ts` at every start and wake, and to a preset changed on a running
-  session in `updateSettings`).
+  `roleText`; `launchRefusal` in protocol, applied by `startFit` in `sessions/session-start.ts` at every start and wake, and through `ToolRegistry.refusal` with
+  the session read by `sessionDemands` (`sessions/tool-fit.ts`) to a tool switch, a preset changed on a running session
+  and the orchestrator's tool).
   The host is the gate whatever path asked; the pickers ask the same rule and grey the tool with the same words.
   Claude and Codex declare none of the three, so nothing changes for them ([plans/acp-adapter.md](plans/acp-adapter.md) §0.1).
 - A capability is not necessarily a static declaration; it can be **decided at detect() time** (e.g. if whether approvals work depends on the Codex version, decide after detecting the version — the C4 response).
