@@ -351,11 +351,11 @@ describe('type-aware lint (#1339)', () => {
   it('sizes the heap of each ESLint thread for the runner and raises it before the threads start', () => {
     const GB = 1024 ** 3
     // The 7 GB macOS runner got V8's ~2 GB default and ran out (beta.37, beta.38 rehearsals)
-    expect(lintHeapMb(7 * GB)).toBe(2867)
+    expect(lintHeapMb(7 * GB)).toBe(3584)
     expect(lintHeapMb(2 * GB)).toBe(2048)
     expect(lintHeapMb(64 * GB)).toBe(4096)
     const lint = readFileSync(join(ROOT, 'tooling/lint.ts'), 'utf8')
-    const flag = lint.indexOf('setFlagsFromString(`--max-old-space-size=${lintHeapMb(totalmem())}`)')
+    const flag = lint.indexOf('setFlagsFromString(`--max-old-space-size=${Math.max(lintHeapMb(totalmem())')
     expect(flag).toBeGreaterThan(-1)
     expect(flag).toBeLessThan(lint.indexOf('new ESLint('))
   })

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, join, resolve } from 'node:path'
 import { installLocalBundle, requestSignature, stampLocalVersion } from '../scripts/local-update.mjs'
@@ -204,6 +204,16 @@ describe('the data-only manifest boundary', () => {
     expect(JSON.parse(signature.toString()).comment).toContain('throwaway')
     expect(() => verifyManifest(original, signature, { keys: [] })).toThrow(/unknown key/)
     expect(() => execFileSync(process.execPath, ['--experimental-strip-types', join(checkout, 'scripts/content-manifest.mts'), 'sign-local', manifestPath], { stdio: 'pipe', env: { ...process.env, CONTENT_SIGNING_KEY: '' } })).toThrow()
+  })
+
+  // Found by the beta.38 rehearsal on macOS, where the temporary folder is a symlink (/var -> /private/var): the command
+  // compared argv[1] unresolved with a resolved import.meta.url, did nothing and printed nothing
+  it.skipIf(process.platform === 'win32')('runs the signer through a symlinked checkout path too', () => {
+    const checkout = taggedCheckout(SIGNER)
+    const link = join(temp(), 'link')
+    symlinkSync(checkout, link)
+    // No command: the usage line and exit 2 when the command ran at all, silence and exit 0 when it did not
+    expect(() => execFileSync(process.execPath, ['--experimental-strip-types', join(link, 'scripts/content-manifest.mts')], { stdio: 'pipe' })).toThrow(/usage: content-manifest/)
   })
 
   // The workflow's run blocks are bash for GitHub's Linux runner (they are what this runs), and a local update is

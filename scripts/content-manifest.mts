@@ -30,7 +30,7 @@
  * half and its id ever leave this module.
  */
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign, verify, type KeyObject } from 'node:crypto'
-import { lstatSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { lstatSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 // @ts-expect-error — dependency-free policy also runs directly in the signing workflow
@@ -338,7 +338,9 @@ export function verifyContent(dir: string, opts: { keys?: TrustedKey[]; platform
  *
  * `sign` uses CONTENT_SIGNING_KEY when it is set, and a throwaway key otherwise.
  */
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+// argv[1] as given, import.meta.url with symlinks resolved: a checkout under macOS's /var (-> /private/var) never matched,
+// and the command ended at once, printing nothing
+if (process.argv[1] && fileURLToPath(import.meta.url) === realpathSync(process.argv[1])) {
   const [command, dir] = process.argv.slice(2)
   const flag = (name: string) => {
     const i = process.argv.indexOf(name)
