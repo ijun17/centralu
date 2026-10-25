@@ -148,6 +148,36 @@ for (const dir of readdirSync(RECORDINGS)) {
       })
     }
 
+    if (names.includes('resume') && dir.startsWith('opencode-')) {
+      it('resume, priced: the turn after the restart reports what it added to the total kept beside the session', async () => {
+        // The recording as it is, but for its two running totals: OpenCode's free model costs 0 every turn, so the
+        // amounts are a paid model's (one turn before the restart, one after it)
+        const recording = loadRecording(join(RECORDINGS, dir, 'resume.jsonl'))
+        const totals = [0.0123, 0.0311]
+        let priced = 0
+        for (const f of recording.frames) {
+          const update = (f.msg as { params?: { update?: { sessionUpdate?: string; cost?: { amount: number } } } } | undefined)?.params?.update
+          if (update?.sessionUpdate === 'usage_update' && update.cost) update.cost.amount = totals[priced++]!
+        }
+        expect(priced).toBe(2)
+        // What `LaunchRecords.runningCostFor` keeps in the store, for the two processes of one session
+        let kept: number | null = null
+        class Kept extends ReplayAdapter {
+          override createSession(opts: Parameters<AcpAdapter['createSession']>[0], emit: Parameters<AcpAdapter['createSession']>[1]) {
+            return super.createSession({ ...opts, runningCost: { last: opts.resumeExternalId ? kept : null, keep: (t) => (kept = t) } }, emit)
+          }
+        }
+        const { spawn, state, peers } = replaySpawner(recording)
+        const adapter = new Kept(profile(dir, String(recording.header.version)), spawn, 60_000)
+        const scenario = SCENARIOS.find((s) => s.name === 'resume')!
+        const events = await drive(adapter, { ...scenario, preset: 'normal' }, '/work', 'replay-resume', 0, () => peers.at(-1)?.kill('SIGKILL'))
+        expect(state.problems).toEqual([])
+        expect(state.spawned).toBe(2)
+        expect(of(events, 'usage_update').map((e) => e.tokens.costUsd)).toEqual([expect.closeTo(0.0123, 6), expect.closeTo(0.0188, 6)])
+        expect(kept).toBeCloseTo(0.0311, 6)
+      })
+    }
+
     if (names.includes('compact')) {
       // A /compact answered with text only: a compaction is read from it only for a tool that says so (`infersCompaction`),
       // and only where its context reading went down (OpenCode); Cursor reads none
