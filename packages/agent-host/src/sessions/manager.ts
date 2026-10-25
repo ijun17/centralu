@@ -2,6 +2,8 @@ import { ModelWindows, autoCompactPlan } from './auto-compact.js'
 import { repairWorktreeRecoveryRemovals } from '../dev-services/worktree-recovery.js'
 import { windowAround } from './snippet.js'
 import { orchestratorToolsFor, type OrchestratorSeatHost } from './orchestrator-seat.js'
+import { AskedGate } from './asked-gate.js'
+import type { Asker } from '../mail/asked-by.js'
 import { withHubMark } from './hub-preset.js'
 import type { MailSessions, ReceiverState } from '../mail/delivery.js'
 import type { AnswerGiven } from '../mail/delegation.js'
@@ -74,6 +76,7 @@ import {
   withoutToolRecord,
   alwaysAllowKey,
   errorMessage,
+  ORCHESTRATOR_CHANGE,
 } from '@cc/protocol'
 import type { AgentAdapter, AgentProcess, AgentSpawnSpec, EventSink, LinkedSessions, OrchestratorTools, SessionHandle } from '../adapters/contract.js'
 import type { MemoryGate } from './memory-gate.js'
@@ -118,6 +121,8 @@ export type MailHooks = {
   answered?(callerId: string, childId: string, how?: AnswerGiven): void
   /** A turn started that the mailbox did not start: whose it is and the thread it belongs to (§6) */
   turnStarted?(sessionId: string, turn: TurnStart): void
+  /** The session whose request the orchestrator's turn is, if a session asked for it (#1447, §9.7): its steps that change something ask the person, naming it */
+  askedBy?(orchestratorId: string): Asker | null
 }
 
 export type KeptAgent = { sessionId: string; tool: ToolName; process: AgentProcess; version?: string }
@@ -282,6 +287,8 @@ export class SessionManager {
   private readonly worktrees: WorktreeSessions
   /** The cards the host raises in a session's approval slot, and the screen's capability questions (host-cards.ts) */
   private readonly hostCards: HostCards
+  /** The orchestrator's steps that ask the person when a session asked for the turn (#1447) */
+  private readonly askedGate: AskedGate
   /** The orchestrator's reports from linked machines' sessions, and the work they pause on (linked-reports.ts) */
   private readonly linkedReports: LinkedReports
   /** A session's process brought up, for a new session or a wake, and what it launches with (session-start.ts) */
@@ -415,6 +422,24 @@ export class SessionManager {
     this.restartPolicy = new RestartPolicy(this.parts())
     this.worktrees = new WorktreeSessions(this.parts())
     this.hostCards = new HostCards(this.parts())
+    this.askedGate = new AskedGate({
+      askedBy: (id) => this.mailHooks?.askedBy?.(id) ?? null,
+      // Allow or deny only, under every preset: `auto` does not answer a session's request for the person (§9.7)
+      ask: async (id, question, signal) => {
+        const answer = await this.hostCards.askHost(id, { kind: 'other', about: ORCHESTRATOR_CHANGE, raw: question }, signal, { alwaysAsk: true, uncovered: true })
+        return answer === null ? null : answer === 'deny' ? 'deny' : 'allow'
+      },
+      cover: (id, run, signal) => this.hostCards.cover(id, run, signal),
+      reach: (sessionId) => {
+        const m = this.meta.get(sessionId)
+        const folders = [this.store.sessions.sessionCwd(sessionId), m?.projectId ? this.projectRegistry.cwdOf(m.projectId) : null, m?.worktree?.path, ...(this.readGrants.get(sessionId) ?? [])]
+        return { folders: folders.filter((f): f is string => typeof f === 'string' && f !== ''), project: m?.projectId ?? null, projectName: this.projectRegistry.projectRow(m?.projectId)?.name ?? null }
+      },
+      projectOf: (sessionId) => {
+        const m = this.meta.get(sessionId)
+        return m ? (m.projectId ?? null) : undefined
+      },
+    })
     this.linkedReports = new LinkedReports(this.parts())
     this.starts = new SessionStarts(this.parts())
     this.events = new SessionEvents(this.parts())
@@ -2078,6 +2103,9 @@ export class SessionManager {
       },
       agentSession: (...a) => self.agentSession(...a),
       mailTool: (id, args) => self.mailHooks?.tool?.(id, args) ?? { text: 'The mailbox is not available.', isError: true },
+      whenAsked: (id, call, signal, run, refused) => self.askedGate.when(id, call, signal, run, refused),
+      newConversation: (id, fresh) => self.askedGate.beginConversation(id, fresh),
+      requestTurn: (id) => ({ active: () => self.askedGate.active(id), ask: (tool, input, signal) => self.askedGate.askCli(id, tool, input, signal), askRead: (tool, input, signal) => self.askedGate.askCliRead(id, tool, input, signal), seen: (tool, input) => self.askedGate.seen(id, tool, input) }),
       compactSelf: (id, focus) => self.selfCompaction.request(id, focus),
       compactTurn: (id) => self.selfCompaction.compactTurn(id),
       compactEvent: (e, ended) => {
@@ -2517,6 +2545,22 @@ export class SessionManager {
       mailTool: (id) => this.canReadMail(id),
       mailCommand: (id) => this.toolProfileOf(id) === 'orchestrator' && orchestratorHasMailCommand(),
     }
+  }
+
+  /**
+   * Why sessions may not ask the orchestrator now, or null when they may (§9.7, #1447). A request is run with every step that is not a read behind the
+   * person's card; that needs the orchestrator's tool to put each step of its own to the host (`gatesSteps`). Where it cannot, a request could have
+   * the orchestrator run a command or write a file unasked, so it is not taken
+   */
+  orchestratorAsks(): string | null {
+    const orchestrator = [...this.meta.values()].find((m) => m.kind === 'orchestrator')
+    if (!orchestrator || this.adapters.get(orchestrator.tool)?.capabilities.gatesSteps === true) return null
+    return 'the orchestrator runs on a tool that cannot ask the person for each step of a request yet, so a session cannot ask it: write to the person instead'
+  }
+
+  /** The central orchestrator's session id, or none while it has not been made (#1447: `mail send to "orchestrator"`) */
+  orchestratorId(): string | undefined {
+    return [...this.meta.values()].find((m) => m.kind === 'orchestrator')?.id
   }
 
   /** `SessionTools.toolProfileOf` (session-tools.ts), kept on the manager for its callers */

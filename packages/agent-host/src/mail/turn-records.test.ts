@@ -106,6 +106,18 @@ describe('a turn the mailbox did not start', () => {
     expect(turns.current('child')).toEqual({ by: 'mail', threadId: id })
   })
 
+  it('numbers its turns, so that one turn of a thread is told from the next (what a request’s turn has read is that turn’s)', () => {
+    const { turns, delegate, threadOf } = setup()
+    expect(turns.numberOf('child')).toBeUndefined()
+    delegate('owner', 'child', 'start_agent', 'x')
+    const id = threadOf('child').id
+    const first = turns.begin('child', id)
+    expect(turns.numberOf('child')).toBe(first)
+    const second = turns.begin('child', id)
+    expect(second).not.toBe(first)
+    expect(turns.numberOf('child')).toBe(second)
+  })
+
   it('a turn that never saw its end is closed lost when the next one starts', () => {
     const { store, turns, recorder } = setup()
     recorder('child', person)

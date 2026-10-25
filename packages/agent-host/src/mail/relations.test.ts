@@ -40,11 +40,16 @@ describe('who may write to whom (§9.1)', () => {
     expect(may(OTHER, PERSON)).toBeNull()
   })
 
-  it('and to nobody else: another session, a sibling, or the orchestrator on its own', () => {
+  it('and to nobody else but the orchestrator, which any session may ask, a new thread too (§9.7, #1447): a stranger, a child, a coordinator', () => {
     expect(may(OTHER, CHILD)).toMatch(/orchestrator is the way/)
     expect(may(CHILD, OTHER)).toMatch(/orchestrator is the way/)
-    expect(may(OTHER, ORCH)).toMatch(/orchestrator is the way/)
     expect(may(CHILD, a('child2'))).toMatch(/gone/)
+    expect(may(OTHER, ORCH)).toBeNull()
+    expect(may(CHILD, ORCH)).toBeNull()
+    expect(may(COORD, ORCH)).toBeNull()
+    expect(policy().isOrchestrator?.(ORCH)).toBe(true)
+    expect(policy().isOrchestrator?.(OTHER)).toBe(false)
+    expect(policy().isOrchestrator?.(a('gone'))).toBe(false)
   })
 
   it('the orchestrator writes to any session, and a coordinator to the members of its scope only', () => {
@@ -66,7 +71,7 @@ describe('who may write to whom (§9.1)', () => {
     expect(p.mayWrite(CHILD, OTHER, { id: 't1' } as never)).toBeNull()
     // But not to a session that has gone since, and not to a party that is not in the thread
     expect(p.mayWrite(CHILD, a('gone'), { id: 't1' } as never)).toMatch(/gone/)
-    expect(p.mayWrite(CHILD, ORCH, { id: 't1' } as never)).not.toBeNull()
+    expect(p.mayWrite(CHILD, PARENT, { id: 't1' } as never)).not.toBeNull()
   })
 
   it('an app writes to a session that called it, and to no other; no one writes to an app yet', () => {

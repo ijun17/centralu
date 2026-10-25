@@ -142,6 +142,9 @@ describe('the mail tool', () => {
     expect(store.mail.blockers(thread.id)[0]).toMatchObject({ kind: 'text', text: 'waiting for the person', resolvedAt: null })
     // No turn of it is going, so a session goes back to waiting, not running (§3.3)
     expect(call('s2', { action: 'update', thread: thread.id, unblock: 1 }).text).toContain('is open')
+    // The next step is echoed only when this call set it: otherwise it is what another session wrote
+    expect(call('s2', { action: 'update', thread: thread.id, state: 'running' }).text).toBe(`Thread ${thread.id} is running.`)
+    expect(call('s2', { action: 'update', thread: thread.id, state: 'running' }).text).not.toContain('write the parser')
 
     const closed = call('s2', { action: 'close', thread: thread.id, outcome: 'finished', text: 'landed' })
     expect(closed.text).toBe(`Thread ${thread.id} is done (finished).`)
