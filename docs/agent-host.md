@@ -3503,7 +3503,7 @@ call at the same moment make one attempt. Calls cannot defeat the backoff: a mac
 per `CALL_WINDOW_MS` (15 s); a call inside the window is answered at once with the last attempt's reason. The calls are those that
 reach the machine through `linkedSessions` (`start_agent`, `ask_project` and `create_session` through their project lookup, but
 only for the machine the act needs: `start_agent`'s `machine`, or the one a project name, qualified id or `machine/name` points to
-(`projects(need)`); a lookup never waits on another machine, nor on an attempt to one; `agent_session`, a send to or a read of one
+(`projects(need)`); a lookup never waits on another machine, nor on an attempt to one, with one exception (#1547): a bare name that matches no project at all (not on this computer, not on a machine that is up, not in any machine's mirror, which is empty after a restart and cannot know a project made since) tries every machine that is down, once and within the same bound (`ProjectNeed.anyDown`, asked by `ask_project` and `create_session` after their first lookup found nothing), and only then answers "No project named"; a name qualified with a machine or hub never widens to the others; `agent_session`, a send to or a read of one
 of its sessions) and the router's calls that have no window behind them (no `ctx`: an agent's, an app view's);
 a window's own calls start nothing, they poll. Not for a machine that waits for the person, one whose host the person stopped
 there, one at `versions_differ` or `updating`, or one held by an operation. What a child there reported meanwhile is read once the

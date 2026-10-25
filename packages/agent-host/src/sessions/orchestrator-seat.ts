@@ -350,7 +350,9 @@ export function orchestratorToolsFor(
       // this computer's own id, which is exact (as ask_project's rule is)
       const reader = linked()
       const exactHere = all.some((p) => p.id === opts.project)
-      const remote = reader && opts.project && !exactHere ? await reader.findProjects(opts.project) : []
+      let remote = reader && opts.project && !exactHere ? await reader.findProjects(opts.project) : []
+      // Named nowhere (#1547): a machine that is down may hold a project its mirror lacks, so those are tried now, once, bounded
+      if (reader && opts.project && !exactHere && !local.length && !remote.length) remote = await reader.findProjects(opts.project, { anyDown: true })
       if (local.length + remote.length > 1) {
         // One name on two machines: guessing would start the work on the wrong disk. A machine that cannot be asked just
         // now counts too (`away`): its project may be the one meant, and dropping it used to start the work here instead

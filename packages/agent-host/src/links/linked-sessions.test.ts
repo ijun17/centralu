@@ -583,6 +583,27 @@ describe('a project lookup connects only the machine the act needs (#1532)', () 
     expect(tried.count).toBe(1)
   })
 
+  it('tries every down machine for a bare name when asked to (#1547), and none for a name qualified with another', async () => {
+    const { m: far, tried } = downMachine('far', 'Far box', 20)
+    const { m: other, tried: otherTried } = downMachine('other', 'Other box', 20)
+    const reader = linkedSessions(() => [far, other])
+    // `live` is in neither mirror: without `anyDown` nothing is tried
+    expect((await reader.findProjects('live')).map((p) => p.id)).toEqual([])
+    expect([tried.count, otherTried.count]).toEqual([0, 0])
+    expect((await reader.findProjects('live', { anyDown: true })).map((p) => [p.id, p.away])).toEqual([['far.p-live', undefined], ['other.p-live', undefined]])
+    expect([tried.count, otherTried.count]).toEqual([1, 1])
+  })
+
+  it('does not widen a qualified name to the machines it does not name (#1547)', async () => {
+    const { m: far, tried } = downMachine('far', 'Far box', 20)
+    const { m: other, tried: otherTried } = downMachine('other', 'Other box', 20)
+    const reader = linkedSessions(() => [far, other])
+    await reader.findProjects('other/live', { anyDown: true })
+    await reader.findProjects('other.p-live', { anyDown: true })
+    await reader.findProjects('nowhere/live', { anyDown: true })
+    expect([tried.count, otherTried.count]).toEqual([0, 1])
+  })
+
   it('names the machine and what became of the attempt when it stays down, once', async () => {
     const { m: far } = downMachine('far', 'Far box', 10, { comesBack: false, why: 'the attempt to connect it just now failed: Operation timed out' })
     const reader = linkedSessions(() => [far])

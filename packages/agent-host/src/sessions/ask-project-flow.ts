@@ -193,16 +193,21 @@ export class AskProjectFlow {
     const hubs = this.hubs
     const none = { projects: [], away: [] }
     // Nothing is awaited when neither is asked: a call naming a project of this computer by id goes on in the same tick
-    const [there, fromHubs] =
+    let [there, fromHubs] =
       (reader || hubs) && !exactHere ? await Promise.all([reader ? reader.projects({ ref: wanted }) : none, hubs ? hubs.projects() : none]) : [none, none]
-    const askable: AskableProject[] = [
+    const askableOf = (): AskableProject[] => [
       ...projects.map((p) => ({ id: p.id, name: p.name, machine: null, machineId: null })),
       ...there.projects.map((p) => ({ id: p.id, name: p.name, machine: p.machine, machineId: p.machineId })),
       ...fromHubs.projects.map((p) => ({ id: p.id, name: p.name, machine: p.hub, machineId: p.hubId })),
     ]
+    let found = matchProjects(wanted, askableOf())
+    // Nowhere (#1547): the mirror of a machine that is down may lack a project made since, so those are tried now, once, bounded
+    if (!found.length && reader && !exactHere) {
+      there = await reader.projects({ ref: wanted, anyDown: true })
+      found = matchProjects(wanted, askableOf())
+    }
     const awayAll = [...there.away, ...fromHubs.away.map((a) => ({ machineId: a.hubId, machine: a.hub, why: a.why }))]
     const elsewhere = !!reader || fromHubs.projects.length > 0 || fromHubs.away.length > 0
-    const found = matchProjects(wanted, askable)
     if (found.length > 1) {
       return {
         ok: false,

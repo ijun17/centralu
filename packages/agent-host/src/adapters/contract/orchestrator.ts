@@ -178,7 +178,15 @@ export function awayPhrase(why: string): string {
 }
 
 /** What an act that looks projects up needs: the project it names (`ref`, as ask_project takes it), or the machine it is about */
-export type ProjectNeed = { ref?: string; machineId?: string }
+export type ProjectNeed = {
+  ref?: string
+  machineId?: string
+  /**
+   * `ref` matched no project the caller can see, here or on a machine that is up (#1547): try every machine that is down,
+   * as the mirror of one may lack a project made since. Not for a name that is qualified with a machine
+   */
+  anyDown?: boolean
+}
 
 /** A project on a linked machine, as the hub's orchestrator names it (#82 phase 4) */
 export type LinkedProject = {
@@ -217,9 +225,9 @@ export type LinkedSessions = {
   /**
    * The projects of `projects()` whose name or qualified id is `ref`, under the same per-machine bound: one on a machine
    * that cannot be asked just now comes from the mirror, marked `away`, so it is found as unreachable, never as missing.
-   * The machine the name belongs to is tried first if it is down (#1532); no other machine is
+   * The machine the name belongs to is tried first if it is down (#1532); no other machine is, unless `anyDown` (#1547, see `ProjectNeed`)
    */
-  findProjects(ref: string): Promise<LinkedProject[]>
+  findProjects(ref: string, o?: { anyDown?: boolean }): Promise<LinkedProject[]>
   /**
    * Every linked machine's projects (ask_project, #700). A machine that cannot be asked contributes what the headers
    * mirror last held, each project marked `away` with why, and is named in `away` whether or not the mirror held
