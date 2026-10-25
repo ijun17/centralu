@@ -6,7 +6,7 @@ import type { PermissionPreset } from '@cc/protocol'
 import { AGENT_TOOLS, runOrchestratorTool } from './orchestrator-tools.js'
 import { ASK_WAIT_MS } from './ask-project.js'
 import { CrossAdapter, crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
-import { AGENT_CEILING, agentBranch, agentChoice, agentFrame, agentNoteFrame, distinguishingText, givenAgentName, presetWithin, remoteAgentFrame } from './start-agent.js'
+import { AGENT_CEILING, agentBranch, agentChoice, agentFrame, agentNoteFrame, distinguishingText, givenAgentName, lowestPreset, presetWithin, remoteAgentFrame } from './start-agent.js'
 import { SessionManager } from './manager.js'
 import { createRpcHandler } from '../rpc.js'
 import { START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS } from './manager.js'
@@ -29,7 +29,7 @@ describe('the preset rule', () => {
     expect(frame).not.toContain('Your final message goes back')
   })
   it('a child may have the parent\'s preset or less, never more', () => {
-    const order: PermissionPreset[] = ['safe', 'normal', 'auto']
+    const order: PermissionPreset[] = ['safe', 'normal', 'edits', 'auto']
     for (const [i, parent] of order.entries()) {
       for (const [j, child] of order.entries()) expect(presetWithin(child, parent)).toBe(j <= i)
     }
@@ -233,6 +233,18 @@ describe('starting another agent in the same project', () => {
     expect(w.events.filter((e) => e.type === 'approval_request' && e.sessionId === s)).toEqual([])
     // Nothing remembered: it is the trust, read at each call
     expect(w.mgr.projectConsents()).toEqual([])
+  })
+
+  it('an edits session in a trusted project starts the child without a card, and the child is edits: the default reaches only the sessions a person starts (#1525)', async () => {
+    const s = await session('edits')
+    const c = await startRunning(s)
+    expect(w.events.filter((e) => e.type === 'approval_request' && e.sessionId === s)).toEqual([])
+    expect(w.mgr.listSessions().find((x) => x.id === c)?.permissionPreset).toBe('edits')
+    expect(handleOf(c)!.opts.permissionPreset).toBe('edits')
+    // A normal caller's child stays normal, even in a trusted project
+    const n = await session('normal')
+    const nc = await startRunning(n)
+    expect(w.mgr.listSessions().find((x) => x.id === nc)?.permissionPreset).toBe('normal')
   })
 
   it("carries the project's instructions for started agents after the task, as they stand when the child is made (#1161 item 2)", async () => {
@@ -1917,5 +1929,15 @@ describe('starting another agent in the same project', () => {
     expect(!r.ok && r.error).toContain('not trusted')
     expect(agentCard(s)).toBeUndefined()
     expect(childrenOf(s)).toEqual([])
+  })
+})
+
+describe('the lowest preset (#1525)', () => {
+  it('is the lowest in the preset order, edits between normal and auto', () => {
+    expect(lowestPreset('auto', 'edits', 'auto')).toBe('edits')
+    expect(lowestPreset('edits', 'normal')).toBe('normal')
+    expect(lowestPreset('auto', 'edits', 'safe')).toBe('safe')
+    expect(lowestPreset('edits')).toBe('edits')
+    expect(lowestPreset()).toBe('auto')
   })
 })

@@ -18,6 +18,7 @@ import { raceTimeout } from '../../timing.js'
 import { threadIdOf } from './turn-reads.js'
 import { CodexSession, LAZY_RESUME_WAIT_MS } from './session.js'
 import { CODEX_SURFACE } from './surface.js'
+import { launchPreset } from '../edit-grant.js'
 import { APP_CALL_WAIT_MS, appApprovalModeFor, CODEX_TOOL_TIMEOUT_SEC, permissionOptionsFor, repoFilesConfig } from './launch-config.js'
 
 export { APP_CALL_WAIT_MS, appApprovalModeFor, CODEX_TOOL_TIMEOUT_SEC, LAZY_RESUME_WAIT_MS, repoFilesConfig }
@@ -90,7 +91,7 @@ export class CodexAdapter implements AgentAdapter {
     // The working directory participates in the sandbox roots. Bump the version when the
     // adapter derives a different sandbox, network or bridge launch policy from these settings.
     // v2: #597 changes auto's sandbox to full access. Kept sessions must restart to pick it up.
-    return JSON.stringify({ v: 2, cwd: settings.cwd, permission: settings.permissionPreset, sandbox: permissionOptionsFor(settings.permissionPreset).sandbox, trusted: !!settings.projectTrusted, noSettings: !!settings.noSettingFiles })
+    return JSON.stringify({ v: 2, cwd: settings.cwd, permission: launchPreset(settings.permissionPreset), sandbox: permissionOptionsFor(settings.permissionPreset).sandbox, trusted: !!settings.projectTrusted, noSettings: !!settings.noSettingFiles })
   }
 
   /** The installed Codex CLI (#297), from npm's `package.json` where it came from npm, else `codex --version` */

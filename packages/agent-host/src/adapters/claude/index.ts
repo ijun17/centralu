@@ -19,6 +19,7 @@ import type { AgentAdapter, CreateSessionOpts, DetectResult, EventSink, SessionH
 import { raceTimeout } from '../../timing.js'
 import { liveQueries, probeIds, querySessions } from './live-queries.js'
 import { ClaudeSession, type ClaudeLaunch } from './session.js'
+import { launchPreset } from '../edit-grant.js'
 import { personsDefaultMode } from './permissions.js'
 import { CLAUDE_SURFACE } from './surface.js'
 
@@ -267,7 +268,7 @@ export class ClaudeAdapter implements AgentAdapter {
     // Normal v2 retires kept processes launched without an explicit mode (#578); safe's flags are unchanged.
     // Auto v3 retires the ones an older host started without the cross-session controls (#1347 slice 0): they are restarted once, at the safe boundary (#589).
     // Code intelligence (#686) only when off, so every fingerprint stored before it reads the same
-    return JSON.stringify({ v: settings.permissionPreset === 'safe' ? 1 : settings.permissionPreset === 'auto' ? 3 : 2, cwd: settings.cwd, permission: settings.permissionPreset, trusted: !!settings.projectTrusted, noSettings: !!settings.noSettingFiles, ...(settings.noCodeIntelligence ? { noLsp: true } : {}) })
+    return JSON.stringify({ v: settings.permissionPreset === 'safe' ? 1 : settings.permissionPreset === 'auto' ? 3 : 2, cwd: settings.cwd, permission: launchPreset(settings.permissionPreset), trusted: !!settings.projectTrusted, noSettings: !!settings.noSettingFiles, ...(settings.noCodeIntelligence ? { noLsp: true } : {}) })
   }
 
   async detect(): Promise<DetectResult> {

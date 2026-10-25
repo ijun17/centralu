@@ -2,7 +2,7 @@ import { query, type SettingSource } from '@anthropic-ai/claude-agent-sdk'
 import { randomUUID } from 'node:crypto'
 import { InputReceipts, type InputReceipt } from '../input-receipts.js'
 import type { InputObserver } from '../contract.js'
-import type { ApprovalDecision, ApprovalScope, QuestionAnswer } from '@cc/protocol'
+import type { ApprovalDecision, ApprovalScope, PermissionPreset, QuestionAnswer } from '@cc/protocol'
 import { ClaudeLinks } from './exe-link.js'
 import { StartGate } from './start-gate.js'
 import type { UsageQuery } from './usage.js'
@@ -14,7 +14,7 @@ import { noCodeIntelligenceSettings } from './lsp-plugins.js'
 import { adapterNotice, couldNotStop, stopNotConfirmed, undeliveredError } from '../session-kit.js'
 import { ClaudeCards } from './session-cards.js'
 import { ClaudeServers } from './session-servers.js'
-import { appToolOf, isOrchestratorTool, permissionOptionsFor, settingSourcesFor } from './permissions.js'
+import { appToolOf, editAskRuleExists, isOrchestratorTool, permissionOptionsFor, settingSourcesFor } from './permissions.js'
 import { liveQueries, probeIds, querySessions } from './live-queries.js'
 import type { ClaudeMessage } from './json.js'
 import { claudeAutoCompactWindow, claudeQueryOptions, compactPointOff, type ClaudeInput, type QueryHandle } from './sdk-query.js'
@@ -127,6 +127,7 @@ export class ClaudeSession implements SessionHandle {
     private emit: EventSink,
     private launch: ClaudeLaunch,
   ) {
+    this.livePreset = opts.permissionPreset
     this.ended = new Promise<void>((resolve) => (this.markEnded = resolve))
     // An app's mark only for an app attached here (#730 review): a repository's own server may be named `app-<x>`
     const sink = emit
@@ -138,7 +139,7 @@ export class ClaudeSession implements SessionHandle {
       query: () => this.query,
       warn: (text) => this.emit({ type: 'notice', sessionId, level: 'warning', from: 'Centralu', label: 'apps', text }),
     })
-    this.cards = new ClaudeCards({ sessionId, opts, emit: (e) => this.emit(e), ownServer: () => this.servers.orchestratorServer !== null })
+    this.cards = new ClaudeCards({ sessionId, opts, emit: (e) => this.emit(e), ownServer: () => this.servers.orchestratorServer !== null, livePreset: () => this.livePreset })
     // The process runs with these until it is replaced; a model switch the CLI makes is reported against them (#304)
     this.stream = new ClaudeStreamNormalizer(sessionId, () => ({
       model: opts.model ?? null,
@@ -167,8 +168,17 @@ export class ClaudeSession implements SessionHandle {
     if (opts.processSource?.adopt?.backgroundTasks?.length) this.stream.tasks.seed(opts.processSource.adopt.backgroundTasks)
   }
 
+  /** The preset the session is set to now (#1525), which can differ from the one it launched under only between `normal` and `edits` */
+  private livePreset: PermissionPreset
+
+  setPermissionPreset(preset: PermissionPreset): void {
+    this.livePreset = preset
+  }
+
   async start(): Promise<void> {
     const preset = this.opts.permissionPreset
+    // Read once for the process: the CLI loads its settings at start too. Until it is known, and if it cannot be read, no grant
+    this.cards.editAskRule = preset === 'edits' || preset === 'normal' ? await editAskRuleExists(this.opts) : true
 
     /*
      * What to start (#353). On Windows a hard link of npm's claude.exe in the data folder, so a Claude

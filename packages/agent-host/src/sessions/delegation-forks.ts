@@ -1,11 +1,11 @@
-import type { PermissionPreset, SessionInfo } from '@cc/protocol'
+import type { SessionInfo } from '@cc/protocol'
 import type { BusyAnswer } from '../adapters/contract.js'
 import type { QueuedRequest } from '../dev-services/store.js'
 import { agentDepthRefusal, recordAgentDepth } from './agent-depth.js'
 import { taskLine } from './ask-project.js'
 import type { Delegation } from './child-ownership.js'
 import type { DelegationHost } from './delegation-host.js'
-import { agentFrame, presetWithin } from './start-agent.js'
+import { agentFrame, lowestPreset, presetWithin } from './start-agent.js'
 import type { AgentStartFlow, StartAgentDelegations } from './start-agent-flow.js'
 import { labelOf } from './transcript-view.js'
 
@@ -70,9 +70,7 @@ export class DelegationForks {
     const caller = this.host.meta.get(callerId)!
     const adapter = this.host.adapters.get(target.tool)!
     const project = this.host.store.projects.listProjects().find((p) => p.id === target.projectId)!
-    const PRESETS: PermissionPreset[] = ['safe', 'normal', 'auto']
-    const lowest = (...ps: PermissionPreset[]) => PRESETS[Math.min(...ps.map((p) => PRESETS.indexOf(p)))]!
-    const preset = lowest(caller.permissionPreset, target.permissionPreset, ...(readOnly ? ['safe' as const] : []))
+    const preset = lowestPreset(caller.permissionPreset, target.permissionPreset, ...(readOnly ? ['safe' as const] : []))
     const worktree = readOnly ? null : await this.flow.starts.agentWorktreeBranch(project, { task: text })
     if (worktree && 'error' in worktree) return { ok: false, error: `${worktree.error.replace('Start the agent without one.', 'Use fork_read for read-only work, or queue it.')}` }
     const consent = await this.flow.starts.ensureAgentConsent(
@@ -122,7 +120,7 @@ export class DelegationForks {
           ...(target.model ? { model: target.model } : {}),
           ...(target.effort ? { effort: target.effort } : {}),
           // Never above either preset as they are when it starts, nor above the one the card showed
-          permissionPreset: lowest(preset, this.host.meta.get(callerId)?.permissionPreset ?? 'safe', this.host.meta.get(target.id)?.permissionPreset ?? 'safe'),
+          permissionPreset: lowestPreset(preset, this.host.meta.get(callerId)?.permissionPreset ?? 'safe', this.host.meta.get(target.id)?.permissionPreset ?? 'safe'),
           // A same-project ordinary session owns it as its agent; the orchestrator, which has no project, through the delegation alone
           ...(caller.projectId === project.id ? { askedBy: callerId } : {}),
           forkedFrom: target.id,
@@ -137,7 +135,7 @@ export class DelegationForks {
       recordAgentDepth(this.host, child.id, callerId)
       // Copying and making the session took a while: the gates are read again, with no wait before the delegation
       const lateGate = this.forkTrustError(callerId, target)
-      const cap = lateGate ? undefined : lowest(this.host.meta.get(callerId)!.permissionPreset, this.host.meta.get(target.id)!.permissionPreset)
+      const cap = lateGate ? undefined : lowestPreset(this.host.meta.get(callerId)!.permissionPreset, this.host.meta.get(target.id)!.permissionPreset)
       const late = lateGate
         ? `No fork of "${target.name}": ${lateGate}.`
         : cap && !presetWithin(child.permissionPreset, cap)

@@ -587,6 +587,71 @@ A name a session has seen an app under (`app-<id>`) stays bound to that app for 
 (`session_app_names:<session>`), so a later app of the same id, a repository's included, cannot take
 calls meant for another (`SessionAppsHub.named`).
 
+### The `edits` preset (#1525, owner 2026-10-24)
+
+A fourth preset, between `normal` and `auto` (`safe` < `normal` < `edits` < `auto`). **`edits` is `normal` plus one
+grant**: a file edit inside the session's project folder (or its worktree) raises no card. Everything else is
+`normal`'s, in every row of the table below: commands, deletes, paths outside the folder, network access and runs
+outside the sandbox ask; the person's own bypass applies as under `normal`, and `edits` never asks more than `normal`
+would. `normal` keeps its meaning (the person approves each step).
+
+- **Preset, not a hidden default.** A default that made `normal` accept edits in a trusted project would put a word
+  on the picker that is not true of the session, and an explicit `normal` could not be told from the default. So the
+  picker lists `edits` ("No card in project"), and the **default** is what changed: the window names the preset when the
+  person starts a session without choosing one, `edits` in a **trusted** project and `normal` in an untrusted one
+  (`defaultPresetFor`, `@cc/core`, read in `createSession` of the store). A preset named in the start, the settings menu,
+  a handoff or a fork always wins and is never raised. The host's own default stays `normal`, so a client that names none
+  (a script, the limited credential, an older window) never gets `edits` unasked, and naming it as the limited credential
+  does asks first (`presetAbove`, `transport/method-rights.ts`). A project on a linked machine keeps `normal` as the
+  default: that machine may run a build from before `edits`, which refuses a value it does not know. The stored and shown
+  preset is the one the session runs under. There is no per-project default preset to override (the "per project" choice
+  of #1525 is the project's trust).
+- **Mapping to Claude.** Not `acceptEdits`. The SDK's mode also approves `rm`, `rmdir`, `mv`, `cp`, `sed`, `mkdir` and
+  `touch` inside the working directory (Claude Code's documentation, "acceptEdits"), which would let deletes and
+  commands through. `edits` launches exactly as `normal` does (the trusted settings mode, else `default`) and `canUseTool`
+  allows `Edit`, `MultiEdit`, `Write` and `NotebookEdit` whose target is inside the session's folder
+  (`adapters/edit-grant.ts`, the shape of the read grant, #371). A person's `acceptEdits` or bypass setting stays as it is
+  (it decides before `canUseTool`). **The person's own `ask` rules win**: when their settings (the sources the session
+  reads, the policy tier included) have an `ask` rule for `Edit`, `Write`, `MultiEdit` or `NotebookEdit`, or the settings
+  cannot be read, the session has no grant at all (`editAskRuleExists`; the rule's path pattern is the CLI's syntax and is
+  not matched, so `ask: ["Write(secret/**)"]` leaves every edit of that session asking). An ask the CLI says a rule forced
+  (`matchedAskRule`) is a card too, and so is an ask whose `decisionReason` is anything but empty or the permission mode asking: the SDK documents it as free text, so only a short allowlist of known benign reasons
+  grants (`benignAskReason`) and an unknown or reworded reason fails closed. These two options are a second line: measured on Claude Code 2.1.296, an `ask` rule reached `canUseTool` with
+  both undefined, so the card for a plain ask rule comes only from `editAskRuleExists`.
+- **Mapping to Codex.** Codex has no mode that accepts patches and asks for commands: its approval policies gate the
+  sandbox boundary, not the kind of action (`on-request` runs sandboxed commands without a card). So `edits` is
+  `normal`'s launch (the person's own policy and sandbox, network off) and the adapter answers an
+  `item/fileChange/requestApproval` (or the older `applyPatchApproval`) with accept when every change of the patch is an add or an update inside the folder
+  (`adapters/codex/server-requests.ts`, `adapters/edit-grant.ts`). A delete, a move, a request that names extra access
+  (`grantRoot`, a `reason`), or a path outside asks. Under Codex's default
+  config (workspace-write, on-request) in-folder patches already ran without a card, so there `edits` and `normal`
+  differ only where the person's config asks.
+- **What is never granted.** The folder is the session's `cwd` after symlinks are resolved (a link out of it is
+  outside, and so is a link whose target does not exist yet), compared by path segment (`/proj-other` is not inside
+  `/proj`). A folder that is the person's home folder, holds it, or is the root of any disk gets no grant. Inside the folder, the names that
+  decide what runs or what is allowed still ask, at any depth and in any case: `.git`, `.gitconfig`, `.gitmodules`,
+  `.githooks`, `.husky`, `.pre-commit-config.yaml`, `.github/workflows`, `.claude`, `.claude.json`, `.codex`, `.agents`,
+  `.mcp.json`, `.vscode`, `.idea`, `.devcontainer`, `.centralu`, the shell startup files (`.bashrc`, `.zshrc`, `.profile`,
+  ...), `.envrc`, `.ripgreprc`, the package managers' config (`.npmrc`, `.yarnrc`, `.yarnrc.yml`, `.pnpmfile.cjs`,
+  `.cargo/config`, `.cargo/config.toml`) and `node_modules` (a hard link there reaches other projects). `CLAUDE.md` and `AGENTS.md` stay
+  editable. A segment with a `:` asks (a Windows stream such as
+  `.mcp.json::$DATA` writes the file it names). A path that cannot be resolved asks. The check reads the disk once,
+  before the write: another process that swaps a link in between is not stopped by it. A person who picks `edits` in an
+  untrusted project gets the grant too (their choice wins); only the default is tied to trust. The preset is read at each call: changing between `normal` and `edits` replaces no
+  process (`launchPreset`, `SessionHandle.setPermissionPreset`) and takes effect in the next call, while a change that alters
+  the launch (to or from `safe` or `auto`) still restarts at the end of the turn.
+  **What the grant is not:** edits to project files are code the person later runs. Under `edits`, an `allow` rule (or the
+  person's bypass) for a command that runs project code (`npm test`, `make`, a script) amounts to running anything the agent
+  wrote into the project, with no card for it. The protected names narrow where that starts; they do not close it.
+- **Agent-started sessions.** The default applies only to a session the person's window starts. `start_agent`'s child
+  gets the caller's preset, never above it (`presetWithin`, rank updated), so a `normal` caller's child is `normal`
+  in a trusted project and an `edits` caller's is `edits`. `edits` is treated as `normal` by the consent (the project's
+  trust is a `normal` or `edits` caller's consent, #673), the ceiling (4, `auto` has none), `ask_project`, the answer
+  rules and `update_centralu`. A linked machine's child (`start_agent` with `machine`, `create_session`, the hub's
+  `normal` at most) is `normal` for an `edits` caller, and the caller's preset that `fromHub` carries goes as `normal` too
+  (`carriedPreset`, `makeChild`): `edits` is never put on the link, so an older machine never sees a value it does not know. A build since #1171 reads a stored `edits` as `safe` (its store parses unknown presets
+  to `safe`), and an earlier one passes it through as an unknown preset that asks like `normal`: neither asks less.
+
 ### When the person is asked
 
 "Open" means the calling session's own `auto` preset opens that permission boundary (#603),
@@ -596,7 +661,8 @@ and the target's own preset still apply. Global bypass under `normal` does not o
 "Allowed" runs without a card, "asks" raises a card in the calling session, "refused" fails the call
 without asking. "Bypass" is the person's own global setting (`defaultMode: "bypassPermissions"` in
 `~/.claude/settings.json`; `approval_policy = "never"` in `~/.codex/config.toml`), which only the
-`normal` preset reads.
+`normal` and `edits` presets read. The table has no `edits` column: `edits` is the `normal` column in every row, except
+the row for a file edit inside the session's folder, where it is allowed.
 
 For Claude, `normal` passes the trusted settings mode explicitly, falling back to `default` when no
 valid mode is configured or settings cannot be read (#578). Omitting the SDK mode can now select
@@ -615,6 +681,7 @@ processes after adoption, at idle or when their current turn finishes (#589).
 | A Centralu tool the profile has | allowed | allowed | allowed | open | allowed | allowed | allowed | open | Claude: `canUseTool`, `isOrchestratorTool` and only when the session was given the server, checked before auto's refusal (`adapters/claude/session-cards.ts`). Codex: `default_tools_approval_mode: 'approve'` on the bridge, and an elicitation for it accepted only on a thread that has it (`adapters/codex/thread-servers.ts` `mcpConfig`, `adapters/codex/server-requests.ts` `onServerRequest`) |
 | A Centralu tool the profile does not have | refused | refused | refused | refused | refused | refused | refused | refused | `profileAllows` (exposure and execution) |
 | `read_session` and `recall` of the caller's own handoff lineage, archived ones included (#1487) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `ownLineage` in `orchestratorToolsFor` (`sessions/orchestrator-seat.ts`): the session's predecessor by its newest handoff marker, that one's, and so on (`HandoffMarkers.lineage`), whatever the project or whether live or in the session archive, and **nothing else of the archive**: any other archived session is refused as a missing one, and `recall` searches only these sessions' own messages in the archive (`searchSessions`, since the archive's search index is dropped). The chain also ends at a marker naming a session of another project, and `createSession` accepts `handoff.fromSessionId` only for a live session of the same project, so a forged marker cannot point a session at text it was never given. A session deleted for good ends the chain there, and a hub's view has no caller, so no lineage. Every line is the predecessor's, never the reader's own or the person's: `role: predecessor` for what it said, `predecessor: <id>` on each line, `[predecessor]` and `[person, to the predecessor]` in a hit's snippet, and a hit says "(your predecessor, archived)"; the answer opens by saying so. The note names the ids (`lineageLine`) and stays the only thing handed over |
+| A file edit inside the session's folder (`Edit`, `MultiEdit`, `Write`, `NotebookEdit`; a Codex patch that adds or updates files) (#1525) | asks | asks | allowed | open | asks | asks (or allowed, where the person's own policy and sandbox let a patch through) | allowed | open | **`edits` allows it**, with no card, for a path inside the folder (links resolved) that is under none of the protected names; a delete, a move, a command and every other path ask as under `normal`. `adapters/edit-grant.ts` (`insideFolder`), Claude `canUseTool` (`session-cards.ts`), Codex `item/fileChange/requestApproval` (`server-requests.ts`) |
 | `ask_project`, first time for a pair of projects | asks (consent card) | asks | asks | open | asks | asks | asks | open | `ensureProjectAccess` in `SessionManager.askProject`; "always" is kept in `project_consents` |
 | `ask_project` from a session at the agent depth (default 1: one that was itself started or asked) | refused | refused | refused | refused | refused | refused | refused | refused | `askGateError`, `agentDepthRefusal` (`prefs.agentDepth`, #867) |
 | `ask_project` from an untrusted project | refused | refused | refused | open | refused | refused | refused | open | `askProject` (the caller's project trust, #382) |

@@ -81,7 +81,7 @@ export function readTarget(toolName: string, input: Record<string, unknown>): st
 }
 
 /**
- * Normal follows the selected settings, with manual approvals when no mode was chosen.
+ * Normal (and `edits`, which differs only in `canUseTool`) follows the selected settings, with manual approvals when no mode was chosen.
  * Since SDK 0.3.286, omitting permissionMode can select the CLI's automatic classifier
  * instead. Resolve with the SDK's own merge engine and trust filter, then pass the mode
  * explicitly on start and resume. In particular, a committed project file cannot turn
@@ -90,6 +90,7 @@ export function readTarget(toolName: string, input: Record<string, unknown>): st
 export async function permissionOptionsFor(opts: CreateSessionOpts): Promise<{ permissionMode: PermissionMode }> {
   if (opts.permissionPreset === 'auto') return { permissionMode: 'bypassPermissions' }
   if (opts.permissionPreset === 'safe') return { permissionMode: 'default' }
+  // `edits` (#1525) launches as `normal` does; its one grant, edits inside the folder, is `canUseTool`'s (not `acceptEdits`)
   if (opts.noSettingFiles) return { permissionMode: (await personsDefaultMode()) ?? 'default' }
   try {
     const resolved = await resolveSettings({ cwd: opts.cwd, ...settingSourcesFor(opts) })
@@ -101,6 +102,27 @@ export async function permissionOptionsFor(opts: CreateSessionOpts): Promise<{ p
     // A settings read failure must not silently select the CLI's automatic mode.
   }
   return { permissionMode: 'default' }
+}
+
+/** The tools a settings rule `Edit(...)`, `Write(...)` and the like names: the ones the `edits` grant answers for */
+const EDIT_RULE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit'])
+
+/**
+ * Whether the person's (or the policy's) settings have an `ask` rule for a file-editing tool (#1525). The person's own ask
+ * rules win over `edits`: a rule they wrote to be asked about `Write(secret/**)` is their stated intent, and the CLI hands
+ * such an ask to `canUseTool` like any other. The rule's path pattern is not matched here (its syntax is the CLI's); a
+ * session with any such rule gets no `edits` grant at all, and so does one whose settings cannot be read.
+ */
+export async function editAskRuleExists(opts: Pick<CreateSessionOpts, 'cwd' | 'noSettingFiles' | 'projectTrusted'>): Promise<boolean> {
+  try {
+    const resolved = await resolveSettings({ cwd: opts.cwd, ...settingSourcesFor(opts) })
+    const ask: unknown = resolved.effective.permissions?.ask
+    if (ask === undefined) return false
+    if (!Array.isArray(ask)) return true
+    return ask.some((rule: unknown) => typeof rule !== 'string' || EDIT_RULE_TOOLS.has((rule.split('(')[0] ?? '').trim()))
+  } catch {
+    return true
+  }
 }
 
 const PERMISSION_MODES: readonly PermissionMode[] = ['default', 'acceptEdits', 'bypassPermissions', 'plan', 'dontAsk', 'auto']

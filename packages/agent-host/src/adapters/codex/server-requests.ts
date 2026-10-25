@@ -5,9 +5,11 @@ import type { ApprovalDecision, ApprovalDetail, ApprovalScope } from '@cc/protoc
 import type { EventSink } from '../contract.js'
 import type { ServerRequest } from './client.js'
 import { approvalDetailFrom, toCodexDecision } from './approvals.js'
-import { fileChangesOf } from './items.js'
+import { changeKindOf, fileChangesOf } from './items.js'
 import { CardIds, PendingCards } from '../session-kit.js'
 import { AlwaysAllowRules, alwaysAllowKey } from '../always-allow.js'
+import { insideFolder } from '../edit-grant.js'
+import type { FileChange } from '../file-changes.js'
 import { turnIdOf } from './turn-reads.js'
 import { asObj } from '../../json-value.js'
 
@@ -20,6 +22,8 @@ export type RequestsHost = {
   threadId(): string | null
   appServers(): ReadonlySet<string>
   ownServer(): boolean
+  /** The folder whose file edits need no card (#1525): the session's own, under `edits`; null under any other preset */
+  editsFolder(): string | null
 }
 
 /**
@@ -33,6 +37,12 @@ export class CodexRequests {
    * with it, or an answer goes to a request id nobody is waiting on.
    */
   readonly approvals = new PendingCards<OpenRequest>()
+  /**
+   * Requests whose folder grant (`edits`, #1525) is being checked on the disk, by Codex's request id. One that Codex ends
+   * meanwhile (`noteRequestEnded`) is dropped from here, and its check then neither answers nor raises a card for a
+   * request that is gone.
+   */
+  private readonly grants = new Map<string, OpenRequest>()
   /** The ids of the cards this handle raises (see `CardIds`) */
   private readonly ids = new CardIds()
   private alwaysAllow = new AlwaysAllowRules()
@@ -43,7 +53,7 @@ export class CodexRequests {
    * interrupted or failed turn: Codex sends no `item/completed` for what it cut off, #392). `thread` is the
    * thread the item belongs to (the parent's or a child's), null when the notification named none.
    */
-  private fileChanges = new Map<string, { thread: string | null; changes: { path: string; diff: string }[] }>()
+  private fileChanges = new Map<string, { thread: string | null; changes: FileChange[] }>()
 
   constructor(private readonly host: RequestsHost) {}
 
@@ -58,12 +68,14 @@ export class CodexRequests {
     if (n.method === 'serverRequest/resolved') {
       if (typeof p.requestId !== 'string' && typeof p.requestId !== 'number') return
       const serverId = String(p.requestId)
+      this.grants.delete(serverId)
       this.closeApprovals((a) => String(a.serverId) === serverId)
       return
     }
     if (n.method !== 'turn/completed' && n.method !== 'turn/failed') return
     const turn = turnIdOf(n.params)
     if (typeof p.threadId !== 'string' || !turn) return
+    for (const [id, g] of this.grants) if (g.threadId === p.threadId && g.turnId === turn) this.grants.delete(id)
     this.closeApprovals((a) => a.threadId === p.threadId && a.turnId === turn)
   }
 
@@ -186,6 +198,39 @@ export class CodexRequests {
       return
     }
 
+    /*
+     * `edits` (#1525): a patch that only adds or updates files inside the session's folder is accepted without a card.
+     * Codex has no approval mode that accepts patches and asks for commands (`on-request` runs sandboxed commands
+     * unasked), so the one grant is answered here. A request that names extra access (`grantRoot`, a `reason`), a
+     * delete, a move, a path outside the folder or under a protected name, or one that cannot be checked, is a card.
+     */
+    const folder = this.host.editsFolder()
+    const changes = r.method === 'applyPatchApproval' ? changesOfLegacy(params) : this.fileChanges.get(itemId)?.changes
+    if (folder && changes && (r.method === 'item/fileChange/requestApproval' || r.method === 'applyPatchApproval') && !params.grantRoot && !params.reason) {
+      const key = String(r.id)
+      this.grants.set(key, requestOrigin(r))
+      void this.mayGrantEdit(folder, changes).then((ok) => {
+        // Codex ended the request while it was checked: nothing to answer, no card to raise
+        if (!this.grants.delete(key)) return
+        if (ok) this.host.respond(r.id, { decision: 'accept' })
+        else this.raiseCard(r, detail)
+      })
+      return
+    }
+    this.raiseCard(r, detail)
+  }
+
+  /** Whether every change adds or updates a file inside `folder` (a delete or a move is not an edit; a check that fails asks) */
+  private async mayGrantEdit(folder: string, changes: readonly FileChange[]): Promise<boolean> {
+    if (changes.length === 0 || changes.some((c) => c.change !== 'add' && c.change !== 'update')) return false
+    try {
+      return await insideFolder(folder, changes.map((c) => c.path))
+    } catch {
+      return false
+    }
+  }
+
+  private raiseCard(r: ServerRequest, detail: ApprovalDetail): void {
     const requestId = this.ids.next('codex-req')
     this.approvals.set(requestId, requestOrigin(r))
     this.host.emit({ type: 'approval_request', sessionId: this.host.sessionId, requestId, detail })
@@ -226,6 +271,11 @@ export class CodexRequests {
     this.host.emit({ type: 'approval_resolved', sessionId: this.host.sessionId, requestId, decision })
     return true
   }
+}
+
+/** The changes a legacy `applyPatchApproval` carries, keyed by path (generated `ApplyPatchApprovalParams.fileChanges`) */
+function changesOfLegacy(params: Record<string, unknown>): FileChange[] {
+  return Object.entries(asObj(params.fileChanges)).map(([path, c]) => ({ path, diff: '', ...changeKindOf(asObj(c)) }))
 }
 
 /** The approval kind named by an elicitation's `_meta` — 0.153.4 uses `codex_approval_kind`, current source uses `codex/approval_kind` */

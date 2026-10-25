@@ -50,6 +50,7 @@ const start = (permissionPreset: PermissionPreset, projectTrusted: boolean | und
 const PRESET: Record<PermissionPreset, Record<string, unknown>> = {
   safe: { approvalPolicy: 'untrusted', sandbox: 'workspace-write' },
   normal: {},
+  edits: {},
   auto: { approvalPolicy: 'never', sandbox: 'danger-full-access' },
 }
 
