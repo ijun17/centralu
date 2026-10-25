@@ -378,6 +378,8 @@ export class MockPlatform implements Platform {
   set askPairs(value: MachinesMock['askPairs']) { this.machinesMock.askPairs = value }
   /** Machines whose "Allow auto from a linked computer" a test turned off (#1273) */
   get hubAutoOff() { return this.machinesMock.hubAutoOff }
+  get reconnectPlan() { return this.machinesMock.reconnectPlan }
+  set reconnectPlan(value: MachinesMock['reconnectPlan']) { this.machinesMock.reconnectPlan = value }
 
   // git.ts
   get gitDiffCalls() { return this.gitMock.gitDiffCalls }

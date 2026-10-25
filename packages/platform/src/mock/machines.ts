@@ -27,6 +27,12 @@ export class MachinesMock {
   updates: { machineId: string; when: 'idle' | 'now' }[] = []
   /** Each mock machine's "Allow auto from a linked computer" (#1273): on unless a test turned it off */
   hubAutoOff = new Set<string>()
+  /**
+   * How a Connect that finds the machine not connected ends (#1533): it stands as `connecting` for `afterMs`, then moves to
+   * `status` with `error` (a failed attempt keeps its reason). Unset: the mock's old rule, a disconnected machine connects at
+   * once and any other state stays as it is
+   */
+  reconnectPlan: { afterMs: number; status: MachineInfo['status']; error: string | null } | null = null
   machineRow(id: string, patch: Partial<MachineInfo>): MachineInfo {
     const at = this.machinesList.findIndex((m) => m.id === id)
     const current = this.machinesList[at]
@@ -104,8 +110,18 @@ export class MachinesMock {
       this.projectStore.list = this.projectStore.list.filter((p) => p.machine !== machineId)
       this.emit({ type: 'machine_resync', machineId })
     },
-    reconnect: async (machineId: string) =>
-      this.machineRow(machineId, this.machinesList.find((m) => m.id === machineId)?.status === 'disconnected' ? { status: 'connected', error: null } : {}),
+    reconnect: async (machineId: string) => {
+      const was = this.machinesList.find((m) => m.id === machineId)?.status
+      const plan = this.reconnectPlan
+      if (plan && was !== undefined && was !== 'connected') {
+        const row = this.machineRow(machineId, { status: 'connecting', error: null })
+        setTimeout(() => {
+          if (this.machinesList.some((m) => m.id === machineId)) this.machineRow(machineId, { status: plan.status, error: plan.error })
+        }, plan.afterMs)
+        return row
+      }
+      return this.machineRow(machineId, was === 'disconnected' ? { status: 'connected', error: null } : {})
+    },
     /** The mock's link closes and opens at once (#1134): no ssh, no hold */
     disconnect: async (machineId: string) => this.machineRow(machineId, { status: 'disconnected', error: null }),
     setAutoReconnect: async (machineId: string, autoReconnect: boolean) =>

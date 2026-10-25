@@ -241,6 +241,73 @@ export function sidebarMachinesTests(): void {
       expect((await opacities(tip)).every((o) => o === 1)).toBe(true)
     })
 
+    test("a project's menu offers Reconnect only while its machine is not connected, and it shows connecting, then the result (#1533)", async ({ page }) => {
+      await setup(page)
+      await link(page, 'Box')
+      await addOn(page, 'box', '/home/me/api')
+      const menu = page.getByTestId('project-menu-open-api')
+      const reconnect = page.getByTestId('reconnect-api')
+      const open = async () => {
+        await page.getByTestId('project-menu-api').click()
+        await expect(menu).toBeVisible()
+      }
+
+      await test.step('connected, and a project of this computer: nothing to reconnect', async () => {
+        await open()
+        await expect(reconnect).toHaveCount(0)
+        await page.keyboard.press('Escape')
+        await page.getByTestId('project-menu-alpha').click()
+        await expect(page.getByTestId('project-menu-open-alpha')).toBeVisible()
+        await expect(page.getByTestId('reconnect-alpha')).toHaveCount(0)
+        await page.keyboard.press('Escape')
+      })
+
+      await test.step('not connected: Reconnect is the first row of the menu', async () => {
+        await setMachine(page, 'box', { status: 'unreachable', error: 'ssh: connect to host box port 22: Operation timed out' })
+        await open()
+        await expect(reconnect).toHaveText('Reconnect')
+        await expect(reconnect).toBeEnabled()
+        await expect(menu.getByRole('menuitem').first()).toHaveAttribute('data-testid', 'reconnect-api')
+      })
+
+      await test.step('a failed attempt: connecting, the menu stays open, then the reason in plain words and Reconnect again', async () => {
+        await page.evaluate(() => {
+          ;(window as unknown as MockWindow).__mock.reconnectPlan = { afterMs: 600, status: 'refused', error: 'box@box: Permission denied (publickey).' }
+        })
+        await reconnect.click()
+        await expect(reconnect).toHaveText('Connecting…')
+        await expect(reconnect).toBeDisabled()
+        await expect(menu).toBeVisible()
+        await expect(page.getByTestId('reconnect-result-api')).toHaveCount(0)
+        await expect(page.getByTestId('reconnect-result-api')).toContainText('Could not connect: Box did not accept your ssh key')
+        await expect(reconnect).toHaveText('Reconnect')
+        await expect(reconnect).toBeEnabled()
+        await expect(menu).toBeVisible()
+      })
+
+      await test.step('a good attempt: connecting, then the menu closes and the badge is solid', async () => {
+        await page.evaluate(() => {
+          ;(window as unknown as MockWindow).__mock.reconnectPlan = { afterMs: 600, status: 'connected', error: null }
+        })
+        await reconnect.click()
+        await expect(reconnect).toHaveText('Connecting…')
+        await expect(menu).toHaveCount(0)
+        await expect(page.getByTestId('project-machine-api')).toHaveAttribute('data-status', 'connected')
+        await open()
+        await expect(reconnect).toHaveCount(0)
+        await page.keyboard.press('Escape')
+      })
+
+      await test.step('a machine the person disconnected says Connect, as its badge menu does', async () => {
+        await page.getByTestId('project-machine-api').click()
+        await page.getByTestId('machine-menu-disconnect-box').click()
+        await expect(page.getByTestId('project-machine-api')).toHaveAttribute('data-status', 'disconnected')
+        await open()
+        await expect(reconnect).toHaveText('Connect')
+        await expect(page.getByTestId('machine-menu-connect-box')).toHaveCount(0)
+      })
+    })
+
     test("a project is dragged between two of another machine's: the one order goes to the hub with the machines' ids", async ({ page }) => {
       await setup(page)
       await link(page, 'Box')
