@@ -32,6 +32,7 @@
     "drift:claude": "node scripts/claude-sdk-drift.mjs",
     "drift:surface": "tsx scripts/surface-drift.mts",
     "smoke:codex": "node packages/agent-host/scripts/smoke-codex.mjs",
+    "smoke:cursor": "node packages/agent-host/scripts/smoke-cursor.mjs",
     "smoke:orchestrator": "tsx packages/agent-host/scripts/smoke-orchestrator.mts",
     "smoke:schemas": "tsx packages/agent-host/scripts/smoke-schemas.mts",
     "app": "tsx scripts/app-build.mts",
