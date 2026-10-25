@@ -2,8 +2,10 @@
  * Cursor through the ACP adapter, end to end on a real host and the installed Cursor CLI (docs/plans/acp-adapter.md §0):
  *
  *   C1  the tool is detected, installed and logged in
- *   C2  refused before any process starts: an untrusted project, and the Safe preset (`launchRefusal`)
- *   C3  a turn in a trusted project: the approval card, allowed, then the turn ends; no context share is claimed
+ *   C2  refused before any process starts: an untrusted project, and Safe and Normal (Cursor writes without asking, so it
+ *       runs under Auto only, `launchRefusal`)
+ *   C3  a turn under Auto in a trusted project: the command runs with no card, its output reads back, and no context
+ *       share is claimed
  *   C4  the host restarts and the next message opens the conversation again (`session/load`) and remembers it
  *   C5  killing the host leaves no `agent acp` of this run behind
  *
@@ -122,21 +124,21 @@ const project = await c1.call('projects.add', { path: TRUSTED })
 await c1.call('projects.setTrusted', { projectId: project.id, trusted: true })
 const refusedSafe = await c1.call('agents.createSession', { projectId: project.id, cwd: TRUSTED, tool: TOOL, permissionPreset: 'safe' }).then(() => null, (e) => e.message)
 check(/Safe/.test(refusedSafe ?? ''), 'C2 the Safe preset is refused with the reason', refusedSafe ?? 'it started')
+const refusedNormal = await c1.call('agents.createSession', { projectId: project.id, cwd: TRUSTED, tool: TOOL, permissionPreset: 'normal' }).then(() => null, (e) => e.message)
+check(/Normal.*only under Auto/.test(refusedNormal ?? ''), 'C2 the Normal preset is refused with the reason', refusedNormal ?? 'it started')
 check(acpPids().filter((p) => !before.has(p)).length === 0, 'C2 no agent process was started for a refused launch')
 
 const session = await c1.call('agents.createSession', {
   projectId: project.id,
   cwd: TRUSTED,
   tool: TOOL,
-  permissionPreset: 'normal',
+  permissionPreset: 'auto',
   initialPrompt: 'Remember the code word: heron. Run the shell command: echo smoke-cursor-1 . Then say done.',
 })
-const card = await c1.next((e) => e.sessionId === session.id && e.type === 'approval_request', 'approval card')
-check(card.detail.kind === 'command' && /echo smoke-cursor-1/.test(card.detail.command), 'C3 the approval card names the command', JSON.stringify(card.detail).slice(0, 120))
-await c1.call('agents.respondApproval', { sessionId: session.id, requestId: card.requestId, decision: 'allow' })
 await c1.next((e) => e.sessionId === session.id && e.type === 'turn_complete', 'turn end')
-const result = c1.events.find((e) => e.sessionId === session.id && e.type === 'tool_result')
-check(!!result, 'C3 the command ran and its card closed', result ? `ok=${result.ok}` : 'no result')
+check(!c1.events.some((e) => e.sessionId === session.id && e.type === 'approval_request'), 'C3 Auto asks nothing')
+const result = c1.events.find((e) => e.sessionId === session.id && e.type === 'tool_result' && /smoke-cursor-1/.test(e.output ?? e.summary ?? ''))
+check(!!result && result.ok, 'C3 the command ran and its output reads back', result ? `ok=${result.ok} ${JSON.stringify(result.summary).slice(0, 60)}` : 'no result with its output')
 check(!c1.events.some((e) => e.sessionId === session.id && e.type === 'context_update'), 'C3 no context share is claimed (Cursor sends no usage_update)')
 check(acpPids().filter((p) => !before.has(p)).length === 1, 'C3 one agent process for the session')
 
