@@ -1248,12 +1248,15 @@ export class RemoteAgents {
     if (!origin || !key) {
       return { error: `This project has ${origin ? 'a local folder as its origin remote' : 'no origin remote'}, so no checkout of it on ${machine.name} can be told apart. Start the agent here, without machine.` }
     }
-    const all = await reader.projects()
+    // Only this machine is waited for if it is down (#1532): a lookup does not wait on the others
+    const all = await reader.projects({ machineId: machine.id })
     const away = all.away.find((a) => a.machineId === machine.id)
     if (away) {
       // Nothing here connects it (#1341): the sentence names the person, who can; no retry on its own is promised
       if (away.why === NOT_CONNECTED) return { error: `${machine.name} ${awayPhrase(NOT_CONNECTED)}, so nothing was started there. Try again once it is connected.` }
-      return { error: `${machine.name} cannot be reached (${away.why}), so nothing was started there. Try again once its link is back.` }
+      // Said once: `why` already starts with "not reachable right now" when a call tried to connect it (#1532)
+      const cannot = away.why.startsWith(`${NOT_REACHABLE};`) ? `is ${away.why}` : `cannot be reached (${away.why})`
+      return { error: `${machine.name} ${cannot}, so nothing was started there. Try again once its link is back.` }
     }
     const theirs = all.projects.filter((p) => p.machineId === machine.id)
     const read = await Promise.all(theirs.map(async (p) => ({ p, r: await reader.origin(p) })))

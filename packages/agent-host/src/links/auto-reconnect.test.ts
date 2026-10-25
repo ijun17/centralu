@@ -10,7 +10,8 @@ import { createRpcHandler } from '../rpc.js'
 import { HostServer } from '../transport/server.js'
 import { Links, type LinkDeps } from './links.js'
 import { linkedSessions } from './linked-sessions.js'
-import { Router } from './router.js'
+import { Router, type RoutedMachine } from './router.js'
+import { Qualifier } from './qualifier.js'
 import type { ConnectionLine, Endpoint, Tunnel } from './tunnel.js'
 import { storeMirror, storeRegistry } from './stored.js'
 import { scriptedAdapters } from './scripted-agent.test-helpers.js'
@@ -156,7 +157,7 @@ async function hubHost(line: () => ConnectionLine, o: HubOptions = {}) {
   })
   const call = (method: string, params: unknown = {}) => router.handle(method, params) as Promise<any>
   const row = () => links.list()[0]!
-  return { links, deps, store, mgr, call, row, events, tunnel: () => tunnels[0] as ControlledTunnel }
+  return { links, deps, store, mgr, call, router, row, events, tunnel: () => tunnels[0] as ControlledTunnel }
 }
 
 /** Long enough for several attempts at the test's backoff (50 ms doubling to 200 ms), scaled for a loaded machine */
@@ -1010,7 +1011,8 @@ describe("an agent's call on a machine nothing here will connect is answered at 
     hub.tunnel().drop()
     expect(hub.row().status).toBe('unreachable')
     const r = await hub.mgr.startAgent('h1', { task: 'say hello', machine: 'Laptop' })
-    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('Laptop cannot be reached') })
+    // A call tried to connect it just now (#1532), and the sentence says so once
+    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('Laptop is not reachable right now; the attempt to connect it just now failed') })
     expect((r as { error: string }).error).not.toContain('ask the person')
   })
 
@@ -1024,4 +1026,276 @@ describe("an agent's call on a machine nothing here will connect is answered at 
     await hub.mgr.respondApproval('h1', card()!.requestId, 'allow')
     expect(await call).toMatchObject({ ok: true })
   })
+})
+
+describe("an agent's call that needs a machine whose link is down makes it connect now (#1532)", () => {
+  /** A hub with a machine that has a session w1, connected; its backoff is long (a minute, to five), so the next try is far off */
+  async function rig(o: { autoReconnect?: boolean; deps?: Partial<LinkDeps> } = {}) {
+    const remoteStore = new Store()
+    remoteStore.projects.addProject({ id: 'p-app', path: checkout('git@github.com:me/app.git'), name: 'app-checkout' })
+    seedSession(remoteStore, 'p-app', 'w1', 'worker', 'ext-w1')
+    const remote = await remoteHost(remoteStore)
+    const hub = await hubHost(() => lineFor(remote.port), {
+      ...(o.autoReconnect === false ? { autoReconnect: false } : {}),
+      deps: { retryMs: [60_000, 300_000], ...o.deps },
+    })
+    await eventually(() => hub.row().status === 'connected')
+    const reader = linkedSessions(() => hub.links.all(), (method, params) => hub.call(method, params), 'Hub mac')
+    return { hub, reader, tunnel: hub.tunnel(), remote }
+  }
+  type Rig = Awaited<ReturnType<typeof rig>>
+  /** The link drops: the machine is mid-backoff, its next try a minute away */
+  async function drop(r: Rig, { sshAnswers }: { sshAnswers: boolean }): Promise<void> {
+    r.tunnel.unreachable = !sshAnswers
+    r.tunnel.drop()
+    await eventually(() => r.hub.row().status === 'unreachable')
+  }
+
+  it('starts one attempt at once, skipping the backoff, and goes through when it connects', async () => {
+    const r = await rig()
+    await drop(r, { sshAnswers: true })
+    const opens = r.tunnel.opens
+    const at = Date.now()
+    expect(await r.reader.read('m1.w1', 1)).toMatchObject({ ok: true })
+    expect(r.tunnel.opens).toBe(opens + 1)
+    expect(r.hub.row().status).toBe('connected')
+    // Not the minute of the backoff, and the machine is not asked again afterwards
+    expect(Date.now() - at).toBeLessThan(10_000 * SLOW)
+    expect(await r.reader.read('m1.w1', 1)).toMatchObject({ ok: true })
+    expect(r.tunnel.opens).toBe(opens + 1)
+  })
+
+  it('also covers the lookup of a project a start_agent needs, and a send', async () => {
+    const r = await rig({ deps: { callWindowMs: 50 } })
+    await drop(r, { sshAnswers: true })
+    const opens = r.tunnel.opens
+    // The machine the act is about: a lookup of every machine's projects tries none (the next test)
+    expect((await r.reader.projects({ machineId: 'm1' })).away).toEqual([])
+    expect(r.hub.row().status).toBe('connected')
+    expect(r.tunnel.opens).toBe(opens + 1)
+    await drop(r, { sshAnswers: true })
+    await pause(80)
+    // The link is brought up for the send; the session is not live there, so the machine itself refuses it: not for reachability
+    const sent = await r.reader.send('m1.w1', 'hello', 'Orchestrator')
+    expect(JSON.stringify(sent)).not.toContain('not reachable')
+    expect(r.hub.row().status).toBe('connected')
+    expect(r.tunnel.opens).toBe(opens + 2)
+  })
+
+  it('makes one attempt for ten calls at once', async () => {
+    const r = await rig()
+    await drop(r, { sshAnswers: true })
+    r.tunnel.openMs = 150 * SLOW
+    const opens = r.tunnel.opens
+    const answers = await Promise.all(Array.from({ length: 10 }, () => r.reader.read('m1.w1', 1)))
+    expect(answers.every((a) => a.ok)).toBe(true)
+    expect(r.tunnel.opens).toBe(opens + 1)
+  })
+
+  it("makes one attempt for the person's Connect and a call at the same moment, whichever comes first", async () => {
+    const r = await rig()
+    await drop(r, { sshAnswers: true })
+    r.tunnel.openMs = 150 * SLOW
+    let opens = r.tunnel.opens
+    const [pressed, read] = await Promise.all([r.hub.call('machines.reconnect', { machineId: 'm1' }), r.reader.read('m1.w1', 1)])
+    expect(pressed).toMatchObject({ id: 'm1' })
+    expect(read).toMatchObject({ ok: true })
+    expect(r.tunnel.opens).toBe(opens + 1)
+
+    await drop(r, { sshAnswers: true })
+    opens = r.tunnel.opens
+    const [read2] = await Promise.all([r.reader.read('m1.w1', 1), r.hub.call('machines.reconnect', { machineId: 'm1' })])
+    expect(read2).toMatchObject({ ok: true })
+    expect(r.tunnel.opens).toBe(opens + 1)
+  })
+
+  it("lists every machine's projects without trying any of them: only an act that needs one does", async () => {
+    const r = await rig()
+    await drop(r, { sshAnswers: true })
+    const opens = r.tunnel.opens
+    expect((await r.reader.projects()).away).toEqual([expect.objectContaining({ machineId: 'm1' })])
+    expect(await r.reader.findProjects('no-such-project')).toEqual([])
+    await pause(100)
+    expect(r.tunnel.opens).toBe(opens)
+    expect(r.hub.row().status).not.toBe('connected')
+  })
+
+  it('answers within the bound when the attempt fails, says why, and the backoff goes on from where it was', async () => {
+    const r = await rig({ deps: { callWaitMs: 5_000 * SLOW } })
+    await drop(r, { sshAnswers: false })
+    const opens = r.tunnel.opens
+    const at = Date.now()
+    const answer = await r.reader.read('m1.w1', 1)
+    expect(Date.now() - at).toBeLessThan(5_000 * SLOW)
+    expect(answer).toMatchObject({ ok: false, error: expect.stringContaining('not reachable right now') })
+    expect((answer as { error: string }).error).toContain('the attempt to connect it just now failed')
+    expect((answer as { error: string }).error).toContain('Operation timed out')
+    expect(r.tunnel.opens).toBe(opens + 1)
+    // The step after the minute it was at (two minutes), not the first step again as the person's Connect would give
+    await eventually(() => r.hub.row().status === 'away')
+    expect(r.hub.row().nextAttemptAt! - Date.now()).toBeGreaterThan(90_000)
+  })
+
+  it('answers within the bound when the attempt is still under way, and the attempt goes on', async () => {
+    const r = await rig({ deps: { callWaitMs: 100 * SLOW } })
+    await drop(r, { sshAnswers: true })
+    r.tunnel.openMs = 1_500 * SLOW
+    const at = Date.now()
+    const answer = await r.reader.read('m1.w1', 1)
+    expect(Date.now() - at).toBeLessThan(1_000 * SLOW)
+    expect(answer).toMatchObject({ ok: false, error: expect.stringContaining('an attempt to connect it is still under way') })
+    await eventually(() => r.hub.row().status === 'connected')
+  })
+
+  it("waits no longer than its own bound for an attempt it did not start, the person's press for one", async () => {
+    const r = await rig({ deps: { callWaitMs: 100 * SLOW } })
+    await drop(r, { sshAnswers: true })
+    r.tunnel.openMs = 1_500 * SLOW
+    const opens = r.tunnel.opens
+    const pressed = r.hub.call('machines.reconnect', { machineId: 'm1' })
+    await eventually(() => r.tunnel.opens === opens + 1)
+    const at = Date.now()
+    const answer = await r.reader.read('m1.w1', 1)
+    // Not the minute an attempt under way was waited for, nor the attempt's own 1.5 s
+    expect(Date.now() - at).toBeLessThan(1_000 * SLOW)
+    expect(answer).toMatchObject({ ok: false, error: expect.stringContaining('an attempt to connect it is still under way') })
+    await pressed
+    expect(r.tunnel.opens).toBe(opens + 1)
+  })
+
+  it("waits no longer than its bound for an attempt another call started, once that call's bound has passed", async () => {
+    const r = await rig({ deps: { callWaitMs: 400 * SLOW } })
+    await drop(r, { sshAnswers: true })
+    r.tunnel.openMs = 2_500 * SLOW
+    const first = r.reader.read('m1.w1', 1)
+    await pause(500 * SLOW)
+    const at = Date.now()
+    expect(await r.reader.read('m1.w1', 1)).toMatchObject({ ok: false })
+    expect(Date.now() - at).toBeLessThan(1_000 * SLOW)
+    await first
+  })
+
+  it('starts no other attempt within the window: a call after a failed one is answered at once', async () => {
+    const r = await rig({ deps: { callWindowMs: 60_000 } })
+    await drop(r, { sshAnswers: false })
+    const opens = r.tunnel.opens
+    expect(await r.reader.read('m1.w1', 1)).toMatchObject({ ok: false })
+    expect(r.tunnel.opens).toBe(opens + 1)
+    const at = Date.now()
+    for (let i = 0; i < 5; i++) {
+      expect(await r.reader.read('m1.w1', 1)).toMatchObject({ ok: false, error: expect.stringContaining('the attempt to connect it just now failed') })
+    }
+    expect(Date.now() - at).toBeLessThan(2_000 * SLOW)
+    expect(r.tunnel.opens).toBe(opens + 1)
+  })
+
+  it('may start another once the window has passed', async () => {
+    const r = await rig({ deps: { callWindowMs: 50 } })
+    await drop(r, { sshAnswers: false })
+    const opens = r.tunnel.opens
+    expect(await r.reader.read('m1.w1', 1)).toMatchObject({ ok: false })
+    await pause(80)
+    r.tunnel.unreachable = false
+    expect(await r.reader.read('m1.w1', 1)).toMatchObject({ ok: true })
+    expect(r.tunnel.opens).toBe(opens + 2)
+  })
+
+  it('starts no attempt with Auto reconnect off, and answers as not connected, as before', async () => {
+    const r = await rig({ autoReconnect: false })
+    await drop(r, { sshAnswers: true })
+    const opens = r.tunnel.opens
+    expect(await r.reader.read('m1.w1', 1)).toMatchObject({ ok: false, error: expect.stringContaining('ask the person to connect it') })
+    expect((await r.reader.projects()).away).toEqual([expect.objectContaining({ machineId: 'm1', why: expect.stringContaining('not connected') })])
+    await pause(100)
+    expect(r.tunnel.opens).toBe(opens)
+    expect(r.hub.row().status).not.toBe('connected')
+  })
+
+  it('starts none for a machine the person disconnected', async () => {
+    const r = await rig()
+    await r.hub.call('machines.disconnect', { machineId: 'm1' })
+    const opens = r.tunnel.opens
+    expect(await r.reader.read('m1.w1', 1)).toMatchObject({ ok: false, error: expect.stringContaining('ask the person to connect it') })
+    expect(r.tunnel.opens).toBe(opens)
+  })
+
+  it("connects the machine for a call through the router with no window behind it, and not for a window's", async () => {
+    const r = await rig()
+    await drop(r, { sshAnswers: true })
+    const opens = r.tunnel.opens
+    // A window's call (it has a connection) is refused as before and starts nothing
+    await expect(r.hub.router.handle('agents.interrupt', { sessionId: 'm1.w1' }, { client: 1 })).rejects.toThrow('not reachable right now')
+    await pause(100)
+    expect(r.tunnel.opens).toBe(opens)
+    // The host's own call, for an agent, connects it first
+    // It reached the machine, which does not run that session: the answer is the machine's, not a refusal for reachability
+    await expect(r.hub.router.handle('agents.interrupt', { sessionId: 'm1.w1' })).rejects.toThrow('Session not found')
+    expect(r.tunnel.opens).toBe(opens + 1)
+  })
+})
+
+describe('an answer that a machine could not be reached says what was tried, once (#1532)', () => {
+  /** As the #1341 rig: a hub project that asks, a machine with a checkout of its repository, the link dropped with ssh not answering */
+  async function rig() {
+    const remoteStore = new Store()
+    remoteStore.projects.addProject({ id: 'p-app', path: checkout('git@github.com:me/app.git'), name: 'app-checkout' })
+    seedSession(remoteStore, 'p-app', 'w1', 'worker', 'ext-w1')
+    const remote = await remoteHost(remoteStore)
+    const hubStore = new Store()
+    hubStore.projects.addProject({ id: 'p-hub', path: checkout('https://github.com/me/app'), name: 'app' })
+    seedSession(hubStore, 'p-hub', 'h1', 'worker', 'ext-h1')
+    const hub = await hubHost(() => lineFor(remote.port), { store: hubStore, deps: { retryMs: [60_000, 300_000] } })
+    await hub.mgr.setProjectTrusted('p-hub', true)
+    await eventually(() => hub.row().status === 'connected')
+    hub.tunnel().unreachable = true
+    hub.tunnel().drop()
+    await eventually(() => hub.row().status === 'unreachable')
+    return { hub, remote }
+  }
+  const times = (text: string, part: string) => text.split(part).length - 1
+
+  it('start_agent with the machine says it is not reachable and why, in one sentence', async () => {
+    const { hub } = await rig()
+    const r = await hub.mgr.startAgent('h1', { task: 'say hello', machine: 'Laptop' })
+    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('Laptop is not reachable right now; the attempt to connect it just now failed: ') })
+    const error = (r as { error: string }).error
+    expect(error).toContain('Operation timed out')
+    expect(error).not.toContain('cannot be reached (')
+    expect(times(error, 'not reachable right now')).toBe(1)
+  })
+
+  it("the router's refusal carries the reason too, whether the window or the host asks", async () => {
+    const { hub } = await rig()
+    // A call made the attempt (the host's own, for an agent): it failed, and the window's refusal after it says how
+    await expect(hub.router.handle('agents.interrupt', { sessionId: 'm1.w1' })).rejects.toThrow('not reachable right now; the attempt to connect it just now failed')
+    const refusal = await hub.router.handle('agents.interrupt', { sessionId: 'm1.w1' }, { client: 1 }).catch((e: Error) => e.message)
+    expect(refusal).toMatch(/^Laptop is not reachable right now; the attempt to connect it just now failed: .*Operation timed out.*; this works again once its link is back$/)
+    expect(times(refusal as string, 'not reachable right now')).toBe(1)
+  })
+  it('start_agent on a machine that is up does not wait on another that is down, nor try it', async () => {
+    const { hub } = await rig()
+    const desk: RoutedMachine = {
+      id: 'm2',
+      name: 'Desk',
+      q: new Qualifier('m2', 2),
+      reachable: true,
+      call: async (method) => {
+        if (method === 'projects.list') return []
+        throw new Error(`Unknown method: ${method}`)
+      },
+      lastKnown: () => null,
+      observe: () => {},
+      hides: () => false,
+    }
+    // The machine that is down is a real link, mid-backoff with a long step; Desk is a stand-in that is up
+    hub.mgr.useLinkedReader(linkedSessions(() => [...hub.links.all(), desk], (method, params) => hub.call(method, params), 'Hub mac'))
+    hub.tunnel().openMs = 5_000 * SLOW
+    const opens = hub.tunnel().opens
+    const at = Date.now()
+    const r = await hub.mgr.startAgent('h1', { task: 'say hello', machine: 'Desk' })
+    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('Desk has no checkout of') })
+    expect(Date.now() - at).toBeLessThan(2_000 * SLOW)
+    expect(hub.tunnel().opens).toBe(opens)
+  })
+
 })

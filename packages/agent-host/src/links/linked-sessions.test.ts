@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { tmpdir } from 'node:os'
-import { eventually } from '../../../../tooling/test-timing.js'
+import { eventually, SLOW } from '../../../../tooling/test-timing.js'
 import { sessionLiveDefaults } from '@cc/protocol'
 import { Store } from '../dev-services/store.js'
 import { PAUSED_REPORT_SETTLE_MS, SessionManager } from '../sessions/manager.js'
@@ -504,6 +504,121 @@ describe('the projects of linked machines, for ask_project (#700)', () => {
     })
     const { projects } = await linkedSessions(() => [m]).projects()
     expect(projects.map((p) => p.trusted)).toEqual([true, false, undefined])
+  })
+})
+
+/*
+ * #1532 review: a lookup that tried every down machine made an act wait on machines it had nothing to do with, and on
+ * an attempt to one for as long as that attempt took. Only the machine the act needs is tried.
+ */
+describe('a project lookup connects only the machine the act needs (#1532)', () => {
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+  /** A machine that is down; trying it (`reachForCall`) takes `ms` and then it is up, or stays down with `why` */
+  function downMachine(id: string, name: string, ms: number, o: { comesBack?: boolean; why?: string } = {}) {
+    let up = false
+    const tried = { count: 0 }
+    const base = machine(
+      { 'projects.list': [{ id: 'p-live', name: 'live', path: `/srv/${id}`, defaultTool: null }] },
+      { reachable: false, mirror: { projects: [{ id: 'p-old', name: 'old', path: `/srv/${id}/old`, defaultTool: null }] } },
+    )
+    const m: RoutedMachine = {
+      ...base,
+      id,
+      name,
+      q: new Qualifier(id, 2),
+      get reachable() {
+        return up
+      },
+      // A slow attempt under way, as the backoff's or a press: nothing in a lookup of another machine may wait on it
+      attemptUnderWay: true,
+      settled: async () => {
+        await sleep(ms)
+      },
+      reachForCall: async () => {
+        tried.count++
+        await sleep(ms)
+        up = o.comesBack !== false
+      },
+      get whyDown() {
+        return up ? null : (o.why ?? null)
+      },
+    }
+    return { m, tried }
+  }
+  const fine = () => machine({ 'projects.list': [{ id: 'p1', name: 'apps', path: '/srv/apps', defaultTool: null }] })
+
+  it('does not wait on a down machine, nor on an attempt to it, for a project on another one', async () => {
+    const { m: far, tried } = downMachine('far', 'Far box', 400 * SLOW)
+    const reader = linkedSessions(() => [far, fine()])
+    const t0 = Date.now()
+    expect((await reader.findProjects('apps')).map((p) => [p.id, p.away])).toEqual([['m1.p1', undefined]])
+    // Listing them all, or one machine's, or a project that is on the machine that is up, tries none either
+    expect((await reader.projects()).projects.map((p) => p.id)).toEqual(['far.p-old', 'm1.p1'])
+    await reader.projects({ ref: 'apps' })
+    await reader.projects({ machineId: 'm1' })
+    expect(Date.now() - t0).toBeLessThan(300 * SLOW)
+    expect(tried.count).toBe(0)
+  })
+
+  it('tries the machine a name belongs to, and finds the project listed again once it is up', async () => {
+    const { m: far, tried } = downMachine('far', 'Far box', 20)
+    const { m: other, tried: otherTried } = downMachine('other', 'Other box', 20)
+    const reader = linkedSessions(() => [far, other])
+    // `old` is in the mirror of Far box only
+    expect((await reader.findProjects('old')).map((p) => p.id)).toEqual([])
+    expect(tried.count).toBe(1)
+    expect((await reader.findProjects('live')).map((p) => [p.id, p.away])).toEqual([['far.p-live', undefined], ['other.p-live', undefined]])
+    expect(otherTried.count).toBe(1)
+  })
+
+  it('tries the machine the act is about, and a machine the name is qualified with though the mirror holds nothing', async () => {
+    const { m: far, tried } = downMachine('far', 'Far box', 20)
+    const { m: other, tried: otherTried } = downMachine('other', 'Other box', 20)
+    const reader = linkedSessions(() => [far, other])
+    const { away } = await reader.projects({ machineId: 'other' })
+    expect(away).toEqual([])
+    expect([tried.count, otherTried.count]).toEqual([0, 1])
+    // `Far box/live`: its machine is named, so it is tried
+    expect((await reader.projects({ ref: 'far box/live' })).projects.some((p) => p.id === 'far.p-live')).toBe(true)
+    expect(tried.count).toBe(1)
+  })
+
+  it('names the machine and what became of the attempt when it stays down, once', async () => {
+    const { m: far } = downMachine('far', 'Far box', 10, { comesBack: false, why: 'the attempt to connect it just now failed: Operation timed out' })
+    const reader = linkedSessions(() => [far])
+    const [project] = await reader.findProjects('old')
+    expect(project!.away).toBe('not reachable right now; the attempt to connect it just now failed: Operation timed out')
+    expect((await reader.projects({ machineId: 'far' })).away).toEqual([{ machine: 'Far box', machineId: 'far', why: project!.away }])
+  })
+
+  it('says a machine whose attempt is still going is away with that said, not listed as if it were up', async () => {
+    const { m: far } = downMachine('far', 'Far box', 10, { comesBack: false, why: 'an attempt to connect it is still under way' })
+    const { away } = await linkedSessions(() => [far]).projects({ machineId: 'far' })
+    expect(away).toEqual([{ machine: 'Far box', machineId: 'far', why: 'not reachable right now; an attempt to connect it is still under way' }])
+  })
+
+  describe('create_session by name', () => {
+    it('takes a project of this computer without waiting on a machine that is down, nor on an attempt to it', async () => {
+      const store = new Store()
+      store.sessions.upsertSession({
+        id: 'orch', projectId: null, kind: 'orchestrator', tool: 'claude', externalId: 'ext-orch', name: 'Orchestrator', autoNamed: false,
+        state: 'idle', lastReadSeq: 0, lastSeq: 0, createdAt: 1, waitingSince: null, live: false, model: null, effort: null, verbosity: null,
+        serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null,
+        roleAppend: null, appId: null, ...sessionLiveDefaults(),
+      })
+      store.projects.addProject({ id: 'p-here', path: tmpdir(), name: 'site' })
+      const { m: far, tried } = downMachine('far', 'Far box', 600 * SLOW)
+      const mgr = new SessionManager(store, scriptedAdapters(), () => {})
+      mgr.useLinkedReader(linkedSessions(() => [far]))
+      try {
+        const t0 = Date.now()
+        expect(await mgr.runOrchestratorTool('orch', 'create_session', { project: 'site' })).toMatchObject({ isError: false })
+        expect(Date.now() - t0).toBeLessThan(400 * SLOW)
+        expect(tried.count).toBe(0)
+      } finally {
+        await mgr.disposeAll()
+      }
+    })
   })
 })
 

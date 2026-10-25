@@ -1,5 +1,5 @@
 import { AGENT_INSTRUCTIONS_MAX, BackgroundTask, HostLastAnswerResult, HostReadSessionResult, PermissionPreset, RpcMethods, HostRecallHit, HostSessionRow, oneLineText, SessionId, SessionInfo, ToolName } from '@cc/protocol'
-import { awayPhrase, NOT_CONNECTED, NOT_REACHABLE, type LinkedProject, type LinkedSessions, type OrchestratedSession, type RecallHit } from '../adapters/contract.js'
+import { awayPhrase, NOT_CONNECTED, NOT_REACHABLE, type LinkedProject, type LinkedSessions, type OrchestratedSession, type ProjectNeed, type RecallHit } from '../adapters/contract.js'
 import { trustedJsonText } from '../sessions/orchestrator-tools.js'
 import { budgetOf, fitMachineLines, toolLinesOf } from '../sessions/session-lines.js'
 import { clipPreview } from '../sessions/turn-answer.js'
@@ -157,13 +157,21 @@ export function linkedSessions(
    * says so at once and names who can: the person. No call connects a machine by itself
    */
   const away = (m: RoutedMachine): string =>
-    m.waitsForPerson ? `${m.name} ${awayPhrase(NOT_CONNECTED)}, then try again` : `${m.name} is ${NOT_REACHABLE}; try again once its link is back`
+    m.waitsForPerson ? `${m.name} ${awayPhrase(NOT_CONNECTED)}, then try again` : `${m.name} is ${notReachable(m)}; try again once its link is back`
+  /**
+   * `NOT_REACHABLE`, with the attempt a call made to connect the machine (#1532): that it is still under way, or that it
+   * failed with the attempt's own words, so the agent can tell a machine that is off from one whose ssh is refused
+   */
+  const notReachable = (m: RoutedMachine): string => (m.whyDown ? `${NOT_REACHABLE}; ${oneLine(m.whyDown, 300)}` : NOT_REACHABLE)
   /**
    * A machine that is connecting is waited for, bounded (#1341): the act that needs it goes through once the attempt ends,
    * as it did when a need connected it. With nothing trying, the call is answered at once
    */
   const settle = async (m: RoutedMachine): Promise<void> => {
-    if (m.attemptUnderWay) await m.settled?.()
+    if (m.reachable) return
+    // A call that needs a machine which is down tries to connect it (#1532, `reachForCall`); one that cannot do that waits for an attempt under way
+    if (m.reachForCall) await m.reachForCall()
+    else if (m.attemptUnderWay) await m.settled?.()
   }
   /** The router's call, its refusal as the sentence the model reads */
   const attempt = async <T>(m: RoutedMachine, run: () => Promise<T>): Promise<({ ok: true } & T) | { ok: false; error: string }> => {
@@ -246,33 +254,55 @@ export function linkedSessions(
     return out
   }
 
+  type Listed = { projects: LinkedProject[]; away: { machine: string; machineId: string; why: string }[] }
+  /**
+   * One machine's projects, asked within `lookupMs` (#700). One that cannot be asked gives what the headers mirror last
+   * held, each project marked `away` with why. `tried`: a call just tried to connect it, so one still connecting is away
+   * too, with that said: the act that follows has waited for it already
+   */
+  const projectsOf = async (m: RoutedMachine, tried = false): Promise<Listed> => {
+    const away: Listed['away'] = []
+    /** What the headers mirror last held of the machine's projects, each marked with why it could not be asked */
+    const mirrored = (why: string): LinkedProject[] => {
+      away.push({ machine: m.name, machineId: m.id, why })
+      return lastProjects(m).map((p) => ({ ...p, away: why }))
+    }
+    // Not away while it is connecting: its projects stand as last listed, and the act that follows waits for the link
+    if (!m.reachable && m.attemptUnderWay && !tried) return { projects: lastProjects(m), away }
+    if (!m.reachable) return { projects: mirrored(m.waitsForPerson ? NOT_CONNECTED : notReachable(m)), away }
+    try {
+      const list = await raceTimeout(m.call('projects.list', {}), lookupMs, TIMED_OUT)
+      if (list === TIMED_OUT) throw new Error(notWithin(lookupMs))
+      return { projects: (Array.isArray(list) ? list : []).map((raw) => projectOf(m, raw)).filter((p): p is LinkedProject => p !== null), away }
+    } catch (err) {
+      return { projects: mirrored(cause(m, err)), away }
+    }
+  }
+  /** Whether the project wanted as `need` is on machine `m`, as far as the mirror tells: its machine is named, or a project of it by that id or name */
+  const needs = (m: RoutedMachine, need: ProjectNeed): boolean => {
+    if (need.machineId === m.id) return true
+    const ref = need.ref?.trim()
+    if (!ref) return false
+    const slash = ref.indexOf('/')
+    const prefix = slash > 0 ? ref.slice(0, slash).trim().toLowerCase() : null
+    if (prefix === m.id || prefix === m.name.toLowerCase() || ref.startsWith(`${m.id}.`)) return true
+    return lastProjects(m).some((p) => p.id === ref || p.name.toLowerCase() === ref.toLowerCase())
+  }
+
   /**
    * Every machine's projects, each machine asked within `lookupMs` (#700). One that cannot be asked gives what the headers
    * mirror last held, each project marked `away` with why. Looking a name up (`findProjects`) goes through this too, so
-   * a stalled link holds it up no longer than it holds the list, and a project there is found as away, never as missing
+   * a stalled link holds it up no longer than it holds the list, and a project there is found as away, never as missing.
+   *
+   * With `need`, the machines the act needs that are down are tried first (#1532, `settle`) and listed again after: only
+   * those. A list does not wait on a machine the act does not need, nor on an attempt to one (it never did)
    */
-  const everyProject: LinkedSessions['projects'] = async () => {
-    const away: { machine: string; machineId: string; why: string }[] = []
-    const perMachine = await Promise.all(
-      [...machines()].map(async (m): Promise<LinkedProject[]> => {
-        /** What the headers mirror last held of the machine's projects, each marked with why it could not be asked */
-        const mirrored = (why: string): LinkedProject[] => {
-          away.push({ machine: m.name, machineId: m.id, why })
-          return lastProjects(m).map((p) => ({ ...p, away: why }))
-        }
-        // Not away while it is connecting: its projects stand as last listed, and the act that follows waits for the link
-        if (!m.reachable && m.attemptUnderWay) return lastProjects(m)
-        if (!m.reachable) return mirrored(m.waitsForPerson ? NOT_CONNECTED : NOT_REACHABLE)
-        try {
-          const list = await raceTimeout(m.call('projects.list', {}), lookupMs, TIMED_OUT)
-          if (list === TIMED_OUT) throw new Error(notWithin(lookupMs))
-          return (Array.isArray(list) ? list : []).map((raw) => projectOf(m, raw)).filter((p): p is LinkedProject => p !== null)
-        } catch (err) {
-          return mirrored(cause(m, err))
-        }
-      }),
-    )
-    return { projects: perMachine.flat(), away }
+  const everyProject: LinkedSessions['projects'] = async (need) => {
+    const all = [...machines()]
+    const wanted = need ? all.filter((m) => !m.reachable && needs(m, need)) : []
+    // A machine the act needs is listed after its attempt, once: the others are listed meanwhile
+    const parts = await Promise.all(all.map(async (m) => (wanted.includes(m) ? (await settle(m), projectsOf(m, true)) : projectsOf(m))))
+    return { projects: parts.flatMap((p) => p.projects), away: parts.flatMap((p) => p.away) }
   }
 
   return {
@@ -293,7 +323,8 @@ export function linkedSessions(
 
     async findProjects(ref) {
       const wanted = ref.trim()
-      return (await everyProject()).projects.filter((p) => p.id === wanted || p.name === wanted)
+      // The machine the name belongs to is tried if it is down (#1532): the act that follows creates a session there
+      return (await everyProject({ ref: wanted })).projects.filter((p) => p.id === wanted || p.name === wanted)
     },
 
     projects: everyProject,
@@ -591,7 +622,7 @@ export function linkedSessions(
       const m = owner(sessionId)
       if (!m) return { ok: false, error: `Not a session of a linked machine: ${sessionId}` }
       await settle(m)
-      if (!m.reachable) return { ok: false, error: m.waitsForPerson ? away(m) : `${m.name} is ${NOT_REACHABLE}` }
+      if (!m.reachable) return { ok: false, error: m.waitsForPerson ? away(m) : `${m.name} is ${notReachable(m)}` }
       try {
         const answer = await m.call('host.lastAnswer', { sessionId: m.q.strip(sessionId, 'The session'), maxChars: Math.min(maxChars, ANSWER_MAX_CHARS) })
         const r = HostLastAnswerResult.safeParse(answer)
@@ -637,7 +668,7 @@ export function linkedSessions(
       const m = owner(sessionId)
       if (!m) return { ok: false, error: `Not a session of a linked machine: ${sessionId}` }
       await settle(m)
-      if (!m.reachable) return { ok: false, error: m.waitsForPerson ? away(m) : `${m.name} is not reachable right now; read it again once its link is back` }
+      if (!m.reachable) return { ok: false, error: m.waitsForPerson ? away(m) : `${m.name} is ${notReachable(m)}; read it again once its link is back` }
       const toolMode = toolLinesOf(opts?.tools)
       try {
         const answer = await m.call('host.readSession', {

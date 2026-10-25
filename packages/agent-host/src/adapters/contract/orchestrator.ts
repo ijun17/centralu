@@ -173,8 +173,12 @@ export const NOT_CONNECTED_PHRASE = 'is not connected, and nothing here connects
  */
 export function awayPhrase(why: string): string {
   if (why === NOT_CONNECTED) return NOT_CONNECTED_PHRASE
-  return why === NOT_REACHABLE ? `is ${NOT_REACHABLE}` : `could not be asked just now (${why})`
+  // "not reachable right now", alone or with the attempt a call just made to connect it and how that failed (#1532)
+  return why === NOT_REACHABLE || why.startsWith(`${NOT_REACHABLE};`) ? `is ${why}` : `could not be asked just now (${why})`
 }
+
+/** What an act that looks projects up needs: the project it names (`ref`, as ask_project takes it), or the machine it is about */
+export type ProjectNeed = { ref?: string; machineId?: string }
 
 /** A project on a linked machine, as the hub's orchestrator names it (#82 phase 4) */
 export type LinkedProject = {
@@ -212,15 +216,17 @@ export type LinkedSessions = {
   ): Promise<Outcome<{ info: SessionInfo & { applied?: string } }>>
   /**
    * The projects of `projects()` whose name or qualified id is `ref`, under the same per-machine bound: one on a machine
-   * that cannot be asked just now comes from the mirror, marked `away`, so it is found as unreachable, never as missing
+   * that cannot be asked just now comes from the mirror, marked `away`, so it is found as unreachable, never as missing.
+   * The machine the name belongs to is tried first if it is down (#1532); no other machine is
    */
   findProjects(ref: string): Promise<LinkedProject[]>
   /**
    * Every linked machine's projects (ask_project, #700). A machine that cannot be asked contributes what the headers
    * mirror last held, each project marked `away` with why, and is named in `away` whether or not the mirror held
-   * anything: a project there is reported as unreachable, never as missing
+   * anything: a project there is reported as unreachable, never as missing. `need` is what the act is about (#1532): a
+   * machine it needs that is down is tried to connect, bounded, before it is listed; one it does not need is never waited for
    */
-  projects(): Promise<{ projects: LinkedProject[]; away: { machine: string; machineId: string; why: string }[] }>
+  projects(need?: ProjectNeed): Promise<{ projects: LinkedProject[]; away: { machine: string; machineId: string; why: string }[] }>
   /** A machine project's ordinary sessions (its workers, not an app's) as that machine reports them now; ids qualified */
   projectSessions(project: LinkedProject): Promise<Outcome<{ sessions: { id: string; name: string; state: string }[] }>>
   /**

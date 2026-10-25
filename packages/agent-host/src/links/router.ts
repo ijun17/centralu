@@ -46,6 +46,14 @@ export interface RoutedMachine {
   readonly attemptUnderWay?: boolean
   /** Resolves once no attempt is under way, or after a bound. Absent: nothing to wait for */
   settled?(): Promise<void>
+  /**
+   * An agent's call needs the machine (#1532): with Auto reconnect on and the link down, starts one attempt to connect now
+   * (the person's Connect, `LinkedMachineConnection.connect`) unless one is under way, and waits for it a short bound.
+   * The caller reads `reachable` after. Absent: nothing to try
+   */
+  reachForCall?(): Promise<void>
+  /** The attempt to connect it that a call made or waited on, as a clause for the answer to a call it could not take (it is still under way, or it failed and why); null when up or unsaid */
+  readonly whyDown?: string | null
 }
 
 /**
@@ -75,7 +83,8 @@ export class MachineUnreachableError extends Error {
   readonly retryable = true
   readonly data: { machine: string; reason: 'unreachable' }
   constructor(machine: RoutedMachine) {
-    super(`${machine.name} is not reachable right now; this works again once its link is back`)
+    // With the attempt a call just made to connect it, and how it went (#1532): once, as part of the same sentence
+    super(`${machine.name} is not reachable right now${machine.whyDown ? `; ${machine.whyDown}` : ''}; this works again once its link is back`)
     this.data = { machine: machine.id, reason: 'unreachable' }
   }
 }
@@ -146,7 +155,13 @@ export class Router {
     return null
   }
 
-  private async forward(m: RoutedMachine, method: string, params: unknown): Promise<unknown> {
+  private async forward(m: RoutedMachine, method: string, params: unknown, ctx?: RpcContext): Promise<unknown> {
+    /*
+     * A call with no window behind it (`ctx` absent: an agent's, through the host's own use of the router) needs the machine
+     * and tries to connect it (#1532). A window's call (`ctx` given) never does: it polls and re-reads whatever is on screen,
+     * and the person has Connect for it
+     */
+    if (!m.reachable && ctx === undefined) await m.reachForCall?.()
     if (!m.reachable) throw new MachineUnreachableError(m)
     return m.call(method, params)
   }
@@ -164,7 +179,7 @@ export class Router {
       const m = this.machineById(params.machine)
       if (!m) throw rpcError(`No linked machine ${params.machine}`)
       const { machine: _machine, ...rest } = params
-      const r = await this.forward(m, method, route.params ? route.params(rest, m.q) : rest)
+      const r = await this.forward(m, method, route.params ? route.params(rest, m.q) : rest, ctx)
       return route.result ? route.result(r, m.q) : r
     }
     const m = this.owner(params[key])
@@ -175,7 +190,7 @@ export class Router {
     const done = this.opts.forwarding?.(method, params)
     let r: unknown
     try {
-      r = await this.forward(m, method, p)
+      r = await this.forward(m, method, p, ctx)
     } catch (e) {
       done?.(false)
       throw e
@@ -217,7 +232,7 @@ export class Router {
     const { machine: _machine, ...own } = params
     const p: Obj = route.orMachine ? own : { ...params }
     for (const key of route.keys) if (typeof p[key] === 'string') p[key] = target.q.strip(p[key], 'The id')
-    const r = await this.forward(target, method, p)
+    const r = await this.forward(target, method, p, ctx)
     return route.result ? route.result(r, target.q) : r
   }
 
@@ -235,7 +250,7 @@ export class Router {
       const shared = await this.sameAccountAnswer(m, method, rest, ctx)
       if (shared) return route.result ? route.result(shared, m.q) : shared
     }
-    const r = await this.forward(m, method, rest)
+    const r = await this.forward(m, method, rest, ctx)
     return route.result ? route.result(r, m.q) : r
   }
 
