@@ -13,7 +13,7 @@ describe('Done on an error against an older host (#1549)', () => {
     })
     const platform = createWebPlatform({ token: 'test', WebSocketImpl: UnconnectedSocket as unknown as typeof WebSocket })
     try {
-      await expect(platform.agents.clearError('s1', 7)).resolves.toEqual({ cleared: false })
+      await expect(platform.agents.clearError('s1', 7)).resolves.toEqual({ cleared: false, newer: false, olderHost: true })
       expect(call).toHaveBeenCalledWith('sessions.markRead', { sessionId: 's1', seq: 7 })
     } finally {
       await platform.dispose()

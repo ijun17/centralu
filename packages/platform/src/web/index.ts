@@ -215,12 +215,13 @@ class WebAgentPort implements AgentPort {
   }
   async clearError(sessionId: string, seq: number) {
     try {
-      return { cleared: (await this.rpc.call('sessions.clearError', { sessionId, seq })).cleared }
+      const r = await this.rpc.call('sessions.clearError', { sessionId, seq })
+      return { cleared: r.cleared, newer: r.newer, olderHost: false }
     } catch (e) {
       // A host from before Done cleared an error can still read the answer
       if (!(e instanceof Error && e.message.startsWith('Unknown method: sessions.clearError'))) throw e
       await this.markRead(sessionId, seq)
-      return { cleared: false }
+      return { cleared: false, newer: false, olderHost: true }
     }
   }
   listSessions() {

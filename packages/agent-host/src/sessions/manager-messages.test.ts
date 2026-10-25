@@ -789,7 +789,7 @@ describe("clearing a session's error (#1549)", () => {
     const { s, row } = await failed()
     const seen = (await row()).lastSeq
     expect((await row()).state).toBe('error')
-    expect(await rpc('sessions.clearError', { sessionId: s.id, seq: seen })).toEqual({ ok: true, cleared: true })
+    expect(await rpc('sessions.clearError', { sessionId: s.id, seq: seen })).toEqual({ ok: true, cleared: true, newer: false })
     const after = await row()
     expect(after.state).toBe('idle')
     expect(after.lastReadSeq).toBe(seen)
@@ -813,7 +813,7 @@ describe("clearing a session's error (#1549)", () => {
     const b = await row()
     expect(b.lastSeq).toBeGreaterThan(seenA)
     const mark = events.length
-    expect(await rpc('sessions.clearError', { sessionId: s.id, seq: seenA })).toEqual({ ok: true, cleared: false })
+    expect(await rpc('sessions.clearError', { sessionId: s.id, seq: seenA })).toEqual({ ok: true, cleared: false, newer: true })
     const after = await row()
     expect(after.state).toBe('error')
     expect(after.lastReadSeq).toBe(seenA)
@@ -829,7 +829,7 @@ describe("clearing a session's error (#1549)", () => {
     const before = await row()
     expect(before.state).not.toBe('error')
     const mark = events.length
-    expect(await rpc('sessions.clearError', { sessionId: s.id, seq: before.lastSeq })).toEqual({ ok: true, cleared: false })
+    expect(await rpc('sessions.clearError', { sessionId: s.id, seq: before.lastSeq })).toEqual({ ok: true, cleared: false, newer: false })
     expect((await row()).state).toBe(before.state)
     expect(events.slice(mark).filter((e) => e.type === 'state_change')).toEqual([])
   })

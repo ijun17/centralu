@@ -409,13 +409,13 @@ export const sessionMethods = {
   /**
    * Done on a session in `error` (#1549): it moves to `idle` and what the person saw is read, so the sidebar's mark and the
    * inbox row go. `seq` is the newest row the window had: the error is cleared only when nothing newer exists (a later error
-   * the person has not seen stays), and rows up to `seq` are read either way. `cleared` says whether the state moved. A session
+   * the person has not seen stays), and rows up to `seq` are read either way. `cleared` says whether the state moved, `newer` that it stayed `error` because a newer row exists. A session
    * not in `error` keeps its state (its rows up to `seq` are read). Nothing is stopped, retried or continued, and the error
    * line stays in the conversation. The person's alone (the window): an agent's script may not hide a failure.
    */
   'sessions.clearError': {
     params: z.object({ sessionId: SessionId, seq: z.number() }),
-    result: z.object({ ok: z.literal(true), cleared: z.boolean() }),
+    result: z.object({ ok: z.literal(true), cleared: z.boolean(), newer: z.boolean().default(false) }),
   },
   'messages.load': {
     params: z.object({ sessionId: SessionId, limit: z.number().default(200), beforeSeq: z.number().optional() }),

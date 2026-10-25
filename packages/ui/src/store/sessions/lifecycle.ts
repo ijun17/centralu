@@ -459,8 +459,9 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
     const s = get().sessions[sessionId]
     const platform = get().platform
     if (s?.state !== 'error' || !platform) return get().markRead(sessionId)
+    let result: { cleared: boolean; newer: boolean; olderHost: boolean }
     try {
-      await platform.agents.clearError(sessionId, s.lastSeq)
+      result = await platform.agents.clearError(sessionId, s.lastSeq)
     } catch (e) {
       set({ toast: `Could not clear the error: ${(e as Error).message}` })
       return
@@ -471,6 +472,9 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
      * wiped such a card. Only the read mark is this window's to move.
      */
     set(ifSessionStill(sessionId, (st, cur) => ({ sessions: { ...st.sessions, [sessionId]: markReadPure(cur, s.lastSeq) } })))
+    // Done that cleared nothing says why, instead of seeming to do nothing
+    if (result.olderHost) set({ toast: 'Marked as read. This host is too old to clear an error: it stays until the host is updated' })
+    else if (result.newer) set({ toast: 'A newer error arrived. It stays marked' })
   },
 
   /*

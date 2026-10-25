@@ -2823,14 +2823,15 @@ export class SessionManager {
    * session again. The error line stays in the conversation; nothing is stopped or sent. Its last answer is read, so a stopped
    * turn that waits unread in the inbox goes too.
    */
-  clearError(sessionId: string, seq: number): boolean {
+  clearError(sessionId: string, seq: number): { cleared: boolean; newer: boolean } {
     const m = this.meta.get(sessionId)
     if (!m) throw sessionNotFound(sessionId)
     // Only the error the person saw: a newer row (another error after a Continue, say) is theirs to read first
-    const cleared = m.state === 'error' && m.lastSeq <= seq
+    const newer = m.state === 'error' && m.lastSeq > seq
+    const cleared = m.state === 'error' && !newer
     if (cleared) this.events.settleState(m, { type: 'state_change', sessionId, state: 'idle', reason: 'error_cleared' })
     this.markRead(sessionId, seq)
-    return cleared
+    return { cleared, newer }
   }
 
   /** `SessionSettings.markRead` (session-settings.ts), kept on the manager for its callers */
