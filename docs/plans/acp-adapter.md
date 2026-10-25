@@ -155,6 +155,11 @@ Antigravity adapter (`agy`, stream-json, not ACP), which is designed in parallel
 | Each call to Centralu's own tools was a raw-JSON card | `AcpProfile.centraluToolOf`: answered without a card, as Claude and Codex take the bridge |
 | A shell outlived a killed Cursor; the recorder appended a second host to the first one's file; a reordered recording still replayed | The tree is noted while a command runs and its groups swept after; the next free file number; every call must end once, after it |
 
+A second-model review of these fixes found more, also fixed: a noted helper group was kept until the CLI exited and
+could by then be someone else's number (it is now dropped once empty, `notedGroups` in `kill-tree.ts`); `ps` ran
+synchronously every 2 s while a command ran (now asynchronous); a result's ok read only the last update; a call of
+another kind titled as the bridge's would pass as Centralu's own (only kind `other` does now).
+
 A live Normal to Auto change restarted the process (about 10 s): with Cursor under Auto only, it has no other preset to
 change to.
 
