@@ -349,10 +349,12 @@ describe('what a session is launched with', () => {
       expect(lastUpdate()).not.toHaveProperty('capped')
     })
 
-    it('Claude with the control off: the reported 1M is the window, and there is no compaction point to mark', async () => {
+    it("Claude with the control turned off after it was on: the reported 1M is the window, and the compaction mark goes", async () => {
       Object.assign(world.codexAdapter, { windowCeilingFor: (tokens: number) => tokens + 33_000 })
       const s = await create()
-      handle(s.id).emitContext(10_000, 1_000_000, 'opus-1m')
+      await restarted(s.id, 10_000, 1_000_000, 'opus-1m')
+      handle(s.id).emitContext(304_000, 633_000, 'opus-1m')
+      expect(shown(s.id)).toEqual({ used: 304_000, window: 1_000_000, exactness: 'exact', compactAt: 600_000 })
       await world.rpc('prefs.set', { patch: { autoCompact: { controlled: false } } })
       expect(await world.mgr.sleepSession(s.id)).toBe(true)
       await world.mgr.resumeSession(s.id)

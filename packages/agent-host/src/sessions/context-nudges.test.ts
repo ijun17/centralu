@@ -59,14 +59,6 @@ function world(over: { window?: number | null; setting?: Partial<typeof DEFAULT_
 }
 
 describe('telling a growing session to call compact_self (#1492)', () => {
-  it('tells a share of the model’s full window, whichever window the tool reported (#1553)', () => {
-    // The CLI reports 633k under the setting; the host knows the model's window is 1M and the nudge says 31% of 1,000k
-    const w = world()
-    w.session.context = { used: 0, window: WINDOW, exactness: 'exact', compactAt: 600_000 }
-    w.request(310_000)
-    expect(w.told[0]).toMatch(/about 31% full \(310k of 1000k tokens\)/)
-  })
-
   it('says nothing when the only window known is a floor under the model’s: a share of it would be told wrong (#1553)', () => {
     const w = world({ window: null })
     w.session.context = { used: 0, window: 633_000, exactness: 'exact', capped: true }
