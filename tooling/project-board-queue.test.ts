@@ -3,16 +3,16 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpath
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { fakeExe, gitWrapper, removeFakeDir, rmFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 import { ExternalApps, resultText, type AppCaller, type AppRef } from '../packages/agent-host/src/apps/external/runtime.js'
 import { fakeBrokerHost } from '../packages/agent-host/src/apps/external/test-helpers.js'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { acknowledge, dueReposts, markReposted, noticeText, unacked, watchStart } from '../.centralu/apps/project-board/notice-acks.mjs'
-import { fakeGh, type FakeGh } from './fake-gh.test-helpers.js'
+import { endLeftoverFakes, fakeGh, type FakeGh } from './fake-gh.test-helpers.js'
 import { SLOW } from './test-timing.js'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
-import { decideBefore, decideCi, emptyQueue, enqueue, findItem, pushEvent, supersededSuites, twinPassedSuites, quickLanded, handoffReason, authorRoute, resetFor, lowerFailureCounts, noticeKey, dequeue, normalize, onlySupersededFailures, queueOrder, watchState } from '../.centralu/apps/project-board/queue.mjs'
+import { decideBefore, decideCi, emptyQueue, enqueue, pushEvent, supersededSuites, twinPassedSuites, quickLanded, handoffReason, authorRoute, resetFor, lowerFailureCounts, noticeKey, dequeue, normalize, onlySupersededFailures, queueOrder, watchState } from '../.centralu/apps/project-board/queue.mjs'
 // @ts-expect-error -- a plain .mjs module of the board app, without types
 import { commandEnv, conflictPlan } from '../.centralu/apps/project-board/queue-conflict.mjs'
 // @ts-expect-error -- a plain .mjs module of the board app, without types
@@ -28,7 +28,7 @@ import { classifyRun, looksLikeNetworkError, onFlakyList } from '../.centralu/ap
 // @ts-expect-error — plain .mjs of a Centralu app
 import { GitError, isNetworkFailure } from '../.centralu/apps/project-board/git.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
-import { activeBatch, batchCandidates, batchLine, decideLanding, dispatchInputs, endBatch, formBatch, gateGreen, gathering, markBatchless, mergeWarning, MOVED_CAP, needsFull, onlyCancelledByBatch, rebatchAfterMove, splitBatch, tierToRun } from '../.centralu/apps/project-board/batch.mjs'
+import { batchCandidates, batchLine, decideLanding, dispatchInputs, endBatch, formBatch, gateGreen, gathering, heavyRan, markBatchless, mergeWarning, MOVED_CAP, needsFull, onlyCancelledByBatch, rebatchAfterMove, splitBatch, tierToRun } from '../.centralu/apps/project-board/batch.mjs'
 
 /**
  * The project board app's merge queue (#956): queue_merge, merge_queue, unqueue, the driver that runs
@@ -950,11 +950,17 @@ describe('merge_when_green says when it would invalidate the queue\'s running ba
 describe('which tier a batch must run before it lands, and what lands from a run (#1538)', () => {
   const names = ['changes', 'full tier', 'verify', 'windows tests (vitest 1/2)', 'e2e (webkit 1/2)', 'e2e (chromium 1/2)']
   const E2E = ['e2e (webkit *)', 'e2e (chromium *)']
+  const SCREEN = { judge: 'x', checks: E2E, steps: ['pnpm e2e (shard *)'], inputs: { tier: 'full', everything: 'false' } }
   const rows = (over: Record<string, string> = {}) => names.filter((n) => over[n] !== 'absent').map((n) => check(n, over[n] ?? 'success'))
   const checksOf2 = (over: Record<string, string> = {}) => evaluateChecks({ required: names, reported: rows(over) })
   const finished = [{ status: 'completed', conclusion: 'success' }]
+  /** The jobs of a run in which every heavy job ran its scenarios, as GitHub lists them with their steps */
+  const realJobs = () => [
+    ...['webkit', 'chromium'].map((b) => ({ name: `e2e (${b} 1/2)`, steps: [{ name: 'Set up job', conclusion: 'success' }, { name: 'pnpm e2e (shard 1/2)', conclusion: 'success' }] })),
+    { name: 'verify', steps: [{ name: 'Set up job', conclusion: 'success' }] },
+  ]
   const gate = (over: Record<string, string>, extra: Record<string, unknown> = {}) =>
-    gateGreen({ full: true, landTier: 'quick', checks: checksOf2(over), runs: finished, fullTier: 'full tier', screenChecks: E2E, ...extra })
+    gateGreen({ full: true, landTier: 'quick', checks: checksOf2(over), runs: finished, fullTier: 'full tier', screen: SCREEN, jobs: realJobs(), ...extra })
 
   it('runs the fast tier, the full tier when the batch changes the screen or cannot be judged, and says so in what it starts the workflow with', () => {
     const inputs = { tier: 'full', everything: 'false' }
@@ -970,8 +976,10 @@ describe('which tier a batch must run before it lands, and what lands from a run
     expect(dispatchInputs({ tiers: false, landTier: 'quick', tier: null, screenInputs: inputs })).toBeUndefined()
     expect(needsFull({ tiers: true, landTier: 'quick', b: { tier: 'quick' } })).toBe(false)
     expect(needsFull({ tiers: true, landTier: 'quick', b: { tier: 'full' } })).toBe(true)
-    // A batch from before the field existed counts as landTier says
-    expect(needsFull({ tiers: true, landTier: 'quick', b: {} })).toBe(false)
+    // A batch from before the field existed (an older board's, a watch command that ran for days) is not known to be quiet:
+    // it counts as changing the screen, under either landing tier
+    expect(needsFull({ tiers: true, landTier: 'quick', b: {} })).toBe(true)
+    expect(needsFull({ tiers: true, landTier: 'quick', b: { tier: null } })).toBe(true)
     expect(needsFull({ tiers: true, landTier: 'full', b: {} })).toBe(true)
     expect(needsFull({ tiers: false, landTier: 'full', b: { tier: 'full' } })).toBe(false)
   })
@@ -981,7 +989,7 @@ describe('which tier a batch must run before it lands, and what lands from a run
     // The run was the quick tier: the heavy jobs never ran
     expect(gate({ 'full tier': 'skipped', 'e2e (webkit 1/2)': 'absent', 'e2e (chromium 1/2)': 'absent' })).toEqual({ drop: 'tier' })
     // The full tier's check is still to come
-    expect(gateGreen({ full: true, landTier: 'quick', checks: checksOf2({ 'full tier': 'absent' }), runs: [{ status: 'in_progress', conclusion: null }], fullTier: 'full tier', screenChecks: E2E })).toEqual({ wait: true })
+    expect(gateGreen({ full: true, landTier: 'quick', checks: checksOf2({ 'full tier': 'absent' }), runs: [{ status: 'in_progress', conclusion: null }], fullTier: 'full tier', screen: SCREEN })).toEqual({ wait: true })
     // Skipped, left out by the files, or never reported: not a pass for a heavy job
     expect(gate({ 'e2e (chromium 1/2)': 'skipped' })).toEqual({ drop: 'heavy' })
     expect(gate({ 'e2e (webkit 1/2)': 'skipped' })).toEqual({ drop: 'heavy' })
@@ -992,8 +1000,39 @@ describe('which tier a batch must run before it lands, and what lands from a run
     // The batches that need no full run are not asked for any of it
     expect(gate({ 'full tier': 'skipped' }, { full: false })).toEqual({ lands: true })
     // Landing only from the full tier (landTier full) asks for the full tier, and for no heavy job by name
-    expect(gate({ 'e2e (webkit 1/2)': 'skipped' }, { landTier: 'full', screenChecks: null })).toEqual({ lands: true })
-    expect(gate({ 'full tier': 'skipped' }, { landTier: 'full', screenChecks: null })).toEqual({ drop: 'tier' })
+    expect(gate({ 'e2e (webkit 1/2)': 'skipped' }, { landTier: 'full', screen: null })).toEqual({ lands: true })
+    expect(gate({ 'full tier': 'skipped' }, { landTier: 'full', screen: null })).toEqual({ drop: 'tier' })
+  })
+
+  // All the checks are done a moment before GitHub marks the run completed: a normal window. The first version dropped the
+  // batch there (a lost full run, and a false "alone" for its session): it waits, as it does for a check still to come
+  it('waits while the run is not completed, though every check has reported', () => {
+    const inProgress = [{ status: 'in_progress', conclusion: null }]
+    expect(gate({}, { runs: inProgress })).toEqual({ wait: true })
+    expect(gate({}, { runs: [...finished, ...inProgress] })).toEqual({ wait: true })
+    // Once it is completed it lands (or not) on what it reported
+    expect(gate({}, { runs: finished })).toEqual({ lands: true })
+    expect(gate({ 'e2e (chromium 1/2)': 'skipped' }, { runs: finished })).toEqual({ drop: 'heavy' })
+    // A run that never completes does not land: only waiting, never landing, from a run in progress
+    expect(gate({ 'e2e (chromium 1/2)': 'skipped' }, { runs: inProgress })).not.toHaveProperty('lands')
+  })
+
+  // The stand-in of a shard the files left out reports a check of the shard's own name and succeeds (build.yml,
+  // e2e-chromium-skipped: it only echoes). The branch decides `code` with its own ci-changes.mjs, main's decides the screen, so a
+  // change that breaks `classify` can switch the real shards off and leave the stand-ins to pass
+  it('does not take the stand-in of a left-out shard for the shard: the job must have run the scenarios', () => {
+    const standIn = { name: 'e2e (chromium 1/2)', steps: [{ name: 'Set up job', conclusion: 'success' }, { name: 'Run echo "Only documents changed (.github/scripts/ci-changes.mjs)"', conclusion: 'success' }] }
+    const jobs = realJobs().map((j) => (j.name === standIn.name ? standIn : j))
+    // Every check reports success, by the names alone
+    expect(gate({}, { jobs: null })).toEqual({ jobs: true })
+    expect(gate({}, { jobs })).toEqual({ drop: 'heavy' })
+    expect(heavyRan(realJobs(), SCREEN)).toBe(true)
+    expect(heavyRan(jobs, SCREEN)).toBe(false)
+    // A shard whose scenarios step failed or was skipped is no pass, nor is a browser with no job at all
+    expect(heavyRan(realJobs().map((j) => (j.name === 'e2e (webkit 1/2)' ? { ...j, steps: [{ name: 'pnpm e2e (shard 1/2)', conclusion: 'skipped' }] } : j)), SCREEN)).toBe(false)
+    expect(heavyRan(realJobs().filter((j) => !j.name.includes('chromium')), SCREEN)).toBe(false)
+    // One stand-in among real shards of the same browser is still a hole
+    expect(heavyRan([...realJobs(), { ...standIn, name: 'e2e (webkit 2/2)' }], SCREEN)).toBe(false)
   })
 
   it('names the tier a batch ran in its line, and the tier of a batch of one that ended without landing in the session\'s message', () => {
@@ -1018,218 +1057,7 @@ describe('which tier a batch must run before it lands, and what lands from a run
   })
 })
 
-/*
- * The queue is a state machine, and these two decisions (#1538 and #1548) are about sequences of events: queueing, pushes,
- * the default branch moving under a batch, CI red or green, a heavy job not running. The pure rules (batch.mjs, queue.mjs)
- * are driven by generated sequences against a small model of what must hold, with the driver's steps written out the
- * way queue-batch.mjs takes them; the app against a fake gh has its own tests below. A failure names the seed.
- *
- *  - nothing lands unless the tier its batch must run has been run: a batch holding a change to the screen lands only
- *    from a full run whose heavy jobs ran and succeeded, whatever the batch's own record says CI did;
- *  - a member lands only while main has the tree the batch had before it;
- *  - main moving under a batch never needs a session until a pull request has been batched again MOVED_CAP times on its
- *    head, and then it is told once (a batch of one) or goes on with its own CI (one of several);
- *  - nothing loops: left alone, every pull request lands or needs a session.
- */
-describe('the merge queue as a state machine: queueing, pushes, main moving and CI results in any order (#1538, #1548)', () => {
-  const E2E = ['e2e (webkit *)', 'e2e (chromium *)']
-  const QUICK_CHECKS = ['changes', 'verify', 'windows tests (vitest *)']
-  const HEAVY_INPUTS = { tier: 'full', everything: 'false' }
-  const REQUIRED = ['changes', 'full tier', 'verify', 'windows tests (vitest 1/2)', 'windows tests (vitest 2/2)', 'e2e (webkit 1/2)', 'e2e (chromium 1/2)']
-  const rng = (seed: number) => {
-    let s = seed >>> 0
-    return () => ((s = (Math.imul(s, 1664525) + 1013904223) >>> 0) / 2 ** 32)
-  }
-  /** What CI reports for a run started with these inputs: the quick tier's checks, and on a full run all of them, a heavy shard sometimes skipped (the bug a landing must not trust) */
-  const reported = (full: boolean, heavyRan: boolean) => [
-    check('changes', 'success'),
-    check('full tier', full ? 'success' : 'skipped'),
-    check('verify', 'success'),
-    check('windows tests (vitest 1/2)', 'success'),
-    check('windows tests (vitest 2/2)', 'success'),
-    ...(full ? [check('e2e (webkit 1/2)', 'success'), check('e2e (chromium 1/2)', heavyRan ? 'success' : 'skipped')] : []),
-  ]
-
-  function simulate(seed: number, { steps = 90, drain = true } = {}) {
-    const rand = rng(seed)
-    const q = emptyQueue()
-    const prs = new Map<number, { head: string; screen: boolean }>()
-    const sim = new Map<number, { inputs: any; red: boolean; heavyRan: boolean; judgeFailed: boolean }>()
-    const movedStops = new Map<string, number>()
-    const landed: { pr: number; batch: number; screen: boolean; inputs: any; heavyRan: boolean; tier: string }[] = []
-    const attention: { pr: number; cause: string; count?: number }[] = []
-    let clock = 0
-    let trees = 0
-    let main = 'M0'
-    let versions = 0
-    const at = () => new Date(Date.UTC(2026, 9, 26) + ++clock * 1000).toISOString()
-    const fail = (what: string) => new Error(`seed ${seed}, step ${clock}: ${what}`)
-    const headOf = (n: number) => `${n}${++versions}`.padEnd(40, 'f')
-    const key = (it: any) => `${it.pr}@${it.head}`
-    const batchScreen = (b: any) => b.members.some((m: any) => prs.get(m.pr)?.head === m.head && prs.get(m.pr)!.screen)
-
-    const queuePr = (n: number) => {
-      const old = q.items.find((i: any) => i.pr === n)
-      // Queued, or merged (a pull request lands once): nothing to do. A new one, or one that needed attention queued again
-      if (old && old.state !== 'attention') return
-      if (!old) prs.set(n, { head: headOf(n), screen: rand() < 0.4 })
-      const { item } = enqueue(q, { repo: R, pr: n, owner: 'me', at: at() })
-      // Queued again, it is looked at afresh: what was counted for it starts over
-      for (const k of [...movedStops.keys()]) if (k.startsWith(`${n}@`)) movedStops.delete(k)
-      Object.assign(item, { state: 'ci', head: prs.get(n)!.head, ci: { head: prs.get(n)!.head, verdict: 'quick', runs: [{ id: 900 + n, status: 'completed' }], batchable: true } })
-    }
-    const push = (n: number) => {
-      const it = q.items.find((i: any) => i.pr === n && ACTIVE_STATES.has(i.state) && i.batch == null)
-      if (!it) return
-      prs.set(n, { head: headOf(n), screen: rand() < 0.4 })
-      // The poll takes the new head: tried afresh on it
-      Object.assign(it, { state: 'ci', head: prs.get(n)!.head, ci: { head: prs.get(n)!.head, verdict: 'quick', runs: [{ id: 900 + n, status: 'completed' }], batchable: true } })
-      delete it.reason
-    }
-    /** The poll of the items outside a batch: one sent back from a batch is read again (its `ci` went), and one marked `alone` on its head is told to its session (attention) */
-    const pollAlone = () => {
-      for (const it of q.items)
-        if (ACTIVE_STATES.has(it.state) && it.batch == null && !it.ci) it.ci = { head: it.head, verdict: 'quick', runs: [{ id: 900 + it.pr, status: 'completed' }], batchable: true }
-      for (const it of q.items)
-        if (it.state === 'ci' && it.batch == null && it.alone?.head === it.head) {
-          it.state = 'attention'
-          const moved = it.alone.text.includes('batched again')
-          attention.push({ pr: it.pr, cause: moved ? 'moved' : it.alone.text.includes('heavy') ? 'gate' : 'red', count: movedStops.get(key(it)) })
-        }
-    }
-
-    const tick = (green: boolean) => {
-      const b = activeBatch(q)
-      if (!b) {
-        const items = batchCandidates(q, { max: 4, tiers: true })
-        if (items.length) formBatch(q, items, { at: at(), ref })
-        return
-      }
-      if (b.state === 'building') {
-        const steps = b.members.map((m: any) => ({ pr: m.pr, head: m.head, sha: `s${++trees}`, tree: `T${trees}` }))
-        // The judge: right about the screen, now and then unable to answer (then the batch is judged to need the heavy jobs)
-        const judgeFailed = rand() < 0.1
-        const judged = batchScreen(b) || judgeFailed ? 'full' : 'quick'
-        Object.assign(b, { state: 'ci', base: { sha: `m-${main}`, tree: main }, steps, tree: steps.at(-1).tree, tier: tierToRun({ tiers: true, landTier: 'quick', judged }) })
-        sim.set(b.id, { inputs: dispatchInputs({ tiers: true, landTier: 'quick', tier: b.tier, screenInputs: HEAVY_INPUTS }), red: green ? false : rand() < 0.2, heavyRan: green ? true : rand() < 0.8, judgeFailed })
-        return
-      }
-      if (b.state === 'ci') {
-        const s = sim.get(b.id)!
-        if (s.red) {
-          if (b.steps.length >= 2) return void splitBatch(q, b, { at: at(), ref, min: 1 })
-          endBatch(q, b, 'failed', { at: at(), why: 'it failed alone.' })
-          return
-        }
-        const full = s.inputs.tier === 'full'
-        const checks = evaluateChecks({ required: REQUIRED, reported: reported(full, s.heavyRan) })
-        const runs = [{ status: 'completed', conclusion: 'success' }]
-        const need = needsFull({ tiers: true, landTier: 'quick', b })
-        // As runCi: the quick tier lands a batch that needs no more; otherwise the usual rules decide, then the gate
-        const green1 = !need ? quickLanded(checks, runs, 'full tier', QUICK_CHECKS) : checks.verdict === 'green'
-        if (!green1) throw fail(`a run the model made was not green (${checks.verdict})`)
-        const gate = gateGreen({ full: need, landTier: 'quick', checks, runs, fullTier: 'full tier', screenChecks: E2E })
-        if (gate.lands) Object.assign(b, { state: 'landing', landed: 0 })
-        else if (gate.drop) endBatch(q, b, 'dropped', { at: at(), why: `its heavy jobs did not all succeed.` })
-        else throw fail('a finished run was told to wait')
-        return
-      }
-      // Landing
-      const k = b.landed
-      if (k >= b.steps.length) return void endBatch(q, b, 'done', { at: at() })
-      const step = b.steps[k]
-      const item = findItem(q, R, step.pr)
-      const prevTree = k === 0 ? b.base.tree : b.steps[k - 1].tree
-      const d = decideLanding({ b, step, pr: openPr({ number: step.pr, headRefOid: step.head }), item, mainTree: main, prevTree, defaultBranch: 'main', subject: 'fix: x', subjectMax: 72, now: NOW, ref })
-      if (d.do === 'merge') {
-        const s = sim.get(b.id)!
-        // The two things that must hold: main is the tree the batch had before this member, and a batch holding a change to the screen ran the heavy jobs
-        if (main !== prevTree) throw fail(`#${step.pr} landed on ${main}, not on ${prevTree}`)
-        if (batchScreen(b) && !(s.inputs.tier === 'full' && s.heavyRan)) throw fail(`#${step.pr} landed from batch ${b.id}, which holds a change to the screen, without the heavy jobs having run (${JSON.stringify(s.inputs)}, ran: ${s.heavyRan})`)
-        if (!batchScreen(b) && !s.judgeFailed && s.inputs.tier !== 'quick') throw fail('a batch with no change to the screen was not run as the fast tier')
-        landed.push({ pr: step.pr, batch: b.id, screen: batchScreen(b), inputs: s.inputs, heavyRan: s.heavyRan, tier: b.tier })
-        Object.assign(item, { state: 'merged' })
-        delete item.batch
-        b.landed = k + 1
-        main = step.tree
-        return
-      }
-      if (d.do !== 'stop' || !d.moved) throw fail(`landing answered ${JSON.stringify(d)}`)
-      // Main moved: the members not landed are batched again, within the cap
-      const rest = b.members.slice(k)
-      const counts = new Map<number, number>()
-      // What a member carried into this stop (one sent back earlier is batchless already): only what the stop adds is blame
-      const before = new Map<number, any>(rest.map((m: any) => [m.pr, { batchless: q.items.find((i: any) => i.pr === m.pr).batchless, alone: q.items.find((i: any) => i.pr === m.pr).alone }]))
-      for (const m of rest) {
-        const n = (movedStops.get(`${m.pr}@${m.head}`) ?? 0) + 1
-        movedStops.set(`${m.pr}@${m.head}`, n)
-        counts.set(m.pr, n)
-      }
-      endBatch(q, b, 'stopped', { at: at(), batchless: false, why: 'main moved' })
-      const made = rebatchAfterMove(q, b, { at: at(), ref, min: 1, why: 'main moved: batched again', defaultBranch: 'main' })
-      for (const m of rest) {
-        const it = q.items.find((i: any) => i.pr === m.pr)
-        const c = counts.get(m.pr)!
-        if (c <= MOVED_CAP) {
-          if (!made || it.batch !== made.id) throw fail(`#${m.pr} was stopped ${c} time(s) by main moving (cap ${MOVED_CAP}) and is not in a new batch`)
-          if (it.alone !== before.get(m.pr).alone || it.batchless !== before.get(m.pr).batchless) throw fail(`#${m.pr} was marked after being stopped ${c} time(s) by main moving`)
-        } else {
-          if (it.batch != null) throw fail(`#${m.pr} was batched again after ${c} stops`)
-          if (it.batchless !== m.head) throw fail(`#${m.pr} is not kept out of a batch on its head after ${c} stops`)
-          if (b.members.length === 1 && !it.alone) throw fail(`a batch of one past the cap is not told to its session`)
-          if (b.members.length > 1 && it.alone) throw fail(`one of several was marked alone past the cap`)
-        }
-      }
-    }
-
-    for (let i = 0; i < steps; i++) {
-      const r = rand()
-      if (r < 0.2) queuePr(1 + Math.floor(rand() * 6))
-      else if (r < 0.3) push(1 + Math.floor(rand() * 6))
-      else if (r < 0.45) main = `X${++trees}`
-      else tick(false)
-      pollAlone()
-    }
-    if (!drain) return { q, landed, attention, movedStops }
-    // Left alone with CI green, every pull request lands or needs a session: nothing loops
-    for (let i = 0; i < 400; i++) {
-      tick(true)
-      pollAlone()
-      if (!activeBatch(q) && batchCandidates(q, { max: 4, tiers: true }).length === 0) break
-    }
-    if (activeBatch(q) || batchCandidates(q, { max: 4, tiers: true }).length) throw fail('the queue was still forming and running batches after 400 ticks')
-    for (const it of q.items) if (!['merged', 'attention'].includes(it.state)) throw fail(`#${it.pr} is ${it.state} and nothing is left to do for it`)
-    for (const a of attention) if (a.cause === 'moved' && !(a.count! > MOVED_CAP)) throw fail(`#${a.pr} needed attention for main moving after ${a.count} stop(s), within the cap of ${MOVED_CAP}`)
-    // Told once at most: nothing was posted to a session by the batching again itself
-    if (q.events.some((e: any) => e.notify)) throw fail('a message for a session was made by the model\'s own steps')
-    return { q, landed, attention, movedStops }
-  }
-  const ACTIVE_STATES = new Set(['ci', 'attention', 'waiting'])
-
-  it('holds for 300 generated sequences', () => {
-    const totals = { landed: 0, heavy: 0, movedAttention: 0, redAttention: 0, stops: 0 }
-    for (let seed = 1; seed <= 300; seed++) {
-      const r = simulate(seed)
-      totals.landed += r.landed.length
-      totals.heavy += r.landed.filter((l) => l.screen).length
-      totals.movedAttention += r.attention.filter((a) => a.cause === 'moved').length
-      totals.redAttention += r.attention.filter((a) => a.cause !== 'moved').length
-      totals.stops += [...r.movedStops.values()].reduce((x, y) => x + y, 0)
-    }
-    // The sequences reach what the invariants are about: landings of both kinds, main moving under batches, and the cap
-    expect(totals.landed).toBeGreaterThan(300)
-    expect(totals.heavy).toBeGreaterThan(50)
-    expect(totals.stops).toBeGreaterThan(100)
-    expect(totals.movedAttention).toBeGreaterThan(0)
-  })
-
-  it('catches a landing from a run whose heavy jobs were skipped, were the gate removed', () => {
-    // The model itself must be able to fail: the gate that lands whatever is green lets a skipped shard through
-    const checks = evaluateChecks({ required: REQUIRED, reported: reported(true, false) })
-    expect(checks.verdict).toBe('green')
-    expect(gateGreen({ full: true, landTier: 'quick', checks, runs: [{ status: 'completed', conclusion: 'success' }], fullTier: 'full tier', screenChecks: E2E })).toEqual({ drop: 'heavy' })
-  })
-})
+// The queue as a state machine, driven for real against a model of GitHub: tooling/project-board-queue-model.test.ts
 
 const PROJECT = JSON.parse(readFileSync(join(REPO_ROOT, '.centralu/apps/project-board/project.json'), 'utf8'))
 const LISTS = PROJECT.queue.conflicts as { mechanical: { files: string[]; run: string[][] }[]; never: string[] }
@@ -1454,7 +1282,11 @@ if (args[0] === 'pr' && args[1] === 'view') {
     const runs = Object.values(st.runs ?? {}).flat().filter((r) => r.id === id)
     const run = runs.sort((a, b) => (b.run_attempt ?? 1) - (a.run_attempt ?? 1))[0]
     const checks = run ? ((st.checks ?? {})[run.head_sha] ?? []).filter((c) => (c.check_suite ?? {}).id === run.check_suite_id) : []
-    out({ jobs: checks.map((c) => ({ id: c.id, name: c.name, status: c.status, conclusion: c.conclusion, steps: c.conclusion === 'failure' ? [{ name: 'Set up job', conclusion: 'success' }, { name: 'pnpm test', conclusion: 'failure' }] : [] })) })
+    // A shard that passed ran the scenarios in its step; a stand-in (st.standIns, by check name) only echoes, as build.yml's -skipped jobs do
+    const stepsOf = (c) => c.conclusion === 'failure' ? [{ name: 'Set up job', conclusion: 'success' }, { name: 'pnpm test', conclusion: 'failure' }]
+      : /^e2e \(/.test(c.name) ? [{ name: 'Set up job', conclusion: 'success' }, (st.standIns ?? []).includes(c.name) ? { name: 'Run echo "Only documents changed"', conclusion: 'success' } : { name: 'pnpm e2e (shard 1/2)', conclusion: c.conclusion }]
+      : []
+    out({ jobs: checks.map((c) => ({ id: c.id, name: c.name, status: c.status, conclusion: c.conclusion, steps: stepsOf(c) })) })
   }
 } else if (path && /\/check-runs\/\d+\/annotations/.test(path)) {
   out((st.annotations ?? {})[path.split('/')[4]] ?? [])
@@ -1564,6 +1396,11 @@ afterEach(async () => {
   // Without blocking the event loop while it retries; a folder Windows still holds is left to its temporary-folder cleanup (#1346)
   await removeFakeDir(root)
 }, 30_000 * SLOW)
+
+// A gh that the app was starting when the test ended its tree stays suspended on Windows, for ever (fake-gh.test-helpers.ts)
+afterAll(() => {
+  endLeftoverFakes()
+}, 60_000 * SLOW)
 
 const FAST = { PROJECT_BOARD_QUEUE_TICK_MS: '50', PROJECT_BOARD_QUEUE_POLL_MS: '50' }
 /**
@@ -3511,7 +3348,7 @@ describe('the merge queue batches a pull request again when main moved under its
  */
 describe('the merge queue runs the heavy jobs before landing a batch that changes the screen (#1538)', { timeout: 240_000 * SLOW }, () => {
   const CI_CHANGES = readFileSync(join(REPO_ROOT, '.github/scripts/ci-changes.mjs'), 'utf8')
-  const SCREEN = { judge: '.github/scripts/ci-changes.mjs', checks: ['e2e (webkit *)', 'e2e (chromium *)'], inputs: { tier: 'full', everything: 'false' } }
+  const SCREEN = { judge: '.github/scripts/ci-changes.mjs', checks: ['e2e (webkit *)', 'e2e (chromium *)'], steps: ['pnpm e2e (shard *)'], inputs: { tier: 'full', everything: 'false' } }
   const ENV = { ...REAL_QUICK, PROJECT_BOARD_CI_SCREEN: JSON.stringify(SCREEN) }
   const WORKFLOW_E2E = [
     'jobs:',
@@ -3561,6 +3398,38 @@ describe('the merge queue runs the heavy jobs before landing a batch that change
     expect(notices().map((e) => e.text)).toEqual(['Merge queue: merged #77 (feat(apps): change 77) as abcdef1, "feat(apps): change 77 (#77)". Tested in batch queue/batch-1 with nothing else, in the full tier.'])
   })
 
+  // All the checks are done a moment before GitHub marks the run completed (a normal window). The first version dropped the
+  // batch there: a lost full run, and its session told the batch of one ended without landing it
+  it('waits for the run to be completed when every check has reported, instead of dropping the batch', async () => {
+    runtime(state(reports(6000), { batchFiles: ['packages/ui/src/App.tsx'] }, null), ENV)
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await until(() => batchesOnDisk()[0]?.state === 'ci', 'the batch to run', BATCH_WAIT_MS)
+    await morePolls(6)
+    expect(batchesOnDisk()).toHaveLength(1)
+    expect(batchesOnDisk()[0]).toMatchObject({ state: 'ci', tier: 'full' })
+    expect(told()).toEqual([])
+    expect(writes().map(short2)).not.toContain('merge 77')
+    expect(gh().dispatched).toHaveLength(1)
+    // GitHub marks the run completed: it lands from that run
+    patchGh((s) => {
+      s.runs[ONE] = [batchRun('success')]
+    })
+    await until((x) => stateOf(x) === 'merged', 'the merge', BATCH_WAIT_MS)
+    expect(gh().dispatched).toHaveLength(1)
+    expect(told()).toEqual([])
+  })
+
+  // build.yml's e2e-chromium-skipped reports a check named like a real shard and succeeds, when the branch's own classify
+  // says only documents changed. A name alone cannot tell it from the shard: the job's step that runs the scenarios can
+  it('does not take the stand-in of a left-out shard for the shard that was to run, though it reports success under its name', async () => {
+    runtime(state(reports(6000), { batchFiles: ['packages/ui/src/App.tsx'], standIns: ['e2e (chromium 1/2)'] }), ENV)
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await until((x) => stateOf(x) === 'attention', 'attention', BATCH_WAIT_MS)
+    expect(writes().map(short2)).not.toContain('merge 77')
+    expect(told()).toHaveLength(1)
+    expect(told()[0]!.text).toContain('not every heavy job (e2e (webkit *), e2e (chromium *)) was reported, succeeded and ran its scenarios (the step pnpm e2e (shard *))')
+  })
+
   it('lands a batch that changes nothing the UI scenarios see from the fast tier, as before, saying so', async () => {
     runtime(state(reports(6000, { full: false }), { batchFiles: ['docs/a.md', 'tooling/x.test.ts', 'packages/ui/src/App.test.tsx', '.centralu/apps/project-board/queue.mjs'] }), ENV)
     await call('queue_merge', { pr: 77, owner: 'tester' })
@@ -3590,7 +3459,7 @@ describe('the merge queue runs the heavy jobs before landing a batch that change
     await until((x) => stateOf(x) === 'attention', 'attention', BATCH_WAIT_MS)
     expect(writes().map(short2)).not.toContain('merge 77')
     expect(told()).toHaveLength(1)
-    expect(told()[0]!.text).toContain('its batch of one ran the full tier and ended without landing it: batch queue/batch-1: its run passed, but not every heavy job (e2e (webkit *), e2e (chromium *)) was reported and succeeded, and it changes the screen (packages/ui/src/App.tsx), so nothing lands from it.')
+    expect(told()[0]!.text).toContain('its batch of one ran the full tier and ended without landing it: batch queue/batch-1: its run passed, but not every heavy job (e2e (webkit *), e2e (chromium *)) was reported, succeeded and ran its scenarios (the step pnpm e2e (shard *)), and it changes the screen (packages/ui/src/App.tsx), so nothing lands from it.')
   })
 
   it('does not land a batch that changes the screen from a run that was only the fast tier, whatever CI ran', async () => {
@@ -3647,17 +3516,26 @@ describe('merge_when_green says when it moves main under a batch the queue is ru
       ...patch,
     })
 
-  it('names the batch, and that it is batched again, in the answer, whether it merges or waits', async () => {
+  // Said before it happens, not after it (the review of #1563): by the time the answer said so, main had already moved
+  it('says that it would move main under the batch before it merges, and merges only when told to anyway', async () => {
     runtime(running())
     await call('queue_merge', { pr: 77, owner: 'tester' })
     await call('queue_merge', { pr: 78, owner: 'tester' })
     await until(() => batchesOnDisk()[0]?.state === 'ci', 'the batch to run', BATCH_WAIT_MS)
-    const merged = await call('merge_when_green', { pr: 79 })
+    const refused = await call('merge_when_green', { pr: 79 })
+    expect(refused.isError).toBe(false)
+    expect(refused.text).toContain('Not merged: The merge queue has batch queue/batch-1 (#77, #78) running on main as it is now.')
+    expect(refused.text).toContain('Merging #79 here moves main under it: the batch stops before it lands, its pull requests are batched again on the new main (at most 3 times each)')
+    expect(refused.text).toContain('queue #79 with queue_merge instead')
+    expect(refused.text).toContain('intoBatch: true')
+    expect(refused.data).toMatchObject({ outcome: 'batch-running', merged: false })
+    expect(writes().map(short2)).not.toContain('merge 79')
+    // The caller who knows (a release bump) merges anyway, and is told again what it did
+    const merged = await call('merge_when_green', { pr: 79, intoBatch: true })
     expect(merged.isError).toBe(false)
     expect(merged.text).toContain('Merged PR #79 (squash)')
     expect(merged.text).toContain('The merge queue has batch queue/batch-1 (#77, #78) running on main as it is now.')
-    expect(merged.text).toContain('Merging #79 here moves main under it: the batch stops before it lands, its pull requests are batched again on the new main (at most 3 times each)')
-    expect(merged.text).toContain('queue #79 with queue_merge instead')
+    expect(writes().map(short2)).toContain('merge 79')
     // Not green yet: said before it merges, so the caller can queue it instead
     patchGh((s) => {
       s.prs['79'] = ghPr(79, { headRefOid: C, mergeStateStatus: 'UNSTABLE' })

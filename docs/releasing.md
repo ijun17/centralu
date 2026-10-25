@@ -85,15 +85,19 @@ script rehearses by default and why nothing publishes automatically.
   `tier: quick`; a release bump or a commit on main still runs in full), a batch of one included, and
   the full tier runs on main once it has landed. **A batch that changes the screen runs the heavy jobs
   first** (#1538, owner decision 2026-10-26): when it holds a change the UI scenarios can see (the window, the
-  host and the protocol outside their tests, the scenarios, the build: `screenFiles` in `ci-changes.mjs`, the
-  one definition, which the queue reads from main and keeps no copy of), the queue starts its run as the full
-  tier (`tier: full`, `everything: false`, so the files still leave out what they cannot affect) and lands it only
-  when the e2e shards of both browsers were reported and succeeded (project.json `ci.screen`); a batch that
-  cannot be judged counts as changing the screen. The other batches land after the fast tier as above, and the
+  host and the protocol outside their tests, the scenarios, the build, and the other files the scenarios render
+  or read: `screenFiles` in `ci-changes.mjs`, the one definition, which the queue reads from main and keeps no
+  copy of, and which `tooling/build-workflow.test.ts` checks by walking what `e2e/` and `apps/web` import
+  and read), the queue starts its run as the full tier (`tier: full`, `everything: false`, so the files
+  still leave out what they cannot affect) and lands it only when the run is completed and the e2e shards of both
+  browsers were reported, succeeded and ran their scenarios (the step `pnpm e2e (shard …)`: the stand-in of a
+  left-out shard reports the shard's name too) (project.json `ci.screen`); a batch that cannot be judged, or has
+  no recorded tier (an older board's), counts as changing the screen. The other batches land after the fast tier as above, and the
   main guard stays the net for them. The board says which tier a batch ran (its line, its events, the message a
   session gets). A batch that stops only because main moved while it ran (a merge outside the queue) is
   batched again on the new main by itself, up to 3 times per head (#1548). `merge_when_green` still refuses a
-  head whose own run was quick. When main's full run fails, the board's main guard finds the culprit among the commits
+  head whose own run was quick, and, while the queue has a batch running on the same branch, says so and merges
+  nothing unless called with `intoBatch: true` (a release bump goes through it). When main's full run fails, the board's main guard finds the culprit among the commits
   since the last fully green one, reverts it in a pull request at the front of the queue (never a
   release bump) and files an issue. A run that failed only in a setup step (a browser install, a
   checkout, a cache) is rerun once first and never reverted for the runner's failure. A release still needs a fully green commit: the release's CI gate

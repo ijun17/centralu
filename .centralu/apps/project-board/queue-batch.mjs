@@ -43,6 +43,7 @@ import {
   readRequired,
   readWorkflowChecks,
   rerunRun,
+  runJobSteps,
   setPrBase,
 } from './github.mjs'
 import { ACTIVE, attentionText, BATCH_ACTIVE, decideRun, ERROR_LIMIT, findItem, noticeKey, pushEvent, quickLanded, SUBJECT_MAX, supersededSuites } from './queue.mjs'
@@ -362,7 +363,15 @@ async function runCi(b, ctx) {
     return { state: 'ci' }
   }
   // The full tier where nothing lands from less (`ci.landTier: full`, or a batch that changes the screen), and then the heavy jobs
-  const gate = d.state === 'green' ? gateGreen({ full: needFull, landTier: CI.landTier, checks, runs, fullTier: CI.fullTier, screenChecks: CI.screen?.checks }) : { lands: true }
+  const gateOf = (jobs) => (d.state === 'green' ? gateGreen({ full: needFull, landTier: CI.landTier, checks, runs, fullTier: CI.fullTier, screen: CI.screen, jobs }) : { lands: true })
+  let gate = gateOf(null)
+  if (gate.jobs) {
+    // Everything else holds: look at the heavy jobs themselves. A job of a shard's name is no proof by its name, since the
+    // stand-in of a left-out shard reports the same name and succeeds (the review of #1563)
+    const jobs = []
+    for (const r of runs) jobs.push(...(await runJobSteps(repo, r.id)))
+    gate = gateOf(jobs)
+  }
   if (gate.wait) {
     // A check still to come waits
     save((fq, fb) => Object.assign(fb, { required, lastError: null, errors: 0, updatedAt: at, nextAt: new Date(now + pollMs('ci')).toISOString() }))
@@ -372,7 +381,7 @@ async function runCi(b, ctx) {
     return drop(b, ctx, `its run passed without running the full tier (the "${CI.fullTier}" check did not pass), and nothing lands from less${b.tierWhy ? ` (${b.tierWhy})` : ''}. Look at the changes job of its run (.github/scripts/ci-changes.mjs).`)
   // Skipped, left out or never reported is not a pass for the heavy jobs (#1538)
   if (gate.drop === 'heavy')
-    return drop(b, ctx, `its run passed, but not every heavy job (${CI.screen.checks.join(', ')}) was reported and succeeded, and ${b.tierWhy ?? 'it changes the screen'}, so nothing lands from it.`)
+    return drop(b, ctx, `its run passed, but not every heavy job (${CI.screen.checks.join(', ')}) was reported, succeeded and ran its scenarios (the step ${CI.screen.steps.join(' or ')}), and ${b.tierWhy ?? 'it may change the screen'}, so nothing lands from it.`)
   if (d.state === 'green') {
     const run = runs[0] ?? null
     save((fq, fb) => {

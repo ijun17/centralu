@@ -42,7 +42,9 @@ length). Those are plain, non-secret values; change them there, not in code.
   `tooling/project-board-reader.test.ts` run this server with a fake `gh` on PATH; the second also
   tests `ci.mjs` directly, the third `markdown.mjs` and the owner's saved answers (in a temporary
   data folder). `e2e/fixtures/board-reader.ts` drives the screen's reader and answer box in
-  Chromium and WebKit.
+  Chromium and WebKit. A test that ends the app's tree while it is starting a `gh` leaves that fake suspended for ever on Windows (the parent was
+  gone before it was resumed); each of these files ends with `endLeftoverFakes()` (`tooling/fake-gh.test-helpers.ts`), which ends
+  any process still running a script of its fakes and nothing else.
 
 ## Reading and answering in the view
 
@@ -134,9 +136,11 @@ intermittent failures (#368), and how long a merge may wait.
   `pollSeconds` up to `waitMinutes`, sends a progress notification each poll (Centralu ends a call
   after 10 minutes without one), and stops if the PR's head moves. A Codex session gets an early
   "still running" at 240 s and follows the call with `run_status`. When the merge queue has a batch running on the
-  same default branch (`mergeWarning`, batch.mjs), the answer says so, merged or still waiting: merging here moves the
-  default branch under the batch, which then stops before it lands and is built again (#1548, below), a CI run lost; it
-  offers `queue_merge` instead. A warning, never a refusal: a release bump goes through here.
+  same default branch (`mergeWarning`, batch.mjs), the call that would merge **merges nothing and says so first**
+  ("Not merged: …", `outcome: 'batch-running'`): merging here moves the default branch under the batch, which then stops
+  before it lands and is built again (#1548, below), a CI run lost. It offers `queue_merge` instead, and
+  `intoBatch: true` merges anyway (a release bump goes through here; the answer then says it again). A call that only waits
+  carries the same note.
 - **`mark_ready`** (`pr`, `note?`, `detail?`): the end of a contributor's flow (#386 merge policy:
   merging is the maintainer's act, and `merge_when_green`/`queue_merge` refuse without maintain or
   admin). Marks a draft ready for review (`gh pr ready`) unless a required check failed, which it
@@ -602,16 +606,27 @@ the required set: it judges main's runs and its probes by their conclusion, and 
   main stayed red). With `landTier` "quick" and project.json `ci.screen`, each batch is judged as it is built
   (`judgeBatch`, queue-screen.mjs): the files it adds to the default branch (GitHub's comparison, a renamed file under both
   names) go to the default branch's own `.github/scripts/ci-changes.mjs --screen` (`screenFiles`: the window, the host and the
-  protocol outside their tests, the scenarios, the build). **This app keeps no list of paths of its own**: that script is
-  the one definition, beside the mapping of files to e2e jobs (`code`), and `tooling/build-workflow.test.ts` holds the two
-  together (a change that reaches the screen is always one the UI scenarios run for) and holds the app's source free of
-  such paths. A batch that cannot be judged (the script not on the default branch yet, an older one without `--screen`, a
-  crash, more files than GitHub lists) counts as changing the screen. The batch's `tier` is then `full`: its run is
+  protocol outside their tests, the scenarios, the build, and what the scenarios render or read from elsewhere: the desktop
+  shell's TypeScript, two shell files, the board's own screen and runtime, the dev server script). **This app keeps no list of
+  paths of its own**: that script is the one definition, beside the mapping of files to e2e jobs (`code`), and
+  `tooling/build-workflow.test.ts` holds the two together (a change that reaches the screen is always one the UI scenarios run
+  for), holds the app's source free of such paths, and holds the definition to **coverage, not a subset**: it walks what
+  `e2e/` and `apps/web` import (relative paths, workspace packages, `new URL(…, import.meta.url)`) and what a fixture
+  names as a path (`join`, strings, the app folders it serves), and fails on any file reached that is neither a document nor
+  a test and that `screenFiles` leaves out; `.centralu/tiers.json`'s `e2e-harness` paths must be in it too. A batch that
+  cannot be judged (the script not on the default branch yet, an older one without `--screen`, a crash, more files than
+  GitHub lists) counts as changing the screen, and so does a batch with **no `tier`** at all (made by an older board, a watch
+  command that ran for days): it fails closed (`needsFull`). The batch's `tier` is then `full`: its run is
   started with `ci.screen.inputs` (`tier: full`, `everything: false`: the files still leave out the jobs they cannot
   affect), and it lands only from a run where the full tier's check passed **and each check named in `ci.screen.checks`**
   (`e2e (webkit *)`, `e2e (chromium *)`) was reported and **succeeded**: skipped, left out or never reported is not a
-  pass, whatever it counts for in the required set (`screenLanded`, `gateGreen`). The shards are waited for (a batch in
-  `ci` while they run). Any other batch has `tier` `quick` and lands as before, from the fast tier. Where the owner's
+  pass, whatever it counts for in the required set (`screenLanded`, `gateGreen`). **A name alone is no proof**: a shard
+  the branch's own `classify` left out reports a stand-in of the same name (build.yml's `e2e-chromium-skipped`, which only
+  echoes), and the branch decides `code` while the default branch decides the screen. So once the checks pass, the run's jobs
+  are read (`runJobSteps`) and each such job must have succeeded in a step `ci.screen.steps` names (`pnpm e2e (shard *)`;
+  `heavyRan`). The shards, and the run itself, are waited for (a batch in `ci` while they run, **and while GitHub has not yet
+  marked the run completed** though every check has reported, a normal window: dropping the batch there lost a full run and
+  told the session it had failed). Any other batch has `tier` `quick` and lands as before, from the fast tier. Where the owner's
   project.json has no `ci.screen`, or `landTier` is "full", nothing changes (the full tier, always).
 - **Which tier a batch ran is said**: its line (`CI at <sha>, the full tier`, `green (the fast tier); landed 1 of 2`), its start
   event (with why: "it changes the screen (packages/ui/src/App.tsx)", or "it changes nothing the UI scenarios see (4
@@ -620,6 +635,12 @@ the required set: it judges main's runs and its probes by their conclusion, and 
   batch of one that ended without landing (`alone.tier`: "its batch of one ran the fast tier and ended without landing
   it", and what the pull request lands from, `landsFrom`, not "only from a full run" under `landTier` "quick").
   `PROJECT_BOARD_CI_SCREEN` ("off", or the object as JSON) sets it for tests only.
+- **The model test** (`tooling/project-board-queue-model.test.ts`): the real `tick` of queue-driver.mjs (and so the batch
+  steps, the judge, `runCi`, `landNext`, `drop`) run against a model of GitHub that replaces github.mjs only: pull requests
+  with files, main and its tree, batch branches, runs that take time (all checks reported a moment before the run is completed),
+  fail, are cancelled and rerun, skip a shard, or have a stand-in report a shard's name; main moving, pushes, unqueueing, a judge
+  that is missing or crashes, an older board's batch with no tier. It checks every landing against the model's own table of
+  files (not the judge's answer) and the run that proved it. Change the queue's steps and this runs them.
 - **Bisect** (2026-10-19): a red batch is split in halves, each a batch of its own built in turn on
   the default branch as it is then, so a half that passes lands before the other half is tried, and a
   red half is split again. **A pull request red alone** (the end of a bisect, or a batch of one) needs

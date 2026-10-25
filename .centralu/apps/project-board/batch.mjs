@@ -35,6 +35,7 @@
 // bump) is not its members' fault: they are batched again on the new default branch, without `alone`, and with no message
 // to a session, at most MOVED_CAP times per head (#1548).
 import { ranTier } from './ci.mjs'
+import { onFlakyList } from './run-failure.mjs'
 import { ACTIVE, BATCH_ACTIVE, findItem, pushEvent, queueOrder, screenLanded } from './queue.mjs'
 import { short } from './util.mjs'
 
@@ -55,20 +56,42 @@ export const MOVED_CAP = 3
 export const tierToRun = ({ tiers, landTier, judged = null }) => (!tiers ? null : landTier !== 'quick' ? 'full' : (judged ?? 'quick'))
 /** What the workflow is started with for a batch of that tier: `screenInputs` (ci.screen.inputs) for the heavy one, the quick tier otherwise */
 export const dispatchInputs = ({ tiers, landTier, tier, screenInputs }) => (tiers && landTier === 'quick' ? (tier === 'full' ? screenInputs : { tier: 'quick' }) : undefined)
-/** Whether a batch lands only from a full run: with the full tier landing, or when it holds a change to the screen. A batch from before `tier` was written down counts as `landTier` says. */
-export const needsFull = ({ tiers, landTier, b }) => !!tiers && (landTier !== 'quick' || b.tier === 'full')
+/**
+ * Whether a batch lands only from a full run: with the full tier landing, or unless it was judged not to change the screen.
+ * A batch with no `tier` (made by a board from before this field, a watch command that has run for days) is not known to
+ * be quiet, so it counts as changing the screen: it fails closed.
+ */
+export const needsFull = ({ tiers, landTier, b }) => !!tiers && (landTier !== 'quick' || b.tier !== 'quick')
 /**
  * What a run that is green by the usual rules lands as (#1538), for a batch that `needsFull`: the full tier ran (its check
- * passed), and, landing after the fast tier, each heavy check (`screenChecks`) was reported and succeeded. Answers
- * `{ lands }`, `{ wait }` (the full tier's check is still to come) or `{ drop: 'tier' | 'heavy' }` (what is missing).
- * Nothing needs more than the usual rules when the batch needs no full run.
+ * passed), and, landing after the fast tier, each heavy check (`screen.checks`) was reported and succeeded, and ran the
+ * scenarios: a job of that name whose step `screen.steps` did not run and succeed is a stand-in that only echoes (the shards
+ * a broken `changes` left out), not a pass. Answers `{ lands }`, `{ wait }` (a check, or the run itself, is still to
+ * come: all checks can be done a moment before GitHub marks the run completed), `{ jobs: true }` (everything else holds;
+ * the run's jobs with their steps are needed to look at the heavy ones: pass them as `jobs`) or `{ drop: 'tier' | 'heavy' }`
+ * (what is missing). Nothing needs more than the usual rules when the batch needs no full run.
  */
-export function gateGreen({ full, landTier, checks, runs, fullTier, screenChecks = null }) {
+export function gateGreen({ full, landTier, checks, runs, fullTier, screen = null, jobs = null }) {
   if (!full) return { lands: true }
+  const running = runs.some((r) => r.status !== 'completed')
   const ran = ranTier(checks, fullTier)
-  if (ran !== 'full') return ran === null && runs.some((r) => r.status !== 'completed') ? { wait: true } : { drop: 'tier' }
-  if (landTier === 'quick' && screenChecks?.length && !screenLanded(checks, runs, fullTier, screenChecks)) return { drop: 'heavy' }
-  return { lands: true }
+  if (ran !== 'full') return ran === null && running ? { wait: true } : { drop: 'tier' }
+  if (landTier !== 'quick' || !screen?.checks?.length) return { lands: true }
+  if (running) return { wait: true }
+  if (!screenLanded(checks, runs, fullTier, screen.checks)) return { drop: 'heavy' }
+  if (jobs === null) return { jobs: true }
+  return heavyRan(jobs, screen) ? { lands: true } : { drop: 'heavy' }
+}
+/**
+ * Whether each heavy job (`screen.checks`) did its work: every job of a run whose name one of them matches has a step
+ * `screen.steps` matches that succeeded, and each pattern names at least one such job. A stand-in job (the same name,
+ * a step that only echoes) has none.
+ */
+export function heavyRan(jobs, screen) {
+  return screen.checks.every((pattern) => {
+    const named = jobs.filter((j) => onFlakyList(j.name, [pattern]))
+    return named.length > 0 && named.every((j) => (j.steps ?? []).some((s) => s.conclusion === 'success' && onFlakyList(s.name, screen.steps)))
+  })
 }
 /** The tiers by the names the queue's texts use */
 export const TIER_NAME = { quick: 'fast tier', full: 'full tier' }

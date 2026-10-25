@@ -78,6 +78,22 @@ const HOST_TEST_INPUTS = [/^tooling\/fixtures\/node-floor\.json$/]
 const WINDOW = [/^packages\/(ui|core|platform)\//, /^apps\/web\//]
 /** The product the UI scenarios start and speak to besides the window: the host and the protocol between them */
 const HOST_PRODUCT = [/^packages\/(agent-host|protocol)\//]
+/**
+ * What the UI scenarios render or read from outside the window and the host (2026-10-26, #1538, found by walking what
+ * `e2e/` and `apps/web` import or name; tooling/build-workflow.test.ts walks it again, so a new such file that is not
+ * listed here or above fails there): the desktop shell's TypeScript that the harness pages mount (`apps/desktop/src`),
+ * the two shell files the scenarios read as text, the project board's screen and its bundled runtime that fixtures
+ * serve in a real frame, the script that runs every dev server (`.centralu/tiers.json`, e2e-harness, counts it), and
+ * the one test helper a scenario's second host runs (`e2e/fixtures/linked-host-main.ts`), a test file that is
+ * still part of what the scenarios exercise.
+ */
+const SCREEN_INPUTS = [
+  /^packages\/agent-host\/src\/links\/scripted-agent\.test-helpers\.ts$/,
+  /^apps\/desktop\/src\//,
+  /^apps\/desktop\/src-tauri\/(tauri\.conf\.json|src\/traffic_lights\.rs)$/,
+  /^\.centralu\/apps\/project-board\/(ui\/|runtime\/mcp-app\.js$)/,
+  /^scripts\/e2e-web-server\.mjs$/,
+]
 /** What the builds, the type checker or CI itself read, wherever it sits: a change to one runs everything */
 const EVERYTHING = [
   /(^|\/)tsconfig[^/]*\.json$/,
@@ -114,7 +130,8 @@ export function classify(files) {
 
 /**
  * The files of a change that can alter what the UI scenarios (e2e, both browsers) see (2026-10-26, #1538): the part of
- * `code` that is behaviour. The window and the host and protocol it talks to, outside their tests; the scenarios and
+ * `code` that is behaviour. The window and the host and protocol it talks to, outside their tests, and what the
+ * scenarios otherwise render or read (`SCREEN_INPUTS`); the scenarios and
  * their fixtures (`e2e/`) themselves; and whatever makes `classify` run everything (the builds, the lockfile, CI
  * itself). Not documents, and not a unit test or a tool's own tests (`tooling/`): those are in `code`, but no
  * scenario can see them. `null` when the files are not known.
@@ -126,7 +143,7 @@ export function classify(files) {
  */
 export function screenFiles(files) {
   if (files === null) return null
-  return files.filter((f) => !matches(DOCS, f) && (matches(EVERYTHING, f) || f.startsWith('e2e/') || (!matches(TESTS, f) && (matches(WINDOW, f) || matches(HOST_PRODUCT, f)))))
+  return files.filter((f) => !matches(DOCS, f) && (matches(EVERYTHING, f) || f.startsWith('e2e/') || matches(SCREEN_INPUTS, f) || (!matches(TESTS, f) && (matches(WINDOW, f) || matches(HOST_PRODUCT, f)))))
 }
 
 /** Whether a change reaches the screen (see `screenFiles`); files that are not known are taken to. */
