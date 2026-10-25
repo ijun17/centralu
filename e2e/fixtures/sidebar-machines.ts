@@ -292,6 +292,10 @@ export function sidebarMachinesTests(): void {
         await expect(reconnect).toHaveText('Reconnect')
         await expect(reconnect).toBeEnabled()
         await expect(menu).toBeVisible()
+        // The reason is read with the row, from a live region that is not a status standing among the menu's items
+        await expect(menu.getByRole('status')).toHaveCount(0)
+        await expect(result).toHaveAttribute('aria-live', 'polite')
+        await expect(reconnect).toHaveAttribute('aria-describedby', (await result.getAttribute('id'))!)
       })
 
       await test.step('a good attempt: connecting, then the menu closes and the badge is solid', async () => {
@@ -305,8 +309,22 @@ export function sidebarMachinesTests(): void {
         await page.evaluate(() => (window as unknown as MockWindow & { __mock: { finishReconnect(id: string): void } }).__mock.finishReconnect('box'))
         await expect(menu).toHaveCount(0)
         await expect(page.getByTestId('project-machine-api')).toHaveAttribute('data-status', 'connected')
+        // The focus the row held did not fall to the body with it: it is on the button that opened the menu
+        await expect(page.getByTestId('project-menu-api')).toBeFocused()
         await open()
         await expect(reconnect).toHaveCount(0)
+        await page.keyboard.press('Escape')
+      })
+
+      await test.step('the machine comes back by itself while the row holds the focus: the menu stays and the focus returns to its button', async () => {
+        await setMachine(page, 'box', { status: 'unreachable', error: 'ssh: connect to host box port 22: Operation timed out' })
+        await open()
+        await reconnect.focus()
+        await expect(reconnect).toBeFocused()
+        await setMachine(page, 'box', { status: 'connected', error: null })
+        await expect(reconnect).toHaveCount(0)
+        await expect(menu).toBeVisible()
+        await expect(page.getByTestId('project-menu-api')).toBeFocused()
         await page.keyboard.press('Escape')
       })
 

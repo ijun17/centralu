@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { machineProblem } from '@cc/core'
 import type { MachineInfo } from '@cc/protocol'
 import { useStore } from '../../../store/store.js'
 import { ActionRow } from './ActionRow.jsx'
+import { menuTrigger } from './RowMenu.jsx'
 import { connectAction } from '../../settings/MachinesSection.jsx'
 
 /** An attempt to connect is under way: the link opening, a host being started, or an update holding it */
@@ -18,7 +19,19 @@ const isTrying = (status: MachineInfo['status'] | undefined): boolean => status 
  * closes (the row is gone, there is nothing left to press); failed, the row is back with the reason in plain words under it
  * (the words Settings → Machines uses for the same state), ready to be pressed again. Hidden while the machine is connected.
  */
-export function ReconnectRow({ machine, projectName, onClose }: { machine: string; projectName: string; onClose: () => void }) {
+export function ReconnectRow({
+  machine,
+  projectName,
+  anchorEl,
+  onClose,
+}: {
+  machine: string
+  projectName: string
+  /** The box that holds the button that opened the menu: where the keyboard goes back to when the row goes while it holds it */
+  anchorEl: HTMLElement | null
+  onClose: () => void
+}) {
+  const resultId = useId()
   const info = useStore((s) => s.machines[machine])
   /*
    * What the row says about a press is what the attempt it started came to, never what the machine said before it: the
@@ -35,7 +48,23 @@ export function ReconnectRow({ machine, projectName, onClose }: { machine: strin
   useEffect(() => {
     if (pressed && status === 'connected') onClose()
   }, [pressed, status, onClose])
-  if (!info || status === 'connected') return null
+  const gone = !info || status === 'connected'
+  /*
+   * The row goes when the machine connects, by this press or by itself, and keyboard focus that was on it falls to the
+   * body with it. It goes back to the button that opened the menu (as Escape sends it there): the menu stays open when
+   * the machine came back by itself, and closes after a press with the focus where it started. Only where it fell to the
+   * body: focus on another row of the menu stays there.
+   */
+  const shown = useRef(false)
+  useLayoutEffect(() => {
+    if (!gone) {
+      shown.current = true
+      return
+    }
+    if (shown.current && (!document.activeElement || document.activeElement === document.body)) menuTrigger(anchorEl)?.focus()
+    shown.current = false
+  }, [gone, anchorEl])
+  if (!info || gone) return null
   // An install, update or rollback is under way there: Settings → Machines hides Connect then, and so does the badge's menu
   const busy = !!info.operation
   const trying = isTrying(status)
@@ -49,6 +78,8 @@ export function ReconnectRow({ machine, projectName, onClose }: { machine: strin
         disabled={busy}
         // Under way: not pressable again, but still where the keyboard is (a disabled button would drop its focus)
         pending={trying}
+        // The reason an attempt failed is read with the row, which is where the keyboard is
+        describedBy={problem ? resultId : undefined}
         onClick={() => {
           stop.current?.()
           setPressed(true)
@@ -60,9 +91,13 @@ export function ReconnectRow({ machine, projectName, onClose }: { machine: strin
         }}
         testId={`reconnect-${projectName}`}
       />
-      {/* Always there once the row is, so a screen reader that watches it hears the result when it is put in */}
+      {/*
+        Always there once the row is, so a screen reader that watches it hears the result when it is put in. A plain element
+        with aria-live, not role="status": a menu holds menu items, and an unnamed status between them is not one
+      */}
       <div
-        role="status"
+        id={resultId}
+        aria-live="polite"
         className={problem ? 'px-2 pb-1.5 text-xs leading-body text-ink-muted' : undefined}
         data-testid={`reconnect-result-${projectName}`}
       >

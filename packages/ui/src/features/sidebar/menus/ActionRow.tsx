@@ -10,6 +10,7 @@ export function ActionRow({
   pending,
   title,
   trailing,
+  describedBy,
 }: {
   label: string
   onClick: () => void
@@ -25,6 +26,8 @@ export function ActionRow({
   title?: string
   /** A mark at the row's right end (a machine's link state, #734) */
   trailing?: ReactNode
+  /** The id of text that says more about the row, read with it (#1533: why the last attempt failed) */
+  describedBy?: string
 }) {
   return (
     <button
@@ -36,6 +39,7 @@ export function ActionRow({
       aria-disabled={pending || undefined}
       aria-busy={pending || undefined}
       title={title}
+      aria-describedby={describedBy}
       className={`block w-full rounded-lg px-2 py-1.5 text-left text-sm transition-colors hover:bg-surface-hover/60 disabled:opacity-50 disabled:hover:bg-transparent aria-disabled:opacity-50 aria-disabled:hover:bg-transparent ${
         danger ? 'text-ink-muted hover:text-ink-signal' : 'text-ink-muted hover:text-ink'
       } ${trailing ? 'flex items-center justify-between gap-2' : ''}`}

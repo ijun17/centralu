@@ -10,6 +10,11 @@ import { SIDEBAR_VARS } from '../layout.js'
  * same menu, writing this calculation twice would foreseeably end up with only one copy fixed later
  * (the zoom compensation already went through that once).
  */
+/** The button that opened a row menu, from the box that holds it: what the keyboard returns to */
+export function menuTrigger(anchorEl: HTMLElement | null): HTMLElement | null {
+  return anchorEl?.querySelector('button') ?? anchorEl
+}
+
 export function RowMenu({
   anchorEl,
   testId,
@@ -56,7 +61,7 @@ export function RowMenu({
    * The trigger is inside `refs`: its click toggles the menu (`setMenuOpen(v => !v)`), so pressing it must not also count as
    * a press outside, or the menu closes on mousedown and the click opens it again.
    */
-  const trigger = anchorEl?.querySelector('button') ?? anchorEl
+  const trigger = menuTrigger(anchorEl)
   useDismiss({ onClose, refs: [ref, { current: anchorEl }], returnFocusTo: trigger })
 
   /*
