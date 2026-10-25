@@ -15,7 +15,7 @@ ends, and what survives a dead process:
 | Delegation reports (`start_agent`, `agent_session send`, `send_to_session reportBack`, `create_session`, `ask_project`) | Report marks (`report_marks`, store v49), delegated turns (v51), queued requests (v52), paused reports (app setting `report_paused:<session>`), the in-memory held notices (`ChildReports.held`, 20 per session), linked reports (`LinkedReports`, memory; the `owed` field of the app setting `remote_agents`) | A held notice is lost on a host swap. A mark says who is owed, not which turn, so a paused mark reports the person's later turns (#1340). A linked machine's report cannot be followed while the link is down |
 | App notices (`notify`, `uses.notices`, #1258) | Delivered at once or refused. The rate window is in memory. The board app keeps its own `told` flag and 6 tries | A refusal during a restart is the app's to retry. The person cannot mute one or find one in the Inbox |
 | The merge queue's `watch` command | A background shell command in the agent's own CLI. It exits on news, which wakes the session | Dies with the agent's process (#1324: a green batch sat about 50 minutes) |
-| Watches (#1324) | Designed, not built | n/a |
+| Watches (#1324) | Designed in §14 (owner, 2026-10-26: part of the mailbox), not built | n/a |
 | The task ledger (#1173, PRs #1334 / #1335) | `ledger.json` in an app's data folder, an app engine, and `notify` | Reaches only a session that called it. The central orchestrator cannot be its responsible session (task-ledger §13.2) |
 
 The owner's direction (2026-10-20, #1347): **one mailbox in the host**, through which work is assigned and discussed.
@@ -118,6 +118,7 @@ Each is argued where the link points, with the alternatives not taken.
 17. ~~Hop limit and per-pair rate~~: **decided** (owner, 2026-10-21, #1455): at most 3 hops per chain, and at most 5 new
     threads an hour per session pair (§11.9.2).
 18. **Store step numbers** come from the orchestrator when a slice is briefed. Here they are named M1, M2 and so on.
+19. **Watches** (§14, owner, 2026-10-26: part of the mailbox): ten questions of their own, in §14.12.
 
 ## 2. Words
 
@@ -811,15 +812,9 @@ with the command. The orchestrator's instructions stop telling it to run a watch
 
 ### 8.4 #1324's watches
 
-Not a separate mechanism. A watch is a rule the host keeps whose firing is a `notice` from `centralu` in a thread the
-session owns:
-
-- `mail watch { on: "session:<id>", when: "finished" | "asked" | "quiet", minutes? }`
-- `mail watch { at: <time> }`, the timer source
-
-The thread shows it, and the person cancels it there. It reads the same session feed (§8.5), and its "once per change"
-key is the message's `dedupe_key`. Slice 8. Most of #1324's cases disappear before that: the finished-child and
-landed-PR cases are reports and queue notices.
+Not a separate mechanism (owner, 2026-10-26). A watch is a rule the host keeps whose firing is a `notice` from `centralu`
+in a thread the session owns, delivered as any mail. The design is §14: registering with `mail(action="watch")`, the
+`mail_watches` table, once per change by the message's `dedupe_key`, delivery, the person's view, and slices W1 to W8.
 
 ### 8.5 #1334 (`SessionWatch`, apps observing sessions)
 
@@ -904,7 +899,7 @@ short:
 
 ```
 mail  action: inbox | read | handled | send | reply | update | close | watch
-      thread?, to?, kind?, subject?, text?, state?, next?, assignee?, blockers?, urgent?, follows?
+      thread?, to?, kind?, subject?, text?, state?, next?, assignee?, blockers?, urgent?, follows?, until?
 ```
 
 - `inbox`: unread and open threads, one line each.
@@ -915,7 +910,7 @@ mail  action: inbox | read | handled | send | reply | update | close | watch
 - `reply`: a post in a thread.
 - `update`: task fields.
 - `close`: `done` with an outcome.
-- `watch`: §8.4.
+- `watch`: §14.2. `close` on a watch's id cancels it, and `inbox` lists the session's watches.
 
 The tool list a session has never changes mid-session: `tools/list_changed` rebuilt the whole 25k-token prefix on Claude
 in #1324's research. So `mail` is in the profile from a session's start, and older sessions get it at their next spawn.
@@ -1457,7 +1452,7 @@ own work, still a proposal at the link level. The mailbox depends on it only thr
 ## 12. Slices
 
 In the owner's order (2026-10-20): 0, 1, 2, 3, then linked machines (4), then the board app (5), then in-turn delivery
-(6), apps (7), tasks (8), contract (9). The reason: most work runs as sessions on linked machines, and reports and queue
+(6), apps (7), tasks (8), contract (9). Watches (W, §14.11) start after 3 (owner, 2026-10-26). The reason: most work runs as sessions on linked machines, and reports and queue
 news are today's pain. (Before that decision the order was by number with linked machines last; the numbers below are
 the new ones.)
 
@@ -1482,7 +1477,8 @@ the new ones.)
 | 5 | **The board app moves** (§8.3), with the app runtime it needs: `uses.mail` `post`, `centralu.mail` `caller` / `open` / `post` / `update` / `read` / `threads` / `handled`, the broker calls, §9.5's wake bounds, the permit and its trust-card lines. Queue items and stacks as threads, acknowledgement from receipts | none (`app_runs` gets no new caller kind until slice 7) | the merge queue's news is durable mail, and the app knows what its owner saw | `watch`, `tellSessions`, #1351's list and `ack` (one release later) |
 | 6 | **In-turn delivery** (§7.2, §7.4, §7.10): Claude's in-process hooks as the primary path, Codex `inject_items` after its live check and with the race check, the maximum hold | none | same-thread mail mid-turn without "the user sent"; a child's question does not wait out a long turn | `agentNoteFrame` over stdin, on this host and on linked machines |
 | 7 | **Apps**: `receive` (§7.8), `tasks` scope, the `notify` shim, an app's inbound line, template and `docs/apps.md` | none; `app_runs` stores caller kind `mail`, a value an older build reads (a `docs/stored-shapes.md` row and an older-reader test) | apps take assigns; any app on mail | — |
-| 8 | **Tasks**: the board screen (§10.2), task rules (§8.6), watches (§8.4), GitHub sync in the board app with `tasks` scope (§8.7) | **M4** (additive): `mail_watches` (source, condition, thread, expiry, last fired key) | the task board; #1324's watches; #1173's triggers | #1335 closed |
+| W | **Watches** (§14, owner, 2026-10-26): W1 to W4 after slice 3, W5 to W8 with slices 5, 6, 4b and 7 (§14.11) | **M4** (additive): `mail_watches` (§14.3.1) | #1324's watches | the orchestrator's pollers, then paused-report state, then the queue's `watch` |
+| 8 | **Tasks**: the board screen (§10.2), task rules (§8.6), GitHub sync in the board app with `tasks` scope (§8.7), the host-wide list of watches (§14.9) | none | the task board; #1173's triggers | #1335 closed |
 | 9 | **Contract**: one release after slices 3, 5 and 7 | **M5** (`breaksOlderReaders: true`): drops `report_marks`, `delegated_turns`, `queued_requests`; deletes the `report_paused:*` settings | — | the old report tables; `notify` / `uses.notices` |
 
 ## 13. Not in this design
@@ -1492,3 +1488,475 @@ the new ones.)
 - Mail between people (one person per Centralu).
 - Search across mail beyond `recall` marking it.
 - Attachments in mail. A message names files as text, and read grants stay `ask_project`'s.
+
+## 14. Watches (#1324)
+
+> **Status: designed 2026-10-26, not built.** The owner decided on 2026-10-26 (#1324, latest comment) that watches are
+> **part of the mailbox**, not a system of their own. This section replaces the sketch §8.4 was, and moves watches out of
+> slice 8 into slices W1 to W8 (§14.11). Written against main at `79cdf916e`: store v63; mailbox slices 0 to 3 are built,
+> 4 to 9 are not (no outbox, no in-turn hooks, no `SessionWatch` feed from #1334).
+
+A **watch** is a rule the host keeps for a session: "tell me when *this* changes *this way*, until *then*". It lives in the
+host's store, not in the agent's process, so nothing that restarts the agent ends it. When it fires, the session gets
+**mail from `centralu`** in the watch's own thread, under the not-user-input frame (§7.3), delivered by `MailDelivery`
+like any other mail (§5, §7). Nothing in this section is a second delivery path.
+
+What it replaces (§14.8): the orchestrator's shell pollers, the merge queue's `watch` command, and the in-memory and
+app-setting state of paused reports (#721, #1540).
+
+### 14.1 Words
+
+| Word | Meaning |
+|---|---|
+| Watch | One stored rule: an owner, a source, a target, a condition, a deadline, and whether it repeats |
+| Source | What kind of thing is watched: `session`, `timer`, `pr`, `thread` (from slice 5), `app` (from slice 7) |
+| Target | The one thing watched: a session address, a PR ref, a thread id, an app address; none for a timer |
+| Condition | The change that fires it, one word per source (§14.2.2) |
+| Key | A string that names one state of the target for its condition (`finished:<turnSeq>`). The watch fires only when the key differs from the last one it saw. This is what "the same state never wakes twice" means |
+| Baseline | The key at registration. A watch never fires for the state it was set in |
+| Fire | One transaction: the notice posted, the key and count written, the watch ended if it is one-shot |
+| Blind | The host cannot see the target now (its machine's link is down, `gh` fails). A flag with a time, not a state |
+
+### 14.2 Registering
+
+#### 14.2.1 The call: one action of the existing `mail` tool
+
+Watches are an action of `mail`, not a tool of their own:
+
+```
+mail(action="watch", to="session:h-1a2b3c4d/9f2…", kind="finished", until="2h", text="review done: merge #1234")
+```
+
+| Field | Meaning for `watch` | Already in the schema? |
+|---|---|---|
+| `action` | `"watch"` | the enum gains one value |
+| `to` | what to watch: a session address (or the short id `list_sessions` shows), `pr:<number>`, `thread:<id>`, `timer`, `app:<…>` | yes |
+| `kind` | the condition (§14.2.2), with its minutes where it takes some (`quiet:20`, `every:30`) | yes |
+| `until` | the deadline: a clock time (`16:30`, ISO 8601) or a span (`45m`, `2h`, `3d`). For `kind:"at"` it is the moment the timer fires | **new, the one added field** |
+| `text` | an optional note to itself, ≤ 300 characters, one line, shown back when the watch fires | yes |
+| `urgent` | the firing may put a one-line header into a turn of another thread (§14.4.3) | yes |
+
+Cancelling reuses `close`: a watch's id has its own shape (`<hostId>.w_<ulid>`, `parseMailId`), so
+`mail(action="close", thread="<watch id>")` cancels it. `mail(action="inbox")` lists the session's active watches after
+its threads, one line each. So the only schema changes are `"watch"` in the enum and `until`.
+
+**Why not a tool of its own, and why not an action for cancelling.** A `watch` tool would add a name to every Claude
+request's tool-search list and a second definition to every Codex request (about 300 characters even minimal). The action
+costs, counted from the definition (measured in tool-cost.md §13 by W1):
+
+| Seat | Change per request |
+|---|---|
+| Claude, ordinary session | none: `mail` is deferred, only its name is resident |
+| Codex, ordinary session | about +60 characters (`,"watch"`, the `until` property, and "; or watch something" in the description), about 15 tokens. `MAIL_BUDGET_CHARS` 820 → 880 |
+| The orchestrator, both tools | none: `mail` is a rare command behind `centralu_run` (tool-cost.md §13) |
+
+The description gains "; or watch something" so that tool search by "watch" finds it. The rest of the action is in its
+answers: a call that lacks a field is refused with what to send, as the other actions are.
+
+#### 14.2.2 Conditions, smallest set first
+
+| Source | `to` | `kind` | Fires when | Key | Repeats | Slice |
+|---|---|---|---|---|---|---|
+| session | a session | `finished` | the target comes to rest with a new final answer: idle or `waiting_input`, no card standing, no paused background work | `finished:<turnSeq>` | no | W1 |
+| session | a session | `answers` | as `finished`, for every new answer, a paused session's interim answers included | `answer:<turnSeq>` | yes | W1 |
+| session | a session | `asked` | a card is raised in the target (an approval or a question) | `asked:<cardId>` | no | W1 |
+| session | a session | `quiet:N` | the target is `working` and nothing happened in it for N minutes (N ≥ 10, default 30). Blind is never quiet | `quiet:<lastEventAt>` | once per quiet stretch | W1 |
+| session | a session | `ended` | the target errors, is interrupted, is trashed or deleted | `ended:<state>:<at>` | no | W1 |
+| timer | `timer` | `at` | the time in `until` | `at:<ms>` | no | W1 |
+| timer | `timer` | `every:N` | every N minutes (N ≥ 10) until the deadline | `every:<slot>` | yes | W1 |
+| pr | `pr:<n>` | `checks` | every check of the PR's head commit has concluded | `checks:<headSha>` | no | W4 |
+| pr | `pr:<n>` | `failing` | a check of the head commit failed | `failing:<headSha>` | no; a new head re-arms it | W4 |
+| pr | `pr:<n>` | `landed` | the PR is merged or closed | `landed:<state>` | no | W4 |
+| thread | `thread:<id>` | `done`, `blocked`, `changed` | the thread goes `done`; a blocker stands; any state change. A merge-queue item is a thread from slice 5 (§8.3), so "an item landed or needs attention" is a `thread` watch on someone else's item | `state:<rev>` | `changed` only | W5 |
+| app | `app:<…>` | a condition the app declares | the app reports it (§14.2.4) | the app's key, behind the app's address | as declared | W8 |
+
+Every session watch also ends, with one notice, when its target is deleted (`gone`): a watch never outlives what it
+watches.
+
+#### 14.2.3 What registration checks, and what it answers
+
+Refused, with the reason (the `refused` error code mail's other refusals use):
+
+- **Reach.** A session may watch what it could read: a session it started or that started it, a session of its own
+  project, any session for the orchestrator, a session on a linked machine only through a link this host may read
+  (§14.6), a PR of its own project's repository, a thread it is a participant of. A watch is not a way to observe another
+  project.
+- **A watch that duplicates a report.** `finished` or `answers` on a session whose not-`done` thread the caller owns:
+  "You get its report already (thread t_…); no watch was made." The report is the same news, so the watch would wake twice.
+- **Limits.** At most 20 active watches per session (50 for the orchestrator), 5 of them repeating and 3 urgent; a
+  deadline at most 7 days away (default 24 hours, or the timer's own time); `quiet` and `every` at least 10 minutes.
+- **The owner's state.** A session in the trash cannot register.
+
+The answer names the target's **current** state and the baseline, so the agent is not woken for what it already knows:
+
+```
+Watch h-1a2b3c4d.w_01K… set: fires once when session 9f2… (your child session; idle since 14:02, last answer turn 7)
+next finishes a turn, until 16:30. Cancel with mail(action="close", thread="h-1a2b3c4d.w_01K…").
+```
+
+#### 14.2.4 Apps registering sources (#1173 pieces 1 and 2, #314, #315)
+
+Not before slice 7. An app declares the conditions it can report, `"uses": { "mail": { "sources": { "deploy": ["done",
+"failed"] } } }`, and reports a change with `centralu.mail.sourceChanged(source, target, key)`: an id and a key, never
+text. The host does the rest: who watches it, once per key, delivery. A session watches it with
+`to:"app:<project>/<app>/deploy:<target>"`. The app never learns who watches, and it cannot wake anyone the watch rules
+would not; §9.5's per-app wake budget applies. #1173's host-side pieces become the host's own: the session fact feed
+(§14.3.3) is piece 1, the watch scheduler is piece 2. #314's "apps that wake themselves" (an app's own timer) stays its
+own issue, and #315's guards are not watches.
+
+### 14.3 Storing, evaluating and ending
+
+#### 14.3.1 Table (step M4, additive)
+
+The store step number is given when W1 is briefed (§12). Store v63 is current at writing.
+
+```
+mail_watches  id TEXT PK                 "<hostId>.w_<ulid>"
+              owner TEXT                 the registering session's address; a host watch's is its thread's owner (§14.8.2)
+              thread_id TEXT             the thread its notices go into (§14.4.1)
+              created_by TEXT            'session' | 'host'
+              source TEXT, target TEXT NULL, condition TEXT
+              params TEXT                JSON: { minutes?, at?, every? }
+              note TEXT NULL             ≤ 300 characters, the owner's own words
+              urgent INTEGER, repeats INTEGER
+              state TEXT                 'active' | 'suspended' | 'fired' | 'expired' | 'cancelled' | 'gone' | 'failed'
+              baseline_key TEXT NULL, last_key TEXT NULL, fired_count INTEGER
+              blind_since INTEGER NULL   the target cannot be seen now (§14.6)
+              errors INTEGER, last_error TEXT NULL
+              created_at, expires_at, next_check_at INTEGER NULL, ended_at INTEGER NULL
+              ended_by TEXT NULL         'deadline' | 'fired' | 'owner' | 'person' | 'target_gone' | 'owner_gone' | 'source_failed'
+              INDEX (state, next_check_at)
+              INDEX (target) WHERE state = 'active'
+              INDEX (owner)  WHERE state IN ('active', 'suspended')
+```
+
+- No foreign keys, as for the other mail tables (§4.1).
+- Threads of `origin 'watch'` are already in the model (§3.3). Their `facts` carry the watch id.
+- The table gets its "Where it is stored" line in `docs/domain-model.md` §2.5 and its JSON (`params`) in
+  `docs/stored-shapes.md`, in W1.
+- **Retention:** an ended watch's row goes with its thread (a done thread keeps its messages 30 days, §4.4). A host
+  watch's row goes when it ends.
+
+#### 14.3.2 States
+
+```
+                  register
+                     │
+                     ▼
+   ┌──────────── active ◀───────────── restored from the trash before the deadline
+   │  │  │  │  │   │
+   │  │  │  │  │   └── owner trashed ────▶ suspended ──▶ (trash emptied: rows deleted)
+   │  │  │  │  └────── repeating fire: stays active, fired_count + 1
+   │  │  │  └───────── one-shot fire ─────▶ fired
+   │  │  └──────────── deadline ──────────▶ expired     (one notice, §14.4.3)
+   │  └─────────────── close / the person ▶ cancelled   (an event, no wake)
+   ├────────────────── target deleted ────▶ gone        (one notice)
+   └────────────────── source failing 30 min ▶ failed   (one notice)
+```
+
+- **Ended states are final.** `fired`, `expired`, `cancelled`, `gone` and `failed` never return to `active`. A new watch
+  is a new row.
+- **A suspended watch's deadline still runs.** Restored after it, it is `expired` at once, with no notice: the owner was
+  not there to plan for it.
+- **The owner deleted** (trash emptied): its watch rows go with its other mail rows. **A handoff** (#693) moves `owner` to
+  the successor in the same transaction as `ChildOwnership.moveChildren` (§4.1).
+
+#### 14.3.3 Evaluating: events first, a sweep as the net
+
+`WatchService` (host, `mail/watches.ts`) acts on:
+
+| Event | Source | Watches looked at |
+|---|---|---|
+| A session's state, answer, card or background tasks changed | a small feed in `session-events.ts`: one `SessionFact { state, lastTurnSeq, cardId, lastEventAt, pausedTasks }` per change. It is the host side of #1334's `SessionWatch.onChange`, built here because #1334 has not landed | `INDEX (target)` on that session |
+| A linked machine's session changed | the hub's mirror (`patchSession` on relayed events), giving the same facts | as above |
+| A thread's `rev` changed | `MailService` (from W5) | `thread` watches on it |
+| `next_check_at` came | one host timer set to the earliest `next_check_at` of active rows, reset on every write | timers, `quiet`, deadlines, PR polls |
+| The host is `ready` (start, swap), back from sleep, a link came back | start, the heartbeat gap (`mail.heartbeat`), `machine_resync` | every active watch: catch-up (§14.3.5) |
+| Every 60 s | the delivery's sweep (§5) | rows past `next_check_at` that an event missed |
+
+Only the active host evaluates, behind the same `handingOver` / `disposing` guards as delivery (§4.2).
+
+**PR checks** send the host no event, so `pr` watches are polled with the person's `gh` through the existing
+`dev-services/git-pr.ts` (`gh pr view <n> --json headRefOid,state,statusCheckRollup`): every 60 s for the first 10
+minutes, then every 5 minutes, one `gh` at a time per project, and only while a `pr` watch is active. Polling costs no
+tokens. Only ids, states and counts are kept: check names and logs are other people's text, and never go in a frame.
+
+#### 14.3.4 Firing: once per change
+
+One SQLite transaction:
+
+1. Re-read the row. Not `active` → stop.
+2. Compute the key from the fact. Equal to `last_key`, or to `baseline_key` before a first firing → stop.
+3. Post the notice (§14.4.2) with `dedupe_key = key`. `UNIQUE (thread_id, sender, dedupe_key)` (§4.1) fails a second
+   insert for the same key, so an event and the sweep racing post once.
+4. Write `last_key` and `fired_count + 1`. One-shot: `state = 'fired'`, `ended_by = 'fired'`, and the watch's thread
+   `done` (outcome `finished`).
+5. Commit, then `MailDelivery.poke(owner)`.
+
+A crash before the commit leaves nothing. After it, the notice is a receipt like any other mail, and §7.6 covers it. A
+restart can neither lose a firing nor post it twice.
+
+#### 14.3.5 What survives what
+
+| Event | What happens to a watch |
+|---|---|
+| The agent's process restarts; a model or tool switch; `/compact`, `compact_self` | nothing: the row is keyed by session, not process. The next delivery goes to whatever process the session has then |
+| The computer sleeps, or the host is off | on return (the heartbeat gap) each active watch is evaluated once against the current facts. A timer whose time passed fires once with `facts.late = <minutes>`. An `every` that missed slots fires **once** with `facts.missed = n`. A deadline that passed during the gap is applied after this evaluation, so news from before the deadline still fires |
+| A host swap | M4 only adds. The old build ignores the table; the new one evaluates on `ready`. A firing is one transaction in the one store, so the overlap cannot double it |
+| A rollback to a build without watches | the rows sleep: nothing fires, nothing is lost. The next build with watches catches up once, by key. W1's release notes say so |
+| A linked machine's link drops | §14.6 |
+| The target session's process restarts | its facts go on (`lastTurnSeq` is the host's count, not the CLI's), so its key does not change |
+
+### 14.4 Delivery as mail
+
+#### 14.4.1 Which thread
+
+**Each watch has a thread of its own**, opened at registration: `origin 'watch'`, owner the session, no assignee, a
+subject Centralu writes from host fields (`Watch: session 9f2… finished`). Its `parent` is the thread of the turn that set
+the watch, when the session is that thread's assignee.
+
+This is what lets the rest of the mailbox apply with no new rule:
+
+- **Whose turn a firing starts** is §6's second row: mail of a thread the session owns starts a turn that belongs to the
+  parent, if it is still `running` with this session as its assignee, and is reported to that thread's owner. So the
+  orchestrator that set a watch while working on A's task is woken as a turn of A's task.
+- **The history** (set, fired, expired, cancelled by the person) is the thread's events.
+- **A one-shot watch's thread is `done` when the watch ends**, so retention (§4.4) sweeps it.
+
+Host watches (§14.8.2) are the exception: their notices are `report`s in the delegation thread they serve.
+
+#### 14.4.2 The message and the frame
+
+The notice is `kind 'notice'`, `sender 'centralu'`, an empty `body`, and `facts`:
+
+```json
+{ "watch": "h-1a2b3c4d.w_01K…", "source": "session", "about": "session:h-1a2b3c4d/9f2…", "condition": "finished",
+  "key": "finished:7", "turnSeq": 7, "fired": 1, "repeats": false, "late": 0 }
+```
+
+In the wake frame (§7.3) it is one line of host fields. The owner's own note follows, quoted and named as its own:
+
+```
+<centralu-mail unread="1">
+thread="h-1a2b3c4d.t_01K…" kind="notice" from="centralu" watch="h-1a2b3c4d.w_01K…" source="session" about="session:h-1a2b3c4d/9f2…" condition="finished" turn="7"
+</centralu-mail>
+Your own note when you set this watch:
+> review done: merge #1234
+Read the session with read_session(session="9f2…"). This watch has ended.
+```
+
+- **Facts only.** The child's answer, a PR's title, a check's name, an app's text never go in the frame (decision 3,
+  §9.2). The frame names the call that reads them (`read_session`, `mail read`, the board app's `ci_status`).
+- **The note is inline** because it is the receiver's own words, flowing down from itself: behind `> `, frame tags
+  escaped, ≤ 300 characters.
+- **Several firings in one wake** are one frame, like any batch (§7.9: the 2 s debounce, one wake per 30 s).
+
+#### 14.4.3 Per receiver state
+
+`MailDelivery` delivers it by §7.1 and §7.2. What is particular to watches:
+
+| The owner is | The notice |
+|---|---|
+| At rest, live | wakes it: one framed turn |
+| Asleep | resumed, then as at rest (at most 2 resumes at once, §7.9) |
+| In a turn of the parent thread | until slice 6: held `turn`, delivered when the turn ends. From slice 6: Claude's `PostToolUse` / `Stop` hooks (§7.4), Codex's `developer` inject (§7.2) |
+| In a turn of another thread, or the person's | held `turn`, delivered as a new turn when it ends. `urgent`, from slice 6 (W6): a one-line header at the next tool boundary (§7.10). Before slice 6, `urgent` changes nothing, since stdin mid-turn reads as the person (§7.1) |
+| Waiting on a card, `limited`, in the trash | held `card` / `limited` / `trash` like all mail. The watch itself goes on: a card stops the delivery, not the firing |
+| On a linked machine | its own host keeps and delivers its watches (§14.6) |
+| After the host was off > 30 minutes | a firing counts as "a report its owner is waiting on" (§7.9): the session asked for it, so it may wake an asleep session, inside the one batched wake per receiver and the "12 sessions" prompt |
+| `auto` | accepted: Centralu's mail (§7.7), and the session's own request |
+
+**Expiry is news.** A watch that reaches its deadline posts one notice (`condition="expired"`, the last known state in
+`facts`) that wakes its owner: it is the "not by 16:30" branch the agent planned for. A target gone, or a source failed,
+also posts one notice that wakes. Cancelling posts an `event`, which never wakes (§3.2).
+
+#### 14.4.4 On screen
+
+A delivery is the compact line every delivery has (§9.2), with a watch icon and the source: "⏱ Watch: session *Review
+#1234* finished · Centralu". The window resolves the name from the id; it is never in the frame. Never a user bubble.
+`read_session` and `recall` mark it `[mail from centralu: watch]`. The line is a `marker` with a label, which an older
+window draws (§4.2).
+
+### 14.5 Guards that keep wakes rare
+
+A wake is a turn, and §14.7 says what one costs. These rules keep their number low:
+
+1. **No wake for what is known.** The baseline (§14.1) and the registration answer (§14.2.3): a watch fires only for a
+   change after it was set.
+2. **No wake that duplicates a report** (§14.2.3).
+3. **One-shot by default.** Repeating needs `answers`, `every:N`, `quiet:N` or `changed`, and at most 5 per session.
+4. **Coalescing.** Firings due within 2 s are one delivery; one wake per session per 30 s; a long gap fires each watch
+   once (§14.3.5).
+5. **A watch chain is a loop.** A turn a watch started that sets a new watch (a timer that reschedules itself) counts in
+   the loop guard (§7.9) for the watch's thread, **and** in a count per session: past 6 watch-started turns in an hour with
+   no word from the person, its watch notices are held `loop`. The session's header says "watches paused: 6 wakes in an
+   hour", with Resume.
+6. **The token guard** (§7.9, 200,000 new input tokens an hour) counts watch-started turns as mail-started turns.
+   Centralu's delegation reports stay exempt; watches do not, since a session asked for them.
+7. **No waiting in the agent.** The orchestrator's instructions say to set a watch and end the turn, and to call
+   `compact_self` first when the wait may be long: a smaller conversation makes the wake cheaper (§14.7).
+
+### 14.6 Linked machines
+
+- **A watch lives on its owner's host.** A session on the laptop has its watches in the laptop's store, evaluated and
+  delivered by the laptop's host (§11.6: the receiver's own host wakes it). A window on the hub shows them through the
+  link, read live like `sessions.list`, and cancels one with a host-to-host call (`host.watches.cancel`, additive).
+- **A target on another computer, before slice 4b:** the owner's host evaluates it from its mirror of that machine's
+  sessions, which `LinkedReports` reads today. Only the hub has that mirror, so the hub's sessions can watch a machine's
+  (the orchestrator's case). A machine's session watching the hub's is refused with the reason ("this computer cannot
+  see that one's sessions"), as rule 2 requires (§11.1).
+- **While the link is down** the watch is blind (`blind_since`). It does not fire `quiet` (task-ledger §13.4: unreachable
+  is neither quiet nor gone), and its line in the header says "can't see <machine> since 14:02". On `machine_resync` it is
+  evaluated once against the fresh facts, and its key keeps a finish that happened during the drop from firing twice.
+  The deadline keeps running: an expiry while blind says so in its facts (`blind: true`, the last known state).
+- **From slice 4b (W7), the evaluation moves to the target's host.** A watch on a remote target is forwarded with its
+  thread's header (`host.mail.deliver`). The target's host evaluates it from its own facts, with no mirror inference, and
+  its notice comes back through the outbox (§11.5). A firing during a link drop is stored on the far side and arrives on
+  reconnect. This is §11.8's "the host that ran the turn makes the report", applied to watches.
+
+### 14.7 Cost of a wake
+
+A wake costs the turn it starts. The frame is small; the conversation it lands in is not.
+
+| Part | Tokens | Measured |
+|---|---|---|
+| The frame | 120 to 250 new input tokens per firing line, plus the note | #1324 research: `cache_new=242` for a queued notice |
+| Each request of the turn | the whole conversation as cache reads: about 25,000 for a fresh session, 80,000 to 150,000 for a long orchestrator | #1324 research: `cache_read=23935` with a 24k prefix |
+| A wake after the prompt cache expired, or of an asleep session (resume) | the whole conversation once as a **cache write**, at 1.25 times the input price on Claude: the largest part | #1324 research: `cache_creation=26616` for a new prompt |
+| Requests per wake | 2 to 4: the wake, a read (`read_session`, `mail read`), an act, the answer | |
+| Output | 100 to 500 | |
+
+So one wake of a 100,000-token orchestrator costs on the order of 300,000 cache-read tokens (the price of about 30,000
+input tokens) with a warm cache, and over 100,000 cache-write tokens with a cold one. Ten wakes an hour is real usage. That
+is why §14.5 makes one-shot the default and refuses duplicates, why expiry is the only notice a watch that never saw its
+change posts, and why the orchestrator's instructions say `compact_self` before a long wait. The token guard counts what
+gets through. W1 records watch-started turns as their own cause in the usage history (`usage_buckets.causes`), so their
+cost is visible.
+
+### 14.8 What it replaces, in order
+
+#### 14.8.1 The orchestrator's shell pollers (W1)
+
+| Today | Becomes |
+|---|---|
+| A background shell command polling a linked machine's sessions every 3 minutes, matching phrases to tell an interim answer from a final one | `mail watch` on each session with `finished` (or `answers`), from the mirror's facts, not words |
+| A background `sleep` to look again later | `mail watch to:"timer" kind:"at"` |
+| Telling the agent to run watchers | one instruction line: "To wait for something, set a watch with the mail command and end your turn." |
+
+Sessions the orchestrator started itself report already (§8.1). The poller exists for sessions started by scripts, and
+for machines whose reports were lost to a dropped link (#1523). Slice 4b removes most of that need; W1 removes the scripts
+now.
+
+#### 14.8.2 Paused reports and #1540 (W3)
+
+Today a paused report (#721) is the in-memory `pausedReports` map, a settle timer (`PAUSED_REPORT_SETTLE_MS`) and the app
+setting `report_paused:<session>`. A new answer while paused is held until all background work ends, and with a
+long-lived task it is never delivered (#1540).
+
+It becomes a **host watch** (`created_by 'host'`) on the delegation thread, made when a turn of the thread ends paused:
+
+- `source 'session'`, target the assignee, condition `answers`, and a settle: when the paused tasks have all ended
+  (`SessionFact.pausedTasks` empty), the final report after the 60 s settle, as today.
+- **Each new answer while paused** posts a `report` in the thread with `facts.outcome = 'paused'`,
+  `facts.newAnswer = <turnSeq>` and the count of tasks still running. **It wakes**, because it carries news. This refines
+  §6's "later pauses do not wake": a later pause **with a new answer** wakes; one with nothing new still does not. That is
+  #1540's fix.
+- The tasks' descriptions (the CLI's command lines) are the agent's words: they are in `mail read`, quoted, never in the
+  frame, which gives the count.
+- The watch ends with the final report, when the thread is `done`, or after 24 hours with a last report ("still paused
+  on 2 tasks after 24 h; this is the last report"). The person sees it in the session's header as "Centralu waits on 2
+  background tasks"; cancelling it there sends the report now, with the last answer.
+- `report_paused:*` is still written in step until slice 9, so a rollback finds what it expects (§4.2).
+
+The "finished" report does not move: it is a turn's report (§6), not a watch.
+
+#### 14.8.3 The merge queue (W5, with slice 5)
+
+From slice 5 the queue's news to its owner is mail (§8.3): the queuing session owns the item's thread and needs no watch.
+A watch is for **someone else's** item (the orchestrator following an item a child queued): a `thread` watch with `done`
+or `blocked`. With it, the queue's `watch` command and its `--after` replay go, with `tellSessions` (slice 5's row in
+§12). Until slice 5, #1258's notices stay as they are.
+
+#### 14.8.4 Order
+
+| Slice | Moves | Removed then |
+|---|---|---|
+| W1 | the pollers → session and timer watches | the poller scripts, the instruction to run watchers |
+| W3 | paused reports → host watches | the in-memory `pausedReports` and its settle timer (the setting stays until slice 9) |
+| W5 | the queue's `watch` command → thread watches | `watch`, `watch --after`, the second driver holding the lease |
+| 9 | the contract | `report_paused:*` |
+
+### 14.9 The person sees and cancels them
+
+- **In the session's header**, beside its open threads (§10.3): a `Badge` "2 watches". Its popover lists each watch: the
+  source's icon, the target's name (resolved by the window), the condition in words ("finishes a turn"), the deadline
+  ("until 16:30"), "repeats" when it does, blind ("can't see the laptop since 14:02"), the note (drawn as the agent's
+  words), and a Cancel `Button`. A host watch shows as "Centralu waits on…" with "Report now".
+- **On the delivery line** of a repeating watch: Cancel beside it.
+- **Held by a guard:** the header says "watches paused: 6 wakes in an hour", with Resume (§14.5).
+- **Across sessions:** not in W2. With the task board (slice 8), a "Watches" filter lists every active watch of this host
+  and of linked machines. Until then the orchestrator answers "what is being watched" with `mail inbox`.
+- **Cancelling** writes `cancelled` and `ended_by 'person'`, and an `event` in the watch's thread ("the person cancelled
+  this watch"), which the session reads at its next turn. It does not wake it.
+- **Protocol (additive):** `watches.list { sessionId }` → `WatchView[]` (`id, source, target, condition, until, repeats,
+  urgent, note, blindSince, firedCount, createdBy`); `watches.cancel { id }`; the event `watch_changed { sessionId }`. An
+  older window ignores the event and shows no badge.
+- The person does not create watches (open question 9).
+
+### 14.10 Failure cases
+
+| Case | What happens |
+|---|---|
+| An event and the sweep evaluate the same change | the `UNIQUE` dedupe key posts once (§14.3.4) |
+| The host dies between the notice's commit and its delivery | the receipt is due, and the next host delivers it. Between `attempt_at` and `delivered_at`, §7.6 applies: a watch notice starts no work by itself, so it is resent with `maybeRepeated="1"` |
+| The target finished, then answered again, both during the owner's turn | a one-shot watch fired at the first. `answers` posted two notices; one wake at the turn's end lists both |
+| The target's machine is unreachable at the deadline | `expired` with `blind: true` and the last known state |
+| `gh` is missing, not logged in, or rate-limited | `errors` counts. After 30 minutes failing: one notice (`condition="failed"`, the error's kind, never its text) and `failed` |
+| The owner is trashed with active watches | `suspended`; restored before the deadline, `active` again and evaluated at once against its last key |
+| The owner closes a watch's thread with `close` | the same as cancelling the watch |
+| The session sets its 21st watch | refused, with the count and how to cancel |
+| A timer that reschedules itself every turn | the watch-chain guard (§14.5, rule 5) holds it after 6 in an hour |
+| An older window | sees the delivery as a `marker` line, with no badge and no cancel |
+| An older host serving during a swap | ignores the table: nothing fires from it, nothing fires twice |
+| A note containing `</centralu-mail>` or "person:" | escaped and quoted (§7.3) |
+
+### 14.11 Slices
+
+| # | Scope | Store step | Needs |
+|---|---|---|---|
+| **W1** | **This design, and the core.** M4 `mail_watches`; `WatchService` (register, cancel, list, expire, fire, catch-up); the session fact feed in `session-events.ts`; session sources (`finished`, `answers`, `asked`, `quiet`, `ended`; local, and linked through the mirror) and timers (`at`, `every`); the `mail` action `watch`, the `until` field, `close` on a watch id, watches in `inbox`, on Claude, on Codex and behind `centralu_run`; the watch thread and its frame line; guards 1 to 6 of §14.5; protocol `watches.list` / `watches.cancel` / `watch_changed`; the orchestrator's instruction line; tool-cost.md §13 measured; the domain-model and stored-shapes rows. Tests that fail without it: a watch outlives a respawn of its owner's process; one state never fires twice across an event and the sweep; a restart between two firings posts each once; the baseline never fires; a deadline posts one expiry; a blind target never fires `quiet` | M4 | slice 3 (built) |
+| W2 | the header's badge and popover with Cancel; the delivery line's watch icon; "watches paused" with Resume | none | W1 |
+| W3 | paused reports as host watches; #1540's update on a new answer; "Report now" | none | W1 |
+| W4 | the `pr` source through `git-pr.ts` | none | W1 |
+| W5 | the `thread` source; the queue's `watch` command removed | none | slice 5 |
+| W6 | `urgent` headers mid-turn | none | slice 6 |
+| W7 | evaluation at the target's host, notices through the outbox | none (M3's tables) | slice 4b |
+| W8 | app sources (`uses.mail.sources`, `sourceChanged`) | none | slice 7 |
+
+### 14.12 Open questions for the owner
+
+1. **A thread per watch, or one "watches" thread per session?** (a) One per watch: its history is in one place, §6's
+   parent rule attributes the wake, and a one-shot's thread is `done` when it ends. (b) One per session: fewer rows, but a
+   long-lived thread mixes unrelated watches, and their wakes cannot be attributed to the work. **Recommend (a).**
+2. **Does expiry wake?** (a) Yes, once: the agent planned for the timeout. (b) No: it is read at the next turn. (c) The
+   session chooses per watch (one more word in `kind`). **Recommend (a).**
+3. **PR and CI checks: the host or the board app?** (a) The host, through `git-pr.ts` and the person's `gh`, polled only
+   while a watch is active: it works for any project on GitHub, with no app running. (b) The board app as the first app
+   source: no host polling, but it waits for slice 7, and only this repository has the app. **Recommend (a)**; the board
+   app may report the same through W8 later.
+4. **Remote targets.** (a) The mirror on the watcher's host now, the target's host from slice 4b (§14.6). (b) Refuse
+   remote targets until 4b. **Recommend (a)**: the orchestrator's poller on the linked machine is today's main case.
+5. **A deadline that passes while the target is unreachable.** (a) It expires, saying it was blind. (b) It is extended by
+   the blind time, up to the 7-day cap. **Recommend (a)**: the deadline is the owner's, and the expiry tells it what is
+   known.
+6. **The numbers:** 20 active per session (50 for the orchestrator), 5 repeating, 3 urgent; default deadline 24 h, at
+   most 7 days; `quiet` and `every` ≥ 10 min; the watch-chain guard at 6 an hour; PR polling every 60 s for 10 min, then
+   every 5 min. **Recommend these**, looked at again after a week of the orchestrator's use.
+7. **The paused report's new rule** (§14.8.2): a later pause with a new answer wakes the owner. (a) Yes: it is #1540's
+   fix. (b) Post it with `wake: false`, to be read with the final report. **Recommend (a).**
+8. **`until` as a new field, or a reused one** (`next`, which means the next step). (a) `until`: about 25 characters in
+   each Codex request. (b) `next`: no new field, but a misleading name. **Recommend (a).**
+9. **May the person create a watch from the window?** (a) Not now: a watch is a session's request. (b) Yes, from the
+   header ("tell this session when…"). **Recommend (a)**, until use shows the need.
+10. **A host-wide list of watches before the task board.** (a) Wait for the board (slice 8). (b) A "Watches" section in
+    the Inbox now. **Recommend (a)**: the header covers the session the person is looking at.
