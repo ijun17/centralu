@@ -278,7 +278,9 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
   The file keeps the last 200 events, so on a very busy queue an old message can still go.
 - **The screen** shows a "Merge queue" section above the board while it has items, or messages not
   acknowledged (one line naming whose): needs attention (with why), CI, waiting, merged in the last
-  day, each with Unqueue while active. Nothing tells a
+  day, each with Unqueue while active. Merged is history (#1551): collapsed behind a "Merged (N)" toggle,
+  so nothing queued is one header line; what needs attention, CI or waiting always shows, and the section
+  never grows past a third of the view (it scrolls inside). Nothing tells a
   screen when the driver moves an item, so it reads `merge_queue` again every 15 s while one is active.
 - `PROJECT_BOARD_QUEUE_TICK_MS`, `PROJECT_BOARD_QUEUE_POLL_MS`, `PROJECT_BOARD_QUEUE_TELL_RETRY_MS` and `PROJECT_BOARD_QUEUE_REPOST_MS` shorten the waits only for tests.
   Tests: `tooling/project-board-queue.test.ts` (the decisions, the app against a fake `gh` that

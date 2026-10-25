@@ -410,6 +410,9 @@ export function boardReaderTests(): void {
       const v = await showBoard(page, { queue: QUEUE })
       const queue = v.locator('#queue')
       await expect(queue).toBeVisible()
+      // Merged items are history: collapsed under a toggle until it is clicked
+      await expect(queue.locator('.q-group .q-label')).toHaveText(['Needs attention1', 'CI2', 'Waiting1'])
+      await queue.locator('#queue-merged-toggle').click()
       await expect(queue.locator('.q-group .q-label')).toHaveText(['Needs attention1', 'CI2', 'Waiting1', 'Merged1'])
       const attention = queue.locator('.q-row[data-state="attention"]')
       await expect(attention).toContainText('fix(ui): keep focus')
@@ -426,6 +429,48 @@ export function boardReaderTests(): void {
       await page.keyboard.press('Escape')
       await attention.getByRole('button', { name: 'Unqueue' }).click()
       await expect.poll(() => callsTo(page, 'unqueue')).toEqual([{ pr: `${REPO}#120` }])
+    })
+
+    const mergedItems = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({ repo: REPO, pr: 200 + i, ref: `#${200 + i}`, title: `fix(host): merged change number ${i}, with a title long enough to wrap`, state: 'merged', lowers: [], reason: null, head: 'abc', commit: 'abcdef1234' }))
+    const queueOf = (queue: any[], summary: string) => ({ ...QUEUE, structuredContent: { ...QUEUE.structuredContent, summary, queue } })
+
+    test('with nothing queued and 13 merged, the queue is one line and the board shows below it in a narrow pane', async ({ page }) => {
+      await page.setViewportSize({ width: 380, height: 700 })
+      const v = await showBoard(page, { queue: queueOf(mergedItems(13), 'Merge queue: nothing queued, 13 merged.') })
+      const queue = v.locator('#queue')
+      await expect(queue).toBeVisible()
+      await expect(queue.locator('.q-row')).toHaveCount(0)
+      const toggle = queue.locator('#queue-merged-toggle')
+      await expect(toggle).toHaveText('Merged (13)')
+      await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+      const at = await v.locator('body').evaluate(() => {
+        const q = document.querySelector('#queue')!.getBoundingClientRect()
+        const c = document.querySelector('.card')!.getBoundingClientRect()
+        return { queueHeight: q.height, cardBottom: c.bottom, view: window.innerHeight, sideways: document.documentElement.scrollWidth - document.documentElement.clientWidth }
+      })
+      expect(at.queueHeight).toBeLessThan(100) // a header of at most two lines
+      expect(at.cardBottom).toBeLessThanOrEqual(at.view)
+      expect(at.sideways).toBeLessThanOrEqual(0)
+      // Opening it lists them, and the section scrolls inside itself instead of growing past a third of the view
+      await toggle.focus()
+      await page.keyboard.press('Enter')
+      await expect(queue.locator('.q-row[data-state="merged"]')).toHaveCount(13)
+      await expect(toggle).toBeFocused()
+      const open = await v.locator('body').evaluate(() => ({ height: document.querySelector('#queue')!.getBoundingClientRect().height, view: window.innerHeight }))
+      expect(open.height).toBeLessThanOrEqual(open.view / 3 + 2)
+      await toggle.click()
+      await expect(queue.locator('.q-row')).toHaveCount(0)
+    })
+
+    test('an item that needs attention shows without a click among merged ones', async ({ page }) => {
+      await page.setViewportSize({ width: 380, height: 700 })
+      const v = await showBoard(page, { queue: queueOf([QUEUE.structuredContent.queue[0], ...mergedItems(13)], 'Merge queue: 1 needs attention, 13 merged.') })
+      const queue = v.locator('#queue')
+      await expect(queue.locator('.q-row[data-state="attention"]')).toBeVisible()
+      await expect(queue.locator('.q-row[data-state="attention"] .why')).toContainText('conflicts with main')
+      await expect(queue.locator('.q-row[data-state="merged"]')).toHaveCount(0)
+      await expect(queue.locator('#queue-merged-toggle')).toHaveText('Merged (13)')
     })
 
     test('the release dialog shows where the release stands, reads again on demand, and Esc gives the keyboard back', async ({ page }) => {
