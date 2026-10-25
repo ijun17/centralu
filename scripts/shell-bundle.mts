@@ -30,6 +30,8 @@ import { createHash } from 'node:crypto'
 import { chmodSync, chownSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync, lstatSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+// @ts-expect-error — plain .mjs, as the other scripts import theirs
+import { isMain } from './is-main.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 export const TAURI_DIR = join(ROOT, 'apps/desktop/src-tauri')
@@ -203,7 +205,7 @@ export async function fetchPinned(entry: LockEntry, dest: string): Promise<strin
   return dest
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (isMain(import.meta.url)) {
   const [command] = process.argv.slice(2)
   const flag = (name: string) => {
     const i = process.argv.indexOf(name)

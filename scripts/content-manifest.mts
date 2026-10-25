@@ -33,6 +33,8 @@ import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sig
 import { lstatSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+// @ts-expect-error — plain .mjs, as the other scripts import theirs
+import { isMain } from './is-main.mjs'
 // @ts-expect-error — dependency-free policy also runs directly in the signing workflow
 import { readReleaseBase, validateLocalManifest } from './local-manifest.mjs'
 
@@ -338,7 +340,7 @@ export function verifyContent(dir: string, opts: { keys?: TrustedKey[]; platform
  *
  * `sign` uses CONTENT_SIGNING_KEY when it is set, and a throwaway key otherwise.
  */
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (isMain(import.meta.url)) {
   const [command, dir] = process.argv.slice(2)
   const flag = (name: string) => {
     const i = process.argv.indexOf(name)

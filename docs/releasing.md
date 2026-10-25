@@ -425,8 +425,9 @@ path is removed.
   `tauri.conf.json`, `apps/desktop/package.json`, `Cargo.toml` and `Cargo.lock`, and every
   `packaging/npm/*/package.json` with the shim's pins. `scripts/stamp-version.mjs` writes the version into
   `version.generated.ts`, `tauri.conf.json` and the npm manifests, and `--restore` puts the placeholder back.
-  `release-npm.mts` stamps right after its clean-tree check, before `pnpm verify` and the build, and signs the content
-  manifest with that version; `pnpm app` (`scripts/app-build.mts`) stamps, builds and restores, also on failure or
+  `release-npm.mts` runs `pnpm verify` on the tree as committed, at the placeholder and without `CENTRALU_VERSION` (the
+  guard tests expect the placeholder: stamped first, 17 of them failed on every Linux job of the beta.38 rehearsal), then
+  stamps, before the build, and signs the content manifest with that version (`verifyThenStamp`, `scripts/release-verify.mjs`); `pnpm app` (`scripts/app-build.mts`) stamps, builds and restores, also on failure or
   Ctrl-C; `local-update` stamps its disposable clone. `bundle.mjs` does not call a tree dirty for those version
   fields alone. Nothing is compiled into Rust: the window reads the stamped `tauri.conf.json` at run time
   (`package_info()`) and passes it to the keeper as `--app-version`, which a keeper running a built host now requires.

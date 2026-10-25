@@ -39,6 +39,8 @@ import { APP_NAME } from '../packages/protocol/src/brand.js'
 import { resolveAppVersion } from './app-version.mjs'
 // @ts-expect-error — plain .mjs, as above
 import { holdStamp } from './stamp-version.mjs'
+// @ts-expect-error — plain .mjs, as above
+import { verifyThenStamp } from './release-verify.mjs'
 // @ts-expect-error — plain .mjs, so bundle.mjs reads the same list under plain node
 import { CONPTY_FILES as CONPTY_FILES_JS } from './conpty-files.mjs'
 import { checkStaged, shellToCarry, stageBundle, stageContent, type CarriedShell } from './bundle-stage.mjs'
@@ -122,7 +124,7 @@ const requireContentKey = process.argv.includes('--require-content-key')
  * The version this run releases (#1501): `CENTRALU_VERSION`, which the release workflow sets from
  * the tag, else the newest release tag reachable from HEAD; no placeholder. Git holds none, so
  * `APP_VERSION` from `brand.ts` is the source's `0.0.0-dev` here (imported before any stamp) and is
- * never what is released. Stamped into the tree after the clean-tree check below.
+ * never what is released. Stamped into the tree after `pnpm verify`, before the build (`verifyThenStamp`).
  */
 let VERSION: string
 try {
@@ -584,15 +586,6 @@ if (out('git', ['status', '--porcelain'])) {
   fail('the working tree is not clean. Commit or revert, then run this again.')
 }
 
-// The version goes into every carrier (`stamp-version.mjs`) before anything is verified or built:
-// the UI and host read version.generated.ts, Tauri and the window tauri.conf.json, npm the manifests.
-// A child (pnpm verify, the build) reads CENTRALU_VERSION. Put back on exit and on Ctrl-C, SIGTERM or
-// SIGHUP (`holdStamp`; Node's exit event skips a signal, #1501 review), so a run by hand leaves the tree
-// as it found it; the release job's checkout is thrown away anyway. A child running then gets the
-// same Ctrl-C from the terminal; a signal sent to this process alone is handled once it returns.
-;(holdStamp as (root: string, v: string) => () => void)(ROOT, VERSION)
-process.env.CENTRALU_VERSION = VERSION
-
 if (publish) {
   // Getting blocked on auth after running the whole build wastes minutes — checked first.
   try {
@@ -602,8 +595,25 @@ if (publish) {
   }
 }
 
+// Verified as committed, at the placeholder, and only then stamped (`verifyThenStamp`, release-verify.mjs): the guard
+// tests expect the placeholder, and the beta.38 rehearsal failed 17 of them when the stamp came first.
 if (skipVerify) console.log('\n  --skip-verify: a rehearsal on this tree verified it (release.yml guard)')
-else for (const script of target?.verify ?? ['verify']) sh('pnpm', [script])
+verifyThenStamp({
+  scripts: target?.verify ?? ['verify'],
+  skipVerify,
+  cwd: ROOT,
+  shell: viaShell('pnpm'),
+  // The version goes into every carrier (`stamp-version.mjs`) for the build: the UI and host read
+  // version.generated.ts, Tauri and the window tauri.conf.json, npm the manifests. A child (the build) reads
+  // CENTRALU_VERSION. Put back on exit and on Ctrl-C, SIGTERM or SIGHUP (`holdStamp`; Node's exit event skips a
+  // signal, #1501 review), so a run by hand leaves the tree as it found it; the release job's checkout is thrown
+  // away anyway. A child running then gets the same Ctrl-C from the terminal; a signal sent to this process alone
+  // is handled once it returns.
+  stamp: () => {
+    ;(holdStamp as (root: string, v: string) => () => void)(ROOT, VERSION)
+    process.env.CENTRALU_VERSION = VERSION
+  },
+})
 
 console.log(
   `  ${target?.id ?? 'centralu (shim only)'} · version ${VERSION} · tag ${tag} · commit ${out('git', ['rev-parse', '--short', 'HEAD'])}`,

@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { installLocalBundle, requestSignature, stampLocalVersion } from '../scripts/local-update.mjs'
 import { buildManifest, MANIFEST_NAME, SIGNATURE_NAME, verifyManifest } from '../scripts/content-manifest.mjs'
 import { fakeGh } from './fake-gh.test-helpers.js'
@@ -10,6 +11,8 @@ import { fakeGh } from './fake-gh.test-helpers.js'
 import { assertLocalVersion, chooseLocalVersion, MAX_LOCAL_MANIFEST_BYTES, nextReleaseVersion, readReleaseBase, validateLocalManifest } from '../scripts/local-manifest.mjs'
 // @ts-expect-error — plain JavaScript, shared with release-npm and bundle.mjs
 import { stampedFiles } from '../scripts/stamp-version.mjs'
+// @ts-expect-error — plain JavaScript, as above
+import { isMain } from '../scripts/is-main.mjs'
 
 const dirs: string[] = []
 const temp = () => { const dir = mkdtempSync(join(tmpdir(), 'cc-local-update-')); dirs.push(dir); return dir }
@@ -34,7 +37,7 @@ function taggedCheckout(paths: string[], tag: string | null = `v${base}`): strin
   if (tag) git(root, 'tag', '-a', tag, '-m', tag)
   return root
 }
-const SIGNER = ['scripts/content-manifest.mts', 'scripts/local-manifest.mjs', 'scripts/app-version.mjs', 'packaging/npm/centralu/bin/semver.mjs', 'packaging/shell/keys.json']
+const SIGNER = ['scripts/content-manifest.mts', 'scripts/local-manifest.mjs', 'scripts/app-version.mjs', 'scripts/is-main.mjs', 'packaging/npm/centralu/bin/semver.mjs', 'packaging/shell/keys.json']
 function fixture() {
   const paths = ['centralu-keeper', 'host/main.mjs', 'host/bundle-info.json', 'host/schema.sql', 'host/node_modules/better-sqlite3/package.json', 'host/node_modules/node-pty/package.json']
   return {
@@ -204,6 +207,36 @@ describe('the data-only manifest boundary', () => {
     expect(JSON.parse(signature.toString()).comment).toContain('throwaway')
     expect(() => verifyManifest(original, signature, { keys: [] })).toThrow(/unknown key/)
     expect(() => execFileSync(process.execPath, ['--experimental-strip-types', join(checkout, 'scripts/content-manifest.mts'), 'sign-local', manifestPath], { stdio: 'pipe', env: { ...process.env, CONTENT_SIGNING_KEY: '' } })).toThrow()
+  })
+
+  // Found by the beta.38 rehearsal on macOS, where the temporary folder is a symlink (/var -> /private/var): the command
+  // compared argv[1] unresolved with a resolved import.meta.url, did nothing and printed nothing. A junction does the
+  // same on Windows, so this runs there too.
+  it('runs the signer through a symlinked checkout path too', () => {
+    const checkout = taggedCheckout(SIGNER)
+    const link = join(temp(), 'link')
+    symlinkSync(checkout, link, 'junction')
+    // No command: the usage line and exit 2 when the command ran at all, silence and exit 0 when it did not
+    expect(() => execFileSync(process.execPath, ['--experimental-strip-types', join(link, 'scripts/content-manifest.mts')], { stdio: 'pipe' })).toThrow(/usage: content-manifest/)
+  })
+
+  it('has one main-module check, and every script that runs a command uses it', () => {
+    for (const name of ['bundle-stage', 'shell-bundle', 'local-update', 'content-manifest']) {
+      const source = readFileSync(resolve(`scripts/${name}.mts`), 'utf8')
+      expect(source, name).toContain('if (isMain(import.meta.url)) {')
+      expect(source, name).not.toMatch(/=== process\.argv\[1\]/)
+    }
+    const dir = temp()
+    const real = join(dir, 'real')
+    mkdirSync(real)
+    writeFileSync(join(real, 'a.mjs'), '')
+    const link = join(dir, 'link')
+    symlinkSync(real, link, 'junction')
+    const url = pathToFileURL(join(real, 'a.mjs')).href
+    expect(isMain(url, join(link, 'a.mjs'))).toBe(true)
+    expect(isMain(url, join(real, 'a.mjs'))).toBe(true)
+    expect(isMain(url, join(real, 'b.mjs'))).toBe(false)
+    expect(isMain(url, undefined)).toBe(false)
   })
 
   // The workflow's run blocks are bash for GitHub's Linux runner (they are what this runs), and a local update is
