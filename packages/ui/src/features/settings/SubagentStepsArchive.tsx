@@ -26,14 +26,15 @@ export function stepsTake(s: Pick<SubagentStepsHeld, 'runs' | 'steps' | 'bytes'>
   return `${stepsCount(s.runs, 'run', 'runs')} · ${stepsCount(s.steps, 'step', 'steps')} · ${formatBytes(s.bytes)}`
 }
 
-/** The refusal a row may be showing, and whether an action is running */
+/** The confirmation and refusal a row may be showing, and whether an action is running */
 type RowState = {
   busy: boolean
+  confirming: boolean
   error: string | null
 }
 
 /**
- * What each live session's subagent steps take, largest first, each with "Archive": at once, with Undo on the toast (#1512). `sessions` null while it is
+ * What each live session's subagent steps take, largest first, each with "Archive…". `sessions` null while it is
  * read; `error` when reading it failed. `unreached`: linked machines whose sessions could not be read (#841's rule), each
  * named; with one, the list is never said to be empty, since it is not the whole of it.
  */
@@ -43,14 +44,18 @@ export function SubagentStepsHeldList({
   error,
   onRetry,
   row,
+  onAsk,
   onMove,
+  onCancel,
 }: {
   sessions: readonly SubagentStepsHeld[] | null
   unreached?: readonly { machineId: string; name: string }[]
   error: string | null
   onRetry: () => void
   row: (sessionId: string) => RowState
+  onAsk: (sessionId: string) => void
   onMove: (s: SubagentStepsHeld) => void
+  onCancel: () => void
 }) {
   return (
     <section data-testid="subagent-steps-held">
@@ -86,10 +91,10 @@ export function SubagentStepsHeldList({
                       size="sm"
                       className="ml-auto shrink-0"
                       disabled={r.busy}
-                      onClick={() => onMove(s)}
+                      onClick={() => onAsk(s.sessionId)}
                       data-testid={`subagent-steps-move-${s.sessionId}`}
                     >
-                      Archive
+                      Archive…
                     </Button>
                   </div>
                   <div className="readout mt-0.5 text-2xs text-ink-faint" data-testid={`subagent-steps-take-${s.sessionId}`}>
@@ -99,6 +104,16 @@ export function SubagentStepsHeldList({
                     <p className="mt-1.5 text-xs leading-body text-ink" data-testid={`subagent-steps-error-${s.sessionId}`}>
                       {r.error}
                     </p>
+                  )}
+                  {r.confirming && (
+                    <InlineConfirm
+                      text={`Move the subagent steps of “${s.name}” to the session archive? The conversation stays, and its cards say the steps are in the session archive. You can restore them here.`}
+                      yesLabel="Archive"
+                      busy={r.busy}
+                      onYes={() => onMove(s)}
+                      onNo={onCancel}
+                      testId="subagent-steps-confirm"
+                    />
                   )}
                 </li>
               )

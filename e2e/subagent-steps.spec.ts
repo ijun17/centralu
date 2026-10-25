@@ -117,11 +117,8 @@ test("a session's subagent steps go to the session archive and back from Setting
   // What the session's steps take, and the way to move them
   await openArchive()
   await expect(page.getByTestId(`subagent-steps-take-${sessionId}`)).toContainText('1 run · 2 steps ·')
-  // Archived at once (#1512): no question, and the toast offers Undo
   await page.getByTestId(`subagent-steps-move-${sessionId}`).click()
-  await expect(page.getByTestId('subagent-steps-confirm')).toHaveCount(0)
-  await expect(page.getByTestId('toast')).toContainText('subagent step')
-  await expect(page.getByTestId('toast-action')).toHaveText('Undo')
+  await page.getByTestId('subagent-steps-confirm-yes').click()
   await expect(page.getByTestId('subagent-steps-held-empty')).toBeVisible()
   const row = page.getByTestId(`trash-steps-row-${sessionId}`)
   await expect(row).toContainText('Subagent steps of')
@@ -146,6 +143,7 @@ test("a session's subagent steps go to the session archive and back from Setting
   // Moved again; then another window moves a later step there, after this screen read the session archive
   await openArchive()
   await page.getByTestId(`subagent-steps-move-${sessionId}`).click()
+  await page.getByTestId('subagent-steps-confirm-yes').click()
   await expect(page.getByTestId(`trash-steps-holds-${sessionId}`)).toContainText('1 run · 2 steps ·')
   await emit(page, { ...step({ type: 'message_delta', role: 'assistant', text: 'One more thing.' }), parentCallId: 'toolu_later' })
   await page.evaluate((id: string) => (window as any).__mock.trash.trashSubagentSteps(id), sessionId)

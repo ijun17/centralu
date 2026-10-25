@@ -324,8 +324,10 @@ export function ArchiveSection() {
           unreached={held?.unreached ?? []}
           error={heldError}
           onRetry={load}
-          row={(id) => ({ busy, error: errorOf(`held:${id}`) })}
+          row={(id) => ({ busy, confirming: confirming === `held:${id}`, error: errorOf(`held:${id}`) })}
+          onAsk={(id) => setConfirming(`held:${id}`)}
           onMove={(h) => void act(`held:${h.sessionId}`, () => trashSubagentSteps(h.sessionId))}
+          onCancel={() => setConfirming(null)}
         />
       )}
     </SettingsPage>

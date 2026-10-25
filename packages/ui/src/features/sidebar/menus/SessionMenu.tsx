@@ -1,7 +1,6 @@
 import type { SessionSummary } from '@cc/core'
 import { RowMenu } from './RowMenu.jsx'
 import { ActionRow } from './ActionRow.jsx'
-import { archiveNeedsAsk } from '../../../store/sessions/lifecycle.js'
 
 /**
  * The action menu on a session row (dogfooding: the hover icons grew to four — pencil, handoff,
@@ -44,8 +43,7 @@ export function SessionMenu({
       )}
       <div className="my-1 border-t border-line" />
       <ActionRow
-        // The dots mean a question comes first: an idle session is archived at once
-        label={archiveNeedsAsk(session) ? 'Archive session…' : 'Archive session'}
+        label="Archive session…"
         onClick={pick(onDelete)}
         testId={`delete-session-${session.id}`}
         danger

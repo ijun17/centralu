@@ -239,31 +239,12 @@ uxTask({
   access: 'discoverable',
   start: demo,
   run: async (u, page) => {
-    // An idle session goes at once, with Undo on the toast (#1512): no confirmation
     await sessionMenu(u, page, DONE, 'delete')
+    await u.until('the confirmation', () => expect(page.getByTestId('confirm-delete')).toBeVisible())
+    await u.click(page.getByTestId('confirm-delete-yes'))
   },
-  goal: async (page) => expect(page.getByTestId('toast')).toContainText('Archived'),
-  budget: { operators: 10, M: 2, seconds: 6.7 },
-})
-
-uxTask({
-  id: 'undo-archive.mouse',
-  task: 'Undo archiving a session',
-  path: 'mouse',
-  access: 'discoverable',
-  notes: ['The toast of the archive offers Undo (#1512); it used to take Settings, then Archive, then Restore'],
-  start: async (page) => {
-    await demo(page)
-    const id = await sessionId(page, DONE)
-    await page.getByTestId(`session-menu-${id}`).click()
-    await page.getByTestId(`delete-session-${id}`).click()
-    await expect(page.getByTestId(`session-row-${id}`)).toHaveCount(0)
-  },
-  run: async (u, page) => {
-    await u.click(page.getByTestId('toast-action'))
-  },
-  goal: async (page) => expect(page.getByTestId(`session-row-${await sessionId(page, DONE)}`)).toBeVisible(),
-  budget: { operators: 5, M: 1, seconds: 3.3 },
+  goal: async (page) => expect(page.getByTestId('confirm-delete')).toBeHidden(),
+  budget: { operators: 16, M: 3, seconds: 10.1 },
 })
 
 uxTask({
@@ -271,12 +252,13 @@ uxTask({
   task: 'Bring back an archived session',
   path: 'mouse',
   access: 'discoverable',
-  notes: ['Settings, then Archive: the toast of the archive said where it went'],
+  notes: ['Settings, then Archive: the delete dialog and its toast say where it went'],
   start: async (page) => {
     await demo(page)
     const id = await sessionId(page, DONE)
     await page.getByTestId(`session-menu-${id}`).click()
     await page.getByTestId(`delete-session-${id}`).click()
+    await page.getByTestId('confirm-delete-yes').click()
     await expect(page.getByTestId(`session-row-${id}`)).toHaveCount(0)
     await expect(page.getByTestId('toast')).toBeHidden({ timeout: 15_000 })
   },
@@ -296,7 +278,7 @@ uxTask({
   task: "Free the space a session's subagent steps take, keeping the session",
   path: 'mouse',
   access: 'discoverable',
-  notes: ["Settings, then Archive: what each session's subagent steps take, its Archive button, which moves them at once with Undo on the toast (#418, #1512)"],
+  notes: ["Settings, then Archive: what each session's subagent steps take, its Archive capsule, then the confirmation (#418)"],
   start: async (page) => {
     await demo(page)
     const id = await sessionId(page, DONE)
@@ -313,9 +295,11 @@ uxTask({
     await u.click(page.getByTestId('settings-tab-archive'))
     await u.until('the archive', () => expect(page.locator('[data-testid^="subagent-steps-move-"]').first()).toBeVisible())
     await u.click(page.locator('[data-testid^="subagent-steps-move-"]').first(), { label: 'subagent-steps-move' })
+    await u.until('the confirmation', () => expect(page.getByTestId('subagent-steps-confirm')).toBeVisible())
+    await u.click(page.getByTestId('subagent-steps-confirm-yes'))
   },
   goal: async (page) => expect(page.getByTestId('subagent-steps-held-empty')).toBeVisible(),
-  budget: { operators: 13, M: 3, seconds: 8.8 },
+  budget: { operators: 19, M: 4, seconds: 12.3 },
 })
 
 uxTask({

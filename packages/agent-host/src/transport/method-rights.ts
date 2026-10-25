@@ -114,8 +114,6 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   'agents.clearBackgroundTasks': 'everyday',
   /** Moving to the trash drops owed reports, delegations, grants and waiting cards (owner, #1371) */
   'agents.deleteSession': 'asks',
-  /** Moves the session to the archive when that loses nothing, and says so otherwise (#1512): the card names the move */
-  'agents.archiveIfAtRest': 'asks',
   'agents.deleteAgentChild': 'asks',
   'agents.mcpProposals': 'everyday',
   'agents.resolveMcpProposal': 'window',

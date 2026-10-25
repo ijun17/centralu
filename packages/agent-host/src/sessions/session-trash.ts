@@ -55,8 +55,6 @@ export type SessionTrashHost = {
   forgetHeldNotices: (sessionId: string) => void
   /** The mail it held: the work it was given or gave moves on (#1347, `MailService.sessionGone`). Never throws */
   mailGone: (sessionId: string) => void
-  /** The unfinished mail threads it is assigned or owns (what `mailGone` moves on); null when the mailbox could not be read */
-  mailWork: (sessionId: string) => { assigned: string[]; owned: string[] } | null
   /** The session is back: the mail that waited for it may go (#1347). Never throws */
   mailPoke: (sessionId: string) => void
   gitTrust: (projectId: string | null) => { trusted: boolean; }
@@ -222,8 +220,8 @@ export class SessionTrash {
    * it is still at rest in the very step that moves it, nothing awaited between (`isQuiet`). Unlike `trashIf` it is the
    * person's kind of delete: it never purges, and a delete already under way is the one that stands. False: it stayed where it was
    */
-  trashIfQuiet(sessionId: string, also: () => boolean = () => true, removeExternal = false): Promise<boolean> {
-    return this.trashShared(sessionId, false, removeExternal, undefined, false, () => this.isQuiet(sessionId) && also())
+  trashIfQuiet(sessionId: string, also: () => boolean = () => true): Promise<boolean> {
+    return this.trashShared(sessionId, false, false, undefined, false, () => this.isQuiet(sessionId) && also())
   }
 
   /**
@@ -250,39 +248,7 @@ export class SessionTrash {
     if (this.host.readGrants.get(sessionId)?.size || this.host.delegationFlow.starts.agentConsents.has(sessionId)) {
       out.push('What the person allowed it (reading other sessions, starting agents) is dropped; a restored session asks again.')
     }
-    /*
-     * Work in the mailbox (#1512): restoring does not hand a thread back. An assigned one went open with nobody on it, and its
-     * owner was told the work stopped; an owned one became the person's.
-     */
-    const mail = this.host.mailWork(sessionId)
-    if (!mail) out.push('Its mailbox could not be read, so what it holds there is not known.')
-    else {
-      const subjects = (list: string[]) => list.slice(0, 3).map((x) => plainQuoted(x, 60)).join(', ') + (list.length > 3 ? ', …' : '')
-      if (mail.assigned.length) {
-        out.push(`${mail.assigned.length === 1 ? 'It is the assignee of an unfinished mail thread' : `It is the assignee of ${mail.assigned.length} unfinished mail threads`} (${subjects(mail.assigned)}); ${mail.assigned.length === 1 ? 'it goes' : 'they go'} back to open with nobody on it, and ${mail.assigned.length === 1 ? 'its' : 'their'} owner is told the work stopped.`)
-      }
-      if (mail.owned.length) {
-        out.push(`${mail.owned.length === 1 ? 'It owns an unfinished mail thread' : `It owns ${mail.owned.length} unfinished mail threads`} (${subjects(mail.owned)}); ${mail.owned.length === 1 ? 'it becomes' : 'they become'} the person's.`)
-      }
-    }
     return out
-  }
-
-  /**
-   * The archive the window asks for on a session that looks idle (#1512), decided here by the same rule as `delete_session`'s card:
-   * the session moves only when nothing it holds would be lost (`lossesOf`) and it is still at rest in the very step that moves it
-   * (`trashIfQuiet`). Otherwise nothing moves and the lines say what would be lost, for the window's dialog; `asks` is empty when
-   * the session was merely not at rest, or is no longer here
-   */
-  async archiveIfAtRest(sessionId: string, deleteExternal = false): Promise<{ archived: true } | { archived: false; asks: string[] }> {
-    const m = this.host.meta.get(sessionId)
-    if (!m) return { archived: false, asks: [] }
-    const lost = this.lossesOf(sessionId)
-    if (lost.length > 0) return { archived: false, asks: lost }
-    // The file is the dialog's default to remove when the session is deleted for good; a tool that cannot delete it keeps it instead of refusing the archive
-    const external = deleteExternal && !!this.host.adapters.get(m.tool)?.deleteExternalConversation
-    const moved = await this.trashIfQuiet(sessionId, () => this.lossesOf(sessionId).length === 0, external)
-    return moved ? { archived: true } : { archived: false, asks: [] }
   }
 
   private async trashSessionOnce(

@@ -533,11 +533,11 @@ delete one for good; and the archive is emptied by nothing but the person.
 
 #### FR-22. Session archive (2026-09-30, [#204](https://github.com/ijun17/centralu/issues/204))
 
-Archiving a session (the sidebar's **Archive session**) moves it to the session archive. A conversation leaves this machine only when the person
+Archiving a session (the sidebar's **Archive session…**) moves it to the session archive. A conversation leaves this machine only when the person
 deletes it for good in **Settings → Archive**, one at a time (**Delete for good**) or all at once (**Delete all archived sessions…**). The reason is the
 owner's: conversations are important data, and one click in the delete dialog used to destroy one
 with no way back. The archive was called the trash until #1404, when an orchestrator read "empty the trash"
-as the operating system's Recycle Bin and permanently deleted 108 sessions; the protocol methods (`trash.*`), the `sessions.trash` column and the `Trashed*` types keep the old word because the protocol only grows. An idle session is archived at once, with no question, and the toast after archiving reads "Archived <name>" with an **Undo** that restores it (#1512); a session that is in a turn, waiting on the person or running a background job asks first, as the dialog always did, and so does one the host says holds something the archive drops and Undo does not bring back (a report owed or awaited, a wait or a card on it, an unfinished mail thread), with the dialog naming it. Undo also puts back the unsent draft and the session's place in the project grids, not its scroll position. Archiving a session's subagent steps works the same way, and so does restoring an app version (Undo restores the version that was current). The same archive holds the kept records of app-agent sessions and archived subagent steps (below).
+as the operating system's Recycle Bin and permanently deleted 108 sessions; the protocol methods (`trash.*`), the `sessions.trash` column and the `Trashed*` types keep the old word because the protocol only grows. The toast after archiving reads "Archived: <name> — Settings → Archive restores it". The same archive holds the kept records of app-agent sessions and archived subagent steps (below).
 
 - **What goes to the archive** is everything deleting used to destroy: the session row, its messages,
   its approval rules, its commit links (`commit_sessions`), the app runs that point at it (with their
