@@ -80,11 +80,13 @@ One session = one agent process (Claude Code or Codex).
   handoff by default (it can be restored from Settings → Archive); a checkbox keeps it instead. The orchestrator can hand a session off too
   (its handoff_session command), after you approve its card unless the session is at rest and runs under a preset the orchestrator has itself; the original stays. A worktree session cannot be
   handed off yet.
-- Archiving: session's ⋯ → Archive session…. The session leaves the sidebar and goes to the session
+- Archiving: session's ⋯ → Archive session. The session leaves the sidebar and goes to the session
   archive (Settings → Archive), where the person can read it, restore it, or delete it for good.
-  Nothing is deleted on its own. The dialog also asks whether deleting it for good should delete the
-  conversation file on the tool's side (on by default); turning that off leaves the conversation on
-  the tool, so it can be loaded again from the past-conversation list in the New session window.
+  An idle session is archived at once and the toast offers Undo; one that is working, waiting on the
+  person or running a background job asks first, in a dialog that also asks whether deleting it for
+  good should delete the conversation file on the tool's side (on by default). Nothing is deleted on
+  its own; turning that off leaves the conversation on the tool, so it can be loaded again from the
+  past-conversation list in the New session window.
 - There is no menu to change a session's agent (claude ↔ codex). A new tool does not know the old
   conversation, so use a handoff to continue with a different tool. The orchestrator is the one
   exception (Settings → Orchestrator).`,

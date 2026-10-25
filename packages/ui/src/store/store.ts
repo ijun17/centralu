@@ -184,7 +184,9 @@ export function stampToasts(set: StoreSet): StoreSet {
   return ((partial: Parameters<StoreSet>[0], replace?: boolean) =>
     (set as (p: unknown, r?: boolean) => void)((st: AppState) => {
       const next = typeof partial === 'function' ? partial(st) : partial
-      return next && typeof next.toast === 'string' ? { ...next, toastAt: st.toastAt + 1 } : next
+      if (!next || typeof next.toast !== 'string') return next
+      // A toast says its own action or none: the previous one's Undo does not carry over to this one
+      return { ...next, toastAt: st.toastAt + 1, ...('toastAction' in next ? {} : { toastAction: null }) }
     }, replace)) as StoreSet
 }
 
@@ -276,6 +278,7 @@ export const useStore = create<AppState>((rawSet, get) => {
     overlay: null,
     inboxOpen: false,
     toast: null,
+    toastAction: null,
     toastAt: 0,
     appFocused: true,
     completion: null as { sessionId: string; at: number } | null,

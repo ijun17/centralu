@@ -58,7 +58,9 @@ A label ends in "…" (the single character, never "...") when pressing it opens
 more before anything happens.
 
 - Follows: "Customise…" and "Import…" (`settings/ThemeSection.tsx`), "New app…" and "Delete project…"
-  (`sidebar/menus/ProjectMenu.tsx`), "Archive session…" and "Hand off to a fresh session…"
+  (`sidebar/menus/ProjectMenu.tsx`), "Archive session…" (only while the session is busy and the dialog asks; an idle
+  session shows "Archive session" and goes at once, with Undo on the toast, unless the host says the archive would drop
+  something Undo does not bring back, and then the dialog names it) and "Hand off to a fresh session…"
   (`sidebar/menus/SessionMenu.tsx`), "Other…" (`settings/OtherChoice.tsx`), "Delete for good…"
   (`settings/ArchiveSection.tsx`, then "Delete for good" on the confirmation itself).
 - The same character means "in progress" on a label that changes while it works: "Restarting the agent…"

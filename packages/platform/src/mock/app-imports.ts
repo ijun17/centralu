@@ -114,6 +114,13 @@ export class AppImportsMock {
       const v = this.appVersions.get(key)
       const a = this.registry.externalAppList.find((x) => x.appId === appId && x.projectId === null)
       if (!a || !v || v.kind !== 'snapshots' || !v.snapshots.some((s) => s.id === id)) throw new Error('That version is no longer kept')
+      /*
+       * Like the host (`capture`, 'before restore'): the current files are kept as a version first, unless a kept version
+       * already matches them; the restored one becomes the current one
+       */
+      if (!v.snapshots.some((s) => s.current)) {
+        v.snapshots.unshift({ id: `before-restore-${this.restoredVersions.length}`, at: this.clock.now(), files: 4, bytes: 2048, reason: 'before restore', current: false })
+      }
       for (const s of v.snapshots) s.current = s.id === id
       this.restoredVersions.push({ appId, id })
       this.emit({ type: 'external_apps_changed' })

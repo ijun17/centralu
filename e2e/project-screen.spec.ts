@@ -156,7 +156,6 @@ test('an archived session leaves its screen and a removed panel returns only whe
 
   await page.getByTestId(`session-menu-${b}`).click()
   await page.getByTestId(`delete-session-${b}`).click()
-  await page.getByTestId('confirm-delete-yes').click()
   await expect(page.getByTestId(`session-row-${b}`)).toHaveCount(0)
 
   await page.getByTestId('project-header-alpha').click()

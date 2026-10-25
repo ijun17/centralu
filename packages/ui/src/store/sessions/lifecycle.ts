@@ -1,5 +1,5 @@
-import { APP_ARRIVAL_ID_PREFIX, isAppArrivalId } from '@cc/core'
-import type { NormalizedEvent, ToolDefaults, ToolName } from '@cc/protocol'
+import { APP_ARRIVAL_ID_PREFIX, backgroundCount, isAppArrivalId, isInTurn, sessionPanelId, withPanel, type SessionSummary } from '@cc/core'
+import { errorMessage, type NormalizedEvent, type ToolDefaults, type ToolName } from '@cc/protocol'
 import { initialSession, markRead as markReadPure, rename as renamePure } from '@cc/core'
 import type { Platform } from '@cc/platform/ports'
 import type { AppState, StoreGet, StoreSet } from '../state.js'
@@ -7,11 +7,88 @@ import { ifSessionStill, inOrder, stillInOrder } from '../patch.js'
 import { writingProject } from '../projects.js'
 import { liveFactsOf, replayPendingEvents } from '../sessionList.js'
 import { bumpChatKeysAbove, messagesToChat, nextChatKey, type ChatItem } from '../transcript.js'
+import type { Draft } from '../state/conversation.js'
 
 /**
  * A session's place in the list: opening the new-session dialog or starting one at once, creating it,
  * moving it to the session archive and back, its name, its read position and its order.
  */
+
+/**
+ * Whether archiving a session asks without the host being consulted (#1512): a turn under way, a card waiting for the person,
+ * or a background job running (moving it ends its process, and with it the job, which the archive does not bring back). This is
+ * only what the window can see, and only to ask more, never less: a session that passes goes to the host's own check
+ * (`archiveSession`), which knows what the window cannot (reports owed, waits and cards on it, mail threads).
+ */
+export function archiveNeedsAsk(s: Pick<SessionSummary, 'state' | 'pendingApproval' | 'pendingQuestions' | 'backgroundTasks'>): boolean {
+  return isInTurn(s.state) || !!s.pendingApproval || s.pendingQuestions.length > 0 || backgroundCount(s.backgroundTasks) > 0
+}
+
+/** What the host said an archive would lose, for the dialog that opens next (read by it; one entry per session asked about) */
+const archiveAsks = new Map<string, string[]>()
+export const archiveAsksOf = (sessionId: string): string[] => archiveAsks.get(sessionId) ?? []
+
+/**
+ * Where a session sat in the window when it was archived: what the person had typed and not sent, and its place in each project's
+ * grid. The archive clears both (`forgetSessions`), and Undo puts them back. Not kept: the scroll position and which panel had
+ * the focus.
+ */
+type WindowPlace = { draft: Draft | null; grids: { projectId: string; at: number }[] }
+
+function windowPlaceOf(s: AppState, sessionId: string): WindowPlace {
+  const draft = s.drafts[sessionId]
+  const panel = sessionPanelId(sessionId)
+  return {
+    draft: draft && (draft.text.trim() || draft.attachments.length > 0) ? draft : null,
+    grids: Object.entries(s.projectPanels).flatMap(([projectId, saved]) => {
+      const at = saved.panels?.indexOf(panel) ?? -1
+      return at >= 0 ? [{ projectId, at }] : []
+    }),
+  }
+}
+
+function putWindowPlaceBack(set: StoreSet, get: StoreGet, sessionId: string, place: WindowPlace): void {
+  const panel = sessionPanelId(sessionId)
+  set((s) => ({
+    // The unsent text is the composer's again, unless the person has typed something new since
+    ...(place.draft && !s.drafts[sessionId]?.text.trim()
+      ? { drafts: { ...s.drafts, [sessionId]: place.draft }, keptDrafts: s.keptDrafts.filter((d) => d.sessionId !== sessionId) }
+      : {}),
+    projectPanels: {
+      ...s.projectPanels,
+      ...Object.fromEntries(
+        place.grids.flatMap(({ projectId, at }) => {
+          const saved = s.projectPanels[projectId]
+          if (!saved?.panels || saved.panels.includes(panel)) return []
+          // Added at the end, then moved to the slot it left, so the panels around it keep their order
+          const added = withPanel([panel, ...saved.panels], saved, panel, true)
+          const panels = saved.panels.slice()
+          panels.splice(Math.min(at, panels.length), 0, panel)
+          return [[projectId, { ...added, panels, order: panels }] as const]
+        }),
+      ),
+    },
+  }))
+  if (place.grids.length > 0) get().saveWorkspace()
+}
+
+/** The toast after a session went to the archive: Undo is the archive's own Restore, and the window's side of the session comes back with it */
+function announceArchived(set: StoreSet, get: StoreGet, sessionId: string, name: string, place: WindowPlace): void {
+  set({
+    toast: `Archived ${name} · Settings → Archive keeps it`,
+    toastAction: {
+      label: 'Undo',
+      run: () => {
+        void get()
+          .restoreFromTrash(sessionId)
+          .then((error) => {
+            if (error) set({ toast: `Could not undo: ${error}` })
+            else putWindowPlaceBack(set, get, sessionId, place)
+          })
+      },
+    },
+  })
+}
 
 /**
  * Of the model and effort this project has remembered for this tool, keep only what **that tool
@@ -83,6 +160,7 @@ type LifecycleActions = Pick<
   | 'startSessionNow'
   | 'createSession'
   | 'deleteSession'
+  | 'archiveSession'
   | 'restoreFromTrash'
   | 'rename'
   | 'markRead'
@@ -262,11 +340,46 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
     const platform = get().platform
     if (!platform) return
     const name = get().sessions[sessionId]?.name ?? 'Session'
+    // Before the host moves it: its answer clears the window's side of the session
+    const place = windowPlaceOf(get(), sessionId)
+    archiveAsks.delete(sessionId)
     try {
       await platform.agents.deleteSession(sessionId, deleteWorktree, deleteExternal)
-      set({ toast: `Archived: ${name} — Settings → Archive restores it` })
+      announceArchived(set, get, sessionId, name, place)
     } catch (e) {
-      set({ toast: `Could not delete: ${(e as Error).message}` })
+      set({ toast: `Could not delete: ${errorMessage(e)}` })
+    }
+  },
+
+  /**
+   * The archive of a session the menu offers, decided with the host (#1512). Null: it was archived (the toast offers Undo) or
+   * failed (the toast says why). Lines: it was not, and the person is asked first; the lines are what the host said the archive
+   * would lose (`archiveAsksOf`), empty when the window itself saw a reason to ask.
+   */
+  async archiveSession(sessionId) {
+    const platform = get().platform
+    const s = get().sessions[sessionId]
+    if (!platform || !s) return null
+    archiveAsks.delete(sessionId)
+    const ask = (lines: string[]) => {
+      archiveAsks.set(sessionId, lines)
+      return lines
+    }
+    if (archiveNeedsAsk(s)) return ask([])
+    try {
+      // A worktree with uncommitted changes is said in the dialog, as it always was (the folder stays, but it is work the person may not remember)
+      if (s.worktree && (await platform.agents.worktreeStatus(sessionId).catch(() => null))?.dirty) return ask([])
+      const place = windowPlaceOf(get(), sessionId)
+      // The tool's own conversation file goes when it is deleted for good, as the dialog's default has it; the archive itself keeps it
+      const r = await platform.agents.archiveIfAtRest(sessionId, true)
+      if (!r.archived) return ask(r.asks)
+      announceArchived(set, get, sessionId, s.name, place)
+      return null
+    } catch (e) {
+      // A host from before the check cannot tell what the archive would lose: ask first, as it always did
+      if (/unknown method/i.test(errorMessage(e))) return ask([])
+      set({ toast: `Could not archive: ${errorMessage(e)}` })
+      return null
     }
   },
 
