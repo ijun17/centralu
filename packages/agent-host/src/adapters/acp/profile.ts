@@ -1,6 +1,7 @@
 import type { AdapterCapabilities, ToolDescriptor } from '@cc/protocol'
 import type { AgentSpawnSpec, DetectResult } from '../contract.js'
 import type { AdapterSurface } from '../contract/surface.js'
+import type { ToolCallFields } from './wire.js'
 
 /**
  * Everything one tool adds to the generic ACP adapter (docs/plans/acp-adapter.md §2): the only place a tool is named.
@@ -14,4 +15,10 @@ export type AcpProfile = {
   launch(): Promise<Pick<AgentSpawnSpec, 'command' | 'args'> & { env?: Record<string, string> } | null>
   detect(): Promise<DetectResult>
   installedVersion(): Promise<string | null>
+  /**
+   * Which of Centralu's own tools a call is (the stdio bridge's, `ORCHESTRATOR_MCP_NAME`), by the way this tool names an
+   * MCP call, or null. Such a call is answered without a card, as Claude and Codex take the bridge: each tool there carries
+   * its own rights (#1562 review)
+   */
+  centraluToolOf?(call: ToolCallFields): string | null
 }

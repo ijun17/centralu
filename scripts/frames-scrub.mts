@@ -15,7 +15,8 @@
  * - text the agent streams in chunks is scrubbed joined, then split again where it was (#1562 review: a path split across two
  *   chunks kept the user name);
  * - session, tool call and message ids become stable placeholders;
- * - anything shaped like a credential or an email address is removed;
+ * - anything shaped like a credential or an email address is removed, and so is the value of an environment entry named
+ *   like one (the bridge's `CC_BRIDGE_TOKEN` in `session/new`);
  * - the command list (the person's own skills among them) keeps only how many there were, as `command-<n>`;
  * - stderr is dropped.
  */
@@ -127,6 +128,8 @@ export function scrub(frames: readonly Frame[], cwd: string, home: string = home
     if (Array.isArray(v)) return v.map((x) => walk(x))
     if (v && typeof v === 'object') {
       const o = v as Record<string, unknown>
+      // An environment entry for a server the client starts (`mcpServers[].env`): a token's value is a secret
+      if (typeof o.name === 'string' && typeof o.value === 'string' && /TOKEN|SECRET|PASSWORD|KEY/i.test(o.name)) return { ...o, value: '<secret>' }
       if (key === 'availableCommands' || o.sessionUpdate === 'available_commands_update') {
         const list = Array.isArray(o.availableCommands) ? o.availableCommands : []
         return { ...o, availableCommands: list.map((_c, i) => ({ name: `command-${i + 1}` })) }

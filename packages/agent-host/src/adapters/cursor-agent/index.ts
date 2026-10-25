@@ -3,6 +3,7 @@ import { promisify } from 'node:util'
 import type { AdapterCapabilities, ToolDescriptor } from '@cc/protocol'
 import { AcpAdapter } from '../acp/adapter.js'
 import type { AcpProfile } from '../acp/profile.js'
+import { ORCHESTRATOR_MCP_NAME } from '../../apps/contract.js'
 import type { DetectResult } from '../contract.js'
 import { findCursor } from './install.js'
 import { CURSOR_SURFACE } from './surface.js'
@@ -49,6 +50,15 @@ const DESCRIPTOR: ToolDescriptor = {
   login: 'agent login',
 }
 
+/**
+ * Cursor asks about an MCP call titled `<server>-<tool>: <tool>` (measured: `centralu-recall: recall`, kind `other`, no
+ * `rawInput`); its `tool_call` says only `MCP: tool`
+ */
+export function centraluToolOfCall(call: { title?: string | null }): string | null {
+  const m = /^([\w-]+): ([\w-]+)$/.exec(call.title ?? '')
+  return m?.[2] && m[1] === `${ORCHESTRATOR_MCP_NAME}-${m[2]}` ? m[2] : null
+}
+
 /** `agent status` costs a Node start (~2 s), and pickers ask on every open: one answer is reused this long */
 const STATUS_FOR_MS = 60_000
 
@@ -65,6 +75,7 @@ export function cursorProfile(): AcpProfile {
     async installedVersion() {
       return findCursor()?.version ?? null
     },
+    centraluToolOf: centraluToolOfCall,
     async detect() {
       if (status && Date.now() - status.at < STATUS_FOR_MS) return status.result
       const install = findCursor()

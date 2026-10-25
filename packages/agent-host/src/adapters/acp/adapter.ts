@@ -7,6 +7,7 @@ import { spawnLocalAgent } from '../local-process.js'
 import type { AcpProfile } from './profile.js'
 import { frameRecorder } from '../frames/recorder.js'
 import { AcpSession } from './session.js'
+import type { ToolCallFields } from './wire.js'
 
 /** How long a Stop waits for the agent's `cancelled` before the person hears it has not taken effect (Claude's bound) */
 const STOP_CONFIRM_MS = 10_000
@@ -60,6 +61,7 @@ export abstract class AcpAdapter implements AgentAdapter {
       process: proc,
       version: () => this.profile.installedVersion(),
       stopConfirmMs: this.stopConfirmMs,
+      ...(this.profile.centraluToolOf ? { centraluToolOf: (call: ToolCallFields) => this.profile.centraluToolOf?.(call) ?? null } : {}),
       ...(recorder ? { onFrame: recorder.frame } : {}),
     })
     try {

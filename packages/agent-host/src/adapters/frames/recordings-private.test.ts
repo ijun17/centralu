@@ -18,6 +18,8 @@ const PRIVATE: readonly [string, RegExp][] = [
   ['a macOS home folder', /(?<![\w<])\/Users\/(?!<|Shared\b)[^/\s"'`]+/],
   ['a macOS temp folder', /\/var\/folders\/[^/\s"'`]+\/[^/\s"'`]+\/T\b/],
   ['a Linux home folder', /(?<![\w<])\/home\/(?!<)[^/\s"'`]+/],
+  ['a bridge token', /ccb\d+:[\w-]+:[\w-]{16,}/],
+  ['a secret in an environment entry', /\\?"name\\?":\\?"[A-Z_]*(?:TOKEN|SECRET|PASSWORD|KEY)[A-Z_]*\\?",\\?"value\\?":\\?"(?!<secret>)/],
 ]
 
 function machineWords(): [string, RegExp][] {

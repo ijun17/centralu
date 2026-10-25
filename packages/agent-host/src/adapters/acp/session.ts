@@ -38,6 +38,8 @@ export type AcpSessionDeps = {
   version: () => Promise<string | null>
   /** How long a Stop may wait for the agent's `cancelled` before the person hears it has not taken effect */
   stopConfirmMs: number
+  /** Which of Centralu's own tools a call is, or null (`AcpProfile.centraluToolOf`) */
+  centraluToolOf?: (call: ToolCallFields) => string | null
   /** Every line both ways, for the recorder (§10.1) */
   onFrame?: (direction: FrameDirection, line: string) => void
 }
@@ -354,9 +356,9 @@ export class AcpSession implements SessionHandle {
     })
   }
 
-  /** `auto`, an `edits` grant inside the folder, or a rule the person saved: answered `allow_once` without a card */
+  /** `auto`, Centralu's own tool, an `edits` grant inside the folder, or a rule the person saved: answered `allow_once` without a card */
   private async grantedWithoutCard(detail: ApprovalDetail, call: ToolCallFields): Promise<boolean> {
-    if (this.preset === 'auto') return true
+    if (this.preset === 'auto' || this.deps.centraluToolOf?.(call)) return true
     // An edit only: a delete or a move is not one (`edit-grant.ts`), and a move's destination is not in its paths
     if (this.preset === 'edits' && call.kind === 'edit' && detail.kind === 'file_edit') {
       const paths = editPaths(call).map((p) => (isAbsolute(p) ? p : join(this.opts.cwd, p)))
