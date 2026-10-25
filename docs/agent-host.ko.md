@@ -938,7 +938,8 @@ interface AdapterCapabilities {
   호스트가 따르지 않는 와일드카드로 읽었다.
 - 프로세스 관리(CLI spawn, 크래시 감지)는 어댑터 자신의 책임이다. 크래시는 `error` 이벤트로 방출되고 호스트는 죽지 않는다.
 - **도구가 지킬 수 없다고 밝힌 시작은 프로세스가 뜨기 전에 거절된다** (`presets`, `keepsRepoFilesOut`, `roleText`.
-  protocol의 `launchRefusal`을 `sessions/session-start.ts`의 `startFit`이 모든 시작과 깨우기에서 적용한다). 어느 경로로
+  protocol의 `launchRefusal`을 `sessions/session-start.ts`의 `startFit`이 모든 시작과 깨우기에서, 실행 중인 세션의
+  preset 변경에는 `updateSettings`가 적용한다). 어느 경로로
   요청했든 호스트가 관문이고, 선택기들은 같은 규칙에 물어 같은 문장으로 그 도구를 흐리게 보인다. Claude와 Codex는 셋 다
   밝히지 않으므로 그들에겐 바뀌는 것이 없다 ([plans/acp-adapter.md](plans/acp-adapter.md) §0.1).
 - capability는 반드시 정적 선언일 필요가 없다 — **detect() 시점에 결정**할 수도 있다 (예: 승인 동작 여부가 Codex 버전에 달려 있다면, 버전을 감지한 뒤 결정한다 — C4에 대한 대응).

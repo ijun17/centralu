@@ -285,13 +285,7 @@ export class AcpSession implements SessionHandle {
     }
     const read = readUpdate(params)
     if (!read || read.sessionId !== this.externalId || this.replaying) return
-    const turn = this.turn
-    // A cancel that reached the agent before its turn had begun is lost (ACP's cancel is a notification, answered by nothing
-    // but the turn's end): the turn going on after it gets the cancel once more
-    if (turn?.stopAsked && !turn.cancelResent) {
-      turn.cancelResent = true
-      this.conn.notify('session/cancel', { sessionId: this.externalId })
-    }
+    this.resendLostCancel()
     if ('other' in read) {
       this.unmapped.note(read.other)
       return
@@ -310,17 +304,38 @@ export class AcpSession implements SessionHandle {
     }
   }
 
+  /**
+   * A cancel that reached the agent before its turn had begun is lost (ACP's cancel is a notification, answered by nothing
+   * but the turn's end): the turn going on after it, by an update or by a question, gets the cancel once more
+   */
+  private resendLostCancel(): void {
+    const turn = this.turn
+    if (!turn?.stopAsked || turn.cancelResent) return
+    turn.cancelResent = true
+    this.conn.notify('session/cancel', { sessionId: this.externalId })
+  }
+
+  /** Whether a question asked now belongs to a turn that still runs: none after Stop or after the turn's end */
+  private askable(turn: Turn | null): boolean {
+    return this.phase !== 'closed' && turn !== null && this.turn === turn && !turn.stopAsked
+  }
+
   private async onRequest(_id: RpcId, method: string, params: unknown): Promise<unknown> {
     if (method !== 'session/request_permission') {
       this.unmapped.note(method)
       throw new RpcError(METHOD_NOT_FOUND, `Method not found: ${method}`)
     }
     const req = RequestPermission.parse(params)
+    const turn = this.turn
+    this.resendLostCancel()
+    if (!this.askable(turn)) return CANCELLED
     const call = this.normalizer.call(req.toolCall)
     const detail = detailOf(call, this.opts.cwd)
     const once = pick(req.options, 'allow_once')
-    if (once && (await this.grantedWithoutCard(detail, call))) return selected(once)
-    if (this.phase === 'closed') return CANCELLED
+    const granted = once !== undefined && (await this.grantedWithoutCard(detail, call))
+    // Stop, or the turn's end, may have come while the folder was being checked
+    if (!this.askable(turn)) return CANCELLED
+    if (granted && once) return selected(once)
     const requestId = this.cardIds.next('acp-req')
     return new Promise<PermissionOutcome>((resolve) => {
       this.cards.set(requestId, { options: req.options, answer: resolve })
@@ -331,7 +346,8 @@ export class AcpSession implements SessionHandle {
   /** `auto`, an `edits` grant inside the folder, or a rule the person saved: answered `allow_once` without a card */
   private async grantedWithoutCard(detail: ApprovalDetail, call: ToolCallFields): Promise<boolean> {
     if (this.preset === 'auto') return true
-    if (this.preset === 'edits' && detail.kind === 'file_edit') {
+    // An edit only: a delete or a move is not one (`edit-grant.ts`), and a move's destination is not in its paths
+    if (this.preset === 'edits' && call.kind === 'edit' && detail.kind === 'file_edit') {
       const paths = editPaths(call).map((p) => (isAbsolute(p) ? p : join(this.opts.cwd, p)))
       if (await insideFolder(this.opts.cwd, paths)) return true
     }

@@ -20,7 +20,10 @@ export type SessionSettingsHost = Pick<DelegationHost, 'meta' | 'store' | 'emit'
   Pick<RestartHost, 'restartSession'> &
   Pick<SessionRecordHost, 'cacheLedger' | 'sessionOf'> &
   Pick<SessionEventsHost, 'queue' | 'requireHandle'> &
-  Pick<WorktreeHost, 'resuming'>
+  Pick<WorktreeHost, 'resuming'> & {
+    /** Why the session's tool cannot run under a preset, or null (`ToolRegistry.presetRefusal`) */
+    presetRefusal: (tool: string, preset: PermissionPreset) => string | null
+  }
 
 /**
  * What the person (or the orchestrator for them) changes on a session: its model, effort and permission preset, its
@@ -36,6 +39,10 @@ export class SessionSettings {
     by: 'person' | 'orchestrator' = 'person',
   ): Promise<SessionInfo & { applied: SettingsApplied }> {
     const m = this.host.openSession(sessionId)
+    // Checked before anything is changed: a preset the tool cannot keep would be saved, shown as in force, and refuse the
+    // session's next wake
+    const refused = s.permissionPreset ? this.host.presetRefusal(m.tool, s.permissionPreset) : null
+    if (refused) throw rpcError(refused, 'refused', { retryable: false, data: { reason: 'tool_unfit' } })
 
     // Another model reads none of this one's cache (§6.1), whether it applies live or through a restart
     if (s.model !== undefined && s.model !== m.model) this.host.cacheLedger.note(sessionId, 'model_change')

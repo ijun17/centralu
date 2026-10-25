@@ -2415,6 +2415,7 @@ export class SessionManager {
       },
       nameOf: (...a) => self.reports.nameOf(...a),
       toolProblem: (...a) => self.toolRegistry.toolProblem(...a),
+      presetRefusal: (...a) => self.toolRegistry.presetRefusal(...a),
       trashSession: (...a) => self.trashSession(...a),
       purgeSession: (...a) => self.purgeSession(...a),
       trashIf: (...a) => self.trash.trashIf(...a),

@@ -114,10 +114,13 @@ export class FakeAcpPeer extends EventEmitter implements AgentProcess {
   exit(code: number | null, signal: NodeJS.Signals | null = null): void {
     if (this.ended) return
     this.ended = true
-    this.exitCode = code
-    this.signalCode = signal
     this.stdout.end()
-    setImmediate(() => this.emit('exit', code, signal))
+    // As a real process: its exit code is there when it has exited, not when it was told to
+    setImmediate(() => {
+      this.exitCode = code
+      this.signalCode = signal
+      this.emit('exit', code, signal)
+    })
   }
 
   kill(signal: NodeJS.Signals = 'SIGTERM'): boolean {

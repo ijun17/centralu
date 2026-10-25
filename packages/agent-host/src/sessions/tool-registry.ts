@@ -1,4 +1,5 @@
-import type { ToolName } from '@cc/protocol'
+import type { PermissionPreset, ToolName } from '@cc/protocol'
+import { launchRefusal } from '@cc/protocol'
 import type { AgentAdapter } from '../adapters/contract.js'
 import { registeredTool } from '../adapters/registry.js'
 import type { DelegationHost } from './delegation-flow.js'
@@ -56,6 +57,16 @@ export class ToolRegistry {
       return this.firstTool(project?.defaultTool)
     }
     return this.firstTool(this.host.store.settings.appSetting('orchestrator_tool'))
+  }
+
+  /**
+   * Why `tool` cannot run under `preset` (it declared it has no way to keep it), or null: the same rule a launch is held
+   * to (`launchRefusal`), for a preset changed on a running session
+   */
+  presetRefusal(tool: ToolName, preset: PermissionPreset): string | null {
+    const adapter = this.host.adapters.get(tool)
+    // Only the preset is asked here: the rest (trust, role text) was the launch's to check
+    return adapter ? launchRefusal(adapter.capabilities, adapter.descriptor.label, { permissionPreset: preset, projectTrusted: true }) : null
   }
 
   /** Why `tool` cannot start a session here now (not registered, not installed, not logged in), or null when it can */

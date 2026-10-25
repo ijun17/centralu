@@ -1,5 +1,6 @@
 import type { ToolName } from '@cc/protocol'
 import { rpcError } from '../../rpc-error.js'
+import { waitForExit } from '../../timing.js'
 import type { AgentAdapter, AgentProcess, AgentSpawnSpec, CreateSessionOpts, EventSink, ProcessSource, SessionHandle } from '../contract.js'
 import { toolResultEvent } from '../tool-result.js'
 import { spawnLocalAgent } from '../local-process.js'
@@ -50,7 +51,7 @@ export abstract class AcpAdapter implements AgentAdapter {
     const recorder = frameRecorder(opts.sessionId)
     const spec = { command: launch.command, args: launch.args, cwd: opts.cwd, env: { ...process.env, ...launch.env } }
     const source = opts.processSource
-    if (source?.adopt) closeAdopted(source.adopt, opts.sessionId, emit)
+    if (source?.adopt) await closeAdopted(source.adopt, opts.sessionId, emit)
     // Under the keeper the process is the keeper's child, which it sweeps with its tree if this host goes (§3.3)
     const proc = source ? source.spawn(spec) : this.spawn(spec)
     if (recorder) proc.once('exit', (code, signal) => recorder.exit(code, signal))
@@ -76,7 +77,12 @@ export abstract class AcpAdapter implements AgentAdapter {
  * running ACP connection yet, so it is ended with its tree, the tool calls it left open are closed as failed (their cards
  * would spin forever), and the conversation is opened again in a new process with `session/load`.
  */
-function closeAdopted(adopt: NonNullable<ProcessSource['adopt']>, sessionId: string, emit: EventSink): void {
+/** A killed process is gone in well under this; the bound only keeps a stuck one from holding the session's start */
+const ADOPTED_EXIT_MS = 5_000
+
+/** Ends the process a previous host left, and waits for it to be gone: the new one loads the same conversation */
+async function closeAdopted(adopt: NonNullable<ProcessSource['adopt']>, sessionId: string, emit: EventSink): Promise<void> {
   adopt.process.kill('SIGKILL')
+  await waitForExit(adopt.process, ADOPTED_EXIT_MS)
   for (const call of adopt.openCalls) emit(toolResultEvent(sessionId, call.callId, false, '', 'Centralu restarted while this call ran; it was stopped'))
 }

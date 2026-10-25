@@ -48,6 +48,16 @@ describe('launching a tool that declares limits', () => {
     expect(world.codexAdapter.lastOpts).toBeNull()
   })
 
+  it('refuses that preset on a running session too, and keeps the one in force', async () => {
+    const world = limitedWorld()
+    const p = (await world.rpc('projects.add', { path: dir })) as { id: string }
+    await world.rpc('projects.setTrusted', { projectId: p.id, trusted: true })
+    const s = (await world.rpc('agents.createSession', { projectId: p.id, cwd: dir, tool: 'codex' })) as { id: string }
+    await expect(world.rpc('agents.updateSettings', { sessionId: s.id, permissionPreset: 'safe' })).rejects.toThrow(/Limited.*Safe/)
+    const kept = (await world.rpc('sessions.list', {})) as { id: string; permissionPreset?: string }[]
+    expect(kept.find((x) => x.id === s.id)?.permissionPreset).toBe('normal')
+  })
+
   it('leaves a tool without limits as it was', async () => {
     const world = managerWorld()
     const p = (await world.rpc('projects.add', { path: dir })) as { id: string }

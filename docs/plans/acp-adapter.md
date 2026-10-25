@@ -26,7 +26,9 @@ this one is the newer: the later sections are the design as proposed, kept for i
 The three limits are new optional capabilities (`AdapterCapabilities.presets`, `keepsRepoFilesOut`, `roleText`;
 absent means what Claude and Codex always did) with one rule over them, `launchRefusal` in `@cc/protocol`. **The
 host is the gate**: every start and wake passes `startFit` (`sessions/session-start.ts`) and is refused before any
-process starts, whatever path asked (a picker, `start_agent`, an app's agent, a fork, a handoff). The pickers ask the
+process starts, whatever path asked (a picker, `start_agent`, an app's agent, a fork, a handoff). A preset changed on a
+running session is held to the same rule (`ToolRegistry.presetRefusal` in `updateSettings`), or it would be saved,
+shown as in force, and refuse the session's next wake. The pickers ask the
 same rule and grey the tool with the same words: the new-session and new-app dialogs, the orchestrator's cards in the
 intro and its picker in Settings, and the preset menu (a preset the tool cannot keep is greyed). The empty session's
 tool switch (`SessionStart`) leaves a refused tool out instead, as it leaves out one not installed (owner,
@@ -447,7 +449,7 @@ The permission presets:
 |---|---|
 | `normal` | the tool's own configuration decides what it asks; every question becomes a card |
 | `auto` | the adapter answers every question `allow_once` itself |
-| `edits` (#1525) | `auto` for `kind: edit` calls inside the session's folder, a card for the rest |
+| `edits` (#1525) | `auto` for `kind: edit` calls inside the session's folder, a card for the rest (a `delete` or a `move` is not an edit, as for Codex) |
 | `safe` | needs the tool to ask before every write and command. OpenCode: through `OPENCODE_CONFIG_CONTENT` (measured). Cursor: no per-process switch found yet; until one is, Cursor does not offer `safe` (open question 3) |
 
 `capabilities.gatesSteps` is false: ACP has no hook before every tool call, so an ACP session cannot be the

@@ -1,3 +1,6 @@
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { AdapterCapabilities, NormalizedEvent } from '@cc/protocol'
 import type { AgentProcess, CreateSessionOpts, ProcessSource } from '../contract.js'
@@ -143,11 +146,66 @@ describe('the ACP session against a scripted agent', () => {
     expect(await busy.event((e) => e.type === 'error')).toMatchObject({ error: { code: 'adapter_crashed' } })
   })
 
+  it('under Edits grants an edit inside the folder, and asks about a delete or a move there', async () => {
+    const cwd = realpathSync(mkdtempSync(join(tmpdir(), 'cc-acp-edits-')))
+    try {
+      const w = world(base, { cwd, permissionPreset: 'edits' })
+      const s = await w.start()
+      s.send('go')
+      const peer = w.peers[0]!
+      await peer.next(isPrompt)
+      const options = [{ optionId: 'yes', name: 'Allow', kind: 'allow_once' }, { optionId: 'no', name: 'Reject', kind: 'reject_once' }]
+      const ask = (kind: string, path: string) =>
+        peer.ask('session/request_permission', { sessionId: SID, options, toolCall: { toolCallId: `call-${kind}`, kind, title: kind, locations: [{ path: join(cwd, path) }] } })
+      expect(await ask('edit', 'a.ts')).toEqual({ outcome: { outcome: 'selected', optionId: 'yes' } })
+      void ask('delete', 'b.ts')
+      void ask('move', 'c.ts')
+      // A command always asks under Edits: once its card is up, the two before it have had theirs, or were granted
+      void ask('execute', 'd.ts')
+      await w.event((e) => e.type === 'approval_request' && e.detail.kind === 'command')
+      const cards = w.events.flatMap((e) => (e.type === 'approval_request' ? [e.detail.kind === 'file_edit' ? e.detail.path.slice(-4) : e.detail.kind] : []))
+      expect(cards).toEqual(['b.ts', 'c.ts', 'command'])
+      s.interrupt()
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it('answers a question asked after Stop as cancelled, with no card, and sends the lost cancel again', async () => {
+    const w = world()
+    const s = await w.start()
+    s.send('go')
+    const peer = w.peers[0]!
+    await peer.next(isPrompt)
+    s.interrupt()
+    const options = [{ optionId: 'yes', name: 'Allow', kind: 'allow_once' }]
+    const answer = await peer.ask('session/request_permission', { sessionId: SID, options, toolCall: { toolCallId: 'call-1', kind: 'execute', title: 'ls', rawInput: { command: 'ls' } } })
+    expect(answer).toEqual({ outcome: { outcome: 'cancelled' } })
+    expect(w.events.some((e) => e.type === 'approval_request')).toBe(false)
+    expect(peer.methods().filter((m) => m === 'session/cancel')).toHaveLength(2)
+  })
+
+  it('logs a frame it cannot parse and goes on with the turn, rather than failing the running prompt', async () => {
+    const w = world()
+    const s = await w.start()
+    s.send('go')
+    const peer = w.peers[0]!
+    await peer.next(isPrompt)
+    peer.stdout.write('{"jsonrpc":"2.0","id":\n')
+    peer.release('session/prompt', { result: { stopReason: 'end_turn' } })
+    await w.event((e) => e.type === 'turn_complete' || e.type === 'error')
+    expect(w.events.filter((e) => e.type === 'error')).toEqual([])
+  })
+
   it('closes a process a previous host left (with its open calls), and opens the conversation again in a new one', async () => {
     const old = new FakeAcpPeer(base)
+    let oldGone = false
+    old.once('exit', () => (oldGone = true))
     const spawned: AgentProcess[] = []
+    const goneAtSpawn: boolean[] = []
     const source: ProcessSource = {
       spawn: () => {
+        goneAtSpawn.push(oldGone)
         const p = new FakeAcpPeer(base)
         spawned.push(p)
         return p
@@ -157,6 +215,8 @@ describe('the ACP session against a scripted agent', () => {
     const w = world(base, { processSource: source, resumeExternalId: SID })
     await w.start()
     expect(old.killed).toBe(true)
+    // The new process loads the same conversation, so the old one is gone first
+    expect(goneAtSpawn).toEqual([true])
     expect(w.peers).toHaveLength(0)
     expect((spawned[0] as FakeAcpPeer).methods()).toEqual(['initialize', 'session/load'])
     expect(w.events.filter((e) => e.type === 'tool_result')).toMatchObject([{ callId: 'call-9', ok: false }])

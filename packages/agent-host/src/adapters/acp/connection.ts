@@ -100,8 +100,8 @@ export class AcpConnection {
     try {
       raw = JSON.parse(line)
     } catch {
-      // A broken frame may have been a waiting answer; every waiter hears it rather than hanging to its timeout
-      if (line.startsWith('{')) this.pending.rejectAll(new Error(`${this.label} sent a frame that could not be parsed (${line.length} bytes)`))
+      // Logged, not fatal: failing the waiting requests would end a running prompt while the agent goes on with it, and the
+      // next prompt would go into a busy agent. A broken answer leaves its request to its timeout (a prompt, to Stop)
       console.error(`[${this.label}] non-JSON output:`, line.slice(0, 200))
       return
     }
