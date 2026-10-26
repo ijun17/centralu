@@ -174,7 +174,7 @@ change to.
 
 ## 1. What was measured
 
-Everything below rests on frames captured from the real tools on Windows 11 (ijun1, 2026-10-26), with a scratch
+Everything below rests on frames captured from the real tools on Windows 11 (2026-10-26), with a scratch
 recorder that spawns the agent, drives a scripted sequence and writes every line both ways with its time. Where a
 fact comes from reading the installed bundle instead of a run, it says so.
 
