@@ -187,12 +187,20 @@ change to.
 | Input during a turn | Folded into the running turn by OpenCode; Centralu queues it for the turn's end instead (`midTurnInput: false`), the fold off |
 | Cost | `usage_update.cost` is the conversation's running total (read in its binary); a turn's cost is what it added. A new conversation starts from 0; the last total is kept beside the session (`app_settings` `running_cost:<id>`, `CreateSessionOpts.runningCost`), so the first turn after a restart, a wake or a host swap has its cost too |
 | Reply text | Its free model sometimes puts its reasoning in the reply and closes it with `</think>`, with no `<think>` (seen in most runs on 2026-10-25, in OpenCode's own store; its provider passes the text through). The core drops the first such tag of a message (`AcpNormalizer`); the reasoning before it stays reply text |
-| A refused model | When its model's provider refuses a turn (the free models' usage limit), OpenCode retries inside and sends no ACP frame: the turn shows nothing until it ends. `smoke:opencode` reports OpenCode's logged error when no event comes |
+| A refused model | When its model's provider refuses a turn (the free models' usage limit), OpenCode retries inside and sends no ACP frame: the turn shows nothing until it ends. `smoke:opencode` reports OpenCode's logged error when no event comes; Centralu itself shows the person nothing yet (#1569) |
 | Writes | After an asked edit it calls `fs/write_text_file` even with `fs` not advertised; the method-not-found answer is harmless (it writes itself) |
 | Ending | Started behind the host watch like every ACP CLI (§0.6) |
 
 `smoke:opencode` (`packages/agent-host/scripts/smoke-opencode.mjs`) runs it on a temporary host, with OpenCode in
-temporary XDG folders; it counts and stops only the `opencode acp` processes its own hosts started.
+temporary XDG folders; it counts and stops only the `opencode acp` processes its own hosts started. The reason it
+gives for a silent turn (`openCodeError()`, OpenCode's last logged error) is the smoke's only, not the adapter's.
+
+`smoke:opencode:scripted` (`packages/agent-host/scripts/smoke-opencode-scripted.mjs`) checks the presets with no
+account and no quota: each case runs a temporary host and OpenCode (temporary data folder, XDG folders and HOME) whose
+model is a local OpenAI-compatible stand-in answering with scripted tool calls, so what is asked, denied or allowed is
+OpenCode's own evaluation on the platform it runs on. It denies every card and checks the cards, the turn's end and the
+files written for Safe, Normal and Edits, cases C, D, G and J, the person's `bash: deny` and `bash: allow`, and the
+three subagent cases (§0.8). It stops only the hosts it started and their `opencode acp`.
 
 ### 0.8 The review of PR 3 (Windows, real OpenCode 1.19.4) and what it changed
 
@@ -234,7 +242,8 @@ on the Windows build and the Linux build (under WSL, whose match is macOS's). Me
 the fix, cases baseline Safe, C, D, G, J, a deny, E (a markdown subagent), E through OpenCode's `general`, Normal, and
 Normal with the person's `bash: allow`: 4ca7a9fda asked nothing on Linux and wrote both files; 9c37862df held all but
 E, which waited with OpenCode's log saying `bash*` asked in the subagent; the fix holds every case on both builds and
-E ends with nothing written.
+E ends with nothing written. The runs are kept as `smoke:opencode:scripted` (§0.7), through a real host, which also
+covers Edits; on 9c37862df its subagent cases fail as the turn never ends.
 
 ## 1. What was measured
 
