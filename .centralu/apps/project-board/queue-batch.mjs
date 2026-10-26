@@ -25,7 +25,7 @@ import {
   tierPhrase,
   tierToRun,
 } from './batch.mjs'
-import { canMerge, evaluateChecks, squashMessage, workflowCheckNames } from './ci.mjs'
+import { canMerge, evaluateChecks, workflowCheckNames } from './ci.mjs'
 import { CI, QUEUE } from './config.mjs'
 import {
   cancelWorkflowRun,
@@ -46,7 +46,7 @@ import {
   runJobSteps,
   setPrBase,
 } from './github.mjs'
-import { ACTIVE, attentionText, BATCH_ACTIVE, decideRun, ERROR_LIMIT, findItem, noticeKey, pushEvent, quickLanded, SUBJECT_MAX, supersededSuites } from './queue.mjs'
+import { ACTIVE, attentionText, BATCH_ACTIVE, decideRun, ERROR_LIMIT, findItem, longSubject, noticeKey, pushEvent, quickLanded, squashSubject, SUBJECT_MAX, supersededSuites } from './queue.mjs'
 import { afterMerge, batchable, failingLine, land, latestRuns, permissionsOf, pollMs, runFailures, takeLease, updateQueue } from './queue-driver.mjs'
 import { judgeBatch, screenOn } from './queue-screen.mjs'
 import { short } from './util.mjs'
@@ -169,7 +169,7 @@ async function build(b, ctx) {
       continue
     }
     const pr = await readPr(repo, m.pr, QUEUE_PR_FIELDS)
-    if (pr.state === 'OPEN' && (!pr.isDraft || it.auto) && pr.headRefOid === m.head && pr.mergeStateStatus !== 'DIRTY' && pr.mergeable !== 'CONFLICTING' && batchable(pr)) kept.push({ ...m, title: pr.title })
+    if (pr.state === 'OPEN' && (!pr.isDraft || it.auto) && pr.headRefOid === m.head && pr.mergeStateStatus !== 'DIRTY' && pr.mergeable !== 'CONFLICTING' && batchable(pr) && !longSubject(pr)) kept.push({ ...m, title: pr.title })
     else gone.push(m.pr)
   }
   if (kept.length < KEEP_MIN) {
@@ -475,7 +475,7 @@ async function landNext(b, ctx) {
   let lowerBranches = []
   if (pr.state === 'OPEN' && pr.baseRefName !== defaultBranch && mine?.lowers?.length)
     lowerBranches = (await Promise.all(mine.lowers.map((l) => readPr(repo, l).catch(() => null)))).filter(Boolean).map((l) => l.headRefName)
-  const subject = squashMessage({ number: pr.number, title: pr.title, description: pr.body }).subject
+  const subject = squashSubject(pr)
   const checks = pr.state === 'OPEN' && pr.mergeStateStatus === 'UNSTABLE' ? await readChecks(repo, pr.headRefOid) : null
   // UNSTABLE may also come from a run its own successful run made moot (a duplicate started in the same second, #1015),
   // as on the single path: without this, a green batch waited 30 minutes, went back and was batched again, for ever

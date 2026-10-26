@@ -24,6 +24,19 @@ export const STATES = ['waiting', 'ci', 'attention', 'merged', 'closed']
 export const ACTIVE = new Set(['waiting', 'ci', 'attention'])
 /** The squash subject's limit, in characters (docs/commit-conventions.md). */
 export const SUBJECT_MAX = 72
+/**
+ * The squash subject a pull request lands as (`Title (#N)`), and, when it is over SUBJECT_MAX characters (code
+ * points, not UTF-16 units), what the refusals say about it: null when it fits. The one definition behind
+ * `queue_merge`, the poll (before a batch can take it), a batch's build and, last, `decideLanding` (#1593).
+ */
+export const squashSubject = (pr) => squashMessage({ number: pr.number, title: pr.title, description: pr.body }).subject
+export function longSubject(pr) {
+  const subject = squashSubject(pr)
+  const length = [...subject].length
+  return length > SUBJECT_MAX ? { subject, length } : null
+}
+/** Why a squash subject over the limit stops a pull request; the queue carries on by itself once the title fits. */
+const subjectAttention = (n, { subject, length }) => attention('subject', `${n}: the squash subject "${subject}" is ${length} characters, over ${SUBJECT_MAX}. Shorten the PR title; the queue carries on by itself.`)
 /** How long after a poll the item is read again, by what it is waiting on. */
 export const POLL_MS = { waiting: 15_000, ci: 90_000, acted: 60_000, attention: 120_000, error: 60_000 }
 /** No run started on a head for this long: CI did not start, which is the session's to look at. */
@@ -416,15 +429,21 @@ export function decideCi({ item, pr, checks, runs = [], failures = {}, defaultBr
   // It failed alone in a batch on this head (queue-batch.mjs): that full run is the answer, whatever
   // its own quick run says (cancelled for the batch, it would otherwise be rerun to say nothing new)
   if (item.alone?.head === head && item.alone.reason) return { state: 'attention', reason: item.alone.reason }
+  // A squash subject over the limit is caught here, before the quick-tier path below sends the item to a batch (#1593:
+  // #1586 ran a batch's whole full tier and was refused at landing). Not a candidate while it holds (`state` is attention);
+  // the title fixed, the next poll carries on, with no new push
+  const long = longSubject(pr)
   // Handed over with integrate (#1259 step 3): a draft, whose own run is only CI's changes job, so it lands through a
   // batch alone (the quick tier on what lands), never from its own run
   if (item.auto) {
+    if (long) return subjectAttention(n, long)
     if (!canBatch) return attention('batch', `${n} was handed over with integrate, which lands only through a batch (the quick tier on ${defaultBranch}), and the queue cannot batch it (batches are off, or two tiers of CI are not set). Take it out (unqueue), mark it ready and land it with queue_merge.`)
     const alone = item.alone?.head === head ? item.alone : null
     if (alone) return attention('full-tier', `${n}'s batch of one ${ranBatch(alone)}ended without landing it: ${alone.text} Fix it and push (the queue takes the new head), or queue it again with integrate.`)
     return { state: 'ci', quick: true, patch: { noCiSince: null, missingSince: null } }
   }
   if (quickGreen(checks, runs, fullTier)) {
+    if (long) return subjectAttention(n, long)
     const alone = item.alone?.head === head ? item.alone : null
     if (alone)
       return attention(
@@ -467,9 +486,7 @@ export function decideCi({ item, pr, checks, runs = [], failures = {}, defaultBr
       `${n} is based on ${pr.baseRefName}, not ${defaultBranch}, and no PR queued under it has that branch. Queue it again with the PRs under it as lowers, or rebase it onto ${defaultBranch}.`,
     )
   }
-  const subject = squashMessage({ number: pr.number, title: pr.title, description: pr.body }).subject
-  if ([...subject].length > SUBJECT_MAX)
-    return attention('subject', `${n}: the squash subject "${subject}" is ${[...subject].length} characters, over ${SUBJECT_MAX}. Shorten the PR title; the queue carries on by itself.`)
+  if (long) return subjectAttention(n, long)
   if (pr.mergeStateStatus === 'BEHIND') return attention('behind', `${n} is behind ${defaultBranch}, and GitHub requires it up to date. Rebase it onto ${defaultBranch} and push.`)
   if (pr.mergeStateStatus === 'BLOCKED') return attention('blocked', `${n} is green, but GitHub blocks merging it (a required review or rule). Look at the PR on GitHub.`)
   // UNSTABLE only from a run a successful one made moot (a cancelled duplicate, #1015): as CLEAN
