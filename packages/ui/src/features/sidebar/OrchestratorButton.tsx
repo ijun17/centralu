@@ -90,7 +90,11 @@ export function OrchestratorButton() {
             : 'border-line bg-surface-raised text-ink-muted hover:border-line-strong hover:text-ink'
         }`}
         // The same rule as the grid: a selection, not a toggle. To leave, choose something else
-        onClick={() => void open()}
+        onClick={() => {
+          // Pressing the button before the rest is over is a decision not to wait for it (as a folded project's name is, #1578)
+          expander.leaveName()
+          void open()
+        }}
         /*
           The orchestrator is a session too. Before the first conversation, no session exists yet,
           so it is not made draggable — that keeps the #63 rule that opening a screen alone never
@@ -171,23 +175,47 @@ function OrchestratorChildren({
   useEffect(() => {
     if (!shown) onDragging(false)
   }, [shown, onDragging])
-  if (!shown || (current.length === 0 && earlier.length === 0)) return null
+  /*
+   * The archive dialog is kept here, not in a row: archiving closes the row's menu at once and the host's answer (it asks
+   * first when something would be lost, #1512) comes later, and a list opened by hover may have folded by then. A row
+   * that is gone still reaches `setConfirmingId`, and the dialog stands on its own.
+   */
+  const [confirmingId, setConfirmingId] = useState<string | null>(null)
+  const deleteSession = useStore((st) => st.deleteSession)
+  useEffect(() => {
+    onHold('archive-dialog', confirmingId !== null)
+    return () => onHold('archive-dialog', false)
+  }, [onHold, confirmingId])
+  const confirming = confirmingId === null ? undefined : [...current, ...earlier].find((c) => c.id === confirmingId)
+  const dialog = confirming && (
+    <ConfirmDelete
+      sessionId={confirming.id}
+      name={confirming.name}
+      tool={confirming.tool}
+      onCancel={() => setConfirmingId(null)}
+      onConfirm={(deleteWorktree, deleteExternal) => {
+        void deleteSession(confirming.id, deleteWorktree, deleteExternal)
+        setConfirmingId(null)
+      }}
+    />
+  )
+  if (!shown || (current.length === 0 && earlier.length === 0)) return dialog || null
+  const row = (s: SessionSummary) => <OrchestratorChildRow key={s.id} s={s} onHold={onHold} setConfirming={(on) => setConfirmingId(on ? s.id : null)} />
   return (
-    <ul className="mt-0.5" data-testid="orchestrator-children" onDragStart={() => onDragging(true)} onDragEnd={() => onDragging(false)}>
-      {current.map((s) => (
-        <OrchestratorChildRow key={s.id} s={s} onHold={onHold} />
-      ))}
-      {earlier.length > 0 && (
-        <>
-          <li className={`${INDENT[2]} pt-1 text-2xs text-ink-faint`} data-testid="orchestrator-children-earlier">
-            Started by an earlier orchestrator
-          </li>
-          {earlier.map((s) => (
-            <OrchestratorChildRow key={s.id} s={s} onHold={onHold} />
-          ))}
-        </>
-      )}
-    </ul>
+    <>
+      <ul className="mt-0.5" data-testid="orchestrator-children" onDragStart={() => onDragging(true)} onDragEnd={() => onDragging(false)}>
+        {current.map(row)}
+        {earlier.length > 0 && (
+          <>
+            <li className={`${INDENT[2]} pt-1 text-2xs text-ink-faint`} data-testid="orchestrator-children-earlier">
+              Started by an earlier orchestrator
+            </li>
+            {earlier.map(row)}
+          </>
+        )}
+      </ul>
+      {dialog}
+    </>
   )
 }
 
@@ -197,15 +225,13 @@ function OrchestratorChildren({
  */
 // No fold gutter on these rows (owner, 2026-10-20): an orchestrator's child folds nothing, so the chevron's empty
 // column only pushed its mark away from the guide line
-function OrchestratorChildRow({ s, onHold }: { s: SessionSummary; onHold: (rowId: string, held: boolean) => void }) {
+function OrchestratorChildRow({ s, onHold, setConfirming }: { s: SessionSummary; onHold: (rowId: string, held: boolean) => void; setConfirming: (on: boolean) => void }) {
   const selected = useSelectedSessionId()
   const focusSession = useStore((st) => st.focusSession)
   const interrupt = useStore((st) => st.interrupt)
-  const deleteSession = useStore((st) => st.deleteSession)
   const [menu, setMenu] = useState<HTMLElement | null>(null)
-  const [confirming, setConfirming] = useState(false)
   // An open menu or dialog keeps the list shown while the pointer is away (#1591)
-  const holding = menu !== null || confirming
+  const holding = menu !== null
   useEffect(() => {
     onHold(s.id, holding)
     return () => onHold(s.id, false)
@@ -276,18 +302,6 @@ function OrchestratorChildRow({ s, onHold }: { s: SessionSummary; onHold: (rowId
         </RowMenu>
       )}
       {approvalLine(s, null, () => focusSession(s.id))}
-      {confirming && (
-        <ConfirmDelete
-          sessionId={s.id}
-          name={s.name}
-          tool={s.tool}
-          onCancel={() => setConfirming(false)}
-          onConfirm={(deleteWorktree, deleteExternal) => {
-            void deleteSession(s.id, deleteWorktree, deleteExternal)
-            setConfirming(false)
-          }}
-        />
-      )}
     </li>
   )
 }

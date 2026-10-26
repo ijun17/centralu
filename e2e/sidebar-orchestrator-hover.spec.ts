@@ -141,3 +141,25 @@ test('Orchestrator children: a child that starts while the pointer rests on the 
   await away(page)
   await expect(list(page)).toHaveCount(0)
 })
+
+test('Orchestrator children: archiving a child of a hover-opened list that asks first shows its dialog even when the list folds under it', async ({ page }) => {
+  await withChildren(page)
+  await button(page).hover()
+  await page.clock.runFor(250)
+  await row(page, 'alpha').hover()
+  await page.getByTestId('session-menu-orc-child-alpha').click()
+  await page.getByTestId('delete-session-orc-child-alpha').click()
+  // The mock host holds no such session, so archiving asks first (#1512)
+  await expect(page.getByTestId('confirm-delete')).toBeVisible()
+  await page.clock.runFor(500)
+  await expect(page.getByTestId('confirm-delete')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('confirm-delete')).toHaveCount(0)
+})
+
+test('Orchestrator children: pressing the button before the rest is over leaves them folded', async ({ page }) => {
+  await withChildren(page)
+  await button(page).click()
+  await page.clock.runFor(1000)
+  await expect(list(page)).toHaveCount(0)
+})
