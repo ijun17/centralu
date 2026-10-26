@@ -5,6 +5,7 @@ import reactHooks from 'eslint-plugin-react-hooks'
 import globals from 'globals'
 import platformChecks from './tooling/eslint-platform-checks.js'
 import agentAdapterChecks from './tooling/eslint-agent-adapter-checks.js'
+import testDataDir from './tooling/eslint-test-data-dir.js'
 
 /**
  * The modules that may ask which OS this is, each owning one subject (docs/architecture.md §2). A new
@@ -306,4 +307,6 @@ export default tseslint.config(
     plugins: { agent: agentAdapterChecks },
     rules: { 'agent/agent-adapter-checks': 'error' },
   },
+  // A test file never writes CC_DATA_DIR by hand (tooling/eslint-test-data-dir.js)
+  { files: TEST_FILES, plugins: { 'test-env': testDataDir }, rules: { 'test-env/data-dir': 'error' } },
 )
