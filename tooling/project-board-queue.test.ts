@@ -12,7 +12,7 @@ import { acknowledge, dueReposts, markReposted, noticeText, unacked, watchStart 
 import { endLeftoverFakes, fakeGh, type FakeGh } from './fake-gh.test-helpers.js'
 import { SLOW } from './test-timing.js'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
-import { decideBefore, decideCi, emptyQueue, enqueue, pushEvent, supersededSuites, twinPassedSuites, quickLanded, handoffReason, authorRoute, resetFor, lowerFailureCounts, noticeKey, dequeue, normalize, onlySupersededFailures, queueOrder, watchState } from '../.centralu/apps/project-board/queue.mjs'
+import { decideBefore, decideCi, emptyQueue, enqueue, pushEvent, supersededSuites, twinPassedSuites, quickLanded, screenLanded, shardsComplete, unexpandedSkip,handoffReason, authorRoute, resetFor, lowerFailureCounts, noticeKey, dequeue, normalize, onlySupersededFailures, queueOrder, watchState } from '../.centralu/apps/project-board/queue.mjs'
 // @ts-expect-error -- a plain .mjs module of the board app, without types
 import { commandEnv, conflictPlan } from '../.centralu/apps/project-board/queue-conflict.mjs'
 // @ts-expect-error -- a plain .mjs module of the board app, without types
@@ -948,7 +948,7 @@ describe('merge_when_green says when it would invalidate the queue\'s running ba
  * other batches land after the fast tier (the owner, 2026-10-26, #1538).
  */
 describe('which tier a batch must run before it lands, and what lands from a run (#1538)', () => {
-  const names = ['changes', 'full tier', 'verify', 'windows tests (vitest 1/2)', 'e2e (webkit 1/2)', 'e2e (chromium 1/2)']
+  const names = ['changes', 'full tier', 'verify', 'windows tests (vitest 1/2)', 'e2e (webkit 1/2)', 'e2e (webkit 2/2)', 'e2e (chromium 1/2)', 'e2e (chromium 2/2)']
   const E2E = ['e2e (webkit *)', 'e2e (chromium *)']
   const SCREEN = { judge: 'x', checks: E2E, steps: ['pnpm e2e (shard *)'], inputs: { tier: 'full', everything: 'false' } }
   const rows = (over: Record<string, string> = {}) => names.filter((n) => over[n] !== 'absent').map((n) => check(n, over[n] ?? 'success'))
@@ -956,7 +956,7 @@ describe('which tier a batch must run before it lands, and what lands from a run
   const finished = [{ status: 'completed', conclusion: 'success' }]
   /** The jobs of a run in which every heavy job ran its scenarios, as GitHub lists them with their steps */
   const realJobs = () => [
-    ...['webkit', 'chromium'].map((b) => ({ name: `e2e (${b} 1/2)`, steps: [{ name: 'Set up job', conclusion: 'success' }, { name: 'pnpm e2e (shard 1/2)', conclusion: 'success' }] })),
+    ...['webkit', 'chromium'].flatMap((b) => [1, 2].map((n) => ({ name: `e2e (${b} ${n}/2)`, conclusion: 'success', steps: [{ name: 'Set up job', conclusion: 'success' }, { name: `pnpm e2e (shard ${n}/2)`, conclusion: 'success' }] }))),
     { name: 'verify', steps: [{ name: 'Set up job', conclusion: 'success' }] },
   ]
   const gate = (over: Record<string, string>, extra: Record<string, unknown> = {}) =>
@@ -987,7 +987,7 @@ describe('which tier a batch must run before it lands, and what lands from a run
   it('lands a batch that changes the screen only from a run where the full tier passed and every heavy job was reported and succeeded', () => {
     expect(gate({})).toEqual({ lands: true })
     // The run was the quick tier: the heavy jobs never ran
-    expect(gate({ 'full tier': 'skipped', 'e2e (webkit 1/2)': 'absent', 'e2e (chromium 1/2)': 'absent' })).toEqual({ drop: 'tier' })
+    expect(gate({ 'full tier': 'skipped', 'e2e (webkit 1/2)': 'absent', 'e2e (webkit 2/2)': 'absent', 'e2e (chromium 1/2)': 'absent', 'e2e (chromium 2/2)': 'absent' })).toEqual({ drop: 'tier' })
     // The full tier's check is still to come
     expect(gateGreen({ full: true, landTier: 'quick', checks: checksOf2({ 'full tier': 'absent' }), runs: [{ status: 'in_progress', conclusion: null }], fullTier: 'full tier', screen: SCREEN })).toEqual({ wait: true })
     // Skipped, left out by the files, or never reported: not a pass for a heavy job
@@ -1032,7 +1032,63 @@ describe('which tier a batch must run before it lands, and what lands from a run
     expect(heavyRan(realJobs().map((j) => (j.name === 'e2e (webkit 1/2)' ? { ...j, steps: [{ name: 'pnpm e2e (shard 1/2)', conclusion: 'skipped' }] } : j)), SCREEN)).toBe(false)
     expect(heavyRan(realJobs().filter((j) => !j.name.includes('chromium')), SCREEN)).toBe(false)
     // One stand-in among real shards of the same browser is still a hole
-    expect(heavyRan([...realJobs(), { ...standIn, name: 'e2e (webkit 2/2)' }], SCREEN)).toBe(false)
+    expect(heavyRan(realJobs().map((j) => (j.name === 'e2e (webkit 2/2)' ? { ...standIn, name: j.name } : j)), SCREEN)).toBe(false)
+  })
+
+  /*
+   * queue/batch-220 (#1562, run 40247598237, 2026-10-26): all ten shards ran their scenarios and passed, and the batch was
+   * dropped. build.yml's stand-in for the Chromium shards (e2e-chromium-skipped) is skipped on every run where the shards
+   * run, and GitHub reports a matrix job skipped before its matrix was expanded under its unexpanded name,
+   * `e2e (chromium ${{ matrix.shard }}/${{ matrix.shards }})`, which `e2e (chromium *)` matches. Its job list, as recorded:
+   */
+  const RUN_220 = JSON.parse(readFileSync(join(REPO_ROOT, 'tooling/fixtures/project-board/run-40247598237-jobs.json'), 'utf8')) as { jobs: { name: string; status: string; conclusion: string; steps: { name: string; conclusion: string | null }[] }[] }
+  const REAL_SCREEN = JSON.parse(readFileSync(join(REPO_ROOT, '.centralu/apps/project-board/project.json'), 'utf8')).ci.screen
+  const template = (n: string) => n.includes('${{')
+  const SHARD = /^e2e \((webkit|chromium) \d+\/\d+\)$/
+  /** The run's checks: the required set is the workflow's jobs with their matrix filled in (no unexpanded name), every job reported */
+  const checks220 = (jobs = RUN_220.jobs) => evaluateChecks({ required: RUN_220.jobs.map((j) => j.name).filter((n) => !template(n)), reported: jobs.map((j) => check(j.name, j.conclusion)) })
+  const gate220 = (jobs = RUN_220.jobs) => gateGreen({ full: true, landTier: 'quick', checks: checks220(jobs), runs: finished, fullTier: 'full tier', screen: REAL_SCREEN, jobs })
+
+  it('lands the batch of run 40247598237: a stand-in skipped under its unexpanded matrix name is not a shard', () => {
+    // What was recorded: every shard of both browsers ran its scenarios, and the stand-in was skipped under its template name
+    expect(RUN_220.jobs.filter((j) => SHARD.test(j.name))).toHaveLength(10)
+    expect(RUN_220.jobs.find((j) => j.name === 'e2e (chromium ${{ matrix.shard }}/${{ matrix.shards }})')).toMatchObject({ conclusion: 'skipped', steps: [] })
+    expect(screenLanded(checks220(), finished, 'full tier', REAL_SCREEN.checks)).toBe(true)
+    expect(heavyRan(RUN_220.jobs, REAL_SCREEN)).toBe(true)
+    expect(gate220()).toEqual({ lands: true })
+  })
+
+  it('still wants every shard of the matrix build.yml declares, with the stand-in ignored', () => {
+    // The shard count is build.yml's (`shards: [M]`, `shard: [1..M]`), and the job names carry it
+    const yml = readFileSync(join(REPO_ROOT, '.github/workflows/build.yml'), 'utf8')
+    for (const browser of ['webkit', 'chromium']) {
+      const job = yml.split(/\n(?= {2}[\w-]+:\n)/).find((block) => block.includes(`name: e2e (${browser} \${{ matrix.shard }}/\${{ matrix.shards }})`) && !block.includes("if: needs.changes.outputs.code == 'false'"))!
+      const count = Number(/shards: \[(\d+)\]/.exec(job)![1])
+      expect(RUN_220.jobs.filter((j) => j.name.startsWith(`e2e (${browser} `) && !template(j.name)).map((j) => j.name).sort()).toEqual(Array.from({ length: count }, (_, i) => `e2e (${browser} ${i + 1}/${count})`))
+    }
+    const without = (name: string) => RUN_220.jobs.filter((j) => j.name !== name)
+    const patched = (name: string, over: object) => RUN_220.jobs.map((j) => (j.name === name ? { ...j, ...over } : j))
+    // A shard GitHub never created is a hole, though every job reported succeeded
+    expect(heavyRan(without('e2e (webkit 3/5)'), REAL_SCREEN)).toBe(false)
+    expect(screenLanded(checks220(without('e2e (webkit 3/5)')), finished, 'full tier', REAL_SCREEN.checks)).toBe(false)
+    // Also with no stand-in in the list at all: only the count says a shard is missing
+    const noStandIn = without('e2e (chromium ${{ matrix.shard }}/${{ matrix.shards }})').filter((j) => j.name !== 'e2e (webkit 3/5)')
+    expect(heavyRan(noStandIn, REAL_SCREEN)).toBe(false)
+    expect(screenLanded(evaluateChecks({ required: ['full tier'], reported: noStandIn.map((j) => check(j.name, j.conclusion)) }), finished, 'full tier', REAL_SCREEN.checks)).toBe(false)
+    // A shard whose scenarios were skipped, a shard skipped under its real name, a stand-in that ran: none is a pass
+    expect(heavyRan(patched('e2e (chromium 2/5)', { steps: [{ name: 'pnpm e2e (shard 2/5)', conclusion: 'skipped' }] }), REAL_SCREEN)).toBe(false)
+    expect(gate220(patched('e2e (chromium 2/5)', { conclusion: 'skipped' }))).toEqual({ drop: 'heavy' })
+    expect(gate220(patched('e2e (chromium ${{ matrix.shard }}/${{ matrix.shards }})', { conclusion: 'success', steps: [{ name: 'Run echo "Only documents changed"', conclusion: 'success' }] }))).toEqual({ drop: 'heavy' })
+    // Only the stand-ins: the shards were left out, whatever their names
+    expect(gate220(RUN_220.jobs.filter((j) => !SHARD.test(j.name)))).toEqual({ drop: 'heavy' })
+    // Shard numbers of two counts, or one past the count
+    expect(shardsComplete(['e2e (webkit 1/2)', 'e2e (webkit 2/2)'])).toBe(true)
+    expect(shardsComplete(['e2e (webkit 1/2)', 'e2e (webkit 2/3)'])).toBe(false)
+    expect(shardsComplete(['e2e (webkit 1/2)', 'e2e (webkit 3/2)'])).toBe(false)
+    expect(shardsComplete(['keeper e2e'])).toBe(true)
+    expect(unexpandedSkip('e2e (chromium ${{ matrix.shard }}/${{ matrix.shards }})', 'skipped')).toBe(true)
+    expect(unexpandedSkip('e2e (chromium ${{ matrix.shard }}/${{ matrix.shards }})', 'success')).toBe(false)
+    expect(unexpandedSkip('e2e (chromium 1/5)', 'skipped')).toBe(false)
   })
 
   it('names the tier a batch ran in its line, and the tier of a batch of one that ended without landing in the session\'s message', () => {

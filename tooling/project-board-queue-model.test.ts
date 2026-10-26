@@ -53,7 +53,7 @@ vi.mock('../.centralu/apps/project-board/github.mjs', async (importOriginal) => 
     readRepo: async () => ({ permissions: { admin: false, maintain: true, push: true }, defaultBranch: 'main' }),
     readPr: async (_repo: string, n: number) => w().readPr(n),
     readCommit: async () => w().readMain(),
-    readRequired: async () => ({ names: REQUIRED, unresolved: [], added: 0, source: 'the model' }),
+    readRequired: async () => ({ names: w().required, unresolved: [], added: 0, source: 'the model' }),
     readWorkflowChecks: async (_repo: string, sha: string, o: { branch?: string }) => w().readWorkflowChecks(sha, o?.branch),
     readChecks: async (_repo: string, sha: string) => w().readWorkflowChecks(sha).reported,
     runJobSteps: async (_repo: string, runId: number) => w().runJobSteps(runId),
@@ -91,6 +91,14 @@ const REQUIRED = [
   'e2e (chromium 2/2)',
 ]
 const SHARDS = REQUIRED.filter((n) => n.startsWith('e2e ('))
+/**
+ * build.yml's stand-in for the Chromium shards (e2e-chromium-skipped) is skipped on every full run whose files reach the
+ * shards, and GitHub reports a matrix job skipped before its matrix was expanded under its unexpanded name (run
+ * 40247598237, queue/batch-220: the batch was dropped for it though every shard passed). Every full run here reports it.
+ */
+const STAND_IN_SKIPPED = 'e2e (chromium ${{ matrix.shard }}/${{ matrix.shards }})'
+/** The jobs of run 40247598237 (queue/batch-220, #1562), as GitHub listed them */
+const RUN_220 = JSON.parse(readFileSync(join(REPO_ROOT, 'tooling/fixtures/project-board/run-40247598237-jobs.json'), 'utf8')) as { jobs: { name: string; conclusion: string; steps: { name: string; conclusion: string | null }[] }[] }
 
 /** The model's own idea of which files the UI scenarios see (not the queue's judge: that is what is under test) */
 const SCREEN_FILES = [
@@ -105,7 +113,7 @@ const SCREEN_FILES = [
 const QUIET_FILES = ['docs/guide.md', 'README.md', 'tooling/project-board-queue.test.ts', 'packages/ui/src/App.test.tsx', '.centralu/apps/project-board/queue.mjs', 'apps/desktop/src-tauri/src/main.rs']
 
 type Plan = 'green' | 'red' | 'infra' | 'skip-shard' | 'stand-in' | 'no-shard'
-type CheckRow = { name: string; status: string; conclusion: string | null; id: number; standIn?: boolean }
+type CheckRow = { name: string; status: string; conclusion: string | null; id: number; standIn?: boolean; steps?: { name: string; conclusion: string | null }[] }
 type Run = {
   id: number
   sha: string
@@ -129,7 +137,7 @@ type Pr = { n: number; head: string; file: string; state: 'OPEN' | 'MERGED'; mer
 type Landing = { n: number; head: string; branch: string }
 
 /** Whether a finished run proves what lands, by the model's own rules (the check on every landing, and tested below on made-up runs) */
-function proof(run: Run | undefined, { heavy }: { heavy: boolean }): string | null {
+function proof(run: Run | undefined, { heavy, shards = SHARDS }: { heavy: boolean; shards?: string[] }): string | null {
   if (!run) return 'no run at all'
   if (run.status !== 'completed') return `the run is ${run.status}`
   if (run.conclusion !== 'success') return `the run concluded ${run.conclusion}`
@@ -139,7 +147,7 @@ function proof(run: Run | undefined, { heavy }: { heavy: boolean }): string | nu
   if (!heavy) return null
   if (run.tier !== 'full') return 'the heavy jobs were needed and the run was the fast tier'
   if (!ok('full tier')) return 'the full tier did not pass'
-  for (const s of SHARDS) {
+  for (const s of shards) {
     const c = by(s)
     if (!c) return `${s} was never reported`
     if (c.conclusion !== 'success') return `${s} concluded ${c.conclusion}`
@@ -154,6 +162,8 @@ class World {
   branches = new Map<string, Branch>()
   runs: Run[] = []
   landings: Landing[] = []
+  /** Landings from a batch that holds a change to the screen */
+  heavyLandings = 0
   violations: string[] = []
   trees = new Map<string, string>()
   counter = 0
@@ -165,6 +175,10 @@ class World {
   calm = false
   /** Ticks left of a busy main: something else lands on it every tick (a release, merges by hand) */
   storm = 0
+  /** The required set, the shards a heavy landing needs, and a recorded job list every full run reports instead of the model's */
+  required = REQUIRED
+  shards = SHARDS
+  jobList: typeof RUN_220 | null = null
   constructor(public rand: () => number) {}
 
   tree(a: string, b: string) {
@@ -264,8 +278,9 @@ class World {
       const [name, b] = branch
       const heavy = b.members.some((m) => m.files.some((f) => SCREEN_FILES.includes(f))) || b.olderBoard
       const run = this.runs.filter((r) => r.branch === name && r.sha === b.sha).sort((x, y) => y.attempt - x.attempt)[0]
-      const why = proof(run, { heavy })
+      const why = proof(run, { heavy, shards: this.shards })
       if (why) this.violations.push(`#${n} landed from ${name}${heavy ? ', which holds a change to the screen,' : ''} but ${why}`)
+      if (heavy) this.heavyLandings++
       const expected = b.steps.get(sha)
       const squashed = this.tree(this.main.tree, sha)
       if (squashed !== expected) this.violations.push(`#${n} landed on ${this.main.tree}, not on the tree its batch tested before it`)
@@ -311,10 +326,12 @@ class World {
   }
   /** The checks a run reports at its age: in progress until its duration, then as its plan says */
   private fill(run: Run) {
-    const names = ['changes', 'full tier', 'verify', 'windows tests (vitest 1/2)', 'windows tests (vitest 2/2)', ...(run.tier === 'full' ? SHARDS : [])]
     const done = run.age >= run.duration
+    if (this.jobList && run.tier === 'full') return this.fillRecorded(run, done)
+    const names = ['changes', 'full tier', 'verify', 'windows tests (vitest 1/2)', 'windows tests (vitest 2/2)', ...(run.tier === 'full' ? SHARDS : [])]
     const id = (n: string) => run.id * 100 + REQUIRED.indexOf(n) + 1
     const rows: CheckRow[] = []
+    if (run.tier === 'full') rows.push({ name: STAND_IN_SKIPPED, status: 'completed', conclusion: 'skipped', id: run.id * 100 + 99, steps: [] })
     for (const name of names) {
       let conclusion: string | null = run.tier === 'quick' && name === 'full tier' ? 'skipped' : null
       let standIn = false
@@ -334,6 +351,14 @@ class World {
       run.status = 'completed'
       run.conclusion = run.plan === 'red' ? 'failure' : run.plan === 'infra' ? 'cancelled' : 'success'
     }
+  }
+  /** A full run that reports the recorded job list: each job in progress until the run's checks finish, then as recorded */
+  private fillRecorded(run: Run, done: boolean) {
+    run.checks = this.jobList!.jobs.map((j, i) => {
+      const settled = done || j.conclusion === 'skipped'
+      return { name: j.name, status: settled ? 'completed' : 'in_progress', conclusion: settled ? j.conclusion : null, id: run.id * 100 + i + 1, steps: settled ? j.steps : [] }
+    })
+    if (done && run.age >= run.duration + run.lag) Object.assign(run, { status: 'completed', conclusion: 'success' })
   }
   /** Time passes: every run in progress gets older */
   advance() {
@@ -395,8 +420,9 @@ class World {
       name: c.name,
       status: c.status,
       conclusion: c.conclusion,
-      steps:
-        c.conclusion === 'failure'
+      steps: c.steps
+        ? c.steps
+        : c.conclusion === 'failure'
           ? [{ name: 'Set up job', conclusion: 'success' }, { name: 'pnpm test', conclusion: 'failure' }]
           : c.name.startsWith('e2e (')
             ? [{ name: 'Set up job', conclusion: 'success' }, c.standIn ? { name: 'Run echo "Only documents changed"', conclusion: 'success' } : { name: `pnpm e2e (shard ${c.name.match(/(\d)\/\d/)?.[1] ?? 1}/2)`, conclusion: c.conclusion }]
@@ -413,7 +439,7 @@ const rng = (seed: number) => {
 const ref = (_repo: string, n: number) => `#${n}`
 
 /** One generated sequence against the real queue: events, ticks, then a calm world until the queue is quiet */
-async function simulate(seed: number, { steps = 70, busyMain = false, judge = null }: { steps?: number; busyMain?: boolean; judge?: 'broken' | 'missing' | 'compare' | null } = {}) {
+async function simulate(seed: number, { steps = 70, busyMain = false, judge = null, setup }: { steps?: number; busyMain?: boolean; judge?: 'broken' | 'missing' | 'compare' | null; setup?: (world: World, dir: string) => void } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'cc-queue-model-'))
   const world = new World(rng(seed))
   world.githubError = GitHubError
@@ -422,6 +448,7 @@ async function simulate(seed: number, { steps = 70, busyMain = false, judge = nu
   if (judge === 'broken') world.judgeBroken = true
   if (judge === 'missing') world.judgeMissing = true
   if (judge === 'compare') world.compareNull = true
+  setup?.(world, dir)
   const holder = `model-${seed}`
   let now = world.clock
   const fail = (what: string) => new Error(`seed ${seed}: ${what}`)
@@ -537,16 +564,19 @@ async function simulate(seed: number, { steps = 70, busyMain = false, judge = nu
 
 describe('the merge queue against a model of GitHub: queueing, pushes, main moving, CI taking time, failing and lying, in any order (#1538, #1548)', { timeout: 600_000 * SLOW }, () => {
   it('holds the invariants for generated sequences', async () => {
-    const totals = { landed: 0, dispatchedFull: 0, dispatchedQuick: 0, stops: 0, stoppedPastCap: 0 }
+    const totals = { landed: 0, landedHeavy: 0, dispatchedFull: 0, dispatchedQuick: 0, stops: 0, stoppedPastCap: 0 }
     for (let seed = 1; seed <= 40; seed++) {
       const r = await simulate(seed)
       totals.landed += r.world.landings.length
+      totals.landedHeavy += r.world.heavyLandings
       for (const d of r.world.dispatches) totals[d.inputs?.tier === 'full' ? 'dispatchedFull' : 'dispatchedQuick']++
       totals.stops += [...r.stops.values()].reduce((x, y) => x + y, 0)
       totals.stoppedPastCap += [...r.stops.values()].filter((c) => c > MOVED_CAP).length
     }
     // The sequences reach what the invariants are about: landings, both kinds of batch, and main moving under batches
     expect(totals.landed).toBeGreaterThan(40)
+    // Batches that change the screen land too, though every full run also reports the stand-in skipped under its template name
+    expect(totals.landedHeavy).toBeGreaterThan(10)
     expect(totals.dispatchedFull).toBeGreaterThan(20)
     expect(totals.dispatchedQuick).toBeGreaterThan(20)
     expect(totals.stops).toBeGreaterThan(20)
@@ -558,8 +588,7 @@ describe('the merge queue against a model of GitHub: queueing, pushes, main movi
     ['broken', 301],
     ['missing', 311],
     ['compare', 321],
-  ] as const)('runs the heavy jobs for every batch when the judge cannot answer: %s', async (judge, first) => {
-    let batches = 0
+  ] as const)('runs the heavy jobs for every batch when the judge cannot answer: %s', async (judge, first) => {    let batches = 0
     for (let seed = first; seed < first + 6; seed++) {
       const r = await simulate(seed, { judge })
       for (const d of r.world.dispatches) {
@@ -568,6 +597,27 @@ describe('the merge queue against a model of GitHub: queueing, pushes, main movi
       }
     }
     expect(batches).toBeGreaterThan(5)
+  })
+
+  // queue/batch-220 (#1562): its run's jobs, as GitHub listed them (every shard passed, the Chromium stand-in skipped under its
+  // unexpanded matrix name), reported by the batch's full run. The batch changes the screen, so it needs the heavy jobs: it lands
+  it('lands a batch that changes the screen from the job list of run 40247598237', async () => {
+    const r = await simulate(1, {
+      steps: 0,
+      setup: (world, dir) => {
+        world.jobList = RUN_220
+        world.required = RUN_220.jobs.map((j) => j.name).filter((n) => !n.includes('${{'))
+        world.shards = world.required.filter((n) => /^e2e \((webkit|chromium) \d+\/\d+\)$/.test(n))
+        world.open(1)
+        world.pr(1).file = 'packages/ui/src/App.tsx'
+        updateQueue(dir, (q: unknown) => enqueue(q, { repo: R, pr: 1, owner: 'me', at: world.iso() }, ref))
+      },
+    })
+    expect(r.world.shards).toHaveLength(10)
+    expect(r.world.dispatches.map((d) => d.inputs)).toEqual([{ tier: 'full', everything: 'false' }])
+    expect(r.world.violations).toEqual([])
+    expect((r.q.events as { text: string }[]).filter((e) => /not every heavy job/.test(e.text))).toEqual([])
+    expect(r.world.landings.map((l) => l.n)).toEqual([1])
   })
 
   // The cap: with something landing on main every tick, no batch can land, and each pull request is stopped again and again.
