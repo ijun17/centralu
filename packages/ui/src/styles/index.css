@@ -1082,6 +1082,23 @@
   }
 }
 
+/*
+ * A usage donut that appears (a tool's first answer, a machine whose link came back, #1616) fades in. Opacity only, so
+ * reduced motion keeps it: the change is still shown, without any travel. It never holds the press: the button is
+ * live from the first frame.
+ */
+@keyframes cc-donut-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.cc-donut-in {
+  animation: cc-donut-in 180ms ease-out;
+}
+
 @keyframes cc-drop-out {
   from {
     opacity: 1;

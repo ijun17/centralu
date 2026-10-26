@@ -13,7 +13,36 @@ import { usageTone, weeklyWindow } from './weekly.js'
 import { setupStates, signedOutTools, withLiveSetups } from '../tools/setupLine.js'
 import { ToolSetupLine } from '../tools/ToolSetupLine.jsx'
 
-type Snap = { usage: UsageSnapshot | null; reason?: string; cache?: CacheStats; sameAccount?: boolean }
+/**
+ * What `agents.usage` answered for one tool. `unsupported` is the host's own `supported: false` (the tool cannot report
+ * limits at all, #1616), never inferred from the tool's name. It is unset for a failed read and for an older host that
+ * sends no flag: those are *unknown for now*, not *never*.
+ */
+type Snap = {
+  usage: UsageSnapshot | null
+  reason?: string
+  cache?: CacheStats
+  sameAccount?: boolean
+  unsupported?: boolean
+}
+
+/** One `agents.usage` answer as a snap: the same reading wherever it comes from (first ask, retry) */
+function toSnap(r: {
+  supported?: boolean
+  reason?: string
+  usage: UsageSnapshot | null
+  cache?: CacheStats
+  sameAccountAsHub?: boolean
+}): Snap {
+  const unsupported = r.supported === false
+  return {
+    usage: r.usage,
+    reason: r.supported ? undefined : r.reason,
+    cache: r.cache,
+    sameAccount: r.sameAccountAsHub,
+    unsupported: unsupported || undefined,
+  }
+}
 
 /**
  * What one machine said about its limits. `live` is null until it has answered which tools are usable there; `snap`
@@ -155,14 +184,7 @@ export function UsageDonuts() {
             const put = (snap: Snap) => patch((g) => ({ snap: { ...g.snap, [tool]: snap } }))
             void platform.agents
               .usage(tool, on)
-              .then((r) =>
-                put({
-                  usage: r.usage,
-                  reason: r.supported ? undefined : r.reason,
-                  cache: r.cache,
-                  sameAccount: r.sameAccountAsHub,
-                }),
-              )
+              .then((r) => put(toSnap(r)))
               .catch((e: Error) => {
                 put({ usage: null, reason: e.message })
                 // A reading that failed (the tool's process busy or restarting) is tried again soon, not in five minutes
@@ -170,14 +192,7 @@ export function UsageDonuts() {
                   setTimeout(() => {
                     void platform.agents
                       .usage(tool, on)
-                      .then((r) =>
-                        put({
-                          usage: r.usage,
-                          reason: r.supported ? undefined : r.reason,
-                          cache: r.cache,
-                          sameAccount: r.sameAccountAsHub,
-                        }),
-                      )
+                      .then((r) => put(toSnap(r)))
                       .catch(() => {})
                   }, RETRY_MS),
                 )
@@ -425,7 +440,7 @@ function MachineGroup({
   if (!info || info.status !== 'connected' || (!group.order.length && !donuts.length)) return null
   return (
     <span
-      className="ml-1.5 flex items-center gap-0.5 rounded-full border border-line py-0.5 pl-2 pr-0.5"
+      className="cc-donut-in ml-1.5 flex items-center gap-0.5 rounded-full border border-line py-0.5 pl-2 pr-0.5"
       data-testid={`usage-machine-${machineId}`}
       data-status={info.status}
     >
@@ -460,12 +475,19 @@ function MachineGroup({
   )
 }
 
+/** The short change between a ring's states: its opacity, its fill and its colour, in the time of the bar's other small moves */
+const RING_FADE =
+  'transition-[opacity,color,stroke-dasharray] duration-150 ease-out motion-reduce:transition-opacity'
+
 /**
  * A single donut — the ring is weekly usage, the center is the tool's single letter.
  *
  * When the number is unknown, **it does not draw a full gray ring**: that reads as "0% used."
  * A dashed ring means unknown, and the expandable detail answers why it is unknown (claude needs
  * a live session to be asked about a limit at all — the usual reason for "unknown").
+ *
+ * A tool that does not report limits at all (the host's `supported: false`, #1616) is not "unknown for now": nothing
+ * the person does would change it, so its ring is solid and dimmed with no fill, and its letter keeps the full ink.
  */
 function Donut({
   tool,
@@ -496,6 +518,15 @@ function Donut({
   const label = machineName ? `${meta.label} on ${machineName}` : meta.label
   const w = !signedOut && snap?.usage ? weeklyWindow(snap.usage.windows) : null
   const known = w !== null
+  /*
+   * Three looks for what the ring can say (#1616). Known: the fill on its track. Unknown for now: a dashed ring and a
+   * faint letter, a state the person may change (a session to run, a machine to connect). Unsupported: the tool never
+   * reports limits, so there is nothing to act on: a plain, solid, dimmed ring with no fill, the letter at full ink.
+   */
+  const unsupported = !known && !signedOut && snap?.unsupported === true
+  const state = known ? 'known' : unsupported ? 'unsupported' : 'unknown'
+  // What is drawn: signed out is its own solid look (below), so it is neither the dashed unknown nor the dimmed unsupported
+  const look = signedOut ? 'signedOut' : state
   const percent = w?.percent ?? 0
   const R = 9
   const C = 2 * Math.PI * R
@@ -550,6 +581,7 @@ function Donut({
         data-leaving={leaving || undefined}
         tabIndex={leaving ? -1 : undefined}
         data-percent={known ? percent : ''}
+        data-state={state}
         /*
          * Even while open, **another donut has to be clickable right away** — if the outside
          * click shield covered the donuts too, switching tools would take two clicks. So this
@@ -566,36 +598,51 @@ function Donut({
          * Inside that capsule the donut has no padding of its own and the capsule keeps 2px on every side, so its
          * hover circle stands the same distance from the outline above, below and beside it (owner).
          */
-        className={`relative z-40 flex items-center rounded-full ${machine ? '' : 'p-0.5'} transition-colors hover:bg-surface-hover ${
+        className={`relative z-40 flex items-center rounded-full ${machine ? '' : 'cc-donut-in p-0.5'} transition-colors hover:bg-surface-hover ${
           active ? 'bg-surface-hover' : ''
         } ${leaving ? 'cc-donut-out pointer-events-none' : entering ? 'cc-donut-in' : ''}`}
       >
         <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden>
+          {/*
+            The rings stand on top of each other and change by opacity (#1616, the owner's motion rule): a state change is
+            a short fade, never a jump, and with reduced motion it is the fade alone. The dashed one is the unknown; the
+            solid one is the track of a read ring, and dimmed it is the unsupported ring.
+          */}
           <circle
+            data-ring="dashed"
             cx="12"
             cy="12"
             r={R}
             fill="none"
             stroke="currentColor"
             strokeWidth="2.5"
-            className={`${ring} transition-colors duration-150`}
-            {...(known || signedOut ? {} : { strokeDasharray: '2 3' })}
+            strokeDasharray="2 3"
+            className={`text-line ${RING_FADE} ${look === 'unknown' ? 'opacity-100' : 'opacity-0'}`}
           />
-          {known && (
-            <circle
-              cx="12"
-              cy="12"
-              r={R}
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeDasharray={`${filled} ${C - filled}`}
-              // Has to start at 12 o'clock to match the direction people read in (same rule as the larger donut in the detail view)
-              transform="rotate(-90 12 12)"
-              className={tone}
-            />
-          )}
+          <circle
+            data-ring="solid"
+            cx="12"
+            cy="12"
+            r={R}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            className={`${ring} ${RING_FADE} ${look === 'unknown' ? 'opacity-0' : look === 'unsupported' ? 'opacity-50' : 'opacity-100'}`}
+          />
+          <circle
+            data-ring="fill"
+            cx="12"
+            cy="12"
+            r={R}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            // Has to start at 12 o'clock to match the direction people read in (same rule as the larger donut in the detail view)
+            transform="rotate(-90 12 12)"
+            style={{ strokeDasharray: `${filled} ${C - filled}` }}
+            className={`${tone} ${RING_FADE} ${known ? 'opacity-100' : 'opacity-0'}`}
+          />
           {/*
             The center letter is the **same mark** as the sidebar session chip. This single
             letter is why, with two donuts standing side by side, which is which reads without
@@ -607,7 +654,7 @@ function Donut({
             y="11"
             textAnchor="middle"
             dominantBaseline="central"
-            className={`fill-current font-sans font-semibold transition-colors duration-150 ${signedOut ? 'text-ink-signal' : known ? 'text-ink' : 'text-ink-faint'}`}
+            className={`fill-current font-sans font-semibold transition-colors duration-150 ease-out motion-reduce:transition-none ${signedOut ? 'text-ink-signal' : look === 'unknown' ? 'text-ink-faint' : 'text-ink'}`}
             style={{ fontSize: 'var(--text-2xs)' }}
           >
             {meta.mark}
