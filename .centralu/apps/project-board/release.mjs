@@ -813,7 +813,7 @@ export async function bumpRelease({ repo, dir, cfg, gh, ci, openPr, permissions 
   if (!opened.ok) return { summary: `Pushed ${branch}, but the pull request was not opened: ${opened.text}`, lines, next, pushed: true, partial: true }
   lines.push(opened.text)
   return {
-    summary: `Opened the bump to ${next}: ${opened.url ?? `#${opened.number}`}. Rehearse it now (release step rehearse) while its CI runs, merge it once CI is green (merge_when_green with intoBatch: true: while the merge queue has a batch running it merges nothing without it), then tag.${note}`,
+    summary: `Opened the bump to ${next}: ${opened.url ?? `#${opened.number}`}. Rehearse it now (release step rehearse) while its CI runs, merge it once CI is green (merge_when_green), then tag.${note}`,
     lines,
     next,
     pushed: true,

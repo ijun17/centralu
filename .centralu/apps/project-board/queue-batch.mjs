@@ -10,22 +10,16 @@ import {
   batchCandidates,
   batchEvent,
   decideLanding,
-  dispatchInputs,
   endBatch,
   formBatch,
-  gateGreen,
   gathering,
   markBatchless,
-  needsFull,
   NOT_STARTED,
-  rebatchAfterMove,
   releaseMembers,
   splitBatch,
   STATUS_CONTEXT,
-  tierPhrase,
-  tierToRun,
 } from './batch.mjs'
-import { canMerge, evaluateChecks, squashMessage, workflowCheckNames } from './ci.mjs'
+import { canMerge, evaluateChecks, ranTier, squashMessage, workflowCheckNames } from './ci.mjs'
 import { CI, QUEUE } from './config.mjs'
 import {
   cancelWorkflowRun,
@@ -43,12 +37,10 @@ import {
   readRequired,
   readWorkflowChecks,
   rerunRun,
-  runJobSteps,
   setPrBase,
 } from './github.mjs'
 import { ACTIVE, attentionText, BATCH_ACTIVE, decideRun, ERROR_LIMIT, findItem, noticeKey, pushEvent, quickLanded, SUBJECT_MAX, supersededSuites } from './queue.mjs'
 import { afterMerge, batchable, failingLine, land, latestRuns, permissionsOf, pollMs, runFailures, takeLease, updateQueue } from './queue-driver.mjs'
-import { judgeBatch, screenOn } from './queue-screen.mjs'
 import { short } from './util.mjs'
 
 /** A dispatch GitHub refused (no workflow_dispatch trigger, a permission): no new batch for this long. */
@@ -222,16 +214,10 @@ async function build(b, ctx) {
       batchless: false,
       then: back,
     })
-  // The tier it must run before it lands (#1538): the fast tier, or the heavy jobs too when it changes the screen. With
-  // `landTier` full, always the full tier. Judged on the branch as built, by the default branch's own mapping of files to jobs
-  const judged = screenOn() ? await judgeBatch(repo, defaultBranch, b.branch) : null
-  const tier = tierToRun({ tiers: TIERS, landTier: CI.landTier, judged: judged?.tier })
-  const tierWhy = judged?.why ?? null
   if (!renew()) return { yielded: true }
   try {
-    // Landing after the fast tier (#1259): the batch runs the quick tier on what lands, the heavy jobs too when it changes the screen
-    const inputs = dispatchInputs({ tiers: TIERS, landTier: CI.landTier, tier, screenInputs: CI.screen?.inputs })
-    for (const w of CI.workflows) await dispatchWorkflow(repo, workflowFile(w), b.branch, inputs)
+    // Landing after the fast tier (#1259): the batch runs the quick tier on what lands
+    for (const w of CI.workflows) await dispatchWorkflow(repo, workflowFile(w), b.branch, TIERS && CI.landTier === 'quick' ? { tier: 'quick' } : undefined)
   } catch (e) {
     if (!(e instanceof GitHubError) || FATAL.has(e.kind)) throw e
     // No workflow_dispatch trigger, or not allowed: no batches for a while, and say why
@@ -271,8 +257,6 @@ async function build(b, ctx) {
       state: 'ci',
       base: main,
       steps,
-      tier,
-      tierWhy,
       members: steps.map((s) => ({ pr: s.pr, head: s.head })),
       head: last.sha,
       tree: last.tree,
@@ -286,7 +270,7 @@ async function build(b, ctx) {
     const off =
       (conflicts.length ? ` ${list(fb, conflicts, ref)} conflicted with the ones before, and go${conflicts.length === 1 ? 'es on with its' : ' on with their'} own CI.` : '') +
       (refused.length ? ` GitHub would not merge ${list(fb, refused, ref)} into it; ${refused.length === 1 ? 'it goes on with its' : 'they go on with their'} own CI.` : '')
-    batchEvent(fq, fb, `Batch ${fb.branch}: ${list(fb, steps.map((s) => s.pr), ref)} merged onto ${defaultBranch} at ${short(main.sha)}; CI started on ${short(last.sha)}${tier ? `, to run ${tierPhrase({ tier })}${tierWhy ? `: ${tierWhy}` : ''}` : ''}.${runs}${off}`, at)
+    batchEvent(fq, fb, `Batch ${fb.branch}: ${list(fb, steps.map((s) => s.pr), ref)} merged onto ${defaultBranch} at ${short(main.sha)}; CI started on ${short(last.sha)}.${runs}${off}`, at)
   })
   return { state: 'ci' }
 }
@@ -341,10 +325,7 @@ async function runCi(b, ctx) {
    * a run with no full tier check at all, one that concluded badly, or one where a check named in ci.quickChecks
    * was not reported or did not succeed, is left to decideRun (`quickLanded`).
    */
-  // The tier this batch must run (#1538): the fast tier unless it holds a change to the screen. A batch from before this
-  // field has none: `landTier` decides, as before
-  const needFull = needsFull({ tiers: TIERS, landTier: CI.landTier, b })
-  const quickLanding = TIERS && !needFull && quickLanded(checks, runs, CI.fullTier, CI.quickChecks)
+  const quickLanding = TIERS && CI.landTier === 'quick' && quickLanded(checks, runs, CI.fullTier, CI.quickChecks)
   const d = quickLanding ? { state: 'green' } : decideRun({ subject: b, head: b.head, checks, runs, failures, now, n })
   if (d.action?.type === 'rerun') {
     if (!renew()) return { yielded: true }
@@ -362,31 +343,19 @@ async function runCi(b, ctx) {
     save((fq, fb) => Object.assign(fb, { required, ...(d.patch ?? {}), lastError: null, errors: 0, updatedAt: at, nextAt: new Date(now + pollMs('ci')).toISOString() }))
     return { state: 'ci' }
   }
-  // The full tier where nothing lands from less (`ci.landTier: full`, or a batch that changes the screen), and then the heavy jobs
-  const gateOf = (jobs) => (d.state === 'green' ? gateGreen({ full: needFull, landTier: CI.landTier, checks, runs, fullTier: CI.fullTier, screen: CI.screen, jobs }) : { lands: true })
-  let gate = gateOf(null)
-  if (gate.jobs) {
-    // Everything else holds: look at the heavy jobs themselves. A job of a shard's name is no proof by its name, since the
-    // stand-in of a left-out shard reports the same name and succeeds (the review of #1563)
-    const jobs = []
-    for (const r of runs) jobs.push(...(await runJobSteps(repo, r.id)))
-    gate = gateOf(jobs)
+  if (d.state === 'green' && TIERS && CI.landTier !== 'quick' && ranTier(checks, CI.fullTier) !== 'full') {
+    // Green without the full tier, where nothing lands from less (`ci.landTier: full`). A check still to come waits
+    if (ranTier(checks, CI.fullTier) === null && runs.some((r) => r.status !== 'completed')) {
+      save((fq, fb) => Object.assign(fb, { required, lastError: null, errors: 0, updatedAt: at, nextAt: new Date(now + pollMs('ci')).toISOString() }))
+      return { state: 'ci' }
+    }
+    return drop(b, ctx, `its run passed without running the full tier (the "${CI.fullTier}" check did not pass), and nothing lands from less. Look at the changes job of its run (.github/scripts/ci-changes.mjs).`)
   }
-  if (gate.wait) {
-    // A check still to come waits
-    save((fq, fb) => Object.assign(fb, { required, lastError: null, errors: 0, updatedAt: at, nextAt: new Date(now + pollMs('ci')).toISOString() }))
-    return { state: 'ci' }
-  }
-  if (gate.drop === 'tier')
-    return drop(b, ctx, `its run passed without running the full tier (the "${CI.fullTier}" check did not pass), and nothing lands from less${b.tierWhy ? ` (${b.tierWhy})` : ''}. Look at the changes job of its run (.github/scripts/ci-changes.mjs).`)
-  // Skipped, left out or never reported is not a pass for the heavy jobs (#1538)
-  if (gate.drop === 'heavy')
-    return drop(b, ctx, `its run passed, but not every heavy job (${CI.screen.checks.join(', ')}) was reported, succeeded and ran its scenarios (the step ${CI.screen.steps.join(' or ')}), and ${b.tierWhy ?? 'it may change the screen'}, so nothing lands from it.`)
   if (d.state === 'green') {
     const run = runs[0] ?? null
     save((fq, fb) => {
       Object.assign(fb, { state: 'landing', required, run: run ? { id: run.id, url: run.url, createdAt: run.createdAt ?? null } : null, greenAt: at, landed: 0, lastError: null, errors: 0, updatedAt: at, nextAt: at })
-      batchEvent(fq, fb, `Batch ${fb.branch} passed CI${run ? ` (run ${run.id}${tierPhrase(fb) ? `, ${tierPhrase(fb)}` : ''})` : tierPhrase(fb) ? ` (${tierPhrase(fb)})` : ''}; landing ${list(fb, fb.steps.map((s) => s.pr), ref)} in that order, each as its own squash.`, at)
+      batchEvent(fq, fb, `Batch ${fb.branch} passed CI${run ? ` (run ${run.id})` : ''}; landing ${list(fb, fb.steps.map((s) => s.pr), ref)} in that order, each as its own squash.`, at)
     })
     return { state: 'landing' }
   }
@@ -399,7 +368,7 @@ async function runCi(b, ctx) {
     const reason = {
       ...d.reason,
       kind: 'failed',
-      text: `${ref(repo, s.pr)} failed alone in batch ${b.branch}, a run of ${tierPhrase(b) || 'the full tier'} on ${defaultBranch} at ${short(b.base?.sha ?? '')}: ${d.reason.text.replace(/^Batch \S+: /, '')}${line}`,
+      text: `${ref(repo, s.pr)} failed alone in batch ${b.branch}, a full run of it on ${defaultBranch} at ${short(b.base?.sha ?? '')}: ${d.reason.text.replace(/^Batch \S+: /, '')}${line}`,
     }
     return drop(b, ctx, `${d.reason.text.replace(/ Read it with.*$| Look with.*$/, '')} ${ref(repo, s.pr)} failed alone; its session is told.`, {
       state: 'failed',
@@ -483,20 +452,8 @@ async function landNext(b, ctx) {
   const d = decideLanding({ b, step, pr, item: mine, mainTree: main.tree, prevTree, defaultBranch, lowerBranches, checks, superseded, subject, subjectMax: SUBJECT_MAX, now, ref })
   const n = ref(repo, step.pr)
   const view = mine ? { ...mine, title: pr.title } : { repo, pr: step.pr, lowers: [], title: pr.title }
-  const tested = ` Tested in batch ${b.branch} with ${list(b, prs.filter((p) => p !== step.pr), ref) || 'nothing else'}${tierPhrase(b) ? `, in ${tierPhrase(b)}` : ''}.`
+  const tested = ` Tested in batch ${b.branch} with ${list(b, prs.filter((p) => p !== step.pr), ref) || 'nothing else'}.`
 
-  if (d.do === 'stop' && d.moved) {
-    // The default branch moved under the batch (something landed outside the queue): not these members' fault, so they are
-    // batched again on the new one, with no message to a session, at most MOVED_CAP times per head (#1548)
-    const rest = prs.slice(k)
-    const why = `batch ${b.branch} stopped before ${n}: ${d.text}.`
-    return drop(
-      b,
-      ctx,
-      `stopped before ${n}: ${d.text}${k ? ` (${list(b, prs.slice(0, k), ref)} landed)` : ''}. That is no fault of ${list(b, rest, ref)}: ${rest.length === 1 ? 'it is' : 'they are'} tested again on the new ${defaultBranch}.`,
-      { state: 'stopped', batchless: false, why, then: (fq, fb) => rebatchAfterMove(fq, fb, { at, ref, min: KEEP_MIN, why, defaultBranch }) },
-    )
-  }
   if (d.do === 'stop') {
     const rest = prs.slice(k)
     return drop(b, ctx, `stopped before ${n}: ${d.text}. ${list(b, rest, ref)} go${rest.length === 1 ? 'es' : ''} back to ${rest.length === 1 ? 'its' : 'their'} own CI${k ? ` (${list(b, prs.slice(0, k), ref)} landed)` : ''}.`, { state: 'stopped' })
@@ -521,7 +478,7 @@ async function landNext(b, ctx) {
       postStatus(repo, step.head, {
         state: 'success',
         context: STATUS_CONTEXT,
-        description: `Passed ${tierPhrase(b) ? `${tierPhrase(b)} of CI` : 'CI'} in ${b.branch}${prs.length > 1 ? ` with ${list(b, prs.filter((p) => p !== step.pr), ref)}` : ''}`,
+        description: `Passed CI in ${b.branch}${prs.length > 1 ? ` with ${list(b, prs.filter((p) => p !== step.pr), ref)}` : ''}`,
         targetUrl: b.run?.url ?? null,
       }).catch((e) => {
         if (e instanceof GitHubError && FATAL.has(e.kind)) throw e

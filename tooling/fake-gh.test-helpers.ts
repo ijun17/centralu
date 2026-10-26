@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { delimiter, join } from 'node:path'
 import { fakeExe, linkNode, windowsSystemEnv } from '../packages/agent-host/src/fake-exe.test-helpers.js'
@@ -42,34 +41,6 @@ const save = () => fs.writeFileSync(process.env.FAKE_GH_STATE, JSON.stringify(st
 
 export type GhCall = { args: string[]; stdin: string | null }
 
-/** The folders of the fakes made in this process (the folder of each one's `bin`), for `endLeftoverFakes` */
-const made = new Set<string>()
-
-/**
- * Windows: ends any process still running a script of a fake made in this process. A test ends the app it started with
- * the app's whole tree, while the app (polling every 50 ms) may be starting a `gh`: Windows creates a new process
- * suspended and resumes it a moment later, and one whose parent was killed in that moment stays suspended for ever (0 s of
- * CPU, one thread, the parent gone: five `gh.fake.cjs` of 24 and 26 October stayed on a machine for days, each holding a
- * temporary folder name). Nothing else would collect them: they belong to no tree any more. Only processes whose command line
- * names a folder this process made are touched. Call it once, after the last test of a file (`afterAll`); it costs a
- * PowerShell start, so not after each test. Other systems do not leave them.
- */
-export function endLeftoverFakes(): number[] {
-  if (process.platform !== 'win32' || made.size === 0) return []
-  const powershell = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
-  const roots = [...made].map((r) => `'${r.replaceAll("'", "''")}'`).join(',')
-  const query = `$roots = @(${roots}); Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $c = $_.CommandLine; $c -and ($roots | Where-Object { $c.Contains($_) }) } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue; $_.ProcessId }`
-  try {
-    return execFileSync(powershell, ['-NoProfile', '-NonInteractive', '-Command', query], { encoding: 'utf8', timeout: 60_000, windowsHide: true })
-      .split(/\r?\n/)
-      .filter(Boolean)
-      .map(Number)
-  } catch (e) {
-    console.warn(`[test cleanup] could not look for leftover fake gh processes: ${(e as Error).message}`)
-    return []
-  }
-}
-
 export interface FakeGh {
   /** The folder `gh` is in: first on the PATH */
   readonly bin: string
@@ -101,7 +72,6 @@ export function fakeGh(root: string, answer: string): FakeGh {
   mkdirSync(bin, { recursive: true })
   linkNode(node)
   fakeExe(bin, 'gh', PROLOGUE + answer)
-  made.add(bin)
   const statePath = join(root, 'gh-state.json')
   const logPath = join(root, 'gh.log')
   writeFileSync(logPath, '')

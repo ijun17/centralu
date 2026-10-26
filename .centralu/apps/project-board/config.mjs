@@ -24,20 +24,6 @@ function quickChecksOf(v) {
 function fullTierOf(v) {
   return typeof v === 'string' && v ? v : null
 }
-
-/**
- * A batch that changes the screen runs the heavy jobs before it lands (#1538): `{ judge, checks, steps, inputs }`, null when it
- * is not set, `false` when it is set wrongly (then landing after the fast tier refuses to start).
- */
-function screenOf(v) {
-  if (v === undefined || v === null) return null
-  const names = Array.isArray(v.checks) && v.checks.length > 0 && v.checks.every((x) => typeof x === 'string' && x.trim()) ? v.checks.map((x) => x.trim()) : null
-  const judge = typeof v.judge === 'string' && v.judge.trim() ? v.judge.trim() : null
-  const steps = Array.isArray(v.steps) && v.steps.length > 0 && v.steps.every((x) => typeof x === 'string' && x.trim()) ? v.steps.map((x) => x.trim()) : null
-  const given = v.inputs === undefined ? { tier: 'full' } : v.inputs
-  const inputs = given && typeof given === 'object' && !Array.isArray(given) ? Object.fromEntries(Object.entries(given).map(([k, x]) => [k, String(x)])) : null
-  return names && judge && steps && inputs ? { judge, checks: names, steps, inputs } : false
-}
 export const CACHE_MS = Math.max(0, Number(config.cacheSeconds ?? 30)) * 1000
 // CI (ci_status, merge_when_green): which workflows hold the required checks, the issue that lists
 // known intermittent failures, and how long merge_when_green may wait.
@@ -62,20 +48,6 @@ export const CI = {
   // whatever the run happened to report: a renamed job, or one a broken `changes` switched off, reports nothing, and
   // that must not land. PROJECT_BOARD_CI_QUICK_CHECKS (the list as JSON): for the tests only
   quickChecks: quickChecksOf(process.env.PROJECT_BOARD_CI_QUICK_CHECKS ? JSON.parse(process.env.PROJECT_BOARD_CI_QUICK_CHECKS) : config.ci?.quickChecks),
-  // A batch that holds a pull request changing the screen runs the heavy jobs before it lands (the owner, 2026-10-26,
-  // #1538); the other batches land after the fast tier as above. `judge`: the script on the default branch that says which
-  // files change the screen (the one definition, .github/scripts/ci-changes.mjs `--screen`: this app keeps no path list of
-  // its own); `checks`: the heavy jobs, each of which must have been reported and succeeded (names as quickChecks); `inputs`:
-  // what the workflow is started with for such a batch (the full tier, the files leaving out what they cannot affect);
-  // `steps`: the step each of those jobs runs the scenarios in, which must have succeeded in the job itself (the job of a
-  // left-out shard reports a check of the same name, a stand-in that only echoes: a name alone cannot tell the two apart).
-  // Only with `landTier` "quick" (with "full" every batch runs the full tier). PROJECT_BOARD_CI_SCREEN ("off", or the
-  // object as JSON): for the tests only
-  screen: screenOf(process.env.PROJECT_BOARD_CI_SCREEN ? (process.env.PROJECT_BOARD_CI_SCREEN === 'off' ? null : JSON.parse(process.env.PROJECT_BOARD_CI_SCREEN)) : config.ci?.screen),
-}
-if (CI.screen === false) {
-  console.error('project.json: ci.screen needs "judge" (a script on the default branch), "checks" (a non-empty list of check names), "steps" (a non-empty list of step names) and, if given, "inputs" (an object).')
-  process.exit(1)
 }
 // Landing after the fast tier with no quick check named would land whatever ran: an error, not "anything goes"
 if (CI.landTier === 'quick' && CI.fullTier && !CI.quickChecks?.length) {

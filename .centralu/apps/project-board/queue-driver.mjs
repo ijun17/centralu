@@ -674,7 +674,7 @@ async function pollItem(item, { now, ref, renew, save, landed = [], stillIntegra
     // UNSTABLE on a green head: is it only a cancelled duplicate, or an older run (#1015)? Every check on it says
     let supersededOnly = false
     if (checks.verdict === 'green' && pr.mergeStateStatus === 'UNSTABLE') supersededOnly = onlySupersededFailures(await readChecks(repo, pr.headRefOid), scoped.runs)
-    d = decideCi({ item: view, pr, checks, runs, failures, defaultBranch, lowerBranches, supersededOnly, now, ref, fullTier: CI.fullTier, canBatch, landTier: CI.landTier })
+    d = decideCi({ item: view, pr, checks, runs, failures, defaultBranch, lowerBranches, supersededOnly, now, ref, fullTier: CI.fullTier, canBatch })
     // Its quick tier passed: what a batch takes (two tiers, queue.mjs)
     if (d.quick) base.ci.verdict = 'quick'
   }

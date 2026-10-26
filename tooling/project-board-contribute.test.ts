@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpath
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ownProcesses } from '../packages/agent-host/src/process.test-helpers.js'
 import { gitWrapper, removeFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 import { ExternalApps, resultText, type AppCaller, type AppRef } from '../packages/agent-host/src/apps/external/runtime.js'
@@ -21,7 +21,7 @@ import {
 } from '../.centralu/apps/project-board/rules.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
 import { topLevel } from '../.centralu/apps/project-board/git.mjs'
-import { endLeftoverFakes, fakeGh, type FakeGh } from './fake-gh.test-helpers.js'
+import { fakeGh, type FakeGh } from './fake-gh.test-helpers.js'
 import { SLOW } from './test-timing.js'
 
 /**
@@ -270,11 +270,6 @@ afterEach(async () => {
   rt = null
   await removeFakeDir(root)
 }, 30_000 * SLOW)
-
-// A gh that the app was starting when the test ended its tree stays suspended on Windows, for ever (fake-gh.test-helpers.ts)
-afterAll(() => {
-  endLeftoverFakes()
-}, 60_000 * SLOW)
 
 function runtime() {
   rt = new ExternalApps({

@@ -9,8 +9,7 @@
 // "Title (#N)" within 72 characters, no attribution lines, never force anything.
 //
 // Two tiers of CI (project.json `ci.fullTier`, 2026-10-18): a pull request's own run is the quick tier,
-// which lands nothing. An item lands from a run on what lands (the full tier, or the fast tier under `ci.landTier` quick, and the
-// heavy jobs too when its batch changes the screen, #1538): a batch (queue-batch.mjs), a batch
+// which lands nothing. An item lands from a full run on what lands: a batch (queue-batch.mjs), a batch
 // of one included, or its own head's full run (a release bump's, or one a person started on its
 // branch). An item whose quick tier passed waits for a batch; one that cannot be batched, or whose
 // batch of one ended without landing it, needs its session.
@@ -154,7 +153,6 @@ export function enqueue(q, { repo, pr, lowers = [], owner = null, author = null,
     delete mine.batch
     delete mine.batchless
     delete mine.alone
-    delete mine.moved
     pushEvent(q, mine, { kind: 'queued', text: `${ref(repo, pr)} queued again${lowers.length ? ` with ${lowers.map((n) => ref(repo, n)).join(', ')}` : ''}.`, at })
     return { item: mine, replaced: true }
   }
@@ -409,7 +407,7 @@ function runFailure(run, failures, failedJobs) {
  * (onlySupersededFailures). Answers `{ state, action?, reason?, patch? }`; action `rerun` (a run, all jobs or the failed ones),
  * `retarget` (onto the default branch) or `merge`.
  */
-export function decideCi({ item, pr, checks, runs = [], failures = {}, defaultBranch, lowerBranches = [], supersededOnly = false, now, ref, fullTier = null, canBatch = false, landTier = 'full' }) {
+export function decideCi({ item, pr, checks, runs = [], failures = {}, defaultBranch, lowerBranches = [], supersededOnly = false, now, ref, fullTier = null, canBatch = false }) {
   const n = ref(item.repo, item.pr)
   const head = pr.headRefOid
   const at = new Date(now).toISOString()
@@ -421,7 +419,7 @@ export function decideCi({ item, pr, checks, runs = [], failures = {}, defaultBr
   if (item.auto) {
     if (!canBatch) return attention('batch', `${n} was handed over with integrate, which lands only through a batch (the quick tier on ${defaultBranch}), and the queue cannot batch it (batches are off, or two tiers of CI are not set). Take it out (unqueue), mark it ready and land it with queue_merge.`)
     const alone = item.alone?.head === head ? item.alone : null
-    if (alone) return attention('full-tier', `${n}'s batch of one ${ranBatch(alone)}ended without landing it: ${alone.text} Fix it and push (the queue takes the new head), or queue it again with integrate.`)
+    if (alone) return attention('full-tier', `${n}'s batch of one ended without landing it: ${alone.text} Fix it and push (the queue takes the new head), or queue it again with integrate.`)
     return { state: 'ci', quick: true, patch: { noCiSince: null, missingSince: null } }
   }
   if (quickGreen(checks, runs, fullTier)) {
@@ -429,7 +427,7 @@ export function decideCi({ item, pr, checks, runs = [], failures = {}, defaultBr
     if (alone)
       return attention(
         'full-tier',
-        `${n} passed the quick tier of CI, and ${landsFrom(landTier)}, but its batch of one ${ranBatch(alone)}ended without landing it: ${alone.text} Fix it and push (the queue takes the new head), or queue it again to try once more.`,
+        `${n} passed the quick tier of CI, and lands only from a full run, but its batch of one ended without landing it: ${alone.text} Fix it and push (the queue takes the new head), or queue it again to try once more.`,
       )
     if (!canBatch) {
       const why = pr.isCrossRepository ? "a fork's pull request" : 'batches are off, or it is a release bump'
@@ -487,11 +485,6 @@ export function decideCi({ item, pr, checks, runs = [], failures = {}, defaultBr
   return { state: 'ci', action: { type: 'merge' }, patch: { uncleanSince: null, missingSince: null } }
 }
 
-/** What a batch lands from, for the texts: the tier `ci.landTier` names, and the heavy jobs a change to the screen adds (#1538) */
-export const landsFrom = (landTier) => (landTier === 'quick' ? "lands from its batch's run (the fast tier, or the full tier when the batch changes the screen)" : 'lands only from a full run')
-/** "ran the fast tier and " for a batch of one that is known to have run it, else nothing (texts about its end) */
-const ranBatch = (alone) => (alone?.tier ? `ran the ${alone.tier === 'full' ? 'full' : 'fast'} tier and ` : '')
-
 /** A finished run whose conclusion is a failure (cancelled, skipped or still going is not). */
 export const FAILED_RUN = new Set(['failure', 'timed_out', 'startup_failure', 'action_required'])
 
@@ -533,24 +526,6 @@ export function quickLanded(checks, runs, fullTier, quickChecks = []) {
   const all = [...checks.rows, ...(checks.others ?? [])]
   const succeeded = (r) => !!r.check && (r.check.kind === 'status' ? r.check.state === 'success' : r.check.status === 'completed' && r.check.conclusion === 'success')
   return quickChecks.every((pattern) => {
-    const named = all.filter((r) => onFlakyList(r.name, [pattern]))
-    return named.length > 0 && named.every(succeeded)
-  })
-}
-
-/**
- * Whether a batch that changes the screen has run the heavy jobs (#1538): the full tier ran (its check passed), every
- * run concluded well, and **each check named in `ci.screen.checks`** (`*` for any run of characters: the e2e shards of
- * both browsers) was reported and succeeded, every check its name matches. Skipped is not a pass here, whatever it
- * counts for in the required set: a shard the files left out, or one a broken `changes` switched off, is exactly
- * what must not let a batch land after the fast tier alone. No names, nothing lands.
- */
-export function screenLanded(checks, runs, fullTier, screenChecks = []) {
-  if (!screenChecks?.length || !fullTier || ranTier(checks, fullTier) !== 'full') return false
-  if (!runs?.length || !runs.every((r) => r.status === 'completed' && OK_CONCLUSIONS.has(r.conclusion))) return false
-  const all = [...checks.rows, ...(checks.others ?? [])]
-  const succeeded = (r) => !!r.check && (r.check.kind === 'status' ? r.check.state === 'success' : r.check.status === 'completed' && r.check.conclusion === 'success')
-  return screenChecks.every((pattern) => {
     const named = all.filter((r) => onFlakyList(r.name, [pattern]))
     return named.length > 0 && named.every(succeeded)
   })
@@ -671,7 +646,7 @@ export function itemLine(item, ref = refIn(item.repo)) {
       : item.state === 'ci' && item.batch != null
         ? `CI in batch ${item.batch}${item.head ? ` at ${short(item.head)}` : ''}`
         : item.state === 'ci' && item.ci?.verdict === 'quick' && item.ci.head === item.head
-          ? `quick tier passed at ${short(item.head)}; waiting for a batch to test it and land it`
+          ? `quick tier passed at ${short(item.head)}; waiting for a batch to run the full tier`
         : item.state === 'ci'
           ? `CI${item.head ? ` at ${short(item.head)}` : ''}${item.lastError ? `; last poll failed: ${item.lastError}` : ''}`
         : item.state === 'waiting'

@@ -2,10 +2,10 @@ import { mkdirSync, mkdtempSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { removeFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 import { ExternalApps, resultText, type AppCaller, type AppRef } from '../packages/agent-host/src/apps/external/runtime.js'
-import { endLeftoverFakes, fakeGh, type FakeGh } from './fake-gh.test-helpers.js'
+import { fakeGh, type FakeGh } from './fake-gh.test-helpers.js'
 import { SLOW } from './test-timing.js'
 
 /**
@@ -134,11 +134,6 @@ afterEach(async () => {
   rt = null
   await removeFakeDir(root)
 }, 30_000 * SLOW)
-
-// A gh that the app was starting when the test ended its tree stays suspended on Windows, for ever (fake-gh.test-helpers.ts)
-afterAll(() => {
-  endLeftoverFakes()
-}, 60_000 * SLOW)
 
 /** The runtime the host uses, on this repository, with `gh` resolving to the fake (or to nothing) */
 function runtime(withGh = true) {
