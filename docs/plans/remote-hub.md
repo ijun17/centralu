@@ -456,9 +456,10 @@ host-only install, where the keeper would be a plain file beside `host/`; it lin
 already checks (`checkKeeperExe`). So a remote keeper is a release change plus a headless mode, after
 runtime-unification step 4b (owner decision 5). Windows has no keeper at all.
 
-**The design for it is [remote-keeper.md](remote-keeper.md) (#1614, proposed 2026-10-26):** a headless keeper on
-Linux and Windows remotes, an update as its host swap with no wait for idle, the keeper's own update kept apart from
-the host's, the keeper as a file beside `host/` in the host-only packages, and the steps with their real-machine checks.
+**The design for it is [remote-keeper.md](remote-keeper.md) (#1614, decided 2026-10-26):** a headless keeper on
+Linux and Windows remotes and an update as its host swap; where a swap cannot keep what runs, an update at once that
+resumes the turns it ended; the keeper's own update kept apart from the host's; the keeper as a file beside `host/` in
+the host-only packages; and the steps with their real-machine checks.
 
 ### 10.5 Update, rollback and uninstall
 
