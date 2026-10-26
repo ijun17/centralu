@@ -3,9 +3,9 @@ import tseslint from 'typescript-eslint'
 import boundaries from 'eslint-plugin-boundaries'
 import reactHooks from 'eslint-plugin-react-hooks'
 import globals from 'globals'
+import testDataDir from './tooling/eslint-test-data-dir.js'
 import platformChecks from './tooling/eslint-platform-checks.js'
 import agentAdapterChecks from './tooling/eslint-agent-adapter-checks.js'
-import testDataDir from './tooling/eslint-test-data-dir.js'
 
 /**
  * The modules that may ask which OS this is, each owning one subject (docs/architecture.md §2). A new
