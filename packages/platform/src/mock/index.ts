@@ -265,6 +265,7 @@ export class MockPlatform implements Platform {
   // tools.ts
   get detected() { return this.toolsMock.detected }
   set detected(value: ToolsMock['detected']) { this.toolsMock.detected = value }
+  get capabilityLimits() { return this.toolsMock.capabilityLimits }
   get machineDetected() { return this.toolsMock.machineDetected }
   set machineDetected(value: ToolsMock['machineDetected']) { this.toolsMock.machineDetected = value }
   get commandState() { return this.toolsMock.commandState }

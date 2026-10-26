@@ -1,7 +1,7 @@
 import type { ChildProcess } from 'node:child_process'
 import { EventEmitter } from 'node:events'
 import { PassThrough, type Readable, type Writable } from 'node:stream'
-import { KILL_GRACE_MS, hasProcessGroups, killTree, stopTree, type KillOs, type LeftoverOs } from '../dev-services/kill-tree.js'
+import { KILL_GRACE_MS, hasProcessGroups, killTree, noteGroups, stopGroup, stopTree, type KillOs, type LeftoverOs } from '../dev-services/kill-tree.js'
 import { killHandle, spawnGrouped, sweepExited } from '../dev-services/grouped-child.js'
 import { ExitAfterDrain } from '../exit-after-drain.js'
 import { Tail } from '../stream-text.js'
@@ -40,6 +40,37 @@ export type LocalSpawnSpec = AgentSpawnSpec & {
   signal?: AbortSignal
 }
 
+/**
+ * The guard a CLI that must end with the host starts behind (`AgentSpawnSpec.endsWithHost`, macOS and Linux): `sh` keeps a
+ * reader on fd 3, a pipe whose other end only this host holds, and `exec`s the CLI in its place with fd 3 closed. The
+ * kernel closes the host's end when the host goes, however it goes (SIGKILL included), and the reader then ends the whole
+ * group (`kill -9 0`): the CLI, its MCP servers and the shells in its group. It needs no stdin's end to reach anyone.
+ * Before that it ends the helper groups a shell the CLI starts in a group of its own lives in, and what that shell runs:
+ * those of the CLI's descendants then (`watchTreeGroups`, read by parent links when the pipe closes, so a command
+ * started a moment before the host died is reached too; #1562 Mac re-check), and those the host told it of on the pipe
+ * (`+<pgid>` noted, `-<pgid>` dropped once empty, `noteTree`), which reach a helper whose shell has gone.
+ */
+export const HOST_WATCH =
+  '{ g=; while read -r l; do case $l in +*) g="$g ${l#+}";; -*) n=; for p in $g; do [ "$p" = "${l#-}" ] || n="$n $p"; done; g=$n;; esac; done; ' +
+  'for p in $g $(' +
+  watchTreeGroups() +
+  '); do kill -9 -"$p" 2>/dev/null; done; kill -9 0 2>/dev/null; } <&3 >/dev/null 2>&1 & exec "$@" 3<&-'
+
+/**
+ * The process groups of the CLI's descendants, its own aside, as the watch reads them: `$$` in the watch's subshell is the
+ * CLI's pid (the `sh` that `exec`ed it)
+ */
+function watchTreeGroups(): string {
+  return (
+    'ps -A -o pid= -o ppid= -o pgid= 2>/dev/null | awk -v r="$$" \'{ p[$1] = $2; g[$1] = $3 } END { d[r] = 1; ' +
+    'do { c = 0; for (k in p) if (!(k in d) && (p[k] in d)) { d[k] = 1; c = 1 } } while (c); ' +
+    'for (k in d) if (g[k] != g[r] && g[k] > 1) print g[k] }\''
+  )
+}
+
+/** How often held helper groups are read again (`noteTree`) */
+const GROUP_CHECK_MS = 2_000
+
 /** The end of stderr kept for a failure message: the SDK only keeps it for processes it spawns itself */
 const STDERR_TAIL = 8 * 1024
 
@@ -49,6 +80,11 @@ export class LocalAgentProcess extends EventEmitter implements AgentProcess {
   readonly stderr: Readable | null
   killed = false
   private readonly tail = new Tail(STDERR_TAIL)
+  /** The helper groups its tree had when last asked (`noteTree`) and that still have a member, swept once it has gone */
+  private groups = new Set<number>()
+  /** While groups are held: they are read again, so one that has emptied is dropped before its number is reused */
+  private groupClock: ReturnType<typeof setInterval> | null = null
+  private noting: Promise<void> | null = null
   /** Reported once the output has all arrived, so a reader never sees the exit before the last line */
   private readonly exitReport = new ExitAfterDrain(() => this.emit('exit', this.child.exitCode, this.child.signalCode))
 
@@ -65,6 +101,8 @@ export class LocalAgentProcess extends EventEmitter implements AgentProcess {
     // Always read: a CLI whose stderr nobody drains blocks once the pipe is full
     child.stderr?.on('data', (d: Buffer) => this.tail.push(d))
     child.stdin?.on('error', () => {})
+    // The host-watch pipe: a write after its reader has gone is no error of the host's
+    child.stdio[3]?.on('error', () => {})
     child.on('error', (e) => {
       this.emit('error', e)
       /*
@@ -84,7 +122,10 @@ export class LocalAgentProcess extends EventEmitter implements AgentProcess {
      */
     let started: ReturnType<typeof spawnGrouped>
     try {
-      started = spawnGrouped(spec.command, spec.args, { cwd: spec.cwd, env: spec.env, stdio: ['pipe', 'pipe', 'pipe'] }, os?.platform)
+      const watched = !!spec.endsWithHost && hasProcessGroups(os?.platform)
+      started = watched
+        ? spawnGrouped('/bin/sh', ['-c', HOST_WATCH, 'centralu-agent', spec.command, ...spec.args], { cwd: spec.cwd, env: spec.env, stdio: ['pipe', 'pipe', 'pipe', 'pipe'] }, os?.platform)
+        : spawnGrouped(spec.command, spec.args, { cwd: spec.cwd, env: spec.env, stdio: ['pipe', 'pipe', 'pipe'] }, os?.platform)
     } catch (err) {
       started = { child: notStarted(err as Error), spawnedAt: Date.now() }
     }
@@ -106,6 +147,43 @@ export class LocalAgentProcess extends EventEmitter implements AgentProcess {
 
   get signalCode(): NodeJS.Signals | null {
     return this.child.signalCode
+  }
+
+  noteTree(): Promise<void> {
+    const pid = this.child.pid
+    if (pid === undefined || this.ended || !this.grouped) return Promise.resolve()
+    this.noting ??= noteGroups(pid, this.groups, this.os?.platform)
+      .then((groups) => {
+        if (this.ended) return
+        this.tellWatch(this.groups, groups)
+        this.groups = groups
+        if (groups.size === 0) this.stopGroupClock()
+        else if (!this.groupClock) {
+          this.groupClock = setInterval(() => void this.noteTree(), GROUP_CHECK_MS)
+          this.groupClock.unref?.()
+        }
+      })
+      .finally(() => {
+        this.noting = null
+      })
+    return this.noting
+  }
+
+  /**
+   * The host watch (`HOST_WATCH`) is told each helper group as it is noted and as it is dropped, so a host killed outright
+   * still ends them: they are in groups of their own, which the watch's own `kill -9 0` does not reach (#1562 Mac re-check:
+   * Cursor's `zsh -c` and its `sleep 300` outlived a SIGKILLed host)
+   */
+  private tellWatch(before: ReadonlySet<number>, after: ReadonlySet<number>): void {
+    const watch = this.child.stdio[3]
+    if (!watch || !('write' in watch) || watch.destroyed) return
+    const lines = [...[...after].filter((g) => !before.has(g)).map((g) => `+${g}`), ...[...before].filter((g) => !after.has(g)).map((g) => `-${g}`)]
+    if (lines.length) watch.write(lines.join('\n') + '\n')
+  }
+
+  private stopGroupClock(): void {
+    if (this.groupClock) clearInterval(this.groupClock)
+    this.groupClock = null
   }
 
   /** The end of what the CLI wrote to stderr */
@@ -142,6 +220,9 @@ export class LocalAgentProcess extends EventEmitter implements AgentProcess {
   }
 
   private onExit(): void {
+    // The host-watch pipe (`HOST_WATCH`) has nothing left to watch: its reader ends with what is left of the group
+    const watch = this.child.stdio[3]
+    if (watch && 'destroy' in watch) watch.destroy()
     this.sweep()
     if (!this.stdout.readableEnded) this.stdout.once('end', () => this.exitReport.drained())
     this.exitReport.exited(this.stdout.readableEnded)
@@ -151,6 +232,9 @@ export class LocalAgentProcess extends EventEmitter implements AgentProcess {
   private sweep(): void {
     const pid = this.child.pid
     if (pid === undefined) return
+    // Groups of its own its helpers started (a shell, measured: Cursor's), which its group's sweep does not reach
+    this.stopGroupClock()
+    for (const g of this.groups) stopGroup(g, KILL_GRACE_MS)
     const root = { pid, spawnedAt: this.spawnedAt, exitedAt: Date.now() }
     void sweepExited(root, this.os?.platform, this.os?.listProcesses ? { listProcesses: this.os.listProcesses, taskkill: this.os.taskkill } : undefined).then((ended) => {
       if (ended.length > 0) console.error(`[agent] ended ${ended.length} process(es) pid ${pid} left running: ${ended.join(', ')}`)
@@ -168,7 +252,8 @@ function notStarted(err: Error): ChildProcess {
   const stand = new EventEmitter() as ChildProcess
   const stdout = new PassThrough()
   stdout.end()
-  Object.assign(stand, { stdin: new PassThrough(), stdout, stderr: null, pid: undefined, exitCode: null, signalCode: null, kill: () => false })
+  const stdin = new PassThrough()
+  Object.assign(stand, { stdin, stdout, stderr: null, stdio: [stdin, stdout, null], pid: undefined, exitCode: null, signalCode: null, kill: () => false })
   process.nextTick(() => stand.emit('error', err))
   return stand
 }

@@ -106,7 +106,8 @@ describe('time limits a test sets for itself', () => {
         .map((l) => `${f}:${l}`),
     )
     expect(unscaled).toEqual([])
-  })
+    // It parses every test file with the TypeScript compiler: near vitest's 5 s default on a loaded runner, so it carries a limit of its own
+  }, 30_000 * SLOW)
 })
 
 describe('eventually', () => {

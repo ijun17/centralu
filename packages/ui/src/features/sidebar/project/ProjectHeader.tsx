@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ProjectInfo } from '@cc/protocol'
 import type { SessionSummary } from '@cc/core'
 import { externalAppKey, useStore } from '../../../store/store.js'
@@ -21,6 +21,12 @@ export function ProjectHeader({
   project,
   projectId,
   folded,
+  savedFolded,
+  onToggleFold,
+  onPin,
+  onNameEnter,
+  onNameLeave,
+  onMenuChange,
   sessions,
   rootApp,
   appCount,
@@ -30,7 +36,19 @@ export function ProjectHeader({
 }: {
   project: ProjectInfo
   projectId: string
+  /** Whether its rows are hidden now: the saved fold, unless hover has expanded it (#1578) */
   folded: boolean
+  /** The saved fold alone: what the arrow's label says it will do */
+  savedFolded: boolean
+  /** The arrow, or a press on the name, while the project is hover-expanded: makes it stay; otherwise folds or unfolds */
+  onToggleFold: () => void
+  /** A press on the name: a hover-expanded project stays; any other is left as it is */
+  onPin: () => void
+  /** The mouse pointer came onto / left the name (#1578) */
+  onNameEnter: () => void
+  onNameLeave: () => void
+  /** The project menu opened or closed: an open menu keeps a hover-expanded project as it is */
+  onMenuChange: (open: boolean) => void
   sessions: SessionSummary[]
   /** The app this project is (#1141): its manifest stands at the project's root */
   rootApp?: ExternalCatalogApp
@@ -50,10 +68,10 @@ export function ProjectHeader({
   // Does the manager's worktree proposal point at this project (#69)? The ⋯ menu button lights up
   const proposalHere = useStore((s) => s.worktreeProposals.some((p) => p.projectId === projectId))
   const [menuOpen, setMenuOpen] = useState(false)
+  useEffect(() => onMenuChange(menuOpen), [menuOpen, onMenuChange])
   const setProjectTrusted = useStore((s) => s.setProjectTrusted)
   /** Where the menu hangs from — the pressed button (not a corner of the sidebar) */
   const menuAnchor = useRef<HTMLSpanElement>(null)
-  const toggleFold = useStore((s) => s.toggleProjectFold)
   const openApp = useStore((s) => s.openApp)
   const askTrust = useStore((s) => s.askTrust)
   // The app's own screen is the one showing: the mark is lit, as an open app row's mark is
@@ -105,9 +123,9 @@ export function ProjectHeader({
       {/*
         The fold arrow (#205). **This is the one and only door for folding** — the name is where
         the project screen opens (#206), so if pressing it also folded, one of the two would
-        always misfire. Expand-on-hover is not used either: if the list expands and collapses as
-        the mouse passes over, the row the person meant to press gets shoved out of place, and a
-        waiting session gets hidden too (from the original request).
+        always misfire. Resting the pointer on a folded name for 0.2 s also shows its rows, until the
+        pointer leaves the project (#1578, owner); passing over does nothing, so the row the person
+        meant to press is not shoved out of place, and pressing the arrow makes that expansion stay.
 
         Unlike that, it is **always visible.** Being folded is a state, not an action, and if it
         only shows on hover there is nowhere to ask why a row is missing. The arrow stands in the
@@ -117,8 +135,8 @@ export function ProjectHeader({
       */}
       <span className={`-my-1 -mr-2 flex ${GUTTER_WIDTH} shrink-0 justify-center self-center`}>
         <IconButton
-          label={folded ? `Expand ${project.name}` : `Collapse ${project.name}`}
-          onClick={() => toggleFold(projectId)}
+          label={savedFolded ? `Expand ${project.name}` : `Collapse ${project.name}`}
+          onClick={onToggleFold}
           testId={`project-fold-${project.name}`}
           className={DISCLOSURE_BUTTON}
         >
@@ -138,13 +156,20 @@ export function ProjectHeader({
         badge's text stands on the name's line whatever the case. Half the row's gap apart, so the badge reads as part of
         the name. Which linked machine it is on (#734); this computer's projects carry none.
       */}
-      <span className="flex min-w-0 items-baseline gap-1">
+      <span
+        className="flex min-w-0 items-baseline gap-1"
+        onPointerEnter={(e) => e.pointerType === 'mouse' && onNameEnter()}
+        onPointerLeave={(e) => e.pointerType === 'mouse' && onNameLeave()}
+      >
         <Tooltip content={<ProjectDetail project={project} />} testId={`project-tip-${project.name}`}>
           <button
             className={`truncate text-left text-md font-medium tracking-tight text-ink transition-colors ${
               selected ? '' : 'hover:text-ink-signal'
             }`}
-            onClick={() => focusProject(projectId)}
+            onClick={() => {
+              onPin()
+              focusProject(projectId)
+            }}
             aria-current={selected ? 'page' : undefined}
             data-testid={`project-header-${project.name}`}
           >

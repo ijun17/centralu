@@ -89,3 +89,10 @@ export type ToolName = z.infer<typeof ToolName>
  */
 export const AppId = z.string()
 export type AppId = z.infer<typeof AppId>
+
+/**
+ * Permission preset — overrides the CLI's global setting on a per-session basis (validated at M0). In rank order,
+ * lowest first. `edits` (#1525) is `normal` plus edits inside the session's folder without a card.
+ */
+export const PermissionPreset = z.enum(['safe', 'normal', 'edits', 'auto'])
+export type PermissionPreset = z.infer<typeof PermissionPreset>

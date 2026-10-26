@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { ToolName } from './ids.js'
+import { PermissionPreset, ToolName } from './ids.js'
 
 /**
  * Everything a screen needs to *present* a tool: its name, its mark, and the two
@@ -139,8 +139,58 @@ export const AdapterCapabilities = z.object({
    * (p50) before the first token (#561). Absent is false: a tool whose resume is slow or untested keeps its process.
    */
   sleep: z.boolean().optional(),
+  /**
+   * The permission presets this tool can keep (docs/plans/acp-adapter.md §5.3). Absent: every preset. Cursor's ACP
+   * server has no switch that makes it ask before every change, so it does not list `safe`, and a session asked to run
+   * it under `safe` is refused (`launchRefusal`) rather than run under a promise it cannot keep.
+   */
+  presets: z.array(PermissionPreset).optional(),
+  /**
+   * Whether the tool can be kept from reading the repository's own files (`.cursor/rules`, `AGENTS.md`, its config)
+   * when the project is not trusted (#92). Absent: true. False: it runs only in trusted projects.
+   */
+  keepsRepoFilesOut: z.boolean().optional(),
+  /**
+   * Whether the tool takes Centralu's role text (`systemPromptAppend`). Absent: true. False: it cannot be a session that
+   * is given one (the orchestrator, a coordinator, an app's agent), nor one that must read no setting files.
+   */
+  roleText: z.boolean().optional(),
 })
 export type AdapterCapabilities = z.infer<typeof AdapterCapabilities>
+
+/** What a launch asks of a tool that `launchRefusal` checks: the part of a session's start settings a tool may not keep */
+export type LaunchDemands = {
+  permissionPreset: PermissionPreset
+  /** Absent means untrusted, as for the adapters (`CreateSessionOpts.projectTrusted`) */
+  projectTrusted?: boolean
+  noSettingFiles?: boolean
+  /** Whether the session is given role text (`systemPromptAppend`) */
+  roleText?: boolean
+}
+
+/** What the orchestrator asks of its tool: Normal, no project's files, and Centralu's role text (`OrchestratorSlot`) */
+export const ORCHESTRATOR_DEMANDS: LaunchDemands = { permissionPreset: 'normal', projectTrusted: false, noSettingFiles: true, roleText: true }
+
+/**
+ * Why `label`'s tool cannot run a session that demands this, or null when it can. The one rule for both sides: the host
+ * refuses a launch with it, and a picker shows the same words beside a tool it greys out.
+ */
+export function launchRefusal(caps: AdapterCapabilities, label: string, demands: LaunchDemands): string | null {
+  if (caps.roleText === false && (demands.roleText || demands.noSettingFiles)) {
+    return `${label} cannot take Centralu's role instructions yet, so it cannot run the orchestrator, a coordinator or an app's agent.`
+  }
+  if (caps.keepsRepoFilesOut === false && !demands.projectTrusted) {
+    return `${label} cannot be kept from reading a project's own files (such as AGENTS.md and its rules), so it runs only in trusted projects.`
+  }
+  if (caps.presets && !caps.presets.includes(demands.permissionPreset)) {
+    const kept = caps.presets.map((p) => PRESET_LABEL[p]).join(' or ')
+    const asked = PRESET_LABEL[demands.permissionPreset]
+    return `${label} cannot be made to ask before a change as ${asked} does, so it cannot run under ${asked}${kept ? ` (only under ${kept})` : ''}.`
+  }
+  return null
+}
+
+const PRESET_LABEL: Record<PermissionPreset, string> = { safe: 'Safe', normal: 'Normal', edits: 'Edits', auto: 'Auto' }
 
 /**
  * One selectable model.

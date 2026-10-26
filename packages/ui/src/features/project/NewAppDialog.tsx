@@ -52,8 +52,11 @@ export function NewAppDialog({ projectId, onClose }: { projectId: string | null;
    * wrong, the dialog **always sends the tool actually selected**: a session never starts with a
    * different tool than the one shown selected.
    */
-  const { tool, setTool, toolMeta, tools, info, usable, blocked, detectError, redetect } = useToolChoice(
+  // An app's builder is given its role as text, which a tool that takes none cannot run (`roleText`)
+  const { tool, setTool, toolMeta, tools, info, usable, refusal, blocked, detectError, redetect } = useToolChoice(
     (projectId ? project?.defaultTool : orchestratorTool) ?? allTools[0]?.name ?? '',
+    undefined,
+    { permissionPreset: 'normal', projectTrusted: true, roleText: true },
   )
   const [name, setName] = useState('')
   /** The value the person entered if they touched the id, otherwise null — the derived id keeps following as the name is edited */
@@ -166,16 +169,17 @@ ${parent?.trim() ?? ''}`
                 value: t.name,
                 label: t.label,
                 testId: `new-app-tool-${t.name}`,
-                title: info(t.name)?.detail,
+                title: refusal(t.name) ?? info(t.name)?.detail,
                 dim: !!tools && !usable(t.name),
               }))}
             />
             {/* The reason it cannot be used is not hidden — a disabled button alone would look like it just does nothing */}
             {blocked && (
               <p className="mt-1.5 text-xs leading-body text-ink-muted" data-testid="new-app-tool-blocked">
-                {info(tool)?.installed
-                  ? `${toolMeta.label} needs a login. Run ${toolMeta.login} in a terminal, then open this again.`
-                  : `${toolMeta.label} is not installed (${info(tool)?.detail ?? 'not found'}).`}
+                {refusal(tool) ??
+                  (info(tool)?.installed
+                    ? `${toolMeta.label} needs a login. Run ${toolMeta.login} in a terminal, then open this again.`
+                    : `${toolMeta.label} is not installed (${info(tool)?.detail ?? 'not found'}).`)}
               </p>
             )}
             {detectError && (

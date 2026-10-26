@@ -59,6 +59,14 @@ export function clonesFiles(platform: Platform = HOST_PLATFORM): boolean {
 }
 
 /**
+ * A CLI's own installer lays it out as a folder of versions, each with its own Node, started through a batch file and a
+ * PowerShell script (Windows; Cursor's `agent`, measured 2026.10.22). Elsewhere it is a link into the newest version.
+ */
+export function installsCliAsVersionFolders(platform: Platform = HOST_PLATFORM): boolean {
+  return platform === 'win32'
+}
+
+/**
  * A running program's file cannot be replaced or deleted (Windows, #353). There, a program npm will
  * update is never run in place just to ask its version.
  */

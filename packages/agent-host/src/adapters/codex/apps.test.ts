@@ -4,7 +4,7 @@ import * as kit from '../../apps/external/test-helpers.js'
 import { SessionAppsHub, type AppSessionKey } from '../../sessions/session-apps.js'
 import { attachWorld, type AttachWorld } from '../../sessions/session-apps.test-helpers.js'
 import type { CreateSessionOpts, OrchestratorTools, SessionHandle } from '../contract.js'
-import { bridgePath } from './bridge-path.js'
+import { bridgePath } from '../bridge-path.js'
 
 /**
  * External apps attached to a Codex session (M4 A-5) — an stdio bridge per app, loaded when a

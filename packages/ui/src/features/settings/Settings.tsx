@@ -21,6 +21,7 @@ import { useAppCatalog, type ExternalCatalogApp } from '../../store/app-catalog.
 import { AppSecrets, missingSecrets } from '../pinned-app/AppSecrets.jsx'
 import { SpanButton } from '../../components/SpanPicker.jsx'
 import { Segmented } from '../../components/Segmented.jsx'
+import { ORCHESTRATOR_DEMANDS, useRefusals } from '../project/useToolChoice.js'
 import { Switch } from '../../components/Switch.jsx'
 import {
   AppIcon,
@@ -709,6 +710,8 @@ function OrchestratorSettings() {
   // Holds onto the whole thing that was picked, not just its name — the confirmation dialog never has to hunt for the name again
   const [asking, setAsking] = useState<ToolStatus | null>(null)
   const tools = useTools()
+  // A tool that cannot take the orchestrator's role stays in the list, greyed, with the reason on hover
+  const refusal = useRefusals(tools, ORCHESTRATOR_DEMANDS)
 
   // With a session, its tool; before one, the choice made this run (the host keeps what it was told, but does not say it)
   const current = live ?? peek.data?.tool ?? chosen ?? (tools[0]?.name ?? null)
@@ -740,7 +743,10 @@ function OrchestratorSettings() {
                 const picked = tools.find((t) => t.name === name)
                 if (picked) setAsking(picked)
               }}
-              options={tools.map((t) => ({ value: t.name, label: t.label, testId: `orchestrator-tool-${t.name}` }))}
+              options={tools.map((t) => {
+                const refused = refusal(t.name)
+                return { value: t.name, label: t.label, testId: `orchestrator-tool-${t.name}`, disabled: refused !== null, ...(refused ? { title: refused } : {}) }
+              })}
             />
           }
         />

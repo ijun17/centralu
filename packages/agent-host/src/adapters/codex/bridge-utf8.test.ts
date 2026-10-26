@@ -1,7 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { afterEach, describe, expect, it } from 'vitest'
 import { WebSocketServer, type WebSocket } from 'ws'
-import { bridgePath } from './bridge-path.js'
+import { bridgePath } from '../bridge-path.js'
 import { SLOW } from '../../../../../tooling/test-timing.js'
 
 /**
