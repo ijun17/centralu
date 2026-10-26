@@ -688,7 +688,8 @@ export class SessionEvents {
    */
   async deliverMail(
     sessionId: string,
-    input: { text: string; quiet: boolean; line: string },
+    /** `label`: the conversation line's kind (`mail` when absent); an update's continued turn says `update` (#1618) */
+    input: { text: string; quiet: boolean; line: string; label?: string },
     gate: { leaving(): boolean; atRest(): boolean } = { leaving: () => false, atRest: () => true },
     late?: (e: Error) => void,
   ): Promise<void> {
@@ -722,7 +723,7 @@ export class SessionEvents {
       await takeInput(handle, input.text, late)
     }
     // After the tool took it, so the line is never about a delivery that did not happen; before the answer it starts
-    this.onEvent({ type: 'notice', sessionId, level: 'info', from: 'Centralu', label: 'mail', text: input.line })
+    this.onEvent({ type: 'notice', sessionId, level: 'info', from: 'Centralu', label: input.label ?? 'mail', text: input.line })
   }
 
   /**

@@ -383,6 +383,12 @@ export const HostActivity = z.object({
   background: z.number().int().default(0),
   terminals: z.number().int().default(0),
   commandRuns: z.number().int().default(0),
+  /**
+   * The ids of the live sessions in a turn (working, or waiting on an approval or a question): the turns a stop ends, which
+   * a hub's update has the next host continue (#1618). Additive: a host from before it says nothing, and the hub then
+   * reads them from `host.sessions`
+   */
+  inTurn: z.array(z.string()).optional(),
 })
 export type HostActivity = z.infer<typeof HostActivity>
 

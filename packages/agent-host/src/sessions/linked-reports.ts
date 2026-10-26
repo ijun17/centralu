@@ -18,6 +18,11 @@ export type ReportWork =
   | { tookOver: true; paused: readonly BackgroundTask[] }
   /** Its turn ended while threads it handed on are still going (§6): the work is paused on them, and the report stays owed */
   | { waitingOn: number }
+  /**
+   * An update of Centralu on its machine cut its turn, and the next host continued it (#1618): not its end. `owed`: the report
+   * is still owed, and the continued turn's end is it
+   */
+  | { resumed: true; owed: boolean }
 
 /**
  * What the linked machines' reports reach (#428): the manager's members they read, with getters for its fields, so

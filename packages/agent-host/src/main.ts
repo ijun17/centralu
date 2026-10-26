@@ -64,7 +64,7 @@ import { stopGitChildren } from './dev-services/git-exec.js'
 import { Gate } from './lifecycle/gate.js'
 import { Shutdown, signalMode, stopPlan } from './lifecycle/shutdown.js'
 import { crashRecorder, holdSignals, wireEndings } from './lifecycle/endings.js'
-import { clearStoppedMark, markQuit } from './lifecycle/stopped-mark.js'
+import { clearStoppedMark, markQuit, takeUpdateResume } from './lifecycle/stopped-mark.js'
 import { bridgeAddress, ControlChannel, KEEPS_AGENTS_ACROSS_SWAP, onDrain, standby, viewPort } from './swap-control.js'
 import { installScript, remoteRuntime } from './links/install.js'
 import { Links } from './links/links.js'
@@ -287,6 +287,8 @@ process.on('exit', ownership.release)
 // A host starting here is the person's start again: a linked hub may start one by itself once this one is gone (#1143).
 // A host in memory has no data folder to say it in
 if (dbPath !== ':memory:') clearStoppedMark(dirname(dbPath))
+// The turns a linked hub's update ended when it stopped the host before this one (#1618): taken once, continued once
+const cutByUpdate = dbPath === ':memory:' ? new Set<string>() : takeUpdateResume(dirname(dbPath))
 
 start.at('hold signals')
 const signals = holdSignals(process, (line) => console.error(line))
@@ -351,7 +353,7 @@ const mgr = new SessionManager(
   (sessionId) => bridgeAddress(launch.frontDoor, port, token, sessionId),
   // Worktrees are created next to the data folder — dev and the packaged app never touch each other's worktrees
   join(dirname(dbPath), 'worktrees'),
-  held ? { processes: held.processes, keptSessions: held.kept.sessionIds } : {},
+  held ? { processes: held.processes, keptSessions: held.kept.sessionIds, cutByUpdate } : { cutByUpdate },
 )
 // A new project's default home is this machine's ~/Centralu (#515); wired here, never in tests
 mgr.useProjectsHome(() => projectsHome())

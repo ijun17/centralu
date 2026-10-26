@@ -20,6 +20,7 @@ import { NodeTooOld } from './node-floor.js'
 import { readHoldCommand } from './swap-hold.js'
 import { storeMirror, storeRegistry } from './stored.js'
 import { ScriptedAdapter, scriptedAdapters } from './scripted-agent.test-helpers.js'
+import { activityCounts } from '../idle.js'
 import { SLOW, eventually } from '../../../../tooling/test-timing.js'
 
 /** The version the hub and its hosts are in these tests: a source tree carries the placeholder 0.0.0-dev (#1501), older than every release */
@@ -69,10 +70,12 @@ async function remoteHost(
     handover?: () => { state: 'waiting' | 'gave_up'; since: number } | null
     /** What happens on the host before it listens: no hub can see it yet */
     beforeListen?: (mgr: SessionManager) => Promise<void>
+    /** The sessions a hub's update listed as in a turn when it stopped the host before this one (#1618, update-resume.json) */
+    cutByUpdate?: ReadonlySet<string>
   } = {},
 ) {
   const adapters = scriptedAdapters({ immediate: o.immediate, queueBehind: o.queueBehind, holdNext: o.holdNext })
-  const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
+  const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e), undefined, undefined, o.cutByUpdate ? { cutByUpdate: o.cutByUpdate } : {})
   const server: HostServer = new HostServer({
     port,
     token: TOKEN,
@@ -1423,6 +1426,13 @@ describe('machines.update through the link (#82, plan §10.5)', () => {
  */
 describe('machines.update waits for the sessions there to finish (#1399)', () => {
   const NODE = '24.21.0'
+  /** The JSON a step of `remote-install.mjs` is run with, as the command carries it; null for any other command */
+  const updatePayload = (cmd: string): { action?: string; activate?: boolean; resume?: string[] } | null => {
+    const b64 = /^printf %s (\S+) \|/.exec(cmd)?.[1]
+    const script = b64 ? Buffer.from(b64, 'base64').toString('utf8') : ''
+    const arg = /"\$f" "([A-Za-z0-9+/=]+)"/.exec(script)?.[1]
+    return arg ? (JSON.parse(Buffer.from(arg, 'base64').toString('utf8')) as { action?: string; activate?: boolean; resume?: string[] }) : null
+  }
   const classifyUpdate = (cmd: string): string => {
     if (cmd.includes('serve --stop')) return 'stop'
     if (cmd.includes('serve --autostart')) return 'autostart'
@@ -1431,18 +1441,28 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
     if (script.includes('CENTRALU-PREFLIGHT')) return 'preflight'
     if (script.includes('say node ok')) return 'node'
     if (script.includes('host.log')) return 'tail'
-    const arg = /"\$f" "([A-Za-z0-9+/=]+)"/.exec(script)?.[1]
-    const p = arg ? (JSON.parse(Buffer.from(arg, 'base64').toString('utf8')) as { action?: string; activate?: boolean }) : null
+    const p = updatePayload(cmd)
     return p?.action ?? (p?.activate === false ? 'install_beside' : 'install')
   }
 
   /** A hub with a remote whose sessions are in a turn (`activity`, changed by the test), recording what ran there */
-  async function waiting(o: { noActivity?: boolean; script?: (Partial<HostActivity> | 'fail')[]; fails?: boolean; deps?: Partial<LinkDeps>; old?: string; gate?: Promise<void> } = {}) {
+  async function waiting(
+    o: {
+      noActivity?: boolean
+      script?: (Partial<HostActivity> | 'fail')[]
+      fails?: boolean
+      deps?: Partial<LinkDeps>
+      old?: string
+      gate?: Promise<void>
+      /** The ids `host.activity` names as in a turn (#1618); absent, it names none, as a host from before them does */
+      inTurn?: string[]
+    } = {},
+  ) {
     /** The version the machine runs before the update */
     const was = o.old ?? '0.0.1'
     const reg = await fakeRegistry(['centralu', '@centralu/linux-x64'].map((name) => ({ name, version: RELEASE, files: { 'package.json': '{}' } })))
     cleanups.push(() => reg.close())
-    const activity: HostActivity = { working: 2, approvals: 1, questions: 0, background: 0, terminals: 1, commandRuns: 0 }
+    const activity: HostActivity = { working: 2, approvals: 1, questions: 0, background: 0, terminals: 1, commandRuns: 0, ...(o.inTurn ? { inTurn: o.inTurn } : {}) }
     /** How many times the remote was asked what runs, and how many when the host was stopped */
     let reads = 0
     let readsAtStop = -1
@@ -1456,6 +1476,8 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
     let running = await remoteHost(0, new Store(), { version: was, ...(o.noActivity ? {} : { activity: asked }) })
     let line = lineFor(running.port, { version: was })
     const runs: string[] = []
+    /** What each pointers step was given to write for the next host: the sessions whose turns the stop ended (#1618) */
+    const resumes: (string[] | null)[] = []
     const old = { version: was, node: NODE }
     const next = { version: RELEASE, node: NODE }
     const done = (x: unknown) => `CENTRALU-INSTALL done ${JSON.stringify(x)}\n`
@@ -1477,6 +1499,7 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
           line = { ...line, hostRunning: false }
           return out('{"v":1,"stop":{"ok":true,"wasRunning":true,"how":"asked"}}\n')
         case 'pointers':
+          resumes.push(updatePayload(cmd)?.resume ?? null)
           return out(done({ current: next, previous: old }))
         case 'prune':
           return out(done({ current: next, previous: old, removed: [], left: [] }))
@@ -1501,7 +1524,19 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
         .events()
         .filter((e) => e.type === 'machine_status' && e.machine.operation)
         .map((e) => e.machine.operation.step as string)
-    return { hub, u, runs, activity, idle, stepsSeen, ran: () => runs.filter((k) => k !== 'open'), readsAtStop: () => readsAtStop, breakReads: (on: boolean) => (broken = on) }
+    return {
+      hub,
+      u,
+      runs,
+      activity,
+      idle,
+      stepsSeen,
+      resumes,
+      remote: () => running,
+      ran: () => runs.filter((k) => k !== 'open'),
+      readsAtStop: () => readsAtStop,
+      breakReads: (on: boolean) => (broken = on),
+    }
   }
 
   it('installs beside, then waits while sessions are in a turn, and stops the host only once none is', async () => {
@@ -1561,12 +1596,14 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
     expect(ran()).toContain('stop')
   })
 
-  it('stops the turns at once when the person chose it, and says how many it ended', async () => {
-    const { u, ran, stepsSeen } = await waiting()
+  it('stops the turns at once when the person chose it, says how many it ended, and has the next host continue them (#1618)', async () => {
+    const { u, ran, stepsSeen, activity, resumes } = await waiting()
+    activity.inTurn = ['s-a', 's-b', 's-c']
     const r = await u.call('machines.update', { machineId: 'm1', when: 'now' })
     expect(ran()).toEqual(['preflight', 'node', 'install_beside', 'stop', 'pointers', 'start', 'prune'])
     expect(stepsSeen()).not.toContain('wait_idle')
-    expect(r.note).toMatch(/Updating stopped Centralu on Remote box with 3 sessions in a turn; they resume on the new version, and a turn in progress was lost/)
+    expect(r.note).toMatch(/Updating stopped Centralu on Remote box with 3 sessions in a turn; Centralu continues each of those turns on the new version, and 1 open terminal or project command there closed/)
+    expect(resumes).toEqual([['s-a', 's-b', 's-c']])
   })
 
   it('a forced update of a machine with nothing in a turn says nothing was stopped', async () => {
@@ -1642,7 +1679,8 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
   /*
    * #1508 (owner, 2026-10-24): with the hub's automatic updates on, a linked machine on an older release follows the hub's version
    * with no one's click. The hub finds it older when the link connects (also after the hub's own update, when its new host links
-   * again), and runs the same idle update the person's Update does: the turns there are waited for and never cut.
+   * again). #1618 (owner, 2026-10-26): it no longer waits for what runs there, since a machine always busy never updated (two
+   * machines held for hours, #1614). It stops the host at once, and the host it starts continues the turns that stop ended.
    */
   describe("follows the hub's version while automatic updates are on (#1508)", () => {
     const auto = (on = true) => {
@@ -1652,19 +1690,19 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
     /** An older release of the hub's own channel: versions of two channels are never ranked, so none is older */
     const OLDER = RELEASE.includes('-') ? RELEASE.replace(/\d+$/, '0') : '0.0.1'
 
-    it('starts an idle update by itself once it finds the machine older, waits for the turns there, then switches', async () => {
+    it('starts an update by itself once it finds the machine older, stops the turns and terminals there at once, and has the next host continue the turns', async () => {
       const a = auto()
-      const { hub, ran, idle, stepsSeen, activity } = await waiting({ deps: a.deps, old: a.old })
-      expect(hub.links.followsHub('m1')).toBe(true)
-      await eventually(() => stepsSeen().includes('wait_idle'))
-      await new Promise((r) => setTimeout(r, 200))
-      // Sessions are in a turn there: nothing was stopped
-      expect(ran()).toEqual(['preflight', 'node', 'install_beside'])
-      idle()
-      // Nothing it would stop is open there either: no turn, no terminal, no command (#1508 review)
-      Object.assign(activity, { terminals: 0, commandRuns: 0 })
+      const logs: string[] = []
+      const { hub, ran, stepsSeen, activity, resumes } = await waiting({ deps: { ...a.deps, log: (l: string) => logs.push(l) }, old: a.old, inTurn: ['s-1', 's-2'] })
+      // Sessions are in a turn there and a terminal is open: it goes on all the same (it started at the connect, nothing waits)
+      expect(activity).toMatchObject({ working: 2, approvals: 1, terminals: 1 })
       await eventually(() => ran().includes('prune'))
       expect(ran()).toEqual(['preflight', 'node', 'install_beside', 'stop', 'pointers', 'start', 'prune'])
+      expect(stepsSeen()).not.toContain('wait_idle')
+      expect(stepsSeen()).not.toContain('wait_open')
+      // The sessions in a turn when it stopped the host, for the host it started to continue
+      expect(resumes).toEqual([['s-1', 's-2']])
+      expect(logs.join('\n')).toMatch(/Updating stopped Centralu on Remote box with 3 sessions in a turn; Centralu continues each of those turns on the new version, and 1 open terminal or project command there closed/)
       await eventually(() => hub.links.list()[0]!.versions?.remote.version === RELEASE && status(hub) === 'connected')
       // On the hub's version now: no more catch-up, and nothing runs again on the next connect
       expect(hub.links.followsHub('m1')).toBe(false)
@@ -1693,17 +1731,6 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
       await eventually(() => ran().includes('prune'))
     })
 
-    it('gives up before stopping anything when automatic updates go off while it waits', async () => {
-      const a = auto()
-      const { hub, ran, stepsSeen } = await waiting({ deps: a.deps, old: a.old })
-      await eventually(() => stepsSeen().includes('wait_idle'))
-      a.state.on = false
-      await eventually(() => hub.links.list()[0]!.followHub?.failed !== undefined)
-      expect(hub.links.list()[0]!.followHub?.failed).toMatch(/Automatic updates went off, or this computer began switching to another build, while the update of Remote box waited; nothing was switched/)
-      expect(ran()).not.toContain('stop')
-      expect(hub.links.list()[0]!.operation).toBeNull()
-    })
-
     it('never stops a host it cannot ask what runs, nor installs there; it tries once more later, then leaves it to the person', async () => {
       const a = auto()
       const { hub, ran } = await waiting({ noActivity: true, deps: a.deps, old: a.old })
@@ -1718,73 +1745,31 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
       expect(hub.links.followsHub('m1')).toBe(false)
     })
 
-    // #1508 review: the person's Update stops terminals and commands knowingly; one nobody approved waits for them, bounded
-    it('waits for terminals and commands there too, then gives up without closing any, and is spent after its retry', async () => {
-      const a = auto()
-      const { hub, ran, idle, activity } = await waiting({ deps: { ...a.deps, openWorkWaitMs: 200 }, old: a.old })
-      idle()
-      Object.assign(activity, { terminals: 2, commandRuns: 1 })
-      await eventually(() => hub.links.list()[0]!.followHub?.retryAt != null)
-      expect(hub.links.list()[0]!.followHub?.failed).toMatch(/Terminals or project commands stayed open on Remote box/)
-      await eventually(() => ran().filter((k) => k === 'install_beside').length === 2 && hub.links.list()[0]!.operation === null && hub.links.list()[0]!.followHub?.retryAt === null)
-      expect(ran()).not.toContain('stop')
-      expect(hub.links.followsHub('m1')).toBe(false)
-      // Two failures spent it: a reconnect starts nothing
-      hub.links.reconnect('m1')
-      await eventually(() => status(hub) === 'connected')
-      await new Promise((r) => setTimeout(r, 300))
-      expect(ran().filter((k) => k === 'install_beside')).toHaveLength(2)
-    })
-
-    // #1579: a turn now and then must not restart the clock of a terminal that stays open
-    it('gives up on an open terminal after the limit although a session takes a short turn every few minutes', async () => {
-      const a = auto()
-      let t = 0
-      const { hub, ran, idle, activity } = await waiting({ deps: { ...a.deps, followRetryMs: 60_000, now: () => t }, old: a.old })
-      idle()
-      Object.assign(activity, { terminals: 1, commandRuns: 0 })
-      // Every reading, five minutes later by the injected clock: a turn on every other one
-      let turn = false
-      const tick = setInterval(() => {
-        t += 5 * 60_000
-        turn = !turn
-        Object.assign(activity, { working: turn ? 1 : 0 })
-      }, 30)
-      try {
-        await eventually(() => hub.links.list()[0]!.followHub?.retryAt != null)
-      } finally {
-        clearInterval(tick)
-      }
-      expect(hub.links.list()[0]!.followHub?.failed).toMatch(/Terminals or project commands stayed open on Remote box/)
-      expect(ran()).not.toContain('stop')
-    })
-
-    it('names what holds the update on the row and in the log: sessions in a turn, or terminals and commands, with how many', async () => {
-      const a = auto()
-      const logs: string[] = []
-      const { hub, idle, activity } = await waiting({ deps: { ...a.deps, followRetryMs: 60_000, log: (l: string) => logs.push(l) }, old: a.old })
-      const op = () => hub.links.list()[0]!.operation
-      // A session in a turn holds it, though a terminal is open too: it is named first
-      Object.assign(activity, { working: 2, approvals: 0, questions: 0, background: 0, terminals: 1, commandRuns: 1 })
-      await eventually(() => op()?.step === 'wait_idle' && op()?.count === 2)
-      expect(logs.join('\n')).toMatch(/the update waits for 2 sessions in a turn/)
-      idle()
-      await eventually(() => op()?.step === 'wait_open' && op()?.count === 2)
-      expect(logs.join('\n')).toMatch(/the update waits for 2 open terminals and project commands/)
-      expect(logs.filter((l) => l.includes('open terminals and project commands')).join('\n')).not.toMatch(/sessions in a turn/)
+    // #1618: the hub's own update reads the turns from the sessions' states on a machine whose host.activity does not name them
+    it('reads the sessions in a turn from their states where the machine does not name them', async () => {
+      const a = auto(false)
+      const { hub, ran, resumes, remote } = await waiting({ deps: a.deps, old: a.old })
+      // A real session there waiting on an approval: in a turn, as host.sessions says
+      const project = await remote().mgr.addProject(mkdtempSync(join(tmpdir(), 'cc-1618-')))
+      const s = await remote().mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
+      await remote().mgr.send(s.id, 'approve this')
+      await eventually(() => remote().mgr.listSessions().find((x) => x.id === s.id)?.state === 'waiting_approval')
+      a.state.on = true
+      hub.links.followHub()
+      await eventually(() => ran().includes('prune'))
+      expect(resumes).toEqual([[s.id]])
     })
 
     it('starts nothing at a reconnect while its retry waits for its time', async () => {
       const a = auto()
-      const { hub, ran, idle, activity } = await waiting({ deps: { ...a.deps, followRetryMs: 60_000, openWorkWaitMs: 100 }, old: a.old })
-      idle()
-      Object.assign(activity, { terminals: 1 })
+      // What runs there cannot be read: the hub's own update fails before it installs anything, and sets its retry
+      const { hub, ran } = await waiting({ deps: { ...a.deps, followRetryMs: 60_000 }, old: a.old, fails: true })
       await eventually(() => hub.links.list()[0]!.followHub?.retryAt != null)
-      expect(ran().filter((k) => k === 'install_beside')).toHaveLength(1)
+      expect(ran()).toEqual([])
       hub.links.reconnect('m1')
       await eventually(() => status(hub) === 'connected')
       await new Promise((r) => setTimeout(r, 300))
-      expect(ran().filter((k) => k === 'install_beside')).toHaveLength(1)
+      expect(ran()).toEqual([])
     })
 
     it('runs a retry that came due while another operation held the machine, once that one ends', async () => {
@@ -1815,22 +1800,6 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
       expect(ran()).toContain('stop')
     })
 
-    // #1508 re-review: an agent's card-less update counts against the version as the hub's own does, so a cancel spends it
-    it("spends the version when the person cancels an agent's card-less update, so the agent cannot start it again unasked", async () => {
-      const a = auto(false)
-      const { hub, u, ran, stepsSeen } = await waiting({ deps: a.deps, old: a.old })
-      a.state.on = true
-      expect(hub.links.followsHub('m1')).toBe(true)
-      const agents = hub.links.update('m1', { when: 'idle', unasked: true })
-      const failed = expect(agents).rejects.toThrow(/was cancelled while it waited/)
-      await eventually(() => stepsSeen().includes('wait_idle'))
-      await u.call('machines.cancelUpdate', { machineId: 'm1' })
-      await failed
-      expect(hub.links.followsHub('m1')).toBe(false)
-      expect(hub.links.list()[0]!.followHub ?? null).toBeNull()
-      expect(ran()).not.toContain('stop')
-    })
-
     it('tries the read of what runs again before it gives up on installing, as the wait does', async () => {
       const a = auto(false)
       const { hub, ran, idle, activity, breakReads } = await waiting({ deps: a.deps, old: a.old })
@@ -1846,38 +1815,20 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
       expect(ran()).toContain('stop')
     })
 
-    it("is not tried again once the person cancelled the hub's own update", async () => {
-      const a = auto()
-      const { hub, u, ran, stepsSeen } = await waiting({ deps: a.deps, old: a.old })
-      await eventually(() => stepsSeen().includes('wait_idle'))
-      await u.call('machines.cancelUpdate', { machineId: 'm1' })
-      await eventually(() => hub.links.list()[0]!.operation === null)
-      await new Promise((r) => setTimeout(r, 400))
-      expect(ran().filter((k) => k === 'install_beside')).toHaveLength(1)
-      // Nor restarted by an agent without a card (#1508 review)
-      expect(hub.links.followsHub('m1')).toBe(false)
-      // The person's own choice: the row shows no failure for it
-      expect(hub.links.list()[0]!.followHub ?? null).toBeNull()
-    })
-
-    // #1508 review: a retry that comes due while the machine is busy runs once that ends, and a note goes once the machine is up
     it("runs a retry that came due while the person's update ran, and drops the failure once the machine is on the hub's version", async () => {
       const a = auto()
       a.deps.followRetryMs = 100
-      const { hub, u, ran, stepsSeen, idle } = await waiting({ deps: a.deps, old: a.old })
-      await eventually(() => stepsSeen().includes('wait_idle'))
-      // The hub's first try ends (automatic updates off for a moment), with a retry set
-      a.state.on = false
+      // What runs there cannot be read at first: the hub's first try fails, with a retry set
+      const { hub, u, ran, breakReads } = await waiting({ deps: a.deps, old: a.old, fails: true })
       await eventually(() => hub.links.list()[0]!.followHub?.retryAt != null)
-      a.state.on = true
+      breakReads(false)
       // The person's own update holds the machine past the retry's time: it then succeeds, and the retry finds nothing to do
-      const mine = u.call('machines.update', { machineId: 'm1' })
+      const mine = u.call('machines.update', { machineId: 'm1', when: 'now' })
       await new Promise((r) => setTimeout(r, 250))
-      idle()
       await mine
       await eventually(() => hub.links.list()[0]!.versions?.remote.version === RELEASE)
       expect(hub.links.list()[0]!.followHub ?? null).toBeNull()
-      expect(ran().filter((k) => k === 'install_beside')).toHaveLength(2)
+      expect(ran().filter((k) => k === 'install_beside')).toHaveLength(1)
     })
   })
 })
@@ -3337,6 +3288,105 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
     await hub.mgr.trashSession('h1')
     expect(records()).toEqual([])
     expect(remote.mgr.listSessions().some((s) => `m1.${s.id}` === r.sessionId)).toBe(true)
+  })
+
+  /*
+   * #1618, the case of 2026-10-26: the hub updated a linked machine at once with children in a turn there. Both turns ended, the
+   * parent heard the link drop and then a report of work "finished" that had not, and it had to send each child a note by hand
+   * to carry on. The hub's own update now goes at once by design, so the host it starts there continues each turn once, and the
+   * parent hears that the turn was cut and goes on, then the one report of the continued turn's end.
+   */
+  it("continues a child's turn that the hub's own update cut, once, and its parent hears it was cut and continued, then one report", async () => {
+    const NODE = '24.21.0'
+    const OLDER = RELEASE.includes('-') ? RELEASE.replace(/\d+$/, '0') : '0.0.1'
+    const reg = await fakeRegistry(['centralu', '@centralu/linux-x64'].map((name) => ({ name, version: RELEASE, files: { 'package.json': '{}' } })))
+    cleanups.push(() => reg.close())
+    const remoteStore = new Store()
+    remoteStore.projects.addProject({ id: 'p-app', path: checkout('git@github.com:me/app.git'), name: 'app-checkout' })
+    /** What the machine's host says runs there, from its own sessions, as main.ts counts it */
+    const activity = () => activityCounts({ sessions: running.mgr.listSessions(), terminals: 0, commandRuns: 0 })
+    let running = await remoteHost(0, remoteStore, { version: OLDER, activity })
+    let line = lineFor(running.port, { version: OLDER })
+    const old = { version: OLDER, node: NODE }
+    const next = { version: RELEASE, node: NODE }
+    /** The ids each pointers step was given for the next host, which it writes to update-resume.json there */
+    const resumes: string[][] = []
+    const runs: string[] = []
+    const done = (x: unknown) => ({ code: 0, stderr: '', stdout: `CENTRALU-INSTALL done ${JSON.stringify(x)}\n` })
+    const exec = async (cmd: string) => {
+      if (cmd.includes('serve --stop')) {
+        runs.push('stop')
+        // The host goes; its sessions' rows stay as they stood, a turn running included
+        await running.close()
+        line = { ...line, hostRunning: false }
+        return { code: 0, stderr: '', stdout: '{"v":1,"stop":{"ok":true,"wasRunning":true,"how":"asked"}}\n' }
+      }
+      const b64 = /^printf %s (\S+) \|/.exec(cmd)?.[1]
+      const script = b64 ? Buffer.from(b64, 'base64').toString('utf8') : ''
+      if (script.includes('CENTRALU-PREFLIGHT')) return { code: 0, stderr: '', stdout: 'CENTRALU-PREFLIGHT os=Linux arch=x86_64 glibc=2.39 musl=0 freeKb=99999999 tar=1 gzip=1 fetch=curl sha=sha256sum\n' }
+      if (script.includes('say node ok')) return { code: 0, stderr: '', stdout: 'CENTRALU-INSTALL node ok\n' }
+      const arg = /"\$f" "([A-Za-z0-9+/=]+)"/.exec(script)?.[1]
+      const p = arg ? (JSON.parse(Buffer.from(arg, 'base64').toString('utf8')) as { action?: string; activate?: boolean; resume?: string[] }) : null
+      runs.push(p?.action ?? (p?.activate === false ? 'install_beside' : 'other'))
+      if (p?.activate === false) return done({ installed: next, current: old, previous: null, removed: [], left: [] })
+      if (p?.action === 'pointers') {
+        resumes.push(p.resume ?? [])
+        return done({ current: next, previous: old })
+      }
+      if (p?.action === 'prune') return done({ current: next, previous: old, removed: [], left: [] })
+      return { code: 0, stderr: '', stdout: '' }
+    }
+    // The next host starts in the same data folder, and takes the file the pointers step wrote (lifecycle/update-resume.ts)
+    const startHost = async (): Promise<HostStart> => {
+      running = await remoteHost(0, remoteStore, { version: RELEASE, activity, cutByUpdate: new Set(resumes.at(-1) ?? []) })
+      line = { ...lineFor(running.port, { version: RELEASE }), install: { managed: true, current: next, previous: old, node: NODE } }
+      return { how: 'detached', note: null }
+    }
+    const tunnel = Object.assign(new DirectTunnel(() => line), { exec, startHost })
+    const installer = { runtime: () => ({ node: { version: NODE, archives: { 'linux-x64': { file: `node-v${NODE}-linux-x64.tar.gz`, sha256: 'a'.repeat(64) } } } }), script: () => '// the installer', registry: { registry: reg.url } }
+    const automatic = { on: false }
+    const hubStore = new Store()
+    hubStore.projects.addProject({ id: 'p-hub', path: checkout('https://github.com/me/app'), name: 'app' })
+    seedSession(hubStore, 'p-hub', 'h1', 'worker', 'ext-h1')
+    const hub = await hubHost(() => line, hubStore, true, { tunnelFor: () => tunnel, installer, checkMs: 3_000, activityPollMs: 40, autoUpdate: () => automatic.on })
+    await hub.mgr.setProjectTrusted('p-hub', true)
+    await eventually(() => status(hub) === 'connected')
+    const told = () => hub.store.messages.loadMessages('h1', 80).map((m) => (m.payload as { text?: string }).text ?? '').filter((t) => t.startsWith('[Centralu]'))
+
+    // The parent starts a child there on a long job, not waited on: its report is owed
+    const call = hub.mgr.startAgent('h1', { task: 'a long job: migrate the tests', machine: 'Remote box', wait: false })
+    await eventually(() => !!hub.mgr.listSessions().find((s) => s.id === 'h1')?.pendingApproval)
+    hub.mgr.respondApproval('h1', hub.mgr.listSessions().find((s) => s.id === 'h1')!.pendingApproval!.requestId, 'allow')
+    const r = await call
+    if (!r.ok) throw new Error(r.error)
+    const id = r.sessionId.slice('m1.'.length)
+    await eventually(() => running.mgr.listSessions().find((s) => s.id === id)?.state === 'working')
+
+    // Automatic updates go on: the hub follows its own version there at once, the child mid-turn
+    automatic.on = true
+    hub.links.followHub()
+    await eventually(() => runs.includes('prune'))
+    expect(runs).toEqual(['install_beside', 'stop', 'pointers', 'prune'])
+    expect(resumes).toEqual([[id]])
+
+    // The new host continued the child's turn once, through Centralu's channel: it runs there again
+    const continuedThere = () => running.store.messages.loadMessages(id, 50).map((m) => JSON.stringify(m.payload)).filter((l) => l.includes('Centralu continued it on the new version'))
+    await eventually(() => continuedThere().length === 1 && running.mgr.listSessions().find((s) => s.id === id)?.live === true)
+    expect(running.mgr.listSessions().find((s) => s.id === id)?.state).toBe('working')
+
+    // The parent hears once that the turn was cut and goes on: not that the link dropped, nor that the work ended
+    const continued = () => told().filter((t) => t.includes('cut the turn') && t.includes('Centralu continued it there on the new version'))
+    await eventually(() => continued().length === 1)
+    expect(told().filter((t) => t.includes('dropped'))).toEqual([])
+    expect(told().filter((t) => t.startsWith('[Centralu] The assigned work'))).toEqual([])
+
+    // The continued turn's end is the one report
+    const handle = (running.mgr as unknown as { handles: Map<string, { finish(text: string): void }> }).handles.get(id)!
+    handle.finish('Tests migrated.')
+    await eventually(() => told().some((t) => t.startsWith('[Centralu] The assigned work finished')))
+    expect(told().filter((t) => t.startsWith('[Centralu] The assigned work'))).toHaveLength(1)
+    expect(continued()).toHaveLength(1)
+    expect(continuedThere()).toHaveLength(1)
   })
 })
 

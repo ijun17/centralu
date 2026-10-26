@@ -90,10 +90,6 @@ export type LinkDeps = {
    * by itself (#1508, `LinkedMachine.followsHub`). Without it no machine follows, and every `machines.update` asks
    */
   autoUpdate?: () => boolean
-  /** For tests: how long an update nobody approved waits for terminals and commands there to close (30 minutes when absent, #1508) */
-  openWorkWaitMs?: number
-  /** For tests: the clock the wait for terminals and commands is measured with (`Date.now` when absent) */
-  now?: () => number
   /** For tests: how long after a failed update of its own the hub tries once more (10 minutes when absent, #1508) */
   followRetryMs?: number
   /** For tests: the client's options beyond url and token */

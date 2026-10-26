@@ -2,7 +2,7 @@
 // ssh and runs it on the pinned Node that step 1 placed; it never runs on the hub. It imports Node's
 // own modules only, and reads one argument: the base64 of a JSON object the hub wrote
 // ({ version, node, platform, hub, packages: [{ name, tarball, integrity }], activate? }), or for the
-// update's later steps ({ action: 'pointers', current, previous } and { action: 'prune' }; plan §10.5), or a dev
+// update's later steps ({ action: 'pointers', current, previous, resume? } and { action: 'prune' }; plan §10.5), or a dev
 // build of the host from a git commit in a working copy there ({ action: 'dev', repo, commit, … }; `pnpm remote-dev`, #1036)
 // and the copy of the store taken before it first runs ({ action: 'store-backup' | 'store-restore' }).
 //
@@ -354,6 +354,7 @@ export async function setPointers(p, { dataDir = process.env.CC_DATA_DIR || join
     const previous = pointerOf(p.previous)
     if (!current) {
       for (const f of [l.previous, l.current, launcherPath(l, platform)]) rmSync(f, { force: true })
+      writeResume(dataDir, p.resume)
       return { current: null, previous: null }
     }
     const dir = join(l.versions, current.version)
@@ -365,10 +366,26 @@ export async function setPointers(p, { dataDir = process.env.CC_DATA_DIR || join
     if (previous) writeAtomic(l.previous, `${previous.version} ${previous.node}\n`)
     else rmSync(l.previous, { force: true })
     writeAtomic(l.current, `${current.version} ${current.node}\n`)
+    writeResume(dataDir, p.resume)
     return { current, previous }
   } finally {
     unlock()
   }
+}
+
+/** The file the next host takes at its start (agent-host lifecycle/update-resume.ts, `UPDATE_RESUME_FILE`) */
+export const UPDATE_RESUME_FILE = 'update-resume.json'
+
+/**
+ * The sessions whose turns the update's stop ended (#1618), for the host that starts next to continue once. Stamped with
+ * this machine's clock, which that host reads it by, so a hub's clock that differs does not age it. Only ids: a list
+ * that is not one writes nothing, and the host continues nothing
+ */
+export function writeResume(dataDir, ids) {
+  if (!Array.isArray(ids)) return
+  const clean = ids.filter((id) => typeof id === 'string' && /^[0-9A-Za-z_.:-]{1,200}$/.test(id)).slice(0, 1000)
+  if (!clean.length) return
+  writeAtomic(join(dataDir, UPDATE_RESUME_FILE), `${JSON.stringify({ v: 1, at: Date.now(), ids: clean })}\n`)
 }
 
 /** Plan §10.5 step 6, on its own: what is neither `current` nor `previous` goes */

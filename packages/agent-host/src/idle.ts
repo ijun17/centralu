@@ -99,7 +99,9 @@ export function updateAtRest(i: { automatic: boolean; draining: boolean; activit
  */
 export function activityCounts(s: ActivitySnapshot): HostActivity {
   const c: HostActivity = { working: 0, approvals: 0, questions: 0, background: 0, terminals: s.terminals, commandRuns: s.commandRuns }
+  const ids: string[] = []
   for (const x of s.sessions) {
+    if (x.id !== undefined && turnCut(x)) ids.push(x.id)
     if (!sessionBusy(x)) continue
     // A question blocks the session as an approval does (waiting_approval), so its own list is read before the state
     if (x.pendingApproval) c.approvals++
@@ -108,7 +110,16 @@ export function activityCounts(s: ActivitySnapshot): HostActivity {
     else if (inTurn(x.state)) c.working++
     else c.background++
   }
-  return c
+  return { ...c, inTurn: ids }
+}
+
+/**
+ * Whether stopping the host now ends this session's turn (#1618): it is in a turn, working or waiting on an approval or a
+ * question. The next host's start finds it so with no process and resets it (`SessionManager`'s start): the one definition
+ * of a turn a stop cut. Background work alone is not a turn: nothing continues it, so it is not listed
+ */
+export function turnCut(s: IdleActivity): boolean {
+  return inTurn(s.state)
 }
 
 /**

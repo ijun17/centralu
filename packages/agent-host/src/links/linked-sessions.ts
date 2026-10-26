@@ -559,6 +559,11 @@ export function linkedSessions(
       return machineById(machineId)?.waitsForPerson === true
     },
 
+    cutByUpdate(sessionId) {
+      const at = splitQualified(sessionId)
+      return (at && machineById(at.machine)?.cutByUpdate?.(at.id)) ?? null
+    },
+
     async backgroundTasks(machineId) {
       const m = machineById(machineId)
       if (!m || !m.reachable) return null

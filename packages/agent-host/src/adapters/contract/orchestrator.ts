@@ -306,6 +306,11 @@ export type LinkedSessions = {
    */
   machineWaitsForPerson(machineId: string): boolean
   /**
+   * When an update of its machine stopped that machine's host while this session (qualified) was in a turn, which the host
+   * the update started continues (#1618): its caller is told the turn was cut and goes on. Null when it did not, or long ago
+   */
+  cutByUpdate?(sessionId: string): number | null
+  /**
    * Each session's background work as the machine lists it now (`sessions.list`, #723), ids qualified; null when the
    * machine cannot be asked. What the hub knows of that work is otherwise only the changes relayed since its link came up
    */

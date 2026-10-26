@@ -403,6 +403,26 @@ describe('remote-install.mjs: replacing a version folder and naming pointers', (
     await mod.setPointers({ ...p, previous: null }, { dataDir: dir, platform: 'linux' })
     expect(readFileSync(l.current, 'utf8')).toBe(`1.0.0 ${NODE_V}\n`)
   })
+
+  // #1618: the turns the update's stop ended, for the host that starts next (agent-host lifecycle/update-resume.ts)
+  it("writes the sessions whose turns the stop ended beside the pointers, stamped with this machine's clock, and nothing when there are none", async () => {
+    fresh()
+    mkdirSync(join(l.node, `v${NODE_V}`), { recursive: true })
+    mkdirSync(join(l.versions, '1.0.0'), { recursive: true })
+    writeFileSync(join(l.versions, '1.0.0', 'install.json'), '{}')
+    mkdirSync(l.bin, { recursive: true })
+    writeFileSync(join(l.bin, 'centralu'), '#!/bin/sh\n')
+    const file = join(dir, 'update-resume.json')
+    const p = { action: 'pointers', version: '1.0.0', node: NODE_V, current: { version: '1.0.0', node: NODE_V }, previous: null }
+    await mod.setPointers(p, { dataDir: dir, platform: 'linux' })
+    expect(existsSync(file)).toBe(false)
+    const before = Date.now()
+    // An id that is not one is left out: the file is read by a host, and holds ids only
+    await mod.setPointers({ ...p, resume: ['3f0c9a52-1b7e-4c1a-9f0e-8a2b6c4d5e6f', 'bad id; rm -rf ~', 7] }, { dataDir: dir, platform: 'linux' })
+    const written = JSON.parse(readFileSync(file, 'utf8')) as { v: number; at: number; ids: string[] }
+    expect(written).toMatchObject({ v: 1, ids: ['3f0c9a52-1b7e-4c1a-9f0e-8a2b6c4d5e6f'] })
+    expect(written.at).toBeGreaterThanOrEqual(before)
+  })
 })
 
 // A Linux remote, played by this machine's sh, uname and tar. Windows has none of them to be that remote; its counterpart,

@@ -64,6 +64,13 @@ export class RestartPolicy {
    */
   readonly restartAfterTurn = new Set<string>()
 
+  /**
+   * Sessions whose turn a linked hub's update cut, being woken to continue it (#1618, `continueCutTurns`): their new process
+   * keeps the turn's state as it comes up, as a re-attached one does, rather than settling idle, so a hub reading the machine
+   * between the wake and the note's turn does not read the cut turn as ended
+   */
+  readonly continuingTurns = new Set<string>()
+
   /** Input arriving after a note completes waits for its deferred process replacement, including disposal. */
   readonly deferredRestarts = new Map<string, Promise<void>>()
 
