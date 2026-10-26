@@ -2,7 +2,7 @@
  * `pnpm lint`: ESLint over the repository, with the type-aware findings that predate those rules allowed at their
  * per-file counts (tooling/lint-allowlist.ts says how).
  *
- *   pnpm lint                  fails on a finding the lists do not hold and on an eslint-disable of a type-aware rule;
+ *   pnpm lint                  fails on a finding the lists do not hold and on an eslint-disable of a type-aware rule or of test-env/data-dir or test-limits/scaled-by-slow;
  *                              a line above what its file holds, or for a file that is gone, is only reported
  *   pnpm lint:tighten          the same, after moving a renamed file's lines to its new path (renames since the merge
  *                              base with CC_LINT_BASE, origin/main by default) and lowering the lines to what the files hold
@@ -84,7 +84,7 @@ if (text) console.log(text)
 
 const left = results.flatMap((r) => r.messages.filter((m) => m.severity === 2))
 for (const d of disabled) {
-  console.log(`${d.file}:${d.line}: an eslint-disable comment hides ${d.rule}. Type-aware rules are not turned off in place (#1339): check the value instead.`)
+  console.log(`${d.file}:${d.line}: an eslint-disable comment hides ${d.rule}. This rule is not turned off in place (#1339, #1602): for a type-aware one check the value instead; for test-env/data-dir or test-limits/scaled-by-slow fix the test, or add the file with its reason to the rule's EXCEPTIONS.`)
 }
 for (const o of over) console.log(`${o.file}: ${o.count} findings of ${o.rule}, ${o.allowed} listed (${ALLOWLIST_DIR}/${listFileOf(packageOf(o.file))}).`)
 const stale = [...(flags.has('--tighten') ? readAllowlist(ROOT) : allow).keys()].filter((file) => !existsSync(join(ROOT, file)))
