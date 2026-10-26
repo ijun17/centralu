@@ -262,7 +262,7 @@ export class SessionTrash {
     const plan = heir ? this.host.mailHandOverPreview(sessionId, heir) : null
     const mail = heir && plan ? null : this.host.mailWork(sessionId)
     const listed = (list: { subject: string }[]) => list.slice(0, 3).map((x) => plainQuoted(x.subject, 60)).join(', ') + (list.length > 3 ? ', …' : '')
-    const threads = (n: number, what = 'unfinished mail thread') => (n === 1 ? `an ${what}` : `${n} ${what}s`)
+    const threads = (n: number, what = 'unfinished mail thread') => (n === 1 ? `${/^[aeiou]/.test(what) ? 'an' : 'a'} ${what}` : `${n} ${what}s`)
     if (heir && plan) {
       // Exactly what the move would do (#1574): what goes to the heir, and what stays to move on as before
       const goes = plan.moved

@@ -427,3 +427,48 @@ describe('mail the move cannot simply re-point (#1580 review)', () => {
     expect(notice && 'text' in notice ? notice.text : '').toContain('mail thread "X asks A"')
   })
 })
+
+describe('the re-check of the review fixes (#1580)', () => {
+  it('leaves nothing waiting for a restored original in a thread left behind for the heir to be assigned', async () => {
+    const h = host()
+    const { project, parent } = await parentOf(h)
+    const heir = await handOff(h, project, parent, false)
+    const work = openBy(h.mail, { by: at(h, parent), kind: 'assign', subject: 'A gives B work', body: 'do it', assignee: at(h, heir) }).thread
+    h.mail.post(work.id, at(h, heir), { kind: 'question', body: 'which branch?' })
+    await h.mgr.trashSession(parent)
+    expect(thread(work.id).owner).toBe(PERSON)
+    await h.mgr.restoreSession(parent)
+    expect(store.mail.pendingFor(at(h, parent), Date.now() + 10 * DEBOUNCE_MS).map((p) => p.thread.id)).not.toContain(work.id)
+  })
+
+  it('keeps the unread mail of a done thread with an original that stays', async () => {
+    const h = host()
+    const { project, parent } = await parentOf(h)
+    const child = await startChild(h, parent, 'long work')
+    const old = openBy(h.mail, { by: at(h, parent), kind: 'assign', subject: 'A gave C work by mail', body: 'do it', assignee: at(h, child) }).thread
+    h.mail.post(old.id, at(h, child), { kind: 'report', body: 'it is done' })
+    h.mail.update(old.id, PERSON, { state: 'done', outcome: 'finished' })
+    const heir = await handOff(h, project, parent, false)
+    expect(recipients(old.id, 'report')).toContain(at(h, parent))
+    expect(recipients(old.id, 'report')).not.toContain(at(h, heir))
+  })
+
+  it('previews a closed thread only when mail of it goes to the heir, and with the right article', async () => {
+    const h = host()
+    const { project, parent } = await parentOf(h)
+    const x = await session(h, project)
+    const heir = await handOff(h, project, parent, false)
+    h.mgr.rename(heir, 'Successor')
+    const own = openBy(h.mail, { by: at(h, parent), kind: 'question', subject: 'A asks B', body: 'what?', members: [at(h, heir)] }).thread
+    h.mail.post(own.id, at(h, heir), { kind: 'answer', body: 'this' })
+    // Closed by its owner, so the heir's answer is the only mail of it the original has not read
+    h.mail.update(own.id, at(h, parent), { state: 'done', outcome: 'finished' })
+    const fromX = openBy(h.mail, { by: at(h, parent), kind: 'question', subject: 'A asks X', body: 'what?', members: [at(h, x)] }).thread
+    h.mail.post(fromX.id, at(h, x), { kind: 'answer', body: 'that' })
+    h.mail.update(fromX.id, PERSON, { state: 'done', outcome: 'finished' })
+    const after = (await h.mgr.archiveIfAtRest(parent)) as { archived: false; asks: string[] }
+    expect(after.asks).toContain('It has unread mail in a closed mail thread ("A asks X"); that mail goes to "Successor".')
+    // The thread whose only unread mail is the heir's own answer is not counted
+    expect(after.asks.some((l) => l.includes('"A asks B"'))).toBe(false)
+  })
+})

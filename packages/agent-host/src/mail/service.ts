@@ -1086,9 +1086,13 @@ id: ${sessionIdOf(assignee)}` : ''
     const to = this.sessionAddress(toSessionId)
     return this.run(() => {
       const now = this.now()
-      return this.handOverPlan(from, to, which).map((p): HandedOverThread => {
+      const done = this.handOverPlan(from, to, which).map((p): HandedOverThread => {
         const { thread: t, role, kind } = p
-        if (kind === 'left') return { ...p, unread: 0 }
+        if (kind === 'left') {
+          // It moves on when the original goes, as `partyGone` says; what waits for the original in it is not to wake a restored one
+          this.records.handleUnread(t.id, from, now)
+          return { ...p, unread: 0 }
+        }
         if (kind === 'closed') {
           // A done thread keeps its owner and its history: the successor joins it to read what the original never did
           this.records.putParticipantIfAbsent(t.id, to, 'member', now)
@@ -1108,6 +1112,9 @@ id: ${sessionIdOf(assignee)}` : ''
         // (or the caller's poke) delivers it
         return { thread: after, role, kind, unread: this.records.moveUnreadReceipts(t.id, from, to, now) }
       })
+      // An original that goes leaves nothing waiting in a done thread either: what none of it moved (the successor's own words) is handled
+      if (which === 'all') for (const t of this.records.doneThreadsWithUnread(from)) this.records.handleUnread(t.id, from, now)
+      return done
     })
   }
 
@@ -1142,6 +1149,9 @@ id: ${sessionIdOf(assignee)}` : ''
       if (t.state === 'unknown') continue
       const role: ParticipantRole = t.owner === from ? 'owner' : t.assignee === from ? 'assignee' : 'member'
       if (assignees && !(role === 'owner' && t.assignee !== null && assignees.has(t.assignee))) continue
+      // A done thread's unread mail moves only from an original that goes: one that stays still owns it, and reads it there.
+      // Nor is a done thread listed whose unread mail would all stay (the successor's own words, or what it has already)
+      if (t.state === 'done' && (assignees || this.records.movableUnread(t.id, from, to) === 0)) continue
       const kind = t.state === 'done' ? 'closed' : (role === 'owner' && t.assignee === to) || (role === 'assignee' && t.owner === to) ? 'left' : 'moved'
       plan.push({ thread: t, role, kind })
     }

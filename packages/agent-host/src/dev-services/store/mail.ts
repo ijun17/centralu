@@ -463,7 +463,7 @@ export class MailRecords {
    * judged for the original's wakes) is let go, for the delivery to judge again for the successor; one the person settled
    * (`released`, `dismissed`) stays. Not moved, and handled for `from` instead: a receipt for a message `to` sent itself (nobody
    * is sent their own words), and one for a message `to` already has a receipt for (it keeps its own). So nothing of the
-   * original's stays waiting, and a restored original is not woken for mail of a thread it has left. Returns how many moved
+   * original's stays waiting (`handleUnread`), and a restored original is not woken for mail of a thread it has left. Returns how many moved
    */
   moveUnreadReceipts(threadId: string, from: string, to: string, now: number): number {
     const moved = this.db
@@ -475,6 +475,27 @@ export class MailRecords {
             AND message_id IN (SELECT id FROM mail_messages WHERE thread_id = @threadId AND sender <> @to)`,
       )
       .run({ threadId, from, to }).changes
+    this.handleUnread(threadId, from, now)
+    return moved
+  }
+
+  /** How many of `from`'s unread receipts in the thread `moveUnreadReceipts` would give `to`: not those of `to`'s own messages, nor those it has already */
+  movableUnread(threadId: string, from: string, to: string): number {
+    const row = this.db
+      .prepare<{ threadId: string; from: string; to: string }, { n: number }>(
+        `SELECT COUNT(*) AS n FROM mail_receipts r JOIN mail_messages m ON m.id = r.message_id
+          WHERE r.recipient = @from AND r.read_at IS NULL AND r.handled_at IS NULL AND m.thread_id = @threadId AND m.sender <> @to
+            AND NOT EXISTS (SELECT 1 FROM mail_receipts o WHERE o.message_id = r.message_id AND o.recipient = @to)`,
+      )
+      .get({ threadId, from, to })
+    return row?.n ?? 0
+  }
+
+  /**
+   * `from`'s receipts in a thread that are neither read nor handled are handled: a handoff's original left the thread, or is about to
+   * when it goes (§4.1), and nothing of it waits there, so a restored original is not woken for a thread it no longer holds
+   */
+  handleUnread(threadId: string, from: string, now: number): void {
     this.db
       .prepare(
         `UPDATE mail_receipts SET handled_at = @now
@@ -482,7 +503,6 @@ export class MailRecords {
             AND message_id IN (SELECT id FROM mail_messages WHERE thread_id = @threadId)`,
       )
       .run({ threadId, from, now })
-    return moved
   }
 
   /**
