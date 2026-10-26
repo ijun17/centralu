@@ -649,6 +649,17 @@ export class ChildOwnership {
     this.store.settings.deleteAppSetting(reportTurnKey(sessionId))
     return starter
   }
+  /**
+   * Whether the turn running is the paused work's continuing (#1576): the caller's report is held over the session's own
+   * background work, and the turn the tool started when that work ended is the work's (`turnStarted`, no message began
+   * it) with no person's message in it. That turn's end is the report the caller is owed, so it is the caller's too.
+   * The one place that says so, as `reportBackIfAwaited` reads the same turn for its report
+   */
+  continuesPause(sessionId: string, callerId: string): boolean {
+    if (this.reports.get(sessionId) !== callerId || !this.paused.has(sessionId)) return false
+    const starter = this.starters.get(sessionId)
+    return starter?.by === 'work' && !starter.wrote && !starter.added && !(this.pending.get(sessionId) ?? []).some((p) => p.by === 'person')
+  }
   /** Whose the session's last turn was (#1377): its last response is the person's answer when it was theirs */
   lastTurnBy(sessionId: string): 'person' | 'work' | undefined {
     return this.lastBy.get(sessionId)

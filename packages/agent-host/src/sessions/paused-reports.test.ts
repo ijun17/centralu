@@ -188,6 +188,44 @@ describe('a child that waits on its own background work (#721)', () => {
     expect(reportsTo(caller, child)[1]).toContain('PR #9 opened; verify passed.')
   })
 
+  // #1576: the turn the tool starts when the work ends continues the work the caller gave: a note goes in, as into the turn it gave
+  it('a note from the caller goes into the turn the child starts by itself when its work ends', async () => {
+    const { caller, child } = await started()
+    pauseOnVerify(child)
+    await w.until(() => reportsTo(caller, child).length === 1)
+    const h = handleOf(child)!
+    h.event({ type: 'background_tasks', sessionId: child, live: [], ended: [{ ...verify, status: 'completed' }] })
+    h.event({ type: 'state_change', sessionId: child, state: 'working' })
+    const before = h.sent.length
+    const r = await w.mgr.agentSession(caller, { sessionId: child, action: 'send', text: 'use staging', ifBusy: 'note' })
+    expect(r).toMatchObject({ ok: true })
+    expect(h.sent.slice(before).join(' ')).toContain('use staging')
+    // The turn's end is still the one report owed
+    h.answer('PR #9 opened; verify passed.')
+    await w.until(() => reportsTo(caller, child).length === 2)
+  })
+
+  it('a note is refused in a turn the person started after the pause, and once they write into the follow-up turn', async () => {
+    const { caller, child } = await started()
+    pauseOnVerify(child)
+    await w.until(() => reportsTo(caller, child).length === 1)
+    const h = handleOf(child)!
+    // Their turn, begun at rest by their message
+    await w.mgr.send(child, 'how is it going?')
+    const mine = await w.mgr.agentSession(caller, { sessionId: child, action: 'send', text: 'use staging', ifBusy: 'note' })
+    expect(mine).toMatchObject({ ok: false, error: expect.stringContaining('No note to') })
+    h.answer('Still waiting for verify.')
+    await settle()
+    // The work's turn, then their message into it: the turn is no longer the caller's alone to add to
+    h.event({ type: 'background_tasks', sessionId: child, live: [], ended: [{ ...verify, status: 'completed' }] })
+    h.event({ type: 'state_change', sessionId: child, state: 'working' })
+    await w.mgr.send(child, 'also the lint please')
+    const before = h.sent.length
+    const typed = await w.mgr.agentSession(caller, { sessionId: child, action: 'send', text: 'use staging', ifBusy: 'note' })
+    expect(typed).toMatchObject({ ok: false })
+    expect(h.sent.slice(before).join(' ')).not.toContain('use staging')
+  })
+
   it('a caller waiting on the child reads the paused answer, told that the final report will follow', async () => {
     const caller = await w.callerSession()
     const waiting = w.mgr.startAgent(caller, { task: 'fix it' })
