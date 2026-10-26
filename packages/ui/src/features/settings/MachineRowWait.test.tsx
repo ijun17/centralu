@@ -34,7 +34,7 @@ function row(operation: MachineInfo['operation']): string {
 describe('the row of an update that waits', () => {
   it('says what holds it and offers Cancel, also while only open terminals do', () => {
     const open = row({ kind: 'update', step: 'wait_open', target: '0.2.0', at: 1, count: 2 })
-    expect(open).toContain('Updating to 0.2.0: waiting for 2 open terminals there (Update now closes them)…')
+    expect(open).toContain('Updating to 0.2.0: waiting for 2 open terminals or commands there (Cancel, then Update, closes them)…')
     expect(open).toContain('data-testid="machine-update-cancel-box"')
     const turns = row({ kind: 'update', step: 'wait_idle', target: '0.2.0', at: 1, count: 1 })
     expect(turns).toContain('waiting for 1 session in a turn…')

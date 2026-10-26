@@ -319,7 +319,7 @@ export function operationNote(m: Pick<MachineInfo, 'operation'>): string | null 
           : 'Removing Centralu'
   // What holds an update that waits, and how many (#1579); a host that sent no count gets the plain step text
   if (o.step === 'wait_idle' && o.count !== undefined) return `${what}: waiting for ${count(o.count, 'session', 'sessions')} in a turn…`
-  if (o.step === 'wait_open' && o.count !== undefined) return `${what}: waiting for ${count(o.count, 'open terminal', 'open terminals')} there (Update now closes them)…`
+  if (o.step === 'wait_open' && o.count !== undefined) return `${what}: waiting for ${o.count === 1 ? '1 open terminal or command there (Cancel, then Update, closes it)' : `${o.count} open terminals or commands there (Cancel, then Update, closes them)`}…`
   return `${what}: ${STEP_TEXT[o.step] ?? o.step}…`
 }
 
