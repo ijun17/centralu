@@ -198,6 +198,8 @@ export class RemoteAgents {
   private readonly whose = new Map<string, Whose>()
   /** What made a turn another's, when it is told (#1576): a message from another session of this hub, else it is read as the person's */
   private readonly otherBy = new Map<string, 'session'>()
+  /** Notes sent into a running turn whose record has not come back yet (memory only): two quick notes both are the caller's own */
+  private readonly notesSent = new Map<string, string[]>()
   /** Children an instruction is on its way to: its own send's answer says what came of it, and the machine is not read meanwhile */
   private readonly pending = new Set<string>()
   /** Children whose turn's end the linked reports held back while whose the turn was could not be told (`reportGate`) */
@@ -609,8 +611,13 @@ export class RemoteAgents {
           // Kept before it goes, as the machine records it before it answers: its record tells the turn that took it
           const framed = agentNoteFrame(label, text)
           this.sentNow(rec.sessionId, framed)
+          this.notesSent.set(rec.sessionId, [...(this.notesSent.get(rec.sessionId) ?? []), framed])
           const sent = await reader.send(rec.sessionId, framed, label, { depth: depthOf(this.host, callerId) + 1 })
-          if (!sent.ok) return { ok: false, error: `Could not send to "${rec.name}" on ${rec.machine}: ${bare(sent.error)}.` }
+          if (!sent.ok) {
+            const at = (this.notesSent.get(rec.sessionId) ?? []).lastIndexOf(framed)
+            if (at >= 0) this.notesSent.set(rec.sessionId, (this.notesSent.get(rec.sessionId) ?? []).filter((_, i) => i !== at))
+            return { ok: false, error: `Could not send to "${rec.name}" on ${rec.machine}: ${bare(sent.error)}.` }
+          }
           // Taken while the turn was still the caller's, it is part of that turn; otherwise the gate has closed on it
           return this.gateNow(rec).live ? this.working(rec, this.reportArmed(rec) || this.waits.has(rec.sessionId)) : this.wentElsewhere(rec)
         }
@@ -622,6 +629,7 @@ export class RemoteAgents {
         // A new turn: its cards are new cards (#676), and whose it is, the machine's record of this instruction says
         const framed = agentNoteFrame(label, text)
         this.save(this.records().map((r) => (r.sessionId === rec.sessionId ? { ...r, turn: randomUUID(), sent: framed } : r)))
+        this.notesSent.delete(rec.sessionId)
         this.whose.set(rec.sessionId, 'unknown')
         this.pending.add(rec.sessionId)
         this.host.children.setLinkedReport(rec.sessionId, { orchestratorId: callerId, busy: false })
@@ -880,7 +888,16 @@ export class RemoteAgents {
       if (e.seq <= (this.lastSeq.get(sessionId) ?? -1)) return
       this.lastSeq.set(sessionId, e.seq)
     }
+    const own = this.notesSent.get(sessionId) ?? []
+    const earlier = typeof e.text === 'string' && e.text !== rec.sent ? own.indexOf(e.text) : -1
+    if (earlier >= 0 && this.fromHubHere(rec, e.from)) {
+      // An earlier note of the caller's own, its record arriving after a later note was kept as the last sent
+      this.notesSent.set(sessionId, own.filter((_, i) => i !== earlier))
+      if (this.whoseOf(rec) === 'caller' && this.gateNow(rec).live) return
+    }
     if (this.fromHubHere(rec, e.from) && e.text === rec.sent) {
+      const at = own.indexOf(rec.sent ?? '')
+      if (at >= 0) this.notesSent.set(sessionId, own.filter((_, i) => i !== at))
       // A note into the caller's own running turn stays in it
       if (this.whoseOf(rec) === 'caller' && this.gateNow(rec).live) return
       if (this.busy.has(sessionId)) return this.setWhose(rec, 'other', 'took what you sent as a message into a turn already running there that you did not give it (the person\'s, most likely)')
@@ -1230,6 +1247,7 @@ export class RemoteAgents {
     this.toldDown.delete(sessionId)
     this.whose.delete(sessionId)
     this.otherBy.delete(sessionId)
+    this.notesSent.delete(sessionId)
     this.pending.delete(sessionId)
     this.deferred.delete(sessionId)
     this.busy.delete(sessionId)

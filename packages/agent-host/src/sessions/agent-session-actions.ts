@@ -241,7 +241,8 @@ export class AgentSessionActions {
              */
             const own = observing || continuing ? this.flow.observeTurn(child, true, true) : undefined
             if (own) void own.run.wait.done.then(own.release, own.release)
-            const record = own ? { run: own.run, waiters: 0, told: false } : undefined
+            // A continued turn's note has no reader of its own for status and wait: they read the paused child as they do at any time, and its one end is the report owed
+            const record = own && !continuing ? { run: own.run, waiters: 0, told: false } : undefined
             if (record) this.host.children.setObserverNote(key, record)
             const run = own?.run ?? d
             if (!run) return { ok: false, error: `No note to "${child.name}": nothing is running there to add it to.` }
@@ -256,7 +257,9 @@ export class AgentSessionActions {
                 const fail = (e: Error) => {
                   if (!record) {
                     wait.fail(e)
-                    return release()
+                    release()
+                    if (continuing) void this.flow.tellNoteRefused(callerId, child.id, e.message)
+                    return
                   }
                   wait.fail(new Error(`your note was not delivered: ${e.message}`))
                   release()
@@ -286,7 +289,7 @@ export class AgentSessionActions {
           }
           if (inTurn(child.state) || (this.host.agentRuns.has(child.id) && !this.host.agentRuns.get(child.id)!.finished)) {
             // Said by what started the turn (#1576): "the person may be using it" only when a person's message did
-            const person = this.host.children.starterOf(child.id)?.by !== 'work'
+            const person = this.host.children.personInTurn(child.id)
             return { ok: false, error: `"${child.name}" is busy with ${person ? 'something else (the person may be using it)' : 'a turn you did not give it (another session, or its own tool, started it)'}. Try again later.` }
           }
           // An answer the caller never came back for gives way to the new message
