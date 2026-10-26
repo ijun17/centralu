@@ -432,6 +432,35 @@ export class MailRecords {
     return rows.map(toThread).filter((t) => !states || states.includes(t.state))
   }
 
+  /** The threads that are not done in which a party is still a participant, whatever its role: what a handoff moves of it (§4.1) */
+  openThreadsWith(address: string): ThreadRow[] {
+    const rows = this.db
+      .prepare<[string], ThreadSql>(
+        `SELECT t.* FROM mail_threads t JOIN mail_participants p ON p.thread_id = t.id AND p.address = ? AND p.left_at IS NULL
+          WHERE t.state <> 'done' ORDER BY t.created_at, t.id`,
+      )
+      .all(address)
+    return rows.map(toThread)
+  }
+
+  /**
+   * A handoff's move of what `from` has not read in a thread to `to` (§4.1): each receipt neither read nor handled is `to`'s, and
+   * waits to be delivered to it, delivered to `from` or not (what went into the original's conversation never reached its
+   * successor). A hold about the original's own delivery (`uncertain`, `failed`) is not the successor's and is let go; a hold that
+   * waits for the person stays. A message `to` already has a receipt for keeps that one. Returns how many moved
+   */
+  moveUnreadReceipts(threadId: string, from: string, to: string): number {
+    return this.db
+      .prepare(
+        `UPDATE OR IGNORE mail_receipts
+            SET recipient = @to, delivered_at = NULL, attempt_at = NULL, attempts = 0, last_error = NULL,
+                held = CASE WHEN held IN ('uncertain', 'failed') THEN NULL ELSE held END
+          WHERE recipient = @from AND read_at IS NULL AND handled_at IS NULL
+            AND message_id IN (SELECT id FROM mail_messages WHERE thread_id = @threadId)`,
+      )
+      .run({ threadId, from, to }).changes
+  }
+
   /**
    * What a party's mailbox holds (§9.3, §10.1): the threads it is in that are not done, and the done ones it has mail unread
    * in, with how much it has not read. Unread first, then the latest change. A mail held back for the person (a loop, a spent

@@ -1272,6 +1272,16 @@ new session now takes over the original's **live** work as it is created, before
   standing start_agent requests are `AgentStartFlow.restoreAgentStarts`, called between the reports and the turns.
 - **The windows** hear `session_owner` (the session's `askedBy` and `parentSessionId` now) and hang the child under
   its new owner; a linked machine's event is qualified (`Qualifier.event`) and patched into the hub's mirror.
+- **The mail moves too** (#1574, docs/plans/mailbox.md §4.1): `MailService.handOver`, run last inside the same
+  transaction (`moveChildren`'s `then`), so a refusal there leaves the children and the mail on the original. With the
+  original kept (scope `live`), the threads it owns with a moved child as assignee; with it removed (`all`, or `removed`
+  in `trashSessionOnce`), every thread not done it is in. The successor takes the original's role, and the unread
+  receipts become its own, so a moved child's report is posted in the successor's thread and moves it to review, and
+  mail the original never got wakes the successor. The note (and the heir's notice for `removed`) lists each thread as
+  `mail thread "<subject>"` with its id as the handle; the archive preview of an original with an heir says its
+  threads go to that heir. `session_owner` is unchanged: a thread is not a sidebar link, and the Inbox hears the mail
+  change itself. A child on a linked machine has no mail thread yet (mail across machines is slice 4), so only its
+  report link moves (`moveCaller`), as before.
 
 ### 1.2.6 The orchestrator hands a session off (`handoff_session`, #694)
 

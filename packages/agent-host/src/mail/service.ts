@@ -159,6 +159,9 @@ export type CentraluPost = {
 /** A thread changed (and who has new mail in it): what the delivery engine and the windows hear */
 export type MailChange = { threadId: string; recipients: string[] }
 
+/** A thread a handoff moved to the successor (`MailService.handOver`): as it is after the move, the original's role in it, and how much unread mail moved with it */
+export type HandedOverThread = { thread: ThreadRow; role: ParticipantRole; unread: number }
+
 export type PostResult = {
   message: MessageRow
   thread: ThreadRow
@@ -1040,6 +1043,54 @@ id: ${sessionIdOf(assignee)}` : ''
             'The owner is gone: the person owns the thread.',
           ),
         )
+      }
+      return moved
+    })
+  }
+
+  /**
+   * A handoff moves the original session's mail to the session that took over (§4.1, #693, #738, #1574): in each thread that moves,
+   * the successor takes the original's place, as owner, as assignee or as a member, and what the original has not read waits for the
+   * successor instead (`moveUnreadReceipts`). Each thread keeps its state and leaves an `event`; nobody is woken for the move
+   * itself, only for the unread mail that now waits for the successor. The host's own write, like `partyGone`'s: no policy or
+   * rate check, since the handoff's own checks came first (`HandoffChildren.moveChildren` trusts its caller the same way).
+   *
+   * `which`: `all` for an original that goes (every thread not done it is in), or the sessions whose work moved to the successor
+   * while the original stays (the threads the original owns with one of them as assignee). A thread the successor already holds
+   * the other side of (it owns what the original is assigned, or the reverse) stays where it is: the two sides of a thread are two
+   * parties, and the original's departure moves it on as before (`partyGone`). Called inside the transaction of the children's
+   * move (`ChildOwnershipRecords.moveChildren`), so the mail and the children move together or not at all. Returns what moved,
+   * for the handoff note
+   */
+  handOver(fromSessionId: string, toSessionId: string, which: 'all' | { assignees: readonly string[] }): HandedOverThread[] {
+    if (fromSessionId === toSessionId || !this.records.hasThreads()) return []
+    const from = this.sessionAddress(fromSessionId)
+    const to = this.sessionAddress(toSessionId)
+    const assignees = which === 'all' ? null : new Set(which.assignees.map((id) => this.sessionAddress(id)))
+    return this.run(() => {
+      const now = this.now()
+      const moved: HandedOverThread[] = []
+      const open = ['open', 'running', 'review', 'blocked'] as const
+      const threads = new Map<string, ThreadRow>()
+      for (const t of [...this.records.threadsOfParty(from, 'owner', open), ...this.records.threadsOfParty(from, 'assignee', open), ...this.records.openThreadsWith(from)]) threads.set(t.id, t)
+      for (const t of threads.values()) {
+        if (t.state === 'unknown') continue
+        const role: ParticipantRole = t.owner === from ? 'owner' : t.assignee === from ? 'assignee' : 'member'
+        if (assignees && !(role === 'owner' && t.assignee !== null && assignees.has(t.assignee))) continue
+        if ((role === 'owner' && t.assignee === to) || (role === 'assignee' && t.owner === to)) continue
+        this.records.leaveParticipant(t.id, from, now)
+        // A successor already in the thread as a member takes the original's role; its own read position stays
+        if (role === 'member') this.records.putParticipantIfAbsent(t.id, to, 'member', now)
+        else this.records.putParticipant(t.id, to, role, now)
+        const facts = { change: 'handed_over', party: from, to, role }
+        const after =
+          role === 'member'
+            ? (this.insertEvent(t.id, 'The session in this thread handed over: the session that took over is in it instead.', facts, now), t)
+            : this.moveState(t, role === 'owner' ? { owner: to } : { assignee: to }, now, facts,
+                role === 'owner' ? 'The owner handed over: the session that took over owns the thread.' : 'The assignee handed over: the session that took over has the work.')
+        const unread = this.records.moveUnreadReceipts(t.id, from, to)
+        if (unread > 0) this.changed(t.id, [to])
+        moved.push({ thread: after, role, unread })
       }
       return moved
     })

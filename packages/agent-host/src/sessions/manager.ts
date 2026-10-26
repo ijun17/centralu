@@ -9,6 +9,7 @@ import type { MailSessions, ReceiverState } from '../mail/delivery.js'
 import type { AnswerGiven } from '../mail/delegation.js'
 import type { MailToolArgs } from '../mail/tool.js'
 import type { TurnStart } from '../mail/turns.js'
+import type { HandedOverThread } from '../mail/service.js'
 import type { ThreadOrigin } from '../dev-services/store/mail.js'
 import { QueuedRequests, type QueuedRequestsHost } from './queued-requests.js'
 import { RoutedCards, type RoutedCardsHost } from './routed-cards.js'
@@ -97,6 +98,11 @@ export type AgentProcessHost = {
 /** What the mailbox hears from the manager (#1347): a session gone, a session that may now take mail, an event the guards count */
 export type MailHooks = {
   sessionGone(sessionId: string): void
+  /**
+   * A handoff moves the original's mail to the successor (§4.1, `MailService.handOver`): every thread for an original that goes,
+   * the threads of the children that moved for one that stays. Run inside the transaction of the children's move; it throws to undo both
+   */
+  handOver?(fromSessionId: string, toSessionId: string, which: 'all' | { assignees: readonly string[] }): HandedOverThread[]
   /** The subjects of the unfinished threads the session is assigned or owns, which `sessionGone` would move on (#1512) */
   openWork?(sessionId: string): { assigned: string[]; owned: string[] }
   sessionChanged(sessionId: string): void
@@ -2248,6 +2254,7 @@ export class SessionManager {
           return null
         }
       },
+      mailHandOver: (...a) => self.mailHooks?.handOver?.(...a) ?? [],
       mailGone: (id) => {
         try {
           self.mailHooks?.sessionGone(id)

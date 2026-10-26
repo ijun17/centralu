@@ -136,11 +136,14 @@ export class ChildOwnershipRecords {
    * stored request names its caller too). A crash before the commit leaves every row on the original; after it, every
    * row on the new session, so the next host (a swap or a restart) reads one owner either way. `armReports`: children
    * whose report the original was waiting for in a call (its wait had taken the mark down), now owed to the new session.
+   * `then`: the rest of the handoff's move that is stored elsewhere (the mail, `MailService.handOver`), run last in the same
+   * transaction, so a refusal there leaves every row of both on the original.
    */
   moveChildren(
     from: string,
     to: string,
     move: { sessions: readonly string[]; startRequests: readonly { requestId: string; request: unknown }[]; armReports?: readonly string[]; queued?: boolean },
+    then?: () => void,
   ): void {
     this.db.transaction(() => {
       const owner = this.db.prepare(
@@ -165,6 +168,7 @@ export class ChildOwnershipRecords {
            ON CONFLICT(session_id) DO UPDATE SET caller_session_id = excluded.caller_session_id, marked_at = excluded.marked_at`,
       )
       for (const id of move.armReports ?? []) arm.run(id, to, Date.now())
+      then?.()
     })()
   }
 }

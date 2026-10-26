@@ -252,11 +252,19 @@ export class SessionTrash {
     }
     /*
      * Work in the mailbox (#1512): restoring does not hand a thread back. An assigned one went open with nobody on it, and its
-     * owner was told the work stopped; an owned one became the person's.
+     * owner was told the work stopped; an owned one became the person's. A session that handed over gives both to the session
+     * that inherited its handoff instead (#1574, `moveChildren` in `trashSessionOnce`), which the lines name.
      */
     const mail = this.host.mailWork(sessionId)
+    const heir = mail && (mail.assigned.length || mail.owned.length) ? this.host.handoffHeir(sessionId) : null
     if (!mail) out.push('Its mailbox could not be read, so what it holds there is not known.')
-    else {
+    else if (heir) {
+      const work = [
+        ...(mail.assigned.length ? [`is the assignee of ${mail.assigned.length === 1 ? 'an unfinished mail thread' : `${mail.assigned.length} unfinished mail threads`}`] : []),
+        ...(mail.owned.length ? [`owns ${mail.owned.length === 1 ? 'an unfinished mail thread' : `${mail.owned.length} unfinished mail threads`}`] : []),
+      ]
+      out.push(`It ${work.join(' and ')} (${[...mail.assigned, ...mail.owned].slice(0, 3).map((x) => plainQuoted(x, 60)).join(', ')}${mail.assigned.length + mail.owned.length > 3 ? ', …' : ''}); ${mail.assigned.length + mail.owned.length === 1 ? 'it goes' : 'they go'} to ${name(heir)}, which took over from it, and ${mail.assigned.length + mail.owned.length === 1 ? 'stays' : 'stay'} there if it is restored.`)
+    } else {
       const subjects = (list: string[]) => list.slice(0, 3).map((x) => plainQuoted(x, 60)).join(', ') + (list.length > 3 ? ', …' : '')
       if (mail.assigned.length) {
         out.push(`${mail.assigned.length === 1 ? 'It is the assignee of an unfinished mail thread' : `It is the assignee of ${mail.assigned.length} unfinished mail threads`} (${subjects(mail.assigned)}); ${mail.assigned.length === 1 ? 'it goes' : 'they go'} back to open with nobody on it, and ${mail.assigned.length === 1 ? 'its' : 'their'} owner is told the work stopped.`)
