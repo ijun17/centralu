@@ -89,7 +89,7 @@ export function connectAction(status: MachineInfo['status']): { label: string; t
   return { label: 'Reconnect' }
 }
 
-function MachineRow({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: (category: 'updates') => void }) {
+export function MachineRow({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: (category: 'updates') => void }) {
   const reconnect = useStore((s) => s.reconnectMachine)
   const disconnect = useStore((s) => s.disconnectMachine)
   const remove = useStore((s) => s.removeMachine)
