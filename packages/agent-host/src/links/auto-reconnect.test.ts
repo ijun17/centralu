@@ -596,7 +596,7 @@ describe('a machine that does not answer (#1398)', () => {
     'ssh could not reach laptop: ssh: connect to host laptop port 22: Connection timed out',
     'ssh could not reach laptop: ssh: connect to host laptop port 22: No route to host',
     'ssh could not reach laptop: ssh: connect to host laptop port 22: Network is unreachable',
-    'ssh could not reach laptop: ssh: Could not resolve hostname jungi.tail3d9122.ts.net: Name or service not known',
+    'ssh could not reach laptop: ssh: Could not resolve hostname laptop.example.ts.net: Name or service not known',
     'ssh could not reach laptop: ssh: Could not resolve hostname laptop: No such host is known.',
   ]
   const REAL_FAILURES = [

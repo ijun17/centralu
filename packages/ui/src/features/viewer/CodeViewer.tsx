@@ -101,7 +101,7 @@ export function CodeViewer({ projectId, sessionId = null }: { projectId: string;
         /*
          * Not being at the root does not make it a dead link. An agent often writes a path
          * relative to wherever it happened to be looking (`Media/ImageSearch.cs` ↔ the real one
-         * being `WzComparerR2.Cli/Media/…`). This looks through the project's file list for one
+         * being `Widgets.Cli/Media/…`). This looks through the project's file list for one
          * with that tail — only after the first attempt failed, and since the host holds the
          * index, this one extra call is cheap.
          */
