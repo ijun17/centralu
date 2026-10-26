@@ -633,11 +633,12 @@ jobs:
           pnpm exec playwright install-deps webkit
 
       - name: Keep the apt packages this run downloaded
+        id: kept
         if: steps.debs.outputs.cache-hit != 'true'
         run: bash .github/scripts/apt-deb-cache.sh save "$RUNNER_TEMP/apt-debs"
 
       - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        if: steps.debs.outputs.cache-hit != 'true'
+        if: steps.debs.outputs.cache-hit != 'true' && steps.kept.outputs.count != '0'
         with:
           path: ${{ runner.temp }}/apt-debs
           key: apt-debs-${{ runner.os }}-${{ steps.image.outputs.name }}-playwright-${{ steps.playwright.outputs.version }}-webkit
@@ -740,11 +741,12 @@ jobs:
           pnpm exec playwright install-deps chromium
 
       - name: Keep the apt packages this run downloaded
+        id: kept
         if: steps.debs.outputs.cache-hit != 'true'
         run: bash .github/scripts/apt-deb-cache.sh save "$RUNNER_TEMP/apt-debs"
 
       - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        if: steps.debs.outputs.cache-hit != 'true'
+        if: steps.debs.outputs.cache-hit != 'true' && steps.kept.outputs.count != '0'
         with:
           path: ${{ runner.temp }}/apt-debs
           key: apt-debs-${{ runner.os }}-${{ steps.image.outputs.name }}-playwright-${{ steps.playwright.outputs.version }}-chromium
@@ -909,11 +911,12 @@ jobs:
           pnpm exec playwright install-deps webkit
 
       - name: Keep the apt packages this run downloaded
+        id: kept
         if: steps.debs.outputs.cache-hit != 'true'
         run: bash .github/scripts/apt-deb-cache.sh save "$RUNNER_TEMP/apt-debs"
 
       - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        if: steps.debs.outputs.cache-hit != 'true'
+        if: steps.debs.outputs.cache-hit != 'true' && steps.kept.outputs.count != '0'
         with:
           path: ${{ runner.temp }}/apt-debs
           key: apt-debs-${{ runner.os }}-${{ steps.image.outputs.name }}-playwright-${{ steps.playwright.outputs.version }}-webkit

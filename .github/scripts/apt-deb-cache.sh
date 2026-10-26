@@ -10,7 +10,8 @@
 # apt checks every file's size and hash against the lists.
 #
 #   apt-deb-cache.sh restore DIR   copy DIR/*.deb into /var/cache/apt/archives (a cache miss leaves DIR empty or absent)
-#   apt-deb-cache.sh save DIR      copy /var/cache/apt/archives/*.deb into DIR, for the cache action to save
+#   apt-deb-cache.sh save DIR      copy /var/cache/apt/archives/*.deb into DIR, for the cache action to save, and
+#                                  write count=<how many> to $GITHUB_OUTPUT
 #
 # Neither fails the job: a cache that cannot be filled or used leaves the install as slow as it was.
 set -u
@@ -35,13 +36,16 @@ case "$mode" in
       # shellcheck disable=SC2086 # $sudo_cmd is empty or one word
       $sudo_cmd cp -f "$dir"/*.deb "$archives"/ || echo "::warning::Could not copy the cached packages into $archives"
     fi
-    echo "Restored $(count "$dir") packages; $archives now holds $(count "$archives")"
+    echo "Cached packages: $(count "$dir"); $archives now holds $(count "$archives")"
     ;;
   save)
     mkdir -p "$dir"
     # The files are root's but world-readable; the copy is the runner user's, so the cache action can read it
     cp -f "$archives"/*.deb "$dir"/ 2>/dev/null || echo "::warning::No packages in $archives to cache"
     echo "Saved $(count "$dir") packages ($(du -sh "$dir" 2>/dev/null | cut -f1))"
+    # The workflow saves the cache only when there is something in it: an empty entry under the key would be a hit
+    # that restores nothing, for every later run of the same image
+    [ -z "${GITHUB_OUTPUT:-}" ] || echo "count=$(count "$dir")" >> "$GITHUB_OUTPUT"
     ;;
 esac
 exit 0

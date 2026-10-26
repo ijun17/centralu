@@ -219,11 +219,12 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
           `          pnpm exec playwright install-deps ${browser}`,
           '',
           '      - name: Keep the apt packages this run downloaded',
+          '        id: kept',
           "        if: steps.debs.outputs.cache-hit != 'true'",
           '        run: bash .github/scripts/apt-deb-cache.sh save "$RUNNER_TEMP/apt-debs"',
           '',
           '      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0',
-          "        if: steps.debs.outputs.cache-hit != 'true'",
+          "        if: steps.debs.outputs.cache-hit != 'true' && steps.kept.outputs.count != '0'",
           '        with:',
           '          path: ${{ runner.temp }}/apt-debs',
           `          key: ${debsKey(browser)}`,
@@ -253,6 +254,7 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     const script = readFileSync(new URL('../.github/scripts/apt-deb-cache.sh', import.meta.url), 'utf8')
     expect(script).toContain('archives=${APT_ARCHIVES:-/var/cache/apt/archives}')
     expect(script).toContain('docker-clean')
+    expect(script).toContain('echo "count=$(count "$dir")" >> "$GITHUB_OUTPUT"')
     // Neither direction may fail a job: a cache that cannot be used leaves the install as slow as it was
     expect(script).toMatch(/^exit 0$/m)
     for (const id of ['e2e', 'e2e-chromium', 'ux-tasks']) {
@@ -271,9 +273,10 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
       expect(order, id).toEqual([...order].sort((a, b) => a - b))
       // The restore and the save are the one entry, found by an exact key and never by a prefix: another image's packages are not wanted
       expect(body, id).not.toContain('restore-keys')
-      // A hit is not saved again, and nothing is saved after a failed install (the step's own success() condition)
-      expect(body.match(/if: steps\.debs\.outputs\.cache-hit != 'true'$/gm), id).toHaveLength(2)
-      expect(body, id).not.toMatch(/cache-hit != 'true' *\|\|/)
+      // A hit is not saved again, an empty folder is not saved (it would be a hit that restores nothing), and nothing
+      // is saved after a failed install (the steps' own success() condition)
+      expect(body.match(/if: steps\.debs\.outputs\.cache-hit != 'true'$/gm), id).toHaveLength(1)
+      expect(body.match(/if: steps\.debs\.outputs\.cache-hit != 'true' && steps\.kept\.outputs\.count != '0'$/gm), id).toHaveLength(1)
     }
     // Only the Linux browser jobs: the macOS and Windows jobs install no system libraries
     expect(workflow.match(/apt-deb-cache\.sh (?:restore|save)/g)).toHaveLength(6)
