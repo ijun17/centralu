@@ -34,6 +34,7 @@
     "smoke:codex": "node packages/agent-host/scripts/smoke-codex.mjs",
     "smoke:cursor": "node packages/agent-host/scripts/smoke-cursor.mjs",
     "smoke:opencode": "node packages/agent-host/scripts/smoke-opencode.mjs",
+    "smoke:opencode:scripted": "node packages/agent-host/scripts/smoke-opencode-scripted.mjs",
     "smoke:orchestrator": "tsx packages/agent-host/scripts/smoke-orchestrator.mts",
     "smoke:schemas": "tsx packages/agent-host/scripts/smoke-schemas.mts",
     "app": "tsx scripts/app-build.mts",
