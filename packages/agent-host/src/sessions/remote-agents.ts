@@ -196,6 +196,10 @@ export class RemoteAgents {
   private readonly toldCards = new Set<string>()
   /** Whose each child's turn is, as settled in this host (`Whose`); one not here is read from its record (`whoseOf`) */
   private readonly whose = new Map<string, Whose>()
+  /** What made a turn another's, when it is told (#1576): a message from another session of this hub, else it is read as the person's */
+  private readonly otherBy = new Map<string, 'session'>()
+  /** Notes sent into a running turn whose record has not come back yet (memory only): two quick notes both are the caller's own */
+  private readonly notesSent = new Map<string, string[]>()
   /** Children an instruction is on its way to: its own send's answer says what came of it, and the machine is not read meanwhile */
   private readonly pending = new Set<string>()
   /** Children whose turn's end the linked reports held back while whose the turn was could not be told (`reportGate`) */
@@ -600,15 +604,20 @@ export class RemoteAgents {
            */
           const g = await this.gate(rec, reader)
           if (!g.live) {
-            return { ok: false, error: `"${rec.name}" is busy on ${rec.machine} with a turn you did not give it (the person may be using it there). A queue or a fork does not reach another machine: try again once it is at rest.` }
+            return { ok: false, error: `"${rec.name}" is busy on ${rec.machine} with ${this.otherTurn(rec, g)}. A queue or a fork does not reach another machine: try again once it is at rest.` }
           }
           const refused = this.gateError(callerId)
           if (refused) return { ok: false, error: refused }
           // Kept before it goes, as the machine records it before it answers: its record tells the turn that took it
           const framed = agentNoteFrame(label, text)
           this.sentNow(rec.sessionId, framed)
+          this.notesSent.set(rec.sessionId, [...(this.notesSent.get(rec.sessionId) ?? []), framed])
           const sent = await reader.send(rec.sessionId, framed, label, { depth: depthOf(this.host, callerId) + 1 })
-          if (!sent.ok) return { ok: false, error: `Could not send to "${rec.name}" on ${rec.machine}: ${bare(sent.error)}.` }
+          if (!sent.ok) {
+            const at = (this.notesSent.get(rec.sessionId) ?? []).lastIndexOf(framed)
+            if (at >= 0) this.notesSent.set(rec.sessionId, (this.notesSent.get(rec.sessionId) ?? []).filter((_, i) => i !== at))
+            return { ok: false, error: `Could not send to "${rec.name}" on ${rec.machine}: ${bare(sent.error)}.` }
+          }
           // Taken while the turn was still the caller's, it is part of that turn; otherwise the gate has closed on it
           return this.gateNow(rec).live ? this.working(rec, this.reportArmed(rec) || this.waits.has(rec.sessionId)) : this.wentElsewhere(rec)
         }
@@ -620,6 +629,7 @@ export class RemoteAgents {
         // A new turn: its cards are new cards (#676), and whose it is, the machine's record of this instruction says
         const framed = agentNoteFrame(label, text)
         this.save(this.records().map((r) => (r.sessionId === rec.sessionId ? { ...r, turn: randomUUID(), sent: framed } : r)))
+        this.notesSent.delete(rec.sessionId)
         this.whose.set(rec.sessionId, 'unknown')
         this.pending.add(rec.sessionId)
         this.host.children.setLinkedReport(rec.sessionId, { orchestratorId: callerId, busy: false })
@@ -747,7 +757,15 @@ export class RemoteAgents {
     const owned = whose === 'caller'
     // A report held over the background work of a turn that ended is no turn running (#1038 review)
     const report = this.host.children.linkedReports.get(rec.sessionId)
-    const running = this.waits.has(rec.sessionId) || (report?.orchestratorId === rec.callerId && !report.paused)
+    const mine = report?.orchestratorId === rec.callerId
+    /*
+     * Except a turn the child's own tool started when that work ended (a task notification, no message of anyone's): the
+     * linked report reads it as the work's (`LinkedReport.turn`, the report is owed its end), so it is the caller's too
+     * (#1576). Only on the hub's own sight of its start: after a swap, or from a machine that does not list background
+     * work, nothing says so and the turn is not taken for the caller's
+     */
+    const continuesPause = mine && !!report.paused && report.busy && report.turn?.by === 'work'
+    const running = this.waits.has(rec.sessionId) || (mine && (!report.paused || continuesPause))
     return { owned, live: owned && running, whose }
   }
 
@@ -763,6 +781,8 @@ export class RemoteAgents {
    */
   private setWhose(rec: RemoteAgent, whose: Whose, why?: string): void {
     const was = this.whoseOf(rec)
+    // What made a turn another's is told with it (`messageTaken` sets it after), never kept past it
+    if (was !== 'other' || whose !== 'other') this.otherBy.delete(rec.sessionId)
     this.whose.set(rec.sessionId, whose)
     const kept = whose === 'unknown' ? undefined : whose
     const stored = this.of(rec.sessionId)
@@ -821,6 +841,23 @@ export class RemoteAgents {
   }
 
   /**
+   * What the running turn is, said for a caller it is not live for (#1576): named by what started it, so only a message
+   * of a person's on that machine is "the person may be using it". A turn the hub has no sight of the start of (a swap,
+   * a machine that lists no background work) is said to be the child's own, not a person's
+   */
+  private otherTurn(rec: RemoteAgent, g: Gate): string {
+    if (g.whose === 'unknown') return 'a turn the hub cannot tell the owner of (the link dropped, or Centralu restarted, and the machine cannot be read now)'
+    if (g.whose === 'other') {
+      return this.otherBy.get(rec.sessionId) === 'session'
+        ? "a turn another session asked of it (it is not the one you gave it)"
+        : 'a turn you did not give it (the person may be using it there)'
+    }
+    const report = this.host.children.linkedReports.get(rec.sessionId)
+    if (report && report.orchestratorId !== rec.callerId) return 'a turn another session is owed the end of (it is not the one you gave it)'
+    return 'a turn it started by itself that this hub cannot tie to the work you gave it'
+  }
+
+  /**
    * What the caller gets of a child whose turn the gate does not let through: the fact and the state word. Nothing of
    * the turn: no card, no words, and nothing owed or armed for it
    */
@@ -828,7 +865,7 @@ export class RemoteAgents {
     const why = g.whose === 'unknown'
       ? `The hub could not tell whose its last turn on ${rec.machine} was (the link dropped, or Centralu restarted, and the machine cannot be read now)`
       : running
-        ? `It is in a turn on ${rec.machine} that you did not give it (the person is using it there)`
+        ? `It is in ${this.otherTurn(rec, g)} on ${rec.machine}`
         : `Its last turn on ${rec.machine} was not one you gave it (the person's)`
     const notice = `${why}: nothing of that turn is yours to read, and none of it is reported to you.${running ? ' Send to it once it is at rest.' : ''}`
     if (running) return { ...this.working(rec, false), notice }
@@ -851,7 +888,16 @@ export class RemoteAgents {
       if (e.seq <= (this.lastSeq.get(sessionId) ?? -1)) return
       this.lastSeq.set(sessionId, e.seq)
     }
+    const own = this.notesSent.get(sessionId) ?? []
+    const earlier = typeof e.text === 'string' && e.text !== rec.sent ? own.indexOf(e.text) : -1
+    if (earlier >= 0 && this.fromHubHere(rec, e.from)) {
+      // An earlier note of the caller's own, its record arriving after a later note was kept as the last sent
+      this.notesSent.set(sessionId, own.filter((_, i) => i !== earlier))
+      if (this.whoseOf(rec) === 'caller' && this.gateNow(rec).live) return
+    }
     if (this.fromHubHere(rec, e.from) && e.text === rec.sent) {
+      const at = own.indexOf(rec.sent ?? '')
+      if (at >= 0) this.notesSent.set(sessionId, own.filter((_, i) => i !== at))
       // A note into the caller's own running turn stays in it
       if (this.whoseOf(rec) === 'caller' && this.gateNow(rec).live) return
       if (this.busy.has(sessionId)) return this.setWhose(rec, 'other', 'took what you sent as a message into a turn already running there that you did not give it (the person\'s, most likely)')
@@ -859,6 +905,8 @@ export class RemoteAgents {
       return
     }
     this.setWhose(rec, 'other', 'took a message there that you did not send (the person on that machine, most likely)')
+    if (this.fromHubHere(rec, e.from)) this.otherBy.set(sessionId, 'session')
+    else this.otherBy.delete(sessionId)
   }
 
   /**
@@ -1198,6 +1246,8 @@ export class RemoteAgents {
     if (this.records().some((r) => r.sessionId === sessionId)) this.save(this.records().filter((r) => r.sessionId !== sessionId))
     this.toldDown.delete(sessionId)
     this.whose.delete(sessionId)
+    this.otherBy.delete(sessionId)
+    this.notesSent.delete(sessionId)
     this.pending.delete(sessionId)
     this.deferred.delete(sessionId)
     this.busy.delete(sessionId)
