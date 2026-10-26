@@ -732,16 +732,38 @@ into the turn the caller gave it goes in as a note (the machine's `host.send` ta
 person's message there; nothing is armed again); into a turn the caller did not give it (the person's there) it is
 refused, as neither a queue nor a fork reaches another machine. A note the tool did not read in the turn it went into
 runs as a turn of its own once that turn ends, with no message to start it (#1604). The machine's host says which: the tool
-names the input a turn began from (Claude Code: `user_message_uuid` on the turn's first message; the adapter's
-`turnStartInputs`), the host keeps who sent each message it put into a running turn under an id (`ChildOwnership`
-`noteInputOrigin`, memory only), and the `state_change` that opens the turn carries `origin: { seq, from }`, the row of
-that message and its sender (additive, `TurnOrigin`). The hub holds the rows of the caller's notes that went into its live
-turn (`RemoteAgents.carried`) and takes a turn for the caller's only when its origin names one of those rows from this
-hub's sender; its end is then owed as the first turn's was, and a note goes into it. Nothing is guessed from the time
-between turns. A turn with no origin stays refused, and so does everything after the person's message, a link's loss, a
-send at rest, a restart of either host, or an older machine that sends no origin. A refusal names the turn by what the hub
-saw start it: a person's message, another session's, or no message at all ("which this hub did not see begin"), never the
-person without a message of theirs. Codex takes every message into the turn it is running, so it never runs one as the next.
+names the input a turn began from, the host keeps who sent each message it gave the tool under an id (`ChildOwnership`
+`noteInputOrigin`: into a running turn or at rest, in the order given, kept in the app setting `input_origins:<session>` so
+a host that takes the session over after a swap still has them), and the `state_change` that opens the turn carries
+`origin: { seq, from }`, the row of that message and its sender (additive, `TurnOrigin`). The tool names the input only
+on the event that opens the turn, and the host reads it there whether or not it already had the session working: an
+instruction sent at rest in the gap between a turn and the one run for a note before it has the session working before
+that turn opens. The tool runs inputs in the order they were given, so a turn that names an input has taken every one given
+before it, and all of them leave the host's store (a CLI that runs several notes as one turn names only the last); so do
+those a turn's end says it took in. Claude Code names it as `user_message_uuid` on the turn's first message (the adapter's
+`turnStartInputs`); Codex, which merges a message sent while a turn runs into it but starts a turn of its own for one sent
+just after a turn ended or queued behind a compact or review (`flushPending`), gives its `turn/start` the input's id as the
+client id and reads it back from the turn's first item (`item/started`, `userMessage`, `clientId`) with a second
+`working` for that turn that names it; a message that joined a turn already running shows after the turn's first item and
+names nothing. The hub holds the rows of the messages its caller gave the child that the tool may run as a turn of its own
+(`RemoteAgents.given`): its notes into a running turn, and its instruction sent at rest. A send at rest does not drop the
+rows of the notes before it, as the turns run for those can still be to come. The hub takes a turn for the caller's when its
+origin names one of those rows from this hub's sender; its end is then owed as the first turn's was, and a note goes into it.
+A row goes when a turn is run for it or for a later one, and every row goes with a message of someone else's or a link's
+loss. Nothing is guessed from the time between turns. A turn with no origin is refused, and so is everything after the
+person's message and after a restart of the hub. A link's loss clears the rows held, so a turn that opens for one while the link is
+down is not taken for the caller's by its origin; when the link is back the child is read again (`verify`), and a turn
+whose last message is the caller's own, with its report still owed, is the caller's as before. An older machine sends no origin and behaves as before this: a note it runs as a turn of its own
+stays refused. A refusal names the turn by what the hub saw start it: a person's message, another session's, or no message
+at all ("which this hub did not see begin"), never the person without a message of theirs.
+
+What the caller reads of such a turn is that turn's words (#1604). `host.lastAnswer` takes `turn: true`: the answer is
+read from the row the machine saw the turn begin after (`ChildOwnership.noteTurnStart`, memory only), not the last
+response of the record. A note's row is stored while the turn before it runs, so the last response joined the two turns'
+words and clipped them at the report's 600 characters; and a note stored in the middle of a turn's text ended that text, so
+a wait read only what followed the note. The caller's notes in a turn are rows among its text (`turnAnswer`'s
+`acrossNotes`). A turn that has said nothing yet when the end of the one before is read gives the one before's words. A
+turn the host did not see begin (it started before a swap) reads as the last response, and so does an older machine.
 
 The person may use the same session on that machine, and nothing of a turn that is not the caller's reaches the
 caller (#1038 review, RV13). One gate decides it (`RemoteAgents.gate`), and every path that hands the caller anything

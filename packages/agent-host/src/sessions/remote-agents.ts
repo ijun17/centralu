@@ -961,9 +961,10 @@ export class RemoteAgents {
    */
   private turnOpens(rec: RemoteAgent, e: LinkedEvent): void {
     const origin = e.type === 'state_change' ? asObj(e.origin) : {}
+    const named = origin.seq
     const held = this.given.get(rec.sessionId)
-    if (!held || typeof origin.seq !== 'number' || !held.has(origin.seq) || !this.fromHubHere(rec, origin.from)) return
-    const later = new Set([...held].filter((row) => row > (origin.seq as number)))
+    if (!held || typeof named !== 'number' || !held.has(named) || !this.fromHubHere(rec, origin.from)) return
+    const later = new Set([...held].filter((row) => row > named))
     if (later.size) this.given.set(rec.sessionId, later)
     else this.given.delete(rec.sessionId)
     if (this.whoseOf(rec) !== 'caller' || this.gateNow(rec).live || !this.host.meta.has(rec.callerId)) return

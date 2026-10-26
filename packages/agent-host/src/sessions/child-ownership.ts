@@ -621,13 +621,13 @@ export class ChildOwnership {
   }
   /** Takes off every origin given up to the last of `inputs` held, and says that one's (`undefined`: none of them is held) */
   private dropOriginsThrough(sessionId: string, held: Map<string, TurnOrigin>, inputs: readonly string[]): TurnOrigin | undefined {
-    const order = [...held.keys()]
-    const last = Math.max(-1, ...inputs.map((id) => order.indexOf(id)))
-    if (last < 0) return undefined
-    const origin = held.get(order[last]!)!
-    for (const id of order.slice(0, last + 1)) held.delete(id)
+    const order = [...held]
+    const last = Math.max(-1, ...inputs.map((id) => order.findIndex(([held]) => held === id)))
+    const named = order[last]
+    if (!named) return undefined
+    for (const [id] of order.slice(0, last + 1)) held.delete(id)
     this.keepOrigins(sessionId, held)
-    return origin
+    return named[1]
   }
   private originsOf(sessionId: string): Map<string, TurnOrigin> {
     let held = this.inputOrigins.get(sessionId)
