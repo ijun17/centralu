@@ -39,8 +39,9 @@ function call(sys: System, args: string[], env: Record<string, string>, input?: 
   })
 }
 
-// Echoes what it was given; `fail <n>` exits with n after writing to both streams
+// Echoes what it was given; `fail <n>` exits with n after writing to both streams; `log` writes through console
 const ANSWER = String.raw`
+if (args[0] === 'log') { console.log('logged', 1); console.error('to stderr'); process.exit(0) }
 if (args[0] === 'fail') { process.stdout.write('partial'); process.stderr.write('gh: no such thing (HTTP 404)\n'); process.exit(Number(args[1])) }
 st.n = (st.n ?? 0) + 1
 save()
@@ -103,6 +104,7 @@ describe("the board app's door for starting programs", { timeout: 60_000 * SLOW 
       [['api', '--input', '-', 'repos/x/y/issues'], '{"title":"a \\"b\\" é"}\n'],
       [['fail', '3'], undefined],
       [['fail', '0'], undefined],
+      [['log'], undefined],
     ]
     for (const [args, input] of cases) {
       gh.setState({})

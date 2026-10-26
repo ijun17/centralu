@@ -133,13 +133,14 @@ export function startQueue() {
 }
 
 /** Who drives the queue now, in words: this server, a watch command, or nobody. */
-function driverLine(q, now = Date.now()) {
+function driverLine(q, now = clock()) {
   const lease = readLease(dataDir())
   const active = q.items.some((i) => ACTIVE.has(i.state))
   const pause = q.pause && Date.parse(q.pause.until) > now ? ` Paused until ${q.pause.until.slice(11, 19)} UTC: ${q.pause.reason}` : ''
   const held = QUEUE.guard && (q.guard?.unfinished ?? 0) > QUEUE.guard.maxMainRuns ? ` Landing held: ${q.guard.unfinished} of main's full runs unfinished (at most ${QUEUE.guard.maxMainRuns}, #1259).` : ''
   if (!active) return `Nothing queued.${pause}${held}`
-  if (lease && Date.parse(lease.until) > now) return `Driven by ${String(lease.holder).startsWith('server:') ? 'the board app' : 'a watch command'}.${pause}${held}`
+  // The lease is on the system's clock (queue-driver.mjs takeLease)
+  if (lease && Date.parse(lease.until) > Date.now()) return `Driven by ${String(lease.holder).startsWith('server:') ? 'the board app' : 'a watch command'}.${pause}${held}`
   return `Driven by the board app, which keeps running while the queue has work, and by a watch command while one runs.${pause}${held}`
 }
 

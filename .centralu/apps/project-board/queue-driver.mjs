@@ -177,7 +177,8 @@ export async function runGuard(dir, { holder, now = Date.now(), ref = queueRef, 
   // It watches what the queue landed: a queue that never landed anything has nothing on main to answer for
   if (!q.items.some((i) => i.state === 'merged') && !q.guard) return { did: 'off' }
   if (q.guard?.nextAt && Date.parse(q.guard.nextAt) > now) return { did: 'wait' }
-  if (!takeLease(dir, holder, now)) return { did: 'busy' }
+  // The lease is between processes, on the system's clock (a stepped test moves only the queue's)
+  if (!takeLease(dir, holder, Date.now())) return { did: 'busy' }
   try {
     return await guardTick({
       q,
@@ -495,7 +496,7 @@ async function onConflict(item, pr, { now, ref, renew, defaultBranch, landed = [
           : []),
         conflictEvent(`${n}: conflict handed to ${where.route === 'direct' ? 'the session that opened it, which the queue told itself' : where.route === 'self' ? 'the session that queued it, its author' : to ? `its author session ${to}` : 'a session on its branch (no author session recorded)'}${files.length ? `; conflicted files: ${listSome(files, 8)}` : ''}.`, {
           step: 'handoff',
-          ms: Date.now() - now,
+          ms: clock() - now,
           files,
           by: 'session',
           relay: d.reason.relay,
@@ -775,7 +776,7 @@ export async function tick(dir, { holder, now = Date.now(), ref = queueRef }) {
   if (q.pause && Date.parse(q.pause.until) > now) return { did: 'paused', until: q.pause.until }
   // Too many of main's full runs unfinished (#1259): each landing adds one, so the queue waits for them
   if (QUEUE.guard && (q.guard?.unfinished ?? 0) > QUEUE.guard.maxMainRuns) return { did: 'held', unfinished: q.guard.unfinished }
-  if (!takeLease(dir, holder, now)) return { did: 'busy', holder: readLease(dir)?.holder ?? null }
+  if (!takeLease(dir, holder, Date.now())) return { did: 'busy', holder: readLease(dir)?.holder ?? null }
   q = readQueue(dir)
   // Batches first (#962): the running one when it is due, or a new one from items waiting for CI
   const work = batchWork(q, now)
