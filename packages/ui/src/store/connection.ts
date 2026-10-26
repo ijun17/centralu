@@ -33,6 +33,7 @@ import {
   watchLiveEvents,
 } from './sessionList.js'
 import { holdPinnedViews } from './apps.js'
+import { machinesHoldingMirror } from './machines.js'
 import { settleUnsureSends } from './sessions/send.js'
 
 /**
@@ -496,6 +497,7 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
     )
 
     const asked = get().sessions
+    const askedMachines = get().machines
     const watch = watchLiveEvents()
     /*
      * What could not be read and came up empty, said in one toast once the screen is up (#841 item 10): an empty grid
@@ -571,7 +573,11 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
         externalApps,
         themeFiles,
         lastGoodThemes: goodThemes(st.lastGoodThemes, themeFiles),
-        machines: Object.fromEntries(machines.map((m) => [m.id, m])),
+        // A `machine_status` that came while these reads were out is newer than the list read at their start (#1611)
+        machines: {
+          ...Object.fromEntries(machines.map((m) => [m.id, m])),
+          ...Object.fromEntries(Object.entries(st.machines).filter(([id, m]) => m !== askedMachines[id])),
+        },
         connection: 'connected',
       }
     })
@@ -583,6 +589,8 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
     // was already running before the app was even opened is held here
     replayPendingEvents(get)
     get().pruneFoldedGroups()
+    // A machine that connected while these lists were out: they were read from the hub's mirror, and its own resync may have come before them (#1611)
+    for (const id of machinesHoldingMirror(get())) void get().recoverMachine(id)
 
     // A suggestion awaiting approval stays on the host even across the app being closed and reopened
     // — its card must reappear
@@ -718,7 +726,7 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
     // So are the preferences (#1306): a missed `prefs_changed` leaves the orchestrator's change to a setting unseen
     void get().refreshPrefs()
     // So are the links' states (#82): a machine that went away or came back during the gap
-    void get().refreshMachines()
+    const machinesRead = get().refreshMachines()
     // The pinned views this window shows are leased to its connection, which just ended (#392)
     void holdPinnedViews(get, set)
 
@@ -794,6 +802,10 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
     // If the merge registered a session for the first time, replay any events held in the pen from before it was registered
     replayPendingEvents(get)
     get().pruneFoldedGroups()
+    // A machine already connected whose rows this list took from the hub's mirror: its resync came before the list, or never will (#1611)
+    void machinesRead.then(() => {
+      for (const id of machinesHoldingMirror(get())) void get().recoverMachine(id)
+    })
 
     /*
      * Resync: events from the gap never come again — the screen's conversation is merged with the
@@ -816,11 +828,15 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
     const alive = new Set(listed.filter((x) => x.live).map((x) => x.id))
     /*
      * Never one on a machine that is away (#82): the hub listed it from its mirror, and waking it would only fail there.
-     * That machine's own `machine_resync` wakes what has to be woken once it is back (`recoverMachine`).
+     * That machine's own `machine_resync` wakes what has to be woken once it is back (`recoverMachine`). Judged against
+     * the machine list read after the drop, not the one from before it, and never a row the hub still lists from its
+     * mirror: its `live` is last heard, not a fact (#1611).
      */
-    const toWake = wasLive.filter(
-      (x) => !alive.has(x.id) && get().sessions[x.id] && !isAway(get().sessions[x.id], get().machines),
-    )
+    await machinesRead
+    const toWake = wasLive.filter((x) => {
+      const now = get().sessions[x.id]
+      return !alive.has(x.id) && now && !now.unreachable && !isAway(now, get().machines)
+    })
     if (toWake.length === 0) return
 
     set({ toast: `Reconnected — resuming ${toWake.length} session${toWake.length > 1 ? 's' : ''}` })

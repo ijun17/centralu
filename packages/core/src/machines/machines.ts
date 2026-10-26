@@ -10,18 +10,35 @@ import { releaseOf, turnsRunning, type HostActivity, type MachineInfo, type Mach
 type Placed = { machine?: string | null; unreachable?: boolean }
 
 /**
- * Whether a session or project on a linked machine is away: the hub listed it from its mirror
- * (`unreachable`), or the machine's link is not up now. Away rows stay listed and dimmed, and are
- * never woken: waking one would only fail at the hub, and the machine's `machine_resync` wakes what
- * has to be woken once it is back. This computer's rows are never away.
+ * Whether a linked machine is away: its link is not up now, by its own row (`machine_status`), which the hub keeps
+ * current. A machine the UI has no row for says nothing yet, so it is not called away. This is the one place that
+ * decides it: a row's dimming and tooltip (`isAway`) and the machine badge's dashed border and dot read it, so the three
+ * always agree (#1611).
+ */
+export function machineAway(machine: Pick<MachineInfo, 'status'> | undefined): boolean {
+  return machine !== undefined && machine.status !== 'connected'
+}
+
+/**
+ * Whether a session or project on a linked machine is away: its machine is (`machineAway`). Away rows stay listed and
+ * dimmed, and are never woken: waking one would only fail at the hub, and the machine's `machine_resync` wakes what has
+ * to be woken once it is back. This computer's rows are never away.
  *
- * A machine the UI has no row for yet (its list has not arrived) is judged by the row's own mark.
+ * The row's own `unreachable` mark is not read here. It says only that the hub answered one list from its mirror,
+ * a fact about that answer and not about the machine now, and it outlives the outage it was written in whenever a list
+ * read lands late or fails (#1611): a second source for the same fact, which then disagrees with the machine's row.
  */
 export function isAway(row: Placed | undefined, machines: Readonly<Record<string, MachineInfo>>): boolean {
-  if (!row?.machine) return false
-  if (row.unreachable) return true
-  const m = machines[row.machine]
-  return !!m && m.status !== 'connected'
+  return !!row?.machine && machineAway(machines[row.machine])
+}
+
+/**
+ * Whether a row still stands for what the hub last heard rather than what its machine says now: it carries the mark
+ * and its machine is away. The mark a row of a connected machine kept from an older answer does not count (#1611), so
+ * the tool mark of such a row is drawn as any other.
+ */
+export function isMirrored(row: Placed | undefined, machines: Readonly<Record<string, MachineInfo>>): boolean {
+  return row?.unreachable === true && isAway(row, machines)
 }
 
 /** One word or two for a link's state, as Add project's machine menu and Settings say it */

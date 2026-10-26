@@ -156,7 +156,8 @@ export type SessionSummary = {
   machine?: string | null
   /**
    * The hub could not reach the machine and listed this session from what it last heard (#82): `live` is the last-known
-   * value, not a fact. Such a session is shown as away and never woken; that machine's `machine_resync` replaces it.
+   * value, not a fact. While its machine is away such a session is shown as away and never woken, and that machine's
+   * `machine_resync` replaces it. The mark is about the answer, not the machine (#1611): `isAway` reads the machine's status.
    */
   unreachable?: boolean
   /**

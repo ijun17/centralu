@@ -153,10 +153,14 @@ The hub lists another machine's sessions and projects with `machine` set (null f
 qualified (`<machine>.<id>`, never parsed here). `machines` holds one `MachineInfo` per linked machine, replaced whole
 by its `machine_status`.
 
-- **Away is derived, not stored** (`isAway` in `@cc/core`): a row the hub answered from its mirror (`unreachable`),
-  or a row of a machine whose link is not `connected`. An away row stays listed and dimmed, and `wake` refuses it:
-  waking would only fail at the hub, and the machine's own resync does the waking once it is back. The reconnect
-  recovery (`recoverAfterReconnect`) skips away sessions for the same reason.
+- **Away is derived, not stored** (`isAway` in `@cc/core`), from one source: the machine's own row. A row is away when its
+  machine's link is not `connected` (`machineAway`, which the machine badge's dashed border and the project tooltip
+  read too, so the three agree, #1611). The row's own `unreachable` mark is **not** read: it says only that the hub
+  answered one list from its mirror, a fact about that answer, and it outlives the outage it was written in whenever a
+  list read lands after the machine's resync or fails (#1611). It still draws a tool mark as not asleep, but only while
+  the machine is away (`isMirrored`). An away row stays listed and dimmed, and `wake` refuses it: waking would only
+  fail at the hub, and the machine's own resync does the waking once it is back. The reconnect recovery
+  (`recoverAfterReconnect`) skips away sessions for the same reason.
 - **`machine_resync {machineId}` runs a recovery scoped to that machine** (`recoverMachine`), not the global one:
   1. re-read `sessions.list` and `projects.list`, and replace **that machine's rows only**: a row of another machine or
      of this computer keeps its object (nothing re-renders, nothing the reducer derived is lost); a row the fresh list
@@ -165,7 +169,16 @@ by its `machine_status`.
   2. re-read the history of every open conversation of that machine (the hub does not replay a remote's gap; the
      conversations are read again, as a host resync does for every one, #173);
   3. wake that machine's sessions that were live before and are not now (a remote host that restarted without a
-     keeper), and none of any other machine.
+     keeper), and none of any other machine, and none of a row the hub still lists from its mirror (its `live` is last
+     heard, not a fact).
+
+  A resync is whole when both lists were read and neither came back marked `unreachable` for a machine that is up
+  (the hub's call to it failed). Otherwise the machine is owed a read, taken at its next `machine_status` that finds it
+  connected again (no timer: the hub's word is the trigger; a status that turns it connected is not that, its resync
+  follows). The window's start-up lists, a reconnect to the hub and a project reorder can land after the machine's own
+  resync and carry the mirror's rows; each reads again every connected machine whose rows still carry the mark
+  (`machinesHoldingMirror`). A `machine_status` that comes while the start-up reads are out is kept over the machine
+  list read at their start.
 - **Per-machine questions carry the machine**: the new-session dialog's `agents.detect`, the model and capability
   lists of a session's menu, a remote session's "older CLI" line (`machineAgentVersions[machine]`, read when its header
   first needs it and again on its resync), `projects.add {path, machine}`, and `projects.create`/`projects.createPreview {name, parent?, machine}` (#515).

@@ -215,6 +215,29 @@ export function sidebarMachinesTests(): void {
       await expect(menu).toHaveCount(0)
     })
 
+    test('a row that still carries the hub’s mirror mark under a connected machine is solid, undimmed and says nothing of being away (#1611)', async ({ page }) => {
+      await setup(page)
+      const box = await link(page, 'Box')
+      await addOn(page, box, '/home/me/api')
+      // What a list read from the hub's mirror, landing after the machine came back, leaves on the row
+      await page.evaluate(() => {
+        const w = window as unknown as MockWindow
+        const mark = (rows: Record<string, { name?: string; machine?: string | null }>) =>
+          Object.fromEntries(Object.entries(rows).map(([id, r]) => [id, r.machine === 'box' ? { ...r, unreachable: true } : r]))
+        w.__store.setState((st: { projects: Record<string, never> }) => ({ projects: mark(st.projects) }))
+      })
+      const badge = page.getByTestId('project-machine-api')
+      await expect(badge).toHaveAttribute('data-status', 'connected')
+      expect(await border(page, 'project-machine-api')).toBe('solid')
+      await expect(page.getByTestId('project-api')).not.toHaveAttribute('data-away', 'true')
+      expect(await opacity(page.getByTestId('project-api'))).toBe(1)
+
+      // The machine's row is the only word: the same row dims, with the badge dashed, when the link drops
+      await setMachine(page, box, { status: 'unreachable', error: 'ssh: connect to host box port 22: Operation timed out' })
+      await expect(page.getByTestId('project-api')).toHaveAttribute('data-away', 'true')
+      expect(await border(page, 'project-machine-api')).toBe('dashed')
+    })
+
     test("the menu of a project on a machine that is away is whole, not see-through, and so is its tooltip (#1531)", async ({ page }) => {
       await setup(page)
       await link(page, 'Box')

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { isInTurn, isUnread, type SessionSummary } from '@cc/core'
+import { isInTurn, isMirrored, isUnread, type SessionSummary } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { useSelectedSessionId } from '../../store/selectors.js'
 import { INDENT, GUIDE } from './layout.js'
@@ -229,6 +229,7 @@ function OrchestratorChildRow({ s, onHold, setConfirming }: { s: SessionSummary;
   const selected = useSelectedSessionId()
   const focusSession = useStore((st) => st.focusSession)
   const interrupt = useStore((st) => st.interrupt)
+  const machines = useStore((st) => st.machines)
   const [menu, setMenu] = useState<HTMLElement | null>(null)
   // An open menu or dialog keeps the list shown while the pointer is away (#1591)
   const holding = menu !== null
@@ -258,7 +259,7 @@ function OrchestratorChildRow({ s, onHold, setConfirming }: { s: SessionSummary;
           focused ? 'border-l-ink-muted bg-surface-hover/40 text-ink' : 'border-l-transparent text-ink-muted hover:bg-surface-hover/20 hover:text-ink'
         }`}
       >
-        <ToolMark tool={s.tool} state={s.state} asleep={!s.live && !s.unreachable} interruption={s.interruption ?? null} openQuestions={s.pendingQuestions.length} unread={isUnread(s)} />
+        <ToolMark tool={s.tool} state={s.state} asleep={!s.live && !isMirrored(s, machines)} interruption={s.interruption ?? null} openQuestions={s.pendingQuestions.length} unread={isUnread(s)} />
         <span className={`truncate ${unread && !focused ? 'text-ink' : ''}`}>{s.name}</span>
       </button>
       <span

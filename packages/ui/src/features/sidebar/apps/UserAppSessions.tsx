@@ -1,4 +1,4 @@
-import { isUnread, type SessionSummary } from '@cc/core'
+import { isMirrored, isUnread, type SessionSummary } from '@cc/core'
 import { useStore } from '../../../store/store.js'
 import { useSelectedSessionId } from '../../../store/selectors.js'
 import { SESSION_MIME } from '../reorder.js'
@@ -22,6 +22,7 @@ import { ToolMark } from '../marks/ToolMark.jsx'
 export function UserAppSessions({ sessions: own }: { sessions: SessionSummary[] }) {
   const selected = useSelectedSessionId()
   const focusSession = useStore((s) => s.focusSession)
+  const machines = useStore((s) => s.machines)
   return own.map((s) => {
     const focused = selected === s.id
     const unread = isUnread(s)
@@ -47,7 +48,7 @@ export function UserAppSessions({ sessions: own }: { sessions: SessionSummary[] 
             focused ? 'border-l-ink-muted bg-surface-hover/40 text-ink' : 'border-l-transparent text-ink-muted hover:bg-surface-hover/20 hover:text-ink'
           }`}
         >
-          <ToolMark tool={s.tool} state={s.state} asleep={!s.live && !s.unreachable} interruption={s.interruption ?? null} openQuestions={s.pendingQuestions.length} unread={isUnread(s)} />
+          <ToolMark tool={s.tool} state={s.state} asleep={!s.live && !isMirrored(s, machines)} interruption={s.interruption ?? null} openQuestions={s.pendingQuestions.length} unread={isUnread(s)} />
           <span className={`truncate ${unread && !focused ? 'text-ink' : ''}`}>{s.name}</span>
         </button>
         {approvalLine(s, null, () => focusSession(s.id))}

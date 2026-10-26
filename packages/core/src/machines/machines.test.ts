@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { HostActivity, MachineInfo, MachineVersions } from '@cc/protocol'
-import { asksRow, autostartRow, awayNote, elevatedNote, followHubLead, followHubNote, hostStartNote, installNote, isAway, logonNote, MACHINE_STATUS_LABEL, machineProblem, operationNote, updateStops, updateWaits, versionPrompt } from './machines.js'
+import { asksRow, autostartRow, awayNote, elevatedNote, followHubLead, followHubNote, hostStartNote, installNote, isAway, isMirrored, logonNote, machineAway, MACHINE_STATUS_LABEL, machineProblem, operationNote, updateStops, updateWaits, versionPrompt } from './machines.js'
 
 const machine = (patch: Partial<MachineInfo> = {}): MachineInfo => ({
   id: 'box',
@@ -44,18 +44,37 @@ describe('away rows (#82)', () => {
     expect(isAway({ machine: null, unreachable: true }, {})).toBe(false)
   })
 
-  it('a row the hub listed from its mirror is away, whatever the machine row says', () => {
-    expect(isAway({ machine: 'box', unreachable: true }, { box: machine() })).toBe(true)
+  it('a row the hub listed from its mirror is not away while its machine says connected (#1611)', () => {
+    expect(isAway({ machine: 'box', unreachable: true }, { box: machine() })).toBe(false)
   })
 
-  it('a row of a machine whose link is not up is away', () => {
-    expect(isAway({ machine: 'box' }, { box: machine({ status: 'unreachable' }) })).toBe(true)
-    expect(isAway({ machine: 'box' }, { box: machine({ status: 'versions_differ' }) })).toBe(true)
+  it('a row of a machine whose link is not up is away, marked or not', () => {
+    for (const status of ['unreachable', 'away', 'connecting', 'versions_differ', 'refused', 'disconnected'] as const) {
+      expect(machineAway(machine({ status }))).toBe(true)
+      expect(isAway({ machine: 'box' }, { box: machine({ status }) })).toBe(true)
+      expect(isAway({ machine: 'box', unreachable: true }, { box: machine({ status }) })).toBe(true)
+    }
     expect(isAway({ machine: 'box' }, { box: machine() })).toBe(false)
   })
 
-  it('before the machine list arrives, the row is judged by its own mark', () => {
+  it('a machine the UI has no row for says nothing, so its rows are not away, whatever mark they carry', () => {
     expect(isAway({ machine: 'box' }, {})).toBe(false)
+    expect(isAway({ machine: 'box', unreachable: true }, {})).toBe(false)
+  })
+
+  it('the machine badge, the dimming and the tooltip read one word: machineAway is isAway for every state', () => {
+    const states = [undefined, ...(['connected', 'unreachable', 'away', 'connecting', 'versions_differ', 'refused', 'starting', 'updating', 'disconnected', 'stopped', 'not_running'] as const)]
+    for (const status of states) {
+      const machines: Record<string, MachineInfo> = status ? { box: machine({ status }) } : {}
+      for (const unreachable of [false, true]) expect(isAway({ machine: 'box', unreachable }, machines)).toBe(machineAway(machines['box']))
+    }
+  })
+
+  it('a row stands for what the hub last heard only while its machine is away', () => {
+    expect(isMirrored({ machine: 'box', unreachable: true }, { box: machine({ status: 'unreachable' }) })).toBe(true)
+    expect(isMirrored({ machine: 'box', unreachable: true }, { box: machine() })).toBe(false)
+    expect(isMirrored({ machine: 'box' }, { box: machine({ status: 'unreachable' }) })).toBe(false)
+    expect(isMirrored({ machine: null, unreachable: true }, {})).toBe(false)
   })
 })
 

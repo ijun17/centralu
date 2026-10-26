@@ -6,6 +6,7 @@
  * uses a different session id instead. Shared fixtures are in store.test-helpers.ts.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { isAway } from '@cc/core'
 import type { MachineInfo, NormalizedEvent } from '@cc/protocol'
 // eslint-disable-next-line no-restricted-imports -- the runtime ui knows only ports, but tests are contractually required to use MockPlatform instead of ad-hoc mocking (see the header of platform/src/mock/index.ts)
 import { MockPlatform } from '@cc/platform/mock'
@@ -685,6 +686,209 @@ describe('linked machines (#82)', () => {
     const p = await useStore.getState().addProject('/srv/other', 'box')
     expect(add).toHaveBeenCalledWith('/srv/other', 'box')
     expect(useStore.getState().projects[p.id]?.machine).toBe('box')
+  })
+})
+
+/*
+ * One source for "is this machine there" (#1611): the machine's own row. The `unreachable` mark on a row says only that
+ * the hub answered one list from its mirror, and a list read that lands late or fails leaves it behind while the machine
+ * says connected. Such a row is never dimmed, and is read again at the next word the hub has about the machine.
+ */
+describe('a machine the hub says is connected is never shown away (#1611)', () => {
+  const box = (over: Partial<MachineInfo> = {}): MachineInfo => ({
+    id: 'box', name: 'Box', sshTarget: 'me@box', shell: 'posix', wslDistro: null, command: null, status: 'connected',
+    error: null, versions: null, lastConnectedAt: null, nextAttemptAt: null, localPort: null, sameLocalPort: false, hostStarted: null, install: null, operation: null, autostart: null, elevated: null, asks: null, logon: null, handover: null, autoReconnect: true, connect: 'at_start', ...over,
+  })
+  const away = () => {
+    const st = useStore.getState()
+    return { project: isAway(Object.values(st.projects).find((p) => p.machine === 'box'), st.machines), session: isAway(st.sessions['box.cm-1'], st.machines) }
+  }
+
+  /** The hub's mirror answers the next `n` reads of each list, with the mark on the machine's rows: its link was down, or its call failed */
+  function mirrored(mock: MockPlatform, n = 1) {
+    const mark = <T extends { machine?: string | null }>(rows: T[]) => rows.map((x) => (x.machine === 'box' ? { ...x, unreachable: true } : x))
+    const sessions = mock.agents.listSessions
+    const projects = mock.projects.list
+    const left = { sessions: n, projects: n }
+    mock.agents.listSessions = async () => {
+      const rows = await sessions()
+      return left.sessions-- > 0 ? mark(rows) : rows
+    }
+    mock.projects.list = async () => {
+      const rows = await projects()
+      return left.projects-- > 0 ? mark(rows) : rows
+    }
+  }
+
+  async function pair() {
+    const mock = new MockPlatform()
+    mock.machinesList = [box()]
+    const remote = await mock.projects.add('/srv/app', 'box')
+    mock.sessions.set('box.cm-1', sessionInfo('box.cm-1', { projectId: remote.id, machine: 'box', live: false }))
+    return { mock, remote }
+  }
+
+  it('lists read from the mirror while the machine reads connected: neither row is away, and both are read again', async () => {
+    const { mock, remote } = await pair()
+    mirrored(mock)
+    await useStore.getState().attach(mock)
+    // Whatever the lists said, the machine is connected: nothing dims
+    expect(away()).toEqual({ project: false, session: false })
+    // And the marks the lists left are replaced by a read taken once the machine is known to be there
+    await vi.waitFor(() => expect(useStore.getState().projects[remote.id]?.unreachable).toBeFalsy())
+    await vi.waitFor(() => expect(useStore.getState().sessions['box.cm-1']?.unreachable).toBeFalsy())
+    // The machine's row is the only word: when the link drops, the same rows dim at once
+    mock.emit({ type: 'machine_status', machine: box({ status: 'unreachable' }) })
+    expect(away()).toEqual({ project: true, session: true })
+  })
+
+  it('a resync that lands while the window\'s own start-up lists are out is not undone by them', async () => {
+    const { mock, remote } = await pair()
+    // The start-up project list was read while the link was down; the link comes up, and its resync reaches the window
+    // before that answer does. The answer lands last and writes the mirror's rows over the fresh ones.
+    const real = mock.projects.list
+    let release!: () => void
+    let asked!: () => void
+    const held = new Promise<void>((r) => (release = r))
+    const first = new Promise<void>((r) => (asked = r))
+    mock.projects.list = async () => {
+      mock.projects.list = real
+      const rows = (await real()).map((p) => ({ ...p, unreachable: true }))
+      asked()
+      await held
+      return rows
+    }
+    const attaching = useStore.getState().attach(mock)
+    await first
+    mock.emit({ type: 'machine_resync', machineId: 'box' })
+    await settle()
+    release()
+    await attaching
+    await vi.waitFor(() => expect(useStore.getState().projects[remote.id]?.unreachable).toBeFalsy())
+    expect(away().project).toBe(false)
+  })
+
+  it.each(['sessions', 'projects'] as const)('a resync whose %s read failed is read again at the machine\'s next status, and nothing is dimmed meanwhile', async (which) => {
+    const { mock, remote } = await pair()
+    await useStore.getState().attach(mock)
+    // Changed on the machine since: a rename, and a project added
+    mock.sessions.get('box.cm-1')!.name = 'renamed there'
+    const added = await mock.projects.add('/srv/other', 'box')
+    const realSessions = mock.agents.listSessions
+    const realProjects = mock.projects.list
+    const failing = async () => {
+      throw new Error('hub busy')
+    }
+    if (which === 'sessions') mock.agents.listSessions = failing
+    else mock.projects.list = failing
+    mock.emit({ type: 'machine_resync', machineId: 'box' })
+    await settle()
+    await settle()
+    mock.agents.listSessions = realSessions
+    mock.projects.list = realProjects
+    // What the failed list would have brought is not here yet; the machine is still connected
+    if (which === 'sessions') expect(useStore.getState().sessions['box.cm-1']!.name).not.toBe('renamed there')
+    else expect(useStore.getState().projects[added.id]).toBeUndefined()
+    expect(away()).toEqual({ project: false, session: false })
+
+    // The hub's next word about the connected machine asks for what was owed
+    mock.emit({ type: 'machine_status', machine: box() })
+    await vi.waitFor(() => expect(useStore.getState().sessions['box.cm-1']!.name).toBe('renamed there'))
+    await vi.waitFor(() => expect(useStore.getState().projects[added.id]).toBeDefined())
+    expect(useStore.getState().projects[remote.id]).toBeDefined()
+
+    // Nothing is owed any more: the next status of the connected machine reads nothing
+    const sessions = vi.spyOn(mock.agents, 'listSessions')
+    const projects = vi.spyOn(mock.projects, 'list')
+    mock.emit({ type: 'machine_status', machine: box() })
+    await settle()
+    expect(sessions).not.toHaveBeenCalled()
+    expect(projects).not.toHaveBeenCalled()
+  })
+
+  it('a resync whose lists still come from the mirror (the hub\'s call failed with the link up) is read again at the next status', async () => {
+    const { mock, remote } = await pair()
+    await useStore.getState().attach(mock)
+    mirrored(mock)
+    mock.emit({ type: 'machine_resync', machineId: 'box' })
+    await vi.waitFor(() => expect(useStore.getState().projects[remote.id]?.unreachable).toBe(true))
+    expect(away()).toEqual({ project: false, session: false })
+    mock.emit({ type: 'machine_status', machine: box() })
+    await vi.waitFor(() => expect(useStore.getState().projects[remote.id]?.unreachable).toBeFalsy())
+    expect(useStore.getState().sessions['box.cm-1']?.unreachable).toBeFalsy()
+  })
+
+  it('a reconnect to the hub that reads the mirror for a connected machine reads that machine again', async () => {
+    const { mock } = await pair()
+    await useStore.getState().attach(mock)
+    mock.setConnectionState('disconnected')
+    mirrored(mock)
+    const read = vi.spyOn(mock.agents, 'listSessions')
+    mock.setConnectionState('connected')
+    // The reconnect's own read (the mirror's), then the machine's, taken once the machine list says it is connected
+    await vi.waitFor(() => expect(read.mock.calls.length).toBeGreaterThanOrEqual(2))
+    await vi.waitFor(() => expect(useStore.getState().sessions['box.cm-1']?.unreachable).toBeFalsy())
+    expect(away()).toEqual({ project: false, session: false })
+  })
+
+  it('a row the hub still lists from its mirror is never woken, though its machine is connected: its live is last heard, not a fact', async () => {
+    const { mock } = await pair()
+    mock.sessions.get('box.cm-1')!.live = true
+    await useStore.getState().attach(mock)
+    expect(useStore.getState().sessions['box.cm-1']!.live).toBe(true)
+    const resume = vi.spyOn(mock.agents, 'resumeSession')
+    // The mirror's last word is "not live" for both reads: the resync's and the window's reconnect
+    mock.sessions.get('box.cm-1')!.live = false
+    mirrored(mock, 2)
+    mock.emit({ type: 'machine_resync', machineId: 'box' })
+    await vi.waitFor(() => expect(useStore.getState().sessions['box.cm-1']!.unreachable).toBe(true))
+    // Not away (its machine is connected), and still not woken
+    expect(away().session).toBe(false)
+    mock.sessions.get('box.cm-1')!.live = true
+    mock.setConnectionState('disconnected')
+    mock.sessions.get('box.cm-1')!.live = false
+    mock.setConnectionState('connected')
+    await settle()
+    await settle()
+    expect(resume).not.toHaveBeenCalled()
+  })
+
+  it('a machine_status that comes while the start-up reads are out is not undone by the machine list read before it', async () => {
+    const { mock, remote } = await pair()
+    mock.machinesList = [box({ status: 'connecting' })]
+    const real = mock.projects.list
+    let release!: () => void
+    let asked!: () => void
+    const held = new Promise<void>((r) => (release = r))
+    const first = new Promise<void>((r) => (asked = r))
+    mock.projects.list = async () => {
+      mock.projects.list = real
+      const rows = (await real()).map((p) => ({ ...p, unreachable: true }))
+      asked()
+      await held
+      return rows
+    }
+    const attaching = useStore.getState().attach(mock)
+    await first
+    // The link comes up while the window is still reading
+    mock.emit({ type: 'machine_status', machine: box() })
+    mock.emit({ type: 'machine_resync', machineId: 'box' })
+    await settle()
+    release()
+    await attaching
+    expect(useStore.getState().machines['box']?.status).toBe('connected')
+    await vi.waitFor(() => expect(useStore.getState().projects[remote.id]?.unreachable).toBeFalsy())
+    expect(away()).toEqual({ project: false, session: false })
+  })
+
+  it('a project order that a machine could not take comes back from the mirror, and that connected machine is read again', async () => {
+    const { mock, remote } = await pair()
+    await useStore.getState().attach(mock)
+    const reorder = mock.projects.reorder
+    mock.projects.reorder = async (ids) => (await reorder(ids)).map((p) => (p.machine === 'box' ? { ...p, unreachable: true } : p))
+    await useStore.getState().reorderProjects([remote.id])
+    await vi.waitFor(() => expect(useStore.getState().projects[remote.id]?.unreachable).toBeFalsy())
+    expect(away().project).toBe(false)
   })
 })
 
