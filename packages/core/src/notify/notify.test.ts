@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionState } from '@cc/protocol'
-import { DEFAULT_NOTIFY_POLICY, allDoneNotification, badgeCount, notificationFor, readNotifyPolicy } from './notify.js'
+import { DEFAULT_NOTIFY_POLICY, badgeCount, notificationFor, readNotifyPolicy } from './notify.js'
 
 describe('readNotifyPolicy: the policy a snapshot from another build holds (#384)', () => {
   it('an older snapshot without a later switch takes that switch on by default, not off', () => {
@@ -51,82 +51,6 @@ describe('immediate notifications (approvals and errors only)', () => {
 
   it('the notification body includes the session name (you have to know which session it is to act)', () => {
     expect(notificationFor(s('waiting_approval', 'auth refactor'), 'working', bg)?.body).toContain('auth refactor')
-  })
-})
-
-describe('the "all done" notification (the signal someone who has left the desk needs)', () => {
-  // The decision is based on identity, so the same session in prev and now has to have the same id
-  const w = (id: string, state: SessionState) => ({ id, state })
-
-  it('notifies once when the last piece of work finishes', () => {
-    const prev = [w('a', 'working'), w('b', 'waiting_input')]
-    const now = [w('a', 'waiting_input'), w('b', 'waiting_input')]
-    expect(allDoneNotification(now, prev, bg)).toMatchObject({ kind: 'all_done' })
-  })
-
-  it('says every session finished, with no count of waiting ones, when none ended with an error', () => {
-    const prev = [w('a', 'working'), w('b', 'waiting_input'), w('c', 'idle')]
-    const now = [w('a', 'waiting_input'), w('b', 'waiting_input'), w('c', 'idle')]
-    expect(allDoneNotification(now, prev, bg)).toEqual({ kind: 'all_done', title: 'All done', body: 'Every session has finished' })
-  })
-
-  it('says how many ended with an error, one or several', () => {
-    const prev = [w('a', 'working'), w('b', 'working'), w('c', 'waiting_input')]
-    expect(allDoneNotification([w('a', 'error'), w('b', 'waiting_input'), w('c', 'waiting_input')], prev, bg)).toMatchObject({
-      body: 'Every session has stopped: 1 ended with an error',
-    })
-    expect(allDoneNotification([w('a', 'error'), w('b', 'error'), w('c', 'waiting_input')], prev, bg)).toMatchObject({
-      body: 'Every session has stopped: 2 ended with an error',
-    })
-  })
-
-  it('does not notify while a session is still working', () => {
-    const prev = [w('a', 'working'), w('b', 'working')]
-    const now = [w('a', 'working'), w('b', 'waiting_input')]
-    expect(allDoneNotification(now, prev, bg)).toBeNull()
-  })
-
-  it('does not notify again if everything had already finished (no duplicates)', () => {
-    const done = [w('a', 'waiting_input')]
-    expect(allDoneNotification(done, done, bg)).toBeNull()
-  })
-
-  it('does not notify when there are no sessions at all', () => {
-    expect(allDoneNotification([], [w('a', 'working')], bg)).toBeNull()
-  })
-
-  it('it is not "all done" while a session is waiting for approval (a blocked agent does not have its hands free)', () => {
-    const prev = [w('a', 'working'), w('b', 'waiting_approval')]
-    const now = [w('a', 'waiting_input'), w('b', 'waiting_approval')]
-    expect(allDoneNotification(now, prev, bg)).toBeNull()
-  })
-
-  it('does not notify while a session is waiting on a limit (it resumes on its own once the limit lifts)', () => {
-    const prev = [w('a', 'working'), w('b', 'limited')]
-    const now = [w('a', 'waiting_input'), w('b', 'limited')]
-    expect(allDoneNotification(now, prev, bg)).toBeNull()
-  })
-
-  it('notifies when the last approval is resolved and everything is awaiting response', () => {
-    const prev = [w('a', 'waiting_input'), w('b', 'waiting_approval')]
-    const now = [w('a', 'waiting_input'), w('b', 'waiting_input')]
-    expect(allDoneNotification(now, prev, bg)).toMatchObject({ kind: 'all_done' })
-  })
-
-  /*
-   * The trap in comparing counts: **deleting** the last working session brings busy to 0, but the work
-   * has not finished — only comparing identities can tell "the session that was busy has actually let go".
-   */
-  it('nothing goes off when the last working session is deleted', () => {
-    const prev = [w('a', 'working'), w('b', 'waiting_input')]
-    const now = [w('b', 'waiting_input')]
-    expect(allDoneNotification(now, prev, bg)).toBeNull()
-  })
-
-  it('if another session became busy while the busy one finished, it is not over yet', () => {
-    const prev = [w('a', 'working'), w('b', 'waiting_input')]
-    const now = [w('a', 'waiting_input'), w('b', 'working')]
-    expect(allDoneNotification(now, prev, bg)).toBeNull()
   })
 })
 

@@ -376,7 +376,7 @@ idle → working → (waiting_approval | waiting_input | limited | error) → wo
 
 - **`waiting_approval` and `waiting_input` are never merged into the same badge.** Colour, icon, ordering and notification policy are all separate.
 - The global counter is split too: **"2 approvals · 3 awaiting response"** (a combined "5 waiting" is forbidden).
-- Display layers: ① session row status dot (sidebar) → ② project aggregate → ③ split global counters (pinned at the top of the window) → ④ dock icon badge / OS notification — defaults: approvals and errors notify immediately, awaiting-response is badge only. Instead, **when every session has finished its work (all waiting/idle), one "all done" notification** — the signal someone who left the desk needs is this, not the end of an individual session. (Configurable)
+- Display layers: ① session row status dot (sidebar) → ② project aggregate → ③ split global counters (pinned at the top of the window) → ④ dock icon badge / OS notification — defaults: approvals notify immediately, awaiting-response is badge only. The "all done" notification (once, when every session had finished its work) and the error notification were retired on 2026-10-20 (#1429): the window no longer raises them, and the stored `error` and `allDone` switches stay readable for older builds (`docs/agent-host.md`).
 - The **"go to the next waiting item"** shortcut: cycles in priority order approval → error → awaiting response (→ FR-17).
 - Show elapsed waiting time ("waiting 3 minutes").
 
@@ -989,7 +989,7 @@ sessions, if one is wanted, is built as an external app). The inbox (FR-15) stay
 - Front end → **React**. Idle energy is decided by the render policy (§7.1), so framework lightness is not the deciding factor; ecosystem and agent-driven-development friendliness take priority.
 - Orchestrator `create_session` → **proposal card + human confirmation** (the three inspect/read/send tools are automatic).
 - "Always allow" rules → **patterns allowed + a match preview at registration + rule management in settings**. Make the consequences visible instead of limiting expressiveness.
-- `waiting_input` notification → **silent by default (badge only), with one "all done" notification when every session has finished its work**.
+- `waiting_input` notification → **silent by default (badge only)**; the "all done" notification was retired on 2026-10-20 (#1429).
 
 ---
 
