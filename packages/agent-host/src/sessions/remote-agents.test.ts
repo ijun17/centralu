@@ -549,6 +549,10 @@ describe("the turn on the child's machine, read as the caller's only on evidence
         const ra = await afterNote()
         await sentInTheGap(ra, 3)
         ends(ra)
+        // A control: the instruction's own turn is taken
+        opens(ra, { seq: 3, from: named })
+        expect(reportOwed()).toBe(true)
+        ends(ra)
         opens(ra, { seq: 7, from: named })
         expect(reportOwed()).toBe(false)
       })

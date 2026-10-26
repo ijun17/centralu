@@ -47,14 +47,23 @@ describe('a turn the tool opens for an earlier message', () => {
 
   it("keeps nothing of another session's messages on this computer: only a hub reads what a turn ran for", async () => {
     const id = await w.callerSession()
-    await w.mgr.send(id, 'a note from a local session', undefined, { sessionId: 'a-local-session', name: 'Local' })
+    // A control: a hub's message is kept
+    await w.mgr.send(id, 'a note from the hub', undefined, FROM)
+    expect(w.store.settings.appSetting(`input_origins:${id}`)).not.toBeNull()
+    const other = await w.callerSession()
+    await w.mgr.send(other, 'a note from a local session', undefined, { sessionId: 'a-local-session', name: 'Local' })
     // The message goes in as any other at rest, and nothing is kept for a turn to name
-    expect(handleOf(id).ids.at(-1)).toBeUndefined()
-    expect(w.store.settings.appSetting(`input_origins:${id}`)).toBeNull()
+    expect(handleOf(other).ids.at(-1)).toBeUndefined()
+    expect(w.store.settings.appSetting(`input_origins:${other}`)).toBeNull()
   })
 
   it('says nothing for a person’s message, or an input no sender gave', async () => {
     const id = await w.callerSession()
+    // A control: the hub's message is named
+    await w.mgr.send(id, 'the task', undefined, FROM)
+    opens(id, [handleOf(id).ids.at(-1)!])
+    expect(opened()).toHaveProperty('origin')
+    handleOf(id).answer('done')
     await w.mgr.send(id, 'typed by the person')
     expect(handleOf(id).ids.at(-1)).toBeUndefined()
     opens(id, ['an-input-nobody-named'])
@@ -89,9 +98,12 @@ describe('the answer of the turn a hub asks about', () => {
   it("is the turn before's when the next has said nothing yet, as the end that is being read was that turn's", async () => {
     const id = await w.callerSession()
     await w.mgr.send(id, 'the task', undefined, FROM)
-    handleOf(id).answer('the answer')
-    // The next turn has begun as the hub reads the end of this one
+    await w.mgr.send(id, 'a note', undefined, FROM)
+    handleOf(id).answer('first answer')
     handleOf(id).event({ type: 'state_change', sessionId: id, state: 'working' })
-    expect(await w.mgr.hostReader().lastAnswer(id, undefined, true)).toMatchObject({ text: 'the answer' })
+    handleOf(id).answer('second answer')
+    // The next turn has begun as the hub reads the end of this one: the words are the second turn's, not the first's joined to them
+    handleOf(id).event({ type: 'state_change', sessionId: id, state: 'working' })
+    expect(await w.mgr.hostReader().lastAnswer(id, undefined, true)).toMatchObject({ text: 'second answer' })
   })
 })

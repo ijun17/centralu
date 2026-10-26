@@ -17,11 +17,9 @@ const tool = (seq: number) => row(seq, 'assistant', 'tool_call')
 describe("a turn's response, read from where the turn began (#1604)", () => {
   const followUp = [asked(1, 'task'), asked(2, 'a note'), said(3, 'first answer'), said(4, 'second answer')]
 
-  it("is both turns' words joined without a start: the report of the follow-up turn read them so", () => {
+  it("is the turn's own words alone from the row it began after: the turn before is not in it, as the report of the follow-up turn read it", () => {
+    // Without a start both turns' words are joined: nothing of anyone's stands between them
     expect(lastResponse(followUp)).toBe('first answer\n\nsecond answer')
-  })
-
-  it("is the turn's own words alone from the row it began after: the turn before is not in it", () => {
     expect(lastResponse(followUp, 3)).toBe('second answer')
     expect(lastResponseSeq(followUp, 3)).toBe(4)
     expect(turnAnswer(followUp, { afterSeq: 3 })).toBe('second answer')
@@ -46,7 +44,7 @@ describe("a turn's response, read from where the turn began (#1604)", () => {
   })
 
   it('reads the response past a tool call still running, as the last response does', () => {
-    const rows = [asked(1, 'task'), said(2, 'about to look'), tool(3)]
-    expect(lastResponse(rows, 1)).toBe('about to look')
+    const rows = [asked(1, 'task'), said(2, 'about to look'), asked(3, 'a note'), said(4, 'and more'), tool(5)]
+    expect(lastResponse(rows, 1)).toBe('about to look\n\nand more')
   })
 })

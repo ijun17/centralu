@@ -58,6 +58,17 @@ const item = (turnId: string, type: string, clientId?: string) =>
   state.handlers!.onNotification({ method: 'item/started', params: { threadId: 't1', turnId, item: { type, id: `i-${type}`, ...(clientId ? { clientId } : {}) } } })
 const completed = (id: string) => state.handlers!.onNotification({ method: 'turn/completed', params: { threadId: 't1', turn: { id } } })
 
+/** A control the cases below mean something only after: a message the hub gave under an id that starts a turn is named */
+async function control(h: Awaited<ReturnType<typeof session>>['h'], startedFrom: (readonly string[] | null)[]) {
+  state.turnStartReply = async () => ({ turn: { id: 'control-1' } })
+  void h.sendTracked!('starts one', undefined, { id: OTHER }).catch(() => {})
+  await tick()
+  turnStarted('control-1')
+  item('control-1', 'userMessage', OTHER)
+  expect(startedFrom).toEqual([null, [OTHER]])
+  completed('control-1')
+}
+
 describe('codex: the input a turn it started began from (#1604)', () => {
   it("says it as the turn opens when the message was sent just after the turn it was meant for ended", async () => {
     const { h, startedFrom } = await session()
@@ -94,6 +105,7 @@ describe('codex: the input a turn it started began from (#1604)', () => {
 
   it('says nothing of a message that joined a turn already running: it shows after the turn’s first item', async () => {
     const { h, startedFrom } = await session()
+    await control(h, startedFrom)
     state.turnStartReply = async () => ({ turn: { id: 'turn-1' } })
     h.send('long job')
     await tick()
@@ -102,19 +114,20 @@ describe('codex: the input a turn it started began from (#1604)', () => {
     void h.sendTracked!('joined', undefined, { id: NOTE }).catch(() => {})
     await tick()
     item('turn-1', 'userMessage', NOTE)
-    expect(startedFrom).toEqual([null])
+    expect(startedFrom).toEqual([null, [OTHER], null])
     completed('turn-1')
     await h.dispose()
   })
 
   it("says nothing of a turn the person's message started: no client id it gave", async () => {
     const { h, startedFrom } = await session()
+    await control(h, startedFrom)
     state.turnStartReply = async () => ({ turn: { id: 'turn-1' } })
     h.send('typed by the person')
     await tick()
     turnStarted('turn-1')
     item('turn-1', 'userMessage')
-    expect(startedFrom).toEqual([null])
+    expect(startedFrom).toEqual([null, [OTHER], null])
     completed('turn-1')
     await h.dispose()
   })
