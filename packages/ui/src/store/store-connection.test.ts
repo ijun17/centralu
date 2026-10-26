@@ -842,6 +842,8 @@ describe('a machine the hub says is connected is never shown away (#1611)', () =
     mirrored(mock, 2)
     mock.emit({ type: 'machine_resync', machineId: 'box' })
     await vi.waitFor(() => expect(useStore.getState().sessions['box.cm-1']!.unreachable).toBe(true))
+    // Not away (its machine is connected), and still not woken
+    expect(away().session).toBe(false)
     mock.sessions.get('box.cm-1')!.live = true
     mock.setConnectionState('disconnected')
     mock.sessions.get('box.cm-1')!.live = false
