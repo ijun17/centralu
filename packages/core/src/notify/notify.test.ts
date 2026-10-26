@@ -64,6 +64,22 @@ describe('the "all done" notification (the signal someone who has left the desk 
     expect(allDoneNotification(now, prev, bg)).toMatchObject({ kind: 'all_done' })
   })
 
+  it('says every session finished, with no count of waiting ones, when none ended with an error', () => {
+    const prev = [w('a', 'working'), w('b', 'waiting_input'), w('c', 'idle')]
+    const now = [w('a', 'waiting_input'), w('b', 'waiting_input'), w('c', 'idle')]
+    expect(allDoneNotification(now, prev, bg)).toEqual({ kind: 'all_done', title: 'All done', body: 'Every session has finished' })
+  })
+
+  it('says how many ended with an error, one or several', () => {
+    const prev = [w('a', 'working'), w('b', 'working'), w('c', 'waiting_input')]
+    expect(allDoneNotification([w('a', 'error'), w('b', 'waiting_input'), w('c', 'waiting_input')], prev, bg)).toMatchObject({
+      body: 'Every session has stopped: 1 ended with an error',
+    })
+    expect(allDoneNotification([w('a', 'error'), w('b', 'error'), w('c', 'waiting_input')], prev, bg)).toMatchObject({
+      body: 'Every session has stopped: 2 ended with an error',
+    })
+  })
+
   it('does not notify while a session is still working', () => {
     const prev = [w('a', 'working'), w('b', 'working')]
     const now = [w('a', 'working'), w('b', 'waiting_input')]

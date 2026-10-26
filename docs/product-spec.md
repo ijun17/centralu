@@ -376,7 +376,7 @@ idle → working → (waiting_approval | waiting_input | limited | error) → wo
 
 - **`waiting_approval` and `waiting_input` are never merged into the same badge.** Colour, icon, ordering and notification policy are all separate.
 - The global counter is split too: **"2 approvals · 3 awaiting response"** (a combined "5 waiting" is forbidden).
-- Display layers: ① session row status dot (sidebar) → ② project aggregate → ③ split global counters (pinned at the top of the window) → ④ dock icon badge / OS notification — defaults: approvals and errors notify immediately, awaiting-response is badge only. Instead, **when every session has finished its work (all waiting/idle), one "all done" notification** — the signal someone who left the desk needs is this, not the end of an individual session. (Configurable)
+- Display layers: ① session row status dot (sidebar) → ② project aggregate → ③ split global counters (pinned at the top of the window) → ④ dock icon badge / OS notification — defaults: approvals and errors notify immediately, awaiting-response is badge only. Instead, **when every session has finished its work (all waiting/idle), one "all done" notification** — the signal someone who left the desk needs is this, not the end of an individual session. It reads "Every session has finished", or, when some ended in error, "Every session has stopped: N ended with an error" (owner, 2026-10-26, #1572). (Configurable)
 - The **"go to the next waiting item"** shortcut: cycles in priority order approval → error → awaiting response (→ FR-17).
 - Show elapsed waiting time ("waiting 3 minutes").
 

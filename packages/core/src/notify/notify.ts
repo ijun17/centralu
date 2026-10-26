@@ -1,5 +1,4 @@
 import { DEFAULT_NOTIFY_POLICY, readNotifyPolicy, type NotifyPolicy, type SessionState } from '@cc/protocol'
-import { isWaiting } from '../session/state-machine.js'
 
 /**
  * Notification policy (FR-12 display layer ④).
@@ -81,11 +80,12 @@ export function allDoneNotification(
   // Nor is it finished if some session became busy in the meantime
   if (sessions.some(isBusy)) return null
 
-  const waiting = sessions.filter((s) => isWaiting(s.state)).length
+  // Said as it is (owner, 2026-10-26, #1572): every session finished, or how many ended with an error
+  const errors = sessions.filter((s) => s.state === 'error').length
   return {
     kind: 'all_done',
     title: 'All done',
-    body: waiting > 0 ? `${waiting} sessions are waiting for input` : 'Every session has finished',
+    body: errors > 0 ? `Every session has stopped: ${errors} ended with an error` : 'Every session has finished',
   }
 }
 
