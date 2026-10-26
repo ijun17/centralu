@@ -4,6 +4,7 @@ import boundaries from 'eslint-plugin-boundaries'
 import reactHooks from 'eslint-plugin-react-hooks'
 import globals from 'globals'
 import testDataDir from './tooling/eslint-test-data-dir.js'
+import testTimeLimits from './tooling/eslint-test-time-limits.js'
 import platformChecks from './tooling/eslint-platform-checks.js'
 import agentAdapterChecks from './tooling/eslint-agent-adapter-checks.js'
 
@@ -309,4 +310,6 @@ export default tseslint.config(
   },
   // A test file never writes CC_DATA_DIR by hand (tooling/eslint-test-data-dir.js)
   { files: TEST_FILES, plugins: { 'test-env': testDataDir }, rules: { 'test-env/data-dir': 'error' } },
+  // A time limit a test sets for itself is scaled by SLOW (tooling/eslint-test-time-limits.js); these are the files the unit test read
+  { files: ['packages/**/*.test.{ts,tsx}', 'tooling/**/*.test.ts'], plugins: { 'test-limits': testTimeLimits }, rules: { 'test-limits/scaled-by-slow': 'error' } },
 )
