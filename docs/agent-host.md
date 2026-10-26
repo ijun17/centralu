@@ -3803,6 +3803,19 @@ purpose: a read that failed (not logged in, a timeout) is also `supported: false
 predates the mark, so only the mark tells "never" from "not now"; without it the window draws the dashed, unknown ring. The
 window keeps the last answer through a call that fails (a host swap, a busy tool) and only learns why the ask failed.
 
+**A tool with no limits to read (#1623, #1616).** Cursor and OpenCode have no usage API. Their adapters answer `listUsage()` from the
+tool's own command, never its credential or state files: Cursor's plan from `agent about --format json` (`subscriptionTier`;
+the account's email in that output is never read out), OpenCode's local totals from `opencode stats` (boxed tables read
+by their labels: sessions, messages, tokens, cost; no JSON form). The snapshot says `noLimits: true` and carries `plan` and
+`totals { scope, rows }` (additive), and `usageFor` answers it as `supported: false, notReported: true` with that snapshot as
+`usage` and a plain reason ("<tool> does not report usage limits"): nothing is wrong and nothing is to be done, and the donut
+is the dimmed one (design-system.md §10). A failed read also answers `supported: false` but without `notReported`, which
+stays the unknown it is. Each read is a process run, so it is kept (`adapters/usage-read.ts`: Cursor's plan five minutes,
+OpenCode's totals one), shared between askers, and never waited on: with no answer yet the asker waits three seconds, then
+gets the plain "no limits" snapshot while the read goes on and fills the cache; a stale answer is returned at once and read
+again behind it; a failed command is not run again for a minute. Measured on Windows (agent 2026.10.22, opencode 1.19.4):
+`agent about` 1.6 to 2.3 s, `opencode stats` 0.8 to 1.3 s; the recorded outputs (email replaced) are the parsers' test input.
+
 Usage is an **account** property, not a session or directory one, which is why `listUsage()`
 takes no arguments — the answer is the same whichever folder you ask from. Only subscription
 limits are in scope; metered credits are not.

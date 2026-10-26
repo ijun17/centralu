@@ -1972,6 +1972,17 @@ SDK, 다른 쪽은 `app-server`). 답하지 못하는 어댑터는 던지고, �
 `supported: false`이고, 이 표시를 모르는 옛 호스트의 모든 답도 그렇기 때문에, "영영 없음"과 "지금은 없음"을 가르는 것은 이 표시뿐이다.
 표시가 없으면 창은 점선의 모름 고리를 그린다. 창은 실패한 호출(호스트 교체, 바쁜 도구)에도 마지막 답을 그대로 두고 왜 실패했는지만 새로 안다.
 
+**읽을 한도가 없는 도구 (#1623, #1616).** Cursor와 OpenCode에는 사용량 API가 없다. 두 어댑터는 `listUsage()`를 도구 자신의
+명령으로 답하고, 자격 증명이나 상태 파일은 읽지 않는다: Cursor의 플랜은 `agent about --format json`(`subscriptionTier`, 출력의 계정
+이메일은 읽지 않는다), OpenCode의 로컬 합계는 `opencode stats`(상자 표를 라벨로 읽는다: 세션, 메시지, 토큰, 비용, JSON 형식은 없다)에서
+얻는다. 스냅샷은 `noLimits: true`와 `plan`, `totals { scope, rows }`(추가만)를 싣고, `usageFor`는 이를 그 스냅샷을 `usage`로 한
+`supported: false, notReported: true`와 쉬운 이유("<도구> does not report usage limits")로 답한다: 잘못된 것도 할 일도 없고, 도넛은
+어둡게 그린 것이다(design-system.ko.md §10). 읽기 실패도 `supported: false`지만 `notReported`가 없어 지금은 모름으로 남는다. 읽기는
+프로세스 실행이라 보관하고(`adapters/usage-read.ts`: Cursor 플랜 5분, OpenCode 합계 1분), 묻는 쪽끼리 나누며, 기다리게 하지 않는다: 답이
+아직 없으면 3초만 기다린 뒤 읽기가 계속되는 동안 쉬운 "한도 없음" 스냅샷을 주고, 오래된 답은 바로 주고 뒤에서 다시 읽으며, 실패한
+명령은 1분간 다시 돌리지 않는다. Windows에서 잰 값(agent 2026.10.22, opencode 1.19.4): `agent about` 1.6~2.3초, `opencode stats` 0.8~1.3초.
+녹화한 출력(이메일은 바꿈)이 파서의 테스트 입력이다.
+
 사용량은 세션도 디렉토리도 아닌 **계정**의 성질이라 `listUsage()`에는 인자가 없다 — 어느
 폴더에서 묻든 답이 같다. 다루는 것은 구독 한도뿐이고, 추가 결제(크레딧)는 범위 밖이다.
 
