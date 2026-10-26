@@ -5,6 +5,7 @@ import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
 import { describe, expect, it, vi } from 'vitest'
+import { SLOW } from './test-timing.js'
 
 /*
  * The data folder tests run against (#368). A folder shared by every test file let one file's
@@ -65,7 +66,8 @@ describe('a data folder a test sets for itself', () => {
     expect(files.length).toBeGreaterThan(100)
     const byHand = files.flatMap((f) => writesByHand(f, readFileSync(join(root, f), 'utf8')).map((line) => `${f}:${line}`))
     expect(byHand).toEqual([])
-  })
+    // It parses every test file in the repository (about 700): under a full CI run's load that passed 5 s (batch-229, #1590)
+  }, 30_000 * SLOW)
 })
 
 /*
