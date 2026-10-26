@@ -1,4 +1,4 @@
-import type { AdapterCapabilities, ToolDescriptor } from '@cc/protocol'
+import type { AdapterCapabilities, ToolDescriptor, UsageSnapshot } from '@cc/protocol'
 import type { AgentSpawnSpec, CreateSessionOpts, DetectResult } from '../contract.js'
 import type { AdapterSurface } from '../contract/surface.js'
 import type { RequestPermission, ToolCallFields } from './wire.js'
@@ -21,6 +21,11 @@ export type AcpProfile = {
    * its own rights (#1562 review)
    */
   centraluToolOf?(call: ToolCallFields): string | null
+  /**
+   * What the tool says about its usage, from its own command (#1623). Absent: the tool says nothing, and `agents.usage`
+   * answers that it does not report usage. The reader keeps its own answer and never waits long (`adapters/usage-read.ts`).
+   */
+  readUsage?(): Promise<UsageSnapshot>
   /**
    * Its `/compact` compacts though the agent does not advertise the command, and leaves no protocol frame: the core reads
    * Centralu's compact turn instead (`AcpSessionDeps.infersCompaction`). Measured, never assumed: without it a session is

@@ -7,6 +7,7 @@ import { ORCHESTRATOR_MCP_NAME } from '../../apps/contract.js'
 import type { DetectResult } from '../contract.js'
 import { findCursor } from './install.js'
 import { CURSOR_SURFACE } from './surface.js'
+import { cursorUsageReader } from './usage.js'
 
 const exec = promisify(execFile)
 
@@ -65,6 +66,7 @@ const STATUS_FOR_MS = 60_000
 
 export function cursorProfile(): AcpProfile {
   let status: { at: number; result: DetectResult } | null = null
+  const readUsage = cursorUsageReader()
   return {
     descriptor: DESCRIPTOR,
     capabilities: CAPABILITIES,
@@ -77,6 +79,7 @@ export function cursorProfile(): AcpProfile {
       return findCursor()?.version ?? null
     },
     centraluToolOf: centraluToolOfCall,
+    readUsage,
     async detect() {
       if (status && Date.now() - status.at < STATUS_FOR_MS) return status.result
       const install = findCursor()

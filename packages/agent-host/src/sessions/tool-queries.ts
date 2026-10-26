@@ -23,6 +23,11 @@ const MODEL_LIST_RETRY_MS = 60_000
  * What the tool queries reach of the session manager (#428), typed as the manager declares each member. The manager
  * builds it with getters for its fields, so each is read when used, never kept.
  */
+/** What a tool with no limits to read is told as: plain, since nothing is wrong and nothing is to be done (#1623) */
+function noLimitsReason(label: string): string {
+  return `${label} does not report usage limits`
+}
+
 export type ToolQueriesHost = {
   readonly adapters: Map<string, AgentAdapter>
   readonly cacheLedger: CacheLedger
@@ -107,19 +112,25 @@ export class ToolQueries {
      */
     const cache = this.host.cacheLedger.stats(tool, (id) => this.host.meta.get(id)?.name)
     const adapter = this.host.adapters.get(tool)
-    if (!adapter?.listUsage) return { supported: false, reason: `${tool} does not support usage queries`, notReported: true, usage: null, cache }
+    if (!adapter?.listUsage) return { supported: false, reason: noLimitsReason(adapter?.descriptor.label ?? tool), notReported: true, usage: null, cache }
     // The hub shows its own limits for this machine (same account, #726): only the figures counted here are wanted
     if (opts.limits === false) return { supported: true, usage: null, cache }
 
+    // A tool with no limits to read (#1623) answers what it does say, as the answer of one that does not report them
+    const answer = (snapshot: UsageSnapshot) =>
+      snapshot.noLimits && snapshot.windows.length === 0
+        ? { supported: false, reason: noLimitsReason(adapter.descriptor.label), notReported: true, usage: snapshot, cache }
+        : { supported: true, usage: snapshot, cache }
+
     const hit = this.usageCache.get(tool)
-    if (hit && Date.now() - hit.at < 60_000) return { supported: true, usage: hit.snapshot, cache }
+    if (hit && Date.now() - hit.at < 60_000) return answer(hit.snapshot)
 
     try {
       const snapshot = await withTimeout(adapter.listUsage(), 15_000)
       this.usageCache.set(tool, { snapshot, at: Date.now() })
       // A fresh reading is kept for the history (§6.2), whoever asked: the gauge, a turn end or the ten-minute sample
       void this.host.usageRecorder.snapshot(tool, snapshot)
-      return { supported: true, usage: snapshot, cache }
+      return answer(snapshot)
     } catch (err) {
       return { supported: false, reason: (err as Error).message, usage: hit?.snapshot ?? null, cache }
     }

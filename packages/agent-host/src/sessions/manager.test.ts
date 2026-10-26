@@ -665,9 +665,22 @@ describe('while-alive facts are carried in the list', () => {
     Object.assign(adapter, { listUsage: undefined })
     expect(await rpc('agents.usage', { tool: 'claude' })).toMatchObject({
       supported: false,
-      reason: 'claude does not support usage queries',
+      reason: 'Claude Code does not report usage limits',
       notReported: true,
     })
+  })
+
+  it('answers a tool with no limits to read as one that does not report them, and keeps the plan and totals it does say (#1623)', async () => {
+    const snapshot = { plan: 'Free', windows: [], daily: [], noLimits: true, totals: { scope: 'all time', rows: [{ id: 'input', label: 'Input', value: 5, unit: 'tokens' }] } }
+    Object.assign(adapter, { listUsage: async () => snapshot })
+    const r = await rpc('agents.usage', { tool: 'claude' })
+    expect(r).toMatchObject({ supported: false, notReported: true, usage: snapshot })
+    expect(r).toHaveProperty('reason', expect.stringMatching(/does not report usage limits$/))
+    // The one-minute cache answers the same
+    expect(await rpc('agents.usage', { tool: 'claude' })).toMatchObject({ supported: false, notReported: true, usage: snapshot })
+    // A tool that does have windows is read as ever
+    Object.assign(adapter, { listUsage: async () => ({ plan: 'max', windows: [{ id: 'w', label: 'Weekly', percent: 1, resetsAt: null, scope: null }], daily: [] }) })
+    expect(await rpc('agents.usage', { tool: 'codex' })).toBeDefined()
   })
 
   it('counts each model request into the prompt cache figures agents.usage answers with (docs/agent-host.md §6.1)', async () => {
