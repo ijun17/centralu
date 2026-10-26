@@ -466,7 +466,7 @@ const mailPerson = new MailPerson(mail, store.mail, mailDelivery, {
 mail.onChange((c) => events.push({ type: 'mail_changed', threadId: c.threadId, toPerson: c.recipients.includes('person') }))
 // A session that goes to the trash leaves the work it held in the mailbox to the person or to nobody (§3.3); one that comes
 // to rest, answers a card or is restored may now take the mail it was holding
-mgr.useMail({ askedBy: (id) => askedBy(askedByHost, mailTurns, id), sessionGone: (id) => void mail.sessionGone(id), handOver: (from, to, which) => mail.handOver(from, to, which), openWork: (id) => mail.openWorkOf(id), sessionChanged: (id) => mailDelivery.poke(id), sessionEvent: (e, ended) => mailTurns.observe(e, ended), tool: (id, args) => mailTool.run(id, args),
+mgr.useMail({ askedBy: (id) => askedBy(askedByHost, mailTurns, id), sessionGone: (id) => void mail.sessionGone(id), handOver: (from, to, which) => mail.handOver(from, to, which), handOverPreview: (from, to) => mail.handOverPreview(from, to), openWork: (id) => mail.openWorkOf(id), sessionChanged: (id) => mailDelivery.poke(id), sessionEvent: (e, ended) => mailTurns.observe(e, ended), tool: (id, args) => mailTool.run(id, args),
   // Work a session gave another is written down as a thread, beside the old path that delivered it (§8.1)
   delegated: delegationRecorder(
     mail,

@@ -113,7 +113,7 @@ function host(kept: ReadonlySet<string> = new Set()) {
   const delivery = new MailDelivery(mail, store.mail, mgr.mailSessions(), { schedule: () => () => {}, turns })
   const tool = new MailTool(mail, store.mail)
   mgr.useMail({
-    sessionGone: (id) => void mail.sessionGone(id), handOver: (from, to, which) => mail.handOver(from, to, which), openWork: (id) => mail.openWorkOf(id),
+    sessionGone: (id) => void mail.sessionGone(id), handOver: (from, to, which) => mail.handOver(from, to, which), handOverPreview: (from, to) => mail.handOverPreview(from, to), openWork: (id) => mail.openWorkOf(id),
     sessionChanged: (id) => delivery.poke(id), sessionEvent: (e, ended) => turns.observe(e, ended), tool: (id, args) => tool.run(id, args),
     delegated: delegationRecorder(mail, (id) => { const s = mgr.sessionInfo(id); return s && { projectId: s.projectId, depth: 0 } }, turns),
     waitingOn: (o, c) => mail.waitingOn(mail.sessionAddress(o), mail.sessionAddress(c)),
@@ -368,5 +368,62 @@ describe('the handoff mail move in the situations around it (#1574)', () => {
     h.mgr.rename(heir, 'Successor')
     const asks = (await h.mgr.archiveIfAtRest(parent)) as { archived: false; asks: string[] }
     expect(asks.asks).toContain('It is the assignee of an unfinished mail thread ("G gives A work"); it goes to "Successor", which took over from it, and stays there if it is restored.')
+  })
+})
+
+describe('mail the move cannot simply re-point (#1580 review)', () => {
+  it('F1: leaves nothing waiting for an original whose copy the heir already has, even once it is restored', async () => {
+    const h = host()
+    const { project, parent } = await parentOf(h)
+    const x = await session(h, project)
+    const heir = await handOff(h, project, parent, false)
+    const both = openBy(h.mail, { by: at(h, x), kind: 'question', subject: 'X asks both', body: 'which?', members: [at(h, parent), at(h, heir)] }).thread
+    await h.mgr.trashSession(parent)
+    await h.mgr.restoreSession(parent)
+    expect(store.mail.pendingFor(at(h, parent), Date.now() + 10 * DEBOUNCE_MS).map((p) => p.thread.id)).not.toContain(both.id)
+    expect(store.mail.pendingFor(at(h, heir), Date.now() + 10 * DEBOUNCE_MS).map((p) => p.thread.id)).toContain(both.id)
+  })
+
+  it("F2: does not give the heir a receipt for its own answer", async () => {
+    const h = host()
+    const { project, parent } = await parentOf(h)
+    const heir = await handOff(h, project, parent, false)
+    const asked = openBy(h.mail, { by: at(h, parent), kind: 'question', subject: 'A asks B', body: 'what?', members: [at(h, heir)] }).thread
+    h.mail.post(asked.id, at(h, heir), { kind: 'answer', body: 'this' })
+    await h.mgr.trashSession(parent)
+    expect(thread(asked.id).owner).toBe(at(h, heir))
+    expect(recipients(asked.id, 'answer')).not.toContain(at(h, heir))
+    expect(store.mail.pendingFor(at(h, heir), Date.now() + 10 * DEBOUNCE_MS).filter((p) => p.message.sender === at(h, heir))).toEqual([])
+  })
+
+  it('F3: gives the heir the closing report of work the original gave, which it never read', async () => {
+    const h = host()
+    const { project, parent } = await parentOf(h)
+    const g = await session(h, project)
+    const work = openBy(h.mail, { by: at(h, parent), kind: 'assign', subject: 'A gives G work', body: 'do it', assignee: at(h, g) }).thread
+    h.mail.post(work.id, at(h, g), { kind: 'report', body: 'I stopped: it cannot be done' })
+    h.mail.update(work.id, PERSON, { state: 'done', outcome: 'dropped' })
+    const heir = await handOff(h, project, parent)
+    expect(thread(work.id)).toMatchObject({ state: 'done', owner: at(h, parent) })
+    expect(recipients(work.id, 'report')).toContain(at(h, heir))
+    expect(recipients(work.id, 'report')).not.toContain(at(h, parent))
+    expect(h.tool.run(heir, { action: 'read', thread: work.id }).text).toContain('I stopped: it cannot be done')
+  })
+
+  it('F4: the archive preview and the heir\'s notice say exactly what goes where', async () => {
+    const h = host()
+    const { project, parent } = await parentOf(h)
+    const x = await session(h, project)
+    const heir = await handOff(h, project, parent, false)
+    h.mgr.rename(heir, 'Successor')
+    openBy(h.mail, { by: at(h, parent), kind: 'assign', subject: 'A gives B work', body: 'do it', assignee: at(h, heir) })
+    openBy(h.mail, { by: at(h, x), kind: 'question', subject: 'X asks A', body: 'what?', members: [at(h, parent)] })
+    const asks = (await h.mgr.archiveIfAtRest(parent)) as { archived: false; asks: string[] }
+    expect(asks.asks).toContain('It is in an unfinished mail thread as a member ("X asks A"); it goes to "Successor", which took over from it, and stays there if it is restored.')
+    expect(asks.asks).toContain('It owns an unfinished mail thread whose assignee is "Successor" ("A gives B work"); it becomes the person\'s.')
+    await h.mgr.trashSession(parent)
+    const notice = events.find((e) => e.type === 'notice' && e.sessionId === heir)
+    expect(notice && 'text' in notice ? notice.text : '').toContain('mail thread "A gives B work"')
+    expect(notice && 'text' in notice ? notice.text : '').toContain('mail thread "X asks A"')
   })
 })

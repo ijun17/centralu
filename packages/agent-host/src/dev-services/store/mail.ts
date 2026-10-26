@@ -443,23 +443,46 @@ export class MailRecords {
     return rows.map(toThread)
   }
 
+  /** The done threads in which `address` has mail it has neither read nor handled: what a handoff's move of its receipts looks at too (§4.1) */
+  doneThreadsWithUnread(address: string): ThreadRow[] {
+    const rows = this.db
+      .prepare<[string], ThreadSql>(
+        `SELECT t.* FROM mail_threads t WHERE t.state = 'done' AND EXISTS (
+            SELECT 1 FROM mail_receipts r JOIN mail_messages m ON m.id = r.message_id
+             WHERE m.thread_id = t.id AND r.recipient = ? AND r.read_at IS NULL AND r.handled_at IS NULL)
+          ORDER BY t.created_at, t.id`,
+      )
+      .all(address)
+    return rows.map(toThread)
+  }
+
   /**
    * A handoff's move of what `from` has not read in a thread to `to` (§4.1): each receipt neither read nor handled is `to`'s, and
    * waits to be delivered to it, delivered to `from` or not (what went into the original's conversation never reached its
-   * successor). A hold about the original itself (its delivery `uncertain` or `failed`, its `loop`, `budget` or `policy`) is not
-   * the successor's and is let go, for the delivery to judge again for the successor; one the person settled (`released`,
-   * `dismissed`) stays. A message `to` already has a receipt for keeps that one. Returns how many moved
+   * successor). A hold about the original itself (its delivery `uncertain` or `failed`, its `loop`, `budget` or `policy`, each
+   * judged for the original's wakes) is let go, for the delivery to judge again for the successor; one the person settled
+   * (`released`, `dismissed`) stays. Not moved, and handled for `from` instead: a receipt for a message `to` sent itself (nobody
+   * is sent their own words), and one for a message `to` already has a receipt for (it keeps its own). So nothing of the
+   * original's stays waiting, and a restored original is not woken for mail of a thread it has left. Returns how many moved
    */
-  moveUnreadReceipts(threadId: string, from: string, to: string): number {
-    return this.db
+  moveUnreadReceipts(threadId: string, from: string, to: string, now: number): number {
+    const moved = this.db
       .prepare(
         `UPDATE OR IGNORE mail_receipts
             SET recipient = @to, delivered_at = NULL, attempt_at = NULL, attempts = 0, last_error = NULL,
                 held = CASE WHEN held IN ('uncertain', 'failed', 'loop', 'budget', 'policy') THEN NULL ELSE held END
           WHERE recipient = @from AND read_at IS NULL AND handled_at IS NULL
-            AND message_id IN (SELECT id FROM mail_messages WHERE thread_id = @threadId)`,
+            AND message_id IN (SELECT id FROM mail_messages WHERE thread_id = @threadId AND sender <> @to)`,
       )
       .run({ threadId, from, to }).changes
+    this.db
+      .prepare(
+        `UPDATE mail_receipts SET handled_at = @now
+          WHERE recipient = @from AND read_at IS NULL AND handled_at IS NULL
+            AND message_id IN (SELECT id FROM mail_messages WHERE thread_id = @threadId)`,
+      )
+      .run({ threadId, from, now })
+    return moved
   }
 
   /**

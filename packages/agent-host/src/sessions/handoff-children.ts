@@ -3,7 +3,7 @@ import { oneLineText } from '@cc/protocol'
 import type { DelegationHost } from './delegation-flow.js'
 import type { QueuedRequestsHost } from './queued-requests.js'
 import type { SessionTrashHost } from './session-trash.js'
-import type { HandedOverThread } from '../mail/service.js'
+import type { HandedOverThread, HandOverScope } from '../mail/service.js'
 import { parseAddress } from '../mail/address.js'
 
 /**
@@ -62,7 +62,7 @@ export type HandoffChildrenHost = Pick<DelegationHost, 'children' | 'emit' | 'me
     /** Requests of a session that only `auto` let through, dropped when they would go on without it (#606) */
     dropOpenedByAuto: (sessionId: string, tell?: string) => void
     /** The original's mail, moved to the successor inside the store's transaction (`MailService.handOver`, #1574); nothing without a mailbox */
-    mailHandOver: (fromSessionId: string, toSessionId: string, which: 'all' | { assignees: readonly string[] }) => HandedOverThread[]
+    mailHandOver: (fromSessionId: string, toSessionId: string, which: HandOverScope) => HandedOverThread[]
   }
 
 /**
@@ -273,10 +273,17 @@ function movedThread(t: HandedOverThread): MovedChild {
     return p.kind === 'person' ? 'the person' : p.kind === 'app' ? `app ${p.appId}` : 'Centralu'
   }
   const can =
-    t.role === 'owner'
-      ? `You own it now (assignee: ${other(t.thread.assignee)}); its reports come to you in it. Read and answer it with the mail tool.`
-      : t.role === 'assignee'
-        ? `It is assigned to you now (owner: ${other(t.thread.owner)}): the work is yours to do, and your report goes to its owner. Read it with the mail tool.`
-        : "You are in it in the previous session's place. Read it with the mail tool."
-  return { handle: t.thread.id, name: t.thread.subject, state: `${t.thread.state}${unread}`, can, thread: true }
+    t.kind === 'closed'
+      ? 'It is closed; what the previous session had not read of it waits for you. Read it with the mail tool.'
+      : t.kind === 'left'
+        ? t.role === 'owner'
+          ? 'You are its assignee and the previous session was its owner, so it did not move: once that session is archived, the person owns it.'
+          : 'You own it and the previous session had its work, so it did not move: once that session is archived, it is open with nobody on it; reassign or close it.'
+        : t.role === 'owner'
+          ? `You own it now (assignee: ${other(t.thread.assignee)}); its reports come to you in it. Read and answer it with the mail tool.`
+          : t.role === 'assignee'
+            ? `It is assigned to you now (owner: ${other(t.thread.owner)}): the work is yours to do, and your report goes to its owner. Read it with the mail tool.`
+            : "You are in it in the previous session's place. Read it with the mail tool."
+  const state = t.kind === 'closed' ? `done${t.thread.outcome ? ` (${t.thread.outcome})` : ''}` : t.thread.state
+  return { handle: t.thread.id, name: t.thread.subject, state: `${state}${unread}`, can, thread: true }
 }

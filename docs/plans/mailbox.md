@@ -282,8 +282,11 @@ mail_turns        session_id, turn_seq, thread_id NULL, started_by ('mail'|'pers
   transaction of `ChildOwnershipRecords.moveChildren`, so marks, turns, queued and start requests and the mail move
   together or not at all. In each thread that moves, the successor takes the original's place as owner, assignee or
   member (the original leaves; the thread keeps its state and gets an `event`, `facts.change: 'handed_over'`), and the
-  original's receipts that are neither read nor handled become the successor's, undelivered again (a hold about the
-  original's own delivery, `uncertain` or `failed`, is let go). Which threads move:
+  original's receipts that are neither read nor handled become the successor's, undelivered again. A hold judged for the
+  original (`uncertain`, `failed`, `loop`, `budget`, `policy`) is let go, so the delivery judges the successor afresh;
+  one the person settled (`released`, `dismissed`) stays. A receipt for the successor's own message, or for one it has a
+  receipt for already, does not move and is marked handled for the original, so nothing waits for it (a restored
+  original is not woken for a thread it left). Which threads move:
   - an original that goes (the handoff says it removes it, or it is archived later and `trashSessionOnce` finds its
     heir): every thread not done it owns, is assigned or is a member of;
   - an original that stays: only the threads it owns whose assignee is a child that moved (the live ones), so the
@@ -292,10 +295,14 @@ mail_turns        session_id, turn_seq, thread_id NULL, started_by ('mail'|'pers
     was given stays its own until it goes, when all of it moves to the heir (`Store.handoffHeirs`, nearest living
     generation).
   - A thread whose other side is already the successor (it owns what the original is assigned, or the reverse) does not
-    move: owner and assignee are two parties. `partyGone` moves it on as before when the original goes.
+    move: owner and assignee are two parties. `partyGone` moves it on as before when the original goes, and the note
+    and the heir's notice say so.
+  - A done thread in that scope with mail the original never read (a closing report) stays done with its parties; the
+    successor joins it as a member and that mail waits for it.
   No row shape changes, so an older build serving during a swap reads the moved owners as it reads any. A restored
-  original gets nothing back. The handoff note and the heir's notice list each moved thread with its id; the archive
-  preview says the mail goes to the heir.
+  original gets nothing back. The handoff note and the heir's notice list each thread with its id and what became of it;
+  the archive preview reads the same plan (`MailService.handOverPreview`) and says thread by thread what goes to the heir
+  and what moves on as before.
 - `mail_turns` takes over from `delegated_turns` (v51): a delegated turn is a turn whose thread has an owner other than
   the person.
 - Undelivered mail is a query on `mail_receipts` (`delivered_at IS NULL`), so no separate queue table is needed. This
