@@ -66,8 +66,10 @@ describe('a data folder written by hand in a test file', () => {
     ['a variable of another object', "other.env.CC_DATA_DIR = '/x'"],
     ['a copy of the environment', "const copy = { ...process.env, CC_DATA_DIR: '/x' }"],
     ['passing it to a child process', "spawn('node', [], { env: { ...process.env, CC_DATA_DIR: dir } })"],
-  ])('is not reported: %s', async (_form, code) => {
-    expect(await inTest(code)).toEqual([])
+  ])('is not reported, and the write after it is: %s', async (_form, code) => {
+    // The write on line 2 keeps this from passing for want of a rule at all
+    expect(await inTest(`${code}
+process.env.CC_DATA_DIR = '/x'`)).toEqual([2])
   })
 })
 
@@ -86,8 +88,10 @@ describe('which files the rule reads', () => {
     expect(await reported(file, write)).toEqual([1])
   })
 
-  it.each(['packages/agent-host/src/x.ts', 'packages/agent-host/scripts/x.mts', 'scripts/x.mjs'])('leaves %s, which is not a test file, to its own code', async (file) => {
-    expect(await reported(file, write)).toEqual([])
+  it('leaves what is not a test file to its own code', async () => {
+    const files = ['packages/agent-host/src/x.ts', 'packages/agent-host/scripts/x.mts', 'scripts/x.mjs', 'packages/agent-host/src/x.test.ts']
+    const found = Object.fromEntries(await Promise.all(files.map(async (file) => [file, await reported(file, write)] as const)))
+    expect(found).toEqual({ 'packages/agent-host/src/x.ts': [], 'packages/agent-host/scripts/x.mts': [], 'scripts/x.mjs': [], 'packages/agent-host/src/x.test.ts': [1] })
   })
 
   it('accepts an explained eslint-disable line', async () => {
