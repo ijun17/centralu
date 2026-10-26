@@ -234,6 +234,8 @@ describe("a handoff moves the original's mail to the session that took over (#15
 
     const heir = await handOff(h, project, parent)
     expect(recipients(given.id, 'note')).toEqual([at(h, heir)])
+    // The opening message comes first: nothing of the moved mail went in ahead of the note
+    expect(h.claude.handles.get(heir)!.sent).toEqual(['You are taking over. Read the note.'])
     expect(store.mail.pendingFor(at(h, heir), Date.now() + DEBOUNCE_MS).map((p) => p.message.body)).toEqual(['do it', 'one more thing'])
     // Once the successor's first turn ends and the mail is due, the delivery wakes it with the thread
     h.claude.handles.get(heir)!.answer('read the note')

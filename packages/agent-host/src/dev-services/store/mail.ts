@@ -446,15 +446,16 @@ export class MailRecords {
   /**
    * A handoff's move of what `from` has not read in a thread to `to` (§4.1): each receipt neither read nor handled is `to`'s, and
    * waits to be delivered to it, delivered to `from` or not (what went into the original's conversation never reached its
-   * successor). A hold about the original's own delivery (`uncertain`, `failed`) is not the successor's and is let go; a hold that
-   * waits for the person stays. A message `to` already has a receipt for keeps that one. Returns how many moved
+   * successor). A hold about the original itself (its delivery `uncertain` or `failed`, its `loop`, `budget` or `policy`) is not
+   * the successor's and is let go, for the delivery to judge again for the successor; one the person settled (`released`,
+   * `dismissed`) stays. A message `to` already has a receipt for keeps that one. Returns how many moved
    */
   moveUnreadReceipts(threadId: string, from: string, to: string): number {
     return this.db
       .prepare(
         `UPDATE OR IGNORE mail_receipts
             SET recipient = @to, delivered_at = NULL, attempt_at = NULL, attempts = 0, last_error = NULL,
-                held = CASE WHEN held IN ('uncertain', 'failed') THEN NULL ELSE held END
+                held = CASE WHEN held IN ('uncertain', 'failed', 'loop', 'budget', 'policy') THEN NULL ELSE held END
           WHERE recipient = @from AND read_at IS NULL AND handled_at IS NULL
             AND message_id IN (SELECT id FROM mail_messages WHERE thread_id = @threadId)`,
       )

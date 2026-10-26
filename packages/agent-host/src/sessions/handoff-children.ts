@@ -57,7 +57,7 @@ function movedLabel(c: Pick<MovedChild, 'name' | 'project' | 'request' | 'thread
  * when used, never kept.
  */
 export type HandoffChildrenHost = Pick<DelegationHost, 'children' | 'emit' | 'meta' | 'nameOf' | 'onEvent' | 'store'> &
-  Pick<SessionTrashHost, 'delegationFlow' | 'hostCards'> &
+  Pick<SessionTrashHost, 'delegationFlow' | 'hostCards' | 'mailPoke'> &
   Pick<QueuedRequestsHost, 'turnRunning'> & {
     /** Requests of a session that only `auto` let through, dropped when they would go on without it (#606) */
     dropOpenedByAuto: (sessionId: string, tell?: string) => void
@@ -204,7 +204,8 @@ export class HandoffChildren {
           sessions,
           startRequests: starts.map((r) => ({ requestId: r.req.requestId, request: { ...r.req, callerId: to } })),
           armReports,
-          queued: !removed,
+          // With no child moving, the memory side does not run, so the queue's rows do not move either
+          queued: !removed && moved.length > 0,
         },
         mailWhich === null ? undefined : () => void (threads = this.host.mailHandOver(from, to, mailWhich)),
       )
@@ -215,6 +216,11 @@ export class HandoffChildren {
     const childCount = moved.length
     moved.push(...threads.map((t) => movedThread(t)))
     if (!moved.length) return []
+    /*
+     * The unread mail that moved waits for the successor. One being created takes it at the end of its first turn, after the note;
+     * a successor that is told now (an original removed later) is poked once the move has committed
+     */
+    if (removed && threads.some((t) => t.unread > 0)) this.host.mailPoke(to)
 
     for (const id of sessions) {
       const s = this.host.meta.get(id)!

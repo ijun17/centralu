@@ -1051,8 +1051,8 @@ id: ${sessionIdOf(assignee)}` : ''
   /**
    * A handoff moves the original session's mail to the session that took over (§4.1, #693, #738, #1574): in each thread that moves,
    * the successor takes the original's place, as owner, as assignee or as a member, and what the original has not read waits for the
-   * successor instead (`moveUnreadReceipts`). Each thread keeps its state and leaves an `event`; nobody is woken for the move
-   * itself, only for the unread mail that now waits for the successor. The host's own write, like `partyGone`'s: no policy or
+   * successor instead (`moveUnreadReceipts`). Each thread keeps its state and leaves an `event`; nobody is woken inside the move
+   * (it runs before the successor's first message); the unread mail waits for the successor's next rest or the caller's poke. The host's own write, like `partyGone`'s: no policy or
    * rate check, since the handoff's own checks came first (`HandoffChildren.moveChildren` trusts its caller the same way).
    *
    * `which`: `all` for an original that goes (every thread not done it is in), or the sessions whose work moved to the successor
@@ -1088,8 +1088,9 @@ id: ${sessionIdOf(assignee)}` : ''
             ? (this.insertEvent(t.id, 'The session in this thread handed over: the session that took over is in it instead.', facts, now), t)
             : this.moveState(t, role === 'owner' ? { owner: to } : { assignee: to }, now, facts,
                 role === 'owner' ? 'The owner handed over: the session that took over owns the thread.' : 'The assignee handed over: the session that took over has the work.')
+        // Nobody is woken here: inside the children's transaction, before the successor's first message. The successor's next rest
+        // (or the caller's poke) delivers it
         const unread = this.records.moveUnreadReceipts(t.id, from, to)
-        if (unread > 0) this.changed(t.id, [to])
         moved.push({ thread: after, role, unread })
       }
       return moved
