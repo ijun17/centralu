@@ -69,3 +69,80 @@ export function groupAttention(
   }
   return found
 }
+
+/** How long the pointer rests on a folded project's name before it expands (owner, 2026-10-26, #1578) */
+export const HOVER_EXPAND_MS = 200
+
+/**
+ * The transient expansion of a folded project under the pointer (#1578). It lives on top of the saved fold and never
+ * writes to it: the block reads `saved fold && !open`. One timer per project: it starts when the pointer enters the name
+ * and is cleared when it leaves, so a pass shorter than `HOVER_EXPAND_MS` does nothing. Only a mouse pointer counts;
+ * keyboard focus and touch never call `enterName`.
+ *
+ * `leaveBlock` folds again, unless something holds the project as it is (an open menu, a drag): `hold(true)` defers the
+ * fold, and `hold(false)` settles it by asking `pointerInside` where the pointer is now.
+ */
+export class HoverExpander {
+  private cancel: (() => void) | null = null
+  private open = false
+  private held = false
+  constructor(
+    private readonly env: {
+      onChange: (open: boolean) => void
+      pointerInside: () => boolean
+      /** Starts a timer and returns what cancels it (tests pass a fake) */
+      startTimer?: (fn: () => void, ms: number) => () => void
+    },
+  ) {}
+
+  /** The pointer came onto a folded project's name */
+  enterName(folded: boolean): void {
+    this.clearTimer()
+    if (!folded || this.open) return
+    const start =
+      this.env.startTimer ??
+      ((fn, ms) => {
+        const t = setTimeout(fn, ms)
+        return () => clearTimeout(t)
+      })
+    this.cancel = start(() => {
+      this.cancel = null
+      this.set(true)
+    }, HOVER_EXPAND_MS)
+  }
+
+  /** The pointer left the name (still inside the block): a rest that has not finished is cancelled; an expansion stays */
+  leaveName(): void {
+    this.clearTimer()
+  }
+
+  /** The pointer left the project's whole block */
+  leaveBlock(): void {
+    this.clearTimer()
+    if (!this.held) this.set(false)
+  }
+
+  /** A menu is open or a drag is under way (`true`), or it ended (`false`) */
+  hold(held: boolean): void {
+    if (this.held === held) return
+    this.held = held
+    if (!held && this.open && !this.env.pointerInside()) this.set(false)
+  }
+
+  /** A click made it stay (the saved fold takes over), or the project was unmounted */
+  reset(): void {
+    this.clearTimer()
+    this.set(false)
+  }
+
+  private set(open: boolean): void {
+    if (this.open === open) return
+    this.open = open
+    this.env.onChange(open)
+  }
+
+  private clearTimer(): void {
+    this.cancel?.()
+    this.cancel = null
+  }
+}
