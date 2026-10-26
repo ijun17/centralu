@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ToolName } from '@cc/protocol'
 import { usePlatform } from '../../../app/PlatformProvider.jsx'
 import { useToolMeta } from '../../../store/selectors.js'
@@ -64,6 +64,14 @@ export function ConfirmDelete({
    */
   const [losses, setLosses] = useState<string[]>([])
   const asking = useRef(false)
+  // A dialog put away while the host is being asked is an answer of "no more": the answer to that question moves nothing further
+  const open = useRef(true)
+  useEffect(() => {
+    open.current = true
+    return () => {
+      open.current = false
+    }
+  }, [])
   const archive = () => {
     if (deleteWorktree || losses.length > 0) return onConfirm(deleteWorktree, deleteExternal)
     if (asking.current) return
@@ -71,7 +79,12 @@ export function ConfirmDelete({
     void useStore
       .getState()
       .archiveSession(sessionId, deleteExternal)
-      .then((lines) => (lines ? setLosses(lines) : onDone()))
+      .then((lines) => {
+        if (!open.current) return
+        if (lines === null) onDone()
+        else if (lines.length > 0) setLosses(lines)
+        else onConfirm(false, deleteExternal)
+      })
       .finally(() => (asking.current = false))
   }
   return (

@@ -83,7 +83,7 @@ One session = one agent process (Claude Code or Codex).
 - Archiving: session's ⋯ → Archive session…. The session leaves the sidebar and goes to the session
   archive (Settings → Archive), where the person can read it, restore it, or delete it for good.
   A dialog asks first, for every session, and also asks whether deleting it for good should delete the
-  conversation file on the tool's side (on by default); it lists anything the archive drops that Undo does
+  conversation file on the tool's side (on by default); with the worktree kept it lists anything the archive drops that Undo does
   not bring back, and the toast after it offers Undo. Nothing is
   deleted on its own; turning that off leaves the conversation on the tool, so it can be loaded again
   from the past-conversation list in the New session window.

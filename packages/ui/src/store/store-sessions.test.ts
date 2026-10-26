@@ -607,21 +607,21 @@ describe('Undo on the archive toast (#1512)', () => {
     expect(useStore.getState().sessions[s.id]).toBeUndefined()
   })
 
-  it('moves it as the dialog alone allowed before #1521 when the session is not at rest', async () => {
+  it('moves nothing and gives no lines when the session is not at rest: the dialog then archives on an answer from the person', async () => {
     const { mock, s } = await oneSession('/tmp/archive-d')
     vi.spyOn(mock.agents, 'archiveIfAtRest').mockResolvedValue({ archived: false, asks: [] })
     const deleted = vi.spyOn(mock.agents, 'deleteSession')
-    expect(await useStore.getState().archiveSession(s.id, false)).toBeNull()
-    expect(deleted).toHaveBeenCalledWith(s.id, false, false)
-    expect(useStore.getState().sessions[s.id]).toBeUndefined()
+    expect(await useStore.getState().archiveSession(s.id, false)).toEqual([])
+    expect(deleted).not.toHaveBeenCalled()
+    expect(useStore.getState().sessions[s.id]).toBeDefined()
   })
 
   it('does the same of a host that predates the check', async () => {
     const { mock, s } = await oneSession('/tmp/archive-d2')
     vi.spyOn(mock.agents, 'archiveIfAtRest').mockRejectedValue(new Error('Unknown method: agents.archiveIfAtRest'))
     const deleted = vi.spyOn(mock.agents, 'deleteSession')
-    expect(await useStore.getState().archiveSession(s.id, true)).toBeNull()
-    expect(deleted).toHaveBeenCalledWith(s.id, false, true)
+    expect(await useStore.getState().archiveSession(s.id, true)).toEqual([])
+    expect(deleted).not.toHaveBeenCalled()
   })
 
   it('says why when the host check fails, and moves nothing', async () => {

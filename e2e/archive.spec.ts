@@ -123,6 +123,11 @@ test('an idle session asks first, Cancel archives nothing, and Undo on the toast
   await page.getByTestId(`delete-session-${id}`).click()
   await expect(page.getByTestId('confirm-delete')).toContainText('Archive this session?')
   await expect(page.getByTestId(`session-row-${id}`)).toBeVisible()
+  // The person's Archive moves it, once, and no losses are listed (the real host answers a session in a turn with no lines, which the store tests cover)
+  await page.getByTestId('confirm-delete-yes').click()
+  await expect(page.getByTestId(`session-row-${id}`)).toHaveCount(0)
+  await expect(page.getByTestId('confirm-delete')).toHaveCount(0)
+  await expect(page.getByTestId('delete-losses')).toHaveCount(0)
 })
 
 // #1589: the dialog's first Archive asks the host (read, then move); what the host says would be lost shows, and the next Archive moves it anyway

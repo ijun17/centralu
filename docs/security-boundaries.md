@@ -803,7 +803,7 @@ moves and the dialog lists the host's lines, and its next Archive is `agents.del
 host from before the method ("Unknown method") and a worktree deleted with it (the host's check never removes one) go straight to
 `agents.deleteSession`, the dialog's answer being the person's. Undo on the toast after the archive is `trash.restore` and puts back
 the unsent draft and the session's place in each project's grid; it does not bring back the scroll position or the focus, and it does
-not hand back what `lossesOf` names (which is why the dialog lists those).
+not hand back what `lossesOf` names (which is why the dialog lists those, when the worktree is kept: a worktree deleted with the session skips the host's check, which never removes one, and the dialog's answer stands).
 
 Rows that differ by session:
 

@@ -341,8 +341,9 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
    * The archive the dialog's first Archive asks for (#1512, #1589): the host moves the session only when nothing it holds would be
    * lost (`agents.archiveIfAtRest`, read then move). Null: it is done (archived, the toast offers Undo; or failed, the toast says why).
    * Lines: not moved, and these are what the archive would lose and Undo does not bring back; the dialog shows them and its next
-   * Archive is `deleteSession`. Not at rest, or a host from before the method: the dialog's answer is enough, so it moves as it
-   * did before #1521. Never with the worktree deleted: that is `deleteSession` straight (the host's check does not remove one).
+   * Archive is `deleteSession`. No lines: not moved because the session is not at rest, or the host predates the method; the
+   * dialog then moves it with `deleteSession` if it is still open, as it did before #1521 (the person's answer is enough). Never
+   * with the worktree deleted: that is `deleteSession` straight (the host's check does not remove one).
    */
   async archiveSession(sessionId, deleteExternal) {
     const platform = get().platform
@@ -362,8 +363,7 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
         return null
       }
     }
-    await get().deleteSession(sessionId, false, deleteExternal)
-    return null
+    return []
   },
 
   async restoreFromTrash(sessionId) {

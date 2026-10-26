@@ -146,7 +146,8 @@ export type SessionsSlice = {
   /**
    * The archive the dialog's first Archive asks for, with the worktree kept (#1589): the host moves the session when nothing it
    * holds would be lost. Null: done (archived with Undo on the toast, or failed with the toast saying why). Lines: not moved, and
-   * these are what it would lose; the dialog shows them and its next Archive is `deleteSession`.
+   * these are what it would lose; the dialog shows them and its next Archive is `deleteSession`. No lines: not moved, the session is not at
+   * rest or the host predates the check; the dialog then calls `deleteSession`.
    */
   archiveSession(sessionId: string, deleteExternal: boolean): Promise<string[] | null>
   /**
