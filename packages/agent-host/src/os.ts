@@ -90,6 +90,24 @@ export function locksWatchedFolders(platform: Platform = HOST_PLATFORM): boolean
   return platform === 'win32'
 }
 
+/**
+ * The folder an app's settings for every user of the machine live in, which the person's own cannot override: under
+ * `%ProgramData%` on Windows, `/Library/Application Support` on macOS, `/etc` elsewhere (OpenCode's managed config,
+ * 1.19.4).
+ */
+export function systemSettingsFolder(app: string, env: Readonly<Record<string, string | undefined>> = process.env, platform: Platform = HOST_PLATFORM): string {
+  if (platform === 'win32') return win32.join(env.ProgramData || 'C:\\ProgramData', app)
+  return platform === 'darwin' ? `/Library/Application Support/${app}` : `/etc/${app}`
+}
+
+/**
+ * OpenCode matches a permission's name and pattern in any case on Windows only (1.19.4's `Wildcard.match` has the flags
+ * `si` in its Windows build, `s` in its macOS and Linux builds; #1565): `BASH` is `bash` there, not elsewhere.
+ */
+export function openCodeMatchesAnyCase(platform: Platform = HOST_PLATFORM): boolean {
+  return platform === 'win32'
+}
+
 /** A program's file name on `platform`: `codex.exe` on Windows, `codex` elsewhere. */
 export function programFile(name: string, platform: Platform = HOST_PLATFORM): string {
   return platform === 'win32' ? `${name}.exe` : name

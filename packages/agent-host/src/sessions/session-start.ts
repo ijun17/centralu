@@ -572,6 +572,7 @@ export class SessionStarts {
       ...this.autoCompactFor(m, !!o.adopt),
       permissionPreset: o.permissionPreset,
       resumeExternalId: o.resumeExternalId,
+      runningCost: this.host.launches.runningCostFor(m.id, !!o.resumeExternalId),
       ...(o.knownGoal ? { knownGoal: o.knownGoal } : {}),
       // Which settings files reach this session (decision 3, #92, #152) — what the session is,
       // and the trust at this exact moment of launch. If this is a builder session, the
@@ -825,7 +826,7 @@ export class SessionStarts {
        * **This used to be an unbounded wait** — and that wait was holding this function's only
        * in-progress (resuming) promise. If the tool got stuck coming up, the outer RPC gave up at 30
        * seconds, but this promise never resolved, and because of dedup, Retry would **rejoin that
-       * same stuck promise**. To the person it looked like "Retry does not work" (measured on an MGH
+       * same stuck promise**. To the person it looked like "Retry does not work" (measured on a real
        * session).
        *
        * Why 150 seconds: it needs to stay inside resume-family RPCs' 180-second limit (LONG_CALLS in

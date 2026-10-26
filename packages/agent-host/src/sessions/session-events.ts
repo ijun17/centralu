@@ -715,7 +715,7 @@ export class SessionEvents {
     this.host.record.closeStream(sessionId)
     // A turn is asked for now, whether or not the tool announces it before its first card (`CardRests`)
     this.host.cardRests.turnAsked(sessionId)
-    handle.send(text)
+    handle.send(text, { compact: true })
   }
 
   /**

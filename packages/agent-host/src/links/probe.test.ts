@@ -23,7 +23,7 @@ const as = process.env.FAKE_AS
 if (as === 'hang') { setInterval(() => {}, 1 << 30); return }
 // A reason whose first character's bytes arrive in two chunks
 if (as === 'split') { const b = Buffer.from('접속 거부: 계정이 잠겼습니다\n'); process.stderr.write(b.subarray(0, 4)); setTimeout(() => { process.stderr.write(b.subarray(4)); process.exit(1) }, 200); return }
-if (as === 'unreachable') { process.stderr.write('ijun1: Permission denied (publickey,password,keyboard-interactive).\n'); process.exit(255) }
+if (as === 'unreachable') { process.stderr.write('win-pc: Permission denied (publickey,password,keyboard-interactive).\n'); process.exit(255) }
 const cmd = args[args.length - 1]
 const enc = 'powershell -NoProfile -NonInteractive -EncodedCommand '
 if (as === 'posix') { process.stderr.write('bash: line 1: powershell: command not found\n'); process.exit(127) }
@@ -52,7 +52,7 @@ beforeEach(() => {
 afterEach(() => rmFakeDir(dir))
 
 const probe = (as: string, registry: unknown = {}, timeoutMs?: number) =>
-  probeTarget('ijun1', { ssh, env: { ...process.env, FAKE_SSH_LOG: log, FAKE_AS: as, FAKE_REGISTRY: JSON.stringify(registry) }, ...(timeoutMs ? { timeoutMs } : {}) })
+  probeTarget('win-pc', { ssh, env: { ...process.env, FAKE_SSH_LOG: log, FAKE_AS: as, FAKE_REGISTRY: JSON.stringify(registry) }, ...(timeoutMs ? { timeoutMs } : {}) })
 const logged = () => readFileSync(log, 'utf8').trim().split('\n').map((l) => JSON.parse(l))
 
 describe('the probe command', () => {
@@ -74,7 +74,7 @@ describe('the probe command', () => {
     await probe('posix')
     const args = logged()[0] as string[]
     expect(args.slice(0, 6)).toEqual(['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '--'])
-    expect(args[6]).toBe('ijun1')
+    expect(args[6]).toBe('win-pc')
     expect(args[7]).toBe(probeCommand())
   })
 
@@ -87,7 +87,7 @@ describe('the probe command', () => {
 
 describe('what it tells apart', () => {
   it('a POSIX shell: no powershell there, exit 127', async () => {
-    expect(await probe('posix')).toEqual({ sshTarget: 'ijun1', reachable: true, os: 'posix', windowsShell: null, wslDistros: [], error: null })
+    expect(await probe('posix')).toEqual({ sshTarget: 'win-pc', reachable: true, os: 'posix', windowsShell: null, wslDistros: [], error: null })
   })
 
   it("csh's own words for a missing command are a POSIX shell too", async () => {
@@ -96,7 +96,7 @@ describe('what it tells apart', () => {
 
   it('Windows with no DefaultShell: cmd.exe, which is what OpenSSH runs then', async () => {
     const r = await probe('windows', { platform: 'Win32NT', defaultShell: '' })
-    expect(r).toEqual({ sshTarget: 'ijun1', reachable: true, os: 'windows', windowsShell: 'cmd', wslDistros: [], error: null })
+    expect(r).toEqual({ sshTarget: 'win-pc', reachable: true, os: 'windows', windowsShell: 'cmd', wslDistros: [], error: null })
   })
 
   it.each([
@@ -131,12 +131,12 @@ describe('what it tells apart', () => {
 
   it("not reached, or a key refused: ssh's own reason, and nothing told", async () => {
     expect(await probe('unreachable')).toEqual({
-      sshTarget: 'ijun1',
+      sshTarget: 'win-pc',
       reachable: false,
       os: null,
       windowsShell: null,
       wslDistros: [],
-      error: 'ijun1: Permission denied (publickey,password,keyboard-interactive).',
+      error: 'win-pc: Permission denied (publickey,password,keyboard-interactive).',
     })
   })
 
@@ -155,8 +155,8 @@ describe('what it tells apart', () => {
     const stubborn = join(dir, 'ssh-stubborn')
     writeFileSync(stubborn, `#!/bin/sh\ntrap '' TERM\necho $$ > "${pidFile}"\nwhile :; do sleep 1; done\n`)
     chmodSync(stubborn, 0o755)
-    const r = await probeTarget('ijun1', { ssh: stubborn, env: process.env, timeoutMs: 2000 })
-    expect(r).toMatchObject({ reachable: false, error: 'ssh to ijun1 did not answer in time' })
+    const r = await probeTarget('win-pc', { ssh: stubborn, env: process.env, timeoutMs: 2000 })
+    expect(r).toMatchObject({ reachable: false, error: 'ssh to win-pc did not answer in time' })
     const pid = Number(readFileSync(pidFile, 'utf8'))
     const alive = () => isAlive(pid)
     // The KILL follows the TERM after 2 s (`SSH_KILL_GRACE_MS`)
@@ -172,7 +172,7 @@ describe('what it tells apart', () => {
 
   it('an ssh that never answers is ended and reported as not reached', async () => {
     const r = await probe('hang', {}, 500)
-    expect(r).toMatchObject({ reachable: false, os: null, error: 'ssh to ijun1 did not answer in time' })
+    expect(r).toMatchObject({ reachable: false, os: null, error: 'ssh to win-pc did not answer in time' })
   })
 
   it("reads the answer measured on a Windows 11 PC (2026-10-12: cmd.exe, WSL Ubuntu and docker-desktop)", () => {
@@ -182,6 +182,6 @@ describe('what it tells apart', () => {
       stdout: 'CENTRALU-PROBE platform=Win32NT\r\nCENTRALU-PROBE shell=\r\nCENTRALU-PROBE wsl=docker-desktop\r\nCENTRALU-PROBE wsl-default=Ubuntu\r\n',
       stderr: '#< CLIXML\r\n<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><Obj S="progress" RefId="0"></Obj></Objs>',
     }
-    expect(parseProbe('ijun1', run)).toEqual({ sshTarget: 'ijun1', reachable: true, os: 'windows', windowsShell: 'cmd', wslDistros: [{ name: 'Ubuntu', default: true }], error: null })
+    expect(parseProbe('win-pc', run)).toEqual({ sshTarget: 'win-pc', reachable: true, os: 'windows', windowsShell: 'cmd', wslDistros: [{ name: 'Ubuntu', default: true }], error: null })
   })
 })

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionSummary } from '@cc/core'
-import { orchestratorChildren } from './OrchestratorButton.jsx'
+import { orchestratorChildren, orchestratorListShown } from './OrchestratorButton.jsx'
 
 // #853: the orchestrator's children have no project to hang in, so they hang under its row
 describe("the orchestrator's children in the sidebar", () => {
@@ -37,5 +37,21 @@ describe("the orchestrator's children in the sidebar", () => {
     expect(ids(orchestratorChildren(withNew, 'orc2'))).toEqual({ current: [], earlier: ['child'] })
     // A child of a session still here is that session's, not an earlier orchestrator's
     expect(orchestratorChildren(withNew, 'orc2').earlier.map((s) => s.id)).not.toContain('other-child')
+  })
+})
+
+// #1591: the children fold under the button; a mouse rest opens them, and an open child keeps them shown
+describe("when the orchestrator's children's list is drawn", () => {
+  const kids = { current: [{ id: 'a' }, { id: 'b' }], earlier: [{ id: 'old' }] }
+  it('is folded at rest, with children and nothing open', () => {
+    expect(orchestratorListShown(false, null, kids)).toBe(false)
+    expect(orchestratorListShown(false, 'someone-else', kids)).toBe(false)
+  })
+  it('is open while the mouse rests on the button', () => {
+    expect(orchestratorListShown(true, null, kids)).toBe(true)
+  })
+  it('stays shown while one of the children, an earlier one too, is the open session', () => {
+    expect(orchestratorListShown(false, 'b', kids)).toBe(true)
+    expect(orchestratorListShown(false, 'old', kids)).toBe(true)
   })
 })

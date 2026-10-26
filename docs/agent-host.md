@@ -774,7 +774,7 @@ machine was removed, while the hub could not see it is cleared by `list` and `de
 children's records, and a handoff gives them to the heir. In the sidebar it stands in that machine's project, among
 the sessions there and with its "Asked by <caller>" mark, since a project on another machine is a project of its own
 (#1416; #1038 first drew it under its caller, in the caller's project). The caller's row carries no pointer to it
-(owner, 2026-10-26: the "2 on ijun1" pointer of #1416 was removed); the child keeps its row, its mark and its inbox entry. The hub names the
+(owner, 2026-10-26: the "2 on win-pc" pointer of #1416 was removed); the child keeps its row, its mark and its inbox entry. The hub names the
 caller as its `askedBy` in that machine's rows and owner events (`LinkDeps.ownerOf`, `SessionManager.remoteAgentParent`)
 and sends `session_owner` when it records the child, hands it to an heir, or forgets it with its caller; the mark
 follows `askedBy`, so it moves with the heir and goes when the caller does.
@@ -1365,7 +1365,7 @@ tool in the other tiers), and one line of its instructions says to use them rath
   when the child is deleted for good (`purgeSession`), and with a start that fails. It runs under the orchestrator's
   preset and gets no Centralu tools and only the person's own settings (no project to trust). There is no worktree,
   and a busy child is not forked: there is no repository to fork from. In the sidebar it hangs under the
-  orchestrator's row (`orchestratorChildren`), with a ⋯ menu to stop or delete it; a child whose orchestrator was
+  orchestrator's row (`orchestratorChildren`), folded until the mouse rests on its button (#1591), with a ⋯ menu to stop or delete it; a child whose orchestrator was
   replaced stays there under "Started by an earlier orchestrator".
 - **The consent**: a card under `safe` and `normal` (no project's trust stands in for it), naming no project
   ("Start Codex in a folder of its own, outside any project, …") and offering no "Always for this project"; ⌥a, or that
@@ -1845,7 +1845,7 @@ interface AdapterCapabilities {
   peerMessaging: boolean        // the CLI has a direct session-to-session path (#575)
   midTurnInput?: boolean         // send accepts a message during a running turn without interrupting it (#592)
   sleep?: boolean               // #568: an idle session may be put to sleep (resume measured to keep the cache); §4.6.1
-  presets?: PermissionPreset[]  // the presets it can keep; absent: all (Cursor has no `safe`, plans/acp-adapter.md §0.1)
+  presets?: PermissionPreset[]  // the presets it can keep; absent: all (Cursor keeps `auto` only, plans/acp-adapter.md §0.1)
   keepsRepoFilesOut?: boolean   // can be kept from a project's own files when untrusted (#92); absent: true
   roleText?: boolean            // takes Centralu's role text (`systemPromptAppend`); absent: true
 }
@@ -3446,7 +3446,7 @@ the person did not remove what the hub installed there, neither side runs a loca
   updates on (`updates.setAutoApply`, `Links.followHub`), for the machines already connected.
 - **What.** The same update as `machines.update { when: 'idle' }`, marked `unasked`: it waits for the turns there as
   above, and also for terminals and project commands there, which the person's Update stops knowingly and it must not
-  (`OPEN_WORK_WAIT_MS`: once only they are left for 30 minutes it gives up, nothing switched). It stops no host it cannot
+  (`OPEN_WORK_WAIT_MS`: once a terminal or command has been open for 30 minutes without a gap, whatever turns run meanwhile (#1579), it gives up, nothing switched, and the row's failure line says why, so the person can press Update, which stops them knowingly). The row and the log say which one holds it: `wait_idle` with `operation.count` sessions in a turn (`turnsRunning`), or, when none is in a turn, `wait_open` with `count` open terminals and commands (`open`). The row reads "Updating to <v>: waiting for <N> open terminals or commands there (Cancel, then Update, closes them)…" (owner, 2026-10-26; "1 open terminal or command there (… closes it)" for one), since Update is disabled while the wait shows and the person's Update then stops the host and ends them. It stops no host it cannot
   ask what runs (a Centralu from before `host.activity`, or one whose reading fails): that is read before anything is
   installed, and the update fails, nothing switched, the row saying to update from Settings. It also fails before the hold once automatic updates go off or the hub begins a swap while it waits. A swap
   that comes after the hold finds it as it finds the person's update (§4.7).

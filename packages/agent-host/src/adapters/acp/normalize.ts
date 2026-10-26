@@ -25,6 +25,15 @@ const KIND_TOOL: Record<string, string> = {
 
 type OpenCall = { output: string }
 
+const OPEN_TAG = '<think>'
+const CLOSE_TAG = '</think>'
+
+/** How much of a text's end could be the start of the closing tag, and so waits for the next chunk */
+function heldTail(text: string): number {
+  for (let n = Math.min(CLOSE_TAG.length - 1, text.length); n > 0; n--) if (CLOSE_TAG.startsWith(text.slice(text.length - n))) return n
+  return 0
+}
+
 export class AcpNormalizer {
   /** Calls announced as `tool_call` and not yet ended, by `toolCallId` */
   private readonly open = new Map<string, OpenCall>()
@@ -44,6 +53,11 @@ export class AcpNormalizer {
   /** The events one update says. `available_commands_update` and the like are read by the session, not here */
   update(u: SessionUpdate): NormalizedEvent[] {
     const sessionId = this.sessionId
+    const held = u.sessionUpdate === 'agent_message_chunk' ? [] : this.releaseHeld()
+    return [...held, ...this.translate(u, sessionId)]
+  }
+
+  private translate(u: SessionUpdate, sessionId: string): NormalizedEvent[] {
     switch (u.sessionUpdate) {
       case 'agent_message_chunk': {
         const text = blockText(u.content)
@@ -52,7 +66,7 @@ export class AcpNormalizer {
         }
         if (this.lastChunk !== 'message') this.segment++
         this.lastChunk = 'message'
-        return text ? [{ type: 'message_delta', sessionId, role: 'assistant', text, messageId: u.messageId ?? `acp-${this.segment}` }] : []
+        return this.messageText(u.messageId ?? `acp-${this.segment}`, text)
       }
       case 'agent_thought_chunk': {
         this.lastChunk = 'thought'
@@ -78,6 +92,53 @@ export class AcpNormalizer {
         return []
     }
   }
+
+  /**
+   * A message's text, without the `</think>` a model leaves where it put its reasoning in the reply (OpenCode's free
+   * model, measured in its own store: a step's text is the reasoning, then `</think>`, then the reply, with no `<think>`
+   * before it). The first such tag of a message is dropped with the space after it; a tag split over two chunks is held
+   * until the next one says whether it is one. The reasoning before it stays reply text: it was shown as it came.
+   */
+  private messageText(messageId: string, text: string): NormalizedEvent[] {
+    const before = this.lastMessage === messageId ? [] : this.releaseHeld()
+    const m = this.messages.get(messageId) ?? { held: '', settled: false, trim: false }
+    this.messages.set(messageId, m)
+    let out = m.held + text
+    m.held = ''
+    if (m.trim) {
+      out = out.replace(/^\s+/, '')
+      m.trim = out === ''
+    }
+    if (!m.settled) {
+      const open = out.indexOf(OPEN_TAG)
+      const close = out.indexOf(CLOSE_TAG)
+      if (close !== -1 && (open === -1 || open > close)) {
+        const after = out.slice(close + CLOSE_TAG.length).replace(/^\s+/, '')
+        m.trim = after === ''
+        out = out.slice(0, close) + after
+        m.settled = true
+      } else if (open !== -1) m.settled = true
+      else {
+        const keep = heldTail(out)
+        m.held = out.slice(out.length - keep)
+        out = out.slice(0, out.length - keep)
+      }
+    }
+    this.lastMessage = messageId
+    return [...before, ...(out ? [{ type: 'message_delta' as const, sessionId: this.sessionId, role: 'assistant' as const, text: out, messageId }] : [])]
+  }
+
+  /** What a message held back, once something else comes: it was no tag */
+  private releaseHeld(): NormalizedEvent[] {
+    const m = this.lastMessage === null ? undefined : this.messages.get(this.lastMessage)
+    if (!m?.held || this.lastMessage === null) return []
+    const text = m.held
+    m.held = ''
+    return [{ type: 'message_delta', sessionId: this.sessionId, role: 'assistant', text, messageId: this.lastMessage }]
+  }
+
+  private readonly messages = new Map<string, { held: string; settled: boolean; trim: boolean }>()
+  private lastMessage: string | null = null
 
   /** Calls the person (or a Stop) refused this turn: whatever the agent says of them after, they did not run as asked */
   private readonly refused = new Set<string>()
@@ -135,10 +196,11 @@ export class AcpNormalizer {
 
   /** Calls still open when the turn ended: closed as failed, so no card spins forever (`why`: what ended them) */
   endTurn(why = 'the turn ended before this call finished'): NormalizedEvent[] {
-    const events = [...this.open.keys()].map((id) => toolResultEvent(this.sessionId, id, false, '', why))
+    const events = [...this.releaseHeld(), ...[...this.open.keys()].map((id) => toolResultEvent(this.sessionId, id, false, '', why))]
     this.open.clear()
     this.known.clear()
     this.refused.clear()
+    this.messages.clear()
     this.lastChunk = 'other'
     return events
   }

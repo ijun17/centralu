@@ -8,7 +8,7 @@ import { SessionManager } from './manager.js'
 
 /*
  * A new session and the same session woken later hand the adapter the same options (#428, `launchOptions`), apart
- * from what a wake changes: the conversation to resume. Fakes as in sleep.test.ts.
+ * from what a wake changes: the conversation to resume and its running cost. Fakes as in sleep.test.ts.
  */
 
 class Handle implements SessionHandle {
@@ -108,8 +108,9 @@ it('a wake starts the process with the options it was created with, and the conv
 
   expect(woken.resumeExternalId).toBe(`ext-${s.id}`)
   expect(created.resumeExternalId).toBeUndefined()
-  const { resumeExternalId: _a, ...a } = plain(created)
-  const { resumeExternalId: _b, ...b } = plain(woken)
+  // The conversation to resume, and the running cost its last process kept (`running-cost.test.ts`), are what a wake changes
+  const { resumeExternalId: _a, runningCost: _c, ...a } = plain(created)
+  const { resumeExternalId: _b, runningCost: _d, ...b } = plain(woken)
   expect(b).toEqual(a)
   expect(Object.keys(b).sort()).toEqual(Object.keys(a).sort())
   expect(a).toMatchObject({ sessionId: s.id, model: 'm1', effort: 'high', permissionPreset: 'normal', toolProfile: 'reader', mayRead: 'function' })

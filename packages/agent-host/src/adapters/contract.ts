@@ -171,6 +171,12 @@ export type CreateSessionOpts = {
   requestTurn?: RequestTurn
   resumeExternalId?: string
   /**
+   * The running cost of the conversation, for a tool that reports only its total (an ACP tool's `usage_update.cost`, OpenCode's):
+   * `last` is the total the session's previous process read last, null when none is known (a new conversation starts from 0, an
+   * import or a fork from nothing); `keep` saves each new one, so a turn after a restart or a host swap still has its cost
+   */
+  runningCost?: { last: number | null; keep(total: number): void }
+  /**
    * The goal the host last heard of for this conversation, when a new process resumes it (the badge's
    * `goal` event). Codex has no use for it — it asks the thread (`thread/goal/get`). Claude does: its
    * CLI restores the goal from the transcript and says nothing about it on the stream (measured
@@ -305,9 +311,10 @@ export interface SessionHandle {
   /**
    * `id`: a name the host gives the input, which `turnInputs` then reports back (a UUID). `quiet`: appended to the conversation without
    * starting a turn, and read with the next message that does (Claude's `shouldQuery: false`). Only an adapter with `quietInput` takes
-   * it; the mailbox's mail that must not wake goes this way
+   * it; the mailbox's mail that must not wake goes this way. `compact`: this is Centralu's own compact command
+   * (`SessionEvents.sendCompact`), for a tool that can tell its compaction only from that turn (ACP, §5.6); others ignore it
    */
-  send(text: string, opts?: { origin?: InputOrigin; id?: string; quiet?: boolean }): void
+  send(text: string, opts?: { origin?: InputOrigin; id?: string; quiet?: boolean; compact?: boolean }): void
   /**
    * A note for the model that never starts a turn and never interrupts one (#1492): Claude takes it as quiet input, read with
    * the next message or at the running turn's next tool round; Codex steers it into the regular turn that is running

@@ -200,42 +200,50 @@ export class LinkedMachine extends LinkedMachineConnection {
       return r
     }
     try {
-      /** Which step the row shows now: null before the first, then `wait_idle` or `wait_unread` */
-      let shown: 'wait_idle' | 'wait_unread' | null = null
+      /** What the row shows now: null before the first, then `wait_idle`, `wait_open` (with how many) or `wait_unread` */
+      let shown: string | null = null
       /** A reading has succeeded: from then on what runs there is known to be readable, so a failed one proves nothing */
       let seen = false
       let blind = 0
-      const show = (step: 'wait_idle' | 'wait_unread', why: string) => {
-        if (shown === step) return
-        shown = step
-        c.step(step)
+      const show = (step: 'wait_idle' | 'wait_open' | 'wait_unread', why: string, count?: number) => {
+        const key = `${step}:${count ?? ''}`
+        if (shown === key) return
+        shown = key
+        c.step(step, count)
         this.deps.log?.(`[links] ${this.name}: ${why}`)
       }
       const unread = () => show('wait_unread', 'what runs there cannot be read now; the update keeps waiting, since the sessions there may be in a turn (Cancel ends it)')
-      const busy = (n: number) => show('wait_idle', `the update waits for ${n} ${n === 1 ? 'session' : 'sessions'} in a turn`)
+      /** Sessions in a turn hold it first; what is left is terminals and project commands (#1579: the row and the log say which) */
+      const busy = (a: HostActivity) => {
+        const turns = turnsRunning(a)
+        const n = open(a)
+        if (turns > 0) show('wait_idle', `the update waits for ${turns} ${turns === 1 ? 'session' : 'sessions'} in a turn`, turns)
+        else show('wait_open', `the update waits for ${n} open ${n === 1 ? 'terminal or project command' : 'terminals and project commands'}, which an update this computer starts by itself closes none of`, n)
+      }
       /*
        * An update nobody approved also waits for terminals and project commands there (#1508 review): the person's Update stops them
        * knowingly, the hub's own catch-up must not. Bounded, since they stay open for hours: it gives up, nothing switched
        */
       const open = (a: HostActivity) => (unasked ? a.terminals + a.commandRuns : 0)
       const holding = (a: HostActivity) => turnsRunning(a) + open(a)
+      /** Since when a terminal or project command has been open without a gap, whatever turns run meanwhile (#1579) */
       let openSince: number | null = null
+      const now = this.deps.now ?? Date.now
       const openLimit = this.deps.openWorkWaitMs ?? OPEN_WORK_WAIT_MS
       for (;;) {
         const r = await read()
         if (r.activity) {
           seen = true
           blind = 0
-          if (turnsRunning(r.activity) === 0 && open(r.activity) > 0) {
-            openSince ??= Date.now()
-            if (Date.now() - openSince >= openLimit) {
+          if (open(r.activity) > 0) {
+            openSince ??= now()
+            if (now() - openSince >= openLimit) {
               throw new Error(
                 `Terminals or project commands stayed open on ${this.name}, and an update this computer starts by itself closes none of them; nothing was switched`,
               )
             }
           } else openSince = null
-          const running = holding(r.activity)
-          if (running === 0) {
+          if (holding(r.activity) === 0) {
             await pause(settle, wait.signal)
             const again = await read()
             // Only a reading that succeeded and shows nobody in a turn lets the host be stopped: a failed one proves nothing
@@ -243,9 +251,9 @@ export class LinkedMachine extends LinkedMachineConnection {
               if (shown) c.step('stop')
               return null
             }
-            if (again.activity) busy(holding(again.activity))
+            if (again.activity) busy(again.activity)
             else unread()
-          } else busy(running)
+          } else busy(r.activity)
         } else if (seen) {
           unread()
         } else if (r.cannot || ++blind > ACTIVITY_UNREAD_RETRIES) {
@@ -574,9 +582,9 @@ export class LinkedMachine extends LinkedMachineConnection {
     const tunnelExec = this.tunnel.exec!.bind(this.tunnel)
     const done = this.begin(kind, null, target)
     const at = Date.now()
-    const step = (s: UpdateStep) => {
+    const step = (s: UpdateStep, count?: number) => {
       this.deps.log?.(`[links] ${this.name}: ${kind}${target ? ` ${target}` : ''}: ${s}`)
-      this.operation = { kind, step: s, target, at }
+      this.operation = { kind, step: s, target, at, ...(count === undefined ? {} : { count }) }
       this.deps.broadcast({ type: 'machine_status', machine: this.info() })
     }
     let result: T
@@ -597,7 +605,7 @@ export class LinkedMachine extends LinkedMachineConnection {
   }
 
   /** What update.ts runs things there with */
-  private control(exec: (command: RemoteCommand) => Promise<RemoteRun>, script: string, step: (s: UpdateStep) => void): HostControl {
+  private control(exec: (command: RemoteCommand) => Promise<RemoteRun>, script: string, step: (s: UpdateStep, count?: number) => void): HostControl {
     const hold = async () => {
       this.held = true
       this.clearRetry()

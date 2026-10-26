@@ -1,5 +1,5 @@
 import type { AdapterCapabilities, ToolDescriptor } from '@cc/protocol'
-import type { AgentSpawnSpec, DetectResult } from '../contract.js'
+import type { AgentSpawnSpec, CreateSessionOpts, DetectResult } from '../contract.js'
 import type { AdapterSurface } from '../contract/surface.js'
 import type { ToolCallFields } from './wire.js'
 
@@ -11,8 +11,8 @@ export type AcpProfile = {
   readonly descriptor: ToolDescriptor
   readonly capabilities: AdapterCapabilities
   readonly surface: AdapterSurface
-  /** How to start this tool's ACP server, or null when it is not installed here */
-  launch(): Promise<Pick<AgentSpawnSpec, 'command' | 'args'> & { env?: Record<string, string> } | null>
+  /** How to start this tool's ACP server for this session (its environment may carry the preset), or null when it is not installed here */
+  launch(opts: CreateSessionOpts): Promise<Pick<AgentSpawnSpec, 'command' | 'args'> & { env?: Record<string, string> } | null>
   detect(): Promise<DetectResult>
   installedVersion(): Promise<string | null>
   /**
@@ -21,4 +21,6 @@ export type AcpProfile = {
    * its own rights (#1562 review)
    */
   centraluToolOf?(call: ToolCallFields): string | null
+  /** Its `/compact` leaves no protocol frame: the core reads Centralu's compact turn instead (`AcpSessionDeps.infersCompaction`) */
+  readonly infersCompaction?: boolean
 }

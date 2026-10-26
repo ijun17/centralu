@@ -47,7 +47,7 @@ export abstract class AcpAdapter implements AgentAdapter {
 
   async createSession(opts: CreateSessionOpts, emit: EventSink): Promise<SessionHandle> {
     const label = this.profile.descriptor.label
-    const launch = await this.profile.launch()
+    const launch = await this.profile.launch(opts)
     if (!launch) throw rpcError(`${label} is not installed. ${this.profile.descriptor.install}`, 'tool_not_installed')
     const recorder = frameRecorder(opts.sessionId)
     const spec = { command: launch.command, args: launch.args, cwd: opts.cwd, env: { ...process.env, ...launch.env } }
@@ -63,6 +63,7 @@ export abstract class AcpAdapter implements AgentAdapter {
       version: () => this.profile.installedVersion(),
       stopConfirmMs: this.stopConfirmMs,
       ...(this.profile.centraluToolOf ? { centraluToolOf: (call: ToolCallFields) => this.profile.centraluToolOf?.(call) ?? null } : {}),
+      ...(this.profile.infersCompaction ? { infersCompaction: true } : {}),
       ...(recorder ? { onFrame: recorder.frame } : {}),
     })
     try {
@@ -75,15 +76,15 @@ export abstract class AcpAdapter implements AgentAdapter {
   }
 }
 
-/**
- * A process the previous host left running (a swap or a crash under the keeper, §4.4): this adapter does not take over a
- * running ACP connection yet, so it is ended with its tree, the tool calls it left open are closed as failed (their cards
- * would spin forever), and the conversation is opened again in a new process with `session/load`.
- */
 /** A killed process is gone in well under this; the bound only keeps a stuck one from holding the session's start */
 const ADOPTED_EXIT_MS = 5_000
 
-/** Ends the process a previous host left, and waits for it to be gone: the new one loads the same conversation */
+/**
+ * A process the previous host left running (a swap or a crash under the keeper, §4.4): this adapter does not take over a
+ * running ACP connection yet, so it is ended with its tree, and waited for (the new one loads the same conversation); the
+ * tool calls it left open are closed as failed (their cards would spin forever), and the conversation is opened again in
+ * a new process with `session/load`.
+ */
 async function closeAdopted(adopt: NonNullable<ProcessSource['adopt']>, sessionId: string, emit: EventSink): Promise<void> {
   adopt.process.kill('SIGKILL')
   await waitForExit(adopt.process, ADOPTED_EXIT_MS)

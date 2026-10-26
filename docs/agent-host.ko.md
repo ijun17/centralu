@@ -801,7 +801,7 @@ interface AdapterCapabilities {
   exclusiveWriter: boolean      // 우리가 쥐고 있는 동안 다른 누구도 대화에 쓸 수 없다
   backgroundTasks: boolean      // 백그라운드 작업을 `background_tasks`로 알린다 (#290)
   sleep?: boolean               // #568: 유휴 세션을 재울 수 있다(재개가 캐시를 지킨다고 측정됨). §4.6.1
-  presets?: PermissionPreset[]  // 지킬 수 있는 프리셋. 없으면 전부 (Cursor는 `safe`가 없다, plans/acp-adapter.md §0.1)
+  presets?: PermissionPreset[]  // 지킬 수 있는 프리셋. 없으면 전부 (Cursor는 `auto`만 지킨다, plans/acp-adapter.md §0.1)
   keepsRepoFilesOut?: boolean   // 신뢰하지 않는 프로젝트에서 그 프로젝트 자신의 파일을 못 읽게 할 수 있는가 (#92). 없으면 true
   roleText?: boolean            // Centralu의 역할 글(`systemPromptAppend`)을 받는가. 없으면 true
 }
@@ -1811,7 +1811,7 @@ Disconnect는 기기를 연결 해제하지 않고 링크를 닫고, 스위치�
 지우지 않았고, 어느 쪽도 로컬 빌드가 아니며, `versions.older`가 `remote`일 때. 허브는 연결될 때마다(허브 자신의 업데이트 뒤 새 호스트가 다시 연결할 때도)
 그리고 사람이 자동 업데이트를 켤 때 `machines.update { when: 'idle' }`과 같은 업데이트를 스스로 시작한다. 이 업데이트는 턴을 기다리고, 무엇이 도는지
 물을 수 없는 호스트는 멈추지 않으며(멈추기 전에 실패하고 아무것도 바뀌지 않는다), 기다리는 동안 자동 업데이트가 꺼지거나 스왑이 시작되면 그만둔다.
-사람의 Update와 달리 터미널과 프로젝트 명령도 닫히길 기다리며(어느 것도 닫지 않고, 그것들만 30분 남으면 그만둔다), 무엇이 도는지 읽을 수 없는 기기에는
+사람의 Update와 달리 터미널과 프로젝트 명령도 닫히길 기다리며(어느 것도 닫지 않고, 터미널이나 명령이 턴과 상관없이 끊김 없이 30분 열려 있으면 그만둔다(#1579). 행과 로그는 무엇이 붙잡는지(턴이 도는 세션 `wait_idle`, 열린 터미널·명령 `wait_open`)와 그 수 `operation.count`를 따로 말한다. 열린 터미널·명령의 행 문구: "Updating to <v>: waiting for <N> open terminals or commands there (Cancel, then Update, closes them)…", 하나면 "1 open terminal or command there (… closes it)"; 소유자 결정 2026-10-26), 무엇이 도는지 읽을 수 없는 기기에는
 아무것도 설치하기 전에 실패한다. 허브 버전마다 한 번, 실패하면 10분 뒤 한 번 더 시도하고, 사람이 기다림을 취소하면 그 버전에는 다시 하지 않는다.
 그렇게 끝난 버전에서는 `followsHub`가 거짓이라 에이전트도 카드 없이 다시 시작할 수 없다. 제한된 호출자의 `machines.cancelUpdate`(everyday)도
 이 업데이트를 다음 허브 버전까지 멈출 수 있다. 실패는 행에 `MachineInfo.followHub`로
