@@ -169,6 +169,10 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
       { id: 'e2e-chromium', browser: 'chromium', Browser: 'Chromium', tests: 'pnpm e2e', testLimit: 12 },
       { id: 'ux-tasks', browser: 'webkit', Browser: 'WebKit', tests: 'pnpm ux', testLimit: 5 },
     ]
+    // The apt packages are cached by the runner image (its OS and version) and Playwright's version, and by browser: the
+    // two browsers need different packages, so they do not share an entry
+    const debsKey = (browser: string) =>
+      `apt-debs-\${{ runner.os }}-\${{ steps.image.outputs.name }}-playwright-\${{ steps.playwright.outputs.version }}-${browser}`
     for (const { id, browser, Browser, tests, testLimit } of browserJobs) {
       const body = job(id).body
       const start = body.indexOf("      - name: Read Playwright's version\n")
@@ -181,10 +185,24 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
           '        id: playwright',
           `        run: echo "version=$(pnpm exec playwright --version | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"`,
           '',
+          '      - name: Read the runner image',
+          '        id: image',
+          '        run: echo "name=${ImageOS:-unknown}-${ImageVersion:-unknown}" >> "$GITHUB_OUTPUT"',
+          '',
           '      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0',
           '        with:',
           '          path: ~/.cache/ms-playwright',
           `          key: playwright-\${{ runner.os }}-\${{ steps.playwright.outputs.version }}-${browser}`,
+          '',
+          '      - name: Restore the apt packages of an earlier run',
+          '        id: debs',
+          '        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0',
+          '        with:',
+          '          path: ${{ runner.temp }}/apt-debs',
+          `          key: ${debsKey(browser)}`,
+          '',
+          '      - name: Put the apt packages where apt looks',
+          '        run: bash .github/scripts/apt-deb-cache.sh restore "$RUNNER_TEMP/apt-debs"',
           '',
           `      - name: Install ${Browser} system libraries`,
           '        id: libraries',
@@ -200,6 +218,16 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
           '          sudo dpkg --configure -a || true',
           `          pnpm exec playwright install-deps ${browser}`,
           '',
+          '      - name: Keep the apt packages this run downloaded',
+          "        if: steps.debs.outputs.cache-hit != 'true'",
+          '        run: bash .github/scripts/apt-deb-cache.sh save "$RUNNER_TEMP/apt-debs"',
+          '',
+          '      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0',
+          "        if: steps.debs.outputs.cache-hit != 'true'",
+          '        with:',
+          '          path: ${{ runner.temp }}/apt-debs',
+          `          key: ${debsKey(browser)}`,
+          '',
           `      - name: Install ${Browser}`,
           '        timeout-minutes: 3',
           `        run: pnpm exec playwright install ${browser}`,
@@ -214,6 +242,42 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     // The old one-step install, with the system libraries inside the tests' budget, is gone
     expect(workflow).not.toMatch(/--with-deps/)
     expect(workflow.match(/playwright install-deps /g)).toHaveLength(browserJobs.length * 2)
+  })
+
+  // #1592, #1597 (2026-10-26): both tries of the system libraries' install, 3 minutes each, timed out on the mirror on
+  // main and in a merge batch, with the limits and the retry of #1503 in place. The 140 packages (117 MB) are not
+  // downloaded any more when an earlier run of the same runner image and Playwright version has them: their .deb files
+  // are cached, put into apt's archive folder before the install and saved right after it, not at the end of the job
+  // (a failed test run must not keep the cache from filling).
+  it("caches the .deb files of the browsers' system libraries, restored before the install and saved right after it", () => {
+    const script = readFileSync(new URL('../.github/scripts/apt-deb-cache.sh', import.meta.url), 'utf8')
+    expect(script).toContain('archives=${APT_ARCHIVES:-/var/cache/apt/archives}')
+    expect(script).toContain('docker-clean')
+    // Neither direction may fail a job: a cache that cannot be used leaves the install as slow as it was
+    expect(script).toMatch(/^exit 0$/m)
+    for (const id of ['e2e', 'e2e-chromium', 'ux-tasks']) {
+      const body = job(id).body
+      const at = (text: string) => body.indexOf(text)
+      const order = [
+        '- name: Read the runner image',
+        '- name: Restore the apt packages of an earlier run',
+        '- name: Put the apt packages where apt looks',
+        'id: libraries',
+        'system libraries, second try',
+        '- name: Keep the apt packages this run downloaded',
+        '- uses: actions/cache/save@',
+      ].map(at)
+      expect(order, id).not.toContain(-1)
+      expect(order, id).toEqual([...order].sort((a, b) => a - b))
+      // The restore and the save are the one entry, found by an exact key and never by a prefix: another image's packages are not wanted
+      expect(body, id).not.toContain('restore-keys')
+      // A hit is not saved again, and nothing is saved after a failed install (the step's own success() condition)
+      expect(body.match(/if: steps\.debs\.outputs\.cache-hit != 'true'$/gm), id).toHaveLength(2)
+      expect(body, id).not.toMatch(/cache-hit != 'true' *\|\|/)
+    }
+    // Only the Linux browser jobs: the macOS and Windows jobs install no system libraries
+    expect(workflow.match(/apt-deb-cache\.sh (?:restore|save)/g)).toHaveLength(6)
+    expect(workflow.match(/actions\/cache\/(?:restore|save)@/g)).toHaveLength(6)
   })
 
   // #1259: changes land after the fast tier, so every push to main needs its full run to the end; a pull request's are superseded
