@@ -192,6 +192,7 @@ Asks only for some parameters (everyday otherwise):
 With the limited credential: refused, never a card: the person's own answers and the window's own state.
 
 - `agents.answerQuestion`
+- `agents.archiveLosses`
 - `agents.resolveMcpProposal`
 - `agents.resolveSkillProposal`
 - `agents.respondApproval`

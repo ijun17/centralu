@@ -338,19 +338,30 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
   },
 
   /**
-   * The archive the dialog's first Archive asks for (#1512, #1589): the host moves the session only when nothing it holds would be
-   * lost (`agents.archiveIfAtRest`, read then move). Null: it is done (archived, the toast offers Undo; or failed, the toast says why).
-   * Lines: not moved, and these are what the archive would lose and Undo does not bring back; the dialog shows them and its next
-   * Archive is `deleteSession`. No lines: not moved because the session is not at rest, or the host predates the method; the
-   * dialog then moves it with `deleteSession` if it is still open, as it did before #1521 (the person's answer is enough). Never
-   * with the worktree deleted: that is `deleteSession` straight (the host's check does not remove one).
+   * The archive the dialog's Archive asks for when the person has not seen the host's losses (#1512, #1589, #1595). Null: it is done
+   * (archived, the toast offers Undo; or failed, the toast says why). Lines: not moved, and these are what the archive would lose
+   * and Undo does not bring back; the dialog shows them and its next Archive is `deleteSession`. No lines: not moved because the
+   * session is not at rest, or the host predates the check; the dialog then moves it with `deleteSession` if it is still open,
+   * as it did before #1521 (the person's answer is enough).
+   *
+   * With the worktree kept the host's own check decides and moves (`agents.archiveIfAtRest`, read then move). With the worktree
+   * deleted too that check cannot be used (it never removes one), so only the losses are read (`agents.archiveLosses`); none means
+   * no lines, and the dialog moves the session with `deleteSession` if it is still open. A host without that method lists nothing,
+   * as after #1590.
    */
-  async archiveSession(sessionId, deleteExternal) {
+  async archiveSession(sessionId, deleteWorktree, deleteExternal) {
     const platform = get().platform
     const s = get().sessions[sessionId]
     if (!platform || !s) return null
     const place = windowPlaceOf(get(), sessionId)
     try {
+      if (deleteWorktree) {
+        const lost = await platform.agents.archiveLosses(sessionId).catch((e) => {
+          if (/unknown method/i.test(errorMessage(e))) return []
+          throw e
+        })
+        return lost
+      }
       const r = await platform.agents.archiveIfAtRest(sessionId, deleteExternal)
       if (r.archived) {
         announceArchived(set, get, sessionId, s.name, place)

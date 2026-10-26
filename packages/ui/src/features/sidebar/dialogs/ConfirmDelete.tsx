@@ -28,7 +28,7 @@ export function ConfirmDelete({
   sessionId: string
   name: string
   tool: ToolName
-  /** Archive for sure: the person has seen what the archive drops, or chose to delete the worktree */
+  /** Archive for sure: the person has seen what the archive drops, or the host has nothing to list or to decide */
   onConfirm: (deleteWorktree: boolean, deleteExternal: boolean) => void
   /** The host archived it (or could not) on the first Archive: nothing is left to ask */
   onDone: () => void
@@ -59,10 +59,14 @@ export function ConfirmDelete({
   const wt = useLoad(() => platform.agents.worktreeStatus(sessionId), [platform, sessionId]).data ?? null
   const [deleteWorktree, setDeleteWorktree] = useState(false)
   /*
-   * What the host said the archive would lose and Undo does not bring back (#1512, #1589). The first Archive (worktree kept) asks the
-   * host, which moves the session when that loses nothing; when it would, the lines show here and the next Archive moves it anyway.
+   * What the archive would lose and Undo does not bring back (#1512, #1589, #1595): read from the host when the dialog opens, so the
+   * lines are on screen before the person decides, whichever way the worktree box is ticked; a host without the method says none.
+   * Archive never waits for that read: if it has not come (or came empty), the store asks the host again as it moves the session,
+   * and what that finds shows here, to be confirmed with the next Archive.
    */
-  const [losses, setLosses] = useState<string[]>([])
+  const read = useLoad(() => platform.agents.archiveLosses(sessionId), [platform, sessionId]).data
+  const [found, setFound] = useState<string[]>([])
+  const losses = found.length > 0 ? found : (read ?? [])
   const asking = useRef(false)
   // A dialog put away while the host is being asked is an answer of "no more": the answer to that question moves nothing further
   const open = useRef(true)
@@ -73,17 +77,19 @@ export function ConfirmDelete({
     }
   }, [])
   const archive = () => {
-    if (deleteWorktree || losses.length > 0) return onConfirm(deleteWorktree, deleteExternal)
+    // One question to the host at a time
     if (asking.current) return
+    // Seen by the person: confirmed in one step
+    if (losses.length > 0) return onConfirm(deleteWorktree, deleteExternal)
     asking.current = true
     void useStore
       .getState()
-      .archiveSession(sessionId, deleteExternal)
+      .archiveSession(sessionId, deleteWorktree, deleteExternal)
       .then((lines) => {
         if (!open.current) return
         if (lines === null) onDone()
-        else if (lines.length > 0) setLosses(lines)
-        else onConfirm(false, deleteExternal)
+        else if (lines.length > 0) setFound(lines)
+        else onConfirm(deleteWorktree, deleteExternal)
       })
       .finally(() => (asking.current = false))
   }
@@ -93,13 +99,18 @@ export function ConfirmDelete({
         <p className="text-md text-ink">Archive this session?</p>
         <p className="mt-1.5 truncate text-sm text-ink-muted">{name}</p>
         {losses.length > 0 && (
-          <div className="mt-2 rounded-md border border-danger/40 bg-danger-bg px-2 py-1.5 text-xs leading-body text-ink" data-testid="delete-losses">
-            <p>Archiving it drops these, and Undo does not bring them back:</p>
-            <ul className="mt-1 list-disc space-y-0.5 pl-4">
-              {losses.map((line) => (
-                <li key={line}>{line}</li>
-              ))}
-            </ul>
+          // Opens downward in place (cc-expand, 180ms, none under reduced motion) and takes no press: the answer arrives after the dialog
+          <div className="cc-expand mt-2 grid">
+            <div className="min-h-0 overflow-hidden">
+              <div className="rounded-md border border-danger/40 bg-danger-bg px-2 py-1.5 text-xs leading-body text-ink" data-testid="delete-losses">
+                <p>Archiving it drops these, and Undo does not bring them back:</p>
+                <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                  {losses.map((line) => (
+                    <li key={line}>{line}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
           </div>
         )}
         <p className="mt-2 text-xs leading-body text-ink-faint" data-testid="delete-trash-note">

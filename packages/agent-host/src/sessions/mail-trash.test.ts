@@ -131,6 +131,30 @@ describe('archiving a session that looks idle', () => {
     expect(listed()).toContain(busy.id)
   })
 
+  // #1595: the dialog reads these before anything moves, also when the worktree goes with the session; nothing moves and nothing changes
+  it('lists what an archive would lose without moving anything (agents.archiveLosses)', async () => {
+    const losses = (sessionId: string) => world.rpc('agents.archiveLosses', { sessionId }) as Promise<{ asks: string[] }>
+    const clean = await create()
+    expect(await losses(clean.id)).toEqual({ asks: [] })
+
+    const worker = await create()
+    const giver = await create()
+    const a = mail.sessionAddress(worker.id)
+    const { thread } = openBy(mail, { by: mail.sessionAddress(giver.id), kind: 'assign', subject: 'Land #13', body: 'please', assignee: a })
+    mail.update(thread.id, a, { state: 'running' })
+    const waited = await create()
+    const caller = await create()
+    ;(world.mgr as unknown as { children: { markReport(sessionId: string, callerId: string): void } }).children.markReport(waited.id, caller.id)
+
+    // The same lines the move itself would answer with
+    expect((await losses(worker.id)).asks).toEqual([expect.stringContaining('assignee of an unfinished mail thread ("Land #13")')])
+    expect((await losses(waited.id)).asks.join(' ')).toContain('is waiting for the report of the work it gave this session')
+    expect((await losses(worker.id)).asks).toEqual((await archive(worker.id)).asks)
+    expect(listed()).toEqual(expect.arrayContaining([clean.id, worker.id, waited.id]))
+    expect(world.store.mail.thread(thread.id)).toMatchObject({ assignee: a, state: 'running' })
+    expect(await losses('s-nothing')).toEqual({ asks: [] })
+  })
+
   it('says it is not archived, with nothing to name, for a session that is not here', async () => {
     expect(await archive('s-nothing')).toEqual({ archived: false, asks: [] })
   })

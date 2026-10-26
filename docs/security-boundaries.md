@@ -795,15 +795,18 @@ processes after adoption, at idle or when their current turn finishes (#589).
 
 **The person's own "Archive session…" in the window** is not `delete_session`, and takes no card of the call table: it is the
 person's. The window asks first, every time and also for an idle session (owner, 2026-10-26, #1589; #1512 had moved an idle one
-at once): its dialog shows the worktree choice and the conversation-file box, ticked by default. Its first Archive, with the
-worktree kept, asks the host (`agents.archiveIfAtRest`, `SessionTrash.archiveIfAtRest`, rights `asks` for any other caller), which
-reads then moves: it moves the session only when `lossesOf` is empty (the same list as the orchestrator's card, with the unfinished
-mail threads the session is assigned or owns) and, in the step that moves it, it is still at rest (`trashIfQuiet`). Otherwise nothing
-moves and the dialog lists the host's lines, and its next Archive is `agents.deleteSession`; a session that was merely not at rest, a
-host from before the method ("Unknown method") and a worktree deleted with it (the host's check never removes one) go straight to
-`agents.deleteSession`, the dialog's answer being the person's. Undo on the toast after the archive is `trash.restore` and puts back
-the unsent draft and the session's place in each project's grid; it does not bring back the scroll position or the focus, and it does
-not hand back what `lossesOf` names (which is why the dialog lists those, when the worktree is kept: a worktree deleted with the session skips the host's check, which never removes one, and the dialog's answer stands).
+at once): its dialog shows the worktree choice and the conversation-file box, ticked by default. When it opens it reads what the
+archive would lose (`agents.archiveLosses`, read only, rights `window` (it names mail thread subjects, which only the window reads), `SessionTrash.archiveLosses` = `lossesOf`: the same list as
+the orchestrator's card, with the unfinished mail threads the session is assigned or owns) and lists it, whichever way the worktree box
+is ticked (#1595); Archive then moves the session in one step, as the person saw it. If the read has not come, or came empty (or the
+host is from before the method, "Unknown method"), Archive asks the host as it moves it: with the worktree kept
+`agents.archiveIfAtRest` (`SessionTrash.archiveIfAtRest`, rights `asks` for any other caller), which reads then moves, only when
+`lossesOf` is empty and, in the step that moves it, the session is still at rest (`trashIfQuiet`); otherwise nothing moves, the
+dialog lists the host's lines, and its next Archive is `agents.deleteSession`. With the worktree deleted too (`archiveIfAtRest` never
+removes one) it reads `agents.archiveLosses` again, and the dialog (if still open) moves it with `agents.deleteSession` when there are none. A session that was merely
+not at rest, and a host without the methods, go to `agents.deleteSession` on the dialog's answer. Undo on the toast after the archive is
+`trash.restore` and puts back the unsent draft and the session's place in each project's grid; it does not bring back the scroll
+position or the focus, and it does not hand back what `lossesOf` names (which is why the dialog lists those).
 
 Rows that differ by session:
 

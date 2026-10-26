@@ -193,6 +193,9 @@ class WebAgentPort implements AgentPort {
   archiveIfAtRest(sessionId: string, deleteExternal = false) {
     return this.rpc.call('agents.archiveIfAtRest', { sessionId, deleteExternal })
   }
+  async archiveLosses(sessionId: string) {
+    return (await this.rpc.call('agents.archiveLosses', { sessionId })).asks
+  }
   listExternalSessions(projectId: string, tool: ToolName, limit = 30) {
     return this.rpc.call(
       'agents.listExternalSessions',

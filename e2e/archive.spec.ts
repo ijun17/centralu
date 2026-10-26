@@ -130,19 +130,17 @@ test('an idle session asks first, Cancel archives nothing, and Undo on the toast
   await expect(page.getByTestId('delete-losses')).toHaveCount(0)
 })
 
-// #1589: the dialog's first Archive asks the host (read, then move); what the host says would be lost shows, and the next Archive moves it anyway
-test('a session the host says would lose something shows it at the first Archive and moves only at the second; Cancel archives nothing', async ({ page }) => {
+// #1595: what an archive would lose is read when the dialog opens, so it is on screen before the person decides, whichever way the worktree box is ticked
+test('a session the host says would lose something shows it as the dialog opens, and one Archive moves it; Cancel archives nothing', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   const id = await answeredSession(page, 'alpha', 'what is the answer')
   // The mock host stands for the real one's rule: a session an agent started owes that agent a report (the mailbox, waits and cards say the same)
   await page.evaluate((sid: string) => ((window as any).__mock.store.sessions.get(sid).askedBy = 'an-agent'), id)
   await page.getByTestId(`session-menu-${id}`).click()
   await page.getByTestId(`delete-session-${id}`).click()
-  await expect(page.getByTestId('delete-losses')).toHaveCount(0)
-  await page.getByTestId('confirm-delete-yes').click()
+  await expect(page.getByTestId('confirm-delete')).toBeVisible()
   await expect(page.getByTestId('delete-losses')).toContainText('owes it a report')
   await expect(page.getByTestId('delete-losses')).toContainText('Undo does not bring them back')
-  await expect(page.getByTestId(`session-row-${id}`)).toBeVisible()
   expect(await page.evaluate(() => (window as any).__mock.trashBin.size)).toBe(0)
   await page.getByRole('button', { name: 'Cancel' }).click()
   await expect(page.getByTestId('confirm-delete')).toHaveCount(0)
@@ -151,7 +149,6 @@ test('a session the host says would lose something shows it at the first Archive
 
   await page.getByTestId(`session-menu-${id}`).click()
   await page.getByTestId(`delete-session-${id}`).click()
-  await page.getByTestId('confirm-delete-yes').click()
   await expect(page.getByTestId('delete-losses')).toBeVisible()
   await page.getByTestId('confirm-delete-yes').click()
   await expect(page.getByTestId(`session-row-${id}`)).toHaveCount(0)
@@ -160,30 +157,130 @@ test('a session the host says would lose something shows it at the first Archive
   expect(await page.evaluate((sid: string) => (window as any).__mock.trashBin.get(sid)?.removeExternal, id)).toBe(true)
 })
 
-test('deleting the worktree too moves the session at the first Archive, whatever the host would list; the unticked file stays at purge', async ({ page }) => {
+test('with the worktree box ticked the losses show all the same, and one Archive moves the session with its worktree; the unticked file stays at purge', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   const id = await answeredSession(page, 'alpha', 'what is the answer')
+  // The mock host stands for the real one's rule: a session an agent started owes that agent a report (the mailbox, waits and cards say the same)
+  await page.evaluate((sid: string) => ((window as any).__mock.store.sessions.get(sid).askedBy = 'an-agent'), id)
   await page.evaluate((sid: string) => {
     const m = (window as any).__mock
     m.store.sessions.get(sid).worktree = { path: '/tmp/alpha-wt', branch: 'feat/x' }
-    m.store.sessions.get(sid).askedBy = 'an-agent'
     ;(window as any).__store.setState((st: any) => ({ sessions: { ...st.sessions, [sid]: { ...st.sessions[sid], worktree: { path: '/tmp/alpha-wt', branch: 'feat/x' } } } }))
   }, id)
   await page.getByTestId(`session-menu-${id}`).click()
   await page.getByTestId(`delete-session-${id}`).click()
+  await expect(page.getByTestId('delete-losses')).toContainText('owes it a report')
   await page.getByTestId('delete-worktree-toggle').check()
+  await expect(page.getByTestId('delete-losses')).toContainText('owes it a report')
   await page.getByTestId('delete-external-toggle').locator('input').uncheck()
+  expect(await page.evaluate(() => (window as any).__mock.trashBin.size)).toBe(0)
   await page.getByTestId('confirm-delete-yes').click()
   await expect(page.getByTestId(`session-row-${id}`)).toHaveCount(0)
-  await expect(page.getByTestId('delete-losses')).toHaveCount(0)
-  const kept = await page.evaluate((sid: string) => (window as any).__mock.trashBin.get(sid), id)
-  expect(kept).toMatchObject({ removeWorktree: true, removeExternal: false })
+  expect(await page.evaluate((sid: string) => (window as any).__mock.trashBin.get(sid), id)).toMatchObject({ removeWorktree: true, removeExternal: false })
   await openArchive(page)
   await page.getByTestId(`trash-purge-${id}`).click()
   await page.getByTestId('trash-confirm-yes').click()
   await expect(page.getByTestId('trash-list-empty')).toBeVisible()
   expect(await page.evaluate(() => (window as any).__mock.externallyDeleted)).toEqual([])
 })
+
+test('a host that cannot list the losses (older build): the dialog shows none and archives as it did before, with the worktree ticked', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const id = await answeredSession(page, 'alpha', 'what is the answer')
+  // The mock host stands for the real one's rule: a session an agent started owes that agent a report (the mailbox, waits and cards say the same)
+  await page.evaluate((sid: string) => ((window as any).__mock.store.sessions.get(sid).askedBy = 'an-agent'), id)
+  await page.evaluate((sid: string) => {
+    const m = (window as any).__mock
+    m.store.sessions.get(sid).worktree = { path: '/tmp/alpha-wt', branch: 'feat/x' }
+    ;(window as any).__store.setState((st: any) => ({ sessions: { ...st.sessions, [sid]: { ...st.sessions[sid], worktree: { path: '/tmp/alpha-wt', branch: 'feat/x' } } } }))
+  }, id)
+  await page.evaluate(() => {
+    ;(window as any).__mock.agents.archiveLosses = async () => {
+      throw new Error('Unknown method: agents.archiveLosses')
+    }
+  })
+  await page.getByTestId(`session-menu-${id}`).click()
+  await page.getByTestId(`delete-session-${id}`).click()
+  await expect(page.getByTestId('confirm-delete')).toBeVisible()
+  await expect(page.getByTestId('delete-losses')).toHaveCount(0)
+  await page.getByTestId('delete-worktree-toggle').check()
+  await page.getByTestId('confirm-delete-yes').click()
+  await expect(page.getByTestId(`session-row-${id}`)).toHaveCount(0)
+  expect(await page.evaluate((sid: string) => (window as any).__mock.trashBin.get(sid)?.removeWorktree, id)).toBe(true)
+})
+
+test('a loss that appears after the dialog opened is shown at Archive, which moves nothing; the next Archive moves it', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const id = await answeredSession(page, 'alpha', 'what is the answer')
+  // The read at opening finds nothing; by the time of Archive the session owes a report
+  await page.evaluate(() => {
+    ;(window as any).__mock.agents.archiveLosses = async () => []
+  })
+  // The mock host stands for the real one's rule: a session an agent started owes that agent a report (the mailbox, waits and cards say the same)
+  await page.evaluate((sid: string) => ((window as any).__mock.store.sessions.get(sid).askedBy = 'an-agent'), id)
+  await page.getByTestId(`session-menu-${id}`).click()
+  await page.getByTestId(`delete-session-${id}`).click()
+  await expect(page.getByTestId('confirm-delete')).toBeVisible()
+  await expect(page.getByTestId('delete-losses')).toHaveCount(0)
+  await page.getByTestId('confirm-delete-yes').click()
+  await expect(page.getByTestId('delete-losses')).toContainText('owes it a report')
+  await expect(page.getByTestId(`session-row-${id}`)).toBeVisible()
+  expect(await page.evaluate(() => (window as any).__mock.trashBin.size)).toBe(0)
+  await page.getByTestId('confirm-delete-yes').click()
+  await expect(page.getByTestId(`session-row-${id}`)).toHaveCount(0)
+})
+
+test('a dialog put away while the losses are being read moves nothing, also with the worktree box ticked', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const id = await answeredSession(page, 'alpha', 'what is the answer')
+  await page.evaluate((sid: string) => {
+    const m = (window as any).__mock
+    m.store.sessions.get(sid).worktree = { path: '/tmp/alpha-wt', branch: 'feat/x' }
+    ;(window as any).__store.setState((st: any) => ({ sessions: { ...st.sessions, [sid]: { ...st.sessions[sid], worktree: { path: '/tmp/alpha-wt', branch: 'feat/x' } } } }))
+    const release: (() => void)[] = []
+    ;(window as any).__release = () => release.splice(0).forEach((r) => r())
+    m.agents.archiveLosses = () => new Promise<string[]>((resolve) => release.push(() => resolve([])))
+  }, id)
+  await page.getByTestId(`session-menu-${id}`).click()
+  await page.getByTestId(`delete-session-${id}`).click()
+  await page.getByTestId('delete-worktree-toggle').check()
+  await page.getByTestId('confirm-delete-yes').click()
+  await page.getByRole('button', { name: 'Cancel' }).click()
+  await expect(page.getByTestId('confirm-delete')).toHaveCount(0)
+  await page.evaluate(() => (window as any).__release())
+  await page.waitForTimeout(300)
+  await expect(page.getByTestId(`session-row-${id}`)).toBeVisible()
+  expect(await page.evaluate(() => (window as any).__mock.trashBin.size)).toBe(0)
+})
+
+test('Archive is never held up by the read of the losses', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const id = await answeredSession(page, 'alpha', 'what is the answer')
+  await page.evaluate(() => {
+    ;(window as any).__mock.agents.archiveLosses = () => new Promise(() => {})
+  })
+  await page.getByTestId(`session-menu-${id}`).click()
+  await page.getByTestId(`delete-session-${id}`).click()
+  await page.getByTestId('confirm-delete-yes').click()
+  await expect(page.getByTestId(`session-row-${id}`)).toHaveCount(0)
+})
+
+// Owner rule, 2026-10-26: what appears is animated, briefly, and not at all under reduced motion
+for (const reduced of [false, true]) {
+  test(`the losses open downward in place (${reduced ? 'no animation under reduced motion' : 'cc-expand'})`, async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: reduced ? 'reduce' : 'no-preference' })
+    await setup(page, { projects: ['/tmp/alpha'] })
+    const id = await answeredSession(page, 'alpha', 'what is the answer')
+    // The mock host stands for the real one's rule: a session an agent started owes that agent a report (the mailbox, waits and cards say the same)
+    await page.evaluate((sid: string) => ((window as any).__mock.store.sessions.get(sid).askedBy = 'an-agent'), id)
+    await page.getByTestId(`session-menu-${id}`).click()
+    await page.getByTestId(`delete-session-${id}`).click()
+    const box = page.getByTestId('delete-losses')
+    await expect(box).toBeVisible()
+    const name = () => box.evaluate((el) => getComputedStyle(el.parentElement!.parentElement!).animationName)
+    expect(await name()).toBe(reduced ? 'none' : 'cc-expand')
+  })
+}
 
 test('the file left unticked stays at the first Archive too, and the ticked one goes only at purge', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
