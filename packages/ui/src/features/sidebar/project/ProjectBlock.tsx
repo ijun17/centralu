@@ -53,6 +53,8 @@ export function ProjectBlock({ projectId }: { projectId: string }) {
   const [instructing, setInstructing] = useState(false)
   // Fold state (#205) — held by the store: remembered per project and persists across restarts
   const savedFolded = useStore((s) => s.foldedProjects.includes(projectId))
+  // Until the saved folds are read the list is drawn open and then folds; that is not a fold the person made, so it does not slide
+  const workspaceReady = useStore((s) => s.workspaceReady)
   const toggleFold = (id: string) => useStore.getState().toggleProjectFold(id)
   /*
    * Hover expansion (#1578): a transient state on top of the saved fold, never written to it. Resting the pointer 0.1 s on
@@ -175,7 +177,7 @@ export function ProjectBlock({ projectId }: { projectId: string }) {
         an open project does not slide: the fold is already open, and only a fold moves. An open project with no session and
         no app draws nothing below its line: no empty gap under the header (the gap is the rows' own padding).
       */}
-      <Fold open={!folded} className={sessions.length > 0 || projectApps.length > 0 ? 'pt-1.5' : undefined} testId={`project-rows-${project.name}`}>
+      <Fold open={!folded} instant={!workspaceReady} className={sessions.length > 0 || projectApps.length > 0 ? 'pt-1.5' : undefined} testId={`project-rows-${project.name}`}>
         <ProjectSessionList
           projectId={projectId}
           sessions={sessions}

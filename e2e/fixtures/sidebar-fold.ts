@@ -78,6 +78,9 @@ async function heightsAlongTransition(list: Locator): Promise<{ property: string
   })
 }
 
+/** Whether the list is still part way: shorter than the rows it holds */
+const stillMoving = (list: Locator) => list.evaluate((el) => el.getBoundingClientRect().height < (el.firstElementChild?.scrollHeight ?? 0))
+
 const nondecreasing = (hs: number[]) => hs.every((h, i) => i === 0 || h >= hs[i - 1]!)
 const nonincreasing = (hs: number[]) => hs.every((h, i) => i === 0 || h <= hs[i - 1]!)
 /** Strictly part way at the middle three samples: it interpolates, it does not jump */
@@ -179,6 +182,7 @@ export function sidebarFoldTests() {
 
   test('Fold: a click on a row while the list is still opening lands', async ({ page }) => {
     await foldedProject(page, { sessions: 2 })
+    await slowFolds(page)
     await restOnEmptySpace(page)
     await page.clock.runFor(REST_MS)
     await expect(region(page, 'alpha')).toHaveAttribute('data-fold', 'opening')
@@ -186,6 +190,7 @@ export function sidebarFoldTests() {
     const first = rows(page, 'alpha').first()
     await expect(first).not.toHaveAttribute('aria-current', 'page')
     await first.click()
+    expect(await stillMoving(region(page, 'alpha'))).toBe(true)
     await expect(first).toHaveAttribute('aria-current', 'page')
     // And the saved fold was left as it is, as it is for any row of a hover-expanded project
     expect(await page.evaluate(() => (window as any).__mock.workspaceSnapshot?.foldedProjects?.length)).toBe(1)
@@ -193,10 +198,12 @@ export function sidebarFoldTests() {
 
   test('Fold: a click on the arrow while the list is opening makes it stay', async ({ page }) => {
     await foldedProject(page)
+    await slowFolds(page)
     await restOnEmptySpace(page)
     await page.clock.runFor(REST_MS)
     await expect(region(page, 'alpha')).toHaveAttribute('data-fold', 'opening')
     await page.getByTestId('project-fold-alpha').click()
+    expect(await stillMoving(region(page, 'alpha'))).toBe(true)
     await away(page)
     await page.clock.runFor(1000)
     await expect(rows(page, 'alpha')).toHaveCount(1)
@@ -212,6 +219,32 @@ export function sidebarFoldTests() {
     await expect(region(page, 'alpha')).toHaveAttribute('data-fold', 'closing')
     await expect(rows(page, 'alpha')).toHaveCount(1)
     await page.clock.runFor(LEAVE_MS + 1)
+    await expect(rows(page, 'alpha')).toHaveCount(0)
+  })
+
+  test('Fold: a list on its way out takes no presses and no focus', async ({ page }) => {
+    await foldedProject(page)
+    await restOnEmptySpace(page)
+    await page.clock.runFor(REST_MS)
+    await expect(region(page, 'alpha')).toHaveAttribute('data-fold', 'opening')
+    await page.clock.runFor(300)
+    await expect(region(page, 'alpha')).toHaveAttribute('data-fold', 'open')
+    await away(page)
+    await expect(region(page, 'alpha')).toHaveAttribute('data-fold', 'closing')
+    await expect(region(page, 'alpha')).toHaveJSProperty('inert', true)
+  })
+
+  test('Fold: before the saved folds are read, a fold neither slides nor waits', async ({ page }) => {
+    await page.clock.install()
+    await setup(page, { projects: ['/tmp/alpha'] })
+    await newSession(page, 'alpha', 'task')
+    await page.evaluate(() => (window as any).__store.setState({ workspaceReady: false }))
+    await away(page)
+    await page.clock.pauseAt(new Date(Date.now() + 60_000))
+    await page.getByTestId('project-fold-alpha').click()
+    await expect(region(page, 'alpha')).toHaveAttribute('data-fold', 'closing')
+    await expect(region(page, 'alpha')).toHaveCSS('transition-property', 'none')
+    await page.clock.runFor(1)
     await expect(rows(page, 'alpha')).toHaveCount(0)
   })
 
@@ -231,7 +264,7 @@ export function sidebarFoldTests() {
     await away(page)
     // Fading out in place: as tall as before until the rows are taken away, then gone at once
     await expect(list).toHaveAttribute('data-fold', 'closing')
-    expect(new Set(await heightsWhileMoving(list, full)).size).toBe(1)
+    expect((await heightsWhileMoving(list, full)).every((h) => h === full)).toBe(true)
     await expect(rows(page, 'alpha')).toHaveCount(3)
     await page.clock.runFor(LEAVE_MS + 1)
     await expect(rows(page, 'alpha')).toHaveCount(0)
@@ -278,10 +311,12 @@ export function orchestratorFoldTests() {
 
   test('Fold: a press on an orchestrator child while the list is still opening lands', async ({ page }) => {
     await orchestratorWithChildren(page, { current: ['alpha', 'beta', 'gamma'] })
+    await slowFolds(page)
     await button(page).hover()
     await page.clock.runFor(REST_MS)
     await expect(fold(page)).toHaveAttribute('data-fold', 'opening')
     await row(page, 'alpha').click()
+    expect(await stillMoving(fold(page))).toBe(true)
     await expect(row(page, 'alpha')).toHaveAttribute('aria-current', 'page')
   })
 

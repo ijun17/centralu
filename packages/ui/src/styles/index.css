@@ -1027,6 +1027,10 @@
     grid-template-rows 140ms ease-in,
     opacity 140ms ease-in;
 }
+.cc-fold-instant,
+.cc-fold-instant[data-drawn] {
+  transition: none;
+}
 .cc-fold[data-drawn] {
   grid-template-rows: 1fr;
   opacity: 1;
