@@ -38,7 +38,8 @@ export default defineConfig({
      * A test that points CC_DATA_DIR (or anything else) somewhere for itself does so with `vi.stubEnv`, and every stub
      * is undone before the next test. Tests used to assign and restore it by hand: one deleted it after each test, which
      * leaves the rest of the file on the real `~/.centralu` fallback, and one restored `undefined`, which Node stores as
-     * the folder name "undefined" (#845). `tooling/vitest-data-dir.test.ts` checks the stub is undone; the lint rule `test-env/data-dir` fails a test file that writes it by hand.
+     * the folder name "undefined" (#845). `tooling/vitest-data-dir.test.ts` checks the stub is undone; the lint rule
+     * `test-env/data-dir` fails a test file that writes it by hand.
      */
     unstubEnvs: true,
     testTimeout: 5_000 * SLOW,

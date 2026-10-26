@@ -3,6 +3,9 @@ import { describe, expect, it } from 'vitest'
 import { virtualFileLinter } from './eslint-virtual.test-helpers.js'
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
+import { execFileSync } from 'node:child_process'
+import { disabledFindings } from './lint-allowlist.js'
+import { EXCEPTIONS } from './eslint-test-data-dir.js'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const eslint = virtualFileLinter()
@@ -49,10 +52,30 @@ describe('a data folder written by hand in a test file', () => {
     ['process.env read by bracket', "process['env'].CC_DATA_DIR = '/x'"],
     ['process.env replaced by an assertion', 'process.env = saved as NodeJS.ProcessEnv'],
     ['process.env replaced with ||=', 'process.env ||= saved'],
+    ['a template-literal key', "process.env[`CC_DATA_DIR`] = '/x'"],
+    ['delete by a template-literal key', 'delete process.env[`CC_DATA_DIR`]'],
+    ['a const holding the key', "const KEY = 'CC_DATA_DIR'\nprocess.env[KEY] = '/x'"],
+    ['a const key built from parts', "const KEY = 'CC_' + 'DATA_DIR'\ndelete process.env[KEY]"],
+    ['a const holding the key through another const', "const A = 'CC_DATA_DIR'\nconst B = A\nprocess.env[B] ??= '/x'"],
+    ['an alias of process.env', "const env = process.env\nenv.CC_DATA_DIR = '/x'"],
+    ['an alias of an alias', "const a = process.env\nconst b = a\ndelete b['CC_DATA_DIR']"],
+    ['process.env taken out of process', "const { env } = process\nenv.CC_DATA_DIR = '/x'"],
+    ['an alias of process', "const p = process\np.env.CC_DATA_DIR = '/x'"],
+    ['globalThis.process.env', "globalThis.process.env.CC_DATA_DIR = '/x'"],
+    ['global.process.env', "delete global.process.env.CC_DATA_DIR"],
+    ['Reflect.set', "Reflect.set(process.env, 'CC_DATA_DIR', '/x')"],
+    ['Reflect.deleteProperty', "Reflect.deleteProperty(process.env, 'CC_DATA_DIR')"],
+    ['Reflect.set with a key that cannot be seen', 'Reflect.set(process.env, key, value)'],
+    ['Object.defineProperty', "Object.defineProperty(process.env, 'CC_DATA_DIR', { value: '/x' })"],
+    ['Object.defineProperties', "Object.defineProperties(process.env, { CC_DATA_DIR: { value: '/x' } })"],
+    ['Object.defineProperty replacing env', "Object.defineProperty(process, 'env', { value: {} })"],
+    ['Reflect.set replacing env', "Reflect.set(process, 'env', {})"],
+    ['Object.assign into an alias', "const env = process.env\nObject.assign(env, saved)"],
     ['delete through an optional chain', 'delete process?.env.CC_DATA_DIR'],
     ['delete behind an assertion', 'delete (process.env as Env).CC_DATA_DIR'],
   ])('is reported, in a spelling the old check did not name: %s', async (_form, code) => {
-    expect(await inTest(code)).toEqual([1])
+    // On the line of the write, the last of the case
+    expect(await inTest(code)).toEqual([code.split('\n').length])
   })
 
   it.each([
@@ -65,11 +88,17 @@ describe('a data folder written by hand in a test file', () => {
     ['deleting another variable', 'delete process.env.OTHER'],
     ['a variable of another object', "other.env.CC_DATA_DIR = '/x'"],
     ['a copy of the environment', "const copy = { ...process.env, CC_DATA_DIR: '/x' }"],
+    ['an alias of another variable', "const env = process.env\nenv.OTHER = '1'"],
+    ['a const key that is another name', "const KEY = 'OTHER'\nprocess.env[KEY] = '1'"],
+    ['a local named env that is not process.env', "const env = {}\nenv.CC_DATA_DIR = '/x'"],
+    ['a parameter named process', "function f(process) { process.env.CC_DATA_DIR = '/x' }"],
+    ['Reflect.set of another variable', "Reflect.set(process.env, 'OTHER', '1')"],
+    ['Reflect.set on another object', "Reflect.set(other, 'CC_DATA_DIR', '1')"],
+    ['Object.defineProperty of another variable', "Object.defineProperty(process.env, 'OTHER', { value: '1' })"],
     ['passing it to a child process', "spawn('node', [], { env: { ...process.env, CC_DATA_DIR: dir } })"],
   ])('is not reported, and the write after it is: %s', async (_form, code) => {
-    // The write on line 2 keeps this from passing for want of a rule at all
-    expect(await inTest(`${code}
-process.env.CC_DATA_DIR = '/x'`)).toEqual([2])
+    // The write after it keeps this from passing for want of a rule at all
+    expect(await inTest(`${code}\nprocess.env.CC_DATA_DIR = '/x'`)).toEqual([code.split('\n').length + 1])
   })
 })
 
@@ -94,8 +123,35 @@ describe('which files the rule reads', () => {
     expect(found).toEqual({ 'packages/agent-host/src/x.ts': [], 'packages/agent-host/scripts/x.mts': [], 'scripts/x.mjs': [], 'packages/agent-host/src/x.test.ts': [1] })
   })
 
-  it('accepts an explained eslint-disable line', async () => {
-    const code = '// eslint-disable-next-line test-env/data-dir -- This test checks what the host does with a bad folder.\n' + write
-    expect(await inTest(code)).toEqual([])
+  it('cannot be switched off by a comment: pnpm lint refuses an eslint-disable of it', async () => {
+    const code = ['// eslint-disable-next-line test-env/data-dir', write.trim(), '/* eslint-disable test-env/data-dir */', write.trim()].join('\n')
+    const [result] = await eslint.lintText(code, { filePath: join(ROOT, 'packages/agent-host/src/x.test.ts'), warnIgnored: false })
+    // The comment hides both findings from the report; the lint run still fails on each
+    expect(result?.messages.filter((m) => m.ruleId === 'test-env/data-dir')).toEqual([])
+    expect(disabledFindings(ROOT, result ? [result] : [])).toEqual([
+      { file: 'packages/agent-host/src/x.test.ts', line: 2, rule: 'test-env/data-dir' },
+      { file: 'packages/agent-host/src/x.test.ts', line: 4, rule: 'test-env/data-dir' },
+    ])
+  })
+
+  it('has no exceptions, and each one added later names its file and its reason', () => {
+    // A ceiling: it is lowered when a line goes, never raised (#1602)
+    expect(Object.keys(EXCEPTIONS).length).toBeLessThanOrEqual(0)
+    const tracked = new Set(execFileSync('git', ['ls-files'], { cwd: ROOT, encoding: 'utf8' }).split('\n'))
+    for (const [file, reason] of Object.entries(EXCEPTIONS)) {
+      expect(tracked.has(file), `${file} is a tracked file`).toBe(true)
+      expect(String(reason).length, `${file} says why`).toBeGreaterThan(10)
+    }
+  })
+
+  it('advises vi.stubEnv in a unit test and the process env in an e2e file, which has no vi', async () => {
+    const message = async (file: string) => {
+      const [result] = await eslint.lintText(write, { filePath: join(ROOT, file), warnIgnored: false })
+      return result?.messages.find((m) => m.ruleId === 'test-env/data-dir')?.message
+    }
+    expect(await message('packages/agent-host/src/x.test.ts')).toContain('vi.stubEnv')
+    const e2e = await message('e2e/x.spec.ts')
+    expect(e2e).toContain('`env` of the process')
+    expect(e2e).not.toContain('vi.stubEnv')
   })
 })

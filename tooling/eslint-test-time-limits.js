@@ -8,11 +8,24 @@
  * (`it(name, fn, 30_000)`, `{ timeout: 10_000 }`), set for a whole file (`vi.setConfig({ testTimeout: 30_000 })`),
  * or given to a wait (`vi.waitFor(fn, { timeout: 3_000 })`, `vi.waitUntil(fn, 3_000)`,
  * `expect.poll(fn, { timeout })`), that does not multiply by `SLOW`. A wait's limit is not scaled by anything
- * else: vitest's own default for one is a fixed second.
+ * else: vitest's own default for one is a fixed second. A name holding the limit is followed to what it was given
+ * (`const LIMIT = 30_000 * SLOW` is scaled; `const LIMIT = 30_000` is reported where it is used).
+ *
+ * Gaps, known: options spread into the call (`it(name, fn, { ...opts })`), runners made by `test.extend`, a tagged
+ * `it.each` table, and a limit set by `vi.setConfig(opts)` from a variable.
+ *
+ * There is no way around it in the file: `pnpm lint` refuses an eslint-disable of this rule
+ * (tooling/lint-allowlist.ts, `NO_DISABLE_RULES`). A real exception is a line of `EXCEPTIONS` below with its
+ * reason; the list only shrinks (tooling/test-time-limits-checks.test.ts holds its ceiling).
  *
  * This was a unit test that parsed every test file (687) with the TypeScript API (#1602); ESLint parses each
  * once per run and caches it.
  */
+
+import { constInit } from './eslint-const-init.js'
+
+/** Files that may set an unscaled limit, by repository-relative path, each with the reason. Empty; it only shrinks. */
+export const EXCEPTIONS = {}
 
 const RUNNERS = new Set(['it', 'test', 'describe', 'beforeAll', 'afterAll', 'beforeEach', 'afterEach'])
 /** What `vi.setConfig` takes that is a time limit */
@@ -59,9 +72,17 @@ export const scaledBySlow = {
   },
   create(context) {
     const source = context.sourceCode
+    const relative = context.filename.slice(context.cwd.length + 1).replaceAll('\\', '/')
+    if (Object.hasOwn(EXCEPTIONS, relative)) return {}
+    /** Does the limit multiply by SLOW, itself or through the `const` that holds it? */
+    const scaled = (node, depth = 0) => {
+      if (/\bSLOW\b/.test(source.getText(node))) return true
+      if (node.type !== 'Identifier' || depth > 5) return false
+      const found = constInit(source, node)
+      return !!found && !found.pattern && scaled(found.init, depth + 1)
+    }
     const check = (limit) => {
-      const text = source.getText(limit)
-      if (!/\bSLOW\b/.test(text)) context.report({ node: limit, messageId: 'unscaled', data: { text } })
+      if (!scaled(limit)) context.report({ node: limit, messageId: 'unscaled', data: { text: source.getText(limit) } })
     }
     return {
       CallExpression(node) {

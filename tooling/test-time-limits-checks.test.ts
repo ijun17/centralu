@@ -3,6 +3,9 @@ import { describe, expect, it } from 'vitest'
 import { virtualFileLinter } from './eslint-virtual.test-helpers.js'
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
+import { execFileSync } from 'node:child_process'
+import { disabledFindings } from './lint-allowlist.js'
+import { EXCEPTIONS } from './eslint-test-time-limits.js'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const eslint = virtualFileLinter()
@@ -35,7 +38,8 @@ describe('a time limit a test sets for itself', () => {
     ['a suite given a limit', "describe('a', () => {}, 30_000)"],
     ['a hook', 'afterEach(() => {}, 60_000)'],
     ['a function expression test', "it('a', function () {}, 30_000)"],
-    ['a limit given as a name', "const LIMIT = 30_000\nit('a', () => {}, LIMIT)"],
+    ['a name holding an unscaled limit, where it is used', "const LIMIT = 30_000\nit('a', () => {}, LIMIT)"],
+    ['a name holding a name holding an unscaled limit', "const A = 30_000\nconst B = A\nit('a', () => {}, B)"],
     ['a limit that multiplies by something else', "it('a', () => {}, 30_000 * FACTOR)"],
     ['a whole file', 'vi.setConfig({ testTimeout: 30_000 })'],
     ['a whole file hooks', 'vitest.setConfig({ hookTimeout: 30_000 })'],
@@ -53,6 +57,9 @@ describe('a time limit a test sets for itself', () => {
     ['a timeout scaled by SLOW', "it('a', { timeout: 10_000 * SLOW }, () => {})"],
     ['a whole file scaled by SLOW', 'vi.setConfig({ testTimeout: 30_000 * SLOW })'],
     ['a wait scaled by SLOW', 'await vi.waitFor(() => ok, { timeout: 3_000 * SLOW })'],
+    ['a name holding a scaled limit', "const LIMIT = 30_000 * SLOW\nit('a', () => {}, LIMIT)"],
+    ['a name holding a name holding a scaled limit', "const A = 30_000 * SLOW\nconst B = A\nit('a', () => {}, B)"],
+    ['a timeout key holding a scaled name', "const LIMIT = 10_000 * SLOW\nit('a', { timeout: LIMIT }, () => {})"],
     ['a test with no limit', "it('a', () => {})"],
     ['a timer inside a test', "it('a', () => { setTimeout(() => {}, 20) })"],
     ['a wait with no limit', 'await vi.waitFor(() => ok)'],
@@ -77,5 +84,23 @@ describe('a time limit a test sets for itself', () => {
       'scripts/x.mjs': [],
       'packages/ui/src/x.ts': [],
     })
+  })
+
+  it('cannot be switched off by a comment: pnpm lint refuses an eslint-disable of it', async () => {
+    const code = ['// eslint-disable-next-line test-limits/scaled-by-slow', "it('a', () => {}, 30_000)"].join('\n')
+    const [result] = await eslint.lintText(code, { filePath: join(ROOT, 'packages/agent-host/src/x.test.ts'), warnIgnored: false })
+    // The comment hides the finding from the report; the lint run still fails on it
+    expect(result?.messages.filter((m) => m.ruleId === 'test-limits/scaled-by-slow')).toEqual([])
+    expect(disabledFindings(ROOT, result ? [result] : [])).toEqual([{ file: 'packages/agent-host/src/x.test.ts', line: 2, rule: 'test-limits/scaled-by-slow' }])
+  })
+
+  it('has no exceptions, and each one added later names its file and its reason', () => {
+    // A ceiling: it is lowered when a line goes, never raised (#1602)
+    expect(Object.keys(EXCEPTIONS).length).toBeLessThanOrEqual(0)
+    const tracked = new Set(execFileSync('git', ['ls-files'], { cwd: ROOT, encoding: 'utf8' }).split('\n'))
+    for (const [file, reason] of Object.entries(EXCEPTIONS)) {
+      expect(tracked.has(file), `${file} is a tracked file`).toBe(true)
+      expect(String(reason).length, `${file} says why`).toBeGreaterThan(10)
+    }
   })
 })

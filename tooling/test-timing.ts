@@ -11,7 +11,7 @@ import { inspect } from 'node:util'
  * `vitest.config.ts` scales its default limits by this, and a test that sets its own limit
  * (`it(name, fn, 30_000 * SLOW)`, `{ timeout: 10_000 * SLOW }`, a hook's limit, `vi.setConfig`)
  * multiplies by it too: an explicit limit replaces the default, so it used to skip the scaling
- * (#845). the lint rule `test-limits/scaled-by-slow` (tooling/eslint-test-time-limits.js) finds one that does not.
+ * (#845). The lint rule `test-limits/scaled-by-slow` (tooling/eslint-test-time-limits.js) finds one that does not.
  */
 export const SLOW = process.platform === 'win32' ? 3 : 1
 

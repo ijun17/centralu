@@ -160,17 +160,23 @@ export function countedFiles(root: string, results: ESLint.LintResult[]): Set<st
   return new Set(results.filter((r) => r.fatalErrorCount === 0 && !ignored(r)).map((r) => relativeFile(root, r.filePath)))
 }
 
+/**
+ * The rules no comment may switch off: the type-aware ones the lists hold, and the two that took over a test's whole-tree
+ * guard (#1602), which a unit test could not be skipped on. Their exceptions are a line in the rule's own `EXCEPTIONS`.
+ */
+export const NO_DISABLE_RULES: ReadonlySet<string> = new Set([...LISTABLE_RULES, 'test-env/data-dir', 'test-limits/scaled-by-slow'])
+
 export type Disabled = { file: string; line: number; rule: string }
 
 /**
- * Findings of a type-aware rule that an `eslint-disable` comment hid. Such a comment would skip the lists and every
+ * Findings of a rule in `NO_DISABLE_RULES` that an `eslint-disable` comment hid. Such a comment would skip the lists and every
  * check on them (#1343 review), so `pnpm lint` fails on it: read the value through a guard instead.
  */
 export function disabledFindings(root: string, results: ESLint.LintResult[]): Disabled[] {
   const out: Disabled[] = []
   for (const r of results) {
     for (const m of r.suppressedMessages) {
-      if (m.ruleId && LISTABLE_RULES.has(m.ruleId) && m.suppressions.some((s) => s.kind === 'directive')) {
+      if (m.ruleId && NO_DISABLE_RULES.has(m.ruleId) && m.suppressions.some((s) => s.kind === 'directive')) {
         out.push({ file: relativeFile(root, r.filePath), line: m.line, rule: m.ruleId })
       }
     }
