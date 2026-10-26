@@ -4,6 +4,7 @@ export declare function osModule(specifier: unknown): string | null
 export declare const OS_LAYER: readonly string[]
 export declare const PLATFORM_MODULES: readonly string[]
 export declare function isChecked(file: string): boolean
+export declare function isRepoApp(file: string): boolean
 export declare function isTestFile(file: string): boolean
 export declare function inOsLayer(file: string): boolean
 export declare const OS_ALLOWLIST: string

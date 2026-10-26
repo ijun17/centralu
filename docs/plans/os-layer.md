@@ -12,11 +12,11 @@ shrinking the allowlist. This is the TypeScript half of the OS layer [runtime-un
 ## 1. Summary
 
 - **Where the Windows time goes.** On main's last green full run, the Windows unit tests spent 4,457 file-seconds over
-  687 test files, in two shards of 19.1 and 11.4 job-minutes. 96 % of that time is in tests that touch the OS, by the
+  687 test files, in two shards of 19.1 and 11.4 job-minutes. 98 % of that time is in tests that touch the OS, by the
   rule below. Two board tests (`tooling/project-board-queue.test.ts`, `-release.test.ts`) are 1,736 s, 39 %, and both
   fall in shard 1.
-- **What this pull request removes.** The packages that are already OS-free leave the Windows job: 273 of 687 test
-  files, but only 181 file-seconds, 4.1 %. Computing the list costs about as much again on each shard (§6.3). The
+- **What this pull request removes.** The packages that are already OS-free leave the Windows job: 269 of 687 test
+  files, but only 106 file-seconds, 2.4 %. Computing the list costs about as much again on each shard (§6.3). The
   gain of step 2 is the rule and the measure, not minutes.
 - **Where the minutes are.** In the host's areas that start real processes, git and worktrees (§7), and in the
   board's tests (§8, a question for the owner).
@@ -47,20 +47,20 @@ CI, Windows unit shards, by area. **W**: still runs on Windows after this pull r
 
 | Area | Files W | Seconds W | Files L | Seconds L |
 |---|---:|---:|---:|---:|
-| `tooling/project-board-*` (the board app's tests) | 8 | 2,004 | 3 | 60 |
+| `tooling/project-board-*` (the board app's tests) | 10 | 2,065 | 1 | 0 |
 | `agent-host/sessions` | 139 | 736 | 7 | 0 |
 | `agent-host/dev-services` | 49 | 409 | 5 | 0 |
 | `agent-host/links` | 19 | 403 | 7 | 3 |
 | `agent-host/apps` | 29 | 208 | 3 | 0 |
 | `agent-host/adapters` | 90 | 137 | 9 | 0 |
 | `agent-host` top level | 32 | 121 | 10 | 1 |
-| `tooling`, other | 17 | 113 | 45 | 68 |
-| `tooling/launcher-*` | 6 | 61 | 2 | 4 |
-| `agent-host/lifecycle`, `mail`, `transport`, `views`, `keeper` | 24 | 56 | 23 | 12 |
+| `tooling`, other | 18 | 124 | 44 | 58 |
+| `tooling/launcher-*` | 7 | 65 | 1 | 0 |
+| `agent-host/lifecycle`, `mail`, `transport`, `views`, `keeper` | 22 | 56 | 17 | 7 |
 | `packages/platform` | 2 | 25 | 19 | 1 |
 | `packages/ui` | 0 | 0 | 115 | 34 |
 | `packages/core`, `packages/protocol` | 1 | 0 | 31 | 2 |
-| **Total** | **414** | **4,276** | **273** | **181** |
+| **Total** | **418** | **4,351** | **269** | **106** |
 
 The slowest files on Windows: `project-board-queue` 875 s, `project-board-release` 861 s, `sessions/manager-worktree`
 168 s, `dev-services/worktree-recovery` 142 s, `links/links` 118 s, `project-board-contribute` 110 s,
@@ -76,14 +76,14 @@ Windows unit job-minutes now: 30.5 (19.1 + 11.4) per full run and per pull reque
 
 | Step | Removes from the Windows unit job (file-seconds, CI) |
 |---|---|
-| 2, this pull request: the OS-free packages and tooling guards leave | 181 of 4,457 (4.1 %); the selection itself costs about 17 s per shard (§6.3) |
+| 2, this pull request: the OS-free packages and tooling guards leave | 106 of 4,457 (2.4 %); the selection itself costs about 17 s per shard (§6.3) |
 | 3a, store and files | ≤ 60 test files picked only through `dev-services/store.ts` and `sessions/cross-project.test-helpers.ts`; about 50 s |
 | 3b, worktrees | ≤ 310 s in `manager-worktree` and `worktree-recovery` alone; ≤ 409 s for `dev-services` |
 | 3c, adapters' spawning | ≤ 137 s (`adapters`); 35 more test files reach the Claude and Codex adapters' index |
 | 3d, links and ssh | ≤ 403 s, most of it real processes that stay (§7) |
 | 3e, apps runtime | ≤ 208 s, mostly real Node processes that stay |
 | 3f, keeper-facing parts | ≤ 40 s |
-| Board tests (§8, owner) | up to 2,004 s |
+| Board tests (§8, owner) | up to 2,065 s |
 
 The "≤" is an upper bound: a test leaves Windows only when neither it nor anything it imports touches the OS, so an
 area's integration tests (a real git, a real process) stay, as they should.
@@ -137,7 +137,7 @@ reported. Build and release scripts, tooling and e2e are not checked: they work 
 - the list equals the checked files that touch the OS outside the layer (`tsx tooling/os-tests.ts --offenders`): a
   file that moved behind the layer, or is gone, takes its line out in the same change;
 - no line may be new against main's list where this branch left it, except a file git sees renamed
-  (`git diff -M`), whose line follows it; a file added at a listed path does not inherit the line;
+  (`git diff -M`), whose line follows it;
 - sorted, unique, none in the layer.
 
 Today: 353 files, 109 shipped (106 host, 3 launcher) and 244 tests (241 host, 2 `platform`, 1 `protocol`).
@@ -155,14 +155,22 @@ list by 14 lines and leave the same files on it.
 1. it is in the layer (a layer module's test), or named in `EVERY_OS_TESTS` (`tooling/os-layer.js`, with a reason);
 2. it asks which OS this is (`local/platform-checks`' own judgement: a test that skips a case on Windows);
 3. it is checked code and imports an OS module itself (it is on the allowlist);
-4. anything it imports, directly or through other modules, is in the layer, or is checked code that imports an OS
-   module or asks which OS it is.
+4. anything it imports, directly or through other modules, is in the layer, or is checked code or one of the
+   repository's own apps (`.centralu/apps/`, which run on the person's machine) that imports an OS module or asks
+   which OS it is.
 
 Every judgement is the lint rules' own: the script runs `local/os-imports` (with `everywhere: true`) and
-`local/platform-checks` on each file through ESLint's `Linter`, and follows imports itself (relative specifiers and
-the `@cc/*` aliases; an import it cannot resolve fails the script rather than leaving a test out). Only the checked
-code counts in (4): a tooling test that reads the repository with `fs` (a guard) runs on Linux only, while one that
-imports the launcher or a host helper that starts processes runs everywhere.
+`local/platform-checks` on each file through ESLint's `Linter`, and follows what each file loads as the rule reads it
+(`loadedSpecifier`: static and `export … from`, `import()`, `require`, `process.getBuiltinModule`,
+`import x = require`, each with a constant string), plus `vi.mock` and `vi.importActual` paths; relative specifiers
+and the `@cc/*` aliases resolve, and one that cannot fails the script rather than leaving a test out. Tooling and
+scripts do not count in (4): a tooling test that reads the repository with `fs` (a guard) runs on Linux only, while one
+that imports the launcher or a host helper that starts processes runs everywhere.
+
+Not seen: a computed specifier, a `require` made by `createRequire` under another name, a process started by path
+(`EVERY_OS_TESTS` names those, `launcher-node-floor` today), and modules outside the five (`node:net`,
+`node:sqlite`, `node-pty`): the real-socket tests `transport/server`, `views/origin-ports`, `view-host` and
+`links/linked-views` leave the Windows job by this. Whether `node:net` belongs to the layer is §8's question 6.
 
 ### 6.2 Where it applies
 
@@ -223,7 +231,7 @@ By Windows time saved and risk:
 
 ## 8. Open questions for the owner
 
-1. **The board's tests** are 45 % of the Windows unit time (2,004 s), two files 1,736 s. They test the project-board
+1. **The board's tests** are 46 % of the Windows unit time (2,065 s), two files 1,736 s. They test the project-board
    app (`.centralu/apps/project-board`), which runs wherever Centralu does, with real git repositories and fake `gh`
    processes. Run them on Linux only, with a small Windows subset? Or make them cheaper (one repository per file)?
 2. **Shard balance.** Vitest shards split by file count, so both big board files land in shard 1 (19.1 min against
@@ -235,6 +243,9 @@ By Windows time saved and risk:
    changes nothing the selection reaches (only `packages/ui`, say) could skip it; not proposed until the list is
    shorter, since today it would rarely apply.
 5. **macOS** has no unit job; the selection is what one would run.
+6. **Sockets.** The rule covers the five modules the direction named. `node:net` (and the native `node-pty`,
+   `better-sqlite3`) also behave differently per OS; adding `net` would keep four socket tests (about 10 s) on
+   Windows and put a few more files on the list. Proposed, not done.
 
 ## 9. How it could fail, and what holds
 
@@ -244,6 +255,8 @@ By Windows time saved and risk:
 | A new file touches the OS outside the layer | `local/os-imports` fails lint; listing it fails `os-layer.test.ts` (no new line against main) |
 | A test reaches the layer only indirectly | Imports are followed transitively, through tooling and scripts as well, and through `@cc/*` aliases |
 | An import the script cannot follow (a typo, a moved file) | The script fails, so the Windows job fails, rather than leaving the test out |
-| A listed file renamed | Its line follows the rename git sees; the old line is then stale and fails the equality check until removed |
+| A listed file renamed | Its line follows the rename git sees (`git mv`, also with edits); a copy, a split or a new file at the old path gets no line |
+| main's list unreadable while main has the layer | The comparison fails instead of passing |
+| A listed test path vitest cannot match | `vitest.config.ts` refuses a `CC_TEST_FILES` line that is not an existing repository path with `/` |
 | A dynamic import of a computed path, or a process started by path | Not seen by imports; such a test is named in `EVERY_OS_TESTS`, or it asks the OS (it usually does) |
 | The list and vitest's projects disagree | `vitestFiles` globs through vitest's own configuration; `os-layer.test.ts` checks a listed run runs exactly the list in both projects |

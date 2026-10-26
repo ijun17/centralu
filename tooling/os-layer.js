@@ -81,8 +81,14 @@ export const PLATFORM_MODULES = [
  * `local/platform-checks`. Build and release scripts, tooling and e2e are about the repository and one platform's
  * artifacts, and are not checked.
  */
-const CHECKED = /^(packages\/[^/]+\/src\/.+\.(ts|tsx|mts|mjs)|apps\/[^/]+\/src\/.+\.(ts|tsx|mts|mjs)|packaging\/.+\.mjs)$/
+const CHECKED = /^(packages\/[^/]+\/src\/.+|apps\/[^/]+\/src\/.+|packaging\/.+)\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/
 export const isChecked = (file) => CHECKED.test(file)
+
+/**
+ * The repository's own apps (`.centralu/apps/`, docs/apps.md): not held to the rule (an app is plain Node with no
+ * installs), but they run on the person's machine, on any OS, so a test that reaches their OS use runs everywhere.
+ */
+export const isRepoApp = (file) => file.startsWith('.centralu/apps/')
 
 /** A test, or a test's helper module */
 export const isTestFile = (file) => /\.test\.(ts|tsx|mts|mjs)$|test-helpers\.(ts|mts|mjs)$/.test(file)
@@ -131,6 +137,10 @@ export function mayTouchOs(file, allowlist) {
 export const EVERY_OS_TESTS = [
   // The selection itself runs on the Windows runner (build.yml), so its own test runs there too
   { file: 'tooling/os-layer.test.ts', why: 'tooling/os-tests.ts picks the tests on the Windows runner itself' },
+  // Starts `centralu.mjs serve` by path (its autostart, the host entry), which its imports do not show
+  { file: 'tooling/launcher-node-floor.test.ts', why: 'starts the npm launcher as a process; its autostart differs per OS' },
+  // The worker-stall watch exists for Windows CI's stalled workers (#368)
+  { file: 'tooling/vitest-stall-watch.test.ts', why: 'tests the watch that exists for stalled vitest workers on Windows CI (#368)' },
 ]
 
 export const REPO_ROOT = ROOT

@@ -3,5 +3,6 @@ import type { ESLint, Rule } from 'eslint'
 
 export declare const platformChecks: Rule.RuleModule
 export declare const osImports: Rule.RuleModule
+export declare function loadedSpecifier(node: unknown): string | null
 declare const plugin: ESLint.Plugin
 export default plugin

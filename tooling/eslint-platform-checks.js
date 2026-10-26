@@ -70,32 +70,58 @@ const SAME_ON_EVERY_OS = new Set(['posix', 'win32'])
 
 const importedName = (s) => (s.imported.type === 'Identifier' ? s.imported.name : s.imported.value)
 
+/** A string a node spells out whole: a string literal, or a template literal with nothing interpolated */
+const constantString = (node) =>
+  node?.type === 'Literal' && typeof node.value === 'string'
+    ? node.value
+    : node?.type === 'TemplateLiteral' && node.expressions.length === 0
+      ? (node.quasis[0]?.value.cooked ?? null)
+      : null
+
 /**
- * The OS module an import names, or null: a type-only import runs nothing, and `import { posix, win32 } from 'node:path'`
- * reads paths the same way on every OS.
+ * The module specifier a node loads, as written, or null: a static import, `export … from`, `import()`, `require()`,
+ * `process.getBuiltinModule()` and `import x = require()`, each with a constant string. The selection
+ * (tooling/os-tests.ts) follows imports with this same function, so the two cannot disagree on what is loaded. A
+ * computed specifier, or a `require` made by `createRequire` under another name, is not seen.
  */
-function touchedBy(node) {
+export function loadedSpecifier(node) {
   switch (node.type) {
-    case 'ImportDeclaration': {
-      const module = osModule(node.source.value)
-      if (!module || node.importKind === 'type') return null
-      const specs = node.specifiers
-      if (specs.length > 0 && specs.every((s) => s.type === 'ImportSpecifier' && s.importKind === 'type')) return null
-      if (module === 'path' && specs.length > 0 && specs.every((s) => s.type === 'ImportSpecifier' && SAME_ON_EVERY_OS.has(importedName(s)))) return null
-      return module
-    }
+    case 'ImportDeclaration':
     case 'ExportAllDeclaration':
+      return constantString(node.source)
     case 'ExportNamedDeclaration':
-      return node.source && node.exportKind !== 'type' ? osModule(node.source.value) : null
+      return node.source ? constantString(node.source) : null
     case 'ImportExpression':
-      return node.source.type === 'Literal' ? osModule(node.source.value) : null
-    case 'CallExpression':
-      return node.callee.type === 'Identifier' && node.callee.name === 'require' && node.arguments[0]?.type === 'Literal' ? osModule(node.arguments[0].value) : null
+      return constantString(node.source)
     case 'TSExternalModuleReference':
-      return node.expression.type === 'Literal' ? osModule(node.expression.value) : null
+      return constantString(node.expression)
+    case 'CallExpression': {
+      const c = node.callee
+      const loads =
+        (c.type === 'Identifier' && c.name === 'require') ||
+        (c.type === 'MemberExpression' && !c.computed && c.object.type === 'Identifier' && c.object.name === 'process' && c.property.name === 'getBuiltinModule')
+      return loads ? constantString(node.arguments[0]) : null
+    }
     default:
       return null
   }
+}
+
+/**
+ * The OS module a node loads, or null: a type-only import runs nothing, and `import { posix, win32 } from 'node:path'`
+ * reads paths the same way on every OS.
+ */
+function touchedBy(node) {
+  const module = osModule(loadedSpecifier(node))
+  if (!module) return null
+  if (node.type === 'ImportDeclaration') {
+    if (node.importKind === 'type') return null
+    const specs = node.specifiers
+    if (specs.length > 0 && specs.every((s) => s.type === 'ImportSpecifier' && s.importKind === 'type')) return null
+    if (module === 'path' && specs.length > 0 && specs.every((s) => s.type === 'ImportSpecifier' && SAME_ON_EVERY_OS.has(importedName(s)))) return null
+  }
+  if ((node.type === 'ExportNamedDeclaration' || node.type === 'ExportAllDeclaration') && node.exportKind === 'type') return null
+  return module
 }
 
 /** A path relative to the repository, with `/` */
@@ -108,7 +134,8 @@ const osAllowlist = () => (allowlist ??= new Set(readOsAllowlist()))
  * `local/os-imports`: the OS is touched only in the OS layer (tooling/os-layer.js, docs/plans/os-layer.md, #1599).
  *
  * In the checked code (the packages, the apps, the npm launcher, and their tests), importing an OS module (`node:fs`,
- * `fs/promises`, `node:child_process`, `node:os`, `node:path`, bare or `node:`, static, dynamic or `require`) is
+ * `fs/promises`, `node:child_process`, `node:os`, `node:path`, bare or `node:`, static, dynamic, `require` or
+ * `process.getBuiltinModule`) is
  * reported outside the layer and its tests, and outside the files on tooling/os-allowlist.txt, a list that may only
  * shrink (tooling/os-layer.test.ts). Code that needs a file, a path, a process or the OS asks the layer.
  *

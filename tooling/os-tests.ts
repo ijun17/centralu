@@ -25,8 +25,8 @@ import { posix, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Linter, type Rule } from 'eslint'
 import tseslint from 'typescript-eslint'
-import plugin from './eslint-platform-checks.js'
-import { EVERY_OS_TESTS, inOsLayer, isChecked } from './os-layer.js'
+import plugin, { loadedSpecifier } from './eslint-platform-checks.js'
+import { EVERY_OS_TESTS, inOsLayer, isChecked, isRepoApp } from './os-layer.js'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 
@@ -41,17 +41,27 @@ export type Scan = {
 }
 
 let collected: string[] = []
+/** vitest's calls that load a module by path: what they name is followed as an import (it may be the real module) */
+const VI_LOADS = new Set(['mock', 'doMock', 'importActual', 'importMock'])
 const collect: Rule.RuleModule = {
   create: () => {
-    const add = (v: unknown) => typeof v === 'string' && collected.push(v)
+    // What a node loads, by the lint rule's own reading (`loadedSpecifier`)
+    const add = (node: unknown) => {
+      const spec = loadedSpecifier(node)
+      if (spec !== null) collected.push(spec)
+    }
     return {
-      ImportDeclaration: (n) => add(n.source.value),
-      ExportAllDeclaration: (n) => add(n.source.value),
-      ExportNamedDeclaration: (n) => n.source && add(n.source.value),
-      ImportExpression: (n) => n.source.type === 'Literal' && add(n.source.value),
+      ImportDeclaration: add,
+      ExportAllDeclaration: add,
+      ExportNamedDeclaration: add,
+      ImportExpression: add,
+      TSExternalModuleReference: add,
       CallExpression: (n) => {
+        add(n)
+        const c = n.callee
         const [first] = n.arguments
-        if (n.callee.type === 'Identifier' && n.callee.name === 'require' && first?.type === 'Literal') add(first.value)
+        const viLoads = c.type === 'MemberExpression' && c.object.type === 'Identifier' && c.object.name === 'vi' && c.property.type === 'Identifier' && VI_LOADS.has(c.property.name)
+        if (viLoads && first?.type === 'Literal' && typeof first.value === 'string') collected.push(first.value)
       },
     }
   },
@@ -113,13 +123,14 @@ export function osSelector(virtual: ReadonlyMap<string, string> = new Map()) {
   }
 
   /**
-   * Does this module, which a test reaches, touch the OS? Only the checked code counts: the build and release
-   * scripts, tooling and e2e work on the repository and touch files for that, so a test is not about the OS for
-   * importing them. They are still followed, to what they import from the checked code.
+   * Does this module, which a test reaches, touch the OS? Only the checked code and the repository's own apps count
+   * (`isRepoApp`: they run on the person's machine too). The build and release scripts, tooling and e2e work on the
+   * repository and touch files for that, so a test is not about the OS for importing them, nor for a helper that asks
+   * the OS only to set its time limits (tooling/test-timing.ts). They are still followed, to what they import.
    */
   const touches = (file: string) => {
     if (inOsLayer(file)) return true
-    if (!isChecked(file)) return false
+    if (!isChecked(file) && !isRepoApp(file)) return false
     const s = scanFile(file)
     return s.touchesOs || s.asksOs
   }

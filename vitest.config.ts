@@ -1,6 +1,6 @@
 import { defineConfig } from 'vitest/config'
 import { fileURLToPath } from 'node:url'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 // Windows gets three times the time limits (#368); a test that sets its own limit multiplies by the same
 import { SLOW } from './tooling/test-timing.js'
 
@@ -17,6 +17,10 @@ const APP_RUNTIME = `${APP_RUNTIME_DIR}**/*.test.ts`
 const LISTED = process.env.CC_TEST_FILES
   ? readFileSync(process.env.CC_TEST_FILES, 'utf8').split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
   : null
+// A path vitest cannot match would be left out without a word: a list is repository paths with `/`, every one a file
+for (const f of LISTED ?? []) {
+  if (f.includes('\\') || f.startsWith('./') || !existsSync(r(`./${f}`))) throw new Error(`CC_TEST_FILES: '${f}' is not a test file's repository path`)
+}
 const listed = (inAppRuntime: boolean) => (LISTED ?? []).filter((f) => f.startsWith(APP_RUNTIME_DIR) === inAppRuntime)
 
 export default defineConfig({

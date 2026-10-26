@@ -13,7 +13,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { virtualFileLinter } from './eslint-virtual.test-helpers.js'
-import { addedSince, baseCommit, renamesSince } from './lint-allowlist.js'
+import { baseCommit, renamesSince } from './lint-allowlist.js'
 import { osSelector, repoFiles, vitestFiles } from './os-tests.js'
 import { SLOW } from './test-timing.js'
 import * as layer from './os-layer.js'
@@ -40,6 +40,10 @@ describe('touching the OS outside the OS layer', () => {
     expect(await refused(HOST, "export { join } from 'node:path'\n")).toHaveLength(1)
     expect(await refused(HOST, "export * from 'node:os'\n")).toHaveLength(1)
     expect(await refused(HOST, "export const load = () => import('node:child_process')\n")).toHaveLength(1)
+    expect(await refused(HOST, 'export const load = () => import(`node:child_process`)\n')).toHaveLength(1)
+    expect(await refused(HOST, "export const fs = process.getBuiltinModule('node:fs')\n")).toHaveLength(1)
+    expect(await refused(HOST, "import fs = require('node:fs')\nexport const f = fs\n")).toHaveLength(1)
+    expect(await refused('packages/agent-host/src/sessions/anything.js', "import fs from 'node:fs'\nexport const f = fs\n")).toHaveLength(1)
     expect(await refused(HOST.replace(/\.ts$/, '.mjs'), "import { createRequire } from 'node:module'\nconst require = createRequire(import.meta.url)\nexport const fs = require('fs')\n")).toHaveLength(1)
   })
 
@@ -115,36 +119,44 @@ describe('the allowlist', () => {
       }
       const main = mainList(base)
       if (main === null) {
+        // Once main has the layer, its list must be readable: a list renamed or unreadable there would pass anything
+        expect(gitOk(['cat-file', '-e', `${base}:tooling/os-layer.js`]), `main has tooling/os-layer.js at ${base} but no readable ${layer.OS_ALLOWLIST}`).toBe(false)
         console.warn(`os-layer.test.ts: main has no ${layer.OS_ALLOWLIST} yet at ${base}; this change brings it`)
         return
       }
       const renames = renamesSince(ROOT, base)
-      const added = addedSince(ROOT, base)
       expect(renames, `the renames since ${base}`).not.toBeNull()
-      expect(added, `the files added since ${base}`).not.toBeNull()
       expect(
-        grown(main, allowlist, renames ?? [], added ?? []),
+        grown(main, allowlist, renames ?? []),
         `${layer.OS_ALLOWLIST} lists more than main's: put the new code behind the OS layer instead (docs/plans/os-layer.md)`,
       ).toEqual([])
     },
     60_000 * SLOW,
   )
 
-  it('cannot grow: a new line is refused, a renamed file keeps its line, a file added at a listed path does not', () => {
+  it('cannot grow: a new line is refused, a renamed file keeps its line, and only that file', () => {
     const main = ['packages/agent-host/src/a.ts', 'packages/agent-host/src/b.ts']
-    expect(grown(main, [...main, 'packages/agent-host/src/c.ts'], [], [])).toEqual(['packages/agent-host/src/c.ts'])
-    expect(grown(main, ['packages/agent-host/src/a.ts'], [], [])).toEqual([])
-    expect(grown(main, ['packages/agent-host/src/a2.ts', 'packages/agent-host/src/b.ts'], [{ from: 'packages/agent-host/src/a.ts', to: 'packages/agent-host/src/a2.ts' }], [])).toEqual([])
-    // b.ts deleted and a new b.ts added: the new file holds nothing from the old line
-    expect(grown(main, main, [], ['packages/agent-host/src/b.ts'])).toEqual(['packages/agent-host/src/b.ts'])
+    expect(grown(main, [...main, 'packages/agent-host/src/c.ts'], [])).toEqual(['packages/agent-host/src/c.ts'])
+    expect(grown(main, ['packages/agent-host/src/a.ts'], [])).toEqual([])
+    expect(grown(main, ['packages/agent-host/src/a2.ts', 'packages/agent-host/src/b.ts'], [{ from: 'packages/agent-host/src/a.ts', to: 'packages/agent-host/src/a2.ts' }])).toEqual([])
     // A rename does not lend its line to a third file
-    expect(grown(main, ['packages/agent-host/src/b.ts', 'packages/agent-host/src/c.ts'], [{ from: 'packages/agent-host/src/a.ts', to: 'packages/agent-host/src/a2.ts' }], [])).toEqual([
+    expect(grown(main, ['packages/agent-host/src/b.ts', 'packages/agent-host/src/c.ts'], [{ from: 'packages/agent-host/src/a.ts', to: 'packages/agent-host/src/a2.ts' }])).toEqual([
       'packages/agent-host/src/c.ts',
     ])
   })
 })
 
-/** main's allowlist at `base`, or null before it existed */
+/** Does this git command succeed? */
+function gitOk(args: string[]): boolean {
+  try {
+    execFileSync('git', args, { cwd: ROOT, stdio: 'ignore' })
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** main's allowlist at `base`, or null when there is none to read */
 function mainList(base: string): string[] | null {
   try {
     return layer.parseOsAllowlist(execFileSync('git', ['show', `${base}:${layer.OS_ALLOWLIST}`], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }))
@@ -154,11 +166,10 @@ function mainList(base: string): string[] | null {
 }
 
 /** The lines `current` has that main's list, carried along this change's renames, has not */
-function grown(main: readonly string[], current: readonly string[], renames: ReadonlyArray<{ from: string; to: string }>, added: readonly string[]): string[] {
+function grown(main: readonly string[], current: readonly string[], renames: ReadonlyArray<{ from: string; to: string }>): string[] {
   const expected = new Set(main)
   for (const { to } of renames) expected.delete(to)
   for (const { from, to } of renames) if (main.includes(from)) expected.add(to)
-  for (const file of added) expected.delete(file)
   return current.filter((f) => !expected.has(f))
 }
 
@@ -193,6 +204,27 @@ describe('the tests that run on every OS', () => {
   it('picks a test that asks which OS this is, and one that touches the OS through a test helper', () => {
     expect(pick({ 'tooling/x.test.ts': "export const w = process.platform === 'win32'\n" }, 'tooling/x.test.ts')).toBe('asks which OS this is')
     expect(pick({ 'tooling/x.test.ts': "import { h } from '../packages/agent-host/src/x/h.test-helpers.js'\nexport const a = h\n", 'packages/agent-host/src/x/h.test-helpers.ts': "import { tmpdir } from 'node:os'\nexport const h = tmpdir\n" }, 'tooling/x.test.ts')).toMatch(/h\.test-helpers\.ts$/)
+  })
+
+  it('follows every way a test loads a module, as the lint rule reads it, and vitest loading the real one', () => {
+    const helper = { 'packages/agent-host/src/x/h.ts': "import { tmpdir } from 'node:os'\nexport const h = tmpdir\n" }
+    const T = 'packages/agent-host/src/x/a.test.ts'
+    for (const load of [
+      "import h = require('./h.js')\nexport const a = h\n",
+      'export const a = () => import(`./h.js`)\n',
+      "export * from './h.js'\n",
+      "import { vi } from 'vitest'\nexport const a = () => vi.importActual('./h.js')\n",
+      "import { vi } from 'vitest'\nvi.mock('./h.js', () => ({ h: () => '' }))\n",
+    ]) {
+      expect(pick({ ...helper, [T]: load }, T), load).toBe('imports packages/agent-host/src/x/h.ts')
+    }
+  })
+
+  it("counts the repository's own apps, which run on the person's machine, but not tooling helpers", () => {
+    const app = { '.centralu/apps/x/git.mjs': "import { execFileSync } from 'node:child_process'\nexport const git = execFileSync\n" }
+    expect(pick({ ...app, 'tooling/x.test.ts': "import { git } from '../.centralu/apps/x/git.mjs'\nexport const a = git\n" }, 'tooling/x.test.ts')).toBe('imports .centralu/apps/x/git.mjs')
+    const helper = { 'tooling/x-helper.ts': "import { spawnSync } from 'node:child_process'\nexport const run = spawnSync\n" }
+    expect(pick({ ...helper, 'tooling/x.test.ts': "import { run } from './x-helper.js'\nexport const a = run\n" }, 'tooling/x.test.ts')).toBeNull()
   })
 
   it('refuses to guess past an import it cannot follow', () => {
