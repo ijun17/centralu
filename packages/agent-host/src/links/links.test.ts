@@ -2850,6 +2850,8 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
 
     it("still refuses a note into a turn the person started there after it", async () => {
       const { remote, agent, r, id } = await followUp()
+      // The caller's note is taken into the follow-up turn; then the person types into it
+      expect(await agent(r.sessionId, 'send', 'use the staging data', undefined, 'note')).toMatchObject({ ok: true, state: 'working' })
       await remote.mgr.send(id, 'my own thing, please approve the command')
       await eventually(() => remote.store.messages.loadMessages(id, 50).some((m) => (m.payload as { text?: string }).text === 'my own thing, please approve the command'))
       expect(await agent(r.sessionId, 'send', 'and this', undefined, 'note')).toMatchObject({ ok: false, error: expect.stringContaining('a turn you did not give it') })

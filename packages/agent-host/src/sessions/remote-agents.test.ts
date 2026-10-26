@@ -393,6 +393,21 @@ describe("the turn on the child's machine, read as the caller's only on evidence
       return ra
     }
 
+    /**
+     * The note's turn has begun and been taken for the caller's (a control: the cases below only mean something if this
+     * holds), took another note of the caller's, and ended: what begins next is judged again
+     */
+    async function afterFollowUp(): Promise<RemoteAgents> {
+      const ra = await afterNote()
+      ra.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working' })
+      expect(reportOwed()).toBe(true)
+      expect(await act(ra, 'send', { text: 'and the keys' })).toMatchObject({ ok: true, state: 'working' })
+      ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 3, text: sentTexts[1], from: HUB })
+      ra.observe({ type: 'turn_complete', sessionId: child.sessionId })
+      children.dropLinkedReport(child.sessionId)
+      return ra
+    }
+
     it("is the note's, so the caller's: its end is owed and a note goes into it", async () => {
       const ra = await afterNote()
       expect(reportOwed()).toBe(false)
@@ -403,16 +418,16 @@ describe("the turn on the child's machine, read as the caller's only on evidence
     })
 
     it("is not the caller's when the person's message came first", async () => {
-      const ra = await afterNote()
-      ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 3, text: 'my own thing', from: PERSON })
+      const ra = await afterFollowUp()
+      ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 4, text: 'my own thing', from: PERSON })
       ra.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working' })
       expect(reportOwed()).toBe(false)
-      expect(await act(ra, 'send', { text: 'and the keys' })).toMatchObject({ ok: false, error: expect.stringContaining('a turn you did not give it') })
-      expect(sentTexts).toHaveLength(1)
+      expect(await act(ra, 'send', { text: 'and this' })).toMatchObject({ ok: false, error: expect.stringContaining('a turn you did not give it') })
+      expect(sentTexts).toHaveLength(2)
     })
 
     it("is not the caller's when it begins long after the turn ended", async () => {
-      const ra = await afterNote()
+      const ra = await afterFollowUp()
       const now = Date.now()
       const clock = vi.spyOn(Date, 'now').mockReturnValue(now + 60_000)
       ra.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working' })
@@ -421,31 +436,21 @@ describe("the turn on the child's machine, read as the caller's only on evidence
     })
 
     it("is not the caller's when it begins after the link dropped", async () => {
-      const ra = await afterNote()
+      const ra = await afterFollowUp()
       ra.observe({ type: 'machine_status', machine: { id: 'm1', name: 'Box', status: 'unreachable' } })
       ra.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working' })
       expect(reportOwed()).toBe(false)
     })
 
-    it("is not the caller's when no note of its was in the turn before", async () => {
-      const ra = following()
-      children.setLinkedReport(child.sessionId, { orchestratorId: 'h1', busy: false })
-      ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 1, text: 'TASK', from: HUB })
+    it("is a turn of its own only once: the one after it, with no note of the caller's in it, is not the note's", async () => {
+      const ra = await afterNote()
       ra.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working' })
+      expect(reportOwed()).toBe(true)
       ra.observe({ type: 'turn_complete', sessionId: child.sessionId })
       children.dropLinkedReport(child.sessionId)
       ra.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working' })
       expect(reportOwed()).toBe(false)
       expect(await act(ra, 'send', { text: 'note' })).toMatchObject({ ok: false, error: expect.stringContaining('a turn it started by itself') })
-    })
-
-    it("is a turn of its own only once: the one after it is not the note's", async () => {
-      const ra = await afterNote()
-      ra.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working' })
-      ra.observe({ type: 'turn_complete', sessionId: child.sessionId })
-      children.dropLinkedReport(child.sessionId)
-      ra.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working' })
-      expect(reportOwed()).toBe(false)
     })
   })
 
