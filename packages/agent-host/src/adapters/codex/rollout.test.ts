@@ -10,7 +10,7 @@ import { findRolloutPath, lastCompactSummary } from './rollout.js'
  * message is the summary text. The file is found by its file name (thread id) — zero dependency on the binary.
  */
 
-const SUMMARY = '# 1. Project and Goals\n\n' + 'MGH skill effect work status and rules. '.repeat(20)
+const SUMMARY = '# 1. Project and Goals\n\n' + 'Sprite effect work status and rules. '.repeat(20)
 
 const compactedLine = (message: string, historyText: string | null) =>
   JSON.stringify({
@@ -132,6 +132,6 @@ describe('where the rollout is looked for when no folder is given', () => {
     writeFileSync(join(day, 'rollout-2026-10-17T01-02-03-t-home.jsonl'), compactedLine('', SUMMARY) + '\n')
     vi.stubEnv('CODEX_HOME', home)
 
-    expect(await lastCompactSummary('t-home')).toContain('MGH skill effect')
+    expect(await lastCompactSummary('t-home')).toContain('Sprite effect')
   })
 })

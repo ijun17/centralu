@@ -589,7 +589,7 @@ describe('the port serve starts on (#482)', () => {
       '  TCP    0.0.0.0:135            0.0.0.0:0              수신 대기',
       '  TCP    127.0.0.1:17175        0.0.0.0:0              LISTENING',
       '  TCP    127.0.0.1:17175        127.0.0.1:50211        ESTABLISHED',
-      '  TCP    192.168.0.24:139       0.0.0.0:0              LISTENING',
+      '  TCP    192.0.2.24:139       0.0.0.0:0              LISTENING',
       '  TCP    [::1]:17176            [::]:0                 LISTENING',
       '  TCP    127.0.0.1:50211        127.0.0.1:17175        ESTABLISHED',
     ].join('\r\n')

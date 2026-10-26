@@ -232,13 +232,13 @@ else {
 
   const framed = (): Framed => framedCommand(script(10 * KB))
   const tunnel = (ssh: string) =>
-    new SshTunnel({ target: 'ijun1', ssh, env: process.env, stdinReadyMs: 3_000 * SLOW, stdinAckMs: 400 * SLOW, execTimeoutMs: 600_000 })
+    new SshTunnel({ target: 'win-pc', ssh, env: process.env, stdinReadyMs: 3_000 * SLOW, stdinAckMs: 400 * SLOW, execTimeoutMs: 600_000 })
 
   it('fails when PowerShell never says it runs, naming that, and does not send the step again', async () => {
     const { ssh, runs } = fakeSsh(['none', 'none'])
-    const t = new SshTunnel({ target: 'ijun1', ssh, env: process.env, stdinReadyMs: 400 * SLOW, stdinAckMs: 400 * SLOW, execTimeoutMs: 600_000 })
+    const t = new SshTunnel({ target: 'win-pc', ssh, env: process.env, stdinReadyMs: 400 * SLOW, stdinAckMs: 400 * SLOW, execTimeoutMs: 600_000 })
     const at = Date.now()
-    await expect(t.exec(framed())).rejects.toThrow(/ijun1 did not start this step's PowerShell within \d+ seconds/)
+    await expect(t.exec(framed())).rejects.toThrow(/win-pc did not start this step's PowerShell within \d+ seconds/)
     expect(Date.now() - at).toBeLessThan(20_000 * SLOW)
     expect(runs()).toBe(1)
     await t.close()
@@ -248,7 +248,7 @@ else {
     const { ssh, runs } = fakeSsh(['ready', 'ready'])
     const t = tunnel(ssh)
     const at = Date.now()
-    await expect(t.exec(framed())).rejects.toThrow(/PowerShell on ijun1 did not confirm within \d+ seconds? that it had read this step's input, so the step did not start, twice/)
+    await expect(t.exec(framed())).rejects.toThrow(/PowerShell on win-pc did not confirm within \d+ seconds? that it had read this step's input, so the step did not start, twice/)
     expect(Date.now() - at).toBeLessThan(20_000 * SLOW)
     expect(runs()).toBe(2)
     await t.close()
@@ -286,16 +286,16 @@ else {
   it('does not send the step again when the link drops after PowerShell said it runs; it is a failure to reach the machine', async () => {
     const { ssh, runs } = fakeSsh(['drop', 'both'])
     const t = tunnel(ssh)
-    await expect(t.exec(framed())).rejects.toThrow(/ssh could not reach ijun1/)
+    await expect(t.exec(framed())).rejects.toThrow(/ssh could not reach win-pc/)
     expect(runs()).toBe(1)
     await t.close()
   }, 60_000 * SLOW)
 
   it('waits for nothing from a command that has no script on stdin', async () => {
     const { ssh, runs } = fakeSsh(['none'])
-    const t = new SshTunnel({ target: 'ijun1', ssh, env: process.env, stdinReadyMs: 100 * SLOW, stdinAckMs: 100 * SLOW, execTimeoutMs: 600_000 })
+    const t = new SshTunnel({ target: 'win-pc', ssh, env: process.env, stdinReadyMs: 100 * SLOW, stdinAckMs: 100 * SLOW, execTimeoutMs: 600_000 })
     // The stand-in ssh never answers; the run ends at the step's own limit, here short
-    const quick = new SshTunnel({ target: 'ijun1', ssh, env: process.env, execTimeoutMs: 1_500 * SLOW })
+    const quick = new SshTunnel({ target: 'win-pc', ssh, env: process.env, execTimeoutMs: 1_500 * SLOW })
     await expect(quick.exec('true')).rejects.toThrow(/did not finish within/)
     expect(runs()).toBe(1)
     await quick.close()

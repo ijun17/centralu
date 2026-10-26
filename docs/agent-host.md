@@ -774,7 +774,7 @@ machine was removed, while the hub could not see it is cleared by `list` and `de
 children's records, and a handoff gives them to the heir. In the sidebar it stands in that machine's project, among
 the sessions there and with its "Asked by <caller>" mark, since a project on another machine is a project of its own
 (#1416; #1038 first drew it under its caller, in the caller's project). The caller's row carries no pointer to it
-(owner, 2026-10-26: the "2 on ijun1" pointer of #1416 was removed); the child keeps its row, its mark and its inbox entry. The hub names the
+(owner, 2026-10-26: the "2 on win-pc" pointer of #1416 was removed); the child keeps its row, its mark and its inbox entry. The hub names the
 caller as its `askedBy` in that machine's rows and owner events (`LinkDeps.ownerOf`, `SessionManager.remoteAgentParent`)
 and sends `session_owner` when it records the child, hands it to an heir, or forgets it with its caller; the mark
 follows `askedBy`, so it moves with the heir and goes when the caller does.

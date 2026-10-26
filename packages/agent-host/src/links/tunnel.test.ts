@@ -701,7 +701,7 @@ describe('the remote command per shell (#82)', () => {
 
   it('reads the reason out of what ssh, PowerShell and Node print around it (measured on Windows)', () => {
     const pq = '** WARNING: connection is not using a post-quantum key exchange algorithm.\n** This session may be vulnerable to "store now, decrypt later" attacks.\n'
-    expect(lastLine(`${pq}ssh: connect to host 192.168.0.24 port 22: Operation timed out\n`)).toBe('ssh: connect to host 192.168.0.24 port 22: Operation timed out')
+    expect(lastLine(`${pq}ssh: connect to host 192.0.2.24 port 22: Operation timed out\n`)).toBe('ssh: connect to host 192.0.2.24 port 22: Operation timed out')
     expect(lastLine("node:internal/modules/cjs/loader:1386\nError: Cannot find module '/var/tmp/x.mjs'\n    at Module._resolveFilename (node:internal)\n\nNode.js v22.23.3\n")).toBe(
       "Error: Cannot find module '/var/tmp/x.mjs'",
     )

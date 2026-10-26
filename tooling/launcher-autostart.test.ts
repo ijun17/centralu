@@ -334,7 +334,7 @@ describe('the Windows scheduled task (and WSL’s)', () => {
      */
     describe('on a PC in a workgroup, where the ssh logon’s USERDOMAIN is not the account’s domain', () => {
       const workgroup = { USERDOMAIN: 'WORKGROUP' }
-      const theirs = "@([pscustomobject]@{ SessionId = 4; User = $env:USERNAME; Domain = 'jungi'; Sid = $self })"
+      const theirs = "@([pscustomobject]@{ SessionId = 4; User = $env:USERNAME; Domain = 'WORKGROUP'; Sid = $self })"
       const me = '[System.Security.Principal.WindowsIdentity]::GetCurrent().Name'
 
       it('finds the person’s sign-in by the SID of its Explorer’s owner, and registers the task as their account', () => {

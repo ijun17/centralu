@@ -7,7 +7,7 @@ import { isNoAnswer } from './away.js'
  */
 describe('a machine that does not answer', () => {
   it.each([
-    'ssh could not reach jungi: ssh: connect to host jungi.tail3d9122.ts.net port 22: Operation timed out',
+    'ssh could not reach laptop: ssh: connect to host laptop.example.ts.net port 22: Operation timed out',
     'ssh could not reach box: ssh: connect to host box port 22: Connection timed out',
     'ssh could not reach box: ssh: connect to host 10.0.0.7 port 22: No route to host',
     'ssh could not reach box: ssh: connect to host 10.0.0.7 port 22: Network is unreachable',

@@ -29,7 +29,7 @@
 
 | | |
 |---|---|
-| Machine | LG Gram, Windows 11, WSL2 Ubuntu 24.04.5, kernel `6.18.40.1-microsoft-standard-WSL2`, 18 CPUs, 7 GB |
+| Machine | A Windows laptop, Windows 11, WSL2 Ubuntu 24.04.5, kernel `6.18.40.1-microsoft-standard-WSL2`, 18 CPUs, 7 GB |
 | `kill` | procps-ng 4.0.4 (`2:4.0.4-4ubuntu3.3`); `pid_max` 4,194,304 |
 | Toolchain | Node 22.23.3 (WSL's own); rustc 1.99.0 installed under the temporary folder only (`RUSTUP_HOME`, `CARGO_HOME`) |
 | FUSE | `/dev/fuse` present, `fusermount3` setuid, no libfuse2 (the AppImage's static type-2 runtime does not need it) |

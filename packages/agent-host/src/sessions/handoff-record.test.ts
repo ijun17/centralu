@@ -186,7 +186,7 @@ describe('the handoff record builder (#102)', () => {
   it('if there is a pivot, starts from there and places the tool\'s summary above it', () => {
     const text = buildHandoffRecord({
       ...base,
-      summary: '# Project and goal\n' + 'This is the MGH skill effect work. '.repeat(20),
+      summary: '# Project and goal\n' + 'This is the Sprite effect work. '.repeat(20),
       pivotSeq: 3,
       rows: [
         row(1, 'user', 'text', { text: 'an old story' }),
@@ -197,8 +197,8 @@ describe('the handoff record builder (#102)', () => {
     })
 
     expect(text).toContain("## The tool's last compaction summary")
-    expect(text).toContain('MGH skill effect')
-    expect(text.indexOf('MGH skill effect')).toBeLessThan(text.indexOf('── verbatim from here ──'))
+    expect(text).toContain('Sprite effect')
+    expect(text.indexOf('Sprite effect')).toBeLessThan(text.indexOf('── verbatim from here ──'))
     expect(text).toContain('[user] the question after compaction')
     // The summary stands in for that span — carrying the same content again verbatim would only bulk up the file
     expect(text).not.toContain('an old story')

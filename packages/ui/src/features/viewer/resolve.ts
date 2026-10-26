@@ -6,7 +6,7 @@
  * An actual case (user's observation, 2026-09-07):
  *
  *     What the agent wrote: `Media/ImageSearch.cs`
- *     Where it really is:   `WzComparerR2.Cli/Media/ImageSearch.cs`
+ *     Where it really is:   `Widgets.Cli/Media/ImageSearch.cs`
  *
  * Since that file does not exist at the root, the viewer could only say "could not open it." To
  * a person's eye, a perfectly fine-looking path looks like a dead link.

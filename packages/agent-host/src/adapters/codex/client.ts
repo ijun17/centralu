@@ -117,7 +117,7 @@ export class CodexClient {
      * a 164MB conversation) got split into 22,049,101 bytes plus the remainder, neither of which
      * was valid JSON anymore, and once the response was dropped as "non-JSON output", that
      * request's promise never resolved. The screen was left with "RPC timed out:
-     * agents.resumeSession" and a Retry button that did nothing (the MGH session).
+     * agents.resumeSession" and a Retry button that did nothing (a real session).
      *
      * Capturing the raw stream directly clears codex of blame — the line arrived whole. What did
      * the splitting was our own readline. So this switches to a buffer that only splits at

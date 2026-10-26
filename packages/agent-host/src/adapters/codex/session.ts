@@ -49,7 +49,7 @@ export class CodexSession implements SessionHandle {
   private readonly turns = new CodexTurns()
   /**
    * Messages that arrived while a compact/review turn was running (measured while dogfooding,
-   * 2026-09-02, MGH session).
+   * 2026-09-02, a dogfooding session).
    *
    * In codex 0.147.0, turn/start **answers success while dropping the input** while a compact
    * turn is running — the rollout kept only the settings application (thread_settings_applied)

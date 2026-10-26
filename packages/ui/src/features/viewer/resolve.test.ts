@@ -3,26 +3,26 @@ import { suffixMatches } from './resolve.js'
 
 /**
  * A relative path an agent wrote → the real file inside the project (user's observation,
- * 2026-09-07). An actual case: `Media/ImageSearch.cs` ↔ `WzComparerR2.Cli/Media/ImageSearch.cs`.
+ * 2026-09-07). An actual case: `Media/ImageSearch.cs` ↔ `Widgets.Cli/Media/ImageSearch.cs`.
  */
 describe('suffixMatches', () => {
   const files = [
-    'WzComparerR2.Cli/Media/ImageSearch.cs',
+    'Widgets.Cli/Media/ImageSearch.cs',
     'Tools/Media/ImageSearch.cs',
-    'WzComparerR2.Common/OldMedia/ImageSearch.cs',
+    'Widgets.Common/OldMedia/ImageSearch.cs',
     'docs/README.md',
   ]
 
   it('matches a truncated-at-the-front path by its tail', () => {
-    expect(suffixMatches(files, 'WzComparerR2.Cli/Media/ImageSearch.cs')).toEqual([
-      'WzComparerR2.Cli/Media/ImageSearch.cs',
+    expect(suffixMatches(files, 'Widgets.Cli/Media/ImageSearch.cs')).toEqual([
+      'Widgets.Cli/Media/ImageSearch.cs',
     ])
   })
 
   it('matches only at segment boundaries — OldMedia/ImageSearch.cs is not a candidate', () => {
     expect(suffixMatches(files, 'Media/ImageSearch.cs')).toEqual([
       'Tools/Media/ImageSearch.cs',
-      'WzComparerR2.Cli/Media/ImageSearch.cs',
+      'Widgets.Cli/Media/ImageSearch.cs',
     ])
   })
 

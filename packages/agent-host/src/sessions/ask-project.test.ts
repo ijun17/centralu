@@ -17,7 +17,7 @@ import { itSymlink, linkDir } from '../link.test-helpers.js'
 describe('the projects a name points at, here and on linked machines (#700)', () => {
   const here = (id: string, name: string): AskableProject => ({ id, name, machine: null, machineId: null })
   const there = (machineId: string, machine: string, id: string, name: string): AskableProject => ({ id: `${machineId}.${id}`, name, machine, machineId })
-  const all = [here('p1', 'vibe'), here('p2', 'cc'), there('ijun1', 'Windows PC', 'p9', 'cc'), there('ijun1', 'Windows PC', 'p8', 'solo'), there('box', 'Linux box', 'p3', 'Solo')]
+  const all = [here('p1', 'vibe'), here('p2', 'cc'), there('win-pc', 'Windows PC', 'p9', 'cc'), there('win-pc', 'Windows PC', 'p8', 'solo'), there('box', 'Linux box', 'p3', 'Solo')]
 
   it('says of a missing name only the machines it may be on: all for a bare name, its own for a qualified one (#1547)', () => {
     const laptop = { machine: 'Laptop', machineId: 'm1', why: 'not reachable right now' }
@@ -31,37 +31,37 @@ describe('the projects a name points at, here and on linked machines (#700)', ()
   it('takes a name that exists once, wherever it is, and an id or a machine-qualified form always', () => {
     expect(matchProjects('vibe', all).map((p) => p.id)).toEqual(['p1'])
     expect(matchProjects('  vibe ', all).map((p) => p.id)).toEqual(['p1'])
-    expect(matchProjects('solo', all).map((p) => p.id)).toEqual(['ijun1.p8'])
-    expect(matchProjects('ijun1.p9', all).map((p) => p.id)).toEqual(['ijun1.p9'])
+    expect(matchProjects('solo', all).map((p) => p.id)).toEqual(['win-pc.p8'])
+    expect(matchProjects('win-pc.p9', all).map((p) => p.id)).toEqual(['win-pc.p9'])
     expect(matchProjects('p2', all).map((p) => p.id)).toEqual(['p2'])
     // The machine by its id or by the name the person gave it, case aside; the project by its name, case aside last
-    for (const wanted of ['ijun1/cc', 'Windows PC/cc', 'windows pc/CC']) expect(matchProjects(wanted, all).map((p) => p.id)).toEqual(['ijun1.p9'])
+    for (const wanted of ['win-pc/cc', 'Windows PC/cc', 'windows pc/CC']) expect(matchProjects(wanted, all).map((p) => p.id)).toEqual(['win-pc.p9'])
     expect(matchProjects('box/solo', all).map((p) => p.id)).toEqual(['box.p3'])
   })
 
   it('returns every machine that has the name, so the caller can refuse and list them; two on one machine count once', () => {
-    expect(matchProjects('cc', all).map((p) => p.id)).toEqual(['p2', 'ijun1.p9'])
+    expect(matchProjects('cc', all).map((p) => p.id)).toEqual(['p2', 'win-pc.p9'])
     expect(matchProjects('cc', [here('a', 'cc'), here('b', 'cc')]).map((p) => p.id)).toEqual(['a'])
     expect(matchProjects('nothing', all)).toEqual([])
-    expect(matchProjects('ijun1/nothing', all)).toEqual([])
+    expect(matchProjects('win-pc/nothing', all)).toEqual([])
     expect(matchProjects('nowhere/cc', all)).toEqual([])
   })
 
   it('prefers the exact spelling anywhere over a spelling that differs in case, and this computer’s exact name over a machine’s', () => {
-    const mixed = [here('p1', 'Solo'), there('ijun1', 'Windows PC', 'p9', 'solo'), there('box', 'Linux box', 'p3', 'SOLO')]
+    const mixed = [here('p1', 'Solo'), there('win-pc', 'Windows PC', 'p9', 'solo'), there('box', 'Linux box', 'p3', 'SOLO')]
     // Written as the machine’s project is: only that one, though this computer’s differs by case alone
-    expect(matchProjects('solo', mixed).map((p) => p.id)).toEqual(['ijun1.p9'])
+    expect(matchProjects('solo', mixed).map((p) => p.id)).toEqual(['win-pc.p9'])
     // Written as this computer’s is: it is not beaten by the machines’ projects that differ by case
     expect(matchProjects('Solo', mixed).map((p) => p.id)).toEqual(['p1'])
     // Spelled in none of the ways: every project of that name, any case, is a choice
-    expect(matchProjects('sOlO', mixed).map((p) => p.id)).toEqual(['p1', 'ijun1.p9', 'box.p3'])
+    expect(matchProjects('sOlO', mixed).map((p) => p.id)).toEqual(['p1', 'win-pc.p9', 'box.p3'])
     // The machine’s exact name wins within it too
-    expect(matchProjects('ijun1/solo', [...mixed, there('ijun1', 'Windows PC', 'p10', 'Solo')]).map((p) => p.id)).toEqual(['ijun1.p9'])
+    expect(matchProjects('win-pc/solo', [...mixed, there('win-pc', 'Windows PC', 'p10', 'Solo')]).map((p) => p.id)).toEqual(['win-pc.p9'])
   })
 
   it('tells the choices apart by id and machine', () => {
     expect(projectChoice(here('p2', 'cc'))).toBe('cc [p2] on this computer')
-    expect(projectChoice(there('ijun1', 'Windows PC', 'p9', 'cc'))).toBe('cc [ijun1.p9] on Windows PC')
+    expect(projectChoice(there('win-pc', 'Windows PC', 'p9', 'cc'))).toBe('cc [win-pc.p9] on Windows PC')
   })
 })
 

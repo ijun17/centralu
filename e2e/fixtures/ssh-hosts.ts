@@ -16,14 +16,14 @@ export async function seedSshConfig(page: Page): Promise<void> {
     mock.sshConfig = {
       configFile: '~/.ssh/config',
       hosts: [
-        { alias: 'ijun1', hostName: 'jun.example.ts.net', user: 'ijun1', port: 38222, source: '~/.ssh/config:4', linked: [] },
+        { alias: 'win-pc', hostName: 'win-pc.example.ts.net', user: 'user', port: 2222, source: '~/.ssh/config:4', linked: [] },
         { alias: 'build-box', hostName: '10.0.0.5', user: 'me', port: 22, source: '~/.ssh/config.d/work:1', linked: [] },
         { alias: 'lab', hostName: 'lab.internal', user: null, port: 22, source: '~/.ssh/config.d/work:7', linked: [] },
       ],
       notes: ['A Match block (~/.ssh/config:12) is not listed; ssh still applies it'],
     }
     mock.probeAnswers = {
-      ijun1: { reachable: true, os: 'windows', windowsShell: 'cmd', wslDistros: [{ name: 'Ubuntu', default: true }], error: null },
+      'win-pc': { reachable: true, os: 'windows', windowsShell: 'cmd', wslDistros: [{ name: 'Ubuntu', default: true }], error: null },
       'build-box': { reachable: true, os: 'posix', windowsShell: null, wslDistros: [], error: null },
     }
   })
@@ -42,7 +42,7 @@ export function sshHostsTests(): void {
     await openMachines(page)
 
     await test.step('the hosts, what ssh resolves them to, and what was left out', async () => {
-      await expect(page.getByTestId('machines-add-host-ijun1')).toContainText('ijun1@jun.example.ts.net:38222')
+      await expect(page.getByTestId('machines-add-host-win-pc')).toContainText('user@win-pc.example.ts.net:2222')
       await expect(page.getByTestId('machines-add-host-build-box')).toContainText('me@10.0.0.5')
       await expect(page.getByTestId('machines-add-notes')).toContainText('Match block')
       // Nothing is asked of a host until it is picked
@@ -51,26 +51,26 @@ export function sshHostsTests(): void {
     })
 
     await test.step('picking one probes it: Windows under cmd.exe, and WSL (Ubuntu), Windows chosen and named', async () => {
-      await page.getByTestId('machines-add-host-ijun1').click()
+      await page.getByTestId('machines-add-host-win-pc').click()
       await expect(page.getByTestId('machines-add-choice-windows')).toHaveAttribute('aria-checked', 'true')
       await expect(page.getByTestId('machines-add-choice-windows')).toContainText('cmd.exe answers ssh')
       await expect(page.getByTestId('machines-add-choice-wsl:Ubuntu')).toContainText('The default distro')
-      await expect(page.getByTestId('machines-add-name')).toHaveValue('ijun1')
+      await expect(page.getByTestId('machines-add-name')).toHaveValue('win-pc')
       await page.getByTestId('machines-add-confirm').click()
       await expect(page.getByTestId('machines-add-form')).toHaveCount(0)
-      await expect(page.getByTestId('machine-row-ijun1')).toContainText('ijun1 · Windows')
+      await expect(page.getByTestId('machine-row-win-pc')).toContainText('win-pc · Windows')
     })
 
     await test.step('opened again: the host says it is linked, Windows is not offered again, WSL is', async () => {
       await page.getByTestId('machines-add-open').click()
-      await expect(page.getByTestId('machines-add-host-linked-ijun1')).toHaveText('linked as ijun1')
-      await page.getByTestId('machines-add-host-ijun1').click()
+      await expect(page.getByTestId('machines-add-host-linked-win-pc')).toHaveText('linked as win-pc')
+      await page.getByTestId('machines-add-host-win-pc').click()
       await expect(page.getByTestId('machines-add-choice-windows')).toBeDisabled()
-      await expect(page.getByTestId('machines-add-choice-windows')).toContainText('Linked as ijun1')
+      await expect(page.getByTestId('machines-add-choice-windows')).toContainText('Linked as win-pc')
       await expect(page.getByTestId('machines-add-choice-wsl:Ubuntu')).toHaveAttribute('aria-checked', 'true')
-      await expect(page.getByTestId('machines-add-name')).toHaveValue('ijun1 Ubuntu')
+      await expect(page.getByTestId('machines-add-name')).toHaveValue('win-pc Ubuntu')
       await page.getByTestId('machines-add-confirm').click()
-      await expect(page.getByTestId('machine-row-ijun1-ubuntu')).toContainText('ijun1 · WSL on Windows · Ubuntu')
+      await expect(page.getByTestId('machine-row-win-pc-ubuntu')).toContainText('win-pc · WSL on Windows · Ubuntu')
     })
   })
 
@@ -91,22 +91,22 @@ export function sshHostsTests(): void {
 
   test('a probe that answers after another host was picked does not take over the dialog', async ({ page }) => {
     await openMachines(page)
-    // ijun1's answer is held back until build-box has been picked and has answered
+    // win-pc's answer is held back until build-box has been picked and has answered
     await page.evaluate(() => {
       const mock = (window as any).__mock
       const real = mock.machines.probe
       const w = window as any
-      w.__releaseIjun1 = null
+      w.__releaseWinPc = null
       mock.machines.probe = async (target: string) => {
-        if (target === 'ijun1') await new Promise<void>((r) => (w.__releaseIjun1 = r))
+        if (target === 'win-pc') await new Promise<void>((r) => (w.__releaseWinPc = r))
         return real(target)
       }
     })
-    await page.getByTestId('machines-add-host-ijun1').click()
-    await expect(page.getByTestId('machines-add-probing')).toContainText('ijun1')
+    await page.getByTestId('machines-add-host-win-pc').click()
+    await expect(page.getByTestId('machines-add-probing')).toContainText('win-pc')
     await page.getByTestId('machines-add-host-build-box').click()
     await expect(page.getByTestId('machines-add-choice-posix')).toHaveAttribute('aria-checked', 'true')
-    await page.evaluate(() => (window as any).__releaseIjun1())
+    await page.evaluate(() => (window as any).__releaseWinPc())
     // Long enough for the held answer to land, were it taken
     await page.waitForTimeout(200)
     await expect(page.getByTestId('machines-add-choice-windows')).toHaveCount(0)
