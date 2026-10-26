@@ -2,6 +2,7 @@ import type { ToolName } from '@cc/protocol'
 import { ClaudeAdapter } from './claude/index.js'
 import { CodexAdapter } from './codex/index.js'
 import { CursorAgentAdapter } from './cursor-agent/index.js'
+import { OpenCodeAdapter } from './opencode/index.js'
 import type { AgentAdapter } from './contract.js'
 
 /**
@@ -18,7 +19,7 @@ import type { AgentAdapter } from './contract.js'
  * (marks are distinct, the commands are real) can only be checked across the whole set.
  */
 export function createAdapters(): Map<ToolName, AgentAdapter> {
-  const all: AgentAdapter[] = [new ClaudeAdapter(), new CodexAdapter(), new CursorAgentAdapter()]
+  const all: AgentAdapter[] = [new ClaudeAdapter(), new CodexAdapter(), new CursorAgentAdapter(), new OpenCodeAdapter()]
   return new Map(all.map((a) => [a.tool, a]))
 }
 

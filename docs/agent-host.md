@@ -1845,7 +1845,7 @@ interface AdapterCapabilities {
   peerMessaging: boolean        // the CLI has a direct session-to-session path (#575)
   midTurnInput?: boolean         // send accepts a message during a running turn without interrupting it (#592)
   sleep?: boolean               // #568: an idle session may be put to sleep (resume measured to keep the cache); §4.6.1
-  presets?: PermissionPreset[]  // the presets it can keep; absent: all (Cursor has no `safe`, plans/acp-adapter.md §0.1)
+  presets?: PermissionPreset[]  // the presets it can keep; absent: all (Cursor keeps `auto` only, plans/acp-adapter.md §0.1)
   keepsRepoFilesOut?: boolean   // can be kept from a project's own files when untrusted (#92); absent: true
   roleText?: boolean            // takes Centralu's role text (`systemPromptAppend`); absent: true
 }

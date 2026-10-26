@@ -20,6 +20,7 @@ not wired into CI, and are run by hand when the related area changes.
 pnpm smoke               # exercises the host end-to-end with a real Claude session
 pnpm smoke:resume        # does resume actually continue
 pnpm smoke:codex         # exercises the Codex adapter end-to-end
+pnpm smoke:opencode:scripted  # what the presets make OpenCode ask, deny and allow: a stand-in model, no account
 pnpm smoke:orchestrator  # orchestrator + MCP tools
 pnpm smoke:schemas       # does the protocol schema match the real thing
 pnpm smoke:question      # AskUserQuestion round trip

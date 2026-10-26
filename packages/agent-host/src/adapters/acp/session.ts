@@ -42,9 +42,15 @@ export type AcpSessionDeps = {
   centraluToolOf?: (call: ToolCallFields) => string | null
   /** Every line both ways, for the recorder (§10.1) */
   onFrame?: (direction: FrameDirection, line: string) => void
+  /**
+   * The tool's `/compact` leaves no protocol frame (OpenCode 1.19.4, measured), so the one boundary known is Centralu's own
+   * compact turn: ended `end_turn` with a context reading smaller than the one before it (§5.6, owner 2026-10-26)
+   */
+  infersCompaction?: boolean
 }
 
-type Input = { text: string; id?: string; observer?: InputObserver; done?: { resolve(): void; reject(e: Error): void } }
+/** `compact`: the turn Centralu started to compact the session (`SessionEvents.sendCompact`), never the person's `/compact` */
+type Input = { text: string; id?: string; compact?: boolean; observer?: InputObserver; done?: { resolve(): void; reject(e: Error): void } }
 
 type Card = { callId: string; options: PermissionOption[]; answer(outcome: PermissionOutcome): void }
 
@@ -52,7 +58,19 @@ type Card = { callId: string; options: PermissionOption[]; answer(outcome: Permi
  * One prompt and what was asked of it. Each turn has its own: a Stop belongs to the turn it was pressed in, so a cancel the
  * agent answers late can never end the next one.
  */
-type Turn = { input: Input; stopAsked: boolean; cancelResent: boolean; stopTimer?: ReturnType<typeof setTimeout> }
+type Turn = {
+  input: Input
+  stopAsked: boolean
+  cancelResent: boolean
+  stopTimer?: ReturnType<typeof setTimeout>
+  /** The context reading before this turn, and the last one in it (`usage_update.used`) */
+  usedBefore: number | null
+  used: number | null
+  /** The agent said a compaction in this turn with protocol frames */
+  compacted: boolean
+  /** The session's running cost the agent last said in this turn (`usage_update.cost`, a total) */
+  costTotal: number | null
+}
 
 /** While a command runs, how often its process tree is noted (`AgentProcess.noteTree`): a shell it starts may be late */
 const TREE_NOTE_MS = 2_000
@@ -88,6 +106,10 @@ export class AcpSession implements SessionHandle {
   /** Commands running now, by call id, and the clock that notes the tree while any runs */
   private readonly commandsRunning = new Set<string>()
   private treeClock: ReturnType<typeof setInterval> | null = null
+  /** The last context reading taken, for the compact turn's comparison */
+  private lastUsed: number | null = null
+  /** The session's running cost as last read at a turn's end: a turn's own cost is what it adds (OpenCode sends the total) */
+  private costTotal: number | null = null
 
   constructor(
     private readonly opts: CreateSessionOpts,
@@ -145,10 +167,13 @@ export class AcpSession implements SessionHandle {
           this.replaying = false
         }
         this.externalId = resume
+        this.costTotal = this.opts.runningCost?.last ?? null
       } else {
         const opened = OpenedSession.parse(await this.conn.request('session/new', base, 120_000))
         if (!opened.sessionId) throw new Error(`${this.deps.label} opened a session without an id`)
         this.externalId = opened.sessionId
+        this.costTotal = 0
+        this.opts.runningCost?.keep(0)
       }
       this.phase = 'ready'
       this.next()
@@ -187,8 +212,8 @@ export class AcpSession implements SessionHandle {
     return 'failed'
   }
 
-  send(text: string, opts?: { origin?: InputOrigin; id?: string }): void {
-    this.enqueue({ text, ...(opts?.id ? { id: opts.id } : {}) })
+  send(text: string, opts?: { origin?: InputOrigin; id?: string; compact?: boolean }): void {
+    this.enqueue({ text, ...(opts?.id ? { id: opts.id } : {}), ...(opts?.compact ? { compact: true } : {}) })
   }
 
   sendTracked(text: string, observer?: InputObserver): Promise<void> {
@@ -218,7 +243,7 @@ export class AcpSession implements SessionHandle {
   }
 
   private async run(input: Input): Promise<void> {
-    const turn: Turn = { input, stopAsked: false, cancelResent: false }
+    const turn: Turn = { input, stopAsked: false, cancelResent: false, usedBefore: this.lastUsed, used: null, compacted: false, costTotal: null }
     this.turn = turn
     this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'working' })
     input.observer?.accepted?.()
@@ -253,7 +278,12 @@ export class AcpSession implements SessionHandle {
   private endTurn(result: PromptResult, turn: Turn): void {
     const sessionId = this.sessionId
     const tokens = tokenUsage(result)
-    if (tokens) this.emit({ type: 'usage_update', sessionId, tokens })
+    // A turn with no usage reports no cost: its spend stays in the total and is said with the next turn that reports
+    const cost = tokens ? this.turnCost(turn) : null
+    if (tokens) this.emit({ type: 'usage_update', sessionId, tokens: cost === null ? tokens : { ...tokens, costUsd: cost } })
+    if (result.stopReason === 'end_turn' && this.inferredCompaction(turn)) {
+      this.emit({ type: 'compaction', sessionId, failed: false, trigger: 'manual' })
+    }
     switch (result.stopReason) {
       case 'cancelled':
         this.emit({ type: 'state_change', sessionId, state: 'waiting_input', reason: turn.stopAsked ? 'interrupted' : INTERRUPTED_BY_TOOL })
@@ -303,6 +333,21 @@ export class AcpSession implements SessionHandle {
     this.treeClock = null
   }
 
+  /** What this turn added to the conversation's running cost, once a total from before it is known (`CreateSessionOpts.runningCost`); null otherwise */
+  private turnCost(turn: Turn): number | null {
+    if (turn.costTotal === null) return null
+    const before = this.costTotal
+    this.costTotal = turn.costTotal
+    this.opts.runningCost?.keep(turn.costTotal)
+    return before === null || turn.costTotal < before ? null : turn.costTotal - before
+  }
+
+  /** Centralu's own compact turn, with no protocol frame for it, whose reading went down (§5.6) */
+  private inferredCompaction(turn: Turn): boolean {
+    if (!this.deps.infersCompaction || !turn.input.compact || turn.compacted) return false
+    return turn.usedBefore !== null && turn.used !== null && turn.used < turn.usedBefore
+  }
+
   interrupt(): void {
     const turn = this.turn
     if (!turn || this.phase !== 'ready') return
@@ -325,6 +370,7 @@ export class AcpSession implements SessionHandle {
     }
     const read = readUpdate(params)
     if (!read || read.sessionId !== this.externalId || this.replaying) return
+    const turn = this.turn
     this.resendLostCancel()
     if ('other' in read) {
       this.unmapped.note(read.other)
@@ -337,12 +383,22 @@ export class AcpSession implements SessionHandle {
         return
       case 'usage_update':
         // Measured: a cancelled turn reads `used: 0` just before it ends, and the next turn reads the real size again
-        if (u.used > 0 && u.size > 0) this.emit({ type: 'context_update', sessionId: this.sessionId, used: u.used, window: u.size, exactness: 'exact' })
+        if (u.used > 0 && u.size > 0) {
+          this.emit({ type: 'context_update', sessionId: this.sessionId, used: u.used, window: u.size, exactness: 'exact' })
+          this.lastUsed = u.used
+          if (turn) turn.used = u.used
+        }
+        if (turn && u.cost?.currency === 'USD') turn.costTotal = u.cost.amount
         return
       default:
         for (const e of this.normalizer.update(u)) {
           this.watchCommands(e)
-          this.emit(e)
+          if (e.type !== 'compaction') {
+            this.emit(e)
+            continue
+          }
+          if (turn) turn.compacted = true
+          this.emit({ ...e, trigger: turn?.input.compact ? 'manual' : 'auto' })
         }
     }
   }

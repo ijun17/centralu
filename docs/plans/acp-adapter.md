@@ -172,6 +172,79 @@ does, `acp/adapter.test.ts`).
 A live Normal to Auto change restarted the process (about 10 s): with Cursor under Auto only, it has no other preset to
 change to.
 
+### 0.7 OpenCode (PR 3), on the core as reviewed
+
+`adapters/opencode/` is a profile and nothing else; the core is PR 1's as fixed after its review.
+
+| Part | OpenCode 1.19.4, measured |
+|---|---|
+| Presets | All four, the same promise as for Claude and Codex, through an inline `OPENCODE_CONFIG_CONTENT` that OpenCode merges after the person's global and project files (`config.ts`). It is built from what the person's OpenCode would read (`config-files.ts`: the global files, `OPENCODE_CONFIG`, the project's `opencode.json(c)` up to its repository's root, the `.opencode` folders, `OPENCODE_CONFIG_DIR`, the managed folder, and the agents their markdown files define), with the person's own inline value kept under it. The asks below are made under the agent Centralu runs (`build` under Safe, the person's `default_agent` or `build` otherwise); under every other agent, which only runs as a subagent, each of them is a deny (Subagents, below). **Safe** asks before every edit (`edit` covers `write` and `patch`), command (`bash`), and web fetch or search (`webfetch`, `websearch`, as Claude's default asks), whatever the rules of any agent say: OpenCode's own, each the person names in a config file or `mode`, and each their markdown files define; handing work (`task`) to an agent it cannot see (one a plugin adds) asks too. A deny of the person's stays a deny (in `permission` or legacy `tools`), a deny of every `task` included. **Normal** asks before edits and commands where the person's rules say nothing about them; each rule of theirs wins over that base for the calls it names: one for every call of the tool (`bash: allow`, `*`, a one-word `permission`, legacy `tools`) leaves no base, one for some (`bash: {"git *": "allow"}`) decides those and the rest ask; the rules of an agent defined in a markdown file come after the base anyway, unless it is the person's `default_agent`, whose asks Centralu sets under its own name and so after its markdown rules. **Edits** starts as Normal and the adapter allows the edits inside the folder itself, so commands ask. **Auto** adds nothing; the adapter answers whatever is asked. Not held under any preset: MCP tools (the person's servers' and Centralu's own), `todowrite`, `skill`, reads. What can still loosen Safe: a managed config (`%ProgramData%\opencode`, `/Library/Application Support/opencode`, `/etc/opencode`) or an OpenCode account organisation's config, both merged after Centralu's; an agent a plugin adds runs its own rules once its `task` card is allowed. OpenCode's `plan` and `explore` agents, which deny edits by themselves, ask instead under Normal when Centralu runs them (Centralu's rule comes after theirs) |
+| Subagents | OpenCode drops an ask made in a subagent's session (one `task` started): its ACP side answers only for the session it opened (`session.tryGet` finds no other), so no `session/request_permission` is sent, nothing answers, and the turn waits until it is stopped (#1565 Mac re-check, case E). So under Safe and Normal (and Edits), under every agent but the one Centralu runs, whatever would ask is denied: the preset's tools, OpenCode's own asks (a `.env` read, a loop) and each tool the person's rules for that agent ask before (`task` and `OPENCODE_PERMISSION` included); their allows and denies stay. The subagent is told and its run ends; `task` hands its last text back to the agent Centralu runs, which can ask, and work is never handed to that agent as a subagent. Still waiting under every preset: an ask for a folder outside the project from inside a subagent (OpenCode's own `external_directory` rule, whose allowed folders are its own), an ask written for every tool at once (`"*": "ask"`) or in a markdown agent's frontmatter, and, under Auto, any subagent's ask |
+| A deny | A call denied by a rule ends the turn (OpenCode stops its loop on a deny unless `experimental.continue_loop_on_deny`), so a call later in the same turn, a write after a denied command, is never tried |
+| Trust and role | Trusted projects only (it reads `AGENTS.md` and the project's `opencode.json`, which can add plugins and servers); a project's plugin (`.opencode/plugin/*.js`) runs its code when the session starts, under every preset, Safe included. No role text, so not the orchestrator, a coordinator or an app's agent |
+| Centralu's own tools | Not asked about under any preset (only `edit` and `bash` ask, measured in the `basic` and `approval` recordings), so no `centraluToolOf` is needed |
+| Compaction | Its `/compact` sends no protocol frame. Marked only at the end of the compact turn Centralu itself started (`SessionEvents.sendCompact`, `compact: true`), ended `end_turn` with a context reading smaller than the one before it: `trigger: manual`, no summary. A `/compact` the person types is never taken for one (`AcpSessionDeps.infersCompaction`) |
+| Input during a turn | Folded into the running turn by OpenCode; Centralu queues it for the turn's end instead (`midTurnInput: false`), the fold off |
+| Cost | `usage_update.cost` is the conversation's running total (read in its binary); a turn's cost is what it added. A new conversation starts from 0; the last total is kept beside the session (`app_settings` `running_cost:<id>`, `CreateSessionOpts.runningCost`), so the first turn after a restart, a wake or a host swap has its cost too |
+| Reply text | Its free model sometimes puts its reasoning in the reply and closes it with `</think>`, with no `<think>` (seen in most runs on 2026-10-25, in OpenCode's own store; its provider passes the text through). The core drops the first such tag of a message (`AcpNormalizer`); the reasoning before it stays reply text |
+| A refused model | When its model's provider refuses a turn (the free models' usage limit), OpenCode retries inside and sends no ACP frame: the turn shows nothing until it ends. `smoke:opencode` reports OpenCode's logged error when no event comes; Centralu itself shows the person nothing yet (#1569) |
+| Writes | After an asked edit it calls `fs/write_text_file` even with `fs` not advertised; the method-not-found answer is harmless (it writes itself) |
+| Ending | Started behind the host watch like every ACP CLI (§0.6) |
+
+`smoke:opencode` (`packages/agent-host/scripts/smoke-opencode.mjs`) runs it on a temporary host, with OpenCode in
+temporary XDG folders; it counts and stops only the `opencode acp` processes its own hosts started. The reason it
+gives for a silent turn (`openCodeError()`, OpenCode's last logged error) is the smoke's only, not the adapter's.
+
+`smoke:opencode:scripted` (`packages/agent-host/scripts/smoke-opencode-scripted.mjs`) checks the presets with no
+account and no quota: each case runs a temporary host and OpenCode (temporary data folder, XDG folders and HOME) whose
+model is a local OpenAI-compatible stand-in answering with scripted tool calls, so what is asked, denied or allowed is
+OpenCode's own evaluation on the platform it runs on. It denies every card and checks the cards, the turn's end and the
+files written for Safe, Normal and Edits, cases C, D, G and J, the person's `bash: deny` and `bash: allow`, and the
+three subagent cases (§0.8). It stops only the hosts it started and their `opencode acp`.
+
+### 0.8 The review of PR 3 (Windows, real OpenCode 1.19.4) and what it changed
+
+| Found | Now |
+|---|---|
+| A `mode.<name>` entry in the project's or the global `opencode.json` beat Safe: OpenCode copies `mode` over `agent` after the inline config; a command ran and a file was written with no card | Safe is put under `mode` for each name the person lists there (no other name, since one listed there becomes primary). The test's model of OpenCode's precedence now has `mode`, the merge's key order and the file layers |
+| A project subagent (`.opencode/agent/helper.md`, `bash`/`edit` allowed) reached through `task` ran unasked | Every agent the markdown files define is held; `task` to an agent it cannot see asks |
+| Within one object a key keeps its first place, and the last matching rule decides, so `{bash: allow, "*": allow}` under an agent beat Safe's `bash` (found while fixing the above) | Safe's rules sit under keys of their own (`bash*`), read after the person's, then the person's denies. Such a key also matches a tool whose name starts the same (an MCP tool `read_notes`), so it starts at its tool's first ask and holds that tool at most more strictly |
+| `webfetch` ran unasked under Safe | Safe asks before `webfetch` and `websearch` |
+| Normal and Edits asked nothing (OpenCode's default allows everything) | Normal asks before edits and commands under the person's own rules; Edits as Normal with the folder's edits allowed |
+| A project plugin runs code at the session's start | Inherent to trusted projects only; said above |
+| The first turn after a restart reported no cost | The last total is kept beside the session |
+| `smoke:opencode` stopped every new `opencode acp`, and failed once with no card in 240 s | It stops only its hosts' descendants; the miss was the free models' usage limit (OpenCode logged `Free usage limit reached` and retried silently), so the smoke now names OpenCode's logged error |
+| A stray `</think>` on a new session's first turn | Dropped by the core, as above (open question 3) |
+
+A second-model review of these fixes found more, also fixed and measured the same way: Safe read a legacy `tools: {bash: false}` as ask, and let the held agents run where the person denied every `task`; Normal's base was dropped for a tool the person had only partial rules for (`git *`), so every other command ran unasked; a held tag split over two messages lost its text.
+
+The owner's re-check on macOS (OpenCode 1.19.4, its free model) held every case but one: under Safe, case E's subagent
+asked, OpenCode logged the ask, and no card came, so the turn waited until its bound (three runs of three). The ask is
+dropped by OpenCode itself (Subagents, above), so a subagent's asks are now denies; checked by runs (below), and against the log's own
+calls in `config.test.ts`. The same re-check found `smoke:opencode`
+counting the host watch's subshell as a second agent process on macOS, as `smoke:cursor` once did; both smokes now
+count through one helper (`scripts/smoke-processes.mjs`). A second-model review of that fix found three more ways a
+subagent could still ask (`task` to an agent Centralu cannot see, the person's own `task` asks, and Normal's
+`OPENCODE_PERMISSION` asks under OpenCode's own subagents) and a key that also matched other tools (`read*` for an MCP
+tool `read_…`); each fixed with a test that fails without it.
+
+That key fix broke Safe on macOS (the owner's next re-check: no card in any case, the files written): it named each
+tool in capitals (`BASH`), taking OpenCode's match to ignore case. It does on Windows only: its `Wildcard.match` has
+the flags `si` in the Windows build and `s` in the macOS and Linux builds of 1.19.4 (read in all three). The keys are
+`bash*` again, each starting at its tool's first ask (so `read*` never carries an allow to `read_notes`), and the test's
+model of OpenCode decides every case on each platform's match and fails where they differ.
+
+How a claim here is checked: `opencode debug agent <name>` only lists an agent's rules; the order it prints says
+nothing about how they match on the platform at hand, and an evaluation by hand on that listing used Windows' match.
+A claim about what OpenCode allows or asks is checked by a run: `opencode acp` itself, with a local stand-in model (an
+OpenAI-compatible server that answers with scripted tool calls, so no quota), counting the cards and the files written,
+on the Windows build and the Linux build (under WSL, whose match is macOS's). Measured so for 9c37862df, 4ca7a9fda and
+the fix, cases baseline Safe, C, D, G, J, a deny, E (a markdown subagent), E through OpenCode's `general`, Normal, and
+Normal with the person's `bash: allow`: 4ca7a9fda asked nothing on Linux and wrote both files; 9c37862df held all but
+E, which waited with OpenCode's log saying `bash*` asked in the subagent; the fix holds every case on both builds and
+E ends with nothing written. The runs are kept as `smoke:opencode:scripted` (§0.7), through a real host, which also
+covers Edits; on 9c37862df its subagent cases fail as the turn never ends.
+
 ## 1. What was measured
 
 Everything below rests on frames captured from the real tools on Windows 11 (2026-10-26), with a scratch
@@ -499,10 +572,10 @@ The permission presets:
 
 | Preset | What the adapter does |
 |---|---|
-| `normal` | the tool's own configuration decides what it asks; every question becomes a card |
+| `normal` | the tool's own configuration decides what it asks; every question becomes a card. OpenCode, whose default asks nothing: Centralu's base asks before edits and commands, under the person's own rules (§0.7) |
 | `auto` | the adapter answers every question `allow_once` itself |
 | `edits` (#1525) | `auto` for `kind: edit` calls inside the session's folder, a card for the rest (a `delete` or a `move` is not an edit, as for Codex) |
-| `safe` | needs the tool to ask before every write and command. OpenCode: through `OPENCODE_CONFIG_CONTENT` (measured). Cursor: no per-process switch found yet; until one is, Cursor does not offer `safe` (open question 3) |
+| `safe` | needs the tool to ask before every write and command. OpenCode: through `OPENCODE_CONFIG_CONTENT` (measured; §0.7). Cursor: no per-process switch found yet; until one is, Cursor does not offer `safe` (open question 3) |
 
 `capabilities.gatesSteps` is false: ACP has no hook before every tool call, so an ACP session cannot be the
 orchestrator answering a session's request (#1447). That is the existing rule for a tool that cannot gate steps.
@@ -719,3 +792,6 @@ Questions 1 to 6 of the design were answered (§0.1). Left open:
    stays offered so, and how a session gets Auto (the new-session dialog has no preset choice and starts under Normal),
    is the owner's to decide.
 2. **Cursor on Linux.** The layout `findCursor` reads there is measured on macOS only; the weekly drift job will say.
+3. **Reasoning in OpenCode's reply text.** The `</think>` is dropped (§0.7), but the reasoning before it stays reply
+   text, since it was shown as it came. Holding a message's text until it is known to be no reasoning would delay every
+   reply; turning shown text into reasoning would need a protocol event. Left until the model or OpenCode stops sending it.

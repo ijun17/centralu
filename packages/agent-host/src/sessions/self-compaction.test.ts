@@ -660,6 +660,8 @@ describe('on the session manager (#1451)', () => {
     expect(h.sent).toEqual(['hello'])
     h.finishTurn()
     expect(h.sent).toEqual(['hello', '/compact keep the PR'])
+    // Said to be Centralu's compact, for a tool that tells its compaction only from that turn (ACP)
+    expect(h.compacts).toEqual([false, true])
     // No user row: the person said nothing
     const rows = world.store.messages.loadMessages(id, 50)
     expect(JSON.stringify(rows.filter((r) => r.role === 'user'))).not.toContain('/compact')
