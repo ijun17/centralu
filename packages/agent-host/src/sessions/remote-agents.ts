@@ -773,6 +773,8 @@ export class RemoteAgents {
    */
   private setWhose(rec: RemoteAgent, whose: Whose, why?: string): void {
     const was = this.whoseOf(rec)
+    // What made a turn another's is told with it (`messageTaken` sets it after), never kept past it
+    if (was !== 'other' || whose !== 'other') this.otherBy.delete(rec.sessionId)
     this.whose.set(rec.sessionId, whose)
     const kept = whose === 'unknown' ? undefined : whose
     const stored = this.of(rec.sessionId)
@@ -885,9 +887,9 @@ export class RemoteAgents {
       this.tookInstruction(rec)
       return
     }
+    this.setWhose(rec, 'other', 'took a message there that you did not send (the person on that machine, most likely)')
     if (this.fromHubHere(rec, e.from)) this.otherBy.set(sessionId, 'session')
     else this.otherBy.delete(sessionId)
-    this.setWhose(rec, 'other', 'took a message there that you did not send (the person on that machine, most likely)')
   }
 
   /**

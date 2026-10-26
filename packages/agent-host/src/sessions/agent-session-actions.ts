@@ -209,7 +209,13 @@ export class AgentSessionActions {
            * a queue, or a fork; without `ifBusy` nothing is sent and the choices come back. Its own delegation's
            * turn is not busy for it: a note into its own work goes on as before.
            */
-          if ((d && !d.settled && observing) || ((!d || d.settled) && this.host.busyForCaller(callerId, child.id))) {
+          /*
+           * The turn the child's own tool started when the work it paused on ended is the caller's work (#1576): its end is
+           * the report the caller is owed (`continuesPause`), so it is not busy for the caller. A note goes into it as an
+           * observer's does, on a wait of its own, so the report owed is not touched; it needs no `auto`
+           */
+          const continuing = (!d || d.settled) && inTurn(child.state) && this.host.children.continuesPause(child.id, callerId)
+          if ((d && !d.settled && observing) || ((!d || d.settled) && !continuing && this.host.busyForCaller(callerId, child.id))) {
             if (!opts.ifBusy) return { ok: true, tool: child.tool, ...this.host.busyAnswer(callerId, child, 'agent_session') }
             if (opts.ifBusy === 'queue') return { ok: true, tool: child.tool, ...this.host.enqueue(callerId, child, 'agent_session', opts.text ?? '') }
             if (opts.ifBusy === 'fork' || opts.ifBusy === 'fork_read') {
@@ -223,12 +229,6 @@ export class AgentSessionActions {
             if (!note.available || !d || d.settled) return { ok: false, error: `No note to "${child.name}": ${note.why ?? 'nothing is running there to add it to'}. Queue it or fork it instead.` }
             this.host.autoBoundaryOpen(callerId, 'a note into a turn that is not its own')
           }
-          /*
-           * The turn the child's own tool started when the work it paused on ended is the caller's work (#1576): its end is
-           * the report the caller is owed (`continuesPause`). A note goes into it as an observer's does, on a wait of its
-           * own, so the report owed is not touched; it needs no `auto`, as the turn it gave needs none
-           */
-          const continuing = (!d || d.settled) && inTurn(child.state) && this.host.children.continuesPause(child.id, callerId)
           if ((d && !d.settled) || continuing) {
             const text = agentNoteFrame(from.name, opts.text ?? '')
             if (!this.host.adapters.get(child.tool)?.capabilities.midTurnInput || !this.host.handles.get(child.id)?.sendTracked) {

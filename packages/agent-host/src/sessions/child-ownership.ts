@@ -657,6 +657,9 @@ export class ChildOwnership {
    */
   continuesPause(sessionId: string, callerId: string): boolean {
     if (this.reports.get(sessionId) !== callerId || !this.paused.has(sessionId)) return false
+    // A turn the mailbox started for another owner's thread, or one given to another caller, is theirs
+    const owner = this.turns.get(sessionId)?.callerId
+    if ((owner && owner !== callerId) || (this.mailTurns.get(sessionId) && this.mailTurns.get(sessionId)?.ownerId !== callerId)) return false
     const starter = this.starters.get(sessionId)
     return starter?.by === 'work' && !starter.wrote && !starter.added && !(this.pending.get(sessionId) ?? []).some((p) => p.by === 'person')
   }
