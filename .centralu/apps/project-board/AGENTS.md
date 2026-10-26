@@ -184,7 +184,9 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
   stack as `pr` (its top) and `lowers` (the ones under it), which land as one squash through the top
   after its base is moved to the default branch; the lowers are then closed with "Landed in #N".
   Refuses at once, as `merge_when_green` does, without maintain or admin, for a draft or a closed pull
-  request, and for a top based on a branch none of its lowers has. A pull request is in one item only.
+  request, for a top based on a branch none of its lowers has, and for a top whose squash subject (`Title (#N)`,
+  the stack lands through its top) is over 72 characters (`kind: 'subject'`, "Shorten the title", nothing
+  queued: #1593, as `integrate` does, #1222). A pull request is in one item only.
   `owner` names the queuing session (default a new id); the answer gives the watch command. `author`
   names the PR's author session, the one that opened or owns it and that a conflict is handed to
   (#1182): default the caller's own, which is the `owner` it gives (an app server cannot tell which
@@ -206,7 +208,20 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
   ready (it is turned back into a draft, below).
 - **Each poll** reads one item (`decideBefore`, `decideCi`): no maintain or admin, a draft, DIRTY
   (which the queue first tries to resolve itself, below), BEHIND, BLOCKED, a squash subject over 72 characters, or a base that is not the default branch or a
-  lower's branch → attention. Only the CI workflows' own checks count (`readWorkflowChecks`, their
+  lower's branch → attention. The subject is judged **before a batch can take the item** (#1593: #1586's quick tier passed,
+  batch-225 ran the full tier for 30 minutes, and landing refused it): `decideCi` answers attention `subject` first of all (after
+  a failure alone in a batch on this head), whatever CI says yet: a quick run still going, not reported, failed or green, a record handed
+  over with integrate, or a full run. A batch takes an item whose quick run is still going too, so the item must not be in `ci`:
+  it is no candidate. It is polled again
+  like any attention, and once the title is shortened the next poll carries on, with no new push. To make that true, the board
+  app is kept running for it (`queueBusy`, `holdsApp`): an item in attention `subject` counts as work for `SUBJECT_HOLD_MS` (6 hours)
+  from when it began (`attentionAt`, set with the notice and cleared when it leaves attention), where every other attention waits for a
+  push or a person and holds nothing. The bound is the cost: a pull request nobody shortens would otherwise keep the app polling for
+  good; after it the item is still polled whenever the app runs for another reason. The watch command exits once with the
+  notice, as for any attention (that is how a session without the posted notice hears it), and run again (`--after` the seq it
+  names) it waits and drives the queue, since an item in attention is still left. The length is counted in
+  characters (code points) of `squashSubject` (queue.mjs, with `SUBJECT_MAX` and `longSubject`: the one definition that
+  `queue_merge`, the poll, a batch's build and landing all read). Only the CI workflows' own checks count (`readWorkflowChecks`, their
   check suites: a release job of the same name is not CI, #624), and the run to rerun is the PR's own
   pull_request run when a push run shares the commit (`latestRuns`). **Only an infrastructure failure
   is rerun** (below, "Reruns"): a cancelled run once per head and failed jobs once per head (`gh api
@@ -248,7 +263,7 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
   open screen and no call after 5 minutes unless it says it is busy (docs/apps.md §4): the manifest declares
   `uses.background`, and this server holds busy exactly while the queue has an item waiting or in CI, or a batch
   with its end to do (not one needing attention: it waits on a session, and one forgotten would keep the app polling
-  for good) (`queueBusy`, after every tick and every change a tool makes; the row reads "Running: merge queue, N
+  for good; except one in attention `subject`, for 6 hours: it waits on a title edit only a poll sees, #1593) (`queueBusy`, after every tick and every change a tool makes; the row reads "Running: merge queue, N
   items"), so the queue carries on overnight with nothing open (#1236). The queue has two drivers: this server, and
   the **watch command** a session runs in the background. One drives at a time through `merge-queue.lease.json` (renewed
   every tick and before every write, free after 3 minutes of silence or as soon as its process is gone,
@@ -492,7 +507,8 @@ default 4: the owner's, 2026-10-19, this repository's too).
 - **Gathering**: a batch that is not full waits while another active item of its repository, queued
   less than a minute ago, has not been read on its head yet (`gathering`), so pull requests queued
   together in a row share one batch instead of the first going alone.
-- **Building**: each member is read again (still open, not a draft, not DIRTY, the same head). A
+- **Building**: each member is read again (still open, not a draft, not DIRTY, the same head, a squash subject within 72
+  characters: a title edited after the poll that made it a candidate sends it back to its own poll, #1593). A
   branch `queue/batch-<n>` is made at the default branch (never moved: one that exists ends the
   batch), and each head is merged into it in order on GitHub (`POST /merges`); one that conflicts
   goes on with its own CI and is not batched again on that head; so does one GitHub will not merge
@@ -530,8 +546,12 @@ default 4: the owner's, 2026-10-19, this repository's too).
   queue/batch-89 sat in landing for a same-second duplicate and looped back); anything else waits 30
   minutes, then the rest go back. Before each merge
   a `merge-queue` success status on its head names the batch run. A head moved, a draft,
-  DIRTY, BEHIND, BLOCKED, a long subject: that member and the rest go back to their own CI (where the usual attention
-  says what is wrong).
+  DIRTY, BEHIND, BLOCKED, a long subject (the last guard: the poll and the build catch it before, so it is a title edited
+  while the batch ran): that member and the rest go back to their own CI (where the usual attention
+  says what is wrong). A long subject is the one stop that leaves the member neither `alone` nor `batchless`
+  (`decideLanding` answers `subject: true`): its head is what CI tested, its poll says `subject`, and shortened it is batched
+  again by itself, a batch of one included; the members after it are sent back as for any stop (`batchless`), which stays as
+  it was (#1593).
 - **The default branch moved under the batch** (#1548, 2026-10-26: batch-209 had #1542 green when the release bump #1545
   landed through `merge_when_green`; the stop marked it `alone` and its session was told to queue it again by hand,
   for a pull request whose tests had passed). That stop alone ("something else landed", `decideLanding`'s `moved`) is not

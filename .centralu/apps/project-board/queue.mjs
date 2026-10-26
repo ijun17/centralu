@@ -24,6 +24,32 @@ export const STATES = ['waiting', 'ci', 'attention', 'merged', 'closed']
 export const ACTIVE = new Set(['waiting', 'ci', 'attention'])
 /** The squash subject's limit, in characters (docs/commit-conventions.md). */
 export const SUBJECT_MAX = 72
+/**
+ * The squash subject a pull request lands as (`Title (#N)`), and, when it is over SUBJECT_MAX characters (code
+ * points, not UTF-16 units), what the refusals say about it: null when it fits. The one definition behind
+ * `queue_merge`, the poll (before a batch can take it), a batch's build and, last, `decideLanding` (#1593).
+ */
+export const squashSubject = (pr) => squashMessage({ number: pr.number, title: pr.title, description: pr.body }).subject
+export function longSubject(pr) {
+  const subject = squashSubject(pr)
+  const length = [...subject].length
+  return length > SUBJECT_MAX ? { subject, length } : null
+}
+/**
+ * How long the board app is kept running for an item in attention `subject` (queueBusy). That attention waits for a title
+ * edit, which only a poll sees, and every other attention waits for a push or a person and does not hold the app. Bounded, since a
+ * pull request nobody shortens would otherwise keep the app polling for good; after it the item is still polled
+ * whenever the app runs for another reason, or a watch command run again drives the queue.
+ */
+export const SUBJECT_HOLD_MS = 6 * 3_600_000
+/** Whether an item holds the board app running now: attention `subject`, within SUBJECT_HOLD_MS of when it began (`attentionAt`). */
+export const holdsApp = (item, now = Date.now()) => item.state === 'attention' && item.reason?.kind === 'subject' && now - Date.parse(item.attentionAt ?? '') < SUBJECT_HOLD_MS
+/** Why a squash subject over the limit stops a pull request; the queue carries on by itself once the title fits. */
+const subjectAttention = (n, { subject, length }) =>
+  attention(
+    'subject',
+    `${n}: the squash subject "${subject}" is ${length} characters, over ${SUBJECT_MAX}. Shorten the PR title; the queue carries on by itself (the board app keeps polling it for ${SUBJECT_HOLD_MS / 3_600_000} hours, and a watch command run again does too).`,
+  )
 /** How long after a poll the item is read again, by what it is waiting on. */
 export const POLL_MS = { waiting: 15_000, ci: 90_000, acted: 60_000, attention: 120_000, error: 60_000 }
 /** No run started on a head for this long: CI did not start, which is the session's to look at. */
@@ -416,6 +442,12 @@ export function decideCi({ item, pr, checks, runs = [], failures = {}, defaultBr
   // It failed alone in a batch on this head (queue-batch.mjs): that full run is the answer, whatever
   // its own quick run says (cancelled for the batch, it would otherwise be rerun to say nothing new)
   if (item.alone?.head === head && item.alone.reason) return { state: 'attention', reason: item.alone.reason }
+  // A squash subject over the limit, whatever CI says yet (#1593: #1586's quick tier passed, its batch ran the whole full tier
+  // and landing refused it). It must stop the item before a batch can take it, and a batch takes one whose quick run is still
+  // going or has not reported too (batchCandidates), so this is not left to the paths below. In attention it is no candidate;
+  // the title fixed, the next poll carries on, with no new push
+  const long = longSubject(pr)
+  if (long) return subjectAttention(n, long)
   // Handed over with integrate (#1259 step 3): a draft, whose own run is only CI's changes job, so it lands through a
   // batch alone (the quick tier on what lands), never from its own run
   if (item.auto) {
@@ -467,9 +499,6 @@ export function decideCi({ item, pr, checks, runs = [], failures = {}, defaultBr
       `${n} is based on ${pr.baseRefName}, not ${defaultBranch}, and no PR queued under it has that branch. Queue it again with the PRs under it as lowers, or rebase it onto ${defaultBranch}.`,
     )
   }
-  const subject = squashMessage({ number: pr.number, title: pr.title, description: pr.body }).subject
-  if ([...subject].length > SUBJECT_MAX)
-    return attention('subject', `${n}: the squash subject "${subject}" is ${[...subject].length} characters, over ${SUBJECT_MAX}. Shorten the PR title; the queue carries on by itself.`)
   if (pr.mergeStateStatus === 'BEHIND') return attention('behind', `${n} is behind ${defaultBranch}, and GitHub requires it up to date. Rebase it onto ${defaultBranch} and push.`)
   if (pr.mergeStateStatus === 'BLOCKED') return attention('blocked', `${n} is green, but GitHub blocks merging it (a required review or rule). Look at the PR on GitHub.`)
   // UNSTABLE only from a run a successful one made moot (a cancelled duplicate, #1015): as CLEAN

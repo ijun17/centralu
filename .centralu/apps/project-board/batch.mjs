@@ -347,7 +347,9 @@ export function decideLanding({ b, step, pr, item, mainTree, prevTree, defaultBr
     if (lowerBranches.includes(pr.baseRefName)) return { do: 'retarget', base: defaultBranch }
     return { do: 'stop', text: `${n} is based on ${pr.baseRefName}, not ${defaultBranch} or a lower's branch` }
   }
-  if ([...subject].length > subjectMax) return { do: 'stop', text: `${n}'s squash subject is over ${subjectMax} characters` }
+  // `subject`: the title was lengthened while the batch ran. Its tree is the one CI tested, so the member is not marked
+  // alone or batchless (queue-batch.mjs): shortened, it joins a batch again by itself (#1593)
+  if ([...subject].length > subjectMax) return { do: 'stop', subject: true, text: `${n}'s squash subject is over ${subjectMax} characters` }
   if (['DIRTY', 'BEHIND', 'BLOCKED'].includes(pr.mergeStateStatus) || pr.mergeable === 'CONFLICTING')
     return { do: 'stop', text: `GitHub says ${pr.mergeStateStatus === 'BLOCKED' ? 'BLOCKED (a rule asks for something the batch does not give)' : pr.mergeStateStatus} for ${n}` }
   const clean =

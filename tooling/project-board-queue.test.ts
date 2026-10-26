@@ -12,7 +12,7 @@ import { acknowledge, dueReposts, markReposted, noticeText, unacked, watchStart 
 import { endLeftoverFakes, fakeGh, type FakeGh } from './fake-gh.test-helpers.js'
 import { SLOW } from './test-timing.js'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
-import { decideBefore, decideCi, emptyQueue, enqueue, pushEvent, supersededSuites, twinPassedSuites, quickLanded, screenLanded, shardsComplete, unexpandedSkip, handoffReason, authorRoute, resetFor, lowerFailureCounts, noticeKey, dequeue, normalize, onlySupersededFailures, queueOrder, watchState } from '../.centralu/apps/project-board/queue.mjs'
+import { decideBefore, decideCi, emptyQueue, enqueue, pushEvent, supersededSuites, twinPassedSuites, quickLanded, screenLanded, shardsComplete, unexpandedSkip, handoffReason, authorRoute, resetFor, lowerFailureCounts, noticeKey, dequeue, normalize, onlySupersededFailures, queueOrder, watchState, longSubject } from '../.centralu/apps/project-board/queue.mjs'
 // @ts-expect-error -- a plain .mjs module of the board app, without types
 import { commandEnv, conflictPlan } from '../.centralu/apps/project-board/queue-conflict.mjs'
 // @ts-expect-error -- a plain .mjs module of the board app, without types
@@ -687,6 +687,60 @@ describe('what the merge queue decides with two tiers of CI', () => {
     expect(alone.reason.text).toContain('its batch of one ended without landing it: Batch queue/batch-4: required check "verify" failed twice.')
     // On a new head it is batched again
     expect(ci({ item: fresh({ alone: { head: SHA2, text: 'x' } }) })).toMatchObject({ state: 'ci', quick: true })
+  })
+
+  // #1593: #1586's title made a 73-character subject; its quick tier passed, the queue batched it, the batch ran the whole
+  // full tier and then refused it at landing. The subject is judged before a batch can take it
+  describe('a squash subject over 72 characters (#1593)', () => {
+    // `feat(apps): ` is 12 characters and ` (#77)` 6: a 54-character rest makes 72, a 55-character one 73
+    const titled = (rest: number) => openPr({ title: `feat(apps): ${'x'.repeat(rest)}` })
+    const subjectOf = (rest: number) => `feat(apps): ${'x'.repeat(rest)} (#77)`
+
+    it('keeps a quick-tier-green pull request out of a batch with attention subject, and lets it go on by itself once the title fits', () => {
+      const long = ci({ pr: titled(55) })
+      expect(long).toMatchObject({ state: 'attention', reason: { kind: 'subject' } })
+      expect(long.quick).toBeUndefined()
+      expect(long.reason.text).toContain(subjectOf(55))
+      expect(long.reason.text).toContain('is 73 characters, over 72. Shorten the PR title; the queue carries on by itself (the board app keeps polling it for 6 hours')
+      // Not a batch candidate while it holds: a batch takes items in `ci` only
+      const q = queueOf({ ...fresh({ state: long.state, ci: { head: SHA, verdict: 'quick', runs: [], batchable: true } }) })
+      expect(batchCandidates(q, { max: 4, tiers: true })).toEqual([])
+      // The title shortened, with no new push: the next poll takes it as it always did
+      expect(ci({ pr: titled(54) })).toEqual({ state: 'ci', quick: true, patch: { noCiSince: null, missingSince: null } })
+      expect(ci({ pr: titled(54) }).reason).toBeUndefined()
+    })
+
+    it('judges it before a batch of one that ended without landing it, a queue that cannot batch, and a handed-over record', () => {
+      const alone = fresh({ alone: { head: SHA, text: 'Batch queue/batch-4: required check "verify" failed twice.' } })
+      expect(ci({ pr: titled(55), item: alone })).toMatchObject({ state: 'attention', reason: { kind: 'subject' } })
+      expect(ci({ pr: titled(55), canBatch: false })).toMatchObject({ state: 'attention', reason: { kind: 'subject' } })
+      // A fork's pull request and a release bump are never batched; the long subject is still the first thing said
+      expect(ci({ pr: openPr({ title: `feat(apps): ${'x'.repeat(55)}`, isCrossRepository: true }), canBatch: false })).toMatchObject({ reason: { kind: 'subject' } })
+      expect(ci({ pr: titled(55), item: fresh({ auto: { branch: 'docs/x' } }) })).toMatchObject({ state: 'attention', reason: { kind: 'subject' } })
+      expect(ci({ pr: titled(54), item: fresh({ auto: { branch: 'docs/x' } }) })).toMatchObject({ state: 'ci', quick: true })
+    })
+
+    it('counts the subject in characters (code points), not UTF-16 units or bytes', () => {
+      // 54 characters in the title, each outside the Basic Multilingual Plane: 72 characters, 126 UTF-16 units
+      const emoji = openPr({ title: `feat(apps): ${'😀'.repeat(54)}` })
+      expect(ci({ pr: emoji })).toMatchObject({ state: 'ci', quick: true })
+      expect(ci({ pr: openPr({ title: `feat(apps): ${'😀'.repeat(55)}` }) })).toMatchObject({ state: 'attention', reason: { kind: 'subject' } })
+      // Korean syllables are one character each too
+      expect(ci({ pr: openPr({ title: `feat(apps): ${'가'.repeat(54)}` }) })).toMatchObject({ quick: true })
+      expect(longSubject(openPr({ title: `feat(apps): ${'x'.repeat(54)}` }))).toBeNull()
+      expect(longSubject(titled(55))).toEqual({ subject: subjectOf(55), length: 73 })
+    })
+
+    // The first review of #1593: judged only once the quick tier was green, a title that was too long while its quick run
+    // still went was a batch candidate (batchCandidates takes pending ones), and a batch was made and dropped every tick
+    it('judges it while the quick tier still runs or has not reported, since a batch takes those too, and before a failure or a rerun', () => {
+      const going = tiered([check(TIER, 'skipped'), check('verify', 'success'), check('windows tests', null)])
+      expect(ci({ pr: titled(55), checks: going, runs: [run(null)] })).toMatchObject({ state: 'attention', reason: { kind: 'subject' } })
+      expect(ci({ pr: titled(54), checks: going, runs: [run(null)] })).toEqual({ state: 'ci', patch: { noCiSince: null, missingSince: null } })
+      expect(ci({ pr: titled(55), checks: tiered([]), runs: [] })).toMatchObject({ state: 'attention', reason: { kind: 'subject' } })
+      const failed = tiered([check(TIER, 'skipped'), check('verify', 'failure', { jobId: '5' }), check('windows tests', 'success')])
+      expect(ci({ pr: titled(55), checks: failed, runs: [run('failure')], failures: { 900: { real: false, cause: 'runner', job: { name: 'verify', id: '5' }, attempt: 1 } } })).toMatchObject({ state: 'attention', reason: { kind: 'subject' } })
+    })
   })
 
   // #1509 item 4: what the attention above told a session to type (gh workflow run build.yml --ref <branch>), the queue does
@@ -1548,6 +1602,23 @@ describe('the merge queue keeps the board app running while it has work (#1236)'
     expect(queueBusy(q)).toBe(null)
     q.batches.push({ id: 1, state: 'landing', members: [{ pr: 77 }] })
     expect(queueBusy(q)).toBe('merge queue, a batch finishing')
+  })
+
+  // #1593: attention `subject` waits for a title edit, which only a poll sees; the other attentions wait for a push or a person
+  it('is busy for an item in attention `subject` for six hours from when it began, and not for another attention', () => {
+    const q = emptyQueue()
+    const began = '2026-10-26T10:00:00.000Z'
+    const at = (hours: number) => Date.parse(began) + hours * 3_600_000
+    q.items.push({ ...fresh(), state: 'attention', reason: { kind: 'subject', text: 'x' }, attentionAt: began }, { ...fresh({ pr: 78 }), state: 'attention', reason: { kind: 'failed', text: 'x' }, attentionAt: began })
+    expect(queueBusy(q, at(1))).toBe('merge queue, 1 item')
+    expect(queueBusy(q, at(5.9))).toBe('merge queue, 1 item')
+    expect(queueBusy(q, at(6.1))).toBe(null)
+    // An item from an older file has no time: not held
+    delete q.items[0].attentionAt
+    expect(queueBusy(q, at(1))).toBe(null)
+    // Shortened, it is back in CI: busy as any item in CI
+    q.items[0].state = 'ci'
+    expect(queueBusy(q, at(1))).toBe('merge queue, 1 item')
   })
 
   it('holds busy from the moment a pull request is queued until it lands, and releases it then', async () => {
@@ -2979,6 +3050,100 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
     expect(writes().map(short2)).toEqual(['branch queue/batch-1', `merge-into ${SHA}`, 'dispatch queue/batch-1', `status ${SHA}`, 'merge 77', 'delete feat/b77', 'delete queue/batch-1'])
     expect(writes().find((w) => w[0] === 'status')).toEqual(['status', SHA, 'success', 'merge-queue', 'Passed the full tier of CI in queue/batch-1'])
     expect(notices().map((e) => e.text)).toEqual(['Merge queue: merged #77 (feat(apps): change 77) as abcdef1, "feat(apps): change 77 (#77)". Tested in batch queue/batch-1 with nothing else, in the full tier.'])
+  })
+
+  // #1593 (#1586, 2026-10-26): its quick tier passed, the queue put it in batch-225 alone, the full tier ran for about 30 minutes,
+  // and the batch stopped at landing: "squash subject is over 72 characters"
+  describe('a squash subject over 72 characters (#1593)', () => {
+    const LONG = `feat(apps): ${'x'.repeat(55)}` // 73 characters with " (#77)"
+    const FITS = `feat(apps): ${'x'.repeat(54)}`
+    const queued = (extra: Record<string, unknown> = {}) => ({
+      repo: R,
+      pr: 77,
+      lowers: [],
+      owner: 'tester',
+      author: 'tester',
+      state: 'ci',
+      title: FITS,
+      queuedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      reruns: {},
+      ...extra,
+    })
+
+    it('puts no batch together with it: attention subject at its poll, and once the title fits it lands through a batch, with no new push', async () => {
+      // Queued with a title that fit, then edited: the quick tier is green on its head
+      seedQueue([queued()])
+      runtime(tieredState({ prs: { '77': ghPr(77, { title: LONG }) } }), TIERS)
+      await until((x) => stateOf(x) === 'attention', 'attention')
+      expect(queueOnDisk().items[0].reason).toMatchObject({ kind: 'subject' })
+      // When it began, for how long the board app is kept polling it
+      expect(Date.parse(queueOnDisk().items[0].attentionAt)).toBeGreaterThan(0)
+      expect(notices().map((e) => e.text).join(' ')).toContain('the squash subject "' + LONG + ' (#77)" is 73 characters, over 72')
+      await morePolls(3)
+      // Polled again, never batched, nothing touched on GitHub
+      expect(writes()).toEqual([])
+      expect(batchesOnDisk()).toEqual([])
+      patchGh((st) => (st.prs['77'] = ghPr(77, { title: FITS })))
+      await until((x) => stateOf(x) === 'merged', 'the merge', BATCH_WAIT_MS)
+      expect(writes().map(short2)).toContain('branch queue/batch-1')
+      expect(writes().map(short2)).toContain('merge 77')
+      expect(gh().prs['77'].headRefOid).toBe(SHA)
+    })
+
+    it('makes no batch of it while its quick tier still runs, as it is a candidate then (a batch made and dropped every tick before)', async () => {
+      const going = [ghCheck('full tier', 'skipped', 10), ghCheck('verify', null, 11), ghCheck('windows tests', null, 12)]
+      seedQueue([queued()])
+      runtime(tieredState({ prs: { '77': ghPr(77, { title: LONG }) }, checks: { [SHA]: going }, runs: { [SHA]: [ghRun(null)] } }), TIERS)
+      await until((x) => stateOf(x) === 'attention', 'attention')
+      expect(queueOnDisk().items[0].reason).toMatchObject({ kind: 'subject' })
+      await morePolls(3)
+      expect(queueOnDisk().batchSeq).toBe(0)
+      expect(batchesOnDisk()).toEqual([])
+      expect(writes()).toEqual([])
+    })
+
+    it('sends a member back at the batch build when its title was edited after the poll that made it a candidate', async () => {
+      // Read as a candidate on its head (verdict quick), the title longer by the time the batch is built
+      seedQueue([queued({ head: SHA, ci: { head: SHA, verdict: 'quick', runs: [{ id: 900, status: 'completed' }], batchable: true } })])
+      runtime(tieredState({ prs: { '77': ghPr(77, { title: LONG }) } }), TIERS)
+      await until((x) => stateOf(x) === 'attention', 'attention')
+      expect(queueOnDisk().items[0].reason).toMatchObject({ kind: 'subject' })
+      // No branch was made for it, no CI started
+      expect(writes().map(short2).filter((w) => w.startsWith('branch') || w.startsWith('dispatch'))).toEqual([])
+      expect(gh().dispatched ?? []).toEqual([])
+    })
+
+    it('refuses to queue a pull request whose squash subject is over 72 characters, with nothing queued and nothing written', async () => {
+      runtime(tieredState({ prs: { '77': ghPr(77, { title: LONG }) } }), TIERS)
+      const r = await call('queue_merge', { pr: 77, owner: 'tester' })
+      expect(r.isError).toBe(true)
+      expect(r.data).toMatchObject({ queued: false, kind: 'subject', subject: true })
+      expect(r.text).toContain(`Not queued: the squash subject "${LONG} (#77)" is 73 characters, over 72. Shorten the title.`)
+      expect(itemsOnDisk()).toEqual([])
+      expect(writes()).toEqual([])
+      // At 72 it queues
+      patchGh((st) => (st.prs['77'] = ghPr(77, { title: FITS })))
+      expect((await call('queue_merge', { pr: 77, owner: 'tester' })).isError).toBe(false)
+    })
+
+    it('does not call another refusal subject when the title is only one of the reasons', async () => {
+      runtime(tieredState({ prs: { '77': ghPr(77, { title: LONG, isDraft: true }) } }), TIERS)
+      const r = await call('queue_merge', { pr: 77, owner: 'tester' })
+      expect(r.data).toMatchObject({ queued: false, kind: 'refused', subject: true })
+      expect(r.text).toContain('is a draft')
+      expect(r.text).toContain('is 73 characters, over 72')
+      expect(itemsOnDisk()).toEqual([])
+    })
+
+    it("judges a stack's top, whose title is the squash subject, and not its lowers", async () => {
+      runtime(tieredState({ prs: { '76': ghPr(76, { title: LONG }), '77': ghPr(77, { title: FITS, baseRefName: 'feat/b76' }) } }), TIERS)
+      expect((await call('queue_merge', { pr: 77, lowers: [76], owner: 'tester' })).isError).toBe(false)
+      await call('unqueue', { pr: 77 })
+      patchGh((st) => (st.prs['77'] = ghPr(77, { title: LONG, baseRefName: 'feat/b76' })))
+      const top = await call('queue_merge', { pr: 77, lowers: [76], owner: 'tester' })
+      expect(top.data).toMatchObject({ queued: false, kind: 'subject' })
+    })
   })
 
   // queue/batch-89, 2026-10-19: the batch went green, then sat in landing because its member's head was UNSTABLE from a

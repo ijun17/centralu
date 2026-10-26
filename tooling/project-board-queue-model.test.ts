@@ -179,6 +179,8 @@ class World {
   required = REQUIRED
   shards = SHARDS
   jobList: typeof RUN_220 | null = null
+  /** A pull request's title when it is not the usual one (a person edited it) */
+  titles = new Map<number, string>()
   constructor(public rand: () => number) {}
 
   tree(a: string, b: string) {
@@ -210,7 +212,7 @@ class World {
     const p = this.pr(n)
     return {
       number: n,
-      title: `feat(apps): change ${n}`,
+      title: this.titles.get(n) ?? `feat(apps): change ${n}`,
       body: '## Why\n\nBecause.\n\n## Closes\n\nRefs #956\n',
       state: p.state,
       isDraft: false,
@@ -439,7 +441,10 @@ const rng = (seed: number) => {
 const ref = (_repo: string, n: number) => `#${n}`
 
 /** One generated sequence against the real queue: events, ticks, then a calm world until the queue is quiet */
-async function simulate(seed: number, { steps = 70, busyMain = false, judge = null, setup }: { steps?: number; busyMain?: boolean; judge?: 'broken' | 'missing' | 'compare' | null; setup?: (world: World, dir: string) => void } = {}) {
+async function simulate(
+  seed: number,
+  { steps = 70, busyMain = false, judge = null, setup, during }: { steps?: number; busyMain?: boolean; judge?: 'broken' | 'missing' | 'compare' | null; setup?: (world: World, dir: string) => void; during?: (world: World, q: any) => void } = {},
+) {
   const dir = mkdtempSync(join(tmpdir(), 'cc-queue-model-'))
   const world = new World(rng(seed))
   world.githubError = GitHubError
@@ -459,6 +464,7 @@ async function simulate(seed: number, { steps = 70, busyMain = false, judge = nu
   let ticks = 0
   const oneTick = async () => {
     ticks++
+    during?.(world, readQueue(dir))
     world.advance()
     now += 20_000
     await tick(dir, { holder, now, ref })
@@ -550,7 +556,8 @@ async function simulate(seed: number, { steps = 70, busyMain = false, judge = nu
     for (let i = 0; i < 300 && quiet < 3; i++) {
       await oneTick()
       const q = readQueue(dir)
-      const working = q.items.some((it: { state: string; batch?: number | null }) => ['ci', 'waiting'].includes(it.state)) || activeBatch(q)
+      // An item whose title is too long is work too: the board app keeps polling it (queueBusy), for the title to be shortened
+      const working = q.items.some((it: { state: string; reason?: { kind: string } | null }) => ['ci', 'waiting'].includes(it.state) || (it.state === 'attention' && it.reason?.kind === 'subject')) || activeBatch(q)
       quiet = working ? 0 : quiet + 1
     }
     const q = readQueue(dir)
@@ -619,6 +626,41 @@ describe('the merge queue against a model of GitHub: queueing, pushes, main movi
     expect(r.world.violations).toEqual([])
     expect((r.q.events as { text: string }[]).filter((e) => /not every heavy job/.test(e.text))).toEqual([])
     expect(r.world.landings.map((l) => l.n)).toEqual([1])
+  })
+
+  // #1593: the title is lengthened while the batch's CI runs, so landing stops it, and then shortened. It must be neither `alone` nor
+  // `batchless` (its session was told the queue carries on by itself) and lands in a second batch, with no new queue_merge
+  it('lands a pull request whose title was lengthened during its batch and shortened again, with no new queue_merge', async () => {
+    const LONG = `feat(apps): ${'x'.repeat(60)}` // 77 characters with " (#1)"
+    let lengthened = false
+    let shortened = false
+    const seen: { state: string; alone: unknown; batchless: unknown }[] = []
+    const r = await simulate(7, {
+      steps: 0,
+      setup: (world, dir) => {
+        world.open(1)
+        world.pr(1).file = 'docs/guide.md'
+        updateQueue(dir, (q: unknown) => enqueue(q, { repo: R, pr: 1, owner: 'me', at: world.iso() }, ref))
+      },
+      during: (world, q) => {
+        const it = q.items.find((i: { pr: number }) => i.pr === 1)
+        if (!lengthened && world.dispatches.length === 1) {
+          world.titles.set(1, LONG)
+          lengthened = true
+        } else if (lengthened && !shortened && it?.state === 'attention' && it.reason?.kind === 'subject') {
+          seen.push({ state: it.state, alone: it.alone ?? null, batchless: it.batchless ?? null })
+          world.titles.delete(1)
+          shortened = true
+        }
+      },
+    })
+    // It reached attention `subject` with nothing marking it, and landed from a second batch
+    expect(seen).toEqual([{ state: 'attention', alone: null, batchless: null }])
+    expect(r.world.dispatches).toHaveLength(2)
+    expect(r.world.landings.map((l) => l.n)).toEqual([1])
+    expect(r.world.violations).toEqual([])
+    expect((r.q.events as { text: string }[]).some((e) => /squash subject is over 72/.test(e.text))).toBe(true)
+    expect(r.q.items.find((i: { pr: number }) => i.pr === 1)).toMatchObject({ state: 'merged' })
   })
 
   // The cap: with something landing on main every tick, no batch can land, and each pull request is stopped again and again.

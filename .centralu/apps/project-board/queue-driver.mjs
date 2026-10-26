@@ -53,6 +53,7 @@ import {
   ERROR_LIMIT,
   errorReason,
   handoffReason,
+  holdsApp,
   itemKey,
   lowerFailureCounts,
   normalize,
@@ -147,8 +148,9 @@ export function updateQueue(dir, fn) {
  * reason (a view, a call, other work), and queued again it is work again. The row reads "Running: merge queue, 2 items".
  */
 export const WORKING = new Set(['waiting', 'ci'])
-export function queueBusy(q) {
-  const active = q.items.filter((i) => WORKING.has(i.state)).length
+export function queueBusy(q, now = Date.now()) {
+  // Also an item in attention `subject`, for SUBJECT_HOLD_MS (queue.mjs holdsApp): it waits on a title edit, which only a poll sees (#1593)
+  const active = q.items.filter((i) => WORKING.has(i.state) || holdsApp(i, now)).length
   if (active) return `merge queue, ${plural(active, 'item')}`
   if (activeBatch(q)) return 'merge queue, a batch finishing'
   // The main guard (#1259): main's full run after a landing not judged yet, or a culprit being looked for
@@ -740,10 +742,10 @@ async function pollItem(item, { now, ref, renew, save, landed = [], stillIntegra
     if (key !== item.noticeKey) {
       const extra = d.reason.kind === 'failed' || d.reason.kind === 'failing' ? await failingLine(repo, d.reason.job) : ''
       const reason = { ...d.reason, text: `${d.reason.text}${extra}` }
-      Object.assign(patch, { reason, noticeKey: key })
+      Object.assign(patch, { reason, noticeKey: key, attentionAt: at })
       events.push({ kind: 'attention', text: attentionText({ ...item, title: pr.title }, reason, ref), notify: true, data: reason.relay ? { relay: reason.relay } : null })
     } else patch.reason = item.reason ?? d.reason
-  } else Object.assign(patch, { reason: null, noticeKey: null })
+  } else Object.assign(patch, { reason: null, noticeKey: null, attentionAt: null })
 
   return { state: d.state, patch, events, wait }
 }
