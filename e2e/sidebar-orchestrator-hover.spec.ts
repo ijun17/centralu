@@ -149,12 +149,44 @@ test('Orchestrator children: archiving a child of a hover-opened list that asks 
   await row(page, 'alpha').hover()
   await page.getByTestId('session-menu-orc-child-alpha').click()
   await page.getByTestId('delete-session-orc-child-alpha').click()
-  // The mock host holds no such session, so archiving asks first (#1512)
+  // Archiving always asks first (#1589)
   await expect(page.getByTestId('confirm-delete')).toBeVisible()
   await page.clock.runFor(500)
   await expect(page.getByTestId('confirm-delete')).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('confirm-delete')).toHaveCount(0)
+})
+
+test('Orchestrator children: the dialog of a hover-opened list stays through the losses step, and the second Archive moves the child', async ({ page }) => {
+  await withChildren(page)
+  // The mock host holds no such child; say what a real host would list for one that owes its starter a report
+  await page.evaluate(() => {
+    ;(window as any).__mock.agents.archiveIfAtRest = async () => ({ archived: false, asks: ['It owes the orchestrator a report; it will not be told, and the report is dropped.'] })
+  })
+  await button(page).hover()
+  await page.clock.runFor(250)
+  await row(page, 'alpha').hover()
+  await page.getByTestId('session-menu-orc-child-alpha').click()
+  await page.getByTestId('delete-session-orc-child-alpha').click()
+  await expect(page.getByTestId('confirm-delete')).toBeVisible()
+  await expect(page.getByTestId('delete-losses')).toHaveCount(0)
+  await page.getByTestId('confirm-delete-yes').click()
+  await expect(page.getByTestId('delete-losses')).toContainText('owes the orchestrator a report')
+  // The pointer is away: the dialog and what it lists stay
+  await away(page)
+  await page.clock.runFor(500)
+  await expect(page.getByTestId('confirm-delete')).toBeVisible()
+  await expect(page.getByTestId('delete-losses')).toBeVisible()
+  // The open dialog holds the list, as it does for the first step
+  await expect(list(page)).toBeVisible()
+  // The second Archive moves it, and the list can fold at last
+  await page.getByTestId('confirm-delete-yes').click()
+  await expect(page.getByTestId('confirm-delete')).toHaveCount(0)
+  await expect(list(page)).toHaveCount(0)
+  await button(page).hover()
+  await page.clock.runFor(250)
+  await expect(row(page, 'alpha')).toHaveCount(0)
+  await expect(row(page, 'beta')).toBeVisible()
 })
 
 test('Orchestrator children: pressing the button before the rest is over leaves them folded', async ({ page }) => {

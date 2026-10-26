@@ -12,7 +12,6 @@ import { sessionGridPanel } from '@cc/core'
 import { MockPlatform } from '@cc/platform/mock'
 import { newSessionProjectOf, useStore } from './store.js'
 import { resetStore, sessionInfo } from './store.test-helpers.js'
-import { archiveAsksOf, archiveNeedsAsk } from './sessions/lifecycle.js'
 
 beforeEach(resetStore)
 
@@ -564,18 +563,6 @@ describe('Undo on the archive toast (#1512)', () => {
     expect(useStore.getState().toastAction).toBeNull()
   })
 
-  it('asks first only for a session the archive would cut short', () => {
-    const idle = { state: 'idle', pendingApproval: null, pendingQuestions: [], backgroundTasks: [] } as const
-    expect(archiveNeedsAsk(idle as never)).toBe(false)
-    expect(archiveNeedsAsk({ ...idle, state: 'working' } as never)).toBe(true)
-    expect(archiveNeedsAsk({ ...idle, pendingApproval: { requestId: 'r', detail: {} } } as never)).toBe(true)
-    expect(archiveNeedsAsk({ ...idle, pendingQuestions: [{ requestId: 'q', questions: [] }] } as never)).toBe(true)
-    expect(archiveNeedsAsk({ ...idle, backgroundTasks: [{ id: 'dev', kind: 'shell', description: 'npm run dev', status: 'running' }] } as never)).toBe(true)
-    expect(archiveNeedsAsk({ ...idle, backgroundTasks: [{ id: 'dev', kind: 'shell', description: 'npm run dev', status: 'completed' }] } as never)).toBe(false)
-    // What only the host knows (a report owed, a wait on it, a mail thread) is not read here: archiveSession asks the host
-    expect(archiveNeedsAsk({ ...idle, askedBy: 'orchestrator-1' } as never)).toBe(false)
-  })
-
   async function oneSession(path: string) {
     const mock = new MockPlatform()
     const p = await mock.projects.add(path)
@@ -585,40 +572,59 @@ describe('Undo on the archive toast (#1512)', () => {
     return { mock, p, s }
   }
 
-  it('archives an idle session at once when the host finds nothing it holds would be lost', async () => {
-    const { s } = await oneSession('/tmp/undo-host-a')
-    expect(await useStore.getState().archiveSession(s.id)).toBeNull()
-    expect(useStore.getState().sessions[s.id]).toBeUndefined()
-    expect(useStore.getState().toastAction?.label).toBe('Undo')
+  // #1589: the dialog's first Archive asks the host (read, then move) with the conversation-file box as the person left it; its lines are
+  // shown, and only the next Archive moves anyway
+  const bin = (mock: MockPlatform) => (mock as unknown as { trashBin: Map<string, { removeExternal: boolean }> }).trashBin
+
+  it('archives at the first Archive when the host finds nothing it holds would be lost, with the file box as the person left it (ticked or not)', async () => {
+    for (const box of [true, false]) {
+      const { mock, s } = await oneSession(`/tmp/archive-a-${box}`)
+      const asked = vi.spyOn(mock.agents, 'archiveIfAtRest')
+      const deleted = vi.spyOn(mock.agents, 'deleteSession')
+      expect(await useStore.getState().archiveSession(s.id, box)).toBeNull()
+      expect(asked).toHaveBeenCalledWith(s.id, box)
+      expect(deleted).not.toHaveBeenCalled()
+      expect(useStore.getState().sessions[s.id]).toBeUndefined()
+      expect(useStore.getState().toastAction?.label).toBe('Undo')
+      expect(bin(mock).get(s.id)?.removeExternal).toBe(box)
+    }
   })
 
-  it('asks instead when the host says the archive would lose something, and archives nothing', async () => {
-    const { mock, s } = await oneSession('/tmp/undo-host-b')
+  it('gives the host lines back and moves nothing when the archive would lose something; deleteSession is the next step', async () => {
+    const { mock, s } = await oneSession('/tmp/archive-c')
     const lines = ['A session it started owes it a report; it will not be told, and the report is dropped.']
-    vi.spyOn(mock.agents, 'archiveIfAtRest').mockResolvedValue({ archived: false, asks: lines })
-    expect(await useStore.getState().archiveSession(s.id)).toEqual(lines)
-    expect(archiveAsksOf(s.id)).toEqual(lines)
+    const asked = vi.spyOn(mock.agents, 'archiveIfAtRest').mockResolvedValue({ archived: false, asks: lines })
+    const deleted = vi.spyOn(mock.agents, 'deleteSession')
+    expect(await useStore.getState().archiveSession(s.id, false)).toEqual(lines)
+    expect(asked).toHaveBeenCalledWith(s.id, false)
     expect(useStore.getState().sessions[s.id]).toBeDefined()
     expect(useStore.getState().toast).toBeNull()
+    expect(deleted).not.toHaveBeenCalled()
+    await useStore.getState().deleteSession(s.id, false, false)
+    expect(deleted).toHaveBeenCalledWith(s.id, false, false)
+    expect(useStore.getState().sessions[s.id]).toBeUndefined()
   })
 
-  it('asks first of a host that predates the check, and when the window itself sees a reason', async () => {
-    const { mock, s } = await oneSession('/tmp/undo-host-c')
-    vi.spyOn(mock.agents, 'archiveIfAtRest').mockRejectedValue(new Error('Unknown method: agents.archiveIfAtRest'))
-    expect(await useStore.getState().archiveSession(s.id)).toEqual([])
+  it('moves nothing and gives no lines when the session is not at rest, or the host predates the check: the dialog then archives on the answer it has', async () => {
+    const { mock, s } = await oneSession('/tmp/archive-d')
+    const asked = vi.spyOn(mock.agents, 'archiveIfAtRest').mockResolvedValue({ archived: false, asks: [] })
+    const deleted = vi.spyOn(mock.agents, 'deleteSession')
+    expect(await useStore.getState().archiveSession(s.id, false)).toEqual([])
+    expect(asked).toHaveBeenCalledWith(s.id, false)
+    asked.mockRejectedValue(new Error('Unknown method: agents.archiveIfAtRest'))
+    expect(await useStore.getState().archiveSession(s.id, false)).toEqual([])
+    expect(deleted).not.toHaveBeenCalled()
     expect(useStore.getState().sessions[s.id]).toBeDefined()
-    useStore.setState((st) => ({ sessions: { ...st.sessions, [s.id]: { ...st.sessions[s.id]!, state: 'working' } } }))
-    const asked = vi.spyOn(mock.agents, 'archiveIfAtRest')
-    asked.mockClear()
-    expect(await useStore.getState().archiveSession(s.id)).toEqual([])
-    expect(asked).not.toHaveBeenCalled()
   })
 
-  it('asks for a worktree with uncommitted changes, which the old dialog showed', async () => {
-    const { mock, s } = await oneSession('/tmp/undo-host-d')
-    useStore.setState((st) => ({ sessions: { ...st.sessions, [s.id]: { ...st.sessions[s.id]!, worktree: { path: '/tmp/wt', branch: 'b' } } } }))
-    vi.spyOn(mock.agents, 'worktreeStatus').mockResolvedValue({ path: '/tmp/wt', branch: 'b', dirty: true, changedFiles: 2 })
-    expect(await useStore.getState().archiveSession(s.id)).toEqual([])
+  it('says why when the host check fails, and moves nothing', async () => {
+    const { mock, s } = await oneSession('/tmp/archive-e')
+    const asked = vi.spyOn(mock.agents, 'archiveIfAtRest').mockRejectedValue(new Error('link lost'))
+    const deleted = vi.spyOn(mock.agents, 'deleteSession')
+    expect(await useStore.getState().archiveSession(s.id, false)).toBeNull()
+    expect(asked).toHaveBeenCalledWith(s.id, false)
+    expect(useStore.getState().toast).toBe('Could not archive: link lost')
+    expect(deleted).not.toHaveBeenCalled()
     expect(useStore.getState().sessions[s.id]).toBeDefined()
   })
 
@@ -632,7 +638,7 @@ describe('Undo on the archive toast (#1512)', () => {
       projectPanels: { ...st.projectPanels, [p.id]: { panels, order: panels, hidden: [] } },
     }))
 
-    expect(await useStore.getState().archiveSession(s.id)).toBeNull()
+    await useStore.getState().deleteSession(s.id)
     expect(useStore.getState().drafts[s.id]).toBeUndefined()
     expect(useStore.getState().projectPanels[p.id]?.panels).toEqual([`session:${other.id}`, 'app:x'])
 
@@ -646,7 +652,7 @@ describe('Undo on the archive toast (#1512)', () => {
   it('Undo does not overwrite what was typed after the archive', async () => {
     const { s } = await oneSession('/tmp/undo-place-b')
     useStore.setState((st) => ({ drafts: { ...st.drafts, [s.id]: { text: 'old words', attachments: [] } } }))
-    expect(await useStore.getState().archiveSession(s.id)).toBeNull()
+    await useStore.getState().deleteSession(s.id)
     useStore.setState((st) => ({ drafts: { ...st.drafts, [s.id]: { text: 'new words', attachments: [] } } }))
     useStore.getState().toastAction?.run()
     await vi.waitFor(() => expect(useStore.getState().sessions[s.id]).toBeDefined())

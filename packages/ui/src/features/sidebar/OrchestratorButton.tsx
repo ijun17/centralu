@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { isInTurn, isUnread, type SessionSummary } from '@cc/core'
 import { useStore } from '../../store/store.js'
-import { archiveNeedsAsk } from '../../store/sessions/lifecycle.js'
 import { useSelectedSessionId } from '../../store/selectors.js'
 import { INDENT, GUIDE } from './layout.js'
 import { approvalLine } from './rows/SessionRow.jsx'
@@ -193,6 +192,7 @@ function OrchestratorChildren({
       name={confirming.name}
       tool={confirming.tool}
       onCancel={() => setConfirmingId(null)}
+      onDone={() => setConfirmingId(null)}
       onConfirm={(deleteWorktree, deleteExternal) => {
         void deleteSession(confirming.id, deleteWorktree, deleteExternal)
         setConfirmingId(null)
@@ -290,11 +290,10 @@ function OrchestratorChildRow({ s, onHold, setConfirming }: { s: SessionSummary;
             />
           )}
           <ActionRow
-            label={archiveNeedsAsk(s) ? 'Archive session…' : 'Archive session'}
+            label="Archive session…"
             onClick={() => {
               setMenu(null)
-              // An idle session is archived at once, with Undo on the toast; the host asks first when that would lose something (#1512)
-              void useStore.getState().archiveSession(s.id).then((asks) => asks && setConfirming(true))
+              setConfirming(true)
             }}
             testId={`delete-session-${s.id}`}
             danger

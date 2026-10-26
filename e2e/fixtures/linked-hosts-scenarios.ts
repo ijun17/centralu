@@ -88,8 +88,7 @@ export function linkedHostsTests(): void {
       await test.step('archive the session', async () => {
         await page.getByTestId(`session-menu-${id}`).click()
         await page.getByTestId(`delete-session-${id}`).click()
-        // An idle session goes at once (#1512): the linked machine's host decides what the archive would lose, and says nothing here
-        await expect(page.getByTestId('confirm-delete')).toHaveCount(0)
+        await page.getByTestId('confirm-delete-yes').click()
         await expect(page.getByTestId(`session-row-${id}`)).toHaveCount(0)
         await expect(page.getByTestId('toast-action')).toHaveText('Undo')
         const trash = (await hubCall(pair.hub.port, 'trash.list', {})) as { sessions: { id: string }[] }

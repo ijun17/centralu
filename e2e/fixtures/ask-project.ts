@@ -248,8 +248,7 @@ export function askProjectTests(): void {
       await row.click()
       await expect.poll(() => page.evaluate(() => (window as any).__store.getState().focusedSessionId)).toBe('orc-child-1')
 
-      // Its ⋯ menu archives it through the same dialog as a project's session (#994 review). The mock host holds no such session,
-      // and a host that does not hold it archives nothing, so the dialog is what is left (#1512)
+      // Its ⋯ menu archives it through the same dialog as a project's session (#994 review)
       await row.hover()
       await page.getByTestId('session-menu-orc-child-1').click()
       await page.getByTestId('delete-session-orc-child-1').click()

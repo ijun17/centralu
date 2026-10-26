@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ToolName } from '@cc/protocol'
 import { usePlatform } from '../../../app/PlatformProvider.jsx'
 import { useToolMeta } from '../../../store/selectors.js'
@@ -6,7 +6,7 @@ import { Modal } from '../../../components/Modal.jsx'
 import { Button } from '../../../components/Button.jsx'
 import { formatChangedCount } from '../../../app/format.js'
 import { useLoad } from '../../../app/useLoad.js'
-import { archiveAsksOf } from '../../../store/sessions/lifecycle.js'
+import { useStore } from '../../../store/store.js'
 
 /**
  * Delete confirmation.
@@ -22,12 +22,16 @@ export function ConfirmDelete({
   name,
   tool,
   onConfirm,
+  onDone,
   onCancel,
 }: {
   sessionId: string
   name: string
   tool: ToolName
+  /** Archive for sure: the person has seen what the archive drops, or chose to delete the worktree */
   onConfirm: (deleteWorktree: boolean, deleteExternal: boolean) => void
+  /** The host archived it (or could not) on the first Archive: nothing is left to ask */
+  onDone: () => void
   onCancel: () => void
 }) {
   const platform = usePlatform()
@@ -54,8 +58,35 @@ export function ConfirmDelete({
   // Unknown until the host answers, and when it cannot: the dialog then says nothing about a worktree
   const wt = useLoad(() => platform.agents.worktreeStatus(sessionId), [platform, sessionId]).data ?? null
   const [deleteWorktree, setDeleteWorktree] = useState(false)
-  // What the host said the archive would lose and Undo does not bring back (#1512): the reason this asks at all, when it is one
-  const [losses] = useState(() => archiveAsksOf(sessionId))
+  /*
+   * What the host said the archive would lose and Undo does not bring back (#1512, #1589). The first Archive (worktree kept) asks the
+   * host, which moves the session when that loses nothing; when it would, the lines show here and the next Archive moves it anyway.
+   */
+  const [losses, setLosses] = useState<string[]>([])
+  const asking = useRef(false)
+  // A dialog put away while the host is being asked is an answer of "no more": the answer to that question moves nothing further
+  const open = useRef(true)
+  useEffect(() => {
+    open.current = true
+    return () => {
+      open.current = false
+    }
+  }, [])
+  const archive = () => {
+    if (deleteWorktree || losses.length > 0) return onConfirm(deleteWorktree, deleteExternal)
+    if (asking.current) return
+    asking.current = true
+    void useStore
+      .getState()
+      .archiveSession(sessionId, deleteExternal)
+      .then((lines) => {
+        if (!open.current) return
+        if (lines === null) onDone()
+        else if (lines.length > 0) setLosses(lines)
+        else onConfirm(false, deleteExternal)
+      })
+      .finally(() => (asking.current = false))
+  }
   return (
     <Modal onClose={onCancel} testId="confirm-delete">
       <div className="w-[380px] max-w-[calc(90vw/var(--text-zoom))] rounded-lg border border-line bg-surface-side p-4 shadow-(--shadow-modal)">
@@ -143,7 +174,7 @@ export function ConfirmDelete({
           <button className="rounded-md px-2 py-1 text-sm text-ink-faint hover:text-ink" onClick={onCancel}>
             Cancel
           </button>
-          <Button variant="primary" onClick={() => onConfirm(deleteWorktree, deleteExternal)} data-testid="confirm-delete-yes">
+          <Button variant="primary" onClick={archive} data-testid="confirm-delete-yes">
             Archive
           </Button>
         </div>
