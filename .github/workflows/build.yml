@@ -590,15 +590,33 @@ jobs:
       # 45 s, 244 to 893 s on some shards, which cancelled three shards at the job's limit, #1503), so each try has a
       # limit of its own and one retry: the install may take its 9 minutes at worst, and the tests keep theirs. The
       # runner kills the step of a try that hit its limit, not the root apt-get it started, which goes on holding
-      # dpkg's locks; the second try stops it first (.github/scripts/stop-leftover-apt.sh).
+      # dpkg's locks; the second try stops it first (.github/scripts/stop-leftover-apt.sh). Limits and a retry were not
+      # enough on 2026-10-26 (#1592, #1597): both tries timed out on the mirror. So the downloaded .deb files are cached,
+      # by runner image and Playwright's version, and put back in apt's archive folder before the install; apt then asks
+      # the network for the package lists only (.github/scripts/apt-deb-cache.sh). The cache is saved right after a
+      # successful install, not at the end of the job, so a failed test run does not keep it from filling.
       - name: Read Playwright's version
         id: playwright
         run: echo "version=$(pnpm exec playwright --version | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"
+
+      - name: Read the runner image
+        id: image
+        run: echo "name=${ImageOS:-unknown}-${ImageVersion:-unknown}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-webkit
+
+      - name: Restore the apt packages of an earlier run
+        id: debs
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/apt-debs
+          key: apt-debs-${{ runner.os }}-${{ steps.image.outputs.name }}-playwright-${{ steps.playwright.outputs.version }}-webkit
+
+      - name: Put the apt packages where apt looks
+        run: bash .github/scripts/apt-deb-cache.sh restore "$RUNNER_TEMP/apt-debs"
 
       - name: Install WebKit system libraries
         id: libraries
@@ -613,6 +631,17 @@ jobs:
           bash .github/scripts/stop-leftover-apt.sh
           sudo dpkg --configure -a || true
           pnpm exec playwright install-deps webkit
+
+      - name: Keep the apt packages this run downloaded
+        id: kept
+        if: steps.debs.outputs.cache-hit != 'true'
+        run: bash .github/scripts/apt-deb-cache.sh save "$RUNNER_TEMP/apt-debs"
+
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: steps.debs.outputs.cache-hit != 'true' && steps.kept.outputs.count != '0'
+        with:
+          path: ${{ runner.temp }}/apt-debs
+          key: apt-debs-${{ runner.os }}-${{ steps.image.outputs.name }}-playwright-${{ steps.playwright.outputs.version }}-webkit
 
       - name: Install WebKit
         timeout-minutes: 3
@@ -678,10 +707,24 @@ jobs:
         id: playwright
         run: echo "version=$(pnpm exec playwright --version | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"
 
+      - name: Read the runner image
+        id: image
+        run: echo "name=${ImageOS:-unknown}-${ImageVersion:-unknown}" >> "$GITHUB_OUTPUT"
+
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-chromium
+
+      - name: Restore the apt packages of an earlier run
+        id: debs
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/apt-debs
+          key: apt-debs-${{ runner.os }}-${{ steps.image.outputs.name }}-playwright-${{ steps.playwright.outputs.version }}-chromium
+
+      - name: Put the apt packages where apt looks
+        run: bash .github/scripts/apt-deb-cache.sh restore "$RUNNER_TEMP/apt-debs"
 
       - name: Install Chromium system libraries
         id: libraries
@@ -696,6 +739,17 @@ jobs:
           bash .github/scripts/stop-leftover-apt.sh
           sudo dpkg --configure -a || true
           pnpm exec playwright install-deps chromium
+
+      - name: Keep the apt packages this run downloaded
+        id: kept
+        if: steps.debs.outputs.cache-hit != 'true'
+        run: bash .github/scripts/apt-deb-cache.sh save "$RUNNER_TEMP/apt-debs"
+
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: steps.debs.outputs.cache-hit != 'true' && steps.kept.outputs.count != '0'
+        with:
+          path: ${{ runner.temp }}/apt-debs
+          key: apt-debs-${{ runner.os }}-${{ steps.image.outputs.name }}-playwright-${{ steps.playwright.outputs.version }}-chromium
 
       - name: Install Chromium
         timeout-minutes: 3
@@ -823,10 +877,24 @@ jobs:
         id: playwright
         run: echo "version=$(pnpm exec playwright --version | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"
 
+      - name: Read the runner image
+        id: image
+        run: echo "name=${ImageOS:-unknown}-${ImageVersion:-unknown}" >> "$GITHUB_OUTPUT"
+
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-webkit
+
+      - name: Restore the apt packages of an earlier run
+        id: debs
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/apt-debs
+          key: apt-debs-${{ runner.os }}-${{ steps.image.outputs.name }}-playwright-${{ steps.playwright.outputs.version }}-webkit
+
+      - name: Put the apt packages where apt looks
+        run: bash .github/scripts/apt-deb-cache.sh restore "$RUNNER_TEMP/apt-debs"
 
       - name: Install WebKit system libraries
         id: libraries
@@ -841,6 +909,17 @@ jobs:
           bash .github/scripts/stop-leftover-apt.sh
           sudo dpkg --configure -a || true
           pnpm exec playwright install-deps webkit
+
+      - name: Keep the apt packages this run downloaded
+        id: kept
+        if: steps.debs.outputs.cache-hit != 'true'
+        run: bash .github/scripts/apt-deb-cache.sh save "$RUNNER_TEMP/apt-debs"
+
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: steps.debs.outputs.cache-hit != 'true' && steps.kept.outputs.count != '0'
+        with:
+          path: ${{ runner.temp }}/apt-debs
+          key: apt-debs-${{ runner.os }}-${{ steps.image.outputs.name }}-playwright-${{ steps.playwright.outputs.version }}-webkit
 
       - name: Install WebKit
         timeout-minutes: 3
