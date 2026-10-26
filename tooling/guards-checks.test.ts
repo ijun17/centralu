@@ -7,13 +7,12 @@ import { describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
-import { virtualFileLinter } from './eslint-virtual.test-helpers.js'
-import { disabledFindings, noDisable } from './lint-allowlist.js'
+import { guardLinter, virtualFileLinter } from './eslint-virtual.test-helpers.js'
 import { EXCEPTIONS } from './guard-exceptions.js'
 import { guardConfigs, guards } from './eslint-guards.js'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
-const eslint = virtualFileLinter()
+const eslint = guardLinter()
 const NL = '\n'
 
 type Hit = { rule: string; line: number }
@@ -75,10 +74,13 @@ describe('guard/ui-no-os', () => {
     ["navigator['platform']"],
     ['const isMac = true'],
     ['if (isMac) {}'],
+    ['const a = <Kbd isMac />'],
+    ["const s = { 'isMac': true }"],
+    ["const a = x['isMac']"],
   ])('reports %s', async (code) => {
     expect(await lines(file, code, 'ui-no-os')).toHaveLength(1)
   })
-  it.each([['const platform = ports.platform'], ['// process.platform is read in the host'], ["const s = 'navigator'"], ['isMacLike()'], ['const { platform } = ports']])('does not report %s', async (code) => {
+  it.each([['const platform = ports.platform'], ['// process.platform is read in the host'], ["const s = 'navigator'"], ['isMacLike()'], ['const { platform } = ports'], ["const s = 'isMac'"]])('does not report %s', async (code) => {
     await quiet(file, 'ui-no-os', code, 'navigator.platform')
   })
   it('reads the UI package, tests included, and nothing else', async () => {
@@ -113,6 +115,10 @@ describe('guard/ui-type-scale', () => {
     ["const s = { fontSize: '12px' }"],
     ['const s = { fontSize: `12px` }'],
     ["const s = { 'fontSize': 12 }"],
+    ['const s = { fontSize: 13 as const }'],
+    ["const s = { fontSize: 1.5 + 'rem' }"],
+    ['const c = `text-[${size}px] flex`'],
+    ['const c = `leading-[${h}px]`'],
   ])('reports %s', async (code) => {
     expect(await lines(file, code, 'ui-type-scale')).toEqual([1])
   })
@@ -123,6 +129,7 @@ describe('guard/ui-type-scale', () => {
     ["const c = 'context-[9px]'"],
     ['const s = { fontSize: size }'],
     ['const s = { fontSize: `${n}px` }'],
+    ['const c = `text-[${color}]`'],
     ["// 'text-[9px]' is what the scale forbids"],
   ])('does not report %s', async (code) => {
     await quiet(file, 'ui-type-scale', code, "const c = 'text-[9px]'")
@@ -151,6 +158,8 @@ describe('guard/ui-radius-scale', () => {
     ['<span className="[&_.keycap]:rounded-[5px]" />'],
     ['const s = { borderRadius: 6 }'],
     ["const s = { 'borderRadius': '6px' }"],
+    ['const c = `rounded-[${r}px]`'],
+    ['const c = `flex rounded-t-[${r}px] ${x}`'],
   ])('reports %s', async (code) => {
     expect((await lines(file, code, 'ui-radius-scale')).length).toBeGreaterThan(0)
   })
@@ -219,8 +228,13 @@ describe('guard/hidden-children', () => {
     await quiet(file, 'hidden-children', "import type { ChildProcess } from 'node:child_process'", "const cp = require('node:child_process')")
   })
 
+  it('reads a .cjs file too, as CommonJS', async () => {
+    expect(await lines('packages/agent-host/src/x.cjs', "const cp = require('node:child_process')", 'hidden-children')).toEqual([1])
+  })
+
   it('reads the host sources, not its tests or fixtures', async () => {
-    const code = imports + "start('git')"
+    // Plain JavaScript: the .mjs and .cjs files are not parsed as TypeScript
+    const code = "import { spawn as start } from 'node:child_process'" + NL + "start('git')"
     const result = Object.fromEntries(
       await Promise.all(
         ['packages/agent-host/src/adapters/codex/orchestrator-bridge.mjs', 'packages/agent-host/src/x.test.ts', 'packages/agent-host/src/x.test-helpers.ts', 'packages/agent-host/src/apps/external/test-fixtures/app.mjs', 'packages/ui/src/x.ts'].map(
@@ -229,7 +243,7 @@ describe('guard/hidden-children', () => {
       ),
     )
     expect(result).toEqual({
-      'packages/agent-host/src/adapters/codex/orchestrator-bridge.mjs': [3],
+      'packages/agent-host/src/adapters/codex/orchestrator-bridge.mjs': [2],
       'packages/agent-host/src/x.test.ts': [],
       'packages/agent-host/src/x.test-helpers.ts': [],
       'packages/agent-host/src/apps/external/test-fixtures/app.mjs': [],
@@ -248,6 +262,8 @@ describe('guard/git-start', () => {
     ["cp.execFileSync('git', ['status'])"],
     ['spawnSync(`git`, [])'],
     ["programPath(`git`)"],
+    ["spawn('git' as string, [])"],
+    ["execFile('git' as const, [])"],
   ])('reports %s', async (code) => {
     expect(await lines(file, code, 'git-start')).toEqual([1])
   })
@@ -270,6 +286,9 @@ describe('guard/no-hand-coded-error', () => {
     ['throw Object.assign(' + NL + '  new Error(' + NL + '    `Gone (${a}) now`,' + NL + '  ),' + NL + "  { code: 'internal' }," + NL + ')'],
     ["Object.assign(new Error('x'), { retryable: true, code: 'session_not_found' })"],
     ["Object.assign(new Error('x'), { 'code': 'internal' })"],
+    ["Object.assign(new Error('x'), { code: 'internal' } as const)"],
+    ["Object.assign(new Error('x'), { code: 'internal' } satisfies Coded)"],
+    ["Object.assign(new Error('x') as Coded, { code: 'internal' as const })"],
   ])('reports %s', async (code) => {
     expect(await lines(file, code, 'no-hand-coded-error')).toHaveLength(1)
   })
@@ -324,6 +343,15 @@ describe('guard/purge-callers and guard/subagent-purge-callers', () => {
     // A listed call that is no longer made says so
     expect(await lines(rpc, 'mgr.emptyTrash()', 'purge-callers')).toEqual([1])
   })
+  it('lets a listed call be made as many times as listed: a second identical call is a finding (#204)', async () => {
+    const manager = 'packages/agent-host/src/sessions/manager.ts'
+    const once = ['self.purgeSession(id)', 'this.trash.emptyTrash()', 'this.trash.purgeSession(id)'].join(NL)
+    expect(await lines(manager, once, 'purge-callers')).toEqual([])
+    // The listed line did not make it free: the second call is reported, with the first (the finding is a count, not a place)
+    expect(await lines(manager, once + NL + 'this.trash.purgeSession(other)', 'purge-callers')).toEqual([3, 4])
+    expect(await lines('packages/agent-host/src/rpc.ts', 'mgr.emptyTrash()' + NL + 'mgr.purgeSession(a)' + NL + 'mgr.purgeSession(b)', 'purge-callers')).toEqual([2, 3])
+    expect(await lines('packages/agent-host/src/sessions/manager.ts', 'this.trash.purgeSubagentSteps(a)' + NL + 'this.trash.purgeSubagentSteps(b)', 'subagent-purge-callers')).toEqual([1, 2])
+  })
   it('reads the host sources, not its tests', async () => {
     expect(await lines('packages/agent-host/src/sessions/x.test.ts', 'mgr.purgeSession(id)', 'purge-callers')).toEqual([])
     expect(await lines('packages/agent-host/src/x.tsx', 'mgr.purgeSession(id)', 'purge-callers')).toEqual([1])
@@ -342,6 +370,8 @@ describe('guard/import-boundary', () => {
     ["const m = require('../sessions/manager.js')"],
     ["import '../sessions/setup.js'"],
     ["import m = require('../sessions/manager.js')"],
+    ["type M = import('../sessions/manager.js').Manager"],
+    ["type M = typeof import('../sessions/manager.js')"],
   ])('reports, in the app runtime, %s', async (code) => {
     expect(await lines(apps, code, 'import-boundary')).toEqual([1])
   })
@@ -353,6 +383,7 @@ describe('guard/import-boundary', () => {
     ["import { a } from '../../adapters/claude/x.js'"],
     ["import { a } from '../../dev-services/store.js'"],
     ["const m = await import('../../dev-services/terminal.js')"],
+    ["type T = import('../../dev-services/terminal.js').Terminal"],
   ])('reports, in the external app runtime, %s', async (code) => {
     expect(await lines(external, code, 'import-boundary')).toEqual([1])
   })
@@ -377,7 +408,7 @@ describe('guard/import-boundary', () => {
 
 describe('guard/no-tool-names', () => {
   const file = 'packages/protocol/src/x.ts'
-  it.each([["export const a = 'claude'"], ["export type T = 'codex' | 'other'"], ['export const claude = 1'], ['export const a = `use Codex`'], ['export const a = /claude/i'], ["export const o = { codex: 1 }"], ["export const a = 'Claude Code'"]])('reports %s', async (code) => {
+  it.each([["export const a = 'claude'"], ["export type T = 'codex' | 'other'"], ['export const claude = 1'], ['export const a = `use Codex`'], ['export const a = /claude/i'], ["export const o = { codex: 1 }"], ["export const a = 'Claude Code'"], ['export class A { #claude = 1 }'], ['export class A { m() { return this.#codex } }']])('reports %s', async (code) => {
     expect((await lines(file, code, 'no-tool-names')).length).toBeGreaterThan(0)
   })
   it.each([['// claude and codex are named in this comment'], ['/** The adapters (claude, codex) introduce themselves */ export const a = 1'], ['export const claudeCode = 1'], ["export const a = 'cursor-agent'"]])('does not report %s', async (code) => {
@@ -393,7 +424,7 @@ describe('guard/no-tool-names', () => {
 
 describe('guard/no-sleeps', () => {
   const file = 'packages/agent-host/src/adapters/frames/x.test.ts'
-  it.each([['setTimeout(() => {}, 10)'], ['await sleep(10)'], ['await delay(5)'], ['await page.waitForTimeout(5)'], ['vi.advanceTimersByTime(100)'], ['await vi.advanceTimersToNextTimerAsync()'], ['globalThis.setTimeout(f, 1)']])('reports %s', async (code) => {
+  it.each([['setTimeout(() => {}, 10)'], ['await sleep(10)'], ['await delay(5)'], ['await page.waitForTimeout(5)'], ['vi.advanceTimersByTime(100)'], ['await vi.advanceTimersToNextTimerAsync()'], ['globalThis.setTimeout(f, 1)'], ["await page['waitForTimeout'](5)"], ['await page[`waitForTimeout`](5)']])('reports %s', async (code) => {
     expect((await lines(file, code, 'no-sleeps')).length).toBeGreaterThan(0)
   })
   it.each([['// setTimeout(f, 1) is what waiting for time looks like'], ["const s = 'sleep(1)'"], ['await vi.waitFor(() => ok)'], ['clearTimeout(t)'], ['const sleepy = 1']])('does not report %s', async (code) => {
@@ -425,12 +456,58 @@ describe('the guard rules as a set', () => {
     for (const rule of Object.keys(EXCEPTIONS)) expect(Object.keys(guards.rules), rule).toContain(rule)
   })
 
-  it('cannot be switched off by a comment: pnpm lint refuses an eslint-disable of any of them', async () => {
-    const code = ['// eslint-disable-next-line guard/no-hand-split', "p.split('/')"].join(NL)
-    const [result] = await eslint.lintText(code, { filePath: join(ROOT, 'packages/agent-host/src/x.ts'), warnIgnored: false })
-    expect(result?.messages.filter((m) => m.ruleId?.startsWith('guard/'))).toEqual([])
-    expect(disabledFindings(ROOT, result ? [result] : [])).toEqual([{ file: 'packages/agent-host/src/x.ts', line: 2, rule: 'guard/no-hand-split' }])
-    for (const rule of Object.keys(guards.rules)) expect(noDisable(`guard/${rule}`), rule).toBe(true)
+  it('is a pass of its own that reads no comment as configuration, and the main configuration holds none of these rules', async () => {
+    const pass = await eslint.calculateConfigForFile(join(ROOT, 'packages/agent-host/src/x.test.ts'))
+    expect(pass?.linterOptions?.noInlineConfig).toBe(true)
+    const main = await virtualFileLinter().calculateConfigForFile(join(ROOT, 'packages/agent-host/src/x.test.ts'))
+    for (const rule of Object.keys(main?.rules ?? {})) expect(/^(guard|test-env|test-limits)\//.test(rule), rule).toBe(false)
+    // And the pass holds these rules only, in every file kind it reads
+    for (const file of ['packages/agent-host/src/x.ts', 'packages/ui/src/x.tsx', 'packages/protocol/src/x.ts', 'packages/agent-host/src/x.test.ts', 'e2e/x.ts', 'packages/agent-host/src/x.cjs']) {
+      const rules = Object.keys((await eslint.calculateConfigForFile(join(ROOT, file)))?.rules ?? {})
+      expect(rules.length, file).toBeGreaterThan(0)
+      for (const rule of rules) expect(/^(guard|test-env|test-limits)\//.test(rule), `${file} ${rule}`).toBe(true)
+    }
+  })
+
+  it('reads a file named test-helpers.ts as a source, as the tests it replaced did: only x.test-helpers.ts is a helper', async () => {
+    const source = 'packages/agent-host/src/apps/external/test-helpers.ts'
+    const helper = 'packages/agent-host/src/apps/external/zip.test-helpers.ts'
+    const probes: [string, string][] = [
+      ['hidden-children', "import { spawn } from 'node:child_process'" + NL + "spawn('du')"],
+      ['git-start', "execFileSync('git')"],
+      ['no-hand-coded-error', "Object.assign(new Error('x'), { code: 'internal' })"],
+      ['purge-callers', 'mgr.purgeSession(id)'],
+      ['subagent-purge-callers', 'mgr.purgeSubagentSteps(id, 0)'],
+    ]
+    for (const [rule, code] of probes) {
+      expect((await lines(source, code, rule)).length, `${rule} in test-helpers.ts`).toBeGreaterThan(0)
+      expect(await lines(helper, code, rule), `${rule} in zip.test-helpers.ts`).toEqual([])
+    }
+  })
+
+  // The ways a comment was found to switch a rule off (the review of #1620): none of them does anything in the pass
+  describe('cannot be switched off by a comment', () => {
+    const host = 'packages/agent-host/src/x.mjs'
+    const spawnGit = ["import { spawn } from 'node:child_process'", "spawn('git', ['x'])"].join(NL)
+    const cases: [string, string, string, Record<string, number[]>][] = [
+      ['a configuration comment naming two rules, in an .mjs', host, ['/* eslint guard/hidden-children: off, guard/git-start: off */', spawnGit].join(NL), { 'hidden-children': [3], 'git-start': [3] }],
+      ['a quoted rule name', host, ['/* eslint "guard/git-start": "off" */', spawnGit].join(NL), { 'hidden-children': [3], 'git-start': [3] }],
+      ['an eslint-disable of the whole file', host, ['/* eslint-disable */', spawnGit].join(NL), { 'hidden-children': [3], 'git-start': [3] }],
+      ['an eslint-disable-next-line', host, ["import { spawn } from 'node:child_process'", '// eslint-disable-next-line guard/git-start, guard/hidden-children', "spawn('git', ['x'])"].join(NL), { 'hidden-children': [3], 'git-start': [3] }],
+      ['an eslint-disable-line', host, ["import { spawn } from 'node:child_process'", "spawn('git', ['x']) // eslint-disable-line guard/git-start, guard/hidden-children"].join(NL), { 'hidden-children': [2], 'git-start': [2] }],
+      ['an eslint-disable of a rule in a .cjs, the main pass reads none of', 'packages/agent-host/src/x.cjs', ['/* eslint-disable guard/hidden-children */', "const cp = require('node:child_process')"].join(NL), { 'hidden-children': [2] }],
+      ['a JSX comment', 'packages/ui/src/x.tsx', ['export const A = () => (', '  <div className="text-[13px]">', '    {/* eslint guard/ui-type-scale: off */}', '  </div>', ')'].join(NL), { 'ui-type-scale': [2] }],
+      ['a comment just before a closing brace', 'packages/agent-host/src/x.ts', ['function f(p: string) {', "  p.split('/')", '  /* eslint guard/no-hand-split: off */', '}'].join(NL), { 'no-hand-split': [2] }],
+      ['a comment just before a closing bracket', 'packages/agent-host/src/x.ts', ['const a = [', "  p.split('/'),", '  /* eslint guard/no-hand-split: off */', ']'].join(NL), { 'no-hand-split': [2] }],
+      ['a comment at the end of the file', 'packages/agent-host/src/x.ts', ["p.split('/')", '/* eslint guard/no-hand-split: off */'].join(NL), { 'no-hand-split': [1] }],
+    ]
+    it.each(cases)('%s', async (_what, file, code, expected) => {
+      const [result] = await eslint.lintText(code, { filePath: join(ROOT, file), warnIgnored: false })
+      const found: Record<string, number[]> = {}
+      for (const m of result?.messages ?? []) if (m.ruleId?.startsWith('guard/')) (found[m.ruleId.slice('guard/'.length)] ??= []).push(m.line)
+      expect(found).toEqual(expected)
+      expect(result?.suppressedMessages).toEqual([])
+    })
   })
 
   it('has exceptions that only shrink, each a tracked file with its reason', () => {
@@ -442,7 +519,7 @@ describe('the guard rules as a set', () => {
         expect(tracked.has(file), `${rule}: ${file} is a tracked file`).toBe(true)
         expect(entry.reason.length, `${rule}: ${file} says why`).toBeGreaterThan(10)
         if (entry.count !== undefined) expect(entry.count, `${rule}: ${file}`).toBeGreaterThan(0)
-        if (entry.keys) expect(entry.keys.length, `${rule}: ${file}`).toBeGreaterThan(0)
+        for (const n of Object.values(entry.counts ?? {})) expect(n, `${rule}: ${file}`).toBeGreaterThan(0)
       }
     }
     // A ceiling: lowered when a line goes, never raised (#1606)

@@ -15,6 +15,7 @@
  * This module is the logic; tooling/lint.ts runs ESLint with it.
  */
 import { execFileSync } from 'node:child_process'
+import { availableParallelism } from 'node:os'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 import type { ESLint, Linter } from 'eslint'
@@ -41,6 +42,13 @@ export const lintHeapMb = (totalMemBytes: number): number => Math.min(4096, Math
 
 /** The options tooling/lint.ts creates ESLint with */
 export const eslintOptions = (cwd: string): ESLint.Options => ({ cwd, ...LINT_OPTIONS })
+
+/**
+ * The options of the guard pass (tooling/eslint-guard-pass.js): its own configuration only, not eslint.config.js, and
+ * no comment configures it. tooling/lint.ts runs it after the main pass; the tests of its rules lint virtual files with it.
+ * More threads than the main pass: no program of types is built, so a thread is small, and parsing the ~2,000 files it reads is what it costs.
+ */
+export const guardOptions = (cwd: string): ESLint.Options => ({ cwd, concurrency: Math.max(2, Math.min(4, availableParallelism())), overrideConfigFile: join(cwd, 'tooling', 'eslint-guard-pass.js') })
 
 /**
  * The rules a line may name: the type-aware ones eslint.config.js turned on (#1339). Any other rule's
@@ -161,16 +169,14 @@ export function countedFiles(root: string, results: ESLint.LintResult[]): Set<st
 }
 
 /**
- * The rules no comment may switch off: the type-aware ones the lists hold, and the two that took over a test's whole-tree
- * guard (#1602), which a unit test could not be skipped on. Their exceptions are a line in the rule's own `EXCEPTIONS`.
+ * The rules no comment may switch off: the type-aware ones the lists hold. The rules that took over a test's whole-tree guard
+ * (`guard/*`, `test-env/*`, `test-limits/*`) are in the guard pass, which reads no comment as configuration
+ * (tooling/eslint-guard-pass.js), so there is nothing to refuse there.
  */
-export const NO_DISABLE_RULES: ReadonlySet<string> = new Set([...LISTABLE_RULES, 'test-env/data-dir', 'test-limits/scaled-by-slow'])
-
-/** Every rule of tooling/eslint-guards.js (#1606): their exceptions are lines of tooling/guard-exceptions.js */
-export const NO_DISABLE_PREFIX = 'guard/'
+export const NO_DISABLE_RULES: ReadonlySet<string> = LISTABLE_RULES
 
 /** May no comment switch this rule off? */
-export const noDisable = (rule: string): boolean => NO_DISABLE_RULES.has(rule) || rule.startsWith(NO_DISABLE_PREFIX)
+export const noDisable = (rule: string): boolean => NO_DISABLE_RULES.has(rule)
 
 export type Disabled = { file: string; line: number; rule: string }
 

@@ -14,12 +14,8 @@
  * Gaps, known: options spread into the call (`it(name, fn, { ...opts })`), runners made by `test.extend`, a tagged
  * `it.each` table, and a limit set by `vi.setConfig(opts)` from a variable.
  *
- * There is no way around it in the file: `pnpm lint` refuses an eslint-disable of this rule
- * (tooling/lint-allowlist.ts, `NO_DISABLE_RULES`). A real exception is a line of `EXCEPTIONS` below with its
- * reason; the list only shrinks (tooling/test-time-limits-checks.test.ts holds its ceiling).
- *
- * This was a unit test that parsed every test file (687) with the TypeScript API (#1602); ESLint parses each
- * once per run and caches it.
+ * There is no way around it in the file: the rule is in the guard pass (tooling/eslint-guard-pass.js), which reads no comment as
+ * configuration. A real exception is a line of `EXCEPTIONS` below with its reason; the list only shrinks (tooling/test-time-limits-checks.test.ts holds its ceiling).
  */
 
 import { relative } from 'node:path'

@@ -1,14 +1,13 @@
 /** `test-env/data-dir` keeps a test file from writing CC_DATA_DIR by hand (#845, #1602). */
 import { describe, expect, it } from 'vitest'
-import { virtualFileLinter } from './eslint-virtual.test-helpers.js'
+import { guardLinter } from './eslint-virtual.test-helpers.js'
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { disabledFindings } from './lint-allowlist.js'
 import { EXCEPTIONS } from './eslint-test-data-dir.js'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
-const eslint = virtualFileLinter()
+const eslint = guardLinter()
 
 /** The lines the rule reports in `code`, linted as the file at `filePath` */
 async function reported(filePath: string, code: string): Promise<number[]> {
@@ -131,15 +130,11 @@ describe('which files the rule reads', () => {
     expect(found).toEqual({ 'packages/agent-host/src/x.ts': [], 'packages/agent-host/scripts/x.mts': [], 'scripts/x.mjs': [], 'packages/agent-host/src/x.test.ts': [1] })
   })
 
-  it('cannot be switched off by a comment: pnpm lint refuses an eslint-disable of it', async () => {
-    const code = ['// eslint-disable-next-line test-env/data-dir', write.trim(), '/* eslint-disable test-env/data-dir */', write.trim()].join('\n')
+  it('cannot be switched off by a comment: the pass reads none as configuration', async () => {
+    const code = ['// eslint-disable-next-line test-env/data-dir', write.trim(), '/* eslint-disable test-env/data-dir */', write.trim(), '/* eslint test-env/data-dir: off */', write.trim()].join('\n')
     const [result] = await eslint.lintText(code, { filePath: join(ROOT, 'packages/agent-host/src/x.test.ts'), warnIgnored: false })
-    // The comment hides both findings from the report; the lint run still fails on each
-    expect(result?.messages.filter((m) => m.ruleId === 'test-env/data-dir')).toEqual([])
-    expect(disabledFindings(ROOT, result ? [result] : [])).toEqual([
-      { file: 'packages/agent-host/src/x.test.ts', line: 2, rule: 'test-env/data-dir' },
-      { file: 'packages/agent-host/src/x.test.ts', line: 4, rule: 'test-env/data-dir' },
-    ])
+    expect(result?.messages.filter((m) => m.ruleId === 'test-env/data-dir').map((m) => m.line)).toEqual([2, 4, 6])
+    expect(result?.suppressedMessages).toEqual([])
   })
 
   it('has no exceptions, and each one added later names its file and its reason', () => {

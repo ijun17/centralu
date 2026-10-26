@@ -2,16 +2,17 @@
  * What the `guard/*` lint rules (tooling/eslint-guards.js) let through, by rule and file, each with its reason (#1606).
  *
  * A guard that used to be a test had its exemptions in the test; they are here so that one list says what is
- * let through and why. No comment switches these rules off (`pnpm lint` refuses an eslint-disable of a `guard/` rule,
- * `NO_DISABLE_RULES` in tooling/lint-allowlist.ts): a real exception is a line below.
+ * let through and why. No comment switches these rules off (they run in a pass that reads no comment as configuration,
+ * tooling/eslint-guard-pass.js): a real exception is a line below.
  *
  * An entry says, for one file:
  *   - `reason`: why it stays. Required.
  *   - `count`: how many findings the file may hold. More fails, and fewer fails too (the line is lowered with the
  *     change that removes a site), so the list never says more than is true.
- *   - `keys`: which findings are let through, by the text the rule gives each (a callee, a class). A key that is no
- *     longer found fails the same way.
- *   - neither: every finding of the rule in that file.
+ *   - `counts`: how many findings of each kind (by the text the rule gives it: a callee, a class) the file may hold. A kind
+ *     that is not listed, one more than listed, and one fewer than listed all fail: a second identical call is not let through
+ *     by the first one's line.
+ *   - none of these: every finding of the rule in that file.
  *
  * The list only shrinks: tooling/guards-checks.test.ts holds a ceiling on its size, and that every file listed is
  * a file in the repository.
@@ -40,43 +41,43 @@ export const EXCEPTIONS = {
   },
   'purge-callers': {
     'packages/agent-host/src/rpc.ts': {
-      keys: ['mgr.emptyTrash', 'mgr.purgeSession'],
+      counts: { 'mgr.emptyTrash': 1, 'mgr.purgeSession': 1 },
       reason: 'The RPC handler: only the person deletes for good, and only through the RPC (#204)',
     },
     'packages/agent-host/src/sessions/app-sessions.ts': {
-      keys: ['this.host.purgeSession'],
+      counts: { 'this.host.purgeSession': 1 },
       reason: 'The one deletion the host makes itself (#378): a finished app-agent session, once its record is kept in the session archive. It reaches the purge only through agentRunEnded after a clean run (app-agents.test.ts holds when it does and when the session stays)',
     },
     'packages/agent-host/src/sessions/manager.ts': {
-      keys: ['self.purgeSession', 'this.trash.emptyTrash', 'this.trash.purgeSession'],
+      counts: { 'self.purgeSession': 1, 'this.trash.emptyTrash': 1, 'this.trash.purgeSession': 1 },
       reason: "The manager hands app-sessions the same purge, and passes the two calls on to its session archive (session-trash.ts, #428); the same calls, not other callers",
     },
     'packages/agent-host/src/sessions/session-trash.ts': {
-      keys: ['this.host.store.trash.purgeSession', 'this.purgeSession'],
+      counts: { 'this.host.store.trash.purgeSession': 1, 'this.purgeSession': 1 },
       reason: 'emptyTrash purges one by one; purgeSession removes the rows through the store',
     },
   },
   'subagent-purge-callers': {
     'packages/agent-host/src/rpc.ts': {
-      keys: ['mgr.purgeSubagentSteps'],
+      counts: { 'mgr.purgeSubagentSteps': 1 },
       reason: 'The RPC handler: only the person deletes subagent steps for good, and only through the RPC (#204)',
     },
     'packages/agent-host/src/sessions/manager.ts': {
-      keys: ['this.trash.purgeSubagentSteps'],
+      counts: { 'this.trash.purgeSubagentSteps': 1 },
       reason: 'Deleting all archived sessions purges their steps too; the manager passes the call on to the session archive',
     },
     'packages/agent-host/src/sessions/session-trash.ts': {
-      keys: ['this.host.store.subagentSteps.purge'],
+      counts: { 'this.host.store.subagentSteps.purge': 1 },
       reason: 'The session archive removes the steps through the store',
     },
   },
   'ui-type-scale': {
     'packages/ui/src/features/viewer/CodeViewer.tsx': {
-      keys: ['leading-[18px]'],
+      counts: { 'leading-[18px]': 1 },
       reason: "The virtual list's row height: a line height the list's arithmetic depends on",
     },
     'packages/ui/src/features/git/GitPanel.tsx': {
-      keys: ['leading-[1.5]'],
+      counts: { 'leading-[1.5]': 1 },
       reason: "The diff's virtual list's ~17px rows depend on it",
     },
   },

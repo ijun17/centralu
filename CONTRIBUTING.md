@@ -304,6 +304,17 @@ lint runs on two threads and without `--cache`: each thread builds the whole pro
 and ESLint's cache keys a file on its own content while a type-aware finding can come from a type
 another file changed.
 
+**A guard over the source is a lint rule in a pass of its own** (#1602, #1606). What used to be a unit test
+that read every source file of a folder (no hand-split paths, hidden children, one place that starts git,
+the type scale, no data folder written by hand in a test) is a `guard/*`, `test-env/*` or `test-limits/*`
+rule (`tooling/eslint-guards.js`), which `pnpm lint` runs after the main pass in a configuration of its own
+(`tooling/eslint-guard-pass.js`) that reads no comment as configuration: no `eslint-disable`, no
+`/* eslint rule: off */`, in any file, can turn one off, and a rule cannot switch itself off. `eslint` run by
+itself, and an editor, do not run it. What a rule lets through is a line of `tooling/guard-exceptions.js`
+(or the rule's own `EXCEPTIONS`) with its reason and the count it may hold, per kind of finding; a count
+that is too high or too low fails, and `tooling/guards-checks.test.ts` caps the list. A new guard is
+a rule there, tried on virtual files that fail without it, not a test that walks the tree.
+
 **A new test must fail when the fix it guards is disabled.** Disable the fix, watch the test
 fail, quote the failure in the commit or the PR, then restore it. A test that still passes
 with the fix removed is not testing the fix.

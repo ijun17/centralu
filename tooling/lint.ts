@@ -2,7 +2,7 @@
  * `pnpm lint`: ESLint over the repository, with the type-aware findings that predate those rules allowed at their
  * per-file counts (tooling/lint-allowlist.ts says how).
  *
- *   pnpm lint                  fails on a finding the lists do not hold and on an eslint-disable of a type-aware rule or of test-env/data-dir or test-limits/scaled-by-slow;
+ *   pnpm lint                  fails on a finding the lists do not hold and on an eslint-disable of a type-aware rule;
  *                              a line above what its file holds, or for a file that is gone, is only reported
  *   pnpm lint:tighten          the same, after moving a renamed file's lines to its new path (renames since the merge
  *                              base with CC_LINT_BASE, origin/main by default) and lowering the lines to what the files hold
@@ -10,6 +10,9 @@
  *                              other files' lines alone, and those of a file that failed to parse)
  *   --record-all               lists every finding: only for the change that turns a rule on (see
  *                              tooling/type-aware-lint.test.ts `TURNED_ON`); fails when other errors remain
+ *
+ * Two passes: the main one (eslint.config.js), then the guard pass (tooling/eslint-guard-pass.js): the rules that took over a
+ * test's whole-tree guard, which no comment can switch off or configure, over the files they read (the .cjs ones too).
  *
  * Exit 0 clean, 1 findings, 2 a crash (tooling/lint-crash.ts).
  */
@@ -28,6 +31,7 @@ import {
   countFindings,
   disabledFindings,
   eslintOptions,
+  guardOptions,
   LISTABLE_RULES,
   lintHeapMb,
   lintFailed,
@@ -59,6 +63,9 @@ const allow = recording ? new Map<string, Map<string, number>>() : readAllowlist
 setFlagsFromString(`--max-old-space-size=${Math.max(lintHeapMb(totalmem()), Math.floor(getHeapStatistics().heap_size_limit / 1048576))}`)
 const eslint = new ESLint(eslintOptions(ROOT))
 const results = await eslint.lintFiles(paths.length > 0 ? paths : ['.'])
+// The guard pass: its own configuration, and no comment configures it. A file none of its rules reads is not a result.
+const guardResults = (await new ESLint(guardOptions(ROOT)).lintFiles(paths.length > 0 ? paths : ['.'])).filter((r) => r.messages.length > 0)
+for (const r of guardResults) r.messages = r.messages.filter((m) => !(m.ruleId === null && m.severity === 1 && /noInlineConfig|File ignored/.test(m.message)))
 const disabled = disabledFindings(ROOT, results)
 
 if (recording) {
@@ -79,19 +86,21 @@ if (flags.has('--tighten')) {
 }
 
 const { over, loose } = recording ? { over: [], loose: [] } : applyAllowlist(ROOT, results, flags.has('--tighten') ? readAllowlist(ROOT) : allow)
-const text = await (await eslint.loadFormatter('stylish')).format(results)
+const text = await (await eslint.loadFormatter('stylish')).format([...results, ...guardResults.filter((r) => r.messages.length > 0)])
 if (text) console.log(text)
 
-const left = results.flatMap((r) => r.messages.filter((m) => m.severity === 2))
+const guardLeft = guardResults.flatMap((r) => r.messages.filter((m) => m.severity === 2))
+const othersLeft = () => otherErrors(results) + guardLeft.length
+const left = [...results.flatMap((r) => r.messages.filter((m) => m.severity === 2)), ...guardLeft]
 for (const d of disabled) {
-  console.log(`${d.file}:${d.line}: an eslint-disable comment hides ${d.rule}. This rule is not turned off in place (#1339, #1602): for a type-aware one check the value instead; for test-env/data-dir or test-limits/scaled-by-slow fix the test, or add the file with its reason to the rule's EXCEPTIONS.`)
+  console.log(`${d.file}:${d.line}: an eslint-disable comment hides ${d.rule}. This rule is not turned off in place (#1339): check the value instead.`)
 }
 for (const o of over) console.log(`${o.file}: ${o.count} findings of ${o.rule}, ${o.allowed} listed (${ALLOWLIST_DIR}/${listFileOf(packageOf(o.file))}).`)
 const stale = [...(flags.has('--tighten') ? readAllowlist(ROOT) : allow).keys()].filter((file) => !existsSync(join(ROOT, file)))
 if (!recording && (loose.length > 0 || stale.length > 0)) {
   console.log(`${loose.length + stale.length} line(s) in ${ALLOWLIST_DIR}/ list more than their file holds, or a file that is gone; \`pnpm lint:tighten\` lowers them (not required).`)
 }
-if (recording && otherErrors(results) > 0) console.log(`${otherErrors(results)} other error(s) are not type-aware findings and were not recorded: fix them first.`)
+if (recording && othersLeft() > 0) console.log(`${othersLeft()} other error(s) are not type-aware findings and were not recorded: fix them first.`)
 if (!recording) for (const line of lintHints(left)) console.log(line)
 
-process.exitCode = lintFailed({ errorsLeft: left.length, disabled: disabled.length, recording, othersLeft: otherErrors(results) }) ? 1 : 0
+process.exitCode = lintFailed({ errorsLeft: left.length, disabled: disabled.length, recording, othersLeft: othersLeft() }) ? 1 : 0

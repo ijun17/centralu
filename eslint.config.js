@@ -3,9 +3,7 @@ import tseslint from 'typescript-eslint'
 import boundaries from 'eslint-plugin-boundaries'
 import reactHooks from 'eslint-plugin-react-hooks'
 import globals from 'globals'
-import testDataDir from './tooling/eslint-test-data-dir.js'
-import testTimeLimits from './tooling/eslint-test-time-limits.js'
-import { guardConfigs } from './tooling/eslint-guards.js'
+import { IGNORES } from './tooling/eslint-ignores.js'
 import platformChecks from './tooling/eslint-platform-checks.js'
 import agentAdapterChecks from './tooling/eslint-agent-adapter-checks.js'
 import { PLATFORM_MODULES } from './tooling/os-layer.js'
@@ -31,18 +29,8 @@ export const TEST_FILES = ['**/*.test.{ts,tsx}', '**/*test-helpers.ts', 'e2e/**/
 
 /** The layer rules originate in docs/architecture.md §2. This is the machine-enforced version. */
 export default tseslint.config(
-  // tmp/: disposable probes and captures made during dogfooding. They never stay in the
-  // repository, so no rule needs to check them either.
-  // .claude/: agents' git worktrees, each a whole checkout of this repository. Linted from
-  // here, none of the path-scoped blocks below match them (3,422 false errors on 2026-10-03,
-  // with two agents at work); each worktree runs its own lint.
-  { ignores: ['.claude/**','**/dist/**', '**/node_modules/**', 'spike/**', 'tmp/**', '**/*.cjs', '**/src-tauri/target/**', '**/src-tauri/gen/**', '**/adapters/codex/generated/**', '**/src-tauri/resources/**', 'apps/desktop/content-verify/**', '**/*.app/**',
-    // The app template's runtime — a minified build artifact (scripts/build-app-runtime.mjs) —
-    // and its copy in each project app committed here.
-    'packages/agent-host/app-template/runtime/**', '.centralu/apps/*/runtime/**',
-    // .centralu/ is git-ignored except apps/ (.gitignore); anything else there is someone's
-    // local material, such as a Claude Code mod being tried out, not code this repo checks.
-    '.centralu/*', '!.centralu/apps'] },
+  // What no pass reads is tooling/eslint-ignores.js; the .cjs files only the guard pass does
+  { ignores: [...IGNORES, '**/*.cjs'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
@@ -289,10 +277,5 @@ export default tseslint.config(
     plugins: { agent: agentAdapterChecks },
     rules: { 'agent/agent-adapter-checks': 'error' },
   },
-  // A test file never writes CC_DATA_DIR by hand (tooling/eslint-test-data-dir.js)
-  { files: TEST_FILES, plugins: { 'test-env': testDataDir }, rules: { 'test-env/data-dir': 'error' } },
-  // A time limit a test sets for itself is scaled by SLOW (tooling/eslint-test-time-limits.js); these are the files the unit test read
-  { files: ['packages/**/*.test.{ts,tsx}', 'tooling/**/*.test.ts'], plugins: { 'test-limits': testTimeLimits }, rules: { 'test-limits/scaled-by-slow': 'error' } },
-  // Guards that were tests reading every source file of a folder (tooling/eslint-guards.js, exceptions in tooling/guard-exceptions.js)
-  ...guardConfigs,
+  // The guard/*, test-env/* and test-limits/* rules are not here: tooling/eslint-guard-pass.js is their own pass, which no comment can configure
 )

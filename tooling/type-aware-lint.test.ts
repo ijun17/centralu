@@ -186,7 +186,7 @@ function commentsOf(file: string, code: string): string[] {
 }
 
 /**
- * Comments that would switch a type-aware rule, or one of the rules that took over a guard (`NO_DISABLE_RULES`), off where they stand: an `eslint-disable` naming one, one naming no
+ * Comments that would switch a type-aware rule (`NO_DISABLE_RULES`) off where they stand (the rules that took over a guard are in a pass that reads no comment, tooling/eslint-guard-pass.js, so need no scan): an `eslint-disable` naming one, one naming no
  * rule (it switches every rule off), and a configuration comment (`/* eslint <rule>: off *\/`) naming one.
  */
 function forbiddenComments(file: string, code: string): string[] {
@@ -335,11 +335,12 @@ describe('type-aware lint (#1339)', () => {
     expect(f(`/* ${D} */\nconst a = 1`)).toHaveLength(1)
     expect(f(`const a = 1\n// ${D}-next-line`)).toHaveLength(1)
     expect(f(`/* ${E} @typescript-eslint/no-floating-promises: "off" */\nconst a = 1`)).toHaveLength(1)
-    // A rule named in quotes, and the two rules that took over a test's guard (#1602)
+    // A rule named in quotes
     expect(f(`/* ${E} "@typescript-eslint/no-floating-promises": "off" */\nconst a = 1`)).toHaveLength(1)
-    expect(f(`/* ${E} 'test-env/data-dir': 'off' */\nconst a = 1`)).toHaveLength(1)
-    expect(f(`/* ${E} test-limits/scaled-by-slow: 0 */\nconst a = 1`)).toHaveLength(1)
-    expect(f(`// ${D}-next-line test-env/data-dir -- because\nconst a = 1`)).toHaveLength(1)
+    expect(f(`/* ${E} '@typescript-eslint/no-floating-promises': 'off' */\nconst a = 1`)).toHaveLength(1)
+    // A rule of the guard pass is no business of this scan: no comment switches it off there
+    expect(f(`/* ${E} 'test-env/data-dir': 'off' */\nconst a = 1`)).toEqual([])
+    expect(f(`// ${D}-next-line guard/no-hand-split -- because\nconst a = 1`)).toEqual([])
     expect(f(`// ${D}-next-line no-control-regex\n/* ${D} @typescript-eslint/no-explicit-any -- raw frames */\nconst a = 1`)).toEqual([])
     expect(f(`/* eslint-enable @typescript-eslint/no-non-null-assertion */\nconst a = 1`)).toEqual([])
     // Text in a string or a template is not a comment

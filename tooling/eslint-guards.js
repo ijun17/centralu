@@ -6,9 +6,9 @@
  * tree, so a comment or a string that merely mentions the thing is no longer a finding, and a spelling the regular
  * expression did not name (`cp.spawn`, a template literal, a name reached through a `const`) is.
  *
- * Which files each rule reads is `guardConfigs` below, spread into eslint.config.js. What each lets through is
- * tooling/guard-exceptions.js, by rule and file, with a reason; `pnpm lint` refuses an eslint-disable of any `guard/`
- * rule (tooling/lint-allowlist.ts), so that list is the only way around one.
+ * Which files each rule reads is `guardConfigs` below, which tooling/eslint-guard-pass.js runs: a pass of its own, over every
+ * file kind the old tests read, in which no comment configures anything (`noInlineConfig`). What each lets through is
+ * tooling/guard-exceptions.js, by rule and file, with a reason, so that list is the only way around one.
  *
  * Known gaps, shared: a name rebound through a `let`, a function that is handed what the rule looks for, and a
  * spelling that needs types (a `Reflect` call, an alias of an imported function).
@@ -27,6 +27,13 @@ function plain(node) {
   if (node?.type === 'Literal') return typeof node.value === 'string' ? node.value : null
   if (node?.type === 'TemplateLiteral' && node.expressions.length === 0) return node.quasis[0].value.cooked
   return null
+}
+
+/** The expression under TypeScript's wrappers: `'x' as string`, `{…} as const`, `{…} satisfies T`, `x!`, `<T>x` */
+function unwrap(node) {
+  let n = node
+  while (n && (n.type === 'TSAsExpression' || n.type === 'TSSatisfiesExpression' || n.type === 'TSNonNullExpression' || n.type === 'TSTypeAssertion')) n = n.expression
+  return n
 }
 
 /** The name of `x.name`, `x['name']` or a bare `name`; null when it is not known */
@@ -49,8 +56,9 @@ const stringNodes = (visit) => ({
     if (typeof node.value === 'string') visit(node, node.value)
     else if (node.regex) visit(node, node.regex.pattern)
   },
-  TemplateElement(node) {
-    visit(node, node.value.cooked ?? node.value.raw)
+  // A template as one text, each substitution written `${}`: `rounded-[${r}px]` is a class written with a value
+  TemplateLiteral(node) {
+    visit(node, node.quasis.map((q) => q.value.cooked ?? q.value.raw).join('${}'))
   },
   JSXText(node) {
     visit(node, node.value)
@@ -59,7 +67,7 @@ const stringNodes = (visit) => ({
 
 /**
  * A rule whose findings are collected, then checked against the file's lines in tooling/guard-exceptions.js. `build`
- * gets the rule's context and `add(node, messageId, data, key)`; the `key` names a finding for `keys` in an exception.
+ * gets the rule's context and `add(node, messageId, data, key)`; the `key` names a kind of finding for `counts` in an exception.
  */
 function guard(name, messages, build) {
   return {
@@ -76,9 +84,14 @@ function guard(name, messages, build) {
           exit?.(program)
           const stale = (what) => context.report({ node: program, messageId: 'stale', data: { what } })
           let reportable = found
-          if (entry?.keys) {
-            for (const key of entry.keys) if (!found.some((f) => f.key === key)) stale(`tooling/guard-exceptions.js lets ${key} through in this file, and it is no longer there: remove it from the line`)
-            reportable = found.filter((f) => !entry.keys.includes(f.key))
+          if (entry?.counts) {
+            // How many of each kind of finding (by key) the file may hold; a kind not listed is not let through, and one more than listed is reported in full
+            reportable = found.filter((f) => !(f.key in entry.counts))
+            for (const [key, n] of Object.entries(entry.counts)) {
+              const mine = found.filter((f) => f.key === key)
+              if (mine.length < n) stale(`tooling/guard-exceptions.js lists ${n} ${key} here, ${mine.length} found: lower the count or remove the line`)
+              if (mine.length > n) reportable.push(...mine)
+            }
           } else if (entry?.count !== undefined) {
             if (found.length < entry.count) stale(`tooling/guard-exceptions.js lists ${entry.count} here, ${found.length} found: lower the count or remove the line`)
             reportable = found.length <= entry.count ? [] : found
@@ -97,7 +110,7 @@ const noHandSplit = guard('no-hand-split', { hand: "`.{{method}}('/')` takes a p
   CallExpression(node) {
     const method = nameOf(node.callee)
     if (node.callee.type !== 'MemberExpression' || (method !== 'split' && method !== 'join')) return
-    if (node.arguments.length === 1 && plain(node.arguments[0]) === '/') add(node, 'hand', { method })
+    if (node.arguments.length === 1 && plain(unwrap(node.arguments[0])) === '/') add(node, 'hand', { method })
   },
 }))
 
@@ -111,6 +124,13 @@ const uiNoOs = guard('ui-no-os', { os: '{{what}} asks which OS this is: an OS di
   Identifier(node) {
     if (node.name === 'isMac') add(node, 'os', { what: 'isMac' })
   },
+  // `<Kbd isMac />`, `{ 'isMac': true }`, `x['isMac']`
+  JSXIdentifier(node) {
+    if (node.name === 'isMac') add(node, 'os', { what: 'isMac' })
+  },
+  Literal(node) {
+    if (node.value === 'isMac' && (node.parent?.key === node || (node.parent?.type === 'MemberExpression' && node.parent.property === node))) add(node, 'os', { what: 'isMac' })
+  },
 }))
 
 /** Keyboard key names (⌘, ⌥) are never written onto the screen (#32) */
@@ -120,20 +140,28 @@ const uiNoKeyGlyphs = guard('ui-no-key-glyphs', { glyph: 'a keyboard key name is
   }),
 )
 
+/** What an expression starts with, as text: `13`, `'13px'`, `13 as const`, `1.5 + 'rem'` start with a digit; '' when it is not known */
+function startOf(node) {
+  const n = unwrap(node)
+  if (n?.type === 'BinaryExpression') return startOf(n.left)
+  if (n?.type === 'Literal') return typeof n.value === 'number' ? String(n.value) : typeof n.value === 'string' ? n.value : ''
+  if (n?.type === 'TemplateLiteral') return n.quasis[0].value.cooked ?? ''
+  return ''
+}
+
 const SIZE = /(?<![\w-])(?:text|leading)-\[[^\]\s]+\]/g
 /** Type stays on the scale (#312 step 2): no arbitrary text size or line height, no number as a fontSize */
 const uiTypeScale = guard('ui-type-scale', { size: '{{what}} is a size outside the type scale: use a token from styles/index.css, or add the exception with its reason to tooling/guard-exceptions.js' }, (_context, add) => ({
   ...stringNodes((node, text) => {
     for (const m of text.matchAll(SIZE)) {
       // text-[…] is also how a colour is written arbitrarily; only sizes are the scale's business
-      if (m[0].startsWith('text-[') && !/^text-\[[\d.]+(px|rem|em)\]$/.test(m[0])) continue
+      if (m[0].startsWith('text-[') && !/^text-\[(?:[\d.]+|\$\{\})(px|rem|em)\]$/.test(m[0])) continue
       add(node, 'size', { what: m[0] }, m[0])
     }
   }),
   Property(node) {
     if (keyOf(node) !== 'fontSize') return
-    const text = typeof node.value.value === 'number' ? String(node.value.value) : plain(node.value) ?? (node.value.type === 'TemplateLiteral' ? node.value.quasis[0].value.cooked : '')
-    if (/^\d/.test(text)) add(node, 'size', { what: 'fontSize: ' + text }, 'fontSize')
+    if (/^\d/.test(startOf(node.value))) add(node, 'size', { what: 'fontSize: ' + startOf(node.value) }, 'fontSize')
   },
 }))
 
@@ -213,7 +241,7 @@ const GIT_STARTERS = new Set(['execFile', 'execFileSync', 'spawn', 'spawnSync', 
 const gitStart = guard('git-start', { git: 'git is started here by name: go through runGit in dev-services/git-exec.ts, which locks it before trust (#407)' }, (_context, add) => ({
   CallExpression(node) {
     const callee = nameOf(node.callee)
-    const first = plain(node.arguments[0])
+    const first = plain(unwrap(node.arguments[0]))
     if ((callee === 'programPath' && first === 'git') || (GIT_STARTERS.has(callee) && /^git(?:\.exe)?$/.test(first ?? ''))) add(node, 'git')
   },
 }))
@@ -223,12 +251,14 @@ const noHandCodedError = guard('no-hand-coded-error', { coded: 'a coded error is
   CallExpression(node) {
     const callee = node.callee
     if (callee.type !== 'MemberExpression' || callee.computed || nameOf(callee.object) !== 'Object' || nameOf(callee) !== 'assign') return
-    const [target, ...rest] = node.arguments
+    const [first, ...rest] = node.arguments
+    const target = unwrap(first)
     if (target?.type !== 'NewExpression' || nameOf(target.callee) !== 'Error') return
-    for (const source of rest) {
-      if (source.type !== 'ObjectExpression') continue
-      // `{ code: 'internal' }`: a protocol code is lower case (an errno such as 'ENOENT' is not one)
-      if (source.properties.some((p) => keyOf(p) === 'code' && /^[a-z_]+$/.test(plain(p.value) ?? ''))) add(node, 'coded')
+    for (const arg of rest) {
+      const source = unwrap(arg)
+      if (source?.type !== 'ObjectExpression') continue
+      // `{ code: 'internal' }`, also `as const` or `satisfies`: a protocol code is lower case (an errno such as 'ENOENT' is not one)
+      if (source.properties.some((p) => keyOf(p) === 'code' && /^[a-z_]+$/.test(plain(unwrap(p.value)) ?? ''))) add(node, 'coded')
     }
   },
 }))
@@ -260,6 +290,11 @@ const importBoundary = guard('import-boundary', { import: "'{{specifier}}' is im
     ExportNamedDeclaration: (node) => node.source && check(node, plain(node.source)),
     ExportAllDeclaration: (node) => check(node, plain(node.source)),
     ImportExpression: (node) => check(node, plain(node.source)),
+    // `import('x').Name` and `typeof import('x')` in a type
+    TSImportType: (node) => {
+      const arg = node.source ?? node.argument // `argument` is the older name
+      check(node, plain(arg?.type === 'TSLiteralType' ? arg.literal : arg))
+    },
     TSImportEqualsDeclaration: (node) => node.moduleReference.type === 'TSExternalModuleReference' && check(node, plain(node.moduleReference.expression)),
     CallExpression: (node) => node.callee.type === 'Identifier' && node.callee.name === 'require' && check(node, plain(node.arguments[0])),
   }
@@ -275,6 +310,13 @@ const noToolNames = guard('no-tool-names', { tool: "the protocol names a tool ('
     Identifier(node) {
       if (re.test(node.name)) add(node, 'tool', { text: node.name })
     },
+    // `#claude`, `<Claude />`
+    PrivateIdentifier(node) {
+      if (re.test(node.name)) add(node, 'tool', { text: '#' + node.name })
+    },
+    JSXIdentifier(node) {
+      if (re.test(node.name)) add(node, 'tool', { text: node.name })
+    },
   }
 })
 
@@ -288,6 +330,10 @@ const noSleeps = guard('no-sleeps', { sleep: '{{what}} waits for time: wait for 
   },
   Identifier(node) {
     if (node.name === 'waitForTimeout') add(node, 'sleep', { what: 'waitForTimeout' })
+  },
+  // `page['waitForTimeout'](5)`
+  MemberExpression(node) {
+    if (node.computed && plain(node.property) === 'waitForTimeout') add(node, 'sleep', { what: 'waitForTimeout' })
   },
 }))
 
@@ -310,7 +356,8 @@ export const guards = {
   },
 }
 
-const TESTS = ['**/*.test.{ts,tsx,mts}', '**/*test-helpers.ts']
+// A test and its helpers (`x.test-helpers.ts`), as the tests these guards were read them; a `test-helpers.ts` is a source
+const TESTS = ['**/*.test.ts', '**/*.test-helpers.ts']
 const UI = ['packages/ui/src/**/*.{ts,tsx}', 'apps/web/src/**/*.{ts,tsx}', 'apps/desktop/src/**/*.{ts,tsx}']
 const HOST_SRC = 'packages/agent-host/src'
 
@@ -328,10 +375,10 @@ export const guardConfigs = [
   // Shared components decide their own shape once for every screen that uses them; the stylesheet is CSS
   { files: UI, ignores: ['**/*.test.{ts,tsx}', 'packages/ui/src/components/**', 'packages/ui/src/styles/**'], rules: { 'guard/ui-radius-scale': 'error' } },
   // The host
-  { files: [`${HOST_SRC}/**/*.{ts,mts,js,mjs}`], ignores: [...TESTS, '**/*.d.ts', '**/test-fixtures/**', '**/node_modules/**'], rules: { 'guard/hidden-children': 'error' } },
-  { files: [`${HOST_SRC}/**/*.{ts,mts,js,mjs}`], ignores: ['**/*.test.ts', '**/*test-helpers.ts'], rules: { 'guard/git-start': 'error' } },
-  { files: [`${HOST_SRC}/**/*.ts`], ignores: ['**/*.test.ts', '**/*test-helpers.ts'], rules: { 'guard/no-hand-coded-error': 'error', 'guard/purge-callers': 'error', 'guard/subagent-purge-callers': 'error' } },
-  { files: [`${HOST_SRC}/**/*.tsx`], ignores: ['**/*.test.tsx', '**/*test-helpers.tsx'], rules: { 'guard/purge-callers': 'error', 'guard/subagent-purge-callers': 'error' } },
+  { files: [`${HOST_SRC}/**/*.{ts,mts,js,mjs,cjs}`], ignores: [...TESTS, '**/*.d.ts', '**/test-fixtures/**', '**/node_modules/**'], rules: { 'guard/hidden-children': 'error' } },
+  { files: [`${HOST_SRC}/**/*.{ts,mts,js,mjs}`], ignores: TESTS, rules: { 'guard/git-start': 'error' } },
+  { files: [`${HOST_SRC}/**/*.ts`], ignores: TESTS, rules: { 'guard/no-hand-coded-error': 'error', 'guard/purge-callers': 'error', 'guard/subagent-purge-callers': 'error' } },
+  { files: [`${HOST_SRC}/**/*.tsx`], ignores: ['**/*.test.tsx', '**/*.test-helpers.tsx'], rules: { 'guard/purge-callers': 'error', 'guard/subagent-purge-callers': 'error' } },
   { files: ['packages/platform/src/mock/*.ts'], ignores: ['**/*.test.ts'], rules: { 'guard/no-hand-coded-error': 'error' } },
   // The app runtime does not lean on what carries it; the external app runtime borrows only the named physics modules
   {
