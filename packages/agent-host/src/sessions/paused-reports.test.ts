@@ -219,6 +219,10 @@ describe('a child that waits on its own background work (#721)', () => {
     // The work's turn, then their message into it: the turn is no longer the caller's alone to add to
     h.event({ type: 'background_tasks', sessionId: child, live: [], ended: [{ ...verify, status: 'completed' }] })
     h.event({ type: 'state_change', sessionId: child, state: 'working' })
+    // The caller's note goes in while it is only the work's (and the person's earlier turn did not close the report)
+    const before0 = h.sent.length
+    expect(await w.mgr.agentSession(caller, { sessionId: child, action: 'send', text: 'first note', ifBusy: 'note' })).toMatchObject({ ok: true })
+    expect(h.sent.slice(before0).join(' ')).toContain('first note')
     await w.mgr.send(child, 'also the lint please')
     const before = h.sent.length
     const typed = await w.mgr.agentSession(caller, { sessionId: child, action: 'send', text: 'use staging', ifBusy: 'note' })

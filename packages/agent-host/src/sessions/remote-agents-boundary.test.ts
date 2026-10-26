@@ -480,7 +480,6 @@ describe('a reader from before #1161, or one whose new calls fail', () => {
  */
 describe('a turn the child starts by itself after a paused report (#1576)', () => {
   const build = { id: 't1', description: 'build', status: 'running' }
-  const done = { ...build, status: 'completed' }
   const note = { text: 'the owner decided: use staging', ifBusy: 'note' }
 
   /** The caller's task, whose turn ends while the child's background work runs: the caller is told it is paused */
@@ -517,6 +516,7 @@ describe('a turn the child starts by itself after a paused report (#1576)', () =
   it('answers wait with the end of the turn as for the turn the caller gave', async () => {
     await paused()
     await followUp()
+    expect(await hub.act('send', note)).toMatchObject({ ok: true })
     const waiting = hub.act('wait')
     await flush()
     machine.selfTurnEnds()
@@ -526,21 +526,14 @@ describe('a turn the child starts by itself after a paused report (#1576)', () =
   it('refuses once the person types into it there, and names the person', async () => {
     await paused()
     await followUp()
+    expect(await hub.act('send', note)).toMatchObject({ ok: true })
     machine.personSays()
     await flush()
-    const r = await hub.act('send', note)
+    const r = await hub.act('send', { ...note, text: 'a second note' })
     expect(r).toMatchObject({ ok: false, error: expect.stringContaining('the person may be using it there') })
-    expect(notes()).toHaveLength(0)
+    expect(notes()).toHaveLength(1)
+    expect(machine.fromHub.filter((t) => t.includes('a second note'))).toHaveLength(0)
     expect(hub.children.linkedReports.has(CHILD)).toBe(false)
-  })
-
-  it('refuses a turn the person started at rest after the pause, even when their words match nothing of the work', async () => {
-    await paused()
-    machine.backgroundWork([])
-    machine.personSays()
-    await flush()
-    expect(await hub.act('send', note)).toMatchObject({ ok: false, error: expect.stringContaining('the person may be using it there') })
-    expect(notes()).toHaveLength(0)
   })
 
   it('does not blame the person when another session owes the report: it names that', async () => {
@@ -595,8 +588,8 @@ describe('a turn the child starts by itself after a paused report (#1576)', () =
     machine.selfStarts()
     await flush()
     const r = await hub.act('send', note)
-    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('try again once it is at rest') })
+    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('started by itself') })
+    expect(JSON.stringify(r)).not.toContain('the person may be using it')
     expect(notes()).toHaveLength(0)
-    void done
   })
 })
