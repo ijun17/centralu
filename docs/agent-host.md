@@ -1534,7 +1534,7 @@ the params with the method's schema and reads the answer with its result schema,
   known one. A model nobody has read a window from passes nothing at its first start and the value from the next (Settings, and the
   session's own settings menu, say so).
   **One context share (#1553).** The share shown anywhere is used / the model's full window, for Claude and Codex alike: 100% is the whole window
-  (a 1M model: 1,000k), and the compaction point is told in the tooltip, not drawn on the bar (#1572), and is not its end. The reading a tool gives is for learning from (`ModelWindows.note` reads it
+  (a 1M model: 1,000k), and the compaction point is not its end (the tooltip names it; the bar does not draw it, #1572). The reading a tool gives is for learning from (`ModelWindows.note` reads it
   against the ceiling, as above); what leaves the host is made from it once, in `SessionEvents.shareOf`, before the event is applied, stored or sent: the
   `context_update` (and so `SessionInfo.context`) carries `window` = the model's full window (`ModelWindows.shareWindow`: the reading when it is under the
   ceiling or the process has none, else the window kept for the model), `compactAt` = where the process compacts by itself, and `capped: true` when the full

@@ -115,7 +115,7 @@ test('The context gauge reads against the model’s full window and names where 
   await expect(page.getByTestId('context-gauge')).toHaveAttribute('title', /estimated until the next turn ends/)
   await expect(page.getByTestId('context-gauge-compact-mark')).toHaveCount(0)
 
-  // No control, no mark
+  // No control, no compaction point
   await emitEvent(page, 0, { type: 'context_update', used: 304000, window: 1000000, exactness: 'exact' })
   await expect(page.getByTestId('context-gauge')).toHaveText('Context 30%')
   await expect(page.getByTestId('context-gauge-compact-mark')).toHaveCount(0)

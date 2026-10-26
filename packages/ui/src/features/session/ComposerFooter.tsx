@@ -108,7 +108,7 @@ export const ComposerFooter = memo(function ComposerFooter({
         }
       >
         <span className="leading-none">Context {ctxPct === null ? '—' : `${share?.capped ? '≤' : ''}${ctxPct}%`}</span>
-        <span className="relative block h-1" aria-hidden>
+        <span className="block h-1" aria-hidden>
           <span className="block h-full overflow-hidden rounded-full bg-line">
             {ctxPct !== null && (
               <span
