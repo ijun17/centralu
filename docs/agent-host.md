@@ -773,7 +773,7 @@ machine was removed, while the hub could not see it is cleared by `list` and `de
 children's records, and a handoff gives them to the heir. In the sidebar it stands in that machine's project, among
 the sessions there and with its "Asked by <caller>" mark, since a project on another machine is a project of its own
 (#1416; #1038 first drew it under its caller, in the caller's project). The caller's row carries a quiet pointer to it,
-"2 on ijun1", one per machine, lit with the signal dot when one of them waits or has errored; pressing it opens what
+"2 on win-pc", one per machine, lit with the signal dot when one of them waits or has errored; pressing it opens what
 hides those rows and scrolls to the first (`HandedOffPointer`, `handedOffBy`, `revealSessions`). The hub names the
 caller as its `askedBy` in that machine's rows and owner events (`LinkDeps.ownerOf`, `SessionManager.remoteAgentParent`)
 and sends `session_owner` when it records the child, hands it to an heir, or forgets it with its caller; the pointer

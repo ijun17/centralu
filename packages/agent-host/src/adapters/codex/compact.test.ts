@@ -333,7 +333,7 @@ describe('codex /review — runs as a function', () => {
 
 /**
  * While compact is running, codex (0.147.0) **answers success while dropping** input that came
- * in through turn/start — measured while dogfooding (2026-09-02, MGH session): the rollout kept
+ * in through turn/start — measured in a dogfooding session (2026-09-02): the rollout kept
  * only the settings application, not a single line of the user message, and since no error came
  * back either, the screen was left showing it as sent. Upstream also classifies compact/review
  * turns as unsteerable ("cannot steer a compact turn"). So this checks whether the adapter queues

@@ -849,7 +849,7 @@ describe('catches up a session even when its cwd differs from the project path (
  * (dogfooding: "Could not load the session identifier").
  */
 /**
- * When the tool **hangs** while starting, that fact has to come back as the reason (the MGH
+ * When the tool **hangs** while starting, that fact has to come back as the reason (the real
  * resume incident).
  *
  * Waiting with no cap means the outer RPC gives up at 30s with "RPC timed out," while the

@@ -25,7 +25,7 @@ function unrefTimer(fn: () => void, ms: number): ReturnType<typeof setTimeout> {
  *
  * The `label` is the diagnosis. An unnamed timeout only ever surfaced as the outer RPC's 30-second
  * "RPC timed out: agents.resumeSession", and that message does not say **where** it stopped — when
- * an actual MGH session died that way, there was no way to find out after the fact. If each stage
+ * an actual session died that way, there was no way to find out after the fact. If each stage
  * fails carrying its own name, the next occurrence of the same incident is its own diagnosis.
  */
 export function withTimeout<T>(p: Promise<T>, ms: number, label = 'A call'): Promise<T> {

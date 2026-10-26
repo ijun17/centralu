@@ -96,8 +96,8 @@ export function askProjectTests(): void {
           kind: 'project_access',
           access: 'delegate',
           from: { id: consumer, name: 'consumer' },
-          to: { id: 'ijun1.p-cc', name: 'cc', machine: 'Windows PC', trusted: true },
-          session: { id: 'ijun1.w1', name: 'Sprites' },
+          to: { id: 'win-pc.p-cc', name: 'cc', machine: 'Windows PC', trusted: true },
+          session: { id: 'win-pc.w1', name: 'Sprites' },
           text: 'export the sprites',
         },
       })

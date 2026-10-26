@@ -134,7 +134,7 @@ export function ProjectHeader({
       */}
       {/*
         The name and its machine badge share one baseline (owner, 2026-10-20): centring their boxes, or nudging the badge
-        by a pixel, suited either a lowercase name ("cc") or a capital one ("MGH") but not both; on the baseline the
+        by a pixel, suited either a lowercase name ("cc") or a capital one ("APP") but not both; on the baseline the
         badge's text stands on the name's line whatever the case. Half the row's gap apart, so the badge reads as part of
         the name. Which linked machine it is on (#734); this computer's projects carry none.
       */}

@@ -123,7 +123,7 @@ export class FakeAdapter implements AgentAdapter {
   failCreate: string | Error | null = null
   /**
    * A situation where the tool starts but **hangs** — neither failing nor succeeding (the shape of the
-   * MGH resume incident).
+   * real resume incident).
    */
   hangCreate = false
   /**

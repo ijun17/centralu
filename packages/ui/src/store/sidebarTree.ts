@@ -3,7 +3,7 @@ import type { SessionSummary } from '@cc/core'
 /**
  * What a session handed to other machines: the sessions it started (`askedBy`) on a machine other than its own, by
  * machine (#1416). Such a child is drawn in the project that holds it, on the machine that holds it, so the parent's
- * row cannot hold it; this is what the parent's pointer ("2 on ijun1") counts and reveals. A child on the parent's own
+ * row cannot hold it; this is what the parent's pointer ("2 on win-pc") counts and reveals. A child on the parent's own
  * machine, in its project or another, is not here: it hangs under the parent, or stands as an ask_project session does.
  */
 export type HandedOff = { machine: string; sessions: SessionSummary[] }

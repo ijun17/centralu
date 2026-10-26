@@ -4,7 +4,7 @@ import { useStore } from '../../../store/store.js'
 import { groupAttention } from '../fold.js'
 
 /**
- * What a session handed to another machine (#1416): "2 on ijun1", on a line under its row, one pointer per machine.
+ * What a session handed to another machine (#1416): "2 on win-pc", on a line under its row, one pointer per machine.
  *
  * A child `start_agent` starts on a linked machine is drawn in that machine's project, with its own "Asked by" mark,
  * not under the session that asked: a project on another machine is a project of its own. So the parent has no row of

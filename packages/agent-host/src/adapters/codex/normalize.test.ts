@@ -167,13 +167,13 @@ describe('streaming and tool calls', () => {
   it('an MCP call card shows arguments too — the argument is what distinguishes two calls of the same tool', () => {
     const out = n('item/started', {
       item: {
-        type: 'mcpToolCall', id: 'm0', server: 'msw-mcp', tool: 'mlua_api_retriever',
+        type: 'mcpToolCall', id: 'm0', server: 'docs-mcp', tool: 'api_retriever',
         status: 'inProgress', arguments: { query: 'Struct' },
       },
     })
     expect(out[0]).toMatchObject({ type: 'tool_call' })
     expect((out[0] as { summary: { title: string } }).summary.title).toBe(
-      'msw-mcp: mlua_api_retriever {query: Struct}',
+      'docs-mcp: api_retriever {query: Struct}',
     )
   })
 
@@ -225,7 +225,7 @@ describe('streaming and tool calls', () => {
   it('an MCP failure carries a reason — an empty card says nothing', () => {
     const out = n('item/completed', {
       item: {
-        type: 'mcpToolCall', id: 'm1', server: 'msw-mcp', tool: 'mlua_document_retriever',
+        type: 'mcpToolCall', id: 'm1', server: 'docs-mcp', tool: 'document_retriever',
         status: 'failed', error: { message: 'unexpected error' }, result: null,
       },
     })
@@ -235,7 +235,7 @@ describe('streaming and tool calls', () => {
   it('an MCP success carries the answer body', () => {
     const out = n('item/completed', {
       item: {
-        type: 'mcpToolCall', id: 'm2', server: 'msw-mcp', tool: 'mlua_api_retriever',
+        type: 'mcpToolCall', id: 'm2', server: 'docs-mcp', tool: 'api_retriever',
         status: 'completed', error: null,
         result: { content: [{ type: 'text', text: 'first line' }, { type: 'text', text: 'second line' }] },
       },

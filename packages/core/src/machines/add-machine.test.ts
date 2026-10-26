@@ -2,15 +2,15 @@ import { describe, expect, it } from 'vitest'
 import type { MachineProbe } from '@cc/protocol'
 import { firstChoice, probeChoices, probeProblem, sshHostDetail } from './add-machine.js'
 
-const probe = (p: Partial<MachineProbe>): MachineProbe => ({ sshTarget: 'ijun1', reachable: true, os: null, windowsShell: null, wslDistros: [], error: null, ...p })
+const probe = (p: Partial<MachineProbe>): MachineProbe => ({ sshTarget: 'win-pc', reachable: true, os: null, windowsShell: null, wslDistros: [], error: null, ...p })
 
 describe('the Add machine dialog’s rows (#514)', () => {
   it('a Windows PC under cmd.exe with WSL: Windows, then each distro, the default first, ready to add', () => {
-    const rows = probeChoices('ijun1', probe({ os: 'windows', windowsShell: 'cmd', wslDistros: [{ name: 'Ubuntu', default: true }, { name: 'Debian', default: false }] }), [])
+    const rows = probeChoices('win-pc', probe({ os: 'windows', windowsShell: 'cmd', wslDistros: [{ name: 'Ubuntu', default: true }, { name: 'Debian', default: false }] }), [])
     expect(rows.map(({ key, label, detail, shell, wslDistro, name, linkedAs }) => ({ key, label, detail, shell, wslDistro, name, linkedAs }))).toEqual([
-      { key: 'windows', label: 'Windows', detail: 'cmd.exe answers ssh', shell: 'powershell', wslDistro: null, name: 'ijun1', linkedAs: null },
-      { key: 'wsl:Ubuntu', label: 'WSL (Ubuntu)', detail: 'The default distro', shell: 'wsl', wslDistro: 'Ubuntu', name: 'ijun1 Ubuntu', linkedAs: null },
-      { key: 'wsl:Debian', label: 'WSL (Debian)', detail: null, shell: 'wsl', wslDistro: 'Debian', name: 'ijun1 Debian', linkedAs: null },
+      { key: 'windows', label: 'Windows', detail: 'cmd.exe answers ssh', shell: 'powershell', wslDistro: null, name: 'win-pc', linkedAs: null },
+      { key: 'wsl:Ubuntu', label: 'WSL (Ubuntu)', detail: 'The default distro', shell: 'wsl', wslDistro: 'Ubuntu', name: 'win-pc Ubuntu', linkedAs: null },
+      { key: 'wsl:Debian', label: 'WSL (Debian)', detail: null, shell: 'wsl', wslDistro: 'Debian', name: 'win-pc Debian', linkedAs: null },
     ])
     expect(firstChoice(rows)?.key).toBe('windows')
   })
@@ -33,13 +33,13 @@ describe('the Add machine dialog’s rows (#514)', () => {
   })
 
   it('marks what is already linked through the alias, and picks the first row that is not', () => {
-    const rows = probeChoices('ijun1', probe({ os: 'windows', wslDistros: [{ name: 'Ubuntu', default: true }] }), [
-      { machineId: 'ijun1', name: 'Gram', shell: 'powershell', wslDistro: null },
+    const rows = probeChoices('win-pc', probe({ os: 'windows', wslDistros: [{ name: 'Ubuntu', default: true }] }), [
+      { machineId: 'win-pc', name: 'Laptop', shell: 'powershell', wslDistro: null },
       { machineId: 'other', name: 'Old WSL', shell: 'wsl', wslDistro: 'Debian' },
     ])
-    expect(rows.map((r) => r.linkedAs)).toEqual(['Gram', null])
+    expect(rows.map((r) => r.linkedAs)).toEqual(['Laptop', null])
     expect(firstChoice(rows)?.key).toBe('wsl:Ubuntu')
-    const all = probeChoices('ijun1', probe({ os: 'windows', wslDistros: [{ name: 'Ubuntu', default: true }] }), [
+    const all = probeChoices('win-pc', probe({ os: 'windows', wslDistros: [{ name: 'Ubuntu', default: true }] }), [
       { machineId: 'a', name: 'A', shell: 'powershell', wslDistro: null },
       { machineId: 'b', name: 'B', shell: 'wsl', wslDistro: 'ubuntu' },
     ])
@@ -47,7 +47,7 @@ describe('the Add machine dialog’s rows (#514)', () => {
   })
 
   it('shows what ssh -G resolved as user@host, with a port other than 22', () => {
-    expect(sshHostDetail({ alias: 'ijun1', hostName: 'jun.ts.net', user: 'ijun1', port: 38222 })).toBe('ijun1@jun.ts.net:38222')
+    expect(sshHostDetail({ alias: 'win-pc', hostName: 'win-pc.example.ts.net', user: 'user', port: 2222 })).toBe('user@win-pc.example.ts.net:2222')
     expect(sshHostDetail({ alias: 'box', hostName: 'box.lan', user: null, port: 22 })).toBe('box.lan')
     expect(sshHostDetail({ alias: 'box', hostName: null, user: null, port: null })).toBeNull()
   })
@@ -55,20 +55,20 @@ describe('the Add machine dialog’s rows (#514)', () => {
 
 describe('what a probe that told nothing says', () => {
   it('not reached: the link’s own words for ssh’s failure, with a step that fits a dialog', () => {
-    expect(probeProblem(probe({ reachable: false, error: 'ijun1: Permission denied (publickey).' }))).toEqual({
-      title: 'ijun1 did not accept your ssh key',
+    expect(probeProblem(probe({ reachable: false, error: 'win-pc: Permission denied (publickey).' }))).toEqual({
+      title: 'win-pc did not accept your ssh key',
       fix: 'Your key is probably not loaded: run `ssh-add` in a terminal (or add the key to ~/.ssh/config), then pick it again',
     })
     expect(probeProblem(probe({ reachable: false, error: 'ssh: connect to host x port 22: Operation timed out' }))).toEqual({
-      title: 'ijun1 does not answer',
+      title: 'win-pc does not answer',
       fix: 'It may be asleep, off or on another network',
     })
-    expect(probeProblem(probe({ reachable: false, error: 'Host key verification failed.' }))?.fix).toBe('Run `ssh ijun1` once in a terminal and answer yes, then pick it again')
+    expect(probeProblem(probe({ reachable: false, error: 'Host key verification failed.' }))?.fix).toBe('Run `ssh win-pc` once in a terminal and answer yes, then pick it again')
   })
 
   it('reached but not recognised: says so, and leaves the choice to the person', () => {
     expect(probeProblem(probe({ os: null, error: 'This account is restricted' }))).toEqual({
-      title: 'Could not tell what runs on ijun1: This account is restricted',
+      title: 'Could not tell what runs on win-pc: This account is restricted',
       fix: 'Enter it by hand, and choose what it runs',
     })
     expect(probeProblem(probe({ os: 'posix' }))).toBeNull()

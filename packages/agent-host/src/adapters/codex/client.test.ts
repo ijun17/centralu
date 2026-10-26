@@ -74,7 +74,7 @@ describe('codex app-server exit judgment', () => {
 })
 
 /**
- * A very long line does not get chopped up (the actual culprit behind the MGH resume incident).
+ * A very long line does not get chopped up (the actual culprit behind a real resume incident).
  *
  * `readline.createInterface` silently split a 23,244,422-byte `thread/resume` response into
  * 22,049,101 bytes plus the remainder — neither piece was valid JSON anymore, the response was
