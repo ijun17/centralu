@@ -2871,9 +2871,9 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
       const reported = told().filter((t) => t.startsWith('[Centralu] The assigned work finished'))
       expect(reported[1]).toContain('echo: ')
       expect(reported[1]).toContain('a plain note')
-      expect(reported[1]).not.toContain('answered: yes')
+      expect(reported[1]).not.toContain('answered: Yes')
       // And a wait or a status after it reads the same words
-      expect(await agent(r.sessionId, 'status')).toMatchObject({ ok: true, state: 'at_rest', answer: expect.not.stringContaining('answered: yes') })
+      expect(await agent(r.sessionId, 'status')).toMatchObject({ ok: true, state: 'at_rest', answer: expect.not.stringContaining('answered: Yes') })
       expect(remote.store.messages.loadMessages(id, 50).filter((m) => m.role === 'assistant' && m.kind === 'text')).toHaveLength(2)
     })
 

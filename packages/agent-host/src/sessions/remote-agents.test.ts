@@ -421,6 +421,15 @@ describe("the turn on the child's machine, read as the caller's only on evidence
       expect(sentTexts).toHaveLength(2)
     })
 
+    it("is the caller's when the machine names the message on a second event of the turn, after the one that opened it (Codex)", async () => {
+      const ra = await afterNote()
+      opens(ra)
+      expect(reportOwed()).toBe(false)
+      opens(ra, { seq: NOTE_ROW, from: named })
+      expect(reportOwed()).toBe(true)
+      expect(await act(ra, 'send', { text: 'and the keys' })).toMatchObject({ ok: true, state: 'working' })
+    })
+
     it("is taken for the caller's by what the machine says, not by how long after the last turn it began", async () => {
       const ra = await afterNote()
       const now = Date.now()
