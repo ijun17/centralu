@@ -79,7 +79,7 @@ function decidesOn(platform: Platform, setup: Setup, env: Record<string, string>
     const fromTools = Object.fromEntries(Object.entries(s.tools).map(([t, on]) => [['write', 'edit', 'patch'].includes(t) ? 'edit' : t, on ? 'allow' : 'deny']))
     s.permission = merge(fromTools, s.permission ?? {})
   }
-  const own = isObj(s.agent) && isObj(s.agent[agent]) ? (s.agent[agent] as Obj) : {}
+  const own = isObj(s.agent) && isObj(s.agent[agent]) ? (s.agent[agent]) : {}
   const ruleset = [...rules(DEFAULTS), ...rules(NATIVE[agent] ?? {}), ...rules(s.permission ?? {}), ...rules(own.permission ?? {})]
   return ruleset.findLast((r) => glob(platform, tool, r.permission) && glob(platform, pattern, r.pattern))?.action ?? 'ask'
 }

@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, extname, join, relative } from 'node:path'
 import { isObj, type Obj } from '../../json-value.js'
+import { systemSettingsFolder } from '../../os.js'
 import type { OpenCodeConfigs } from './config.js'
 
 /**
@@ -42,8 +43,7 @@ function foldersUp(cwd: string): string[] {
 
 function managedFolder(env: Readonly<Record<string, string | undefined>>): string {
   if (env.OPENCODE_TEST_MANAGED_CONFIG_DIR) return env.OPENCODE_TEST_MANAGED_CONFIG_DIR
-  if (process.platform === 'win32') return join(env.ProgramData || 'C:\\ProgramData', 'opencode')
-  return process.platform === 'darwin' ? '/Library/Application Support/opencode' : '/etc/opencode'
+  return systemSettingsFolder('opencode', env)
 }
 
 function readConfig(path: string): Obj | null {

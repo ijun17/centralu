@@ -1,5 +1,6 @@
 import type { PermissionPreset } from '@cc/protocol'
 import { asObj, isObj, jsonObject, type Obj } from '../../json-value.js'
+import { HOST_PLATFORM, openCodeMatchesAnyCase, type Platform } from '../../os.js'
 
 /**
  * What the person's OpenCode reads besides Centralu's inline config (`config-files.ts` finds it): every config object
@@ -25,7 +26,7 @@ export const NO_CONFIGS: OpenCodeConfigs = { layers: [], agentFiles: [] }
  * the turn is stopped (#1565 Mac re-check, case E). So under `safe` and `normal`, what would ask under any other agent
  * is denied: the subagent is told so and its turn ends, and the agent Centralu runs, which can ask, may try itself.
  */
-export function presetEnv(preset: PermissionPreset, env: Readonly<Record<string, string | undefined>>, configs: OpenCodeConfigs, platform: NodeJS.Platform = process.platform): Record<string, string> {
+export function presetEnv(preset: PermissionPreset, env: Readonly<Record<string, string | undefined>>, configs: OpenCodeConfigs, platform: Platform = HOST_PLATFORM): Record<string, string> {
   if (preset === 'auto') return {}
   const theirs = jsonObject(env.OPENCODE_CONFIG_CONTENT ?? '')
   const all = [...configs.layers, theirs, ...(env.OPENCODE_PERMISSION === undefined ? [] : [{ permission: jsonObject(env.OPENCODE_PERMISSION) }])]
@@ -196,8 +197,8 @@ type Match = (value: string, pattern: string) => boolean
  * OpenCode's match of a permission name or pattern (1.19.4, `Wildcard.match`, read in its Windows, macOS and Linux
  * builds): `*` any run, `?` one character; any case on Windows only (its flags are `si` there, `s` elsewhere)
  */
-function matcher(platform: NodeJS.Platform): Match {
-  const flags = platform === 'win32' ? 'si' : 's'
+function matcher(platform: Platform): Match {
+  const flags = openCodeMatchesAnyCase(platform) ? 'si' : 's'
   return (value, pattern) => {
     const re = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')
     return new RegExp(`^${re.endsWith(' .*') ? `${re.slice(0, -3)}( .*)?` : re}$`, flags).test(value)
