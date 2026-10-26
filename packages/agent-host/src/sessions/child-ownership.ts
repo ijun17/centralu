@@ -205,6 +205,8 @@ export class ChildOwnership {
    * work's, as every turn was.
    */
   private readonly starters = new Map<string, TurnStarter>()
+  /** Turns the tool started by itself, no message behind them (`turnStarted`, #1576); memory only, a swap forgets it */
+  private readonly cliTurns = new Set<string>()
   private readonly lastBy = new Map<string, 'person' | 'work'>()
   /** Messages that went into the running turn and may not have been taken into it (#1377), by session */
   private readonly pending = new Map<string, PendingMessage[]>()
@@ -615,6 +617,8 @@ export class ChildOwnership {
     const next = found && Date.now() - found.at < NEXT_STARTER_MS ? found : undefined
     const { at: _at, ...starter } = next ?? { by: 'work' as const, at: 0 }
     this.starters.set(sessionId, starter)
+    if (next) this.cliTurns.delete(sessionId)
+    else this.cliTurns.add(sessionId)
     this.persistTurn(sessionId)
     const source = next ? (this.nextSource.get(sessionId) ?? 'caller') : 'caller'
     this.nextSource.delete(sessionId)
@@ -635,6 +639,7 @@ export class ChildOwnership {
   turnEnded(sessionId: string, taken?: readonly string[] | null): TurnStarter {
     const starter: TurnStarter = { ...(this.starters.get(sessionId) ?? { by: 'work' as const }) }
     this.starters.delete(sessionId)
+    this.cliTurns.delete(sessionId)
     const pending = this.pending.get(sessionId) ?? []
     this.pending.delete(sessionId)
     for (const p of pending) {
@@ -648,6 +653,26 @@ export class ChildOwnership {
     this.lastBy.set(sessionId, starter.by)
     this.store.settings.deleteAppSetting(reportTurnKey(sessionId))
     return starter
+  }
+  /**
+   * Whether the turn running is the paused work's continuing (#1576): the caller's report is held over the session's own
+   * background work, and the turn the tool started when that work ended is the work's (`turnStarted`, no message began
+   * it) with no person's message in it. That turn's end is the report the caller is owed, so it is the caller's too.
+   * The one place that says so, as `reportBackIfAwaited` reads the same turn for its report
+   */
+  continuesPause(sessionId: string, callerId: string): boolean {
+    if (this.reports.get(sessionId) !== callerId || !this.paused.has(sessionId)) return false
+    // A turn the mailbox started for another owner's thread, or one given to another caller, is theirs
+    const owner = this.turns.get(sessionId)?.callerId
+    if ((owner && owner !== callerId) || (this.mailTurns.get(sessionId) && this.mailTurns.get(sessionId)?.ownerId !== callerId)) return false
+    const starter = this.starters.get(sessionId)
+    // Only the tool's own continuation: a message with a `from`, an app's or a script's also starts a 'work' turn, and is not it
+    return this.cliTurns.has(sessionId) && starter?.by === 'work' && !this.personInTurn(sessionId)
+  }
+  /** Whether a person started the running turn or wrote into it (#1576): a refusal says "the person may be using it" for no other */
+  personInTurn(sessionId: string): boolean {
+    const starter = this.starters.get(sessionId)
+    return starter?.by !== 'work' || !!starter.wrote || !!starter.added || (this.pending.get(sessionId) ?? []).some((p) => p.by === 'person')
   }
   /** Whose the session's last turn was (#1377): its last response is the person's answer when it was theirs */
   lastTurnBy(sessionId: string): 'person' | 'work' | undefined {

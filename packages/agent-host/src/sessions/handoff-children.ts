@@ -3,6 +3,8 @@ import { oneLineText } from '@cc/protocol'
 import type { DelegationHost } from './delegation-flow.js'
 import type { QueuedRequestsHost } from './queued-requests.js'
 import type { SessionTrashHost } from './session-trash.js'
+import type { HandedOverThread, HandOverScope } from '../mail/service.js'
+import { parseAddress } from '../mail/address.js'
 
 /**
  * One piece of the original's live work a handoff moved to the session that took over (#693), as the handoff note
@@ -11,7 +13,7 @@ import type { SessionTrashHost } from './session-trash.js'
  * depends on what moved: a child it now started, a turn it now owns in a session it did not start, another project's
  * session, a queued request, a standing card.
  */
-export type MovedChild = { handle: string; name: string; state: string; can: string; project?: string; request?: boolean }
+export type MovedChild = { handle: string; name: string; state: string; can: string; project?: string; request?: boolean; /** A mail thread the original was in (#1574): the handle is the thread's id */ thread?: boolean }
 
 /** A moved child with nothing owed (#738): finished and reported, and often waiting for the next instruction */
 const SETTLED_CHILD = 'finished; waiting for more work'
@@ -24,8 +26,15 @@ export function movedChildrenNote(moved: readonly MovedChild[], commands = ''): 
   return [
     '## Work handed over with this note (added by Centralu)',
     '',
-    'The previous session started or asked for these. They now answer to you as each line says (a finished one waits',
-    'for more work); use the handle with the tool it names.',
+    ...(moved.some((c) => c.thread)
+      ? [
+          'The previous session started or asked for these, or held these mail threads. They are yours now as each line says',
+          '(a finished session waits for more work); use the handle with the tool it names.',
+        ]
+      : [
+          'The previous session started or asked for these. They now answer to you as each line says (a finished one waits',
+          'for more work); use the handle with the tool it names.',
+        ]),
     ...(commands ? [commands] : []),
     '',
     ...moved.map((c) => `- ${movedLabel(c)} — ${c.state} — handle: ${c.handle}. ${c.can}`),
@@ -36,8 +45,9 @@ export function movedChildrenNote(moved: readonly MovedChild[], commands = ''): 
   ].join('\n')
 }
 
-function movedLabel(c: Pick<MovedChild, 'name' | 'project' | 'request'>): string {
+function movedLabel(c: Pick<MovedChild, 'name' | 'project' | 'request' | 'thread'>): string {
   if (c.request) return 'start_agent request'
+  if (c.thread) return `mail thread "${oneLineText(c.name, 120)}"`
   return `"${oneLineText(c.name, 120)}"${c.project ? ` (project ${c.project})` : ''}`
 }
 
@@ -47,10 +57,12 @@ function movedLabel(c: Pick<MovedChild, 'name' | 'project' | 'request'>): string
  * when used, never kept.
  */
 export type HandoffChildrenHost = Pick<DelegationHost, 'children' | 'emit' | 'meta' | 'nameOf' | 'onEvent' | 'store'> &
-  Pick<SessionTrashHost, 'delegationFlow' | 'hostCards'> &
+  Pick<SessionTrashHost, 'delegationFlow' | 'hostCards' | 'mailPoke'> &
   Pick<QueuedRequestsHost, 'turnRunning'> & {
     /** Requests of a session that only `auto` let through, dropped when they would go on without it (#606) */
     dropOpenedByAuto: (sessionId: string, tell?: string) => void
+    /** The original's mail, moved to the successor inside the store's transaction (`MailService.handOver`, #1574); nothing without a mailbox */
+    mailHandOver: (fromSessionId: string, toSessionId: string, which: HandOverScope) => HandedOverThread[]
   }
 
 /**
@@ -175,18 +187,40 @@ export class HandoffChildren {
             can: 'The card stands in your session; if the person allows it, the session it starts is yours and its report comes to you. agent_session (status, wait, stop) works on the handle meanwhile.',
           })
     }
-    if (!moved.length) return []
+    /*
+     * The original's mail moves in the same transaction (#1574, docs/plans/mailbox.md §4.1). An original that goes gives every thread
+     * it is in; one that stays gives the threads of the work that moved, those it owns with a moved child as assignee, so the child's
+     * report lands in the thread the successor now owns. The rest stays with an original that stays, as a settled child does: it is
+     * still there to read and answer it, and work it was given is its own until it goes, when all of it moves (scope `removed`)
+     */
+    const mailWhich = scope === 'live' ? (sessions.length ? { assignees: sessions } : null) : 'all'
+    if (!moved.length && mailWhich === null) return []
+    let threads: HandedOverThread[] = []
     try {
-      this.host.store.children.moveChildren(from, to, {
-        sessions,
-        startRequests: starts.map((r) => ({ requestId: r.req.requestId, request: { ...r.req, callerId: to } })),
-        armReports,
-        queued: !removed,
-      })
+      this.host.store.children.moveChildren(
+        from,
+        to,
+        {
+          sessions,
+          startRequests: starts.map((r) => ({ requestId: r.req.requestId, request: { ...r.req, callerId: to } })),
+          armReports,
+          // With no child moving, the memory side does not run, so the queue's rows do not move either
+          queued: !removed && moved.length > 0,
+        },
+        mailWhich === null ? undefined : () => void (threads = this.host.mailHandOver(from, to, mailWhich)),
+      )
     } catch (e) {
-      console.error(`[agent-host] handoff left the children with ${from.slice(0, 8)}: ${(e as Error).message}`)
+      console.error(`[agent-host] handoff left the children and the mail with ${from.slice(0, 8)}: ${(e as Error).message}`)
       return []
     }
+    const childCount = moved.length
+    moved.push(...threads.map((t) => movedThread(t)))
+    if (!moved.length) return []
+    /*
+     * The unread mail that moved waits for the successor. One being created takes it at the end of its first turn, after the note;
+     * a successor that is told now (an original removed later) is poked once the move has committed
+     */
+    if (removed && threads.some((t) => t.unread > 0)) this.host.mailPoke(to)
 
     for (const id of sessions) {
       const s = this.host.meta.get(id)!
@@ -195,7 +229,7 @@ export class HandoffChildren {
       if (s.parentSessionId === from) s.parentSessionId = to
       this.host.emit({ type: 'session_owner', sessionId: id, askedBy: s.askedBy ?? null, parentSessionId: s.parentSessionId ?? null })
     }
-    this.host.children.moveOwner(from, to, { sessions, armReports, starts, queued: !removed }, () => {
+    if (childCount) this.host.children.moveOwner(from, to, { sessions, armReports, starts, queued: !removed }, () => {
       /*
        * A start_agent card still standing (#673) moves with its request: the request object is the one the waiting setup
        * holds, so an approval starts the child for the new session. The card closes in the original and stands in the
@@ -221,7 +255,35 @@ export class HandoffChildren {
         text: `Handed over to “${heir.name}” [${to}], which follows them from now on: ${items.join('; ')}. This session no longer does.`,
       })
     }
-    console.error(`[agent-host] handoff ${from.slice(0, 8)} -> ${to.slice(0, 8)} (${scope}): moved ${sessions.length} session(s), ${starts.length} start request(s)`)
+    console.error(`[agent-host] handoff ${from.slice(0, 8)} -> ${to.slice(0, 8)} (${scope}): moved ${sessions.length} session(s), ${starts.length} start request(s), ${threads.length} mail thread(s)`)
     return moved
   }
+}
+
+/**
+ * A mail thread the handoff moved (#1574), as the note lists it: the role the successor took over in it, its state and the unread
+ * mail that now waits for the successor, and what it does with it. The handle is the thread's id, for the `mail` tool
+ */
+function movedThread(t: HandedOverThread): MovedChild {
+  const unread = t.unread ? `, ${t.unread} unread message${t.unread === 1 ? '' : 's'} now waiting for you` : ''
+  const other = (address: string | null): string => {
+    const p = address === null ? null : parseAddress(address)
+    if (!p) return 'nobody'
+    if (p.kind === 'session') return `session ${p.sessionId}`
+    return p.kind === 'person' ? 'the person' : p.kind === 'app' ? `app ${p.appId}` : 'Centralu'
+  }
+  const can =
+    t.kind === 'closed'
+      ? 'It is closed; what the previous session had not read of it waits for you. Read it with the mail tool.'
+      : t.kind === 'left'
+        ? t.role === 'owner'
+          ? 'You are its assignee and the previous session was its owner, so it did not move: once that session is archived, the person owns it.'
+          : 'You own it and the previous session had its work, so it did not move: once that session is archived, it is open with nobody on it; reassign or close it.'
+        : t.role === 'owner'
+          ? `You own it now (assignee: ${other(t.thread.assignee)}); its reports come to you in it. Read and answer it with the mail tool.`
+          : t.role === 'assignee'
+            ? `It is assigned to you now (owner: ${other(t.thread.owner)}): the work is yours to do, and your report goes to its owner. Read it with the mail tool.`
+            : "You are in it in the previous session's place. Read it with the mail tool."
+  const state = t.kind === 'closed' ? `done${t.thread.outcome ? ` (${t.thread.outcome})` : ''}` : t.thread.state
+  return { handle: t.thread.id, name: t.thread.subject, state: `${state}${unread}`, can, thread: true }
 }

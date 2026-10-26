@@ -2994,7 +2994,7 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
     await eventually(() => asked)
     expect(await agent(r.sessionId, 'status')).toMatchObject({ ok: true, state: 'working' })
     expect(await agent(r.sessionId, 'answer', 'yes', 'any.card')).toMatchObject({ ok: false, error: expect.stringContaining('not running a turn you gave it') })
-    expect(await agent(r.sessionId, 'send', 'and this')).toMatchObject({ ok: false, error: expect.stringContaining('a turn you did not give it') })
+    expect(await agent(r.sessionId, 'send', 'and this')).toMatchObject({ ok: false, error: expect.stringContaining('the hub cannot tell the owner of') })
     expect(back.mgr.listSessions().find((s) => s.id === id)?.pendingQuestions).toHaveLength(1)
   })
 

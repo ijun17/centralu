@@ -70,48 +70,15 @@ describe('SessionListRow', () => {
     }
   })
 
-  // #1416: a child started on another machine stands in that machine's project; its parent's row points there
-  describe('what the session handed to another machine', () => {
-    const child = (id: string, over: Partial<SessionSummary> = {}) => session({ id, machine: 'm1', askedBy: 's1', ...over })
-    const seed = (...children: SessionSummary[]) => {
-      state = {
-        machines: { m1: { id: 'm1', name: 'Windows PC' }, m2: { id: 'm2', name: 'Mac mini' } },
-        sessions: Object.fromEntries([session(), ...children].map((x) => [x.id, x])),
-      } as unknown as Partial<AppState>
-    }
-
-    it('says how many are on which machine, quietly, with no dot while none of them needs the person', () => {
-      seed(child('m1.a'), child('m1.b'))
-      const html = render(session(), false)
-      expect(html).toMatch(/data-testid="handed-off-s1-m1"[^>]*>(?:<span[^>]*>)?2 on Windows PC</)
-      expect(html).not.toContain('handed-off-s1-m1-attention')
-      expect(html).not.toMatch(/data-testid="handed-off-s1-m1"[^>]*data-attention/)
-    })
-
-    it('lights the pointer when one of them waits or has errored, so a stopped child is seen from its parent', () => {
-      for (const state of ['waiting_approval', 'error'] as const) {
-        seed(child('m1.a'), child('m1.b', { state }))
-        const html = render(session(), false)
-        expect(html).toMatch(/data-testid="handed-off-s1-m1"[^>]*data-attention="alert"/)
-        expect(html).toContain('handed-off-s1-m1-attention')
-        expect(html).toMatch(/aria-label="2 on Windows PC, one needs you"/)
-      }
-    })
-
-    it('has one pointer per machine, and none when the children run on its own machine or it started nothing', () => {
-      seed(child('m1.a'), child('m2.a', { machine: 'm2' }), child('l1', { machine: null }))
-      const html = render(session(), false)
-      expect(html).toMatch(/data-testid="handed-off-s1-m1"[^>]*>(?:<span[^>]*>)?1 on Windows PC</)
-      expect(html).toMatch(/data-testid="handed-off-s1-m2"[^>]*>(?:<span[^>]*>)?1 on Mac mini</)
-      expect(html).not.toContain('handed-off-s1-null')
-      seed(child('l1', { machine: null }))
-      expect(render(session(), false)).not.toContain('handed-off-')
-    })
-
-    it('draws no machine tag on the row itself: the project it stands in names the machine', () => {
-      seed()
-      expect(render(session({ id: 'm1.c1', machine: 'm1' }), false)).not.toContain('session-machine-')
-    })
+  // #1416: a child started on another machine stands in that machine's project; its row names no machine, the project does
+  it('draws no machine tag on the row itself, and no pointer to what a session handed to another machine', () => {
+    const child = session({ id: 'm1.c1', machine: 'm1', askedBy: 's1' })
+    state = {
+      machines: { m1: { id: 'm1', name: 'Windows PC' } },
+      sessions: { s1: session(), 'm1.c1': child },
+    } as unknown as Partial<AppState>
+    expect(render(child, false)).not.toContain('session-machine-')
+    expect(render(session(), false)).not.toMatch(/handed-off-| on Windows PC/)
   })
 
   // #1273: a child a linked computer's session started runs under the preset it carried; its row says which

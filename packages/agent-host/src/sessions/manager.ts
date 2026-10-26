@@ -9,6 +9,7 @@ import type { MailSessions, ReceiverState } from '../mail/delivery.js'
 import type { AnswerGiven } from '../mail/delegation.js'
 import type { MailToolArgs } from '../mail/tool.js'
 import type { TurnStart } from '../mail/turns.js'
+import type { HandedOverThread, HandOverPreview, HandOverScope } from '../mail/service.js'
 import type { ThreadOrigin } from '../dev-services/store/mail.js'
 import { QueuedRequests, type QueuedRequestsHost } from './queued-requests.js'
 import { RoutedCards, type RoutedCardsHost } from './routed-cards.js'
@@ -97,6 +98,13 @@ export type AgentProcessHost = {
 /** What the mailbox hears from the manager (#1347): a session gone, a session that may now take mail, an event the guards count */
 export type MailHooks = {
   sessionGone(sessionId: string): void
+  /**
+   * A handoff moves the original's mail to the successor (§4.1, `MailService.handOver`): every thread for an original that goes,
+   * the threads of the children that moved for one that stays. Run inside the transaction of the children's move; it throws to undo both
+   */
+  handOver?(fromSessionId: string, toSessionId: string, which: HandOverScope): HandedOverThread[]
+  /** What `handOver` would do with an original that goes, read only: the archive preview says it (#1574) */
+  handOverPreview?(fromSessionId: string, toSessionId: string): HandOverPreview
   /** The subjects of the unfinished threads the session is assigned or owns, which `sessionGone` would move on (#1512) */
   openWork?(sessionId: string): { assigned: string[]; owned: string[] }
   sessionChanged(sessionId: string): void
@@ -2245,6 +2253,15 @@ export class SessionManager {
           return self.mailHooks?.openWork?.(id) ?? { assigned: [], owned: [] }
         } catch (e) {
           console.error(`[mail] ${id.slice(0, 8)}: its open work could not be read (${errorMessage(e)})`)
+          return null
+        }
+      },
+      mailHandOver: (...a) => self.mailHooks?.handOver?.(...a) ?? [],
+      mailHandOverPreview: (from, to) => {
+        try {
+          return self.mailHooks?.handOverPreview?.(from, to) ?? { moved: [], closed: [], left: [] }
+        } catch (e) {
+          console.error(`[mail] ${from.slice(0, 8)}: what a handoff would move could not be read (${errorMessage(e)})`)
           return null
         }
       },

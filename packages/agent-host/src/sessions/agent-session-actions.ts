@@ -209,7 +209,13 @@ export class AgentSessionActions {
            * a queue, or a fork; without `ifBusy` nothing is sent and the choices come back. Its own delegation's
            * turn is not busy for it: a note into its own work goes on as before.
            */
-          if ((d && !d.settled && observing) || ((!d || d.settled) && this.host.busyForCaller(callerId, child.id))) {
+          /*
+           * The turn the child's own tool started when the work it paused on ended is the caller's work (#1576): its end is
+           * the report the caller is owed (`continuesPause`), so it is not busy for the caller. A note goes into it as an
+           * observer's does, on a wait of its own, so the report owed is not touched; it needs no `auto`
+           */
+          const continuing = (!d || d.settled) && inTurn(child.state) && this.host.children.continuesPause(child.id, callerId)
+          if ((d && !d.settled && observing) || ((!d || d.settled) && !continuing && this.host.busyForCaller(callerId, child.id))) {
             if (!opts.ifBusy) return { ok: true, tool: child.tool, ...this.host.busyAnswer(callerId, child, 'agent_session') }
             if (opts.ifBusy === 'queue') return { ok: true, tool: child.tool, ...this.host.enqueue(callerId, child, 'agent_session', opts.text ?? '') }
             if (opts.ifBusy === 'fork' || opts.ifBusy === 'fork_read') {
@@ -223,7 +229,7 @@ export class AgentSessionActions {
             if (!note.available || !d || d.settled) return { ok: false, error: `No note to "${child.name}": ${note.why ?? 'nothing is running there to add it to'}. Queue it or fork it instead.` }
             this.host.autoBoundaryOpen(callerId, 'a note into a turn that is not its own')
           }
-          if (d && !d.settled) {
+          if ((d && !d.settled) || continuing) {
             const text = agentNoteFrame(from.name, opts.text ?? '')
             if (!this.host.adapters.get(child.tool)?.capabilities.midTurnInput || !this.host.handles.get(child.id)?.sendTracked) {
               return { ok: false, error: `"${child.name}" cannot take messages while working. Wait for it (action "wait") or stop it first.` }
@@ -233,11 +239,14 @@ export class AgentSessionActions {
              * would hand the owner the reply to this note instead of its answer, or fail its whole delegation when
              * the note is refused; the owner's wait is never touched from here.
              */
-            const own = observing ? this.flow.observeTurn(child, true, true) : undefined
+            const own = observing || continuing ? this.flow.observeTurn(child, true, true) : undefined
             if (own) void own.run.wait.done.then(own.release, own.release)
-            const record = own ? { run: own.run, waiters: 0, told: false } : undefined
+            // A continued turn's note has no reader of its own for status and wait: they read the paused child as they do at any time, and its one end is the report owed
+            const record = own && !continuing ? { run: own.run, waiters: 0, told: false } : undefined
             if (record) this.host.children.setObserverNote(key, record)
-            const wait = own?.run.wait ?? d.wait
+            const run = own?.run ?? d
+            if (!run) return { ok: false, error: `No note to "${child.name}": nothing is running there to add it to.` }
+            const wait = run.wait
             const releaseHold = wait.holdInput()
             const release = () => {
               releaseHold()
@@ -248,7 +257,9 @@ export class AgentSessionActions {
                 const fail = (e: Error) => {
                   if (!record) {
                     wait.fail(e)
-                    return release()
+                    release()
+                    if (continuing) void this.flow.tellNoteRefused(callerId, child.id, e.message)
+                    return
                   }
                   wait.fail(new Error(`your note was not delivered: ${e.message}`))
                   release()
@@ -271,11 +282,15 @@ export class AgentSessionActions {
             // An observer's note is not work its owner gave (#646): only the caller's own words are written down in the mailbox
             if (!observing) this.host.children.delegated(callerId, child.id, 'agent_session', opts.text ?? '')
             // Keep the same outcome and any active wait. A send must not re-arm a report on top of that wait.
-            const working = this.flow.agentWorking(d, false, observing)
+            const working = this.flow.agentWorking(run, false, observing || continuing)
+            // The report stays owed to the caller on a continued turn: the note is not an observer's
+            if (continuing && working.ok && working.state === 'working') return { ...working, reported: this.host.children.awaitingReport.get(child.id) === callerId, via: 'note' }
             return working.ok && observing ? { ...working, via: 'note' } : working
           }
           if (inTurn(child.state) || (this.host.agentRuns.has(child.id) && !this.host.agentRuns.get(child.id)!.finished)) {
-            return { ok: false, error: `"${child.name}" is busy with something else (the person may be using it). Try again later.` }
+            // Said by what started the turn (#1576): "the person may be using it" only when a person's message did
+            const person = this.host.children.personInTurn(child.id)
+            return { ok: false, error: `"${child.name}" is busy with ${person ? 'something else (the person may be using it)' : 'a turn you did not give it (another session, or its own tool, started it)'}. Try again later.` }
           }
           // An answer the caller never came back for gives way to the new message
           if (d) this.host.children.dropDelegation(key)
