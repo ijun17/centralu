@@ -85,11 +85,24 @@ describe('touching the OS outside the OS layer', () => {
       ["import { fileURLToPath } from 'node:url'\nexport const f = fileURLToPath\n", 'url.fileURLToPath'],
       ["import { pathToFileURL as p } from 'url'\nexport const f = p\n", 'url.pathToFileURL'],
       ["import * as url from 'node:url'\nexport const f = url.fileURLToPath\n", 'url.fileURLToPath'],
+      ["import { default as u } from 'node:url'\nexport const f = u.pathToFileURL\n", 'url.pathToFileURL'],
+      ["export { fileURLToPath } from 'node:url'\n", 'url.fileURLToPath'],
+      ['const { cwd } = process\nexport const c = cwd\n', 'process.cwd'],
+      ['const { PATH: p } = process.env\nexport const c = p\n', 'process.env.PATH'],
+      ['const { env: { Path } } = process\nexport const c = Path\n', 'process.env.PATH'],
+      ['export const p = process.env[`PATH`]\n', 'process.env.PATH'],
+      ['export const c = globalThis.process.cwd()\n', 'process.cwd'],
+      ['export const c = process?.cwd()\n', 'process.cwd'],
+      ["import { cwd } from 'node:process'\nexport const c = cwd\n", 'process.cwd'],
+      ["import { env } from 'node:process'\nexport const p = env.PATH\n", 'process.env.PATH'],
+      ["import p from 'node:process'\nexport const k = p.kill\n", 'process.kill'],
     ] as const) {
       expect(await refused(HOST, code), code).toEqual([expect.stringContaining(`'${what}'`)])
     }
-    // What is the same on every OS, and what is not seen (docs/plans/os-layer.md §6.1)
+    // What is the same on every OS, a `process` of the file's own, and what is not seen (docs/plans/os-layer.md §5)
     expect(await refused(HOST, "export const a = [process.argv, process.env.HOME, process.exitCode]\nexport const k = (name: 'kill') => process[name]\n")).toEqual([])
+    expect(await refused(HOST, 'export const stop = (process: { kill(): void }) => process.kill()\n')).toEqual([])
+    expect(await refused(HOST, "import { argv, type cwd } from 'node:process'\nexport const a = argv\nexport type C = typeof cwd\n")).toEqual([])
   })
 
   it('lets the layer, its tests and the listed files touch it', async () => {
@@ -133,9 +146,9 @@ describe('the allowlist', () => {
 
   it(
     'says no more than is true: every listed file exists and still touches the OS, and every such file is listed',
-    () => {
+    async () => {
       // A file that moved behind the layer takes its line out in the same change; one that is gone does too
-      expect(osSelector().offenders(repoFiles()), `${layer.OS_ALLOWLIST} as \`tsx tooling/os-tests.ts --offenders\` prints it`).toEqual(allowlist)
+      expect(await osSelector().offenders(repoFiles()), `${layer.OS_ALLOWLIST} as \`tsx tooling/os-tests.ts --offenders\` prints it`).toEqual(allowlist)
     },
     120_000 * SLOW,
   )
@@ -277,7 +290,7 @@ describe('the tests that run on every OS', () => {
     'on the repository: every layer test and every listed test runs, no ui or core test does, and a listed run runs exactly the list',
     async () => {
       const all = await vitestFiles()
-      const picked = new Set(osSelector().selectTests(all))
+      const picked = new Set(await osSelector().selectTests(all))
       for (const t of all.filter((f) => layer.inOsLayer(f) || allowlist.includes(f))) expect(picked.has(t), t).toBe(true)
       for (const { file } of layer.EVERY_OS_TESTS) expect(picked.has(file), file).toBe(true)
       expect([...picked].filter((t) => /^packages\/(ui|core)\//.test(t))).toEqual([])
@@ -300,7 +313,7 @@ describe('a listed run (vitest.config.ts `CC_TEST_FILES`)', () => {
   }
 
   it('refuses a line that is not an existing repository path, rather than run less without a word', async () => {
-    for (const bad of ['tooling\\os-layer.test.ts', './tooling/os-layer.test.ts', 'tooling/gone.test.ts']) {
+    for (const bad of ['tooling\\os-layer.test.ts', './tooling/os-layer.test.ts', 'tooling/gone.test.ts', 'tooling/fixtures']) {
       await expect(vitestFiles(listFile(['tooling/test-timing.test.ts', bad])), bad).rejects.toThrow(/CC_TEST_FILES: '.*' is not a test file's repository path/)
     }
   }, 60_000 * SLOW)
@@ -360,7 +373,7 @@ describe("the Windows shards, split by each file's measured time", () => {
     const source = (JSON.parse(text) as { source: string }).source
     expect(formatDurations(durations, source)).toBe(text)
     // A missing file only weighs the median; most having a time is what keeps the shards even
-    const picked = osSelector().selectTests(await vitestFiles())
+    const picked = await osSelector().selectTests(await vitestFiles())
     expect(picked.filter((t) => durations[t] !== undefined).length / picked.length).toBeGreaterThan(0.8)
   }, 120_000 * SLOW)
 })

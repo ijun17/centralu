@@ -1,6 +1,6 @@
 import { defineConfig } from 'vitest/config'
 import { fileURLToPath } from 'node:url'
-import { existsSync, readFileSync } from 'node:fs'
+import { readFileSync, statSync } from 'node:fs'
 // Windows gets three times the time limits (#368); a test that sets its own limit multiplies by the same
 import { SLOW } from './tooling/test-timing.js'
 
@@ -18,14 +18,15 @@ function listedTests(text: string): string[] {
   const files = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
   // A path vitest cannot match would be left out without a word: a list is repository paths with `/`, every one a file
   for (const f of files) {
-    if (f.includes('\\') || f.startsWith('./') || !existsSync(r(`./${f}`))) throw new Error(`CC_TEST_FILES: '${f}' is not a test file's repository path`)
+    if (f.includes('\\') || f.startsWith('./') || statSync(r(`./${f}`), { throwIfNoEntry: false })?.isFile() !== true) throw new Error(`CC_TEST_FILES: '${f}' is not a test file's repository path`)
   }
   return files
 }
 const LISTED = process.env.CC_TEST_FILES ? listedTests(readFileSync(process.env.CC_TEST_FILES, 'utf8')) : null
 /*
  * The list is this run's, read once. A test that starts a vitest of its own (`tooling/vitest-stall-watch.test.ts` runs
- * a fixture) would otherwise inherit it, and its child would find none of its files on the list.
+ * a fixture) would otherwise inherit it, and its child would find none of its files on the list. In watch mode, a
+ * config change reloads this file without the list, and everything runs: CI does not watch.
  */
 delete process.env.CC_TEST_FILES
 const listed = (inAppRuntime: boolean) => (LISTED ?? []).filter((f) => f.startsWith(APP_RUNTIME_DIR) === inAppRuntime)

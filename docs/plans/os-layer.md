@@ -155,8 +155,8 @@ it), `inOsLayer` and the allowlist. `eslint.config.js` and the selection both re
 **Growing `OS_LAYER` is a deep-tier change, by design.** The allowlist can only shrink, but a file added to `OS_LAYER`
 may touch the OS without being on it, so a new entry is the one way to let new OS use in without the list growing.
 That is what the layer is for when the file carries an OS subject of its own, and a way around the rule when it does
-not. No test can tell the two apart; a reviewer can. `tooling/os-layer.js` is the host's platform code
-(`pnpm tier`), so a change to it is reviewed in a separate deep review session.
+not. No test can tell the two apart; a reviewer can. `tooling/os-layer.js` is a guard (`tooling/**` in
+`.centralu/tiers.json`), so `pnpm tier` rates a change to it deep, and it is reviewed in a separate deep review session.
 
 ## 4. What the layer owns
 
@@ -187,8 +187,11 @@ reported. Build and release scripts, tooling and e2e are not checked: they work 
 
 It also reports the OS reached without importing an OS module: `process.kill`, `process.cwd()`, `process.chdir()`,
 `process.execPath` and `process.env.PATH` (any case, as Windows reads it) (`OS_PROCESS_USES`), and `fileURLToPath`
-and `pathToFileURL` imported from `node:url` (`OS_NAMED_EXPORTS`), which convert by the OS's path rules. Not seen:
-`process[name]`, a computed `import()`, and a `require` made by `createRequire` under another name.
+and `pathToFileURL` from `node:url` (`OS_NAMED_EXPORTS`), which convert by the OS's path rules. `process` is Node's
+unless the file declares its own, also as `globalThis.process` or through `node:process`; a use counts as a member
+(`env['Path']`, ``env[`PATH`]``) or in an object pattern (`const { cwd } = process`). Not seen: a computed key
+(`process[name]`), `process.env` or a `node:url` namespace kept in a variable and read later, `require('node:url')`
+read in place, a computed `import()`, and a `require` made by `createRequire` under another name.
 
 `tooling/os-layer.test.ts` holds the list to the truth and lets it only shrink:
 
@@ -227,8 +230,7 @@ and the `@cc/*` aliases resolve, and one that cannot fails the script rather tha
 scripts do not count in (4): a tooling test that reads the repository with `fs` (a guard) runs on Linux only, while one
 that imports the launcher or a host helper that starts processes runs everywhere.
 
-Not seen: a computed specifier, a `require` made by `createRequire` under another name, `process[name]`, and a
-process started by path (`EVERY_OS_TESTS` names those, `launcher-node-floor` today). Modules outside the list
+Not seen: what §5 lists as not seen by the rule, and a process started by path (`EVERY_OS_TESTS` names those, `launcher-node-floor` today). Modules outside the list
 (`node:crypto`, `node:url` but its path conversions) do not count.
 
 ### 6.2 Where it applies

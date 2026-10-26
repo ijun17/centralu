@@ -4,7 +4,8 @@
  * A test runs on every OS when it touches the OS, or anything it imports does, directly or through other modules.
  * "Touches the OS" is asked of each file with the lint rules themselves (tooling/eslint-platform-checks.js), so the
  * selection cannot disagree with the lint:
- * - `local/os-imports`, everywhere: it imports an OS module (`node:fs`, `node:child_process`, …);
+ * - `local/os-imports`, everywhere: it imports an OS module (`node:fs`, `node:child_process`, …), or reaches the OS
+ *   through `process` (`process.kill`, `process.cwd()`, `process.env.PATH`, …) or `node:url`'s path conversions;
  * - `local/platform-checks`: it asks which OS this is (`process.platform`, `=== 'win32'`), as a test that skips a
  *   case on an OS does;
  * - or it is in the OS layer (tooling/os-layer.js `inOsLayer`), or named in `EVERY_OS_TESTS`.
@@ -162,12 +163,26 @@ export function osSelector(virtual: ReadonlyMap<string, string> = new Map()) {
     return null
   }
 
+  /**
+   * The files of `files` that `keep` keeps, giving the event loop a turn after each: scanning the repository takes
+   * 10–50 s, and in a test, one synchronous stretch that long fails it in the stall watch (tooling/vitest-stall-setup.ts,
+   * #368) and, past 60 s, the whole vitest run.
+   */
+  async function filterYielding(files: readonly string[], keep: (f: string) => boolean): Promise<string[]> {
+    const out: string[] = []
+    for (const f of files) {
+      if (keep(f)) out.push(f)
+      await new Promise((done) => setImmediate(done))
+    }
+    return out
+  }
+
   /** The tests that run on every OS, of `tests` */
-  const selectTests = (tests: readonly string[]): string[] => tests.filter((t) => whyEveryOs(t) !== null)
+  const selectTests = (tests: readonly string[]): Promise<string[]> => filterYielding(tests, (t) => whyEveryOs(t) !== null)
 
   /** The checked files that import an OS module outside the layer: what the allowlist holds */
-  const offenders = (files: readonly string[]): string[] =>
-    files.filter((f) => isChecked(f) && CODE.test(f) && !inOsLayer(f) && scanFile(f).touchesOs).sort()
+  const offenders = async (files: readonly string[]): Promise<string[]> =>
+    (await filterYielding(files, (f) => isChecked(f) && CODE.test(f) && !inOsLayer(f) && scanFile(f).touchesOs)).sort()
 
   return { scanFile, resolveImport, whyEveryOs, selectTests, offenders, isFile }
 }
@@ -189,13 +204,15 @@ export async function vitestFiles(listed?: string): Promise<string[]> {
   const env = process.env.CC_TEST_FILES
   if (listed === undefined) delete process.env.CC_TEST_FILES
   else process.env.CC_TEST_FILES = listed
-  const vitest = await createVitest('test', { watch: false, run: true, config: `${ROOT}vitest.config.ts` }, {}, {})
+  let vitest: Awaited<ReturnType<typeof createVitest>> | undefined
   try {
+    // Inside the try: a config that refuses the list throws here, and the variable is still put back
+    vitest = await createVitest('test', { watch: false, run: true, config: `${ROOT}vitest.config.ts` }, {}, {})
     const specs = await vitest.globTestSpecifications()
     const files = [...new Set(specs.map((s) => posix.relative(ROOT.replace(/\\/g, '/'), s.moduleId.replace(/\\/g, '/'))))]
     return files.sort()
   } finally {
-    await vitest.close()
+    await vitest?.close()
     if (env === undefined) delete process.env.CC_TEST_FILES
     else process.env.CC_TEST_FILES = env
   }
@@ -274,7 +291,7 @@ export function formatDurations(durations: Durations, source: string): string {
 
 async function main(argv: string[]) {
   if (argv.includes('--offenders')) {
-    process.stdout.write(repo.offenders(repoFiles()).join('\n') + '\n')
+    process.stdout.write((await repo.offenders(repoFiles())).join('\n') + '\n')
     return
   }
   if (argv.includes('--refresh-durations')) {
@@ -292,7 +309,7 @@ async function main(argv: string[]) {
   const shard = shardArg === undefined ? null : /^(\d+)\/(\d+)$/.exec(shardArg)
   if (shardArg !== undefined && (!shard || Number(shard[1]) < 1 || Number(shard[1]) > Number(shard[2]))) throw new Error(`--shard ${shardArg}: expected i/n with 1 <= i <= n`)
   const all = await vitestFiles()
-  const picked = repo.selectTests(all)
+  const picked = await repo.selectTests(all)
   const why = argv.includes('--why')
   if (shard) {
     const durations = readDurations()

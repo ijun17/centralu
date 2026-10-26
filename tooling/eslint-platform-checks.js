@@ -18,8 +18,7 @@ const OS_NAMES = new Set(['aix', 'android', 'cygwin', 'darwin', 'freebsd', 'haik
 
 const isOsName = (node) => node?.type === 'Literal' && typeof node.value === 'string' && OS_NAMES.has(node.value)
 
-const propertyName = (node) =>
-  node.computed ? (node.property.type === 'Literal' ? node.property.value : null) : node.property.name
+const propertyName = (node) => (node.computed ? constantString(node.property) : node.property.name)
 
 /** `os` / `node:os` default or namespace import names, per file */
 const OS_MODULES = new Set(['os', 'node:os'])
@@ -71,12 +70,11 @@ const SAME_ON_EVERY_OS = new Set(['posix', 'win32'])
 const importedName = (s) => (s.imported.type === 'Identifier' ? s.imported.name : s.imported.value)
 
 /** A string a node spells out whole: a string literal, or a template literal with nothing interpolated */
-const constantString = (node) =>
-  node?.type === 'Literal' && typeof node.value === 'string'
-    ? node.value
-    : node?.type === 'TemplateLiteral' && node.expressions.length === 0
-      ? (node.quasis[0]?.value.cooked ?? null)
-      : null
+function constantString(node) {
+  if (node?.type === 'Literal' && typeof node.value === 'string') return node.value
+  if (node?.type === 'TemplateLiteral' && node.expressions.length === 0) return node.quasis[0]?.value.cooked ?? null
+  return null
+}
 
 /**
  * The module specifier a node loads, as written, or null: a static import, `export … from`, `import()`, `require()`,
@@ -130,9 +128,11 @@ const namedExportsModule = (specifier) => {
   return typeof name === 'string' && Object.hasOwn(OS_NAMED_EXPORTS, name) ? name : null
 }
 
-/** `process.env` */
-const isProcessEnv = (node) =>
-  node.type === 'MemberExpression' && node.object.type === 'Identifier' && node.object.name === 'process' && propertyName(node) === 'env'
+/** `process` and `node:process`, the module Node's `process` object also is */
+const PROCESS_MODULES = new Set(['process', 'node:process'])
+
+/** A key of an object pattern (`const { cwd } = process`), when spelled out */
+const patternKey = (p) => (p.type !== 'Property' ? null : p.computed ? constantString(p.key) : p.key.type === 'Identifier' ? p.key.name : constantString(p.key))
 
 /** A path relative to the repository, with `/` */
 const repoPath = (filename) => relative(REPO_ROOT, filename).split(sep).join('/')
@@ -151,8 +151,13 @@ const osAllowlist = () => (allowlist ??= new Set(readOsAllowlist()))
  * shrink (tooling/os-layer.test.ts). Code that needs a file, a path, a process or the OS asks the layer.
  *
  * `{ everywhere: true }` reports every such import wherever it is: how tooling/os-tests.ts asks the same question
- * of any file, to pick the tests that run on every OS. Not seen: `process[name]`, a computed `import()`, and a
- * `require` made by `createRequire` under another name.
+ * of any file, to pick the tests that run on every OS.
+ *
+ * `process` is Node's own unless the file declares a `process` of its own (then it is that), and also reached as
+ * `globalThis.process` and through `node:process`; a use is seen as a member (`process.cwd()`, `env['Path']`) or in an
+ * object pattern (`const { cwd } = process`, `const { PATH } = process.env`). Not seen: a computed key
+ * (`process[name]`), `process.env` or a `node:url` namespace kept in a variable and read later, `require('node:url')`
+ * read in place, a computed `import()`, and a `require` made by `createRequire` under another name.
  */
 export const osImports = {
   meta: {
@@ -171,29 +176,88 @@ export const osImports = {
       const module = touchedBy(node)
       if (module) report(node, module)
     }
-    // The local names of a namespace or default import of a module `OS_NAMED_EXPORTS` names: `url.fileURLToPath`
+    // Local names bound by imports: of `node:process` (the object, or its `env`), and the object of a module
+    // `OS_NAMED_EXPORTS` names (`import * as url from 'node:url'`)
+    const processNames = new Set()
+    const envNames = new Set()
     const namespaces = new Map()
+    const sourceCode = context.sourceCode
+    /** Is `id` Node's `process`: the global one, unless the file declares its own, or one imported from node:process */
+    const isNodeProcess = (id) => {
+      for (let scope = sourceCode.getScope(id); scope; scope = scope.upper) {
+        const v = scope.set.get(id.name)
+        if (v && v.defs.length > 0) return v.defs.every((d) => d.type === 'ImportBinding') && processNames.has(id.name)
+      }
+      return id.name === 'process'
+    }
+    const isProcess = (node) =>
+      (node.type === 'Identifier' && isNodeProcess(node)) ||
+      (node.type === 'MemberExpression' && node.object.type === 'Identifier' && node.object.name === 'globalThis' && propertyName(node) === 'process')
+    const isEnv = (node) =>
+      (node.type === 'MemberExpression' && isProcess(node.object) && propertyName(node) === 'env') || (node.type === 'Identifier' && envNames.has(node.name))
+    const isPath = (name) => typeof name === 'string' && name.toUpperCase() === 'PATH'
+    /** What `key` of `object` reaches of the OS, if anything: `process.cwd`, `process.env.PATH`, `url.fileURLToPath` */
+    const reached = (object, key) => {
+      if (isProcess(object) && OS_PROCESS_USES.includes(key)) return `process.${key}`
+      if (isEnv(object) && isPath(key)) return 'process.env.PATH'
+      if (object.type === 'Identifier' && namespaces.has(object.name) && OS_NAMED_EXPORTS[namespaces.get(object.name)].includes(key)) {
+        return `${namespaces.get(object.name)}.${key}`
+      }
+      return null
+    }
+    const checkPattern = (pattern, object) => {
+      for (const p of pattern.properties) {
+        const key = patternKey(p)
+        const what = key === null ? null : reached(object, key)
+        if (what) report(p, what)
+        // `const { env: { PATH } } = process`
+        else if (key === 'env' && isProcess(object) && p.value.type === 'ObjectPattern') {
+          for (const q of p.value.properties) if (isPath(patternKey(q))) report(q, 'process.env.PATH')
+        }
+      }
+    }
     return {
       ImportDeclaration(node) {
         check(node)
-        const module = namedExportsModule(loadedSpecifier(node))
-        if (!module || node.importKind === 'type') return
+        const spec = loadedSpecifier(node)
+        if (node.importKind === 'type') return
+        if (PROCESS_MODULES.has(spec)) {
+          for (const s of node.specifiers) {
+            if (s.type !== 'ImportSpecifier' || importedName(s) === 'default') processNames.add(s.local.name)
+            else if (s.importKind === 'type') continue
+            else if (OS_PROCESS_USES.includes(importedName(s))) report(s, `process.${importedName(s)}`)
+            else if (importedName(s) === 'env') envNames.add(s.local.name)
+          }
+          return
+        }
+        const module = namedExportsModule(spec)
+        if (!module) return
         for (const s of node.specifiers) {
-          if (s.type === 'ImportSpecifier') {
-            if (s.importKind !== 'type' && OS_NAMED_EXPORTS[module].includes(importedName(s))) report(s, `${module}.${importedName(s)}`)
-          } else namespaces.set(s.local.name, module)
+          if (s.type !== 'ImportSpecifier' || importedName(s) === 'default') namespaces.set(s.local.name, module)
+          else if (s.importKind !== 'type' && OS_NAMED_EXPORTS[module].includes(importedName(s))) report(s, `${module}.${importedName(s)}`)
+        }
+      },
+      ExportNamedDeclaration(node) {
+        check(node)
+        // `export { fileURLToPath } from 'node:url'`
+        const module = node.exportKind === 'type' ? null : namedExportsModule(loadedSpecifier(node))
+        if (!module) return
+        for (const s of node.specifiers) {
+          const name = s.local.type === 'Identifier' ? s.local.name : s.local.value
+          if (s.exportKind !== 'type' && OS_NAMED_EXPORTS[module].includes(name)) report(s, `${module}.${name}`)
         }
       },
       MemberExpression(node) {
-        const name = propertyName(node)
-        if (node.object.type === 'Identifier' && node.object.name === 'process' && OS_PROCESS_USES.includes(name)) report(node, `process.${name}`)
-        else if (isProcessEnv(node.object) && typeof name === 'string' && name.toUpperCase() === 'PATH') report(node, 'process.env.PATH')
-        else if (node.object.type === 'Identifier' && namespaces.has(node.object.name) && OS_NAMED_EXPORTS[namespaces.get(node.object.name)].includes(name)) {
-          report(node, `${namespaces.get(node.object.name)}.${name}`)
-        }
+        const what = reached(node.object, propertyName(node))
+        if (what) report(node, what)
+      },
+      VariableDeclarator(node) {
+        if (node.id.type === 'ObjectPattern' && node.init) checkPattern(node.id, node.init)
+      },
+      AssignmentExpression(node) {
+        if (node.left.type === 'ObjectPattern') checkPattern(node.left, node.right)
       },
       ExportAllDeclaration: check,
-      ExportNamedDeclaration: check,
       ImportExpression: check,
       CallExpression: check,
       TSExternalModuleReference: check,
