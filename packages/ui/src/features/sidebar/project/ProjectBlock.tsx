@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { isAway } from '@cc/core'
 import { groupProjectAppSessions } from '../tree.js'
 import { useStore } from '../../../store/store.js'
@@ -10,6 +10,7 @@ import { useIsProjectOpen, useSessionsOf } from '../../../store/selectors.js'
 import { useProjectApps } from '../../../store/app-catalog.js'
 import { PROJECT_MIME, moveTo } from '../reorder.js'
 import { useDropLine, dropLine } from '../dragDrop.js'
+import { HoverExpander } from '../fold.js'
 import { TrustAsk } from './TrustAsk.jsx'
 import { AppRows } from '../apps/AppRows.jsx'
 import { ProjectHeader } from './ProjectHeader.jsx'
@@ -50,7 +51,42 @@ export function ProjectBlock({ projectId }: { projectId: string }) {
   // The instructions for agents started here (#1161 item 2), opened from the project's menu
   const [instructing, setInstructing] = useState(false)
   // Fold state (#205) — held by the store: remembered per project and persists across restarts
-  const folded = useStore((s) => s.foldedProjects.includes(projectId))
+  const savedFolded = useStore((s) => s.foldedProjects.includes(projectId))
+  const toggleFold = (id: string) => useStore.getState().toggleProjectFold(id)
+  /*
+   * Hover expansion (#1578): a transient state on top of the saved fold, never written to it. Resting the pointer 0.2 s on
+   * a folded project's name shows its rows; leaving the whole block hides them again. A click on the project makes it
+   * stay, which is the saved fold taking over (`pin`).
+   */
+  const [hoverOpen, setHoverOpen] = useState(false)
+  // hoverOpen only counts while the saved fold is closed: if something unfolded the project meanwhile, the saved fold rules
+  const hoverActive = savedFolded && hoverOpen
+  const folded = savedFolded && !hoverOpen
+  const sectionRef = useRef<HTMLElement>(null)
+  const [headerMenuOpen, setHeaderMenuOpen] = useState(false)
+  const [dragging, setDragging] = useState(false)
+  const expander = useMemo(
+    () => new HoverExpander({ onChange: setHoverOpen, pointerInside: () => !!sectionRef.current?.matches(':hover') }),
+    [],
+  )
+  // An open menu, a name being edited or a drag keeps the project as it is until it ends
+  const holding = headerMenuOpen || sessionMenu !== null || renaming !== null || dragging
+  useEffect(() => expander.hold(holding), [expander, holding])
+  useEffect(() => {
+    if (!savedFolded) expander.reset()
+  }, [expander, savedFolded])
+  useEffect(() => () => expander.reset(), [expander])
+  /** A click on the project: a hover-expanded one stays (the saved fold opens), a click-folded one folds as the arrow always did */
+  const toggleFoldFromClick = () => {
+    if (hoverActive) expander.reset()
+    toggleFold(projectId)
+  }
+  const pinHoverExpanded = () => {
+    // Pressing the name of a folded project is a decision not to wait for the rest: no expansion follows it
+    if (!hoverActive) return expander.leaveName()
+    expander.reset()
+    toggleFold(projectId)
+  }
   /*
    * On a linked machine that is away (#82): its rows stay, from what the hub last heard, dimmed so they read as not
    * current. Nothing about them changes on its own until the machine is back.
@@ -92,12 +128,25 @@ export function ProjectBlock({ projectId }: { projectId: string }) {
       data-away={away || undefined}
       data-folded={folded || undefined}
       data-selected={open || undefined}
+      data-hover-expanded={(savedFolded && hoverOpen) || undefined}
+      ref={sectionRef}
+      onPointerLeave={(e) => {
+        if (e.pointerType === 'mouse') expander.leaveBlock()
+      }}
+      onDragStart={() => setDragging(true)}
+      onDragEnd={() => setDragging(false)}
       {...drop.handlers}
     >
       <ProjectHeader
         project={project}
         projectId={projectId}
         folded={folded}
+        savedFolded={savedFolded}
+        onToggleFold={toggleFoldFromClick}
+        onPin={pinHoverExpanded}
+        onNameEnter={() => expander.enterName(savedFolded)}
+        onNameLeave={() => expander.leaveName()}
+        onMenuChange={setHeaderMenuOpen}
         sessions={sessions}
         rootApp={rootApp}
         appCount={apps.length}

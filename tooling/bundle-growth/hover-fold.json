@@ -1,0 +1,4 @@
+{
+  "bytes": 1600,
+  "reason": "Hover expansion of a folded sidebar project (#1578): the HoverExpander class (one rest timer, a hold while a menu or drag is open) and its wiring in the project block and header. CI measured 1,912,945 B against main's 1,911,382 B (163d6dcf), +1,563 B, all in the main chunk. Plain code with no dependency; lazy loading would not lower the total, which counts every chunk."
+}
