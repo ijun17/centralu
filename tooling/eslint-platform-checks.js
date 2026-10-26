@@ -11,7 +11,7 @@
  * Tests are not checked: skipping a case on an OS is what they are for.
  */
 import { relative, sep } from 'node:path'
-import { REPO_ROOT, mayTouchOs, osModule, readOsAllowlist } from './os-layer.js'
+import { OS_NAMED_EXPORTS, OS_PROCESS_USES, REPO_ROOT, mayTouchOs, osModule, readOsAllowlist } from './os-layer.js'
 
 /** Node's `process.platform` values */
 const OS_NAMES = new Set(['aix', 'android', 'cygwin', 'darwin', 'freebsd', 'haiku', 'linux', 'netbsd', 'openbsd', 'sunos', 'win32'])
@@ -124,6 +124,16 @@ function touchedBy(node) {
   return module
 }
 
+/** The module a specifier names without `node:`, if `OS_NAMED_EXPORTS` names some of its exports */
+const namedExportsModule = (specifier) => {
+  const name = typeof specifier === 'string' && specifier.startsWith('node:') ? specifier.slice('node:'.length) : specifier
+  return typeof name === 'string' && Object.hasOwn(OS_NAMED_EXPORTS, name) ? name : null
+}
+
+/** `process.env` */
+const isProcessEnv = (node) =>
+  node.type === 'MemberExpression' && node.object.type === 'Identifier' && node.object.name === 'process' && propertyName(node) === 'env'
+
 /** A path relative to the repository, with `/` */
 const repoPath = (filename) => relative(REPO_ROOT, filename).split(sep).join('/')
 
@@ -133,14 +143,16 @@ const osAllowlist = () => (allowlist ??= new Set(readOsAllowlist()))
 /**
  * `local/os-imports`: the OS is touched only in the OS layer (tooling/os-layer.js, docs/plans/os-layer.md, #1599).
  *
- * In the checked code (the packages, the apps, the npm launcher, and their tests), importing an OS module (`node:fs`,
- * `fs/promises`, `node:child_process`, `node:os`, `node:path`, bare or `node:`, static, dynamic, `require` or
- * `process.getBuiltinModule`) is
- * reported outside the layer and its tests, and outside the files on tooling/os-allowlist.txt, a list that may only
+ * In the checked code (the packages, the apps, the npm launcher, and their tests), importing an OS module (`OS_MODULES`
+ * bare or `node:`, and `INSTALLED_OS_MODULES`; static, dynamic, `require` or `process.getBuiltinModule`), importing
+ * `fileURLToPath` or `pathToFileURL` (`OS_NAMED_EXPORTS`), and using `process.kill`, `process.cwd()`,
+ * `process.chdir()`, `process.execPath` or `process.env.PATH` (`OS_PROCESS_USES`) is reported outside the layer and its
+ * tests, and outside the files on tooling/os-allowlist.txt, a list that may only
  * shrink (tooling/os-layer.test.ts). Code that needs a file, a path, a process or the OS asks the layer.
  *
  * `{ everywhere: true }` reports every such import wherever it is: how tooling/os-tests.ts asks the same question
- * of any file, to pick the tests that run on every OS.
+ * of any file, to pick the tests that run on every OS. Not seen: `process[name]`, a computed `import()`, and a
+ * `require` made by `createRequire` under another name.
  */
 export const osImports = {
   meta: {
@@ -154,12 +166,32 @@ export const osImports = {
   create(context) {
     const everywhere = context.options[0]?.everywhere === true
     if (!everywhere && mayTouchOs(repoPath(context.filename), osAllowlist())) return {}
+    const report = (node, module) => context.report({ node, messageId: 'touch', data: { module } })
     const check = (node) => {
       const module = touchedBy(node)
-      if (module) context.report({ node, messageId: 'touch', data: { module } })
+      if (module) report(node, module)
     }
+    // The local names of a namespace or default import of a module `OS_NAMED_EXPORTS` names: `url.fileURLToPath`
+    const namespaces = new Map()
     return {
-      ImportDeclaration: check,
+      ImportDeclaration(node) {
+        check(node)
+        const module = namedExportsModule(loadedSpecifier(node))
+        if (!module || node.importKind === 'type') return
+        for (const s of node.specifiers) {
+          if (s.type === 'ImportSpecifier') {
+            if (s.importKind !== 'type' && OS_NAMED_EXPORTS[module].includes(importedName(s))) report(s, `${module}.${importedName(s)}`)
+          } else namespaces.set(s.local.name, module)
+        }
+      },
+      MemberExpression(node) {
+        const name = propertyName(node)
+        if (node.object.type === 'Identifier' && node.object.name === 'process' && OS_PROCESS_USES.includes(name)) report(node, `process.${name}`)
+        else if (isProcessEnv(node.object) && typeof name === 'string' && name.toUpperCase() === 'PATH') report(node, 'process.env.PATH')
+        else if (node.object.type === 'Identifier' && namespaces.has(node.object.name) && OS_NAMED_EXPORTS[namespaces.get(node.object.name)].includes(name)) {
+          report(node, `${namespaces.get(node.object.name)}.${name}`)
+        }
+      },
       ExportAllDeclaration: check,
       ExportNamedDeclaration: check,
       ImportExpression: check,

@@ -66,7 +66,9 @@ OS는 그 파일들을 고치는 일이다. 테스트와 빌드 스크립트는 
 `start_plan`이다([agent-host.md](agent-host.md) §4.0).
 
 **OS는 OS 계층에서만 건드린다** (`local/os-imports`, 같은 파일; #1599, [plans/os-layer.md](plans/os-layer.md)).
-같은 코드와 그 테스트에서 `fs`, `fs/promises`, `child_process`, `os`, `path`, `net`(그대로든 `node:`든)이나 네이티브 `node-pty`, `better-sqlite3`를 가져오는 것은 계층
+같은 코드와 그 테스트에서 `fs`, `fs/promises`, `child_process`, `os`, `path`, `net`, `http`, `https`, `dgram`, `worker_threads`(그대로든 `node:`든)나
+설치된 `node-pty`, `better-sqlite3`, `ws`를 가져오는 것, 그리고 `process.kill`, `process.cwd()`, `process.chdir()`,
+`process.execPath`, `process.env.PATH`와 `node:url`의 `fileURLToPath`, `pathToFileURL`을 쓰는 것은 계층
 (`tooling/os-layer.js`의 `OS_LAYER`: 위의 플랫폼 모듈 중 `links/**`와 런처의 `centralu.mjs`를 뺀 것)과 그 테스트 밖에서는
 린트 에러다. 규칙 전부터 그러던 파일은 `tooling/os-allowlist.txt`에 있고, 이 목록은 줄기만 한다
 (`tooling/os-layer.test.ts`). Windows 단위 테스트 잡은 같은 판단으로 OS를 건드리는 테스트만 돌린다

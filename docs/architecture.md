@@ -67,8 +67,11 @@ starts is `start_plan` ([agent-host.md](agent-host.md) §4.0).
 
 **The OS is touched only in the OS layer** (`local/os-imports`, the same file; #1599,
 [plans/os-layer.md](plans/os-layer.md)). In the same code and its tests, importing `fs`, `fs/promises`,
-`child_process`, `os`, `path` or `net` (bare or `node:`), or the native `node-pty` and `better-sqlite3`, is a lint error outside the layer (`OS_LAYER` in
-`tooling/os-layer.js`: the platform modules above but `links/**` and the launcher's `centralu.mjs`) and its tests.
+`child_process`, `os`, `path`, `net`, `http`, `https`, `dgram` or `worker_threads` (bare or `node:`), or the installed
+`node-pty`, `better-sqlite3` and `ws`, is a lint error outside the layer (`OS_LAYER` in
+`tooling/os-layer.js`: the platform modules above but `links/**` and the launcher's `centralu.mjs`) and its tests, and
+so are `process.kill`, `process.cwd()`, `process.chdir()`, `process.execPath`, `process.env.PATH` and `node:url`'s
+`fileURLToPath` and `pathToFileURL`.
 The files that did so before the rule are listed in `tooling/os-allowlist.txt`, which may only shrink
 (`tooling/os-layer.test.ts`). The Windows unit job runs only the tests that touch the OS by the same judgement
 (`tooling/os-tests.ts`); Linux runs every test.

@@ -16,22 +16,32 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url))
 
 /**
  * The Node modules whose behaviour depends on the OS: files, paths, processes and shells, the OS itself, and sockets
- * (an address in use, a port held after close, named pipes). Each is also refused in its `node:` form and, for fs, its
+ * and the servers on them (an address in use, a port held after close or reserved, named pipes). Each is also refused in its `node:` form and, for fs, its
  * promise form. `node:path`'s `posix` and `win32` halves are the same on every OS, so `path/posix` and `path/win32`
  * are not here.
  */
-export const OS_MODULES = ['fs', 'fs/promises', 'child_process', 'os', 'path', 'net']
+export const OS_MODULES = ['fs', 'fs/promises', 'child_process', 'os', 'path', 'net', 'http', 'https', 'dgram', 'worker_threads']
 
 /**
- * The installed native modules that reach the OS: the terminal's pseudo console (ConPTY on Windows) and SQLite's files
- * and locks. Named as imported, never with `node:`.
+ * The installed modules that reach the OS: the terminal's pseudo console (ConPTY on Windows), SQLite's files and
+ * locks, and WebSocket servers and clients on real sockets. Named as imported, never with `node:`.
  */
-export const NATIVE_OS_MODULES = ['node-pty', 'better-sqlite3']
+export const INSTALLED_OS_MODULES = ['node-pty', 'better-sqlite3', 'ws']
+
+/**
+ * What `process` gives of the OS without an import: ending a process by its id (a signal, or `TerminateProcess`), the
+ * working folder, the running program's path, and `process.env.PATH` (`Path` on Windows, read whatever its case).
+ * Other reads of `process` (`argv`, `env` in general, `exitCode`) are the same on every OS.
+ */
+export const OS_PROCESS_USES = ['kill', 'cwd', 'chdir', 'execPath']
+
+/** The named exports of a module that is otherwise not the OS's: `file:` URLs and paths convert by the OS's rules */
+export const OS_NAMED_EXPORTS = { url: ['fileURLToPath', 'pathToFileURL'] }
 
 /** The OS module an import specifier names (`node:fs/promises` → `fs/promises`, `node-pty`), or null */
 export function osModule(specifier) {
   if (typeof specifier !== 'string') return null
-  if (NATIVE_OS_MODULES.includes(specifier)) return specifier
+  if (INSTALLED_OS_MODULES.includes(specifier)) return specifier
   const name = specifier.startsWith('node:') ? specifier.slice('node:'.length) : specifier
   return OS_MODULES.includes(name) ? name : null
 }
@@ -104,16 +114,14 @@ export const isTestFile = (file) => /\.test\.(ts|tsx|mts|mjs)$|test-helpers\.(ts
 const LAYER_FILES = new Set(OS_LAYER)
 
 /**
- * In the OS layer: one of its modules, or a test of one (`kill-tree.test.ts`, `os.windows.test.ts`: the name up to
- * its first dot, beside the module).
+ * In the OS layer: one of its modules, or its test or test helper beside it, named for it exactly
+ * (`kill-tree.test.ts` for `kill-tree.ts`). Any other name is not, `os.anything.test.ts` included: a test the name
+ * would let in by its prefix goes on the allowlist like any other.
  */
 export function inOsLayer(file) {
   if (LAYER_FILES.has(file)) return true
-  if (!isTestFile(file)) return false
-  const slash = file.lastIndexOf('/')
-  const dir = file.slice(0, slash + 1)
-  const stem = file.slice(slash + 1).split('.')[0]
-  return ['ts', 'tsx', 'mts', 'mjs'].some((ext) => LAYER_FILES.has(`${dir}${stem}.${ext}`))
+  const test = /^(.*)\.(test|test-helpers)\.(ts|tsx|mts|mjs)$/.exec(file)
+  return test !== null && ['ts', 'tsx', 'mts', 'mjs'].some((ext) => LAYER_FILES.has(`${test[1]}.${ext}`))
 }
 
 /** The checked files that touch the OS outside the layer today, one path per line. It may only shrink. */

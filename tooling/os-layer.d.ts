@@ -1,6 +1,8 @@
 /** Types of tooling/os-layer.js, plain JavaScript so that eslint.config.js can import it */
 export declare const OS_MODULES: readonly string[]
-export declare const NATIVE_OS_MODULES: readonly string[]
+export declare const INSTALLED_OS_MODULES: readonly string[]
+export declare const OS_PROCESS_USES: readonly string[]
+export declare const OS_NAMED_EXPORTS: Readonly<Record<string, readonly string[]>>
 export declare function osModule(specifier: unknown): string | null
 export declare const OS_LAYER: readonly string[]
 export declare const PLATFORM_MODULES: readonly string[]

@@ -15,12 +15,12 @@ shrinking the allowlist. This is the TypeScript half of the OS layer [runtime-un
   687 test files, in two shards of 19.1 and 11.4 job-minutes. 98 % of that time is in tests that touch the OS, by the
   rule below. Two board tests (`tooling/project-board-queue.test.ts`, `-release.test.ts`) are 1,736 s, 39 %, and
   vitest's count-based `--shard` put both in shard 1.
-- **What this pull request removes.** The packages that are already OS-free leave the Windows job: 261 of 687 test
-  files, but only 99 file-seconds, 2.2 %. Its gain in minutes is the time-balanced split (§6.4): each shard gets
+- **What this pull request removes.** The packages that are already OS-free leave the Windows job: 258 of 687 test
+  files, but only 93 file-seconds, 2.1 %. Its gain in minutes is the time-balanced split (§6.4): each shard gets
   about 2,180 measured seconds, so the quick tier's Windows wait goes from 19.1 to about 16 minutes (§2.3).
 - **Where the minutes are.** In the board's tests (§2.4: the next pull request gives the board its own OS seam and a
   fake), then in the host's areas that start real processes, git and worktrees (§7).
-- **The measure of progress** is the allowlist: 362 files today (115 shipped, 247 tests).
+- **The measure of progress** is the allowlist: 384 files today (123 shipped, 261 tests).
 
 ## 2. Measured
 
@@ -50,17 +50,17 @@ CI, Windows unit shards, by area. **W**: still runs on Windows after this pull r
 | `tooling/project-board-*` (the board app's tests) | 10 | 2,065 | 1 | 0 |
 | `agent-host/sessions` | 139 | 736 | 7 | 0 |
 | `agent-host/dev-services` | 50 | 409 | 4 | 0 |
-| `agent-host/links` | 20 | 403 | 6 | 2 |
+| `agent-host/links` | 21 | 405 | 5 | 0 |
 | `agent-host/apps` | 30 | 209 | 2 | 0 |
 | `agent-host/adapters` | 90 | 137 | 9 | 0 |
 | `agent-host` top level | 33 | 121 | 9 | 1 |
-| `tooling`, other | 18 | 124 | 44 | 58 |
+| `tooling`, other | 19 | 125 | 43 | 57 |
 | `tooling/launcher-*` | 7 | 65 | 1 | 0 |
-| `agent-host/lifecycle`, `mail`, `transport`, `views`, `keeper` | 26 | 63 | 13 | 0 |
+| `agent-host/lifecycle`, `mail`, `transport`, `views`, `keeper` | 27 | 63 | 12 | 0 |
 | `packages/platform` | 2 | 25 | 19 | 1 |
 | `packages/ui` | 0 | 0 | 115 | 34 |
 | `packages/core`, `packages/protocol` | 1 | 0 | 31 | 2 |
-| **Total** | **426** | **4,358** | **261** | **99** |
+| **Total** | **429** | **4,364** | **258** | **93** |
 
 The slowest files on Windows: `project-board-queue` 875 s, `project-board-release` 861 s, `sessions/manager-worktree`
 168 s, `dev-services/worktree-recovery` 142 s, `links/links` 118 s, `project-board-contribute` 110 s,
@@ -83,7 +83,7 @@ two files getting cheaper, which is what §2.4 is for.
 
 | Step | Removes from the Windows unit job (file-seconds, CI) |
 |---|---|
-| 2, this pull request: the OS-free packages and tooling guards leave; shards balanced by time | 99 of 4,457 (2.2 %); the longer shard from 19.1 to about 16 minutes |
+| 2, this pull request: the OS-free packages and tooling guards leave; shards balanced by time | 93 of 4,457 (2.1 %); the longer shard from 19.1 to about 16 minutes |
 | Next: the board's OS seam and fake (§2.4) | most of 2,065 s; with it the longest file, which bounds a shard |
 | 3a, store and files | ≤ 60 test files picked only through `dev-services/store.ts` and `sessions/cross-project.test-helpers.ts`; about 50 s |
 | 3b, worktrees | ≤ 310 s in `manager-worktree` and `worktree-recovery` alone; ≤ 409 s for `dev-services` |
@@ -152,6 +152,12 @@ Today it is a handful of modules, each owning one subject, that `local/platform-
 in them touches it is on the allowlist), `osModule` (which imports touch the OS), `isChecked` (which code is held to
 it), `inOsLayer` and the allowlist. `eslint.config.js` and the selection both read it.
 
+**Growing `OS_LAYER` is a deep-tier change, by design.** The allowlist can only shrink, but a file added to `OS_LAYER`
+may touch the OS without being on it, so a new entry is the one way to let new OS use in without the list growing.
+That is what the layer is for when the file carries an OS subject of its own, and a way around the rule when it does
+not. No test can tell the two apart; a reviewer can. `tooling/os-layer.js` is the host's platform code
+(`pnpm tier`), so a change to it is reviewed in a separate deep review session.
+
 ## 4. What the layer owns
 
 The layer carries the OS's semantics, not only its calls: a caller should not be able to tell which OS it is on. That
@@ -170,12 +176,19 @@ is where the Windows-only bugs have come from (#1559: a link that is a junction,
 ## 5. The rule and the allowlist
 
 `local/os-imports` (in `tooling/eslint-platform-checks.js`, beside `local/platform-checks`) reports an import of
-`fs`, `fs/promises`, `child_process`, `os`, `path` or `net`, bare or `node:`, or of the native `node-pty` (the
-terminal's pseudo console) and `better-sqlite3` (SQLite's files and locks), static, `export … from`, `import()` or
+`fs`, `fs/promises`, `child_process`, `os`, `path`, `net`, `http`, `https`, `dgram` or `worker_threads`, bare or
+`node:`, or of the installed `node-pty` (the terminal's pseudo console), `better-sqlite3` (SQLite's files and locks)
+and `ws` (WebSockets on real sockets), static, `export … from`, `import()` or
 `require`, in the checked code (`packages/*/src`, `apps/*/src`, `packaging/**/*.mjs`, tests included) outside the
-layer, its tests (`os.test.ts`, `kill-tree.windows.test.ts`) and the files on `tooling/os-allowlist.txt`. A type-only
+layer, its tests (a layer module's own test or test helper beside it, named for it exactly: `os.test.ts`,
+`kill-tree.test.ts`; `os.anything.test.ts` is not) and the files on `tooling/os-allowlist.txt`. A type-only
 import runs nothing, and `import { posix, win32 } from 'node:path'` reads paths the same way everywhere, so neither is
 reported. Build and release scripts, tooling and e2e are not checked: they work on the repository.
+
+It also reports the OS reached without importing an OS module: `process.kill`, `process.cwd()`, `process.chdir()`,
+`process.execPath` and `process.env.PATH` (any case, as Windows reads it) (`OS_PROCESS_USES`), and `fileURLToPath`
+and `pathToFileURL` imported from `node:url` (`OS_NAMED_EXPORTS`), which convert by the OS's path rules. Not seen:
+`process[name]`, a computed `import()`, and a `require` made by `createRequire` under another name.
 
 `tooling/os-layer.test.ts` holds the list to the truth and lets it only shrink:
 
@@ -185,8 +198,9 @@ reported. Build and release scripts, tooling and e2e are not checked: they work 
   (`git diff -M`), whose line follows it;
 - sorted, unique, none in the layer.
 
-Today: 362 files, 115 shipped (111 host, 4 launcher) and 247 tests (244 host, 2 `platform`, 1 `protocol`). Adding
-`net`, `node-pty` and `better-sqlite3` (owner's session, 2026-10-26) put 9 more files on it.
+Today: 384 files, 123 shipped (119 host, 4 launcher) and 261 tests (258 host, 2 `platform`, 1 `protocol`). Adding
+`net`, `node-pty` and `better-sqlite3` (owner's session, 2026-10-26) put 9 more files on it; `http`, `https`, `dgram`,
+`ws`, `worker_threads` and the uses of `process` and `node:url` (the deep review) 22 more.
 
 **`path` is not staged separately.** Of the 127 checked source files that import an OS module, 10 import only `path`
 (4 tests do); `path` is the most imported (85 files) but nearly always beside `fs`. Leaving `path` out would shrink the
@@ -213,9 +227,9 @@ and the `@cc/*` aliases resolve, and one that cannot fails the script rather tha
 scripts do not count in (4): a tooling test that reads the repository with `fs` (a guard) runs on Linux only, while one
 that imports the launcher or a host helper that starts processes runs everywhere.
 
-Not seen: a computed specifier, a `require` made by `createRequire` under another name, and a process started by path
-(`EVERY_OS_TESTS` names those, `launcher-node-floor` today). Modules outside the list (`node:http`, say) do not count:
-`views/origin-ports.test.ts` starts a real server through `node:http` and runs on Linux only.
+Not seen: a computed specifier, a `require` made by `createRequire` under another name, `process[name]`, and a
+process started by path (`EVERY_OS_TESTS` names those, `launcher-node-floor` today). Modules outside the list
+(`node:crypto`, `node:url` but its path conversions) do not count.
 
 ### 6.2 Where it applies
 
@@ -242,7 +256,7 @@ before starting at all, so the quick tier's wait would grow by about 40 s to sav
 Vitest's `--shard` splits by file count. `tooling/os-tests.ts --shard i/n` splits the selected tests by time instead:
 longest first, each to the lighter shard (`balance`), ties by path, so both shards compute the same split. The times
 are `tooling/test-durations.json`, each test file's seconds on the Windows runner. A file it does not name (a new
-test) weighs the median of those it does, at least one second. Today: 254 and 173 files, 2,178 and 2,179 seconds.
+test) weighs the median of those it does, at least one second. Today: 256 and 174 files, 2,181 and 2,180 seconds.
 
 **Refreshing the times.** Every Windows shard writes vitest's JSON report next to its usual output and keeps it as the
 artifact `windows-test-times-<shard>` (30 days). To refresh, from a green run on main:
@@ -309,11 +323,17 @@ Answered by the owner's session, 2026-10-26:
    the board's git, gh and file calls behind one module of its own with an in-memory fake, most queue and release
    tests on the fake, a few real-git and real-file tests on every OS. The next pull request; §2.4 is its measurement.
 2. **Shards balanced by measured time**: in this pull request (§6.4).
-3. **`node:net`, `node-pty` and `better-sqlite3` are OS modules**: in this pull request (§5); the socket tests
-   `transport/server`, `views/view-host` and `links/linked-views` are back on Windows.
+3. **`node:net`, `node-pty` and `better-sqlite3` are OS modules**: in this pull request (§5). The deep review added
+   `http`, `https`, `dgram`, `ws` and `worker_threads`, and the OS uses of `process` and `node:url`. The socket tests
+   `transport/server`, `views/view-host`, `links/linked-views`, `links/remote-client`, `views/origin-ports` and
+   `tooling/rpc-recovery` (a real `HostServer` across a host restart) are back on Windows.
 4. **The remote-Node Windows job stays as it is.**
 5. **Skipping the Windows job** on a pull request that reaches no selected test: proposed after the selection has run
    green on a few pull requests.
+
+Filed from the deep review, not in this pull request: #1612 (a view origin port Windows reserves fails with
+`EACCES` instead of moving on; the test's port finder already skips it) and #1613 (the shards read main's latest
+measured times on their own, so nobody has to run `--refresh-durations`).
 
 Open: **macOS** has no unit job; the selection is what one would run.
 

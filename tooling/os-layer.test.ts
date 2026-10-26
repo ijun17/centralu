@@ -6,7 +6,7 @@
  * The rule is checked on virtual paths, as platform-checks.test.ts does, so no file is created; the selection is
  * checked on virtual files laid over the repository (`osSelector`).
  */
-import { execFileSync } from 'node:child_process'
+import { execFile, execFileSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -57,8 +57,9 @@ describe('touching the OS outside the OS layer', () => {
     expect(await refused('packaging/npm/centralu/bin/semver.mjs', code)).toHaveLength(1)
   })
 
-  it('refuses sockets and the native modules that reach the OS, the terminal and SQLite', async () => {
-    for (const [spec, module] of [['net', 'net'], ['node:net', 'net'], ['node-pty', 'node-pty'], ['better-sqlite3', 'better-sqlite3']]) {
+  it('refuses sockets, servers, workers and the installed modules that reach the OS: the terminal, SQLite, WebSockets', async () => {
+    const modules = [['net', 'net'], ['node:net', 'net'], ['node:http', 'http'], ['https', 'https'], ['node:dgram', 'dgram'], ['node:worker_threads', 'worker_threads']]
+    for (const [spec, module] of [...modules, ['node-pty', 'node-pty'], ['better-sqlite3', 'better-sqlite3'], ['ws', 'ws']]) {
       expect(await refused(HOST, `import * as x from '${spec}'\nexport const y = x\n`), spec).toEqual([expect.stringContaining(`'${module}'`)])
     }
     expect(await refused(HOST, "import type { AddressInfo } from 'node:net'\nexport type A = AddressInfo\n")).toEqual([])
@@ -69,17 +70,43 @@ describe('touching the OS outside the OS layer', () => {
     expect(await refused(HOST, "import { type Stats } from 'node:fs'\nexport type S = Stats\n")).toEqual([])
     expect(await refused(HOST, "import { posix, win32 } from 'node:path'\nexport const j = [posix.join, win32.join]\n")).toEqual([])
     expect(await refused(HOST, "import { posix, join } from 'node:path'\nexport const j = [posix.join, join]\n")).toHaveLength(1)
-    // Other Node modules are not the OS's
-    expect(await refused(HOST, "import { randomUUID } from 'node:crypto'\nimport { fileURLToPath } from 'node:url'\nexport const r = [randomUUID, fileURLToPath]\n")).toEqual([])
+    // Other Node modules are not the OS's, nor what of node:url does not convert paths
+    expect(await refused(HOST, "import { randomUUID } from 'node:crypto'\nimport { URL, type fileURLToPath } from 'node:url'\nexport const r = [randomUUID, URL]\nexport type F = typeof fileURLToPath\n")).toEqual([])
+  })
+
+  it("refuses the OS reached without importing an OS module: process's, and node:url's path conversions", async () => {
+    for (const [code, what] of [
+      ['export const k = (pid: number) => process.kill(pid)\n', 'process.kill'],
+      ['export const c = process.cwd()\n', 'process.cwd'],
+      ["export const c = () => process.chdir('/')\n", 'process.chdir'],
+      ['export const e = process.execPath\n', 'process.execPath'],
+      ['export const p = process.env.PATH\n', 'process.env.PATH'],
+      ["export const p = process.env['Path']\n", 'process.env.PATH'],
+      ["import { fileURLToPath } from 'node:url'\nexport const f = fileURLToPath\n", 'url.fileURLToPath'],
+      ["import { pathToFileURL as p } from 'url'\nexport const f = p\n", 'url.pathToFileURL'],
+      ["import * as url from 'node:url'\nexport const f = url.fileURLToPath\n", 'url.fileURLToPath'],
+    ] as const) {
+      expect(await refused(HOST, code), code).toEqual([expect.stringContaining(`'${what}'`)])
+    }
+    // What is the same on every OS, and what is not seen (docs/plans/os-layer.md §6.1)
+    expect(await refused(HOST, "export const a = [process.argv, process.env.HOME, process.exitCode]\nexport const k = (name: 'kill') => process[name]\n")).toEqual([])
   })
 
   it('lets the layer, its tests and the listed files touch it', async () => {
     const code = "import { readFileSync } from 'node:fs'\nexport const r = readFileSync\n"
     for (const m of layer.OS_LAYER) expect(await refused(m, code), m).toEqual([])
     expect(await refused('packages/agent-host/src/dev-services/kill-tree.test.ts', code)).toEqual([])
-    expect(await refused('packages/agent-host/src/os.windows.test.ts', code)).toEqual([])
+    expect(await refused('packages/agent-host/src/dev-services/kill-tree.test-helpers.ts', code)).toEqual([])
     const listed = allowlist[0] as string
     expect(await refused(listed, code), listed).toEqual([])
+  })
+
+  it("lets a layer module's test in by its exact name only, not a name that starts like it", async () => {
+    const code = "import { readFileSync } from 'node:fs'\nexport const r = readFileSync\n"
+    for (const f of ['packages/agent-host/src/os.windows.test.ts', 'packages/agent-host/src/os.sessions.test.ts', 'packages/agent-host/src/os-extra.test.ts', 'packages/agent-host/src/sessions/os.test.ts']) {
+      expect(await refused(f, code), f).toHaveLength(1)
+      expect(layer.inOsLayer(f), f).toBe(false)
+    }
   })
 
   it('does not check build scripts, tooling or e2e, which work on the repository', async () => {
@@ -227,6 +254,14 @@ describe('the tests that run on every OS', () => {
     }
   })
 
+  it('picks a test that reaches the OS through process, or converts a path with node:url', () => {
+    const T = 'packages/agent-host/src/x/a.test.ts'
+    const helper = (code: string) => ({ 'packages/agent-host/src/x/h.ts': code, [T]: "import { h } from './h.js'\nexport const a = h\n" })
+    expect(pick(helper('export const h = (pid: number) => process.kill(pid)\n'), T)).toBe('imports packages/agent-host/src/x/h.ts')
+    expect(pick(helper("import { pathToFileURL } from 'node:url'\nexport const h = pathToFileURL\n"), T)).toBe('imports packages/agent-host/src/x/h.ts')
+    expect(pick(helper('export const h = process.argv\n'), T)).toBeNull()
+  })
+
   it("counts the repository's own apps, which run on the person's machine, but not tooling helpers", () => {
     const app = { '.centralu/apps/x/git.mjs': "import { execFileSync } from 'node:child_process'\nexport const git = execFileSync\n" }
     expect(pick({ ...app, 'tooling/x.test.ts': "import { git } from '../.centralu/apps/x/git.mjs'\nexport const a = git\n" }, 'tooling/x.test.ts')).toBe('imports .centralu/apps/x/git.mjs')
@@ -255,6 +290,38 @@ describe('the tests that run on every OS', () => {
     },
     120_000 * SLOW,
   )
+})
+
+describe('a listed run (vitest.config.ts `CC_TEST_FILES`)', () => {
+  const listFile = (lines: string[]) => {
+    const list = join(mkdtempSync(join(tmpdir(), 'os-tests-')), 'list.txt')
+    writeFileSync(list, lines.map((l) => `${l}\n`).join(''))
+    return list
+  }
+
+  it('refuses a line that is not an existing repository path, rather than run less without a word', async () => {
+    for (const bad of ['tooling\\os-layer.test.ts', './tooling/os-layer.test.ts', 'tooling/gone.test.ts']) {
+      await expect(vitestFiles(listFile(['tooling/test-timing.test.ts', bad])), bad).rejects.toThrow(/CC_TEST_FILES: '.*' is not a test file's repository path/)
+    }
+  }, 60_000 * SLOW)
+
+  it("does not pass its list on: a listed test that starts a vitest of its own runs that vitest's files", async () => {
+    // tooling/vitest-stall-watch.test.ts does this; its child once found no test files on the Windows shard (#1600)
+    const out = await new Promise<{ code: number | null; text: string }>((done) => {
+      const child = execFile(
+        process.execPath,
+        [fileURLToPath(new URL('../node_modules/vitest/vitest.mjs', import.meta.url)), 'run', '--project', 'unit', '--maxWorkers=1'],
+        {
+          cwd: ROOT,
+          timeout: 60_000 * SLOW,
+          env: { ...process.env, CC_TEST_FILES: listFile(['tooling/fixtures/listed/outer.test.ts']), CC_LISTED_PROBE: '1', NO_COLOR: '1', FORCE_COLOR: '0' },
+        },
+        (_e, stdout, stderr) => done({ code: child.exitCode, text: `${stdout}\n${stderr}` }),
+      )
+    })
+    expect(out.text).toMatch(/Tests {2}1 passed/)
+    expect(out.code, out.text).toBe(0)
+  }, 70_000 * SLOW)
 })
 
 describe("the Windows shards, split by each file's measured time", () => {
