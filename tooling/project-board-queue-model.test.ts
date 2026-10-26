@@ -588,7 +588,8 @@ describe('the merge queue against a model of GitHub: queueing, pushes, main movi
     ['broken', 301],
     ['missing', 311],
     ['compare', 321],
-  ] as const)('runs the heavy jobs for every batch when the judge cannot answer: %s', async (judge, first) => {    let batches = 0
+  ] as const)('runs the heavy jobs for every batch when the judge cannot answer: %s', async (judge, first) => {
+    let batches = 0
     for (let seed = first; seed < first + 6; seed++) {
       const r = await simulate(seed, { judge })
       for (const d of r.world.dispatches) {

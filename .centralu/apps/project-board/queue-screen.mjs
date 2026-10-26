@@ -45,7 +45,7 @@ function runJudge(source, files) {
       const out = await new Promise((resolve, reject) => {
         const child = execFile(node, [file, '--screen'], { cwd: dir, timeout: JUDGE_MS, maxBuffer: 1024 * 1024, windowsHide: true, env: { LC_ALL: 'C', ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}) } }, (error, stdout, stderr) => {
           if (!error) return resolve({ stdout, stderr })
-          const how = error.killed ? `a stop after ${JUDGE_MS / 1000} s` : typeof error.code === 'number' ? `exit code ${error.code}` : `${error.code ?? error.signal ?? 'no start'}`
+          const how = error.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' ? 'more output than it may print' : error.killed ? `a stop after ${JUDGE_MS / 1000} s` : typeof error.code === 'number' ? `exit code ${error.code}` : `${error.code ?? error.signal ?? 'no start'}`
           const line = errorLine(stderr)
           reject(new Error(`the judge ended with ${how}: ${line || error.message}`))
         })
