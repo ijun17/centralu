@@ -306,6 +306,11 @@ export class SessionTrash {
    * (`trashIfQuiet`). Otherwise nothing moves and the lines say what would be lost, for the window's dialog; `asks` is empty when
    * the session was merely not at rest, or is no longer here
    */
+  /** What archiving would lose, for the dialog to show before anything moves (#1595); nothing for a session that is gone */
+  archiveLosses(sessionId: string): string[] {
+    return this.host.meta.get(sessionId) ? this.lossesOf(sessionId) : []
+  }
+
   async archiveIfAtRest(sessionId: string, deleteExternal = false): Promise<{ archived: true } | { archived: false; asks: string[] }> {
     const m = this.host.meta.get(sessionId)
     if (!m) return { archived: false, asks: [] }

@@ -10,6 +10,7 @@ With the limited credential: runs.
 
 - `agents.account`
 - `agents.applyVersions`
+- `agents.archiveLosses`
 - `agents.autoCompact`
 - `agents.capabilities`
 - `agents.clearBackgroundTasks`

@@ -1286,6 +1286,11 @@ export class SessionManager {
     return this.trash.archiveIfAtRest(...a)
   }
 
+  /** `SessionTrash.archiveLosses` (session-trash.ts, #1595): `agents.archiveLosses` */
+  archiveLosses(...a: Parameters<SessionTrash['archiveLosses']>): ReturnType<SessionTrash['archiveLosses']> {
+    return this.trash.archiveLosses(...a)
+  }
+
   /** The startup repair of recovery folders an interrupted purge left aside (#647) */
   private recoveryRepair: Promise<void> = Promise.resolve()
 

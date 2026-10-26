@@ -127,6 +127,8 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   'agents.deleteSession': 'asks',
   /** Moves the session to the archive when that loses nothing, and says so otherwise (#1512): the card names the move */
   'agents.archiveIfAtRest': 'asks',
+  /** Reads what an archive would lose (#1595): nothing moves */
+  'agents.archiveLosses': 'everyday',
   'agents.deleteAgentChild': 'asks',
   'agents.mcpProposals': 'everyday',
   'agents.resolveMcpProposal': 'window',

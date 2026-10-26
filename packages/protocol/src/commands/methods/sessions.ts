@@ -147,6 +147,16 @@ export const sessionMethods = {
     result: z.union([z.object({ archived: z.literal(true) }), z.object({ archived: z.literal(false), asks: z.array(z.string()) })]),
   },
   /**
+   * What archiving the session would lose that restoring does not bring back (#1595), read only: the lines `agents.archiveIfAtRest`
+   * would answer in `asks` (`SessionTrash.lossesOf`), so the archive dialog can show them whichever way the worktree box is
+   * ticked, also when the session leaves with its worktree, which `archiveIfAtRest` never does. Empty for a session with none,
+   * and for one that is gone. A build from before it answers "Unknown method", and the dialog goes on as it did before.
+   */
+  'agents.archiveLosses': {
+    params: z.object({ sessionId: SessionId }),
+    result: z.object({ asks: z.array(z.string()) }),
+  },
+  /**
    * agent_session delete of a child a hub's session started here with a worktree (#1161 item 3): the session goes to the
    * trash, and the worktree Centralu made for it on `worktreeBranch` goes too when nothing would be lost (nothing
    * uncommitted, every commit of its own on a remote or the trunk). `kept` says why it stayed; `none`, the session had

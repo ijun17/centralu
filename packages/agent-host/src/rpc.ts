@@ -246,6 +246,11 @@ export function createRpcHandler(
       const { sessionId, deleteExternal } = RpcMethods['agents.archiveIfAtRest'].params.parse(p)
       return mgr.archiveIfAtRest(sessionId, deleteExternal)
     },
+    // What the window's archive dialog lists before it moves anything (#1595)
+    'agents.archiveLosses': async (p) => {
+      const { sessionId } = RpcMethods['agents.archiveLosses'].params.parse(p)
+      return { asks: mgr.archiveLosses(sessionId) }
+    },
     // A hub's start_agent child deleted with the worktree made for it, when nothing would be lost (#1161 item 3)
     'agents.deleteAgentChild': async (p) => {
       const { sessionId, worktreeBranch } = RpcMethods['agents.deleteAgentChild'].params.parse(p)

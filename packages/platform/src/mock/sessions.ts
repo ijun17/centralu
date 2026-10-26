@@ -12,6 +12,8 @@ import { mockError } from './mock-error.js'
 
 /** A name coined from a person's words, as the host cuts it (`truncate`, external-conversations.ts): one line, 40 characters (#999) */
 const autoName = (text: string) => oneLineText(text, 40)
+/** What the mock host says an archive would lose for a session an agent started: it owes that agent a report (#1512) */
+const MOCK_LOSS = 'A session it started owes it a report; it will not be told, and the report is dropped.'
 
 /**
  * Whether git would take `name` as a branch (`git check-ref-format --branch`), which the host asks git itself
@@ -64,7 +66,7 @@ export class SessionsMock {
     s.live = true
     this.emit({ type: 'session_live', sessionId, live: true })
   }
-  readonly agents: Pick<AgentPort, 'createSession' | 'saveAttachment' | 'send' | 'reportOwed' | 'reorderSessions' | 'switchTool' | 'worktreeStatus' | 'autoCompact' | 'deleteSession' | 'archiveIfAtRest' | 'updateSettings' | 'restartSession' | 'resumeSession' | 'forkConversation' | 'rename' | 'markRead' | 'clearError' | 'listSessions' | 'loadMessages' | 'messageImage' | 'loadSubagentMessages' | 'subagentTrashed'> = {
+  readonly agents: Pick<AgentPort, 'createSession' | 'saveAttachment' | 'send' | 'reportOwed' | 'reorderSessions' | 'switchTool' | 'worktreeStatus' | 'autoCompact' | 'deleteSession' | 'archiveIfAtRest' | 'archiveLosses' | 'updateSettings' | 'restartSession' | 'resumeSession' | 'forkConversation' | 'rename' | 'markRead' | 'clearError' | 'listSessions' | 'loadMessages' | 'messageImage' | 'loadSubagentMessages' | 'subagentTrashed'> = {
     createSession: async (params: CreateSessionParams) => {
       this.lastCreateParams = params
       this.createParamsLog.push(params)
@@ -298,10 +300,12 @@ export class SessionsMock {
     archiveIfAtRest: async (sessionId: string, deleteExternal = false) => {
       const s = this.store.sessions.get(sessionId)
       if (!s) return { archived: false as const, asks: [] }
-      if (s.askedBy) return { archived: false as const, asks: ['A session it started owes it a report; it will not be told, and the report is dropped.'] }
+      if (s.askedBy) return { archived: false as const, asks: [MOCK_LOSS] }
       this.trashMock.moveToTrash(sessionId, false, deleteExternal)
       return { archived: true as const }
     },
+    // Read only, by the same rule (#1595)
+    archiveLosses: async (sessionId: string) => (this.store.sessions.get(sessionId)?.askedBy ? [MOCK_LOSS] : []),
     updateSettings: async (
       sessionId: string,
       s: {

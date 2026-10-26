@@ -144,12 +144,12 @@ export type SessionsSlice = {
   /** Moves the session to the session archive (#204); the two flags say what goes with it when it is deleted for good */
   deleteSession(sessionId: string, deleteWorktree?: boolean, deleteExternal?: boolean): Promise<void>
   /**
-   * The archive the dialog's first Archive asks for, with the worktree kept (#1589): the host moves the session when nothing it
-   * holds would be lost. Null: done (archived with Undo on the toast, or failed with the toast saying why). Lines: not moved, and
-   * these are what it would lose; the dialog shows them and its next Archive is `deleteSession`. No lines: not moved, the session is not at
-   * rest or the host predates the check; the dialog then calls `deleteSession`.
+   * The archive the dialog's Archive asks for when the person has not seen the host's losses (#1589, #1595). Null: done (archived
+   * with Undo on the toast, or failed with the toast saying why). Lines: not moved, and these are what it would lose; the dialog
+   * shows them and its next Archive is `deleteSession`. No lines: not moved, the session is not at rest or the host predates the
+   * check; the dialog then calls `deleteSession`. With the worktree deleted too, no lines means it was moved (`deleteSession`).
    */
-  archiveSession(sessionId: string, deleteExternal: boolean): Promise<string[] | null>
+  archiveSession(sessionId: string, deleteWorktree: boolean, deleteExternal: boolean): Promise<string[] | null>
   /**
    * Brings a session back from the session archive (#204). A project its restore registered again is added here, and asked
    * about trust as a newly added one is. Returns an error message, or null when it is back.

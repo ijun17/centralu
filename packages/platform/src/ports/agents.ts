@@ -88,6 +88,12 @@ export interface AgentPort {
    * was only busy). A host from before it throws "Unknown method", and the caller moves the session with `deleteSession` on the person's answer.
    */
   archiveIfAtRest(sessionId: string, deleteExternal?: boolean): Promise<{ archived: true } | { archived: false; asks: string[] }>
+  /**
+   * What archiving the session would lose and Undo does not bring back (#1595), read only: the lines the archive dialog shows before
+   * anything moves, also when the worktree goes with the session. A host from before it throws "Unknown method"; the caller then
+   * shows none.
+   */
+  archiveLosses(sessionId: string): Promise<string[]>
   /** Where the session's agent will compact next time its process starts (#1376), as the host that runs it decides */
   autoCompact(sessionId: string): Promise<{ controlled: boolean; share: number; tokens: number | null }>
   /** The material needed to ask the person whether it is fine to delete. Null if it is not a worktree session */
