@@ -84,7 +84,7 @@ two files getting cheaper, which is what §2.4 is for.
 | Step | Removes from the Windows unit job (file-seconds, CI) |
 |---|---|
 | 2, this pull request: the OS-free packages and tooling guards leave; shards balanced by time | 93 of 4,457 (2.1 %); the longer shard from 19.1 to about 16 minutes |
-| Next: the board's OS seam and fake (§2.4) | most of 2,065 s; with it the longest file, which bounds a shard |
+| Next: the board's OS seam and fake (§2.4) | about half of the two files' 1,736 s (measured locally: −60 % and −32 %); with it the longest file, which bounds a shard |
 | 3a, store and files | ≤ 60 test files picked only through `dev-services/store.ts` and `sessions/cross-project.test-helpers.ts`; about 50 s |
 | 3b, worktrees | ≤ 310 s in `manager-worktree` and `worktree-recovery` alone; ≤ 409 s for `dev-services` |
 | 3c, adapters' spawning | ≤ 137 s (`adapters`); 35 more test files reach the Claude and Codex adapters' index |
@@ -131,6 +131,37 @@ What the next pull request does, by time saved:
    `gh` calls, and fewer calls against GitHub itself.
 3. **Shared fixtures and a cheaper stop**: the release fixture built once per file and copied (about 80 s here), and
    no process listing when the app's tree is already gone (about 80 s over both files).
+
+**Done in the board's first step (#1599, the pull request after #1600).** The board app starts every program through one
+module, `.centralu/apps/project-board/system.mjs` (gh, git, Node, the conflict commands), which also keeps the merge
+queue's clock. Two test-only switches use it:
+
+- `PROJECT_BOARD_FAKE_PROGRAMS`: the fake `gh` script, unchanged, answers in the app's own process instead of being
+  started (`fakeGh(root, script, { inProcess: true })`): no launcher, no Node, no console host per call.
+- `PROJECT_BOARD_QUEUE_STEP=read`: the queue ticks once per `merge_queue` read, never on a timer, each tick 100 ms later
+  on its own clock. The tests step it (`until`, `polls`) instead of sleeping; the 15 sleeps of the queue file are gone,
+  and a test reads the queue at the poll that acted (three tests had read it one poll later by luck of the timer).
+
+Measured on the Windows PC above, both files together with two workers, this branch and then main right after it (the
+load of the machine changes over an hour: an earlier pair took 1,612 and 1,464 s on main, 200 and 305 s here):
+
+| File | Tests | Before | After |
+|---|---:|---:|---:|
+| `project-board-queue.test.ts` | 259, 260 after | 612 s | 245 s (−60 %) |
+| `project-board-release.test.ts` | 104 | 538 s | 366 s (−32 %) |
+
+What is left: a queue test is now its app's start and stop (about 0.5 s with the PowerShell listing at stop) and, in
+the 69 with a git fixture, real git; a release test is real git (its fixture repositories and the app's own git, about
+90 processes) and the app's start and stop. `tooling/project-board-system.test.ts` starts the real programs (the fake
+`gh` through its launcher, Windows' quoting, stdin, exit codes, a missing program) and holds the in-process fake to
+the same answers; it stays on every OS.
+
+**Still on every OS, and why.** Both files start the app through the real app runtime
+(`packages/agent-host/src/apps/external/runtime.ts`), a Node process per test, so by the selection's rule they touch the
+OS and stay in the Windows list. Taking them off it is the next step: the app run in the test's own process, its data
+files behind the same seam (the queue file, the lease, `opened-prs.json`), and git faked for the queue tests that build
+no fixture. The release tests check real git (tags, a temporary index, pushes to a bare repository) and keep it; the
+release flow's git is the board's real-git test.
 
 ## 3. What the OS layer is
 
