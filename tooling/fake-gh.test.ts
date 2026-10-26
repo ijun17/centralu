@@ -1,10 +1,10 @@
 import { spawn, spawnSync } from 'node:child_process'
-import { mkdtempSync, realpathSync } from 'node:fs'
+import { mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { rmFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
-import { fakeGh, type FakeGh } from './fake-gh.test-helpers.js'
+import { endLeftoverFakes, fakeGh, type FakeGh } from './fake-gh.test-helpers.js'
 import { SLOW } from './test-timing.js'
 
 const ANSWER = String.raw`
@@ -69,5 +69,36 @@ describe('the shared fake gh', { timeout: 30_000 * SLOW }, () => {
     expect(torn).toEqual([])
     expect(reads).toBeGreaterThan(0)
     expect(gh.state().n).toBe(199)
+  })
+
+  /*
+   * A test that ends its app while the app is starting a gh leaves that gh suspended for ever on Windows (the parent was
+   * gone before it was resumed), and nothing collects it: five stayed on a machine for two days. The sweep ends what still
+   * runs a script of this process's fakes, and nothing else.
+   */
+  it.runIf(process.platform === 'win32')('ends a process still running from the folder of a fake gh, and leaves the others', async () => {
+    make()
+    const idle = join(gh.bin, 'idle.cjs')
+    writeFileSync(idle, 'setInterval(() => {}, 1000)')
+    const mine = spawn(process.execPath, [idle], { stdio: 'ignore', windowsHide: true })
+    const other = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore', windowsHide: true })
+    const alive = (pid: number) => {
+      try {
+        process.kill(pid, 0)
+        return true
+      } catch {
+        return false
+      }
+    }
+    try {
+      await new Promise((r) => setTimeout(r, 300))
+      expect(endLeftoverFakes()).toContain(mine.pid)
+      await new Promise((r) => setTimeout(r, 300))
+      expect(alive(mine.pid!)).toBe(false)
+      expect(alive(other.pid!)).toBe(true)
+    } finally {
+      other.kill()
+      mine.kill()
+    }
   })
 })

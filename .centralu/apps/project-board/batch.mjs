@@ -20,11 +20,23 @@
 // batch run, so the pull request says why it merged with its own run cancelled.
 //
 // Two tiers of CI (project.json `ci.fullTier`, 2026-10-18): a pull request's own run is the quick tier,
-// and a batch's (a manual run) the full one. Every item lands through a batch then, a batch of one
+// and a batch's (a manual run) the full one, or the fast one (`ci.landTier` below). Every item lands through a batch then, a batch of one
 // included: the batch also takes items whose quick tier passed, one sent back from a batch goes alone,
 // and one whose batch of one ended without landing it is not batched again on that head (`alone`):
 // the queue tells its session why (queue.mjs decideCi).
-import { ACTIVE, BATCH_ACTIVE, findItem, pushEvent, queueOrder } from './queue.mjs'
+//
+// Which tier a batch runs (project.json `ci.landTier`, `ci.screen`): with `full`, the full tier. With `quick`, the fast tier,
+// unless the batch holds a change to the screen (#1538, the owner's decision of 2026-10-26): then the heavy jobs (the e2e
+// shards, both browsers) run too, and the batch lands only when they were reported and succeeded. Which tier a batch
+// runs is written on it (`tier`, queue-batch.mjs) and said in what the queue tells: the batch's line, its events, the
+// message a member's session gets.
+//
+// A batch that stops only because the default branch moved while it ran (something landed outside the queue, a release
+// bump) is not its members' fault: they are batched again on the new default branch, without `alone`, and with no message
+// to a session, at most MOVED_CAP times per head (#1548).
+import { ranTier } from './ci.mjs'
+import { onFlakyList } from './run-failure.mjs'
+import { ACTIVE, BATCH_ACTIVE, findItem, pushEvent, queueOrder, screenLanded } from './queue.mjs'
 import { short } from './util.mjs'
 
 export const BRANCH_PREFIX = 'queue/batch-'
@@ -34,6 +46,57 @@ export const MAX_BATCHES_KEPT = 20
 /** A run GitHub has not started: cancelling it throws away no work. */
 export const NOT_STARTED = new Set(['queued', 'waiting', 'requested', 'pending'])
 const OK_CONCLUSIONS = new Set(['success', 'neutral', 'skipped'])
+/** How many times a pull request is batched again on the same head because the default branch moved under its batch (#1548) */
+export const MOVED_CAP = 3
+/**
+ * The tier a batch must run before it lands (#1538): without tiers none; with `landTier` full the full tier; with quick the
+ * fast tier, or the full tier (the heavy jobs too) when the batch changes the screen (`judged`, queue-screen.mjs: its
+ * tier, null when batches are not judged).
+ */
+export const tierToRun = ({ tiers, landTier, judged = null }) => (!tiers ? null : landTier !== 'quick' ? 'full' : (judged ?? 'quick'))
+/** What the workflow is started with for a batch of that tier: `screenInputs` (ci.screen.inputs) for the heavy one, the quick tier otherwise */
+export const dispatchInputs = ({ tiers, landTier, tier, screenInputs }) => (tiers && landTier === 'quick' ? (tier === 'full' ? screenInputs : { tier: 'quick' }) : undefined)
+/**
+ * Whether a batch lands only from a full run: with the full tier landing, or unless it was judged not to change the screen.
+ * A batch with no `tier` (made by a board from before this field, a watch command that has run for days) is not known to
+ * be quiet, so it counts as changing the screen: it fails closed.
+ */
+export const needsFull = ({ tiers, landTier, b }) => !!tiers && (landTier !== 'quick' || b.tier !== 'quick')
+/**
+ * What a run that is green by the usual rules lands as (#1538), for a batch that `needsFull`: the full tier ran (its check
+ * passed), and, landing after the fast tier, each heavy check (`screen.checks`) was reported and succeeded, and ran the
+ * scenarios: a job of that name whose step `screen.steps` did not run and succeed is a stand-in that only echoes (the shards
+ * a broken `changes` left out), not a pass. Answers `{ lands }`, `{ wait }` (a check, or the run itself, is still to
+ * come: all checks can be done a moment before GitHub marks the run completed), `{ jobs: true }` (everything else holds;
+ * the run's jobs with their steps are needed to look at the heavy ones: pass them as `jobs`) or `{ drop: 'tier' | 'heavy' }`
+ * (what is missing). Nothing needs more than the usual rules when the batch needs no full run.
+ */
+export function gateGreen({ full, landTier, checks, runs, fullTier, screen = null, jobs = null }) {
+  if (!full) return { lands: true }
+  const running = runs.some((r) => r.status !== 'completed')
+  const ran = ranTier(checks, fullTier)
+  if (ran !== 'full') return ran === null && running ? { wait: true } : { drop: 'tier' }
+  if (landTier !== 'quick' || !screen?.checks?.length) return { lands: true }
+  if (running) return { wait: true }
+  if (!screenLanded(checks, runs, fullTier, screen.checks)) return { drop: 'heavy' }
+  if (jobs === null) return { jobs: true }
+  return heavyRan(jobs, screen) ? { lands: true } : { drop: 'heavy' }
+}
+/**
+ * Whether each heavy job (`screen.checks`) did its work: every job of a run whose name one of them matches has a step
+ * `screen.steps` matches that succeeded, and each pattern names at least one such job. A stand-in job (the same name,
+ * a step that only echoes) has none.
+ */
+export function heavyRan(jobs, screen) {
+  return screen.checks.every((pattern) => {
+    const named = jobs.filter((j) => onFlakyList(j.name, [pattern]))
+    return named.length > 0 && named.every((j) => (j.steps ?? []).some((s) => s.conclusion === 'success' && onFlakyList(s.name, screen.steps)))
+  })
+}
+/** The tiers by the names the queue's texts use */
+export const TIER_NAME = { quick: 'fast tier', full: 'full tier' }
+/** The tier a batch ran, as a phrase for the queue's texts ("the fast tier"); empty when it is not known (no tiers of CI, an older batch) */
+export const tierPhrase = (b) => (TIER_NAME[b?.tier] ? `the ${TIER_NAME[b.tier]}` : '')
 /** Green, but the pull request has not been CLEAN (or UNSTABLE from runs the batch cancelled) for this long. */
 export const LANDING_WAIT_MS = 30 * 60_000
 
@@ -146,7 +209,7 @@ export function releaseMembers(q, b, prs, { at, batchless = true, why = null } =
     delete it.ci
     it.nextAt = at
     if (batchless) it.batchless = it.head
-    if (batchless && b.members.length === 1) it.alone = { head: it.head, text: why ?? `batch ${b.branch} ended without landing it.` }
+    if (batchless && b.members.length === 1) it.alone = { head: it.head, text: why ?? `batch ${b.branch} ended without landing it.`, ...(b.tier ? { tier: b.tier } : {}) }
   }
 }
 
@@ -174,6 +237,49 @@ export function endBatch(q, b, state, { at, batchless = true, why = null } = {})
     const drop = new Set(done.slice(0, done.length - MAX_BATCHES_KEPT))
     q.batches = q.batches.filter((x) => !drop.has(x))
   }
+}
+
+/**
+ * The members of `b` not landed, after it stopped only because the default branch moved (#1548): they are batched again
+ * on the new default branch, without `batchless` or `alone` and with nothing said to a session, each at most `cap` times on
+ * the head it has (`moved`: the head and how many times). Past the cap a member is treated as today: kept out of a batch
+ * on this head (`batchless`), and told to its session when the batch it was in held it alone (`alone`), so a busy default
+ * branch cannot keep it from landing for ever, and cannot keep the queue forming the same batch either. Called after
+ * `endBatch` released them without marking them; answers the new batch, or null when fewer than `min` are left to
+ * form one (the rest go on with their own CI and are batched again with the next).
+ */
+export function rebatchAfterMove(q, b, { at, ref, min = 1, cap = MOVED_CAP, why = null, defaultBranch = 'the default branch' }) {
+  const spent = (it) => (it.moved?.head === it.head ? it.moved.n : 0)
+  const left = b.members
+    .slice(b.landed ?? 0)
+    .map((m) => findItem(q, b.repo, m.pr))
+    .filter((it) => it && !it.batch)
+  const over = left.filter((it) => spent(it) >= cap)
+  const again = left.filter((it) => spent(it) < cap)
+  if (over.length)
+    markBatchless(
+      q,
+      b.repo,
+      over.map((it) => it.pr),
+      b.members.length === 1 ? `${why ?? `batch ${b.branch} stopped.`} It was batched again ${cap} times on this head already, and ${defaultBranch} moved under each batch.` : null,
+    )
+  for (const it of over) if (it.alone && b.tier) it.alone.tier = b.tier
+  const names = (items) => refList(b, items.map((it) => it.pr), ref)
+  const spentText = over.length ? ` ${names(over)} used ${over.length === 1 ? 'its' : 'their'} ${cap} restarts and go${over.length === 1 ? 'es' : ''} on with ${over.length === 1 ? 'its' : 'their'} own CI.` : ''
+  if (again.length < min) {
+    // Too few left to form a batch (without tiers a batch needs two): they go on with their own CI, unmarked, and are batched with the next
+    if (left.length) batchEvent(q, b, `Batch ${b.branch}: ${names(left)} go${left.length === 1 ? 'es' : ''} on with ${left.length === 1 ? 'its' : 'their'} own CI.${again.length ? ' Too few are left to form a batch.' : ''}${spentText}`, at)
+    return null
+  }
+  for (const it of again) it.moved = { head: it.head, n: spent(it) + 1 }
+  const made = formBatch(q, again, { at, ref, cancelled: b.cancelled })
+  batchEvent(
+    q,
+    made,
+    `Batch ${made.branch}: ${names(again)} ${again.length === 1 ? 'was' : 'were'} in ${b.branch}, which stopped because ${defaultBranch} moved; ${again.length === 1 ? 'it is' : 'they are'} batched again on it (restart ${Math.max(...again.map((it) => it.moved.n))} of ${cap}).${spentText}`,
+    at,
+  )
+  return made
 }
 
 /**
@@ -233,7 +339,8 @@ export function decideLanding({ b, step, pr, item, mainTree, prevTree, defaultBr
   if (pr.headRefOid !== step.head) return { do: 'stop', text: `${n}'s head moved from ${short(step.head)} to ${short(pr.headRefOid)}` }
   // An integrated record is a draft until land() readies and squashes it (#1259 step 3)
   if (pr.isDraft && !item.auto) return { do: 'stop', text: `${n} became a draft` }
-  if (mainTree !== prevTree) return { do: 'stop', text: `${defaultBranch} is not the tree the batch had before ${n} (something else landed)` }
+  // `moved`: the one stop that is the default branch's doing and not the pull request's (#1548)
+  if (mainTree !== prevTree) return { do: 'stop', moved: true, text: `${defaultBranch} is not the tree the batch had before ${n} (something else landed)` }
   if (pr.baseRefName !== defaultBranch) {
     if (lowerBranches.includes(pr.baseRefName)) return { do: 'retarget', base: defaultBranch }
     return { do: 'stop', text: `${n} is based on ${pr.baseRefName}, not ${defaultBranch} or a lower's branch` }
@@ -250,6 +357,22 @@ export function decideLanding({ b, step, pr, item, mainTree, prevTree, defaultBr
   return { do: 'wait', patch: { uncleanSince: { pr: step.pr, at: since } } }
 }
 
+/**
+ * What `merge_when_green` says when the queue has a batch running whose tree a merge to the default branch outside the
+ * queue would invalidate (#1548): the batch was built on the default branch as it is, and lands each member only while
+ * the default branch still has the tree it had; so the batch stops before it lands, and its members are batched again
+ * (MOVED_CAP times at most), the run it spent lost. Null when there is none: another repository, a pull request not
+ * into the default branch, or a batch with nothing left to land. `pr` is the pull request being merged.
+ */
+export function mergeWarning(q, { repo, pr, baseRefName, defaultBranch, ref }) {
+  if (baseRefName !== defaultBranch) return null
+  const b = (q.batches ?? []).find((x) => BATCH_ACTIVE.has(x.state) && String(x.repo).toLowerCase() === String(repo).toLowerCase() && (x.landed ?? 0) < x.members.length)
+  if (!b) return null
+  const prs = (b.steps?.length ? b.steps : b.members).map((s) => s.pr)
+  const own = prs.includes(pr) ? ` It is itself a member of that batch.` : ''
+  return `The merge queue has batch ${b.branch} (${refList(b, prs, ref)}) running on ${defaultBranch} as it is now.${own} Merging ${ref(repo, pr)} here moves ${defaultBranch} under it: the batch stops before it lands, its pull requests are batched again on the new ${defaultBranch} (at most ${MOVED_CAP} times each), and the CI run spent on it is lost. To avoid that, queue ${ref(repo, pr)} with queue_merge instead, or merge it when the batch has landed (merge_queue shows it).`
+}
+
 /** One line for a batch in answers and on the screen. */
 export function batchLine(b, ref) {
   const prs = (b.steps.length ? b.steps : b.members).map((s) => s.pr)
@@ -257,9 +380,9 @@ export function batchLine(b, ref) {
     b.state === 'building'
       ? 'building'
       : b.state === 'ci'
-        ? `CI${b.head ? ` at ${short(b.head)}` : ''}`
+        ? `CI${b.head ? ` at ${short(b.head)}` : ''}${tierPhrase(b) ? `, ${tierPhrase(b)}` : ''}`
         : b.state === 'landing'
-          ? `green; landed ${b.landed} of ${prs.length}`
+          ? `green${tierPhrase(b) ? ` (${tierPhrase(b)})` : ''}; landed ${b.landed} of ${prs.length}`
           : b.state === 'done'
             ? `landed ${b.landed} of ${prs.length}`
             : `ended (${b.state})${b.landed ? `, landed ${b.landed} of ${prs.length}` : ''}`

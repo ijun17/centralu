@@ -1,5 +1,7 @@
 // CI: ci_status, merge_when_green, mark_ready and read_failed_job.
-import { z } from './runtime/centralu-app-runtime.mjs'
+import { centralu, z } from './runtime/centralu-app-runtime.mjs'
+import { mergeWarning } from './batch.mjs'
+import { readQueue, queueRef } from './queue-driver.mjs'
 import { detailInput, itemOf, itemRef, REF_HELP, refOf, repoInput, repoOf } from './board.mjs'
 import { canMerge, cleanLog, clip, decideMerge, evaluateChecks, failureLineIndex, firstFailure, matchKnownFailure, NO_PERMISSION, squashMessage, workflowCheckNames } from './ci.mjs'
 import { CI, config } from './config.mjs'
@@ -149,15 +151,29 @@ export function progress(ctx, n, message) {
 const MERGEABLE_RETRIES = 3
 const MERGEABLE_WAIT_MS = 2_000
 
-async function mergeWhenGreen({ pr, body, wait = false, waitMinutes, deleteBranch: del = false, detail = 'compact' }, ctx) {
+async function mergeWhenGreen({ pr, body, wait = false, waitMinutes, deleteBranch: del = false, intoBatch = false, detail = 'compact' }, ctx) {
   const want = itemOf(pr)
   const repo = want.repo
   const what = `PR ${want.ref}`
+  // A merge outside the queue moves the default branch under a batch it is running (#1548): said in the answer. Read fresh
+  // each time, since a batch may start or end while this waits; a queue file that does not read is no reason to refuse
+  const queueNote = (p) => {
+    try {
+      return mergeWarning(readQueue(centralu.dataDir), { repo, pr: want.number, baseRefName: p.baseRefName, defaultBranch, ref: queueRef })
+    } catch {
+      return null
+    }
+  }
+  const noted = (summary, p) => {
+    const note = queueNote(p)
+    return note ? `${summary}
+${note}` : summary
+  }
   const refused = (reason, ci, extra = {}) =>
     ci ? ciAnswer(`Not merged: ${reason}`, ci, { outcome: 'refused', merged: false, ...extra }, { isError: true }) : asError(answer(`Not merged: ${reason}`, { outcome: 'refused', merged: false, ...extra }))
 
   // Who is asking comes first: a contributor's agent gets no further (#386, merge policy).
-  const { permissions } = await readRepo(repo)
+  const { permissions, defaultBranch } = await readRepo(repo)
   if (!canMerge(permissions)) return refused(NO_PERMISSION.reason, null, { kind: 'permission' })
 
   let p = await readPr(repo, want.number)
@@ -175,7 +191,15 @@ async function mergeWhenGreen({ pr, body, wait = false, waitMinutes, deleteBranc
       const ci = ciLines(what, p.headRefOid, req, checks, d.kind === 'failing' ? await failureDetails(repo, checks) : [], detail)
       return refused(d.reason, ci, { kind: d.kind, verdict: checks.verdict })
     }
-    if (d.action === 'merge') return doMerge(repo, what, p, body, del, ciLines(what, p.headRefOid, req, checks, [], detail))
+    if (d.action === 'merge') {
+      // Said before it happens, not after (the review of #1563): a merge here moves the default branch under a batch that
+      // is running. Read now, at the moment of merging, since a batch may have started while this waited
+      const note = queueNote(p)
+      const ci = ciLines(what, p.headRefOid, req, checks, [], detail)
+      if (note && !intoBatch)
+        return ciAnswer(`Not merged: ${note} Call again with intoBatch: true to merge it anyway (a release bump goes through here).`, ci, { outcome: 'batch-running', merged: false, verdict: checks.verdict }, { isError: true })
+      return doMerge(repo, what, p, body, del, ci, note)
+    }
     // wait
     let pause = CI.pollMs
     if (d.kind === 'mergeable' && quick < MERGEABLE_RETRIES) {
@@ -183,10 +207,10 @@ async function mergeWhenGreen({ pr, body, wait = false, waitMinutes, deleteBranc
       pause = MERGEABLE_WAIT_MS
     } else if (!wait) {
       const ci = ciLines(what, p.headRefOid, req, checks, [], detail)
-      return ciAnswer(`Not merged yet: ${d.reason} Call again later, or with wait: true to wait for them.`, ci, { outcome: 'pending', merged: false, verdict: checks.verdict })
+      return ciAnswer(noted(`Not merged yet: ${d.reason} Call again later, or with wait: true to wait for them.`, p), ci, { outcome: 'pending', merged: false, verdict: checks.verdict })
     } else if (Date.now() - started + pause > limitMs) {
       const ci = ciLines(what, p.headRefOid, req, checks, [], detail)
-      return ciAnswer(`Not merged: still not green after ${span(Date.now() - started)} of waiting (limit ${span(limitMs)}). ${d.reason}`, ci, {
+      return ciAnswer(noted(`Not merged: still not green after ${span(Date.now() - started)} of waiting (limit ${span(limitMs)}). ${d.reason}`, p), ci, {
         outcome: 'timeout',
         merged: false,
         verdict: checks.verdict,
@@ -202,7 +226,7 @@ async function mergeWhenGreen({ pr, body, wait = false, waitMinutes, deleteBranc
   }
 }
 
-async function doMerge(repo, what, p, body, del, ci) {
+async function doMerge(repo, what, p, body, del, ci, note = null) {
   const msg = squashMessage({ number: p.number, title: p.title, body, description: p.body })
   const why = await mergePr(repo, p.number, p.headRefOid, msg.subject, msg.body)
   if (why) return ciAnswer(`Not merged: GitHub refused the merge: ${why}`, ci, { outcome: 'refused', merged: false, kind: 'github' }, { isError: true })
@@ -220,7 +244,8 @@ async function doMerge(repo, what, p, body, del, ci) {
       extra.push(e ? `Branch ${p.headRefName} not deleted: ${e}` : `Deleted branch ${p.headRefName}.`)
     }
   }
-  const summary = `Merged ${what} (squash) as ${short(commit)}: "${msg.subject}".${extra.length ? ` ${extra.join(' ')}` : ''}`
+  const summary = `Merged ${what} (squash) as ${short(commit)}: "${msg.subject}".${extra.length ? ` ${extra.join(' ')}` : ''}${note ? `
+${note}` : ''}`
   return ciAnswer(summary, ci, { outcome: 'merged', merged: true, commit, subject: msg.subject })
 }
 
@@ -325,13 +350,14 @@ export const tools = {
     config: {
       title: 'Merge a pull request once CI is green',
       description:
-        'Instead of gh pr merge: squash-merge one pull request (several, or a stack, unattended: queue_merge) only when the gh account has maintain or admin permission, the PR is open and not a draft, every required check is reported and passed (none reported, or any pending, is not green), and GitHub can merge it. Never auto-merge. Subject "Title (#N)"; body from `body` or the PR description\'s Why / What changed / Closes, without Co-Authored-By or "Generated with" lines; the PR author stays the author. Pending: answers at once, or with wait: true polls until green or failed (up to waitMinutes, default 40) and then merges or reports the failure like ci_status.',
+        'Instead of gh pr merge: squash-merge one pull request (several, or a stack, unattended: queue_merge) only when the gh account has maintain or admin permission, the PR is open and not a draft, every required check is reported and passed (none reported, or any pending, is not green), and GitHub can merge it. Never auto-merge. Subject "Title (#N)"; body from `body` or the PR description\'s Why / What changed / Closes, without Co-Authored-By or "Generated with" lines; the PR author stays the author. Pending: answers at once, or with wait: true polls until green or failed (up to waitMinutes, default 40) and then merges or reports the failure like ci_status. When the merge queue has a batch running on the same branch, it merges nothing and says so first, because merging here moves main under the batch (it stops before it lands and is built again); queue_merge avoids that, and intoBatch: true merges anyway.',
       inputSchema: z.object({
         pr: itemRef.describe(`The pull request: ${REF_HELP}`),
         body: z.string().optional().describe('The squash commit body; default a summary of the PR description'),
         wait: z.boolean().optional().describe('Wait for pending checks instead of answering "pending" at once; default false'),
         waitMinutes: z.number().positive().max(60).optional().describe('With wait: how many minutes to wait at most; default 40'),
         deleteBranch: z.boolean().optional().describe('Delete the head branch on GitHub after the merge (never a fork\'s, never a local branch: a Centralu worktree may hold it); default false'),
+        intoBatch: z.boolean().optional().describe('Merge although the merge queue has a batch running on the same branch, which this stops and builds again; default false: the call answers "Not merged" and says so first'),
         detail: detailInput.describe('"full" lists passed and non-required checks too'),
       }),
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
