@@ -572,17 +572,66 @@ describe('Undo on the archive toast (#1512)', () => {
     return { mock, p, s }
   }
 
-  it('offers no archive that skips the dialog: the only way out of the sidebar is deleteSession, with both choices', async () => {
-    const { mock, s } = await oneSession('/tmp/undo-host-a')
-    // #1589: the quick path (`archiveSession`, through the host's `archiveIfAtRest`) is gone from the window
-    expect(useStore.getState()).not.toHaveProperty('archiveSession')
-    const quick = vi.spyOn(mock.agents, 'archiveIfAtRest')
-    const moved = vi.spyOn(mock.agents, 'deleteSession')
-    await useStore.getState().deleteSession(s.id, false, true)
-    expect(moved).toHaveBeenCalledWith(s.id, false, true)
-    expect(quick).not.toHaveBeenCalled()
+  // #1589: the dialog's first Archive asks the host (read, then move); its lines are shown, and only the next Archive moves anyway
+  it('archives at the first Archive when the host finds nothing it holds would be lost, handing it the conversation-file choice', async () => {
+    const { mock, s } = await oneSession('/tmp/archive-a')
+    const asked = vi.spyOn(mock.agents, 'archiveIfAtRest')
+    const deleted = vi.spyOn(mock.agents, 'deleteSession')
+    expect(await useStore.getState().archiveSession(s.id, true)).toBeNull()
+    expect(asked).toHaveBeenCalledWith(s.id, true)
+    expect(deleted).not.toHaveBeenCalled()
     expect(useStore.getState().sessions[s.id]).toBeUndefined()
     expect(useStore.getState().toastAction?.label).toBe('Undo')
+    expect((mock as unknown as { trashBin: Map<string, { removeExternal: boolean }> }).trashBin.get(s.id)?.removeExternal).toBe(true)
+  })
+
+  it('hands the conversation-file choice on as made when it is off', async () => {
+    const { mock, s } = await oneSession('/tmp/archive-b')
+    const asked = vi.spyOn(mock.agents, 'archiveIfAtRest')
+    expect(await useStore.getState().archiveSession(s.id, false)).toBeNull()
+    expect(asked).toHaveBeenCalledWith(s.id, false)
+    expect((mock as unknown as { trashBin: Map<string, { removeExternal: boolean }> }).trashBin.get(s.id)?.removeExternal).toBe(false)
+  })
+
+  it('gives the host lines back and moves nothing when the archive would lose something; deleteSession is the next step', async () => {
+    const { mock, s } = await oneSession('/tmp/archive-c')
+    const lines = ['A session it started owes it a report; it will not be told, and the report is dropped.']
+    vi.spyOn(mock.agents, 'archiveIfAtRest').mockResolvedValue({ archived: false, asks: lines })
+    const deleted = vi.spyOn(mock.agents, 'deleteSession')
+    expect(await useStore.getState().archiveSession(s.id, true)).toEqual(lines)
+    expect(useStore.getState().sessions[s.id]).toBeDefined()
+    expect(useStore.getState().toast).toBeNull()
+    expect(deleted).not.toHaveBeenCalled()
+    await useStore.getState().deleteSession(s.id, false, true)
+    expect(deleted).toHaveBeenCalledWith(s.id, false, true)
+    expect(useStore.getState().sessions[s.id]).toBeUndefined()
+  })
+
+  it('moves it as the dialog alone allowed before #1521 when the session is not at rest', async () => {
+    const { mock, s } = await oneSession('/tmp/archive-d')
+    vi.spyOn(mock.agents, 'archiveIfAtRest').mockResolvedValue({ archived: false, asks: [] })
+    const deleted = vi.spyOn(mock.agents, 'deleteSession')
+    expect(await useStore.getState().archiveSession(s.id, false)).toBeNull()
+    expect(deleted).toHaveBeenCalledWith(s.id, false, false)
+    expect(useStore.getState().sessions[s.id]).toBeUndefined()
+  })
+
+  it('does the same of a host that predates the check', async () => {
+    const { mock, s } = await oneSession('/tmp/archive-d2')
+    vi.spyOn(mock.agents, 'archiveIfAtRest').mockRejectedValue(new Error('Unknown method: agents.archiveIfAtRest'))
+    const deleted = vi.spyOn(mock.agents, 'deleteSession')
+    expect(await useStore.getState().archiveSession(s.id, true)).toBeNull()
+    expect(deleted).toHaveBeenCalledWith(s.id, false, true)
+  })
+
+  it('says why when the host check fails, and moves nothing', async () => {
+    const { mock, s } = await oneSession('/tmp/archive-e')
+    vi.spyOn(mock.agents, 'archiveIfAtRest').mockRejectedValue(new Error('link lost'))
+    const deleted = vi.spyOn(mock.agents, 'deleteSession')
+    expect(await useStore.getState().archiveSession(s.id, true)).toBeNull()
+    expect(useStore.getState().toast).toBe('Could not archive: link lost')
+    expect(deleted).not.toHaveBeenCalled()
+    expect(useStore.getState().sessions[s.id]).toBeDefined()
   })
 
   it('Undo puts the unsent draft back in the composer and the session back in its place in the grid', async () => {

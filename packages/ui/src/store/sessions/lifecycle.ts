@@ -146,6 +146,7 @@ type LifecycleActions = Pick<
   | 'startSessionNow'
   | 'createSession'
   | 'deleteSession'
+  | 'archiveSession'
   | 'restoreFromTrash'
   | 'rename'
   | 'markRead'
@@ -334,6 +335,35 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
     } catch (e) {
       set({ toast: `Could not delete: ${errorMessage(e)}` })
     }
+  },
+
+  /**
+   * The archive the dialog's first Archive asks for (#1512, #1589): the host moves the session only when nothing it holds would be
+   * lost (`agents.archiveIfAtRest`, read then move). Null: it is done (archived, the toast offers Undo; or failed, the toast says why).
+   * Lines: not moved, and these are what the archive would lose and Undo does not bring back; the dialog shows them and its next
+   * Archive is `deleteSession`. Not at rest, or a host from before the method: the dialog's answer is enough, so it moves as it
+   * did before #1521. Never with the worktree deleted: that is `deleteSession` straight (the host's check does not remove one).
+   */
+  async archiveSession(sessionId, deleteExternal) {
+    const platform = get().platform
+    const s = get().sessions[sessionId]
+    if (!platform || !s) return null
+    const place = windowPlaceOf(get(), sessionId)
+    try {
+      const r = await platform.agents.archiveIfAtRest(sessionId, deleteExternal)
+      if (r.archived) {
+        announceArchived(set, get, sessionId, s.name, place)
+        return null
+      }
+      if (r.asks.length > 0) return r.asks
+    } catch (e) {
+      if (!/unknown method/i.test(errorMessage(e))) {
+        set({ toast: `Could not archive: ${errorMessage(e)}` })
+        return null
+      }
+    }
+    await get().deleteSession(sessionId, false, deleteExternal)
+    return null
   },
 
   async restoreFromTrash(sessionId) {

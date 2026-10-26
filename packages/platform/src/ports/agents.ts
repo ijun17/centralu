@@ -85,7 +85,7 @@ export interface AgentPort {
   /**
    * The archive for a session that looks idle (#1512), decided by the host at the last moment: it moves the session only when
    * nothing it holds would be lost and it is at rest; otherwise nothing moves and `asks` says what would be lost (empty when it
-   * was only busy). A host from before it throws "Unknown method", and the caller asks first as it always did.
+   * was only busy). A host from before it throws "Unknown method", and the caller moves the session with `deleteSession` on the person's answer.
    */
   archiveIfAtRest(sessionId: string, deleteExternal?: boolean): Promise<{ archived: true } | { archived: false; asks: string[] }>
   /** Where the session's agent will compact next time its process starts (#1376), as the host that runs it decides */

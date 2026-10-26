@@ -125,6 +125,77 @@ test('an idle session asks first, Cancel archives nothing, and Undo on the toast
   await expect(page.getByTestId(`session-row-${id}`)).toBeVisible()
 })
 
+// #1589: the dialog's first Archive asks the host (read, then move); what the host says would be lost shows, and the next Archive moves it anyway
+test('a session the host says would lose something shows it at the first Archive and moves only at the second; Cancel archives nothing', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const id = await answeredSession(page, 'alpha', 'what is the answer')
+  // The mock host stands for the real one's rule: a session an agent started owes that agent a report (the mailbox, waits and cards say the same)
+  await page.evaluate((sid: string) => ((window as any).__mock.store.sessions.get(sid).askedBy = 'an-agent'), id)
+  await page.getByTestId(`session-menu-${id}`).click()
+  await page.getByTestId(`delete-session-${id}`).click()
+  await expect(page.getByTestId('delete-losses')).toHaveCount(0)
+  await page.getByTestId('confirm-delete-yes').click()
+  await expect(page.getByTestId('delete-losses')).toContainText('owes it a report')
+  await expect(page.getByTestId('delete-losses')).toContainText('Undo does not bring them back')
+  await expect(page.getByTestId(`session-row-${id}`)).toBeVisible()
+  expect(await page.evaluate(() => (window as any).__mock.trashBin.size)).toBe(0)
+  await page.getByRole('button', { name: 'Cancel' }).click()
+  await expect(page.getByTestId('confirm-delete')).toHaveCount(0)
+  await expect(page.getByTestId(`session-row-${id}`)).toBeVisible()
+  expect(await page.evaluate(() => (window as any).__mock.trashBin.size)).toBe(0)
+
+  await page.getByTestId(`session-menu-${id}`).click()
+  await page.getByTestId(`delete-session-${id}`).click()
+  await page.getByTestId('confirm-delete-yes').click()
+  await expect(page.getByTestId('delete-losses')).toBeVisible()
+  await page.getByTestId('confirm-delete-yes').click()
+  await expect(page.getByTestId(`session-row-${id}`)).toHaveCount(0)
+  await expect(page.getByTestId('toast-action')).toHaveText('Undo')
+  // The choice made in the dialog (the conversation file ticked) came along
+  expect(await page.evaluate((sid: string) => (window as any).__mock.trashBin.get(sid)?.removeExternal, id)).toBe(true)
+})
+
+test('deleting the worktree too moves the session at the first Archive, whatever the host would list; the unticked file stays at purge', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const id = await answeredSession(page, 'alpha', 'what is the answer')
+  await page.evaluate((sid: string) => {
+    const m = (window as any).__mock
+    m.store.sessions.get(sid).worktree = { path: '/tmp/alpha-wt', branch: 'feat/x' }
+    m.store.sessions.get(sid).askedBy = 'an-agent'
+    ;(window as any).__store.setState((st: any) => ({ sessions: { ...st.sessions, [sid]: { ...st.sessions[sid], worktree: { path: '/tmp/alpha-wt', branch: 'feat/x' } } } }))
+  }, id)
+  await page.getByTestId(`session-menu-${id}`).click()
+  await page.getByTestId(`delete-session-${id}`).click()
+  await page.getByTestId('delete-worktree-toggle').check()
+  await page.getByTestId('delete-external-toggle').locator('input').uncheck()
+  await page.getByTestId('confirm-delete-yes').click()
+  await expect(page.getByTestId(`session-row-${id}`)).toHaveCount(0)
+  await expect(page.getByTestId('delete-losses')).toHaveCount(0)
+  const kept = await page.evaluate((sid: string) => (window as any).__mock.trashBin.get(sid), id)
+  expect(kept).toMatchObject({ removeWorktree: true, removeExternal: false })
+  await openArchive(page)
+  await page.getByTestId(`trash-purge-${id}`).click()
+  await page.getByTestId('trash-confirm-yes').click()
+  await expect(page.getByTestId('trash-list-empty')).toBeVisible()
+  expect(await page.evaluate(() => (window as any).__mock.externallyDeleted)).toEqual([])
+})
+
+test('the file left unticked stays at the first Archive too, and the ticked one goes only at purge', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const keep = await answeredSession(page, 'alpha', 'keep my file')
+  await page.getByTestId(`session-menu-${keep}`).click()
+  await page.getByTestId(`delete-session-${keep}`).click()
+  await page.getByTestId('delete-external-toggle').locator('input').uncheck()
+  await page.getByTestId('confirm-delete-yes').click()
+  await expect(page.getByTestId(`session-row-${keep}`)).toHaveCount(0)
+  expect(await page.evaluate((sid: string) => (window as any).__mock.trashBin.get(sid)?.removeExternal, keep)).toBe(false)
+  await openArchive(page)
+  await page.getByTestId(`trash-purge-${keep}`).click()
+  await page.getByTestId('trash-confirm-yes').click()
+  await expect(page.getByTestId('trash-list-empty')).toBeVisible()
+  expect(await page.evaluate(() => (window as any).__mock.externallyDeleted)).toEqual([])
+})
+
 test('the dialog of a session whose worktree holds uncommitted work says so', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   const id = await answeredSession(page, 'alpha', 'what is the answer')

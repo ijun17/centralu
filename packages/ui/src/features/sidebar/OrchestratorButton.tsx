@@ -213,6 +213,7 @@ function OrchestratorChildRow({ s }: { s: SessionSummary }) {
           name={s.name}
           tool={s.tool}
           onCancel={() => setConfirming(false)}
+          onDone={() => setConfirming(false)}
           onConfirm={(deleteWorktree, deleteExternal) => {
             void deleteSession(s.id, deleteWorktree, deleteExternal)
             setConfirming(false)

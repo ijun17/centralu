@@ -30,6 +30,7 @@ export function ProjectSessionDialogs({
           // This session's own tool, not the project default — this sentence states where the transcript ends up, so it must not be wrong
           tool={sessions.find((s) => s.id === confirming)?.tool ?? defaultTool}
           onCancel={() => setConfirming(null)}
+          onDone={() => setConfirming(null)}
           onConfirm={(deleteWorktree, deleteExternal) => {
             void deleteSession(confirming, deleteWorktree, deleteExternal)
             setConfirming(null)

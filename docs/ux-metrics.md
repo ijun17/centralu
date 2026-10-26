@@ -351,7 +351,7 @@ that changes is re-priced by Fitts's law. Each is a proposal, not a decision.
 exist) or needs the host or the protocol too. All but the folder list in 16 are the screen alone.
 
 Rank 11 was done in #1512 and taken back for a session in #1589 (owner decision, 2026-10-26): archiving a session from the
-window asks first again, also for an idle one, so `delete-session.mouse` is back to the dialog's 14 operations (budget 16). The toast after the
+window asks first again, also for an idle one, so `delete-session.mouse` is back to the dialog's 14 operations (budget 16). The dialog also lists what the host says the archive drops, before such a session moves. The toast after the
 archive still offers Undo (`undo-archive.mouse`, 5 · 3.17 s, Chromium; the baseline above is WebKit on Linux). A session's
 subagent steps (`trash-subagent-steps.mouse`, 13 · 8.63 s, was 19) and restoring an app version stay without a question.
 
