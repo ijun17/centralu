@@ -390,18 +390,18 @@ idle → working → (waiting_approval | waiting_input | limited | error) → wo
 
 - A context gauge in the session header: tokens used / **the model's full context window** (%), the same for every tool (#1553):
   100% is the whole window (a 1M model: 1,000k), whatever window the tool reports under Centralu's compaction setting. The
-  point where the tool compacts by itself is a mark on the bar and in the tooltip ("compacts at 600k tokens (60%)"), as the tool says it
+  point where the tool compacts by itself is in the tooltip ("compacts at 600k tokens (60%)"), not a mark on the bar (#1572), as the tool says it
   (not as asked for: the CLI clamps what it is given). When the
   model's full window is not known yet the gauge says so ("≤N%", the tooltip names why) instead of passing a smaller window
   off as the full one. Updated from streaming usage events.
-- Threshold warning: the gauge changes colour within 10 points of the compaction mark (the tool compacts at 60% by default, so an
-  80% threshold would never show before it); where no mark is known, at 80%.
+- Threshold warning: the gauge changes colour within 10 points of the compaction point (the tool compacts at 60% by default, so an
+  80% threshold would never show before it); where none is known, at 80%.
 - Show a marker in the conversation view when compaction (summarisation) happens.
 - Show a marker when the tool starts a fresh conversation inside the session (Claude Code's `/clear`, #304), and empty
   the gauge until the tool reports the new conversation's size.
 - When a compaction reports how big the conversation came out (Claude Code's `post_tokens`, #1282), the gauge shows
   that size as an estimate until the tool's next reading; with no earlier reading it stays empty.
-- Where the tool does not give exact numbers, state that it is an estimate (shown with ≈).
+- Where the tool does not give exact numbers, the tooltip says it is an estimate; the figure carries no ≈ (owner, #1572).
 - **What the tool tells its own user reaches the conversation** (#304): a hook's block reason, a configuration or
   deprecation warning, an MCP server that failed to start, a model the tool switched to by itself and why. One quiet line
   each in the conversation's marker style, in the tool's own words; nothing interrupts (no toast, no dialog). A warning
@@ -970,7 +970,7 @@ sessions, if one is wanted, is built as an external app). The inbox (FR-15) stay
 |---|---|---|
 | **The permission preset cannot override global bypass** | The approval UI (a core feature) is neutered | Top-priority M0 verification. If impossible, disable the approval UI per tool via the capability declaration and rebuild the inbox around awaiting-response |
 | The Codex protocol changes between versions | Adapter breakage | Version detection in the adapter + protocol snapshot tests, verified early in M0 |
-| The SDK may not give enough context/usage detail | FR-14 accuracy | Demote to 'estimate' via capability + show ≈, with log parsing as backup |
+| The SDK may not give enough context/usage detail | FR-14 accuracy | Demote to 'estimate' via capability + say so in the tooltip (no ≈ on the figure, #1572), with log parsing as backup |
 | File conflicts between concurrent sessions in the same directory | **Data loss** | An explicit warning dialog at creation time + a same-file-modification detection badge (FR-2), worktree option later |
 | Situations where resume is impossible (tool update, lost logs) | FR-10 degraded | Design the "view the record + new session" fallback as a first-class path |
 | The orchestrator running away (excessive instructions) | Cost and confusion | Instructions made visible (source label, built) + a `create_session` proposal card + respecting the approval preset. Per-session refusal was dropped — see FR-11 |

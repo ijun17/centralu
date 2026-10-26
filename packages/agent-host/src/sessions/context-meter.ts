@@ -6,7 +6,7 @@ import { inTurn } from '../idle.js'
  * Codex sends one with each token count), so a long turn left the window's meter where the turn before had put it while the
  * context grew past a share. Each model request of the session's own conversation says how big its prompt was
  * (`usage_update.request`: Claude per assistant message, Codex per token count), and that moves the figure as a `context_update`
- * marked `estimate` (the window draws "≈"), so everything that reads `SessionInfo.context` and the event, a hub and an older window
+ * marked `estimate` (the window draws it like a reading, with no "≈", #1572), so everything that reads `SessionInfo.context` and the event, a hub and an older window
  * included, sees it as it sees a reading.
  *
  *  - **The tool's reading is the authority.** It replaces an estimate whatever the two say. Estimates stop for the rest of a turn

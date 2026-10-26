@@ -16,7 +16,7 @@ import { SessionSettings } from './SessionSettings.jsx'
  * they belong here, where the hand and eye already are, rather than in the header at the
  * opposite end of the screen.
  */
-/** Points below the compaction mark where the bar starts to warn */
+/** Points below the point where the tool compacts at which the bar starts to warn */
 const WARN_BEFORE_COMPACT = 10
 
 export const ComposerFooter = memo(function ComposerFooter({
@@ -34,8 +34,9 @@ export const ComposerFooter = memo(function ComposerFooter({
   const share = contextShare(session.context)
   const ctxPct = share ? Math.round(share.fraction * 100) : null
   const compactPct = share?.compactAt?.fraction != null ? Math.round(share.compactAt.fraction * 100) : null
-  const mark = session.context?.exactness === 'estimate' ? '≈' : ''
-  // The bar warns when the tool is about to compact: within 10 points of its mark. With no mark known, at 80% (FR-14)
+  // An estimate is not drawn on the figure (owner, #1572); only the tooltip says it holds until the turn ends
+  const estimated = session.context?.exactness === 'estimate'
+  // The bar warns when the tool is about to compact: within 10 points of its compaction point. With none known, at 80% (FR-14)
   const warn = ctxPct !== null && ctxPct >= (compactPct !== null ? Math.max(1, compactPct - WARN_BEFORE_COMPACT) : 80)
   return (
     <div className="mt-1.5 flex items-center gap-2">
@@ -81,8 +82,9 @@ export const ComposerFooter = memo(function ComposerFooter({
       {/*
         In the UI face, with figures of one width so the number does not jitter as it counts (owner, 2026-10-18).
         A thin bar under the number (owner, 2026-10-18), so how full it is reads at a glance: the track is a hairline,
-        the fill steps up to ink from 80% as the number does; unknown draws the track alone. An estimate says so with ≈
-        (FR-14): the size a compaction reported (#1282), until the tool's own reading at the next turn's end.
+        the fill steps up to ink from 80% as the number does; unknown draws the track alone. An estimate (the size a compaction
+        reported, #1282, or a turn's running size) is drawn like any reading, with no mark on the figure (owner, #1572); only the tooltip
+        says it holds until the turn ends. The point where the tool compacts is in the tooltip alone, not on the bar (owner, #1572).
       */}
       <span
         className={`ml-auto flex shrink-0 flex-col items-stretch gap-[1.5px] text-xs tabular-nums ${
@@ -91,8 +93,8 @@ export const ComposerFooter = memo(function ComposerFooter({
         data-testid="context-gauge"
         title={
           session.context
-            ? `Context ${mark}${formatCount(session.context.used)} / ${formatCount(session.context.window)} tokens${
-                mark && ' (estimated until the next turn ends)'
+            ? `Context ${formatCount(session.context.used)} / ${formatCount(session.context.window)} tokens${
+                estimated ? ' (estimated until the next turn ends)' : ''
               }${
                 share?.capped
                   ? " — the model's full window is not known yet, so this is the share of a smaller window the tool reported: the real share is at most this"
@@ -105,7 +107,7 @@ export const ComposerFooter = memo(function ComposerFooter({
             : 'Context unknown — this session has never reported one'
         }
       >
-        <span className="leading-none">Context {ctxPct === null ? '—' : `${share?.capped ? '≤' : mark}${ctxPct}%`}</span>
+        <span className="leading-none">Context {ctxPct === null ? '—' : `${share?.capped ? '≤' : ''}${ctxPct}%`}</span>
         <span className="relative block h-1" aria-hidden>
           <span className="block h-full overflow-hidden rounded-full bg-line">
             {ctxPct !== null && (
@@ -116,17 +118,6 @@ export const ComposerFooter = memo(function ComposerFooter({
               />
             )}
           </span>
-          {/*
-            Where the tool compacts by itself: a mark on the bar, not its end (#1553). It stands out of the track above and below, so it
-            still shows once the fill has passed it (the fill and the mark are both ink there).
-          */}
-          {compactPct !== null && compactPct > 0 && compactPct < 100 && (
-            <span
-              className="absolute -inset-y-[1.5px] w-px bg-ink"
-              style={{ left: `${compactPct}%` }}
-              data-testid="context-gauge-compact-mark"
-            />
-          )}
         </span>
       </span>
     </div>

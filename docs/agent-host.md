@@ -1534,7 +1534,7 @@ the params with the method's schema and reads the answer with its result schema,
   known one. A model nobody has read a window from passes nothing at its first start and the value from the next (Settings, and the
   session's own settings menu, say so).
   **One context share (#1553).** The share shown anywhere is used / the model's full window, for Claude and Codex alike: 100% is the whole window
-  (a 1M model: 1,000k), and the compaction point is a mark on it, not its end. The reading a tool gives is for learning from (`ModelWindows.note` reads it
+  (a 1M model: 1,000k), and the compaction point is told in the tooltip, not drawn on the bar (#1572), and is not its end. The reading a tool gives is for learning from (`ModelWindows.note` reads it
   against the ceiling, as above); what leaves the host is made from it once, in `SessionEvents.shareOf`, before the event is applied, stored or sent: the
   `context_update` (and so `SessionInfo.context`) carries `window` = the model's full window (`ModelWindows.shareWindow`: the reading when it is under the
   ceiling or the process has none, else the window kept for the model), `compactAt` = where the process compacts by itself, and `capped: true` when the full
@@ -1606,7 +1606,7 @@ the params with the method's schema and reads the answer with its result schema,
     **The size during a turn** comes from each model request's input as the stream says it (`usage_update.request`: Claude per assistant message, Codex per
     token count; a subagent's request is not the conversation's), because the tool's own reading comes at a turn's end (Claude reads it just after the turn
     ends). The same figure moves the window's meter (`sessions/context-meter.ts`, `ContextMeter`): each request becomes a `context_update` marked
-    `exactness: 'estimate'` (the window draws "≈"; a hub and an older window read it as a reading), **at most one per 3 seconds per session**, in the
+    `exactness: 'estimate'` (the window draws it like a reading, with no "≈", #1572; a hub and an older window read it as a reading), **at most one per 3 seconds per session**, in the
     window of the session's last reading (`SessionInfo.context.window`, the model's full window when known, #1553, so the meter never changes its denominator in a turn; none until a reading gave one), carrying its `capped` and `compactAt`. **The
     tool's reading stays the authority** at the turn's end whatever the estimates said, and estimates stop for the rest of a turn in which the tool read the
     size. Codex reads it with every request, right after the request's token count (`AgentAdapter.contextAtRequest`), so it gets no estimate at all: the exact

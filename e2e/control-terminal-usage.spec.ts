@@ -64,22 +64,22 @@ test('The context gauge stays filled in after restarting the app (#48)', async (
  * kept "Context 96%"; the first turn after it failed, so no turn-end reading ever corrected it. Until the tool's own
  * reading it is an estimate, and says so.
  */
-test('A compaction moves the context gauge to its reported size, as an estimate (#1282)', async ({ page }) => {
+test('A compaction moves the context gauge to its reported size, as an estimate, without a mark (#1282)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'task')
 
   await emitEvent(page, 0, { type: 'context_update', used: 964000, window: 1000000, exactness: 'exact' })
   await expect(page.getByTestId('context-gauge')).toHaveText('Context 96%')
   await emitEvent(page, 0, { type: 'compaction', failed: false, before: 964000, after: 8800 })
-  await expect(page.getByTestId('context-gauge')).toHaveText('Context ≈1%')
-  await expect(page.getByTestId('context-gauge')).toHaveAttribute('title', /Context ≈8\.8k \/ 1M tokens \(estimated/)
+  await expect(page.getByTestId('context-gauge')).toHaveText('Context 1%')
+  await expect(page.getByTestId('context-gauge')).toHaveAttribute('title', /Context 8\.8k \/ 1M tokens \(estimated/)
 
   // A reconnect reads back what the screen showed
   await page.evaluate(async () => {
     const w = window as any
     await w.__store.getState().attach(w.__mock)
   })
-  await expect(page.getByTestId('context-gauge')).toHaveText('Context ≈1%')
+  await expect(page.getByTestId('context-gauge')).toHaveText('Context 1%')
 
   // The tool's own reading at the next turn's end replaces the estimate
   await emitEvent(page, 0, { type: 'context_update', used: 12000, window: 1000000, exactness: 'exact' })
@@ -87,17 +87,17 @@ test('A compaction moves the context gauge to its reported size, as an estimate 
 })
 
 /*
- * The share is used / the model's full window, with the compaction point as a mark on the bar (#1553). The host says the window: a
+ * The share is used / the model's full window, with the compaction point in the tooltip only (#1553, #1572). The host says the window: a
  * 1M model started under the compaction setting reports 633k to the tool's reader, and the gauge is told 1,000k.
  */
-test('The context gauge reads against the model’s full window and marks where the tool compacts (#1553)', async ({ page }) => {
+test('The context gauge reads against the model’s full window and names where the tool compacts in the tooltip (#1553)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'task')
 
   await emitEvent(page, 0, { type: 'context_update', used: 304000, window: 1000000, exactness: 'exact', compactAt: 600000 })
   await expect(page.getByTestId('context-gauge')).toHaveText('Context 30%')
   await expect(page.getByTestId('context-gauge')).toHaveAttribute('title', /Context 304k \/ 1M tokens · compacts at 600k tokens \(60%\)/)
-  await expect(page.getByTestId('context-gauge-compact-mark')).toHaveAttribute('style', /left: 60%/)
+  await expect(page.getByTestId('context-gauge-compact-mark')).toHaveCount(0)
 
   // The bar warns near the tool's compaction point, not at a fixed 80% the tool never reaches: 30% is quiet, 52% of a 60% point is not
   await expect(page.getByTestId('context-gauge-fill')).toHaveClass(/bg-ink-faint/)
@@ -105,18 +105,7 @@ test('The context gauge reads against the model’s full window and marks where 
   await expect(page.getByTestId('context-gauge')).toHaveText('Context 52%')
   await expect(page.getByTestId('context-gauge-fill')).toHaveClass(/bg-ink(?!-)/)
 
-  // Past the mark the fill and the mark are both ink: the mark stands out of the track above and below, so it shows
-  await emitEvent(page, 0, { type: 'context_update', used: 800000, window: 1000000, exactness: 'exact', compactAt: 600000 })
-  await expect(page.getByTestId('context-gauge')).toHaveText('Context 80%')
-  const fill = await page.getByTestId('context-gauge-fill').boundingBox()
-  const tick = await page.getByTestId('context-gauge-compact-mark').boundingBox()
-  expect(fill && tick).toBeTruthy()
-  expect(tick!.y).toBeLessThan(fill!.y)
-  expect(tick!.y + tick!.height).toBeGreaterThan(fill!.y + fill!.height)
-  expect(tick!.x).toBeLessThan(fill!.x + fill!.width)
-  await test.info().attach('gauge-past-the-mark.png', { body: await page.getByTestId('context-gauge').screenshot(), contentType: 'image/png' })
-
-  // Only a floor under the model's window is known: the figure says it is at most that, and the mark has no place on the bar
+  // Only a floor under the model's window is known: the figure says it is at most that
   await emitEvent(page, 0, { type: 'context_update', used: 100000, window: 153000, exactness: 'exact', capped: true, compactAt: 120000 })
   await expect(page.getByTestId('context-gauge')).toHaveText('Context ≤65%')
   await expect(page.getByTestId('context-gauge')).toHaveAttribute('title', /full window is not known yet.*the real share is at most this/)
