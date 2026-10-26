@@ -1365,7 +1365,7 @@ tool in the other tiers), and one line of its instructions says to use them rath
   when the child is deleted for good (`purgeSession`), and with a start that fails. It runs under the orchestrator's
   preset and gets no Centralu tools and only the person's own settings (no project to trust). There is no worktree,
   and a busy child is not forked: there is no repository to fork from. In the sidebar it hangs under the
-  orchestrator's row (`orchestratorChildren`), with a ⋯ menu to stop or delete it; a child whose orchestrator was
+  orchestrator's row (`orchestratorChildren`), folded until the mouse rests on its button (#1591), with a ⋯ menu to stop or delete it; a child whose orchestrator was
   replaced stays there under "Started by an earlier orchestrator".
 - **The consent**: a card under `safe` and `normal` (no project's trust stands in for it), naming no project
   ("Start Codex in a folder of its own, outside any project, …") and offering no "Always for this project"; ⌥a, or that
