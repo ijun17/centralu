@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { inboxStateLabel } from './inboxLabel.js'
+import { stateLabel } from '../../components/primitives.jsx'
 
 describe('inboxStateLabel (docs/ux-writing.md 1.12)', () => {
   const row = (over: Parameters<typeof inboxStateLabel>[0]) => inboxStateLabel(over)
@@ -12,6 +13,8 @@ describe('inboxStateLabel (docs/ux-writing.md 1.12)', () => {
   it('keeps the other states’ words', () => {
     expect(row({ state: 'waiting_approval' })).toBe('Needs approval')
     expect(row({ state: 'error' })).toBe('Error')
-    expect(row({ state: 'waiting_input' })).toBe('Waiting for input')
+    // Said as the state's dot says it (owner, 2026-10-26): the same word as `idle`
+    expect(row({ state: 'waiting_input' })).toBe('Idle')
+    expect(row({ state: 'waiting_input' })).toBe(stateLabel('waiting_input'))
   })
 })

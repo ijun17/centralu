@@ -1,7 +1,7 @@
 import { appKeyOf, gridPanelKey, sanitizeGridPanels, withPanelSpan } from '@cc/core'
 import type { AppState, Overlay, StoreGet, StoreSet } from './state.js'
 import { activateTab } from './panelLayout.js'
-import { FOLDED_GROUPS_MAX, deadFoldKeys, foldGroupsHiding, sameKeys } from './foldGroups.js'
+import { FOLDED_GROUPS_MAX, deadFoldKeys, sameKeys } from './foldGroups.js'
 import { gridAppViewKey } from './appKeys.js'
 import { omitKey } from './patch.js'
 
@@ -90,7 +90,6 @@ type LayoutActions = Pick<
   | 'toggleDir'
   | 'setShowIgnored'
   | 'toggleProjectFold'
-  | 'revealSessions'
   | 'setGroupsFolded'
   | 'pruneFoldedGroups'
   | 'foldOtherProjects'
@@ -305,19 +304,6 @@ export const layoutActions = (set: StoreSet, get: StoreGet): LayoutActions => ({
         : [...s.foldedProjects, projectId],
     }))
     get().saveWorkspace()
-  },
-
-  revealSessions(ids) {
-    const s = get()
-    const rows = ids.flatMap((id) => s.sessions[id] ?? [])
-    const projects = new Set(rows.map((x) => x.projectId))
-    if (s.foldedProjects.some((id) => projects.has(id))) {
-      set({ foldedProjects: s.foldedProjects.filter((id) => !projects.has(id)) })
-      get().saveWorkspace()
-    }
-    const listed = new Set(s.externalApps.map((a) => appKeyOf(a.projectId, a.appId, a.machine)))
-    const hiding = rows.flatMap((x) => foldGroupsHiding(x, s.sessions, (y) => appKeyOf(y.projectId, y.appId ?? '', y.machine), listed))
-    if (hiding.some((k) => s.prefs.foldedGroups.includes(k))) get().setGroupsFolded(hiding, false)
   },
 
   setGroupsFolded(keys, folded) {

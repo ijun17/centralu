@@ -9,7 +9,6 @@ import { MAX_LEVEL, ROW_MENU_PAD, ROW_PAD, type INDENT } from '../layout.js'
 import { GroupToggle } from './GroupToggle.jsx'
 import { FoldedMark } from '../marks/FoldedMark.jsx'
 import { foldKeys } from './groupFold.js'
-import { HandedOffPointer } from './HandedOffPointer.jsx'
 import { SessionRow, approvalLine } from './SessionRow.jsx'
 import { SessionNameInput } from './SessionNameInput.jsx'
 import { SessionMenu } from '../menus/SessionMenu.jsx'
@@ -65,8 +64,6 @@ export function SessionListRow({
       below={
         <>
           {approvalLine(s, renaming, () => focusSession(s.id))}
-          {/* What it handed to another machine stands in that machine's project (#1416); this points there */}
-          {renaming !== s.id && <HandedOffPointer parentId={s.id} />}
         </>
       }
       /*
