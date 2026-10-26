@@ -1,33 +1,18 @@
 import { test, expect, type Page } from '@playwright/test'
-import { setup } from './fixtures/control.js'
+import { orchestratorWithChildren as withChildren } from './fixtures/sidebar-fold.js'
 
 /**
  * The orchestrator's children fold under its button and open on a mouse rest (#1591, owner 2026-10-26), by the rule of a
- * folded project's name (#1578). The 0.2 s rest runs on Playwright's clock: the clock is paused after setup and moved by hand.
+ * folded project's name (#1578). The 0.1 s rest (#1605) and the exit (150 ms) run on Playwright's clock: the clock is paused after setup and moved by hand.
  */
 const list = (page: Page) => page.getByTestId('orchestrator-children')
 const button = (page: Page) => page.getByTestId('orchestrator-button')
 const away = (page: Page) => page.mouse.move(900, 600)
 
-/** An orchestrator with children (`current`, started by it) and `earlier` ones (started by an orchestrator that is gone) */
-async function withChildren(page: Page, opts: { current?: string[]; earlier?: string[] } = { current: ['alpha', 'beta'] }): Promise<Record<string, unknown> & { id: string }> {
-  await page.clock.install()
-  await setup(page, { projects: ['/tmp/consumer'] })
-  const orc = await page.evaluate(async () => (await (window as any).__mock.agents.orchestrator()) as Record<string, unknown>)
-  await page.evaluate(
-    ([o, current, earlier]) => {
-      const add = (name: string, askedBy: string) => {
-        const child = { ...(o as object), id: `orc-child-${name}`, kind: 'worker', name, askedBy }
-        ;(window as any).__mock.emit({ type: 'session_created', sessionId: child.id, session: child })
-      }
-      for (const n of current) add(n, (o as { id: string }).id)
-      for (const n of earlier) add(n, 'orc-gone')
-    },
-    [orc, opts.current ?? [], opts.earlier ?? []] as const,
-  )
-  await away(page)
-  await page.clock.pauseAt(new Date(Date.now() + 60_000))
-  return orc as Record<string, unknown> & { id: string }
+/** A list that folds stays 150 ms (usePresence) on the same fake clock: wait until it is leaving, then let the exit end */
+async function exitEnds(page: Page) {
+  await expect(page.getByTestId('orchestrator-fold')).toHaveAttribute('data-fold', 'closing')
+  await page.clock.runFor(151)
 }
 
 const row = (page: Page, name: string) => page.getByTestId(`orchestrator-child-row-orc-child-${name}`)
@@ -37,7 +22,7 @@ test('Orchestrator children: folded at rest, open after a mouse rest on the butt
   await expect(button(page)).toBeVisible()
   await expect(list(page)).toHaveCount(0)
   await button(page).hover()
-  await page.clock.runFor(199)
+  await page.clock.runFor(99)
   await expect(list(page)).toHaveCount(0)
   await page.clock.runFor(2)
   await expect(list(page)).toBeVisible()
@@ -49,6 +34,7 @@ test('Orchestrator children: folded at rest, open after a mouse rest on the butt
   await expect(list(page)).toBeVisible()
   // Out of the whole block: it folds
   await away(page)
+  await exitEnds(page)
   await expect(list(page)).toHaveCount(0)
 })
 
@@ -62,7 +48,7 @@ test('Orchestrator children: nothing on the folded button says how many there ar
 test('Orchestrator children: passing over the button does not open them', async ({ page }) => {
   await withChildren(page)
   await button(page).hover()
-  await page.clock.runFor(150)
+  await page.clock.runFor(60)
   await expect(list(page)).toHaveCount(0)
   await away(page)
   await page.clock.runFor(1000)
@@ -104,6 +90,7 @@ test('Orchestrator children: the earlier orchestrator group folds and opens with
   await expect(page.getByTestId('orchestrator-children-earlier')).toHaveText('Started by an earlier orchestrator')
   await expect(row(page, 'gamma')).toBeVisible()
   await away(page)
+  await exitEnds(page)
   await expect(row(page, 'gamma')).toHaveCount(0)
 })
 
@@ -118,6 +105,7 @@ test("Orchestrator children: an open row menu holds the list until it closes", a
   await page.clock.runFor(500)
   await expect(list(page)).toBeVisible()
   await page.keyboard.press('Escape')
+  await exitEnds(page)
   await expect(list(page)).toHaveCount(0)
 })
 
@@ -139,6 +127,7 @@ test('Orchestrator children: a child that starts while the pointer rests on the 
   }, orc)
   await expect(row(page, 'late')).toBeVisible()
   await away(page)
+  await exitEnds(page)
   await expect(list(page)).toHaveCount(0)
 })
 

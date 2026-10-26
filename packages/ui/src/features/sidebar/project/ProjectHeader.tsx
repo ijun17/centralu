@@ -24,8 +24,8 @@ export function ProjectHeader({
   savedFolded,
   onToggleFold,
   onPin,
-  onNameEnter,
-  onNameLeave,
+  onRowEnter,
+  onRowLeave,
   onMenuChange,
   sessions,
   rootApp,
@@ -44,9 +44,9 @@ export function ProjectHeader({
   onToggleFold: () => void
   /** A press on the name: a hover-expanded project stays; any other is left as it is */
   onPin: () => void
-  /** The mouse pointer came onto / left the name (#1578) */
-  onNameEnter: () => void
-  onNameLeave: () => void
+  /** The mouse pointer came onto / left the name row, any part of it (#1578, #1605); a press on it ends a rest that has not finished */
+  onRowEnter: () => void
+  onRowLeave: () => void
   /** The project menu opened or closed: an open menu keeps a hover-expanded project as it is */
   onMenuChange: (open: boolean) => void
   sessions: SessionSummary[]
@@ -107,6 +107,10 @@ export function ProjectHeader({
         selected ? 'border-l-ink-muted bg-surface-hover/40' : 'border-l-transparent'
       }`}
       draggable
+      onPointerEnter={(e) => e.pointerType === 'mouse' && onRowEnter()}
+      onPointerLeave={(e) => e.pointerType === 'mouse' && onRowLeave()}
+      // Pressing anything on the row (the arrow, the name, the menu) is a decision not to wait for the rest
+      onPointerDown={(e) => e.pointerType === 'mouse' && onRowLeave()}
       onDragStart={(e) => {
         e.dataTransfer.setData(PROJECT_MIME, projectId)
         /*
@@ -123,7 +127,7 @@ export function ProjectHeader({
       {/*
         The fold arrow (#205). **This is the one and only door for folding** — the name is where
         the project screen opens (#206), so if pressing it also folded, one of the two would
-        always misfire. Resting the pointer on a folded name for 0.2 s also shows its rows, until the
+        always misfire. Resting the pointer on a folded name row for 0.1 s also shows its rows, until the
         pointer leaves the project (#1578, owner); passing over does nothing, so the row the person
         meant to press is not shoved out of place, and pressing the arrow makes that expansion stay.
 
@@ -156,11 +160,7 @@ export function ProjectHeader({
         badge's text stands on the name's line whatever the case. Half the row's gap apart, so the badge reads as part of
         the name. Which linked machine it is on (#734); this computer's projects carry none.
       */}
-      <span
-        className="flex min-w-0 items-baseline gap-1"
-        onPointerEnter={(e) => e.pointerType === 'mouse' && onNameEnter()}
-        onPointerLeave={(e) => e.pointerType === 'mouse' && onNameLeave()}
-      >
+      <span className="flex min-w-0 items-baseline gap-1">
         <Tooltip content={<ProjectDetail project={project} />} testId={`project-tip-${project.name}`}>
           <button
             className={`truncate text-left text-md font-medium tracking-tight text-ink transition-colors ${

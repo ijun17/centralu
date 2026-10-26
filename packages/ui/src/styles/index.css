@@ -1008,6 +1008,41 @@
   }
 }
 
+/*
+ * A list that folds and unfolds (components/Fold.tsx: a project's rows, the orchestrator's children; #1605). A transition
+ * of the grid track, not a keyframe animation: one that is reversed half way (the pointer comes back while it closes)
+ * goes on from where it is, and what stands under it moves with it. The rows inside are uncovered, not moved. Closing is a
+ * little shorter than opening (140ms against 180ms, as a layer's exit is) and ends before the rows are taken away at `LEAVE_MS`.
+ *
+ * With reduced motion the track does not move at all: the rows stay at full height and only fade in and out, then go when
+ * the exit ends (`usePresence`).
+ */
+.cc-fold {
+  display: grid;
+  /* The column may be narrower than its rows' minimum content, as a block is: a truncated name must not widen the list */
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 140ms ease-in,
+    opacity 140ms ease-in;
+}
+.cc-fold[data-drawn] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition-duration: 180ms;
+  transition-timing-function: ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cc-fold,
+  .cc-fold[data-drawn] {
+    grid-template-rows: 1fr;
+    transition-property: opacity;
+    transition-duration: 100ms;
+    transition-timing-function: linear;
+  }
+}
+
 /* The exit counterpart of cc-drop — goes back up the way it came down and disappears (closing
    the run-command dropdown) */
 /*
