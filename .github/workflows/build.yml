@@ -491,6 +491,10 @@ jobs:
         run: pnpm typecheck
 
   # `pnpm test` on Windows, the rest of the job above, halved by `vitest --shard` (#1035). In the quick tier.
+  #
+  # Only the tests that touch the OS (#1599, docs/plans/os-layer.md): those that reach the OS layer, a file still on
+  # tooling/os-allowlist.txt or anything else in the shipped code that imports an OS module or asks which OS this is,
+  # picked by the lint rule's own judgement (tooling/os-tests.ts). The rest run once, on Linux, in `verify`.
   windows-tests-unit:
     name: windows tests (vitest ${{ matrix.shard }}/${{ matrix.shards }})
     needs: changes
@@ -515,10 +519,15 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - name: Pick the tests that touch the OS
+        run: pnpm exec tsx tooling/os-tests.ts --out "${{ runner.temp }}\os-tests.txt"
+
       - name: pnpm test (shard ${{ matrix.shard }}/${{ matrix.shards }})
         # Never the real data folder, on any OS (AGENTS.md).
         env:
           CC_DATA_DIR: ${{ runner.temp }}\centralu-data
+          # The tests picked above (vitest.config.ts)
+          CC_TEST_FILES: ${{ runner.temp }}\os-tests.txt
           # styles.test.ts compares the app's JS with main's in the verify job, and fails in CI unless told where
           CC_BUNDLE_COMPARED_BY: verify
         # `pnpm test` is `vitest run`, called directly: pnpm 11 refuses `pnpm test --shard` as an

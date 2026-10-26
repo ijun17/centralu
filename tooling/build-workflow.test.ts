@@ -122,6 +122,20 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     expect(unit).toContain('CC_DATA_DIR: ${{ runner.temp }}')
   })
 
+  // #1599: Windows runs the tests that touch the OS, picked by the OS layer's rule; Linux (`verify`) runs them all
+  it('runs on Windows the tests the OS layer picks, and every test on Linux', () => {
+    const unit = job('windows-tests-unit').body
+    const pick = unit.indexOf('run: pnpm exec tsx tooling/os-tests.ts --out "${{ runner.temp }}\\os-tests.txt"\n')
+    const test = unit.indexOf('run: pnpm exec vitest run --shard=')
+    expect(pick).toBeGreaterThan(-1)
+    expect(test).toBeGreaterThan(pick)
+    expect(unit.slice(pick, test)).toContain('CC_TEST_FILES: ${{ runner.temp }}\\os-tests.txt\n')
+    // Nowhere else is the selection used: the Linux jobs run every test
+    const verify = job('verify').body
+    expect(verify).not.toMatch(/CC_TEST_FILES|os-tests/)
+    expect(workflow.match(/CC_TEST_FILES/g)).toHaveLength(1)
+  })
+
   // 2026-10-19 (owner): Playwright retries a failed test, not the shard, and a pass on the retry is named, not hidden
   it('runs each e2e shard once, retrying a failed test inside Playwright, and names every test that passed only on retry', () => {
     const config = readFileSync(new URL('../e2e/playwright.config.ts', import.meta.url), 'utf8')
