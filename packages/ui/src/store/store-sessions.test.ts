@@ -576,16 +576,18 @@ describe('Undo on the archive toast (#1512)', () => {
   // shown, and only the next Archive moves anyway
   const bin = (mock: MockPlatform) => (mock as unknown as { trashBin: Map<string, { removeExternal: boolean }> }).trashBin
 
-  it.each([true, false])('archives at the first Archive when the host finds nothing it holds would be lost, with the file box %s', async (box) => {
-    const { mock, s } = await oneSession('/tmp/archive-a')
-    const asked = vi.spyOn(mock.agents, 'archiveIfAtRest')
-    const deleted = vi.spyOn(mock.agents, 'deleteSession')
-    expect(await useStore.getState().archiveSession(s.id, box)).toBeNull()
-    expect(asked).toHaveBeenCalledWith(s.id, box)
-    expect(deleted).not.toHaveBeenCalled()
-    expect(useStore.getState().sessions[s.id]).toBeUndefined()
-    expect(useStore.getState().toastAction?.label).toBe('Undo')
-    expect(bin(mock).get(s.id)?.removeExternal).toBe(box)
+  it('archives at the first Archive when the host finds nothing it holds would be lost, with the file box as the person left it (ticked or not)', async () => {
+    for (const box of [true, false]) {
+      const { mock, s } = await oneSession(`/tmp/archive-a-${box}`)
+      const asked = vi.spyOn(mock.agents, 'archiveIfAtRest')
+      const deleted = vi.spyOn(mock.agents, 'deleteSession')
+      expect(await useStore.getState().archiveSession(s.id, box)).toBeNull()
+      expect(asked).toHaveBeenCalledWith(s.id, box)
+      expect(deleted).not.toHaveBeenCalled()
+      expect(useStore.getState().sessions[s.id]).toBeUndefined()
+      expect(useStore.getState().toastAction?.label).toBe('Undo')
+      expect(bin(mock).get(s.id)?.removeExternal).toBe(box)
+    }
   })
 
   it('gives the host lines back and moves nothing when the archive would lose something; deleteSession is the next step', async () => {
