@@ -429,21 +429,21 @@ export function decideCi({ item, pr, checks, runs = [], failures = {}, defaultBr
   // It failed alone in a batch on this head (queue-batch.mjs): that full run is the answer, whatever
   // its own quick run says (cancelled for the batch, it would otherwise be rerun to say nothing new)
   if (item.alone?.head === head && item.alone.reason) return { state: 'attention', reason: item.alone.reason }
-  // A squash subject over the limit is caught here, before the quick-tier path below sends the item to a batch (#1593:
-  // #1586 ran a batch's whole full tier and was refused at landing). Not a candidate while it holds (`state` is attention);
+  // A squash subject over the limit, whatever CI says yet (#1593: #1586's quick tier passed, its batch ran the whole full tier
+  // and landing refused it). It must stop the item before a batch can take it, and a batch takes one whose quick run is still
+  // going or has not reported too (batchCandidates), so this is not left to the paths below. In attention it is no candidate;
   // the title fixed, the next poll carries on, with no new push
   const long = longSubject(pr)
+  if (long) return subjectAttention(n, long)
   // Handed over with integrate (#1259 step 3): a draft, whose own run is only CI's changes job, so it lands through a
   // batch alone (the quick tier on what lands), never from its own run
   if (item.auto) {
-    if (long) return subjectAttention(n, long)
     if (!canBatch) return attention('batch', `${n} was handed over with integrate, which lands only through a batch (the quick tier on ${defaultBranch}), and the queue cannot batch it (batches are off, or two tiers of CI are not set). Take it out (unqueue), mark it ready and land it with queue_merge.`)
     const alone = item.alone?.head === head ? item.alone : null
     if (alone) return attention('full-tier', `${n}'s batch of one ${ranBatch(alone)}ended without landing it: ${alone.text} Fix it and push (the queue takes the new head), or queue it again with integrate.`)
     return { state: 'ci', quick: true, patch: { noCiSince: null, missingSince: null } }
   }
   if (quickGreen(checks, runs, fullTier)) {
-    if (long) return subjectAttention(n, long)
     const alone = item.alone?.head === head ? item.alone : null
     if (alone)
       return attention(
@@ -486,7 +486,6 @@ export function decideCi({ item, pr, checks, runs = [], failures = {}, defaultBr
       `${n} is based on ${pr.baseRefName}, not ${defaultBranch}, and no PR queued under it has that branch. Queue it again with the PRs under it as lowers, or rebase it onto ${defaultBranch}.`,
     )
   }
-  if (long) return subjectAttention(n, long)
   if (pr.mergeStateStatus === 'BEHIND') return attention('behind', `${n} is behind ${defaultBranch}, and GitHub requires it up to date. Rebase it onto ${defaultBranch} and push.`)
   if (pr.mergeStateStatus === 'BLOCKED') return attention('blocked', `${n} is green, but GitHub blocks merging it (a required review or rule). Look at the PR on GitHub.`)
   // UNSTABLE only from a run a successful one made moot (a cancelled duplicate, #1015): as CLEAN

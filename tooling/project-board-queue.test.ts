@@ -731,6 +731,17 @@ describe('what the merge queue decides with two tiers of CI', () => {
       expect(longSubject(titled(55))).toEqual({ subject: subjectOf(55), length: 73 })
     })
 
+    // The first review of #1593: judged only once the quick tier was green, a title that was too long while its quick run
+    // still went was a batch candidate (batchCandidates takes pending ones), and a batch was made and dropped every tick
+    it('judges it while the quick tier still runs or has not reported, since a batch takes those too, and before a failure or a rerun', () => {
+      const going = tiered([check(TIER, 'skipped'), check('verify', 'success'), check('windows tests', null)])
+      expect(ci({ pr: titled(55), checks: going, runs: [run(null)] })).toMatchObject({ state: 'attention', reason: { kind: 'subject' } })
+      expect(ci({ pr: titled(54), checks: going, runs: [run(null)] })).toEqual({ state: 'ci', patch: { noCiSince: null, missingSince: null } })
+      expect(ci({ pr: titled(55), checks: tiered([]), runs: [] })).toMatchObject({ state: 'attention', reason: { kind: 'subject' } })
+      const failed = tiered([check(TIER, 'skipped'), check('verify', 'failure', { jobId: '5' }), check('windows tests', 'success')])
+      expect(ci({ pr: titled(55), checks: failed, runs: [run('failure')], failures: { 900: { real: false, cause: 'runner', job: { name: 'verify', id: '5' }, attempt: 1 } } })).toMatchObject({ state: 'attention', reason: { kind: 'subject' } })
+    })
+
     it('still stops a full run on its own head at the same limit (the path it was on before), and decideLanding stays the last guard', () => {
       expect(ci({ pr: titled(55), checks: FULL() })).toMatchObject({ state: 'attention', reason: { kind: 'subject' } })
       expect(ci({ pr: titled(54), checks: FULL() })).toMatchObject({ action: { type: 'merge' } })
@@ -3064,6 +3075,18 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
       expect(writes().map(short2)).toContain('branch queue/batch-1')
       expect(writes().map(short2)).toContain('merge 77')
       expect(gh().prs['77'].headRefOid).toBe(SHA)
+    })
+
+    it('makes no batch of it while its quick tier still runs, as it is a candidate then (a batch made and dropped every tick before)', async () => {
+      const going = [ghCheck('full tier', 'skipped', 10), ghCheck('verify', null, 11), ghCheck('windows tests', null, 12)]
+      seedQueue([queued()])
+      runtime(tieredState({ prs: { '77': ghPr(77, { title: LONG }) }, checks: { [SHA]: going }, runs: { [SHA]: [ghRun(null)] } }), TIERS)
+      await until((x) => stateOf(x) === 'attention', 'attention')
+      expect(queueOnDisk().items[0].reason).toMatchObject({ kind: 'subject' })
+      await morePolls(3)
+      expect(queueOnDisk().batchSeq).toBe(0)
+      expect(batchesOnDisk()).toEqual([])
+      expect(writes()).toEqual([])
     })
 
     it('sends a member back at the batch build when its title was edited after the poll that made it a candidate', async () => {

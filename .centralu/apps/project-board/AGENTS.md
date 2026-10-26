@@ -209,8 +209,10 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
 - **Each poll** reads one item (`decideBefore`, `decideCi`): no maintain or admin, a draft, DIRTY
   (which the queue first tries to resolve itself, below), BEHIND, BLOCKED, a squash subject over 72 characters, or a base that is not the default branch or a
   lower's branch → attention. The subject is judged **before a batch can take the item** (#1593: #1586's quick tier passed,
-  batch-225 ran the full tier for 30 minutes, and landing refused it): `decideCi` answers attention `subject` on the quick-tier
-  path (and for a handed-over record) as on a full run's, so the item is not in `ci` and no candidate. It is polled again
+  batch-225 ran the full tier for 30 minutes, and landing refused it): `decideCi` answers attention `subject` first of all (after
+  a failure alone in a batch on this head), whatever CI says yet: a quick run still going, not reported, failed or green, a record handed
+  over with integrate, or a full run. A batch takes an item whose quick run is still going too, so the item must not be in `ci`:
+  it is no candidate. It is polled again
   like any attention, and once the title is shortened the next poll carries on, with no new push. The length is counted in
   characters (code points) of `squashSubject` (queue.mjs, with `SUBJECT_MAX` and `longSubject`: the one definition that
   `queue_merge`, the poll, a batch's build and landing all read). Only the CI workflows' own checks count (`readWorkflowChecks`, their
