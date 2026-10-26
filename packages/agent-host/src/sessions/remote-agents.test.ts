@@ -379,6 +379,87 @@ describe("the turn on the child's machine, read as the caller's only on evidence
     expect(reportOwed()).toBe(false)
   })
 
+  describe("a turn that begins with no message after one that had the caller's note in it (#1604)", () => {
+    /** The caller's turn took its task and a note; the turn ends, and its report goes as the linked reports send it */
+    async function afterNote(): Promise<RemoteAgents> {
+      const ra = following()
+      children.setLinkedReport(child.sessionId, { orchestratorId: 'h1', busy: false })
+      ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 1, text: 'TASK', from: HUB })
+      ra.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working' })
+      expect(await act(ra, 'send', { text: 'use the staging data' })).toMatchObject({ ok: true, state: 'working' })
+      ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 2, text: sentTexts[0], from: HUB })
+      ra.observe({ type: 'turn_complete', sessionId: child.sessionId })
+      children.dropLinkedReport(child.sessionId)
+      return ra
+    }
+
+    it("is the note's, so the caller's: its end is owed and a note goes into it", async () => {
+      const ra = await afterNote()
+      expect(reportOwed()).toBe(false)
+      ra.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working' })
+      expect(reportOwed()).toBe(true)
+      expect(await act(ra, 'send', { text: 'and the keys' })).toMatchObject({ ok: true, state: 'working' })
+      expect(sentTexts).toHaveLength(2)
+    })
+
+    it("is not the caller's when the person's message came first", async () => {
+      const ra = await afterNote()
+      ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 3, text: 'my own thing', from: PERSON })
+      ra.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working' })
+      expect(reportOwed()).toBe(false)
+      expect(await act(ra, 'send', { text: 'and the keys' })).toMatchObject({ ok: false, error: expect.stringContaining('a turn you did not give it') })
+      expect(sentTexts).toHaveLength(1)
+    })
+
+    it("is not the caller's when it begins long after the turn ended", async () => {
+      const ra = await afterNote()
+      const now = Date.now()
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(now + 60_000)
+      ra.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working' })
+      clock.mockRestore()
+      expect(reportOwed()).toBe(false)
+    })
+
+    it("is not the caller's when it begins after the link dropped", async () => {
+      const ra = await afterNote()
+      ra.observe({ type: 'machine_status', machine: { id: 'm1', name: 'Box', status: 'unreachable' } })
+      ra.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working' })
+      expect(reportOwed()).toBe(false)
+    })
+
+    it("is not the caller's when no note of its was in the turn before", async () => {
+      const ra = following()
+      children.setLinkedReport(child.sessionId, { orchestratorId: 'h1', busy: false })
+      ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 1, text: 'TASK', from: HUB })
+      ra.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working' })
+      ra.observe({ type: 'turn_complete', sessionId: child.sessionId })
+      children.dropLinkedReport(child.sessionId)
+      ra.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working' })
+      expect(reportOwed()).toBe(false)
+      expect(await act(ra, 'send', { text: 'note' })).toMatchObject({ ok: false, error: expect.stringContaining('a turn it started by itself') })
+    })
+
+    it("is a turn of its own only once: the one after it is not the note's", async () => {
+      const ra = await afterNote()
+      ra.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working' })
+      ra.observe({ type: 'turn_complete', sessionId: child.sessionId })
+      children.dropLinkedReport(child.sessionId)
+      ra.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working' })
+      expect(reportOwed()).toBe(false)
+    })
+  })
+
+  it('does not say the person may be using a turn it saw no message begin', async () => {
+    const ra = following()
+    state = 'idle'
+    // The send goes, but no record of it comes back as this hub's instruction: the hub did not see the turn begin
+    await act(ra, 'send', { text: 'do X' })
+    state = 'working'
+    const r = await act(ra, 'send', { text: 'and this' })
+    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('this hub did not see begin') })
+    expect((r as { error: string }).error).not.toContain('person may be using')
+  })
+
   it("takes a link's replay of an instruction seen before, and another link's sender, as no new instruction", async () => {
     const ra = following()
     children.setLinkedReport(child.sessionId, { orchestratorId: 'h1', busy: false })

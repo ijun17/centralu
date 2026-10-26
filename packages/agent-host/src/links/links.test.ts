@@ -57,6 +57,8 @@ async function remoteHost(
     version?: string
     activity?: () => HostActivity
     immediate?: boolean
+    /** A message sent into a running turn waits for the next one (`scriptedAdapters`) */
+    queueBehind?: boolean
     without?: readonly string[]
     /** Runs as each call reaches the host, before it is answered: a test acts at that moment */
     onCall?: (method: string) => void
@@ -67,7 +69,7 @@ async function remoteHost(
     beforeListen?: (mgr: SessionManager) => Promise<void>
   } = {},
 ) {
-    const adapters = scriptedAdapters({ immediate: o.immediate })
+  const adapters = scriptedAdapters({ immediate: o.immediate, queueBehind: o.queueBehind })
   const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
   const server: HostServer = new HostServer({
     port,
@@ -2469,7 +2471,7 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
    * project's session h1 starts the child. `remote`: how the machine's host answers (a synchronous agent, methods an
    * older build lacks)
    */
-  async function rig(o: { remote?: { immediate?: boolean; without?: readonly string[]; onCall?: (method: string) => void } } = {}) {
+  async function rig(o: { remote?: { immediate?: boolean; queueBehind?: boolean; without?: readonly string[]; onCall?: (method: string) => void } } = {}) {
     const remoteStore = new Store()
     remoteStore.projects.addProject({ id: 'p-other', path: checkout('git@github.com:me/other.git'), name: 'other' })
     remoteStore.projects.addProject({ id: 'p-app', path: checkout('git@GitHub.com:me/app.git'), name: 'app-checkout' })
@@ -2489,8 +2491,8 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
     }
     const start = (opts: Partial<Parameters<SessionManager['startAgent']>[1]> = {}) =>
       hub.mgr.startAgent('h1', { task: 'say hello', machine: 'Remote box', ...opts })
-    const agent = (sessionId: string, action: 'status' | 'send' | 'wait' | 'stop' | 'delete' | 'answer', text?: string, card?: string) =>
-      hub.mgr.agentSession('h1', { sessionId, action, ...(text ? { text } : {}), ...(card ? { card } : {}) })
+    const agent = (sessionId: string, action: 'status' | 'send' | 'wait' | 'stop' | 'delete' | 'answer', text?: string, card?: string, ifBusy?: 'note' | 'queue') =>
+      hub.mgr.agentSession('h1', { sessionId, action, ...(text ? { text } : {}), ...(card ? { card } : {}), ...(ifBusy ? { ifBusy } : {}) })
     const list = (id = 'h1') => (hub.mgr as unknown as { delegationFlow: { listAgents(id: string): Promise<unknown[]> } }).delegationFlow.listAgents(id)
     // As the machine names its projects (the folder's name), which is what the hub reads
     const nameOf = async (id: string) => (await remote.mgr.listProjects()).find((p) => p.id === id)!.name
@@ -2803,6 +2805,55 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
     // The stopped turn's report, if one were owed, would have come before the next child's
     await control()
     expect(reports()).toBe(before + 1)
+  })
+
+  describe('a note the child ran as a turn of its own after the turn it was sent into (#1604)', () => {
+    /**
+     * The child's first turn waits on a question; the caller's `queue` goes into it, and the tool does not read it there:
+     * once the caller answers, that turn ends and the note runs as the next one, which asks a question of its own
+     */
+    async function followUp() {
+      const rigged = await rig({ remote: { queueBehind: true } })
+      const { remote, answer, start, agent } = rigged
+      const call = start({ task: 'a question for you', wait: false })
+      await answer('allow')
+      const r = await call
+      if (!r.ok) throw new Error(r.error)
+      const id = r.sessionId.slice('m1.'.length)
+      const pending = () => remote.mgr.listSessions().find((s) => s.id === id)?.pendingQuestions.length ?? 0
+      await eventually(() => pending() === 1)
+      expect(await agent(r.sessionId, 'send', 'one more question for you', undefined, 'queue')).toMatchObject({ ok: true, state: 'working' })
+      const asked = await agent(r.sessionId, 'status')
+      if (!asked.ok || asked.state !== 'asking') throw new Error(`no card: ${JSON.stringify(asked)}`)
+      expect(await agent(r.sessionId, 'answer', 'yes', asked.cards[0]!.card)).toMatchObject({ ok: true, state: 'answered' })
+      // The first turn ended; the note it did not read is the next turn, with a question of its own standing
+      await eventually(() => remote.mgr.listSessions().find((s) => s.id === id)?.pendingQuestions.some((q) => q.requestId !== asked.cards[0]!.requestId) ?? false)
+      return { ...rigged, r, id }
+    }
+
+    it("takes a note into it, as into the turn the caller's note ran in", async () => {
+      const { remote, agent, r, id } = await followUp()
+      expect(await agent(r.sessionId, 'send', 'use the staging data', undefined, 'note')).toMatchObject({ ok: true, state: 'working' })
+      expect(await agent(r.sessionId, 'send', 'and the staging keys', undefined, 'note')).toMatchObject({ ok: true, state: 'working' })
+      await eventually(() => remote.store.messages.loadMessages(id, 50).some((m) => (m.payload as { text?: string }).text?.includes('and the staging keys')))
+    })
+
+    it('reads its question to the caller, and reports its end to the caller once', async () => {
+      const { agent, r, reports } = await followUp()
+      // The first turn's end was reported; this one's is owed too
+      expect(reports()).toBe(1)
+      const asked = await agent(r.sessionId, 'status')
+      if (!asked.ok || asked.state !== 'asking') throw new Error(`no card: ${JSON.stringify(asked)}`)
+      expect(await agent(r.sessionId, 'answer', 'yes', asked.cards[0]!.card)).toMatchObject({ ok: true, state: 'answered' })
+      await eventually(() => reports() === 2)
+    })
+
+    it("still refuses a note into a turn the person started there after it", async () => {
+      const { remote, agent, r, id } = await followUp()
+      await remote.mgr.send(id, 'my own thing, please approve the command')
+      await eventually(() => remote.store.messages.loadMessages(id, 50).some((m) => (m.payload as { text?: string }).text === 'my own thing, please approve the command'))
+      expect(await agent(r.sessionId, 'send', 'and this', undefined, 'note')).toMatchObject({ ok: false, error: expect.stringContaining('a turn you did not give it') })
+    })
   })
 
   // #1038 review: the turn a delete stops ends before the machine answers the stop; it is owed to nobody

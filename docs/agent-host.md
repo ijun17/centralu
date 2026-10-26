@@ -730,7 +730,12 @@ card stays the person's on that machine, whatever the caller's preset: a caller'
 local child's approval, never answers one on another computer, even when its child runs under `auto` there. `send`
 into the turn the caller gave it goes in as a note (the machine's `host.send` takes it into the running turn, as the
 person's message there; nothing is armed again); into a turn the caller did not give it (the person's there) it is
-refused, as neither a queue nor a fork reaches another machine.
+refused, as neither a queue nor a fork reaches another machine. A note the tool did not read in the turn it went into
+runs as a turn of its own once that turn ends, with no message of anyone's to start it: the first turn that begins within
+15 s of the end of a turn that took a note of the caller's is that note's, so the caller's (`RemoteAgents.carried`,
+#1604), and its end is owed as the first turn's was. The person's message first, a link's loss or a send at rest drops
+that reading. A refusal names the turn by what the hub saw start it: a person's message, another session's, or no
+message at all ("which this hub did not see begin"), never the person without a message of theirs.
 
 The person may use the same session on that machine, and nothing of a turn that is not the caller's reaches the
 caller (#1038 review, RV13). One gate decides it (`RemoteAgents.gate`), and every path that hands the caller anything

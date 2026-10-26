@@ -87,6 +87,9 @@ const bare = (error: string): string => error.trim().replace(/\.+$/, '')
  */
 export const INSTRUCTIONS_WAIT_MS = 5_000
 
+/** How soon after the caller's turn ended a turn with no message of anyone's is the note's that the tool ran after it (#1604); the machine's own bound for the same (`NEXT_STARTER_MS`) */
+const FOLLOW_UP_MS = 15_000
+
 /**
  * What became of a deleted child's worktree on its machine (#1161 item 3), as the rest of "It went to <machine>'s
  * trash": removed, left and why, or left because the machine's build predates the cleanup. Nothing for a child started
@@ -197,7 +200,14 @@ export class RemoteAgents {
   /** Whose each child's turn is, as settled in this host (`Whose`); one not here is read from its record (`whoseOf`) */
   private readonly whose = new Map<string, Whose>()
   /** What made a turn another's, when it is told (#1576): a message from another session of this hub, else it is read as the person's */
-  private readonly otherBy = new Map<string, 'session'>()
+  private readonly otherBy = new Map<string, 'session' | 'person'>()
+  /**
+   * Children a note of the caller's went into a running turn of (#1604), and when that turn ended (null while it runs). A
+   * tool whose turn does not read the note runs it as a turn of its own once the turn ends, with no message of anyone's
+   * to say so: the first turn that begins soon after is the note's, so the caller's. Dropped by anything that tells another
+   * way: a message of someone else's, a send at rest, a link's loss
+   */
+  private readonly carried = new Map<string, number | null>()
   /** Notes sent into a running turn whose record has not come back yet (memory only): two quick notes both are the caller's own */
   private readonly notesSent = new Map<string, string[]>()
   /** Children an instruction is on its way to: its own send's answer says what came of it, and the machine is not read meanwhile */
@@ -630,6 +640,7 @@ export class RemoteAgents {
         const framed = agentNoteFrame(label, text)
         this.save(this.records().map((r) => (r.sessionId === rec.sessionId ? { ...r, turn: randomUUID(), sent: framed } : r)))
         this.notesSent.delete(rec.sessionId)
+        this.carried.delete(rec.sessionId)
         this.whose.set(rec.sessionId, 'unknown')
         this.pending.add(rec.sessionId)
         this.host.children.setLinkedReport(rec.sessionId, { orchestratorId: callerId, busy: false })
@@ -712,7 +723,7 @@ export class RemoteAgents {
     const rec = this.of(sessionId)
     if (!rec) return
     if (e.type === 'user_message') this.messageTaken(rec, e)
-    else this.trackBusy(sessionId, e)
+    else this.trackBusy(rec, e)
     const wait = this.waits.get(sessionId)
     if ((e.type === 'approval_request' || e.type === 'question_request') && typeof e.requestId === 'string') {
       this.cardRaised(rec, e.type === 'approval_request' ? 'approval' : 'question', e.requestId, !!wait)
@@ -784,6 +795,7 @@ export class RemoteAgents {
     // What made a turn another's is told with it (`messageTaken` sets it after), never kept past it
     if (was !== 'other' || whose !== 'other') this.otherBy.delete(rec.sessionId)
     this.whose.set(rec.sessionId, whose)
+    if (whose !== 'caller') this.carried.delete(rec.sessionId)
     const kept = whose === 'unknown' ? undefined : whose
     const stored = this.of(rec.sessionId)
     if (stored && kept && stored.whose !== kept) this.save(this.records().map((r) => (r.sessionId === rec.sessionId ? { ...r, whose: kept } : r)))
@@ -848,9 +860,11 @@ export class RemoteAgents {
   private otherTurn(rec: RemoteAgent, g: Gate): string {
     if (g.whose === 'unknown') return 'a turn the hub cannot tell the owner of (the link dropped, or Centralu restarted, and the machine cannot be read now)'
     if (g.whose === 'other') {
-      return this.otherBy.get(rec.sessionId) === 'session'
-        ? "a turn another session asked of it (it is not the one you gave it)"
-        : 'a turn you did not give it (the person may be using it there)'
+      const by = this.otherBy.get(rec.sessionId)
+      if (by === 'session') return "a turn another session asked of it (it is not the one you gave it)"
+      if (by === 'person') return 'a turn you did not give it (the person may be using it there)'
+      // No message of anyone's was seen to start it: the hub cannot say it is a person's (#1604)
+      return 'a turn already running there when your message reached it, which this hub did not see begin (the person, or the child’s own tool)'
     }
     const report = this.host.children.linkedReports.get(rec.sessionId)
     if (report && report.orchestratorId !== rec.callerId) return 'a turn another session is owed the end of (it is not the one you gave it)'
@@ -893,20 +907,19 @@ export class RemoteAgents {
     if (earlier >= 0 && this.fromHubHere(rec, e.from)) {
       // An earlier note of the caller's own, its record arriving after a later note was kept as the last sent
       this.notesSent.set(sessionId, own.filter((_, i) => i !== earlier))
-      if (this.whoseOf(rec) === 'caller' && this.gateNow(rec).live) return
+      if (this.whoseOf(rec) === 'caller' && this.gateNow(rec).live) return void this.carried.set(sessionId, null)
     }
     if (this.fromHubHere(rec, e.from) && e.text === rec.sent) {
       const at = own.indexOf(rec.sent ?? '')
       if (at >= 0) this.notesSent.set(sessionId, own.filter((_, i) => i !== at))
-      // A note into the caller's own running turn stays in it
-      if (this.whoseOf(rec) === 'caller' && this.gateNow(rec).live) return
+      // A note into the caller's own running turn stays in it, unless the tool runs it after that turn (`carried`)
+      if (this.whoseOf(rec) === 'caller' && this.gateNow(rec).live) return void this.carried.set(sessionId, null)
       if (this.busy.has(sessionId)) return this.setWhose(rec, 'other', 'took what you sent as a message into a turn already running there that you did not give it (the person\'s, most likely)')
       this.tookInstruction(rec)
       return
     }
     this.setWhose(rec, 'other', 'took a message there that you did not send (the person on that machine, most likely)')
-    if (this.fromHubHere(rec, e.from)) this.otherBy.set(sessionId, 'session')
-    else this.otherBy.delete(sessionId)
+    this.otherBy.set(sessionId, this.fromHubHere(rec, e.from) ? 'session' : 'person')
   }
 
   /**
@@ -921,10 +934,30 @@ export class RemoteAgents {
   }
 
   /** Whether the child is in a turn there, as the machine's events last said (#1038 review): an instruction taken in one is a message in it */
-  private trackBusy(sessionId: string, e: LinkedEvent): void {
+  private trackBusy(rec: RemoteAgent, e: LinkedEvent): void {
+    const sessionId = rec.sessionId
     const step = linkedTurnEnd(true, e)
-    if (step?.step === 'busy') this.busy.add(sessionId)
-    else if (step?.step === 'completed' || step?.step === 'failed' || step?.step === 'deleted') this.busy.delete(sessionId)
+    if (step?.step === 'busy') {
+      this.busy.add(sessionId)
+      this.followUpBegins(rec)
+    } else if (step?.step === 'completed' || step?.step === 'failed' || step?.step === 'deleted') {
+      this.busy.delete(sessionId)
+      if (this.carried.has(sessionId)) this.carried.set(sessionId, Date.now())
+    }
+  }
+
+  /**
+   * A turn begins with no message to say whose it is (#1604), soon after the caller's turn ended with a note of its own in
+   * it: the tool did not read the note there and runs it now, so this turn is the note's, the caller's, and its end is
+   * owed as the first turn's was. Not a turn the person began (their message came first and dropped `carried`)
+   */
+  private followUpBegins(rec: RemoteAgent): void {
+    const endedAt = this.carried.get(rec.sessionId)
+    if (endedAt === undefined || endedAt === null) return
+    this.carried.delete(rec.sessionId)
+    if (Date.now() - endedAt > FOLLOW_UP_MS || this.whoseOf(rec) !== 'caller' || this.gateNow(rec).live) return
+    if (!this.host.meta.has(rec.callerId)) return
+    this.host.children.setLinkedReport(rec.sessionId, { orchestratorId: rec.callerId, busy: true })
   }
 
   // ── Waits ───────────────────────────────────────────────────────────────────────────────
@@ -1136,6 +1169,7 @@ export class RemoteAgents {
       if (rec.machineId !== m.id) continue
       if (this.whoseOf(rec) === 'caller') this.whose.set(rec.sessionId, 'unknown')
       this.busy.delete(rec.sessionId)
+      this.carried.delete(rec.sessionId)
       const wait = this.waits.get(rec.sessionId)
       if (wait) {
         this.dropWait(rec.sessionId)
@@ -1248,6 +1282,7 @@ export class RemoteAgents {
     this.whose.delete(sessionId)
     this.otherBy.delete(sessionId)
     this.notesSent.delete(sessionId)
+    this.carried.delete(sessionId)
     this.pending.delete(sessionId)
     this.deferred.delete(sessionId)
     this.busy.delete(sessionId)

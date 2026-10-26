@@ -10,28 +10,39 @@ import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '
  *   anything else                    replies "echo: <message>"
  *
  * and every turn ends with `turn_complete`, so the session goes back to idle the way a real one does.
+ *
+ * `queueBehind`: a message sent while a turn is open is not taken into it but held, and runs as a turn of its own once
+ * that one ends, as a tool whose running turn did not read the input does with it (#1604).
  */
 class ScriptedHandle implements SessionHandle {
   readonly externalId: string
   private seq = 0
   private approvals = new Set<string>()
   private questions = new Set<string>()
+  private open = false
+  private readonly held: string[] = []
 
   constructor(
     readonly sessionId: string,
     private readonly emit: EventSink,
     /** Answers inside `send` rather than a moment later, as a tool that refuses at once does */
     private readonly immediate = false,
+    private readonly queueBehind = false,
   ) {
     this.externalId = `scripted-${sessionId}`
   }
 
   send(text: string): void {
+    if (this.queueBehind && this.open) {
+      this.held.push(text)
+      return
+    }
     if (this.immediate) return this.turn(text)
     setTimeout(() => this.turn(text), 20)
   }
 
   private turn(text: string): void {
+    this.open = true
     const id = `${this.sessionId.slice(0, 8)}-${++this.seq}`
     if (/approve/i.test(text)) {
       this.approvals.add(id)
@@ -54,6 +65,9 @@ class ScriptedHandle implements SessionHandle {
   private say(text: string): void {
     this.emit({ type: 'message_delta', sessionId: this.sessionId, role: 'assistant', text })
     this.emit({ type: 'turn_complete', sessionId: this.sessionId })
+    this.open = false
+    const next = this.held.shift()
+    if (next !== undefined) setTimeout(() => this.turn(next), 20)
   }
 
   respondApproval(requestId: string, decision: ApprovalDecision): boolean {
@@ -98,6 +112,7 @@ export class ScriptedAdapter implements AgentAdapter {
   constructor(
     readonly tool: ToolName = 'claude',
     private readonly immediate = false,
+    private readonly queueBehind = false,
   ) {
     this.descriptor = { name: tool, label: `Scripted ${tool}`, mark: tool.slice(0, 1).toUpperCase(), install: 'none', login: 'none' }
   }
@@ -108,7 +123,7 @@ export class ScriptedAdapter implements AgentAdapter {
 
   async createSession(opts: CreateSessionOpts, emit: EventSink): Promise<SessionHandle> {
     this.created.push(opts.sessionId)
-    return new ScriptedHandle(opts.sessionId, emit, this.immediate)
+    return new ScriptedHandle(opts.sessionId, emit, this.immediate, this.queueBehind)
   }
 
   /** The conversation lives nowhere but in this object; deleting it for good has nothing to remove */
@@ -119,9 +134,9 @@ export class ScriptedAdapter implements AgentAdapter {
   }
 }
 
-export function scriptedAdapters(o: { immediate?: boolean } = {}): Map<ToolName, AgentAdapter> {
+export function scriptedAdapters(o: { immediate?: boolean; queueBehind?: boolean } = {}): Map<ToolName, AgentAdapter> {
   return new Map<ToolName, AgentAdapter>([
-    ['claude', new ScriptedAdapter('claude', o.immediate)],
-    ['codex', new ScriptedAdapter('codex', o.immediate)],
+    ['claude', new ScriptedAdapter('claude', o.immediate, o.queueBehind)],
+    ['codex', new ScriptedAdapter('codex', o.immediate, o.queueBehind)],
   ])
 }
