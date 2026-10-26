@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useDismiss } from '../../components/useDismiss.js'
 import { ChevronIcon } from '../../components/icons.jsx'
-import { autoCompactOf, type ModelOption, type PermissionPreset, type ToolName } from '@cc/protocol'
+import { autoCompactOf, launchRefusal, type AdapterCapabilities, type ModelOption, type PermissionPreset, type ToolName } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useLoad } from '../../app/useLoad.js'
 import { useStore } from '../../store/store.js'
@@ -96,12 +96,13 @@ const NO_LEVELS: string[] = []
  * knob.
  */
 export function useVerbosities(tool: ToolName, machine: string | null = null): string[] {
-  const platform = usePlatform()
   // The menu must still render even if capabilities cannot be read — it just loses one row
-  return (
-    useLoad(() => platform.agents.capabilities(tool, machine), [platform, tool, machine]).data?.verbosities ??
-    NO_LEVELS
-  )
+  return useCapabilities(tool, machine)?.verbosities ?? NO_LEVELS
+}
+
+function useCapabilities(tool: ToolName, machine: string | null): AdapterCapabilities | undefined {
+  const platform = usePlatform()
+  return useLoad(() => platform.agents.capabilities(tool, machine), [platform, tool, machine]).data
 }
 
 /**
@@ -119,6 +120,7 @@ function MenuRow({
   onPick,
   testId,
   title,
+  disabled = false,
 }: {
   label: string
   hint?: string
@@ -126,6 +128,7 @@ function MenuRow({
   onPick: () => void
   testId: string
   title?: string
+  disabled?: boolean
 }) {
   return (
     <button
@@ -134,8 +137,9 @@ function MenuRow({
       aria-checked={selected}
       data-testid={testId}
       title={title}
+      disabled={disabled}
       onClick={onPick}
-      className={`flex w-full items-baseline gap-2 rounded-lg px-2 py-1.5 text-left transition-colors ${
+      className={`flex w-full items-baseline gap-2 rounded-lg px-2 py-1.5 text-left transition-colors disabled:cursor-default disabled:opacity-40 ${
         selected
           ? 'text-ink hover:bg-surface-hover/50'
           : 'text-ink-muted hover:bg-surface-hover/50 hover:text-ink'
@@ -211,7 +215,11 @@ export function SessionSettings({
   // A session on a linked machine runs that machine's CLI (#82): its models and knobs are asked there
   const machine = useStore((s) => s.sessions[sessionId]?.machine ?? null)
   const { models, reason } = useModels(tool, live, machine)
-  const verbosities = useVerbosities(tool, machine)
+  const caps = useCapabilities(tool, machine)
+  const verbosities = caps?.verbosities ?? NO_LEVELS
+  const toolLabel = useStore((s) => s.tools.find((t) => t.name === tool)?.label ?? tool)
+  // A preset the tool cannot keep stays in the menu, greyed, with the host's reason (`launchRefusal`)
+  const presetRefusal = (p: PermissionPreset) => (caps ? launchRefusal(caps, toolLabel, { permissionPreset: p, projectTrusted: true }) : null)
   const [open, setOpen] = useState(false)
   // Read when the menu opens and again when the setting or the model changes. A linked machine answers for itself; one from
   // before the setting answers "Unknown method", which means it passes nothing
@@ -452,16 +460,21 @@ export function SessionSettings({
           */}
 
           <MenuSection label="Permissions">
-            {PRESETS.map((p) => (
-              <MenuRow
-                key={p.value}
-                testId={`settings-preset-${p.value}`}
-                label={p.label}
-                hint={p.hint}
-                selected={p.value === preset}
-                onPick={() => choose({ permissionPreset: p.value })}
-              />
-            ))}
+            {PRESETS.map((p) => {
+              const refused = presetRefusal(p.value)
+              return (
+                <MenuRow
+                  key={p.value}
+                  testId={`settings-preset-${p.value}`}
+                  label={p.label}
+                  hint={refused ? 'Not available' : p.hint}
+                  selected={p.value === preset}
+                  disabled={refused !== null}
+                  {...(refused ? { title: refused } : {})}
+                  onPick={() => choose({ permissionPreset: p.value })}
+                />
+              )
+            })}
           </MenuSection>
 
           {/*

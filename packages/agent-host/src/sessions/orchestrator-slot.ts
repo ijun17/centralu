@@ -1,4 +1,5 @@
-import type { SessionInfo, ToolName } from '@cc/protocol'
+import type { LaunchDemands, SessionInfo, ToolName } from '@cc/protocol'
+import { ORCHESTRATOR_DEMANDS } from '@cc/protocol'
 import { rpcError } from '../rpc-error.js'
 import type { DelegationHost } from './delegation-flow.js'
 import { orchestratorHome } from './orchestrator-home.js'
@@ -7,6 +8,7 @@ import { notAToolText, profileAllows, runOrchestratorTool } from './orchestrator
 import type { RestartHost } from './restart-policy.js'
 import type { SessionStartsHost } from './session-start.js'
 import type { SessionTrashHost } from './session-trash.js'
+import { unfitError } from './tool-fit.js'
 
 /**
  * What the orchestrator's slot reaches of the session manager (#1143), typed as the manager declares each member. The
@@ -15,7 +17,10 @@ import type { SessionTrashHost } from './session-trash.js'
 export type OrchestratorSlotHost = Pick<DelegationHost, 'meta' | 'store' | 'emit' | 'firstTool' | 'createSession' | 'rename'> &
   Pick<SessionTrashHost, 'appsHub'> &
   Pick<RestartHost, 'restartSession'> &
-  Pick<SessionStartsHost, 'tools'>
+  Pick<SessionStartsHost, 'tools'> & {
+    /** Why a tool cannot run a session that demands this, or null (`ToolRegistry.refusal`) */
+    refusal: (tool: ToolName, demands: LaunchDemands) => string | null
+  }
 
 /**
  * The app's one central orchestrator: made on its first question, with the tool chosen for it before it exists; the
@@ -128,6 +133,9 @@ export class OrchestratorSlot {
    * session's own settings takes over — this value is never read again after that.
    */
   configureOrchestrator(tool: ToolName): void {
+    // Refused as its launch would be (#1562 review): a choice saved here is the orchestrator every window opens
+    const refused = this.host.refusal(tool, ORCHESTRATOR_DEMANDS)
+    if (refused) throw unfitError(refused)
     this.host.store.settings.setAppSetting('orchestrator_tool', tool)
   }
 
@@ -175,7 +183,7 @@ export class OrchestratorSlot {
       kind: 'orchestrator',
       cwd: orchestratorHome(),
       tool: this.host.firstTool(configured),
-      permissionPreset: 'normal',
+      permissionPreset: ORCHESTRATOR_DEMANDS.permissionPreset,
     })
     // Kept as a name the person set, so the auto-name (FR-18) never overwrites it with the first prompt
     this.host.rename(info.id, 'Orchestrator')

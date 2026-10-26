@@ -16,7 +16,7 @@ import { HostServer } from '../../transport/server.js'
 import type { AgentAdapter, CreateSessionOpts, SessionHandle } from '../contract.js'
 import { bridgeAddress } from '../../swap-control.js'
 import { bridgeToken } from '../../transport/bridge-token.js'
-import { bridgePath } from './bridge-path.js'
+import { bridgePath } from '../bridge-path.js'
 
 /**
  * Tests Codex's app bridge **as a whole bridge** (M4 A-5) — a real bridge process, a real host WS

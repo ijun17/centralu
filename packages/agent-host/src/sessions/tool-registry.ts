@@ -1,4 +1,5 @@
-import type { ToolName } from '@cc/protocol'
+import type { LaunchDemands, ToolName } from '@cc/protocol'
+import { launchRefusal } from '@cc/protocol'
 import type { AgentAdapter } from '../adapters/contract.js'
 import { registeredTool } from '../adapters/registry.js'
 import type { DelegationHost } from './delegation-flow.js'
@@ -56,6 +57,15 @@ export class ToolRegistry {
       return this.firstTool(project?.defaultTool)
     }
     return this.firstTool(this.host.store.settings.appSetting('orchestrator_tool'))
+  }
+
+  /**
+   * Why `tool` cannot run a session that demands this (`launchRefusal`), or null: the one rule, for every path that puts
+   * a tool on a session (`tool-fit.ts`). A tool this host does not run is `toolProblem`'s to say
+   */
+  refusal(tool: ToolName, demands: LaunchDemands): string | null {
+    const adapter = this.host.adapters.get(tool)
+    return adapter ? launchRefusal(adapter.capabilities, adapter.descriptor.label, demands) : null
   }
 
   /** Why `tool` cannot start a session here now (not registered, not installed, not logged in), or null when it can */

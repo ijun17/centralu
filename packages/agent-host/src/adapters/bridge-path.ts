@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url'
  */
 export function bridgePath(): string {
   const candidates = [
-    new URL('./orchestrator-bridge.mjs', import.meta.url), // the source tree
+    new URL('./codex/orchestrator-bridge.mjs', import.meta.url), // the source tree
     new URL('./codex-orchestrator-bridge.mjs', import.meta.url), // the bundled build-output layout
   ].map((u) => fileURLToPath(u))
   const found = candidates.find((p) => existsSync(p))

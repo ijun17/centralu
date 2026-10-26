@@ -1,0 +1,4 @@
+{
+  "bytes": 2400,
+  "reason": "The tool limits and their one rule (launchRefusal, ORCHESTRATOR_DEMANDS in protocol), with the pickers that grey a tool the launch cannot use and say why: the new-session and new-app dialogs, the intro's orchestrator cards, Settings' orchestrator picker, the preset menu, and the empty session's switch asked with the session's own preset (#1562). Measured against main at b8758577a (1,908,018 B, 482 B under the ceiling): +2,299 B, all in the main chunk. Plain components and a small pure function with no dependency; lazy loading would not lower the total, which counts every chunk."
+}
