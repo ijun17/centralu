@@ -35,6 +35,7 @@ import type { HostCards } from './host-cards.js'
 import type { SessionRecord } from './session-record.js'
 import { rpcError } from '../rpc-error.js'
 import type { SubagentStepsRow } from '../dev-services/store/subagent-steps.js'
+import type { HandOverPreview } from '../mail/service.js'
 
 /**
  * What the session archive reaches of the session manager (#428), typed as the manager declares each member. The manager builds
@@ -57,6 +58,8 @@ export type SessionTrashHost = {
   mailGone: (sessionId: string) => void
   /** The unfinished mail threads it is assigned or owns (what `mailGone` moves on); null when the mailbox could not be read */
   mailWork: (sessionId: string) => { assigned: string[]; owned: string[] } | null
+  /** What a handoff's move would do with its mail if it went now with `heir` inheriting (`MailService.handOverPreview`); null when the mailbox could not be read */
+  mailHandOverPreview: (sessionId: string, heir: string) => HandOverPreview | null
   /** The session is back: the mail that waited for it may go (#1347). Never throws */
   mailPoke: (sessionId: string) => void
   gitTrust: (projectId: string | null) => { trusted: boolean; }
@@ -252,10 +255,39 @@ export class SessionTrash {
     }
     /*
      * Work in the mailbox (#1512): restoring does not hand a thread back. An assigned one went open with nobody on it, and its
-     * owner was told the work stopped; an owned one became the person's.
+     * owner was told the work stopped; an owned one became the person's. A session that handed over gives both to the session
+     * that inherited its handoff instead (#1574, `moveChildren` in `trashSessionOnce`), which the lines name.
      */
-    const mail = this.host.mailWork(sessionId)
-    if (!mail) out.push('Its mailbox could not be read, so what it holds there is not known.')
+    const heir = this.host.handoffHeir(sessionId)
+    const plan = heir ? this.host.mailHandOverPreview(sessionId, heir) : null
+    const mail = heir && plan ? null : this.host.mailWork(sessionId)
+    const listed = (list: { subject: string }[]) => list.slice(0, 3).map((x) => plainQuoted(x.subject, 60)).join(', ') + (list.length > 3 ? ', …' : '')
+    const threads = (n: number, what = 'unfinished mail thread') => (n === 1 ? `${/^[aeiou]/.test(what) ? 'an' : 'a'} ${what}` : `${n} ${what}s`)
+    if (heir && plan) {
+      // Exactly what the move would do (#1574): what goes to the heir, and what stays to move on as before
+      const goes = plan.moved
+      if (goes.length) {
+        const of = (role: string) => goes.filter((g) => g.role === role).length
+        const parts = [
+          ...(of('assignee') ? [`is the assignee of ${threads(of('assignee'))}`] : []),
+          ...(of('owner') ? [`owns ${threads(of('owner'))}`] : []),
+          ...(of('member') ? [`is in ${threads(of('member'))} as a member`] : []),
+        ]
+        const joined = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}` : parts[0]
+        out.push(`It ${joined} (${listed(goes)}); ${goes.length === 1 ? 'it goes' : 'they go'} to ${name(heir)}, which took over from it, and ${goes.length === 1 ? 'stays' : 'stay'} there if it is restored.`)
+      }
+      if (plan.closed.length) {
+        out.push(`It has unread mail in ${threads(plan.closed.length, 'closed mail thread')} (${listed(plan.closed)}); that mail goes to ${name(heir)}.`)
+      }
+      const ownedLeft = plan.left.filter((l) => l.role === 'owner')
+      if (ownedLeft.length) {
+        out.push(`It owns ${threads(ownedLeft.length)} whose assignee is ${name(heir)} (${listed(ownedLeft)}); ${ownedLeft.length === 1 ? 'it becomes' : 'they become'} the person's.`)
+      }
+      const assignedLeft = plan.left.filter((l) => l.role === 'assignee')
+      if (assignedLeft.length) {
+        out.push(`It is the assignee of ${threads(assignedLeft.length)} ${name(heir)} owns (${listed(assignedLeft)}); ${assignedLeft.length === 1 ? 'it goes' : 'they go'} back to open with nobody on ${assignedLeft.length === 1 ? 'it' : 'them'}.`)
+      }
+    } else if (!mail) out.push('Its mailbox could not be read, so what it holds there is not known.')
     else {
       const subjects = (list: string[]) => list.slice(0, 3).map((x) => plainQuoted(x, 60)).join(', ') + (list.length > 3 ? ', …' : '')
       if (mail.assigned.length) {
