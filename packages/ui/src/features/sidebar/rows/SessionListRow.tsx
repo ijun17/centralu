@@ -224,8 +224,7 @@ export function SessionListRow({
               onClose={() => setSessionMenu(null)}
               onRename={() => setRenaming(s.id)}
               onHandoff={() => setHandingOff(s.id)}
-              // An idle session is archived at once, with Undo on the toast; the host asks first when that would lose something (#1512)
-              onDelete={() => void useStore.getState().archiveSession(s.id).then((asks) => asks && setConfirming(s.id))}
+              onDelete={() => setConfirming(s.id)}
             />
           )}
         </>

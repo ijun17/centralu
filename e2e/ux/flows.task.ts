@@ -239,11 +239,12 @@ uxTask({
   access: 'discoverable',
   start: demo,
   run: async (u, page) => {
-    // An idle session goes at once, with Undo on the toast (#1512): no confirmation
     await sessionMenu(u, page, DONE, 'delete')
+    await u.until('the confirmation', () => expect(page.getByTestId('confirm-delete')).toBeVisible())
+    await u.click(page.getByTestId('confirm-delete-yes'))
   },
-  goal: async (page) => expect(page.getByTestId('toast')).toContainText('Archived'),
-  budget: { operators: 10, M: 2, seconds: 6.7 },
+  goal: async (page) => expect(page.getByTestId('confirm-delete')).toBeHidden(),
+  budget: { operators: 16, M: 3, seconds: 10.1 },
 })
 
 uxTask({
@@ -257,6 +258,7 @@ uxTask({
     const id = await sessionId(page, DONE)
     await page.getByTestId(`session-menu-${id}`).click()
     await page.getByTestId(`delete-session-${id}`).click()
+    await page.getByTestId('confirm-delete-yes').click()
     await expect(page.getByTestId(`session-row-${id}`)).toHaveCount(0)
   },
   run: async (u, page) => {
@@ -271,12 +273,13 @@ uxTask({
   task: 'Bring back an archived session',
   path: 'mouse',
   access: 'discoverable',
-  notes: ['Settings, then Archive: the toast of the archive said where it went'],
+  notes: ['Settings, then Archive: the delete dialog and its toast say where it went'],
   start: async (page) => {
     await demo(page)
     const id = await sessionId(page, DONE)
     await page.getByTestId(`session-menu-${id}`).click()
     await page.getByTestId(`delete-session-${id}`).click()
+    await page.getByTestId('confirm-delete-yes').click()
     await expect(page.getByTestId(`session-row-${id}`)).toHaveCount(0)
     await expect(page.getByTestId('toast')).toBeHidden({ timeout: 15_000 })
   },

@@ -21,12 +21,14 @@ async function answeredSession(page: Page, projectName: string, prompt: string):
   return id
 }
 
-/** Archives an idle session from its row's menu: at once, no question (#1512) */
+/** Archives a session from its row's menu: the dialog asks first, also for an idle one (#1589) */
 async function deleteSession(page: Page, id: string) {
   await page.getByTestId(`session-menu-${id}`).click()
-  await expect(page.getByTestId(`delete-session-${id}`)).toHaveText('Archive session')
+  await expect(page.getByTestId(`delete-session-${id}`)).toHaveText('Archive session…')
   await page.getByTestId(`delete-session-${id}`).click()
-  await expect(page.getByTestId('confirm-delete')).toHaveCount(0)
+  await expect(page.getByTestId('confirm-delete')).toBeVisible()
+  await expect(page.getByTestId(`session-row-${id}`)).toBeVisible()
+  await page.getByTestId('confirm-delete-yes').click()
   await expect(page.getByTestId(`session-row-${id}`)).toHaveCount(0)
 }
 
@@ -42,12 +44,20 @@ test('a deleted session waits in the session archive, reads there, comes back, a
   await setup(page, { projects: ['/tmp/alpha'] })
   const id = await answeredSession(page, 'alpha', 'what is the answer')
 
-  // An idle session goes at once: the toast says where it went and offers Undo (#1512)
-  await deleteSession(page, id)
+  // The dialog says where it goes and the two ways out, before anything happens; the conversation file is ticked to go with it
+  await page.getByTestId(`session-menu-${id}`).click()
+  await page.getByTestId(`delete-session-${id}`).click()
+  await expect(page.getByTestId('confirm-delete')).toContainText('Archive this session?')
+  await expect(page.getByTestId('delete-trash-note')).toContainText('Settings → Archive reads it, restores it, or deletes it for good')
+  await expect(page.getByTestId('confirm-delete-yes')).toHaveText('Archive')
+  await expect(page.getByTestId('delete-external-toggle').locator('input')).toBeChecked()
+  await page.getByTestId('confirm-delete-yes').click()
+  await expect(page.getByTestId(`session-row-${id}`)).toHaveCount(0)
   await expect(page.getByTestId('toast')).toContainText('Archived')
   await expect(page.getByTestId('toast-action')).toHaveText('Undo')
-  // Nothing the dialog chose has happened yet: the tool's conversation file waits with it
+  // Nothing the dialog chose has happened yet: the tool's conversation file waits with it, marked to go when deleted for good
   expect(await page.evaluate(() => (window as any).__mock.externallyDeleted)).toEqual([])
+  expect(await page.evaluate((sid: string) => (window as any).__mock.trashBin.get(sid)?.removeExternal, id)).toBe(true)
 
   // Listed with where it came from, what it holds, and what goes with it
   await openArchive(page)
@@ -85,10 +95,19 @@ test('a deleted session waits in the session archive, reads there, comes back, a
   expect(await page.evaluate(() => (window as any).__mock.externallyDeleted)).toEqual([id])
 })
 
-// #1512: archiving an idle session asks nothing, and Undo on the toast puts it back
-test('an idle session is archived at once and Undo on the toast brings it back; a busy one still asks first', async ({ page }) => {
+// #1589: every archive from the window asks first, also for an idle session; Undo on the toast after it puts it back
+test('an idle session asks first, Cancel archives nothing, and Undo on the toast after Archive brings it back; a busy one asks too', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   const id = await answeredSession(page, 'alpha', 'what is the answer')
+  await page.getByTestId(`session-menu-${id}`).click()
+  await page.getByTestId(`delete-session-${id}`).click()
+  await expect(page.getByTestId('confirm-delete')).toBeVisible()
+  await page.getByRole('button', { name: 'Cancel' }).click()
+  await expect(page.getByTestId('confirm-delete')).toHaveCount(0)
+  await expect(page.getByTestId(`session-row-${id}`)).toBeVisible()
+  expect(await page.evaluate(() => (window as any).__mock.trashBin.size)).toBe(0)
+  await expect(page.getByTestId('toast')).toHaveCount(0)
+
   await deleteSession(page, id)
   await expect(page.getByTestId('toast')).toContainText('Archived')
   await page.getByTestId('toast-action').click()
@@ -106,30 +125,7 @@ test('an idle session is archived at once and Undo on the toast brings it back; 
   await expect(page.getByTestId(`session-row-${id}`)).toBeVisible()
 })
 
-// #1512 review: the host decides what an archive loses, and the toast lets go of the pointer
-test('a session the host says would lose something asks first and names it; Cancel archives nothing, Archive offers Undo', async ({ page }) => {
-  await setup(page, { projects: ['/tmp/alpha'] })
-  const id = await answeredSession(page, 'alpha', 'what is the answer')
-  // The mock host stands for the real one's rule: a session an agent started owes that agent a report (the mailbox, waits and cards say the same)
-  await page.evaluate((sid: string) => ((window as any).__mock.store.sessions.get(sid).askedBy = 'an-agent'), id)
-  await page.getByTestId(`session-menu-${id}`).click()
-  // The window sees nothing busy, so the menu does not promise a question; the host's answer opens it
-  await page.getByTestId(`delete-session-${id}`).click()
-  await expect(page.getByTestId('confirm-delete')).toBeVisible()
-  await expect(page.getByTestId('delete-losses')).toContainText('owes it a report')
-  await expect(page.getByTestId('delete-losses')).toContainText('Undo does not bring them back')
-  await page.getByRole('button', { name: 'Cancel' }).click()
-  await expect(page.getByTestId(`session-row-${id}`)).toBeVisible()
-  expect(await page.evaluate(() => (window as any).__mock.trashBin.size)).toBe(0)
-
-  await page.getByTestId(`session-menu-${id}`).click()
-  await page.getByTestId(`delete-session-${id}`).click()
-  await page.getByTestId('confirm-delete-yes').click()
-  await expect(page.getByTestId(`session-row-${id}`)).toHaveCount(0)
-  await expect(page.getByTestId('toast-action')).toHaveText('Undo')
-})
-
-test('an archive with uncommitted work in its worktree asks, as the old dialog did', async ({ page }) => {
+test('the dialog of a session whose worktree holds uncommitted work says so', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   const id = await answeredSession(page, 'alpha', 'what is the answer')
   await page.evaluate((sid: string) => {

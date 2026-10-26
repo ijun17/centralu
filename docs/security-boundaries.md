@@ -794,15 +794,13 @@ processes after adoption, at idle or when their current turn finishes (#589).
 | The agent's own tools (commands, edits) | asks, reads run | the person's settings | allowed | open | asks, reads run | the person's settings | allowed | open | `permissionOptionsFor` in each adapter |
 
 **The person's own "Archive session" in the window** is not `delete_session`, and takes no card of the call table: it is the
-person's. An idle session goes at once with Undo on the toast, after the host has been asked (`agents.archiveIfAtRest`,
-`SessionTrash.archiveIfAtRest`, rights `asks` for any other caller): the host moves it only when `lossesOf` is empty (the same
-list as the orchestrator's card, with the unfinished mail threads the session is assigned or owns) and, in the step that moves
-it, it is still at rest (`trashIfQuiet`). Otherwise nothing moves, and the window opens its dialog with the host's lines. The
-window itself asks without the host for what it can see: a turn, a card, a background job, and a worktree with uncommitted
-changes (the folder stays in the archive, but the old dialog said it). Undo is `trash.restore` and puts back the unsent draft and
+person's. The window asks first, every time and also for an idle session (owner, 2026-10-26, #1589; #1512 had moved an idle one
+at once): its dialog shows the worktree choice and the conversation-file box, ticked by default, and its answer is
+`agents.deleteSession`. The window no longer calls `agents.archiveIfAtRest` (`SessionTrash.archiveIfAtRest`, rights `asks` for any other
+caller), which stays for other callers: the host moves a session only when `lossesOf` is empty and, in the step that moves it, it
+is still at rest (`trashIfQuiet`). Undo on the toast after the archive is `trash.restore` and puts back the unsent draft and
 the session's place in each project's grid; it does not bring back the scroll position or the focus, and it does not hand back
-what `lossesOf` names (which is why those ask first). A host from before the method answers "Unknown method", and the window asks
-as it always did.
+what `lossesOf` names.
 
 Rows that differ by session:
 
