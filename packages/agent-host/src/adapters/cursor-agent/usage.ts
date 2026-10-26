@@ -18,13 +18,38 @@ const ABOUT = z.object({ subscriptionTier: z.unknown().optional() })
  * state files are never opened, and the account's email in that output is never kept or sent.
  */
 export function parseAbout(stdout: string): UsageSnapshot {
-  // Measured: a bare JSON object; anything printed before or after it (a banner, a notice) is not part of it
-  const from = stdout.indexOf('{')
-  const to = stdout.lastIndexOf('}')
-  if (from < 0 || to < from) throw new Error('`agent about` printed no JSON')
-  const about = ABOUT.parse(JSON.parse(stdout.slice(from, to + 1)))
+  const about = ABOUT.parse(jsonObjectOf(stdout))
   const tier = typeof about.subscriptionTier === 'string' ? about.subscriptionTier.trim() : ''
   return { plan: tier || null, windows: [], daily: [], noLimits: true }
+}
+
+/**
+ * Measured: a bare JSON object. A notice printed before or after it (even one holding a brace) is not part of it: each
+ * `{` starts a candidate that ends where its braces close (strings read as strings), and the first that parses is it.
+ */
+function jsonObjectOf(stdout: string): unknown {
+  for (let from = stdout.indexOf('{'); from >= 0; from = stdout.indexOf('{', from + 1)) {
+    let depth = 0
+    let inString = false
+    for (let i = from; i < stdout.length; i++) {
+      const c = stdout[i]
+      if (inString) {
+        if (c === '\\') i++
+        else if (c === '"') inString = false
+      } else if (c === '"') inString = true
+      else if (c === '{') depth++
+      else if (c === '}' && --depth === 0) {
+        try {
+          const value: unknown = JSON.parse(stdout.slice(from, i + 1))
+          if (typeof value === 'object' && value !== null) return value
+        } catch {
+          // Not an object: the next brace
+        }
+        break
+      }
+    }
+  }
+  throw new Error('`agent about` printed no JSON object')
 }
 
 const NO_LIMITS: UsageSnapshot = { plan: null, windows: [], daily: [], noLimits: true }

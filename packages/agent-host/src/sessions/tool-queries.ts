@@ -19,14 +19,15 @@ const MODEL_LIST_READ_MS = 60_000
 /** After a failed read, how long a caller that cannot wait goes without a list before one is tried again (#660) */
 const MODEL_LIST_RETRY_MS = 60_000
 
-/**
- * What the tool queries reach of the session manager (#428), typed as the manager declares each member. The manager
- * builds it with getters for its fields, so each is read when used, never kept.
- */
 /** What a tool with no limits to read is told as: plain, since nothing is wrong and nothing is to be done (#1623) */
 function noLimitsReason(label: string): string {
   return `${label} does not report usage limits`
 }
+
+/**
+ * What the tool queries reach of the session manager (#428), typed as the manager declares each member. The manager
+ * builds it with getters for its fields, so each is read when used, never kept.
+ */
 
 export type ToolQueriesHost = {
   readonly adapters: Map<string, AgentAdapter>
@@ -127,7 +128,11 @@ export class ToolQueries {
 
     try {
       const snapshot = await withTimeout(adapter.listUsage(), 15_000)
-      this.usageCache.set(tool, { snapshot, at: Date.now() })
+      /*
+       * An answer that says nothing at all (no limits, no plan, no totals) is what a command that was slow to answer
+       * gets (`adapters/usage-read.ts`): it is not kept, so the next ask finds what the command has read by then.
+       */
+      if (!(snapshot.noLimits && !snapshot.plan && !snapshot.totals)) this.usageCache.set(tool, { snapshot, at: Date.now() })
       // A fresh reading is kept for the history (§6.2), whoever asked: the gauge, a turn end or the ten-minute sample
       void this.host.usageRecorder.snapshot(tool, snapshot)
       return answer(snapshot)

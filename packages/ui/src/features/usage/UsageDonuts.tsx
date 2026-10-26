@@ -554,15 +554,16 @@ function Donut({
       content={
         <span className="block">
           <span className="block text-ink">{label}</span>
-          <span className="readout mt-1 block">
-            {signedOut
-              ? 'Not signed in'
-              : known
-                ? `${w.label}${w.scope ? ` · ${w.scope}` : ''} — ${percent}% used`
-                : unsupported
-                  ? 'No usage limits reported'
+          {/* A tool with no limits says so once, in the line below: a second "unknown" or "none" line would repeat it */}
+          {(signedOut || !unsupported) && (
+            <span className="readout mt-1 block">
+              {signedOut
+                ? 'Not signed in'
+                : known
+                  ? `${w.label}${w.scope ? ` · ${w.scope}` : ''} — ${percent}% used`
                   : 'Weekly usage unknown'}
-          </span>
+            </span>
+          )}
           {/* Why the numbers equal this computer's, or why there are none: said in the donut's words, never a blank (#726) */}
           {!signedOut && known && snap?.sameAccount && (
             <span className="readout block text-ink-faint" data-testid={`usage-donut-same-${id}`}>
@@ -570,7 +571,7 @@ function Donut({
             </span>
           )}
           {!signedOut && !known && (unsupported || snap?.reason) && (
-            <span className="readout block text-ink-faint" data-testid={`usage-donut-reason-${id}`}>
+            <span className={`readout ${unsupported ? 'mt-1' : ''} block text-ink-faint`} data-testid={`usage-donut-reason-${id}`}>
               {unsupported ? NOT_REPORTED_COPY.title(meta.label) : snap.reason}
             </span>
           )}

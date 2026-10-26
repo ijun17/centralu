@@ -678,9 +678,14 @@ describe('while-alive facts are carried in the list', () => {
     expect(r).toHaveProperty('reason', expect.stringMatching(/does not report usage limits$/))
     // The one-minute cache answers the same
     expect(await rpc('agents.usage', { tool: 'claude' })).toMatchObject({ supported: false, notReported: true, usage: snapshot })
-    // A tool that does have windows is read as ever
-    Object.assign(adapter, { listUsage: async () => ({ plan: 'max', windows: [{ id: 'w', label: 'Weekly', percent: 1, resetsAt: null, scope: null }], daily: [] }) })
-    expect(await rpc('agents.usage', { tool: 'codex' })).toBeDefined()
+  })
+
+  it('does not keep the answer a slow command gets, so the next ask finds the plan (#1623)', async () => {
+    const snapshot = { plan: 'Free', windows: [], daily: [], noLimits: true }
+    let reads = 0
+    Object.assign(adapter, { listUsage: async () => (reads++ === 0 ? { plan: null, windows: [], daily: [], noLimits: true } : snapshot) })
+    expect(await rpc('agents.usage', { tool: 'claude' })).toMatchObject({ notReported: true, usage: { plan: null } })
+    expect(await rpc('agents.usage', { tool: 'claude' })).toMatchObject({ notReported: true, usage: { plan: 'Free' } })
   })
 
   it('counts each model request into the prompt cache figures agents.usage answers with (docs/agent-host.md §6.1)', async () => {

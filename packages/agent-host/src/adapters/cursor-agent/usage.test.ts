@@ -25,6 +25,11 @@ describe("Cursor's usage: the plan from `agent about --format json` (#1623)", ()
     expect(parseAbout('{"subscriptionTier":"  "}').plan).toBeNull()
   })
 
+  it('reads the object when a notice around it holds a brace', () => {
+    expect(parseAbout(`Update available: {x}\n${RECORDED}\nSee {docs}`).plan).toBe('Free')
+    expect(parseAbout(`{"subscriptionTier":"Pro"}\n{note}`).plan).toBe('Pro')
+  })
+
   it('throws on output that is not JSON, so the reader answers its plain fallback', () => {
     expect(() => parseAbout('not a json line')).toThrow()
     expect(() => parseAbout('')).toThrow()

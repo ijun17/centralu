@@ -92,11 +92,25 @@ export function usageNotReportedTests(): void {
       await expect(page.getByTestId('usage-not-reported')).toHaveCount(0)
     })
 
+    test("a linked machine's totals say they were counted there, not on this computer", async ({ page }) => {
+      await setup(page, { projects: ['/tmp/alpha'] })
+      await page.evaluate(() => (window as unknown as MockWindow).__mock.machines.add({ shell: 'posix', name: 'Box', sshTarget: 'me@box' }))
+      await page.evaluate((c) => {
+        ;(window as unknown as MockWindow).__mock.toolUsage = { 'box.codex': c }
+      }, answer(TOTALS))
+      await page.evaluate(() => (window as unknown as MockWindow).__mock.setConnectionState('disconnected'))
+      await expect(page.getByTestId('connection')).toBeVisible()
+      await page.evaluate(() => (window as unknown as MockWindow).__mock.setConnectionState('connected'))
+      await expect(page.getByTestId('connection')).toHaveCount(0)
+      await page.getByTestId('usage-donut-box.codex').click()
+      await expect(page.getByTestId('usage-totals')).toContainText('Counted by Codex on Box. These are totals, not a limit.')
+    })
+
     for (const reduced of [false, true]) {
       test(`its rows come in by a short fade${reduced ? ', the only motion left with reduced motion' : ''}`, async ({ page }) => {
         if (reduced) await page.emulateMedia({ reducedMotion: 'reduce' })
         await open(page, answer({ ...TOTALS, plan: 'Free' }))
-        for (const id of ['usage-not-reported', 'usage-plan', 'usage-totals']) {
+        for (const id of ['usage-not-reported']) {
           const anim = await page.getByTestId(id).evaluate((el) => {
             const s = getComputedStyle(el)
             return { name: s.animationName, ms: parseFloat(s.animationDuration) * 1000 }

@@ -6,7 +6,7 @@ import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { Tooltip } from '../../components/primitives.jsx'
 import { SkeletonLines } from '../../components/Skeleton.jsx'
 import { useStore } from '../../store/store.js'
-import { useToolMeta } from '../../store/selectors.js'
+import { useMachineName, useToolMeta } from '../../store/selectors.js'
 import { CacheSection } from './CacheSection.jsx'
 import { formatCount, formatDuration } from '../../app/format.js'
 import { HistorySection } from './HistorySection.jsx'
@@ -70,7 +70,7 @@ export function UsagePanel({ tool, machine = null }: { tool: ToolName; /** A lin
   if (state.notReported) {
     return (
       <>
-        <NotReported label={meta.label} usage={state.usage} />
+        <NotReported label={meta.label} usage={state.usage} machine={machine} />
         {cache && <div className="px-4 pb-4 [&>section]:mt-0">{cache}</div>}
         <div className="px-4 pb-4 [&>section:first-child]:mt-0">{history}</div>
       </>
@@ -127,16 +127,18 @@ export const NOT_REPORTED_COPY = {
   note: 'Nothing is wrong, and there is nothing to set up.',
   plan: (plan: string) => `${plan} plan`,
   totalsTitle: (scope: string) => `Local totals · ${scope}`,
-  totalsNote: (tool: string) => `Counted by ${tool} on this computer. These are totals, not a limit.`,
+  totalsNote: (tool: string, where: string) => `Counted by ${tool} on ${where}. These are totals, not a limit.`,
 }
 
 /** How a total is written: tokens and counts as the daily tokens are, dollars with their cents */
 function totalText(value: number, unit: 'count' | 'tokens' | 'usd'): string {
-  return unit === 'usd' ? `$${value.toFixed(2)}` : formatCount(value)
+  return unit === 'usd' ? `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : formatCount(value)
 }
 
-function NotReported({ label, usage }: { label: string; usage: UsageSnapshot | null }) {
+function NotReported({ label, usage, machine }: { label: string; usage: UsageSnapshot | null; machine: string | null }) {
   const totals = usage?.totals
+  // The totals are what that machine counted: the words say where, as the dropdown's header does
+  const machineName = useMachineName(machine)
   return (
     <div className="cc-row-in px-4 py-6" data-testid="usage-not-reported">
       <p className="text-center text-sm leading-body text-ink-muted" data-testid="usage-not-reported-text">
@@ -144,12 +146,12 @@ function NotReported({ label, usage }: { label: string; usage: UsageSnapshot | n
         <span className="mt-1 block text-xs text-ink-faint">{NOT_REPORTED_COPY.note}</span>
       </p>
       {usage?.plan && (
-        <p className="readout cc-row-in mt-4 text-center text-xs text-ink" data-testid="usage-plan">
+        <p className="readout mt-4 text-center text-xs text-ink" data-testid="usage-plan">
           {NOT_REPORTED_COPY.plan(usage.plan)}
         </p>
       )}
       {totals && totals.rows.length > 0 && (
-        <section className="cc-row-in mt-5 border-t border-line pt-3" data-testid="usage-totals">
+        <section className="mt-5 border-t border-line pt-3" data-testid="usage-totals">
           <span className="text-xs uppercase text-ink-faint">{NOT_REPORTED_COPY.totalsTitle(totals.scope)}</span>
           <ul className="mt-2 space-y-1">
             {totals.rows.map((row) => (
@@ -159,7 +161,7 @@ function NotReported({ label, usage }: { label: string; usage: UsageSnapshot | n
               </li>
             ))}
           </ul>
-          <p className="mt-2 text-2xs text-ink-faint">{NOT_REPORTED_COPY.totalsNote(label)}</p>
+          <p className="mt-2 text-2xs text-ink-faint">{NOT_REPORTED_COPY.totalsNote(label, machineName ?? 'this computer')}</p>
         </section>
       )}
     </div>
