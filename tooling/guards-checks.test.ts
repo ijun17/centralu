@@ -193,6 +193,7 @@ describe('guard/hidden-children', () => {
     ["const run = promisify(execFile)" + NL + "const again = promisify(run)" + NL + "again('ps')"],
     ["start('ssh', args, {" + NL + "  env," + NL + "  stdio: 'pipe'," + NL + '})'],
     ["start('git', [], { cwd, windowsHide: false })"],
+    ["start('git', [], { cwd, windowsHide: false as const })"],
     ["const opts = { windowsHide: true }" + NL + "start('git', [], opts)"],
   ])('reports a start without windowsHide: %s', async (body) => {
     expect(await found(body)).toHaveLength(1)
@@ -220,6 +221,7 @@ describe('guard/hidden-children', () => {
     ["import cp from 'child_process'" + NL + "cp.execFile('git', [])"],
     ["import cp, { spawn } from 'node:child_process'"],
     ["const cp = require('node:child_process')"],
+    ["import cp = require('node:child_process')"],
     ["const { spawn } = await import('child_process')"],
   ])('reports a way of reaching child_process that cannot be followed to its calls: %s', async (source) => {
     expect(await lines(file, source, 'hidden-children')).toHaveLength(1)

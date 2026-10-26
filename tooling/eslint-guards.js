@@ -200,6 +200,10 @@ const hiddenChildren = guard(
       ImportExpression(node) {
         if (CHILD_PROCESS.test(plain(node.source) ?? '')) add(node, 'unnamed')
       },
+      // `import cp = require('node:child_process')`
+      TSImportEqualsDeclaration(node) {
+        if (node.moduleReference.type === 'TSExternalModuleReference' && CHILD_PROCESS.test(plain(node.moduleReference.expression) ?? '')) add(node, 'unnamed')
+      },
       CallExpression(node) {
         if (node.callee.type === 'Identifier' && node.callee.name === 'require' && CHILD_PROCESS.test(plain(node.arguments[0]) ?? '')) add(node, 'unnamed')
       },
@@ -226,7 +230,7 @@ const hiddenChildren = guard(
             const call = ref.identifier.parent
             if (call?.type !== 'CallExpression' || call.callee !== ref.identifier) continue
             const hidden = call.arguments.some(
-              (a) => a.type === 'ObjectExpression' && a.properties.some((p) => keyOf(p) === 'windowsHide' && !(p.value.type === 'Literal' && p.value.value === false)),
+              (a) => a.type === 'ObjectExpression' && a.properties.some((p) => keyOf(p) === 'windowsHide' && !(unwrap(p.value).type === 'Literal' && unwrap(p.value).value === false)),
             )
             if (!hidden) add(call, 'start', { name: variable.name })
           }
