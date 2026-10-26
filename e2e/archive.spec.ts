@@ -230,6 +230,29 @@ test('a loss that appears after the dialog opened is shown at Archive, which mov
   await expect(page.getByTestId(`session-row-${id}`)).toHaveCount(0)
 })
 
+test('a dialog put away while the losses are being read moves nothing, also with the worktree box ticked', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const id = await answeredSession(page, 'alpha', 'what is the answer')
+  await page.evaluate((sid: string) => {
+    const m = (window as any).__mock
+    m.store.sessions.get(sid).worktree = { path: '/tmp/alpha-wt', branch: 'feat/x' }
+    ;(window as any).__store.setState((st: any) => ({ sessions: { ...st.sessions, [sid]: { ...st.sessions[sid], worktree: { path: '/tmp/alpha-wt', branch: 'feat/x' } } } }))
+    const release: (() => void)[] = []
+    ;(window as any).__release = () => release.splice(0).forEach((r) => r())
+    m.agents.archiveLosses = () => new Promise<string[]>((resolve) => release.push(() => resolve([])))
+  }, id)
+  await page.getByTestId(`session-menu-${id}`).click()
+  await page.getByTestId(`delete-session-${id}`).click()
+  await page.getByTestId('delete-worktree-toggle').check()
+  await page.getByTestId('confirm-delete-yes').click()
+  await page.getByRole('button', { name: 'Cancel' }).click()
+  await expect(page.getByTestId('confirm-delete')).toHaveCount(0)
+  await page.evaluate(() => (window as any).__release())
+  await page.waitForTimeout(300)
+  await expect(page.getByTestId(`session-row-${id}`)).toBeVisible()
+  expect(await page.evaluate(() => (window as any).__mock.trashBin.size)).toBe(0)
+})
+
 test('Archive is never held up by the read of the losses', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   const id = await answeredSession(page, 'alpha', 'what is the answer')

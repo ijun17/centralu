@@ -345,8 +345,9 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
    * as it did before #1521 (the person's answer is enough).
    *
    * With the worktree kept the host's own check decides and moves (`agents.archiveIfAtRest`, read then move). With the worktree
-   * deleted too that check cannot be used (it never removes one), so the losses are read (`agents.archiveLosses`) and the session
-   * moves with `deleteSession` when there are none; a host without that method lists nothing, as after #1590.
+   * deleted too that check cannot be used (it never removes one), so only the losses are read (`agents.archiveLosses`); none means
+   * no lines, and the dialog moves the session with `deleteSession` if it is still open. A host without that method lists nothing,
+   * as after #1590.
    */
   async archiveSession(sessionId, deleteWorktree, deleteExternal) {
     const platform = get().platform
@@ -359,9 +360,7 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
           if (/unknown method/i.test(errorMessage(e))) return []
           throw e
         })
-        if (lost.length > 0) return lost
-        await get().deleteSession(sessionId, true, deleteExternal)
-        return null
+        return lost
       }
       const r = await platform.agents.archiveIfAtRest(sessionId, deleteExternal)
       if (r.archived) {

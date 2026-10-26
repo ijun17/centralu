@@ -300,17 +300,17 @@ export class SessionTrash {
     return out
   }
 
+  /** What archiving would lose, for the dialog to show before anything moves (#1595); nothing for a session that is gone */
+  archiveLosses(sessionId: string): string[] {
+    return this.host.meta.get(sessionId) ? this.lossesOf(sessionId) : []
+  }
+
   /**
    * The archive the window asks for on a session that looks idle (#1512), decided here by the same rule as `delete_session`'s card:
    * the session moves only when nothing it holds would be lost (`lossesOf`) and it is still at rest in the very step that moves it
    * (`trashIfQuiet`). Otherwise nothing moves and the lines say what would be lost, for the window's dialog; `asks` is empty when
    * the session was merely not at rest, or is no longer here
    */
-  /** What archiving would lose, for the dialog to show before anything moves (#1595); nothing for a session that is gone */
-  archiveLosses(sessionId: string): string[] {
-    return this.host.meta.get(sessionId) ? this.lossesOf(sessionId) : []
-  }
-
   async archiveIfAtRest(sessionId: string, deleteExternal = false): Promise<{ archived: true } | { archived: false; asks: string[] }> {
     const m = this.host.meta.get(sessionId)
     if (!m) return { archived: false, asks: [] }

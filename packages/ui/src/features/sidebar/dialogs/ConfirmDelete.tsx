@@ -28,7 +28,7 @@ export function ConfirmDelete({
   sessionId: string
   name: string
   tool: ToolName
-  /** Archive for sure: the person has seen what the archive drops, or chose to delete the worktree */
+  /** Archive for sure: the person has seen what the archive drops, or the host has nothing to list or to decide */
   onConfirm: (deleteWorktree: boolean, deleteExternal: boolean) => void
   /** The host archived it (or could not) on the first Archive: nothing is left to ask */
   onDone: () => void
@@ -77,9 +77,10 @@ export function ConfirmDelete({
     }
   }, [])
   const archive = () => {
+    // One question to the host at a time
+    if (asking.current) return
     // Seen by the person: confirmed in one step
     if (losses.length > 0) return onConfirm(deleteWorktree, deleteExternal)
-    if (asking.current) return
     asking.current = true
     void useStore
       .getState()
@@ -88,7 +89,7 @@ export function ConfirmDelete({
         if (!open.current) return
         if (lines === null) onDone()
         else if (lines.length > 0) setFound(lines)
-        else onConfirm(false, deleteExternal)
+        else onConfirm(deleteWorktree, deleteExternal)
       })
       .finally(() => (asking.current = false))
   }

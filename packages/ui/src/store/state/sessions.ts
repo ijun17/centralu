@@ -147,7 +147,7 @@ export type SessionsSlice = {
    * The archive the dialog's Archive asks for when the person has not seen the host's losses (#1589, #1595). Null: done (archived
    * with Undo on the toast, or failed with the toast saying why). Lines: not moved, and these are what it would lose; the dialog
    * shows them and its next Archive is `deleteSession`. No lines: not moved, the session is not at rest or the host predates the
-   * check; the dialog then calls `deleteSession`. With the worktree deleted too, no lines means it was moved (`deleteSession`).
+   * check; the dialog then calls `deleteSession`. With the worktree deleted too only the losses are read: the store moves nothing then.
    */
   archiveSession(sessionId: string, deleteWorktree: boolean, deleteExternal: boolean): Promise<string[] | null>
   /**

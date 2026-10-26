@@ -642,21 +642,18 @@ describe('Undo on the archive toast (#1512)', () => {
     expect(useStore.getState().sessions[s.id]).toBeDefined()
   })
 
-  it('with the worktree deleted too, moves the session with deleteSession when there is nothing to list, and when the host has no such method', async () => {
+  it('with the worktree deleted too, gives no lines when there is nothing to list, or the host has no such method, and moves nothing: the dialog moves it if it is still open', async () => {
     const { mock, s } = await oneSession('/tmp/archive-w2')
     const read = vi.spyOn(mock.agents, 'archiveLosses').mockResolvedValue([])
     const deleted = vi.spyOn(mock.agents, 'deleteSession')
-    expect(await useStore.getState().archiveSession(s.id, true, false)).toBeNull()
-    expect(deleted).toHaveBeenCalledWith(s.id, true, false)
-    expect(useStore.getState().sessions[s.id]).toBeUndefined()
+    expect(await useStore.getState().archiveSession(s.id, true, false)).toEqual([])
+    expect(read).toHaveBeenCalledWith(s.id)
+    expect(deleted).not.toHaveBeenCalled()
+    expect(useStore.getState().sessions[s.id]).toBeDefined()
 
-    const old = await oneSession('/tmp/archive-w3')
-    const oldRead = vi.spyOn(old.mock.agents, 'archiveLosses').mockRejectedValue(new Error('Unknown method: agents.archiveLosses'))
-    const oldDeleted = vi.spyOn(old.mock.agents, 'deleteSession')
-    expect(await useStore.getState().archiveSession(old.s.id, true, true)).toBeNull()
-    expect(oldRead).toHaveBeenCalled()
-    expect(oldDeleted).toHaveBeenCalledWith(old.s.id, true, true)
-    expect(read).toHaveBeenCalledTimes(1)
+    read.mockRejectedValue(new Error('Unknown method: agents.archiveLosses'))
+    expect(await useStore.getState().archiveSession(s.id, true, true)).toEqual([])
+    expect(deleted).not.toHaveBeenCalled()
   })
 
   it('with the worktree deleted too, a failed read moves nothing and says why', async () => {
