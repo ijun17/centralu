@@ -243,7 +243,7 @@ uxTask({
     await u.until('the confirmation', () => expect(page.getByTestId('confirm-delete')).toBeVisible())
     await u.click(page.getByTestId('confirm-delete-yes'))
   },
-  goal: async (page) => expect(page.getByTestId('confirm-delete')).toBeHidden(),
+  goal: async (page) => expect(page.getByTestId('toast')).toContainText('Archived'),
   budget: { operators: 16, M: 3, seconds: 10.1 },
 })
 
