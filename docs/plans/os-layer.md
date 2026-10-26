@@ -150,6 +150,10 @@ load of the machine changes over an hour: an earlier pair took 1,612 and 1,464 s
 | `project-board-queue.test.ts` | 259, 260 after | 612 s | 245 s (−60 %) |
 | `project-board-release.test.ts` | 104 | 538 s | 366 s (−32 %) |
 
+On the Windows runner (this step's own CI, build run 40355280437): the queue file 375 s (875 before), the release file
+652 s (861). `tooling/test-durations.json` was refreshed from that run: each shard now holds 1,974 measured seconds
+(2,180 before), and no single file bounds a shard any more.
+
 What is left: a queue test is now its app's start and stop (about 0.5 s with the PowerShell listing at stop) and, in
 the 69 with a git fixture, real git; a release test is real git (its fixture repositories and the app's own git, about
 90 processes) and the app's start and stop. `tooling/project-board-system.test.ts` starts the real programs (the fake
