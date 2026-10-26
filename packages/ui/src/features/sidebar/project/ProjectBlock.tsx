@@ -59,6 +59,8 @@ export function ProjectBlock({ projectId }: { projectId: string }) {
    * stay, which is the saved fold taking over (`pin`).
    */
   const [hoverOpen, setHoverOpen] = useState(false)
+  // hoverOpen only counts while the saved fold is closed: if something unfolded the project meanwhile, the saved fold rules
+  const hoverActive = savedFolded && hoverOpen
   const folded = savedFolded && !hoverOpen
   const sectionRef = useRef<HTMLElement>(null)
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false)
@@ -70,15 +72,18 @@ export function ProjectBlock({ projectId }: { projectId: string }) {
   // An open menu, a name being edited or a drag keeps the project as it is until it ends
   const holding = headerMenuOpen || sessionMenu !== null || renaming !== null || dragging
   useEffect(() => expander.hold(holding), [expander, holding])
+  useEffect(() => {
+    if (!savedFolded) expander.reset()
+  }, [expander, savedFolded])
   useEffect(() => () => expander.reset(), [expander])
   /** A click on the project: a hover-expanded one stays (the saved fold opens), a click-folded one folds as the arrow always did */
   const toggleFoldFromClick = () => {
-    if (hoverOpen) expander.reset()
+    if (hoverActive) expander.reset()
     toggleFold(projectId)
   }
   const pinHoverExpanded = () => {
     // Pressing the name of a folded project is a decision not to wait for the rest: no expansion follows it
-    if (!hoverOpen) return expander.leaveName()
+    if (!hoverActive) return expander.leaveName()
     expander.reset()
     toggleFold(projectId)
   }

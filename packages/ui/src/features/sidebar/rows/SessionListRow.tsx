@@ -99,7 +99,8 @@ export function SessionListRow({
             />
           )}
           <button
-            onClick={() => focusSession(s.id)}
+            // Opening a row of a hover-expanded project leaves the saved fold as it is (#1578): it folds when the pointer leaves
+            onClick={(e) => focusSession(s.id, e.currentTarget.closest('[data-hover-expanded]') ? { reveal: false } : undefined)}
             onKeyDown={foldKeys(children.length > 0, childrenFolded, (next) => setGroupsFolded([groupKey], next))}
             /*
               Double-clicking the name edits it in place — the same convention as file

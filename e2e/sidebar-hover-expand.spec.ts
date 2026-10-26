@@ -124,3 +124,13 @@ test('Hover: keyboard focus on a folded name does not expand it', async ({ page 
   await page.clock.runFor(1000)
   await expect(rows(page, 'alpha')).toHaveCount(0)
 })
+
+test('Hover: opening a session row of a hover-expanded project leaves the saved fold; leaving folds it, and the name never folds it', async ({ page }) => {
+  await foldedProjects(page, ['alpha'])
+  await name(page, 'alpha').hover()
+  await page.clock.runFor(250)
+  await rows(page, 'alpha').first().click()
+  expect(await page.evaluate(() => (window as any).__mock.workspaceSnapshot?.foldedProjects?.length)).toBe(1)
+  await name(page, 'alpha').click()
+  await expect(rows(page, 'alpha')).toHaveCount(1)
+})
