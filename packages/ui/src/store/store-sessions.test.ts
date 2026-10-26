@@ -572,11 +572,15 @@ describe('Undo on the archive toast (#1512)', () => {
     return { mock, p, s }
   }
 
-  it('hands both choices of the archive dialog to the host as they were made', async () => {
+  it('offers no archive that skips the dialog: the only way out of the sidebar is deleteSession, with both choices', async () => {
     const { mock, s } = await oneSession('/tmp/undo-host-a')
+    // #1589: the quick path (`archiveSession`, through the host's `archiveIfAtRest`) is gone from the window
+    expect(useStore.getState()).not.toHaveProperty('archiveSession')
+    const quick = vi.spyOn(mock.agents, 'archiveIfAtRest')
     const moved = vi.spyOn(mock.agents, 'deleteSession')
     await useStore.getState().deleteSession(s.id, false, true)
     expect(moved).toHaveBeenCalledWith(s.id, false, true)
+    expect(quick).not.toHaveBeenCalled()
     expect(useStore.getState().sessions[s.id]).toBeUndefined()
     expect(useStore.getState().toastAction?.label).toBe('Undo')
   })
