@@ -117,9 +117,30 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     expect(shards).toBeGreaterThan(1)
     expect(/^ {8}shard: \[([\d, ]+)\]$/m.exec(unit)?.[1]).toBe(Array.from({ length: shards }, (_, i) => i + 1).join(', '))
     expect(names(unit)).toEqual(Array.from({ length: shards }, (_, i) => `windows tests (vitest ${i + 1}/${shards})`))
-    expect(unit).toContain('run: pnpm exec vitest run --shard=${{ matrix.shard }}/${{ matrix.shards }}\n')
     expect(unit).toMatch(/^ {4}runs-on: windows-2022$/m)
     expect(unit).toContain('CC_DATA_DIR: ${{ runner.temp }}')
+  })
+
+  // #1599: Windows runs the tests that touch the OS, picked by the OS layer's rule and split by measured time;
+  // Linux (`verify`) runs them all
+  it('runs on Windows the tests the OS layer picks, each shard its time-balanced half, and every test on Linux', () => {
+    const unit = job('windows-tests-unit').body
+    const pick = unit.indexOf('run: pnpm exec tsx tooling/os-tests.ts --shard ${{ matrix.shard }}/${{ matrix.shards }} --out "${{ runner.temp }}\\os-tests.txt"\n')
+    const test = unit.indexOf('run: pnpm exec vitest run --reporter=default --reporter=json --outputFile.json="${{ runner.temp }}\\vitest-times.json"\n')
+    expect(pick).toBeGreaterThan(-1)
+    expect(test).toBeGreaterThan(pick)
+    expect(unit.slice(pick, test)).toContain('CC_TEST_FILES: ${{ runner.temp }}\\os-tests.txt\n')
+    // The shard's list is already its half: vitest's own --shard would halve it again
+    expect(unit).not.toMatch(/vitest run[^\n]*--shard/)
+    // Each shard keeps its file times, which refresh tooling/test-durations.json, even when a test failed
+    const keep = unit.slice(test)
+    expect(keep).toMatch(/- name: Keep the test times\n {8}if: \$\{\{ !cancelled\(\) \}\}\n {8}uses: actions\/upload-artifact@/)
+    expect(keep).toContain('name: windows-test-times-${{ matrix.shard }}\n')
+    expect(keep).toContain('path: ${{ runner.temp }}\\vitest-times.json\n')
+    // Nowhere else is the selection used: the Linux jobs run every test
+    const verify = job('verify').body
+    expect(verify).not.toMatch(/CC_TEST_FILES|os-tests/)
+    expect(workflow.match(/CC_TEST_FILES/g)).toHaveLength(1)
   })
 
   // 2026-10-19 (owner): Playwright retries a failed test, not the shard, and a pass on the retry is named, not hidden

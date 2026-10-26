@@ -7,43 +7,13 @@ import testDataDir from './tooling/eslint-test-data-dir.js'
 import testTimeLimits from './tooling/eslint-test-time-limits.js'
 import platformChecks from './tooling/eslint-platform-checks.js'
 import agentAdapterChecks from './tooling/eslint-agent-adapter-checks.js'
+import { PLATFORM_MODULES } from './tooling/os-layer.js'
 
 /**
- * The modules that may ask which OS this is, each owning one subject (docs/architecture.md §2). A new
- * entry is a new subject, not a place to park a check.
+ * The modules that may ask which OS this is, and the OS layer they are part of, are defined in tooling/os-layer.js
+ * (docs/architecture.md §2, docs/plans/os-layer.md). Re-exported for the tests that read them from here.
  */
-export const PLATFORM_MODULES = [
-  // The host's questions named for what differs: `ps`, clonefile, locked programs, path rules, install paths
-  'packages/agent-host/src/os.ts',
-  // Finding a tool on PATH (PATHEXT, npm shims) and starting it (`.cmd` shims, absolute paths)
-  'packages/agent-host/src/env-path.ts',
-  'packages/agent-host/src/tool-launch.ts',
-  // Ending a process tree: groups and signals, or taskkill and parent links
-  'packages/agent-host/src/dev-services/kill-tree.ts',
-  // The terminal's and the Run button's shell
-  'packages/agent-host/src/dev-services/terminal.ts',
-  // How Claude Code is started on Windows (#353)
-  'packages/agent-host/src/adapters/claude/exe-link.ts',
-  // A new project's folder (#515): the Desktop (Windows' known folder, XDG, ~/Desktop) and each OS's path rules
-  'packages/agent-host/src/dev-services/project-folder.ts',
-  // The npm launcher's platform layer
-  'packaging/npm/centralu/bin/platform.mjs',
-  // TODO: move the launcher's own checks into platform.mjs once remote phase 3's launcher work has
-  // landed (it is changing serve.mjs and centralu.mjs now); listed so that work is not blocked.
-  'packaging/npm/centralu/bin/centralu.mjs',
-  // serve.mjs and the modules it is split into
-  'packaging/npm/centralu/bin/serve-autostart.mjs',
-  'packaging/npm/centralu/bin/serve-detach.mjs',
-  'packaging/npm/centralu/bin/serve-files.mjs',
-  'packaging/npm/centralu/bin/serve-handover.mjs',
-  'packaging/npm/centralu/bin/serve-host.mjs',
-  'packaging/npm/centralu/bin/serve-install.mjs',
-  'packaging/npm/centralu/bin/serve-run.mjs',
-  'packaging/npm/centralu/bin/serve-window.mjs',
-  'packaging/npm/centralu/bin/serve-windows.mjs',
-  // TODO: remote phase 3 is changing the hub's links; revisit what platform checks they need then.
-  'packages/agent-host/src/links/**',
-]
+export { PLATFORM_MODULES } from './tooling/os-layer.js'
 
 /**
  * The files the type-aware rules read: what the root tsconfig.json compiles. A file outside it has no
@@ -301,6 +271,16 @@ export default tseslint.config(
     ignores: ['**/*.test.{ts,tsx}', '**/*test-helpers.ts', ...PLATFORM_MODULES],
     plugins: { local: platformChecks },
     rules: { 'local/platform-checks': 'error' },
+  },
+  /*
+   * The OS is touched only in the OS layer (tooling/eslint-platform-checks.js `os-imports`, #1599). The rule itself
+   * knows which files it checks and which may touch the OS (tooling/os-layer.js), so that the Windows job's test
+   * selection (tooling/os-tests.ts) asks the same question; here it is only given every file.
+   */
+  {
+    files: ['**/*.{ts,tsx,mts,mjs,js}'],
+    plugins: { local: platformChecks },
+    rules: { 'local/os-imports': 'error' },
   },
   {
     files: ['packages/*/src/**/*.{ts,tsx,mts,mjs}', 'apps/*/src/**/*.{ts,tsx,mts,mjs}', 'packaging/**/*.mjs'],

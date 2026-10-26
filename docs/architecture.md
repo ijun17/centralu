@@ -56,7 +56,7 @@ events to core's reducer and the host's copy and compares what a reconnect hands
 **Which OS this is is asked in platform modules only** (`local/platform-checks`, `tooling/eslint-platform-checks.js`).
 In the packages, the apps and the npm launcher, reading `process.platform` (or `os.platform()`) and comparing
 anything with an OS name (`=== 'win32'`, `case 'darwin':`) is a lint error outside `PLATFORM_MODULES` in
-`eslint.config.js`: `os.ts` (the host's questions named for what differs: `hasPs`, `clonesFiles`,
+`tooling/os-layer.js`: `os.ts` (the host's questions named for what differs: `hasPs`, `clonesFiles`,
 `locksRunningPrograms`, `pathsOf`, `installedCopyPath`, `systemTool`), `env-path.ts` and `tool-launch.ts` (finding and starting a
 tool), `dev-services/kill-tree.ts` (ending a process tree; `hasProcessGroups`), `dev-services/terminal.ts` (the
 shell), `adapters/claude/exe-link.ts` (Claude Code's Windows start; `windowsStart`), `dev-services/project-folder.ts` (a new
@@ -64,6 +64,17 @@ project's default location, `~/Centralu`, and folder-name rules, #515) and the l
 Code elsewhere asks one of those a question named for what differs, so each OS's answer is written once and a new
 OS is a change to those files. Tests and build scripts are not checked. The Rust side's equivalent for how the host
 starts is `start_plan` ([agent-host.md](agent-host.md) §4.0).
+
+**The OS is touched only in the OS layer** (`local/os-imports`, the same file; #1599,
+[plans/os-layer.md](plans/os-layer.md)). In the same code and its tests, importing `fs`, `fs/promises`,
+`child_process`, `os`, `path`, `net`, `http`, `https`, `dgram` or `worker_threads` (bare or `node:`), or the installed
+`node-pty`, `better-sqlite3` and `ws`, is a lint error outside the layer (`OS_LAYER` in
+`tooling/os-layer.js`: the platform modules above but `links/**` and the launcher's `centralu.mjs`) and its tests, and
+so are `process.kill`, `process.cwd()`, `process.chdir()`, `process.execPath`, `process.env.PATH` and `node:url`'s
+`fileURLToPath` and `pathToFileURL`.
+The files that did so before the rule are listed in `tooling/os-allowlist.txt`, which may only shrink
+(`tooling/os-layer.test.ts`). The Windows unit job runs only the tests that touch the OS by the same judgement
+(`tooling/os-tests.ts`); Linux runs every test.
 
 **Which agent CLI this is is asked in its adapter only** (`agent/agent-adapter-checks`,
 `tooling/eslint-agent-adapter-checks.js`). In shipped code, an exact CLI name in a string literal, expression-free template, object key or

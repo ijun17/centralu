@@ -57,13 +57,22 @@
 
 **어느 OS인지는 플랫폼 모듈에서만 묻는다** (`local/platform-checks`, `tooling/eslint-platform-checks.js`). 패키지, 앱,
 npm 런처에서 `process.platform`(또는 `os.platform()`)을 읽거나 무엇이든 OS 이름과 비교하는 것(`=== 'win32'`,
-`case 'darwin':`)은 `eslint.config.js`의 `PLATFORM_MODULES` 밖에서는 린트 에러다: `os.ts`(다른 점의 이름으로 묻는
+`case 'darwin':`)은 `tooling/os-layer.js`의 `PLATFORM_MODULES` 밖에서는 린트 에러다: `os.ts`(다른 점의 이름으로 묻는
 호스트의 질문들: `hasPs`, `clonesFiles`, `locksRunningPrograms`, `pathsOf`, `installedCopyPath`, `systemTool`), `env-path.ts`와
 `tool-launch.ts`(도구 찾기와 띄우기), `dev-services/kill-tree.ts`(프로세스 트리 끝내기, `hasProcessGroups`),
 `dev-services/terminal.ts`(셸), `adapters/claude/exe-link.ts`(Windows에서 Claude Code 띄우기, `windowsStart`), `dev-services/project-folder.ts`(새 프로젝트의 기본 위치 `~/Centralu`와 폴더 이름 규칙, #515), 그리고
 런처의 `platform.mjs`. 다른 곳의 코드는 그중 하나에 다른 점의 이름으로 묻는다. 그래서 OS마다의 답은 한 번만 쓰이고, 새
 OS는 그 파일들을 고치는 일이다. 테스트와 빌드 스크립트는 검사하지 않는다. 호스트가 뜨는 방식에 대한 Rust 쪽의 짝은
 `start_plan`이다([agent-host.md](agent-host.md) §4.0).
+
+**OS는 OS 계층에서만 건드린다** (`local/os-imports`, 같은 파일; #1599, [plans/os-layer.md](plans/os-layer.md)).
+같은 코드와 그 테스트에서 `fs`, `fs/promises`, `child_process`, `os`, `path`, `net`, `http`, `https`, `dgram`, `worker_threads`(그대로든 `node:`든)나
+설치된 `node-pty`, `better-sqlite3`, `ws`를 가져오는 것, 그리고 `process.kill`, `process.cwd()`, `process.chdir()`,
+`process.execPath`, `process.env.PATH`와 `node:url`의 `fileURLToPath`, `pathToFileURL`을 쓰는 것은 계층
+(`tooling/os-layer.js`의 `OS_LAYER`: 위의 플랫폼 모듈 중 `links/**`와 런처의 `centralu.mjs`를 뺀 것)과 그 테스트 밖에서는
+린트 에러다. 규칙 전부터 그러던 파일은 `tooling/os-allowlist.txt`에 있고, 이 목록은 줄기만 한다
+(`tooling/os-layer.test.ts`). Windows 단위 테스트 잡은 같은 판단으로 OS를 건드리는 테스트만 돌린다
+(`tooling/os-tests.ts`). Linux는 모든 테스트를 돌린다.
 
 **프로세스 밖에서 온 데이터는 확인하지, 단언하지 않는다** (#1339). 다음은 모두 무언가가 확인하기 전까지 `unknown`이다.
 - 에이전트 CLI의 스트림, Codex app-server의 메시지, 원격 호스트나 앱이 보낸 프레임

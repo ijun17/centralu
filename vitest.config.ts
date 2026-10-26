@@ -1,12 +1,35 @@
 import { defineConfig } from 'vitest/config'
 import { fileURLToPath } from 'node:url'
+import { readFileSync, statSync } from 'node:fs'
 // Windows gets three times the time limits (#368); a test that sets its own limit multiplies by the same
 import { SLOW } from './tooling/test-timing.js'
 
 const r = (p: string) => fileURLToPath(new URL(p, import.meta.url))
 
 const EXCLUDE = ['**/node_modules/**', 'spike/**', 'e2e/**']
-const APP_RUNTIME = 'packages/agent-host/src/apps/external/**/*.test.ts'
+const APP_RUNTIME_DIR = 'packages/agent-host/src/apps/external/'
+const APP_RUNTIME = `${APP_RUNTIME_DIR}**/*.test.ts`
+
+/*
+ * `CC_TEST_FILES`: a file listing the tests to run, one path per line, instead of every test. The Windows unit job
+ * runs the tests that touch the OS (tooling/os-tests.ts, #1599); Linux runs every test, without it.
+ */
+function listedTests(text: string): string[] {
+  const files = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+  // A path vitest cannot match would be left out without a word: a list is repository paths with `/`, every one a file
+  for (const f of files) {
+    if (f.includes('\\') || f.startsWith('./') || statSync(r(`./${f}`), { throwIfNoEntry: false })?.isFile() !== true) throw new Error(`CC_TEST_FILES: '${f}' is not a test file's repository path`)
+  }
+  return files
+}
+const LISTED = process.env.CC_TEST_FILES ? listedTests(readFileSync(process.env.CC_TEST_FILES, 'utf8')) : null
+/*
+ * The list is this run's, read once. A test that starts a vitest of its own (`tooling/vitest-stall-watch.test.ts` runs
+ * a fixture) would otherwise inherit it, and its child would find none of its files on the list. In watch mode, a
+ * config change reloads this file without the list, and everything runs: CI does not watch.
+ */
+delete process.env.CC_TEST_FILES
+const listed = (inAppRuntime: boolean) => (LISTED ?? []).filter((f) => f.startsWith(APP_RUNTIME_DIR) === inAppRuntime)
 
 export default defineConfig({
   resolve: {
@@ -57,11 +80,11 @@ export default defineConfig({
     projects: [
       {
         extends: true,
-        test: { name: 'unit', include: ['packages/**/*.test.{ts,tsx}', 'tooling/**/*.test.ts'], exclude: [...EXCLUDE, APP_RUNTIME] },
+        test: { name: 'unit', include: LISTED ? listed(false) : ['packages/**/*.test.{ts,tsx}', 'tooling/**/*.test.ts'], exclude: [...EXCLUDE, APP_RUNTIME] },
       },
       {
         extends: true,
-        test: { name: 'app-runtime', include: [APP_RUNTIME], testTimeout: 15_000 * SLOW },
+        test: { name: 'app-runtime', include: LISTED ? listed(true) : [APP_RUNTIME], testTimeout: 15_000 * SLOW },
       },
     ],
   },
