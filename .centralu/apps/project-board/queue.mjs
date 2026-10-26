@@ -35,8 +35,21 @@ export function longSubject(pr) {
   const length = [...subject].length
   return length > SUBJECT_MAX ? { subject, length } : null
 }
+/**
+ * How long the board app is kept running for an item in attention `subject` (queueBusy). That attention waits for a title
+ * edit, which only a poll sees, and every other attention waits for a push or a person and does not hold the app. Bounded, since a
+ * pull request nobody shortens would otherwise keep the app polling for good; after it the item is still polled
+ * whenever the app runs for another reason, or a watch command run again drives the queue.
+ */
+export const SUBJECT_HOLD_MS = 6 * 3_600_000
+/** Whether an item holds the board app running now: attention `subject`, within SUBJECT_HOLD_MS of when it began (`attentionAt`). */
+export const holdsApp = (item, now = Date.now()) => item.state === 'attention' && item.reason?.kind === 'subject' && now - Date.parse(item.attentionAt ?? '') < SUBJECT_HOLD_MS
 /** Why a squash subject over the limit stops a pull request; the queue carries on by itself once the title fits. */
-const subjectAttention = (n, { subject, length }) => attention('subject', `${n}: the squash subject "${subject}" is ${length} characters, over ${SUBJECT_MAX}. Shorten the PR title; the queue carries on by itself.`)
+const subjectAttention = (n, { subject, length }) =>
+  attention(
+    'subject',
+    `${n}: the squash subject "${subject}" is ${length} characters, over ${SUBJECT_MAX}. Shorten the PR title; the queue carries on by itself (the board app keeps polling it for ${SUBJECT_HOLD_MS / 3_600_000} hours, and a watch command run again does too).`,
+  )
 /** How long after a poll the item is read again, by what it is waiting on. */
 export const POLL_MS = { waiting: 15_000, ci: 90_000, acted: 60_000, attention: 120_000, error: 60_000 }
 /** No run started on a head for this long: CI did not start, which is the session's to look at. */

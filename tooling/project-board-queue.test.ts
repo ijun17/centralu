@@ -701,7 +701,7 @@ describe('what the merge queue decides with two tiers of CI', () => {
       expect(long).toMatchObject({ state: 'attention', reason: { kind: 'subject' } })
       expect(long.quick).toBeUndefined()
       expect(long.reason.text).toContain(subjectOf(55))
-      expect(long.reason.text).toContain('is 73 characters, over 72. Shorten the PR title; the queue carries on by itself.')
+      expect(long.reason.text).toContain('is 73 characters, over 72. Shorten the PR title; the queue carries on by itself (the board app keeps polling it for 6 hours')
       // Not a batch candidate while it holds: a batch takes items in `ci` only
       const q = queueOf({ ...fresh({ state: long.state, ci: { head: SHA, verdict: 'quick', runs: [], batchable: true } }) })
       expect(batchCandidates(q, { max: 4, tiers: true })).toEqual([])
@@ -1602,6 +1602,23 @@ describe('the merge queue keeps the board app running while it has work (#1236)'
     expect(queueBusy(q)).toBe(null)
     q.batches.push({ id: 1, state: 'landing', members: [{ pr: 77 }] })
     expect(queueBusy(q)).toBe('merge queue, a batch finishing')
+  })
+
+  // #1593: attention `subject` waits for a title edit, which only a poll sees; the other attentions wait for a push or a person
+  it('is busy for an item in attention `subject` for six hours from when it began, and not for another attention', () => {
+    const q = emptyQueue()
+    const began = '2026-10-26T10:00:00.000Z'
+    const at = (hours: number) => Date.parse(began) + hours * 3_600_000
+    q.items.push({ ...fresh(), state: 'attention', reason: { kind: 'subject', text: 'x' }, attentionAt: began }, { ...fresh({ pr: 78 }), state: 'attention', reason: { kind: 'failed', text: 'x' }, attentionAt: began })
+    expect(queueBusy(q, at(1))).toBe('merge queue, 1 item')
+    expect(queueBusy(q, at(5.9))).toBe('merge queue, 1 item')
+    expect(queueBusy(q, at(6.1))).toBe(null)
+    // An item from an older file has no time: not held
+    delete q.items[0].attentionAt
+    expect(queueBusy(q, at(1))).toBe(null)
+    // Shortened, it is back in CI: busy as any item in CI
+    q.items[0].state = 'ci'
+    expect(queueBusy(q, at(1))).toBe('merge queue, 1 item')
   })
 
   it('holds busy from the moment a pull request is queued until it lands, and releases it then', async () => {
@@ -3060,6 +3077,8 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
       runtime(tieredState({ prs: { '77': ghPr(77, { title: LONG }) } }), TIERS)
       await until((x) => stateOf(x) === 'attention', 'attention')
       expect(queueOnDisk().items[0].reason).toMatchObject({ kind: 'subject' })
+      // When it began, for how long the board app is kept polling it
+      expect(Date.parse(queueOnDisk().items[0].attentionAt)).toBeGreaterThan(0)
       expect(notices().map((e) => e.text).join(' ')).toContain('the squash subject "' + LONG + ' (#77)" is 73 characters, over 72')
       await morePolls(3)
       // Polled again, never batched, nothing touched on GitHub
@@ -3099,13 +3118,22 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
       runtime(tieredState({ prs: { '77': ghPr(77, { title: LONG }) } }), TIERS)
       const r = await call('queue_merge', { pr: 77, owner: 'tester' })
       expect(r.isError).toBe(true)
-      expect(r.data).toMatchObject({ queued: false, kind: 'subject' })
+      expect(r.data).toMatchObject({ queued: false, kind: 'subject', subject: true })
       expect(r.text).toContain(`Not queued: the squash subject "${LONG} (#77)" is 73 characters, over 72. Shorten the title.`)
       expect(itemsOnDisk()).toEqual([])
       expect(writes()).toEqual([])
       // At 72 it queues
       patchGh((st) => (st.prs['77'] = ghPr(77, { title: FITS })))
       expect((await call('queue_merge', { pr: 77, owner: 'tester' })).isError).toBe(false)
+    })
+
+    it('does not call another refusal subject when the title is only one of the reasons', async () => {
+      runtime(tieredState({ prs: { '77': ghPr(77, { title: LONG, isDraft: true }) } }), TIERS)
+      const r = await call('queue_merge', { pr: 77, owner: 'tester' })
+      expect(r.data).toMatchObject({ queued: false, kind: 'refused', subject: true })
+      expect(r.text).toContain('is a draft')
+      expect(r.text).toContain('is 73 characters, over 72')
+      expect(itemsOnDisk()).toEqual([])
     })
 
     it("judges a stack's top, whose title is the squash subject, and not its lowers", async () => {

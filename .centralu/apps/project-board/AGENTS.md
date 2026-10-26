@@ -213,7 +213,13 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
   a failure alone in a batch on this head), whatever CI says yet: a quick run still going, not reported, failed or green, a record handed
   over with integrate, or a full run. A batch takes an item whose quick run is still going too, so the item must not be in `ci`:
   it is no candidate. It is polled again
-  like any attention, and once the title is shortened the next poll carries on, with no new push. The length is counted in
+  like any attention, and once the title is shortened the next poll carries on, with no new push. To make that true, the board
+  app is kept running for it (`queueBusy`, `holdsApp`): an item in attention `subject` counts as work for `SUBJECT_HOLD_MS` (6 hours)
+  from when it began (`attentionAt`, set with the notice and cleared when it leaves attention), where every other attention waits for a
+  push or a person and holds nothing. The bound is the cost: a pull request nobody shortens would otherwise keep the app polling for
+  good; after it the item is still polled whenever the app runs for another reason. The watch command exits once with the
+  notice, as for any attention (that is how a session without the posted notice hears it), and run again (`--after` the seq it
+  names) it waits and drives the queue, since an item in attention is still left. The length is counted in
   characters (code points) of `squashSubject` (queue.mjs, with `SUBJECT_MAX` and `longSubject`: the one definition that
   `queue_merge`, the poll, a batch's build and landing all read). Only the CI workflows' own checks count (`readWorkflowChecks`, their
   check suites: a release job of the same name is not CI, #624), and the run to rerun is the PR's own
@@ -257,7 +263,7 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
   open screen and no call after 5 minutes unless it says it is busy (docs/apps.md §4): the manifest declares
   `uses.background`, and this server holds busy exactly while the queue has an item waiting or in CI, or a batch
   with its end to do (not one needing attention: it waits on a session, and one forgotten would keep the app polling
-  for good) (`queueBusy`, after every tick and every change a tool makes; the row reads "Running: merge queue, N
+  for good; except one in attention `subject`, for 6 hours: it waits on a title edit only a poll sees, #1593) (`queueBusy`, after every tick and every change a tool makes; the row reads "Running: merge queue, N
   items"), so the queue carries on overnight with nothing open (#1236). The queue has two drivers: this server, and
   the **watch command** a session runs in the background. One drives at a time through `merge-queue.lease.json` (renewed
   every tick and before every write, free after 3 minutes of silence or as soon as its process is gone,
@@ -542,7 +548,10 @@ default 4: the owner's, 2026-10-19, this repository's too).
   a `merge-queue` success status on its head names the batch run. A head moved, a draft,
   DIRTY, BEHIND, BLOCKED, a long subject (the last guard: the poll and the build catch it before, so it is a title edited
   while the batch ran): that member and the rest go back to their own CI (where the usual attention
-  says what is wrong).
+  says what is wrong). A long subject is the one stop that leaves the member neither `alone` nor `batchless`
+  (`decideLanding` answers `subject: true`): its head is what CI tested, its poll says `subject`, and shortened it is batched
+  again by itself, a batch of one included; the members after it are sent back as for any stop (`batchless`), which stays as
+  it was (#1593).
 - **The default branch moved under the batch** (#1548, 2026-10-26: batch-209 had #1542 green when the release bump #1545
   landed through `merge_when_green`; the stop marked it `alone` and its session was told to queue it again by hand,
   for a pull request whose tests had passed). That stop alone ("something else landed", `decideLanding`'s `moved`) is not

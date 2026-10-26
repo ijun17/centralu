@@ -229,7 +229,8 @@ async function queueMerge({ pr, lowers = [], owner, author, deleteBranch = true 
   // The squash subject is "Title (#N)" and must fit (#1593: before any batch, as integrate does, #1222); a stack lands through its top
   const long = longSubject(p)
   if (long) problems.push(`the squash subject "${long.subject}" is ${long.length} characters, over ${SUBJECT_MAX}. Shorten the title.`)
-  if (problems.length) return asError(answer(`Not queued: ${problems.join(' ')}`, { queued: false, kind: long ? 'subject' : 'refused' }))
+  // `kind` is 'subject' only when that is the one reason; with others it is 'refused', and `subject` says the title is among them
+  if (problems.length) return asError(answer(`Not queued: ${problems.join(' ')}`, { queued: false, kind: long && problems.length === 1 ? 'subject' : 'refused', subject: Boolean(long) }))
 
   const r = enqueueFor({ repo: top.repo, number: top.number, lowers: under.map((l) => l.number), owner, author, deleteBranch, title: p.title })
   if (r.error) return asError(answer(`Not queued: ${r.error}`, { queued: false, kind: 'conflict' }))

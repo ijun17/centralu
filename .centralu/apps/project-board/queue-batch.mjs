@@ -499,7 +499,17 @@ async function landNext(b, ctx) {
   }
   if (d.do === 'stop') {
     const rest = prs.slice(k)
-    return drop(b, ctx, `stopped before ${n}: ${d.text}. ${list(b, rest, ref)} go${rest.length === 1 ? 'es' : ''} back to ${rest.length === 1 ? 'its' : 'their'} own CI${k ? ` (${list(b, prs.slice(0, k), ref)} landed)` : ''}.`, { state: 'stopped' })
+    // A title lengthened during the batch is the one stop that is nothing wrong with the head: the member is not `alone` or
+    // `batchless`, so its poll says `subject` (it needs no push) and, once the title fits, a batch takes it again (#1593).
+    // The members after it go back as for any stop
+    const fixable = (fq) => {
+      const it = findItem(fq, repo, step.pr)
+      if (it) {
+        delete it.alone
+        delete it.batchless
+      }
+    }
+    return drop(b, ctx, `stopped before ${n}: ${d.text}. ${list(b, rest, ref)} go${rest.length === 1 ? 'es' : ''} back to ${rest.length === 1 ? 'its' : 'their'} own CI${k ? ` (${list(b, prs.slice(0, k), ref)} landed)` : ''}.`, { state: 'stopped', then: d.subject ? fixable : undefined })
   }
   if (d.do === 'wait') {
     save((fq, fb) => Object.assign(fb, d.patch ?? {}, { lastError: null, errors: 0, updatedAt: at, nextAt: new Date(now + pollMs('waiting')).toISOString() }))
