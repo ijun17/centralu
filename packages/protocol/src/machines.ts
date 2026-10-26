@@ -113,6 +113,8 @@ export const MachineOperation = z.object({
   /** The version it brings the machine to, when there is one */
   target: z.string().nullable().default(null),
   at: z.number(),
+  /** What `wait_idle` (sessions in a turn) or `wait_open` (open terminals and project commands) waits for: how many. Additive (#1579) */
+  count: z.number().optional(),
 })
 export type MachineOperation = z.infer<typeof MachineOperation>
 

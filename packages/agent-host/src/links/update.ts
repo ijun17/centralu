@@ -37,6 +37,7 @@ export type UpdateStep =
   | 'build'
   | 'wait_idle'
   | 'wait_unread'
+  | 'wait_open'
   | 'stop'
   | 'backup'
   | 'switch'
@@ -67,7 +68,8 @@ export type HostControl = {
   start: () => Promise<void>
   /** Whether a host answering as `version` said hello within `ms`; the link reconnects for it */
   answers: (version: string, ms: number) => Promise<boolean>
-  step: (step: UpdateStep) => void
+  /** `count`: what a `wait_idle` or `wait_open` step waits for (#1579) */
+  step: (step: UpdateStep, count?: number) => void
 }
 
 /** `{ v: 1, stop: { ok, wasRunning, how?, message? } }`, the line `serve --stop` prints; null when there is none */

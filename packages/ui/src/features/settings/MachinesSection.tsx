@@ -89,7 +89,7 @@ export function connectAction(status: MachineInfo['status']): { label: string; t
   return { label: 'Reconnect' }
 }
 
-function MachineRow({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: (category: 'updates') => void }) {
+export function MachineRow({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: (category: 'updates') => void }) {
   const reconnect = useStore((s) => s.reconnectMachine)
   const disconnect = useStore((s) => s.disconnectMachine)
   const remove = useStore((s) => s.removeMachine)
@@ -172,7 +172,7 @@ function MachineRow({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: (ca
         {operation && (
           <p className="mt-1.5 text-xs leading-body text-ink" data-testid={`machine-operation-${m.id}`} data-step={m.operation?.step}>
             {operation}
-            {(m.operation?.step === 'wait_idle' || m.operation?.step === 'wait_unread') && (
+            {(m.operation?.step === 'wait_idle' || m.operation?.step === 'wait_open' || m.operation?.step === 'wait_unread') && (
               <>
                 {' '}
                 <Button variant="ghost" size="sm" onClick={() => void cancelUpdate(m.id)} data-testid={`machine-update-cancel-${m.id}`}>
