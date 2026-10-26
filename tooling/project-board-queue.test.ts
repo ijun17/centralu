@@ -1340,7 +1340,7 @@ if (args[0] === 'pr' && args[1] === 'view') {
     const checks = run ? ((st.checks ?? {})[run.head_sha] ?? []).filter((c) => (c.check_suite ?? {}).id === run.check_suite_id) : []
     // A shard that passed ran the scenarios in its step; a stand-in (st.standIns, by check name) only echoes, as build.yml's -skipped jobs do
     const stepsOf = (c) => c.conclusion === 'failure' ? [{ name: 'Set up job', conclusion: 'success' }, { name: 'pnpm test', conclusion: 'failure' }]
-      : /^e2e \(/.test(c.name) ? [{ name: 'Set up job', conclusion: 'success' }, (st.standIns ?? []).includes(c.name) ? { name: 'Run echo "Only documents changed"', conclusion: 'success' } : { name: 'pnpm e2e (shard 1/2)', conclusion: c.conclusion }]
+      : /^e2e \(/.test(c.name) ? [{ name: 'Set up job', conclusion: 'success' }, (st.standIns ?? []).includes(c.name) ? { name: 'Run echo "Only documents changed"', conclusion: 'success' } : { name: 'pnpm e2e (shard ' + ((/(\d+\/\d+)\)$/.exec(c.name) || [])[1] || '1/1') + ')', conclusion: c.conclusion }]
       : []
     out({ jobs: checks.map((c) => ({ id: c.id, name: c.name, status: c.status, conclusion: c.conclusion, steps: stepsOf(c) })) })
   }
@@ -3408,7 +3408,7 @@ describe('the merge queue runs the heavy jobs before landing a batch that change
   const ENV = { ...REAL_QUICK, PROJECT_BOARD_CI_SCREEN: JSON.stringify(SCREEN) }
   const WORKFLOW_E2E = [
     'jobs:',
-    ...['changes', 'full tier', 'verify', 'windows tests (vitest 1/2)', 'windows tests (vitest 2/2)', 'e2e (webkit 1/2)', 'e2e (chromium 1/2)'].flatMap((n, i) => [`  j${i}:`, `    name: ${n}`]),
+    ...['changes', 'full tier', 'verify', 'windows tests (vitest 1/2)', 'windows tests (vitest 2/2)', 'e2e (webkit 1/1)', 'e2e (chromium 1/1)'].flatMap((n, i) => [`  j${i}:`, `    name: ${n}`]),
     '',
   ].join('\n')
   const ONE = `batch-${SHA}`
@@ -3419,7 +3419,7 @@ describe('the merge queue runs the heavy jobs before landing a batch that change
     suiteCheck('verify', verify, suite * 10 + 1, suite),
     suiteCheck('windows tests (vitest 1/2)', 'success', suite * 10 + 2, suite),
     suiteCheck('windows tests (vitest 2/2)', 'success', suite * 10 + 3, suite),
-    ...(full ? [suiteCheck('e2e (webkit 1/2)', e2e, suite * 10 + 6, suite), suiteCheck('e2e (chromium 1/2)', e2e, suite * 10 + 7, suite)] : []),
+    ...(full ? [suiteCheck('e2e (webkit 1/1)', e2e, suite * 10 + 6, suite), suiteCheck('e2e (chromium 1/1)', e2e, suite * 10 + 7, suite)] : []),
   ]
   const batchRun = (conclusion: string | null) => ghRun(conclusion, 1, ONE, { id: 950, head_branch: 'queue/batch-1', event: 'workflow_dispatch', check_suite_id: 6000 })
   const state = (reported: any[], patch: Gh = {}, conclusion: string | null = 'success') =>
@@ -3478,7 +3478,7 @@ describe('the merge queue runs the heavy jobs before landing a batch that change
   // build.yml's e2e-chromium-skipped reports a check named like a real shard and succeeds, when the branch's own classify
   // says only documents changed. A name alone cannot tell it from the shard: the job's step that runs the scenarios can
   it('does not take the stand-in of a left-out shard for the shard that was to run, though it reports success under its name', async () => {
-    runtime(state(reports(6000), { batchFiles: ['packages/ui/src/App.tsx'], standIns: ['e2e (chromium 1/2)'] }), ENV)
+    runtime(state(reports(6000), { batchFiles: ['packages/ui/src/App.tsx'], standIns: ['e2e (chromium 1/1)'] }), ENV)
     await call('queue_merge', { pr: 77, owner: 'tester' })
     await until((x) => stateOf(x) === 'attention', 'attention', BATCH_WAIT_MS)
     expect(writes().map(short2)).not.toContain('merge 77')
