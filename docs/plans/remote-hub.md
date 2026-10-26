@@ -321,6 +321,7 @@ or `CC_DATA_DIR`):
   versions/0.1.0-beta.13/
     node_modules/centralu/            the npm shim package: bin/centralu.mjs, serve.mjs (and serve-*.mjs), platform.mjs
     node_modules/@centralu/host-linux-x64/host/   the bundled host, the host-only package (step 5);
+                                      on Linux `centralu-keeper` beside it (remote-keeper.md §7);
                                       versions published before it: @centralu/linux-x64/host/
                                       (Windows: …/win32-x64/Centralu/resources/host/)
     install.json                      version, Node version, both integrities, when, by which hub

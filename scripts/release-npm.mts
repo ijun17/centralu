@@ -45,7 +45,7 @@ import { verifyThenStamp } from './release-verify.mjs'
 import { CONPTY_FILES as CONPTY_FILES_JS } from './conpty-files.mjs'
 import { checkStaged, shellToCarry, stageBundle, stageContent, type CarriedShell } from './bundle-stage.mjs'
 import { resolveSigningKey, trustedKeys, verifyContent, type SigningKey } from './content-manifest.mjs'
-import { floorDiffers, hostPackageDir, hostPackageProblems, remotePlatforms, stageHostPackage } from './host-package.mjs'
+import { floorDiffers, hostPackageDir, hostPackageKeeper, hostPackageProblems, remotePlatforms, stageHostPackage } from './host-package.mjs'
 const CONPTY_FILES = CONPTY_FILES_JS as readonly string[]
 import { publishStep, stillMissing, viewPublished, VISIBLE_DELAY_MS, VISIBLE_TRIES } from './release-registry.mjs'
 
@@ -269,12 +269,24 @@ function checkKeeperExe(path: string, machine: string): void {
  * this runs on any runner that can build one. The folder is under `target/`, removed afterwards.
  */
 function checkKeeperInAppImage(appImage: string, machine: string): void {
+  withKeeperFromAppImage(appImage, (keeper) => checkKeeperExe(keeper, machine))
+}
+
+/**
+ * Runs `use` on the keeper the AppImage carries, extracted into a folder under `target/` that is removed afterwards.
+ * The host-only package takes its keeper from here too (docs/plans/remote-keeper.md §7): the bytes the platform package
+ * ships, not cargo's copy, which the bundler may not have used as it is.
+ */
+function withKeeperFromAppImage<T>(appImage: string, use: (keeper: string) => T): T {
   const dir = join(ROOT, 'apps/desktop/src-tauri/target/release/keeper-check')
   rmSync(dir, { recursive: true, force: true })
   mkdirSync(dir, { recursive: true })
-  execFileSync(appImage, ['--appimage-extract', `usr/bin/${KEEPER_EXE}`], { cwd: dir, stdio: 'ignore' })
-  checkKeeperExe(join(dir, 'squashfs-root/usr/bin', KEEPER_EXE), machine)
-  rmSync(dir, { recursive: true, force: true })
+  try {
+    execFileSync(appImage, ['--appimage-extract', `usr/bin/${KEEPER_EXE}`], { cwd: dir, stdio: 'ignore' })
+    return use(join(dir, 'squashfs-root/usr/bin', KEEPER_EXE))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 }
 
 type Target = {
@@ -304,6 +316,11 @@ type Target = {
   install: (src: string, dest: string) => void
   /** prove the copied artifact is intact, executable, and the right machine */
   check: (dest: string) => void
+  /**
+   * Hands `stage` the keeper the host-only package carries beside `host/` (`hostPackageKeeper`), taken from the
+   * artifact at `dest`. Absent where that package carries none (Windows, until docs/plans/remote-keeper.md step 7)
+   */
+  withKeeper?: (dest: string, stage: (keeper: string) => void) => void
 }
 
 const TARGETS: Record<string, Target | undefined> = {
@@ -420,6 +437,7 @@ const TARGETS: Record<string, Target | undefined> = {
       // (d) the keeper executable inside the AppImage (#440), for `CC_USE_KEEPER=1` there
       checkKeeperInAppImage(dest, 'x86-64')
     },
+    withKeeper: (dest, stage) => withKeeperFromAppImage(dest, stage),
   },
 
   /*
@@ -472,6 +490,7 @@ const TARGETS: Record<string, Target | undefined> = {
       // (d) the keeper executable inside, same as linux-x64
       checkKeeperInAppImage(dest, 'aarch64')
     },
+    withKeeper: (dest, stage) => withKeeperFromAppImage(dest, stage),
   },
 
   /*
@@ -654,10 +673,14 @@ if (target && ARCH_PKG) {
     // From `src-tauri/resources/host`, which the build's `beforeBuildCommand` has just written: the
     // same folder the platform package's host was copied from, for the reason given at `win32-x64`
     step('Staging the host-only package')
-    stageHostPackage(join(ROOT, 'apps/desktop/src-tauri/resources/host'), HOST_PKG)
+    const hostSrc = join(ROOT, 'apps/desktop/src-tauri/resources/host')
+    const keeperName = hostPackageKeeper(target.id)
+    if (keeperName && !target.withKeeper) fail(`the host-only package carries ${keeperName}, and ${target.id} names no artifact to take it from`)
+    if (keeperName && target.withKeeper) target.withKeeper(dest, (src) => stageHostPackage(hostSrc, HOST_PKG, { src, name: keeperName }))
+    else stageHostPackage(hostSrc, HOST_PKG)
     const problems = hostPackageProblems(HOST_PKG, target.id)
     if (problems.length) fail(`the host-only package would not run on a remote:\n  ${problems.join('\n  ')}`)
-    console.log(`  host/ staged and checked: @centralu/host-${target.id}`)
+    console.log(`  host/${keeperName ? ` and ${keeperName}` : ''} staged and checked: @centralu/host-${target.id}`)
   }
 
   // If `files` does not actually point at what was packed, the tarball ships **empty inside**

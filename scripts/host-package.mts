@@ -8,9 +8,10 @@
  * platforms `packaging/remote-runtime.json` pins a Node for. Kept apart from that script, which runs a
  * release when it is imported, so `tooling/host-package.test.ts` can stage and check one.
  */
-import { cpSync, existsSync, readdirSync, readFileSync, rmSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { chmodSync, copyFileSync, cpSync, existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { ELF_MACHINES, ET_DYN, ET_EXEC, readElf } from './elf.mjs'
 // @ts-expect-error — plain .mjs, so bundle.mjs reads the same list under plain node
 import { CONPTY_FILES as CONPTY_FILES_JS } from './conpty-files.mjs'
 const CONPTY_FILES = CONPTY_FILES_JS as readonly string[]
@@ -27,6 +28,21 @@ export function remotePlatforms(pinFile = PIN_FILE): string[] {
   return Object.keys((JSON.parse(readFileSync(pinFile, 'utf8')) as { node: { archives: Record<string, unknown> } }).node.archives).sort()
 }
 
+/**
+ * The keeper's file in a host-only package, beside `host/` (docs/plans/remote-keeper.md §7, step 1), or null where the
+ * package carries none yet: Windows has no keeper until the plan's steps 6 and 7. Nothing on a remote starts it before
+ * the plan's step 3; the file is there so that every later step finds it where it will run from.
+ */
+export function hostPackageKeeper(platform: string): string | null {
+  return platform in ELF_MACHINES ? 'centralu-keeper' : null
+}
+
+/** What the package's `files` must be: `host/`, and the keeper where it carries one */
+export function hostPackageFiles(platform: string): string[] {
+  const keeper = hostPackageKeeper(platform)
+  return keeper ? ['host', keeper] : ['host']
+}
+
 /** `packaging/npm/host-<platform>`, the package's folder */
 export function hostPackageDir(platform: string, root = ROOT): string {
   return join(root, 'packaging/npm', `host-${platform}`)
@@ -36,10 +52,39 @@ export function hostPackageDir(platform: string, root = ROOT): string {
  * Copies the bundled host into the package as `host/`. `dereference`: npm drops symlinks from a
  * tarball without a word, so anything linked would arrive as a hole in the host's node_modules.
  */
-export function stageHostPackage(hostSrc: string, pkgDir: string): void {
+export function stageHostPackage(hostSrc: string, pkgDir: string, keeper?: { src: string; name: string }): void {
   const dest = join(pkgDir, 'host')
   rmSync(dest, { recursive: true, force: true })
   cpSync(hostSrc, dest, { recursive: true, dereference: true })
+  if (keeper) {
+    // The exec bit is set here rather than trusted: a GitHub Actions artifact is a zip and drops it (release-npm.mts)
+    copyFileSync(keeper.src, join(pkgDir, keeper.name))
+    chmodSync(join(pkgDir, keeper.name), 0o755)
+  }
+}
+
+/** The libraries that mean a window is linked in: the keeper must run where no desktop is installed (#440) */
+const GUI_LIBRARY = /webkit|gtk|gdk|javascriptcore|libsoup|libX11|wayland/i
+
+/**
+ * What is wrong with the keeper in a Linux host-only package, one sentence each. Read from the file itself, so this
+ * runs on any machine: an ELF executable for the platform's machine, with its exec bit (where the file system keeps
+ * one), linking no window library. `release-npm.mts`'s `checkKeeperExe` checks the platform package's copy with `file`
+ * and `ldd` on the build machine; this is the same rule for the copy a remote runs.
+ */
+export function keeperProblems(path: string, platform: string): string[] {
+  const name = basename(path)
+  const elf = readElf(readFileSync(path))
+  if (typeof elf === 'string') return [`${name} is ${elf}: a remote could not run it`]
+  const problems: string[] = []
+  if (elf.type !== ET_EXEC && elf.type !== ET_DYN) problems.push(`${name} is not an executable (ELF type ${elf.type})`)
+  const want = ELF_MACHINES[platform]
+  if (elf.machine !== want) problems.push(`${name} is built for ELF machine 0x${elf.machine.toString(16)}, not ${platform} (0x${want?.toString(16)})`)
+  // Windows keeps no exec bit to read; the release that stages a Linux package runs on Linux
+  if (process.platform !== 'win32' && (statSync(path).mode & 0o111) === 0) problems.push(`${name} has no exec bit: a remote could not start it`)
+  const gui = elf.needed.filter((l) => GUI_LIBRARY.test(l))
+  if (gui.length) problems.push(`${name} links a window library (${gui.join(', ')}): it would not start on a machine with no desktop`)
+  return problems
 }
 
 /**
@@ -68,13 +113,14 @@ export function floorDiffers(bundled: string, launcher: string): string | null {
  * `centralu serve` cannot start without, a host bundled for this platform, the pinned Node beside it
  * (a hub on this version reads it from its own host, and a remote's host must carry the same one), the
  * copy of the npm package's manifest that holds the Node floor, the
- * manifest that ships exactly `host/`, and nothing of the window.
+ * manifest that ships exactly `host/` (and the keeper beside it on Linux, `keeperProblems`), and nothing of the window.
  */
 export function hostPackageProblems(pkgDir: string, platform: string, pinFile = PIN_FILE, launcherFile = LAUNCHER_PACKAGE_FILE): string[] {
   const problems: string[] = []
   const manifest = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8')) as { name?: string; files?: string[] }
   if (manifest.name !== `@centralu/host-${platform}`) problems.push(`package.json names ${manifest.name}, not @centralu/host-${platform}`)
-  if (JSON.stringify(manifest.files) !== JSON.stringify(['host'])) problems.push(`package.json "files" is ${JSON.stringify(manifest.files)}, not ["host"]`)
+  const files = hostPackageFiles(platform)
+  if (JSON.stringify(manifest.files) !== JSON.stringify(files)) problems.push(`package.json "files" is ${JSON.stringify(manifest.files)}, not ${JSON.stringify(files)}`)
   const host = join(pkgDir, 'host')
   const needed = ['main.mjs', 'bundle-info.json', 'node_modules/better-sqlite3/package.json', 'node_modules/node-pty/package.json']
   // The ConPTY a terminal runs on (#849)
@@ -95,7 +141,12 @@ export function hostPackageProblems(pkgDir: string, platform: string, pinFile = 
     const why = floorDiffers(readFileSync(floor, 'utf8'), readFileSync(launcherFile, 'utf8'))
     if (why) problems.push(`host/centralu-package.json differs from packaging/npm/centralu/package.json: ${why}`)
   }
-  const extra = readdirSync(pkgDir).filter((n) => !['host', 'package.json', 'README.md'].includes(n))
+  const keeper = hostPackageKeeper(platform)
+  if (keeper) {
+    if (!existsSync(join(pkgDir, keeper))) problems.push(`${keeper} is missing beside host/: the keeper a remote runs (docs/plans/remote-keeper.md)`)
+    else problems.push(...keeperProblems(join(pkgDir, keeper), platform))
+  }
+  const extra = readdirSync(pkgDir).filter((n) => ![...files, 'package.json', 'README.md'].includes(n))
   if (extra.length) problems.push(`the package folder holds more than the host: ${extra.join(', ')}`)
   return problems
 }
