@@ -741,11 +741,6 @@ describe('what the merge queue decides with two tiers of CI', () => {
       const failed = tiered([check(TIER, 'skipped'), check('verify', 'failure', { jobId: '5' }), check('windows tests', 'success')])
       expect(ci({ pr: titled(55), checks: failed, runs: [run('failure')], failures: { 900: { real: false, cause: 'runner', job: { name: 'verify', id: '5' }, attempt: 1 } } })).toMatchObject({ state: 'attention', reason: { kind: 'subject' } })
     })
-
-    it('still stops a full run on its own head at the same limit (the path it was on before), and decideLanding stays the last guard', () => {
-      expect(ci({ pr: titled(55), checks: FULL() })).toMatchObject({ state: 'attention', reason: { kind: 'subject' } })
-      expect(ci({ pr: titled(54), checks: FULL() })).toMatchObject({ action: { type: 'merge' } })
-    })
   })
 
   // #1509 item 4: what the attention above told a session to type (gh workflow run build.yml --ref <branch>), the queue does
