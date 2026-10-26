@@ -131,6 +131,15 @@ wakes sessions that were live. So the hub must:
 3. send a **per-machine resync** event (new, additive) when a remote answers "resync", with a
    UI-side recovery scoped to that machine.
 
+**One source for "is this machine there" (#1611).** The mark of point 1 is a fact about one answer: the hub also gives
+it when the link is up and its call for that list failed, and a window can take such an answer after the machine's
+resync (its start-up lists, a reconnect to the hub) or fail to finish the resync. A window that read the mark as the
+machine's state showed a project dimmed "Not connected" while `machines.list` said `connected`, because nothing read the
+list again until the next connect. So the window derives away from the machine's status alone (the badge, the dimming
+and the tooltip read the same `machineAway`), and a machine whose resync was not whole, or whose rows still carry the
+mark while it is connected, is read again at the next word the hub says about it, not on a timer. The hub's answers are
+unchanged, so an older window keeps what it had, and an older hub needs nothing.
+
 ## 6. What is tied to a machine
 
 | Thing | Phase 1 | Later |

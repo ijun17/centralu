@@ -19,6 +19,40 @@ function withAnswered(machines: Record<string, MachineInfo>, m: MachineInfo): Re
   return machines[m.id] ? machines : { ...machines, [m.id]: m }
 }
 
+/**
+ * The machines whose resync is not complete (#1611): its list read failed, or the hub answered a list from its mirror
+ * while the link was up. Held per platform (a new one starts clean) and read when a `machine_status` says the machine is
+ * connected, so what a resync could not read is asked again at the next word the hub has about that machine instead of
+ * waiting for the next connect.
+ */
+const unrecovered = new WeakMap<object, Set<string>>()
+const unrecoveredOf = (platform: object): Set<string> => {
+  let set = unrecovered.get(platform)
+  if (!set) unrecovered.set(platform, (set = new Set()))
+  return set
+}
+
+/**
+ * Whether a machine's resync has left something unread, to be read again at its next `machine_status` that finds it
+ * connected (see `unrecovered`). A transition into connected is not asked: the hub sends `machine_resync` right after it.
+ */
+export function resyncOwed(platform: object | null, machineId: string): boolean {
+  return platform !== null && (unrecovered.get(platform)?.has(machineId) ?? false)
+}
+
+/**
+ * The machines that are connected and whose rows still carry the hub's mirror mark (#1611): the list that wrote it was
+ * read while the link was down or failing, and no resync has replaced it. They are read again where a list is taken
+ * whole (attach, a reconnect to the hub), since that list can land after the machine's own resync.
+ */
+export function machinesHoldingMirror(s: Pick<AppState, 'machines' | 'sessions' | 'projects'>): string[] {
+  const ids = new Set<string>()
+  for (const row of [...Object.values(s.sessions), ...Object.values(s.projects)]) {
+    if (row.machine && row.unreachable && s.machines[row.machine]?.status === 'connected') ids.add(row.machine)
+  }
+  return [...ids]
+}
+
 /** The store's actions for linked machines */
 type MachineActions = Pick<
   AppState,
@@ -196,10 +230,21 @@ export const machineActions = (set: StoreSet, get: StoreGet): MachineActions => 
     const wasLive = Object.values(s.sessions).filter((x) => ofMachine(x) && x.live)
     const asked = s.sessions
     const watch = watchLiveEvents()
+    const platform = s.platform
     const [fresh, projects] = await Promise.all([
-      s.platform.agents.listSessions().catch(() => null),
-      s.platform.projects.list().catch(() => null),
+      platform.agents.listSessions().catch(() => null),
+      platform.projects.list().catch(() => null),
     ]).finally(watch.stop)
+    /*
+     * Whole only when both lists were read and the hub asked the machine for each. A row still marked while the machine
+     * is connected means the hub's call to it failed while the link stayed up. Either way the machine is owed a read at
+     * its next `machine_status` (#1611); the rows the failed read left are not dimmed meanwhile (`isAway` follows the
+     * machine's row alone).
+     */
+    const mirrored = (x: { machine?: string | null; unreachable?: boolean }) => ofMachine(x) && x.unreachable === true
+    const whole = !!fresh && !!projects && !fresh.some(mirrored) && !projects.some(mirrored)
+    if (whole) unrecoveredOf(platform).delete(machineId)
+    else unrecoveredOf(platform).add(machineId)
     if (!fresh) return
     set((st) => {
       /*

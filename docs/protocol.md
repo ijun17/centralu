@@ -474,7 +474,10 @@ own. The UI still talks to one host; everything here is additive, and `PROTOCOL_
   other machine, so the window offers no reveal for it.
 - **When a machine is away.** `sessions.list` and `projects.list` answer for it from the hub's
   headers mirror, each row marked `unreachable: true`, with `live` as last heard. The UI keeps
-  those rows and does not wake them. Calls to it fail at once (§5).
+  those rows and does not wake them. Calls to it fail at once (§5). The same answer is given when the link is up but the
+  hub's call for that list failed. The mark describes that answer only, not the machine: whether a row is away is the
+  machine's `MachineInfo.status` alone (`machine_status`), and a window never dims a row of a `connected` machine
+  for the mark (#1611). The next read without the failure carries no mark (`unreachable` is absent, not `false`).
 - **Events.** A linked machine's session events reach the UI under the hub's own `seq`, with ids
   qualified; one about the remote host itself (`update_status`, `themes_changed`, `prefs_changed`,
   `app_state_changed`, `agent_versions`, `external_app_questions_changed`,

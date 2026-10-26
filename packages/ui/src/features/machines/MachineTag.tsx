@@ -1,4 +1,5 @@
 import { forwardRef, useRef, useState, type CSSProperties } from 'react'
+import { machineAway } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { useMachineName } from '../../store/selectors.js'
 import { MachineMenu } from './MachineMenu.jsx'
@@ -61,7 +62,8 @@ export function MachineBadge({
   const ref = useRef<HTMLButtonElement>(null)
   const name = info?.name ?? machine
   const status = info?.status ?? 'unknown'
-  const connected = status === 'connected'
+  // The same word as the row's dimming and tooltip (`isAway`): the three never disagree (#1611)
+  const connected = !machineAway(info)
   return (
     <>
       <button
@@ -69,7 +71,7 @@ export function MachineBadge({
         type="button"
         className={`${BADGE} ${connected ? '' : 'border-dashed'} ${className}`}
         style={style}
-        title={connected ? `${name} — ${info?.sshTarget ?? ''}` : `${name} is not connected${info?.error ? ` — ${info.error}` : ''}`}
+        title={info === undefined ? name : connected ? `${name} — ${info.sshTarget}` : `${name} is not connected${info?.error ? ` — ${info.error}` : ''}`}
         aria-haspopup="menu"
         aria-expanded={open}
         data-testid={testId}

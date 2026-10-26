@@ -414,7 +414,10 @@ type ProtocolError = {
   것이라 창은 그 파일을 보여 주겠다고 하지 않는다.
 - **기기가 닿지 않을 때.** `sessions.list`와 `projects.list`는 허브의 헤더 미러로 그 기기를 대신
   답하고, 각 행에 `unreachable: true`를, `live`에는 마지막으로 들은 값을 싣는다. UI는 그 행을 지우지
-  않고 깨우지도 않는다. 그 기기로 가는 호출은 바로 실패한다(§5).
+  않고 깨우지도 않는다. 그 기기로 가는 호출은 바로 실패한다(§5). 링크는 올라와 있는데 허브가 그 목록을 위해 부른 호출이
+  실패한 때에도 같은 답을 준다. 이 표시는 그 답만 설명할 뿐 기기를 설명하지 않는다: 행이 자리를 비웠는지는 그 기기의
+  `MachineInfo.status`(`machine_status`)만으로 정해지며, 창은 `connected` 기기의 행을 그 표시 때문에 흐리게 하지 않는다
+  (#1611). 실패 없이 읽은 다음 답에는 표시가 없다(`false`가 아니라 `unreachable` 자체가 없다).
 - **이벤트.** 링크된 기기의 세션 이벤트는 허브 자신의 `seq`로, id에 기기를 붙여 UI에 닿는다. 원격
   호스트 자신에 관한 것(`update_status`, `themes_changed`, `app_state_changed`, `agent_versions`,
   `external_app_questions_changed`, `orchestrator_proposals_changed`, 세션 없는 `error`)은 버린다. 터미널 프레임은 기기가 붙은 터미널

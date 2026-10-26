@@ -33,6 +33,7 @@ import {
   watchLiveEvents,
 } from './sessionList.js'
 import { holdPinnedViews } from './apps.js'
+import { machinesHoldingMirror } from './machines.js'
 import { settleUnsureSends } from './sessions/send.js'
 
 /**
@@ -583,6 +584,8 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
     // was already running before the app was even opened is held here
     replayPendingEvents(get)
     get().pruneFoldedGroups()
+    // A machine that connected while these lists were out: they were read from the hub's mirror, and its own resync may have come before them (#1611)
+    for (const id of machinesHoldingMirror(get())) void get().recoverMachine(id)
 
     // A suggestion awaiting approval stays on the host even across the app being closed and reopened
     // — its card must reappear
@@ -718,7 +721,7 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
     // So are the preferences (#1306): a missed `prefs_changed` leaves the orchestrator's change to a setting unseen
     void get().refreshPrefs()
     // So are the links' states (#82): a machine that went away or came back during the gap
-    void get().refreshMachines()
+    const machinesRead = get().refreshMachines()
     // The pinned views this window shows are leased to its connection, which just ended (#392)
     void holdPinnedViews(get, set)
 
@@ -794,6 +797,10 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
     // If the merge registered a session for the first time, replay any events held in the pen from before it was registered
     replayPendingEvents(get)
     get().pruneFoldedGroups()
+    // A machine already connected whose rows this list took from the hub's mirror: its resync came before the list, or never will (#1611)
+    void machinesRead.then(() => {
+      for (const id of machinesHoldingMirror(get())) void get().recoverMachine(id)
+    })
 
     /*
      * Resync: events from the gap never come again — the screen's conversation is merged with the
