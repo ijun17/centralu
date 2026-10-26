@@ -154,6 +154,13 @@ export const sessionsResults = {
     reason: z.string().optional(),
     usage: UsageSnapshot.nullable(),
     /**
+     * With `supported: false`: this read failed (not logged in, a probe that timed out), although the tool can report
+     * limits. Only an answer without it says the tool never does (#1616: the screen draws that one as a plain dimmed
+     * ring and a failed read as the unknown it is). Absent otherwise, and from a host that predates it: its
+     * `supported: false` then cannot be told apart.
+     */
+    unreadable: z.boolean().optional(),
+    /**
      * Set on the hub's answer for a linked machine when `usage` is this computer's own because both are logged in to
      * the same account (#726); the meter says so. Absent otherwise, and from a host that predates it.
      */

@@ -26,15 +26,19 @@ type Snap = {
   unsupported?: boolean
 }
 
-/** One `agents.usage` answer as a snap: the same reading wherever it comes from (first ask, retry) */
+/**
+ * One `agents.usage` answer as a snap: the same reading wherever it comes from (first ask, retry). The host also answers
+ * `supported: false` for a read that failed (`unreadable`): the tool can report, so that one stays unknown for now.
+ */
 function toSnap(r: {
   supported?: boolean
   reason?: string
+  unreadable?: boolean
   usage: UsageSnapshot | null
   cache?: CacheStats
   sameAccountAsHub?: boolean
 }): Snap {
-  const unsupported = r.supported === false
+  const unsupported = r.supported === false && r.unreadable !== true
   return {
     usage: r.usage,
     reason: r.supported ? undefined : r.reason,
@@ -606,7 +610,8 @@ function Donut({
           {/*
             The rings stand on top of each other and change by opacity (#1616, the owner's motion rule): a state change is
             a short fade, never a jump, and with reduced motion it is the fade alone. The dashed one is the unknown; the
-            solid one is the track of a read ring, and dimmed it is the unsupported ring.
+            solid one is the track of a read ring; the thin dim one is the unsupported ring (a read ring's track alone is nearly
+            invisible in the light theme, and an empty track would also read as 0% used).
           */}
           <circle
             data-ring="dashed"
@@ -627,7 +632,17 @@ function Donut({
             fill="none"
             stroke="currentColor"
             strokeWidth="2.5"
-            className={`${ring} ${RING_FADE} ${look === 'unknown' ? 'opacity-0' : look === 'unsupported' ? 'opacity-50' : 'opacity-100'}`}
+            className={`${ring} ${RING_FADE} ${look === 'known' || look === 'signedOut' ? 'opacity-100' : 'opacity-0'}`}
+          />
+          <circle
+            data-ring="dim"
+            cx="12"
+            cy="12"
+            r={R}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            className={`text-ink-faint ${RING_FADE} ${look === 'unsupported' ? 'opacity-60' : 'opacity-0'}`}
           />
           <circle
             data-ring="fill"

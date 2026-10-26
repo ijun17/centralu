@@ -100,7 +100,7 @@ export class ToolQueries {
   async usageFor(
     tool: ToolName,
     opts: { limits?: boolean } = {},
-  ): Promise<{ supported: boolean; reason?: string; usage: UsageSnapshot | null; cache: CacheStats }> {
+  ): Promise<{ supported: boolean; reason?: string; unreadable?: boolean; usage: UsageSnapshot | null; cache: CacheStats }> {
     /*
      * The cache figures are summed now, on the question, from what this host counted: a sum over a day's requests at
      * most, cheap next to the tool call below, and nothing is kept up to date while nobody asks.
@@ -121,7 +121,8 @@ export class ToolQueries {
       void this.host.usageRecorder.snapshot(tool, snapshot)
       return { supported: true, usage: snapshot, cache }
     } catch (err) {
-      return { supported: false, reason: (err as Error).message, usage: hit?.snapshot ?? null, cache }
+      // The tool can report limits; this read did not work, so the person may still be able to act (`unreadable`, protocol)
+      return { supported: false, reason: (err as Error).message, unreadable: true, usage: hit?.snapshot ?? null, cache }
     }
   }
 

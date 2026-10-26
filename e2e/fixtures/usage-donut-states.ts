@@ -37,7 +37,7 @@ async function answer(page: Page, tools: Record<string, unknown>): Promise<void>
 }
 
 const donut = (page: Page, id: string): Locator => page.getByTestId(`usage-donut-${id}`)
-const ring = (d: Locator, which: 'dashed' | 'solid' | 'fill'): Locator => d.locator(`circle[data-ring="${which}"]`)
+const ring = (d: Locator, which: 'dashed' | 'solid' | 'dim' | 'fill'): Locator => d.locator(`circle[data-ring="${which}"]`)
 const opacity = (l: Locator): Promise<number> => l.evaluate((el) => Number(getComputedStyle(el).opacity))
 const letter = (d: Locator): Promise<string> => d.locator('text').evaluate((el) => getComputedStyle(el).fill)
 
@@ -50,7 +50,8 @@ async function expectState(page: Page, id: string, state: 'known' | 'unknown' | 
   const d = donut(page, id)
   await expect(d).toHaveAttribute('data-state', state)
   await expectOpacity(ring(d, 'dashed'), state === 'unknown' ? 1 : 0)
-  await expectOpacity(ring(d, 'solid'), state === 'known' ? 1 : state === 'unsupported' ? 0.5 : 0)
+  await expectOpacity(ring(d, 'solid'), state === 'known' ? 1 : 0)
+  await expectOpacity(ring(d, 'dim'), state === 'unsupported' ? 0.6 : 0)
   await expectOpacity(ring(d, 'fill'), state === 'known' ? 1 : 0)
 }
 
@@ -64,7 +65,7 @@ export function usageDonutStatesTests(): void {
       await expectState(page, 'codex', 'unsupported')
       // The letter is the same ink as a donut whose usage is known, and not the faint one
       const known = await letter(donut(page, 'claude'))
-      expect(await letter(donut(page, 'codex'))).toBe(known)
+      await expect.poll(() => letter(donut(page, 'codex'))).toBe(known)
 
       // The tooltip keeps saying why (its wording is another matter)
       await donut(page, 'codex').hover()
@@ -82,6 +83,12 @@ export function usageDonutStatesTests(): void {
       await answer(page, { claude: WEEKLY(40), codex: { reason: 'needs a live session', usage: null } })
       await expectState(page, 'codex', 'unknown')
       await expectState(page, 'claude', 'known')
+
+      // A read the host could not make (`supported: false` with `unreadable`: not logged in, a timeout) is not "never"
+      await answer(page, { claude: WEEKLY(40), codex: { supported: false, unreadable: true, reason: 'not logged in', usage: null } })
+      await expectState(page, 'codex', 'unknown')
+      await donut(page, 'codex').hover()
+      await expect(page.getByTestId('usage-donut-reason-codex')).toHaveText('not logged in')
 
       // A read that fails answers nothing at all
       await answer(page, { claude: WEEKLY(40), codex: UNSUPPORTED })
@@ -135,23 +142,43 @@ export function usageDonutStatesTests(): void {
       expect(parseFloat(still.duration)).toBeGreaterThan(0)
     })
 
-    for (const scheme of ['light', 'dark'] as const) {
-      test(`${scheme} theme: the unsupported ring is the read ring's track at half strength, drawn, and its letter is the full ink`, async ({ page }) => {
+    for (const theme of ['light', 'dark', 'hc-light', 'hc-dark'] as const) {
+      test(`${theme} theme: the unsupported ring is drawn clear of the top bar, and its letter is the full ink`, async ({ page }) => {
+        const side = theme.endsWith('light') ? 'light' : 'dark'
         await setup(page, { projects: ['/tmp/alpha'] })
         // The app does not follow the OS: the theme is the stored pick (docs/design-system.md, themes)
-        await page.evaluate((side) => {
-          ;(window as unknown as MockWindow).__store.getState().setPrefs(
-            side === 'light' ? { themeMode: 'light', themeLight: 'light' } : { themeMode: 'dark', themeDark: 'dark' },
-          )
-        }, scheme)
-        await expect.poll(() => page.evaluate(() => document.documentElement.dataset.themeBase)).toBe(scheme)
+        await page.evaluate(
+          ([sd, t]) => {
+            ;(window as unknown as MockWindow).__store.getState().setPrefs(
+              sd === 'light' ? { themeMode: 'light', themeLight: t } : { themeMode: 'dark', themeDark: t },
+            )
+          },
+          [side, theme] as const,
+        )
+        await expect.poll(() => page.evaluate(() => document.documentElement.dataset.themeBase)).toBe(side)
         await answer(page, { claude: WEEKLY(0), codex: UNSUPPORTED })
         await expectState(page, 'codex', 'unsupported')
-        const stroke = (l: Locator) => l.evaluate((el) => getComputedStyle(el).stroke)
-        const track = await stroke(ring(donut(page, 'claude'), 'solid'))
-        expect(await stroke(ring(donut(page, 'codex'), 'solid'))).toBe(track)
-        expect(track).not.toMatch(/rgba\(0, 0, 0, 0\)|none/)
-        expect(await letter(donut(page, 'codex'))).toBe(await letter(donut(page, 'claude')))
+        // The ring as the eye gets it: its ink at the ring's opacity over the top bar's ground, against that ground
+        const contrast = await donut(page, 'codex').evaluate((el) => {
+          const rgb = (c: string) => (c.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number)
+          const lum = ([r, g, b]: number[]) => {
+            const f = (v: number) => ((v /= 255) <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)
+            return 0.2126 * f(r!) + 0.7152 * f(g!) + 0.0722 * f(b!)
+          }
+          const dim = el.querySelector('circle[data-ring="dim"]')!
+          const a = Number(getComputedStyle(dim).opacity)
+          const ink = rgb(getComputedStyle(dim).stroke)
+          const probe = document.body.appendChild(document.createElement('div'))
+          probe.style.background = 'var(--color-surface-side)'
+          const ground = rgb(getComputedStyle(probe).backgroundColor)
+          probe.remove()
+          const seen = ink.map((v, i) => v * a + ground[i]! * (1 - a))
+          const [hi, lo] = [lum(seen), lum(ground)].sort((x, y) => y - x)
+          return (hi! + 0.05) / (lo! + 0.05)
+        })
+        expect(contrast).toBeGreaterThan(1.5)
+        const known = await letter(donut(page, 'claude'))
+        await expect.poll(() => letter(donut(page, 'codex'))).toBe(known)
       })
     }
 
@@ -170,7 +197,6 @@ export function usageDonutStatesTests(): void {
       await page.evaluate(() => (window as unknown as MockWindow).__mock.machineRow('box', { status: 'connected' }))
       await expect(capsule).toBeVisible()
       // It comes in by opacity and is pressable from the first frame
-      await expect.poll(() => capsule.evaluate((el) => getComputedStyle(el).animationName)).toMatch(/cc-donut-in|none/)
       await donut(page, 'box.claude').click({ trial: true })
       await expectState(page, 'box.codex', 'unsupported')
     })

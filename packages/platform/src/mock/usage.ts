@@ -4,17 +4,17 @@ import type { AgentPort, MachineRef } from '../ports/index.js'
 /** What the usage gauge reads (`agents.usage`): this computer's usage, each linked machine's, and the cache figures */
 export class UsageMock {
   /** For tests: usage (supported=false also reproduces "could not fetch it") */
-  usageState: { supported: boolean; reason?: string; usage: UsageSnapshot | null } = {
+  usageState: { supported: boolean; reason?: string; unreadable?: boolean; usage: UsageSnapshot | null } = {
     supported: true,
     usage: { plan: 'max', windows: [], daily: [] },
   }
   /** For tests: a linked machine's usage, by machine id (#82); a machine with none answers `usageState` */
-  machineUsage: Record<string, { supported: boolean; reason?: string; usage: UsageSnapshot | null; sameAccountAsHub?: boolean }> = {}
+  machineUsage: Record<string, { supported: boolean; reason?: string; unreadable?: boolean; usage: UsageSnapshot | null; sameAccountAsHub?: boolean }> = {}
   /**
    * For tests: one tool's own answer, keyed like the gauge's donuts (`<tool>` for this computer, `<machine>.<tool>` for a
    * linked machine); it wins over the two above. A tool that cannot report limits answers `supported: false`, as the host does
    */
-  toolUsage: Record<string, { supported: boolean; reason?: string; usage: UsageSnapshot | null; sameAccountAsHub?: boolean }> = {}
+  toolUsage: Record<string, { supported: boolean; reason?: string; unreadable?: boolean; usage: UsageSnapshot | null; sameAccountAsHub?: boolean }> = {}
   /** For tests: every usage question, and which machine it went to (null: this computer) */
   usageCalls: { tool: ToolName; machine: string | null }[] = []
   /**
