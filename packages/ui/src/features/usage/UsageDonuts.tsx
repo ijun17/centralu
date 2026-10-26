@@ -7,7 +7,7 @@ import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore, usageTools } from '../../store/store.js'
 import { useMachineName, useToolMeta } from '../../store/selectors.js'
 import { Tooltip } from '../../components/primitives.jsx'
-import { UsagePanel } from './UsagePanel.jsx'
+import { NOT_REPORTED_COPY, UsagePanel } from './UsagePanel.jsx'
 import { SAME_ACCOUNT_LABEL } from './sameAccount.js'
 import { usageTone, weeklyWindow } from './weekly.js'
 import { setupStates, signedOutTools, withLiveSetups } from '../tools/setupLine.js'
@@ -559,7 +559,9 @@ function Donut({
               ? 'Not signed in'
               : known
                 ? `${w.label}${w.scope ? ` · ${w.scope}` : ''} — ${percent}% used`
-                : 'Weekly usage unknown'}
+                : unsupported
+                  ? 'No usage limits reported'
+                  : 'Weekly usage unknown'}
           </span>
           {/* Why the numbers equal this computer's, or why there are none: said in the donut's words, never a blank (#726) */}
           {!signedOut && known && snap?.sameAccount && (
@@ -567,9 +569,9 @@ function Donut({
               {SAME_ACCOUNT_LABEL}
             </span>
           )}
-          {!signedOut && !known && snap?.reason && (
+          {!signedOut && !known && (unsupported || snap?.reason) && (
             <span className="readout block text-ink-faint" data-testid={`usage-donut-reason-${id}`}>
-              {snap.reason}
+              {unsupported ? NOT_REPORTED_COPY.title(meta.label) : snap.reason}
             </span>
           )}
           {/*
@@ -587,7 +589,7 @@ function Donut({
       <button
         type="button"
         onClick={onClick}
-        aria-label={signedOut ? `${label} not signed in` : `${label} weekly usage${known ? ` ${percent}%` : ' unknown'}`}
+        aria-label={signedOut ? `${label} not signed in` : `${label} ${unsupported ? 'reports no usage limits' : `weekly usage${known ? ` ${percent}%` : ' unknown'}`}`}
         data-testid={`usage-donut-${id}`}
         data-signed-out={signedOut || undefined}
         data-leaving={leaving || undefined}

@@ -18,7 +18,7 @@ const WEEKLY = (percent: number) => ({
   usage: { plan: 'max', windows: [{ id: 'weekly_all', label: 'Weekly', percent, resetsAt: null, scope: null }], daily: [] },
 })
 const UNKNOWN = { supported: true, usage: { plan: 'max', windows: [], daily: [] } }
-const UNSUPPORTED = { supported: false, reason: 'codex does not support usage queries', notReported: true, usage: null }
+const UNSUPPORTED = { supported: false, reason: 'Codex does not report usage limits', notReported: true, usage: null }
 
 /** The host connection dropping and coming back: the moment every donut asks again */
 async function reconnect(page: Page): Promise<void> {
@@ -69,7 +69,7 @@ export function usageDonutStatesTests(): void {
 
       // The tooltip keeps saying why (its wording is another matter)
       await donut(page, 'codex').hover()
-      await expect(page.getByTestId('usage-donut-reason-codex')).toHaveText('codex does not support usage queries')
+      await expect(page.getByTestId('usage-donut-reason-codex')).toHaveText('Codex does not report usage limits.')
 
       // A usage that is unknown for now (supported, no weekly window) is the dashed, faint one still
       await answer(page, { claude: WEEKLY(40), codex: UNKNOWN })

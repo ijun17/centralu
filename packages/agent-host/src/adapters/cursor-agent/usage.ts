@@ -1,10 +1,14 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import { z } from 'zod'
 import type { UsageSnapshot } from '@cc/protocol'
 import { softRead } from '../usage-read.js'
 import { findCursor } from './install.js'
 
 const exec = promisify(execFile)
+
+/** The one field of `agent about` that is read; the rest of what it prints (the account's email among it) is never looked at */
+const ABOUT = z.object({ subscriptionTier: z.unknown().optional() })
 
 /**
  * Cursor's usage (#1623). Its CLI has a `/usage` command only on its interactive screen: the ACP server advertises none
@@ -18,7 +22,7 @@ export function parseAbout(stdout: string): UsageSnapshot {
   const from = stdout.indexOf('{')
   const to = stdout.lastIndexOf('}')
   if (from < 0 || to < from) throw new Error('`agent about` printed no JSON')
-  const about = JSON.parse(stdout.slice(from, to + 1)) as { subscriptionTier?: unknown }
+  const about = ABOUT.parse(JSON.parse(stdout.slice(from, to + 1)))
   const tier = typeof about.subscriptionTier === 'string' ? about.subscriptionTier.trim() : ''
   return { plan: tier || null, windows: [], daily: [], noLimits: true }
 }

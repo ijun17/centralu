@@ -23,7 +23,8 @@ export abstract class AcpAdapter implements AgentAdapter {
     private readonly stopConfirmMs = STOP_CONFIRM_MS,
   ) {
     // Present only when the tool says something about its usage: `agents.usage` tells "none at all" from "read" by it
-    if (profile.readUsage) this.listUsage = () => profile.readUsage!()
+    const readUsage = profile.readUsage?.bind(profile)
+    if (readUsage) this.listUsage = readUsage
   }
 
   /** What the tool's own command says about its usage (the profile's `readUsage`), when it has one */

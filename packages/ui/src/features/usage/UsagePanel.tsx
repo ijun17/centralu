@@ -38,8 +38,14 @@ export function UsagePanel({ tool, machine = null }: { tool: ToolName; /** A lin
 
   const read = useLoad(() => platform.agents.usage(tool, machine ?? undefined), [platform, tool, machine])
   const r = read.data
-  const state: { usage: UsageSnapshot | null; reason?: string; cache?: CacheStats; sameAccount?: boolean } = r
-    ? { usage: r.usage, reason: r.supported ? undefined : r.reason, cache: r.cache, sameAccount: r.sameAccountAsHub }
+  const state: { usage: UsageSnapshot | null; reason?: string; cache?: CacheStats; sameAccount?: boolean; notReported?: boolean } = r
+    ? {
+        usage: r.usage,
+        reason: r.supported ? undefined : r.reason,
+        cache: r.cache,
+        sameAccount: r.sameAccountAsHub,
+        notReported: !r.supported && r.notReported === true,
+      }
     : { usage: null, reason: read.error ?? undefined }
 
   if (r === undefined && read.error === null) {
@@ -55,6 +61,21 @@ export function UsagePanel({ tool, machine = null }: { tool: ToolName; /** A lin
 
   // What the host stored over the last days (§6.2): independent of the limits too, and absent from a host that predates it
   const history = <HistorySection tool={tool} machine={machine} canOpen={(id) => id in useStore.getState().sessions} onOpen={openSession} />
+
+  /*
+   * A tool with no limits to report (#1623, owner 2026-10-26) is not "unavailable": nothing is wrong and nothing is to be
+   * done, and the panel says so in plain words. What the tool does say stands under it: its plan, and what it counted on this
+   * computer, labelled as totals and not a limit. A failed read (no `notReported`) is still the reason as it is.
+   */
+  if (state.notReported) {
+    return (
+      <>
+        <NotReported label={meta.label} usage={state.usage} />
+        {cache && <div className="px-4 pb-4 [&>section]:mt-0">{cache}</div>}
+        <div className="px-4 pb-4 [&>section:first-child]:mt-0">{history}</div>
+      </>
+    )
+  }
 
   // Failing to read it and there being none are different — the reason is shown as is
   if (!state.usage || state.usage.windows.length === 0) {
@@ -96,6 +117,51 @@ export function UsagePanel({ tool, machine = null }: { tool: ToolName; /** A lin
       {daily.length > 0 && <DailyTokens daily={daily} />}
       {cache}
       {history}
+    </div>
+  )
+}
+
+/** The words of the panel for a tool that reports no limits (#1623): the exact copy the owner confirms */
+export const NOT_REPORTED_COPY = {
+  title: (tool: string) => `${tool} does not report usage limits.`,
+  note: 'Nothing is wrong, and there is nothing to set up.',
+  plan: (plan: string) => `${plan} plan`,
+  totalsTitle: (scope: string) => `Local totals · ${scope}`,
+  totalsNote: (tool: string) => `Counted by ${tool} on this computer. These are totals, not a limit.`,
+}
+
+/** How a total is written: tokens and counts as the daily tokens are, dollars with their cents */
+function totalText(value: number, unit: 'count' | 'tokens' | 'usd'): string {
+  return unit === 'usd' ? `$${value.toFixed(2)}` : formatCount(value)
+}
+
+function NotReported({ label, usage }: { label: string; usage: UsageSnapshot | null }) {
+  const totals = usage?.totals
+  return (
+    <div className="cc-row-in px-4 py-6" data-testid="usage-not-reported">
+      <p className="text-center text-sm leading-body text-ink-muted" data-testid="usage-not-reported-text">
+        {NOT_REPORTED_COPY.title(label)}
+        <span className="mt-1 block text-xs text-ink-faint">{NOT_REPORTED_COPY.note}</span>
+      </p>
+      {usage?.plan && (
+        <p className="readout cc-row-in mt-4 text-center text-xs text-ink" data-testid="usage-plan">
+          {NOT_REPORTED_COPY.plan(usage.plan)}
+        </p>
+      )}
+      {totals && totals.rows.length > 0 && (
+        <section className="cc-row-in mt-5 border-t border-line pt-3" data-testid="usage-totals">
+          <span className="text-xs uppercase text-ink-faint">{NOT_REPORTED_COPY.totalsTitle(totals.scope)}</span>
+          <ul className="mt-2 space-y-1">
+            {totals.rows.map((row) => (
+              <li key={row.id} className="flex items-baseline gap-2" data-testid={`usage-total-${row.id}`}>
+                <span className="text-xs text-ink-muted">{row.label}</span>
+                <span className="readout ml-auto text-xs text-ink">{totalText(row.value, row.unit)}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-2xs text-ink-faint">{NOT_REPORTED_COPY.totalsNote(label)}</p>
+        </section>
+      )}
     </div>
   )
 }
