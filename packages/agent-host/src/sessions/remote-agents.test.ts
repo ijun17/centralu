@@ -468,10 +468,10 @@ describe("the turn on the child's machine, read as the caller's only on evidence
     })
 
     it("is not the caller's after the hub restarted: what it held of the notes is gone", async () => {
-      await afterNote()
+      await afterFollowUp()
       // A hub that starts again knows no note of the caller's that went into the turn; the machine's say alone is not enough
       const restarted = following()
-      restarted.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working', origin: { seq: NOTE_ROW, from: named } })
+      restarted.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working', origin: { seq: 4, from: named } })
       expect(reportOwed()).toBe(false)
     })
 
@@ -485,12 +485,12 @@ describe("the turn on the child's machine, read as the caller's only on evidence
     })
 
     it("is not the note's when the note was read in the turn it went into: a later turn naming its row is not the caller's", async () => {
-      const ra = await afterNote()
-      // No turn began for the note (the tool read it in the first turn); the tool's own next turn names nothing
+      const ra = await afterFollowUp()
+      // No turn began for the note of row 4 (the tool read it in the turn it went into); the tool's own next turn names nothing
       opens(ra)
       expect(reportOwed()).toBe(false)
       ends(ra)
-      opens(ra, { seq: NOTE_ROW, from: named })
+      opens(ra, { seq: 4, from: named })
       expect(reportOwed()).toBe(false)
     })
   })
