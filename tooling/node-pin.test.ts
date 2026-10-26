@@ -5,7 +5,7 @@
  * it, and CI runs the host's tests on that version. Each of those reads the same file; these tests
  * hold them to it.
  *
- * The fixtures are Node 24.21.0's real SHASUMS256.txt, its detached signature and the key of the
+ * The fixtures are Node 24.22.1's real SHASUMS256.txt, its detached signature and the key of the
  * releaser who signed it (nodejs/release-keys at the commit the pin names).
  */
 import { describe, expect, it } from 'vitest'
