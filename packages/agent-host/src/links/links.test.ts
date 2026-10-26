@@ -1727,6 +1727,44 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
       expect(ran().filter((k) => k === 'install_beside')).toHaveLength(2)
     })
 
+    // #1579: a turn now and then must not restart the clock of a terminal that stays open
+    it('gives up on an open terminal after the limit although a session takes a short turn every few minutes', async () => {
+      const a = auto()
+      let t = 0
+      const { hub, ran, idle, activity } = await waiting({ deps: { ...a.deps, followRetryMs: 60_000, now: () => t }, old: a.old })
+      idle()
+      Object.assign(activity, { terminals: 1, commandRuns: 0 })
+      // Every reading, five minutes later by the injected clock: a turn on every other one
+      let turn = false
+      const tick = setInterval(() => {
+        t += 5 * 60_000
+        turn = !turn
+        Object.assign(activity, { working: turn ? 1 : 0 })
+      }, 30)
+      try {
+        await eventually(() => hub.links.list()[0]!.followHub?.retryAt != null)
+      } finally {
+        clearInterval(tick)
+      }
+      expect(hub.links.list()[0]!.followHub?.failed).toMatch(/Terminals or project commands stayed open on Remote box/)
+      expect(ran()).not.toContain('stop')
+    })
+
+    it('names what holds the update on the row and in the log: sessions in a turn, or terminals and commands, with how many', async () => {
+      const a = auto()
+      const logs: string[] = []
+      const { hub, idle, activity } = await waiting({ deps: { ...a.deps, followRetryMs: 60_000, log: (l: string) => logs.push(l) }, old: a.old })
+      const op = () => hub.links.list()[0]!.operation
+      // A session in a turn holds it, though a terminal is open too: it is named first
+      Object.assign(activity, { working: 2, approvals: 0, questions: 0, background: 0, terminals: 1, commandRuns: 1 })
+      await eventually(() => op()?.step === 'wait_idle' && op()?.count === 2)
+      expect(logs.join('\n')).toMatch(/the update waits for 2 sessions in a turn/)
+      idle()
+      await eventually(() => op()?.step === 'wait_open' && op()?.count === 2)
+      expect(logs.join('\n')).toMatch(/the update waits for 2 open terminals and project commands/)
+      expect(logs.filter((l) => l.includes('open terminals and project commands')).join('\n')).not.toMatch(/sessions in a turn/)
+    })
+
     it('starts nothing at a reconnect while its retry waits for its time', async () => {
       const a = auto()
       const { hub, ran, idle, activity } = await waiting({ deps: { ...a.deps, followRetryMs: 60_000, openWorkWaitMs: 100 }, old: a.old })

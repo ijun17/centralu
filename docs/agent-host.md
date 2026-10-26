@@ -3423,7 +3423,7 @@ the person did not remove what the hub installed there, neither side runs a loca
   updates on (`updates.setAutoApply`, `Links.followHub`), for the machines already connected.
 - **What.** The same update as `machines.update { when: 'idle' }`, marked `unasked`: it waits for the turns there as
   above, and also for terminals and project commands there, which the person's Update stops knowingly and it must not
-  (`OPEN_WORK_WAIT_MS`: once only they are left for 30 minutes it gives up, nothing switched). It stops no host it cannot
+  (`OPEN_WORK_WAIT_MS`: once a terminal or command has been open for 30 minutes without a gap, whatever turns run meanwhile (#1579), it gives up, nothing switched, and the row's failure line says why, so the person can press Update, which stops them knowingly). The row and the log say which one holds it: `wait_idle` with `operation.count` sessions in a turn (`turnsRunning`), or, when none is in a turn, `wait_open` with `count` open terminals and commands (`open`). It stops no host it cannot
   ask what runs (a Centralu from before `host.activity`, or one whose reading fails): that is read before anything is
   installed, and the update fails, nothing switched, the row saying to update from Settings. It also fails before the hold once automatic updates go off or the hub begins a swap while it waits. A swap
   that comes after the hold finds it as it finds the person's update (§4.7).

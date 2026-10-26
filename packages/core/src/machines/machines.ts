@@ -286,6 +286,7 @@ const STEP_TEXT: Record<string, string> = {
   node: 'installing Node',
   centralu: 'installing Centralu',
   wait_idle: 'waiting for its sessions to finish',
+  wait_open: 'waiting for its open terminals and commands',
   wait_unread: 'waiting: it cannot read what runs there now',
   stop: 'stopping Centralu there',
   switch: 'switching versions',
@@ -316,6 +317,9 @@ export function operationNote(m: Pick<MachineInfo, 'operation'>): string | null 
         : o.kind === 'rollback'
           ? `Rolling back to ${o.target ?? 'the earlier version'}`
           : 'Removing Centralu'
+  // What holds an update that waits, and how many (#1579); a host that sent no count gets the plain step text
+  if (o.step === 'wait_idle' && o.count !== undefined) return `${what}: waiting for ${count(o.count, 'session', 'sessions')} in a turn…`
+  if (o.step === 'wait_open' && o.count !== undefined) return `${what}: waiting for ${count(o.count, 'open terminal', 'open terminals')} there (Update now closes them)…`
   return `${what}: ${STEP_TEXT[o.step] ?? o.step}…`
 }
 

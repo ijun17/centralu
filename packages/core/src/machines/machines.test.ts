@@ -352,6 +352,11 @@ describe('the update prompt when sessions are in a turn', () => {
 
   it('names the step of the wait on the row', () => {
     expect(operationNote({ operation: { kind: 'update', step: 'wait_idle', target: '0.2.0', at: 1 } })).toBe('Updating to 0.2.0: waiting for its sessions to finish…')
+    // #1579: which one holds the update, and how many
+    expect(operationNote({ operation: { kind: 'update', step: 'wait_idle', target: '0.2.0', at: 1, count: 2 } })).toBe('Updating to 0.2.0: waiting for 2 sessions in a turn…')
+    expect(operationNote({ operation: { kind: 'update', step: 'wait_idle', target: '0.2.0', at: 1, count: 1 } })).toBe('Updating to 0.2.0: waiting for 1 session in a turn…')
+    expect(operationNote({ operation: { kind: 'update', step: 'wait_open', target: '0.2.0', at: 1, count: 1 } })).toBe('Updating to 0.2.0: waiting for 1 open terminal there (Update now closes them)…')
+    expect(operationNote({ operation: { kind: 'update', step: 'wait_open', target: '0.2.0', at: 1, count: 3 } })).toBe('Updating to 0.2.0: waiting for 3 open terminals there (Update now closes them)…')
     expect(operationNote({ operation: { kind: 'update', step: 'wait_unread', target: '0.2.0', at: 1 } })).toBe('Updating to 0.2.0: waiting: it cannot read what runs there now…')
   })
 })
