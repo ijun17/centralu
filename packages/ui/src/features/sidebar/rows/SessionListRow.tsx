@@ -61,11 +61,7 @@ export function SessionListRow({
       projectId={projectId}
       nested={inApp ? depth + 1 : nested}
       level={Math.min((inApp ? 2 : 1) + depth, MAX_LEVEL) as keyof typeof INDENT}
-      below={
-        <>
-          {approvalLine(s, renaming, () => focusSession(s.id))}
-        </>
-      }
+      below={approvalLine(s, renaming, () => focusSession(s.id))}
       /*
        * A child row cannot be dragged — position is membership (#69). Letting a row
        * drawn indented under a parent be moved by hand would make the new position read
