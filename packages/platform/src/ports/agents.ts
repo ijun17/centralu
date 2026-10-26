@@ -199,7 +199,7 @@ export interface AgentPort {
   usage(
     tool: ToolName,
     machine?: MachineRef,
-  ): Promise<{ supported: boolean; reason?: string; unreadable?: boolean; usage: UsageSnapshot | null; cache?: CacheStats; sameAccountAsHub?: boolean }>
+  ): Promise<{ supported: boolean; reason?: string; notReported?: boolean; usage: UsageSnapshot | null; cache?: CacheStats; sameAccountAsHub?: boolean }>
   /**
    * Limit readings and tokens over time, as that machine's host stored them (`usage.history`, docs/agent-host.md §6.2):
    * the rows are summed per day or hour and per session, project, model or tool. A host that predates it rejects the call.

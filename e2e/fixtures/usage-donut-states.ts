@@ -3,8 +3,8 @@ import { setup } from './control.js'
 
 /**
  * What a usage donut's ring says (#1616, owner 2026-10-26): a tool whose usage Centralu cannot read at all
- * (`agents.usage` answers `supported: false`) has a plain, dimmed, solid ring and its letter at full ink; a usage that is
- * unknown for now (`supported: true`, no weekly window, or a host that sends no flag) keeps its dashed ring and faint
+ * (`agents.usage` answers `supported: false` with `notReported`) has a plain, dimmed, solid ring and its letter at full ink; a usage that is
+ * unknown for now (`supported: true`, no weekly window, a read that failed, or a host that predates the mark) keeps its dashed ring and faint
  * letter. A function, because it runs in Chromium and in WebKit: the desktop app is WKWebView.
  *
  * The mock answers per tool (`toolUsage`), so which donut is unsupported is the flag in the answer. Codex stands for
@@ -18,7 +18,7 @@ const WEEKLY = (percent: number) => ({
   usage: { plan: 'max', windows: [{ id: 'weekly_all', label: 'Weekly', percent, resetsAt: null, scope: null }], daily: [] },
 })
 const UNKNOWN = { supported: true, usage: { plan: 'max', windows: [], daily: [] } }
-const UNSUPPORTED = { supported: false, reason: 'codex does not support usage queries', usage: null }
+const UNSUPPORTED = { supported: false, reason: 'codex does not support usage queries', notReported: true, usage: null }
 
 /** The host connection dropping and coming back: the moment every donut asks again */
 async function reconnect(page: Page): Promise<void> {
@@ -51,7 +51,7 @@ async function expectState(page: Page, id: string, state: 'known' | 'unknown' | 
   await expect(d).toHaveAttribute('data-state', state)
   await expectOpacity(ring(d, 'dashed'), state === 'unknown' ? 1 : 0)
   await expectOpacity(ring(d, 'solid'), state === 'known' ? 1 : 0)
-  await expectOpacity(ring(d, 'dim'), state === 'unsupported' ? 0.6 : 0)
+  await expectOpacity(ring(d, 'dim'), state === 'unsupported' ? 0.5 : 0)
   await expectOpacity(ring(d, 'fill'), state === 'known' ? 1 : 0)
 }
 
@@ -77,15 +77,15 @@ export function usageDonutStatesTests(): void {
       await expect.poll(() => letter(donut(page, 'codex'))).not.toBe(known)
     })
 
-    test('a host that sends no flag, or a read that failed, is unknown for now, never unsupported', async ({ page }) => {
+    test('a read that failed, or a host that predates the mark, is unknown for now, never unsupported', async ({ page }) => {
       await setup(page, { projects: ['/tmp/alpha'] })
       // An older host's answer: no `supported`, and a reason it may have given
       await answer(page, { claude: WEEKLY(40), codex: { reason: 'needs a live session', usage: null } })
       await expectState(page, 'codex', 'unknown')
       await expectState(page, 'claude', 'known')
 
-      // A read the host could not make (`supported: false` with `unreadable`: not logged in, a timeout) is not "never"
-      await answer(page, { claude: WEEKLY(40), codex: { supported: false, unreadable: true, reason: 'not logged in', usage: null } })
+      // A read the host could not make (`supported: false` with no `notReported`: not logged in, a timeout; what an older host answers for both) is not "never"
+      await answer(page, { claude: WEEKLY(40), codex: { supported: false, reason: 'not logged in', usage: null } })
       await expectState(page, 'codex', 'unknown')
       await donut(page, 'codex').hover()
       await expect(page.getByTestId('usage-donut-reason-codex')).toHaveText('not logged in')

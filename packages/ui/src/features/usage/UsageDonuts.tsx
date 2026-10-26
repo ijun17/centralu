@@ -15,8 +15,8 @@ import { ToolSetupLine } from '../tools/ToolSetupLine.jsx'
 
 /**
  * What `agents.usage` answered for one tool. `unsupported` is the host's own `supported: false` (the tool cannot report
- * limits at all, #1616), never inferred from the tool's name. It is unset for a failed read and for an older host that
- * sends no flag: those are *unknown for now*, not *never*.
+ * limits at all, #1616: `supported: false` with the host's `notReported` mark), never inferred from the tool's name. It
+ * is unset for a failed read and for an older host that sends no mark: those are *unknown for now*, not *never*.
  */
 type Snap = {
   usage: UsageSnapshot | null
@@ -28,17 +28,18 @@ type Snap = {
 
 /**
  * One `agents.usage` answer as a snap: the same reading wherever it comes from (first ask, retry). The host also answers
- * `supported: false` for a read that failed (`unreadable`): the tool can report, so that one stays unknown for now.
+ * `supported: false` for a read that failed, and a host that predates the mark answers both alike: only `notReported`
+ * (the tool has no way to report limits) is the dimmed ring, so everything else stays unknown for now.
  */
 function toSnap(r: {
   supported?: boolean
   reason?: string
-  unreadable?: boolean
+  notReported?: boolean
   usage: UsageSnapshot | null
   cache?: CacheStats
   sameAccountAsHub?: boolean
 }): Snap {
-  const unsupported = r.supported === false && r.unreadable !== true
+  const unsupported = r.supported === false && r.notReported === true
   return {
     usage: r.usage,
     reason: r.supported ? undefined : r.reason,
@@ -642,7 +643,7 @@ function Donut({
             fill="none"
             stroke="currentColor"
             strokeWidth="1.5"
-            className={`text-ink-faint ${RING_FADE} ${look === 'unsupported' ? 'opacity-60' : 'opacity-0'}`}
+            className={`text-ink-faint ${RING_FADE} ${look === 'unsupported' ? 'opacity-50' : 'opacity-0'}`}
           />
           <circle
             data-ring="fill"

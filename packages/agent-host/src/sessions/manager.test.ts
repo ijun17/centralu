@@ -657,14 +657,17 @@ describe('while-alive facts are carried in the list', () => {
     expect(await rpc('agents.account', { tool: 'codex' })).toEqual({ loggedIn: null, fingerprint: null })
   })
 
-  it('says a read that failed is unreadable, not that the tool cannot report usage (#1616)', async () => {
+  it('marks only a tool with no way to report usage as notReported, not a read that failed (#1616)', async () => {
     Object.assign(adapter, { listUsage: async () => Promise.reject(new Error('not logged in')) })
-    expect(await rpc('agents.usage', { tool: 'claude' })).toMatchObject({ supported: false, unreadable: true, reason: 'not logged in' })
-    // A tool with no way to read limits at all is the other answer, with no such mark
+    const failed = await rpc('agents.usage', { tool: 'claude' })
+    expect(failed).toMatchObject({ supported: false, reason: 'not logged in' })
+    expect(failed).not.toHaveProperty('notReported')
     Object.assign(adapter, { listUsage: undefined })
-    const none = await rpc('agents.usage', { tool: 'claude' })
-    expect(none).toMatchObject({ supported: false, reason: 'claude does not support usage queries' })
-    expect(none).not.toHaveProperty('unreadable')
+    expect(await rpc('agents.usage', { tool: 'claude' })).toMatchObject({
+      supported: false,
+      reason: 'claude does not support usage queries',
+      notReported: true,
+    })
   })
 
   it('counts each model request into the prompt cache figures agents.usage answers with (docs/agent-host.md §6.1)', async () => {

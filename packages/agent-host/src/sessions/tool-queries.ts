@@ -100,14 +100,14 @@ export class ToolQueries {
   async usageFor(
     tool: ToolName,
     opts: { limits?: boolean } = {},
-  ): Promise<{ supported: boolean; reason?: string; unreadable?: boolean; usage: UsageSnapshot | null; cache: CacheStats }> {
+  ): Promise<{ supported: boolean; reason?: string; notReported?: boolean; usage: UsageSnapshot | null; cache: CacheStats }> {
     /*
      * The cache figures are summed now, on the question, from what this host counted: a sum over a day's requests at
      * most, cheap next to the tool call below, and nothing is kept up to date while nobody asks.
      */
     const cache = this.host.cacheLedger.stats(tool, (id) => this.host.meta.get(id)?.name)
     const adapter = this.host.adapters.get(tool)
-    if (!adapter?.listUsage) return { supported: false, reason: `${tool} does not support usage queries`, usage: null, cache }
+    if (!adapter?.listUsage) return { supported: false, reason: `${tool} does not support usage queries`, notReported: true, usage: null, cache }
     // The hub shows its own limits for this machine (same account, #726): only the figures counted here are wanted
     if (opts.limits === false) return { supported: true, usage: null, cache }
 
@@ -121,8 +121,7 @@ export class ToolQueries {
       void this.host.usageRecorder.snapshot(tool, snapshot)
       return { supported: true, usage: snapshot, cache }
     } catch (err) {
-      // The tool can report limits; this read did not work, so the person may still be able to act (`unreadable`, protocol)
-      return { supported: false, reason: (err as Error).message, unreadable: true, usage: hit?.snapshot ?? null, cache }
+      return { supported: false, reason: (err as Error).message, usage: hit?.snapshot ?? null, cache }
     }
   }
 
