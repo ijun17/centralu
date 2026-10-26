@@ -1717,6 +1717,24 @@ describe('the merge queue posts its news into the session that queued (#1161 ite
 })
 
 describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, () => {
+  // What every test here relies on (FAST): the queue moves when a test reads it, one poll a read, and not in between
+  it('moves one poll per merge_queue read, and none between reads', async () => {
+    runtime(ghState({ checks: { [SHA]: [ghCheck('verify', null, 11), ghCheck('windows tests', 'success', 12)] }, runs: { [SHA]: [ghRun(null)] } }))
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    const reads = () => ghCalls().filter((a) => a[0] === 'pr' && a[1] === 'view').length
+    await until((x) => stateOf(x) === 'ci', 'in CI')
+    const counts = [reads()]
+    for (let i = 0; i < 5; i++) {
+      await call('merge_queue', { all: true })
+      counts.push(reads())
+    }
+    expect(counts.slice(1).map((n, i) => n - counts[i]!)).toEqual([1, 1, 1, 1, 1])
+    // Nothing moves while nobody reads: no timer ticks (the one wait here, for a timer that must not fire; a 50 ms one would)
+    const before = reads()
+    await new Promise((r) => setTimeout(r, 200))
+    expect(reads()).toBe(before)
+  })
+
   it('passes check, with queue_merge and unqueue as changes and merge_queue as a read', async () => {
     const r = await runtime(ghState()).check(appRef)
     expect(r.text.split('\n').filter((l) => l.startsWith('- problem'))).toEqual([])

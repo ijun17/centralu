@@ -49,9 +49,9 @@ process.stdout.write(JSON.stringify({ args, stdin, n: st.n, prompt: process.env.
 
 let root = ''
 let gh: FakeGh
-afterEach(async () => {
+afterEach(() => {
   vi.unstubAllEnvs()
-  await rmFakeDir(root)
+  rmFakeDir(root)
 })
 afterAll(() => {
   endLeftoverFakes()
@@ -120,16 +120,26 @@ describe("the board app's door for starting programs", { timeout: 60_000 * SLOW 
   it('answers a faked program only by its name, and starts any other', async () => {
     make()
     const sys = await system({ PROJECT_BOARD_FAKE_PROGRAMS: gh.env().PROJECT_BOARD_FAKE_PROGRAMS! })
-    const node = await new Promise<string>((resolve, reject) =>
-      sys.execFile(process.execPath, ['-e', 'process.stdout.write("real")'], {}, (e, out) => (e ? reject(e) : resolve(out))),
-    )
+    // A started program has a process id; one answered in this process has none
+    const pid = (child: unknown) => (child as { pid?: number }).pid
+    let started: unknown
+    const node = await new Promise<string>((resolve, reject) => {
+      started = sys.execFile(process.execPath, ['-e', 'process.stdout.write("real")'], {}, (e, out) => (e ? reject(e) : resolve(out)))
+    })
     expect(node).toBe('real')
-    // gh.exe and a full path name the same program
-    const r = await call(sys, ['x'], gh.env())
-    const viaPath = await new Promise<string>((resolve) => sys.execFile(join(gh.bin, process.platform === 'win32' ? 'gh.exe' : 'gh'), ['y'], { env: gh.env() }, (_e, out) => resolve(out)))
-    expect(JSON.parse(r.stdout).args).toEqual(['x'])
+    expect(pid(started)).toEqual(expect.any(Number))
+    // gh.exe and a full path name the same program, and neither is started
+    let byName: unknown
+    let byPath: unknown
+    const r = await new Promise<string>((resolve) => {
+      byName = sys.execFile('gh', ['x'], { env: gh.env() }, (_e, out) => resolve(out))
+    })
+    const viaPath = await new Promise<string>((resolve) => {
+      byPath = sys.execFile(join(gh.bin, process.platform === 'win32' ? 'gh.exe' : 'gh'), ['y'], { env: gh.env() }, (_e, out) => resolve(out))
+    })
+    expect(JSON.parse(r).args).toEqual(['x'])
     expect(JSON.parse(viaPath).args).toEqual(['y'])
-    // In process: no launcher ran, so nothing of it is left to end
+    expect([pid(byName), pid(byPath)]).toEqual([undefined, undefined])
     expect(gh.calls()).toHaveLength(2)
   })
 
