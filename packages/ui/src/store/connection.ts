@@ -497,6 +497,7 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
     )
 
     const asked = get().sessions
+    const askedMachines = get().machines
     const watch = watchLiveEvents()
     /*
      * What could not be read and came up empty, said in one toast once the screen is up (#841 item 10): an empty grid
@@ -572,7 +573,11 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
         externalApps,
         themeFiles,
         lastGoodThemes: goodThemes(st.lastGoodThemes, themeFiles),
-        machines: Object.fromEntries(machines.map((m) => [m.id, m])),
+        // A `machine_status` that came while these reads were out is newer than the list read at their start (#1611)
+        machines: {
+          ...Object.fromEntries(machines.map((m) => [m.id, m])),
+          ...Object.fromEntries(Object.entries(st.machines).filter(([id, m]) => m !== askedMachines[id])),
+        },
         connection: 'connected',
       }
     })
@@ -823,11 +828,15 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
     const alive = new Set(listed.filter((x) => x.live).map((x) => x.id))
     /*
      * Never one on a machine that is away (#82): the hub listed it from its mirror, and waking it would only fail there.
-     * That machine's own `machine_resync` wakes what has to be woken once it is back (`recoverMachine`).
+     * That machine's own `machine_resync` wakes what has to be woken once it is back (`recoverMachine`). Judged against
+     * the machine list read after the drop, not the one from before it, and never a row the hub still lists from its
+     * mirror: its `live` is last heard, not a fact (#1611).
      */
-    const toWake = wasLive.filter(
-      (x) => !alive.has(x.id) && get().sessions[x.id] && !isAway(get().sessions[x.id], get().machines),
-    )
+    await machinesRead
+    const toWake = wasLive.filter((x) => {
+      const now = get().sessions[x.id]
+      return !alive.has(x.id) && now && !now.unreachable && !isAway(now, get().machines)
+    })
     if (toWake.length === 0) return
 
     set({ toast: `Reconnected — resuming ${toWake.length} session${toWake.length > 1 ? 's' : ''}` })

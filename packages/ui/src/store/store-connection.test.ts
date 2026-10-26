@@ -830,6 +830,64 @@ describe('a machine the hub says is connected is never shown away (#1611)', () =
     await vi.waitFor(() => expect(useStore.getState().sessions['box.cm-1']?.unreachable).toBeFalsy())
     expect(away()).toEqual({ project: false, session: false })
   })
+
+  it('a row the hub still lists from its mirror is never woken, though its machine is connected: its live is last heard, not a fact', async () => {
+    const { mock } = await pair()
+    mock.sessions.get('box.cm-1')!.live = true
+    await useStore.getState().attach(mock)
+    expect(useStore.getState().sessions['box.cm-1']!.live).toBe(true)
+    const resume = vi.spyOn(mock.agents, 'resumeSession')
+    // The mirror's last word is "not live" for both reads: the resync's and the window's reconnect
+    mock.sessions.get('box.cm-1')!.live = false
+    mirrored(mock, 2)
+    mock.emit({ type: 'machine_resync', machineId: 'box' })
+    await vi.waitFor(() => expect(useStore.getState().sessions['box.cm-1']!.unreachable).toBe(true))
+    mock.sessions.get('box.cm-1')!.live = true
+    mock.setConnectionState('disconnected')
+    mock.sessions.get('box.cm-1')!.live = false
+    mock.setConnectionState('connected')
+    await settle()
+    await settle()
+    expect(resume).not.toHaveBeenCalled()
+  })
+
+  it('a machine_status that comes while the start-up reads are out is not undone by the machine list read before it', async () => {
+    const { mock, remote } = await pair()
+    mock.machinesList = [box({ status: 'connecting' })]
+    const real = mock.projects.list
+    let release!: () => void
+    let asked!: () => void
+    const held = new Promise<void>((r) => (release = r))
+    const first = new Promise<void>((r) => (asked = r))
+    mock.projects.list = async () => {
+      mock.projects.list = real
+      const rows = (await real()).map((p) => ({ ...p, unreachable: true }))
+      asked()
+      await held
+      return rows
+    }
+    const attaching = useStore.getState().attach(mock)
+    await first
+    // The link comes up while the window is still reading
+    mock.emit({ type: 'machine_status', machine: box() })
+    mock.emit({ type: 'machine_resync', machineId: 'box' })
+    await settle()
+    release()
+    await attaching
+    expect(useStore.getState().machines['box']?.status).toBe('connected')
+    await vi.waitFor(() => expect(useStore.getState().projects[remote.id]?.unreachable).toBeFalsy())
+    expect(away()).toEqual({ project: false, session: false })
+  })
+
+  it('a project order that a machine could not take comes back from the mirror, and that connected machine is read again', async () => {
+    const { mock, remote } = await pair()
+    await useStore.getState().attach(mock)
+    const reorder = mock.projects.reorder
+    mock.projects.reorder = async (ids) => (await reorder(ids)).map((p) => (p.machine === 'box' ? { ...p, unreachable: true } : p))
+    await useStore.getState().reorderProjects([remote.id])
+    await vi.waitFor(() => expect(useStore.getState().projects[remote.id]?.unreachable).toBeFalsy())
+    expect(away().project).toBe(false)
+  })
 })
 
 /*

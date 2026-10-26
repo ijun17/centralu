@@ -2,6 +2,7 @@ import { forgetArrivalsOf } from './apps.js'
 import type { ProjectInfo } from '@cc/protocol'
 import type { AppState, StoreGet, StoreSet } from './state.js'
 import { forgetSessions } from './sessionList.js'
+import { machinesHoldingMirror } from './machines.js'
 import { inOrder, omitKey, stillInOrder } from './patch.js'
 
 /**
@@ -531,6 +532,8 @@ export const projectActions = (set: StoreSet, get: StoreGet): ProjectActions => 
     try {
       const fresh = await platform.projects.reorder(orderedIds)
       set({ projects: Object.fromEntries(fresh.map((p) => [p.id, p])) })
+      // A machine that could not take the order answers from the hub's mirror; a connected one is read again (#1611)
+      for (const id of machinesHoldingMirror(get())) void get().recoverMachine(id)
     } catch (e) {
       /*
        * The projects as they are now, in the order from before the drag (#842 item 3): one deleted meanwhile stays

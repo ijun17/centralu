@@ -293,7 +293,8 @@ export const machineActions = (set: StoreSet, get: StoreGet): MachineActions => 
 
     const toWake = wasLive.filter((x) => {
       const now = get().sessions[x.id]
-      return now && !now.live && !isAway(now, get().machines)
+      // Not a row the hub still lists from its mirror: its `live` is last heard, not a fact (#1611)
+      return now && !now.live && !now.unreachable && !isAway(now, get().machines)
     })
     if (toWake.length === 0) return
     const name = get().machines[machineId]?.name ?? machineId
