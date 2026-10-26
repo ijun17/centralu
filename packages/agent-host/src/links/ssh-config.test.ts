@@ -170,10 +170,10 @@ describe('the hosts of a config and what it includes', () => {
 
 describe('resolving each alias with ssh -G', () => {
   it('reads hostname, user and port from ssh -G, the first of each', () => {
-    expect(parseSshG('user me\nhostname box.ts.net\nport 38222\nidentityfile ~/.ssh/id_ed25519\nhostname later\n')).toEqual({
+    expect(parseSshG('user me\nhostname box.ts.net\nport 2222\nidentityfile ~/.ssh/id_ed25519\nhostname later\n')).toEqual({
       hostName: 'box.ts.net',
       user: 'me',
-      port: 38222,
+      port: 2222,
       proxyCommand: null,
       proxyJump: null,
     })
