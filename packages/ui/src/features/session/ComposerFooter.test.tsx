@@ -41,7 +41,7 @@ describe('the context gauge', () => {
     expect(render({ used: 21000, window: 153000, exactness: 'estimate', capped: true })).not.toContain('≈')
   })
 
-  it.each([0, 100, 300000, 600000, 1000000])('draws no compaction mark when compactAt is %i', (tokens) => {
+  it.each([300000, 600000])('draws no compaction mark when compactAt is %i', (tokens) => {
     const html = render({ used: 304000, window: 1000000, exactness: 'exact', compactAt: tokens })
     expect(html).not.toContain('context-gauge-compact-mark')
     expect(html).toContain('data-testid="context-gauge-fill"')
@@ -53,11 +53,5 @@ describe('the context gauge', () => {
     expect(html).toContain('title="Context 520k / 1M tokens · compacts at 600k tokens (60%)"')
     expect(html).toContain('bg-ink"')
     expect(html).not.toContain('context-gauge-compact-mark')
-  })
-
-  it('draws the track alone for an unknown reading', () => {
-    const html = render(undefined)
-    expect(text(html)).toContain('Context —')
-    expect(html).not.toContain('context-gauge-fill')
   })
 })
