@@ -124,6 +124,7 @@ packages/agent-host/src/dev-services/attachments.ts
 packages/agent-host/src/dev-services/broker-pty.test.ts
 packages/agent-host/src/dev-services/broker-pty.ts
 packages/agent-host/src/dev-services/commands.test.ts
+packages/agent-host/src/dev-services/commands.ts
 packages/agent-host/src/dev-services/data-folder.test.ts
 packages/agent-host/src/dev-services/data-folder.ts
 packages/agent-host/src/dev-services/entry-sizes.test.ts
@@ -158,6 +159,7 @@ packages/agent-host/src/dev-services/path-guard.ts
 packages/agent-host/src/dev-services/planted-repo.test-helpers.ts
 packages/agent-host/src/dev-services/process-tree.test-helpers.test.ts
 packages/agent-host/src/dev-services/process-tree.test-helpers.ts
+packages/agent-host/src/dev-services/pty-broker.mjs
 packages/agent-host/src/dev-services/schema-doc.test.ts
 packages/agent-host/src/dev-services/schema-doc.ts
 packages/agent-host/src/dev-services/store-asked-by.test.ts
@@ -175,6 +177,7 @@ packages/agent-host/src/dev-services/store-usage.test.ts
 packages/agent-host/src/dev-services/store.test.ts
 packages/agent-host/src/dev-services/store.ts
 packages/agent-host/src/dev-services/store/migrate-runner.ts
+packages/agent-host/src/dev-services/store/rows.test.ts
 packages/agent-host/src/dev-services/strays.test.ts
 packages/agent-host/src/dev-services/strays.ts
 packages/agent-host/src/dev-services/watch.test.ts
@@ -191,6 +194,7 @@ packages/agent-host/src/fake-exe.test.ts
 packages/agent-host/src/fs-containment.test.ts
 packages/agent-host/src/inline-views.test.ts
 packages/agent-host/src/keeper/agent-process.ts
+packages/agent-host/src/keeper/children-client.ts
 packages/agent-host/src/keeper/fake-keeper.test-helpers.ts
 packages/agent-host/src/keeper/held-child.ts
 packages/agent-host/src/keeper/held-children.ts
@@ -342,14 +346,19 @@ packages/agent-host/src/temp-dir.test-helpers.ts
 packages/agent-host/src/temp-dir.test.ts
 packages/agent-host/src/themes.test.ts
 packages/agent-host/src/themes.ts
+packages/agent-host/src/this-machine.ts
 packages/agent-host/src/transport/method-rights-doc.test.ts
+packages/agent-host/src/transport/server.test.ts
 packages/agent-host/src/updates.test.ts
 packages/agent-host/src/updates.ts
 packages/agent-host/src/user-app-adoption.test.ts
 packages/agent-host/src/user-app-adoption.ts
+packages/agent-host/src/views/csp.ts
+packages/agent-host/src/views/view-host.test.ts
 packages/platform/src/mock/mock-error.test.ts
 packages/platform/src/platform.contract.test.ts
 packages/protocol/src/theme.test.ts
 packaging/npm/centralu/bin/centralu.mjs
+packaging/npm/centralu/bin/serve-port.mjs
 packaging/npm/centralu/bin/serve-util.mjs
 packaging/npm/centralu/bin/swap.mjs

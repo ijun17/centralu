@@ -13,14 +13,14 @@ shrinking the allowlist. This is the TypeScript half of the OS layer [runtime-un
 
 - **Where the Windows time goes.** On main's last green full run, the Windows unit tests spent 4,457 file-seconds over
   687 test files, in two shards of 19.1 and 11.4 job-minutes. 98 % of that time is in tests that touch the OS, by the
-  rule below. Two board tests (`tooling/project-board-queue.test.ts`, `-release.test.ts`) are 1,736 s, 39 %, and both
-  fall in shard 1.
-- **What this pull request removes.** The packages that are already OS-free leave the Windows job: 269 of 687 test
-  files, but only 106 file-seconds, 2.4 %. Computing the list costs about as much again on each shard (§6.3). The
-  gain of step 2 is the rule and the measure, not minutes.
-- **Where the minutes are.** In the host's areas that start real processes, git and worktrees (§7), and in the
-  board's tests (§8, a question for the owner).
-- **The measure of progress** is the allowlist: 353 files today (109 shipped, 244 tests).
+  rule below. Two board tests (`tooling/project-board-queue.test.ts`, `-release.test.ts`) are 1,736 s, 39 %, and
+  vitest's count-based `--shard` put both in shard 1.
+- **What this pull request removes.** The packages that are already OS-free leave the Windows job: 261 of 687 test
+  files, but only 99 file-seconds, 2.2 %. Its gain in minutes is the time-balanced split (§6.4): each shard gets
+  about 2,180 measured seconds, so the quick tier's Windows wait goes from 19.1 to about 16 minutes (§2.3).
+- **Where the minutes are.** In the board's tests (§2.4: the next pull request gives the board its own OS seam and a
+  fake), then in the host's areas that start real processes, git and worktrees (§7).
+- **The measure of progress** is the allowlist: 362 files today (115 shipped, 247 tests).
 
 ## 2. Measured
 
@@ -49,18 +49,18 @@ CI, Windows unit shards, by area. **W**: still runs on Windows after this pull r
 |---|---:|---:|---:|---:|
 | `tooling/project-board-*` (the board app's tests) | 10 | 2,065 | 1 | 0 |
 | `agent-host/sessions` | 139 | 736 | 7 | 0 |
-| `agent-host/dev-services` | 49 | 409 | 5 | 0 |
-| `agent-host/links` | 19 | 403 | 7 | 3 |
-| `agent-host/apps` | 29 | 208 | 3 | 0 |
+| `agent-host/dev-services` | 50 | 409 | 4 | 0 |
+| `agent-host/links` | 20 | 403 | 6 | 2 |
+| `agent-host/apps` | 30 | 209 | 2 | 0 |
 | `agent-host/adapters` | 90 | 137 | 9 | 0 |
-| `agent-host` top level | 32 | 121 | 10 | 1 |
+| `agent-host` top level | 33 | 121 | 9 | 1 |
 | `tooling`, other | 18 | 124 | 44 | 58 |
 | `tooling/launcher-*` | 7 | 65 | 1 | 0 |
-| `agent-host/lifecycle`, `mail`, `transport`, `views`, `keeper` | 22 | 56 | 17 | 7 |
+| `agent-host/lifecycle`, `mail`, `transport`, `views`, `keeper` | 26 | 63 | 13 | 0 |
 | `packages/platform` | 2 | 25 | 19 | 1 |
 | `packages/ui` | 0 | 0 | 115 | 34 |
 | `packages/core`, `packages/protocol` | 1 | 0 | 31 | 2 |
-| **Total** | **418** | **4,351** | **269** | **106** |
+| **Total** | **426** | **4,358** | **261** | **99** |
 
 The slowest files on Windows: `project-board-queue` 875 s, `project-board-release` 861 s, `sessions/manager-worktree`
 168 s, `dev-services/worktree-recovery` 142 s, `links/links` 118 s, `project-board-contribute` 110 s,
@@ -71,22 +71,66 @@ By whether the file itself imports `fs`, `child_process`, `os` or `path` (local 
 
 ### 2.3 What Windows spends now, and what each step removes
 
-Windows unit job-minutes now: 30.5 (19.1 + 11.4) per full run and per pull request. The remote-Node Windows job adds
-17.8 on a full run that changes the host.
+Windows unit job-minutes now: 30.5 (19.1 + 11.4) per pull request and per full run; the quick tier waits on the
+longer shard, 19.1. The remote-Node Windows job adds 17.8 on a full run that changes the host (unchanged, owner).
+
+After this pull request, expected: each shard holds about 2,180 measured file-seconds. The shards ran about 2.7
+files at once (shard 1: 2,930 s of tests in 1,090 s), which gives about 810 s, but a shard cannot end before its
+longest file: `project-board-queue`, 875 s. With the job's setup (about 50 s), choosing the tests (17–25 s) and
+vitest's collection, each shard should take about 16 minutes: the quick tier's Windows wait drops from 19.1 to about
+16 minutes, and the job-minutes stay about 32 (the same tests, evenly split). Below 875 s per shard takes the board's
+two files getting cheaper, which is what §2.4 is for.
 
 | Step | Removes from the Windows unit job (file-seconds, CI) |
 |---|---|
-| 2, this pull request: the OS-free packages and tooling guards leave | 106 of 4,457 (2.4 %); the selection itself costs about 17 s per shard (§6.3) |
+| 2, this pull request: the OS-free packages and tooling guards leave; shards balanced by time | 99 of 4,457 (2.2 %); the longer shard from 19.1 to about 16 minutes |
+| Next: the board's OS seam and fake (§2.4) | most of 2,065 s; with it the longest file, which bounds a shard |
 | 3a, store and files | ≤ 60 test files picked only through `dev-services/store.ts` and `sessions/cross-project.test-helpers.ts`; about 50 s |
 | 3b, worktrees | ≤ 310 s in `manager-worktree` and `worktree-recovery` alone; ≤ 409 s for `dev-services` |
 | 3c, adapters' spawning | ≤ 137 s (`adapters`); 35 more test files reach the Claude and Codex adapters' index |
 | 3d, links and ssh | ≤ 403 s, most of it real processes that stay (§7) |
-| 3e, apps runtime | ≤ 208 s, mostly real Node processes that stay |
+| 3e, apps runtime | ≤ 209 s, mostly real Node processes that stay |
 | 3f, keeper-facing parts | ≤ 40 s |
-| Board tests (§8, owner) | up to 2,065 s |
 
 The "≤" is an upper bound: a test leaves Windows only when neither it nor anything it imports touches the OS, so an
 area's integration tests (a real git, a real process) stay, as they should.
+
+### 2.4 Why the board's two files take so long on Windows
+
+Measured on the Windows PC above (both files about 2× faster there than on the Windows runner: queue 500 s against
+875 s, release 419 s against 861 s; Linux CI 246 s and 141 s), counting each process the tests start.
+
+The time is processes started one after another, and an app start and stop per test:
+
+| Per test that starts the board | Queue file (174 of 248 tests) | Release file (87 of 104 tests) |
+|---|---|---|
+| Fake `gh` calls | 26.6, about 63 ms each: 1.7 s, about 60 % | 28, about 61 ms each: 1.7 s, about 35 % |
+| Real `git` processes | 16.5 (42 in the 69 tests with a git fixture), about 19 ms each | about 90 (63 from the app, 27 from the fixture), about 18 ms each: 1.75 s, about 35 % |
+| App start, MCP handshake, `tools/list` | 1, about 0.2 s | 1, about 0.2 s |
+| Stop (`dispose`, a PowerShell `Get-CimInstance` listing of the tree) | 1, about 0.3 s | 1, about 0.3 s |
+| Repositories made (`origin.git` and `work`) | 2 in the git tests | 2, about 0.9 s of fixture |
+| Mean per test | 2.9 s | 4.8 s |
+
+Unit costs on Windows: a fake `gh` call is a launcher `.exe` (the .NET runtime, about 30 ms), then `node` (about 30 ms),
+each with a console host; `git` 11–24 ms for a local command, about 150 ms for a push; `node -e 0` 28 ms.
+
+Why so many `gh` calls: the board polls every 50 ms, and each call takes about 63 ms, so a waiting test runs `gh` back
+to back for as long as it waits. About 28 % of the queue file's calls re-read what never changes within a test
+(repository permissions, `build.yml`, branch protection and rules); the release file's hot calls are the release
+workflow's runs, branch protection and rules, and check runs. Its git calls are mostly `show`, `rev-parse`, `config`,
+`fetch` and `update-ref`.
+
+What the next pull request does, by time saved:
+
+1. **The board's own OS seam**: its `gh`, `git` and file calls behind one module, with an in-memory fake that most
+   queue and release tests use. The fake `gh` alone is about 290 of the queue file's 500 s and about 150 of the
+   release file's 419 s here; on the fake, git and the stop go too. A few tests keep the real git, the real files and
+   the fake `gh` process, on every OS.
+2. **Fewer reads per poll**: what does not change within a run (permissions, protection, rules, the workflow file)
+   read once; repeated `git show` and `rev-parse` through one `git cat-file --batch`. About a quarter of the queue's
+   `gh` calls, and fewer calls against GitHub itself.
+3. **Shared fixtures and a cheaper stop**: the release fixture built once per file and copied (about 80 s here), and
+   no process listing when the app's tree is already gone (about 80 s over both files).
 
 ## 3. What the OS layer is
 
@@ -126,7 +170,8 @@ is where the Windows-only bugs have come from (#1559: a link that is a junction,
 ## 5. The rule and the allowlist
 
 `local/os-imports` (in `tooling/eslint-platform-checks.js`, beside `local/platform-checks`) reports an import of
-`fs`, `fs/promises`, `child_process`, `os` or `path`, bare or `node:`, static, `export … from`, `import()` or
+`fs`, `fs/promises`, `child_process`, `os`, `path` or `net`, bare or `node:`, or of the native `node-pty` (the
+terminal's pseudo console) and `better-sqlite3` (SQLite's files and locks), static, `export … from`, `import()` or
 `require`, in the checked code (`packages/*/src`, `apps/*/src`, `packaging/**/*.mjs`, tests included) outside the
 layer, its tests (`os.test.ts`, `kill-tree.windows.test.ts`) and the files on `tooling/os-allowlist.txt`. A type-only
 import runs nothing, and `import { posix, win32 } from 'node:path'` reads paths the same way everywhere, so neither is
@@ -140,7 +185,8 @@ reported. Build and release scripts, tooling and e2e are not checked: they work 
   (`git diff -M`), whose line follows it;
 - sorted, unique, none in the layer.
 
-Today: 353 files, 109 shipped (106 host, 3 launcher) and 244 tests (241 host, 2 `platform`, 1 `protocol`).
+Today: 362 files, 115 shipped (111 host, 4 launcher) and 247 tests (244 host, 2 `platform`, 1 `protocol`). Adding
+`net`, `node-pty` and `better-sqlite3` (owner's session, 2026-10-26) put 9 more files on it.
 
 **`path` is not staged separately.** Of the 127 checked source files that import an OS module, 10 import only `path`
 (4 tests do); `path` is the most imported (85 files) but nearly always beside `fs`. Leaving `path` out would shrink the
@@ -167,23 +213,49 @@ and the `@cc/*` aliases resolve, and one that cannot fails the script rather tha
 scripts do not count in (4): a tooling test that reads the repository with `fs` (a guard) runs on Linux only, while one
 that imports the launcher or a host helper that starts processes runs everywhere.
 
-Not seen: a computed specifier, a `require` made by `createRequire` under another name, a process started by path
-(`EVERY_OS_TESTS` names those, `launcher-node-floor` today), and modules outside the five (`node:net`,
-`node:sqlite`, `node-pty`): the real-socket tests `transport/server`, `views/origin-ports`, `view-host` and
-`links/linked-views` leave the Windows job by this. Whether `node:net` belongs to the layer is §8's question 6.
+Not seen: a computed specifier, a `require` made by `createRequire` under another name, and a process started by path
+(`EVERY_OS_TESTS` names those, `launcher-node-floor` today). Modules outside the list (`node:http`, say) do not count:
+`views/origin-ports.test.ts` starts a real server through `node:http` and runs on Linux only.
 
 ### 6.2 Where it applies
 
-`windows tests (vitest N/2)` runs `tsx tooling/os-tests.ts --out <list>` and then vitest with `CC_TEST_FILES=<list>`
-(`vitest.config.ts` runs only the listed files, each in its project). Both tiers, every pull request and every full
-run, `workflow_dispatch` included: the list does not depend on what changed. Linux (`verify`) runs every test. The
-remote-Node job and e2e are unchanged (out of scope, #1599).
+`windows tests (vitest N/2)` runs `tsx tooling/os-tests.ts --shard N/2 --out <list>` and then vitest with
+`CC_TEST_FILES=<list>` (`vitest.config.ts` runs only the listed files, each in its project, and refuses a line that
+is not an existing repository path). Both tiers, every pull request and every full run, `workflow_dispatch`
+included: the list does not depend on what changed. Linux (`verify`) runs every test. The remote-Node job and e2e
+are unchanged (out of scope, #1599; the remote-Node job stays as it is, owner's session 2026-10-26).
+
+Skipping the Windows job on a pull request that reaches none of the selected tests (only `packages/ui`, say) is to
+be proposed once the selection has run green on a few pull requests.
 
 ### 6.3 Cost
 
 The script globs the tests through vitest's own configuration and scans the files they reach: 17 s on the Windows PC
-above, pnpm and tsx starting included; each shard computes the same list, so the job pays it twice.
+above, pnpm and tsx starting included. Each shard computes it. A job of its own that computes it once, on Linux, and
+hands the lists to the shards was considered and not done: its setup is about 21 s (checkout, pnpm, Node, install;
+the `verify` job's steps on the same run) plus the scan and a runner's pickup, and both shards would wait for it
+before starting at all, so the quick tier's wait would grow by about 40 s to save 17 s of each shard's runner time.
 `tooling/os-layer.test.ts` checks that a listed run runs exactly the list.
+
+### 6.4 Shards balanced by measured time
+
+Vitest's `--shard` splits by file count. `tooling/os-tests.ts --shard i/n` splits the selected tests by time instead:
+longest first, each to the lighter shard (`balance`), ties by path, so both shards compute the same split. The times
+are `tooling/test-durations.json`, each test file's seconds on the Windows runner. A file it does not name (a new
+test) weighs the median of those it does, at least one second. Today: 254 and 173 files, 2,178 and 2,179 seconds.
+
+**Refreshing the times.** Every Windows shard writes vitest's JSON report next to its usual output and keeps it as the
+artifact `windows-test-times-<shard>` (30 days). To refresh, from a green run on main:
+
+```sh
+gh run download <run id> -p 'windows-test-times-*' -D /tmp/times
+pnpm exec tsx tooling/os-tests.ts --refresh-durations /tmp/times/*/vitest-times.json
+```
+
+and commit the file. The first version was read from run 40303859800's log, which prints each file's time. Times
+that are a little old only make the split a little uneven; a refresh is due when a shard runs more than a few
+minutes longer than the other, or after a step of §7 moves many tests off Windows. `os-layer.test.ts` checks the
+file is as the refresh writes it and names a time for most of the selected tests.
 
 ## 7. Moving the host behind the layer
 
@@ -229,23 +301,21 @@ By Windows time saved and risk:
 | 3e | Apps runtime | 208 s of real Node processes per app; placement and discovery (files) move, the runtime tests stay |
 | 3f | Keeper-facing parts: `lifecycle/`, `keeper/`, the handover | small (≤ 40 s) and the highest risk; with runtime-unification's steps |
 
-## 8. Open questions for the owner
+## 8. Decisions and open questions
 
-1. **The board's tests** are 46 % of the Windows unit time (2,065 s), two files 1,736 s. They test the project-board
-   app (`.centralu/apps/project-board`), which runs wherever Centralu does, with real git repositories and fake `gh`
-   processes. Run them on Linux only, with a small Windows subset? Or make them cheaper (one repository per file)?
-2. **Shard balance.** Vitest shards split by file count, so both big board files land in shard 1 (19.1 min against
-   11.4). Splitting the two files, or a duration-balanced shard list from the measured times, would bring the quick
-   tier's Windows wait to about 15 minutes with nothing removed. Proposed, not changed.
-3. **The remote-Node Windows job** runs every host test again on the pinned Node (17.8 min). Running only the
-   selected ones there would remove little today (99 % of its time is selected); worth revisiting after 3a–3c.
-4. **The quick tier** keeps the Windows unit job on every pull request, as decided 2026-10-18. A pull request that
-   changes nothing the selection reaches (only `packages/ui`, say) could skip it; not proposed until the list is
-   shorter, since today it would rarely apply.
-5. **macOS** has no unit job; the selection is what one would run.
-6. **Sockets.** The rule covers the five modules the direction named. `node:net` (and the native `node-pty`,
-   `better-sqlite3`) also behave differently per OS; adding `net` would keep four socket tests (about 10 s) on
-   Windows and put a few more files on the list. Proposed, not done.
+Answered by the owner's session, 2026-10-26:
+
+1. **The board's tests stay on Windows** (the board app runs on Windows too). They get cheaper the way the product does:
+   the board's git, gh and file calls behind one module of its own with an in-memory fake, most queue and release
+   tests on the fake, a few real-git and real-file tests on every OS. The next pull request; §2.4 is its measurement.
+2. **Shards balanced by measured time**: in this pull request (§6.4).
+3. **`node:net`, `node-pty` and `better-sqlite3` are OS modules**: in this pull request (§5); the socket tests
+   `transport/server`, `views/view-host` and `links/linked-views` are back on Windows.
+4. **The remote-Node Windows job stays as it is.**
+5. **Skipping the Windows job** on a pull request that reaches no selected test: proposed after the selection has run
+   green on a few pull requests.
+
+Open: **macOS** has no unit job; the selection is what one would run.
 
 ## 9. How it could fail, and what holds
 
@@ -259,4 +329,5 @@ By Windows time saved and risk:
 | main's list unreadable while main has the layer | The comparison fails instead of passing |
 | A listed test path vitest cannot match | `vitest.config.ts` refuses a `CC_TEST_FILES` line that is not an existing repository path with `/` |
 | A dynamic import of a computed path, or a process started by path | Not seen by imports; such a test is named in `EVERY_OS_TESTS`, or it asks the OS (it usually does) |
+| The measured times go stale, or a new test has none | The split only gets uneven, never drops a test: `balance` places every selected file; a new one weighs the median |
 | The list and vitest's projects disagree | `vitestFiles` globs through vitest's own configuration; `os-layer.test.ts` checks a listed run runs exactly the list in both projects |

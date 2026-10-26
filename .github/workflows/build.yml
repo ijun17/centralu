@@ -519,8 +519,11 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # This shard's half of them, split by each file's measured time (tooling/test-durations.json), not by count:
+      # by count, the two longest files (875 and 861 s) fell in one shard, 19.1 minutes against 11.4 (#1599).
+      # Computed here rather than once in a job of its own: that job would make both shards wait for its setup (#1599).
       - name: Pick the tests that touch the OS
-        run: pnpm exec tsx tooling/os-tests.ts --out "${{ runner.temp }}\os-tests.txt"
+        run: pnpm exec tsx tooling/os-tests.ts --shard ${{ matrix.shard }}/${{ matrix.shards }} --out "${{ runner.temp }}\os-tests.txt"
 
       - name: pnpm test (shard ${{ matrix.shard }}/${{ matrix.shards }})
         # Never the real data folder, on any OS (AGENTS.md).
@@ -530,9 +533,18 @@ jobs:
           CC_TEST_FILES: ${{ runner.temp }}\os-tests.txt
           # styles.test.ts compares the app's JS with main's in the verify job, and fails in CI unless told where
           CC_BUNDLE_COMPARED_BY: verify
-        # `pnpm test` is `vitest run`, called directly: pnpm 11 refuses `pnpm test --shard` as an
-        # unknown option of its own
-        run: pnpm exec vitest run --shard=${{ matrix.shard }}/${{ matrix.shards }}
+        # `pnpm test` is `vitest run`, called directly. The JSON report is each file's time, which refreshes
+        # tooling/test-durations.json (`tsx tooling/os-tests.ts --refresh-durations`, docs/plans/os-layer.md §6.4).
+        run: pnpm exec vitest run --reporter=default --reporter=json --outputFile.json="${{ runner.temp }}\vitest-times.json"
+
+      - name: Keep the test times
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-test-times-${{ matrix.shard }}
+          path: ${{ runner.temp }}\vitest-times.json
+          retention-days: 30
+          if-no-files-found: warn
 
   # The UI scenarios (e2e/, Playwright) in WebKit, on every full run (owner decisions, 2026-10-11:
   # every pull request; 2026-10-18: every full run, which is what lands). The desktop app is WKWebView,

@@ -15,15 +15,23 @@ import { fileURLToPath } from 'node:url'
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 
 /**
- * The Node modules whose behaviour depends on the OS: files, paths, processes and shells, and the OS itself. Each is
- * also refused in its `node:` form and, for fs, its promise form. `node:path`'s `posix` and `win32` halves are the
- * same on every OS, so `path/posix` and `path/win32` are not here.
+ * The Node modules whose behaviour depends on the OS: files, paths, processes and shells, the OS itself, and sockets
+ * (an address in use, a port held after close, named pipes). Each is also refused in its `node:` form and, for fs, its
+ * promise form. `node:path`'s `posix` and `win32` halves are the same on every OS, so `path/posix` and `path/win32`
+ * are not here.
  */
-export const OS_MODULES = ['fs', 'fs/promises', 'child_process', 'os', 'path']
+export const OS_MODULES = ['fs', 'fs/promises', 'child_process', 'os', 'path', 'net']
 
-/** The OS module an import specifier names (`node:fs/promises` → `fs/promises`), or null */
+/**
+ * The installed native modules that reach the OS: the terminal's pseudo console (ConPTY on Windows) and SQLite's files
+ * and locks. Named as imported, never with `node:`.
+ */
+export const NATIVE_OS_MODULES = ['node-pty', 'better-sqlite3']
+
+/** The OS module an import specifier names (`node:fs/promises` → `fs/promises`, `node-pty`), or null */
 export function osModule(specifier) {
   if (typeof specifier !== 'string') return null
+  if (NATIVE_OS_MODULES.includes(specifier)) return specifier
   const name = specifier.startsWith('node:') ? specifier.slice('node:'.length) : specifier
   return OS_MODULES.includes(name) ? name : null
 }

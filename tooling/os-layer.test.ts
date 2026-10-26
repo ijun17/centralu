@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { virtualFileLinter } from './eslint-virtual.test-helpers.js'
 import { baseCommit, renamesSince } from './lint-allowlist.js'
-import { osSelector, repoFiles, vitestFiles } from './os-tests.js'
+import { DURATIONS, balance, durationsFromReports, formatDurations, osSelector, parseDurations, repoFiles, vitestFiles } from './os-tests.js'
 import { SLOW } from './test-timing.js'
 import * as layer from './os-layer.js'
 
@@ -55,6 +55,13 @@ describe('touching the OS outside the OS layer', () => {
     expect(await refused('packages/protocol/src/thing.ts', code)).toHaveLength(1)
     expect(await refused('apps/web/src/thing.ts', code)).toHaveLength(1)
     expect(await refused('packaging/npm/centralu/bin/semver.mjs', code)).toHaveLength(1)
+  })
+
+  it('refuses sockets and the native modules that reach the OS, the terminal and SQLite', async () => {
+    for (const [spec, module] of [['net', 'net'], ['node:net', 'net'], ['node-pty', 'node-pty'], ['better-sqlite3', 'better-sqlite3']]) {
+      expect(await refused(HOST, `import * as x from '${spec}'\nexport const y = x\n`), spec).toEqual([expect.stringContaining(`'${module}'`)])
+    }
+    expect(await refused(HOST, "import type { AddressInfo } from 'node:net'\nexport type A = AddressInfo\n")).toEqual([])
   })
 
   it('lets through what runs nothing or reads paths the same way on every OS', async () => {
@@ -248,4 +255,45 @@ describe('the tests that run on every OS', () => {
     },
     120_000 * SLOW,
   )
+})
+
+describe("the Windows shards, split by each file's measured time", () => {
+  it('puts every test in exactly one shard, the longest apart, and the same split on every shard', () => {
+    const durations = { 'a.test.ts': 875, 'b.test.ts': 861, 'c.test.ts': 168, 'd.test.ts': 142, 'e.test.ts': 1, 'f.test.ts': 1 }
+    const tests = Object.keys(durations)
+    const lists = balance(tests, durations, 2)
+    expect(lists.flat().sort()).toEqual(tests)
+    expect(lists.findIndex((l) => l.includes('a.test.ts'))).not.toBe(lists.findIndex((l) => l.includes('b.test.ts')))
+    const secs = lists.map((l) => l.reduce((s, t) => s + (durations[t as keyof typeof durations] ?? 0), 0))
+    expect(Math.abs((secs[0] ?? 0) - (secs[1] ?? 0))).toBeLessThanOrEqual(30)
+    expect(balance([...tests].reverse(), durations, 2)).toEqual(lists)
+  })
+
+  it('weighs a file with no measured time as the median one, at least a second', () => {
+    const durations = { 'a.test.ts': 10, 'b.test.ts': 2, 'c.test.ts': 2 }
+    // new1 and new2 weigh 2 each: a holds 10, the other shard takes b, c and both new files
+    expect(balance(['a.test.ts', 'b.test.ts', 'c.test.ts', 'new1.test.ts', 'new2.test.ts'], durations, 2)).toEqual([['a.test.ts'], ['b.test.ts', 'c.test.ts', 'new1.test.ts', 'new2.test.ts']])
+    expect(balance(['x.test.ts', 'y.test.ts'], {}, 2)).toEqual([['x.test.ts'], ['y.test.ts']])
+  })
+
+  it("reads each file's time from vitest JSON reports, wherever the runner checked the repository out", () => {
+    const report = (name: string, ms: number) => ({ testResults: [{ name, startTime: 1000, endTime: 1000 + ms }] })
+    expect(
+      durationsFromReports([
+        report('D:\\a\\centralu\\centralu\\packages\\agent-host\\src\\os.test.ts', 1234),
+        report('/home/runner/work/centralu/centralu/tooling/launcher-cmd.test.ts', 50),
+      ]),
+    ).toEqual({ 'packages/agent-host/src/os.test.ts': 1.2, 'tooling/launcher-cmd.test.ts': 0.1 })
+    expect(() => durationsFromReports([{ not: 'a report' }])).toThrow(/testResults/)
+  })
+
+  it(`keeps ${DURATIONS} as --refresh-durations writes it, with a time for most tests Windows runs`, async () => {
+    const text = readFileSync(join(ROOT, DURATIONS), 'utf8').replace(/\r\n/g, '\n')
+    const durations = parseDurations(text)
+    const source = (JSON.parse(text) as { source: string }).source
+    expect(formatDurations(durations, source)).toBe(text)
+    // A missing file only weighs the median; most having a time is what keeps the shards even
+    const picked = osSelector().selectTests(await vitestFiles())
+    expect(picked.filter((t) => durations[t] !== undefined).length / picked.length).toBeGreaterThan(0.8)
+  }, 120_000 * SLOW)
 })

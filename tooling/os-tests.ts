@@ -15,9 +15,12 @@
  * unless what they reach in the checked code touches the OS, or they ask which OS this is. A checked test that
  * touches the OS is on the allowlist, and runs.
  *
- *   pnpm exec tsx tooling/os-tests.ts --out <file>   the selected tests, one path per line (vitest.config.ts
- *                                                    `CC_TEST_FILES` reads it)
- *   pnpm exec tsx tooling/os-tests.ts --offenders    the checked files that touch the OS outside the layer
+ *   tsx tooling/os-tests.ts --out <file> [--shard i/n]   the selected tests, one path per line (vitest.config.ts
+ *                                                        `CC_TEST_FILES` reads it); with --shard, shard i of n,
+ *                                                        balanced by the measured times (`balance`)
+ *   tsx tooling/os-tests.ts --offenders                  the checked files that touch the OS outside the layer
+ *   tsx tooling/os-tests.ts --refresh-durations <vitest JSON report>...
+ *                                                        rewrites tooling/test-durations.json from the reports
  */
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
@@ -198,17 +201,109 @@ export async function vitestFiles(listed?: string): Promise<string[]> {
   }
 }
 
+/**
+ * Each test file's time on the Windows runner, in seconds, by repository path. Read by `balance`; rewritten by
+ * `--refresh-durations` from the Windows shards' vitest JSON reports, which build.yml keeps as the
+ * `windows-test-times-<shard>` artifacts of every run (docs/plans/os-layer.md §6.4).
+ */
+export const DURATIONS = 'tooling/test-durations.json'
+
+export type Durations = Record<string, number>
+
+export function parseDurations(text: string): Durations {
+  const parsed: unknown = JSON.parse(text)
+  const files = typeof parsed === 'object' && parsed !== null && 'files' in parsed ? parsed.files : null
+  if (typeof files !== 'object' || files === null) throw new Error(`${DURATIONS}: no "files"`)
+  const out: Durations = {}
+  for (const [file, secs] of Object.entries(files)) if (typeof secs === 'number' && secs >= 0) out[file] = secs
+  return out
+}
+
+export const readDurations = (): Durations => parseDurations(readFileSync(`${ROOT}${DURATIONS}`, 'utf8'))
+
+/**
+ * Splits tests into `shards` lists of about equal measured time: longest first, each to the lightest list so far, ties
+ * by path, so that every shard computes the same split. A file with no measured time weighs the median of those that
+ * have one, and at least a second: a new test is usually an ordinary one.
+ */
+export function balance(tests: readonly string[], durations: Durations, shards: number): string[][] {
+  const known = tests.map((t) => durations[t]).filter((d): d is number => d !== undefined).sort((a, b) => a - b)
+  const fallback = Math.max(1, known[Math.floor(known.length / 2)] ?? 1)
+  const weight = (t: string) => durations[t] ?? fallback
+  const order = [...tests].sort((a, b) => weight(b) - weight(a) || (a < b ? -1 : a > b ? 1 : 0))
+  const lists = Array.from({ length: shards }, () => ({ files: [] as string[], secs: 0 }))
+  for (const t of order) {
+    const lightest = lists.reduce((min, l) => (l.secs < min.secs ? l : min))
+    lightest.files.push(t)
+    lightest.secs += weight(t)
+  }
+  return lists.map((l) => l.files.sort())
+}
+
+/** A test's path in the repository, from the absolute path a runner reported: from its first top folder of tests */
+function repoPathOf(name: string): string {
+  const p = name.replace(/\\/g, '/')
+  const at = ['/packages/', '/tooling/'].map((d) => p.indexOf(d)).filter((i) => i >= 0)
+  return at.length > 0 ? p.slice(Math.min(...at) + 1) : p
+}
+
+/** The per-file times in vitest JSON reports (`--reporter=json`), in seconds; the longest when a file repeats */
+export function durationsFromReports(reports: readonly unknown[]): Durations {
+  const out: Durations = {}
+  for (const report of reports) {
+    const results: unknown = typeof report === 'object' && report !== null && 'testResults' in report ? report.testResults : null
+    if (!Array.isArray(results)) throw new Error('not a vitest JSON report: no testResults')
+    for (const r of results as unknown[]) {
+      if (typeof r !== 'object' || r === null || !('name' in r) || !('startTime' in r) || !('endTime' in r)) continue
+      const { name, startTime, endTime } = r
+      if (typeof name !== 'string' || typeof startTime !== 'number' || typeof endTime !== 'number') continue
+      const file = repoPathOf(name)
+      out[file] = Math.max(out[file] ?? 0, Math.round((endTime - startTime) / 100) / 10)
+    }
+  }
+  return out
+}
+
+/** tooling/test-durations.json's text: sorted, one file per line */
+export function formatDurations(durations: Durations, source: string): string {
+  const files = Object.keys(durations)
+    .sort()
+    .map((f) => `    ${JSON.stringify(f)}: ${durations[f]}`)
+  return `{\n  "source": ${JSON.stringify(source)},\n  "files": {\n${files.join(',\n')}\n  }\n}\n`
+}
+
 async function main(argv: string[]) {
   if (argv.includes('--offenders')) {
     process.stdout.write(repo.offenders(repoFiles()).join('\n') + '\n')
     return
   }
+  if (argv.includes('--refresh-durations')) {
+    const reports = argv.filter((a) => !a.startsWith('--'))
+    if (reports.length === 0) throw new Error('usage: tsx tooling/os-tests.ts --refresh-durations <vitest JSON report>...')
+    const durations = durationsFromReports(reports.map((f) => JSON.parse(readFileSync(f, 'utf8')) as unknown))
+    const source = `the Windows unit shards' vitest JSON reports, refreshed ${new Date().toISOString().slice(0, 10)}`
+    writeFileSync(`${ROOT}${DURATIONS}`, formatDurations(durations, source))
+    console.error(`${DURATIONS}: ${Object.keys(durations).length} files`)
+    return
+  }
   const out = argv[argv.indexOf('--out') + 1]
-  if (!argv.includes('--out') || !out) throw new Error('usage: tsx tooling/os-tests.ts --out <file> | --offenders')
+  if (!argv.includes('--out') || !out) throw new Error('usage: tsx tooling/os-tests.ts --out <file> [--shard i/n] | --offenders | --refresh-durations <report>...')
+  const shardArg = argv.includes('--shard') ? argv[argv.indexOf('--shard') + 1] : undefined
+  const shard = shardArg === undefined ? null : /^(\d+)\/(\d+)$/.exec(shardArg)
+  if (shardArg !== undefined && (!shard || Number(shard[1]) < 1 || Number(shard[1]) > Number(shard[2]))) throw new Error(`--shard ${shardArg}: expected i/n with 1 <= i <= n`)
   const all = await vitestFiles()
   const picked = repo.selectTests(all)
   const why = argv.includes('--why')
-  writeFileSync(out, picked.join('\n') + '\n')
+  if (shard) {
+    const durations = readDurations()
+    const lists = balance(picked, durations, Number(shard[2]))
+    const mine = lists[Number(shard[1]) - 1] ?? []
+    writeFileSync(out, mine.join('\n') + '\n')
+    const secs = lists.map((l) => Math.round(l.reduce((sum, t) => sum + (durations[t] ?? 0), 0)))
+    console.error(`shard ${shardArg}: ${mine.length} test files; measured seconds per shard: ${secs.join(', ')}`)
+  } else {
+    writeFileSync(out, picked.join('\n') + '\n')
+  }
   if (why) for (const t of picked) console.error(`${t}: ${repo.whyEveryOs(t)}`)
   const byPackage = new Map<string, [number, number]>()
   for (const t of all) {
