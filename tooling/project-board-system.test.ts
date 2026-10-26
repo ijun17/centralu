@@ -111,9 +111,10 @@ describe("the board app's door for starting programs", { timeout: 60_000 * SLOW 
       const b = await call(inProcess, args, env, input)
       expect(b, JSON.stringify(args)).toEqual(a)
     }
-    // Each call logged once, the same way
+    // Each call logged once, the same way: started, then in process, case by case
     const log = gh.calls()
-    expect(log.slice(0, cases.length)).toEqual(log.slice(cases.length))
+    expect(log).toHaveLength(cases.length * 2)
+    for (let i = 0; i < cases.length; i++) expect(log[2 * i + 1]).toEqual(log[2 * i])
   })
 
   it('answers a faked program only by its name, and starts any other', async () => {
