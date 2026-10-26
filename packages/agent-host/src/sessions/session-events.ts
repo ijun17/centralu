@@ -662,11 +662,12 @@ export class SessionEvents {
     // Whose turn this message makes, or joins (#1377): only the person's own message (no source) is theirs
     const joins = inTurn(m.state) && this.host.joinsRunningTurn(sessionId)
     // Named, so the turn that ends can say whether it took this message in (`SessionHandle.turnInputs`)
-    // Also a sender's message at rest: the turn that runs it may open after another (#1604)
-    const inputId = joins || from ? randomUUID() : undefined
+    // Also a hub's message at rest: the turn that runs it may open after another's (#1604)
+    const hubInput = from?.sessionId === HUB_SENDER
+    const inputId = joins || hubInput ? randomUUID() : undefined
     this.host.children.noteMessage(sessionId, !from && !fromApp && !fromScript ? 'person' : 'work', inTurn(m.state), this.host.joinsRunningTurn(sessionId), intent === 'task', inputId, relayed ? 'report' : fromApp ? 'app' : 'caller')
-    // A sender's message may run as a turn of its own, after another's (#1604): who it is from, for the turn that does
-    if (inputId && from) this.host.children.noteInputOrigin(sessionId, inputId, { seq, from })
+    // A hub's message may run as a turn of its own, after another's (#1604): who it is from, for the turn that does
+    if (inputId && from && hubInput) this.host.children.noteInputOrigin(sessionId, inputId, { seq, from })
     // A turn is asked for now, whether or not the tool announces it before its first card (`CardRests`)
     this.host.cardRests.turnAsked(sessionId)
     if (sendInput) sendInput(h, input, inputId)

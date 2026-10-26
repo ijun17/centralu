@@ -732,9 +732,10 @@ into the turn the caller gave it goes in as a note (the machine's `host.send` ta
 person's message there; nothing is armed again); into a turn the caller did not give it (the person's there) it is
 refused, as neither a queue nor a fork reaches another machine. A note the tool did not read in the turn it went into
 runs as a turn of its own once that turn ends, with no message to start it (#1604). The machine's host says which: the tool
-names the input a turn began from, the host keeps who sent each message it gave the tool under an id (`ChildOwnership`
-`noteInputOrigin`: into a running turn or at rest, in the order given, kept in the app setting `input_origins:<session>` so
-a host that takes the session over after a swap still has them), and the `state_change` that opens the turn carries
+names the input a turn began from, the host keeps who sent each message of a hub's it gave the tool under an id
+(`ChildOwnership` `noteInputOrigin`: into a running turn or at rest, in the order given, at most 64 a session, in the app
+setting `input_origins:<session>`, read and written there each time so a host that takes the session over after a swap still
+has them and the one that leaves cannot overwrite what the other wrote), and the `state_change` that opens the turn carries
 `origin: { seq, from }`, the row of that message and its sender (additive, `TurnOrigin`). The tool names the input only
 on the event that opens the turn, and the host reads it there whether or not it already had the session working: an
 instruction sent at rest in the gap between a turn and the one run for a note before it has the session working before

@@ -115,9 +115,10 @@ const NEXT_STARTER_MS = 15_000
 export const reportTurnKey = (sessionId: string) => `report_turn:${sessionId}`
 /**
  * Who sent each message that was given to the tool under an input id, and the row it is stored as (#1604), kept per session in
- * `input_origins:<session>` so a host that takes over a kept session after a swap still knows whose message a turn the tool
- * runs for it is. The most a session keeps: the oldest go first, as a tool that takes every message into the running turn
- * (Codex) never runs one of them as a turn of its own to clear them
+ * `input_origins:<session>` (read and written in the store each time: a host that takes over a kept session after a swap still
+ * knows whose message a turn the tool runs for it is, and the one that leaves cannot overwrite what the other wrote). Only the
+ * hub's own messages are kept. The most a session keeps: the oldest go first, as a tool that does not say which inputs a turn
+ * took (Codex, an older Claude Code) never clears them
  */
 export const inputOriginsKey = (sessionId: string) => `input_origins:${sessionId}`
 const MAX_INPUT_ORIGINS = 64
@@ -136,6 +137,12 @@ function readInputOrigins(raw: string | null): Map<string, TurnOrigin> {
     // An unreadable record says nothing: no origin is better than a wrong one
   }
   return held
+}
+/** The origins given up to the last of `inputs` that is held, that one's, and those given after it (#1604) */
+function splitOrigins(held: Map<string, TurnOrigin>, inputs: readonly string[]): { origin: TurnOrigin; rest: [string, TurnOrigin][] } | undefined {
+  const order = [...held]
+  const named = order[Math.max(-1, ...inputs.map((id) => order.findIndex(([given]) => given === id)))]
+  return named ? { origin: named[1], rest: order.slice(order.indexOf(named) + 1) } : undefined
 }
 /** A message that went into a turn the tool may or may not have taken in (#1377): decided at the turn's end */
 type PendingMessage = { id?: string; by: 'person' | 'work'; added?: true; source?: TurnSource }
@@ -234,12 +241,6 @@ export class ChildOwnership {
   private readonly lastBy = new Map<string, 'person' | 'work'>()
   /** Messages that went into the running turn and may not have been taken into it (#1377), by session */
   private readonly pending = new Map<string, PendingMessage[]>()
-  /**
-   * Who sent each message a sender gave the tool under an input id, and its row (#1604), in the order they were given
-   * (`inputOriginsKey`: read from the store the first time a session is asked about, written when it changes). Kept until the
-   * turn that ran the message ends, or begins for it (`takeInputOrigin`)
-   */
-  private readonly inputOrigins = new Map<string, Map<string, TurnOrigin>>()
   /** The rows the session's running or last turn, and the one before it, began after (`noteTurnStart`, #1604); memory only, a swap forgets them */
   private readonly turnStarts = new Map<string, { since: number; before?: number }>()
   /** Whose the message is that waits to start the session's next turn, delivered while it was at rest */
@@ -604,10 +605,12 @@ export class ChildOwnership {
   }
   /** A named sender's message was given to the tool as input `inputId`, stored as row `seq`: at rest or into a running turn (#1604) */
   noteInputOrigin(sessionId: string, inputId: string, origin: TurnOrigin): void {
-    const held = this.originsOf(sessionId)
-    held.set(inputId, origin)
-    for (const oldest of [...held.keys()].slice(0, Math.max(0, held.size - MAX_INPUT_ORIGINS))) held.delete(oldest)
-    this.keepOrigins(sessionId, held)
+    // Read and written in one step: the host that is leaving and the one taking over can both be writing during a swap
+    this.store.settings.updateAppSetting(inputOriginsKey(sessionId), (raw) => {
+      const held = readInputOrigins(raw)
+      held.set(inputId, origin)
+      return JSON.stringify([...held].slice(-MAX_INPUT_ORIGINS))
+    })
   }
   /**
    * What the turn that starts now ran for (#1604): the origin of the last of the inputs the tool names that a sender gave
@@ -616,30 +619,21 @@ export class ChildOwnership {
    * named (a message with no sender, the tool's own turn, a tool that does not say)
    */
   takeInputOrigin(sessionId: string, inputs: readonly string[] | null | undefined): TurnOrigin | undefined {
-    if (!inputs?.length) return undefined
-    return this.dropOriginsThrough(sessionId, this.originsOf(sessionId), inputs)
+    return inputs?.length ? this.dropOriginsThrough(sessionId, inputs) : undefined
   }
   /** Takes off every origin given up to the last of `inputs` held, and says that one's (`undefined`: none of them is held) */
-  private dropOriginsThrough(sessionId: string, held: Map<string, TurnOrigin>, inputs: readonly string[]): TurnOrigin | undefined {
-    const order = [...held]
-    const last = Math.max(-1, ...inputs.map((id) => order.findIndex(([held]) => held === id)))
-    const named = order[last]
-    if (!named) return undefined
-    for (const [id] of order.slice(0, last + 1)) held.delete(id)
-    this.keepOrigins(sessionId, held)
-    return named[1]
-  }
-  private originsOf(sessionId: string): Map<string, TurnOrigin> {
-    let held = this.inputOrigins.get(sessionId)
-    if (!held) {
-      held = readInputOrigins(this.store.settings.appSetting(inputOriginsKey(sessionId)))
-      this.inputOrigins.set(sessionId, held)
-    }
-    return held
-  }
-  private keepOrigins(sessionId: string, held: ReadonlyMap<string, TurnOrigin>): void {
-    if (held.size) this.store.settings.setAppSetting(inputOriginsKey(sessionId), JSON.stringify([...held]))
-    else this.store.settings.deleteAppSetting(inputOriginsKey(sessionId))
+  private dropOriginsThrough(sessionId: string, inputs: readonly string[]): TurnOrigin | undefined {
+    const key = inputOriginsKey(sessionId)
+    // Most turns have none: no write for those
+    const raw = this.store.settings.appSetting(key)
+    if (raw === null || !splitOrigins(readInputOrigins(raw), inputs)) return undefined
+    const taken: { origin?: TurnOrigin } = {}
+    this.store.settings.updateAppSetting(key, (current) => {
+      const split = splitOrigins(readInputOrigins(current), inputs)
+      taken.origin = split?.origin
+      return split ? JSON.stringify(split.rest) : (current ?? '[]')
+    })
+    return taken.origin
   }
   /** A turn began after row `seq` of the session's record: the turn's own text is every row after it (#1604) */
   noteTurnStart(sessionId: string, seq: number): void {
@@ -724,7 +718,7 @@ export class ChildOwnership {
     this.pending.delete(sessionId)
     // The inputs the tool says it took in are done with, and so are those given before them: no turn begins for them. A tool
     // that does not say (Codex takes every message in, yet can run one as a turn after) leaves them for the turn that does
-    if (taken?.length) this.dropOriginsThrough(sessionId, this.originsOf(sessionId), taken)
+    if (taken?.length) this.dropOriginsThrough(sessionId, taken)
     for (const p of pending) {
       const joined = taken === undefined || (taken !== null && p.id !== undefined && taken.includes(p.id))
       if (!joined) this.addNext(sessionId, p.by, !!p.added, p.source)

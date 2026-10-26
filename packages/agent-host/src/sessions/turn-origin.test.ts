@@ -45,6 +45,14 @@ describe('a turn the tool opens for an earlier message', () => {
     expect(opened()).toMatchObject({ origin: { seq: rowOf(id, 'first'), from: FROM } })
   })
 
+  it("keeps nothing of another session's messages on this computer: only a hub reads what a turn ran for", async () => {
+    const id = await w.callerSession()
+    await w.mgr.send(id, 'a note from a local session', undefined, { sessionId: 'a-local-session', name: 'Local' })
+    // The message goes in as any other at rest, and nothing is kept for a turn to name
+    expect(handleOf(id).ids.at(-1)).toBeUndefined()
+    expect(w.store.settings.appSetting(`input_origins:${id}`)).toBeNull()
+  })
+
   it('says nothing for a person’s message, or an input no sender gave', async () => {
     const id = await w.callerSession()
     await w.mgr.send(id, 'typed by the person')

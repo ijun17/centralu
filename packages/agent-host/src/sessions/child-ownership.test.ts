@@ -745,6 +745,16 @@ describe('what a turn that opens ran for', () => {
     expect(new ChildOwnership(store).takeInputOrigin('s', ['note-id'])).toBeUndefined()
   })
 
+  it('keeps what two hosts write for one session during a swap: neither overwrites the other with a list read earlier', () => {
+    const leaving = new ChildOwnership(store)
+    const taking = new ChildOwnership(store)
+    leaving.noteInputOrigin('s', 'from-leaving', { ...note, seq: 1 })
+    taking.noteInputOrigin('s', 'from-taking', { ...note, seq: 2 })
+    leaving.noteInputOrigin('s', 'later-from-leaving', { ...note, seq: 3 })
+    expect(leaving.takeInputOrigin('s', ['from-taking'])).toEqual({ ...note, seq: 2 })
+    expect(taking.takeInputOrigin('s', ['later-from-leaving'])).toEqual({ ...note, seq: 3 })
+  })
+
   it('keeps the most recent sixty-four a session was given, not every one for the life of the session', () => {
     for (let i = 0; i < 70; i++) own.noteInputOrigin('s', `id-${i}`, { ...note, seq: i })
     expect(new ChildOwnership(store).takeInputOrigin('s', ['id-0'])).toBeUndefined()
