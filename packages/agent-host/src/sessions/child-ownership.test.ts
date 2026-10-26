@@ -703,4 +703,58 @@ describe('what a turn that opens ran for', () => {
     own.turnEnded('s', [])
     expect(own.takeInputOrigin('s', ['note-id'])).toEqual(note)
   })
+
+  it('takes off every note given before the last one a turn names: the tool runs them in order, and says only the last of a batch', () => {
+    for (const [i, id] of ['a', 'b', 'c', 'd'].entries()) own.noteInputOrigin('s', id, { ...note, seq: 10 + i })
+    expect(own.takeInputOrigin('s', ['c'])).toEqual({ ...note, seq: 12 })
+    // None of the batch is left, and the one given after it still is
+    expect(own.takeInputOrigin('s', ['a'])).toBeUndefined()
+    expect(own.takeInputOrigin('s', ['b'])).toBeUndefined()
+    expect(own.takeInputOrigin('s', ['d'])).toEqual({ ...note, seq: 13 })
+  })
+
+  it("takes off a batch a turn took in at its end too, and keeps what was given after the last it names", () => {
+    own.noteInputOrigin('s', 'task', { ...note, seq: 1 })
+    own.noteInputOrigin('s', 'note-1', { ...note, seq: 2 })
+    own.noteInputOrigin('s', 'note-2', { ...note, seq: 3 })
+    own.turnEnded('s', ['note-1'])
+    expect(own.takeInputOrigin('s', ['task'])).toBeUndefined()
+    expect(own.takeInputOrigin('s', ['note-2'])).toEqual({ ...note, seq: 3 })
+  })
+
+  it('also names a message given at rest, for the turn the tool opens for it after another', () => {
+    own.noteInputOrigin('s', 'at-rest', { ...note, seq: 5 })
+    expect(own.takeInputOrigin('s', ['at-rest'])).toEqual({ ...note, seq: 5 })
+  })
+
+  it('keeps what a tool that does not name its inputs may still run as a turn after the one it was sent into', () => {
+    own.noteMessage('s', 'work', false, true)
+    own.turnStarted('s')
+    own.noteMessage('s', 'work', true, true, false, 'note-id')
+    own.noteInputOrigin('s', 'note-id', note)
+    // Codex: every message sent to a running turn is taken to have joined it, yet one it ran as a turn after is named when that turn opens
+    own.turnEnded('s', undefined)
+    expect(own.takeInputOrigin('s', ['note-id'])).toEqual(note)
+  })
+
+  it('keeps them across a host swap: a host that takes over the session still says whose message the turn it runs is for', () => {
+    own.noteInputOrigin('s', 'note-id', note)
+    const next = new ChildOwnership(store)
+    expect(next.takeInputOrigin('s', ['note-id'])).toEqual(note)
+    // And what it took off stays off for the one after it
+    expect(new ChildOwnership(store).takeInputOrigin('s', ['note-id'])).toBeUndefined()
+  })
+
+  it('keeps the most recent sixty-four a session was given, not every one for the life of the session', () => {
+    for (let i = 0; i < 70; i++) own.noteInputOrigin('s', `id-${i}`, { ...note, seq: i })
+    expect(new ChildOwnership(store).takeInputOrigin('s', ['id-0'])).toBeUndefined()
+    expect(new ChildOwnership(store).takeInputOrigin('s', ['id-69'])).toEqual({ ...note, seq: 69 })
+  })
+
+  it('says where the running turn and the one before it began, for a hub to read the answer of that turn', () => {
+    own.noteTurnStart('s', 4)
+    expect(own.turnStartOf('s')).toEqual({ since: 4 })
+    own.noteTurnStart('s', 9)
+    expect(own.turnStartOf('s')).toEqual({ since: 9, before: 4 })
+  })
 })
