@@ -1,6 +1,6 @@
 import { query, type SettingSource } from '@anthropic-ai/claude-agent-sdk'
 import { randomUUID } from 'node:crypto'
-import { InputReceipts, type InputReceipt } from '../input-receipts.js'
+import { InputReceipts, isUuid, type InputReceipt } from '../input-receipts.js'
 import type { InputObserver } from '../contract.js'
 import type { ApprovalDecision, ApprovalScope, PermissionPreset, QuestionAnswer } from '@cc/protocol'
 import { ClaudeLinks } from './exe-link.js'
@@ -54,12 +54,6 @@ export type ClaudeLaunch = {
   exitGraceMs: number
   /** How long a Stop waits for the CLI to confirm it (see `interrupt`) */
   stopConfirmMs: number
-}
-
-const UUID_FORMAT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-/** An id the host named an input by (#1377): the CLI takes only a UUID */
-function isUuid(s: string): s is ReturnType<typeof randomUUID> {
-  return UUID_FORMAT.test(s)
 }
 
 export class ClaudeSession implements SessionHandle {

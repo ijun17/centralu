@@ -331,9 +331,11 @@ export type LinkedSessions = {
    * The last thing a machine's session said (`host.lastAnswer` there, #1186): its head up to `maxChars` (an ellipsis
    * past it), its length in all, and the seq its first message has there (`around` for read_session), or null when
    * the machine does not say (an older one, read from its lines). A read that failed says why: it used to be an empty
-   * answer, which read as "it said nothing"
+   * answer, which read as "it said nothing". `turn` (#1604): the answer of the turn it last ran, not the last response of the
+   * record (which a note stored in the turn before, run by this one, joins to that turn's); a machine that does not say where a
+   * turn began reads it as the last response
    */
-  lastWords(sessionId: string, maxChars: number): Promise<Outcome<{ text: string; length: number; seq: number | null }>>
+  lastWords(sessionId: string, maxChars: number, opts?: { turn?: boolean }): Promise<Outcome<{ text: string; length: number; seq: number | null }>>
   /** Every linked machine's sessions, the hub's view of each (its orchestrator and coordinators left out) */
   list(): Promise<OrchestratedSession[]>
   /** Every linked machine's sessions, the hub's view of each (its orchestrator and coordinators left out) */

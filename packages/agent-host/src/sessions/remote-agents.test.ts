@@ -484,14 +484,77 @@ describe("the turn on the child's machine, read as the caller's only on evidence
       expect(reportOwed()).toBe(false)
     })
 
-    it("is not the note's when the note was read in the turn it went into: a later turn naming its row is not the caller's", async () => {
+    it("is not the caller's when it names nothing, whatever notes are still held for turns to come", async () => {
       const ra = await afterFollowUp()
-      // No turn began for the note of row 4 (the tool read it in the turn it went into); the tool's own next turn names nothing
+      // The tool's own next turn names no row of the caller's
       opens(ra)
       expect(reportOwed()).toBe(false)
-      ends(ra)
-      opens(ra, { seq: 4, from: named })
-      expect(reportOwed()).toBe(false)
+    })
+
+    /**
+     * The gap (#1604): the caller's note went into turn 1, which did not read it; turn 1 ends, and before the turn the tool
+     * runs for the note begins, the caller sends an instruction with no ifBusy: the machine is at rest as far as anyone can
+     * see. The tool runs the note's turn first (nothing opens it that the hub can tell from the instruction's), then the
+     * instruction's, which names its row
+     */
+    describe('an instruction sent at rest between a turn and the turn run for a note before it', () => {
+      /** Sent at rest: the machine's record of it comes back as the answer to the send does */
+      async function sentInTheGap(ra: RemoteAgents, row: number): Promise<void> {
+        state = 'idle'
+        let release!: () => void
+        holdSend = new Promise<void>((resolve) => (release = resolve))
+        const sending = act(ra, 'send', { text: 'and now this' })
+        await eventually(() => sentTexts.length === 2)
+        ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: row, text: sentTexts[1], from: HUB })
+        release()
+        expect(await sending).toMatchObject({ ok: true, state: 'working', reported: true })
+        state = 'working'
+      }
+
+      it("takes the instruction's own turn for the caller's after the note's turn ended as its report", async () => {
+        const ra = await afterNote()
+        await sentInTheGap(ra, 3)
+        // The turn run for the note (row 2) ends, and it is reported as the send's turn is
+        ends(ra)
+        expect(reportOwed()).toBe(false)
+        // Then the turn run for the instruction (row 3) opens
+        opens(ra, { seq: 3, from: named })
+        expect(reportOwed()).toBe(true)
+        expect(await act(ra, 'send', { text: 'a note into it' })).toMatchObject({ ok: true, state: 'working' })
+        expect(sentTexts).toHaveLength(3)
+      })
+
+      it("still takes the note's turn for the caller's when that is the one that opens first", async () => {
+        const ra = await afterNote()
+        await sentInTheGap(ra, 3)
+        ends(ra)
+        opens(ra, { seq: NOTE_ROW, from: named })
+        expect(reportOwed()).toBe(true)
+        ends(ra)
+        // And the instruction's after it
+        opens(ra, { seq: 3, from: named })
+        expect(reportOwed()).toBe(true)
+      })
+
+      it("does not take a turn run for another's message for the caller's", async () => {
+        const ra = await afterNote()
+        await sentInTheGap(ra, 3)
+        ends(ra)
+        opens(ra, { seq: 7, from: named })
+        expect(reportOwed()).toBe(false)
+      })
+    })
+
+    it("reads an adopted turn's answer as that turn's, from the machine's turn, not the last response of its record", async () => {
+      const asked: unknown[] = []
+      const ra = following(async (_s, _max, opts) => {
+        asked.push(opts)
+        return { ok: true as const, text: 'the second turn', length: 0, seq: null }
+      })
+      state = 'idle'
+      lastUser = { text: 'TASK', from: HUB }
+      expect(await act(ra, 'status')).toMatchObject({ ok: true, state: 'at_rest', answer: 'the second turn' })
+      expect(asked).toEqual([{ turn: true }])
     })
   })
 

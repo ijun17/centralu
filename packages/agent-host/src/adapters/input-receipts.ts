@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto'
 import type { InputObserver } from './contract.js'
 
+const UUID_FORMAT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+/** An id the host named an input by (#1377): the tools take only a UUID */
+export function isUuid(s: string): s is ReturnType<typeof randomUUID> {
+  return UUID_FORMAT.test(s)
+}
+
 export type InputReceipt = { id: ReturnType<typeof randomUUID>; done: Promise<void>; cancelled: boolean; completed: boolean }
 
 /** Tracks completion of input, rather than its acceptance by a CLI. Vendor correlation stays in the adapter. */

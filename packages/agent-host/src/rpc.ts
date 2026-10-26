@@ -1037,8 +1037,8 @@ export function createRpcHandler(
       })
     },
     'host.lastAnswer': async (p) => {
-      const { sessionId, maxChars } = RpcMethods['host.lastAnswer'].params.parse(p)
-      return mgr.hostReader().lastAnswer(sessionId, maxChars)
+      const { sessionId, maxChars, turn } = RpcMethods['host.lastAnswer'].params.parse(p)
+      return mgr.hostReader().lastAnswer(sessionId, maxChars, turn)
     },
     'host.recall': async (p) => {
       const { query, limit } = RpcMethods['host.recall'].params.parse(p)

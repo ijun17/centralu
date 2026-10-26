@@ -488,7 +488,7 @@ export class LinkedReports {
      */
     // Nor its words once the person has taken it over: what is there now is not the assigned work's
     const tookOver = (!!work && 'tookOver' in work) || theirs
-    const words = unreachable || tookOver ? null : await reader.lastWords(sessionId, 600).catch((e: Error) => ({ ok: false as const, error: e.message }))
+    const words = unreachable || tookOver ? null : await reader.lastWords(sessionId, 600, { turn: true }).catch((e: Error) => ({ ok: false as const, error: e.message }))
     const preview =
       theirs && !(work && 'tookOver' in work) ? "(not read: the last turn there was the person's; read_session shows it)"
       : tookOver ? "(not read: the conversation there is the person's now; read_session shows it)"

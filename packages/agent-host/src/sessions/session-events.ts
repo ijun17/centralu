@@ -217,9 +217,16 @@ export class SessionEvents {
         // A turn starts (#1377): whose it is comes from the message it started with, else the CLI's own
         if (!wasBusy && inTurn(m.state)) {
           this.host.children.turnStarted(m.id)
-          // The message the tool ran this turn for, when one sent into the turn before it was not read there (#1604)
-          started = this.host.children.takeInputOrigin(m.id, handle?.turnStartInputs?.())
+          // Its own text is every row after the last one stored now (#1604): what a hub reads of it is that, not the turn before's
+          this.host.children.noteTurnStart(m.id, m.lastSeq)
         }
+        /*
+         * The message the tool ran this turn for, when a sender gave it (#1604): said on the event that opens the turn. Not
+         * only when this host saw the session go from rest to work: a message given at rest has the session working already
+         * when the tool opens the turn it runs for an earlier one (a note sent into the turn before, which that turn did not
+         * read). The tool names the input only on the event that opens the turn, so no other event says one
+         */
+        if (e.type === 'state_change' && e.state === 'working') started = this.host.children.takeInputOrigin(m.id, handle?.turnStartInputs?.())
         /*
          * Or the tool refused it outright (#839): an error or a usage limit, and no turn starts. The request is done with
          * all the same, and this is its turn's end: its requester is told, the turn it owned is released, the next request
@@ -655,9 +662,10 @@ export class SessionEvents {
     // Whose turn this message makes, or joins (#1377): only the person's own message (no source) is theirs
     const joins = inTurn(m.state) && this.host.joinsRunningTurn(sessionId)
     // Named, so the turn that ends can say whether it took this message in (`SessionHandle.turnInputs`)
-    const inputId = joins ? randomUUID() : undefined
+    // Also a sender's message at rest: the turn that runs it may open after another (#1604)
+    const inputId = joins || from ? randomUUID() : undefined
     this.host.children.noteMessage(sessionId, !from && !fromApp && !fromScript ? 'person' : 'work', inTurn(m.state), this.host.joinsRunningTurn(sessionId), intent === 'task', inputId, relayed ? 'report' : fromApp ? 'app' : 'caller')
-    // A sender's message into a running turn may run as a turn of its own after it (#1604): who it is from, for the turn that does
+    // A sender's message may run as a turn of its own, after another's (#1604): who it is from, for the turn that does
     if (inputId && from) this.host.children.noteInputOrigin(sessionId, inputId, { seq, from })
     // A turn is asked for now, whether or not the tool announces it before its first card (`CardRests`)
     this.host.cardRests.turnAsked(sessionId)

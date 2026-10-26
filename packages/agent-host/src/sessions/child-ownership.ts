@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { errorMessage } from '@cc/protocol'
-import type { ApprovalDetail, BackgroundTask, SessionInfo, TurnOrigin } from '@cc/protocol'
+import { errorMessage, TurnOrigin } from '@cc/protocol'
+import type { ApprovalDetail, BackgroundTask, SessionInfo } from '@cc/protocol'
 import type { QueuedRequest, Store } from '../dev-services/store.js'
 import type { AgentRunWait } from './app-agents.js'
 import { inTurn } from '../idle.js'
@@ -113,6 +113,30 @@ export type TurnStarter = { by: 'person' | 'work'; wrote?: true; added?: true }
 const NEXT_STARTER_MS = 15_000
 /** The store's record of the turn a session with an owed report is in (#1377), kept across a swap */
 export const reportTurnKey = (sessionId: string) => `report_turn:${sessionId}`
+/**
+ * Who sent each message that was given to the tool under an input id, and the row it is stored as (#1604), kept per session in
+ * `input_origins:<session>` so a host that takes over a kept session after a swap still knows whose message a turn the tool
+ * runs for it is. The most a session keeps: the oldest go first, as a tool that takes every message into the running turn
+ * (Codex) never runs one of them as a turn of its own to clear them
+ */
+export const inputOriginsKey = (sessionId: string) => `input_origins:${sessionId}`
+const MAX_INPUT_ORIGINS = 64
+function readInputOrigins(raw: string | null): Map<string, TurnOrigin> {
+  const held = new Map<string, TurnOrigin>()
+  if (raw === null) return held
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return held
+    for (const entry of parsed) {
+      if (!Array.isArray(entry) || typeof entry[0] !== 'string') continue
+      const origin = TurnOrigin.safeParse(entry[1])
+      if (origin.success) held.set(entry[0], origin.data)
+    }
+  } catch {
+    // An unreadable record says nothing: no origin is better than a wrong one
+  }
+  return held
+}
 /** A message that went into a turn the tool may or may not have taken in (#1377): decided at the turn's end */
 type PendingMessage = { id?: string; by: 'person' | 'work'; added?: true; source?: TurnSource }
 type StoredTurn = TurnStarter & { pending?: PendingMessage[] }
@@ -211,10 +235,13 @@ export class ChildOwnership {
   /** Messages that went into the running turn and may not have been taken into it (#1377), by session */
   private readonly pending = new Map<string, PendingMessage[]>()
   /**
-   * Who sent each message that went into a running turn under an `id`, and its row (#1604): memory only, kept until the
-   * turn that takes it in ends, or the turn the tool runs for it starts (`takeInputOrigin`)
+   * Who sent each message a sender gave the tool under an input id, and its row (#1604), in the order they were given
+   * (`inputOriginsKey`: read from the store the first time a session is asked about, written when it changes). Kept until the
+   * turn that ran the message ends, or begins for it (`takeInputOrigin`)
    */
   private readonly inputOrigins = new Map<string, Map<string, TurnOrigin>>()
+  /** The rows the session's running or last turn, and the one before it, began after (`noteTurnStart`, #1604); memory only, a swap forgets them */
+  private readonly turnStarts = new Map<string, { since: number; before?: number }>()
   /** Whose the message is that waits to start the session's next turn, delivered while it was at rest */
   private readonly nextStarter = new Map<string, TurnStarter & { at: number }>()
   /** What the work's message that is to start the session's next turn is: a caller's, a report or notice about another session, an app's */
@@ -575,22 +602,53 @@ export class ChildOwnership {
     }
     this.addNext(sessionId, by, added, source)
   }
-  /** A named sender's message went into the running turn as input `inputId`, stored as row `seq` (#1604) */
+  /** A named sender's message was given to the tool as input `inputId`, stored as row `seq`: at rest or into a running turn (#1604) */
   noteInputOrigin(sessionId: string, inputId: string, origin: TurnOrigin): void {
-    this.inputOrigins.set(sessionId, new Map([...(this.inputOrigins.get(sessionId) ?? []), [inputId, origin]]))
+    const held = this.originsOf(sessionId)
+    held.set(inputId, origin)
+    for (const oldest of [...held.keys()].slice(0, Math.max(0, held.size - MAX_INPUT_ORIGINS))) held.delete(oldest)
+    this.keepOrigins(sessionId, held)
   }
   /**
-   * What the turn that starts now ran for (#1604): the origin of the first of the inputs the tool names that a sender gave
-   * a message under, taken off. Undefined when none is (a message at rest, the tool's own turn, a tool that does not say)
+   * What the turn that starts now ran for (#1604): the origin of the last of the inputs the tool names that a sender gave
+   * a message under. The tool runs inputs in the order they were given, so that turn took in every one given before it
+   * too (a tool that runs several as one turn names only the last), and they are all taken off. Undefined when none is
+   * named (a message with no sender, the tool's own turn, a tool that does not say)
    */
   takeInputOrigin(sessionId: string, inputs: readonly string[] | null | undefined): TurnOrigin | undefined {
-    const held = this.inputOrigins.get(sessionId)
-    if (!held || !inputs) return undefined
-    const found = inputs.find((id) => held.has(id))
-    const origin = found === undefined ? undefined : held.get(found)
-    for (const id of inputs) held.delete(id)
-    if (!held.size) this.inputOrigins.delete(sessionId)
+    if (!inputs?.length) return undefined
+    return this.dropOriginsThrough(sessionId, this.originsOf(sessionId), inputs)
+  }
+  /** Takes off every origin given up to the last of `inputs` held, and says that one's (`undefined`: none of them is held) */
+  private dropOriginsThrough(sessionId: string, held: Map<string, TurnOrigin>, inputs: readonly string[]): TurnOrigin | undefined {
+    const order = [...held.keys()]
+    const last = Math.max(-1, ...inputs.map((id) => order.indexOf(id)))
+    if (last < 0) return undefined
+    const origin = held.get(order[last]!)!
+    for (const id of order.slice(0, last + 1)) held.delete(id)
+    this.keepOrigins(sessionId, held)
     return origin
+  }
+  private originsOf(sessionId: string): Map<string, TurnOrigin> {
+    let held = this.inputOrigins.get(sessionId)
+    if (!held) {
+      held = readInputOrigins(this.store.settings.appSetting(inputOriginsKey(sessionId)))
+      this.inputOrigins.set(sessionId, held)
+    }
+    return held
+  }
+  private keepOrigins(sessionId: string, held: ReadonlyMap<string, TurnOrigin>): void {
+    if (held.size) this.store.settings.setAppSetting(inputOriginsKey(sessionId), JSON.stringify([...held]))
+    else this.store.settings.deleteAppSetting(inputOriginsKey(sessionId))
+  }
+  /** A turn began after row `seq` of the session's record: the turn's own text is every row after it (#1604) */
+  noteTurnStart(sessionId: string, seq: number): void {
+    const was = this.turnStarts.get(sessionId)
+    this.turnStarts.set(sessionId, { since: seq, ...(was ? { before: was.since } : {}) })
+  }
+  /** The rows the session's running or last turn, and the one before it, began after, when this host saw them begin */
+  turnStartOf(sessionId: string): { since: number; before?: number } | undefined {
+    return this.turnStarts.get(sessionId)
   }
   /** A message that is to start the session's next turn (#1377); a later one before it starts only joins */
   private addNext(sessionId: string, by: 'person' | 'work', added: boolean, source: TurnSource = 'caller'): void {
@@ -664,10 +722,11 @@ export class ChildOwnership {
     this.cliTurns.delete(sessionId)
     const pending = this.pending.get(sessionId) ?? []
     this.pending.delete(sessionId)
+    // The inputs the tool says it took in are done with, and so are those given before them: no turn begins for them. A tool
+    // that does not say (Codex takes every message in, yet can run one as a turn after) leaves them for the turn that does
+    if (taken?.length) this.dropOriginsThrough(sessionId, this.originsOf(sessionId), taken)
     for (const p of pending) {
       const joined = taken === undefined || (taken !== null && p.id !== undefined && taken.includes(p.id))
-      // Taken into this turn: no turn will begin for it
-      if (joined && p.id !== undefined) this.inputOrigins.get(sessionId)?.delete(p.id)
       if (!joined) this.addNext(sessionId, p.by, !!p.added, p.source)
       else if (p.by === 'person' && starter.by === 'work') {
         if (p.added) starter.added = true
