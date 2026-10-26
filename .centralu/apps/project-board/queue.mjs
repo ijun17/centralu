@@ -548,12 +548,37 @@ export function quickLanded(checks, runs, fullTier, quickChecks = []) {
 export function screenLanded(checks, runs, fullTier, screenChecks = []) {
   if (!screenChecks?.length || !fullTier || ranTier(checks, fullTier) !== 'full') return false
   if (!runs?.length || !runs.every((r) => r.status === 'completed' && OK_CONCLUSIONS.has(r.conclusion))) return false
-  const all = [...checks.rows, ...(checks.others ?? [])]
+  const all = [...checks.rows, ...(checks.others ?? [])].filter((r) => !unexpandedSkip(r.name, r.check?.conclusion))
   const succeeded = (r) => !!r.check && (r.check.kind === 'status' ? r.check.state === 'success' : r.check.status === 'completed' && r.check.conclusion === 'success')
   return screenChecks.every((pattern) => {
     const named = all.filter((r) => onFlakyList(r.name, [pattern]))
-    return named.length > 0 && named.every(succeeded)
+    return named.length > 0 && named.every(succeeded) && shardsComplete(named.map((r) => r.name))
   })
+}
+
+/**
+ * A matrix job GitHub skipped before it expanded the matrix: it reports its name unexpanded (`e2e (chromium ${{
+ * matrix.shard }}/${{ matrix.shards }})`) and skipped. build.yml's `…-skipped` stand-in of a matrix job is one on every
+ * run where the real shards run (its `if:` is the other answer), so it says nothing about the shards: it is not one of
+ * them, neither a pass nor a hole (queue/batch-220, run 40247598237: all ten shards passed and the batch was dropped for
+ * it). A job whose matrix was expanded and then skipped has its real name, and still counts as not run.
+ */
+export const unexpandedSkip = (name, conclusion) => String(name ?? '').includes('${{') && conclusion === 'skipped'
+
+/**
+ * Whether the shards a heavy check's pattern names are all of them: names that end in `N/M)` (build.yml's matrix,
+ * `shard: [1..M]`, `shards: [M]`) must be 1 to M, of one M. A shard GitHub never created is a hole however the others
+ * did. Names without a shard number have nothing to count.
+ */
+export function shardsComplete(names) {
+  const nums = names.map((n) => /(\d+)\/(\d+)\)$/.exec(n))
+  if (nums.every((m) => !m)) return true
+  if (nums.some((m) => !m)) return false
+  const of = new Set(nums.map((m) => Number(m[2])))
+  if (of.size !== 1) return false
+  const count = [...of][0]
+  const got = new Set(nums.map((m) => Number(m[1])))
+  return got.size === count && [...got].every((k) => k >= 1 && k <= count)
 }
 
 export function quickGreen(checks, runs, fullTier) {

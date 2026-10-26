@@ -36,7 +36,7 @@
 // to a session, at most MOVED_CAP times per head (#1548).
 import { ranTier } from './ci.mjs'
 import { onFlakyList } from './run-failure.mjs'
-import { ACTIVE, BATCH_ACTIVE, findItem, pushEvent, queueOrder, screenLanded } from './queue.mjs'
+import { ACTIVE, BATCH_ACTIVE, findItem, pushEvent, queueOrder, screenLanded, shardsComplete, unexpandedSkip } from './queue.mjs'
 import { short } from './util.mjs'
 
 export const BRANCH_PREFIX = 'queue/batch-'
@@ -85,12 +85,14 @@ export function gateGreen({ full, landTier, checks, runs, fullTier, screen = nul
 /**
  * Whether each heavy job (`screen.checks`) did its work: every job of a run whose name one of them matches has a step
  * `screen.steps` matches that succeeded, and each pattern names at least one such job. A stand-in job (the same name,
- * a step that only echoes) has none.
+ * a step that only echoes) has none. A matrix stand-in skipped under its unexpanded name is none of them (`unexpandedSkip`),
+ * and every shard of the matrix must be there (`shardsComplete`).
  */
 export function heavyRan(jobs, screen) {
+  const real = jobs.filter((j) => !unexpandedSkip(j.name, j.conclusion))
   return screen.checks.every((pattern) => {
-    const named = jobs.filter((j) => onFlakyList(j.name, [pattern]))
-    return named.length > 0 && named.every((j) => (j.steps ?? []).some((s) => s.conclusion === 'success' && onFlakyList(s.name, screen.steps)))
+    const named = real.filter((j) => onFlakyList(j.name, [pattern]))
+    return named.length > 0 && named.every((j) => (j.steps ?? []).some((s) => s.conclusion === 'success' && onFlakyList(s.name, screen.steps))) && shardsComplete(named.map((j) => j.name))
   })
 }
 /** The tiers by the names the queue's texts use */

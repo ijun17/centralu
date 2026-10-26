@@ -7,7 +7,7 @@
 // a crash) is read as "it does": a batch that cannot be judged runs the heavy jobs, as a change that cannot be judged
 // is deep (queue-integrate.mjs).
 import { execFile } from 'node:child_process'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { CI } from './config.mjs'
@@ -24,24 +24,47 @@ const errorLine = (stderr) => {
   return lines.find((l) => /^\w*Error\b/.test(l)) ?? lines.at(-1) ?? ''
 }
 
-/** Runs the judge (its source text) on the files: `{ screen, file, count }`, or throws. */
+/**
+ * Runs the judge (its source text) on the files: `{ screen, file, count }`, or throws with what went wrong (the exit code,
+ * the error line it printed, or what it printed instead of an answer).
+ *
+ * The folder it is written to is taken by its real path. The judge runs its main only when it is the script Node was
+ * started with (`import.meta.url` against `process.argv[1]`), and Node resolves the first to the real path but not the
+ * second: from a folder behind a symlink (macOS's temp folder, /var/folders under the /var link to /private/var) it
+ * printed nothing and exited 0, and every batch was taken for one that changes the screen (queue/batch-220, "Unexpected
+ * end of JSON input").
+ */
 function runJudge(source, files) {
-  return mkdtemp(join(tmpdir(), 'cc-queue-screen-')).then(async (dir) => {
+  // The Node this server runs on: the manifest starts it as `node`, so it is a plain Node, whatever PATH the judge gets
+  const node = process.execPath
+  return mkdtemp(join(tmpdir(), 'cc-queue-screen-')).then(async (made) => {
     try {
+      const dir = await realpath(made)
       const file = join(dir, 'ci-changes.mjs')
       await writeFile(file, source)
       const out = await new Promise((resolve, reject) => {
-        const child = execFile(process.execPath, [file, '--screen'], { cwd: dir, timeout: JUDGE_MS, maxBuffer: 1024 * 1024, env: { LC_ALL: 'C', ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}) } }, (error, stdout, stderr) =>
-          error ? reject(new Error(errorLine(stderr) || error.message)) : resolve(stdout),
-        )
+        const child = execFile(node, [file, '--screen'], { cwd: dir, timeout: JUDGE_MS, maxBuffer: 1024 * 1024, windowsHide: true, env: { LC_ALL: 'C', ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}) } }, (error, stdout, stderr) => {
+          if (!error) return resolve({ stdout, stderr })
+          const how = error.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' ? 'more output than it may print' : error.killed ? `a stop after ${JUDGE_MS / 1000} s` : typeof error.code === 'number' ? `exit code ${error.code}` : `${error.code ?? error.signal ?? 'no start'}`
+          const line = errorLine(stderr)
+          reject(new Error(`the judge ended with ${how}: ${line || error.message}`))
+        })
         child.stdin.on('error', () => {})
         child.stdin.end(JSON.stringify(files))
       })
-      const answer = JSON.parse(String(out))
+      const text = String(out.stdout).trim()
+      const said = errorLine(out.stderr)
+      if (!text) throw new Error(`the judge printed no answer and ended with exit code 0${said ? `: ${said}` : ''}`)
+      let answer
+      try {
+        answer = JSON.parse(text)
+      } catch {
+        throw new Error(`the judge printed something else than JSON: ${text.split('\n')[0].slice(0, 120)}`)
+      }
       if (typeof answer?.screen !== 'boolean') throw new Error('it answered something else than { screen }')
       return answer
     } finally {
-      await rm(dir, { recursive: true, force: true }).catch(() => null)
+      await rm(made, { recursive: true, force: true }).catch(() => null)
     }
   })
 }

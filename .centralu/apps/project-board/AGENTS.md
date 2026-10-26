@@ -604,7 +604,10 @@ the required set: it judges main's runs and its probes by their conclusion, and 
 - **A batch that changes the screen runs the heavy jobs first** (#1538, the owner's decision of 2026-10-26; after
   `batch-194` landed #1521 from the fast tier and main's full run failed in four e2e shards, the revert did not apply and
   main stayed red). With `landTier` "quick" and project.json `ci.screen`, each batch is judged as it is built
-  (`judgeBatch`, queue-screen.mjs): the files it adds to the default branch (GitHub's comparison, a renamed file under both
+  (`judgeBatch`, queue-screen.mjs; the judge is written to the real path of a temporary folder and started with the Node this
+  server runs on: from macOS's temporary folder, behind the /var -> /private/var link, its main never ran and it printed
+  nothing, queue/batch-220; empty output, a non-zero exit or output that is not `{ screen }` is "cannot be judged", and the
+  batch's text names the exit code and the judge's error line): the files it adds to the default branch (GitHub's comparison, a renamed file under both
   names) go to the default branch's own `.github/scripts/ci-changes.mjs --screen` (`screenFiles`: the window, the host and the
   protocol outside their tests, the scenarios, the build, and what the scenarios render or read from elsewhere: the desktop
   shell's TypeScript, two shell files, the board's own screen and runtime, the dev server script). **This app keeps no list of
@@ -626,7 +629,11 @@ the required set: it judges main's runs and its probes by their conclusion, and 
   the branch's own `classify` left out reports a stand-in of the same name (build.yml's `e2e-chromium-skipped`, which only
   echoes), and the branch decides `code` while the default branch decides the screen. So once the checks pass, the run's jobs
   are read (`runJobSteps`) and each such job must have succeeded in a step `ci.screen.steps` names (`pnpm e2e (shard *)`;
-  `heavyRan`). The shards, and the run itself, are waited for (a batch in `ci` while they run, **and while GitHub has not yet
+  `heavyRan`). Two more rules, from queue/batch-220 (run 40247598237, #1562: all ten shards passed and the batch was dropped):
+  a job **skipped under its unexpanded matrix name** (`e2e (chromium ${{ matrix.shard }}/${{ matrix.shards }})`, the
+  stand-in GitHub skips on every run where the real shards run) is none of the shards, neither a pass nor a hole
+  (`unexpandedSkip`, queue.mjs); and the shards a pattern names must be **all of the matrix**, `1/M` to `M/M` of one `M`
+  (build.yml's `shards`), so a shard GitHub never created is a hole (`shardsComplete`). The shards, and the run itself, are waited for (a batch in `ci` while they run, **and while GitHub has not yet
   marked the run completed** though every check has reported, a normal window: dropping the batch there lost a full run and
   told the session it had failed). Any other batch has `tier` `quick` and lands as before, from the fast tier. Where the owner's
   project.json has no `ci.screen`, or `landTier` is "full", nothing changes (the full tier, always).
@@ -640,7 +647,8 @@ the required set: it judges main's runs and its probes by their conclusion, and 
 - **The model test** (`tooling/project-board-queue-model.test.ts`): the real `tick` of queue-driver.mjs (and so the batch
   steps, the judge, `runCi`, `landNext`, `drop`) run against a model of GitHub that replaces github.mjs only: pull requests
   with files, main and its tree, batch branches, runs that take time (all checks reported a moment before the run is completed),
-  fail, are cancelled and rerun, skip a shard, or have a stand-in report a shard's name; main moving, pushes, unqueueing, a judge
+  fail, are cancelled and rerun, skip a shard, or have a stand-in report a shard's name, and on every full run the stand-in
+  skipped under its unexpanded matrix name, as GitHub reports it (and one case runs on the recorded job list of run 40247598237); main moving, pushes, unqueueing, a judge
   that is missing or crashes, an older board's batch with no tier. It checks every landing against the model's own table of
   files (not the judge's answer) and the run that proved it. Change the queue's steps and this runs them.
 - **Bisect** (2026-10-19): a red batch is split in halves, each a batch of its own built in turn on
