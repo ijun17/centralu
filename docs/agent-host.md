@@ -731,11 +731,17 @@ local child's approval, never answers one on another computer, even when its chi
 into the turn the caller gave it goes in as a note (the machine's `host.send` takes it into the running turn, as the
 person's message there; nothing is armed again); into a turn the caller did not give it (the person's there) it is
 refused, as neither a queue nor a fork reaches another machine. A note the tool did not read in the turn it went into
-runs as a turn of its own once that turn ends, with no message of anyone's to start it: the first turn that begins within
-15 s of the end of a turn that took a note of the caller's is that note's, so the caller's (`RemoteAgents.carried`,
-#1604), and its end is owed as the first turn's was. The person's message first, a link's loss or a send at rest drops
-that reading. A refusal names the turn by what the hub saw start it: a person's message, another session's, or no
-message at all ("which this hub did not see begin"), never the person without a message of theirs.
+runs as a turn of its own once that turn ends, with no message to start it (#1604). The machine's host says which: the tool
+names the input a turn began from (Claude Code: `user_message_uuid` on the turn's first message; the adapter's
+`turnStartInputs`), the host keeps who sent each message it put into a running turn under an id (`ChildOwnership`
+`noteInputOrigin`, memory only), and the `state_change` that opens the turn carries `origin: { seq, from }`, the row of
+that message and its sender (additive, `TurnOrigin`). The hub holds the rows of the caller's notes that went into its live
+turn (`RemoteAgents.carried`) and takes a turn for the caller's only when its origin names one of those rows from this
+hub's sender; its end is then owed as the first turn's was, and a note goes into it. Nothing is guessed from the time
+between turns. A turn with no origin stays refused, and so does everything after the person's message, a link's loss, a
+send at rest, a restart of either host, or an older machine that sends no origin. A refusal names the turn by what the hub
+saw start it: a person's message, another session's, or no message at all ("which this hub did not see begin"), never the
+person without a message of theirs. Codex takes every message into the turn it is running, so it never runs one as the next.
 
 The person may use the same session on that machine, and nothing of a turn that is not the caller's reaches the
 caller (#1038 review, RV13). One gate decides it (`RemoteAgents.gate`), and every path that hands the caller anything

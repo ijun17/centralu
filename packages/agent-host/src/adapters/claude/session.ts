@@ -75,7 +75,7 @@ export class ClaudeSession implements SessionHandle {
   private quietInputs = new Set<string>()
   private trackedInputKnown = false
   /** Installed only after the initial CLI metadata confirms the protocol we have verified. */
-  sendTracked?: (text: string, observer?: InputObserver, opts?: { origin?: InputOrigin }) => Promise<void>
+  sendTracked?: (text: string, observer?: InputObserver, opts?: { origin?: InputOrigin; id?: string }) => Promise<void>
   /** The CLI version this process last reported (#297) */
   private reportedVersion: string | null = null
   /** The init message's command list was compared with the adapter's limitations (#270): once per process */
@@ -341,7 +341,12 @@ export class ClaudeSession implements SessionHandle {
     const m = msg as StreamMsg
     if (!this.turnOpen && m.user_message_uuid && !m.parent_tool_use_id && (m.type === 'assistant' || m.type === 'stream_event')) {
       this.turnOpen = true
-      if (!this.cards.pending.size && !this.cards.questions.size) this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'working' })
+      if (!this.cards.pending.size && !this.cards.questions.size) {
+        // The input this turn began from, read by the host while it handles the event (`turnStartInputs`, #1604)
+        this.startInputs = [m.user_message_uuid]
+        this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'working' })
+        this.startInputs = null
+      }
     }
     // The first thing the CLI says for an input is a turn run for it (`user_message_uuid`): it took it
     if (m.user_message_uuid) this.inputReceipts.accept(m.user_message_uuid)
@@ -401,7 +406,7 @@ export class ClaudeSession implements SessionHandle {
       this.trackedInputKnown = true
       if (tracksInputs(m)) {
         this.sendTracked = (text, observer, opts) => {
-          const receipt = this.inputReceipts.create(observer)
+          const receipt = this.inputReceipts.create(observer, opts?.id !== undefined && isUuid(opts.id) ? opts.id : undefined)
           this.sendInput(text, receipt.id, receipt, opts?.origin)
           return receipt.done
         }
@@ -488,6 +493,12 @@ export class ClaudeSession implements SessionHandle {
     if (this.closed) return false
     this.send(text, { origin: { kind: 'channel', server: 'centralu' }, quiet: true })
     return true
+  }
+
+  /** The input the turn whose start is being handled began from (#1604); null outside that event */
+  private startInputs: readonly string[] | null = null
+  turnStartInputs(): readonly string[] | null {
+    return this.startInputs
   }
 
   /** The inputs the result being handled names (#1377); null when the CLI cannot name them, and outside a result */

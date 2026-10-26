@@ -64,7 +64,7 @@ export type AppSessionsHost = {
   /** Registers a folder made for a new app as a trusted project, and tells the windows: `ProjectCreation.registerMadeFolder` */
   registerMadeFolder: (path: string, opts?: { trusted?: boolean }) => Promise<ProjectInfo>
   readonly delegationFlow: DelegationFlow
-  deliver: (sessionId: string, text: string, attachments: Attachment[] | undefined, from: { sessionId: string; name: string; } | undefined, relayed: boolean, fromApp?: AppMessageSource, fromAppVia?: AppMessageVia, sendInput?: (handle: SessionHandle, text: string) => void, stillAllowed?: () => string | null, relayedText?: string) => Promise<void>
+  deliver: (sessionId: string, text: string, attachments: Attachment[] | undefined, from: { sessionId: string; name: string; } | undefined, relayed: boolean, fromApp?: AppMessageSource, fromAppVia?: AppMessageVia, sendInput?: (handle: SessionHandle, text: string, inputId?: string) => void, stillAllowed?: () => string | null, relayedText?: string) => Promise<void>
   readonly handles: Map<string, SessionHandle>
   listSessions: () => SessionInfo[]
   readonly memoryGate: MemoryGate | null

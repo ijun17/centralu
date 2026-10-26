@@ -12,7 +12,8 @@ import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '
  * and every turn ends with `turn_complete`, so the session goes back to idle the way a real one does.
  *
  * `queueBehind`: a message sent while a turn is open is not taken into it but held, and runs as a turn of its own once
- * that one ends, as a tool whose running turn did not read the input does with it (#1604).
+ * that one ends, as a tool whose running turn did not read the input does with it (#1604). Like Claude Code it names the
+ * inputs a turn took in when it ends (`turnInputs`) and the input a turn began from when it opens (`turnStartInputs`).
  */
 class ScriptedHandle implements SessionHandle {
   readonly externalId: string
@@ -20,7 +21,11 @@ class ScriptedHandle implements SessionHandle {
   private approvals = new Set<string>()
   private questions = new Set<string>()
   private open = false
-  private readonly held: string[] = []
+  private readonly held: { text: string; id?: string }[] = []
+  /** The inputs the open turn runs for, what `turnInputs` says when it ends, and what `turnStartInputs` says as a held one opens */
+  private taking: string[] = []
+  private ending: readonly string[] | null = null
+  private starting: readonly string[] | null = null
 
   constructor(
     readonly sessionId: string,
@@ -30,13 +35,21 @@ class ScriptedHandle implements SessionHandle {
     private readonly queueBehind = false,
   ) {
     this.externalId = `scripted-${sessionId}`
+    if (queueBehind) {
+      this.turnInputs = () => this.ending
+      this.turnStartInputs = () => this.starting
+    }
   }
 
-  send(text: string): void {
+  turnInputs?(): readonly string[] | null
+  turnStartInputs?(): readonly string[] | null
+
+  send(text: string, opts?: { id?: string }): void {
     if (this.queueBehind && this.open) {
-      this.held.push(text)
+      this.held.push({ text, ...(opts?.id ? { id: opts.id } : {}) })
       return
     }
+    if (this.queueBehind) this.taking = opts?.id ? [opts.id] : []
     if (this.immediate) return this.turn(text)
     setTimeout(() => this.turn(text), 20)
   }
@@ -64,10 +77,21 @@ class ScriptedHandle implements SessionHandle {
 
   private say(text: string): void {
     this.emit({ type: 'message_delta', sessionId: this.sessionId, role: 'assistant', text })
+    this.ending = this.taking
     this.emit({ type: 'turn_complete', sessionId: this.sessionId })
+    this.ending = null
     this.open = false
     const next = this.held.shift()
-    if (next !== undefined) setTimeout(() => this.turn(next), 20)
+    if (next !== undefined) {
+      setTimeout(() => {
+        // The tool opens the turn it runs the held message for, and says which input that is
+        this.taking = next.id ? [next.id] : []
+        this.starting = this.taking
+        this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'working' })
+        this.starting = null
+        this.turn(next.text)
+      }, 20)
+    }
   }
 
   respondApproval(requestId: string, decision: ApprovalDecision): boolean {
@@ -96,16 +120,7 @@ class ScriptedHandle implements SessionHandle {
 }
 
 export class ScriptedAdapter implements AgentAdapter {
-  readonly capabilities: AdapterCapabilities = {
-    approvals: true,
-    contextUsage: 'none',
-    resume: true,
-    autoTitle: false,
-    attachments: ['image'],
-    verbosities: [],
-    exclusiveWriter: false,
-    backgroundTasks: false,
-  }
+  readonly capabilities: AdapterCapabilities
   readonly descriptor: AgentAdapter['descriptor']
   readonly created: string[] = []
 
@@ -114,6 +129,18 @@ export class ScriptedAdapter implements AgentAdapter {
     private readonly immediate = false,
     private readonly queueBehind = false,
   ) {
+    this.capabilities = {
+      approvals: true,
+      contextUsage: 'none',
+      resume: true,
+      autoTitle: false,
+      // A message sent into a running turn is named, so the turn that ends can say whether it took it in (`queueBehind`)
+      ...(queueBehind ? { midTurnInput: true } : {}),
+      attachments: ['image'],
+      verbosities: [],
+      exclusiveWriter: false,
+      backgroundTasks: false,
+    }
     this.descriptor = { name: tool, label: `Scripted ${tool}`, mark: tool.slice(0, 1).toUpperCase(), install: 'none', login: 'none' }
   }
 

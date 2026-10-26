@@ -4,6 +4,7 @@ import type { AgentListRow, AgentSessionOpts, ChildRunResult, LinkedProject, Lin
 import { awayPhrase, NOT_CONNECTED, NOT_CONNECTED_PHRASE, NOT_REACHABLE } from '../adapters/contract.js'
 import { gitValidBranchName } from '../dev-services/git-worktree.js'
 import { readJsonObjects } from '../dev-services/store/json.js'
+import { asObj } from '../json-value.js'
 import { inTurn } from '../idle.js'
 import { agentDepthRefusal, depthOf } from './agent-depth.js'
 import { ANSWER_READ_MAX_CHARS, ASK_WAIT_MS, clipAnswer, taskLine } from './ask-project.js'
@@ -87,8 +88,6 @@ const bare = (error: string): string => error.trim().replace(/\.+$/, '')
  */
 export const INSTRUCTIONS_WAIT_MS = 5_000
 
-/** How soon after the caller's turn ended a turn with no message of anyone's is the note's that the tool ran after it (#1604); the machine's own bound for the same (`NEXT_STARTER_MS`) */
-const FOLLOW_UP_MS = 15_000
 
 /**
  * What became of a deleted child's worktree on its machine (#1161 item 3), as the rest of "It went to <machine>'s
@@ -202,12 +201,13 @@ export class RemoteAgents {
   /** What made a turn another's, when it is told (#1576): a message from another session of this hub, else it is read as the person's */
   private readonly otherBy = new Map<string, 'session' | 'person'>()
   /**
-   * Children a note of the caller's went into a running turn of (#1604), and when that turn ended (null while it runs). A
-   * tool whose turn does not read the note runs it as a turn of its own once the turn ends, with no message of anyone's
-   * to say so: the first turn that begins soon after is the note's, so the caller's. Dropped by anything that tells another
-   * way: a message of someone else's, a send at rest, a link's loss
+   * The rows of the caller's notes that went into a running turn (#1604), by child. A tool that does not read a note there
+   * runs it as a turn of its own once that turn ends, and the machine says so on the turn's start: `origin.seq` names the
+   * row it ran the turn for. Only a turn whose origin is a row held here, sent by this hub, is taken for the caller's.
+   * Cleared by the next turn to begin, and by anything that tells another way: a message of someone else's, a send at
+   * rest, a link's loss
    */
-  private readonly carried = new Map<string, number | null>()
+  private readonly carried = new Map<string, Set<number>>()
   /** Notes sent into a running turn whose record has not come back yet (memory only): two quick notes both are the caller's own */
   private readonly notesSent = new Map<string, string[]>()
   /** Children an instruction is on its way to: its own send's answer says what came of it, and the machine is not read meanwhile */
@@ -907,13 +907,13 @@ export class RemoteAgents {
     if (earlier >= 0 && this.fromHubHere(rec, e.from)) {
       // An earlier note of the caller's own, its record arriving after a later note was kept as the last sent
       this.notesSent.set(sessionId, own.filter((_, i) => i !== earlier))
-      if (this.whoseOf(rec) === 'caller' && this.gateNow(rec).live) return void this.carried.set(sessionId, null)
+      if (this.whoseOf(rec) === 'caller' && this.gateNow(rec).live) return this.carryNote(sessionId, e.seq)
     }
     if (this.fromHubHere(rec, e.from) && e.text === rec.sent) {
       const at = own.indexOf(rec.sent ?? '')
       if (at >= 0) this.notesSent.set(sessionId, own.filter((_, i) => i !== at))
       // A note into the caller's own running turn stays in it, unless the tool runs it after that turn (`carried`)
-      if (this.whoseOf(rec) === 'caller' && this.gateNow(rec).live) return void this.carried.set(sessionId, null)
+      if (this.whoseOf(rec) === 'caller' && this.gateNow(rec).live) return this.carryNote(sessionId, e.seq)
       if (this.busy.has(sessionId)) return this.setWhose(rec, 'other', 'took what you sent as a message into a turn already running there that you did not give it (the person\'s, most likely)')
       this.tookInstruction(rec)
       return
@@ -938,25 +938,29 @@ export class RemoteAgents {
     const sessionId = rec.sessionId
     const step = linkedTurnEnd(true, e)
     if (step?.step === 'busy') {
+      const began = !this.busy.has(sessionId)
       this.busy.add(sessionId)
-      this.followUpBegins(rec)
-    } else if (step?.step === 'completed' || step?.step === 'failed' || step?.step === 'deleted') {
-      this.busy.delete(sessionId)
-      if (this.carried.has(sessionId)) this.carried.set(sessionId, Date.now())
-    }
+      if (began) this.turnBegins(rec, e)
+    } else if (step?.step === 'completed' || step?.step === 'failed' || step?.step === 'deleted') this.busy.delete(sessionId)
+  }
+
+  /** A note of the caller's went into its running turn as row `seq`: if the tool does not read it there, it runs it as the next turn (`carried`) */
+  private carryNote(sessionId: string, seq: unknown): void {
+    if (typeof seq === 'number') this.carried.set(sessionId, new Set([...(this.carried.get(sessionId) ?? []), seq]))
   }
 
   /**
-   * A turn begins with no message to say whose it is (#1604), soon after the caller's turn ended with a note of its own in
-   * it: the tool did not read the note there and runs it now, so this turn is the note's, the caller's, and its end is
-   * owed as the first turn's was. Not a turn the person began (their message came first and dropped `carried`)
+   * A turn begins (#1604). When the machine says it ran it for a note of the caller's that went into the turn before
+   * (`origin`, from this hub), it is the caller's: its end is owed as the first turn's was, and a note goes into it. A turn
+   * with no origin, or one for a row not held here (the person's, another session's, a host that does not say), is not
+   * taken for the caller's. The notes held are done with either way: that turn took them or they never ran
    */
-  private followUpBegins(rec: RemoteAgent): void {
-    const endedAt = this.carried.get(rec.sessionId)
-    if (endedAt === undefined || endedAt === null) return
+  private turnBegins(rec: RemoteAgent, e: LinkedEvent): void {
+    const held = this.carried.get(rec.sessionId)
     this.carried.delete(rec.sessionId)
-    if (Date.now() - endedAt > FOLLOW_UP_MS || this.whoseOf(rec) !== 'caller' || this.gateNow(rec).live) return
-    if (!this.host.meta.has(rec.callerId)) return
+    const origin = e.type === 'state_change' ? asObj(e.origin) : {}
+    if (!held || typeof origin.seq !== 'number' || !held.has(origin.seq) || !this.fromHubHere(rec, origin.from)) return
+    if (this.whoseOf(rec) !== 'caller' || this.gateNow(rec).live || !this.host.meta.has(rec.callerId)) return
     this.host.children.setLinkedReport(rec.sessionId, { orchestratorId: rec.callerId, busy: true })
   }
 

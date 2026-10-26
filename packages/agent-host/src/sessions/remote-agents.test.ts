@@ -379,78 +379,119 @@ describe("the turn on the child's machine, read as the caller's only on evidence
     expect(reportOwed()).toBe(false)
   })
 
-  describe("a turn that begins with no message after one that had the caller's note in it (#1604)", () => {
-    /** The caller's turn took its task and a note; the turn ends, and its report goes as the linked reports send it */
+  describe("a turn the machine says it ran for a note of the caller's (#1604)", () => {
+    const NOTE_ROW = 2
+    const named = { ...HUB, name: 'h1' }
+    const opens = (ra: RemoteAgents, origin?: unknown) => ra.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working', ...(origin ? { origin } : {}) })
+    const ends = (ra: RemoteAgents) => {
+      ra.observe({ type: 'turn_complete', sessionId: child.sessionId })
+      children.dropLinkedReport(child.sessionId)
+    }
+    /** The caller's turn took its task and a note (row 2) as the tool read them; the turn ends and its report goes as the linked reports send it */
     async function afterNote(): Promise<RemoteAgents> {
       const ra = following()
       children.setLinkedReport(child.sessionId, { orchestratorId: 'h1', busy: false })
       ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 1, text: 'TASK', from: HUB })
-      ra.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working' })
+      opens(ra)
       expect(await act(ra, 'send', { text: 'use the staging data' })).toMatchObject({ ok: true, state: 'working' })
-      ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 2, text: sentTexts[0], from: HUB })
-      ra.observe({ type: 'turn_complete', sessionId: child.sessionId })
-      children.dropLinkedReport(child.sessionId)
+      ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: NOTE_ROW, text: sentTexts[0], from: HUB })
+      ends(ra)
       return ra
     }
-
     /**
-     * The note's turn has begun and been taken for the caller's (a control: the cases below only mean something if this
-     * holds), took another note of the caller's, and ended: what begins next is judged again
+     * The turn that ran for the note began and was taken for the caller's (a control: the cases below only mean something if
+     * this holds), took another note of the caller's (row 4), and ended: what begins next is judged again
      */
     async function afterFollowUp(): Promise<RemoteAgents> {
       const ra = await afterNote()
-      ra.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working' })
+      opens(ra, { seq: NOTE_ROW, from: named })
       expect(reportOwed()).toBe(true)
       expect(await act(ra, 'send', { text: 'and the keys' })).toMatchObject({ ok: true, state: 'working' })
-      ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 3, text: sentTexts[1], from: HUB })
-      ra.observe({ type: 'turn_complete', sessionId: child.sessionId })
-      children.dropLinkedReport(child.sessionId)
+      ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 4, text: sentTexts[1], from: HUB })
+      ends(ra)
       return ra
     }
 
     it("is the note's, so the caller's: its end is owed and a note goes into it", async () => {
       const ra = await afterNote()
       expect(reportOwed()).toBe(false)
-      ra.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working' })
+      opens(ra, { seq: NOTE_ROW, from: named })
       expect(reportOwed()).toBe(true)
       expect(await act(ra, 'send', { text: 'and the keys' })).toMatchObject({ ok: true, state: 'working' })
       expect(sentTexts).toHaveLength(2)
     })
 
+    it("is taken for the caller's by what the machine says, not by how long after the last turn it began", async () => {
+      const ra = await afterNote()
+      const now = Date.now()
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(now + 10 * 60_000)
+      opens(ra, { seq: NOTE_ROW, from: named })
+      clock.mockRestore()
+      expect(reportOwed()).toBe(true)
+    })
+
+    it("is not the caller's when it names a row the hub holds no note of", async () => {
+      const ra = await afterFollowUp()
+      // The note of row 4 went into the turn that ended; row 9 is not one of the hub's
+      opens(ra, { seq: 9, from: named })
+      expect(reportOwed()).toBe(false)
+    })
+
+    it("is not the caller's when the row is named for another sender", async () => {
+      const ra = await afterFollowUp()
+      opens(ra, { seq: 4, from: { sessionId: 'm1.another-session', name: 'Other' } })
+      expect(reportOwed()).toBe(false)
+    })
+
+    it("is not the caller's when the machine says nothing of what it ran for (a machine from before this, a tool that does not say)", async () => {
+      const ra = await afterFollowUp()
+      opens(ra)
+      expect(reportOwed()).toBe(false)
+      expect(await act(ra, 'send', { text: 'and this' })).toMatchObject({ ok: false, error: expect.stringContaining('a turn it started by itself') })
+      expect(sentTexts).toHaveLength(2)
+    })
+
     it("is not the caller's when the person's message came first", async () => {
       const ra = await afterFollowUp()
-      ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 4, text: 'my own thing', from: PERSON })
-      ra.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working' })
+      ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 5, text: 'my own thing', from: PERSON })
+      opens(ra, { seq: 5, from: { ...PERSON, name: 'person' } })
       expect(reportOwed()).toBe(false)
       expect(await act(ra, 'send', { text: 'and this' })).toMatchObject({ ok: false, error: expect.stringContaining('a turn you did not give it') })
       expect(sentTexts).toHaveLength(2)
     })
 
-    it("is not the caller's when it begins long after the turn ended", async () => {
-      const ra = await afterFollowUp()
-      const now = Date.now()
-      const clock = vi.spyOn(Date, 'now').mockReturnValue(now + 60_000)
-      ra.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working' })
-      clock.mockRestore()
-      expect(reportOwed()).toBe(false)
-    })
-
-    it("is not the caller's when it begins after the link dropped", async () => {
+    it("is not the caller's when the link dropped between the two turns", async () => {
       const ra = await afterFollowUp()
       ra.observe({ type: 'machine_status', machine: { id: 'm1', name: 'Box', status: 'unreachable' } })
-      ra.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working' })
+      opens(ra, { seq: 4, from: named })
       expect(reportOwed()).toBe(false)
     })
 
-    it("is a turn of its own only once: the one after it, with no note of the caller's in it, is not the note's", async () => {
-      const ra = await afterNote()
-      ra.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working' })
-      expect(reportOwed()).toBe(true)
-      ra.observe({ type: 'turn_complete', sessionId: child.sessionId })
-      children.dropLinkedReport(child.sessionId)
-      ra.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working' })
+    it("is not the caller's after the hub restarted: what it held of the notes is gone", async () => {
+      await afterNote()
+      // A hub that starts again knows no note of the caller's that went into the turn; the machine's say alone is not enough
+      const restarted = following()
+      restarted.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working', origin: { seq: NOTE_ROW, from: named } })
       expect(reportOwed()).toBe(false)
-      expect(await act(ra, 'send', { text: 'note' })).toMatchObject({ ok: false, error: expect.stringContaining('a turn it started by itself') })
+    })
+
+    it('is one turn: the note is done with once a turn has begun', async () => {
+      const ra = await afterNote()
+      opens(ra, { seq: NOTE_ROW, from: named })
+      expect(reportOwed()).toBe(true)
+      ends(ra)
+      opens(ra, { seq: NOTE_ROW, from: named })
+      expect(reportOwed()).toBe(false)
+    })
+
+    it("is not the note's when the note was read in the turn it went into: a later turn naming its row is not the caller's", async () => {
+      const ra = await afterNote()
+      // No turn began for the note (the tool read it in the first turn); the tool's own next turn names nothing
+      opens(ra)
+      expect(reportOwed()).toBe(false)
+      ends(ra)
+      opens(ra, { seq: NOTE_ROW, from: named })
+      expect(reportOwed()).toBe(false)
     })
   })
 

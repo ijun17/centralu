@@ -107,10 +107,11 @@ export class LinkedHost {
       this.host.store.settings.deleteAppSetting(key)
     }
     try {
-      await this.host.deliver(sessionId, text, undefined, { sessionId: HUB_SENDER, name }, false, undefined, 'inline', (h, t) => {
-        if (!h.sendTracked) return h.send(t)
+      await this.host.deliver(sessionId, text, undefined, { sessionId: HUB_SENDER, name }, false, undefined, 'inline', (h, t, inputId) => {
+        // Named, so the tool says which input a turn began from (`turnStartInputs`, #1604)
+        if (!h.sendTracked) return h.send(t, inputId ? { id: inputId } : undefined)
         this.hubAskTurns.add(sessionId)
-        void h.sendTracked(t, { complete: done, fail: done }).catch(() => {})
+        void h.sendTracked(t, { complete: done, fail: done }, inputId ? { id: inputId } : undefined).catch(() => {})
       })
     } catch (e) {
       done()

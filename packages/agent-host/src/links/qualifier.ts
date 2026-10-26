@@ -316,6 +316,12 @@ export class Qualifier {
         if (isObj(e.fromApp)) out.fromApp = { ...e.fromApp, projectId: this.maybeId(e.fromApp.projectId) }
         return out
       }
+      // The sender of the message a turn ran for (#1604), named as a message's sender is
+      case 'state_change': {
+        const o = e.origin
+        if (!isObj(o) || !isObj(o.from) || typeof o.from.sessionId !== 'string') return base
+        return { ...base, origin: { ...o, from: { ...o.from, sessionId: this.id(o.from.sessionId) } } }
+      }
       case 'handoff':
         return { ...base, fromSessionId: this.maybeId(e.fromSessionId) }
       case 'session_owner':

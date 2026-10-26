@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { relative, resolve, sep } from 'node:path'
-import type { Attachment, Interruption, NormalizedEvent, SessionInfo, ToolName } from '@cc/protocol'
+import type { Attachment, Interruption, NormalizedEvent, SessionInfo, ToolName, TurnOrigin } from '@cc/protocol'
 import { applyBackgroundTasks, applySessionState, nextContext, nextStateFor } from '@cc/protocol'
 import type { ToolQueriesHost } from './tool-queries.js'
 import type { AgentProcess, SessionHandle } from '../adapters/contract.js'
@@ -188,6 +188,7 @@ export class SessionEvents {
     /** This event ended the turn — how it ended (completed, error, canceled, limit) is stated by this event
      * itself */
     let endedTurn = false
+    let started: TurnOrigin | undefined
     /** The session's interruption before this event (#698); `undefined` when the event belongs to no known session */
     let interruptionBefore: Interruption | null | undefined
     if (e.sessionId) {
@@ -214,7 +215,11 @@ export class SessionEvents {
         // The queued request being delivered started its turn (#684 review): only now is it off the queue and the store
         if (!wasBusy && inTurn(m.state)) this.host.children.queuedTurnStarted(m.id)
         // A turn starts (#1377): whose it is comes from the message it started with, else the CLI's own
-        if (!wasBusy && inTurn(m.state)) this.host.children.turnStarted(m.id)
+        if (!wasBusy && inTurn(m.state)) {
+          this.host.children.turnStarted(m.id)
+          // The message the tool ran this turn for, when one sent into the turn before it was not read there (#1604)
+          started = this.host.children.takeInputOrigin(m.id, handle?.turnStartInputs?.())
+        }
         /*
          * Or the tool refused it outright (#839): an error or a usage limit, and no turn starts. The request is done with
          * all the same, and this is its turn's end: its requester is told, the turn it owned is released, the next request
@@ -290,7 +295,9 @@ export class SessionEvents {
     const owned = endedTurn && e.sessionId ? this.host.children.turnEnded(e.sessionId, this.host.handles.get(e.sessionId)?.turnInputs?.()) : undefined
     // A turn Centralu started to compact the conversation says so (#1451): the window raises no "done" for it
     const turnBy = e.sessionId && endedTurn && this.host.compactTurn(e.sessionId) ? { ...(owned ?? { by: 'work' as const }), compaction: true as const } : owned
-    const said = turnBy && (e.type === 'turn_complete' || e.type === 'state_change' || e.type === 'error' || e.type === 'limit_reached') ? { ...e, turn: turnBy } : e
+    const turnSaid = turnBy && (e.type === 'turn_complete' || e.type === 'state_change' || e.type === 'error' || e.type === 'limit_reached') ? { ...e, turn: turnBy } : e
+    // What the turn it opens ran for, said with it so a hub that follows this host reads whose it is (#1604)
+    const said = started && e.type === 'state_change' ? { ...turnSaid, origin: started } : turnSaid
     this.host.emit(seq != null ? ({ ...said, seq } as NormalizedEvent) : said)
     this.closeIntoRest(e)
     // After the event that caused it, so a window reads the error first and the reason for it second (#698)
@@ -528,7 +535,8 @@ export class SessionEvents {
      * a different header (`appMessageFrame`)
      */
     fromAppVia: AppMessageVia = 'inline',
-    sendInput?: (handle: SessionHandle, text: string) => void,
+    /** `inputId`: the name this message goes in under when it joins a running turn, for the tool to name it back (`turnInputs`, `turnStartInputs`) */
+    sendInput?: (handle: SessionHandle, text: string, inputId?: string) => void,
     /**
      * What the message rests on, read once the session is awake and before anything is written: a reason refuses it.
      * A wake or a restart waited out here takes seconds, and the trust a task was let through on can go meanwhile.
@@ -649,9 +657,11 @@ export class SessionEvents {
     // Named, so the turn that ends can say whether it took this message in (`SessionHandle.turnInputs`)
     const inputId = joins ? randomUUID() : undefined
     this.host.children.noteMessage(sessionId, !from && !fromApp && !fromScript ? 'person' : 'work', inTurn(m.state), this.host.joinsRunningTurn(sessionId), intent === 'task', inputId, relayed ? 'report' : fromApp ? 'app' : 'caller')
+    // A sender's message into a running turn may run as a turn of its own after it (#1604): who it is from, for the turn that does
+    if (inputId && from) this.host.children.noteInputOrigin(sessionId, inputId, { seq, from })
     // A turn is asked for now, whether or not the tool announces it before its first card (`CardRests`)
     this.host.cardRests.turnAsked(sessionId)
-    if (sendInput) sendInput(h, input)
+    if (sendInput) sendInput(h, input, inputId)
     // Not with a line of Centralu's in front of it: that message is not only the person's words
     else if (fromPerson && !notice) h.send(input, { origin: { kind: 'human' }, ...(inputId ? { id: inputId } : {}) })
     else h.send(input, inputId ? { id: inputId } : undefined)

@@ -8,8 +8,9 @@ export class InputReceipts {
   private pending = new Map<string, { receipt: InputReceipt; resolve(): void; reject(e: Error): void; turn?: string; observer?: InputObserver; accepted?: true }>()
   private ended = new Set<string>()
 
-  create(observer?: InputObserver): InputReceipt {
-    const id = randomUUID()
+  /** `named`: the id the caller gave the input, which the tool then names back; none, one is made */
+  create(observer?: InputObserver, named?: ReturnType<typeof randomUUID>): InputReceipt {
+    const id = named ?? randomUUID()
     let resolve!: () => void
     let reject!: (e: Error) => void
     const done = new Promise<void>((yes, no) => { resolve = yes; reject = no })

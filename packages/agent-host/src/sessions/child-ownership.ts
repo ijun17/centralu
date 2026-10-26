@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { errorMessage } from '@cc/protocol'
-import type { ApprovalDetail, BackgroundTask, SessionInfo } from '@cc/protocol'
+import type { ApprovalDetail, BackgroundTask, SessionInfo, TurnOrigin } from '@cc/protocol'
 import type { QueuedRequest, Store } from '../dev-services/store.js'
 import type { AgentRunWait } from './app-agents.js'
 import { inTurn } from '../idle.js'
@@ -210,6 +210,11 @@ export class ChildOwnership {
   private readonly lastBy = new Map<string, 'person' | 'work'>()
   /** Messages that went into the running turn and may not have been taken into it (#1377), by session */
   private readonly pending = new Map<string, PendingMessage[]>()
+  /**
+   * Who sent each message that went into a running turn under an `id`, and its row (#1604): memory only, kept until the
+   * turn that takes it in ends, or the turn the tool runs for it starts (`takeInputOrigin`)
+   */
+  private readonly inputOrigins = new Map<string, Map<string, TurnOrigin>>()
   /** Whose the message is that waits to start the session's next turn, delivered while it was at rest */
   private readonly nextStarter = new Map<string, TurnStarter & { at: number }>()
   /** What the work's message that is to start the session's next turn is: a caller's, a report or notice about another session, an app's */
@@ -570,6 +575,23 @@ export class ChildOwnership {
     }
     this.addNext(sessionId, by, added, source)
   }
+  /** A named sender's message went into the running turn as input `inputId`, stored as row `seq` (#1604) */
+  noteInputOrigin(sessionId: string, inputId: string, origin: TurnOrigin): void {
+    this.inputOrigins.set(sessionId, new Map([...(this.inputOrigins.get(sessionId) ?? []), [inputId, origin]]))
+  }
+  /**
+   * What the turn that starts now ran for (#1604): the origin of the first of the inputs the tool names that a sender gave
+   * a message under, taken off. Undefined when none is (a message at rest, the tool's own turn, a tool that does not say)
+   */
+  takeInputOrigin(sessionId: string, inputs: readonly string[] | null | undefined): TurnOrigin | undefined {
+    const held = this.inputOrigins.get(sessionId)
+    if (!held || !inputs) return undefined
+    const found = inputs.find((id) => held.has(id))
+    const origin = found === undefined ? undefined : held.get(found)
+    for (const id of inputs) held.delete(id)
+    if (!held.size) this.inputOrigins.delete(sessionId)
+    return origin
+  }
   /** A message that is to start the session's next turn (#1377); a later one before it starts only joins */
   private addNext(sessionId: string, by: 'person' | 'work', added: boolean, source: TurnSource = 'caller'): void {
     // A note that no turn ever started from (a command the tool answers itself, a message it refused) goes stale
@@ -644,6 +666,8 @@ export class ChildOwnership {
     this.pending.delete(sessionId)
     for (const p of pending) {
       const joined = taken === undefined || (taken !== null && p.id !== undefined && taken.includes(p.id))
+      // Taken into this turn: no turn will begin for it
+      if (joined && p.id !== undefined) this.inputOrigins.get(sessionId)?.delete(p.id)
       if (!joined) this.addNext(sessionId, p.by, !!p.added, p.source)
       else if (p.by === 'person' && starter.by === 'work') {
         if (p.added) starter.added = true

@@ -330,8 +330,14 @@ export interface SessionHandle {
    * `null`: the tool cannot tell (an older CLI), and none is taken to have joined
    */
   turnInputs?(): readonly string[] | null
+  /**
+   * The inputs the turn that is starting runs for (#1604), read while the `state_change` that opens it is handled: the
+   * tool names the input it began that turn from, which for a message sent into a running turn that did not read it is
+   * that message's `id`. `null`: it does not say. Absent: the tool never runs a message as a turn after the one it was sent into
+   */
+  turnStartInputs?(): readonly string[] | null
   /** Completes after the consuming turn is recorded. The observer runs synchronously, before later turn frames. */
-  sendTracked?(text: string, observer?: InputObserver, opts?: { origin?: InputOrigin }): Promise<void>
+  sendTracked?(text: string, observer?: InputObserver, opts?: { origin?: InputOrigin; id?: string }): Promise<void>
   /** The matcher is computed by core and passed along by the UI (boundary rule: the host does not know core) */
   /**
    * The approval response. **Returns whether it reached anything** (false = no such request exists).

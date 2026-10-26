@@ -87,6 +87,8 @@ export type LinkedEvent = {
   intent?: unknown
   /** Whose the turn was, on the event that ends it (#1377) */
   turn?: unknown
+  /** The message a turn ran for, on the `state_change` that opens it, when the tool ran it after the turn it was sent into (#1604) */
+  origin?: unknown
   /** An app's message (`user_message`): not the person's */
   fromApp?: unknown
   live?: unknown

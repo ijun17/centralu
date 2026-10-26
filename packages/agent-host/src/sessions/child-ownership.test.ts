@@ -667,3 +667,40 @@ describe('whose a turn is', () => {
     expect(next.starterOf('t')).toBeUndefined()
   })
 })
+
+// #1604: a sender's note into a running turn that the tool runs as the next turn is named back by the turn that opens
+describe('what a turn that opens ran for', () => {
+  const note = { seq: 7, from: { sessionId: '_hub-orchestrator', name: 'Parent' } }
+
+  it('names the sender and row of the note the turn opens for, once', () => {
+    own.noteInputOrigin('s', 'note-id', note)
+    expect(own.takeInputOrigin('s', ['other-id', 'note-id'])).toEqual(note)
+    expect(own.takeInputOrigin('s', ['note-id'])).toBeUndefined()
+  })
+
+  it('names nothing for a turn the tool opens with no input of a sender, or when the tool does not say', () => {
+    own.noteInputOrigin('s', 'note-id', note)
+    expect(own.takeInputOrigin('s', [])).toBeUndefined()
+    expect(own.takeInputOrigin('s', null)).toBeUndefined()
+    expect(own.takeInputOrigin('s', undefined)).toBeUndefined()
+    expect(own.takeInputOrigin('s', ['note-id'])).toEqual(note)
+  })
+
+  it('forgets a note the turn it went into took in: no later turn opens for it', () => {
+    own.noteMessage('s', 'work', false, true)
+    own.turnStarted('s')
+    own.noteMessage('s', 'work', true, true, false, 'note-id')
+    own.noteInputOrigin('s', 'note-id', note)
+    own.turnEnded('s', ['note-id'])
+    expect(own.takeInputOrigin('s', ['note-id'])).toBeUndefined()
+  })
+
+  it('keeps a note the turn did not take in, for the turn the tool runs it as', () => {
+    own.noteMessage('s', 'work', false, true)
+    own.turnStarted('s')
+    own.noteMessage('s', 'work', true, true, false, 'note-id')
+    own.noteInputOrigin('s', 'note-id', note)
+    own.turnEnded('s', [])
+    expect(own.takeInputOrigin('s', ['note-id'])).toEqual(note)
+  })
+})

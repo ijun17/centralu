@@ -141,6 +141,8 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   // A turn that answered against a schema (M4 D-1)
   { type: 'turn_complete', sessionId: 's1', output: { summary: 'short' } },
   { type: 'state_change', sessionId: 's1', state: 'waiting_input' },
+  // A turn the tool ran for a note sent into the turn before (#1604); a build from before drops the field and reads a plain state change
+  { type: 'state_change', sessionId: 's1', state: 'working', origin: { seq: 4, from: { sessionId: '_hub-orchestrator', name: 'Parent' } } },
   { type: 'usage_update', sessionId: 's1', tokens: { inputTokens: 10, outputTokens: 20, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0.01 } },
   { type: 'context_update', sessionId: 's1', used: 1000, window: 200000, exactness: 'exact' },
   { type: 'limit_reached', sessionId: 's1', resumeAt: '2026-08-15T14:30:00Z', usedPercent: 21, windowMins: 10080 },

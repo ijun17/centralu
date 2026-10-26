@@ -42,6 +42,16 @@ export type TurnWho = z.infer<typeof TurnWho>
 const endsTurn = { turn: TurnWho.optional() }
 
 /**
+ * What a turn that began with no message of its own ran for (#1604), said on the `state_change` that opens it: the tool
+ * had been sent a message while another turn ran and did not read it there, so it ran it as a turn of its own once that
+ * ended. `seq` is that message's row in the conversation (the `user_message` the hub saw) and `from` who sent it, so a
+ * hub that followed the sender reads whose the turn is instead of guessing from the time between. Absent from a turn
+ * that began otherwise (a message at rest, the tool's own) and from a host that does not say.
+ */
+export const TurnOrigin = z.object({ seq: z.number().int(), from: z.object({ sessionId: z.string(), name: z.string() }) })
+export type TurnOrigin = z.infer<typeof TurnOrigin>
+
+/**
  * Events that do not belong to a session (`error`, `update_status`).
  *
  * `sessionId` is **kept, made optional, rather than removed.** Adding a branch that omits the
@@ -406,7 +416,7 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    * to windows already open. Not recorded: the conversation already has the error, or the host's marker for a quit.
    */
   z.object({ ...base, type: z.literal('interruption'), interruption: Interruption.nullable() }),
-  z.object({ ...base, ...endsTurn, type: z.literal('state_change'), state: SessionState, reason: z.string().optional() }),
+  z.object({ ...base, ...endsTurn, type: z.literal('state_change'), state: SessionState, reason: z.string().optional(), origin: TurnOrigin.optional() }),
   /**
    * Whether the session's agent process runs (`SessionInfo.live`) changed outside an answer to the screen's own call
    * (#568): the host put an idle session to sleep (`reason: 'asleep'`, its process ended, the conversation stays and
