@@ -14,6 +14,7 @@
 // or an outage pauses the whole queue with a growing wait.
 import { readFileSync, renameSync, unlinkSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { advanceClock, now as clock } from './system.mjs'
 import { canMerge, evaluateChecks, firstFailure, squashMessage, workflowCheckNames } from './ci.mjs'
 import { CI, config, QUEUE } from './config.mjs'
 import {
@@ -89,6 +90,14 @@ const BACKOFF_MAX_MS = 5 * 60_000
 const pollOverride = Number(process.env.PROJECT_BOARD_QUEUE_POLL_MS) || 0
 export const pollMs = (kind) => pollOverride || POLL_MS[kind]
 export const TICK_MS = Number(process.env.PROJECT_BOARD_QUEUE_TICK_MS) || 5_000
+/**
+ * PROJECT_BOARD_QUEUE_STEP=read: for the tests only. The server's driver ticks once at the start of each `merge_queue`
+ * read, and never on a timer, so a test moves the queue one poll at a time and waits for nothing by the clock: what a
+ * poll does is done when the read answers (docs/plans/os-layer.md §2.4).
+ */
+export const STEP_ON_READ = process.env.PROJECT_BOARD_QUEUE_STEP === 'read'
+/** How much later each step is on the queue's clock (system.mjs `now`): every wait the tests shorten is due within a few */
+const STEP_MS = Number(process.env.PROJECT_BOARD_QUEUE_STEP_MS) || 100
 /** `#8` in this project's repository, `owner/repo#8` elsewhere (board.mjs's refOf, without the runtime). */
 export const queueRef = (repo, n) => (sameRepo(repo, config.repository) ? `#${n}` : `${repo}#${n}`)
 
@@ -835,9 +844,10 @@ export async function tick(dir, { holder, now = Date.now(), ref = queueRef }) {
 
 /**
  * Drives the queue every `tickMs` until stopped: the server calls it at start, the watch command while
- * it waits. The timer does not keep the process alive.
+ * it waits. The timer does not keep the process alive. With `manual`, it ticks only when `step()` is called (and
+ * `step()` resolves once that tick, its guard step and `onTick` are done).
  */
-export function startDriver(dir, { holder, ref = queueRef, tickMs = TICK_MS, onTick } = {}) {
+export function startDriver(dir, { holder, ref = queueRef, tickMs = TICK_MS, onTick, manual = false } = {}) {
   let timer = null
   let stopped = false
   let running = Promise.resolve()
@@ -845,23 +855,24 @@ export function startDriver(dir, { holder, ref = queueRef, tickMs = TICK_MS, onT
   let failures = 0
   let said = null
   let guardSaid = null
-  const loop = async () => {
-    if (stopped) return
+  const once = async () => {
     let done
+    const previous = running
     running = new Promise((resolve) => (done = resolve))
+    await previous
     try {
-      const r = await tick(dir, { holder, ref })
+      const r = await tick(dir, { holder, ref, now: clock() })
       failures = 0
       said = null
       try {
-        await runGuard(dir, { holder, ref })
+        await runGuard(dir, { holder, ref, now: clock() })
       } catch (e) {
         const message = `the main guard: ${String(e?.message ?? e)}`
         if (message !== guardSaid) console.error(`[project-board] merge queue: ${message}`)
         guardSaid = message
-        updateQueue(dir, (fq) => (fq.guard = { ...(fq.guard ?? {}), lastError: message, nextAt: new Date(Date.now() + GUARD_MS).toISOString() }))
+        updateQueue(dir, (fq) => (fq.guard = { ...(fq.guard ?? {}), lastError: message, nextAt: new Date(clock() + GUARD_MS).toISOString() }))
       }
-      onTick?.(r)
+      await onTick?.(r, clock())
     } catch (e) {
       failures += 1
       const message = String(e?.message ?? e)
@@ -870,14 +881,26 @@ export function startDriver(dir, { holder, ref = queueRef, tickMs = TICK_MS, onT
     } finally {
       done()
     }
+  }
+  const loop = async () => {
+    if (stopped) return
+    await once()
     if (!stopped) {
       timer = setTimeout(loop, failures ? Math.min(BACKOFF_MAX_MS, tickMs * 2 ** failures) : tickMs)
       timer.unref?.()
     }
   }
-  timer = setTimeout(loop, 0)
-  timer.unref?.()
+  if (!manual) {
+    timer = setTimeout(loop, 0)
+    timer.unref?.()
+  }
   return {
+    /** One tick now, after the one in flight: what `manual` drives with. Resolves once it is written down. */
+    step: () => {
+      if (stopped) return Promise.resolve()
+      advanceClock(STEP_MS)
+      return once()
+    },
     /** Stops ticking; resolves once the tick in flight (a merge among it) has written what it did. */
     stop() {
       stopped = true

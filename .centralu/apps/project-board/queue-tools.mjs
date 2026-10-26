@@ -5,6 +5,7 @@
 import { randomBytes } from 'node:crypto'
 import { join } from 'node:path'
 import { centralu, z } from './runtime/centralu-app-runtime.mjs'
+import { now as clock } from './system.mjs'
 import { itemOf, itemRef, REF_HELP } from './board.mjs'
 import { canMerge, NO_PERMISSION } from './ci.mjs'
 import { APP_DIR, CI, config, QUEUE } from './config.mjs'
@@ -14,7 +15,7 @@ import { answering, serially } from './handlers.mjs'
 import { BATCH_ACTIVE, batchLine } from './batch.mjs'
 import { ACTIVE, dequeue, enqueue, findItem, itemLine, longSubject, queueOrder, SUBJECT_MAX } from './queue.mjs'
 import { becauseLines, judgeBranch, labelTier, notAutoText, recordVerified } from './queue-integrate.mjs'
-import { queueBusy, queueRef, readLease, readQueue, startDriver, updateQueue } from './queue-driver.mjs'
+import { STEP_ON_READ, queueBusy, queueRef, readLease, readQueue, startDriver, updateQueue } from './queue-driver.mjs'
 import { answer, asError, linesAnswer } from './reply.mjs'
 import { plural, shellQuote } from './util.mjs'
 import { acknowledge, dueReposts, markReposted, noticeText, unacked } from './notice-acks.mjs'
@@ -76,7 +77,7 @@ let telling = false
  * server posts it, after every tick. One at a time, in order; one Centralu did not take is tried again a few times
  * (a restart), then marked failed. A session on an older Centralu gets no address, and its watch command still works.
  */
-export async function tellSessions(now = Date.now()) {
+export async function tellSessions(now = clock()) {
   if (telling) return
   telling = true
   try {
@@ -107,17 +108,24 @@ export async function tellSessions(now = Date.now()) {
   }
 }
 
+/** This server's driver, once started: `merge_queue` steps it when STEP_ON_READ */
+let serverDriver = null
+
 /** Starts this server's driver; called once from server.mjs. */
 export function startQueue() {
   const holder = `server:${process.pid}`
   holdWhileWork()
   const driver = startDriver(dataDir(), {
     holder,
-    onTick: () => {
+    manual: STEP_ON_READ,
+    // Stepped (tests), a tick ends once its messages are posted, so the read after it sees them told
+    onTick: (_r, at) => {
       holdWhileWork()
-      void tellSessions()
+      const telling = tellSessions(at)
+      return STEP_ON_READ ? telling : undefined
     },
   })
+  serverDriver = driver
   // Stopped (Centralu closes its input, and the runtime exits): the lease goes with it, so the next
   // driver need not wait for it to run out
   process.once('exit', () => driver.stopNow())
@@ -152,13 +160,13 @@ export function queueView({ all = false } = {}) {
   const q = readQueue(dataDir())
   const order = ['attention', 'ci', 'waiting', 'merged', 'closed']
   const items = q.items
-    .filter((i) => all || ACTIVE.has(i.state) || Date.now() - Date.parse(i.updatedAt) < 24 * 3600_000)
+    .filter((i) => all || ACTIVE.has(i.state) || clock() - Date.parse(i.updatedAt) < 24 * 3600_000)
     .sort((a, b) => order.indexOf(a.state) - order.indexOf(b.state) || (ACTIVE.has(a.state) ? queueOrder(a, b) : String(b.updatedAt).localeCompare(String(a.updatedAt))))
   const counts = Object.fromEntries(COUNTS.map(([s]) => [s, items.filter((i) => i.state === s).length]))
   const parts = COUNTS.filter(([s]) => counts[s]).map(([s, words]) => `${counts[s]} ${words}`)
   const summary = `Merge queue: ${parts.length ? parts.join(', ') : 'empty'}. ${driverLine(q)}`
   // Batches (#962): the running ones, and those ended in the last day (or all, with `all`)
-  const batches = (q.batches ?? []).filter((b) => all || BATCH_ACTIVE.has(b.state) || Date.now() - Date.parse(b.updatedAt) < 24 * 3600_000)
+  const batches = (q.batches ?? []).filter((b) => all || BATCH_ACTIVE.has(b.state) || clock() - Date.parse(b.updatedAt) < 24 * 3600_000)
   const byId = new Map((q.batches ?? []).map((b) => [b.id, b]))
   return {
     summary,
@@ -255,7 +263,7 @@ function enqueueFor({ repo, number, lowers = [], owner, author, deleteBranch = t
   const authorGiven = author?.trim() || given
   // The queuing session's address, where the queue posts its news (#1161 item 1); null from a view or an older Centralu
   const notice = centralu.noticeAddress()
-  const at = new Date().toISOString()
+  const at = new Date(clock()).toISOString()
   const r = updateQueue(dataDir(), (q) => {
     const who = given ?? findItem(q, repo, number)?.owner ?? `queue-${randomBytes(3).toString('hex')}`
     const out = enqueue(q, { repo, pr: number, lowers, owner: who, author: authorGiven, notice, deleteBranch, title, at }, queueRef)
@@ -353,7 +361,7 @@ async function integrateWrites({ repo, name, defaultBranch, title, sections, ver
     opened = true
   }
   const recordTitle = open ? (await readPr(repo, number)).title : title
-  const at = new Date().toISOString()
+  const at = new Date(clock()).toISOString()
   const r = enqueueFor({ repo, number, owner, author: owner, title: recordTitle, mark: { auto: { branch: name, head: j.head, main: j.main, line: j.line, at }, tierAt: null } })
   if (r.error) return refused(`${r.error}${opened ? ` ${queueRef(repo, number)} was opened as its record and is not queued: integrate again once that is cleared.` : ''}`, { kind: 'conflict', pr: number })
   const ref = queueRef(repo, number)
@@ -368,6 +376,8 @@ function unackedView(owner = null) {
 }
 
 async function mergeQueue({ all = false, owner }) {
+  // Tests only (STEP_ON_READ): the read moves the queue one poll first, in place of the timer
+  if (STEP_ON_READ) await serverDriver?.step()
   const v = queueView({ all })
   const who = owner?.trim() || null
   const waiting = unackedView(who)
@@ -386,7 +396,7 @@ async function ack({ owner, seqs = [], upTo }) {
   // A blank owner would match every owner's messages: refused
   if (!who) return asError(answer('Nothing acknowledged: give the owner you queued with.', { acked: 0 }))
   if (!seqs.length && upTo === undefined) return asError(answer('Nothing acknowledged: give seqs, or upTo.', { acked: 0 }))
-  const at = new Date().toISOString()
+  const at = new Date(clock()).toISOString()
   const n = updateQueue(dataDir(), (q) => acknowledge(q, who, { seqs, upTo: upTo ?? null, at }))
   const left = unackedView(who).length
   return answer(`Acknowledged ${plural(n, 'message')} for ${who}; ${left} still not acknowledged.`, { acked: n, left })
@@ -394,7 +404,7 @@ async function ack({ owner, seqs = [], upTo }) {
 
 async function unqueue({ pr }) {
   const want = itemOf(pr)
-  const removed = updateQueue(dataDir(), (q) => dequeue(q, { repo: want.repo, pr: want.number, at: new Date().toISOString() }, queueRef))
+  const removed = updateQueue(dataDir(), (q) => dequeue(q, { repo: want.repo, pr: want.number, at: new Date(clock()).toISOString() }, queueRef))
   if (!removed) return asError(answer(`${want.ref} is not in the merge queue.`, { removed: false }))
   holdWhileWork()
   return answer(`Took ${want.ref} out of the merge queue; nothing on GitHub changed.`, { removed: true })

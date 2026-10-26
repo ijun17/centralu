@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Wait outside an MCP call: agents can start this in the background and keep working.
 import { readFile } from 'node:fs/promises'
-import { execFile } from 'node:child_process'
+import { execFile } from '../system.mjs'
 import { DEFAULT_TIMEOUT_MS, waitForChecks } from '../wait-checks.mjs'
 import { parseItemRef } from '../github.mjs'
 

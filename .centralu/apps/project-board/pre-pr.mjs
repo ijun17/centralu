@@ -6,7 +6,7 @@
 // in git.mjs does): no branch or remote-tracking ref of the person's moves. The script works in
 // temporary worktrees, so the checkout is not touched either. Cancelled or out of time, the script's
 // whole process tree is stopped and its `--cleanup` removes what it left (worktrees, dependency links).
-import { execFile, spawn } from 'node:child_process'
+import { execFile, spawn } from './system.mjs'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { git, remoteFor, topLevel } from './git.mjs'

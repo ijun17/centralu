@@ -25,7 +25,7 @@
 //
 // Every step answers how long it took, for the queue's events (the daily metrics count conflicts the
 // queue handled without a person).
-import { execFile } from 'node:child_process'
+import { execFile } from './system.mjs'
 import { copyFile, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, rmdir, symlink, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, sep } from 'node:path'

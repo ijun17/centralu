@@ -40,6 +40,43 @@ const st = (() => {
 const save = () => fs.writeFileSync(process.env.FAKE_GH_STATE, JSON.stringify(st))
 `
 
+/**
+ * The same fake, answered inside the board app's process (`PROJECT_BOARD_FAKE_PROGRAMS`, the app's system.mjs) instead of
+ * started: on Windows each start is a launcher and a Node, about 60 ms, and a merge queue test makes dozens (#1599,
+ * docs/plans/os-layer.md §2.4). The script is the same text: what it reads of `process` (its arguments, environment,
+ * output and exit) is given to it, and its input is what the app wrote, not stdin.
+ */
+const inProcessModule = (script: string) => `// Written by tooling/fake-gh.test-helpers.ts: the fake gh, answered in the board app's process
+import { createRequire } from 'node:module'
+const require = createRequire(import.meta.url)
+const body = new Function('process', 'require', '__input', ${JSON.stringify(script.replace("fs.readFileSync(0, 'utf8')", '__input'))})
+const EXIT = Symbol('exit')
+export function gh(args, { input, env }) {
+  let stdout = ''
+  let stderr = ''
+  let code = 0
+  const process = {
+    argv: [globalThis.process.execPath, 'gh', ...args],
+    env: { ...env },
+    stdout: { write: (s) => ((stdout += String(s)), true) },
+    stderr: { write: (s) => ((stderr += String(s)), true) },
+    exit: (c = 0) => {
+      code = c
+      throw EXIT
+    },
+  }
+  try {
+    body(process, require, input ?? '')
+  } catch (e) {
+    if (e !== EXIT) {
+      stderr += String(e && e.stack ? e.stack : e)
+      code = 1
+    }
+  }
+  return { code, stdout, stderr }
+}
+`
+
 export type GhCall = { args: string[]; stdin: string | null }
 
 /** The folders of the fakes made in this process (the folder of each one's `bin`), for `endLeftoverFakes` */
@@ -94,14 +131,20 @@ export interface FakeGh {
   clearCalls(): void
 }
 
-/** Puts a fake `gh` running `answer` (see above) into `<root>/bin`, and this Node into `<root>/node` */
-export function fakeGh(root: string, answer: string): FakeGh {
+/**
+ * Puts a fake `gh` running `answer` (see above) into `<root>/bin`, and this Node into `<root>/node`. With `inProcess`,
+ * the board app answers it in its own process instead of starting it (`inProcessModule`); anything else that runs `gh`
+ * from the PATH still starts the one in `bin`.
+ */
+export function fakeGh(root: string, answer: string, { inProcess = false }: { inProcess?: boolean } = {}): FakeGh {
   const bin = join(root, 'bin')
   const node = join(root, 'node')
   mkdirSync(bin, { recursive: true })
   linkNode(node)
   fakeExe(bin, 'gh', PROLOGUE + answer)
   made.add(bin)
+  const programs = join(root, 'gh-in-process.mjs')
+  if (inProcess) writeFileSync(programs, inProcessModule(PROLOGUE + answer))
   const statePath = join(root, 'gh-state.json')
   const logPath = join(root, 'gh.log')
   writeFileSync(logPath, '')
@@ -127,6 +170,7 @@ export function fakeGh(root: string, answer: string): FakeGh {
       ...windowsSystemEnv(),
       FAKE_GH_STATE: statePath,
       FAKE_GH_LOG: logPath,
+      ...(inProcess ? { PROJECT_BOARD_FAKE_PROGRAMS: programs } : {}),
       ...extra,
     }),
     setState: write,
