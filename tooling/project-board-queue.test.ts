@@ -4143,7 +4143,7 @@ describe('the main guard reverts what broke main, at the front of the queue (#12
     const culprit = repo.shas[0]!
     seedQueue([{ repo: R, pr: 81, lowers: [], owner: 'tester', author: 'writer', state: 'merged', commit: culprit, title: 'feat(ui): change 81', updatedAt: new Date().toISOString(), reruns: {} }])
     guardRuntime(repo, redOn(repo, culprit))
-    await call('merge_queue')
+    // Stopped at the poll that reverts: the next one would read the revert's own CI
     await until(() => guardOnDisk().hunt?.outcome === 'reverting' && mainRedNotices().length > 0, 'the revert')
     // The revert: on main's tip, undoing exactly the culprit (its file gone again), and nothing in the checkout moved
     const branch = `revert/${culprit.slice(0, 12)}`
@@ -4918,12 +4918,12 @@ describe('the integrator lands an auto-tier branch without a pull request from i
     const repo = integrateRepo({ 'docs/guide': { 'docs/guide.md': 'read it top down\n' } })
     integrateRuntime(repo, 'docs/guide', patch)
     await call('integrate', handOver('docs/guide'))
-    await until(() => writes().some((w) => w[0] === 'draft' && w[1] === '600'), 'the record to be a draft again', BATCH_WAIT_MS)
+    // The poll that turns it back says why at once; the next one may say what it lands from instead
+    const q = await until((x) => writes().some((w) => w[0] === 'draft' && w[1] === '600') && (!reason || stateOf(x, 600) === 'attention'), 'the record to be a draft again', BATCH_WAIT_MS)
     const order = writes().map(short2).filter((w) => /^(ready|merge|draft) 600$/.test(w))
     expect(order).toEqual(merge ? ['ready 600', 'merge 600', 'draft 600'] : ['ready 600', 'draft 600'])
     expect(gh().prs['600']).toMatchObject({ state: 'OPEN', isDraft: true })
     if (reason) {
-      const q = await until((x) => stateOf(x, 600) === 'attention', 'attention')
       const item = q.queue.find((i: any) => i.pr === 600)
       expect(item.reason.kind).toBe(reason)
       if (reason === 'not-merged') expect(item.reason.text).toContain('it was turned back into a draft, which also stops what GitHub held')
