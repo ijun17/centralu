@@ -27,6 +27,7 @@
  * This was a unit test that parsed every test file (712) a second time (#1602); ESLint parses each file once per
  * run and caches the result.
  */
+import { relative } from 'node:path'
 import { constInit, variableOf } from './eslint-const-init.js'
 
 const NAME = 'CC_DATA_DIR'
@@ -61,8 +62,8 @@ export const testDataDir = {
   create(context) {
     const source = context.sourceCode
     const data = { advice: advice(context.filename) }
-    const relative = context.filename.slice(context.cwd.length + 1).replaceAll('\\', '/')
-    if (Object.hasOwn(EXCEPTIONS, relative)) return {}
+    const relativePath = relative(context.cwd, context.filename).replaceAll('\\', '/')
+    if (Object.hasOwn(EXCEPTIONS, relativePath)) return {}
     const report = (node, messageId) => context.report({ node, messageId, data })
 
     /** The string an expression is, or null when it cannot be told: a literal, a plain template, a `const`, a sum of those */

@@ -248,7 +248,7 @@ git, fs, workspace RPC의 요청·응답 타입은 **포트 인터페이스와 1
 | **네이티브 경로** | `ProjectInfo.path` — 프로젝트의 디렉터리 | OS 고유 표기, **절대 분해하지 않고, 절대 정규화하지 않는다** |
 
 **상대 경로를 정규화하는 이유.** `packages/ui`는 어느 OS 위에서 도는지 알 수 없게 되어 있다
-([platform-abstraction.ko.md](platform-abstraction.ko.md) 참고; `tooling/styles.test.ts`가 강제한다).
+([platform-abstraction.ko.md](platform-abstraction.ko.md) 참고; 린트 규칙 `guard/ui-no-os`(`tooling/eslint-guards.js`)가 강제한다).
 상대 경로가 네이티브 구분자를 실어 나른다면 UI 안에서 Windows에서는 이렇게, 다른 곳에서는
 저렇게 읽어야 하는데, 그것이 바로 그 규칙이 금지하는 분기다. git도 반대편에서 이를 확정한다:
 git 자신의 경로 포맷은 모든 플랫폼에서 POSIX이고 그 출력은 그대로 화면에 도달하므로,
@@ -266,7 +266,7 @@ Linux에서는 이 변환이 항등이라서, 잘못해도 대가가 없었다 �
 
 이것이 앱을 Windows에서 돌게 만드는 것은 **아니다** ([#14](https://github.com/ijun17/centralu/issues/14)).
 그 전제 조건이다: 익명의 가정 스물한 개 대신 이름 붙은 가정 하나 — 그래서 Windows 빌드는
-Windows에 관한 이유로만 실패한다. 스물두 번째 가정이 생기면 `tooling/paths.test.ts`가 빌드를 실패시킨다.
+Windows에 관한 이유로만 실패한다. 스물두 번째 가정이 생기면 린트 규칙 `guard/no-hand-split`(`tooling/eslint-guards.js`)이 빌드를 실패시킨다.
 
 ## 3.2 걷어낸 메서드와 이벤트 ([#97](https://github.com/ijun17/centralu/issues/97), [#372](https://github.com/ijun17/centralu/pull/372))
 

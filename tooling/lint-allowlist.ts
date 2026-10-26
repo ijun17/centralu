@@ -166,6 +166,12 @@ export function countedFiles(root: string, results: ESLint.LintResult[]): Set<st
  */
 export const NO_DISABLE_RULES: ReadonlySet<string> = new Set([...LISTABLE_RULES, 'test-env/data-dir', 'test-limits/scaled-by-slow'])
 
+/** Every rule of tooling/eslint-guards.js (#1606): their exceptions are lines of tooling/guard-exceptions.js */
+export const NO_DISABLE_PREFIX = 'guard/'
+
+/** May no comment switch this rule off? */
+export const noDisable = (rule: string): boolean => NO_DISABLE_RULES.has(rule) || rule.startsWith(NO_DISABLE_PREFIX)
+
 export type Disabled = { file: string; line: number; rule: string }
 
 /**
@@ -176,7 +182,7 @@ export function disabledFindings(root: string, results: ESLint.LintResult[]): Di
   const out: Disabled[] = []
   for (const r of results) {
     for (const m of r.suppressedMessages) {
-      if (m.ruleId && NO_DISABLE_RULES.has(m.ruleId) && m.suppressions.some((s) => s.kind === 'directive')) {
+      if (m.ruleId && noDisable(m.ruleId) && m.suppressions.some((s) => s.kind === 'directive')) {
         out.push({ file: relativeFile(root, r.filePath), line: m.line, rule: m.ruleId })
       }
     }

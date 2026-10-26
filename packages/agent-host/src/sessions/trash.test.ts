@@ -1,7 +1,6 @@
-import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs'
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { ApprovalDecision, ProjectInfo, SessionInfo, ToolName, TrashedSession } from '@cc/protocol'
 import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
@@ -180,37 +179,5 @@ describe('who can delete for good', () => {
     }
   })
 
-  it('only the RPC handler calls the purge', () => {
-    const src = join(fileURLToPath(new URL('.', import.meta.url)), '..')
-    const callers: string[] = []
-    const walk = (dir: string) => {
-      for (const e of readdirSync(dir, { withFileTypes: true })) {
-        const p = join(dir, e.name)
-        if (e.isDirectory()) walk(p)
-        else if (/\.tsx?$/.test(e.name) && !/\.test(-helpers)?\.tsx?$/.test(e.name)) {
-          for (const m of readFileSync(p, 'utf8').matchAll(/([\w.]+)\.(purgeSession|emptyTrash)\(/g)) {
-            callers.push(`${p.slice(src.length + 1).replaceAll('\\', '/')}: ${m[1]}.${m[2]}`)
-          }
-        }
-      }
-    }
-    walk(src)
-    expect(callers.sort()).toEqual([
-      'rpc.ts: mgr.emptyTrash',
-      'rpc.ts: mgr.purgeSession',
-      /*
-       * The one deletion the host makes itself (#378): a finished app-agent session, once its record (request, answer,
-       * the whole conversation) is kept in the session archive. It reaches the purge only through `agentRunEnded` after a clean run
-       * (app-agents.test.ts holds when it does and when the session stays); the manager hands it the same purge
-       */
-      'sessions/app-sessions.ts: this.host.purgeSession',
-      'sessions/manager.ts: self.purgeSession',
-      // The manager passes the two calls on to its session archive (session-trash.ts, #428); the same calls, not other callers
-      'sessions/manager.ts: this.trash.emptyTrash',
-      'sessions/manager.ts: this.trash.purgeSession',
-      // emptyTrash purges one by one; purgeSession removes the rows through the store
-      'sessions/session-trash.ts: this.host.store.trash.purgeSession',
-      'sessions/session-trash.ts: this.purgeSession',
-    ])
-  })
+  // That only the RPC handler calls the purge is the lint rule `guard/purge-callers` (tooling/eslint-guards.js, #1606)
 })

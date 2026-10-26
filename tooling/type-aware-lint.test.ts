@@ -22,7 +22,7 @@ import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 import {
   ALLOWLIST_DIR,
-  NO_DISABLE_RULES,
+  noDisable,
   lintHeapMb,
   addedSince,
   compareWithBase,
@@ -197,12 +197,12 @@ function forbiddenComments(file: string, code: string): string[] {
     if (directive) {
       const rules = (directive[1] ?? '').split('--')[0]?.split(/[\s,]+/).filter(Boolean) ?? []
       if (rules.length === 0) out.push(`${D} with no rule named: it switches the type-aware rules off too`)
-      for (const rule of rules) if (NO_DISABLE_RULES.has(rule)) out.push(`${D} ${rule}`)
+      for (const rule of rules) if (noDisable(rule)) out.push(`${D} ${rule}`)
       continue
     }
     const config = new RegExp(`^\\s*${E}\\s+([\\s\\S]*)$`).exec(body)
     if (config && comment.startsWith('/*')) {
-      for (const [, , rule = ''] of (config[1] ?? '').matchAll(/(["']?)([@\w/-]+)\1\s*:/g)) if (NO_DISABLE_RULES.has(rule)) out.push(`a configuration comment for ${rule}`)
+      for (const [, , rule = ''] of (config[1] ?? '').matchAll(/(["']?)([@\w/-]+)\1\s*:/g)) if (noDisable(rule)) out.push(`a configuration comment for ${rule}`)
     }
   }
   return out

@@ -22,6 +22,7 @@
  * once per run and caches it.
  */
 
+import { relative } from 'node:path'
 import { constInit } from './eslint-const-init.js'
 
 /** Files that may set an unscaled limit, by repository-relative path, each with the reason. Empty; it only shrinks. */
@@ -72,8 +73,8 @@ export const scaledBySlow = {
   },
   create(context) {
     const source = context.sourceCode
-    const relative = context.filename.slice(context.cwd.length + 1).replaceAll('\\', '/')
-    if (Object.hasOwn(EXCEPTIONS, relative)) return {}
+    const relativePath = relative(context.cwd, context.filename).replaceAll('\\', '/')
+    if (Object.hasOwn(EXCEPTIONS, relativePath)) return {}
     /** Does the limit multiply by SLOW, itself or through the `const` that holds it? */
     const scaled = (node, depth = 0) => {
       if (/\bSLOW\b/.test(source.getText(node))) return true

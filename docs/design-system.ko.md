@@ -37,8 +37,8 @@ Centralu의 모든 화면이 따르는 것: 색, 모양, 선, 글자, 아이콘,
 - **테두리 있는 모양 안의 모양은 바깥 모서리에서 테두리를 뺀다.** 호출하는 자리에서 토큰에 calc로 쓴다(접힌
   입력창: `rounded-b-[calc(var(--radius-lg)-1px)]`).
 - **가드.** `packages/ui/src/components/`와 `styles/` 밖에서 모서리를 숫자로 쓰면(`rounded-[14px]`, 인라인
-  `borderRadius`) `tooling/styles.test.ts`("corners come from the radius scale")가 실패한다. 남겨 둔 자리의
-  목록은 줄어들 수만 있다: 파일에 실제로 있는 것보다 많이 적힌 개수도 실패한다. 새 단계는 호출 자리가 아니라
+  `borderRadius`) 린트 규칙 `guard/ui-radius-scale`(`tooling/eslint-guards.js`)이 실패한다. 남겨 둔 자리의
+  목록(`tooling/guard-exceptions.js`)은 줄어들 수만 있다: 파일에 실제로 있는 것보다 많이 적힌 개수도 실패한다. 새 단계는 호출 자리가 아니라
   `@theme`에, 무엇이 쓰는지와 함께 들어간다.
 
 ## 3. 테두리와 선
@@ -58,7 +58,7 @@ Centralu의 모든 화면이 따르는 것: 색, 모양, 선, 글자, 아이콘,
 |---|---|---|
 | 사람이나 모델이 말한 것, 그리고 컨트롤, 제목, 세션 표시의 글자(사용량 도넛의 글자도)는 **Pretendard** | 코드 글꼴의 글자는 칩 안에서 중심을 벗어났다. 표시는 이름이지 수치가 아니다(*owner, 2026-10-18*, `.cc-chip-letter`) | `--font-sans`, 번들(#731) |
 | 기계가 쓴 것: 코드, 경로, 명령, 로그, 터미널, 그리고 **줄을 맞춰야 하는 숫자**: 캡슐과 접힌 프로젝트의 개수, 수치, 크기, 시간 길이는 **D2Coding** | 고정폭 숫자는 개수가 바뀌어도 자리가 움직이지 않는다. 한글이 라틴의 두 배 폭이라 코드 속 한국어도 격자에 맞는다 | `--font-mono`, `.readout`(`tabular-nums`를 더한다) |
-| **크기 다섯**: `text-2xs` 10px(라벨, 개수, 시각), `text-xs` 11px(기계가 쓴 것), `text-sm` 12px(컨트롤), `text-md` 13px(사람이 읽는 것), `text-display` 19px(첫 실행 화면의 제목). 굵기는 400, 500, 600 | 기본 확대에서 읽히는 촘촘한 대역. 화면 전체는 이것들이 아니라 루트 확대로 커진다 | `@theme`. 임의 크기는 `tooling/styles.test.ts`가 실패시킨다([themes.ko.md](themes.ko.md)) |
+| **크기 다섯**: `text-2xs` 10px(라벨, 개수, 시각), `text-xs` 11px(기계가 쓴 것), `text-sm` 12px(컨트롤), `text-md` 13px(사람이 읽는 것), `text-display` 19px(첫 실행 화면의 제목). 굵기는 400, 500, 600 | 기본 확대에서 읽히는 촘촘한 대역. 화면 전체는 이것들이 아니라 루트 확대로 커진다 | `@theme`. 임의 크기는 린트 규칙 `guard/ui-type-scale`이 실패시킨다([themes.ko.md](themes.ko.md)) |
 
 ## 5. 아이콘
 

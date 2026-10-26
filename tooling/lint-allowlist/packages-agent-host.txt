@@ -390,7 +390,7 @@ packages/agent-host/src/sessions/codex-seats.test.ts @typescript-eslint/no-base-
 packages/agent-host/src/sessions/cross-project.test-helpers.ts @typescript-eslint/no-floating-promises 1
 packages/agent-host/src/sessions/cross-project.test-helpers.ts @typescript-eslint/no-unnecessary-type-assertion 1
 packages/agent-host/src/sessions/delegation-flow.test.ts @typescript-eslint/no-unnecessary-type-assertion 1
-packages/agent-host/src/sessions/delegation-forks.ts @typescript-eslint/no-non-null-assertion 9
+packages/agent-host/src/sessions/delegation-forks.ts @typescript-eslint/no-non-null-assertion 8
 packages/agent-host/src/sessions/delegation-forks.ts @typescript-eslint/no-unsafe-type-assertion 4
 packages/agent-host/src/sessions/external-conversations.test.ts @typescript-eslint/no-unnecessary-type-assertion 1
 packages/agent-host/src/sessions/external-conversations.ts @typescript-eslint/no-non-null-assertion 5
@@ -416,7 +416,6 @@ packages/agent-host/src/sessions/interruption-watch.ts @typescript-eslint/no-unn
 packages/agent-host/src/sessions/interruptions.test.ts @typescript-eslint/no-floating-promises 2
 packages/agent-host/src/sessions/interruptions.test.ts @typescript-eslint/no-unnecessary-type-assertion 1
 packages/agent-host/src/sessions/interruptions.ts @typescript-eslint/no-non-null-assertion 1
-packages/agent-host/src/sessions/keeper-reattach.test.ts @typescript-eslint/no-unnecessary-type-assertion 2
 packages/agent-host/src/sessions/launch-records.ts @typescript-eslint/no-unsafe-type-assertion 1
 packages/agent-host/src/sessions/linked-reports.ts @typescript-eslint/no-unsafe-type-assertion 5
 packages/agent-host/src/sessions/machine-asks.ts @typescript-eslint/no-non-null-assertion 1
@@ -431,7 +430,7 @@ packages/agent-host/src/sessions/memory-gate.ts @typescript-eslint/no-unsafe-typ
 packages/agent-host/src/sessions/message-image.test.ts @typescript-eslint/no-unnecessary-type-assertion 1
 packages/agent-host/src/sessions/orchestrator-proposals.ts @typescript-eslint/no-unsafe-type-assertion 2
 packages/agent-host/src/sessions/orchestrator-seat.test.ts @typescript-eslint/no-unnecessary-type-assertion 1
-packages/agent-host/src/sessions/orchestrator-seat.ts @typescript-eslint/no-non-null-assertion 6
+packages/agent-host/src/sessions/orchestrator-seat.ts @typescript-eslint/no-non-null-assertion 5
 packages/agent-host/src/sessions/orchestrator-seat.ts @typescript-eslint/no-unsafe-type-assertion 4
 packages/agent-host/src/sessions/orchestrator-slot.ts @typescript-eslint/no-non-null-assertion 2
 packages/agent-host/src/sessions/orchestrator-tools.ts @typescript-eslint/no-unnecessary-type-assertion 1
@@ -443,7 +442,7 @@ packages/agent-host/src/sessions/project-consent.test.ts @typescript-eslint/no-u
 packages/agent-host/src/sessions/project-creation.ts @typescript-eslint/no-unsafe-type-assertion 6
 packages/agent-host/src/sessions/queued-requests.ts @typescript-eslint/no-non-null-assertion 4
 packages/agent-host/src/sessions/queued-requests.ts @typescript-eslint/no-unsafe-type-assertion 2
-packages/agent-host/src/sessions/remote-agents-boundary.test.ts @typescript-eslint/no-unnecessary-type-assertion 3
+packages/agent-host/src/sessions/remote-agents-boundary.test.ts @typescript-eslint/no-unnecessary-type-assertion 2
 packages/agent-host/src/sessions/remote-agents.test.ts @typescript-eslint/no-unnecessary-type-assertion 1
 packages/agent-host/src/sessions/remote-agents.ts @typescript-eslint/no-non-null-assertion 3
 packages/agent-host/src/sessions/remote-agents.ts @typescript-eslint/no-unnecessary-type-assertion 3

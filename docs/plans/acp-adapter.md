@@ -116,7 +116,7 @@ Recorded through the adapter itself (`scripts/acp-record.mts`, §10.5) in eight 
    failed results (the cards stop). Sub-agents are not reported in PR 1 (`builtInSubagents: false`), so none can be
    left behind.
 4. **Tests wait for events, never for time.** The replayer writes a frame when the adapter has sent what precedes it;
-   the scenario driver resolves on the event; `adapters/frames/no-sleeps.test.ts` fails a test in `acp/`, `frames/` or
+   the scenario driver resolves on the event; the lint rule `guard/no-sleeps` (`tooling/eslint-guards.js`) fails a test in `acp/`, `frames/` or
    `cursor-agent/` that calls `setTimeout`, `sleep` or a fake clock.
 5. **Windows.** Nothing starts through a shell: Cursor's newest version folder is found as its own launcher finds it
    and its `node.exe index.js acp` started directly; OpenCode's npm shim is read by `launchFor`. Tools are found with
@@ -135,7 +135,7 @@ Antigravity adapter (`agy`, stream-json, not ACP), which is designed in parallel
 | The scrubber | `scripts/frames-scrub.mts` | as is; its id keys (`sessionId`, `toolCallId`, `messageId`) may need the tool's own |
 | The replayer | `adapters/frames/replay.test-helpers.ts`, with a `FrameCodec` | with `jsonLinesCodec` (lines matched by `type`) instead of `jsonRpcCodec` |
 | The scenarios and their driver | `adapters/frames/scenarios.test-helpers.ts`, at `SessionHandle` level | as is, with a record script of its own |
-| The no-sleeps guard | `adapters/frames/no-sleeps.test.ts` | add its folder to the list |
+| The no-sleeps guard | the `guard/no-sleeps` block in `tooling/eslint-guards.js` | add its folder to the list |
 | The capability limits and `launchRefusal` | `@cc/protocol` | declare what it cannot keep; the host and the pickers follow |
 | The fake peer | `adapters/acp/fake-peer.test-helpers.ts` | no: it speaks JSON-RPC |
 | Ending with the host, and what it started | `adapters/local-process.ts` (`endsWithHost`, `noteTree`) | yes: start with `endsWithHost`, note the tree while a command runs |

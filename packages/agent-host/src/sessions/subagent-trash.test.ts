@@ -1,7 +1,6 @@
-import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs'
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { ApprovalDecision, ProjectInfo, SessionInfo, StoredMessage, SubagentStepsHeld, ToolName, TrashedSession, TrashedSubagentSteps } from '@cc/protocol'
 import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
@@ -165,27 +164,4 @@ describe("a session's subagent steps, to the session archive and back without th
   })
 })
 
-/** The session archive's rule (#204): only the person deletes for good, and only through the RPC */
-describe('who can delete subagent steps for good', () => {
-  it('only the RPC handler and deleting all archived sessions call the purge', () => {
-    const src = join(fileURLToPath(new URL('.', import.meta.url)), '..')
-    const callers: string[] = []
-    const walk = (dir: string) => {
-      for (const e of readdirSync(dir, { withFileTypes: true })) {
-        const p = join(dir, e.name)
-        if (e.isDirectory()) walk(p)
-        else if (/\.tsx?$/.test(e.name) && !/\.test(-helpers)?\.tsx?$/.test(e.name)) {
-          for (const m of readFileSync(p, 'utf8').matchAll(/([\w.]+)\.(purgeSubagentSteps|subagentSteps\.purge)\(/g)) {
-            callers.push(`${p.slice(src.length + 1).replaceAll('\\', '/')}: ${m[1]}.${m[2]}`)
-          }
-        }
-      }
-    }
-    walk(src)
-    expect(callers.sort()).toEqual([
-      'rpc.ts: mgr.purgeSubagentSteps',
-      'sessions/manager.ts: this.trash.purgeSubagentSteps',
-      'sessions/session-trash.ts: this.host.store.subagentSteps.purge',
-    ])
-  })
-})
+// That only the RPC handler and deleting all archived sessions purge subagent steps is the lint rule `guard/subagent-purge-callers` (tooling/eslint-guards.js, #1606)
