@@ -385,6 +385,8 @@ describe('the lint run', () => {
     expect(lintFailed(run)).toBe(false)
     expect(lintFailed({ ...run, errorsLeft: 1 })).toBe(true)
     expect(lintFailed({ ...run, disabled: 1 })).toBe(true)
+    expect(lintFailed({ ...run, assertionsOver: 1 })).toBe(true)
+    expect(lintFailed({ ...run, assertionsOver: 0 })).toBe(false)
     expect(lintFailed({ ...run, recording: true, errorsLeft: 0, othersLeft: 0 })).toBe(false)
     expect(lintFailed({ ...run, recording: true, othersLeft: 1 })).toBe(true)
   })

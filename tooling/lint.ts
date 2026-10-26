@@ -25,6 +25,10 @@ import { fileURLToPath } from 'node:url'
 import { getHeapStatistics, setFlagsFromString } from 'node:v8'
 import {
   applyAllowlist,
+  archiveUses,
+  ASSERTION_ROOM,
+  ASSERTIONS,
+  assertionTotals,
   ALLOWLIST_DIR,
   baseCommit,
   countedFiles,
@@ -38,10 +42,12 @@ import {
   lintHints,
   listFileOf,
   otherErrors,
+  overAndUnder,
   packageOf,
   readAllowlist,
   renamesSince,
   tighten,
+  unusedArchiveEntries,
   writeAllowlist,
 } from './lint-allowlist.js'
 
@@ -64,9 +70,16 @@ setFlagsFromString(`--max-old-space-size=${Math.max(lintHeapMb(totalmem()), Math
 const eslint = new ESLint(eslintOptions(ROOT))
 const results = await eslint.lintFiles(paths.length > 0 ? paths : ['.'])
 // The guard pass: its own configuration, and no comment configures it. A file none of its rules reads is not a result.
-const guardResults = (await new ESLint(guardOptions(ROOT)).lintFiles(paths.length > 0 ? paths : ['.'])).filter((r) => r.messages.length > 0)
-for (const r of guardResults) r.messages = r.messages.filter((m) => !(m.ruleId === null && m.severity === 1 && /noInlineConfig|File ignored/.test(m.message)))
+const guardAll = await new ESLint(guardOptions(ROOT)).lintFiles(paths.length > 0 ? paths : ['.'])
+for (const r of guardAll) r.messages = r.messages.filter((m) => !(m.ruleId === null && m.severity === 1 && /noInlineConfig|File ignored/.test(m.message)))
 const disabled = disabledFindings(ROOT, results)
+// Counted over the whole run, and not shown: they are not findings (#1607). A run of some paths sees only some of the files.
+const assertions = assertionTotals(ROOT, guardAll)
+const archiveUsed = archiveUses(guardAll)
+const guardResults = guardAll.filter((r) => r.messages.length > 0)
+const whole = paths.length === 0 && !recording
+const { over: assertionsOver, under: assertionsUnder } = whole ? overAndUnder(assertions, ASSERTIONS, ASSERTION_ROOM) : { over: [], under: [] }
+const archiveStale = whole ? unusedArchiveEntries(archiveUsed) : []
 
 if (recording) {
   writeAllowlist(ROOT, countFindings(ROOT, results))
@@ -86,7 +99,7 @@ if (flags.has('--tighten')) {
 }
 
 const { over, loose } = recording ? { over: [], loose: [] } : applyAllowlist(ROOT, results, flags.has('--tighten') ? readAllowlist(ROOT) : allow)
-const text = await (await eslint.loadFormatter('stylish')).format([...results, ...guardResults.filter((r) => r.messages.length > 0)])
+const text = await (await eslint.loadFormatter('stylish')).format([...results, ...guardResults])
 if (text) console.log(text)
 
 const guardLeft = guardResults.flatMap((r) => r.messages.filter((m) => m.severity === 2))
@@ -95,6 +108,9 @@ const left = [...results.flatMap((r) => r.messages.filter((m) => m.severity === 
 for (const d of disabled) {
   console.log(`${d.file}:${d.line}: an eslint-disable comment hides ${d.rule}. This rule is not turned off in place (#1339): check the value instead.`)
 }
+for (const line of assertionsOver) console.log(`${line} type assertions: check the value (a zod schema, a guard) instead of asserting its type (tooling/lint-allowlist.ts ASSERTIONS)`)
+for (const line of archiveStale) console.log(line)
+if (assertionsUnder.length > 0) console.log(`ASSERTIONS in tooling/lint-allowlist.ts can come down to ${assertionsUnder.join(', ')}`)
 for (const o of over) console.log(`${o.file}: ${o.count} findings of ${o.rule}, ${o.allowed} listed (${ALLOWLIST_DIR}/${listFileOf(packageOf(o.file))}).`)
 const stale = [...(flags.has('--tighten') ? readAllowlist(ROOT) : allow).keys()].filter((file) => !existsSync(join(ROOT, file)))
 if (!recording && (loose.length > 0 || stale.length > 0)) {
@@ -103,4 +119,4 @@ if (!recording && (loose.length > 0 || stale.length > 0)) {
 if (recording && othersLeft() > 0) console.log(`${othersLeft()} other error(s) are not type-aware findings and were not recorded: fix them first.`)
 if (!recording) for (const line of lintHints(left)) console.log(line)
 
-process.exitCode = lintFailed({ errorsLeft: left.length, disabled: disabled.length, recording, othersLeft: othersLeft() }) ? 1 : 0
+process.exitCode = lintFailed({ errorsLeft: left.length, disabled: disabled.length, recording, othersLeft: othersLeft(), assertionsOver: assertionsOver.length, archiveStale: archiveStale.length }) ? 1 : 0

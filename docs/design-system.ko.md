@@ -156,9 +156,9 @@ Centralu의 모든 화면이 따르는 것: 색, 모양, 선, 글자, 아이콘,
 | 작은 대문자 라벨 | `Badge`(숫자 사이에선 `readout`) |
 | 테두리 있는 입력칸 | `TextInput`, 또는 라벨·힌트·문제를 함께 그리는 `TextField` |
 
-**가드.** `tooling/shared-components.test.ts`는 `components/` 밖의 화면이 테두리 있는 버튼, 테두리 있는 입력칸,
-작은 대문자 라벨, 캡슐을 손으로 그리면 쓸 컴포넌트를 말하며 실패한다(판별 규칙은 `tooling/hand-made-looks.ts`).
-아직 옮기지 않은 자리의 목록은 모서리 가드처럼 **줄어들 수만 있다**.
+**가드.** 린트 규칙 `guard/hand-made-looks`는 `components/` 밖의 화면이 테두리 있는 버튼, 테두리 있는 입력칸,
+작은 대문자 라벨, 캡슐을 손으로 그리면 쓸 컴포넌트를 말하며 실패한다(판별 규칙은 `tooling/eslint-guards-ts.js`).
+아직 옮기지 않은 자리의 목록(`tooling/guard-exceptions.js`)은 모서리 가드처럼 **줄어들 수만 있다**.
 
 ## 정리된 어긋남
 

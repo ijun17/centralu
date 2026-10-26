@@ -161,9 +161,10 @@ strings: a copy drifts (padding, hover, disabled fade) and the next screen copie
 | A small uppercase label | `Badge` (`readout` among figures) |
 | A framed text field | `TextInput`, or `TextField` with its label, hint and problem |
 
-**The guard.** `tooling/shared-components.test.ts` fails when a screen outside `components/` draws a
+**The guard.** The lint rule `guard/hand-made-looks` fails when a screen outside `components/` draws a
 framed button, a framed text field, a small caps label or a capsule by hand, naming the component to use
-(the patterns are in `tooling/hand-made-looks.ts`). Its list of sites not moved yet **can only shrink**,
+(the patterns are in `tooling/eslint-guards-ts.js`). Its list of sites not moved yet
+(`tooling/guard-exceptions.js`) **can only shrink**,
 as the corner guard's does.
 
 ## Settled departures
