@@ -8,15 +8,15 @@
  * "undefined", a folder in the current directory.
  *
  * Every spelling is reported, read from the syntax tree:
- *   - dot, bracket or template-literal access, any assignment operator, `delete`;
+ *   - dot, bracket or template-literal access, any assignment operator, `++`/`--`, `delete`;
  *   - a key held in a `const` (`const KEY = 'CC_DATA_DIR'; process.env[KEY] = …`);
- *   - `process.env` through an alias (`const env = process.env`, `const { env } = process`) or `globalThis.process`;
+ *   - `process.env` through an alias (`const env = process.env`, `const { env } = process`, `import { env } from 'node:process'`) or `globalThis.process`;
  *   - `Object.assign(process.env, …)` naming the variable or copying in what cannot be seen (a spread, a saved
  *     object), `Reflect.set` / `Reflect.deleteProperty` / `Object.defineProperty(ies)` on it;
  *   - replacing `process.env` whole.
  * Parentheses, `as`, `!` and `?.` around any of these do not hide it.
  *
- * Gaps, known: a key that is a parameter or a `let` (`process.env[name] = v` is not told from another variable),
+ * Gaps, known: destructuring and loop targets (`[process.env.CC_DATA_DIR] = [x]`, `for (process.env.CC_DATA_DIR of xs)`), a chain of more than five aliases, a key that is a parameter or a `let` (`process.env[name] = v` is not told from another variable),
  * a function that is handed `process.env` and writes to it, and a `let` or reassigned alias. An inline configuration
  * comment that turns the rule off is not a disable directive; tooling/type-aware-lint.test.ts finds it as it does an eslint-disable.
  *
@@ -70,7 +70,16 @@ export const testDataDir = {
       const n = unwrap(node)
       if (!n || depth > 5) return null
       if (n.type === 'Literal') return typeof n.value === 'string' ? n.value : null
-      if (n.type === 'TemplateLiteral') return n.expressions.length === 0 ? n.quasis[0].value.cooked : null
+      if (n.type === 'TemplateLiteral') {
+        // `CC_DATA_DIR`, or `${PREFIX}DIR` with every substitution a string that can be told
+        let out = n.quasis[0].value.cooked
+        for (const [i, e] of n.expressions.entries()) {
+          const part = text(e, depth + 1)
+          if (part === null) return null
+          out += part + n.quasis[i + 1].value.cooked
+        }
+        return out
+      }
       if (n.type === 'BinaryExpression' && n.operator === '+') {
         const [a, b] = [text(n.left, depth + 1), text(n.right, depth + 1)]
         return a !== null && b !== null ? a + b : null
@@ -115,7 +124,11 @@ export const testDataDir = {
       if (n.type === 'MemberExpression') return memberKey(n) === 'env' && isProcess(n.object)
       if (n.type === 'Identifier') {
         const found = constInit(source, n)
-        if (!found) return false
+        if (!found) {
+          // `import { env } from 'node:process'`
+          const def = variableOf(source, n)?.defs[0]
+          return def?.type === 'ImportBinding' && def.node.type === 'ImportSpecifier' && def.node.imported.name === 'env' && /^(node:)?process$/.test(def.parent.source.value)
+        }
         if (found.pattern) return !found.pattern.computed && found.pattern.key.type === 'Identifier' && found.pattern.key.name === 'env' && isProcess(found.init)
         return isEnv(found.init, depth + 1)
       }
@@ -131,8 +144,9 @@ export const testDataDir = {
     /** `Object.assign`, `Reflect.set` …: the callee's object and method, when both are plain names */
     const calleeOf = (node) => {
       const n = unwrap(node)
-      if (n?.type !== 'MemberExpression' || n.computed || n.object.type !== 'Identifier') return null
-      return `${n.object.name}.${n.property.name}`
+      if (n?.type !== 'MemberExpression' || n.object.type !== 'Identifier') return null
+      const method = n.computed ? text(n.property) : n.property.type === 'Identifier' ? n.property.name : null
+      return method === null ? null : `${n.object.name}.${method}`
     }
 
     /** Does the source of an `Object.assign` or `defineProperties` name the variable, or hold what cannot be seen? */
@@ -151,6 +165,9 @@ export const testDataDir = {
         if (isDataDir(node.left)) report(node, 'write')
         // `env = …` on a local alias is not process.env being replaced: only `process.env = …`
         else if (unwrap(node.left)?.type === 'MemberExpression' && isEnv(node.left)) report(node, 'replace')
+      },
+      UpdateExpression(node) {
+        if (isDataDir(node.argument)) report(node, 'write')
       },
       UnaryExpression(node) {
         if (node.operator === 'delete' && isDataDir(node.argument)) report(node, 'write')

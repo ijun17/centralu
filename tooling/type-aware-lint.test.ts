@@ -202,7 +202,7 @@ function forbiddenComments(file: string, code: string): string[] {
     }
     const config = new RegExp(`^\\s*${E}\\s+([\\s\\S]*)$`).exec(body)
     if (config && comment.startsWith('/*')) {
-      for (const [, rule = ''] of (config[1] ?? '').matchAll(/([@\w/-]+)\s*:/g)) if (NO_DISABLE_RULES.has(rule)) out.push(`a configuration comment for ${rule}`)
+      for (const [, , rule = ''] of (config[1] ?? '').matchAll(/(["']?)([@\w/-]+)\1\s*:/g)) if (NO_DISABLE_RULES.has(rule)) out.push(`a configuration comment for ${rule}`)
     }
   }
   return out
@@ -335,6 +335,11 @@ describe('type-aware lint (#1339)', () => {
     expect(f(`/* ${D} */\nconst a = 1`)).toHaveLength(1)
     expect(f(`const a = 1\n// ${D}-next-line`)).toHaveLength(1)
     expect(f(`/* ${E} @typescript-eslint/no-floating-promises: "off" */\nconst a = 1`)).toHaveLength(1)
+    // A rule named in quotes, and the two rules that took over a test's guard (#1602)
+    expect(f(`/* ${E} "@typescript-eslint/no-floating-promises": "off" */\nconst a = 1`)).toHaveLength(1)
+    expect(f(`/* ${E} 'test-env/data-dir': 'off' */\nconst a = 1`)).toHaveLength(1)
+    expect(f(`/* ${E} test-limits/scaled-by-slow: 0 */\nconst a = 1`)).toHaveLength(1)
+    expect(f(`// ${D}-next-line test-env/data-dir -- because\nconst a = 1`)).toHaveLength(1)
     expect(f(`// ${D}-next-line no-control-regex\n/* ${D} @typescript-eslint/no-explicit-any -- raw frames */\nconst a = 1`)).toEqual([])
     expect(f(`/* eslint-enable @typescript-eslint/no-non-null-assertion */\nconst a = 1`)).toEqual([])
     // Text in a string or a template is not a comment

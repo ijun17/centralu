@@ -71,6 +71,12 @@ describe('a data folder written by hand in a test file', () => {
     ['Object.defineProperty replacing env', "Object.defineProperty(process, 'env', { value: {} })"],
     ['Reflect.set replacing env', "Reflect.set(process, 'env', {})"],
     ['Object.assign into an alias', "const env = process.env\nObject.assign(env, saved)"],
+    ['an increment', 'process.env.CC_DATA_DIR++'],
+    ['a template key with a substitution', "const N = 'CC_DATA_DIR'\nprocess.env[`${N}`] = '/x'"],
+    ['a template key built from parts', "const P = 'CC_'\ndelete process.env[`${P}DATA_DIR`]"],
+    ['env imported by name', "import { env } from 'node:process'\nenv.CC_DATA_DIR = '/x'"],
+    ['env imported by name from process', "import { env } from 'process'\ndelete env.CC_DATA_DIR"],
+    ['a quoted method name', "Object['assign'](process.env, saved)"],
     ['delete through an optional chain', 'delete process?.env.CC_DATA_DIR'],
     ['delete behind an assertion', 'delete (process.env as Env).CC_DATA_DIR'],
   ])('is reported, in a spelling the old check did not name: %s', async (_form, code) => {
@@ -95,6 +101,8 @@ describe('a data folder written by hand in a test file', () => {
     ['Reflect.set of another variable', "Reflect.set(process.env, 'OTHER', '1')"],
     ['Reflect.set on another object', "Reflect.set(other, 'CC_DATA_DIR', '1')"],
     ['Object.defineProperty of another variable', "Object.defineProperty(process.env, 'OTHER', { value: '1' })"],
+    ['env imported by name from another module', "import { env } from './env.js'\nenv.CC_DATA_DIR = '/x'"],
+    ['a template key that cannot be told', "process.env[`${name}`] = '/x'"],
     ['passing it to a child process', "spawn('node', [], { env: { ...process.env, CC_DATA_DIR: dir } })"],
   ])('is not reported, and the write after it is: %s', async (_form, code) => {
     // The write after it keeps this from passing for want of a rule at all
