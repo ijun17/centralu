@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { isInTurn, isUnread, type SessionSummary } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { archiveNeedsAsk } from '../../store/sessions/lifecycle.js'
@@ -11,6 +11,7 @@ import { ActionRow } from './menus/ActionRow.jsx'
 import { ConfirmDelete } from './dialogs/ConfirmDelete.jsx'
 import { CrownIcon, DotsIcon } from '../../components/icons.jsx'
 import { SESSION_MIME } from './reorder.js'
+import { HoverExpander } from './fold.js'
 
 /**
  * The door to the orchestrator — **directing by talking**.
@@ -44,10 +45,44 @@ export function OrchestratorButton() {
   const open = useStore((s) => s.openOrchestrator)
   const id = useStore((s) => s.orchestratorId)
   const active = view === 'orchestrator'
+  /*
+   * The children fold under the button and open when the mouse rests on it (#1591), by the rule of a folded project's name
+   * (#1578): a transient state that nothing saves. Leaving the whole block, button and list, folds it again. A click on
+   * the button only opens the screen; it pins nothing.
+   */
+  const [hoverOpen, setHoverOpen] = useState(false)
+  const blockRef = useRef<HTMLDivElement>(null)
+  const expander = useMemo(
+    () => new HoverExpander({ onChange: setHoverOpen, pointerInside: () => !!blockRef.current?.matches(':hover') }),
+    [],
+  )
+  // A row menu, the archive dialog or a drag from a row keeps the list as it is until it ends
+  const [holders, setHolders] = useState<ReadonlySet<string>>(new Set())
+  const [dragging, setDragging] = useState(false)
+  const onHold = useCallback(
+    (rowId: string, held: boolean) =>
+      setHolders((cur) => {
+        if (cur.has(rowId) === held) return cur
+        const next = new Set(cur)
+        if (held) next.add(rowId)
+        else next.delete(rowId)
+        return next
+      }),
+    [],
+  )
+  const holding = holders.size > 0 || dragging
+  useEffect(() => expander.hold(holding), [expander, holding])
+  useEffect(() => () => expander.reset(), [expander])
 
   // pt-2: the lane's top margin. Search used to stand above this row (#529); it moved to the top bar (#727)
   return (
-    <div className="px-2 pt-2">
+    <div
+      className="px-2 pt-2"
+      ref={blockRef}
+      onPointerLeave={(e) => {
+        if (e.pointerType === 'mouse') expander.leaveBlock()
+      }}
+    >
       <button
         className={`flex w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left text-sm transition-colors ${
           active
@@ -64,6 +99,8 @@ export function OrchestratorButton() {
           this was the only entry point still missing from it.
         */
         draggable={!!id}
+        onPointerEnter={(e) => e.pointerType === 'mouse' && expander.enterName(true)}
+        onPointerLeave={(e) => e.pointerType === 'mouse' && expander.leaveName()}
         onDragStart={(e) => {
           if (!id) return
           e.dataTransfer.setData(SESSION_MIME, id)
@@ -80,7 +117,7 @@ export function OrchestratorButton() {
         <CrownIcon />
         <span className="truncate font-medium tracking-tight">Orchestrator</span>
       </button>
-      <OrchestratorChildren orchestratorId={id} />
+      <OrchestratorChildren orchestratorId={id} hoverOpen={hoverOpen} onHold={onHold} onDragging={setDragging} />
     </div>
   )
 }
@@ -107,14 +144,38 @@ export function orchestratorChildren(
   }
 }
 
-function OrchestratorChildren({ orchestratorId }: { orchestratorId: string | null }) {
+/**
+ * Whether the children's list is drawn (#1591): while the mouse rests on the button (`hoverOpen`), and always while one
+ * of the children is the open session, so the open session's row does not vanish. Nothing else says it is folded: no count.
+ */
+export function orchestratorListShown(hoverOpen: boolean, selectedId: string | null, children: { current: readonly { id: string }[]; earlier: readonly { id: string }[] }): boolean {
+  return hoverOpen || (selectedId !== null && [...children.current, ...children.earlier].some((s) => s.id === selectedId))
+}
+
+function OrchestratorChildren({
+  orchestratorId,
+  hoverOpen,
+  onHold,
+  onDragging,
+}: {
+  orchestratorId: string | null
+  hoverOpen: boolean
+  onHold: (rowId: string, held: boolean) => void
+  onDragging: (dragging: boolean) => void
+}) {
   const all = useStore((s) => s.sessions)
+  const selected = useSelectedSessionId()
   const { current, earlier } = useMemo(() => orchestratorChildren(all, orchestratorId), [all, orchestratorId])
-  if (current.length === 0 && earlier.length === 0) return null
+  const shown = orchestratorListShown(hoverOpen, selected, { current, earlier })
+  // A row dragged away from a list that then goes is never told its drag ended
+  useEffect(() => {
+    if (!shown) onDragging(false)
+  }, [shown, onDragging])
+  if (!shown || (current.length === 0 && earlier.length === 0)) return null
   return (
-    <ul className="mt-0.5" data-testid="orchestrator-children">
+    <ul className="mt-0.5" data-testid="orchestrator-children" onDragStart={() => onDragging(true)} onDragEnd={() => onDragging(false)}>
       {current.map((s) => (
-        <OrchestratorChildRow key={s.id} s={s} />
+        <OrchestratorChildRow key={s.id} s={s} onHold={onHold} />
       ))}
       {earlier.length > 0 && (
         <>
@@ -122,7 +183,7 @@ function OrchestratorChildren({ orchestratorId }: { orchestratorId: string | nul
             Started by an earlier orchestrator
           </li>
           {earlier.map((s) => (
-            <OrchestratorChildRow key={s.id} s={s} />
+            <OrchestratorChildRow key={s.id} s={s} onHold={onHold} />
           ))}
         </>
       )}
@@ -136,13 +197,19 @@ function OrchestratorChildren({ orchestratorId }: { orchestratorId: string | nul
  */
 // No fold gutter on these rows (owner, 2026-10-20): an orchestrator's child folds nothing, so the chevron's empty
 // column only pushed its mark away from the guide line
-function OrchestratorChildRow({ s }: { s: SessionSummary }) {
+function OrchestratorChildRow({ s, onHold }: { s: SessionSummary; onHold: (rowId: string, held: boolean) => void }) {
   const selected = useSelectedSessionId()
   const focusSession = useStore((st) => st.focusSession)
   const interrupt = useStore((st) => st.interrupt)
   const deleteSession = useStore((st) => st.deleteSession)
   const [menu, setMenu] = useState<HTMLElement | null>(null)
   const [confirming, setConfirming] = useState(false)
+  // An open menu or dialog keeps the list shown while the pointer is away (#1591)
+  const holding = menu !== null || confirming
+  useEffect(() => {
+    onHold(s.id, holding)
+    return () => onHold(s.id, false)
+  }, [onHold, s.id, holding])
   const focused = selected === s.id
   const unread = isUnread(s)
   return (
