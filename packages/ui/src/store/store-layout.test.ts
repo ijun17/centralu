@@ -95,24 +95,6 @@ describe('sidebar group folding (#666)', () => {
     expect(folded()).toEqual(['session:g-hub-parent'])
   })
 
-  // #1416: the parent's "N on <machine>" opens what hides the children it handed to another machine, and picks none of them
-  it('revealing the sessions a parent handed to another machine opens their project and groups, and picks nothing', async () => {
-    const mock = new MockPlatform()
-    const hub = await mock.projects.add('/tmp/group-hub-2')
-    mock.sessions.set('g-hub-parent', sessionInfo('g-hub-parent', { projectId: hub.id }))
-    mock.sessions.set('m1.g-lead', sessionInfo('m1.g-lead', { projectId: 'm1.p-far', machine: 'm1', askedBy: 'g-hub-parent' }))
-    mock.sessions.set('m1.g-sub', sessionInfo('m1.g-sub', { projectId: 'm1.p-far', machine: 'm1', askedBy: 'm1.g-lead' }))
-    await useStore.getState().attach(mock)
-    useStore.setState({ foldedProjects: [hub.id, 'm1.p-far'] })
-    useStore.getState().setGroupsFolded(['session:m1.g-lead', 'session:unrelated'], true)
-
-    useStore.getState().revealSessions(['m1.g-sub'])
-
-    expect(useStore.getState().foldedProjects).toEqual([hub.id])
-    expect(folded()).toEqual(['session:unrelated'])
-    expect(useStore.getState().focusedSessionId).toBeNull()
-  })
-
   it('a removed app does not claim the session, so its fold opens nothing', async () => {
     const mock = new MockPlatform()
     const a = await mock.projects.add('/tmp/group-gone')

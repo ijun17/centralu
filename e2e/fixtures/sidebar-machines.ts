@@ -542,39 +542,26 @@ export function sidebarMachinesTests(): void {
       await expect(page.getByTestId('project-alpha')).toHaveAttribute('data-selected', 'true')
     })
 
-    test('the parent points to them as "2 on Box"; pressing it opens their project and scrolls to them, picking none', async ({ page }) => {
-      const { parent, ccId } = await seed(page)
-      const pointer = page.getByTestId(`handed-off-${parent}-box`)
-      await expect(pointer).toContainText('2 on Box')
-      await expect(page.getByTestId('project-alpha').getByTestId(`handed-off-${parent}`)).toBeVisible()
-      await expect(page.getByTestId(`handed-off-${parent}-box-attention`)).toHaveCount(0)
-
-      await test.step('Box’s project is folded and off screen: the pointer opens it and brings the child into view', async () => {
-        await page.evaluate((id) => (window as unknown as MockWindow).__store.getState().toggleProjectFold(id), ccId)
-        await expect(page.getByTestId('project-cc')).toHaveAttribute('data-folded', 'true')
-        await expect(page.getByTestId('session-row-box.child-1')).toHaveCount(0)
-        const picked = await page.evaluate(() => (window as unknown as MockWindow).__store.getState().focusedSessionId as string)
-        await pointer.click()
-        await expect(page.getByTestId('project-cc')).not.toHaveAttribute('data-folded')
-        await expect(page.getByTestId('session-row-box.child-1')).toBeInViewport()
-        // It only showed them: nothing was picked
-        expect(await page.evaluate(() => (window as unknown as MockWindow).__store.getState().focusedSessionId as string)).toBe(picked)
-      })
-    })
-
-    test('the pointer lights when a child waits or has errored, and says so, so a stopped child is seen from its parent', async ({ page }) => {
+    test('the parent’s row draws no pointer to them; a child that waits on approval shows in the inbox and in its own project row', async ({ page }) => {
       const { parent } = await seed(page)
-      const pointer = page.getByTestId(`handed-off-${parent}-box`)
-      for (const state of ['error', 'waiting_approval'] as const) {
-        await page.evaluate((st) => (window as unknown as MockWindow).__mock.emit({ type: 'state_change', sessionId: 'box.child-2', state: st }), state)
-        await expect(page.getByTestId(`handed-off-${parent}-box-attention`)).toHaveAttribute('data-attention', 'alert')
-        await expect(pointer).toHaveAttribute('aria-label', '2 on Box, one needs you')
-      }
-      await page.evaluate(() => (window as unknown as MockWindow).__mock.emit({ type: 'state_change', sessionId: 'box.child-2', state: 'working' }))
-      await expect(page.getByTestId(`handed-off-${parent}-box-attention`)).toHaveCount(0)
+      await expect(page.getByTestId('project-alpha').getByTestId(`session-row-${parent}`)).toBeVisible()
+      await expect(page.locator('[data-testid^="handed-off-"]')).toHaveCount(0)
+      await expect(page.getByText('2 on Box')).toHaveCount(0)
+
+      await page.evaluate(() => {
+        const m = (window as unknown as MockWindow).__mock
+        m.emit({ type: 'state_change', sessionId: 'box.child-2', state: 'working' })
+        m.emit({ type: 'approval_request', sessionId: 'box.child-2', requestId: 'box-1', detail: { kind: 'command', command: 'ls', cwd: '/home/me/cc' } })
+      })
+      // Its own row, in Box's project, lights as a session waiting on the person does
+      await expect(page.getByTestId('project-cc').getByTestId('session-row-box.child-2')).toBeAttached()
+      await expect(page.getByTestId('project-cc').getByTestId('session-row-box.child-2').locator('[data-testid^="tool-mark-"]')).toHaveAttribute('data-state', 'waiting_approval')
+      // And the inbox lists it
+      await page.getByTestId('counter').click()
+      await expect(page.getByTestId('inbox-item-box.child-2')).toBeVisible()
     })
 
-    test('a child of the same project on the same machine still hangs under its parent, with no pointer of its own', async ({ page }) => {
+    test('a child of the same project on the same machine still hangs under its parent', async ({ page }) => {
       const { parent } = await seed(page)
       await page.evaluate((pid) => {
         const m = (window as unknown as MockWindow).__mock
@@ -583,9 +570,8 @@ export function sidebarMachinesTests(): void {
       }, parent)
       await expect(page.getByTestId('project-alpha').getByTestId('session-row-local-kid')).toBeVisible()
       await expect(page.getByTestId('project-alpha').locator('li', { has: page.getByTestId('session-row-local-kid') })).toHaveAttribute('data-level', '2')
-      // Still the one pointer, for the two on Box, and none for the child here
-      await expect(page.getByTestId(`handed-off-${parent}-box`)).toContainText('2 on Box')
-      await expect(page.getByTestId(`handed-off-${parent}`).locator('button')).toHaveCount(1)
+      // No pointer for the two on Box, nor for the child here
+      await expect(page.locator('[data-testid^="handed-off-"]')).toHaveCount(0)
     })
   })
 }

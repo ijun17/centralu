@@ -14,7 +14,7 @@ import { useAnchoredPlacement } from './anchored.js'
 const SIGNAL: Record<SessionState, { glyph: string; tone: string; label: string }> = {
   waiting_approval: { glyph: '●', tone: 'signal', label: 'Awaiting approval' },
   error: { glyph: '✕', tone: 'text-ink-signal', label: 'Error' },
-  waiting_input: { glyph: '○', tone: 'text-ink-muted', label: 'Waiting for input' },
+  waiting_input: { glyph: '○', tone: 'text-ink-muted', label: 'Idle' },
   working: { glyph: '◆', tone: 'text-ink-muted breathe', label: 'Working' },
   limited: { glyph: '▬', tone: 'text-ink-faint', label: 'Limit reached' },
   idle: { glyph: '·', tone: 'text-ink-faint', label: 'Idle' },

@@ -1,5 +1,5 @@
 import type { InboxItem } from '@cc/core'
-import { interruptionLabel } from '../../components/primitives.jsx'
+import { interruptionLabel, stateLabel } from '../../components/primitives.jsx'
 
 /**
  * What a waiting list row says it waits for. Why a stopped turn stopped says more than the state it stopped in (#698),
@@ -10,5 +10,5 @@ export function inboxStateLabel(it: Pick<InboxItem, 'state' | 'proposal' | 'inte
   if (it.proposal) return 'Needs your answer'
   if (it.interruption) return interruptionLabel(it.interruption)
   if (it.state === 'waiting_approval') return it.asking ? 'Needs your answer' : 'Needs approval'
-  return it.state === 'error' ? 'Error' : 'Waiting for input'
+  return stateLabel(it.state)
 }
