@@ -502,12 +502,12 @@ describe("the turn on the child's machine, read as the caller's only on evidence
     })
 
     it("is not the caller's when the link dropped between the note and its turn, and the person wrote there meanwhile", async () => {
-      const ra = await afterNote()
+      // A control: the turn run for the first note is the caller's, and the second note (row 4) is held for the one after it
+      const ra = await afterFollowUp()
       ra.observe({ type: 'machine_status', machine: { id: 'm1', name: 'Box', status: 'unreachable' } })
-      // A control: the same flow with the caller's note as the last message is the caller's (above)
       lastUser = { text: 'my own thing', from: PERSON }
       await readAgain(ra)
-      opens(ra, { seq: NOTE_ROW, from: named })
+      opens(ra, { seq: 4, from: named })
       expect(reportOwed()).toBe(false)
     })
 
@@ -525,11 +525,12 @@ describe("the turn on the child's machine, read as the caller's only on evidence
     })
 
     it("is not the caller's after the hub restarted when the machine's last message is not that note", async () => {
-      await afterNote()
+      // A control: the turn run for the first note is the caller's, and the second note (row 4) is held for the one after it
+      await afterFollowUp()
       const restarted = following()
       lastUser = { text: 'my own thing', from: PERSON }
       await readAgain(restarted)
-      opens(restarted, { seq: NOTE_ROW, from: named })
+      opens(restarted, { seq: 4, from: named })
       expect(reportOwed()).toBe(false)
     })
 

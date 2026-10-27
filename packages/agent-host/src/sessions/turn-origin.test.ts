@@ -187,12 +187,16 @@ describe('what is kept for the turns a hub may be owed', () => {
 
   it('keeps nothing when an error cut the turn', async () => {
     const id = await withNote()
+    // A control: something is kept until then
+    expect(origins(id)).not.toBeNull()
     handleOf(id).event({ type: 'error', sessionId: id, error: { code: 'internal', message: 'boom', retryable: false } })
     expect(origins(id)).toBeNull()
   })
 
   it('keeps nothing when the session is stopped', async () => {
     const id = await withNote()
+    // A control: something is kept until then
+    expect(origins(id)).not.toBeNull()
     w.mgr.interrupt(id)
     expect(origins(id)).toBeNull()
   })
