@@ -186,6 +186,39 @@ describe("a session's process across its replacements (agy)", () => {
     await expect(sp.start()).rejects.toThrow(/closed/)
   })
 
+  it('denies every open gate request when a Stop or a relaunch begins, before the process is signalled', async () => {
+    const { sp, log } = session()
+    await sp.start()
+    const stopped = sp.gates.wait('call-1').then((a) => (log.push('denied-stop'), a))
+    const done = sp.stop('The user stopped.')
+    expect(sp.gates.size).toBe(0)
+    expect(await stopped).toEqual({ decision: 'deny', reason: 'The user stopped.' })
+    await done
+    expect(log.indexOf('denied-stop')).toBeLessThan(log.indexOf('p1:eof'))
+    await sp.start()
+    const restarted = sp.gates.wait('call-2')
+    const relaunched = sp.relaunch()
+    expect(await restarted).toEqual({ decision: 'deny', reason: 'The session is restarting.' })
+    await relaunched
+  })
+
+  it('denies a gate request a process asks while it is being stopped, at once, and takes requests again once the next one runs', async () => {
+    const log: string[] = []
+    const procs: FakeProc[] = []
+    const sp = new SessionProcess('Antigravity', async () => ({ command: 'agy', args: [], env: {} }), { graceMs: 300, spawn: () => (procs.push(new FakeProc(log, `p${procs.length + 1}`, false)), procs.at(-1)!) }, null)
+    await sp.start()
+    const done = sp.stop()
+    // The tool ignores stdin's end and is still there for the grace: its hook asks now
+    await vi.waitFor(() => expect(log).toContain('p1:eof'))
+    expect(await sp.gates.wait('late')).toEqual({ decision: 'deny', reason: 'The turn was stopped.' })
+    expect(sp.gates.size).toBe(0)
+    await done
+    await sp.start()
+    void sp.gates.wait('next')
+    expect(sp.gates.size).toBe(1)
+    await sp.close()
+  })
+
   /** A session whose launch waits until `go()` (agy is looked for, its plugin root written) */
   function slowSession() {
     const log: string[] = []

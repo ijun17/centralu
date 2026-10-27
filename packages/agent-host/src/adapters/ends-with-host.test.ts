@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -41,7 +41,7 @@ const helperCli = [
 
 describe('a CLI that must end with its host', () => {
   it('starts behind the host watch, which ends the group once the host’s end of its pipe closes', () => {
-    expect(HOST_WATCH).toContain('exec "$@" 3<&-')
+    expect(HOST_WATCH).toContain('exec "$@" 3<&- 4>&-')
     expect(HOST_WATCH).toContain('kill -9 0')
   })
 
@@ -163,13 +163,64 @@ describe('a CLI that must end with its host', () => {
     ])
   })
 
+  /*
+   * Behind the watch `sh` always starts, so a program that is not there or cannot be run used to read as an exit code (127,
+   * 126): Codex said "exited (code 127)". The shell that will `exec` looks it up itself and says so before it does, and the
+   * host raises what Node's spawn raises without the watch. The PATH is the test's own, never the runner's: npx and pnpm put
+   * a relative `./node_modules/.bin` on it, a login shell may leave `~/...` or an empty entry.
+   */
+  const startError = (env: Record<string, string | undefined>, command: string, cwd?: string) => {
+    const p = spawnLocalAgent({ command, args: [], env, cwd, endsWithHost: true })
+    return new Promise<{ error: Error; exits: number[] }>((resolve) => {
+      const exits: number[] = []
+      p.once('exit', (code: number) => exits.push(code))
+      p.once('error', (error) => setTimeout(() => resolve({ error, exits }), 100))
+    })
+  }
+
   it.skipIf(!unix)('says a CLI that is not there did not start, as without the watch, not that it crashed', async () => {
-    // Behind the watch `sh` always starts, and its `exec` of a missing program exits 127: Codex said "exited (code 127)"
-    for (const command of ['/nonexistent/cc-no-such-cli', 'cc-no-such-cli']) {
-      const p = spawnLocalAgent({ command, args: [], env: process.env, endsWithHost: true })
-      const error = await new Promise<Error>((resolve) => p.once('error', resolve))
-      expect(error).toMatchObject({ code: 'ENOENT' })
-      expect(p.pid).toBeUndefined()
+    dir = mkdtempSync(join(tmpdir(), 'cc-ends-with-host-'))
+    mkdirSync(join(dir, 'rel'))
+    const bin = '/usr/bin:/bin'
+    const paths: (string | undefined)[] = [bin, `${bin}:./rel`, `${bin}:~/cc-no-such-dir`, `${bin}::`, `:${bin}`, undefined]
+    for (const PATH of paths) {
+      for (const command of ['/nonexistent/cc-no-such-cli', 'cc-no-such-cli', './cc-no-such-cli']) {
+        const { error } = await startError({ PATH }, command, dir)
+        expect(error, `PATH=${PATH} ${command}`).toMatchObject({ code: 'ENOENT', syscall: `spawn ${command}` })
+      }
+    }
+  })
+
+  it.skipIf(!unix)('finds a CLI on a relative or empty PATH entry, from the folder it starts in', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'cc-ends-with-host-'))
+    mkdirSync(join(dir, 'rel'))
+    const cli = join(dir, 'rel', 'cc-rel-cli')
+    writeFileSync(cli, '#!/bin/sh\necho started\n', { mode: 0o755 })
+    for (const PATH of ['/usr/bin:/bin:rel', '/usr/bin:/bin:./rel']) {
+      const p = spawnLocalAgent({ command: 'cc-rel-cli', args: [], env: { PATH }, cwd: dir, endsWithHost: true })
+      const failed = vi.fn()
+      p.on('error', failed)
+      let out = ''
+      p.stdout.on('data', (d) => (out += d))
+      await new Promise((r) => p.once('exit', r))
+      expect(out, PATH).toBe('started\n')
+      expect(failed).not.toHaveBeenCalled()
+    }
+  })
+
+  it.skipIf(!unix || process.getuid?.() === 0)('says a file that cannot be run, or a folder, did not start (EACCES), as without the watch', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'cc-ends-with-host-'))
+    writeFileSync(join(dir, 'plain'), 'not a program', { mode: 0o644 })
+    mkdirSync(join(dir, 'folder'))
+    const cases: [string, Record<string, string>][] = [
+      [join(dir, 'plain'), { PATH: '/usr/bin:/bin' }],
+      [join(dir, 'folder'), { PATH: '/usr/bin:/bin' }],
+    ]
+    for (const [command, env] of cases) {
+      const { error } = await startError(env, command)
+      const node = await new Promise<Error>((resolve) => spawn(command, [], { env }).once('error', resolve))
+      expect(error, command).toMatchObject({ code: 'EACCES' })
+      expect(node).toMatchObject({ code: 'EACCES' })
     }
   })
 

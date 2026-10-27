@@ -20,9 +20,9 @@ export type GateRequest = {
 }
 
 /**
- * The hook's way back to this host: **an interface only** until the transport is decided (PR 3's decision: a loopback
- * listener with a per-session token, or a route on the host's front door under the bridge credential). Whichever it is,
- * it is opened per session before the tool starts, its `env` goes into the tool's environment (the hook inherits it,
+ * The hook's way back to this host: **an interface only**: the transport is decided (session-core.md §8.1: a route on the host's front
+ * door under a gate-only key, random per session, in memory, revoked on close, one method, no decision field) and comes with
+ * `agy`. It is opened per session before the tool starts, its `env` goes into the tool's environment (the hook inherits it,
  * measured), it fails closed (an unreachable host is a `deny`), and closing it denies what is still open.
  */
 export interface GateInbound {
@@ -40,15 +40,33 @@ export class GateRequests {
   private readonly open = new Map<string, (answer: GateAnswer) => void>()
   /** Set once the session has closed: a request asked after that is denied at once, never left waiting */
   private closedReason: string | null = null
+  /** The reasons of the Stops under way (`hold`): while there is one, a request asked is denied at once */
+  private readonly holds: string[] = []
 
   /**
    * Waits for the answer to one request: given by `answer`, or `deny` by `denyAll`. A second wait for the same id denies the
    * first: only ever a deny, so a request asked again (or forged with an open id) can end a wait but never allow a call
    */
   wait(requestId: string): Promise<GateAnswer> {
-    if (this.closedReason !== null) return Promise.resolve({ decision: 'deny', reason: this.closedReason })
+    const refused = this.closedReason ?? this.holds[this.holds.length - 1]
+    if (refused !== undefined) return Promise.resolve({ decision: 'deny', reason: refused })
     this.answer(requestId, { decision: 'deny', reason: 'The request was asked again.' })
     return new Promise((resolve) => this.open.set(requestId, resolve))
+  }
+
+  /**
+   * A Stop is under way: what is open is denied now, and so is what a dying process asks until `release` (its grace can run
+   * seconds, and a request it asks then would wait for the next start). Stops overlap, each releasing only its own hold
+   */
+  hold(reason: string): () => void {
+    this.holds.push(reason)
+    this.denyAll(reason)
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      this.holds.splice(this.holds.lastIndexOf(reason), 1)
+    }
   }
 
   /** The session's end: what is open is denied, and so is what asks later */

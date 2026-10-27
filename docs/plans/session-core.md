@@ -353,7 +353,7 @@ the watch. That also changes ACP on macOS and Linux, from "<label> exited (code 
 2. **An id learned late** (`noteExternalId(id, from)`): `agy` says its id only in `init`, after the first input; every
    later launch goes on with it. A late line from a process already replaced is ignored.
 3. **The gate's inbound path** (`GateInbound`, `GateChannel`, `GateRequest`, `GateAnswer`): an interface only; the
-   transport is a decision to make (§8.1).
+   transport is decided (§8.1: a front-door route under a gate-only key), built with `agy`.
 4. **A Stop denies every open gate request first** (`GateRequests.denyAll`, in `interrupt` and `stop`): SIGINT does not
    end `agy` while a gate hook waits.
 
@@ -480,33 +480,37 @@ for ACP; it does not wait for Claude's or Codex's moves (PRs 2, 6, 7).
 ### 8.1 The gate's way back to the host: a decision
 
 The hook is a process `agy` starts per call; it must reach this host, wait for a decision and print it (a hook that
-prints nothing and exits 0 lets the tool run, measured). Two transports, behind the same `GateInbound`:
+prints nothing and exits 0 lets the tool run, measured). Two transports were weighed, and a third, narrower one chosen:
 
 | | A. Loopback listener per session, its own token | B. A route on the host's front door, the bridge credential |
 |---|---|---|
 | What is new | a listener per `agy` session (`127.0.0.1`, a random port) and a random token per session in the tool's environment | one route and a `SessionHandle` method it reaches; no new listener |
-| Who can call | anyone on the machine who has the port and the token; the token is per session and dies with it | anyone who holds the session's bridge credential: the bridge and every MCP server the session runs see it already |
-| What a leaked secret allows | answering that session's gate until it closes | the same, plus what that credential already reaches; a gate answer becomes one more right on a credential tools see |
+| Who can call | anyone on the machine who has the port and the token; the token is per session and dies with it | anyone who holds the session's bridge credential |
+| What a leaked secret allows | raising that session's gate cards until it closes | the same, plus what that credential already reaches (`orchestrator.tool`, `apps.sessionCall` for that session) |
 | Rights model | outside the host's method rights: a second front door to review and keep reviewed | inside them: one front door, its rights table and its tests |
 | Across a host swap | dies with the host; an adopted `agy` is reopened, not taken over (§8), so a new process gets a new listener and token | the route survives; a request the old host opened is answered only if the hook asks again |
-| The session's own commands | inherit the tool's environment, so they hold the token (and another process of the same user can read it from the process's environment) | the same: they already hold the bridge credential |
+| Who holds the secret today | nobody: it is new | **no tool's environment holds the bridge credential today.** Claude's Centralu tools run inside the host with no token. Codex and ACP get the bridge's environment only in the bridge child process (thread config, `session/new`'s `mcpServers`), and only for a session with the orchestrator profile or apps. Another process can read it from that child's environment at most. The credential is an HMAC of the session id keyed by the host token: it does not die with the session and survives keeper swaps |
+| What `agy`'s shell would gain | the session's gate token only | a long-lived credential for its session's orchestrator and app tools, newly in the agent's own shell, skipping what the tool asks before an MCP call |
 | Windows | a loopback port (no firewall prompt for `127.0.0.1`) | nothing new |
 
-Either one fails closed (the hook denies when the host cannot be reached), keeps the secret out of every file (the
-plugin root holds names only) and is closed with the session, denying what is open and what asks later. Either way the
-hook's process must not be able to approve calls of another session: A by the per-session token, B by checking the
-credential's session against the request's.
+**Decision (owner, after the security review on #1668): a route on the host's front door under a gate-only key of its own.**
+Not the bridge credential, and no new listener.
 
-The secret is in the tool's environment, so the agent's own shell commands hold it too, under A as under B. That is safe
-only because the channel **asks and never answers**: a caller sends a call to decide on and gets the decision back; the
-decision comes from the preset, the always-allow rules or the person's card, never from the caller. A command holding the
-secret can then raise a card (noise the person sees and can deny), or ask again with an open request's id, which only
-ever denies the first wait (`GateRequests.wait`); it cannot allow a call. A transport that let the caller say "allowed"
-(a shortcut for Centralu's own tools, say) would hand the agent its own approvals, and must not be added. A per-request
-nonce from the hook's input does not help: the tool writes that input and the agent's commands do not see it, but the
-gate's answer, not the request, is what has to be protected. **Recommended: B**, since it adds no listener and keeps one front door under one rights table;
-A's narrower secret is the reason to choose it instead. The owner decides before `agy`'s pull request; PR 3 ships the
-interface alone.
+- The key is random per session, held in memory, revoked when the session closes, and allows exactly one method: raise a
+  gate request for that session. It is bound to the session it was made for and is not in the everyday rights.
+- The method's parameters carry no decision field. Approvals stay `window`-only in the rights table
+  (`agents.respondApproval`, `requests.answer`), so the channel can ask and never answer.
+- It fails closed (the hook denies when the host cannot be reached), keeps the secret out of every file (the plugin root
+  holds names only) and is closed with the session, denying what is open and what asks later. A Stop denies what is open and
+  what a dying process asks during its grace.
+- `core/gate.ts` stays interfaces only; the route and the key come with `agy`'s pull request.
+
+The key is in the tool's environment, so the agent's own shell commands hold it too. That is safe only because the channel
+**asks and never answers**: the decision comes from the preset, the always-allow rules or the person's card, never from the
+caller. A command holding the key can raise a card (noise the person sees and can deny), or ask again with an open
+request's id, which only ever denies the first wait (`GateRequests.wait`); it cannot allow a call. A transport that let the
+caller say "allowed" (a shortcut for Centralu's own tools, say) would hand the agent its own approvals, and must not be
+added.
 
 ## 9. Open questions
 

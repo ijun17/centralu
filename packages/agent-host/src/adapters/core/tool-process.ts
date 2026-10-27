@@ -170,8 +170,9 @@ export class SessionProcess {
 
   /** Denies every open gate request, then stops the process (stdin's end, the bound, the tree); a later start starts another */
   stop(reason = 'The turn was stopped.'): Promise<void> {
-    this.gates.denyAll(reason)
-    return this.serial(() => this.stopNow(reason))
+    // Held from now until the stop is done, also while it waits behind a start
+    const release = this.gates.hold(reason)
+    return this.serial(() => this.stopNow(reason)).finally(release)
   }
 
   /** The session's end: what is open and what asks later is denied, the process is stopped, and nothing starts again */
@@ -201,10 +202,14 @@ export class SessionProcess {
   }
 
   private async stopNow(reason: string): Promise<void> {
-    this.gates.denyAll(reason)
-    const proc = this.proc
-    this.proc = null
-    if (proc) await stopToolProcess(proc, { exited: ended(proc), ...(this.how.graceMs === undefined ? {} : { graceMs: this.how.graceMs }) })
+    const release = this.gates.hold(reason)
+    try {
+      const proc = this.proc
+      this.proc = null
+      if (proc) await stopToolProcess(proc, { exited: ended(proc), ...(this.how.graceMs === undefined ? {} : { graceMs: this.how.graceMs }) })
+    } finally {
+      release()
+    }
   }
 }
 
