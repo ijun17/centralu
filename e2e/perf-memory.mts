@@ -39,8 +39,8 @@
  *
  * Only processes this script started are measured, and none are signalled but its own host. WebKit's helper
  * processes are XPC services with no parent link, so they are told apart as the WebKit processes that were not
- * there before the launch — hold the e2e lock while this runs:
- *   until mkdir /tmp/centralu-e2e.lock 2>/dev/null; do sleep 20; done; pnpm perf:memory; rmdir /tmp/centralu-e2e.lock
+ * there before the launch — so it must not overlap another run: `pnpm perf:memory` holds the e2e lock
+ * (tooling/with-e2e-lock.ts, tooling/e2e-lock.ts) and waits for any other `pnpm e2e`, `ux` or `perf` first.
  *
  * Results: docs/spikes/2026-10-memory-heavy-store.md.
  */

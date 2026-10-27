@@ -12,7 +12,7 @@ behind each line live in the linked documents.
   its keeper and its host match the same names, and your own session may be running under them.
 - Trigger an OS permission prompt (screen capture, camera, protected folders) without asking.
   A tool started under Centralu asks in Centralu's name.
-- Run two `pnpm e2e` at once on one machine. Take the lock (below).
+- Run two `pnpm e2e` (or `ux`, `perf`, `perf:memory`) at once on one machine. The runners take a lock themselves and wait for each other; do not bypass it by calling `playwright` directly. WSL and native Windows are two machines to that lock: a run in each does not wait for the other, so use one of them.
 - Merge your own pull request.
 
 ## Commands
@@ -20,8 +20,8 @@ behind each line live in the linked documents.
 | Need | Run |
 |---|---|
 | Everything that has to pass | `pnpm verify` (lint, dependency rules, types, tests); CI runs it too |
-| UI scenarios | `until mkdir /tmp/centralu-e2e.lock 2>/dev/null; do sleep 20; done; CI=1 pnpm e2e; rmdir /tmp/centralu-e2e.lock` |
-| UI scenarios as CI runs them (one engine at a time) | the same, with `CI=1 E2E_BROWSER=webkit pnpm e2e` (or `=chromium`) |
+| UI scenarios | `CI=1 pnpm e2e` (waits if another run holds the machine's lock and says who; `tooling/e2e-lock.ts`) |
+| UI scenarios as CI runs them (one engine at a time) | `CI=1 E2E_BROWSER=webkit pnpm e2e` (or `=chromium`) |
 | Tests while other agents run tests | `pnpm exec vitest run --maxWorkers=4 <files>` |
 | Rust shell and keeper | `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib` (run `pnpm bundle:host` first if `resources/host` is missing) |
 | The UI without a host | `pnpm dev`, then `?mock=1` (empty) or `?demo` / `?demo=grid` (a seeded scene) |
