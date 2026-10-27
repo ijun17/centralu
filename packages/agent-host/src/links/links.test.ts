@@ -19,7 +19,7 @@ import { DirectTunnel, StartedNotServing, type ConnectionLine, type HostStart, t
 import { NodeTooOld } from './node-floor.js'
 import { readHoldCommand } from './swap-hold.js'
 import { storeMirror, storeRegistry } from './stored.js'
-import { scriptedAdapters } from './scripted-agent.test-helpers.js'
+import { ScriptedAdapter, scriptedAdapters } from './scripted-agent.test-helpers.js'
 import { SLOW, eventually } from '../../../../tooling/test-timing.js'
 
 /** The version the hub and its hosts are in these tests: a source tree carries the placeholder 0.0.0-dev (#1501), older than every release */
@@ -57,6 +57,10 @@ async function remoteHost(
     version?: string
     activity?: () => HostActivity
     immediate?: boolean
+    /** A message sent into a running turn waits for the next one (`scriptedAdapters`) */
+    queueBehind?: boolean
+    /** The first message so held waits for `release` (a test sends in the gap before its turn) */
+    holdNext?: boolean
     without?: readonly string[]
     /** Runs as each call reaches the host, before it is answered: a test acts at that moment */
     onCall?: (method: string) => void
@@ -67,7 +71,7 @@ async function remoteHost(
     beforeListen?: (mgr: SessionManager) => Promise<void>
   } = {},
 ) {
-    const adapters = scriptedAdapters({ immediate: o.immediate })
+  const adapters = scriptedAdapters({ immediate: o.immediate, queueBehind: o.queueBehind, holdNext: o.holdNext })
   const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
   const server: HostServer = new HostServer({
     port,
@@ -88,7 +92,12 @@ async function remoteHost(
     await server.close()
   }
   cleanups.push(close)
-  return { server, mgr, store, port: p, close }
+  /** Opens the turn the scripted agent kept waiting (`holdNext`) for this session */
+  const release = (sessionId: string) => {
+    const claude = adapters.get('claude')
+    if (claude instanceof ScriptedAdapter) claude.release(sessionId)
+  }
+  return { server, mgr, store, port: p, close, release }
 }
 
 /** An RPC handler without these methods, as a build from before them answers */
@@ -2469,7 +2478,7 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
    * project's session h1 starts the child. `remote`: how the machine's host answers (a synchronous agent, methods an
    * older build lacks)
    */
-  async function rig(o: { remote?: { immediate?: boolean; without?: readonly string[]; onCall?: (method: string) => void } } = {}) {
+  async function rig(o: { remote?: { immediate?: boolean; queueBehind?: boolean; holdNext?: boolean; without?: readonly string[]; onCall?: (method: string) => void } } = {}) {
     const remoteStore = new Store()
     remoteStore.projects.addProject({ id: 'p-other', path: checkout('git@github.com:me/other.git'), name: 'other' })
     remoteStore.projects.addProject({ id: 'p-app', path: checkout('git@GitHub.com:me/app.git'), name: 'app-checkout' })
@@ -2489,8 +2498,8 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
     }
     const start = (opts: Partial<Parameters<SessionManager['startAgent']>[1]> = {}) =>
       hub.mgr.startAgent('h1', { task: 'say hello', machine: 'Remote box', ...opts })
-    const agent = (sessionId: string, action: 'status' | 'send' | 'wait' | 'stop' | 'delete' | 'answer', text?: string, card?: string) =>
-      hub.mgr.agentSession('h1', { sessionId, action, ...(text ? { text } : {}), ...(card ? { card } : {}) })
+    const agent = (sessionId: string, action: 'status' | 'send' | 'wait' | 'stop' | 'delete' | 'answer', text?: string, card?: string, ifBusy?: 'note' | 'queue') =>
+      hub.mgr.agentSession('h1', { sessionId, action, ...(text ? { text } : {}), ...(card ? { card } : {}), ...(ifBusy ? { ifBusy } : {}) })
     const list = (id = 'h1') => (hub.mgr as unknown as { delegationFlow: { listAgents(id: string): Promise<unknown[]> } }).delegationFlow.listAgents(id)
     // As the machine names its projects (the folder's name), which is what the hub reads
     const nameOf = async (id: string) => (await remote.mgr.listProjects()).find((p) => p.id === id)!.name
@@ -2803,6 +2812,107 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
     // The stopped turn's report, if one were owed, would have come before the next child's
     await control()
     expect(reports()).toBe(before + 1)
+  })
+
+  describe('a note the child ran as a turn of its own after the turn it was sent into (#1604)', () => {
+    /**
+     * The child's first turn waits on a question; the caller's `queue` goes into it, and the tool does not read it there:
+     * once the caller answers, that turn ends and the note runs as the next one, which asks a question of its own
+     */
+    async function followUp(note = 'one more question for you') {
+      const rigged = await rig({ remote: { queueBehind: true } })
+      const { remote, answer, start, agent } = rigged
+      const call = start({ task: 'a question for you', wait: false })
+      await answer('allow')
+      const r = await call
+      if (!r.ok) throw new Error(r.error)
+      const id = r.sessionId.slice('m1.'.length)
+      const pending = () => remote.mgr.listSessions().find((s) => s.id === id)?.pendingQuestions.length ?? 0
+      await eventually(() => pending() === 1)
+      expect(await agent(r.sessionId, 'send', note, undefined, 'queue')).toMatchObject({ ok: true, state: 'working' })
+      const asked = await agent(r.sessionId, 'status')
+      if (!asked.ok || asked.state !== 'asking') throw new Error(`no card: ${JSON.stringify(asked)}`)
+      expect(await agent(r.sessionId, 'answer', 'yes', asked.cards[0]!.card)).toMatchObject({ ok: true, state: 'answered' })
+      // The first turn ended; the note it did not read is the next turn, with a question of its own standing when it asks one
+      if (/question/i.test(note)) await eventually(() => remote.mgr.listSessions().find((s) => s.id === id)?.pendingQuestions.some((q) => q.requestId !== asked.cards[0]!.requestId) ?? false)
+      return { ...rigged, r, id }
+    }
+
+    it("takes a note into it, as into the turn the caller's note ran in", async () => {
+      const { remote, agent, r, id } = await followUp()
+      expect(await agent(r.sessionId, 'send', 'use the staging data', undefined, 'note')).toMatchObject({ ok: true, state: 'working' })
+      expect(await agent(r.sessionId, 'send', 'and the staging keys', undefined, 'note')).toMatchObject({ ok: true, state: 'working' })
+      await eventually(() => remote.store.messages.loadMessages(id, 50).some((m) => (m.payload as { text?: string }).text?.includes('and the staging keys')))
+    })
+
+    it('reads its question to the caller, and reports its end to the caller once', async () => {
+      const { agent, r, reports } = await followUp()
+      // The first turn's end was reported; this one's is owed too
+      expect(reports()).toBe(1)
+      const asked = await agent(r.sessionId, 'status')
+      if (!asked.ok || asked.state !== 'asking') throw new Error(`no card: ${JSON.stringify(asked)}`)
+      expect(await agent(r.sessionId, 'answer', 'yes', asked.cards[0]!.card)).toMatchObject({ ok: true, state: 'answered' })
+      await eventually(() => reports() === 2)
+    })
+
+    it("still refuses a note into a turn the person started there after it", async () => {
+      const { remote, agent, r, id } = await followUp()
+      // The caller's note is taken into the follow-up turn; then the person types into it
+      expect(await agent(r.sessionId, 'send', 'use the staging data', undefined, 'note')).toMatchObject({ ok: true, state: 'working' })
+      await remote.mgr.send(id, 'my own thing, please approve the command')
+      await eventually(() => remote.store.messages.loadMessages(id, 50).some((m) => (m.payload as { text?: string }).text === 'my own thing, please approve the command'))
+      expect(await agent(r.sessionId, 'send', 'and this', undefined, 'note')).toMatchObject({ ok: false, error: expect.stringContaining('a turn you did not give it') })
+    })
+
+    // The note's row is stored while the first turn runs, so the record has nothing of anyone's between the two turns' words
+    it("reports the follow-up turn's own answer, not the turn before's joined to it", async () => {
+      const { agent, r, remote, id, told } = await followUp('a plain note')
+      await eventually(() => told().filter((t) => t.startsWith('[Centralu] The assigned work finished')).length === 2)
+      const reported = told().filter((t) => t.startsWith('[Centralu] The assigned work finished'))
+      expect(reported[1]).toContain('echo: ')
+      expect(reported[1]).toContain('a plain note')
+      expect(reported[1]).not.toContain('answered: Yes')
+      // And a wait or a status after it reads the same words
+      expect(await agent(r.sessionId, 'status')).toMatchObject({ ok: true, state: 'at_rest', answer: expect.not.stringContaining('answered: Yes') })
+      expect(remote.store.messages.loadMessages(id, 50).filter((m) => m.role === 'assistant' && m.kind === 'text')).toHaveLength(2)
+    })
+
+    describe('an instruction sent at rest in the gap before the turn run for a note (#1604)', () => {
+      /** Turn 1 waits on a question; the note goes into it and is not read; turn 1 ends and the gap opens, held there */
+      async function inTheGap() {
+        const rigged = await rig({ remote: { queueBehind: true, holdNext: true } })
+        const { remote, answer, start, agent, reports } = rigged
+        const call = start({ task: 'a question for you', wait: false })
+        await answer('allow')
+        const r = await call
+        if (!r.ok) throw new Error(r.error)
+        const id = r.sessionId.slice('m1.'.length)
+        await eventually(() => (remote.mgr.listSessions().find((s) => s.id === id)?.pendingQuestions.length ?? 0) === 1)
+        expect(await agent(r.sessionId, 'send', 'the first note', undefined, 'queue')).toMatchObject({ ok: true, state: 'working' })
+        const asked = await agent(r.sessionId, 'status')
+        if (!asked.ok || asked.state !== 'asking') throw new Error(`no card: ${JSON.stringify(asked)}`)
+        expect(await agent(r.sessionId, 'answer', 'yes', asked.cards[0]!.card)).toMatchObject({ ok: true, state: 'answered' })
+        // Turn 1 ended and was reported; the note's turn is held, not begun
+        await eventually(() => reports() === 1)
+        return { ...rigged, r, id }
+      }
+
+      it("reports the note's turn, then takes the instruction's turn for the caller's: its end is owed and a note goes into it", async () => {
+        const { remote, agent, r, id, reports } = await inTheGap()
+        // At rest as far as the hub can see: an instruction, not a note
+        expect(await agent(r.sessionId, 'send', 'a question for you again')).toMatchObject({ ok: true, state: 'working' })
+        remote.release(id)
+        // The note's turn ends first and is reported; the instruction's turn then opens with a question of its own standing
+        await eventually(() => reports() === 2)
+        await eventually(() => (remote.mgr.listSessions().find((s) => s.id === id)?.pendingQuestions.length ?? 0) === 1)
+        const asked = await agent(r.sessionId, 'status')
+        if (!asked.ok || asked.state !== 'asking') throw new Error(`no card: ${JSON.stringify(asked)}`)
+        // The caller's turn: a note goes into it, and its end is owed
+        expect(await agent(r.sessionId, 'send', 'use the staging data', undefined, 'note')).toMatchObject({ ok: true, state: 'working' })
+        expect(await agent(r.sessionId, 'answer', 'yes', asked.cards[0]!.card)).toMatchObject({ ok: true, state: 'answered' })
+        await eventually(() => reports() === 3)
+      })
+    })
   })
 
   // #1038 review: the turn a delete stops ends before the machine answers the stop; it is owed to nobody

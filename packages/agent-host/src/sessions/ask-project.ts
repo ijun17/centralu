@@ -114,6 +114,9 @@ export function matchProjects(asked: string, projects: readonly AskableProject[]
 /** Where a turn's answer starts in its session (`answerAt`): the read that finds what a cut left out (#1186) */
 export type AnswerAt = { sessionId: string; seq: number }
 
+/** What a caller reads of a child's turn that ended with nothing to say (#1604): not an empty answer, which reads as one that was not read */
+export const NO_WORDS = '(its turn ended without saying anything: read_session shows what it did)'
+
 /**
  * A long answer cut in the middle, with where the whole of it is. With `at`, the cut names the read that shows what it
  * left out (#1186): read_session from the answer's first message, at the character the cut starts. It used to send

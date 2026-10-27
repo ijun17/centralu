@@ -20,3 +20,18 @@ describe('a linked machine\'s events about itself', () => {
     expect(q.event({ type: 'a_later_event' })).toBeNull()
   })
 })
+
+// #1604: the sender of the message a turn ran for is named as a message's sender is, or the hub could not match it to its own
+describe('the origin a linked machine says a turn ran for', () => {
+  const q = new Qualifier('m1', 1)
+
+  it('qualifies the sender of the message, and passes a turn that names none as it came', () => {
+    expect(q.event({ type: 'state_change', sessionId: 's1', state: 'working', origin: { seq: 4, from: { sessionId: '_hub-orchestrator', name: 'Parent' } } })).toEqual({
+      type: 'state_change',
+      sessionId: 'm1.s1',
+      state: 'working',
+      origin: { seq: 4, from: { sessionId: 'm1._hub-orchestrator', name: 'Parent' } },
+    })
+    expect(q.event({ type: 'state_change', sessionId: 's1', state: 'working' })).toEqual({ type: 'state_change', sessionId: 'm1.s1', state: 'working' })
+  })
+})

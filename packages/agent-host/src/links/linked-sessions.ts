@@ -1,4 +1,4 @@
-import { AGENT_INSTRUCTIONS_MAX, BackgroundTask, HostLastAnswerResult, HostReadSessionResult, PermissionPreset, RpcMethods, HostRecallHit, HostSessionRow, oneLineText, SessionId, SessionInfo, ToolName } from '@cc/protocol'
+import { AGENT_INSTRUCTIONS_MAX, BackgroundTask, HostLastAnswerResult, HostReadSessionResult, PermissionPreset, RpcMethods, HostRecallHit, HostSessionRow, isInTurn, oneLineText, SessionId, SessionInfo, ToolName } from '@cc/protocol'
 import { awayPhrase, NOT_CONNECTED, NOT_REACHABLE, type LinkedProject, type LinkedSessions, type OrchestratedSession, type ProjectNeed, type RecallHit } from '../adapters/contract.js'
 import { trustedJsonText } from '../sessions/orchestrator-tools.js'
 import { budgetOf, fitMachineLines, toolLinesOf } from '../sessions/session-lines.js'
@@ -503,18 +503,25 @@ export function linkedSessions(
       return attempt(m, async () => {
         // Newest page first, as a window pages back through it; a turn of many tool calls can span a page
         let beforeSeq: number | undefined
-        for (let page = 0; page < 5; page++) {
+        let message: { text: string; from: unknown; seq?: number } | null = null
+        for (let page = 0; page < 5 && !message; page++) {
           const list = await route('messages.load', { sessionId, limit: 200, ...(beforeSeq !== undefined ? { beforeSeq } : {}) })
           if (!Array.isArray(list) || list.length === 0) break
           for (const raw of [...list].reverse()) {
             if (!isObj(raw) || raw.role !== 'user' || raw.kind !== 'text' || !isObj(raw.payload)) continue
-            return { message: { text: typeof raw.payload.text === 'string' ? raw.payload.text : '', from: raw.payload.from ?? null } }
+            message = { text: typeof raw.payload.text === 'string' ? raw.payload.text : '', from: raw.payload.from ?? null, ...(typeof raw.seq === 'number' ? { seq: raw.seq } : {}) }
+            break
           }
           const first: unknown = list[0]
           if (!isObj(first) || typeof first.seq !== 'number') break
           beforeSeq = first.seq
         }
-        return { message: null }
+        // Whether it is in a turn now (#1604): no turn is still to open for a message before its last when it is not. Not told, not guessed
+        const listed: unknown = await m.call('sessions.list', {}).catch(() => null)
+        const id = m.q.strip(sessionId, 'The session')
+        const row: unknown = (Array.isArray(listed) ? listed : []).find((s) => isObj(s) && s.id === id)
+        const atRest = isObj(row) && typeof row.state === 'string' ? !isInTurn(row.state) : undefined
+        return { message, ...(atRest !== undefined ? { atRest } : {}) }
       })
     },
 
@@ -655,13 +662,13 @@ export function linkedSessions(
       return { name: oneLine(s.name), project: `${isObj(p) ? oneLine(p.name) : '(none)'} on ${m.name}` }
     },
 
-    async lastWords(sessionId, maxChars) {
+    async lastWords(sessionId, maxChars, opts) {
       const m = owner(sessionId)
       if (!m) return { ok: false, error: `Not a session of a linked machine: ${sessionId}` }
       await settle(m)
       if (!m.reachable) return { ok: false, error: m.waitsForPerson ? away(m) : `${m.name} is ${notReachable(m)}` }
       try {
-        const answer = await m.call('host.lastAnswer', { sessionId: m.q.strip(sessionId, 'The session'), maxChars: Math.min(maxChars, ANSWER_MAX_CHARS) })
+        const answer = await m.call('host.lastAnswer', { sessionId: m.q.strip(sessionId, 'The session'), maxChars: Math.min(maxChars, ANSWER_MAX_CHARS), ...(opts?.turn ? { turn: true } : {}) })
         const r = HostLastAnswerResult.safeParse(answer)
         if (!r.success) return { ok: false, error: `${m.name} answered in a shape this Centralu does not read` }
         // Its head, cut as this host cuts its own preview (`clipPreview`, #428): an answer says first what it did

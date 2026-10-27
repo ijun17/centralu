@@ -437,6 +437,8 @@ export class SessionTrash {
     // Kept until its turn ends, which a deleted session's never does (#392)
     this.host.restartPolicy.appsRestartAfterTurn.delete(sessionId)
     this.host.children.clearReport(sessionId)
+    // What was kept of its turns for a hub that followed it (#1604)
+    this.host.children.forgetTurns(sessionId)
     // Nobody is left to tell: the reports its children owed it go too
     for (const [child, caller] of [...this.host.children.awaitingReport]) if (caller === sessionId) this.host.children.clearReport(child)
     // Requests held for it, or that it made, go too (#677)

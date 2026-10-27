@@ -107,10 +107,11 @@ export class LinkedHost {
       this.host.store.settings.deleteAppSetting(key)
     }
     try {
-      await this.host.deliver(sessionId, text, undefined, { sessionId: HUB_SENDER, name }, false, undefined, 'inline', (h, t) => {
-        if (!h.sendTracked) return h.send(t)
+      await this.host.deliver(sessionId, text, undefined, { sessionId: HUB_SENDER, name }, false, undefined, 'inline', (h, t, inputId) => {
+        // Named, so the tool says which input a turn began from (`turnStartInputs`, #1604)
+        if (!h.sendTracked) return h.send(t, inputId ? { id: inputId } : undefined)
         this.hubAskTurns.add(sessionId)
-        void h.sendTracked(t, { complete: done, fail: done }).catch(() => {})
+        void h.sendTracked(t, { complete: done, fail: done }, inputId ? { id: inputId } : undefined).catch(() => {})
       })
     } catch (e) {
       done()
@@ -131,20 +132,28 @@ export class LinkedHost {
     sessions(): Promise<OrchestratedSession[]>
     read(sessionId: string, limit?: number, opts?: { around?: number; tools?: boolean | 'none' | 'titles' | 'full'; offset?: number; maxChars?: number; before?: number; from?: number }): Promise<{ state: string; lines: string[]; maxChars: number }>
     recall(query: string, limit?: number): Promise<RecallHit[]>
-    lastAnswer(sessionId: string, maxChars?: number): Promise<{ text: string; length: number; seq: number | null }>
+    lastAnswer(sessionId: string, maxChars?: number, turn?: boolean): Promise<{ text: string; length: number; seq: number | null }>
   } {
     const view = this.host.orchestratorToolsFor('', undefined, undefined, true)
     return {
       /*
        * A session's last response, whole (#1186): the hub read it from read's lines, which are cut at 2,000 characters,
-       * so a long answer came back as an older line or nothing. Only of a session a hub's window is shown
+       * so a long answer came back as an older line or nothing. Only of a session a hub's window is shown.
+       *
+       * `turn` (#1604): the answer of the last turn that ended, from the row that turn began after, kept in the store as this host
+       * (or the one before it) saw it begin: a note stored during the turn before it, which that turn did not read and this one
+       * ran, is a row of the turn before's text, so reading the last response joined both turns' words; and a note in a turn
+       * splits its text. A turn that ended with nothing to say has no answer, never the turn before's. The next turn may have
+       * begun as the hub reads this one's end: then it is the turn before it that ended. A turn not seen to begin (before
+       * this build) reads as the last response does
        */
-      lastAnswer: async (sessionId, maxChars) => {
+      lastAnswer: async (sessionId, maxChars, turn) => {
         const m = this.host.meta.get(sessionId)
         if (!m || m.kind === 'orchestrator' || m.kind === 'coordinator') throw rpcError(`Not a session this machine shares: ${sessionId}`, 'session_not_found')
         const rows = this.host.store.messages.loadMessages(sessionId, 200)
-        const text = lastResponse(rows)
-        return { text: text.slice(0, Math.min(maxChars ?? HOST_ANSWER_MAX_CHARS, HOST_ANSWER_MAX_CHARS)), length: text.length, seq: lastResponseSeq(rows) }
+        const span = turn ? this.host.children.turnRows(sessionId) : undefined
+        const text = lastResponse(rows, span)
+        return { text: text.slice(0, Math.min(maxChars ?? HOST_ANSWER_MAX_CHARS, HOST_ANSWER_MAX_CHARS)), length: text.length, seq: lastResponseSeq(rows, span) }
       },
       sessions: () => view.listSessions(),
       read: async (sessionId, limit, opts) => {

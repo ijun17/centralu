@@ -29,6 +29,8 @@ export class CrossHandle implements SessionHandle {
    * ends took in, by id (`SessionHandle.turnInputs`). Unset, the tool takes every message into the running turn
    */
   turnInputs?: () => readonly string[] | null
+  /** A test sets this to make the tool one that names the input a turn opens from (`SessionHandle.turnStartInputs`, #1604) */
+  turnStartInputs?: () => readonly string[] | null
   /** The origin each input was stamped with (`SessionHandle.send`'s `opts.origin`), in the same order */
   origins: unknown[] = []
   /** The inputs that went in without a turn (`SessionHandle.send`'s `opts.quiet`) */

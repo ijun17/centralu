@@ -674,6 +674,31 @@ describe('what the turn that ends took in (#1377)', () => {
     await handle.dispose()
   })
 
+  // #1604: the CLI names the input a turn runs for on its first message, which says which note became the next turn
+  it('names the input a turn began from while the event that opens it is handled, and none outside it', async () => {
+    const starts: (readonly string[] | null | undefined)[] = []
+    const box: { handle?: Awaited<ReturnType<InstanceType<typeof ClaudeAdapter>['createSession']>> } = {}
+    const handle = await adapter().createSession({ sessionId: 'sx', cwd: dir, permissionPreset: 'auto' }, (e) => {
+      if (e.type === 'state_change' && e.state === 'working') starts.push(box.handle?.turnStartInputs?.())
+    })
+    box.handle = handle
+    const cli = sdk.started.at(-1)!
+    handle.send('first', { id: idA })
+    handle.send('second', { id: idB })
+    await cli.input.next()
+    await cli.input.next()
+    // The turn the send opened names no input yet; the first turn took only the first in
+    expect(starts).toEqual([null])
+    cli.push({ type: 'result', subtype: 'success', user_message_uuid: idA, user_message_uuids: [idA] })
+    // The second runs as a turn of its own: the CLI's first message for it names it
+    cli.push({ type: 'assistant', user_message_uuid: idB, message: { role: 'assistant', content: [{ type: 'text', text: 'ok' }] } })
+    await eventually(() => starts.length === 2)
+    expect(starts[1]).toEqual([idB])
+    expect(handle.turnStartInputs?.()).toBeNull()
+    cli.end()
+    await handle.dispose()
+  })
+
   it('a result that names none (a background task\'s own turn) took none in', async () => {
     const { handle, seen, cli } = await watched(adapter())
     cli.push({ type: 'result', subtype: 'success' })

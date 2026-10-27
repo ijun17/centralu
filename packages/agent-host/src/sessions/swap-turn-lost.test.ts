@@ -87,11 +87,16 @@ function host(takesOverTurn: boolean | undefined, kept: ReadonlySet<string> = ne
 }
 
 /** A session mid-turn on the first host, which then leaves for a swap; the next host adopts its process */
-async function swapMidTurn(takesOverTurn: boolean | undefined) {
+async function swapMidTurn(takesOverTurn: boolean | undefined, hubGave = false) {
   const a = host(takesOverTurn)
   const p = (await a.rpc('projects.add', { path: tmpdir() })) as { id: string }
   const s = (await a.rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal' })) as { id: string }
   a.adapter.last.emit({ type: 'state_change', sessionId: s.id, state: 'working' })
+  // A hub gave it a note for the turn to come, and the turn it was in began after row 1 (#1604)
+  if (hubGave) {
+    store.settings.setAppSetting(`input_origins:${s.id}`, JSON.stringify([['note-1', { seq: 2, from: { sessionId: '_hub-orchestrator', name: 'Parent' } }]]))
+    store.settings.setAppSetting(`turn_span:${s.id}`, JSON.stringify({ latest: { since: 1 } }))
+  }
   await a.mgr.detachAll()
   const b = host(takesOverTurn, new Set([s.id]))
   await b.mgr.adoptKept([{ sessionId: s.id, tool: 'claude', process: new FakeProcess() }])
@@ -105,9 +110,18 @@ describe('a swap mid-turn (#1562 review)', () => {
     expect(events.some((e) => e.type === 'notice' && e.sessionId === id && /Centralu quit or restarted/.test(e.text))).toBe(true)
   })
 
+  it('closes the turn a hub follows and takes off what it was given: the process that held them is gone', async () => {
+    const { id } = await swapMidTurn(false, true)
+    expect(store.settings.appSetting(`input_origins:${id}`)).toBeNull()
+    expect(JSON.parse(store.settings.appSetting(`turn_span:${id}`)!)).toEqual({ latest: { since: 1, ended: true } })
+  })
+
   it('keeps the turn running for an adapter that took the process over as it was', async () => {
-    const { b, id } = await swapMidTurn(undefined)
+    const { b, id } = await swapMidTurn(undefined, true)
     expect(b.session(id).state).toBe('working')
     expect(b.session(id).interruption ?? null).toBeNull()
+    // And what a hub was given for it and where the turn began are kept for the process that runs it on (#1604)
+    expect(store.settings.appSetting(`input_origins:${id}`)).not.toBeNull()
+    expect(JSON.parse(store.settings.appSetting(`turn_span:${id}`)!)).toEqual({ latest: { since: 1 } })
   })
 })

@@ -285,9 +285,10 @@ export type LinkedSessions = {
   ): Promise<Outcome<{ worktree: 'removed' | 'kept' | 'none'; path?: string; branch?: string; why?: string; note?: string }> | { ok: false; error: string; olderBuild: true }>
   /**
    * The last message a machine's session took in (its text and sender, `from` qualified), or null for none within its
-   * last thousand messages: whose turn it is running (#1038 review)
+   * last thousand messages: whose turn it is running (#1038 review). `seq`: its row there. `atRest`: the session is in no
+   * turn as that machine lists it now (absent when it did not say), so no turn is still to open for a message before its last (#1604)
    */
-  lastUserMessage(sessionId: string): Promise<Outcome<{ message: { text: string; from: unknown } | null }>>
+  lastUserMessage(sessionId: string): Promise<Outcome<{ message: { text: string; from: unknown; seq?: number } | null; atRest?: boolean }>>
   /** The cards standing in a machine's session now, as that machine lists them (#1038: agent_session on a child there) */
   cards(sessionId: string): Promise<Outcome<{
     approval: { requestId: string; detail: ApprovalDetail } | null
@@ -331,9 +332,11 @@ export type LinkedSessions = {
    * The last thing a machine's session said (`host.lastAnswer` there, #1186): its head up to `maxChars` (an ellipsis
    * past it), its length in all, and the seq its first message has there (`around` for read_session), or null when
    * the machine does not say (an older one, read from its lines). A read that failed says why: it used to be an empty
-   * answer, which read as "it said nothing"
+   * answer, which read as "it said nothing". `turn` (#1604): the answer of the turn it last ran, not the last response of the
+   * record (which a note stored in the turn before, run by this one, joins to that turn's); a machine that does not say where a
+   * turn began reads it as the last response
    */
-  lastWords(sessionId: string, maxChars: number): Promise<Outcome<{ text: string; length: number; seq: number | null }>>
+  lastWords(sessionId: string, maxChars: number, opts?: { turn?: boolean }): Promise<Outcome<{ text: string; length: number; seq: number | null }>>
   /** Every linked machine's sessions, the hub's view of each (its orchestrator and coordinators left out) */
   list(): Promise<OrchestratedSession[]>
   /** Every linked machine's sessions, the hub's view of each (its orchestrator and coordinators left out) */

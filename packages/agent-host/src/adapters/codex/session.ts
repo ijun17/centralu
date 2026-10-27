@@ -1,4 +1,4 @@
-import { InputReceipts, type InputReceipt } from '../input-receipts.js'
+import { InputReceipts, isUuid, type InputReceipt } from '../input-receipts.js'
 import type { InputObserver, InputOrigin } from '../contract.js'
 import { launchPreset } from '../edit-grant.js'
 import type { ApprovalDecision, ApprovalScope, PermissionPreset } from '@cc/protocol'
@@ -62,6 +62,14 @@ export class CodexSession implements SessionHandle {
   private pendingInputs: { text: string; receipt?: InputReceipt }[] = []
   private inputReceipts = new InputReceipts()
   private inputGroups = new Map<string, InputReceipt[]>()
+  /**
+   * The turn that started and has shown no item yet (#1604): the first item of a turn Codex starts for `turn/start` is the
+   * message it was started with, which names the id it came under (`clientId`). A message that joined a turn already running
+   * shows after the turn's other items, so only the first one says what a turn began from
+   */
+  private openingTurn: string | null = null
+  /** The inputs the turn whose opening is being handled began from (`turnStartInputs`); null outside that event */
+  private startInputs: readonly string[] | null = null
   /** An unsteerable turn (compact/review) is running — we know because we are the ones who started it */
   private blockingTurn = false
   /** The unsteerable turn is a compaction we started (`/compact`), not a review: a compaction event in it is manual */
@@ -352,6 +360,7 @@ export class CodexSession implements SessionHandle {
     // stop a turn that has already ended gets rejected by the server, and that rejection becomes a false "did not stop" signal
     if (n.method === 'turn/started') {
       this.turns.turnId = turnIdOf(n.params)
+      this.openingTurn = this.turns.turnId
       // Before the event below goes out: the manager records a handle's external id as its events arrive
       this.threadWritten()
     }
@@ -366,11 +375,15 @@ export class CodexSession implements SessionHandle {
     this.threadServers.noteAppCall(n)
     if (n.method === 'item/started' || n.method === 'item/completed') {
       const p = (n.params ?? {}) as { turnId?: string; item?: { type?: string; clientId?: string } }
+      // The turn's first item: what it began from is said now, and no later item is a start
+      const opening = p.turnId !== undefined && p.turnId === this.openingTurn
+      if (opening) this.openingTurn = null
       if (p.item?.type === 'userMessage' && p.item.clientId && p.turnId) {
         const group = this.inputGroups.get(p.item.clientId)
         if (group) {
           this.inputGroups.delete(p.item.clientId)
           this.takeInputTurn({ turn: { id: p.turnId } }, group)
+          if (opening) this.announceStart(group.map((r) => r.id))
         }
       }
     }
@@ -462,11 +475,29 @@ export class CodexSession implements SessionHandle {
     }
   }
 
-  // The origin is Claude's: Codex has no such stamp
-  sendTracked(text: string, observer?: InputObserver, _opts?: { origin?: InputOrigin }): Promise<void> {
-    const receipt = this.inputReceipts.create(observer)
+  // The origin is Claude's: Codex has no such stamp. `id` goes to `turn/start` as the message's client id, which the turn it starts names (#1604)
+  sendTracked(text: string, observer?: InputObserver, opts?: { origin?: InputOrigin; id?: string }): Promise<void> {
+    const receipt = this.inputReceipts.create(observer, opts?.id !== undefined && isUuid(opts.id) ? opts.id : undefined)
     this.sendInput(text, receipt)
     return receipt.done
+  }
+
+  /**
+   * Says which inputs a turn Codex started began from (#1604): a second `working` for the turn, which the host reads with
+   * `turnStartInputs` as it handles it. Codex starts a turn for a `turn/start` sent after the turn it was meant for ended, or
+   * queued behind a compact or a review (`flushPending`), and the message it began from is what tells a hub whose that turn is
+   */
+  private announceStart(inputs: readonly string[]): void {
+    this.startInputs = inputs
+    try {
+      this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'working' })
+    } finally {
+      this.startInputs = null
+    }
+  }
+
+  turnStartInputs(): readonly string[] | null {
+    return this.startInputs
   }
 
   send(text: string): void { this.sendInput(text) }

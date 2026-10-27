@@ -18,7 +18,11 @@ let state: string
 let settled: string[]
 let told: string[]
 /** The last message the child took there, as the machine lists it */
-let lastUser: { text: string; from: unknown } | null
+let lastUser: { text: string; from: unknown; seq?: number } | null
+/** Whether the machine lists the child in no turn when its last message is read; absent: it did not say */
+let lastAtRest: boolean | undefined
+/** How many times the hub has read the machine's last message (`verify`) */
+let lastUserReads = 0
 /** This hub's sender as the machine records it, qualified with the machine's id */
 const HUB = { sessionId: 'm1._hub-orchestrator' }
 const PERSON = { sessionId: 'm1.person' }
@@ -59,6 +63,8 @@ beforeEach(() => {
   told = []
   // The child last took the instruction this hub sent it: its turn is the caller's
   lastUser = { text: 'TASK', from: HUB }
+  lastUserReads = 0
+  lastAtRest = undefined
 })
 afterEach(() => store.close())
 
@@ -173,7 +179,10 @@ describe("the turn on the child's machine, read as the caller's only on evidence
       machineLinked: () => true,
       machineWaitsForPerson: () => false,
       lastWords: words,
-      lastUserMessage: async () => ({ ok: true, message: lastUser }),
+      lastUserMessage: async () => {
+        lastUserReads++
+        return { ok: true, message: lastUser, ...(lastAtRest !== undefined ? { atRest: lastAtRest } : {}) }
+      },
       cards: async () => ({ ok: true, approval: null, questions: [q] }),
       answerQuestion: async (_s: string, id: string) => {
         answered.push(id)
@@ -377,6 +386,297 @@ describe("the turn on the child's machine, read as the caller's only on evidence
     const r = await ra.agentSession('h1', ra.of(child.sessionId)!, { sessionId: child.sessionId, action: 'send', text: 'do X' } as never)
     expect(r).toMatchObject({ ok: true, state: 'working', reported: false, notice: expect.stringContaining('did not go in as a turn of its own') })
     expect(reportOwed()).toBe(false)
+  })
+
+  describe("a turn the machine says it ran for a note of the caller's (#1604)", () => {
+    const NOTE_ROW = 2
+    const named = { ...HUB, name: 'h1' }
+    const opens = (ra: RemoteAgents, origin?: unknown) => ra.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working', ...(origin ? { origin } : {}) })
+    const ends = (ra: RemoteAgents) => {
+      ra.observe({ type: 'turn_complete', sessionId: child.sessionId })
+      children.dropLinkedReport(child.sessionId)
+    }
+    /** The caller's turn took its task and a note (row 2) as the tool read them; the turn ends and its report goes as the linked reports send it */
+    async function afterNote(): Promise<RemoteAgents> {
+      const ra = following()
+      children.setLinkedReport(child.sessionId, { orchestratorId: 'h1', busy: false })
+      ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 1, text: 'TASK', from: HUB })
+      opens(ra)
+      expect(await act(ra, 'send', { text: 'use the staging data' })).toMatchObject({ ok: true, state: 'working' })
+      ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: NOTE_ROW, text: sentTexts[0], from: HUB })
+      ends(ra)
+      return ra
+    }
+    /**
+     * The turn that ran for the note began and was taken for the caller's (a control: the cases below only mean something if
+     * this holds), took another note of the caller's (row 4), and ended: what begins next is judged again
+     */
+    async function afterFollowUp(): Promise<RemoteAgents> {
+      const ra = await afterNote()
+      opens(ra, { seq: NOTE_ROW, from: named })
+      expect(reportOwed()).toBe(true)
+      expect(await act(ra, 'send', { text: 'and the keys' })).toMatchObject({ ok: true, state: 'working' })
+      ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 4, text: sentTexts[1], from: HUB })
+      ends(ra)
+      return ra
+    }
+
+    it("is the note's, so the caller's: its end is owed and a note goes into it", async () => {
+      const ra = await afterNote()
+      expect(reportOwed()).toBe(false)
+      opens(ra, { seq: NOTE_ROW, from: named })
+      expect(reportOwed()).toBe(true)
+      expect(await act(ra, 'send', { text: 'and the keys' })).toMatchObject({ ok: true, state: 'working' })
+      expect(sentTexts).toHaveLength(2)
+    })
+
+    it("is the caller's when the machine names the message on a second event of the turn, after the one that opened it (Codex)", async () => {
+      const ra = await afterNote()
+      opens(ra)
+      expect(reportOwed()).toBe(false)
+      opens(ra, { seq: NOTE_ROW, from: named })
+      expect(reportOwed()).toBe(true)
+      expect(await act(ra, 'send', { text: 'and the keys' })).toMatchObject({ ok: true, state: 'working' })
+    })
+
+    it("is taken for the caller's by what the machine says, not by how long after the last turn it began", async () => {
+      const ra = await afterNote()
+      const now = Date.now()
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(now + 10 * 60_000)
+      opens(ra, { seq: NOTE_ROW, from: named })
+      clock.mockRestore()
+      expect(reportOwed()).toBe(true)
+    })
+
+    it("is not the caller's when it names a row the hub holds no note of", async () => {
+      const ra = await afterFollowUp()
+      // The note of row 4 went into the turn that ended; row 9 is not one of the hub's
+      opens(ra, { seq: 9, from: named })
+      expect(reportOwed()).toBe(false)
+    })
+
+    it("is not the caller's when the row is named for another sender", async () => {
+      const ra = await afterFollowUp()
+      opens(ra, { seq: 4, from: { sessionId: 'm1.another-session', name: 'Other' } })
+      expect(reportOwed()).toBe(false)
+    })
+
+    it("is not the caller's when the machine says nothing of what it ran for (a machine from before this, a tool that does not say)", async () => {
+      const ra = await afterFollowUp()
+      opens(ra)
+      expect(reportOwed()).toBe(false)
+      expect(await act(ra, 'send', { text: 'and this' })).toMatchObject({ ok: false, error: expect.stringContaining('a turn it started by itself') })
+      expect(sentTexts).toHaveLength(2)
+    })
+
+    it("is not the caller's when the person's message came first", async () => {
+      const ra = await afterFollowUp()
+      ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 5, text: 'my own thing', from: PERSON })
+      opens(ra, { seq: 5, from: { ...PERSON, name: 'person' } })
+      expect(reportOwed()).toBe(false)
+      expect(await act(ra, 'send', { text: 'and this' })).toMatchObject({ ok: false, error: expect.stringContaining('a turn you did not give it') })
+      expect(sentTexts).toHaveLength(2)
+    })
+
+    /** The link is back (or the hub started again) and the machine's last message is read: what `verify` settles */
+    async function readAgain(ra: RemoteAgents): Promise<void> {
+      const before = lastUserReads
+      ra.observe({ type: 'machine_resync', machineId: 'm1' })
+      await eventually(() => lastUserReads > before)
+      // The read's answer is taken in the next turn of the loop
+      await new Promise<void>((resolve) => setImmediate(resolve))
+    }
+
+    it("is not the caller's when it opens while the link is down: whose it is cannot be told", async () => {
+      const ra = await afterFollowUp()
+      ra.observe({ type: 'machine_status', machine: { id: 'm1', name: 'Box', status: 'unreachable' } })
+      opens(ra, { seq: 4, from: named })
+      expect(reportOwed()).toBe(false)
+    })
+
+    it("is the caller's when the link dropped between the note and its turn, and the machine's last message read when it is back is that note", async () => {
+      const ra = await afterNote()
+      ra.observe({ type: 'machine_status', machine: { id: 'm1', name: 'Box', status: 'unreachable' } })
+      lastUser = { text: sentTexts[0]!, from: HUB }
+      await readAgain(ra)
+      opens(ra, { seq: NOTE_ROW, from: named })
+      expect(reportOwed()).toBe(true)
+      expect(await act(ra, 'send', { text: 'and the keys' })).toMatchObject({ ok: true, state: 'working' })
+    })
+
+    it("is not the caller's when the link dropped between the note and its turn, and the person wrote there meanwhile", async () => {
+      // A control: the turn run for the first note is the caller's, and the second note (row 4) is held for the one after it
+      const ra = await afterFollowUp()
+      ra.observe({ type: 'machine_status', machine: { id: 'm1', name: 'Box', status: 'unreachable' } })
+      lastUser = { text: 'my own thing', from: PERSON }
+      await readAgain(ra)
+      opens(ra, { seq: 4, from: named })
+      expect(reportOwed()).toBe(false)
+    })
+
+    it("is the caller's after the hub restarted, once the machine's last message is read to be that note: the rows it held are in its record", async () => {
+      await afterNote()
+      const note = sentTexts[0]!
+      // A hub that starts again: nothing is in memory, and whose the turn is cannot be told until the machine is read
+      const restarted = following()
+      lastUser = { text: note, from: HUB }
+      opens(restarted, { seq: NOTE_ROW, from: named })
+      expect(reportOwed()).toBe(false)
+      await readAgain(restarted)
+      opens(restarted, { seq: NOTE_ROW, from: named })
+      expect(reportOwed()).toBe(true)
+    })
+
+    it('stops holding the rows of turns that opened while the hub could not see them, once the machine is read with the child in no turn', async () => {
+      const ra = await afterNote()
+      expect(ra.of(child.sessionId)?.given).toEqual([1, NOTE_ROW])
+      ra.observe({ type: 'machine_status', machine: { id: 'm1', name: 'Box', status: 'unreachable' } })
+      // The turns for both messages opened and ended while the link was down: their events were not seen
+      opens(ra, { seq: NOTE_ROW, from: named })
+      lastUser = { text: sentTexts[0]!, from: HUB, seq: NOTE_ROW }
+      // A control: read while the child is in a turn, the rows stay
+      lastAtRest = false
+      await readAgain(ra)
+      expect(ra.of(child.sessionId)?.given).toEqual([1, NOTE_ROW])
+      ra.observe({ type: 'machine_status', machine: { id: 'm1', name: 'Box', status: 'unreachable' } })
+      lastAtRest = true
+      await readAgain(ra)
+      expect(ra.of(child.sessionId)?.given).toEqual([NOTE_ROW])
+    })
+
+    it('keeps the row of the last message the machine took in when it reads the child at rest: the turn run for it may not have opened', async () => {
+      const ra = await afterNote()
+      ra.observe({ type: 'machine_status', machine: { id: 'm1', name: 'Box', status: 'unreachable' } })
+      // The note was queued in the turn that ended; the tool opens its turn a moment later, the child at rest in between
+      lastUser = { text: sentTexts[0]!, from: HUB, seq: NOTE_ROW }
+      lastAtRest = true
+      await readAgain(ra)
+      opens(ra, { seq: NOTE_ROW, from: named })
+      expect(reportOwed()).toBe(true)
+    })
+
+    it('keeps the rows after the last message the machine took in when it reads the child at rest', async () => {
+      const ra = await afterNote()
+      ra.observe({ type: 'machine_status', machine: { id: 'm1', name: 'Box', status: 'unreachable' } })
+      lastUser = { text: sentTexts[0]!, from: HUB, seq: 1 }
+      lastAtRest = true
+      await readAgain(ra)
+      expect(ra.of(child.sessionId)?.given).toEqual([1, NOTE_ROW])
+    })
+
+    it("is not the caller's after the hub restarted when the machine's last message is not that note", async () => {
+      // A control: the turn run for the first note is the caller's, and the second note (row 4) is held for the one after it
+      await afterFollowUp()
+      const restarted = following()
+      lastUser = { text: 'my own thing', from: PERSON }
+      await readAgain(restarted)
+      opens(restarted, { seq: 4, from: named })
+      expect(reportOwed()).toBe(false)
+    })
+
+    it('is one turn: the note is done with once a turn has begun', async () => {
+      const ra = await afterNote()
+      opens(ra, { seq: NOTE_ROW, from: named })
+      expect(reportOwed()).toBe(true)
+      ends(ra)
+      opens(ra, { seq: NOTE_ROW, from: named })
+      expect(reportOwed()).toBe(false)
+    })
+
+    it("is not the caller's when it names nothing, whatever notes are still held for turns to come", async () => {
+      const ra = await afterFollowUp()
+      // The tool's own next turn names no row of the caller's
+      opens(ra)
+      expect(reportOwed()).toBe(false)
+    })
+
+    /**
+     * The gap (#1604): the caller's note went into turn 1, which did not read it; turn 1 ends, and before the turn the tool
+     * runs for the note begins, the caller sends an instruction with no ifBusy: the machine is at rest as far as anyone can
+     * see. The tool runs the note's turn first (nothing opens it that the hub can tell from the instruction's), then the
+     * instruction's, which names its row
+     */
+    describe('an instruction sent at rest between a turn and the turn run for a note before it', () => {
+      /** Sent at rest: the machine's record of it comes back as the answer to the send does */
+      async function sentInTheGap(ra: RemoteAgents, row: number): Promise<void> {
+        state = 'idle'
+        let release!: () => void
+        holdSend = new Promise<void>((resolve) => (release = resolve))
+        const sending = act(ra, 'send', { text: 'and now this' })
+        await eventually(() => sentTexts.length === 2)
+        ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: row, text: sentTexts[1], from: HUB })
+        release()
+        expect(await sending).toMatchObject({ ok: true, state: 'working', reported: true })
+        state = 'working'
+      }
+
+      it("takes the instruction's own turn for the caller's after the note's turn ended as its report", async () => {
+        const ra = await afterNote()
+        await sentInTheGap(ra, 3)
+        // The turn run for the note (row 2) ends, and it is reported as the send's turn is
+        ends(ra)
+        expect(reportOwed()).toBe(false)
+        // Then the turn run for the instruction (row 3) opens
+        opens(ra, { seq: 3, from: named })
+        expect(reportOwed()).toBe(true)
+        expect(await act(ra, 'send', { text: 'a note into it' })).toMatchObject({ ok: true, state: 'working' })
+        expect(sentTexts).toHaveLength(3)
+      })
+
+      it("still takes the note's turn for the caller's when that is the one that opens first", async () => {
+        const ra = await afterNote()
+        await sentInTheGap(ra, 3)
+        ends(ra)
+        opens(ra, { seq: NOTE_ROW, from: named })
+        expect(reportOwed()).toBe(true)
+        ends(ra)
+        // And the instruction's after it
+        opens(ra, { seq: 3, from: named })
+        expect(reportOwed()).toBe(true)
+      })
+
+      it("does not take a turn run for another's message for the caller's", async () => {
+        const ra = await afterNote()
+        await sentInTheGap(ra, 3)
+        ends(ra)
+        // A control: the instruction's own turn is taken
+        opens(ra, { seq: 3, from: named })
+        expect(reportOwed()).toBe(true)
+        ends(ra)
+        opens(ra, { seq: 7, from: named })
+        expect(reportOwed()).toBe(false)
+      })
+    })
+
+    it('says a turn ended without saying anything, rather than answering with nothing', async () => {
+      const ra = following(async () => ({ ok: true as const, text: '', length: 0, seq: null }))
+      state = 'idle'
+      lastUser = { text: 'TASK', from: HUB }
+      expect(await act(ra, 'status')).toMatchObject({ ok: true, state: 'at_rest', answer: expect.stringContaining('ended without saying anything') })
+    })
+
+    it("reads an adopted turn's answer as that turn's, from the machine's turn, not the last response of its record", async () => {
+      const asked: unknown[] = []
+      const ra = following(async (_s, _max, opts) => {
+        asked.push(opts)
+        return { ok: true as const, text: 'the second turn', length: 0, seq: null }
+      })
+      state = 'idle'
+      lastUser = { text: 'TASK', from: HUB }
+      expect(await act(ra, 'status')).toMatchObject({ ok: true, state: 'at_rest', answer: 'the second turn' })
+      expect(asked).toEqual([{ turn: true }])
+    })
+  })
+
+  it('does not say the person may be using a turn it saw no message begin', async () => {
+    const ra = following()
+    state = 'idle'
+    // The send goes, but no record of it comes back as this hub's instruction: the hub did not see the turn begin
+    await act(ra, 'send', { text: 'do X' })
+    state = 'working'
+    const r = await act(ra, 'send', { text: 'and this' })
+    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('this hub did not see begin') })
+    expect((r as { error: string }).error).not.toContain('person may be using')
   })
 
   it("takes a link's replay of an instruction seen before, and another link's sender, as no new instruction", async () => {

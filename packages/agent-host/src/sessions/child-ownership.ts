@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto'
-import { errorMessage } from '@cc/protocol'
+import { errorMessage, TurnOrigin } from '@cc/protocol'
 import type { ApprovalDetail, BackgroundTask, SessionInfo } from '@cc/protocol'
 import type { QueuedRequest, Store } from '../dev-services/store.js'
 import type { AgentRunWait } from './app-agents.js'
 import { inTurn } from '../idle.js'
 import { readJsonObjects } from '../dev-services/store/json.js'
+import { asObj } from '../json-value.js'
 import type { ThreadOrigin } from '../dev-services/store/mail.js'
 import type { AnswerGiven } from '../mail/delegation.js'
 import type { TurnSource, TurnStart } from '../mail/turns.js'
@@ -113,6 +114,59 @@ export type TurnStarter = { by: 'person' | 'work'; wrote?: true; added?: true }
 const NEXT_STARTER_MS = 15_000
 /** The store's record of the turn a session with an owed report is in (#1377), kept across a swap */
 export const reportTurnKey = (sessionId: string) => `report_turn:${sessionId}`
+/**
+ * Who sent each message that was given to the tool under an input id, and the row it is stored as (#1604), kept per session in
+ * `input_origins:<session>` (read and written in the store each time: a host that takes over a kept session after a swap still
+ * knows whose message a turn the tool runs for it is, and the one that leaves cannot overwrite what the other wrote). Only the
+ * hub's own messages are kept, and they go as the tool's inputs do: the turn that runs one takes it off (`takeInputOrigin`),
+ * a turn's end takes off those the tool says it took in, or those given before the turn began when it does not say
+ * (`turnEnded`), a turn that is cut, a stop and a new process take off all (`dropInputOrigins`), and the session's deletion
+ * its key (`forgetTurns`). The most a session keeps all the same: the oldest go first
+ */
+export const inputOriginsKey = (sessionId: string) => `input_origins:${sessionId}`
+const MAX_INPUT_ORIGINS = 64
+/**
+ * Where the turns of a session a hub gives messages began (#1604), in `turn_span:<session>`, kept in the store because a hub
+ * reads a turn's words after the turn: by then the next one may have begun, and a host that takes the session over after a
+ * swap must know where the running turn began. `latest`: the row the last turn that began began after, and whether it has
+ * ended; `previous`: the same for the turn before it
+ */
+export const turnSpanKey = (sessionId: string) => `turn_span:${sessionId}`
+type TurnSpan = { latest?: { since: number; ended?: true }; previous?: { since: number } }
+function readTurnSpan(raw: string | null): TurnSpan {
+  if (raw === null) return {}
+  try {
+    const p = asObj(JSON.parse(raw))
+    const [l, before] = [asObj(p.latest), asObj(p.previous)]
+    const latest = typeof l.since === 'number' ? { since: l.since, ...(l.ended === true ? { ended: true as const } : {}) } : undefined
+    const previous = typeof before.since === 'number' ? { since: before.since } : undefined
+    return { ...(latest ? { latest } : {}), ...(previous ? { previous } : {}) }
+  } catch {
+    return {}
+  }
+}
+function readInputOrigins(raw: string | null): Map<string, TurnOrigin> {
+  const held = new Map<string, TurnOrigin>()
+  if (raw === null) return held
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return held
+    for (const entry of parsed) {
+      if (!Array.isArray(entry) || typeof entry[0] !== 'string') continue
+      const origin = TurnOrigin.safeParse(entry[1])
+      if (origin.success) held.set(entry[0], origin.data)
+    }
+  } catch {
+    // An unreadable record says nothing: no origin is better than a wrong one
+  }
+  return held
+}
+/** The origins given up to the last of `inputs` that is held, that one's, and those given after it (#1604) */
+function splitOrigins(held: Map<string, TurnOrigin>, inputs: readonly string[]): { origin: TurnOrigin; rest: [string, TurnOrigin][] } | undefined {
+  const order = [...held]
+  const named = order[Math.max(-1, ...inputs.map((id) => order.findIndex(([given]) => given === id)))]
+  return named ? { origin: named[1], rest: order.slice(order.indexOf(named) + 1) } : undefined
+}
 /** A message that went into a turn the tool may or may not have taken in (#1377): decided at the turn's end */
 type PendingMessage = { id?: string; by: 'person' | 'work'; added?: true; source?: TurnSource }
 type StoredTurn = TurnStarter & { pending?: PendingMessage[] }
@@ -570,6 +624,102 @@ export class ChildOwnership {
     }
     this.addNext(sessionId, by, added, source)
   }
+  /** A named sender's message was given to the tool as input `inputId`, stored as row `seq`: at rest or into a running turn (#1604) */
+  noteInputOrigin(sessionId: string, inputId: string, origin: TurnOrigin): void {
+    // Read and written in one step: the host that is leaving and the one taking over can both be writing during a swap
+    this.store.settings.updateAppSetting(inputOriginsKey(sessionId), (raw) => {
+      const held = readInputOrigins(raw)
+      held.set(inputId, origin)
+      return JSON.stringify([...held].slice(-MAX_INPUT_ORIGINS))
+    })
+  }
+  /**
+   * What the turn that starts now ran for (#1604): the origin of the last of the inputs the tool names that a sender gave
+   * a message under. The tool runs inputs in the order they were given, so that turn took in every one given before it
+   * too (a tool that runs several as one turn names only the last), and they are all taken off. Undefined when none is
+   * named (a message with no sender, the tool's own turn, a tool that does not say)
+   */
+  takeInputOrigin(sessionId: string, inputs: readonly string[] | null | undefined): TurnOrigin | undefined {
+    return inputs?.length ? this.dropOriginsThrough(sessionId, inputs) : undefined
+  }
+  /** Takes off every origin given up to the last of `inputs` held, and says that one's (`undefined`: none of them is held) */
+  private dropOriginsThrough(sessionId: string, inputs: readonly string[]): TurnOrigin | undefined {
+    const key = inputOriginsKey(sessionId)
+    // Most turns have none: no write for those
+    const raw = this.store.settings.appSetting(key)
+    if (raw === null || !splitOrigins(readInputOrigins(raw), inputs)) return undefined
+    const taken: { origin?: TurnOrigin } = {}
+    this.store.settings.updateAppSetting(key, (current) => {
+      const split = splitOrigins(readInputOrigins(current), inputs)
+      taken.origin = split?.origin
+      return split ? JSON.stringify(split.rest) : (current ?? '[]')
+    })
+    return taken.origin
+  }
+  /** Takes off every origin given at or before the row `since`: the turn that began after it ran for what it ran for, or for none of them */
+  private dropOriginsBefore(sessionId: string, since: number): void {
+    const key = inputOriginsKey(sessionId)
+    if (this.store.settings.appSetting(key) === null) return
+    this.store.settings.updateAppSetting(key, (current) => {
+      const rest = [...readInputOrigins(current)].filter(([, o]) => o.seq > since)
+      return JSON.stringify(rest)
+    })
+  }
+  /**
+   * The tool holds no input for the session any more (#1604): its process ended or was replaced, or it was stopped. No turn begins for the messages given before, and none is named for them. Only the origins are dropped: the
+   * words of the turn that ran stay readable
+   */
+  dropInputOrigins(sessionId: string): void {
+    this.store.settings.deleteAppSetting(inputOriginsKey(sessionId))
+  }
+  /**
+   * The process that ran the session's turns is gone (#1604): it crashed, lost its conversation, or this host started with no
+   * process for a session the last one left mid-turn. A turn it was in will never send its end, so it ends here: its words
+   * are those said so far (or none), never the turn before's, and nothing it was given is run by anyone
+   */
+  processGone(sessionId: string): void {
+    this.dropInputOrigins(sessionId)
+    this.noteTurnEnd(sessionId)
+  }
+  /** The session is deleted: nothing kept for a hub that followed its turns is kept (`purgeSession` removes the same keys by their shape) */
+  forgetTurns(sessionId: string): void {
+    this.dropInputOrigins(sessionId)
+    this.store.settings.deleteAppSetting(turnSpanKey(sessionId))
+  }
+  /** Whether a hub gives this session messages: nothing is kept of the turns of any other (#1604) */
+  private followedByHub(sessionId: string): boolean {
+    return this.store.settings.appSetting(turnSpanKey(sessionId)) !== null || this.store.settings.appSetting(inputOriginsKey(sessionId)) !== null
+  }
+  /** A turn began after row `seq` of the session's record: the turn's own text is every row after it (#1604) */
+  noteTurnStart(sessionId: string, seq: number): void {
+    if (!this.followedByHub(sessionId)) return
+    this.store.settings.updateAppSetting(turnSpanKey(sessionId), (raw) => {
+      const was = readTurnSpan(raw)
+      return JSON.stringify({ latest: { since: seq }, ...(was.latest ? { previous: { since: was.latest.since } } : {}) })
+    })
+  }
+  /** The turn ended: its words are settled, and the turn after it begins where they stop (`turnRows`) */
+  private noteTurnEnd(sessionId: string): void {
+    const key = turnSpanKey(sessionId)
+    const raw = this.store.settings.appSetting(key)
+    if (raw === null || readTurnSpan(raw).latest?.ended) return
+    this.store.settings.updateAppSetting(key, (current) => {
+      const was = readTurnSpan(current)
+      return was.latest ? JSON.stringify({ ...was, latest: { ...was.latest, ended: true } }) : (current ?? '{}')
+    })
+  }
+  /**
+   * The rows of the last turn that ended, when this session's turns were seen to begin (#1604): the latest when it has ended,
+   * else the one before it up to where the latest began (a hub reads a turn's end after the next one has begun). A turn that
+   * ended with nothing to say has no words, and never the turn before's. None recorded (a turn from before this build, a
+   * session no hub gives messages): undefined
+   */
+  turnRows(sessionId: string): { after: number; through?: number } | undefined {
+    const span = readTurnSpan(this.store.settings.appSetting(turnSpanKey(sessionId)))
+    if (span.latest?.ended) return { after: span.latest.since }
+    if (span.latest && span.previous) return { after: span.previous.since, through: span.latest.since }
+    return span.latest ? { after: span.latest.since } : undefined
+  }
   /** A message that is to start the session's next turn (#1377); a later one before it starts only joins */
   private addNext(sessionId: string, by: 'person' | 'work', added: boolean, source: TurnSource = 'caller'): void {
     // A note that no turn ever started from (a command the tool answers itself, a message it refused) goes stale
@@ -636,12 +786,28 @@ export class ChildOwnership {
    * running turn, null when it cannot tell. A message that was taken in joined this turn (a person's into the work's is
    * noted on it); one that was not is what the next turn starts from, and that turn is its sender's.
    */
-  turnEnded(sessionId: string, taken?: readonly string[] | null): TurnStarter {
+  turnEnded(sessionId: string, taken?: readonly string[] | null, cut = false): TurnStarter {
     const starter: TurnStarter = { ...(this.starters.get(sessionId) ?? { by: 'work' as const }) }
     this.starters.delete(sessionId)
     this.cliTurns.delete(sessionId)
     const pending = this.pending.get(sessionId) ?? []
     this.pending.delete(sessionId)
+    /*
+     * What became of the messages given the tool (#1604). The process went with the turn (`cut`): it holds none. Any other
+     * error or limit ends the turn and leaves the process, which can still run a message it holds queued as the next turn,
+     * so those stay as for any end (a stale one is harmless: the next turn that names a later input takes it off, and a
+     * missing one refuses the caller). The inputs the tool says it
+     * took in are done with, and so are those given before them: no turn begins for them. A tool that does not say (Codex)
+     * can run a message given while this turn ran as a turn of its own right after it, and names it when it opens; those
+     * given before this turn began are done with (it took them in, or it opened for them)
+     */
+    if (cut) this.dropInputOrigins(sessionId)
+    else if (taken?.length) this.dropOriginsThrough(sessionId, taken)
+    else if (taken === undefined || taken === null) {
+      const began = readTurnSpan(this.store.settings.appSetting(turnSpanKey(sessionId))).latest
+      if (began && !began.ended) this.dropOriginsBefore(sessionId, began.since)
+    }
+    this.noteTurnEnd(sessionId)
     for (const p of pending) {
       const joined = taken === undefined || (taken !== null && p.id !== undefined && taken.includes(p.id))
       if (!joined) this.addNext(sessionId, p.by, !!p.added, p.source)

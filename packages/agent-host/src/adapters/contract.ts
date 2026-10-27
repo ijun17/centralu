@@ -325,13 +325,22 @@ export interface SessionHandle {
   nudge?(text: string): boolean | Promise<boolean>
   /**
    * Which of the inputs given an `id` the turn that just ended took in (#1377), read while the event that ends it is
-   * handled. Absent: the tool takes every message into the turn it is running (Codex steers an active turn). Present:
+   * handled. Absent: the tool takes every message into the turn it is running (Codex merges one into an active turn; one it
+   * runs as a turn after is named by `turnStartInputs` instead). Present:
    * a message sent mid-turn may instead run as a turn of its own after (Claude folds one in only at a tool round);
    * `null`: the tool cannot tell (an older CLI), and none is taken to have joined
    */
   turnInputs?(): readonly string[] | null
+  /**
+   * The inputs the turn that is starting runs for (#1604), read while the `state_change` that opens it is handled: the
+   * tool names the input it began that turn from, which for a message that did not run in the turn it was sent into (a
+   * note a turn did not read, one sent just after a turn ended, one queued behind a compact) is that message's `id`. The
+   * `state_change` may be a second `working` for the turn, said when the tool names the input. `null`: it does not say.
+   * Absent: the tool never names an input a turn began from
+   */
+  turnStartInputs?(): readonly string[] | null
   /** Completes after the consuming turn is recorded. The observer runs synchronously, before later turn frames. */
-  sendTracked?(text: string, observer?: InputObserver, opts?: { origin?: InputOrigin }): Promise<void>
+  sendTracked?(text: string, observer?: InputObserver, opts?: { origin?: InputOrigin; id?: string }): Promise<void>
   /** The matcher is computed by core and passed along by the UI (boundary rule: the host does not know core) */
   /**
    * The approval response. **Returns whether it reached anything** (false = no such request exists).

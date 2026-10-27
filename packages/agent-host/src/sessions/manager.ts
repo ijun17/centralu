@@ -518,6 +518,8 @@ export class SessionManager {
         // No window is attached yet: the marker and the interruption are read with the conversation and the list
         this.interruptions.markStoppedByQuit(fixed, false)
         store.sessions.upsertSession(fixed)
+        // The turn the last host was in never sent its end and no process holds what it was given (#1604)
+        this.children.processGone(s.id)
         stoppedByQuit.push(fixed)
       }
     }
@@ -1154,7 +1156,8 @@ export class SessionManager {
     this.emit(change)
     // Its turn is over: the report it owed says so now, rather than naming a later turn (#698)
     // Whose the turn was (#1377): the person's is reported to nobody
-    const turnBy = this.children.turnEnded(m.id, null)
+    // The process is gone with it (#1604): what it was given is run by no one
+    const turnBy = this.children.turnEnded(m.id, null, true)
     if (this.children.awaitingReport.has(m.id)) void this.reports.reportBackIfAwaited(m.id, { type: 'state_change', sessionId: m.id, state: 'idle' }, undefined, undefined, turnBy)
     else {
       if (turnBy.by !== 'person') void this.reports.tellAskerOfInterruption(m.id, this.children.turnOwners.get(m.id)?.callerId)
@@ -2028,6 +2031,9 @@ export class SessionManager {
     const run = this.agentRuns.get(sessionId)
     if (run) run.stoppedByPerson = true
     for (const observer of this.turnObservers.get(sessionId) ?? []) observer.stoppedByPerson = true
+    // A stop takes off what a hub gave the tool for turns to come (#1604). A message the CLI keeps queued past a plain interrupt
+    // still runs as a turn after it, and that turn is then refused as the caller's, as it was before origins
+    this.children.dropInputOrigins(sessionId)
     handle.interrupt()
     // Stop reaches delegated work only while the caller waits. A note that joined the person's turn
     // only ends that caller's wait; work left running past the bound has its own Stop.

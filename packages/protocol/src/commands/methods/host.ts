@@ -298,10 +298,11 @@ export const hostMethods = {
   /**
    * A session's last response, whole up to `maxChars` (100,000 at most), for a hub's ask_project, start_agent and
    * reports (#1186). Asked by the hub directly, never routed, of a session a hub is shown. Additive: a hub reads an
-   * older machine's lines instead
+   * older machine's lines instead. `turn` (#1604): the answer of the turn it last ran, from where this host saw that turn
+   * begin, not the last response of the record (an older machine ignores it)
    */
   'host.lastAnswer': {
-    params: z.object({ sessionId: SessionId, maxChars: z.number().int().positive().max(100_000).optional() }),
+    params: z.object({ sessionId: SessionId, maxChars: z.number().int().positive().max(100_000).optional(), turn: z.boolean().optional() }),
     result: HostLastAnswerResult,
   },
   /**
