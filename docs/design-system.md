@@ -146,7 +146,7 @@ strings: a copy drifts (padding, hover, disabled fade) and the next screen copie
 | A layer's enter and exit | `usePresence` (`presence.ts`) with the `cc-drop` / `cc-fade` classes |
 | Something placed under its anchor | `useAnchoredPlacement` (`anchored.ts`), closed by `useDismiss` |
 | "Are you sure?" in place | `InlineConfirm` (Cancel first, then the action, disabled while busy) |
-| A tool's setup (install, sign in, the terminal hint) | `ToolSetupLine` (`features/tools/`): one piece in the new-session dialog, the first-run card and the new-app dialog |
+| A tool's setup (install, sign in, the terminal hint) | `ToolSetupLine` (`features/tools/`): one piece in the new-session dialog, the first-run card and the new-app dialog; a button that halts work in progress (the install, the sign-in) reads **Stop**, never Cancel, which belongs to the dialog (*owner, 2026-10-28*) |
 | A bar for work with a known end | `ProgressBar` (`value` 0 to 1; null breathes) |
 | A list that failed to load | `LoadFailed` (what could not be read, why, Retry), never an empty list |
 | Still loading | `SkeletonLines`, `ChatSkeleton` (invisible for 150ms, then fade in) |

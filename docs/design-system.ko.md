@@ -142,7 +142,7 @@ Centralu의 모든 화면이 따르는 것: 색, 모양, 선, 글자, 아이콘,
 | 층의 등장과 퇴장 | `usePresence`(`presence.ts`)와 `cc-drop` / `cc-fade` 클래스 |
 | 기준점 아래에 놓이는 것 | `useAnchoredPlacement`(`anchored.ts`), 닫기는 `useDismiss` |
 | 그 자리에서 "정말요?" | `InlineConfirm`(Cancel 먼저, 그다음 동작, 진행 중엔 비활성) |
-| 도구의 설정(설치, 로그인, 터미널 안내) | `ToolSetupLine`(`features/tools/`): 새 세션 창, 첫 실행 카드, 새 앱 창에 같은 하나 |
+| 도구의 설정(설치, 로그인, 터미널 안내) | `ToolSetupLine`(`features/tools/`): 새 세션 창, 첫 실행 카드, 새 앱 창에 같은 하나. 진행 중인 일을 멈추는 버튼(설치, 로그인)은 Cancel이 아니라 **Stop**이다. Cancel은 창의 것이다(*owner, 2026-10-28*) |
 | 끝이 알려진 작업의 막대 | `ProgressBar`(`value` 0~1, null이면 숨 쉰다) |
 | 읽기에 실패한 목록 | `LoadFailed`(무엇을 못 읽었는지, 왜, Retry). 빈 목록으로 그리지 않는다 |
 | 아직 읽는 중 | `SkeletonLines`, `ChatSkeleton`(150ms 동안 안 보이다가 서서히) |

@@ -21,7 +21,7 @@ export type TerminalHints = {
 /**
  * A tool's setup line (#59, owner 2026-10-27): the one piece the new-session dialog, the first-run orchestrator card and
  * the new-app dialog show where a tool cannot be used yet. It says why in one line and gives the action the state allows:
- * Install (with progress and Cancel, then Retry on a failure), Sign in (with "Waiting for the browser…" and Cancel, then
+ * Install (with progress and Stop, then Retry on a failure), Sign in (with "Waiting for the browser…" and Stop, then
  * Retry after a timeout), only a sentence on a linked machine, and the terminal command for a tool Centralu does not set
  * up (as before).
  *
@@ -114,8 +114,8 @@ export function ToolSetupLine({
               <span data-testid={id('progress-text')}>
                 {fraction !== null ? `Installing ${said.label}… ${Math.round(fraction * 100)}%` : `Installing ${said.label}… ${formatBytes(v.received)}`}
               </span>,
-              <Button size="sm" variant="quiet" busy={actions.busy} onClick={() => void actions.cancelInstall()} data-testid={id('cancel-install')}>
-                Cancel
+              <Button size="sm" variant="quiet" busy={actions.busy} onClick={() => void actions.cancelInstall()} data-testid={id('stop-install')}>
+                Stop
               </Button>,
             )}
             <ProgressBar className="mt-1.5" label={`Installing ${said.label}`} value={fraction} testId={id('progress')} />

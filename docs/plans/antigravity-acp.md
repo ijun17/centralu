@@ -554,11 +554,11 @@ mapping from a setup to a line:
 | Setup | The line |
 |---|---|
 | `not_installed`, `install: centralu` | "Antigravity is not installed." and **Install** |
-| `installing` | "Installing Antigravity… 40%" (the size received when the total is not known), **Cancel**, a progress bar |
+| `installing` | "Installing Antigravity… 40%" (the size received when the total is not known), **Stop**, a progress bar |
 | `not_installed` with a failure (not a cancel) | "Could not install Antigravity: <reason>" and **Retry** |
 | `not_installed`, no build for the system | said, no action |
 | `signed_out`, `signIn: centralu`, this machine | "Antigravity needs a Google sign-in." and **Sign in** |
-| `signing_in` | "Waiting for the browser…" and **Stop** (not Cancel, so it is not mistaken for the dialog's own Cancel) |
+| `signing_in` | "Waiting for the browser…" and **Stop** (not Cancel, so it is not mistaken for the dialog's own Cancel; every button that halts work in progress reads Stop, the install's too) |
 | `signed_out` after `timed_out` or `failed` | "Sign-in timed out." / "Sign-in did not finish: <reason>" and **Retry** |
 | `signed_out`, a linked machine | "Antigravity needs a Google sign-in. Sign in on <machine>." No button (pasting the address is a follow-up, §11) |
 | `signed_out` or `not_installed`, `terminal` | The terminal hint of each place, as before (Claude Code, Codex, Cursor) |

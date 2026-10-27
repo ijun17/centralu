@@ -69,7 +69,7 @@ export function toolSetupTests(): void {
       await setup(page, { projects: ['/tmp/alpha'] })
     })
 
-    test('not installed: Install, then progress with Cancel, a failure with its reason and Retry', async ({ page }) => {
+    test('not installed: Install, then progress with Stop, a failure with its reason and Retry', async ({ page }) => {
       await antigravity(page, centralu('not_installed'))
       await pickAntigravity(page)
       const line = page.getByTestId('tool-blocked')
@@ -85,7 +85,9 @@ export function toolSetupTests(): void {
       await expect(page.getByTestId('tool-blocked-progress-text')).toContainText('50%')
       await expect(page.getByTestId('tool-blocked-progress')).toHaveAttribute('aria-valuenow', '50')
 
-      await page.getByTestId('tool-blocked-cancel-install').click()
+      // Every button that halts work in progress reads Stop, never Cancel (owner, 2026-10-28)
+      await expect(page.getByTestId('tool-blocked-stop-install')).toHaveText('Stop')
+      await page.getByTestId('tool-blocked-stop-install').click()
       expect(await calls(page)).toEqual(['install:antigravity', 'cancelInstall:antigravity'])
       // A cancel is the person's own act: back to Install, with nothing to apologise for
       await expect(line).toHaveAttribute('data-setup', 'install')
@@ -101,7 +103,7 @@ export function toolSetupTests(): void {
       await expect(line).toHaveAttribute('data-setup', 'sign_in')
     })
 
-    test('signed out: Sign in, waiting for the browser with Cancel, then the line fades out and Start enables', async ({ page }) => {
+    test('signed out: Sign in, waiting for the browser with Stop, then the line fades out and Start enables', async ({ page }) => {
       await antigravity(page, centralu('signed_out'))
       await pickAntigravity(page)
       const line = page.getByTestId('tool-blocked')
