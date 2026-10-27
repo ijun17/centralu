@@ -115,7 +115,7 @@ export class CoreSession<W extends ToolWire = ToolWire> {
   }
 
   send(text: string, opts?: { origin?: InputOrigin; id?: string; compact?: boolean }): void {
-    this.enqueue(text, opts?.id ?? null, opts?.compact === true)
+    void this.enqueue(text, opts?.id ?? null, opts?.compact === true)
   }
 
   sendTracked(text: string, observer?: InputObserver): Promise<void> {

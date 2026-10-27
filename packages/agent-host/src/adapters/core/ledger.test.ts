@@ -390,7 +390,7 @@ describe('the ledger, case by case', () => {
       throw new Error('Tool exited')
     }
     const events: NormalizedEvent[] = []
-    const session = new CoreSession({ sessionId: 's1', resumeExternalId: null, start: { spawn: () => new FakeProc('p1') as unknown as AgentProcess } }, (e) => events.push(e), wire)
+    const session = new CoreSession({ sessionId: 's1', resumeExternalId: null, start: { spawn: () => new FakeProc('p1') } }, (e) => events.push(e), wire)
     await expect(session.ready).rejects.toThrow('Tool exited')
     expect(said(events)).toEqual(['crashed'])
     expect(started?.exitCode).toBe(1)
