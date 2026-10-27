@@ -111,7 +111,9 @@ export function toolSetupTests(): void {
       await page.getByTestId('tool-blocked-sign-in').click()
       expect(await calls(page)).toEqual(['signIn:antigravity'])
       await expect(line).toContainText('Waiting for the browser…')
-      await page.getByTestId('tool-blocked-cancel-sign-in').click()
+      // Its own button is Stop, so it is not mistaken for the dialog's Cancel
+      await expect(page.getByTestId('tool-blocked-stop-sign-in')).toHaveText('Stop')
+      await page.getByTestId('tool-blocked-stop-sign-in').click()
       await expect(line).toHaveAttribute('data-setup', 'sign_in')
       await page.getByTestId('tool-blocked-sign-in').click()
 
@@ -273,12 +275,15 @@ export function toolSetupTests(): void {
       await expect(dialog.getByTestId('new-app-create')).toBeDisabled()
     })
 
-    test('PROPOSAL, an account that is not eligible: Verify account opens Google\'s address, then Sign in again', async ({ page }) => {
+    test('an account that is not eligible: Verify account opens Google\'s address, then Sign in again', async ({ page }) => {
       const uri = 'https://accounts.google.com/verify?x=1'
       await antigravity(page, centralu('signed_out', { failure: { reason: 'ineligible', message: 'Google did not set up Antigravity for this account', verifyUri: uri } }))
       await pickAntigravity(page)
       const line = page.getByTestId('tool-blocked')
-      await expect(line).toContainText('Google needs to verify this account before Antigravity can be used.')
+      await expect(line).toContainText('Google needs to verify this account.')
+      // Both buttons stand on one line
+      const [v, s] = await Promise.all([page.getByTestId('tool-blocked-verify').boundingBox(), page.getByTestId('tool-blocked-sign-in').boundingBox()])
+      expect(Math.abs((v?.y ?? 0) - (s?.y ?? 99))).toBeLessThan(4)
       await page.getByTestId('tool-blocked-verify').click()
       expect(await page.evaluate(() => (window as unknown as MockWindow).__mock.openedUrls)).toEqual([uri])
       await page.getByTestId('tool-blocked-sign-in').click()
@@ -307,6 +312,9 @@ export function toolSetupTests(): void {
       const card = page.getByTestId('intro-card-antigravity')
       await expect(card).not.toHaveAttribute('role', 'button')
       await expect(page.getByTestId('intro-card-antigravity-setup')).toContainText('Antigravity needs a Google sign-in.')
+      // The line says it once: no grey "Not connected" above it, and installed and waiting for a sign-in the card is not dimmed
+      await expect(card).not.toContainText('Not connected')
+      await expect(card.locator('span').first()).not.toHaveClass(/opacity-40/)
       await page.getByTestId('intro-card-antigravity-setup-sign-in').click()
       await expect(page.getByTestId('intro-card-antigravity-setup')).toContainText('Waiting for the browser…')
 
@@ -346,6 +354,9 @@ export function toolSetupTests(): void {
         await expect(page.getByTestId(`usage-donut-${tool}`)).toHaveAttribute('data-signed-out', 'true')
       }
       await expect(page.getByTestId('usage-donut-opencode')).not.toHaveAttribute('data-signed-out', 'true')
+      // Waiting on the person is the signal's white, not an error's red (design-system §1)
+      await expect(page.getByTestId('usage-donut-antigravity').locator('circle').first()).toHaveClass(/text-ink-signal/)
+      await expect(page.getByTestId('usage-donut-antigravity').locator('circle').first()).not.toHaveClass(/text-danger/)
       await expect(page.getByTestId('usage-donut-absent')).toHaveCount(0)
       // Something to do is not "no agent"
       await expect(page.getByTestId('usage-no-agent')).toHaveCount(0)
@@ -369,9 +380,11 @@ export function toolSetupTests(): void {
       await expect(page.getByTestId('usage-donut-tip-antigravity')).toContainText('Not signed in')
 
       await page.getByTestId('usage-donut-claude').click()
+      await expect(page.getByTestId('usage-drop-title')).toHaveText('Claude Code')
       await expect(page.getByTestId('usage-signed-out-line')).toContainText('Claude Code is not signed in. Run claude auth login in a terminal.')
 
       await agy.click()
+      await expect(page.getByTestId('usage-drop-title')).toHaveText('Antigravity')
       await expect(page.getByTestId('usage-signed-out-line')).toContainText('Antigravity needs a Google sign-in.')
       await page.getByTestId('usage-signed-out-line-sign-in').click()
       await expect(page.getByTestId('usage-signed-out-line')).toContainText('Waiting for the browser…')

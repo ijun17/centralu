@@ -22,7 +22,7 @@ export type SetupView =
   | { kind: 'signing_in' }
   /** The sign-in ended without success (it timed out, or failed): said, and offered again */
   | { kind: 'sign_in_failed'; reason: 'timed_out' | 'failed'; message: string }
-  /** PROPOSAL (the owner has not decided its screen): Google did not set the account up, and may give an address to verify it at */
+  /** Google did not set the account up, and may give an address to verify it at */
   | { kind: 'ineligible'; verifyUri: string | null }
   /** Signed out on a linked machine: the sign-in happens there, so this line only says so */
   | { kind: 'sign_in_elsewhere' }

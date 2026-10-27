@@ -42,13 +42,15 @@ test('usage gets one donut per tool — the screen never guesses which tool is m
   await expect(page.getByTestId('usage-donut-codex')).toBeVisible()
 
   await page.getByTestId('usage-donut-codex').click()
+  // The agent's name is the panel's heading; the word "Usage" is not (owner, 2026-10-28)
+  await expect(page.getByTestId('usage-drop-title')).toHaveText('Codex')
   await expect(page.getByTestId('usage-drop')).toContainText('Codex')
   await expect(page.getByTestId('usage-drop')).not.toContainText('Claude Code')
   await expect(page.getByTestId('usage-panel')).toHaveCount(1)
 
   // Clicking a different donut switches to that tool's limit (same spot, different answer)
   await page.getByTestId('usage-donut-claude').click()
-  await expect(page.getByTestId('usage-drop')).toContainText('Claude Code')
+  await expect(page.getByTestId('usage-drop-title')).toHaveText('Claude Code')
 })
 
 /**

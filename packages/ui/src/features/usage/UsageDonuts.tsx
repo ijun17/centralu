@@ -22,7 +22,7 @@ type Snap = { usage: UsageSnapshot | null; reason?: string; cache?: CacheStats; 
 type Group = {
   live: ToolName[] | null
   /**
-   * The tools that are installed but signed out (owner, 2026-10-27): each gets an error-style donut, so the same state
+   * The tools that are installed but signed out (owner, 2026-10-27): each gets a donut with a solid ring in the signal ink, so the same state
    * looks the same for every tool. `tools` is what detect said of them, for the panel's sign-in line
    */
   signedOut: ToolName[]
@@ -374,8 +374,8 @@ export function UsageDonuts() {
             data-machine={drop.machine ?? undefined}
           >
             <header className="flex items-center gap-2 border-b border-line px-4 py-2">
-              <h2 className="text-md font-medium text-ink">Usage</h2>
-              <span className="readout text-xs text-ink-faint">{openMeta.label}</span>
+              {/* The agent's name is the heading (owner, 2026-10-28): the panel is about that tool, signed in or not */}
+              <h2 className="text-md font-medium text-ink" data-testid="usage-drop-title">{openMeta.label}</h2>
               {openMachineName && (
                 <span className="truncate text-xs text-ink-faint" data-testid="usage-drop-machine">
                   on {openMachineName}
@@ -481,7 +481,7 @@ function Donut({
   /** The linked machine it is for; null for this computer */
   machine: string | null
   snap?: Snap
-  /** Installed but signed out (owner, 2026-10-27): an error-style ring, no reading */
+  /** Installed but signed out (owner, 2026-10-27): a solid ring in the signal ink, no reading */
   signedOut?: boolean
   /** Came after the bar was first drawn: fades in. `leaving`: on its way out, still drawn for its exit */
   entering?: boolean
@@ -501,8 +501,8 @@ function Donut({
   const C = 2 * Math.PI * R
   const filled = (Math.max(0, Math.min(100, percent)) / 100) * C
   const tone = known ? usageTone(percent) : 'text-ink-faint'
-  // Signed out is an error: the whole ring in the danger colour, solid (a dashed ring means "unknown"), and its letter with it
-  const ring = signedOut ? 'text-danger' : 'text-line'
+  // Signed out waits on the person, which is the signal's white (design-system §1), not an error: a solid ring and its letter in `ink-signal` (a dashed ring means "unknown")
+  const ring = signedOut ? 'text-ink-signal' : 'text-line'
   const cacheLine = cacheTooltipLine(snap?.cache)
 
   return (
@@ -607,7 +607,7 @@ function Donut({
             y="11"
             textAnchor="middle"
             dominantBaseline="central"
-            className={`fill-current font-sans font-semibold transition-colors duration-150 ${signedOut ? 'text-danger' : known ? 'text-ink' : 'text-ink-faint'}`}
+            className={`fill-current font-sans font-semibold transition-colors duration-150 ${signedOut ? 'text-ink-signal' : known ? 'text-ink' : 'text-ink-faint'}`}
             style={{ fontSize: 'var(--text-2xs)' }}
           >
             {meta.mark}

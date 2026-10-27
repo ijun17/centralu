@@ -3,7 +3,6 @@ import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useLoad } from '../../app/useLoad.js'
 import { LoadFailed } from '../../components/LoadFailed.jsx'
-import { Fold } from '../../components/Fold.jsx'
 import { ToolSetupLine } from '../tools/ToolSetupLine.jsx'
 import { useLiveTools, useReloadOnReconnect } from '../tools/useToolSetup.js'
 import { ORCHESTRATOR_DEMANDS, useRefusals } from '../project/useToolChoice.js'
@@ -92,24 +91,23 @@ export function Intro() {
                   ok
                     ? 'border-line bg-surface-raised hover:border-line-strong'
                     : managed
-                      ? 'cursor-default border-line/60 bg-surface-raised/40'
+                      ? // Dimmed only before it is installed: installed and waiting for a sign-in it is the person's next step, so not faded
+                        t.installed
+                        ? 'cursor-default border-line bg-surface-raised'
+                        : 'cursor-default border-line/60 bg-surface-raised/40'
                       : 'cursor-not-allowed border-line/60 bg-surface-raised/40 opacity-40'
                 }`}
               >
-                <span className={`block text-md font-medium text-ink ${managed ? `transition-opacity duration-150 ${ok ? '' : 'opacity-40'}` : ''}`}>{t.label}</span>
+                <span className={`block text-md font-medium text-ink ${managed ? `transition-opacity duration-150 ${t.installed ? '' : 'opacity-40'}` : ''}`}>{t.label}</span>
                 {managed ? (
                   <>
-                    <Fold open={!ok}>
-                      <span className="mt-1 block text-sm text-ink-muted opacity-40" data-testid={`intro-card-${t.name}-status`}>
-                        {refusal(t.name) ?? 'Not connected'}
-                      </span>
-                    </Fold>
                     {ok && <span className="readout cc-setup-swap mt-1 block text-xs text-ink-faint">{t.detail}</span>}
                     <ToolSetupLine
                       status={t}
                       label={t.label}
                       login={t.login}
-                      shown={!ok && refusal(t.name) === null}
+                      shown={!ok}
+                      refusal={refusal(t.name)}
                       terminal={{ login: (label, command) => `${label}: run ${command} in a terminal`, missing: (label) => `${label} is not installed` }}
                       redetect={() => void detect()}
                       testId={`intro-card-${t.name}-setup`}

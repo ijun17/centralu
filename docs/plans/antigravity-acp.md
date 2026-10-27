@@ -17,7 +17,7 @@ frames this pull request replays are committed, scrubbed, as `adapters/antigravi
 | Antigravity runs as Google's ACP agent on Centralu's ACP adapter, not `agy -p` with a `PreToolUse` hook (owner 2026-10-27) | The hook path is fail-open: an empty hook answer allows, the hook file is writable by the agent's own commands, and command rules depend on parsing shell text. Over ACP an unanswered, cancelled or unknown answer denies (spike §5), turns, cancel and resume are the ACP core's, and Windows has an official build |
 | Sign-in happens inside Centralu (owner 2026-10-27) | The agent has no terminal sign-in; it signs in through ACP `authenticate` with a browser and a loopback redirect. Its state folder is Centralu's own, so a CLI sign-in does not carry over; sharing the CLI's folder would bring the person's global hooks and MCP servers in and move the token into the Keychain |
 | The sign-in action sits where the "needs a login" line is; the header donut shows a tool installed but signed out (owner 2026-10-27, both, wording on screenshots) | One shared piece for the new-session dialog, the first-run orchestrator card and the new-app dialog (§12). The host side gives the state and the actions; the screens are drawn in the stacked pull request |
-| The header shows an error donut for **every** tool installed but signed out: Claude Code, Codex, Cursor, and OpenCode where its detection can tell (owner 2026-10-27) | Every tool reports one shape, `ToolStatus.setup` (§8); OpenCode reports `signIn: none` (its free models need no account, so it is never signed out) |
+| The header shows a signed-out donut (a solid ring in the signal ink, no red) for **every** tool installed but signed out: Claude Code, Codex, Cursor, and OpenCode where its detection can tell (owner 2026-10-27) | Every tool reports one shape, `ToolStatus.setup` (§8); OpenCode reports `signIn: none` (its free models need no account, so it is never signed out) |
 | Install inside Centralu: one pinned version, sha256, atomic, progress, cancel (owner 2026-10-27) | §3 |
 | Centralu's tools (the MCP bridge) ship in this beta, at parity with Cursor and OpenCode (owner 2026-10-27, replacing "next beta") | §7 |
 | First beta signs in on the host's machine only; a linked machine's line says to sign in there (owner 2026-10-27) | The redirect goes to `127.0.0.1` of the machine the agent runs on (spike §4); a person elsewhere can open the address but their browser's redirect reaches their own loopback. Forwarding the redirect is a follow-up |
@@ -558,7 +558,7 @@ mapping from a setup to a line:
 | `not_installed` with a failure (not a cancel) | "Could not install Antigravity: <reason>" and **Retry** |
 | `not_installed`, no build for the system | said, no action |
 | `signed_out`, `signIn: centralu`, this machine | "Antigravity needs a Google sign-in." and **Sign in** |
-| `signing_in` | "Waiting for the browser…" and **Cancel** |
+| `signing_in` | "Waiting for the browser…" and **Stop** (not Cancel, so it is not mistaken for the dialog's own Cancel) |
 | `signed_out` after `timed_out` or `failed` | "Sign-in timed out." / "Sign-in did not finish: <reason>" and **Retry** |
 | `signed_out`, a linked machine | "Antigravity needs a Google sign-in. Sign in on <machine>." No button (pasting the address is a follow-up, §11) |
 | `signed_out` or `not_installed`, `terminal` | The terminal hint of each place, as before (Claude Code, Codex, Cursor) |
@@ -567,16 +567,23 @@ mapping from a setup to a line:
 On success the line folds and fades out (`Fold`) while Start is already enabled. A cancel is the person's own act: the line
 goes back to Install or Sign in with nothing said. An action the host refuses prints its reason under the line.
 
-**The top bar.** Every tool that is installed but signed out (`signedOutTools`) gets an error-style donut: a solid ring and
-the tool's letter in the danger colour, where a reading's ring would be (`data-signed-out`). Its tooltip says "Not signed
-in"; pressing it opens the panel with the same line: **Sign in** for Antigravity, the terminal command for Claude Code,
-Codex and Cursor. A tool that is signed out is not "no agent": the "No agent connected" mark shows only when no tool has a
-donut at all. A donut fades and grows in and fades out when a tool comes or goes after the bar was first drawn.
+**The top bar.** Every tool that is installed but signed out (`signedOutTools`) gets a donut with a solid ring and the
+tool's letter in the signal ink (`ink-signal`), where a reading's ring would be (`data-signed-out`). It is not red:
+design-system §1 keeps `danger` for what destroys something or failed to go through, and a signed-out tool waits on the
+person, which is the signal's white. Its tooltip says "Not signed in"; pressing it opens the panel with the same line:
+**Sign in** for Antigravity, the terminal command for Claude Code, Codex and Cursor. The panel's heading is the agent's
+name for every tool, signed in or not (no "Usage" title). A tool that is signed out is not "no agent": the "No agent
+connected" mark shows only when no tool has a donut at all. A donut fades and grows in and fades out when a tool comes
+or goes after the bar was first drawn.
 
-**Not eligible (PROPOSAL, not decided).** `failure.reason = ineligible` with `verifyUri` (Google's page): "Google needs
-to verify this account before Antigravity can be used." with **Verify account** (opens the address in the browser) and
-**Sign in again**. Without an address: "Google did not set up Antigravity for this account." and **Sign in again**. Only an
-`https` address is opened. Screenshots mark it as a proposal.
+**The first-run card.** Antigravity's card says it once: the setup line, with no grey "Not connected" above it. The card
+is dimmed only before the tool is installed (not installed, installing, install failed); installed and waiting for a
+sign-in it is not dimmed, since its action is the person's next step.
+
+**Not eligible (owner 2026-10-28).** `failure.reason = ineligible` with `verifyUri` (Google's page): "Google needs to
+verify this account." with **Verify account** (opens the address in the browser) and **Sign in again**, both on one line.
+Without an address: "Google did not set up Antigravity for this account." and **Sign in again**. Only an `https`
+address is opened.
 
 **Motion.** Every change is animated, about 150 to 200 ms (design-system §9): the line folds in (180 ms) and out (140 ms, as every fold closes), its words change in place
 (`.cc-setup-swap`, 170 ms), the bar's width is a transition (`.cc-progress`, 180 ms), a donut comes and goes

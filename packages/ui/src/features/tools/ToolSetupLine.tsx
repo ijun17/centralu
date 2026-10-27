@@ -152,8 +152,8 @@ export function ToolSetupLine({
           <>
             {row(
               'Waiting for the browser…',
-              <Button size="sm" variant="quiet" busy={actions.busy} onClick={() => void actions.cancelSignIn()} data-testid={id('cancel-sign-in')}>
-                Cancel
+              <Button size="sm" variant="quiet" busy={actions.busy} onClick={() => void actions.cancelSignIn()} data-testid={id('stop-sign-in')}>
+                Stop
               </Button>,
             )}
             {failure}
@@ -172,13 +172,13 @@ export function ToolSetupLine({
           </>
         )
       case 'ineligible': {
-        // PROPOSAL (not decided by the owner): say it, offer the verification Google gave, then Sign in again
+        // The verification Google gave is offered first, then Sign in again; without an address only the sentence and Sign in again
         const uri = v.verifyUri
         return (
           <>
             {row(
-              uri ? `Google needs to verify this account before ${said.label} can be used.` : `Google did not set up ${said.label} for this account.`,
-              <>
+              uri ? 'Google needs to verify this account.' : `Google did not set up ${said.label} for this account.`,
+              <span className="flex shrink-0 items-center gap-2">
                 {uri && (
                   <Button size="sm" onClick={() => actions.openVerify(uri)} data-testid={id('verify')}>
                     Verify account
@@ -187,7 +187,7 @@ export function ToolSetupLine({
                 <Button size="sm" variant="quiet" busy={actions.busy} onClick={() => void actions.signIn()} data-testid={id('sign-in')}>
                   Sign in again
                 </Button>
-              </>,
+              </span>,
             )}
             {failure}
           </>
