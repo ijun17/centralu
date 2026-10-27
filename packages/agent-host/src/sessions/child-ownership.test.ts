@@ -778,7 +778,7 @@ describe('what a turn that opens ran for', () => {
     expect(own.takeInputOrigin('s', ['before-the-turn'])).toBeUndefined()
   })
 
-  it('takes off all of them when an error cut the turn: the tool runs none of what it was given after', () => {
+  it('takes off all of them when the process went with the turn: it runs none of what it was given after', () => {
     own.noteTurnStart('s', 1)
     own.noteInputOrigin('s', 'a', { ...note, seq: 2 })
     own.noteInputOrigin('s', 'b', { ...note, seq: 3 })
@@ -841,6 +841,23 @@ describe('where the last turn that ended began', () => {
     own.noteTurnStart('s', 9)
     own.turnEnded('s')
     expect(own.turnRows('s')).toEqual({ after: 9 })
+  })
+
+  it('is closed with the process: a turn that never sent its end has its own words, and nothing it was given is run', () => {
+    followed()
+    own.noteTurnStart('s', 4)
+    own.turnEnded('s')
+    own.noteTurnStart('s', 9)
+    // A control: the turn still running reads as the turn before it
+    expect(own.turnRows('s')).toEqual({ after: 4, through: 9 })
+    own.processGone('s')
+    expect(own.turnRows('s')).toEqual({ after: 9 })
+    expect(store.settings.appSetting('input_origins:s')).toBeNull()
+    // Closing it again, or a session no hub follows, is nothing
+    own.processGone('s')
+    own.processGone('nobody')
+    expect(own.turnRows('s')).toEqual({ after: 9 })
+    expect(store.settings.appSetting('turn_span:nobody')).toBeNull()
   })
 
   it('survives a host swap: the host that takes the session over reads where the running turn began, and ends it', () => {

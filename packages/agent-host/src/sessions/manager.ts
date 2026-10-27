@@ -518,6 +518,8 @@ export class SessionManager {
         // No window is attached yet: the marker and the interruption are read with the conversation and the list
         this.interruptions.markStoppedByQuit(fixed, false)
         store.sessions.upsertSession(fixed)
+        // The turn the last host was in never sent its end and no process holds what it was given (#1604)
+        this.children.processGone(s.id)
         stoppedByQuit.push(fixed)
       }
     }
@@ -1154,7 +1156,8 @@ export class SessionManager {
     this.emit(change)
     // Its turn is over: the report it owed says so now, rather than naming a later turn (#698)
     // Whose the turn was (#1377): the person's is reported to nobody
-    const turnBy = this.children.turnEnded(m.id, null)
+    // The process is gone with it (#1604): what it was given is run by no one
+    const turnBy = this.children.turnEnded(m.id, null, true)
     if (this.children.awaitingReport.has(m.id)) void this.reports.reportBackIfAwaited(m.id, { type: 'state_change', sessionId: m.id, state: 'idle' }, undefined, undefined, turnBy)
     else {
       if (turnBy.by !== 'person') void this.reports.tellAskerOfInterruption(m.id, this.children.turnOwners.get(m.id)?.callerId)

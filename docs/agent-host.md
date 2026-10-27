@@ -737,8 +737,8 @@ names the input a turn began from, the host keeps who sent each message of a hub
 setting `input_origins:<session>`, read and written there each time so a host that takes the session over after a swap still
 has them and the one that leaves cannot overwrite what the other wrote). They go as the tool's inputs do: when a turn runs
 one, when a turn's end says it took it in, or, for a tool that does not say (Codex), when that turn began after it was given;
-an error that cuts a turn, a stop, a new process for the session and its deletion take off all, and the `state_change` that opens the turn carries
-`origin: { seq, from }`, the row of that message and its sender (additive, `TurnOrigin`). The tool names the input only
+a stop, a process that is gone (a crash or a lost conversation, a host that starts with no process for a session its last left mid-turn, a new process) and the session's deletion take off all, and the `state_change` that opens the turn carries
+`origin: { seq, from }`, the row of that message and its sender (additive, `TurnOrigin`). Any other error or a usage limit ends the turn and leaves the process, which can still run a message it holds queued as the next turn, so those stay: a stale one is harmless (ids are unique, and the next turn that names a later input takes it off) and a missing one refuses the caller. The tool names the input only
 on the event that opens the turn, and the host reads it there whether or not it already had the session working: an
 instruction sent at rest in the gap between a turn and the one run for a note before it has the session working before
 that turn opens. The tool runs inputs in the order they were given, so a turn that names an input has taken every one given
@@ -757,7 +757,7 @@ A row goes when a turn is run for it or for a later one, and every row goes with
 Nothing is guessed from the time between turns. A turn with no origin is refused, and so is everything after the person's
 message. A link's loss or a restart of the hub keeps the rows but not whose the turn is (`unknown`): a turn that opens
 meanwhile is not taken for the caller's, and the rows stay for the re-read when the link is back (`verify`): if the machine's
-last message is the caller's note, the turn that is run for it afterwards is the caller's. An older machine sends no origin
+last message is the caller's note, the turn that is run for it afterwards is the caller's. The same read says whether the machine lists the child in a turn (`lastUserMessage`'s `atRest`) and the row of that message: at rest, every message it took in has run, so the rows up to that row are dropped, which settles the turns that opened while the hub could not see them. An older machine sends no origin
 and behaves as before this: a note it runs as a turn of its own stays refused. A refusal names the turn by what the hub saw start it: a person's message, another session's, or no message
 at all ("which this hub did not see begin"), never the person without a message of theirs.
 
@@ -769,7 +769,7 @@ joined the two turns' words and clipped them at the report's 600 characters; and
 text ended that text, so a wait read only what followed the note. A caller's notes in a turn (a row that names its sender)
 are rows among its text (`turnAnswer`'s `acrossNotes`); the person's message ends it, as it always did. The next turn may
 have begun as the hub reads the end of this one: then it is the turn before it that ended, up to where the next began. A turn
-that ended with nothing to say has no answer, and the report says so; it is never the turn before's. A turn the host did not
+that ended with nothing to say has no answer, and the report says so; it is never the turn before's. A turn that never sent its end because its process went (a host that starts with the session left mid-turn, a crash) is closed when that is known (`processGone`): its words are those it said, or none, never the turn before's. A turn the host did not
 see begin (before this build) reads as the last response, and so does an older machine.
 
 The person may use the same session on that machine, and nothing of a turn that is not the caller's reaches the

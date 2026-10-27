@@ -192,6 +192,32 @@ describe('reading a linked machine for the hub’s orchestrator', () => {
     ])
   })
 
+  // #1604: what the hub settles the rows it holds for a child's turns by
+  describe("the last message a machine's session took in", () => {
+    const rows = [
+      { seq: 1, role: 'user', kind: 'text', payload: { text: 'the task', from: { sessionId: 'hub' } } },
+      { seq: 2, role: 'assistant', kind: 'text', payload: { text: 'working' } },
+      { seq: 3, role: 'user', kind: 'text', payload: { text: 'a note', from: { sessionId: 'hub' } } },
+      { seq: 4, role: 'assistant', kind: 'text', payload: { text: 'more' } },
+    ]
+    const route = async (method: string) => {
+      if (method === 'messages.load') return rows
+      throw new Error(`Unknown method: ${method}`)
+    }
+
+    it('has its row there, and says whether the machine lists the session in no turn now', async () => {
+      for (const [state, atRest] of [['idle', true], ['waiting_input', true], ['working', false], ['waiting_approval', false]] as const) {
+        const m = machine({ 'sessions.list': [row({ id: 'w1', state })] })
+        expect(await linkedSessions(() => [m], route).lastUserMessage('m1.w1')).toEqual({ ok: true, message: { text: 'a note', from: { sessionId: 'hub' }, seq: 3 }, atRest })
+      }
+    })
+
+    it('says nothing of rest when the machine does not list the session, or cannot be asked: not guessed', async () => {
+      expect(await linkedSessions(() => [machine({ 'sessions.list': [row({ id: 'other', state: 'idle' })] })], route).lastUserMessage('m1.w1')).toEqual({ ok: true, message: { text: 'a note', from: { sessionId: 'hub' }, seq: 3 } })
+      expect(await linkedSessions(() => [machine({ 'sessions.list': new Error('busy') })], route).lastUserMessage('m1.w1')).toEqual({ ok: true, message: { text: 'a note', from: { sessionId: 'hub' }, seq: 3 } })
+    })
+  })
+
   it('reads the head of a long answer an older machine cut, rather than an older line or nothing', async () => {
     const long = JSON.stringify({ ts: '2026-10-18 10:00', role: 'assistant', text: `HEAD "quoted" \\ ${'y'.repeat(5000)}` })
     // An older machine's cut: 2,000 characters of the line's JSON and an ellipsis, here inside an escape

@@ -666,12 +666,20 @@ export class ChildOwnership {
     })
   }
   /**
-   * The tool holds no input for the session any more (#1604): its process ended or was replaced, the turn was cut by an error
-   * or stopped. No turn begins for the messages given before, and none is named for them. Only the origins are dropped: the
+   * The tool holds no input for the session any more (#1604): its process ended or was replaced, or it was stopped. No turn begins for the messages given before, and none is named for them. Only the origins are dropped: the
    * words of the turn that ran stay readable
    */
   dropInputOrigins(sessionId: string): void {
     this.store.settings.deleteAppSetting(inputOriginsKey(sessionId))
+  }
+  /**
+   * The process that ran the session's turns is gone (#1604): it crashed, lost its conversation, or this host started with no
+   * process for a session the last one left mid-turn. A turn it was in will never send its end, so it ends here: its words
+   * are those said so far (or none), never the turn before's, and nothing it was given is run by anyone
+   */
+  processGone(sessionId: string): void {
+    this.dropInputOrigins(sessionId)
+    this.noteTurnEnd(sessionId)
   }
   /** The session is deleted: nothing kept for a hub that followed its turns is kept (`purgeSession` removes the same keys by their shape) */
   forgetTurns(sessionId: string): void {
@@ -785,7 +793,10 @@ export class ChildOwnership {
     const pending = this.pending.get(sessionId) ?? []
     this.pending.delete(sessionId)
     /*
-     * What became of the messages given the tool (#1604). Cut by an error: the tool holds none. The inputs the tool says it
+     * What became of the messages given the tool (#1604). The process went with the turn (`cut`): it holds none. Any other
+     * error or limit ends the turn and leaves the process, which can still run a message it holds queued as the next turn,
+     * so those stay as for any end (a stale one is harmless: the next turn that names a later input takes it off, and a
+     * missing one refuses the caller). The inputs the tool says it
      * took in are done with, and so are those given before them: no turn begins for them. A tool that does not say (Codex)
      * can run a message given while this turn ran as a turn of its own right after it, and names it when it opens; those
      * given before this turn began are done with (it took them in, or it opened for them)

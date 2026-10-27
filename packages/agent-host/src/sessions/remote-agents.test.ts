@@ -18,7 +18,9 @@ let state: string
 let settled: string[]
 let told: string[]
 /** The last message the child took there, as the machine lists it */
-let lastUser: { text: string; from: unknown } | null
+let lastUser: { text: string; from: unknown; seq?: number } | null
+/** Whether the machine lists the child in no turn when its last message is read; absent: it did not say */
+let lastAtRest: boolean | undefined
 /** How many times the hub has read the machine's last message (`verify`) */
 let lastUserReads = 0
 /** This hub's sender as the machine records it, qualified with the machine's id */
@@ -62,6 +64,7 @@ beforeEach(() => {
   // The child last took the instruction this hub sent it: its turn is the caller's
   lastUser = { text: 'TASK', from: HUB }
   lastUserReads = 0
+  lastAtRest = undefined
 })
 afterEach(() => store.close())
 
@@ -178,7 +181,7 @@ describe("the turn on the child's machine, read as the caller's only on evidence
       lastWords: words,
       lastUserMessage: async () => {
         lastUserReads++
-        return { ok: true, message: lastUser }
+        return { ok: true, message: lastUser, ...(lastAtRest !== undefined ? { atRest: lastAtRest } : {}) }
       },
       cards: async () => ({ ok: true, approval: null, questions: [q] }),
       answerQuestion: async (_s: string, id: string) => {
@@ -522,6 +525,33 @@ describe("the turn on the child's machine, read as the caller's only on evidence
       await readAgain(restarted)
       opens(restarted, { seq: NOTE_ROW, from: named })
       expect(reportOwed()).toBe(true)
+    })
+
+    it('stops holding the rows of turns that opened while the hub could not see them, once the machine is read with the child in no turn', async () => {
+      const ra = await afterNote()
+      expect(ra.of(child.sessionId)?.given).toEqual([1, NOTE_ROW])
+      ra.observe({ type: 'machine_status', machine: { id: 'm1', name: 'Box', status: 'unreachable' } })
+      // The turns for both messages opened and ended while the link was down: their events were not seen
+      opens(ra, { seq: NOTE_ROW, from: named })
+      lastUser = { text: sentTexts[0]!, from: HUB, seq: NOTE_ROW }
+      // A control: read while the child is in a turn, the rows stay
+      lastAtRest = false
+      await readAgain(ra)
+      expect(ra.of(child.sessionId)?.given).toEqual([1, NOTE_ROW])
+      ra.observe({ type: 'machine_status', machine: { id: 'm1', name: 'Box', status: 'unreachable' } })
+      lastAtRest = true
+      await readAgain(ra)
+      expect(ra.of(child.sessionId)?.given).toBeUndefined()
+    })
+
+    it('keeps the rows of messages after the last the machine took in when it reads the child at rest', async () => {
+      const ra = await afterNote()
+      ra.observe({ type: 'machine_status', machine: { id: 'm1', name: 'Box', status: 'unreachable' } })
+      // The note (row 2) is not the last message read: the row after the task's is the one it names
+      lastUser = { text: sentTexts[0]!, from: HUB, seq: 1 }
+      lastAtRest = true
+      await readAgain(ra)
+      expect(ra.of(child.sessionId)?.given).toEqual([NOTE_ROW])
     })
 
     it("is not the caller's after the hub restarted when the machine's last message is not that note", async () => {

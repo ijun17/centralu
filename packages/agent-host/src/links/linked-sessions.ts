@@ -1,4 +1,4 @@
-import { AGENT_INSTRUCTIONS_MAX, BackgroundTask, HostLastAnswerResult, HostReadSessionResult, PermissionPreset, RpcMethods, HostRecallHit, HostSessionRow, oneLineText, SessionId, SessionInfo, ToolName } from '@cc/protocol'
+import { AGENT_INSTRUCTIONS_MAX, BackgroundTask, HostLastAnswerResult, HostReadSessionResult, PermissionPreset, RpcMethods, HostRecallHit, HostSessionRow, isInTurn, oneLineText, SessionId, SessionInfo, ToolName } from '@cc/protocol'
 import { awayPhrase, NOT_CONNECTED, NOT_REACHABLE, type LinkedProject, type LinkedSessions, type OrchestratedSession, type ProjectNeed, type RecallHit } from '../adapters/contract.js'
 import { trustedJsonText } from '../sessions/orchestrator-tools.js'
 import { budgetOf, fitMachineLines, toolLinesOf } from '../sessions/session-lines.js'
@@ -503,18 +503,25 @@ export function linkedSessions(
       return attempt(m, async () => {
         // Newest page first, as a window pages back through it; a turn of many tool calls can span a page
         let beforeSeq: number | undefined
-        for (let page = 0; page < 5; page++) {
+        let message: { text: string; from: unknown; seq?: number } | null = null
+        for (let page = 0; page < 5 && !message; page++) {
           const list = await route('messages.load', { sessionId, limit: 200, ...(beforeSeq !== undefined ? { beforeSeq } : {}) })
           if (!Array.isArray(list) || list.length === 0) break
           for (const raw of [...list].reverse()) {
             if (!isObj(raw) || raw.role !== 'user' || raw.kind !== 'text' || !isObj(raw.payload)) continue
-            return { message: { text: typeof raw.payload.text === 'string' ? raw.payload.text : '', from: raw.payload.from ?? null } }
+            message = { text: typeof raw.payload.text === 'string' ? raw.payload.text : '', from: raw.payload.from ?? null, ...(typeof raw.seq === 'number' ? { seq: raw.seq } : {}) }
+            break
           }
           const first: unknown = list[0]
           if (!isObj(first) || typeof first.seq !== 'number') break
           beforeSeq = first.seq
         }
-        return { message: null }
+        // Whether it is in a turn now (#1604): every message it took in has run when it is not. Not told, not guessed
+        const listed: unknown = await m.call('sessions.list', {}).catch(() => null)
+        const id = m.q.strip(sessionId, 'The session')
+        const row: unknown = (Array.isArray(listed) ? listed : []).find((s) => isObj(s) && s.id === id)
+        const atRest = isObj(row) && typeof row.state === 'string' ? !isInTurn(row.state) : undefined
+        return { message, ...(atRest !== undefined ? { atRest } : {}) }
       })
     },
 

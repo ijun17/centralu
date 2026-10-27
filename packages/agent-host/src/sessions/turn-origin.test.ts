@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
 import { ChildOwnership } from './child-ownership.js'
+import { SessionManager } from './manager.js'
 
 /**
  * What a turn that opens says it ran for, and where its words begin (#1604), on the host a hub follows: the events a hub
@@ -185,12 +186,53 @@ describe('what is kept for the turns a hub may be owed', () => {
     expect(JSON.parse(origins(id)!)).toEqual([])
   })
 
-  it('keeps nothing when an error cut the turn', async () => {
+  it('keeps a note when an error ends the turn but the process lives: the CLI can still run the note it holds as the next turn', async () => {
     const id = await withNote()
-    // A control: something is kept until then
-    expect(origins(id)).not.toBeNull()
-    handleOf(id).event({ type: 'error', sessionId: id, error: { code: 'internal', message: 'boom', retryable: false } })
-    expect(origins(id)).toBeNull()
+    handleOf(id).turnInputs = () => []
+    handleOf(id).event({ type: 'error', sessionId: id, error: { code: 'internal', message: 'not logged in', retryable: true } })
+    // The task and the note are both held: the turn that ended took in neither
+    expect(JSON.parse(origins(id)!)).toHaveLength(2)
+    // The note runs as the next turn, and that turn says whose it is
+    const noteId = handleOf(id).ids.at(-1)
+    handleOf(id).turnStartInputs = () => [noteId!]
+    handleOf(id).event({ type: 'state_change', sessionId: id, state: 'working' })
+    expect(w.events.filter((e) => e.type === 'state_change' && e.state === 'working').at(-1)).toHaveProperty('origin')
+  })
+
+  it('keeps a note when a usage limit ends the turn, the same', async () => {
+    const id = await withNote()
+    handleOf(id).turnInputs = () => []
+    handleOf(id).event({ type: 'limit_reached', sessionId: id, usedPercent: 100 })
+    expect(JSON.parse(origins(id)!)).toHaveLength(2)
+  })
+
+  it('keeps nothing when the process went with the turn: a crash, a lost conversation', async () => {
+    for (const code of ['adapter_crashed', 'conversation_locked'] as const) {
+      const id = await withNote()
+      // A control: something is kept until then
+      expect(origins(id)).not.toBeNull()
+      handleOf(id).event({ type: 'error', sessionId: id, error: { code, message: 'gone', retryable: false } })
+      expect(origins(id)).toBeNull()
+    }
+  })
+
+  it('ends the turn it was in when a host starts with no process for a session its last left mid-turn: its words are its own, not the turn before it', async () => {
+    const id = await withNote()
+    handleOf(id).answer('first answer')
+    // The note runs as a turn of its own, says something, and the host stops before the turn ends
+    handleOf(id).event({ type: 'state_change', sessionId: id, state: 'working' })
+    handleOf(id).event({ type: 'message_delta', sessionId: id, role: 'assistant', text: 'half of the second' })
+    const before = w.mgr.hostReader()
+    // A control: while the turn is running, what a hub reads is the turn before it
+    expect(await before.lastAnswer(id, undefined, true)).toMatchObject({ text: 'first answer' })
+    const restarted = new SessionManager(w.store, w.adapters, () => {}, undefined, `${w.caller.path}-worktrees`)
+    try {
+      expect(origins(id)).toBeNull()
+      expect(JSON.parse(spans(id)!).latest.ended).toBe(true)
+      expect(await restarted.hostReader().lastAnswer(id, undefined, true)).toMatchObject({ text: 'half of the second' })
+    } finally {
+      await restarted.disposeAll()
+    }
   })
 
   it('keeps nothing when the session is stopped', async () => {
