@@ -50,4 +50,19 @@ describe("a turn's response, read from where the turn began (#1604)", () => {
     const rows = [asked(1, 'task'), said(2, 'about to look'), asked(3, 'a note'), said(4, 'and more'), tool(5)]
     expect(lastResponse(rows, { after: 1 })).toBe('about to look\n\nand more')
   })
+
+  it("stops at a person's message in the turn: what the agent said before it is not the answer to what came after", () => {
+    const rows = [asked(1, 'task'), said(2, 'part one'), typed(3, 'wait, one more thing'), said(4, 'part two')]
+    // A control: the same rows with a caller's note in the place read whole
+    expect(lastResponse([rows[0]!, rows[1]!, asked(3, 'a note'), rows[3]!], { after: 1 })).toBe('part one\n\npart two')
+    expect(lastResponse(rows, { after: 1 })).toBe('part two')
+    expect(lastResponseSeq(rows, { after: 1 })).toBe(4)
+  })
+
+  it('reads a turn up to where the next began: the turn that has begun since says nothing of this one', () => {
+    const rows = [asked(1, 'task'), said(2, 'first answer'), asked(3, 'a note'), said(4, 'second answer')]
+    expect(lastResponse(rows, { after: 1 })).toBe('first answer\n\nsecond answer')
+    expect(lastResponse(rows, { after: 1, through: 3 })).toBe('first answer')
+    expect(lastResponseSeq(rows, { after: 1, through: 3 })).toBe(2)
+  })
 })

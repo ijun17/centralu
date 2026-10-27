@@ -5,6 +5,7 @@ import type { QueuedRequest, Store } from '../dev-services/store.js'
 import type { AgentRunWait } from './app-agents.js'
 import { inTurn } from '../idle.js'
 import { readJsonObjects } from '../dev-services/store/json.js'
+import { asObj } from '../json-value.js'
 import type { ThreadOrigin } from '../dev-services/store/mail.js'
 import type { AnswerGiven } from '../mail/delegation.js'
 import type { TurnSource, TurnStart } from '../mail/turns.js'
@@ -135,9 +136,10 @@ type TurnSpan = { latest?: { since: number; ended?: true }; previous?: { since: 
 function readTurnSpan(raw: string | null): TurnSpan {
   if (raw === null) return {}
   try {
-    const p = JSON.parse(raw) as { latest?: { since?: unknown; ended?: unknown }; previous?: { since?: unknown } } | null
-    const latest = typeof p?.latest?.since === 'number' ? { since: p.latest.since, ...(p.latest.ended === true ? { ended: true as const } : {}) } : undefined
-    const previous = typeof p?.previous?.since === 'number' ? { since: p.previous.since } : undefined
+    const p = asObj(JSON.parse(raw))
+    const [l, before] = [asObj(p.latest), asObj(p.previous)]
+    const latest = typeof l.since === 'number' ? { since: l.since, ...(l.ended === true ? { ended: true as const } : {}) } : undefined
+    const previous = typeof before.since === 'number' ? { since: before.since } : undefined
     return { ...(latest ? { latest } : {}), ...(previous ? { previous } : {}) }
   } catch {
     return {}

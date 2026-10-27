@@ -1,9 +1,10 @@
 import type { StoredMessage } from '@cc/protocol'
+import { asObj } from '../json-value.js'
 
 /** A message someone else sent into the conversation (a session, an app, a script): its row says who; the person's own says nothing */
 function isNote(m: StoredMessage): boolean {
   if (m.role !== 'user' || m.kind !== 'text') return false
-  const p = m.payload as { from?: unknown; fromApp?: unknown; fromScript?: unknown }
+  const p = asObj(m.payload)
   return !!(p.from || p.fromApp || p.fromScript)
 }
 
