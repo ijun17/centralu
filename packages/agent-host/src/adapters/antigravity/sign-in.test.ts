@@ -123,6 +123,9 @@ describe("Antigravity's sign-in", () => {
     expect(network.reason).toBe('failed')
     expect(network.message).toContain('timed out after 30s')
     expect(signInFailure(new Error('No response for initialize'), live).reason).toBe('failed')
+    // Only the whole message: another call's name after it, or a bound of its own, is not Centralu's authenticate bound
+    expect(signInFailure(new Error('No response for authenticate within 300000ms'), live).reason).toBe('failed')
+    expect(signInFailure(new Error('No response for authenticateDevice'), live).reason).toBe('failed')
     expect(signInFailure(new Error('connect ETIMEDOUT: timed out'), live).reason).toBe('failed')
   })
 

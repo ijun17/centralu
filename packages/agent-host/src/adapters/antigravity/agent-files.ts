@@ -1,9 +1,9 @@
 import { spawn as spawnChild } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { closeSync, createReadStream, createWriteStream, existsSync, fstatSync, openSync, readFileSync, readSync, watch, type FSWatcher } from 'node:fs'
-import { chmod, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, statfs, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, stat, statfs, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
@@ -463,94 +463,259 @@ export async function signInFolder(home: AgyHome, platform: Platform = HOST_PLAT
 // The agent's own folder, kept from its tools (plan §4.2)
 
 /**
- * Whether a permission request names a file in the agent's own folder (`tools/antigravity/`: its token and settings in
+ * Whether a permission request may reach the agent's own folder (`tools/antigravity/`: its token and settings in
  * `gemini-home/antigravity-acp/`, its MCP config and skills, its conversations, its programs) anywhere but this
- * conversation's plan folder. Refused under every preset and every saved rule (`AcpToolShape.neverAllowed`): Centralu
- * answers every request the agent asks, and under Auto its edit tools reached the token's folder with no card (re-review
- * of #1680, measured: `replace_file_content` on a file in `antigravity-acp/` ran; the harness counts that folder as part of
- * its workspace).
+ * conversation's plan. Refused under every preset and every saved rule (`AcpToolShape.neverAllowed`): Centralu answers
+ * every request the agent asks, and under Auto its edit tools reached the token's folder with no card (re-review of #1680,
+ * measured: `replace_file_content` on a file in `antigravity-acp/` ran; the harness counts that folder as part of its
+ * workspace).
  *
  * The plan folder is the one place there the agent writes for the person: `/plan` writes
  * `gemini-home/antigravity-acp/brain/<its session id>/plan.md`, an edit it asks for (measured on 1.4.3; the same folder holds
- * the MCP schemas it reads). Only that session's folder is let through, judged as written there (not by where a link in it
- * leads), so a link to the token inside it is still refused.
+ * the MCP schemas it reads). Only a file in that session's folder is let through (not the folder, so not a search or glob over it), judged both
+ * as written there and where it really leads, so a link in it to the token is still refused.
  *
- * Every string in the request that reads as a path is judged: absolute, `~/…`, a `file:` address, or a relative one with a
- * separator (from the session's folder). Each is judged as written and as it resolves (links followed, as far as the path
- * exists), and case is folded, since macOS and Windows take any case for the same file. A shell command's words are not
- * read (a command can still reach the folder; it asks under every preset but Auto, security-boundaries.md)
+ * It fails closed: what it cannot judge is refused (recheck of #1680). What is read, exactly:
+ *
+ * - every string of the request, object keys too, and the strings of one that holds JSON; a string with a line break, or
+ *   longer than any OS takes as a path, names no file and is passed over. A request deeper than `SCAN_LIMITS.depth` or with
+ *   more than `SCAN_LIMITS.strings` strings is refused whole, unread
+ * - each string as written, without one pair of surrounding quotes, and with `%VAR%`, `$VAR` and `${VAR}` filled from the
+ *   agent's environment; then as a path: a `file:` address, `~`, absolute, drive-relative (`C:foo`, judged against the
+ *   drive's root, the session's folder and the host's own per-drive folder), or relative to the session's folder. A
+ *   `file:` address that does not parse is refused
+ * - a glob (`*`, `?`, `[`, `{` in a segment) also as its fixed prefix, the folder it searches; a `..` after a glob segment is
+ *   refused, since where it lands depends on what matched
+ * - each path as written (Windows: its device prefix, trailing dots and spaces dropped as the OS does) and as it resolves:
+ *   segment by segment through every link and junction, a `..` taken after the link before it as the OS does, case and
+ *   8.3 names as the file system has them. Case is folded too (macOS and Windows take any case for one file)
+ * - refused when it is in the folder, or is the folder or one of its parents (the data folder, `tools/`, the home folder, a
+ *   drive): a listing or a recursive search from there reaches inside. A shell call is exempt from the parents rule only,
+ *   since its command's words are not read anyway (a command can still reach the folder; it asks under every preset but
+ *   Auto, security-boundaries.md)
+ * - Windows: a network path (`\\host\share`, `\\?\UNC\…`, a mapped drive, a volume or device path) is refused when it
+ *   is on the same volume as the folder, or its volume cannot be read. Its host's name proves nothing (`localhost`,
+ *   `127.0.0.1`, the machine's names and addresses, a hosts entry, any share of any folder all lead here), its volume does
  */
 export async function reachesAgentFolder(home: AgyHome, call: unknown, sessionId: string, cwd: string): Promise<boolean> {
-  const paths = pathsIn(call, cwd)
-  if (paths.length === 0) return false
-  const root = await realOrSelf(home.root)
-  const plans = /^[A-Za-z0-9-]{1,64}$/.test(sessionId) ? join('antigravity-acp', 'brain', sessionId) : null
-  const realGemini = await realOrSelf(home.geminiHome)
-  for (const path of paths) {
-    const asWritten = resolve(path)
-    if (refusedIn(home.root, plans && join(home.geminiHome, plans), asWritten)) return true
-    if (refusedIn(root, plans && join(realGemini, plans), await realAsFarAsItExists(asWritten))) return true
+  const strings = stringsIn(call)
+  if (strings === null) return true
+  const guard = await guardOf(home, sessionId)
+  const parents = asObj(call).kind !== 'execute'
+  const env: Record<string, string | undefined> = { ...process.env, GEMINI_HOME: home.geminiHome }
+  const judged = new Set<string>()
+  for (const text of strings) {
+    for (const variant of variantsOf(text, env)) {
+      const candidates = candidatesOf(variant, cwd)
+      if (candidates === null) return true
+      for (const c of candidates) {
+        if (judged.has(c.path)) continue
+        judged.add(c.path)
+        if (await reaches(guard, c, parents)) return true
+      }
+    }
   }
   return false
 }
 
-const fold = (p: string) => p.toLowerCase()
+/** How far a request is read: past either bound it is refused, unread (a padded or deeply nested request) */
+export const SCAN_LIMITS = { depth: 32, strings: 1024, linkSteps: 256 }
 
-function within(folder: string, target: string): boolean {
-  const rel = relative(fold(folder), fold(target))
-  return rel === '' || (!isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`))
-}
+const WINDOWS = sep === '\\'
+/** The longest path any OS opens (Windows' 32767 UTF-16 units); a longer string names no file */
+const MAX_PATH_TEXT = 32767
 
-function refusedIn(root: string, plans: string | null, target: string): boolean {
-  return within(root, target) && !(plans !== null && within(plans, target))
-}
-
-async function realOrSelf(path: string): Promise<string> {
-  return realpath(path).catch(() => path)
-}
-
-/** The real path of the part that exists, with the rest as written: a file being created resolves through its folder */
-async function realAsFarAsItExists(path: string): Promise<string> {
-  const rest: string[] = []
-  let at = path
-  for (;;) {
-    const real = await realpath(at).catch(() => null)
-    if (real !== null) return rest.length ? join(real, ...rest.reverse()) : real
-    const up = resolve(at, '..')
-    if (up === at) return path
-    rest.push(relative(up, at))
-    at = up
+/** Every string in a request, distinct, or null when the request is beyond `SCAN_LIMITS` */
+function stringsIn(value: unknown): string[] | null {
+  const out = new Set<string>()
+  const add = (text: string, depth: number): boolean => {
+    const s = text.trim()
+    if (s.length === 0 || s.length > MAX_PATH_TEXT || /[\r\n]/.test(s)) return true
+    out.add(s)
+    if (out.size > SCAN_LIMITS.strings) return false
+    if (/^[[{]/.test(s)) {
+      try {
+        return walk(JSON.parse(s), depth + 1)
+      } catch {
+        return true
+      }
+    }
+    return true
   }
-}
-
-/** The strings of a request that read as paths, made absolute */
-function pathsIn(value: unknown, cwd: string, depth = 0, out: string[] = []): string[] {
-  if (depth > 8 || out.length > 64) return out
-  if (typeof value === 'string') {
-    const path = asPath(value, cwd)
-    if (path) out.push(path)
-  } else if (Array.isArray(value)) {
-    for (const v of value) pathsIn(v, cwd, depth + 1, out)
-  } else if (value && typeof value === 'object') {
-    for (const v of Object.values(value)) pathsIn(v, cwd, depth + 1, out)
+  const walk = (v: unknown, depth: number): boolean => {
+    if (depth > SCAN_LIMITS.depth) return false
+    if (typeof v === 'string') return add(v, depth)
+    if (Array.isArray(v)) return v.every((x) => walk(x, depth + 1))
+    if (v && typeof v === 'object') return Object.entries(v).every(([k, x]) => add(k, depth) && walk(x, depth + 1))
+    return true
   }
-  return out
+  return walk(value, 0) ? [...out] : null
 }
 
-function asPath(text: string, cwd: string): string | null {
-  const s = text.trim()
-  if (s.length === 0 || s.length > 4096 || /[\r\n]/.test(s)) return null
+/** A string as written, without one pair of surrounding quotes, and with environment variables filled in */
+function variantsOf(text: string, env: Record<string, string | undefined>): string[] {
+  const out = new Set([text])
+  const quoted = /^(["'`])(.*)\1$/.exec(text)
+  if (quoted?.[2]) out.add(quoted[2].trim())
+  const lookup = (name: string) => (WINDOWS ? Object.entries(env).find(([k]) => k.toLowerCase() === name.toLowerCase())?.[1] : env[name])
+  for (const v of [...out]) {
+    const filled = v
+      .replace(/%([^%\s]+)%/g, (all, name: string) => (WINDOWS ? (lookup(name) ?? all) : all))
+      .replace(/\$\{(\w+)\}|\$(\w+)/g, (all, a?: string, b?: string) => lookup(a ?? b ?? '') ?? all)
+    out.add(filled)
+  }
+  return [...out].filter((s) => s.length > 0)
+}
+
+type Candidate = { path: string }
+
+/**
+ * The absolute paths a string may name, each as written (not normalized: `..` is judged after the links before it), and
+ * a glob's fixed prefix too. Null when the string reads as a path that cannot be judged
+ */
+function candidatesOf(text: string, cwd: string): Candidate[] | null {
+  let s = text
   if (/^file:/i.test(s)) {
+    if (!/^file:[\\/]/i.test(s)) return [{ path: joinRaw(cwd, s) }]
     try {
-      return fileURLToPath(s)
+      s = fileURLToPath(s)
     } catch {
       return null
     }
   }
-  if (s === '~' || s.startsWith('~/') || s.startsWith('~\\')) return join(homedir(), s.slice(1))
-  if (isAbsolute(s)) return s
-  if (/\s/.test(s) || !/[\\/]/.test(s) || /^[a-z][\w+.-]*:/i.test(s)) return null
-  return resolve(cwd, s)
+  if (WINDOWS) s = withoutDevicePrefix(s)
+  const roots: string[] = []
+  let pathLike = true
+  if (s === '~' || s.startsWith('~/') || (WINDOWS && s.startsWith('~\\'))) roots.push(homedir() + s.slice(1))
+  // Windows: `\foo` is from the root of the process's drive, which Centralu takes to be the session folder's
+  else if (WINDOWS && /^[\\/](?![\\/])/.test(s)) roots.push(`${cwd.slice(0, 2)}${s}`, resolve(s))
+  else if (isAbsolute(s)) roots.push(s)
+  else if (WINDOWS && /^[A-Za-z]:/.test(s)) {
+    // Drive-relative: the process's folder on that drive, which Centralu cannot see; every folder it may be is judged
+    const drive = s.slice(0, 2)
+    const rest = s.slice(2)
+    roots.push(`${drive}\\${rest}`, resolve(s))
+    if (cwd.slice(0, 2).toLowerCase() === drive.toLowerCase()) roots.push(joinRaw(cwd, rest))
+  } else {
+    pathLike = /[\\/]/.test(s)
+    roots.push(joinRaw(cwd, s))
+  }
+  const out: Candidate[] = []
+  for (const path of roots) {
+    out.push({ path })
+    if (!pathLike) continue
+    const segments = path.split(WINDOWS ? /[\\/]/ : '/')
+    const at = segments.findIndex((seg, i) => i > 0 && /[*?[{]/.test(seg))
+    if (at < 0) continue
+    if (segments.slice(at + 1).includes('..')) return null
+    out.push({ path: segments.slice(0, at).join(sep) || sep })
+  }
+  return out
+}
+
+const joinRaw = (dir: string, rest: string) => (rest.length ? `${dir.replace(/[\\/]+$/, '')}${sep}${rest}` : dir)
+
+/** `\\?\C:\…` and `\\.\C:\…` as `C:\…`, `\\?\UNC\host\…` and `\\.\UNC\host\…` as `\\host\…` */
+function withoutDevicePrefix(s: string): string {
+  return s.replace(/^[\\/]{2}[?.][\\/]UNC[\\/]/i, '\\\\').replace(/^[\\/]{2}[?.][\\/]([A-Za-z]:)/, '$1')
+}
+
+/** Windows' own reading of a path: made absolute with `..` taken by the text, and each name's trailing dots and spaces dropped */
+function windowsForm(path: string): string {
+  return resolve(withoutDevicePrefix(path))
+    .split('\\')
+    .map((seg) => (seg === '.' || seg === '..' ? seg : seg.replace(/[. ]+$/, '') || seg))
+    .join('\\')
+}
+
+type Guard = {
+  root: { written: string; real: string }
+  plans: { written: string; real: string } | null
+  /** The volume the folder (or the part of its path that exists) is on, or null when it cannot be read */
+  volume: bigint | null
+}
+
+async function guardOf(home: AgyHome, sessionId: string): Promise<Guard> {
+  const memo = new Map<string, Promise<string | null>>()
+  const root = await resolveLinks(home.root, memo)
+  const plansAt = /^[A-Za-z0-9-]{1,64}$/.test(sessionId) ? join(home.geminiHome, 'antigravity-acp', 'brain', sessionId) : null
+  const plans = plansAt === null ? null : await resolveLinks(plansAt, memo)
+  const volume = root?.existing ? await stat(root.existing, { bigint: true }).then((s) => s.dev, () => null) : null
+  return {
+    root: { written: written(home.root), real: root?.real ?? written(home.root) },
+    plans: plansAt === null ? null : { written: written(plansAt), real: plans?.real ?? written(plansAt) },
+    volume,
+  }
+}
+
+const written = (path: string) => (WINDOWS ? windowsForm(path) : resolve(path))
+
+async function reaches(guard: Guard, c: Candidate, parents: boolean): Promise<boolean> {
+  const real = await resolveLinks(c.path, new Map())
+  if (real === null) return true
+  const pairs: [root: string, plans: string | null, target: string][] = [
+    [guard.root.written, guard.plans?.written ?? null, written(c.path)],
+    [guard.root.real, guard.plans?.real ?? null, real.real],
+  ]
+  for (const [root, plans, target] of pairs) {
+    if (within(root, target)) {
+      const plan = plans !== null && within(plans, target) && !(await isFolder(real.real))
+      if (!plan) return true
+    }
+    if (parents && within(target, root)) return true
+  }
+  if (WINDOWS && /^[\\/]{2}/.test(real.real)) {
+    if (real.existing === null || guard.volume === null) return true
+    const volume = await stat(real.existing, { bigint: true }).then((s) => s.dev, () => null)
+    if (volume === null || volume === guard.volume) return true
+  }
+  return false
+}
+
+async function isFolder(path: string): Promise<boolean> {
+  return stat(path).then((s) => s.isDirectory(), () => false)
+}
+
+const fold = (p: string) => p.toLowerCase()
+
+/** Whether `target` is `folder` or inside it, case folded (exported for its test under POSIX rules on every OS) */
+export function within(folder: string, target: string, paths: Pick<typeof import('node:path'), 'relative' | 'isAbsolute' | 'sep'> = { relative, isAbsolute, sep }): boolean {
+  const rel = paths.relative(fold(folder), fold(target))
+  return rel === '' || (!paths.isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${paths.sep}`))
+}
+
+/**
+ * Where a path really leads: from its root, segment by segment, each through `realpath` (links, junctions, 8.3 names, the
+ * file system's case), a `..` taken after the link before it (POSIX; Windows takes `..` by the text, so its form is
+ * normalized first). The part past the first segment that does not exist is kept as written. `existing` is the deepest
+ * part that does, or null when not even the root does. Null when it takes more than `SCAN_LIMITS.linkSteps` lookups
+ */
+async function resolveLinks(path: string, memo: Map<string, Promise<string | null>>): Promise<{ real: string; existing: string | null } | null> {
+  const full = WINDOWS ? windowsForm(path) : isAbsolute(path) ? path : resolve(path)
+  const real = (p: string) => {
+    let r = memo.get(p)
+    if (!r) memo.set(p, (r = realpath(p).catch(() => null)))
+    return r
+  }
+  const root = parse(full).root
+  const parts = full.slice(root.length).split(WINDOWS ? /[\\/]+/ : /\/+/).filter(Boolean)
+  let at = await real(root)
+  if (at === null) return { real: resolve(full), existing: null }
+  let i = 0
+  let steps = 0
+  for (; i < parts.length; i++) {
+    const part = parts[i] ?? '.'
+    if (part === '.') continue
+    if (part === '..') {
+      at = dirname(at)
+      continue
+    }
+    if (++steps > SCAN_LIMITS.linkSteps) return null
+    const next = await real(join(at, part))
+    if (next === null) break
+    at = next
+  }
+  return { real: i < parts.length ? resolve(at, ...parts.slice(i)) : at, existing: at }
 }
 
 /** The person's browser on this machine, started apart from the host and never through a shell */

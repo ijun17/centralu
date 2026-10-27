@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { spawn } from 'node:child_process'
-import { tmpdir } from 'node:os'
-import { join, relative } from 'node:path'
+import { hostname, tmpdir } from 'node:os'
+import { join, posix, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { NormalizedEvent, PermissionPreset } from '@cc/protocol'
 import type { AgentProcess, CreateSessionOpts } from '../contract.js'
@@ -55,11 +55,21 @@ export const folder = (path: string) => mkdirSync(path, { recursive: true })
 export const write = (path: string, text: string) => writeFileSync(path, text)
 export const pathIn = (...parts: string[]) => join(...parts)
 export const pathFrom = (from: string, to: string) => relative(from, to)
+export { sep }
+/** Node's POSIX path rules, the same on every OS */
+export const posixPaths = posix
+/** This machine's own name, as a network path may name it */
+export const thisHost = () => hostname()
 /** A symbolic link at `at` to `target`, or false where making one needs rights a test does not have (Windows) */
 export function link(target: string, at: string): boolean {
   if (process.platform === 'win32') return false
   symlinkSync(target, at)
   return true
+}
+
+/** A link at `at` to the folder `target` that every OS lets a test make: a junction on Windows (no right needed), a symbolic link elsewhere */
+export function folderLink(target: string, at: string): void {
+  symlinkSync(target, at, 'junction')
 }
 
 const hosts: (() => Promise<void>)[] = []
