@@ -498,6 +498,11 @@ export async function signInFolder(home: AgyHome, platform: Platform = HOST_PLAT
  *   `127.0.0.1`, the machine's names and addresses, a hosts entry, any share of any folder all lead here), its volume does
  */
 export async function reachesAgentFolder(home: AgyHome, call: unknown, sessionId: string, cwd: string): Promise<boolean> {
+  // A check that throws (a path the OS will not take apart) has not shown the request stays outside
+  return judgeRequest(home, call, sessionId, cwd).catch(() => true)
+}
+
+async function judgeRequest(home: AgyHome, call: unknown, sessionId: string, cwd: string): Promise<boolean> {
   const strings = stringsIn(call)
   if (strings === null) return true
   const guard = await guardOf(home, sessionId)
