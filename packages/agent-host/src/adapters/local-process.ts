@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events'
 import { PassThrough, type Readable, type Writable } from 'node:stream'
 import { KILL_GRACE_MS, hasProcessGroups, killTree, noteGroups, stopGroup, stopTree, type KillOs, type LeftoverOs } from '../dev-services/kill-tree.js'
 import { killHandle, spawnGrouped, sweepExited } from '../dev-services/grouped-child.js'
+import { whichTool } from '../env-path.js'
 import { ExitAfterDrain } from '../exit-after-drain.js'
 import { Tail } from '../stream-text.js'
 import type { AgentProcess, AgentSpawnSpec } from './contract.js'
@@ -123,6 +124,7 @@ export class LocalAgentProcess extends EventEmitter implements AgentProcess {
     let started: ReturnType<typeof spawnGrouped>
     try {
       const watched = !!spec.endsWithHost && hasProcessGroups(os?.platform)
+      if (watched && !shellFinds(spec)) throw missing(spec)
       started = watched
         ? spawnGrouped('/bin/sh', ['-c', HOST_WATCH, 'centralu-agent', spec.command, ...spec.args], { cwd: spec.cwd, env: spec.env, stdio: ['pipe', 'pipe', 'pipe', 'pipe'] }, os?.platform)
         : spawnGrouped(spec.command, spec.args, { cwd: spec.cwd, env: spec.env, stdio: ['pipe', 'pipe', 'pipe'] }, os?.platform)
@@ -240,6 +242,24 @@ export class LocalAgentProcess extends EventEmitter implements AgentProcess {
       if (ended.length > 0) console.error(`[agent] ended ${ended.length} process(es) pid ${pid} left running: ${ended.join(', ')}`)
     })
   }
+}
+
+/**
+ * Whether `sh` will find the CLI it is to `exec` behind the host watch. Node's own spawn reports a missing program as an
+ * 'error' (ENOENT) and adapters say so ("failed to start", #849); behind the watch `sh` starts whatever happens and its
+ * `exec` fails with exit 127 instead, which read as a crash. A name is looked for on the spec's PATH; a path, from `cwd`.
+ */
+function shellFinds(spec: AgentSpawnSpec): boolean {
+  const slash = spec.command.lastIndexOf('/')
+  // No PATH of its own: the shell's default one, which this does not guess at
+  if (slash < 0) return spec.env.PATH === undefined || whichTool(spec.command, spec.env, 'linux') !== null
+  const dir = spec.command.startsWith('/') || !spec.cwd ? spec.command.slice(0, slash) || '/' : `${spec.cwd}/${spec.command.slice(0, slash)}`
+  return whichTool(spec.command.slice(slash + 1), { PATH: dir }, 'linux') !== null
+}
+
+/** The error Node's spawn gives for a program that is not there */
+function missing(spec: AgentSpawnSpec): Error {
+  return Object.assign(new Error(`spawn ${spec.command} ENOENT`), { code: 'ENOENT', errno: -2, syscall: `spawn ${spec.command}`, path: spec.command, spawnargs: spec.args })
 }
 
 /**

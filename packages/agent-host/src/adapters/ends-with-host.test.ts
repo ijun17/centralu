@@ -163,6 +163,16 @@ describe('a CLI that must end with its host', () => {
     ])
   })
 
+  it.skipIf(!unix)('says a CLI that is not there did not start, as without the watch, not that it crashed', async () => {
+    // Behind the watch `sh` always starts, and its `exec` of a missing program exits 127: Codex said "exited (code 127)"
+    for (const command of ['/nonexistent/cc-no-such-cli', 'cc-no-such-cli']) {
+      const p = spawnLocalAgent({ command, args: [], env: process.env, endsWithHost: true })
+      const error = await new Promise<Error>((resolve) => p.once('error', resolve))
+      expect(error).toMatchObject({ code: 'ENOENT' })
+      expect(p.pid).toBeUndefined()
+    }
+  })
+
   it('starts as before without it, and where there are no process groups', async () => {
     const p = spawnLocalAgent({ command: process.execPath, args: ['-e', "process.stdout.write(process.pid + '\\n')"], env: process.env })
     const pid = await helperPid(p.stdout)
