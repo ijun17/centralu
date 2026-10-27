@@ -96,6 +96,20 @@ describe('a usage read that is a command run (#1623)', () => {
     expect(read).toHaveBeenCalledTimes(2)
   })
 
+  it('does not return a stale answer that may not stand in, and waits for the new read instead', async () => {
+    let clock = 0
+    const g = gate<string>()
+    const read = vi.fn<() => Promise<string>>().mockResolvedValueOnce('logged out').mockReturnValueOnce(g.promise)
+    const ask = softRead({ read, fallback: () => 'none', freshMs: 10, failMs: 1000, softMs: 5, now: () => clock, staleOk: (v) => v !== 'logged out' })
+    expect(await ask()).toEqual(answer('logged out'))
+    clock = 11
+    // The new read is slower than the soft wait: provisional, not the stale "logged out" as final
+    expect(await ask()).toEqual(answer('none', true))
+    const settled = ask({ settle: true })
+    g.resolve('Free')
+    expect(await settled).toEqual(answer('Free'))
+  })
+
   it('marks a local usage answer provisional only while the command is still being read', async () => {
     const g = gate<{ plan: string | null }>()
     const ask = localUsageReader({ read: () => g.promise, fallback: () => ({ plan: null }), freshMs: 60_000, failMs: 1000, softMs: 10 })

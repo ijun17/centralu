@@ -108,10 +108,34 @@ export function usageNotReportedTests(): void {
       // The panel was never reopened: what it shows changed in place
       await expect(page.getByTestId('usage-plan')).toHaveText('Free plan')
       await expect(page.getByTestId('usage-totals')).toContainText('Local totals · all time')
-      // One settle ask, and no more however long it stays open
+      // Each ask that was provisional is settled once (the donut's two asks and the panel's), and nothing asks again however long it stays open
+      const settles = () => page.evaluate(() => ((window as unknown as MockWindow).__mock.usageCalls as { settle: boolean }[]).filter((c) => c.settle).length)
+      const asked = await settles()
+      expect(asked).toBeGreaterThanOrEqual(1)
+      expect(asked).toBeLessThanOrEqual(3)
       await page.waitForTimeout(700)
-      const settles = await page.evaluate(() => ((window as unknown as MockWindow).__mock.usageCalls as { settle: boolean }[]).filter((c) => c.settle).length)
-      expect(settles).toBe(1)
+      expect(await settles()).toBe(asked)
+    })
+
+    test('the donut follows the settled answer as the panel does, not the provisional one for five minutes', async ({ page }) => {
+      await setup(page, { projects: ['/tmp/alpha'] })
+      await page.evaluate(
+        ([first, settled]) => {
+          const m = (window as unknown as MockWindow).__mock
+          m.toolUsage = { codex: first }
+          m.settledUsage = { codex: settled }
+        },
+        [{ ...answer(NONE), provisional: true }, { supported: false, reason: 'Codex is not logged in on this computer', usage: null }] as const,
+      )
+      await page.evaluate(() => (window as unknown as MockWindow).__mock.setConnectionState('disconnected'))
+      await expect(page.getByTestId('connection')).toBeVisible()
+      await page.evaluate(() => (window as unknown as MockWindow).__mock.setConnectionState('connected'))
+      await expect(page.getByTestId('connection')).toHaveCount(0)
+      // The command ended with "not logged in": the donut is the unknown one with that reason, not the dimmed "no limits" one
+      await expect(page.getByTestId('usage-donut-codex')).toHaveAttribute('data-state', 'unknown')
+      await page.mouse.move(0, 300)
+      await page.getByTestId('usage-donut-codex').hover()
+      await expect(page.getByTestId('usage-donut-reason-codex')).toHaveText('Codex is not logged in on this computer')
     })
 
     test('a read that failed is still its reason, not the plain words (nothing says the tool has no limits)', async ({ page }) => {

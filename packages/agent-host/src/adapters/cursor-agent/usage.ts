@@ -71,6 +71,8 @@ const RUN_MS = 15_000
 export function cursorUsageReader(): (ask?: { settle?: boolean }) => Promise<LocalUsage> {
   return localUsageReader({
     freshMs: (v) => (v.loggedOut ? LOGGED_OUT_FRESH_MS : FRESH_MS),
+    // A "not logged in" that is ten seconds old is read again before it is told: a login a moment ago is seen at once
+    staleOk: (v) => !v.loggedOut,
     failMs: FAIL_MS,
     softMs: SOFT_MS,
     fallback: () => NOTHING,

@@ -5,7 +5,7 @@ import type { LocalUsage } from './contract.js'
  * so one answer is kept, a read in flight is shared, and the asker is never kept waiting on a slow one.
  *
  * - A fresh answer is returned as it is. A stale one is returned at once and read again behind it, so a panel opened an
- *   hour later does not wait on the command.
+ *   hour later does not wait on the command (unless `staleOk` says that kind of answer may not stand in).
  * - With no answer yet, the asker waits `softMs` at most, then gets `fallback()` marked `provisional` while the read goes on
  *   and fills the cache for the next ask. The panel never sits on a command that hangs. A provisional answer is never kept:
  *   only what the command read is.
@@ -21,6 +21,11 @@ export type SoftReadOptions<T> = {
   fallback: () => T
   /** How long an answer is fresh; a function when it depends on the answer (a logged-out account may log in the next minute) */
   freshMs: number | ((value: T) => number)
+  /**
+   * Whether a stale answer may be returned while it is read again. Default: yes. An answer that says "nobody is logged in"
+   * may not: the person may have logged in since, and it would be shown as final; the asker waits for the new read instead
+   */
+  staleOk?: (value: T) => boolean
   /** How long a failure stands before the command is run again */
   failMs: number
   /** How long an asker with no answer yet waits for the command */
@@ -63,7 +68,7 @@ export function softRead<T>(o: SoftReadOptions<T>): (ask?: { settle?: boolean })
     if (value && t - value.at < freshFor(value.v)) return { value: value.v, provisional: false }
     if (failedAt !== null && t - failedAt < o.failMs) return { value: value?.v ?? o.fallback(), provisional: false }
     const run = start()
-    if (value) return { value: value.v, provisional: false }
+    if (value && (o.staleOk?.(value.v) ?? true)) return { value: value.v, provisional: false }
     if (ask.settle) return { value: await run, provisional: false }
     let timer: ReturnType<typeof setTimeout> | undefined
     const soft = new Promise<SoftAnswer<T>>((resolve) => {

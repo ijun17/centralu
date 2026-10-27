@@ -196,7 +196,19 @@ export function UsageDonuts() {
               patch((g) => ({ snap: { ...g.snap, [tool]: { ...(g.snap[tool] ?? { usage: null }), reason } } }))
             void platform.agents
               .usage(tool, on)
-              .then((r) => put(toSnap(r)))
+              .then((r) => {
+                put(toSnap(r))
+                /*
+                 * A tool whose own command was slower than the host waits answered provisionally (#1623): asked once more,
+                 * to settle, the donut gets the answer when the command ends, not at the next tick. Once, never in a loop.
+                 */
+                if (r.provisional) {
+                  void platform.agents
+                    .usage(tool, on, { settle: true })
+                    .then((s) => put(toSnap(s)))
+                    .catch(() => {})
+                }
+              })
               .catch((e: Error) => {
                 failed(e.message)
                 // A reading that failed (the tool's process busy or restarting) is tried again soon, not in five minutes
@@ -413,7 +425,7 @@ export function UsageDonuts() {
               {(groups[drop.machine ?? HERE] ?? EMPTY).signedOut.includes(drop.tool) ? (
                 <SignedOutPanel tool={drop.tool} machine={drop.machine} group={groups[drop.machine ?? HERE] ?? EMPTY} redetect={() => loadOne(drop.machine)} />
               ) : (
-                <UsagePanel tool={drop.tool} machine={drop.machine} />
+                <UsagePanel key={`${drop.machine ?? ''}:${drop.tool}`} tool={drop.tool} machine={drop.machine} />
               )}
             </div>
           </div>
