@@ -22,12 +22,17 @@ const PRIVATE: readonly [string, RegExp][] = [
   ['a secret in an environment entry', /\\?"name\\?":\\?"[A-Z_]*(?:TOKEN|SECRET|PASSWORD|KEY)[A-Z_]*\\?",\\?"value\\?":\\?"(?!<secret>)/],
 ]
 
+/**
+ * The words of the machine the test runs on. The user name is looked for only off CI: a recording is made and
+ * scrubbed on a person's machine, so that is where their name could leak, while a CI runner's account is a common
+ * word ("runner") that a model's own text may use (an Antigravity sub-agent named its role "Command Runner").
+ */
 function machineWords(): [string, RegExp][] {
   const words: [string, RegExp][] = []
   const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   try {
     const user = userInfo().username
-    if (user.length >= 3) words.push(['this machine’s user name', new RegExp(`\\b${escape(user)}\\b`, 'i')])
+    if (user.length >= 3 && !process.env.CI) words.push(['this machine’s user name', new RegExp(`\\b${escape(user)}\\b`, 'i')])
   } catch {
     // No user name to look for
   }
