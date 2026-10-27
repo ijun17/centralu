@@ -66,6 +66,8 @@ export const OS_LAYER = [
   'packages/agent-host/src/adapters/claude/exe-link.ts',
   // A new project's folder (#515): the Desktop (Windows' known folder, XDG, ~/Desktop) and each OS's path rules
   'packages/agent-host/src/dev-services/project-folder.ts',
+  // The `agy` session's files and node (#1654): bound to the real OS until the Os interface (#1650) is handed in
+  'packages/agent-host/src/adapters/agy/host-files.ts',
   // The e2e lock (#1632): when another process started, and whether it is still the one that took the lock
   'tooling/e2e-lock.ts',
   // The npm launcher's platform layer

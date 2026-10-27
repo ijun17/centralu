@@ -106,8 +106,8 @@ export class AgyWire {
   }
 
   /** The process ended: the calls it left open are closed as failed. Whether that is a crash is the core's rule (a Stop expects it) */
-  exit(): WireOutput {
-    return { events: this.normalizer.endTurn('the process ended before this call finished') }
+  exit(why = 'the process ended before this call finished'): WireOutput {
+    return { events: this.normalizer.endTurn(why) }
   }
 
   private init(conversationId: string): WireOutput {

@@ -55,6 +55,8 @@ export class CoreSession<W extends ToolWire = ToolWire> {
   private readonly expectedExits = new WeakSet<AgentProcess>()
   /** A new process is being started and opened for the next input: the queue waits for it */
   private launching = false
+  /** The process was launched with settings that have changed (`restartForNextInput`): the next input starts another */
+  private stale = false
   private lastTurnInputs: string[] = []
   private readonly stopConfirmMs: number
 
@@ -182,7 +184,16 @@ export class CoreSession<W extends ToolWire = ToolWire> {
   /** A tool whose Stop ends its process starts a new one for the next input; any other tool's gone process closed the session */
   private needsProcess(): boolean {
     if (!this.wire.turns.interruptEndsProcess) return false
-    return this.live === null || this.expectedExits.has(this.live)
+    return this.live === null || this.expectedExits.has(this.live) || this.stale
+  }
+
+  /**
+   * The launch has changed (`agy`: model and effort are flags): the process that runs was started with the old one, so
+   * the next input starts another on the same conversation. A turn that runs finishes on the old process first; nothing
+   * starts until an input comes. Only a tool whose process the core may replace this way (`interruptEndsProcess`)
+   */
+  restartForNextInput(): void {
+    if (this.wire.turns.interruptEndsProcess && this.phase !== 'closed') this.stale = true
   }
 
   /** The old process ended (or is ended now), a new one starts on the same conversation, and the queue goes on in it */
@@ -192,6 +203,9 @@ export class CoreSession<W extends ToolWire = ToolWire> {
 
   private async replaceProcess(): Promise<void> {
     this.launching = true
+    // The old process ends by our hand, however it was found: its exit is no crash
+    if (this.live) this.expectedExits.add(this.live)
+    this.stale = false
     // Opening again: an exit now is a crash, as on the first open, and the queue waits
     this.phase = 'opening'
     try {
