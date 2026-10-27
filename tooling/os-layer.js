@@ -66,6 +66,8 @@ export const OS_LAYER = [
   'packages/agent-host/src/adapters/claude/exe-link.ts',
   // A new project's folder (#515): the Desktop (Windows' known folder, XDG, ~/Desktop) and each OS's path rules
   'packages/agent-host/src/dev-services/project-folder.ts',
+  // The e2e lock (#1632): when another process started, and whether it is still the one that took the lock
+  'tooling/e2e-lock.ts',
   // The npm launcher's platform layer
   'packaging/npm/centralu/bin/platform.mjs',
   // serve.mjs and the modules it is split into
