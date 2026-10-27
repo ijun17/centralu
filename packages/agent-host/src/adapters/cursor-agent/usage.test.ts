@@ -1,10 +1,6 @@
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { ABOUT_RECORDED as RECORDED } from './recordings/about.js'
 import { parseAbout } from './usage.js'
-
-/** The real output of `agent about --format json` (agent 2026.10.22-27dcf5f, Windows), the account's email replaced */
-const RECORDED = readFileSync(join(import.meta.dirname, 'recordings', 'about.json'), 'utf8')
 
 describe("Cursor's usage: the plan from `agent about --format json` (#1623)", () => {
   it('reads the plan from the recorded output', () => {

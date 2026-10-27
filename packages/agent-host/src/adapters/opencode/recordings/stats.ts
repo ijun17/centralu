@@ -1,4 +1,5 @@
-┌────────────────────────────────────────────────────────┐
+/** The real output of `opencode stats` (1.19.4, Windows): boxed tables, no JSON form. A module and not a file, so the test needs no file access */
+export const STATS_RECORDED = `┌────────────────────────────────────────────────────────┐
 │                       OVERVIEW                         │
 ├────────────────────────────────────────────────────────┤
 │Sessions                                             28 │
@@ -27,3 +28,4 @@
 │ write              █████                  5 (20.0%)    │
 └────────────────────────────────────────────────────────┘
 
+`

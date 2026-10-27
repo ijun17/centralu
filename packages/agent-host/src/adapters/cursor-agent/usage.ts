@@ -1,11 +1,6 @@
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
 import { z } from 'zod'
 import type { LocalUsage } from '../contract.js'
 import { localUsageReader } from '../usage-read.js'
-import { findCursor } from './install.js'
-
-const exec = promisify(execFile)
 
 /** The one field of `agent about` that is read; the rest of what it prints (the account's email among it) is never looked at */
 const ABOUT = z.object({ subscriptionTier: z.unknown().optional() })
@@ -66,9 +61,11 @@ const FRESH_MS = 5 * 60_000
 const LOGGED_OUT_FRESH_MS = 10_000
 const FAIL_MS = 60_000
 const SOFT_MS = 3_000
-const RUN_MS = 15_000
+/** How long `agent about` may run before it is ended (the run itself is the profile's, the one place that starts the tool) */
+const ABOUT_RUN_MS = 15_000
 
-export function cursorUsageReader(): (ask?: { settle?: boolean }) => Promise<LocalUsage> {
+/** The reader of Cursor's plan; `run` starts `agent about --format json` for at most the given time and answers its stdout */
+export function cursorUsageReader(run: (timeoutMs: number) => Promise<string>): (ask?: { settle?: boolean }) => Promise<LocalUsage> {
   return localUsageReader({
     freshMs: (v) => (v.loggedOut ? LOGGED_OUT_FRESH_MS : FRESH_MS),
     // A "not logged in" that is ten seconds old is read again before it is told: a login a moment ago is seen at once
@@ -77,15 +74,6 @@ export function cursorUsageReader(): (ask?: { settle?: boolean }) => Promise<Loc
     softMs: SOFT_MS,
     fallback: () => NOTHING,
     onFail: (e) => console.error(`[usage] cursor: could not read the plan: ${e.message}`),
-    read: async () => {
-      const install = findCursor()
-      if (!install) throw new Error('Cursor CLI not found')
-      const r = await exec(install.command, [...install.args, 'about', '--format', 'json'], {
-        timeout: RUN_MS,
-        windowsHide: true,
-        env: { ...process.env, ...install.env },
-      })
-      return parseAbout(r.stdout)
-    },
+    read: async () => parseAbout(await run(ABOUT_RUN_MS)),
   })
 }

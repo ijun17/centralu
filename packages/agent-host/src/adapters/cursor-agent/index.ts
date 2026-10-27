@@ -66,7 +66,12 @@ const STATUS_FOR_MS = 60_000
 
 export function cursorProfile(): AcpProfile {
   let status: { at: number; result: DetectResult } | null = null
-  const localUsage = cursorUsageReader()
+  const localUsage = cursorUsageReader(async (timeout) => {
+    const install = findCursor()
+    if (!install) throw new Error('Cursor CLI not found')
+    const r = await exec(install.command, [...install.args, 'about', '--format', 'json'], { timeout, windowsHide: true, env: { ...process.env, ...install.env } })
+    return r.stdout
+  })
   return {
     descriptor: DESCRIPTOR,
     capabilities: CAPABILITIES,

@@ -1,10 +1,6 @@
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { STATS_RECORDED as RECORDED } from './recordings/stats.js'
 import { parseAmount, parseCount, parseStats } from './usage.js'
-
-/** The real output of `opencode stats` (1.19.4, Windows): boxed tables, no JSON form */
-const RECORDED = readFileSync(join(import.meta.dirname, 'recordings', 'stats.txt'), 'utf8')
 
 /** One table as `opencode stats` boxes it, with the two count rows written the way a computer's language writes them */
 const table = (sessions: string, messages: string) =>

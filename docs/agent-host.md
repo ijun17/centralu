@@ -3820,13 +3820,20 @@ from `opencode stats` (boxed tables read by their labels: sessions, messages, to
   grouping) are read; anything else is a row with a null value, shown as a dash and never as a number that may be wrong. Tokens and
   cost are `toFixed` with a suffix, not localized.
 - *Cost of a read.* Each read is a process run, so the adapter's reader keeps it (`adapters/usage-read.ts`: Cursor's plan five
-  minutes, OpenCode's totals one), shares one run between askers, returns a stale answer at once and reads again behind it, and does
-  not run a failed command again for a minute. The host keeps nothing of its own for these tools.
+  minutes; OpenCode's totals a minute, or ten times as long as the last run took, so a run of twelve seconds is not started each
+  minute), shares one run between askers, returns the last good answer at once while it reads again behind it (also for as long as
+  a slow run takes), and does not run a failed command again for a minute. The host keeps nothing of its own for these tools. The
+  readers keep the answer in memory only: a host restart starts the first run again.
 - *A slow command.* With no answer yet the asker waits three seconds, then gets an answer marked `provisional` (nothing known yet)
   while the run goes on; a provisional answer is never kept. The open panel then asks once more with `settle: true`, which waits for
-  the run in flight (the command's own timeout, 15 s, is the ceiling) and answers what it read, so the plan or totals arrive on the
-  panel without polling. `opencode stats` reads every session it has, so a large database may be slow: past 15 s the run is killed,
-  read as a failure, and not started again for a minute.
+  the run in flight (twenty seconds at most) and answers what it read, so the plan or totals arrive on the
+  panel without polling. `opencode stats` reads every session it has: measured on Windows with a temporary data
+  folder filled with synthetic sessions (opencode 1.19.4, about 3 s for an empty database, 3.4 s for 200 sessions and 10,000
+  messages, 4.4 s for 1,000 and 50,000 (190 MB), 11.3 s for 5,000 and 250,000 (1 GB)), roughly 1.7 s more per thousand sessions,
+  so a database of some seven thousand sessions or more passes 15 s. The run is therefore not ended at 15 s: it has a ceiling of
+  five minutes, the asker never waits for it (a `settle` waits twenty seconds at most and then answers provisionally again, the run
+  going on), and a run that ends later is kept for the next ask. A run that reaches the ceiling is a failure, not started again for
+  a minute.
 - Measured on Windows (agent 2026.10.22, opencode 1.19.4): `agent about` 1.6 to 2.3 s, `opencode stats` 0.8 to 1.3 s; the recorded
   outputs (email replaced) are the parsers' test input.
 

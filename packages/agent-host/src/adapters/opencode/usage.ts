@@ -1,11 +1,6 @@
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
 import type { UsageSnapshot } from '@cc/protocol'
 import type { LocalUsage } from '../contract.js'
 import { localUsageReader } from '../usage-read.js'
-import { findOpenCode } from './install.js'
-
-const exec = promisify(execFile)
 
 type Row = NonNullable<UsageSnapshot['totals']>['rows'][number]
 
@@ -86,29 +81,29 @@ export function parseStats(stdout: string): LocalUsage {
 /** What a read that has nothing (not finished, or failed) answers: no totals */
 const NOTHING: LocalUsage = { plan: null }
 
-/** Totals move with every turn, but a panel needs them to the minute at best: a minute keeps a busy window from running a binary each time */
-const FRESH_MS = 60_000
+/** At the least a minute: totals move with every turn, but a panel needs them to the minute at best */
+const MIN_FRESH_MS = 60_000
+/** A run is not started again before ten times as long as it took: a command that needs twelve seconds is not run each minute */
+const FRESH_PER_RUN = 10
 const FAIL_MS = 60_000
 const SOFT_MS = 3_000
 /**
- * `opencode stats` reads every session it has, so a large database may take longer than the soft wait: the first answer is
- * then provisional and the panel receives the totals when the run ends (`settle`). A run that outlasts this is killed, read as
- * a failure, and not started again for `FAIL_MS`.
+ * `opencode stats` reads every session it has: measured on Windows (opencode 1.19.4) 3 s for an empty database, 3.4 s at
+ * 200 sessions (10,000 messages, 40 MB), 4.4 s at 1,000 (50,000, 190 MB), 11.3 s at 5,000 (250,000 messages, 1 GB), about
+ * 1.7 s more per thousand sessions, so a few thousand sessions or more pass 15 s. The run is therefore not cut at 15 s: it
+ * has this ceiling, the asker never waits for it (the soft wait answers provisionally; `settle` waits at most 20 s), the last
+ * totals stand while a refresh runs, and a stale answer is returned at once.
  */
-const RUN_MS = 15_000
+export const STATS_RUN_MS = 5 * 60_000
 
-export function openCodeUsageReader(): (ask?: { settle?: boolean }) => Promise<LocalUsage> {
+/** The reader of OpenCode's totals; `run` starts `opencode stats` for at most the given time and answers its stdout */
+export function openCodeUsageReader(run: (timeoutMs: number) => Promise<string>): (ask?: { settle?: boolean }) => Promise<LocalUsage> {
   return localUsageReader({
-    freshMs: FRESH_MS,
+    freshMs: (_v, tookMs) => Math.max(MIN_FRESH_MS, tookMs * FRESH_PER_RUN),
     failMs: FAIL_MS,
     softMs: SOFT_MS,
     fallback: () => NOTHING,
     onFail: (e) => console.error(`[usage] opencode: could not read the totals: ${e.message}`),
-    read: async () => {
-      const l = findOpenCode()
-      if (!l) throw new Error('OpenCode not found')
-      const r = await exec(l.command, [...l.args, 'stats'], { timeout: RUN_MS, windowsHide: true, maxBuffer: 1024 * 1024 })
-      return parseStats(r.stdout)
-    },
+    read: async () => parseStats(await run(STATS_RUN_MS)),
   })
 }

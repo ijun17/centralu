@@ -9,8 +9,9 @@ import type { LocalUsage } from './contract.js'
  * - With no answer yet, the asker waits `softMs` at most, then gets `fallback()` marked `provisional` while the read goes on
  *   and fills the cache for the next ask. The panel never sits on a command that hangs. A provisional answer is never kept:
  *   only what the command read is.
- * - `settle: true` waits for the read in flight (it has its own ceiling, the command's timeout) and answers what it read:
- *   how an open panel receives the answer of a command that took longer than the soft wait, without polling.
+ * - `settle: true` waits for the read in flight, at most `settleMs`, and answers what it read: how an open panel receives the
+ *   answer of a command that took longer than the soft wait, without polling. Past `settleMs` the answer is provisional again
+ *   and the run goes on; what it reads is kept for the next ask.
  * - A read that failed is not run again for `failMs`: the asker gets the last good answer, or `fallback()`. That is final
  *   (not provisional): nothing is being read.
  */
@@ -19,8 +20,11 @@ export type SoftReadOptions<T> = {
   read: () => Promise<T>
   /** What to answer when there is nothing better: the tool's plain "nothing known" answer */
   fallback: () => T
-  /** How long an answer is fresh; a function when it depends on the answer (a logged-out account may log in the next minute) */
-  freshMs: number | ((value: T) => number)
+  /**
+   * How long an answer is fresh; a function when it depends on the answer (a logged-out account may log in the next minute)
+   * or on how long the read took (`tookMs`): a command that takes twelve seconds is not run again every minute
+   */
+  freshMs: number | ((value: T, tookMs: number) => number)
   /**
    * Whether a stale answer may be returned while it is read again. Default: yes. An answer that says "nobody is logged in"
    * may not: the person may have logged in since, and it would be shown as final; the asker waits for the new read instead
@@ -30,6 +34,12 @@ export type SoftReadOptions<T> = {
   failMs: number
   /** How long an asker with no answer yet waits for the command */
   softMs: number
+  /**
+   * How long a `settle` waits for the run in flight before it answers provisionally again. The run itself is not cut short
+   * by it (a command on a large database may take a minute): only the asker stops waiting, and the next ask finds the answer.
+   * Default 20 s, under the screen's own 30 s bound on a call
+   */
+  settleMs?: number
   now?: () => number
   /** Where a failure is said (the host's stderr) */
   onFail?: (err: Error) => void
@@ -39,17 +49,18 @@ export type SoftAnswer<T> = { value: T; provisional: boolean }
 
 export function softRead<T>(o: SoftReadOptions<T>): (ask?: { settle?: boolean }) => Promise<SoftAnswer<T>> {
   const now = o.now ?? Date.now
-  const freshFor = (v: T) => (typeof o.freshMs === 'function' ? o.freshMs(v) : o.freshMs)
-  let value: { at: number; v: T } | null = null
+  const freshFor = (e: { v: T; tookMs: number }) => (typeof o.freshMs === 'function' ? o.freshMs(e.v, e.tookMs) : o.freshMs)
+  let value: { at: number; v: T; tookMs: number } | null = null
   let failedAt: number | null = null
   let inflight: Promise<T> | null = null
 
-  const start = (): Promise<T> =>
-    (inflight ??= o
+  const start = (): Promise<T> => {
+    const began = now()
+    return (inflight ??= o
       .read()
       .then(
         (v) => {
-          value = { at: now(), v }
+          value = { at: now(), v, tookMs: now() - began }
           failedAt = null
           return v
         },
@@ -62,17 +73,17 @@ export function softRead<T>(o: SoftReadOptions<T>): (ask?: { settle?: boolean })
       .finally(() => {
         inflight = null
       }))
+  }
 
   return async (ask = {}) => {
     const t = now()
-    if (value && t - value.at < freshFor(value.v)) return { value: value.v, provisional: false }
+    if (value && t - value.at < freshFor(value)) return { value: value.v, provisional: false }
     if (failedAt !== null && t - failedAt < o.failMs) return { value: value?.v ?? o.fallback(), provisional: false }
     const run = start()
     if (value && (o.staleOk?.(value.v) ?? true)) return { value: value.v, provisional: false }
-    if (ask.settle) return { value: await run, provisional: false }
     let timer: ReturnType<typeof setTimeout> | undefined
     const soft = new Promise<SoftAnswer<T>>((resolve) => {
-      timer = setTimeout(() => resolve({ value: o.fallback(), provisional: true }), o.softMs)
+      timer = setTimeout(() => resolve({ value: o.fallback(), provisional: true }), ask.settle ? (o.settleMs ?? 20_000) : o.softMs)
       timer.unref?.()
     })
     try {

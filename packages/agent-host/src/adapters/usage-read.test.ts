@@ -110,6 +110,47 @@ describe('a usage read that is a command run (#1623)', () => {
     expect(await settled).toEqual(answer('Free'))
   })
 
+  it('lets a settle wait only so long: the run goes on, the asker gets a provisional answer, and what the run reads is kept', async () => {
+    const g = gate<string>()
+    const read = vi.fn(() => g.promise)
+    const ask = softRead({ read, fallback: () => 'none', freshMs: 60_000, failMs: 1000, softMs: 5, settleMs: 20 })
+    expect(await ask()).toEqual(answer('none', true))
+    expect(await ask({ settle: true })).toEqual(answer('none', true))
+    g.resolve('totals')
+    await vi.waitFor(async () => expect(await ask()).toEqual(answer('totals')))
+    expect(read).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the last good answer while a refresh runs, and for as long as a refresh takes', async () => {
+    let clock = 0
+    const g = gate<string>()
+    const read = vi.fn<() => Promise<string>>().mockResolvedValueOnce('old').mockReturnValueOnce(g.promise)
+    const ask = softRead({ read, fallback: () => 'none', freshMs: 10, failMs: 1000, softMs: 5, now: () => clock })
+    await ask()
+    clock = 11
+    // A run that takes minutes: every ask in between is the last good answer, at once, and none starts a second run
+    for (clock = 11; clock < 300_000; clock += 60_000) expect(await ask()).toEqual(answer('old'))
+    expect(read).toHaveBeenCalledTimes(2)
+    g.resolve('new')
+    await vi.waitFor(async () => expect(await ask()).toEqual(answer('new')))
+  })
+
+  it('is fresh for longer after a read that took longer', async () => {
+    let clock = 0
+    const read = vi.fn(async () => {
+      clock += 12_000
+      return 'totals'
+    })
+    const ask = softRead({ read, fallback: () => 'none', freshMs: (_v, took) => Math.max(60_000, took * 10), failMs: 1000, softMs: 50, now: () => clock })
+    await ask()
+    clock += 110_000
+    await ask()
+    expect(read).toHaveBeenCalledTimes(1)
+    clock += 20_000
+    await ask()
+    expect(read).toHaveBeenCalledTimes(2)
+  })
+
   it('marks a local usage answer provisional only while the command is still being read', async () => {
     const g = gate<{ plan: string | null }>()
     const ask = localUsageReader({ read: () => g.promise, fallback: () => ({ plan: null }), freshMs: 60_000, failMs: 1000, softMs: 10 })
