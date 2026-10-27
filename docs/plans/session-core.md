@@ -28,7 +28,7 @@ Marks: **S** the same in all (shared code already), **I** the same idea in diffe
 | Input during a turn | mid-turn (the SDK's input generator), `turnInputs()` | merged into the running turn by Codex; queued behind a blocking `/compact` or `/review` (`pendingInputs`, `flushPending:591`) | queued by the host, one prompt at a time (`midTurnInput: false`) | **I**: a host queue exists twice (Codex blocking turns, ACP) |
 | Interrupt | `query.interrupt({cancelQueued})` (`interrupt:653`), stop-confirm timer 10 s (`awaitStop:726`) | `turn/interrupt` (`interrupt:683`); refused → `stopNotConfirmed`; no timer | `session/cancel` (`interrupt:351`), timer 10 s, cancel re-sent once (`resendLostCancel:410`) | **I** (§2.4); the request is **T** |
 | An interrupt nobody here asked for | not possible | `INTERRUPTED_BY_TOOL` (`codex/session.ts:467`) | `INTERRUPTED_BY_TOOL` (`acp/session.ts:289`) | **I** |
-| Input receipts | `InputReceipts` (`create`, `accept`, `complete`, `failAll`) when the CLI has the receipt capabilities (`claude/tracked-input.ts:10`) | `InputReceipts` (`create`, `bind`, `endTurn`, `failAll`), `clientUserMessageId` | not used: drives `InputObserver` by hand (`run:249`, `:268`) | **I** (§2.3) |
+| Input receipts | `InputReceipts` (`create`, `accept`, `complete`, `failAll`) when the CLI has the receipt capabilities (`claude/tracked-input.ts:10`) | `InputReceipts` (`create`, `bind`, `endTurn`, `failAll`), `clientUserMessageId` | not used: drives `InputObserver` by hand (`run:249`, `:268`); a stopped input completes | **I**, differs (§2.3) |
 | Undelivered input on exit or dispose | `undeliveredError` (`session-kit.ts:32`) | the same, plus `reportUnsentWhileWaking:778` | the same, `dropQueue:520` | **S** |
 | Resume | SDK `resume` option (`sdk-query.ts:211`); id from `system/init` | `thread/resume` (`thread-open.ts:60`), `resumeFailure:129` (`conversation_locked`), lazy resume (`LAZY_RESUME_WAIT_MS` 3 s, `background-resume.ts`) | `session/load`, else `session/resume`, else `session_not_found` (`acp/session.ts:open:140`); replay dropped while loading | **T** |
 | History read-back | SDK `getSessionMessages` (`claude/history.ts:123`) | `thread/turns/list` paged (`codex/history.ts:88`), fallback `thread/read` | none (`external-conversations.ts` skips ACP tools) | **T**; the output shape is **S** (`history-events.ts`) |
@@ -37,7 +37,7 @@ Marks: **S** the same in all (shared code already), **I** the same idea in diffe
 | Presets → tool | `permissionOptionsFor` (`claude/permissions.ts:90`): permission mode, setting sources | `permissionOptionsFor` (`codex/launch-config.ts:25`): approval policy and sandbox | Cursor: `auto` only; OpenCode: inline config at launch (`opencode/config.ts:presetEnv:29`) | **T** |
 | Compaction boundary | `system/compact_boundary`, trigger from the tool (`claude/cli-messages.ts:181`) | `contextCompaction` item and the old `thread/compacted`, deduplicated (`codex/normalize.ts:CompactionMarks:54`); manual when our compact turn runs (`codex/session.ts:425`) | `compaction_update` (`acp/normalize.ts:208`); manual when our compact turn runs (`acp/session.ts:285`); OpenCode infers it (`inferredCompaction:346`) | **I** (manual vs auto), **T** (signals) |
 | Context reading | `getContextUsage()` after each result (`reportContext:605`): `window > 0 && used >= 0` | `thread/tokenUsage/updated` `last` over `modelContextWindow`; above the window dropped (`codex/token-readings.ts:42`, `:90`) | `usage_update` when `used > 0 && size > 0` (`acp/session.ts:384`) | **I**, differs (§2.2) |
-| Token usage | shared `token-usage.ts` (`tokenCount`, `addTokens`) | own `splitInput` and `finite` | own `tokenUsage` (`acp/normalize.ts:220`) | **I** (§2.1) |
+| Token usage | process total, shared `token-usage.ts` (`tokenCount`, `addTokens`) | thread total, own `splitInput` and `finite` | one turn's, own `tokenUsage` (`acp/normalize.ts:220`) | **I**, differs (§2.1) |
 | Files touched | `TouchedFiles` (after an ok result, #843) | at item completion (after it ran) | on the call, before any approval (`acp/normalize.ts:175`) | **I**, differs (§2.8) |
 | Images | `inlineImageEvent` (8 MB cap) | `mcpImageEvents`, `imageEventFromDisk` | `message_image` built inline, no cap (`acp/normalize.ts:64`) | **I**, differs (§2.9) |
 | Unknown frames | `UnmappedTypes` + `CLAUDE_KNOWN_TYPES` | surface drift (`codex/surface.ts`) | `UnmappedTypes` + `KNOWN_UPDATES` | **S** |
@@ -49,20 +49,29 @@ Marks: **S** the same in all (shared code already), **I** the same idea in diffe
 
 What the table says: the wire (framing, requests, history, resume, presets) is per tool and stays so. The life around
 it, a process, a ledger of turns and inputs, the stop, the cards and their decision order, the exit, the frames, and
-the event hygiene, is the same idea written three times, with real differences in six places (§2).
+the event hygiene, is the same idea written three times, with real differences in a dozen places (§2).
 
 ## 2. One concept, more than one copy
 
 Each is a finding to decide, not a silent choice. "Right" below says which copy the core should take and why; where a
 copy is wrong today the fix is its own small pull request (§7.3), never folded into a move, so a move stays a move.
 
-### 2.1 Token usage totals
+### 2.1 Token usage: a running reading, or one turn's
 
-`token-usage.ts` (`tokenCount`, `addTokens`) is used by Claude; Codex sums with its own `splitInput`
-(`codex/token-readings.ts:19`, which splits cached input out of `inputTokens`), ACP builds a `TokenUsage` by hand
-(`acp/normalize.ts:220`). They agree on the result for their tool's fields today (by reading); the split of cached
-input is per tool (Codex counts it inside `inputTokens`, Anthropic apart). **Right:** the shared helpers, with the
-per-tool field mapping kept in the tool. No behaviour change.
+`usage_update.tokens` is "a running reading" (`protocol/src/events.ts:443`, `entities/usage.ts`: Claude's result is
+cumulative over the process, Codex's `total` over the thread), and the host keeps the last one as is
+(`sessions/session-events.ts:441`, `m.usage = e.tokens`).
+
+| | Sends | Sanitizing |
+|---|---|---|
+| Claude `turn-ending.ts:61`, `normalize.ts:withRequest:330` | the process total plus each request since; `costUsd` = `total_cost_usd`; a `request` per model request | `tokenCount` (rejects NaN, negatives, non-numbers) |
+| Codex `token-readings.ts:42` | the thread's `total`; a `request` per change of `last` | `finite` (lets a negative through; input clamped by `splitInput:19`, output not) |
+| ACP `acp/normalize.ts:tokenUsage:220`, `acp/session.ts:283` | **this turn's** `PromptResult.usage`; `costUsd` is this turn's delta (`turnCost:337`); no `request` | `?? 0` on schema numbers; `thoughtTokens` added to output |
+
+**Right:** Claude's and Codex's (the contract). An ACP session's token figure is one turn's where the others show the
+session's, and it feeds nothing to the prompt cache ledger (by reading; the screen effect not checked). The core's
+`events.ts` keeps a running sum for a tool that reports per turn, through `tokenCount`. A fix with its own pull
+request (§7.3); can start now.
 
 ### 2.2 The context reading's guard
 
@@ -82,17 +91,31 @@ pull request (§7.3).
 
 ### 2.3 Input receipts
 
-Claude and Codex use `InputReceipts`; ACP calls `InputObserver.accepted/complete/fail` by hand and keeps its own
-`done` promise. They agree on when (accepted when the turn starts, complete when it ends, fail on stop and exit). The
-ACP copy does not mint ids through `InputReceipts.create`, so after #1626 its inputs would not carry Centralu's mark
-(`centraluInputId`); ACP keeps no input id the tool echoes, so the mark has no reader there today (by reading: no
-history read-back for ACP). **Right:** `InputReceipts` for all; ACP moves onto it in the ledger pull request.
+Claude and Codex use `InputReceipts`; ACP calls `InputObserver` by hand and keeps its own `done` promise. They differ
+in two places:
+
+| | `accepted` | An input whose turn was stopped |
+|---|---|---|
+| Claude | the CLI echoes `user_message_uuid` (`claude/session.ts:346`) | fails (`failAll` on interrupt, `:665`) |
+| Codex | the `turn/start` answer binds it (`codex/session.ts:640`) | fails (`failAll`, `:681`) |
+| ACP | **before** `session/prompt` is written (`acp/session.ts:249`) | **completes**: a `cancelled` stop reason is a result, so `observer.complete()` and `done.resolve()` (`:272`) |
+
+`InputObserver.accepted` means "the tool took the input" (`contract.ts:282`). **Right:** Claude's and Codex's: a
+stopped input fails, so a stopped delegation is not reported as finished (by reading). ACP accepting at the write is
+the nearest it can say (`session/prompt` has no earlier answer), so that one is per tool. ACP also does not mint ids
+through `InputReceipts.create`, so after #1626 its inputs carry no Centralu mark (`centraluInputId`); nothing reads it
+for ACP today (no history read-back). The ledger uses `InputReceipts` for all; ACP's "stopped completes" is a fix
+with its own pull request (§7.3), before ACP moves onto the ledger, so the move stays a move.
 
 ### 2.4 Stop confirmation
 
 Claude and ACP start a 10 s timer after a Stop and say `stopNotConfirmed` when no confirmation comes; ACP also re-sends
 `session/cancel` once. Codex has no timer: it says `stopNotConfirmed` only when `turn/interrupt` is refused. The
-constants are separate (`STOP_CONFIRM_MS` in `claude/index.ts:168` and `acp/adapter.ts:13`). **Right:** the timer
+constants are separate (`STOP_CONFIRM_MS` in `claude/index.ts:168` and `acp/adapter.ts:13`), and the notices say it
+differently ("…after N s. The turn is still running." against "…; the turn may still be running."). What a Stop
+releases differs too: Claude releases approvals and questions and cancels app calls; Codex denies this thread's
+approvals and cancels app calls; ACP closes approvals and leaves app calls (`opts.apps` untouched). Claude's comment
+says it waits "the way Codex waits for its `turn/completed`", which Codex does not bound. **Right:** the timer
 (Claude and ACP): a Stop the tool accepted and never acted on is the case the timer exists for, and Codex's
 `turn/interrupt` answer is an acceptance, not a confirmation that the turn ended. Codex gaining the timer is a visible
 notice in a case that today shows nothing: a behaviour change, its own pull request, and an open question (§9.2).
@@ -146,6 +169,10 @@ every current outcome (by reading): no behaviour change.
 mark the file). ACP emits `files_touched` when the call is first announced (`acp/normalize.ts:175`), before
 `session/request_permission` is answered, so an edit the person denies in an OpenCode session still marks its files.
 **Right:** `TouchedFiles`. A bug today (by reading; not reproduced): its own fix pull request, which can start now.
+Codex differs on purpose and stays so: it marks a failed patch too, since a patch is applied file by file and the item
+does not say which files were written before it failed, and marks nothing for a declined one
+(`codex/normalize.ts:224`). The core's rule is therefore "never before the call went through; a failed call is marked
+when the tool cannot say what it wrote", which `TouchedFiles.result` takes as a per-tool flag.
 
 ### 2.9 Images without the cap
 
@@ -165,7 +192,18 @@ image (by reading): its own small fix.
 | Duplicate compaction signals | `codex/normalize.ts:CompactionMarks:54` | one copy; the core takes it as the boundary filter for any tool with two signals |
 | JSON-RPC client | `codex/client.ts`, `acp/connection.ts` | the same framing, id prefix and pending map; differ in Codex's missing `jsonrpc` field and its 120 s default timeout; a shared client is possible but not needed for the core (§3.3) |
 
-Whatever the duplicates agent of this design adds is in §2.11.
+### 2.11 More differences, each to decide
+
+| Concept | Copies | Difference | Right |
+|---|---|---|---|
+| Refusal and turn-limit endings | Claude `normalize.ts:472`, `turn-ending.ts:85`; ACP `acp/session.ts:291`; Codex `model-rejected.ts:62` | Claude: a failed turn is a retryable `error`, `error_max_turns` too; ACP: `refusal` a non-retryable `error` without `turn_complete`, `max_tokens` and `max_turn_requests` a notice and `turn_complete`; Codex: non-retryable only for a rejected model | undefined by any document: an open question (§9.7); the ledger takes `turnEnded(how, detail)` and each tool keeps its mapping until decided |
+| Diff preview on a card | Claude `tool-summary.ts:claudeFileChange:113` (`diffLines`); Codex the vendor's diff; ACP `acp/session.ts:detailOf:577` (`newText` only, `oldText` parsed and ignored) | the `other` card's raw text is cut at 300 characters in Claude (`tool-summary.ts:147`), 2,000 in Codex and ACP | a diff from `oldText` and `newText` for ACP (`file-changes.ts:11` means one preview rule); the 300 against 2,000 cut is a question for review |
+| An emptied plan | `plan.ts:todoWritePlan:31` and ACP send it (clears the panel); Codex drops it (`codex/normalize.ts:135`, `plan.length > 0`) | a cleared Codex plan stays on screen (by reading) | `plan.ts`'s rule; a small Codex fix |
+| Compaction `reason` | ACP puts the summary's first line in `reason` on success (`acp/normalize.ts:208`); the protocol and the UI read `reason` only on failure (`ui/src/store/transcript.ts:432`) | drift, nothing shown | the protocol's meaning; ACP drops it on success (no visible change) |
+| The live usage limit | Claude acts only on `rejected` and sets `windowMins` only for `five_hour` (`turn-ending.ts:22`); Codex always reads the primary window (`codex/normalize.ts:281`), even when the weekly one was hit | the same window labelled "5 hours"/"Weekly" (Claude, `usage.ts:25`) or "5h"/"1w" (Codex, `usage.ts:17`) | per tool sources, one label rule: an open question (§9.8); not core |
+| Closing the process | `CodexClient.dispose:247` and `AcpConnection.dispose:259`: the same code (EOF, 2,000 ms, SIGKILL); Claude through the SDK's `close()` | agree | the core's stop (PR 3), one copy |
+| `safe` preset | Claude `default` (the person's allow rules still apply); Codex `untrusted` (asks about everything) | assumed different in effect, not measured | to check; presets stay per tool |
+| stderr host-log line | `codex/client.ts:130`, `acp/connection.ts:80`: the same 500-character line | agree | the core's tap, one copy |
 
 ## 3. What the core owns
 
@@ -355,6 +393,10 @@ PRs 5–9 for one tool do not wait for the others, so `agy` (§8) needs only 1, 
 | Fix | From | Can start |
 |---|---|---|
 | ACP marks files only after an ok result (`TouchedFiles`) | §2.8 | now (a file the move does not touch until PR 9) |
+| ACP sends a running token reading, through `tokenCount` | §2.1 | now |
+| ACP fails an input whose turn was stopped | §2.3 | now, before PR 5 |
+| ACP's card shows a diff from `oldText` | §2.11 | now |
+| Codex sends an emptied plan | §2.11 | now |
 | ACP caps inline images (`inlineImageEvent`) | §2.9 | now |
 | The context guard's upper bound for Claude and ACP | §2.2 | after 9 (then one line) |
 | ACP's crash message in `withStderrTail`'s form | §2.5 | after 5 |
@@ -380,7 +422,7 @@ From antigravity-adapter.md's measurements (`agy` 1.4.7, macOS, 2026-10-26), wha
 | Not used | history read-back, `detach` takeover (`adopt` returns `reopen`, like ACP) | §8 |
 
 So `agy`'s adapter is a wire (`stream.ts`, `normalize.ts`, `gate.ts`, `plugin-root.ts`, `tool-kinds.ts`,
-`known-steps.ts`) on the core, without its own queue, Stop, exit or approval order. Its pull request follows PR 9
+`known-steps.ts`) on the core, without its own queue, Stop, exit or approval order. Its pull request follows PRs 1, 3, 5, 8 and 9
 for ACP; it does not wait for Claude's or Codex's moves (PRs 2, 6, 7).
 
 ## 9. Open questions
@@ -393,6 +435,10 @@ for ACP; it does not wait for Claude's or Codex's moves (PRs 2, 6, 7).
 4. **The context guard** (§2.2): the upper bound for every tool, and "0 means no reading" per tool?
 5. **`agy` on Windows**: its interrupt is SIGINT, which `Os` cannot send on Windows (`kill` ends the child). Raise an
    `Os` addition (a console interrupt) when `agy`'s Windows pull request comes, or treat a Stop on Windows as ending the
-   process (it ends it anyway, §1.5)?
+   process (it ends it anyway, its §1.5)?
 6. **Recording Claude and Codex** (PR 2) spends real turns on a logged-in machine: which machine, and is the ACP
    scenario list the right set for them?
+7. **Refusal and turn limits** (§2.11): a refusal, `max_tokens` and a turn limit end a turn differently per tool
+   (retryable error, non-retryable error, notice and completion). Which is the host's meaning?
+8. **Usage limits** (§2.11): Codex reads the primary window when the weekly one was hit, and the two tools label the
+   same window differently. Out of the core, but worth an issue?
