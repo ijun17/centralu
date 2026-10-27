@@ -69,6 +69,11 @@
           "maxLength": 400,
           "description": "Surfaces: Conversation, raised. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
         },
+        "surface-relayed": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Surfaces: Message from a session, app or script. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
         "line": {
           "type": "string",
           "maxLength": 400,
@@ -98,6 +103,11 @@
           "type": "string",
           "maxLength": 400,
           "description": "Ink: Background information. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
+        },
+        "ink-relayed": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Ink: Text on a message from a session, app or script. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
         },
         "diff-add": {
           "type": "string",

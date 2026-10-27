@@ -388,7 +388,7 @@
   --color-surface-reading: #f0f0f0;
   --color-surface-reading-raised: #f9f9f9;
   --color-surface-relayed: #c8c8c8;
-  --color-ink-relayed: #101010;
+  --color-ink-relayed: #1a1a1a;
 
   --color-line: #d6d6d6;
   --color-line-strong: #bdbdbd;
@@ -1387,7 +1387,8 @@
  * Light only: a bubble's border a step darker than its own fill, not the hairline every raised surface uses, so a
  * message reads as one soft shape instead of a boxed form (owner, 2026-10-19). Dark keeps the shared line, which
  * already sits close to its fill there. The agent's answer bubble carries `data-bubble`, mine `data-mine-bubble`
- * (the person's message, and the same message pinned at the top).
+ * (the person's message, and the same message pinned at the top). A relayed message
+ * (`data-relayed`: from a session, an app or a script) keeps the shared line, solid, on its own fill.
  */
 [data-theme='light'] [data-bubble] {
   border-color: #e6e6e6;
