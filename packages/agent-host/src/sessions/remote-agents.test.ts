@@ -797,7 +797,7 @@ describe('a child whose turn an update of its machine cut (#1618)', () => {
     expect(continued()).toHaveLength(1)
   })
 
-  it('is told the link dropped once the update ends with the machine not back', async () => {
+  it('is told the link dropped once the update ends with the machine not back, and at once where the host predates continuing turns', async () => {
     const ra = agents()
     update(ra)
     await new Promise((r) => setTimeout(r, 20))
@@ -805,14 +805,18 @@ describe('a child whose turn an update of its machine cut (#1618)', () => {
     // The update ended with the machine not back: the row's operation is gone
     ra.observe({ type: 'machine_status', machine: { id: 'm1', name: 'Box', status: 'unreachable', operation: null } })
     await eventually(() => dropped().length === 1)
-  })
 
-  it('is told the link dropped at once, as before, when the machine runs a host from before continuing turns', async () => {
+    // A host from before #1618 lists no turn as it stops: the drop is told at once, as before (a fresh hub and record)
+    store.close()
+    store = new Store()
+    children = new ChildOwnership(store)
+    store.settings.setAppSetting(REMOTE_AGENTS_KEY, JSON.stringify([child]))
+    told = []
     continues = false
-    const ra = agents()
-    update(ra)
+    const rb = agents()
+    update(rb)
     await eventually(() => dropped().length === 1)
-    ra.observe({ type: 'machine_resync', machineId: 'm1' })
+    rb.observe({ type: 'machine_resync', machineId: 'm1' })
     await new Promise((r) => setTimeout(r, 20))
     expect(continued()).toEqual([])
   })
