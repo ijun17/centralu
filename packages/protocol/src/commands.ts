@@ -1,5 +1,6 @@
 import type { z } from 'zod'
 import { appMethods } from './commands/methods/apps.js'
+import { gateMethods } from './commands/methods/gate.js'
 import { hostMethods } from './commands/methods/host.js'
 import { mailMethods } from './commands/methods/mail.js'
 import { orchestratorMethods } from './commands/methods/orchestrator.js'
@@ -14,6 +15,7 @@ import { parseTolerant } from './tolerant.js'
 export * from './commands/sessions.js'
 export * from './commands/projects.js'
 export * from './commands/files.js'
+export { GATE_DECISION_FIELDS } from './commands/methods/gate.js'
 
 /*
  * One module per concept under commands/methods/ (#850), spread together here. Only the key order follows from the
@@ -29,6 +31,7 @@ export const RpcMethods = {
   ...hostMethods,
   ...mailMethods,
   ...settingsMethods,
+  ...gateMethods,
 } as const
 
 export type RpcMethodName = keyof typeof RpcMethods

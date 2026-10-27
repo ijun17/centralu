@@ -371,6 +371,7 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   // ── Callbacks of the hub's own agents ───────────────────────────────────────────────────
   'orchestrator.tools': INTERNAL,
   'orchestrator.tool': INTERNAL,
+  'gate.ask': INTERNAL,
   'apps.sessionTools': INTERNAL,
   'apps.sessionCall': INTERNAL,
 }

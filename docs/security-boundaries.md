@@ -1306,6 +1306,7 @@ protocol does not compile until someone classifies it, and a test compares its k
 | asks | waits for the person's card in the window and runs once allowed ("The card for a limited call" below); refused at once when no window that shows the card holds the token | deleting for good (`trash.purge`, `trash.purgeRuns`, `trash.purgeSubagentSteps`, `trash.empty`); deleting a session (#1371: not fully undoable); deleting or adding a project, its trust either way, its commands, worktree setup and agent instructions; removing, enabling, importing apps, sharing one; adding, removing, installing, updating (save the catch-up below), rolling back, uninstalling a machine, its autostart, its versions, letting it ask or start `auto` here; installing an update (save the idle one below) or turning automatic updates on; a session created above `normal` or carrying a hub's preset (`fromHub`: an `auto` one starts it under `auto` while the hub-auto switch is on, and only a hub, which holds the token, sends it), or set to any preset but `safe` (the parameters do not say what it was); a preference that sets the agent ceiling or depth, turns hub auto on, or turns approval notifications or their sound off |
 | window | refused, never a card | the person's own answers (approval cards, questions, an update's apply and its report, whose ticket every client hears, MCP and skill proposals), the window's layout written whole, an app's secret, an import's preparing and cancelling, an app view's own calls |
 | link | refused | a hub's `host.*` calls (`host.stop` and `host.activity` are everyday: stopping is what `kill` does) |
+| gate | refused, to every WebSocket connection | `gate.ask`: a session's approval gate asking about one call; only that session's gate key raises it, on the front door's gate route ("A hook-gated tool's gate key" below) |
 | bridge | refused | `orchestrator.tool(s)`, `apps.sessionTools`, `apps.sessionCall`: through them a caller would act as an `auto` session, whose own cards are skipped |
 
 The full list, method by method, is [generated/method-rights.md](generated/method-rights.md), written from the table by
@@ -1576,6 +1577,22 @@ host. It changes where a client connects, not what it must prove:
   an orchestrator's bridge gets the orchestrator's set. It is valid for the keeper's lifetime. This takes the token
   out of the one process that held it for a session; per the bullet above, the token itself stays within reach of
   the same user.
+- **A hook-gated tool's gate key** (#1654, decided on its §8.1 review; `transport/gate-door.ts`). `agy` asks for
+  approval through a hook process, which must reach the host. It is given `CC_GATE_URL` (`/gate/<sessionId>` on the
+  front door's port) and `CC_GATE_TOKEN`, a key of 32 random bytes made for that session, held only in the host's
+  memory and revoked when the session closes; a host that starts (a restart, a swap) holds none, so an old key gets
+  404 and the hook denies. It is in the tool's environment, so the agent's own commands can read it, as they can the
+  bridge's. What it opens is deliberately less: one method, `gate.ask`, for its own session, which **asks and never
+  answers** (a body with a decision field is refused; the decision comes from the preset, the always-allow rules or the
+  person's card, and the person's answers stay `window`). So a command holding it can raise a card the person sees and
+  can deny, or end an open wait of its session with a deny by asking again; it cannot allow a call, reach another
+  session, call another method, say hello on the WebSocket, or open the HTTP door's routes. It is not the bridge
+  credential, which is derived from the token, lives for the keeper's lifetime and opens the session's tools; putting
+  that in every `agy` session's environment would have let its shell call those tools around the tool's own checks.
+  A reason the route sends is one of the session's own sentences, never a caller's; as a last check one that shows any
+  12 letters and digits of a credential (any case, with or without its prefix, split) is dropped whole. A hook that goes
+  before its answer frees its slot and its card is withdrawn; bodies still being read count against the 32 requests a
+  session may have, and one over 1 MiB is refused. Tests: `gate-door.test.ts`.
 - A stable token is a longer-lived secret than a token per host. It lives as long as the keeper, which is as long as
   the agents it serves; a keeper restart makes a new one, and a keeper update (step 4) passes the
   same one on to the new keeper over the handoff channel below.
