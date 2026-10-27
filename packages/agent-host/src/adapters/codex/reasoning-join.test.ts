@@ -111,10 +111,12 @@ describe('codex reasoning summaries stay apart (#1464)', () => {
   it('the first reasoning of a row, after a tool call or in the next turn, has no blank line in front', async () => {
     const { say, delta, reasoning } = await live()
     delta('rs_1', 0, '**One**')
-    say('item/completed', { item: { type: 'commandExecution', id: 'c1', command: 'ls', cwd: '/tmp', status: 'completed', aggregatedOutput: '', exitCode: 0, commandActions: [], source: 'agent', processId: null, durationMs: 1 } })
     delta('rs_2', 0, '**Two**')
-    say('turn/completed', { turn: { id: 't1', status: 'completed', items: [], error: null } })
+    say('item/completed', { item: { type: 'commandExecution', id: 'c1', command: 'ls', cwd: '/tmp', status: 'completed', aggregatedOutput: '', exitCode: 0, commandActions: [], source: 'agent', processId: null, durationMs: 1 } })
     delta('rs_3', 0, '**Three**')
-    expect(reasoning()).toBe('**One****Two****Three**')
+    say('turn/completed', { turn: { id: 't1', status: 'completed', items: [], error: null } })
+    delta('rs_4', 0, '**Four**')
+    // Joined within the row of rs_1 and rs_2; the tool call and the turn's end each start a row, whose first chunk has none
+    expect(reasoning()).toBe('**One**\n\n**Two****Three****Four**')
   })
 })
