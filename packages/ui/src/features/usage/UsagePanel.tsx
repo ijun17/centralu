@@ -124,7 +124,6 @@ export function UsagePanel({ tool, machine = null }: { tool: ToolName; /** A lin
 /** The words of the panel for a tool that reports no limits (#1623): the exact copy the owner confirms */
 export const NOT_REPORTED_COPY = {
   title: (tool: string) => `${tool} does not report usage limits.`,
-  note: 'Nothing is wrong, and there is nothing to set up.',
   plan: (plan: string) => `${plan} plan`,
   totalsTitle: (scope: string) => `Local totals · ${scope}`,
   totalsNote: (tool: string, where: string) => `Counted by ${tool} on ${where}. These are totals, not a limit.`,
@@ -143,7 +142,6 @@ function NotReported({ label, usage, machine }: { label: string; usage: UsageSna
     <div className="cc-row-in px-4 py-6" data-testid="usage-not-reported">
       <p className="text-center text-sm leading-body text-ink-muted" data-testid="usage-not-reported-text">
         {NOT_REPORTED_COPY.title(label)}
-        <span className="mt-1 block text-xs text-ink-faint">{NOT_REPORTED_COPY.note}</span>
       </p>
       {usage?.plan && (
         <p className="readout mt-4 text-center text-xs text-ink" data-testid="usage-plan">

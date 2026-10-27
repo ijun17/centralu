@@ -45,9 +45,7 @@ export function usageNotReportedTests(): void {
   test.describe('the usage panel of a tool that reports no limits (#1623)', () => {
     test('says so in plain words, with the plan, and without the technical reason or a limit bar', async ({ page }) => {
       await open(page, answer(PLAN))
-      await expect(page.getByTestId('usage-not-reported-text')).toHaveText(
-        'Codex does not report usage limits.Nothing is wrong, and there is nothing to set up.',
-      )
+      await expect(page.getByTestId('usage-not-reported-text')).toHaveText('Codex does not report usage limits.')
       await expect(page.getByTestId('usage-plan')).toHaveText('Free plan')
       await expect(page.getByTestId('usage-unavailable')).toHaveCount(0)
       await expect(page.getByTestId('usage-panel')).toHaveCount(0)
@@ -73,11 +71,14 @@ export function usageNotReportedTests(): void {
       await expect(page.getByTestId('usage-not-reported-text')).toContainText('Codex does not report usage limits.')
       await expect(page.getByTestId('usage-totals')).toHaveCount(0)
       await expect(page.getByTestId('usage-donut-codex')).toHaveAttribute('data-state', 'unsupported')
+      // The donut's own words (the accessible name and the tooltip) say the same, not "unknown" and not the technical reason
+      await expect(page.getByTestId('usage-donut-codex')).toHaveAttribute('aria-label', 'Codex reports no usage limits')
       await page.keyboard.press('Escape')
       await expect(page.getByTestId('usage-drop')).toHaveCount(0)
       await page.mouse.move(0, 300)
       await page.getByTestId('usage-donut-codex').hover()
       await expect(page.getByTestId('usage-donut-reason-codex')).toHaveText('Codex does not report usage limits.')
+      await expect(page.getByTestId('usage-donut-tip-codex')).not.toContainText('unknown')
     })
 
     test('a read that failed is still its reason, not the plain words (nothing says the tool has no limits)', async ({ page }) => {
