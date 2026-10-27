@@ -3541,15 +3541,23 @@ the person's Continue would.
   instead), a stop of the person's, or a host from before #1618 writes nothing, and its turns end as a stop's always did.
 - **Taken once each, and only that turn** (#1626 review). The next host to start in that folder reads all the lists
   before it builds its sessions, without taking them. A listed session is that stop's turn only while its conversation
-  still ends at the listed row: every turn begun after, under any version, records its input first. So a list left
-  behind (one a virus scanner held open when it was to go, one a host from before #1618 never read after a rollback)
-  continues no later turn, and a later stop of the person's that cuts one is told as a quit's. A list goes once each
+  still ends at the listed row. That holds because the next start always writes a row for a listed session: the
+  Continue's line, or the stopped mark of one that is lost or no longer the listed turn (and an older host's start after a
+  rollback writes its own stopped mark), so the conversation is past the row before any later turn. It does not rest
+  on "a turn records its input first": a turn the CLI starts itself after a background task, and Centralu's own
+  compaction, begin with no row. So a list left behind (one a virus scanner held open when it was to go, one a host from
+  before #1618 never read after a rollback) continues no later turn, and a later stop of the person's that cuts one is
+  told as a quit's. A list the start cannot read because it is held (`EBUSY`, a virus scanner that opened the file just
+  written) is read again up to five times 200 ms apart, each failure in the log; one still held stays where it is for a
+  later start, and the turns of sessions this start finds cut are marked stopped like a quit's (the host cannot tell which
+  the list names), with the log saying why. A list goes once each
   turn it names is dealt with (`UpdateResumeLists.done`): its Continue went in, its loss was reported, or the start did
   not find it cut. One that cannot be removed is said in the log, stays harmless, and goes at a later start; one a host
   killed while it wrote is not JSON and goes at the next start. A host that stops before then (its check failed and the
   update puts the old one back, a second update, a rollback) leaves the lists and writes its own with the turns it cuts,
   the continued ones included, so the host after it continues them; a Continue the tool takes while the host is leaving
-  is left to that next host, which tells the requester. Nothing expires: a list is the next start's, whenever it comes,
+  is left to that next host, which sends the note, writes the line and tells the requester: the leaving host writes no
+  line of its own for it, so the conversation shows one Continue. Nothing expires: a list is the next start's, whenever it comes,
   on that machine's own clock. A list of another format continues nothing and is left to the host that wrote it.
 - **Continued.** A listed session the start finds mid-turn with no process stays `working` (no "stopped" mark, no quit
   notice), its owed report and its delegated turn kept as a kept process's are, and once the start is done it is woken
@@ -4112,7 +4120,11 @@ group that Claude Code keeps as the line's `uuid`; #1626 review: a note sent thr
 its words, and anchoring on words alone attached it as the person's message). It skips each tool call or result our
 record already holds, by its id, wherever it falls after that, and a compaction our record holds right after its last
 message, by count (one this host saw live is in both), and attaches the rest. The CLI's own "[Request interrupted by
-user]" line is not read back as a message of the person's. A Claude record keeps no compaction row (`getSessionMessages` drops system
+user]" line is not read back as a message of the person's. Where the tool keeps no id of Centralu's (Codex; a Claude Code version that does not keep it;
+a transcript a crash left without it), Centralu's own Continue note is known by its exact text: the readers mark it as
+Centralu's input, the catch-up anchors after it, and it is never stored as a message of the person's (a Claude read says in the
+log that the CLI did not keep the id). What is left there is Codex after a crash before the agent's first words: the CLI's
+lines before the note may be attached once. A Claude record keeps no compaction row (`getSessionMessages` drops system
 rows), so the reader marks one where the CLI's summary stands as a user turn.
 
 ### 8.4 The identity of an imported session
