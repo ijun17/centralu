@@ -169,7 +169,12 @@ export function usageNotReportedTests(): void {
       expect(await settles()).toBe(asked)
     })
 
-    test('old totals shown while the host reads again: the open panel gets the new totals and their time when the read lands, without reopening', async ({ page }) => {
+    /*
+     * What the open panel does with a settled answer is the UI's; that the host answers a stale read provisionally and a
+     * settle with the new one is the reader's and the manager's, proven by their unit tests (usage-read.test.ts, manager.test.ts):
+     * the mock stands in for the host here, so this scenario cannot fail for a host change. It fails without the fade.
+     */
+    test('old totals shown while the host reads again: the open panel gets the new totals and their time when the read lands, without reopening, by a fade', async ({ page }) => {
       await setup(page, { projects: ['/tmp/alpha'] })
       const read = (sessions: number, asOf: number) => ({ ...NONE, totals: { scope: 'all time', asOf, rows: [{ id: 'sessions', label: 'Sessions', value: sessions, unit: 'count' }] } })
       await page.evaluate(
@@ -178,6 +183,8 @@ export function usageNotReportedTests(): void {
           // The host's first answer is the old totals, marked as standing in for the read behind them; a settle returns the new ones
           m.toolUsage = { codex: old }
           m.settledUsage = { codex: fresh }
+          // The read behind the old totals takes a while, as a large database does
+          m.settleDelayMs = 1500
         },
         [{ ...answer(read(28, Date.now() - 3 * 86_400_000)), provisional: true }, answer(read(30, Date.now() - 1000))] as const,
       )
@@ -186,8 +193,15 @@ export function usageNotReportedTests(): void {
       await page.evaluate(() => (window as unknown as MockWindow).__mock.setConnectionState('connected'))
       await expect(page.getByTestId('connection')).toHaveCount(0)
       await page.getByTestId('usage-donut-codex').click()
-      // Never reopened: the totals and the time changed in place, from a dated read to today's
+      // The old totals first, with their date; then, never reopened, the new totals and today's time in place
+      await expect(page.getByTestId('usage-total-sessions')).toHaveText('Sessions28')
+      await expect(page.getByTestId('usage-totals-as-of')).not.toHaveText(/^As of \d{1,2}:\d{2}\s(AM|PM)$/)
       await expect(page.getByTestId('usage-total-sessions')).toHaveText('Sessions30')
+      // The change is a fade (150-200 ms, opacity only) and not a jump: the totals have just started it
+      const fade = await page.getByTestId('usage-totals').evaluate((el) =>
+        el.getAnimations().map((a) => ({ name: (a as CSSAnimation).animationName, ms: Number(a.effect?.getTiming().duration) })),
+      )
+      expect(fade).toEqual([{ name: 'cc-donut-in', ms: 180 }])
       await expect(page.getByTestId('usage-totals-as-of')).toHaveText(/^As of \d{1,2}:\d{2}\s(AM|PM)$/)
       // The panel's own first ask was answered with the old totals, and one more ask, to settle, brought the new ones
       const calls = await page.evaluate(() => (window as unknown as MockWindow).__mock.usageCalls as { tool: string; settle: boolean }[])

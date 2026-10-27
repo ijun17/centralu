@@ -194,21 +194,23 @@ export function UsageDonuts() {
              */
             const failed = (reason: string) =>
               patch((g) => ({ snap: { ...g.snap, [tool]: { ...(g.snap[tool] ?? { usage: null }), reason } } }))
+            /*
+             * A tool whose own command was slower than the host waits answered provisionally (#1623): asked once more,
+             * to settle, the donut gets the answer when the command ends, not at the next tick. Once per answer, never in a
+             * loop: the settled answer is final. The retry after a failed call takes the same path.
+             */
+            const take = (r: Parameters<typeof toSnap>[0] & { provisional?: boolean }) => {
+              put(toSnap(r))
+              if (r.provisional) {
+                void platform.agents
+                  .usage(tool, on, { settle: true })
+                  .then((s) => put(toSnap(s)))
+                  .catch(() => {})
+              }
+            }
             void platform.agents
               .usage(tool, on)
-              .then((r) => {
-                put(toSnap(r))
-                /*
-                 * A tool whose own command was slower than the host waits answered provisionally (#1623): asked once more,
-                 * to settle, the donut gets the answer when the command ends, not at the next tick. Once, never in a loop.
-                 */
-                if (r.provisional) {
-                  void platform.agents
-                    .usage(tool, on, { settle: true })
-                    .then((s) => put(toSnap(s)))
-                    .catch(() => {})
-                }
-              })
+              .then(take)
               .catch((e: Error) => {
                 failed(e.message)
                 // A reading that failed (the tool's process busy or restarting) is tried again soon, not in five minutes
@@ -216,7 +218,7 @@ export function UsageDonuts() {
                   setTimeout(() => {
                     void platform.agents
                       .usage(tool, on)
-                      .then((r) => put(toSnap(r)))
+                      .then(take)
                       .catch(() => {})
                   }, RETRY_MS),
                 )

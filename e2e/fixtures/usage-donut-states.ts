@@ -125,6 +125,33 @@ export function usageDonutStatesTests(): void {
       await expect(donut(page, 'claude')).toHaveAttribute('data-percent', '40')
     })
 
+    test('the retry after a failed call settles a provisional answer, as the first ask does', async ({ page }) => {
+      test.setTimeout(90_000)
+      await setup(page, { projects: ['/tmp/alpha'] })
+      await answer(page, { claude: WEEKLY(40), codex: UNSUPPORTED })
+      await expectState(page, 'codex', 'unsupported')
+      // The next ask of codex fails, the retry (15 s later) is provisional, and its settle says nobody is logged in
+      await page.evaluate(() => {
+        const w = window as unknown as MockWindow & { __codex: { settle: boolean }[] }
+        w.__codex = []
+        const was = w.__mock.agents.usage
+        let failed = false
+        w.__mock.agents.usage = (tool: string, machine?: string, opts?: { settle?: boolean }) => {
+          if (tool !== 'codex') return was(tool, machine, opts)
+          w.__codex.push({ settle: opts?.settle === true })
+          if (opts?.settle) return Promise.resolve({ supported: false, reason: 'Codex is not logged in on this computer', usage: null })
+          if (!failed) {
+            failed = true
+            return Promise.reject(new Error('the tool is busy'))
+          }
+          return Promise.resolve({ ...UNSUPPORTED, provisional: true })
+        }
+      })
+      await reconnect(page)
+      await expect(donut(page, 'codex')).toHaveAttribute('data-state', 'unknown', { timeout: 40_000 })
+      expect(await page.evaluate(() => (window as unknown as { __codex: { settle: boolean }[] }).__codex)).toEqual([{ settle: false }, { settle: false }, { settle: true }])
+    })
+
     test('a tool that changes between supported and unsupported while the window is open follows it, both ways', async ({ page }) => {
       await setup(page, { projects: ['/tmp/alpha'] })
       await answer(page, { claude: WEEKLY(40), codex: UNSUPPORTED })

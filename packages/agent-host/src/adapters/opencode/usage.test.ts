@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { STATS_RECORDED as RECORDED } from './recordings/stats.test-helpers.js'
 import { openCodeUsageReader, parseAmount, parseCount, parseStats } from './usage.js'
 
@@ -16,6 +16,42 @@ describe('when the totals were read (asOf)', () => {
     // Stale: the same totals come back at once with the time they were read, not the time they were asked
     const stale = await ask()
     expect(stale.totals?.asOf).toBe(13_000)
+  })
+
+  it('is fresh for ten times as long as the run took (a minute at least), by the run time and not a fixed time', async () => {
+    let clock = 0
+    let runs = 0
+    let took = 30_000
+    const ask = openCodeUsageReader(async () => {
+      runs++
+      clock += took
+      return RECORDED
+    }, () => clock)
+    await ask({ settle: true })
+    clock += 200_000
+    await ask()
+    expect(runs).toBe(1)
+    clock += 200_000
+    // 400 s after the end of a 30 s run: past ten times it
+    expect((await ask()).provisional).toBe(true)
+    await vi.waitFor(() => expect(runs).toBe(2))
+  })
+
+  it('is read again after the minute when the run was quick', async () => {
+    let clock = 0
+    let runs = 0
+    const ask = openCodeUsageReader(async () => {
+      runs++
+      clock += 100
+      return RECORDED
+    }, () => clock)
+    await ask({ settle: true })
+    clock += 59_000
+    await ask()
+    expect(runs).toBe(1)
+    clock += 2_000
+    await ask()
+    await vi.waitFor(() => expect(runs).toBe(2))
   })
 
   it('stamps nothing on output with no totals', async () => {

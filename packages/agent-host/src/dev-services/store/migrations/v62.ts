@@ -1,6 +1,6 @@
 import { MigrationRange, type MigrationStep } from './context.js'
 
-/** The migration steps v62 to v64.The rule it follows is written above `migrationSteps` in `index.ts` */
+/** The migration steps v62 to v64. The rule it follows is written above `migrationSteps` in `index.ts` */
 export class StepsV62 extends MigrationRange {
   steps(): MigrationStep[] {
     return [

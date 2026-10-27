@@ -195,6 +195,16 @@ describe('v64 the last totals of a tool that reports no limits (#1623)', () => {
     expect(s.usage.localTotals('opencode')).toEqual(totals(3_000, 30))
   })
 
+  it('replaces a kept row dated in the future (the clock moved back) with a read dated now', () => {
+    const s = new Store()
+    s.usage.saveLocalTotals('opencode', totals(10_000_000, 99), 5_000)
+    s.usage.saveLocalTotals('opencode', totals(6_000, 30), 7_000)
+    expect(s.usage.localTotals('opencode')).toEqual(totals(6_000, 30))
+    // Not in the future any more: an older read still does not replace it
+    s.usage.saveLocalTotals('opencode', totals(1_000, 5), 7_000)
+    expect(s.usage.localTotals('opencode')).toEqual(totals(6_000, 30))
+  })
+
   it('does not keep totals that do not say when they were read, and reads a row it cannot make sense of as none', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-usage-totals-bad-'))
     const open: { close(): void }[] = []

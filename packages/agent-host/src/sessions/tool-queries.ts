@@ -120,10 +120,12 @@ export class ToolQueries {
      * `localUsage`, read from the tool's own command by a reader that keeps its answer (`adapters/usage-read.ts`), so
      * nothing here is cached.
      */
-    if (!adapter?.listUsage) {
+    // No adapter at all is not "reports no limits": nothing is known about the tool, so it stays unknown (#1616 wording)
+    if (!adapter) return { supported: false, reason: `${tool} does not support usage queries`, usage: null, cache }
+    if (!adapter.listUsage) {
       const none = { supported: false, reason: noLimitsReason(label), notReported: true, usage: null, cache }
       // The hub shows its own limits for this machine: only the figures counted here are wanted, so no command is run
-      if (!adapter?.localUsage || opts.limits === false) return none
+      if (!adapter.localUsage || opts.limits === false) return none
       try {
         const local = await adapter.localUsage({ settle: opts.settle, seed: this.localTotalsSeed(tool) })
         this.keepLocalTotals(tool, local)

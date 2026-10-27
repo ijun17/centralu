@@ -65,8 +65,12 @@ const SOFT_MS = 3_000
 const ABOUT_RUN_MS = 15_000
 
 /** The reader of Cursor's plan; `run` starts `agent about --format json` for at most the given time and answers its stdout */
-export function cursorUsageReader(run: (timeoutMs: number) => Promise<string>): (ask?: { settle?: boolean }) => Promise<LocalUsage> {
+export function cursorUsageReader(
+  run: (timeoutMs: number) => Promise<string>,
+  now: () => number = Date.now,
+): (ask?: { settle?: boolean }) => Promise<LocalUsage> {
   return localUsageReader({
+    now,
     freshMs: (v) => (v.loggedOut ? LOGGED_OUT_FRESH_MS : FRESH_MS),
     // A "not logged in" that is ten seconds old is read again before it is told: a login a moment ago is seen at once
     staleOk: (v) => !v.loggedOut,

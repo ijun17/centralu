@@ -111,6 +111,32 @@ describe('a usage read that is a command run (#1623)', () => {
     expect(await settled).toEqual(answer('Free'))
   })
 
+  it('never answers a logged-out kind of answer as final after a failed read, also inside the failure back-off, and not to a settle', async () => {
+    let clock = 0
+    const read = vi.fn<() => Promise<string>>().mockResolvedValueOnce('logged out').mockRejectedValue(new Error('timed out'))
+    const ask = softRead({ read, fallback: () => 'none', freshMs: 10, failMs: 60_000, softMs: 5, now: () => clock, staleOk: (v) => v !== 'logged out', onFail: () => {} })
+    expect(await ask()).toEqual(answer('logged out'))
+    clock = 20
+    expect(await ask({ settle: true })).toEqual(answer('none'))
+    clock = 40
+    // Inside failMs: no run, and still not the old "logged out"
+    expect(await ask()).toEqual(answer('none'))
+    expect(await ask({ settle: true })).toEqual(answer('none'))
+    expect(read).toHaveBeenCalledTimes(2)
+  })
+
+  it('never counts a time from the future as fresh (the clock moved back): the answer is read again', async () => {
+    const clock = 1_000
+    const read = vi.fn(async () => 'new')
+    const ask = softRead({ read, fallback: () => 'none', freshMs: 60_000, failMs: 1000, softMs: 50, now: () => clock })
+    // Stamped an hour ahead of this clock
+    expect(await ask({ seed: { value: 'old', at: clock + 3_600_000 } })).toEqual(answer('old', true))
+    await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(1))
+    expect(await ask({ settle: true })).toEqual(answer('new'))
+    // The read now dated at the clock's time stands as the kept answer
+    expect(await ask()).toEqual(answer('new'))
+  })
+
   it('lets a settle wait only so long: the run goes on, the asker gets a provisional answer, and what the run reads is kept', async () => {
     const g = gate<string>()
     const read = vi.fn(() => g.promise)

@@ -154,7 +154,7 @@ function NotReported({ label, usage, machine }: { label: string; usage: UsageSna
   const machineName = useMachineName(machine)
   return (
     <div className="px-4 py-6" data-testid="usage-not-reported">
-      {/* Each part fades in as it arrives: the plan or the totals may come after the words, when the command was slow */}
+      {/* Each part fades in as it arrives: the plan or the totals may come after the words, when the command was slow. The totals are keyed by the read, so new ones landing on the open panel (a settle) fade in as a whole, rows and time together, and do not jump */}
       <p className="cc-row-in text-center text-sm leading-body text-ink-muted" data-testid="usage-not-reported-text">
         {NOT_REPORTED_COPY.title(label)}
       </p>
@@ -164,7 +164,7 @@ function NotReported({ label, usage, machine }: { label: string; usage: UsageSna
         </p>
       )}
       {totals && totals.rows.length > 0 && (
-        <section className="cc-row-in mt-5 border-t border-line pt-3" data-testid="usage-totals">
+        <section key={totals.asOf ?? 'unread'} className="cc-row-in mt-5 border-t border-line pt-3" data-testid="usage-totals">
           <span className="text-xs uppercase text-ink-faint">{NOT_REPORTED_COPY.totalsTitle(totals.scope)}</span>
           <ul className="mt-2 space-y-1">
             {totals.rows.map((row) => (

@@ -1,3 +1,4 @@
+import { isFromTheFuture } from '../usage-clock.js'
 import type { LocalUsage } from './contract.js'
 
 /**
@@ -59,6 +60,8 @@ export function softRead<T>(o: SoftReadOptions<T>): (ask?: SoftAsk<T>) => Promis
   let value: { at: number; v: T; tookMs: number } | null = null
   let failedAt: number | null = null
   let inflight: Promise<T> | null = null
+  /** The last answer when it may stand in for a read that did not come (a logged-out one may not, also after a failure), else the fallback */
+  const standIn = (): T => (value && (o.staleOk?.(value.v) ?? true) ? value.v : o.fallback())
 
   const start = (): Promise<T> => {
     const began = now()
@@ -73,7 +76,7 @@ export function softRead<T>(o: SoftReadOptions<T>): (ask?: SoftAsk<T>) => Promis
         (e: unknown) => {
           failedAt = now()
           o.onFail?.(e instanceof Error ? e : new Error(String(e)))
-          return value?.v ?? o.fallback()
+          return standIn()
         },
       )
       .finally(() => {
@@ -85,8 +88,8 @@ export function softRead<T>(o: SoftReadOptions<T>): (ask?: SoftAsk<T>) => Promis
     const t = now()
     // Nothing read in this process yet: the answer a former one kept stands in, as a stale one does (read again behind it)
     if (!value && ask.seed) value = { at: ask.seed.at, v: ask.seed.value, tookMs: 0 }
-    if (value && t - value.at < freshFor(value)) return { value: value.v, provisional: false }
-    if (failedAt !== null && t - failedAt < o.failMs) return { value: value?.v ?? o.fallback(), provisional: false }
+    if (value && !isFromTheFuture(value.at, t) && t - value.at < freshFor(value)) return { value: value.v, provisional: false }
+    if (failedAt !== null && t - failedAt < o.failMs) return { value: standIn(), provisional: false }
     const run = start()
     // The last answer, when it may stand in while the read goes on: returned at once, as provisional, unless the asker settles
     const held = value && (o.staleOk?.(value.v) ?? true) ? { v: value.v } : null

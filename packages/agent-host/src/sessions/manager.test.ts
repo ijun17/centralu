@@ -671,6 +671,12 @@ describe('while-alive facts are carried in the list', () => {
     })
   })
 
+  it('does not say a tool with no adapter reports no limits: nothing is known about it, so it is unknown (#1616)', async () => {
+    const r = await rpc('agents.usage', { tool: 'codex' })
+    expect(r).toMatchObject({ supported: false, reason: 'codex does not support usage queries', usage: null })
+    expect(r).not.toHaveProperty('notReported')
+  })
+
   it('has one definition of a tool that reports no limits: its adapter has no listUsage; what it says itself is carried (#1623)', async () => {
     const totals = { scope: 'all time', rows: [{ id: 'input', label: 'Input', value: 5, unit: 'tokens' }] }
     const asks: unknown[] = []

@@ -17,6 +17,8 @@ export class UsageMock {
   toolUsage: Record<string, UsageAnswer> = {}
   /** For tests: what a tool's answer becomes when it is asked to `settle` (the read that was in flight has finished); keyed as `toolUsage` */
   settledUsage: Record<string, UsageAnswer> = {}
+  /** For tests: how long a settled ask takes to answer, as a read still going on would (ms) */
+  settleDelayMs = 0
   /** For tests: every usage question, and which machine it went to (null: this computer) */
   usageCalls: { tool: ToolName; machine: string | null; settle: boolean }[] = []
   /**
@@ -35,6 +37,7 @@ export class UsageMock {
     },
     usage: async (tool: ToolName, machine?: MachineRef, opts?: { settle?: boolean }) => {
       this.usageCalls.push({ tool, machine: machine ?? null, settle: opts?.settle === true })
+      if (opts?.settle && this.settleDelayMs > 0) await new Promise((r) => setTimeout(r, this.settleDelayMs))
       const key = machine ? `${machine}.${tool}` : tool
       const cache = this.cacheStats[key]
       const answer = (opts?.settle && this.settledUsage[key]) || this.toolUsage[key] || ((machine && this.machineUsage[machine]) || this.usageState)
