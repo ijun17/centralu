@@ -13,9 +13,21 @@ export function methodsOf<P extends Record<string, z.ZodType>, R extends Record<
   params: P,
   results: R & { readonly [K in keyof R]: K extends keyof P ? z.ZodType : never },
 ): Joined<P, R> {
+  const resultOf = new Map<string, z.ZodType>(Object.entries(results))
   const joined: Record<string, { params: z.ZodType; result: z.ZodType }> = {}
-  for (const [k, p] of Object.entries(params)) joined[k] = { params: p, result: results[k as keyof R] }
-  // The loop above pairs each key of `params` with the same key of `results`, which is what `Joined` says
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
-  return joined as Joined<P, R>
+  for (const [k, p] of Object.entries(params)) {
+    const result = resultOf.get(k)
+    if (!result) throw new Error(`methodsOf: no result schema for ${k}`)
+    joined[k] = { params: p, result }
+  }
+  if (!pairsEvery<P, R>(joined, params)) throw new Error('methodsOf: the halves name different methods')
+  return joined
+}
+
+/** Whether `joined` pairs every key of `params`, which is what `Joined` says of it. */
+function pairsEvery<P extends Record<string, z.ZodType>, R extends Record<keyof P, z.ZodType>>(
+  joined: Record<string, unknown>,
+  params: P,
+): joined is Joined<P, R> {
+  return Object.keys(params).every((k) => k in joined)
 }

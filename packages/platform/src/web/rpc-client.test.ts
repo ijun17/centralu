@@ -8,7 +8,7 @@ import { currentSession, missingDefaults, withoutDefaultedFields } from '../../.
  * the rest of this file runs against the real schemas.
  */
 const resultFault = vi.hoisted(() => ({ next: null as Error | null }))
-vi.mock('@cc/protocol', async (importOriginal) => {
+vi.mock('@cc/protocol/client', async (importOriginal) => {
   const real = await importOriginal<typeof import('@cc/protocol')>()
   return {
     ...real,

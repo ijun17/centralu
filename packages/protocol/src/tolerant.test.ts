@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { parseTolerant } from './tolerant.js'
-import { parseRpcResult, SessionInfo } from './commands.js'
+import { SessionInfo } from './commands.js'
+import { parseRpcResult } from './rpc-results.js'
 import { currentSession, missingDefaults, withoutDefaultedFields } from './test-helpers.js'
 
 describe('a client reads an older host (protocol.md §4, #280)', () => {

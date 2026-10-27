@@ -45,6 +45,3 @@ export type RpcParams<M extends RpcMethodName> = z.input<(typeof RpcMethods)[M][
 
 /** What the **receiver** holds in hand (`z.output`) — after defaults have been filled in */
 export type RpcResult<M extends RpcMethodName> = z.output<(typeof RpcMethods)[M]['result']>
-
-// A client reads results only (rpc-results.ts); here for whoever imports the whole protocol
-export { parseRpcResult } from './rpc-results.js'
