@@ -564,8 +564,11 @@ export interface AgentAdapter {
    * the totals it counted here. The one definition of "reports no limits" is that `listUsage` is absent; with `localUsage`
    * the host then answers `supported: false, notReported: true` carrying this. Never reads the tool's credential or state
    * files, and never waits long: past `settle` the answer may be `provisional` (the command is still running).
+   *
+   * `seed` is the last answer the host kept across a restart (its totals carry `asOf`, when they were read). A reader that has
+   * read nothing yet in this process stands on it, as on a stale answer: returned at once while a fresh read goes on.
    */
-  localUsage?(ask?: { settle?: boolean }): Promise<LocalUsage>
+  localUsage?(ask?: { settle?: boolean; seed?: LocalUsage }): Promise<LocalUsage>
 
   /**
    * Which account the tool is logged in to on this host, as an opaque fingerprint (#726); `fingerprint` is null when the

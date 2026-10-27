@@ -26,7 +26,7 @@ export type AcpProfile = {
    * limits to read, so the adapter never has `listUsage` (the one definition of "reports no limits"); with this it still
    * says what it can. Absent: it says nothing. The reader keeps its own answer and never waits long (`adapters/usage-read.ts`).
    */
-  localUsage?(ask?: { settle?: boolean }): Promise<LocalUsage>
+  localUsage?(ask?: { settle?: boolean; seed?: LocalUsage }): Promise<LocalUsage>
   /**
    * Its `/compact` compacts though the agent does not advertise the command, and leaves no protocol frame: the core reads
    * Centralu's compact turn instead (`AcpSessionDeps.infersCompaction`). Measured, never assumed: without it a session is

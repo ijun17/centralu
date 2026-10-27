@@ -3766,6 +3766,7 @@ step against:
 | 3, 6, 9, 16, 19, 34, 36, 41, 42, 44, 46, 49, 50, 51, 52, 57 | add a table (3 also backfills the index: heavy; 44 adds `project_consents`, the "always" one project was given to reach another, #371; 46 adds `linked_machines` and `machine_headers`, the hub's links and what it last heard from each, and the nullable `grid_layout.remote_session_id`, #82; 42 copies the grid's session rows into `grid_layout` once and leaves `grid_panels` as it was, #288; 49 adds `report_marks`, the report a session owes the session that gave it work, #646; 50 adds `agent_start_requests`, a start_agent card still waiting for the person, #673; 51 adds `delegated_turns`, the session that gave a running turn, #676; 52 adds `queued_requests`, a request held for a busy session, and the nullable `sessions.forked_from_session_id`, #677; 57 adds `app_run_records`, `app_run_messages` and `app_run_subagent_messages`, the record of a deleted app-agent session, and the nullable `app_runs.request`, `answer` and `output`, #378) | reads it (42: an older host keeps its grid in `grid_panels`, so the two builds' grids can differ; 46: an older host's `setGridView` drops a linked machine's session panel when it rewrites the layout) |
 | 60 | add a column and a table (#550): `linked_machines.asks`, the per-machine switch for a linked machine's sessions to ask this computer's projects, off by default, and `machine_ask_consents`, the pairs (a session of that machine, a project here) the person approved, each end a foreign key with CASCADE | reads it (an older host's insert leaves the switch off, it never reads the table, and its removal of a machine takes the machine's pairs with it) |
 | 62 | add two tables (#1452): `usage_readings` (the limit windows' readings) and `usage_buckets` (the requests of each hour per session, project, tool and model), §6.2 | reads it (an older host neither reads nor writes the two tables, so it records nothing while it serves a swap, and its purge leaves a purged session's `usage_buckets` rows, which hold counts only) |
+| 64 | add `usage_local_totals` (#1623): the last good totals of a tool that reports no limits, with when they were read, so a restart shows them at once, §6 | reads it (an older host neither reads nor writes the table) |
 | 10, 11, 40 | rebuild with the same shape (10: `sessions` with `project_id` nullable; 11 and 40: the index, then `VACUUM`: heavy) | reads it |
 | 21, 26, 29, 35, 48, 55 | rewrite data one way (21 rewrites every message: heavy; 48 gives a former worktree manager's worktree sessions `askedBy`, #561; 55 clears an `askedBy` that names a session of another project, the ask_project meaning from before #614, which the host start did until #844) | reads it, cannot be undone (55: a build of beta.20 or before still writes the old meaning, and a row it writes after the step keeps it, as that build showed it) |
 | **13, 28, 32, 56** | **drop a table or a column** (56: `usage_facts`, which nothing ever wrote, #423) | **breaks: raises `min_reader_version`** (56: an older host recreates the table empty, which harms nothing) |
@@ -3809,7 +3810,7 @@ an optional `localUsage()`, read from the tool's own command and never its crede
 `agent about --format json` (`subscriptionTier`; the account's email in that output is never read out), OpenCode's local totals
 from `opencode stats` (boxed tables read by their labels: sessions, messages, tokens, cost; no JSON form). `usageFor` answers
 `supported: false, notReported: true` with a plain reason ("<tool> does not report usage limits") and a `usage` that carries
-`plan` and `totals { scope, rows }` (additive); the donut is the dimmed one (design-system.md §10). A failed read also answers
+`plan` and `totals { scope, asOf, rows }` (additive); the donut is the dimmed one (design-system.md §10). A failed read also answers
 `supported: false` but without `notReported`, which stays the unknown it is.
 - *Logged out.* `agent about` prints `subscriptionTier: null` with exit 0 for an account that is not logged in; the answer is then
   the failed read every tool gives ("Cursor is not logged in on this computer", no `notReported`), and is kept ten seconds only,
@@ -3818,12 +3819,17 @@ from `opencode stats` (boxed tables read by their labels: sessions, messages, to
   setting; `LANG` is ignored): `1,204`, `1.204`, `1 204` (no-break or narrow no-break space), `1'204`, `12,04,567`. A count is a
   whole number, so only digit groups of exactly three behind one separator used throughout (or two and then three for the Indian
   grouping) are read; anything else is a row with a null value, shown as a dash and never as a number that may be wrong. Tokens and
-  cost are `toFixed` with a suffix, not localized.
+  cost are `toFixed` with a suffix, not localized. The panel writes the two counts exactly, with the thousands separators of the
+  person's language (`1,204`), and the token rows abbreviated (owner, 2026-10-27).
 - *Cost of a read.* Each read is a process run, so the adapter's reader keeps it (`adapters/usage-read.ts`: Cursor's plan five
   minutes; OpenCode's totals a minute, or ten times as long as the last run took, so a run of twelve seconds is not started each
   minute), shares one run between askers, returns the last good answer at once while it reads again behind it (also for as long as
-  a slow run takes), and does not run a failed command again for a minute. The host keeps nothing of its own for these tools. The
-  readers keep the answer in memory only: a host restart starts the first run again.
+  a slow run takes), and does not run a failed command again for a minute. The totals carry `asOf`, the time the read ended, so a
+  stale answer says how old it is (the panel writes "As of 3:42 PM", with the date for an earlier day). The readers keep the answer
+  in memory; the host also keeps the last good totals in its store (`usage_local_totals`, v64: one row per tool, replaced by each
+  newer read, counts only), writes them when a read ends, and hands them to the reader once after a restart (`localUsage({ seed })`).
+  The reader stands on them as on a stale answer, so the panel shows them at once with their `asOf` while a fresh read goes on; a
+  restart no longer needs a first slow run to show anything. Cursor's plan is not kept (a few seconds to read; it can change).
 - *A slow command.* With no answer yet the asker waits three seconds, then gets an answer marked `provisional` (nothing known yet)
   while the run goes on; a provisional answer is never kept. The open panel then asks once more with `settle: true`, which waits for
   the run in flight (twenty seconds at most) and answers what it read, so the plan or totals arrive on the

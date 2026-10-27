@@ -704,6 +704,56 @@ describe('while-alive facts are carried in the list', () => {
     expect(asks).toEqual([{ settle: undefined }, { settle: true }])
   })
 
+  it('keeps the totals a read produced, and after a restart answers them at once with the time they were read (#1623)', async () => {
+    const read = { scope: 'all time', asOf: 1_700_000_000_000, rows: [{ id: 'sessions', label: 'Sessions', value: 1204, unit: 'count' }] }
+    Object.assign(adapter, { listUsage: undefined, localUsage: async () => ({ plan: null, totals: read }) })
+    await rpc('agents.usage', { tool: 'claude' })
+    // Asked again with the same read (a stale answer returned): nothing is written again
+    const saved = vi.spyOn(store.usage, 'saveLocalTotals')
+    await rpc('agents.usage', { tool: 'claude' })
+    expect(saved).not.toHaveBeenCalled()
+    expect(store.usage.localTotals('claude')).toEqual(read)
+
+    // A new process on the same store, whose command is still reading: the reader is offered the kept totals as its seed
+    const seeds: unknown[] = []
+    const slow = new FakeAdapter()
+    Object.assign(slow, {
+      listUsage: undefined,
+      localUsage: async (ask?: { seed?: { totals?: unknown } }) => (seeds.push(ask?.seed?.totals), ask?.seed ?? { plan: null, provisional: true }),
+    })
+    const adapters = new Map<ToolName, AgentAdapter>([['claude', slow]])
+    const next = new SessionManager(store, adapters, () => {})
+    const handler = createRpcHandler(next, adapters)
+    const restored = (await handler('agents.usage', { tool: 'claude' })) as { usage: { totals: unknown }; provisional?: boolean }
+    expect(restored.usage.totals).toEqual(read)
+    expect(restored).not.toHaveProperty('provisional')
+    await handler('agents.usage', { tool: 'claude' })
+    // Offered once: the reader keeps its own answer after that
+    expect(seeds).toEqual([read, undefined])
+    await next.disposeAll()
+  })
+
+  it('does not keep a provisional answer, nor totals that say nothing of when they were read (#1623)', async () => {
+    Object.assign(adapter, {
+      listUsage: undefined,
+      localUsage: async () => ({ plan: null, provisional: true, totals: { scope: 'all time', asOf: 5, rows: [] } }),
+    })
+    await rpc('agents.usage', { tool: 'claude' })
+    expect(store.usage.localTotals('claude')).toBeNull()
+    Object.assign(adapter, { localUsage: async () => ({ plan: null, totals: { scope: 'all time', rows: [] } }) })
+    await rpc('agents.usage', { tool: 'claude' })
+    expect(store.usage.localTotals('claude')).toBeNull()
+  })
+
+  it('answers with the totals even when the store cannot keep them (#1623)', async () => {
+    const read = { scope: 'all time', asOf: 9, rows: [] }
+    Object.assign(adapter, { listUsage: undefined, localUsage: async () => ({ plan: null, totals: read }) })
+    vi.spyOn(store.usage, 'saveLocalTotals').mockImplementation(() => {
+      throw new Error('disk full')
+    })
+    expect(await rpc('agents.usage', { tool: 'claude' })).toMatchObject({ notReported: true, usage: { totals: read } })
+  })
+
   it('tells a tool whose command says nobody is logged in as any tool is, not as one with no limits (#1623)', async () => {
     Object.assign(adapter, { listUsage: undefined, localUsage: async () => ({ plan: null, loggedOut: true }) })
     const r = await rpc('agents.usage', { tool: 'claude' })

@@ -28,7 +28,7 @@ export abstract class AcpAdapter implements AgentAdapter {
   }
 
   /** What the tool's own command says about its usage (the profile's `localUsage`), when it has one */
-  readonly localUsage?: (ask?: { settle?: boolean }) => Promise<LocalUsage>
+  readonly localUsage?: (ask?: { settle?: boolean; seed?: LocalUsage }) => Promise<LocalUsage>
 
   get descriptor() {
     return this.profile.descriptor

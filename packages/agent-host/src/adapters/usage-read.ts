@@ -47,7 +47,10 @@ export type SoftReadOptions<T> = {
 
 export type SoftAnswer<T> = { value: T; provisional: boolean }
 
-export function softRead<T>(o: SoftReadOptions<T>): (ask?: { settle?: boolean }) => Promise<SoftAnswer<T>> {
+/** What an ask may carry: `settle` as above, and the last answer a former process read (`at`: when), for a reader with none of its own */
+export type SoftAsk<T> = { settle?: boolean; seed?: { value: T; at: number } }
+
+export function softRead<T>(o: SoftReadOptions<T>): (ask?: SoftAsk<T>) => Promise<SoftAnswer<T>> {
   const now = o.now ?? Date.now
   const freshFor = (e: { v: T; tookMs: number }) => (typeof o.freshMs === 'function' ? o.freshMs(e.v, e.tookMs) : o.freshMs)
   let value: { at: number; v: T; tookMs: number } | null = null
@@ -77,6 +80,8 @@ export function softRead<T>(o: SoftReadOptions<T>): (ask?: { settle?: boolean })
 
   return async (ask = {}) => {
     const t = now()
+    // Nothing read in this process yet: the answer a former one kept stands in, as a stale one does (read again behind it)
+    if (!value && ask.seed) value = { at: ask.seed.at, v: ask.seed.value, tookMs: 0 }
     if (value && t - value.at < freshFor(value)) return { value: value.v, provisional: false }
     if (failedAt !== null && t - failedAt < o.failMs) return { value: value?.v ?? o.fallback(), provisional: false }
     const run = start()
@@ -95,10 +100,12 @@ export function softRead<T>(o: SoftReadOptions<T>): (ask?: { settle?: boolean })
 }
 
 /** `softRead` for what `AgentAdapter.localUsage` answers: the soft wait's fallback is marked `provisional` on the answer */
-export function localUsageReader(o: SoftReadOptions<LocalUsage>): (ask?: { settle?: boolean }) => Promise<LocalUsage> {
+export function localUsageReader(o: SoftReadOptions<LocalUsage>): (ask?: { settle?: boolean; seed?: LocalUsage }) => Promise<LocalUsage> {
   const read = softRead(o)
   return async (ask) => {
-    const { value, provisional } = await read(ask)
+    // The seed's age is when its totals were read; one without that is no seed (nothing says how old it is)
+    const at = ask?.seed?.totals?.asOf
+    const { value, provisional } = await read({ settle: ask?.settle, ...(ask?.seed && at !== undefined ? { seed: { value: ask.seed, at } } : {}) })
     return provisional ? { ...value, provisional: true } : value
   }
 }

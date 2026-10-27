@@ -10,7 +10,7 @@ import {
   type UsageSnapshot,
   type ToolName,
 } from '@cc/protocol'
-import type { AgentAdapter, SessionHandle } from '../adapters/contract.js'
+import type { AgentAdapter, LocalUsage, SessionHandle } from '../adapters/contract.js'
 import type { Store } from '../dev-services/store.js'
 import { withTimeout } from './with-timeout.js'
 
@@ -125,7 +125,8 @@ export class ToolQueries {
       // The hub shows its own limits for this machine: only the figures counted here are wanted, so no command is run
       if (!adapter?.localUsage || opts.limits === false) return none
       try {
-        const local = await adapter.localUsage({ settle: opts.settle })
+        const local = await adapter.localUsage({ settle: opts.settle, seed: this.localTotalsSeed(tool) })
+        this.keepLocalTotals(tool, local)
         // The tool's command says nobody is logged in: said as any tool that is not logged in is (a failed read, not "no limits")
         if (local.loggedOut) return { supported: false, reason: `${label} is not logged in on this computer`, usage: null, cache }
         const usage: UsageSnapshot = { plan: local.plan, windows: [], daily: [], ...(local.totals ? { totals: local.totals } : {}) }
@@ -149,6 +150,42 @@ export class ToolQueries {
       return { supported: true, usage: snapshot, cache }
     } catch (err) {
       return { supported: false, reason: (err as Error).message, usage: hit?.snapshot ?? null, cache }
+    }
+  }
+
+  /** Per tool: the read time of the totals last kept, so a stale answer returned again is not written again */
+  private readonly keptTotalsAt = new Map<ToolName, number>()
+
+  /** Tools whose kept totals were already offered to their reader: it keeps its own answer after that */
+  private readonly seededTotals = new Set<ToolName>()
+
+  /**
+   * The totals the last process kept for a tool (v64), offered once to its reader, which stands on them as on a stale answer
+   * until its own read ends. After a restart a panel then shows the totals at once, with the time they were read.
+   */
+  private localTotalsSeed(tool: ToolName): LocalUsage | undefined {
+    if (this.seededTotals.has(tool)) return undefined
+    this.seededTotals.add(tool)
+    try {
+      const totals = this.host.store.usage.localTotals(tool)
+      if (!totals) return undefined
+      if (totals.asOf !== undefined) this.keptTotalsAt.set(tool, totals.asOf)
+      return { plan: null, totals }
+    } catch (err) {
+      console.error(`[usage] ${tool}: the kept totals could not be read: ${errorMessage(err)}`)
+      return undefined
+    }
+  }
+
+  /** Keeps totals a read produced (not a stale answer returned again, nor a provisional one), for the next process */
+  private keepLocalTotals(tool: ToolName, local: LocalUsage): void {
+    const totals = local.totals
+    if (!totals || totals.asOf === undefined || local.provisional || this.keptTotalsAt.get(tool) === totals.asOf) return
+    this.keptTotalsAt.set(tool, totals.asOf)
+    try {
+      this.host.store.usage.saveLocalTotals(tool, totals)
+    } catch (err) {
+      console.error(`[usage] ${tool}: the totals could not be kept: ${errorMessage(err)}`)
     }
   }
 

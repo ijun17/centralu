@@ -29,7 +29,7 @@ describe('v62 usage tables', () => {
       raw.close()
 
       const s = new Store(file)
-      expect(s.schemaVersion).toBe(63)
+      expect(s.schemaVersion).toBe(64)
       expect(s.projects.listProjects().map((p) => p.id)).toEqual(['p1'])
       s.usage.addBuckets([bucket()])
       expect(s.usage.buckets(0, 10 * 3_600_000)).toHaveLength(1)
@@ -61,7 +61,7 @@ describe('v63 rebuild tokens (#1492)', () => {
 
       const s = new Store(file)
       open.push(s)
-      expect(s.schemaVersion).toBe(63)
+      expect(s.schemaVersion).toBe(64)
       expect(s.usage.buckets(0, 2 * 3_600_000)).toMatchObject([{ sessionId: 's1', requests: 3, rebuilds: 1, rebuildTokens: 0 }])
       s.close()
       // The previous build names its columns and has none of this one: its insert takes the default
@@ -122,5 +122,104 @@ describe('UsageRecords', () => {
     expect(s.usage.buckets(0, 2 * 3_600_000)).toHaveLength(3)
     expect(s.usage.buckets(5 * 3_600_000, 6 * 3_600_000)).toHaveLength(1)
     expect(s.usage.firstHour()).toBe(3_600_000)
+  })
+})
+
+describe('v64 the last totals of a tool that reports no limits (#1623)', () => {
+  const totals = (asOf: number, sessions = 28) => ({
+    scope: 'all time',
+    asOf,
+    rows: [{ id: 'sessions', label: 'Sessions', value: sessions, unit: 'count' as const }],
+  })
+
+  it('adds the table to a store from before it without touching what it holds, and a build that does not know it still opens it', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-usage-v64-'))
+    const open: { close(): void }[] = []
+    try {
+      const file = join(dir, 'store.db')
+      const first = new Store(file)
+      first.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+      first.usage.addBuckets([bucket()])
+      first.close()
+      const raw = new Database(file)
+      open.push(raw)
+      raw.exec('DROP TABLE usage_local_totals; PRAGMA user_version = 63')
+      raw.close()
+
+      const s = new Store(file)
+      open.push(s)
+      expect(s.schemaVersion).toBe(64)
+      expect(s.projects.listProjects().map((p) => p.id)).toEqual(['p1'])
+      expect(s.usage.buckets(0, 10 * 3_600_000)).toHaveLength(1)
+      expect(s.usage.localTotals('opencode')).toBeNull()
+      s.usage.saveLocalTotals('opencode', totals(5))
+      s.close()
+      // The previous build neither names nor reads the table: it opens the store and carries on
+      const older = new Database(file)
+      open.push(older)
+      expect(older.prepare('SELECT COUNT(*) AS n FROM usage_buckets').get()).toEqual({ n: 1 })
+      older.close()
+    } finally {
+      for (const d of open) {
+        try {
+          d.close()
+        } catch {
+          /* closed already */
+        }
+      }
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps the totals across a restart, per tool, with the time they were read', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-usage-totals-'))
+    try {
+      const file = join(dir, 'store.db')
+      const a = new Store(file)
+      a.usage.saveLocalTotals('opencode', totals(1_000))
+      a.close()
+      const b = new Store(file)
+      expect(b.usage.localTotals('opencode')).toEqual(totals(1_000))
+      expect(b.usage.localTotals('cursor')).toBeNull()
+      b.close()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('replaces the totals with a newer read, and never with an older one', () => {
+    const s = new Store()
+    s.usage.saveLocalTotals('opencode', totals(2_000, 28))
+    s.usage.saveLocalTotals('opencode', totals(3_000, 30))
+    s.usage.saveLocalTotals('opencode', totals(1_000, 5))
+    expect(s.usage.localTotals('opencode')).toEqual(totals(3_000, 30))
+  })
+
+  it('does not keep totals that do not say when they were read, and reads a row it cannot make sense of as none', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-usage-totals-bad-'))
+    const open: { close(): void }[] = []
+    try {
+      const file = join(dir, 'store.db')
+      const s = new Store(file)
+      open.push(s)
+      s.usage.saveLocalTotals('opencode', { scope: 'all time', rows: [] })
+      expect(s.usage.localTotals('opencode')).toBeNull()
+      s.usage.saveLocalTotals('opencode', totals(7))
+      const raw = new Database(file)
+      open.push(raw)
+      raw.prepare("UPDATE usage_local_totals SET totals = ? WHERE tool = 'opencode'").run('{"scope":1}')
+      expect(s.usage.localTotals('opencode')).toBeNull()
+      raw.prepare("UPDATE usage_local_totals SET totals = ? WHERE tool = 'opencode'").run('not json')
+      expect(s.usage.localTotals('opencode')).toBeNull()
+    } finally {
+      for (const d of open) {
+        try {
+          d.close()
+        } catch {
+          /* closed already */
+        }
+      }
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

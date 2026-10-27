@@ -96,14 +96,24 @@ const SOFT_MS = 3_000
  */
 export const STATS_RUN_MS = 5 * 60_000
 
-/** The reader of OpenCode's totals; `run` starts `opencode stats` for at most the given time and answers its stdout */
-export function openCodeUsageReader(run: (timeoutMs: number) => Promise<string>): (ask?: { settle?: boolean }) => Promise<LocalUsage> {
+/**
+ * The reader of OpenCode's totals; `run` starts `opencode stats` for at most the given time and answers its stdout. The
+ * totals carry `asOf`, when the read ended: a stale answer (a large database is read slowly) says how old it is.
+ */
+export function openCodeUsageReader(
+  run: (timeoutMs: number) => Promise<string>,
+  now: () => number = Date.now,
+): (ask?: { settle?: boolean; seed?: LocalUsage }) => Promise<LocalUsage> {
   return localUsageReader({
     freshMs: (_v, tookMs) => Math.max(MIN_FRESH_MS, tookMs * FRESH_PER_RUN),
     failMs: FAIL_MS,
     softMs: SOFT_MS,
+    now,
     fallback: () => NOTHING,
     onFail: (e) => console.error(`[usage] opencode: could not read the totals: ${e.message}`),
-    read: async () => parseStats(await run(STATS_RUN_MS)),
+    read: async () => {
+      const read = parseStats(await run(STATS_RUN_MS))
+      return read.totals ? { ...read, totals: { ...read.totals, asOf: now() } } : read
+    },
   })
 }

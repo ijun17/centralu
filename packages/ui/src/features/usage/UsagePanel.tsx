@@ -8,7 +8,7 @@ import { SkeletonLines } from '../../components/Skeleton.jsx'
 import { useStore } from '../../store/store.js'
 import { useMachineName, useToolMeta } from '../../store/selectors.js'
 import { CacheSection } from './CacheSection.jsx'
-import { formatCount, formatDuration } from '../../app/format.js'
+import { formatCount, formatDuration, formatReadAt } from '../../app/format.js'
 import { HistorySection } from './HistorySection.jsx'
 import { SAME_ACCOUNT_LABEL } from './sameAccount.js'
 import { useLoad } from '../../app/useLoad.js'
@@ -135,13 +135,17 @@ export const NOT_REPORTED_COPY = {
   plan: (plan: string) => `${plan} plan`,
   totalsTitle: (scope: string) => `Local totals · ${scope}`,
   totalsNote: (tool: string, where: string) => `Counted by ${tool} on ${where}. These are totals, not a limit.`,
+  totalsAsOf: (at: number, now: number) => `As of ${formatReadAt(at, now)}`,
 }
 
-/** How a total is written: tokens and counts as the daily tokens are, dollars with their cents */
+/**
+ * How a total is written: tokens as the daily tokens are (abbreviated), dollars with their cents, and the whole-number counts
+ * (sessions, messages) exactly, with the thousands separators of the person's language
+ */
 function totalText(value: number | null, unit: 'count' | 'tokens' | 'usd'): string {
   // The tool printed it in a form that could not be read: a dash, never a number that may be wrong
   if (value === null) return '—'
-  return unit === 'usd' ? `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : formatCount(value)
+  return unit === 'usd' ? `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : unit === 'count' ? value.toLocaleString() : formatCount(value)
 }
 
 function NotReported({ label, usage, machine }: { label: string; usage: UsageSnapshot | null; machine: string | null }) {
@@ -155,7 +159,7 @@ function NotReported({ label, usage, machine }: { label: string; usage: UsageSna
         {NOT_REPORTED_COPY.title(label)}
       </p>
       {usage?.plan && (
-        <p className="readout cc-row-in mt-4 text-center text-xs text-ink" data-testid="usage-plan">
+        <p className="cc-row-in mt-4 text-center text-xs text-ink" data-testid="usage-plan">
           {NOT_REPORTED_COPY.plan(usage.plan)}
         </p>
       )}
@@ -173,6 +177,11 @@ function NotReported({ label, usage, machine }: { label: string; usage: UsageSna
             ))}
           </ul>
           <p className="mt-2 text-2xs text-ink-faint">{NOT_REPORTED_COPY.totalsNote(label, machineName ?? 'this computer')}</p>
+          {totals.asOf !== undefined && (
+            <p className="mt-1 text-2xs text-ink-faint" data-testid="usage-totals-as-of">
+              {NOT_REPORTED_COPY.totalsAsOf(totals.asOf, Date.now())}
+            </p>
+          )}
         </section>
       )}
     </div>

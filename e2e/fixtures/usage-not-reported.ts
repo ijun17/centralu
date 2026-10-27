@@ -90,6 +90,58 @@ export function usageNotReportedTests(): void {
       await expect(page.getByTestId('usage-total-messages')).toHaveText('Messages126')
     })
 
+    test('writes the sessions and messages exactly, with thousands separators, and the tokens abbreviated (owner, 2026-10-27)', async ({ page }) => {
+      const counts = {
+        ...NONE,
+        totals: {
+          scope: 'all time',
+          rows: [
+            { id: 'sessions', label: 'Sessions', value: 1204, unit: 'count' },
+            { id: 'messages', label: 'Messages', value: 120400, unit: 'count' },
+            { id: 'input', label: 'Input', value: 1204000, unit: 'tokens' },
+          ],
+        },
+      }
+      await open(page, answer(counts))
+      await expect(page.getByTestId('usage-total-sessions')).toHaveText('Sessions1,204')
+      await expect(page.getByTestId('usage-total-messages')).toHaveText('Messages120,400')
+      await expect(page.getByTestId('usage-total-input')).toHaveText('Input1.2M')
+    })
+
+    test('says when the totals were read: the clock time for today, the date as well for an earlier day, nothing from a host that predates it', async ({ page }) => {
+      const read = (asOf: number | undefined) => ({ ...TOTALS, totals: { ...TOTALS.totals, ...(asOf === undefined ? {} : { asOf }) } })
+      const line = page.getByTestId('usage-totals-as-of')
+      await open(page, answer(read(Date.now() - 60_000)))
+      await expect(line).toHaveText(/^As of \d{1,2}:\d{2}\s(AM|PM)$/)
+      // It sits under the totals and their note, in the small muted text of the note
+      const note = page.getByTestId('usage-totals').locator('p').first()
+      const [noteBox, lineBox] = [await note.boundingBox(), await line.boundingBox()]
+      expect(lineBox!.y).toBeGreaterThan(noteBox!.y)
+      await expect(line).toHaveCSS('font-size', (await note.evaluate((e) => getComputedStyle(e).fontSize)))
+      await expect(line).toHaveCSS('color', (await note.evaluate((e) => getComputedStyle(e).color)))
+
+      await page.keyboard.press('Escape')
+      await expect(page.getByTestId('usage-drop')).toHaveCount(0)
+      await page.evaluate((c) => ((window as unknown as MockWindow).__mock.toolUsage = { codex: c }), answer(read(Date.now() - 3 * 86_400_000)))
+      await page.getByTestId('usage-donut-codex').click()
+      await expect(line).toHaveText(/^As of [A-Z][a-z]{2} \d{1,2}(, \d{4})?, \d{1,2}:\d{2}\s(AM|PM)$/)
+
+      await page.keyboard.press('Escape')
+      await expect(page.getByTestId('usage-drop')).toHaveCount(0)
+      await page.evaluate((c) => ((window as unknown as MockWindow).__mock.toolUsage = { codex: c }), answer(read(undefined)))
+      await page.getByTestId('usage-donut-codex').click()
+      await expect(page.getByTestId('usage-total-sessions')).toBeVisible()
+      await expect(line).toHaveCount(0)
+    })
+
+    test('the plan is in the body font, the figures in the figures font (owner, 2026-10-27)', async ({ page }) => {
+      await open(page, answer({ ...TOTALS, plan: 'Free' }))
+      const font = (id: string) => page.getByTestId(id).evaluate((e) => getComputedStyle(e).fontFamily)
+      const body = await font('usage-not-reported-text')
+      expect(await font('usage-plan')).toBe(body)
+      expect(await page.getByTestId('usage-total-sessions').locator('span').last().evaluate((e) => getComputedStyle(e).fontFamily)).not.toBe(body)
+    })
+
     test('a command that was slower than the host waits: the open panel receives the plan when it ends, without polling', async ({ page }) => {
       await setup(page, { projects: ['/tmp/alpha'] })
       await page.evaluate(

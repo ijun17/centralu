@@ -264,6 +264,11 @@ export const UsageSnapshot = z.object({
     .object({
       /** What the totals cover, in the words the person reads under their title ("all time") */
       scope: z.string(),
+      /**
+       * When the host read them, in ms since the epoch. A large database is read slowly, so the host keeps the last totals and
+       * the screen says how old they are. Absent from a host that predates it
+       */
+      asOf: z.number().optional(),
       rows: z.array(
         z.object({
           id: z.string(),

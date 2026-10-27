@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { dayKey, formatBytes, formatCount, formatDayLong, formatDuration, formatSaidAt } from './format.js'
+import { dayKey, formatBytes, formatCount, formatDayLong, formatDuration, formatReadAt, formatSaidAt } from './format.js'
 
 describe('formatBytes', () => {
   it('writes whole bytes under a kilobyte', () => {
@@ -165,5 +165,22 @@ describe('dayKey', () => {
     // The same day of another month or year is another day
     expect(dayKey(new Date(2026, 10, 18).getTime())).not.toBe(dayKey(morning))
     expect(dayKey(new Date(2027, 9, 18).getTime())).not.toBe(dayKey(morning))
+  })
+})
+
+describe('formatReadAt', () => {
+  const now = new Date(2026, 9, 27, 13, 5).getTime()
+
+  it('writes the clock time alone for today', () => {
+    expect(spaced(formatReadAt(new Date(2026, 9, 27, 9, 5).getTime(), now))).toBe('9:05 AM')
+  })
+
+  it('adds the date for an earlier day, and the year for an earlier year', () => {
+    expect(spaced(formatReadAt(new Date(2026, 9, 25, 15, 42).getTime(), now))).toBe('Oct 25, 3:42 PM')
+    expect(spaced(formatReadAt(new Date(2025, 11, 30, 15, 42).getTime(), now))).toBe('Dec 30, 2025, 3:42 PM')
+  })
+
+  it('treats just before midnight as yesterday, not today', () => {
+    expect(spaced(formatReadAt(new Date(2026, 9, 26, 23, 59).getTime(), now))).toBe('Oct 26, 11:59 PM')
   })
 })

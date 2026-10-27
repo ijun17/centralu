@@ -1,6 +1,36 @@
 import { describe, expect, it } from 'vitest'
 import { STATS_RECORDED as RECORDED } from './recordings/stats.test-helpers.js'
-import { parseAmount, parseCount, parseStats } from './usage.js'
+import { openCodeUsageReader, parseAmount, parseCount, parseStats } from './usage.js'
+
+describe('when the totals were read (asOf)', () => {
+  it('stamps the totals with the time the read ended, and keeps that time while they are returned stale', async () => {
+    let clock = 1_000
+    const run = async () => {
+      clock += 12_000
+      return RECORDED
+    }
+    const ask = openCodeUsageReader(run, () => clock)
+    const first = await ask({ settle: true })
+    expect(first.totals?.asOf).toBe(13_000)
+    clock += 5 * 60_000
+    // Stale: the same totals come back at once with the time they were read, not the time they were asked
+    const stale = await ask()
+    expect(stale.totals?.asOf).toBe(13_000)
+  })
+
+  it('stamps nothing on output with no totals', async () => {
+    const ask = openCodeUsageReader(async () => 'nothing here')
+    expect(await ask({ settle: true })).toEqual({ plan: null })
+  })
+
+  it('stands on the totals a former run kept across a restart, with their own time', async () => {
+    const never = new Promise<string>(() => {})
+    const kept = parseStats(RECORDED)
+    const seed = { ...kept, totals: { ...kept.totals!, asOf: 42 } }
+    const ask = openCodeUsageReader(() => never)
+    expect((await ask({ seed })).totals?.asOf).toBe(42)
+  })
+})
 
 /** One table as `opencode stats` boxes it, with the two count rows written the way a computer's language writes them */
 const table = (sessions: string, messages: string) =>

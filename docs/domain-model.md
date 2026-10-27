@@ -284,6 +284,7 @@ Where it is stored:
 - `queued_requests`: a request held for a busy session, until it is delivered as a new turn.
 - `usage_readings`: the limit windows' percentages and reset times over time, per tool and account; kept 90 days, on this computer only (agent-host §6.2).
 - `usage_buckets`: the requests of each hour per session, project, tool and model: tokens, cache reads and writes, rebuilds by cause. Kept 90 days, on this computer only; a purged session's buckets go with it.
+- `usage_local_totals`: the last good totals of a tool that reports no limits (OpenCode's `opencode stats`) and when they were read, one row per tool, so a restart shows them at once. Counts only, on this computer only (agent-host §6).
 
 ### 2.3 Apps
 
