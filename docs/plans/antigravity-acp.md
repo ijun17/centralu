@@ -46,7 +46,7 @@ its label and mark (Antigravity, `A`) are carried over.
 | File | What |
 |---|---|
 | `release.ts` | The pinned registry entry: version, per-platform URL, sha256, command, files (§3.1) |
-| `agent-files.ts` | The OS layer's part for this tool (`tooling/os-layer.js`): platform key, folder layout, what is on disk, the install's disk work, the sign-in's private folder and `BROWSER` helper, the browser opener |
+| `agent-files.ts` | The OS layer's part for this tool (`tooling/os-layer.js`): platform key, folder layout, what is on disk, the install's disk work, each process's private folder and `BROWSER` helper (a sign-in's and a session's), the browser opener |
 | `launch.ts` | The environment and command every process starts with |
 | `setup.ts` | The install and sign-in state machine (`ToolSetupControl`) |
 | `sign-in.ts` | The sign-in flow over ACP |
@@ -237,16 +237,32 @@ come as `fs/read_text_file`, and every path into the agent's folder is refused t
 isolation environment, tied to no session: `initialize`, then `authenticate {methodId: "oauth-personal"}` with a 330 s
 bound, past the agent's own 300 s, and the process kept until it answers.
 
-The address reaches the host and never `host.log`:
+The agent never starts a browser itself, on any OS, and the address reaches the host and never `host.log`. Every
+Antigravity process (a sign-in, and each session, §4.4) gets its own private folder (`.sign-in-<owner>-<random>`, 0700)
+and `BROWSER` set to a helper there that writes its one argument to a file through a temporary name; the host reads it
+(and removes it, so each address is told once). `BROWSER` is always Centralu's, so one from the person's environment
+never reaches the agent (review of #1685, follow-up 8).
 
-- **macOS and Linux**: `BROWSER` names a script in a private folder (`.sign-in-<random>`, 0700) that writes its one
-  argument to a file there through a temporary name; the host reads it and opens the browser (`open`, `xdg-open`).
-  Measured on macOS: the agent's launcher honours `BROWSER`, and no browser opened by itself (spike §4).
-- **Every OS**: the agent's stderr line `Open the following link to authenticate the ACP server: <url>` is read by the
-  sign-in and left out of the log. On Windows it is the only source: a batch helper would hand its argument to `cmd`,
-  which splits an address at `&` (the launcher gives the address as the program's one argument, as measured on
-  macOS, and a `.cmd` is run through `cmd`). So on Windows `BROWSER` is not set and the agent's own launcher opens the browser; the host opens
-  nothing there. **(live, Windows)** that it does.
+- **The agent's launcher** is CPython 3.14's `webbrowser` (the binary is a PyInstaller build; its credential manager
+  calls `webbrowser.open` and prints the address on stderr). It tries each `BROWSER` entry (split at `os.pathsep`)
+  before its own defaults, and goes on to the defaults when the command exits non-zero. An entry holding `%s` is split
+  with `shlex` and run with no shell, the address put for `%s`.
+- **macOS and Linux**: `BROWSER` is a `sh` script's path. Measured on macOS: the launcher runs it, and no browser opened
+  by itself (spike §4).
+- **Windows**: a batch helper would hand the address to `cmd`, which splits it at `&`. So `BROWSER` is a command line,
+  `'<node>' '<folder>/open-url.mjs' %s` (the host's own node, each path in `shlex` single quotes): a real program, given
+  the address whole, that exits 0. Before this, `BROWSER` was unset on Windows and the agent's launcher started the
+  browser as its own child, inside the host's job object (`lifecycle/work-job.ts`), so a Stop, the sign-in's end or the
+  host's exit ended the person's browser with every tab (review of #1685, B2, measured).
+- **The host opens it outside its work.** On Windows the terminal broker (`dev-services/broker-pty.ts`), which the host
+  starts before it joins the job, starts it (`{op:'open', url}`, `rundll32 url.dll,FileProtocolHandler`, detached, so
+  in no job of the broker's either); with no broker there is no job, or the host opens it itself. On macOS and Linux
+  the host runs `open` / `xdg-open` as before.
+- **Every OS**: the agent's stderr line `Open the following link to authenticate the ACP server: <url>` is a second
+  source of the same address, read by the sign-in and left out of the log.
+- Where no helper can be written (a path holding the separator `BROWSER` is split at, `;` on Windows and `:` elsewhere,
+  or `%s`), `BROWSER` is empty: the person's own still does not reach the agent, its launcher opens the default browser
+  itself (the old behaviour), and the host does not open a second one.
 - An address is opened once, and only `https` on a Google host.
 
 `agents.cancelSignIn` ends the process, and with it the one-shot listener (ACP cannot cancel `authenticate`). Endings:
@@ -268,6 +284,28 @@ Signed in means `auth.type` in `<home>/antigravity-acp/settings.json` and the to
 opened). A session whose `session/new` or `session/load` answers `-32000` is a `not_logged_in` error that says to sign
 in with Google from the tool's line in Centralu (not "Log in from a terminal"), and the setup turns `signed_out`
 (a `tool_setup` event), whatever is on disk, until the next sign-in.
+
+`-32000` comes only when `settings.json` names no `auth.type`. With `auth.type` set and a token the agent cannot use (a
+refresh Google refuses, a damaged file, `{}`), 1.4.3 starts its own interactive login inside `session/new` (and
+`session/load`, and a prompt whose access token runs out: all go through the same `get_access_token`), logs
+`Credentials missing or invalid. Launching browser login flow...`, and waits up to 300 s (review of #1685, B1,
+measured: a browser nobody asked for, then "No response for session/new" after 128 s, with the line still ready).
+There is no switch to make it answer instead: `AGY_ACP_ENABLE_OAUTH` and env-based auth selection were removed in this
+build (its own warning says so), and only an explicit logout makes `session/new` answer `auth_required` (read in the
+binary). So the signal is structural: **the session's `BROWSER` helper running is the agent asking for a sign-in**
+(`SignInWanted`, `acp/profile.ts`). The session then fails what it had asked (`session/new`, `session/load` or the
+prompt) with the `not_logged_in` error above, which notes the tool `signed_out`; it does not open the address. While
+the conversation opens, the failed open ends the process; once open, the session ends the process itself and sleeps,
+and the next message starts a new process, which asks again if the sign-in is still needed. The session start's RPC
+error keeps the code `not_logged_in` (it was sent as `internal`). Measured on Windows with the real agent: a
+refresh-refused token and a `{}` token each failed `agents.createSession` with `not_logged_in` in about 8.5 s (the
+agent's own start is most of it), the line went `signed_out`, and no agent process or browser was left.
+
+Other ACP clients: the protocol's authentication page (agentclientprotocol.com, "Authentication") has the agent block
+a gated request with `auth_required` and the client answer with `authenticate` on one of the advertised `authMethods`,
+and asks clients to expect such failures mid-session and prompt for a sign-in again. Nothing found there or in a
+search covers an agent that starts its own browser flow inside `session/new` instead; how Zed handles it was not read.
+So the helper is the signal, and the code it gives the session is the protocol's own `not_logged_in` path.
 
 The agent logs, at every start, its onboarding answer, whose upgrade address names the account's email (spike stderr),
 and its sign-in address. A line with an address, an email, `loadCodeAssist`, `oauth` or `token` is left out of
@@ -397,8 +435,13 @@ or ran the agent.
 4. A Stop during `sleep 60` ends the command's process group; a host killed mid-command leaves no `sleep` behind.
 5. A question from the agent (`interaction_*`), if one can be provoked (its `/plan` command asks before it executes,
    binary): the card's text and the answer's effect.
-6. Windows (this machine or another): the agent opens the browser itself with `BROWSER` unset; the sha256 and install of
-   the x64 archive end to end.
+6. Windows: the sha256 and install of the x64 archive end to end (done in the review of #1685). The agent's own
+   browser is gone (§4.3): checked on Windows 11 with the real host in a temporary data folder. A sign-in's `BROWSER`
+   helper handed the address to the host, the broker started the browser (its parent the broker, no process of the
+   agent above it), and the browser outlived Stop and the host's exit. That host ran in a network logon, where
+   `rundll32 url.dll,FileProtocolHandler` opens nothing (nor does any shell association), so for that check the broker
+   started Chrome with a temporary profile directly, a local change not in the pull request; the `rundll32` step
+   itself is unexercised in a desktop logon.
 
 Measured after the deep review's fixes (macOS arm64, agent 1.4.3, a temporary data folder and a temporary `HOME`):
 

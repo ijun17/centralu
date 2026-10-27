@@ -1275,7 +1275,14 @@ Centralu installs Google's Antigravity agent itself and keeps all of its state u
   the token without naming its path (a variable, `cd` then a relative name); it asks under every preset but Auto.
   Centralu itself never opens the token file; it looks for its presence.
 - **The sign-in address stays out of logs and events.** It reaches the host through a private folder (`0700`) and the
-  agent's stderr, is opened once and only as an `https` Google address, and no `tool_setup` event carries it. Lines of
+  agent's stderr, is opened once and only as an `https` Google address, and no `tool_setup` event carries it.
+- **The agent never starts a browser, and the person's `BROWSER` never reaches it.** Every Antigravity process gets
+  `BROWSER` set to Centralu's helper in that private folder (on Windows a `node` command line run with no shell, since
+  `cmd` would split the address at `&`). The host opens the address, on Windows through the terminal broker, outside
+  the host's job object, so a Stop, a finished sign-in or the host's exit cannot end the person's browser and its tabs
+  ([plans/antigravity-acp.md](plans/antigravity-acp.md) §4.3). In a session, the helper running means the stored
+  sign-in stopped working: the session fails as `not_logged_in` and its process ends, and nothing is opened that the
+  person did not ask for (§4.4). Lines of
   the agent's stderr that hold an address, an email or a token's name never reach `host.log` or a crash message.
 - **The agent never decides alone.** It stays in its `default` mode, where it asks; `allow_always` is never sent, so no
   rule of its own outlives Centralu's preset; a question it asks is the person's to answer under every preset.
