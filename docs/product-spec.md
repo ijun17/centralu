@@ -350,7 +350,7 @@ Lives in the right-hand **evidence panel**, whose tabs are **Git / History / Fil
 - Settings changes surface as a `settings_changed` event + toast, so the human sees
   what the orchestrator changed the moment it changes it.
 - Orchestrator-sent instructions are marked in the target session's conversation (built 2026-08-26): a source label
-  above the bubble and a dashed border — shape, not color, per the palette rule. Worker completion reports in the
+  above the bubble and a deeper solid-edged fill (`surface-relayed`) — no color, per the palette rule. Worker completion reports in the
   orchestrator's own chat carry the same marker. The sticky banner prefixes the source name.
 - **Dropped (2026-08-27): the per-session "refuse orchestrator instructions" toggle.** It was written into v0.4 as the
   other half of that safeguard sentence, never requested and never missed: the person who creates the orchestrator and

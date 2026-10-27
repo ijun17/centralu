@@ -86,7 +86,7 @@ Centralu의 모든 화면이 따르는 것: 색, 모양, 선, 글자, 아이콘,
 
 | 규칙 | 이유 | 코드 |
 |---|---|---|
-| **사람의 말풍선은 오른쪽**(`surface-hover`, 폭은 최대 75%), **에이전트의 글은 왼쪽의 전체 폭 말풍선**(`surface-raised`, `line` 테두리). 둘 다 `rounded-bubble`, **꼬리 없음** | 쪽, 폭, 명암이 이미 누가 말했는지 말한다. 꼬리 모서리는 뺐다(*owner, 2026-10-18*). 다른 세션이나 앱이 보낸 메시지는 점선이다 | `ChatRow.tsx`, `ChatStream.tsx` `AnswerBubble` |
+| **사람의 말풍선은 오른쪽**(`surface-hover`, 폭은 최대 75%), **에이전트의 글은 왼쪽의 전체 폭 말풍선**(`surface-raised`, `line` 테두리). 둘 다 `rounded-bubble`, **꼬리 없음** | 쪽, 폭, 명암이 이미 누가 말했는지 말한다. 꼬리 모서리는 뺐다(*owner, 2026-10-18*). 다른 세션, 앱, 스크립트가 보낸 메시지는 실선 테두리에 사람의 것보다 한 단계 깊은 `surface-relayed` 바탕이고 글자는 `ink-relayed`다(점선은 쓰지 않는다: 점선은 실패나 모름을 뜻한다, #1629) | `ChatRow.tsx`, `ChatStream.tsx` `AnswerBubble` |
 | **말풍선에는 에이전트가 말한 것만.** 도구 호출, 추론 요약, 이미지, 승인, 표식(압축, 넘기기, 오류 한 줄)은 말풍선 **밖**, 페이지에 서서 말풍선을 나눈다 | 말풍선 속 카드는 상자 속 상자로 읽혔고, 그 속 추론은 메시지로 읽혔다 | `ChatStream.tsx` `inBubble` |
 | **시각**은 사람의 말풍선 아래와 답의 **마지막** 말풍선 아래에, 영어 시계 시각으로: "3:42 PM", `text-2xs` `ink-faint` | 채팅 앱이 그렇게 쓴다. 날짜는 구분선이 한 번 말한다 | `format.ts` `formatSaidAt`, `ChatRow.tsx` `SaidAt` |
 | **날짜 구분선**은 하루가 시작되는 곳에: 두 가는 선 사이에 "Saturday, October 18, 2026" | 어떤 시각도 날짜를 지고 다니지 않게 | `ChatStream.tsx` `DayDivider`, `formatDayLong` |

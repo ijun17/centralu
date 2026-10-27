@@ -59,24 +59,30 @@ describe('ChatRow: what the person sent', () => {
     expect(html).not.toContain('border-dashed')
   })
 
-  it('names the session a delegated message came from and switches the bubble to dashed', () => {
+  it('names the session a delegated message came from and gives it a solid, deeper bubble', () => {
     const { html, text } = row({ kind: 'user', seq: 1, text: 'Do the task', from: { sessionId: 'o1', name: 'Manager' } })
     expect(testIds(html)).toEqual(['msg-user', 'msg-user-from'])
     expect(text).toBe('Manager ⤷ Do the task')
-    expect(html).toContain('border-dashed border-ink-muted/50')
+    expect(html).toContain('border-ink-muted/50 bg-surface-relayed text-ink-relayed')
+    expect(html).not.toContain('border-dashed')
+    expect(html).toContain('data-relayed')
   })
 
   it('names the app that wrote a message', () => {
     const { html, text } = row({ kind: 'user', seq: 1, text: 'Open #12', fromApp: { appId: 'board', projectId: 'p1', name: 'Board' } })
     expect(testIds(html)).toEqual(['msg-user', 'msg-user-from-app'])
     expect(text).toBe('Board app ⤷ Open #12')
+    expect(html).toContain('bg-surface-relayed')
+    expect(html).not.toContain('border-dashed')
   })
 
-  it('names the script that wrote a first message, in a dashed bubble: it is not the person’s (§8.1)', () => {
+  it('names the script that wrote a first message, in a deeper bubble: it is not the person’s (§8.1)', () => {
     const { html, text } = row({ kind: 'user', seq: 1, text: 'Triage the build', fromScript: { credential: 'ci runner' } })
     expect(testIds(html)).toEqual(['msg-user', 'msg-user-from-script'])
     expect(text).toBe('script ci runner ⤷ Triage the build')
-    expect(html).toContain('border-dashed border-ink-muted/50')
+    expect(html).toContain('border-ink-muted/50 bg-surface-relayed text-ink-relayed')
+    expect(html).not.toContain('border-dashed')
+    expect(html).toContain('data-relayed')
   })
 
   it('draws an image with bytes as a thumbnail, a file and a byteless image as chips', () => {

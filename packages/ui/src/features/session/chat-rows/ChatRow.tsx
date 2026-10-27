@@ -58,13 +58,14 @@ export const ChatRow = memo(function ChatRow({
   nested?: boolean
 }) {
   if (item.kind === 'user') {
+    const relayed = Boolean(item.from || item.fromApp || item.fromScript)
     return (
       <div className="flex flex-col items-end" data-testid="msg-user">
         {/*
           A message that came in through delegation (FR-11). Placed in the same spot (right) as
           the person's own messages — to the session it is equally "a directive received" —
-          but with a source name above it and the border switched to dashed. No color is used
-          (the palette rule): the distinction is made by shape, not brightness.
+          with a source name above it and a deeper fill (surface-relayed, solid border). No color is used
+          (the palette rule): the distinction is the surface step.
         */}
         {item.from && (
           <div className="pb-0.5 text-xs text-ink-muted" data-testid="msg-user-from">
@@ -73,7 +74,7 @@ export const ChatRow = memo(function ChatRow({
         )}
         {/*
           A message sent by an in-conversation app view (M4 B-1). A person chose to send it, but
-          the app wrote it — shown in the same shape as a delegated message (dashed border, a
+          the app wrote it — shown in the same look as a delegated message (deeper fill, a
           one-line source), noting that the source is an app rather than a session.
         */}
         {item.fromApp && (
@@ -114,12 +115,21 @@ export const ChatRow = memo(function ChatRow({
             ))}
           </div>
         )}
+        {/*
+          A message that came from another session, an app or a script (relayed) is the person's
+          bubble one surface step deeper (surface-relayed) with a solid border. It was dashed, but
+          a dashed edge means failed or unknown everywhere else in the app (#1629). The source
+          line above it stays. No hue: only the step tells it from my own. ink-relayed keeps the
+          text at least as contrasty as on my bubble, which matters in the light themes where
+          the deeper fill is darker.
+        */}
         {/* No empty bubble is rendered for a message that only sent an image */}
         {(item.text || !item.attachments?.length) && (
           <div
             data-mine-bubble
-            className={`max-w-[75%] whitespace-pre-wrap break-words rounded-bubble border bg-surface-hover px-3 py-2 text-ink ${
-              item.from || item.fromApp || item.fromScript ? 'border-dashed border-ink-muted/50' : 'border-ink-faint/40'
+            {...(relayed ? { 'data-relayed': '' } : {})}
+            className={`max-w-[75%] whitespace-pre-wrap break-words rounded-bubble border px-3 py-2 ${
+              relayed ? 'border-ink-muted/50 bg-surface-relayed text-ink-relayed' : 'border-ink-faint/40 bg-surface-hover text-ink'
             }`}
           >
             {item.text}

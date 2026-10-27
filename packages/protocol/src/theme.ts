@@ -50,6 +50,7 @@ export const THEME_TOKENS: readonly ThemeTokenDef[] = [
     ['surface-deck', 'Grid floor'],
     ['surface-reading', 'Conversation'],
     ['surface-reading-raised', 'Conversation, raised'],
+    ['surface-relayed', 'Message from a session, app or script'],
   ]),
   ...defs('Lines', 'color', [
     ['line', 'Line'],
@@ -60,6 +61,7 @@ export const THEME_TOKENS: readonly ThemeTokenDef[] = [
     ['ink', 'Text'],
     ['ink-muted', 'Secondary'],
     ['ink-faint', 'Background information'],
+    ['ink-relayed', 'Text on a message from a session, app or script'],
   ]),
   ...defs('Diff and danger', 'color', [
     ['diff-add', 'Added'],

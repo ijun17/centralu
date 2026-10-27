@@ -97,6 +97,8 @@
   /* The conversation's own surfaces — the floor's steps in this preset, see the session-view block below */
   --color-surface-reading: #0f0f0f;
   --color-surface-reading-raised: #242424;
+  --color-surface-relayed: #2e2e2e; /* a message that came from a session, an app or a script: one step deeper than my bubble */
+  --color-ink-relayed: #ededed; /* text on it */
 
   /* Lines */
   --color-line: #363636; /* hairline: borders, dividers, meter tracks */
@@ -385,6 +387,8 @@
   --color-surface-deck: #e4e4e4;
   --color-surface-reading: #f0f0f0;
   --color-surface-reading-raised: #f9f9f9;
+  --color-surface-relayed: #c8c8c8;
+  --color-ink-relayed: #101010;
 
   --color-line: #d6d6d6;
   --color-line-strong: #bdbdbd;
@@ -461,6 +465,8 @@
   --color-surface-reading: #000000;
   --color-surface-reading-raised: #0f0f0f;
 
+  --color-surface-relayed: #282828;
+  --color-ink-relayed: #f0f0f0;
   --color-line: #707070;
   --color-line-strong: #a8a8a8;
 
@@ -501,6 +507,8 @@
   --color-surface-deck: #e6e6e6;
   --color-surface-reading: #ffffff;
   --color-surface-reading-raised: #ffffff;
+  --color-surface-relayed: #c8c8c8;
+  --color-ink-relayed: #000000;
 
   --color-line: #767676;
   --color-line-strong: #4a4a4a;
@@ -1384,7 +1392,7 @@
 [data-theme='light'] [data-bubble] {
   border-color: #e6e6e6;
 }
-[data-theme='light'] [data-mine-bubble]:not(.border-dashed) {
+[data-theme='light'] [data-mine-bubble]:not([data-relayed]) {
   border-color: #cdcdcd;
 }
 /* A tool call's card, the same way: softer than the hairline (owner, 2026-10-19). A failed call keeps its dashed
