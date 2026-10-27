@@ -88,13 +88,11 @@ describe('HoverExpander (#1578)', () => {
     return { h, changes, timers, fire, state }
   }
 
-  it('expands once the pointer has rested HOVER_EXPAND_MS (100 ms) on a folded name row', () => {
+  it('expands once the pointer has rested HOVER_EXPAND_MS on a folded name', () => {
     const { h, changes, timers, fire } = setup()
-    h.enterRow(true)
+    h.enterName(true)
     expect(timers).toHaveLength(1)
     expect(timers[0]?.ms).toBe(HOVER_EXPAND_MS)
-    // The rest the owner chose (2026-10-26, #1605); a change of it is a decision, not a refactor
-    expect(HOVER_EXPAND_MS).toBe(100)
     expect(changes).toEqual([])
     fire()
     expect(changes).toEqual([true])
@@ -102,23 +100,23 @@ describe('HoverExpander (#1578)', () => {
 
   it('does nothing when the pointer leaves the name before the rest is over', () => {
     const { h, changes, fire } = setup()
-    h.enterRow(true)
-    h.leaveRow()
+    h.enterName(true)
+    h.leaveName()
     fire()
     expect(changes).toEqual([])
   })
 
   it('starts no timer on a project that is not folded', () => {
     const { h, timers } = setup()
-    h.enterRow(false)
+    h.enterName(false)
     expect(timers).toHaveLength(0)
   })
 
   it('folds when the pointer leaves the block, and not when it only leaves the name', () => {
     const { h, changes, fire } = setup()
-    h.enterRow(true)
+    h.enterName(true)
     fire()
-    h.leaveRow()
+    h.leaveName()
     expect(changes).toEqual([true])
     h.leaveBlock()
     expect(changes).toEqual([true, false])
@@ -126,8 +124,8 @@ describe('HoverExpander (#1578)', () => {
 
   it('keeps one timer: entering again restarts the rest, and a block leave clears a pending one', () => {
     const { h, changes, timers, fire } = setup()
-    h.enterRow(true)
-    h.enterRow(true)
+    h.enterName(true)
+    h.enterName(true)
     expect(timers.filter((t) => t.live)).toHaveLength(1)
     h.leaveBlock()
     fire()
@@ -136,7 +134,7 @@ describe('HoverExpander (#1578)', () => {
 
   it('holds the project while a menu or a drag is open, and settles by where the pointer is', () => {
     const { h, changes, fire, state } = setup()
-    h.enterRow(true)
+    h.enterName(true)
     fire()
     h.hold(true)
     h.leaveBlock()
@@ -148,7 +146,7 @@ describe('HoverExpander (#1578)', () => {
 
   it('stays open after a hold ends with the pointer still inside', () => {
     const { h, changes, fire } = setup(true)
-    h.enterRow(true)
+    h.enterName(true)
     fire()
     h.hold(true)
     h.hold(false)
@@ -157,7 +155,7 @@ describe('HoverExpander (#1578)', () => {
 
   it('reset (a click made it stay) drops the transient state', () => {
     const { h, changes, fire } = setup()
-    h.enterRow(true)
+    h.enterName(true)
     fire()
     h.reset()
     expect(changes).toEqual([true, false])

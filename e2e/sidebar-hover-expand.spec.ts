@@ -2,17 +2,11 @@ import { test, expect, type Page } from '@playwright/test'
 import { setup, newSession } from './fixtures/control.js'
 
 /**
- * Hover expansion of a folded project (#1578, owner 2026-10-26). The 0.1 s rest (#1605) and the exit (a leaving list stays 150 ms, usePresence) run on
- * Playwright's clock, so the tests wait for no wall-clock time: the clock is paused after setup and moved by hand.
+ * Hover expansion of a folded project (#1578, owner 2026-10-26). The 0.2 s rest runs on Playwright's clock, so the tests
+ * wait for no wall-clock time: the clock is paused after setup and moved by hand.
  */
 const rows = (page: Page, project: string) => page.getByTestId(`project-${project}`).locator('[data-testid^="session-row-"]')
 const name = (page: Page, project: string) => page.getByTestId(`project-header-${project}`)
-
-/** A list that folds stays 150 ms (usePresence) on the same fake clock: wait until it is leaving, then let the exit end */
-async function exitEnds(page: Page, project: string) {
-  await expect(page.getByTestId(`project-rows-${project}`)).toHaveAttribute('data-fold', 'closing')
-  await page.clock.runFor(151)
-}
 
 async function foldedProjects(page: Page, names: string[]) {
   await page.clock.install()
@@ -27,10 +21,10 @@ async function foldedProjects(page: Page, names: string[]) {
   await page.clock.pauseAt(new Date(Date.now() + 60_000))
 }
 
-test('Hover: resting 0.1 s on a folded name expands it, leaving the block folds it; the saved fold is untouched', async ({ page }) => {
+test('Hover: resting 0.2 s on a folded name expands it, leaving the block folds it; the saved fold is untouched', async ({ page }) => {
   await foldedProjects(page, ['alpha', 'beta'])
   await name(page, 'alpha').hover()
-  await page.clock.runFor(99)
+  await page.clock.runFor(199)
   await expect(rows(page, 'alpha')).toHaveCount(0)
   await page.clock.runFor(2)
   await expect(rows(page, 'alpha')).toHaveCount(1)
@@ -43,14 +37,13 @@ test('Hover: resting 0.1 s on a folded name expands it, leaving the block folds 
   await expect(rows(page, 'alpha')).toHaveCount(1)
   // Out of the block: folds
   await page.mouse.move(900, 600)
-  await exitEnds(page, 'alpha')
   await expect(rows(page, 'alpha')).toHaveCount(0)
 })
 
 test('Hover: passing over a name does not expand it', async ({ page }) => {
   await foldedProjects(page, ['alpha'])
   await name(page, 'alpha').hover()
-  await page.clock.runFor(60)
+  await page.clock.runFor(150)
   await expect(rows(page, 'alpha')).toHaveCount(0)
   await page.mouse.move(900, 600)
   await page.clock.runFor(1000)
@@ -61,7 +54,7 @@ test('Hover: moving down across three folded projects expands none of them', asy
   await foldedProjects(page, ['alpha', 'beta', 'gamma'])
   for (const n of ['alpha', 'beta', 'gamma']) {
     await name(page, n).hover()
-    await page.clock.runFor(60)
+    await page.clock.runFor(100)
     // Checked while the pointer is still on the name: a project that expanded and folded again would pass the final check
     await expect(rows(page, n)).toHaveCount(0)
   }
@@ -122,7 +115,6 @@ test('Hover: an open project menu keeps a hover-expanded project until it closes
   await page.clock.runFor(500)
   await expect(rows(page, 'alpha')).toHaveCount(1)
   await page.keyboard.press('Escape')
-  await exitEnds(page, 'alpha')
   await expect(rows(page, 'alpha')).toHaveCount(0)
 })
 

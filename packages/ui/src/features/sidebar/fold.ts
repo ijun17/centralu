@@ -70,14 +70,14 @@ export function groupAttention(
   return found
 }
 
-/** How long the pointer rests on a folded project's name row before it expands (owner, 2026-10-26: 200 ms in #1578, 100 ms in #1605). The orchestrator's button shares it (#1591) */
-export const HOVER_EXPAND_MS = 100
+/** How long the pointer rests on a folded project's name before it expands (owner, 2026-10-26, #1578) */
+export const HOVER_EXPAND_MS = 200
 
 /**
  * The transient expansion of a folded project under the pointer (#1578). It lives on top of the saved fold and never
  * writes to it: the block reads `saved fold && !open`. One timer per project: it starts when the pointer enters the name
- * row (all of it, the empty space beside the name included, #1605) and is cleared when it leaves, so a pass shorter than
- * `HOVER_EXPAND_MS` does nothing. Only a mouse pointer counts; keyboard focus and touch never call `enterRow`.
+ * and is cleared when it leaves, so a pass shorter than `HOVER_EXPAND_MS` does nothing. Only a mouse pointer counts;
+ * keyboard focus and touch never call `enterName`.
  *
  * `leaveBlock` folds again, unless something holds the project as it is (an open menu, a drag): `hold(true)` defers the
  * fold, and `hold(false)` settles it by asking `pointerInside` where the pointer is now.
@@ -95,8 +95,8 @@ export class HoverExpander {
     },
   ) {}
 
-  /** The pointer came onto a folded project's name row (or the orchestrator's button) */
-  enterRow(folded: boolean): void {
+  /** The pointer came onto a folded project's name */
+  enterName(folded: boolean): void {
     this.clearTimer()
     if (!folded || this.open) return
     const start =
@@ -111,8 +111,8 @@ export class HoverExpander {
     }, HOVER_EXPAND_MS)
   }
 
-  /** The pointer left the row or pressed on it (still inside the block): a rest that has not finished is cancelled; an expansion stays */
-  leaveRow(): void {
+  /** The pointer left the name (still inside the block): a rest that has not finished is cancelled; an expansion stays */
+  leaveName(): void {
     this.clearTimer()
   }
 

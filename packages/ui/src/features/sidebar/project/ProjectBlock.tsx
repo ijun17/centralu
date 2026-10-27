@@ -11,7 +11,6 @@ import { useProjectApps } from '../../../store/app-catalog.js'
 import { PROJECT_MIME, moveTo } from '../reorder.js'
 import { useDropLine, dropLine } from '../dragDrop.js'
 import { HoverExpander } from '../fold.js'
-import { Fold } from '../../../components/Fold.jsx'
 import { TrustAsk } from './TrustAsk.jsx'
 import { AppRows } from '../apps/AppRows.jsx'
 import { ProjectHeader } from './ProjectHeader.jsx'
@@ -53,12 +52,10 @@ export function ProjectBlock({ projectId }: { projectId: string }) {
   const [instructing, setInstructing] = useState(false)
   // Fold state (#205) — held by the store: remembered per project and persists across restarts
   const savedFolded = useStore((s) => s.foldedProjects.includes(projectId))
-  // Until the saved folds are read the list is drawn open and then folds; that is not a fold the person made, so it does not slide
-  const workspaceReady = useStore((s) => s.workspaceReady)
   const toggleFold = (id: string) => useStore.getState().toggleProjectFold(id)
   /*
-   * Hover expansion (#1578): a transient state on top of the saved fold, never written to it. Resting the pointer 0.1 s on
-   * a folded project's name row (any part of it, #1605) shows its rows; leaving the whole block hides them again. A click on the project makes it
+   * Hover expansion (#1578): a transient state on top of the saved fold, never written to it. Resting the pointer 0.2 s on
+   * a folded project's name shows its rows; leaving the whole block hides them again. A click on the project makes it
    * stay, which is the saved fold taking over (`pin`).
    */
   const [hoverOpen, setHoverOpen] = useState(false)
@@ -86,7 +83,7 @@ export function ProjectBlock({ projectId }: { projectId: string }) {
   }
   const pinHoverExpanded = () => {
     // Pressing the name of a folded project is a decision not to wait for the rest: no expansion follows it
-    if (!hoverActive) return expander.leaveRow()
+    if (!hoverActive) return expander.leaveName()
     expander.reset()
     toggleFold(projectId)
   }
@@ -147,8 +144,8 @@ export function ProjectBlock({ projectId }: { projectId: string }) {
         savedFolded={savedFolded}
         onToggleFold={toggleFoldFromClick}
         onPin={pinHoverExpanded}
-        onRowEnter={() => expander.enterRow(savedFolded)}
-        onRowLeave={() => expander.leaveRow()}
+        onNameEnter={() => expander.enterName(savedFolded)}
+        onNameLeave={() => expander.leaveName()}
         onMenuChange={setHeaderMenuOpen}
         sessions={sessions}
         rootApp={rootApp}
@@ -172,25 +169,27 @@ export function ProjectBlock({ projectId }: { projectId: string }) {
         to show it would be a spot that never accepts the drop anyway. If a session's own project
         is folded, there is no row to drag from it in the first place.
       */}
-      {/*
-        The rows slide open and closed (#1605) and stay until the exit ends, so a fold does not blink. A row that arrives in
-        an open project does not slide: the fold is already open, and only a fold moves. An open project with no session and
-        no app draws nothing below its line: no empty gap under the header (the gap is the rows' own padding).
-      */}
-      <Fold open={!folded} instant={!workspaceReady} className={sessions.length > 0 || projectApps.length > 0 ? 'pt-1.5' : undefined} testId={`project-rows-${project.name}`}>
-        <ProjectSessionList
-          projectId={projectId}
-          sessions={sessions}
-          groupedSessions={groupedSessions}
-          renaming={renaming}
-          setRenaming={setRenaming}
-          sessionMenu={sessionMenu}
-          setSessionMenu={setSessionMenu}
-          setHandingOff={setHandingOff}
-          setConfirming={setConfirming}
-        />
-        <AppRows apps={projectApps} sessionsByApp={groupedSessions.byApp} testId={`project-apps-${project.name}`} />
-      </Fold>
+      {/* An open project with no session and no app draws nothing below its line: no empty gap under the header */}
+      {!folded && (sessions.length > 0 || projectApps.length > 0) && (
+        <div className="mt-1.5">
+          <ProjectSessionList
+            projectId={projectId}
+            sessions={sessions}
+            groupedSessions={groupedSessions}
+            renaming={renaming}
+            setRenaming={setRenaming}
+            sessionMenu={sessionMenu}
+            setSessionMenu={setSessionMenu}
+            setHandingOff={setHandingOff}
+            setConfirming={setConfirming}
+          />
+          <AppRows
+            apps={projectApps}
+            sessionsByApp={groupedSessions.byApp}
+            testId={`project-apps-${project.name}`}
+          />
+        </div>
+      )}
 
       {newSessionOpen && <NewSessionDialog projectId={projectId} onClose={() => openNewSession(null)} />}
       {newAppOpen && <NewAppDialog projectId={projectId} onClose={() => setNewAppOpen(false)} />}
