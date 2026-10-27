@@ -2028,7 +2028,8 @@ export class SessionManager {
     const run = this.agentRuns.get(sessionId)
     if (run) run.stoppedByPerson = true
     for (const observer of this.turnObservers.get(sessionId) ?? []) observer.stoppedByPerson = true
-    // A stop ends what was given the tool: no message sent before it runs as a turn after (#1604)
+    // A stop takes off what a hub gave the tool for turns to come (#1604). A message the CLI keeps queued past a plain interrupt
+    // still runs as a turn after it, and that turn is then refused as the caller's, as it was before origins
     this.children.dropInputOrigins(sessionId)
     handle.interrupt()
     // Stop reaches delegated work only while the caller waits. A note that joined the person's turn
