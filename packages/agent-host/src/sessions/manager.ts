@@ -1295,7 +1295,7 @@ export class SessionManager {
           // Not sent once this host is leaving (a second update's stop while the session wakes): the host after it sends the one
           await this.events.deliverMail(
             sessionId,
-            { text: UPDATE_CONTINUE_TEXT, quiet: false, line: UPDATE_CONTINUE_LINE, label: 'update', lineUnlessLeaving: true },
+            { text: UPDATE_CONTINUE_TEXT, quiet: false, line: UPDATE_CONTINUE_LINE, label: 'update', skipLine: () => this.disposing && this.stoppingForUpdate },
             { leaving: () => this.handingOver || this.disposing, atRest: () => true },
           )
         } catch (e) {

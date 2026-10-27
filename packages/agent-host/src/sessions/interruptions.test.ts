@@ -670,6 +670,44 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     expect(lines(child).filter((l) => l.includes('Centralu continued it'))).toHaveLength(1)
   })
 
+  it("a Continue the tool takes as the person quits is recorded by its line, so the list left standing names no turn that quit cut (#1626 review)", async () => {
+    const f = folder()
+    const a = host({ updateResume: f })
+    const { child } = await parentAndChild(a)
+    await stopForUpdate(a)
+    const b = host({ updateResume: f })
+    let accept: (() => void) | undefined
+    const create = b.claude.createSession.bind(b.claude)
+    b.claude.createSession = async (opts, emit) => {
+      const h = await create(opts, emit)
+      if (opts.sessionId !== child) return h
+      return Object.assign(h, {
+        sendTracked: (text: string, observer?: { accepted?: () => void }) => {
+          h.send(text)
+          return new Promise<void>((r) => {
+            accept = () => {
+              observer?.accepted?.()
+              r()
+            }
+          })
+        },
+      })
+    }
+    await eventually(() => accept !== undefined)
+    // A plain stop, not an update's: it lists nothing, and the list the first update left is still there
+    const stopping = b.mgr.disposeAll()
+    accept!()
+    await stopping
+    expect(lines(child).filter((l) => l.includes('Centralu continued it'))).toHaveLength(1)
+    const c = host({ updateResume: f })
+    // A quit's turn, told as one: not continued again as an update's
+    expect(info(c, child)).toMatchObject({ state: 'idle', interruption: { reason: 'quit' } })
+    await startNoticesRan()
+    await new Promise((r) => setTimeout(r, 50))
+    expect(c.claude.handles.has(child)).toBe(false)
+    expect(f.ids()).toBeNull()
+  })
+
   it('a host that starts to leave while the session wakes sends it no note, and the next host sends the one (#1626 review)', async () => {
     const f = folder()
     const a = host({ updateResume: f })

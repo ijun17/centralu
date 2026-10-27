@@ -3556,8 +3556,9 @@ the person's Continue would.
   killed while it wrote is not JSON and goes at the next start. A host that stops before then (its check failed and the
   update puts the old one back, a second update, a rollback) leaves the lists and writes its own with the turns it cuts,
   the continued ones included, so the host after it continues them; a Continue the tool takes while the host is leaving
-  is left to that next host, which sends the note, writes the line and tells the requester: the leaving host writes no
-  line of its own for it, so the conversation shows one Continue. Nothing expires: a list is the next start's, whenever it comes,
+  is left to that next host, which sends the note, writes the line and tells the requester: a host leaving for a second
+  update writes no line of its own for it, so the conversation shows one Continue. A person's quit or a swap lists nothing,
+  so there the line is written: it is the row that carries the conversation past the mark of the list still standing. Nothing expires: a list is the next start's, whenever it comes,
   on that machine's own clock. A list of another format continues nothing and is left to the host that wrote it.
 - **Continued.** A listed session the start finds mid-turn with no process stays `working` (no "stopped" mark, no quit
   notice), its owed report and its delegated turn kept as a kept process's are, and once the start is done it is woken

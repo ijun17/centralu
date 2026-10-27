@@ -690,7 +690,7 @@ export class SessionEvents {
   async deliverMail(
     sessionId: string,
     /** `label`: the conversation line's kind (`mail` when absent); an update's continued turn says `update` (#1618) */
-    input: { text: string; quiet: boolean; line: string; label?: string; lineUnlessLeaving?: true },
+    input: { text: string; quiet: boolean; line: string; label?: string; skipLine?: () => boolean },
     gate: { leaving(): boolean; atRest(): boolean } = { leaving: () => false, atRest: () => true },
     late?: (e: Error) => void,
   ): Promise<void> {
@@ -724,11 +724,13 @@ export class SessionEvents {
       await takeInput(handle, input.text, late)
     }
     /*
-     * A Continue the tool took as this host began to leave (a second update's stop, #1626 review) is left to the host after it:
-     * it lists the turn again and continues it with a note and a line of its own, so the conversation shows one Continue, not
-     * two. Only for the update's note: a mail the tool took stays recorded by its line, which is its only trace
+     * A Continue the tool took as a second update's stop began (#1626 review) is left to the host after it: that stop lists
+     * the turn again and the host after continues it with a note and a line of its own, so the conversation shows one
+     * Continue. Only for that stop: a person's quit or a swap lists nothing, so its line is the row that carries the
+     * conversation past the mark of the list still standing, and it is written. Only for the update's note: a mail the tool
+     * took stays recorded by its line, which is its only trace
      */
-    if (input.lineUnlessLeaving && gate.leaving()) return
+    if (input.skipLine?.()) return
     // After the tool took it, so the line is never about a delivery that did not happen; before the answer it starts
     this.onEvent({ type: 'notice', sessionId, level: 'info', from: 'Centralu', label: input.label ?? 'mail', text: input.line })
   }
