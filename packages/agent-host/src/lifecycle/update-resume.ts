@@ -1,58 +1,78 @@
 import { errorMessage } from '@cc/protocol'
 
 /**
- * The turns a linked hub's update of this machine ended (#1618, docs/agent-host.md §4.8 "Continuing the turns an update
- * cut"). Before it stops this machine's host to update it, the hub reads which sessions are in a turn (`host.activity`'s
- * `inTurn`), and the step that writes the version pointers (`remote-install.mjs`, action `pointers`) writes their ids to
- * this file in the data folder. The next host to start in the folder takes it (`takeUpdateResume`, stopped-mark.ts, which
- * reads the folder's marks): each listed session its start finds cut is continued once, rather than left stopped for
- * someone to continue by hand. A host from before this file ignores it, as today.
+ * The turns an update of this machine cut (#1618, docs/agent-host.md §4.8 "Continuing the turns an update cut"). A linked
+ * hub that stops this machine's host to update it, roll it back or put the previous version back says so in its stop
+ * (`centralu serve --stop` with `CENTRALU_STOP_FOR=update`, `host.stop { forUpdate }`). The stopping host then writes, as it
+ * lets its sessions go, the ids of those in a turn (`cutTurns`, idle.ts) into this file in the data folder: the turns it
+ * ends itself, on its own clock, with nothing between the reading and the stop, and no link that could drop between them.
+ *
+ * The next host to start in the folder reads it (`readUpdateResume`): each listed session its start finds cut is kept in
+ * its turn and continued once, and its id leaves the file only once that Continue was sent or the turn was reported as
+ * lost (`dropFromUpdateResume`). A host that stops before then (a failed check, a rollback, a second update) leaves the
+ * rest listed, and adds what it cuts itself. Nothing expires: the file is the next start's, whenever it comes. A host from
+ * before this file never writes it and ignores it, as before.
  */
 export const UPDATE_RESUME_FILE = 'update-resume.json'
 
-/**
- * How old the file may be: an update writes it seconds before the start that reads it. One left by an update whose new
- * host never started (the machine was switched off) names turns long over, which nobody expects to come back.
- */
-export const UPDATE_RESUME_MAX_AGE_MS = 10 * 60_000
+/** At most this many ids are kept: more sessions than this in a turn at once is no machine this was built for */
+const MAX_IDS = 1000
+const ID = /^[0-9A-Za-z_.:-]{1,200}$/
 
-/** The file, as the start reaches it: its text (null when there is none), and its removal (throws when it cannot) */
-export type UpdateResumeFile = { read(): string | null; remove(): void }
+/** The file, as the hosts reach it: its text (null when there is none), a write that replaces it whole, and its removal */
+export type UpdateResumeFile = { read(): string | null; write(text: string): void; remove(): void }
 
-/**
- * The ids the file names, read once: the file goes before anything is sent, so a host that starts again after this one
- * continues nothing a second time. Empty when there is none, when it is too old or from a newer format, or unreadable.
- * Never fatal: a file this host cannot read or remove only means no turn is continued for it.
- */
-export function takeUpdateResumeFrom(file: UpdateResumeFile, now: number): ReadonlySet<string> {
-  const text = file.read()
-  if (text === null) return new Set()
-  try {
-    file.remove()
-  } catch (err) {
-    // Left there, the next start would continue the same turns again: none is continued
-    console.error(`[agent-host] ${UPDATE_RESUME_FILE} could not be removed (${errorMessage(err)}); no turn the update ended is continued`)
-    return new Set()
-  }
-  return parseUpdateResume(text, now)
-}
-
-/** The ids of a file's text, by the rules of `takeUpdateResumeFrom` */
-export function parseUpdateResume(text: string, now: number): ReadonlySet<string> {
+/** The ids a file's text names; none when it is unreadable or from a newer format */
+export function parseUpdateResume(text: string | null): string[] {
+  if (text === null) return []
   let o: unknown
   try {
     o = JSON.parse(text)
   } catch {
+    return []
+  }
+  if (typeof o !== 'object' || o === null || !('v' in o) || o.v !== 1 || !('ids' in o) || !Array.isArray(o.ids)) return []
+  return [...new Set(o.ids.filter((id): id is string => typeof id === 'string' && ID.test(id)))].slice(0, MAX_IDS)
+}
+
+const textOf = (ids: readonly string[]) => `${JSON.stringify({ v: 1, ids })}\n`
+
+/**
+ * Adds the turns this stop cuts to what the file already lists (#1618): a host that stopped again before it continued the
+ * turns an earlier stop cut leaves those listed too, so none is continued zero times. Never fatal: a stop goes on whatever
+ * the folder says, and a turn not written here ends as a stop's always did
+ */
+export function recordUpdateCut(file: UpdateResumeFile, cut: readonly string[]): void {
+  try {
+    const ids = [...new Set([...parseUpdateResume(file.read()), ...cut.filter((id) => ID.test(id))])].slice(0, MAX_IDS)
+    if (ids.length) file.write(textOf(ids))
+  } catch (err) {
+    console.error(`[agent-host] ${UPDATE_RESUME_FILE} could not be written (${errorMessage(err)}); the turns this update ends are not continued`)
+  }
+}
+
+/** The ids the next start continues, read without taking them: each leaves the file once it is dealt with */
+export function readUpdateResume(file: UpdateResumeFile): ReadonlySet<string> {
+  try {
+    return new Set(parseUpdateResume(file.read()))
+  } catch {
     return new Set()
   }
-  if (typeof o !== 'object' || o === null) return new Set()
-  const at = 'at' in o ? o.at : undefined
-  const ids = 'ids' in o ? o.ids : undefined
-  if (!('v' in o) || o.v !== 1 || typeof at !== 'number' || !Array.isArray(ids)) return new Set()
-  // A clock that went back a little between the write and this start is not a reason to drop it
-  if (Math.abs(now - at) > UPDATE_RESUME_MAX_AGE_MS) {
-    console.error(`[agent-host] ${UPDATE_RESUME_FILE} was written ${Math.round((now - at) / 60_000)} min from now; the turns it names are not continued`)
-    return new Set()
+}
+
+/**
+ * One listed turn dealt with: continued, reported as lost, or not found cut. Its id leaves the file, and the file goes with
+ * the last one, so a later start continues it no second time. A file this host cannot change is said once, in the log: the
+ * next start would find that session at rest, or in a turn of its own, and leaves it alone either way
+ */
+export function dropFromUpdateResume(file: UpdateResumeFile, id: string): void {
+  try {
+    const ids = parseUpdateResume(file.read())
+    if (!ids.includes(id)) return
+    const rest = ids.filter((x) => x !== id)
+    if (rest.length) file.write(textOf(rest))
+    else file.remove()
+  } catch (err) {
+    console.error(`[agent-host] ${UPDATE_RESUME_FILE} could not be changed (${errorMessage(err)})`)
   }
-  return new Set(ids.filter((id): id is string => typeof id === 'string' && id.length > 0 && id.length <= 200))
 }

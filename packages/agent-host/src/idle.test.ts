@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { activityCounts, hostBusy, hostBusyBesides, updateAtRest, type ActivitySnapshot, type IdleActivity } from './idle.js'
+import { activityCounts, cutTurns, hostBusy, hostBusyBesides, updateAtRest, type ActivitySnapshot, type IdleActivity } from './idle.js'
 
 describe('activityCounts (host.activity, for the "Update <machine>" prompt)', () => {
   const live = (over: Partial<IdleActivity>): IdleActivity => ({ state: 'waiting_input', live: true, ...over })
@@ -17,15 +17,13 @@ describe('activityCounts (host.activity, for the "Update <machine>" prompt)', ()
       terminals: 2,
       commandRuns: 1,
     }
-    const { inTurn: _ids, ...counts } = activityCounts(s)
-    expect(counts).toEqual({ working: 1, approvals: 2, questions: 1, background: 0, terminals: 2, commandRuns: 1 })
+    expect(activityCounts(s)).toEqual({ working: 1, approvals: 2, questions: 1, background: 0, terminals: 2, commandRuns: 1 })
     const idle: ActivitySnapshot = { sessions: [live({}), live({ state: 'working', live: false })], terminals: 0, commandRuns: 0 }
     expect(hostBusy(idle)).toBe(false)
-    const { inTurn: _none, ...nothing } = activityCounts(idle)
-    expect(Object.values(nothing).every((n) => n === 0)).toBe(true)
+    expect(Object.values(activityCounts(idle)).every((n) => n === 0)).toBe(true)
   })
 
-  // #1618: the turns a stop ends, by id, which a hub's update has the next host continue
+  // #1618: the turns a stop ends, by id, which the host an update stops lists for the next one to continue
   it('names the sessions in a turn: working or waiting on a card, the ones the next start finds cut', () => {
     const s: ActivitySnapshot = {
       sessions: [
@@ -39,7 +37,7 @@ describe('activityCounts (host.activity, for the "Update <machine>" prompt)', ()
       commandRuns: 0,
     }
     // Background work alone is no turn to continue; a session waking (no process yet) is in one all the same
-    expect(activityCounts(s).inTurn).toEqual(['a', 'b', 'e'])
+    expect(cutTurns(s)).toEqual(['a', 'b', 'e'])
   })
 
   it('counts a question as a question though it blocks the session as an approval does (#428)', () => {

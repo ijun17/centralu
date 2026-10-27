@@ -1,4 +1,4 @@
-import { errorMessage, HostActivity, HostSessionRow, isInTurn, isLocalBuildVersion, isNewerVersion, releaseOf, turnsRunning } from '@cc/protocol'
+import { errorMessage, HostActivity, isLocalBuildVersion, isNewerVersion, releaseOf, turnsRunning } from '@cc/protocol'
 import type { MachineAutostartResult, MachineInfo, MachineInstallResult, MachineOperation, MachineUninstallResult } from '@cc/protocol'
 import { autostartRemote } from './autostart.js'
 import { installRemote, type InstallResult } from './install.js'
@@ -8,7 +8,7 @@ import { belowFloor, NodeTooOld, switchedSentence, updateNodeSentence } from './
 import { installVersion, type InstallVersion } from './registry.js'
 import { RemoteClient } from './remote-client.js'
 import { npmInstall, type RemoteCommand, type RemoteRun } from './tunnel.js'
-import { rollbackRemote, uninstallRemote, updateRemote, type HostControl, type StopPlan, type UpdateStep } from './update.js'
+import { rollbackRemote, uninstallRemote, updateRemote, type HostControl, type UpdateStep } from './update.js'
 import { rpcError } from '../rpc-error.js'
 
 /**
@@ -24,12 +24,6 @@ const ACTIVITY_POLL_MS = 15_000
 const ACTIVITY_SETTLE_MS = 3_000
 /** How many times a reading that failed is repeated before the update stops waiting for what it cannot see (#1399) */
 const ACTIVITY_UNREAD_RETRIES = 2
-/**
- * How long after an update stopped the host there the hub still knows which turns that stop ended (#1618): the next host
- * continues them at its start, and the link's catch-up tells their callers so. As long as the next host gives the file it
- * reads them from (`UPDATE_RESUME_MAX_AGE_MS`), plus the update's own steps after the stop
- */
-const UPDATE_CUT_KEPT_MS = 15 * 60_000
 /** How long after a failed update of its own the hub tries once more (#1508) */
 const FOLLOW_RETRY_MS = 10 * 60_000
 /** How many updates of its own the hub runs for one version of its own: the first, and one retry (#1508) */
@@ -167,7 +161,7 @@ export class LinkedMachine extends LinkedMachineConnection {
    * a successful reading of none in a turn, since a busy or dropped remote reads as failed too; Cancel or Update now are the ways
    * out. `now`, and every update nobody approved (`unasked`, #1508; at once since #1618): `stopAtOnce`.
    */
-  private async beforeStop(c: HostControl, when: 'idle' | 'now', unasked = false): Promise<StopPlan> {
+  private async beforeStop(c: HostControl, when: 'idle' | 'now', unasked = false): Promise<string | null> {
     if (when === 'now' || unasked) return this.stopAtOnce(unasked)
     const wait = new AbortController()
     this.idleWait = wait
@@ -209,7 +203,7 @@ export class LinkedMachine extends LinkedMachineConnection {
             // Only a reading that succeeded and shows nobody in a turn lets the host be stopped: a failed one proves nothing
             if (again.activity && turnsRunning(again.activity) === 0) {
               if (shown) c.step('stop')
-              return { note: null, resume: [] }
+              return null
             }
             if (again.activity) busy(again.activity)
             else unread()
@@ -219,7 +213,7 @@ export class LinkedMachine extends LinkedMachineConnection {
         } else if (r.cannot || ++blind > ACTIVITY_UNREAD_RETRIES) {
           // Never read: there is nothing to wait for that could be seen, and waiting on it would never end
           this.deps.log?.(`[links] ${this.name}: it cannot be told what runs there, so the update does not wait for it`)
-          return { note: null, resume: [] }
+          return null
         }
         await pause(poll, wait.signal)
       }
@@ -231,54 +225,26 @@ export class LinkedMachine extends LinkedMachineConnection {
   /**
    * An update that does not wait (#1618): the person's `when: 'now'`, and every update nobody approved (owner, 2026-10-26: the
    * hub's own catch-up used to wait for the turns there, and for its terminals and project commands, and a machine always busy
-   * never updated). It reads what runs there once, right before the hold, and the host is stopped: the turns running end, and
-   * terminals and project commands close. The ids of the sessions in a turn go to the next host (`StopPlan.resume`), which
-   * continues each of those turns once, and are kept here a while (`updateCut`) so the callers of those sessions on this
-   * computer hear that their turn was cut and continued rather than that the link dropped.
+   * never updated). It reads what runs there once, for the answer's sentence, and the host is stopped: the turns running end,
+   * and terminals and project commands close. Which turns that stop ends the stopping host lists itself, as it stops
+   * (`host.stop { forUpdate }`, update.ts `stopRemoteHost`), and the host the update starts continues each of them once.
    *
    * An update nobody approved stops no host it cannot ask what runs (#1508): a reading that fails is tried again as
    * `probeActivity` does, then the update fails before the hold, nothing switched. The person's `now` goes on unread
    */
-  private async stopAtOnce(unasked: boolean): Promise<StopPlan> {
+  private async stopAtOnce(unasked: boolean): Promise<string | null> {
     const a = unasked ? await this.probeActivity() : await this.activity()
-    // A host from before `inTurn` (every machine the first time it follows a hub that has it): its sessions' states say the same
-    const resume = a ? (a.inTurn ?? (await this.sessionsInTurn())) : []
-    this.updateCut = resume.length ? { ids: new Set(resume), at: Date.now() } : null
     const running = turnsRunning(a)
     const open = a ? a.terminals + a.commandRuns : 0
-    if (unasked) this.deps.log?.(`[links] ${this.name}: updating it now, since automatic updates are on${running ? `; ${running} ${running === 1 ? 'session' : 'sessions'} in a turn there continue on the new version` : ''}`)
-    if (running === 0) return { note: null, resume }
+    // A host from before #1618 lists nothing as it stops, and its turns end as before
+    const goesOn = this.continuesCutTurns()
+    const after = goesOn ? 'Centralu continues each of those turns on the new version' : 'they resume on the new version, and a turn in progress was lost'
+    if (unasked) this.deps.log?.(`[links] ${this.name}: updating it now, since automatic updates are on${running ? `; ${running} ${running === 1 ? 'session' : 'sessions'} in a turn there: ${after}` : ''}`)
+    if (running === 0) return null
     const closed = open ? `, and ${open} open ${open === 1 ? 'terminal or project command' : 'terminals and project commands'} there closed` : ''
-    const note = `Updating stopped Centralu on ${this.name} with ${running} ${running === 1 ? 'session' : 'sessions'} in a turn; Centralu continues each of those turns on the new version${closed}`
+    const note = `Updating stopped Centralu on ${this.name} with ${running} ${running === 1 ? 'session' : 'sessions'} in a turn; ${after}${closed}`
     this.deps.log?.(`[links] ${this.name}: ${note}`)
-    return { note, resume }
-  }
-
-  /** The sessions in a turn there, by their states (`host.sessions`), for a host whose `host.activity` does not list them; none when unread */
-  private async sessionsInTurn(): Promise<string[]> {
-    if (!this.client?.connected) return []
-    try {
-      const rows = await this.client.call('host.sessions', {})
-      return (Array.isArray(rows) ? rows : []).flatMap((r) => {
-        const row = HostSessionRow.safeParse(r)
-        return row.success && isInTurn(row.data.state) ? [row.data.sessionId] : []
-      })
-    } catch {
-      return []
-    }
-  }
-
-  /**
-   * The turns the last update's stop ended there (#1618), the machine's own ids, while the next host may still be continuing
-   * them (`UPDATE_CUT_KEPT_MS`): what the callers of those sessions here are told when the link is back. Null when none
-   */
-  private updateCut: { ids: ReadonlySet<string>; at: number } | null = null
-
-  /** `updateCut`, while it is recent; `at` tells one update's cut from the next's */
-  cutByUpdate(sessionId: string): number | null {
-    const cut = this.updateCut
-    if (!cut || Date.now() - cut.at > UPDATE_CUT_KEPT_MS || !cut.ids.has(sessionId)) return null
-    return cut.at
+    return note
   }
 
   /**

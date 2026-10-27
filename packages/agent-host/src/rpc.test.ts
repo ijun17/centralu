@@ -52,6 +52,15 @@ describe('host.stop', () => {
     expect(stopped).toBe(1)
   })
 
+  it('says whether a linked hub stops it for an update, so the turns it ends are listed for the next host (#1618)', async () => {
+    const asked: { forUpdate: boolean }[] = []
+    const rpc = await handler({ stopHost: (o) => void asked.push(o) })
+    await rpc('host.stop', { forUpdate: true })
+    await rpc('host.stop', {})
+    await new Promise((r) => setTimeout(r, 100))
+    expect(asked).toEqual([{ forUpdate: true }, { forUpdate: false }])
+  })
+
   it('is refused by a host with nothing to stop it through (one the app runs)', async () => {
     const rpc = await handler({})
     await expect(rpc('host.stop', {})).rejects.toThrow(/quit the app instead/)

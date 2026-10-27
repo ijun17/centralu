@@ -207,7 +207,7 @@ export class RemoteAgents {
    * turned Auto reconnect off, or disconnected it, while it was down
    */
   private readonly toldDown = new Map<string, boolean>()
-  /** The turns an update of their machine cut whose callers were told it goes on (#1618), by session and update: once each */
+  /** The turns an update of their machine cut whose callers were told it goes on (#1618), by session and when it was continued: once each */
   private readonly toldCut = new Set<string>()
   /** The cards of a caller's turn its caller was told of, once each (`<session>\0<turn>\0<request>`, #676) */
   private readonly toldCards = new Set<string>()
@@ -1189,7 +1189,7 @@ export class RemoteAgents {
    * (`LinkedReports.linkChanged`).
    */
   private linkChanged(machine: unknown): void {
-    const m = machine as { id?: unknown; name?: unknown; status?: unknown; autoReconnect?: unknown } | null
+    const m = machine as { id?: unknown; name?: unknown; status?: unknown; autoReconnect?: unknown; operation?: { kind?: unknown } | null } | null
     if (!m || typeof m.id !== 'string' || m.status === 'connected') return
     /*
      * Nothing here reconnects it (#1341): the person disconnected it, or its Auto reconnect is off and the attempt that
@@ -1217,13 +1217,12 @@ export class RemoteAgents {
       if (!report || report.orchestratorId !== rec.callerId || report.paused || (told !== undefined && (told || !alone))) continue
       if (mayRecover) continue
       /*
-       * An update that stopped the machine's host with this turn running has the host it starts continue it (#1618): the caller
-       * hears that once the link is back (`caughtUp`), not that the link dropped. While the update holds the link and its check
-       * opens it again, the row says `updating`, `starting` or `connecting`; a machine that does not come back is
-       * `unreachable` then, and this tells as for any drop
+       * This hub's own update or rollback of the machine holds the link (#1618): its stop ends this turn, and the host it starts
+       * continues it, when the machine's host is one that does (its hello's `updateContinued`). The caller hears that once the
+       * link is back (`caughtUp`), not that the link dropped. An update that ends with the machine not back clears the row's
+       * operation, and the drop is told then as any is. A host from before that is told as before
        */
-      const cutAt = this.host.linkedReader?.cutByUpdate?.(rec.sessionId) ?? null
-      if (cutAt !== null && !this.toldCut.has(`${rec.sessionId}@${cutAt}`) && (m.status === 'updating' || m.status === 'starting' || m.status === 'connecting')) continue
+      if (updating(m.operation) && this.host.linkedReader?.continuesCutTurns?.(m.id) === true) continue
       this.toldDown.set(rec.sessionId, alone)
       const why = !alone
         ? 'It cannot be followed until the link is back: '
@@ -1284,7 +1283,7 @@ export class RemoteAgents {
    * neither waits on a link that came back nor continues the child by hand a second time
    */
   private tellContinued(rec: RemoteAgent): void {
-    const at = this.host.linkedReader?.cutByUpdate?.(rec.sessionId)
+    const at = this.host.linkedReader?.continuedAfterUpdate?.(rec.sessionId)
     if (at == null || this.toldCut.has(`${rec.sessionId}@${at}`)) return
     this.toldCut.add(`${rec.sessionId}@${at}`)
     const rest = 'and Centralu continued it there on the new version. Its report comes when that turn ends; nothing is needed from you now.'
@@ -1424,4 +1423,9 @@ export class RemoteAgents {
     const listed = read.map(({ p, r }) => `"${p.name}" (${r.ok ? shownRemote(r.origin) : 'not read'})`).join(', ')
     return { error: `${machine.name} has no checkout of ${key}, so nothing was started there.${listed ? ` Its projects: ${listed}.` : ' It has no projects.'} The person can clone it there first.` }
   }
+}
+
+/** The row's operation is this hub's update or rollback of the machine, whose stop and start hold the link (#1618) */
+function updating(op: { kind?: unknown } | null | undefined): boolean {
+  return op?.kind === 'update' || op?.kind === 'rollback'
 }

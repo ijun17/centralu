@@ -626,6 +626,26 @@ describe('linked machines (#82)', () => {
     expect(resume.mock.calls.map(([id]) => id)).toEqual(['box.mw-1'])
   })
 
+  it('a resync leaves a session the machine continues itself to it, and counts only what it wakes (#1618 review D4)', async () => {
+    const mock = new MockPlatform()
+    mock.machinesList = [box()]
+    const remote = await mock.projects.add('/srv/app', 'box')
+    mock.sessions.set('box.mc-rest', sessionInfo('box.mc-rest', { projectId: remote.id, machine: 'box' }))
+    mock.sessions.set('box.mc-cut', sessionInfo('box.mc-cut', { projectId: remote.id, machine: 'box', state: 'working' }))
+    await useStore.getState().attach(mock)
+    const resume = vi.spyOn(mock.agents, 'resumeSession')
+
+    // An update stopped the host there: the session at rest lost its process, and the one in a turn waits for its Continue
+    mock.sessions.get('box.mc-rest')!.live = false
+    mock.sessions.get('box.mc-cut')!.live = false
+    mock.emit({ type: 'machine_resync', machineId: 'box' })
+
+    await vi.waitFor(() => expect(resume).toHaveBeenCalledWith('box.mc-rest'))
+    await settle()
+    expect(resume.mock.calls.map(([id]) => id)).toEqual(['box.mc-rest'])
+    expect(useStore.getState().toast).toMatch(/resuming 1 session$/)
+  })
+
   it('a resync re-reads the open conversations of that machine only', async () => {
     const mock = new MockPlatform()
     mock.machinesList = [box()]

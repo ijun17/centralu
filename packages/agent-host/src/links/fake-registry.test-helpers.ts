@@ -120,7 +120,7 @@ const a = process.argv.slice(2).join(' ')
 const log = (s) => appendFileSync(d + '/events', s + '\\n')
 if (a === 'serve --stop') {
   const was = existsSync(d + '/running')
-  log('stop ' + (was ? readFileSync(d + '/running', 'utf8') : '-') + (existsSync(d + '/remote/hold.json') ? ' (held)' : ''))
+  log('stop ' + (was ? readFileSync(d + '/running', 'utf8') : '-') + (existsSync(d + '/remote/hold.json') ? ' (held)' : '') + (process.env.CENTRALU_STOP_FOR === 'update' ? ' (for update)' : ''))
   rmSync(d + '/running', { force: true })
   console.log(JSON.stringify({ v: 1, stop: process.env.FAKE_STOP_FAILS ? { ok: false, wasRunning: true, message: 'the host on 127.0.0.1:4141 is still running' } : { ok: true, wasRunning: was } }))
 } else if (a === 'serve --detach') {

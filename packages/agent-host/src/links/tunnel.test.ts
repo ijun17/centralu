@@ -623,7 +623,7 @@ describe('the remote command per shell (#82)', () => {
   })
 
   it('a Windows remote never runs a bare centralu: PowerShell would resolve it to the .ps1 shim a default execution policy blocks (#688)', () => {
-    for (const cmd of [connectionCommand, detachCommand, stopCommand, serveCommand, (s: RemoteSpec) => autostartCommand(s, 'on'), (s: RemoteSpec) => autostartCommand(s, 'status')]) {
+    for (const cmd of [connectionCommand, detachCommand, (s: RemoteSpec) => stopCommand(s, { forUpdate: true }), serveCommand, (s: RemoteSpec) => autostartCommand(s, 'on'), (s: RemoteSpec) => autostartCommand(s, 'status')]) {
       const ps = decode(cmd({ shell: 'powershell' }))
       expect(ps).not.toMatch(/(?:&|Get-Command)\s+centralu(?!\.cmd)\b/)
       expect(ps).toMatch(/& centralu\.cmd /)
@@ -665,16 +665,29 @@ describe('the remote command per shell (#82)', () => {
 
   it('says it is the hub’s own stop to serve --stop in every shell, so serve leaves no mark of the person’s stop', () => {
     const decode = (cmd: string) => Buffer.from(cmd.split('-EncodedCommand ')[1]!, 'base64').toString('utf16le')
-    expect(stopCommand({ shell: 'posix' })).toMatch(/^sh -c 'CENTRALU_STOP_BY=hub; export CENTRALU_STOP_BY; d=/)
-    expect(decode(stopCommand({ shell: 'powershell' }))).toContain("$env:CENTRALU_STOP_BY = 'hub'; $d = ")
-    const wsl = decode(stopCommand({ shell: 'wsl', wslDistro: 'Ubuntu' }))
+    const stop = { forUpdate: false }
+    expect(stopCommand({ shell: 'posix' }, stop)).toMatch(/^sh -c 'CENTRALU_STOP_BY=hub; export CENTRALU_STOP_BY; d=/)
+    expect(decode(stopCommand({ shell: 'powershell' }, stop))).toContain("$env:CENTRALU_STOP_BY = 'hub'; $d = ")
+    const wsl = decode(stopCommand({ shell: 'wsl', wslDistro: 'Ubuntu' }, stop))
     const script = Buffer.from(/echo ([A-Za-z0-9+/=]+) \| base64/.exec(wsl)![1]!, 'base64').toString('utf8')
     expect(script).toContain('; CENTRALU_STOP_BY=hub; export CENTRALU_STOP_BY; d=')
+    // An uninstall's stop: no host starts after it, so none lists the turns it ends (#1618)
+    for (const cmd of [stopCommand({ shell: 'posix' }, stop), decode(stopCommand({ shell: 'powershell' }, stop)), script]) expect(cmd).not.toContain('CENTRALU_STOP_FOR')
     // Only the stop says it
     for (const cmd of [connectionCommand, detachCommand, serveCommand]) {
       expect(cmd({ shell: 'posix' })).not.toContain('CENTRALU_STOP_BY')
       expect(decode(cmd({ shell: 'powershell' }))).not.toContain('CENTRALU_STOP_BY')
     }
+  })
+
+  it('says a stop a host starts again after is for an update, in every shell, so the host lists the turns it ends (#1618)', () => {
+    const decode = (cmd: string) => Buffer.from(cmd.split('-EncodedCommand ')[1]!, 'base64').toString('utf16le')
+    const update = { forUpdate: true }
+    expect(stopCommand({ shell: 'posix' }, update)).toMatch(/^sh -c 'CENTRALU_STOP_BY=hub; export CENTRALU_STOP_BY; CENTRALU_STOP_FOR=update; export CENTRALU_STOP_FOR; d=/)
+    expect(decode(stopCommand({ shell: 'powershell' }, update))).toContain("$env:CENTRALU_STOP_BY = 'hub'; $env:CENTRALU_STOP_FOR = 'update'; $d = ")
+    const wsl = decode(stopCommand({ shell: 'wsl', wslDistro: 'Ubuntu' }, update))
+    const script = Buffer.from(/echo ([A-Za-z0-9+/=]+) \| base64/.exec(wsl)![1]!, 'base64').toString('utf8')
+    expect(script).toContain('; CENTRALU_STOP_BY=hub; export CENTRALU_STOP_BY; CENTRALU_STOP_FOR=update; export CENTRALU_STOP_FOR; d=')
   })
 
   it('reads the connection line past anything else the remote shell printed', () => {

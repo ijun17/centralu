@@ -1,68 +1,88 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { parseUpdateResume, takeUpdateResumeFrom, UPDATE_RESUME_MAX_AGE_MS, type UpdateResumeFile } from './update-resume.js'
+import { dropFromUpdateResume, parseUpdateResume, readUpdateResume, recordUpdateCut, type UpdateResumeFile } from './update-resume.js'
 
 /**
- * The file a linked hub's update leaves for the next host (#1618): the sessions whose turns the stop ended, which that host
- * continues once. Read once, then gone; too old, from another format or unreadable, it continues nothing. The folder is
- * played by a map here; stopped-mark.ts reaches the real one.
+ * The data folder's list of the turns an update cut (#1618): written by the host an update stops, as it stops, and read by
+ * the next. Each id leaves it only once its turn was dealt with, so no stop or failed start in between loses one, and a
+ * second stop adds to it rather than replacing it. The folder is played by a variable here; stopped-mark.ts reaches the
+ * real one.
  */
-const NOW = 1_800_000_000_000
 afterEach(() => vi.restoreAllMocks())
 
 /** A data folder holding the file's text, or none */
-function folder(text?: string): UpdateResumeFile & { has(): boolean } {
+function folder(text?: string): UpdateResumeFile & { text(): string | undefined } {
   let held = text
   return {
     read: () => held ?? null,
+    write: (t) => {
+      held = t
+    },
     remove: () => {
       held = undefined
     },
-    has: () => held !== undefined,
+    text: () => held,
   }
 }
 
-describe('takeUpdateResumeFrom', () => {
-  it('reads the ids once and removes the file, so a host that starts again continues nothing a second time', () => {
-    const f = folder(JSON.stringify({ v: 1, at: NOW - 5_000, ids: ['s1', 's2'] }))
-    expect([...takeUpdateResumeFrom(f, NOW)]).toEqual(['s1', 's2'])
-    expect(f.has()).toBe(false)
-    expect([...takeUpdateResumeFrom(f, NOW)]).toEqual([])
+describe('the turns an update cut, in the data folder', () => {
+  it('a stop writes the turns it ends; the next start reads them without taking them, and each leaves once dealt with', () => {
+    const f = folder()
+    recordUpdateCut(f, ['s1', 's2'])
+    expect([...readUpdateResume(f)]).toEqual(['s1', 's2'])
+    // Read again (a start that failed its check, before anything was sent): still all there
+    expect([...readUpdateResume(f)]).toEqual(['s1', 's2'])
+    dropFromUpdateResume(f, 's1')
+    expect([...readUpdateResume(f)]).toEqual(['s2'])
+    dropFromUpdateResume(f, 's2')
+    // The last one takes the file with it
+    expect(f.text()).toBeUndefined()
   })
 
-  it('finds nothing where no update left a file', () => {
-    expect([...takeUpdateResumeFrom(folder(), NOW)]).toEqual([])
+  it('a second stop before the turns were continued adds its own to them: none is continued zero times (#1618 review D2)', () => {
+    const f = folder()
+    recordUpdateCut(f, ['s1', 's2'])
+    // The next host continued s1, then was stopped again (a rollback, a second update) with s1's continued turn and s3 running
+    dropFromUpdateResume(f, 's1')
+    recordUpdateCut(f, ['s1', 's3'])
+    expect([...readUpdateResume(f)]).toEqual(['s2', 's1', 's3'])
   })
 
-  it('removes a file it cannot use too, so it is not read by a later start', () => {
+  it('a stop that ends no turn leaves the list as it was, and writes no file where there was none', () => {
+    const f = folder()
+    recordUpdateCut(f, [])
+    expect(f.text()).toBeUndefined()
+    recordUpdateCut(f, ['s1'])
+    recordUpdateCut(f, [])
+    expect([...readUpdateResume(f)]).toEqual(['s1'])
+  })
+
+  it('does not expire: the next start continues them whenever it comes, on whichever clock', () => {
+    const f = folder(JSON.stringify({ v: 1, at: 0, ids: ['s1'] }))
+    expect([...readUpdateResume(f)]).toEqual(['s1'])
+  })
+
+  it('reads nothing from another format, text that is not JSON, or ids that are not ids', () => {
+    expect(parseUpdateResume(JSON.stringify({ v: 2, ids: ['s1'] }))).toEqual([])
+    expect(parseUpdateResume('{"v":1,')).toEqual([])
+    expect(parseUpdateResume(null)).toEqual([])
+    expect(parseUpdateResume(JSON.stringify({ v: 1, ids: ['s1', 7, null, '', '../x y', 's2', 's1'] }))).toEqual(['s1', 's2'])
+  })
+
+  it('a folder it cannot write in or read from loses the list, never the stop or the start', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
-    const f = folder(JSON.stringify({ v: 1, at: NOW - UPDATE_RESUME_MAX_AGE_MS - 1, ids: ['s1'] }))
-    expect([...takeUpdateResumeFrom(f, NOW)]).toEqual([])
-    expect(f.has()).toBe(false)
-  })
-
-  it('continues nothing when the file cannot be removed: left there, the next start would continue the same turns again', () => {
-    vi.spyOn(console, 'error').mockImplementation(() => {})
-    const stuck: UpdateResumeFile = {
-      read: () => JSON.stringify({ v: 1, at: NOW, ids: ['s1'] }),
+    const broken: UpdateResumeFile = {
+      read: () => {
+        throw new Error('EACCES')
+      },
+      write: () => {
+        throw new Error('EACCES')
+      },
       remove: () => {
-        throw new Error('EPERM')
+        throw new Error('EACCES')
       },
     }
-    expect([...takeUpdateResumeFrom(stuck, NOW)]).toEqual([])
-  })
-})
-
-describe('parseUpdateResume', () => {
-  it('continues nothing from a file older than the bound: an update whose new host never started names turns long over', () => {
-    vi.spyOn(console, 'error').mockImplementation(() => {})
-    expect([...parseUpdateResume(JSON.stringify({ v: 1, at: NOW - UPDATE_RESUME_MAX_AGE_MS - 1, ids: ['s1'] }), NOW)]).toEqual([])
-    expect([...parseUpdateResume(JSON.stringify({ v: 1, at: NOW - UPDATE_RESUME_MAX_AGE_MS + 1_000, ids: ['s1'] }), NOW)]).toEqual(['s1'])
-  })
-
-  it('reads nothing from another format, text that is not JSON, or ids that are not strings', () => {
-    expect([...parseUpdateResume(JSON.stringify({ v: 2, at: NOW, ids: ['s1'] }), NOW)]).toEqual([])
-    expect([...parseUpdateResume('{"v":1,', NOW)]).toEqual([])
-    expect([...parseUpdateResume(JSON.stringify({ v: 1, ids: ['s1'] }), NOW)]).toEqual([])
-    expect([...parseUpdateResume(JSON.stringify({ v: 1, at: NOW, ids: ['s1', 7, null, '', 's2'] }), NOW)]).toEqual(['s1', 's2'])
+    expect(() => recordUpdateCut(broken, ['s1'])).not.toThrow()
+    expect([...readUpdateResume(broken)]).toEqual([])
+    expect(() => dropFromUpdateResume(broken, 's1')).not.toThrow()
   })
 })

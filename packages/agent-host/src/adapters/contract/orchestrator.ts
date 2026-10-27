@@ -305,11 +305,13 @@ export type LinkedSessions = {
    * client redials, an attempt is under way or an install or update holds it. False for a machine not linked
    */
   machineWaitsForPerson(machineId: string): boolean
+  /** Whether the machine's host continues the turns an update's stop cuts (#1618, its hello's `updateContinued`) */
+  continuesCutTurns?(machineId: string): boolean
   /**
-   * When an update of its machine stopped that machine's host while this session (qualified) was in a turn, which the host
-   * the update started continues (#1618): its caller is told the turn was cut and goes on. Null when it did not, or long ago
+   * When the machine's host continued this session's (qualified) turn after an update cut it (#1618), on that host's clock:
+   * its caller is told the turn was cut and goes on. Null when it did not
    */
-  cutByUpdate?(sessionId: string): number | null
+  continuedAfterUpdate?(sessionId: string): number | null
   /**
    * Each session's background work as the machine lists it now (`sessions.list`, #723), ids qualified; null when the
    * machine cannot be asked. What the hub knows of that work is otherwise only the changes relayed since its link came up

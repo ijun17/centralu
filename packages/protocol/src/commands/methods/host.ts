@@ -336,9 +336,14 @@ export const hostMethods = {
    * command can start), so a turn cannot slip in between the check and the stop. Otherwise `{ ok: false, busy, calls }`
    * and nothing changes. A host older than `ifIdle` ignores it and stops; the hand-over sends it only to a host that says
    * its logon, which came with it
+   *
+   * `forUpdate` (#1618, additive): a linked hub stops this host to update it, roll it back or put a version back, and starts
+   * one again in this folder. As it lets its sessions go, this host writes the ids of those in a turn to the folder's
+   * `update-resume.json` (docs/agent-host.md §4.8), so the host that starts next continues each of those turns once. A host
+   * older than it ignores it and stops, and its turns end as a stop's always did
    */
   'host.stop': {
-    params: z.object({ ifIdle: z.boolean().optional() }),
+    params: z.object({ ifIdle: z.boolean().optional(), forUpdate: z.boolean().optional() }),
     result: z.union([z.object({ ok: z.literal(true) }), z.object({ ok: z.literal(false), busy: HostActivity, calls: z.number().int() })]),
   },
   /**

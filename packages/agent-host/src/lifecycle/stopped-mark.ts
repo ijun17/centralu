@@ -1,6 +1,6 @@
-import { readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { takeUpdateResumeFrom, UPDATE_RESUME_FILE } from './update-resume.js'
+import { UPDATE_RESUME_FILE, type UpdateResumeFile } from './update-resume.js'
 
 /**
  * The person's stop, kept in the data folder (#1143). A linked hub that finds no host running here starts one
@@ -34,23 +34,26 @@ export function markQuit(dataDir: string, now: number = Date.now()): void {
 }
 
 /**
- * The turns a linked hub's update ended when it stopped the host before this one (#1618, update-resume.ts), taken from the
- * data folder once: read, then removed before anything is continued. Here beside the person's stop mark, as the other
- * file a hub leaves in the folder for the next host to find at its start
+ * The data folder's list of the turns an update cut (#1618, update-resume.ts): written by the host an update stops, read by
+ * the next to start. Here beside the person's stop mark, the other file one host leaves in the folder for the next. A write
+ * replaces it whole (a new file renamed over it), so a host stopped in the middle leaves the old list or the new, never half
  */
-export function takeUpdateResume(dataDir: string, now: number = Date.now()): ReadonlySet<string> {
+export function updateResumeFile(dataDir: string): UpdateResumeFile {
   const file = join(dataDir, UPDATE_RESUME_FILE)
-  return takeUpdateResumeFrom(
-    {
-      read: () => {
-        try {
-          return readFileSync(file, 'utf8')
-        } catch {
-          return null
-        }
-      },
-      remove: () => rmSync(file, { force: true }),
+  return {
+    read: () => {
+      try {
+        return readFileSync(file, 'utf8')
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null
+        throw err
+      }
     },
-    now,
-  )
+    write: (text) => {
+      const next = `${file}.${process.pid}.tmp`
+      writeFileSync(next, text)
+      renameSync(next, file)
+    },
+    remove: () => rmSync(file, { force: true }),
+  }
 }

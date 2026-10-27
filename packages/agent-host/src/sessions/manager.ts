@@ -138,7 +138,8 @@ export type KeptAgent = { sessionId: string; tool: ToolName; process: AgentProce
 import { Store } from '../dev-services/store.js'
 import type { UpdateService } from '../updates.js'
 import type { UpdateApplyBroker } from '../update-apply.js'
-import { inTurn, sessionIdle, type SessionIdle } from '../idle.js'
+import { cutTurns, inTurn, sessionIdle, type SessionIdle } from '../idle.js'
+import { dropFromUpdateResume, readUpdateResume, recordUpdateCut, type UpdateResumeFile } from '../lifecycle/update-resume.js'
 import { UPDATE_CONTINUE_LINE, UPDATE_CONTINUE_TEXT } from './interruptions.js'
 import { appSettingRests, CardRests } from './card-rest.js'
 import { rpcError, sessionNotFound } from '../rpc-error.js'
@@ -348,6 +349,10 @@ export class SessionManager {
   private quitPersonWork: string[] = []
   /** Turns a hub's update cut, to continue once the start is done, and who to tell (#1618, `continueCutTurns`) */
   private updateCuts: { sessionId: string; requester: string | null }[] = []
+  /** The turns this host continued after an update cut them, and when (#1618): said in every hello, for a hub's callers */
+  private readonly continuedAfterUpdate: { sessionId: string; at: number }[] = []
+  /** A linked hub stops this host for an update (`host.stop { forUpdate }`): the turns its stop ends are listed (#1618) */
+  private stoppingForUpdate = false
   /** `disposeAll` has begun (#673): a card it withdraws is not the person's answer, and its request stays stored */
   private disposing = false
   /**
@@ -380,10 +385,11 @@ export class SessionManager {
       /** Sessions whose tool process a previous host left running — their live state is not reset (see below) */
       keptSessions?: ReadonlySet<string>
       /**
-       * Sessions whose turn a linked hub's update ended when it stopped the host before this one (#1618,
-       * lifecycle/update-resume.ts): each found mid-turn with no process is continued once (`continueCutTurns`)
+       * The data folder's list of the turns an update cut (#1618, lifecycle/update-resume.ts): the host before this one wrote
+       * it as it stopped, and each listed session this start finds mid-turn with no process is continued once
+       * (`continueCutTurns`). This host writes it in turn when a linked hub stops it for an update (`stopForUpdate`)
        */
-      cutByUpdate?: ReadonlySet<string>
+      updateResume?: UpdateResumeFile
       /** How handoff_session waits for an agent's note (#694); tests shorten it */
       handoffTimings?: HandoffTimings
     } = {},
@@ -512,6 +518,7 @@ export class SessionManager {
     const stoppedByQuit: SessionInfo[] = []
     /** Sessions whose turn a hub's update cut, continued once the start is done (#1618, `continueCutTurns`) */
     const cutByUpdate: SessionInfo[] = []
+    const listedCut = keeperOpts.updateResume ? readUpdateResume(keeperOpts.updateResume) : new Set<string>()
     for (const s of store.sessions.listSessions()) {
       /*
        * Except where the process **does** still exist (#280 step 2): the keeper kept it through the
@@ -525,7 +532,7 @@ export class SessionManager {
        * turn running, not one that ended; the report it owes stays owed. If it cannot be continued, it is reset there
        * (`turnLostInSwap`), as a kept process that could not be re-attached is
        */
-      const goesOn = cut && !!keeperOpts.cutByUpdate?.has(s.id)
+      const goesOn = cut && listedCut.has(s.id)
       const stale = cut && !goesOn
       const fixed = stale ? { ...s, state: 'idle' as const, waitingSince: null } : goesOn ? { ...s, state: 'working' as const, waitingSince: null } : s
       // Old cross-project ownership (#614) is cleared by store step v55, no longer here (#844)
@@ -544,8 +551,12 @@ export class SessionManager {
         console.error(`[agent-host] ${s.id.slice(0, 8)}: an update of this machine ended its turn; continuing it`)
         store.sessions.upsertSession(fixed)
         cutByUpdate.push(fixed)
+        // Until its Continue is in: a wake meanwhile (a window that sees the machine back) keeps it in its turn (`SessionStarts`)
+        this.restartPolicy.continuingTurns.add(s.id)
       }
     }
+    // A listed session this start does not find cut (at rest, or gone) has nothing to continue: it leaves the list now
+    for (const id of listedCut) if (!cutByUpdate.some((s) => s.id === id)) this.updateResumeDone(id)
     /** What the start takes over as going on: the keeper's processes, and the turns an update cut (#1618) */
     const goingOn = new Set([...(keeperOpts.keptSessions ?? []), ...cutByUpdate.map((s) => s.id)])
     /*
@@ -1248,7 +1259,8 @@ export class SessionManager {
    * cut and goes on, unless it is one of the turns continued, whose own note covers its children, as a quit's rule has it
    * (`tellAskerOfInterruption`). A session that cannot be continued (its tool cannot resume it, it is gone there) ends
    * as a kept process that could not be re-attached does (`turnLostInSwap`): idle, marked stopped, its report or its
-   * requester told. Each is taken once: the list is emptied first, and the file it came from was removed at the start.
+   * requester told. Each is taken once: the list is emptied first, and its id leaves the file once its Continue was sent
+   * or its loss reported (`updateResumeDone`), not before, so a host stopped in between leaves it for the next.
    */
   private async continueCutTurns(): Promise<void> {
     const cuts = this.updateCuts
@@ -1257,23 +1269,52 @@ export class SessionManager {
     await Promise.all(
       cuts.map(async ({ sessionId, requester }) => {
         const m = this.meta.get(sessionId)
-        if (!m || this.disposing || this.handingOver || !inTurn(m.state)) return
-        this.restartPolicy.continuingTurns.add(sessionId)
+        // Leaving before it went in: still listed, for the host that starts next
+        if (this.disposing || this.handingOver) return
+        if (!m || !inTurn(m.state)) {
+          // Gone, or stopped by the person before its Continue went in: nothing to continue
+          this.restartPolicy.continuingTurns.delete(sessionId)
+          this.updateResumeDone(sessionId)
+          return
+        }
         try {
           await this.events.deliverMail(sessionId, { text: UPDATE_CONTINUE_TEXT, quiet: false, line: UPDATE_CONTINUE_LINE, label: 'update' })
         } catch (e) {
           if (this.disposing || this.handingOver || this.meta.get(sessionId) !== m) return
+          this.restartPolicy.continuingTurns.delete(sessionId)
           console.error(`[agent-host] ${sessionId.slice(0, 8)}: the turn an update ended could not be continued (${errorMessage(e)})`)
           this.turnLostInSwap(m)
+          this.updateResumeDone(sessionId)
           return
-        } finally {
-          this.restartPolicy.continuingTurns.delete(sessionId)
         }
+        this.restartPolicy.continuingTurns.delete(sessionId)
+        this.continuedAfterUpdate.push({ sessionId, at: Date.now() })
+        // Sent: a host that starts after this one does not send it again
+        this.updateResumeDone(sessionId)
         if (requester && !continued.has(requester)) void this.reports.tellCutByUpdate(sessionId, requester)
       }),
     )
     this.tellQuitNotices(() => true)
   }
+
+  /** One turn the update file listed is dealt with: it leaves the file (#1618, `dropFromUpdateResume`) */
+  private updateResumeDone(sessionId: string): void {
+    if (this.keeperOpts.updateResume) dropFromUpdateResume(this.keeperOpts.updateResume, sessionId)
+  }
+
+  /**
+   * A linked hub stops this host to update it, roll it back or put a version back (`host.stop { forUpdate }`, #1618): as the
+   * sessions are let go of (`disposeAll`), the ones in a turn are listed for the host that starts next, which continues them
+   */
+  stopForUpdate(): void {
+    this.stoppingForUpdate = true
+  }
+
+  /** The turns this host continued after an update cut them (#1618), for the hello a linked hub reads */
+  updateContinued(): { sessionId: string; at: number }[] {
+    return [...this.continuedAfterUpdate]
+  }
+
 
   /** A turn a quit cut in a session whose work the person owns: reported to them. */
   private tellPersonOfInterruption(sessionId: string): void {
@@ -3002,6 +3043,14 @@ export class SessionManager {
     // The cards it closes below are not the person's answers: a standing start_agent request stays stored (#673)
     this.disposing = true
     this.leaveHost('Centralu is shutting down')
+    /*
+     * A linked hub's update stops this host (#1618): the turns it ends are the ones in a turn now, read in the same step as
+     * the processes are let go of below, with no new turn taken since `leaveHost`. Added to what the file already lists
+     * (turns an earlier stop cut that this host had not continued yet), for the host the hub starts next
+     */
+    if (this.stoppingForUpdate && this.keeperOpts.updateResume) {
+      recordUpdateCut(this.keeperOpts.updateResume, cutTurns({ sessions: this.listSessions(), terminals: 0, commandRuns: 0 }))
+    }
     // The messages in progress are written as they stand — a shutdown must not swallow the last two seconds (#66).
     // Written, not closed: the supervisor may kill the host before the processes are down
     for (const [id, run] of this.record.streams) this.record.flushStream(id, run)

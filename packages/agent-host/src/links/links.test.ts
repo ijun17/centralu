@@ -21,6 +21,7 @@ import { readHoldCommand } from './swap-hold.js'
 import { storeMirror, storeRegistry } from './stored.js'
 import { ScriptedAdapter, scriptedAdapters } from './scripted-agent.test-helpers.js'
 import { activityCounts } from '../idle.js'
+import type { UpdateResumeFile } from '../lifecycle/update-resume.js'
 import { SLOW, eventually } from '../../../../tooling/test-timing.js'
 
 /** The version the hub and its hosts are in these tests: a source tree carries the placeholder 0.0.0-dev (#1501), older than every release */
@@ -70,12 +71,14 @@ async function remoteHost(
     handover?: () => { state: 'waiting' | 'gave_up'; since: number } | null
     /** What happens on the host before it listens: no hub can see it yet */
     beforeListen?: (mgr: SessionManager) => Promise<void>
-    /** The sessions a hub's update listed as in a turn when it stopped the host before this one (#1618, update-resume.json) */
-    cutByUpdate?: ReadonlySet<string>
+    /** The data folder's `update-resume.json` (#1618), shared by the hosts that start in the same folder */
+    updateResume?: UpdateResumeFile
+    /** A host from before #1618: its hello says nothing of the turns it continued, and it continues none */
+    before1618?: boolean
   } = {},
 ) {
   const adapters = scriptedAdapters({ immediate: o.immediate, queueBehind: o.queueBehind, holdNext: o.holdNext })
-  const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e), undefined, undefined, o.cutByUpdate ? { cutByUpdate: o.cutByUpdate } : {})
+  const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e), undefined, undefined, o.updateResume && !o.before1618 ? { updateResume: o.updateResume } : {})
   const server: HostServer = new HostServer({
     port,
     token: TOKEN,
@@ -84,6 +87,7 @@ async function remoteHost(
     ...(o.elevated ? { elevated: o.elevated } : {}),
     ...(o.logon ? { logon: o.logon } : {}),
     ...(o.handover ? { handover: o.handover } : {}),
+    ...(o.before1618 ? {} : { updateContinued: () => mgr.updateContinued() }),
   })
   await o.beforeListen?.(mgr)
   const p = await server.listen()
@@ -101,6 +105,20 @@ async function remoteHost(
     if (claude instanceof ScriptedAdapter) claude.release(sessionId)
   }
   return { server, mgr, store, port: p, close, release }
+}
+
+/** A data folder's `update-resume.json` (#1618), played by a variable */
+function memoryFolder(): UpdateResumeFile {
+  let held: string | null = null
+  return {
+    read: () => held,
+    write: (t) => {
+      held = t
+    },
+    remove: () => {
+      held = null
+    },
+  }
 }
 
 /** An RPC handler without these methods, as a build from before them answers */
@@ -1427,11 +1445,11 @@ describe('machines.update through the link (#82, plan §10.5)', () => {
 describe('machines.update waits for the sessions there to finish (#1399)', () => {
   const NODE = '24.21.0'
   /** The JSON a step of `remote-install.mjs` is run with, as the command carries it; null for any other command */
-  const updatePayload = (cmd: string): { action?: string; activate?: boolean; resume?: string[] } | null => {
+  const updatePayload = (cmd: string): { action?: string; activate?: boolean } | null => {
     const b64 = /^printf %s (\S+) \|/.exec(cmd)?.[1]
     const script = b64 ? Buffer.from(b64, 'base64').toString('utf8') : ''
     const arg = /"\$f" "([A-Za-z0-9+/=]+)"/.exec(script)?.[1]
-    return arg ? (JSON.parse(Buffer.from(arg, 'base64').toString('utf8')) as { action?: string; activate?: boolean; resume?: string[] }) : null
+    return arg ? (JSON.parse(Buffer.from(arg, 'base64').toString('utf8')) as { action?: string; activate?: boolean }) : null
   }
   const classifyUpdate = (cmd: string): string => {
     if (cmd.includes('serve --stop')) return 'stop'
@@ -1454,15 +1472,15 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
       deps?: Partial<LinkDeps>
       old?: string
       gate?: Promise<void>
-      /** The ids `host.activity` names as in a turn (#1618); absent, it names none, as a host from before them does */
-      inTurn?: string[]
+      /** The machine runs a host from before #1618, which lists no turn as it stops */
+      before1618?: boolean
     } = {},
   ) {
     /** The version the machine runs before the update */
     const was = o.old ?? '0.0.1'
     const reg = await fakeRegistry(['centralu', '@centralu/linux-x64'].map((name) => ({ name, version: RELEASE, files: { 'package.json': '{}' } })))
     cleanups.push(() => reg.close())
-    const activity: HostActivity = { working: 2, approvals: 1, questions: 0, background: 0, terminals: 1, commandRuns: 0, ...(o.inTurn ? { inTurn: o.inTurn } : {}) }
+    const activity: HostActivity = { working: 2, approvals: 1, questions: 0, background: 0, terminals: 1, commandRuns: 0 }
     /** How many times the remote was asked what runs, and how many when the host was stopped */
     let reads = 0
     let readsAtStop = -1
@@ -1473,11 +1491,13 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
       if (broken || step === 'fail') throw new Error('the host could not count')
       return step ? { ...activity, working: 0, approvals: 0, questions: 0, background: 0, ...step } : activity
     }
-    let running = await remoteHost(0, new Store(), { version: was, ...(o.noActivity ? {} : { activity: asked }) })
+    /** The machine's data folder's `update-resume.json` (#1618), which every host there reads and writes */
+    const folder = memoryFolder()
+    let running = await remoteHost(0, new Store(), { version: was, updateResume: folder, ...(o.before1618 ? { before1618: true } : {}), ...(o.noActivity ? {} : { activity: asked }) })
     let line = lineFor(running.port, { version: was })
     const runs: string[] = []
-    /** What each pointers step was given to write for the next host: the sessions whose turns the stop ended (#1618) */
-    const resumes: (string[] | null)[] = []
+    /** Whether each stop said it is for an update (#1618, `CENTRALU_STOP_FOR=update`), after which the host lists the turns it ends */
+    const stops: boolean[] = []
     const old = { version: was, node: NODE }
     const next = { version: RELEASE, node: NODE }
     const done = (x: unknown) => `CENTRALU-INSTALL done ${JSON.stringify(x)}\n`
@@ -1495,11 +1515,13 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
           return out(done({ installed: next, current: old, previous: null, removed: [], left: [] }))
         case 'stop':
           readsAtStop = reads
+          stops.push(cmd.includes('CENTRALU_STOP_FOR=update'))
+          // What `host.stop { forUpdate }` does there (`serve --stop` passes it on)
+          if (stops.at(-1)) running.mgr.stopForUpdate()
           await running.close()
           line = { ...line, hostRunning: false }
           return out('{"v":1,"stop":{"ok":true,"wasRunning":true,"how":"asked"}}\n')
         case 'pointers':
-          resumes.push(updatePayload(cmd)?.resume ?? null)
           return out(done({ current: next, previous: old }))
         case 'prune':
           return out(done({ current: next, previous: old, removed: [], left: [] }))
@@ -1509,7 +1531,7 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
     }
     const startHost = async (): Promise<HostStart> => {
       runs.push('start')
-      running = await remoteHost(0, new Store(), { version: RELEASE })
+      running = await remoteHost(0, new Store(), { version: RELEASE, updateResume: folder })
       line = { ...lineFor(running.port, { version: RELEASE }), install: { managed: true, current: next, previous: old, node: NODE } }
       return { how: 'detached', note: null }
     }
@@ -1531,7 +1553,7 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
       activity,
       idle,
       stepsSeen,
-      resumes,
+      stops,
       remote: () => running,
       ran: () => runs.filter((k) => k !== 'open'),
       readsAtStop: () => readsAtStop,
@@ -1597,13 +1619,20 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
   })
 
   it('stops the turns at once when the person chose it, says how many it ended, and has the next host continue them (#1618)', async () => {
-    const { u, ran, stepsSeen, activity, resumes } = await waiting()
-    activity.inTurn = ['s-a', 's-b', 's-c']
+    const { u, ran, stepsSeen, stops } = await waiting()
     const r = await u.call('machines.update', { machineId: 'm1', when: 'now' })
     expect(ran()).toEqual(['preflight', 'node', 'install_beside', 'stop', 'pointers', 'start', 'prune'])
     expect(stepsSeen()).not.toContain('wait_idle')
     expect(r.note).toMatch(/Updating stopped Centralu on Remote box with 3 sessions in a turn; Centralu continues each of those turns on the new version, and 1 open terminal or project command there closed/)
-    expect(resumes).toEqual([['s-a', 's-b', 's-c']])
+    // Said to the host there as it is stopped: it lists the turns it ends, for the one the update starts
+    expect(stops).toEqual([true])
+  })
+
+  it('says the turns were lost, as before, on a machine whose host predates continuing them (#1618)', async () => {
+    const { u, stops } = await waiting({ before1618: true })
+    const r = await u.call('machines.update', { machineId: 'm1', when: 'now' })
+    expect(r.note).toMatch(/Updating stopped Centralu on Remote box with 3 sessions in a turn; they resume on the new version, and a turn in progress was lost/)
+    expect(stops).toEqual([true])
   })
 
   it('a forced update of a machine with nothing in a turn says nothing was stopped', async () => {
@@ -1693,15 +1722,15 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
     it('starts an update by itself once it finds the machine older, stops the turns and terminals there at once, and has the next host continue the turns', async () => {
       const a = auto()
       const logs: string[] = []
-      const { hub, ran, stepsSeen, activity, resumes } = await waiting({ deps: { ...a.deps, log: (l: string) => logs.push(l) }, old: a.old, inTurn: ['s-1', 's-2'] })
+      const { hub, ran, stepsSeen, activity, stops } = await waiting({ deps: { ...a.deps, log: (l: string) => logs.push(l) }, old: a.old })
       // Sessions are in a turn there and a terminal is open: it goes on all the same (it started at the connect, nothing waits)
       expect(activity).toMatchObject({ working: 2, approvals: 1, terminals: 1 })
       await eventually(() => ran().includes('prune'))
       expect(ran()).toEqual(['preflight', 'node', 'install_beside', 'stop', 'pointers', 'start', 'prune'])
       expect(stepsSeen()).not.toContain('wait_idle')
       expect(stepsSeen()).not.toContain('wait_open')
-      // The sessions in a turn when it stopped the host, for the host it started to continue
-      expect(resumes).toEqual([['s-1', 's-2']])
+      // The host there was told the stop is for an update, so it listed the turns it ended for the host the update started
+      expect(stops).toEqual([true])
       expect(logs.join('\n')).toMatch(/Updating stopped Centralu on Remote box with 3 sessions in a turn; Centralu continues each of those turns on the new version, and 1 open terminal or project command there closed/)
       await eventually(() => hub.links.list()[0]!.versions?.remote.version === RELEASE && status(hub) === 'connected')
       // On the hub's version now: no more catch-up, and nothing runs again on the next connect
@@ -1745,10 +1774,10 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
       expect(hub.links.followsHub('m1')).toBe(false)
     })
 
-    // #1618: the hub's own update reads the turns from the sessions' states on a machine whose host.activity does not name them
-    it('reads the sessions in a turn from their states where the machine does not name them', async () => {
+    // #1618 review D1: the host there lists what its own stop ends, so a turn that began after the hub read what runs is continued too
+    it('has the host there list the turn it ends as it stops, one the hub never read included, and the next host continue it', async () => {
       const a = auto(false)
-      const { hub, ran, resumes, remote } = await waiting({ deps: a.deps, old: a.old })
+      const { hub, ran, remote } = await waiting({ deps: a.deps, old: a.old })
       // A real session there waiting on an approval: in a turn, as host.sessions says
       const project = await remote().mgr.addProject(mkdtempSync(join(tmpdir(), 'cc-1618-')))
       const s = await remote().mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
@@ -1757,7 +1786,9 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
       a.state.on = true
       hub.links.followHub()
       await eventually(() => ran().includes('prune'))
-      expect(resumes).toEqual([[s.id]])
+      // The host the update started continued it, once, on its own data folder's word
+      await eventually(() => remote().mgr.updateContinued().some((c) => c.sessionId === s.id))
+      expect(remote().mgr.listSessions().find((x) => x.id === s.id)?.state).not.toBe('idle')
     })
 
     it('starts nothing at a reconnect while its retry waits for its time', async () => {
@@ -3305,18 +3336,19 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
     remoteStore.projects.addProject({ id: 'p-app', path: checkout('git@github.com:me/app.git'), name: 'app-checkout' })
     /** What the machine's host says runs there, from its own sessions, as main.ts counts it */
     const activity = () => activityCounts({ sessions: running.mgr.listSessions(), terminals: 0, commandRuns: 0 })
-    let running = await remoteHost(0, remoteStore, { version: OLDER, activity })
+    /** The machine's data folder's `update-resume.json`: the stopping host writes it, the next one reads it (lifecycle/update-resume.ts) */
+    const folder = memoryFolder()
+    let running = await remoteHost(0, remoteStore, { version: OLDER, activity, updateResume: folder })
     let line = lineFor(running.port, { version: OLDER })
     const old = { version: OLDER, node: NODE }
     const next = { version: RELEASE, node: NODE }
-    /** The ids each pointers step was given for the next host, which it writes to update-resume.json there */
-    const resumes: string[][] = []
     const runs: string[] = []
     const done = (x: unknown) => ({ code: 0, stderr: '', stdout: `CENTRALU-INSTALL done ${JSON.stringify(x)}\n` })
     const exec = async (cmd: string) => {
       if (cmd.includes('serve --stop')) {
-        runs.push('stop')
-        // The host goes; its sessions' rows stay as they stood, a turn running included
+        runs.push(cmd.includes('CENTRALU_STOP_FOR=update') ? 'stop for update' : 'stop')
+        // The host goes, listing the turns it ends (`host.stop { forUpdate }`); its sessions' rows stay as they stood
+        if (cmd.includes('CENTRALU_STOP_FOR=update')) running.mgr.stopForUpdate()
         await running.close()
         line = { ...line, hostRunning: false }
         return { code: 0, stderr: '', stdout: '{"v":1,"stop":{"ok":true,"wasRunning":true,"how":"asked"}}\n' }
@@ -3326,19 +3358,16 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
       if (script.includes('CENTRALU-PREFLIGHT')) return { code: 0, stderr: '', stdout: 'CENTRALU-PREFLIGHT os=Linux arch=x86_64 glibc=2.39 musl=0 freeKb=99999999 tar=1 gzip=1 fetch=curl sha=sha256sum\n' }
       if (script.includes('say node ok')) return { code: 0, stderr: '', stdout: 'CENTRALU-INSTALL node ok\n' }
       const arg = /"\$f" "([A-Za-z0-9+/=]+)"/.exec(script)?.[1]
-      const p = arg ? (JSON.parse(Buffer.from(arg, 'base64').toString('utf8')) as { action?: string; activate?: boolean; resume?: string[] }) : null
+      const p = arg ? (JSON.parse(Buffer.from(arg, 'base64').toString('utf8')) as { action?: string; activate?: boolean }) : null
       runs.push(p?.action ?? (p?.activate === false ? 'install_beside' : 'other'))
       if (p?.activate === false) return done({ installed: next, current: old, previous: null, removed: [], left: [] })
-      if (p?.action === 'pointers') {
-        resumes.push(p.resume ?? [])
-        return done({ current: next, previous: old })
-      }
+      if (p?.action === 'pointers') return done({ current: next, previous: old })
       if (p?.action === 'prune') return done({ current: next, previous: old, removed: [], left: [] })
       return { code: 0, stderr: '', stdout: '' }
     }
-    // The next host starts in the same data folder, and takes the file the pointers step wrote (lifecycle/update-resume.ts)
+    // The next host starts in the same data folder, and reads the file the stopping host wrote
     const startHost = async (): Promise<HostStart> => {
-      running = await remoteHost(0, remoteStore, { version: RELEASE, activity, cutByUpdate: new Set(resumes.at(-1) ?? []) })
+      running = await remoteHost(0, remoteStore, { version: RELEASE, activity, updateResume: folder })
       line = { ...lineFor(running.port, { version: RELEASE }), install: { managed: true, current: next, previous: old, node: NODE } }
       return { how: 'detached', note: null }
     }
@@ -3366,8 +3395,7 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
     automatic.on = true
     hub.links.followHub()
     await eventually(() => runs.includes('prune'))
-    expect(runs).toEqual(['install_beside', 'stop', 'pointers', 'prune'])
-    expect(resumes).toEqual([[id]])
+    expect(runs).toEqual(['install_beside', 'stop for update', 'pointers', 'prune'])
 
     // The new host continued the child's turn once, through Centralu's channel: it runs there again
     const continuedThere = () => running.store.messages.loadMessages(id, 50).map((m) => JSON.stringify(m.payload)).filter((l) => l.includes('Centralu continued it on the new version'))

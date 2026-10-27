@@ -99,9 +99,7 @@ export function updateAtRest(i: { automatic: boolean; draining: boolean; activit
  */
 export function activityCounts(s: ActivitySnapshot): HostActivity {
   const c: HostActivity = { working: 0, approvals: 0, questions: 0, background: 0, terminals: s.terminals, commandRuns: s.commandRuns }
-  const ids: string[] = []
   for (const x of s.sessions) {
-    if (x.id !== undefined && turnCut(x)) ids.push(x.id)
     if (!sessionBusy(x)) continue
     // A question blocks the session as an approval does (waiting_approval), so its own list is read before the state
     if (x.pendingApproval) c.approvals++
@@ -110,7 +108,7 @@ export function activityCounts(s: ActivitySnapshot): HostActivity {
     else if (inTurn(x.state)) c.working++
     else c.background++
   }
-  return { ...c, inTurn: ids }
+  return c
 }
 
 /**
@@ -120,6 +118,11 @@ export function activityCounts(s: ActivitySnapshot): HostActivity {
  */
 export function turnCut(s: IdleActivity): boolean {
   return inTurn(s.state)
+}
+
+/** The sessions whose turns stopping the host now ends (`turnCut`), by id: what an update's stop lists for the next host */
+export function cutTurns(s: ActivitySnapshot): string[] {
+  return s.sessions.flatMap((x) => (x.id !== undefined && turnCut(x) ? [x.id] : []))
 }
 
 /**

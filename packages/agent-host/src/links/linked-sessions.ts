@@ -559,9 +559,13 @@ export function linkedSessions(
       return machineById(machineId)?.waitsForPerson === true
     },
 
-    cutByUpdate(sessionId) {
+    continuesCutTurns(machineId) {
+      return machineById(machineId)?.continuesCutTurns?.() === true
+    },
+
+    continuedAfterUpdate(sessionId) {
       const at = splitQualified(sessionId)
-      return (at && machineById(at.machine)?.cutByUpdate?.(at.id)) ?? null
+      return (at && machineById(at.machine)?.continuedAfterUpdate?.(at.id)) ?? null
     },
 
     async backgroundTasks(machineId) {

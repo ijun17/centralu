@@ -58,10 +58,10 @@ export type HostControl = {
   /** `remote-install.mjs`'s text: the pointer and prune steps run it too */
   script: string
   /**
-   * Called before the running host is stopped (#1399): resolves when it may be, with what the stop ends (`StopPlan`);
-   * rejects to end the update with nothing switched. Absent: stopped at once, and no turn is continued
+   * Called before the running host is stopped (#1399): resolves when it may be, with a sentence for the person when it was
+   * stopped with turns running; rejects to end the update with nothing switched. Absent: stopped at once
    */
-  beforeStop?: () => Promise<StopPlan>
+  beforeStop?: () => Promise<string | null>
   /** The link stops reconnecting and starting a host on its own; called before the host is stopped */
   hold: () => void | Promise<void>
   /** `centralu serve --detach` there, through the lookup (which reads `current`) */
@@ -71,13 +71,6 @@ export type HostControl = {
   /** `count`: what a `wait_idle` or `wait_open` step waits for (#1579) */
   step: (step: UpdateStep, count?: number) => void
 }
-
-/**
- * What stopping the host ends (#1399, #1618): a sentence for the person when it ends turns, and the ids of the sessions in a
- * turn there (`HostActivity.inTurn`). The step that writes the pointers writes those ids for the next host
- * (`update-resume.json`, lifecycle/update-resume.ts), which continues each of those turns once
- */
-export type StopPlan = { note: string | null; resume: readonly string[] }
 
 /** `{ v: 1, stop: { ok, wasRunning, how?, message? } }`, the line `serve --stop` prints; null when there is none */
 export function parseStopLine(stdout: string): { ok: boolean; wasRunning: boolean; message: string | null } | null {
@@ -96,9 +89,15 @@ export function parseStopLine(stdout: string): { ok: boolean; wasRunning: boolea
   return null
 }
 
-/** Stops the host there in order. Rejects with a sentence when it is still running afterwards */
-export async function stopRemoteHost(c: Pick<HostControl, 'exec' | 'spec' | 'target'>): Promise<{ wasRunning: boolean }> {
-  const r = await c.exec(stopCommand(c.spec))
+/**
+ * Stops the host there in order. Rejects with a sentence when it is still running afterwards.
+ *
+ * `forUpdate` (#1618): a host starts again in the folder after this stop (an update, a rollback, a version put back), so
+ * the stopping host lists the turns it ends and the next one continues each of them once (`CENTRALU_STOP_FOR=update`,
+ * lifecycle/update-resume.ts). Not for an uninstall, after which no host starts there
+ */
+export async function stopRemoteHost(c: Pick<HostControl, 'exec' | 'spec' | 'target'>, o: { forUpdate: boolean }): Promise<{ wasRunning: boolean }> {
+  const r = await c.exec(stopCommand(c.spec, o))
   // No Centralu to ask: then nothing of it runs either
   if (r.stdout.includes(NOT_FOUND)) return { wasRunning: false }
   const answer = parseStopLine(r.stdout)
@@ -113,16 +112,9 @@ export async function stopRemoteHost(c: Pick<HostControl, 'exec' | 'spec' | 'tar
   return { wasRunning: answer.wasRunning }
 }
 
-/**
- * Writes both pointers there (`remote-install.mjs`, action `pointers`), run on the Node of `run`. `resume`: the sessions whose
- * turns the stop ended, written beside them for the host that starts next (#1618); none, nothing is written
- */
-async function setPointers(c: HostControl, run: InstalledVersion, current: InstalledVersion | null, previous: InstalledVersion | null, resume: readonly string[] = []) {
-  const out = readStep(
-    await c.exec(installCommand(c.spec, c.script, { action: 'pointers', version: run.version, node: run.node, current, previous, ...(resume.length ? { resume } : {}) })),
-    'done',
-    c.target,
-  )
+/** Writes both pointers there (`remote-install.mjs`, action `pointers`), run on the Node of `run` */
+async function setPointers(c: HostControl, run: InstalledVersion, current: InstalledVersion | null, previous: InstalledVersion | null) {
+  const out = readStep(await c.exec(installCommand(c.spec, c.script, { action: 'pointers', version: run.version, node: run.node, current, previous })), 'done', c.target)
   return JSON.parse(out) as { current: InstalledVersion | null; previous: InstalledVersion | null }
 }
 
@@ -187,7 +179,7 @@ const restoredNote = (version: string, target: string) =>
 async function startOrRestore(c: HostControl, to: InstalledVersion, from: InstalledVersion | null): Promise<{ why: string | null; note?: string }> {
   const why = await startAndCheck(c, to.version)
   if (!why || !isLocalBuildVersion(from?.version) || isLocalBuildVersion(to.version)) return { why }
-  await stopRemoteHost(c).catch(() => undefined)
+  await stopRemoteHost(c, { forUpdate: true }).catch(() => undefined)
   let restored = false
   try {
     restored = await restoreStore(c, to)
@@ -211,8 +203,6 @@ async function putBack(
   why: string,
   was: { current: InstalledVersion | null; previous: InstalledVersion | null; running: boolean },
   restore = false,
-  /** The turns the stop ended (#1618): written again, so the version put back continues them once, as the new one would have */
-  resume: readonly string[] = [],
 ): Promise<never> {
   c.step('roll_back')
   const tail = await hostLogTail(c).catch(() => '')
@@ -220,8 +210,8 @@ async function putBack(
   const back = was.current ? `Centralu ${was.current.version}` : 'the Centralu that was there'
   try {
     // A new host that came up late, or half, goes before the old one starts on the same port
-    await stopRemoteHost(c).catch(() => undefined)
-    await setPointers(c, to, was.current, was.previous, resume)
+    await stopRemoteHost(c, { forUpdate: true }).catch(() => undefined)
+    await setPointers(c, to, was.current, was.previous)
     if (restore && was.current) await restoreStore(c, was.current)
     if (was.running) await c.start()
   } catch (err) {
@@ -260,10 +250,10 @@ export async function switchRemote(
   o: { saveStore?: boolean } = {},
 ): Promise<InstallResult> {
   // What is working there is waited for before anything is held or stopped (#1399); the new version is already beside it
-  const plan: StopPlan = (await c.beforeStop?.()) ?? { note: null, resume: [] }
+  const stoppedTurns = (await c.beforeStop?.()) ?? null
   await c.hold()
   c.step('stop')
-  const { wasRunning } = await stopRemoteHost(c)
+  const { wasRunning } = await stopRemoteHost(c, { forUpdate: true })
   const saveStore = o.saveStore === true && was.current !== null
   if (saveStore && was.current) {
     c.step('backup')
@@ -276,12 +266,12 @@ export async function switchRemote(
     }
   }
   c.step('switch')
-  await setPointers(c, next, next, keep, plan.resume)
+  await setPointers(c, next, next, keep)
   const { why, note } = saveStore ? { why: await startAndCheck(c, next.version), note: undefined } : await startOrRestore(c, next, was.current)
-  if (why) return putBack(c, next, why, { ...was, running: wasRunning }, saveStore, plan.resume)
+  if (why) return putBack(c, next, why, { ...was, running: wasRunning }, saveStore)
   c.step('prune')
   const pruned = await pruneThere(c, next).catch(() => ({ removed: [], left: [] }))
-  const said = [plan.note, note].filter(Boolean).join(' ')
+  const said = [stoppedTurns, note].filter(Boolean).join(' ')
   return { current: next, previous: keep, ...pruned, ...(said ? { note: said } : {}) }
 }
 
@@ -289,7 +279,7 @@ export async function switchRemote(
 export async function rollbackRemote(c: HostControl, there: { current: InstalledVersion; previous: InstalledVersion }): Promise<InstallResult> {
   await c.hold()
   c.step('stop')
-  const { wasRunning } = await stopRemoteHost(c)
+  const { wasRunning } = await stopRemoteHost(c, { forUpdate: true })
   c.step('switch')
   await setPointers(c, there.previous, there.previous, null)
   // Back from a dev build, the release may not read the store as the dev build left it (#1036)
@@ -327,7 +317,7 @@ export function uninstallCommand(spec: RemoteSpec): RemoteCommand {
 export async function uninstallRemote(c: HostControl): Promise<{ stopped: boolean }> {
   await c.hold()
   c.step('stop')
-  const { wasRunning } = await stopRemoteHost(c)
+  const { wasRunning } = await stopRemoteHost(c, { forUpdate: false })
   c.step('autostart')
   await removeAutostart(c)
   c.step('remove')

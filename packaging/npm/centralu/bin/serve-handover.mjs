@@ -23,9 +23,11 @@ import { isAlive, say, sleep, waitUntil } from './serve-util.mjs'
  * with this folder's token: a stale pid is never signalled.
  *
  * `{ ok, wasRunning, how?, message? }`, the `--stop` line's `stop`. With `ifIdle` (#1224, the hand-over) the host stops only
- * when nothing runs there, and `{ ok: false, busy: true }` says it did not.
+ * when nothing runs there, and `{ ok: false, busy: true }` says it did not. `forUpdate` (#1618): a hub's update stops it, and
+ * the host writes the turns it ends for the next one (`host.stop { forUpdate }`); a host that does not take the request is
+ * ended as any is, and lists nothing.
  */
-export async function stopServedHost({ dataDir, entry, platform = process.platform, ifIdle = false, timeoutMs = 30_000, graceMs = 15_000, kill = (pid, sig) => process.kill(pid, sig) }) {
+export async function stopServedHost({ dataDir, entry, platform = process.platform, ifIdle = false, forUpdate = false, timeoutMs = 30_000, graceMs = 15_000, kill = (pid, sig) => process.kill(pid, sig) }) {
   const state = readServeState(dataDir)
   if (!state) return { ok: true, wasRunning: false, message: `no centralu serve has run for ${dataDir}` }
   const port = state.port ?? DEFAULT_SERVE_PORT
@@ -41,8 +43,8 @@ export async function stopServedHost({ dataDir, entry, platform = process.platfo
   const launcherPid = launcher && hostPid && launcher.hostPid === hostPid ? launcher.pid : null
   const down = async () => !(await probe()).running && !(hostPid && isAlive(hostPid))
 
-  let asked = await askHostToStop({ port, token: state.token, protocolVersion: first.protocolVersion ?? installed, prove, ifIdle })
-  if (!asked.ok && asked.protocolVersion !== undefined) asked = await askHostToStop({ port, token: state.token, protocolVersion: asked.protocolVersion, prove, ifIdle })
+  let asked = await askHostToStop({ port, token: state.token, protocolVersion: first.protocolVersion ?? installed, prove, ifIdle, forUpdate })
+  if (!asked.ok && asked.protocolVersion !== undefined) asked = await askHostToStop({ port, token: state.token, protocolVersion: asked.protocolVersion, prove, ifIdle, forUpdate })
   // `ifIdle` and it has work running (#1224): it was left as it is
   if (asked.busy) return { ok: false, wasRunning: true, busy: true, message: asked.message }
   let how = 'asked'

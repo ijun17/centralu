@@ -50,6 +50,8 @@ export type RemoteHello = {
   logon?: HostLogon
   /** A sign-in's serve waiting to take over from the remote host, or one that gave up (#1224); absent when none */
   handover?: HostHandover
+  /** The turns the remote host continued after an update cut them (#1618); absent when it predates that */
+  updateContinued?: { sessionId: string; at: number }[]
 }
 
 /** `proving`: refused the `prove` itself (#838), as a host from before the proof, still running, does */
@@ -315,7 +317,7 @@ export class RemoteClient {
       this.cursorValid = true
       this.ready = true
       this.attempt = 0
-      this.on.hello?.({ resync, newLifetime: !sameLifetime, protocolVersion: frame.protocolVersion, ...(frame.build ? { build: frame.build } : {}), ...(typeof frame.elevated === 'boolean' ? { elevated: frame.elevated } : {}), ...(frame.logon ? { logon: frame.logon } : {}), ...(frame.handover ? { handover: frame.handover } : {}) })
+      this.on.hello?.({ resync, newLifetime: !sameLifetime, protocolVersion: frame.protocolVersion, ...(frame.build ? { build: frame.build } : {}), ...(typeof frame.elevated === 'boolean' ? { elevated: frame.elevated } : {}), ...(frame.logon ? { logon: frame.logon } : {}), ...(frame.handover ? { handover: frame.handover } : {}), ...(frame.updateContinued ? { updateContinued: frame.updateContinued } : {}) })
       return
     }
     if (frame.kind === 'res') {

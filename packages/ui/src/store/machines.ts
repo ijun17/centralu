@@ -1,4 +1,4 @@
-import { errorMessage, type MachineInfo } from '@cc/protocol'
+import { errorMessage, isInTurn, type MachineInfo } from '@cc/protocol'
 import { isAway } from '@cc/core'
 import type { AppState, StoreGet, StoreSet } from './state.js'
 import { omitKey } from './patch.js'
@@ -293,8 +293,9 @@ export const machineActions = (set: StoreSet, get: StoreGet): MachineActions => 
 
     const toWake = wasLive.filter((x) => {
       const now = get().sessions[x.id]
-      // Not a row the hub still lists from its mirror: its `live` is last heard, not a fact (#1611)
-      return now && !now.live && !now.unreachable && !isAway(now, get().machines)
+      // Not a row the hub still lists from its mirror: its `live` is last heard, not a fact (#1611). Nor one in a turn with no process:
+      // an update there cut it, and the machine continues it itself (#1618); the toast counts only what this window wakes
+      return now && !now.live && !now.unreachable && !isAway(now, get().machines) && !isInTurn(now.state)
     })
     if (toWake.length === 0) return
     const name = get().machines[machineId]?.name ?? machineId

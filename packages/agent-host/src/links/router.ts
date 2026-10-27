@@ -54,11 +54,10 @@ export interface RoutedMachine {
   reachForCall?(): Promise<void>
   /** How long after a call started an attempt on it another may not (#1532): the window a guess for a name is held off by too (#1547). Absent: no window kept */
   readonly callWindowMs?: number
-  /**
-   * When the last update of the machine stopped its host while this session (the machine's own id) was in a turn, which the
-   * next host continues (#1618); null when it did not, or long ago. Absent: a machine this hub does not update
-   */
-  cutByUpdate?(sessionId: string): number | null
+  /** Whether the machine's host continues the turns an update's stop cuts (#1618, its hello's `updateContinued`) */
+  continuesCutTurns?(): boolean
+  /** When the machine's host continued this session's turn (its own id) after an update cut it (#1618); null when it did not */
+  continuedAfterUpdate?(sessionId: string): number | null
   /** The attempt to connect it that a call made or waited on, as a clause for the answer to a call it could not take (it is still under way, or it failed and why); null when up or unsaid */
   readonly whyDown?: string | null
 }

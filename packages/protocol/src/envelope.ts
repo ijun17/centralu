@@ -73,6 +73,13 @@ export const HelloServer = z.object({
   logon: HostLogon.optional().catch(undefined),
   /** A sign-in's `serve` waiting to take over from this host, or one that gave up (#1224, `HostHandover`). Additive */
   handover: HostHandover.optional().catch(undefined),
+  /**
+   * The turns this host continued at its start because an update of this machine cut them (#1618, `host.stop { forUpdate }`),
+   * with when each was continued, on this host's clock: what tells a linked hub's caller of such a session that its turn
+   * goes on rather than that the link dropped. Kept for the host's life. An empty list says the host continues the turns
+   * an update cuts; absent, it predates that (or the field could not be read). Additive
+   */
+  updateContinued: z.array(z.object({ sessionId: z.string(), at: z.number() })).optional().catch(undefined),
 })
 export type HelloServer = z.infer<typeof HelloServer>
 
