@@ -66,7 +66,7 @@ const STATUS_FOR_MS = 60_000
 
 export function cursorProfile(): AcpProfile {
   let status: { at: number; result: DetectResult } | null = null
-  const readUsage = cursorUsageReader()
+  const localUsage = cursorUsageReader()
   return {
     descriptor: DESCRIPTOR,
     capabilities: CAPABILITIES,
@@ -79,7 +79,7 @@ export function cursorProfile(): AcpProfile {
       return findCursor()?.version ?? null
     },
     centraluToolOf: centraluToolOfCall,
-    readUsage,
+    localUsage,
     async detect() {
       if (status && Date.now() - status.at < STATUS_FOR_MS) return status.result
       const install = findCursor()

@@ -279,6 +279,8 @@ export class MockPlatform implements Platform {
   set usageState(value: UsageMock['usageState']) { this.usageMock.usageState = value }
   get toolUsage() { return this.usageMock.toolUsage }
   set toolUsage(value: UsageMock['toolUsage']) { this.usageMock.toolUsage = value }
+  get settledUsage() { return this.usageMock.settledUsage }
+  set settledUsage(value: UsageMock['settledUsage']) { this.usageMock.settledUsage = value }
   get machineUsage() { return this.usageMock.machineUsage }
   set machineUsage(value: UsageMock['machineUsage']) { this.usageMock.machineUsage = value }
   get usageCalls() { return this.usageMock.usageCalls }

@@ -1,8 +1,8 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { z } from 'zod'
-import type { UsageSnapshot } from '@cc/protocol'
-import { softRead } from '../usage-read.js'
+import type { LocalUsage } from '../contract.js'
+import { localUsageReader } from '../usage-read.js'
 import { findCursor } from './install.js'
 
 const exec = promisify(execFile)
@@ -13,14 +13,19 @@ const ABOUT = z.object({ subscriptionTier: z.unknown().optional() })
 /**
  * Cursor's usage (#1623). Its CLI has a `/usage` command only on its interactive screen: the ACP server advertises none
  * and print mode answers nothing for it (measured, agent 2026.10.22-27dcf5f). What `agent about --format json` says is the
- * plan, `subscriptionTier` ("Free"; measured 1.6 to 2.3 s a run on Windows). No limit can be read, so the snapshot says
- * there are none (`noLimits`) and carries the plan. The command's own output is the only source: the tool's credential and
+ * plan, `subscriptionTier` ("Free"; measured 1.6 to 2.3 s a run on Windows). No limit can be read, so the adapter has no
+ * `listUsage` and says the plan as its `localUsage`. The command's own output is the only source: the tool's credential and
  * state files are never opened, and the account's email in that output is never kept or sent.
+ *
+ * A logged-out account prints `"subscriptionTier": null` with exit 0 (measured in review, RV1625): the answer then says
+ * so, and the host tells it as it tells any tool that is not logged in. A tier the field does not carry at all, or a blank
+ * one, is only a plan the tool does not name.
  */
-export function parseAbout(stdout: string): UsageSnapshot {
+export function parseAbout(stdout: string): LocalUsage {
   const about = ABOUT.parse(jsonObjectOf(stdout))
+  if (about.subscriptionTier === null) return { plan: null, loggedOut: true }
   const tier = typeof about.subscriptionTier === 'string' ? about.subscriptionTier.trim() : ''
-  return { plan: tier || null, windows: [], daily: [], noLimits: true }
+  return { plan: tier || null }
 }
 
 /**
@@ -52,20 +57,23 @@ function jsonObjectOf(stdout: string): unknown {
   throw new Error('`agent about` printed no JSON object')
 }
 
-const NO_LIMITS: UsageSnapshot = { plan: null, windows: [], daily: [], noLimits: true }
+/** What a read that has nothing (not finished, or failed) answers: no plan known */
+const NOTHING: LocalUsage = { plan: null }
 
 /** A plan changes on the order of days: five minutes keeps a panel opened often from starting Node each time */
 const FRESH_MS = 5 * 60_000
+/** A logged-out answer is short-lived: a login a moment ago must not read as "not logged in" for five minutes */
+const LOGGED_OUT_FRESH_MS = 10_000
 const FAIL_MS = 60_000
 const SOFT_MS = 3_000
 const RUN_MS = 15_000
 
-export function cursorUsageReader(): () => Promise<UsageSnapshot> {
-  return softRead<UsageSnapshot>({
-    freshMs: FRESH_MS,
+export function cursorUsageReader(): (ask?: { settle?: boolean }) => Promise<LocalUsage> {
+  return localUsageReader({
+    freshMs: (v) => (v.loggedOut ? LOGGED_OUT_FRESH_MS : FRESH_MS),
     failMs: FAIL_MS,
     softMs: SOFT_MS,
-    fallback: () => NO_LIMITS,
+    fallback: () => NOTHING,
     onFail: (e) => console.error(`[usage] cursor: could not read the plan: ${e.message}`),
     read: async () => {
       const install = findCursor()

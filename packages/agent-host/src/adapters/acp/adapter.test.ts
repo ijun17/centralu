@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { launchRefusal, type AdapterCapabilities, type PermissionPreset } from '@cc/protocol'
 import type { AgentSpawnSpec } from '../contract.js'
 import { cursorProfile } from '../cursor-agent/index.js'
+import { openCodeProfile } from '../opencode/index.js'
 import { AcpAdapter } from './adapter.js'
 import { FakeAcpPeer, INIT_RESULT, type PeerScript } from './fake-peer.test-helpers.js'
 import type { AcpProfile } from './profile.js'
@@ -57,5 +58,23 @@ describe("Cursor's presets", () => {
   it('start it under Auto only: it writes without asking, so no preset that asks before a change can be kept', () => {
     expect(refusal('auto')).toBeNull()
     for (const p of ['safe', 'normal', 'edits'] as const) expect(refusal(p)).toMatch(/only under Auto/)
+  })
+})
+
+describe('what an ACP tool says about its usage (#1623)', () => {
+  it('never has listUsage, the one definition of a tool that reports no limits; localUsage is only what its profile gives', () => {
+    expect('listUsage' in new FakeAdapter(profile)).toBe(false)
+    expect(new FakeAdapter(profile).localUsage).toBeUndefined()
+    const given = new FakeAdapter({ ...profile, localUsage: async () => ({ plan: 'Free' }) })
+    expect('listUsage' in given).toBe(false)
+    expect(given.localUsage).toBeTypeOf('function')
+  })
+
+  it("is Cursor's and OpenCode's own: a local usage and no limits", () => {
+    for (const p of [cursorProfile(), openCodeProfile()]) {
+      const a = new FakeAdapter(p)
+      expect('listUsage' in a).toBe(false)
+      expect(a.localUsage).toBeTypeOf('function')
+    }
   })
 })

@@ -28,6 +28,19 @@ import type {
 } from '@cc/protocol/client'
 
 export type { SendIntent }
+
+/** What `agents.usage` answers (docs/protocol.md): the limits, or why there are none, with the cache figures beside them */
+export type UsageAnswer = {
+  supported: boolean
+  reason?: string
+  /** `supported: false` with this: the tool has no way to report limits (#1616), as against a read that failed */
+  notReported?: boolean
+  /** The host is still reading the tool's own command; `usage` stands in until `usage(tool, machine, { settle: true })` (#1623) */
+  provisional?: boolean
+  usage: UsageSnapshot | null
+  cache?: CacheStats
+  sameAccountAsHub?: boolean
+}
 import type { Unsubscribe, ConnectionState, MachineRef } from './common.js'
 
 export interface AgentPort {
@@ -196,10 +209,7 @@ export interface AgentPort {
    * machine's host counted it (`cache`, absent from a host that predates it).
    * `sameAccountAsHub`: for a linked machine, the limits are this computer's because both are logged in to one account (#726)
    */
-  usage(
-    tool: ToolName,
-    machine?: MachineRef,
-  ): Promise<{ supported: boolean; reason?: string; notReported?: boolean; usage: UsageSnapshot | null; cache?: CacheStats; sameAccountAsHub?: boolean }>
+  usage(tool: ToolName, machine?: MachineRef, opts?: { settle?: boolean }): Promise<UsageAnswer>
   /**
    * Limit readings and tokens over time, as that machine's host stored them (`usage.history`, docs/agent-host.md §6.2):
    * the rows are summed per day or hour and per session, project, model or tool. A host that predates it rejects the call.

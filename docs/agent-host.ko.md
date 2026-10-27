@@ -1972,16 +1972,24 @@ SDK, 다른 쪽은 `app-server`). 답하지 못하는 어댑터는 던지고, �
 `supported: false`이고, 이 표시를 모르는 옛 호스트의 모든 답도 그렇기 때문에, "영영 없음"과 "지금은 없음"을 가르는 것은 이 표시뿐이다.
 표시가 없으면 창은 점선의 모름 고리를 그린다. 창은 실패한 호출(호스트 교체, 바쁜 도구)에도 마지막 답을 그대로 두고 왜 실패했는지만 새로 안다.
 
-**읽을 한도가 없는 도구 (#1623, #1616).** Cursor와 OpenCode에는 사용량 API가 없다. 두 어댑터는 `listUsage()`를 도구 자신의
-명령으로 답하고, 자격 증명이나 상태 파일은 읽지 않는다: Cursor의 플랜은 `agent about --format json`(`subscriptionTier`, 출력의 계정
+**한도가 없는 도구가 그래도 말하는 것 (#1623).** "한도를 알리지 않는다"의 정의는 하나다: 어댑터에 `listUsage()`가 없다
+(`usageFor`가 `notReported`를 여기서만 끌어낸다). Cursor와 OpenCode에는 사용량 API가 없지만 어댑터에 선택 메서드 `localUsage()`가 있고, 도구
+자신의 명령으로 읽으며 자격 증명이나 상태 파일은 읽지 않는다: Cursor의 플랜은 `agent about --format json`(`subscriptionTier`, 출력의 계정
 이메일은 읽지 않는다), OpenCode의 로컬 합계는 `opencode stats`(상자 표를 라벨로 읽는다: 세션, 메시지, 토큰, 비용, JSON 형식은 없다)에서
-얻는다. 스냅샷은 `noLimits: true`와 `plan`, `totals { scope, rows }`(추가만)를 싣고, `usageFor`는 이를 그 스냅샷을 `usage`로 한
-`supported: false, notReported: true`와 쉬운 이유("<도구> does not report usage limits")로 답한다: 잘못된 것도 할 일도 없고, 도넛은
-어둡게 그린 것이다(design-system.ko.md §10). 읽기 실패도 `supported: false`지만 `notReported`가 없어 지금은 모름으로 남는다. 읽기는
-프로세스 실행이라 보관하고(`adapters/usage-read.ts`: Cursor 플랜 5분, OpenCode 합계 1분), 묻는 쪽끼리 나누며, 기다리게 하지 않는다: 답이
-아직 없으면 3초만 기다린 뒤 읽기가 계속되는 동안 쉬운 "한도 없음" 스냅샷을 주고, 오래된 답은 바로 주고 뒤에서 다시 읽으며, 실패한
-명령은 1분간 다시 돌리지 않는다. Windows에서 잰 값(agent 2026.10.22, opencode 1.19.4): `agent about` 1.6~2.3초, `opencode stats` 0.8~1.3초.
-녹화한 출력(이메일은 바꿈)이 파서의 테스트 입력이다.
+얻는다. `usageFor`는 쉬운 이유("<도구> does not report usage limits")와 함께 `supported: false, notReported: true`로 답하고, `usage`에는 `plan`과
+`totals { scope, rows }`(추가만)가 실린다. 도넛은 어둡게 그린 것이다(design-system.ko.md §10). 읽기 실패도 `supported: false`지만 `notReported`가
+없어 지금은 모름으로 남는다.
+- *로그아웃.* 로그인하지 않은 계정에서 `agent about`은 종료 코드 0으로 `subscriptionTier: null`을 낸다. 그 답은 어느 도구나 주는 읽기 실패("Cursor is
+  not logged in on this computer", `notReported` 없음)이고 10초만 보관해서, 방금 한 로그인이 보인다.
+- *횟수.* OpenCode는 세션·메시지 횟수를 컴퓨터의 언어(Windows 지역 설정, `LANG`은 무시)로 `toLocaleString()` 해서 쓴다: `1,204`, `1.204`, `1 204`(줄바꿈 없는
+  공백 또는 좁은 공백), `1'204`, `12,04,567`. 횟수는 정수이므로 구분자 하나로 정확히 세 자리씩 묶인 숫자(인도식은 두 자리 뒤 세 자리)만 읽고,
+  나머지는 값이 null인 줄이 되어 대시로 보이며, 틀릴 수 있는 숫자로는 보이지 않는다. 토큰과 비용은 현지화되지 않은 `toFixed`와 접미사다.
+- *읽기의 비용.* 읽기는 프로세스 실행이라 어댑터의 리더가 보관하고(`adapters/usage-read.ts`: Cursor 플랜 5분, OpenCode 합계 1분), 묻는 쪽끼리 한 번의 실행을
+  나누며, 오래된 답은 바로 주고 뒤에서 다시 읽고, 실패한 명령은 1분간 다시 돌리지 않는다. 호스트는 이 도구들에 대해 자기 보관을 두지 않는다.
+- *느린 명령.* 답이 아직 없으면 3초만 기다린 뒤 `provisional`(아직 아는 것 없음)로 표시한 답을 주고 실행은 계속된다. 잠정 답은 보관하지 않는다. 열린 패널은
+  그다음 `settle: true`로 한 번 더 묻고, 이 호출은 진행 중인 실행(명령 자체의 제한 15초가 상한)을 기다려 읽은 것을 답하므로 플랜이나 합계가 폴링 없이 패널에
+  도착한다. `opencode stats`는 가진 세션을 모두 읽으므로 큰 데이터베이스에서는 느릴 수 있다: 15초를 넘기면 실행은 끝나고, 실패로 읽히며, 1분간 다시 시작하지 않는다.
+- Windows에서 잰 값(agent 2026.10.22, opencode 1.19.4): `agent about` 1.6~2.3초, `opencode stats` 0.8~1.3초. 녹화한 출력(이메일은 바꿈)이 파서의 테스트 입력이다.
 
 사용량은 세션도 디렉토리도 아닌 **계정**의 성질이라 `listUsage()`에는 인자가 없다 — 어느
 폴더에서 묻든 답이 같다. 다루는 것은 구독 한도뿐이고, 추가 결제(크레딧)는 범위 밖이다.

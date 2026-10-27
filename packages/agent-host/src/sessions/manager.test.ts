@@ -670,22 +670,60 @@ describe('while-alive facts are carried in the list', () => {
     })
   })
 
-  it('answers a tool with no limits to read as one that does not report them, and keeps the plan and totals it does say (#1623)', async () => {
-    const snapshot = { plan: 'Free', windows: [], daily: [], noLimits: true, totals: { scope: 'all time', rows: [{ id: 'input', label: 'Input', value: 5, unit: 'tokens' }] } }
-    Object.assign(adapter, { listUsage: async () => snapshot })
+  it('has one definition of a tool that reports no limits: its adapter has no listUsage; what it says itself is carried (#1623)', async () => {
+    const totals = { scope: 'all time', rows: [{ id: 'input', label: 'Input', value: 5, unit: 'tokens' }] }
+    const asks: unknown[] = []
+    Object.assign(adapter, {
+      listUsage: undefined,
+      localUsage: async (ask?: unknown) => (asks.push(ask), { plan: 'Free', totals }),
+    })
     const r = await rpc('agents.usage', { tool: 'claude' })
-    expect(r).toMatchObject({ supported: false, notReported: true, usage: snapshot })
-    expect(r).toHaveProperty('reason', expect.stringMatching(/does not report usage limits$/))
-    // The one-minute cache answers the same
-    expect(await rpc('agents.usage', { tool: 'claude' })).toMatchObject({ supported: false, notReported: true, usage: snapshot })
+    expect(r).toMatchObject({ supported: false, notReported: true, usage: { plan: 'Free', windows: [], daily: [], totals } })
+    expect(r).toHaveProperty('reason', 'Claude Code does not report usage limits')
+    expect(r).not.toHaveProperty('provisional')
+    // The adapter's reader keeps what it read; the host keeps nothing of its own, so each ask goes to it
+    await rpc('agents.usage', { tool: 'claude' })
+    expect(asks).toHaveLength(2)
+    // A tool that has listUsage reports limits, whatever its snapshot says
+    Object.assign(adapter, { listUsage: async () => ({ plan: 'max', windows: [], daily: [] }) })
+    const limited = await rpc('agents.usage', { tool: 'claude' })
+    expect(limited).toMatchObject({ supported: true, usage: { plan: 'max' } })
+    expect(limited).not.toHaveProperty('notReported')
   })
 
-  it('does not keep the answer a slow command gets, so the next ask finds the plan (#1623)', async () => {
-    const snapshot = { plan: 'Free', windows: [], daily: [], noLimits: true }
-    let reads = 0
-    Object.assign(adapter, { listUsage: async () => (reads++ === 0 ? { plan: null, windows: [], daily: [], noLimits: true } : snapshot) })
-    expect(await rpc('agents.usage', { tool: 'claude' })).toMatchObject({ notReported: true, usage: { plan: null } })
-    expect(await rpc('agents.usage', { tool: 'claude' })).toMatchObject({ notReported: true, usage: { plan: 'Free' } })
+  it('passes a provisional answer through, and asks the adapter to settle when the screen does (#1623)', async () => {
+    const asks: unknown[] = []
+    Object.assign(adapter, {
+      listUsage: undefined,
+      localUsage: async (ask?: { settle?: boolean }) => (asks.push(ask), ask?.settle ? { plan: 'Free' } : { plan: null, provisional: true }),
+    })
+    expect(await rpc('agents.usage', { tool: 'claude' })).toMatchObject({ notReported: true, provisional: true, usage: { plan: null } })
+    const settled = await rpc('agents.usage', { tool: 'claude', settle: true })
+    expect(settled).toMatchObject({ notReported: true, usage: { plan: 'Free' } })
+    expect(settled).not.toHaveProperty('provisional')
+    expect(asks).toEqual([{ settle: undefined }, { settle: true }])
+  })
+
+  it('tells a tool whose command says nobody is logged in as any tool is, not as one with no limits (#1623)', async () => {
+    Object.assign(adapter, { listUsage: undefined, localUsage: async () => ({ plan: null, loggedOut: true }) })
+    const r = await rpc('agents.usage', { tool: 'claude' })
+    expect(r).toMatchObject({ supported: false, reason: 'Claude Code is not logged in on this computer', usage: null })
+    expect(r).not.toHaveProperty('notReported')
+  })
+
+  it('runs no command for a tool with no limits when only the cache is wanted, and survives one that throws (#1623)', async () => {
+    let runs = 0
+    Object.assign(adapter, {
+      listUsage: undefined,
+      localUsage: async () => {
+        runs++
+        throw new Error('boom')
+      },
+    })
+    expect(await rpc('agents.usage', { tool: 'claude', limits: false })).toMatchObject({ notReported: true, usage: null })
+    expect(runs).toBe(0)
+    expect(await rpc('agents.usage', { tool: 'claude' })).toMatchObject({ supported: false, notReported: true, usage: null })
+    expect(runs).toBe(1)
   })
 
   it('counts each model request into the prompt cache figures agents.usage answers with (docs/agent-host.md §6.1)', async () => {

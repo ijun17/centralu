@@ -12,7 +12,7 @@ import { setup } from './control.js'
 
 type MockWindow = { __mock: any }
 
-const NONE = { plan: null, windows: [], daily: [], noLimits: true }
+const NONE = { plan: null, windows: [], daily: [] }
 const PLAN = { ...NONE, plan: 'Free' }
 const TOTALS = {
   ...NONE,
@@ -26,6 +26,9 @@ const TOTALS = {
     ],
   },
 }
+/** A count the tool printed in a form the host could not read is null: shown as a dash, never as a number */
+const UNREAD = { ...NONE, totals: { scope: 'all time', rows: [{ id: 'sessions', label: 'Sessions', value: null, unit: 'count' }, { id: 'messages', label: 'Messages', value: 126, unit: 'count' }] } }
+const TOTALS_PLAN = { ...TOTALS, plan: 'Free' }
 const answer = (usage: unknown) => ({ supported: false, reason: 'Codex does not report usage limits', notReported: true, usage })
 
 async function open(page: Page, codex: unknown): Promise<void> {
@@ -81,6 +84,36 @@ export function usageNotReportedTests(): void {
       await expect(page.getByTestId('usage-donut-tip-codex')).not.toContainText('unknown')
     })
 
+    test('a count the tool printed in a form the host could not read is a dash, not a number', async ({ page }) => {
+      await open(page, answer(UNREAD))
+      await expect(page.getByTestId('usage-total-sessions')).toHaveText('Sessions—')
+      await expect(page.getByTestId('usage-total-messages')).toHaveText('Messages126')
+    })
+
+    test('a command that was slower than the host waits: the open panel receives the plan when it ends, without polling', async ({ page }) => {
+      await setup(page, { projects: ['/tmp/alpha'] })
+      await page.evaluate(
+        ([first, settled]) => {
+          const m = (window as unknown as MockWindow).__mock
+          m.toolUsage = { codex: first }
+          m.settledUsage = { codex: settled }
+        },
+        [{ ...answer(NONE), provisional: true }, answer(TOTALS_PLAN)] as const,
+      )
+      await page.evaluate(() => (window as unknown as MockWindow).__mock.setConnectionState('disconnected'))
+      await expect(page.getByTestId('connection')).toBeVisible()
+      await page.evaluate(() => (window as unknown as MockWindow).__mock.setConnectionState('connected'))
+      await expect(page.getByTestId('connection')).toHaveCount(0)
+      await page.getByTestId('usage-donut-codex').click()
+      // The panel was never reopened: what it shows changed in place
+      await expect(page.getByTestId('usage-plan')).toHaveText('Free plan')
+      await expect(page.getByTestId('usage-totals')).toContainText('Local totals · all time')
+      // One settle ask, and no more however long it stays open
+      await page.waitForTimeout(700)
+      const settles = await page.evaluate(() => ((window as unknown as MockWindow).__mock.usageCalls as { settle: boolean }[]).filter((c) => c.settle).length)
+      expect(settles).toBe(1)
+    })
+
     test('a read that failed is still its reason, not the plain words (nothing says the tool has no limits)', async ({ page }) => {
       await open(page, { supported: false, reason: 'Codex is not logged in on this computer', usage: null })
       await expect(page.getByTestId('usage-unavailable')).toContainText('Codex is not logged in on this computer')
@@ -111,7 +144,7 @@ export function usageNotReportedTests(): void {
       test(`its rows come in by a short fade${reduced ? ', the only motion left with reduced motion' : ''}`, async ({ page }) => {
         if (reduced) await page.emulateMedia({ reducedMotion: 'reduce' })
         await open(page, answer({ ...TOTALS, plan: 'Free' }))
-        for (const id of ['usage-not-reported']) {
+        for (const id of ['usage-not-reported-text', 'usage-plan', 'usage-totals']) {
           const anim = await page.getByTestId(id).evaluate((el) => {
             const s = getComputedStyle(el)
             return { name: s.animationName, ms: parseFloat(s.animationDuration) * 1000 }

@@ -37,7 +37,15 @@ export function UsagePanel({ tool, machine = null }: { tool: ToolName; /** A lin
   }
 
   const read = useLoad(() => platform.agents.usage(tool, machine ?? undefined), [platform, tool, machine])
-  const r = read.data
+  /*
+   * A tool whose own command is slower than the host waits answers `provisional` (#1623). The panel asks once more, to
+   * settle: that one call returns when the command ends, so the plan or the totals arrive on the open panel, and nothing
+   * polls. It is asked once and never again (an answer that is still provisional stands), so a host that ignores it cannot
+   * make a loop.
+   */
+  const provisional = read.data?.provisional === true
+  const settled = useLoad(() => (provisional ? platform.agents.usage(tool, machine ?? undefined, { settle: true }) : null), [platform, tool, machine, provisional])
+  const r = settled.data ?? read.data
   const state: { usage: UsageSnapshot | null; reason?: string; cache?: CacheStats; sameAccount?: boolean; notReported?: boolean } = r
     ? {
         usage: r.usage,
@@ -130,7 +138,9 @@ export const NOT_REPORTED_COPY = {
 }
 
 /** How a total is written: tokens and counts as the daily tokens are, dollars with their cents */
-function totalText(value: number, unit: 'count' | 'tokens' | 'usd'): string {
+function totalText(value: number | null, unit: 'count' | 'tokens' | 'usd'): string {
+  // The tool printed it in a form that could not be read: a dash, never a number that may be wrong
+  if (value === null) return '—'
   return unit === 'usd' ? `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : formatCount(value)
 }
 
@@ -139,23 +149,26 @@ function NotReported({ label, usage, machine }: { label: string; usage: UsageSna
   // The totals are what that machine counted: the words say where, as the dropdown's header does
   const machineName = useMachineName(machine)
   return (
-    <div className="cc-row-in px-4 py-6" data-testid="usage-not-reported">
-      <p className="text-center text-sm leading-body text-ink-muted" data-testid="usage-not-reported-text">
+    <div className="px-4 py-6" data-testid="usage-not-reported">
+      {/* Each part fades in as it arrives: the plan or the totals may come after the words, when the command was slow */}
+      <p className="cc-row-in text-center text-sm leading-body text-ink-muted" data-testid="usage-not-reported-text">
         {NOT_REPORTED_COPY.title(label)}
       </p>
       {usage?.plan && (
-        <p className="readout mt-4 text-center text-xs text-ink" data-testid="usage-plan">
+        <p className="readout cc-row-in mt-4 text-center text-xs text-ink" data-testid="usage-plan">
           {NOT_REPORTED_COPY.plan(usage.plan)}
         </p>
       )}
       {totals && totals.rows.length > 0 && (
-        <section className="mt-5 border-t border-line pt-3" data-testid="usage-totals">
+        <section className="cc-row-in mt-5 border-t border-line pt-3" data-testid="usage-totals">
           <span className="text-xs uppercase text-ink-faint">{NOT_REPORTED_COPY.totalsTitle(totals.scope)}</span>
           <ul className="mt-2 space-y-1">
             {totals.rows.map((row) => (
               <li key={row.id} className="flex items-baseline gap-2" data-testid={`usage-total-${row.id}`}>
                 <span className="text-xs text-ink-muted">{row.label}</span>
-                <span className="readout ml-auto text-xs text-ink">{totalText(row.value, row.unit)}</span>
+                <span className="readout ml-auto text-xs text-ink" data-unread={row.value === null ? '' : undefined}>
+                  {totalText(row.value, row.unit)}
+                </span>
               </li>
             ))}
           </ul>

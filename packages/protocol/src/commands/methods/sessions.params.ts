@@ -353,6 +353,12 @@ export const sessionsParams = {
      * reading of limits nobody will look at. Absent: read them.
      */
     limits: z.boolean().optional(),
+    /**
+     * `true`: when a read of the tool's own command is in flight (an answer marked `provisional`), wait for it instead of
+     * answering at once (#1623). The screen asks once more with this when the first answer was provisional, so it
+     * receives the result when the command finishes and does not poll. Absent: answer at once.
+     */
+    settle: z.boolean().optional(),
     ...machineParam,
   }),
   /**

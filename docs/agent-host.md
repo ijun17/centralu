@@ -3803,18 +3803,32 @@ purpose: a read that failed (not logged in, a timeout) is also `supported: false
 predates the mark, so only the mark tells "never" from "not now"; without it the window draws the dashed, unknown ring. The
 window keeps the last answer through a call that fails (a host swap, a busy tool) and only learns why the ask failed.
 
-**A tool with no limits to read (#1623, #1616).** Cursor and OpenCode have no usage API. Their adapters answer `listUsage()` from the
-tool's own command, never its credential or state files: Cursor's plan from `agent about --format json` (`subscriptionTier`;
-the account's email in that output is never read out), OpenCode's local totals from `opencode stats` (boxed tables read
-by their labels: sessions, messages, tokens, cost; no JSON form). The snapshot says `noLimits: true` and carries `plan` and
-`totals { scope, rows }` (additive), and `usageFor` answers it as `supported: false, notReported: true` with that snapshot as
-`usage` and a plain reason ("<tool> does not report usage limits"): nothing is wrong and nothing is to be done, and the donut
-is the dimmed one (design-system.md §10). A failed read also answers `supported: false` but without `notReported`, which
-stays the unknown it is. Each read is a process run, so it is kept (`adapters/usage-read.ts`: Cursor's plan five minutes,
-OpenCode's totals one), shared between askers, and never waited on: with no answer yet the asker waits three seconds, then
-gets the plain "no limits" snapshot while the read goes on and fills the cache; a stale answer is returned at once and read
-again behind it; a failed command is not run again for a minute. Measured on Windows (agent 2026.10.22, opencode 1.19.4):
-`agent about` 1.6 to 2.3 s, `opencode stats` 0.8 to 1.3 s; the recorded outputs (email replaced) are the parsers' test input.
+**What a tool with no limits still says (#1623).** "Reports no limits" has one definition: the adapter has no `listUsage()`
+(`usageFor` derives `notReported` from that and nowhere else). Cursor and OpenCode have no usage API, but their adapters have
+an optional `localUsage()`, read from the tool's own command and never its credential or state files: Cursor's plan from
+`agent about --format json` (`subscriptionTier`; the account's email in that output is never read out), OpenCode's local totals
+from `opencode stats` (boxed tables read by their labels: sessions, messages, tokens, cost; no JSON form). `usageFor` answers
+`supported: false, notReported: true` with a plain reason ("<tool> does not report usage limits") and a `usage` that carries
+`plan` and `totals { scope, rows }` (additive); the donut is the dimmed one (design-system.md §10). A failed read also answers
+`supported: false` but without `notReported`, which stays the unknown it is.
+- *Logged out.* `agent about` prints `subscriptionTier: null` with exit 0 for an account that is not logged in; the answer is then
+  the failed read every tool gives ("Cursor is not logged in on this computer", no `notReported`), and is kept ten seconds only,
+  so a login a moment ago is seen.
+- *Counts.* OpenCode writes the sessions and messages counts with `toLocaleString()` in the computer's language (Windows' regional
+  setting; `LANG` is ignored): `1,204`, `1.204`, `1 204` (no-break or narrow no-break space), `1'204`, `12,04,567`. A count is a
+  whole number, so only digit groups of exactly three behind one separator used throughout (or two and then three for the Indian
+  grouping) are read; anything else is a row with a null value, shown as a dash and never as a number that may be wrong. Tokens and
+  cost are `toFixed` with a suffix, not localized.
+- *Cost of a read.* Each read is a process run, so the adapter's reader keeps it (`adapters/usage-read.ts`: Cursor's plan five
+  minutes, OpenCode's totals one), shares one run between askers, returns a stale answer at once and reads again behind it, and does
+  not run a failed command again for a minute. The host keeps nothing of its own for these tools.
+- *A slow command.* With no answer yet the asker waits three seconds, then gets an answer marked `provisional` (nothing known yet)
+  while the run goes on; a provisional answer is never kept. The open panel then asks once more with `settle: true`, which waits for
+  the run in flight (the command's own timeout, 15 s, is the ceiling) and answers what it read, so the plan or totals arrive on the
+  panel without polling. `opencode stats` reads every session it has, so a large database may be slow: past 15 s the run is killed,
+  read as a failure, and not started again for a minute.
+- Measured on Windows (agent 2026.10.22, opencode 1.19.4): `agent about` 1.6 to 2.3 s, `opencode stats` 0.8 to 1.3 s; the recorded
+  outputs (email replaced) are the parsers' test input.
 
 Usage is an **account** property, not a session or directory one, which is why `listUsage()`
 takes no arguments — the answer is the same whichever folder you ask from. Only subscription

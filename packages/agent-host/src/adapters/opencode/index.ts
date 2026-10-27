@@ -54,7 +54,7 @@ const VERSION_FOR_MS = 60_000
 
 export function openCodeProfile(): AcpProfile {
   let known: { at: number; version: string | null } | null = null
-  const readUsage = openCodeUsageReader()
+  const localUsage = openCodeUsageReader()
   const version = async (): Promise<string | null> => {
     if (known && Date.now() - known.at < VERSION_FOR_MS) return known.version
     const l = findOpenCode()
@@ -67,7 +67,7 @@ export function openCodeProfile(): AcpProfile {
     capabilities: CAPABILITIES,
     surface: OPENCODE_SURFACE,
     infersCompaction: true,
-    readUsage,
+    localUsage,
     async launch(opts) {
       const l = findOpenCode()
       return l ? { command: l.command, args: [...l.args, 'acp'], env: presetEnv(opts.permissionPreset, process.env, readOpenCodeConfigs(opts.cwd, process.env)) } : null

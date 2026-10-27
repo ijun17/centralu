@@ -7,8 +7,8 @@ import { parseAbout } from './usage.js'
 const RECORDED = readFileSync(join(import.meta.dirname, 'recordings', 'about.json'), 'utf8')
 
 describe("Cursor's usage: the plan from `agent about --format json` (#1623)", () => {
-  it('reads the plan from the recorded output, and says the tool has no limits to report', () => {
-    expect(parseAbout(RECORDED)).toEqual({ plan: 'Free', windows: [], daily: [], noLimits: true })
+  it('reads the plan from the recorded output', () => {
+    expect(parseAbout(RECORDED)).toEqual({ plan: 'Free' })
   })
 
   it('never carries the account or anything else the command prints', () => {
@@ -19,10 +19,13 @@ describe("Cursor's usage: the plan from `agent about --format json` (#1623)", ()
     expect(parseAbout(`Update available\n${RECORDED}\n`).plan).toBe('Free')
   })
 
-  it('leaves the plan out when the tool does not say it (not logged in, a tier it does not name)', () => {
-    expect(parseAbout('{"cliVersion":"1","subscriptionTier":null}').plan).toBeNull()
-    expect(parseAbout('{"cliVersion":"1"}').plan).toBeNull()
-    expect(parseAbout('{"subscriptionTier":"  "}').plan).toBeNull()
+  it('leaves the plan out when the tool does not name one (no field, a blank one)', () => {
+    expect(parseAbout('{"cliVersion":"1"}')).toEqual({ plan: null })
+    expect(parseAbout('{"subscriptionTier":"  "}')).toEqual({ plan: null })
+  })
+
+  it('says nobody is logged in when the tier is null (exit 0, measured in review RV1625)', () => {
+    expect(parseAbout('{"cliVersion":"1","subscriptionTier":null,"userEmail":null}')).toEqual({ plan: null, loggedOut: true })
   })
 
   it('reads the object when a notice around it holds a brace', () => {
