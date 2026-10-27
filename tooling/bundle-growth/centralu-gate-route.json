@@ -1,4 +1,0 @@
-{
-  "bytes": 200,
-  "reason": "The gate's inbound path (#1654): the protocol gains one method, gate.ask, whose zod schema ships with RpcMethods in the UI's main chunk though only the host uses it. Measured 1,917,351 B against a ceiling of 1,917,200 B (151 B over); no new dependency. Once #1671 splits host-only schemas out of the UI bundle, only the small allow-or-deny result stays, and this declaration shrinks or goes."
-}

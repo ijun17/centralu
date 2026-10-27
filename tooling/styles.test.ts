@@ -256,6 +256,7 @@ describe('bundle regression (decision C-3: no editor engine in the viewer)', () 
     { file: 'packages/protocol/src/client-frames.ts', text: '^[A-Za-z0-9_-]{22,128}$' },
     { file: 'packages/protocol/src/commands/methods/projects.params.ts', text: 'This attachment is too large' },
     { file: 'packages/protocol/src/commands/methods/settings.params.ts', text: 'panels or sessionIds is required' },
+    { file: 'packages/protocol/src/commands/methods/gate.params.ts', text: 'A gate request carries no decision' },
   ]
   it('holds none of the schemas only the host reads', () => {
     for (const { file, text } of HOST_ONLY_MARKERS) {
