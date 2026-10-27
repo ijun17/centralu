@@ -11,6 +11,7 @@
  *   main.mjs                     — the bundled host (only better-sqlite3 kept external)
  *   schema.sql                   — the store looks for this next to the bundle
  *   codex-orchestrator-bridge.mjs — codex launches this directly with node (bundled with `ws` inside)
+ *   agy-gate.mjs, gate-answer.mjs — Antigravity's PreToolUse hook command and the file it imports, plain files side by side
  *   pty-broker.mjs               — the terminal broker the host starts with node on Windows (#1067), as is: it needs only node-pty
  *   node_modules/better-sqlite3  — the native addon (only the files needed)
  *   remote-runtime.json          — the Node a remote this host installs runs, pinned (scripts/node-pin.mjs)
@@ -25,6 +26,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { CONPTY_FILES } from '../../../scripts/conpty-files.mjs'
 import { buildId } from './build-id.mjs'
+import { copyAgyGate } from './agy-gate-files.mjs'
 import { bundleOutFolder } from './bundle-out.mjs'
 
 const require = createRequire(import.meta.url)
@@ -65,6 +67,8 @@ cpSync(join(ROOT, 'packages/protocol/src/schema/schema.sql'), join(OUT, 'schema.
 // The terminal broker (dev-services/pty-broker.mjs, #1067): `brokerPath` looks beside main.mjs. Its one import, node-pty,
 // resolves against the host folder's node_modules, as main.mjs's does
 cpSync(join(ROOT, 'packages/agent-host/src/dev-services/pty-broker.mjs'), join(OUT, 'pty-broker.mjs'))
+// Antigravity's gate hook: `agy` runs `node <host folder>/agy-gate.mjs`, which imports ./gate-answer.mjs (both copied as they are)
+copyAgyGate(ROOT, OUT)
 /*
  * The stdio bridge for the Codex orchestrator. Codex launches it directly with `node <path>`, so it
  * stays one plain `.mjs` file next to the host, but it is **bundled**, with `ws` inside.

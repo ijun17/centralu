@@ -1,0 +1,10 @@
+import { fileBeside } from '../../os.js'
+
+/**
+ * Where the gate hook command is. `./agy-gate.mjs` is beside this file in the source tree and beside the bundled `main.mjs`
+ * in the packaged layout (`scripts/agy-gate-files.mjs` copies both gate files there), the same relative name in both. `agy`
+ * starts it with `node <path>`, so it has to be a plain file on disk.
+ */
+export function gatePath(base: string = import.meta.url): string {
+  return fileBeside(base, 'agy-gate.mjs')
+}
