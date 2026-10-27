@@ -10,6 +10,7 @@ import { formatCount, formatSaidAt } from '../../../app/format.js'
 import { InlineViewSlot } from '../InlineView.jsx'
 import { NoticeMark } from '../NoticeMark.jsx'
 import { UserAttachment } from './attachments.jsx'
+import { isRelayed, mineBubbleAttrs, mineBubbleLook } from './bubbleLook.js'
 import { WorktreeProposalRow } from './delegation.jsx'
 import { CentraluCallHeader } from './CentraluCall.jsx'
 import { CentraluCallBody } from './CentraluCallBody.jsx'
@@ -58,7 +59,7 @@ export const ChatRow = memo(function ChatRow({
   nested?: boolean
 }) {
   if (item.kind === 'user') {
-    const relayed = Boolean(item.from || item.fromApp || item.fromScript)
+    const relayed = isRelayed(item)
     return (
       <div className="flex flex-col items-end" data-testid="msg-user">
         {/*
@@ -126,11 +127,8 @@ export const ChatRow = memo(function ChatRow({
         {/* No empty bubble is rendered for a message that only sent an image */}
         {(item.text || !item.attachments?.length) && (
           <div
-            data-mine-bubble
-            {...(relayed ? { 'data-relayed': '' } : {})}
-            className={`max-w-[75%] whitespace-pre-wrap break-words rounded-bubble border px-3 py-2 ${
-              relayed ? 'border-ink-muted/50 bg-surface-relayed text-ink-relayed' : 'border-ink-faint/40 bg-surface-hover text-ink'
-            }`}
+            {...mineBubbleAttrs(relayed)}
+            className={`max-w-[75%] whitespace-pre-wrap break-words rounded-bubble border px-3 py-2 ${mineBubbleLook(relayed)}`}
           >
             {item.text}
           </div>

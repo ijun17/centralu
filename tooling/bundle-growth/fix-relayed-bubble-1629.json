@@ -1,4 +1,4 @@
 {
-  "bytes": 600,
-  "reason": "The relayed message look (#1629): two theme token names and labels in THEME_TOKENS (surface-relayed, ink-relayed) and the relayed branch in ChatRow's bubble. Plain strings and one flag, no dependency; lazy loading would not lower the total."
+  "bytes": 810,
+  "reason": "The relayed message look (#1629): two theme token names and labels in THEME_TOKENS and the relayed branch in the bubble look shared by ChatRow and the pinned copy. Measured 809 B against main (1,916,842 to 1,917,651 B), including the pinned copy and the theme order check; plain strings and one flag, no dependency."
 }

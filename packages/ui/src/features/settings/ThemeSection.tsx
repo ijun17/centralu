@@ -263,7 +263,13 @@ function urgencyOf(file: ThemeFileEntry): string[] {
     if (isValidTokenValue(key, value)) tokens[THEME_TOKEN_BY_KEY.get(key)!.cssVar] = value
   }
   const preset = THEME_PRESETS.find((p) => p.base === file.base)?.id ?? THEME_PRESETS[0]!.id
-  const names = [...READING_SURFACES.map(([n]) => n), ...INK_ORDER.map(([n]) => n)]
+  const names = [
+    ...READING_SURFACES.map(([n]) => n),
+    ...INK_ORDER.map(([n]) => n),
+    '--color-surface-hover',
+    '--color-surface-relayed',
+    '--color-ink-relayed',
+  ]
   return urgencyBreaks(resolveColors(tokens, preset, names))
 }
 

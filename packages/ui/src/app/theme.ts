@@ -283,6 +283,26 @@ export function urgencyBreaks(colors: Record<string, Rgba>): string[] {
       }
     }
   }
+  // A message relayed from a session, an app or a script is read on its own fill. Its text has to
+  // stay at least as strong as on the person's own bubble, and above the secondary ink (#1629).
+  const relayedFill = colors['--color-surface-relayed']
+  const relayedInk = colors['--color-ink-relayed']
+  if (relayedFill && relayedInk) {
+    const ground = relayedFill[3] < 1 ? over(relayedFill, [0, 0, 0, 1]) : relayedFill
+    const onRelayed = contrast(over(relayedInk, ground), ground)
+    const muted = colors['--color-ink-muted']
+    if (muted && !(onRelayed > contrast(over(muted, ground), ground))) {
+      breaks.push('On a message from a session, app or script, secondary stands out as much as its text or more.')
+    }
+    const hover = colors['--color-surface-hover']
+    const ink = colors['--color-ink']
+    if (hover && ink) {
+      const bubble = hover[3] < 1 ? over(hover, [0, 0, 0, 1]) : hover
+      if (onRelayed < contrast(over(ink, bubble), bubble)) {
+        breaks.push('The text on a message from a session, app or script is weaker than on your own message.')
+      }
+    }
+  }
   return breaks
 }
 

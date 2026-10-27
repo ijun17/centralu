@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import type { RefObject } from 'react'
 import type { Virtualizer } from '@tanstack/react-virtual'
 import type { ChatItem } from '../../../store/store.js'
+import { isRelayed, mineBubbleAttrs, mineBubbleLook } from '../chat-rows/bubbleLook.js'
 
 /*
  * The banner that pins the person's latest message once it scrolls off the top (#428): which
@@ -66,6 +67,7 @@ export function useStickyUser({
   // A message that sent only an image has empty text — the banner shows the attachment name in its place
   const pinnedText =
     pinned?.kind === 'user' ? pinned.text || (pinned.attachments?.map((a) => a.name).join(', ') ?? '') : null
+  const stickyRelayed = pinned?.kind === 'user' && isRelayed(pinned)
   const stickyText =
     pinned?.kind === 'user' && pinnedText
       ? pinned.from
@@ -159,6 +161,7 @@ export function useStickyUser({
   return {
     stickyIndex,
     stickyText,
+    stickyRelayed,
     syncSticky,
     scheduleStickyOverlap,
     stickyRef,
@@ -172,7 +175,7 @@ export function useStickyUser({
 export type StickyUserState = ReturnType<typeof useStickyUser>
 
 export function StickyUser({ sticky }: { sticky: StickyUserState }) {
-  const { stickyText, stickyRef, stickyOpen, setStickyOpen, stickyObscured, stickyReturning } = sticky
+  const { stickyText, stickyRelayed, stickyRef, stickyOpen, setStickyOpen, stickyObscured, stickyReturning } = sticky
   if (stickyText === null) return null
   return (
     /*
@@ -247,8 +250,8 @@ export function StickyUser({ sticky }: { sticky: StickyUserState }) {
           type="button"
           onClick={() => setStickyOpen((v) => !v)}
           aria-expanded={stickyOpen}
-          data-mine-bubble
-          className="w-full cursor-pointer truncate rounded-bubble border border-ink-faint/40 bg-surface-hover px-3 py-2 text-left text-md text-ink shadow-(--shadow-sticky)"
+          {...mineBubbleAttrs(stickyRelayed)}
+          className={`w-full cursor-pointer truncate rounded-bubble border px-3 py-2 text-left text-md shadow-(--shadow-sticky) ${mineBubbleLook(stickyRelayed)}`}
         >
           {stickyText}
         </button>
@@ -269,8 +272,8 @@ export function StickyUser({ sticky }: { sticky: StickyUserState }) {
               reason to expand it is to read it — the conversation showing through a long
               question would immediately defeat that purpose.
             */
-            data-mine-bubble
-            className="absolute inset-x-0 top-0 z-10 max-h-60 cursor-pointer overflow-y-auto whitespace-pre-wrap break-words rounded-bubble border border-ink-faint/40 bg-surface-hover px-3 py-2 text-left text-md text-ink shadow-(--shadow-sticky)"
+            {...mineBubbleAttrs(stickyRelayed)}
+            className={`absolute inset-x-0 top-0 z-10 max-h-60 cursor-pointer overflow-y-auto whitespace-pre-wrap break-words rounded-bubble border px-3 py-2 text-left text-md shadow-(--shadow-sticky) ${mineBubbleLook(stickyRelayed)}`}
           >
             {stickyText}
           </button>
