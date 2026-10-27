@@ -77,6 +77,13 @@ const code = (err: unknown): string | undefined => (typeof err === 'object' && e
 /** What a shell reports for a process a signal ended: 128 plus the signal's number (137 for SIGKILL, 143 for SIGTERM, 130 for SIGINT) */
 export const signalExit = (signal: string | null): number => 128 + (Object.entries(constants.signals).find(([name]) => name === signal)?.[1] ?? 1)
 
+/**
+ * Is a SIGINT or SIGTERM that reaches the runner passed on to its command? Not on Windows: a console's Ctrl-C reaches every
+ * process on the console, the command included, which then tears down and writes its report; `child.kill` there is
+ * `TerminateProcess`, which would end it outright, skipping that. (Windows has no other signal to pass on.)
+ */
+export const passesSignalOn = (platform: NodeJS.Platform = process.platform): boolean => platform !== 'win32'
+
 /** How the start time is asked of the OS: the program and its arguments, per platform */
 export function startTimeCommand(pid: number, platform: NodeJS.Platform = process.platform): { file: string; args: string[] } {
   if (platform === 'win32') {
@@ -329,16 +336,21 @@ export function describeSelf(command: string, probe: Probe = realProbe, now: () 
 }
 
 /** Writes `holder` whole under a private name and links it to `path`; fails with EEXIST when that name exists */
-function linkNew(path: string, holder: Holder): void {
+function linkNew(path: string, holder: Holder, link: (existing: string, created: string) => void = linkSync): void {
   const tmp = `${path}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
   const data = JSON.stringify(holder)
   writeFileSync(tmp, data)
   try {
     try {
-      linkSync(tmp, path)
+      link(tmp, path)
     } catch (err) {
-      // A folder that has no hard links (a FAT or network volume): create the file in one call; it is empty for an instant
-      if (code(err) !== 'EPERM' && code(err) !== 'ENOTSUP' && code(err) !== 'EXDEV' && code(err) !== 'ENOSYS') throw err
+      const c = code(err)
+      if (c === 'EEXIST') throw err
+      // A folder that has no hard links (some network volumes): create the file in one call; it is empty for an instant
+      if (c !== 'EPERM' && c !== 'ENOTSUP' && c !== 'EXDEV' && c !== 'ENOSYS') {
+        // FAT and exFAT answer EISDIR: say which folder and what it must do, not a bare failure
+        throw new Error(`cannot create the lock ${path} (${c ?? (err instanceof Error ? err.message : String(err))}): the folder must support hard links (FAT and exFAT volumes do not); point E2E_LOCK_FILE at a file on another volume`)
+      }
       writeFileSync(path, data, { flag: 'wx' })
     }
   } finally {
@@ -359,7 +371,7 @@ const remove = (path: string) => {
 }
 
 /** Hooks for the tests: run at the moments a race has to be made */
-export type Hooks = { afterJudged?: (judged: Holder | null) => void }
+export type Hooks = { afterJudged?: (judged: Holder | null) => void; link?: (existing: string, created: string) => void }
 
 /**
  * One try at the lock: taken, or who holds it. A holder that is gone is taken over (it is in `tookOver`). The lock is the
@@ -381,17 +393,23 @@ export function tryAcquire(file: string, self: Holder, probe: Probe = realProbe,
     const next = (top?.gen ?? 0) + 1
     const mine = `${file}.${next}`
     try {
-      linkNew(mine, self)
+      linkNew(mine, self, hooks.link)
     } catch (err) {
       if (code(err) !== 'EEXIST') throw err
       continue // someone else made the next generation first: look at theirs
     }
     // Only the highest generation is the lock, and no other lock may be held below it. Both hold unless this number had been
-    // free again: a run that judged a holder gone long ago, after that holder's lock and the ones after it were all given back
-    const others = generations(file).filter((g) => g.path !== mine)
+    // free again: a run that judged a holder gone long ago, after that holder's lock and the ones after it were all given back.
+    // Ours is told from the others by its number: `file` may be written with `//`, `./` or mixed slashes, and a listing gives
+    // the path normalised, so the paths of one file differ as strings.
+    const others = generations(file).filter((g) => g.gen !== next)
     const stale: Holder[] = []
     let withdraw = false
     for (const g of others) {
+      // A lock above ours: the next taker looks at the highest, so a lock held below it is not held. A live holder above is
+      // caught by the liveness test below too, and a dead one is removed with the other stale files; what only this line
+      // catches is a file above that names no holder (the empty instant of a lock made without a hard link, or a stray file):
+      // it is skipped below, and we would hold a lock under it.
       if (g.gen > next) {
         withdraw = true
         break

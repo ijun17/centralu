@@ -12,11 +12,13 @@
  *  - while the command runs: is passed on to the command, and the lock is given back when the command has ended. The exit
  *    code is the command's own, except that a command a signal ended gives 128 plus its number (as a shell reports it), and
  *    one that was told to stop and then exited with 0 gives 130 or 143 too.
- * Windows has no signals: a process there is ended outright, and neither case runs.
+ * Windows has no signals. A console's Ctrl-C reaches every process on the console, the command too, so it is not passed on
+ * there (`child.kill` would end Playwright outright, without its teardown and report): the runner waits for the command to
+ * end and gives the lock back. Anything else that ends the runner there ends it outright, and nothing above runs.
  */
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { acquireLock, signalExit, trackChild, type Held } from './e2e-lock.js'
+import { acquireLock, passesSignalOn, signalExit, trackChild, type Held } from './e2e-lock.js'
 
 const [program, ...args] = process.argv.slice(2)
 if (program !== 'playwright' && program !== 'node') {
@@ -51,12 +53,12 @@ const child = spawn(process.execPath, argv, { stdio: 'inherit' })
 // Named in the lock at once, and its start time filled in as soon as it is known (on Windows that takes seconds): a runner
 // killed in between must not leave Playwright running with the lock free
 if (child.pid !== undefined) void trackChild(held, child.pid)
-// Ctrl-C reaches the child itself on a terminal; a signal sent to this process alone is passed on
+// Ctrl-C reaches the child itself on a terminal; a signal sent to this process alone is passed on (not on Windows: passesSignalOn)
 let passedOn: 'SIGINT' | 'SIGTERM' | null = null
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {
     passedOn ??= signal
-    child.kill(signal)
+    if (passesSignalOn()) child.kill(signal)
   })
 }
 // A run that cannot be started gives the lock back before it fails

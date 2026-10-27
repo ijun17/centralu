@@ -20,6 +20,7 @@ import {
   lockFile,
   ownStart,
   parseLstart,
+  passesSignalOn,
   procGone,
   processStartTime,
   procStamp,
@@ -189,6 +190,11 @@ describe('where the lock is and how a start time is asked', () => {
     expect(signalExit('SIGINT')).toBe(130)
     expect(signalExit(null)).toBe(129)
     expect(signalExit('SIGNOPE')).toBe(129)
+  })
+  it('passes a signal on to the command everywhere but Windows, where Ctrl-C already reaches it and kill would end it outright', () => {
+    expect(passesSignalOn('linux')).toBe(true)
+    expect(passesSignalOn('darwin')).toBe(true)
+    expect(passesSignalOn('win32')).toBe(false)
   })
 })
 
@@ -364,6 +370,61 @@ describe('taking the lock', () => {
       expect(late).toMatchObject({ ok: false, holder: { pid: 3 } })
       expect(top()).toMatchObject({ pid: 3 })
       expect(lockFiles()).toEqual(['lock.json.1', 'lock.json.5'])
+    })
+
+    it('does not hold a lock below a file that names no holder (the empty instant of a lock made without a hard link): that file is the lock', () => {
+      // The check on a higher generation is for this case alone: a live holder above is refused by the liveness test and a
+      // dead one is removed with the stale files, but a file that cannot be read is skipped by both
+      write(holder(1, 1 * HOUR))
+      const late = tryAcquire(file, holder(5, 5 * HOUR), live, null, {
+        afterJudged: (judged) => {
+          if (judged?.pid === 1) writeFileSync(`${file}.5`, '')
+        },
+      })
+      expect(late).toMatchObject({ ok: false, holder: 'unreadable', path: expect.stringContaining('lock.json.5') })
+      // Nothing of ours is left below the file
+      expect(lockFiles()).toEqual(['lock.json.1', 'lock.json.5'])
+    })
+  })
+
+  describe('when the lock file is written another way than the folder lists it', () => {
+    it('takes the lock whatever the spelling of the path: `//`, `./`, `x/../`, and on Windows mixed slashes', () => {
+      mkdirSync(join(dir, 'sub'))
+      const spellings = [`${dir}//lock.json`, `${dir}/./lock.json`, `${dir}/sub/../lock.json`, ...(process.platform === 'win32' ? [`${dir.replaceAll('\\', '/')}\\lock.json`, `${dir}\\.\\sub\\..\\lock.json`] : [])]
+      for (const spelled of spellings) {
+        const live = probeOf({ 1: 1 * HOUR, 2: 2 * HOUR })
+        const first = tryAcquire(spelled, holder(1, 1 * HOUR), live)
+        expect(first.ok, spelled).toBe(true)
+        // Another spelling of the same file sees it as held, and its holder
+        expect(tryAcquire(file, holder(2, 2 * HOUR), live), spelled).toMatchObject({ ok: false, holder: { pid: 1 } })
+        taken(first).release()
+        expect(lockFiles(), spelled).toEqual([])
+        // A holder that is gone is taken over through the same spelling
+        write(holder(9, 9 * HOUR))
+        const over = tryAcquire(spelled, holder(2, 2 * HOUR), live)
+        expect(over.ok, spelled).toBe(true)
+        expect(over.tookOver.map((h) => h.pid), spelled).toEqual([9])
+        taken(over).release()
+      }
+    })
+  })
+
+  describe('a folder that cannot hold a hard link', () => {
+    it('says which file, and that the folder must support hard links, when the link fails with EISDIR (FAT and exFAT)', () => {
+      const eisdir = () => {
+        throw Object.assign(new Error('EISDIR: illegal operation on a directory, link'), { code: 'EISDIR' })
+      }
+      expect(() => tryAcquire(file, holder(1, 1 * HOUR), probeOf({ 1: 1 * HOUR }), null, { link: eisdir })).toThrow(/cannot create the lock .*lock\.json\.1 \(EISDIR\): the folder must support hard links/)
+      // No private file is left behind, and nothing is held
+      expect(lockFiles()).toEqual([])
+    })
+    it('writes the lock in one call on a folder that refuses hard links in the ways it knows', () => {
+      const refuse = () => {
+        throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' })
+      }
+      const r = tryAcquire(file, holder(1, 1 * HOUR), probeOf({ 1: 1 * HOUR }), null, { link: refuse })
+      expect(r.ok).toBe(true)
+      expect(top()).toMatchObject({ pid: 1 })
     })
   })
 })
@@ -590,6 +651,19 @@ describe('the runners (real processes)', () => {
       expect(existsSync(legacy)).toBe(false)
     },
     90_000 * SLOW,
+  )
+
+  it(
+    'runs when E2E_LOCK_FILE is spelled with //, ./ or x/../, and does not wait for a lock of its own',
+    async () => {
+      mkdirSync(join(dir, 'sub'))
+      const r = runner(logLine('r', 'ran'), { E2E_LOCK_FILE: `${dir}//./sub/../lock.json` })
+      expect(await r.done).toBe(0)
+      expect(r.stderr()).not.toContain('waiting for the e2e lock')
+      expect(readFileSync(join(dir, 'log.txt'), 'utf8')).toBe('r ran\n')
+      expect(lockFiles()).toEqual([])
+    },
+    60_000 * SLOW,
   )
 
   it(
