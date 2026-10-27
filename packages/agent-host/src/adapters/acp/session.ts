@@ -505,7 +505,7 @@ class AcpWire implements ToolWire {
     if (!this.askable(turn)) return this.refused(req.toolCall.toolCallId)
     // A question is the person's to answer under every preset: never an approval, never answered without them
     if (this.deps.shape?.isQuestion?.(req)) return this.ask(req)
-    if (this.deps.shape?.neverAllowed?.(req)) {
+    if (await this.deps.shape?.neverAllowed?.(req, this.opts.cwd)) {
       // Declined as the person's "no" would be, so the agent carries on with the turn instead of taking it as stopped
       const no = pick(req.options, 'reject_once')
       this.normalizer.refuse(req.toolCall.toolCallId)

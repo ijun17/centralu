@@ -3,9 +3,10 @@ import type { NormalizedEvent, PermissionPreset } from '@cc/protocol'
 import { readTextFileFor } from '../acp/session.js'
 import { FakeAcpPeer, type PeerScript } from '../acp/fake-peer.test-helpers.js'
 import { logToolStderr, redactLines, startToolProcess } from '../core/tool-process.js'
+import { agyHome, reachesAgentFolder } from './agent-files.js'
 import { AntigravityAdapter, antigravityProfile } from './index.js'
 import { AGY_DISABLED_TOOLS, agyStderrLine, readAgyCall } from './shape.js'
-import { driven, fakeInstall, fakeSignIn, readsWorld, sessionOpts, tempData, tokenPath } from './agent-files.test-helpers.js'
+import { driven, fakeInstall, fakeSignIn, folder, link, pathFrom, pathIn, readsWorld, sessionOpts, tempData, tokenPath, write } from './agent-files.test-helpers.js'
 
 /**
  * What the spike could not make the agent send on cue (docs/plans/antigravity-adapter.md §5, §6): a question to the person
@@ -259,4 +260,74 @@ describe("Antigravity's subagents", () => {
       await handle.dispose()
     })
   }
+})
+
+/** An edit or read request as the agent asks for one under Auto (re-review of #1680: `replace_file_content`, kind `edit`) */
+const touching = (id: string, title: string, kind: string, rawInput: Record<string, unknown>) => ({
+  sessionId: SID,
+  toolCall: { toolCallId: id, title, kind, status: 'pending', rawInput },
+  options: [
+    { optionId: 'allow_once', name: 'Allow', kind: 'allow_once' },
+    { optionId: 'reject_once', name: 'Reject', kind: 'reject_once' },
+  ],
+})
+const NO = { outcome: { outcome: 'selected', optionId: 'reject_once' } }
+const YES = { outcome: { outcome: 'selected', optionId: 'allow_once' } }
+
+describe("the agent's own folder, kept from its tools", () => {
+  for (const preset of ['safe', 'normal', 'edits', 'auto'] as const) {
+    it(`under ${preset}, and with a saved rule for it, an edit or read of a file there is declined without a card`, async () => {
+      const w = world(base, preset)
+      const own = pathIn(w.home.geminiHome, 'antigravity-acp')
+      folder(own)
+      write(pathIn(own, 'settings.json'), '{}')
+      const project = pathIn(w.home.root, '..', '..', 'project')
+      folder(project)
+      const handle = await w.adapter.createSession(sessionOpts('agy-own', preset, { cwd: project }), w.emit)
+      handle.applyRules?.(['replace_file_content', 'edit', '*'])
+      handle.send('go')
+      const peer = w.peers[0]!
+      await peer.next((m) => m.method === 'session/prompt')
+      const asks = [
+        // As measured: the edit tool on a file in the token's folder
+        touching('own-1', 'Run replace_file_content?', 'edit', { TargetFile: pathIn(own, 'settings.json'), TargetContent: 'a', ReplacementContent: 'b' }),
+        // The token itself, spelled in another case (one file on macOS and Windows), and a file not there yet
+        touching('own-2', 'Run write_to_file?', 'edit', { TargetFile: tokenPath(w.home).toUpperCase(), CodeContent: 'x' }),
+        touching('own-3', 'Run write_to_file?', 'edit', { TargetFile: pathIn(own, 'new', 'deeper.txt'), CodeContent: 'x' }),
+        // A read by address, the MCP config beside it, and a path climbing out of the session's folder
+        touching('own-4', 'Run read_url_content?', 'fetch', { Url: `file://${tokenPath(w.home)}` }),
+        touching('own-5', 'Run write_to_file?', 'edit', { TargetFile: pathIn(w.home.geminiHome, 'config', 'mcp_config.json'), CodeContent: '{}' }),
+        touching('own-6', 'Run replace_file_content?', 'edit', { TargetFile: pathFrom(project, pathIn(own, 'settings.json')) }),
+        // Another conversation's plan folder
+        touching('own-7', 'Run create_file?', 'edit', { TargetFile: pathIn(own, 'brain', 'another-session', 'plan.md'), CodeContent: '# Plan' }),
+      ]
+      for (const ask of asks) expect(await peer.ask('session/request_permission', ask), ask.toolCall.toolCallId).toEqual(NO)
+      expect(w.events.some((e) => e.type === 'approval_request')).toBe(false)
+      await handle.dispose()
+    })
+  }
+
+  it('folds case where no part of the path exists to tell it (macOS and Windows take any case for one file)', async () => {
+    const home = agyHome(pathIn('/', 'no-such-cc-data'), '1.4.3')
+    const token = pathIn(home.geminiHome, 'antigravity-acp', 'acp_token.json')
+    await expect(reachesAgentFolder(home, { rawInput: { TargetFile: token.toUpperCase() } }, SID, '/work')).resolves.toBe(true)
+    await expect(reachesAgentFolder(home, { rawInput: { TargetFile: pathIn('/', 'no-such-cc-data', 'project', 'a.txt') } }, SID, '/work')).resolves.toBe(false)
+  })
+
+  it("lets this conversation's plan through as any edit, but not a link in its folder to the token", async () => {
+    const w = world(base, 'auto')
+    const plans = pathIn(w.home.geminiHome, 'antigravity-acp', 'brain', SID)
+    folder(plans)
+    fakeSignIn(w.home)
+    const handle = await w.adapter.createSession(sessionOpts('agy-plan', 'auto'), w.emit)
+    handle.send('go')
+    const peer = w.peers[0]!
+    await peer.next((m) => m.method === 'session/prompt')
+    // As `/plan` asked (measured on 1.4.3): create_file on brain/<session>/plan.md
+    expect(await peer.ask('session/request_permission', touching('plan-1', 'Run create_file?', 'edit', { TargetFile: pathIn(plans, 'plan.md'), CodeContent: '# Plan' }))).toEqual(YES)
+    if (link(tokenPath(w.home), pathIn(plans, 'notes.md'))) {
+      expect(await peer.ask('session/request_permission', touching('plan-2', 'Run replace_file_content?', 'edit', { TargetFile: pathIn(plans, 'notes.md') }))).toEqual(NO)
+    }
+    await handle.dispose()
+  })
 })

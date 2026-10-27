@@ -1,11 +1,12 @@
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { spawn } from 'node:child_process'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { NormalizedEvent, PermissionPreset } from '@cc/protocol'
 import type { AgentProcess, CreateSessionOpts } from '../contract.js'
 import { loadRecording, type Recording } from '../frames/replay.test-helpers.js'
-import { agyHome, INSTALL_MARKER, type AgyHome } from './agent-files.js'
+import { agyHome, INSTALL_MARKER, ownerTag, type AgyHome } from './agent-files.js'
 import { AGY_RELEASE, type AgyArchive } from './release.js'
 
 /**
@@ -52,6 +53,33 @@ export const inRoot = (home: AgyHome, name: string) => join(home.root, name)
 /** Makes a folder (and its parents) */
 export const folder = (path: string) => mkdirSync(path, { recursive: true })
 export const write = (path: string, text: string) => writeFileSync(path, text)
+export const pathIn = (...parts: string[]) => join(...parts)
+export const pathFrom = (from: string, to: string) => relative(from, to)
+/** A symbolic link at `at` to `target`, or false where making one needs rights a test does not have (Windows) */
+export function link(target: string, at: string): boolean {
+  if (process.platform === 'win32') return false
+  symlinkSync(target, at)
+  return true
+}
+
+const hosts: (() => Promise<void>)[] = []
+
+/** Another host process, as a leftover folder's name records its owner: a child that runs until `end` (or `endHosts`) */
+export function otherHost(): { tag: string; end(): Promise<void> } {
+  const child = spawn(process.execPath, ['-e', 'process.stdin.resume(); process.stdin.on("end", () => process.exit(0))'], { stdio: ['pipe', 'ignore', 'ignore'] })
+  const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()))
+  const end = async () => {
+    child.stdin.end()
+    await exited
+  }
+  hosts.push(end)
+  return { tag: ownerTag(child.pid ?? 0), end }
+}
+
+/** Ends every host `otherHost` started (each test's `afterEach`) */
+export async function endHosts(): Promise<void> {
+  for (const end of hosts.splice(0)) await end()
+}
 
 /** One of the committed recordings of 1.4.3 (`recordings/antigravity-1.4.3/<name>.jsonl`) */
 export function agyRecording(name: string): Recording {

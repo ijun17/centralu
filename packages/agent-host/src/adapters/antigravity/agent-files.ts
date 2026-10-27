@@ -1,13 +1,16 @@
 import { spawn as spawnChild } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { closeSync, createReadStream, createWriteStream, existsSync, fstatSync, openSync, readFileSync, readSync, watch, type FSWatcher } from 'node:fs'
-import { chmod, mkdir, mkdtemp, readdir, readFile, rename, rm, statfs, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { chmod, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, statfs, writeFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { createInflateRaw } from 'node:zlib'
 import { errorMessage } from '@cc/protocol'
 import { asObj } from '../../json-value.js'
+import { processStartTime } from '../../dev-services/instance-lock.js'
 import { HOST_PLATFORM, type Platform } from '../../os.js'
 import { readZipEntriesFrom, ZipError, zipEntryStart, type ZipEntry } from '../../zip.js'
 import { InstallFailure } from './failure.js'
@@ -28,8 +31,10 @@ import { AGY_INSTALL_SPACE_BYTES, type AgyArchive, type AgyPlatformKey } from '.
  *     <version>/             the server and its harness, side by side, and `install.json` written last
  *     gemini-home/           GEMINI_HOME: the agent's settings, token, conversations. Not versioned, so a session made
  *                            under one Centralu still loads under the next (ids are per GEMINI_HOME, spike §3)
- *     .install-<random>/     an install in progress (removed when it ends, however it ends)
- *     .sign-in-<random>/     a sign-in's browser helper and the address it hands over (removed when the sign-in ends)
+ *     .install-<owner>-<random>/  an install in progress (removed when it ends, however it ends)
+ *     .sign-in-<owner>-<random>/  a sign-in's browser helper and the address it hands over (removed when the sign-in ends)
+ *
+ * `<owner>` names the host process that made the folder (`ownerTag`), so another host never removes it while that one runs
  */
 
 /** The registry's name for this machine's build, or null where Google ships none (a 32-bit or another OS) */
@@ -174,7 +179,7 @@ export async function installAgy(
   if (free !== null && free < AGY_INSTALL_SPACE_BYTES) {
     throw new InstallFailure('disk_space', `Antigravity needs about ${mb(AGY_INSTALL_SPACE_BYTES)} MB free to install; ${mb(free)} MB are free`)
   }
-  const work = await mkdtemp(join(home.root, '.install-'))
+  const work = await mkdtemp(join(home.root, `.install-${ownerTag()}-`))
   try {
     const zip = join(work, 'archive.zip')
     const sha = await download(io, archive.url, zip, signal, opts.onProgress)
@@ -318,9 +323,59 @@ export async function removeLeftovers(home: AgyHome): Promise<void> {
   await removeStale(home.root, '.sign-in-')
 }
 
+/**
+ * The folders of that kind whose owner is provably gone. Another host may share this data folder's `tools/` and be in
+ * the middle of its own: the keeper's next host starts while the last one drains, and a second host on the same data
+ * folder with another `--db` takes its own lock, not this folder (re-review of #1680: a second host's start removed a
+ * live sign-in). So a folder goes only when the process its name records has ended, or that pid now belongs to a process
+ * that started at another time; a folder whose owner cannot be told is kept
+ */
 async function removeStale(root: string, prefix: string): Promise<void> {
   const names = await readdir(root).catch((): string[] => [])
-  await Promise.all(names.filter((n) => n.startsWith(prefix)).map((n) => rm(join(root, n), { recursive: true, force: true }).catch(() => {})))
+  const stale = names.filter((n) => n.startsWith(prefix) && ownerGone(n.slice(prefix.length)))
+  await Promise.all(stale.map((n) => rm(join(root, n), { recursive: true, force: true }).catch(() => {})))
+}
+
+let ownStart: string | undefined
+
+/**
+ * This process, as a folder's name records its owner: `<pid>-<start>`, the start a short hash of when the process began
+ * (`ps`), or `0` where that cannot be read (Windows). The pid alone could be another process's later
+ */
+export function ownerTag(pid: number = process.pid, startOf: (pid: number) => string | null = processStartTime): string {
+  if (pid === process.pid && startOf === processStartTime) {
+    ownStart ??= startKey(startOf(pid))
+    return `${pid}-${ownStart}`
+  }
+  return `${pid}-${startKey(startOf(pid))}`
+}
+
+const startKey = (started: string | null) => (started ? createHash('sha256').update(started).digest('hex').slice(0, 8) : '0')
+
+/**
+ * Whether the process a folder's name records (after its prefix: `<pid>-<start>-<random>`) has provably ended: no
+ * process has that pid, or the one that has it started at another time. A name without an owner, or an owner that may
+ * still run (alive, its start unknown), is not gone
+ */
+export function ownerGone(rest: string, deps: { alive?: (pid: number) => boolean; startOf?: (pid: number) => string | null } = {}): boolean {
+  const [, pidText, key] = /^(\d+)-([0-9a-f]{8}|0)-/.exec(rest) ?? []
+  if (pidText === undefined || key === undefined) return false
+  const pid = Number(pidText)
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false
+  if (!(deps.alive ?? processAlive)(pid)) return true
+  if (key === '0') return false
+  const now = (deps.startOf ?? processStartTime)(pid)
+  return now !== null && startKey(now) !== key
+}
+
+/** Whether a process has this pid (signal 0 tests without sending; EPERM means it exists, another user's) */
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    return (err instanceof Error ? Reflect.get(err, 'code') : undefined) === 'EPERM'
+  }
 }
 
 /** Every version folder but the pinned one; `gemini-home` and the dot folders are never touched */
@@ -372,7 +427,7 @@ export type SignInFolder = {
 export async function signInFolder(home: AgyHome, platform: Platform = HOST_PLATFORM): Promise<SignInFolder> {
   await mkdir(home.root, { recursive: true })
   await removeStale(home.root, '.sign-in-')
-  const dir = await mkdtemp(join(home.root, '.sign-in-'))
+  const dir = await mkdtemp(join(home.root, `.sign-in-${ownerTag()}-`))
   await chmod(dir, 0o700).catch(() => {})
   const file = join(dir, 'url')
   let helper: string | null = null
@@ -402,6 +457,100 @@ export async function signInFolder(home: AgyHome, platform: Platform = HOST_PLAT
       await rm(dir, { recursive: true, force: true }).catch(() => {})
     },
   }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// The agent's own folder, kept from its tools (plan §4.2)
+
+/**
+ * Whether a permission request names a file in the agent's own folder (`tools/antigravity/`: its token and settings in
+ * `gemini-home/antigravity-acp/`, its MCP config and skills, its conversations, its programs) anywhere but this
+ * conversation's plan folder. Refused under every preset and every saved rule (`AcpToolShape.neverAllowed`): Centralu
+ * answers every request the agent asks, and under Auto its edit tools reached the token's folder with no card (re-review
+ * of #1680, measured: `replace_file_content` on a file in `antigravity-acp/` ran; the harness counts that folder as part of
+ * its workspace).
+ *
+ * The plan folder is the one place there the agent writes for the person: `/plan` writes
+ * `gemini-home/antigravity-acp/brain/<its session id>/plan.md`, an edit it asks for (measured on 1.4.3; the same folder holds
+ * the MCP schemas it reads). Only that session's folder is let through, judged as written there (not by where a link in it
+ * leads), so a link to the token inside it is still refused.
+ *
+ * Every string in the request that reads as a path is judged: absolute, `~/…`, a `file:` address, or a relative one with a
+ * separator (from the session's folder). Each is judged as written and as it resolves (links followed, as far as the path
+ * exists), and case is folded, since macOS and Windows take any case for the same file. A shell command's words are not
+ * read (a command can still reach the folder; it asks under every preset but Auto, security-boundaries.md)
+ */
+export async function reachesAgentFolder(home: AgyHome, call: unknown, sessionId: string, cwd: string): Promise<boolean> {
+  const paths = pathsIn(call, cwd)
+  if (paths.length === 0) return false
+  const root = await realOrSelf(home.root)
+  const plans = /^[A-Za-z0-9-]{1,64}$/.test(sessionId) ? join('antigravity-acp', 'brain', sessionId) : null
+  const realGemini = await realOrSelf(home.geminiHome)
+  for (const path of paths) {
+    const asWritten = resolve(path)
+    if (refusedIn(home.root, plans && join(home.geminiHome, plans), asWritten)) return true
+    if (refusedIn(root, plans && join(realGemini, plans), await realAsFarAsItExists(asWritten))) return true
+  }
+  return false
+}
+
+const fold = (p: string) => p.toLowerCase()
+
+function within(folder: string, target: string): boolean {
+  const rel = relative(fold(folder), fold(target))
+  return rel === '' || (!isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`))
+}
+
+function refusedIn(root: string, plans: string | null, target: string): boolean {
+  return within(root, target) && !(plans !== null && within(plans, target))
+}
+
+async function realOrSelf(path: string): Promise<string> {
+  return realpath(path).catch(() => path)
+}
+
+/** The real path of the part that exists, with the rest as written: a file being created resolves through its folder */
+async function realAsFarAsItExists(path: string): Promise<string> {
+  const rest: string[] = []
+  let at = path
+  for (;;) {
+    const real = await realpath(at).catch(() => null)
+    if (real !== null) return rest.length ? join(real, ...rest.reverse()) : real
+    const up = resolve(at, '..')
+    if (up === at) return path
+    rest.push(relative(up, at))
+    at = up
+  }
+}
+
+/** The strings of a request that read as paths, made absolute */
+function pathsIn(value: unknown, cwd: string, depth = 0, out: string[] = []): string[] {
+  if (depth > 8 || out.length > 64) return out
+  if (typeof value === 'string') {
+    const path = asPath(value, cwd)
+    if (path) out.push(path)
+  } else if (Array.isArray(value)) {
+    for (const v of value) pathsIn(v, cwd, depth + 1, out)
+  } else if (value && typeof value === 'object') {
+    for (const v of Object.values(value)) pathsIn(v, cwd, depth + 1, out)
+  }
+  return out
+}
+
+function asPath(text: string, cwd: string): string | null {
+  const s = text.trim()
+  if (s.length === 0 || s.length > 4096 || /[\r\n]/.test(s)) return null
+  if (/^file:/i.test(s)) {
+    try {
+      return fileURLToPath(s)
+    } catch {
+      return null
+    }
+  }
+  if (s === '~' || s.startsWith('~/') || s.startsWith('~\\')) return join(homedir(), s.slice(1))
+  if (isAbsolute(s)) return s
+  if (/\s/.test(s) || !/[\\/]/.test(s) || /^[a-z][\w+.-]*:/i.test(s)) return null
+  return resolve(cwd, s)
 }
 
 /** The person's browser on this machine, started apart from the host and never through a shell */

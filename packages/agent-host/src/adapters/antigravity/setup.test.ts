@@ -1,10 +1,24 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ToolSetup, ToolSetupState } from '@cc/protocol'
 import { InstallFailure } from './failure.js'
 import { AGY_RELEASE } from './release.js'
+import { ownerGone, ownerTag, signInFolder } from './agent-files.js'
 import { AgySetup } from './setup.js'
-import { fakeInstall, fakeSignIn, folder, inRoot, leftovers, TEST_ARCHIVE, tempData, write } from './agent-files.test-helpers.js'
+import { endHosts, fakeInstall, fakeSignIn, folder, inRoot, leftovers, otherHost, TEST_ARCHIVE, tempData, write } from './agent-files.test-helpers.js'
 import type { SignInResult } from './sign-in.js'
+
+// The start-up cleanup, as slow as a busy Windows disk makes it (CI on 08be80ba1): every install and sign-in waits for it,
+// so a test that steps the setup by counting ticks would act before the run it means to end had begun
+vi.mock('./agent-files.js', async (importOriginal) => {
+  const real = await importOriginal<typeof import('./agent-files.js')>()
+  return {
+    ...real,
+    removeLeftovers: async (...args: Parameters<typeof real.removeLeftovers>) => {
+      await new Promise((resolve) => setTimeout(resolve, 30))
+      return real.removeLeftovers(...args)
+    },
+  }
+})
 
 /**
  * Antigravity's setup as a state machine (docs/plans/antigravity-adapter.md §3–§4), checked against a model of it: random
@@ -26,8 +40,12 @@ const deferred = (): Deferred => {
   return { resolve, reject, promise }
 }
 
-/** A stand-in for the install and the sign-in that end when the test says, and honour a cancel as the real ones do */
-function world() {
+/**
+ * A stand-in for the install and the sign-in that end when the test says, and honour a cancel as the real ones do. Ready
+ * once the host's start-up cleanup has ended (the event every install and sign-in waits on), so the steps below act on
+ * runs that have begun
+ */
+async function world() {
   const t = tempData()
   data.push(t)
   let install: Deferred | null = null
@@ -52,6 +70,7 @@ function world() {
     },
   })
   setup.onChange((s) => seen.push(s))
+  await setup.whenTidy()
   return {
     setup,
     seen,
@@ -60,7 +79,7 @@ function world() {
   }
 }
 
-/** Lets every promise the step started settle (no clock: the stand-ins answer at once once told) */
+/** Lets every promise the step started settle (no clock, no disk: the stand-ins answer at once once told, and the cleanup has ended) */
 const settle = async () => {
   for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r))
 }
@@ -89,7 +108,7 @@ function rng(seed: number): () => number {
   }
 }
 
-async function step(w: ReturnType<typeof world>, m: Model, s: Step): Promise<void> {
+async function step(w: Awaited<ReturnType<typeof world>>, m: Model, s: Step): Promise<void> {
   switch (s) {
     case 'install':
       w.setup.install()
@@ -137,7 +156,7 @@ async function step(w: ReturnType<typeof world>, m: Model, s: Step): Promise<voi
 describe('the setup line against its model', () => {
   for (const seed of [1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233]) {
     it(`seed ${seed}: every step shows what the model says, and says each change`, async () => {
-      const w = world()
+      const w = await world()
       const m: Model = { installed: false, installing: false, signedIn: false, signingIn: false, failure: null }
       const next = rng(seed)
       const trace: string[] = []
@@ -159,7 +178,7 @@ describe('the setup line against its model', () => {
   }
 
   it('a sign-in that succeeds says the plan the agent gave', async () => {
-    const w = world()
+    const w = await world()
     fakeInstall((w.setup as unknown as { deps: { home: Parameters<typeof fakeInstall>[0] } }).deps.home)
     w.setup.signIn()
     await settle()
@@ -178,16 +197,57 @@ describe('the setup line against its model', () => {
   })
 })
 
+afterEach(endHosts)
+
 describe('what an earlier host left', () => {
-  it('removes a partial install and a sign-in folder as the host starts, before any install of its own', async () => {
+  it('removes a partial install and a sign-in folder of a host that has ended, as the next one starts', async () => {
     const t = tempData()
     data.push(t)
-    folder(inRoot(t.home, '.install-left'))
-    write(inRoot(t.home, '.install-left/archive.zip'), 'partial')
-    folder(inRoot(t.home, '.sign-in-left'))
+    const gone = otherHost()
+    await gone.end()
+    folder(inRoot(t.home, `.install-${gone.tag}-left01`))
+    write(inRoot(t.home, `.install-${gone.tag}-left01/archive.zip`), 'partial')
+    folder(inRoot(t.home, `.sign-in-${gone.tag}-left02`))
     const setup = new AgySetup({ home: t.home, archive: TEST_ARCHIVE, version: AGY_RELEASE.version })
     await setup.whenTidy()
     expect(leftovers(t.home, '.install-')).toEqual([])
     expect(leftovers(t.home, '.sign-in-')).toEqual([])
+  })
+
+  it("keeps the install and sign-in of another host still running on the same folder (the keeper's swap, a second --db)", async () => {
+    const t = tempData()
+    data.push(t)
+    const live = otherHost()
+    const install = `.install-${live.tag}-run001`
+    const signIn = `.sign-in-${live.tag}-run002`
+    folder(inRoot(t.home, install))
+    folder(inRoot(t.home, signIn))
+    // This host's start, and a sign-in of its own, both sweep the folder
+    const setup = new AgySetup({ home: t.home, archive: TEST_ARCHIVE, version: AGY_RELEASE.version })
+    await setup.whenTidy()
+    const own = await signInFolder(t.home)
+    expect(leftovers(t.home, '.install-')).toEqual([install])
+    const signIns = leftovers(t.home, '.sign-in-')
+    expect(signIns).toHaveLength(2)
+    expect(signIns).toContain(signIn)
+    expect(signIns.find((n) => n !== signIn)).toMatch(new RegExp(`^\\.sign-in-${ownerTag()}-`))
+    await own.remove()
+    // Once that host has ended, the next start takes its folders away
+    await live.end()
+    await new AgySetup({ home: t.home, archive: TEST_ARCHIVE, version: AGY_RELEASE.version }).whenTidy()
+    expect(leftovers(t.home, '.install-')).toEqual([])
+    expect(leftovers(t.home, '.sign-in-')).toEqual([])
+  })
+
+  it("keeps a folder whose owner cannot be told, and takes one whose pid is now another process's", () => {
+    const alive = () => true
+    expect(ownerGone('123-0a1b2c3d-xyz', { alive, startOf: () => 'Wed Oct 28 10:00:00 2026' })).toBe(true)
+    expect(ownerGone(`123-${ownerTag(123, () => 'Wed Oct 28 10:00:00 2026').split('-')[1]}-xyz`, { alive, startOf: () => 'Wed Oct 28 10:00:00 2026' })).toBe(false)
+    // Its start unread (Windows has no ps), or not readable now: it may still be the owner
+    expect(ownerGone('123-0-xyz', { alive, startOf: () => 'Wed Oct 28 10:00:00 2026' })).toBe(false)
+    expect(ownerGone('123-0a1b2c3d-xyz', { alive, startOf: () => null })).toBe(false)
+    // A name that records no owner (not one this build makes) is never taken
+    expect(ownerGone('abc123', { alive: () => false })).toBe(false)
+    expect(ownerGone('123-0-xyz', { alive: () => false })).toBe(true)
   })
 })

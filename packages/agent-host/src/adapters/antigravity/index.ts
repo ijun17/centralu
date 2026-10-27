@@ -5,7 +5,7 @@ import { rpcError } from '../../rpc-error.js'
 import type { AgentProcess, AgentSpawnSpec, DetectResult } from '../contract.js'
 import { AcpAdapter } from '../acp/adapter.js'
 import type { AcpProfile } from '../acp/profile.js'
-import { agyHome, agyPlatformKey, type AgyHome } from './agent-files.js'
+import { agyHome, agyPlatformKey, reachesAgentFolder, type AgyHome } from './agent-files.js'
 import { agyLaunch } from './launch.js'
 import { AGY_RELEASE, type AgyArchive } from './release.js'
 import { AgySetup, type AgySetupDeps } from './setup.js'
@@ -90,7 +90,8 @@ export function antigravityProfile(deps: AgyProfileDeps = {}): AgyProfile {
     shape: {
       readCall: readAgyCall,
       isQuestion: isAgyQuestion,
-      neverAllowed: isAgySubagentCall,
+      // A subagent (it reads the agent's home with no card), or a file in the agent's own folder but its plan (§4.2)
+      neverAllowed: async (req, cwd) => isAgySubagentCall(req) || (await reachesAgentFolder(home, req.toolCall, req.sessionId, cwd)),
       editRunsAsNewCall: true,
       // The agent's own folder: its token, its settings, its binaries
       clientReads: { refused: () => [home.root] },

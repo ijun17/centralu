@@ -97,6 +97,17 @@ describe("Antigravity's sign-in", () => {
     expect(signInUrl('not a url')).toBeNull()
   })
 
+  it('refuses an address with a user part or a port of its own, and passes on one rebuilt from its parts', () => {
+    // The re-review of #1680: each of these was taken, with what stood before the `@` kept in what went on
+    expect(signInUrl('https://evil.example@accounts.google.com/x')).toBeNull()
+    expect(signInUrl('https://user%40mail.example@accounts.google.com/x')).toBeNull()
+    expect(signInUrl('https://user:secret@accounts.google.com/x')).toBeNull()
+    expect(signInUrl('https://accounts.google.com:8443/x')).toBeNull()
+    // Rebuilt: the host as parsed (lower case), the path, query and fragment, nothing else of the agent's string
+    expect(signInUrl(' https://ACCOUNTS.google.com/a/b?c=d#e ')).toBe('https://accounts.google.com/a/b?c=d#e')
+    expect(signInUrl('https://accounts.google.com\\@evil.example/x')).toBe('https://accounts.google.com/@evil.example/x')
+  })
+
   it('says why a sign-in ended, as a word the line can act on', () => {
     const live = new AbortController().signal
     const aborted = AbortSignal.abort()
@@ -104,6 +115,15 @@ describe("Antigravity's sign-in", () => {
     expect(signInFailure(new Error('No response for authenticate'), live).reason).toBe('timed_out')
     expect(signInFailure(new Error('request cancelled while closing'), aborted).reason).toBe('cancelled')
     expect(signInFailure(new Error('Antigravity exited'), live).reason).toBe('failed')
+  })
+
+  it("maps only the authenticate call's own timeout to the five minutes; another timeout keeps its reason", () => {
+    const live = new AbortController().signal
+    const network = signInFailure(new RpcError(-32603, 'Request to cloudcode-pa timed out after 30s'), live)
+    expect(network.reason).toBe('failed')
+    expect(network.message).toContain('timed out after 30s')
+    expect(signInFailure(new Error('No response for initialize'), live).reason).toBe('failed')
+    expect(signInFailure(new Error('connect ETIMEDOUT: timed out'), live).reason).toBe('failed')
   })
 
   // The two answers 1.4.3 gave (deep review of #1680, raw captures): the same code and reason, told apart by their words

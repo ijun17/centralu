@@ -48,12 +48,18 @@ const AuthResult = z.looseObject({ _meta: z.looseObject({ antigravity: z.looseOb
 
 const URL_LINE = /Open the following link to authenticate the ACP server:\s*(\S+)/
 
-/** An address worth opening: https, on a Google host. Anything else the agent hands over is dropped */
+/**
+ * An address worth opening: https, on a Google host, with no user part (`https://someone@accounts.google.com/…` would carry
+ * whatever stands before the `@`, an email included, into an event) and no port of its own. Anything else the agent hands
+ * over is dropped. What is passed on is written out again from the parsed parts, never the agent's string
+ */
 export function signInUrl(raw: string): string | null {
   try {
     const url = new URL(raw.trim())
-    if (url.protocol !== 'https:') return null
-    return url.hostname === 'google.com' || url.hostname.endsWith('.google.com') ? url.toString() : null
+    if (url.protocol !== 'https:' || url.username !== '' || url.password !== '' || url.port !== '') return null
+    if (url.hostname !== 'google.com' && !url.hostname.endsWith('.google.com')) return null
+    // The URL's own serialization of what it parsed: the host as parsed (lower case, punycode), never the agent's string
+    return url.toString()
   } catch {
     return null
   }
@@ -111,7 +117,7 @@ export async function runSignIn(home: AgyHome, archive: AgyArchive, signal: Abor
  * Why a sign-in ended without one, as a word for the screen. The agent answers both a sign-in that timed out and an account
  * Google will not serve with `-32000` and `data.reason: "onboarding_failed"` (both measured on 1.4.3: "Onboarding failed:
  * Timed out waiting for the authentication flow to complete." and "Onboarding failed: User is ineligible for free-tier. …
- * Verification URL: <address>"), so the words tell them apart, the timeout first. The verification page is carried apart
+ * Verification URL: <address>"), so the words tell them apart, the timeout first, by the agent's words for its own wait (another error that says "timed out" keeps its reason). The verification page is carried apart
  * (`verifyUri`); no address or email in the agent's words reaches the message
  */
 export function signInFailure(err: unknown, signal: AbortSignal): InstallFailure {
@@ -119,7 +125,8 @@ export function signInFailure(err: unknown, signal: AbortSignal): InstallFailure
   if (signal.aborted) return new InstallFailure('cancelled', 'The sign-in was cancelled')
   const timedOut = new InstallFailure('timed_out', 'Sign-in timed out: the browser did not finish within 5 minutes')
   if (err instanceof RpcError) {
-    if (/timed out/i.test(err.message)) return timedOut
+    // Only the agent's own wait for the browser; any other timeout keeps its own reason and words
+    if (AUTH_FLOW_TIMED_OUT.test(err.message)) return timedOut
     if (err.code === AUTH_REQUIRED && asObj(err.data).reason === 'onboarding_failed') {
       const verify = VERIFY_URL.exec(err.message)?.[1]
       const url = verify ? signInUrl(verify) : null
@@ -128,11 +135,15 @@ export function signInFailure(err: unknown, signal: AbortSignal): InstallFailure
     return new InstallFailure('failed', `Antigravity's sign-in failed: ${scrubbed(err.message)}`)
   }
   const message = err instanceof Error ? err.message : String(err)
-  if (/^No response for authenticate/.test(message)) return timedOut
+  // Centralu's bound past the agent's own (`SIGN_IN_TIMEOUT_MS`) on the authenticate call
+  if (/^No response for authenticate$/.test(message)) return timedOut
   return new InstallFailure('failed', `Antigravity's sign-in failed: ${scrubbed(message)}`)
 }
 
 const VERIFY_URL = /Verification URL:\s*(\S+)/i
+
+/** The agent's answer when nobody finished the browser's sign-in within its 300 s (measured on 1.4.3, inside "Onboarding failed: …") */
+const AUTH_FLOW_TIMED_OUT = /Timed out waiting for the authentication flow/i
 
 /** The agent's words without the addresses and emails they may carry (its answers name the account's verification page) */
 function scrubbed(text: string): string {

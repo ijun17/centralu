@@ -1,9 +1,10 @@
+import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createServer, type IncomingHttpHeaders } from 'node:http'
 import { gzipSync } from 'node:zlib'
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { makeZip, type ZipSpec } from '../../apps/external/zip.test-helpers.js'
 import { agyPlatformKey, decodedLength, installAgy, isInstalled, realInstallIo, type InstallIo } from './agent-files.js'
 import { InstallFailure } from './failure.js'
@@ -14,6 +15,20 @@ import { tempData } from './agent-files.test-helpers.js'
  * The install (docs/plans/antigravity-adapter.md §3.2) against archives built here: the right one, and each way one can be
  * wrong. The network is a stand-in that serves the bytes in chunks; the disk is a real temporary folder.
  */
+
+/** The bytes each file written through `createWriteStream` reached on disk, by path: what the unpack let through */
+const writtenTo = new Map<string, number>()
+vi.mock('node:fs', async (importOriginal) => {
+  const real = await importOriginal<typeof import('node:fs')>()
+  return {
+    ...real,
+    createWriteStream: (...args: Parameters<typeof real.createWriteStream>) => {
+      const out = real.createWriteStream(...args)
+      out.on('close', () => writtenTo.set(String(args[0]), out.bytesWritten))
+      return out
+    },
+  }
+})
 
 const data: { done(): void }[] = []
 afterEach(() => {
@@ -151,7 +166,9 @@ describe('installing the pinned agent', () => {
     mkdirSync(t.home.versionDir, { recursive: true })
     writeFileSync(join(t.home.versionDir, 'agy_acp_server.par'), 'half')
     mkdirSync(join(t.home.geminiHome, 'antigravity-acp'), { recursive: true })
-    mkdirSync(join(t.home.root, '.install-stale'), { recursive: true })
+    // An earlier host's partial install: its owner (a process that has ended) is in the name
+    const ended = spawnSync(process.execPath, ['-e', '']).pid
+    mkdirSync(join(t.home.root, `.install-${ended}-0-stale0`), { recursive: true })
     await installAgy(t.home, archive, AGY_RELEASE.version, { io: io(zip, { calls: 0 }), signal: new AbortController().signal, platform: 'darwin' })
     expect(isInstalled(t.home, archive)).toBe(true)
     expect(readFileSync(join(t.home.versionDir, 'agy_acp_server.par'), 'utf8')).toBe('server')
@@ -226,6 +243,22 @@ describe('the real download, against a server that gzips', () => {
 })
 
 describe('the unpack', () => {
+  it('stops a zip bomb as it passes its declared size, before more than that reaches the disk', async () => {
+    // 64 MB of zeros declared as 1 KB: refused either way, but a check only at the end would write the 64 MB first
+    const declared = 1024
+    const zip = makeZip([
+      { name: 'agy_acp_server.par', data: Buffer.alloc(64 * 1024 * 1024), mode: 0o100755, declaredSize: declared },
+      { name: 'localharness_external', data: 'harness', mode: 0o100755 },
+    ])
+    writtenTo.clear()
+    const r = await install(zip, archiveOf(zip), { calls: 0 })
+    expect(reasonOf(r.failure)).toBe('unpack')
+    expect(r.leftovers).toEqual([])
+    const bomb = [...writtenTo].filter(([path]) => path.endsWith('agy_acp_server.par'))
+    expect(bomb).toHaveLength(1)
+    expect(bomb[0]![1]).toBeLessThanOrEqual(declared)
+  })
+
   it('streams a large entry to disk instead of holding it whole in memory', async () => {
     // 160 MB of zeros: a few hundred KB zipped. Unpacked into one buffer, external memory would grow by the whole entry
     const big = Buffer.alloc(160 * 1024 * 1024)
