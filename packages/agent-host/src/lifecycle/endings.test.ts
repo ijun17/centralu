@@ -9,6 +9,8 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { REPEAT_AFTER_MS, crashRecorder, guardErrors, holdSignals, watchParent, wireEndings } from './endings.js'
 import type { LeaveMode } from './shutdown.js'
+import { updateResumeFile } from './stopped-mark.js'
+import { dropFromUpdateResume, readUpdateResume, recordUpdateCut, UPDATE_RESUME_FILE } from './update-resume.js'
 import { removeTree, tempRoot } from '../temp-dir.test-helpers.js'
 
 function fakeProcess() {
@@ -239,5 +241,25 @@ describe('every ending, wired (HO15)', () => {
     const w = wired(false)
     w.f.emitter.emit('SIGHUP', 'SIGHUP')
     expect(w.left).toEqual([['stop', false]])
+  })
+})
+
+// #1618: the data folder's list of the turns an update cut, through the real file system
+describe('updateResumeFile', () => {
+  it('reads none where there is no file, replaces it whole, and removes it', async () => {
+    const dir = tempRoot('cc-update-resume-')
+    try {
+      const f = updateResumeFile(dir)
+      expect(f.read()).toBeNull()
+      recordUpdateCut(f, ['s1'])
+      recordUpdateCut(f, ['s2'])
+      expect([...readUpdateResume(updateResumeFile(dir))]).toEqual(['s1', 's2'])
+      expect(JSON.parse(readFileSync(join(dir, UPDATE_RESUME_FILE), 'utf8'))).toEqual({ v: 1, ids: ['s1', 's2'] })
+      dropFromUpdateResume(f, 's1')
+      dropFromUpdateResume(f, 's2')
+      expect(existsSync(join(dir, UPDATE_RESUME_FILE))).toBe(false)
+    } finally {
+      await removeTree(dir)
+    }
   })
 })

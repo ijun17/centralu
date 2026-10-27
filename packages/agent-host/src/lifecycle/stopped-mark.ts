@@ -45,7 +45,7 @@ export function updateResumeFile(dataDir: string): UpdateResumeFile {
       try {
         return readFileSync(file, 'utf8')
       } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null
+        if (err instanceof Error && 'code' in err && err.code === 'ENOENT') return null
         throw err
       }
     },
