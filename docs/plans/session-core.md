@@ -352,8 +352,8 @@ the watch. That also changes ACP on macOS and Linux, from "<label> exited (code 
    before it asks for the next.
 2. **An id learned late** (`noteExternalId(id, from)`): `agy` says its id only in `init`, after the first input; every
    later launch goes on with it. A late line from a process already replaced is ignored.
-3. **The gate's inbound path** (`GateInbound`, `GateChannel`, `GateRequest`, `GateAnswer`): an interface only; the
-   transport is decided (§8.1: a front-door route under a gate-only key), built with `agy`.
+3. **The gate's inbound path** (`GateInbound`, `GateChannel`, `GateRequest`, `GateAnswer`): an interface in PR 3, then
+   built as a route on the host's front door under a gate-only key per session (§8.1, `transport/gate-door.ts`).
 4. **A Stop denies every open gate request first** (`GateRequests.denyAll`, in `interrupt` and `stop`): SIGINT does not
    end `agy` while a gate hook waits.
 
@@ -477,7 +477,7 @@ So `agy`'s adapter is a wire (`stream.ts`, `normalize.ts`, `gate.ts`, `plugin-ro
 `known-steps.ts`) on the core, without its own queue, Stop, exit or approval order. Its pull request follows PRs 1, 3, 5, 8 and 9
 for ACP; it does not wait for Claude's or Codex's moves (PRs 2, 6, 7).
 
-### 8.1 The gate's way back to the host: a decision
+### 8.1 The gate's way back to the host: a route on the front door, under a gate-only key
 
 The hook is a process `agy` starts per call; it must reach this host, wait for a decision and print it (a hook that
 prints nothing and exits 0 lets the tool run, measured). Two transports were weighed, and a third, narrower one chosen:
@@ -503,14 +503,28 @@ Not the bridge credential, and no new listener.
 - It fails closed (the hook denies when the host cannot be reached), keeps the secret out of every file (the plugin root
   holds names only) and is closed with the session, denying what is open and what asks later. A Stop denies what is open and
   what a dying process asks during its grace.
-- `core/gate.ts` stays interfaces only; the route and the key come with `agy`'s pull request.
+- Built in `transport/gate-door.ts` (`FrontDoorGates`, the `GateInbound` the adapters open), as below.
 
-The key is in the tool's environment, so the agent's own shell commands hold it too. That is safe only because the channel
-**asks and never answers**: the decision comes from the preset, the always-allow rules or the person's card, never from the
-caller. A command holding the key can raise a card (noise the person sees and can deny), or ask again with an open
-request's id, which only ever denies the first wait (`GateRequests.wait`); it cannot allow a call. A transport that let the
-caller say "allowed" (a shortcut for Centralu's own tools, say) would hand the agent its own approvals, and must not be
-added.
+**As built:**
+
+| | What it is | Why |
+|---|---|---|
+| Where | `POST /gate/<sessionId>` on the host's front door (the keeper's port under a keeper, `swap-control.ts` `gateAddress`), outside the HTTP door's secret segment; no new listener | one front door, one rights table |
+| The key | `ccg1:` and 32 random bytes per session, in the host's memory only, sent as `Authorization: Bearer`; revoked when the session's channel closes, and a host that starts holds none | not the bridge credential: that is an HMAC of the host's token, outlives the session and every swap, and opens the session's orchestrator and app tools, which the agent's own shell would then call around what the tool asks before an MCP call. Not the HTTP door's secret either, for the same reason (it opens the app views) |
+| What it allows | one method, `gate.ask`, for the session it was made for: its rights class is `gate` (`method-rights.ts`), which the limited credential, a bridge and every WebSocket connection are refused, the token's included; `gateRefusal` reads the same table and the method's schema | one definition of who may call what |
+| What a request carries | the tool's hook input, a JSON object; one with a top-level `decision`, `permissionDecision` or `answer` is refused (400). The decision is the session's `GateHandler.decide` alone; the person's answers stay `window` | the channel asks and never answers |
+| The answer | `200` and its headers at once, a space every 30 s while the card is open, then one `{decision}` or `{decision: 'deny', reason}`; a reason never carries the key, the host's token, the limited credential, the HTTP secret or anything shaped like a `cc?1:` credential (`scrub`) | Node's `fetch` in the hook gives up after 300 s without a byte (antigravity-adapter.md §5.1); #1666's review, finding 4 |
+| A refusal | a wrong key, another session's key, a revoked one and no route at all get the front door's same 404; a body that is no request 400; past 32 open requests of one session 429. The hook denies on every one | nothing tells a prober which it was |
+| Stop and close | a Stop answers every open request `deny` first, and what a dying process asks during its grace (`SessionProcess.stop`/`interrupt`, `GateRequests.hold`); the channel's close revokes the key and denies what still waits; the host's own close (`HostServer.close`) denies every open request before its connections are cut | `agy` does not act on SIGINT while a hook waits |
+| Across a host swap | the next host has no key: the hook's old key gets 404 and denies; an adopted `agy` is reopened (§8), so its new process gets a new key | nothing long-lived in the tool's environment |
+
+The key is in the tool's environment, so the agent's own shell commands hold it too (and another process of the same
+user can read it from the process's environment). That is safe only because the channel **asks and never answers**: a
+command holding the key can raise a card (noise the person sees and can deny), or ask again with an open request's id,
+which only ever denies the first wait (`GateRequests.wait`); it cannot allow a call, call another method, or reach
+another session. A transport that let the caller say "allowed" (a shortcut for Centralu's own tools, say) would hand the
+agent its own approvals, and must not be added. The environment names are tool-neutral (`CC_GATE_URL`, `CC_GATE_TOKEN`,
+`GATE_ENV`), for the next hook-gated tool.
 
 ## 9. Open questions
 
