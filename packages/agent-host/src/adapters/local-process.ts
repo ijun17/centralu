@@ -40,6 +40,18 @@ export type LocalSpawnSpec = AgentSpawnSpec & {
   signal?: AbortSignal
 }
 
+/** The lookup that comes first in `HOST_WATCH` (see the comment below it): what Node's spawn would have raised, said on fd 4 */
+export const FIND_CLI =
+  // A name with a slash is tested here, not looked up: `command -v` answers differently for a file that cannot be run
+  // (macOS's sh fails where dash prints the path), and Node says ENOENT for none, EACCES for a folder or a file not runnable
+  'case $1 in */*) [ -e "$1" ] || { echo enoent >&4; exit 127; }; ' +
+  'if [ -d "$1" ] || [ ! -x "$1" ]; then echo eacces >&4; exit 126; fi;; ' +
+  // A bare name is looked up by `sh` itself. When that finds nothing, PATH is read as libuv does: a match that cannot be run
+  // is EACCES, an empty entry is the folder it starts in (`/dev/null` ends the list so a trailing empty one is not split away), and nothing is ENOENT
+  '*) if c=$(command -v -- "$1" 2>/dev/null); then case $c in */*) if [ -d "$c" ] || [ ! -x "$c" ]; then echo eacces >&4; exit 126; fi;; esac; ' +
+  'else if (IFS=:; set -f; for d in ${PATH:+$PATH:}/dev/null; do [ -e "${d:-.}/$1" ] && exit 0; done; exit 1); then echo eacces >&4; exit 126; fi; ' +
+  'echo enoent >&4; exit 127; fi;; esac; '
+
 /**
  * The guard a CLI that must end with the host starts behind (`AgentSpawnSpec.endsWithHost`, macOS and Linux): `sh` keeps a
  * reader on fd 3, a pipe whose other end only this host holds, and `exec`s the CLI in its place with fd 3 closed. The
@@ -49,16 +61,10 @@ export type LocalSpawnSpec = AgentSpawnSpec & {
  * those of the CLI's descendants then (`watchTreeGroups`, read by parent links when the pipe closes, so a command
  * started a moment before the host died is reached too; #1562 Mac re-check), and those the host told it of on the pipe
  * (`+<pgid>` noted, `-<pgid>` dropped once empty, `noteTree`), which reach a helper whose shell has gone.
- */
-const FIND_CLI =
-  'c=$(command -v -- "$1") || { echo enoent >&4; exit 127; }; ' +
-  'case $c in */*) if [ -d "$c" ] || [ ! -x "$c" ]; then echo eacces >&4; exit 126; fi;; esac; '
-
-/*
- * Before it starts the watch, the shell that will `exec` looks the CLI up itself (`command -v`, so its own PATH rules apply:
- * relative and empty entries, a default when unset) and says on fd 4 what Node's spawn would have raised: `enoent` for a
- * program that is not there, `eacces` for a directory or a file that cannot be run. The host turns it into the same 'error'
- * (`LocalAgentProcess.readStatus`); fd 4 is closed by the `exec`, so a CLI that starts says nothing.
+ *
+ * Before all that the shell looks the CLI up itself (`FIND_CLI`) and says on fd 4 what Node's spawn would have raised, `enoent`
+ * or `eacces`; the host turns it into the same 'error' (`LocalAgentProcess.readStatus`). fd 4 is closed by the `exec`, so a
+ * CLI that starts says nothing.
  */
 export const HOST_WATCH =
   FIND_CLI +

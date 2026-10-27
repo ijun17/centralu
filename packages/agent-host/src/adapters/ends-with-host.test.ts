@@ -1,12 +1,12 @@
-import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { spawn, spawnSync } from 'node:child_process'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { KILL_GRACE_MS } from '../dev-services/kill-tree.js'
 import { goneWithin, helperPid, killLeftovers } from './fake-agent-cli.test-helpers.js'
-import { HOST_WATCH, spawnLocalAgent } from './local-process.js'
+import { FIND_CLI, HOST_WATCH, spawnLocalAgent } from './local-process.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 
 /**
@@ -221,6 +221,59 @@ describe('a CLI that must end with its host', () => {
       const node = await new Promise<Error>((resolve) => spawn(command, [], { env }).once('error', resolve))
       expect(error, command).toMatchObject({ code: 'EACCES' })
       expect(node).toMatchObject({ code: 'EACCES' })
+    }
+  })
+
+  /*
+   * The lookup is one script run by whatever `sh` the OS has, and shells differ on a file that cannot be run: dash's
+   * `command -v` prints its path, macOS's `sh` fails (the macOS re-check of #1668: an absolute path to a plain file read
+   * ENOENT where Node says EACCES). So the decision is run under dash, under a POSIX bash, and under a bash whose
+   * `command -v` fails for every name with a slash, which is how macOS's answers.
+   */
+  describe.skipIf(!unix)('the lookup before the watch, in each kind of sh', () => {
+    const macLike = 'command() { case "$*" in */*) return 1;; esac; builtin command "$@"; }; '
+    const shells: [string, string, string[]][] = [
+      ['sh', '', []],
+      ['bash --posix', '', ['--posix']],
+      ['a sh whose command -v fails for a path', macLike, []],
+    ]
+    const available = (name: string) => spawnSync(name, ['-c', 'exit 0']).status === 0
+    const say = (shell: string, flags: string[], prelude: string, command: string, cwd: string, PATH: string | undefined) => {
+      const r = spawnSync(shell, [...flags, '-c', `${prelude}${FIND_CLI}exit 0`, 'x', command], { cwd, env: PATH === undefined ? {} : { PATH }, stdio: ['ignore', 'ignore', 'ignore', 'ignore', 'pipe'] })
+      return { said: String(r.output[4] ?? '').trim(), status: r.status }
+    }
+    for (const [label, prelude, flags] of shells) {
+      const shell = label.startsWith('bash') || prelude ? 'bash' : 'sh'
+      it.skipIf(!available(shell))(`says ENOENT, EACCES or nothing as Node does: ${label}`, () => {
+        dir = mkdtempSync(join(tmpdir(), 'cc-ends-with-host-'))
+        const bin = join(dir, 'bin')
+        mkdirSync(bin)
+        mkdirSync(join(dir, 'bin', 'folder-cli'))
+        writeFileSync(join(bin, 'plain-cli'), 'not a program', { mode: 0o644 })
+        writeFileSync(join(bin, 'good-cli'), '#!/bin/sh\n', { mode: 0o755 })
+        chmodSync(join(bin, 'plain-cli'), 0o644)
+        const sys = '/usr/bin:/bin'
+        const cases: [string, string, string | undefined, string, number | null][] = [
+          ['absolute, missing', join(dir, 'nothing'), sys, 'enoent', 127],
+          ['absolute, not runnable', join(bin, 'plain-cli'), sys, 'eacces', 126],
+          ['absolute, a folder', join(bin, 'folder-cli'), sys, 'eacces', 126],
+          ['absolute, runnable', join(bin, 'good-cli'), sys, '', 0],
+          ['relative, not runnable', './bin/plain-cli', sys, 'eacces', 126],
+          ['relative, missing', './bin/nothing', sys, 'enoent', 127],
+          ['a name, missing', 'cc-no-such-cli', sys, 'enoent', 127],
+          ['a name, missing, PATH unset', 'cc-no-such-cli', undefined, 'enoent', 127],
+          ['a name, not runnable on PATH', 'plain-cli', `${sys}:${bin}`, 'eacces', 126],
+          ['a name, a folder on PATH', 'folder-cli', `${sys}:${bin}`, 'eacces', 126],
+          ['a name, not runnable on a relative PATH entry', 'plain-cli', `${sys}:bin`, 'eacces', 126],
+          ['a name, not runnable behind an empty PATH entry', 'plain-cli', `${sys}:`, 'eacces', 126],
+          ['a name, runnable on a relative PATH entry', 'good-cli', `${sys}:./bin`, '', 0],
+          ['a name, runnable after a folder of that name', 'good-cli', `${bin}:${sys}`, '', 0],
+        ]
+        for (const [what, command, PATH, said, status] of cases) {
+          const cwd = what.includes('empty') ? bin : dir
+          expect(say(shell, flags, prelude, command, cwd, PATH), `${label}: ${what}`).toEqual({ said, status })
+        }
+      })
     }
   })
 
