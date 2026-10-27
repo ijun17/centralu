@@ -3,6 +3,7 @@ import type { ApprovalDecision, ApprovalDetail, NormalizedEvent, PermissionPrese
 import { ORCHESTRATOR_MCP_NAME } from '../../apps/contract.js'
 import { rpcError } from '../../rpc-error.js'
 import { asObj } from '../../json-value.js'
+import { withStderrTail } from '../../stream-text.js'
 import { AlwaysAllowRules, alwaysAllowKey } from '../always-allow.js'
 import { bridgePath } from '../bridge-path.js'
 import { INTERRUPTED_BY_TOOL, type AgentProcess, type CreateSessionOpts, type EventSink, type InputObserver, type InputOrigin, type SessionHandle } from '../contract.js'
@@ -531,8 +532,7 @@ export class AcpSession implements SessionHandle {
       turn.input.done?.reject(failure)
     }
     if (turn || !wasOpen) {
-      const tail = this.conn.stderrTail().trim().split('\n').slice(-5).join('\n')
-      this.emit({ type: 'error', sessionId: this.sessionId, error: { code: 'adapter_crashed', message: tail ? `${failure.message}: ${tail}` : failure.message, retryable: true } })
+      this.emit({ type: 'error', sessionId: this.sessionId, error: { code: 'adapter_crashed', message: withStderrTail(failure.message, this.conn), retryable: true } })
     } else {
       // Idle when it ended: the conversation is kept by the tool, and the next message opens it again
       this.emit({ type: 'session_live', sessionId: this.sessionId, live: false, reason: 'asleep' })

@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { AdapterCapabilities, NormalizedEvent } from '@cc/protocol'
 import type { AgentProcess, CreateSessionOpts, ProcessSource } from '../contract.js'
+import { failureSentence, isNetworkFailure } from '../../sessions/interruptions.js'
 import { AcpAdapter } from './adapter.js'
 import { FakeAcpPeer, INIT_RESULT, type PeerScript } from './fake-peer.test-helpers.js'
 import type { AcpProfile } from './profile.js'
@@ -160,6 +161,20 @@ describe('the ACP session against a scripted agent', () => {
     await busy.peers[0]!.next(isPrompt)
     busy.peers[0]!.exit(1)
     expect(await busy.event((e) => e.type === 'error')).toMatchObject({ error: { code: 'adapter_crashed' } })
+  })
+
+  it("puts the process's last words after a marker, so they are not read as the turn's own failure", async () => {
+    const w = world()
+    const s = await w.start()
+    s.send('go')
+    const peer = w.peers[0]!
+    await peer.next(isPrompt)
+    peer.stderr.write('connection reset: fetch failed\n')
+    peer.exit(1)
+    const { error } = (await w.event((e) => e.type === 'error')) as { error: { message: string } }
+    expect(error.message).toMatch(/^Fake exited \(code 1\)\. stderr: connection reset/)
+    expect(failureSentence(error.message)).toBe('Fake exited (code 1).')
+    expect(isNetworkFailure(error.message)).toBe(false)
   })
 
   it('under Edits grants an edit inside the folder, and asks about a delete or a move there', async () => {
