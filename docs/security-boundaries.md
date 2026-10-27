@@ -1246,7 +1246,12 @@ Centralu installs Google's Antigravity agent itself and keeps all of its state u
   program that later runs.
 - **The agent's home is Centralu's.** Every process starts with `GEMINI_HOME` there, never the person's `~/.gemini`, so
   none of their global MCP servers, hooks or skills load into a Centralu session, and Centralu never reads the CLI's
-  sign-in.
+  sign-in. The agent keeps the person's `HOME`, so its commands see their git, ssh and npm settings; one thing escapes
+  `GEMINI_HOME` because of it: Google's harness extracts its screencast encoder (`webm_encoder`) into
+  `$HOME/.gemini/antigravity/bin/` at the first prompt. Nothing else under `~/.gemini` was read or written in the
+  measured runs, and development and review runs use a temporary `HOME`. The owner accepted this
+  ([#59](https://github.com/ijun17/centralu/issues/59#issuecomment-6446873429);
+  [plans/antigravity-acp.md](plans/antigravity-acp.md) §4.1).
 - **The token is a file the agent's own tools do not read.** The file backend is forced (no Keychain item, no OS
   dialog in Centralu's name). The agent's built-in viewer read that file without asking in the spike, so its content
   readers are switched off for every session and reads come to Centralu (`fs/read_text_file`), which answers inside the

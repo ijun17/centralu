@@ -28,7 +28,7 @@ frames this pull request replays are committed, scrubbed, as `adapters/antigravi
 | Finding (spike §0) | What the adapter does | Where |
 |---|---|---|
 | `GEMINI_HOME` relocates the server's state; without it the agent shares `~/.gemini` and loads its global MCP servers, hooks and skills (§3) | Every process sets `GEMINI_HOME` to Centralu's folder | `launch.ts` `agyEnv` |
-| Not all of it: the harness writes `webm_encoder` under `$HOME/.gemini/antigravity/bin` at the first prompt (deep review, measured) | Nothing yet: only `HOME` moves it, an open owner decision | §4.1 |
+| Not all of it: the harness writes `webm_encoder` under `$HOME/.gemini/antigravity/bin` at the first prompt (deep review, measured) | Accepted (owner, [#59](https://github.com/ijun17/centralu/issues/59#issuecomment-6446873429)): the agent keeps the person's `HOME`; this one file is the only thing it writes under `~/.gemini` | §4.1 |
 | Sign-in is an ACP call that blocks up to 300 s on a loopback redirect (§4) | A dedicated process, `authenticate` with a 330 s bound | `sign-in.ts` |
 | Commands run in their own process group; a group SIGTERM orphans a running command (§9) | The tree is noted while an `execute` call runs, so its groups are ended with the agent | ACP core `watchCommands` (`kind: execute` reads as `Bash`) |
 | The agent reads its own token without asking (§6) | Option (b): its file viewers and its subagents off, reads through Centralu, which refuses the agent's folder | §4.2 |
@@ -117,18 +117,25 @@ not found in the current GEMINI_HOME"`, spike §3), so a Centralu update that mo
 opens every conversation. `HOME` is left as it is, since a changed `HOME` would change what the agent's commands see (git
 config, ssh, npm).
 
-**Not every path follows `GEMINI_HOME`. Open, the owner's decision.** The spike's claim that every path did held for the
-server, not the harness (`localharness_external`): it writes a 12.7 MB `webm_encoder` to `$HOME/.gemini/antigravity/bin/`
-at the first prompt of a process (not at `session/new`; measured with a temporary `HOME`, and in the review on the
-person's real folder). The harness takes the folder from the home directory alone (binary: its browser subagent's
-encoder path joins the home directory and `.gemini`, with no variable read); `ANTIGRAVITY_GEMINI_DIR` set to
-`GEMINI_HOME` changes nothing, and switching the subagents off (below) does not either. Other things do follow
-`GEMINI_HOME`: an MCP config under `GEMINI_HOME/config` is loaded, one under `$HOME/.gemini/config` is not, and the
-harness's children (commands, MCP servers) inherit the agent's environment, `HOME` included. So only a different `HOME`
-for the agent's processes moves the file. The choices: (A) `HOME` set to a folder of Centralu's for the agent, which
-moves the person's git, ssh and npm settings out of the agent's commands' reach; (B) accept the one file under
-`~/.gemini/antigravity/bin` and say so; (C) hold Antigravity until Google honours `GEMINI_HOME` there (an upstream
-report).
+**Not every path follows `GEMINI_HOME`; the owner accepted the one that does not
+([#59](https://github.com/ijun17/centralu/issues/59#issuecomment-6446873429)).** The spike's claim that every path did
+held for the server, not the harness (`localharness_external`): Google's harness extracts its screencast encoder, a 12.7
+MB `webm_encoder`, into `$HOME/.gemini/antigravity/bin/` at the first prompt of a process (not at `session/new`;
+measured with a temporary `HOME`, and in the review on the person's real folder). The harness takes the folder from the
+home directory alone (binary: its browser subagent's encoder path joins the home directory and `.gemini`, with no
+variable read); `ANTIGRAVITY_GEMINI_DIR` set to `GEMINI_HOME` changes nothing, and switching the subagents off (below)
+does not either. Other things do follow `GEMINI_HOME`: an MCP config under `GEMINI_HOME/config` is loaded, one under
+`$HOME/.gemini/config` is not, and the harness's children (commands, MCP servers) inherit the agent's environment,
+`HOME` included. So only a different `HOME` for the agent's processes would move the file, and that would take the
+person's git, ssh and npm settings out of reach of the commands the agent runs for them.
+
+The owner chose to accept the file: **the agent keeps the person's `HOME`**, and the encoder under
+`~/.gemini/antigravity/bin/` is the one thing it writes there. Nothing else under `~/.gemini` was read or written in the
+measured runs (with a temporary `HOME`, that file was the only entry under it after a prompt, and an MCP config placed
+under `$HOME/.gemini/config` was not loaded). Development and review runs use a temporary `HOME`, so they leave the
+person's `~/.gemini` as it was. The rejected choices were a `HOME` of Centralu's for the agent (the settings above) and
+holding Antigravity until Google's harness honours `GEMINI_HOME` there; the bug is to be reported upstream, and once
+fixed the file follows `GEMINI_HOME` with no change here.
 
 ### 4.2 Where the token lives: the file, and the agent kept from reading it
 
@@ -334,7 +341,7 @@ Measured after the deep review's fixes (macOS arm64, agent 1.4.3, a temporary da
 - 1: `agents.installTool` took about 30 s; progress counted up to the archive's stored size (114,147,623 bytes); the
   marker names the pinned sha256; no `.install-*` left; no quarantine attribute (provenance only).
 - `HOME`: nothing under it at `session/new`; after the first prompt `.gemini/antigravity/bin/webm_encoder` (12.7 MB)
-  was there (§4.1, open).
+  was there (§4.1, accepted).
 - 2: asked, under Auto, to read a canary file in `GEMINI_HOME/antigravity-acp/` through a subagent, the agent said it
   has no subagent tool and made no call. `read_url_content` with a `file://` address to that file failed in the
   harness ("unsupported protocol scheme").
@@ -387,6 +394,7 @@ one by one on Windows):
 4. The other sign-in methods (`gemini-api-key`, `agent-platform`, `oauth-business`) take keys or project settings, not a
    browser: a screen of their own, later.
 5. Sign-out (`auth.logout`), once there is a place for it.
-6. **The harness's write under `~/.gemini` (§4.1): the owner's decision** between a separate `HOME`, accepting the file,
-   or holding the tool until Google honours `GEMINI_HOME`.
+6. The harness's write under `~/.gemini` (§4.1): accepted
+   ([#59](https://github.com/ijun17/centralu/issues/59#issuecomment-6446873429)); report upstream that the harness
+   resolves its `bin` folder from the home directory instead of `GEMINI_HOME`.
 7. An exhausted quota as a `limit_reached` (§5.6), once the agent says it in a frame.
