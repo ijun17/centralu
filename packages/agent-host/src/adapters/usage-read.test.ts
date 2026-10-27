@@ -33,7 +33,8 @@ describe('a usage read that is a command run (#1623)', () => {
     const ask = softRead({ read, fallback: () => 'none', freshMs: 1000, failMs: 1000, softMs: 50, now: () => clock })
     expect(await ask()).toEqual(answer('old'))
     clock = 2000
-    expect(await ask()).toEqual(answer('old'))
+    // Stale: returned at once, marked provisional (the read behind it is going on)
+    expect(await ask()).toEqual(answer('old', true))
     expect(read).toHaveBeenCalledTimes(2)
     g.resolve('new')
     await vi.waitFor(async () => expect(await ask()).toEqual(answer('new')))
@@ -129,7 +130,7 @@ describe('a usage read that is a command run (#1623)', () => {
     await ask()
     clock = 11
     // A run that takes minutes: every ask in between is the last good answer, at once, and none starts a second run
-    for (clock = 11; clock < 300_000; clock += 60_000) expect(await ask()).toEqual(answer('old'))
+    for (clock = 11; clock < 300_000; clock += 60_000) expect(await ask()).toEqual(answer('old', true))
     expect(read).toHaveBeenCalledTimes(2)
     g.resolve('new')
     await vi.waitFor(async () => expect(await ask()).toEqual(answer('new')))
@@ -156,13 +157,49 @@ describe('a usage read that is a command run (#1623)', () => {
     const g = gate<string>()
     const read = vi.fn(() => g.promise)
     const ask = softRead({ read, fallback: () => 'none', freshMs: 60_000, failMs: 1000, softMs: 5, now: () => clock })
-    // A day old: not fresh, so it is read again, but the asker does not wait for that (nor get the provisional fallback)
-    expect(await ask({ seed: { value: 'kept', at: clock - 86_400_000 } })).toEqual(answer('kept'))
+    // A day old: not fresh, so it is read again, but the asker does not wait for that (nor get the empty fallback)
+    expect(await ask({ seed: { value: 'kept', at: clock - 86_400_000 } })).toEqual(answer('kept', true))
     expect(read).toHaveBeenCalledTimes(1)
     g.resolve('new')
     await vi.waitFor(async () => expect(await ask()).toEqual(answer('new')))
     // The process's own answer wins over a seed offered later
     expect(await ask({ seed: { value: 'kept', at: clock - 86_400_000 } })).toEqual(answer('new'))
+  })
+
+  it('settles a stale answer: waits for the refresh behind it and answers what it read, final, with no polling', async () => {
+    let clock = 0
+    const g = gate<string>()
+    const read = vi.fn<() => Promise<string>>().mockResolvedValueOnce('old').mockReturnValueOnce(g.promise)
+    const ask = softRead({ read, fallback: () => 'none', freshMs: 10, failMs: 1000, softMs: 5, now: () => clock })
+    await ask()
+    clock = 11
+    expect(await ask()).toEqual(answer('old', true))
+    const settled = ask({ settle: true })
+    g.resolve('new')
+    expect(await settled).toEqual(answer('new'))
+    // One run served both askers
+    expect(read).toHaveBeenCalledTimes(2)
+  })
+
+  it('settles a stale answer for only so long: the stale answer stays, provisional, and the run goes on to fill the cache', async () => {
+    let clock = 0
+    const g = gate<string>()
+    const read = vi.fn<() => Promise<string>>().mockResolvedValueOnce('old').mockReturnValueOnce(g.promise)
+    const ask = softRead({ read, fallback: () => 'none', freshMs: 10, failMs: 1000, softMs: 5, settleMs: 20, now: () => clock })
+    await ask()
+    clock = 11
+    expect(await ask({ settle: true })).toEqual(answer('old', true))
+    g.resolve('new')
+    await vi.waitFor(async () => expect(await ask()).toEqual(answer('new')))
+  })
+
+  it('settles a stale answer whose refresh fails: the old answer, final (nothing is being read)', async () => {
+    let clock = 0
+    const read = vi.fn<() => Promise<string>>().mockResolvedValueOnce('old').mockRejectedValueOnce(new Error('boom'))
+    const ask = softRead({ read, fallback: () => 'none', freshMs: 10, failMs: 1000, softMs: 5, now: () => clock })
+    await ask()
+    clock = 11
+    expect(await ask({ settle: true })).toEqual(answer('old'))
   })
 
   it('does not read at all for a seed that is still fresh', async () => {
@@ -176,7 +213,7 @@ describe('a usage read that is a command run (#1623)', () => {
   it('keeps the seed when the read behind it fails', async () => {
     const clock = 1_000_000
     const ask = softRead({ read: async () => Promise.reject(new Error('boom')), fallback: () => 'none', freshMs: 60_000, failMs: 1000, softMs: 5, now: () => clock })
-    expect(await ask({ seed: { value: 'kept', at: clock - 86_400_000 } })).toEqual(answer('kept'))
+    expect(await ask({ seed: { value: 'kept', at: clock - 86_400_000 } })).toEqual(answer('kept', true))
     await vi.waitFor(async () => expect(await ask()).toEqual(answer('kept')))
   })
 
@@ -184,7 +221,7 @@ describe('a usage read that is a command run (#1623)', () => {
     const g = gate<{ plan: string | null }>()
     const seed = { plan: null, totals: { scope: 'all time', asOf: 5, rows: [] } }
     const ask = localUsageReader({ read: () => g.promise, fallback: () => ({ plan: null }), freshMs: 60_000, failMs: 1000, softMs: 10, now: () => 10_000_000 })
-    expect(await ask({ seed })).toEqual(seed)
+    expect(await ask({ seed })).toEqual({ ...seed, provisional: true })
     // Without `asOf` nothing says how old it is, so it is not shown as an answer
     const other = localUsageReader({ read: () => g.promise, fallback: () => ({ plan: null }), freshMs: 60_000, failMs: 1000, softMs: 10 })
     expect(await other({ seed: { plan: null, totals: { scope: 'all time', rows: [] } } })).toEqual({ plan: null, provisional: true })

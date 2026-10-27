@@ -450,7 +450,7 @@ export type LocalUsage = {
   totals?: NonNullable<UsageSnapshot['totals']>
   /** The command ran and says nobody is logged in: the host answers as it does for any tool that is not logged in */
   loggedOut?: boolean
-  /** Stands in for what the command has not finished reading */
+  /** Stands in for what the command has not finished reading: nothing yet, or the last answer while it is read again */
   provisional?: boolean
 }
 

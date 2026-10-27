@@ -3830,7 +3830,10 @@ from `opencode stats` (boxed tables read by their labels: sessions, messages, to
   newer read, counts only), writes them when a read ends, and hands them to the reader once after a restart (`localUsage({ seed })`).
   The reader stands on them as on a stale answer, so the panel shows them at once with their `asOf` while a fresh read goes on; a
   restart no longer needs a first slow run to show anything. Cursor's plan is not kept (a few seconds to read; it can change).
-- *A slow command.* With no answer yet the asker waits three seconds, then gets an answer marked `provisional` (nothing known yet)
+  An answer that is returned stale (after a restart, or past its freshness) is marked `provisional`: it stands in for the read going
+  on behind it, so the open panel asks once more with `settle` and receives the new totals and their `asOf` when the read lands, in place
+  and without polling (a `settle` waits twenty seconds at most; past that the stale answer stands and the next open finds the new one).
+- *A slow command.* With no answer yet the asker waits three seconds, then gets an answer marked `provisional` (nothing known yet, or the last answer while it is read again)
   while the run goes on; a provisional answer is never kept. The open panel then asks once more with `settle: true`, which waits for
   the run in flight (twenty seconds at most) and answers what it read, so the plan or totals arrive on the
   panel without polling. `opencode stats` reads every session it has: measured on Windows with a temporary data

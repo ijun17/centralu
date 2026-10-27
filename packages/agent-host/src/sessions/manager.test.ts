@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os'
 import type { GridPanel, NormalizedEvent, SessionInfo, StoredMessage, ToolName, TrashedSession, UsageHistory } from '@cc/protocol'
 import { NormalizedEvent as NormalizedEventSchema } from '@cc/protocol'
 import type { AgentAdapter } from '../adapters/contract.js'
+import { openCodeUsageReader } from '../adapters/opencode/usage.js'
 import { Store } from '../dev-services/store.js'
 import { SessionManager } from './manager.js'
 import { createRpcHandler } from '../rpc.js'
@@ -731,6 +732,57 @@ describe('while-alive facts are carried in the list', () => {
     // Offered once: the reader keeps its own answer after that
     expect(seeds).toEqual([read, undefined])
     await next.disposeAll()
+  })
+
+  it('tells the screen an old answer is being read again, and a settle brings the new totals with their new time, after a restart or not (#1623)', async () => {
+    const table = (sessions: number) => ['│Sessions' + String(sessions).padStart(40) + ' │', '│Messages' + '9'.padStart(40) + ' │'].join(String.fromCharCode(10))
+    let clock = 1_000_000
+    let release: (out: string) => void = () => {}
+    const runs: string[] = []
+    // The command ends when the test says, as a slow `opencode stats` does
+    const run = (): Promise<string> => new Promise((resolve) => ((release = resolve), runs.push('run')))
+    const world = (reader: ReturnType<typeof openCodeUsageReader>) => {
+      const a = new FakeAdapter()
+      Object.assign(a, { listUsage: undefined, localUsage: reader })
+      const adapters = new Map<ToolName, AgentAdapter>([['claude', a]])
+      const m = new SessionManager(store, adapters, () => {})
+      return { ask: createRpcHandler(m, adapters), m }
+    }
+    const sessionsOf = (r: unknown) => (r as { usage: { totals: { asOf: number; rows: { id: string; value: number }[] } } }).usage.totals
+    const first = world(openCodeUsageReader(run, () => clock))
+    const firstRead = first.ask('agents.usage', { tool: 'claude', settle: true })
+    await vi.waitFor(() => expect(runs).toHaveLength(1))
+    release(table(28))
+    expect(sessionsOf(await firstRead)).toMatchObject({ asOf: clock, rows: [{ id: 'sessions', value: 28 }, { id: 'messages' }] })
+
+    // Ten minutes on, with no restart: the old totals come back at once, marked provisional, while the command runs
+    clock += 10 * 60_000
+    const oldAt = sessionsOf(await first.ask('agents.usage', { tool: 'claude' })).asOf
+    const stale = (await first.ask('agents.usage', { tool: 'claude' })) as { provisional?: boolean }
+    expect(stale.provisional).toBe(true)
+    await vi.waitFor(() => expect(runs).toHaveLength(2))
+    // The screen's one more ask, with settle, ends when the command does, and carries the new totals and their time
+    const settled = first.ask('agents.usage', { tool: 'claude', settle: true })
+    clock += 12_000
+    release(table(30))
+    const fresh = (await settled) as { provisional?: boolean }
+    expect(fresh.provisional).toBeUndefined()
+    expect(sessionsOf(fresh)).toMatchObject({ asOf: clock, rows: [{ id: 'sessions', value: 30 }, { id: 'messages' }] })
+    expect(sessionsOf(fresh).asOf).toBeGreaterThan(oldAt)
+    expect(store.usage.localTotals('claude')?.asOf).toBe(clock)
+    await first.m.disposeAll()
+
+    // A restart a day later: the kept totals come back at once, provisional, and a settle brings the new read
+    clock += 86_400_000
+    const second = world(openCodeUsageReader(run, () => clock))
+    const kept = (await second.ask('agents.usage', { tool: 'claude' })) as { provisional?: boolean }
+    expect(kept.provisional).toBe(true)
+    expect(sessionsOf(kept)).toMatchObject({ asOf: clock - 86_400_000, rows: [{ id: 'sessions', value: 30 }, { id: 'messages' }] })
+    await vi.waitFor(() => expect(runs).toHaveLength(3))
+    const settledAgain = second.ask('agents.usage', { tool: 'claude', settle: true })
+    release(table(31))
+    expect(sessionsOf(await settledAgain)).toMatchObject({ asOf: clock, rows: [{ id: 'sessions', value: 31 }, { id: 'messages' }] })
+    await second.m.disposeAll()
   })
 
   it('does not keep a provisional answer, nor totals that say nothing of when they were read (#1623)', async () => {

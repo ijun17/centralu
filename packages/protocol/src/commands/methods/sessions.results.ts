@@ -162,8 +162,9 @@ export const sessionsResults = {
     notReported: z.boolean().optional(),
     /**
      * The answer stands in for one the host is still reading (#1623): a tool with no limits whose own command was
-     * slower than the host waits. `usage` holds nothing yet; asking again with `settle` returns what the command read.
-     * Absent otherwise, and from a host that predates it.
+     * slower than the host waits (`usage` holds nothing yet), or whose last answer is old and is being read again (`usage`
+     * is that answer, with its `totals.asOf`). Asking again with `settle` returns what the command read. Absent
+     * otherwise, and from a host that predates it.
      */
     provisional: z.boolean().optional(),
     /**

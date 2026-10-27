@@ -169,6 +169,32 @@ export function usageNotReportedTests(): void {
       expect(await settles()).toBe(asked)
     })
 
+    test('old totals shown while the host reads again: the open panel gets the new totals and their time when the read lands, without reopening', async ({ page }) => {
+      await setup(page, { projects: ['/tmp/alpha'] })
+      const read = (sessions: number, asOf: number) => ({ ...NONE, totals: { scope: 'all time', asOf, rows: [{ id: 'sessions', label: 'Sessions', value: sessions, unit: 'count' }] } })
+      await page.evaluate(
+        ([old, fresh]) => {
+          const m = (window as unknown as MockWindow).__mock
+          // The host's first answer is the old totals, marked as standing in for the read behind them; a settle returns the new ones
+          m.toolUsage = { codex: old }
+          m.settledUsage = { codex: fresh }
+        },
+        [{ ...answer(read(28, Date.now() - 3 * 86_400_000)), provisional: true }, answer(read(30, Date.now() - 1000))] as const,
+      )
+      await page.evaluate(() => (window as unknown as MockWindow).__mock.setConnectionState('disconnected'))
+      await expect(page.getByTestId('connection')).toBeVisible()
+      await page.evaluate(() => (window as unknown as MockWindow).__mock.setConnectionState('connected'))
+      await expect(page.getByTestId('connection')).toHaveCount(0)
+      await page.getByTestId('usage-donut-codex').click()
+      // Never reopened: the totals and the time changed in place, from a dated read to today's
+      await expect(page.getByTestId('usage-total-sessions')).toHaveText('Sessions30')
+      await expect(page.getByTestId('usage-totals-as-of')).toHaveText(/^As of \d{1,2}:\d{2}\s(AM|PM)$/)
+      // The panel's own first ask was answered with the old totals, and one more ask, to settle, brought the new ones
+      const calls = await page.evaluate(() => (window as unknown as MockWindow).__mock.usageCalls as { tool: string; settle: boolean }[])
+      expect(calls.some((c) => c.tool === 'codex' && !c.settle)).toBe(true)
+      expect(calls.some((c) => c.tool === 'codex' && c.settle)).toBe(true)
+    })
+
     test('the donut follows the settled answer as the panel does, not the provisional one for five minutes', async ({ page }) => {
       await setup(page, { projects: ['/tmp/alpha'] })
       await page.evaluate(

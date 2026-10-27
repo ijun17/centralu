@@ -35,7 +35,7 @@ export type UsageAnswer = {
   reason?: string
   /** `supported: false` with this: the tool has no way to report limits (#1616), as against a read that failed */
   notReported?: boolean
-  /** The host is still reading the tool's own command; `usage` stands in until `usage(tool, machine, { settle: true })` (#1623) */
+  /** The host is still reading the tool's own command (`usage` is nothing yet, or the last, older answer); it stands in until `usage(tool, machine, { settle: true })` (#1623) */
   provisional?: boolean
   usage: UsageSnapshot | null
   cache?: CacheStats

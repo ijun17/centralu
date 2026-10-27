@@ -5,13 +5,16 @@ import type { LocalUsage } from './contract.js'
  * so one answer is kept, a read in flight is shared, and the asker is never kept waiting on a slow one.
  *
  * - A fresh answer is returned as it is. A stale one is returned at once and read again behind it, so a panel opened an
- *   hour later does not wait on the command (unless `staleOk` says that kind of answer may not stand in).
+ *   hour later does not wait on the command (unless `staleOk` says that kind of answer may not stand in). It is marked
+ *   `provisional`: it stands in for the read going on behind it, so the screen that shows it can ask once more with `settle`
+ *   and receive the new answer when the read lands, without polling.
  * - With no answer yet, the asker waits `softMs` at most, then gets `fallback()` marked `provisional` while the read goes on
  *   and fills the cache for the next ask. The panel never sits on a command that hangs. A provisional answer is never kept:
  *   only what the command read is.
  * - `settle: true` waits for the read in flight, at most `settleMs`, and answers what it read: how an open panel receives the
- *   answer of a command that took longer than the soft wait, without polling. Past `settleMs` the answer is provisional again
- *   and the run goes on; what it reads is kept for the next ask.
+ *   answer of a command that took longer than the soft wait, or the new answer behind a stale one it shows, without polling.
+ *   Past `settleMs` the answer is provisional again (the stale one, if there was one) and the run goes on; what it reads is
+ *   kept for the next ask.
  * - A read that failed is not run again for `failMs`: the asker gets the last good answer, or `fallback()`. That is final
  *   (not provisional): nothing is being read.
  */
@@ -85,10 +88,12 @@ export function softRead<T>(o: SoftReadOptions<T>): (ask?: SoftAsk<T>) => Promis
     if (value && t - value.at < freshFor(value)) return { value: value.v, provisional: false }
     if (failedAt !== null && t - failedAt < o.failMs) return { value: value?.v ?? o.fallback(), provisional: false }
     const run = start()
-    if (value && (o.staleOk?.(value.v) ?? true)) return { value: value.v, provisional: false }
+    // The last answer, when it may stand in while the read goes on: returned at once, as provisional, unless the asker settles
+    const held = value && (o.staleOk?.(value.v) ?? true) ? { v: value.v } : null
+    if (held && !ask.settle) return { value: held.v, provisional: true }
     let timer: ReturnType<typeof setTimeout> | undefined
     const soft = new Promise<SoftAnswer<T>>((resolve) => {
-      timer = setTimeout(() => resolve({ value: o.fallback(), provisional: true }), ask.settle ? (o.settleMs ?? 20_000) : o.softMs)
+      timer = setTimeout(() => resolve({ value: held ? held.v : o.fallback(), provisional: true }), ask.settle ? (o.settleMs ?? 20_000) : o.softMs)
       timer.unref?.()
     })
     try {
