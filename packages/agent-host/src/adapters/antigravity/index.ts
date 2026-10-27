@@ -95,7 +95,7 @@ export function antigravityProfile(deps: AgyProfileDeps = {}): AgyProfile {
             folder.watch((text) => {
               if (agentSignInUrl(text)) return wanted()
               // Google's v2 authorize page with another client may be a new agent release whose client was not measured
-              // (`AGY_OAUTH_CLIENT`): said apart, so a sign-in that stopped working there is not lost in the log
+              // (`AGY_RELEASE.oauthClient`): said apart, so a sign-in that stopped working there is not lost in the log
               const other = googleAuthorizeUrl(text)
               console.error(
                 other

@@ -6,7 +6,7 @@ import { agyHome, browserFolder, windowsBrowserCommand } from './agent-files.js'
 import { InstallFailure } from './failure.js'
 import { AntigravityAdapter, antigravityProfile } from './index.js'
 import { AGY_RELEASE } from './release.js'
-import { AGY_OAUTH_CLIENT, agentSignInUrl, googleAuthorizeUrl, runSignIn } from './sign-in.js'
+import { agentSignInUrl, googleAuthorizeUrl, runSignIn } from './sign-in.js'
 import { driven, fakeInstall, fakeSignIn, HOST_TEST_ARCHIVE, HOST_TEST_PLATFORM, leftovers, runBrowser, sessionOpts, tempData, TEST_ARCHIVE } from './agent-files.test-helpers.js'
 
 /**
@@ -23,7 +23,7 @@ import { driven, fakeInstall, fakeSignIn, HOST_TEST_ARCHIVE, HOST_TEST_PLATFORM,
  * The agent's own login request, as 1.4.3 hands it to `BROWSER` (measured on Windows; the state and the PKCE challenge
  * stand in). With `&` in it: a batch file would have handed it to `cmd`, which splits it there
  */
-const ADDRESS = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${AGY_OAUTH_CLIENT}&redirect_uri=http%3A%2F%2F127.0.0.1%3A60382%2F&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcloud-platform+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email&state=s&code_challenge=c&code_challenge_method=S256&access_type=offline&prompt=consent`
+const ADDRESS = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${AGY_RELEASE.oauthClient}&redirect_uri=http%3A%2F%2F127.0.0.1%3A60382%2F&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcloud-platform+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email&state=s&code_challenge=c&code_challenge_method=S256&access_type=offline&prompt=consent`
 
 /** What `gcloud auth login` opens (deep review of #1687): Google's authorize page, with gcloud's own public client */
 const GCLOUD = 'https://accounts.google.com/o/oauth2/auth?response_type=code&client_id=32555940559.apps.googleusercontent.com&redirect_uri=http%3A%2F%2Flocalhost%3A8085%2F&scope=openid'
@@ -93,13 +93,22 @@ describe("the BROWSER helper's folder", () => {
     // Each part on its own: the client named twice, another redirect, another host or path, no code flow, not https
     expect(agentSignInUrl(`${ADDRESS}&client_id=32555940559.apps.googleusercontent.com`)).toBeNull()
     expect(agentSignInUrl(ADDRESS.replace('http%3A%2F%2F127.0.0.1%3A60382', 'https%3A%2F%2Fevil.example'))).toBeNull()
+    // http, as the agent's own: only the loopback check refuses these (RV1687b), a host elsewhere or one that only starts
+    // or ends like the loopback
+    for (const back of ['http://evil.example/cb', 'http://localhost.evil.test/cb', 'http://127.0.0.1.nip.io/cb', 'http://evil.localhost.example:60382/']) {
+      expect(agentSignInUrl(ADDRESS.replace('http%3A%2F%2F127.0.0.1%3A60382%2F', encodeURIComponent(back))), back).toBeNull()
+    }
+    // The loopback in each spelling the agent may use is still its own
+    for (const back of ['http://localhost:60382/', 'http://[::1]:60382/']) {
+      expect(agentSignInUrl(ADDRESS.replace('http%3A%2F%2F127.0.0.1%3A60382%2F', encodeURIComponent(back))), back).not.toBeNull()
+    }
     expect(agentSignInUrl(ADDRESS.replace('http%3A%2F%2F127.0.0.1', 'http%3A%2F%2Fuser%40127.0.0.1'))).toBeNull()
     expect(agentSignInUrl(ADDRESS.replace('accounts.google.com', 'myaccount.google.com'))).toBeNull()
     expect(agentSignInUrl(ADDRESS.replace('/o/oauth2/v2/auth', '/o/oauth2/v2/authx'))).toBeNull()
     expect(agentSignInUrl(ADDRESS.replace('response_type=code', 'response_type=token'))).toBeNull()
     expect(agentSignInUrl(ADDRESS.replace('https:', 'http:'))).toBeNull()
     // Told apart in the log only: Google's v2 authorize page with another client (a new release's, not measured)
-    expect(googleAuthorizeUrl(ADDRESS.replace(AGY_OAUTH_CLIENT, 'other.apps.googleusercontent.com'))).not.toBeNull()
+    expect(googleAuthorizeUrl(ADDRESS.replace(AGY_RELEASE.oauthClient, 'other.apps.googleusercontent.com'))).not.toBeNull()
     expect(googleAuthorizeUrl(GCLOUD)).toBeNull()
     expect(googleAuthorizeUrl(DOC)).toBeNull()
   })

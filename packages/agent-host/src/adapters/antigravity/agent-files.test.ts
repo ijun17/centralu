@@ -85,7 +85,9 @@ async function install(zip: Buffer, archive: AgyArchive, served: Served, opts: {
 const reasonOf = (e: unknown) => (e instanceof InstallFailure ? e.reason : e)
 
 describe('installing the pinned agent', () => {
-  it('pins one archive for each platform Google ships, each with a sha256', () => {
+  it("pins one archive for each platform Google ships, each with a sha256, and the agent's OAuth client with them", () => {
+    // The sign-in's and the session's only sign-in address (`agentSignInUrl`): a bump that forgets it opens no browser
+    expect(AGY_RELEASE.oauthClient).toMatch(/^\d+-[a-z0-9]+\.apps\.googleusercontent\.com$/)
     for (const [key, a] of Object.entries(AGY_RELEASE.archives)) {
       expect(a.sha256, key).toMatch(/^[0-9a-f]{64}$/)
       expect(a.url, key).toMatch(new RegExp(`^https://dl\\.google\\.com/.+-${AGY_RELEASE.version}-.+\\.zip$`))

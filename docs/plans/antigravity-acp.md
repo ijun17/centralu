@@ -273,7 +273,8 @@ never reaches the agent (review of #1685, follow-up 8).
   (`1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com`, public, measured in 1.4.3's login
   address on Windows and Linux) and a `redirect_uri` on the loopback, each named once. The folder is under the data
   folder, where an agent of another session could write, so a Google page planted there is not opened either (deep
-  review of #1687, follow-up 5). Another release's client has to be measured again with its pin.
+  review of #1687, follow-up 5). The client is pinned in the release entry (`AGY_RELEASE.oauthClient`, `release.ts`) beside
+  the version and the sha256s, so a bump measures it again; a test fails on an entry without one.
 
 `agents.cancelSignIn` ends the process, and with it the one-shot listener (ACP cannot cancel `authenticate`). Endings:
 success reads `_meta.antigravity.tier` (`{name, upgradeUri}`: the plan name, offered as `ToolSetup.plan`) and the line

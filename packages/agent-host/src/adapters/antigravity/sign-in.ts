@@ -8,7 +8,7 @@ import type { Platform } from '../../os.js'
 import { browserFolder, openInBrowser, type AgyHome } from './agent-files.js'
 import { InstallFailure } from './failure.js'
 import { agyLaunch } from './launch.js'
-import type { AgyArchive } from './release.js'
+import { AGY_RELEASE, type AgyArchive } from './release.js'
 import { agyStderrLine } from './shape.js'
 
 /**
@@ -74,12 +74,6 @@ export function signInUrl(raw: string): string | null {
   }
 }
 
-/**
- * The OAuth client of Antigravity's ACP server 1.4.3: public, it stands in the agent's own login address (measured on
- * Windows and on Linux with a token the agent could not use). A new release must be measured again (`AGY_RELEASE`)
- */
-export const AGY_OAUTH_CLIENT = '1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com'
-
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]'])
 
 /** Google's v2 authorize page, whoever's client asks (only for the log: `agentSignInUrl` is what is acted on) */
@@ -92,7 +86,7 @@ export function googleAuthorizeUrl(raw: string): URL | null {
 
 /**
  * The agent's own login request, and nothing else Google serves: `https://accounts.google.com/o/oauth2/v2/auth` with
- * `response_type=code`, the agent's client (`AGY_OAUTH_CLIENT`) and a `redirect_uri` on this machine's loopback (its
+ * `response_type=code`, the agent's client (`AGY_RELEASE.oauthClient`, pinned with the version) and a `redirect_uri` on this machine's loopback (its
  * one-shot listener), each named once. `BROWSER` reaches every command the agent runs, so a Google address alone says
  * nothing (deep review of #1687: `gcloud auth login` opens Google's authorize page with gcloud's own client, a script may
  * open a Google Doc); only this one is the agent asking for a sign-in. The address passed on is `signInUrl`'s rebuilt one
@@ -105,7 +99,7 @@ export function agentSignInUrl(raw: string): string | null {
     const all = parsed.searchParams.getAll(name)
     return all.length === 1 ? (all[0] ?? null) : null
   }
-  if (one('response_type') !== 'code' || one('client_id') !== AGY_OAUTH_CLIENT) return null
+  if (one('response_type') !== 'code' || one('client_id') !== AGY_RELEASE.oauthClient) return null
   try {
     const back = new URL(one('redirect_uri') ?? '')
     if (back.protocol !== 'http:' || !LOOPBACK.has(back.hostname) || back.username !== '' || back.password !== '') return null
