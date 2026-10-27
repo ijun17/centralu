@@ -3469,7 +3469,7 @@ at a time per machine, and the remote's `install.lock` guards the files.
 | Hold | The link stops reconnecting and starting a host of its own (Reconnect included) until the check; it would otherwise start the old version between the stop and the switch | the same | the same |
 | Stop | `centralu serve --stop` through the lookup: the running version stops itself in order (§4.7). Not stopped: the call fails and nothing is switched | the same | the same; not stopped, nothing is removed |
 | Boot entry | — | — | `serve --autostart remove` through the lookup (§4.7), after the stop; `off` of a serve from before `remove`, where `off` removed the entry. Not removed: nothing is removed. A version older than `--autostart` is passed by (it cannot have written one from here) |
-| Switch | `remote-install.mjs` with `action: 'pointers'`: `previous` = the old `current`, `current` = the new one, each by rename; the launcher is written now if there is none. The stop before it was `serve --stop` with `CENTRALU_STOP_FOR=update`, so the host it stopped wrote the turns it ended to `<data>/update-resume.json` (#1618, below) | `current` = `previous`, `previous` removed: one step back only | `<data>/remote/` removed, by a script per shell (a running `node.exe` could not remove itself) |
+| Switch | `remote-install.mjs` with `action: 'pointers'`: `previous` = the old `current`, `current` = the new one, each by rename; the launcher is written now if there is none. The stop before it was `serve --stop` with `CENTRALU_STOP_FOR=update`, so the host it stopped wrote the turns it ended to a list of its own, `<data>/update-resume.<uuid>.json` (#1618, below) | `current` = `previous`, `previous` removed: one step back only | `<data>/remote/` removed, by a script per shell (a running `node.exe` could not remove itself) |
 | Start | `serve --detach` (`Tunnel.startHost`) | the same | — |
 | Check | The link opens again; only a hello whose `build.version` is the target ends it, within 30 s | the same | — |
 | After | Success: `action: 'prune'` removes what neither pointer names. Failure: the end of `host.log`, `serve --stop` again, the old pointers back (none, after a first update over an npm install: then the launcher goes too), the old version started if one was running, and the call fails with that sentence. That stop is for an update too: the turns the new host had not continued, and those it was running, stay listed for the version put back (one from before #1618 ignores the list) | Failure: the same, towards the version it left | The link opens again and finds what is left (an npm install, or nothing) |
@@ -3532,16 +3532,25 @@ the person's Continue would.
   Background work alone is not a turn and is not continued.
 - **Told it is an update.** Every stop of the hub's after which a host starts again in that folder (the update's, the
   put-back's after a failed check, a rollback's; not an uninstall's) runs `serve --stop` with `CENTRALU_STOP_FOR=update`
-  (`stopCommand`, `stopRemoteHost`), which the launcher passes on as `host.stop { forUpdate: true }` (additive). The host
-  then writes the ids to `<data>/update-resume.json` (`{ v: 1, ids }`, lifecycle/update-resume.ts), added to what is
-  already listed there. A host the launcher could not ask (it is ended instead), a stop of the person's, or a host from
-  before #1618 writes nothing, and its turns end as a stop's always did.
-- **Taken once each.** The next host to start in that folder reads the list before it builds its sessions, without
-  taking it. Each id leaves it only once dealt with (`dropFromUpdateResume`): its Continue went in, its loss was reported,
-  or the start did not find it cut. A host that stops before then (its check failed and the update puts the old one
-  back, a second update, a rollback) leaves the rest listed and adds the turns it cuts itself, the continued ones
-  included, so the host after it continues them. Nothing expires: the list is the next start's, whenever it comes, on
-  that machine's own clock. A file of another format continues nothing.
+  (`stopCommand`, `stopRemoteHost`), which the launcher passes on as `host.stop { forUpdate: true }` (additive). Once
+  the processes are down and their last output written, the host writes those turns as a list of its own,
+  `<data>/update-resume.<uuid>.json` (`{ v: 1, turns: [{ id, seq }] }`, lifecycle/update-resume.ts), each with the last
+  row of its conversation then (`seq`). A list is written once, under a new name, beside any an earlier stop left:
+  nothing is renamed over a file another process may hold. One that cannot be written is said in the log with the
+  folder's own error, and those turns end as a stop's always did. A host the launcher could not ask (it is ended
+  instead), a stop of the person's, or a host from before #1618 writes nothing, and its turns end as a stop's always did.
+- **Taken once each, and only that turn** (#1626 review). The next host to start in that folder reads all the lists
+  before it builds its sessions, without taking them. A listed session is that stop's turn only while its conversation
+  still ends at the listed row: every turn begun after, under any version, records its input first. So a list left
+  behind (one a virus scanner held open when it was to go, one a host from before #1618 never read after a rollback)
+  continues no later turn, and a later stop of the person's that cuts one is told as a quit's. A list goes once each
+  turn it names is dealt with (`UpdateResumeLists.done`): its Continue went in, its loss was reported, or the start did
+  not find it cut. One that cannot be removed is said in the log, stays harmless, and goes at a later start; one a host
+  killed while it wrote is not JSON and goes at the next start. A host that stops before then (its check failed and the
+  update puts the old one back, a second update, a rollback) leaves the lists and writes its own with the turns it cuts,
+  the continued ones included, so the host after it continues them; a Continue the tool takes while the host is leaving
+  is left to that next host, which tells the requester. Nothing expires: a list is the next start's, whenever it comes,
+  on that machine's own clock. A list of another format continues nothing and is left to the host that wrote it.
 - **Continued.** A listed session the start finds mid-turn with no process stays `working` (no "stopped" mark, no quit
   notice), its owed report and its delegated turn kept as a kept process's are, and once the start is done it is woken
   and given Centralu's note through Centralu's channel (`deliverMail`, no message of the person's): "Centralu on this
@@ -3568,7 +3577,9 @@ the person's Continue would.
   told, its own note covers its children. A caller on the hub (a child start_agent made there) is not told that the link
   dropped while the hub's own update or rollback holds the link, from its first step until the link is back
   (`RemoteAgents.updateHolds`), when the machine's host is one that continues cut turns. The new host's `hello_ok`
-  names the turns it continued (`updateContinued`, with when, on its clock); once the link is back and the child is in
+  names the turns it continues from its start on, before it answers any hello, whether or not the Continue is in yet
+  (`updateContinued`, with when its start took each up, on its clock; one that turns out lost is no longer named), so
+  the order of the Continue and the reconnect does not matter; once the link is back and the child is in
   its turn again and named there, the caller hears once that the update cut the turn and Centralu continued it. An
   update that ends with the machine not back lets the link go, and the drop is told then. Either way the report it is
   owed is the continued turn's end: one report, never "finished" for the cut.
