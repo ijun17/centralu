@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useLayoutEffect, useState } from 'react'
 
 /** How long a layer takes to leave: the exit animations in styles/index.css (cc-drop-out, cc-fade-out) last this long */
 export const LEAVE_MS = 150
@@ -12,6 +12,9 @@ export const LEAVE_MS = 150
  * keeps its own timer (the run window's did, CommandRunner).
  *
  * A timer, not animationend: with reduced motion there is no animation to end, and the layer must still go.
+ *
+ * With `ms` of 0 there is no exit: `shown` follows `open` in the same render. A zero-length timer is still a timer, and
+ * whether it has run when something looks (a test on a paused clock, a slow frame) is not up to the layer.
  */
 export function usePresence(open: boolean, ms = LEAVE_MS): { shown: boolean; leaving: boolean } {
   /*
@@ -23,9 +26,10 @@ export function usePresence(open: boolean, ms = LEAVE_MS): { shown: boolean; lea
   const [leaving, setLeaving] = useState(false)
   if (prev !== open) {
     setPrev(open)
-    setLeaving(!open)
+    setLeaving(!open && ms > 0)
   }
-  useEffect(() => {
+  // A layout effect, so the timer exists in the commit that shows the exit: nothing can see `leaving` without the timer already running
+  useLayoutEffect(() => {
     if (!leaving) return
     const t = setTimeout(() => setLeaving(false), ms)
     return () => clearTimeout(t)

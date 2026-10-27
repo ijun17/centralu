@@ -11,6 +11,7 @@ import { ConfirmDelete } from './dialogs/ConfirmDelete.jsx'
 import { CrownIcon, DotsIcon } from '../../components/icons.jsx'
 import { SESSION_MIME } from './reorder.js'
 import { HoverExpander } from './fold.js'
+import { Fold } from '../../components/Fold.jsx'
 
 /**
  * The door to the orchestrator — **directing by talking**.
@@ -90,8 +91,8 @@ export function OrchestratorButton() {
         }`}
         // The same rule as the grid: a selection, not a toggle. To leave, choose something else
         onClick={() => {
-          // Pressing the button before the rest is over is a decision not to wait for it (as a folded project's name is, #1578)
-          expander.leaveName()
+          // Pressing the button before the rest is over is a decision not to wait for it (as a press on a folded project's row is, #1578)
+          expander.leaveRow()
           void open()
         }}
         /*
@@ -102,8 +103,8 @@ export function OrchestratorButton() {
           this was the only entry point still missing from it.
         */
         draggable={!!id}
-        onPointerEnter={(e) => e.pointerType === 'mouse' && expander.enterName(true)}
-        onPointerLeave={(e) => e.pointerType === 'mouse' && expander.leaveName()}
+        onPointerEnter={(e) => e.pointerType === 'mouse' && expander.enterRow(true)}
+        onPointerLeave={(e) => e.pointerType === 'mouse' && expander.leaveRow()}
         onDragStart={(e) => {
           if (!id) return
           e.dataTransfer.setData(SESSION_MIME, id)
@@ -199,21 +200,23 @@ function OrchestratorChildren({
       }}
     />
   )
-  if (!shown || (current.length === 0 && earlier.length === 0)) return dialog || null
   const row = (s: SessionSummary) => <OrchestratorChildRow key={s.id} s={s} onHold={onHold} setConfirming={(on) => setConfirmingId(on ? s.id : null)} />
   return (
     <>
-      <ul className="mt-0.5" data-testid="orchestrator-children" onDragStart={() => onDragging(true)} onDragEnd={() => onDragging(false)}>
-        {current.map(row)}
-        {earlier.length > 0 && (
-          <>
-            <li className={`${INDENT[2]} pt-1 text-2xs text-ink-faint`} data-testid="orchestrator-children-earlier">
-              Started by an earlier orchestrator
-            </li>
-            {earlier.map(row)}
-          </>
-        )}
-      </ul>
+      {/* Slides open and closed like a project's rows (#1605); the rows stay until the exit ends. A child that arrives while it is open does not slide */}
+      <Fold open={shown} className={current.length > 0 || earlier.length > 0 ? 'pt-0.5' : undefined} testId="orchestrator-fold">
+        <ul data-testid="orchestrator-children" onDragStart={() => onDragging(true)} onDragEnd={() => onDragging(false)}>
+          {current.map(row)}
+          {earlier.length > 0 && (
+            <>
+              <li className={`${INDENT[2]} pt-1 text-2xs text-ink-faint`} data-testid="orchestrator-children-earlier">
+                Started by an earlier orchestrator
+              </li>
+              {earlier.map(row)}
+            </>
+          )}
+        </ul>
+      </Fold>
       {dialog}
     </>
   )

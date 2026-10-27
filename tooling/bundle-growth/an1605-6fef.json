@@ -1,0 +1,4 @@
+{
+  "bytes": 1000,
+  "reason": "Animated sidebar folds (#1605): the shared Fold component (a presence-kept grid-track transition used by a project's rows and the orchestrator's children) and the whole-row hover wiring. Measured +861 B on the same tree (1,916,842 B against main's 1,915,981 B at b9571c8c3), all in the main chunk; no new dependency, and one component serves both fold sites. Main sat 19 B under the ceiling, so any growth needed a declaration."
+}
