@@ -69,6 +69,9 @@ describe('a request that cannot be read whole is refused', () => {
     const w = world()
     expect(await reaches(w.home, edit(`${pathIn(w.project, 'a.txt')}\n${w.token}`), w.project)).toBe(true)
     expect(await reaches(w.home, { kind: 'other', rawInput: { args: [`--out=${w.token}`] } }, w.project)).toBe(true)
+    for (const arg of [`x:${w.token}`, `@${w.token}`, `-o${w.token}`, `[${w.token}]`]) {
+      expect(await reaches(w.home, { kind: 'execute', rawInput: { CommandLine: `tool ${arg}`, Cwd: w.project } }, w.project), arg).toBe(true)
+    }
     expect(await reaches(w.home, { kind: 'execute', rawInput: { CommandLine: `cat "${w.token}"`, Cwd: w.project } }, w.project)).toBe(true)
     // Code that names no file there is let through, comments and all
     const code = '/**\n * A note.\n */\nexport const a = 1 // ~ / ..\n'

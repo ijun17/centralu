@@ -196,9 +196,10 @@ refused (recheck of #1680). Exactly what it checks:
   its volume is the folder's volume, or cannot be read. Its host's name proves nothing: `localhost`, `127.0.0.1`, the
   machine's own names and addresses, a hosts-file entry, and any share of any folder lead to the same file (measured:
   the admin share by each of those names gave the token's volume serial and file id). The volume, read with `stat`, does.
-- Then every line and every word (split at spaces, `=`, `,`, `;`, quotes, brackets and `|`) of every string, multi-line
-  ones and a shell command included, read the same way by its text only (no links, no parent rule): a path in a list,
-  an argument (`--out=<path>`), a command that names the token.
+- Then every line and every word (split at spaces, `=`, `,`, `;`, quotes, brackets, `|`, `@` and `&`) of every string,
+  multi-line ones and a shell command included, and each word also from every place a path can start in it (`~`, a
+  separator, a drive), read the same way by its text only (no links, no parent rule): a path in a list, an argument
+  (`--out=<path>`, `-o<path>`, `key:<path>`, `@<path>`), a command that names the token.
 
 Work this declines that it need not (accepted, since each is rare and the person can still do it with a shell command,
 which asks): a search or listing over the home folder, the data folder or a drive's root, including a session whose

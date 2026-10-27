@@ -497,9 +497,9 @@ export async function signInFolder(home: AgyHome, platform: Platform = HOST_PLAT
  * - Windows: a network path (`\\host\share`, `\\?\UNC\…`, a mapped drive, a volume or device path) is refused when it
  *   is on the same volume as the folder, or its volume cannot be read. Its host's name proves nothing (`localhost`,
  *   `127.0.0.1`, the machine's names and addresses, a hosts entry, any share of any folder all lead here), its volume does
- * - then every line and every word (split at spaces, `=`, `,`, `;`, quotes, brackets, `|`) of every string, multi-line
- *   ones and a shell command's included, read the same way but by its text only (no links, no parents rule): a path in a
- *   list or an argument (`--out=<path>`). A command can still reach the folder in ways no text shows (a variable, `cd`
+ * - then every line and every word (split at spaces, `=`, `,`, `;`, quotes, brackets, `|`, `@`, `&`) of every string,
+ *   multi-line ones and a shell command's included, and each word from every place a path can start in it, read the
+ *   same way but by its text only (no links, no parents rule): a path in a list or an argument (`--out=<path>`, `-o<path>`). A command can still reach the folder in ways no text shows (a variable, `cd`
  *   then a relative name); it asks under every preset but Auto (security-boundaries.md)
  */
 export async function reachesAgentFolder(home: AgyHome, call: unknown, sessionId: string, cwd: string): Promise<boolean> {
@@ -527,10 +527,15 @@ async function judgeRequest(home: AgyHome, call: unknown, sessionId: string, cwd
       }
     }
   }
-  // Every line and word of every string, by its text only: a path in a list, an argument (`--out=<path>`), a command
+  // Every line and word of every string, by its text only: a path in a list, an argument (`--out=<path>`, `-o<path>`,
+  // `key:<path>`, `@<path>`), a command. Each word also from every place a path can start in it (`~`, a separator, a drive)
   const seen = new Set<string>()
   for (const text of read.texts) {
-    for (const word of [...text.split(/[\r\n]+/), ...text.split(/[\s=,;'"`()<>|]+/)]) {
+    const words = [...text.split(/[\r\n]+/), ...text.split(/[\s=,;'"`()<>|@[\]&]+/)].flatMap((word) => {
+      const starts = [...word.matchAll(/[~\\/]|[A-Za-z]:[\\/]/g)].map((m) => m.index)
+      return [word, ...starts.filter((i) => i > 0).map((i) => word.slice(i))]
+    })
+    for (const word of words) {
       const w = word.trim()
       if (w.length === 0 || w.length > MAX_PATH_TEXT || seen.has(w)) continue
       seen.add(w)
