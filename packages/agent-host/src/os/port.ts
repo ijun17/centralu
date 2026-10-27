@@ -213,7 +213,8 @@ export type OsExit = { code: number | null; signal: NodeJS.Signals | null }
  * One of the child's standard streams: a pipe to the host, nothing, an extra duplex pipe (`'overlapped'`: the apps'
  * broker channel on fd 3), or a file the host opened (`openSync`), which the child writes into.
  */
-export type OsStdio = 'pipe' | 'ignore' | 'overlapped' | number
+/** `'inherit'`: the host's own (a child whose output is the host's log); in memory, discarded */
+export type OsStdio = 'pipe' | 'ignore' | 'inherit' | 'overlapped' | number
 
 export type StartOptions = {
   cwd?: HostPath
@@ -250,6 +251,8 @@ export interface OsChild {
   readonly exited: Promise<OsExit & { error?: OsError }>
   /** One signal to this process alone (Node's `kill`); on Windows any signal ends it. `stop` ends a tree. */
   kill(signal?: NodeJS.Signals): boolean
+  /** The host may end while this runs (Node's `unref`); in memory, nothing */
+  unref(): void
   on(event: 'spawn', listener: () => void): this
   on(event: 'exit' | 'close', listener: (code: number | null, signal: NodeJS.Signals | null) => void): this
   on(event: 'error', listener: (error: OsError) => void): this
@@ -306,6 +309,11 @@ export interface OsProcesses {
   stop(child: OsChild, graceMs: number): Promise<OsExit>
   /** Whether a process with this pid is alive (`process.kill(pid, 0)`; `EPERM` counts as alive) */
   alive(pid: number): boolean
+  /**
+   * One signal to a process the host did not start, by pid (`process.kill`: a stray from a host before, a lock's
+   * owner): false when there is no such process; throws `EPERM`. On Windows any signal ends it.
+   */
+  signal(pid: number, signal: NodeJS.Signals): boolean
   /** The host's own pid */
   readonly pid: number
 }
@@ -331,6 +339,7 @@ export interface OsEnv {
   /** Sets one for this host and the children it starts after (the tool PATH at start, `ensureToolPath`) */
   set(name: string, value: string | undefined): void
   readonly home: HostPath
+  /** Read when asked: `TMPDIR` (POSIX) or `TEMP` (Windows) as set now */
   readonly temp: HostPath
   /** The Node running the host */
   readonly execPath: HostPath
@@ -343,7 +352,8 @@ export type Timer = { cancel(): void }
 
 /**
  * Time, for the waits that are about the OS: a grace before a second shot, a retry while Windows holds a file, a poll
- * of a file. The real timers do not keep the host alive (`unref`). In memory, time moves only when a test moves it.
+ * of a file. A real `setTimeout` does not keep the host alive (`unref`); a `sleep`, awaited, does. In memory, time moves
+ * only when a test moves it.
  */
 export interface OsClock {
   now(): number
@@ -353,7 +363,7 @@ export interface OsClock {
 
 export type SqliteOptions = { readonly?: boolean; fileMustExist?: boolean; timeout?: number }
 
-/** SQLite's files and locks (better-sqlite3), opened through the OS like any file */
+/** SQLite (better-sqlite3) on the real OS; in memory, the engine a test gives, whose files are not in the in-memory tree */
 export interface OsSqlite {
   /** `':memory:'` opens a database with no file */
   open(path: HostPath, options?: SqliteOptions): Database.Database

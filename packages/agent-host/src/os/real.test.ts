@@ -28,7 +28,7 @@ afterAll(async () => {
 
 describe('the real OS and the in-memory one answer the contract alike', () => {
   for (const c of CONTRACT) {
-    it.skipIf(c.symlinks && !canSymlink)(`${HOST_FAMILY}: ${c.name}`, async () => {
+    it.skipIf((c.symlinks && !canSymlink) || (c.linux && process.platform === 'darwin'))(`${HOST_FAMILY}: ${c.name}`, async () => {
       const root = realpathSync.native(mkdtempSync(os.paths.path.join(tmpdir(), 'cc-os-contract-')))
       roots.push(root)
       const real = await outcome(() =>
@@ -84,8 +84,29 @@ describe('the real OS is made of the layer modules', () => {
   })
 
   it('ends a run past its time, its whole tree, and says so', async () => {
-    const r = await os.processes.run(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { timeoutMs: 300 })
+    // A child that starts a grandchild, says its pid, and waits: the grandchild must end with it
+    const grandchild = "setInterval(() => {}, 1000)"
+    const parent = `const c = require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(grandchild)}], { stdio: 'ignore' }); process.stdout.write(String(c.pid)); setInterval(() => {}, 1000)`
+    const r = await os.processes.run(process.execPath, ['-e', parent], { timeoutMs: 3000 })
     expect(r.ended).toBe('timeout')
     expect(r.code === 0 && r.signal === null).toBe(false)
+    const pid = Number(r.stdout.toString())
+    expect(pid).toBeGreaterThan(0)
+    expect(os.processes.alive(pid)).toBe(false)
+  }, 30_000)
+
+  it('signals a process by pid, and answers false once it is gone', async () => {
+    const child = await ready(os.processes.start(process.execPath, ['-e', "process.stdout.write('ready'); setInterval(() => {}, 1000)"], { stdio: ['ignore', 'pipe', 'ignore'] }))
+    const pid = child.pid ?? 0
+    expect(os.processes.signal(pid, 'SIGTERM')).toBe(true)
+    await child.exited
+    expect(os.processes.alive(pid)).toBe(false)
+    expect(os.processes.signal(pid, 'SIGTERM')).toBe(false)
+  }, 30_000)
+
+  it('runs a command line through the OS shell', async () => {
+    const r = await os.processes.runShell('echo hi')
+    expect({ code: r.code, stdout: r.stdout.toString().trim() }).toEqual({ code: 0, stdout: 'hi' })
   })
+
 })

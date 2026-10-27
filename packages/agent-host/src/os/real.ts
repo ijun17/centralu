@@ -28,7 +28,7 @@ import type {
   StartOptions,
   WatchListener,
 } from './port.js'
-import { envValue, fileUrlToPath, isInside, pathKey, pathToFileUrl, samePath, type OsFamily } from './rules.js'
+import { commandInterpreter, envValue, fileUrlToPath, isInside, pathKey, pathToFileUrl, samePath, type OsFamily } from './rules.js'
 import { abortReason, asOsError, errorCode } from './errors.js'
 import { runChild } from './run.js'
 
@@ -243,6 +243,9 @@ class RealChild extends EventEmitter implements OsChild {
   kill(signal?: NodeJS.Signals): boolean {
     return this.node?.kill(signal) ?? false
   }
+  unref(): void {
+    this.node?.unref()
+  }
 }
 
 function asChild(start: () => { child: ChildProcess; spawnedAt: number }): RealChild {
@@ -257,8 +260,15 @@ function asChild(start: () => { child: ChildProcess; spawnedAt: number }): RealC
 
 const stdioFor = (stdio: readonly OsStdio[] | undefined): StdioOptions => (stdio ? [...stdio] : ['pipe', 'pipe', 'pipe'])
 
+/**
+ * The shell a command line goes through, as the in-memory OS names it: on Windows ComSpec when it is a full path, else
+ * System32's cmd.exe (`commandInterpreter`), read from the child's environment (Node's `shell: true` reads the host's)
+ */
+const shellFor = (env: Env): string => (HOST_FAMILY === 'windows' ? commandInterpreter(env) : '/bin/sh')
+
 function start(command: string, args: readonly string[], o: StartOptions = {}, shell = false): RealChild {
-  const options: SpawnOptions = { cwd: o.cwd, env: o.env ?? process.env, stdio: stdioFor(o.stdio), shell, windowsHide: true }
+  const env = o.env ?? process.env
+  const options: SpawnOptions = { cwd: o.cwd, env, stdio: stdioFor(o.stdio), shell: shell ? shellFor(env) : false, windowsHide: true }
   if (o.contained === false) {
     return asChild(() => {
       const spawnedAt = Date.now()
@@ -304,7 +314,6 @@ const clock: Os['clock'] = {
       const signal = o?.signal
       if (signal?.aborted) return reject(abortReason(signal))
       const t = setTimeout(resolve, ms)
-      t.unref()
       signal?.addEventListener('abort', () => (clearTimeout(t), reject(abortReason(signal))), { once: true })
     }),
 }
@@ -336,6 +345,15 @@ const realOsValue: Os = {
         return errorCode(e) === 'EPERM'
       }
     },
+    signal: (pid, signal) => {
+      try {
+        process.kill(pid, signal)
+        return true
+      } catch (e) {
+        if (errorCode(e) === 'ESRCH') return false
+        throw asOsError(e)
+      }
+    },
     pid: process.pid,
   },
   tools: {
@@ -350,8 +368,12 @@ const realOsValue: Os = {
       if (value === undefined) delete process.env[name]
       else process.env[name] = value
     },
-    home: homedir(),
-    temp: tmpdir(),
+    get home() {
+      return homedir()
+    },
+    get temp() {
+      return tmpdir()
+    },
     execPath: process.execPath,
     get username() {
       if (username === undefined) {

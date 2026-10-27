@@ -333,8 +333,9 @@ implementation and one in memory. In `packages/agent-host/src/os/`:
 | `memory.ts` | `memoryOs({ as: 'windows' \| 'posix' })` | no |
 
 **One definition per concept.** The rules moved out of `os.ts`, `env-path.ts`, `tool-launch.ts` and `kill-tree.ts`
-into `rules.ts`; those modules now read them for the running OS (`familyOf`, `traitsFor` in `os.ts`), with their
-signatures and tests unchanged. The in-memory OS cannot import a layer module: a test that reaches the layer runs on
+into `rules.ts`; those modules now read them for the running OS (`familyOf`, `traitsFor` in `os.ts`), with the
+signatures their callers use and their tests unchanged. Two reads follow Windows more closely than before:
+`systemTool` and `commandInterpreter` find `SystemRoot` and `ComSpec` in any case. The in-memory OS cannot import a layer module: a test that reaches the layer runs on
 Windows (§6.1, rule 4), and the point is that its tests do not. So the rules live where both can read them.
 
 ```ts
@@ -342,12 +343,13 @@ interface Os {
   files: OsFiles          // Node's sync names (readFileSync, renameSync, openSync/readSync, watch, cpSync, …) and
                           // .promises (node:fs/promises' names); stats with bigint dev/ino and mtimeNs
   paths: OsPaths          // path (win32 or posix), devNull, same, inside, key, fromFileUrl, toFileUrl
-  processes: OsProcesses  // start (a ChildProcess-like child, contained by default), run, runSync, runShell,
-                          // stop(child, grace) (the tree, then its leftovers), alive(pid), pid
+  processes: OsProcesses  // start (a ChildProcess-like child, contained by default; stdio pipe, ignore, inherit,
+                          // overlapped or an fd), run, runSync, runShell, stop(child, grace) (the tree, then its
+                          // leftovers), alive(pid), signal(pid, signal) (a process the host did not start), pid
   tools: OsTools          // find (whichTool), program (programPath), resolve (resolveCommand)
-  env: OsEnv              // get (any case on Windows), all, set, home, temp, execPath, username, cwd()
-  clock: OsClock          // now, setTimeout (unref'd), sleep: the waits that are about the OS
-  sqlite: OsSqlite        // open(path | ':memory:') — better-sqlite3's files and locks
+  env: OsEnv              // get (any case on Windows), all, set, home, temp (read when asked), execPath, username, cwd()
+  clock: OsClock          // now, setTimeout (unref'd), sleep (keeps the host alive while awaited)
+  sqlite: OsSqlite        // open(path | ':memory:'): better-sqlite3 on the real OS; in memory, the engine the test gives
   traits: OsTraits        // foldsPathCase, hasProcessGroups, locksRunningPrograms, locksWatchedFolders,
                           // cpKeepsLinks, clonesFiles, measuresWithDu, hasPs, modesGuardFiles, hasWindowsFileNames
 }
@@ -373,20 +375,29 @@ file refused", which is not what Node does: it opens files with share-delete):
 | a path through a file | `ENOENT` | `ENOTDIR` |
 | rename a file onto a folder; a folder onto a folder | `EPERM`; `EPERM` | `EISDIR`; replaced if empty, else `ENOTEMPTY` |
 | a copy onto a folder | `EPERM` | `EISDIR` |
-| the working folder of a process that has just started | held only once the process has set it up, a moment after `spawn` | — |
+| the working folder of a process that has just started | held only once the process has set it up, a moment after `spawn` (the in-memory OS holds it at once: stricter) | — |
+| a rename to the same name in another case | the name is stored as written | another name |
+| `mkdir` over a link; `mkdir -p` over one | `EEXIST`; followed: to a folder done, to nothing `ENOENT` | the same |
+| open a folder: to read; to write | allowed, it reads as `EISDIR`; allowed | allowed, it reads as `EISDIR`; `EISDIR` |
+| copy a tree into itself (`cpSync`) | `ERR_FS_CP_EINVAL` | the same |
 | a junction | absolute (a relative target read from its folder); a link to `lstat` and the listing; one to a file leads nowhere (`ENOENT`) | — |
 | `realpathSync.native` / `realpathSync` | the case stored / the case given | the same |
 | `child.kill()` / `taskkill /F` | exit `null, SIGTERM` / `1, null` | exit `null, SIGTERM` |
 
 `memoryOs` follows each column. `os/contract.test-helpers.ts` holds the cases with both answers: `os/memory.test.ts`
-checks the in-memory OS against both on any OS, and `os/real.test.ts` (the layer's own test, so it runs on Windows
+checks the in-memory OS against both on any OS (and a few cases more: a program's file while it runs, `EXDEV`, symlink
+rights), and `os/real.test.ts` (the layer's own test, so it runs on Windows
 too) checks the real OS and the in-memory one as its family against the column of the OS it runs on. A case the
 in-memory OS gets wrong fails there. `os/rules.test.ts` checks the path, case and PATH rules by property, over
 generated paths and names, for both families on Linux; `real.test.ts` holds `rules.ts`'s `file:` URLs to Node's own.
+The POSIX column is Linux's: macOS ignores case and refuses `unlink` of a folder with `EPERM`, so the two cases that
+show it are not run against a Mac (`linux: true`).
 
 Not modeled in memory: 8.3 short names, Windows' reserved names and trailing dots, alternate data streams, shares,
-`\\?\` paths, permissions beyond the mode bits (on Windows, the read-only bit), PTYs, and SQLite, which a test gives
-it (`memoryOs({ sqlite })`).
+`\\?\` paths, permissions beyond the mode bits (on Windows, the read-only bit), PTYs, the null device (a child's
+`'ignore'` is the way to discard), a write through a link that leads nowhere (refused, where the OS makes the
+target), and SQLite: a test gives the engine (`memoryOs({ sqlite })`), and the database's files are not in the
+in-memory tree, so what renames, copies or removes them is tested on the real OS.
 
 ### 7.2 What each area needs, and whether the interface has it
 
@@ -394,9 +405,9 @@ Surveyed from each area's shipped files before the interface was frozen (the par
 
 | Area | Needs | Covered by |
 |---|---|---|
-| 3a store and files | sync reads and writes, `mkdir -p` with a mode, `rm` with retries, a private file (`0600`, `wx`, a hard link to claim a name), `lstat`/`chmod` for the data folder, an append log (`openSync('a')`, `writeSync`, `fchmodSync`), `realpathSync.native`, `fs.watch`, `ps` for a lock's owner, SQLite (WAL, `BEGIN EXCLUSIVE` lock) | `files`, `processes.runSync`, `sqlite.open`, `traits.modesGuardFiles`, `env.home` |
+| 3a store and files | sync reads and writes, `mkdir -p` with a mode, `rm` with retries, a private file (`0600`, `wx`, a hard link to claim a name), `lstat`/`chmod` for the data folder, an append log (`openSync('a')`, `writeSync`, `fchmodSync`), `realpathSync.native`, `fs.watch`, `ps` for a lock's owner and a signal to a stray by pid, SQLite (WAL, `BEGIN EXCLUSIVE` lock) | `files`, `processes.runSync`/`signal`, `sqlite.open` (the database's own files only on the real OS, §7.1), `traits.modesGuardFiles`, `env.home` |
 | 3b worktrees | git run to its end with input, a 0600 output file, a timeout, a buffer cap and an abort that end the tree (`run`); `cp -c` (`run` + `traits.clonesFiles`), `cpSync` with `verbatimSymlinks`, a folder walk that sees junctions (`readdirSync` with types), `symlink(…, 'junction')` and its `EPERM` fallback, `realpath`, bigint `dev`/`ino`; the setup command through the shell; the one recursive watch on Windows | `processes.run`/`runShell`, `files`, `traits.cpKeepsLinks`/`locksWatchedFolders`, `tools.program` |
-| 3c adapters | a contained child with three pipes, `exit` and `error`, `kill`, a tree stop with a grace and the sweep of what is left; short runs with a timeout; config files read sync; the clock for graces | `processes.start`/`stop`/`run`, `tools.find`/`resolve`, `files`, `clock`. **Not in it**: the POSIX host watch (an extra fd and an `sh` wrapper, `endsWithHost`) and the keeper-held processes: those stay with the adapters' process code in the layer's `grouped-child.ts`/`kill-tree.ts` until 3f |
+| 3c adapters | a contained child with three pipes (or the host's own, `'inherit'`), `exit` and `error`, `kill`, `unref`, a tree stop with a grace and the sweep of what is left; short runs with a timeout; config files read sync; the clock for graces | `processes.start`/`stop`/`run`, `child.unref`, `tools.find`/`resolve`, `files`, `clock`. **Not in it**: the POSIX host watch (an extra fd and an `sh` wrapper, `endsWithHost`) and the keeper-held processes: those stay with the adapters' process code in the layer's `grouped-child.ts`/`kill-tree.ts` until 3f |
 | 3e apps runtime | the app server with stdio `['pipe','pipe','pipe','overlapped']`, its exit and close, a stop with a grace; sync file work (fingerprints, private JSON, staging, `cpSync` with timestamps, `utimesSync`, `EXDEV` across volumes), `fs.watch`, `process.kill(pid, 0)` | `processes.start` (`'overlapped'`), `stop`, `alive`, `files`, `clock` |
 | 3d links and ssh, 3f keeper | parked (#1626, #1615) | — |
 

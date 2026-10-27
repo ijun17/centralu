@@ -33,6 +33,7 @@ import type {
 } from './port.js'
 import {
   DEFAULT_PATHEXT,
+  commandInterpreter,
   envValue,
   fileUrlToPath,
   findOnPath,
@@ -43,7 +44,6 @@ import {
   programFor,
   resolveCommand,
   samePath,
-  systemTool,
   traitsOf,
   type OsFamily,
 } from './rules.js'
@@ -325,6 +325,16 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     return { parent: root, name: '', node: root, native: rootPath, given: rootPath }
   }
 
+  /** `lookup`, or null when a folder on the way (or the link's target) is missing */
+  const lookupOrNull = (p: string, syscall: string, follow = false): Found | null => {
+    try {
+      return lookup(p, follow, syscall)
+    } catch (e) {
+      if (errorCode(e) === 'ENOENT' || errorCode(e) === 'ENOTDIR') return null
+      throw e
+    }
+  }
+
   const existing = (p: string, follow: boolean, syscall: string): Node => {
     const f = lookup(p, follow, syscall)
     if (!f.node) throw fsError('ENOENT', syscall, p)
@@ -471,6 +481,16 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
   }
 
   function mkdir(p: string, o: MkdirOptions = {}) {
+    // A link in the name's place is taken (EEXIST), even one that leads nowhere; `mkdir -p` follows it, to a folder
+    // (done), to anything else (EEXIST) or nowhere (ENOENT), as Node does on Linux and Windows alike
+    const named = lookupOrNull(p, 'mkdir')
+    if (named?.node?.kind === 'link') {
+      if (!o.recursive) throw fsError('EEXIST', 'mkdir', p)
+      const to = lookupOrNull(p, 'mkdir', true)?.node
+      if (!to) throw fsError('ENOENT', 'mkdir', p)
+      if (to.kind === 'dir') return
+      throw fsError('EEXIST', 'mkdir', p)
+    }
     let f: Found
     try {
       f = lookup(p, true, 'mkdir')
@@ -516,7 +536,17 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     if (!a.node) throw fsError('ENOENT', 'rename', from, to)
     const b = lookup(to, false, 'rename')
     if (b.parent.dev !== a.parent.dev) throw fsError('EXDEV', 'rename', from, to)
-    if (a.node === b.node) return
+    if (a.node === b.node) {
+      // The same file under another case on Windows: its name is stored as now written
+      const written = P.basename(to)
+      if (windows && a.parent === b.parent && written !== a.name) {
+        a.parent.entries.delete(fold(a.name))
+        link(a.parent, written, a.node)
+        touch(a.parent)
+        notify(a.parent, a.name, 'rename')
+      }
+      return
+    }
     const src = a.node
     if (src.kind === 'dir' && inside(src, b.parent)) throw fsError('EINVAL', 'rename', from, to)
     if (windows && src.kind === 'dir') {
@@ -617,6 +647,8 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
 
   function cp(from: string, to: string, o: CopyTreeOptions = {}) {
     const src = existing(from, false, 'cp')
+    if (src.kind === 'dir' && isInside(P.resolve(from), P.resolve(to), family))
+      throw nodeError('ERR_FS_CP_EINVAL', `Invalid src or dest: cp returned EINVAL (cannot copy ${from} to a subdirectory of self ${to}) ${to}`, 'cp', to)
     const copy = (s: Node, sPath: string, dPath: string) => {
       if (s.kind === 'link' && !(windows && s.junction)) {
         const target = o.verbatimSymlinks || P.isAbsolute(s.target) ? s.target : P.resolve(P.dirname(sPath), s.target)
@@ -660,7 +692,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
 
   // ---- descriptors ----
   const constants = windows ? WINDOWS_CONSTANTS : POSIX_CONSTANTS
-  type Fd = { node: FileNode; read: boolean; write: boolean; append: boolean; pos: number; closed: boolean }
+  type Fd = { node: FileNode | DirNode; read: boolean; write: boolean; append: boolean; pos: number; closed: boolean }
   const fds = new Map<number, Fd>()
   let fdSeq = 3
   const FLAGS: Record<string, number> = {
@@ -676,7 +708,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     if (f === undefined) throw fsError('EINVAL', 'open', p)
     const access = f & 3
     const noFollow = constants.O_NOFOLLOW !== 0 && (f & constants.O_NOFOLLOW) !== 0
-    let node: FileNode
+    let node: FileNode | DirNode
     if (f & constants.O_CREAT) {
       node = fileForWrite(p, 'open', { exclusive: (f & constants.O_EXCL) !== 0, mode, noFollow })
       if (f & constants.O_TRUNC) node.data = Buffer.alloc(0)
@@ -684,15 +716,14 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
       const found = lookup(p, !noFollow, 'open')
       if (!found.node) throw fsError('ENOENT', 'open', p)
       if (found.node.kind === 'link') throw fsError('ELOOP', 'open', p)
-      if (found.node.kind === 'dir') {
-        if (access !== constants.O_RDONLY) throw fsError('EISDIR', 'open', p)
-        throw fsError(windows ? 'EISDIR' : 'EISDIR', 'read', p)
-      }
+      // A folder opens (to fsync it); for writing too on Windows, not on POSIX. It reads as EISDIR
+      if (found.node.kind === 'dir' && !windows && access !== constants.O_RDONLY) throw fsError('EISDIR', 'open', p)
       node = found.node
     }
     const fd = fdSeq++
     fds.set(fd, { node, read: access !== constants.O_WRONLY, write: access !== constants.O_RDONLY, append: (f & constants.O_APPEND) !== 0, pos: 0, closed: false })
-    hold(openFiles, node)
+    // An open folder holds nothing on Windows: it is opened to share its deletion too
+    if (node.kind === 'file') hold(openFiles, node)
     return fd
   }
   const fdOf = (fd: number, syscall: string): Fd => {
@@ -703,6 +734,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
   function readFd(fd: number, buffer: Uint8Array, offset: number, length: number, position: number | null): number {
     const d = fdOf(fd, 'read')
     if (!d.read) throw fsError('EBADF', 'read')
+    if (d.node.kind !== 'file') throw fsError('EISDIR', 'read')
     const at = position ?? d.pos
     const n = Math.max(0, Math.min(length, d.node.data.length - at))
     d.node.data.copy(buffer, offset, at, at + n)
@@ -712,6 +744,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
   function writeFd(fd: number, data: string | Uint8Array): number {
     const d = fdOf(fd, 'write')
     if (!d.write) throw fsError('EBADF', 'write')
+    if (d.node.kind !== 'file') throw fsError('EISDIR', 'write')
     const b = bytes(data)
     const at = d.append ? d.node.data.length : d.pos
     const end = at + b.length
@@ -727,14 +760,14 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     const d = fdOf(fd, 'close')
     d.closed = true
     fds.delete(fd)
-    release(openFiles, d.node)
+    if (d.node.kind === 'file') release(openFiles, d.node)
   }
   /** Another descriptor on the same file (a child's copy of one it was given) */
   function dupFd(fd: number): number {
     const d = fdOf(fd, 'dup')
     const copy = fdSeq++
     fds.set(copy, { ...d })
-    hold(openFiles, d.node)
+    if (d.node.kind === 'file') hold(openFiles, d.node)
     return copy
   }
 
@@ -946,7 +979,9 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     all: (): Env => Object.fromEntries(vars),
     set: setVar,
     home: HOME,
-    temp: windows ? `${HOME}\\AppData\\Local\\Temp` : '/tmp',
+    get temp() {
+      return envValue(Object.fromEntries(vars), windows ? 'TEMP' : 'TMPDIR', family) ?? (windows ? `${HOME}\\AppData\\Local\\Temp` : '/tmp')
+    },
     execPath: windows ? 'C:\\Program Files\\nodejs\\node.exe' : '/usr/local/bin/node',
     username: 'person',
     cwd: () => cwd,
@@ -1033,6 +1068,9 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
       this.killed = true
       deliver(p, signal)
       return true
+    }
+    unref(): void {
+      // Nothing keeps a test's process alive but the test
     }
   }
 
@@ -1237,7 +1275,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     return { code: r.code ?? 0, signal: null, stdout: r.stdout ?? '', stderr: r.stderr ?? '' }
   }
 
-  const shell = (line: string): [string, string[]] => (windows ? [systemTool(['cmd.exe'], env.all()), ['/d', '/s', '/c', line]] : ['/bin/sh', ['-c', line]])
+  const shell = (line: string): [string, string[]] => (windows ? [commandInterpreter(env.all()), ['/d', '/s', '/c', line]] : ['/bin/sh', ['-c', line]])
 
   const processes: OsProcesses = {
     start: (command, args, o = {}) => startProcess(command, args, o, HOST_PID, HOST_PID),
@@ -1249,6 +1287,12 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     },
     stop,
     alive: (pid) => pid === HOST_PID || procs.get(pid)?.row.alive === true,
+    signal: (pid, signal) => {
+      const p = procs.get(pid)
+      if (!p?.row.alive) return false
+      deliver(p, signal)
+      return true
+    },
     pid: HOST_PID,
   }
 

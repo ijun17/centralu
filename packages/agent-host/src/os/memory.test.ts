@@ -3,6 +3,7 @@ import { CONTRACT, outcome, ready } from './contract.test-helpers.js'
 import { memoryOs, type MemoryOs, type ProgramContext } from './memory.js'
 import { forAll, name, recase } from './property.test-helpers.js'
 import type { OsFamily } from './rules.js'
+import { CLOSE_AFTER_EXIT_MS, RUN_STOP_GRACE_MS } from './run.js'
 
 /**
  * The in-memory OS (#1599, docs/plans/os-layer.md §7.1) answering as each family does, on whatever OS this runs: the
@@ -233,6 +234,38 @@ describe('processes in memory', () => {
     os.env.set('PATH', `${os.env.get('PATH')};${dir}`)
     expect(os.tools.find('codex')).toBe(`${dir}\\codex.cmd`)
     expect(os.tools.resolve('codex')).toEqual({ command: os.env.execPath, args: [`${dir}\\node_modules\\@openai\\codex\\bin\\codex.js`] })
+  })
+
+  for (const family of FAMILIES) {
+    it(`${family}: a signal by pid reaches a live process, and answers false for one that is gone`, async () => {
+      const os = memoryOs({ as: family })
+      os.programs.add(os.env.execPath, waits)
+      const child = os.processes.start(os.env.execPath, [])
+      const pid = child.pid ?? 0
+      expect(os.processes.signal(pid, 'SIGTERM')).toBe(true)
+      expect(await child.exited).toMatchObject({ signal: 'SIGTERM' })
+      expect(os.processes.signal(pid, 'SIGTERM')).toBe(false)
+    })
+  }
+
+  it('the temporary folder is read from the environment as set now', () => {
+    const os = memoryOs({ as: 'posix' })
+    expect(os.env.temp).toBe('/tmp')
+    os.env.set('TMPDIR', '/var/tmp')
+    expect(os.env.temp).toBe('/var/tmp')
+  })
+
+  it('maxBuffer counts stdout and stderr each on its own, and ends the run past it', async () => {
+    const os = memoryOs({ as: 'posix' })
+    os.programs.add('/usr/bin/both', (ctx) => {
+      ctx.stdout.write('o'.repeat(60))
+      ctx.stderr.write('e'.repeat(60))
+    })
+    expect((await os.processes.run('both', [], { maxBuffer: 100 })).ended).toBeUndefined()
+    os.programs.add('/usr/bin/much', (ctx) => (ctx.stdout.write('o'.repeat(101)), waits(ctx)))
+    const run = os.processes.run('much', [], { maxBuffer: 100 })
+    await os.clock.advance(RUN_STOP_GRACE_MS + CLOSE_AFTER_EXIT_MS)
+    expect((await run).ended).toBe('overflow')
   })
 
   it('runSync answers a program that answers at once, and runShell goes through the shell', async () => {

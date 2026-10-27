@@ -24,6 +24,11 @@ export type Contract = {
   want: Record<OsFamily, unknown>
   /** Needs the right to make a symlink, which a Windows account without Developer Mode lacks */
   symlinks?: boolean
+  /**
+   * The POSIX answer is Linux's, and macOS answers otherwise: its volume ignores case, and `unlink` of a folder is
+   * `EPERM` there. `real.test.ts` does not hold macOS to it; the in-memory OS follows Linux
+   */
+  linux?: boolean
   run(os: Os, root: string, ctx: ContractContext): unknown
 }
 
@@ -83,6 +88,7 @@ export const CONTRACT: Contract[] = [
   },
   {
     name: 'removing: each call on the wrong kind',
+    linux: true,
     want: {
       windows: [err('EPERM'), err('ENOENT'), err('ENOTEMPTY'), err('ERR_FS_EISDIR'), err('ENOENT'), 'ok', 'ok'],
       posix: [err('EISDIR'), err('ENOTDIR'), err('ENOTEMPTY'), err('ERR_FS_EISDIR'), err('ENOENT'), 'ok', 'ok'],
@@ -154,6 +160,7 @@ export const CONTRACT: Contract[] = [
   },
   {
     name: 'names in another case: one file on Windows, none on Linux; each realpath spells it its way',
+    linux: true,
     want: {
       windows: { read: 'x', native: 'Name.TXT', given: 'name.txt', list: ['Name.TXT'] },
       posix: { read: err('ENOENT'), native: err('ENOENT'), given: err('ENOENT'), list: ['Name.TXT'] },
@@ -319,6 +326,65 @@ export const CONTRACT: Contract[] = [
       await p.mkdir(join(root, 'd'))
       await p.writeFile(join(root, 'd', 'f'), 'a')
       return { text: await p.readFile(join(root, 'd', 'f'), 'utf8'), list: await p.readdir(join(root, 'd')), missing: await outcome(() => p.stat(join(root, 'nope'))) }
+    },
+  },
+  {
+    name: 'a rename to the same name in another case: the name is stored as written',
+    want: both({ list: ['name.txt'], native: 'name.txt' }),
+    run(os, root) {
+      const { join, basename } = os.paths.path
+      os.files.writeFileSync(join(root, 'Name.TXT'), 'x')
+      os.files.renameSync(join(root, 'Name.TXT'), join(root, 'name.txt'))
+      return { list: os.files.readdirSync(root), native: basename(os.files.realpathNativeSync(join(root, 'name.txt'))) }
+    },
+  },
+  {
+    name: 'mkdir over a link: taken; with -p, followed to a folder, or nowhere',
+    want: both({ dangling: err('EEXIST'), danglingP: err('ENOENT'), toDir: err('EEXIST'), toDirP: 'ok' }),
+    async run(os, root) {
+      const { join } = os.paths.path
+      const f = os.files
+      f.symlinkSync(join(root, 'gone'), join(root, 'l'), 'junction')
+      f.mkdirSync(join(root, 't'))
+      f.symlinkSync(join(root, 't'), join(root, 'lt'), 'junction')
+      const ok = (fn: () => unknown) => outcome(() => (fn(), 'ok'))
+      return {
+        dangling: await ok(() => f.mkdirSync(join(root, 'l'))),
+        danglingP: await ok(() => f.mkdirSync(join(root, 'l'), { recursive: true })),
+        toDir: await ok(() => f.mkdirSync(join(root, 'lt'))),
+        toDirP: await ok(() => f.mkdirSync(join(root, 'lt'), { recursive: true })),
+      }
+    },
+  },
+  {
+    name: 'a folder opened: for reading on both, for writing on Windows only; it reads as EISDIR',
+    want: {
+      windows: { read: err('EISDIR'), isDir: true, forWrite: 'ok', renamedOpen: 'ok' },
+      posix: { read: err('EISDIR'), isDir: true, forWrite: err('EISDIR'), renamedOpen: 'ok' },
+    },
+    async run(os, root) {
+      const { join } = os.paths.path
+      const f = os.files
+      f.mkdirSync(join(root, 'd'))
+      const fd = f.openSync(join(root, 'd'), 'r')
+      const result = {
+        read: await outcome(() => f.readSync(fd, Buffer.alloc(4), 0, 4, null)),
+        isDir: f.fstatSync(fd).isDirectory(),
+        forWrite: await outcome(() => (f.closeSync(f.openSync(join(root, 'd'), 'r+')), 'ok')),
+        renamedOpen: await outcome(() => (f.renameSync(join(root, 'd'), join(root, 'e')), 'ok')),
+      }
+      f.closeSync(fd)
+      return result
+    },
+  },
+  {
+    name: 'a tree copied into itself is refused',
+    want: both({ copy: err('ERR_FS_CP_EINVAL') }),
+    async run(os, root) {
+      const { join } = os.paths.path
+      os.files.mkdirSync(join(root, 's'))
+      os.files.writeFileSync(join(root, 's', 'f'), '')
+      return { copy: await outcome(() => os.files.cpSync(join(root, 's'), join(root, 's', 'in'), { recursive: true })) }
     },
   },
   {

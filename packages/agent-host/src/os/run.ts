@@ -30,7 +30,6 @@ export function runChild(
   return new Promise<RunResult>((resolve, reject) => {
     const stdout: Buffer[] = []
     const stderr: Buffer[] = []
-    let bytes = 0
     let ended: RunResult['ended']
     let settled = false
     const timers: Array<{ cancel(): void }> = []
@@ -47,11 +46,16 @@ export function runChild(
       options.signal?.removeEventListener('abort', onAbort)
       finish()
     }
-    const collect = (into: Buffer[]) => (chunk: Buffer | string) => {
-      const b = typeof chunk === 'string' ? Buffer.from(chunk) : chunk
-      into.push(b)
-      bytes += b.length
-      if (options.maxBuffer !== undefined && bytes > options.maxBuffer) stopFor('overflow')
+    // Each stream counted on its own, as `maxBuffer` says; past it, the rest is dropped while the tree ends
+    const collect = (into: Buffer[]) => {
+      let bytes = 0
+      return (chunk: Buffer | string) => {
+        if (ended === 'overflow') return
+        const b = typeof chunk === 'string' ? Buffer.from(chunk) : chunk
+        into.push(b)
+        bytes += b.length
+        if (options.maxBuffer !== undefined && bytes > options.maxBuffer) stopFor('overflow')
+      }
     }
     child.stdout?.on('data', collect(stdout))
     child.stderr?.on('data', collect(stderr))

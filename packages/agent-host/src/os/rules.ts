@@ -323,7 +323,7 @@ export function nodeShimEntry(text: string, dir: string, deps: Pick<LaunchDeps, 
   const prefixJs = set('NPM_PREFIX_JS')
   if (!prefixJs || !deps.runJs) return base
   const prefix = deps.runJs(win32.resolve(dir, prefixJs))?.trim().split(/\r?\n/).pop()?.trim()
-  if (!prefix) return base
+  if (!prefix || !win32.isAbsolute(prefix)) return base
   const global = win32.join(prefix, 'node_modules', 'npm', 'bin', win32.basename(base))
   return deps.exists(global) ? global : base
 }
