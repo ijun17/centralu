@@ -1,4 +1,4 @@
-import type { CommandInfo } from '@cc/protocol'
+import type { CommandInfo } from '@cc/protocol/client'
 import type { Loaded } from '../../app/useLoad.js'
 
 /**

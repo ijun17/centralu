@@ -42,7 +42,10 @@ export const MailThreadRow = z.object({
   createdAt: z.number(),
   updatedAt: z.number(),
   /** The latest message that is not an event: who, what kind, its first words */
-  last: z.object({ sender: MailParty, kind: z.string(), preview: z.string(), at: z.number() }).nullable().default(null),
+  last: z
+    .object({ sender: MailParty, kind: z.string(), preview: z.string(), at: z.number() })
+    .nullable()
+    .default(null),
 })
 export type MailThreadRow = z.infer<typeof MailThreadRow>
 
@@ -73,7 +76,11 @@ export const MailMessage = z.object({
   facts: z.record(z.string(), z.unknown()).default({}),
   createdAt: z.number(),
   /** For the person's own messages: how far each receiver has taken them */
-  receipts: z.array(z.object({ recipient: MailParty, delivered: z.boolean(), read: z.boolean(), handled: z.boolean() })).optional(),
+  receipts: z
+    .array(
+      z.object({ recipient: MailParty, delivered: z.boolean(), read: z.boolean(), handled: z.boolean() }),
+    )
+    .optional(),
 })
 export type MailMessage = z.infer<typeof MailMessage>
 

@@ -1,4 +1,4 @@
-import type { Interruption, SessionState } from '@cc/protocol'
+import type { Interruption, SessionState } from '@cc/protocol/client'
 import { URGENCY, isWaiting } from '../session/state-machine.js'
 import { isUnread, type ReadTracked } from '../unread/unread.js'
 

@@ -81,7 +81,10 @@ export const ProjectInfo = z.object({
    * setup (the order Vibe Kanban validated). Null means nothing runs — it is never forced.
    * This lives in our own database, not the repo (#50: nothing is ever written into the repo).
    */
-  worktreeSetup: z.object({ command: z.string(), copyFiles: z.array(z.string()) }).nullable().default(null),
+  worktreeSetup: z
+    .object({ command: z.string(), copyFiles: z.array(z.string()) })
+    .nullable()
+    .default(null),
   /**
    * The person's standing instructions for the agents start_agent starts in this project (#1161 item 2), appended to
    * every such task: the rules a parent otherwise repeats in each brief (make your own worktree, stack the pull

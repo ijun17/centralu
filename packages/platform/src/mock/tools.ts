@@ -1,4 +1,4 @@
-import type { AdapterCapabilities, ToolName, ToolStatus } from '@cc/protocol'
+import type { AdapterCapabilities, ToolName, ToolStatus } from '@cc/protocol/client'
 import type { AgentPort, MachineRef } from '../ports/index.js'
 
 /** The agent tools the mock knows: what is detected, their models and capabilities, and the slash command list */

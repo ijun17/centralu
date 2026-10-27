@@ -32,7 +32,10 @@ export function parseCliVersion(text: string): string | null {
  * never "older": a session whose version is not known is not restarted on a guess, and a header
  * says nothing it cannot back.
  */
-export function runsOlderCli(running: string | null | undefined, installed: string | null | undefined): boolean {
+export function runsOlderCli(
+  running: string | null | undefined,
+  installed: string | null | undefined,
+): boolean {
   if (!running || !installed) return false
   return isNewerVersion(installed, running)
 }

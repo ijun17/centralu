@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useDismiss } from '../../components/useDismiss.js'
 import { ChevronIcon } from '../../components/icons.jsx'
-import { autoCompactOf, launchRefusal, type AdapterCapabilities, type ModelOption, type PermissionPreset, type ToolName } from '@cc/protocol'
+import { autoCompactOf, launchRefusal, type AdapterCapabilities, type ModelOption, type PermissionPreset, type ToolName } from '@cc/protocol/client'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useLoad } from '../../app/useLoad.js'
 import { useStore } from '../../store/store.js'

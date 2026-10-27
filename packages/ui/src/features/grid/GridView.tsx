@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent } from 'react'
-import type { GridPanel, GridSpan } from '@cc/protocol'
+import type { GridPanel, GridSpan } from '@cc/protocol/client'
 import {
   ONE_CELL,
   appKeyOf,

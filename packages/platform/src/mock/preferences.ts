@@ -1,5 +1,5 @@
-import type { UiPreferences, UiPreferencesPatch } from '@cc/protocol'
-import { isRecord, parseUiPreferences, readAutoCompact, readNotifyPolicy, textSizeFromLegacyStep } from '@cc/protocol'
+import type { UiPreferences, UiPreferencesPatch } from '@cc/protocol/client'
+import { isRecord, parseUiPreferences, readAutoCompact, readNotifyPolicy, textSizeFromLegacyStep } from '@cc/protocol/client'
 import type { PreferencesPort, WorkspaceSnapshot } from '../ports/index.js'
 import type { Emit } from './event-bus.js'
 

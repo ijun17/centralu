@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { SavedCommand } from '@cc/protocol'
+import type { SavedCommand } from '@cc/protocol/client'
 import {
   ChevronIcon,
   CloseIcon,

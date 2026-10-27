@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { ProjectInfo } from '@cc/protocol'
+import type { ProjectInfo } from '@cc/protocol/client'
 import type { SessionSummary } from '@cc/core'
 import { externalAppKey, useStore } from '../../../store/store.js'
 import { useIsProjectSelected } from '../../../store/selectors.js'

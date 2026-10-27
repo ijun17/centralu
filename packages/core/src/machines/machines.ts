@@ -1,4 +1,4 @@
-import { releaseOf, turnsRunning, type HostActivity, type MachineInfo, type MachineStatus } from '@cc/protocol'
+import { releaseOf, turnsRunning, type HostActivity, type MachineInfo, type MachineStatus } from '@cc/protocol/client'
 
 /**
  * Linked machines on the screen (#82, docs/plans/remote-hub.md): which rows are away, what a link's

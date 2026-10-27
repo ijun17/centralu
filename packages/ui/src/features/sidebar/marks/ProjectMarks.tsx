@@ -1,4 +1,4 @@
-import type { ProjectInfo } from '@cc/protocol'
+import type { ProjectInfo } from '@cc/protocol/client'
 import { Tooltip } from '../../../components/primitives.jsx'
 
 /**

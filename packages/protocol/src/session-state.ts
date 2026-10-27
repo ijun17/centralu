@@ -104,7 +104,8 @@ export function transition(from: SessionState, event: NormalizedEvent): Transiti
    * never see it and the agent would be blocked forever — the table filters only inferred transitions such
    * as state_change.
    */
-  if (event.type === 'approval_request' || event.type === 'question_request') return { state: to, illegal: false }
+  if (event.type === 'approval_request' || event.type === 'question_request')
+    return { state: to, illegal: false }
   /*
    * A resolve only means "back to work" for a session that was blocked on a card. The host sends resolves late:
    * a handle being disposed (a swap, a crash) releases every request still in its map, and the manager passes
@@ -113,7 +114,10 @@ export function transition(from: SessionState, event: NormalizedEvent): Transiti
    * to flip the session to working with nothing left to ever end it, and in error it also cleared the banner.
    * Outside waiting_approval it is not a state change, and not illegal either: the reducer still removes the card.
    */
-  if ((event.type === 'approval_resolved' || event.type === 'question_resolved') && from !== 'waiting_approval') {
+  if (
+    (event.type === 'approval_resolved' || event.type === 'question_resolved') &&
+    from !== 'waiting_approval'
+  ) {
     return { state: from, illegal: false }
   }
   /*
@@ -152,7 +156,11 @@ export type SessionStateStep = {
  * One event's effect on a session's state — the part of the reducer both sides run.
  * `now` is taken as an argument because recording when a wait started has to be testable.
  */
-export function stepSessionState(s: SessionStateFacts, event: NormalizedEvent, now: number): SessionStateStep {
+export function stepSessionState(
+  s: SessionStateFacts,
+  event: NormalizedEvent,
+  now: number,
+): SessionStateStep {
   /*
    * Answering one card while another is still open (an approval and a question, or two questions) leaves the agent
    * blocked on the other: the session stays waiting_approval and keeps that card. Taken as a transition to working,
@@ -160,11 +168,17 @@ export function stepSessionState(s: SessionStateFacts, event: NormalizedEvent, n
    * answered, and the agent sat waiting on a question nobody could see. The host does the same (manager.ts
    * `respondApproval`: working again only when no card is left).
    */
-  const { state, illegal } = otherCardOpen(s, event) ? { state: s.state, illegal: false } : transition(s.state, event)
+  const { state, illegal } = otherCardOpen(s, event)
+    ? { state: s.state, illegal: false }
+    : transition(s.state, event)
   const changed = state !== s.state
 
   // Record when the wait began (what the inbox order and the elapsed time are based on)
-  const waitingSince = isWaiting(state) ? (isWaiting(s.state) && s.waitingSince != null ? s.waitingSince : now) : null
+  const waitingSince = isWaiting(state)
+    ? isWaiting(s.state) && s.waitingSince != null
+      ? s.waitingSince
+      : now
+    : null
 
   /*
    * When the session recovers, the banners come down with it.
@@ -189,7 +203,14 @@ export function stepSessionState(s: SessionStateFacts, event: NormalizedEvent, n
     !illegal &&
     changed &&
     (state === 'error' || recovered || (s.state === 'waiting_approval' && state === 'waiting_input'))
-  return { state, illegal, changed, waitingSince: illegal ? s.waitingSince : waitingSince, recovered, cardsDead }
+  return {
+    state,
+    illegal,
+    changed,
+    waitingSince: illegal ? s.waitingSince : waitingSince,
+    recovered,
+    cardsDead,
+  }
 }
 
 /**
@@ -264,7 +285,13 @@ export type ContextReading = SessionInfo['context']
 export function nextContext(context: ContextReading, e: NormalizedEvent): ContextReading {
   switch (e.type) {
     case 'context_update':
-      return { used: e.used, window: e.window, exactness: e.exactness, ...(e.capped ? { capped: true } : {}), ...(e.compactAt !== undefined ? { compactAt: e.compactAt } : {}) }
+      return {
+        used: e.used,
+        window: e.window,
+        exactness: e.exactness,
+        ...(e.capped ? { capped: true } : {}),
+        ...(e.compactAt !== undefined ? { compactAt: e.compactAt } : {}),
+      }
     case 'conversation_reset':
       return null
     case 'compaction':
@@ -295,7 +322,10 @@ export type ContextShare = {
 export function contextShare(context: ContextReading): ContextShare | null {
   if (!context || !(context.window > 0)) return null
   const capped = context.capped === true
-  const compactAt = context.compactAt !== undefined && context.compactAt > 0 ? { tokens: context.compactAt, fraction: capped ? null : context.compactAt / context.window } : null
+  const compactAt =
+    context.compactAt !== undefined && context.compactAt > 0
+      ? { tokens: context.compactAt, fraction: capped ? null : context.compactAt / context.window }
+      : null
   return { fraction: context.used / context.window, window: context.window, capped, compactAt }
 }
 
@@ -303,7 +333,9 @@ export function contextShare(context: ContextReading): ContextShare | null {
  * Blocked on a question and nothing else. The state says waiting_approval for both kinds of card, as the window shows
  * them; a text read by an agent names the card (list_sessions, a busy session, a handover).
  */
-export function blockedOnQuestion(s: Pick<SessionInfo, 'state' | 'pendingApproval' | 'pendingQuestions'>): boolean {
+export function blockedOnQuestion(
+  s: Pick<SessionInfo, 'state' | 'pendingApproval' | 'pendingQuestions'>,
+): boolean {
   return s.state === 'waiting_approval' && !s.pendingApproval && s.pendingQuestions.length > 0
 }
 
@@ -311,7 +343,10 @@ export function blockedOnQuestion(s: Pick<SessionInfo, 'state' | 'pendingApprova
 function otherCardOpen(s: SessionStateFacts, event: NormalizedEvent): boolean {
   if (s.state !== 'waiting_approval') return false
   if (event.type === 'approval_resolved') {
-    return (s.pendingApproval !== null && s.pendingApproval.requestId !== event.requestId) || s.pendingQuestions.length > 0
+    return (
+      (s.pendingApproval !== null && s.pendingApproval.requestId !== event.requestId) ||
+      s.pendingQuestions.length > 0
+    )
   }
   if (event.type === 'question_resolved') {
     return s.pendingApproval !== null || s.pendingQuestions.some((q) => q.requestId !== event.requestId)

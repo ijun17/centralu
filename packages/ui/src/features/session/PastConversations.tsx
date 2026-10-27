@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { ExternalSession } from '@cc/protocol'
+import type { ExternalSession } from '@cc/protocol/client'
 import { useStore } from '../../store/store.js'
 import { useLoad } from '../../app/useLoad.js'
 import { RelativeAge } from '../../components/RelativeAge.jsx'

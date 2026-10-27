@@ -12,7 +12,7 @@ import type {
   ExternalAppInfo,
   SessionInfo,
   ToolName,
-} from '@cc/protocol'
+} from '@cc/protocol/client'
 import type { MachineRef } from './common.js'
 
 /**

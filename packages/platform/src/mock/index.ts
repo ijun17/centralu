@@ -1,5 +1,5 @@
 import { defaultCapabilities } from '../capabilities.js'
-import { changedFileCount, type NormalizedEvent } from '@cc/protocol'
+import { changedFileCount, type NormalizedEvent } from '@cc/protocol/client'
 import type { AgentPort, Platform } from '../ports/index.js'
 import { AgentVersionsMock } from './agent-versions.js'
 import { AppBuilderMock } from './app-builder.js'

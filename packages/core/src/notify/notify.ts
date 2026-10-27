@@ -1,4 +1,4 @@
-import { DEFAULT_NOTIFY_POLICY, readNotifyPolicy, type NotifyPolicy, type SessionState } from '@cc/protocol'
+import { DEFAULT_NOTIFY_POLICY, readNotifyPolicy, type NotifyPolicy, type SessionState } from '@cc/protocol/client'
 
 /**
  * Notification policy (FR-12 display layer ④).

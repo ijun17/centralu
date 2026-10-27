@@ -9,7 +9,7 @@ import {
   type RpcMethodName,
   type RpcParams,
   type RpcResult,
-} from '@cc/protocol'
+} from '@cc/protocol/client'
 import type { ConnectionState, Unsubscribe } from '../ports/index.js'
 import { deliver } from '../deliver.js'
 

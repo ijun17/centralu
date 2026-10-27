@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { StoredMessage, SubagentStepsHeld, TrashedRun, TrashedSession, TrashedSubagentSteps } from '@cc/protocol'
+import type { StoredMessage, SubagentStepsHeld, TrashedRun, TrashedSession, TrashedSubagentSteps } from '@cc/protocol/client'
 import { messagesToChat, useStore } from '../../store/store.js'
 import { mergeBySeq } from '../../store/historyPages.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'

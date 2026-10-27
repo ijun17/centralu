@@ -1,4 +1,4 @@
-import type { MachineStatus } from '@cc/protocol'
+import type { MachineStatus } from '@cc/protocol/client'
 import { MACHINE_STATUS_LABEL } from '@cc/core'
 
 /**

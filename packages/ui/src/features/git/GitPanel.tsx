@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import type { GitBranch, GitFileStatus } from '@cc/protocol'
+import type { GitBranch, GitFileStatus } from '@cc/protocol/client'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useLoad } from '../../app/useLoad.js'
 import { LoadFailed } from '../../components/LoadFailed.jsx'

@@ -1,4 +1,4 @@
-import type { MessageImage } from '@cc/protocol'
+import type { MessageImage } from '@cc/protocol/client'
 
 /**
  * Local images in an agent's reply: which destinations are files, and the answers the host gave for them.

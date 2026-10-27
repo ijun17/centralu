@@ -13,7 +13,7 @@ import type {
   UpdateSettingsParams,
   GitSource,
   UsageHistoryBy,
-} from '@cc/protocol'
+} from '@cc/protocol/client'
 import type {
   AgentPort,
   AlertKind,
@@ -26,7 +26,7 @@ import type {
   SystemPort,
   Unsubscribe,
 } from '../ports/index.js'
-import { SUBAGENT_STEPS_PAGE } from '@cc/protocol'
+import { SUBAGENT_STEPS_PAGE } from '@cc/protocol/client'
 import { isAppToolResult } from '../app-tool-result.js'
 import { RpcClient } from './rpc-client.js'
 

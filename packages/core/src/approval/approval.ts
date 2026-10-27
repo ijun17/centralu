@@ -1,4 +1,4 @@
-import { NO_PATH, alwaysAllowKey, matchesAllowRule, oneLineText, type ApprovalDetail, type ApprovalScope } from '@cc/protocol'
+import { NO_PATH, alwaysAllowKey, matchesAllowRule, oneLineText, type ApprovalDetail, type ApprovalScope } from '@cc/protocol/client'
 
 /**
  * Approval policy (FR-3). "Don't block it, make it visible" — approving in place is not forbidden; only the

@@ -1,4 +1,4 @@
-import type { ProjectInfo } from '@cc/protocol'
+import type { ProjectInfo } from '@cc/protocol/client'
 import { useStore } from '../../../store/store.js'
 import { TrustCard } from '../../project/TrustCard.jsx'
 

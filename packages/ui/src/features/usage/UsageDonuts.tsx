@@ -1,7 +1,7 @@
 import { usePresence } from '../../components/presence.js'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useDismiss } from '../../components/useDismiss.js'
-import type { CacheStats, MachineInfo, ToolName, UsageSnapshot } from '@cc/protocol'
+import type { CacheStats, MachineInfo, ToolName, UsageSnapshot } from '@cc/protocol/client'
 import { cacheTooltipLine } from '@cc/core'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore, usageTools } from '../../store/store.js'

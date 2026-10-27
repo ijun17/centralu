@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { backgroundCount } from '@cc/core'
-import type { BackgroundTask } from '@cc/protocol'
+import type { BackgroundTask } from '@cc/protocol/client'
 import { useAnchoredPlacement } from '../../components/anchored.js'
 import { useDismiss } from '../../components/useDismiss.js'
 import { BackgroundIcon, StopIcon } from '../../components/icons.jsx'

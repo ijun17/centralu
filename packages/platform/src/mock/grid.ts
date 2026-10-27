@@ -1,4 +1,4 @@
-import { appKeyOf, GridPanel } from '@cc/protocol'
+import { appKeyOf, GridPanel } from '@cc/protocol/client'
 import type { AgentPort } from '../ports/index.js'
 import type { SessionStore } from './session-store.js'
 import type { ProjectStore } from './project-store.js'

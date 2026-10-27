@@ -1,4 +1,4 @@
-import { wireBaseName, wireJoin, wireParent, wireSegments } from '@cc/protocol'
+import { wireBaseName, wireJoin, wireParent, wireSegments } from '@cc/protocol/client'
 import type { FsEntry, FsFile } from '../ports/index.js'
 import { mockError } from './mock-error.js'
 

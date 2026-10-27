@@ -1,4 +1,4 @@
-import type { ProjectInfo } from '@cc/protocol'
+import type { ProjectInfo } from '@cc/protocol/client'
 
 /** What the host says deleting the project may do to its folder (`projects.deleteOutlook`, #1301) */
 export type DeleteOutlook = 'stays' | 'may_move' | 'around_may_move' | 'unsure'

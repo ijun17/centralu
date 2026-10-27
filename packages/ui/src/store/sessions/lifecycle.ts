@@ -1,5 +1,5 @@
 import { APP_ARRIVAL_ID_PREFIX, defaultPresetFor, isAppArrivalId, sessionPanelId, withPanel } from '@cc/core'
-import { errorMessage, type NormalizedEvent, type ToolDefaults, type ToolName } from '@cc/protocol'
+import { errorMessage, type NormalizedEvent, type ToolDefaults, type ToolName } from '@cc/protocol/client'
 import { initialSession, markRead as markReadPure, rename as renamePure } from '@cc/core'
 import type { Platform } from '@cc/platform/ports'
 import type { AppState, StoreGet, StoreSet } from '../state.js'

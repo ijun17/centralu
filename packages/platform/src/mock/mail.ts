@@ -1,4 +1,4 @@
-import type { MailHeldRow, MailMessage, MailParty, MailThreadRow, MailThreadView } from '@cc/protocol'
+import type { MailHeldRow, MailMessage, MailParty, MailThreadRow, MailThreadView } from '@cc/protocol/client'
 import type { MailPort } from '../ports/index.js'
 import type { MockClock } from './clock.js'
 import type { Emit } from './event-bus.js'

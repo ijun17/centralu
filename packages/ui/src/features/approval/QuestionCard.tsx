@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import type { Question, QuestionAnswer } from '@cc/protocol'
+import type { Question, QuestionAnswer } from '@cc/protocol/client'
 import { useStore } from '../../store/store.js'
 import { Pill } from '../../components/Pill.jsx'
 

@@ -1,4 +1,4 @@
-import type { HostRequest } from '@cc/protocol'
+import type { HostRequest } from '@cc/protocol/client'
 import type { HostRequestsPort } from '../ports/index.js'
 import type { MockClock } from './clock.js'
 import type { Emit } from './event-bus.js'

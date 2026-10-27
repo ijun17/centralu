@@ -1,4 +1,4 @@
-import { GRID_SPAN_MAX, type GridSpan } from '@cc/protocol'
+import { GRID_SPAN_MAX, type GridSpan } from '@cc/protocol/client'
 import { MAX_PANEL_H, MIN_PANEL_W } from './layout.js'
 
 /**

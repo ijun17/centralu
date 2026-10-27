@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { ProjectInfo } from '@cc/protocol'
+import type { ProjectInfo } from '@cc/protocol/client'
 import { Button } from '../../components/Button.jsx'
 import { useProjectApps, usesLines } from '../../store/app-catalog.js'
 import { useStore } from '../../store/store.js'

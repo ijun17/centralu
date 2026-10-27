@@ -4,7 +4,7 @@ import type {
   ProjectInfo,
   SavedCommand,
   GitSource,
-} from '@cc/protocol'
+} from '@cc/protocol/client'
 import type { MachineRef } from './common.js'
 
 export interface ProjectPort {

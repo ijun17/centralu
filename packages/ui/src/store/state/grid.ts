@@ -1,7 +1,7 @@
 import type {
   GridPanel,
   GridSpan,
-} from '@cc/protocol'
+} from '@cc/protocol/client'
 import type {
   ProjectArrangement,
 } from '@cc/core'

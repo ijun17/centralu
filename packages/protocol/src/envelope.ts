@@ -7,30 +7,6 @@ import { HostHandover, HostLogon } from './host-logon.js'
 
 export const PROTOCOL_VERSION = 1
 
-export const HelloClient = z.object({
-  kind: z.literal('hello'),
-  token: z.string(),
-  protocolVersion: z.number(),
-  /** Request resend of what was missed on reconnect (omit to receive everything fresh) */
-  afterSeq: z.number().int().nonnegative().optional(),
-  /**
-   * The host lifetime that issued `afterSeq`, as received in `hello_ok` (#82). A cursor is
-   * honoured only together with the current lifetime's epoch; any other cursor gets a resync.
-   */
-  streamEpoch: z.string().min(1).max(200).optional(),
-  /**
-   * What this client can show (#1405): a window says `host_requests` (`SHOWS_HOST_REQUESTS`), and the host raises a
-   * request from a limited caller only while a window holding the token said so. Unknown entries are ignored. Additive
-   */
-  shows: z.array(z.string().max(40)).max(16).optional().catch(undefined),
-  /**
-   * What the program calls itself (#1405), for a card its call raises: never checked, shown quoted, cut to 60
-   * characters by the host. Additive
-   */
-  client: z.string().max(200).optional().catch(undefined),
-})
-export type HelloClient = z.infer<typeof HelloClient>
-
 /** Where a host came from (#280) — the same record the keeper keeps for it */
 export const HostBuild = z.object({
   /** The commit stamped at bundle time (`abc1234`, `abc1234-dirty`, `unknown`), or `dev` from source */
@@ -117,19 +93,6 @@ export const TerminalExit = z.object({
 })
 export type TerminalExit = z.infer<typeof TerminalExit>
 
-/**
- * Before hello, a client may ask the host to prove it holds the token, without either side sending it (#838): the
- * hub's ssh forward listens on a loopback port any local account can take first, and the hello carries the token.
- * The host answers `proof` with an HMAC of the nonce under its token (`hostProof` in agent-host). At most one per
- * socket, and it authenticates nothing: a hello still has to follow.
- */
-export const ProveClient = z.object({
-  kind: z.literal('prove'),
-  /** Fresh random, base64url: the HMAC's input after a fixed label, so no other value derived from the token can be asked for */
-  nonce: z.string().regex(/^[A-Za-z0-9_-]{22,128}$/),
-})
-export type ProveClient = z.infer<typeof ProveClient>
-
 export const ProofServer = z.object({
   kind: z.literal('proof'),
   nonce: z.string(),
@@ -138,38 +101,23 @@ export const ProofServer = z.object({
 export type ProofServer = z.infer<typeof ProofServer>
 
 /**
- * The reverse direction (#550, docs/plans/remote-hub.md §12.7): a host calls a hub linked to it, over the socket the hub
- * opened. The call is an `RpcRequest` sent by the host, and only to a socket whose hub said it answers them
- * (`host.hubOffer`); the hub answers it with this frame under the same id. Ids of the two directions never meet: a host
- * reads an answer only for a call it sent on that socket. A hub without a handler for the reverse direction (any build
- * before it) drops the call; a host from before it answers this frame with "Unknown frame", which nothing waits on.
- */
-export const RpcAnswer = z.object({
-  kind: z.literal('res'),
-  id: z.string(),
-  ok: z.boolean(),
-  result: z.unknown().optional(),
-  error: ProtocolError.optional(),
-})
-export type RpcAnswer = z.infer<typeof RpcAnswer>
-
-/**
  * How a host withdraws a call it sent a hub (#550): a reverse call of this method, `{ id }` naming the call. The hub
  * aborts that call's work; nothing waits on the answer to either.
  */
 export const CANCEL_CALL_METHOD = 'call.cancel'
 
-export const ClientFrame = z.discriminatedUnion('kind', [HelloClient, ProveClient, RpcRequest, RpcAnswer])
-export type ClientFrame = z.infer<typeof ClientFrame>
-
 // 'res' splits into two branches by ok, so discriminatedUnion('kind') does not work here — use a plain union.
 // `rpc` here is a host's call to a hub linked to it (#550, `RpcAnswer`)
-export const ServerFrame = z.union([HelloServer, ProofServer, EventPush, RpcResponse, TerminalPush, TerminalExit, RpcRequest])
+export const ServerFrame = z.union([
+  HelloServer,
+  ProofServer,
+  EventPush,
+  RpcResponse,
+  TerminalPush,
+  TerminalExit,
+  RpcRequest,
+])
 export type ServerFrame = z.infer<typeof ServerFrame>
-
-export function parseClientFrame(raw: unknown) {
-  return ClientFrame.safeParse(raw)
-}
 export function parseServerFrame(raw: unknown) {
   return ServerFrame.safeParse(raw)
 }

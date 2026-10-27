@@ -1,6 +1,6 @@
 import { useRef, useState, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
-import { GRID_SPAN_MAX, type GridSpan } from '@cc/protocol'
+import { GRID_SPAN_MAX, type GridSpan } from '@cc/protocol/client'
 import { useAnchoredPlacement } from './anchored.js'
 import { useDismiss } from './useDismiss.js'
 

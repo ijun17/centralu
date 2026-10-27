@@ -1,4 +1,4 @@
-import type { NormalizedEvent } from '@cc/protocol'
+import type { NormalizedEvent } from '@cc/protocol/client'
 import { badgeCount, countWaiting, gridSessionIds, notificationFor, pendingProposals, proposalCandidates, type SessionSummary } from '@cc/core'
 import { isOnScreen } from '../../app/onscreen.js'
 import type { AppState, Notice, StoreGet, StoreSet } from '../state.js'

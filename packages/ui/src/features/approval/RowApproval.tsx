@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { wireJoin, wireSegments, type ApprovalDetail } from '@cc/protocol'
+import { wireJoin, wireSegments, type ApprovalDetail } from '@cc/protocol/client'
 import { answersInPlace, type SessionSummary } from '@cc/core'
 import { inFlightKey, useStore } from '../../store/store.js'
 import { useSessionFolder } from '../../store/selectors.js'

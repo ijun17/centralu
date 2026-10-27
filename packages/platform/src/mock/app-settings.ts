@@ -1,5 +1,5 @@
-import { appKeyOf, noSuchAppText } from '@cc/protocol'
-import type { AppPermission, AppUsage, AppQuestion } from '@cc/protocol'
+import { appKeyOf, noSuchAppText } from '@cc/protocol/client'
+import type { AppPermission, AppUsage, AppQuestion } from '@cc/protocol/client'
 import type { AppRegistry } from './app-registry.js'
 import type { Emit } from './event-bus.js'
 

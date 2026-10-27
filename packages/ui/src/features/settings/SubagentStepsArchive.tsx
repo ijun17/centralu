@@ -1,4 +1,4 @@
-import type { SubagentStepsHeld, TrashedSubagentSteps } from '@cc/protocol'
+import type { SubagentStepsHeld, TrashedSubagentSteps } from '@cc/protocol/client'
 import { formatBytes, formatCount, formatDay } from '../../app/format.js'
 import { Button } from '../../components/Button.jsx'
 import { InlineConfirm } from '../../components/InlineConfirm.jsx'

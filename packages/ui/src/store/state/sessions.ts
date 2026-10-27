@@ -3,7 +3,7 @@ import type {
   PermissionPreset,
   ToolName,
   SessionInfo,
-} from '@cc/protocol'
+} from '@cc/protocol/client'
 import type {
   SessionSummary,
 } from '@cc/core'

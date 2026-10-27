@@ -16,7 +16,16 @@ import { AppId } from './ids.js'
  *   unconfirmed an app imported from outside that the person has not turned on yet, or whose `server`/`uses` changed after being turned on (M4 E-3). Like `untrusted`,
  *               it **never starts**, is not attached to any session, and every call to it is rejected — until the person reviews it via `apps.review` and turns it on via `apps.enable`
  */
-export const ExternalAppStatus = z.enum(['invalid', 'untrusted', 'unconfirmed', 'stopped', 'starting', 'running', 'crashed', 'failed'])
+export const ExternalAppStatus = z.enum([
+  'invalid',
+  'untrusted',
+  'unconfirmed',
+  'stopped',
+  'starting',
+  'running',
+  'crashed',
+  'failed',
+])
 export type ExternalAppStatus = z.infer<typeof ExternalAppStatus>
 
 /** The manifest's `uses` — the capabilities the app declares it will use (M4 D). `agent` is either `true` (the person's default agent) or a list of tool names */
@@ -87,7 +96,9 @@ export const ExternalAppInfo = z.object({
    * `reason` says why in a few words (`it is not valid JSON`, `Centralu may not read it (EACCES)`), never anything the
    * file holds (#944); absent when the host does not know (a copy found after a restart) and from older hosts.
    */
-  secretsUnreadable: z.object({ movedTo: z.string().nullable(), at: z.number(), reason: z.string().optional() }).optional(),
+  secretsUnreadable: z
+    .object({ movedTo: z.string().nullable(), at: z.number(), reason: z.string().optional() })
+    .optional(),
   /** Which linked machine the app lives on (#82); absent or null for the hub's own (a user-folder app is otherwise ambiguous) */
   machine: z.string().nullable().optional(),
   /**
@@ -292,7 +303,13 @@ export const AppErrorBundle = z.object({
    * response — null if not present.
    */
   denied: z
-    .object({ appId: AppId, projectId: z.string().nullable(), name: z.string(), capability: z.string(), text: z.string() })
+    .object({
+      appId: AppId,
+      projectId: z.string().nullable(),
+      name: z.string(),
+      capability: z.string(),
+      text: z.string(),
+    })
     .nullable()
     .default(null),
   /** Text that can be sent to the building session as-is */
@@ -341,9 +358,11 @@ export type AppVersions = z.infer<typeof AppVersions>
 export function usesLines(uses: AppUses): string[] {
   const out: string[] = []
   if (uses.agent === true) out.push('Run your default agent in a new session')
-  else if (Array.isArray(uses.agent) && uses.agent.length) out.push(`Run your agent in a new session: ${uses.agent.join(', ')}`)
+  else if (Array.isArray(uses.agent) && uses.agent.length)
+    out.push(`Run your agent in a new session: ${uses.agent.join(', ')}`)
   if (uses.apps?.length) out.push(`Call other apps: ${uses.apps.join(', ')}`)
-  if (uses.host?.length) out.push(`Read Centralu data: ${uses.host.map((name) => HOST_DATA_WORDS[name] ?? name).join('; ')}`)
+  if (uses.host?.length)
+    out.push(`Read Centralu data: ${uses.host.map((name) => HOST_DATA_WORDS[name] ?? name).join('; ')}`)
   // Kept running with nothing open while it says it is busy (#1236), in the app's own words
   if (uses.background) out.push(`Keep running in the background while busy: ${uses.background}`)
   if (uses.notices) out.push('Post notices into the sessions that called it')

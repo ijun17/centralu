@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import type { ExternalAppInfo } from '@cc/protocol'
+import type { ExternalAppInfo } from '@cc/protocol/client'
 import { externalAppKey, isApp, useStore } from './store.js'
 
 /**

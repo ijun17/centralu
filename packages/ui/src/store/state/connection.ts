@@ -1,4 +1,4 @@
-import type { NormalizedEvent } from '@cc/protocol'
+import type { NormalizedEvent } from '@cc/protocol/client'
 import type { ConnectionState, Platform } from '@cc/platform/ports'
 
 /** The connection to the host and the recovery after it comes back. */

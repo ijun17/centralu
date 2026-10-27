@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { APP_VERSION } from '@cc/protocol'
+import { APP_VERSION } from '@cc/protocol/client'
 import { useStore } from '../../store/store.js'
 import { installedUpdate, applyOffer, updateStateText, useRelaunchCheck } from './apply-update.js'
 import { SettingToggle } from './SettingToggle.jsx'

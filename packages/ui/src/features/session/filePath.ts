@@ -29,7 +29,7 @@
  * empty window (see `viewer-error` in CodeViewer).
  */
 
-import { wireSegments } from '@cc/protocol'
+import { wireSegments } from '@cc/protocol/client'
 
 export type FileRef = {
   /** Project-relative path, as `openFile` wants it */

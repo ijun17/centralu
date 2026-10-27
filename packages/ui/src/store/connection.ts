@@ -1,5 +1,5 @@
 import type { AppArrival } from '@cc/core'
-import { DEFAULT_UI_PREFERENCES, parseUiPreferences, type SessionInfo } from '@cc/protocol'
+import { DEFAULT_UI_PREFERENCES, parseUiPreferences, type SessionInfo } from '@cc/protocol/client'
 import type {
   ExternalAppInfo,
   GridPanel,
@@ -7,7 +7,7 @@ import type {
   MachineInfo,
   ThemeFileEntry,
   ToolStatus,
-} from '@cc/protocol'
+} from '@cc/protocol/client'
 import {
   appPanelId,
   isAway,

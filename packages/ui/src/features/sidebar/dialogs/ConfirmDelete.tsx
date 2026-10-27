@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { ToolName } from '@cc/protocol'
+import type { ToolName } from '@cc/protocol/client'
 import { usePlatform } from '../../../app/PlatformProvider.jsx'
 import { useToolMeta } from '../../../store/selectors.js'
 import { Modal } from '../../../components/Modal.jsx'

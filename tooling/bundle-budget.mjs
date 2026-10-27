@@ -30,7 +30,9 @@ export const BUNDLE_ALLOWANCE = 30_000
 
 /**
  * The absolute ceiling before any declaration: main measured 1,784,673 B on 2026-10-18 (Windows,
- * production build), plus about 115 KB. Raised only by declarations, never by editing this line.
+ * production build), plus about 115 KB. #1648 freed 13,484 B under this same ceiling by leaving the protocol's
+ * host-only schemas out of the UI entry (packages/protocol/src/client.ts): that room is for the work that follows, without
+ * declarations. Raised only by declarations, never by editing this line.
  */
 export const BUNDLE_CEILING = 1_900_000
 

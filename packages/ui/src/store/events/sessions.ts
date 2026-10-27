@@ -1,4 +1,4 @@
-import { SessionInfo, parseTolerant, type NormalizedEvent } from '@cc/protocol'
+import { SessionInfo, parseTolerant, type NormalizedEvent } from '@cc/protocol/client'
 import { initialSession, sessionPanelId, withPanel } from '@cc/core'
 import type { StoreGet, StoreSet } from '../state.js'
 import { forgetSessions, liveEventWatchers, liveFactsOf, replayPendingEvents } from '../sessionList.js'

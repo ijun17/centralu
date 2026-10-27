@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { CommandInfo } from '@cc/protocol'
+import type { CommandInfo } from '@cc/protocol/client'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { loadErrorText, useLoad } from '../../app/useLoad.js'
 import { useStore } from '../../store/store.js'

@@ -8,7 +8,7 @@ import type {
   HostActivity,
   RemoteShell,
   SshHostList,
-} from '@cc/protocol'
+} from '@cc/protocol/client'
 
 /**
  * Linked machines (#82, docs/plans/remote-hub.md): the hosts on other computers this computer's

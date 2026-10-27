@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { AppSnapshot, AppVersions } from '@cc/protocol'
+import type { AppSnapshot, AppVersions } from '@cc/protocol/client'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useLoad } from '../../app/useLoad.js'
 import { formatBytes, formatClock, formatDay } from '../../app/format.js'

@@ -53,7 +53,9 @@ function hasDefault(field: z.ZodType): boolean {
 function branchOf(schema: z.ZodType, value: unknown): z.ZodType | undefined {
   const def = defOf(schema)
   if (def.discriminator && isRecord(value)) {
-    return def.options!.find((o) => defOf(core(o)).shape?.[def.discriminator!]?.safeParse(value[def.discriminator!]).success)
+    return def.options!.find(
+      (o) => defOf(core(o)).shape?.[def.discriminator!]?.safeParse(value[def.discriminator!]).success,
+    )
   }
   return def.options!.find((o) => o.safeParse(value).success)
 }
@@ -82,7 +84,11 @@ export function withoutDefaultedFields(schema: z.ZodType, value: unknown): unkno
     case 'array':
       return Array.isArray(value) ? value.map((v) => withoutDefaultedFields(def.element!, v)) : value
     case 'record':
-      return isRecord(value) ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, withoutDefaultedFields(def.valueType!, v)])) : value
+      return isRecord(value)
+        ? Object.fromEntries(
+            Object.entries(value).map(([k, v]) => [k, withoutDefaultedFields(def.valueType!, v)]),
+          )
+        : value
     case 'union': {
       const branch = branchOf(c, value)
       return branch ? withoutDefaultedFields(branch, value) : value
@@ -106,9 +112,13 @@ export function missingDefaults(schema: z.ZodType, value: unknown, path = '$'): 
       })
     }
     case 'array':
-      return Array.isArray(value) ? value.flatMap((v, i) => missingDefaults(def.element!, v, `${path}[${i}]`)) : []
+      return Array.isArray(value)
+        ? value.flatMap((v, i) => missingDefaults(def.element!, v, `${path}[${i}]`))
+        : []
     case 'record':
-      return isRecord(value) ? Object.entries(value).flatMap(([k, v]) => missingDefaults(def.valueType!, v, `${path}.${k}`)) : []
+      return isRecord(value)
+        ? Object.entries(value).flatMap(([k, v]) => missingDefaults(def.valueType!, v, `${path}.${k}`))
+        : []
     case 'union': {
       const branch = branchOf(c, value)
       return branch ? missingDefaults(branch, value, path) : []
@@ -149,4 +159,3 @@ export function currentSession(id: string): SessionInfo {
     backgroundTasks: [{ id: 't1', kind: 'shell', description: 'npm run dev', status: 'running' }],
   })
 }
-

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { RelativeAge } from '../../components/RelativeAge.jsx'
 import { SkeletonLines } from '../../components/Skeleton.jsx'
-import type { ExternalSession, GitBranch } from '@cc/protocol'
+import type { ExternalSession, GitBranch } from '@cc/protocol/client'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useLoad } from '../../app/useLoad.js'

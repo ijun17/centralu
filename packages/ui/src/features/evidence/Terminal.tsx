@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Terminal as Xterm } from '@xterm/xterm'
-import type { CommandRunInfo, TerminalInfo } from '@cc/protocol'
+import type { CommandRunInfo, TerminalInfo } from '@cc/protocol/client'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { CloseIcon, PlusIcon, RestartIcon, StopIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'

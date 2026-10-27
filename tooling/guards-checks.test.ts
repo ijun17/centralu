@@ -420,6 +420,28 @@ describe('guard/purge-callers and guard/subagent-purge-callers', () => {
   })
 })
 
+describe('guard/import-boundary, the UI protocol entry (#1648)', () => {
+  const POSITIVE = "import { a } from '@cc/protocol'"
+  it.each(['packages/ui/src/x.tsx', 'packages/platform/src/web/x.ts', 'packages/platform/src/mock/x.ts', 'packages/core/src/x.ts', 'apps/web/src/x.tsx'])('reports the whole protocol in %s', async (file) => {
+    expect(await lines(file, POSITIVE, 'import-boundary')).toEqual([1])
+    expect(await lines(file, "export * from '@cc/protocol'", 'import-boundary')).toEqual([1])
+    expect(await lines(file, "import type { A } from '@cc/protocol'", 'import-boundary')).toEqual([1])
+  })
+  it('reports a relative path into the protocol package other than its client entry (#1648)', async () => {
+    const file = 'packages/ui/src/x.tsx'
+    for (const spec of ['../../../protocol/src/commands.js', '../../protocol/src/index.js', '../../protocol/src/commands/methods/apps.params.js']) {
+      expect(await lines(file, `export { RpcMethods } from '${spec}'`, 'import-boundary'), spec).toEqual([1])
+    }
+    await quiet(file, 'import-boundary', "export { A } from '../../protocol/src/client.js'", "export { A } from '../../protocol/src/commands.js'")
+  })
+  it('lets the client entry in, and tests and the host import the whole protocol', async () => {
+    await quiet('packages/ui/src/x.tsx', 'import-boundary', "import { a } from '@cc/protocol/client'", POSITIVE)
+    expect(await lines('packages/ui/src/x.test.tsx', POSITIVE, 'import-boundary')).toEqual([])
+    expect(await lines('packages/platform/src/web/x.test-helpers.ts', POSITIVE, 'import-boundary')).toEqual([])
+    expect(await lines('packages/agent-host/src/x.ts', POSITIVE, 'import-boundary')).toEqual([])
+  })
+})
+
 describe('guard/import-boundary', () => {
   const apps = 'packages/agent-host/src/apps/x.ts'
   const external = 'packages/agent-host/src/apps/external/x.ts'

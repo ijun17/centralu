@@ -246,6 +246,25 @@ describe('bundle regression (decision C-3: no editor engine in the viewer)', () 
   })
 
   /*
+   * The protocol's host-only schemas are not in the build (#1648). The lint guard and dependency-cruiser keep the UI from
+   * importing them; this reads the result, so a bare '@cc/protocol' that gets past both (a new way to spell an import, a rule
+   * switched off) still fails here, whatever the bundle budget has room for. Each marker is a string literal that only a
+   * host-only schema file holds (its own file is read to say so, so a marker that moves cannot leave this check empty).
+   * A new host-only method needs no marker: its params are in a <concept>.params.ts, which any of these would show.
+   */
+  const HOST_ONLY_MARKERS: { file: string; text: string }[] = [
+    { file: 'packages/protocol/src/client-frames.ts', text: '^[A-Za-z0-9_-]{22,128}$' },
+    { file: 'packages/protocol/src/commands/methods/projects.params.ts', text: 'This attachment is too large' },
+    { file: 'packages/protocol/src/commands/methods/settings.params.ts', text: 'panels or sessionIds is required' },
+  ]
+  it('holds none of the schemas only the host reads', () => {
+    for (const { file, text } of HOST_ONLY_MARKERS) {
+      expect(readFileSync(join(ROOT, file), 'utf8'), `${file} no longer holds its marker`).toContain(text)
+      expect(js.includes(text), `the build holds "${text}" from ${file}: something imports the whole protocol (#1648)`).toBe(false)
+    }
+  })
+
+  /*
    * The release build's JS, every chunk counted, against main's and against a ceiling (#1181,
    * tooling/bundle-budget.mjs). It was a constant here that every UI pull request raised, so they
    * conflicted with each other in the merge queue (`git log -L` on this test lists those raises).

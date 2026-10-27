@@ -1,4 +1,4 @@
-import type { NormalizedEvent } from '@cc/protocol'
+import type { NormalizedEvent } from '@cc/protocol/client'
 import type { AgentPort, ConnectionState, Unsubscribe } from '../ports/index.js'
 import { deliver } from '../deliver.js'
 

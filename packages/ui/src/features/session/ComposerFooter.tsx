@@ -1,5 +1,5 @@
 import { memo } from 'react'
-import { contextShare } from '@cc/protocol'
+import { contextShare } from '@cc/protocol/client'
 import { formatCount } from '../../app/format.js'
 import { useStore } from '../../store/store.js'
 import { SessionSettings } from './SessionSettings.jsx'

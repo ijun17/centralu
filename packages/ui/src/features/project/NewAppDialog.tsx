@@ -1,6 +1,6 @@
 import { TrustProjectButton } from './TrustCard.jsx'
 import { useEffect, useState } from 'react'
-import { newAppIdProblem } from '@cc/protocol'
+import { newAppIdProblem } from '@cc/protocol/client'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { isPlainEscape } from '../../app/keys.js'
 import { Modal } from '../../components/Modal.jsx'

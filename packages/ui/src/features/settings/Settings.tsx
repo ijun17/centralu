@@ -1,7 +1,7 @@
 import { TrustProjectButton } from '../project/TrustCard.jsx'
 import { usePresence } from '../../components/presence.js'
 import { useEffect, useRef, useState } from 'react'
-import { MAX_AGENT_DEPTH, MAX_AUTO_COMPACT_SHARE, MAX_NUDGE_SHARE, MIN_AUTO_COMPACT_SHARE, MIN_IDLE_COMPACT_SHARE, MIN_NUDGE_SHARE, NUDGE_MARGIN, agentDepthOf, autoCompactOf, hubAutoOf, nudgeShares, type ToolName, type ToolStatus, type UiPreferencesPatch } from '@cc/protocol'
+import { MAX_AGENT_DEPTH, MAX_AUTO_COMPACT_SHARE, MAX_NUDGE_SHARE, MIN_AUTO_COMPACT_SHARE, MIN_IDLE_COMPACT_SHARE, MIN_NUDGE_SHARE, NUDGE_MARGIN, agentDepthOf, autoCompactOf, hubAutoOf, nudgeShares, type ToolName, type ToolStatus, type UiPreferencesPatch } from '@cc/protocol/client'
 import { appKeyOf, explainGridSpan, type NotifyPolicy } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'

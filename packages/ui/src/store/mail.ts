@@ -1,5 +1,5 @@
-import { errorMessage } from '@cc/protocol'
-import type { MailThreadView, NormalizedEvent } from '@cc/protocol'
+import { errorMessage } from '@cc/protocol/client'
+import type { MailThreadView, NormalizedEvent } from '@cc/protocol/client'
 import type { AppState, StoreGet, StoreSet } from './state.js'
 
 /**

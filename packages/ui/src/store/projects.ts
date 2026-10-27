@@ -1,5 +1,5 @@
 import { forgetArrivalsOf } from './apps.js'
-import type { ProjectInfo } from '@cc/protocol'
+import type { ProjectInfo } from '@cc/protocol/client'
 import type { AppState, StoreGet, StoreSet } from './state.js'
 import { forgetSessions } from './sessionList.js'
 import { machinesHoldingMirror } from './machines.js'

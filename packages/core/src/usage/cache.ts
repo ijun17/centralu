@@ -1,4 +1,4 @@
-import type { CacheStats, CacheWindowStats } from '@cc/protocol'
+import type { CacheStats, CacheWindowStats } from '@cc/protocol/client'
 import { formatClock } from '../clock/clock.js'
 
 /** The input side of a window or a session: the three parts that do not overlap (`TokenUsage`) */

@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { DragEvent as ReactDragEvent } from 'react'
 import type { FsEntry } from '@cc/platform/ports'
-import { wireParent } from '@cc/protocol'
+import { wireParent } from '@cc/protocol/client'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useLoad } from '../../app/useLoad.js'
 import { LoadFailed } from '../../components/LoadFailed.jsx'

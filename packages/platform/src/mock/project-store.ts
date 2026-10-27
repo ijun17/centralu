@@ -1,4 +1,4 @@
-import type { ProjectInfo } from '@cc/protocol'
+import type { ProjectInfo } from '@cc/protocol/client'
 
 /** The registered projects, as the mock holds them — the session list, the session archive, machines and the project port all read it */
 export class ProjectStore {

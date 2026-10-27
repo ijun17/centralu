@@ -1,4 +1,4 @@
-import type { UsageHistoryReadings, UsageWindow } from '@cc/protocol'
+import type { UsageHistoryReadings, UsageWindow } from '@cc/protocol/client'
 
 /**
  * Pick the single **weekly window** the top-bar donut should draw (user request, 2026-09-09).

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import type { ToolName } from '@cc/protocol'
+import type { ToolName } from '@cc/protocol/client'
 import { useStore } from '../../store/store.js'
 import { useTools } from '../../store/selectors.js'
 import { useLoad } from '../../app/useLoad.js'

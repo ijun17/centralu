@@ -2,7 +2,7 @@ import type { AppArrival } from '@cc/core'
 import type {
   AppQuestion,
   ExternalAppInfo,
-} from '@cc/protocol'
+} from '@cc/protocol/client'
 
 /** External apps: the list, their questions and change counters, import, share and remove. */
 export type AppsSlice = {

@@ -1,4 +1,4 @@
-import type { NormalizedEvent, SessionInfo } from '@cc/protocol'
+import type { NormalizedEvent, SessionInfo } from '@cc/protocol/client'
 import { initialSession, type SessionSummary } from '@cc/core'
 import type { AppState } from './state.js'
 

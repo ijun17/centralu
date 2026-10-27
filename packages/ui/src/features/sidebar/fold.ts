@@ -1,4 +1,4 @@
-import type { Interruption, SessionState } from '@cc/protocol'
+import type { Interruption, SessionState } from '@cc/protocol/client'
 import { isListedWaiting, isUnread, listedState, needsAnswer, type ReadTracked } from '@cc/core'
 
 /**

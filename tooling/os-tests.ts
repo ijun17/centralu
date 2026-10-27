@@ -108,7 +108,7 @@ export function osSelector(virtual: ReadonlyMap<string, string> = new Map()) {
 
   /**
    * The repository file a specifier names, or null for a package outside it. `@cc/<package>` is vitest.config.ts's
-   * alias for packages/<package>/src/index.ts. A relative specifier that names no file fails: a test whose imports
+   * alias for packages/<package>/src/index.ts, and `@cc/<package>/<name>` for its src/<name>/index.ts or src/<name>.ts (`@cc/protocol/client`). A relative specifier that names no file fails: a test whose imports
    * cannot be followed is not left out quietly. A file that is not code (a JSON, a stylesheet) imports nothing.
    */
   function resolveImport(from: string, specifier: string): string | null {
@@ -120,7 +120,7 @@ export function osSelector(virtual: ReadonlyMap<string, string> = new Map()) {
       base = ['packages', pkg, 'src', ...sub, 'index'].join('/')
     } else return null
     const stem = base.replace(/\.(m?js|jsx)$/, '')
-    const candidates = [base, `${stem}.ts`, `${stem}.tsx`, `${stem}.mts`, `${stem}.mjs`, `${stem}.js`, `${base}/index.ts`, `${base}/index.tsx`, `${base}.ts`, `${base}.tsx`]
+    const candidates = [base, `${stem}.ts`, `${stem}.tsx`, `${stem}.mts`, `${stem}.mjs`, `${stem}.js`, `${base}/index.ts`, `${base}/index.tsx`, `${base}.ts`, `${base}.tsx`, `${base.replace(/[/]index$/, '')}.ts`]
     const found = candidates.find(isFile)
     if (!found) throw new Error(`${from}: '${specifier}' names no file; the tests that run on every OS are picked by following imports`)
     return CODE.test(found) ? found : null
