@@ -231,7 +231,7 @@ export function tokenUsage(result: PromptResult): TokenUsage | null {
 
 /**
  * What the prompt cache accounting reads of a turn: its input, split as the agent reports it (uncached input apart from
- * cache reads, measured). A turn can hold several model requests and ACP reports only their sum, so this is the turn as
+ * cache reads, measured). The spec reports a turn's usage, which can hold several model requests; OpenCode's recordings read as one request (its total matches the context size), so this is the turn as
  * one reading. A write figure is given only when the agent reports one. Null when the turn read no input.
  */
 export function requestInput(result: PromptResult): RequestInput | null {
