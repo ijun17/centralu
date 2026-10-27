@@ -588,7 +588,14 @@ so it is run by hand before an `agy` bump, not on a schedule. The weekly surface
       with each preset proved by a live run; its inbound path waits on the core's PR 3 (#1654, gap 3) and its card on
       PR 5 and 8.
 
-   Then the session wiring, detect and usage, `agy-gate.mjs` in the bundle, and agent-host.md §2–3.
+   Then the session wiring, detect and usage, `agy-gate.mjs` in the bundle, and agent-host.md §2–3. Part one of that
+   (`feat/agy-detect`) is the tool's entry without a session: `agy/index.ts` (`AgyAdapter`: descriptor "Antigravity",
+   `agy --version`, the login read from `agy -p /usage` started in a session of its own so it has no terminal to log in on,
+   never from `agy`'s files; `createSession` refuses until part two), `install.ts`, `surface.ts` (limitations and baseline
+   for the descriptors test; the drift run itself is the later item 4), `os.runsAntigravity` (macOS and Linux only: on
+   Windows it shows as not installed, "not available on Windows yet"), and the packaged layout: `scripts/agy-gate-files.mjs`
+   copies `agy-gate.mjs` and `gate-answer.mjs` beside `main.mjs`, and `gate-path.ts` finds the command in both layouts
+   (`tooling/agy-gate-bundle.test.ts`). No usage and no context share yet.
 2. **Models and effort, sub-agent progress, nudges** through `PreInvocation`, if measured useful.
 3. **Windows**: launch, `cmd /c` hooks, paths in the plugin root; measured on the Windows machine with its own login.
 4. **The drift check** in the weekly surface run.

@@ -117,7 +117,8 @@ centralu/
 │        ├─ transport/          # WS server, session handshake, the event log
 │        ├─ adapters/           # claude/, codex/ + the common adapter contract (contract.ts); each tool's usage
 │        │                      #   reader (usage.ts) and the orchestrator's MCP server (claude/orchestrator-mcp.ts,
-│        │                      #   codex/orchestrator-bridge.mjs)
+│        │                      #   codex/orchestrator-bridge.mjs); agy/ (Antigravity) also ships its gate hook
+│        │                      #   (agy-gate.mjs + gate-answer.mjs, copied beside main.mjs by the bundle step)
 │        │                      #   each tool's index.ts is the adapter, session.ts its session, with the session's
 │        │                      #   parts beside it (#850): claude/ session-cards, session-servers, permissions, sdk-query,
 │        │                      #   refresh-race, tracked-input, schedule-look;

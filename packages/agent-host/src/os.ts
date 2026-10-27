@@ -10,8 +10,11 @@
  * Each takes the platform as a parameter, defaulting to this host's, so tests can ask about another.
  */
 
+import { spawn } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { posix, win32, type PlatformPath } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { APP_NAME, APP_SLUG, type HostLogon } from '@cc/protocol'
 
 export type Platform = NodeJS.Platform
@@ -106,6 +109,14 @@ export function systemSettingsFolder(app: string, env: Readonly<Record<string, s
  */
 export function openCodeMatchesAnyCase(platform: Platform = HOST_PLATFORM): boolean {
   return platform === 'win32'
+}
+
+/**
+ * Antigravity CLI (`agy`) runs from macOS and Linux only in this version (#59): its hooks start through `cmd /c` on
+ * Windows, which is not measured yet. There it shows as not available, as a tool that is not installed does.
+ */
+export function runsAntigravity(platform: Platform = HOST_PLATFORM): boolean {
+  return platform !== 'win32'
 }
 
 /** A program's file name on `platform`: `codex.exe` on Windows, `codex` elsewhere. */
@@ -283,4 +294,38 @@ export function logonFromGroups(stdout: string): HostLogon | null {
   if (sids.has('S-1-5-3')) return 'batch'
   if (sids.has('S-1-5-6')) return 'service'
   return null
+}
+
+/** What a program printed, whatever its exit: a failed or timed-out run gives what it had printed by then */
+export type ProgramOutput = { stdout: string; stderr: string }
+
+/**
+ * Runs a program to its end and gives its output. `detached` starts it in a session of its own, so it has no controlling
+ * terminal to ask the person on (a CLI that would otherwise wait for a login code there).
+ */
+export function runProgram(command: string, args: readonly string[], opts: { timeoutMs: number; detached?: boolean }): Promise<ProgramOutput> {
+  return new Promise((resolve) => {
+    let stdout = ''
+    let stderr = ''
+    const done = () => resolve({ stdout, stderr })
+    const child = spawn(command, [...args], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, detached: opts.detached ?? false })
+    const timer = setTimeout(() => child.kill(), opts.timeoutMs)
+    child.stdout.on('data', (d: Buffer) => (stdout += d.toString()))
+    child.stderr.on('data', (d: Buffer) => (stderr += d.toString()))
+    child.on('error', () => {
+      clearTimeout(timer)
+      done()
+    })
+    child.on('close', () => {
+      clearTimeout(timer)
+      done()
+    })
+  })
+}
+
+/** A plain file beside `base` (a `file:` URL: `import.meta.url`), by the OS's path rules; throws when it is not there */
+export function fileBeside(base: string, name: string): string {
+  const path = fileURLToPath(new URL(`./${name}`, base))
+  if (!existsSync(path)) throw new Error(`${name} not found: ${path}`)
+  return path
 }
