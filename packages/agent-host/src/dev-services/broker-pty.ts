@@ -180,6 +180,16 @@ export class PtyBroker {
     this.stdin.write(`${JSON.stringify(message)}\n`)
   }
 
+  /**
+   * Opens an `https` address in the person's browser, started by the broker, so outside the host's work job: the browser
+   * outlives what asked for it and the host (review of #1685). False when the broker is gone (nothing is sent)
+   */
+  openUrl(url: string): boolean {
+    if (this.gone || !/^https:\/\//i.test(url)) return false
+    this.send({ op: 'open', url })
+    return true
+  }
+
   /** Ends the broker; its terminals end with it */
   close(): void {
     this.stdin.end()
@@ -208,6 +218,26 @@ export class PtyBroker {
     console.error(`[agent-host] ${reason}; new terminals start in the host`)
     for (const p of this.ptys.values()) p.failed(reason)
     this.ptys.clear()
+  }
+}
+
+/**
+ * An address opened for the person: through the broker, outside the job, while it runs; in the host (inside the job, as
+ * a terminal is then too) once it is gone, rather than not at all
+ */
+export function openForPerson(broker: PtyBroker, url: string, inHost: (url: string) => void = openInHost): void {
+  if (broker.openUrl(url)) return
+  console.error('[agent-host] the terminal service is gone; an address for the person opens in the host')
+  inHost(url)
+}
+
+function openInHost(url: string): void {
+  try {
+    const child = startProcess('rundll32', ['url.dll,FileProtocolHandler', url], { detached: true, stdio: 'ignore', windowsHide: true })
+    child.on('error', () => {})
+    child.unref()
+  } catch {
+    // Nothing to tell beyond what asked for it (a sign-in times out)
   }
 }
 

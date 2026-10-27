@@ -19,7 +19,7 @@ import { CardIds, PendingCards } from '../session-kit.js'
 import { UnmappedTypes } from '../unmapped.js'
 import { AcpConnection, AUTH_REQUIRED, METHOD_NOT_FOUND, NO_TIMEOUT_MS, RESOURCE_NOT_FOUND, RpcError, type RpcId } from './connection.js'
 import { KNOWN_UPDATES } from './known-updates.js'
-import type { AcpToolShape } from './profile.js'
+import type { AcpToolShape, SignInWanted } from './profile.js'
 import { addTokens, NO_TOKENS } from '../token-usage.js'
 import { AcpNormalizer, requestInput, tokenUsage } from './normalize.js'
 import {
@@ -62,6 +62,8 @@ export type AcpSessionDeps = {
   infersCompaction?: boolean
   /** Where this tool's ACP differs from the common shape (`AcpProfile.shape`) */
   shape?: AcpToolShape
+  /** The agent asking for a browser sign-in in this session's process (`AcpProfile.launch`), removed with the session */
+  signInWanted?: SignInWanted
 }
 
 /** `edit`: the asked call is an edit whose run may come as a new call (`AcpToolShape.editRunsAsNewCall`), with its files */
@@ -140,6 +142,14 @@ export class AcpSession extends CoreSession<AcpWire> implements SessionHandle {
   compactCommand(): string | null {
     return this.wire.compacts() ? '/compact' : null
   }
+
+  override async dispose(): Promise<void> {
+    try {
+      await super.dispose()
+    } finally {
+      await this.wire.removeSignInWatch()
+    }
+  }
 }
 
 class AcpWire implements ToolWire {
@@ -181,6 +191,8 @@ class AcpWire implements ToolWire {
 
   /** The conversation `session/load` or `session/resume` is opening: its commands come during the replay (measured, Antigravity 1.4.3) */
   private opening: string | null = null
+  /** This process's conversation is open (`open` answered): until then a failed open ends the process, after it the wire does */
+  private opened = false
 
   constructor(
     private readonly opts: CreateSessionOpts,
@@ -192,6 +204,26 @@ class AcpWire implements ToolWire {
     this.launch = async () => deps.spec
     this.normalizer = new AcpNormalizer(opts.sessionId, deps.label)
     this.unmapped = new UnmappedTypes(deps.label, opts.sessionId, KNOWN_UPDATES)
+    deps.signInWanted?.watch(() => this.signInWanted())
+  }
+
+  /**
+   * The agent wants an interactive sign-in inside this session's process (`SignInWanted`): it would wait for a browser
+   * nobody asked for, and `session/new` would end in "No response" two minutes later with the tool still said ready. What
+   * it was asked fails at once as not signed in, which notes the tool signed out, so its line offers Sign in
+   * (`AcpToolShape.signedOut`). While the conversation opens, the failed open ends the process (the adapter's, or the
+   * relaunch's); once open (a prompt, or idle), the process is ended here, and the next message starts a new one
+   */
+  private signInWanted(): void {
+    const conn = this.conn as AcpConnection | undefined
+    if (!conn || conn.isClosed) return
+    const error = this.deps.shape?.signedOut?.(this.label) ?? rpcError(`${this.label} is not logged in. Log in, then try again.`, 'not_logged_in')
+    conn.failPending(error)
+    if (this.opened) void conn.dispose(500)
+  }
+
+  async removeSignInWatch(): Promise<void> {
+    await this.deps.signInWanted?.remove()
   }
 
   private get sessionId(): string {
@@ -204,6 +236,7 @@ class AcpWire implements ToolWire {
 
   async open(io: CoreIo, resume: { externalId: string } | null): Promise<{ externalId: string | null }> {
     this.io = io
+    this.opened = false
     // The process's exit is the core's (it watches the process); the connection only fails what it had asked
     this.conn = new AcpConnection(
       io.process,
@@ -259,6 +292,7 @@ class AcpWire implements ToolWire {
         this.costTotal = 0
         this.opts.runningCost?.keep(0)
       }
+      this.opened = true
       return { externalId: this.conversation }
     } catch (err) {
       throw this.openError(err)
@@ -309,6 +343,11 @@ class AcpWire implements ToolWire {
       )
     } catch (err) {
       const failure = err instanceof Error ? err : new Error(String(err))
+      // Not signed in (`signInWanted`): said as such, so the screen offers the sign-in rather than a retry
+      if (Reflect.get(failure, 'code') === 'not_logged_in') {
+        turn.core.end({ how: 'failed', error: { code: 'not_logged_in', message: failure.message, retryable: false }, inputError: failure })
+        return
+      }
       turn.core.end({ how: 'failed', error: { code: 'internal', message: `${this.label}: ${failure.message}`, retryable: true }, inputError: failure })
       return
     }

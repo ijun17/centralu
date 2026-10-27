@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ToolSetup, ToolSetupState } from '@cc/protocol'
 import { InstallFailure } from './failure.js'
 import { AGY_RELEASE } from './release.js'
-import { ownerGone, ownerTag, signInFolder } from './agent-files.js'
+import { ownerGone, ownerTag, browserFolder } from './agent-files.js'
 import { AgySetup } from './setup.js'
 import { endHosts, fakeInstall, fakeSignIn, folder, inRoot, leftovers, otherHost, TEST_ARCHIVE, tempData, write } from './agent-files.test-helpers.js'
 import type { SignInResult } from './sign-in.js'
@@ -225,7 +225,7 @@ describe('what an earlier host left', () => {
     // This host's start, and a sign-in of its own, both sweep the folder
     const setup = new AgySetup({ home: t.home, archive: TEST_ARCHIVE, version: AGY_RELEASE.version })
     await setup.whenTidy()
-    const own = await signInFolder(t.home)
+    const own = await browserFolder(t.home)
     expect(leftovers(t.home, '.install-')).toEqual([install])
     const signIns = leftovers(t.home, '.sign-in-')
     expect(signIns).toHaveLength(2)

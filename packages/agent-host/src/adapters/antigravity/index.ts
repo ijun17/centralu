@@ -5,7 +5,7 @@ import { rpcError } from '../../rpc-error.js'
 import type { AgentProcess, AgentSpawnSpec, DetectResult } from '../contract.js'
 import { AcpAdapter } from '../acp/adapter.js'
 import type { AcpProfile } from '../acp/profile.js'
-import { agyHome, agyPlatformKey, reachesAgentFolder, type AgyHome } from './agent-files.js'
+import { agyHome, agyPlatformKey, browserFolder, reachesAgentFolder, type AgyHome } from './agent-files.js'
 import { agyLaunch } from './launch.js'
 import { AGY_RELEASE, type AgyArchive } from './release.js'
 import { AgySetup, type AgySetupDeps } from './setup.js'
@@ -74,7 +74,14 @@ export function antigravityProfile(deps: AgyProfileDeps = {}): AgyProfile {
     archive,
     async launch() {
       if (!archive || !setup.installed()) return null
-      return agyLaunch(home, archive)
+      // Its own BROWSER helper (`browserFolder`): the agent never opens a browser itself, and the helper running in a
+      // session's process is how a stored sign-in that stopped working is told (`SignInWanted`). The address is not opened:
+      // the person asked for a conversation, and the line offers Sign in
+      const folder = await browserFolder(home, deps.platform)
+      return {
+        ...agyLaunch(home, archive, folder.browser),
+        signInWanted: { watch: (wanted: () => void) => folder.watch(() => wanted()), remove: () => folder.remove() },
+      }
     },
     async installedVersion() {
       return setup.installed() ? AGY_RELEASE.version : null

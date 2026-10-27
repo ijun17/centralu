@@ -6,7 +6,7 @@ import { ReplayPeer, replaySpawner } from '../frames/replay.test-helpers.js'
 import { InstallFailure } from './failure.js'
 import { runSignIn, signInFailure, signInUrl } from './sign-in.js'
 import { agyStderrLine } from './shape.js'
-import { agyRecording, exists, fakeInstall, inVersion, leftovers, TEST_ARCHIVE, tempData } from './agent-files.test-helpers.js'
+import { agyRecording, exists, fakeInstall, HOST_TEST_PLATFORM, inVersion, leftovers, TEST_ARCHIVE, tempData } from './agent-files.test-helpers.js'
 
 /**
  * Antigravity's sign-in inside Centralu (docs/plans/antigravity-adapter.md §4): the recorded `authenticate` replayed, and
@@ -36,7 +36,7 @@ describe("Antigravity's sign-in", () => {
     const specs: AgentSpawnSpec[] = []
     const opened: string[] = []
     const result = await runSignIn(h, TEST_ARCHIVE, new AbortController().signal, {
-      platform: 'darwin',
+      platform: HOST_TEST_PLATFORM,
       openUrl: (u) => opened.push(u),
       spawn: (spec) => {
         specs.push(spec)
@@ -51,7 +51,7 @@ describe("Antigravity's sign-in", () => {
     expect(result.plan).toEqual({ name: 'Antigravity Starter Quota', upgradeUri: expect.stringMatching(/^https:\/\/antigravity\.google\//) })
     // Isolated as every Antigravity process is, with the BROWSER helper in a folder of its own
     expect(specs[0]!.env).toMatchObject({ GEMINI_HOME: h.geminiHome, AGY_ACP_FORCE_FILE_STORAGE: '1' })
-    expect(specs[0]!.env?.BROWSER).toMatch(/[\\/]\.sign-in-[^\\/]+[\\/]open-url$/)
+    expect(specs[0]!.env?.BROWSER).toMatch(/[\\/]\.sign-in-[^\\/]+[\\/]open-url(\.mjs' %s)?$/)
     expect(specs[0]!.command).toBe(inVersion(h, TEST_ARCHIVE.command))
     expect(opened).toEqual([ADDRESS])
     // The helper's folder goes with the sign-in
@@ -62,11 +62,11 @@ describe("Antigravity's sign-in", () => {
     const h = home()
     const abort = new AbortController()
     const peers: FakeAcpPeer[] = []
+    const opened: string[] = []
     const run = runSignIn(h, TEST_ARCHIVE, abort.signal, {
+      // On Windows too the host opens it, outside its job (review of #1685: the agent's own launcher opened it in the job)
       platform: 'win32',
-      openUrl: () => {
-        throw new Error('the host opens nothing on Windows: the agent opens it')
-      },
+      openUrl: (u) => opened.push(u),
       spawn: () => {
         const p = new FakeAcpPeer((method) => (method === 'initialize' ? { result: { protocolVersion: 1 } } : { hold: true }))
         peers.push(p)
@@ -79,6 +79,8 @@ describe("Antigravity's sign-in", () => {
     })
     expect(auth.params).toEqual({ methodId: 'oauth-personal' })
     peers[0]!.stderr.write(`Open the following link to authenticate the ACP server: ${ADDRESS}\n`)
+    await new Promise((r) => setImmediate(r))
+    expect(opened).toEqual([ADDRESS])
     abort.abort()
     const failure = await run.then(
       () => null,

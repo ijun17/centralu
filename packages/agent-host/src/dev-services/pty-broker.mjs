@@ -11,13 +11,14 @@
  * what the terminals do on stdout.
  *
  * - in: `{op:'spawn', id, file, args, cwd, env, cols, rows}` · `{op:'write', id, data}` · `{op:'resize', id, cols, rows}`
- *   · `{op:'kill', id}`
+ *   · `{op:'kill', id}` · `{op:'open', url}` (an `https` address in the person's browser, review of #1685)
  * - out: `{ev:'ready'}` once · `{ev:'spawned', id, pid}` · `{ev:'error', id, message}` · `{ev:'data', id, data}` ·
  *   `{ev:'exit', id, exitCode, signal}`
  *
  * Its stdin closing means the host is gone: it exits, which closes every pseudoconsole and so ends each shell as the
  * host's own would have. What a shell started outside its console stays.
  */
+import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { createInterface } from 'node:readline'
 
@@ -48,7 +49,24 @@ function spawnPty(m) {
   }
 }
 
+/**
+ * The person's browser at an address (Antigravity's sign-in page): started from here, outside the host's job, so it
+ * outlives the sign-in and the host. `detached`, so libuv puts it in no job of this process's either (it ends with this
+ * one otherwise); never through a shell, and only an `https` address
+ */
+function open(url) {
+  if (typeof url !== 'string' || !/^https:\/\//i.test(url)) return
+  try {
+    const child = spawn('rundll32', ['url.dll,FileProtocolHandler', url], { detached: true, stdio: 'ignore', windowsHide: true })
+    child.on('error', () => {})
+    child.unref()
+  } catch {
+    // The sign-in times out, which says the browser did not open
+  }
+}
+
 function handle(m) {
+  if (m.op === 'open') return open(m.url)
   if (m.op === 'spawn') {
     let p
     try {

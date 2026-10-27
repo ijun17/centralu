@@ -12,7 +12,7 @@ export type AcpProfile = {
   readonly capabilities: AdapterCapabilities
   readonly surface: AdapterSurface
   /** How to start this tool's ACP server for this session (its environment may carry the preset), or null when it is not installed here */
-  launch(opts: CreateSessionOpts): Promise<Pick<AgentSpawnSpec, 'command' | 'args'> & { env?: Record<string, string> } | null>
+  launch(opts: CreateSessionOpts): Promise<(Pick<AgentSpawnSpec, 'command' | 'args'> & { env?: Record<string, string>; signInWanted?: SignInWanted }) | null>
   detect(): Promise<DetectResult>
   installedVersion(): Promise<string | null>
   /**
@@ -29,6 +29,21 @@ export type AcpProfile = {
   readonly infersCompaction?: boolean
   /** The parts of a tool's ACP that differ from the common shape the core reads (`AcpToolShape`) */
   readonly shape?: AcpToolShape
+}
+
+/**
+ * How a session's process says its agent wants the person to sign in in a browser, which a session never asks for: the
+ * tool's sign-in is its own process (Antigravity's `runSignIn`). Antigravity 1.4.3, whose stored sign-in no longer works
+ * (the refresh fails, or the token file is damaged) while its settings still name it, starts its own browser login inside
+ * `session/new`, `session/load` or a prompt and waits there up to 300 s (review of #1685). The signal is structural: the
+ * process's `BROWSER` helper ran (`browserFolder`), not a line of its stderr. The session then fails what it asked as not
+ * signed in (`AcpToolShape.signedOut`) and ends the process
+ */
+export type SignInWanted = {
+  /** Calls `wanted` each time the agent asks (from the session's start: every process of the session shares it) */
+  watch(wanted: () => void): void
+  /** At the session's end */
+  remove(): Promise<void>
 }
 
 /**

@@ -61,6 +61,7 @@ export abstract class AcpAdapter implements AgentAdapter {
       ...(this.profile.centraluToolOf ? { centraluToolOf: (call: ToolCallFields) => this.profile.centraluToolOf?.(call) ?? null } : {}),
       ...(this.profile.infersCompaction ? { infersCompaction: true } : {}),
       ...(shape ? { shape } : {}),
+      ...(launch.signInWanted ? { signInWanted: launch.signInWanted } : {}),
     })
     try {
       await session.ready

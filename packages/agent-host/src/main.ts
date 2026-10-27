@@ -80,7 +80,7 @@ import { parseJson } from './dev-services/store/json.js'
 import { asObj } from './json-value.js'
 import { flagSetting } from './dev-services/store/settings.js'
 import { joinWorkJob, workJobLine, workJobWanted } from './lifecycle/work-job.js'
-import { PtyBroker, brokerPtyModule } from './dev-services/broker-pty.js'
+import { PtyBroker, brokerPtyModule, openForPerson } from './dev-services/broker-pty.js'
 import { detectToken } from './elevation.js'
 
 /**
@@ -305,7 +305,12 @@ try {
   refuse(err.message)
   process.exit(1)
 }
-const adapters = createAdapters()
+/*
+ * What the host opens for the person stays outside its work job (lifecycle/work-job.ts): on Windows the terminal broker,
+ * which is outside the job, starts it (Antigravity's sign-in page, review of #1685). Without a broker there is no job of
+ * the host's either (or terminals start in the host too, and so does this)
+ */
+const adapters = createAdapters(ptyBroker ? { openUrl: (url) => openForPerson(ptyBroker, url) } : {})
 
 /*
  * Under the keeper, agents, terminals and project commands are spawned by the keeper, not by this

@@ -5,7 +5,7 @@ import { startToolProcess } from '../core/tool-process.js'
 import { lineSplitter } from '../../transport/json-lines.js'
 import { asObj } from '../../json-value.js'
 import type { Platform } from '../../os.js'
-import { hostOpensSignIn, openInBrowser, signInFolder, type AgyHome } from './agent-files.js'
+import { browserFolder, openInBrowser, type AgyHome } from './agent-files.js'
 import { InstallFailure } from './failure.js'
 import { agyLaunch } from './launch.js'
 import type { AgyArchive } from './release.js'
@@ -18,12 +18,13 @@ import { agyStderrLine } from './shape.js'
  * (measured: 14 s after the address was opened) or after 300 s ("Timed out waiting for the authentication flow").
  *
  * So the sign-in is a process of its own, tied to no session: `initialize`, then `authenticate` with a bound past the
- * agent's own (330 s), and the process kept until it answers. The address reaches the host, never host.log:
- * - **macOS and Linux**: `BROWSER` names a small script in a private folder that writes the address it is given to a file
- *   there (measured on macOS: the launcher honours it, and no browser opens by itself); the host opens the browser
- * - **Every system**: the agent's stderr line `Open the following link to authenticate the ACP server: <url>`, read here
- *   and left out of the log (`agyStderrLine`); on Windows it is the only source, and the agent's own launcher opens the
- *   browser there (to be checked live, plan §9)
+ * agent's own (330 s), and the process kept until it answers. The agent never opens the browser itself, on any OS: its
+ * `BROWSER` is a helper in a private folder that writes the address it is given to a file there (`browserFolder`), and
+ * the host opens the browser (`openUrl`). On Windows that is through what opens things for the person outside the host's
+ * job object (the terminal broker, `main.ts`), so the browser outlives a Stop, the sign-in's end and the host (review of
+ * #1685: the agent's own launcher had started it as its child, inside the job). The agent's stderr line `Open the
+ * following link to authenticate the ACP server: <url>` is a second source of the same address, read here and left out
+ * of the log (`agyStderrLine`). The address reaches the host, never host.log.
  *
  * The address is opened once, and only an `https` address on a Google host. A cancel ends the process, and with it the
  * listener (ACP cannot cancel `authenticate`, spike §4).
@@ -37,7 +38,10 @@ export type SignInResult = { plan: { name: string; upgradeUri?: string } | null 
 export type SignInDeps = {
   /** Starts the sign-in process (`startToolProcess`: it ends with the host) */
   spawn?: (spec: AgentSpawnSpec) => AgentProcess
-  /** Opens an address in the person's browser on this machine */
+  /**
+   * Opens an address in the person's browser on this machine, outside the host's work: on Windows the host's opener that
+   * starts it outside the job (`main.ts`); `openInBrowser` where no such opener is given
+   */
   openUrl?: (url: string) => void
   platform?: Platform
   timeoutMs?: number
@@ -66,17 +70,18 @@ export function signInUrl(raw: string): string | null {
 }
 
 export async function runSignIn(home: AgyHome, archive: AgyArchive, signal: AbortSignal, deps: SignInDeps = {}): Promise<SignInResult> {
-  const folder = await signInFolder(home, deps.platform)
+  const folder = await browserFolder(home, deps.platform)
   const openUrl = deps.openUrl ?? ((url: string) => openInBrowser(url, deps.platform))
   let opened = false
   const offer = (raw: string) => {
     const url = signInUrl(raw)
     if (!url || opened) return
     opened = true
-    if (hostOpensSignIn(folder)) openUrl(url)
+    // No helper could be written (`browserFolder`): the agent's own launcher opens it, and a second window would follow
+    if (folder.browser !== '') openUrl(url)
   }
-  const launch = agyLaunch(home, archive)
-  const spec: AgentSpawnSpec = { ...launch, cwd: home.root, env: { ...process.env, ...launch.env, ...(folder.helper ? { BROWSER: folder.helper } : {}) } }
+  const launch = agyLaunch(home, archive, folder.browser)
+  const spec: AgentSpawnSpec = { ...launch, cwd: home.root, env: { ...process.env, ...launch.env } }
   const proc = startToolProcess(spec, deps.spawn ? { spawn: deps.spawn } : {})
   const lines = lineSplitter((line) => {
     const m = URL_LINE.exec(line)

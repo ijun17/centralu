@@ -154,6 +154,11 @@ export class AcpConnection {
     this.proc.stdin.write(line + '\n')
   }
 
+  /** Fails every request still waiting with `error`: the caller knows why none will be answered (the process is left to it) */
+  failPending(error: Error): void {
+    this.pending.rejectAll(error)
+  }
+
   /** This side is ending the process (the session core stops it next): its exit is expected, and nothing more is written */
   close(): void {
     this.closed = true
