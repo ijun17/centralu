@@ -60,7 +60,7 @@ test('usage gets one donut per tool — the screen never guesses which tool is m
  * dashboard. The test is installed-plus-logged-in — the **same test** the new-session dialog
  * uses, so the two places on screen never give different answers to "can this tool be used."
  */
-test('a tool that is not logged in gets an error donut, not a usage one (#59)', async ({ page }) => {
+test('a tool that is not logged in gets an signed-out donut, not a usage one (#59)', async ({ page }) => {
   await page.goto('/?mock=1')
   await page.evaluate(() => {
     const m = (window as never as { __mock: any }).__mock

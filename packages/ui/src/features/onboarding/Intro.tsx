@@ -17,7 +17,8 @@ import { ORCHESTRATOR_DEMANDS, useRefusals } from '../project/useToolChoice.js'
  *
  * **The card doubles as the detection display.** There is no separate tool-detection screen — a
  * ready tool gets a live card, and a tool that is not ready gets a dim card with "Not connected"
- * and the prescription (an install or login command) standing right there together. Where the
+ * and the prescription (an install or login command) standing right there together. A tool Centralu
+ * installs itself (Antigravity) shows its setup line instead, without the "Not connected" line, and is dimmed only before install. Where the
  * state is shown and where the action happens are the same spot.
  *
  * **Clicking a card only records the choice; no process starts** (lazy start). The orchestrator
@@ -92,13 +93,13 @@ export function Intro() {
                     ? 'border-line bg-surface-raised hover:border-line-strong'
                     : managed
                       ? // Dimmed only before it is installed: installed and waiting for a sign-in it is the person's next step, so not faded
-                        t.installed
+                        t.installed && refusal(t.name) === null
                         ? 'cursor-default border-line bg-surface-raised'
                         : 'cursor-default border-line/60 bg-surface-raised/40'
                       : 'cursor-not-allowed border-line/60 bg-surface-raised/40 opacity-40'
                 }`}
               >
-                <span className={`block text-md font-medium text-ink ${managed ? `transition-opacity duration-150 ${t.installed ? '' : 'opacity-40'}` : ''}`}>{t.label}</span>
+                <span className={`block text-md font-medium text-ink ${managed ? `transition-opacity duration-150 ${t.installed && refusal(t.name) === null ? '' : 'opacity-40'}` : ''}`}>{t.label}</span>
                 {managed ? (
                   <>
                     {ok && <span className="readout cc-setup-swap mt-1 block text-xs text-ink-faint">{t.detail}</span>}

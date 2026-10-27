@@ -95,7 +95,7 @@ describe('withLiveSetups: a setup that moved after the list was read', () => {
   })
 })
 
-describe('signedOutTools: which tools get an error donut', () => {
+describe('signedOutTools: which tools get an signed-out donut', () => {
   it('every tool that is installed but signed out, and not one that is missing, ready, or cannot tell', () => {
     const list = [
       status('claude', true, false),

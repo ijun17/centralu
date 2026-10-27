@@ -93,7 +93,7 @@ export function setupStates(live: Partial<Record<string, ToolSetup>>): string {
     .join(',')
 }
 
-/** The tools to draw an error donut for: installed, and the tool says it is signed out (`unknown`, OpenCode's, is not) */
+/** The tools to draw an signed-out donut for: installed, and the tool says it is signed out (`unknown`, OpenCode's, is not) */
 export function signedOutTools(tools: readonly ToolStatus[]): ToolStatus[] {
   return tools.filter((t) => {
     const s = t.setup ?? setupOfDetection(t.installed, t.loggedIn)

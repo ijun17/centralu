@@ -212,7 +212,7 @@ export function remoteMachineToolsTests(): void {
         const m = (window as unknown as MockWindow).__mock
         const claude = m.detected.find((t: any) => t.name === 'claude')
         m.machineDetected = { box: [claude] }
-        // Not installed here: an installed tool that is signed out has an error donut of its own now (tool-setup.ts)
+        // Not installed here: an installed tool that is signed out has an signed-out donut of its own now (tool-setup.ts)
         m.detected = [{ ...claude, installed: false, loggedIn: false }]
       })
       await reconnectHost(page)

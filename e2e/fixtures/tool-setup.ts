@@ -3,8 +3,8 @@ import { setup } from './control.js'
 import { openSessionDialog } from './new-session.js'
 
 /**
- * A tool's setup line and the top bar's error donuts (#59, owner 2026-10-27): Antigravity's Install and Sign in inside
- * Centralu, the terminal hint for the other tools, a sentence only on a linked machine, and an error-style donut for every
+ * A tool's setup line and the top bar's signed-out donuts (#59, owner 2026-10-27): Antigravity's Install and Sign in inside
+ * Centralu, the terminal hint for the other tools, a sentence only on a linked machine, and a signed-out donut for every
  * tool that is installed but signed out. Driven through the mock platform, which answers the four setup RPCs and
  * moves the setup the way the host's `tool_setup` event does. A function, because it runs in Chromium and in WebKit
  * (the desktop app is WKWebView): tool-setup.spec.ts and tool-setup-webkit.spec.ts.
@@ -312,6 +312,12 @@ export function toolSetupTests(): void {
       const card = page.getByTestId('intro-card-antigravity')
       await expect(card).not.toHaveAttribute('role', 'button')
       await expect(page.getByTestId('intro-card-antigravity-setup')).toContainText('Antigravity needs a Google sign-in.')
+      // Not eligible, in the narrow card: Verify account and Sign in again stay together as a pair
+      await told(page, centralu('signed_out', { failure: { reason: 'ineligible', message: 'no', verifyUri: 'https://accounts.google.com/verify' } }))
+      const [va, sa] = await Promise.all([page.getByTestId('intro-card-antigravity-setup-verify').boundingBox(), page.getByTestId('intro-card-antigravity-setup-sign-in').boundingBox()])
+      expect(Math.abs((va?.y ?? 0) - (sa?.y ?? 99))).toBeLessThan(4)
+      await told(page, centralu('signed_out'))
+      await expect(page.getByTestId('intro-card-antigravity-setup-verify')).toHaveCount(0)
       // The line says it once: no grey "Not connected" above it, and installed and waiting for a sign-in the card is not dimmed
       await expect(card).not.toContainText('Not connected')
       await expect(card.locator('span').first()).not.toHaveClass(/opacity-40/)
@@ -324,9 +330,25 @@ export function toolSetupTests(): void {
       await card.click()
       await expect(page.getByTestId('orchestrator-suggestions')).toBeVisible()
     })
+
+    test('a managed card that the orchestrator cannot take says why, and stays dimmed', async ({ page }) => {
+      await page.goto('/?mock=1')
+      await expect(page.getByTestId('intro')).toBeVisible()
+      await page.evaluate(() => {
+        const m = (window as unknown as MockWindow).__mock
+        m.capabilityLimits.antigravity = { roleText: false }
+        const claude = m.detected.find((t: any) => t.name === 'claude')
+        m.detected = [claude, { name: 'antigravity', label: 'Antigravity', mark: 'A', install: 'x', login: 'y', installed: true, loggedIn: true, detail: 'agent', setup: { state: 'ready', install: 'centralu', signIn: 'centralu' } }]
+      })
+      await page.getByTestId('redetect').click()
+      const line = page.getByTestId('intro-card-antigravity-setup')
+      await expect(line).toHaveAttribute('data-setup', 'refused')
+      await expect(line).toContainText('Antigravity')
+      await expect(page.getByTestId('intro-card-antigravity').locator('span').first()).toHaveClass(/opacity-40/)
+    })
   })
 
-  test.describe('the top bar: an error donut for a tool installed but signed out (#59)', () => {
+  test.describe('the top bar: a signed-out donut for a tool installed but signed out (#59)', () => {
     test.beforeEach(async ({ page }) => {
       await setup(page, { projects: ['/tmp/alpha'] })
     })
@@ -357,6 +379,8 @@ export function toolSetupTests(): void {
       // Waiting on the person is the signal's white, not an error's red (design-system §1)
       await expect(page.getByTestId('usage-donut-antigravity').locator('circle').first()).toHaveClass(/text-ink-signal/)
       await expect(page.getByTestId('usage-donut-antigravity').locator('circle').first()).not.toHaveClass(/text-danger/)
+      await expect(page.getByTestId('usage-donut-antigravity').locator('text')).toHaveClass(/text-ink-signal/)
+      await expect(page.getByTestId('usage-donut-antigravity').locator('text')).not.toHaveClass(/text-danger/)
       await expect(page.getByTestId('usage-donut-absent')).toHaveCount(0)
       // Something to do is not "no agent"
       await expect(page.getByTestId('usage-no-agent')).toHaveCount(0)
