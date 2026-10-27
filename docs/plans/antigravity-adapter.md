@@ -595,7 +595,12 @@ so it is run by hand before an `agy` bump, not on a schedule. The weekly surface
    for the descriptors test; the drift run itself is the later item 4), `os.runsAntigravity` (macOS and Linux only: on
    Windows it shows as not installed, "not available on Windows yet"), and the packaged layout: `scripts/agy-gate-files.mjs`
    copies `agy-gate.mjs` and `gate-answer.mjs` beside `main.mjs`, and `gate-path.ts` finds the command in both layouts
-   (`tooling/agy-gate-bundle.test.ts`). No usage and no context share yet.
+   (`tooling/agy-gate-bundle.test.ts`). No usage and no context share yet. The install line is the official Unix
+   bootstrapper, `curl -fsSL https://antigravity.google/cli/install.sh | bash` (it installs to `~/.local/bin`; checked
+   2026-10-27, HTTP 200). The login probe `agy -p /usage --output-format json` is read-only on macOS 1.4.8 (`num_turns` 0,
+   all token counts 0, empty `conversation_id`, about 7 s), and is cached for 60 s like Cursor's `agent status`. On
+   Windows 1.4.8 it is not read-only (it ran a model turn, and logged out it waited for an OAuth code), which is why
+   Windows stays off in this version.
 2. **Models and effort, sub-agent progress, nudges** through `PreInvocation`, if measured useful.
 3. **Windows**: launch, `cmd /c` hooks, paths in the plugin root; measured on the Windows machine with its own login.
 4. **The drift check** in the weekly surface run.

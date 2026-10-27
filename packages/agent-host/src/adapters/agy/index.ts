@@ -12,7 +12,7 @@ const DESCRIPTOR: ToolDescriptor = {
   name: 'agy',
   label: 'Antigravity',
   mark: 'A',
-  install: 'curl -fsSL https://antigravity.google/install.sh | bash',
+  install: 'curl -fsSL https://antigravity.google/cli/install.sh | bash',
   login: 'agy',
 }
 
