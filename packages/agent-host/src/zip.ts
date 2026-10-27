@@ -1,4 +1,5 @@
 import { inflateRawSync } from 'node:zlib'
+import { errorMessage } from '@cc/protocol'
 
 /**
  * Zip reading (M4 E-3) — unpacks an imported app's bundle **while validating it**. Three reasons
@@ -125,7 +126,7 @@ export function readZipEntry(buf: Buffer, e: ZipEntry): Buffer {
       // A declared size of 0 is treated as 1 — even an empty file has a deflate stream. Exceeding it by even one byte breaks the declaration
       data = inflateRawSync(raw, { maxOutputLength: Math.max(e.size, 1) })
     } catch (err) {
-      throw new ZipError(`Could not unpack ${e.name}: ${(err as Error).message}`)
+      throw new ZipError(`Could not unpack ${e.name}: ${errorMessage(err)}`)
     }
   } else throw new ZipError(`Unsupported compression method ${e.method}: ${e.name}`)
   if (data.length !== e.size) throw new ZipError(`${e.name} unpacks to ${data.length} bytes, not the ${e.size} it declares`)
@@ -153,6 +154,6 @@ const CRC_TABLE = (() => {
 
 export function crc32(data: Uint8Array): number {
   let c = 0xffffffff
-  for (let i = 0; i < data.length; i++) c = CRC_TABLE[(c ^ data[i]!) & 0xff]! ^ (c >>> 8)
+  for (let i = 0; i < data.length; i++) c = (CRC_TABLE[(c ^ (data[i] ?? 0)) & 0xff] ?? 0) ^ (c >>> 8)
   return (c ^ 0xffffffff) >>> 0
 }

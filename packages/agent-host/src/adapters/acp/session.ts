@@ -1,4 +1,6 @@
-import { readFile, realpath, stat } from 'node:fs/promises'
+import { realpath as realpathCallback } from 'node:fs'
+import { readFile, stat } from 'node:fs/promises'
+import { promisify } from 'node:util'
 import { isAbsolute, join, relative, sep } from 'node:path'
 import { z } from 'zod'
 import type { ApprovalDecision, ApprovalDetail, NormalizedEvent, PermissionPreset, QuestionAnswer } from '@cc/protocol'
@@ -517,7 +519,14 @@ class AcpWire implements ToolWire {
   private foldEdit(u: ToolCallFields, kind: 'tool_call' | 'tool_call_update'): ToolCallFields {
     const into = this.folded.get(u.toolCallId)
     if (into) return { ...u, toolCallId: into }
-    if (kind !== 'tool_call' || u.kind !== 'edit' || this.allowedEdits.length === 0) return u
+    // An allowed edit that ended with no run of its own (the agent said it failed) waits for none: a later edit of the
+    // same file is folded into its own asked call, not into this ended one
+    if (u.status === 'completed' || u.status === 'failed') {
+      const at = this.allowedEdits.findIndex((a) => a.callId === u.toolCallId)
+      if (at >= 0) this.allowedEdits.splice(at, 1)
+    }
+    // A run is said running or ended; a `pending` call is another edit about to be asked, never a run
+    if (kind !== 'tool_call' || u.kind !== 'edit' || u.status === 'pending' || this.allowedEdits.length === 0) return u
     const paths = editPaths(u)
     const at = this.allowedEdits.findIndex((a) => a.paths.some((p) => paths.includes(p)))
     const allowed = at < 0 ? undefined : this.allowedEdits.splice(at, 1)[0]
@@ -658,6 +667,9 @@ export const ReadTextFileParams = z.looseObject({
 })
 export type ReadTextFileParams = z.infer<typeof ReadTextFileParams>
 
+/** The OS's own real path (Windows: long names and the disk's case), so a short name cannot slip past a refused folder */
+const realPath = promisify(realpathCallback.native)
+
 /** A file larger than this is not read whole into the agent's context (a log, a build output) */
 export const MAX_READ_BYTES = 8 * 1024 * 1024
 
@@ -669,12 +681,12 @@ export async function readTextFileFor(cwd: string, refused: readonly string[], p
   if (!p.success) throw new RpcError(-32602, 'fs/read_text_file needs a path')
   const { path, line, limit } = p.data
   if (!isAbsolute(path)) throw new RpcError(-32602, 'fs/read_text_file needs an absolute path')
-  const real = await realpath(path).catch(() => null)
+  const real = await realPath(path).catch(() => null)
   if (real === null) throw new RpcError(RESOURCE_NOT_FOUND, `No such file: ${path}`)
-  const root = await realpath(cwd).catch(() => null)
+  const root = await realPath(cwd).catch(() => null)
   if (root === null || !inside(root, real)) throw new RpcError(RESOURCE_NOT_FOUND, `${REFUSED}: ${path} is outside it`)
   for (const folder of refused) {
-    const no = await realpath(folder).catch(() => folder)
+    const no = await realPath(folder).catch(() => folder)
     if (inside(no, real) || real === no) throw new RpcError(RESOURCE_NOT_FOUND, `${REFUSED}: ${path} is the agent's own data`)
   }
   const info = await stat(real)

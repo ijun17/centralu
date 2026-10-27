@@ -53,6 +53,10 @@ its label and mark (Antigravity, `A`) are carried over.
 | `index.ts` | The profile, its capabilities and `AntigravityAdapter` |
 | `surface.ts` | What the installed agent offers (#270), with a baseline from the spike's `initialize` |
 
+**Not shown yet.** The registry adds the adapter only with `CC_ANTIGRAVITY=1` (the live checks set it): registered,
+every tool picker would draw Antigravity's line, and the screens and their words are the next pull request's. That one
+removes the switch.
+
 The ACP core gains one optional profile part, `AcpToolShape` (`acp/profile.ts`): hooks at fixed points, each absent for
 Cursor and OpenCode, so their behaviour is unchanged (their replays pass as before).
 
@@ -201,7 +205,9 @@ After `allow` the edit runs as a new call (`<session>:<n>`, "Running edit_file")
 ("Tool call was approved but never executed") when the turn ends, though the file changed (spike §5). The core keeps the
 edits allowed in the turn, with their files; a new `edit` call whose file one of them names is said under that call's
 id, so the card the person answered ends as the edit did; the asked call's own late `failed` then finds it ended and is
-dropped (the normalizer drops any update of a call that ended this turn). Replayed on the spike's frames.
+dropped (the normalizer drops any update of a call that ended this turn). A `pending` call is never taken for a run
+(it is the next edit about to be asked), and an allowed edit that ends with no run of its own waits for none, so a
+later edit of the same file folds into its own card. Replayed on the spike's frames; the two edge cases are scripted.
 
 ### 5.4 Questions
 
@@ -287,6 +293,9 @@ one by one on Windows):
 | Fix | Test |
 |---|---|
 | Edit run folded into the asked call; ended calls' updates dropped | `replay.test.ts` permissions |
+| A pending edit never taken for a run; an allowed edit that ended with no run no longer waits | `shape.test.ts` |
+| Stderr judged line by line (a split address never reaches the log) | `shape.test.ts` |
+| Registered only with `CC_ANTIGRAVITY=1` | `replay.test.ts` registry |
 | Field names read (`Cwd`, `combinedOutput`) | `replay.test.ts` permissions |
 | Viewers off, never `set_mode`, never `allow_always` | `replay.test.ts` default mode |
 | `-32000` is a Centralu sign-in; the line turns signed out | `replay.test.ts` signed out |

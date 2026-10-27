@@ -113,8 +113,17 @@ export function adoptToolProcess(proc: AgentProcess, sessionId: string | undefin
 
 /** The host log's line for what a tool writes to stderr, cut at 500 characters (the tail for messages is `stderrTail`) */
 export function logToolStderr(proc: AgentProcess, label: string, line?: (line: string) => string | null): void {
+  if (line) {
+    // Line by line, so a line split across two chunks is judged whole (an address must not reach the log in halves)
+    const lines = lineSplitter((l) => {
+      const kept = line(l)?.trim()
+      if (kept) console.error(`[${label}]`, kept.slice(0, 500))
+    })
+    proc.stderr?.on('data', (d: Buffer | string) => lines.push(d))
+    return
+  }
   proc.stderr?.on('data', (d) => {
-    const s = (line ? redactLines(String(d), line) : String(d)).trim()
+    const s = String(d).trim()
     if (s) console.error(`[${label}]`, s.slice(0, 500))
   })
 }

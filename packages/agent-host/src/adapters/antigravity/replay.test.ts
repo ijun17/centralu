@@ -76,6 +76,14 @@ async function open(w: ReturnType<typeof world>, preset: PermissionPreset = 'nor
 
 const of = <T extends NormalizedEvent['type']>(events: readonly NormalizedEvent[], type: T) => events.filter((e): e is Extract<NormalizedEvent, { type: T }> => e.type === type)
 
+describe('Antigravity in the registry', () => {
+  it('is registered only when asked for, until its screens land', async () => {
+    const { createAdapters } = await import('../registry.js')
+    expect(createAdapters({ antigravity: false }).has('antigravity')).toBe(false)
+    expect(createAdapters({ antigravity: true }).get('antigravity')).toBeInstanceOf(AntigravityAdapter)
+  })
+})
+
 describe('Antigravity 1.4.3, replayed', () => {
   it('permissions: a command and an edit asked and allowed; the edit card ends as the edit did, under the id that was asked', async () => {
     const w = world(recording('permissions'))

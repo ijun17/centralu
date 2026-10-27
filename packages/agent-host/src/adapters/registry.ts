@@ -19,9 +19,18 @@ import type { AgentAdapter } from './contract.js'
  * descriptor tests something to hold: the rules that used to live in the protocol's shape
  * (marks are distinct, the commands are real) can only be checked across the whole set.
  */
-export function createAdapters(): Map<ToolName, AgentAdapter> {
-  const all: AgentAdapter[] = [new ClaudeAdapter(), new CodexAdapter(), new CursorAgentAdapter(), new OpenCodeAdapter(), new AntigravityAdapter()]
+export function createAdapters(opts: { antigravity?: boolean } = {}): Map<ToolName, AgentAdapter> {
+  const all: AgentAdapter[] = [new ClaudeAdapter(), new CodexAdapter(), new CursorAgentAdapter(), new OpenCodeAdapter()]
+  if (opts.antigravity ?? antigravityShown()) all.push(new AntigravityAdapter())
   return new Map(all.map((a) => [a.tool, a]))
+}
+
+/**
+ * Antigravity is registered only with `CC_ANTIGRAVITY=1` until its screens land (#59: the host side comes first, and
+ * the screens are the owner's call): registered, every picker would draw its line with words nobody has approved
+ */
+function antigravityShown(): boolean {
+  return process.env.CC_ANTIGRAVITY === '1'
 }
 
 /**

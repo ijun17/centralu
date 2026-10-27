@@ -176,7 +176,7 @@ export async function installAgy(
     // A folder there without a whole install (another version's sha, a damaged copy) is replaced; a whole one is kept
     if (isInstalled(home, archive)) return
     await rm(home.versionDir, { recursive: true, force: true })
-    await rename(pkg, home.versionDir)
+    await renameHeld(pkg, home.versionDir)
   } catch (err) {
     throw asFailure(err, signal)
   } finally {
@@ -267,6 +267,23 @@ async function removeOtherVersions(home: AgyHome): Promise<void> {
     const dir = join(home.root, n)
     if (dir === home.versionDir) continue
     await rm(dir, { recursive: true, force: true }).catch(() => {})
+  }
+}
+
+/**
+ * A rename Windows may refuse for a moment: a virus scanner holds a program just written (`EBUSY`, `EPERM`). Tried a few
+ * times, a moment apart; anything else, or the last refusal, is the install's failure
+ */
+async function renameHeld(from: string, to: string): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await rename(from, to)
+      return
+    } catch (err) {
+      const code: unknown = err instanceof Error ? Reflect.get(err, 'code') : undefined
+      if (attempt >= 5 || (code !== 'EBUSY' && code !== 'EPERM')) throw err
+      await new Promise((resolve) => setTimeout(resolve, 200 * attempt))
+    }
   }
 }
 

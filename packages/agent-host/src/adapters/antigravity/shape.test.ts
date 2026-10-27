@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { NormalizedEvent, PermissionPreset } from '@cc/protocol'
 import { readTextFileFor } from '../acp/session.js'
 import { FakeAcpPeer, type PeerScript } from '../acp/fake-peer.test-helpers.js'
-import { redactLines, startToolProcess } from '../core/tool-process.js'
+import { logToolStderr, redactLines, startToolProcess } from '../core/tool-process.js'
 import { AntigravityAdapter, antigravityProfile } from './index.js'
 import { agyStderrLine, readAgyCall } from './shape.js'
 import { driven, fakeInstall, fakeSignIn, readsWorld, sessionOpts, tempData, tokenPath } from './agent-files.test-helpers.js'
@@ -144,5 +144,81 @@ describe("the agent's field names", () => {
   it('reads a replayed rawInput (a JSON string, session/load) as the object it says', () => {
     const read = readAgyCall({ toolCallId: 'c', title: undefined, kind: 'execute', status: 'completed', content: undefined, locations: undefined, rawInput: '{"CommandLine":"echo hi","Cwd":"/p"}' })
     expect(read.rawInput).toMatchObject({ command: 'echo hi', cwd: '/p' })
+  })
+})
+
+describe("an allowed edit's run", () => {
+  const edit = (id: string, status: string, extra: Record<string, unknown> = {}) => ({
+    sessionUpdate: id.includes(':') || status === 'pending' ? 'tool_call' : 'tool_call_update',
+    toolCallId: id,
+    kind: 'edit',
+    status,
+    locations: [{ path: '/work/notes.txt' }],
+    ...extra,
+  })
+  const asked = (id: string) => ({
+    sessionId: SID,
+    toolCall: { toolCallId: id, kind: 'edit', status: 'pending', title: 'Run create_file?', rawInput: { TargetFile: '/work/notes.txt', CodeContent: 'x' } },
+    options: [
+      { optionId: 'allow', name: 'Allow', kind: 'allow_once' },
+      { optionId: 'deny', name: 'Deny', kind: 'reject_once' },
+    ],
+  })
+
+  it('is folded into its own asked call, even after an earlier allowed edit of that file ended with no run', async () => {
+    const w = world(base, 'auto')
+    const handle = await w.adapter.createSession(sessionOpts('agy-e', 'auto'), w.emit)
+    handle.send('go')
+    const peer = w.peers[0]!
+    await peer.next((m) => m.method === 'session/prompt')
+    // The first edit is allowed (Auto, no card), then ends failed with no run of its own
+    peer.update(SID, edit('ed-1', 'pending', { rawInput: { TargetFile: '/work/notes.txt' } }))
+    await peer.ask('session/request_permission', asked('ed-1'))
+    peer.update(SID, edit('ed-1', 'failed', { rawOutput: 'Tool call was approved but never executed.' }))
+    // A second edit of the same file is allowed, and runs under a new id
+    peer.update(SID, edit('ed-2', 'pending', { rawInput: { TargetFile: '/work/notes.txt' } }))
+    await peer.ask('session/request_permission', asked('ed-2'))
+    peer.update(SID, { ...edit(`${SID}:3`, 'in_progress', { rawInput: { file_path: '/work/notes.txt' } }), title: 'Running edit_file' })
+    peer.update(SID, { sessionUpdate: 'tool_call_update', toolCallId: `${SID}:3`, status: 'completed', rawOutput: 'Edited' })
+    const second = (await w.event((e) => e.type === 'tool_result' && e.callId === 'ed-2')) as Extract<NormalizedEvent, { type: 'tool_result' }>
+    expect(second.ok).toBe(true)
+    expect(w.events.filter((e) => e.type === 'tool_call').map((e) => (e as { callId: string }).callId)).toEqual(['ed-1', 'ed-2'])
+    await handle.dispose()
+  })
+  it('never takes another edit announced before the run for that run', async () => {
+    const w = world(base, 'auto')
+    const handle = await w.adapter.createSession(sessionOpts('agy-e2', 'auto'), w.emit)
+    handle.send('go')
+    const peer = w.peers[0]!
+    await peer.next((m) => m.method === 'session/prompt')
+    peer.update(SID, edit('ed-1', 'pending', { rawInput: { TargetFile: '/work/notes.txt' } }))
+    await peer.ask('session/request_permission', asked('ed-1'))
+    // A second edit of the same file is announced (pending) before the first one's run comes
+    peer.update(SID, edit('ed-2', 'pending', { rawInput: { TargetFile: '/work/notes.txt' } }))
+    peer.update(SID, { ...edit(`${SID}:3`, 'in_progress', { rawInput: { file_path: '/work/notes.txt' } }), title: 'Running edit_file' })
+    peer.update(SID, { sessionUpdate: 'tool_call_update', toolCallId: `${SID}:3`, status: 'completed', rawOutput: 'Edited' })
+    const first = (await w.event((e) => e.type === 'tool_result' && e.callId === 'ed-1')) as Extract<NormalizedEvent, { type: 'tool_result' }>
+    expect(first.ok).toBe(true)
+    expect(w.events.filter((e) => e.type === 'tool_call').map((e) => (e as { callId: string }).callId)).toEqual(['ed-1', 'ed-2'])
+    expect(w.events.some((e) => e.type === 'tool_result' && e.callId === 'ed-2')).toBe(false)
+    await handle.dispose()
+  })
+})
+
+describe('the log of a split stderr line', () => {
+  it('judges a line whole, so half an address never reaches host.log', async () => {
+    const said: string[] = []
+    const original = console.error
+    console.error = (...args: unknown[]) => void said.push(args.join(' '))
+    try {
+      const peer = new FakeAcpPeer(() => ({ hold: true }))
+      logToolStderr(peer, 'agy', agyStderrLine)
+      peer.stderr.write('Open the following link: https://accounts.goo')
+      peer.stderr.write('gle.com/o/oauth2/v2/auth?state=secretpart\nplain line\n')
+      await new Promise((r) => setImmediate(r))
+    } finally {
+      console.error = original
+    }
+    expect(said).toEqual(['[agy] plain line'])
   })
 })

@@ -525,5 +525,3 @@ packages/agent-host/src/views/view-host.ts @typescript-eslint/no-non-null-assert
 packages/agent-host/src/views/view-host.ts @typescript-eslint/no-unnecessary-type-assertion 1
 packages/agent-host/src/views/view-host.ts @typescript-eslint/no-unsafe-type-assertion 2
 packages/agent-host/src/views/view-host.ts @typescript-eslint/unbound-method 1
-packages/agent-host/src/zip.ts @typescript-eslint/no-non-null-assertion 2
-packages/agent-host/src/zip.ts @typescript-eslint/no-unsafe-type-assertion 1
