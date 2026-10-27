@@ -14,7 +14,7 @@ import { agyRecording, exists, fakeInstall, HOST_TEST_PLATFORM, inVersion, lefto
  * the opener is a stand-in that writes down what it was given.
  */
 
-const ADDRESS = 'https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=x&redirect_uri=http%3A%2F%2F127.0.0.1%3A1%2F&state=s'
+const ADDRESS = 'https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com&redirect_uri=http%3A%2F%2F127.0.0.1%3A1%2F&state=s'
 
 const data: { done(): void }[] = []
 afterEach(() => {
@@ -173,7 +173,7 @@ describe("Antigravity's sign-in", () => {
   it('leaves no helper folder when the process cannot start', async () => {
     const h = home()
     const failure = await runSignIn(h, TEST_ARCHIVE, new AbortController().signal, {
-      platform: 'darwin',
+      platform: HOST_TEST_PLATFORM,
       openUrl: () => {},
       spawn: () => {
         const p = new FakeAcpPeer(() => ({ hold: true }))

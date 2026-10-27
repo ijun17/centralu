@@ -26,7 +26,8 @@ import { agyStderrLine } from './shape.js'
  * following link to authenticate the ACP server: <url>` is a second source of the same address, read here and left out
  * of the log (`agyStderrLine`). The address reaches the host, never host.log.
  *
- * The address is opened once, and only an `https` address on a Google host. A cancel ends the process, and with it the
+ * The address is opened once, and only the agent's own login request (`agentSignInUrl`). Where no helper can be written
+ * the sign-in is refused, not started (`NO_HELPER`). A cancel ends the process, and with it the
  * listener (ACP cannot cancel `authenticate`, spike §4).
  */
 
@@ -50,7 +51,11 @@ export type SignInDeps = {
 const Tier = z.looseObject({ name: z.string(), upgradeUri: z.string().nullish() })
 const AuthResult = z.looseObject({ _meta: z.looseObject({ antigravity: z.looseObject({ tier: Tier.nullish() }).nullish() }).nullish() }).nullish()
 
-const URL_LINE = /Open the following link to authenticate the ACP server:\s*(\S+)/
+/** Why no `BROWSER` helper could be written: the paths it is made of hold what its launcher splits at */
+export const NO_HELPER =
+  "the path of Centralu's data folder or of the host's Node holds a character Antigravity's browser setting cannot carry (';' on Windows, ':' elsewhere, or '%s')"
+
+const URL_LINE =/Open the following link to authenticate the ACP server:\s*(\S+)/
 
 /**
  * An address worth opening: https, on a Google host, with no user part (`https://someone@accounts.google.com/…` would carry
@@ -69,16 +74,62 @@ export function signInUrl(raw: string): string | null {
   }
 }
 
+/**
+ * The OAuth client of Antigravity's ACP server 1.4.3: public, it stands in the agent's own login address (measured on
+ * Windows and on Linux with a token the agent could not use). A new release must be measured again (`AGY_RELEASE`)
+ */
+export const AGY_OAUTH_CLIENT = '1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com'
+
+const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]'])
+
+/**
+ * The agent's own login request, and nothing else Google serves: `https://accounts.google.com/o/oauth2/v2/auth` with
+ * `response_type=code`, the agent's client (`AGY_OAUTH_CLIENT`) and a `redirect_uri` on this machine's loopback (its
+ * one-shot listener), each named once. `BROWSER` reaches every command the agent runs, so a Google address alone says
+ * nothing (deep review of #1687: `gcloud auth login` opens Google's authorize page with gcloud's own client, a script may
+ * open a Google Doc); only this one is the agent asking for a sign-in. The address passed on is `signInUrl`'s rebuilt one
+ */
+export function agentSignInUrl(raw: string): string | null {
+  const url = signInUrl(raw)
+  if (!url) return null
+  const parsed = new URL(url)
+  if (parsed.hostname !== 'accounts.google.com' || parsed.pathname !== '/o/oauth2/v2/auth') return null
+  const one = (name: string) => {
+    const all = parsed.searchParams.getAll(name)
+    return all.length === 1 ? (all[0] ?? null) : null
+  }
+  if (one('response_type') !== 'code' || one('client_id') !== AGY_OAUTH_CLIENT) return null
+  try {
+    const back = new URL(one('redirect_uri') ?? '')
+    if (back.protocol !== 'http:' || !LOOPBACK.has(back.hostname) || back.username !== '' || back.password !== '') return null
+  } catch {
+    return null
+  }
+  return url
+}
+
 export async function runSignIn(home: AgyHome, archive: AgyArchive, signal: AbortSignal, deps: SignInDeps = {}): Promise<SignInResult> {
   const folder = await browserFolder(home, deps.platform)
+  // No helper could be written (`browserFolder`): the agent's own launcher would start the browser, on Windows inside the
+  // host's job, so a Stop or the host's exit would end it with every tab. Refused rather than started
+  if (folder.browser === '') {
+    await folder.remove()
+    console.error(`[Antigravity] sign-in refused: ${NO_HELPER}`)
+    throw new InstallFailure('failed', `Antigravity cannot sign in here: ${NO_HELPER}`)
+  }
   const openUrl = deps.openUrl ?? ((url: string) => openInBrowser(url, deps.platform))
   let opened = false
   const offer = (raw: string) => {
-    const url = signInUrl(raw)
-    if (!url || opened) return
+    if (opened) return
+    // Only the agent's own login request (`agentSignInUrl`): the folder is under the data folder, where an agent of
+    // another session could write (deep review of #1687, follow-up 5)
+    const url = agentSignInUrl(raw)
+    if (!url) {
+      console.error('[Antigravity] the sign-in was handed an address that is not its own login request; not opened')
+      return
+    }
     opened = true
-    // No helper could be written (`browserFolder`): the agent's own launcher opens it, and a second window would follow
-    if (folder.browser !== '') openUrl(url)
+    openUrl(url)
   }
   const launch = agyLaunch(home, archive, folder.browser)
   const spec: AgentSpawnSpec = { ...launch, cwd: home.root, env: { ...process.env, ...launch.env } }

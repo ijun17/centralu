@@ -23,7 +23,8 @@ import { createRequire } from 'node:module'
 import { createInterface } from 'node:readline'
 
 const require = createRequire(import.meta.url)
-const pty = require('node-pty')
+/** node-pty, loaded as the broker starts (`main`); a test that imports this file for `handle` loads none */
+let pty
 
 /** @type {Map<number, any>} */
 const ptys = new Map()
@@ -52,12 +53,12 @@ function spawnPty(m) {
 /**
  * The person's browser at an address (Antigravity's sign-in page): started from here, outside the host's job, so it
  * outlives the sign-in and the host. `detached`, so libuv puts it in no job of this process's either (it ends with this
- * one otherwise); never through a shell, and only an `https` address
+ * one otherwise); never through a shell, and only an `https` address. `start` is `spawn` (a test gives its own)
  */
-function open(url) {
+function open(url, start) {
   if (typeof url !== 'string' || !/^https:\/\//i.test(url)) return
   try {
-    const child = spawn('rundll32', ['url.dll,FileProtocolHandler', url], { detached: true, stdio: 'ignore', windowsHide: true })
+    const child = start('rundll32', ['url.dll,FileProtocolHandler', url], { detached: true, stdio: 'ignore', windowsHide: true })
     child.on('error', () => {})
     child.unref()
   } catch {
@@ -65,8 +66,9 @@ function open(url) {
   }
 }
 
-function handle(m) {
-  if (m.op === 'open') return open(m.url)
+/** One request from the host. `start` starts what `open` opens: `spawn`, or a test's stand-in so no browser opens */
+export function handle(m, start = spawn) {
+  if (m.op === 'open') return open(m.url, start)
   if (m.op === 'spawn') {
     let p
     try {
@@ -99,16 +101,22 @@ function handle(m) {
   }
 }
 
-const lines = createInterface({ input: process.stdin })
-lines.on('line', (line) => {
-  let m
-  try {
-    m = JSON.parse(line)
-  } catch {
-    return
-  }
-  handle(m)
-})
-// The host is gone (closed, crashed, killed): every pseudoconsole closes with this process
-lines.on('close', () => process.exit(0))
-send({ ev: 'ready' })
+function main() {
+  pty = require('node-pty')
+  const lines = createInterface({ input: process.stdin })
+  lines.on('line', (line) => {
+    let m
+    try {
+      m = JSON.parse(line)
+    } catch {
+      return
+    }
+    handle(m)
+  })
+  // The host is gone (closed, crashed, killed): every pseudoconsole closes with this process
+  lines.on('close', () => process.exit(0))
+  send({ ev: 'ready' })
+}
+
+// Started as the broker (`node pty-broker.mjs`, which every start is); a test imports it with this flag set to read `handle`
+if (!globalThis.__ccPtyBrokerImported) main()

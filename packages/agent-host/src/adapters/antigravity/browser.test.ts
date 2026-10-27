@@ -2,9 +2,11 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
 import { FakeAcpPeer, type PeerScript } from '../acp/fake-peer.test-helpers.js'
 import type { AgentSpawnSpec } from '../contract.js'
-import { browserFolder, windowsBrowserCommand } from './agent-files.js'
+import { agyHome, browserFolder, windowsBrowserCommand } from './agent-files.js'
+import { InstallFailure } from './failure.js'
 import { AntigravityAdapter, antigravityProfile } from './index.js'
-import { runSignIn } from './sign-in.js'
+import { AGY_RELEASE } from './release.js'
+import { AGY_OAUTH_CLIENT, agentSignInUrl, runSignIn } from './sign-in.js'
 import { driven, fakeInstall, fakeSignIn, HOST_TEST_ARCHIVE, HOST_TEST_PLATFORM, leftovers, runBrowser, sessionOpts, tempData, TEST_ARCHIVE } from './agent-files.test-helpers.js'
 
 /**
@@ -17,8 +19,16 @@ import { driven, fakeInstall, fakeSignIn, HOST_TEST_ARCHIVE, HOST_TEST_PLATFORM,
  * is a scripted peer, as no recording holds a sign-in that stopped working.
  */
 
-/** An address with `&` in it: a batch file would have handed it to `cmd`, which splits it there */
-const ADDRESS = 'https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=x&redirect_uri=http%3A%2F%2F127.0.0.1%3A1%2F&state=s'
+/**
+ * The agent's own login request, as 1.4.3 hands it to `BROWSER` (measured on Windows; the state and the PKCE challenge
+ * stand in). With `&` in it: a batch file would have handed it to `cmd`, which splits it there
+ */
+const ADDRESS = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${AGY_OAUTH_CLIENT}&redirect_uri=http%3A%2F%2F127.0.0.1%3A60382%2F&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcloud-platform+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email&state=s&code_challenge=c&code_challenge_method=S256&access_type=offline&prompt=consent`
+
+/** What `gcloud auth login` opens (deep review of #1687): Google's authorize page, with gcloud's own public client */
+const GCLOUD = 'https://accounts.google.com/o/oauth2/auth?response_type=code&client_id=32555940559.apps.googleusercontent.com&redirect_uri=http%3A%2F%2Flocalhost%3A8085%2F&scope=openid'
+/** A page a script the agent runs may open */
+const DOC = 'https://docs.google.com/document/d/abc/edit'
 
 const data: { done(): void }[] = []
 const saved = process.env.BROWSER
@@ -74,6 +84,22 @@ describe("the BROWSER helper's folder", () => {
     await folder.remove()
   })
 
+  it("takes only the agent's own login request: its client, Google's v2 authorize page, a loopback redirect", () => {
+    expect(agentSignInUrl(ADDRESS)).toBe(ADDRESS)
+    expect(agentSignInUrl(ADDRESS.replace('127.0.0.1', 'localhost'))).toBe(ADDRESS.replace('127.0.0.1', 'localhost'))
+    expect(agentSignInUrl(GCLOUD)).toBeNull()
+    expect(agentSignInUrl(GCLOUD.replace('/o/oauth2/auth', '/o/oauth2/v2/auth'))).toBeNull()
+    expect(agentSignInUrl(DOC)).toBeNull()
+    // Each part on its own: the client named twice, another redirect, another host or path, no code flow, not https
+    expect(agentSignInUrl(`${ADDRESS}&client_id=32555940559.apps.googleusercontent.com`)).toBeNull()
+    expect(agentSignInUrl(ADDRESS.replace('http%3A%2F%2F127.0.0.1%3A60382', 'https%3A%2F%2Fevil.example'))).toBeNull()
+    expect(agentSignInUrl(ADDRESS.replace('http%3A%2F%2F127.0.0.1', 'http%3A%2F%2Fuser%40127.0.0.1'))).toBeNull()
+    expect(agentSignInUrl(ADDRESS.replace('accounts.google.com', 'myaccount.google.com'))).toBeNull()
+    expect(agentSignInUrl(ADDRESS.replace('/o/oauth2/v2/auth', '/o/oauth2/v2/authx'))).toBeNull()
+    expect(agentSignInUrl(ADDRESS.replace('response_type=code', 'response_type=token'))).toBeNull()
+    expect(agentSignInUrl(ADDRESS.replace('https:', 'http:'))).toBeNull()
+  })
+
   it('is no command where a path holds the separator the launcher splits BROWSER at, or %s', () => {
     expect(windowsBrowserCommand('C:\\node\\node.exe', "C:\\Users\\o'neil\\x\\open-url.mjs")).toBe(`'C:\\node\\node.exe' 'C:\\Users\\o'\\''neil\\x\\open-url.mjs' %s`)
     expect(windowsBrowserCommand('C:\\a;b\\node.exe', 'C:\\x\\open-url.mjs')).toBe('')
@@ -94,7 +120,9 @@ describe("the sign-in's browser", () => {
       if (method === 'initialize') return { result: { protocolVersion: 1 } }
       if (method === 'authenticate') {
         // As the agent's launcher does with the address (it prints it on stderr too; left out here, so only the helper tells),
-        // then answers once the person has signed in in the browser the host opened
+        // then answers once the person has signed in in the browser the host opened. An address another process wrote
+        // into the folder first (an agent of another session can write under the data folder) is not opened
+        expect(await runBrowser(String(specs[0]!.env?.BROWSER), GCLOUD)).toBe(0)
         expect(await runBrowser(String(specs[0]!.env?.BROWSER), ADDRESS)).toBe(0)
         await signedIn
         return { result: {} }
@@ -204,8 +232,13 @@ describe('a stored sign-in that stopped working, in a session', () => {
     expect(leftovers(w.home, '.sign-in-')).toEqual([])
   })
 
-  it('an address that is no Google sign-in is no sign-in: the turn goes on, and nothing is opened', async () => {
-    const w = world('session/prompt', 'https://example.com/docs?a=1&b=2')
+  // Every command the agent runs inherits BROWSER (deep review of #1687): only the agent's own login request is a sign-in
+  it.each([
+    ['gcloud auth login', GCLOUD],
+    ['a Google Doc', DOC],
+    ['a page elsewhere', 'https://example.com/docs?a=1&b=2'],
+  ])('an address a command opens (%s) is no sign-in: the turn goes on, and nothing is opened', async (_what, address) => {
+    const w = world('session/prompt', address)
     const handle = await w.adapter.createSession(sessionOpts('agy-b5'), w.emit)
     handle.send('go')
     await w.event((e) => e.type === 'turn_complete' || e.type === 'error')
@@ -216,5 +249,52 @@ describe('a stored sign-in that stopped working, in a session', () => {
     expect(w.adapter.setup.current().state).toBe('ready')
     expect(w.opened).toEqual([])
     await handle.dispose()
+  })
+})
+
+/**
+ * Where no helper can be written (a data folder holding `;` on Windows), the agent's launcher would start the browser itself,
+ * inside the host's job on Windows, and a sign-in that stopped working would hang the start again: refused, not started
+ */
+describe('no BROWSER helper', () => {
+  function noHelper() {
+    const t = temp()
+    const dataDir = `${t.dir}/data;x`
+    const home = agyHome(dataDir, AGY_RELEASE.version)
+    const archive = AGY_RELEASE.archives['windows-x86_64']
+    fakeInstall(home, archive)
+    fakeSignIn(home)
+    const spawned: AgentSpawnSpec[] = []
+    const spawn = (spec: AgentSpawnSpec) => {
+      spawned.push(spec)
+      return new FakeAcpPeer(() => ({ hold: true }))
+    }
+    return { dataDir, home, archive, spawned, spawn }
+  }
+
+  it('a session is refused before the agent starts, and leaves no folder', async () => {
+    const n = noHelper()
+    const adapter = new AntigravityAdapter(antigravityProfile({ dataDir: n.dataDir, platform: 'win32', arch: 'x64' }), n.spawn)
+    const err = await adapter.createSession(sessionOpts('agy-nh'), driven().emit).then(
+      () => null,
+      (e: unknown) => e,
+    )
+    expect(String((err as Error).message)).toMatch(/cannot start here/)
+    expect(n.spawned).toEqual([])
+    expect(leftovers(n.home, '.sign-in-')).toEqual([])
+  })
+
+  it('a sign-in is refused before the agent starts, and opens nothing', async () => {
+    const n = noHelper()
+    const opened: string[] = []
+    const err = await runSignIn(n.home, n.archive, new AbortController().signal, { platform: 'win32', openUrl: (u) => opened.push(u), spawn: n.spawn }).then(
+      () => null,
+      (e: unknown) => e,
+    )
+    expect(err).toBeInstanceOf(InstallFailure)
+    expect((err as InstallFailure).message).toMatch(/cannot sign in here/)
+    expect(n.spawned).toEqual([])
+    expect(opened).toEqual([])
+    expect(leftovers(n.home, '.sign-in-')).toEqual([])
   })
 })

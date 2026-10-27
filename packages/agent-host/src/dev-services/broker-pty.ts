@@ -231,6 +231,15 @@ export function openForPerson(broker: PtyBroker, url: string, inHost: (url: stri
   inHost(url)
 }
 
+/**
+ * What the adapters are given to open an address for the person (`createAdapters` in `main.ts`): through the broker
+ * while there is one. Without it the sign-in falls back to the host's own opener, inside the job on Windows, which brought
+ * back the browser that ended with a Stop (deep review of #1687, follow-up 3)
+ */
+export function personOpener(broker: PtyBroker | null): { openUrl?: (url: string) => void } {
+  return broker ? { openUrl: (url) => openForPerson(broker, url) } : {}
+}
+
 function openInHost(url: string): void {
   try {
     const child = startProcess('rundll32', ['url.dll,FileProtocolHandler', url], { detached: true, stdio: 'ignore', windowsHide: true })

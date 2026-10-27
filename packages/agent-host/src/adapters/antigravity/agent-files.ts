@@ -415,8 +415,8 @@ const mb = (bytes: number) => Math.round(bytes / (1024 * 1024))
 export type BrowserFolder = {
   /**
    * What `BROWSER` is set to in the agent's process: a command its launcher (Python's `webbrowser`) runs with the address.
-   * Empty where none can be written (a path holding the list separator `BROWSER` is split at, or `%s`): the person's own
-   * `BROWSER` is still kept out, and the agent's launcher then opens the default browser itself
+   * Empty where none can be written (a path holding the list separator `BROWSER` is split at, or `%s`): the agent's
+   * launcher would then start the browser itself, so a session and a sign-in refuse to start (`NO_HELPER`)
    */
   browser: string
   /**

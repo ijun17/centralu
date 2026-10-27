@@ -4,7 +4,7 @@ import { ORCHESTRATOR_MCP_NAME } from '../../apps/contract.js'
 import type { AgentProcess } from '../contract.js'
 import { replaySpawner, type Recording } from '../frames/replay.test-helpers.js'
 import { AntigravityAdapter, antigravityProfile } from './index.js'
-import { agyRecording, driven, fakeInstall, fakeSignIn, sentFrames, sessionOpts, tempData, turnEnded } from './agent-files.test-helpers.js'
+import { agyRecording, driven, fakeInstall, HOST_TEST_ARCHIVE, HOST_TEST_PLATFORM, fakeSignIn, sentFrames, sessionOpts, tempData, turnEnded } from './agent-files.test-helpers.js'
 
 /**
  * Antigravity's agent (1.4.3) against the spike's recorded frames (docs/plans/antigravity-adapter.md §10): the adapter is
@@ -23,7 +23,7 @@ afterEach(() => {
 function world(rec: Recording, opts: { signedIn?: boolean } = {}) {
   const temp = tempData()
   data.push(temp)
-  fakeInstall(temp.home)
+  fakeInstall(temp.home, HOST_TEST_ARCHIVE)
   if (opts.signedIn !== false) fakeSignIn(temp.home)
   const { spawn, state, peers } = replaySpawner(rec)
   const sent: Record<string, unknown>[][] = []
@@ -34,7 +34,7 @@ function world(rec: Recording, opts: { signedIn?: boolean } = {}) {
     Object.assign(p, { noteTree: async () => void notes.push(Date.now()) })
     return p
   }
-  const profile = antigravityProfile({ dataDir: temp.dir, platform: 'darwin', arch: 'arm64' })
+  const profile = antigravityProfile({ dataDir: temp.dir, platform: HOST_TEST_PLATFORM, arch: 'x64' })
   const adapter = new AntigravityAdapter(profile, spawnNoted)
   return { adapter, profile, state, peers, sent, notes, ...driven() }
 }

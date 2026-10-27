@@ -80,7 +80,7 @@ import { parseJson } from './dev-services/store/json.js'
 import { asObj } from './json-value.js'
 import { flagSetting } from './dev-services/store/settings.js'
 import { joinWorkJob, workJobLine, workJobWanted } from './lifecycle/work-job.js'
-import { PtyBroker, brokerPtyModule, openForPerson } from './dev-services/broker-pty.js'
+import { PtyBroker, brokerPtyModule, personOpener } from './dev-services/broker-pty.js'
 import { detectToken } from './elevation.js'
 
 /**
@@ -310,7 +310,7 @@ try {
  * which is outside the job, starts it (Antigravity's sign-in page, review of #1685). Without a broker there is no job of
  * the host's either (or terminals start in the host too, and so does this)
  */
-const adapters = createAdapters(ptyBroker ? { openUrl: (url) => openForPerson(ptyBroker, url) } : {})
+const adapters = createAdapters(personOpener(ptyBroker))
 
 /*
  * Under the keeper, agents, terminals and project commands are spawned by the keeper, not by this
