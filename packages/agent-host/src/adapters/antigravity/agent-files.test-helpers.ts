@@ -182,3 +182,47 @@ export function sentFrames(proc: AgentProcess): Record<string, unknown>[] {
   })
   return frames
 }
+
+/**
+ * What the agent's launcher runs for its `BROWSER` (CPython 3.14 `webbrowser`, the agent's runtime): an entry holding `%s`
+ * split as `shlex` does (here, single quotes and `\'` only, all a helper's command uses) with the address put for `%s`;
+ * any other entry run with the address after it. No shell, as the launcher's `subprocess.Popen`. Resolves with the exit
+ * code, which the launcher reads (not 0: it goes on to the default browser)
+ */
+export function runBrowser(browser: string, url: string): Promise<number | null> {
+  const argv = browser.includes('%s') ? shlexSplit(browser).map((a) => a.replace('%s', url)) : [browser, url]
+  return new Promise((resolve, reject) => {
+    const child = spawn(argv[0]!, argv.slice(1), { stdio: 'ignore', windowsHide: true })
+    child.on('error', reject)
+    child.on('exit', (code) => resolve(code))
+  })
+}
+
+function shlexSplit(text: string): string[] {
+  const out: string[] = []
+  let word: string | null = null
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]!
+    if (c === "'") {
+      const end = text.indexOf("'", i + 1)
+      if (end < 0) throw new Error(`unclosed quote in ${text}`)
+      word = (word ?? '') + text.slice(i + 1, end)
+      i = end
+    } else if (c === '\\') {
+      word = (word ?? '') + (text[++i] ?? '')
+    } else if (c === ' ' || c === '\t') {
+      if (word !== null) out.push(word)
+      word = null
+    } else {
+      word = (word ?? '') + c
+    }
+  }
+  if (word !== null) out.push(word)
+  return out
+}
+
+/** This machine as the profile's platform: the helper a test runs is the one this OS gets */
+export const HOST_TEST_PLATFORM = process.platform === 'win32' ? 'win32' : process.platform === 'darwin' ? 'darwin' : 'linux'
+/** The archive of this machine's platform on x64, for a profile built for `HOST_TEST_PLATFORM` */
+export const HOST_TEST_ARCHIVE: AgyArchive =
+  AGY_RELEASE.archives[HOST_TEST_PLATFORM === 'win32' ? 'windows-x86_64' : HOST_TEST_PLATFORM === 'darwin' ? 'darwin-x86_64' : 'linux-x86_64']

@@ -20,7 +20,17 @@ export type AgyArchive = {
   files: readonly string[]
 }
 
-export type AgyRelease = { version: string; archives: Readonly<Record<AgyPlatformKey, AgyArchive>> }
+export type AgyRelease = {
+  version: string
+  /**
+   * The agent's own OAuth client, as it stands in the login address this version hands `BROWSER` (public; measured on
+   * each bump with a token the agent cannot use, plan §4.3). The only address taken for its sign-in, in a sign-in and in a
+   * session (`agentSignInUrl`): a stale one opens no browser for a sign-in and leaves a session start waiting on the
+   * agent's own login, so it moves with the version and the sha256s
+   */
+  oauthClient: string
+  archives: Readonly<Record<AgyPlatformKey, AgyArchive>>
+}
 
 const BASE = 'https://dl.google.com/agy-extensions/releases'
 
@@ -40,9 +50,13 @@ const windows = (url: string, sha256: string): AgyArchive => ({
   files: ['agy_acp_server.exe', 'localharness_external.exe'],
 })
 
-/** Registry entry `antigravity-acp` 1.4.3, read 2026-10-27; the Windows x64 archive was downloaded and its sha256 matched */
+/**
+ * Registry entry `antigravity-acp` 1.4.3, read 2026-10-27; the Windows x64 archive was downloaded and its sha256 matched.
+ * Its OAuth client read from the login address it handed `BROWSER` on Windows (and seen on the same page on Linux)
+ */
 export const AGY_RELEASE: AgyRelease = {
   version: '1.4.3',
+  oauthClient: '1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com',
   archives: {
     'darwin-aarch64': posix(`${BASE}/macos/agy-acp-server-1.4.3-darwin-arm64.zip`, 'c57db0a9b8b712daa9c3c17cdb990a61842ea569f279e8bd79d7aa85a303b20b'),
     'darwin-x86_64': posix(`${BASE}/macos/agy-acp-server-1.4.3-darwin-x86_64.zip`, '9392dbbdad7f0663dbfb5a0bf641297b0cf80d2ee9cd2d49a616bbbc7378731d'),

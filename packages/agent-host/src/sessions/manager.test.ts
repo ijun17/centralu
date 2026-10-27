@@ -321,6 +321,14 @@ describe('automatic continuation', () => {
     expect(adapter.last!.sent).toContain('keep going')
   })
 
+  it('a start the tool refused as not signed in keeps that code, so the screen can offer the sign-in', async () => {
+    const p = await addProject()
+    adapter.failCreate = Object.assign(new Error('The tool is not signed in'), { code: 'not_logged_in' })
+    await expect(rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })).rejects.toMatchObject({ code: 'not_logged_in', message: expect.stringMatching(/not signed in/) })
+    adapter.failCreate = Object.assign(new Error('something else'), { code: 'session_not_found' })
+    await expect(rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })).rejects.toMatchObject({ code: 'internal' })
+  })
+
   it('when it truly cannot resume, it throws a reason instead of swallowing it silently', async () => {
     const p = await addProject()
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as { id: string }

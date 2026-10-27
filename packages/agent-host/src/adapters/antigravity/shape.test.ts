@@ -6,7 +6,7 @@ import { logToolStderr, redactLines, startToolProcess } from '../core/tool-proce
 import { agyHome, reachesAgentFolder } from './agent-files.js'
 import { AntigravityAdapter, antigravityProfile } from './index.js'
 import { AGY_DISABLED_TOOLS, agyStderrLine, readAgyCall } from './shape.js'
-import { driven, fakeInstall, fakeSignIn, folder, link, pathFrom, pathIn, readsWorld, sessionOpts, tempData, tokenPath, write } from './agent-files.test-helpers.js'
+import { driven, fakeInstall, HOST_TEST_ARCHIVE, HOST_TEST_PLATFORM, fakeSignIn, folder, link, pathFrom, pathIn, readsWorld, sessionOpts, tempData, tokenPath, write } from './agent-files.test-helpers.js'
 
 /**
  * What the spike could not make the agent send on cue (docs/plans/antigravity-adapter.md §5, §6): a question to the person
@@ -25,10 +25,10 @@ const INIT = { protocolVersion: 1, agentCapabilities: { loadSession: true, sessi
 function world(script: PeerScript, preset: PermissionPreset = 'normal') {
   const t = tempData()
   data.push(t)
-  fakeInstall(t.home)
+  fakeInstall(t.home, HOST_TEST_ARCHIVE)
   fakeSignIn(t.home)
   const peers: FakeAcpPeer[] = []
-  const adapter = new AntigravityAdapter(antigravityProfile({ dataDir: t.dir, platform: 'darwin', arch: 'arm64' }), () => {
+  const adapter = new AntigravityAdapter(antigravityProfile({ dataDir: t.dir, platform: HOST_TEST_PLATFORM, arch: 'x64' }), () => {
     const p = new FakeAcpPeer(script)
     peers.push(p)
     return p

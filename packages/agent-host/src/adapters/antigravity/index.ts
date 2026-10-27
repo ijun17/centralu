@@ -5,11 +5,12 @@ import { rpcError } from '../../rpc-error.js'
 import type { AgentProcess, AgentSpawnSpec, DetectResult } from '../contract.js'
 import { AcpAdapter } from '../acp/adapter.js'
 import type { AcpProfile } from '../acp/profile.js'
-import { agyHome, agyPlatformKey, reachesAgentFolder, type AgyHome } from './agent-files.js'
+import { agyHome, agyPlatformKey, browserFolder, reachesAgentFolder, type AgyHome } from './agent-files.js'
 import { agyLaunch } from './launch.js'
 import { AGY_RELEASE, type AgyArchive } from './release.js'
 import { AgySetup, type AgySetupDeps } from './setup.js'
 import { agyCentraluTool, agySessionMeta, agyStderrLine, isAgyQuestion, isAgySubagentCall, readAgyCall } from './shape.js'
+import { agentSignInUrl, googleAuthorizeUrl, NO_HELPER } from './sign-in.js'
 import { AGY_SURFACE } from './surface.js'
 
 /**
@@ -74,7 +75,37 @@ export function antigravityProfile(deps: AgyProfileDeps = {}): AgyProfile {
     archive,
     async launch() {
       if (!archive || !setup.installed()) return null
-      return agyLaunch(home, archive)
+      // Its own BROWSER helper (`browserFolder`): the agent never opens a browser itself, and the helper handed the agent's
+      // own login request in a session's process is how a stored sign-in that stopped working is told (`SignInWanted`).
+      // No address is opened from a session: the person asked for a conversation, and the line offers Sign in. Every
+      // command the agent runs inherits `BROWSER`, so any other address (`gcloud auth login`, a script opening a page) is
+      // only logged, never opened and never taken for a sign-in (plan §4.4)
+      const folder = await browserFolder(home, deps.platform)
+      if (folder.browser === '') {
+        // Without a helper the agent's launcher would start the browser itself, on Windows inside the host's job, and a
+        // stored sign-in that stopped working would hang the start again (review of #1685): refused rather than started
+        await folder.remove()
+        console.error(`[Antigravity] session refused: ${NO_HELPER}`)
+        throw rpcError(`Antigravity cannot start here: ${NO_HELPER}.`)
+      }
+      return {
+        ...agyLaunch(home, archive, folder.browser),
+        signInWanted: {
+          watch: (wanted: () => void) =>
+            folder.watch((text) => {
+              if (agentSignInUrl(text)) return wanted()
+              // Google's v2 authorize page with another client may be a new agent release whose client was not measured
+              // (`AGY_RELEASE.oauthClient`): said apart, so a sign-in that stopped working there is not lost in the log
+              const other = googleAuthorizeUrl(text)
+              console.error(
+                other
+                  ? "[Antigravity] a session's process asked for a Google sign-in with an OAuth client that is not the agent's; not opened, not taken for its sign-in"
+                  : "[Antigravity] a command in a session asked for a browser; not opened (it is not the agent's sign-in)",
+              )
+            }),
+          remove: () => folder.remove(),
+        },
+      }
     },
     async installedVersion() {
       return setup.installed() ? AGY_RELEASE.version : null

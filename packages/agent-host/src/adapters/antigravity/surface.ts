@@ -17,7 +17,8 @@ async function gather(): Promise<SurfaceInputs> {
   const archive = key ? AGY_RELEASE.archives[key] : null
   const home = agyHome(dataRoot(), AGY_RELEASE.version)
   if (!archive || !isInstalled(home, archive)) throw new Error('Antigravity is not installed by Centralu on this machine')
-  const launch = agyLaunch(home, archive)
+  // `initialize` alone starts no sign-in, so no helper: an empty `BROWSER` still keeps the person's own out
+  const launch = agyLaunch(home, archive, '')
   const proc = startToolProcess({ ...launch, cwd: home.root, env: { ...process.env, ...launch.env } })
   const conn = new AcpConnection(proc, { onNotification: () => {}, onRequest: async () => null, onExit: () => {} }, 'antigravity-surface', agyStderrLine)
   let init: unknown

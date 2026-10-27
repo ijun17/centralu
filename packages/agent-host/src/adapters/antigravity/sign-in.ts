@@ -5,10 +5,10 @@ import { startToolProcess } from '../core/tool-process.js'
 import { lineSplitter } from '../../transport/json-lines.js'
 import { asObj } from '../../json-value.js'
 import type { Platform } from '../../os.js'
-import { hostOpensSignIn, openInBrowser, signInFolder, type AgyHome } from './agent-files.js'
+import { browserFolder, openInBrowser, type AgyHome } from './agent-files.js'
 import { InstallFailure } from './failure.js'
 import { agyLaunch } from './launch.js'
-import type { AgyArchive } from './release.js'
+import { AGY_RELEASE, type AgyArchive } from './release.js'
 import { agyStderrLine } from './shape.js'
 
 /**
@@ -18,14 +18,16 @@ import { agyStderrLine } from './shape.js'
  * (measured: 14 s after the address was opened) or after 300 s ("Timed out waiting for the authentication flow").
  *
  * So the sign-in is a process of its own, tied to no session: `initialize`, then `authenticate` with a bound past the
- * agent's own (330 s), and the process kept until it answers. The address reaches the host, never host.log:
- * - **macOS and Linux**: `BROWSER` names a small script in a private folder that writes the address it is given to a file
- *   there (measured on macOS: the launcher honours it, and no browser opens by itself); the host opens the browser
- * - **Every system**: the agent's stderr line `Open the following link to authenticate the ACP server: <url>`, read here
- *   and left out of the log (`agyStderrLine`); on Windows it is the only source, and the agent's own launcher opens the
- *   browser there (to be checked live, plan §9)
+ * agent's own (330 s), and the process kept until it answers. The agent never opens the browser itself, on any OS: its
+ * `BROWSER` is a helper in a private folder that writes the address it is given to a file there (`browserFolder`), and
+ * the host opens the browser (`openUrl`). On Windows that is through what opens things for the person outside the host's
+ * job object (the terminal broker, `main.ts`), so the browser outlives a Stop, the sign-in's end and the host (review of
+ * #1685: the agent's own launcher had started it as its child, inside the job). The agent's stderr line `Open the
+ * following link to authenticate the ACP server: <url>` is a second source of the same address, read here and left out
+ * of the log (`agyStderrLine`). The address reaches the host, never host.log.
  *
- * The address is opened once, and only an `https` address on a Google host. A cancel ends the process, and with it the
+ * The address is opened once, and only the agent's own login request (`agentSignInUrl`). Where no helper can be written
+ * the sign-in is refused, not started (`NO_HELPER`). A cancel ends the process, and with it the
  * listener (ACP cannot cancel `authenticate`, spike §4).
  */
 
@@ -37,7 +39,10 @@ export type SignInResult = { plan: { name: string; upgradeUri?: string } | null 
 export type SignInDeps = {
   /** Starts the sign-in process (`startToolProcess`: it ends with the host) */
   spawn?: (spec: AgentSpawnSpec) => AgentProcess
-  /** Opens an address in the person's browser on this machine */
+  /**
+   * Opens an address in the person's browser on this machine, outside the host's work: on Windows the host's opener that
+   * starts it outside the job (`main.ts`); `openInBrowser` where no such opener is given
+   */
   openUrl?: (url: string) => void
   platform?: Platform
   timeoutMs?: number
@@ -45,6 +50,10 @@ export type SignInDeps = {
 
 const Tier = z.looseObject({ name: z.string(), upgradeUri: z.string().nullish() })
 const AuthResult = z.looseObject({ _meta: z.looseObject({ antigravity: z.looseObject({ tier: Tier.nullish() }).nullish() }).nullish() }).nullish()
+
+/** Why no `BROWSER` helper could be written: the paths it is made of hold what its launcher splits at */
+export const NO_HELPER =
+  "the path of Centralu's data folder or of the host's Node holds a character Antigravity's browser setting cannot carry (';' on Windows, ':' elsewhere, or '%s')"
 
 const URL_LINE = /Open the following link to authenticate the ACP server:\s*(\S+)/
 
@@ -65,18 +74,66 @@ export function signInUrl(raw: string): string | null {
   }
 }
 
+const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]'])
+
+/** Google's v2 authorize page, whoever's client asks (only for the log: `agentSignInUrl` is what is acted on) */
+export function googleAuthorizeUrl(raw: string): URL | null {
+  const url = signInUrl(raw)
+  if (!url) return null
+  const parsed = new URL(url)
+  return parsed.hostname === 'accounts.google.com' && parsed.pathname === '/o/oauth2/v2/auth' ? parsed : null
+}
+
+/**
+ * The agent's own login request, and nothing else Google serves: `https://accounts.google.com/o/oauth2/v2/auth` with
+ * `response_type=code`, the agent's client (`AGY_RELEASE.oauthClient`, pinned with the version) and a `redirect_uri` on this machine's loopback (its
+ * one-shot listener), each named once. `BROWSER` reaches every command the agent runs, so a Google address alone says
+ * nothing (deep review of #1687: `gcloud auth login` opens Google's authorize page with gcloud's own client, a script may
+ * open a Google Doc); only this one is the agent asking for a sign-in. The address passed on is `signInUrl`'s rebuilt one
+ */
+export function agentSignInUrl(raw: string): string | null {
+  const parsed = googleAuthorizeUrl(raw)
+  if (!parsed) return null
+  const url = parsed.toString()
+  const one = (name: string) => {
+    const all = parsed.searchParams.getAll(name)
+    return all.length === 1 ? (all[0] ?? null) : null
+  }
+  if (one('response_type') !== 'code' || one('client_id') !== AGY_RELEASE.oauthClient) return null
+  try {
+    const back = new URL(one('redirect_uri') ?? '')
+    if (back.protocol !== 'http:' || !LOOPBACK.has(back.hostname) || back.username !== '' || back.password !== '') return null
+  } catch {
+    return null
+  }
+  return url
+}
+
 export async function runSignIn(home: AgyHome, archive: AgyArchive, signal: AbortSignal, deps: SignInDeps = {}): Promise<SignInResult> {
-  const folder = await signInFolder(home, deps.platform)
+  const folder = await browserFolder(home, deps.platform)
+  // No helper could be written (`browserFolder`): the agent's own launcher would start the browser, on Windows inside the
+  // host's job, so a Stop or the host's exit would end it with every tab. Refused rather than started
+  if (folder.browser === '') {
+    await folder.remove()
+    console.error(`[Antigravity] sign-in refused: ${NO_HELPER}`)
+    throw new InstallFailure('failed', `Antigravity cannot sign in here: ${NO_HELPER}`)
+  }
   const openUrl = deps.openUrl ?? ((url: string) => openInBrowser(url, deps.platform))
   let opened = false
   const offer = (raw: string) => {
-    const url = signInUrl(raw)
-    if (!url || opened) return
+    if (opened) return
+    // Only the agent's own login request (`agentSignInUrl`): the folder is under the data folder, where an agent of
+    // another session could write (deep review of #1687, follow-up 5)
+    const url = agentSignInUrl(raw)
+    if (!url) {
+      console.error('[Antigravity] the sign-in was handed an address that is not its own login request; not opened')
+      return
+    }
     opened = true
-    if (hostOpensSignIn(folder)) openUrl(url)
+    openUrl(url)
   }
-  const launch = agyLaunch(home, archive)
-  const spec: AgentSpawnSpec = { ...launch, cwd: home.root, env: { ...process.env, ...launch.env, ...(folder.helper ? { BROWSER: folder.helper } : {}) } }
+  const launch = agyLaunch(home, archive, folder.browser)
+  const spec: AgentSpawnSpec = { ...launch, cwd: home.root, env: { ...process.env, ...launch.env } }
   const proc = startToolProcess(spec, deps.spawn ? { spawn: deps.spawn } : {})
   const lines = lineSplitter((line) => {
     const m = URL_LINE.exec(line)

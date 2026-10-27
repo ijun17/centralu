@@ -1,5 +1,5 @@
 import type { ToolName } from '@cc/protocol'
-import { AntigravityAdapter } from './antigravity/index.js'
+import { AntigravityAdapter, antigravityProfile } from './antigravity/index.js'
 import { ClaudeAdapter } from './claude/index.js'
 import { CodexAdapter } from './codex/index.js'
 import { CursorAgentAdapter } from './cursor-agent/index.js'
@@ -19,9 +19,10 @@ import type { AgentAdapter } from './contract.js'
  * descriptor tests something to hold: the rules that used to live in the protocol's shape
  * (marks are distinct, the commands are real) can only be checked across the whole set.
  */
-export function createAdapters(opts: { antigravity?: boolean } = {}): Map<ToolName, AgentAdapter> {
+export function createAdapters(opts: { antigravity?: boolean; openUrl?: (url: string) => void } = {}): Map<ToolName, AgentAdapter> {
   const all: AgentAdapter[] = [new ClaudeAdapter(), new CodexAdapter(), new CursorAgentAdapter(), new OpenCodeAdapter()]
-  if (opts.antigravity ?? antigravityShown()) all.push(new AntigravityAdapter())
+  // `openUrl`: the host's way to open an address for the person outside its work (Antigravity's sign-in, `main.ts`)
+  if (opts.antigravity ?? antigravityShown()) all.push(new AntigravityAdapter(antigravityProfile(opts.openUrl ? { signIn: { openUrl: opts.openUrl } } : {})))
   return new Map(all.map((a) => [a.tool, a]))
 }
 

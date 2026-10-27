@@ -1,6 +1,6 @@
 import { spawn as spawnChild } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { closeSync, createReadStream, createWriteStream, existsSync, fstatSync, openSync, readFileSync, readSync, watch, type FSWatcher } from 'node:fs'
+import { closeSync, createReadStream, createWriteStream, existsSync, fstatSync, openSync, readdirSync, readFileSync, readSync, watch, type FSWatcher } from 'node:fs'
 import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, stat, statfs, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
@@ -24,7 +24,7 @@ import { AGY_INSTALL_SPACE_BYTES, type AgyArchive, type AgyPlatformKey } from '.
  * - which of Google's builds this machine takes (`agyPlatformKey`)
  * - the folder layout under Centralu's data folder, and what is on disk there (`agyHome`, `isInstalled`, `hasSignIn`)
  * - the install: the download to disk, the unpack with each OS's file modes, the one rename that puts it in place
- * - the sign-in's private folder, its `BROWSER` helper where the OS can run one, and the person's browser (`openInBrowser`)
+ * - the private folder of a process's `BROWSER` helper (`browserFolder`), and the person's browser (`openInBrowser`)
  *
  * The folder, under `<data>/tools/antigravity/`:
  *
@@ -32,7 +32,8 @@ import { AGY_INSTALL_SPACE_BYTES, type AgyArchive, type AgyPlatformKey } from '.
  *     gemini-home/           GEMINI_HOME: the agent's settings, token, conversations. Not versioned, so a session made
  *                            under one Centralu still loads under the next (ids are per GEMINI_HOME, spike §3)
  *     .install-<owner>-<random>/  an install in progress (removed when it ends, however it ends)
- *     .sign-in-<owner>-<random>/  a sign-in's browser helper and the address it hands over (removed when the sign-in ends)
+ *     .sign-in-<owner>-<random>/  one process's browser helper and the address it hands over (a sign-in's or a session's;
+ *                            removed when that process's sign-in or session ends)
  *
  * `<owner>` names the host process that made the folder (`ownerTag`), so another host never removes it while that one runs
  */
@@ -409,40 +410,77 @@ async function renameHeld(from: string, to: string): Promise<void> {
 const mb = (bytes: number) => Math.round(bytes / (1024 * 1024))
 
 // ---------------------------------------------------------------------------------------------------------------------
-// The sign-in's folder (plan §4)
+// The browser helper's folder (plan §4)
 
-export type SignInFolder = {
-  /** The `BROWSER` helper, or null where none can be run (Windows: a batch file hands its argument to `cmd`, which splits it at `&`) */
-  helper: string | null
-  /** Calls `found` with what the helper wrote (a watch, and a look now for one written before the watch began) */
+export type BrowserFolder = {
+  /**
+   * What `BROWSER` is set to in the agent's process: a command its launcher (Python's `webbrowser`) runs with the address.
+   * Empty where none can be written (a path holding the list separator `BROWSER` is split at, or `%s`): the agent's
+   * launcher would then start the browser itself, so a session and a sign-in refuse to start (`NO_HELPER`)
+   */
+  browser: string
+  /**
+   * Calls `found` with each address the helper hands over (a watch, and a look now for one written before the watch
+   * began). Each is taken once: the file is removed as it is read, so a later process on the same folder is not told of it
+   */
   watch(found: (text: string) => void): void
   /** Ends the watch and removes the folder */
   remove(): Promise<void>
 }
 
 /**
- * A folder only this user can read (0700) beside the install, for one sign-in: the `BROWSER` helper, which writes the one
- * argument it is given to `url` there through a temporary name, so the host never reads half an address
+ * A folder only this user can read (0700) beside the install, for one Antigravity process's browser: the `BROWSER` helper,
+ * which writes the one argument it is given to a file of its own there (`url-<run>`) through a temporary name, so the
+ * host never reads half an address. Every Antigravity process gets one (a sign-in, a session), so the agent never starts a browser itself on any
+ * OS (review of #1685: on Windows it started the person's browser as its own child, inside the host's job object, and a
+ * Stop, the sign-in's end or the host's exit ended it with every tab):
+ * - **macOS and Linux**: a `sh` script, `BROWSER` its path (measured on macOS: the launcher runs it, and opens no browser)
+ * - **Windows**: a batch file would hand the address to `cmd`, which splits it at `&`. So `BROWSER` is a command line,
+ *   `'<node>' '<dir>/open-url.mjs' %s`: Python's launcher splits a `BROWSER` entry holding `%s` with `shlex` and runs it
+ *   with no shell (CPython 3.14 `webbrowser.get`, the agent's runtime), so the address reaches the helper whole. The
+ *   helper exits 0, so the launcher does not fall back to the default browser
  */
-export async function signInFolder(home: AgyHome, platform: Platform = HOST_PLATFORM): Promise<SignInFolder> {
+export async function browserFolder(home: AgyHome, platform: Platform = HOST_PLATFORM, node: string = process.execPath): Promise<BrowserFolder> {
   await mkdir(home.root, { recursive: true })
   await removeStale(home.root, '.sign-in-')
   const dir = await mkdtemp(join(home.root, `.sign-in-${ownerTag()}-`))
   await chmod(dir, 0o700).catch(() => {})
-  const file = join(dir, 'url')
-  let helper: string | null = null
-  if (platform !== 'win32') {
-    helper = join(dir, 'open-url')
-    const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`
-    await writeFile(helper, `#!/bin/sh\nprintf '%s\\n' "$1" > ${q(`${file}.part`)} && mv ${q(`${file}.part`)} ${q(file)}\n`, { mode: 0o700 })
+  let browser: string
+  if (platform === 'win32') {
+    const script = join(dir, 'open-url.mjs')
+    await writeFile(script, WINDOWS_HELPER)
+    browser = windowsBrowserCommand(node, script)
+  } else {
+    const helper = join(dir, 'open-url')
+    // `url-<pid>`: each run its own name, so a rename never lands on a file the host is reading; exit 0 whatever happens
+    const part = `${shQuote(join(dir, 'part-'))}"$$"`
+    await writeFile(helper, `#!/bin/sh\nprintf '%s\\n' "$1" > ${part} && mv ${part} ${shQuote(join(dir, 'url-'))}"$$"\nexit 0\n`, { mode: 0o700 })
     await chmod(helper, 0o700)
+    browser = usableBrowser(helper, ':') ? helper : ''
   }
   let watcher: FSWatcher | null = null
+  const taken = new Set<string>()
   return {
-    helper,
+    browser,
     watch(found) {
       const look = () => {
-        if (existsSync(file)) void readFile(file, 'utf8').then((text) => found(text.trim()), () => {})
+        let names: string[]
+        try {
+          names = readdirSync(dir).filter((n) => n.startsWith('url-') && !taken.has(n))
+        } catch {
+          return
+        }
+        for (const name of names) {
+          taken.add(name)
+          const path = join(dir, name)
+          void readFile(path, 'utf8').then(
+            async (text) => {
+              await rm(path, { force: true }).catch(() => {})
+              found(text.trim())
+            },
+            () => {},
+          )
+        }
       }
       try {
         watcher = watch(dir, () => look())
@@ -458,6 +496,35 @@ export async function signInFolder(home: AgyHome, platform: Platform = HOST_PLAT
     },
   }
 }
+
+/**
+ * The Windows helper: the address to `url-<pid>-<time>` beside it, through a temporary name (each run its own, so the
+ * rename never meets a file the host is reading), and exit 0 whatever happens: a non-zero exit would send the agent's
+ * launcher on to the default browser, inside the job
+ */
+const WINDOWS_HELPER = `import { renameSync, writeFileSync } from 'node:fs'
+try {
+  const tag = \`\${process.pid}-\${Date.now()}\`
+  const part = new URL(\`./part-\${tag}\`, import.meta.url)
+  writeFileSync(part, \`\${process.argv[2] ?? ''}\n\`)
+  renameSync(part, new URL(\`./url-\${tag}\`, import.meta.url))
+} catch {}
+process.exit(0)
+`
+
+/**
+ * `BROWSER` for Windows: node and the helper, each in `shlex` single quotes (no escapes inside, so a backslash stays), and
+ * `%s` where the launcher puts the address. Empty when a path holds `;` (the launcher splits `BROWSER` there) or `%s`
+ */
+export function windowsBrowserCommand(node: string, script: string): string {
+  if (!usableBrowser(node, ';') || !usableBrowser(script, ';')) return ''
+  return `${shQuote(node)} ${shQuote(script)} %s`
+}
+
+/** In single quotes, as both `sh` and `shlex` read them: nothing is escaped inside, and a `'` is closed, escaped and reopened */
+const shQuote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`
+
+const usableBrowser = (path: string, listSep: string) => !path.includes(listSep) && !path.includes('%s')
 
 // ---------------------------------------------------------------------------------------------------------------------
 // The agent's own folder, kept from its tools (plan §4.2)
@@ -828,9 +895,4 @@ export function openInBrowser(url: string, platform: Platform = HOST_PLATFORM): 
   } catch {
     // Nothing to tell the person beyond the sign-in's own end: a browser that did not open times the sign-in out
   }
-}
-
-/** Whether the host opens the sign-in's address itself: where the helper hands it over. Elsewhere the agent's own launcher opens it */
-export function hostOpensSignIn(folder: SignInFolder): boolean {
-  return folder.helper !== null
 }
