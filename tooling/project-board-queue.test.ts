@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpath
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fakeExe, gitWrapper, removeFakeDir, rmFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 import { ExternalApps, resultText, type AppCaller, type AppRef } from '../packages/agent-host/src/apps/external/runtime.js'
 import { fakeBrokerHost } from '../packages/agent-host/src/apps/external/test-helpers.js'
@@ -27,6 +27,8 @@ import { attributeByPaths, carried, mainVerdict, nextStep, sortCommits } from '.
 import { classifyRun, looksLikeNetworkError, onFlakyList } from '../.centralu/apps/project-board/run-failure.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { GitError, isNetworkFailure } from '../.centralu/apps/project-board/git.mjs'
+// @ts-expect-error — plain .mjs of a Centralu app
+import { judgeBranch } from '../.centralu/apps/project-board/queue-integrate.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { batchCandidates, batchLine, decideLanding, dispatchInputs, endBatch, formBatch, gateGreen, gathering, heavyRan, markBatchless, mergeWarning, MOVED_CAP, needsFull, onlyCancelledByBatch, rebatchAfterMove, splitBatch, tierToRun } from '../.centralu/apps/project-board/batch.mjs'
 
@@ -4842,7 +4844,7 @@ describe('the integrator lands an auto-tier branch without a pull request from i
     const repo = integrateRepo({ 'docs/empty': {} })
     integrateRuntime(repo, 'docs/empty')
     const missing = await call('integrate', handOver('docs/nowhere'))
-    expect(missing.data).toMatchObject({ integrated: false, kind: 'missing' })
+    expect(missing.data, missing.text).toMatchObject({ integrated: false, kind: 'missing' })
     expect(missing.text).toContain('the branch docs/nowhere is not on GitHub. Push it first')
     expect((await call('integrate', handOver('docs/empty'))).data).toMatchObject({ kind: 'empty' })
     expect((await call('integrate', handOver('someone:docs/guide'))).data).toMatchObject({ kind: 'fork' })
@@ -4856,6 +4858,24 @@ describe('the integrator lands an auto-tier branch without a pull request from i
     expect(contributor.text).toContain('mark_ready')
     expect(writes()).toEqual([])
     expect(itemsOnDisk()).toEqual([])
+  })
+
+  it("tells a branch not on GitHub by git's exit code, whatever git prints before its error", async () => {
+    // Main's CI on Windows (2026-10-27) read docs/nowhere as `retry`: the answer was read from the first line of a failed
+    // fetch, so any line git printed before "couldn't find remote ref" turned it into a failure of the moment.
+    // GIT_TRACE prints such lines every time.
+    const repo = integrateRepo({ 'docs/empty': {} })
+    vi.stubEnv('GIT_TRACE', '1')
+    try {
+      const missing = await judgeBranch({ dir: repo.work, repo: 'ijun17/centralu', branch: 'docs/nowhere', defaultBranch: 'main' })
+      expect(missing, JSON.stringify(missing)).toMatchObject({ missing: true })
+      expect(missing.retry).toBeUndefined()
+      const there = await judgeBranch({ dir: repo.work, repo: 'ijun17/centralu', branch: 'docs/empty', defaultBranch: 'main' })
+      expect(there.missing, JSON.stringify(there)).toBeUndefined()
+      expect(there.retry, JSON.stringify(there)).toBeUndefined()
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 
   it('takes the record already open from the branch when it is handed over again, and queues it again, never a second pull request', async () => {

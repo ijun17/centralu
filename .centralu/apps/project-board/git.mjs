@@ -105,6 +105,22 @@ export async function remoteFor(dir, repo) {
  * moves. stack.mjs runs one restack at a time, so the names never collide; release.mjs names its own
  * `space` per call.
  */
+/**
+ * Whether `remote` has `ref` (`refs/heads/docs/x`), from the exit code of `git ls-remote --exit-code`: 0 there, 2 not
+ * there. Anything else (no network, the remote away, a timeout) throws its GitError. The text of a failed fetch says
+ * "couldn't find remote ref" only when that is the first thing git prints: a line before it (a warning, a trace) made a
+ * missing branch read as a failure of the moment (the integrator's `retry`, main's CI on Windows, 2026-10-27).
+ */
+export async function remoteHas(dir, remote, ref) {
+  try {
+    await git(dir, ['ls-remote', '--exit-code', remote, ref])
+    return true
+  } catch (e) {
+    if (e instanceof GitError && e.code === 2) return false
+    throw e
+  }
+}
+
 export async function fetchRefs(dir, remote, refs, space = 'refs/centralu-restack') {
   const names = refs.map((_, i) => `${space}/${i}`)
   const specs = refs.map((r, i) => `+${r}:${names[i]}`)

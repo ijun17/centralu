@@ -14,7 +14,7 @@ import { randomBytes } from 'node:crypto'
 import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { fetchRefs, git, GitError, remoteFor, showFile, topLevel } from './git.mjs'
+import { fetchRefs, git, GitError, remoteFor, remoteHas, showFile, topLevel } from './git.mjs'
 import { GitHubError } from './github.mjs'
 import { short } from './util.mjs'
 
@@ -80,13 +80,22 @@ export async function judgeBranch({ dir, repo, branch, defaultBranch, head: want
     if (!(e instanceof GitError)) throw e
     return unjudged(`${defaultBranch} could not be fetched (${e.message})`, { retry: true })
   }
+  // Not there is the session's to fix; anything else (no network, GitHub down) is worth a try again. Which one is
+  // git's exit code (`remoteHas`), never the text it printed
+  let there
+  try {
+    there = await remoteHas(root, remote, `refs/heads/${branch}`)
+  } catch (e) {
+    if (!(e instanceof GitError)) throw e
+    return unjudged(`the branch ${branch} could not be looked up (${e.message})`, { retry: true, main })
+  }
+  if (!there) return unjudged(`the branch ${branch} is not on GitHub`, { missing: true, main })
   let tip
   try {
     ;[tip] = await fetchRefs(root, remote, [`refs/heads/${branch}`], `${space}/head`)
   } catch (e) {
     if (!(e instanceof GitError)) throw e
-    // Not there is the session's to fix; anything else (no network, GitHub down) is worth a try again
-    if (/couldn't find remote ref|not our ref|no such ref/i.test(e.message)) return unjudged(`the branch ${branch} is not on GitHub (${e.message})`, { missing: true, main })
+    // There a moment ago: gone since, or a failure of the moment; either way, judged again on the next try
     return unjudged(`the branch ${branch} could not be fetched (${e.message})`, { retry: true, main })
   }
   let head = tip
