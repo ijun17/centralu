@@ -1,6 +1,6 @@
 import type { ChildProcess } from 'node:child_process'
 import { EventEmitter } from 'node:events'
-import { PassThrough, type Readable, type Writable } from 'node:stream'
+import { PassThrough, Readable, type Writable } from 'node:stream'
 import { KILL_GRACE_MS, hasProcessGroups, killTree, noteGroups, stopGroup, stopTree, type KillOs, type LeftoverOs } from '../dev-services/kill-tree.js'
 import { killHandle, spawnGrouped, sweepExited } from '../dev-services/grouped-child.js'
 import { ExitAfterDrain } from '../exit-after-drain.js'
@@ -40,6 +40,18 @@ export type LocalSpawnSpec = AgentSpawnSpec & {
   signal?: AbortSignal
 }
 
+/** The lookup that comes first in `HOST_WATCH` (see the comment below it): what Node's spawn would have raised, said on fd 4 */
+export const FIND_CLI =
+  // A name with a slash is tested here, not looked up: `command -v` answers differently for a file that cannot be run
+  // (macOS's sh fails where dash prints the path), and Node says ENOENT for none, EACCES for a folder or a file not runnable
+  'case $1 in */*) [ -e "$1" ] || { echo enoent >&4; exit 127; }; ' +
+  'if [ -d "$1" ] || [ ! -x "$1" ]; then echo eacces >&4; exit 126; fi;; ' +
+  // A bare name is looked up by `sh` itself. When that finds nothing, PATH is read as libuv does: a match that cannot be run
+  // is EACCES, an empty entry is the folder it starts in (`/dev/null` ends the list so a trailing empty one is not split away), and nothing is ENOENT
+  '*) if c=$(command -v -- "$1" 2>/dev/null); then case $c in */*) if [ -d "$c" ] || [ ! -x "$c" ]; then echo eacces >&4; exit 126; fi;; esac; ' +
+  'else if (IFS=:; set -f; for d in ${PATH:+$PATH:}/dev/null; do [ -e "${d:-.}/$1" ] && exit 0; done; exit 1); then echo eacces >&4; exit 126; fi; ' +
+  'echo enoent >&4; exit 127; fi;; esac; '
+
 /**
  * The guard a CLI that must end with the host starts behind (`AgentSpawnSpec.endsWithHost`, macOS and Linux): `sh` keeps a
  * reader on fd 3, a pipe whose other end only this host holds, and `exec`s the CLI in its place with fd 3 closed. The
@@ -49,12 +61,17 @@ export type LocalSpawnSpec = AgentSpawnSpec & {
  * those of the CLI's descendants then (`watchTreeGroups`, read by parent links when the pipe closes, so a command
  * started a moment before the host died is reached too; #1562 Mac re-check), and those the host told it of on the pipe
  * (`+<pgid>` noted, `-<pgid>` dropped once empty, `noteTree`), which reach a helper whose shell has gone.
+ *
+ * Before all that the shell looks the CLI up itself (`FIND_CLI`) and says on fd 4 what Node's spawn would have raised, `enoent`
+ * or `eacces`; the host turns it into the same 'error' (`LocalAgentProcess.readStatus`). fd 4 is closed by the `exec`, so a
+ * CLI that starts says nothing.
  */
 export const HOST_WATCH =
+  FIND_CLI +
   '{ g=; while read -r l; do case $l in +*) g="$g ${l#+}";; -*) n=; for p in $g; do [ "$p" = "${l#-}" ] || n="$n $p"; done; g=$n;; esac; done; ' +
   'for p in $g $(' +
   watchTreeGroups() +
-  '); do kill -9 -"$p" 2>/dev/null; done; kill -9 0 2>/dev/null; } <&3 >/dev/null 2>&1 & exec "$@" 3<&-'
+  '); do kill -9 -"$p" 2>/dev/null; done; kill -9 0 2>/dev/null; } <&3 >/dev/null 2>&1 4>&- & exec "$@" 3<&- 4>&-'
 
 /**
  * The process groups of the CLI's descendants, its own aside, as the watch reads them: `$$` in the watch's subshell is the
@@ -85,6 +102,7 @@ export class LocalAgentProcess extends EventEmitter implements AgentProcess {
   /** While groups are held: they are read again, so one that has emptied is dropped before its number is reused */
   private groupClock: ReturnType<typeof setInterval> | null = null
   private noting: Promise<void> | null = null
+  private readonly status: Promise<void>
   /** Reported once the output has all arrived, so a reader never sees the exit before the last line */
   private readonly exitReport = new ExitAfterDrain(() => this.emit('exit', this.child.exitCode, this.child.signalCode))
 
@@ -93,6 +111,7 @@ export class LocalAgentProcess extends EventEmitter implements AgentProcess {
     /** Taken just before the spawn (`spawnGrouped`): the Windows sweep matches what it left by creation time */
     private readonly spawnedAt: number,
     private readonly os: LocalProcessOs | undefined,
+    private readonly spec: AgentSpawnSpec,
   ) {
     super()
     this.stdin = child.stdin!
@@ -103,6 +122,7 @@ export class LocalAgentProcess extends EventEmitter implements AgentProcess {
     child.stdin?.on('error', () => {})
     // The host-watch pipe: a write after its reader has gone is no error of the host's
     child.stdio[3]?.on('error', () => {})
+    this.status = this.readStatus(child.stdio[4])
     child.on('error', (e) => {
       this.emit('error', e)
       /*
@@ -112,7 +132,8 @@ export class LocalAgentProcess extends EventEmitter implements AgentProcess {
        */
       if (child.pid === undefined) this.onExit()
     })
-    child.once('exit', () => this.onExit())
+    // The shell's word on a CLI it could not start comes before the exit is reported
+    child.once('exit', () => void this.status.then(() => this.onExit()))
   }
 
   static spawn(spec: LocalSpawnSpec, os?: LocalProcessOs): LocalAgentProcess {
@@ -124,17 +145,37 @@ export class LocalAgentProcess extends EventEmitter implements AgentProcess {
     try {
       const watched = !!spec.endsWithHost && hasProcessGroups(os?.platform)
       started = watched
-        ? spawnGrouped('/bin/sh', ['-c', HOST_WATCH, 'centralu-agent', spec.command, ...spec.args], { cwd: spec.cwd, env: spec.env, stdio: ['pipe', 'pipe', 'pipe', 'pipe'] }, os?.platform)
+        ? spawnGrouped('/bin/sh', ['-c', HOST_WATCH, 'centralu-agent', spec.command, ...spec.args], { cwd: spec.cwd, env: spec.env, stdio: ['pipe', 'pipe', 'pipe', 'pipe', 'pipe'] }, os?.platform)
         : spawnGrouped(spec.command, spec.args, { cwd: spec.cwd, env: spec.env, stdio: ['pipe', 'pipe', 'pipe'] }, os?.platform)
     } catch (err) {
       started = { child: notStarted(err as Error), spawnedAt: Date.now() }
     }
-    const p = new LocalAgentProcess(started.child, started.spawnedAt, os)
+    const p = new LocalAgentProcess(started.child, started.spawnedAt, os, spec)
     if (spec.signal) {
       if (spec.signal.aborted) p.kill('SIGTERM')
       else spec.signal.addEventListener('abort', () => p.kill('SIGTERM'), { once: true })
     }
     return p
+  }
+
+  /**
+   * What the shell behind the watch said before it started the CLI (`FIND_CLI`, on fd 4): a CLI it could not find or run is
+   * an 'error' as Node's spawn gives, not an exit code. Settles once fd 4 has ended, which the `exec` or the shell's exit does
+   */
+  private readStatus(pipe: Readable | Writable | null | undefined): Promise<void> {
+    if (!(pipe instanceof Readable)) return Promise.resolve()
+    const r = pipe
+    let said = ''
+    r.on('data', (d: Buffer) => (said += d.toString()))
+    return new Promise((resolve) => {
+      const done = () => {
+        const code = said.includes('enoent') ? 'ENOENT' : said.includes('eacces') ? 'EACCES' : null
+        if (code) this.emit('error', startError(code, this.spec))
+        resolve()
+      }
+      r.once('end', done)
+      r.once('error', () => resolve())
+    })
   }
 
   get pid(): number | undefined {
@@ -240,6 +281,12 @@ export class LocalAgentProcess extends EventEmitter implements AgentProcess {
       if (ended.length > 0) console.error(`[agent] ended ${ended.length} process(es) pid ${pid} left running: ${ended.join(', ')}`)
     })
   }
+}
+
+/** The error Node's spawn gives for a program that is not there (`ENOENT`) or cannot be run (`EACCES`) */
+function startError(code: 'ENOENT' | 'EACCES', spec: AgentSpawnSpec): Error {
+  const errno = code === 'ENOENT' ? -2 : -13
+  return Object.assign(new Error(`spawn ${spec.command} ${code}`), { code, errno, syscall: `spawn ${spec.command}`, path: spec.command, spawnargs: spec.args })
 }
 
 /**

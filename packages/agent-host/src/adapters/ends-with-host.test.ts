@@ -1,12 +1,12 @@
-import { spawn } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { spawn, spawnSync } from 'node:child_process'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { KILL_GRACE_MS } from '../dev-services/kill-tree.js'
 import { goneWithin, helperPid, killLeftovers } from './fake-agent-cli.test-helpers.js'
-import { HOST_WATCH, spawnLocalAgent } from './local-process.js'
+import { FIND_CLI, HOST_WATCH, spawnLocalAgent } from './local-process.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 
 /**
@@ -41,7 +41,7 @@ const helperCli = [
 
 describe('a CLI that must end with its host', () => {
   it('starts behind the host watch, which ends the group once the host’s end of its pipe closes', () => {
-    expect(HOST_WATCH).toContain('exec "$@" 3<&-')
+    expect(HOST_WATCH).toContain('exec "$@" 3<&- 4>&-')
     expect(HOST_WATCH).toContain('kill -9 0')
   })
 
@@ -115,6 +115,166 @@ describe('a CLI that must end with its host', () => {
     started.push(helper, h.pid!)
     h.kill('SIGKILL')
     expect(await goneWithin(helper, 10_000)).toBe(true)
+  })
+
+  /*
+   * Every tool started by this host, through the process seam (#1654 Q3): Codex's app-server and Claude Code end with a host
+   * killed outright, as ACP's tools already did, whatever they do with stdin's end. The CLI writes its pid to a file: the
+   * tool's own reader takes its stdout.
+   */
+  const pidFileCli = (file: string) => ({
+    command: process.execPath,
+    args: ['-e', `require('node:fs').writeFileSync(${JSON.stringify(file)}, String(process.pid)); process.stdin.resume(); setInterval(() => {}, 1000)`],
+  })
+  async function pidIn(file: string): Promise<number> {
+    for (let i = 0; i < 200; i++) {
+      if (existsSync(file) && readFileSync(file, 'utf8')) return Number(readFileSync(file, 'utf8'))
+      await new Promise((r) => setTimeout(r, 50 * SLOW))
+    }
+    throw new Error('the CLI wrote no pid')
+  }
+  async function endsWithItsHost(lines: (cli: { command: string; args: string[] }) => string[]): Promise<void> {
+    dir = mkdtempSync(join(tmpdir(), 'cc-ends-with-host-'))
+    const host = join(dir, 'host.mts')
+    const file = join(dir, 'cli.pid')
+    writeFileSync(host, [...lines(pidFileCli(file)), 'setInterval(() => {}, 1000)'].join('\n'))
+    const h = spawn(process.execPath, ['--import', 'tsx', host], { stdio: ['ignore', 'ignore', 'inherit'] })
+    started.push(h.pid!)
+    const cli = await pidIn(file)
+    started.push(cli)
+    h.kill('SIGKILL')
+    expect(await goneWithin(cli, 10_000)).toBe(true)
+  }
+  const moduleUrl = (file: string) => JSON.stringify(pathToFileURL(join(import.meta.dirname, file)).href)
+
+  it.skipIf(!unix)('ends Codex’s app-server when its host is SIGKILLed', async () => {
+    await endsWithItsHost((cli) => [
+      `import { CodexClient } from ${moduleUrl('codex/client.ts')}`,
+      `new CodexClient({ onNotification: () => {}, onServerRequest: () => {}, onExit: () => {} }, { command: ${JSON.stringify(cli.command)}, args: ${JSON.stringify(cli.args)} })`,
+    ])
+  })
+
+  it.skipIf(!unix)('ends Claude Code when its host is SIGKILLed', async () => {
+    await endsWithItsHost((cli) => [
+      `import { claudeQueryOptions } from ${moduleUrl('claude/sdk-query.ts')}`,
+      `import { spawnLocalAgent } from ${moduleUrl('local-process.ts')}`,
+      "const o = claudeQueryOptions({ sessionId: 's1', opts: { sessionId: 's1', cwd: process.cwd(), permissionPreset: 'normal' }, executablePath: undefined, servers: {}, permissionOptions: { permissionMode: 'default' }, codeIntelligence: {}, spawn: spawnLocalAgent, canUseTool: async () => ({ behavior: 'deny', message: '' }) })",
+      `o.spawnClaudeCodeProcess({ command: ${JSON.stringify(cli.command)}, args: ${JSON.stringify(cli.args)}, env: process.env })`,
+    ])
+  })
+
+  /*
+   * Behind the watch `sh` always starts, so a program that is not there or cannot be run used to read as an exit code (127,
+   * 126): Codex said "exited (code 127)". The shell that will `exec` looks it up itself and says so before it does, and the
+   * host raises what Node's spawn raises without the watch. The PATH is the test's own, never the runner's: npx and pnpm put
+   * a relative `./node_modules/.bin` on it, a login shell may leave `~/...` or an empty entry.
+   */
+  const startError = (env: Record<string, string | undefined>, command: string, cwd?: string) => {
+    const p = spawnLocalAgent({ command, args: [], env, cwd, endsWithHost: true })
+    return new Promise<{ error: Error; exits: number[] }>((resolve) => {
+      const exits: number[] = []
+      p.once('exit', (code: number) => exits.push(code))
+      p.once('error', (error) => setTimeout(() => resolve({ error, exits }), 100))
+    })
+  }
+
+  it.skipIf(!unix)('says a CLI that is not there did not start, as without the watch, not that it crashed', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'cc-ends-with-host-'))
+    mkdirSync(join(dir, 'rel'))
+    const bin = '/usr/bin:/bin'
+    const paths: (string | undefined)[] = [bin, `${bin}:./rel`, `${bin}:~/cc-no-such-dir`, `${bin}::`, `:${bin}`, undefined]
+    for (const PATH of paths) {
+      for (const command of ['/nonexistent/cc-no-such-cli', 'cc-no-such-cli', './cc-no-such-cli']) {
+        const { error } = await startError({ PATH }, command, dir)
+        expect(error, `PATH=${PATH} ${command}`).toMatchObject({ code: 'ENOENT', syscall: `spawn ${command}` })
+      }
+    }
+  })
+
+  it.skipIf(!unix)('finds a CLI on a relative or empty PATH entry, from the folder it starts in', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'cc-ends-with-host-'))
+    mkdirSync(join(dir, 'rel'))
+    const cli = join(dir, 'rel', 'cc-rel-cli')
+    writeFileSync(cli, '#!/bin/sh\necho started\n', { mode: 0o755 })
+    for (const PATH of ['/usr/bin:/bin:rel', '/usr/bin:/bin:./rel']) {
+      const p = spawnLocalAgent({ command: 'cc-rel-cli', args: [], env: { PATH }, cwd: dir, endsWithHost: true })
+      const failed = vi.fn()
+      p.on('error', failed)
+      let out = ''
+      p.stdout.on('data', (d) => (out += d))
+      await new Promise((r) => p.once('exit', r))
+      expect(out, PATH).toBe('started\n')
+      expect(failed).not.toHaveBeenCalled()
+    }
+  })
+
+  it.skipIf(!unix || process.getuid?.() === 0)('says a file that cannot be run, or a folder, did not start (EACCES), as without the watch', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'cc-ends-with-host-'))
+    writeFileSync(join(dir, 'plain'), 'not a program', { mode: 0o644 })
+    mkdirSync(join(dir, 'folder'))
+    const cases: [string, Record<string, string>][] = [
+      [join(dir, 'plain'), { PATH: '/usr/bin:/bin' }],
+      [join(dir, 'folder'), { PATH: '/usr/bin:/bin' }],
+    ]
+    for (const [command, env] of cases) {
+      const { error } = await startError(env, command)
+      const node = await new Promise<Error>((resolve) => spawn(command, [], { env }).once('error', resolve))
+      expect(error, command).toMatchObject({ code: 'EACCES' })
+      expect(node).toMatchObject({ code: 'EACCES' })
+    }
+  })
+
+  /*
+   * The lookup is one script run by whatever `sh` the OS has, and shells differ on a file that cannot be run: dash's
+   * `command -v` prints its path, macOS's `sh` fails (the macOS re-check of #1668: an absolute path to a plain file read
+   * ENOENT where Node says EACCES). So the decision is run under dash, under a POSIX bash, and under a bash whose
+   * `command -v` fails for every name with a slash, which is how macOS's answers.
+   */
+  describe.skipIf(!unix)('the lookup before the watch, in each kind of sh', () => {
+    const macLike = 'command() { case "$*" in */*) return 1;; esac; builtin command "$@"; }; '
+    const shells: [string, string, string[]][] = [
+      ['sh', '', []],
+      ['bash --posix', '', ['--posix']],
+      ['a sh whose command -v fails for a path', macLike, []],
+    ]
+    const available = (name: string) => spawnSync(name, ['-c', 'exit 0']).status === 0
+    const say = (shell: string, flags: string[], prelude: string, command: string, cwd: string, PATH: string | undefined) => {
+      const r = spawnSync(shell, [...flags, '-c', `${prelude}${FIND_CLI}exit 0`, 'x', command], { cwd, env: PATH === undefined ? {} : { PATH }, stdio: ['ignore', 'ignore', 'ignore', 'ignore', 'pipe'] })
+      return { said: String(r.output[4] ?? '').trim(), status: r.status }
+    }
+    for (const [label, prelude, flags] of shells) {
+      const shell = label.startsWith('bash') || prelude ? 'bash' : 'sh'
+      it.skipIf(!available(shell))(`says ENOENT, EACCES or nothing as Node does: ${label}`, () => {
+        dir = mkdtempSync(join(tmpdir(), 'cc-ends-with-host-'))
+        const bin = join(dir, 'bin')
+        mkdirSync(bin)
+        mkdirSync(join(dir, 'bin', 'folder-cli'))
+        writeFileSync(join(bin, 'plain-cli'), 'not a program', { mode: 0o644 })
+        writeFileSync(join(bin, 'good-cli'), '#!/bin/sh\n', { mode: 0o755 })
+        chmodSync(join(bin, 'plain-cli'), 0o644)
+        const sys = '/usr/bin:/bin'
+        const cases: [string, string, string | undefined, string, number | null][] = [
+          ['absolute, missing', join(dir, 'nothing'), sys, 'enoent', 127],
+          ['absolute, not runnable', join(bin, 'plain-cli'), sys, 'eacces', 126],
+          ['absolute, a folder', join(bin, 'folder-cli'), sys, 'eacces', 126],
+          ['absolute, runnable', join(bin, 'good-cli'), sys, '', 0],
+          ['relative, not runnable', './bin/plain-cli', sys, 'eacces', 126],
+          ['relative, missing', './bin/nothing', sys, 'enoent', 127],
+          ['a name, missing', 'cc-no-such-cli', sys, 'enoent', 127],
+          ['a name, missing, PATH unset', 'cc-no-such-cli', undefined, 'enoent', 127],
+          ['a name, not runnable on PATH', 'plain-cli', `${sys}:${bin}`, 'eacces', 126],
+          ['a name, a folder on PATH', 'folder-cli', `${sys}:${bin}`, 'eacces', 126],
+          ['a name, not runnable on a relative PATH entry', 'plain-cli', `${sys}:bin`, 'eacces', 126],
+          ['a name, not runnable behind an empty PATH entry', 'plain-cli', `${sys}:`, 'eacces', 126],
+          ['a name, runnable on a relative PATH entry', 'good-cli', `${sys}:./bin`, '', 0],
+          ['a name, runnable after a folder of that name', 'good-cli', `${bin}:${sys}`, '', 0],
+        ]
+        for (const [what, command, PATH, said, status] of cases) {
+          const cwd = what.includes('empty') ? bin : dir
+          expect(say(shell, flags, prelude, command, cwd, PATH), `${label}: ${what}`).toEqual({ said, status })
+        }
+      })
+    }
   })
 
   it('starts as before without it, and where there are no process groups', async () => {

@@ -2521,9 +2521,11 @@ Linux it gets a process group of its own; a stop is `kill-tree.ts`'s TERM to eve
 the survivors after 3 s, and once it has exited its group is swept the same way (`stopGroup`). On Windows a stop is
 `taskkill /T /F` on its tree, and once it has exited what it left running is found by parent links and creation
 times and ended (`collectOrphansWindows`), against a start time taken before the spawn. The start and the sweep are
-the ones app processes use (`dev-services/grouped-child.ts`: `spawnGrouped`, `sweepExited`). Being in a group of its own, the CLI is no longer in the host's: a host
-that is SIGKILLed takes it along only through stdin EOF, on which codex exits at once and claude after the turn it
-is in. The SDK adds the end of the CLI's stderr to a failure only for a process it spawned itself, so both
+the ones app processes use (`dev-services/grouped-child.ts`: `spawnGrouped`, `sweepExited`). Being in a group of its own, the CLI is no longer in the host's, so
+every CLI the host starts, Claude Code, Codex's app-server and the ACP tools alike, starts behind the host watch
+(`endsWithHost`, `HOST_WATCH`): a pipe only the host holds, whose close ends the CLI's group however the host went,
+SIGKILL included, and whatever the CLI does with stdin's end (#1654; one start for every tool,
+`adapters/core/tool-process.ts`). The shell behind the watch also looks the CLI up itself before it starts it (`command -v`, so its own PATH rules apply: relative and empty entries, its default when PATH is unset) and says on fd 4 when it is not there or cannot be run, so the host raises the same ENOENT or EACCES 'error' Node's spawn gives without the watch, not an "exited (code 127)". Windows has no such watch: there a host's children end with it through its kill-on-close job. The SDK adds the end of the CLI's stderr to a failure only for a process it spawned itself, so both
 adapters add it the same way (`withStderrTail`, `stream-text.ts`): the host's own child and the keeper's each keep the
 last 8 KiB of stderr (`AgentProcess.stderrTail`), decoded as one stream so a character split between two chunks stays
 whole, and Claude's `adapter_crashed` and Codex's "codex app-server exited" carry it, under the keeper too.

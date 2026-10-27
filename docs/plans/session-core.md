@@ -141,7 +141,8 @@ Only ACP starts behind `HOST_WATCH`. Claude and Codex rely on stdin EOF when the
 and the CLI ends its MCP servers, unless the CLI is wedged; `HOST_WATCH` ends the group whatever the CLI does (#1562
 review: Cursor with the bridge outlived a SIGKILLed host). **Right:** `endsWithHost` for every locally started CLI
 (the stronger guarantee; Claude and Codex were never measured to outlive a host, assumed safe). It changes what runs
-on macOS and Linux: its own pull request, after the process seam, with a real-OS test per tool (§9.3).
+on macOS and Linux: its own pull request, after the process seam, with a real-OS test per tool (§9.3). Decided (#1654,
+Q3): part of the process seam itself; done in PR 3 (§5.1).
 
 ### 2.7 The approval decision order
 
@@ -254,6 +255,9 @@ export interface ToolWire {
   }
   /** What `auto` answers for a call that reaches the decision order (§2.7): Claude deny, ACP and agy allow */
   readonly autoGrant: 'allow' | 'deny'
+  /** The process to start for this conversation, asked again for every new process (`ToolLaunch`, §5.1): agy needs a
+   *  new one with `--conversation <id>` after every Stop and every model or effort change. `null`: not installed */
+  launch(resume: { externalId: string } | null): Promise<AgentSpawnSpec | null>
   /** Opens or resumes the conversation on a started process; the core has already tapped it */
   open(io: CoreIo, resume: { externalId: string } | null): Promise<{ externalId: string | null }>
   /** Writes one input; `blocking` turns (Codex /compact, /review) say so in the answer */
@@ -274,6 +278,7 @@ export interface CoreIo {
   turnStarted(info: { toolTurnId?: string; inputIds?: readonly string[] | null }): void
   turnEnded(how: 'complete' | 'interrupted' | 'failed', detail?: { error?: NormalizedError }): void
   inputAccepted(inputId: string): void        // the tool took it (receipts)
+  externalId(id: string): void                // an id the tool said after `open` (agy: in `init`, after the first input)
   grant(call: GrantQuery): Promise<GrantDecision>  // §2.7's order; raises the card when it must
 }
 
@@ -315,6 +320,42 @@ and an `sh` wrapper, `endsWithHost`) and the keeper-held processes. They stay in
 `dev-services/grouped-child.ts` and `kill-tree.ts` behind `LocalAgentProcess` until 3f. `tool-process.ts` therefore has
 three sources: `os.processes.start` (a local child without the host watch), `LocalAgentProcess` (a local child with it),
 and the keeper's `ProcessSource` (spawn and adopt). Tests give a fourth: the replayer or a fake peer.
+
+### 5.1 As built in PR 3
+
+`core/tool-process.ts` is the one start and stop for every tool, with no change to `Os` (PR 4 moves this file onto it):
+
+| Function | What it does | Called by |
+|---|---|---|
+| `startToolProcess(spec, { sessionId, source, spawn })` | the keeper's `source.spawn` (no host watch: the keeper's child outlives the host by design), or this host's `spawnLocalAgent` **always with `endsWithHost`**; tapped when there is a `sessionId` | ACP's `createSession`, `CodexClient` (session and short-lived), the Cursor and OpenCode surface probes |
+| `adoptToolProcess(proc, sessionId)` | a process a previous host left, taken over as it is: tapped from the adoption on | `CodexClient` |
+| `stopToolProcess(proc, { graceMs, exited })` | stdin's end, `STOP_GRACE_MS` (2 s), then the tree (`kill('SIGKILL')`) | `CodexClient.dispose`, `AcpConnection.dispose` |
+| `endToolProcess(proc, boundMs)` | the tree at once, then a bounded wait | ACP's `closeAdopted` |
+| `logToolStderr(proc, label)` | the 500-character host-log line (§2.11) | `CodexClient`, `AcpConnection` |
+| `SessionProcess` | a session's process across its replacements (below): `start`, `relaunch`, `interrupt`, `stop`, `close`, run one at a time in the order asked, so a Stop or a close asked while a start awaits its launch ends what it starts (or starts nothing, once closed) | nobody yet: `agy`'s wire, then the ledger (PR 5) |
+
+Claude stays on the SDK (§3.3): `claudeQueryOptions`'s `spawnClaudeCodeProcess` adds `endsWithHost` to what the SDK asks
+for (`claude/sdk-query.ts`), and `claude/session.ts` (#1626's) is untouched; its keeper spawn passes four fields and so
+leaves the flag out. Codex's keeper spawn (`launch-config.ts:spawnInKeeper`) is gone: `CodexClient` takes the
+`ProcessSource` and builds one spec for both. What changes on screen: nothing. What changes on macOS and Linux: Claude
+Code and Codex's app-server start behind `HOST_WATCH`, as ACP's tools already did (§2.6, Q3), so a host killed outright
+takes them along whatever they do with stdin's end; `ends-with-host.test.ts` holds it per tool on a real OS (skipped on
+Windows, which has no watch). Behind the watch `sh` always starts, and its `exec` of a missing program exits 127, so a
+removed `codex` read as a crash where it used to say it failed to start (found by `codex/client.test.ts` on Linux):
+`local-process.ts` now looks the program up as `sh` would and reports a missing one as not started (ENOENT), as without
+the watch. That also changes ACP on macOS and Linux, from "<label> exited (code 127)" to "<label> failed to start".
+
+**What Antigravity needs of the seam** (#1654, measured on `agy` 1.4.7), in `SessionProcess` and `core/gate.ts`:
+
+1. **`launch(resume)`** (`ToolLaunch`): asked again for every new process, with the conversation's id once known, since
+   `agy` ends its process on every Stop and takes model and effort as flags. `relaunch()` stops the old process (4.)
+   before it asks for the next.
+2. **An id learned late** (`noteExternalId(id, from)`): `agy` says its id only in `init`, after the first input; every
+   later launch goes on with it. A late line from a process already replaced is ignored.
+3. **The gate's inbound path** (`GateInbound`, `GateChannel`, `GateRequest`, `GateAnswer`): an interface only; the
+   transport is decided (§8.1: a front-door route under a gate-only key), built with `agy`.
+4. **A Stop denies every open gate request first** (`GateRequests.denyAll`, in `interrupt` and `stop`): SIGINT does not
+   end `agy` while a gate hook waits.
 
 **No change to the frozen interface is needed** for the core or for Claude, Codex and ACP on it. One later need to
 raise: `agy`'s interrupt is SIGINT (antigravity-adapter.md §1.5), and on Windows `OsChild.kill` ends a child whatever
@@ -389,7 +430,7 @@ estimates of changed lines without fixtures.
 |---|---|---|---|---|
 | 1 | **The frame tap at the process**: `core/tool-process.ts` with the tap only; ACP records through it instead of `AcpConnection.onFrame`; Codex records through it (off unless `CC_RECORD_FRAMES`). This document | S, ~250 | ACP's 19 replays unchanged; a test that a tapped process records exactly the lines written and read, and the exit | nothing: **can start before #1626 and #1650** (touches `frames/`, `acp/adapter.ts`, `acp/connection.ts`, `codex/client.ts`, none in #1626) |
 | 2 | **Claude and Codex recordings**: Claude taps its process (`claude/session.ts` spawn site); the Claude codec; scrubbed recordings of the shared scenarios for both; replay tests | M, ~400 + fixtures | the replays themselves pin today's events; recorded on a logged-in machine | 1; can be written before #1626 (its hunks in `claude/session.ts` are the input ids, lines 479–500; the spawn site is line 213), but Claude's recordings should be made with #1626's input ids, so they are recorded after it lands |
-| 3 | **The process seam**: `tool-process.ts` starts every tool (local, host watch, keeper, adopt) and stops it (EOF, bound, tree); the three spawn and dispose paths call it | M, ~350 | all adapter tests and replays unchanged; core tests for stop order and bound | 2 |
+| 3 | **The process seam**: `tool-process.ts` starts every tool (local, host watch, keeper, adopt) and stops it (EOF, bound, tree); the spawn and dispose paths call it; `endsWithHost` for every tool (Q3); what `agy` needs (§5.1) | M, ~350 | all adapter tests and replays unchanged; core tests for stop order and bound; a real-OS test per tool that it ends with its host | 1 (built before 2: Claude's spawn flag is in `claude/sdk-query.ts`, not its spawn site) |
 | 4 | **OS step 3c**: `tool-process.ts` on `Os`; adapter tests on `memoryOs` and the replayer; allowlist lines off | M, ~300 | the same tests on `memoryOs` as both families; a few real-process tests stay on every OS | 3, #1650 |
 | 5 | **The ledger, ACP first**: `core/ledger.ts` and `seam.ts`; `AcpSession` becomes an ACP `ToolWire` on `CoreSession` (queue, receipts, Stop timer, exit) | L, ~500 | ACP's replays and `acp/session.test.ts` unchanged; core tests on a scripted wire | 3 (not 4) |
 | 6 | **The ledger, Codex**: Codex's blocking-turn queue, receipts and exit onto the ledger; Codex keeps no Stop timer (`confirmsStop: false`, §2.4) | L, ~450 | Codex's replays (PR 2), `interrupt.test.ts`, `lazy-resume.test.ts`, `keeper.test.ts` unchanged | 5 |
@@ -413,7 +454,7 @@ PRs 5–9 for one tool do not wait for the others, so `agy` (§8) needs only 1, 
 | ACP's crash message in `withStderrTail`'s form | §2.5 | after 5 |
 | Claude's idle exit is asleep, not crashed | §2.5 | after 7, owner's call (§9.1) |
 | Codex gets the Stop confirmation timer | §2.4 | after 6, owner's call (§9.2) |
-| `endsWithHost` for Claude and Codex | §2.6 | after 3, with real-OS tests on macOS and Linux (§9.3) |
+| `endsWithHost` for Claude and Codex | §2.6 | done in 3 (Q3 decided it belongs there; §5.1) |
 
 ## 8. Antigravity on the core
 
@@ -427,14 +468,49 @@ From antigravity-adapter.md's measurements (`agy` 1.4.7, macOS, 2026-10-26), wha
 | `turns.interruptEndsProcess` | true: SIGINT ends the process within 30 ms with a `result` `interrupted`; the next input starts a new one with `--conversation` | §1.5, §3.1 |
 | Stop confirmation | the process exit is the confirmation; the timer bounds it with the existing stop bound | §3.3 |
 | Crash vs asleep | the core's rule; an exit after our SIGINT is expected | §4.1 |
-| `open` and resume | `--conversation <id>`; the unknown-id check at the first `init` is the wire's | §4.4 |
-| `grant` | the PreToolUse hook gate calls `CoreIo.grant` with a `GrantQuery` from `tool-kinds.ts` (an unknown name is a card) | §5 |
+| `open` and resume | `--conversation <id>` from `launch(resume)` for every new process; the id from the first `init` through `noteExternalId`; the unknown-id check at the first `init` is the wire's | §4.4 |
+| `grant` | the PreToolUse hook gate reaches the host through `GateInbound` (§8.1) and calls `CoreIo.grant` with a `GrantQuery` from `tool-kinds.ts` (an unknown name is a card); a Stop and a close deny what is open first | §5 |
 | Event hygiene | `TouchedFiles` for edits, token totals from `agent_response` `DONE` frames, no context reading (no window), no compaction marks | §4.1, §6 |
 | Not used | history read-back, `detach` takeover (`adopt` returns `reopen`, like ACP) | §8 |
 
 So `agy`'s adapter is a wire (`stream.ts`, `normalize.ts`, `gate.ts`, `plugin-root.ts`, `tool-kinds.ts`,
 `known-steps.ts`) on the core, without its own queue, Stop, exit or approval order. Its pull request follows PRs 1, 3, 5, 8 and 9
 for ACP; it does not wait for Claude's or Codex's moves (PRs 2, 6, 7).
+
+### 8.1 The gate's way back to the host: a decision
+
+The hook is a process `agy` starts per call; it must reach this host, wait for a decision and print it (a hook that
+prints nothing and exits 0 lets the tool run, measured). Two transports were weighed, and a third, narrower one chosen:
+
+| | A. Loopback listener per session, its own token | B. A route on the host's front door, the bridge credential |
+|---|---|---|
+| What is new | a listener per `agy` session (`127.0.0.1`, a random port) and a random token per session in the tool's environment | one route and a `SessionHandle` method it reaches; no new listener |
+| Who can call | anyone on the machine who has the port and the token; the token is per session and dies with it | anyone who holds the session's bridge credential |
+| What a leaked secret allows | raising that session's gate cards until it closes | the same, plus what that credential already reaches (`orchestrator.tool`, `apps.sessionCall` for that session) |
+| Rights model | outside the host's method rights: a second front door to review and keep reviewed | inside them: one front door, its rights table and its tests |
+| Across a host swap | dies with the host; an adopted `agy` is reopened, not taken over (§8), so a new process gets a new listener and token | the route survives; a request the old host opened is answered only if the hook asks again |
+| Who holds the secret today | nobody: it is new | **no tool's environment holds the bridge credential today.** Claude's Centralu tools run inside the host with no token. Codex and ACP get the bridge's environment only in the bridge child process (thread config, `session/new`'s `mcpServers`), and only for a session with the orchestrator profile or apps. Another process can read it from that child's environment at most. The credential is an HMAC of the session id keyed by the host token: it does not die with the session and survives keeper swaps |
+| What `agy`'s shell would gain | the session's gate token only | a long-lived credential for its session's orchestrator and app tools, newly in the agent's own shell, skipping what the tool asks before an MCP call |
+| Windows | a loopback port (no firewall prompt for `127.0.0.1`) | nothing new |
+
+**Decision (owner, after the security review on #1668): a route on the host's front door under a gate-only key of its own.**
+Not the bridge credential, and no new listener.
+
+- The key is random per session, held in memory, revoked when the session closes, and allows exactly one method: raise a
+  gate request for that session. It is bound to the session it was made for and is not in the everyday rights.
+- The method's parameters carry no decision field. Approvals stay `window`-only in the rights table
+  (`agents.respondApproval`, `requests.answer`), so the channel can ask and never answer.
+- It fails closed (the hook denies when the host cannot be reached), keeps the secret out of every file (the plugin root
+  holds names only) and is closed with the session, denying what is open and what asks later. A Stop denies what is open and
+  what a dying process asks during its grace.
+- `core/gate.ts` stays interfaces only; the route and the key come with `agy`'s pull request.
+
+The key is in the tool's environment, so the agent's own shell commands hold it too. That is safe only because the channel
+**asks and never answers**: the decision comes from the preset, the always-allow rules or the person's card, never from the
+caller. A command holding the key can raise a card (noise the person sees and can deny), or ask again with an open
+request's id, which only ever denies the first wait (`GateRequests.wait`); it cannot allow a call. A transport that let the
+caller say "allowed" (a shortcut for Centralu's own tools, say) would hand the agent its own approvals, and must not be
+added.
 
 ## 9. Open questions
 
