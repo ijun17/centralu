@@ -756,3 +756,25 @@ describe('the preset a new session starts with (#1525)', () => {
     expect((await started(true, undefined, 'other-machine')).sent).toBe('normal')
   })
 })
+
+/*
+ * #1647: a pick that reaches the orchestrator without the sidebar's button (a mail's Open, a notice, the waiting list) has to
+ * bring up the same screen: the one that shows the conversation of the session `orchestratorId` names.
+ */
+describe('focusing the orchestrator', () => {
+  it('names it as the orchestrator the screen shows, in the change that moves to its screen', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('orc-1647', sessionInfo('orc-1647', { projectId: null, kind: 'orchestrator' }))
+    mock.sessions.set('w-1647', sessionInfo('w-1647'))
+    await useStore.getState().attach(mock)
+    useStore.getState().focusSession('w-1647')
+    expect(useStore.getState().orchestratorId).toBeNull()
+
+    useStore.getState().focusSession('orc-1647')
+
+    const s = useStore.getState()
+    expect(s.view).toBe('orchestrator')
+    expect(s.orchestratorId).toBe('orc-1647')
+    expect(s.introSeen).toBe(true)
+  })
+})

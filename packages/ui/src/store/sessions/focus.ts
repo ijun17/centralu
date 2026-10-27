@@ -3,6 +3,7 @@ import type { AppState, StoreGet, StoreSet } from '../state.js'
 import { foldGroupsHiding } from '../foldGroups.js'
 import { trimWindow, withoutClosedSteps } from '../historyPages.js'
 import { omitKey } from '../patch.js'
+import { orchestratorScreen } from '../orchestrator.js'
 
 /**
  * Picking the session the person looks at: `focusSession`, the one door a dozen call sites go
@@ -113,6 +114,13 @@ export const focusActions = (set: StoreSet, get: StoreGet): FocusActions => ({
       // A composer asked to take the keyboard belongs to the session asked for, not the one shown now (#528)
       ...(get().composerFocusFor !== null && get().composerFocusFor !== id ? { composerFocusFor: null } : {}),
       ...(reveal ? { foldedProjects: get().foldedProjects.filter((p) => p !== rowProject) } : {}),
+      /*
+       * The orchestrator's screen shows the session `orchestratorId` names, and a run learns that id only by opening the
+       * screen itself. A pick that arrives by another way (a mail, a notice, the waiting list) knows the session, so it
+       * names it here, in the state change the sidebar's button makes (#1647); left unset, the screen showed its empty
+       * start state over a conversation that exists, until the person went to the grid and back.
+       */
+      ...(id && orchestrator && !onGrid && !picked?.machine ? orchestratorScreen(id) : {}),
       ...(id
         ? {
             /*

@@ -22,6 +22,16 @@ type OrchestratorActions = Pick<
   | 'resolveSkillProposal'
 >
 
+/**
+ * What changes when the orchestrator's screen comes up, for every way onto it (#1647): the sidebar button and a saved
+ * workspace through `openOrchestrator`, a mail, a notice, the palette and the waiting list through `focusSession`. The screen
+ * shows the session `orchestratorId` names, so a way in that knows the session passes it; one that does not (the button
+ * asks the host) learns it a moment later. Landing here also counts as having passed the intro (the same reason as `setView`, #63).
+ */
+export function orchestratorScreen(id?: string): Pick<AppState, 'view' | 'introSeen' | 'overlay'> & Partial<Pick<AppState, 'orchestratorId'>> {
+  return { view: 'orchestrator', introSeen: true, overlay: null, ...(id ? { orchestratorId: id } : {}) }
+}
+
 /** Records the tool the orchestrator will be born with; a failure is toasted */
 async function recordChoice(set: StoreSet, get: StoreGet, tool: ToolName): Promise<boolean> {
   try {
@@ -43,8 +53,7 @@ export const orchestratorActions = (set: StoreSet, get: StoreGet): OrchestratorA
      * person who clicked assumes the button is dead — the same reason a message is marked "working"
      * the instant it is sent.
      */
-    // Landing here also counts as having passed the intro (the same reason as `setView`, #63)
-    set({ view: 'orchestrator', introSeen: true, overlay: null })
+    set(orchestratorScreen())
     get().saveWorkspace()
     try {
       /*
