@@ -2090,6 +2090,14 @@ sets a temporary `CC_DATA_DIR`, and never starts a host or uses `~/.centralu`.
    (`adapters/contract/surface.ts`, #270) too: how to read what the tool offers without a turn,
    what the adapter blocks, drops or works around (each with its measurement), and a recorded
    baseline. The weekly drift run then watches the new tool in the other direction as well.
+   An ACP tool is a profile on `adapters/acp/`; where its ACP differs from the common shape (its field names, a
+   question sent as a permission request, a permitted call that runs under another id, client reads, `_meta` on the
+   session's start, a sign-in of its own, a log line that must not reach host.log), it fills `AcpProfile.shape`
+   (`AcpToolShape`) rather than branching the core ([plans/antigravity-acp.md](plans/antigravity-acp.md) §2).
+   A tool Centralu installs or signs in itself carries `AgentAdapter.setup` (`ToolSetupControl`): the host answers
+   `agents.installTool` and `agents.signIn` through it and pushes its changes as `tool_setup` events. Every tool
+   reports `DetectResult.setup` or gets one from its two booleans, so the screens read one shape for all
+   ([plans/antigravity-acp.md](plans/antigravity-acp.md) §8).
 5. Done. **ui, core and platform are unchanged**, and protocol changes only by the two
    entries in step 2. (If more was needed, that is not the adapter's fault but the protocol
    lacking a concept — consider extending the protocol first)

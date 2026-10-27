@@ -1230,6 +1230,30 @@ during a swap, an app's data, SQLite) is still behind a folder only its owner ca
 widens the folder again. The host's `umask` is not changed: it is every agent's and every terminal's, and the files
 they write in the person's projects keep the person's own modes.
 
+### Antigravity's agent and its token (#59)
+
+Centralu installs Google's Antigravity agent itself and keeps all of its state under the data folder
+(`tools/antigravity/`, [plans/antigravity-acp.md](plans/antigravity-acp.md) §3, §4), so it sits behind the folder's
+`0700`. The rules that hold it:
+
+- **Only the pinned build runs.** `agents.installTool` downloads the one archive this Centralu pins and refuses it unless
+  its sha256 is the pinned one, before anything is unpacked; only the files the release names, as plain files, are
+  written, and the folder is put in place by one rename. The method `asks` for the limited credential: it brings in a
+  program that later runs.
+- **The agent's home is Centralu's.** Every process starts with `GEMINI_HOME` there, never the person's `~/.gemini`, so
+  none of their global MCP servers, hooks or skills load into a Centralu session, and Centralu never reads the CLI's
+  sign-in.
+- **The token is a file the agent's own tools do not read.** The file backend is forced (no Keychain item, no OS
+  dialog in Centralu's name). The agent's built-in viewer read that file without asking in the spike, so its content
+  readers are switched off for every session and reads come to Centralu (`fs/read_text_file`), which answers inside the
+  session's folder only, by real path, and never under `tools/antigravity/`. A shell command can still read it, and asks
+  under every preset but Auto. Centralu itself never opens the token file; it looks for its presence.
+- **The sign-in address stays out of logs and events.** It reaches the host through a private folder (`0700`) and the
+  agent's stderr, is opened once and only as an `https` Google address, and no `tool_setup` event carries it. Lines of
+  the agent's stderr that hold an address, an email or a token's name never reach `host.log` or a crash message.
+- **The agent never decides alone.** It stays in its `default` mode, where it asks; `allow_always` is never sent, so no
+  rule of its own outlives Centralu's preset; a question it asks is the person's to answer under every preset.
+
 ## Local transport
 
 The host listens on loopback and requires a token that is not blank — whitespace-only is

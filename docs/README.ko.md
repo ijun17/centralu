@@ -53,6 +53,7 @@
 | [plans/runtime-unification.md](plans/runtime-unification.md) | 프로세스 런타임을 단계별로 다시 설계 (주인, 2026-10-08): macOS·Linux·Windows·원격에서 하나의 구조(런처 → 키퍼 → 호스트), 하나의 OS 계층, 하나의 시작 계획, 어디서나 검증된 콘텐츠; 단계 순서, 원격 3–4단계와 Windows 키퍼(#14)와의 관계, 완료의 정의. [runtime-lessons.md](runtime-lessons.md)가 각 단계의 관문 |
 | [plans/acp-adapter.md](plans/acp-adapter.md) | Cursor CLI를 첫 도구로 하는 범용 Agent Client Protocol 어댑터 (#59, #1476, 2026-10-26 제안): Cursor 2026.10.22와 OpenCode 1.19.4에서 측정한 프레임, 세션마다 프로세스 하나, `authenticate`를 부르지 않는 이유, resume보다 load, 업데이트 대응표, 승인은 한 번씩 답하고 규칙은 여기서 지킨다, 턴 중 입력은 호스트가 줄 세운다, 컨텍스트 비율과 압축, stdio 브리지로 가는 Centralu의 도구, 능력 목록, 녹화를 재생하는 테스트(#1498), 런타임에 SDK를 쓰지 않는 이유, PR 분할과 열린 질문 (영어만) |
 | [plans/antigravity-adapter.md](plans/antigravity-adapter.md) | 대체됨 (#59): `agy -p` 어댑터 설계. `agy` 1.4.7 측정 기록으로만 남기며, Antigravity는 ACP 어댑터 위의 Google ACP 에이전트로 실행한다 |
+| [plans/antigravity-acp.md](plans/antigravity-acp.md) | Google의 ACP 에이전트로 돌리는 Antigravity (#59, 2026-10-27 제안, `agy -p` 설계를 대신한다): 주인의 결정, 에이전트 1.4.3을 macOS에서 잰 결과와 어댑터에 요구하는 것, 고정한 버전의 설치(sha256, 원자적, 진행, 취소, 모든 OS), Centralu의 `GEMINI_HOME` 하나, 에이전트가 제 뷰어로 읽지 못하는 파일 토큰, ACP `authenticate`와 `BROWSER` 도우미로 하는 로그인, 필드 이름, 편집의 두 id, 질문 카드, 모든 도구의 설정 상태 한 모양, 실기 확인이 필요한 것, 테스트 (영어만) |
 | [plans/root-apps.md](plans/root-apps.md) | 폴더에 `centralu.app.json`이 있는 프로젝트가 앱이다(#1141, 2026-10-18 결정): 루트 앱의 키, 매니페스트를 지웠을 때 남는 것, 사용자 폴더 앱을 프로젝트로 옮기기, 어느 세션이 그 도구를 받는가 |
 
 ## 문서를 쓰는 규칙

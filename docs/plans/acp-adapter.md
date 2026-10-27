@@ -3,7 +3,8 @@
 Proposed and approved 2026-10-26; §0 is what PR 1 settled. A design to agree on before code: what was measured, the shape of a generic Agent Client
 Protocol (ACP) client adapter in `packages/agent-host`, how Cursor CLI (`agent acp`) runs through it, how it is
 tested from recorded frames (#1498), and how the work is split. OpenCode (`opencode acp`) is the second tool on the
-same core; Antigravity (`agy`, stream-json, no ACP) gets its own adapter later and is out of scope here. A record like
+same core; Antigravity, first planned as its own `agy` adapter (stream-json, no ACP), runs on this core too since
+2026-10-27, as Google's ACP agent ([antigravity-acp.md](antigravity-acp.md)). A record like
 the rest of `plans/`, so not mirrored in Korean; [agent-host.md](../agent-host.md) §2–3 gains the lasting parts in
 the same pull request as the code.
 
@@ -126,7 +127,8 @@ Recorded through the adapter itself (`scripts/acp-record.mts`, §10.5) in eight 
 ### 0.5 What other adapters take from this
 
 The parts that know no protocol live outside `adapters/acp/`, for OpenCode (PR 3, on the ACP core) and for the
-Antigravity adapter (`agy`, stream-json, not ACP), which is designed in parallel:
+Antigravity adapter as it was then designed (`agy`, stream-json, not ACP; Antigravity now runs on this core as Google's ACP
+agent, [antigravity-acp.md](antigravity-acp.md)):
 
 | Part | Where | Antigravity can take it |
 |---|---|---|
