@@ -148,6 +148,11 @@ export class AcpNormalizer {
 
   /** Calls the person (or a Stop) refused this turn: whatever the agent says of them after, they did not run as asked */
   private readonly refused = new Set<string>()
+  /**
+   * Calls that ended this turn: a later update of one is dropped, not announced as a new call. Antigravity 1.4.3 ends an
+   * asked edit `failed` after its run, under another id, already ended it (`AcpToolShape.editRunsAsNewCall`)
+   */
+  private readonly ended = new Set<string>()
 
   /**
    * What this turn has heard of a call, merged with `u`. `asked`: `u` is a permission request's, which may carry less than
@@ -167,6 +172,7 @@ export class AcpNormalizer {
 
   private toolCall(u: ToolCallFields): NormalizedEvent[] {
     const id = u.toolCallId
+    if (this.ended.has(id)) return []
     const seen = this.call(u)
     this.known.set(id, seen)
     const events: NormalizedEvent[] = []
@@ -191,6 +197,7 @@ export class AcpNormalizer {
     }
     if (u.status === 'completed' || u.status === 'failed') {
       this.open.delete(id)
+      this.ended.add(id)
       const refused = this.refused.delete(id)
       // Measured on Cursor: a refused call ends `completed` with nothing else
       const ok = u.status === 'completed' && !refused && rawOutputOk(seen.rawOutput)
@@ -206,6 +213,7 @@ export class AcpNormalizer {
     this.open.clear()
     this.known.clear()
     this.refused.clear()
+    this.ended.clear()
     this.messages.clear()
     this.lastChunk = 'other'
     return events

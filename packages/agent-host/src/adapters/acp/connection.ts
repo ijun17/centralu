@@ -66,12 +66,14 @@ export class AcpConnection {
     private readonly proc: AgentProcess,
     private readonly handlers: AcpConnectionHandlers,
     private readonly label: string,
+    /** A stderr line as host.log may carry it, or null to leave it out (`AcpToolShape.stderrLine`) */
+    stderrLine?: (line: string) => string | null,
   ) {
     proc.on('error', (err) => this.finish(null, new Error(`${label} failed to start: ${err.message}`)))
     proc.stdin.on('error', () => {})
     const lines = lineSplitter((line) => this.onLine(line))
     proc.stdout.on('data', (chunk: Buffer | string) => lines.push(chunk))
-    logToolStderr(proc, label)
+    logToolStderr(proc, label, stderrLine)
     proc.on('exit', (code) => this.finish(code, null))
   }
 
