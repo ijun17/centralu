@@ -5,7 +5,7 @@ import type { AgentAdapter, AgentProcess, AgentSpawnSpec, CreateSessionOpts, Eve
 import { toolResultEvent } from '../tool-result.js'
 import { spawnLocalAgent } from '../local-process.js'
 import type { AcpProfile } from './profile.js'
-import { frameRecorder } from '../frames/recorder.js'
+import { tapSessionProcess } from '../core/tool-process.js'
 import { AcpSession } from './session.js'
 import type { ToolCallFields } from './wire.js'
 
@@ -49,14 +49,12 @@ export abstract class AcpAdapter implements AgentAdapter {
     const label = this.profile.descriptor.label
     const launch = await this.profile.launch(opts)
     if (!launch) throw rpcError(`${label} is not installed. ${this.profile.descriptor.install}`, 'tool_not_installed')
-    const recorder = frameRecorder(opts.sessionId)
     const spec = { command: launch.command, args: launch.args, cwd: opts.cwd, env: { ...process.env, ...launch.env } }
     const source = opts.processSource
     if (source?.adopt) await closeAdopted(source.adopt, opts.sessionId, emit)
     // Under the keeper the process is the keeper's child, which it sweeps with its tree if this host goes (§3.3)
     // Started here, it must end with this host however the host ends (`endsWithHost`, #1562 review)
-    const proc = source ? source.spawn(spec) : this.spawn({ ...spec, endsWithHost: true })
-    if (recorder) proc.once('exit', (code, signal) => recorder.exit(code, signal))
+    const proc = tapSessionProcess(source ? source.spawn(spec) : this.spawn({ ...spec, endsWithHost: true }), opts.sessionId)
     const session = new AcpSession(opts, emit, {
       label,
       process: proc,
@@ -64,7 +62,6 @@ export abstract class AcpAdapter implements AgentAdapter {
       stopConfirmMs: this.stopConfirmMs,
       ...(this.profile.centraluToolOf ? { centraluToolOf: (call: ToolCallFields) => this.profile.centraluToolOf?.(call) ?? null } : {}),
       ...(this.profile.infersCompaction ? { infersCompaction: true } : {}),
-      ...(recorder ? { onFrame: recorder.frame } : {}),
     })
     try {
       await session.ready

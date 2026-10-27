@@ -30,18 +30,12 @@ export const AUTH_REQUIRED = -32000
 /** ACP's code for a session or resource that does not exist */
 export const RESOURCE_NOT_FOUND = -32002
 
-/** Which way a line went, for the recorder (§10.1) */
-export type { FrameDirection } from '../frames/recorder.js'
-import type { FrameDirection } from '../frames/recorder.js'
-
 export type AcpConnectionHandlers = {
   onNotification(method: string, params: unknown): void
   /** The agent's request. A thrown `RpcError` is answered as that error; any other throw as an internal error */
   onRequest(id: RpcId, method: string, params: unknown): Promise<unknown>
   /** `expected`: this side closed it */
   onExit(code: number | null, expected: boolean): void
-  /** Every line both ways, in order, as written; for the recorder */
-  onFrame?(direction: FrameDirection, line: string): void
   /** An answer to a request this connection never sent: the previous host's, after a swap (§4.4) */
   onStrayResponse?(id: RpcId, result: unknown, error: RpcError | null): void
 }
@@ -95,7 +89,6 @@ export class AcpConnection {
 
   private onLine(line: string): void {
     if (!line.trim()) return
-    this.handlers.onFrame?.('in', line)
     let raw: unknown
     try {
       raw = JSON.parse(line)
@@ -159,7 +152,6 @@ export class AcpConnection {
   private write(obj: unknown): void {
     if (this.closed) return
     const line = JSON.stringify(obj)
-    this.handlers.onFrame?.('out', line)
     this.proc.stdin.write(line + '\n')
   }
 

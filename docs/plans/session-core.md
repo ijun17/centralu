@@ -41,7 +41,7 @@ Marks: **S** the same in all (shared code already), **I** the same idea in diffe
 | Files touched | `TouchedFiles` (after an ok result, #843) | at item completion (after it ran) | on the call, before any approval (`acp/normalize.ts:175`) | **I**, differs (§2.8) |
 | Images | `inlineImageEvent` (8 MB cap) | `mcpImageEvents`, `imageEventFromDisk` | `message_image` built inline, no cap (`acp/normalize.ts:64`) | **I**, differs (§2.9) |
 | Unknown frames | `UnmappedTypes` + `CLAUDE_KNOWN_TYPES` | surface drift (`codex/surface.ts`) | `UnmappedTypes` + `KNOWN_UPDATES` | **S** |
-| Recorded frames (#1498) | none | none | `frameRecorder` wired in `acp/adapter.ts:52` through `AcpConnection`'s `onFrame`; 19 recorded scenarios replayed (11 Cursor, 8 OpenCode) (`acp/replay.test.ts`) | **I**: only ACP records |
+| Recorded frames (#1498) | none | none | `frameRecorder` wired in `acp/adapter.ts:52` through `AcpConnection`'s `onFrame`; 19 recorded scenarios replayed (11 Cursor, 8 OpenCode) (`acp/replay.test.ts`) | **I**: only ACP records (PR 1 moved it to the process tap and added Codex, §6.1) |
 | Crash vs asleep | stream ends while not closed or detaching → `adapter_crashed` (`read:294`) | idle → `session_live asleep`, else `adapter_crashed` (`codex/session.ts:168`) | idle and open → asleep, else `adapter_crashed` (`acp/session.ts:onExit:495`) | **I**, differs (§2.5) |
 | Retries shown | `RetryActivity` via `system/api_retry`; sign-in race resend (`claude/refresh-race.ts`) | `RetryActivity` via `willRetry` | none | **S** helper, **T** signal |
 | Host swap: detach | `detach:469`: `proc.detach()`, no signal | `detach:812`: `client.detach()`, no signal | none: no `detach` | **I** |
@@ -331,11 +331,19 @@ lines off the allowlist). 3c's 137 s and 35 test files leave the Windows job in 
 
 ### 6.1 One tap for every tool
 
-Today only ACP records, inside `AcpConnection` (`onFrame`). The core records at the process instead: `tool-process.ts`
+Until PR 1 only ACP recorded, inside `AcpConnection` (`onFrame`). The core records at the process instead: `tool-process.ts`
 wraps the child's stdin and stdout and writes each line both ways, and the exit, through `frames/recorder.ts`
 (unchanged format: header, `{t, dir, line}`, `exit`). A tap at the pipes sees what any wire writes, so Claude (through
-the SDK), Codex, ACP and `agy` record the same way with no wire code. The ACP connection's `onFrame` goes; its
+the SDK), Codex, ACP and `agy` record the same way with no wire code. The ACP connection's `onFrame` is gone; its
 recordings stay valid (same lines, same file per process).
+
+As built in PR 1: `core/tool-process.ts` holds `tapProcess(proc, recorder)` and `tapSessionProcess(proc, sessionId)` (the latter is off unless
+`CC_RECORD_FRAMES` is set). The tap leaves the process as it is: it listens on stdout's `data` and wraps `stdin.write` on the
+instance, each through the same `lineSplitter` the wires use, so a line is recorded once, whole, in the order it happened, and
+nothing is held back or changed for the wire. It is attached before the wire's own reader. A blank line is not a frame. ACP taps in
+`createSession` (local or keeper process alike); Codex taps in `CodexClient` (`sessionId` option), also for a process the keeper
+hands over or spawns, so an adopted process is recorded from the adoption on, as a file of its own. The app-server clients that are
+not a conversation (`short-lived.ts`: model list, probes) pass no `sessionId` and record nothing.
 
 ### 6.2 Two kinds of test
 
