@@ -485,8 +485,8 @@ running, possibly the very session doing the work.
 - **Never stop what you did not start.** Signal only process ids you started yourself. No
   `pkill`/`killall` by name: the installed app, its keeper and its host match the same names.
 - **One `pnpm e2e` per machine at a time**; parallel runs share ports and fail each other. `pnpm e2e`, `ux`, `perf` and
-  `perf:memory` take one lock themselves (`tooling/e2e-lock.ts`: a file in Node's temporary folder, the same from every
-  shell, naming the holder's process id and start time). A second run waits and prints who holds it; a lock whose holder
+  `perf:memory` take one lock themselves (`tooling/e2e-lock.ts`: a file in `/tmp` on macOS and Linux and in the temporary
+  folder on Windows, naming the holder's process id and start time; WSL and native Windows are two machines to it). A second run waits and prints who holds it; a lock whose holder
   is gone (killed) is taken over, with a line saying so. There is no time limit: a long run holds it as long as it runs.
   Run `CI=1 pnpm e2e`; do not start `playwright` by hand, which skips the lock.
 - **Several agents on one machine:** limit test workers (`pnpm exec vitest run --maxWorkers=4`).

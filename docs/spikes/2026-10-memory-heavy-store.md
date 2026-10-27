@@ -258,13 +258,11 @@ the window's JS state (15–19 MB after a collection with a 150k-row store).
 ## 8. Reproduce
 
 ```bash
-until mkdir /tmp/centralu-e2e.lock 2>/dev/null; do sleep 20; done
 pnpm perf:memory --profile owner --engines webkit,chromium --out /tmp/main.json     # ~20 min
 pnpm perf:memory --engines webkit --steps shell,long,stream --stream-minutes 2 --stream-parts working   # one part
 pnpm perf:memory --engines webkit --steps blank,shell,long,grid --dpr 1
 pnpm perf:memory --ui-root <checkout of another commit> --label other               # the UI of another build
 pnpm perf:memory --engines webkit --steps shell,long,stream --stream-parts working --turn-steps 70   # one long turn
-rmdir /tmp/centralu-e2e.lock
 ```
 
 `--reduced-motion` and `--freeze-animations` run the same with the app's motion reduced or every animation off.

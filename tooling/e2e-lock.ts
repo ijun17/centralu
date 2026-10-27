@@ -4,7 +4,7 @@
  * Two runs share ports and browsers and fail each other in ways that look like flakes. The lock used to be a line in each
  * agent's shell (`until mkdir /tmp/centralu-e2e.lock …`), and `/tmp` is a different folder in Git Bash, WSL and PowerShell,
  * so two runs overlapped; a run that was killed left the folder behind and every later run waited for ever. Now the
- * runners take it (tooling/with-e2e-lock.ts), in `os.tmpdir()` as Node resolves it, which is the same folder from every shell.
+ * runners take it (tooling/with-e2e-lock.ts), in a folder every shell on the machine sees (`lockDir`).
  *
  * The lock is one file naming its holder: the runner's process id and that process's start time, and the command it
  * runs (a Playwright process the runner started is named too, since a runner that is killed does not take its child
@@ -21,29 +21,46 @@
  */
 import { execFileSync } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import { linkSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
+import { linkSync, mkdirSync, readFileSync, renameSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-/** A process, told apart from another that got its id later */
-export type Proc = { pid: number; started: string | null }
-/** What the lock file says: the runner, what it runs, and the child it started */
-export type Holder = Proc & { at: number; command: string; cwd: string; child?: Proc }
+/** A process, told apart from another that got its id later: the time it started, as milliseconds since the epoch (UTC) */
+export type Proc = { pid: number; started: number | null }
+/** What the lock file says: the runner, what it runs, the child it started, and whether it made the old lock folder (`legacyLockDir`) */
+export type Holder = Proc & { at: number; command: string; cwd: string; child?: Proc; legacy?: boolean }
 
 /** The OS's answers about other processes; replaced in tests */
 export type Probe = {
   alive: (pid: number) => boolean
-  startOf: (pid: number) => string | null
+  startOf: (pid: number) => number | null
 }
 
-/** The lock's file: `E2E_LOCK_FILE` when set (the tests), otherwise in the temporary folder Node resolves */
-export const lockFile = (env: NodeJS.ProcessEnv = process.env): string => env.E2E_LOCK_FILE || join(tmpdir(), 'centralu-e2e-lock.json')
+/**
+ * The folder the lock is in. On POSIX a fixed `/tmp`: `os.tmpdir()` follows `$TMPDIR`, which macOS sets per user and not at
+ * all under ssh, cron or `env -i`, so two runs on one machine would not see each other's lock. On Windows Node's temporary
+ * folder, the same from every shell (Git Bash's `/tmp` is that folder). A WSL shell and native Windows are two machines to
+ * this lock: WSL's `/tmp` is not Windows' temporary folder, so a run in each does not wait for the other.
+ */
+export const lockDir = (platform: NodeJS.Platform = process.platform): string => (platform === 'win32' ? tmpdir() : '/tmp')
+
+/** The lock's file: `E2E_LOCK_FILE` when set (the tests), otherwise in `lockDir()` */
+export const lockFile = (env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): string => env.E2E_LOCK_FILE || join(lockDir(platform), 'centralu-e2e-lock.json')
+
+/**
+ * The folder the shell line this replaced made (`until mkdir /tmp/centralu-e2e.lock …`). A branch cut before the runners took
+ * the lock still runs bare Playwright behind only that line, so while a run holds the lock it makes this folder too, and
+ * removes it when it gives the lock back, only if it made it. It never waits for it: an old line in a new checkout holds it
+ * itself around a run that holds the lock, and waiting would be a deadlock. A run that waits for this folder is not protected
+ * from an old run in the other direction. To be removed once no branch is left that has the line (a follow-up of #1632).
+ */
+export const legacyLockDir = (env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): string => env.E2E_LEGACY_LOCK_DIR || join(lockDir(platform), 'centralu-e2e.lock')
 
 /** How the start time is asked: the program and its arguments, per platform */
 export function startTimeCommand(pid: number, platform: NodeJS.Platform = process.platform): { file: string; args: string[] } {
   if (platform === 'win32') {
-    // ISO 8601 in UTC, so that the answer does not follow the user's locale
-    return { file: 'powershell.exe', args: ['-NoProfile', '-NonInteractive', '-Command', `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().ToString('o')`] }
+    // Milliseconds since the epoch, an integer: the answer does not follow the user's locale or time zone
+    return { file: 'powershell.exe', args: ['-NoProfile', '-NonInteractive', '-Command', `([DateTimeOffset](Get-Process -Id ${pid} -ErrorAction Stop).StartTime).ToUnixTimeMilliseconds()`] }
   }
   return { file: 'ps', args: ['-o', 'lstart=', '-p', String(pid)] }
 }
@@ -51,24 +68,50 @@ export function startTimeCommand(pid: number, platform: NodeJS.Platform = proces
 /** The error code (`ENOENT`, `EPERM`) of what was thrown, when it has one */
 const code = (err: unknown): string | undefined => (typeof err === 'object' && err !== null && 'code' in err && typeof err.code === 'string' ? err.code : undefined)
 
-/** Runs a program and returns what it printed, or null when it failed; replaced in tests */
-export type Run = (file: string, args: string[]) => string | null
+/** Runs a program with this environment added to the process's, and returns what it printed, or null when it failed; replaced in tests */
+export type Run = (file: string, args: string[], env: Record<string, string>) => string | null
 
-const run: Run = (file, args) => {
+/**
+ * What `ps` is run with: `lstart` is written in local time and in the locale's words ("2026년 9월 27일 …"), so two runs in
+ * another time zone or locale would read the same process as having started at another time and take over a live lock.
+ * Both are pinned: `UTC0` is a POSIX time zone (no daylight saving), `C` the one locale with English names.
+ */
+export const PS_ENV = { LC_ALL: 'C', TZ: 'UTC0' }
+
+const run: Run = (file, args, env) => {
   try {
-    // `ps -o lstart=` follows the locale (in a Korean locale, "2026년 9월 27일 …"); pinned to C so the writer and the reader agree
-    const out = execFileSync(file, args, { encoding: 'utf8', windowsHide: true, timeout: 15_000, stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, LC_ALL: 'C' } })
+    const out = execFileSync(file, args, { encoding: 'utf8', windowsHide: true, timeout: 15_000, stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, ...env } })
     return out.trim() || null
   } catch {
     return null
   }
 }
 
-/** When `pid` started, in a form that is the same each time it is asked; null when the OS cannot say (no such process, no `ps`) */
-export function processStartTime(pid: number, ask: Run = run, platform: NodeJS.Platform = process.platform): string | null {
-  const { file, args } = startTimeCommand(pid, platform)
-  return ask(file, args)
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/** `Mon Oct 26 10:00:00 2026` (`ps -o lstart=` in the C locale, in UTC) as milliseconds since the epoch; null if it is not that */
+export function parseLstart(text: string): number | null {
+  const m = /^[A-Za-z]{3}\s+([A-Za-z]{3})\s+(\d{1,2})\s+(\d{1,2}):(\d{2}):(\d{2})\s+(\d{4})$/.exec(text.trim())
+  const month = m ? MONTHS.indexOf(m[1] ?? '') : -1
+  if (!m || month < 0) return null
+  return Date.UTC(Number(m[6]), month, Number(m[2]), Number(m[3]), Number(m[4]), Number(m[5]))
 }
+
+/** When `pid` started, as milliseconds since the epoch, the same whatever the asker's time zone and locale; null when the OS cannot say (no such process, no `ps`) */
+export function processStartTime(pid: number, ask: Run = run, platform: NodeJS.Platform = process.platform): number | null {
+  const { file, args } = startTimeCommand(pid, platform)
+  const out = ask(file, args, platform === 'win32' ? {} : PS_ENV)
+  if (out === null) return null
+  if (platform === 'win32') {
+    const ms = Number(out)
+    return Number.isFinite(ms) && ms > 0 ? ms : null
+  }
+  return parseLstart(out)
+}
+
+/** `ps` rounds to the second and derives the time from the boot time, which can move by a second: starts this close are the same process */
+export const START_TOLERANCE_MS = 2000
+const sameStart = (a: number, b: number) => Math.abs(a - b) <= START_TOLERANCE_MS
 
 /** Does a process with this id exist? One that exists but is not ours to signal does too */
 export function isAlive(pid: number): boolean {
@@ -88,7 +131,30 @@ export function procGone(p: Proc, probe: Probe): boolean {
   if (!probe.alive(p.pid)) return true
   if (p.started === null) return false // it was not known when it was written: only its absence tells
   const now = probe.startOf(p.pid)
-  return now !== null && now !== p.started
+  return now !== null && !sameStart(now, p.started)
+}
+
+/**
+ * A probe that asks for a start time only when it has none for that process yet, or the one it has is a minute old. A
+ * waiting run looks at the lock every second, and on Windows a start time is a PowerShell process; an id is reused only
+ * after its process has died, which `alive` shows, and that forgets the answer.
+ */
+export function cachedProbe(probe: Probe, now: () => number = Date.now, ttlMs = 60_000): Probe {
+  const known = new Map<number, { at: number; value: number | null }>()
+  return {
+    alive(pid) {
+      const alive = probe.alive(pid)
+      if (!alive) known.delete(pid)
+      return alive
+    },
+    startOf(pid) {
+      const seen = known.get(pid)
+      if (seen && now() - seen.at < ttlMs) return seen.value
+      const value = probe.startOf(pid)
+      known.set(pid, { at: now(), value })
+      return value
+    },
+  }
 }
 
 /** Is the holder gone: the runner and, if it started one, its child */
@@ -100,7 +166,7 @@ const asProc = (v: unknown): Proc | null => {
   if (typeof v !== 'object' || v === null) return null
   const pid = field(v, 'pid')
   const started = field(v, 'started')
-  return typeof pid === 'number' && Number.isInteger(pid) && pid > 0 ? { pid, started: typeof started === 'string' ? started : null } : null
+  return typeof pid === 'number' && Number.isInteger(pid) && pid > 0 ? { pid, started: typeof started === 'number' && Number.isFinite(started) ? started : null } : null
 }
 
 const field = (v: unknown, name: string): unknown => {
@@ -131,7 +197,8 @@ export function readHolder(file: string): Holder | null | 'unreadable' {
     const at = field(v, 'at')
     const command = field(v, 'command')
     const cwd = field(v, 'cwd')
-    return { ...p, at: typeof at === 'number' ? at : 0, command: typeof command === 'string' ? command : '', cwd: typeof cwd === 'string' ? cwd : '', ...(child ? { child } : {}) }
+    const legacy = field(v, 'legacy')
+    return { ...p, at: typeof at === 'number' ? at : 0, command: typeof command === 'string' ? command : '', cwd: typeof cwd === 'string' ? cwd : '', ...(child ? { child } : {}), ...(legacy === true ? { legacy: true } : {}) }
   } catch {
     return 'unreadable'
   }
@@ -139,13 +206,13 @@ export function readHolder(file: string): Holder | null | 'unreadable' {
 
 const sameHolder = (a: Holder | null | 'unreadable', b: Holder): boolean => a !== null && a !== 'unreadable' && a.pid === b.pid && a.started === b.started && a.at === b.at
 
-export type Held = { release: () => void; setChild: (child: Proc) => void; holder: Holder }
+export type Held = { release: () => void; setChild: (child: Proc) => void; claimLegacy: (dir: string, inherit: boolean) => void; holder: Holder }
 export type Attempt = { ok: true; held: Held; tookOver: Holder[] } | { ok: false; holder: Holder | null | 'unreadable'; tookOver: Holder[] }
 
 /** The holder a runner writes for itself */
 export function describeSelf(command: string, probe: Probe = realProbe, now: () => number = Date.now): Holder {
   // One line, and short enough to print: a `node -e` script can be long
-  const line = command.replace(/s+/g, ' ').trim()
+  const line = command.replace(/\s+/g, ' ').trim()
   return { pid: process.pid, started: probe.startOf(process.pid), at: now(), command: line.length > 160 ? `${line.slice(0, 157)}...` : line, cwd: process.cwd() }
 }
 
@@ -201,12 +268,14 @@ function reap(file: string, judged: Holder): boolean {
 }
 
 /** One try at the lock: taken, or who holds it. A holder that is gone is taken over (it is in `tookOver`) */
-export function tryAcquire(file: string, self: Holder, probe: Probe = realProbe): Attempt {
+export function tryAcquire(file: string, self: Holder, probe: Probe = realProbe, legacyDir: string | null = null): Attempt {
   const tookOver: Holder[] = []
   for (let attempt = 0; attempt < 8; attempt++) {
     try {
       linkNew(file, self)
-      return { ok: true, tookOver, held: held(file, self) }
+      const h = held(file, self)
+      if (legacyDir !== null) h.claimLegacy(legacyDir, tookOver.some((t) => t.legacy === true))
+      return { ok: true, tookOver, held: h }
     } catch (err) {
       if (code(err) !== 'EEXIST') throw err
     }
@@ -222,39 +291,69 @@ export function tryAcquire(file: string, self: Holder, probe: Probe = realProbe)
 function held(file: string, self: Holder): Held {
   let current = self
   let released = false
+  let legacyMade: string | null = null
   const ours = () => sameHolder(readHolder(file), current)
+  /** Replaces the lock file with this record (atomically), when the lock is still ours */
+  const replace = (next: Holder) => {
+    if (released || !ours()) return
+    const data = JSON.stringify(next)
+    // Replacing the file can be refused for an instant while another run is reading it (Windows): try again
+    for (let attempt = 0; attempt < 40; attempt++) {
+      const tmp = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
+      try {
+        writeFileSync(tmp, data)
+        renameSync(tmp, file)
+        current = next
+        return
+      } catch {
+        try {
+          unlinkSync(tmp)
+        } catch {
+          // nothing written
+        }
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25)
+      }
+    }
+  }
   return {
     get holder() {
       return current
     },
     // The child the runner started, so that the lock is not free while it runs on after a runner that was killed
     setChild(child) {
-      if (released || !ours()) return
-      const next: Holder = { ...current, child }
-      const data = JSON.stringify(next)
-      // Replacing the file can be refused for an instant while another run is reading it (Windows): try again
-      for (let attempt = 0; attempt < 40; attempt++) {
-        const tmp = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
+      replace({ ...current, child })
+    },
+    // The old lock folder (legacyLockDir), made while this lock is held and recorded, so that a run that takes this one over
+    // from a killed holder can remove what the holder left (`inherit`)
+    claimLegacy(dir, inherit) {
+      if (inherit) {
         try {
-          writeFileSync(tmp, data)
-          renameSync(tmp, file)
-          current = next
-          return
+          rmdirSync(dir)
         } catch {
-          try {
-            unlinkSync(tmp)
-          } catch {
-            // nothing written
-          }
-          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25)
+          // not there, or not empty
         }
       }
+      try {
+        mkdirSync(dir)
+      } catch {
+        return // there already: an old shell line holds it, and it is not ours to remove
+      }
+      legacyMade = dir
+      replace({ ...current, legacy: true })
     },
     release() {
       if (released) return
       released = true
       // Only our own record is removed: a lock that is not ours any more is someone else's
-      if (!ours()) return
+      const own = ours()
+      if (legacyMade !== null) {
+        try {
+          rmdirSync(legacyMade)
+        } catch {
+          // gone already
+        }
+      }
+      if (!own) return
       try {
         unlinkSync(file)
       } catch {
@@ -284,6 +383,8 @@ export type AcquireOptions = {
   /** Where lines for the person go */
   say?: (line: string) => void
   now?: () => number
+  /** The old lock folder to make while the lock is held (`legacyLockDir`); null for none */
+  legacyDir?: string | null
   /** Stops the wait: the promise rejects */
   signal?: AbortSignal
 }
@@ -291,14 +392,16 @@ export type AcquireOptions = {
 /** Waits for the lock, saying who holds it when it first waits, when the holder changes, and every minute */
 export async function acquireLock(opts: AcquireOptions): Promise<Held> {
   const file = opts.file ?? lockFile()
-  const probe = opts.probe ?? realProbe
-  const say = opts.say ?? ((line: string) => console.error(`e2e lock: ${line}`))
   const now = opts.now ?? Date.now
+  // A start time is asked for once per process, not at every look (on Windows it is a PowerShell process)
+  const probe = cachedProbe(opts.probe ?? realProbe, now)
+  const legacyDir = opts.legacyDir === undefined ? legacyLockDir() : opts.legacyDir
+  const say = opts.say ?? ((line: string) => console.error(`e2e lock: ${line}`))
   const self = describeSelf(opts.command, probe, now)
   let shown = ''
   let shownAt = 0
   for (;;) {
-    const r = tryAcquire(file, self, probe)
+    const r = tryAcquire(file, self, probe, legacyDir)
     for (const gone of r.tookOver) say(`the holder, pid ${gone.pid}${gone.command ? ` (${gone.command})` : ''}, is gone; taking the lock over`)
     if (r.ok) return r.held
     const line = waitingLine(r.holder, file, now())
