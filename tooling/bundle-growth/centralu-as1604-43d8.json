@@ -1,0 +1,4 @@
+{
+  "bytes": 200,
+  "reason": "Protocol additions for a hub's own queued notes (#1604): the TurnOrigin schema and the optional `origin` on `state_change`, and `turn` on host.lastAnswer's params. The UI bundle carries the protocol's zod schemas, so they count there though only the host reads them. Measured here with the same production build: 1,916,077 B with them, 1,915,981 B with the protocol files as on the merge base, +96 B, all in the main chunk. No UI code changed."
+}
