@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { GATE_DECISION_FIELDS, isSessionId, RpcMethods } from '@cc/protocol'
-import { GATE_ENV, GateRequests, type GateAnswer, type GateChannel, type GateHandler, type GateInbound } from '../adapters/core/gate.js'
+import { GATE_ENV, GateRequests, type GateAnswer, type GateChannel, type GateHandler, type GateInbound, type GateRequest } from '../adapters/core/gate.js'
 import { sameSecret } from './http.js'
 import { METHOD_RIGHTS, type Rights } from './method-rights.js'
 
@@ -49,9 +49,16 @@ export const DECISION_FIELDS: readonly string[] = GATE_DECISION_FIELDS
 export const GATE_LIMITS = {
   /** A space this often while a card is open: well inside `fetch`'s 300 s */
   heartbeatMs: 30_000,
-  /** The largest hook input read: a call writing a file carries the file */
-  maxBodyBytes: 8 * 1024 * 1024,
-  /** Requests one session may have open at once; past it a request is refused (429), so a loop in a shell cannot grow memory */
+  /**
+   * The largest hook input read. The largest in the recordings is 685 B (`agy` 1.4.7, a sub-agent's call); a call that
+   * writes a file carries the whole file and the person's last message, so this leaves room for a large source file. A
+   * bigger call is refused (413) and the hook denies it
+   */
+  maxBodyBytes: 1024 * 1024,
+  /**
+   * Requests one session may have at once, those whose body is still being read included; past it a request is refused
+   * (429) before its body is read, so a loop in a shell holds at most this many bodies of `maxBodyBytes` in memory
+   */
   maxOpenPerSession: 32,
   /** The longest reason passed on to the tool */
   maxReasonChars: 2000,
@@ -60,7 +67,7 @@ export const GATE_LIMITS = {
 const KEY_PREFIX = 'ccg1'
 
 /** What a credential of this host looks like in a sentence (`ccb1:` bridge, `ccl1:` limited, `ccg1:` gate), for `scrub` */
-const CREDENTIAL_SHAPE = /\bcc[a-z]\d:[A-Za-z0-9_:-]+/g
+const CREDENTIAL_SHAPE = /\bcc[a-z]\d:[A-Za-z0-9_:-]{8,}/i
 
 /** The parameters `gate.ask` is judged on: the session the URL names and the hook's input */
 export type GateAskParams = { sessionId: string; request: Readonly<Record<string, unknown>> }
@@ -91,6 +98,8 @@ type Open = {
   /** This channel's requests still waiting, by a number of its own (a hook's id may repeat): a close denies them all */
   waiting: GateRequests
   serial: number
+  /** Requests whose body is still being read: they hold a slot of `maxOpenPerSession` too */
+  reading: number
 }
 
 export type FrontDoorGatesOptions = {
@@ -125,7 +134,7 @@ export class FrontDoorGates implements GateInbound {
     const url = this.opts.url(sessionId)
     if (!url) return Promise.reject(new Error('The host has no address for a gate yet'))
     this.revoke(sessionId, 'The session’s gate was opened again.')
-    const entry: Open = { key: `${KEY_PREFIX}:${randomBytes(32).toString('base64url')}`, gate, waiting: new GateRequests(), serial: 0 }
+    const entry: Open = { key: `${KEY_PREFIX}:${randomBytes(32).toString('base64url')}`, gate, waiting: new GateRequests(), serial: 0, reading: 0 }
     this.open_.set(sessionId, entry)
     const env = Object.freeze({ [GATE_ENV.url]: url, [GATE_ENV.token]: entry.key })
     return Promise.resolve({
@@ -147,6 +156,12 @@ export class FrontDoorGates implements GateInbound {
   /** How many sessions hold a key (for tests and the log) */
   get size(): number {
     return this.open_.size
+  }
+
+  /** A session's requests holding a slot of the bound: waiting for their answer, or their body still being read */
+  openRequests(sessionId: string): number {
+    const entry = this.open_.get(sessionId)
+    return entry ? entry.waiting.size + entry.reading : 0
   }
 
   private revoke(sessionId: string, reason: string): void {
@@ -177,19 +192,27 @@ export class FrontDoorGates implements GateInbound {
     const matches = sameSecret(given ?? '', entry?.key ?? '')
     if (!entry || given === null || !matches) return false
     this.serve(sessionId, entry, req, res).catch((e: unknown) => {
-      // Only the message's class of fault goes to the log: never the request, which carries the tool's input
+      // Only the class of fault goes to the log: never the request, which carries the tool's input
       console.error(`[agent-host] gate route failed: ${e instanceof Error ? e.name : 'error'}`)
-      plain(res, 500, 'internal error')
+      fail(res)
     })
     return true
   }
 
   private async serve(sessionId: string, entry: Open, req: IncomingMessage, res: ServerResponse): Promise<void> {
+    // The slot is taken before the body is read: bodies still arriving count against the bound as waiting requests do
+    if (entry.waiting.size + entry.reading >= this.maxOpen) {
+      req.resume()
+      return plain(res, 429, 'too many open requests')
+    }
+    entry.reading++
     let body: string
     try {
       body = await readBody(req, this.maxBodyBytes)
     } catch {
       return plain(res, 413, 'too large')
+    } finally {
+      entry.reading--
     }
     let request: unknown
     try {
@@ -199,13 +222,11 @@ export class FrontDoorGates implements GateInbound {
     }
     const judged = gateAsk(sessionId, GATE_METHOD, { sessionId, request })
     if (!judged.ok) return plain(res, 400, 'not a gate request')
-    const params = judged.params
-    // Closed while the body was read: its key is gone, and so is the gate
+    // Closed (or opened again) while the body was read: its key is gone, and no card is raised for a closed gate
     if (this.open_.get(sessionId) !== entry) return plain(res, 404, 'not found')
-    if (entry.waiting.size >= this.maxOpen) return plain(res, 429, 'too many open requests')
-    let read
+    let read: GateRequest | null
     try {
-      read = entry.gate.read(params.request)
+      read = entry.gate.read(judged.params.request)
     } catch {
       read = null
     }
@@ -213,37 +234,81 @@ export class FrontDoorGates implements GateInbound {
 
     const id = String(++entry.serial)
     const answer = entry.waiting.wait(id)
+    /*
+     * The hook that asked can go before the answer: `agy` kills a hook past its entry's timeout, or the connection drops.
+     * Its request is then denied at once (its slot freed), and the session is told through `gone`, so the card is
+     * withdrawn rather than left for the person to answer for a call that will never run.
+     */
+    const gone = new AbortController()
+    let settled = false
+    res.once('close', () => {
+      if (settled) return
+      entry.waiting.answer(id, { decision: 'deny', reason: 'The gate hook went away before the answer.' })
+      gone.abort()
+    })
     // A decide that throws at once is a deny like one that rejects
-    Promise.resolve(read).then((r) => entry.gate.decide(r)).then(
-      (a) => entry.waiting.answer(id, a),
-      () => entry.waiting.answer(id, { decision: 'deny', reason: 'Centralu could not decide on this call, so it was not run.' }),
-    )
+    Promise.resolve(read)
+      .then((r) => entry.gate.decide(r, gone.signal))
+      .then(
+        (a) => entry.waiting.answer(id, a),
+        () => entry.waiting.answer(id, { decision: 'deny', reason: 'Centralu could not decide on this call, so it was not run.' }),
+      )
 
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' })
     res.flushHeaders()
     const beat = setInterval(() => {
       if (!res.writableEnded && !res.destroyed) res.write(' ')
     }, this.heartbeatMs)
-    res.once('close', () => clearInterval(beat))
-    const decided = await answer
-    clearInterval(beat)
+    let decided: unknown
+    try {
+      decided = await answer
+    } finally {
+      settled = true
+      clearInterval(beat)
+    }
     if (res.writableEnded || res.destroyed) return
     res.end(JSON.stringify(this.outward(decided, entry.key)))
   }
 
-  /** The answer as the hook gets it: only the two fields, and a reason with no credential in it */
-  private outward(answer: GateAnswer, key: string): GateAnswer {
-    if (answer.decision === 'allow') return { decision: 'allow' }
-    return { decision: 'deny', reason: scrub(String(answer.reason ?? ''), [key, ...(this.opts.redact?.() ?? [])]) || 'Centralu did not allow this call.' }
+  /**
+   * The answer as the hook gets it: `allow` only for a clear allow, a deny for anything else (an answer of the wrong
+   * shape included), and a reason with no credential in it
+   */
+  private outward(answer: unknown, key: string): GateAnswer {
+    const decision = answer !== null && typeof answer === 'object' && 'decision' in answer ? answer.decision : undefined
+    if (decision === 'allow') return { decision: 'allow' }
+    const reason = answer !== null && typeof answer === 'object' && 'reason' in answer && typeof answer.reason === 'string' ? answer.reason : ''
+    return { decision: 'deny', reason: scrub(reason, [key, ...(this.opts.redact?.() ?? [])]) || 'Centralu did not allow this call.' }
   }
 }
 
-/** `reason` without any of `secrets` or anything shaped like this host's credentials, and not past the length bound */
+/** How long a run of a secret's letters and digits has to be to count as the secret showing in a reason */
+const SECRET_WINDOW = 12
+
+/** Letters and digits only, lower case: what is left of a value split by spaces or punctuation, or written in another case */
+const squash = (v: string): string => v.toLowerCase().replace(/[^a-z0-9]/g, '')
+
+/**
+ * `reason` as it may go to the tool, or '' (the caller's own deny sentence then) when it may carry a credential.
+ *
+ * Where a reason comes from: the session's `decide`, so the host's own sentences ("The person declined.", "The turn was
+ * stopped.") and nothing a caller of the route sends; none of them is built from a credential, and that is what keeps
+ * credentials out. This is the last check behind it: a whole reason is dropped, never patched, when any run of
+ * `SECRET_WINDOW` letters and digits of a secret shows in it, in any case, with or without its `ccX1:` prefix, split by
+ * spaces or punctuation; and so is one with anything shaped like this host's credentials.
+ */
 export function scrub(reason: string, secrets: readonly string[]): string {
-  let out = reason
-  for (const s of secrets) if (s.length >= 8) out = out.split(s).join('[redacted]')
-  out = out.replace(CREDENTIAL_SHAPE, '[redacted]')
-  return out.length > GATE_LIMITS.maxReasonChars ? `${out.slice(0, GATE_LIMITS.maxReasonChars)}…` : out
+  if (CREDENTIAL_SHAPE.test(reason)) return ''
+  const flat = squash(reason)
+  for (const secret of secrets) {
+    const s = squash(secret.replace(/^cc[a-z]\d:/i, ''))
+    if (s.length < SECRET_WINDOW) {
+      if (s.length >= 8 && flat.includes(s)) return ''
+      continue
+    }
+    for (let i = 0; i + SECRET_WINDOW <= s.length; i++) if (flat.includes(s.slice(i, i + SECRET_WINDOW))) return ''
+  }
+  return reason.length > GATE_LIMITS.maxReasonChars ? `${reason.slice(0, GATE_LIMITS.maxReasonChars)}…` : reason
 }
 
 function bearer(header: string | undefined): string | null {
@@ -268,8 +333,17 @@ function readBody(req: IncomingMessage, limit: number): Promise<string> {
   })
 }
 
+/**
+ * After the headers went out, nothing but the body can be said: the connection is cut, which the hook reads as a deny at
+ * once (it denies anything but a clear allow) instead of waiting out `fetch`'s 300 s on a body that never ends
+ */
+function fail(res: ServerResponse): void {
+  if (res.headersSent) res.destroy()
+  else plain(res, 500, 'internal error')
+}
+
 function plain(res: ServerResponse, status: number, body: string): void {
-  if (res.writableEnded || res.destroyed) return
+  if (res.writableEnded || res.destroyed || res.headersSent) return
   res.writeHead(status, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' })
   res.end(body)
 }

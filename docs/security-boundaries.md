@@ -1589,7 +1589,10 @@ host. It changes where a client connects, not what it must prove:
   session, call another method, say hello on the WebSocket, or open the HTTP door's routes. It is not the bridge
   credential, which is derived from the token, lives for the keeper's lifetime and opens the session's tools; putting
   that in every `agy` session's environment would have let its shell call those tools around the tool's own checks.
-  No reason the route sends carries the key or another credential. Tests: `gate-door.test.ts`.
+  A reason the route sends is one of the session's own sentences, never a caller's; as a last check one that shows any
+  12 letters and digits of a credential (any case, with or without its prefix, split) is dropped whole. A hook that goes
+  before its answer frees its slot and its card is withdrawn; bodies still being read count against the 32 requests a
+  session may have, and one over 1 MiB is refused. Tests: `gate-door.test.ts`.
 - A stable token is a longer-lived secret than a token per host. It lives as long as the keeper, which is as long as
   the agents it serves; a keeper restart makes a new one, and a keeper update (step 4) passes the
   same one on to the new keeper over the handoff channel below.

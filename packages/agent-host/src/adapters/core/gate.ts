@@ -39,8 +39,14 @@ export type GateHandler = {
    * one), read into a request; null when it is not a call this tool's gate reads, which the hook then denies
    */
   read(input: Readonly<Record<string, unknown>>): GateRequest | null
-  /** The decision on one request. A Stop answers it `deny` (`GateRequests.denyAll`); a rejection is a `deny` too */
-  decide(request: GateRequest): Promise<GateAnswer>
+  /**
+   * The decision on one request. A Stop answers it `deny` (`GateRequests.hold`); a rejection is a `deny` too. `gone` fires
+   * when the hook that asked went away before the answer (`agy` killed it past its timeout, or its connection dropped):
+   * the door has already denied the request, and the session withdraws the card it raised as any tool's cancelled card
+   * is withdrawn (released as `deny` with its `approval_resolved`, as `claude/session-cards.ts` does on its abort
+   * signal), so the person is never left to answer for a call that will not run
+   */
+  decide(request: GateRequest, gone: AbortSignal): Promise<GateAnswer>
 }
 
 /**

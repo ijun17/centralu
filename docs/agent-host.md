@@ -2402,7 +2402,8 @@ gate key (`CC_GATE_URL`, `CC_GATE_TOKEN`; the adapter opens the channel through 
 tool's environment). The key is random, held in this host's memory only, revoked when the session's channel closes, and
 raises `gate.ask` (rights class `gate`) for that session alone; it is no WebSocket hello. The route answers with its
 headers at once, a space every 30 s while the card is open (the hook's `fetch` gives up after 300 s of silence), then
-one `{decision, reason?}`. A Stop denies every open request first (`SessionProcess`), the channel's close denies what
+one `{decision, reason?}`. A hook that goes before its answer (`agy` kills one past its timeout) has its request denied
+and its card withdrawn (`decide`'s `gone` signal). A Stop denies every open request first (`SessionProcess`), the channel's close denies what
 still waits, and `HostServer.close` denies everything before cutting connections. Across a swap the key does not
 survive: the next host answers 404, the hook denies, and a reopened `agy` gets a new key. Design and the reasoning
 against the bridge credential: [plans/session-core.md](plans/session-core.md) §8.1.

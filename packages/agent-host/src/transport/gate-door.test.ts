@@ -45,14 +45,20 @@ async function host(opts: Partial<FrontDoorGatesOptions> = {}) {
 function cardGate() {
   const sp = new SessionProcess('agy', () => Promise.resolve(null), {}, null)
   const asked: GateRequest[] = []
+  /** Cards withdrawn because their hook went away, as an adapter withdraws one (released as deny) */
+  const withdrawn: string[] = []
   const gate: GateHandler = {
     read,
-    decide: (r) => {
+    decide: (r, gone) => {
       asked.push(r)
-      return sp.gates.wait(r.requestId)
+      const answer = sp.gates.wait(r.requestId)
+      gone.addEventListener('abort', () => {
+        if (sp.gates.answer(r.requestId, { decision: 'deny', reason: 'withdrawn' })) withdrawn.push(r.requestId)
+      })
+      return answer
     },
   }
-  return { sp, asked, gate, card: (id: string, a: GateAnswer) => sp.gates.answer(id, a) }
+  return { sp, asked, withdrawn, gate, card: (id: string, a: GateAnswer) => sp.gates.answer(id, a) }
 }
 
 /** The hook's own answer for `input`, with the channel's environment, through Node's `fetch` */
@@ -63,6 +69,19 @@ const hook = (env: Readonly<Record<string, string>>, input: unknown = INPUT) =>
 async function post(url: string, key: string | null, body: string, method = 'POST'): Promise<{ status: number; text: string }> {
   const res = await fetch(url, { method, redirect: 'error', headers: key === null ? {} : { authorization: `Bearer ${key}` }, ...(method === 'POST' ? { body } : {}) })
   return { status: res.status, text: await res.text() }
+}
+
+/** A POST whose body is sent a piece at a time, as a slow or stalled client sends it */
+function slowPost(url: string, key: string) {
+  let push: ReadableStreamDefaultController<Uint8Array> | undefined
+  const body = new ReadableStream<Uint8Array>({ start: (c) => void (push = c) })
+  const stop = new AbortController()
+  const init = Object.assign({ method: 'POST', headers: { authorization: `Bearer ${key}` }, body, signal: stop.signal }, { duplex: 'half' as const })
+  // Aborted, it reads as null: the request or its body ends with the abort
+  const res = fetch(url, init)
+    .then(async (r) => ({ status: r.status, text: await r.text() }))
+    .catch(() => null)
+  return { send: (text: string) => push?.enqueue(new TextEncoder().encode(text)), end: () => push?.close(), abort: () => stop.abort(), res }
 }
 
 const until = async (pred: () => boolean) => {
@@ -201,7 +220,8 @@ describe('the gate route on the front door', () => {
     expect(text).not.toContain(TOKEN)
     expect(text).not.toContain(limitedToken(TOKEN))
     expect(text).not.toMatch(/cc[a-z]\d:/)
-    expect(JSON.parse(text)).toEqual({ decision: 'deny', reason: expect.stringContaining('Declined') })
+    // The whole reason is dropped, not patched: the door's own sentence goes instead
+    expect(JSON.parse(text)).toEqual({ decision: 'deny', reason: 'Centralu did not allow this call.' })
     // Nor does any refusal: each is a fixed word, whatever was sent
     for (const body of ['not json', JSON.stringify({ ...INPUT, decision: key })]) expect((await post(ch.env[GATE_ENV.url]!, key, body)).text).not.toContain(key)
   })
@@ -334,9 +354,125 @@ describe('trying to break the gate with its own key', () => {
   })
 })
 
+describe('the review of #1675', () => {
+  it('denies and withdraws the card of a hook that went away, and frees its slot (F1)', async () => {
+    const { gates } = await host({ maxOpenPerSession: 2 })
+    const g = cardGate()
+    const ch = await gates.open('s1', g.gate)
+    const url = ch.env[GATE_ENV.url]!
+    const key = ch.env[GATE_ENV.token]!
+    // Two hooks wait on their cards, then both go (agy killed them past their timeout)
+    const hooks = [slowPost(url, key), slowPost(url, key)]
+    hooks.forEach((h, i) => {
+      h.send(JSON.stringify({ ...INPUT, stepIdx: i + 1 }))
+      h.end()
+    })
+    await until(() => g.asked.length === 2)
+    for (const h of hooks) h.abort()
+    await until(() => g.withdrawn.length === 2)
+    expect(g.withdrawn.sort()).toEqual(['conv-1:1', 'conv-1:2'])
+    // No dead card is left for the person, and the session's next call is asked, not refused
+    expect(g.sp.gates.size).toBe(0)
+    await until(() => gates.openRequests('s1') === 0)
+    const next = hook(ch.env, { ...INPUT, stepIdx: 3 })
+    await until(() => g.asked.length === 3)
+    g.card('conv-1:3', { decision: 'allow' })
+    expect(await next).toEqual({ decision: 'allow' })
+  })
+
+  it('denies at once, not after fetch’s 300 s, when a session answers in the wrong shape (F2)', async () => {
+    const { gates } = await host()
+    const ch = await gates.open('s1', { read, decide: () => Promise.resolve(undefined as unknown as GateAnswer) })
+    expect(await hook(ch.env)).toEqual({ decision: 'deny', reason: 'Centralu did not allow this call.' })
+  })
+
+  it('cuts the answer when it fails after its headers went out, so the hook denies at once (F2)', async () => {
+    const { gates } = await host({
+      redact: () => {
+        throw new Error('broken')
+      },
+    })
+    const ch = await gates.open('s1', { read, decide: () => Promise.resolve({ decision: 'deny', reason: 'no' }) })
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    expect((await hook(ch.env)).decision).toBe('deny')
+    expect(errors).toHaveBeenCalledWith(expect.stringContaining('gate route failed'))
+    errors.mockRestore()
+  })
+
+  it('counts bodies still being read against the bound, before reading another (F3)', async () => {
+    const { gates } = await host({ maxOpenPerSession: 2 })
+    const g = cardGate()
+    const ch = await gates.open('s1', g.gate)
+    const url = ch.env[GATE_ENV.url]!
+    const key = ch.env[GATE_ENV.token]!
+    const stalled = [slowPost(url, key), slowPost(url, key)]
+    for (const h of stalled) h.send('{"conversationId":"c",')
+    await until(() => gates.openRequests('s1') === 2)
+    expect((await post(url, key, JSON.stringify(INPUT))).status).toBe(429)
+    // A stalled client that goes gives its slot back
+    for (const h of stalled) h.abort()
+    await until(() => gates.openRequests('s1') === 0)
+    const next = hook(ch.env)
+    await until(() => g.asked.length === 1)
+    g.card('conv-1:2', { decision: 'allow' })
+    expect(await next).toEqual({ decision: 'allow' })
+  })
+
+  it('reads at most a MiB of a hook’s input (F3)', async () => {
+    const { gates } = await host()
+    const ch = await gates.open('s1', cardGate().gate)
+    const big = JSON.stringify({ ...INPUT, toolCall: { name: 'write_file', args: { Content: 'x'.repeat(1024 * 1024) } } })
+    expect((await hook(ch.env, JSON.parse(big))).decision).toBe('deny')
+    const fits = JSON.stringify({ ...INPUT, toolCall: { name: 'write_file', args: { Content: 'x'.repeat(512 * 1024) } } })
+    const g = cardGate()
+    const ch2 = await gates.open('s2', g.gate)
+    const answer = hook(ch2.env, JSON.parse(fits))
+    await until(() => g.asked.length === 1)
+    g.card('conv-1:2', { decision: 'allow' })
+    expect(await answer).toEqual({ decision: 'allow' })
+  })
+
+  it('drops a reason carrying a secret in any case, without its prefix, or split (F4)', async () => {
+    const key = 'ccg1:Ab3dEf6hIj9kLm2nOp5qRs8tUv1wXy4z'
+    const token = 'host-token-0123456789abcdef'
+    for (const reason of [
+      `no ${key.slice(5)}`,
+      `no ${key.slice(5).toUpperCase()}`,
+      `no ${token.toUpperCase()}`,
+      `no ${token.slice(0, 13)} ${token.slice(13)}`,
+      `no ${key.slice(5, 20)}`,
+      `no CCB1:s1:abcdefghij`,
+    ]) {
+      expect(scrub(reason, [key, token])).toBe('')
+    }
+    expect(scrub('The person declined.', [key, token])).toBe('The person declined.')
+    // Through the route: the caller gets the door's own sentence instead
+    const { gates } = await host()
+    let k = ''
+    const ch = await gates.open('s1', { read, decide: () => Promise.resolve({ decision: 'deny', reason: `bad ${k.slice(5).toUpperCase()}` }) })
+    k = ch.env[GATE_ENV.token]!
+    expect(await hook(ch.env)).toEqual({ decision: 'deny', reason: 'Centralu did not allow this call.' })
+  })
+
+  it('raises no card for a request whose session closed while its body was read (F5)', async () => {
+    const { gates } = await host()
+    const g = cardGate()
+    const ch = await gates.open('s1', g.gate)
+    const slow = slowPost(ch.env[GATE_ENV.url]!, ch.env[GATE_ENV.token]!)
+    slow.send(JSON.stringify(INPUT).slice(0, 10))
+    await until(() => gates.openRequests('s1') === 1)
+    await ch.close()
+    slow.send(JSON.stringify(INPUT).slice(10))
+    slow.end()
+    expect(await slow.res).toEqual({ status: 404, text: 'not found' })
+    expect(g.asked).toEqual([])
+  })
+})
+
 describe('scrub', () => {
-  it('takes out the given secrets and anything shaped like this host’s credentials', () => {
-    expect(scrub('a sekrit-value-1234 b ccl1:abc_DEF-1 c ccb1:s1:mac', ['sekrit-value-1234'])).toBe('a [redacted] b [redacted] c [redacted]')
+  it('passes a reason with no secret in it, cut to its bound', () => {
+    expect(scrub('The turn was stopped.', ['sekrit-value-1234'])).toBe('The turn was stopped.')
+    expect(scrub('x'.repeat(3000), []).length).toBe(2001)
   })
 })
 
