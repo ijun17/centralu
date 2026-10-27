@@ -171,6 +171,8 @@ test('Orchestrator children: the dialog of a hover-opened list stays through the
   // The second Archive moves it, and the list can fold at last
   await page.getByTestId('confirm-delete-yes').click()
   await expect(page.getByTestId('confirm-delete')).toHaveCount(0)
+  // The hold is gone, so the list is leaving (not held, not reopened); its exit runs on the fake clock like the rest
+  await exitEnds(page)
   await expect(list(page)).toHaveCount(0)
   await button(page).hover()
   await page.clock.runFor(250)
