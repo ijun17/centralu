@@ -360,7 +360,7 @@ door's and not `agy`'s.
 nothing), then one `{decision}` or `{decision: "deny", reason}`. A reason never carries the key or another credential.
 A wrong key, another session's key, a revoked one (the session closed, or the host restarted or was swapped: a host
 starts with no key) all get the front door's plain 404; a hook input with a `decision`, `permissionDecision` or
-`answer` field gets 400, since the channel asks and never answers; past 32 open requests of one session, 429. The hook
+`answer` field gets 400, since the channel asks and never answers; one over 1 MiB, 413; past 32 requests of one session (bodies still being read included), 429. A hook that `agy` kills past its entry's `timeout` has its request denied and its card withdrawn, so the person never answers a card for a call that will not run. The hook
 denies on every one of them.
 
 The hook is two files: `agy-gate.mjs`, the command, runs unconditionally under any name and only calls
