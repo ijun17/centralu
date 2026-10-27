@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
+import { ChildOwnership } from './child-ownership.js'
 
 /**
  * What a turn that opens says it ran for, and where its words begin (#1604), on the host a hub follows: the events a hub
@@ -36,6 +37,8 @@ describe('a turn the tool opens for an earlier message', () => {
 
   it("says it for a turn that opens while the host already has the session working, not only as it leaves rest", async () => {
     const id = await w.callerSession()
+    // The tool says which inputs a turn took in, as Claude does: none of them here
+    handleOf(id).turnInputs = () => []
     await w.mgr.send(id, 'first', undefined, FROM)
     const first = handleOf(id).ids.at(-1)
     handleOf(id).answer('done')
@@ -105,5 +108,115 @@ describe('the answer of the turn a hub asks about', () => {
     // The next turn has begun as the hub reads the end of this one: the words are the second turn's, not the first's joined to them
     handleOf(id).event({ type: 'state_change', sessionId: id, state: 'working' })
     expect(await w.mgr.hostReader().lastAnswer(id, undefined, true)).toMatchObject({ text: 'second answer' })
+  })
+
+  /** A hub's session after a swap: a new owner of the turns over the store the old one wrote */
+  const swap = () => {
+    ;(w.mgr as unknown as { children: ChildOwnership }).children = new ChildOwnership(w.store)
+  }
+  const note = async (id: string) => {
+    await w.mgr.send(id, 'the task', undefined, FROM)
+    await w.mgr.send(id, 'a note', undefined, FROM)
+    handleOf(id).answer('first answer')
+    handleOf(id).event({ type: 'state_change', sessionId: id, state: 'working' })
+  }
+
+  it("is still the turn's own after a swap between the turn's start and the report: where it began is in the store", async () => {
+    const id = await w.callerSession()
+    await note(id)
+    handleOf(id).answer('second answer')
+    swap()
+    const reader = w.mgr.hostReader()
+    expect(await reader.lastAnswer(id, undefined, true)).toMatchObject({ text: 'second answer' })
+  })
+
+  it('is empty for a turn that ended with nothing to say: never the turn before it', async () => {
+    const id = await w.callerSession()
+    await note(id)
+    // The note's turn ends on a tool call, with no text
+    handleOf(id).event({ type: 'turn_complete', sessionId: id })
+    const reader = w.mgr.hostReader()
+    // A control: the same turn, once it has said something, is its words
+    expect(await reader.lastAnswer(id)).toMatchObject({ text: 'first answer' })
+    expect(await reader.lastAnswer(id, undefined, true)).toMatchObject({ text: '', seq: null })
+  })
+
+  it('reads the turn before the running one while the next has begun, even after a swap', async () => {
+    const id = await w.callerSession()
+    await note(id)
+    handleOf(id).answer('second answer')
+    handleOf(id).event({ type: 'state_change', sessionId: id, state: 'working' })
+    swap()
+    expect(await w.mgr.hostReader().lastAnswer(id, undefined, true)).toMatchObject({ text: 'second answer' })
+  })
+})
+
+/** What the host keeps of the messages a hub gave a session, for the turns it will run: it keeps none of it once nothing can run them */
+describe('what is kept for the turns a hub may be owed', () => {
+  let w: CrossWorld
+  const FROM = { sessionId: '_hub-orchestrator', name: 'Parent' }
+  beforeEach(async () => {
+    w = await crossWorld()
+  })
+  afterEach(() => w.dispose())
+  const handleOf = (id: string) => w.adapters.get('claude')!.handles.get(id)!
+  const origins = (id: string) => w.store.settings.appSetting(`input_origins:${id}`)
+  const spans = (id: string) => w.store.settings.appSetting(`turn_span:${id}`)
+  /** A hub's task, then a note into the running turn: the note is given after the turn began */
+  async function withNote() {
+    const id = await w.callerSession()
+    await w.mgr.send(id, 'the task', undefined, FROM)
+    await w.mgr.send(id, 'a note', undefined, FROM)
+    return id
+  }
+
+  it('keeps a note given during a turn that ended without saying it took it in (a control for the cases below)', async () => {
+    const id = await withNote()
+    handleOf(id).answer('done')
+    expect(JSON.parse(origins(id)!)).toHaveLength(1)
+  })
+
+  it('keeps nothing of the notes given before a turn began once it ended, for a tool that does not name its inputs', async () => {
+    const id = await withNote()
+    handleOf(id).answer('done')
+    // The tool ran the note as the next turn, not naming it (an older Claude Code): the turn after it ends, and it is done with
+    handleOf(id).event({ type: 'state_change', sessionId: id, state: 'working' })
+    handleOf(id).answer('and the note')
+    expect(JSON.parse(origins(id)!)).toEqual([])
+  })
+
+  it('keeps nothing when an error cut the turn', async () => {
+    const id = await withNote()
+    handleOf(id).event({ type: 'error', sessionId: id, error: { code: 'internal', message: 'boom', retryable: false } })
+    expect(origins(id)).toBeNull()
+  })
+
+  it('keeps nothing when the session is stopped', async () => {
+    const id = await withNote()
+    w.mgr.interrupt(id)
+    expect(origins(id)).toBeNull()
+  })
+
+  it('keeps nothing for a new process: the one before it held the inputs', async () => {
+    const id = await withNote()
+    handleOf(id).turnInputs = () => []
+    // The conversation the tool keeps, which a new process resumes
+    handleOf(id).externalId = 'conversation-1'
+    handleOf(id).answer('done')
+    expect(origins(id)).not.toBeNull()
+    // A tool whose sessions can sleep
+    Object.assign(w.adapters.get('claude')!.capabilities, { backgroundTasks: true, sleep: true })
+    expect(await w.mgr.sleepSession(id)).toBe(true)
+    await w.mgr.send(id, 'typed by the person')
+    expect(origins(id)).toBeNull()
+  })
+
+  it('keeps nothing of the session once it is deleted, but its words', async () => {
+    const id = await withNote()
+    handleOf(id).answer('done')
+    expect(spans(id)).not.toBeNull()
+    await w.mgr.trashSession(id)
+    expect(origins(id)).toBeNull()
+    expect(spans(id)).toBeNull()
   })
 })

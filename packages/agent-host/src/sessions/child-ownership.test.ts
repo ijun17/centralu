@@ -761,10 +761,96 @@ describe('what a turn that opens ran for', () => {
     expect(new ChildOwnership(store).takeInputOrigin('s', ['id-69'])).toEqual({ ...note, seq: 69 })
   })
 
-  it('says where the running turn and the one before it began, for a hub to read the answer of that turn', () => {
+  it("keeps what a tool that does not name its inputs was given while the turn ran, and takes off what was given before it began", () => {
+    own.noteInputOrigin('s', 'before-the-turn', { ...note, seq: 4 })
+    own.noteTurnStart('s', 5)
+    own.noteInputOrigin('s', 'during-the-turn', { ...note, seq: 6 })
+    // Codex: a message given while the turn ran may be run as a turn right after it, and is named when that turn opens; what was given before this turn began is done with, named or merged
+    own.turnEnded('s', undefined)
+    expect(own.takeInputOrigin('s', ['before-the-turn'])).toBeUndefined()
+    expect(own.takeInputOrigin('s', ['during-the-turn'])).toEqual({ ...note, seq: 6 })
+  })
+
+  it('takes off the same when the tool cannot tell what a turn took in (an older Claude Code, a turn lost in a swap)', () => {
+    own.noteInputOrigin('s', 'before-the-turn', { ...note, seq: 4 })
+    own.noteTurnStart('s', 5)
+    own.turnEnded('s', null)
+    expect(own.takeInputOrigin('s', ['before-the-turn'])).toBeUndefined()
+  })
+
+  it('takes off all of them when an error cut the turn: the tool runs none of what it was given after', () => {
+    own.noteTurnStart('s', 1)
+    own.noteInputOrigin('s', 'a', { ...note, seq: 2 })
+    own.noteInputOrigin('s', 'b', { ...note, seq: 3 })
+    // A control: a turn that ended whole and named nothing keeps them
+    own.turnEnded('s', [])
+    expect(new ChildOwnership(store).takeInputOrigin('s', ['b'])).toEqual({ ...note, seq: 3 })
+    own.noteInputOrigin('s', 'b', { ...note, seq: 3 })
+    own.noteTurnStart('s', 3)
+    own.turnEnded('s', [], true)
+    expect(store.settings.appSetting('input_origins:s')).toBeNull()
+    expect(own.takeInputOrigin('s', ['a', 'b'])).toBeUndefined()
+  })
+
+  it('takes off all of them when the tool holds none any more: a stop, a new process', () => {
+    own.noteInputOrigin('s', 'a', { ...note, seq: 2 })
+    own.dropInputOrigins('s')
+    expect(own.takeInputOrigin('s', ['a'])).toBeUndefined()
+    expect(store.settings.appSetting('input_origins:s')).toBeNull()
+  })
+
+  it("keeps nothing of a session's turns when it is deleted: neither its origins nor where its turns began", () => {
+    own.noteInputOrigin('s', 'a', { ...note, seq: 2 })
+    own.noteTurnStart('s', 1)
+    expect(store.settings.appSetting('turn_span:s')).not.toBeNull()
+    own.forgetTurns('s')
+    expect(store.settings.appSetting('input_origins:s')).toBeNull()
+    expect(store.settings.appSetting('turn_span:s')).toBeNull()
+  })
+})
+
+// #1604: where a hub reads the words of a turn from
+describe('where the last turn that ended began', () => {
+  const note = { seq: 7, from: { sessionId: '_hub-orchestrator', name: 'Parent' } }
+  /** A hub gives the session messages: only those have their turns kept */
+  const followed = () => own.noteInputOrigin('s', 'task', note)
+
+  it('is kept for the turns of a session a hub gave messages, and for no other', () => {
+    own.noteTurnStart('other', 4)
+    expect(store.settings.appSetting('turn_span:other')).toBeNull()
+    expect(own.turnRows('other')).toBeUndefined()
+    followed()
     own.noteTurnStart('s', 4)
-    expect(own.turnStartOf('s')).toEqual({ since: 4 })
+    expect(own.turnRows('s')).toEqual({ after: 4 })
+  })
+
+  it('is the turn before the running one, up to where the running one began, when the running one has not ended', () => {
+    followed()
+    own.noteTurnStart('s', 4)
+    own.turnEnded('s')
+    expect(own.turnRows('s')).toEqual({ after: 4 })
     own.noteTurnStart('s', 9)
-    expect(own.turnStartOf('s')).toEqual({ since: 9, before: 4 })
+    // The hub reads the end of the first turn as the second begins
+    expect(own.turnRows('s')).toEqual({ after: 4, through: 9 })
+  })
+
+  it('is the latest turn once it has ended, even when it said nothing: never the turn before it', () => {
+    followed()
+    own.noteTurnStart('s', 4)
+    own.turnEnded('s')
+    own.noteTurnStart('s', 9)
+    own.turnEnded('s')
+    expect(own.turnRows('s')).toEqual({ after: 9 })
+  })
+
+  it('survives a host swap: the host that takes the session over reads where the running turn began, and ends it', () => {
+    followed()
+    own.noteTurnStart('s', 4)
+    own.turnEnded('s')
+    own.noteTurnStart('s', 9)
+    const next = new ChildOwnership(store)
+    expect(next.turnRows('s')).toEqual({ after: 4, through: 9 })
+    next.turnEnded('s')
+    expect(new ChildOwnership(store).turnRows('s')).toEqual({ after: 9 })
   })
 })

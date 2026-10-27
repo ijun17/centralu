@@ -735,7 +735,9 @@ runs as a turn of its own once that turn ends, with no message to start it (#160
 names the input a turn began from, the host keeps who sent each message of a hub's it gave the tool under an id
 (`ChildOwnership` `noteInputOrigin`: into a running turn or at rest, in the order given, at most 64 a session, in the app
 setting `input_origins:<session>`, read and written there each time so a host that takes the session over after a swap still
-has them and the one that leaves cannot overwrite what the other wrote), and the `state_change` that opens the turn carries
+has them and the one that leaves cannot overwrite what the other wrote). They go as the tool's inputs do: when a turn runs
+one, when a turn's end says it took it in, or, for a tool that does not say (Codex), when that turn began after it was given;
+an error that cuts a turn, a stop, a new process for the session and its deletion take off all, and the `state_change` that opens the turn carries
 `origin: { seq, from }`, the row of that message and its sender (additive, `TurnOrigin`). The tool names the input only
 on the event that opens the turn, and the host reads it there whether or not it already had the session working: an
 instruction sent at rest in the gap between a turn and the one run for a note before it has the session working before
@@ -747,24 +749,28 @@ just after a turn ended or queued behind a compact or review (`flushPending`), g
 client id and reads it back from the turn's first item (`item/started`, `userMessage`, `clientId`) with a second
 `working` for that turn that names it; a message that joined a turn already running shows after the turn's first item and
 names nothing. The hub holds the rows of the messages its caller gave the child that the tool may run as a turn of its own
-(`RemoteAgents.given`): its notes into a running turn, and its instruction sent at rest. A send at rest does not drop the
+(`RemoteAgent.given`, in the child's record, so a restart of the hub keeps them): its notes into a running turn, and its
+instruction sent at rest. A send at rest does not drop the
 rows of the notes before it, as the turns run for those can still be to come. The hub takes a turn for the caller's when its
 origin names one of those rows from this hub's sender; its end is then owed as the first turn's was, and a note goes into it.
-A row goes when a turn is run for it or for a later one, and every row goes with a message of someone else's or a link's
-loss. Nothing is guessed from the time between turns. A turn with no origin is refused, and so is everything after the
-person's message and after a restart of the hub. A link's loss clears the rows held, so a turn that opens for one while the link is
-down is not taken for the caller's by its origin; when the link is back the child is read again (`verify`), and a turn
-whose last message is the caller's own, with its report still owed, is the caller's as before. An older machine sends no origin and behaves as before this: a note it runs as a turn of its own
-stays refused. A refusal names the turn by what the hub saw start it: a person's message, another session's, or no message
+A row goes when a turn is run for it or for a later one, and every row goes with a message of someone else's.
+Nothing is guessed from the time between turns. A turn with no origin is refused, and so is everything after the person's
+message. A link's loss or a restart of the hub keeps the rows but not whose the turn is (`unknown`): a turn that opens
+meanwhile is not taken for the caller's, and the rows stay for the re-read when the link is back (`verify`): if the machine's
+last message is the caller's note, the turn that is run for it afterwards is the caller's. An older machine sends no origin
+and behaves as before this: a note it runs as a turn of its own stays refused. A refusal names the turn by what the hub saw start it: a person's message, another session's, or no message
 at all ("which this hub did not see begin"), never the person without a message of theirs.
 
 What the caller reads of such a turn is that turn's words (#1604). `host.lastAnswer` takes `turn: true`: the answer is
-read from the row the machine saw the turn begin after (`ChildOwnership.noteTurnStart`, memory only), not the last
-response of the record. A note's row is stored while the turn before it runs, so the last response joined the two turns'
-words and clipped them at the report's 600 characters; and a note stored in the middle of a turn's text ended that text, so
-a wait read only what followed the note. The caller's notes in a turn are rows among its text (`turnAnswer`'s
-`acrossNotes`). A turn that has said nothing yet when the end of the one before is read gives the one before's words. A
-turn the host did not see begin (it started before a swap) reads as the last response, and so does an older machine.
+that of the last turn that ended, read from the row the machine saw it begin after (`ChildOwnership.noteTurnStart`, in the
+app setting `turn_span:<session>` for a session a hub gives messages, so a host that takes the session over after a swap
+reads it), not the last response of the record. A note's row is stored while the turn before it runs, so the last response
+joined the two turns' words and clipped them at the report's 600 characters; and a note stored in the middle of a turn's
+text ended that text, so a wait read only what followed the note. A caller's notes in a turn (a row that names its sender)
+are rows among its text (`turnAnswer`'s `acrossNotes`); the person's message ends it, as it always did. The next turn may
+have begun as the hub reads the end of this one: then it is the turn before it that ended, up to where the next began. A turn
+that ended with nothing to say has no answer, and the report says so; it is never the turn before's. A turn the host did not
+see begin (before this build) reads as the last response, and so does an older machine.
 
 The person may use the same session on that machine, and nothing of a turn that is not the caller's reaches the
 caller (#1038 review, RV13). One gate decides it (`RemoteAgents.gate`), and every path that hands the caller anything

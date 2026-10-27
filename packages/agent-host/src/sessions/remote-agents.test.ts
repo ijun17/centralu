@@ -19,6 +19,8 @@ let settled: string[]
 let told: string[]
 /** The last message the child took there, as the machine lists it */
 let lastUser: { text: string; from: unknown } | null
+/** How many times the hub has read the machine's last message (`verify`) */
+let lastUserReads = 0
 /** This hub's sender as the machine records it, qualified with the machine's id */
 const HUB = { sessionId: 'm1._hub-orchestrator' }
 const PERSON = { sessionId: 'm1.person' }
@@ -59,6 +61,7 @@ beforeEach(() => {
   told = []
   // The child last took the instruction this hub sent it: its turn is the caller's
   lastUser = { text: 'TASK', from: HUB }
+  lastUserReads = 0
 })
 afterEach(() => store.close())
 
@@ -173,7 +176,10 @@ describe("the turn on the child's machine, read as the caller's only on evidence
       machineLinked: () => true,
       machineWaitsForPerson: () => false,
       lastWords: words,
-      lastUserMessage: async () => ({ ok: true, message: lastUser }),
+      lastUserMessage: async () => {
+        lastUserReads++
+        return { ok: true, message: lastUser }
+      },
       cards: async () => ({ ok: true, approval: null, questions: [q] }),
       answerQuestion: async (_s: string, id: string) => {
         answered.push(id)
@@ -469,18 +475,61 @@ describe("the turn on the child's machine, read as the caller's only on evidence
       expect(sentTexts).toHaveLength(2)
     })
 
-    it("is not the caller's when the link dropped between the two turns", async () => {
+    /** The link is back (or the hub started again) and the machine's last message is read: what `verify` settles */
+    async function readAgain(ra: RemoteAgents): Promise<void> {
+      const before = lastUserReads
+      ra.observe({ type: 'machine_resync', machineId: 'm1' })
+      await eventually(() => lastUserReads > before)
+      // The read's answer is taken in the next turn of the loop
+      await new Promise<void>((resolve) => setImmediate(resolve))
+    }
+
+    it("is not the caller's when it opens while the link is down: whose it is cannot be told", async () => {
       const ra = await afterFollowUp()
       ra.observe({ type: 'machine_status', machine: { id: 'm1', name: 'Box', status: 'unreachable' } })
       opens(ra, { seq: 4, from: named })
       expect(reportOwed()).toBe(false)
     })
 
-    it("is not the caller's after the hub restarted: what it held of the notes is gone", async () => {
-      await afterFollowUp()
-      // A hub that starts again knows no note of the caller's that went into the turn; the machine's say alone is not enough
+    it("is the caller's when the link dropped between the note and its turn, and the machine's last message read when it is back is that note", async () => {
+      const ra = await afterNote()
+      ra.observe({ type: 'machine_status', machine: { id: 'm1', name: 'Box', status: 'unreachable' } })
+      lastUser = { text: sentTexts[0]!, from: HUB }
+      await readAgain(ra)
+      opens(ra, { seq: NOTE_ROW, from: named })
+      expect(reportOwed()).toBe(true)
+      expect(await act(ra, 'send', { text: 'and the keys' })).toMatchObject({ ok: true, state: 'working' })
+    })
+
+    it("is not the caller's when the link dropped between the note and its turn, and the person wrote there meanwhile", async () => {
+      const ra = await afterNote()
+      ra.observe({ type: 'machine_status', machine: { id: 'm1', name: 'Box', status: 'unreachable' } })
+      // A control: the same flow with the caller's note as the last message is the caller's (above)
+      lastUser = { text: 'my own thing', from: PERSON }
+      await readAgain(ra)
+      opens(ra, { seq: NOTE_ROW, from: named })
+      expect(reportOwed()).toBe(false)
+    })
+
+    it("is the caller's after the hub restarted, once the machine's last message is read to be that note: the rows it held are in its record", async () => {
+      await afterNote()
+      const note = sentTexts[0]!
+      // A hub that starts again: nothing is in memory, and whose the turn is cannot be told until the machine is read
       const restarted = following()
-      restarted.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working', origin: { seq: 4, from: named } })
+      lastUser = { text: note, from: HUB }
+      opens(restarted, { seq: NOTE_ROW, from: named })
+      expect(reportOwed()).toBe(false)
+      await readAgain(restarted)
+      opens(restarted, { seq: NOTE_ROW, from: named })
+      expect(reportOwed()).toBe(true)
+    })
+
+    it("is not the caller's after the hub restarted when the machine's last message is not that note", async () => {
+      await afterNote()
+      const restarted = following()
+      lastUser = { text: 'my own thing', from: PERSON }
+      await readAgain(restarted)
+      opens(restarted, { seq: NOTE_ROW, from: named })
       expect(reportOwed()).toBe(false)
     })
 
@@ -556,6 +605,13 @@ describe("the turn on the child's machine, read as the caller's only on evidence
         opens(ra, { seq: 7, from: named })
         expect(reportOwed()).toBe(false)
       })
+    })
+
+    it('says a turn ended without saying anything, rather than answering with nothing', async () => {
+      const ra = following(async () => ({ ok: true as const, text: '', length: 0, seq: null }))
+      state = 'idle'
+      lastUser = { text: 'TASK', from: HUB }
+      expect(await act(ra, 'status')).toMatchObject({ ok: true, state: 'at_rest', answer: expect.stringContaining('ended without saying anything') })
     })
 
     it("reads an adopted turn's answer as that turn's, from the machine's turn, not the last response of its record", async () => {

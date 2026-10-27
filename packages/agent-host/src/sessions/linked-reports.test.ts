@@ -27,6 +27,9 @@ let closing: boolean
 /** What the host's report gate answers, for every session (`LinkedReportsHost.reportGate`) */
 let gateAnswer: 'deliver' | 'withhold' | 'defer'
 let reports: LinkedReports
+/** What the machine says the last turn said, and what the hub asked for of it (#1604) */
+let said: (id: string) => string
+let wordsAsked: unknown[]
 
 beforeEach(() => {
   store = new Store()
@@ -42,10 +45,15 @@ beforeEach(() => {
   listing = async () => []
   closing = false
   gateAnswer = 'deliver'
+  said = (id) => `last words of ${id}`
+  wordsAsked = []
   /** The hub's reader over its links, as far as the reports read it: the mirror, the last words, and the machine's list */
   const reader = {
     describe: (id: string) => mirror.get(id) ?? null,
-    lastWords: async (id: string) => ({ ok: true as const, text: `last words of ${id}`, length: 0, seq: null }),
+    lastWords: async (id: string, _max: number, opts?: unknown) => {
+      wordsAsked.push(opts)
+      return { ok: true as const, text: said(id), length: 0, seq: null }
+    },
     machineLinked: (id: string) => linked.has(id),
     machineWaitsForPerson: () => false,
     backgroundTasks: (id: string) => listing(id),
@@ -100,6 +108,19 @@ describe('whom a turn end is reported to', () => {
       { orchestratorId: 'o1', sessionId: 'm1.w1', name: 'Worker', project: 'Site', preview: 'last words of m1.w1', ending: 'turn_complete' },
     ])
     expect(children.linkedReports.size).toBe(0)
+  })
+
+  // #1604: the words of the turn that ended, not the child's last response; a turn with nothing to say says so
+  it("asks for the turn's own words, and says so when the turn ended with none", async () => {
+    ask('m1.w1')
+    turn('m1.w1')
+    await flush()
+    expect(wordsAsked).toEqual([{ turn: true }])
+    said = () => ''
+    ask('m1.w1')
+    turn('m1.w1')
+    await flush()
+    expect(delivered.map((d) => d.preview)).toEqual(['last words of m1.w1', expect.stringContaining('ended without saying anything')])
   })
 
   it('a turn end the machine reports before the turn was seen running is not that turn\'s end', async () => {

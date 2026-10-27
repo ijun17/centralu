@@ -299,7 +299,8 @@ export class SessionEvents {
      * Whose the turn was (#1377), read once as it ends, from what the tool says it took in: said on the event that ends
      * it, so a hub that follows this host reads it rather than guessing. The person's own turn is reported to nobody
      */
-    const owned = endedTurn && e.sessionId ? this.host.children.turnEnded(e.sessionId, this.host.handles.get(e.sessionId)?.turnInputs?.()) : undefined
+    // An error or a usage limit cut the turn: the tool runs none of the messages given it after (#1604)
+    const owned = endedTurn && e.sessionId ? this.host.children.turnEnded(e.sessionId, this.host.handles.get(e.sessionId)?.turnInputs?.(), e.type === 'error' || e.type === 'limit_reached') : undefined
     // A turn Centralu started to compact the conversation says so (#1451): the window raises no "done" for it
     const turnBy = e.sessionId && endedTurn && this.host.compactTurn(e.sessionId) ? { ...(owned ?? { by: 'work' as const }), compaction: true as const } : owned
     const turnSaid = turnBy && (e.type === 'turn_complete' || e.type === 'state_change' || e.type === 'error' || e.type === 'limit_reached') ? { ...e, turn: turnBy } : e

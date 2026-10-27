@@ -7,7 +7,7 @@ import { readJsonObjects } from '../dev-services/store/json.js'
 import { asObj } from '../json-value.js'
 import { inTurn } from '../idle.js'
 import { agentDepthRefusal, depthOf } from './agent-depth.js'
-import { ANSWER_READ_MAX_CHARS, ASK_WAIT_MS, clipAnswer, taskLine } from './ask-project.js'
+import { ANSWER_READ_MAX_CHARS, ASK_WAIT_MS, clipAnswer, NO_WORDS, taskLine } from './ask-project.js'
 import { answersFrom, cardCall, cardHandle, cardNotice } from './delegated-cards.js'
 import type { DelegationHost } from './delegation-host.js'
 import type { LinkedEvent } from './linked-reports.js'
@@ -55,6 +55,16 @@ export type RemoteAgent = {
    * across a restart. `caller` is read again after a restart, as anything may have happened there meanwhile
    */
   whose?: 'caller' | 'other'
+  /**
+   * The rows of the messages its caller gave the child that the tool may run as a turn of its own (#1604): its notes into a
+   * running turn, which a tool that does not read one there runs once that turn ends, and its instruction sent at rest, which
+   * can run after another message given before it. The machine says which message a turn began for on the event that opens it
+   * (`origin.seq` names the row); only a turn whose origin is a row held here, sent by this hub, is taken for the caller's.
+   * Kept in the record, so a restart or a link's loss between a note and its turn does not lose it. A row goes when a turn is
+   * run for it or for a later one, and all go once the turn is another's (`setWhose`). Not with a send at rest: that one is the
+   * caller's too, and the turns of the notes before it are still to come (the gap between a turn's end and the next)
+   */
+  given?: number[]
 }
 
 /**
@@ -72,6 +82,9 @@ type Whose = 'caller' | 'other' | 'unknown'
  * them and a note into it are the caller's too. Not owned: the caller gets the fact and the state word, nothing more
  */
 type Gate = { owned: boolean; live: boolean; whose: Whose }
+
+/** The most rows of the caller's messages a child's record holds for turns to come (`RemoteAgent.given`) */
+const MAX_GIVEN_ROWS = 64
 
 /** The record with nothing owed */
 const withoutOwed = (r: RemoteAgent): RemoteAgent => {
@@ -200,16 +213,6 @@ export class RemoteAgents {
   private readonly whose = new Map<string, Whose>()
   /** What made a turn another's, when it is told (#1576): a message from another session of this hub, else it is read as the person's */
   private readonly otherBy = new Map<string, 'session' | 'person'>()
-  /**
-   * The rows of the messages this hub's caller gave the child that the tool may run as a turn of its own (#1604), by child:
-   * its notes into a running turn, which a tool that does not read one there runs once that turn ends, and its instruction
-   * sent at rest, which can run after another message given before it. The machine says which message a turn began for on
-   * the event that opens it: `origin.seq` names the row. Only a turn whose origin is a row held here, sent by this hub, is
-   * taken for the caller's. A row goes when a turn is run for it or for a later one, and all go with anything that tells
-   * the turns are not the caller's: a message of someone else's, the link's loss. Not with a send at rest: that one is the
-   * caller's too, and the turns of the notes before it are still to come (the gap between a turn's end and the next)
-   */
-  private readonly given = new Map<string, Set<number>>()
   /** Notes sent into a running turn whose record has not come back yet (memory only): two quick notes both are the caller's own */
   private readonly notesSent = new Map<string, string[]>()
   /** Children an instruction is on its way to: its own send's answer says what came of it, and the machine is not read meanwhile */
@@ -796,7 +799,7 @@ export class RemoteAgents {
     // What made a turn another's is told with it (`messageTaken` sets it after), never kept past it
     if (was !== 'other' || whose !== 'other') this.otherBy.delete(rec.sessionId)
     this.whose.set(rec.sessionId, whose)
-    if (whose !== 'caller') this.given.delete(rec.sessionId)
+    if (whose !== 'caller') this.setGiven(rec.sessionId, [])
     const kept = whose === 'unknown' ? undefined : whose
     const stored = this.of(rec.sessionId)
     if (stored && kept && stored.whose !== kept) this.save(this.records().map((r) => (r.sessionId === rec.sessionId ? { ...r, whose: kept } : r)))
@@ -948,7 +951,16 @@ export class RemoteAgents {
 
   /** A message of the caller's was stored on the machine as row `seq`: if the tool runs a turn for it after another's, that turn names it (`given`) */
   private noteRow(sessionId: string, seq: unknown): void {
-    if (typeof seq === 'number') this.given.set(sessionId, new Set([...(this.given.get(sessionId) ?? []), seq]))
+    if (typeof seq === 'number' && !this.givenRows(sessionId).includes(seq)) this.setGiven(sessionId, [...this.givenRows(sessionId), seq].slice(-MAX_GIVEN_ROWS))
+  }
+  private givenRows(sessionId: string): readonly number[] {
+    return this.of(sessionId)?.given ?? []
+  }
+  private setGiven(sessionId: string, rows: readonly number[]): void {
+    const rec = this.of(sessionId)
+    if (!rec || (rec.given ?? []).join() === rows.join()) return
+    const { given: _given, ...rest } = rec
+    this.save(this.records().map((r) => (r.sessionId === sessionId ? { ...rest, ...(rows.length ? { given: [...rows] } : {}) } : r)))
   }
 
   /**
@@ -957,16 +969,17 @@ export class RemoteAgents {
    * message after a later one has set it working). When that is a row of the caller's (`given`, from this hub), the turn is
    * the caller's: its end is owed as the first turn's was, and a note goes into it. A turn with no origin, or one for a row
    * not held here (the person's, another session's, a machine that does not say), is not taken for the caller's. The rows up
-   * to the one named are done with either way: the tool runs messages in the order they were given
+   * to the one named are done with either way: the tool runs messages in the order they were given. While whose the child's turn
+   * is cannot be told (a link's loss, a restart), the rows are kept, and no turn is taken for the caller's
    */
   private turnOpens(rec: RemoteAgent, e: LinkedEvent): void {
     const origin = e.type === 'state_change' ? asObj(e.origin) : {}
     const named = origin.seq
-    const held = this.given.get(rec.sessionId)
-    if (!held || typeof named !== 'number' || !held.has(named) || !this.fromHubHere(rec, origin.from)) return
-    const later = new Set([...held].filter((row) => row > named))
-    if (later.size) this.given.set(rec.sessionId, later)
-    else this.given.delete(rec.sessionId)
+    const held = this.givenRows(rec.sessionId)
+    if (typeof named !== 'number' || !held.includes(named) || !this.fromHubHere(rec, origin.from)) return
+    // Not told apart yet (the link dropped, or Centralu restarted): the rows stay for the re-read that tells (`verify`)
+    if (this.whoseOf(rec) === 'unknown') return
+    this.setGiven(rec.sessionId, held.filter((row) => row > named))
     if (this.whoseOf(rec) !== 'caller' || this.gateNow(rec).live || !this.host.meta.has(rec.callerId)) return
     this.host.children.setLinkedReport(rec.sessionId, { orchestratorId: rec.callerId, busy: true })
   }
@@ -1083,6 +1096,7 @@ export class RemoteAgents {
   private async lastWords(rec: RemoteAgent, reader: LinkedSessions | null): Promise<{ answer: string; notice: string }> {
     const words = reader ? await reader.lastWords(rec.sessionId, ANSWER_READ_MAX_CHARS, { turn: true }).catch((e: Error) => ({ ok: false as const, error: e.message })) : { ok: false as const, error: 'no machine is linked here' }
     if (!words.ok) return { answer: '', notice: ` Its answer could not be read there (${words.error}): read_session(sessionId="${rec.sessionId}") reads it once the machine answers.` }
+    if (words.text === '') return { answer: NO_WORDS, notice: '' }
     return { answer: clipAnswer(words.text, rec.name, words.seq !== null ? { sessionId: rec.sessionId, seq: words.seq } : undefined), notice: '' }
   }
 
@@ -1180,7 +1194,6 @@ export class RemoteAgents {
       if (rec.machineId !== m.id) continue
       if (this.whoseOf(rec) === 'caller') this.whose.set(rec.sessionId, 'unknown')
       this.busy.delete(rec.sessionId)
-      this.given.delete(rec.sessionId)
       const wait = this.waits.get(rec.sessionId)
       if (wait) {
         this.dropWait(rec.sessionId)
@@ -1293,7 +1306,6 @@ export class RemoteAgents {
     this.whose.delete(sessionId)
     this.otherBy.delete(sessionId)
     this.notesSent.delete(sessionId)
-    this.given.delete(sessionId)
     this.pending.delete(sessionId)
     this.deferred.delete(sessionId)
     this.busy.delete(sessionId)

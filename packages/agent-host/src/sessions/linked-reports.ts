@@ -3,6 +3,7 @@ import type { LinkedSessions } from '../adapters/contract.js'
 import { HUB_SENDER } from './hub-sender.js'
 import { linkedTurnEnd } from './linked-turn-end.js'
 import { PAUSED_REPORT_SETTLE_MS, type ChildOwnership, type LinkedReport, type TurnStarter } from './child-ownership.js'
+import { NO_WORDS } from './ask-project.js'
 
 /** The work a report is about, as `deliverReport` words its first line (#721, #723) */
 export type ReportWork =
@@ -493,7 +494,8 @@ export class LinkedReports {
       theirs && !(work && 'tookOver' in work) ? "(not read: the last turn there was the person's; read_session shows it)"
       : tookOver ? "(not read: the conversation there is the person's now; read_session shows it)"
       : !words ? (work && 'paused' in work && work.paused ? '(in the paused report before this one)' : '(not read: its machine could not be reached)')
-      : words.ok ? words.text
+      // A turn that ended with nothing to say says so, rather than a preview that reads as an unread one (#1604)
+      : words.ok ? (words.text === '' ? NO_WORDS : words.text)
       : `(its last response could not be read there: ${words.error})`
     const seq = words?.ok && words.seq !== null ? words.seq : undefined
     await this.host.deliverReport(orchestratorId, sessionId, about.name, about.project, preview, ending as Pick<NormalizedEvent, 'type'>, work, seq, part)

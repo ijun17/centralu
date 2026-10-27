@@ -173,6 +173,25 @@ describe('reading a linked machine for the hub’s orchestrator', () => {
     expect(await reader.lastWords('m1.w1', 600)).toEqual({ ok: true, text: `${answer.slice(0, 600)}…`, length: answer.length, seq: 41 })
   })
 
+  // #1604: asked for the turn's own words, the machine is told so; asked for the last response, it is not (an older machine ignores the field)
+  it('asks a machine for the words of the turn that ended only when the caller asks for the turn', async () => {
+    const asked: unknown[] = []
+    const m = machine({})
+    m.call = async (method, params) => {
+      asked.push(params)
+      return { text: 'the words', length: 9, seq: 3 }
+    }
+    const reader = linkedSessions(() => [m])
+    await reader.lastWords('m1.w1', 600, { turn: true })
+    await reader.lastWords('m1.w1', 600)
+    await reader.lastWords('m1.w1', 600, {})
+    expect(asked).toEqual([
+      { sessionId: 'w1', maxChars: 600, turn: true },
+      { sessionId: 'w1', maxChars: 600 },
+      { sessionId: 'w1', maxChars: 600 },
+    ])
+  })
+
   it('reads the head of a long answer an older machine cut, rather than an older line or nothing', async () => {
     const long = JSON.stringify({ ts: '2026-10-18 10:00', role: 'assistant', text: `HEAD "quoted" \\ ${'y'.repeat(5000)}` })
     // An older machine's cut: 2,000 characters of the line's JSON and an ellipsis, here inside an escape

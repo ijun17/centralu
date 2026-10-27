@@ -881,6 +881,8 @@ export class SessionStarts {
       }
       this.host.handles.set(sessionId, handle)
       if (!adopt) {
+        // The process before it held the messages given it for turns to come, and a new one holds none (#1604)
+        this.host.children.dropInputOrigins(sessionId)
         this.host.launches.rememberToolPrefix(sessionId)
         this.host.launches.rememberLaunchSettings(m, cwd)
         // A new process holds no background work yet (#648); whatever an earlier adopted one left unknown is over

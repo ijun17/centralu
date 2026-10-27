@@ -2028,6 +2028,8 @@ export class SessionManager {
     const run = this.agentRuns.get(sessionId)
     if (run) run.stoppedByPerson = true
     for (const observer of this.turnObservers.get(sessionId) ?? []) observer.stoppedByPerson = true
+    // A stop ends what was given the tool: no message sent before it runs as a turn after (#1604)
+    this.children.dropInputOrigins(sessionId)
     handle.interrupt()
     // Stop reaches delegated work only while the caller waits. A note that joined the person's turn
     // only ends that caller's wait; work left running past the bound has its own Stop.

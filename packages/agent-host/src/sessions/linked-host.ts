@@ -140,25 +140,20 @@ export class LinkedHost {
        * A session's last response, whole (#1186): the hub read it from read's lines, which are cut at 2,000 characters,
        * so a long answer came back as an older line or nothing. Only of a session a hub's window is shown.
        *
-       * `turn` (#1604): the answer of the turn it last ran, from the row that turn began after, as this host saw it begin:
-       * a note stored during the turn before it, which that turn did not read and this one ran, is a row of the turn before's
-       * text, so reading the last response joined both turns' words; and a note in a turn splits its text. A turn this host
-       * did not see begin (it started after a swap) reads as the last response does
+       * `turn` (#1604): the answer of the last turn that ended, from the row that turn began after, kept in the store as this host
+       * (or the one before it) saw it begin: a note stored during the turn before it, which that turn did not read and this one
+       * ran, is a row of the turn before's text, so reading the last response joined both turns' words; and a note in a turn
+       * splits its text. A turn that ended with nothing to say has no answer, never the turn before's. The next turn may have
+       * begun as the hub reads this one's end: then it is the turn before it that ended. A turn not seen to begin (before
+       * this build) reads as the last response does
        */
       lastAnswer: async (sessionId, maxChars, turn) => {
         const m = this.host.meta.get(sessionId)
         if (!m || m.kind === 'orchestrator' || m.kind === 'coordinator') throw rpcError(`Not a session this machine shares: ${sessionId}`, 'session_not_found')
         const rows = this.host.store.messages.loadMessages(sessionId, 200)
-        const started = turn ? this.host.children.turnStartOf(sessionId) : undefined
-        /*
-         * A turn that has said nothing yet (the next one began as the hub reads the end of this) has no response of its own:
-         * the one before it is the response the end was of, as the last response would have been
-         */
-        const earlier = started?.before !== undefined && lastResponse(rows, started.since) === ''
-        const read = earlier ? rows.filter((r) => r.seq <= started.since) : rows
-        const since = earlier ? started.before : started?.since
-        const text = lastResponse(read, since)
-        return { text: text.slice(0, Math.min(maxChars ?? HOST_ANSWER_MAX_CHARS, HOST_ANSWER_MAX_CHARS)), length: text.length, seq: lastResponseSeq(read, since) }
+        const span = turn ? this.host.children.turnRows(sessionId) : undefined
+        const text = lastResponse(rows, span)
+        return { text: text.slice(0, Math.min(maxChars ?? HOST_ANSWER_MAX_CHARS, HOST_ANSWER_MAX_CHARS)), length: text.length, seq: lastResponseSeq(rows, span) }
       },
       sessions: () => view.listSessions(),
       read: async (sessionId, limit, opts) => {
