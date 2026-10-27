@@ -172,9 +172,35 @@ refused, (c) never `yolo`. Decided: **(b), with (c), and the file backend forced
 allows them: the re-review measured `replace_file_content` running on a file in `antigravity-acp/`, which the harness
 counts as part of its workspace (with `gemini-home/config/skills`). So any permission request (an edit, a read by
 address, an MCP call, a command's folder) with a path in `<data>/tools/antigravity/` is refused under every preset and
-every saved rule (`AcpToolShape.neverAllowed`, `reachesAgentFolder`): every string in the request that reads as a path
-(absolute, `~/…`, `file:`, or relative to the session's folder), judged as written and through its links as far as it
-exists, with case folded. One folder is let through, the conversation's own plan folder
+every saved rule (`AcpToolShape.neverAllowed`, `reachesAgentFolder`). The guard fails closed: what it cannot judge is
+refused (recheck of #1680). Exactly what it checks:
+
+- Every string of the request, object keys too, and the strings inside a string that holds JSON. A string with a line
+  break, or longer than 32767 characters, names no file and is passed over. A request nested deeper than 32 levels, or
+  with more than 1024 distinct strings, is refused whole without being read (`SCAN_LIMITS`).
+- Each string as written, without one pair of surrounding quotes, and with `%VAR%`, `$VAR`, `${VAR}` filled in from the
+  agent's environment (`GEMINI_HOME` included). Each is then read as a path: a `file:` address (one that does not parse
+  is refused), `~`, absolute, drive-relative `C:foo` (judged from the drive's root, the session's folder and the host's
+  own folder on that drive), `\foo` on Windows, or relative to the session's folder. A glob (`*`, `?`, `[`, `{` in a
+  segment) is judged by its fixed prefix as well; a `..` after a glob segment is refused.
+- Each path as written (on Windows without its `\?\` or `\.\` prefix, and with trailing dots and spaces dropped from
+  each name, as the OS does) and as it resolves: segment by segment through links and junctions, a `..` taken after
+  the link before it as the kernel does, 8.3 names and case as the file system has them. Case is also folded.
+- It is refused when it is inside the folder, or is the folder or a parent of it (`<data>`, `<data>/tools`, the home
+  folder, a drive's root): a listing or a recursive search from a parent reaches inside. A shell call's own folder is
+  exempt from the parent rule only, since its command's words are not read anyway.
+- On Windows a network path (`\host\share\…`, `\?\UNC\…`, a mapped drive, a volume or device path) is refused when
+  its volume is the folder's volume, or cannot be read. Its host's name proves nothing: `localhost`, `127.0.0.1`, the
+  machine's own names and addresses, a hosts-file entry, and any share of any folder lead to the same file (measured:
+  the admin share by each of those names gave the token's volume serial and file id). The volume, read with `stat`, does.
+
+Work this declines that it need not (accepted, since each is rare and the person can still do it with a shell command,
+which asks): a search or listing over the home folder, the data folder or a drive's root, including a session whose
+folder is the home folder searching `.`; an edit whose one-line text is `/`, `~`, `..` or a glob from a parent (it
+reads as a path); a file on a network share of the data folder's own volume (a loopback share); a request with more
+than 1024 strings or 32 levels; a listing of the plan folder itself (only files in it are let through).
+
+One folder is let through, the conversation's own plan folder
 `gemini-home/antigravity-acp/brain/<session id>/`: `/plan` writes its plan there as an edit it asks for (measured on
 1.4.3: `plan.md`, or a name of its choosing, and `<name>.metadata.json`; the harness itself keeps the MCP schemas it
 reads and its logs beside them). The token, `settings.json`, the conversations' databases, other conversations' folders,
