@@ -49,6 +49,10 @@
         {
           "files": ["tooling/lint-allowlist/*.txt"],
           "run": [["pnpm", "install", "--frozen-lockfile", "--ignore-scripts"], ["pnpm", "lint:tighten"], ["pnpm", "exec", "vitest", "run", "tooling/type-aware-lint.test.ts"]]
+        },
+        {
+          "files": ["tooling/os-allowlist.txt"],
+          "run": [["pnpm", "install", "--frozen-lockfile", "--ignore-scripts"], ["pnpm", "os:tighten"], ["pnpm", "exec", "vitest", "run", "tooling/os-layer.test.ts"]]
         }
       ],
       "never": [

@@ -1,6 +1,6 @@
 import { execFile, execFileSync } from 'node:child_process'
 import { promisify } from 'node:util'
-import { systemTool } from '../os.js'
+import { systemTool, traitsFor } from '../os.js'
 import { descendants } from './proc-table.js'
 
 /**
@@ -143,7 +143,7 @@ export type KillOs = {
  * (`collectOrphansWindows`).
  */
 export function hasProcessGroups(platform: NodeJS.Platform = process.platform): boolean {
-  return platform !== 'win32'
+  return traitsFor(platform).hasProcessGroups
 }
 
 /**

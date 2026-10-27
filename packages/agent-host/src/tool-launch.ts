@@ -1,8 +1,18 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
-import { win32 } from 'node:path'
 import { whichTool } from './env-path.js'
-import { systemTool } from './os.js'
+import { familyOf } from './os.js'
+import {
+  launchFor as rulesLaunchFor,
+  nodeShimEntry as rulesNodeShimEntry,
+  notOnPath as rulesNotOnPath,
+  programFor,
+  resolveCommand as rulesResolveCommand,
+  type LaunchDeps,
+  type ToolLaunch,
+} from './os/rules.js'
+
+export { shimTarget, type ToolLaunch } from './os/rules.js'
 
 /**
  * How to start a tool `whichTool` found: a program and the arguments that go before the tool's
@@ -16,8 +26,9 @@ import { systemTool } from './os.js'
  * through this same Node, or an `.exe` directly. A native install (`claude.exe`) needs none of
  * this. `npm.cmd` and `npx.cmd` themselves are batch files too, of a different shape
  * (`nodeShimEntry`), and are read the same way.
+ *
+ * The rules are `os/rules.ts`'s; this module gives them the real files and this Node.
  */
-export type ToolLaunch = { command: string; args: string[] }
 
 type Deps = {
   platform: NodeJS.Platform
@@ -43,104 +54,22 @@ const realDeps = (): Deps => ({
   },
 })
 
-/**
- * A batch shim may start another one (#849): Yarn v1's global bin (`%LOCALAPPDATA%\Yarn\bin\claude.cmd`) is one line,
- * `@"%~dp0\..\Data\global\node_modules\.bin\claude.cmd" %*`, whose target is npm's cmd-shim. That one is followed too, up
- * to this many shims deep, so a loop of shims ends.
- */
-const MAX_SHIM_DEPTH = 3
+/** The rules' dependencies for `platform` (`os/rules.ts` holds the rules; the in-memory OS follows them too) */
+const ruleDeps = (deps: Deps): LaunchDeps => ({ ...deps, family: familyOf(deps.platform) })
 
-export function launchFor(path: string, deps: Deps = realDeps(), depth = 0): ToolLaunch {
-  const plain = { command: path, args: [] }
-  if (deps.platform !== 'win32' || !/\.(cmd|bat)$/i.test(path)) return plain
-  let text: string
-  try {
-    text = deps.read(path)
-  } catch {
-    return plain
-  }
-  const dir = win32.dirname(path)
-  const relative = shimTarget(text)
-  const target = relative ? win32.resolve(dir, relative) : nodeShimEntry(text, dir, deps)
-  if (!target || !deps.exists(target)) return plain
-  if (/\.(c|m)?js$/i.test(target)) return { command: deps.node, args: [target] }
-  if (/\.exe$/i.test(target)) return { command: target, args: [] }
-  if (/\.(cmd|bat)$/i.test(target) && depth + 1 < MAX_SHIM_DEPTH) {
-    const inner = launchFor(target, deps, depth + 1)
-    if (inner.command !== target) return inner
-  }
-  return plain
+/** How to start a found tool (`launchFor` in `os/rules.ts`): a batch shim becomes what it starts on Windows */
+export function launchFor(path: string, deps: Deps = realDeps()): ToolLaunch {
+  return rulesLaunchFor(path, ruleDeps(deps))
 }
 
-/**
- * The file a package manager's batch shim starts, relative to the shim's folder.
- *
- * Both shapes in use name it as a quoted path off the shim's own folder, next to an optional
- * `node.exe` in that folder (used when one sits beside the shim):
- *
- *   npm (cmd-shim):          "%_prog%"  "%dp0%\node_modules\@openai\codex\bin\codex.js" %*
- *   pnpm (@zkochan/cmd-shim): node  "%~dp0\..\@anthropic-ai\claude-code\cli.js" %*
- *
- * and for a package whose bin is an executable, npm writes `"%dp0%\node_modules\…\x.exe"   %*`.
- * The first quoted path that is not that `node.exe` is the target.
- */
-export function shimTarget(text: string): string | null {
-  for (const m of text.matchAll(/"%(?:~dp0|dp0%)\\?([^"%]+)"/gi)) {
-    const rel = m[1]!.trim()
-    if (!rel || /(^|\\)node\.exe$/i.test(rel)) continue
-    return rel
-  }
-  return null
-}
-
-/**
- * The `.js` that the `npm.cmd` or `npx.cmd` shipped with Node starts, or null for any other file.
- *
- * Those two are not cmd-shim output. They set variables and start the last of them, so the quoted
- * paths `shimTarget` looks for are not there (read on Windows 11 with Node 24.21, 2026-10-08):
- *
- *   SET "NODE_EXE=%~dp0\node.exe"
- *   SET "NPM_PREFIX_JS=%~dp0\node_modules\npm\bin\npm-prefix.js"
- *   SET "NPM_CLI_JS=%~dp0\node_modules\npm\bin\npm-cli.js"
- *   FOR /F "delims=" %%F IN ('CALL "%NODE_EXE%" "%NPM_PREFIX_JS%"') DO (
- *     SET "NPM_PREFIX_NPM_CLI_JS=%%F\node_modules\npm\bin\npm-cli.js"
- *   )
- *   IF EXIST "%NPM_PREFIX_NPM_CLI_JS%" ( SET "NPM_CLI_JS=%NPM_PREFIX_NPM_CLI_JS%" )
- *   "%NODE_EXE%" "%NPM_CLI_JS%" %*
- *
- * The middle part is followed too: after `npm i -g npm`, the npm in the global prefix is the one
- * the shim runs, and it is the one the person's own terminal runs. A prefix that cannot be asked
- * for falls back to the npm beside Node, which is what the shim does as well.
- */
+/** The `.js` that Node's own `npm.cmd` or `npx.cmd` starts (`nodeShimEntry` in `os/rules.ts`) */
 export function nodeShimEntry(text: string, dir: string, deps: Pick<Deps, 'exists' | 'runJs'>): string | null {
-  const started = /^\s*"%NODE_EXE%"\s+"%(\w+)%"\s+%\*\s*$/m.exec(text)?.[1]
-  if (!started) return null
-  const set = (name: string) =>
-    new RegExp(`^\\s*SET\\s+"${name}=%~dp0\\\\?([^"%]+)"`, 'im').exec(text)?.[1]?.trim() ?? null
-  const relative = set(started)
-  if (!relative) return null
-  const base = win32.resolve(dir, relative)
-  const prefixJs = set('NPM_PREFIX_JS')
-  if (!prefixJs || !deps.runJs) return base
-  const prefix = deps.runJs(win32.resolve(dir, prefixJs))?.trim().split(/\r?\n/).pop()?.trim()
-  if (!prefix || !win32.isAbsolute(prefix)) return base
-  const inPrefix = win32.join(prefix, 'node_modules', 'npm', 'bin', win32.basename(base))
-  return deps.exists(inPrefix) ? inPrefix : base
+  return rulesNodeShimEntry(text, dir, deps)
 }
 
 /**
- * A command as a manifest names it (`node`, `npx`, `uvx`, or a path), ready to spawn.
- *
- * Off Windows, unchanged: the spawn searches PATH as it always did. On Windows a bare name is
- * looked up with PATHEXT first, so `npx` becomes `npx.cmd` and then the program that starts, and
- * `node` becomes the absolute `node.exe` on PATH. The second matters too: given a bare name,
- * Windows process creation looks in the working directory before PATH, and an app's working
- * directory is its own folder.
- *
- * A path (`bin/server`, `.\run.cmd`) is taken from `cwd`, the folder the command will run in, and
- * on Windows without an extension it is looked up with PATHEXT as cmd.exe does (#849). Read from the
- * host's own folder instead, a relative `.cmd` was never found and an extensionless one never had
- * its `.cmd` tried, so an app that started everywhere else failed only on Windows.
+ * How to start `command` (a manifest's, a person's) from `cwd` (`resolveCommand` in `os/rules.ts`, #849): on Windows a
+ * path is read from `cwd` and tried with PATHEXT, a bare name is found on PATH, and a batch shim becomes what it starts.
  */
 export function resolveCommand(
   command: string,
@@ -148,24 +77,7 @@ export function resolveCommand(
   deps: Deps = realDeps(),
   cwd?: string,
 ): ToolLaunch {
-  if (deps.platform !== 'win32') return { command, args: [] }
-  if (/[\\/]/.test(command)) {
-    const path = cwd === undefined ? command : win32.resolve(cwd, command)
-    return launchFor(withPathExt(path, env, deps) ?? path, deps)
-  }
-  const found = whichTool(command, env, 'win32', deps.exists)
-  return found ? launchFor(found, deps) : { command, args: [] }
-}
-
-/** A Windows path without an extension, with the first PATHEXT extension that exists; null when it has one or none fits */
-function withPathExt(path: string, env: Record<string, string | undefined>, deps: Pick<Deps, 'exists'>): string | null {
-  if (/\.[^\\/.]+$/.test(win32.basename(path))) return null
-  const pathExt = Object.entries(env).find(([k]) => k.toUpperCase() === 'PATHEXT')?.[1] || '.COM;.EXE;.BAT;.CMD'
-  for (const ext of pathExt.split(';').filter(Boolean)) {
-    const candidate = path + ext.toLowerCase()
-    if (deps.exists(candidate)) return candidate
-  }
-  return null
+  return rulesResolveCommand(command, env, ruleDeps(deps), cwd)
 }
 
 /**
@@ -198,18 +110,14 @@ export function programPath(
   find: (name: string, pathExt?: string) => string | null = (n, pathExt) => whichTool(n, pathExt ? { ...process.env, PATHEXT: pathExt } : process.env),
   launch: (path: string) => ToolLaunch = (p) => launchFor(p),
 ): string {
-  if (platform !== 'win32') return name
+  const family = familyOf(platform)
+  if (family !== 'windows') return name
   const known = programs.get(name)
   if (known) return known
-  let found = find(name)
-  if (found && /\.(cmd|bat)$/i.test(found)) {
-    const batch = found
-    const started = launch(batch)
-    found = started.args.length === 0 && /\.(exe|com)$/i.test(started.command) ? started.command : find(name, '.COM;.EXE')
-    if (!found) return win32.join(win32.dirname(batch), `${name}.exe`)
-  }
-  if (found) programs.set(name, found)
-  return found ?? notOnPath(name)
+  // The rule is `programFor` (os/rules.ts); a path found is remembered, a miss is asked again next time
+  const { path, found } = programFor(name, family, find, launch, process.env)
+  if (found) programs.set(name, path)
+  return path
 }
 
 /**
@@ -220,7 +128,7 @@ export function programPath(
  * `codex.exe` committed there ran whenever the tool itself was not installed (#838, reproduced on Windows 11).
  */
 export function notOnPath(name: string, env: Record<string, string | undefined> = process.env): string {
-  return systemTool(['centralu-not-on-path', `${name}.exe`], env)
+  return rulesNotOnPath(name, env)
 }
 
 /**
