@@ -507,7 +507,9 @@ PRs 5–9 for one tool do not wait for the others, so `agy` (§8) needs only 1, 
 | Codex gets the Stop confirmation timer | §2.4 | after 6, owner's call (§9.2) |
 | `endsWithHost` for Claude and Codex | §2.6 | done in 3 (Q3 decided it belongs there; §5.1) |
 
-## 8. Antigravity on the core
+## 8. Antigravity on the core (superseded)
+
+**Superseded (#59).** The `agy -p` adapter this section sketched on the core, with its hook gate, was built and then removed; Antigravity runs on Google's ACP agent through the ACP adapter. Read the section as a record of what the core was measured to need, not as a plan.
 
 From antigravity-adapter.md's measurements (`agy` 1.4.7, macOS, 2026-10-26), what `agy` supplies and what it takes:
 
