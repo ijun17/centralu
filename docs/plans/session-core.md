@@ -340,7 +340,10 @@ leaves the flag out. Codex's keeper spawn (`launch-config.ts:spawnInKeeper`) is 
 `ProcessSource` and builds one spec for both. What changes on screen: nothing. What changes on macOS and Linux: Claude
 Code and Codex's app-server start behind `HOST_WATCH`, as ACP's tools already did (§2.6, Q3), so a host killed outright
 takes them along whatever they do with stdin's end; `ends-with-host.test.ts` holds it per tool on a real OS (skipped on
-Windows, which has no watch).
+Windows, which has no watch). Behind the watch `sh` always starts, and its `exec` of a missing program exits 127, so a
+removed `codex` read as a crash where it used to say it failed to start (found by `codex/client.test.ts` on Linux):
+`local-process.ts` now looks the program up as `sh` would and reports a missing one as not started (ENOENT), as without
+the watch. That also changes ACP on macOS and Linux, from "<label> exited (code 127)" to "<label> failed to start".
 
 **What Antigravity needs of the seam** (#1654, measured on `agy` 1.4.7), in `SessionProcess` and `core/gate.ts`:
 
