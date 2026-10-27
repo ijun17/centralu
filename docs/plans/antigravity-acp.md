@@ -198,7 +198,9 @@ refused (recheck of #1680). Exactly what it checks:
   the admin share by each of those names gave the token's volume serial and file id). The volume, read with `stat`, does.
   A WSL share (`\wsl$<distro>…`, `\wsl.localhost<distro>…`, any case, either slash, `\?UNCwsl…` too) is another
   volume, but its `mnt<letter>…` (or `<letter>…`, where a distro mounts drives at its root) is this machine's `<letter>:`:
-  that path is judged as well, by text (tested without WSL). A distro whose mount point is set to something else
+  that path is judged as well, however it was reached (a relative path or a `\foo` from a session folder that is itself on
+  a WSL share included), by text (tested without WSL). The share's root, a distro's root and its `mnt` are parents of every
+  drive, so a search from them is refused like one from a drive's root. A distro whose mount point is set to something else
   (`/etc/wsl.conf`), or a link inside a distro that leads to `/mnt/<letter>`, is not known and is not judged.
 - Then every line and every word (split at spaces, `=`, `,`, `;`, quotes, brackets, `|`, `@` and `&`) of every string,
   multi-line ones and a shell command included, and each word also from every place a path can start in it (`~`, a

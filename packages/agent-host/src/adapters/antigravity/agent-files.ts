@@ -633,7 +633,7 @@ function alternativesOf(text: string): string[] | null {
   return done
 }
 
-type Candidate = { path: string }
+type Candidate = { path: string; /** A WSL share's root, a distro's root or its `mnt`: above every drive it mounts */ aboveDrives?: boolean }
 
 /**
  * The absolute paths a string may name, each as written (not normalized: `..` is judged after the links before it), and
@@ -654,13 +654,10 @@ export function candidatesOf(text: string, cwd: string): Candidate[] | null {
   }
   if (WINDOWS) s = withoutDevicePrefix(s)
   const roots: string[] = []
-  // A WSL share is another volume, but `/mnt/c` in it is this machine's `C:`: that path is judged too
-  const mounted = WINDOWS ? wslDrivePath(windowsForm(s)) : null
-  if (mounted !== null) roots.push(mounted)
   let pathLike = true
   if (s === '~' || s.startsWith('~/') || (WINDOWS && s.startsWith('~\\'))) roots.push(homedir() + s.slice(1))
   // Windows: `\foo` is from the root of the process's drive, which Centralu takes to be the session folder's
-  else if (WINDOWS && /^[\\/](?![\\/])/.test(s)) roots.push(`${cwd.slice(0, 2)}${s}`, resolve(s))
+  else if (WINDOWS && /^[\\/](?![\\/])/.test(s)) roots.push(`${parse(cwd).root.replace(/[\\/]+$/, '')}${s}`, resolve(s))
   else if (isAbsolute(s)) roots.push(s)
   else if (WINDOWS && /^[A-Za-z]:/.test(s)) {
     // Drive-relative: the process's folder on that drive, which Centralu cannot see; every folder it may be is judged
@@ -672,9 +669,11 @@ export function candidatesOf(text: string, cwd: string): Candidate[] | null {
     pathLike = /[\\/]/.test(s)
     roots.push(joinRaw(cwd, s))
   }
+  // A WSL share is another volume, but `/mnt/c` in it is this machine's `C:`: that path is judged too, whichever way it was reached
+  if (WINDOWS) for (const r of [...roots]) roots.push(...[wslDrivePath(windowsForm(r))].filter((m) => m !== null))
   const out: Candidate[] = []
   for (const path of roots) {
-    out.push({ path })
+    out.push(WINDOWS && wslAboveDrives(windowsForm(path)) ? { path, aboveDrives: true } : { path })
     if (!pathLike) continue
     const segments = path.split(WINDOWS ? /[\\/]/ : '/')
     const at = segments.findIndex((seg, i) => i > 0 && /[*?[{]/.test(seg))
@@ -693,6 +692,11 @@ export function candidatesOf(text: string, cwd: string): Candidate[] | null {
 export function wslDrivePath(path: string): string | null {
   const m = /^[\\/]{2}wsl(?:\$|\.localhost)[\\/]+[^\\/]+[\\/]+(?:mnt[\\/]+)?([A-Za-z])(?:[\\/]+(.*))?$/i.exec(path)
   return m ? `${(m[1] ?? '').toLowerCase()}:\\${(m[2] ?? '').replace(/\//g, '\\')}` : null
+}
+
+/** Whether a path is the root of a WSL share, a distro's root or its `mnt`: above every drive the distro mounts, so a search from there reaches them all */
+export function wslAboveDrives(path: string): boolean {
+  return /^[\\/]{2}wsl(?:\$|\.localhost)(?:[\\/]+[^\\/]+(?:[\\/]+mnt)?)?[\\/]*$/i.test(path)
 }
 
 const joinRaw = (dir: string, rest: string) => (rest.length ? `${dir.replace(/[\\/]+$/, '')}${sep}${rest}` : dir)
@@ -738,6 +742,7 @@ async function guardOf(home: AgyHome, sessionId: string): Promise<Guard> {
 const written = (path: string) => (WINDOWS ? windowsForm(path) : resolve(path))
 
 async function reaches(guard: Guard, c: Candidate, parents: boolean): Promise<boolean> {
+  if (parents && c.aboveDrives) return true
   const real = await resolveLinks(c.path, new Map())
   if (real === null) return true
   const pairs: [root: string, plans: string | null, target: string][] = [

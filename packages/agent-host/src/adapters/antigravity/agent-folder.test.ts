@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { candidatesOf, reachesAgentFolder, SCAN_LIMITS, within, wslDrivePath, type AgyHome } from './agent-files.js'
+import { candidatesOf, reachesAgentFolder, SCAN_LIMITS, within, wslAboveDrives, wslDrivePath, type AgyHome } from './agent-files.js'
 import { fakeSignIn, folder, folderLink, hardLink, pathFrom, pathIn, posixPaths, processDrive, sep, tempData, thisHost, tokenPath, write } from './agent-files.test-helpers.js'
 
 /**
@@ -243,6 +243,25 @@ describe('PowerShell variables, WSL paths, hardlinks, and the spellings only a t
   it.runIf(WINDOWS)("a WSL share's mount is also judged as the drive it names (the share itself may be another volume)", () => {
     const paths = candidatesOf('\\\\wsl$\\Ubuntu\\mnt\\D\\Users\\x', 'C:\\project')?.map((c) => c.path)
     expect(paths).toContain('d:\\Users\\x')
+  })
+
+  it('a WSL share, a distro and its mnt are above every drive the distro mounts', () => {
+    for (const p of ['\\\\wsl$', '\\\\wsl$\\', '\\\\wsl$\\Ubuntu', '\\\\wsl.localhost\\Ubuntu\\', '\\\\WSL$\\Ubuntu\\mnt', '//wsl.localhost/Ubuntu/mnt/']) expect(wslAboveDrives(p), p).toBe(true)
+    for (const p of ['\\\\wsl$\\Ubuntu\\home', '\\\\wsl$\\Ubuntu\\mnt\\c', '\\\\other\\Ubuntu', 'C:\\Ubuntu']) expect(wslAboveDrives(p), p).toBe(false)
+  })
+
+  it.runIf(WINDOWS)('a path to a WSL distro or its mnt is marked as above the drives (a search from there reaches them)', () => {
+    for (const at of ['\\\\wsl$\\NoSuchDistro', '\\\\wsl.localhost\\NoSuchDistro\\mnt']) {
+      expect(candidatesOf(at, 'C:\\project')?.some((c) => c.aboveDrives), at).toBe(true)
+    }
+    expect(candidatesOf('\\\\wsl$\\NoSuchDistro\\home', 'C:\\project')?.some((c) => c.aboveDrives)).toBe(false)
+  })
+
+  it.runIf(WINDOWS)("a session folder on a WSL share reaches the drives by a relative or a rooted path too", () => {
+    const cwd = '\\\\wsl.localhost\\NoSuchDistro\\home\\u\\p'
+    for (const p of ['..\\..\\..\\mnt\\d\\Users\\x', '\\mnt\\d\\Users\\x']) {
+      expect(candidatesOf(p, cwd)?.map((c) => c.path), p).toContain('d:\\Users\\x')
+    }
   })
 
   it('declines a file in the plan folder that has a second name (a hardlink to the token), and lets a plain one through', async () => {
