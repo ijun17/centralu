@@ -1,6 +1,6 @@
 import { spawn as spawnChild } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { closeSync, createReadStream, createWriteStream, existsSync, fstatSync, openSync, readFileSync, readSync, watch, type FSWatcher } from 'node:fs'
+import { closeSync, createReadStream, createWriteStream, existsSync, fstatSync, openSync, readdirSync, readFileSync, readSync, watch, type FSWatcher } from 'node:fs'
 import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, stat, statfs, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
@@ -430,8 +430,8 @@ export type BrowserFolder = {
 
 /**
  * A folder only this user can read (0700) beside the install, for one Antigravity process's browser: the `BROWSER` helper,
- * which writes the one argument it is given to `url` there through a temporary name, so the host never reads half an
- * address. Every Antigravity process gets one (a sign-in, a session), so the agent never starts a browser itself on any
+ * which writes the one argument it is given to a file of its own there (`url-<run>`) through a temporary name, so the
+ * host never reads half an address. Every Antigravity process gets one (a sign-in, a session), so the agent never starts a browser itself on any
  * OS (review of #1685: on Windows it started the person's browser as its own child, inside the host's job object, and a
  * Stop, the sign-in's end or the host's exit ended it with every tab):
  * - **macOS and Linux**: a `sh` script, `BROWSER` its path (measured on macOS: the launcher runs it, and opens no browser)
@@ -445,7 +445,6 @@ export async function browserFolder(home: AgyHome, platform: Platform = HOST_PLA
   await removeStale(home.root, '.sign-in-')
   const dir = await mkdtemp(join(home.root, `.sign-in-${ownerTag()}-`))
   await chmod(dir, 0o700).catch(() => {})
-  const file = join(dir, 'url')
   let browser: string
   if (platform === 'win32') {
     const script = join(dir, 'open-url.mjs')
@@ -453,28 +452,35 @@ export async function browserFolder(home: AgyHome, platform: Platform = HOST_PLA
     browser = windowsBrowserCommand(node, script)
   } else {
     const helper = join(dir, 'open-url')
-    await writeFile(helper, `#!/bin/sh\nprintf '%s\\n' "$1" > ${shQuote(`${file}.part`)} && mv ${shQuote(`${file}.part`)} ${shQuote(file)}\n`, { mode: 0o700 })
+    // `url-<pid>`: each run its own name, so a rename never lands on a file the host is reading; exit 0 whatever happens
+    const part = `${shQuote(join(dir, 'part-'))}"$$"`
+    await writeFile(helper, `#!/bin/sh\nprintf '%s\\n' "$1" > ${part} && mv ${part} ${shQuote(join(dir, 'url-'))}"$$"\nexit 0\n`, { mode: 0o700 })
     await chmod(helper, 0o700)
     browser = usableBrowser(helper, ':') ? helper : ''
   }
   let watcher: FSWatcher | null = null
-  let reading = false
+  const taken = new Set<string>()
   return {
     browser,
     watch(found) {
       const look = () => {
-        if (reading || !existsSync(file)) return
-        reading = true
-        void readFile(file, 'utf8')
-          .then(async (text) => {
-            await rm(file, { force: true }).catch(() => {})
-            found(text.trim())
-          }, () => {})
-          .finally(() => {
-            reading = false
-            // A second address written while the first was read
-            if (existsSync(file)) look()
-          })
+        let names: string[]
+        try {
+          names = readdirSync(dir).filter((n) => n.startsWith('url-') && !taken.has(n))
+        } catch {
+          return
+        }
+        for (const name of names) {
+          taken.add(name)
+          const path = join(dir, name)
+          void readFile(path, 'utf8').then(
+            async (text) => {
+              await rm(path, { force: true }).catch(() => {})
+              found(text.trim())
+            },
+            () => {},
+          )
+        }
       }
       try {
         watcher = watch(dir, () => look())
@@ -491,11 +497,19 @@ export async function browserFolder(home: AgyHome, platform: Platform = HOST_PLA
   }
 }
 
-/** The Windows helper: the address to `url` beside it, through a temporary name, and exit 0 */
+/**
+ * The Windows helper: the address to `url-<pid>-<time>` beside it, through a temporary name (each run its own, so the
+ * rename never meets a file the host is reading), and exit 0 whatever happens: a non-zero exit would send the agent's
+ * launcher on to the default browser, inside the job
+ */
 const WINDOWS_HELPER = `import { renameSync, writeFileSync } from 'node:fs'
-const part = new URL('./url.part', import.meta.url)
-writeFileSync(part, \`\${process.argv[2] ?? ''}\n\`)
-renameSync(part, new URL('./url', import.meta.url))
+try {
+  const tag = \`\${process.pid}-\${Date.now()}\`
+  const part = new URL(\`./part-\${tag}\`, import.meta.url)
+  writeFileSync(part, \`\${process.argv[2] ?? ''}\n\`)
+  renameSync(part, new URL(\`./url-\${tag}\`, import.meta.url))
+} catch {}
+process.exit(0)
 `
 
 /**

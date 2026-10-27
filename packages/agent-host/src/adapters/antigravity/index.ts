@@ -10,6 +10,7 @@ import { agyLaunch } from './launch.js'
 import { AGY_RELEASE, type AgyArchive } from './release.js'
 import { AgySetup, type AgySetupDeps } from './setup.js'
 import { agyCentraluTool, agySessionMeta, agyStderrLine, isAgyQuestion, isAgySubagentCall, readAgyCall } from './shape.js'
+import { signInUrl } from './sign-in.js'
 import { AGY_SURFACE } from './surface.js'
 
 /**
@@ -74,13 +75,17 @@ export function antigravityProfile(deps: AgyProfileDeps = {}): AgyProfile {
     archive,
     async launch() {
       if (!archive || !setup.installed()) return null
-      // Its own BROWSER helper (`browserFolder`): the agent never opens a browser itself, and the helper running in a
-      // session's process is how a stored sign-in that stopped working is told (`SignInWanted`). The address is not opened:
-      // the person asked for a conversation, and the line offers Sign in
+      // Its own BROWSER helper (`browserFolder`): the agent never opens a browser itself, and the helper handed a Google
+      // sign-in address in a session's process is how a stored sign-in that stopped working is told (`SignInWanted`). No
+      // address is opened from a session: the person asked for a conversation, and the line offers Sign in. Another
+      // address (none is known: its browser subagent drives its own Chrome) is dropped, never taken for a sign-in
       const folder = await browserFolder(home, deps.platform)
       return {
         ...agyLaunch(home, archive, folder.browser),
-        signInWanted: { watch: (wanted: () => void) => folder.watch(() => wanted()), remove: () => folder.remove() },
+        signInWanted: {
+          watch: (wanted: () => void) => folder.watch((text) => (signInUrl(text) ? wanted() : undefined)),
+          remove: () => folder.remove(),
+        },
       }
     },
     async installedVersion() {

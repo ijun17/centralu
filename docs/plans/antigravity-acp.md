@@ -260,6 +260,8 @@ never reaches the agent (review of #1685, follow-up 8).
   the host runs `open` / `xdg-open` as before.
 - **Every OS**: the agent's stderr line `Open the following link to authenticate the ACP server: <url>` is a second
   source of the same address, read by the sign-in and left out of the log.
+- The helper writes each address to a file of its own (`url-<run>`, through `part-<run>`) and exits 0 whatever
+  happens: a non-zero exit would send the launcher on to its own default browser, inside the job.
 - Where no helper can be written (a path holding the separator `BROWSER` is split at, `;` on Windows and `:` elsewhere,
   or `%s`), `BROWSER` is empty: the person's own still does not reach the agent, its launcher opens the default browser
   itself (the old behaviour), and the host does not open a second one.
@@ -293,10 +295,15 @@ measured: a browser nobody asked for, then "No response for session/new" after 1
 There is no switch to make it answer instead: `AGY_ACP_ENABLE_OAUTH` and env-based auth selection were removed in this
 build (its own warning says so), and only an explicit logout makes `session/new` answer `auth_required` (read in the
 binary). So the signal is structural: **the session's `BROWSER` helper running is the agent asking for a sign-in**
-(`SignInWanted`, `acp/profile.ts`). The session then fails what it had asked (`session/new`, `session/load` or the
+(`SignInWanted`, `acp/profile.ts`), when what it hands over is a Google sign-in address (`signInUrl`). Another address
+is dropped, never opened and never taken for a sign-in: none is known in a session (its browser subagent drives a
+Chrome of its own over CDP, not `webbrowser`), and treating any browser open as a sign-in would end a working session
+and mark the tool signed out. The session then fails what it had asked (`session/new`, `session/load` or the
 prompt) with the `not_logged_in` error above, which notes the tool `signed_out`; it does not open the address. While
 the conversation opens, the failed open ends the process; once open, the session ends the process itself and sleeps,
-and the next message starts a new process, which asks again if the sign-in is still needed. The session start's RPC
+and the next message opens the conversation again in a new process (`session/load`), which asks again if the sign-in
+is still needed and fails the same way. Where no helper could be written (§4.3) none of this happens: the old wait
+and the agent's own browser remain, on that rare path only. The session start's RPC
 error keeps the code `not_logged_in` (it was sent as `internal`). Measured on Windows with the real agent: a
 refresh-refused token and a `{}` token each failed `agents.createSession` with `not_logged_in` in about 8.5 s (the
 agent's own start is most of it), the line went `signed_out`, and no agent process or browser was left.

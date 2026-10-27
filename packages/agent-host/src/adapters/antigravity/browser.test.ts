@@ -126,7 +126,8 @@ const INIT = { protocolVersion: 1, agentCapabilities: { loadSession: true }, age
  * A session on this machine's platform, so the helper is the one this OS runs; `wants` is the method in which the agent
  * starts its own browser login (it runs the helper and waits, as 1.4.3 does with a token whose refresh fails or `{}`)
  */
-function world(wants: 'session/new' | 'session/load' | 'session/prompt') {
+function world(wants: 'session/new' | 'session/load' | 'session/prompt' | readonly string[], address: string = ADDRESS) {
+  const asks: readonly string[] = typeof wants === 'string' ? [wants] : wants
   const t = temp()
   fakeInstall(t.home, HOST_TEST_ARCHIVE)
   fakeSignIn(t.home)
@@ -135,9 +136,9 @@ function world(wants: 'session/new' | 'session/load' | 'session/prompt') {
   const specs: AgentSpawnSpec[] = []
   const opened: string[] = []
   const script: PeerScript = async (method) => {
-    if (method === wants) {
-      await runBrowser(String(specs.at(-1)!.env?.BROWSER), ADDRESS)
-      return { hold: true }
+    if (asks.includes(method)) {
+      await runBrowser(String(specs.at(-1)!.env?.BROWSER), address)
+      return method === 'session/prompt' && address !== ADDRESS ? { result: { stopReason: 'end_turn' } } : { hold: true }
     }
     if (method === 'initialize') return { result: INIT }
     if (method === 'session/new') return { result: { sessionId: SID } }
@@ -201,5 +202,19 @@ describe('a stored sign-in that stopped working, in a session', () => {
     expect(w.opened).toEqual([])
     await handle.dispose()
     expect(leftovers(w.home, '.sign-in-')).toEqual([])
+  })
+
+  it('an address that is no Google sign-in is no sign-in: the turn goes on, and nothing is opened', async () => {
+    const w = world('session/prompt', 'https://example.com/docs?a=1&b=2')
+    const handle = await w.adapter.createSession(sessionOpts('agy-b5'), w.emit)
+    handle.send('go')
+    await w.event((e) => e.type === 'turn_complete' || e.type === 'error')
+    // Time for a late watch to have fired
+    await new Promise((r) => setTimeout(r, 300))
+    expect(w.events.some((e) => e.type === 'turn_complete')).toBe(true)
+    expect(w.events.some(notLoggedIn)).toBe(false)
+    expect(w.adapter.setup.current().state).toBe('ready')
+    expect(w.opened).toEqual([])
+    await handle.dispose()
   })
 })
