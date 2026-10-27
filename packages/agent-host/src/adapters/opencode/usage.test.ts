@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { STATS_RECORDED as RECORDED } from './recordings/stats.js'
+import { STATS_RECORDED as RECORDED } from './recordings/stats.test-helpers.js'
 import { parseAmount, parseCount, parseStats } from './usage.js'
 
 /** One table as `opencode stats` boxes it, with the two count rows written the way a computer's language writes them */

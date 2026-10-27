@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ABOUT_RECORDED as RECORDED } from './recordings/about.js'
+import { ABOUT_RECORDED as RECORDED } from './recordings/about.test-helpers.js'
 import { parseAbout } from './usage.js'
 
 describe("Cursor's usage: the plan from `agent about --format json` (#1623)", () => {
