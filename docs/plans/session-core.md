@@ -574,6 +574,27 @@ another session. A transport that let the caller say "allowed" (a shortcut for C
 agent its own approvals, and must not be added. The environment names are tool-neutral (`CC_GATE_URL`, `CC_GATE_TOKEN`,
 `GATE_ENV`), for the next hook-gated tool.
 
+### 8.2 As built: the `agy` session (`adapters/agy/session.ts`, `adapter.ts`)
+
+`AgyAdapter` (the one registration point: `new AgyAdapter(profile, host)`) returns an `AgySession`, a `CoreSession` over
+`AgyToolWire` with `turns { midTurnInput: false, interruptEndsProcess: true, confirmsStop: true }`.
+
+- **Launch**, asked for every new process: the plugin root is written afresh (`writePluginRoot`), the gate channel is
+  opened (`GateInbound.open`, a new gate-only key per process, which revokes the last one), and `launchArgs` adds
+  `--conversation <externalId>` once `init` has said it (`CoreIo.externalId` → `noteExternalId`). The key goes into the
+  process's environment (`CC_GATE_URL`, `CC_GATE_TOKEN`) and nowhere else. The channel closes when that process exits and
+  when the session closes; the plugin root is removed at dispose.
+- **The gate's decide** is `AgyGate.answer` (the cards and `PendingCards` the other adapters use), raced with the session's
+  `GateRequests.wait`, so a Stop, an exit or the close that comes first answers `deny`.
+- **A Stop**: the core calls `interrupt()` (the wire hears that the `interrupted` result is ours), then `releaseCards()`
+  (`AgyGate.stop`: every card denied, with its `approval_resolved`), then `SessionProcess.interrupt` (`denyAll`, SIGINT).
+- **Model and effort** are flags: `updateSettings` calls `CoreSession.restartForNextInput()`, and the next input starts a
+  new process with them on the same conversation. A preset change is the gate's alone (`setPermissionPreset`).
+- **The person's deny rules** are read once at `createSession` (`readAgyDenyRules`).
+- **A conversation `agy` does not have** (`sessionNotFound`): the turn fails with `session_not_found` and the process is
+  stopped.
+- Files and the node path come from `host-files.ts` until the `Os` interface (#1650) is handed in.
+
 ## 9. Open questions
 
 1. **Claude's idle exit** (§2.5): asleep like Codex and ACP (#1397's reasoning), or does Claude have a reason to call
