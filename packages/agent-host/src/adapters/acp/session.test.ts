@@ -201,6 +201,24 @@ describe('the ACP session against a scripted agent', () => {
     expect(peer.methods().filter((m) => m === 'session/cancel')).toHaveLength(2)
   })
 
+  it("fails an input whose turn was stopped, and completes one whose turn ended", async () => {
+    const w = world()
+    const s = await w.start()
+    const peer = w.peers[0]!
+    const seen: string[] = []
+    const observer = (name: string) => ({ accepted: () => seen.push(`${name}:accepted`), complete: () => seen.push(`${name}:complete`), fail: (e: Error) => seen.push(`${name}:fail ${e.message}`) })
+    const stopped = s.sendTracked!('stop me', observer('a'))
+    await peer.next(isPrompt)
+    s.interrupt()
+    peer.release('session/prompt', { result: { stopReason: 'cancelled' } })
+    await expect(stopped).rejects.toThrow(/stopped/)
+    const done = s.sendTracked!('finish me', observer('b'))
+    await peer.next((m) => isPrompt(m) && JSON.stringify(m).includes('finish me'))
+    peer.release('session/prompt', { result: { stopReason: 'end_turn' } })
+    await done
+    expect(seen).toEqual(['a:accepted', 'a:fail The parent note was stopped before it finished', 'b:accepted', 'b:complete'])
+  })
+
   it('logs a frame it cannot parse and goes on with the turn, rather than failing the running prompt', async () => {
     const w = world()
     const s = await w.start()

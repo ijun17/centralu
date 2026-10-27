@@ -269,8 +269,15 @@ export class AcpSession implements SessionHandle {
       input.done?.reject(failure)
     } else if (result) {
       this.endTurn(result, turn)
-      input.observer?.complete()
-      input.done?.resolve()
+      if (result.stopReason === 'cancelled') {
+        // A stopped turn's input did not finish, as Claude and Codex fail it: a stopped delegation is not reported as done
+        const stopped = new Error('The parent note was stopped before it finished')
+        input.observer?.fail(stopped)
+        input.done?.reject(stopped)
+      } else {
+        input.observer?.complete()
+        input.done?.resolve()
+      }
     }
     this.next()
   }
