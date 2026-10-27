@@ -203,8 +203,8 @@ export const ChatRow = memo(function ChatRow({
      * reload brings it back unless the size cap swept it. When there is no `data`, this states the reason instead of a
      * silent blank (failures stay visible — an app-wide rule).
      */
-    if (!item.data) return <ImageNote path={item.path} note={item.note} />
-    return <ImageMessage mime={item.mime} data={item.data} path={item.path} />
+    if (!item.data) return <ImageNote path={item.path} name={item.name} note={item.note} />
+    return <ImageMessage mime={item.mime} data={item.data} path={item.path} name={item.name} />
   }
   // A manager's worktree proposal (#69) — a line pointing at the door rather than a tool card, and the value
   // (branch name) is pre-filled into the window
@@ -229,10 +229,10 @@ export const ChatRow = memo(function ChatRow({
  * is never trapped by a grid cell's overflow (the pitfall called out in #62), and closing via
  * Esc or an outside click does not have to be rebuilt.
  */
-function ImageMessage({ mime, data, path }: { mime?: string; data: string; path?: string }) {
+function ImageMessage({ mime, data, path, name }: { mime?: string; data: string; path?: string; name?: string }) {
   // Bytes the window cannot decode draw as an empty framed box (WebKit paints not even the alt text, #1464): say so instead
   const [undrawable, setUndrawable] = useState(false)
-  if (undrawable) return <ImageNote path={path} note="the window could not draw it" />
+  if (undrawable) return <ImageNote path={path} name={name} note="the window could not draw it" />
   return (
     <div className="min-w-0" data-testid="msg-image">
       <ZoomableImage
@@ -255,8 +255,9 @@ function ImageMessage({ mime, data, path }: { mime?: string; data: string; path?
  * tooltip. It fades in over 160ms (opacity only under reduced motion, `cc-fade`) as the image it replaces can have been
  * on screen a moment before the window found it undrawable.
  */
-function ImageNote({ path, note }: { path?: string; note?: string }) {
-  const name = path ? path.split(/[\\/]/).filter(Boolean).pop() : undefined
+function ImageNote({ path, name: viewed, note }: { path?: string; name?: string; note?: string }) {
+  // A stored row's `path` is the host's own copy of the file; the name it was viewed under is `name`
+  const name = viewed ?? (path ? path.split(/[\\/]/).filter(Boolean).pop() : undefined)
   const reason = note ? ` (${note})` : ''
   return (
     <div

@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -67,6 +67,32 @@ describe('imageEventFromDisk', () => {
   it('the mime comes from the bytes: a PNG saved as .jpg is still drawn', async () => {
     await writeFile(join(dir, 'really-png.jpg'), Buffer.from(PNG_B64, 'base64'))
     expect(await imageEventFromDisk('s1', join(dir, 'really-png.jpg'))).toMatchObject({ mime: 'image/png', data: PNG_B64 })
+  })
+})
+
+describe('a whole picture is never held back for what follows its end (#1464)', () => {
+  it('draws a PNG with bytes after IEND, a JPEG with a trailer, and a GIF with padding', () => {
+    const png = Buffer.from(PNG_B64, 'base64')
+    expect(sniffImage(Buffer.concat([png, Buffer.alloc(300, 7)]))).toEqual({ mime: 'image/png', complete: true })
+    const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 0xff, 0xd9]), Buffer.alloc(5000, 9)])
+    expect(sniffImage(jpeg)).toEqual({ mime: 'image/jpeg', complete: true })
+    expect(sniffImage(Buffer.concat([Buffer.from('GIF89a'), Buffer.from([0, 0, 0x3b, 0, 0, 0])]))).toEqual({ mime: 'image/gif', complete: true })
+  })
+
+  it('a text file that starts with BM is no picture, and a reason never names the path', async () => {
+    expect(sniffImage(Buffer.from('BMW is a car maker, and this is a text file about them'))).toBeNull()
+    await writeFile(join(dir, 'noext'), 'text')
+    const e = await imageEventFromDisk('s1', join(dir, 'noext'))
+    expect(e).toMatchObject({ data: '', note: 'the file is not a picture' })
+    // A dot in the folder's name is not the file's extension
+    await mkdir(join(dir, 'my.dir'), { recursive: true })
+    await writeFile(join(dir, 'my.dir', 'shot'), 'text')
+    expect(await imageEventFromDisk('s1', join(dir, 'my.dir', 'shot'))).toMatchObject({ note: 'the file is not a picture' })
+    // A folder named like a picture: the system's own message holds the whole path, the note says what it is
+    await mkdir(join(dir, 'folder.png'), { recursive: true })
+    const folder = await imageEventFromDisk('s1', join(dir, 'folder.png'))
+    expect(folder).toMatchObject({ data: '', note: expect.any(String) })
+    expect(folder.type === 'message_image' ? folder.note : '').not.toContain('folder.png')
   })
 })
 

@@ -62,7 +62,7 @@ export type ChatItem =
      * An image the agent produced (#40). Persisted as a file (under attachments/, referenced by path,
      * 500MB cap). If `data` is empty, `note` says why (failures are shown, not hidden).
      */
-    | { kind: 'image'; seq: number; mime: string; data: string; path?: string; note?: string }
+    | { kind: 'image'; seq: number; mime: string; data: string; path?: string; name?: string; note?: string }
     /**
      * live: the tail of output while running (#58, codex outputDelta). Discarded once `result` comes
      * in — the full output lives in `result`.
@@ -270,6 +270,7 @@ export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
           mime: e.mime,
           data: e.data,
           path: e.path,
+          name: e.name,
           note: e.note,
         },
       ]
@@ -662,7 +663,7 @@ function pushStored(items: ChatItem[], m: StoredMessage): void {
       if (it?.kind === 'tool') items[i] = { ...it, result: e.summary ?? '', ok: e.ok }
     } else if (m.kind === 'image') {
       // An image is persisted (#40, second pass) — the host resends the bytes by reading the file again
-      const e = m.payload as { mime?: string; data?: string; path?: string; note?: string }
+      const e = m.payload as { mime?: string; data?: string; path?: string; name?: string; note?: string }
       items.push({
         kind: 'image',
         seq: m.seq,
@@ -670,6 +671,7 @@ function pushStored(items: ChatItem[], m: StoredMessage): void {
         mime: e.mime ?? '',
         data: e.data ?? '',
         path: e.path,
+        name: e.name,
         note: e.note,
       })
     }

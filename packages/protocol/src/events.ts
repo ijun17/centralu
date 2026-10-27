@@ -409,6 +409,8 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
     data: z.string(),
     /** If the image exists on disk, its source path (Codex imageView) */
     path: z.string().optional(),
+    /** The file the agent viewed, by name: `path` of a stored row is the host's own copy of it (#1464) */
+    name: z.string().optional(),
     note: z.string().optional(),
   }),
   /**

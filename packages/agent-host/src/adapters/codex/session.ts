@@ -1,7 +1,7 @@
 import { InputReceipts, isUuid, type InputReceipt } from '../input-receipts.js'
 import type { InputObserver, InputOrigin } from '../contract.js'
 import { launchPreset } from '../edit-grant.js'
-import { endsStreamRow, type ApprovalDecision, type ApprovalScope, type PermissionPreset } from '@cc/protocol'
+import { endsStreamRow, streamRowKind, type ApprovalDecision, type ApprovalScope, type PermissionPreset } from '@cc/protocol'
 import { toolCommand } from '../../tool-launch.js'
 import { INTERRUPTED_BY_TOOL, type CreateSessionOpts, type EventSink, type SessionHandle } from '../contract.js'
 import { CodexClient } from './client.js'
@@ -125,8 +125,8 @@ export class CodexSession implements SessionHandle {
     // An app's mark only for an app attached here (#730 review): a repository's own server may be named `app-<x>`
     const sink = emit
     this.emit = (e) => {
-      // Whatever ends the open row also ends the reasoning part before it (#1464)
-      if (endsStreamRow(e)) this.reasoningParts.reset()
+      // Whatever ends the open row, or a row of another kind (an answer), also ends the reasoning part before it (#1464)
+      if (endsStreamRow(e) || streamRowKind(e) === 'text') this.reasoningParts.reset()
       sink(keepAttachedAppMarks(e, () => (opts.apps?.current() ?? []).map((a) => a.server)))
     }
     this.unmapped = new UnmappedTypes('codex', opts.sessionId, CODEX_KNOWN_NOTIFICATIONS)

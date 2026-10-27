@@ -1,5 +1,5 @@
 import { readFile, stat } from 'node:fs/promises'
-import { errorMessage, type NormalizedEvent } from '@cc/protocol'
+import type { NormalizedEvent } from '@cc/protocol'
 import { asObj } from '../json-value.js'
 
 /**
@@ -21,25 +21,23 @@ const startsWith = (buf: Buffer, bytes: number[], at = 0): boolean => bytes.ever
  * decode, not even the alt text). The mime comes from the bytes, so a `.png` that is a JPEG is still drawn.
  *
  * `complete: false` is a file cut short, told by the end each format closes with: PNG's `IEND` chunk, JPEG's end of
- * image marker (looked for in the last bytes, as a file may carry padding after it), GIF's trailer byte, and the size
- * the RIFF (WebP) and BMP headers state.
+ * image marker, GIF's trailer byte, and the size the RIFF (WebP) and BMP headers state. A picture is never held back
+ * for what follows its end: a PNG saved over a longer one, a JPEG with a trailer or a video after it (a phone's motion
+ * photo) and a GIF with padding all draw, so the end is looked for from the back, not only at the last byte.
  */
 export function sniffImage(buf: Buffer): { mime: string; complete: boolean } | null {
   const n = buf.length
   if (startsWith(buf, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) {
-    return { mime: 'image/png', complete: n >= 20 && buf.subarray(n - 8, n - 4).toString('latin1') === 'IEND' }
+    return { mime: 'image/png', complete: buf.lastIndexOf('IEND', n, 'latin1') >= 8 }
   }
-  if (startsWith(buf, [0xff, 0xd8, 0xff])) {
-    const tail = buf.subarray(Math.max(0, n - 64))
-    return { mime: 'image/jpeg', complete: tail.includes(Buffer.from([0xff, 0xd9])) }
+  if (startsWith(buf, [0xff, 0xd8, 0xff])) return { mime: 'image/jpeg', complete: buf.lastIndexOf(Buffer.from([0xff, 0xd9])) > 2 }
+  const head = buf.subarray(0, 6).toString('latin1')
+  if (head === 'GIF87a' || head === 'GIF89a') return { mime: 'image/gif', complete: buf.subarray(Math.max(6, n - 16)).includes(0x3b) }
+  if (head.startsWith('RIFF') && buf.subarray(8, 12).toString('latin1') === 'WEBP') {
+    return { mime: 'image/webp', complete: buf.readUInt32LE(4) + 8 <= n }
   }
-  if (buf.subarray(0, 6).toString('latin1') === 'GIF87a' || buf.subarray(0, 6).toString('latin1') === 'GIF89a') {
-    return { mime: 'image/gif', complete: buf[n - 1] === 0x3b }
-  }
-  if (buf.subarray(0, 4).toString('latin1') === 'RIFF' && buf.subarray(8, 12).toString('latin1') === 'WEBP') {
-    return { mime: 'image/webp', complete: n >= 12 && buf.readUInt32LE(4) + 8 <= n }
-  }
-  if (startsWith(buf, [0x42, 0x4d]) && n >= 14) return { mime: 'image/bmp', complete: buf.readUInt32LE(2) <= n }
+  // A BMP has two reserved words of zero in its 14-byte header and a DIB header of one of a few sizes after it: a text file that starts with "BM" has neither
+  if (startsWith(buf, [0x42, 0x4d]) && n >= 26 && buf.readUInt32LE(6) === 0 && [12, 40, 52, 56, 64, 108, 124].includes(buf.readUInt32LE(14))) return { mime: 'image/bmp', complete: buf.readUInt32LE(2) <= n }
   return null
 }
 
@@ -84,13 +82,14 @@ export function mcpImageEvents(sessionId: string, content: unknown): NormalizedE
   return out
 }
 
-/** Why a read failed, in words for the card: the system's message names the whole path, which the card already shows */
+/** Why a read failed, in words for the card */
 function readFailure(err: unknown): string {
   const code = asObj(err).code
   if (code === 'ENOENT') return 'the file is gone'
   if (code === 'EACCES' || code === 'EPERM') return 'no permission to read it'
   if (code === 'EISDIR') return 'it is a folder'
-  return errorMessage(err)
+  // Not the message: it names the path, which the card already shows (and the system's wording is not the person's)
+  return typeof code === 'string' ? `the system refused the read (${code})` : 'the read failed'
 }
 
 export async function imageEventFromDisk(
@@ -99,13 +98,14 @@ export async function imageEventFromDisk(
   maxBytes: number = IMAGE_MAX_BYTES,
 ): Promise<NormalizedEvent> {
   const fail = (note: string): ImageEvent => ({ ...undrawnImageEvent(sessionId, note), path })
-  const ext = path.slice(path.lastIndexOf('.') + 1).toLowerCase()
+  const file = path.split(/[\\/]/).pop() ?? path
+  const ext = file.includes('.') ? file.slice(file.lastIndexOf('.') + 1).toLowerCase() : ''
   try {
     const s = await stat(path)
     if (s.size > maxBytes) return fail(tooLarge(s.size))
     const buf = await readFile(path)
     const seen = sniffImage(buf)
-    if (!seen) return fail(IMAGE_EXTENSIONS.has(ext) ? `the file is not a valid .${ext} image` : `the .${ext} format cannot be shown`)
+    if (!seen) return fail(!ext ? 'the file is not a picture' : IMAGE_EXTENSIONS.has(ext) ? `the file is not a valid .${ext} image` : `the .${ext} format cannot be shown`)
     if (!seen.complete) return fail(`the file is cut short (${buf.length} bytes): it may still be being written`)
     return { type: 'message_image', sessionId, mime: seen.mime, data: buf.toString('base64'), path }
   } catch (err) {

@@ -388,6 +388,23 @@ describe('a streaming message is stored as a single row (#66)', () => {
     expect(store.messages.loadMessages(s.id, 50).map((r) => (r.payload as { text?: string }).text)).toEqual(['one row'])
   })
 
+  /*
+   * #1464: the Codex adapter puts a blank line before a second reasoning item's first chunk, to keep its heading off the one
+   * before. When an answer chunk closed the row in between, that chunk starts a new row, which must not start with the blank line.
+   */
+  it('a reasoning row never starts with a blank line, and a heading stays apart from the one before it', async () => {
+    const { s, h } = await openSession()
+    h.emitEvent({ type: 'reasoning_delta', sessionId: s.id, text: '**One**' })
+    h.emitEvent({ type: 'reasoning_delta', sessionId: s.id, text: '\n\n**Two**' })
+    h.emitDelta('an answer in between')
+    h.emitEvent({ type: 'reasoning_delta', sessionId: s.id, text: '\n\n**Three**' })
+    h.finishTurn()
+    await new Promise((r) => setTimeout(r, 0))
+
+    const rows = store.messages.loadMessages(s.id, 50).filter((r) => r.kind === 'reasoning').map((r) => (r.payload as { text?: string }).text)
+    expect(rows).toEqual(['**One**\n\n**Two**', '**Three**'])
+  })
+
   it('an attachment is stored as a path in the payload, and loadMessages re-reads the image bytes from the file', async () => {
     const { s } = await openSession()
     const dir = mkdtempSync(join(tmpdir(), 'cc-att-'))
@@ -422,13 +439,14 @@ describe('a streaming message is stored as a single row (#66)', () => {
     const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAFklEQVR4nGP8z8Dwn4EIwESMolGFtFEIAJ2yAhH+Iz4jAAAAAElFTkSuQmCC'
     h.emitEvent({ type: 'message_image', sessionId: s.id, mime: 'image/png', data: PNG, path: '/elsewhere/shot.png' })
     h.emitEvent({ type: 'message_image', sessionId: s.id, mime: '', data: '', path: '/elsewhere/gone.png', note: 'the file is gone' })
-    const stored = () => store.messages.loadMessages(s.id, 50).filter((r) => r.kind === 'image').map((r) => r.payload as { data?: string; path?: string; note?: string })
+    const stored = () => store.messages.loadMessages(s.id, 50).filter((r) => r.kind === 'image').map((r) => r.payload as { data?: string; path?: string; name?: string; note?: string })
 
     // Both rows are taken at once, in order; the first has no bytes in the store, and (once its copy is written) a path of its own
     await vi.waitFor(() => expect(stored()[0]?.path).not.toBe('/elsewhere/shot.png'))
     const [viewed, unread] = stored()
-    expect(viewed).toMatchObject({ data: '', path: expect.stringMatching(/attachments.*\.png$/) })
-    expect(unread).toMatchObject({ data: '', path: '/elsewhere/gone.png', note: 'the file is gone' })
+    // The row's path is the host's own copy; what was viewed stays named, for the line a reload may have to draw instead (#1464)
+    expect(viewed).toMatchObject({ data: '', name: 'shot.png', path: expect.stringMatching(/attachments.*\.png$/) })
+    expect(unread).toMatchObject({ data: '', path: '/elsewhere/gone.png', name: 'gone.png', note: 'the file is gone' })
 
     // What a reload serves: the bytes read back from the copy, and the reason as it was
     const served = (await mgr.loadMessages(s.id, 50)).filter((r) => r.kind === 'image').map((r) => r.payload as { data?: string; note?: string })
