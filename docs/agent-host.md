@@ -4106,9 +4106,13 @@ result is text meant for the model, and an image in a result is not brought back
 `scripts/probe-codex-compaction.mts`). The reader turns it into an event line (`HistoryMessage` with
 `role: 'system', event`), and the host stores that as exactly the row the live event leaves (its recorded kind,
 `marker` for a compaction, the event as its payload), so the screen and the handoff pivot cannot tell a read-back
-compaction or tool call from one watched live. Stored once: catching up skips the event lines right after our last
-message that our record already holds there (a compaction by count, a tool call or result by its id; one this host saw
-live is in both), and attaches the rest. A Claude record keeps no compaction row (`getSessionMessages` drops system
+compaction or tool call from one watched live. Stored once: catching up starts after the later of our last message,
+found by its words, and the last input Centralu wrote, known by the id it gave the line (`centraluInputId`, a fixed last
+group that Claude Code keeps as the line's `uuid`; #1626 review: a note sent through Centralu's channel leaves no row of
+its words, and anchoring on words alone attached it as the person's message). It skips each tool call or result our
+record already holds, by its id, wherever it falls after that, and a compaction our record holds right after its last
+message, by count (one this host saw live is in both), and attaches the rest. The CLI's own "[Request interrupted by
+user]" line is not read back as a message of the person's. A Claude record keeps no compaction row (`getSessionMessages` drops system
 rows), so the reader marks one where the CLI's summary stands as a user turn.
 
 ### 8.4 The identity of an imported session
