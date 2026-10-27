@@ -89,19 +89,40 @@ export function usageDonutStatesTests(): void {
       await expectState(page, 'codex', 'unknown')
       await donut(page, 'codex').hover()
       await expect(page.getByTestId('usage-donut-reason-codex')).toHaveText('not logged in')
+    })
 
-      // A read that fails answers nothing at all
+    test('a call that fails is not an answer: each donut keeps what it last knew (RV1624)', async ({ page }) => {
+      await setup(page, { projects: ['/tmp/alpha'] })
       await answer(page, { claude: WEEKLY(40), codex: UNSUPPORTED })
       await expectState(page, 'codex', 'unsupported')
+      await expectState(page, 'claude', 'known')
+      // Every ask now fails, as one does when the connection drops mid-call (a host swap)
       await page.evaluate(() => {
-        const m = (window as unknown as MockWindow).__mock
-        const ask = m.agents.usage
-        m.agents.usage = (tool: string, machine?: string) =>
-          tool === 'codex' ? Promise.reject(new Error('the tool is busy')) : ask(tool, machine)
+        const w = window as unknown as MockWindow & { __failed: number }
+        w.__failed = 0
+        w.__mock.agents.usage = () => {
+          w.__failed++
+          return Promise.reject(new Error('the tool is busy'))
+        }
+      })
+      // Every state the donuts are ever drawn in from here on, so a flash to dashed and back cannot pass unseen
+      await page.evaluate(() => {
+        const w = window as unknown as { __seen: Set<string> }
+        w.__seen = new Set()
+        const note = () =>
+          document.querySelectorAll('[data-testid^="usage-donut-"][data-state]').forEach((d) => w.__seen.add(`${d.getAttribute('data-testid')}:${d.getAttribute('data-state')}`))
+        new MutationObserver(note).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-state'] })
       })
       await reconnect(page)
-      await expectState(page, 'codex', 'unknown')
+      await expect.poll(() => page.evaluate(() => (window as unknown as { __failed: number }).__failed)).toBeGreaterThanOrEqual(2)
+      // Not a flash to dashed and back: neither state changes, and the percent stays
+      expect(await page.evaluate(() => [...(window as unknown as { __seen: Set<string> }).__seen].sort())).toEqual([
+        'usage-donut-claude:known',
+        'usage-donut-codex:unsupported',
+      ])
+      await expectState(page, 'codex', 'unsupported')
       await expectState(page, 'claude', 'known')
+      await expect(donut(page, 'claude')).toHaveAttribute('data-percent', '40')
     })
 
     test('a tool that changes between supported and unsupported while the window is open follows it, both ways', async ({ page }) => {

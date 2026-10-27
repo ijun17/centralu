@@ -187,11 +187,18 @@ export function UsageDonuts() {
           patch({ live: usable, signedOut, tools: found, order: found.filter((t) => usable.includes(t.name) || signedOut.includes(t.name)).map((t) => t.name) })
           for (const tool of usable) {
             const put = (snap: Snap) => patch((g) => ({ snap: { ...g.snap, [tool]: snap } }))
+            /*
+             * A call that failed is not an answer (#850; RV1624): the donut keeps what it last knew (known, or the tool
+             * has no limits) and only learns why the last ask failed. Over a host swap it would otherwise flash to
+             * dashed and back; over a link that stays up, stay dashed until the retry.
+             */
+            const failed = (reason: string) =>
+              patch((g) => ({ snap: { ...g.snap, [tool]: { ...(g.snap[tool] ?? { usage: null }), reason } } }))
             void platform.agents
               .usage(tool, on)
               .then((r) => put(toSnap(r)))
               .catch((e: Error) => {
-                put({ usage: null, reason: e.message })
+                failed(e.message)
                 // A reading that failed (the tool's process busy or restarting) is tried again soon, not in five minutes
                 retries.current.push(
                   setTimeout(() => {

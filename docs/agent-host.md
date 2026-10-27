@@ -3797,6 +3797,12 @@ there in the same pull request.
 `app-server` for the other). An adapter that cannot answer throws, and the manager degrades
 with the reason attached rather than showing a confident wrong number.
 
+**A tool that cannot report limits (#1616).** A tool whose adapter has no `listUsage()` at all is answered
+`supported: false, notReported: true` with a plain reason ("<tool> does not report usage limits"). The mark is positive on
+purpose: a read that failed (not logged in, a timeout) is also `supported: false`, and so is every answer of a host that
+predates the mark, so only the mark tells "never" from "not now"; without it the window draws the dashed, unknown ring. The
+window keeps the last answer through a call that fails (a host swap, a busy tool) and only learns why the ask failed.
+
 Usage is an **account** property, not a session or directory one, which is why `listUsage()`
 takes no arguments — the answer is the same whichever folder you ask from. Only subscription
 limits are in scope; metered credits are not.
