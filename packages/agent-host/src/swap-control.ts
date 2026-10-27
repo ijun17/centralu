@@ -50,17 +50,6 @@ export function bridgeAddress(
 }
 
 /**
- * Where a session's gate hook posts (`transport/gate-door.ts`): the gate route on the front door's port, as a view's
- * address is (`viewPort`), so a hook asking across a swap reaches whichever host is current. Its key does not survive the
- * swap (it is held in memory only), so the next host answers that hook 404 and the hook denies; the address outliving
- * the host only spares a hook asking across a swap a connection refused. Null before this host listens.
- */
-export function gateAddress(frontDoor: string | undefined, port: number | undefined, sessionId: string): string | null {
-  const door = viewPort(frontDoor, port)
-  return door === null ? null : `http://127.0.0.1:${door}/gate/${encodeURIComponent(sessionId)}`
-}
-
-/**
  * The port an app view's address points at (#280 step 4, views/view-host.ts). Under a keeper it is
  * the front door's, for the same reason as the bridge above: the address is handed to the UI once
  * and loaded into an iframe that outlives this host, and the door relays the HTTP bytes to

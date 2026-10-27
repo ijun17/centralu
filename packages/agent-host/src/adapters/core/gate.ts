@@ -1,66 +1,11 @@
 /**
- * The approval gate's host side, for a tool that asks through a hook process rather than on its own wire (`agy`'s
- * PreToolUse hook, antigravity-adapter.md §5; #1654 seam gap 3). The hook is a separate process the tool starts per call:
- * it reaches this host, waits for a decision and prints it. Measured on `agy` 1.4.7: a hook that prints nothing and exits 0
- * lets the tool run (every other failure denies), so the hook must always print an answer; and SIGINT is not acted on
- * while a hook waits, so a Stop answers every open request `deny` before it signals (`SessionProcess.interrupt`).
+ * The approval gate's open requests, for a tool that asks through a process of its own rather than on its wire: a Stop
+ * or a close answers every open request `deny` at once, before the process hears of it (`SessionProcess`). The hook-path
+ * transport that once fed it (a front-door route under a per-session key, for `agy -p`) is retired (#59).
  */
 
 /** What the gate prints for the tool. Never "ask": print mode cannot ask (measured) */
 export type GateAnswer = { decision: 'allow' } | { decision: 'deny'; reason: string }
-
-/** One call the hook asks about, as it reads the tool's hook input */
-export type GateRequest = {
-  /** Unique per session while open: the hook's own id for the call */
-  requestId: string
-  tool: string
-  input: unknown
-  /** The tool's step the call belongs to (`agy`: the stream's `step_index`), so the card joins the call already drawn */
-  stepIndex?: number
-}
-
-/**
- * The hook's way back to this host (#1654 comment on §8.1, session-core.md): a route on the host's front door under a
- * gate-only key of the session's own (`transport/gate-door.ts`). It is opened per session before the tool starts, its `env`
- * goes into the tool's environment (the hook inherits it, measured), it fails closed (an unreachable host is a `deny`),
- * and closing it revokes the key and denies what is still open.
- *
- * The channel **asks and never answers**: what a caller sends is a call to decide on, read by `read`; the decision is
- * `decide`'s alone (the preset, the always-allow rules or the person's card), never the caller's.
- */
-export interface GateInbound {
-  open(sessionId: string, gate: GateHandler): Promise<GateChannel>
-}
-
-/** What a session's gate does with what its hook posts */
-export type GateHandler = {
-  /**
-   * The tool's hook input as the hook posted it (a JSON object, with no decision in it: the door refuses one that carries
-   * one), read into a request; null when it is not a call this tool's gate reads, which the hook then denies
-   */
-  read(input: Readonly<Record<string, unknown>>): GateRequest | null
-  /**
-   * The decision on one request. A Stop answers it `deny` (`GateRequests.hold`); a rejection is a `deny` too. `gone` fires
-   * when the hook that asked went away before the answer (`agy` killed it past its timeout, or its connection dropped):
-   * the door has already denied the request, and the session withdraws the card it raised as any tool's cancelled card
-   * is withdrawn (released as `deny` with its `approval_resolved`, as `claude/session-cards.ts` does on its abort
-   * signal), so the person is never left to answer for a call that will not run
-   */
-  decide(request: GateRequest, gone: AbortSignal): Promise<GateAnswer>
-}
-
-/**
- * The environment names the hook reads (`adapters/agy/gate-answer.mjs`, which imports nothing and so spells them
- * itself; `gate-door.test.ts` drives that file with a channel's `env`, so the two cannot drift apart). Tool-neutral:
- * the route is the front door's, and the next hook-gated tool uses the same names
- */
-export const GATE_ENV = { url: 'CC_GATE_URL', token: 'CC_GATE_TOKEN' } as const
-
-export type GateChannel = {
-  /** What the hook needs to find this host and prove the session (`GATE_ENV`); no file holds it */
-  readonly env: Readonly<Record<string, string>>
-  close(): Promise<void>
-}
 
 /** The gate requests of one session still waiting for an answer, so a Stop or a close can deny them all at once */
 export class GateRequests {

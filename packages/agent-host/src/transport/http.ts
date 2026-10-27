@@ -22,13 +22,6 @@ import { rpcError } from '../rpc-error.js'
  * **different value** from the WebSocket token — if a view's address leaks through devtools or a
  * log, the RPC door still does not open.
  *
- * One route sits outside the secret segment, on purpose: the gate route of hook-gated tools (`gate-door.ts`,
- * `POST /gate/<sessionId>`). It is behind a secret all the same, a per-session gate key in the `Authorization` header,
- * which a page cannot send without a CORS preflight this port answers 404. A request it does not take (no key, a wrong
- * one) falls through to this handler and gets the same 404 as any other. The HTTP secret is not used for it because it
- * is derived from the token under the keeper, outlives every session and opens the app views; the gate's hook runs in
- * the agent's environment, where the agent's own commands can read what it holds.
- *
  * WebSocket upgrades never pass through this handler. `ws` receives the http server's `upgrade`
  * event separately, and that path already has its own origin check and token handshake
  * (server.ts).

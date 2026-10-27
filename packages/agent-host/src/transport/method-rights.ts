@@ -19,9 +19,6 @@ import type { RpcMethodName } from '@cc/protocol'
  *   link       host-to-host calls of a hub linked to this host, which holds this host's full token
  *   bridge     a session's own tool channel; a Codex bridge has its own credential for it, and through
  *              it a limited caller could act as an `auto` session, whose tool cards are skipped
- *   gate       a session's approval gate asking about one call (a hook-gated tool, `transport/gate-door.ts`):
- *              only the session's gate key on the front door's gate route raises it, and it asks, never
- *              answers; refused here and to every connection on the WebSocket
  *
  * `{ asks, when }` is for a method that asks only for some parameters (raising a preset, turning a switch
  * on); the function is given the parameters as sent, before they are parsed, so it reads them
@@ -40,7 +37,6 @@ export type Rights =
   | 'window'
   | 'link'
   | 'bridge'
-  | 'gate'
 
 /** What of the host's state a conditional right reads (main.ts wires it into the server) */
 export type RightsHost = {
@@ -195,8 +191,6 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   'orchestrator.configure': 'everyday',
   'orchestrator.tools': 'bridge',
   'orchestrator.tool': 'bridge',
-  // A hook-gated tool's approval gate asking about one call (transport/gate-door.ts): the session's gate key on the gate route only
-  'gate.ask': 'gate',
 
   // Git and files in a project: what the OS user does with git and a shell anyway
   'git.status': 'everyday',
@@ -382,7 +376,7 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
 }
 
 /** What a limited call of `method` with `params` comes to: run it, or which class refuses it */
-export function limitedRight(method: string, params: unknown, host: RightsHost | null = null): 'everyday' | 'asks' | 'window' | 'link' | 'bridge' | 'gate' | 'unknown' {
+export function limitedRight(method: string, params: unknown, host: RightsHost | null = null): 'everyday' | 'asks' | 'window' | 'link' | 'bridge' | 'unknown' {
   // Read as a table of any name: an own key only, so `constructor` or `__proto__` is no method
   const table: Readonly<Record<string, Rights>> = METHOD_RIGHTS
   const rights = Object.prototype.hasOwnProperty.call(table, method) ? table[method] : undefined
@@ -419,8 +413,6 @@ export function limitedRefusal(
       return { rights, message: `${method} is for a computer linked to this one, not for the limited credential` }
     case 'bridge':
       return { rights, message: `${method} is a session's own tool channel, not for the limited credential` }
-    case 'gate':
-      return { rights, message: `${method} is a session's approval gate, asked only by its hook with the session's gate key` }
     case 'unknown':
       return { rights, message: `Unknown method ${method}` }
   }

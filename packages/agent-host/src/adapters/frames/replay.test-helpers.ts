@@ -12,12 +12,7 @@ import type { AgentProcess, AgentSpawnSpec } from '../contract.js'
  * Nothing waits on a clock: a frame goes out when the adapter has sent what precedes it.
  */
 
-/**
- * One recorded line. `in`, `out` and `exit` are what `ReplayPeer` plays; a CLI recorded at its three pipes (`agy`) also holds `err` (a stderr
- * line), `gate` (a hook request and the answer), `spawn` (the arguments a process started with) and `note` (what the recorder did), which only a
- * test that reads the recording itself looks at
- */
-export type Rec = { t: number; dir: 'in' | 'out' | 'exit' | 'err' | 'gate' | 'spawn' | 'note'; msg?: Record<string, unknown>; code?: number | null; signal?: string | null; text?: string; args?: string[] }
+type Rec = { t: number; dir: 'in' | 'out' | 'exit'; msg?: Record<string, unknown>; code?: number | null; signal?: string | null }
 
 export type Recording = { header: Record<string, unknown>; frames: Rec[] }
 

@@ -403,8 +403,8 @@ the watch. That also changes ACP on macOS and Linux, from "<label> exited (code 
    before it asks for the next.
 2. **An id learned late** (`noteExternalId(id, from)`): `agy` says its id only in `init`, after the first input; every
    later launch goes on with it. A late line from a process already replaced is ignored.
-3. **The gate's inbound path** (`GateInbound`, `GateChannel`, `GateRequest`, `GateAnswer`): an interface in PR 3, then
-   built as a route on the host's front door under a gate-only key per session (§8.1, `transport/gate-door.ts`).
+3. **The gate's inbound path** (`GateInbound`, `GateChannel`, `GateRequest`): built as a front-door route under a
+   gate-only key per session (§8.1), then removed with the hook path (#59). Only `GateAnswer` and `GateRequests` remain.
 4. **A Stop denies every open gate request first** (`GateRequests.denyAll`, in `interrupt` and `stop`): SIGINT does not
    end `agy` while a gate hook waits.
 
@@ -507,7 +507,9 @@ PRs 5–9 for one tool do not wait for the others, so `agy` (§8) needs only 1, 
 | Codex gets the Stop confirmation timer | §2.4 | after 6, owner's call (§9.2) |
 | `endsWithHost` for Claude and Codex | §2.6 | done in 3 (Q3 decided it belongs there; §5.1) |
 
-## 8. Antigravity on the core
+## 8. Antigravity on the core (superseded)
+
+**Superseded (#59).** The `agy -p` adapter this section sketched on the core, with its hook gate, was built and then removed; Antigravity runs on Google's ACP agent through the ACP adapter. Read the section as a record of what the core was measured to need, not as a plan.
 
 From antigravity-adapter.md's measurements (`agy` 1.4.7, macOS, 2026-10-26), what `agy` supplies and what it takes:
 
@@ -528,54 +530,15 @@ So `agy`'s adapter is a wire (`stream.ts`, `normalize.ts`, `gate.ts`, `plugin-ro
 `known-steps.ts`) on the core, without its own queue, Stop, exit or approval order. Its pull request follows PRs 1, 3, 5, 8 and 9
 for ACP; it does not wait for Claude's or Codex's moves (PRs 2, 6, 7).
 
-### 8.1 The gate's way back to the host: a route on the front door, under a gate-only key
+### 8.1 The gate's way back to the host (superseded)
 
-The hook is a process `agy` starts per call; it must reach this host, wait for a decision and print it (a hook that
-prints nothing and exits 0 lets the tool run, measured). Two transports were weighed, and a third, narrower one chosen:
-
-| | A. Loopback listener per session, its own token | B. A route on the host's front door, the bridge credential |
-|---|---|---|
-| What is new | a listener per `agy` session (`127.0.0.1`, a random port) and a random token per session in the tool's environment | one route and a `SessionHandle` method it reaches; no new listener |
-| Who can call | anyone on the machine who has the port and the token; the token is per session and dies with it | anyone who holds the session's bridge credential |
-| What a leaked secret allows | raising that session's gate cards until it closes | the same, plus what that credential already reaches (`orchestrator.tool`, `apps.sessionCall` for that session) |
-| Rights model | outside the host's method rights: a second front door to review and keep reviewed | inside them: one front door, its rights table and its tests |
-| Across a host swap | dies with the host; an adopted `agy` is reopened, not taken over (§8), so a new process gets a new listener and token | the route survives; a request the old host opened is answered only if the hook asks again |
-| Who holds the secret today | nobody: it is new | **no tool's environment holds the bridge credential today.** Claude's Centralu tools run inside the host with no token. Codex and ACP get the bridge's environment only in the bridge child process (thread config, `session/new`'s `mcpServers`), and only for a session with the orchestrator profile or apps. Another process can read it from that child's environment at most. The credential is an HMAC of the session id keyed by the host token: it does not die with the session and survives keeper swaps |
-| What `agy`'s shell would gain | the session's gate token only | a long-lived credential for its session's orchestrator and app tools, newly in the agent's own shell, skipping what the tool asks before an MCP call |
-| Windows | a loopback port (no firewall prompt for `127.0.0.1`) | nothing new |
-
-**Decision (owner, after the security review on #1668): a route on the host's front door under a gate-only key of its own.**
-Not the bridge credential, and no new listener.
-
-- The key is random per session, held in memory, revoked when the session closes, and allows exactly one method: raise a
-  gate request for that session. It is bound to the session it was made for and is not in the everyday rights.
-- The method's parameters carry no decision field. Approvals stay `window`-only in the rights table
-  (`agents.respondApproval`, `requests.answer`), so the channel can ask and never answer.
-- It fails closed (the hook denies when the host cannot be reached), keeps the secret out of every file (the plugin root
-  holds names only) and is closed with the session, denying what is open and what asks later. A Stop denies what is open and
-  what a dying process asks during its grace.
-- Built in `transport/gate-door.ts` (`FrontDoorGates`, the `GateInbound` the adapters open), as below.
-
-**As built:**
-
-| | What it is | Why |
-|---|---|---|
-| Where | `POST /gate/<sessionId>` on the host's front door (the keeper's port under a keeper, `swap-control.ts` `gateAddress`), outside the HTTP door's secret segment; no new listener | one front door, one rights table |
-| The key | `ccg1:` and 32 random bytes per session, in the host's memory only, sent as `Authorization: Bearer`; revoked when the session's channel closes, and a host that starts holds none | not the bridge credential: that is an HMAC of the host's token, outlives the session and every swap, and opens the session's orchestrator and app tools, which the agent's own shell would then call around what the tool asks before an MCP call. Not the HTTP door's secret either, for the same reason (it opens the app views) |
-| What it allows | one method, `gate.ask`, for the session it was made for: its rights class is `gate` (`method-rights.ts`), which the limited credential, a bridge and every WebSocket connection are refused, the token's included; `gateRefusal` reads the same table and the method's schema | one definition of who may call what |
-| What a request carries | the tool's hook input, a JSON object; one with a top-level `decision`, `permissionDecision` or `answer` is refused (400). The decision is the session's `GateHandler.decide` alone; the person's answers stay `window` | the channel asks and never answers |
-| The answer | `200` and its headers at once, a space every 30 s while the card is open, then one `{decision}` or `{decision: 'deny', reason}`. A reason comes from the session's own sentences, never from a caller; as a last check a reason is dropped whole (the door's own sentence goes instead) when any 12 letters and digits of the key, the host's token, the limited credential or the HTTP secret show in it, in any case, with or without a prefix, split by spaces or punctuation, or anything shaped like a `cc?1:` credential (`scrub`). A failure after the headers went out cuts the connection, so the hook denies at once | Node's `fetch` in the hook gives up after 300 s without a byte (antigravity-adapter.md §5.1); #1666's review, finding 4 |
-| A refusal | a wrong key, another session's key, a revoked one and no route at all get the front door's same 404; a body that is no request 400; a body over 1 MiB 413, read to its end and answered so the hook says the call was too large to check (the largest recorded hook input is 685 B; the hook cuts a file's content past 64 KiB, and nothing a decision reads, to its head and a marker with the bytes cut and the whole one's SHA-256, so a write of a file of any size is still asked; a command, path or URL is sent whole, and a call cut anywhere else is denied undecided); past 32 requests of one session, those whose body is still being read included, 429 before the body is read. The hook denies on every one | nothing tells a prober which it was |
-| Stop, close and a hook gone | a hook that goes before its answer (`agy` kills one past its timeout, a dropped connection) has its request denied at once and its slot freed, and `decide`'s `gone` signal tells the session to withdraw its card as a cancelled card is (`approval_resolved` deny), so no dead card waits for the person; a request whose session closed while its body was read raises no card (404). A Stop answers every open request `deny` first, and what a dying process asks during its grace (`SessionProcess.stop`/`interrupt`, `GateRequests.hold`); the channel's close revokes the key and denies what still waits; the host's own close (`HostServer.close`) denies every open request before its connections are cut | `agy` does not act on SIGINT while a hook waits |
-| Across a host swap | the next host has no key: the hook's old key gets 404 and denies; an adopted `agy` is reopened (§8), so its new process gets a new key | nothing long-lived in the tool's environment |
-
-The key is in the tool's environment, so the agent's own shell commands hold it too (and another process of the same
-user can read it from the process's environment). That is safe only because the channel **asks and never answers**: a
-command holding the key can raise a card (noise the person sees and can deny), or ask again with an open request's id,
-which only ever denies the first wait (`GateRequests.wait`); it cannot allow a call, call another method, or reach
-another session. A transport that let the caller say "allowed" (a shortcut for Centralu's own tools, say) would hand the
-agent its own approvals, and must not be added. The environment names are tool-neutral (`CC_GATE_URL`, `CC_GATE_TOKEN`,
-`GATE_ENV`), for the next hook-gated tool.
+**Superseded (#59).** This section designed how `agy -p`'s `PreToolUse` hook process reached the host: a route on the
+front door (`POST /gate/<sessionId>`) under a per-session gate-only key (`ccg1:`), one method `gate.ask` in its own
+rights class `gate`, tool-neutral environment names `CC_GATE_URL` and `CC_GATE_TOKEN`. It was built (#1675) and then
+retired with the whole hook path, because Antigravity moves to Google's official ACP agent on the existing ACP adapter
+(#59). The route, the key, the rights class, the method and the hook are gone from the host; the history has the
+design and its security review. What stays of it: a tool that asks through a process of its own, rather than on its
+wire, may still need a Stop to deny every open request first (`GateRequests`).
 
 ## 9. Open questions
 
