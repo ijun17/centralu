@@ -1,6 +1,7 @@
-import type { NormalizedEvent, TokenUsage, ToolSummary } from '@cc/protocol'
+import type { NormalizedEvent, RequestInput, TokenUsage, ToolSummary } from '@cc/protocol'
 import { asObj } from '../../json-value.js'
 import { planUpdate } from '../plan.js'
+import { tokenCount } from '../token-usage.js'
 import { toolResultEvent } from '../tool-result.js'
 import { firstLine } from '../tool-titles.js'
 import { blockText, ToolCallFields, type PromptResult, type SessionUpdate } from './wire.js'
@@ -216,15 +217,33 @@ export class AcpNormalizer {
   }
 }
 
-/** The prompt answer's token counts in our terms, or null when it carries none (Cursor, a `/compact`) */
+/** The prompt answer's token counts in our terms (this turn's alone), or null when it carries none (Cursor, a `/compact`) */
 export function tokenUsage(result: PromptResult): TokenUsage | null {
   const u = result.usage
   if (!u || (u.inputTokens === undefined && u.outputTokens === undefined)) return null
   return {
-    inputTokens: u.inputTokens ?? 0,
-    outputTokens: (u.outputTokens ?? 0) + (u.thoughtTokens ?? 0),
-    cacheReadTokens: u.cachedReadTokens ?? 0,
-    cacheCreationTokens: u.cachedWriteTokens ?? 0,
+    inputTokens: tokenCount(u.inputTokens),
+    outputTokens: tokenCount(u.outputTokens) + tokenCount(u.thoughtTokens),
+    cacheReadTokens: tokenCount(u.cachedReadTokens),
+    cacheCreationTokens: tokenCount(u.cachedWriteTokens),
+  }
+}
+
+/**
+ * What the prompt cache accounting reads of a turn: its input, split as the agent reports it (uncached input apart from
+ * cache reads, measured). A turn can hold several model requests and ACP reports only their sum, so this is the turn as
+ * one reading. A write figure is given only when the agent reports one. Null when the turn read no input.
+ */
+export function requestInput(result: PromptResult): RequestInput | null {
+  const u = result.usage
+  const inputTokens = tokenCount(u?.inputTokens)
+  const cacheReadTokens = tokenCount(u?.cachedReadTokens)
+  if (!u || inputTokens + cacheReadTokens <= 0) return null
+  return {
+    inputTokens,
+    cacheReadTokens,
+    ...(u.cachedWriteTokens !== undefined ? { cacheCreationTokens: tokenCount(u.cachedWriteTokens) } : {}),
+    ...(u.outputTokens !== undefined ? { outputTokens: tokenCount(u.outputTokens) + tokenCount(u.thoughtTokens) } : {}),
   }
 }
 
