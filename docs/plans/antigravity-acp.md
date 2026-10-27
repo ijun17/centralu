@@ -27,10 +27,11 @@ frames this pull request replays are committed, scrubbed, as `adapters/antigravi
 
 | Finding (spike §0) | What the adapter does | Where |
 |---|---|---|
-| `GEMINI_HOME` relocates all of the agent's state; without it the agent shares `~/.gemini` and loads its global MCP servers, hooks and skills (§3) | Every process sets `GEMINI_HOME` to Centralu's folder | `launch.ts` `agyEnv` |
+| `GEMINI_HOME` relocates the server's state; without it the agent shares `~/.gemini` and loads its global MCP servers, hooks and skills (§3) | Every process sets `GEMINI_HOME` to Centralu's folder | `launch.ts` `agyEnv` |
+| Not all of it: the harness writes `webm_encoder` under `$HOME/.gemini/antigravity/bin` at the first prompt (deep review, measured) | Nothing yet: only `HOME` moves it, an open owner decision | §4.1 |
 | Sign-in is an ACP call that blocks up to 300 s on a loopback redirect (§4) | A dedicated process, `authenticate` with a 330 s bound | `sign-in.ts` |
 | Commands run in their own process group; a group SIGTERM orphans a running command (§9) | The tree is noted while an `execute` call runs, so its groups are ended with the agent | ACP core `watchCommands` (`kind: execute` reads as `Bash`) |
-| The agent reads its own token without asking (§6) | Option (b): its file viewers off, reads through Centralu, which refuses the agent's folder | §4.2 |
+| The agent reads its own token without asking (§6) | Option (b): its file viewers and its subagents off, reads through Centralu, which refuses the agent's folder | §4.2 |
 | The shell's input is `CommandLine`/`Cwd`, then `command_line`/`working_dir` (§5) | A per-profile reading of `rawInput`/`rawOutput` | `shape.ts` `readAgyCall` |
 | A permitted edit runs under another id; the asked one ends `failed` though the edit ran (§5) | The run is folded into the asked call | ACP core `foldEdit`, `editRunsAsNewCall` |
 | Questions come as `session/request_permission`, one option per answer; the core would answer them with the first `allow_once` (binary) | Asked as Centralu's question card, under every preset | ACP core `ask`, `isAgyQuestion` |
@@ -81,15 +82,21 @@ that will run the agent, and `asks` for the limited credential (it brings in a p
 1. **Room first.** The folder's free space is read (`statfs`); under 700 MB (110 MB zipped and 405 MB unpacked on
    macOS, side by side until the archive goes) it ends `disk_space` before a byte arrives.
 2. **Download** into a fresh `.install-<random>` folder beside the install, hashed as it arrives; progress at most every
-   1 MB. A broken or short download ends `network`; ENOSPC midway ends `disk_space`.
+   1 MB. A broken or short download ends `network`; ENOSPC midway ends `disk_space`. The archive is asked for as stored
+   (`accept-encoding: identity`): `fetch` asks for gzip by itself, and `dl.google.com` then answers gzipped with a
+   `content-length` of the gzipped size, which the decoded bytes never matched, so every install ended `network` (deep
+   review, measured). A length is compared only when the answer names no encoding; the sha256 decides either way.
 3. **Check** the sha256 against the pinned one; a mismatch ends `checksum` and nothing of it is unpacked.
 4. **Unpack** exactly the files the release names, as plain files with plain names (no folder, link or path), each to the
-   size it declares (inflated no further: a zip bomb stops there), marked runnable. Anything else ends `unpack`.
+   size it declares (inflated no further: a zip bomb stops there), marked runnable. Anything else ends `unpack`. Streamed
+   from the file entry by entry: only the zip's directory is held in memory, not the 110 MB archive or a 280 MB entry
+   (reading it whole raised the host's memory by about 400 MB in the review).
 5. **Put in place** with one rename of the unpacked folder to `<version>/`, its marker (`install.json`, naming the
    archive's sha256) written last inside it. The launcher reads the folder only when the marker names the pinned archive
    and every file is there, so a folder is whole or absent.
 6. **Tidy**: the temporary folder always; older version folders best effort (a running session may hold them on
-   Windows). A stale `.install-*` an earlier host left is removed at the next start.
+   Windows). A stale `.install-*` or `.sign-in-*` an earlier host left (one killed mid-install) is removed when the next
+   host starts; an install or sign-in waits for that.
 
 `agents.cancelInstallTool` aborts it: the download stops and nothing is left. A second `installTool` while one runs
 joins it.
@@ -98,7 +105,7 @@ joins it.
 
 Under Centralu's data folder (`dataRoot()`, so `CC_DATA_DIR` in tests), `tools/antigravity/`: `<version>/` (the server
 and `localharness_external` side by side, as they must be, spike §1), `gemini-home/` (not versioned), and the temporary
-folders. The person's `~/.gemini` is never read or written.
+folders. The server never reads or writes the person's `~/.gemini`; the harness writes one file there (§4.1).
 
 ## 4. Isolation and sign-in
 
@@ -107,8 +114,21 @@ folders. The person's `~/.gemini` is never read or written.
 Every process (each session's and the sign-in's) starts with `GEMINI_HOME=<data>/tools/antigravity/gemini-home`. It is
 not under the version folder: a session created under one `GEMINI_HOME` cannot be loaded under another (`-32002 "Session
 not found in the current GEMINI_HOME"`, spike §3), so a Centralu update that moves the agent to a new version still
-opens every conversation. `HOME` is left as it is: every path the agent used followed `GEMINI_HOME` (spike §3), and a
-changed `HOME` would change what the person's own commands see (git config, ssh).
+opens every conversation. `HOME` is left as it is, since a changed `HOME` would change what the agent's commands see (git
+config, ssh, npm).
+
+**Not every path follows `GEMINI_HOME`. Open, the owner's decision.** The spike's claim that every path did held for the
+server, not the harness (`localharness_external`): it writes a 12.7 MB `webm_encoder` to `$HOME/.gemini/antigravity/bin/`
+at the first prompt of a process (not at `session/new`; measured with a temporary `HOME`, and in the review on the
+person's real folder). The harness takes the folder from the home directory alone (binary: its browser subagent's
+encoder path joins the home directory and `.gemini`, with no variable read); `ANTIGRAVITY_GEMINI_DIR` set to
+`GEMINI_HOME` changes nothing, and switching the subagents off (below) does not either. Other things do follow
+`GEMINI_HOME`: an MCP config under `GEMINI_HOME/config` is loaded, one under `$HOME/.gemini/config` is not, and the
+harness's children (commands, MCP servers) inherit the agent's environment, `HOME` included. So only a different `HOME`
+for the agent's processes moves the file. The choices: (A) `HOME` set to a folder of Centralu's for the agent, which
+moves the person's git, ssh and npm settings out of the agent's commands' reach; (B) accept the one file under
+`~/.gemini/antigravity/bin` and say so; (C) hold Antigravity until Google honours `GEMINI_HOME` there (an upstream
+report).
 
 ### 4.2 Where the token lives: the file, and the agent kept from reading it
 
@@ -119,18 +139,27 @@ refused, (c) never `yolo`. Decided: **(b), with (c), and the file backend forced
   measured, and such a dialog would ask in Centralu's name. On Windows and Linux the backend's behaviour is unknown. The
   file keeps one behaviour on every OS, inside Centralu's folder (mode 0600, spike §3).
 - (b): the client advertises `fs.readTextFile` (not `writeTextFile`, not `terminal`). Every session's `session/new`,
-  `session/load` and `session/resume` carry `_meta.antigravity.disabledTools` with the harness's content readers:
-  `view_file`, `view_file_outline`, `view_code_item`, `grep_search` (names read in the harness binary; `list_dir` and
-  `find_by_name` say names only and stay). Centralu answers `fs/read_text_file` inside the session's folder only, by real
+  `session/load` and `session/resume` carry `_meta.antigravity.disabledTools`, in the server's canonical names
+  (`BuiltinTools`; a name it does not know is logged "Unknown tool name in disabledTools" and skipped): `view_file` and
+  `search_directory` (the content readers: the search prints matching lines) and `invoke_subagent` and `run_workflow`
+  (the subagents). The first list here named `view_file_outline`, `view_code_item` and `grep_search`, which are the
+  harness's internal names: the server dropped all three, so only `view_file` was off (measured in the review's logs).
+  `list_directory` and `find_file` say names only and stay. **Subagents** kept the built-in `view_file`, which
+  `disabledTools` does not reach: in the review one allowed "Run invoke_subagent?" card let a subagent read a canary file
+  in `GEMINI_HOME/antigravity-acp/` with no Centralu read and no card. With `invoke_subagent` off the server turns its
+  subagents off (`subagents_enabled`, binary), and the tool declarations lose `invoke_subagent`, `define_subagent`,
+  `run_workflow` and `send_message` (measured). A permission request titled `Run invoke_subagent?`, `Run
+  start_subagent?`, `Run define_subagent?` or `Run run_workflow?` arriving anyway is refused under every preset and rule,
+  Auto and an "Always" rule included (`AcpToolShape.neverAllowed`). Centralu answers `fs/read_text_file` inside the session's folder only, by real
   path (a link out is refused like its target), and never under `<data>/tools/antigravity/` (its token, settings and
   binaries), even when the project folder holds it. Spike §7 measured that reads inside the folder go through
   `fs/read_text_file` once it is advertised.
 - (c): the agent stays in `default`; `session/set_mode` is never sent (§5.1).
 
 What still reaches the token: a shell command (`cat`), which asks in `default` mode, so under Normal, Safe and Edits the
-person sees it; under Auto it runs, as any command does for Claude or Codex under Auto. **(live)** Whether
-`disabledTools` removes those tools, whether the agent then reads through `fs/read_text_file` (also outside the folder),
-and whether any remaining tool reads `GEMINI_HOME` without asking.
+person sees it; under Auto it runs, as any command does for Claude or Codex under Auto (said in
+[security-boundaries.md](../security-boundaries.md)). Measured in the review: the tool list loses the viewers, reads come
+as `fs/read_text_file`, and every path into the agent's folder is refused there.
 
 ### 4.3 The sign-in
 
@@ -153,7 +182,12 @@ The address reaches the host and never `host.log`:
 `agents.cancelSignIn` ends the process, and with it the one-shot listener (ACP cannot cancel `authenticate`). Endings:
 success reads `_meta.antigravity.tier` (`{name, upgradeUri}`: the plan name, offered as `ToolSetup.plan`) and the line is
 ready; the agent's "Timed out…" or our bound is `timed_out`; `-32000` with `data.reason = "onboarding_failed"` is
-`ineligible` (the token is cleared by the agent, binary); a cancel is `cancelled`; anything else `failed`. Success
+`ineligible` (the token is cleared by the agent, binary); a cancel is `cancelled`; anything else `failed`. The agent
+answers a timeout with the same code and reason ("Onboarding failed: Timed out waiting for the authentication flow to
+complete.", measured at 300 s), so the timeout's words are read first; the review found a timeout reported as
+`ineligible`. An ineligible answer names the account's verification page ("Verification URL: …", measured): it is carried
+as `failure.verifyUri` (only `https` on a Google host) for the screens' pull request to offer, never in `message` or the
+log, and this pull request adds no wording for it. The agent's words in a `failed` message lose any address or email. Success
 without `auth.type` on disk is said as `failed`, not taken for ready. The sign-in's stderr is filtered like a session's
 (§4.4).
 
@@ -229,7 +263,19 @@ shell call. **(live)** That a Stop under Centralu ends a `sleep` the agent start
 - A read the harness refuses (outside the folder) ends `completed`; the agent says the refusal in its text (spike §5).
 - Context: `usage_update {used, size: 1048576}`, exact, no cost; the prompt result's `usage` gives the turn's tokens.
 - One prompt at a time: a second `session/prompt` mid-turn breaks the connection (spike §8); the core never overlaps.
-- Resume: `session/load` (replays, dropped by the core); `session/resume` is not used. Replayed.
+- Resume: `session/load` (replays, dropped by the core); `session/resume` is not used. Replayed. The commands the agent
+  advertises during the replay are kept (they are the process's, not the conversation's).
+- **No compaction.** The agent advertises `plan`, `logout` and `usage`, no `compact`; a bare `/compact` would only be a
+  prompt to its model. So Centralu never compacts an Antigravity session at a break and `compact_self` answers that it
+  cannot (`AcpSession.compactCommand` is null, [acp-adapter.md](acp-adapter.md) §5.6). What the agent does near the end
+  of its window (1,048,576 tokens) is its own, not measured.
+- **An exhausted quota is plain text.** The turn ends `end_turn` with the agent's message "Usage Limit Reached … Your
+  limit will reset in N days" and no other frame, so no `limit_reached` is said. Read in the server: on the harness's
+  quota error (`429 RESOURCE_EXHAUSTED`, reason `QUOTA_EXHAUSTED`) it writes that text as an `agent_message_chunk` and
+  ends the turn `end_turn`, by design ("This surface does not upsell"). Its only structured path is the harness's own
+  `QUOTA_EXHAUSTED` stop reason, mapped to ACP `refusal`, which the 1.4.3 run did not take and which ACP also uses for a
+  model's refusal; the core already ends a `refusal` turn as failed. Text is not matched; a follow-up if Google adds a
+  frame.
 
 ## 6. Capabilities
 
@@ -255,7 +301,7 @@ All additive; a window that predates them reads `installed`/`loggedIn` as before
 
 - `ToolSetup` on `ToolStatus.setup` for every tool: `state` (`not_installed`, `installing`, `signed_out`,
   `signing_in`, `ready`, `unknown`), `install` (`centralu` | `terminal`), `signIn` (`centralu` | `terminal` | `none`),
-  `progress`, `failure {reason, message}`, `plan`. Tools with no setup of their own get `setupOfDetection(installed,
+  `progress`, `failure {reason, message, verifyUri?}`, `plan`. Tools with no setup of their own get `setupOfDetection(installed,
   loggedIn)`; OpenCode says `signIn: none`.
 - `agents.installTool`, `agents.cancelInstallTool` (`machine` routed; `asks` / `everyday`), `agents.signIn`,
   `agents.cancelSignIn` (hub only; `asks` / `everyday`), each answering the `ToolSetup` as it stands. A tool with no setup
@@ -283,6 +329,24 @@ or ran the agent.
 6. Windows (this machine or another): the agent opens the browser itself with `BROWSER` unset; the sha256 and install of
    the x64 archive end to end.
 
+Measured after the deep review's fixes (macOS arm64, agent 1.4.3, a temporary data folder and a temporary `HOME`):
+
+- 1: `agents.installTool` took about 30 s; progress counted up to the archive's stored size (114,147,623 bytes); the
+  marker names the pinned sha256; no `.install-*` left; no quarantine attribute (provenance only).
+- `HOME`: nothing under it at `session/new`; after the first prompt `.gemini/antigravity/bin/webm_encoder` (12.7 MB)
+  was there (§4.1, open).
+- 2: asked, under Auto, to read a canary file in `GEMINI_HOME/antigravity-acp/` through a subagent, the agent said it
+  has no subagent tool and made no call. `read_url_content` with a `file://` address to that file failed in the
+  harness ("unsupported protocol scheme").
+- 4: a Stop during `sleep 97` (its own process group, a child of the harness) ended it within a second.
+- Edits: two edits of one file, each allowed, each card ended as its edit did, with no stray failed call (§5.3).
+- Centralu's tools: `compact_self` was called through the bridge without a card and answered that the tool has no
+  compact command. Before calling it the agent asked to `cat` the tool's schema file, which the harness keeps under
+  `GEMINI_HOME/antigravity-acp/brain/<conversation>/mcp/`: under Normal that is a command card; under Auto it runs.
+- Under Normal a shell command asked (kind `command`), as in the spike.
+- 5: no question came. `/plan` wrote its plan to `GEMINI_HOME/antigravity-acp/brain/<conversation>/plan.md` (an edit
+  card under Normal) and ended the turn asking the person to "click Proceed", with no `interaction_*` request.
+
 ## 10. Tests
 
 Recordings (scrubbed by `scripts/frames-scrub.mts`'s `scrub()` after the spike's own folders were named; outgoing
@@ -307,6 +371,12 @@ one by one on Windows):
 | Sign-in: process, environment, helper, address opened once (Google only), cancel, endings | `sign-in.test.ts` |
 | The setup as a state machine, against a model, seeded random runs | `setup.test.ts` |
 | Every tool's setup in `agents.detect`; the actions passed or refused | `rpc.test.ts` |
+| Deep review: the archive asked for as stored, a gzipped answer's length not compared | `agent-files.test.ts` the real download (a local server that answers gzip) |
+| Deep review: the unpack streamed, memory bounded | `agent-files.test.ts` |
+| Deep review: an earlier host's `.install-*` removed at the start | `setup.test.ts` |
+| Deep review: a sign-in timeout is `timed_out`, an ineligible answer carries its page, no address in the message | `sign-in.test.ts` (the agent's real frames) |
+| Deep review: the readers and subagents off by their canonical names; a subagent's request refused under every preset | `shape.test.ts` |
+| Deep review: no compaction for an agent that advertises none; `compact_self` says so; the commands of a load's replay kept | `acp/session.test.ts`, `sessions/self-compaction.test.ts` |
 
 ## 11. Open questions and follow-ups
 
@@ -317,3 +387,6 @@ one by one on Windows):
 4. The other sign-in methods (`gemini-api-key`, `agent-platform`, `oauth-business`) take keys or project settings, not a
    browser: a screen of their own, later.
 5. Sign-out (`auth.logout`), once there is a place for it.
+6. **The harness's write under `~/.gemini` (§4.1): the owner's decision** between a separate `HOME`, accepting the file,
+   or holding the tool until Google honours `GEMINI_HOME`.
+7. An exhausted quota as a `limit_reached` (§5.6), once the agent says it in a frame.

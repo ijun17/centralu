@@ -146,6 +146,10 @@ with `danger-full-access` (no sandbox) and `never` approval**, including a child
 matches Claude's `auto` bypass permissions. Commands have the person's OS access, including network and
 files outside the project. `safe` uses workspace-write with `untrusted` approval. `normal` follows the
 person's configured approval policy and sandbox mode, including a personal full-access mode.
+**Under `auto`, Antigravity's shell commands can read its account token** (the Google sign-in Centralu keeps in
+`<data>/tools/antigravity/gemini-home/`): its file viewers are off and Centralu refuses reads of that folder, but a command runs
+unasked under `auto` as it does for every tool, so it exposes that account, not only the project
+([plans/antigravity-acp.md](plans/antigravity-acp.md) §4.2).
 
 In the Codex adapter, every linked-worktree session still adds its repository's canonical git common
 directory to workspace-write's writable roots on start and resume (#585), retaining existing extra roots.
