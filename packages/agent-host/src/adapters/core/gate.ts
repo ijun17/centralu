@@ -20,17 +20,38 @@ export type GateRequest = {
 }
 
 /**
- * The hook's way back to this host: **an interface only**: the transport is decided (session-core.md §8.1: a route on the host's front
- * door under a gate-only key, random per session, in memory, revoked on close, one method, no decision field) and comes with
- * `agy`. It is opened per session before the tool starts, its `env` goes into the tool's environment (the hook inherits it,
- * measured), it fails closed (an unreachable host is a `deny`), and closing it denies what is still open.
+ * The hook's way back to this host (#1654 comment on §8.1, session-core.md): a route on the host's front door under a
+ * gate-only key of the session's own (`transport/gate-door.ts`). It is opened per session before the tool starts, its `env`
+ * goes into the tool's environment (the hook inherits it, measured), it fails closed (an unreachable host is a `deny`),
+ * and closing it revokes the key and denies what is still open.
+ *
+ * The channel **asks and never answers**: what a caller sends is a call to decide on, read by `read`; the decision is
+ * `decide`'s alone (the preset, the always-allow rules or the person's card), never the caller's.
  */
 export interface GateInbound {
-  open(sessionId: string, decide: (request: GateRequest) => Promise<GateAnswer>): Promise<GateChannel>
+  open(sessionId: string, gate: GateHandler): Promise<GateChannel>
 }
 
+/** What a session's gate does with what its hook posts */
+export type GateHandler = {
+  /**
+   * The tool's hook input as the hook posted it (a JSON object, with no decision in it: the door refuses one that carries
+   * one), read into a request; null when it is not a call this tool's gate reads, which the hook then denies
+   */
+  read(input: Readonly<Record<string, unknown>>): GateRequest | null
+  /** The decision on one request. A Stop answers it `deny` (`GateRequests.denyAll`); a rejection is a `deny` too */
+  decide(request: GateRequest): Promise<GateAnswer>
+}
+
+/**
+ * The environment names the hook reads (`adapters/agy/gate-answer.mjs`, which imports nothing and so spells them
+ * itself; `gate-door.test.ts` drives that file with a channel's `env`, so the two cannot drift apart). Tool-neutral:
+ * the route is the front door's, and the next hook-gated tool uses the same names
+ */
+export const GATE_ENV = { url: 'CC_GATE_URL', token: 'CC_GATE_TOKEN' } as const
+
 export type GateChannel = {
-  /** What the hook needs to find this host and prove the session (names and values per transport); no file holds it */
+  /** What the hook needs to find this host and prove the session (`GATE_ENV`); no file holds it */
   readonly env: Readonly<Record<string, string>>
   close(): Promise<void>
 }

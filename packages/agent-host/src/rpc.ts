@@ -696,6 +696,8 @@ export function createRpcHandler(
       const { sessionId, server, name, args, waitMs } = RpcMethods['apps.sessionCall'].params.parse(p)
       return mgr.callAppForSession(sessionId, server, name, args, waitMs)
     },
+    // Raised only on the front door's gate route with the session's gate key (transport/gate-door.ts); the server refuses it on the WebSocket first
+    'gate.ask': () => Promise.reject(rpcError('gate.ask is asked only by a session’s gate hook, on the gate route')),
     /*
      * A request in the pre-#288 shape (no `tagged`, no `panels`) is answered in it: the sessions' ids only. An older UI
      * that saves through `sessionIds` replaces the list with its sessions, as it always did — it cannot know the apps.

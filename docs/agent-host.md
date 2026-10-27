@@ -2396,6 +2396,17 @@ token, so the next host accepts a running bridge's credential without anything b
 this change refuses it: after switching back to such a build, a Codex session started by a newer one loses its
 Centralu tools until it is restarted, and the bridge says so.
 
+**A hook-gated tool's gate key** (#1654, `transport/gate-door.ts`). `agy` asks for approval through a hook process, which
+posts the call to `POST /gate/<sessionId>` on the front door's port (`swap-control.ts`, `gateAddress`) with the session's
+gate key (`CC_GATE_URL`, `CC_GATE_TOKEN`; the adapter opens the channel through `GateInbound` and puts its `env` in the
+tool's environment). The key is random, held in this host's memory only, revoked when the session's channel closes, and
+raises `gate.ask` (rights class `gate`) for that session alone; it is no WebSocket hello. The route answers with its
+headers at once, a space every 30 s while the card is open (the hook's `fetch` gives up after 300 s of silence), then
+one `{decision, reason?}`. A Stop denies every open request first (`SessionProcess`), the channel's close denies what
+still waits, and `HostServer.close` denies everything before cutting connections. Across a swap the key does not
+survive: the next host answers 404, the hook denies, and a reopened `agy` gets a new key. Design and the reasoning
+against the bridge credential: [plans/session-core.md](plans/session-core.md) §8.1.
+
 **Control lines on stdin** (`swap-control.ts`). The keeper's pipe also carries one JSON object per line; the host
 answers on stdout next to its ready line. Neither side parses anything else the other says.
 

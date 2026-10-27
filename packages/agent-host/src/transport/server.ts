@@ -18,7 +18,8 @@ import { EventLog } from './event-log.js'
 import { createHttpHandler, sameSecret, type HttpGate } from './http.js'
 import { bridgeRefusal, bridgeSessionOf } from './bridge-token.js'
 import { isLimitedToken } from './limited-token.js'
-import { conditionalRight, limitedRefusal, type RightsHost } from './method-rights.js'
+import { conditionalRight, limitedRefusal, limitedRight, type RightsHost } from './method-rights.js'
+import type { FrontDoorGates } from './gate-door.js'
 import { hostProof } from './host-proof.js'
 import { DrainCut, type Drain } from '../drain.js'
 import { rpcError } from '../rpc-error.js'
@@ -98,6 +99,12 @@ export type HostServerOptions = {
    * rule below independently of this.
    */
   http?: HttpGate
+  /**
+   * The gate route of hook-gated tools (`gate-door.ts`), on the same port: `POST /gate/<sessionId>` under that session's
+   * gate key. A request it does not take (no such key, another session's, a revoked one) falls through to the HTTP
+   * door above and gets its 404
+   */
+  gate?: FrontDoorGates
   /**
    * How long a socket may stay connected without a valid hello (#82). Until then it holds a
    * socket, a timer and a slot in the http server's connection list for nothing.
@@ -286,7 +293,9 @@ export class HostServer {
       closeGraceMs: opts.closeGraceMs ?? TRANSPORT_LIMITS.closeGraceMs,
     }
     this.log = new EventLog(2000, this.limits.replayBudgetBytes)
-    this.http = createServer(createHttpHandler(opts.http))
+    const door = createHttpHandler(opts.http)
+    const gate = opts.gate
+    this.http = createServer(gate ? (req, res) => gate.take(req, res) || door(req, res) : door)
     this.wss = new WebSocketServer({
       server: this.http,
       // A frame over this closes the socket with 1009 before it is handed to us
@@ -407,6 +416,8 @@ export class HostServer {
   }
 
   private async shutdown(): Promise<void> {
+    // A hook waiting on a card gets its deny before its connection is cut, and no key outlives this host
+    this.opts.gate?.closeAll('Centralu stopped, so the call was not run.')
     for (const timer of this.handshakeTimers.values()) clearTimeout(timer)
     this.handshakeTimers.clear()
     const sockets = [...this.wss.clients]
@@ -644,6 +655,10 @@ export class HostServer {
       if (bridgeOf !== null) {
         const refusal = bridgeRefusal(bridgeOf, method, params)
         if (refusal !== null) return this.sendError(ws, id, { code: 'internal', message: refusal, retryable: false })
+      }
+      // A session's gate is asked on the gate route with its gate key only (gate-door.ts): never here, the token's call included
+      if (limitedRight(method, params) === 'gate') {
+        return this.sendError(ws, id, { code: 'internal', message: `${method} is asked only by a session's gate hook, on the gate route`, retryable: false, data: { refused: 'rights', rights: 'gate' } })
       }
       /*
        * The limited credential calls the everyday methods only (#1405, method-rights.ts). Checked here, before the
