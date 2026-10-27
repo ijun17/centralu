@@ -242,9 +242,8 @@ export function sidebarFoldTests() {
     await away(page)
     await page.clock.pauseAt(new Date(Date.now() + 60_000))
     await page.getByTestId('project-fold-alpha').click()
-    await expect(region(page, 'alpha')).toHaveAttribute('data-fold', 'closing')
-    await expect(region(page, 'alpha')).toHaveCSS('transition-property', 'none')
-    await page.clock.runFor(1)
+    // The clock is paused and never moved: a list that waited for a timer, or slid, would still be here
+    await expect(region(page, 'alpha')).toHaveCount(0)
     await expect(rows(page, 'alpha')).toHaveCount(0)
   })
 

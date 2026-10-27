@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { LEAVE_MS, usePresence } from './presence.js'
 
 /** How long an entrance takes: `.cc-fold`'s transition in styles/index.css lasts 180ms; the clip stays on a little past it */
@@ -17,7 +17,7 @@ const FOLD_IN_MS = 200
  * does not move: the rows fade in and fade out in place.
  *
  * `instant` is for a fold that is being set up, not changed (the sidebar before the saved folds are read): it neither
- * slides nor waits, so the window does not open with every folded project closing.
+ * slides nor waits (it is gone in the render that closes it, with no `closing` state to be seen), so the window does not open with every folded project closing.
  *
  * A list on its way out takes no presses and no focus (`inert`, as a layer's exit does): the rows are still there only so
  * that the close does not blink, and a menu or a drag begun on one would be taken away with it.
@@ -42,7 +42,8 @@ export function Fold({ open, children, className, testId, instant }: { open: boo
     void ref.current?.offsetHeight
     setExpanded(true)
   }, [open, expanded])
-  useEffect(() => {
+  // Also a layout effect, for the same reason as the exit's: `data-fold` never says `opening` without the end of it scheduled
+  useLayoutEffect(() => {
     if (!open || !expanded || settled) return
     const t = setTimeout(() => setSettled(true), FOLD_IN_MS)
     return () => clearTimeout(t)
