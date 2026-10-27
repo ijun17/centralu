@@ -41,15 +41,15 @@
 [design-system.ko.md](design-system.ko.md#2-모양-모서리-단계))이 있고, Tailwind 자체의 단계는 지워서 다른 값은 이름으로 쓸 수
 없다. 크기에는 짝이 되는 줄 높이를 두지 않아, 크기 유틸리티는 물려받은 줄 높이를 건드리지 않는다.
 행 높이가 고정된 화면(코드 뷰어, diff, 커밋 그래프)은 행 높이를 그것에 기대는 코드 옆에 픽셀로
-둔다. `tooling/styles.test.ts`는 짧은 예외 목록 밖의 임의 크기와 줄 높이에서 실패하고, 공유 컴포넌트
+둔다. 린트 규칙 `guard/ui-type-scale`과 `guard/ui-radius-scale`(`tooling/eslint-guards.js`)은 짧은 예외 목록 밖의 임의 크기와 줄 높이에서 실패하고, 공유 컴포넌트
 밖에서 숫자로 쓴 모서리에서도 실패한다. 그 예외 목록은 줄어들 수만 있다.
 
 **공유 모양.** 테두리 있는 버튼, 여럿 중 하나를 고르는 토글, 작은 대문자 라벨, 캡슐, 테두리 있는 입력란은
 `packages/ui/src/components/`의 컴포넌트다: `Button`(primary, secondary, quiet, subtle, danger, ghost;
 xs, sm, md), `Segmented`(방향키로 움직이는 라디오 그룹), `Badge`, `Pill`, `TextInput` / `TextField`.
 전에는 화면마다 클래스 문자열을 복사했고, 복사본마다 여백, 호버, 비활성 흐림이 조금씩 달라졌다.
-`tooling/shared-components.test.ts`는 그 폴더 밖의 컴포넌트가 이 모양을 손으로 그리면 실패한다(판별
-규칙은 `tooling/hand-made-looks.ts`). 아직 옮기지 않은 자리의 목록은 줄어들 수만 있다.
+린트 규칙 `guard/hand-made-looks`는 그 폴더 밖의 컴포넌트가 이 모양을 손으로 그리면 실패한다(판별
+규칙은 `tooling/eslint-guards-ts.js`). 아직 옮기지 않은 자리의 목록은 줄어들 수만 있다.
 
 ## 2. 스키마와 검증 (packages/protocol)
 

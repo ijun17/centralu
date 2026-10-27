@@ -39,9 +39,8 @@ Every corner is a step of this scale. Tailwind's own radii are cleared, so `roun
 - **A shape inside a bordered shape takes the outer corner less the border**, written as a calc on the
   token at its call site (the folded composer: `rounded-b-[calc(var(--radius-lg)-1px)]`).
 - **Guard.** Outside `packages/ui/src/components/` and `styles/`, a corner written as a number
-  (`rounded-[14px]`, an inline `borderRadius`) fails `tooling/styles.test.ts` ("corners come from the
-  radius scale"). Its list of sites that stay can only shrink: a listed count above what the file holds
-  fails too. A new step goes into `@theme` with what takes it, not at a call site.
+  (`rounded-[14px]`, an inline `borderRadius`) fails the lint rule `guard/ui-radius-scale` (`tooling/eslint-guards.js`). Its list of sites that stay
+  (`tooling/guard-exceptions.js`) can only shrink: a listed count above what the file holds fails too. A new step goes into `@theme` with what takes it, not at a call site.
 
 ## 3. Borders and lines
 
@@ -61,7 +60,7 @@ a header on the bubble and off it.
 |---|---|---|
 | **Pretendard** for what a person or a model says, and for controls, titles and a session's mark letter (the usage donut's letter too) | A letter in the code face sat off centre in its chip; the mark is a name, not a readout (*owner, 2026-10-18*, `.cc-chip-letter`) | `--font-sans`, bundled (#731) |
 | **D2Coding** for what a machine wrote: code, paths, commands, logs, terminals, and **numbers that must line up**: counts in capsules and folded projects, readouts, sizes, durations | Tabular digits keep a count from shifting as it changes; Hangul is twice the Latin width, so Korean in code stays on the grid | `--font-mono`, `.readout` (adds `tabular-nums`) |
-| **Five sizes**: `text-2xs` 10px (labels, counts, times), `text-xs` 11px (what a machine wrote), `text-sm` 12px (controls), `text-md` 13px (what a person reads), `text-display` 19px (the first-run heading). Weights 400, 500, 600 | A dense band that reads at the default zoom; the whole screen scales by the root zoom, not by these | `@theme`; `tooling/styles.test.ts` fails on an arbitrary size ([themes.md](themes.md#text-size-fonts-and-line-height)) |
+| **Five sizes**: `text-2xs` 10px (labels, counts, times), `text-xs` 11px (what a machine wrote), `text-sm` 12px (controls), `text-md` 13px (what a person reads), `text-display` 19px (the first-run heading). Weights 400, 500, 600 | A dense band that reads at the default zoom; the whole screen scales by the root zoom, not by these | `@theme`; the lint rule `guard/ui-type-scale` fails on an arbitrary size ([themes.md](themes.md#text-size-fonts-and-line-height)) |
 
 ## 5. Icons
 
@@ -163,9 +162,10 @@ strings: a copy drifts (padding, hover, disabled fade) and the next screen copie
 | A small uppercase label | `Badge` (`readout` among figures) |
 | A framed text field | `TextInput`, or `TextField` with its label, hint and problem |
 
-**The guard.** `tooling/shared-components.test.ts` fails when a screen outside `components/` draws a
+**The guard.** The lint rule `guard/hand-made-looks` fails when a screen outside `components/` draws a
 framed button, a framed text field, a small caps label or a capsule by hand, naming the component to use
-(the patterns are in `tooling/hand-made-looks.ts`). Its list of sites not moved yet **can only shrink**,
+(the patterns are in `tooling/eslint-guards-ts.js`). Its list of sites not moved yet
+(`tooling/guard-exceptions.js`) **can only shrink**,
 as the corner guard's does.
 
 ## Settled departures

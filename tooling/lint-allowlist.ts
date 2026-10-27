@@ -15,10 +15,11 @@
  * This module is the logic; tooling/lint.ts runs ESLint with it.
  */
 import { execFileSync } from 'node:child_process'
+import { availableParallelism } from 'node:os'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 import type { ESLint, Linter } from 'eslint'
-import tseslint from 'typescript-eslint'
+import { ARCHIVE_ALLOWED } from './guard-exceptions.js'
 
 export const ALLOWLIST_DIR = 'tooling/lint-allowlist'
 
@@ -39,19 +40,99 @@ export const LINT_OPTIONS = { concurrency: 2 } as const satisfies ESLint.Options
  */
 export const lintHeapMb = (totalMemBytes: number): number => Math.min(4096, Math.max(2048, Math.floor((totalMemBytes / 1048576) * 0.5)))
 
+/** The rule that reports each type assertion, so tooling/lint.ts can count them per package (`assertionTotals`): a warning of the guard pass, taken out of what is shown */
+export const ASSERTION_RULE = 'guard/type-assertions'
+
+/**
+ * The options of the guard pass (tooling/eslint-guard-pass.js): its own configuration only, not eslint.config.js, and
+ * no comment configures it. tooling/lint.ts runs it after the main pass; the tests of its rules lint virtual files with it.
+ * More threads than the main pass: no program of types is built, so a thread is small, and parsing the ~2,000 files it reads is what it costs.
+ */
+export const guardOptions = (cwd: string): ESLint.Options => ({ cwd, concurrency: Math.max(2, Math.min(4, availableParallelism())), overrideConfigFile: join(cwd, 'tooling', 'eslint-guard-pass.js') })
+
 /** The options tooling/lint.ts creates ESLint with */
 export const eslintOptions = (cwd: string): ESLint.Options => ({ cwd, ...LINT_OPTIONS })
 
 /**
- * The rules a line may name: the type-aware ones eslint.config.js turned on (#1339). Any other rule's
- * findings were already errors before, and stay errors everywhere.
+ * The most type assertions (`x as T`, `<T>x`; not `as const`) each package's src may hold outside its tests: exactly what it holds
+ * today, with no room, so one more fails `pnpm lint`. A change that removes some lowers its package's number with `pnpm lint:tighten`
+ * (`tightenAssertions` writes it); one that needs a safe assertion removes another, or checks the value instead. Nothing raises a
+ * number: tooling/type-aware-lint.test.ts refuses one above main's.
  */
-export const LISTABLE_RULES: ReadonlySet<string> = new Set([
-  ...tseslint.configs.recommendedTypeCheckedOnly.flatMap((c) => Object.keys(c.rules ?? {})).filter((r) => r.startsWith('@typescript-eslint/')),
-  '@typescript-eslint/consistent-type-assertions',
-  '@typescript-eslint/no-non-null-assertion',
-  '@typescript-eslint/no-unsafe-type-assertion',
-])
+export const ASSERTIONS: Readonly<Record<string, number>> = {
+  'apps/desktop': 4,
+  'apps/web': 6,
+  'packages/agent-host': 529,
+  'packages/core': 1,
+  'packages/platform': 3,
+  'packages/protocol': 0,
+  'packages/ui': 255,
+}
+
+/** The packages above their ceiling, and the numbers a ceiling could come down to (a hint, not a failure: two changes that each lowered it by the same one merge into a ceiling one too high) */
+export function overAndUnder(actual: Record<string, number>, ceiling: Readonly<Record<string, number>>): { over: string[]; under: string[] } {
+  const over = Object.entries(actual)
+    .filter(([pkg, n]) => n > (ceiling[pkg] ?? 0))
+    .map(([pkg, n]) => `${pkg}: ${n}, ceiling ${ceiling[pkg] ?? 0}`)
+  const under = Object.entries(ceiling)
+    .filter(([pkg, n]) => (actual[pkg] ?? 0) < n)
+    .map(([pkg]) => `${pkg}: ${actual[pkg] ?? 0}`)
+  return { over, under }
+}
+
+/** `source` (the text of this module) with each ASSERTIONS number lowered to what its package holds: what `pnpm lint:tighten` writes. Never raised. */
+export function tightenAssertions(source: string, actual: Record<string, number>): string {
+  const block = /(export const ASSERTIONS\b[^=]*=\s*\{)([^}]*)(\})/
+  const entry = /(['"])([^'"]+)\1(\s*:\s*)(\d+)/g
+  return source.replace(block, (_all, head: string, body: string, tail: string) => head + body.replace(entry, (_m, quote: string, pkg: string, colon: string, n: string) => quote + pkg + quote + colon + String(Math.min(Number(n), actual[pkg] ?? 0))) + tail)
+}
+
+/**
+ * The type assertions each package holds, from the results of a whole run, and the results without the messages that
+ * counted them (they are not findings to show).
+ */
+export function assertionTotals(root: string, results: ESLint.LintResult[]): Record<string, number> {
+  const totals: Record<string, number> = {}
+  for (const r of results) {
+    const counted = r.messages.filter((m) => m.ruleId === ASSERTION_RULE)
+    if (counted.length === 0) continue
+    const pkg = packageOf(relativeFile(root, r.filePath))
+    totals[pkg] = (totals[pkg] ?? 0) + counted.length
+    r.messages = r.messages.filter((m) => m.ruleId !== ASSERTION_RULE)
+    recount(r)
+  }
+  return totals
+}
+
+/**
+ * The rule that reports, once per file, each ARCHIVE_ALLOWED entry (tooling/guard-exceptions.js) a text of the file used: its
+ * message is the entry's index. Like the assertions it is a warning of the guard pass that `tooling/lint.ts` takes out of
+ * what it shows, and what it counts is whole-run: an entry that no file used is stale.
+ */
+export const ARCHIVE_USED_RULE = 'guard/archive-allowed-used'
+
+/** The indexes of the ARCHIVE_ALLOWED entries the files of a whole run used, and the results without those messages */
+export function archiveUses(results: ESLint.LintResult[]): Set<number> {
+  const used = new Set<number>()
+  for (const r of results) {
+    const counted = r.messages.filter((m) => m.ruleId === ARCHIVE_USED_RULE)
+    if (counted.length === 0) continue
+    for (const m of counted) used.add(Number(m.message))
+    r.messages = r.messages.filter((m) => m.ruleId !== ARCHIVE_USED_RULE)
+    recount(r)
+  }
+  return used
+}
+
+/** The lines that say which ARCHIVE_ALLOWED entries no file of the run used: the file it was for is renamed or gone, or no longer says what it lets through */
+export function unusedArchiveEntries(used: ReadonlySet<number>, entries: readonly { file: string; text: string; why: string }[] = ARCHIVE_ALLOWED): string[] {
+  return entries.flatMap((entry, i) =>
+    used.has(i) ? [] : [`tooling/guard-exceptions.js ARCHIVE_ALLOWED: «${entry.why}» (files /${entry.file}/, text /${entry.text}/) is used by no file: remove the entry`],
+  )
+}
+
+export { LISTABLE_RULES, NO_DISABLE_RULES, noDisable } from './no-disable-rules.js'
+import { LISTABLE_RULES, noDisable } from './no-disable-rules.js'
 
 const HEADER = [
   '# Type-aware lint findings that predate the rules (#1339): <file> <rule> <count>, one per line, sorted.',
@@ -160,12 +241,6 @@ export function countedFiles(root: string, results: ESLint.LintResult[]): Set<st
   return new Set(results.filter((r) => r.fatalErrorCount === 0 && !ignored(r)).map((r) => relativeFile(root, r.filePath)))
 }
 
-/**
- * The rules no comment may switch off: the type-aware ones the lists hold, and the two that took over a test's whole-tree
- * guard (#1602), which a unit test could not be skipped on. Their exceptions are a line in the rule's own `EXCEPTIONS`.
- */
-export const NO_DISABLE_RULES: ReadonlySet<string> = new Set([...LISTABLE_RULES, 'test-env/data-dir', 'test-limits/scaled-by-slow'])
-
 export type Disabled = { file: string; line: number; rule: string }
 
 /**
@@ -176,7 +251,7 @@ export function disabledFindings(root: string, results: ESLint.LintResult[]): Di
   const out: Disabled[] = []
   for (const r of results) {
     for (const m of r.suppressedMessages) {
-      if (m.ruleId && NO_DISABLE_RULES.has(m.ruleId) && m.suppressions.some((s) => s.kind === 'directive')) {
+      if (m.ruleId && noDisable(m.ruleId) && m.suppressions.some((s) => s.kind === 'directive')) {
         out.push({ file: relativeFile(root, r.filePath), line: m.line, rule: m.ruleId })
       }
     }
@@ -385,6 +460,28 @@ export function mainLists(root: string, ref: string): MainLists {
   return { kind: 'lists', base, lists: parseLists(texts) }
 }
 
+/**
+ * The ASSERTIONS ceilings a copy of this module's source declares, or null when it has none (a base from before they
+ * were here). Read from main's copy, so that a change cannot raise them: they only go down.
+ */
+export function assertionsOf(source: string): Record<string, number> | null {
+  const block = /export const ASSERTIONS\b[^=]*=\s*\{([^}]*)\}/.exec(source)
+  if (!block) return null
+  const ceilings: Record<string, number> = {}
+  for (const m of (block[1] ?? '').matchAll(/(['"])([^'"]+)\1\s*:\s*(\d+)/g)) ceilings[m[2] ?? ''] = Number(m[3])
+  return ceilings
+}
+
+/** The ceilings main had where this branch left it (as `mainLists` finds main's lists), or why they could not be read */
+export function mainAssertions(root: string, ref: string): { kind: 'ceilings'; base: string; ceilings: Record<string, number> } | { kind: 'none' | 'unreadable'; why: string } {
+  const base = baseCommit(root, ref)
+  if (!base) return { kind: 'unreadable', why: `no merge base with ${ref} in this checkout` }
+  const source = runGit(root, 'show', `${base}:tooling/lint-allowlist.ts`)
+  if (source === null) return { kind: 'unreadable', why: `could not read tooling/lint-allowlist.ts at ${base}` }
+  const found = assertionsOf(source)
+  return found ? { kind: 'ceilings', base, ceilings: found } : { kind: 'none', why: `main has no ceilings yet at ${base}; this change brings them` }
+}
+
 /** What `pnpm lint` adds under ESLint's report about the type-aware findings left, as lines */
 export function lintHints(left: readonly Linter.LintMessage[]): string[] {
   const typeAware = left.filter((m) => m.ruleId?.startsWith('@typescript-eslint/'))
@@ -405,7 +502,7 @@ export function lintHints(left: readonly Linter.LintMessage[]): string[] {
  * would have to edit a list. `pnpm lint:tighten` and the weekly tighten job lower such lines, and no change can raise
  * one again (tooling/type-aware-lint.test.ts).
  */
-export function lintFailed(o: { errorsLeft: number; disabled: number; recording: boolean; othersLeft: number }): boolean {
+export function lintFailed(o: { errorsLeft: number; disabled: number; recording: boolean; othersLeft: number; assertionsOver?: number; archiveStale?: number }): boolean {
   if (o.recording) return o.othersLeft > 0 || o.disabled > 0
-  return o.errorsLeft > 0 || o.disabled > 0
+  return o.errorsLeft > 0 || o.disabled > 0 || (o.assertionsOver ?? 0) > 0 || (o.archiveStale ?? 0) > 0
 }

@@ -56,7 +56,6 @@ packages/agent-host/src/adapters/edit-grant.test.ts
 packages/agent-host/src/adapters/edit-grant.ts
 packages/agent-host/src/adapters/ends-with-host.test.ts
 packages/agent-host/src/adapters/fake-agent-cli.test-helpers.ts
-packages/agent-host/src/adapters/frames/no-sleeps.test.ts
 packages/agent-host/src/adapters/frames/recorder.test.ts
 packages/agent-host/src/adapters/frames/recorder.ts
 packages/agent-host/src/adapters/frames/recordings-private.test.ts
@@ -254,7 +253,6 @@ packages/agent-host/src/process.test-helpers.ts
 packages/agent-host/src/process.test.ts
 packages/agent-host/src/project-delete-processes.test.ts
 packages/agent-host/src/project-settings-events.test.ts
-packages/agent-host/src/rpc-error.test.ts
 packages/agent-host/src/rpc.test.ts
 packages/agent-host/src/rpc.ts
 packages/agent-host/src/sessions/add-project.test.ts
@@ -377,7 +375,6 @@ packages/agent-host/src/views/csp.ts
 packages/agent-host/src/views/origin-ports.test.ts
 packages/agent-host/src/views/origin-ports.ts
 packages/agent-host/src/views/view-host.test.ts
-packages/platform/src/mock/mock-error.test.ts
 packages/platform/src/platform.contract.test.ts
 packages/protocol/src/theme.test.ts
 packaging/npm/centralu/bin/centralu.mjs

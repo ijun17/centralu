@@ -4,8 +4,6 @@ tooling/dev-live.test.ts @typescript-eslint/no-redundant-type-constituents 1
 tooling/dev-live.test.ts @typescript-eslint/restrict-plus-operands 1
 tooling/e2e-browser-sandbox.test.ts @typescript-eslint/no-unnecessary-type-assertion 1
 tooling/e2e-web-server.test.ts @typescript-eslint/no-unnecessary-type-assertion 1
-tooling/hand-made-looks.ts @typescript-eslint/no-non-null-assertion 1
-tooling/hidden-children.test.ts @typescript-eslint/no-unnecessary-type-assertion 3
 tooling/launcher-serve.test.ts @typescript-eslint/no-unnecessary-type-assertion 8
 tooling/launcher-serve.test.ts @typescript-eslint/prefer-promise-reject-errors 1
 tooling/project-board-release.test.ts @typescript-eslint/no-misused-promises 1

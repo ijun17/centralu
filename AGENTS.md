@@ -61,7 +61,7 @@ The layer rules are enforced by lint (`docs/architecture.md` §2). Where things 
 - Tests that wait on wall-clock time fail under load. Wait for an event, or give generous bounds.
 - A framed button, pick-one toggle, small caps label, capsule or text field is a shared component
   (`Button`, `Segmented`, `Badge`, `Pill`, `TextInput`/`TextField` in `packages/ui/src/components/`),
-  not a class string; `tooling/shared-components.test.ts` fails on a hand-drawn one and names the component.
+  not a class string; the lint rule `guard/hand-made-looks` fails on a hand-drawn one and names the component.
 
 ## How work is done
 

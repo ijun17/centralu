@@ -1,5 +1,3 @@
-import { readdirSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { mockError } from './mock-error.js'
 
@@ -16,12 +14,5 @@ describe('mockError (#850)', () => {
     expect(mockError('Session not found', 'session_not_found').code).toBe('session_not_found')
   })
 
-  // mockError's code is typed by the protocol, so a code it does not have does not compile; built by hand, it did
-  it('is the one way the mock builds a coded error: none is assembled by hand', () => {
-    const dir = import.meta.dirname
-    const files = readdirSync(dir).filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts') && f !== 'mock-error.ts')
-    // Across lines (a formatter splits a long one), the message bounded so one call cannot run into the next
-    const byHand = /Object\.assign\(\s*new Error\((?:(?!Object\.assign)[\s\S]){0,400}?\)\s*,\s*\{\s*code:\s*'[a-z_]+'/
-    expect(files.filter((f) => byHand.test(readFileSync(join(dir, f), 'utf8')))).toEqual([])
-  })
+  // That none is assembled by hand is the lint rule `guard/no-hand-coded-error` (tooling/eslint-guards.js, #1606)
 })

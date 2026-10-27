@@ -6,16 +6,6 @@
  */
 import { describe, expect, it } from 'vitest'
 import { virtualFileLinter } from './eslint-virtual.test-helpers.js'
-import { readFileSync, readdirSync } from 'node:fs'
-import { join, relative } from 'node:path'
-import { fileURLToPath } from 'node:url'
-
-const ROOT = fileURLToPath(new URL('..', import.meta.url))
-const PROTOCOL_SRC = join(ROOT, 'packages/protocol/src/')
-
-/** Block and line comments, so prose that explains a rule cannot trip it. */
-const stripComments = (code: string) =>
-  code.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1')
 
 const eslint = virtualFileLinter()
 
@@ -25,133 +15,12 @@ async function lint(filePath: string, code: string) {
 }
 const ruleIds = (msgs: { ruleId?: string | null }[]) => msgs.map((m) => m.ruleId)
 
-/**
- * `@cc/protocol` is the shelf both sides can reach, which is exactly why a vendor must not
- * be able to leave anything on it.
- *
- * It used to hold both halves of a tool's identity: `ToolName` was `z.enum(['claude',
- * 'codex'])` and `TOOL_META` beside it carried each one's label, glyph, install command and
- * login command. So a tool existed in three places — the shared protocol, its adapter, and
- * every screen that drew a row per tool — and adding a third (#59) meant finding all of
- * them. An adapter introduces itself now, and this test is what keeps the old shape from
- * growing back one convenient constant at a time.
- *
- * Comments are stripped first: the ones explaining this change name the vendors, and a rule
- * that cannot be explained in the file it governs is a rule that gets deleted.
+/*
+ * Three guards that read source files lived here, and are lint rules (tooling/eslint-guards.js, #1606): the protocol writes
+ * no tool name (`guard/no-tool-names`, #59), the app runtime does not import the sessions that carry it (#97), and the
+ * external app runtime borrows only the named physics modules from dev-services (`guard/import-boundary`;
+ * dependency-cruiser's `host-app-runtime-physics-only` enforces the same list).
  */
-describe('protocol does not know about vendors', () => {
-  // Recursive: entities.ts and commands.ts re-export modules kept in folders of their own (#850)
-  const sources = readdirSync(PROTOCOL_SRC, { recursive: true, encoding: 'utf8' })
-    .filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts'))
-    .map((f) => ({ file: f, code: stripComments(readFileSync(join(PROTOCOL_SRC, f), 'utf8')) }))
-
-  it('has source files to read', () => {
-    expect(sources.length).toBeGreaterThan(0)
-  })
-
-  it('does not write a tool name into the code', () => {
-    const offenders = sources
-      .filter(({ code }) => /\b(claude|codex)\b/i.test(code))
-      .map(({ file }) => file)
-    expect(offenders).toEqual([])
-  })
-})
-
-/** Every `.ts`/`.tsx` under a directory, tests included, with comments stripped. */
-function sourcesUnder(dir: string): { file: string; code: string }[] {
-  return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
-    const path = join(dir, e.name)
-    if (e.isDirectory()) return sourcesUnder(path)
-    if (!/\.tsx?$/.test(e.name)) return []
-    return [{ file: relative(ROOT, path), code: stripComments(readFileSync(path, 'utf8')) }]
-  })
-}
-
-/** Static, dynamic and re-exported specifiers alike — a leak does not care which form it took. */
-function importsOf(code: string): string[] {
-  const re = /\bfrom\s*['"]([^'"]+)['"]|\bimport\s*\(\s*['"]([^'"]+)['"]|\bimport\s*['"]([^'"]+)['"]/g
-  return [...code.matchAll(re)].map((m) => m[1] ?? m[2] ?? m[3]!)
-}
-
-/**
- * `apps/` is the layer other things are meant to run *on*, and it was running *beside* them.
- *
- * The host half had this shape: `apps/contract.ts` borrowed `AppToolCaller` from the
- * orchestrator, which is one caller of the runtime, not its owner. The direction was inverted
- * (#97): the contract defines those types and the orchestrator takes them from there. The UI
- * half (`packages/ui/src/apps/`, which once re-exported the inbox's store) was checked here too
- * until that framework was removed in #97.
- *
- * The cycle grew because nothing was checking. This is the checking (#97), and it is the same
- * rule as the one above, one layer over: a shelf both sides reach must stay one-directional.
- *
- * Comments are stripped first — the prose explaining this names the layers it forbids.
- */
-describe('the app runtime does not know what carries it', () => {
-  const layers = [
-    {
-      name: 'packages/agent-host/src/apps',
-      dir: join(ROOT, 'packages/agent-host/src/apps/'),
-      // The orchestrator is one caller of the runtime — the runtime must not lean on it the
-      // other way around.
-      forbidden: /(^|\/)sessions(\/|$)/,
-    },
-  ]
-
-  for (const layer of layers) {
-    describe(layer.name, () => {
-      const sources = sourcesUnder(layer.dir)
-
-      it('has source files to read', () => {
-        expect(sources.length).toBeGreaterThan(0)
-      })
-
-      it('does not import a forbidden layer', () => {
-        const offenders = sources.flatMap(({ file, code }) =>
-          importsOf(code)
-            .filter((spec) => layer.forbidden.test(spec))
-            .map((spec) => `${file} → ${spec}`),
-        )
-        expect(offenders).toEqual([])
-      })
-    })
-  }
-})
-
-/**
- * The external app runtime (M4 A) is the one part of `apps/` allowed into `dev-services/`, and
- * only by name: folder watching, path containment and killing a process tree are promises the
- * terminal and the command runner already keep, and a second copy of "how we kill a tree" is how
- * the two drift apart. Starting a child as such a tree's root, and sweeping what it leaves, is shared
- * with the agent CLIs the same way (grouped-child, #428). So is removing a folder that a Windows process may
- * still hold for a moment (data-folder, #975).
- * Everything else stays out — sessions and adapters are callers of the runtime, and the store is
- * reached through the `ExternalAppsDeps` the host supplies.
- *
- * dependency-cruiser enforces the same list (`host-app-runtime-physics-only`); this is the copy
- * that runs with the tests, so a widening has to be made twice, on purpose.
- */
-describe('the external app runtime borrows only the named physics modules', () => {
-  const sources = sourcesUnder(join(ROOT, 'packages/agent-host/src/apps/external/'))
-  const PHYSICS = /(^|\/)dev-services\/(watch|path-guard|kill-tree|grouped-child|data-folder)\.js$/
-
-  it('has source files to read', () => {
-    expect(sources.length).toBeGreaterThan(0)
-  })
-
-  it('never imports sessions or adapters, and only the allow-listed dev-services', () => {
-    const offenders = sources.flatMap(({ file, code }) =>
-      importsOf(code)
-        .filter(
-          (spec) =>
-            /(^|\/)(sessions|adapters)(\/|$)/.test(spec) ||
-            (/(^|\/)dev-services\//.test(spec) && !PHYSICS.test(spec)),
-        )
-        .map((spec) => `${file} → ${spec}`),
-    )
-    expect(offenders).toEqual([])
-  })
-})
 
 describe('ui layer boundary', () => {
   it('rejects importing a platform implementation', async () => {

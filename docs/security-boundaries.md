@@ -1137,8 +1137,8 @@ reads a project as soon as it is added (`projects.list` asks for its branch and 
 every one of these was reachable before the person answered the trust question.
 
 **Before a project is trusted, no git read the host makes runs a program the repository chose.**
-Every git the host starts goes through `runGit` (`dev-services/git-exec.ts`); `git-exec.test.ts`
-fails if any other source starts git. A read for an untrusted project gets:
+Every git the host starts goes through `runGit` (`dev-services/git-exec.ts`); the lint rule `guard/git-start`
+(`tooling/eslint-guards.js`) fails if any other source starts git. A read for an untrusted project gets:
 
 - `--no-optional-locks`, so the index is not rewritten and the folder is left as it was found;
 - `-c core.hooksPath=<null device>` (`/dev/null`, or `\\.\nul` on Windows), under which no hook

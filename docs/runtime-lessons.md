@@ -175,7 +175,7 @@ child it starts pops a visible window (e84cf872, #14); `code.cmd` through `cmd.e
 Rule: the release window is `windows_subsystem = "windows"`; the host is created with `CREATE_NO_WINDOW`; every child
 the host starts has `windowsHide: true`; agent CLIs and app processes are not `detached` on Windows (they are elsewhere,
 for their own process group).
-Guard: `tooling/hidden-children.test.ts` "no call in the host starts a process without windowsHide" (every
+Guard: the lint rule `guard/hidden-children` (`tooling/eslint-guards.js`; every
 `child_process` call under `host/`, #983, which found seventeen without it). The host's `CREATE_NO_WINDOW` and the
 agent CLIs and app processes not being `detached` on Windows are **UNGUARDED** (the Windows tests inject the OS and
 check only the kill paths).

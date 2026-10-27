@@ -1,57 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { copyFileSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join, relative } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { join } from 'node:path'
 import { gitArgv, gitFilterListings, runGit } from './git-exec.js'
 import { __forgetPrograms } from '../tool-launch.js'
 
-/**
- * Every git the host starts goes through `runGit` (#407), so a new call is locked before trust by
- * default instead of by remembering to. This reads the sources: a file other than `git-exec.ts`
- * that names git as a program to start fails here, whichever way it starts it.
- */
-
-const SRC = join(dirname(fileURLToPath(import.meta.url)), '..')
-/**
- * `links/remote-install.mjs` runs on another machine, on its own Node, and imports nothing of the host: a dev build
- * there checks the maintainer's working copy with the git on that machine's PATH (#1036, `devBuild`)
- */
-const ALLOWED = new Set(['dev-services/git-exec.ts', 'links/remote-install.mjs'])
-
-/** `programPath('git')`, or git as the program of execFile / spawn / exec / execFileSync */
-const STARTS_GIT = /programPath\(\s*['"`]git['"`]\s*\)|\b(?:execFile|execFileSync|spawn|spawnSync|exec|execSync)\(\s*['"`]git(?:\.exe)?['"`]/
-
-function sources(dir: string): string[] {
-  const out: string[] = []
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const path = join(dir, entry.name)
-    if (entry.isDirectory()) out.push(...sources(path))
-    else if (/\.(?:ts|mts|js|mjs)$/.test(entry.name) && !/\.test(?:-helpers)?\.ts$/.test(entry.name)) out.push(path)
-  }
-  return out
-}
-
-describe('git is started in one place', () => {
-  it('no source outside git-exec.ts starts git itself', () => {
-    const offenders = sources(SRC)
-      .map((path) => relative(SRC, path).replaceAll('\\', '/'))
-      .filter((rel) => !ALLOWED.has(rel) && STARTS_GIT.test(readFileSync(join(SRC, rel), 'utf8')))
-    expect(offenders).toEqual([])
-  })
-
-  it('the check sees the ways a call could be written', () => {
-    for (const line of [
-      "spawn(programPath('git'), ['status'])",
-      "await exec(programPath( 'git' ), args)",
-      "execFileSync('git', ['status'])",
-      'spawn("git.exe", [])',
-    ]) {
-      expect(STARTS_GIT.test(line)).toBe(true)
-    }
-    expect(STARTS_GIT.test("exec(programPath('gh'), ['pr', 'view'])")).toBe(false)
-  })
-})
+// That no other file starts git itself is the lint rule `guard/git-start` (tooling/eslint-guards.js, #1606)
 
 /**
  * A git that exits before reading what it was given (lessons HO14): the write lands on a closed

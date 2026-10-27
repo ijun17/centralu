@@ -281,7 +281,7 @@ Two kinds of path cross this boundary, and they are not the same kind of thing.
 | **Native** | `ProjectInfo.path` — a project's directory | the OS's own spelling, **never taken apart, never normalised** |
 
 **Why relative paths are normalised.** `packages/ui` is not allowed to know which OS it is on
-(see [platform-abstraction.md](platform-abstraction.md); it is enforced by `tooling/styles.test.ts`).
+(see [platform-abstraction.md](platform-abstraction.md); it is enforced by the lint rule `guard/ui-no-os`, `tooling/eslint-guards.js`).
 A relative path carrying a native separator would have to be read one way on Windows and another
 way everywhere else — in the UI — which is exactly the branch that rule forbids. Git settles it
 from the other side too: its own path format is POSIX on every platform and its output reaches the
@@ -300,7 +300,7 @@ written down.
 
 This does **not** make the app run on Windows ([#14](https://github.com/ijun17/centralu/issues/14)).
 It is the prerequisite: one named assumption instead of twenty-one anonymous ones, so a Windows
-build fails for reasons that are about Windows. `tooling/paths.test.ts` fails the build on a
+build fails for reasons that are about Windows. the lint rule `guard/no-hand-split` (`tooling/eslint-guards.js`) fails the build on a
 twenty-second.
 
 ## 3.2 Retired methods and events ([#97](https://github.com/ijun17/centralu/issues/97), [#372](https://github.com/ijun17/centralu/pull/372))

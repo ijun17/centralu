@@ -16,13 +16,14 @@ export function variableOf(sourceCode, identifier) {
 /**
  * What the `const` an identifier names was initialised with (the expression after `=`), or null for anything else: a
  * `let`, a parameter, an import, a global, a pattern. `{ env }` taken out of an object is `{ pattern: Property, init }`:
- * the caller decides what that says.
+ * the caller decides what that says. `anyKind` follows a `let` or `var` too, as the old text scans followed a name: for a rule that
+ * only reads the words a variable was given, where a variable that is reassigned is no riskier than one that is not.
  */
-export function constInit(sourceCode, identifier) {
+export function constInit(sourceCode, identifier, { anyKind = false } = {}) {
   const variable = variableOf(sourceCode, identifier)
   if (variable?.defs.length !== 1) return null
   const [def] = variable.defs
-  if (def.type !== 'Variable' || def.parent?.kind !== 'const' || !def.node.init) return null
+  if (def.type !== 'Variable' || (!anyKind && def.parent?.kind !== 'const') || !def.node.init) return null
   if (def.node.id.type === 'Identifier') return { init: def.node.init, pattern: null }
   if (def.node.id.type !== 'ObjectPattern') return null
   // `const { env } = process` or `const { env: e } = process`

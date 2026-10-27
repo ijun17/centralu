@@ -297,12 +297,26 @@ new finding there, and a count freed in one file is not credit for another. `too
 compares the lists with main's at the merge base (a push to main with its parent) and refuses any line that
 is new or higher than main's but a renamed file's own (CI's `verify` fetches main's history for it and fails
 without it; elsewhere, without one, the test says it did not compare).
-The same test refuses an `eslint-disable` of a type-aware rule, a disable naming no rule, and a comment
-that configures one off, and caps the type assertions (`as T`, safe ones too) in each package's shipped
-code. `eslint` run by itself, and an editor, do not read the lists and show the old findings too. The
+The guard pass (below) runs the lint rule `guard/no-rule-switch-comments`, which refuses an `eslint-disable` of a type-aware rule, a
+disable naming no rule, and a comment that configures one off, wherever the rules run; the same pass counts the type assertions
+(`as T`, safe ones too) in each package's shipped code, and `pnpm lint` fails over `ASSERTIONS` in `tooling/lint-allowlist.ts`: what the package holds, with no room, so one
+more fails. A change that removes some runs `pnpm lint:tighten`, which lowers the numbers; one that needs another removes one
+or checks the value instead. `tooling/type-aware-lint.test.ts` refuses a number above main's. `eslint` run by itself, and an editor, do not read the lists and show the old findings too. The
 lint runs on two threads and without `--cache`: each thread builds the whole program (six took 13.6 GB),
 and ESLint's cache keys a file on its own content while a type-aware finding can come from a type
 another file changed.
+
+**A guard over the source is a lint rule in a pass of its own** (#1602, #1606). What used to be a unit test
+that read every source file of a folder (no hand-split paths, hidden children, one place that starts git,
+the type scale, no data folder written by hand in a test) is a `guard/*`, `test-env/*` or `test-limits/*`
+rule (`tooling/eslint-guards.js`), which `pnpm lint` runs after the main pass in a configuration of its own
+(`tooling/eslint-guard-pass.js`) that reads no comment as configuration: no `eslint-disable`, no
+`/* eslint rule: off */`, in any file, can turn one off, and a rule cannot switch itself off. `eslint` run by
+itself, and an editor, do not run it. What a rule lets through is a line of `tooling/guard-exceptions.js`
+(or the rule's own `EXCEPTIONS`) with its reason and the count it may hold, per kind of finding; a count
+that is too high or too low fails, and `tooling/guards-checks.test.ts` caps the list. A word the archive wording lets through
+(`ARCHIVE_ALLOWED`) that no file of the whole run uses any more fails `pnpm lint`. A new guard is
+a rule there, tried on virtual files that fail without it, not a test that walks the tree.
 
 **A new test must fail when the fix it guards is disabled.** Disable the fix, watch the test
 fail, quote the failure in the commit or the PR, then restore it. A test that still passes

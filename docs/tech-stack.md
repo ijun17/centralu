@@ -41,7 +41,7 @@ on the demo scenes before and after (`scripts/style-snapshot-diff.mjs` compares 
 takes which is in [design-system.md](design-system.md#2-shape-the-corner-scale)), with Tailwind's own scales cleared so nothing
 else can be named. Sizes define no paired line height, so a size utility leaves the inherited line
 height alone. Views with fixed rows (the code viewer, the diff, the commit graph) keep their row
-heights in pixels next to the code that depends on them. `tooling/styles.test.ts` fails on an
+heights in pixels next to the code that depends on them. the lint rules `guard/ui-type-scale` and `guard/ui-radius-scale` (`tooling/eslint-guards.js`) fail on an
 arbitrary size or line height outside a short list of exceptions, and on a corner written as a number
 outside the shared components, with a list of sites that can only shrink.
 
@@ -49,9 +49,9 @@ outside the shared components, with a list of sites that can only shrink.
 text field are components in `packages/ui/src/components/`: `Button` (primary, secondary, quiet,
 subtle, danger, ghost; xs, sm, md), `Segmented` (a radio group with the arrow keys of one), `Badge`,
 `Pill` and `TextInput` / `TextField`. They used to be class strings copied from screen to screen,
-and the copies drifted in padding, hover and the disabled fade. `tooling/shared-components.test.ts`
-fails when a component outside that folder draws one of these looks by hand (the patterns are in
-`tooling/hand-made-looks.ts`); its list of sites not moved yet can only shrink.
+and the copies drifted in padding, hover and the disabled fade. the lint rule
+`guard/hand-made-looks` fails when a component outside that folder draws one of these looks by hand (the patterns are in
+`tooling/eslint-guards-ts.js`); its list of sites not moved yet can only shrink.
 
 ## 2. Schema and validation (packages/protocol)
 

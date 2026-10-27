@@ -14,14 +14,11 @@
  * Gaps, known: options spread into the call (`it(name, fn, { ...opts })`), runners made by `test.extend`, a tagged
  * `it.each` table, and a limit set by `vi.setConfig(opts)` from a variable.
  *
- * There is no way around it in the file: `pnpm lint` refuses an eslint-disable of this rule
- * (tooling/lint-allowlist.ts, `NO_DISABLE_RULES`). A real exception is a line of `EXCEPTIONS` below with its
- * reason; the list only shrinks (tooling/test-time-limits-checks.test.ts holds its ceiling).
- *
- * This was a unit test that parsed every test file (687) with the TypeScript API (#1602); ESLint parses each
- * once per run and caches it.
+ * There is no way around it in the file: the rule is in the guard pass (tooling/eslint-guard-pass.js), which reads no comment as
+ * configuration. A real exception is a line of `EXCEPTIONS` below with its reason; the list only shrinks (tooling/test-time-limits-checks.test.ts holds its ceiling).
  */
 
+import { relative } from 'node:path'
 import { constInit } from './eslint-const-init.js'
 
 /** Files that may set an unscaled limit, by repository-relative path, each with the reason. Empty; it only shrinks. */
@@ -72,8 +69,8 @@ export const scaledBySlow = {
   },
   create(context) {
     const source = context.sourceCode
-    const relative = context.filename.slice(context.cwd.length + 1).replaceAll('\\', '/')
-    if (Object.hasOwn(EXCEPTIONS, relative)) return {}
+    const relativePath = relative(context.cwd, context.filename).replaceAll('\\', '/')
+    if (Object.hasOwn(EXCEPTIONS, relativePath)) return {}
     /** Does the limit multiply by SLOW, itself or through the `const` that holds it? */
     const scaled = (node, depth = 0) => {
       if (/\bSLOW\b/.test(source.getText(node))) return true

@@ -1,14 +1,13 @@
 /** `test-limits/scaled-by-slow` finds a time limit a test sets for itself that Windows would not get three times of (#845, #1602). */
 import { describe, expect, it } from 'vitest'
-import { virtualFileLinter } from './eslint-virtual.test-helpers.js'
+import { guardLinter } from './eslint-virtual.test-helpers.js'
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { disabledFindings } from './lint-allowlist.js'
 import { EXCEPTIONS } from './eslint-test-time-limits.js'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
-const eslint = virtualFileLinter()
+const eslint = guardLinter()
 
 async function reported(filePath: string, code: string): Promise<string[]> {
   const [result] = await eslint.lintText(code, { filePath: join(ROOT, filePath), warnIgnored: false })
@@ -86,12 +85,11 @@ describe('a time limit a test sets for itself', () => {
     })
   })
 
-  it('cannot be switched off by a comment: pnpm lint refuses an eslint-disable of it', async () => {
-    const code = ['// eslint-disable-next-line test-limits/scaled-by-slow', "it('a', () => {}, 30_000)"].join('\n')
+  it('cannot be switched off by a comment: the pass reads none as configuration', async () => {
+    const code = ['// eslint-disable-next-line test-limits/scaled-by-slow', "it('a', () => {}, 30_000)", '/* eslint test-limits/scaled-by-slow: off */', "it('b', () => {}, 30_000)"].join('\n')
     const [result] = await eslint.lintText(code, { filePath: join(ROOT, 'packages/agent-host/src/x.test.ts'), warnIgnored: false })
-    // The comment hides the finding from the report; the lint run still fails on it
-    expect(result?.messages.filter((m) => m.ruleId === 'test-limits/scaled-by-slow')).toEqual([])
-    expect(disabledFindings(ROOT, result ? [result] : [])).toEqual([{ file: 'packages/agent-host/src/x.test.ts', line: 2, rule: 'test-limits/scaled-by-slow' }])
+    expect(result?.messages.filter((m) => m.ruleId === 'test-limits/scaled-by-slow').map((m) => m.line)).toEqual([2, 4])
+    expect(result?.suppressedMessages).toEqual([])
   })
 
   it('has no exceptions, and each one added later names its file and its reason', () => {
