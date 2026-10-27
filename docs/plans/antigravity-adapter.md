@@ -305,6 +305,7 @@ swap) sends nothing.
 | `system_message` | dropped | content not streamed; the resume notice is agy's, not the person's |
 | `result` `SUCCESS` | `turn_complete` | `denied_actions` → a `notice` naming them (should not happen under the gate) |
 | `result` `ERROR` `"interrupted"` | the turn ends `interrupted` | only after our SIGINT; otherwise `INTERRUPTED_BY_TOOL` |
+| `result` `ERROR` other, after our Stop | the turn ends `interrupted` (ours) | a Stop that raced a failure, or came at `init`, is the person's Stop and is not shown as the failure it left; a Stop is spent at the turn's end whatever the result says, as is a login line from stderr |
 | `result` `ERROR` other | `error` with the text | auth and "model not found" get their own wording; stderr `AGY_ERROR: {…}` (changelog: canonical status, retryability, error id; exit 3) when present |
 | stderr `warning:` / `error:` lines | host.log; `error:` also feeds the next `error` | never shown as conversation text |
 | process exit | `error` + `session_live {live: false, reason: 'crashed'}` unless we stopped it | open gate cards released (`PendingCards`), queued inputs said undelivered |

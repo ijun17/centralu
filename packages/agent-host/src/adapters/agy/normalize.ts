@@ -35,6 +35,8 @@ export class AgyNormalizer {
   private readonly open = new Set<string>()
   /** Messages that have said any text, by id: a model call that only called tools ends with a bare newline, which is no message */
   private readonly spoke = new Set<string>()
+  /** Model calls whose usage is counted, by step id: a `DONE` frame sent twice is one request */
+  private readonly counted = new Set<string>()
   /** Paths an edit would change, reported once it ended ok (#843): a denied edit marks nothing */
   private readonly touched: TouchedFiles
   /** The conversation's token total as `agy` last said it (`result.usage` is cumulative, across processes) */
@@ -59,6 +61,8 @@ export class AgyNormalizer {
 
   step(s: AgyStep): NormalizedEvent[] {
     const conversation = s.conversation_id || this.conversationId
+    // No id is built from a missing conversation (":3" would name no step): a step before `init` that names none is dropped
+    if (!conversation) return []
     switch (s.step_type) {
       case 'agent_response':
         return this.response(s, conversation)
@@ -81,7 +85,10 @@ export class AgyNormalizer {
       this.spoke.add(messageId)
       events.push({ type: 'message_delta', sessionId: this.sessionId, role: 'assistant', text, messageId })
     }
-    if (s.state === 'DONE' && s.usage) events.push(...this.request(s.usage))
+    if (s.state === 'DONE' && s.usage && !this.counted.has(messageId)) {
+      this.counted.add(messageId)
+      events.push(...this.request(s.usage))
+    }
     return events
   }
 
@@ -135,6 +142,7 @@ export class AgyNormalizer {
     const events = [...this.open].flatMap((id) => [toolResultEvent(this.sessionId, id, false, '', why)])
     this.open.clear()
     this.spoke.clear()
+    this.counted.clear()
     return events
   }
 

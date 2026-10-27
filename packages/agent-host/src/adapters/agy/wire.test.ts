@@ -200,6 +200,76 @@ describe('resume', () => {
   })
 })
 
+describe('what belongs to one turn', () => {
+  it('a login failure is the failure it came with, not every later one of the process', () => {
+    const { w, feed } = wire()
+    feed(init())
+    w.stderr("Error: authentication required. Run 'agy' to log in, then retry.")
+    expect(feed(result({ status: 'ERROR', error: 'authentication failed or timed out' })).turnEnded).toMatchObject({ error: { code: 'not_logged_in' } })
+    expect(feed(result({ status: 'ERROR', error: 'model overloaded' })).turnEnded).toMatchObject({ error: { code: 'internal', message: 'Antigravity: model overloaded' } })
+  })
+
+  it('a Stop that raced a success is spent by it: the next interrupt is the tool\'s own', () => {
+    const { w, feed } = wire()
+    feed(init())
+    w.stopRequested()
+    expect(feed(result({})).turnEnded).toEqual({ how: 'complete' })
+    expect(feed(result({ status: 'ERROR', error: 'interrupted' })).turnEnded).toEqual({ how: 'interrupted', byUs: false })
+  })
+
+  it('a Stop that ends in a failed result is reported as the Stop, not as a failure, and is spent', () => {
+    const { w, feed } = wire()
+    feed(init())
+    w.stopRequested()
+    expect(feed(result({ status: 'ERROR', error: 'failed to send message: trajectory not found' })).turnEnded).toEqual({ how: 'interrupted', byUs: true })
+    expect(feed(result({ status: 'ERROR', error: 'model overloaded' })).turnEnded).toMatchObject({ how: 'failed' })
+  })
+})
+
+describe('steps that are counted once or not at all', () => {
+  it('a step that names no conversation before init makes no id', () => {
+    const { feed } = wire()
+    const bare = JSON.stringify({ event: 'step_update', step_update: { step_index: 3, state: 'ACTIVE', step_type: 'tool', tool_name: 'run_command', tool_info: { parameters: { CommandLine: 'ls' } } } })
+    expect(feed(bare).events).toEqual([])
+    feed(init())
+    expect(digest(feed(bare).events)).toEqual(['call c1:3 Bash: ls'])
+  })
+
+  it('a DONE frame sent twice is one model request', () => {
+    const { w, feed } = wire()
+    feed(init())
+    w.startTurn('go')
+    const done = step({ step_index: 1, state: 'DONE', step_type: 'agent_response', usage: usage(100, 10) })
+    expect(feed(done).events).toHaveLength(1)
+    expect(feed(done).events).toEqual([])
+    const next = feed(step({ step_index: 3, state: 'DONE', step_type: 'agent_response', usage: usage(50, 5) }))
+    expect(next.events).toMatchObject([{ tokens: { inputTokens: 150, outputTokens: 15 } }])
+  })
+
+  it('a cache read larger than the input is clamped to it, leaving no negative input', () => {
+    const { feed } = wire()
+    feed(init())
+    const o = feed(step({ step_index: 1, state: 'DONE', step_type: 'agent_response', usage: usage(100, 5, 500) }))
+    expect(o.events).toMatchObject([{ tokens: { inputTokens: 0, cacheReadTokens: 100 }, request: { inputTokens: 0, cacheReadTokens: 100 } }])
+  })
+
+  it('what a message said in one turn does not make a bare newline of the next a message', () => {
+    const { w, feed } = wire()
+    feed(init())
+    w.startTurn('a')
+    expect(feed(step({ step_index: 1, state: 'ACTIVE', step_type: 'agent_response', text_delta: 'hi' })).events).toHaveLength(1)
+    feed(result({}))
+    // The same id again in the next turn (a test's stand-in for a reused index) starts from nothing
+    expect(feed(step({ step_index: 1, state: 'DONE', step_type: 'agent_response', text_delta: '\n' })).events).toEqual([])
+  })
+
+  it('after the resume was refused, a second warning or login line asks for nothing more', () => {
+    const { w } = wire('c1')
+    expect(w.stderr('warning: conversation "c1" not found')).toMatchObject({ stop: true })
+    expect(w.stderr('warning: conversation "c1" not found')).toEqual({ events: [] })
+  })
+})
+
 describe('what agy may add', () => {
   it('an unknown step type, event or line maps to nothing and is logged once', () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})

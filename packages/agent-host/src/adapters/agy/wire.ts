@@ -107,7 +107,6 @@ export class AgyWire {
 
   /** The process ended: the calls it left open are closed as failed. Whether that is a crash is the core's rule (a Stop expects it) */
   exit(): WireOutput {
-    if (this.rejected) return EMPTY
     return { events: this.normalizer.endTurn('the process ended before this call finished') }
   }
 
@@ -130,19 +129,22 @@ export class AgyWire {
   private result(r: AgyResult): WireOutput {
     this.inFlight = Math.max(0, this.inFlight - 1)
     const events = this.normalizer.result(r)
+    // What a stderr line said belongs to the turn it came in, and so does a Stop: neither outlives the turn's end
     const asked = this.stopAsked
     const retryable = this.retryable
+    const loggedOut = this.loggedOut
+    this.stopAsked = false
     this.retryable = undefined
+    this.loggedOut = false
     if (r.status === 'SUCCESS') return { events, turnEnded: { how: 'complete' } }
-    if (/^interrupted\b/i.test(r.error ?? '')) {
-      this.stopAsked = false
-      return { events, turnEnded: { how: 'interrupted', byUs: asked } }
-    }
-    return { events, turnEnded: { how: 'failed', error: this.failure(r, retryable) } }
+    // A Stop that ends in a failed result (it raced a failure, or came at init) is still the person's Stop: reported as
+    // stopped, not as the failure it left behind
+    if (asked || /^interrupted\b/i.test(r.error ?? '')) return { events, turnEnded: { how: 'interrupted', byUs: asked } }
+    return { events, turnEnded: { how: 'failed', error: this.failure(r, retryable, loggedOut) } }
   }
 
-  private failure(r: AgyResult, retryable: boolean | undefined): { code: 'not_logged_in' | 'internal'; message: string; retryable: boolean } {
-    if (this.loggedOut) {
+  private failure(r: AgyResult, retryable: boolean | undefined, loggedOut: boolean): { code: 'not_logged_in' | 'internal'; message: string; retryable: boolean } {
+    if (loggedOut) {
       return { code: 'not_logged_in', message: `${this.label} is not logged in. Run agy in a terminal to log in, then try again.`, retryable: false }
     }
     return { code: 'internal', message: `${this.label}: ${r.error || `the turn ended ${r.status}`}`, retryable: retryable ?? false }
