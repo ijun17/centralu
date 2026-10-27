@@ -249,8 +249,9 @@ in step 2 (#1618, #1626); agent-host.md §4.8, "Continuing the turns an update c
    wrote is not JSON and goes at the next. So a new host that fails its check and is stopped again, a rollback, or a
    second update with no host up in between leaves the lists (and writes its own with what it cuts, the continued turns
    included), and the host after it continues them; a Continue the tool takes while the host is leaving is left to that
-   next host, which sends the note, writes the line and tells the requester: the leaving host writes no line for it
-   and, once it is leaving, sends none, so the conversation shows one Continue. Nothing expires: a list is the next start's, whenever it comes. A session the person stopped, and whose Stop the host took
+   next host, which sends the note, writes the line and tells the requester: a host leaving for a second update writes no
+   line for it, and a host that is leaving sends none, so the conversation shows one Continue. A person's quit or a swap
+   lists nothing, so there the line is written: it carries the conversation past the mark of the list still standing. Nothing expires: a list is the next start's, whenever it comes. A session the person stopped, and whose Stop the host took
    before it stopped, is not listed. A Stop still on its way when the host stops is not taken, and that session is
    continued. A session whose turn had ended but whose background work still ran loses that work and is not continued.
 4. **The callers.** A caller on the same machine hears once that the turn was cut and continued, and whether its report
