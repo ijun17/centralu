@@ -73,3 +73,17 @@ describe('a message’s text', () => {
     expect(events.map((e) => (e.type === 'message_delta' ? `${e.messageId}:${e.text}` : e.type))).toEqual(['a:x ', 'a:</th', 'b:next'])
   })
 })
+
+describe('an image the agent sends inline', () => {
+  const image = (data: string) => frame({ sessionUpdate: 'agent_message_chunk', content: { type: 'image', mimeType: 'image/png', data } })
+
+  it('is drawn when it is small', () => {
+    expect(new AcpNormalizer('s').update(image('aGk='))).toEqual([{ type: 'message_image', sessionId: 's', mime: 'image/png', data: 'aGk=' }])
+  })
+
+  it('is left undrawn with a note over the 8 MB every other tool is held to, rather than sent to the screen whole', () => {
+    const big = 'A'.repeat(12 * 1048576)
+    const [e] = new AcpNormalizer('s').update(image(big))
+    expect(e).toMatchObject({ type: 'message_image', data: '', note: 'Image is too large (9MB)' })
+  })
+})
