@@ -28,6 +28,8 @@ export class ReasoningParts {
     const p = asObj(n.params)
     const item = str(p.itemId)
     if (!item) return events
+    // An item counts once it has said something: Codex sends empty chunks, and one must not make the next real chunk look like a continuation
+    if (!events.some((e) => e.type === 'reasoning_delta' && e.text)) return events
     const apart = this.item !== null && this.item !== item
     this.item = item
     // A part after the first of its item has its own blank line from `summaryPartAdded`; only the first part of an item has none

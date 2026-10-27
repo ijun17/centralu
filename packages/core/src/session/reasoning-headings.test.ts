@@ -24,4 +24,20 @@ describe('splitRunTogetherHeadings (#1464)', () => {
       expect(splitRunTogetherHeadings(text)).toBe(text)
     }
   })
+
+  it('leaves code alone: a span, and a fenced block', () => {
+    for (const text of ['`**x****y**`', 'run `**A****B**` now', '``**x****y**``', '```\n**A****B**\n```', '~~~sh\n**A****B**\n~~~\n']) {
+      expect(splitRunTogetherHeadings(text)).toBe(text)
+    }
+    // Prose around the code is still mended, and the block ends where its fence does
+    expect(splitRunTogetherHeadings('**A****B** and `**x****y**`\n```\n**C****D**\n```\n**E****F**')).toBe(
+      '**A**\n\n**B** and `**x****y**`\n```\n**C****D**\n```\n**E**\n\n**F**',
+    )
+  })
+
+  it('never splits a bold masked value (a digit or -_@/+=# at the join), where a bold span of a key, card or address ends and starts', () => {
+    for (const text of ['**sk-****abcd**', '**4111****1111**', '**jo****@x.com**', 'the key is **sk-****abcd** here']) {
+      expect(splitRunTogetherHeadings(text)).toBe(text)
+    }
+  })
 })

@@ -90,6 +90,14 @@ describe('codex reasoning summaries stay apart (#1464)', () => {
     expect(reasoning()).toBe('**Checking projects child process**\n\n**흰 화면의 초기화 로그를 확인합니다.**')
   })
 
+  it('an empty first chunk of the second item does not make its next chunk look like a continuation', async () => {
+    const { delta, reasoning } = await live()
+    delta('rs_1', 0, '**One**')
+    delta('rs_2', 0, '')
+    delta('rs_2', 0, '**Two**')
+    expect(reasoning()).toBe('**One**\n\n**Two**')
+  })
+
   it('the same for headings of two languages, streamed in chunks', async () => {
     const { delta, reasoning } = await live()
     delta('rs_1', 0, '**검증 기록 ')
