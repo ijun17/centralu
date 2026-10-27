@@ -211,6 +211,24 @@ export const sessionsParams = {
   'agents.capabilities': z.object({ tool: ToolName, ...machineParam }),
   'agents.detect': z.object({ ...machineParam }),
   /**
+   * Installs a tool Centralu manages itself (#59: Antigravity's agent, `ToolSetup.install: centralu`) on the machine named:
+   * the version this build pins, its archive checked against the pinned sha256 before it is unpacked, put in place whole or
+   * not at all. Answers at once with the setup as it stands (`installing`); progress and the end come as `tool_setup`
+   * events. A second call while one runs joins it. Never started by the host on its own (no download at startup)
+   */
+  'agents.installTool': z.object({ tool: ToolName, ...machineParam }),
+  /** Stops an install that runs; what it had downloaded is removed. Answers the setup as it stands after */
+  'agents.cancelInstallTool': z.object({ tool: ToolName, ...machineParam }),
+  /**
+   * Starts a tool's sign-in inside Centralu (`ToolSetup.signIn: centralu`): the host opens the browser on the machine it
+   * runs on and waits for the tool (Antigravity: ACP `authenticate`, up to 5 minutes). Answers at once (`signing_in`); the
+   * end comes as a `tool_setup` event. **This host's machine only**: there is no `machine` parameter, since the tool's
+   * redirect goes to the loopback of the machine it runs on (a linked machine's line says to sign in there)
+   */
+  'agents.signIn': z.object({ tool: ToolName }),
+  /** Ends a sign-in that waits (its process, and with it the one-shot listener). Answers the setup as it stands after */
+  'agents.cancelSignIn': z.object({ tool: ToolName }),
+  /**
    * The agent CLIs installed now (#297). `force: false` (the window gaining focus) answers with what is known when it
    * was read moments ago; `force: true` reads again. Reading costs no process where the CLI came from npm (its
    * `package.json` says the version), so this is cheap either way.

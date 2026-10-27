@@ -10,6 +10,7 @@ import type {
   SessionGoal,
   ToolName,
   ToolDescriptor,
+  ToolSetup,
 } from '@cc/protocol'
 import type { ToolProfile } from '../apps/contract.js'
 import type { OrchestratorTools } from './contract/orchestrator.js'
@@ -271,7 +272,21 @@ export type HistoryMessage =
   | { role: 'user' | 'assistant'; text: string; ts?: number }
   | { role: 'system'; event: HistoryEvent; ts?: number }
 
-export type DetectResult = { tool: ToolName; installed: boolean; loggedIn: boolean; detail: string }
+export type DetectResult = { tool: ToolName; installed: boolean; loggedIn: boolean; detail: string; setup?: ToolSetup }
+
+/**
+ * Centralu's own install and sign-in of a tool that has them (#59: Antigravity's agent, `ToolSetup.install/signIn: centralu`).
+ * Each start answers at once with the setup as it stands; how it goes on comes through `onChange` (the host turns it into
+ * `tool_setup` events). A second start while one runs joins it. Absent: the tool is installed and signed in from a terminal.
+ */
+export interface ToolSetupControl {
+  current(): ToolSetup
+  install(): ToolSetup
+  cancelInstall(): Promise<ToolSetup>
+  signIn(): ToolSetup
+  cancelSignIn(): Promise<ToolSetup>
+  onChange(listener: (setup: ToolSetup) => void): () => void
+}
 
 export type EventSink = (event: NormalizedEvent) => void
 
@@ -475,6 +490,8 @@ export interface AgentAdapter {
   readonly surface?: AdapterSurface
 
   detect(): Promise<DetectResult>
+  /** Centralu's own install and sign-in, for a tool that has them (`ToolSetupControl`) */
+  readonly setup?: ToolSetupControl
   /**
    * The version of this tool installed on the machine now, or null when it is not installed or
    * cannot be told (#297). Read without starting a session, and cheaply: it runs every ten minutes

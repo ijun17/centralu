@@ -578,6 +578,8 @@ const agentVersions = new AgentVersionService({
   readSeen: () => asObj(parseJson(store.settings.appSetting(AGENT_VERSIONS_SEEN_KEY))) as Record<string, string>,
   writeSeen: (seen) => store.settings.setAppSetting(AGENT_VERSIONS_SEEN_KEY, JSON.stringify(seen)),
 })
+// A tool's own install and sign-in (#59) tell every window as they go: no RPC is waiting when a download ends
+for (const a of adapters.values()) a.setup?.onChange((setup) => events.push({ type: 'tool_setup', tool: a.tool, setup }))
 versionsRef.current = agentVersions
 mgr.useVersionHint((tool) => agentVersions.installedNow(tool))
 /*

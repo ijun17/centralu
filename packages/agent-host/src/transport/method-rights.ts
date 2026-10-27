@@ -150,6 +150,12 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   'agents.listExternalSessions': 'everyday',
   'agents.capabilities': 'everyday',
   'agents.detect': 'everyday',
+  // Brings in a program that later runs (the vendor's agent, checked against the pinned sha256): the person says yes first
+  'agents.installTool': 'asks',
+  'agents.cancelInstallTool': 'everyday',
+  // Opens a browser on the person's machine to sign an account in to a tool
+  'agents.signIn': 'asks',
+  'agents.cancelSignIn': 'everyday',
   'agents.versions': 'everyday',
   'agents.setAutoApplyVersions': 'everyday',
   'agents.applyVersions': 'everyday',

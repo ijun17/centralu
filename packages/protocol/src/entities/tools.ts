@@ -30,6 +30,56 @@ export const ToolDescriptor = z.object({
 export type ToolDescriptor = z.infer<typeof ToolDescriptor>
 
 /**
+ * Where a tool stands on this machine, one shape for every tool (#59, owner 2026-10-27: the header shows an error
+ * donut for each tool that is installed but signed out, and Antigravity's line offers Centralu's own install and
+ * sign-in). Additive: a window that predates it reads `installed` and `loggedIn` as before.
+ *
+ * - `not_installed`: the tool is not found here (`install` says who can install it)
+ * - `installing`: Centralu is downloading or unpacking it (`progress`), only where `install` is `centralu`
+ * - `signed_out`: installed, and the tool says it is not signed in (or a session found so: `-32000` on ACP)
+ * - `signing_in`: Centralu's sign-in runs (the browser is open on that machine), only where `signIn` is `centralu`
+ * - `ready`: installed and signed in
+ * - `unknown`: installed, and its sign-in cannot be told without a session (OpenCode, whose providers each keep their own)
+ */
+export const ToolSetupState = z.enum(['not_installed', 'installing', 'signed_out', 'signing_in', 'ready', 'unknown'])
+export type ToolSetupState = z.infer<typeof ToolSetupState>
+
+/** Why Centralu's install or sign-in of a tool stopped, as a word a screen can act on; `message` says it in words */
+export const ToolSetupFailureReason = z.enum([
+  'network',
+  'checksum',
+  'disk_space',
+  'unpack',
+  'unsupported_platform',
+  'cancelled',
+  'timed_out',
+  'ineligible',
+  'failed',
+])
+export type ToolSetupFailureReason = z.infer<typeof ToolSetupFailureReason>
+
+export const ToolSetup = z.object({
+  state: ToolSetupState,
+  /** Who installs it: `centralu` (an `agents.installTool` action), or the person from a terminal (`ToolDescriptor.install`) */
+  install: z.enum(['centralu', 'terminal']),
+  /** How the person signs in: Centralu's own action (`agents.signIn`, on the machine the host runs on), a terminal (`ToolDescriptor.login`), or not at all (none) */
+  signIn: z.enum(['centralu', 'terminal', 'none']),
+  /** While `installing`: bytes received of the archive, and its size when known */
+  progress: z.object({ received: z.number().int().nonnegative(), total: z.number().int().nonnegative().nullable() }).optional(),
+  /** The last install or sign-in that did not finish; cleared by the next start */
+  failure: z.object({ reason: ToolSetupFailureReason, message: z.string() }).optional(),
+  /** The plan the tool said at its last sign-in (Antigravity's `_meta.antigravity.tier`), with its upgrade link when it gave one */
+  plan: z.object({ name: z.string(), upgradeUri: z.string().optional() }).optional(),
+})
+export type ToolSetup = z.infer<typeof ToolSetup>
+
+/** The setup of a tool whose detection is all there is (Claude, Codex, Cursor): its two booleans in the one shape */
+export function setupOfDetection(installed: boolean, loggedIn: boolean | null): ToolSetup {
+  const state: ToolSetupState = !installed ? 'not_installed' : loggedIn === null ? 'unknown' : loggedIn ? 'ready' : 'signed_out'
+  return { state, install: 'terminal', signIn: 'terminal' }
+}
+
+/**
  * A descriptor and whether that tool can actually be used on this machine right now.
  *
  * One type rather than two lists to join: the screens that draw a row per tool need both
@@ -39,6 +89,8 @@ export const ToolStatus = ToolDescriptor.extend({
   installed: z.boolean(),
   loggedIn: z.boolean(),
   detail: z.string(),
+  /** Additive (#59): the same in the one shape every tool reports, with Centralu's install and sign-in where it has them */
+  setup: ToolSetup.optional(),
 })
 export type ToolStatus = z.infer<typeof ToolStatus>
 

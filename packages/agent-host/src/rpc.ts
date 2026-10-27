@@ -1,7 +1,7 @@
 import { scriptLabel } from './mail/script-label.js'
 import { relative } from 'node:path'
 import { ThemeFiles } from './themes.js'
-import { RpcMethods, hubAutoOf, noSuchAppText, type RpcMethodName } from '@cc/protocol'
+import { RpcMethods, hubAutoOf, noSuchAppText, setupOfDetection, type RpcMethodName } from '@cc/protocol'
 import type { SessionManager } from './sessions/manager.js'
 import { searchFiles } from './dev-services/file-search.js'
 import type { TerminalHandle, TerminalService } from './dev-services/terminal.js'
@@ -28,7 +28,7 @@ import { resultText, type ExternalApps } from './apps/external/runtime.js'
 import { openHomeView } from './app-home-view.js'
 import { askBuilder, sendErrorToBuilder } from './builder-requests.js'
 import { orchestratorToolSchemas } from './sessions/orchestrator-tools.js'
-import type { AgentAdapter } from './adapters/contract.js'
+import type { AgentAdapter, ToolSetupControl } from './adapters/contract.js'
 import type { ViewHost } from './views/view-host.js'
 import type { MailPerson } from './mail/person.js'
 import type { InlineViews } from './inline-views.js'
@@ -198,6 +198,13 @@ export function createRpcHandler(
     if (!updates) throw rpcError('Update checks are unavailable')
     return updates
   }
+  /** A tool's own install and sign-in (#59); a tool installed and signed in from a terminal says so */
+  const toolSetup = (tool: string): ToolSetupControl => {
+    const a = adapters.get(tool)
+    if (!a) throw rpcError(`Unknown tool: ${tool}`, 'tool_not_installed')
+    if (!a.setup) throw rpcError(`${a.descriptor.label} is installed and signed in from a terminal: ${a.descriptor.install}`, 'refused')
+    return a.setup
+  }
 
   const handlers: { [M in RpcMethodName]: (p: unknown, ctx?: { client: number; rights?: 'full' | 'limited'; label?: string | null; covered?: boolean }) => Promise<unknown> } = {
     // A script (the limited credential) that starts a session with a first message owes nobody a wait: the work is the person's, reported to their Inbox (§8.1)
@@ -328,10 +335,15 @@ export function createRpcHandler(
     'agents.detect': async () =>
       Promise.all(
         [...adapters.values()].map(async (a) => {
-          const { installed, loggedIn, detail } = await a.detect()
-          return { ...a.descriptor, installed, loggedIn, detail }
+          const { installed, loggedIn, detail, setup } = await a.detect()
+          // Every tool in one shape (#59): the header's donut reads `setup.state` for each, whoever installs and signs it in
+          return { ...a.descriptor, installed, loggedIn, detail, setup: setup ?? setupOfDetection(installed, loggedIn) }
         }),
       ),
+    'agents.installTool': async (p) => toolSetup(RpcMethods['agents.installTool'].params.parse(p).tool).install(),
+    'agents.cancelInstallTool': async (p) => toolSetup(RpcMethods['agents.cancelInstallTool'].params.parse(p).tool).cancelInstall(),
+    'agents.signIn': async (p) => toolSetup(RpcMethods['agents.signIn'].params.parse(p).tool).signIn(),
+    'agents.cancelSignIn': async (p) => toolSetup(RpcMethods['agents.cancelSignIn'].params.parse(p).tool).cancelSignIn(),
     'git.status': async (p) => mgr.gitStatusFiles(RpcMethods['git.status'].params.parse(p).projectId),
     'git.diff': async (p) => {
       const { projectId, path, staged } = RpcMethods['git.diff'].params.parse(p)
