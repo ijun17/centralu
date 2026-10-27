@@ -64,6 +64,10 @@ export const OS_LAYER = [
   'packages/agent-host/src/dev-services/terminal.ts',
   // How Claude Code is started on Windows (#353)
   'packages/agent-host/src/adapters/claude/exe-link.ts',
+  // A program Centralu installs and runs from its own folder (#59, Google's Antigravity agent): which build this machine
+  // takes, its download and unpack with each OS's file modes, the one rename that puts it in place, the sign-in's BROWSER
+  // helper where the OS can run one, and the person's browser
+  'packages/agent-host/src/adapters/antigravity/agent-files.ts',
   // A new project's folder (#515): the Desktop (Windows' known folder, XDG, ~/Desktop) and each OS's path rules
   'packages/agent-host/src/dev-services/project-folder.ts',
   // The e2e lock (#1632): when another process started, and whether it is still the one that took the lock

@@ -1,0 +1,135 @@
+import { afterEach, describe, expect, it } from 'vitest'
+import { AUTH_REQUIRED, RpcError } from '../acp/connection.js'
+import { FakeAcpPeer } from '../acp/fake-peer.test-helpers.js'
+import type { AgentSpawnSpec } from '../contract.js'
+import { ReplayPeer, replaySpawner } from '../frames/replay.test-helpers.js'
+import { InstallFailure } from './failure.js'
+import { runSignIn, signInFailure, signInUrl } from './sign-in.js'
+import { agyStderrLine } from './shape.js'
+import { agyRecording, exists, fakeInstall, inVersion, leftovers, TEST_ARCHIVE, tempData } from './agent-files.test-helpers.js'
+
+/**
+ * Antigravity's sign-in inside Centralu (docs/plans/antigravity-adapter.md §4): the recorded `authenticate` replayed, and
+ * the parts a recording cannot hold (the address on stderr, a timeout, a cancel) with a scripted agent. No browser opens:
+ * the opener is a stand-in that writes down what it was given.
+ */
+
+const ADDRESS = 'https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=x&redirect_uri=http%3A%2F%2F127.0.0.1%3A1%2F&state=s'
+
+const data: { done(): void }[] = []
+afterEach(() => {
+  for (const d of data.splice(0)) d.done()
+})
+
+function home() {
+  const t = tempData()
+  data.push(t)
+  fakeInstall(t.home)
+  return t.home
+}
+
+describe("Antigravity's sign-in", () => {
+  it('runs initialize and authenticate in a process of its own, and says the plan the agent answered', async () => {
+    const h = home()
+    const rec = agyRecording('sign-in')
+    const { spawn, state } = replaySpawner(rec)
+    const specs: AgentSpawnSpec[] = []
+    const opened: string[] = []
+    const result = await runSignIn(h, TEST_ARCHIVE, new AbortController().signal, {
+      platform: 'darwin',
+      openUrl: (u) => opened.push(u),
+      spawn: (spec) => {
+        specs.push(spec)
+        const p = spawn(spec)
+        // The agent prints its address on stderr as it waits (spike §4); the recording does not keep stderr
+        setImmediate(() => p instanceof ReplayPeer && p.stderr.write(`I1027 server.py] Open the following link to authenticate the ACP server: ${ADDRESS}\n`))
+        return p
+      },
+    })
+    expect(state.problems).toEqual([])
+    expect(state.left()).toBe(0)
+    expect(result.plan).toEqual({ name: 'Antigravity Starter Quota', upgradeUri: expect.stringMatching(/^https:\/\/antigravity\.google\//) })
+    // Isolated as every Antigravity process is, with the BROWSER helper in a folder of its own
+    expect(specs[0]!.env).toMatchObject({ GEMINI_HOME: h.geminiHome, AGY_ACP_FORCE_FILE_STORAGE: '1' })
+    expect(specs[0]!.env?.BROWSER).toMatch(/[\\/]\.sign-in-[^\\/]+[\\/]open-url$/)
+    expect(specs[0]!.command).toBe(inVersion(h, TEST_ARCHIVE.command))
+    expect(opened).toEqual([ADDRESS])
+    // The helper's folder goes with the sign-in
+    expect(leftovers(h, '.sign-in-')).toEqual([])
+  })
+
+  it('asks authenticate for a Google sign-in and waits; a cancel ends the process and says cancelled', async () => {
+    const h = home()
+    const abort = new AbortController()
+    const peers: FakeAcpPeer[] = []
+    const run = runSignIn(h, TEST_ARCHIVE, abort.signal, {
+      platform: 'win32',
+      openUrl: () => {
+        throw new Error('the host opens nothing on Windows: the agent opens it')
+      },
+      spawn: () => {
+        const p = new FakeAcpPeer((method) => (method === 'initialize' ? { result: { protocolVersion: 1 } } : { hold: true }))
+        peers.push(p)
+        return p
+      },
+    })
+    const auth = await new Promise<Record<string, unknown>>((resolve) => {
+      const wait = () => (peers[0] ? void peers[0].next((m) => m.method === 'authenticate').then(resolve) : setImmediate(wait))
+      wait()
+    })
+    expect(auth.params).toEqual({ methodId: 'oauth-personal' })
+    peers[0]!.stderr.write(`Open the following link to authenticate the ACP server: ${ADDRESS}\n`)
+    abort.abort()
+    const failure = await run.then(
+      () => null,
+      (e: unknown) => e,
+    )
+    expect(failure).toBeInstanceOf(InstallFailure)
+    expect((failure as InstallFailure).reason).toBe('cancelled')
+    expect(peers[0]!.killed || peers[0]!.exitCode !== null).toBe(true)
+  })
+
+  it('opens only an https address on a Google host', () => {
+    expect(signInUrl(ADDRESS)).toBe(ADDRESS)
+    expect(signInUrl('http://accounts.google.com/x')).toBeNull()
+    expect(signInUrl('https://accounts.google.com.evil.example/x')).toBeNull()
+    expect(signInUrl('file:///etc/passwd')).toBeNull()
+    expect(signInUrl('not a url')).toBeNull()
+  })
+
+  it('says why a sign-in ended, as a word the line can act on', () => {
+    const live = new AbortController().signal
+    const aborted = AbortSignal.abort()
+    expect(signInFailure(new RpcError(AUTH_REQUIRED, 'Onboarding failed', { reason: 'onboarding_failed' }), live).reason).toBe('ineligible')
+    expect(signInFailure(new RpcError(-32603, 'Timed out waiting for the authentication flow to complete.'), live).reason).toBe('timed_out')
+    expect(signInFailure(new Error('No response for authenticate'), live).reason).toBe('timed_out')
+    expect(signInFailure(new Error('request cancelled while closing'), aborted).reason).toBe('cancelled')
+    expect(signInFailure(new Error('Antigravity exited'), live).reason).toBe('failed')
+  })
+
+  it("keeps the agent's address, its account's email and its token lines out of host.log", () => {
+    expect(agyStderrLine(`Open the following link to authenticate the ACP server: ${ADDRESS}`)).toBeNull()
+    expect(agyStderrLine("loadCodeAssist response: {'upgradeSubscriptionUri': 'x'}")).toBeNull()
+    expect(agyStderrLine('AccountChooser for someone@example.com')).toBeNull()
+    expect(agyStderrLine('credential_store.py:235] using file credential storage.')).toBe('credential_store.py:235] using file credential storage.')
+  })
+
+  it('leaves no helper folder when the process cannot start', async () => {
+    const h = home()
+    const failure = await runSignIn(h, TEST_ARCHIVE, new AbortController().signal, {
+      platform: 'darwin',
+      openUrl: () => {},
+      spawn: () => {
+        const p = new FakeAcpPeer(() => ({ hold: true }))
+        setImmediate(() => p.exit(1))
+        return p
+      },
+    }).then(
+      () => null,
+      (e: unknown) => e,
+    )
+    expect((failure as InstallFailure).reason).toBe('failed')
+    expect(leftovers(h, '.sign-in-')).toEqual([])
+    expect(exists(h.geminiHome)).toBe(false)
+  })
+})
