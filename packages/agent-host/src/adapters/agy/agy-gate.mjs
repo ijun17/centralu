@@ -7,8 +7,8 @@
  *
  * Nothing here is conditional: whatever name or path this file is run under, it reads the call and prints one answer
  * (`gate-answer.mjs`, where the tests drive it). `agy` passes its environment on to its hooks (measured):
- *   CC_AGY_GATE_URL     where the session's gate listens
- *   CC_AGY_GATE_TOKEN   that gate's credential: it answers this one session's gate and nothing else
+ *   CC_GATE_URL     where the session's gate listens
+ *   CC_GATE_TOKEN   that gate's credential: it answers this one session's gate and nothing else
  */
 import { runHook } from './gate-answer.mjs'
 
