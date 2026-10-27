@@ -208,6 +208,8 @@ export class RemoteAgents {
    */
   private readonly toldDown = new Map<string, boolean>()
   /** The turns an update of their machine cut whose callers were told it goes on (#1618), by session and when it was continued: once each */
+  /** The machines whose link this hub's own update or rollback holds, until it is back (#1618, `linkChanged`) */
+  private readonly updateHolds = new Set<string>()
   private readonly toldCut = new Set<string>()
   /** The cards of a caller's turn its caller was told of, once each (`<session>\0<turn>\0<request>`, #676) */
   private readonly toldCards = new Set<string>()
@@ -1190,7 +1192,15 @@ export class RemoteAgents {
    */
   private linkChanged(machine: unknown): void {
     const m = machine as { id?: unknown; name?: unknown; status?: unknown; autoReconnect?: unknown; operation?: { kind?: unknown } | null } | null
-    if (!m || typeof m.id !== 'string' || m.status === 'connected') return
+    if (!m || typeof m.id !== 'string') return
+    /*
+     * This hub's own update or rollback of the machine holds the link from its first step until the link is back (#1618):
+     * the operation ends with the check, before the link has reconnected (`connecting`, `starting`). Anything else, such as
+     * an update that ended with the machine not back, lets it go
+     */
+    if (updating(m.operation)) this.updateHolds.add(m.id)
+    else if (m.status !== 'connecting' && m.status !== 'starting') this.updateHolds.delete(m.id)
+    if (m.status === 'connected') return
     /*
      * Nothing here reconnects it (#1341): the person disconnected it, or its Auto reconnect is off and the attempt that
      * failed or the redials that gave up were the last. Judged by the link and not by the row, which says `unreachable` the
@@ -1219,10 +1229,10 @@ export class RemoteAgents {
       /*
        * This hub's own update or rollback of the machine holds the link (#1618): its stop ends this turn, and the host it starts
        * continues it, when the machine's host is one that does (its hello's `updateContinued`). The caller hears that once the
-       * link is back (`caughtUp`), not that the link dropped. An update that ends with the machine not back clears the row's
-       * operation, and the drop is told then as any is. A host from before that is told as before
+       * link is back (`caughtUp`), not that the link dropped. An update that ends with the machine not back lets the link go
+       * (`updateHolds`), and the drop is told then as any is. A host from before that is told as before
        */
-      if (updating(m.operation) && this.host.linkedReader?.continuesCutTurns?.(m.id) === true) continue
+      if (this.updateHolds.has(m.id) && this.host.linkedReader?.continuesCutTurns?.(m.id) === true) continue
       this.toldDown.set(rec.sessionId, alone)
       const why = !alone
         ? 'It cannot be followed until the link is back: '

@@ -467,8 +467,8 @@ through an additive call, since the hub's mirror knows sessions but not terminal
 2. **Wait until no session there is in a turn** (#1399; the person can stop the wait, or choose to stop the turns): a remote
    has no keeper to hand agents over, so the person's update does not end a turn on its own. The person's `now`, and every
    update nobody approved (following the hub, #1508), do not wait (owner, 2026-10-26, #1618): the turns they end are
-   continued once by the next host, from the ids the switch writes beside the pointers (agent-host.md §4.8, "Continuing
-   the turns an update cut"), and terminals and project commands close. Once a reading has succeeded the wait goes
+   continued once by the next host, from the ids the stopping host writes as it stops (`host.stop { forUpdate }`,
+   agent-host.md §4.8, "Continuing the turns an update cut"), and terminals and project commands close. Once a reading has succeeded the wait goes
    on through failed readings (a busy or dropped remote fails them too) and ends only on a successful reading of none, taken
    twice; a machine never read successfully is not waited for. Then stop the running host in order
    (`serve --stop`, §10.4). Without a keeper this ends its agents; their sessions resume on the new host through the stored

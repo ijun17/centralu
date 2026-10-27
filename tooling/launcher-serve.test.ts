@@ -22,6 +22,7 @@ import {
   parseWmiAnswer,
   remoteLayout,
   runDetach,
+  runStop,
   SERVE_PID_FILE,
   windowsArg,
   wmiScript,
@@ -992,7 +993,7 @@ describe('moving a host that runs in a network logon into the Windows sign-in', 
       ...(logon ? { logon: () => logon } : {}),
       build: { commit: 'c', protocolVersion: PROTOCOL_VERSION, version: '1.0.0' },
       onRpc: async (method, params) => {
-        calls.push(`${method}${(params as { ifIdle?: boolean })?.ifIdle ? ' ifIdle' : ''}`)
+        calls.push(`${method}${(params as { ifIdle?: boolean })?.ifIdle ? ' ifIdle' : ''}${(params as { forUpdate?: boolean })?.forUpdate ? ' forUpdate' : ''}`)
         if (method === 'host.handover') told.push((params as { handover: unknown }).handover)
         if (method === 'host.stop') {
           const now = counts.length > 1 ? counts.shift()! : counts[0]!
@@ -1007,6 +1008,24 @@ describe('moving a host that runs in a network logon into the Windows sign-in', 
     const existing = await probeHost({ port: state.port!, token: state.token, protocolVersion: PROTOCOL_VERSION })
     return { d, server, calls, told, existing }
   }
+
+  // #1618: a hub's update stops the host with `CENTRALU_STOP_FOR=update`, and the host lists the turns it ends for the next one
+  it('passes an update’s stop on to the host as host.stop {forUpdate}, and only an update’s', async () => {
+    for (const [env, call] of [
+      [{ CENTRALU_STOP_BY: 'hub', CENTRALU_STOP_FOR: 'update' }, 'host.stop forUpdate'],
+      [{ CENTRALU_STOP_BY: 'hub' }, 'host.stop'],
+    ] as const) {
+      const h = await heldFolder(null, [idle])
+      try {
+        const lines: string[] = []
+        await runStop({ env: { CC_DATA_DIR: h.d, ...env }, home: h.d, entry: SOURCE_HOST, write: (l: string) => void lines.push(l) })
+        expect(h.calls.filter((c) => c.startsWith('host.stop'))).toEqual([call])
+        expect(JSON.parse(lines.join(''))).toMatchObject({ v: 1, stop: { ok: true, wasRunning: true } })
+      } finally {
+        await h.server.close()
+      }
+    }
+  })
 
   it('reads the logon a host says in its hello', async () => {
     const h = await heldFolder('network', [idle])

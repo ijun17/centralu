@@ -1531,7 +1531,8 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
     }
     const startHost = async (): Promise<HostStart> => {
       runs.push('start')
-      running = await remoteHost(0, new Store(), { version: RELEASE, updateResume: folder })
+      // In the same data folder: the same store, and the same list of the turns an update cut
+      running = await remoteHost(0, running.store, { version: RELEASE, updateResume: folder })
       line = { ...lineFor(running.port, { version: RELEASE }), install: { managed: true, current: next, previous: old, node: NODE } }
       return { how: 'detached', note: null }
     }
