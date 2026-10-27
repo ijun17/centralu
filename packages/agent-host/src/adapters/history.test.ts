@@ -1,4 +1,6 @@
 import { describe, expect, it, afterEach } from 'vitest'
+import { randomUUID } from 'node:crypto'
+import { centraluInputId, isCentraluInputId } from './input-receipts.js'
 import {
   __setSessionApiForTest,
   AGENT_REPORT_NOT_RECORDED,
@@ -120,6 +122,30 @@ describe('claude — SDK listSessions/getSessionMessages', () => {
       { role: 'user', text: 'Take a look at this too' },
       { role: 'user', text: 'This is really my message' },
     ])
+  })
+
+  it("marks the inputs Centralu wrote by the id it gave them, and drops the CLI's line where a turn was stopped (#1618 review)", async () => {
+    const note = '[Centralu] Centralu on this machine was updated while your turn was running. Continue where you stopped.'
+    // The CLI keeps the id a stream-json input names as the line's uuid (measured, CLI 2.1.296); its own lines get random ones
+    const ours = centraluInputId()
+    __setSessionApiForTest({
+      listSessions: async () => [],
+      getSessionMessages: async () => [
+        { type: 'user', uuid: centraluInputId(), message: { content: 'Make ten Bash calls' } },
+        { type: 'assistant', uuid: randomUUID(), message: { id: 'synthetic-1', model: '<synthetic>', content: [{ type: 'text', text: 'No response requested.' }] } },
+        { type: 'user', uuid: ours, message: { content: [{ type: 'text', text: note }] } },
+        { type: 'user', uuid: randomUUID(), message: { content: [{ type: 'text', text: '[Request interrupted by user]' }] } },
+        { type: 'user', uuid: randomUUID(), message: { content: [{ type: 'text', text: '[Request interrupted by user for tool use]' }] } },
+        { type: 'user', uuid: randomUUID(), message: { content: 'typed in a terminal' } },
+      ],
+    })
+    expect(await readClaudeHistory('s', '/p', 100)).toEqual([
+      { role: 'user', text: 'Make ten Bash calls', sent: true },
+      { role: 'assistant', text: 'No response requested.' },
+      { role: 'user', text: note, sent: true },
+      { role: 'user', text: 'typed in a terminal' },
+    ])
+    expect([isCentraluInputId(ours), isCentraluInputId(randomUUID()), isCentraluInputId(undefined)]).toEqual([true, false, false])
   })
 
   it("keeps a compaction as a marker, where its summary was, rather than as the person's words (#843)", async () => {

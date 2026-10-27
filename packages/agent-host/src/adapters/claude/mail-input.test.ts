@@ -23,6 +23,7 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
 }))
 
 const { ClaudeAdapter } = await import('./index.js')
+const { centraluInputId, isCentraluInputId } = await import('../input-receipts.js')
 const tick = () => new Promise((r) => setTimeout(r, 10))
 const textOf = (m: Record<string, unknown>) => (m.message as { content: { text: string }[] }).content[0]?.text
 
@@ -67,6 +68,21 @@ describe('mail written to the CLI', () => {
       ['quiet', { kind: 'channel', server: 'centralu' }, true],
       ['hello', { kind: 'human' }, false],
     ])
+    await handle.dispose()
+  })
+
+  it("writes every input under an id with Centralu's mark, so its transcript line reads back as Centralu's (#1618 review)", async () => {
+    wire.messages.length = 0
+    const handle = await new ClaudeAdapter().createSession({ sessionId: 'm4', cwd: '/tmp', permissionPreset: 'normal' }, () => {})
+    const named = centraluInputId()
+    handle.send('<centralu-mail/>', { origin: { kind: 'channel', server: 'centralu' } })
+    handle.send('quiet', { origin: { kind: 'channel', server: 'centralu' }, quiet: true })
+    await handle.nudge?.('a note')
+    handle.send('hello', { origin: { kind: 'human' }, id: named })
+    await tick()
+    expect(wire.messages.map((m) => isCentraluInputId(m.uuid))).toEqual([true, true, true, true])
+    // An id the host named the input by is the one written: the turn's end is matched to it (#1377)
+    expect(wire.messages[3]!.uuid).toBe(named)
     await handle.dispose()
   })
 

@@ -278,51 +278,52 @@ export class ExternalConversations {
     }
     const lastText = lastMessageText()?.trim()
 
-    // Everything new starts right after the last message we know about
+    /*
+     * Everything new starts right after the last line we know about: our last message, found by its words, or the last
+     * input Centralu itself wrote there, known by the id it gave the line (`HistoryMessage.sent`), whichever is later
+     * (#1618 review). A note or mail goes in through Centralu's channel and leaves no row of its words, so the words
+     * alone anchored on the message before it: the note was attached as the person's message, and the calls after it,
+     * already stored live, a second time. Words we hold that the record lacks still attach nothing, as before: the id
+     * only moves the anchor later, never past words of ours it cannot place.
+     */
+    const said = lastText ? history.findLastIndex((h) => h.role !== 'system' && h.text.trim() === lastText) : -1
+    const wrote = history.findLastIndex((h) => h.role === 'user' && h.sent === true)
     let start = -1
-    if (lastText) {
-      for (let i = history.length - 1; i >= 0; i--) {
-        const h = history[i]!
-        if (h.role !== 'system' && h.text.trim() === lastText) {
-          start = i + 1
-          break
-        }
-      }
-    } else if (ours.length === 0) {
-      start = 0 // If our record is empty, everything is new
-    }
+    if (ours.length === 0) start = 0 // If our record is empty, everything is new
+    else if (said >= 0 || (!lastText && wrote >= 0)) start = Math.max(said, wrote) + 1
     if (start < 0 || start >= history.length) {
       mark()
       return 0
     }
 
     /*
-     * The events right after that message may already be ours (#303, #843): a compaction or a tool call that ran while
-     * this host was watching left its row live, and the tool's record has the same event in the same stretch. Each one
-     * our record holds after its last message is skipped, as many times as it holds it, so the row is stored once; the
-     * rest of the stretch is attached. The two need not be in the same order or complete: parallel calls finish in
-     * another order live than the record lists them, a background agent's launch result is in the record but came
-     * later live (or never), and a row an older host did not store can come first. Stopping at the first event we lack
-     * stored every later one a second time. An event that ran outside the app is not in our record and is attached
-     * like any other line.
+     * The events after that line may already be ours (#303, #843): a compaction or a tool call that ran while this host
+     * was watching left its row live, and the tool's record has the same event. Each one our record holds is skipped, as
+     * many times as it holds it, so the row is stored once; the rest is attached. The two need not be in the same order
+     * or complete: parallel calls finish in another order live than the record lists them, a background agent's launch
+     * result is in the record but came later live (or never), and a row an older host did not store can come first.
+     * Stopping at the first event we lack stored every later one a second time. A tool call or result is the same
+     * record by its id wherever it falls, so one our record holds is never stored again, also behind a line we did not
+     * store (#1618 review: the CLI's own "No response requested." where it resumed a cut turn). A compaction has no id:
+     * only one our record holds after its last message is taken for one right after the anchor. An event that ran
+     * outside the app is not in our record and is attached like any other line.
      */
     const known = new Map<string, number>()
-    for (let i = ours.length - 1; i >= 0 && ours[i]!.kind !== 'text'; i--) {
+    let trailing = true
+    for (let i = ours.length - 1; i >= 0; i--) {
+      if (ours[i]!.kind === 'text') trailing = false
       const key = eventKey(ours[i]!)
-      if (key) known.set(key, (known.get(key) ?? 0) + 1)
+      if (key && (key !== 'compaction' || trailing)) known.set(key, (known.get(key) ?? 0) + 1)
     }
     let end = start
     while (history[end]?.role === 'system') end++
-    const fresh = [
-      ...history.slice(start, end).filter((h) => {
-        const key = eventKey(historyRow(info.id, 0, h, 0))
-        const left = key ? (known.get(key) ?? 0) : 0
-        if (!key || left === 0) return true
-        known.set(key, left - 1)
-        return false
-      }),
-      ...history.slice(end),
-    ]
+    const fresh = history.slice(start).filter((h, i) => {
+      const key = eventKey(historyRow(info.id, 0, h, 0))
+      const left = key && (key !== 'compaction' || start + i < end) ? (known.get(key) ?? 0) : 0
+      if (!key || left === 0) return true
+      known.set(key, left - 1)
+      return false
+    })
     if (fresh.length === 0) {
       mark()
       return 0

@@ -778,6 +778,62 @@ describe('catching up on a conversation continued outside', () => {
     expect(rows).toEqual(['List the files', 'Let me look', '[compaction]', 'tool_call:tc1', 'after'])
   })
 
+  /*
+   * #1618 review, seen with real Claude Code: an update cut a turn, Centralu continued it with its note through its own
+   * channel (`deliverMail`: a notice line, no row of the note's words), the continued turn made calls, and the host
+   * stopped. At the next wake the record has, after our last words, the CLI's "No response requested." where it resumed
+   * the cut turn, then the note, then the calls we hold. Anchored on the words, the note was stored as the person's
+   * message and every call after it a second time.
+   */
+  const continuedTurn = async (note: HistoryMessage) => {
+    const { a, m, call } = setup()
+    const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
+    a.toolHistory = [{ role: 'user', text: 'Make ten Bash calls', sent: true }]
+    const s = (await call('agents.createSession', {
+      projectId: p.id, cwd: tmpdir(), tool: 'claude', resumeExternalId: 'ext-1', importHistory: true,
+    })) as { id: string }
+    const live: NormalizedEvent[] = [
+      toolCall('tc1', 'sleep 6'), toolResult('tc1', ''),
+      // What `deliverMail` leaves where the note went in
+      { type: 'notice', sessionId: '', level: 'info', from: 'Centralu', label: 'update', text: 'Centralu was updated during this turn' },
+      toolCall('tc2', 'sleep 6'), toolResult('tc2', ''), toolCall('tc3', 'sleep 6'),
+    ]
+    for (const e of live) a.last!.emitEvent({ ...e, sessionId: s.id })
+    await m.disposeAll()
+    a.toolHistory.push(
+      recorded(toolCall('tc1', 'sleep 6')), recorded(toolResult('tc1', '')),
+      { role: 'assistant', text: 'No response requested.' },
+      note,
+      recorded(toolCall('tc2', 'sleep 6')), recorded(toolResult('tc2', '')), recorded(toolCall('tc3', 'sleep 6')),
+    )
+    await m.resumeSession(s.id)
+    return ((await call('messages.load', { sessionId: s.id, limit: 200 })) as StoredMessage[]).map(label)
+  }
+  const note = '[Centralu] Centralu on this machine was updated while your turn was running. Continue where you stopped.'
+  const held = ['Make ten Bash calls', 'tool_call:tc1', 'tool_result:tc1', '[notice]', 'tool_call:tc2', 'tool_result:tc2', 'tool_call:tc3']
+
+  it("does not store Centralu's own note, known by the id it wrote it under, as the person's message, nor what followed it twice", async () => {
+    expect(await continuedTurn({ role: 'user', text: note, sent: true })).toEqual(held)
+  })
+
+  it("stores no call it holds twice behind a line it did not store, also where the tool keeps no id of Centralu's", async () => {
+    // Without the mark the note cannot be told from a message typed in a terminal (Codex keeps no id of ours)
+    expect(await continuedTurn({ role: 'user', text: note })).toEqual([...held, 'No response requested.', note])
+  })
+
+  it('anchors on the last input Centralu wrote when its record holds no words at all (only mail went in)', async () => {
+    const { a, m, call } = setup()
+    const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
+    const s = (await call('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude', resumeExternalId: 'ext-1' })) as { id: string }
+    a.last!.emitEvent({ type: 'notice', sessionId: s.id, level: 'info', from: 'Centralu', label: 'mail', text: 'Mail went in' })
+    a.last!.emitEvent({ ...toolCall('tc1', 'ls'), sessionId: s.id })
+    await m.disposeAll()
+    a.toolHistory = [{ role: 'user', text: '[Centralu] mail', sent: true }, recorded(toolCall('tc1', 'ls')), { role: 'user', text: 'typed in a terminal' }]
+    await m.resumeSession(s.id)
+    const stored = ((await call('messages.load', { sessionId: s.id, limit: 200 })) as StoredMessage[]).map(label)
+    expect(stored).toEqual(['[notice]', 'tool_call:tc1', 'typed in a terminal'])
+  })
+
   it('does not append when the last message we know cannot be found (better than piling up a duplicate)', async () => {
     const { a, m, call } = setup()
     const p = (await call('projects.add', { path: tmpdir() })) as { id: string }

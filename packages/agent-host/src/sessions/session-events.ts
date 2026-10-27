@@ -1,9 +1,9 @@
-import { randomUUID } from 'node:crypto'
 import { relative, resolve, sep } from 'node:path'
 import type { Attachment, Interruption, NormalizedEvent, SessionInfo, ToolName, TurnOrigin } from '@cc/protocol'
 import { applyBackgroundTasks, applySessionState, nextContext, nextStateFor } from '@cc/protocol'
 import type { ToolQueriesHost } from './tool-queries.js'
 import type { AgentProcess, SessionHandle } from '../adapters/contract.js'
+import { centraluInputId } from '../adapters/input-receipts.js'
 import { gitHeadSha } from '../dev-services/git.js'
 import { looksLikeGitCommit, parseCommitSha } from '../dev-services/git-attrib.js'
 import { canonicalPath, isInside } from '../dev-services/path-guard.js'
@@ -663,10 +663,11 @@ export class SessionEvents {
     const input = notice ? `[Centralu] ${notice}\n\n${adapterText}` : adapterText
     // Whose turn this message makes, or joins (#1377): only the person's own message (no source) is theirs
     const joins = inTurn(m.state) && this.host.joinsRunningTurn(sessionId)
-    // Named, so the turn that ends can say whether it took this message in (`SessionHandle.turnInputs`)
+    // Named, so the turn that ends can say whether it took this message in (`SessionHandle.turnInputs`), with Centralu's mark
+    // as every input the adapter names itself, so its line reads back as one Centralu wrote (`centraluInputId`)
     // Also a hub's message at rest: the turn that runs it may open after another's (#1604)
     const hubInput = from?.sessionId === HUB_SENDER
-    const inputId = joins || hubInput ? randomUUID() : undefined
+    const inputId = joins || hubInput ? centraluInputId() : undefined
     this.host.children.noteMessage(sessionId, !from && !fromApp && !fromScript ? 'person' : 'work', inTurn(m.state), this.host.joinsRunningTurn(sessionId), intent === 'task', inputId, relayed ? 'report' : fromApp ? 'app' : 'caller')
     // A hub's message may run as a turn of its own, after another's (#1604): who it is from, for the turn that does
     if (inputId && from && hubInput) this.host.children.noteInputOrigin(sessionId, inputId, { seq, from })
