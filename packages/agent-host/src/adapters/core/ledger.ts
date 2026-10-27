@@ -186,6 +186,10 @@ export class CoreSession<W extends ToolWire = ToolWire> {
   }
 
   /** The old process ended (or is ended now), a new one starts on the same conversation, and the queue goes on in it */
+  private get closed(): boolean {
+    return this.phase === 'closed'
+  }
+
   private async replaceProcess(): Promise<void> {
     this.launching = true
     // Opening again: an exit now is a crash, as on the first open, and the queue waits
@@ -195,7 +199,8 @@ export class CoreSession<W extends ToolWire = ToolWire> {
       await this.openOn(proc)
     } catch (err) {
       this.launching = false
-      if (this.phase === 'closed') return
+      // Read again: the close or an exit may have come while it awaited
+      if (this.closed) return
       // The same rule as a failed first open: the session could not go on, which is a crash, and the input waiting fails.
       // The process that started and could not open is not left running
       const failure = err instanceof Error ? err : new Error(String(err))
