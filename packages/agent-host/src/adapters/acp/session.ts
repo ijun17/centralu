@@ -510,7 +510,6 @@ export class AcpSession implements SessionHandle {
       turn.input.done?.reject(failure)
     }
     if (turn || !wasOpen) {
-      const tail = this.conn.stderrTail().trim().split('\n').slice(-5).join('\n')
       this.emit({ type: 'error', sessionId: this.sessionId, error: { code: 'adapter_crashed', message: withStderrTail(failure.message, this.conn), retryable: true } })
     } else {
       // Idle when it ended: the conversation is kept by the tool, and the next message opens it again
