@@ -1,6 +1,6 @@
-import { describe, expect, it, afterEach } from 'vitest'
+import { describe, expect, it, afterEach, vi } from 'vitest'
 import { randomUUID } from 'node:crypto'
-import { centraluInputId, isCentraluInputId } from './input-receipts.js'
+import { centraluInputId, isCentraluInputId, UPDATE_CONTINUE_TEXT } from './input-receipts.js'
 import {
   __setSessionApiForTest,
   AGENT_REPORT_NOT_RECORDED,
@@ -146,6 +146,42 @@ describe('claude — SDK listSessions/getSessionMessages', () => {
       { role: 'user', text: 'typed in a terminal' },
     ])
     expect([isCentraluInputId(ours), isCentraluInputId(randomUUID()), isCentraluInputId(undefined)]).toEqual([true, false, false])
+  })
+
+  it("knows Centralu's Continue note by its text where the line lacks the id, and says why (#1626 review)", async () => {
+    // Another CLI version, or a transcript a crash left without the id: the row's uuid is a random one
+    __setSessionApiForTest({
+      listSessions: async () => [],
+      getSessionMessages: async () => [
+        { type: 'user', uuid: randomUUID(), message: { content: 'Make ten Bash calls' } },
+        { type: 'user', uuid: randomUUID(), message: { content: [{ type: 'text', text: UPDATE_CONTINUE_TEXT }] } },
+        { type: 'user', uuid: randomUUID(), message: { content: 'typed in a terminal' } },
+      ],
+    })
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      expect(await readClaudeHistory('s', '/p', 100)).toEqual([
+        { role: 'user', text: 'Make ten Bash calls' },
+        { role: 'user', text: UPDATE_CONTINUE_TEXT, sent: true },
+        { role: 'user', text: 'typed in a terminal' },
+      ])
+      expect(log.mock.calls.flat().join(' ')).toContain('does not keep it')
+      // With the id there is nothing to say
+      log.mockClear()
+      __setSessionApiForTest({
+        listSessions: async () => [],
+        getSessionMessages: async () => [{ type: 'user', uuid: centraluInputId(), message: { content: UPDATE_CONTINUE_TEXT } }],
+      })
+      expect(await readClaudeHistory('s', '/p', 100)).toEqual([{ role: 'user', text: UPDATE_CONTINUE_TEXT, sent: true }])
+      expect(log).not.toHaveBeenCalled()
+    } finally {
+      log.mockRestore()
+    }
+  })
+
+  it("knows Centralu's Continue note in a Codex thread by its text, as that tool keeps no id of ours (#1626 review)", () => {
+    const out = turnsToHistory([{ items: [{ type: 'userMessage', content: [{ type: 'input_text', text: 'Run the tests' }] }, { type: 'userMessage', content: [{ type: 'input_text', text: UPDATE_CONTINUE_TEXT }] }] }], 10)
+    expect(out).toEqual([{ role: 'user', text: 'Run the tests' }, { role: 'user', text: UPDATE_CONTINUE_TEXT, sent: true }])
   })
 
   it("keeps a compaction as a marker, where its summary was, rather than as the person's words (#843)", async () => {

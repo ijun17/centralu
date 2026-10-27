@@ -2,6 +2,7 @@ import type { ExternalSessionSummary, HistoryMessage } from '../contract.js'
 import { finite, trimmed } from '../../json-value.js'
 import { countsAsLine, HISTORY_SESSION, historyEvents, lastLines } from '../history-events.js'
 import { cleanTitle, stripInjectedBlocks } from '../history-text.js'
+import { isUpdateContinueNote } from '../input-receipts.js'
 import { normalizeNotification } from './normalize.js'
 import { withCodexClient } from './short-lived.js'
 
@@ -211,7 +212,8 @@ function itemToMessages(item: unknown, ts?: number): HistoryMessage[] {
   }
   if (it.type === 'userMessage') {
     const text = stripInjectedBlocks(userInputText(it.content))
-    return text ? [{ role: 'user', text, ts }] : []
+    // Codex keeps no id of ours: Centralu's own Continue note is known by its text, so it is never the person's message (#1626 review)
+    return text ? [{ role: 'user', text, ts, ...(isUpdateContinueNote(text) ? { sent: true as const } : {}) }] : []
   }
   const live = (method: string) => normalizeNotification(HISTORY_SESSION, { method, params: { item: it } })
   return historyEvents([...live('item/started'), ...live('item/completed')], ts)

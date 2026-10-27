@@ -8,6 +8,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { AdapterCapabilities, NormalizedEvent, SessionInfo, StoredMessage, ToolName } from '@cc/protocol'
 import { sessionLiveDefaults } from '@cc/protocol'
+import { UPDATE_CONTINUE_TEXT } from '../adapters/input-receipts.js'
 import type { AgentAdapter, CreateSessionOpts, EventSink, HistoryEvent, HistoryMessage } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { SessionManager } from './manager.js'
@@ -816,9 +817,9 @@ describe('catching up on a conversation continued outside', () => {
     expect(await continuedTurn({ role: 'user', text: note, sent: true })).toEqual(held)
   })
 
-  it("stores no call it holds twice behind a line it did not store, also where the tool keeps no id of Centralu's", async () => {
-    // Without the mark the note cannot be told from a message typed in a terminal (Codex keeps no id of ours)
-    expect(await continuedTurn({ role: 'user', text: note })).toEqual([...held, 'No response requested.', note])
+  it("never stores Centralu's own Continue note as the person's message, also where the tool keeps no id of Centralu's, and no call twice (#1626 review)", async () => {
+    // Codex keeps no id of ours, and a reader that finds none gives the note unmarked: it is Centralu's own exact text
+    expect(await continuedTurn({ role: 'user', text: UPDATE_CONTINUE_TEXT })).toEqual([...held, 'No response requested.'])
   })
 
   it('anchors on the last input Centralu wrote when its record holds no words at all (only mail went in)', async () => {

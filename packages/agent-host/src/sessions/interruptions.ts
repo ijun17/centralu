@@ -118,12 +118,5 @@ export function interruptionWords(i: Interruption): string {
   }
 }
 
-/**
- * What a session whose turn a linked hub's update cut is sent when the next host continues it (#1618): the same Continue
- * the person's button sends, after why. It goes in through Centralu's channel, never as the person's message
- */
-export const UPDATE_CONTINUE_TEXT =
-  '[Centralu] Centralu on this machine was updated while your turn was running, which stopped the turn before it finished. ' +
-  'Continue where you stopped. Check what already happened before repeating a step.'
 /** The line the conversation shows where that note went in */
 export const UPDATE_CONTINUE_LINE = 'Centralu was updated during this turn, which stopped it; Centralu continued it on the new version.'

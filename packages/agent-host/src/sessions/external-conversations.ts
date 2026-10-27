@@ -9,6 +9,7 @@ import type {
 } from '@cc/protocol'
 import type { AgentAdapter, HistoryMessage, SessionHandle } from '../adapters/contract.js'
 import type { Store } from '../dev-services/store.js'
+import { isUpdateContinueNote } from '../adapters/input-receipts.js'
 
 /**
  * Maximum number of lines of conversation to load. The older side is cut off first.
@@ -32,6 +33,12 @@ const SYNC_LIMIT = 600
  * values given by the same tool.
  */
 const externalSyncedKey = (sessionId: string) => `external_synced:${sessionId}`
+
+/**
+ * Centralu's own Continue note read back (`isUpdateContinueNote`). It went in through Centralu's channel and left its notice
+ * line, so it is never stored as a message of the person's, wherever the anchor falls (#1626 review)
+ */
+const ownNote = (h: HistoryMessage): boolean => h.role === 'user' && isUpdateContinueNote(h.text)
 
 /**
  * A line read back from the tool into a stored row. An event (a tool call, its result, a compaction point) becomes the
@@ -318,6 +325,7 @@ export class ExternalConversations {
     let end = start
     while (history[end]?.role === 'system') end++
     const fresh = history.slice(start).filter((h, i) => {
+      if (ownNote(h)) return false
       const key = eventKey(historyRow(info.id, 0, h, 0))
       const left = key && (key !== 'compaction' || start + i < end) ? (known.get(key) ?? 0) : 0
       if (!key || left === 0) return true
@@ -367,6 +375,7 @@ export class ExternalConversations {
       })
       return
     }
+    history = history.filter((h) => !ownNote(h))
     if (history.length === 0) return
 
     // nextSeq is based on MAX(seq) in the DB, so it **keeps returning the same value until something is

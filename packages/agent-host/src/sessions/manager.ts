@@ -139,7 +139,8 @@ import type { UpdateService } from '../updates.js'
 import type { UpdateApplyBroker } from '../update-apply.js'
 import { cutTurns, inTurn, sessionIdle, turnCut, type SessionIdle } from '../idle.js'
 import { recordUpdateCut, UpdateResumeLists, type UpdateResumeFolder } from '../lifecycle/update-resume.js'
-import { UPDATE_CONTINUE_LINE, UPDATE_CONTINUE_TEXT } from './interruptions.js'
+import { UPDATE_CONTINUE_TEXT } from '../adapters/input-receipts.js'
+import { UPDATE_CONTINUE_LINE } from './interruptions.js'
 import { appSettingRests, CardRests } from './card-rest.js'
 import { rpcError, sessionNotFound } from '../rpc-error.js'
 import { gitWorktreeDirty } from '../dev-services/git-worktree.js'
@@ -539,7 +540,9 @@ export class SessionManager {
        * turn running, not one that ended; the report it owes stays owed. If it cannot be continued, it is reset there
        * (`turnLostInSwap`), as a kept process that could not be re-attached is. Only the turn the stop listed: its
        * conversation still ends where it ended when that stop was done (`UpdateResumeLists.cut`), so a list left behind
-       * names no later turn, such as one a stop of the person's cut after a rollback to a host that never reads lists
+       * names no later turn, such as one a stop of the person's cut after a rollback to a host that never reads lists. It
+       * holds because every listed session leaves this start with a row past the mark: the Continue's line, or the stopped
+       * mark below (`turnLostInSwap` for one that cannot be continued)
        */
       const goesOn = cut && !!lists?.cut(s.id, s.lastSeq)
       const stale = cut && !goesOn
@@ -1289,7 +1292,12 @@ export class SessionManager {
           return
         }
         try {
-          await this.events.deliverMail(sessionId, { text: UPDATE_CONTINUE_TEXT, quiet: false, line: UPDATE_CONTINUE_LINE, label: 'update' })
+          // Not sent once this host is leaving (a second update's stop while the session wakes): the host after it sends the one
+          await this.events.deliverMail(
+            sessionId,
+            { text: UPDATE_CONTINUE_TEXT, quiet: false, line: UPDATE_CONTINUE_LINE, label: 'update', lineUnlessLeaving: true },
+            { leaving: () => this.handingOver || this.disposing, atRest: () => true },
+          )
         } catch (e) {
           if (this.disposing || this.handingOver || this.meta.get(sessionId) !== m) return
           this.restartPolicy.continuingTurns.delete(sessionId)

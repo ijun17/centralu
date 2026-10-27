@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { parseUpdateResume, recordUpdateCut, UpdateResumeLists, type UpdateResumeFolder } from './update-resume.js'
+import { parseUpdateResume, READ_RETRY_MS, READ_TRIES, recordUpdateCut, UpdateResumeLists, type UpdateResumeFolder } from './update-resume.js'
 import { memoryUpdateFolder } from './update-resume.test-helpers.js'
 
 /**
@@ -66,6 +66,60 @@ describe('the turns an update cut, in the data folder', () => {
     expect(later.cut('s1', 12)).toBe(false)
     later.done('s1')
     expect(f.files.size).toBe(0)
+  })
+
+  /*
+   * #1626 review 1a: a virus scanner holds the list just written (EBUSY on Windows), and a start that gave up at once ended
+   * the turn as a quit's although the list was intact.
+   */
+  const busy = () => Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' })
+
+  it('a list held for a moment (EBUSY) is read again, each failure said, and its turn is continued (#1626 review)', () => {
+    const said = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const f = memoryUpdateFolder()
+    recordUpdateCut(f, [{ id: 's1', seq: 4 }])
+    const read = f.read
+    let held = 2
+    f.read = (name) => {
+      if (held-- > 0) throw busy()
+      return read(name)
+    }
+    const waits: number[] = []
+    const lists = new UpdateResumeLists(f, (ms) => waits.push(ms))
+    expect(lists.cut('s1', 4)).toBe(true)
+    expect(waits).toEqual([READ_RETRY_MS, READ_RETRY_MS])
+    expect(said.mock.calls.filter((c) => String(c[0]).includes('EBUSY'))).toHaveLength(2)
+  })
+
+  it('a list still held after the tries is kept for a later start, never removed, and the log says so (#1626 review)', () => {
+    const said = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const f = memoryUpdateFolder()
+    recordUpdateCut(f, [{ id: 's1', seq: 4 }])
+    const read = f.read
+    f.read = () => {
+      throw busy()
+    }
+    const waits: number[] = []
+    const lists = new UpdateResumeLists(f, (ms) => waits.push(ms))
+    expect(waits).toHaveLength(READ_TRIES - 1)
+    expect([...lists.ids()]).toEqual([])
+    expect(said.mock.calls.map((c) => String(c[0])).some((l) => l.includes('kept for a later start') && l.includes('EBUSY'))).toBe(true)
+    expect(f.files.size).toBe(1)
+    // The hold is gone at a later start: the list is read whole
+    f.read = read
+    expect(new UpdateResumeLists(f).cut('s1', 4)).toBe(true)
+  })
+
+  it('any other read error is final at once, with no wait', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const f = memoryUpdateFolder()
+    recordUpdateCut(f, [{ id: 's1', seq: 4 }])
+    f.read = () => {
+      throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' })
+    }
+    const waits: number[] = []
+    new UpdateResumeLists(f, (ms) => waits.push(ms))
+    expect(waits).toEqual([])
   })
 
   it('a stop that ends no turn writes no list', () => {

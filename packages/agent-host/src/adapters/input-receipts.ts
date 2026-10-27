@@ -30,6 +30,24 @@ export function isCentraluInputId(id: unknown): boolean {
   return typeof id === 'string' && id.length === 36 && id.toLowerCase().endsWith(`-${CENTRALU_INPUT_MARK}`)
 }
 
+/**
+ * What a session whose turn a linked hub's update cut is sent when the next host continues it (#1618): the same Continue
+ * the person's button sends, after why. It goes in through Centralu's channel, never as the person's message.
+ */
+export const UPDATE_CONTINUE_TEXT =
+  '[Centralu] Centralu on this machine was updated while your turn was running, which stopped the turn before it finished. ' +
+  'Continue where you stopped. Check what already happened before repeating a step.'
+
+/**
+ * Whether a line read back is Centralu's own Continue note, by its exact text: Centralu's own words, which the person does
+ * not type. The sign for the tools that keep no id of ours (Codex, a Claude Code version that does not keep it, a
+ * transcript a crash left without it): the read-back marks that line as Centralu's input all the same (`sent`), so the
+ * catch-up anchors after it and never stores it as the person's message (#1626 review).
+ */
+export function isUpdateContinueNote(text: string): boolean {
+  return text.trim() === UPDATE_CONTINUE_TEXT
+}
+
 /** Tracks completion of input, rather than its acceptance by a CLI. Vendor correlation stays in the adapter. */
 export class InputReceipts {
   private pending = new Map<string, { receipt: InputReceipt; resolve(): void; reject(e: Error): void; turn?: string; observer?: InputObserver; accepted?: true }>()

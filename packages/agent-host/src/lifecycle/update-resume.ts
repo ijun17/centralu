@@ -9,10 +9,18 @@ import { errorMessage } from '@cc/protocol'
  *
  * **Each turn is the one that stop cut, by a mark, not by its session alone** (#1626 review): with each session goes the
  * last row of its conversation as it stood when the stop was done (`seq`). The next host continues a listed session only
- * when its conversation still ends there. Every turn that begins after, under any version, records its input first, so
- * a list left behind (a file a virus scanner held when it was to be removed, a rollback to a host from before this, which
- * never reads it) names a turn long over and continues nothing: a later stop of the person's that cuts a new turn there
- * is told as a quit's, as it always was.
+ * when its conversation still ends there. That is safe because the next start always writes a row for a listed session
+ * (the Continue's line, or the stopped mark of a turn that is lost or no longer the listed one), and so does an older host's
+ * start after a rollback: the conversation is past the mark before any later turn, whatever begins it. (Not because a
+ * turn records its input first: one the CLI starts itself after a background task, and Centralu's own compaction, begin
+ * with no row of their own.) So a list left behind (a file a virus scanner held when it was to be removed, a rollback to a
+ * host from before this, which never reads it) names a turn long over and continues nothing: a later stop of the person's
+ * that cuts a new turn there is told as a quit's, as it always was.
+ *
+ * **A list that cannot be read at the start** is tried again a few times when it is held (`EBUSY`, a virus scanner that
+ * opened the file just written; `READ_TRIES`), each failure said. One still unreadable stays where it is for a later start,
+ * which reads it whole: the host cannot tell which sessions it names, so a session this start finds cut is marked stopped
+ * like any a quit cut, with its Continue, and the log says so.
  *
  * **Each stop writes its own list** under a name no other has (`add`), never replacing another's: no rename over a file
  * another process may hold, and no list one stop wrote that a second one could take away. The next host reads all of
@@ -36,6 +44,34 @@ export type UpdateResumeFolder = {
   /** Writes a new list under a name no other list has */
   add(text: string): void
   remove(name: string): void
+}
+
+/**
+ * How often a list is read when the first read finds it held (`EBUSY`: a virus scanner that opened the file just written, or
+ * a backup), and how long between the reads. A hold like that is the one failure here known to be passing, so it is tried
+ * again, each failure in the log; every other error is final at once. The tries are the whole of the wait: the start goes on
+ * after them, with the list kept.
+ */
+export const READ_TRIES = 5
+export const READ_RETRY_MS = 200
+
+/** Blocks this thread for `ms` without spinning: the start has nothing to serve yet, and the lists are read before its first session is */
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+}
+
+/** A list's text; a read that fails with `EBUSY` is tried again (`READ_TRIES`), each failure said */
+function readHeld(folder: UpdateResumeFolder, name: string, wait: (ms: number) => void): string | null {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return folder.read(name)
+    } catch (err) {
+      const busy = err instanceof Error && 'code' in err && err.code === 'EBUSY'
+      if (!busy || attempt >= READ_TRIES) throw err
+      console.error(`[agent-host] ${name} is held by another process (${errorMessage(err)}); reading it again (${attempt}/${READ_TRIES})`)
+      wait(READ_RETRY_MS)
+    }
+  }
 }
 
 /** The turns a list's text names; `torn` when it is not JSON (a host killed while it wrote), `other` for another format */
@@ -79,7 +115,14 @@ export class UpdateResumeLists {
   private readonly lists = new Map<string, CutTurn[]>()
   private readonly dealt = new Set<string>()
 
-  constructor(private readonly folder: UpdateResumeFolder) {
+  /**
+   * `wait` sleeps between the tries at a list a scanner holds (`READ_TRIES`); the host's own start is one thread with nothing
+   * yet to serve, so it blocks. Tests pass their own
+   */
+  constructor(
+    private readonly folder: UpdateResumeFolder,
+    wait: (ms: number) => void = sleepSync,
+  ) {
     let names: string[]
     try {
       names = folder.names()
@@ -90,9 +133,14 @@ export class UpdateResumeLists {
     for (const name of names) {
       let text: string | null
       try {
-        text = folder.read(name)
+        text = readHeld(folder, name, wait)
       } catch (err) {
-        console.error(`[agent-host] ${name} could not be read (${errorMessage(err)}); the turns it names are not continued`)
+        /*
+         * Still held after the tries, or unreadable for another reason. The list stays where it is and is read by a later
+         * start, which continues nothing for it if its turns are over by then. The host cannot tell which sessions it names,
+         * so a session it finds cut now is marked stopped like any a quit cut, and its Continue is the person's button
+         */
+        console.error(`[agent-host] ${name} could not be read (${errorMessage(err)}); the list is kept for a later start, and the turns it names end as a quit's do`)
         continue
       }
       if (text === null) continue
