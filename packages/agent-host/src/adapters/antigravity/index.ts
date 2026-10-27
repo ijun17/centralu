@@ -10,7 +10,7 @@ import { agyLaunch } from './launch.js'
 import { AGY_RELEASE, type AgyArchive } from './release.js'
 import { AgySetup, type AgySetupDeps } from './setup.js'
 import { agyCentraluTool, agySessionMeta, agyStderrLine, isAgyQuestion, isAgySubagentCall, readAgyCall } from './shape.js'
-import { agentSignInUrl, NO_HELPER } from './sign-in.js'
+import { agentSignInUrl, googleAuthorizeUrl, NO_HELPER } from './sign-in.js'
 import { AGY_SURFACE } from './surface.js'
 
 /**
@@ -94,7 +94,14 @@ export function antigravityProfile(deps: AgyProfileDeps = {}): AgyProfile {
           watch: (wanted: () => void) =>
             folder.watch((text) => {
               if (agentSignInUrl(text)) return wanted()
-              console.error("[Antigravity] a command in a session asked for a browser; not opened (it is not the agent's sign-in)")
+              // Google's v2 authorize page with another client may be a new agent release whose client was not measured
+              // (`AGY_OAUTH_CLIENT`): said apart, so a sign-in that stopped working there is not lost in the log
+              const other = googleAuthorizeUrl(text)
+              console.error(
+                other
+                  ? "[Antigravity] a session's process asked for a Google sign-in with an OAuth client that is not the agent's; not opened, not taken for its sign-in"
+                  : "[Antigravity] a command in a session asked for a browser; not opened (it is not the agent's sign-in)",
+              )
             }),
           remove: () => folder.remove(),
         },

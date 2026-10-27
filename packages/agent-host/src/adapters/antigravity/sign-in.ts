@@ -55,7 +55,7 @@ const AuthResult = z.looseObject({ _meta: z.looseObject({ antigravity: z.looseOb
 export const NO_HELPER =
   "the path of Centralu's data folder or of the host's Node holds a character Antigravity's browser setting cannot carry (';' on Windows, ':' elsewhere, or '%s')"
 
-const URL_LINE =/Open the following link to authenticate the ACP server:\s*(\S+)/
+const URL_LINE = /Open the following link to authenticate the ACP server:\s*(\S+)/
 
 /**
  * An address worth opening: https, on a Google host, with no user part (`https://someone@accounts.google.com/…` would carry
@@ -82,6 +82,14 @@ export const AGY_OAUTH_CLIENT = '1071006060591-tmhssin2h21lcre235vtolojh4g403ep.
 
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]'])
 
+/** Google's v2 authorize page, whoever's client asks (only for the log: `agentSignInUrl` is what is acted on) */
+export function googleAuthorizeUrl(raw: string): URL | null {
+  const url = signInUrl(raw)
+  if (!url) return null
+  const parsed = new URL(url)
+  return parsed.hostname === 'accounts.google.com' && parsed.pathname === '/o/oauth2/v2/auth' ? parsed : null
+}
+
 /**
  * The agent's own login request, and nothing else Google serves: `https://accounts.google.com/o/oauth2/v2/auth` with
  * `response_type=code`, the agent's client (`AGY_OAUTH_CLIENT`) and a `redirect_uri` on this machine's loopback (its
@@ -90,10 +98,9 @@ const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]'])
  * open a Google Doc); only this one is the agent asking for a sign-in. The address passed on is `signInUrl`'s rebuilt one
  */
 export function agentSignInUrl(raw: string): string | null {
-  const url = signInUrl(raw)
-  if (!url) return null
-  const parsed = new URL(url)
-  if (parsed.hostname !== 'accounts.google.com' || parsed.pathname !== '/o/oauth2/v2/auth') return null
+  const parsed = googleAuthorizeUrl(raw)
+  if (!parsed) return null
+  const url = parsed.toString()
   const one = (name: string) => {
     const all = parsed.searchParams.getAll(name)
     return all.length === 1 ? (all[0] ?? null) : null

@@ -6,7 +6,7 @@ import { agyHome, browserFolder, windowsBrowserCommand } from './agent-files.js'
 import { InstallFailure } from './failure.js'
 import { AntigravityAdapter, antigravityProfile } from './index.js'
 import { AGY_RELEASE } from './release.js'
-import { AGY_OAUTH_CLIENT, agentSignInUrl, runSignIn } from './sign-in.js'
+import { AGY_OAUTH_CLIENT, agentSignInUrl, googleAuthorizeUrl, runSignIn } from './sign-in.js'
 import { driven, fakeInstall, fakeSignIn, HOST_TEST_ARCHIVE, HOST_TEST_PLATFORM, leftovers, runBrowser, sessionOpts, tempData, TEST_ARCHIVE } from './agent-files.test-helpers.js'
 
 /**
@@ -98,6 +98,10 @@ describe("the BROWSER helper's folder", () => {
     expect(agentSignInUrl(ADDRESS.replace('/o/oauth2/v2/auth', '/o/oauth2/v2/authx'))).toBeNull()
     expect(agentSignInUrl(ADDRESS.replace('response_type=code', 'response_type=token'))).toBeNull()
     expect(agentSignInUrl(ADDRESS.replace('https:', 'http:'))).toBeNull()
+    // Told apart in the log only: Google's v2 authorize page with another client (a new release's, not measured)
+    expect(googleAuthorizeUrl(ADDRESS.replace(AGY_OAUTH_CLIENT, 'other.apps.googleusercontent.com'))).not.toBeNull()
+    expect(googleAuthorizeUrl(GCLOUD)).toBeNull()
+    expect(googleAuthorizeUrl(DOC)).toBeNull()
   })
 
   it('is no command where a path holds the separator the launcher splits BROWSER at, or %s', () => {
