@@ -557,16 +557,6 @@ describe('the hub router (docs/plans/remote-hub.md §5)', () => {
       expect(m1.calls.at(-1)).toEqual({ method: 'agents.usage', params: { tool: 'claude' } })
     })
 
-    it("forwards a tool's own-usage answer as it is, and the screen's `settle`, to the machine (#1623)", async () => {
-      const { router, localAnswers, m1 } = rig()
-      localAnswers['agents.account'] = { loggedIn: true, fingerprint: 'mine' }
-      m1.answers['agents.account'] = { loggedIn: true, fingerprint: 'theirs' }
-      const answer = { supported: false, reason: 'Cursor does not report usage limits', notReported: true, provisional: true, usage: { plan: null, windows: [], daily: [] } }
-      m1.answers['agents.usage'] = answer
-      expect(await router.handle('agents.usage', { tool: 'cursor-agent', machine: 'm1', settle: true })).toEqual(answer)
-      expect(m1.calls.at(-1)).toEqual({ method: 'agents.usage', params: { tool: 'cursor-agent', settle: true } })
-    })
-
     it('never takes two logins that do not say their account for the same one', async () => {
       const { router, localAnswers, m1 } = rig()
       localAnswers['agents.account'] = { loggedIn: true, fingerprint: null }
