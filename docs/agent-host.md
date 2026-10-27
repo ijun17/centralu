@@ -3596,7 +3596,8 @@ the person's Continue would.
   continued is reported as at rest, as before: neither `host.sessions` nor the hello carries the loss (one whose
   continued turn ended meanwhile is reported finished, which it is). A machine whose host predates #1618 lists nothing as
   it stops; the hub's sentence then says the turns were lost, and a caller on the hub hears the drop as before.
-  `pnpm remote-dev` (`dev-build.ts`) stops at once and continues nothing.
+  `pnpm remote-dev` (`dev-build.ts`) goes through the update's steps, so its stop is for an update too: the turns running
+  are listed and the dev build's host continues them like any next host.
 
 | Decision | Why |
 |---|---|
