@@ -1,7 +1,7 @@
-import { usePresence } from '../../components/presence.js'
+import { LEAVE_MS, usePresence } from '../../components/presence.js'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useDismiss } from '../../components/useDismiss.js'
-import type { CacheStats, MachineInfo, ToolName, UsageSnapshot } from '@cc/protocol/client'
+import type { CacheStats, MachineInfo, ToolName, ToolStatus, UsageSnapshot } from '@cc/protocol/client'
 import { cacheTooltipLine } from '@cc/core'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore, usageTools } from '../../store/store.js'
@@ -10,6 +10,8 @@ import { Tooltip } from '../../components/primitives.jsx'
 import { UsagePanel } from './UsagePanel.jsx'
 import { SAME_ACCOUNT_LABEL } from './sameAccount.js'
 import { usageTone, weeklyWindow } from './weekly.js'
+import { setupStates, signedOutTools, withLiveSetups } from '../tools/setupLine.js'
+import { ToolSetupLine } from '../tools/ToolSetupLine.jsx'
 
 type Snap = { usage: UsageSnapshot | null; reason?: string; cache?: CacheStats; sameAccount?: boolean }
 
@@ -17,7 +19,18 @@ type Snap = { usage: UsageSnapshot | null; reason?: string; cache?: CacheStats; 
  * What one machine said about its limits. `live` is null until it has answered which tools are usable there; `snap`
  * holds each tool's last answer.
  */
-type Group = { live: ToolName[] | null; snap: Partial<Record<ToolName, Snap>> }
+type Group = {
+  live: ToolName[] | null
+  /**
+   * The tools that are installed but signed out (owner, 2026-10-27): each gets an error-style donut, so the same state
+   * looks the same for every tool. `tools` is what detect said of them, for the panel's sign-in line
+   */
+  signedOut: ToolName[]
+  tools: ToolStatus[]
+  /** Every tool with a donut, live or signed out, in the order detect lists them */
+  order: ToolName[]
+  snap: Partial<Record<ToolName, Snap>>
+}
 
 /** The key of this computer's group. Machine ids start with a letter, so it never collides with one */
 const HERE = ''
@@ -30,7 +43,7 @@ const POLL_MS = 5 * 60_000
 /** How soon a machine whose detect failed (its host restarting, the link catching up) is asked again */
 const RETRY_MS = 15_000
 
-const EMPTY: Group = { live: null, snap: {} }
+const EMPTY: Group = { live: null, signedOut: [], tools: [], order: [], snap: {} }
 
 /** The ids of the linked machines that are connected now, as one string so a selector can compare it */
 function connectedIds(machines: Record<string, MachineInfo>): string[] {
@@ -109,6 +122,8 @@ export function UsageDonuts() {
    * removing it before the first answer arrives would make the bar flicker.
    */
   const live = groups[HERE]?.live ?? null
+  const here = groups[HERE] ?? EMPTY
+  const hereDonuts = useDonutPresence(here.live === null ? null : here.order)
 
   /** Retries of a detect that failed, cleared when the bar goes */
   const retries = useRef<ReturnType<typeof setTimeout>[]>([])
@@ -130,9 +145,12 @@ export function UsageDonuts() {
        */
       void platform.agents
         .detect(on)
-        .then((found) => {
+        .then((read) => {
+          // This computer's live setups over the reading: an install or sign-in that finished since is counted at once
+          const found = machine ? read : withLiveSetups(read, useStore.getState().toolSetups)
           const usable = found.filter((t) => t.installed && t.loggedIn).map((t) => t.name)
-          patch({ live: usable })
+          const signedOut = signedOutTools(found).map((t) => t.name)
+          patch({ live: usable, signedOut, tools: found, order: found.filter((t) => usable.includes(t.name) || signedOut.includes(t.name)).map((t) => t.name) })
           for (const tool of usable) {
             const put = (snap: Snap) => patch((g) => ({ snap: { ...g.snap, [tool]: snap } }))
             void platform.agents
@@ -181,6 +199,19 @@ export function UsageDonuts() {
   const loadOneRef = useRef(loadOne)
   loadOneRef.current = loadOne
   useEffect(() => () => retries.current.forEach(clearTimeout), [])
+
+  /*
+   * A tool's own install or sign-in moved on this computer (`tool_setup`): asked again at once, so a donut turns from
+   * error to a reading, or appears, without waiting for the next tick. Only a change after the first reading counts.
+   */
+  // The states, not the setups: an install's progress readings do not ask detect and usage again
+  const setupState = useStore((s) => setupStates(s.toolSetups))
+  const setupStateSeen = useRef(setupState)
+  useEffect(() => {
+    if (setupStateSeen.current === setupState) return
+    setupStateSeen.current = setupState
+    loadOneRef.current?.(null)
+  }, [setupState])
 
   /** The connected machines last asked, so a machine whose link comes back is asked once, and the others are not */
   const asked = useRef<Set<string>>(new Set())
@@ -246,10 +277,10 @@ export function UsageDonuts() {
       const machine = s.focusedSessionId ? (s.sessions[s.focusedSessionId]?.machine ?? null) : null
       if (tool)
         return { machine: machine && s.machines[machine]?.status === 'connected' ? machine : null, tool }
-      const first = (live ?? [])[0]
+      const first = here.order[0]
       return first ? { machine: null, tool: first } : null
     })
-  }, [usageOpen, live])
+  }, [usageOpen, live, here.order])
 
   const show = (next: Open | null) => {
     setOpen(next)
@@ -281,7 +312,7 @@ export function UsageDonuts() {
    * (null), nothing is said — silence before the first answer would not be true.
    */
   const noAgent =
-    live !== null && live.length === 0 ? (
+    live !== null && live.length === 0 && here.signedOut.length === 0 ? (
       <Tooltip
         testId="usage-no-agent-tip"
         content={
@@ -303,14 +334,17 @@ export function UsageDonuts() {
   return (
     <span className="relative flex items-center gap-0.5" data-testid="usage-donuts">
       {noAgent}
-      {(live ?? []).map((tool) => (
+      {hereDonuts.map((d) => (
         <Donut
-          key={tool}
-          tool={tool}
+          key={d.tool}
+          tool={d.tool}
           machine={null}
-          snap={groups[HERE]?.snap[tool]}
-          active={isOpen(null, tool)}
-          onClick={() => show(isOpen(null, tool) ? null : { machine: null, tool })}
+          snap={here.snap[d.tool]}
+          signedOut={here.signedOut.includes(d.tool)}
+          entering={d.entering}
+          leaving={d.leaving}
+          active={isOpen(null, d.tool)}
+          onClick={() => show(isOpen(null, d.tool) ? null : { machine: null, tool: d.tool })}
         />
       ))}
       {machineIds.map((id) => (
@@ -349,7 +383,11 @@ export function UsageDonuts() {
               )}
             </header>
             <div className="max-h-[calc(60vh/var(--text-zoom))] overflow-y-auto">
-              <UsagePanel tool={drop.tool} machine={drop.machine} />
+              {(groups[drop.machine ?? HERE] ?? EMPTY).signedOut.includes(drop.tool) ? (
+                <SignedOutPanel tool={drop.tool} machine={drop.machine} group={groups[drop.machine ?? HERE] ?? EMPTY} redetect={() => loadOne(drop.machine)} />
+              ) : (
+                <UsagePanel tool={drop.tool} machine={drop.machine} />
+              )}
             </div>
           </div>
         </>
@@ -377,14 +415,14 @@ function MachineGroup({
   show: (next: Open | null) => void
 }) {
   const info = useStore((s) => s.machines[machineId])
+  const donuts = useDonutPresence(group.order)
   /*
    * Only a machine with a tool that can run there shows (owner, 2026-10-18): one that is not connected, or has no
    * tool installed and logged in, is left out rather than drawn as "Offline" or "No agent". Tools will grow (OpenCode
    * and others) and so will machines; the bar keeps only what the person can use. Settings → Machines still lists
    * every machine with its state.
    */
-  if (!info || info.status !== 'connected' || !group.live?.length) return null
-  const live = group.live
+  if (!info || info.status !== 'connected' || (!group.order.length && !donuts.length)) return null
   return (
     <span
       className="ml-1.5 flex items-center gap-0.5 rounded-full border border-line py-0.5 pl-2 pr-0.5"
@@ -405,14 +443,17 @@ function MachineGroup({
           {info.name}
         </span>
       </Tooltip>
-      {live.map((tool) => (
+      {donuts.map((d) => (
         <Donut
-          key={tool}
-          tool={tool}
+          key={d.tool}
+          tool={d.tool}
           machine={machineId}
-          snap={group.snap[tool]}
-          active={isOpen(machineId, tool)}
-          onClick={() => show(isOpen(machineId, tool) ? null : { machine: machineId, tool })}
+          snap={group.snap[d.tool]}
+          signedOut={group.signedOut.includes(d.tool)}
+          entering={d.entering}
+          leaving={d.leaving}
+          active={isOpen(machineId, d.tool)}
+          onClick={() => show(isOpen(machineId, d.tool) ? null : { machine: machineId, tool: d.tool })}
         />
       ))}
     </span>
@@ -430,6 +471,9 @@ function Donut({
   tool,
   machine,
   snap,
+  signedOut = false,
+  entering = false,
+  leaving = false,
   active,
   onClick,
 }: {
@@ -437,6 +481,11 @@ function Donut({
   /** The linked machine it is for; null for this computer */
   machine: string | null
   snap?: Snap
+  /** Installed but signed out (owner, 2026-10-27): an error-style ring, no reading */
+  signedOut?: boolean
+  /** Came after the bar was first drawn: fades in. `leaving`: on its way out, still drawn for its exit */
+  entering?: boolean
+  leaving?: boolean
   active: boolean
   onClick: () => void
 }) {
@@ -445,13 +494,15 @@ function Donut({
   // A machine's donut is named `<machine>.<tool>`, the way the hub names a machine's ids (#82); this computer's keep their names
   const id = machine ? `${machine}.${tool}` : tool
   const label = machineName ? `${meta.label} on ${machineName}` : meta.label
-  const w = snap?.usage ? weeklyWindow(snap.usage.windows) : null
+  const w = !signedOut && snap?.usage ? weeklyWindow(snap.usage.windows) : null
   const known = w !== null
   const percent = w?.percent ?? 0
   const R = 9
   const C = 2 * Math.PI * R
   const filled = (Math.max(0, Math.min(100, percent)) / 100) * C
   const tone = known ? usageTone(percent) : 'text-ink-faint'
+  // Signed out is an error: the whole ring in the danger colour, solid (a dashed ring means "unknown"), and its letter with it
+  const ring = signedOut ? 'text-danger' : 'text-line'
   const cacheLine = cacheTooltipLine(snap?.cache)
 
   return (
@@ -461,17 +512,19 @@ function Donut({
         <span className="block">
           <span className="block text-ink">{label}</span>
           <span className="readout mt-1 block">
-            {known
-              ? `${w.label}${w.scope ? ` · ${w.scope}` : ''} — ${percent}% used`
-              : 'Weekly usage unknown'}
+            {signedOut
+              ? 'Not signed in'
+              : known
+                ? `${w.label}${w.scope ? ` · ${w.scope}` : ''} — ${percent}% used`
+                : 'Weekly usage unknown'}
           </span>
           {/* Why the numbers equal this computer's, or why there are none: said in the donut's words, never a blank (#726) */}
-          {known && snap?.sameAccount && (
+          {!signedOut && known && snap?.sameAccount && (
             <span className="readout block text-ink-faint" data-testid={`usage-donut-same-${id}`}>
               {SAME_ACCOUNT_LABEL}
             </span>
           )}
-          {!known && snap?.reason && (
+          {!signedOut && !known && snap?.reason && (
             <span className="readout block text-ink-faint" data-testid={`usage-donut-reason-${id}`}>
               {snap.reason}
             </span>
@@ -480,7 +533,7 @@ function Donut({
             The prompt cache in one line (docs/agent-host.md §6.1), from the answer the donut already asked for: the
             detail below the donut breaks it down. Absent when the host did not count it (one that predates it).
           */}
-          {cacheLine && (
+          {!signedOut && cacheLine && (
             <span className="readout block text-ink-faint" data-testid={`usage-donut-cache-${id}`}>
               {cacheLine}
             </span>
@@ -491,8 +544,11 @@ function Donut({
       <button
         type="button"
         onClick={onClick}
-        aria-label={`${label} weekly usage${known ? ` ${percent}%` : ' unknown'}`}
+        aria-label={signedOut ? `${label} not signed in` : `${label} weekly usage${known ? ` ${percent}%` : ' unknown'}`}
         data-testid={`usage-donut-${id}`}
+        data-signed-out={signedOut || undefined}
+        data-leaving={leaving || undefined}
+        tabIndex={leaving ? -1 : undefined}
         data-percent={known ? percent : ''}
         /*
          * Even while open, **another donut has to be clickable right away** — if the outside
@@ -512,7 +568,7 @@ function Donut({
          */
         className={`relative z-40 flex items-center rounded-full ${machine ? '' : 'p-0.5'} transition-colors hover:bg-surface-hover ${
           active ? 'bg-surface-hover' : ''
-        }`}
+        } ${leaving ? 'cc-donut-out pointer-events-none' : entering ? 'cc-donut-in' : ''}`}
       >
         <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden>
           <circle
@@ -522,8 +578,8 @@ function Donut({
             fill="none"
             stroke="currentColor"
             strokeWidth="2.5"
-            className="text-line"
-            {...(known ? {} : { strokeDasharray: '2 3' })}
+            className={`${ring} transition-colors duration-150`}
+            {...(known || signedOut ? {} : { strokeDasharray: '2 3' })}
           />
           {known && (
             <circle
@@ -551,7 +607,7 @@ function Donut({
             y="11"
             textAnchor="middle"
             dominantBaseline="central"
-            className={`fill-current font-sans font-semibold ${known ? 'text-ink' : 'text-ink-faint'}`}
+            className={`fill-current font-sans font-semibold transition-colors duration-150 ${signedOut ? 'text-danger' : known ? 'text-ink' : 'text-ink-faint'}`}
             style={{ fontSize: 'var(--text-2xs)' }}
           >
             {meta.mark}
@@ -580,5 +636,55 @@ function NoAgentMark() {
         strokeDasharray="2.2 2.6"
       />
     </svg>
+  )
+}
+
+/**
+ * The tools with a donut, kept through their exit (owner, 2026-10-27: every change is animated): one that goes (a tool
+ * uninstalled, a machine's list changing) stays drawn for `LEAVE_MS` with `leaving`, and one that comes after the bar was
+ * first drawn is `entering`. The first reading is not an entrance: the bar does not open with every donut fading in.
+ */
+function useDonutPresence(order: ToolName[] | null): { tool: ToolName; entering: boolean; leaving: boolean }[] {
+  const key = order === null ? null : order.join(',')
+  const [state, setState] = useState<{ key: string | null; shown: ToolName[]; leaving: ToolName[] }>({ key, shown: order ?? [], leaving: [] })
+  const first = useRef<Set<ToolName> | null>(null)
+  if (first.current === null && order !== null && order.length > 0) first.current = new Set(order)
+  if (state.key !== key) {
+    const next = order ?? []
+    // Everything drawn that is not in the list now is leaving, one already on its way out included: it keeps its place until its exit ends
+    const gone = state.shown.filter((t) => !next.includes(t))
+    const merged = [...next]
+    for (const t of gone) merged.splice(Math.min(state.shown.indexOf(t), merged.length), 0, t)
+    setState({ key, shown: merged, leaving: gone })
+  }
+  const leavingKey = state.leaving.join(',')
+  useEffect(() => {
+    if (!leavingKey) return
+    const t = setTimeout(() => setState((s) => ({ ...s, shown: s.shown.filter((x) => !s.leaving.includes(x)), leaving: [] })), LEAVE_MS)
+    return () => clearTimeout(t)
+  }, [leavingKey])
+  return state.shown.map((tool) => ({ tool, entering: first.current !== null && !first.current.has(tool), leaving: state.leaving.includes(tool) }))
+}
+
+/**
+ * What the dropdown of a signed-out tool's donut holds (owner, 2026-10-27): the setup line, the same piece as in the
+ * pickers, with its sign-in for Antigravity and the terminal command for the others.
+ */
+function SignedOutPanel({ tool, machine, group, redetect }: { tool: ToolName; machine: string | null; group: Group; redetect: () => void }) {
+  const meta = useToolMeta(tool)
+  return (
+    <div className="px-4 py-4" data-testid="usage-signed-out">
+      <ToolSetupLine
+        status={group.tools.find((t) => t.name === tool)}
+        label={meta.label}
+        login={meta.login}
+        machine={machine}
+        shown
+        terminal={{ login: (label, command) => `${label} is not signed in. Run ${command} in a terminal.`, missing: (label) => `${label} is not installed` }}
+        redetect={redetect}
+        testId="usage-signed-out-line"
+        className="text-sm leading-body text-ink-muted"
+      />
+    </div>
   )
 }

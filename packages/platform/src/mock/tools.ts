@@ -1,8 +1,14 @@
-import type { AdapterCapabilities, ToolName, ToolStatus } from '@cc/protocol/client'
+import { setupOfDetection, type AdapterCapabilities, type ToolName, type ToolSetup, type ToolStatus } from '@cc/protocol/client'
+import type { Emit } from './event-bus.js'
 import type { AgentPort, MachineRef } from '../ports/index.js'
 
 /** The agent tools the mock knows: what is detected, their models and capabilities, and the slash command list */
 export class ToolsMock {
+  /** Tells the app a tool's setup changed (`tool_setup`) */
+  constructor(private readonly emit: Emit) {}
+  /** The calls a screen made to the setup actions, in order (`install`, `cancelInstall`, `signIn`, `cancelSignIn`), for a test to read */
+  setupCalls: { action: string; tool: ToolName; machine?: MachineRef }[] = []
+
   /** The detected tools — kept outside so a test can build "a tool that is not logged in" */
   detected: ToolStatus[] = [
     {
@@ -72,7 +78,39 @@ export class ToolsMock {
   capabilityLimits: Record<ToolName, Partial<AdapterCapabilities>> = {}
   /** For tests: when set, the slash command list fails with this reason (a machine away, a call that timed out) */
   commandsError: string | null = null
-  readonly agents: Pick<AgentPort, 'models' | 'commands' | 'capabilities' | 'detect'> = {
+  /** Moves a tool to a setup and tells the app, as the host's `tool_setup` event does; detect answers it from then on */
+  private setSetup(tool: ToolName, setup: ToolSetup, machine?: MachineRef): ToolSetup {
+    const list = (machine && this.machineDetected[machine]) || this.detected
+    const t = list.find((x) => x.name === tool)
+    if (t) {
+      t.setup = setup
+      t.installed = setup.state !== 'not_installed' && setup.state !== 'installing'
+      t.loggedIn = setup.state === 'ready' || setup.state === 'unknown'
+    }
+    if (!machine) this.emit({ type: 'tool_setup', tool, setup })
+    return setup
+  }
+  private setupOf(tool: ToolName, machine?: MachineRef): ToolSetup {
+    const t = ((machine && this.machineDetected[machine]) || this.detected).find((x) => x.name === tool)
+    return t?.setup ?? setupOfDetection(t?.installed ?? false, t?.loggedIn ?? false)
+  }
+  readonly agents: Pick<AgentPort, 'models' | 'commands' | 'capabilities' | 'detect' | 'installTool' | 'cancelInstallTool' | 'signInTool' | 'cancelSignInTool'> = {
+    installTool: async (tool: ToolName, machine?: MachineRef) => {
+      this.setupCalls.push({ action: 'install', tool, machine })
+      return this.setSetup(tool, { ...this.setupOf(tool, machine), state: 'installing', failure: undefined, progress: { received: 0, total: 100 } }, machine)
+    },
+    cancelInstallTool: async (tool: ToolName, machine?: MachineRef) => {
+      this.setupCalls.push({ action: 'cancelInstall', tool, machine })
+      return this.setSetup(tool, { ...this.setupOf(tool, machine), state: 'not_installed', progress: undefined, failure: { reason: 'cancelled', message: 'Install cancelled' } }, machine)
+    },
+    signInTool: async (tool: ToolName) => {
+      this.setupCalls.push({ action: 'signIn', tool })
+      return this.setSetup(tool, { ...this.setupOf(tool), state: 'signing_in', failure: undefined })
+    },
+    cancelSignInTool: async (tool: ToolName) => {
+      this.setupCalls.push({ action: 'cancelSignIn', tool })
+      return this.setSetup(tool, { ...this.setupOf(tool), state: 'signed_out', failure: { reason: 'cancelled', message: 'Sign-in cancelled' } })
+    },
     models: async (tool: ToolName) => ({ supported: true, models: this.mockToolProfiles.get(tool)?.models ?? [] }),
     commands: async (_sessionId: string) => {
       if (this.commandsError !== null) throw new Error(this.commandsError)

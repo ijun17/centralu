@@ -104,12 +104,6 @@ export const EXCEPTIONS = {
         capsule: "Answer, #1160's capsule action (owner, 2026-10-18); Button has no capsule shape yet, the next step for these",
       },
     },
-    'packages/ui/src/features/onboarding/Intro.tsx': {
-      counts: { button: 1 },
-      reason: {
-        button: "a tool card of the first run, large and two-lined",
-      },
-    },
     'packages/ui/src/features/orchestrator/OrchestratorView.tsx': {
       counts: { button: 3 },
       reason: {

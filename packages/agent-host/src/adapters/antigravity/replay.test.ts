@@ -77,10 +77,9 @@ async function open(w: ReturnType<typeof world>, preset: PermissionPreset = 'nor
 const of = <T extends NormalizedEvent['type']>(events: readonly NormalizedEvent[], type: T) => events.filter((e): e is Extract<NormalizedEvent, { type: T }> => e.type === type)
 
 describe('Antigravity in the registry', () => {
-  it('is registered only when asked for, until its screens land', async () => {
+  it('is registered for everyone: the screens for its install and sign-in exist (#59)', async () => {
     const { createAdapters } = await import('../registry.js')
-    expect(createAdapters({ antigravity: false }).has('antigravity')).toBe(false)
-    expect(createAdapters({ antigravity: true }).get('antigravity')).toBeInstanceOf(AntigravityAdapter)
+    expect(createAdapters().get('antigravity')).toBeInstanceOf(AntigravityAdapter)
   })
 })
 

@@ -58,7 +58,7 @@ test('usage gets one donut per tool — the screen never guesses which tool is m
  * dashboard. The test is installed-plus-logged-in — the **same test** the new-session dialog
  * uses, so the two places on screen never give different answers to "can this tool be used."
  */
-test('a tool that is not logged in gets no donut', async ({ page }) => {
+test('a tool that is not logged in gets an error donut, not a usage one (#59)', async ({ page }) => {
   await page.goto('/?mock=1')
   await page.evaluate(() => {
     const m = (window as never as { __mock: any }).__mock
@@ -75,7 +75,9 @@ test('a tool that is not logged in gets no donut', async ({ page }) => {
   await page.getByTestId('usage-donut-claude').click()
 
   await expect(page.getByTestId('usage-donut-claude')).toBeVisible()
-  await expect(page.getByTestId('usage-donut-codex')).toHaveCount(0)
+  // A tool installed but signed out is not drawn with a reading (owner, 2026-10-27): its donut is the error one, with no usage
+  await expect(page.getByTestId('usage-donut-claude')).not.toHaveAttribute('data-signed-out', 'true')
+  await expect(page.getByTestId('usage-donut-codex')).toHaveAttribute('data-signed-out', 'true')
 
   /*
    * If nothing at all can be used, the space is not left empty — the message is not "nothing to
@@ -85,7 +87,8 @@ test('a tool that is not logged in gets no donut', async ({ page }) => {
   await page.evaluate(() => {
     const m = (window as never as { __mock: any }).__mock
     const claude = m.detected.find((t: any) => t.name === 'claude')
-    m.detected = [{ ...claude, installed: true, loggedIn: false, detail: 'not logged in' }]
+    // Not installed: an installed tool that is signed out has a donut of its own now (tool-setup.ts)
+    m.detected = [{ ...claude, installed: false, loggedIn: false, detail: 'not installed' }]
   })
   // Closing (first click) then reopening (second) asks again at that point — closing asks nothing
   await page.getByTestId('usage-donut-claude').click()

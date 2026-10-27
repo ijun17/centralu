@@ -16,7 +16,7 @@ frames this pull request replays are committed, scrubbed, as `adapters/antigravi
 |---|---|
 | Antigravity runs as Google's ACP agent on Centralu's ACP adapter, not `agy -p` with a `PreToolUse` hook (owner 2026-10-27) | The hook path is fail-open: an empty hook answer allows, the hook file is writable by the agent's own commands, and command rules depend on parsing shell text. Over ACP an unanswered, cancelled or unknown answer denies (spike §5), turns, cancel and resume are the ACP core's, and Windows has an official build |
 | Sign-in happens inside Centralu (owner 2026-10-27) | The agent has no terminal sign-in; it signs in through ACP `authenticate` with a browser and a loopback redirect. Its state folder is Centralu's own, so a CLI sign-in does not carry over; sharing the CLI's folder would bring the person's global hooks and MCP servers in and move the token into the Keychain |
-| The sign-in action sits where the "needs a login" line is; the header donut shows a tool installed but signed out (owner 2026-10-27, both, wording on screenshots) | One shared piece for the new-session dialog, the first-run orchestrator card and the new-app dialog. This pull request gives the host the state and the actions; nothing is drawn |
+| The sign-in action sits where the "needs a login" line is; the header donut shows a tool installed but signed out (owner 2026-10-27, both, wording on screenshots) | One shared piece for the new-session dialog, the first-run orchestrator card and the new-app dialog (§12). The host side gives the state and the actions; the screens are drawn in the stacked pull request |
 | The header shows an error donut for **every** tool installed but signed out: Claude Code, Codex, Cursor, and OpenCode where its detection can tell (owner 2026-10-27) | Every tool reports one shape, `ToolStatus.setup` (§8); OpenCode reports `signIn: none` (its free models need no account, so it is never signed out) |
 | Install inside Centralu: one pinned version, sha256, atomic, progress, cancel (owner 2026-10-27) | §3 |
 | Centralu's tools (the MCP bridge) ship in this beta, at parity with Cursor and OpenCode (owner 2026-10-27, replacing "next beta") | §7 |
@@ -54,9 +54,8 @@ its label and mark (Antigravity, `A`) are carried over.
 | `index.ts` | The profile, its capabilities and `AntigravityAdapter` |
 | `surface.ts` | What the installed agent offers (#270), with a baseline from the spike's `initialize` |
 
-**Not shown yet.** The registry adds the adapter only with `CC_ANTIGRAVITY=1` (the live checks set it): registered,
-every tool picker would draw Antigravity's line, and the screens and their words are the next pull request's. That one
-removes the switch.
+**Shown to everyone.** The registry adds the adapter always: the screens for its install and sign-in exist (§12). While
+they did not, a `CC_ANTIGRAVITY=1` switch kept it out of every picker.
 
 The ACP core gains one optional profile part, `AcpToolShape` (`acp/profile.ts`): hooks at fixed points, each absent for
 Cursor and OpenCode, so their behaviour is unchanged (their replays pass as before).
@@ -345,7 +344,7 @@ and its sign-in address. A line with an address, an email, `loadCodeAssist`, `oa
 
 `agents.installTool` and `agents.detect` route to the machine; `agents.signIn` does not (route `hub`, no parameter). A
 linked machine's `setup` says `signed_out` with `signIn: centralu`; the screen, which knows the line is a linked
-machine's, says to sign in on that machine (next pull request).
+machine's, says to sign in on that machine (§12).
 
 ## 5. Behaviour in a session
 
@@ -505,7 +504,7 @@ one by one on Windows):
 | Edit run folded into the asked call; ended calls' updates dropped | `replay.test.ts` permissions |
 | A pending edit never taken for a run; an allowed edit that ended with no run no longer waits | `shape.test.ts` |
 | Stderr judged line by line (a split address never reaches the log) | `shape.test.ts` |
-| Registered only with `CC_ANTIGRAVITY=1` | `replay.test.ts` registry |
+| Registered for everyone (the `CC_ANTIGRAVITY=1` switch is gone) | `replay.test.ts` registry |
 | Field names read (`Cwd`, `combinedOutput`) | `replay.test.ts` permissions |
 | Viewers off, never `set_mode`, never `allow_always` | `replay.test.ts` default mode |
 | `-32000` is a Centralu sign-in; the line turns signed out | `replay.test.ts` signed out |
@@ -543,3 +542,45 @@ one by one on Windows):
    ([#59](https://github.com/ijun17/centralu/issues/59#issuecomment-6446873429)); report upstream that the harness
    resolves its `bin` folder from the home directory instead of `GEMINI_HOME`.
 7. An exhausted quota as a `limit_reached` (§5.6), once the agent says it in a frame.
+
+## 12. The screens (#59, owner 2026-10-27)
+
+One piece, `ToolSetupLine` (`packages/ui/src/features/tools/`), draws a tool's setup where its "needs a login" line was:
+the new-session dialog's tool line, the first-run orchestrator card (Antigravity's card carries it; the others keep the
+command to run) and the new-app dialog. It reads the tool's `ToolStatus.setup`, with this computer's live `tool_setup`
+events over it (`withLiveSetups`), so Start enables the moment a sign-in succeeds. `setupView` (`setupLine.ts`) is the one
+mapping from a setup to a line:
+
+| Setup | The line |
+|---|---|
+| `not_installed`, `install: centralu` | "Antigravity is not installed." and **Install** |
+| `installing` | "Installing Antigravity… 40%" (the size received when the total is not known), **Cancel**, a progress bar |
+| `not_installed` with a failure (not a cancel) | "Could not install Antigravity: <reason>" and **Retry** |
+| `not_installed`, no build for the system | said, no action |
+| `signed_out`, `signIn: centralu`, this machine | "Antigravity needs a Google sign-in." and **Sign in** |
+| `signing_in` | "Waiting for the browser…" and **Cancel** |
+| `signed_out` after `timed_out` or `failed` | "Sign-in timed out." / "Sign-in did not finish: <reason>" and **Retry** |
+| `signed_out`, a linked machine | "Antigravity needs a Google sign-in. Sign in on <machine>." No button (pasting the address is a follow-up, §11) |
+| `signed_out` or `not_installed`, `terminal` | The terminal hint of each place, as before (Claude Code, Codex, Cursor) |
+| `ready`, `unknown`, `signIn: none` (OpenCode) | no line |
+
+On success the line folds and fades out (`Fold`) while Start is already enabled. A cancel is the person's own act: the line
+goes back to Install or Sign in with nothing said. An action the host refuses prints its reason under the line.
+
+**The top bar.** Every tool that is installed but signed out (`signedOutTools`) gets an error-style donut: a solid ring and
+the tool's letter in the danger colour, where a reading's ring would be (`data-signed-out`). Its tooltip says "Not signed
+in"; pressing it opens the panel with the same line: **Sign in** for Antigravity, the terminal command for Claude Code,
+Codex and Cursor. A tool that is signed out is not "no agent": the "No agent connected" mark shows only when no tool has a
+donut at all. A donut fades and grows in and fades out when a tool comes or goes after the bar was first drawn.
+
+**Not eligible (PROPOSAL, not decided).** `failure.reason = ineligible` with `verifyUri` (Google's page): "Google needs
+to verify this account before Antigravity can be used." with **Verify account** (opens the address in the browser) and
+**Sign in again**. Without an address: "Google did not set up Antigravity for this account." and **Sign in again**. Only an
+`https` address is opened. Screenshots mark it as a proposal.
+
+**Motion.** Every change is animated, about 150 to 200 ms (design-system §9): the line folds in (180 ms) and out (140 ms, as every fold closes), its words change in place
+(`.cc-setup-swap`, 170 ms), the bar's width is a transition (`.cc-progress`, 180 ms), a donut comes and goes
+(`.cc-donut-in`, 170 ms, `.cc-donut-out`, 150 ms). Under reduced motion nothing travels: a 100 ms change of opacity.
+
+Tests: `setupLine.test.ts` (the mapping, the live setups, the donut rule) and `e2e/fixtures/tool-setup.ts` (each state in
+the dialogs, the first-run card and the panel; Chromium and WebKit).
