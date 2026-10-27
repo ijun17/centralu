@@ -151,7 +151,15 @@ export class CoreSession<W extends ToolWire = ToolWire> {
     for (let next = this.queue.shift(); next; next = this.wire.turns.midTurnInput ? this.queue.shift() : undefined) {
       const turn = this.turn ?? this.begin(next, proc)
       if (turn.inputs[0] !== next) turn.inputs.push(next)
-      this.wire.startTurn(next.input, this.handleOf(turn))
+      const handle = this.handleOf(turn)
+      try {
+        this.wire.startTurn(next.input, handle)
+      } catch (err) {
+        // A wire that could not write the input ends its turn as failed, so neither the input nor the queue waits forever
+        const failure = err instanceof Error ? err : new Error(String(err))
+        handle.end({ how: 'failed', error: { code: 'internal', message: `${this.wire.label}: ${failure.message}`, retryable: true }, inputError: failure })
+        return
+      }
     }
   }
 
@@ -180,20 +188,26 @@ export class CoreSession<W extends ToolWire = ToolWire> {
   /** The old process ended (or is ended now), a new one starts on the same conversation, and the queue goes on in it */
   private async replaceProcess(): Promise<void> {
     this.launching = true
+    // Opening again: an exit now is a crash, as on the first open, and the queue waits
+    this.phase = 'opening'
     try {
       const proc = this.process.current ? await this.process.relaunch() : await this.process.start()
       await this.openOn(proc)
     } catch (err) {
-      if (this.phase === 'closed') return
       this.launching = false
-      // The same rule as an exit while opening: the session could not go on, which is a crash, and the input waiting fails
+      if (this.phase === 'closed') return
+      // The same rule as a failed first open: the session could not go on, which is a crash, and the input waiting fails.
+      // The process that started and could not open is not left running
       const failure = err instanceof Error ? err : new Error(String(err))
+      const proc = this.live
       this.phase = 'closed'
-      this.failQueue(failure)
-      this.emit({ type: 'error', sessionId: this.sessionId, error: { code: 'adapter_crashed', message: withStderrTail(`${this.wire.label} could not start again: ${failure.message}`, this.live), retryable: true } })
+      this.dropQueue('were still queued when the agent could not start again')
+      this.emit({ type: 'error', sessionId: this.sessionId, error: { code: 'adapter_crashed', message: withStderrTail(`${this.wire.label} could not start again: ${failure.message}`, proc), retryable: true } })
+      await this.process.close()
       return
     }
     this.launching = false
+    if (this.phase === 'opening') this.phase = 'ready'
     this.drain()
   }
 
@@ -279,12 +293,8 @@ export class CoreSession<W extends ToolWire = ToolWire> {
   private dropQueue(when: string): void {
     const count = this.queue.length
     if (count === 0) return
-    this.failQueue(new Error(`${count} message(s) ${when}`))
+    this.receipts.fail(this.queue.splice(0).map((q) => q.input.id), new Error(`${count} message(s) ${when}`))
     this.emit(undeliveredError(this.sessionId, count, when))
-  }
-
-  private failQueue(error: Error): void {
-    this.receipts.fail(this.queue.splice(0).map((q) => q.input.id), error)
   }
 
   async dispose(): Promise<void> {

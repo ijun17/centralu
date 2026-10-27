@@ -338,8 +338,10 @@ What the ledger owns now, one copy for every tool on it:
 - **A Stop that ends the process** (`interruptEndsProcess`, `agy`): the process is marked as ending by our hand, the gate
   requests are denied, then SIGINT. Its exit is the Stop's confirmation and ends the turn as `interrupted` if the tool did
   not say so first. The next input asks `launch` again with the conversation's id (`relaunch`, or `start` once the old
-  process is gone), opens it, and goes on; nothing starts until an input comes. A new process that cannot start or open
-  is a crash, like an exit while opening, and fails the inputs waiting.
+  process is gone), opens it (the session is `opening` again, so an exit then is a crash), and goes on; nothing starts
+  until an input comes. A new process that cannot start or open is a crash, like an exit while opening: the inputs
+  waiting are undelivered, and the process is stopped, not left running.
+- **A wire that cannot write an input**: `startTurn` throwing ends that turn as `failed`, and the queue goes on.
 
 The core tests (`core/ledger.test.ts`) run a scripted wire in memory against a small model of the above: 150 random
 sequences each of inputs, Stops, the tool's endings, exits and the close, for an ACP-like tool, a tool with mid-turn

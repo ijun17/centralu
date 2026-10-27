@@ -456,6 +456,41 @@ describe('a tool whose Stop ends its process (agy, session-core.md §8)', () => 
     expect(await gates?.wait('r2')).toMatchObject({ decision: 'deny' })
   })
 
+  it('a new process that ends while it opens is a crash, and one that cannot open is stopped, not left running', async () => {
+    for (const how of ['exits', 'throws'] as const) {
+      const w = world('agy')
+      await w.session.ready
+      w.session.send('one')
+      w.session.interrupt()
+      const open = w.wire.open.bind(w.wire)
+      w.wire.open = async (io, resume) => {
+        if (how === 'exits') (io.process as unknown as FakeProc).exit(1)
+        await open(io, resume)
+        throw new Error('no init')
+      }
+      const waiting = w.session.sendTracked('two')
+      await expect(waiting).rejects.toThrow()
+      await settle()
+      expect(said(w.events)).toEqual(['working', 'waiting:interrupted', 'undelivered', 'crashed'])
+      expect(w.spawned[1]?.exitCode).not.toBeNull()
+    }
+  })
+
+  it('fails the input a wire could not write, and goes on with the next', async () => {
+    const w = world('acp')
+    await w.session.ready
+    const start = w.wire.startTurn.bind(w.wire)
+    w.wire.startTurn = (input, turn) => {
+      if (input.text === 'bad') throw new Error('cannot write')
+      start(input, turn)
+    }
+    await expect(w.session.sendTracked('bad')).rejects.toThrow('cannot write')
+    w.session.send('good')
+    expect(w.wire.writes).toEqual(['good@p1'])
+    expect(said(w.events)).toEqual(['working', 'error:true', 'working'])
+    await w.session.dispose()
+  })
+
   it('an exit of its own, not after a Stop, is still a crash in a turn and asleep when idle', async () => {
     const busy = world('agy')
     await busy.session.ready
