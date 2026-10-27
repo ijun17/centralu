@@ -123,6 +123,18 @@ for (const dir of readdirSync(RECORDINGS)) {
       })
     }
 
+    if (names.includes('files')) {
+      it('files: a file is marked after the edit that wrote it ended ok, never before (#843)', async () => {
+        const { events } = await replay(dir, 'files')
+        const touched = events.map((e, i) => ({ e, i })).filter((x) => x.e.type === 'files_touched')
+        expect(touched.length).toBeGreaterThan(0)
+        for (const { i } of touched) {
+          const before = events[i - 1]
+          expect(before?.type === 'tool_result' && before.ok).toBe(true)
+        }
+      })
+    }
+
     if (names.includes('interrupt-approval')) {
       it('interrupt-approval: a Stop closes the open card and ends the turn as stopped', async () => {
         const { events } = await replay(dir, 'interrupt-approval')

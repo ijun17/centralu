@@ -1,5 +1,6 @@
 import type { NormalizedEvent, TokenUsage, ToolSummary } from '@cc/protocol'
 import { asObj } from '../../json-value.js'
+import { TouchedFiles } from '../file-changes.js'
 import { planUpdate } from '../plan.js'
 import { toolResultEvent } from '../tool-result.js'
 import { firstLine } from '../tool-titles.js'
@@ -39,6 +40,8 @@ export class AcpNormalizer {
   private readonly open = new Map<string, OpenCall>()
   /** Every field said of each call this turn, merged: a permission request may carry less than the call did (measured, Cursor) */
   private readonly known = new Map<string, ToolCallFields>()
+  /** Paths an edit call would change, reported once the call ends ok (#843): a denied edit marks nothing */
+  private readonly touched: TouchedFiles
   private readonly compactions = new Map<string, string>()
   private segment = 0
   private lastChunk: 'message' | 'thought' | 'other' = 'other'
@@ -48,7 +51,9 @@ export class AcpNormalizer {
     /** Who returns a call's output: an empty one can be a command that printed nothing or output the tool did not return
      *  (measured on Cursor: 60 KB arrived as `stdout: ""`), and which it was cannot be told: said as the tool not returning it */
     private readonly label = 'The tool',
-  ) {}
+  ) {
+    this.touched = new TouchedFiles(sessionId)
+  }
 
   /** The events one update says. `available_commands_update` and the like are read by the session, not here */
   update(u: SessionUpdate): NormalizedEvent[] {
@@ -174,7 +179,7 @@ export class AcpNormalizer {
       events.push({ type: 'tool_call', sessionId: this.sessionId, callId: id, summary: summaryOf(seen), ...(seen.rawInput === undefined ? {} : { input: seen.rawInput }) })
       if (seen.kind === 'edit' || seen.kind === 'delete' || seen.kind === 'move') {
         const paths = pathsOf(seen)
-        if (paths.length) events.push({ type: 'files_touched', sessionId: this.sessionId, paths })
+        this.touched.call(id, paths)
       }
     }
     const output = outputOf(u)
@@ -189,7 +194,7 @@ export class AcpNormalizer {
       // Measured on Cursor: a refused call ends `completed` with nothing else
       const ok = u.status === 'completed' && !refused && rawOutputOk(seen.rawOutput)
       const text = output ?? rawOutputText(seen.rawOutput) ?? call.output
-      events.push(toolResultEvent(this.sessionId, id, ok, text || (refused ? 'Not run: the request was refused.' : ''), `${this.label} did not return the output`))
+      events.push(toolResultEvent(this.sessionId, id, ok, text || (refused ? 'Not run: the request was refused.' : ''), `${this.label} did not return the output`), ...this.touched.result(id, ok))
     }
     return events
   }
