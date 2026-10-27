@@ -14,12 +14,20 @@ import { lineSplitter } from '../../transport/json-lines.js'
 export function tapProcess<P extends AgentProcess>(proc: P, recorder: FrameRecorder | undefined): P {
   if (!recorder) return proc
   const out = lineSplitter((line) => line.trim() && recorder.frame('out', line))
-  const write = proc.stdin.write.bind(proc.stdin) as (...args: unknown[]) => boolean
-  // Recorded where it is written, so the order against the lines read is the order they happened in
-  proc.stdin.write = ((chunk: unknown, ...rest: unknown[]) => {
-    if (typeof chunk === 'string' || chunk instanceof Uint8Array) out.push(chunk)
-    return write(chunk, ...rest)
-  }) as typeof proc.stdin.write
+  const original: unknown = Reflect.get(proc.stdin, 'write')
+  if (typeof original !== 'function') return proc
+  // Recorded where it is written, so the order against the lines read is the order they happened in. Called on the stream
+  // it came from with the arguments it was given, whatever overload the wire used
+  Object.defineProperty(proc.stdin, 'write', {
+    configurable: true,
+    writable: true,
+    value: (chunk: unknown, ...rest: unknown[]): unknown => {
+      if (typeof chunk === 'string') out.push(chunk)
+      else if (chunk instanceof Uint8Array) out.push(Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength))
+      const written: unknown = Reflect.apply(original, proc.stdin, [chunk, ...rest])
+      return written
+    },
+  })
   const incoming = lineSplitter((line) => line.trim() && recorder.frame('in', line))
   proc.stdout.on('data', (chunk: Buffer | string) => incoming.push(chunk))
   proc.once('exit', (code, signal) => recorder.exit(code, signal))

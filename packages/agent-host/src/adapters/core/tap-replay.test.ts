@@ -1,11 +1,8 @@
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { afterEach, describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
 import { cursorProfile } from '../cursor-agent/index.js'
 import { AcpAdapter } from '../acp/adapter.js'
+import type { FrameRecorder } from '../frames/recorder.js'
 import { loadRecording, replaySpawner } from '../frames/replay.test-helpers.js'
 import { drive, SCENARIOS } from '../frames/scenarios.test-helpers.js'
 
@@ -17,58 +14,49 @@ class ReplayAdapter extends AcpAdapter {
   readonly tool = 'replay'
 }
 
-const RECORDINGS = fileURLToPath(new URL('../acp/recordings/', import.meta.url))
-let dir: string | undefined
-const saved = process.env.CC_RECORD_FRAMES
-afterEach(() => {
-  if (dir) rmSync(dir, { recursive: true, force: true })
-  if (saved === undefined) delete process.env.CC_RECORD_FRAMES
-  else process.env.CC_RECORD_FRAMES = saved
-})
+type Entry = { dir: 'in' | 'out' | 'exit'; line: string }
+let recording = false
+const recorded: Entry[] = []
+const recorder: FrameRecorder = {
+  frame: (dir, line) => recorded.push({ dir, line }),
+  exit: () => recorded.push({ dir: 'exit', line: '' }),
+}
+vi.mock('../frames/recorder.js', () => ({ frameRecorder: () => (recording ? recorder : undefined) }))
 
-async function play(tool: string, name: string, record: boolean) {
-  if (dir) rmSync(dir, { recursive: true, force: true })
-  dir = mkdtempSync(join(tmpdir(), 'cc-tap-replay-'))
-  if (record) process.env.CC_RECORD_FRAMES = dir
-  else delete process.env.CC_RECORD_FRAMES
-  const recording = loadRecording(join(RECORDINGS, tool, `${name}.jsonl`))
-  const { spawn, state, peers } = replaySpawner(recording)
-  const profile = { ...cursorProfile(), launch: async () => ({ command: 'agent', args: ['acp'] }), installedVersion: async () => String(recording.header.version) }
+const TOOL = 'cursor-agent-2026.10.22'
+
+async function play(name: string, record: boolean) {
+  recording = record
+  recorded.length = 0
+  const rec = loadRecording(`${import.meta.dirname}/../acp/recordings/${TOOL}/${name}.jsonl`)
+  const { spawn, state, peers } = replaySpawner(rec)
+  const profile = { ...cursorProfile(), launch: async () => ({ command: 'agent', args: ['acp'] }), installedVersion: async () => String(rec.header.version) }
   const events: NormalizedEvent[] = await drive(new ReplayAdapter(profile, spawn, 60_000), SCENARIOS.find((s) => s.name === name)!, '/work', 'tap-replay', 0, () => peers.at(-1)?.kill('SIGKILL'))
-  return { recording, events, problems: state.problems }
+  return { rec, events, problems: state.problems }
 }
 
-const shape = (m: Record<string, unknown>) => (typeof m.method === 'string' ? m.method : 'answer')
+/** A frame's kind, for what differs between runs (the adapter's own request ids): its method, else that it answers */
+const kind = (m: unknown): string => (typeof m === 'object' && m !== null && 'method' in m && typeof m.method === 'string' ? m.method : 'answer')
+const withoutId = (m: unknown): unknown => (typeof m === 'object' && m !== null ? Object.fromEntries(Object.entries(m).filter(([k]) => k !== 'id')) : m)
+/** The per-run random request id prefix is the one thing that may differ between two runs */
+const stable = (events: NormalizedEvent[]): unknown => JSON.parse(JSON.stringify(events).replace(/acp-req-[0-9a-f]+-/g, 'acp-req-'))
 
 describe('a recorded replay through the tap', () => {
-  const tool = readdirSync(RECORDINGS).find((d) => d.startsWith('cursor-agent-'))!
-  const name = readdirSync(join(RECORDINGS, tool))
-    .map((f) => f.replace(/\.jsonl$/, ''))
-    .find((n) => SCENARIOS.some((s) => s.name === n))!
-
-  it('records the frames the recording holds, in order, and changes no event', async () => {
-    const plain = await play(tool, name, false)
-    const taped = await play(tool, name, true)
-    expect(taped.problems).toEqual([])
-    const written = readdirSync(dir!).sort()
-    // One file per process, as the recorder has always written them
-    expect(written.length).toBeGreaterThan(0)
-    const got = written.flatMap((f) =>
-      readFileSync(join(dir!, f), 'utf8')
-        .split('\n')
-        .filter(Boolean)
-        .map((l) => JSON.parse(l) as { dir: string; line?: string }),
-    )
-    const want = taped.recording.frames
-    // A killed peer's exit is reported after the recording ended, so the exits are counted apart
-    const frames = <T extends { dir: string }>(all: T[]) => all.filter((e) => e.dir !== 'exit')
-    expect(frames(got).map((e) => e.dir)).toEqual(frames(want).map((f) => f.dir))
-    expect(got.filter((e) => e.dir === 'exit').length).toBeGreaterThanOrEqual(want.filter((f) => f.dir === 'exit').length)
-    expect(got.filter((e) => e.dir !== 'exit').map((e) => shape(JSON.parse(e.line!) as Record<string, unknown>))).toEqual(
-      want.filter((f) => f.dir !== 'exit').map((f) => shape(f.msg!)),
-    )
-    // The per-run random request id prefix is the one thing that may differ
-    const stable = (events: NormalizedEvent[]) => JSON.parse(JSON.stringify(events).replace(/acp-req-[0-9a-f]+-/g, 'acp-req-'))
-    expect(stable(taped.events)).toEqual(stable(plain.events))
-  })
+  for (const name of ['basic', 'approval', 'interrupt']) {
+    it(`${name}: records the frames the recording holds, in order, and changes no event`, async () => {
+      const plain = await play(name, false)
+      expect(recorded).toEqual([])
+      const taped = await play(name, true)
+      expect(taped.problems).toEqual([])
+      const frames = recorded.filter((e) => e.dir !== 'exit')
+      const want = taped.rec.frames.filter((f) => f.dir !== 'exit')
+      expect(frames.map((e) => e.dir)).toEqual(want.map((f) => f.dir))
+      expect(frames.map((e) => kind(JSON.parse(e.line)))).toEqual(want.map((f) => kind(f.msg)))
+      // Every incoming frame is the recorded one once parsed (an answer carries the adapter's own id, which differs per run)
+      expect(frames.filter((e) => e.dir === 'in').map((e) => withoutId(JSON.parse(e.line)))).toEqual(want.filter((f) => f.dir === 'in').map((f) => withoutId(f.msg)))
+      // A killed peer's exit is reported after the recording ended: at least the recorded ones are there
+      expect(recorded.filter((e) => e.dir === 'exit').length).toBeGreaterThanOrEqual(taped.rec.frames.filter((f) => f.dir === 'exit').length)
+      expect(stable(taped.events)).toEqual(stable(plain.events))
+    })
+  }
 })
