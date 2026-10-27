@@ -91,15 +91,6 @@ describe('the urgency order (contrast is urgency)', () => {
     ])
   })
 
-  it('checks the text on a relayed message against the person’s bubble and the secondary ink', () => {
-    const withRelayed = { ...dark, '--color-surface-hover': [66, 66, 66, 1] as Rgba, '--color-surface-relayed': [46, 46, 46, 1] as Rgba, '--color-ink-relayed': [237, 237, 237, 1] as Rgba }
-    expect(urgencyBreaks(withRelayed)).toEqual([])
-    expect(urgencyBreaks({ ...withRelayed, '--color-ink-relayed': [100, 100, 100, 1] })).toEqual([
-      'On a message from a session, app or script, secondary stands out as much as its text or more.',
-      'The text on a message from a session, app or script is weaker than on your own message.',
-    ])
-  })
-
   it('judges a translucent ink by where it lands', () => {
     // Half-transparent white over black is a mid grey: weaker than the opaque muted ink
     expect(urgencyBreaks({ ...dark, '--color-ink-muted': [255, 255, 255, 0.2] })).toEqual([

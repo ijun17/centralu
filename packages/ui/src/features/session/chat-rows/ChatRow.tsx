@@ -65,7 +65,7 @@ export const ChatRow = memo(function ChatRow({
         {/*
           A message that came in through delegation (FR-11). Placed in the same spot (right) as
           the person's own messages — to the session it is equally "a directive received" —
-          with a source name above it and a deeper fill (surface-relayed, solid border). No color is used
+          with a source name above it and the agent bubble's fill (surface-raised, solid line border). No color is used
           (the palette rule): the distinction is the surface step.
         */}
         {item.from && (
@@ -117,12 +117,10 @@ export const ChatRow = memo(function ChatRow({
           </div>
         )}
         {/*
-          A message that came from another session, an app or a script (relayed) is the person's
-          bubble one surface step deeper (surface-relayed) with a solid border. It was dashed, but
-          a dashed edge means failed or unknown everywhere else in the app (#1629). The source
-          line above it stays. No hue: only the step tells it from my own. ink-relayed keeps the
-          text at least as contrasty as on my bubble, which matters in the light themes where
-          the deeper fill is darker.
+          A message that came from another session, an app or a script (relayed) is drawn as the agent's
+          answer bubble is: surface-raised and the line edge, solid (bubbleLook.ts). It was the person's
+          bubble with a dashed edge, but a dashed edge means failed or unknown everywhere else in the app
+          (#1629). The source line above it stays. No hue: the fill alone tells it from my own.
         */}
         {/* No empty bubble is rendered for a message that only sent an image */}
         {(item.text || !item.attachments?.length) && (

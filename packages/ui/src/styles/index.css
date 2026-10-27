@@ -77,7 +77,7 @@
    * brightness from the floor up.
    */
   --color-surface-floor: #0f0f0f; /* the app floor */
-  --color-surface-side: #181818; /* the sidebar and the top bar — darker by the owner's ask (2026-10-20), see the session-view block */
+  --color-surface-side: #0f0f0f; /* the sidebar and the top bar — the same as the floor by the owner's ask (2026-10-27; it was #181818, 2026-10-20), so the edge line alone parts them from the conversation */
   --color-surface-raised: #242424; /* what floats: cards, menus, dialogs, inputs */
   --color-surface-selected: #353535; /* a picked tab or option, and the quiet hover on a raised card */
   --color-surface-hover: #424242; /* hover and pressed; also my own message bubble */
@@ -97,8 +97,6 @@
   /* The conversation's own surfaces — the floor's steps in this preset, see the session-view block below */
   --color-surface-reading: #0f0f0f;
   --color-surface-reading-raised: #242424;
-  --color-surface-relayed: #2e2e2e; /* a message that came from a session, an app or a script: one step deeper than my bubble */
-  --color-ink-relayed: #ededed; /* text on it */
 
   /* Lines */
   --color-line: #363636; /* hairline: borders, dividers, meter tracks */
@@ -387,8 +385,6 @@
   --color-surface-deck: #e4e4e4;
   --color-surface-reading: #f0f0f0;
   --color-surface-reading-raised: #f9f9f9;
-  --color-surface-relayed: #c8c8c8;
-  --color-ink-relayed: #1a1a1a;
 
   --color-line: #d6d6d6;
   --color-line-strong: #bdbdbd;
@@ -465,8 +461,6 @@
   --color-surface-reading: #000000;
   --color-surface-reading-raised: #0f0f0f;
 
-  --color-surface-relayed: #282828;
-  --color-ink-relayed: #f0f0f0;
   --color-line: #707070;
   --color-line-strong: #a8a8a8;
 
@@ -507,8 +501,6 @@
   --color-surface-deck: #e6e6e6;
   --color-surface-reading: #ffffff;
   --color-surface-reading-raised: #ffffff;
-  --color-surface-relayed: #c8c8c8;
-  --color-ink-relayed: #000000;
 
   --color-line: #767676;
   --color-line-strong: #4a4a4a;
@@ -1388,9 +1380,11 @@
  * message reads as one soft shape instead of a boxed form (owner, 2026-10-19). Dark keeps the shared line, which
  * already sits close to its fill there. The agent's answer bubble carries `data-bubble`, mine `data-mine-bubble`
  * (the person's message, and the same message pinned at the top). A relayed message
- * (`data-relayed`: from a session, an app or a script) keeps the shared line, solid, on its own fill.
+ * (`data-relayed`: from a session, an app or a script) is drawn as the agent's bubble is (the same fill and edge), so it
+ * takes this softer edge too.
  */
-[data-theme='light'] [data-bubble] {
+[data-theme='light'] [data-bubble],
+[data-theme='light'] [data-relayed] {
   border-color: #e6e6e6;
 }
 [data-theme='light'] [data-mine-bubble]:not([data-relayed]) {
