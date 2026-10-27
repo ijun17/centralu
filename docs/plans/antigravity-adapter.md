@@ -360,12 +360,12 @@ door's and not `agy`'s.
 nothing), then one `{decision}` or `{decision: "deny", reason}`. A reason never carries the key or another credential.
 A wrong key, another session's key, a revoked one (the session closed, or the host restarted or was swapped: a host
 starts with no key) all get the front door's plain 404; a hook input with a `decision`, `permissionDecision` or
-`answer` field gets 400, since the channel asks and never answers; one over 1 MiB, 413; past 32 requests of one session (bodies still being read included), 429. A hook that `agy` kills past its entry's `timeout` has its request denied and its card withdrawn, so the person never answers a card for a call that will not run. The hook
+`answer` field gets 400, since the channel asks and never answers; one over 1 MiB, 413, which the hook reports as a call too large to check; past 32 requests of one session (bodies still being read included), 429. A hook that `agy` kills past its entry's `timeout` has its request denied and its card withdrawn, so the person never answers a card for a call that will not run. The hook
 denies on every one of them.
 
 The hook is two files: `agy-gate.mjs`, the command, runs unconditionally under any name and only calls
 `gate-answer.mjs`, which holds the logic the tests drive. It uses Node's global `fetch` and touches no file or process
-(os-layer.md). It sends again only when the request never left (`ECONNREFUSED`, `ENOTFOUND`: a host swap), so a card is
+(os-layer.md). Before sending, it cuts any string argument longer than 64 KiB (a large file's content) to its head and a marker naming the bytes cut and the SHA-256 of the whole (`cutLongArguments`): the gate decides on paths, commands and kinds, the card shows the head with the marker as the argument's text (no new element), and the digest keeps two long commands that share a head apart for an always-allow rule. It sends again only when the request never left (`ECONNREFUSED`, `ENOTFOUND`: a host swap), so a card is
 never raised twice, and a `deny` reason names an error's code only, never its message (which can carry the address). The host side
 (`gate.ts`) decides from the preset and the always-allow rules, or raises an `approval_request` card and waits:
 

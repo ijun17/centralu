@@ -418,16 +418,34 @@ describe('the review of #1675', () => {
     expect(await next).toEqual({ decision: 'allow' })
   })
 
-  it('reads at most a MiB of a hook’s input (F3)', async () => {
+  it('answers a body over the cap with a 413 the hook reads, not a cut connection (F3, the recheck)', async () => {
     const { gates } = await host()
-    const ch = await gates.open('s1', cardGate().gate)
-    const big = JSON.stringify({ ...INPUT, toolCall: { name: 'write_file', args: { Content: 'x'.repeat(1024 * 1024) } } })
-    expect((await hook(ch.env, JSON.parse(big))).decision).toBe('deny')
-    const fits = JSON.stringify({ ...INPUT, toolCall: { name: 'write_file', args: { Content: 'x'.repeat(512 * 1024) } } })
     const g = cardGate()
-    const ch2 = await gates.open('s2', g.gate)
-    const answer = hook(ch2.env, JSON.parse(fits))
+    const ch = await gates.open('s1', g.gate)
+    const url = ch.env[GATE_ENV.url]!
+    const key = ch.env[GATE_ENV.token]!
+    const over = JSON.stringify({ ...INPUT, pad: 'x'.repeat(1024 * 1024) })
+    expect(await post(url, key, over)).toEqual({ status: 413, text: 'This call is too large to check (over 1 MiB).' })
+    // Many arguments each under the hook's bound still add up past the cap: the hook says why it denied
+    const many = Object.fromEntries(Array.from({ length: 20 }, (_, i) => [`a${i}`, 'y'.repeat(60 * 1024)]))
+    expect(await hook(ch.env, { ...INPUT, toolCall: { name: 'write_file', args: many } })).toEqual({
+      decision: 'deny',
+      reason: 'Centralu could not check this call: it is too large to check (over 1 MiB), so it was not run.',
+    })
+    expect(g.asked).toEqual([])
+  })
+
+  it('lets a write of a file far over the cap be asked, its content cut by the hook (the recheck)', async () => {
+    const { gates } = await host()
+    const g = cardGate()
+    const ch = await gates.open('s1', g.gate)
+    const content = 'z'.repeat(4 * 1024 * 1024)
+    const answer = hook(ch.env, { ...INPUT, toolCall: { name: 'write_file', args: { Path: '/w/big.txt', Content: content } } })
     await until(() => g.asked.length === 1)
+    const args = g.asked[0]!.input as { Path: string; Content: string }
+    expect(args.Path).toBe('/w/big.txt')
+    expect(args.Content.length).toBeLessThan(70 * 1024)
+    expect(args.Content).toMatch(/\[Centralu cut \d+ bytes of this argument before asking; SHA-256 of the whole: [0-9a-f]{64}\]$/)
     g.card('conv-1:2', { decision: 'allow' })
     expect(await answer).toEqual({ decision: 'allow' })
   })

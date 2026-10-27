@@ -209,8 +209,9 @@ export class FrontDoorGates implements GateInbound {
     let body: string
     try {
       body = await readBody(req, this.maxBodyBytes)
-    } catch {
-      return plain(res, 413, 'too large')
+    } catch (e) {
+      // Anything else is a client gone mid-body: nobody to answer
+      return e instanceof TooLarge ? plain(res, 413, 'This call is too large to check (over 1 MiB).') : undefined
     } finally {
       entry.reading--
     }
@@ -315,20 +316,24 @@ function bearer(header: string | undefined): string | null {
   return /^Bearer (\S+)$/.exec(header ?? '')?.[1] ?? null
 }
 
+/** A body past `maxBodyBytes`, read to its end and dropped */
+class TooLarge extends Error {}
+
 function readBody(req: IncomingMessage, limit: number): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = []
     let size = 0
+    /*
+     * Past the limit the rest is read and dropped, not kept, and the request ends as too large once it has arrived: the
+     * 413 then reaches the hook, which says the call was too large to check. Cutting the connection instead left the
+     * hook a socket error to report, and no reason
+     */
     req.on('data', (c: Buffer) => {
       size += c.length
-      if (size > limit) {
-        reject(new Error('too large'))
-        req.destroy()
-        return
-      }
-      chunks.push(c)
+      if (size <= limit) chunks.push(c)
+      else chunks.length = 0
     })
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
+    req.on('end', () => (size > limit ? reject(new TooLarge()) : resolve(Buffer.concat(chunks).toString('utf8'))))
     req.on('error', reject)
   })
 }
