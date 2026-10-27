@@ -32,7 +32,7 @@ const PROTECTED_NAMES: ReadonlySet<string> = new Set([
 const PROTECTED_PAIRS: readonly (readonly [string, string])[] = [['.github', 'workflows'], ['.cargo', 'config'], ['.cargo', 'config.toml']]
 
 /** The deepest part of `path` that exists, resolved through links, with the rest of the path put back after it */
-async function realPathOf(path: string): Promise<string | null> {
+export async function realPathOf(path: string): Promise<string | null> {
   const tail: string[] = []
   let at = resolve(path)
   for (;;) {

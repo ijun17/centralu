@@ -4,8 +4,8 @@ Proposed 2026-10-26. A design to agree on before code: what was measured from An
 Centralu session runs it, how its stream maps onto our events, how approvals reach a card although print mode cannot
 ask, and how it is tested from recorded frames (#1498). `agy` has no Agent Client Protocol (ACP) surface, so it gets
 its own adapter; it takes the tool-neutral parts of the ACP work ([acp-adapter.md](acp-adapter.md), branch
-`feat/acp-cursor`) instead of designing them again ([§11](#11-what-is-taken-from-the-acp-work)). A record like the rest
-of `plans/`, so not mirrored in Korean; [agent-host.md](../agent-host.md) §2–3 gains the lasting parts in the same pull
+`feat/acp-cursor`) instead of designing them again ([짠11](#11-what-is-taken-from-the-acp-work)). A record like the rest
+of `plans/`, so not mirrored in Korean; [agent-host.md](../agent-host.md) 짠2?? gains the lasting parts in the same pull
 request as the code.
 
 Owner rule (2026-10-26, #59): Centralu runs only the official CLI and never reads, copies or reuses its login. The
@@ -19,21 +19,21 @@ scripted lines to its stdin and records every stdin, stdout and stderr line with
 from 99.6% to 94% remaining; the limit was never reached. Where a fact comes from the documentation and changelog
 embedded in the binary instead of a run, it says so.
 
-A second round on 2026-10-27 used the committed recorder (`scripts/agy-record.mts`, §10.1) with the real gate hook:
-the §10.4 scenarios and seven hook failure modes on 1.4.7, then five on 1.4.8 (a tool call, a deny, a Stop with a gate
+A second round on 2026-10-27 used the committed recorder (`scripts/agy-record.mts`, 짠10.1) with the real gate hook:
+the 짠10.4 scenarios and seven hook failure modes on 1.4.7, then five on 1.4.8 (a tool call, a deny, a Stop with a gate
 request open, a hook that prints nothing, an unknown conversation id), which `agy` installed by itself between two runs
 (its changelog lists no change to the stream, hooks or print mode, and the replayed scenario read the same; a hook that
 prints nothing still lets the tool run). The quota went from 93% to about 84% remaining.
 
 The raw recordings hold local paths and stay outside the repository; scrubbed ones are committed under
-`packages/agent-host/src/adapters/agy/recordings/agy-<version>/` ([§10](#10-tests-1498-from-the-start)).
+`packages/agent-host/src/adapters/agy/recordings/agy-<version>/` ([짠10](#10-tests-1498-from-the-start)).
 
 ### 1.1 Print mode and its stream
 
 `agy -p "<prompt>" --output-format stream-json` prints one JSON object per line. `--input-format stream-json` keeps
 the process open and runs one turn per stdin line, in one conversation. **`-p` takes a value**: with stream-json input
 the working form is `agy --input-format stream-json --output-format stream-json [flags] -p=` (an empty prompt
-attached to the flag; a bare `-p` fails with "flag needs an argument", and `-p --input-format …` takes the next flag
+attached to the flag; a bare `-p` fails with "flag needs an argument", and `-p --input-format ?? takes the next flag
 as the prompt and says so).
 
 Input lines (measured, and the CLI's own error texts):
@@ -47,35 +47,35 @@ Input lines (measured, and the CLI's own error texts):
 |---|---|
 | `user` | runs a turn |
 | `control_request`, `control_response` | **known but refused**: `error: stream input message event "control_request" is not supported yet`, a `result` with `status: ERROR`, exit 2 |
-| anything else (`interrupt`, `cancel`, `keep_alive`, `permission_response`, …) | `warning: ignoring unsupported stream input message event "<name>"` on stderr, nothing else |
+| anything else (`interrupt`, `cancel`, `keep_alive`, `permission_response`, ?? | `warning: ignoring unsupported stream input message event "<name>"` on stderr, nothing else |
 
 So there is no stdin control channel in 1.4.7: no interrupt, no approval answer, no settings change. The two reserved
-names say one is planned; the drift check watches for them ([§10.5](#105-refreshing-and-drift)).
+names say one is planned; the drift check watches for them ([짠10.5](#105-refreshing-and-drift)).
 
 Output lines, in order, for one turn:
 
 ```
-{"event":"init","conversation_id":"<uuid>","init":{"model","cwd","tools":[…],"permission_mode":"request-review"}}
+{"event":"init","conversation_id":"<uuid>","init":{"model","cwd","tools":[??,"permission_mode":"request-review"}}
 {"event":"step_update","step_update":{"conversation_id","step_index":0,"state":"DONE","step_type":"user_input"}}
-{"event":"step_update","step_update":{…,"step_index":1,"state":"ACTIVE","step_type":"agent_response","text_delta":"pine"}}
-{"event":"step_update","step_update":{…,"step_index":1,"state":"DONE","step_type":"agent_response","text_delta":"\n",
+{"event":"step_update","step_update":{??"step_index":1,"state":"ACTIVE","step_type":"agent_response","text_delta":"pine"}}
+{"event":"step_update","step_update":{??"step_index":1,"state":"DONE","step_type":"agent_response","text_delta":"\n",
    "duration_seconds":2.18,"usage":{"input_tokens":6780,"output_tokens":1,"thinking_tokens":0,"cache_read_tokens":0,"total_tokens":6781}}}
 {"event":"result","result":{"conversation_id","status":"SUCCESS","response":"pineapple\n","duration_seconds",
-   "num_turns":1,"usage":{…},"denied_actions"?:[{"action":"command","display_name":"RunCommand"}]}}
+   "num_turns":1,"usage":{??,"denied_actions"?:[{"action":"command","display_name":"RunCommand"}]}}
 ```
 
-- `init` comes once per process, **after the first input line is read** (3.5–5.4 s after it on a cold start), not at
+- `init` comes once per process, **after the first input line is read** (3.5??.4 s after it on a cold start), not at
   launch. An idle process that has read nothing has printed nothing.
 - `step_index` counts the conversation's steps across processes (a resumed conversation continues the numbering).
 - Step types seen: `user_input`, `system_message`, `agent_response`, `tool`, `subagent`. The changelog calls the
-  vocabulary "closed" with a "stable" discriminator; compaction and other steps were not seen ([§6](#6-context-and-compaction)).
+  vocabulary "closed" with a "stable" discriminator; compaction and other steps were not seen ([짠6](#6-context-and-compaction)).
 - `agent_response`: `ACTIVE` frames carry `text_delta`; the `DONE` frame carries the last delta (often `"\n"`) and
   that model call's `usage`. A model call that only calls tools has an `agent_response` `DONE` with `usage` and no text
   (the transcript confirms it had no text, only `tool_calls`).
 - `tool`: an `ACTIVE` frame with `tool_name` and `tool_info.parameters`, then `DONE` with `tool_info.output` or
   `ERROR` with `tool_info.error {type: "TOOL_ERROR", message}`. **There is no call id**; the `step_index` is the key.
 - `system_message`: content is not in the stream (the transcript has it). Seen for a SessionStart hook's injected
-  message and for the notice `agy` adds on every resume ([§1.4](#14-resume)).
+  message and for the notice `agy` adds on every resume ([짠1.4](#14-resume)).
 - `thinking_tokens` is counted (59, 130, 262 in runs) but **no reasoning text is streamed**.
 - `result.usage`, `num_turns` and `duration_seconds` are **cumulative for the conversation**, across processes (a
   resumed conversation's fourth turn reported `num_turns: 4` and the sum of all four); per-call figures are the
@@ -85,9 +85,9 @@ Output lines, in order, for one turn:
 ### 1.2 Approvals: print mode cannot ask, a hook can
 
 Without flags `permission_mode` is `request-review`. A tool that needs a confirmation is **soft-denied**: the tool step
-ends `ERROR` ("permission check failed … user denied permission to run command"), stderr says
+ends `ERROR` ("permission check failed ??user denied permission to run command"), stderr says
 "a tool required the "command" permission that headless mode cannot prompt for, so it was auto-denied. Add an
-allow-rule under permissions.allow in settings.json … or re-run with --dangerously-skip-permissions", the `result`
+allow-rule under permissions.allow in settings.json ??or re-run with --dangerously-skip-permissions", the `result`
 lists `denied_actions`, and **the turn ends there** (the model gets no further call). `--mode` and
 `--dangerously-skip-permissions` are the only per-run presets; neither asks anyone.
 
@@ -103,10 +103,10 @@ that gets JSON on stdin and answers JSON on stdout. Measured in print mode:
 | `{"decision":"allow"}` without the skip flag | **not enough**: the headless permission check still soft-denied; `permissionOverrides: ["command(<cmd>)"]` did not lift it either |
 | `{"decision":"allow"}` with `--dangerously-skip-permissions` | the tool runs; `init.permission_mode` reads `always-proceed` |
 | `{"decision":"ask"}` | soft-denied as above (print mode cannot ask) |
-| The hook outlives its entry's `timeout` | killed; tool step `ERROR` (`JSON hook "…" failed: … signal: killed`); the tool does not run |
+| The hook outlives its entry's `timeout` | killed; tool step `ERROR` (`JSON hook "?? failed: ??signal: killed`); the tool does not run |
 | The hook exits non-zero | the tool does not run, **even when it printed `allow` first** |
 | It prints something that is not JSON, `{}`, or a decision `agy` does not know | the tool does not run (`{}`: `tool call denied by pre-tool hook:` with no reason) |
-| **It prints nothing and exits 0** | **the tool runs**: the one failure that opens the gate, so the gate script prints a decision on every path (§5.4) |
+| **It prints nothing and exits 0** | **the tool runs**: the one failure that opens the gate, so the gate script prints a decision on every path (짠5.4) |
 | Tools outside `init.tools` | `write_file` (`Path`, `Content`) ran and passed the hook though the list does not name it; the stream's `tool_info.parameters` showed only `Path`, the hook got every argument |
 | Coverage | with matcher `"*"`: `run_command`, `read_file`, `call_mcp_tool`, `invoke_subagent`, and the **sub-agent's own** tool calls (with the sub-agent's `conversationId`) |
 | Environment | the hook inherits `agy`'s environment (a variable set on `agy` reached it) plus `ANTIGRAVITY_CONVERSATION_ID` |
@@ -115,7 +115,18 @@ that gets JSON on stdin and answers JSON on stdout. Measured in print mode:
 | `Stop` | fires when a turn ends normally (`terminationReason: "NO_TOOL_CALL"`); not seen for a soft-denied turn |
 
 **That is the approval path**: the session runs with `--dangerously-skip-permissions`, and Centralu's own
-`PreToolUse` hook, which blocks until the person answers the card, is the only gate ([§5](#5-approvals)).
+`PreToolUse` hook, which blocks until the person answers the card, is the only gate ([짠5](#5-approvals)).
+
+**The person's deny rules still apply under the skip flag** (1.4.8, 2026-10-27, rules added to the settings file for
+the run and the file put back byte for byte after it). `~/.gemini/antigravity-cli/settings.json` holds
+`permissions.deny`, a list of `kind(target)` strings; `agy -p /permissions --output-format json` lists them back as
+written, per scope (`project`, `shared`, `global`), an entry it cannot parse included. With no hook:
+`command(echo deny-me)` refused `echo deny-me` and `echo ok; echo deny-me` ("Permission denied for unsandboxed(??.
+Matches user-configured deny rule.") and let `echo deny-me-also` run; `write_file(<folder>)` and `read_file(<folder>)`
+refused a write and a read under the folder, but only when the rule spelled the path as the call did (a rule under
+`/tmp` missed the same file as `/private/tmp`); `ls` of a denied folder through `run_command` ran. The kinds, from the
+binary's own documentation of its grants: `command(<prefix>)`, `read_file(<path>)`, `write_file(<path>)`,
+`mcp(<server>/<tool>)`, `read_url(<domain>)`, `execute_url(<domain>)`.
 
 ### 1.3 Where hooks, MCP servers and rules come from, without writing anyone's config
 
@@ -125,7 +136,7 @@ the project root. Both belong to the person (their config, their repository). Me
 
 ```
 plugin.json        {"name": "centralu"}
-hooks.json         the gate (§5)
+hooks.json         the gate (짠5)
 mcp_config.json    {"mcpServers": {"centralu": {"command", "args", "env"}}}
 rules/AGENTS.md    text the model reads as a rule
 ```
@@ -138,11 +149,11 @@ only if they toggle it; with no entry it is enabled.
 Side effects to know:
 
 - The `--add-dir` folder becomes a workspace: it appears in `workspacePaths` and in a sub-agent's `workspace_uris`,
-  so the agent may read it. It holds no secret ([§7](#7-centralus-tools)).
+  so the agent may read it. It holds no secret ([짠7](#7-centralus-tools)).
 - An MCP server from a plugin is named `<plugin>_<server>` (`centralu_centralu`). Its tools are not native tools:
   `agy` writes one descriptor per tool under `~/.gemini/antigravity-cli/mcp/<server>/<tool>.json`, the model reads it
   with `read_file`, then calls `call_mcp_tool {ServerName, ToolName, Arguments}`. The `tools/call` request carries
-  `_meta` with `antigravity.google/conversation_id`, `…/root_conversation_id` and `…/artifacts_dir`.
+  `_meta` with `antigravity.google/conversation_id`, `??root_conversation_id` and `??artifacts_dir`.
 - The MCP server process inherits `agy`'s environment (measured: a variable of the parent process reached it).
 - `agy` opens MCP with `server/discover` (protocol `2026-07-28`) and falls back to `initialize` (`2025-11-25`).
 
@@ -154,9 +165,9 @@ Side effects to know:
 | after SIGINT | context intact; the interrupted answer is saved as far as it got |
 | after SIGKILL mid-turn | **no lock, no error**; context intact; the killed answer is **not** saved (the transcript skips its step index); the presence file `presence/<id>.lock` stays behind and does not block |
 | two processes on one conversation | process B ran a turn on the conversation while process A held it open and idle: no refusal |
-| `--continue` | resumes the most recent conversation **of the working folder** (`cache/last_conversations.json` maps folder → id) |
-| `--conversation <unknown id>` | stderr `warning: conversation "<id>" not found`, then **a new conversation is created and the turn runs in it** (a new id in `init`), exit 0. The warning comes 0.4–0.7 s after the start, `init` about 3.9 s; stopped with SIGINT at `init` (recording `unknown-id`, 1.4.8), `agy` answered `failed to send message: trajectory not found` (`result` `ERROR`, `num_turns` 0) and no model answer came |
-| every resume | `agy` adds a `system_message` step: "[Notice] All your subagents and background tasks have been stopped due to server restart …" |
+| `--continue` | resumes the most recent conversation **of the working folder** (`cache/last_conversations.json` maps folder ??id) |
+| `--conversation <unknown id>` | stderr `warning: conversation "<id>" not found`, then **a new conversation is created and the turn runs in it** (a new id in `init`), exit 0. The warning comes 0.4??.7 s after the start, `init` about 3.9 s; stopped with SIGINT at `init` (recording `unknown-id`, 1.4.8), `agy` answered `failed to send message: trajectory not found` (`result` `ERROR`, `num_turns` 0) and no model answer came |
+| every resume | `agy` adds a `system_message` step: "[Notice] All your subagents and background tasks have been stopped due to server restart ?? |
 
 ### 1.5 Interrupt
 
@@ -168,8 +179,8 @@ process normally (exit 0). No child process was left behind in any run (hooks, t
 **SIGINT does not end a turn while a `PreToolUse` hook runs.** With a gate request held open, `agy` printed nothing and
 stayed until the hook process ended (97 s, when it was stopped by hand); then the tool step ended `ERROR`, stderr
 `error: interrupted`, and the process exited 1. With the open request answered `deny` first and SIGINT right after, the
-process exited within about a second, code 1 (0.66–0.97 s over the runs; recording `interrupt-gate`, 1.4.8). So a Stop answers every open gate request `deny`
-before it sends SIGINT (§3.3).
+process exited within about a second, code 1 (0.66??.97 s over the runs; recording `interrupt-gate`, 1.4.8). So a Stop answers every open gate request `deny`
+before it sends SIGINT (짠3.3).
 
 ### 1.6 Input during a turn
 
@@ -184,7 +195,7 @@ Print mode answers some slash commands without a turn, without quota and without
 
 | Command | `command.data` (measured) |
 |---|---|
-| `-p /usage` (also `/quota`) | `{description, groups: [{name: "Gemini Models", buckets: [{id: "gemini-weekly", window: "weekly", remaining_fraction, reset_time}]}, {name: "Claude and GPT models", …}]}` |
+| `-p /usage` (also `/quota`) | `{description, groups: [{name: "Gemini Models", buckets: [{id: "gemini-weekly", window: "weekly", remaining_fraction, reset_time}]}, {name: "Claude and GPT models", ??]}` |
 | `-p /model` | `{id: "gemini-3.8-flash-high", label, effort: "high", is_default}`: the persisted default |
 | `-p /effort` | `{adjustable: true, current: "high", available: ["low", "medium", "high"]}` |
 | `-p /help` | the commands print mode answers: `/agents /changelog /config /credits /effort /help /hooks /model /permissions /plugin /skills /usage` |
@@ -192,14 +203,14 @@ Print mode answers some slash commands without a turn, without quota and without
 | `-p /compact` | **not a command in print mode**: sent to the model as plain text (a turn spent; the model tried a shell command) |
 
 `agy models` prints `id<TAB>label` lines: `gemini-3.8-flash-{high,medium,low}`, `claude-sonnet-4-6`,
-`claude-opus-4-6-thinking`, `gpt-oss-120b-medium`. The effort is part of the Gemini ids; `--effort` (low … max) also
+`claude-opus-4-6-thinking`, `gpt-oss-120b-medium`. The effort is part of the Gemini ids; `--effort` (low ??max) also
 exists. `agy models --output-format json`, which the changelog mentions, is refused by 1.4.7 ("flags provided but not
 defined"). `agy agents` printed nothing (no custom agents).
 
 Login: not logged in (a temporary `HOME`, below), `-p /usage` answers within 0.4 s, without a terminal and without
 opening a browser: stderr `Error: authentication required. Run 'agy' to log in, then retry.`, `result {status:
 "ERROR", error: "authentication failed or timed out"}`, exit 1. The changelog says print mode can otherwise take an
-OAuth code from the controlling terminal; the adapter never gives it one ([§3.1](#31-one-process-per-live-session)).
+OAuth code from the controlling terminal; the adapter never gives it one ([짠3.1](#31-one-process-per-live-session)).
 
 ### 1.8 State on disk, and a temporary home
 
@@ -219,14 +230,14 @@ the "not logged in" case; real turns run against the person's real `agy` state.
 adapters/agy/
   index.ts          AgyAdapter implements AgentAdapter: detect, models, usage, capabilities
   session.ts        AgySession implements SessionHandle: the process, the input queue, interrupt, resume, teardown
-  stream.ts         stream-json lines → our own narrow types (anti-corruption, agent-host.md §2)
-  normalize.ts      step_update / result / stderr → NormalizedEvent (a small per-turn context)
-  gate.ts           the host side of the PreToolUse gate: hook request → approval card → decision
-  plugin-root.ts    writes the per-session --add-dir root (§3.2)
-  tool-kinds.ts     agy tool names → read / edit / execute / mcp / subagent / other
+  stream.ts         stream-json lines ??our own narrow types (anti-corruption, agent-host.md 짠2)
+  normalize.ts      step_update / result / stderr ??NormalizedEvent (a small per-turn context)
+  gate.ts           the host side of the PreToolUse gate: hook request ??approval card ??decision
+  plugin-root.ts    writes the per-session --add-dir root (짠3.2)
+  tool-kinds.ts     agy tool names ??read / edit / execute / mcp / subagent / other
   known-steps.ts    step types and stderr markers mapped or left out on purpose (unmapped.ts reads it)
   agy-gate.mjs      the hook command (always runs; bundled like orchestrator-bridge.mjs)
-  gate-answer.mjs   what the hook does: post the call, print one answer (§5.1)
+  gate-answer.mjs   what the hook does: post the call, print one answer (짠5.1)
   recordings/agy-<version>/   scrubbed recordings (fixture data)
 ```
 
@@ -253,9 +264,9 @@ and Linux; Windows to measure), by `LocalAgentProcess` / the keeper's `ProcessSo
 
 - One process per Centralu session, as for Codex: a crash ends one session, the keeper adopts each process across a
   host swap as today, and per-session settings are per-process flags. Measured: ~183 MB resident for an idle process.
-- The process lives while the session does. It is **replaced** after every interrupt (the CLI exits, §1.5) and after a
+- The process lives while the session does. It is **replaced** after every interrupt (the CLI exits, 짠1.5) and after a
   settings change that needs a flag (model, effort): the next input starts a new process with `--conversation`. A new
-  process costs 3.5–5.4 s before `init` (measured, cold).
+  process costs 3.5??.4 s before `init` (measured, cold).
 - **Never `--continue`**: it picks the folder's latest conversation, which may be another session's. Always
   `--conversation <externalId>`.
 - `--mode` is not passed: the binary has a message for modes print mode does not support headless, and `auto` is a
@@ -268,19 +279,30 @@ person's config:
 
 ```
 .agents/plugins/centralu/plugin.json       {"name": "centralu"}
-.agents/plugins/centralu/hooks.json        PreToolUse "*" → agy-gate.mjs (timeout: §5.4); SessionStart → role text (§7.2)
-.agents/plugins/centralu/mcp_config.json   Centralu's bridge and one entry per attached app (§7.1)
-.agents/plugins/centralu/rules/AGENTS.md   only if the role text needs a rule file (§7.2)
+.agents/plugins/centralu/hooks.json        PreToolUse "*" ??gate/agy-gate.mjs, timeout 900 s (짠5.4)
+.agents/plugins/centralu/gate/             agy-gate.mjs and gate-answer.mjs, both copied: the entry imports the other
+.agents/plugins/centralu/mcp_config.json   Centralu's bridge and one entry per attached app (짠7.1)
+.agents/plugins/centralu/rules/AGENTS.md   the role text, when the session has one (짠7.2)
 ```
 
-The files hold paths and names, **no secret**: the bridge credential and the gate's callback address reach the hook and
-the MCP servers through `agy`'s environment, which both inherit (measured). The folder is made read-only, and the gate
-refuses any write into it, since the agent sees it as a workspace. It is removed with the session.
+`plugin-root.ts` writes it (`writePluginRoot`, `removePluginRoot`). The files hold paths and names, **no secret**: the
+bridge credential and the gate's callback address reach the hook and the MCP servers through `agy`'s environment, which
+both inherit (measured). An app's entry names its server in its own `env` (`CC_APP_SERVER`); that `agy` adds such an
+`env` to the inherited one rather than replacing it was not measured, so it is checked with the wiring. The folder is
+made read-only (files 0444, folders 0555), and the gate refuses any write into it, since the agent sees it as a
+workspace. It is removed with the session. A shell command is not checked against it: under `auto`, or with an "always"
+rule on a command, a command could change the modes and rewrite the hook. The session id must be one path segment.
+
+Both gate files are copied (#1666 review finding 2): a copy of the entry alone exits 1 without an answer, which `agy`
+takes as a refusal. They are found where `bridge-path.ts` finds the bridge (`agyGatePaths()`): `agy/` beside the module
+in the source tree, and `agy/` beside the bundled host, where the bundle step is to put them (the wiring's pull
+request). The module touches no file itself (docs/plans/os-layer.md): it is handed the file operations, the OS layer's
+`files` by the same names, or Node's `fs/promises` in the recorder.
 
 ### 3.3 Teardown
 
 An interrupt answers every open gate request `deny` ("The turn was stopped.") and only then sends SIGINT: `agy` does not
-act on SIGINT while a hook runs (§1.5), so the other order hangs until the hook's own timeout (97 s measured before the
+act on SIGINT while a hook runs (짠1.5), so the other order hangs until the hook's own timeout (97 s measured before the
 hook was stopped by hand; with `deny` first, the process ended within about a second).
 
 `dispose()`: answer every open gate request `deny` ("the session is closing"), close stdin if idle; if a turn runs,
@@ -294,19 +316,19 @@ swap) sends nothing.
 
 | `agy` | NormalizedEvent | Notes |
 |---|---|---|
-| `init` | `agent_version` from `agy --version` at detect; `externalId := conversation_id` | **resume check**: an `init` whose id is not the `--conversation` asked for is the unknown-id case (§4.4) |
+| `init` | `agent_version` from `agy --version` at detect; `externalId := conversation_id` | **resume check**: an `init` whose id is not the `--conversation` asked for is the unknown-id case (짠4.4) |
 | `user_input` `DONE` | dropped | an echo of our input |
 | `agent_response` `ACTIVE` `text_delta` | `message_delta` | `messageId` is `conversation_id:step_index`; a bare newline with no text before it (a model call that only called tools) is no message |
-| `agent_response` `DONE` | last `message_delta`; `usage` → `usage_update` (a running reading with a `request` per model call) | a `DONE` with no text is a model call that only called tools; `input_tokens` counts the cached part, so the uncached input is `input_tokens − cache_read_tokens` (no recording has a cache read yet: this follows `total_tokens = input + output`) |
+| `agent_response` `DONE` | last `message_delta`; `usage` ??`usage_update` (a running reading with a `request` per model call) | a `DONE` with no text is a model call that only called tools; `input_tokens` counts the cached part, so the uncached input is `input_tokens ??cache_read_tokens` (no recording has a cache read yet: this follows `total_tokens = input + output`) |
 | `tool` `ACTIVE` | `tool_call` | call id `<conversation_id>:<step_index>`, the gate's `conversationId:stepIdx` (a sub-agent's steps count from the same numbers as its parent's); title and name from `tool-kinds.ts`, an unknown tool by its own name; the hook's `toolSummary` arg, when the gate saw it, is the card's summary |
-| `tool` `DONE` | `tool_result` | `tool_info.output`; edits → `files_touched` (`TouchedFiles`, only after an ok end) from `Path`, `TargetFile`, `AbsolutePath`, `FilePath`, `SearchPath` |
+| `tool` `DONE` | `tool_result` | `tool_info.output`; edits ??`files_touched` (`TouchedFiles`, only after an ok end) from `Path`, `TargetFile`, `AbsolutePath`, `FilePath`, `SearchPath` |
 | `tool` `ERROR` | `tool_result` (error) | a gate deny and a soft-deny keep their own wording |
-| `subagent` `DONE` | `tool_result` of the `invoke_subagent` call (same step index) | `subagent_info.subagents[]: {type_name, role, initial_prompt, conversation_id, log_uri}` said as the role and the prompt; no `subagent_event` (§4.3) |
+| `subagent` `DONE` | `tool_result` of the `invoke_subagent` call (same step index) | `subagent_info.subagents[]: {type_name, role, initial_prompt, conversation_id, log_uri}` said as the role and the prompt; no `subagent_event` (짠4.3) |
 | `system_message` | dropped | content not streamed; the resume notice is agy's, not the person's |
-| `result` `SUCCESS` | `turn_complete` | `denied_actions` → a `notice` naming them (should not happen under the gate) |
+| `result` `SUCCESS` | `turn_complete` | `denied_actions` ??a `notice` naming them (should not happen under the gate) |
 | `result` `ERROR` `"interrupted"` | the turn ends `interrupted` | only after our SIGINT; otherwise `INTERRUPTED_BY_TOOL` |
 | `result` `ERROR` other, after our Stop | the turn ends `interrupted` (ours) | a Stop that raced a failure, or came at `init`, is the person's Stop and is not shown as the failure it left; a Stop is spent at the turn's end whatever the result says, as is a login line from stderr |
-| `result` `ERROR` other | `error` with the text | auth and "model not found" get their own wording; stderr `AGY_ERROR: {…}` (changelog: canonical status, retryability, error id; exit 3) when present |
+| `result` `ERROR` other | `error` with the text | auth and "model not found" get their own wording; stderr `AGY_ERROR: {??` (changelog: canonical status, retryability, error id; exit 3) when present |
 | stderr `warning:` / `error:` lines | host.log; `error:` also feeds the next `error` | never shown as conversation text |
 | process exit | `error` + `session_live {live: false, reason: 'crashed'}` unless we stopped it | open gate cards released (`PendingCards`), queued inputs said undelivered |
 | an unknown `step_type` or `event` | nothing; one host.log line | `unmapped.ts`, with `known-steps.ts` |
@@ -331,12 +353,12 @@ the child reports back through its own `send_message` tool, which reaches the pa
 another `agent_response` in the same turn (measured). The child's steps are **not** in the parent's stream; its tool
 calls do reach our gate (with the child's `conversationId`), so its approvals work. P1 draws the start as the
 `invoke_subagent` call and its result; a `subagent_event` would be a visible change and waits for the protocol to name
-`invoke_subagent` as a launcher. `builtInSubagents` stays false until the child's progress has a source. The child's transcript (`log_uri`) is a file, and reading it is ruled out by §8.
+`invoke_subagent` as a launcher. `builtInSubagents` stays false until the child's progress has a source. The child's transcript (`log_uri`) is a file, and reading it is ruled out by 짠8.
 
 ### 4.4 Resume and the unknown id
 
-`resumeExternalId` → `--conversation <id>`. Since an unknown id silently starts a new conversation and runs the turn
-in it (§1.4), the adapter checks the first `init`: an id that differs, or the stderr `warning: conversation … not
+`resumeExternalId` ??`--conversation <id>`. Since an unknown id silently starts a new conversation and runs the turn
+in it (짠1.4), the adapter checks the first `init`: an id that differs, or the stderr `warning: conversation ??not
 found` before it, stops the process at once (SIGINT) and becomes the existing "no record of this conversation" error.
 The prompt has then already reached the new conversation; that conversation is left as it is (there is no delete
 command), and the session keeps its old `externalId`. Open question 5 asks whether a cheaper probe is worth looking for.
@@ -347,11 +369,11 @@ command), and the session keeps its old `externalId`. Open question 5 asks wheth
 
 `agy-gate.mjs` is the `PreToolUse` command. It reads the hook input, posts it to the session's gate address with the
 session's gate credential (`CC_GATE_URL`, `CC_GATE_TOKEN` from the environment, which `agy` passes on to its
-hooks), waits for a decision and prints `{"decision": "allow"}` or `{"decision": "deny", "reason": …}`. The host end
+hooks), waits for a decision and prints `{"decision": "allow"}` or `{"decision": "deny", "reason": ??`. The host end
 is a route on the host's front door, `POST /gate/<sessionId>`, under a **gate-only key** of the session's own: random,
 held in the host's memory only, revoked when the session closes, and good for one method (`gate.ask`, rights class
 `gate`) for that session alone; not the bridge credential (#382), and no new listener (decided on #1654;
-session-core.md §8.1, `transport/gate-door.ts`). The adapter opens it through `GateInbound` and puts the channel's `env`
+session-core.md 짠8.1, `transport/gate-door.ts`). The adapter opens it through `GateInbound` and puts the channel's `env`
 in `agy`'s environment. The names are tool-neutral (`CC_GATE_URL`, `CC_GATE_TOKEN`), since the route is the front
 door's and not `agy`'s.
 
@@ -384,20 +406,33 @@ The card carries the hook's `stepIdx`, which is the stream's `step_index` (measu
 
 ### 5.2 Presets
 
+As built (`gate.ts`), each proved by a live run (`recordings/agy-1.4.8/preset-*`):
+
 | Preset | The gate |
 |---|---|
-| `auto` | allows everything at once (the hook still runs, so `gatesSteps` holds) |
-| `edits` (#1525) | allows reads, and edits inside the session's folder; a card for the rest |
-| `normal` | allows reads inside the workspace (agy's own default does the same, per the changelog); a card for edits, commands, URL reads, browser actions and MCP calls to servers other than Centralu's |
-| `safe` | a card for everything but reads inside the session's folder |
+| `auto` | allows every known tool at once (the hook still runs, so `gatesSteps` holds) |
+| `edits` (#1525) | as `normal`, and an edit inside the session's folder without a card (`edit-grant.ts`), by the tools that write the text they are given (`write_to_file`, `write_file`, `replace_file_content`, `multi_replace_file_content`); `sed_file` is a card, since sed's `e` and `w` run a command and write another file |
+| `normal` | allows reads inside the session's folder, its readable folders and the paths given to read later, and starting a sub-agent (its own calls pass the gate one by one); a card for edits, commands, URL reads, browser actions and MCP calls to servers other than Centralu's |
+| `safe` | a card for everything but reads inside the session's folder and Centralu's own tools |
+
+The order is the ACP adapter's (`grantedWithoutCard`): `auto`, Centralu's own tool, the `edits` grant, a saved
+"always" rule (`always-allow.ts`), then the reads above; anything else is a card. Core PR 8's decision order is not
+waited for; `agy` moves onto it when it lands. Two refusals come before any allow, under every preset: a write into the
+plugin root (짠3.2), by any tool that names a path there, and the person's own deny rules (짠5.5). A read of `agy`'s MCP
+tool descriptors (`~/.gemini/antigravity-cli/mcp/`) is allowed under every preset: the model reads one before each MCP
+call (measured under `safe`), and they are tool schemas `agy` writes itself. A path is checked through its links: a link
+in the folder that points out of it is outside it, and a path `agy` might expand (`~`, `$`, `%`, `://`) is a card under
+every preset. A call that began before a Stop is refused even when the next turn has begun by the time it is decided. A
+saved "always" rule names one file, so it never allows an edit over several.
 
 `tool-kinds.ts` classifies by tool name (`view_file`, `read_file`, `list_dir`, `grep_search`, `find_by_name` read;
 `write_to_file`, `replace_file_content`, `multi_replace_file_content`, `sed_file`, `notebook_edit` edit; `run_command`,
 `send_command_input`, `notebook_execution` execute; `call_mcp_tool` by `ServerName`; `invoke_subagent` and the
 messaging tools subagent; `browser_*`, `read_url_content`, `search_web` outside). **An unknown name is a card**, never
-an allow: the list in `init.tools` is not complete (measured), and a new tool must not slip through. Calls to
-Centralu's own server (`centralu_*` server names) are allowed by the gate; the host's own approvals apply inside the
-bridge, as now.
+an allow, under `auto` too: the list in `init.tools` is not complete (measured), and a new tool must not slip through.
+Calls to Centralu's own server (`centralu_centralu`, as `agy` names the plugin's `centralu` server) are allowed by the
+gate; the host's own approvals apply inside the bridge, as now. An attached app's server is not Centralu's own and gets
+a card under `normal` and `safe`.
 
 ### 5.3 Who else answers
 
@@ -406,15 +441,40 @@ session can be the one whose requests go to the orchestrator (#1447).
 
 ### 5.4 Failure
 
-The gate fails closed: the host unreachable past a short retry across a swap → `deny` with the reason. The hook entry's
+The gate fails closed: the host unreachable past a short retry across a swap ??`deny` with the reason. The hook entry's
 `timeout` must outlast a person's answer (900 s proposed; 90 s measured to wait).
 
-**The gate's end sends its headers at once and then a space every so often until it decides** (§5.1). Node's `fetch`
+**The gate's end sends its headers at once and then a space every so often until it decides** (짠5.1). Node's `fetch`
 gives up on an answer whose headers, or next piece of body, take over 300 s, and a person may take longer over a card;
 JSON reads leading spaces as nothing, so the heartbeat does not change the answer (`gate-door.test.ts` holds a card six
 minutes). The hook refuses a redirect (`redirect: 'error'`), so its key goes to the session's address only.
 
-How `agy` treats a hook that does not answer as asked was measured (§1.2): a timeout, a non-zero exit, output that is
+### 5.5 The person's own deny rules
+
+Owner decision (#59, open question 1): the gate honours the person's `agy` deny rules on top of the preset, and only
+deny rules, so they can only make a session stricter. `deny-rules.ts` reads `permissions.deny` from
+`~/.gemini/antigravity-cli/settings.json` once when the session starts; a missing file, one that cannot be read or
+parsed, or one without the list gives no rules, and the preset alone decides. An entry of a kind it does not know is
+ignored, as `agy` ignores it. The refusal names the rule: "A deny rule in the person's agy settings blocks this call:
+command(git push)", which the model reads and can tell the person.
+
+`agy` applies these rules itself under the skip flag (짠1.2), so the gate's check is mostly early: a call `agy` would
+refuse after the person allowed it gets no card. Where a rule's meaning is not certain it is read broadly, since a
+broader deny only asks less: a command rule matches each part of a compound command (split at `;`, `&`, `|`,
+newlines, `$(`, backticks and parentheses, without reading quotes) by whole words, after shell keywords and common
+wrappers (`sudo`, `time`, `env`, `xargs`, `then`, ??, its program also through a path (`/bin/rm`); this is best
+effort (`bash -c '??` still hides a command), and `command(*)` denies every execute call; a path rule matches what is under it, as written or through links (where `agy` did not); a domain rule
+matches its subdomains. Not read: the `project` and `shared` scopes `/permissions` lists (`~/.gemini/config/projects/`
+and the Antigravity app's); `agy` still applies those itself.
+
+### 5.6 Stop
+
+`stopTurn(gate, interrupt)` answers every open gate request `deny` ("The turn was stopped."), then sends the interrupt,
+and the gate refuses every further call until `resume()` (the next turn). Measured with a card open
+(`recordings/agy-1.4.8/stop-card`): the process ended 0.5??.6 s after the Stop, exit 1. The other order hangs until the
+hook's own timeout (짠1.5).
+
+How `agy` treats a hook that does not answer as asked was measured (짠1.2): a timeout, a non-zero exit, output that is
 not JSON, `{}` and an unknown decision all keep the tool from running. **Empty output with exit 0 lets it run.** So
 `agy-gate.mjs` prints a decision on every path, `deny` unless Centralu clearly said `allow` (no address or credential,
 unreachable, a status other than 200, an answer it cannot read, any other decision, an exception), and its test runs
@@ -441,20 +501,20 @@ each of those paths. No watchdog is needed.
 
 `mcp_config.json` in the plugin root names the same stdio bridge Codex uses (`orchestrator-bridge.mjs`, run by the
 host's node), one entry for Centralu's own tools and one per attached app (`CC_APP_SERVER`). The credential comes from
-the environment (§3.2). `bridge-path.ts` moves from `adapters/codex/` to `adapters/` (shared with the ACP work, which
+the environment (짠3.2). `bridge-path.ts` moves from `adapters/codex/` to `adapters/` (shared with the ACP work, which
 plans the same move). The servers are fixed when the process starts, so an app attached later is
 `appAttachment: 'restart'`: the next process start (any input after an interrupt, or a forced restart) picks it up.
 
-Tools are reached through `call_mcp_tool` after the model reads a descriptor file (§1.3), so their definitions are not
+Tools are reached through `call_mcp_tool` after the model reads a descriptor file (짠1.3), so their definitions are not
 in the prompt prefix: `toolDeferral` is true in effect (to confirm against how the host counts the prefix).
 
 ### 7.2 Role text
 
 Unlike ACP, `agy` has two measured paths into the model: the `SessionStart` hook's `systemMessage` (persists in the
-conversation) and the plugin's `rules/AGENTS.md`. `systemPromptAppend` goes through `SessionStart`; `instructionChannel`
-is `server` for the bridge's own MCP instructions. `SessionStart` fires only for a new conversation, so a resumed
-session keeps the role text it started with (as stored in its history), and a changed role text needs a new
-conversation, as for Claude.
+conversation) and the plugin's `rules/AGENTS.md`. The first release writes `systemPromptAppend` to `rules/AGENTS.md`
+(`plugin-root.ts`): a rule file is read on every turn, a resumed conversation included, and needs no second hook
+command. `instructionChannel` is `server` for the bridge's own MCP instructions. `SessionStart` (it fires only for a new
+conversation) is not used.
 
 ### 7.3 Repository trust
 
@@ -467,7 +527,7 @@ text has a path (open question 4).
 
 | | Why |
 |---|---|
-| Import and history (`listExternalSessions`, `readExternalHistory`) | the only sources are `agy`'s own files (`conversation_summaries.db`, `brain/<id>/…/transcript_full.jsonl`); agent-host.md §8.1 rules out parsing a tool's undocumented files. No CLI command lists or reads conversations |
+| Import and history (`listExternalSessions`, `readExternalHistory`) | the only sources are `agy`'s own files (`conversation_summaries.db`, `brain/<id>/??transcript_full.jsonl`); agent-host.md 짠8.1 rules out parsing a tool's undocumented files. No CLI command lists or reads conversations |
 | `deleteExternalConversation` | no CLI command |
 | Reasoning text | not streamed; `thinking_tokens` only |
 | Sleep (`sleep`) | resume works, but whether a resumed process reads the prompt cache was not measured (a resumed turn showed `cache_read_tokens: 0`); false until measured |
@@ -477,21 +537,21 @@ text has a path (open question 4).
 
 | Capability | Value | From |
 |---|---|---|
-| `approvals` | true | the gate (§5) |
+| `approvals` | true | the gate (짠5) |
 | `gatesSteps` | true | the hook sees every tool step, sub-agents' too |
-| `contextUsage` | `none` | no window (§6) |
+| `contextUsage` | `none` | no window (짠6) |
 | `resume` | true | `--conversation`, survives SIGKILL |
 | `exclusiveWriter` | false | two processes wrote one conversation |
 | `autoTitle` | false | print mode skips titles (changelog) |
 | `attachments` | `[]` | text blocks only |
 | `verbosities` | `[]` | |
-| `midTurnInput` | false | host-side queue (§4.2) |
+| `midTurnInput` | false | host-side queue (짠4.2) |
 | `backgroundTasks`, `builtInSubagents` | false | not visible in the stream |
-| `processModel` | `per-session` | §3.1 |
-| `instructionChannel` | `server` | §7.2 |
-| `toolDeferral` | true | descriptor files (§7.1), to confirm |
-| `sleep` | false | §8 |
-| `compactCommand`, import methods | absent | §6, §8 |
+| `processModel` | `per-session` | 짠3.1 |
+| `instructionChannel` | `server` | 짠7.2 |
+| `toolDeferral` | true | descriptor files (짠7.1), to confirm |
+| `sleep` | false | 짠8 |
+| `compactCommand`, import methods | absent | 짠6, 짠8 |
 | `listModels` | `agy models` | ids carry the effort for Gemini |
 | `listUsage` | `-p /usage --output-format json` | weekly buckets per model group, no turn |
 
@@ -508,9 +568,8 @@ decision given), `spawn` (a process started, with its arguments), `exit` (code a
 checked itself, such as whether a command ran). `agy` has no JSON-RPC, so the tap sits on the process's three pipes and
 on the gate's handler instead of on a connection.
 
-The ACP scrubber's rules, plus: conversation ids and sub-agent ids → `conv-1`…; `~/.gemini/antigravity-cli/…` →
-`<agy-home>/…`; the plugin root → `<plugin-root>`; the working folder → `<cwd>`; other ids → `id-1`…; the account's
-quota in `/usage` → a fixed reading (half left, a fixed reset time); the tool list in `init` kept (it is the drift
+The ACP scrubber's rules, plus: conversation ids and sub-agent ids ??`conv-1`?? `~/.gemini/antigravity-cli/?? ??`<agy-home>/??; the plugin root ??`<plugin-root>`; the working folder ??`<cwd>`; other ids ??`id-1`?? the account's
+quota in `/usage` ??a fixed reading (half left, a fixed reset time); the tool list in `init` kept (it is the drift
 baseline); stderr lines kept verbatim except paths. The streamed answer is scrubbed joined, as the ACP one is. The
 shared privacy test (`adapters/frames/recordings-private.test.ts`) reads these recordings too.
 
@@ -592,29 +651,27 @@ so it is run by hand before an `agy` bump, not on a schedule. The weekly surface
 1. **The adapter, as a stack built beside the session core** (#1654), each with a test that fails without it:
    1. `feat/agy-adapter`: this document, the recorder and scrubber, the recordings, and the hook
       (`agy-gate.mjs`, `gate-answer.mjs`) with its test.
-   2. `feat/agy-wire`: the stream codec and the table of §4.1, turns and input, sub-agents, resume with the unknown-id
+   2. `feat/agy-wire`: the stream codec and the table of 짠4.1, turns and input, sub-agents, resume with the unknown-id
       check, interrupt and capabilities, as a pure wire (lines in, events out) replayed from the recordings; it plugs
       into the session core's `ToolWire` once the core's PRs 1, 3, 5 and 9 land.
    3. `feat/agy-gate`: the gate's decisions and presets, the plugin root, and Stop denying every open request first,
-      with each preset proved by a live run; its inbound path is the front door's gate route (§5.1, stacked on the core's PR 3) and its card on
+      with each preset proved by a live run; its inbound path is the front door's gate route (짠5.1, stacked on the core's PR 3) and its card on
       PR 5 and 8.
 
-   Then the session wiring, detect and usage, `agy-gate.mjs` in the bundle, and agent-host.md §2–3.
+   Then the session wiring, detect and usage, `agy-gate.mjs` in the bundle, and agent-host.md 짠2??.
 2. **Models and effort, sub-agent progress, nudges** through `PreInvocation`, if measured useful.
 3. **Windows**: launch, `cmd /c` hooks, paths in the plugin root; measured on the Windows machine with its own login.
 4. **The drift check** in the weekly surface run.
 
 ## 14. Open questions
 
-1. **Running with `--dangerously-skip-permissions`.** The gate replaces `agy`'s own checks, so the person's own `agy`
-   deny rules in `settings.json` no longer apply to Centralu's `agy` sessions (the flag skips every permission prompt).
-   Acceptable with Centralu's presets as the only rules, or should the gate also read and honour the person's `agy`
-   deny rules?
-2. ~~**Hook failure modes**~~: measured (§1.2, §5.4). Only empty output with exit 0 lets the tool run; the gate script
+1. ~~**Running with `--dangerously-skip-permissions`**~~: decided (owner, #59): the gate honours the person's deny rules,
+   deny only (짠5.5). Measured since: `agy` applies them itself under the flag too (짠1.2).
+2. ~~**Hook failure modes**~~: measured (짠1.2, 짠5.4). Only empty output with exit 0 lets the tool run; the gate script
    always prints a decision, so no watchdog.
 3. **No context window.** Show used tokens without a share, or keep `contextUsage: 'none'` until `agy` reports a window?
-4. **Repository trust and the orchestrator** (§7.3): same as the ACP design's question 3.
-5. **The unknown-id trap** (§4.4): the turn reaches a new conversation before the mismatch is seen. The stderr warning
+4. **Repository trust and the orchestrator** (짠7.3): same as the ACP design's question 3.
+5. **The unknown-id trap** (짠4.4): the turn reaches a new conversation before the mismatch is seen. The stderr warning
    comes some 3 s before `init` (measured), and stopping there kept the turn from reaching the model; an empty
    conversation is still left behind. Accept that, or look for a probe that does not run a turn?
 6. **Quota**: the account is free with weekly limits. A quota-reached error was not reached, so its shape is unknown;

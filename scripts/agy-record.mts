@@ -28,9 +28,15 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server } from 'node:http'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import type { ApprovalDecision, ApprovalDetail, NormalizedEvent, PermissionPreset } from '@cc/protocol'
+import { agyMcpDescriptors, parseRule } from '../packages/agent-host/src/adapters/agy/deny-rules.ts'
+import { AgyGate, stopTurn } from '../packages/agent-host/src/adapters/agy/gate.ts'
+import { removePluginRoot, writePluginRoot } from '../packages/agent-host/src/adapters/agy/plugin-root.ts'
+import { agyGatePaths } from '../packages/agent-host/src/adapters/bridge-path.ts'
+import * as fsp from 'node:fs/promises'
 
 const GATE_SCRIPT = fileURLToPath(new URL('../packages/agent-host/src/adapters/agy/agy-gate.mjs', import.meta.url))
 
@@ -49,7 +55,7 @@ const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`
 /** One scenario's run: its folders, the gate listener, the file it writes, the processes it starts */
 class Run {
   readonly cwd: string
-  readonly pluginRoot: string
+  pluginRoot: string
   readonly file: string
   private readonly start = Date.now()
   private server: Server | null = null
@@ -58,6 +64,9 @@ class Run {
   onGate: GateHandler = () => ({ decision: 'allow' })
   readonly gateInputs: Frame[] = []
   readonly procs: Proc[] = []
+  /** The host's gate (`gate.ts`) when the scenario runs on it, with the plugin root `plugin-root.ts` writes */
+  hostGate: AgyGate | null = null
+  private gateData: string | null = null
 
   constructor(
     readonly scenario: string,
@@ -77,6 +86,36 @@ class Run {
       join(plugin, 'hooks.json'),
       JSON.stringify({ 'centralu-gate': { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: hookTimeoutS }] }] } }, null, 2),
     )
+  }
+
+  /**
+   * Runs this scenario on the host's own gate and plugin root (`gate.ts`, `plugin-root.ts`): the plugin root is written
+   * the way a session's is, under a temporary data folder, and every hook request is answered by `AgyGate`. Each card it
+   * raises is noted and answered by `person`, or left open when that returns null.
+   */
+  async useGate(opts: { preset: PermissionPreset; denyRules?: string[]; person?: (detail: ApprovalDetail) => ApprovalDecision | null; fakeCentralu?: boolean }): Promise<void> {
+    rmSync(this.pluginRoot, { recursive: true, force: true })
+    this.gateData = mkdtempSync(join(tmpdir(), 'agy-rec-data-'))
+    const bridge = opts.fakeCentralu ? join(this.gateData, 'fake-centralu-mcp.mjs') : undefined
+    if (bridge) writeFileSync(bridge, FAKE_MCP)
+    this.pluginRoot = await writePluginRoot({ dataDir: this.gateData, sessionId: 'rec', node: process.execPath, gateSources: agyGatePaths(), files: fsp, ...(bridge ? { bridge } : {}) })
+    const gate = new AgyGate({
+      sessionId: 'rec',
+      cwd: this.cwd,
+      pluginRoot: this.pluginRoot,
+      preset: opts.preset,
+      denyRules: (opts.denyRules ?? []).flatMap((t) => parseRule(t) ?? []),
+      mcpDescriptors: agyMcpDescriptors(homedir()),
+      emit: (e: NormalizedEvent) => {
+        if (e.type === 'approval_request') {
+          this.write('card', { msg: { requestId: e.requestId, detail: e.detail } })
+          const decision = opts.person?.(e.detail) ?? null
+          if (decision) setTimeout(() => gate.respondApproval(e.requestId, decision), 300)
+        } else if (e.type === 'approval_resolved') this.write('card', { msg: { requestId: e.requestId, resolved: e.decision } })
+      },
+    })
+    this.hostGate = gate
+    this.onGate = (input) => gate.answer(input)
   }
 
   write(dir: string, entry: Frame): void {
@@ -127,7 +166,12 @@ class Run {
     this.server?.closeAllConnections()
     this.server?.close()
     rmSync(this.cwd, { recursive: true, force: true })
-    rmSync(this.pluginRoot, { recursive: true, force: true })
+    if (this.gateData) {
+      const data = this.gateData
+      void removePluginRoot(fsp, data, 'rec')
+        .then(() => rmSync(data, { recursive: true, force: true }))
+        .catch((e: unknown) => console.error(`could not remove ${data}: ${String(e)}`))
+    } else rmSync(this.pluginRoot, { recursive: true, force: true })
   }
 }
 
@@ -220,6 +264,20 @@ class Proc {
     await this.exited
   }
 }
+
+/** A stdio MCP server standing in for Centralu's bridge: one tool, `ping`, answering `pong` */
+const FAKE_MCP = `import { createInterface } from 'node:readline'
+const send = (m) => process.stdout.write(JSON.stringify(m) + '\\n')
+createInterface({ input: process.stdin }).on('line', (line) => {
+  let m
+  try { m = JSON.parse(line) } catch { return }
+  if (m.id === undefined) return
+  if (m.method === 'initialize') return send({ jsonrpc: '2.0', id: m.id, result: { protocolVersion: m.params?.protocolVersion ?? '2025-11-25', capabilities: { tools: {} }, serverInfo: { name: 'centralu', version: '0' } } })
+  if (m.method === 'tools/list') return send({ jsonrpc: '2.0', id: m.id, result: { tools: [{ name: 'ping', description: 'Answers pong', inputSchema: { type: 'object', properties: {} } }] } })
+  if (m.method === 'tools/call') return send({ jsonrpc: '2.0', id: m.id, result: { content: [{ type: 'text', text: 'pong' }] } })
+  send({ jsonrpc: '2.0', id: m.id, error: { code: -32601, message: 'Method not found' } })
+})
+`
 
 type Scenario = { name: string; what: string; hook?: (gate: string) => string; hookTimeoutS?: number; run: (r: Run) => Promise<void> }
 
@@ -399,6 +457,81 @@ const SCENARIOS: Scenario[] = [
         p.child.stdin!.end()
         await p.exited
       }
+    },
+  },
+  // The host's gate (`gate.ts`) and plugin root (`plugin-root.ts`) with a real agy, one scenario per preset (§5.2)
+  {
+    name: 'preset-auto',
+    what: 'auto on the host gate: a command, a write and a read, all without a card',
+    run: async (r) => {
+      await r.useGate({ preset: 'auto' })
+      const p = r.spawn()
+      p.send('Do these one at a time, each with its own tool call: 1) run the shell command `echo p-auto` 2) create the file notes.txt in the current folder containing `hi` 3) read notes.txt. Then reply with: done.')
+      await p.untilResults(1)
+      await p.closeAndWait()
+    },
+  },
+  {
+    name: 'preset-edits',
+    what: 'edits on the host gate: a write inside the folder without a card, a command with a card the person allows',
+    run: async (r) => {
+      await r.useGate({ preset: 'edits', person: () => 'allow' })
+      const p = r.spawn()
+      p.send('Do these one at a time, each with its own tool call: 1) create the file notes.txt in the current folder containing `hi` 2) run the shell command `echo p-edits`. Then reply with: done.')
+      await p.untilResults(1)
+      await p.closeAndWait()
+    },
+  },
+  {
+    name: 'preset-normal',
+    what: 'normal on the host gate: a read inside the folder without a card, a write the person denies, a command the person allows',
+    run: async (r) => {
+      writeFileSync(join(r.cwd, 'readme.txt'), 'normal-read\n')
+      await r.useGate({ preset: 'normal', person: (d) => (d.kind === 'file_edit' ? 'deny' : 'allow') })
+      const p = r.spawn()
+      p.send('Do these one at a time, each with its own tool call, and go on if one is refused: 1) read the file readme.txt 2) create the file notes.txt containing `hi` 3) run the shell command `echo p-normal`. Then reply with which steps were refused.')
+      await p.untilResults(1)
+      await p.closeAndWait()
+    },
+  },
+  {
+    name: 'preset-safe',
+    what: "safe on the host gate: a read inside the folder and Centralu's own MCP tool without a card, a command the person denies",
+    run: async (r) => {
+      writeFileSync(join(r.cwd, 'readme.txt'), 'safe-read\n')
+      await r.useGate({ preset: 'safe', person: () => 'deny', fakeCentralu: true })
+      const p = r.spawn()
+      p.send('Do these one at a time, each with its own tool call, and go on if one is refused: 1) read the file readme.txt 2) call the `ping` tool of the MCP server whose name starts with centralu 3) run the shell command `echo p-safe`. Then reply with which steps were refused.')
+      await p.untilResults(1, 180_000)
+      await p.closeAndWait()
+    },
+  },
+  {
+    name: 'deny-rule',
+    what: "the person's agy deny rule on the host gate under auto: the matching command refused, the other run",
+    run: async (r) => {
+      await r.useGate({ preset: 'auto', denyRules: ['command(echo deny-me)'] })
+      const p = r.spawn()
+      p.send('Do these one at a time, each with its own tool call, and go on if one is refused: 1) run the shell command `echo ok; echo deny-me` 2) run the shell command `echo allowed-one`. Then reply with which steps were refused and the exact reason.')
+      await p.untilResults(1)
+      await p.closeAndWait()
+    },
+  },
+  {
+    name: 'stop-card',
+    what: 'a Stop with a card open on the host gate: stopTurn denies it, then SIGINT; the process ends within seconds',
+    run: async (r) => {
+      await r.useGate({ preset: 'normal', person: () => null })
+      const p = r.spawn()
+      p.send('Run the shell command `echo held` with your command tool, then reply with its output only.')
+      await p.until('a card', () => (r.hostGate?.open ?? 0) > 0)
+      await sleep(500)
+      const at = Date.now()
+      stopTurn(r.hostGate!, () => p.child.kill('SIGINT'))
+      r.write('note', { msg: { sent: 'SIGINT', after: 'stopTurn answered the open card deny' } })
+      await Promise.race([p.exited, sleep(30_000)])
+      r.write('note', { msg: { endedWithin30s: p.done, ms: Date.now() - at } })
+      console.log(`stop-card: ${p.done ? `ended ${Date.now() - at} ms after the Stop` : 'STILL RUNNING after 30 s'}`)
     },
   },
   // How agy treats a hook that does not answer as asked (§5.4, open question 2): each must not let the command run
