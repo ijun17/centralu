@@ -38,6 +38,8 @@ import {
 export type AcpSessionDeps = {
   /** The tool's name in host.log lines and messages */
   label: string
+  /** How to install the tool (`AcpProfile.descriptor.install`) */
+  install?: string
   /** The agent's process: what to start (`AcpProfile.launch`), and from where (the keeper's source, or this host's spawn) */
   spec: AgentSpawnSpec
   start: Omit<ToolStart, 'sessionId'>
@@ -116,6 +118,7 @@ export class AcpSession extends CoreSession<AcpWire> implements SessionHandle {
 
 class AcpWire implements ToolWire {
   readonly label: string
+  readonly install?: string
   /** ACP runs one prompt at a time (§5.4); a cancel ends the turn with `cancelled`, so the Stop's timer applies */
   readonly turns = { midTurnInput: false, interruptEndsProcess: false, confirmsStop: true } as const
   readonly launch: ToolWire['launch']
@@ -151,6 +154,7 @@ class AcpWire implements ToolWire {
     private readonly deps: AcpSessionDeps,
   ) {
     this.label = deps.label
+    if (deps.install !== undefined) this.install = deps.install
     this.preset = opts.permissionPreset
     this.launch = async () => deps.spec
     this.normalizer = new AcpNormalizer(opts.sessionId, deps.label)

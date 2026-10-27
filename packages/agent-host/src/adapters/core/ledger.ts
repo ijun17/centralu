@@ -4,7 +4,7 @@ import { INTERRUPTED_BY_TOOL, type AgentProcess, type EventSink, type InputObser
 import { InputReceipts } from '../input-receipts.js'
 import { stopNotConfirmed, undeliveredError } from '../session-kit.js'
 import type { CoreIo, RunningTurn, ToolWire, TurnEnding, TurnInput } from './seam.js'
-import { SessionProcess, type ToolStart } from './tool-process.js'
+import { isMissingProgram, SessionProcess, toolNotInstalled, type ToolStart } from './tool-process.js'
 
 /**
  * The ledger (docs/plans/session-core.md §3.1, §7.2 PR 5, #1654): what every tool's session does the same way, once. The
@@ -64,7 +64,7 @@ export class CoreSession<W extends ToolWire = ToolWire> {
     protected readonly wire: W,
   ) {
     this.stopConfirmMs = core.stopConfirmMs ?? STOP_CONFIRM_MS
-    this.process = new SessionProcess(wire.label, wire.launch, { ...core.start, sessionId: core.sessionId, onStart: (proc) => this.watch(proc) }, core.resumeExternalId)
+    this.process = new SessionProcess(wire.label, wire.launch, { ...core.start, sessionId: core.sessionId, onStart: (proc) => this.watch(proc), ...(wire.install === undefined ? {} : { install: wire.install }) }, core.resumeExternalId)
     this.ready = this.open()
     this.ready.catch(() => {})
   }
@@ -105,13 +105,13 @@ export class CoreSession<W extends ToolWire = ToolWire> {
   private watch(proc: AgentProcess): void {
     this.live = proc
     let seen = false
-    const gone = (code: number | null) => {
+    const gone = (code: number | null, err?: Error) => {
       if (seen) return
       seen = true
-      this.exited(proc, code)
+      this.exited(proc, code, err)
     }
     proc.once('exit', (code: number | null) => gone(code))
-    proc.on('error', () => gone(null))
+    proc.on('error', (err: Error) => gone(null, err))
   }
 
   send(text: string, opts?: { origin?: InputOrigin; id?: string; compact?: boolean }): void {
@@ -204,6 +204,7 @@ export class CoreSession<W extends ToolWire = ToolWire> {
       // The same rule as a failed first open: the session could not go on, which is a crash, and the input waiting fails.
       // The process that started and could not open is not left running
       const failure = err instanceof Error ? err : new Error(String(err))
+      if (Reflect.get(failure, 'code') === 'tool_not_installed') return this.goneMissing()
       const proc = this.live
       this.phase = 'closed'
       this.dropQueue('were still queued when the agent could not start again')
@@ -214,6 +215,20 @@ export class CoreSession<W extends ToolWire = ToolWire> {
     this.launching = false
     if (this.phase === 'opening') this.phase = 'ready'
     this.drain()
+  }
+
+  /**
+   * A new process found the tool gone (its launch answered null, or the program is not there or cannot be run): the same
+   * answer as at the first open, `tool_not_installed` with how to install it, not a crash
+   */
+  private async goneMissing(): Promise<void> {
+    if (this.closed) return
+    this.phase = 'closed'
+    this.launching = false
+    this.dropQueue('were still queued when the agent could not start again')
+    const answer = toolNotInstalled(this.wire.label, this.wire.install)
+    this.emit({ type: 'error', sessionId: this.sessionId, error: { code: 'tool_not_installed', message: answer.message, retryable: false } })
+    await this.process.close()
   }
 
   interrupt(): void {
@@ -265,9 +280,14 @@ export class CoreSession<W extends ToolWire = ToolWire> {
     this.drain()
   }
 
-  private exited(proc: AgentProcess, code: number | null): void {
+  private exited(proc: AgentProcess, code: number | null, err?: Error): void {
     if (this.phase === 'closed' || proc !== this.live) return
     this.live = null
+    // A relaunch whose program is gone: not installed, as at the first open (the open it was waiting on then ends quietly)
+    if (this.launching && isMissingProgram(err)) {
+      void this.goneMissing()
+      return
+    }
     const turn = this.turn
     if (this.expectedExits.has(proc)) {
       // A Stop that ends the process (`agy`): its exit ends the turn it stopped, if the tool did not say so first

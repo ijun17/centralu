@@ -43,6 +43,17 @@ export function tapSessionProcess<P extends AgentProcess>(proc: P, sessionId: st
   return tapProcess(proc, frameRecorder(sessionId))
 }
 
+/** The answer for a tool whose launch is gone (not installed, or removed since): at the first open and at every relaunch */
+export function toolNotInstalled(label: string, install?: string): Error {
+  return rpcError(install ? `${label} is not installed. ${install}` : `${label} is not installed.`, 'tool_not_installed')
+}
+
+/** A start that failed because the program is not there (`ENOENT`) or cannot be run (`EACCES`): the tool is not installed */
+export function isMissingProgram(err: unknown): boolean {
+  const code: unknown = err instanceof Error ? Reflect.get(err, 'code') : undefined
+  return code === 'ENOENT' || code === 'EACCES'
+}
+
 /** How long a stopped tool has after stdin's end to exit on its own before its tree is killed (Codex and ACP, measured as enough) */
 export const STOP_GRACE_MS = 2_000
 
@@ -123,6 +134,8 @@ export class SessionProcess {
     private readonly launch: ToolLaunch,
     private readonly how: ToolStart & {
       graceMs?: number
+      /** How to install the tool, for the "not installed" answer (`toolNotInstalled`) */
+      install?: string
       /** Told of each process as it starts, before anyone awaits it: the core watches its exit from here (`ledger.ts`) */
       onStart?: (proc: AgentProcess) => void
     },
@@ -196,7 +209,7 @@ export class SessionProcess {
     if (this.closed) throw new Error(`${this.label}'s session is closed`)
     if (this.current) throw new Error(`${this.label} is already running`)
     const spec = await this.launch(this.id === null ? null : { externalId: this.id })
-    if (!spec) throw rpcError(`${this.label} is not installed.`, 'tool_not_installed')
+    if (!spec) throw toolNotInstalled(this.label, this.how.install)
     // Closed while the launch was asked for: nothing is started that no one would stop
     if (this.closed) throw new Error(`${this.label}'s session is closed`)
     // What the process before left asking has no process to answer to

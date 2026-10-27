@@ -340,7 +340,10 @@ What the ledger owns now, one copy for every tool on it:
   not say so first. The next input asks `launch` again with the conversation's id (`relaunch`, or `start` once the old
   process is gone), opens it (the session is `opening` again, so an exit then is a crash), and goes on; nothing starts
   until an input comes. A new process that cannot start or open is a crash, like an exit while opening: the inputs
-  waiting are undelivered, and the process is stopped, not left running.
+  waiting are undelivered, and the process is stopped, not left running. A tool found gone at that point (its `launch`
+  answers null, or the program is not there or cannot be run: ENOENT, EACCES) is no crash: the error is
+  `tool_not_installed` with the tool's install hint (`ToolWire.install`), from `toolNotInstalled`, the same function the
+  ACP adapter answers with at the first open.
 - **A wire that cannot write an input**: `startTurn` throwing ends that turn as `failed`, and the queue goes on.
 
 The core tests (`core/ledger.test.ts`) run a scripted wire in memory against a small model of the above: 150 random
@@ -577,3 +580,12 @@ added.
    (retryable error, non-retryable error, notice and completion). Which is the host's meaning?
 8. **Usage limits** (§2.11): Codex reads the primary window when the weekly one was hit, and the two tools label the
    same window differently. Out of the core, but worth an issue?
+9. **Input after a Stop, for a tool with mid-turn input** (PR 6/7; from #1674's review). With `midTurnInput: true` the
+   ledger lets an input sent after a Stop, before the tool has ended the stopped turn, join that turn; the turn then ends
+   `interrupted` with the Stop asked, and that input fails as stopped though it was written after the Stop. Should an
+   input sent after a Stop wait in the queue for the next turn instead? No tool on the core has mid-turn input yet (ACP
+   and `agy` queue), so nothing reaches it today.
+10. **A mid-turn write that fails** (PR 6/7; from #1674's review). When `startTurn` throws on a later input that joins a
+    running turn, the ledger ends the whole turn `failed`: the inputs already written and accepted fail too, and the
+    session goes idle while the tool may still be working. Should only that input fail, the turn going on? Unreachable
+    today: ACP has no mid-turn input, and `AcpWire.startTurn` does not throw.

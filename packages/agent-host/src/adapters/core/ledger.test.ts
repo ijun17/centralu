@@ -2,7 +2,6 @@ import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
 import { describe, expect, it } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
-import type { AgentProcess } from '../contract.js'
 import { CoreSession } from './ledger.js'
 import type { CoreIo, RunningTurn, ToolWire, TurnEnding, TurnInput } from './seam.js'
 
@@ -54,6 +53,9 @@ const TURNS: Record<Kind, ToolWire['turns']> = {
 /** A wire that writes nothing: it says what it was asked, and the test ends its turns */
 class ScriptedWire implements ToolWire {
   readonly label = 'Tool'
+  readonly install = 'Install it with its installer.'
+  /** The tool was removed since the session started: its launch answers null, or its program is not there */
+  gone: 'no' | 'launch' | 'spawn' = 'no'
   readonly turns: ToolWire['turns']
   readonly log: string[] = []
   readonly launches: ({ externalId: string } | null)[] = []
@@ -69,19 +71,23 @@ class ScriptedWire implements ToolWire {
   constructor(
     kind: Kind,
     readonly spawned: FakeProc[] = [],
+    turns: Partial<ToolWire['turns']> = {},
   ) {
-    this.turns = TURNS[kind]
+    this.turns = { ...TURNS[kind], ...turns }
     this.idLate = kind === 'agy'
   }
 
   readonly launch = async (resume: { externalId: string } | null) => {
     this.launches.push(resume)
+    if (this.gone === 'launch') return null
     return { command: 'tool', args: resume ? ['--conversation', resume.externalId] : [], env: {} }
   }
 
   async open(io: CoreIo, resume: { externalId: string } | null): Promise<{ externalId: string | null }> {
     this.ios.push(io)
     this.opens.push(resume)
+    // A real wire waits for the tool's first answer, so a start that failed is heard while it opens
+    if (this.gone === 'spawn') await new Promise((r) => setImmediate(r))
     if (this.idLate) return { externalId: null }
     return { externalId: resume?.externalId ?? 'conv-1' }
   }
@@ -129,15 +135,23 @@ async function settle(): Promise<void> {
   for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r))
 }
 
-function world(kind: Kind, opts: { stopConfirmMs?: number; resume?: string | null } = {}) {
+function world(kind: Kind, opts: { stopConfirmMs?: number; resume?: string | null; turns?: Partial<ToolWire['turns']> } = {}) {
   const spawned: FakeProc[] = []
-  const wire = new ScriptedWire(kind, spawned)
+  const wire = new ScriptedWire(kind, spawned, opts.turns)
   const events: NormalizedEvent[] = []
   const session = new CoreSession(
     {
       sessionId: 's1',
       resumeExternalId: opts.resume ?? null,
-      start: { spawn: () => (spawned.push(new FakeProc(`p${spawned.length + 1}`)), spawned.at(-1) as unknown as AgentProcess) },
+      start: {
+        spawn: () => {
+          const proc = new FakeProc(`p${spawned.length + 1}`)
+          spawned.push(proc)
+          // As Node's spawn says a program that is not there: an `error` on the next tick, never an `exit`
+          if (wire.gone === 'spawn') process.nextTick(() => proc.emit('error', Object.assign(new Error('spawn tool ENOENT'), { code: 'ENOENT' })))
+          return proc
+        },
+      },
       stopConfirmMs: opts.stopConfirmMs ?? 60_000,
     },
     (e) => events.push(e),
@@ -328,6 +342,17 @@ describe('the ledger, case by case', () => {
     await w.session.dispose()
   })
 
+  it('starts no Stop timer for a tool that does not end its turn after a Stop (confirmsStop: false, Codex until §9.2)', async () => {
+    const w = world('acp', { stopConfirmMs: 5, turns: { confirmsStop: false } })
+    await w.session.ready
+    w.session.send('a')
+    w.session.interrupt()
+    await new Promise((r) => setTimeout(r, 40))
+    expect(w.events.filter((e) => e.type === 'notice')).toEqual([])
+    expect(w.wire.log).toContain('interrupt')
+    await w.session.dispose()
+  })
+
   it('releases the cards on a Stop, at the turn’s end, on an exit and on the close; ends the calls a closed turn left open', async () => {
     const w = world('acp')
     await w.session.ready
@@ -489,6 +514,23 @@ describe('a tool whose Stop ends its process (agy, session-core.md §8)', () => 
     expect(w.wire.writes).toEqual(['good@p1'])
     expect(said(w.events)).toEqual(['working', 'error:true', 'working'])
     await w.session.dispose()
+  })
+
+  it('says a tool removed since the start is not installed, with how to install it, when a new process finds it gone', async () => {
+    for (const gone of ['launch', 'spawn'] as const) {
+      const w = world('agy')
+      await w.session.ready
+      w.session.send('one')
+      w.session.interrupt()
+      w.wire.gone = gone
+      await expect(w.session.sendTracked('two')).rejects.toThrow('still queued')
+      await settle()
+      const errors = w.events.filter((e) => e.type === 'error')
+      expect(errors, gone).toMatchObject([
+        { error: { code: 'internal', retryable: false } },
+        { error: { code: 'tool_not_installed', message: 'Tool is not installed. Install it with its installer.', retryable: false } },
+      ])
+    }
   })
 
   it('an exit of its own, not after a Stop, is still a crash in a turn and asleep when idle', async () => {

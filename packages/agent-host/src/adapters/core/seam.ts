@@ -64,6 +64,8 @@ export interface CoreIo {
 export interface ToolWire {
   /** "Cursor", "OpenCode", "Antigravity": for messages */
   readonly label: string
+  /** How to install the tool, said when a new process finds it gone (`toolNotInstalled`) */
+  readonly install?: string
   readonly turns: {
     /** false: an input sent while a turn runs waits for its end (ACP, `agy`); true: it goes to the tool at once */
     readonly midTurnInput: boolean
