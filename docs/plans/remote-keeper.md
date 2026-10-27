@@ -281,21 +281,34 @@ API does not expose). Neither is on the path of a host swap, which is why the st
 
 ## 7. The release change
 
-- **The keeper is a plain file beside `host/`** in each host-only package (`@centralu/host-linux-x64`, `-linux-arm64`,
-  `-win32-x64`): `centralu-keeper` or `centralu-keeper.exe`, `files: ["host", "centralu-keeper*"]`. On the remote it
-  lands at `<data>/remote/versions/<v>/node_modules/@centralu/host-<platform>/centralu-keeper`, so it runs from a plain
-  folder of the hub's install and never from an AppImage's mount (linux spike §6). About 1 MB more per package packed.
-  The platform packages keep their own copy for the window.
+- **The keeper is a plain file beside `host/`** in each host-only package, named exactly in its `files`
+  (`hostPackageFiles`, `scripts/host-package.mts`): `@centralu/host-linux-x64` and `-linux-arm64` ship
+  `files: ["host", "centralu-keeper"]` from step 1; `@centralu/host-win32-x64` ships `files: ["host"]` until step 7
+  adds `"centralu-keeper.exe"` there. The release stages it into `packaging/npm/host-<platform>/`, where `.gitignore`
+  covers it as it covers `host/`, so a second run finds the tree clean. On the remote it lands at
+  `<data>/remote/versions/<v>/node_modules/@centralu/host-<platform>/centralu-keeper`, so it runs from a plain folder of
+  the hub's install and never from an AppImage's mount (linux spike §6). About 1 MB more per package packed. The
+  platform packages keep their own copy for the window.
 - **Built by the job that builds that platform's package**, from the same commit. linux-x64 and linux-arm64 already
-  compile the keeper for their AppImage. win32-x64 compiles it once step 6 makes the crate build on Windows.
-- **Checked before publishing.** `hostPackageProblems` (`scripts/host-package.mts`, a pure function) today requires
-  `files` to be exactly `["host"]` and refuses any other entry in the package folder; step 1 lets the keeper in and
-  requires it. `checkKeeperExe` is a private function of `scripts/release-npm.mts`, which runs a release when imported,
-  so it moves into an importable module (beside `host-package.mts`) and runs on the staged host package too: present,
-  executable, the target's architecture, no GUI framework linked. On the Windows runner, where neither `file` nor `ldd`
-  exist, the same checks read the PE header (machine `0x8664`, a subsystem that opens no console window) and its
-  import table (no `WebView2Loader.dll`, nothing of the window). A test runs the checks against stand-in packages with
-  the file missing, of the wrong architecture, and linking a GUI library.
+  compile the keeper for their AppImage, and the host-only package takes the copy that AppImage carries (the bytes the
+  platform package ships, not cargo's). win32-x64 compiles it once step 6 makes the crate build on Windows.
+- **Checked before publishing, by one check.** `hostPackageProblems` (`scripts/host-package.mts`, a pure function)
+  requires `files` to be exactly the list above and the keeper beside `host/`, and refuses any other entry in the
+  package folder. The Linux keeper itself has one check, `keeperProblems` (`scripts/host-package.mts`), which
+  `release-npm.mts` runs on the AppImage's copy and `hostPackageProblems` on the staged package's. It reads the file's
+  own bytes (`scripts/elf.mts`), so it runs on any machine, a test on Windows included, with no `file`, `ldd` or
+  `readelf`: an ELF executable (type `EXEC` or `DYN`) for the platform's machine (`0x3e`, `0xb7`), with its exec bit,
+  linking by name (`DT_NEEDED`) nothing beyond the C runtime (glibc's libraries, the dynamic loader, `libgcc_s`). That
+  is an allow-list rather than a list of window libraries, so a window library that would come in through another
+  library is refused too, with no `ldd` to follow it. And it asks, in its version needs (`DT_VERNEED`, what
+  `readelf -V` lists), for no glibc newer than `MIN_GLIBC` (`links/install.ts`), the floor a remote's preflight checks
+  before an install: the build machine's glibc sets that number, so a runner moved to a newer distribution fails the
+  release instead of a 22.04 remote. The macOS bundle's keeper, which no host-only package carries, keeps its own
+  check in `release-npm.mts` (`checkMacKeeperExe`: `file` and `otool`). For step 7, the Windows keeper's check reads
+  the PE header (machine `0x8664`, a subsystem that opens no console window) and its import table (no
+  `WebView2Loader.dll`, nothing of the window). Tests (`tooling/host-package.test.ts`, `tooling/elf.test.ts`) run the
+  check against stand-in packages with the keeper missing, not an ELF, not an executable, for the other machine,
+  without its exec bit, linking a window library directly or through another library, and asking for glibc 2.35.
 - **Trust** stays remote-hub.md §10.3: the hub checks the package's registry signature and sends its `integrity`, and
   the remote refuses a tarball that does not match, so the keeper's bytes are checked exactly as the host's are.
   Signing host folders, the keeper included (owner decision 6 of §10.9; runtime-unification decision 1), stays open and

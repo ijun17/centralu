@@ -11,7 +11,8 @@
 import { chmodSync, copyFileSync, cpSync, existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ELF_MACHINES, ET_DYN, ET_EXEC, readElf } from './elf.mjs'
+import { compareVersions, ELF_MACHINES, ET_DYN, ET_EXEC, readElf } from './elf.mjs'
+import { MIN_GLIBC } from '../packages/agent-host/src/links/install.js'
 // @ts-expect-error — plain .mjs, so bundle.mjs reads the same list under plain node
 import { CONPTY_FILES as CONPTY_FILES_JS } from './conpty-files.mjs'
 const CONPTY_FILES = CONPTY_FILES_JS as readonly string[]
@@ -63,14 +64,20 @@ export function stageHostPackage(hostSrc: string, pkgDir: string, keeper?: { src
   }
 }
 
-/** The libraries that mean a window is linked in: the keeper must run where no desktop is installed (#440) */
-const GUI_LIBRARY = /webkit|gtk|gdk|javascriptcore|libsoup|libX11|wayland/i
+/**
+ * What the keeper may link by name: the C runtime (glibc's libraries, the dynamic loader, gcc's unwinder), which every
+ * machine a hub installs on has, and which links nothing else in turn. An allow-list rather than a list of window
+ * libraries, so a window library that would come in through another one (a tray library linking GTK) is refused too,
+ * with no `ldd` to follow it: the keeper must run where no desktop is installed (#440)
+ */
+const C_RUNTIME = /^(?:libc|libm|libdl|libpthread|librt|libutil|libgcc_s)\.so\.\d+$|^ld-linux-(?:x86-64|aarch64)\.so\.\d+$/
 
 /**
- * What is wrong with the keeper in a Linux host-only package, one sentence each. Read from the file itself, so this
- * runs on any machine: an ELF executable for the platform's machine, with its exec bit (where the file system keeps
- * one), linking no window library. `release-npm.mts`'s `checkKeeperExe` checks the platform package's copy with `file`
- * and `ldd` on the build machine; this is the same rule for the copy a remote runs.
+ * What is wrong with a Linux keeper, one sentence each: the one check of it, for the copy the AppImage carries
+ * (`release-npm.mts`) and the copy beside `host/` in the host-only package (`hostPackageProblems`). Read from the file's
+ * own bytes (`scripts/elf.mts`), so this runs on any machine, a test on Windows included: an ELF executable for the
+ * platform's machine, with its exec bit (where the file system keeps one), linking nothing beyond the C runtime, and
+ * asking for no glibc newer than the one a remote is checked for before an install (`MIN_GLIBC`, links/install.ts).
  */
 export function keeperProblems(path: string, platform: string): string[] {
   const name = basename(path)
@@ -82,8 +89,14 @@ export function keeperProblems(path: string, platform: string): string[] {
   if (elf.machine !== want) problems.push(`${name} is built for ELF machine 0x${elf.machine.toString(16)}, not ${platform} (0x${want?.toString(16)})`)
   // Windows keeps no exec bit to read; the release that stages a Linux package runs on Linux
   if (process.platform !== 'win32' && (statSync(path).mode & 0o111) === 0) problems.push(`${name} has no exec bit: a remote could not start it`)
-  const gui = elf.needed.filter((l) => GUI_LIBRARY.test(l))
-  if (gui.length) problems.push(`${name} links a window library (${gui.join(', ')}): it would not start on a machine with no desktop`)
+  const beyond = elf.needed.filter((l) => !C_RUNTIME.test(l))
+  if (beyond.length) {
+    problems.push(`${name} links more than the C runtime (${beyond.join(', ')}): a machine with no desktop may lack it, and a window library comes in this way`)
+  }
+  // The build machine's glibc sets this: a runner moved to a newer distribution raises it with no other sign
+  if (elf.glibc && compareVersions(elf.glibc, MIN_GLIBC) > 0) {
+    problems.push(`${name} needs glibc ${elf.glibc.join('.')}, newer than the ${MIN_GLIBC.join('.')} a remote is checked for: it would not start on every machine a hub installs on`)
+  }
   return problems
 }
 

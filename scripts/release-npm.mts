@@ -45,7 +45,7 @@ import { verifyThenStamp } from './release-verify.mjs'
 import { CONPTY_FILES as CONPTY_FILES_JS } from './conpty-files.mjs'
 import { checkStaged, shellToCarry, stageBundle, stageContent, type CarriedShell } from './bundle-stage.mjs'
 import { resolveSigningKey, trustedKeys, verifyContent, type SigningKey } from './content-manifest.mjs'
-import { floorDiffers, hostPackageDir, hostPackageKeeper, hostPackageProblems, remotePlatforms, stageHostPackage } from './host-package.mjs'
+import { floorDiffers, hostPackageDir, hostPackageKeeper, hostPackageProblems, keeperProblems, remotePlatforms, stageHostPackage } from './host-package.mjs'
 const CONPTY_FILES = CONPTY_FILES_JS as readonly string[]
 import { publishStep, stillMissing, viewPublished, VISIBLE_DELAY_MS, VISIBLE_TRIES } from './release-registry.mjs'
 
@@ -244,32 +244,36 @@ function checkRemoteRuntime(hostDir: string): void {
 const KEEPER_EXE = 'centralu-keeper'
 
 /**
- * The keeper executable is there, executable, the right machine, and links no GUI framework.
+ * The keeper executable in the macOS bundle is there, executable, the right machine, and links no GUI framework.
  *
- * The last part is the reason it is a separate executable: the window's links WebKit and AppKit
- * (or webkit2gtk), and a keeper that pulled them in again would not be one that can later start
- * from outside the bundle. It is linked from a crate with no Tauri in it, so this only fails if
- * someone adds such a dependency there.
+ * The last part is the reason it is a separate executable: the window's links WebKit and AppKit, and a keeper that
+ * pulled them in again would not be one that can later start from outside the bundle. It is linked from a crate with
+ * no Tauri in it, so this only fails if someone adds such a dependency there. A Linux keeper is checked from its own
+ * bytes instead (`keeperProblems`, host-package.mts), the same check as the copy in the host-only package.
  */
-function checkKeeperExe(path: string, machine: string): void {
+function checkMacKeeperExe(path: string): void {
   if (!existsSync(path)) fail(`the keeper executable is missing: ${path}`)
   const mode = statSync(path).mode
   if ((mode & 0o111) === 0) fail(`the keeper executable has no exec bit (${mode.toString(8)}): ${path}`)
   const arch = out('/usr/bin/file', ['-b', path])
-  if (!arch.includes(machine)) fail(`the keeper executable is not ${machine}: ${arch}`)
-  const libs =
-    process.platform === 'darwin' ? out('/usr/bin/otool', ['-L', path]) : out('/usr/bin/ldd', [path])
-  if (/WebKit|AppKit|webkit2gtk|gtk-3|javascriptcore/i.test(libs)) fail(`the keeper executable links a GUI framework:\n${libs}`)
-  console.log(`  ${KEEPER_EXE} present, ${machine}, no GUI framework linked`)
+  if (!arch.includes('arm64')) fail(`the keeper executable is not arm64: ${arch}`)
+  const libs = out('/usr/bin/otool', ['-L', path])
+  if (/WebKit|AppKit|JavaScriptCore/i.test(libs)) fail(`the keeper executable links a GUI framework:\n${libs}`)
+  console.log(`  ${KEEPER_EXE} present, arm64, no GUI framework linked`)
 }
 
 /**
- * `checkKeeperExe` for the keeper inside an AppImage. The AppImage runtime extracts by itself
- * (`--appimage-extract <pattern>`, into `squashfs-root/` of the working folder) without FUSE, so
- * this runs on any runner that can build one. The folder is under `target/`, removed afterwards.
+ * The keeper inside an AppImage, checked as the host-only package's copy is (`keeperProblems`). The AppImage runtime
+ * extracts by itself (`--appimage-extract <pattern>`, into `squashfs-root/` of the working folder) without FUSE, so
+ * this runs on any runner that can build one.
  */
-function checkKeeperInAppImage(appImage: string, machine: string): void {
-  withKeeperFromAppImage(appImage, (keeper) => checkKeeperExe(keeper, machine))
+function checkKeeperInAppImage(appImage: string, platform: string): void {
+  withKeeperFromAppImage(appImage, (keeper) => {
+    if (!existsSync(keeper)) fail(`the AppImage carries no ${KEEPER_EXE}`)
+    const problems = keeperProblems(keeper, platform)
+    if (problems.length) fail(`the keeper in the AppImage:\n  ${problems.join('\n  ')}`)
+  })
+  console.log(`  ${KEEPER_EXE} present, ${platform}, linking the C runtime only`)
 }
 
 /**
@@ -365,7 +369,7 @@ const TARGETS: Record<string, Target | undefined> = {
 
       // (d) the keeper executable beside it (#440). Without it the app still runs (the window's
       // executable runs the keeper itself), so nothing else would notice it missing.
-      checkKeeperExe(join(dest, 'Contents/MacOS', KEEPER_EXE), 'arm64')
+      checkMacKeeperExe(join(dest, 'Contents/MacOS', KEEPER_EXE))
 
       // (e) the pinned Node for remotes, which a Mac hub sends to the machines it installs
       checkRemoteRuntime(join(dest, 'Contents/Resources/resources/host'))
@@ -435,7 +439,7 @@ const TARGETS: Record<string, Target | undefined> = {
       console.log(`  ${arch.split(',')[0]}`)
 
       // (d) the keeper executable inside the AppImage (#440), for `CC_USE_KEEPER=1` there
-      checkKeeperInAppImage(dest, 'x86-64')
+      checkKeeperInAppImage(dest, 'linux-x64')
     },
     withKeeper: (dest, stage) => withKeeperFromAppImage(dest, stage),
   },
@@ -488,7 +492,7 @@ const TARGETS: Record<string, Target | undefined> = {
       console.log(`  ${arch.split(',')[0]}`)
 
       // (d) the keeper executable inside, same as linux-x64
-      checkKeeperInAppImage(dest, 'aarch64')
+      checkKeeperInAppImage(dest, 'linux-arm64')
     },
     withKeeper: (dest, stage) => withKeeperFromAppImage(dest, stage),
   },

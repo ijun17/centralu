@@ -454,7 +454,7 @@ rules end it when no window attaches, and the keeper is still opt-in on Linux (#
 running the real window on a Linux desktop, [spikes/2026-10-linux-keeper.md](../spikes/2026-10-linux-keeper.md) §7).
 The AppImage problem itself (a keeper running from a FUSE mount that disappears with the window) does not arise for a
 host-only install, where the keeper would be a plain file beside `host/`; it links no GUI library, which the release
-already checks (`checkKeeperExe`). So a remote keeper is a release change plus a headless mode, after
+already checks (`keeperProblems`, `scripts/host-package.mts`). So a remote keeper is a release change plus a headless mode, after
 runtime-unification step 4b (owner decision 5). Windows has no keeper at all.
 
 **The design for it is [remote-keeper.md](remote-keeper.md) (#1614, decided 2026-10-26):** a headless keeper on
