@@ -1,7 +1,7 @@
 import type {
   TerminalInfo,
   CommandRunInfo,
-} from '@cc/protocol'
+} from '@cc/protocol/client'
 import type { Unsubscribe } from './common.js'
 
 /**

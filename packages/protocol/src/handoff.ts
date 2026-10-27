@@ -55,7 +55,9 @@ function notePreview(note: string): string {
 
 /** A name as one JSON string on one line: JSON escapes control characters, and U+2028/U+2029 are escaped too */
 function quotedName(name: string): string {
-  return JSON.stringify(name).replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
+  return JSON.stringify(name)
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029')
 }
 
 /**

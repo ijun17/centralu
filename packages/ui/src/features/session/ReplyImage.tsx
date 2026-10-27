@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { MessageImage } from '@cc/protocol'
+import type { MessageImage } from '@cc/protocol/client'
 import { useStore } from '../../store/store.js'
 import { loadReplyImage } from './localImages.js'
 import { ZoomableImage } from './ZoomableImage.jsx'

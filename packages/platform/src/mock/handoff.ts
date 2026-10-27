@@ -1,4 +1,4 @@
-import { isInTurn, isRecord, type SessionInfo, type ToolName } from '@cc/protocol'
+import { isInTurn, isRecord, type SessionInfo, type ToolName } from '@cc/protocol/client'
 import type { AgentPort } from '../ports/index.js'
 import type { SessionStore } from './session-store.js'
 import { mockError } from './mock-error.js'

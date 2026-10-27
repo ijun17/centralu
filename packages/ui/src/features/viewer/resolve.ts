@@ -21,7 +21,7 @@
  * for them would be a guess dressed up as a fact.
  */
 
-import { wireSegments } from '@cc/protocol'
+import { wireSegments } from '@cc/protocol/client'
 
 /** Shallowest first. The closer to the root, the more likely it is what the person meant */
 function depth(path: string): number {

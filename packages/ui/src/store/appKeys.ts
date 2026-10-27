@@ -1,4 +1,4 @@
-import type { ExternalAppInfo } from '@cc/protocol'
+import type { ExternalAppInfo } from '@cc/protocol/client'
 import { appKeyOf } from '@cc/core'
 
 /**

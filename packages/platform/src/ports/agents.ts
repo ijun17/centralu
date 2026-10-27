@@ -24,7 +24,7 @@ import type {
   AgentVersions,
   SleepPolicy,
   SendIntent,
-} from '@cc/protocol'
+} from '@cc/protocol/client'
 
 export type { SendIntent }
 import type { Unsubscribe, ConnectionState, MachineRef } from './common.js'

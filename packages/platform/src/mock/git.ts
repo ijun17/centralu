@@ -1,4 +1,4 @@
-import type { GitBranch, GitCommit, GitDiff, GitFileStatus } from '@cc/protocol'
+import type { GitBranch, GitCommit, GitDiff, GitFileStatus } from '@cc/protocol/client'
 
 /** The mock's git, behind the `git` port: the state tests manipulate and the calls they check */
 export class GitMock {

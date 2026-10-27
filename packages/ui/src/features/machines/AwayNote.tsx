@@ -1,5 +1,5 @@
 import { awayNote } from '@cc/core'
-import type { MachineInfo } from '@cc/protocol'
+import type { MachineInfo } from '@cc/protocol/client'
 import { useLabelNow } from '../../app/useLabelNow.js'
 
 /** Moves on twice a minute: "39m ago" and "in 3 min" are read in minutes, and the next attempt's time changes at each attempt */

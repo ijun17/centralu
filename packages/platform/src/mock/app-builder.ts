@@ -1,5 +1,5 @@
-import type { AppErrorBundle, AppReach, Attachment, BuilderRequestFacts, ExternalAppInfo, ProjectInfo, SessionInfo, ToolName } from '@cc/protocol'
-import { appKeyOf, errorMessage, noSuchAppText, builderErrorFrame, builderRequestFrame, newAppIdProblem, sessionLiveDefaults } from '@cc/protocol'
+import type { AppErrorBundle, AppReach, Attachment, BuilderRequestFacts, ExternalAppInfo, ProjectInfo, SessionInfo, ToolName } from '@cc/protocol/client'
+import { appKeyOf, errorMessage, noSuchAppText, builderErrorFrame, builderRequestFrame, newAppIdProblem, sessionLiveDefaults } from '@cc/protocol/client'
 import type { AppCreated, BuilderAsk, NewAppSpec } from '../ports/index.js'
 import type { MockClock } from './clock.js'
 import type { SessionStore } from './session-store.js'

@@ -233,13 +233,16 @@ export type ApprovalDetail = z.infer<typeof ApprovalDetailKinds>
 export const UNKNOWN_CARD = 'unknown_card'
 
 /** The last line of a card of a kind this build does not know */
-export const UNKNOWN_CARD_NOTE = 'A newer Centralu may have sent it. Allow it only if you know what it asks; updating Centralu shows it in full.'
+export const UNKNOWN_CARD_NOTE =
+  'A newer Centralu may have sent it. Allow it only if you know what it asks; updating Centralu shows it in full.'
 
 /** The last line of a card of a known kind that did not read: from a newer build, or malformed */
-export const UNREADABLE_CARD_NOTE = 'It may come from a newer Centralu, or be malformed. Allow it only if you know what it asks.'
+export const UNREADABLE_CARD_NOTE =
+  'It may come from a newer Centralu, or be malformed. Allow it only if you know what it asks.'
 
 /** A text with something in it, trimmed; agent-host's `trimmed` (json-value.ts), which protocol cannot import (#850) */
-const trimmed = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined)
+const trimmed = (v: unknown): string | undefined =>
+  typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined
 const quoted = (v: unknown, max = 500): string => {
   const cut = (t: string) => (t.length > max ? `${t.slice(0, max)}…` : t)
   // JSON quoting keeps a text on one line, so it cannot pass itself off as the card's own lines; a value that is not
@@ -270,26 +273,42 @@ function unknownApprovalCard(raw: unknown): ApprovalDetail {
         return `${issue.path.join('.') || 'the card'}: ${value === undefined ? 'missing' : quoted(value, 60)}`
       })
       .join(', ')
-    lines.push(`Centralu cannot show this question as it should: a "${kind}" question with something this window cannot read (${problems || 'its shape'}).`)
+    lines.push(
+      `Centralu cannot show this question as it should: a "${kind}" question with something this window cannot read (${problems || 'its shape'}).`,
+    )
   } else {
     problems = kind ? `kind ${quoted(kind, 60)}` : 'no kind'
-    lines.push(kind ? `Centralu cannot show this question: it is of a kind this window does not know (${quoted(kind, 60)}).` : 'Centralu cannot show this question: it does not say what kind it is.')
+    lines.push(
+      kind
+        ? `Centralu cannot show this question: it is of a kind this window does not know (${quoted(kind, 60)}).`
+        : 'Centralu cannot show this question: it does not say what kind it is.',
+    )
   }
   const from = nameOf(card.from)
   const to = nameOf(card.to)
-  if (from || to) lines.push(`It reaches from project ${from ? quoted(from, 80) : '(unnamed)'} to project ${to ? quoted(to, 80) : '(unnamed)'}.`)
+  if (from || to)
+    lines.push(
+      `It reaches from project ${from ? quoted(from, 80) : '(unnamed)'} to project ${to ? quoted(to, 80) : '(unnamed)'}.`,
+    )
   const named = [
     nameOf(card.project) && `project ${quoted(nameOf(card.project), 80)}`,
     nameOf(card.app) && `app ${quoted(nameOf(card.app), 80)}`,
     trimmed(card.machine) && `machine ${quoted(trimmed(card.machine), 80)}`,
   ].filter(Boolean)
   if (named.length) lines.push(`It names ${named.join(', ')}.`)
-  for (const [key, label] of [['text', 'Its text'], ['raw', 'Its text'], ['command', 'The command'], ['path', 'The file']] as const) {
+  for (const [key, label] of [
+    ['text', 'Its text'],
+    ['raw', 'Its text'],
+    ['command', 'The command'],
+    ['path', 'The file'],
+  ] as const) {
     const v = trimmed(card[key])
     if (v) lines.push(`${label}, as the request gives it (not checked by Centralu): ${quoted(v)}`)
   }
   lines.push(branch ? UNREADABLE_CARD_NOTE : UNKNOWN_CARD_NOTE)
-  console.warn(`[centralu] an approval card did not read and is shown as a fallback: ${kind ?? '(no kind)'}${problems ? ` (${problems})` : ''}`)
+  console.warn(
+    `[centralu] an approval card did not read and is shown as a fallback: ${kind ?? '(no kind)'}${problems ? ` (${problems})` : ''}`,
+  )
   return { kind: 'other', raw: lines.join('\n'), about: UNKNOWN_CARD }
 }
 
@@ -329,7 +348,10 @@ export const SESSION_HANDOFF = 'session_handoff'
 
 /** A card whose "always" is for the asking session only (#581, #665, #694): an update, an apply, a handoff */
 export function sessionOnlyAlways(d: ApprovalDetail): boolean {
-  return d.kind === 'centralu_update' || (d.kind === 'other' && (d.about === CENTRALU_APPLY || d.about === SESSION_HANDOFF))
+  return (
+    d.kind === 'centralu_update' ||
+    (d.kind === 'other' && (d.about === CENTRALU_APPLY || d.about === SESSION_HANDOFF))
+  )
 }
 
 /** One remembered "always" from one project to another (#371) — a row of Settings' list, with the names as they are now */
@@ -350,9 +372,19 @@ export type ProjectConsent = z.infer<typeof ProjectConsent>
  * window that does not know the kind shows (#844). Here rather than with the other questions in core: the host raises
  * this card, and the host does not import core. It names every fact the card shows.
  */
-export function projectAddQuestion(d: { name: string; path: string; machine?: string; git: boolean; origin: string | null }): string {
+export function projectAddQuestion(d: {
+  name: string
+  path: string
+  machine?: string
+  git: boolean
+  origin: string | null
+}): string {
   const where = d.machine ? `${d.path} on ${d.machine}` : d.path
-  const repo = d.git ? (d.origin ? `a git repository (origin ${d.origin})` : 'a git repository with no origin') : 'not a git repository'
+  const repo = d.git
+    ? d.origin
+      ? `a git repository (origin ${d.origin})`
+      : 'a git repository with no origin'
+    : 'not a git repository'
   return `Add the existing folder ${where} as the project ${d.name}? It is ${repo}.`
 }
 

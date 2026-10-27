@@ -24,7 +24,11 @@ export const APP_DRAG_TEXT_MAX = 4096
  *          `dragend`), with the view's size, so the UI can place it whatever the frame's scale
  */
 export const AppDragMessage = z.discriminatedUnion('phase', [
-  z.object({ phase: z.literal('start'), uri: z.string().max(APP_DRAG_TEXT_MAX), text: z.string().max(APP_DRAG_TEXT_MAX) }),
+  z.object({
+    phase: z.literal('start'),
+    uri: z.string().max(APP_DRAG_TEXT_MAX),
+    text: z.string().max(APP_DRAG_TEXT_MAX),
+  }),
   z.object({
     phase: z.literal('end'),
     x: z.number(),

@@ -86,7 +86,10 @@ export type NewAppIdProblem = ServerNameProblem | 'server-prefix' | 'builtin'
  * in — a new app has no reason to have the server name `app-app-notes`, and if an approved
  * server took that slot, it could skip approval under the app's read-only annotation.
  */
-export function newAppIdProblem(id: string, reservedIds: readonly string[] = RESERVED_APP_IDS): NewAppIdProblem | null {
+export function newAppIdProblem(
+  id: string,
+  reservedIds: readonly string[] = RESERVED_APP_IDS,
+): NewAppIdProblem | null {
   const base = serverNameProblem(id)
   if (base) return base
   if (id.startsWith(APP_SERVER_PREFIX)) return 'server-prefix'

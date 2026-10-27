@@ -33,7 +33,8 @@ export function frameField(value: string): string {
  * which hide text a reader does not see. The other format characters stay: ZWJ in an emoji, ZWNJ in Persian, a soft
  * hyphen are part of a name.
  */
-const NOT_ON_ONE_LINE = /[\s\p{Cc}\u061c\u200b\u200e\u200f\u202a-\u202e\u2060\u2066-\u2069\u{e0000}-\u{e007f}]+/gu
+const NOT_ON_ONE_LINE =
+  /[\s\p{Cc}\u061c\u200b\u200e\u200f\u202a-\u202e\u2060\u2066-\u2069\u{e0000}-\u{e007f}]+/gu
 
 /**
  * Any text on one line (#428): every run of what `NOT_ON_ONE_LINE` names becomes one space; past `max` characters it is
@@ -42,7 +43,12 @@ const NOT_ON_ONE_LINE = /[\s\p{Cc}\u061c\u200b\u200e\u200f\u202a-\u202e\u2060\u2
  * A number or a boolean is written out; an object, an array or a function is no text (it used to read `[object Object]`).
  */
 export function oneLineText(value: unknown, max = Infinity): string {
-  const text = typeof value === 'string' ? value : typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint' ? String(value) : ''
+  const text =
+    typeof value === 'string'
+      ? value
+      : typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint'
+        ? String(value)
+        : ''
   const flat = text.replace(NOT_ON_ONE_LINE, ' ').trim()
   return flat.length > max ? flat.slice(0, max) + '…' : flat
 }
@@ -71,7 +77,11 @@ export type BuilderRequestFacts = {
   latestRun: BuilderRunFact | null
 }
 
-const CALLER: Record<BuilderRunFact['callerKind'], string> = { view: 'its view', session: 'a session', app: 'another app' }
+const CALLER: Record<BuilderRunFact['callerKind'], string> = {
+  view: 'its view',
+  session: 'a session',
+  app: 'another app',
+}
 const ENDED: Record<BuilderRunFact['status'], string> = {
   running: 'is still running',
   error: 'failed',
@@ -92,11 +102,13 @@ const ENDED: Record<BuilderRunFact['status'], string> = {
  */
 export function builderRequestFrame(facts: BuilderRequestFacts, text: string): string {
   let head = `[Centralu] The person wrote this in the app "${frameField(facts.app.name)}" (app-${frameField(facts.app.appId)}) that you build`
-  if (facts.screen) head += `, looking at its screen ${frameField(facts.screen.resourceUri)} (tool "${frameField(facts.screen.tool)}")`
+  if (facts.screen)
+    head += `, looking at its screen ${frameField(facts.screen.resourceUri)} (tool "${frameField(facts.screen.tool)}")`
   head += '.'
   if (facts.stopped) head += ` The app has stopped (${facts.stopped.status})${because(facts.stopped.reason)}.`
   const run = facts.latestRun
-  if (run) head += ` Its latest run, ${frameField(run.tool)} from ${CALLER[run.callerKind]}, ${ENDED[run.status]}${because(run.error)}.`
+  if (run)
+    head += ` Its latest run, ${frameField(run.tool)} from ${CALLER[run.callerKind]}, ${ENDED[run.status]}${because(run.error)}.`
   return text ? `${head}\n${text}` : head
 }
 

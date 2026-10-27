@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { THEME_TOKENS, THEME_TOKEN_BY_KEY, type ThemeFileEntry } from '@cc/protocol'
+import { THEME_TOKENS, THEME_TOKEN_BY_KEY, type ThemeFileEntry } from '@cc/protocol/client'
 import { useStore, usableThemeFiles } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { SettingsSelect } from './OtherChoice.jsx'

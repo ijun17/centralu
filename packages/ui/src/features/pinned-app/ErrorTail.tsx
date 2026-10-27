@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { AppErrorBundle } from '@cc/protocol'
+import type { AppErrorBundle } from '@cc/protocol/client'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { formatClock } from '../../app/format.js'
 import { Button } from '../../components/Button.jsx'

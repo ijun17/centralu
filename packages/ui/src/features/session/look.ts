@@ -1,5 +1,5 @@
 import { needsAnswer } from '@cc/core'
-import type { Interruption, SessionState } from '@cc/protocol'
+import type { Interruption, SessionState } from '@cc/protocol/client'
 
 /**
  * The four looks a session wears (#736): the sidebar's mark and the grid's panel say what a session is

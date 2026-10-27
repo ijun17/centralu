@@ -1,5 +1,5 @@
 import { gridSessionIds, isInTurn, type SessionSummary } from '@cc/core'
-import { handoffOpening, handoffPrompt } from '@cc/protocol'
+import { handoffOpening, handoffPrompt } from '@cc/protocol/client'
 import type { AppState, StoreGet, StoreSet } from '../state.js'
 import { EMPTY_DRAFT } from '../state.js'
 

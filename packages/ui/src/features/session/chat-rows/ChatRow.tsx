@@ -1,5 +1,5 @@
 import { memo, useMemo, useState } from 'react'
-import { centraluCallOf, launchesSubagent } from '@cc/protocol'
+import { centraluCallOf, launchesSubagent } from '@cc/protocol/client'
 import { messagesToChat, useStore, type ChatItem } from '../../../store/store.js'
 import { ChevronIcon } from '../../../components/icons.jsx'
 import { ZoomableImage } from '../ZoomableImage.jsx'

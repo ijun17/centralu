@@ -11,6 +11,7 @@ export default defineConfig({
   plugins: [react(), tailwind()],
   resolve: {
     alias: {
+      '@cc/protocol/client': r('../../packages/protocol/src/client.ts'),
       '@cc/protocol': r('../../packages/protocol/src/index.ts'),
       '@cc/core': r('../../packages/core/src/index.ts'),
       '@cc/platform/ports': r('../../packages/platform/src/ports/index.ts'),

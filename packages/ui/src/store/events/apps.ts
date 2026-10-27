@@ -1,4 +1,4 @@
-import type { NormalizedEvent } from '@cc/protocol'
+import type { NormalizedEvent } from '@cc/protocol/client'
 import type { StoreGet, StoreSet } from '../state.js'
 import { externalAppKey } from '../appKeys.js'
 import { applyAppView, capInlineViews, codeStampOf } from '../apps.js'

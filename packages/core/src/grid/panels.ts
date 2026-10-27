@@ -1,4 +1,4 @@
-import { MACHINE_ID_RE, appKeyOf, isRecord, type GridPanel, type GridSpan } from '@cc/protocol'
+import { MACHINE_ID_RE, appKeyOf, isRecord, type GridPanel, type GridSpan } from '@cc/protocol/client'
 import { sanitizeGridSpan } from './span.js'
 
 /**
@@ -19,7 +19,7 @@ import { sanitizeGridSpan } from './span.js'
  * One app as a string (`appKeyOf`, `parseAppKey`, `USER_APP_SCOPE`) lives in @cc/protocol (`app-key.ts`), so the host
  * spells it the same way; re-exported here, where the grid's keys are built from it.
  */
-export { USER_APP_SCOPE, appKeyOf, parseAppKey } from '@cc/protocol'
+export { USER_APP_SCOPE, appKeyOf, parseAppKey } from '@cc/protocol/client'
 
 export const sessionGridPanel = (sessionId: string): GridPanel => ({ kind: 'session', sessionId })
 /** An app's panel. `machine` is kept only for a linked machine's user-folder app (see `appKeyOf`) */

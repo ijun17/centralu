@@ -1,4 +1,4 @@
-import type { ProjectInfo } from '@cc/protocol'
+import type { ProjectInfo } from '@cc/protocol/client'
 import { RowMenu } from './RowMenu.jsx'
 import { ActionRow } from './ActionRow.jsx'
 import { ReconnectRow } from './ReconnectRow.jsx'

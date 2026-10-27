@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { machineProblem } from '@cc/core'
-import type { MachineInfo } from '@cc/protocol'
+import type { MachineInfo } from '@cc/protocol/client'
 import { useStore } from '../../../store/store.js'
 import { ActionRow } from './ActionRow.jsx'
 import { menuTrigger } from './RowMenu.jsx'

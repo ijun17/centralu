@@ -1,4 +1,4 @@
-import { DEFAULT_UI_PREFERENCES, LineHeight, nearestTextSize, type UiPreferences } from '@cc/protocol'
+import { DEFAULT_UI_PREFERENCES, LineHeight, nearestTextSize, type UiPreferences } from '@cc/protocol/client'
 
 /**
  * Fonts, line height and text size (#312 step 5), written on `<html>` next to the theme.

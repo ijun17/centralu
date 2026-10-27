@@ -1,4 +1,4 @@
-import { SUBAGENT_STEPS_PAGE, type StoredMessage } from '@cc/protocol'
+import { SUBAGENT_STEPS_PAGE, type StoredMessage } from '@cc/protocol/client'
 import type { AppState, StoreGet, StoreSet } from './state.js'
 import { HISTORY_PAGE, SUBAGENT_STEPS_UNREAD, mergeBySeq, mergePage, prependPage, putSubagentSteps, readBack } from './historyPages.js'
 import { RECOVERY_RETRY_MS } from './connection.js'

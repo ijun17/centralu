@@ -2,7 +2,14 @@ import { z } from 'zod'
 import { ToolName } from './ids.js'
 
 /** A session's state (product-spec FR-12). Urgency is judged by core/session. */
-export const SessionState = z.enum(['idle', 'working', 'waiting_approval', 'waiting_input', 'limited', 'error'])
+export const SessionState = z.enum([
+  'idle',
+  'working',
+  'waiting_approval',
+  'waiting_input',
+  'limited',
+  'error',
+])
 export type SessionState = z.infer<typeof SessionState>
 
 /**
@@ -39,7 +46,9 @@ export const SessionActivity = z.enum(['compacting', 'reviewing', 'retrying'])
  * The person's own Stop is none of these: they know. Cleared when the session works again. An unknown word from a
  * newer host reads as `interrupted`, which still says "this turn did not finish".
  */
-export const InterruptionReason = z.enum(['network', 'quit', 'interrupted', 'reconnecting']).catch('interrupted')
+export const InterruptionReason = z
+  .enum(['network', 'quit', 'interrupted', 'reconnecting'])
+  .catch('interrupted')
 export type InterruptionReason = z.infer<typeof InterruptionReason>
 
 export const Interruption = z.object({
@@ -132,7 +141,9 @@ export function applyBackgroundTasks(
   const liveIds = new Set(live.map((t) => t.id))
   const fresh = (e.ended ?? []).filter((t) => !liveIds.has(t.id) && t.status !== 'running')
   const freshIds = new Set(fresh.map((t) => t.id))
-  const kept = e.clearEnded ? [] : prev.filter((t) => t.status !== 'running' && !liveIds.has(t.id) && !freshIds.has(t.id))
+  const kept = e.clearEnded
+    ? []
+    : prev.filter((t) => t.status !== 'running' && !liveIds.has(t.id) && !freshIds.has(t.id))
   return [...live, ...[...kept, ...fresh].slice(-BACKGROUND_ENDED_KEPT)]
 }
 
@@ -191,7 +202,12 @@ export const ToolSummary = z.object({
    * when it names one. Absent from an older host's records, where the screen reads Claude's `mcp__centralu__…` name.
    */
   centralu: z
-    .object({ tool: z.string(), app: z.string().optional(), label: z.string().optional(), sessionId: z.string().optional() })
+    .object({
+      tool: z.string(),
+      app: z.string().optional(),
+      label: z.string().optional(),
+      sessionId: z.string().optional(),
+    })
     .optional(),
 })
 export type ToolSummary = z.infer<typeof ToolSummary>

@@ -1,4 +1,4 @@
-import type { MailHeldRow, MailParty, MailThreadRow } from '@cc/protocol'
+import type { MailHeldRow, MailParty, MailThreadRow } from '@cc/protocol/client'
 
 /**
  * How the Inbox words the mailbox (#1347, docs/plans/mailbox.md §10.1). The host names the parties and states why mail is held;

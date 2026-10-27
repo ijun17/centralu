@@ -75,7 +75,8 @@ function split(raw: string): [number[], string | null] {
   return [core, pre]
 }
 
-const LOCAL_BUILD = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*\.local\.[1-9]\d*$/
+const LOCAL_BUILD =
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*\.local\.[1-9]\d*$/
 
 /** A maintainer's local build: `<base>.local.N`, strict SemVer, with a prerelease base and a positive N (`scripts/local-manifest.mjs`). */
 export function isLocalBuildVersion(v: string | null | undefined): boolean {
@@ -102,5 +103,7 @@ export function releaseOf(v: string): string {
  * `centralu install` applies the same rule by itself, and pinned to it by `tooling/launcher-semver.test.ts`.
  */
 export function keepsInstalledCopy(target: string, copyVersion: string | null | undefined): boolean {
-  return typeof copyVersion === 'string' && isLocalBuildVersion(copyVersion) && isNewerVersion(copyVersion, target)
+  return (
+    typeof copyVersion === 'string' && isLocalBuildVersion(copyVersion) && isNewerVersion(copyVersion, target)
+  )
 }

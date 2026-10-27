@@ -1,4 +1,4 @@
-import type { SessionState } from '@cc/protocol'
+import type { SessionState } from '@cc/protocol/client'
 
 /**
  * The session state machine (product-spec FR-12).
@@ -17,7 +17,7 @@ export {
   type TransitionResult,
   type SessionStateFacts,
   type SessionStateStep,
-} from '@cc/protocol'
+} from '@cc/protocol/client'
 
 /** Urgency: what the inbox order and the notification policy are based on. Lower is more urgent. */
 export const URGENCY: Record<SessionState, number> = {

@@ -6,7 +6,7 @@ import type {
   AgentVersions,
   SleepPolicy,
   HostRequest,
-} from '@cc/protocol'
+} from '@cc/protocol/client'
 
 /** Updates, agent versions, screen preferences and theme files. */
 export type PreferencesSlice = {

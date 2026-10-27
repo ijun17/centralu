@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { MachineProbe, RemoteShell, SshHost, SshHostList } from '@cc/protocol'
+import type { MachineProbe, RemoteShell, SshHost, SshHostList } from '@cc/protocol/client'
 import { firstChoice, probeChoices, probeProblem, sshHostDetail, type MachineChoice } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { offerFocus } from '../../components/offerFocus.js'

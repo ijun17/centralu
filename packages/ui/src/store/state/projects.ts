@@ -3,7 +3,7 @@ import type {
   SavedCommand,
   ProjectInfo,
   GitSource,
-} from '@cc/protocol'
+} from '@cc/protocol/client'
 
 /**
  * A command's last run as the screen holds it: the host's record (#60) and two facts only this window saw. Both are

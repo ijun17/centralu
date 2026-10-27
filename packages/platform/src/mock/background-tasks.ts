@@ -1,5 +1,5 @@
-import type { BackgroundTask, NormalizedEvent } from '@cc/protocol'
-import { applyBackgroundTasks } from '@cc/protocol'
+import type { BackgroundTask, NormalizedEvent } from '@cc/protocol/client'
+import { applyBackgroundTasks } from '@cc/protocol/client'
 import type { AgentPort } from '../ports/index.js'
 import type { Emit } from './event-bus.js'
 import { mockError } from './mock-error.js'

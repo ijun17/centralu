@@ -37,7 +37,12 @@ const base = { sessionId: z.string() }
  * order of the messages. Absent from a host that does not say.
  * `compaction`: Centralu started this turn to compact the conversation (#1451); a window raises no "done" for it.
  */
-export const TurnWho = z.object({ by: z.enum(['person', 'work']), wrote: z.literal(true).optional(), added: z.literal(true).optional(), compaction: z.literal(true).optional() })
+export const TurnWho = z.object({
+  by: z.enum(['person', 'work']),
+  wrote: z.literal(true).optional(),
+  added: z.literal(true).optional(),
+  compaction: z.literal(true).optional(),
+})
 export type TurnWho = z.infer<typeof TurnWho>
 const endsTurn = { turn: TurnWho.optional() }
 
@@ -48,7 +53,10 @@ const endsTurn = { turn: TurnWho.optional() }
  * hub that followed the sender reads whose the turn is instead of guessing from the time between. Absent from a turn
  * that began otherwise (a message at rest, the tool's own) and from a host that does not say.
  */
-export const TurnOrigin = z.object({ seq: z.number().int(), from: z.object({ sessionId: z.string(), name: z.string() }) })
+export const TurnOrigin = z.object({
+  seq: z.number().int(),
+  from: z.object({ sessionId: z.string(), name: z.string() }),
+})
 export type TurnOrigin = z.infer<typeof TurnOrigin>
 
 /**
@@ -349,7 +357,13 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
     reason: z.string().optional(),
     kept: z.boolean().optional(),
   }),
-  z.object({ ...base, ...persistedSeq, type: z.literal('approval_request'), requestId: z.string(), detail: ApprovalDetail }),
+  z.object({
+    ...base,
+    ...persistedSeq,
+    type: z.literal('approval_request'),
+    requestId: z.string(),
+    detail: ApprovalDetail,
+  }),
   z.object({
     ...base,
     ...persistedSeq,
@@ -416,7 +430,14 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    * to windows already open. Not recorded: the conversation already has the error, or the host's marker for a quit.
    */
   z.object({ ...base, type: z.literal('interruption'), interruption: Interruption.nullable() }),
-  z.object({ ...base, ...endsTurn, type: z.literal('state_change'), state: SessionState, reason: z.string().optional(), origin: TurnOrigin.optional() }),
+  z.object({
+    ...base,
+    ...endsTurn,
+    type: z.literal('state_change'),
+    state: SessionState,
+    reason: z.string().optional(),
+    origin: TurnOrigin.optional(),
+  }),
   /**
    * Whether the session's agent process runs (`SessionInfo.live`) changed outside an answer to the screen's own call
    * (#568): the host put an idle session to sleep (`reason: 'asleep'`, its process ended, the conversation stays and
@@ -762,7 +783,12 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    * on. App-wide like `update_status`: the Inbox reads its list again, or the open thread. It names the thread and nothing of
    * its content, which the person's screen asks for (`mail.thread`); `toPerson` says the person has something to read in it.
    */
-  z.object({ ...appScoped, type: z.literal('mail_changed'), threadId: z.string(), toPerson: z.boolean().default(false) }),
+  z.object({
+    ...appScoped,
+    type: z.literal('mail_changed'),
+    threadId: z.string(),
+    toPerson: z.boolean().default(false),
+  }),
   /**
    * An agent asked to apply the installed update (#665, `update_centralu` action "apply"): each window that hears this
    * makes the checks its "Apply now" makes and answers with `updates.answerApply`. Nothing relaunches yet; a window
@@ -776,7 +802,13 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    * `unasked` (additive, #1509): no card stood between the agent and this relaunch, because Automatic updates are on and the
    * host is idle, so the window also waits out someone typing, as its own automatic apply does. A window that predates it ignores it
    */
-  z.object({ ...appScoped, type: z.literal('update_apply_go'), requestId: z.string(), ticket: z.string(), unasked: z.boolean().optional() }),
+  z.object({
+    ...appScoped,
+    type: z.literal('update_apply_go'),
+    requestId: z.string(),
+    ticket: z.string(),
+    unasked: z.boolean().optional(),
+  }),
   /**
    * An external app's tool call finished (M4 A-4). Deliberately coarse: it never carries what
    * changed, only that the receiving side should refetch. An external app's state lives inside the
@@ -810,7 +842,12 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    * create a loop of the screen refetching). But a read-only tool can also stand up a multi-minute
    * agent chain. This event is heard only by the run history panel.
    */
-  z.object({ ...appScoped, type: z.literal('external_app_runs_changed'), appId: AppId, projectId: z.string().nullable() }),
+  z.object({
+    ...appScoped,
+    type: z.literal('external_app_runs_changed'),
+    appId: AppId,
+    projectId: z.string().nullable(),
+  }),
   /**
    * The external app list changed (M4 A-8) — an app was created, removed or edited, a project's
    * trust changed, or an app started, stopped or failed. The same coarseness: this carries
@@ -841,7 +878,12 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    */
   z.object({ ...appScoped, type: z.literal('host_request'), request: HostRequest }),
   /** A host request ended: answered, withdrawn by the program that asked, or past its time (#1405) */
-  z.object({ ...appScoped, type: z.literal('host_request_resolved'), requestId: z.string(), outcome: HostRequestOutcome }),
+  z.object({
+    ...appScoped,
+    type: z.literal('host_request_resolved'),
+    requestId: z.string(),
+    outcome: HostRequestOutcome,
+  }),
   /**
    * A capability question from a chain that started from a screen was raised or closed (M4 D-4).
    * The same coarseness: this carries nothing, and the receiving side refetches

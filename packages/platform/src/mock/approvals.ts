@@ -1,5 +1,5 @@
-import type { ApprovalDecision, ApprovalDetail, ApprovalScope, QuestionAnswer } from '@cc/protocol'
-import { alwaysAllowKey } from '@cc/protocol'
+import type { ApprovalDecision, ApprovalDetail, ApprovalScope, QuestionAnswer } from '@cc/protocol/client'
+import { alwaysAllowKey } from '@cc/protocol/client'
 import type { AgentPort } from '../ports/index.js'
 import type { MockClock } from './clock.js'
 import type { SessionStore } from './session-store.js'

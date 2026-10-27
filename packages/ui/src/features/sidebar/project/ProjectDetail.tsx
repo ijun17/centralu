@@ -1,4 +1,4 @@
-import type { ProjectInfo } from '@cc/protocol'
+import type { ProjectInfo } from '@cc/protocol/client'
 import { isAway } from '@cc/core'
 import { useStore } from '../../../store/store.js'
 import { formatChangedCount } from '../../../app/format.js'

@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import type { AppQuestion } from '@cc/protocol'
+import type { AppQuestion } from '@cc/protocol/client'
 import { useStore } from '../../store/store.js'
 import { isCovered, type CoveringLayers } from '../../store/layers.js'
 import { PermissionCard, approvalKeyAction } from '../approval/ApprovalCard.jsx'

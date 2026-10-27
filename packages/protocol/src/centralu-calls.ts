@@ -22,12 +22,15 @@ export function mcpNameParts(name: string): { server: string; tool: string } | n
  */
 export function centraluServer(server: string): { app?: string } | null {
   if (server === RESERVED_NAME_PREFIX) return {}
-  if (server.startsWith(APP_SERVER_PREFIX) && server.length > APP_SERVER_PREFIX.length) return { app: server.slice(APP_SERVER_PREFIX.length) }
+  if (server.startsWith(APP_SERVER_PREFIX) && server.length > APP_SERVER_PREFIX.length)
+    return { app: server.slice(APP_SERVER_PREFIX.length) }
   return null
 }
 
 /** The call as the screen draws it: the mark the host set, else what a Claude name says (an older host's records) */
-export function centraluCallOf(s: Pick<ToolSummary, 'tool' | 'centralu'>): NonNullable<ToolSummary['centralu']> | null {
+export function centraluCallOf(
+  s: Pick<ToolSummary, 'tool' | 'centralu'>,
+): NonNullable<ToolSummary['centralu']> | null {
   if (s.centralu) return s.centralu
   const parts = mcpNameParts(s.tool)
   const origin = parts ? centraluServer(parts.server) : null
@@ -50,7 +53,10 @@ export function centraluCallLabel(c: NonNullable<ToolSummary['centralu']>, appNa
  * name. Codex titles an MCP call `<server>: <tool> <arguments>`; the server and tool already show, so only the
  * arguments are left.
  */
-export function centraluCallTitle(s: Pick<ToolSummary, 'tool' | 'title' | 'centralu'>, c: NonNullable<ToolSummary['centralu']>): string {
+export function centraluCallTitle(
+  s: Pick<ToolSummary, 'tool' | 'title' | 'centralu'>,
+  c: NonNullable<ToolSummary['centralu']>,
+): string {
   if (s.title === s.tool || s.title === c.label) return ''
   const codexName = `${c.app ? `${APP_SERVER_PREFIX}${c.app}` : RESERVED_NAME_PREFIX}: ${c.tool}`
   return s.title.startsWith(codexName) ? s.title.slice(codexName.length).trim() : s.title

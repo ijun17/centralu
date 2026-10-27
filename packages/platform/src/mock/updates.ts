@@ -1,5 +1,5 @@
-import type { UpdateStatus } from '@cc/protocol'
-import { APP_VERSION, isNewerVersion } from '@cc/protocol'
+import type { UpdateStatus } from '@cc/protocol/client'
+import { APP_VERSION, isNewerVersion } from '@cc/protocol/client'
 import type { UpdatePort } from '../ports/index.js'
 import type { MockClock } from './clock.js'
 import type { Emit } from './event-bus.js'

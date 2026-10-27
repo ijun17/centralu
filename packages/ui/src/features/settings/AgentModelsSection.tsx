@@ -1,4 +1,4 @@
-import type { AgentDifficulty, AgentModelChoice, AgentModels, ToolStatus } from '@cc/protocol'
+import type { AgentDifficulty, AgentModelChoice, AgentModels, ToolStatus } from '@cc/protocol/client'
 import { useStore } from '../../store/store.js'
 import { useTools } from '../../store/selectors.js'
 import { useModels } from '../session/SessionSettings.jsx'

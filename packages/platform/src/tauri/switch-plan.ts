@@ -21,7 +21,7 @@
  * back to an older build stays a button press, and the bar says it is an older build.
  */
 
-import { isNewerVersion } from '@cc/protocol'
+import { isNewerVersion } from '@cc/protocol/client'
 
 /** Where a build came from, as the keeper records it */
 export type SwapBuild = { commit: string; builtAt?: string; version?: string; bundlePath?: string }

@@ -48,7 +48,10 @@ export const UpdateStatus = z.object({
    * before. `updating` is the honest "something is under way", and it shows `error`, where the host puts its words for
    * a phase such as `waiting_for_npm` (which windows before beta.18 do not know either).
    */
-  phase: z.enum(['idle', 'checking', 'updating', 'waiting_for_npm', 'restart_required', 'failed']).default('idle').catch('updating'),
+  phase: z
+    .enum(['idle', 'checking', 'updating', 'waiting_for_npm', 'restart_required', 'failed'])
+    .default('idle')
+    .catch('updating'),
   /**
    * Why the last check or update did not work, or null when nothing went wrong.
    *

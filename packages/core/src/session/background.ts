@@ -1,4 +1,4 @@
-import { liveBackgroundTasks, type BackgroundTask } from '@cc/protocol'
+import { liveBackgroundTasks, type BackgroundTask } from '@cc/protocol/client'
 
 const tasks = (n: number) => `${n} background task${n === 1 ? '' : 's'}`
 

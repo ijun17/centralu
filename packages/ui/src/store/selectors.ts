@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { appArrivalCandidates, buildInbox, countWaiting, detectFileConflicts, isAway, isUnread, listedState, pendingProposals, proposalCandidates, type InboxCandidate, type InboxItem } from '@cc/core'
 import { openProjectOf, useStore, type AppState } from './store.js'
-import type { ToolDescriptor, ToolName, ToolStatus } from '@cc/protocol'
+import type { ToolDescriptor, ToolName, ToolStatus } from '@cc/protocol/client'
 import type { SessionSummary } from '@cc/core'
 
 /**

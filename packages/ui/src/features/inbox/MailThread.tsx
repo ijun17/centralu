@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { MailMessage } from '@cc/protocol'
+import type { MailMessage } from '@cc/protocol/client'
 import { composingKey } from '../../app/keys.js'
 import { Button } from '../../components/Button.js'
 import { Pill } from '../../components/Pill.js'

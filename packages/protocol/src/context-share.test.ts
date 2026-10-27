@@ -29,7 +29,13 @@ describe('contextShare', () => {
   })
 
   it('says when the window is only a floor under the model’s: the figure is an upper bound and its mark has no place on it', () => {
-    const share = contextShare({ used: 100_000, window: 153_000, exactness: 'exact', capped: true, compactAt: 120_000 })
+    const share = contextShare({
+      used: 100_000,
+      window: 153_000,
+      exactness: 'exact',
+      capped: true,
+      compactAt: 120_000,
+    })
     expect(share?.capped).toBe(true)
     expect(share?.compactAt).toEqual({ tokens: 120_000, fraction: null })
   })
@@ -42,15 +48,31 @@ describe('contextShare', () => {
 
 describe('the reading a context_update leaves (nextContext)', () => {
   it('carries the host’s window, its capped mark and the compaction point', () => {
-    expect(nextContext(null, update({ compactAt: 600_000 }))).toEqual({ used: 304_000, window: 1_000_000, exactness: 'exact', compactAt: 600_000 })
-    expect(nextContext(null, update({ capped: true }))).toEqual({ used: 304_000, window: 1_000_000, exactness: 'exact', capped: true })
+    expect(nextContext(null, update({ compactAt: 600_000 }))).toEqual({
+      used: 304_000,
+      window: 1_000_000,
+      exactness: 'exact',
+      compactAt: 600_000,
+    })
+    expect(nextContext(null, update({ capped: true }))).toEqual({
+      used: 304_000,
+      window: 1_000_000,
+      exactness: 'exact',
+      capped: true,
+    })
     // An older host says neither
     expect(nextContext(null, update({}))).toEqual({ used: 304_000, window: 1_000_000, exactness: 'exact' })
   })
 
   it('keeps them through a compaction that reports its size', () => {
     const read = nextContext(null, update({ compactAt: 600_000 }))
-    const after = nextContext(read, { type: 'compaction', sessionId: 's1', failed: false, before: 304_000, after: 8_800 })
+    const after = nextContext(read, {
+      type: 'compaction',
+      sessionId: 's1',
+      failed: false,
+      before: 304_000,
+      after: 8_800,
+    })
     expect(after).toEqual({ used: 8_800, window: 1_000_000, exactness: 'estimate', compactAt: 600_000 })
   })
 })

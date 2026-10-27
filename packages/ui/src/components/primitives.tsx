@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import type { Interruption, SessionState } from '@cc/protocol'
+import type { Interruption, SessionState } from '@cc/protocol/client'
 import { useCapability } from '../app/PlatformProvider.jsx'
 import { formatDuration } from '../app/format.js'
 import { useAnchoredPlacement } from './anchored.js'

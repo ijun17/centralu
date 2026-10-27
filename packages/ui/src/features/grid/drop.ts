@@ -1,4 +1,4 @@
-import type { GridPanel } from '@cc/protocol'
+import type { GridPanel } from '@cc/protocol/client'
 import { appGridPanel, gridPanelKey, sessionGridPanel } from '@cc/core'
 import { APP_MIME, SESSION_MIME, moveTo } from '../sidebar/reorder.js'
 

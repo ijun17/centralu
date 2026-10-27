@@ -12,7 +12,7 @@ import {
   type NormalizedEvent,
   type SessionInfo,
   type StoredMessage,
-} from '@cc/protocol'
+} from '@cc/protocol/client'
 import type { MockClock } from './clock.js'
 
 /** The event as the host broadcasts it, carrying the number its row was stored under */

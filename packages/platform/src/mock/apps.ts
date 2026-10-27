@@ -1,5 +1,5 @@
-import { appKeyOf, noSuchAppText } from '@cc/protocol'
-import type { AppRun, ExternalAppInfo } from '@cc/protocol'
+import { appKeyOf, noSuchAppText } from '@cc/protocol/client'
+import type { AppRun, ExternalAppInfo } from '@cc/protocol/client'
 import type { AppCallOrigin, AppHomeView, AppResourceResult, AppToolResult, AppViewFrame, InlineViewKept, InlineViewReopened } from '../ports/index.js'
 import type { MockClock } from './clock.js'
 import type { SessionStore } from './session-store.js'

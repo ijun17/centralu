@@ -1,4 +1,4 @@
-import type { HostRequest } from '@cc/protocol'
+import type { HostRequest } from '@cc/protocol/client'
 
 /**
  * The calls of the limited credential waiting for the person (#1405): a program on this computer that is not the

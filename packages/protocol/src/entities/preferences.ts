@@ -140,7 +140,14 @@ export const MAX_NUDGE_SHARE = 0.9
 export const NUDGE_SECOND_GAP = 0.1
 /** The least the second notice may sit below the tool's own compaction share */
 export const NUDGE_MARGIN = 0.05
-export const DEFAULT_AUTO_COMPACT: AutoCompact = { controlled: true, share: 0.6, idleShare: 0.3, nudge: true, nudgeFirst: 0.3, nudgeSecond: null }
+export const DEFAULT_AUTO_COMPACT: AutoCompact = {
+  controlled: true,
+  share: 0.6,
+  idleShare: 0.3,
+  nudge: true,
+  nudgeFirst: 0.3,
+  nudgeSecond: null,
+}
 
 const hundredths = (n: number): number => Math.round(n * 100) / 100
 
@@ -149,7 +156,10 @@ const hundredths = (n: number): number => Math.round(n * 100) / 100
  * `NUDGE_SECOND_GAP` below the tool's own share, and in every case at least `NUDGE_MARGIN` below it. A first share at or
  * above `share` stays as it is and is never told by the host (the tool compacts before it).
  */
-export function nudgeShares(c: Pick<AutoCompact, 'share' | 'nudgeFirst' | 'nudgeSecond'>): { first: number; second: number } {
+export function nudgeShares(c: Pick<AutoCompact, 'share' | 'nudgeFirst' | 'nudgeSecond'>): {
+  first: number
+  second: number
+} {
   const ceiling = hundredths(c.share - NUDGE_MARGIN)
   const second = hundredths(c.nudgeSecond ?? c.share - NUDGE_SECOND_GAP)
   return { first: c.nudgeFirst, second: Math.min(ceiling, Math.max(MIN_NUDGE_SHARE, second)) }
@@ -163,11 +173,15 @@ export function readAutoCompact(raw: unknown): AutoCompact {
   const out = { ...DEFAULT_AUTO_COMPACT }
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return out
   if ('controlled' in raw && typeof raw.controlled === 'boolean') out.controlled = raw.controlled
-  if ('share' in raw && typeof raw.share === 'number' && Number.isFinite(raw.share)) out.share = Math.min(MAX_AUTO_COMPACT_SHARE, Math.max(MIN_AUTO_COMPACT_SHARE, raw.share))
-  if ('idleShare' in raw && typeof raw.idleShare === 'number' && Number.isFinite(raw.idleShare)) out.idleShare = Math.min(MAX_AUTO_COMPACT_SHARE, Math.max(MIN_IDLE_COMPACT_SHARE, raw.idleShare))
+  if ('share' in raw && typeof raw.share === 'number' && Number.isFinite(raw.share))
+    out.share = Math.min(MAX_AUTO_COMPACT_SHARE, Math.max(MIN_AUTO_COMPACT_SHARE, raw.share))
+  if ('idleShare' in raw && typeof raw.idleShare === 'number' && Number.isFinite(raw.idleShare))
+    out.idleShare = Math.min(MAX_AUTO_COMPACT_SHARE, Math.max(MIN_IDLE_COMPACT_SHARE, raw.idleShare))
   if ('nudge' in raw && typeof raw.nudge === 'boolean') out.nudge = raw.nudge
-  if ('nudgeFirst' in raw && typeof raw.nudgeFirst === 'number' && Number.isFinite(raw.nudgeFirst)) out.nudgeFirst = Math.min(MAX_NUDGE_SHARE, Math.max(MIN_NUDGE_SHARE, raw.nudgeFirst))
-  if ('nudgeSecond' in raw && typeof raw.nudgeSecond === 'number' && Number.isFinite(raw.nudgeSecond)) out.nudgeSecond = Math.min(MAX_NUDGE_SHARE, Math.max(MIN_NUDGE_SHARE, raw.nudgeSecond))
+  if ('nudgeFirst' in raw && typeof raw.nudgeFirst === 'number' && Number.isFinite(raw.nudgeFirst))
+    out.nudgeFirst = Math.min(MAX_NUDGE_SHARE, Math.max(MIN_NUDGE_SHARE, raw.nudgeFirst))
+  if ('nudgeSecond' in raw && typeof raw.nudgeSecond === 'number' && Number.isFinite(raw.nudgeSecond))
+    out.nudgeSecond = Math.min(MAX_NUDGE_SHARE, Math.max(MIN_NUDGE_SHARE, raw.nudgeSecond))
   return settledSecond(out)
 }
 
@@ -315,7 +329,14 @@ export type UiPreferences = z.infer<typeof UiPreferences>
 export const UiPreferencesPatch = UiPreferences.partial().extend({
   /** Only the switches that change (#1306): the host merges them into the record, so two writers changing different switches do not undo each other */
   notifyPolicy: z
-    .object({ approval: z.boolean(), error: z.boolean(), done: z.boolean(), allDone: z.boolean(), whenFocused: z.boolean(), sound: z.boolean() })
+    .object({
+      approval: z.boolean(),
+      error: z.boolean(),
+      done: z.boolean(),
+      allDone: z.boolean(),
+      whenFocused: z.boolean(),
+      sound: z.boolean(),
+    })
     .partial()
     .optional(),
   /** Only what changes (#1376), merged into the record like the notification switches */

@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, type DragEvent } from 'react'
-import type { GridSpan } from '@cc/protocol'
+import type { GridSpan } from '@cc/protocol/client'
 import type { GridSpanSource } from '@cc/core'
 import type { ExternalCatalogApp } from '../../store/app-catalog.js'
 import { SpanButton } from '../../components/SpanPicker.jsx'

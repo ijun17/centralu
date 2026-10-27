@@ -1,7 +1,7 @@
 import type {
   FsEntry,
   FsFile,
-} from '@cc/protocol'
+} from '@cc/protocol/client'
 
 /**
  * File tree and viewer (FR-5, FR-6 / C-1).

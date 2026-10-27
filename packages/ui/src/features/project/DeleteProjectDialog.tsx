@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { ProjectInfo } from '@cc/protocol'
+import type { ProjectInfo } from '@cc/protocol/client'
 import { useStore } from '../../store/store.js'
 import { Modal } from '../../components/Modal.jsx'
 import { Button } from '../../components/Button.jsx'

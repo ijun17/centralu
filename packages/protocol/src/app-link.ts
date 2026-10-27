@@ -23,7 +23,8 @@ export const APP_LINK_MAX_CHARS = 4096
 export type AppLinkParse = { ok: true; source: string } | { ok: false; error: string }
 
 export function parseAppLink(link: string): AppLinkParse {
-  if (link.length > APP_LINK_MAX_CHARS) return { ok: false, error: `The link is longer than ${APP_LINK_MAX_CHARS} characters` }
+  if (link.length > APP_LINK_MAX_CHARS)
+    return { ok: false, error: `The link is longer than ${APP_LINK_MAX_CHARS} characters` }
   // eslint-disable-next-line no-control-regex
   if (/[\u0000-\u001f\u007f]/.test(link)) return { ok: false, error: 'The link contains control characters' }
   let url: URL
@@ -46,11 +47,13 @@ export function parseAppLink(link: string): AppLinkParse {
     return { ok: false, error: `Not a link to import from: ${raw}` }
   }
   if (inner.protocol === 'https:') {
-    if (inner.username || inner.password) return { ok: false, error: 'Links with a user name or password in them are not accepted' }
+    if (inner.username || inner.password)
+      return { ok: false, error: 'Links with a user name or password in them are not accepted' }
     return { ok: true, source: inner.href }
   }
   if (inner.protocol === 'file:') {
-    if (inner.host !== '' && inner.host !== 'localhost') return { ok: false, error: 'Only files on this machine can be imported from a file link' }
+    if (inner.host !== '' && inner.host !== 'localhost')
+      return { ok: false, error: 'Only files on this machine can be imported from a file link' }
     return { ok: true, source: inner.href }
   }
   return { ok: false, error: `Only https links and files on this machine can be imported: ${raw}` }

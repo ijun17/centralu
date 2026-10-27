@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { DEFAULT_UI_PREFERENCES, TEXT_SIZES, parseUiPreferences } from '@cc/protocol'
+import { DEFAULT_UI_PREFERENCES, TEXT_SIZES, parseUiPreferences } from '@cc/protocol/client'
 import type {
   AppQuestion,
   ToolStatus,
@@ -10,7 +10,7 @@ import type {
   ThemeFileEntry,
   AgentVersions,
   MachineInfo,
-} from '@cc/protocol'
+} from '@cc/protocol/client'
 import { DEFAULT_NOTIFY_POLICY, gridSessionIds, type ProjectArrangement } from '@cc/core'
 import { defaultLayout } from './panelLayout.js'
 import { closeLayer, EMPTY_NAV, sameScreen, visit } from './navHistory.js'

@@ -1,4 +1,4 @@
-import type { GitCommit } from '@cc/protocol'
+import type { GitCommit } from '@cc/protocol/client'
 
 /**
  * The number of commits the History tab fetches (#21).

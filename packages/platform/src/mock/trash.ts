@@ -1,4 +1,4 @@
-import { isInTurn, type ProjectInfo, type SessionInfo, type StoredMessage, type SubagentStepsHeld, type TrashedRun, type TrashedSubagentSteps } from '@cc/protocol'
+import { isInTurn, type ProjectInfo, type SessionInfo, type StoredMessage, type SubagentStepsHeld, type TrashedRun, type TrashedSubagentSteps } from '@cc/protocol/client'
 import type { MockClock } from './clock.js'
 import type { SessionStore } from './session-store.js'
 import type { ProjectStore } from './project-store.js'

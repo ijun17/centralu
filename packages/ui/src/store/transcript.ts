@@ -6,7 +6,7 @@ import {
   type StoredMessage,
   type SubagentStep,
   type ToolSummary,
-} from '@cc/protocol'
+} from '@cc/protocol/client'
 import {
   agentStartQuestion,
   centraluUpdateQuestion,

@@ -1,4 +1,4 @@
-import type { Interruption, SessionState, ToolName } from '@cc/protocol'
+import type { Interruption, SessionState, ToolName } from '@cc/protocol/client'
 import { useToolMeta } from '../../../store/selectors.js'
 import { Tooltip, interruptionLabel, stateLabel } from '../../../components/primitives.jsx'
 import { lookOf } from '../../session/look.js'

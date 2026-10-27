@@ -16,6 +16,9 @@
       "DOM.Iterable"
     ],
     "paths": {
+      "@cc/protocol/client": [
+        "./packages/protocol/src/client.ts"
+      ],
       "@cc/protocol": [
         "./packages/protocol/src/index.ts"
       ],

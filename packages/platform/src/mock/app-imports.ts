@@ -1,5 +1,5 @@
-import { appKeyOf } from '@cc/protocol'
-import type { AppReview, AppVersions, ExternalAppInfo, ProjectInfo } from '@cc/protocol'
+import { appKeyOf } from '@cc/protocol/client'
+import type { AppReview, AppVersions, ExternalAppInfo, ProjectInfo } from '@cc/protocol/client'
 import type { MockClock } from './clock.js'
 import type { AppRegistry } from './app-registry.js'
 import type { Emit } from './event-bus.js'

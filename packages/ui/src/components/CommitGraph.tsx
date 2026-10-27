@@ -1,4 +1,4 @@
-import type { GitCommit } from '@cc/protocol'
+import type { GitCommit } from '@cc/protocol/client'
 import type { GraphRow } from '@cc/core'
 
 /**

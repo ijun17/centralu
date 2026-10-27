@@ -1,4 +1,4 @@
-import type { ProjectConsent } from '@cc/protocol'
+import type { ProjectConsent } from '@cc/protocol/client'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useLoad } from '../../app/useLoad.js'

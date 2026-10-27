@@ -1,4 +1,4 @@
-import { alwaysAllowKey } from '@cc/protocol'
+import { alwaysAllowKey } from '@cc/protocol/client'
 import type { AppState, StoreGet, StoreSet } from '../state.js'
 
 /** Answering what a session asks: an approval, exactly once (#158), and a question's options */

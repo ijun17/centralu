@@ -1,6 +1,16 @@
 import { posix, win32 } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { folderNameError, gitRemoteKey, gitSourceError, osPathBaseName, repoNameOf, wireBaseName, wireJoin, wireParent, wireSegments } from './paths.js'
+import {
+  folderNameError,
+  gitRemoteKey,
+  gitSourceError,
+  osPathBaseName,
+  repoNameOf,
+  wireBaseName,
+  wireJoin,
+  wireParent,
+  wireSegments,
+} from './paths.js'
 
 /** A repository a new project is cloned from (#515): https, ssh and scp-like only */
 describe('a clone source', () => {
@@ -75,12 +85,22 @@ describe('a remote address as one repository', () => {
     expect(gitRemoteKey('https://github.com/me/app')).not.toBe(gitRemoteKey('https://github.com/you/app'))
     // Only the host is lowercased: a host may tell these apart
     expect(gitRemoteKey('https://git.example/Team/App')).toBe('git.example/Team/App')
-    expect(gitRemoteKey('https://git.example/Team/App')).not.toBe(gitRemoteKey('https://git.example/team/app'))
+    expect(gitRemoteKey('https://git.example/Team/App')).not.toBe(
+      gitRemoteKey('https://git.example/team/app'),
+    )
   })
 
   // A folder names a repository only on its own computer (#1038 review): two machines' local remotes are never one
   it('has no key for a local path, a file:// address, or nothing', () => {
-    for (const url of ['C:\\repos\\app.git', '/srv/git/app.git', '../app.git', './app', 'file:///srv/git/app.git', '\\\\server\\share\\app', '   ']) {
+    for (const url of [
+      'C:\\repos\\app.git',
+      '/srv/git/app.git',
+      '../app.git',
+      './app',
+      'file:///srv/git/app.git',
+      '\\\\server\\share\\app',
+      '   ',
+    ]) {
       expect(gitRemoteKey(url), url).toBeNull()
     }
   })
@@ -98,7 +118,20 @@ describe('a new folder name', () => {
   })
 
   it('refuses the reserved Windows device names on every machine, with or without an extension', () => {
-    for (const bad of ['CON', 'con', 'nul', 'Aux.txt', 'COM1', 'lpt9', 'com¹', 'CONIN$', 'conout$', 'nul .txt', 'Aux  .c', 'com1 ']) {
+    for (const bad of [
+      'CON',
+      'con',
+      'nul',
+      'Aux.txt',
+      'COM1',
+      'lpt9',
+      'com¹',
+      'CONIN$',
+      'conout$',
+      'nul .txt',
+      'Aux  .c',
+      'com1 ',
+    ]) {
       expect(folderNameError(bad, false), bad).toMatch(/Windows/)
       expect(folderNameError(bad, true), bad).toMatch(/Windows/)
     }

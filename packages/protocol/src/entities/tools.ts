@@ -51,15 +51,21 @@ export const AgentDifficulty = z.enum(['light', 'standard', 'heavy'])
 export type AgentDifficulty = z.infer<typeof AgentDifficulty>
 
 /** One difficulty's model for one tool (#729). The effort belongs to the model, as a project's remembered one does (#107) */
-export const AgentModelChoice = z.object({ model: z.string().min(1).max(200), effort: z.string().min(1).max(80).optional() })
+export const AgentModelChoice = z.object({
+  model: z.string().min(1).max(200),
+  effort: z.string().min(1).max(80).optional(),
+})
 export type AgentModelChoice = z.infer<typeof AgentModelChoice>
 
 /** Per tool (a registry name), per difficulty: what start_agent runs when a caller names a difficulty and no model */
-export const AgentModels = z.record(z.string().max(80), z.object({
-  light: AgentModelChoice.optional(),
-  standard: AgentModelChoice.optional(),
-  heavy: AgentModelChoice.optional(),
-}))
+export const AgentModels = z.record(
+  z.string().max(80),
+  z.object({
+    light: AgentModelChoice.optional(),
+    standard: AgentModelChoice.optional(),
+    heavy: AgentModelChoice.optional(),
+  }),
+)
 export type AgentModels = z.infer<typeof AgentModels>
 
 /**
@@ -169,13 +175,22 @@ export type LaunchDemands = {
 }
 
 /** What the orchestrator asks of its tool: Normal, no project's files, and Centralu's role text (`OrchestratorSlot`) */
-export const ORCHESTRATOR_DEMANDS: LaunchDemands = { permissionPreset: 'normal', projectTrusted: false, noSettingFiles: true, roleText: true }
+export const ORCHESTRATOR_DEMANDS: LaunchDemands = {
+  permissionPreset: 'normal',
+  projectTrusted: false,
+  noSettingFiles: true,
+  roleText: true,
+}
 
 /**
  * Why `label`'s tool cannot run a session that demands this, or null when it can. The one rule for both sides: the host
  * refuses a launch with it, and a picker shows the same words beside a tool it greys out.
  */
-export function launchRefusal(caps: AdapterCapabilities, label: string, demands: LaunchDemands): string | null {
+export function launchRefusal(
+  caps: AdapterCapabilities,
+  label: string,
+  demands: LaunchDemands,
+): string | null {
   if (caps.roleText === false && (demands.roleText || demands.noSettingFiles)) {
     return `${label} cannot take Centralu's role instructions yet, so it cannot run the orchestrator, a coordinator or an app's agent.`
   }
@@ -190,7 +205,12 @@ export function launchRefusal(caps: AdapterCapabilities, label: string, demands:
   return null
 }
 
-const PRESET_LABEL: Record<PermissionPreset, string> = { safe: 'Safe', normal: 'Normal', edits: 'Edits', auto: 'Auto' }
+const PRESET_LABEL: Record<PermissionPreset, string> = {
+  safe: 'Safe',
+  normal: 'Normal',
+  edits: 'Edits',
+  auto: 'Auto',
+}
 
 /**
  * One selectable model.

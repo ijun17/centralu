@@ -1,7 +1,7 @@
 import { useCallback } from 'react'
 import { useLabelNow } from '../../app/useLabelNow.js'
 import { nextResetTick } from '../../app/labelClock.js'
-import type { CacheStats, ToolName, UsageSnapshot, UsageWindow } from '@cc/protocol'
+import type { CacheStats, ToolName, UsageSnapshot, UsageWindow } from '@cc/protocol/client'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { Tooltip } from '../../components/primitives.jsx'
 import { SkeletonLines } from '../../components/Skeleton.jsx'

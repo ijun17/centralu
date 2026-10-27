@@ -128,7 +128,9 @@ export const THEME_TOKENS: readonly ThemeTokenDef[] = [
   ]),
 ]
 
-export const THEME_TOKEN_BY_KEY: ReadonlyMap<string, ThemeTokenDef> = new Map(THEME_TOKENS.map((t) => [t.key, t]))
+export const THEME_TOKEN_BY_KEY: ReadonlyMap<string, ThemeTokenDef> = new Map(
+  THEME_TOKENS.map((t) => [t.key, t]),
+)
 
 /**
  * Tokens a theme could set once and no longer can (#844). A file written before they left still names them, and the
@@ -137,7 +139,13 @@ export const THEME_TOKEN_BY_KEY: ReadonlyMap<string, ThemeTokenDef> = new Map(TH
  *
  * - `activity-1` to `activity-5`: the working orbit's colours, gone with the orbit (#742)
  */
-export const RETIRED_THEME_TOKENS: readonly string[] = ['activity-1', 'activity-2', 'activity-3', 'activity-4', 'activity-5']
+export const RETIRED_THEME_TOKENS: readonly string[] = [
+  'activity-1',
+  'activity-2',
+  'activity-3',
+  'activity-4',
+  'activity-5',
+]
 const RETIRED_THEME_TOKEN_SET: ReadonlySet<string> = new Set(RETIRED_THEME_TOKENS)
 
 /** A theme file's id is its file name without `.json`: lowercase words and hyphens */
@@ -197,14 +205,31 @@ export function parseThemeFile(id: string, path: string, text: string): ThemeFil
   try {
     raw = JSON.parse(text)
   } catch (e) {
-    return { id, path, name: id, base: 'dark', tokens: {}, problems: [`Not valid JSON: ${errorMessage(e)}`], broken: true }
+    return {
+      id,
+      path,
+      name: id,
+      base: 'dark',
+      tokens: {},
+      problems: [`Not valid JSON: ${errorMessage(e)}`],
+      broken: true,
+    }
   }
   if (!isRecord(raw)) {
-    return { id, path, name: id, base: 'dark', tokens: {}, problems: ['The file is not a JSON object.'], broken: true }
+    return {
+      id,
+      path,
+      name: id,
+      base: 'dark',
+      tokens: {},
+      problems: ['The file is not a JSON object.'],
+      broken: true,
+    }
   }
   const file = raw
   for (const key of Object.keys(file)) {
-    if (!['$schema', 'name', 'base', 'tokens'].includes(key)) problems.push(`Unknown key "${key}" is ignored.`)
+    if (!['$schema', 'name', 'base', 'tokens'].includes(key))
+      problems.push(`Unknown key "${key}" is ignored.`)
   }
   let name = id
   if (typeof file.name === 'string' && file.name.trim()) name = file.name.trim().slice(0, 80)
@@ -220,7 +245,8 @@ export function parseThemeFile(id: string, path: string, text: string): ThemeFil
     for (const [key, value] of Object.entries(rawTokens ?? {})) {
       if (RETIRED_THEME_TOKEN_SET.has(key)) continue
       if (!THEME_TOKEN_BY_KEY.has(key)) problems.push(`Unknown token "${key}" is ignored.`)
-      else if (typeof value !== 'string' || !value.trim() || value.length > 400) problems.push(`Token "${key}" needs a CSS value as a string.`)
+      else if (typeof value !== 'string' || !value.trim() || value.length > 400)
+        problems.push(`Token "${key}" needs a CSS value as a string.`)
       else tokens[key] = value.trim()
     }
   }
@@ -254,13 +280,22 @@ export function themeFileJsonSchema(): Record<string, unknown> {
     properties: {
       $schema: { type: 'string' },
       name: { type: 'string', minLength: 1, maxLength: 80, description: 'Shown in Settings → Appearance' },
-      base: { enum: ['dark', 'light'], description: 'Which side this theme is for, and whose values fill the tokens left out' },
+      base: {
+        enum: ['dark', 'light'],
+        description: 'Which side this theme is for, and whose values fill the tokens left out',
+      },
       tokens: {
         type: 'object',
         additionalProperties: false,
         properties: Object.fromEntries([
-          ...THEME_TOKENS.map((t): [string, object] => [t.key, { type: 'string', maxLength: 400, description: `${t.group}: ${t.label}. ${kindText[t.kind]}` }]),
-          ...RETIRED_THEME_TOKENS.map((key): [string, object] => [key, { type: 'string', description: 'Retired: Centralu no longer uses this token and ignores it.' }]),
+          ...THEME_TOKENS.map((t): [string, object] => [
+            t.key,
+            { type: 'string', maxLength: 400, description: `${t.group}: ${t.label}. ${kindText[t.kind]}` },
+          ]),
+          ...RETIRED_THEME_TOKENS.map((key): [string, object] => [
+            key,
+            { type: 'string', description: 'Retired: Centralu no longer uses this token and ignores it.' },
+          ]),
         ]),
       },
     },

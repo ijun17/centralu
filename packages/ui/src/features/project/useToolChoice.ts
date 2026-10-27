@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { launchRefusal, type AdapterCapabilities, type LaunchDemands, type ToolName, type ToolStatus } from '@cc/protocol'
+import { launchRefusal, type AdapterCapabilities, type LaunchDemands, type ToolName, type ToolStatus } from '@cc/protocol/client'
 import type { MachineRef } from '@cc/platform/ports'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useLoad } from '../../app/useLoad.js'
@@ -64,7 +64,7 @@ export function useToolChoice(initial: ToolName, machine?: MachineRef, demands?:
 }
 
 /** What the orchestrator's seat asks of a tool: its role as text, and no setting files read (#92) */
-export { ORCHESTRATOR_DEMANDS } from '@cc/protocol'
+export { ORCHESTRATOR_DEMANDS } from '@cc/protocol/client'
 
 /**
  * Why each of `tools` cannot run a start that asks `demands`, in the host's words (`launchRefusal`, the rule the host

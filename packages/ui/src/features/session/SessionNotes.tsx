@@ -1,4 +1,4 @@
-import type { Interruption } from '@cc/protocol'
+import type { Interruption } from '@cc/protocol/client'
 import { useStore } from '../../store/store.js'
 import { useMachineName } from '../../store/selectors.js'
 import { CONTINUE_TEXT, interruptionLabel } from '../../components/primitives.jsx'

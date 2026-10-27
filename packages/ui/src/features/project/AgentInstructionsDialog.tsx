@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { AGENT_INSTRUCTIONS_MAX, type ProjectInfo } from '@cc/protocol'
+import { AGENT_INSTRUCTIONS_MAX, type ProjectInfo } from '@cc/protocol/client'
 import { useStore } from '../../store/store.js'
 import { Modal } from '../../components/Modal.jsx'
 import { Button } from '../../components/Button.jsx'

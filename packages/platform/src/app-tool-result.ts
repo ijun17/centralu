@@ -1,4 +1,4 @@
-import { isRecord } from '@cc/protocol'
+import { isRecord } from '@cc/protocol/client'
 import type { AppToolResult } from './ports/index.js'
 
 /**

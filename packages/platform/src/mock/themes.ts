@@ -1,5 +1,5 @@
-import type { ThemeFileContent, ThemeFileEntry } from '@cc/protocol'
-import { isRecord, parseThemeFile, formatThemeFile } from '@cc/protocol'
+import type { ThemeFileContent, ThemeFileEntry } from '@cc/protocol/client'
+import { isRecord, parseThemeFile, formatThemeFile } from '@cc/protocol/client'
 import type { ThemesPort } from '../ports/index.js'
 import type { Emit } from './event-bus.js'
 import { mockError } from './mock-error.js'

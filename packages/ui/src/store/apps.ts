@@ -1,5 +1,5 @@
-import { APP_VIEWS_LIVE_PER_SESSION } from '@cc/protocol'
-import type { ExternalAppInfo, NormalizedEvent, StoredMessage } from '@cc/protocol'
+import { APP_VIEWS_LIVE_PER_SESSION } from '@cc/protocol/client'
+import type { ExternalAppInfo, NormalizedEvent, StoredMessage } from '@cc/protocol/client'
 import type { AppToolResult } from '@cc/platform/ports'
 import type { AppState, InlineView, PinnedView, StoreGet, StoreSet } from './state.js'
 import { externalAppKey, gridAppViewKey, isApp } from './appKeys.js'

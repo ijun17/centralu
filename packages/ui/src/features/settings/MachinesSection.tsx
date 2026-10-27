@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { HostActivity, MachineAskConsent, MachineInfo } from '@cc/protocol'
+import type { HostActivity, MachineAskConsent, MachineInfo } from '@cc/protocol/client'
 import {
   asksRow,
   autostartRow,

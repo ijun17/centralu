@@ -8,7 +8,7 @@ import {
   SESSION_HANDOFF,
   sessionOnlyAlways,
   type ApprovalDetail,
-} from '@cc/protocol'
+} from '@cc/protocol/client'
 import {
   agentStartQuestion,
   approvalNotes,

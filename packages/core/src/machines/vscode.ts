@@ -1,4 +1,4 @@
-import { wireSegments, type MachineInfo } from '@cc/protocol'
+import { wireSegments, type MachineInfo } from '@cc/protocol/client'
 
 /**
  * Opening a linked machine's file or folder in VS Code over Remote-SSH (#82, docs/plans/remote-hub.md §6).

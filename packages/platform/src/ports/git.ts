@@ -3,7 +3,7 @@ import type {
   GitCommit,
   GitDiff,
   GitFileStatus,
-} from '@cc/protocol'
+} from '@cc/protocol/client'
 
 /**
  * Git inspection and operations (FR-4, B-1 new).

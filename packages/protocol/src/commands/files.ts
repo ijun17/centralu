@@ -25,7 +25,13 @@ export const ATTACHMENT_MAX_BASE64 = Math.ceil((32 * 1048576) / 3) * 4
  *
  * A newer host may add a reason; an older window reads it through `parseTolerant` and shows the message as it came.
  */
-export const MessageImageRefusal = z.enum(['not_mentioned', 'not_found', 'not_an_image', 'too_large', 'unreadable'])
+export const MessageImageRefusal = z.enum([
+  'not_mentioned',
+  'not_found',
+  'not_an_image',
+  'too_large',
+  'unreadable',
+])
 export type MessageImageRefusal = z.infer<typeof MessageImageRefusal>
 
 /**
@@ -35,7 +41,12 @@ export type MessageImageRefusal = z.infer<typeof MessageImageRefusal>
 export const IMAGE_PREVIEW_MAX_BYTES = 10_000_000
 
 /** One row of a project folder, as `fs.listDir` answers it; `path` is project-relative and POSIX-separated (paths.ts) */
-export const FsEntry = z.object({ name: z.string(), path: z.string(), isDir: z.boolean(), ignored: z.boolean() })
+export const FsEntry = z.object({
+  name: z.string(),
+  path: z.string(),
+  isDir: z.boolean(),
+  ignored: z.boolean(),
+})
 export type FsEntry = z.infer<typeof FsEntry>
 
 /** A file as the read-only viewer reads it (`fs.readFile`) */
@@ -60,7 +71,12 @@ export type FsFile = z.infer<typeof FsFile>
  */
 export const MessageImage = z.discriminatedUnion('ok', [
   z.object({ ok: z.literal(true), mime: z.string(), data: z.string(), file: z.string().optional() }),
-  z.object({ ok: z.literal(false), reason: MessageImageRefusal, message: z.string(), file: z.string().optional() }),
+  z.object({
+    ok: z.literal(false),
+    reason: MessageImageRefusal,
+    message: z.string(),
+    file: z.string().optional(),
+  }),
 ])
 export type MessageImage = z.infer<typeof MessageImage>
 

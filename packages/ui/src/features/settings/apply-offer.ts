@@ -1,4 +1,4 @@
-import { APP_VERSION, isNewerVersion, type UpdateStatus } from '@cc/protocol'
+import { APP_VERSION, isNewerVersion, type UpdateStatus } from '@cc/protocol/client'
 import type { RelaunchCheck, RelaunchPort } from '@cc/platform/ports'
 
 /**
