@@ -72,7 +72,9 @@ OS는 그 파일들을 고치는 일이다. 테스트와 빌드 스크립트는 
 (`tooling/os-layer.js`의 `OS_LAYER`: 위의 플랫폼 모듈 중 `links/**`와 런처의 `centralu.mjs`를 뺀 것)과 그 테스트 밖에서는
 린트 에러다. 규칙 전부터 그러던 파일은 `tooling/os-allowlist.txt`에 있고, 이 목록은 줄기만 한다
 (`tooling/os-layer.test.ts`). Windows 단위 테스트 잡은 같은 판단으로 OS를 건드리는 테스트만 돌린다
-(`tooling/os-tests.ts`). Linux는 모든 테스트를 돌린다.
+(`tooling/os-tests.ts`). Linux는 모든 테스트를 돌린다. 계층 뒤로 옮긴 코드는 `Os`를 받는다
+(`packages/agent-host/src/os/port.ts`): `realOs()`(`os/real.ts`, 계층 안), 또는 그 테스트에서는 어느 OS에서든
+Windows나 POSIX 규칙을 따르는 `memoryOs({ as })`(`os/memory.ts`). 둘 다 `os/rules.ts`를 따른다.
 
 **프로세스 밖에서 온 데이터는 확인하지, 단언하지 않는다** (#1339). 다음은 모두 무언가가 확인하기 전까지 `unknown`이다.
 - 에이전트 CLI의 스트림, Codex app-server의 메시지, 원격 호스트나 앱이 보낸 프레임

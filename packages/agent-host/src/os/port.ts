@@ -138,7 +138,7 @@ export interface OsFiles {
   realpathSync(path: HostPath): HostPath
   /** Through every link, spelled as the OS stores it: the case on disk, a short name long (`realpathSync.native`) */
   realpathNativeSync(path: HostPath): HostPath
-  /** A hard link: `EEXIST` (POSIX) or `EPERM` (Windows) when `to` is taken, the way to claim a name once */
+  /** A hard link: `EEXIST` when `to` is taken, the way to claim a name once */
   linkSync(existing: HostPath, to: HostPath): void
   chmodSync(path: HostPath, mode: number): void
   utimesSync(path: HostPath, atime: number | Date, mtime: number | Date): void
@@ -256,7 +256,9 @@ export interface OsChild {
   once(event: 'spawn', listener: () => void): this
   once(event: 'exit' | 'close', listener: (code: number | null, signal: NodeJS.Signals | null) => void): this
   once(event: 'error', listener: (error: OsError) => void): this
-  off(event: 'spawn' | 'exit' | 'close' | 'error', listener: (...args: never[]) => void): this
+  off(event: 'spawn', listener: () => void): this
+  off(event: 'exit' | 'close', listener: (code: number | null, signal: NodeJS.Signals | null) => void): this
+  off(event: 'error', listener: (error: OsError) => void): this
 }
 
 export type RunOptions = {
@@ -353,7 +355,8 @@ export type SqliteOptions = { readonly?: boolean; fileMustExist?: boolean; timeo
 
 /** SQLite's files and locks (better-sqlite3), opened through the OS like any file */
 export interface OsSqlite {
-  open(path: HostPath | ':memory:', options?: SqliteOptions): Database.Database
+  /** `':memory:'` opens a database with no file */
+  open(path: HostPath, options?: SqliteOptions): Database.Database
 }
 
 export interface Os {

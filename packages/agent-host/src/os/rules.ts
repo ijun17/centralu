@@ -1,4 +1,5 @@
-import { posix, win32, type PlatformPath } from 'node:path'
+import { posix, win32 } from 'node:path'
+import type { PlatformPath } from 'node:path'
 
 /**
  * The OS layer's rules for a family of operating systems, as pure functions (#1599, docs/plans/os-layer.md §7.1).
@@ -286,7 +287,7 @@ export function launchFor(path: string, deps: LaunchDeps, depth = 0): ToolLaunch
  */
 export function shimTarget(text: string): string | null {
   for (const m of text.matchAll(/"%(?:~dp0|dp0%)\\?([^"%]+)"/gi)) {
-    const rel = m[1]!.trim()
+    const rel = (m[1] ?? '').trim()
     if (!rel || /(^|\\)node\.exe$/i.test(rel)) continue
     return rel
   }
@@ -371,7 +372,7 @@ export function fileUrlToPath(url: string | URL, family: OsFamily): string {
   }
   const backslashed = pathname.replaceAll('/', '\\')
   if (host !== '') return `\\\\${u.hostname}${backslashed}`
-  const letter = backslashed.codePointAt(1)! | 0x20
+  const letter = (backslashed.codePointAt(1) ?? 0) | 0x20
   if (!(letter >= 0x61 && letter <= 0x7a) || backslashed[2] !== ':') {
     throw Object.assign(new TypeError('File URL path must be absolute'), { code: 'ERR_INVALID_FILE_URL_PATH' })
   }
@@ -385,15 +386,18 @@ export function pathToFileUrl(path: string, family: OsFamily): URL {
     const [host = '', ...rest] = path.slice(2).split(/[\\/]/)
     const url = new URL('file://')
     url.hostname = host
-    url.pathname = rest.map(encodePathSegment).join('/')
+    url.pathname = rest.map(encodePathSegment).join(URL_SEP)
     return url
   }
   let resolved = p.resolve(path)
   if ((path.endsWith(p.sep) || path.endsWith('/')) && !resolved.endsWith(p.sep)) resolved += p.sep
-  const segments = (family === 'windows' ? resolved.replaceAll('\\', '/') : resolved).split('/')
-  const encoded = segments.map(encodePathSegment).join('/')
+  const segments = (family === 'windows' ? resolved.replaceAll(win32.sep, URL_SEP) : resolved).split(URL_SEP)
+  const encoded = segments.map(encodePathSegment).join(URL_SEP)
   return new URL(`file://${family === 'windows' ? '/' : ''}${encoded}`)
 }
+
+/** A URL's path separator, the same on every OS */
+const URL_SEP = posix.sep
 
 /** A path segment as a URL writes it: what `new URL` would read as syntax is escaped */
 function encodePathSegment(segment: string): string {

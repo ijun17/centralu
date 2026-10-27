@@ -175,6 +175,7 @@ Today it is a handful of modules, each owning one subject, that `local/platform-
 | Module | Subject |
 |---|---|
 | `agent-host/src/os.ts` | the host's questions named for what differs: `hasPs`, `clonesFiles`, `locksRunningPrograms`, `pathsOf`, `installedCopyPath`, `systemTool` |
+| `agent-host/src/os/real.ts` | the `Os` of the machine itself (§7.1), built from the modules in this table |
 | `agent-host/src/env-path.ts`, `tool-launch.ts` | finding a tool on PATH (PATHEXT, npm shims) and starting it (`.cmd` shims) |
 | `agent-host/src/dev-services/kill-tree.ts` | ending a process tree: groups and signals, or taskkill and parent links |
 | `agent-host/src/dev-services/terminal.ts` | the terminal's and the Run button's shell |
@@ -321,30 +322,106 @@ in-memory implementation, keeps a few integration tests on the real OS, and take
 ### 7.1 Interface and fake
 
 The layer's operations are an interface the host is given (as the store and the platform ports are), with a real
-implementation per OS family and one in memory:
+implementation and one in memory. In `packages/agent-host/src/os/`:
+
+| File | What | In the layer |
+|---|---|---|
+| `port.ts` | the `Os` interface: types only | no (runs nothing) |
+| `rules.ts` | the rules of a family (`windows`, `posix`), as pure functions: path case and form (`pathKey`, `samePath`, `isInside`), the environment's case (`envValue`), PATH and PATHEXT (`findOnPath`), batch shims (`launchFor`, `resolveCommand`), the program path never planted (`programFor`, `notOnPath`, `systemTool`), `file:` URLs, and the questions named for what differs (`traitsOf`) | no: it answers for the family it is given, never for this host |
+| `real.ts` | `realOs()`: Node's calls, and the layer modules for what differs (`env-path.ts`, `tool-launch.ts`, `kill-tree.ts`, `grouped-child.ts`, `os.ts`) | yes |
+| `run.ts` | what a run to the end is (input, timeout, overflow, abort, the close a grandchild holds), over any `Os` | no |
+| `memory.ts` | `memoryOs({ as: 'windows' \| 'posix' })` | no |
+
+**One definition per concept.** The rules moved out of `os.ts`, `env-path.ts`, `tool-launch.ts` and `kill-tree.ts`
+into `rules.ts`; those modules now read them for the running OS (`familyOf`, `traitsFor` in `os.ts`), with their
+signatures and tests unchanged. The in-memory OS cannot import a layer module: a test that reaches the layer runs on
+Windows (§6.1, rule 4), and the point is that its tests do not. So the rules live where both can read them.
 
 ```ts
 interface Os {
-  files: {
-    readText(p: HostPath): Promise<string>
-    write(p: HostPath, data: string | Uint8Array, opts?: { atomic?: boolean }): Promise<void>
-    list(dir: HostPath): Promise<Entry[]>
-    stat(p: HostPath): Promise<Stat | null>
-    rename(from: HostPath, to: HostPath): Promise<void> // retries what Windows locks
-    remove(p: HostPath, opts?: { recursive?: boolean }): Promise<void> // never through a link
-    link(target: HostPath, at: HostPath): Promise<'symlink' | 'junction'>
-  }
-  paths: { join(...parts: string[]): HostPath; same(a: HostPath, b: HostPath): boolean; inside(root: HostPath, p: HostPath): boolean }
-  processes: { start(cmd: Command, opts: StartOptions): Child; stop(child: Child, graceMs: number): Promise<Exit> }
-  env: { get(name: string): string | undefined; home: HostPath; temp: HostPath; findTool(name: string): Promise<HostPath | null> }
+  files: OsFiles          // Node's sync names (readFileSync, renameSync, openSync/readSync, watch, cpSync, …) and
+                          // .promises (node:fs/promises' names); stats with bigint dev/ino and mtimeNs
+  paths: OsPaths          // path (win32 or posix), devNull, same, inside, key, fromFileUrl, toFileUrl
+  processes: OsProcesses  // start (a ChildProcess-like child, contained by default), run, runSync, runShell,
+                          // stop(child, grace) (the tree, then its leftovers), alive(pid), pid
+  tools: OsTools          // find (whichTool), program (programPath), resolve (resolveCommand)
+  env: OsEnv              // get (any case on Windows), all, set, home, temp, execPath, username, cwd()
+  clock: OsClock          // now, setTimeout (unref'd), sleep: the waits that are about the OS
+  sqlite: OsSqlite        // open(path | ':memory:') — better-sqlite3's files and locks
+  traits: OsTraits        // foldsPathCase, hasProcessGroups, locksRunningPrograms, locksWatchedFolders,
+                          // cpKeepsLinks, clonesFiles, measuresWithDu, hasPs, modesGuardFiles, hasWindowsFileNames
 }
 ```
 
-`memoryOs({ as: 'windows' | 'posix' })` keeps a file tree in memory and follows the chosen OS's rules: case-folding,
-`\` paths, junctions in place of directory symlinks, a rename of an open file refused. Logic tests then cover Windows
-semantics on Linux, which they do not today, and leave the Windows job.
+The shapes follow Node's own, so moving a module behind it changes where a call goes, not what it means: most of the
+host's file calls are synchronous (a store opened in a constructor, a write that must not yield, a fingerprint taken
+mid-scan), so `files` has Node's sync calls and `files.promises` the async ones. A child has `ChildProcess`'s events
+(`spawn`, `exit`, `close`, `error`) and fields, so the adapters' and apps' process code keeps its shape; a start
+Node refuses at once (`EINVAL` for a batch file) is an `'error'` like a program not found.
 
-### 7.2 Order
+**What Windows refuses, as measured** (Windows 11, Node 22, NTFS; the plan's first draft said "a rename of an open
+file refused", which is not what Node does: it opens files with share-delete):
+
+| | Windows | Linux |
+|---|---|---|
+| rename or delete a file open in this process | allowed | allowed |
+| rename another file onto an open one | `EPERM` | allowed |
+| rename a folder something below it holds open (a file, a watch, a working folder) | `EPERM` | allowed |
+| rename or remove a running process's working folder | `EBUSY` | allowed |
+| delete a running program's file / rename it | `EPERM` / allowed | allowed |
+| `unlink` a folder; `rmdir` a file | `EPERM`; `ENOENT` | `EISDIR`; `ENOTDIR` |
+| a path through a file | `ENOENT` | `ENOTDIR` |
+| rename a file onto a folder; a folder onto a folder | `EPERM`; `EPERM` | `EISDIR`; replaced if empty, else `ENOTEMPTY` |
+| a copy onto a folder | `EPERM` | `EISDIR` |
+| the working folder of a process that has just started | held only once the process has set it up, a moment after `spawn` | — |
+| a junction | absolute (a relative target read from its folder); a link to `lstat` and the listing; one to a file leads nowhere (`ENOENT`) | — |
+| `realpathSync.native` / `realpathSync` | the case stored / the case given | the same |
+| `child.kill()` / `taskkill /F` | exit `null, SIGTERM` / `1, null` | exit `null, SIGTERM` |
+
+`memoryOs` follows each column. `os/contract.test-helpers.ts` holds the cases with both answers: `os/memory.test.ts`
+checks the in-memory OS against both on any OS, and `os/real.test.ts` (the layer's own test, so it runs on Windows
+too) checks the real OS and the in-memory one as its family against the column of the OS it runs on. A case the
+in-memory OS gets wrong fails there. `os/rules.test.ts` checks the path, case and PATH rules by property, over
+generated paths and names, for both families on Linux; `real.test.ts` holds `rules.ts`'s `file:` URLs to Node's own.
+
+Not modeled in memory: 8.3 short names, Windows' reserved names and trailing dots, alternate data streams, shares,
+`\\?\` paths, permissions beyond the mode bits (on Windows, the read-only bit), PTYs, and SQLite, which a test gives
+it (`memoryOs({ sqlite })`).
+
+### 7.2 What each area needs, and whether the interface has it
+
+Surveyed from each area's shipped files before the interface was frozen (the parallel steps start from it):
+
+| Area | Needs | Covered by |
+|---|---|---|
+| 3a store and files | sync reads and writes, `mkdir -p` with a mode, `rm` with retries, a private file (`0600`, `wx`, a hard link to claim a name), `lstat`/`chmod` for the data folder, an append log (`openSync('a')`, `writeSync`, `fchmodSync`), `realpathSync.native`, `fs.watch`, `ps` for a lock's owner, SQLite (WAL, `BEGIN EXCLUSIVE` lock) | `files`, `processes.runSync`, `sqlite.open`, `traits.modesGuardFiles`, `env.home` |
+| 3b worktrees | git run to its end with input, a 0600 output file, a timeout, a buffer cap and an abort that end the tree (`run`); `cp -c` (`run` + `traits.clonesFiles`), `cpSync` with `verbatimSymlinks`, a folder walk that sees junctions (`readdirSync` with types), `symlink(…, 'junction')` and its `EPERM` fallback, `realpath`, bigint `dev`/`ino`; the setup command through the shell; the one recursive watch on Windows | `processes.run`/`runShell`, `files`, `traits.cpKeepsLinks`/`locksWatchedFolders`, `tools.program` |
+| 3c adapters | a contained child with three pipes, `exit` and `error`, `kill`, a tree stop with a grace and the sweep of what is left; short runs with a timeout; config files read sync; the clock for graces | `processes.start`/`stop`/`run`, `tools.find`/`resolve`, `files`, `clock`. **Not in it**: the POSIX host watch (an extra fd and an `sh` wrapper, `endsWithHost`) and the keeper-held processes: those stay with the adapters' process code in the layer's `grouped-child.ts`/`kill-tree.ts` until 3f |
+| 3e apps runtime | the app server with stdio `['pipe','pipe','pipe','overlapped']`, its exit and close, a stop with a grace; sync file work (fingerprints, private JSON, staging, `cpSync` with timestamps, `utimesSync`, `EXDEV` across volumes), `fs.watch`, `process.kill(pid, 0)` | `processes.start` (`'overlapped'`), `stop`, `alive`, `files`, `clock` |
+| 3d links and ssh, 3f keeper | parked (#1626, #1615) | — |
+
+Outside every area: terminals (node-pty) stay in the layer's `terminal.ts`; sockets and HTTP (`views/`, `transport/`)
+are not in `Os` yet.
+
+**Lines parked for 3d and 3f.** `links/**` (28 lines) waits for #1626, and `keeper/**` and `lifecycle/**` (15) for
+#1615 (the remote keeper); no step before them touches those lines. The first pull request (the interface) takes no line
+off: 381 before and after.
+
+### 7.3 The allowlist across parallel steps
+
+Every step takes lines out of `tooling/os-allowlist.txt`. Git merges two removals of distinct lines cleanly only when a
+kept line lies between them; two steps that take out neighbouring lines conflict (tried: removing `b` and `c` of
+`a b c d` conflicts, `b` and `d` merges). The merge queue's batches merge each member into the batch branch with
+GitHub's merge, so such a pair would conflict there too. Steps 3a and 3b both own lines in `dev-services/` and
+`sessions/`, so they would.
+
+The list is now generated as much as checked: `pnpm os:tighten` (`tsx tooling/os-tests.ts --tighten`) takes out every
+line the code no longer needs and never adds one, and `project.json` `queue.conflicts.mechanical` names the list with
+that command and `tooling/os-layer.test.ts` as its check, as the lint allowlists do (#1423). On a conflict the queue
+takes main's list, tightens it from the merged code, runs the check (no line new against main, through `baseCommit`
+with the merge not yet committed) and pushes. The second step costs one CI run, never a person.
+
+### 7.4 Order
 
 By Windows time saved and risk:
 

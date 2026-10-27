@@ -85,7 +85,9 @@ so are `process.kill`, `process.cwd()`, `process.chdir()`, `process.execPath`, `
 `fileURLToPath` and `pathToFileURL`.
 The files that did so before the rule are listed in `tooling/os-allowlist.txt`, which may only shrink
 (`tooling/os-layer.test.ts`). The Windows unit job runs only the tests that touch the OS by the same judgement
-(`tooling/os-tests.ts`); Linux runs every test.
+(`tooling/os-tests.ts`); Linux runs every test. Code moved behind the layer is given an `Os`
+(`packages/agent-host/src/os/port.ts`): `realOs()` (`os/real.ts`, in the layer), or in its tests `memoryOs({ as })`
+(`os/memory.ts`), which follows Windows' or POSIX rules on any OS; both follow `os/rules.ts`.
 
 **Which agent CLI this is is asked in its adapter only** (`agent/agent-adapter-checks`,
 `tooling/eslint-agent-adapter-checks.js`). In shipped code, an exact CLI name in a string literal, expression-free template, object key or
