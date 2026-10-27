@@ -12,7 +12,8 @@ import { CardIds, PendingCards, stopNotConfirmed, undeliveredError } from '../se
 import { UnmappedTypes } from '../unmapped.js'
 import { AcpConnection, AUTH_REQUIRED, METHOD_NOT_FOUND, NO_TIMEOUT_MS, RpcError, type FrameDirection, type RpcId } from './connection.js'
 import { KNOWN_UPDATES } from './known-updates.js'
-import { AcpNormalizer, tokenUsage } from './normalize.js'
+import { addTokens, NO_TOKENS } from '../token-usage.js'
+import { AcpNormalizer, requestInput, tokenUsage } from './normalize.js'
 import {
   InitializeResult,
   OpenedSession,
@@ -110,6 +111,10 @@ export class AcpSession implements SessionHandle {
   private lastUsed: number | null = null
   /** The session's running cost as last read at a turn's end: a turn's own cost is what it adds (OpenCode sends the total) */
   private costTotal: number | null = null
+  /** What this process's turns have used, added up: `usage_update.tokens` is a running reading, and ACP reports each turn's alone */
+  private tokensSoFar = NO_TOKENS
+  /** The turns' costs added up (null until one is known): the cost of the running reading */
+  private costSoFar: number | null = null
 
   constructor(
     private readonly opts: CreateSessionOpts,
@@ -277,10 +282,20 @@ export class AcpSession implements SessionHandle {
 
   private endTurn(result: PromptResult, turn: Turn): void {
     const sessionId = this.sessionId
-    const tokens = tokenUsage(result)
+    const turnTokens = tokenUsage(result)
     // A turn with no usage reports no cost: its spend stays in the total and is said with the next turn that reports
-    const cost = tokens ? this.turnCost(turn) : null
-    if (tokens) this.emit({ type: 'usage_update', sessionId, tokens: cost === null ? tokens : { ...tokens, costUsd: cost } })
+    const cost = turnTokens ? this.turnCost(turn) : null
+    if (turnTokens) {
+      if (cost !== null) this.costSoFar = (this.costSoFar ?? 0) + cost
+      this.tokensSoFar = addTokens(this.tokensSoFar, turnTokens)
+      const request = requestInput(result)
+      this.emit({
+        type: 'usage_update',
+        sessionId,
+        tokens: this.costSoFar === null ? this.tokensSoFar : { ...this.tokensSoFar, costUsd: this.costSoFar },
+        ...(request ? { request } : {}),
+      })
+    }
     if (result.stopReason === 'end_turn' && this.inferredCompaction(turn)) {
       this.emit({ type: 'compaction', sessionId, failed: false, trigger: 'manual' })
     }

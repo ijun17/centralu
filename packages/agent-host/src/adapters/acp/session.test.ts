@@ -289,14 +289,15 @@ describe('the ACP session against a scripted agent', () => {
     }
     const costs = w.events.flatMap((e) => (e.type === 'usage_update' ? [e.tokens.costUsd] : []))
     expect(costs).toHaveLength(2)
-    expect(costs[1]).toBeCloseTo(0.2)
+    // A running reading: the agent's total, which the carried spend completes
+    expect(costs[1]).toBeCloseTo(0.3)
   })
 
   it("takes a turn's cost as what it added to the running total the agent sends, a new conversation's from 0", async () => {
     const kept: number[] = []
     const w = world(base, { runningCost: { last: 5, keep: (t) => kept.push(t) } })
     const s = await w.start()
-    expect(await turnCosts(w, s, [0.1, 0.25])).toEqual([0.1, 0.15].map(near))
+    expect(await turnCosts(w, s, [0.1, 0.25])).toEqual([0.1, 0.25].map(near))
     expect(kept).toEqual([0, 0.1, 0.25])
   })
 
@@ -307,6 +308,31 @@ describe('the ACP session against a scripted agent', () => {
     expect(kept).toEqual([0.25])
     const unknown = world(base, { resumeExternalId: SID, runningCost: { last: null, keep: () => {} } })
     expect(await turnCosts(unknown, await unknown.start(), [0.25, 0.3])).toEqual([undefined, near(0.05)])
+  })
+
+  it("reports the tokens as a running reading, and each turn's input as a request for the cache accounting", async () => {
+    const w = world()
+    const s = await w.start()
+    const peer = w.peers[0]!
+    const turns = [
+      { inputTokens: 100, outputTokens: 10, thoughtTokens: 5, cachedReadTokens: 1_000 },
+      { inputTokens: 40, outputTokens: 4, cachedReadTokens: 1_100, cachedWriteTokens: 7 },
+    ]
+    for (const [i, usage] of turns.entries()) {
+      s.send(`turn ${i}`)
+      await peer.next((m) => isPrompt(m) && JSON.stringify(m).includes(`turn ${i}`))
+      peer.release('session/prompt', { result: { stopReason: 'end_turn', usage } })
+      await w.event((e) => e.type === 'turn_complete' && w.events.filter((x) => x.type === 'usage_update').length === i + 1)
+    }
+    const updates = w.events.flatMap((e) => (e.type === 'usage_update' ? [e] : []))
+    expect(updates.map((e) => e.tokens)).toEqual([
+      { inputTokens: 100, outputTokens: 15, cacheReadTokens: 1_000, cacheCreationTokens: 0 },
+      { inputTokens: 140, outputTokens: 19, cacheReadTokens: 2_100, cacheCreationTokens: 7 },
+    ])
+    expect(updates.map((e) => e.request)).toEqual([
+      { inputTokens: 100, cacheReadTokens: 1_000, outputTokens: 15 },
+      { inputTokens: 40, cacheReadTokens: 1_100, cacheCreationTokens: 7, outputTokens: 4 },
+    ])
   })
 
   it('closes a process a previous host left (with its open calls), and opens the conversation again in a new one', async () => {
