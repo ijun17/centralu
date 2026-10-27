@@ -74,13 +74,29 @@ export function agyCentraluTool(call: ToolCallFields): string | null {
 }
 
 /**
- * The agent's built-in tools that read a file's content without asking (from the harness binary's tool names; `view_file`
- * read the token in the spike, §6). Switched off for every session (`_meta.antigravity.disabledTools`, read in the agent's
- * binary by the spike, its effect still to be checked live, plan §9): reads come to Centralu instead (`fs/read_text_file`,
- * inside the project folder only, never the agent's home). `grep_search` prints matching lines, so it is a reader too.
- * `list_dir` and `find_by_name` say names only, and stay.
+ * The agent's built-in tools switched off for every session (`_meta.antigravity.disabledTools` on `session/new`, `load` and
+ * `resume`), by the names its server accepts: the `BuiltinTools` values of 1.4.3, read in its server. Any other name is
+ * dropped there with "Unknown tool name in disabledTools" (measured: `grep_search`, `view_file_outline` and `view_code_item`
+ * were, deep review of #1680), so only these spellings take effect:
+ * - `view_file`, `search_directory` (its grep, which prints matching lines): read a file's content without asking. Reads
+ *   come to Centralu instead (`fs/read_text_file`, inside the project folder only, never the agent's home)
+ * - `invoke_subagent`: a subagent keeps the built-in viewer whatever the filter says, and read a file inside `GEMINI_HOME`
+ *   in the review. With it off the server sets `enable_subagents: false`, and the model's tools lose `invoke_subagent`,
+ *   `define_subagent`, `run_workflow` and `send_message` (measured in the session's recorded tool list)
+ * - `run_workflow`: a multi-agent script, subagents by another door
+ * `list_directory` and `find_file` say names only, and are off by the server's default anyway.
  */
-export const AGY_DISABLED_TOOLS: readonly string[] = ['view_file', 'view_file_outline', 'view_code_item', 'grep_search']
+export const AGY_DISABLED_TOOLS: readonly string[] = ['view_file', 'search_directory', 'invoke_subagent', 'run_workflow']
+
+/**
+ * A permission request for a subagent or a workflow, refused under every preset and rule (`AcpToolShape.neverAllowed`):
+ * the tools are switched off (`AGY_DISABLED_TOOLS`), so one arriving means the filter did not hold, and a subagent reads
+ * the agent's home with no card. The agent titles a built-in's request `Run <tool>?` (its server; recorded in the review:
+ * `Run invoke_subagent?`, kind `other`)
+ */
+export function isAgySubagentCall(req: Pick<RequestPermission, 'toolCall'>): boolean {
+  return /^Run (invoke_subagent|start_subagent|define_subagent|run_workflow)\?$/.test(req.toolCall.title ?? '')
+}
 
 export function agySessionMeta(): Record<string, unknown> {
   return { antigravity: { disabledTools: [...AGY_DISABLED_TOOLS] } }

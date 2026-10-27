@@ -130,7 +130,7 @@ describe('Antigravity 1.4.3, replayed', () => {
     const init = frames.find((f) => f.method === 'initialize') as { params: { clientCapabilities: { fs: unknown; terminal: unknown } } }
     expect(init.params.clientCapabilities).toMatchObject({ fs: { readTextFile: true, writeTextFile: false }, terminal: false })
     const created = frames.find((f) => f.method === 'session/new') as { params: { _meta?: { antigravity?: { disabledTools?: string[] } } } }
-    expect(created.params._meta?.antigravity?.disabledTools).toEqual(expect.arrayContaining(['view_file', 'grep_search']))
+    expect(created.params._meta?.antigravity?.disabledTools).toEqual(expect.arrayContaining(['view_file', 'search_directory', 'invoke_subagent']))
     // Every answer is Allow once: `allow_always` (which the agent would keep as its own rule) is never sent
     const answers = frames.filter((f) => f.method === undefined).map((f) => JSON.stringify(f.result))
     expect(answers.every((a) => a.includes('"optionId":"allow"'))).toBe(true)

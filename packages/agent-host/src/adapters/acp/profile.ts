@@ -40,6 +40,8 @@ export type AcpToolShape = {
   readCall?(call: ToolCallFields): Partial<ToolCallFields>
   /** A permission request that is a question to the person (one option per answer), not an approval: asked as a question card */
   isQuestion?(req: RequestPermission): boolean
+  /** A request refused under every preset and every saved rule, before any is read (Antigravity's subagents) */
+  neverAllowed?(req: RequestPermission): boolean
   /**
    * A permitted edit runs as a new call (another id) and the asked one later ends `failed` though the edit ran (measured on
    * Antigravity 1.4.3): the core folds the new call into the asked one, so its card ends as the edit did

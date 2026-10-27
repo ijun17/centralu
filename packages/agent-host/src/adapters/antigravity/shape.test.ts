@@ -4,7 +4,7 @@ import { readTextFileFor } from '../acp/session.js'
 import { FakeAcpPeer, type PeerScript } from '../acp/fake-peer.test-helpers.js'
 import { logToolStderr, redactLines, startToolProcess } from '../core/tool-process.js'
 import { AntigravityAdapter, antigravityProfile } from './index.js'
-import { agyStderrLine, readAgyCall } from './shape.js'
+import { AGY_DISABLED_TOOLS, agyStderrLine, readAgyCall } from './shape.js'
 import { driven, fakeInstall, fakeSignIn, readsWorld, sessionOpts, tempData, tokenPath } from './agent-files.test-helpers.js'
 
 /**
@@ -221,4 +221,42 @@ describe('the log of a split stderr line', () => {
     }
     expect(said).toEqual(['[agy] plain line'])
   })
+})
+
+/** The request the review recorded after asking for a subagent (the WS frame's `raw`, the project path made neutral) */
+const SUBAGENT = {
+  sessionId: SID,
+  toolCall: {
+    toolCallId: 'call-sub-1',
+    title: 'Run invoke_subagent?',
+    kind: 'other',
+    rawInput: { Subagents: [{ Model: 'inherit', Prompt: 'Please open the file at `/work/notes.txt` and read its first line.', Role: 'Canary Note Reader', TypeName: 'research', Workspace: 'inherit' }] },
+  },
+  options: [
+    { optionId: 'allow_once', name: 'Allow', kind: 'allow_once' },
+    { optionId: 'allow_always', name: 'Always allow', kind: 'allow_always' },
+    { optionId: 'reject_once', name: 'Reject', kind: 'reject_once' },
+  ],
+}
+
+describe("Antigravity's subagents", () => {
+  it('are switched off at the server by the names it accepts', () => {
+    // The server's BuiltinTools values (1.4.3): any other name is dropped with "Unknown tool name in disabledTools"
+    const accepted = ['list_directory', 'search_directory', 'find_file', 'view_file', 'create_file', 'edit_file', 'run_command', 'ask_question', 'invoke_subagent', 'run_workflow', 'generate_image', 'search_web', 'read_url_content', 'schedule', 'finish']
+    for (const name of AGY_DISABLED_TOOLS) expect(accepted, name).toContain(name)
+    expect(AGY_DISABLED_TOOLS).toEqual(expect.arrayContaining(['view_file', 'search_directory', 'invoke_subagent', 'run_workflow']))
+  })
+
+  for (const preset of ['safe', 'normal', 'edits', 'auto'] as const) {
+    it(`under ${preset}, and with a saved rule for it, a subagent request is declined without a card`, async () => {
+      const w = world(base, preset)
+      const handle = await w.adapter.createSession(sessionOpts('agy-sub', preset), w.emit)
+      handle.applyRules?.(['invoke_subagent', 'other', '*'])
+      handle.send('go')
+      await w.peers[0]!.next((m) => m.method === 'session/prompt')
+      expect(await w.peers[0]!.ask('session/request_permission', SUBAGENT)).toEqual({ outcome: { outcome: 'selected', optionId: 'reject_once' } })
+      expect(w.events.some((e) => e.type === 'approval_request')).toBe(false)
+      await handle.dispose()
+    })
+  }
 })

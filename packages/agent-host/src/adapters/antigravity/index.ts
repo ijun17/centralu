@@ -9,7 +9,7 @@ import { agyHome, agyPlatformKey, type AgyHome } from './agent-files.js'
 import { agyLaunch } from './launch.js'
 import { AGY_RELEASE, type AgyArchive } from './release.js'
 import { AgySetup, type AgySetupDeps } from './setup.js'
-import { agyCentraluTool, agySessionMeta, agyStderrLine, isAgyQuestion, readAgyCall } from './shape.js'
+import { agyCentraluTool, agySessionMeta, agyStderrLine, isAgyQuestion, isAgySubagentCall, readAgyCall } from './shape.js'
 import { AGY_SURFACE } from './surface.js'
 
 /**
@@ -90,6 +90,7 @@ export function antigravityProfile(deps: AgyProfileDeps = {}): AgyProfile {
     shape: {
       readCall: readAgyCall,
       isQuestion: isAgyQuestion,
+      neverAllowed: isAgySubagentCall,
       editRunsAsNewCall: true,
       // The agent's own folder: its token, its settings, its binaries
       clientReads: { refused: () => [home.root] },
