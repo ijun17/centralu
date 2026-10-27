@@ -12,7 +12,7 @@ behind each line live in the linked documents.
   its keeper and its host match the same names, and your own session may be running under them.
 - Trigger an OS permission prompt (screen capture, camera, protected folders) without asking.
   A tool started under Centralu asks in Centralu's name.
-- Run two `pnpm e2e` (or `ux`, `perf`, `perf:memory`) at once on one machine. The runners take a lock themselves and wait for each other; do not bypass it by calling `playwright` directly.
+- Run two `pnpm e2e` (or `ux`, `perf`, `perf:memory`) at once on one machine. The runners take a lock themselves and wait for each other; do not bypass it by calling `playwright` directly. WSL and native Windows are two machines to that lock: a run in each does not wait for the other, so use one of them.
 - Merge your own pull request.
 
 ## Commands

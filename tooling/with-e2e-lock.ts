@@ -6,17 +6,17 @@
  *   tsx tooling/with-e2e-lock.ts node --import tsx e2e/perf-memory.mts [its arguments]
  *
  * `playwright` is Playwright's own command line started with this Node (no shell, so no `.cmd` shim), `node` is this Node.
- * The command's exit code is this one's; a command ended by a signal gives 128 plus its number (137 for SIGKILL), as a
- * shell reports it. A run that waits says who holds the lock; Ctrl-C or a SIGTERM while waiting or running ends both
- * and gives the lock back (130 and 143).
+ * The command's exit code is this one's. A run that waits says who holds the lock. A SIGINT (Ctrl-C) or SIGTERM that
+ * reaches this process:
+ *  - while it waits: ends it with 130 or 143, having taken nothing;
+ *  - while the command runs: is passed on to the command, and the lock is given back when the command has ended. The exit
+ *    code is the command's own, except that a command a signal ended gives 128 plus its number (as a shell reports it), and
+ *    one that was told to stop and then exited with 0 gives 130 or 143 too.
+ * Windows has no signals: a process there is ended outright, and neither case runs.
  */
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { constants } from 'node:os'
-import { acquireLock, processStartTime, type Held } from './e2e-lock.js'
-
-/** What a shell reports for a process a signal ended: 128 plus the signal's number */
-const signalExit = (signal: string | null): number => 128 + ((signal !== null && (constants.signals as Record<string, number | undefined>)[signal]) || 1)
+import { acquireLock, signalExit, trackChild, type Held } from './e2e-lock.js'
 
 const [program, ...args] = process.argv.slice(2)
 if (program !== 'playwright' && program !== 'node') {
@@ -48,15 +48,17 @@ process.off('SIGTERM', onTerm)
 console.error('e2e lock: taken')
 
 const child = spawn(process.execPath, argv, { stdio: 'inherit' })
-// Named in the lock at once, before its start time is looked up (which can take a second): a runner killed in between
-// must not leave Playwright running with the lock free. The start time is filled in as soon as it is known.
-if (child.pid !== undefined) {
-  const pid = child.pid
-  held.setChild({ pid, started: null })
-  setImmediate(() => held.setChild({ pid, started: processStartTime(pid) }))
-}
+// Named in the lock at once, and its start time filled in as soon as it is known (on Windows that takes seconds): a runner
+// killed in between must not leave Playwright running with the lock free
+if (child.pid !== undefined) void trackChild(held, child.pid)
 // Ctrl-C reaches the child itself on a terminal; a signal sent to this process alone is passed on
-for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, () => child.kill(signal))
+let passedOn: 'SIGINT' | 'SIGTERM' | null = null
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(signal, () => {
+    passedOn ??= signal
+    child.kill(signal)
+  })
+}
 // A run that cannot be started gives the lock back before it fails
 child.on('error', (err) => {
   held.release()
@@ -65,5 +67,5 @@ child.on('error', (err) => {
 })
 child.on('close', (exitCode, signal) => {
   held.release()
-  process.exit(exitCode ?? signalExit(signal))
+  process.exit(exitCode === null || (exitCode === 0 && passedOn !== null) ? signalExit(signal ?? passedOn) : exitCode)
 })
