@@ -364,7 +364,7 @@ export const guardConfigs = [
       'guard/import-boundary': [
         'error',
         {
-          forbidden: ['^@cc/protocol$'],
+          forbidden: ['^@cc/protocol$', '(^|/)protocol/src/(?!client(\\.|$))'],
           why: "the UI's bundle takes the protocol through '@cc/protocol/client', which leaves out the schemas only the host reads; the whole of '@cc/protocol' puts them back (#1648)",
         },
       ],

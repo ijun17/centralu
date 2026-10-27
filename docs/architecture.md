@@ -57,7 +57,12 @@ events to core's reducer and the host's copy and compares what a reconnect hands
 leaves out the schemas only the host parses at run time (each method's params, the frames a client sends, the
 calls a machine makes to its hub), so they stay out of the UI's JS bundle; the types of them still come through. A schema
 the UI needs to parse (events, entities, each method's results through `parseRpcResult`) stays in the client entry. `guard/import-boundary` fails a
-bare `@cc/protocol` in ui, platform and core (tests excepted); the host imports the whole.
+bare `@cc/protocol` in ui, platform and core (tests excepted), and a relative path into `protocol/src/` other than `client`;
+dependency-cruiser resolves every specifier and fails any file of ui, platform, core or the apps that reaches `protocol/src/` other than
+`client.ts` (`screen-takes-protocol-through-client`), and shipped code that imports a `*.test-helpers` file
+(`no-test-helpers-in-shipped-code`). `tooling/styles.test.ts` also fails when the built bundle holds a marker of a host-only schema.
+A new host-only method stays out by having its params in `<concept>.params.ts`, which `client.ts` never reaches; its result schema
+is small and joins `<concept>.results.ts`. The host imports the whole protocol.
 
 **Which OS this is is asked in platform modules only** (`local/platform-checks`, `tooling/eslint-platform-checks.js`).
 In the packages, the apps and the npm launcher, reading `process.platform` (or `os.platform()`) and comparing

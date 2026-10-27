@@ -427,6 +427,13 @@ describe('guard/import-boundary, the UI protocol entry (#1648)', () => {
     expect(await lines(file, "export * from '@cc/protocol'", 'import-boundary')).toEqual([1])
     expect(await lines(file, "import type { A } from '@cc/protocol'", 'import-boundary')).toEqual([1])
   })
+  it('reports a relative path into the protocol package other than its client entry (#1648)', async () => {
+    const file = 'packages/ui/src/x.tsx'
+    for (const spec of ['../../../protocol/src/commands.js', '../../protocol/src/index.js', '../../protocol/src/commands/methods/apps.params.js']) {
+      expect(await lines(file, `export { RpcMethods } from '${spec}'`, 'import-boundary'), spec).toEqual([1])
+    }
+    await quiet(file, 'import-boundary', "export { A } from '../../protocol/src/client.js'", "export { A } from '../../protocol/src/commands.js'")
+  })
   it('lets the client entry in, and tests and the host import the whole protocol', async () => {
     await quiet('packages/ui/src/x.tsx', 'import-boundary', "import { a } from '@cc/protocol/client'", POSITIVE)
     expect(await lines('packages/ui/src/x.test.tsx', POSITIVE, 'import-boundary')).toEqual([])
