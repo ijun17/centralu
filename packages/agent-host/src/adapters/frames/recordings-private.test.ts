@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest'
  * since a path split across two chunks reads whole on the screen.
  */
 
-const ROOTS = [fileURLToPath(new URL('../acp/recordings/', import.meta.url))]
+const ROOTS = [fileURLToPath(new URL('../acp/recordings/', import.meta.url)), fileURLToPath(new URL('../agy/recordings/', import.meta.url))]
 
 const PRIVATE: readonly [string, RegExp][] = [
   ['a Windows home folder', /[A-Za-z]:(?:\\\\|\\|\/)+Users(?:\\\\|\\|\/)+(?!<)[^\\/\s"'`]+/i],
@@ -22,12 +22,17 @@ const PRIVATE: readonly [string, RegExp][] = [
   ['a secret in an environment entry', /\\?"name\\?":\\?"[A-Z_]*(?:TOKEN|SECRET|PASSWORD|KEY)[A-Z_]*\\?",\\?"value\\?":\\?"(?!<secret>)/],
 ]
 
+/**
+ * The words of the machine the test runs on. The user name is looked for only off CI: a recording is made and
+ * scrubbed on a person's machine, so that is where their name could leak, while a CI runner's account is a common
+ * word ("runner") that a model's own text may use (an Antigravity sub-agent named its role "Command Runner").
+ */
 function machineWords(): [string, RegExp][] {
   const words: [string, RegExp][] = []
   const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   try {
     const user = userInfo().username
-    if (user.length >= 3) words.push(['this machine’s user name', new RegExp(`\\b${escape(user)}\\b`, 'i')])
+    if (user.length >= 3 && !process.env.CI) words.push(['this machine’s user name', new RegExp(`\\b${escape(user)}\\b`, 'i')])
   } catch {
     // No user name to look for
   }
@@ -37,14 +42,20 @@ function machineWords(): [string, RegExp][] {
   return words
 }
 
-type Line = { dir?: string; msg?: { method?: string; params?: { update?: { sessionUpdate?: string; content?: { text?: unknown }; availableCommands?: { name?: unknown }[] } } } }
+type Line = {
+  dir?: string
+  msg?: { method?: string; params?: { update?: { sessionUpdate?: string; content?: { text?: unknown }; availableCommands?: { name?: unknown }[] } }; step_update?: { text_delta?: unknown } }
+}
 
 /** The recording's text as the screen would read it: every streamed chunk joined to the ones beside it */
 function joinedChunks(lines: readonly Line[]): string {
   return lines
     .map((l) => {
       const u = l.msg?.params?.update
-      return u && /_chunk$/.test(u.sessionUpdate ?? '') && typeof u.content?.text === 'string' ? u.content.text : '\n'
+      if (u && /_chunk$/.test(u.sessionUpdate ?? '') && typeof u.content?.text === 'string') return u.content.text
+      // Antigravity's stream (`adapters/agy/`): the answer's pieces
+      const piece = l.msg?.step_update?.text_delta
+      return typeof piece === 'string' ? piece : '\n'
     })
     .join('')
 }
