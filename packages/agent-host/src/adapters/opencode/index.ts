@@ -71,11 +71,11 @@ export function openCodeProfile(): AcpProfile {
     },
     installedVersion: version,
     async detect(): Promise<DetectResult> {
-      if (!findOpenCode()) return { tool: DESCRIPTOR.name, installed: false, loggedIn: false, detail: 'OpenCode not found (npm i -g opencode-ai)' }
+      if (!findOpenCode()) return { tool: DESCRIPTOR.name, installed: false, loggedIn: false, detail: 'OpenCode not found (npm i -g opencode-ai)', setup: { state: 'not_installed', install: 'terminal', signIn: 'none' } }
       const v = await version()
       // Its own free models need no account (measured), and a provider's key is the person's OpenCode settings: there is
       // no state in which a session cannot start for want of a login
-      return { tool: DESCRIPTOR.name, installed: true, loggedIn: true, detail: v ? `opencode ${v}` : 'opencode' }
+      return { tool: DESCRIPTOR.name, installed: true, loggedIn: true, detail: v ? `opencode ${v}` : 'opencode', setup: { state: 'ready', install: 'terminal', signIn: 'none' } }
     },
   }
 }

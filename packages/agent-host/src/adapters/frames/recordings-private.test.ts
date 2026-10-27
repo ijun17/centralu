@@ -10,7 +10,10 @@ import { describe, expect, it } from 'vitest'
  * since a path split across two chunks reads whole on the screen.
  */
 
-const ROOTS = [fileURLToPath(new URL('../acp/recordings/', import.meta.url))]
+const ROOTS = [
+  fileURLToPath(new URL('../acp/recordings/', import.meta.url)),
+  fileURLToPath(new URL('../antigravity/recordings/', import.meta.url)),
+]
 
 const PRIVATE: readonly [string, RegExp][] = [
   ['a Windows home folder', /[A-Za-z]:(?:\\\\|\\|\/)+Users(?:\\\\|\\|\/)+(?!<)[^\\/\s"'`]+/i],

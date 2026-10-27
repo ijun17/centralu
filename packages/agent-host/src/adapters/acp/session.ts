@@ -1,5 +1,9 @@
-import { isAbsolute, join } from 'node:path'
-import type { ApprovalDecision, ApprovalDetail, NormalizedEvent, PermissionPreset } from '@cc/protocol'
+import { realpath as realpathCallback } from 'node:fs'
+import { readFile, stat } from 'node:fs/promises'
+import { promisify } from 'node:util'
+import { isAbsolute, join, relative, sep } from 'node:path'
+import { z } from 'zod'
+import type { ApprovalDecision, ApprovalDetail, NormalizedEvent, PermissionPreset, QuestionAnswer } from '@cc/protocol'
 import { ORCHESTRATOR_MCP_NAME } from '../../apps/contract.js'
 import { rpcError } from '../../rpc-error.js'
 import { asObj } from '../../json-value.js'
@@ -13,8 +17,9 @@ import { insideFolder } from '../edit-grant.js'
 import { fileEditDetail, type FileChange } from '../file-changes.js'
 import { CardIds, PendingCards } from '../session-kit.js'
 import { UnmappedTypes } from '../unmapped.js'
-import { AcpConnection, AUTH_REQUIRED, METHOD_NOT_FOUND, NO_TIMEOUT_MS, RpcError, type RpcId } from './connection.js'
+import { AcpConnection, AUTH_REQUIRED, METHOD_NOT_FOUND, NO_TIMEOUT_MS, RESOURCE_NOT_FOUND, RpcError, type RpcId } from './connection.js'
 import { KNOWN_UPDATES } from './known-updates.js'
+import type { AcpToolShape } from './profile.js'
 import { addTokens, NO_TOKENS } from '../token-usage.js'
 import { AcpNormalizer, requestInput, tokenUsage } from './normalize.js'
 import {
@@ -50,13 +55,20 @@ export type AcpSessionDeps = {
   /** Which of Centralu's own tools a call is, or null (`AcpProfile.centraluToolOf`) */
   centraluToolOf?: (call: ToolCallFields) => string | null
   /**
-   * The tool's `/compact` leaves no protocol frame (OpenCode 1.19.4, measured), so the one boundary known is Centralu's own
-   * compact turn: ended `end_turn` with a context reading smaller than the one before it (§5.6, owner 2026-10-26)
+   * The tool's `/compact` compacts without the agent advertising it and leaves no protocol frame (OpenCode 1.19.4, measured), so
+   * the one boundary known is Centralu's own compact turn: ended `end_turn` with a context reading smaller than the one before
+   * it (§5.6, owner 2026-10-26). It is also what makes Centralu send that `/compact` at all (`AcpSession.compactCommand`)
    */
   infersCompaction?: boolean
+  /** Where this tool's ACP differs from the common shape (`AcpProfile.shape`) */
+  shape?: AcpToolShape
 }
 
-type Card = { callId: string; options: PermissionOption[]; answer(outcome: PermissionOutcome): void }
+/** `edit`: the asked call is an edit whose run may come as a new call (`AcpToolShape.editRunsAsNewCall`), with its files */
+type Card = { callId: string; options: PermissionOption[]; edit: string[] | null; answer(outcome: PermissionOutcome): void }
+
+/** A question the agent asked through a permission request (`AcpToolShape.isQuestion`): one option per answer */
+type QuestionCard = { callId: string; question: string; options: PermissionOption[]; answer(outcome: PermissionOutcome): void }
 
 /**
  * One prompt and what was asked of it. Each turn has its own: a Stop belongs to the turn it was pressed in (`core.stopAsked`),
@@ -103,6 +115,10 @@ export class AcpSession extends CoreSession<AcpWire> implements SessionHandle {
     return this.wire.respondApproval(requestId, decision, matcher)
   }
 
+  answerQuestion(requestId: string, answers: QuestionAnswer[]): boolean {
+    return this.wire.answerQuestion(requestId, answers)
+  }
+
   applyRules(matchers: readonly string[]): void {
     this.wire.rules.addAll(matchers)
   }
@@ -113,6 +129,16 @@ export class AcpSession extends CoreSession<AcpWire> implements SessionHandle {
 
   async listCommands(): Promise<{ name: string; description?: string; argumentHint?: string }[]> {
     return this.wire.commands
+  }
+
+  /**
+   * `/compact` when this agent compacts on it, else null: Centralu then neither compacts the session at a break nor takes
+   * `compact_self` (§5.6). A bare `/compact` sent to an agent without the command is an ordinary prompt to its model, which
+   * compacts nothing (Antigravity 1.4.3 advertises only plan, logout and usage; Cursor's model answered it with a summary).
+   * The focus line is not passed: no ACP agent measured takes one.
+   */
+  compactCommand(): string | null {
+    return this.wire.compacts() ? '/compact' : null
   }
 }
 
@@ -132,6 +158,10 @@ class AcpWire implements ToolWire {
   private readonly normalizer: AcpNormalizer
   private readonly unmapped: UnmappedTypes
   private readonly cards = new PendingCards<Card>()
+  private readonly questions = new PendingCards<QuestionCard>()
+  /** Edits allowed this turn whose run has not come yet, oldest first, and the new calls folded into them (`editRunsAsNewCall`) */
+  private readonly allowedEdits: { callId: string; paths: string[] }[] = []
+  private readonly folded = new Map<string, string>()
   private readonly cardIds = new CardIds()
   private turn: Turn | null = null
   /** While `session/load` is answered, every update is the replay of the conversation, not this turn (§4.3) */
@@ -148,6 +178,9 @@ class AcpWire implements ToolWire {
   private tokensSoFar = NO_TOKENS
   /** The turns' costs added up (null until one is known): the cost of the running reading */
   private costSoFar: number | null = null
+
+  /** The conversation `session/load` or `session/resume` is opening: its commands come during the replay (measured, Antigravity 1.4.3) */
+  private opening: string | null = null
 
   constructor(
     private readonly opts: CreateSessionOpts,
@@ -180,6 +213,7 @@ class AcpWire implements ToolWire {
         onExit: () => {},
       },
       this.label,
+      this.deps.shape?.stderrLine?.bind(this.deps.shape),
     )
     try {
       const init = InitializeResult.parse(
@@ -188,8 +222,13 @@ class AcpWire implements ToolWire {
           {
             protocolVersion: 1,
             clientInfo: { name: 'centralu', version: '1' },
-            // No fs and no terminal: the agent uses its own tools, whose approvals come as `session/request_permission`
-            clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false, session: { compaction: {} } },
+            // No terminal and no writes: the agent uses its own tools, whose approvals come as `session/request_permission`.
+            // Reads only for a tool whose own viewer is switched off (`clientReads`), held to the session's folder
+            clientCapabilities: {
+              fs: { readTextFile: this.deps.shape?.clientReads !== undefined, writeTextFile: false },
+              terminal: false,
+              session: { compaction: {} },
+            },
           },
           60_000,
         ),
@@ -197,16 +236,19 @@ class AcpWire implements ToolWire {
       const version = init.agentInfo?.version ?? (await this.deps.version())
       if (version) this.emit({ type: 'agent_version', sessionId: this.sessionId, version })
       this.canClose = init.agentCapabilities?.sessionCapabilities?.close !== undefined
-      const base = { cwd: this.opts.cwd, mcpServers: this.mcpServers() }
+      const meta = this.deps.shape?.sessionMeta?.()
+      const base = { cwd: this.opts.cwd, mcpServers: this.mcpServers(), ...(meta ? { _meta: meta } : {}) }
       if (resume) {
         const caps = init.agentCapabilities
         const method = caps?.loadSession ? 'session/load' : caps?.sessionCapabilities?.resume !== undefined ? 'session/resume' : null
         if (!method) throw rpcError(`${this.label} cannot reopen a conversation`, 'session_not_found')
         this.replaying = method === 'session/load'
+        this.opening = resume.externalId
         try {
           OpenedSession.parse((await this.conn.request(method, { ...base, sessionId: resume.externalId }, 150_000)) ?? {})
         } finally {
           this.replaying = false
+          this.opening = null
         }
         this.conversation = resume.externalId
         this.costTotal = this.opts.runningCost?.last ?? null
@@ -225,6 +267,8 @@ class AcpWire implements ToolWire {
 
   private openError(err: unknown): Error {
     if (err instanceof RpcError && err.code === AUTH_REQUIRED) {
+      const signedOut = this.deps.shape?.signedOut?.(this.label)
+      if (signedOut) return signedOut
       return rpcError(`${this.label} is not logged in. Log in from a terminal, then try again.`, 'not_logged_in')
     }
     if (err instanceof RpcError) return rpcError(`${this.label}: ${err.message}`, 'internal')
@@ -318,6 +362,8 @@ class AcpWire implements ToolWire {
   turnOver(why?: string): void {
     for (const e of why === undefined ? this.normalizer.endTurn() : this.normalizer.endTurn(why)) this.emit(e)
     this.stopTreeClock()
+    this.allowedEdits.length = 0
+    this.folded.clear()
     this.turn = null
   }
 
@@ -356,6 +402,11 @@ class AcpWire implements ToolWire {
     return before === null || turn.costTotal < before ? null : turn.costTotal - before
   }
 
+  /** Whether the agent compacts on `/compact`: it advertises the command, or the profile measured that it does without saying so */
+  compacts(): boolean {
+    return this.deps.infersCompaction === true || this.commands.some((c) => c.name.replace(/^\//, '') === 'compact')
+  }
+
   /** Centralu's own compact turn, with no protocol frame for it, whose reading went down (§5.6) */
   private inferredCompaction(turn: Turn): boolean {
     if (!this.deps.infersCompaction || !turn.input.compact || turn.compacted) return false
@@ -373,7 +424,13 @@ class AcpWire implements ToolWire {
       return
     }
     const read = readUpdate(params)
-    if (!read || read.sessionId !== this.conversation || this.replaying) return
+    if (!read) return
+    // The commands are the process's, not the conversation's history: the ones said during a load's replay are kept
+    if ('update' in read && read.update.sessionUpdate === 'available_commands_update' && (read.sessionId === this.conversation || read.sessionId === this.opening)) {
+      this.commands = read.update.availableCommands.map((c) => ({ name: c.name, ...(c.description ? { description: c.description } : {}), ...(c.input?.hint ? { argumentHint: c.input.hint } : {}) }))
+      return
+    }
+    if (read.sessionId !== this.conversation || this.replaying) return
     const turn = this.turn
     this.resendLostCancel()
     if ('other' in read) {
@@ -382,9 +439,6 @@ class AcpWire implements ToolWire {
     }
     const u = read.update
     switch (u.sessionUpdate) {
-      case 'available_commands_update':
-        this.commands = u.availableCommands.map((c) => ({ name: c.name, ...(c.description ? { description: c.description } : {}), ...(c.input?.hint ? { argumentHint: c.input.hint } : {}) }))
-        return
       case 'usage_update':
         // Measured: a cancelled turn reads `used: 0` just before it ends, and the next turn reads the real size again
         if (u.used > 0 && u.size > 0) {
@@ -394,16 +448,24 @@ class AcpWire implements ToolWire {
         }
         if (turn && u.cost?.currency === 'USD') turn.costTotal = u.cost.amount
         return
+      case 'tool_call':
+      case 'tool_call_update':
+        this.emitAll(this.normalizer.update({ ...this.foldEdit(this.readCall(u), u.sessionUpdate), sessionUpdate: u.sessionUpdate }), turn)
+        return
       default:
-        for (const e of this.normalizer.update(u)) {
-          this.watchCommands(e)
-          if (e.type !== 'compaction') {
-            this.emit(e)
-            continue
-          }
-          if (turn) turn.compacted = true
-          this.emit({ ...e, trigger: turn?.input.compact ? 'manual' : 'auto' })
-        }
+        this.emitAll(this.normalizer.update(u), turn)
+    }
+  }
+
+  private emitAll(events: readonly NormalizedEvent[], turn: Turn | null): void {
+    for (const e of events) {
+      this.watchCommands(e)
+      if (e.type !== 'compaction') {
+        this.emit(e)
+        continue
+      }
+      if (turn) turn.compacted = true
+      this.emit({ ...e, trigger: turn?.input.compact ? 'manual' : 'auto' })
     }
   }
 
@@ -430,26 +492,106 @@ class AcpWire implements ToolWire {
   }
 
   private async onRequest(_id: RpcId, method: string, params: unknown): Promise<unknown> {
+    const reads = this.deps.shape?.clientReads
+    if (method === 'fs/read_text_file' && reads) return readTextFileFor(this.opts.cwd, reads.refused(), params)
     if (method !== 'session/request_permission') {
       this.unmapped.note(method)
       throw new RpcError(METHOD_NOT_FOUND, `Method not found: ${method}`)
     }
-    const req = RequestPermission.parse(params)
+    const asked = RequestPermission.parse(params)
+    const req = { ...asked, toolCall: this.readCall(asked.toolCall) }
     const turn = this.turn
     this.resendLostCancel()
     if (!this.askable(turn)) return this.refused(req.toolCall.toolCallId)
+    // A question is the person's to answer under every preset: never an approval, never answered without them
+    if (this.deps.shape?.isQuestion?.(req)) return this.ask(req)
+    if (await this.deps.shape?.neverAllowed?.(req, this.opts.cwd)) {
+      // Declined as the person's "no" would be, so the agent carries on with the turn instead of taking it as stopped
+      const no = pick(req.options, 'reject_once')
+      this.normalizer.refuse(req.toolCall.toolCallId)
+      return no ? selected(no) : CANCELLED
+    }
     const call = this.normalizer.call(req.toolCall, true)
     const detail = detailOf(call, this.opts.cwd)
+    const edit = this.deps.shape?.editRunsAsNewCall && call.kind === 'edit' ? editPaths(call) : null
     const once = pick(req.options, 'allow_once')
     const granted = once !== undefined && (await this.grantedWithoutCard(detail, call))
     // Stop, or the turn's end, may have come while the folder was being checked
     if (!this.askable(turn)) return this.refused(req.toolCall.toolCallId)
-    if (granted && once) return selected(once)
+    if (granted && once) {
+      this.allowedEdit(call.toolCallId, edit)
+      return selected(once)
+    }
     const requestId = this.cardIds.next('acp-req')
     return new Promise<PermissionOutcome>((resolve) => {
-      this.cards.set(requestId, { callId: req.toolCall.toolCallId, options: req.options, answer: resolve })
+      this.cards.set(requestId, { callId: req.toolCall.toolCallId, options: req.options, edit, answer: resolve })
       this.emit({ type: 'approval_request', sessionId: this.sessionId, requestId, detail })
     })
+  }
+
+  /** The tool's own field names read into the core's (`AcpToolShape.readCall`) */
+  private readCall<T extends ToolCallFields>(call: T): T {
+    const shape = this.deps.shape
+    if (!shape?.readCall) return call
+    return { ...call, ...shape.readCall(call), toolCallId: call.toolCallId }
+  }
+
+  /** An edit was allowed: its run, if it comes as a new call, is folded into this one (`editRunsAsNewCall`) */
+  private allowedEdit(callId: string, paths: string[] | null): void {
+    if (paths?.length) this.allowedEdits.push({ callId, paths })
+  }
+
+  /**
+   * A new edit call whose file is one an allowed edit names is that edit's run (Antigravity 1.4.3: `<session>:<n>`,
+   * "Running edit_file", after the asked call's `allow`): it is said under the asked call's id, so the card the person
+   * answered ends as the edit did. The asked call's own late `failed` ("approved but never executed") then finds it ended
+   */
+  private foldEdit(u: ToolCallFields, kind: 'tool_call' | 'tool_call_update'): ToolCallFields {
+    const into = this.folded.get(u.toolCallId)
+    if (into) return { ...u, toolCallId: into }
+    // An allowed edit that ended with no run of its own (the agent said it failed) waits for none: a later edit of the
+    // same file is folded into its own asked call, not into this ended one
+    if (u.status === 'completed' || u.status === 'failed') {
+      const at = this.allowedEdits.findIndex((a) => a.callId === u.toolCallId)
+      if (at >= 0) this.allowedEdits.splice(at, 1)
+    }
+    // A run is said running or ended; a `pending` call is another edit about to be asked, never a run
+    if (kind !== 'tool_call' || u.kind !== 'edit' || u.status === 'pending' || this.allowedEdits.length === 0) return u
+    const paths = editPaths(u)
+    const at = this.allowedEdits.findIndex((a) => a.paths.some((p) => paths.includes(p)))
+    const allowed = at < 0 ? undefined : this.allowedEdits.splice(at, 1)[0]
+    if (!allowed) return u
+    this.folded.set(u.toolCallId, allowed.callId)
+    return { ...u, toolCallId: allowed.callId }
+  }
+
+  /**
+   * A question the agent asked as a permission request (Antigravity's `interaction_*`, from its binary: one option per
+   * answer, `reject_once` only for a "deny"): Centralu's question card, with the options' names as the answers. The answer
+   * picks the option of that name; anything else is answered `cancelled`, which the agent takes as no answer
+   */
+  private ask(req: { toolCall: ToolCallFields; options: PermissionOption[] }): Promise<PermissionOutcome> {
+    const requestId = this.cardIds.next('acp-question')
+    const text = firstContentText(req.toolCall) || req.toolCall.title || `${this.label} asks`
+    return new Promise<PermissionOutcome>((resolve) => {
+      this.questions.set(requestId, { callId: req.toolCall.toolCallId, question: text, options: req.options, answer: resolve })
+      this.emit({
+        type: 'question_request',
+        sessionId: this.sessionId,
+        requestId,
+        questions: [{ question: text, header: '', multiSelect: false, options: req.options.map((o) => ({ label: optionLabel(o), description: '' })) }],
+      })
+    })
+  }
+
+  answerQuestion(requestId: string, answers: QuestionAnswer[]): boolean {
+    const card = this.questions.take(requestId)
+    if (!card) return false
+    const chosen = answers.find((a) => a.question === card.question)?.answers[0] ?? answers[0]?.answers[0]
+    const option = card.options.find((o) => optionLabel(o) === chosen)
+    card.answer(option ? selected(option) : CANCELLED)
+    this.emit({ type: 'question_resolved', sessionId: this.sessionId, requestId })
+    return true
   }
 
   /** `auto`, Centralu's own tool, an `edits` grant inside the folder, or a rule the person saved: answered `allow_once` without a card */
@@ -471,6 +613,7 @@ class AcpWire implements ToolWire {
     if (decision === 'always' && matcher) this.rules.add(matcher)
     const option = pick(card.options, decision === 'deny' ? 'reject_once' : 'allow_once')
     if (decision === 'deny' || !option) this.normalizer.refuse(card.callId)
+    else this.allowedEdit(card.callId, card.edit)
     card.answer(option ? selected(option) : CANCELLED)
     this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId, decision })
     return true
@@ -481,6 +624,10 @@ class AcpWire implements ToolWire {
       this.normalizer.refuse(card.callId)
       card.answer(CANCELLED)
       this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId, decision: 'deny' })
+    })
+    this.questions.release((requestId, card) => {
+      card.answer(CANCELLED)
+      this.emit({ type: 'question_resolved', sessionId: this.sessionId, requestId })
     })
   }
 
@@ -495,6 +642,14 @@ class AcpWire implements ToolWire {
   }
 }
 
+
+const optionLabel = (o: PermissionOption): string => o.name || o.optionId
+
+/** The text a call's first content block says (a question's wording, when the agent puts it there) */
+function firstContentText(call: ToolCallFields): string {
+  for (const c of call.content ?? []) if (c.type === 'content' && c.content?.type === 'text' && c.content.text) return c.content.text
+  return ''
+}
 
 function pick(options: readonly PermissionOption[], kind: string): PermissionOption | undefined {
   return options.find((o) => o.kind === kind)
@@ -525,3 +680,57 @@ export function detailOf(call: ToolCallFields, cwd: string): ApprovalDetail {
   return { kind: 'other', raw: JSON.stringify({ title: call.title, kind: call.kind, input: call.rawInput }).slice(0, 2000) }
 }
 
+/**
+ * `fs/read_text_file`, answered by the client (#59, docs/plans/antigravity-adapter.md §5.3): offered to a tool whose own file
+ * viewer reads its home without asking (Antigravity 1.4.3 read its token file in the spike, §6 there). The viewer is switched
+ * off and reads come here instead, where they are held to one rule: **inside the session's folder, never under a refused
+ * folder** (the agent's home, which holds its token). Both sides are compared as real paths, so a link inside the folder that
+ * points out of it, or into the agent's home, is refused like the path it points to.
+ */
+
+export const ReadTextFileParams = z.looseObject({
+  sessionId: z.string(),
+  path: z.string(),
+  /** 1-based, as ACP's schema says */
+  line: z.number().int().positive().nullish(),
+  limit: z.number().int().positive().nullish(),
+})
+export type ReadTextFileParams = z.infer<typeof ReadTextFileParams>
+
+/** The OS's own real path (Windows: long names and the disk's case), so a short name cannot slip past a refused folder */
+const realPath = promisify(realpathCallback.native)
+
+/** A file larger than this is not read whole into the agent's context (a log, a build output) */
+export const MAX_READ_BYTES = 8 * 1024 * 1024
+
+/** Who refuses a read, in the words the agent passes on to the model */
+const REFUSED = 'Centralu reads files only inside the project folder for this agent'
+
+export async function readTextFileFor(cwd: string, refused: readonly string[], params: unknown): Promise<{ content: string }> {
+  const p = ReadTextFileParams.safeParse(params)
+  if (!p.success) throw new RpcError(-32602, 'fs/read_text_file needs a path')
+  const { path, line, limit } = p.data
+  if (!isAbsolute(path)) throw new RpcError(-32602, 'fs/read_text_file needs an absolute path')
+  const real = await realPath(path).catch(() => null)
+  if (real === null) throw new RpcError(RESOURCE_NOT_FOUND, `No such file: ${path}`)
+  const root = await realPath(cwd).catch(() => null)
+  if (root === null || !inside(root, real)) throw new RpcError(RESOURCE_NOT_FOUND, `${REFUSED}: ${path} is outside it`)
+  for (const folder of refused) {
+    const no = await realPath(folder).catch(() => folder)
+    if (inside(no, real) || real === no) throw new RpcError(RESOURCE_NOT_FOUND, `${REFUSED}: ${path} is the agent's own data`)
+  }
+  const info = await stat(real)
+  if (!info.isFile()) throw new RpcError(RESOURCE_NOT_FOUND, `Not a file: ${path}`)
+  if (info.size > MAX_READ_BYTES) throw new RpcError(-32603, `${path} is ${info.size} bytes; files over ${MAX_READ_BYTES} are not read whole`)
+  const text = await readFile(real, 'utf8')
+  if (!line && !limit) return { content: text }
+  const lines = text.split('\n')
+  const from = (line ?? 1) - 1
+  return { content: lines.slice(from, limit ? from + limit : undefined).join('\n') }
+}
+
+/** Whether `target` is `folder` itself or under it (both real paths) */
+function inside(folder: string, target: string): boolean {
+  const rel = relative(folder, target)
+  return rel === '' || (!isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`))
+}

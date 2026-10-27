@@ -2,7 +2,8 @@
 
 Proposed 2026-10-27. Part of #59 and #1599. Owner order (#59, 2026-10-26): the OS seam, then one session core that the
 Claude, Codex and ACP adapters share, then Antigravity (`agy`) as the first new tool on it
-(`antigravity-adapter.md` on branch `feat/agy-adapter`). A design to agree on before code: what
+(`antigravity-adapter.md`). Since 2026-10-27 Antigravity runs as Google's ACP agent on the ACP wire instead
+([antigravity-acp.md](antigravity-acp.md)); §8 and the `agy` parts of §9 are kept as the reasoning of the time. A design to agree on before code: what
 the three adapters do today, side by side (§1); where one concept is computed twice and which copy is right (§2); what
 the core owns and what stays per tool (§3); the seam (§4); how the core reaches processes through `Os` (§5); how
 recorded frames test it (§6); the pull requests (§7); Antigravity on it (§8). A record like the rest of `plans/`, so not
@@ -548,7 +549,8 @@ wire, may still need a Stop to deny every open request first (`GateRequests`).
 3. **`endsWithHost` for Claude and Codex** (§2.6): the stronger guarantee, at the cost of an `sh` wrapper per CLI on
    macOS and Linux and a real-OS test each.
 4. **The context guard** (§2.2): the upper bound for every tool, and "0 means no reading" per tool?
-5. **`agy` on Windows**: its interrupt is SIGINT, which `Os` cannot send on Windows (`kill` ends the child). Raise an
+5. **`agy` on Windows** (closed 2026-10-27: Antigravity runs as Google's ACP agent, whose Stop is `session/cancel` on
+   every OS, [antigravity-acp.md](antigravity-acp.md)): its interrupt is SIGINT, which `Os` cannot send on Windows (`kill` ends the child). Raise an
    `Os` addition (a console interrupt) when `agy`'s Windows pull request comes, or treat a Stop on Windows as ending the
    process (it ends it anyway, its §1.5)?
 6. **Recording Claude and Codex** (PR 2) spends real turns on a logged-in machine: which machine, and is the ACP

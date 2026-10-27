@@ -65,6 +65,11 @@ export type ToolStart = {
   source?: ProcessSource
   /** This host's own start, `spawnLocalAgent` unless a test or an adapter passes another */
   spawn?: (spec: AgentSpawnSpec) => AgentProcess
+  /**
+   * A stderr line as it may be read back (`stderrTail`, which a crash message carries to the screen): changed, or null to
+   * leave it out. For a tool whose log names the person's account or a sign-in address (Antigravity, #59)
+   */
+  stderrLine?: (line: string) => string | null
 }
 
 /**
@@ -75,7 +80,30 @@ export type ToolStart = {
 export function startToolProcess(spec: AgentSpawnSpec, how: ToolStart = {}): AgentProcess {
   const plain: AgentSpawnSpec = { command: spec.command, args: spec.args, env: spec.env, ...(spec.cwd === undefined ? {} : { cwd: spec.cwd }) }
   const proc = how.source ? how.source.spawn(plain) : (how.spawn ?? spawnLocalAgent)({ ...plain, endsWithHost: true })
+  if (how.stderrLine) redactStderrTail(proc, how.stderrLine)
   return how.sessionId ? tapSessionProcess(proc, how.sessionId) : proc
+}
+
+/** What `stderrTail` reads, line by line through `line` (`ToolStart.stderrLine`); the process is the one given */
+export function redactStderrTail(proc: AgentProcess, line: (line: string) => string | null): void {
+  const tail = proc.stderrTail?.bind(proc)
+  if (!tail) return
+  Object.defineProperty(proc, 'stderrTail', {
+    configurable: true,
+    writable: true,
+    value: (): string => redactLines(tail(), line),
+  })
+}
+
+/** `text` with each line passed through `line`; a dropped line leaves no gap */
+export function redactLines(text: string, line: (line: string) => string | null): string {
+  return text
+    .split('\n')
+    .flatMap((l) => {
+      const kept = line(l)
+      return kept === null ? [] : [kept]
+    })
+    .join('\n')
 }
 
 /** A process a previous host left running, taken over as it is (the keeper's `adopt`): tapped from the adoption on */
@@ -84,7 +112,16 @@ export function adoptToolProcess(proc: AgentProcess, sessionId: string | undefin
 }
 
 /** The host log's line for what a tool writes to stderr, cut at 500 characters (the tail for messages is `stderrTail`) */
-export function logToolStderr(proc: AgentProcess, label: string): void {
+export function logToolStderr(proc: AgentProcess, label: string, line?: (line: string) => string | null): void {
+  if (line) {
+    // Line by line, so a line split across two chunks is judged whole (an address must not reach the log in halves)
+    const lines = lineSplitter((l) => {
+      const kept = line(l)?.trim()
+      if (kept) console.error(`[${label}]`, kept.slice(0, 500))
+    })
+    proc.stderr?.on('data', (d: Buffer | string) => lines.push(d))
+    return
+  }
   proc.stderr?.on('data', (d) => {
     const s = String(d).trim()
     if (s) console.error(`[${label}]`, s.slice(0, 500))

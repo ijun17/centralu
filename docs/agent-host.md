@@ -1608,7 +1608,10 @@ the params with the method's schema and reads the answer with its result schema,
   long wait and a compaction in the middle of work breaks the flow. Both send the tool's own command as a turn of its own (`SessionEvents.sendCompact`:
   Claude `/compact [focus]`, Codex's `thread/compact/start` through its slash handling, which takes the bare command, so a focus line
   reaches Claude only), with no user row, and the conversation gets a line from Centralu when the tool reports it done:
-  "Compacted by Centralu (reason)".
+  "Compacted by Centralu (reason)". **Only a tool that has the command:** the session's own `SessionHandle.compactCommand` decides first
+  (ACP: `/compact` when the agent advertises `compact` or its profile measured `infersCompaction`, else null, docs/plans/acp-adapter.md §5.6),
+  then the adapter's. A null command means the session is never compacted by Centralu, and `compact_self` answers the agent that it cannot
+  (Antigravity, which advertises only plan, logout and usage, where a bare `/compact` would only be a prompt to its model).
   - **`compact_self`**, a tool of an ordinary session and the orchestrator (loaded, 453 characters; docs/tool-cost.md §15): asks for a compaction
     **after the current turn ends**, never in the middle of one, with an optional `focus` line (one line, 300 characters). Its description says when:
     work is finished and reported; before waiting more than a few minutes on a child, CI or the person; switching to an unrelated task.
@@ -2090,6 +2093,14 @@ sets a temporary `CC_DATA_DIR`, and never starts a host or uses `~/.centralu`.
    (`adapters/contract/surface.ts`, #270) too: how to read what the tool offers without a turn,
    what the adapter blocks, drops or works around (each with its measurement), and a recorded
    baseline. The weekly drift run then watches the new tool in the other direction as well.
+   An ACP tool is a profile on `adapters/acp/`; where its ACP differs from the common shape (its field names, a
+   question sent as a permission request, a permitted call that runs under another id, client reads, `_meta` on the
+   session's start, a sign-in of its own, a log line that must not reach host.log), it fills `AcpProfile.shape`
+   (`AcpToolShape`) rather than branching the core ([plans/antigravity-acp.md](plans/antigravity-acp.md) §2).
+   A tool Centralu installs or signs in itself carries `AgentAdapter.setup` (`ToolSetupControl`): the host answers
+   `agents.installTool` and `agents.signIn` through it and pushes its changes as `tool_setup` events. Every tool
+   reports `DetectResult.setup` or gets one from its two booleans, so the screens read one shape for all
+   ([plans/antigravity-acp.md](plans/antigravity-acp.md) §8).
 5. Done. **ui, core and platform are unchanged**, and protocol changes only by the two
    entries in step 2. (If more was needed, that is not the adapter's fault but the protocol
    lacking a concept — consider extending the protocol first)

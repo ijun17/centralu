@@ -259,8 +259,6 @@ packages/agent-host/src/apps/external/stream-transport.ts @typescript-eslint/no-
 packages/agent-host/src/apps/external/versions.test.ts @typescript-eslint/no-unnecessary-type-assertion 1
 packages/agent-host/src/apps/external/versions.ts @typescript-eslint/no-unsafe-type-assertion 2
 packages/agent-host/src/apps/external/visibility.ts @typescript-eslint/no-unsafe-type-assertion 1
-packages/agent-host/src/apps/external/zip.ts @typescript-eslint/no-non-null-assertion 2
-packages/agent-host/src/apps/external/zip.ts @typescript-eslint/no-unsafe-type-assertion 1
 packages/agent-host/src/builder-requests.ts @typescript-eslint/no-unsafe-type-assertion 2
 packages/agent-host/src/cli-version.ts @typescript-eslint/no-unsafe-type-assertion 1
 packages/agent-host/src/dev-services/store-subagent-trash.test.ts @typescript-eslint/no-unnecessary-type-assertion 1

@@ -146,6 +146,11 @@ with `danger-full-access` (no sandbox) and `never` approval**, including a child
 matches Claude's `auto` bypass permissions. Commands have the person's OS access, including network and
 files outside the project. `safe` uses workspace-write with `untrusted` approval. `normal` follows the
 person's configured approval policy and sandbox mode, including a personal full-access mode.
+**Under `auto`, Antigravity's shell commands can read its account token** (the Google sign-in Centralu keeps in
+`<data>/tools/antigravity/gemini-home/`): its file viewers are off, Centralu refuses reads of that folder, and it
+refuses every edit or read request that names a file there under every preset (only the conversation's own plan folder
+is let through), but a command's words are not read, and a command runs unasked under `auto` as it does for every tool,
+so it exposes that account, not only the project ([plans/antigravity-acp.md](plans/antigravity-acp.md) §4.2).
 
 In the Codex adapter, every linked-worktree session still adds its repository's canonical git common
 directory to workspace-write's writable roots on start and resume (#585), retaining existing extra roots.
@@ -1229,6 +1234,51 @@ The folder's own mode is what protects the rest: a file written later with the d
 during a swap, an app's data, SQLite) is still behind a folder only its owner can enter, and an older build never
 widens the folder again. The host's `umask` is not changed: it is every agent's and every terminal's, and the files
 they write in the person's projects keep the person's own modes.
+
+### Antigravity's agent and its token (#59)
+
+Centralu installs Google's Antigravity agent itself and keeps all of its state under the data folder
+(`tools/antigravity/`, [plans/antigravity-acp.md](plans/antigravity-acp.md) §3, §4), so it sits behind the folder's
+`0700`. The rules that hold it:
+
+- **Only the pinned build runs.** `agents.installTool` downloads the one archive this Centralu pins and refuses it unless
+  its sha256 is the pinned one, before anything is unpacked; only the files the release names, as plain files, are
+  written, and the folder is put in place by one rename. The method `asks` for the limited credential: it brings in a
+  program that later runs.
+- **The agent's home is Centralu's.** Every process starts with `GEMINI_HOME` there, never the person's `~/.gemini`, so
+  none of their global MCP servers, hooks or skills load into a Centralu session, and Centralu never reads the CLI's
+  sign-in. The agent keeps the person's `HOME`, so its commands see their git, ssh and npm settings; one thing escapes
+  `GEMINI_HOME` because of it: Google's harness extracts its screencast encoder (`webm_encoder`) into
+  `$HOME/.gemini/antigravity/bin/` at the first prompt. Nothing else under `~/.gemini` was read or written in the
+  measured runs, and development and review runs use a temporary `HOME`. The owner accepted this
+  ([#59](https://github.com/ijun17/centralu/issues/59#issuecomment-6446873429);
+  [plans/antigravity-acp.md](plans/antigravity-acp.md) §4.1).
+- **The token is a file the agent's own tools do not read.** The file backend is forced (no Keychain item, no OS
+  dialog in Centralu's name). The agent's built-in viewer read that file without asking in the spike, so its content
+  readers are switched off for every session and reads come to Centralu (`fs/read_text_file`), which answers inside the
+  session's folder only, by real path, and never under `tools/antigravity/`. A permission request that may reach
+  `tools/antigravity/` is refused under every preset and every saved rule, Auto included: the agent's edit tools
+  reached the token's folder unasked under Auto before (re-review). The guard fails closed. It reads every string of
+  the request (object keys and JSON inside strings too) as written, unquoted, with environment variables (`$VAR`, `%VAR%`, PowerShell's `$env:VAR`) and brace
+  alternatives filled in, as an absolute, `~`, `file:`, drive-relative or session-relative path and, for a glob, by
+  its fixed prefix. It judges each as written and as it resolves through links and junctions, with case folded. A path
+  inside the folder, or the folder or any parent of it (the data folder, `tools/`, the home folder, a drive), is
+  refused; on Windows so is a network path on the folder's own volume, or one whose volume cannot be read, and a WSL
+  share's `mnt<letter>` path is judged as that drive, and so is the same path reached from a session folder on a share; a distro's root and its
+  `mnt` count as parents of every drive (a distro with another mount point is not known). Every line
+  and word of every string, a shell command's too, is also read by its text for a path inside the folder. A request it
+  cannot read whole (deeper than 32 levels, more than 1024 strings) is refused unread (so a whole-file write of more than 1024 strings, or one line with seven or more `{a,b}` groups, is
+  declined). Only a file in the
+  conversation's own plan folder (`gemini-home/antigravity-acp/brain/<session id>/`, where `/plan` writes) that has no
+  second name (a hardlink to the token would) is let through. What this declines that it need not, and the full list, are in
+  [plans/antigravity-acp.md](plans/antigravity-acp.md) §4.2. What Auto still reaches: a shell command that reaches
+  the token without naming its path (a variable, `cd` then a relative name); it asks under every preset but Auto.
+  Centralu itself never opens the token file; it looks for its presence.
+- **The sign-in address stays out of logs and events.** It reaches the host through a private folder (`0700`) and the
+  agent's stderr, is opened once and only as an `https` Google address, and no `tool_setup` event carries it. Lines of
+  the agent's stderr that hold an address, an email or a token's name never reach `host.log` or a crash message.
+- **The agent never decides alone.** It stays in its `default` mode, where it asks; `allow_always` is never sent, so no
+  rule of its own outlives Centralu's preset; a question it asks is the person's to answer under every preset.
 
 ## Local transport
 
