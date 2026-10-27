@@ -113,6 +113,9 @@ export type ToolLaunch = (resume: { externalId: string } | null) => Promise<Agen
 export class SessionProcess {
   private proc: AgentProcess | null = null
   private id: string | null
+  private closed = false
+  /** Starts and stops run one at a time, in the order asked: a Stop asked while a start awaits the launch stops what it starts */
+  private chain: Promise<unknown> = Promise.resolve()
   readonly gates = new GateRequests()
 
   constructor(
@@ -124,9 +127,9 @@ export class SessionProcess {
     this.id = resumeExternalId
   }
 
-  /** The running process, or null before the first start and after a stop */
+  /** The running process: null before the first start, after a stop, and once it has ended on its own */
   get current(): AgentProcess | null {
-    return this.proc
+    return this.proc && !ended(this.proc) ? this.proc : null
   }
 
   /** The conversation's id: the one resumed, or the one the tool said last */
@@ -134,24 +137,26 @@ export class SessionProcess {
     return this.id
   }
 
-  /** The tool said its conversation's id, after its process started: every later launch goes on with it */
-  noteExternalId(id: string): void {
+  /**
+   * The tool said its conversation's id, after its process started: every later launch goes on with it. `from`: the process
+   * that said it, so a late line from a process already replaced does not change the id the current one goes on with
+   */
+  noteExternalId(id: string, from?: AgentProcess): void {
+    if (from && from !== this.proc) return
     this.id = id
   }
 
-  /** Starts a process for the conversation (a new one while its id is unknown). The one before must have been stopped */
-  async start(): Promise<AgentProcess> {
-    if (this.proc && !ended(this.proc)) throw new Error(`${this.label} is already running`)
-    const spec = await this.launch(this.id === null ? null : { externalId: this.id })
-    if (!spec) throw rpcError(`${this.label} is not installed.`, 'tool_not_installed')
-    this.proc = startToolProcess(spec, this.how)
-    return this.proc
+  /** Starts a process for the conversation (a new one while its id is unknown), unless one runs */
+  start(): Promise<AgentProcess> {
+    return this.serial(() => this.startNow())
   }
 
   /** Ends the process (`stop`) and starts the next one on the same conversation: after a Stop, or a change of model or effort */
-  async relaunch(): Promise<AgentProcess> {
-    await this.stop('The session is restarting.')
-    return this.start()
+  relaunch(): Promise<AgentProcess> {
+    return this.serial(async () => {
+      await this.stopNow('The session is restarting.')
+      return this.startNow()
+    })
   }
 
   /**
@@ -160,11 +165,42 @@ export class SessionProcess {
    */
   interrupt(signal: NodeJS.Signals = 'SIGINT'): boolean {
     this.gates.denyAll('The turn was stopped.')
-    return this.proc?.kill(signal) ?? false
+    return this.current?.kill(signal) ?? false
   }
 
-  /** Denies every open gate request, then stops the process (stdin's end, the bound, the tree) */
-  async stop(reason = 'The session is closing.'): Promise<void> {
+  /** Denies every open gate request, then stops the process (stdin's end, the bound, the tree); a later start starts another */
+  stop(reason = 'The turn was stopped.'): Promise<void> {
+    this.gates.denyAll(reason)
+    return this.serial(() => this.stopNow(reason))
+  }
+
+  /** The session's end: what is open and what asks later is denied, the process is stopped, and nothing starts again */
+  close(): Promise<void> {
+    this.closed = true
+    this.gates.close('The session is closing.')
+    return this.serial(() => this.stopNow('The session is closing.'))
+  }
+
+  private serial<T>(step: () => Promise<T>): Promise<T> {
+    const next = this.chain.then(step, step)
+    this.chain = next.catch(() => {})
+    return next
+  }
+
+  private async startNow(): Promise<AgentProcess> {
+    if (this.closed) throw new Error(`${this.label}'s session is closed`)
+    if (this.current) throw new Error(`${this.label} is already running`)
+    const spec = await this.launch(this.id === null ? null : { externalId: this.id })
+    if (!spec) throw rpcError(`${this.label} is not installed.`, 'tool_not_installed')
+    // Closed while the launch was asked for: nothing is started that no one would stop
+    if (this.closed) throw new Error(`${this.label}'s session is closed`)
+    // What the process before left asking has no process to answer to
+    this.gates.denyAll('The process was replaced.')
+    this.proc = startToolProcess(spec, this.how)
+    return this.proc
+  }
+
+  private async stopNow(reason: string): Promise<void> {
     this.gates.denyAll(reason)
     const proc = this.proc
     this.proc = null

@@ -250,9 +250,13 @@ export class LocalAgentProcess extends EventEmitter implements AgentProcess {
  * `exec` fails with exit 127 instead, which read as a crash. A name is looked for on the spec's PATH; a path, from `cwd`.
  */
 function shellFinds(spec: AgentSpawnSpec): boolean {
+  // Only where `sh` really runs: a test that names another platform on this host reads no POSIX PATH here
+  if (!hasProcessGroups()) return true
   const slash = spec.command.lastIndexOf('/')
-  // No PATH of its own: the shell's default one, which this does not guess at
-  if (slash < 0) return spec.env.PATH === undefined || whichTool(spec.command, spec.env, 'linux') !== null
+  const path = spec.env.PATH
+  // No PATH of its own (the shell's default), or one with an empty or relative entry (read from the child's folder): not
+  // guessed at here, so a CLI `sh` would find is never called missing; the worst left is the old exit 127
+  if (slash < 0) return path === undefined || path.split(':').some((d) => !d.startsWith('/')) || whichTool(spec.command, spec.env, 'linux') !== null
   const dir = spec.command.startsWith('/') || !spec.cwd ? spec.command.slice(0, slash) || '/' : `${spec.cwd}/${spec.command.slice(0, slash)}`
   return whichTool(spec.command.slice(slash + 1), { PATH: dir }, 'linux') !== null
 }

@@ -38,11 +38,23 @@ export type GateChannel = {
 /** The gate requests of one session still waiting for an answer, so a Stop or a close can deny them all at once */
 export class GateRequests {
   private readonly open = new Map<string, (answer: GateAnswer) => void>()
+  /** Set once the session has closed: a request asked after that is denied at once, never left waiting */
+  private closedReason: string | null = null
 
-  /** Waits for the answer to one request: given by `answer`, or `deny` by `denyAll`. A second wait for the same id denies the first */
+  /**
+   * Waits for the answer to one request: given by `answer`, or `deny` by `denyAll`. A second wait for the same id denies the
+   * first: only ever a deny, so a request asked again (or forged with an open id) can end a wait but never allow a call
+   */
   wait(requestId: string): Promise<GateAnswer> {
+    if (this.closedReason !== null) return Promise.resolve({ decision: 'deny', reason: this.closedReason })
     this.answer(requestId, { decision: 'deny', reason: 'The request was asked again.' })
     return new Promise((resolve) => this.open.set(requestId, resolve))
+  }
+
+  /** The session's end: what is open is denied, and so is what asks later */
+  close(reason: string): void {
+    this.closedReason = reason
+    this.denyAll(reason)
   }
 
   /** False when the request is no longer open (answered, or denied by a Stop) */

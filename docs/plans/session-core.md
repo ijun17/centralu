@@ -332,7 +332,7 @@ and the keeper's `ProcessSource` (spawn and adopt). Tests give a fourth: the rep
 | `stopToolProcess(proc, { graceMs, exited })` | stdin's end, `STOP_GRACE_MS` (2 s), then the tree (`kill('SIGKILL')`) | `CodexClient.dispose`, `AcpConnection.dispose` |
 | `endToolProcess(proc, boundMs)` | the tree at once, then a bounded wait | ACP's `closeAdopted` |
 | `logToolStderr(proc, label)` | the 500-character host-log line (§2.11) | `CodexClient`, `AcpConnection` |
-| `SessionProcess` | a session's process across its replacements (below) | nobody yet: `agy`'s wire, then the ledger (PR 5) |
+| `SessionProcess` | a session's process across its replacements (below): `start`, `relaunch`, `interrupt`, `stop`, `close`, run one at a time in the order asked, so a Stop or a close asked while a start awaits its launch ends what it starts (or starts nothing, once closed) | nobody yet: `agy`'s wire, then the ledger (PR 5) |
 
 Claude stays on the SDK (§3.3): `claudeQueryOptions`'s `spawnClaudeCodeProcess` adds `endsWithHost` to what the SDK asks
 for (`claude/sdk-query.ts`), and `claude/session.ts` (#1626's) is untouched; its keeper spawn passes four fields and so
@@ -350,8 +350,8 @@ the watch. That also changes ACP on macOS and Linux, from "<label> exited (code 
 1. **`launch(resume)`** (`ToolLaunch`): asked again for every new process, with the conversation's id once known, since
    `agy` ends its process on every Stop and takes model and effort as flags. `relaunch()` stops the old process (4.)
    before it asks for the next.
-2. **An id learned late** (`noteExternalId`): `agy` says its id only in `init`, after the first input; every later
-   launch goes on with it.
+2. **An id learned late** (`noteExternalId(id, from)`): `agy` says its id only in `init`, after the first input; every
+   later launch goes on with it. A late line from a process already replaced is ignored.
 3. **The gate's inbound path** (`GateInbound`, `GateChannel`, `GateRequest`, `GateAnswer`): an interface only; the
    transport is a decision to make (§8.1).
 4. **A Stop denies every open gate request first** (`GateRequests.denyAll`, in `interrupt` and `stop`): SIGINT does not
@@ -489,12 +489,22 @@ prints nothing and exits 0 lets the tool run, measured). Two transports, behind 
 | What a leaked secret allows | answering that session's gate until it closes | the same, plus what that credential already reaches; a gate answer becomes one more right on a credential tools see |
 | Rights model | outside the host's method rights: a second front door to review and keep reviewed | inside them: one front door, its rights table and its tests |
 | Across a host swap | dies with the host; an adopted `agy` is reopened, not taken over (§8), so a new process gets a new listener and token | the route survives; a request the old host opened is answered only if the hook asks again |
+| The session's own commands | inherit the tool's environment, so they hold the token (and another process of the same user can read it from the process's environment) | the same: they already hold the bridge credential |
 | Windows | a loopback port (no firewall prompt for `127.0.0.1`) | nothing new |
 
 Either one fails closed (the hook denies when the host cannot be reached), keeps the secret out of every file (the
-plugin root holds names only) and is closed with the session, denying what is open. Either way the hook's process must
-not be able to approve calls of another session: A by the per-session token, B by checking the credential's session
-against the request's. **Recommended: B**, since it adds no listener and keeps one front door under one rights table;
+plugin root holds names only) and is closed with the session, denying what is open and what asks later. Either way the
+hook's process must not be able to approve calls of another session: A by the per-session token, B by checking the
+credential's session against the request's.
+
+The secret is in the tool's environment, so the agent's own shell commands hold it too, under A as under B. That is safe
+only because the channel **asks and never answers**: a caller sends a call to decide on and gets the decision back; the
+decision comes from the preset, the always-allow rules or the person's card, never from the caller. A command holding the
+secret can then raise a card (noise the person sees and can deny), or ask again with an open request's id, which only
+ever denies the first wait (`GateRequests.wait`); it cannot allow a call. A transport that let the caller say "allowed"
+(a shortcut for Centralu's own tools, say) would hand the agent its own approvals, and must not be added. A per-request
+nonce from the hook's input does not help: the tool writes that input and the agent's commands do not see it, but the
+gate's answer, not the request, is what has to be protected. **Recommended: B**, since it adds no listener and keeps one front door under one rights table;
 A's narrower secret is the reason to choose it instead. The owner decides before `agy`'s pull request; PR 3 ships the
 interface alone.
 

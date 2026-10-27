@@ -174,14 +174,79 @@ describe("a session's process across its replacements (agy)", () => {
     ])
   })
 
-  it('denies every open gate request before it closes the process', async () => {
+  it('denies every open gate request before it closes the process, and every one asked after', async () => {
     const { sp, log } = session()
     await sp.start()
     const answer = sp.gates.wait('call-1').then((a) => (log.push('denied'), a))
-    await sp.stop()
+    await sp.close()
     expect(await answer).toEqual({ decision: 'deny', reason: 'The session is closing.' })
     expect(log.indexOf('denied')).toBeLessThan(log.indexOf('p1:eof'))
     expect(sp.current).toBeNull()
+    expect(await sp.gates.wait('call-2')).toEqual({ decision: 'deny', reason: 'The session is closing.' })
+    await expect(sp.start()).rejects.toThrow(/closed/)
+  })
+
+  /** A session whose launch waits until `go()` (agy is looked for, its plugin root written) */
+  function slowSession() {
+    const log: string[] = []
+    const waiting: (() => void)[] = []
+    let n = 0
+    const launch: ToolLaunch = (r) =>
+      new Promise((resolve) => waiting.push(() => resolve({ command: 'agy', args: r ? ['--conversation', r.externalId] : [], env: {} })))
+    const procs: FakeProc[] = []
+    const sp = new SessionProcess('Antigravity', launch, { spawn: () => (procs.push(new FakeProc(log, `p${++n}`)), procs.at(-1)!) }, null)
+    const go = async () => {
+      while (waiting.length === 0) await new Promise((r) => setImmediate(r))
+      waiting.shift()!()
+    }
+    return { sp, log, procs, go }
+  }
+
+  it('stops what a start still waiting for its launch starts, when a Stop comes meanwhile', async () => {
+    const { sp, log, go } = slowSession()
+    const started = sp.start()
+    const stopped = sp.stop()
+    await go()
+    await started
+    await stopped
+    expect(log).toEqual(['p1:eof'])
+    expect(sp.current).toBeNull()
+  })
+
+  it('starts nothing once closed while a launch was asked for', async () => {
+    const { sp, procs, go } = slowSession()
+    const started = sp.start()
+    // The launch has been asked for
+    await new Promise((r) => setImmediate(r))
+    const closed = sp.close()
+    await go()
+    await expect(started).rejects.toThrow(/closed/)
+    await closed
+    expect(procs).toEqual([])
+  })
+
+  it('leaves one process after two relaunches asked at once (a model and an effort change)', async () => {
+    const { sp, procs, go } = slowSession()
+    const first = sp.start()
+    await go()
+    await first
+    const a = sp.relaunch()
+    const b = sp.relaunch()
+    await go()
+    await a
+    await go()
+    await b
+    expect(procs.map((p) => p.exitCode === null)).toEqual([false, false, true])
+    expect(sp.current).toBe(procs[2])
+  })
+
+  it('keeps the id the current process said, not a late one from the process it replaced', async () => {
+    const { sp, procs } = session()
+    await sp.start()
+    await sp.relaunch()
+    sp.noteExternalId('conv-new', procs[1])
+    sp.noteExternalId('conv-old', procs[0])
+    expect(sp.externalId).toBe('conv-new')
   })
 })
 

@@ -54,7 +54,7 @@ describe('the options of a session\'s query', () => {
 })
 
 describe("the CLI's process", () => {
-  it('started here, ends with this host however the host ends (#1654 Q3); the keeper’s spawn leaves the flag out', () => {
+  it('started here, ends with this host however the host ends (#1654 Q3)', () => {
     const specs: unknown[] = []
     const o = claudeQueryOptions({
       sessionId: 's1',
