@@ -26,7 +26,7 @@ import { attributeByPaths, carried, mainVerdict, nextStep, sortCommits } from '.
 // @ts-expect-error — plain .mjs of a Centralu app
 import { classifyRun, looksLikeNetworkError, onFlakyList } from '../.centralu/apps/project-board/run-failure.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
-import { GitError, isNetworkFailure } from '../.centralu/apps/project-board/git.mjs'
+import { GitError, isAncestor, isNetworkFailure, showFile } from '../.centralu/apps/project-board/git.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { judgeBranch } from '../.centralu/apps/project-board/queue-integrate.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
@@ -4860,7 +4860,7 @@ describe('the integrator lands an auto-tier branch without a pull request from i
     expect(itemsOnDisk()).toEqual([])
   })
 
-  it("tells a branch not on GitHub by git's exit code, whatever git prints before its error", async () => {
+  it("tells a branch not on GitHub, and a file a commit lacks, by git's exit code, whatever git prints before its error", async () => {
     // Main's CI on Windows (2026-10-27) read docs/nowhere as `retry`: the answer was read from the first line of a failed
     // fetch, so any line git printed before "couldn't find remote ref" turned it into a failure of the moment.
     // GIT_TRACE prints such lines every time.
@@ -4873,10 +4873,16 @@ describe('the integrator lands an auto-tier branch without a pull request from i
       const there = await judgeBranch({ dir: repo.work, repo: 'ijun17/centralu', branch: 'docs/empty', defaultBranch: 'main' })
       expect(there.missing, JSON.stringify(there)).toBeUndefined()
       expect(there.retry, JSON.stringify(there)).toBeUndefined()
+      // The same for a file a commit does not have, and a commit that is its own ancestor
+      const main = repo.main
+      expect(await showFile(repo.work, main, 'docs/none.md')).toBeNull()
+      expect(await showFile(repo.work, main, 'docs/guide.md')).toBe('base\n')
+      await expect(showFile(repo.work, '0'.repeat(40), 'docs/guide.md')).rejects.toBeInstanceOf(GitError)
+      expect(await isAncestor(repo.work, main, main)).toBe(true)
     } finally {
       vi.unstubAllEnvs()
     }
-  })
+  }, 60_000 * SLOW)
 
   it('takes the record already open from the branch when it is handed over again, and queues it again, never a second pull request', async () => {
     const repo = integrateRepo({ 'docs/guide': { 'docs/guide.md': 'read it top down\n' } })

@@ -80,22 +80,20 @@ export async function judgeBranch({ dir, repo, branch, defaultBranch, head: want
     if (!(e instanceof GitError)) throw e
     return unjudged(`${defaultBranch} could not be fetched (${e.message})`, { retry: true })
   }
-  // Not there is the session's to fix; anything else (no network, GitHub down) is worth a try again. Which one is
-  // git's exit code (`remoteHas`), never the text it printed
-  let there
-  try {
-    there = await remoteHas(root, remote, `refs/heads/${branch}`)
-  } catch (e) {
-    if (!(e instanceof GitError)) throw e
-    return unjudged(`the branch ${branch} could not be looked up (${e.message})`, { retry: true, main })
-  }
-  if (!there) return unjudged(`the branch ${branch} is not on GitHub`, { missing: true, main })
   let tip
   try {
     ;[tip] = await fetchRefs(root, remote, [`refs/heads/${branch}`], `${space}/head`)
   } catch (e) {
     if (!(e instanceof GitError)) throw e
-    // There a moment ago: gone since, or a failure of the moment; either way, judged again on the next try
+    // Not there is the session's to fix; anything else (no network, GitHub down) is worth a try again. Which one is
+    // asked of the remote by exit code (`remoteHas`), never read from what the fetch printed
+    let there = true
+    try {
+      there = await remoteHas(root, remote, `refs/heads/${branch}`)
+    } catch (asked) {
+      if (!(asked instanceof GitError)) throw asked
+    }
+    if (!there) return unjudged(`the branch ${branch} is not on GitHub`, { missing: true, main })
     return unjudged(`the branch ${branch} could not be fetched (${e.message})`, { retry: true, main })
   }
   let head = tip

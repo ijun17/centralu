@@ -106,17 +106,31 @@ export async function remoteFor(dir, repo) {
  * `space` per call.
  */
 /**
- * Whether `remote` has `ref` (`refs/heads/docs/x`), from the exit code of `git ls-remote --exit-code`: 0 there, 2 not
- * there. Anything else (no network, the remote away, a timeout) throws its GitError. The text of a failed fetch says
- * "couldn't find remote ref" only when that is the first thing git prints: a line before it (a warning, a trace) made a
- * missing branch read as a failure of the moment (the integrator's `retry`, main's CI on Windows, 2026-10-27).
+ * Whether `remote` has `ref` (`refs/heads/docs/x`), from the exit code of `git ls-remote --exit-code`: 2 is nothing
+ * matched, and a match is taken only when it is `ref` itself (ls-remote matches a pattern on the name's tail, so
+ * `refs/heads/refs/heads/docs/x` would match too). Anything else (no network, the remote away, a timeout) throws its
+ * GitError. The text of a failed fetch says "couldn't find remote ref" only when that is the first thing git prints: a
+ * line before it (a warning, a trace) made a missing branch read as a failure of the moment (the integrator's `retry`,
+ * main's CI on Windows, 2026-10-27).
  */
 export async function remoteHas(dir, remote, ref) {
+  let listed
   try {
-    await git(dir, ['ls-remote', '--exit-code', remote, ref])
-    return true
+    listed = await git(dir, ['ls-remote', '--exit-code', remote, ref])
   } catch (e) {
     if (e instanceof GitError && e.code === 2) return false
+    throw e
+  }
+  return listed.split('\n').some((line) => line.trimEnd().endsWith(`\t${ref}`))
+}
+
+/** Whether `spec` names an object in `dir` (`git rev-parse --verify --quiet`: exit 1, nothing said, is no) */
+async function resolves(dir, spec) {
+  try {
+    await git(dir, ['rev-parse', '--verify', '--quiet', spec])
+    return true
+  } catch (e) {
+    if (e instanceof GitError && e.code === 1) return false
     throw e
   }
 }
@@ -138,8 +152,9 @@ export async function isAncestor(dir, a, b) {
     await git(dir, ['merge-base', '--is-ancestor', a, b])
     return true
   } catch (e) {
-    // Exit 1 with nothing said: not an ancestor. Anything else is an error (an unknown commit)
-    if (e.code === 1 && !e.stderr.trim()) return false
+    // Exit 1: not an ancestor. Anything else is an error (an unknown commit, 128). Not by what it printed: a warning
+    // or a trace line comes with an exit 1 too
+    if (e.code === 1) return false
     throw e
   }
 }
@@ -187,12 +202,15 @@ export async function remoteRefs(dir, remote, prefix) {
   return [...refs].map(([name, sha]) => ({ name, sha }))
 }
 
-/** A file of a commit as text; null when the commit has no such file. */
+/**
+ * A file of a commit as text; null when the commit has no such file. Which failure it was is asked by exit codes (the
+ * commit is there, the path in it is not), never read from git's message, whose first line is not always the error.
+ */
 export async function showFile(dir, rev, path) {
   try {
     return await git(dir, ['show', `${rev}:${path}`])
   } catch (e) {
-    if (/does not exist|exists on disk, but not in/.test(e.message)) return null
+    if (e instanceof GitError && (await resolves(dir, `${rev}^{commit}`)) && !(await resolves(dir, `${rev}:${path}`))) return null
     throw e
   }
 }
@@ -206,7 +224,7 @@ export async function filesHolding(dir, rev, strings) {
     const text = await git(dir, ['grep', '-l', '-z', '-I', '-F', ...strings.flatMap((s) => ['-e', s]), rev, '--'])
     return text.split('\0').filter(Boolean).map((l) => l.slice(rev.length + 1))
   } catch (e) {
-    if (e.code === 1 && !e.stderr.trim()) return [] // nothing found
+    if (e.code === 1) return [] // nothing found; an error is 128
     throw e
   }
 }
