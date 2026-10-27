@@ -121,7 +121,11 @@ export class SessionProcess {
   constructor(
     private readonly label: string,
     private readonly launch: ToolLaunch,
-    private readonly how: ToolStart & { graceMs?: number },
+    private readonly how: ToolStart & {
+      graceMs?: number
+      /** Told of each process as it starts, before anyone awaits it: the core watches its exit from here (`ledger.ts`) */
+      onStart?: (proc: AgentProcess) => void
+    },
     resumeExternalId: string | null,
   ) {
     this.id = resumeExternalId
@@ -197,8 +201,10 @@ export class SessionProcess {
     if (this.closed) throw new Error(`${this.label}'s session is closed`)
     // What the process before left asking has no process to answer to
     this.gates.denyAll('The process was replaced.')
-    this.proc = startToolProcess(spec, this.how)
-    return this.proc
+    const proc = startToolProcess(spec, this.how)
+    this.proc = proc
+    this.how.onStart?.(proc)
+    return proc
   }
 
   private async stopNow(reason: string): Promise<void> {

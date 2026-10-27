@@ -152,6 +152,11 @@ export class AcpConnection {
     this.proc.stdin.write(line + '\n')
   }
 
+  /** This side is ending the process (the session core stops it next): its exit is expected, and nothing more is written */
+  close(): void {
+    this.closed = true
+  }
+
   /** stdin EOF first, so the agent can end its own children; the whole tree is killed after `graceMs` */
   async dispose(graceMs = 2000): Promise<void> {
     if (this.closed) return

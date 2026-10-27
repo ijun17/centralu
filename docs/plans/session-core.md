@@ -300,6 +300,52 @@ presence means supported).
 The Claude wire is the SDK: `startTurn` pushes to the SDK's input generator, `interrupt` is `query.interrupt`,
 `answer` resolves the pending `canUseTool` promise, `open` is `query()`. Nothing the SDK does moves.
 
+### 4.1 As built in PR 5
+
+`core/seam.ts` and `core/ledger.ts` (`CoreSession`), with ACP the first tool on them (`acp/session.ts`: `AcpWire`, and
+`AcpSession`, a `CoreSession` that adds ACP's card and command methods). What changed from the proposal above, and why:
+
+| Proposal | As built | Why |
+|---|---|---|
+| `CoreIo.turnStarted`, `turnEnded(how, detail)` | the core starts every turn (`state_change working`, then `startTurn`) and hands the wire a `RunningTurn`: `stopAsked` to read, `end(ending, events?)` to end it | the turn the tool ends is always the one it was handed, so a late answer for a turn already over is dropped by identity, not by guessing; a tool that starts turns of its own (Codex's, PR 6) adds `turnStarted` then |
+| `turnEnded('failed', { error })` | `TurnEnding`: `complete`, `interrupted`, or `failed` with the `error` event and `inputError` (null: the input completes) | ACP's refusal is an error whose input completes (§2.11); Q7's change makes the endings one, and then `inputError` goes |
+| (none) | `events` on `end`: the tool's own end-of-turn events (usage, a limit's notice), emitted after the turn's open calls end and before the core's ending event, and only when the end is taken | keeps today's order of events exactly, and counts no cost for a turn the session no longer runs |
+| (none) | `turnOver(why?)` and `releaseCards()`: the core says when, the wire still holds its open calls and cards | the cards move into the core with the decision order (PR 8); until then the core calls `releaseCards` on a Stop, at a turn's end, on an exit and on the close, and `turnOver` at a turn's end, on an exit and on the close (`why`: "Centralu stopped this session while the call ran") |
+| `CoreIo.process`, `externalId(id)` | the same, one `CoreIo` per process, plus `gates` (`SessionProcess.gates`) | an id from a replaced process changes nothing (`noteExternalId(id, from)`) |
+| `interrupt()` | optional; a tool whose Stop ends its process has none, and the core signals it (`SessionProcess.interrupt`: the open gate requests are denied first) | `agy` has no Stop on its wire |
+| `close(how)` | `close({ turnRunning })`, then the core stops the process (`SessionProcess.close`) | ACP sends `session/cancel` first when closed mid-turn; `detach` is no ACP feature (no `SessionHandle.detach`) |
+| `autoGrant`, `answer`, `grant`, `steer`, `adopt`, `blocking` | not yet | the decision order is PR 8; `steer` and blocking turns are Codex's (PR 6); `adopt` is Codex's and Claude's |
+
+What the ledger owns now, one copy for every tool on it:
+
+- **The phase and the queue.** `opening`, `ready`, `closed`. A tool without mid-turn input (`midTurnInput: false`) gets one
+  input at a time, the rest wait in order; with it, an input sent mid-turn joins the running turn, and the turn's end
+  settles them all.
+- **The receipts** (§2.3): every input has an `InputReceipts` receipt; the wire says when the tool took it
+  (`CoreIo.inputAccepted`: ACP at the write); a turn our Stop ended fails its inputs; an exit fails the turn's inputs
+  with "`<label>` exited (code N)", and the queued ones with the undelivered count and its `error` event; the close fails
+  them with "the session closed". `turnInputs` names the inputs the last turn took by the host's names.
+- **The Stop** (§2.4): `stopAsked` on the turn, the wire's own Stop, the cards released, and the 10 s timer
+  (`STOP_CONFIRM_MS`, now one constant for ACP; Claude's own copy in `claude/index.ts` goes with PR 7) for a tool with
+  `confirmsStop`. The notice reads ACP's words ("`<label>` has not confirmed the stop; the turn may still be running.");
+  Claude's differ ("…after N s. The turn is still running."), so PR 7 takes ACP's words or keeps its own as a visible
+  change of its own, not inside the move.
+- **"Interrupted by the tool"**: an `interrupted` ending without our Stop is `INTERRUPTED_BY_TOOL`, and its input completes.
+- **The exit** (§2.5): the core watches the process from its start (`SessionProcess`'s `onStart`, before the wire reads
+  it), `exit` and a failed start (`error`) alike, once. In a turn or while opening it is `adapter_crashed` with
+  `withStderrTail`'s message; idle, `session_live` asleep. ACP's `AcpConnection.onExit` no longer decides it: the
+  connection only fails the requests it had open, and `close()` marks this side's own stop as expected.
+- **A Stop that ends the process** (`interruptEndsProcess`, `agy`): the process is marked as ending by our hand, the gate
+  requests are denied, then SIGINT. Its exit is the Stop's confirmation and ends the turn as `interrupted` if the tool did
+  not say so first. The next input asks `launch` again with the conversation's id (`relaunch`, or `start` once the old
+  process is gone), opens it, and goes on; nothing starts until an input comes. A new process that cannot start or open
+  is a crash, like an exit while opening, and fails the inputs waiting.
+
+The core tests (`core/ledger.test.ts`) run a scripted wire in memory against a small model of the above: 150 random
+sequences each of inputs, Stops, the tool's endings, exits and the close, for an ACP-like tool, a tool with mid-turn
+input, and an `agy`-like tool (`midTurnInput: false`, `interruptEndsProcess: true`, its id said at the first input), and
+compare the ledger's events, what the wire was asked to write on which process, and how every input ended.
+
 ## 5. Reaching processes through `Os` (#1650, OS layer step 3c)
 
 The core reaches the OS only through `tool-process.ts`, which takes an `Os` (`os/port.ts` on `centralu/os-interface`,
@@ -332,7 +378,7 @@ and the keeper's `ProcessSource` (spawn and adopt). Tests give a fourth: the rep
 | `stopToolProcess(proc, { graceMs, exited })` | stdin's end, `STOP_GRACE_MS` (2 s), then the tree (`kill('SIGKILL')`) | `CodexClient.dispose`, `AcpConnection.dispose` |
 | `endToolProcess(proc, boundMs)` | the tree at once, then a bounded wait | ACP's `closeAdopted` |
 | `logToolStderr(proc, label)` | the 500-character host-log line (§2.11) | `CodexClient`, `AcpConnection` |
-| `SessionProcess` | a session's process across its replacements (below): `start`, `relaunch`, `interrupt`, `stop`, `close`, run one at a time in the order asked, so a Stop or a close asked while a start awaits its launch ends what it starts (or starts nothing, once closed) | nobody yet: `agy`'s wire, then the ledger (PR 5) |
+| `SessionProcess` | a session's process across its replacements (below): `start`, `relaunch`, `interrupt`, `stop`, `close`, run one at a time in the order asked, so a Stop or a close asked while a start awaits its launch ends what it starts (or starts nothing, once closed) | the ledger (PR 5, §4.1), for every tool on it |
 
 Claude stays on the SDK (§3.3): `claudeQueryOptions`'s `spawnClaudeCodeProcess` adds `endsWithHost` to what the SDK asks
 for (`claude/sdk-query.ts`), and `claude/session.ts` (#1626's) is untouched; its keeper spawn passes four fields and so
