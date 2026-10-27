@@ -198,37 +198,55 @@ A host swap needs a keeper that speaks the host's API, not the newest keeper. So
   - when the person chooses Update on that row, which replaces it at once by §5.1;
   - when a host needs a newer keeper than the one running (below), by §5.1;
   - at a reboot or `serve --stop`, like any process.
-- **A host that needs a newer keeper than the one running**, and **the first update into a keeper** (from a version
-  whose `serve` starts no keeper), cannot keep what runs: the old keeper or the old host owns the children. They go
-  ahead at once by §5.1. From then on, swaps keep everything.
+- **A host that needs a newer keeper than the one running**: on Linux and WSL that is the `switch` with `keeper` above
+  (the keeper is handed over first, then the host swapped), and everything is kept. On Windows until step 8 there is no
+  handoff, so it cannot keep what runs and goes ahead at once by §5.1 (owner, decision 3, which names Windows for it).
+- **The first update into a keeper** (from a version whose `serve` starts no keeper) cannot keep what runs on any
+  system: the old host owns the children. It goes ahead at once by §5.1. From then on, swaps keep everything.
 
 ### 5.1 Where a swap cannot keep what runs: at once, then resume (owner, decision 3)
 
 The cases: a remote whose `serve` has no keeper (every remote today, and WSL with WMI blocked), the first update into
-a keeper, a host that needs a newer keeper, and the keeper's own replacement on Windows. In each, the update stops and
-starts at once, as `when: 'now'` does today, and continues afterwards the turns it ended, the way sessions are taken up
-again when a linked machine comes back after a network drop ("<machine> is back — resuming N sessions"). Terminals
-and project commands cannot be continued: they close, as they do today when the person presses Update.
+a keeper, and on Windows until step 8 a host that needs a newer keeper and the keeper's own replacement. In each, the
+update stops and starts at once, as `when: 'now'` does, and the host it starts continues the turns the stop ended.
+Terminals and project commands cannot be continued: they close, as they do when the person presses Update now. Built
+in step 2 (#1618, #1626); agent-host.md §4.8, "Continuing the turns an update cut", is the full rule.
 
-1. **Before the stop** the hub reads the machine's sessions in a turn (`host.activity`, as `beforeStop` does now, but
-   once and without waiting) and writes their ids to `<data>/remote/resume.json` there, `{ v: 1, update, ids, at }`,
-   through the same `remote-install.mjs` step that writes the pointers. `update` is an id of this update.
-2. **The new host reads it at start**, before it lists sessions, and deletes it: a file older than ten minutes is
-   ignored, as the views' handover record is (agent-host.md §4.2). For each id whose session the start finds cut
-   (`interruption: 'quit'`, set because it was working with no process), it withholds the quit notice to the asker
-   (`quitNotices`, agent-host.md §4.6.2), and once it serves sends that session the one Continue sentence Centralu
-   already uses ("Continue where you stopped. Check what already happened before repeating a step."), as Centralu's
-   note, not as the person's message. The session's report owed, if any, stays owed and the continued turn settles it.
-3. **Once.** The file is deleted before anything is sent, so a host that restarts again sends nothing more. A session
-   that is not `quit` at that start (the person stopped it before the stop, which sets no interruption; it was written
-   to meanwhile; it was archived or deleted) is not continued. A session the person stopped is never continued.
-4. **The window** shows the existing "<machine> is back — resuming N sessions" when its machine's resync finds them,
-   as it does after a network drop (`recoverMachine`); nothing new is drawn.
-5. **An older new version** (a rollback to a host from before this file) ignores it: the turns stay cut with their
-   "stopped" mark and Continue, as today. The hub deletes a file still there at its next connect.
+1. **The stopping host lists the turns it ends.** Every stop of the hub's after which a host starts again in that
+   folder (the update's, the put-back's after a failed check, a rollback's; not an uninstall's) runs `serve --stop` with
+   `CENTRALU_STOP_FOR=update`, which the launcher passes on as `host.stop { forUpdate: true }` (additive). As it lets its
+   sessions go, the host writes the ids of those in a turn (`cutTurns`, idle.ts, the one definition) to
+   `<data>/update-resume.json`, `{ v: 1, ids }`, added to what is already listed there. The host knows exactly which
+   turns it cut, on its own clock, with no reading by the hub before it and nothing between the list and the stop for
+   a turn to start in or a link drop to separate. A host from before this, or one the launcher could not ask and ended
+   instead, lists nothing, and its turns end as a stop's always did.
+2. **The next host continues each listed turn once.** It reads the list at start, before it builds its sessions, without
+   taking it. A listed session it finds mid-turn with no process stays `working` (no "stopped" mark, no quit notice to
+   its asker, no "stopped" report in the person's Inbox), its owed report kept, and once the start is done it is sent the
+   Continue sentence Centralu already uses ("Continue where you stopped. Check what already happened before repeating a
+   step."), as Centralu's note through Centralu's channel, not as the person's message. The continued turn's end is the
+   report owed. One the tool cannot take up again ends with the usual "stopped" mark and report.
+3. **Each id leaves the list only once dealt with:** its Continue went in, its loss was reported, or the start did not
+   find it cut. So a new host that fails its check and is stopped again, a rollback, or a second update with no host up
+   in between leaves the rest listed (and adds what it cuts itself), and the host after it continues them. Nothing
+   expires: the list is the next start's, whenever it comes. A session the person stopped, and whose Stop the host took
+   before it stopped, is not listed. A Stop still on its way when the host stops is not taken, and that session is
+   continued. A session whose turn had ended but whose background work still ran loses that work and is not continued.
+4. **The callers.** A caller on the same machine hears once that the turn was cut and continued, and whether its report
+   still follows. A caller on the hub is not told the link dropped while the hub's own update or rollback holds the link,
+   until the link is back; the new host's `hello_ok.updateContinued` names the turns it continued, and the caller hears
+   once that its child's turn was cut and continued. An update that ends with the machine not back tells the drop then.
+5. **The window** does not wake a session that is in a turn with no process: the machine continues it. Its existing
+   "<machine> is back — resuming N sessions" counts only the sessions it wakes itself; nothing new is drawn.
+6. **An older host** (a machine before step 2, or one rolled back to it) lists nothing: the hub's sentence says the turns
+   were lost, the turns keep their "stopped" mark and Continue, and a caller on the hub hears the drop, as before.
 
-This replaces `beforeStop`'s wait everywhere: `wait_idle`, `wait_open`, `wait_unread` and `OPEN_WORK_WAIT_MS` go, and
-`when` stops mattering. Following the hub (#1508) then updates a busy machine at once too.
+The person's Update keeps its choice (#1399): `when: 'idle'`, the default, still waits for the turns there to end, with
+`wait_idle`, `wait_unread` and Cancel (`machines.cancelUpdate`); `when: 'now'` goes at once and has its cut turns
+continued by this section. Every update nobody approved (following the hub, #1508, and an agent's card-less one) goes
+at once: `wait_open` and `OPEN_WORK_WAIT_MS` are gone, and a busy machine is updated too. `machines.cancelUpdate`, the
+`when` parameter and the `wait_open` step stay in the protocol (additions only), for the person's Update and for a
+window or hub of another build.
 
 ## 6. Windows specifics
 
@@ -262,7 +280,10 @@ named pipe, not by inheritance.
 ssh, the keeper and all it holds run in session 0 under a network logon (P6), without the user's credential vault
 (#1224); created by the sign-in task, in the person's session. Nothing can move a running process from one to the
 other, so the hand-over from a network-logon keeper to the sign-in task's (remote-hub.md §10.4) still waits until
-nothing runs, as now. That wait is rare (once per sign-in) and is not the update's.
+nothing runs, as now. That wait is rare (once per sign-in) and is not the update's. Handing over at once with §5.1's
+resume (the owner's "nothing waits for idle") would close the terminals and project commands started from the hub and
+end the agents' background work there, which §5.1 cannot restore; whether the sign-in may do that is the owner's to
+decide (review D9 of #1615), and until then it waits.
 
 **The scheduled task.** The task's action runs the managed launcher, which starts the keeper; the task's settings stay
 (`ExecutionTimeLimit` zero, `IgnoreNew`). Whether Task Scheduler ends a task's processes when the task is stopped is
@@ -342,12 +363,21 @@ window, so `--switch` is a new control op, `swap_current`, that names no code: t
 to a folder under `<data>/remote/versions/` with an `install.json`. That is still a deliberate exception to #1405: any
 process of this user, an agent included, can rewrite `current` and ask. What it gains is little: on a remote the token
 already sits in `serve.json`, readable by that same process, and rewriting `current` then `serve --stop` and `--detach`
-already starts that code today. The owner accepted the exception (decision 4), limited to the local `serve --switch`:
-`swap_current` is taken on the control channel only, never over the front door's limited token, and is written into
-security-boundaries.md in step 4.
+already starts that code today. The owner accepted the exception (decision 4) for the local `serve --switch`. The
+keeper cannot tell `serve --switch` from any other process of this user on its control channel, so in effect the
+exception is any same-user process there, not `serve --switch` alone; what bounds it is where it is taken:
+
+- on the control channel only, never over the front door's limited token;
+- by a headless keeper only. A keeper a window started (the desktop app) refuses `swap_current`: a Linux PC that runs
+  the desktop app and is also a hub's remote on the same data folder would otherwise let an agent there swap its
+  keeper to code it wrote, holding the window's full token. That refusal and its test are part of step 4;
+- to a folder under `<data>/remote/versions/` with an `install.json` only.
+
+All three are written into security-boundaries.md in step 4.
 
 **On the hub** (`links/update.ts`, `linked-machine-ops.ts`): the update takes the swap path when the machine's line has
-`switch` in `takes`, a running keeper, and `keeper.hostApi` at or above the new host's `needsKeeper`:
+`switch` in `takes` and a running keeper, and either `keeper.hostApi` is at or above the new host's `needsKeeper` or
+the machine is Linux or WSL, where a keeper below it is handed over first (§5):
 
 1. Install beside (unchanged).
 2. Hold (unchanged): the link starts no `serve --detach` of its own until the end, so nothing starts the old version
@@ -364,8 +394,8 @@ security-boundaries.md in step 4.
    host that serves but does not answer as the target is swapped back the same way: pointers back, `--switch` again.
 6. Prune (keeping what still runs, §7), lift the hold.
 
-No `beforeStop` and no stop on that path. Every case the swap cannot keep (an older `serve`, no keeper, a keeper below
-the floor, the first update into a keeper) is §5.1's: at once, then resume. Following the hub (#1508) gains nothing
+No `beforeStop` and no stop on that path. Every case the swap cannot keep (an older `serve`, no keeper, the first update
+into a keeper, and on Windows until step 8 a keeper below the floor) is §5.1's: at once, then resume. Following the hub (#1508) gains nothing
 new: it calls the same update. Rollback is the same swap towards `previous`; to a version from before the keeper it is
 §5.1's stop and start. `pnpm remote-dev` (§10.11) keeps its stop path: its store copy needs no host running, and the
 keeper's swap has no pause between the old host's drain and the new one's activation to take it in.
@@ -375,8 +405,9 @@ keeper's swap has no pause between the old host's drain and the new one's activa
 | Hub | Remote | What happens |
 |---|---|---|
 | older | with a keeper | The hub knows no `--switch`: it runs `beforeStop`, `serve --stop` (which stops the keeper and everything) and `serve --detach`, exactly as today. Nothing is better, nothing worse |
-| newer | without a keeper (older `serve`, or `CENTRALU_KEEPER=off`) | No `switch` in `takes`: §5.1, at once, then resume. A remote from before `resume.json` ignores it, so its cut turns keep their "stopped" mark and Continue, as after any restart today |
-| newer | keeper, below the new host's floor | §5.1; the new `serve` then starts the newer keeper |
+| newer | without a keeper (older `serve`, or `CENTRALU_KEEPER=off`) | No `switch` in `takes`: §5.1, at once, then resume. A remote from before step 2 lists no turn as it stops (it ignores `host.stop { forUpdate }`), so its cut turns keep their "stopped" mark and Continue, as after any restart today |
+| newer | keeper, below the new host's floor, Linux or WSL | The swap with a keeper handoff (§5): everything kept |
+| newer | keeper, below the new host's floor, Windows until step 8 | §5.1; the new `serve` then starts the newer keeper |
 | newer | keeper, WSL with WMI blocked (link-bound) | §5.1: the keeper is the link's child and ends with it |
 
 A host under a newer keeper is a pair step 5 makes supported (§5). A remote rolled back to a version from before the
@@ -389,8 +420,8 @@ setting.
 | Step | What | Tests that fail without it | Real-machine checks |
 |---|---|---|---|
 | 0 | This document | — | — |
-| 1 | Linux: the keeper as a plain file beside `host/` in `@centralu/host-linux-x64` and `-linux-arm64` (§7). The release takes it from the AppImage it ships; `hostPackageProblems` requires it and checks it by reading the file, with no `file` or `ldd`: an ELF executable for the platform's machine, with its exec bit, linking no GUI library. Nothing starts it yet | `tooling/host-package.test.ts`: a Linux host package without the keeper, with one for the other machine, with one that is not an executable, without its exec bit, or linking webkit2gtk is refused; `files` must name it; the Windows package still ships `host/` only | none: nothing runs it yet. At the first release after it, the host package's tarball lists the keeper with its exec bit |
-| 2 | Hub and host: §5.1 on every remote. The wait goes (`beforeStop`'s readings, `wait_idle`, `wait_open`, `wait_unread`, `OPEN_WORK_WAIT_MS`); the hub writes `resume.json` before the stop; the new host continues each listed session once | host: a turn ended by an update is continued once (one Continue, sent as Centralu's note, the quit notice withheld, the file gone, a second start sends nothing); a session the person stopped is not continued; one written to meanwhile, archived or deleted is not; a file older than ten minutes is ignored. Hub (`update.test.ts`, `linked-machine-ops.test.ts`): an update with turns running and a terminal open stops at once and writes the ids of the sessions in a turn; following the hub does the same with no card | a linked Windows PC and WSL: an update with a claude turn and a codex turn running and a terminal open; both turns continue once on the new version, the terminal closes, the window shows "<machine> is back — resuming 2 sessions" |
+| 1 | Linux: the keeper as a plain file beside `host/` in `@centralu/host-linux-x64` and `-linux-arm64` (§7). The release takes it from the AppImage it ships; `hostPackageProblems` requires it and checks it by reading the file, with no `file` or `ldd`, through one check (`keeperProblems`, which the release also runs on the AppImage's copy): an ELF executable for the platform's machine, with its exec bit, linking nothing beyond the C runtime, and asking for no glibc newer than the remote preflight's floor (`MIN_GLIBC`). Nothing starts it yet | `tooling/host-package.test.ts`: a Linux host package without the keeper, with one for the other machine, with one that is not an executable, without its exec bit, linking webkit2gtk or another library beyond the C runtime, or asking for GLIBC_2.35 is refused; `files` must name it, and git ignores what the release stages there; the Windows package still ships `host/` only | none: nothing runs it yet. At the first release after it, the host package's tarball lists the keeper with its exec bit |
+| 2 (#1626) | Hub and host: §5.1 on every remote. Every update nobody approved goes at once (`wait_open`, `OPEN_WORK_WAIT_MS` go; the person's `when: 'idle'` keeps its wait); every hub stop a host starts again after says `forUpdate`, and the stopping host lists the turns it ends in `update-resume.json`; the next host continues each listed turn once and drops its id once dealt with; `hello_ok.updateContinued`; a quitting host's failed waits settle no report | host: a turn an update's stop ended is listed by that stop and continued once (one Continue, as Centralu's note, no quit notice and no Inbox "stopped", the id gone once sent, a later start sends nothing); a host stopped again before the Continue went in leaves it listed and the one after continues it; a Stop the host took is not listed; a stop not for an update lists nothing; a wake from a window before the Continue keeps the turn and the Continue goes in once; one that cannot be continued ends as a quit's. Launcher: `CENTRALU_STOP_FOR=update` becomes `host.stop { forUpdate }`. Hub (`links.test.ts`, `remote-agents.test.ts`, `update.test.ts`): an update with turns running and a terminal open stops at once and says it is for an update; a turn the hub never read is continued; a hub parent hears "continued" once, never "dropped", then one report; a machine not back, or a host from before, tells the drop as before | a linked Windows PC and WSL: an update with a claude turn and a codex turn running and a terminal open; both turns continue once on the new version, the terminal closes, the window wakes neither turn itself, and a hub parent of each hears "continued" once, then one report |
 | 3 | Linux: the headless keeper taking `serve`'s port, token, Node and `CC_SERVE`; `serve` starts it and stays its parent; `--connection` reports it; `--stop` and the sign-in hand-over ask its `stop { ifIdle }`; a dev build (remote-hub.md §10.11), which bundles the host only, takes the keeper of the release it is built on | the keeper crate's `idle_decision` keeps a headless keeper with no window; a headless keeper serves on the given port with the given token; its `stop { ifIdle }` refuses while a turn runs and refuses a call after its yes; `serve` tests choose the keeper when the file is there and `CENTRALU_KEEPER` is not off; `keeper-integration.mjs` gains a headless scenario run by `keeper e2e (linux)` | a Linux arm64 server and WSL: `serve --detach`, ssh closed, the keeper and host still serving; WSL's distro held by the WMI-created `wsl.exe` as before |
 | 4 | Hub: the swap path of §8; `serve --switch` and the keeper's `swap_current` op; #1405's exception written into security-boundaries.md | the keeper refuses `swap_current` to a folder outside `<data>/remote/versions/` or without `install.json`, refuses it over the front door's limited token, and still refuses `switch` to a non-window; `update.test.ts`: with `switch` in `takes` and the floor met, nothing is stopped and the hold is lifted at the end; without either, §5.1; a refused or failed switch puts the pointers back and stops nothing; a new host that does not answer as the target is swapped back | a Linux arm64 server and WSL: an update with a claude turn in a tool call, a codex turn, an open terminal running a counter and a Run command; each kept, the counter continuous, the turn finishing on the new host |
 | 5 | The keeper's own update (§5): `keeper.hostApi`, `needsKeeper`, the pin test, older hosts under a newer keeper, the handoff on Linux at a switch, the lag where there is none and its line on the machine's row, the replacement when it costs nothing or the person chooses Update, `in-use.json` and prune keeping what runs | the pin test fails on an unrecorded raise; the previous release's host runs under the new keeper; a host with a higher floor takes §5.1; prune keeps the versions and Nodes `in-use.json` names; the row's line appears and leaves with a short transition, and with none under reduced motion | a Linux arm64 server: an update across a keeper build change keeps a turn and a terminal |
@@ -410,9 +441,10 @@ for the rules it guards, in its own pull request. The Windows desktop (#14) take
   measured on a remote).
 - **Sessions on that machine:** a turn in flight goes on; a Centralu tool call caught in the gap returns the existing
   retryable error and the agent calls again. Terminals keep their scrollback (the ring) and their shell.
-- **Where a swap cannot keep what runs (§5.1):** the update goes at once, with no waiting step on the row. The sessions
-  it cut carry the existing "stopped" mark only until their one Continue starts them again, and the window shows the
-  existing "<machine> is back — resuming N sessions". Terminals and project commands there close.
+- **Where a swap cannot keep what runs (§5.1):** an update nobody approved, and the person's Update now, go at once,
+  with no waiting step on the row. The sessions it cut stay in their turn, with no "stopped" mark, and their
+  conversation shows that Centralu continued the turn on the new version. The window's existing "<machine> is back —
+  resuming N sessions" counts only the sessions it wakes itself. Terminals and project commands there close.
 - **New: an outdated keeper on Windows** (step 5, decision 2): one line on that machine's row in Settings → Machines,
   never in the sidebar, saying its keeper is from an older version and is replaced when nothing runs there or by
   Update. Its wording is proposed in step 5's pull request. It appears and leaves with a short transition, and with
@@ -431,4 +463,6 @@ Recorded on #1614.
    resumed when it comes back after a network drop. Terminals and project commands cannot be resumed and close (§5.1).
 4. **The exception to #1405 is accepted:** a headless keeper takes `serve --switch`, so the hub's automatic update needs
    no window. The request comes from the hub over ssh, which already has full access to that machine. It is limited to
-   the local `serve --switch` on that machine and is not open to the limited WebSocket token (§8).
+   the local `serve --switch` on that machine and is not open to the limited WebSocket token (§8). (In effect: any
+   process of the user on the keeper's control channel, since the keeper cannot tell `serve --switch` from another, and
+   only on a headless keeper; a keeper a window started refuses it. §8, review D8.)
