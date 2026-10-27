@@ -299,8 +299,9 @@ is new or higher than main's but a renamed file's own (CI's `verify` fetches mai
 without it; elsewhere, without one, the test says it did not compare).
 The guard pass (below) runs the lint rule `guard/no-rule-switch-comments`, which refuses an `eslint-disable` of a type-aware rule, a
 disable naming no rule, and a comment that configures one off, wherever the rules run; the same pass counts the type assertions
-(`as T`, safe ones too) in each package's shipped code, and `pnpm lint` fails over `ASSERTIONS` in `tooling/lint-allowlist.ts`, whose
-numbers `tooling/type-aware-lint.test.ts` refuses to see above main's. `eslint` run by itself, and an editor, do not read the lists and show the old findings too. The
+(`as T`, safe ones too) in each package's shipped code, and `pnpm lint` fails over `ASSERTIONS` in `tooling/lint-allowlist.ts`: what the package holds, with no room, so one
+more fails. A change that removes some runs `pnpm lint:tighten`, which lowers the numbers; one that needs another removes one
+or checks the value instead. `tooling/type-aware-lint.test.ts` refuses a number above main's. `eslint` run by itself, and an editor, do not read the lists and show the old findings too. The
 lint runs on two threads and without `--cache`: each thread builds the whole program (six took 13.6 GB),
 and ESLint's cache keys a file on its own content while a type-aware finding can come from a type
 another file changed.

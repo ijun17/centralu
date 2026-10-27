@@ -153,7 +153,7 @@ const handMadeLooks = guard('hand-made-looks', { look: '{{tag}} draws the {{look
  * tooling/lint.ts can hold a ceiling per package (ASSERTIONS in tooling/lint-allowlist.ts). A warning of the guard pass, which no
  * comment configures, so none can hide one; tooling/lint.ts takes its messages out of what it shows.
  */
-const typeAssertions = guard('type-assertions', { asserted: 'a type assertion (counted per package by `pnpm lint`; ASSERTIONS in tooling/lint-allowlist.ts)' }, (_context, add) => ({
+const typeAssertions = guard('type-assertions', { asserted: 'a type assertion (counted per package by `pnpm lint`, which fails over ASSERTIONS in tooling/lint-allowlist.ts; a change that removes some lowers it with `pnpm lint:tighten`)' }, (_context, add) => ({
   TSAsExpression(node) {
     const t = node.typeAnnotation
     if (!(t.type === 'TSTypeReference' && t.typeName.type === 'Identifier' && t.typeName.name === 'const')) add(node, 'asserted')

@@ -23,7 +23,6 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
   ALLOWLIST_DIR,
-  ASSERTION_ROOM,
   ASSERTIONS,
   lintHeapMb,
   addedSince,
@@ -103,7 +102,6 @@ describe('type-aware lint (#1339)', () => {
       return
     }
     for (const [pkg, n] of Object.entries(ASSERTIONS)) expect(n, `${pkg}: ASSERTIONS in tooling/lint-allowlist.ts is above main's ${main.ceilings[pkg] ?? 0}; fix the assertions instead`).toBeLessThanOrEqual(main.ceilings[pkg] ?? 0)
-    expect(ASSERTION_ROOM, `ASSERTION_ROOM is above main's ${main.room}`).toBeLessThanOrEqual(main.room)
   })
 
   it('has a weekly job lower stale lines in one pull request, with no dependency code where the write token is', () => {

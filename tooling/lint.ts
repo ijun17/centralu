@@ -18,7 +18,7 @@
  */
 import './lint-crash.js'
 import { ESLint } from 'eslint'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { totalmem } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -26,7 +26,6 @@ import { getHeapStatistics, setFlagsFromString } from 'node:v8'
 import {
   applyAllowlist,
   archiveUses,
-  ASSERTION_ROOM,
   ASSERTIONS,
   assertionTotals,
   ALLOWLIST_DIR,
@@ -47,6 +46,7 @@ import {
   readAllowlist,
   renamesSince,
   tighten,
+  tightenAssertions,
   unusedArchiveEntries,
   writeAllowlist,
 } from './lint-allowlist.js'
@@ -78,7 +78,7 @@ const assertions = assertionTotals(ROOT, guardAll)
 const archiveUsed = archiveUses(guardAll)
 const guardResults = guardAll.filter((r) => r.messages.length > 0)
 const whole = paths.length === 0 && !recording
-const { over: assertionsOver, under: assertionsUnder } = whole ? overAndUnder(assertions, ASSERTIONS, ASSERTION_ROOM) : { over: [], under: [] }
+const { over: assertionsOver, under: assertionsUnder } = whole ? overAndUnder(assertions, ASSERTIONS) : { over: [], under: [] }
 const archiveStale = whole ? unusedArchiveEntries(archiveUsed) : []
 
 if (recording) {
@@ -95,6 +95,16 @@ if (flags.has('--tighten')) {
   else if (!found) console.log(`git could not list the renames since ${base}: lines are only lowered, and a renamed file's findings stay unlisted.`)
   const { allow: tightened, moves } = tighten(allow, countFindings(ROOT, results), countedFiles(ROOT, results), (file) => existsSync(join(ROOT, file)), renames)
   writeAllowlist(ROOT, tightened)
+  // The type-assertion ceilings too, of a whole run: each package's number comes down to what it holds
+  if (whole) {
+    const file = join(ROOT, 'tooling', 'lint-allowlist.ts')
+    const source = readFileSync(file, 'utf8')
+    const lowered = tightenAssertions(source, assertions)
+    if (lowered !== source) {
+      writeFileSync(file, lowered)
+      console.log('Lowered ASSERTIONS in tooling/lint-allowlist.ts to what the packages hold.')
+    }
+  }
   for (const m of moves) console.log(`Moved ${m.count} of ${m.rule} from ${m.from} to ${m.to} (renamed).`)
 }
 
@@ -110,7 +120,7 @@ for (const d of disabled) {
 }
 for (const line of assertionsOver) console.log(`${line} type assertions: check the value (a zod schema, a guard) instead of asserting its type (tooling/lint-allowlist.ts ASSERTIONS)`)
 for (const line of archiveStale) console.log(line)
-if (assertionsUnder.length > 0) console.log(`ASSERTIONS in tooling/lint-allowlist.ts can come down to ${assertionsUnder.join(', ')}`)
+if (assertionsUnder.length > 0 && !flags.has('--tighten')) console.log(`ASSERTIONS in tooling/lint-allowlist.ts can come down to ${assertionsUnder.join(', ')}`)
 for (const o of over) console.log(`${o.file}: ${o.count} findings of ${o.rule}, ${o.allowed} listed (${ALLOWLIST_DIR}/${listFileOf(packageOf(o.file))}).`)
 const stale = [...(flags.has('--tighten') ? readAllowlist(ROOT) : allow).keys()].filter((file) => !existsSync(join(ROOT, file)))
 if (!recording && (loose.length > 0 || stale.length > 0)) {

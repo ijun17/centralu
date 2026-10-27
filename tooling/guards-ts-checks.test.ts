@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 import { ARCHIVE_ALLOWED } from './guard-exceptions.js'
-import { archiveUses, ASSERTION_ROOM, ASSERTIONS, assertionsOf, assertionTotals, lintFailed, overAndUnder, unusedArchiveEntries } from './lint-allowlist.js'
+import { archiveUses, ASSERTIONS, assertionsOf, assertionTotals, lintFailed, overAndUnder, tightenAssertions, unusedArchiveEntries } from './lint-allowlist.js'
 import { guardLinter, virtualFileLinter } from './eslint-virtual.test-helpers.js'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
@@ -220,22 +220,35 @@ describe('guard/type-assertions', () => {
     expect(results[0]?.warningCount).toBe(1)
     expect(results[1]?.messages).toEqual([])
   })
-  it('reports a package over its ceiling, and only that', () => {
+  it('reports a package over its ceiling, with no room, and only that', () => {
     expect(overAndUnder({ a: 3, b: 1, c: 2 }, { a: 2, b: 2 })).toEqual({ over: ['a: 3, ceiling 2', 'c: 2, ceiling 0'], under: ['b: 1'] })
-    expect(overAndUnder({ a: 3, c: 2 }, { a: 2 }, 1)).toEqual({ over: ['c: 2, ceiling 1'], under: [] })
-    expect(ASSERTION_ROOM).toBeGreaterThan(0)
+    // One over fails: the ceiling is what the package holds
+    expect(overAndUnder({ a: 2 }, { a: 2 })).toEqual({ over: [], under: [] })
+    expect(overAndUnder({ a: 3 }, { a: 2 }).over).toEqual(['a: 3, ceiling 2'])
     expect(Object.keys(ASSERTIONS).length).toBe(7)
   })
-  it('holds the ceilings at what the packages hold today, not at the old test\'s slack', () => {
-    // Today's counts (pnpm lint says where they can come down); the room above them is ASSERTION_ROOM
+  it("holds the ceilings at what the packages hold today, with no room above them", () => {
+    // Today's counts: pnpm lint says where they can come down, and fails one over
     expect(ASSERTIONS).toEqual({ 'apps/desktop': 4, 'apps/web': 6, 'packages/agent-host': 529, 'packages/core': 1, 'packages/platform': 3, 'packages/protocol': 0, 'packages/ui': 255 })
+    expect(readFileSync(join(ROOT, 'tooling/lint-allowlist.ts'), 'utf8')).not.toMatch(/ASSERTION_ROOM/)
+  })
+  it('lowers a ceiling to what its package holds, as pnpm lint:tighten writes it, and never raises one', () => {
+    const source = ["export const ASSERTIONS: Readonly<Record<string, number>> = {", "  'packages/ui': 5,", "  'a/b': 3,", "  'c/d': 2,", '}', "export const OTHER = { 'packages/ui': 9 }"].join(NL)
+    const lowered = tightenAssertions(source, { 'packages/ui': 4, 'a/b': 3, 'c/d': 7 })
+    expect(lowered).toBe(source.replace("'packages/ui': 5", "'packages/ui': 4"))
+    // A package that holds none comes down to 0; nothing else in the module is touched
+    expect(tightenAssertions(source, {})).toContain("  'a/b': 0,")
+    expect(tightenAssertions(source, {})).toContain("OTHER = { 'packages/ui': 9 }")
+    // The module's own ceilings, held at what the packages hold, stay as they are
+    const own = readFileSync(join(ROOT, 'tooling/lint-allowlist.ts'), 'utf8')
+    expect(tightenAssertions(own, ASSERTIONS)).toBe(own)
   })
   it('reads the ceilings out of a copy of lint-allowlist.ts, as the compare with main needs', () => {
-    const source = ["export const ASSERTIONS: Readonly<Record<string, number>> = {", "  'packages/ui': 5,", "  'a/b': 3,", '}', 'export const ASSERTION_ROOM = 10'].join(NL)
-    expect(assertionsOf(source)).toEqual({ ceilings: { 'packages/ui': 5, 'a/b': 3 }, room: 10 })
+    const source = ["export const ASSERTIONS: Readonly<Record<string, number>> = {", "  'packages/ui': 5,", "  'a/b': 3,", '}'].join(NL)
+    expect(assertionsOf(source)).toEqual({ 'packages/ui': 5, 'a/b': 3 })
     expect(assertionsOf('nothing here')).toBeNull()
     // The module itself says what it says
-    expect(assertionsOf(readFileSync(join(ROOT, 'tooling/lint-allowlist.ts'), 'utf8'))).toEqual({ ceilings: ASSERTIONS, room: ASSERTION_ROOM })
+    expect(assertionsOf(readFileSync(join(ROOT, 'tooling/lint-allowlist.ts'), 'utf8'))).toEqual(ASSERTIONS)
   })
 })
 

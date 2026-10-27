@@ -53,7 +53,12 @@ export const guardOptions = (cwd: string): ESLint.Options => ({ cwd, concurrency
 /** The options tooling/lint.ts creates ESLint with */
 export const eslintOptions = (cwd: string): ESLint.Options => ({ cwd, ...LINT_OPTIONS })
 
-/** The most type assertions (`x as T`, `<T>x`; not `as const`) each package's src may hold outside its tests */
+/**
+ * The most type assertions (`x as T`, `<T>x`; not `as const`) each package's src may hold outside its tests: exactly what it holds
+ * today, with no room, so one more fails `pnpm lint`. A change that removes some lowers its package's number with `pnpm lint:tighten`
+ * (`tightenAssertions` writes it); one that needs a safe assertion removes another, or checks the value instead. Nothing raises a
+ * number: tooling/type-aware-lint.test.ts refuses one above main's.
+ */
 export const ASSERTIONS: Readonly<Record<string, number>> = {
   'apps/desktop': 4,
   'apps/web': 6,
@@ -64,22 +69,22 @@ export const ASSERTIONS: Readonly<Record<string, number>> = {
   'packages/ui': 255,
 }
 
-/**
- * How far over ASSERTIONS a package may go: room for the safe assertions (a widening, `as unknown`) a change in
- * flight adds, so it does not have to edit this list; unsafe ones the lint reports per file. The changes that
- * remove assertions lower ASSERTIONS.
- */
-export const ASSERTION_ROOM = 10
-
-/** The packages above their ceiling, with `room` over it allowed, and the numbers a ceiling could come down to */
-export function overAndUnder(actual: Record<string, number>, ceiling: Readonly<Record<string, number>>, room = 0): { over: string[]; under: string[] } {
+/** The packages above their ceiling, and the numbers a ceiling could come down to (a hint, not a failure: two changes that each lowered it by the same one merge into a ceiling one too high) */
+export function overAndUnder(actual: Record<string, number>, ceiling: Readonly<Record<string, number>>): { over: string[]; under: string[] } {
   const over = Object.entries(actual)
-    .filter(([pkg, n]) => n > (ceiling[pkg] ?? 0) + room)
-    .map(([pkg, n]) => `${pkg}: ${n}, ceiling ${(ceiling[pkg] ?? 0) + room}`)
+    .filter(([pkg, n]) => n > (ceiling[pkg] ?? 0))
+    .map(([pkg, n]) => `${pkg}: ${n}, ceiling ${ceiling[pkg] ?? 0}`)
   const under = Object.entries(ceiling)
     .filter(([pkg, n]) => (actual[pkg] ?? 0) < n)
     .map(([pkg]) => `${pkg}: ${actual[pkg] ?? 0}`)
   return { over, under }
+}
+
+/** `source` (the text of this module) with each ASSERTIONS number lowered to what its package holds: what `pnpm lint:tighten` writes. Never raised. */
+export function tightenAssertions(source: string, actual: Record<string, number>): string {
+  const block = /(export const ASSERTIONS\b[^=]*=\s*\{)([^}]*)(\})/
+  const entry = /(['"])([^'"]+)\1(\s*:\s*)(\d+)/g
+  return source.replace(block, (_all, head: string, body: string, tail: string) => head + body.replace(entry, (_m, quote: string, pkg: string, colon: string, n: string) => quote + pkg + quote + colon + String(Math.min(Number(n), actual[pkg] ?? 0))) + tail)
 }
 
 /**
@@ -456,26 +461,25 @@ export function mainLists(root: string, ref: string): MainLists {
 }
 
 /**
- * The ASSERTIONS ceilings and ASSERTION_ROOM a copy of this module's source declares, or null when it has none (a base
- * from before they were here). Read from main's copy, so that a change cannot raise them: they only go down.
+ * The ASSERTIONS ceilings a copy of this module's source declares, or null when it has none (a base from before they
+ * were here). Read from main's copy, so that a change cannot raise them: they only go down.
  */
-export function assertionsOf(source: string): { ceilings: Record<string, number>; room: number } | null {
+export function assertionsOf(source: string): Record<string, number> | null {
   const block = /export const ASSERTIONS\b[^=]*=\s*\{([^}]*)\}/.exec(source)
   if (!block) return null
   const ceilings: Record<string, number> = {}
   for (const m of (block[1] ?? '').matchAll(/(['"])([^'"]+)\1\s*:\s*(\d+)/g)) ceilings[m[2] ?? ''] = Number(m[3])
-  const room = /export const ASSERTION_ROOM\s*=\s*(\d+)/.exec(source)
-  return { ceilings, room: room ? Number(room[1]) : 0 }
+  return ceilings
 }
 
 /** The ceilings main had where this branch left it (as `mainLists` finds main's lists), or why they could not be read */
-export function mainAssertions(root: string, ref: string): { kind: 'ceilings'; base: string; ceilings: Record<string, number>; room: number } | { kind: 'none' | 'unreadable'; why: string } {
+export function mainAssertions(root: string, ref: string): { kind: 'ceilings'; base: string; ceilings: Record<string, number> } | { kind: 'none' | 'unreadable'; why: string } {
   const base = baseCommit(root, ref)
   if (!base) return { kind: 'unreadable', why: `no merge base with ${ref} in this checkout` }
   const source = runGit(root, 'show', `${base}:tooling/lint-allowlist.ts`)
   if (source === null) return { kind: 'unreadable', why: `could not read tooling/lint-allowlist.ts at ${base}` }
   const found = assertionsOf(source)
-  return found ? { kind: 'ceilings', base, ...found } : { kind: 'none', why: `main has no ceilings yet at ${base}; this change brings them` }
+  return found ? { kind: 'ceilings', base, ceilings: found } : { kind: 'none', why: `main has no ceilings yet at ${base}; this change brings them` }
 }
 
 /** What `pnpm lint` adds under ESLint's report about the type-aware findings left, as lines */
