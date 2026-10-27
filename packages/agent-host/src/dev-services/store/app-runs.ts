@@ -213,8 +213,8 @@ export class AppRunRecords {
   /**
    * Closes out runs that never saw an end (once, at startup). When the host dies, the app
    * process's input also closes and it ends — a row left at `running` would look like it is
-   * running forever. The same reasoning as fixing session state at startup (`manager.ts`'s
-   * LIVE_ONLY): a "live" state is only true while a process backs it.
+   * running forever. The same reasoning as fixing session state at startup (`manager.ts`, by
+   * `turnCut`): a "live" state is only true while a process backs it.
    */
   settleUnfinishedAppRuns(error: string): number {
     return this.db.prepare(`UPDATE app_runs SET status = 'error', error = ? WHERE status = 'running'`).run(error).changes

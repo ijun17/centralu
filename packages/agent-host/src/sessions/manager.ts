@@ -65,7 +65,6 @@ import type {
   PermissionPreset,
   QuestionAnswer,
   SessionInfo,
-  SessionState,
   ToolName,
   MachineAskConsent,
   UsageHistory,
@@ -138,7 +137,7 @@ export type KeptAgent = { sessionId: string; tool: ToolName; process: AgentProce
 import { Store } from '../dev-services/store.js'
 import type { UpdateService } from '../updates.js'
 import type { UpdateApplyBroker } from '../update-apply.js'
-import { cutTurns, inTurn, sessionIdle, type SessionIdle } from '../idle.js'
+import { cutTurns, inTurn, sessionIdle, turnCut, type SessionIdle } from '../idle.js'
 import { recordUpdateCut, UpdateResumeLists, type UpdateResumeFolder } from '../lifecycle/update-resume.js'
 import { UPDATE_CONTINUE_LINE, UPDATE_CONTINUE_TEXT } from './interruptions.js'
 import { appSettingRests, CardRests } from './card-rest.js'
@@ -518,8 +517,9 @@ export class SessionManager {
      * A live state (working, waiting for approval) is **only true when a process exists**.
      * At startup no session has a process, so every one of them is corrected to idle. It wakes
      * again once something addresses it — that is better than showing a state that is not true.
+     * Which states those are is the one definition a stop lists the turns it ends by (`turnCut`, idle.ts, #1618): what a
+     * stop cut and what this start finds cut are the same sessions.
      */
-    const LIVE_ONLY: SessionState[] = ['working', 'waiting_approval']
     /** Sessions this start found mid-turn with no process (#698): whoever gave them the turn is told once */
     const stoppedByQuit: SessionInfo[] = []
     /** Sessions whose turn a hub's update cut, continued once the start is done (#1618, `continueCutTurns`) */
@@ -532,7 +532,7 @@ export class SessionManager {
        * restart and `adoptKept` re-attaches it. That state is true; if the adoption fails, it is reset
        * there.
        */
-      const cut = LIVE_ONLY.includes(s.state) && !keeperOpts.keptSessions?.has(s.id)
+      const cut = turnCut(s) && !keeperOpts.keptSessions?.has(s.id)
       /*
        * And where a linked hub's update cut the turn (#1618): the turn goes on, in a new process, as a kept session's
        * does in its old one. It stays `working` until it is continued, so a hub reading this machine meanwhile sees a
