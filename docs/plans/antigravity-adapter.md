@@ -117,6 +117,17 @@ that gets JSON on stdin and answers JSON on stdout. Measured in print mode:
 **That is the approval path**: the session runs with `--dangerously-skip-permissions`, and Centralu's own
 `PreToolUse` hook, which blocks until the person answers the card, is the only gate ([§5](#5-approvals)).
 
+**The person's deny rules still apply under the skip flag** (1.4.8, 2026-10-27, rules added to the settings file for
+the run and the file put back byte for byte after it). `~/.gemini/antigravity-cli/settings.json` holds
+`permissions.deny`, a list of `kind(target)` strings; `agy -p /permissions --output-format json` lists them back as
+written, per scope (`project`, `shared`, `global`), an entry it cannot parse included. With no hook:
+`command(echo deny-me)` refused `echo deny-me` and `echo ok; echo deny-me` ("Permission denied for unsandboxed(…).
+Matches user-configured deny rule.") and let `echo deny-me-also` run; `write_file(<folder>)` and `read_file(<folder>)`
+refused a write and a read under the folder, but only when the rule spelled the path as the call did (a rule under
+`/tmp` missed the same file as `/private/tmp`); `ls` of a denied folder through `run_command` ran. The kinds, from the
+binary's own documentation of its grants: `command(<prefix>)`, `read_file(<path>)`, `write_file(<path>)`,
+`mcp(<server>/<tool>)`, `read_url(<domain>)`, `execute_url(<domain>)`.
+
 ### 1.3 Where hooks, MCP servers and rules come from, without writing anyone's config
 
 Customization roots (embedded docs): the global `~/.gemini/config/` and every `.agents/` between the working folder and
@@ -268,14 +279,24 @@ person's config:
 
 ```
 .agents/plugins/centralu/plugin.json       {"name": "centralu"}
-.agents/plugins/centralu/hooks.json        PreToolUse "*" → agy-gate.mjs (timeout: §5.4); SessionStart → role text (§7.2)
+.agents/plugins/centralu/hooks.json        PreToolUse "*" → gate/agy-gate.mjs, timeout 900 s (§5.4)
+.agents/plugins/centralu/gate/             agy-gate.mjs and gate-answer.mjs, both copied: the entry imports the other
 .agents/plugins/centralu/mcp_config.json   Centralu's bridge and one entry per attached app (§7.1)
-.agents/plugins/centralu/rules/AGENTS.md   only if the role text needs a rule file (§7.2)
+.agents/plugins/centralu/rules/AGENTS.md   the role text, when the session has one (§7.2)
 ```
 
-The files hold paths and names, **no secret**: the bridge credential and the gate's callback address reach the hook and
-the MCP servers through `agy`'s environment, which both inherit (measured). The folder is made read-only, and the gate
-refuses any write into it, since the agent sees it as a workspace. It is removed with the session.
+`plugin-root.ts` writes it (`writePluginRoot`, `removePluginRoot`). The files hold paths and names, **no secret**: the
+bridge credential and the gate's callback address reach the hook and the MCP servers through `agy`'s environment, which
+both inherit (measured). An app's entry names its server in its own `env` (`CC_APP_SERVER`); that `agy` adds such an
+`env` to the inherited one rather than replacing it was not measured, so it is checked with the wiring. The folder is
+made read-only (files 0444, folders 0555), and the gate refuses any write into it, since the agent sees it as a
+workspace. It is removed with the session.
+
+Both gate files are copied (#1666 review finding 2): a copy of the entry alone exits 1 without an answer, which `agy`
+takes as a refusal. They are found where `bridge-path.ts` finds the bridge (`agyGatePaths()`): `agy/` beside the module
+in the source tree, and `agy/` beside the bundled host, where the bundle step is to put them (the wiring's pull
+request). The module touches no file itself (docs/plans/os-layer.md): it is handed the file operations, the OS layer's
+`files` by the same names, or Node's `fs/promises` in the recorder.
 
 ### 3.3 Teardown
 
@@ -373,20 +394,31 @@ The card carries the hook's `stepIdx`, which is the stream's `step_index` (measu
 
 ### 5.2 Presets
 
+As built (`gate.ts`), each proved by a live run (`recordings/agy-1.4.8/preset-*`):
+
 | Preset | The gate |
 |---|---|
-| `auto` | allows everything at once (the hook still runs, so `gatesSteps` holds) |
-| `edits` (#1525) | allows reads, and edits inside the session's folder; a card for the rest |
-| `normal` | allows reads inside the workspace (agy's own default does the same, per the changelog); a card for edits, commands, URL reads, browser actions and MCP calls to servers other than Centralu's |
-| `safe` | a card for everything but reads inside the session's folder |
+| `auto` | allows every known tool at once (the hook still runs, so `gatesSteps` holds) |
+| `edits` (#1525) | as `normal`, and an edit inside the session's folder without a card (`edit-grant.ts`) |
+| `normal` | allows reads inside the session's folder, its readable folders and the paths given to read later, and starting a sub-agent (its own calls pass the gate one by one); a card for edits, commands, URL reads, browser actions and MCP calls to servers other than Centralu's |
+| `safe` | a card for everything but reads inside the session's folder and Centralu's own tools |
+
+The order is the ACP adapter's (`grantedWithoutCard`): `auto`, Centralu's own tool, the `edits` grant, a saved
+"always" rule (`always-allow.ts`), then the reads above; anything else is a card. Core PR 8's decision order is not
+waited for; `agy` moves onto it when it lands. Two refusals come before any allow, under every preset: a write into the
+plugin root (§3.2), by any tool that names a path there, and the person's own deny rules (§5.5). A read of `agy`'s MCP
+tool descriptors (`~/.gemini/antigravity-cli/mcp/`) is allowed under every preset: the model reads one before each MCP
+call (measured under `safe`), and they are tool schemas `agy` writes itself. A path is checked through its links: a link
+in the folder that points out of it is outside it.
 
 `tool-kinds.ts` classifies by tool name (`view_file`, `read_file`, `list_dir`, `grep_search`, `find_by_name` read;
 `write_to_file`, `replace_file_content`, `multi_replace_file_content`, `sed_file`, `notebook_edit` edit; `run_command`,
 `send_command_input`, `notebook_execution` execute; `call_mcp_tool` by `ServerName`; `invoke_subagent` and the
 messaging tools subagent; `browser_*`, `read_url_content`, `search_web` outside). **An unknown name is a card**, never
-an allow: the list in `init.tools` is not complete (measured), and a new tool must not slip through. Calls to
-Centralu's own server (`centralu_*` server names) are allowed by the gate; the host's own approvals apply inside the
-bridge, as now.
+an allow, under `auto` too: the list in `init.tools` is not complete (measured), and a new tool must not slip through.
+Calls to Centralu's own server (`centralu_centralu`, as `agy` names the plugin's `centralu` server) are allowed by the
+gate; the host's own approvals apply inside the bridge, as now. An attached app's server is not Centralu's own and gets
+a card under `normal` and `safe`.
 
 ### 5.3 Who else answers
 
@@ -400,8 +432,34 @@ The gate fails closed: the host unreachable past a short retry across a swap →
 
 **The gate's end sends its headers at once and then a space every so often until it decides.** Node's `fetch` gives up
 on an answer whose headers, or next piece of body, take over 300 s, and a person may take longer over a card; JSON reads
-leading spaces as nothing, so the heartbeat does not change the answer. Until that end exists (`feat/agy-gate`), a card
-left open past 300 s ends as `deny`.
+leading spaces as nothing, so the heartbeat does not change the answer. That end is the gate's route on the host
+(#1654), built apart from `gate.ts`; until it exists, a card left open past 300 s ends as `deny`. The route hands
+`AgyGate.answer` an `AbortSignal` that fires when the hook's connection closes (`agy` killed it at its timeout), and the
+card is closed `deny`.
+
+### 5.5 The person's own deny rules
+
+Owner decision (#59, open question 1): the gate honours the person's `agy` deny rules on top of the preset, and only
+deny rules, so they can only make a session stricter. `deny-rules.ts` reads `permissions.deny` from
+`~/.gemini/antigravity-cli/settings.json` once when the session starts; a missing file, one that cannot be read or
+parsed, or one without the list gives no rules, and the preset alone decides. An entry of a kind it does not know is
+ignored, as `agy` ignores it. The refusal names the rule: "A deny rule in the person's agy settings blocks this call:
+command(git push)", which the model reads and can tell the person.
+
+`agy` applies these rules itself under the skip flag (§1.2), so the gate's check is mostly early: a call `agy` would
+refuse after the person allowed it gets no card. Where a rule's meaning is not certain it is read broadly, since a
+broader deny only asks less: a command rule matches each part of a compound command (split at `;`, `&`, `|`,
+newlines, `$(`, backticks and parentheses, without reading quotes) by whole words, its program also through a path
+(`/bin/rm`); a path rule matches what is under it, as written or through links (where `agy` did not); a domain rule
+matches its subdomains. Not read: the `project` and `shared` scopes `/permissions` lists (`~/.gemini/config/projects/`
+and the Antigravity app's); `agy` still applies those itself.
+
+### 5.6 Stop
+
+`stopTurn(gate, interrupt)` answers every open gate request `deny` ("The turn was stopped."), then sends the interrupt,
+and the gate refuses every further call until `resume()` (the next turn). Measured with a card open
+(`recordings/agy-1.4.8/stop-card`): the process ended 0.5–0.6 s after the Stop, exit 1. The other order hangs until the
+hook's own timeout (§1.5).
 
 How `agy` treats a hook that does not answer as asked was measured (§1.2): a timeout, a non-zero exit, output that is
 not JSON, `{}` and an unknown decision all keep the tool from running. **Empty output with exit 0 lets it run.** So
@@ -440,10 +498,10 @@ in the prompt prefix: `toolDeferral` is true in effect (to confirm against how t
 ### 7.2 Role text
 
 Unlike ACP, `agy` has two measured paths into the model: the `SessionStart` hook's `systemMessage` (persists in the
-conversation) and the plugin's `rules/AGENTS.md`. `systemPromptAppend` goes through `SessionStart`; `instructionChannel`
-is `server` for the bridge's own MCP instructions. `SessionStart` fires only for a new conversation, so a resumed
-session keeps the role text it started with (as stored in its history), and a changed role text needs a new
-conversation, as for Claude.
+conversation) and the plugin's `rules/AGENTS.md`. The first release writes `systemPromptAppend` to `rules/AGENTS.md`
+(`plugin-root.ts`): a rule file is read on every turn, a resumed conversation included, and needs no second hook
+command. `instructionChannel` is `server` for the bridge's own MCP instructions. `SessionStart` (it fires only for a new
+conversation) is not used.
 
 ### 7.3 Repository trust
 
@@ -595,10 +653,8 @@ so it is run by hand before an `agy` bump, not on a schedule. The weekly surface
 
 ## 14. Open questions
 
-1. **Running with `--dangerously-skip-permissions`.** The gate replaces `agy`'s own checks, so the person's own `agy`
-   deny rules in `settings.json` no longer apply to Centralu's `agy` sessions (the flag skips every permission prompt).
-   Acceptable with Centralu's presets as the only rules, or should the gate also read and honour the person's `agy`
-   deny rules?
+1. ~~**Running with `--dangerously-skip-permissions`**~~: decided (owner, #59): the gate honours the person's deny rules,
+   deny only (§5.5). Measured since: `agy` applies them itself under the flag too (§1.2).
 2. ~~**Hook failure modes**~~: measured (§1.2, §5.4). Only empty output with exit 0 lets the tool run; the gate script
    always prints a decision, so no watchdog.
 3. **No context window.** Show used tokens without a share, or keep `contextUsage: 'none'` until `agy` reports a window?
