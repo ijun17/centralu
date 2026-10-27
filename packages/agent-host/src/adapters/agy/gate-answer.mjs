@@ -12,8 +12,10 @@
  *
  * It uses Node's global `fetch`, and touches no file, path or process (docs/plans/os-layer.md). `fetch` gives up on an
  * answer whose headers, or next piece of body, take over 300 s, and a person may take longer over a card: the gate's
- * end must send its headers at once and a space every so often until it decides (JSON reads leading spaces as nothing).
- * That end is built with the gate (§5.4); until then a card open past 300 s ends as `deny`.
+ * end sends its headers at once and a space every so often until it decides (JSON reads leading spaces as nothing):
+ * the front door's gate route, `transport/gate-door.ts`. The address and key come from the environment (`CC_GATE_URL`,
+ * `CC_GATE_TOKEN`, the names `GATE_ENV` in `adapters/core/gate.ts` gives); a redirect is refused (`redirect: 'error'`),
+ * so the key is never sent anywhere but the address the session gave.
  */
 
 /** Errors that mean the request never reached anyone (nothing listens there yet: a host swap), so it is safe to send again */
@@ -64,10 +66,10 @@ function errorCode(e) {
 
 /** @param {Parameters<typeof gateAnswer>[0]} io */
 async function decide({ env, input, fetch, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = Date.now }) {
-  const url = env.CC_AGY_GATE_URL
-  const token = env.CC_AGY_GATE_TOKEN
+  const url = env.CC_GATE_URL
+  const token = env.CC_GATE_TOKEN
   if (!url || !token) return deny('Centralu could not check this call: its approval gate is not set up for this session.')
-  const retryMs = Number(env.CC_AGY_GATE_RETRY_MS) || 3000
+  const retryMs = Number(env.CC_GATE_RETRY_MS) || 3000
   const until = now() + retryMs
   let res
   for (;;) {

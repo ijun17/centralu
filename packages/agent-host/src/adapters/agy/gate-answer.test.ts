@@ -9,7 +9,7 @@ import { gateAnswer, runHook } from './gate-answer.mjs'
  */
 
 const INPUT = JSON.stringify({ conversationId: 'conv-1', stepIdx: 2, toolCall: { name: 'run_command', args: { CommandLine: 'echo hi' } } })
-const ENV = { CC_AGY_GATE_URL: 'http://127.0.0.1:1/gate', CC_AGY_GATE_TOKEN: 'tok' }
+const ENV = { CC_GATE_URL: 'http://127.0.0.1:1/gate', CC_GATE_TOKEN: 'tok' }
 
 type Call = { url: string; init: RequestInit }
 const reply = (status: number, body: string) => () => Promise.resolve(new Response(body, { status }))
@@ -32,7 +32,7 @@ describe('the gate hook’s answer (gate-answer.mjs)', () => {
     const { calls, result } = run(reply(200, JSON.stringify({ decision: 'allow' })))
     expect(await result).toEqual({ decision: 'allow' })
     expect(calls).toHaveLength(1)
-    expect(calls[0]!.url).toBe(ENV.CC_AGY_GATE_URL)
+    expect(calls[0]!.url).toBe(ENV.CC_GATE_URL)
     expect(calls[0]!.init).toMatchObject({ method: 'POST', body: INPUT, headers: { authorization: 'Bearer tok' } })
   })
 
@@ -71,7 +71,7 @@ describe('the gate hook’s answer (gate-answer.mjs)', () => {
   }
 
   it('tries an unreachable gate again for its retry window, then denies', async () => {
-    const { calls, result } = run(refused, { ...ENV, CC_AGY_GATE_RETRY_MS: '1000' })
+    const { calls, result } = run(refused, { ...ENV, CC_GATE_RETRY_MS: '1000' })
     expect(await result).toMatchObject({ decision: 'deny', reason: expect.stringContaining('ECONNREFUSED') })
     expect(calls.length).toBe(5)
   })
@@ -84,8 +84,8 @@ describe('the gate hook’s answer (gate-answer.mjs)', () => {
   })
 
   for (const [what, env] of [
-    ['no address', { CC_AGY_GATE_TOKEN: 'tok' }],
-    ['no credential', { CC_AGY_GATE_URL: ENV.CC_AGY_GATE_URL }],
+    ['no address', { CC_GATE_TOKEN: 'tok' }],
+    ['no credential', { CC_GATE_URL: ENV.CC_GATE_URL }],
   ] as const) {
     it(`answers deny, asking no one, when the session gave it ${what}`, async () => {
       const { calls, result } = run(reply(200, JSON.stringify({ decision: 'allow' })), env)
@@ -94,8 +94,20 @@ describe('the gate hook’s answer (gate-answer.mjs)', () => {
     })
   }
 
+  it('follows no redirect: the key goes nowhere but the session’s address, and an allow from elsewhere is not taken', async () => {
+    // A gate address that redirects, with fetch's own rule: `redirect: 'error'` rejects, anything else follows
+    const elsewhere: Call[] = []
+    const { result } = run((call) => {
+      if (call.init.redirect === 'error') return Promise.reject(new TypeError('fetch failed', { cause: new Error('unexpected redirect') }))
+      elsewhere.push(call)
+      return reply(200, JSON.stringify({ decision: 'allow' }))()
+    })
+    expect((await result).decision).toBe('deny')
+    expect(elsewhere).toEqual([])
+  })
+
   it('keeps the address and credential out of what the model is told', async () => {
-    const leak = new TypeError(`bad header value Bearer tok for ${ENV.CC_AGY_GATE_URL}`)
+    const leak = new TypeError(`bad header value Bearer tok for ${ENV.CC_GATE_URL}`)
     const out = await run(() => Promise.reject(leak)).result
     expect(JSON.stringify(out)).not.toMatch(/tok|127\.0\.0\.1/)
   })
