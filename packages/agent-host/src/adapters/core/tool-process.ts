@@ -8,8 +8,8 @@ import { lineSplitter } from '../../transport/json-lines.js'
  * order, and how the process ended. It reads and records only: no line is held, split differently, dropped or changed for
  * whoever reads or writes after it, and the process returned is the one given.
  *
- * Call it before the wire's own reader is attached, so a line is recorded before the wire has seen it (the order the
- * recorder had inside `AcpConnection`). A blank line is not a frame and is not recorded.
+ * Call it before the wire's own reader is attached, so a line is recorded before the wire has seen it (all the lines of
+ * a chunk before the wire handles the first: the order on the pipe). A blank line is not a frame and is not recorded.
  */
 export function tapProcess<P extends AgentProcess>(proc: P, recorder: FrameRecorder | undefined): P {
   if (!recorder) return proc
