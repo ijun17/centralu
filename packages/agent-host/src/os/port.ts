@@ -69,7 +69,10 @@ export type LinkKind = 'file' | 'dir' | 'junction'
 export type MkdirOptions = { recursive?: boolean; mode?: number }
 export type WriteOptions = { mode?: number; flag?: 'w' | 'wx' | 'a' | 'ax' }
 export type RmOptions = { recursive?: boolean; force?: boolean; maxRetries?: number; retryDelay?: number }
-/** `cp`: `verbatimSymlinks` keeps a link's target as written; on Windows a junction is still copied as its target (`traits.cpKeepsLinks`) */
+/**
+ * `cp`: `verbatimSymlinks` keeps a link's target as written; on Windows a junction is still copied as its target
+ * (`traits.cpKeepsLinks`), and a tree with a link back into itself is refused (`ELOOP`, `OsFiles.cpSync`)
+ */
 export type CopyTreeOptions = { recursive?: boolean; verbatimSymlinks?: boolean; preserveTimestamps?: boolean; force?: boolean; errorOnExist?: boolean }
 /** Open flags by name, or a number from `files.constants` (`O_RDONLY | O_NOFOLLOW`; on Windows `O_NOFOLLOW` and `O_NONBLOCK` are 0) */
 export type OpenFlags = 'r' | 'r+' | 'w' | 'wx' | 'a' | 'ax' | number
@@ -117,6 +120,11 @@ export interface OsFiles {
   statSync(path: HostPath, options: { throwIfNoEntry: false }): OsStats | undefined
   lstatSync(path: HostPath): OsStats
   lstatSync(path: HostPath, options: { throwIfNoEntry: false }): OsStats | undefined
+  /**
+   * A folder's names. With `recursive`, breadth first as Node lists (`a, b, a/x`), and never into a link, a junction
+   * included: Node enters a junction on Windows and not a link on POSIX, and the `Os` answers alike on both, so a
+   * link back to a folder above cannot make a listing endless or cut short (`listRecursive` in rules.ts)
+   */
   readdirSync(path: HostPath, options?: { recursive?: boolean }): string[]
   readdirSync(path: HostPath, options: { withFileTypes: true; recursive?: boolean }): OsDirent[]
   readFileSync(path: HostPath): Buffer
@@ -128,6 +136,11 @@ export interface OsFiles {
   mkdtempSync(prefix: HostPath): HostPath
   renameSync(from: HostPath, to: HostPath): void
   copyFileSync(from: HostPath, to: HostPath, mode?: number): void
+  /**
+   * A copy of a file or, with `recursive`, a tree. Where a copy follows links (Windows: a junction is copied as its
+   * folder, `traits.cpKeepsLinks`), a tree with a link to a folder it is already inside is refused with `ELOOP`
+   * before anything is copied: Node's own copy of one ended the host with nothing to catch (`linkLoop` in rules.ts).
+   */
   cpSync(from: HostPath, to: HostPath, options?: CopyTreeOptions): void
   unlinkSync(path: HostPath): void
   rmdirSync(path: HostPath): void
@@ -211,7 +224,8 @@ export type OsExit = { code: number | null; signal: NodeJS.Signals | null }
 
 /**
  * One of the child's standard streams: a pipe to the host, nothing, an extra duplex pipe (`'overlapped'`: the apps'
- * broker channel on fd 3), or a file the host opened (`openSync`), which the child writes into.
+ * broker channel on fd 3), or a file the host opened (`openSync`): the child reads it as its stdin (from the
+ * descriptor's position), or writes into it.
  */
 /** `'inherit'`: the host's own (a child whose output is the host's log); in memory, discarded */
 export type OsStdio = 'pipe' | 'ignore' | 'inherit' | 'overlapped' | number
@@ -249,7 +263,12 @@ export interface OsChild {
   readonly signalCode: NodeJS.Signals | null
   readonly killed: boolean
   readonly exited: Promise<OsExit & { error?: OsError }>
-  /** One signal to this process alone (Node's `kill`); on Windows any signal ends it. `stop` ends a tree. */
+  /**
+   * One signal to this process alone (Node's `kill`, default SIGTERM); false once it has ended. `stop` ends a tree.
+   * On Windows only SIGTERM, SIGKILL, SIGINT and SIGQUIT are sent, and each ends the process at once; any other throws
+   * (`ENOSYS`, or `ERR_UNKNOWN_SIGNAL` for a name Node does not know there, as `SIGUSR1`) and leaves it running
+   * (`signalRefusal` in rules.ts). On POSIX a program may trap any but SIGKILL; a name Linux does not know throws.
+   */
   kill(signal?: NodeJS.Signals): boolean
   /** The host may end while this runs (Node's `unref`); in memory, nothing */
   unref(): void
@@ -286,10 +305,26 @@ export type RunResult = OsExit & {
   ended?: 'timeout' | 'overflow' | 'aborted'
 }
 
-export type RunSyncResult = OsExit & { stdout: string; stderr: string; error?: OsError }
+export type RunSyncOptions = Omit<RunOptions, 'signal' | 'stdoutFile'> & {
+  /**
+   * How the output is answered: 'utf8' (the default) decodes it as UTF-8, 'buffer' gives the bytes. Windows' own
+   * tools (cmd, taskkill, PowerShell to a pipe) write in the console's code page, not UTF-8: Korean from `cmd /c echo`
+   * on a Korean Windows comes out as replacement characters in 'utf8', so read anything beyond ASCII as bytes.
+   */
+  encoding?: 'utf8' | 'buffer'
+}
+
+/**
+ * How a `runSync` ended: `error` when it did not start (`ENOENT`), passed `maxBuffer` on stdout or stderr (`ENOBUFS`,
+ * the output so far kept, ended with SIGTERM) or `timeoutMs` (`ETIMEDOUT`, ended with SIGTERM)
+ */
+export type RunSyncResult<T extends string | Buffer = string> = OsExit & { stdout: T; stderr: T; error?: OsError }
 
 export interface OsProcesses {
-  /** Starts a child (see `StartOptions`); never throws: a child that could not start emits `'error'` */
+  /**
+   * Starts a child (see `StartOptions`); never throws: a child that could not start emits `'error'`. On Windows a
+   * path without an extension is tried with `.com` and `.exe` only, never as written (`programCandidates`)
+   */
   start(command: string, args: readonly string[], options?: StartOptions): OsChild
   /**
    * Runs a program to its end and answers its exit and output, a non-zero exit included; rejects only when it could
@@ -298,7 +333,8 @@ export interface OsProcesses {
    */
   run(command: string, args: readonly string[], options?: RunOptions): Promise<RunResult>
   /** The same, holding the host until it ends (the layer's own `taskkill` and `ps`, a lock's owner): keep these few */
-  runSync(command: string, args: readonly string[], options?: Omit<RunOptions, 'signal' | 'stdoutFile'>): RunSyncResult
+  runSync(command: string, args: readonly string[], options?: RunSyncOptions & { encoding?: 'utf8' }): RunSyncResult
+  runSync(command: string, args: readonly string[], options: RunSyncOptions & { encoding: 'buffer' }): RunSyncResult<Buffer>
   /** A command line through the OS's shell (`cmd.exe /d /s /c`, `/bin/sh -c`): a person's own setup command, never built from parts */
   runShell(commandLine: string, options?: Omit<RunOptions, 'stdoutFile'>): Promise<RunResult>
   /**
@@ -311,7 +347,8 @@ export interface OsProcesses {
   alive(pid: number): boolean
   /**
    * One signal to a process the host did not start, by pid (`process.kill`: a stray from a host before, a lock's
-   * owner): false when there is no such process; throws `EPERM`. On Windows any signal ends it.
+   * owner): false when there is no such process; throws `EPERM`. Which signals are sent is `OsChild.kill`'s rule:
+   * on Windows TERM, KILL, INT and QUIT end it, any other throws (`ENOSYS`, `ERR_UNKNOWN_SIGNAL`).
    */
   signal(pid: number, signal: NodeJS.Signals): boolean
   /** The host's own pid */

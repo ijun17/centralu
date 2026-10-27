@@ -24,6 +24,7 @@ import type {
   OsStdio,
   OsWatcher,
   RmOptions,
+  RunSyncOptions,
   RunSyncResult,
   SqliteOptions,
   StartOptions,
@@ -33,21 +34,32 @@ import type {
 } from './port.js'
 import {
   DEFAULT_PATHEXT,
+  IGNORED_BY_DEFAULT,
   commandInterpreter,
   envValue,
   fileUrlToPath,
   findOnPath,
+  foldCase,
   isInside,
   launchFor,
+  linkLoop,
+  listRecursive,
   pathKey,
+  pathRulesFrom,
   pathToFileUrl,
+  programCandidates,
   programFor,
   resolveCommand,
   samePath,
+  signalError,
+  signalRefusal,
+  storedTimeNs,
   traitsOf,
+  type ListedEntry,
   type OsFamily,
+  type TreeReader,
 } from './rules.js'
-import { abortReason, asError, errorCode } from './errors.js'
+import { abortReason, asError, errorCode, linkLoopError } from './errors.js'
 import { runChild } from './run.js'
 
 /**
@@ -104,7 +116,19 @@ export type ProgramContext = {
 /** A program: its exit code, or nothing for 0. Throwing writes the error to stderr and exits 1. */
 export type Program = (ctx: ProgramContext) => number | void | Promise<number | void>
 /** A program `runSync` can run: it answers at once */
-export type SyncProgram = (ctx: { args: readonly string[]; cwd: string; env: Env; input: string }) => { code?: number; stdout?: string; stderr?: string }
+/**
+ * A program `runSync` can run: it answers at once, with its output as text (UTF-8) or bytes (a tool writing in a
+ * console code page), and `ms`, how long it would take, for `timeoutMs`
+ */
+export type SyncProgram = (ctx: { args: readonly string[]; cwd: string; env: Env; input: string }) => {
+  code?: number
+  stdout?: string | Uint8Array
+  stderr?: string | Uint8Array
+  ms?: number
+}
+
+/** spawnSync's `maxBuffer` when none is given */
+const SYNC_MAX_BUFFER = 1024 * 1024
 
 export interface MemoryPrograms {
   /** Puts a program's file at `path` (folders made as needed) and runs `program` when it is started */
@@ -150,8 +174,11 @@ type DirNode = Meta & { kind: 'dir'; entries: Map<string, { name: string; node: 
 type LinkNode = Meta & { kind: 'link'; target: string; junction: boolean }
 type Node = FileNode | DirNode | LinkNode
 
-/** Where a path leads: the folder it is in, its name there, and the node when there is one */
-type Found = { parent: DirNode; name: string; node: Node | undefined; native: string; given: string }
+/** Where a path leads: the folder it is in, its name there, and the node when there is one; `dirOnly` for `name/` on POSIX */
+type Found = { parent: DirNode; name: string; node: Node | undefined; native: string; given: string; dirOnly?: boolean }
+
+/** Characters Windows refuses in a name (measured: `a*b` is ENOENT to write or read, EINVAL to make a folder) */
+const refusedOnWindows = (name: string) => /[<>"|?*]/.test(name) || [...name].some((c) => c.charCodeAt(0) < 0x20)
 
 const LINK_HOPS = 40
 const STAT_FILE = 0o100000
@@ -191,9 +218,12 @@ const later = (fn: () => void) => void setImmediate(fn)
 export function memoryOs(options: MemoryOsOptions): MemoryOs {
   const family = options.as
   const windows = family === 'windows'
-  const P: PlatformPath = windows ? win32 : posix
+  const HOME = windows ? 'C:\\Users\\person' : '/home/person'
+  const cwd = options.cwd ?? HOME
+  // Relative paths are read from this OS's working folder, never from the one of the process running the tests
+  const P: PlatformPath = pathRulesFrom(family, () => cwd)
   const traits = traitsOf(family)
-  const fold = (name: string) => (windows ? name.toLowerCase() : name)
+  const fold = (name: string) => foldCase(name, family)
   const canSymlink = options.symlinks ?? true
 
   // ---- time ----
@@ -262,19 +292,33 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
   function parse(p: string, syscall: string): { root: DirNode; rootPath: string; parts: string[] } {
     if (typeof p !== 'string' || p === '') throw fsError('ENOENT', syscall, String(p))
     if (windows) {
-      const full = win32.resolve(env.cwd(), p)
+      const full = win32.resolve(cwd, p)
       const root = win32.parse(full).root
       const drive = /^([A-Za-z]):\\$/.exec(root)?.[1]
       const node = drive ? roots.get(drive.toLowerCase()) : undefined
       if (!drive || !node) throw fsError('ENOENT', syscall, p)
-      return { root: node, rootPath: `${drive.toUpperCase()}:\\`, parts: full.slice(root.length).split('\\').filter(Boolean) }
+      const parts = full.slice(root.length).split('\\').filter(Boolean)
+      // A name Windows refuses (`a*b`): not there to read or write (ENOENT), invalid to make a folder of (EINVAL)
+      if (parts.some(refusedOnWindows)) throw fsError(syscall === 'mkdir' ? 'EINVAL' : 'ENOENT', syscall, p)
+      return { root: node, rootPath: `${drive.toUpperCase()}:\\`, parts }
     }
-    const full = p.startsWith('/') ? p : `${env.cwd()}/${p}`
+    const full = p.startsWith('/') ? p : `${cwd}/${p}`
     return { root: posixRoot, rootPath: '/', parts: full.split(posix.sep).filter((s) => s !== '') }
   }
 
-  /** Where `p` leads; `follow` follows a link in the last name too. Throws for a missing folder on the way. */
+  /**
+   * Where `p` leads; `follow` follows a link in the last name too. Throws for a missing folder on the way. On POSIX a
+   * trailing `/` names a folder: the last name is followed, and is `ENOTDIR` when it is not one (`file/`), as Linux
+   * answers; Windows reads `file\` as `file`.
+   */
   function lookup(p: string, follow: boolean, syscall: string, hops = 0): Found {
+    const trailing = !windows && typeof p === 'string' && p.length > 1 && p.endsWith('/')
+    const f = lookupName(p, follow || trailing, syscall, hops)
+    if (trailing && f.node && f.node.kind !== 'dir') throw fsError('ENOTDIR', syscall, p)
+    return trailing ? { ...f, dirOnly: true } : f
+  }
+
+  function lookupName(p: string, follow: boolean, syscall: string, hops: number): Found {
     const { root, rootPath, parts } = parse(p, syscall)
     let dir = root
     const native: string[] = []
@@ -429,20 +473,31 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
   const sortedEntries = (dir: DirNode) => [...dir.entries.values()].sort((a, b) => (fold(a.name) < fold(b.name) ? -1 : fold(a.name) > fold(b.name) ? 1 : 0))
 
   function readdir(p: string, o?: { withFileTypes?: boolean; recursive?: boolean }): string[] | OsDirent[] {
-    const f = lookup(p, true, 'scandir')
-    if (!f.node) throw fsError('ENOENT', 'scandir', p)
-    if (f.node.kind !== 'dir') throw fsError('ENOTDIR', 'scandir', p)
-    const names: string[] = []
-    const ents: OsDirent[] = []
-    const walk = (dir: DirNode, prefix: string, dirPath: string) => {
-      for (const e of sortedEntries(dir)) {
-        names.push(prefix + e.name)
-        ents.push(dirent(e.name, e.node, dirPath))
-        if (o?.recursive && e.node.kind === 'dir') walk(e.node, prefix + e.name + P.sep, P.join(dirPath, e.name))
-      }
+    const entriesOf = (dir: string): OsDirent[] => {
+      const f = lookup(dir, true, 'scandir')
+      if (!f.node) throw fsError('ENOENT', 'scandir', dir)
+      if (f.node.kind !== 'dir') throw fsError('ENOTDIR', 'scandir', dir)
+      return sortedEntries(f.node).map((e) => dirent(e.name, e.node, dir))
     }
-    walk(f.node, '', p)
-    return o?.withFileTypes ? ents : names
+    // Breadth first and never into a link, by the one rule the real OS follows too
+    const listed = o?.recursive ? listRecursive(p, entriesOf, (...s) => P.join(...s)) : entriesOf(p).map((entry) => ({ rel: entry.name, entry }))
+    return o?.withFileTypes ? listed.map((e) => e.entry) : listed.map((e) => e.rel)
+  }
+
+  /** The tree `linkLoop` walks, in memory */
+  const treeReader: TreeReader = {
+    list: (dir): ListedEntry[] => {
+      const n = lookupOrNull(dir, 'scandir', true)?.node
+      return n?.kind === 'dir' ? sortedEntries(n).map((e) => dirent(e.name, e.node, dir)) : []
+    },
+    real: (path) => {
+      try {
+        return realpathNative(path)
+      } catch {
+        return null
+      }
+    },
+    isDir: (path) => statSync(path, { throwIfNoEntry: false })?.isDirectory() ?? false,
   }
 
   function readFile(p: string): Buffer {
@@ -455,6 +510,16 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
 
   const bytes = (data: string | Uint8Array) => (typeof data === 'string' ? Buffer.from(data, 'utf8') : Buffer.from(data))
 
+  /**
+   * A file without its owner's write bit cannot be written: on Windows that is the read-only attribute, `EPERM` (to
+   * write, append, open for writing, copy or rename onto it; it can still be renamed away and removed); on POSIX the
+   * mode, `EACCES` for the owner the host runs as (never root)
+   */
+  const readOnly = (n: Node) => n.kind === 'file' && (n.perm & 0o200) === 0
+  const refuseReadOnly = (n: Node, syscall: string, p: string) => {
+    if (readOnly(n)) throw fsError(windows ? 'EPERM' : 'EACCES', syscall, p)
+  }
+
   /** The file at `p` for writing, made when missing; `exclusive` refuses one there */
   function fileForWrite(p: string, syscall: string, o: { exclusive?: boolean; mode?: number; noFollow?: boolean } = {}): FileNode {
     const f = lookup(p, !o.noFollow, syscall)
@@ -463,8 +528,11 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
       if (f.node.kind === 'dir') throw fsError('EISDIR', syscall, p)
       if (f.node.kind === 'link') throw fsError(windows ? 'EPERM' : 'ELOOP', syscall, p)
       if (windows && runningFiles.has(f.node)) throw fsError('EBUSY', syscall, p)
+      refuseReadOnly(f.node, syscall, p)
       return f.node
     }
+    // `name/` names a folder: a file is not made under it (Linux)
+    if (f.dirOnly) throw fsError('EISDIR', syscall, p)
     if (f.parent.kind !== 'dir') throw fsError('ENOENT', syscall, p)
     const n = newFile(f.parent.dev, Buffer.alloc(0), (o.mode ?? 0o666) & ~0o022)
     link(f.parent, f.name, n)
@@ -480,7 +548,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     notify(f.parent, f.name, 'change')
   }
 
-  function mkdir(p: string, o: MkdirOptions = {}) {
+  function mkdir(p: string, o: MkdirOptions = {}, parentOf?: string) {
     // A link in the name's place is taken (EEXIST), even one that leads nowhere; `mkdir -p` follows it, to a folder
     // (done), to anything else (EEXIST) or nowhere (ENOENT), as Node does on Linux and Windows alike
     const named = lookupOrNull(p, 'mkdir')
@@ -498,11 +566,13 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
       const up = P.dirname(p)
       if (!o.recursive || errorCode(e) !== 'ENOENT' || up === p) throw e
       // A folder on the way is missing: made first, as `mkdir -p` does
-      mkdir(up, o)
+      mkdir(up, o, parentOf ?? p)
       f = lookup(p, true, 'mkdir')
     }
     if (f.node) {
       if (o.recursive && f.node.kind === 'dir') return
+      // A file on the way of `mkdir -p` (Windows reads it as missing, then finds it there): ENOTDIR, as on Linux
+      if (parentOf !== undefined) throw fsError('ENOTDIR', 'mkdir', parentOf)
       throw fsError('EEXIST', 'mkdir', p)
     }
     link(f.parent, f.name, newDir(f.parent, f.parent.dev, (o.mode ?? 0o777) & ~0o022))
@@ -537,18 +607,25 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     const b = lookup(to, false, 'rename')
     if (b.parent.dev !== a.parent.dev) throw fsError('EXDEV', 'rename', from, to)
     if (a.node === b.node) {
-      // The same file under another case on Windows: its name is stored as now written
-      const written = P.basename(to)
-      if (windows && a.parent === b.parent && written !== a.name) {
-        a.parent.entries.delete(fold(a.name))
-        link(a.parent, written, a.node)
-        touch(a.parent)
-        notify(a.parent, a.name, 'rename')
+      const sameEntry = a.parent === b.parent && fold(a.name) === fold(b.name)
+      if (sameEntry) {
+        // The same file under another case on Windows: its name is stored as now written
+        const written = P.basename(to)
+        if (windows && written !== a.name) {
+          a.parent.entries.delete(fold(a.name))
+          link(a.parent, written, a.node)
+          touch(a.parent)
+          notify(a.parent, a.name, 'rename')
+        }
+        return
       }
+      // Two hard links to one file: Windows takes the name away (one link left), POSIX does nothing (rename(2))
+      if (windows) unlinkEntry(a.parent, a.name)
       return
     }
     const src = a.node
-    if (src.kind === 'dir' && inside(src, b.parent)) throw fsError('EINVAL', 'rename', from, to)
+    // Into itself: Windows refuses with EPERM, Linux with EINVAL
+    if (src.kind === 'dir' && inside(src, b.parent)) throw fsError(windows ? 'EPERM' : 'EINVAL', 'rename', from, to)
     if (windows && src.kind === 'dir') {
       if (heldDirs.has(src)) throw fsError('EBUSY', 'rename', from, to)
       if (heldBelow(src)) throw fsError('EPERM', 'rename', from, to)
@@ -557,7 +634,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
       const dst = b.node
       if (windows) {
         if (dst.kind === 'dir') throw fsError('EPERM', 'rename', from, to)
-        if (openFiles.has(dst) || runningFiles.has(dst)) throw fsError('EPERM', 'rename', from, to)
+        if (openFiles.has(dst) || runningFiles.has(dst) || readOnly(dst)) throw fsError('EPERM', 'rename', from, to)
       } else if (dst.kind === 'dir') {
         if (src.kind !== 'dir') throw fsError('EISDIR', 'rename', from, to)
         if (dst.entries.size > 0) throw fsError('ENOTEMPTY', 'rename', from, to)
@@ -647,8 +724,20 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
 
   function cp(from: string, to: string, o: CopyTreeOptions = {}) {
     const src = existing(from, false, 'cp')
-    if (src.kind === 'dir' && isInside(P.resolve(from), P.resolve(to), family))
+    // Node's own checks before it copies anything, the same on every OS (measured on Windows and Linux)
+    const srcReal = src.kind === 'link' ? lookupOrNull(from, 'cp', true)?.node : src
+    const dest = lookupOrNull(to, 'cp', true)?.node
+    if (dest !== undefined && dest === srcReal) throw nodeError('ERR_FS_CP_EINVAL', `Invalid src or dest: cp returned EINVAL (src and dest cannot be the same) ${to}`, 'cp', to)
+    if (srcReal?.kind === 'dir' && isInside(P.resolve(from), P.resolve(to), family))
       throw nodeError('ERR_FS_CP_EINVAL', `Invalid src or dest: cp returned EINVAL (cannot copy ${from} to a subdirectory of self ${to}) ${to}`, 'cp', to)
+    if (srcReal?.kind === 'dir' && dest !== undefined && dest.kind !== 'dir')
+      throw nodeError('ERR_FS_CP_DIR_TO_NON_DIR', `Cannot overwrite non-directory ${to} with directory ${from}`, 'cp', to)
+    if (srcReal?.kind === 'file' && dest?.kind === 'dir') throw nodeError('ERR_FS_CP_NON_DIR_TO_DIR', `Cannot overwrite directory ${to} with non-directory ${from}`, 'cp', to)
+    // A copy that follows links (Windows' junctions) would not end on a link back into the tree: refused first
+    if (!traits.cpKeepsLinks && o.recursive) {
+      const loop = linkLoop(from, treeReader, family, (...s) => P.join(...s))
+      if (loop !== null) throw linkLoopError(loop)
+    }
     const copy = (s: Node, sPath: string, dPath: string) => {
       if (s.kind === 'link' && !(windows && s.junction)) {
         const target = o.verbatimSymlinks || P.isAbsolute(s.target) ? s.target : P.resolve(P.dirname(sPath), s.target)
@@ -667,6 +756,8 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
       const there = lookup(dPath, true, 'cp').node
       if (there && o.errorOnExist && o.force === false) throw fsError('EEXIST', 'cp', dPath)
       if (there && o.force === false) return
+      // A file there is replaced, a read-only one too, and the copy takes the source's mode (measured on both)
+      if (there?.kind === 'file') unlink(dPath)
       copyFile(sPath, dPath)
       if (o.preserveTimestamps) {
         const d = existing(dPath, true, 'cp')
@@ -683,11 +774,10 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     n.ctimeNs = nowNs()
   }
 
-  const toNs = (t: number | Date) => BigInt(Math.round((t instanceof Date ? t.getTime() : t * 1000) * 1e6))
   function utimes(p: string, atime: number | Date, mtime: number | Date) {
     const n = existing(p, true, 'utime')
-    n.atimeNs = toNs(atime)
-    n.mtimeNs = toNs(mtime)
+    n.atimeNs = storedTimeNs(atime, family)
+    n.mtimeNs = storedTimeNs(mtime, family)
   }
 
   // ---- descriptors ----
@@ -718,6 +808,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
       if (found.node.kind === 'link') throw fsError('ELOOP', 'open', p)
       // A folder opens (to fsync it); for writing too on Windows, not on POSIX. It reads as EISDIR
       if (found.node.kind === 'dir' && !windows && access !== constants.O_RDONLY) throw fsError('EISDIR', 'open', p)
+      if (access !== constants.O_RDONLY) refuseReadOnly(found.node, 'open', p)
       node = found.node
     }
     const fd = fdSeq++
@@ -737,6 +828,8 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     if (d.node.kind !== 'file') throw fsError('EISDIR', 'read')
     const at = position ?? d.pos
     const n = Math.max(0, Math.min(length, d.node.data.length - at))
+    // At or past the end (a log truncated under a reader): 0 bytes, as the OS answers
+    if (n === 0) return 0
     d.node.data.copy(buffer, offset, at, at + n)
     if (position === null) d.pos += n
     return n
@@ -951,7 +1044,6 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     promises,
   }
   // ---- the environment ----
-  const HOME = windows ? 'C:\\Users\\person' : '/home/person'
   const vars = new Map<string, string>()
   const defaults: Env = windows
     ? {
@@ -968,12 +1060,11 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
       }
     : { PATH: '/usr/local/bin:/usr/bin:/bin', HOME, USER: 'person', SHELL: '/bin/sh', TMPDIR: '/tmp' }
   const setVar = (name: string, value: string | undefined) => {
-    const key = windows ? [...vars.keys()].find((k) => k.toUpperCase() === name.toUpperCase()) ?? name : name
+    const key = windows ? ([...vars.keys()].find((k) => fold(k) === fold(name)) ?? name) : name
     if (value === undefined) vars.delete(key)
     else vars.set(key, value)
   }
   for (const [k, v] of Object.entries({ ...defaults, ...(options.env ?? {}) })) setVar(k, v)
-  const cwd = options.cwd ?? HOME
   const env = {
     get: (name: string) => envValue(Object.fromEntries(vars), name, family),
     all: (): Env => Object.fromEntries(vars),
@@ -1004,7 +1095,6 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     child: MemoryChild
     traps: Array<(signal: NodeJS.Signals) => boolean | void>
     ended: AbortController
-    held: Node[]
     terminate: (exit: OsExit) => void
   }
   const programs = new Map<string, { program: Program; sync?: SyncProgram }>()
@@ -1013,7 +1103,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
   let pidSeq = windows ? 4000 : 2000
   const HOST_PID = windows ? 1200 : 1000
 
-  const programKey = (path: string) => pathKey(path, family)
+  const programKey = (path: string) => pathKey(path, family, cwd)
 
   /** The program file `command` names, as the OS would find it from `cwdPath` and `childEnv` */
   function findProgram(command: string, cwdPath: string, childEnv: Env): { path: string } | { error: string } {
@@ -1025,7 +1115,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
       }
     }
     const candidates: string[] = []
-    const withExts = (p: string) => (windows && !/\.[^\\/.]+$/.test(win32.basename(p)) ? [p, `${p}.com`, `${p}.exe`] : [p])
+    const withExts = (p: string) => programCandidates(p, family)
     if (/[\\/]/.test(command)) candidates.push(...withExts(P.resolve(cwdPath, command)))
     else if (windows) {
       // Windows' process creation looks in the working folder first, then PATH (libuv's search_path)
@@ -1062,11 +1152,16 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
       // `exited` carries a start that failed, as the real child's does: an `'error'` nobody listens to is no crash
       this.on('error', () => {})
     }
+    /** The family's rule for which signals are sent (`signalRefusal`); a refused one throws and ends nothing */
     kill(signal: NodeJS.Signals = 'SIGTERM'): boolean {
+      const refused = signalRefusal(signal, family)
+      if (refused === 'ERR_UNKNOWN_SIGNAL') throw signalError(signal, refused)
       const p = this.pid === undefined ? undefined : procs.get(this.pid)
       if (!p || !p.row.alive) return false
+      if (refused) throw signalError(signal, refused)
       this.killed = true
-      deliver(p, signal)
+      // Node reports a Windows child it ended with the signal it was sent
+      deliver(p, signal, { code: null, signal })
       return true
     }
     unref(): void {
@@ -1074,14 +1169,39 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     }
   }
 
-  /** A signal to a process: Windows ends it; POSIX lets a program trap it (never KILL) */
-  function deliver(p: Proc, signal: NodeJS.Signals) {
+  /**
+   * A signal the family sends (`signalRefusal` has passed it) to a process. Windows ends it at once, as `exit` says
+   * (a child's own `kill`: no code and the signal; `process.kill` by pid: code 1, as Windows reports a process ended from
+   * outside). POSIX lets a program trap it (never KILL), does nothing for one ignored by default, else ends it.
+   */
+  function deliver(p: Proc, signal: NodeJS.Signals, windowsExit: OsExit = { code: 1, signal: null }) {
     if (!p.row.alive) return
-    if (!windows && signal !== 'SIGKILL' && p.traps.some((t) => t(signal) === true)) return
+    if (windows) return p.terminate(windowsExit)
+    if (signal !== 'SIGKILL' && p.traps.some((t) => t(signal) === true)) return
+    if (IGNORED_BY_DEFAULT.has(signal)) return
     p.terminate({ code: null, signal })
   }
 
-  function startProcess(command: string, args: readonly string[], o: StartOptions, ppid: number, parentGroup: number): OsChild {
+  /**
+   * An output pipe and the processes that hold its writing end: it ends only when the last one has, so a grandchild
+   * given its parent's stdout (`'inherit'`) holds the host's pipe open after the child has exited, as on a real OS
+   */
+  type OutPipe = { stream: PassThrough; holders: number; onEnd: Array<() => void> }
+  const holdPipe = (pipe: OutPipe) => (pipe.holders++, pipe)
+  const releasePipe = (pipe: OutPipe) => {
+    if (--pipe.holders > 0) return
+    pipe.stream.end()
+    for (const f of pipe.onEnd.splice(0)) f()
+  }
+
+  function startProcess(
+    command: string,
+    args: readonly string[],
+    o: StartOptions,
+    ppid: number,
+    parentGroup: number,
+    parentPipes?: { stdout: OutPipe; stderr: OutPipe },
+  ): OsChild {
     const child = new MemoryChild(nowMs)
     const cwdPath = o.cwd ?? env.cwd()
     const childEnv = o.env ?? env.all()
@@ -1114,32 +1234,43 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
 
     const stdio = o.stdio ?? ['pipe', 'pipe', 'pipe']
     const programStdin = new PassThrough()
-    const programStdout = new PassThrough()
-    const programStderr = new PassThrough()
     let extra: Duplex | null = null
     const hostSide: Array<Readable | Writable | Duplex | null> = []
-    // fd 0
+    // fd 0: a pipe from the host, a file the host opened (read from its position), or nothing
     if (stdio[0] === 'pipe') {
       child.stdin = programStdin
       hostSide.push(programStdin)
+    } else if (typeof stdio[0] === 'number') {
+      const d = fdOf(stdio[0], 'read')
+      programStdin.end(d.node.kind === 'file' ? d.node.data.subarray(d.pos) : Buffer.alloc(0))
+      hostSide.push(null)
     } else {
       programStdin.end()
       hostSide.push(null)
     }
-    // fd 1 and 2
-    const outFor = (spec: OsStdio | undefined, pipe: PassThrough): Readable | null => {
-      if (spec === 'pipe' || spec === undefined) return pipe
+    // fd 1 and 2: a pipe to the host, a file, the parent program's own pipe (`'inherit'`), or nowhere
+    const held: OutPipe[] = []
+    const outFor = (spec: OsStdio | undefined, inherited: OutPipe | undefined): { pipe: OutPipe; host: Readable | null } => {
+      if (spec === 'inherit' && inherited) {
+        held.push(holdPipe(inherited))
+        return { pipe: inherited, host: null }
+      }
+      const pipe = holdPipe({ stream: new PassThrough(), holders: 0, onEnd: [] })
+      held.push(pipe)
+      if (spec === 'pipe' || spec === undefined) return { pipe, host: pipe.stream }
       if (typeof spec === 'number') {
         const fd = dupFd(spec)
-        pipe.on('data', (d: Buffer) => writeFd(fd, d))
-        pipe.on('end', () => closeFd(fd))
-        return null
+        pipe.stream.on('data', (d: Buffer) => writeFd(fd, d))
+        pipe.stream.on('end', () => closeFd(fd))
+        return { pipe, host: null }
       }
-      pipe.resume()
-      return null
+      pipe.stream.resume()
+      return { pipe, host: null }
     }
-    child.stdout = outFor(stdio[1], programStdout)
-    child.stderr = outFor(stdio[2], programStderr)
+    const out = outFor(stdio[1], parentPipes?.stdout)
+    const err = outFor(stdio[2], parentPipes?.stderr)
+    child.stdout = out.host
+    child.stderr = err.host
     hostSide.push(child.stdout, child.stderr)
     if (stdio[3] === 'overlapped') {
       const toProgram = new PassThrough()
@@ -1150,19 +1281,15 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     child.stdio = hostSide
 
     const ended = new AbortController()
-    const held: Node[] = []
     if (windows) {
       hold(heldDirs, cwdNode)
-      held.push(cwdNode)
       hold(runningFiles, programNode)
-      held.push(programNode)
     }
     const proc: Proc = {
       row,
       child,
       traps: [],
       ended,
-      held,
       terminate: (exit) => {
         if (!row.alive) return
         row.alive = false
@@ -1172,32 +1299,39 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
           release(heldDirs, cwdNode)
           release(runningFiles, programNode)
         }
-        programStdout.end()
-        programStderr.end()
+        // Input it never read: the host's write fails as a write to a closed pipe does (EPIPE)
+        if (programStdin.writableLength > 0) programStdin.destroy(Object.assign(new Error('write EPIPE'), { code: 'EPIPE', syscall: 'write' }))
+        for (const pipe of held) releasePipe(pipe)
         extra?.end()
         child.exitCode = exit.code
         child.signalCode = exit.signal
         later(() => {
           child.emit('exit', exit.code, exit.signal)
           child.settle(exit)
-          later(() => child.emit('close', exit.code, exit.signal))
+          // 'close' once its output has ended: at once, unless something it started still holds its pipes
+          const open = [...new Set([out.pipe, err.pipe])].filter((p) => p.holders > 0)
+          let left = open.length
+          const closed = () => later(() => child.emit('close', exit.code, exit.signal))
+          if (left === 0) closed()
+          for (const p of open) p.onEnd.push(() => --left === 0 && closed())
         })
       },
     }
     procs.set(pid, proc)
 
+    const pipes = { stdout: out.pipe, stderr: err.pipe }
     const ctx: ProgramContext = {
       args: [...args],
       cwd: cwdPath,
       env: childEnv,
       pid,
       stdin: programStdin,
-      stdout: programStdout,
-      stderr: programStderr,
+      stdout: out.pipe.stream,
+      stderr: err.pipe.stream,
       extra,
       os: memory,
-      // A program's children stay in its group unless it contains them, as a plain spawn does
-      start: (c, a, so = {}) => startProcess(c, a, { contained: false, ...so }, pid, row.pgid),
+      // A program's children stay in its group unless it contains them, as a plain spawn does; `'inherit'` hands them its pipes
+      start: (c, a, so = {}) => startProcess(c, a, { contained: false, ...so }, pid, row.pgid, pipes),
       onSignal: (listener) => void proc.traps.push(listener),
       ended: ended.signal,
     }
@@ -1208,7 +1342,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
         .then(
           (code) => proc.terminate({ code: typeof code === 'number' ? code : 0, signal: null }),
           (e: unknown) => {
-            if (row.alive) programStderr.write(String(asError(e).stack ?? e))
+            if (row.alive && !err.pipe.stream.writableEnded) err.pipe.stream.write(String(asError(e).stack ?? e))
             proc.terminate({ code: 1, signal: null })
           },
         )
@@ -1261,18 +1395,30 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     return { code: exit.code, signal: exit.signal }
   }
 
-  function runSync(command: string, args: readonly string[], o: { cwd?: string; env?: Env; input?: string | Uint8Array } = {}): RunSyncResult {
+  /**
+   * As Node's `spawnSync`: past `maxBuffer` on either stream (default 1 MiB) it answers `ENOBUFS` with what was
+   * written, and past `timeoutMs` (the program's `ms`) `ETIMEDOUT`; both as ended by SIGTERM
+   */
+  function runSync(command: string, args: readonly string[], o?: RunSyncOptions & { encoding?: 'utf8' }): RunSyncResult
+  function runSync(command: string, args: readonly string[], o: RunSyncOptions & { encoding: 'buffer' }): RunSyncResult<Buffer>
+  function runSync(command: string, args: readonly string[], o: RunSyncOptions = {}): RunSyncResult<string | Buffer> {
+    const text = (b: Buffer) => (o.encoding === 'buffer' ? b : b.toString('utf8'))
     const cwdPath = o.cwd ?? env.cwd()
     const found = findProgram(command, cwdPath, o.env ?? env.all())
-    if ('error' in found) return { code: null, signal: null, stdout: '', stderr: '', error: fsError(found.error, `spawnSync ${command}`, command) }
+    if ('error' in found) return { code: null, signal: null, stdout: text(Buffer.alloc(0)), stderr: text(Buffer.alloc(0)), error: fsError(found.error, `spawnSync ${command}`, command) }
     const entry = programs.get(programKey(found.path))
     if (!entry?.sync) throw new Error(`memoryOs: ${found.path} has no answer for runSync (programs.add(path, program, { sync }))`)
     const input = o.input === undefined ? '' : typeof o.input === 'string' ? o.input : Buffer.from(o.input).toString('utf8')
     const r = entry.sync({ args, cwd: cwdPath, env: o.env ?? env.all(), input })
     const pid = pidSeq
     pidSeq += windows ? 4 : 1
-    table.push({ pid, ppid: HOST_PID, pgid: HOST_PID, command, args: [...args], cwd: cwdPath, alive: false, exit: { code: r.code ?? 0, signal: null } })
-    return { code: r.code ?? 0, signal: null, stdout: r.stdout ?? '', stderr: r.stderr ?? '' }
+    const stdout = bytes(r.stdout ?? '')
+    const stderr = bytes(r.stderr ?? '')
+    const max = o.maxBuffer ?? SYNC_MAX_BUFFER
+    const failed = o.timeoutMs !== undefined && (r.ms ?? 0) > o.timeoutMs ? 'ETIMEDOUT' : stdout.length > max || stderr.length > max ? 'ENOBUFS' : null
+    const exit: OsExit = failed ? { code: null, signal: 'SIGTERM' } : { code: r.code ?? 0, signal: null }
+    table.push({ pid, ppid: HOST_PID, pgid: HOST_PID, command, args: [...args], cwd: cwdPath, alive: false, exit })
+    return { ...exit, stdout: text(stdout), stderr: text(stderr), ...(failed ? { error: fsError(failed, `spawnSync ${command}`, command) } : {}) }
   }
 
   const shell = (line: string): [string, string[]] => (windows ? [commandInterpreter(env.all()), ['/d', '/s', '/c', line]] : ['/bin/sh', ['-c', line]])
@@ -1280,7 +1426,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
   const processes: OsProcesses = {
     start: (command, args, o = {}) => startProcess(command, args, o, HOST_PID, HOST_PID),
     run: (command, args, o = {}) => runChild({ processes: { stop }, clock, files }, (stdio) => processes.start(command, args, { cwd: o.cwd, env: o.env, stdio }), o),
-    runSync: (command, args, o) => runSync(command, args, o),
+    runSync,
     runShell: (line, o = {}) => {
       const [command, args] = shell(line)
       return runChild({ processes: { stop }, clock, files }, (stdio) => processes.start(command, args, { cwd: o.cwd, env: o.env, stdio }), o)
@@ -1288,8 +1434,11 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     stop,
     alive: (pid) => pid === HOST_PID || procs.get(pid)?.row.alive === true,
     signal: (pid, signal) => {
+      const refused = signalRefusal(signal, family)
+      if (refused === 'ERR_UNKNOWN_SIGNAL') throw signalError(signal, refused)
       const p = procs.get(pid)
       if (!p?.row.alive) return false
+      if (refused) throw signalError(signal, refused)
       deliver(p, signal)
       return true
     },
@@ -1309,11 +1458,11 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     paths: {
       path: P,
       devNull,
-      same: (a, b) => samePath(a, b, family),
-      inside: (root, p) => isInside(root, p, family),
-      key: (p) => pathKey(p, family),
+      same: (a, b) => samePath(a, b, family, cwd),
+      inside: (root, p) => isInside(root, p, family, cwd),
+      key: (p) => pathKey(p, family, cwd),
       fromFileUrl: (url) => fileUrlToPath(url, family),
-      toFileUrl: (p) => pathToFileUrl(p, family),
+      toFileUrl: (p) => pathToFileUrl(P.resolve(p), family),
     },
     processes,
     tools: {

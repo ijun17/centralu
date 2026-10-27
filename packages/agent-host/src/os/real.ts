@@ -5,8 +5,9 @@ import * as fsp from 'node:fs/promises'
 import { EventEmitter } from 'node:events'
 import type { Readable, Writable } from 'node:stream'
 import { devNull, homedir, tmpdir, userInfo } from 'node:os'
+import { join } from 'node:path'
 import { stopTree } from '../dev-services/kill-tree.js'
-import { killHandle, spawnGrouped, sweepExited } from '../dev-services/grouped-child.js'
+import { killHandle, spawnGrouped, sweepLeftovers, tracked, type GroupedChild } from '../dev-services/grouped-child.js'
 import { whichTool } from '../env-path.js'
 import { HOST_PLATFORM, familyOf, pathsOf, traitsFor } from '../os.js'
 import { programPath, resolveCommand } from '../tool-launch.js'
@@ -24,12 +25,28 @@ import type {
   OsFilesAsync,
   OsStats,
   OsStdio,
+  RunSyncOptions,
   RunSyncResult,
   StartOptions,
   WatchListener,
 } from './port.js'
-import { commandInterpreter, envValue, fileUrlToPath, isInside, pathKey, pathToFileUrl, samePath, type OsFamily } from './rules.js'
-import { abortReason, asOsError, errorCode } from './errors.js'
+import {
+  commandInterpreter,
+  envValue,
+  fileUrlToPath,
+  isInside,
+  linkLoop,
+  listRecursive,
+  pathKey,
+  pathToFileUrl,
+  recursiveListing,
+  samePath,
+  signalError,
+  signalRefusal,
+  type OsFamily,
+  type TreeReader,
+} from './rules.js'
+import { abortReason, asOsError, errorCode, linkLoopError } from './errors.js'
 import { runChild } from './run.js'
 
 /**
@@ -41,6 +58,8 @@ import { runChild } from './run.js'
 
 /** The family of the OS the host runs on, for a test that holds the in-memory OS to this one (`memoryOs({ as: HOST_FAMILY })`) */
 export const HOST_FAMILY: OsFamily = familyOf(HOST_PLATFORM)
+
+const traits = traitsFor()
 
 const NS_PER_MS = 1_000_000n
 
@@ -86,10 +105,53 @@ const handle = (h: fsp.FileHandle): OsFileHandle => ({
   close: () => h.close(),
 })
 
+/**
+ * A recursive listing by the layer's rule (`listRecursive`): breadth first as Node's, never into a link. Node's own
+ * enters a junction on Windows, and one leading to a folder above it cut the listing off without a word.
+ */
+async function readdirRecursiveAsync(p: string, withFileTypes: boolean): Promise<string[] | OsDirent[]> {
+  const walk = recursiveListing<fs.Dirent>(p, join)
+  let step = walk.next()
+  while (!step.done) step = walk.next(await fsp.readdir(step.value, { withFileTypes: true }))
+  return withFileTypes ? step.value.map((e) => e.entry) : step.value.map((e) => e.rel)
+}
+
+function readdirRecursiveSync(p: string, withFileTypes: boolean): string[] | OsDirent[] {
+  const listed = listRecursive(p, (dir) => fs.readdirSync(dir, { withFileTypes: true }), join)
+  return withFileTypes ? listed.map((e) => e.entry) : listed.map((e) => e.rel)
+}
+
+/** The tree reader `linkLoop` walks, on this machine */
+const treeReader: TreeReader = {
+  list: (dir) => fs.readdirSync(dir, { withFileTypes: true }),
+  real: (p) => {
+    try {
+      return fs.realpathSync.native(p)
+    } catch {
+      return null
+    }
+  },
+  isDir: (p) => {
+    try {
+      return fs.statSync(p, { throwIfNoEntry: false })?.isDirectory() ?? false
+    } catch {
+      return false
+    }
+  },
+}
+
+/** A tree copy the layer refuses before Node starts it: one that would follow a link back into itself (`linkLoop`) */
+function refuseLoop(from: string, o: CopyTreeOptions | undefined): void {
+  if (traits.cpKeepsLinks || !o?.recursive) return
+  const loop = linkLoop(from, treeReader, HOST_FAMILY, join)
+  if (loop !== null) throw linkLoopError(loop)
+}
+
 function readdirAsync(p: string, o?: { recursive?: boolean }): Promise<string[]>
 function readdirAsync(p: string, o: { withFileTypes: true; recursive?: boolean }): Promise<OsDirent[]>
 function readdirAsync(p: string, o?: { withFileTypes?: boolean; recursive?: boolean }): Promise<string[] | OsDirent[]> {
-  return o?.withFileTypes ? fsp.readdir(p, { withFileTypes: true, recursive: o.recursive }) : fsp.readdir(p, { encoding: 'utf8', recursive: o?.recursive })
+  if (o?.recursive) return readdirRecursiveAsync(p, !!o.withFileTypes)
+  return o?.withFileTypes ? fsp.readdir(p, { withFileTypes: true }) : fsp.readdir(p, { encoding: 'utf8' })
 }
 function readFileAsync(p: string): Promise<Buffer>
 function readFileAsync(p: string, encoding: 'utf8'): Promise<string>
@@ -109,7 +171,10 @@ const promises: OsFilesAsync = {
   mkdtemp: (prefix) => fsp.mkdtemp(prefix),
   rename: (a, b) => fsp.rename(a, b),
   copyFile: (a, b, mode) => fsp.copyFile(a, b, mode),
-  cp: (a, b, o?: CopyTreeOptions) => fsp.cp(a, b, o),
+  cp: async (a, b, o?: CopyTreeOptions) => {
+    refuseLoop(a, o)
+    await fsp.cp(a, b, o)
+  },
   unlink: (p) => fsp.unlink(p),
   rmdir: (p) => fsp.rmdir(p),
   rm: (p, o) => fsp.rm(p, o),
@@ -137,7 +202,8 @@ function lstatSync(p: string, o?: { throwIfNoEntry: false }): OsStats | undefine
 function readdirSync(p: string, o?: { recursive?: boolean }): string[]
 function readdirSync(p: string, o: { withFileTypes: true; recursive?: boolean }): OsDirent[]
 function readdirSync(p: string, o?: { withFileTypes?: boolean; recursive?: boolean }): string[] | OsDirent[] {
-  return o?.withFileTypes ? fs.readdirSync(p, { withFileTypes: true, recursive: o.recursive }) : fs.readdirSync(p, { encoding: 'utf8', recursive: o?.recursive })
+  if (o?.recursive) return readdirRecursiveSync(p, !!o.withFileTypes)
+  return o?.withFileTypes ? fs.readdirSync(p, { withFileTypes: true }) : fs.readdirSync(p, { encoding: 'utf8' })
 }
 function readFileSync(p: string): Buffer
 function readFileSync(p: string, encoding: 'utf8'): string
@@ -158,7 +224,10 @@ const files: OsFiles = {
   mkdtempSync: (prefix) => fs.mkdtempSync(prefix),
   renameSync: (a, b) => fs.renameSync(a, b),
   copyFileSync: (a, b, mode) => fs.copyFileSync(a, b, mode),
-  cpSync: (a, b, o) => fs.cpSync(a, b, o),
+  cpSync: (a, b, o) => {
+    refuseLoop(a, o)
+    fs.cpSync(a, b, o)
+  },
   unlinkSync: (p) => fs.unlinkSync(p),
   rmdirSync: (p) => fs.rmdirSync(p),
   rmSync: (p, o) => fs.rmSync(p, o),
@@ -186,12 +255,18 @@ const files: OsFiles = {
  */
 class RealChild extends EventEmitter implements OsChild {
   readonly exited: Promise<OsExit & { error?: OsError }>
+  readonly node: ChildProcess | null
+  readonly spawnedAt: number
   constructor(
-    readonly node: ChildProcess | null,
-    readonly spawnedAt: number,
+    /** Its start and exit times, for the sweep after it (`sweepLeftovers`); null when it never started */
+    readonly started: GroupedChild | null,
+    spawnedAt: number,
     failed?: OsError,
   ) {
     super()
+    this.node = started?.child ?? null
+    this.spawnedAt = spawnedAt
+    const node = this.node
     // `exited` carries a start that failed: an `'error'` nobody else listens to is no crash
     this.on('error', () => {})
     this.exited = new Promise((resolve) => {
@@ -240,19 +315,25 @@ class RealChild extends EventEmitter implements OsChild {
   get killed() {
     return this.node?.killed ?? false
   }
-  kill(signal?: NodeJS.Signals): boolean {
-    return this.node?.kill(signal) ?? false
+  /** Node's `kill`, after the layer's rule for the signal (`signalRefusal`): on Windows only TERM, KILL, INT and QUIT are sent */
+  kill(signal: NodeJS.Signals = 'SIGTERM'): boolean {
+    const refused = signalRefusal(signal, HOST_FAMILY)
+    if (refused === 'ERR_UNKNOWN_SIGNAL') throw signalError(signal, refused)
+    const node = this.node
+    if (!node || node.exitCode !== null || node.signalCode !== null) return false
+    if (refused) throw signalError(signal, refused)
+    return node.kill(signal)
   }
   unref(): void {
     this.node?.unref()
   }
 }
 
-function asChild(start: () => { child: ChildProcess; spawnedAt: number }): RealChild {
+function asChild(start: () => GroupedChild): RealChild {
   const before = Date.now()
   try {
-    const { child, spawnedAt } = start()
-    return new RealChild(child, spawnedAt)
+    const started = start()
+    return new RealChild(started, started.spawnedAt)
   } catch (e) {
     return new RealChild(null, before, asOsError(e))
   }
@@ -272,7 +353,7 @@ function start(command: string, args: readonly string[], o: StartOptions = {}, s
   if (o.contained === false) {
     return asChild(() => {
       const spawnedAt = Date.now()
-      return { child: spawn(command, [...args], { ...options, windowsHide: true }), spawnedAt }
+      return tracked(spawn(command, [...args], { ...options, windowsHide: true }), spawnedAt)
     })
   }
   return asChild(() => spawnGrouped(command, args, options))
@@ -284,21 +365,24 @@ async function stop(child: OsChild, graceMs: number): Promise<OsExit> {
   const running = () => node !== null && node.exitCode === null && node.signalCode === null
   if (node?.pid !== undefined && running()) stopTree(killHandle(node), graceMs, running)
   const exit = await child.exited
-  if (node?.pid !== undefined) await sweepExited({ pid: node.pid, spawnedAt: child.spawnedAt, exitedAt: Date.now() })
+  // What it left, created between its spawn and its exit as seen then: never up to now, when its pid may be another's
+  if (child.started) await sweepLeftovers(child.started)
   return { code: exit.code, signal: exit.signal }
 }
 
-function runSync(command: string, args: readonly string[], o: { cwd?: string; env?: Env; input?: string | Uint8Array; timeoutMs?: number; maxBuffer?: number } = {}): RunSyncResult {
+function runSync(command: string, args: readonly string[], o?: RunSyncOptions & { encoding?: 'utf8' }): RunSyncResult
+function runSync(command: string, args: readonly string[], o: RunSyncOptions & { encoding: 'buffer' }): RunSyncResult<Buffer>
+function runSync(command: string, args: readonly string[], o: RunSyncOptions = {}): RunSyncResult<string | Buffer> {
   const r = spawnSync(command, [...args], {
     cwd: o.cwd,
     env: o.env ?? process.env,
     input: o.input,
     timeout: o.timeoutMs,
     maxBuffer: o.maxBuffer,
-    encoding: 'utf8',
     windowsHide: true,
   })
-  return { code: r.status, signal: r.signal, stdout: r.stdout ?? '', stderr: r.stderr ?? '', ...(r.error ? { error: asOsError(r.error) } : {}) }
+  const text = (b: Buffer | null) => (o.encoding === 'buffer' ? (b ?? Buffer.alloc(0)) : (b ?? Buffer.alloc(0)).toString('utf8'))
+  return { code: r.status, signal: r.signal, stdout: text(r.stdout), stderr: text(r.stderr), ...(r.error ? { error: asOsError(r.error) } : {}) }
 }
 
 const family = HOST_FAMILY
@@ -334,7 +418,7 @@ const realOsValue: Os = {
   processes: {
     start: (command, args, o) => start(command, args, o),
     run: (command, args, o = {}) => runChild({ processes: { stop }, clock, files }, (stdio) => start(command, args, { cwd: o.cwd, env: o.env, stdio }), o),
-    runSync: (command, args, o) => runSync(command, args, o),
+    runSync,
     runShell: (line, o = {}) => runChild({ processes: { stop }, clock, files }, (stdio) => start(line, [], { cwd: o.cwd, env: o.env, stdio }, true), o),
     stop,
     alive: (pid) => {
@@ -346,8 +430,12 @@ const realOsValue: Os = {
       }
     },
     signal: (pid, signal) => {
+      const refused = signalRefusal(signal, HOST_FAMILY)
+      if (refused === 'ERR_UNKNOWN_SIGNAL') throw signalError(signal, refused)
       try {
-        process.kill(pid, signal)
+        // A signal Windows cannot send is refused only to a process that is there (Node's order: ESRCH first)
+        process.kill(pid, refused ? 0 : signal)
+        if (refused) throw signalError(signal, refused)
         return true
       } catch (e) {
         if (errorCode(e) === 'ESRCH') return false
@@ -391,7 +479,7 @@ const realOsValue: Os = {
   sqlite: {
     open: (path, o = {}) => new Database(path, { readonly: o.readonly, fileMustExist: o.fileMustExist, timeout: o.timeout }),
   },
-  traits: traitsFor(),
+  traits,
 }
 
 /** The machine's own OS. One for the process: it holds no state of its own. */

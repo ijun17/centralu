@@ -467,7 +467,9 @@ export async function mergeMain({ repo, pr, defaultBranch, dir, conflicts, renew
         if (!lockfileOnly) await prepare()
         if (install && !lockfileOnly && modules === 'linked') continue
         try {
-          // CC_LINT_BASE: the lint allowlist check compares with main's lists at the tip just fetched (#1423), not an `origin/main` the checkout may not have
+          // CC_LINT_BASE: main's tip just fetched, not an `origin/main` the checkout may not have. The allowlists read it: the lint's
+          // check compares with main's lists (#1423), and the OS layer's (`os:tighten` for the renames since main,
+          // tooling/os-layer.test.ts for no line new against main's list, #1599)
           await run(tmp, argv, timeoutMs, { CC_LINT_BASE: mainTip })
         } catch (e) {
           await git(tmp, ['merge', '--abort']).catch(() => {})

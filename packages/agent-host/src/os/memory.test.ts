@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { CONTRACT, outcome, ready } from './contract.test-helpers.js'
+import { CONTRACT, memoryContext, outcome } from './contract.test-helpers.js'
 import { memoryOs, type MemoryOs, type ProgramContext } from './memory.js'
-import { forAll, name, recase } from './property.test-helpers.js'
+import { forAll, name, recase, sameOnNtfs } from './property.test-helpers.js'
 import type { OsFamily } from './rules.js'
 import { CLOSE_AFTER_EXIT_MS, RUN_STOP_GRACE_MS } from './run.js'
 
@@ -30,7 +30,7 @@ describe('the in-memory OS answers the contract as each family does', () => {
       it(`${family}: ${c.name}`, async () => {
         const os = fresh(family)
         const root = os.files.mkdtempSync(os.paths.path.join(os.env.temp, 'c-'))
-        const got = await outcome(() => c.run(os, root, { waiter: (cwd) => ready(os.processes.start(os.env.execPath, ['wait'], { cwd })) }))
+        const got = await outcome(() => c.run(os, root, memoryContext(os)))
         expect(got).toEqual(c.want[family])
       })
     }
@@ -94,14 +94,14 @@ describe('names, by property', () => {
           const written: string[] = []
           for (const n of names) {
             // On Windows two names that differ only by case are one file: the first one written keeps its spelling
-            if (family === 'windows' && written.some((w) => w.toLowerCase() === n.toLowerCase())) continue
+            if (family === 'windows' && written.some((w) => sameOnNtfs(w, n))) continue
             os.files.writeFileSync(os.paths.path.join(dir, n), n)
             written.push(n)
           }
           expect(new Set(os.files.readdirSync(dir))).toEqual(new Set(written))
           names.forEach((n, i) => {
             const p = os.paths.path.join(dir, asked[i]!)
-            const owner = written.find((w) => (family === 'windows' ? w.toLowerCase() === asked[i]!.toLowerCase() : w === asked[i]))
+            const owner = written.find((w) => (family === 'windows' ? sameOnNtfs(w, asked[i]!) : w === asked[i]))
             expect(os.files.existsSync(p)).toBe(owner !== undefined)
             if (owner) {
               expect(os.files.readFileSync(p, 'utf8')).toBe(owner)
@@ -243,7 +243,8 @@ describe('processes in memory', () => {
       const child = os.processes.start(os.env.execPath, [])
       const pid = child.pid ?? 0
       expect(os.processes.signal(pid, 'SIGTERM')).toBe(true)
-      expect(await child.exited).toMatchObject({ signal: 'SIGTERM' })
+      // A process ended by pid from outside: code 1 on Windows, the signal on POSIX (the contract's signal case)
+      expect(await child.exited).toMatchObject(family === 'windows' ? { code: 1, signal: null } : { code: null, signal: 'SIGTERM' })
       expect(os.processes.signal(pid, 'SIGTERM')).toBe(false)
     })
   }
@@ -266,6 +267,103 @@ describe('processes in memory', () => {
     const run = os.processes.run('much', [], { maxBuffer: 100 })
     await os.clock.advance(RUN_STOP_GRACE_MS + CLOSE_AFTER_EXIT_MS)
     expect((await run).ended).toBe('overflow')
+  })
+
+  it('a run whose output a grandchild still holds ends a moment after the program exits', async () => {
+    const os = memoryOs({ as: 'posix' })
+    // The grandchild is given the program's own stdout and outlives it, as a daemon a script starts does
+    os.programs.add('/usr/bin/daemon', (ctx) => (ctx.stdout.write('d'), waits(ctx)))
+    os.programs.add('/usr/bin/starts', (ctx) => {
+      ctx.start('/usr/bin/daemon', [], { stdio: ['ignore', 'inherit', 'inherit'] })
+      ctx.stdout.write('s')
+    })
+    let settled = false
+    const run = os.processes.run('starts', [])
+    void run.then(() => (settled = true))
+    await os.clock.advance(CLOSE_AFTER_EXIT_MS - 1)
+    expect(settled).toBe(false)
+    await os.clock.advance(1)
+    const r = await run
+    expect({ code: r.code, stdout: r.stdout.toString() }).toEqual({ code: 0, stdout: 'sd' })
+    expect(os.processTable().find((p) => p.command === '/usr/bin/daemon')?.alive).toBe(true)
+  })
+
+  it('a run is ended when its signal aborts, and says so', async () => {
+    const os = memoryOs({ as: 'posix' })
+    os.programs.add(os.env.execPath, waits)
+    const abort = new AbortController()
+    const run = os.processes.run(os.env.execPath, [], { signal: abort.signal })
+    await os.clock.advance(0)
+    abort.abort()
+    await os.clock.advance(RUN_STOP_GRACE_MS)
+    expect(await run).toMatchObject({ ended: 'aborted', code: null, signal: 'SIGTERM' })
+    // Already aborted: ended at once
+    const late = os.processes.run(os.env.execPath, [], { signal: abort.signal })
+    await os.clock.advance(RUN_STOP_GRACE_MS)
+    expect((await late).ended).toBe('aborted')
+  })
+
+  it("a run's stdout file is made readable by its owner alone (0600)", async () => {
+    const os = memoryOs({ as: 'posix' })
+    os.programs.add('/usr/bin/say', (ctx) => void ctx.stdout.write('secret'))
+    const r = await os.processes.run('say', [], { stdoutFile: '/tmp/out' })
+    expect(r.stdout.length).toBe(0)
+    expect(os.files.readFileSync('/tmp/out', 'utf8')).toBe('secret')
+    expect(os.files.statSync('/tmp/out').mode & 0o777).toBe(0o600)
+  })
+
+  it('input a program never reads is no failure of the run (EPIPE)', async () => {
+    const os = memoryOs({ as: 'posix' })
+    os.programs.add('/usr/bin/quits', () => 0)
+    const r = await os.processes.run('quits', [], { input: 'x'.repeat(4 * 1024 * 1024) })
+    expect(r.code).toBe(0)
+  })
+
+  it('posix: stop sends KILL after the grace to a root that traps TERM', async () => {
+    const os = memoryOs({ as: 'posix' })
+    os.programs.add('/usr/bin/stubborn', (ctx) => (ctx.onSignal((s) => s === 'SIGTERM'), waits(ctx)))
+    const child = os.processes.start('stubborn', [])
+    await os.clock.advance(0)
+    let exit: unknown
+    void os.processes.stop(child, 3000).then((e) => (exit = e))
+    await os.clock.advance(2999)
+    expect(exit).toBeUndefined()
+    await os.clock.advance(1)
+    expect(exit).toEqual({ code: null, signal: 'SIGKILL' })
+  })
+
+  it('posix: what a root started in its group as it ended is swept: TERM, then KILL after the grace', async () => {
+    const os = memoryOs({ as: 'posix' })
+    // On TERM the root starts a helper that ignores TERM, then ends: the helper was not in the tree TERM was sent to
+    os.programs.add('/usr/bin/helper', (ctx) => (ctx.onSignal((s) => s === 'SIGTERM'), waits(ctx)))
+    os.programs.add('/usr/bin/root', (ctx) =>
+      new Promise<void>((resolve) =>
+        ctx.onSignal(() => {
+          ctx.start('/usr/bin/helper', [])
+          setImmediate(resolve)
+          return true
+        }),
+      ),
+    )
+    const child = os.processes.start('root', [])
+    await os.clock.advance(0)
+    await os.processes.stop(child, 3000)
+    const helper = () => os.processTable().find((p) => p.command === '/usr/bin/helper')!
+    expect(helper().alive).toBe(true)
+    await os.clock.advance(3000)
+    expect(helper().exit).toEqual({ code: null, signal: 'SIGKILL' })
+  })
+
+  it('runSync: past maxBuffer ENOBUFS, past its time ETIMEDOUT, and the bytes as written when asked', () => {
+    const os = memoryOs({ as: 'windows' })
+    const cmd = 'C:\\Windows\\System32\\cmd.exe'
+    // cmd writes in the console's code page: 한 in code page 949 is C7 D1
+    os.programs.add(cmd, () => 0, { sync: ({ args }) => (args[0] === 'slow' ? { stdout: '', ms: 5000 } : args[0] === 'much' ? { stdout: 'x'.repeat(70_000) } : { stdout: Buffer.from([0xc7, 0xd1]) }) })
+    expect(os.processes.runSync(cmd, ['much'], { maxBuffer: 65_536 })).toMatchObject({ code: null, signal: 'SIGTERM', error: { code: 'ENOBUFS' } })
+    expect(os.processes.runSync(cmd, ['much']).error).toBeUndefined()
+    expect(os.processes.runSync(cmd, ['slow'], { timeoutMs: 300 })).toMatchObject({ code: null, signal: 'SIGTERM', error: { code: 'ETIMEDOUT' } })
+    expect(os.processes.runSync(cmd, ['echo'], { encoding: 'buffer' }).stdout).toEqual(Buffer.from([0xc7, 0xd1]))
+    expect(os.processes.runSync(cmd, ['echo']).stdout).toBe('\ufffd\ufffd')
   })
 
   it('runSync answers a program that answers at once, and runShell goes through the shell', async () => {

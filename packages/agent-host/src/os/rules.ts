@@ -80,31 +80,85 @@ export function traitsOf(family: OsFamily): OsTraits {
 }
 
 /**
- * The form two spellings of one path share: resolved, without a trailing separator, and on Windows in one case with
- * one kind of separator. Not the real spelling (that is `realpathSync.native`'s): a key to compare and to index by.
+ * Characters JavaScript's `toUpperCase` maps to one other character but NTFS's case table does not, as code point
+ * ranges: measured on Windows 11 (NTFS, 2026-10-27) by making a file under each and asking for it under its upper
+ * case. Among them the micro sign, the dotless i (`ı` and `I` are two files), the long s, final sigma, Georgian
+ * Mkhedruli and Cherokee small letters: NTFS's table predates their upper cases. A volume keeps the table it was
+ * formatted with, so an old volume may differ further; the host only needs the folding to agree with itself and to
+ * err towards two names, which these do.
  */
-export function pathKey(path: string, family: OsFamily): string {
+const NTFS_KEEPS_CASE: ReadonlyArray<readonly [number, number]> = [
+  [0xb5, 0xb5], [0x131, 0x131], [0x17f, 0x17f], [0x19b, 0x19b], [0x1c5, 0x1c5], [0x1c8, 0x1c8], [0x1cb, 0x1cb],
+  [0x1f2, 0x1f2], [0x23f, 0x240], [0x252, 0x252], [0x25c, 0x25c], [0x261, 0x261], [0x264, 0x266], [0x26a, 0x26a],
+  [0x26c, 0x26c], [0x282, 0x282], [0x287, 0x287], [0x29d, 0x29e], [0x345, 0x345], [0x3c2, 0x3c2], [0x3d0, 0x3d1],
+  [0x3d5, 0x3d6], [0x3f0, 0x3f1], [0x3f3, 0x3f3], [0x3f5, 0x3f5], [0x525, 0x52f], [0x10d0, 0x10ff], [0x13f8, 0x13fd],
+  [0x1c80, 0x1c8a], [0x1d8e, 0x1d8e], [0x1e9b, 0x1e9b], [0x1fbe, 0x1fbe], [0x2c5f, 0x2c5f], [0x2cec, 0x2cf3],
+  [0x2d27, 0x2d2d], [0xa661, 0xa661], [0xa699, 0xa69b], [0xa791, 0xa7f6], [0xab53, 0xab53], [0xab70, 0xabbf],
+]
+
+const keepsCase = (code: number) => NTFS_KEEPS_CASE.some(([lo, hi]) => code >= lo && code <= hi)
+
+/**
+ * A name in the one case the family compares names in: on Windows each character in its upper case where NTFS has
+ * one (NTFS compares names through its upcase table, so `Name.TXT` and `name.txt` are one file, and so are `é` and
+ * `É`, while the Kelvin sign and `k`, or `ß` and `SS`, are two), unchanged elsewhere. One character never becomes two.
+ * Upper, not lower: the folded names also sort as NTFS lists a folder (`_` after `Z`).
+ */
+export function foldCase(name: string, family: OsFamily): string {
+  if (!traitsOf(family).foldsPathCase) return name
+  let out = ''
+  for (const c of name) {
+    const code = c.codePointAt(0) ?? 0
+    const upper = code > 0xffff || keepsCase(code) ? c : c.toUpperCase()
+    out += upper.length === c.length ? upper : c
+  }
+  return out
+}
+
+/**
+ * The family's path functions resolving relative paths from `cwd` (the `Os`'s own working folder, `env.cwd()`), not
+ * from the working folder of the process this code runs in: what the in-memory OS answers for `paths.path`.
+ */
+export function pathRulesFrom(family: OsFamily, cwd: () => string): PlatformPath {
   const p = pathRules(family)
-  let full = p.resolve(path)
+  const resolve = (...segments: string[]) => p.resolve(cwd(), ...segments)
+  const rules: PlatformPath = {
+    ...p,
+    resolve,
+    relative: (from, to) => p.relative(resolve(from), resolve(to)),
+    toNamespacedPath: (path) => (family === 'windows' && path !== '' ? p.toNamespacedPath(resolve(path)) : path),
+  }
+  return Object.assign(rules, { [family === 'windows' ? 'win32' : 'posix']: rules })
+}
+
+/**
+ * The form two spellings of one path share: resolved (relative to `cwd`, default this process's working folder),
+ * without a trailing separator, and on Windows in one case (`foldCase`) with one kind of separator. Not the real
+ * spelling (that is `realpathSync.native`'s): a key to compare and to index by.
+ */
+export function pathKey(path: string, family: OsFamily, cwd?: string): string {
+  const p = pathRules(family)
+  let full = cwd === undefined ? p.resolve(path) : p.resolve(cwd, path)
   const root = p.parse(full).root
   while (full.length > root.length && (full.endsWith(p.sep) || full.endsWith('/'))) full = full.slice(0, -1)
-  return traitsOf(family).foldsPathCase ? full.toLowerCase() : full
+  return foldCase(full, family)
 }
 
 /** The same file system entry by name (not through links): `samePath('C:\\A\\', 'c:/a', 'windows')` */
-export function samePath(a: string, b: string, family: OsFamily): boolean {
-  return pathKey(a, family) === pathKey(b, family)
+export function samePath(a: string, b: string, family: OsFamily, cwd?: string): boolean {
+  return pathKey(a, family, cwd) === pathKey(b, family, cwd)
 }
 
 /**
  * Whether `candidate` is `root` or lies inside it, by segment: `/a/wt-old` is not inside `/a/wt`, `..cache` is a
- * name, another drive or share is outside. On Windows case does not count (`relative` folds it). Both are taken as
- * written: canonicalize them first where a link or a short name could make one path look like two.
+ * name, another drive or share is outside. On Windows case does not count, by `foldCase`. Both are taken as written:
+ * canonicalize them first where a link or a short name could make one path look like two.
  */
-export function isInside(root: string, candidate: string, family: OsFamily): boolean {
-  const p = pathRules(family)
-  const rel = p.relative(root, candidate)
-  return rel === '' || (rel !== '..' && !rel.startsWith(`..${p.sep}`) && !p.isAbsolute(rel))
+export function isInside(root: string, candidate: string, family: OsFamily, cwd?: string): boolean {
+  const sep = pathRules(family).sep
+  const r = pathKey(root, family, cwd)
+  const c = pathKey(candidate, family, cwd)
+  return c === r || c.startsWith(r.endsWith(sep) ? r : r + sep)
 }
 
 type Env = Readonly<Record<string, string | undefined>>
@@ -116,9 +170,137 @@ type Env = Readonly<Record<string, string | undefined>>
  */
 export function envValue(env: Env, name: string, family: OsFamily): string | undefined {
   if (env[name] !== undefined || family !== 'windows') return env[name]
-  const upper = name.toUpperCase()
-  const key = Object.keys(env).find((k) => k.toUpperCase() === upper)
+  const folded = foldCase(name, family)
+  const key = Object.keys(env).find((k) => foldCase(k, family) === folded)
   return key === undefined ? undefined : env[key]
+}
+
+/**
+ * Signals by family. On Windows Node knows a few names (`os.constants.signals`), and of those only TERM, KILL, INT and
+ * QUIT end a process (at once: Windows has no signal a program can trap). Measured on Windows 11 with Node 22: another
+ * name Node knows there throws `ENOSYS` from `process.kill` and leaves the process running, while `ChildProcess.kill`
+ * ends it reporting SIGKILL; a name Node does not know there (`SIGUSR1`) throws `ERR_UNKNOWN_SIGNAL` from both. The
+ * `Os` takes the one rule for both calls: a signal it cannot deliver throws, and never ends anything by accident.
+ * Linux's names are delivered; a program may trap all but KILL and STOP, and those in `IGNORED_BY_DEFAULT` end nothing.
+ */
+const WINDOWS_SIGNALS = ['SIGHUP', 'SIGINT', 'SIGQUIT', 'SIGILL', 'SIGABRT', 'SIGFPE', 'SIGKILL', 'SIGSEGV', 'SIGTERM', 'SIGBREAK', 'SIGWINCH'] as const
+const WINDOWS_ENDING = new Set<string>(['SIGTERM', 'SIGKILL', 'SIGINT', 'SIGQUIT'])
+const LINUX_SIGNALS = new Set<string>([
+  'SIGHUP', 'SIGINT', 'SIGQUIT', 'SIGILL', 'SIGTRAP', 'SIGABRT', 'SIGIOT', 'SIGBUS', 'SIGFPE', 'SIGKILL', 'SIGUSR1', 'SIGSEGV', 'SIGUSR2',
+  'SIGPIPE', 'SIGALRM', 'SIGTERM', 'SIGCHLD', 'SIGSTKFLT', 'SIGCONT', 'SIGSTOP', 'SIGTSTP', 'SIGTTIN', 'SIGTTOU', 'SIGURG', 'SIGXCPU',
+  'SIGXFSZ', 'SIGVTALRM', 'SIGPROF', 'SIGWINCH', 'SIGIO', 'SIGPOLL', 'SIGPWR', 'SIGSYS',
+])
+/** Signals whose default action on Linux is to do nothing (STOP, TSTP, TTIN and TTOU pause a process; not modelled) */
+export const IGNORED_BY_DEFAULT: ReadonlySet<string> = new Set(['SIGCHLD', 'SIGCONT', 'SIGURG', 'SIGWINCH'])
+
+/**
+ * Why `signal` cannot be sent on the family, as the code of the error the send throws, or null when it is delivered:
+ * `ERR_UNKNOWN_SIGNAL` for a name the family's Node does not know, `ENOSYS` (Windows) for one it knows but cannot send.
+ * On Windows a delivered signal ends the process.
+ */
+export function signalRefusal(signal: string, family: OsFamily): 'ERR_UNKNOWN_SIGNAL' | 'ENOSYS' | null {
+  if (family === 'windows') {
+    if (!(WINDOWS_SIGNALS as readonly string[]).includes(signal)) return 'ERR_UNKNOWN_SIGNAL'
+    return WINDOWS_ENDING.has(signal) ? null : 'ENOSYS'
+  }
+  return LINUX_SIGNALS.has(signal) ? null : 'ERR_UNKNOWN_SIGNAL'
+}
+
+/** The error a send `signalRefusal` refuses throws, shaped as Node's own */
+export function signalError(signal: string, code: 'ERR_UNKNOWN_SIGNAL' | 'ENOSYS'): Error & { code: string } {
+  if (code === 'ERR_UNKNOWN_SIGNAL') return Object.assign(new TypeError(`Unknown signal: ${signal}`), { code })
+  return Object.assign(new Error('kill ENOSYS'), { code, errno: -4054, syscall: 'kill' })
+}
+
+/**
+ * A file time as the family stores what `utimes` is given (seconds, or a `Date`), in nanoseconds: both keep whole
+ * microseconds, cut from the seconds as libuv does (Linux from the fraction, Windows from the whole value, so a
+ * `Date`'s milliseconds come out exact on Windows and a nanosecond short on Linux). Measured with Node 22.
+ */
+export function storedTimeNs(time: number | Date, family: OsFamily): bigint {
+  const seconds = time instanceof Date ? time.getTime() / 1000 : time
+  if (family === 'windows') return BigInt(Math.trunc(seconds * 1e6)) * 1000n
+  const whole = Math.trunc(seconds)
+  let ns = Math.trunc((seconds - whole) * 1e9)
+  ns -= ns % 1000
+  return BigInt(whole) * 1_000_000_000n + BigInt(ns)
+}
+
+/** A folder entry as a listing describes it, for `listRecursive` */
+export type ListedEntry = { readonly name: string; isDirectory(): boolean; isSymbolicLink(): boolean }
+
+/**
+ * A folder's recursive listing as the `Os` gives it, from `list` (one folder's entries, in the OS's order): breadth
+ * first, as Node's own `readdir({ recursive })` (`a, b, a/x, a/x/f`), each name relative to `root`. It never enters a
+ * link: Node does not on POSIX, but on Windows it enters a junction, and a junction to a folder above it made Node's
+ * listing stop at some depth without saying so. With the rule here a listing is the same on every OS and ends.
+ */
+export function listRecursive<E extends ListedEntry>(root: string, list: (dir: string) => E[], join: (...parts: string[]) => string): Array<Listed<E>> {
+  const walk = recursiveListing<E>(root, join)
+  for (let step = walk.next(); ; ) {
+    if (step.done) return step.value
+    step = walk.next(list(step.value))
+  }
+}
+
+export type Listed<E> = { rel: string; dir: string; entry: E }
+
+/**
+ * `listRecursive`'s walk, for a caller that lists a folder asynchronously: it yields each folder to list and is
+ * given back its entries, and returns the listing.
+ */
+export function* recursiveListing<E extends ListedEntry>(root: string, join: (...parts: string[]) => string): Generator<string, Array<Listed<E>>, E[]> {
+  const out: Array<Listed<E>> = []
+  const queue: Array<{ dir: string; rel: string }> = [{ dir: root, rel: '' }]
+  for (let next = queue.shift(); next; next = queue.shift()) {
+    const entries: E[] = yield next.dir
+    for (const entry of entries) {
+      const rel = next.rel === '' ? entry.name : join(next.rel, entry.name)
+      out.push({ rel, dir: next.dir, entry })
+      if (entry.isDirectory() && !entry.isSymbolicLink()) queue.push({ dir: join(next.dir, entry.name), rel })
+    }
+  }
+  return out
+}
+
+/** What `linkLoop` reads of a tree */
+export type TreeReader = {
+  /** The entries of a folder (through links) */
+  list(dir: string): ListedEntry[]
+  /** Where a path leads through every link, or null when nowhere; a folder's answer is compared by `pathKey` */
+  real(path: string): string | null
+  /** Whether a path leads to a folder (through links) */
+  isDir(path: string): boolean
+}
+
+/**
+ * The first link in the tree at `root` that leads back to a folder the walk is already inside (itself, an ancestor, or
+ * by a chain of links), or null. A tree copy that follows links (`cp` on Windows copies a junction as the folder it
+ * leads to: `traits.cpKeepsLinks` false) would copy such a tree for ever: measured on Windows 11 with Node 22, `cpSync`
+ * over a junction to its own parent ended the process (exit 127) with nothing to catch. The `Os` refuses that copy
+ * with `ELOOP` instead, on the real OS and in memory alike. Every link to a folder counts, a symlink as much as a
+ * junction: Node does not tell them apart, so the refusal is the same for both.
+ */
+export function linkLoop(root: string, read: TreeReader, family: OsFamily, join: (...parts: string[]) => string): string | null {
+  const start = read.real(root)
+  if (start === null || !read.isDir(root)) return null
+  // A folder's real path is its parent's and its name; only a link's is asked for
+  const walk = (dir: string, dirReal: string, chain: ReadonlySet<string>): string | null => {
+    for (const e of read.list(dir)) {
+      const path = join(dir, e.name)
+      const link = e.isSymbolicLink()
+      if (!link && !e.isDirectory()) continue
+      if (link && !read.isDir(path)) continue
+      const real = link ? read.real(path) : join(dirReal, e.name)
+      if (real === null) continue
+      const key = pathKey(real, family)
+      if (chain.has(key)) return path
+      const found = walk(path, real, new Set([...chain, key]))
+      if (found !== null) return found
+    }
+    return null
+  }
+  return walk(root, start, new Set([pathKey(start, family)]))
 }
 
 /** Where Windows lives when `%SystemRoot%` cannot be used */
@@ -188,6 +370,17 @@ export function pathListSeparator(family: OsFamily): string {
 
 /** What Windows assumes when PATHEXT is not set */
 export const DEFAULT_PATHEXT = '.COM;.EXE;.BAT;.CMD'
+
+/**
+ * The files a start of `path` tries, in order, as libuv's search does: on Windows a name with an extension as written
+ * and then with `.com` and `.exe` after it, a name without one only with `.com` and `.exe` (a file `node` with no
+ * extension does not start, measured: ENOENT); elsewhere the path itself.
+ */
+export function programCandidates(path: string, family: OsFamily): string[] {
+  if (family !== 'windows') return [path]
+  const withExt = /\.[^\\/.]+$/.test(win32.basename(path))
+  return [...(withExt ? [path] : []), `${path}.com`, `${path}.exe`]
+}
 
 /**
  * A tool's path on PATH (the job of `which`), or null. `exists` says whether a name is there.

@@ -327,15 +327,16 @@ implementation and one in memory. In `packages/agent-host/src/os/`:
 | File | What | In the layer |
 |---|---|---|
 | `port.ts` | the `Os` interface: types only | no (runs nothing) |
-| `rules.ts` | the rules of a family (`windows`, `posix`), as pure functions: path case and form (`pathKey`, `samePath`, `isInside`), the environment's case (`envValue`), PATH and PATHEXT (`findOnPath`), batch shims (`launchFor`, `resolveCommand`), the program path never planted (`programFor`, `notOnPath`, `systemTool`), `file:` URLs, and the questions named for what differs (`traitsOf`) | no: it answers for the family it is given, never for this host |
+| `rules.ts` | the rules of a family (`windows`, `posix`), as pure functions: path case and form (`foldCase`, `pathKey`, `samePath`, `isInside`, relative paths from a given working folder with `pathRulesFrom`), the environment's case (`envValue`), PATH and PATHEXT (`findOnPath`, `programCandidates`), batch shims (`launchFor`, `resolveCommand`), the program path never planted (`programFor`, `notOnPath`, `systemTool`), `file:` URLs, which signals are sent (`signalRefusal`), stored file times (`storedTimeNs`), the recursive listing and the link loop a copy refuses (`listRecursive`, `linkLoop`), and the questions named for what differs (`traitsOf`) | no: it answers for the family it is given, never for this host |
 | `real.ts` | `realOs()`: Node's calls, and the layer modules for what differs (`env-path.ts`, `tool-launch.ts`, `kill-tree.ts`, `grouped-child.ts`, `os.ts`) | yes |
 | `run.ts` | what a run to the end is (input, timeout, overflow, abort, the close a grandchild holds), over any `Os` | no |
 | `memory.ts` | `memoryOs({ as: 'windows' \| 'posix' })` | no |
 
 **One definition per concept.** The rules moved out of `os.ts`, `env-path.ts`, `tool-launch.ts` and `kill-tree.ts`
 into `rules.ts`; those modules now read them for the running OS (`familyOf`, `traitsFor` in `os.ts`), with the
-signatures their callers use and their tests unchanged. Two reads follow Windows more closely than before:
-`systemTool` and `commandInterpreter` find `SystemRoot` and `ComSpec` in any case. The in-memory OS cannot import a layer module: a test that reaches the layer runs on
+signatures their callers use and their tests unchanged. Three reads follow Windows more closely than before:
+`systemTool` and `commandInterpreter` find `SystemRoot` and `ComSpec` in any case, and a variable's name and a
+path are compared by NTFS's case rule (`foldCase`), not by JavaScript's `toLowerCase`. The in-memory OS cannot import a layer module: a test that reaches the layer runs on
 Windows (§6.1, rule 4), and the point is that its tests do not. So the rules live where both can read them.
 
 ```ts
@@ -382,7 +383,38 @@ file refused", which is not what Node does: it opens files with share-delete):
 | copy a tree into itself (`cpSync`) | `ERR_FS_CP_EINVAL` | the same |
 | a junction | absolute (a relative target read from its folder); a link to `lstat` and the listing; one to a file leads nowhere (`ENOENT`) | — |
 | `realpathSync.native` / `realpathSync` | the case stored / the case given | the same |
-| `child.kill()` / `taskkill /F` | exit `null, SIGTERM` / `1, null` | exit `null, SIGTERM` |
+| `child.kill()` / `taskkill /F` / `process.kill(pid)` | exit `null, SIGTERM` / `1, null` / `1, null` | exit `null, SIGTERM` / — / `null, SIGTERM` |
+| which signals | TERM, KILL, INT and QUIT end it at once; another name Node knows there: `process.kill` throws `ENOSYS`, `child.kill` ends it as SIGKILL; `SIGUSR1` and other names: `ERR_UNKNOWN_SIGNAL` | each sent; a program traps any but KILL and STOP |
+| a read-only file (the attribute; on Linux mode `444`, not root) | write, append, open to write, copy or rename onto it: `EPERM`; rename it away, remove it, `cp` onto it: allowed | write, open to write, copy onto: `EACCES`; rename onto, rename away, remove, `cp` onto: allowed |
+| read at or past the end | 0 bytes | the same |
+| `mkdir -p` through a file / onto a file | `ENOTDIR` / `EEXIST` | the same |
+| rename a folder into itself | `EPERM` | `EINVAL` |
+| `cpSync` a folder onto a file / a file onto a folder / a file onto itself | `ERR_FS_CP_DIR_TO_NON_DIR` / `ERR_FS_CP_NON_DIR_TO_DIR` / `ERR_FS_CP_EINVAL` | the same |
+| rename one hard link onto another of the same file | the first name goes (`nlink` 1) | nothing happens (`rename(2)`) |
+| a name with `*?<>"\|` | `ENOENT` to write or read, `EINVAL` to `mkdir` | an ordinary name |
+| `file/` (a trailing separator) | the file | `ENOTDIR` (`EISDIR` to make one) |
+| start a path with no extension | tried as `.com` and `.exe` only: `ENOENT` for a file `node` | the path |
+| a child's stdin given as a file | it reads the file | the same |
+| `utimes` | whole microseconds of the value | whole microseconds of the fraction (a `Date`'s `.123` is `.122999`) |
+| case | NTFS's upcase table: `é`/`É` one name; the Kelvin sign and `k`, `ı` and `I`, `ß` and `SS` two; listed in upcased order (`_` after `Z`) | case counts |
+| `runSync` past `maxBuffer` / `timeout` | `ENOBUFS` with the output kept / `ETIMEDOUT`, both ended by SIGTERM | the same |
+
+**Where the `Os` answers otherwise than Node, on purpose** (#1650 review), so a caller cannot tell the OS from the
+answer, and a test on memory says what the host does:
+
+- A recursive listing (`readdirSync`, `promises.readdir`) is breadth first as Node's but never enters a link. Node 22
+  enters a junction on Windows and a symlink to a folder on Linux, and one leading back to its own folder made the
+  listing on Windows stop at some depth without a word (192 names) and on Linux run to the limit of path lengths.
+- Where a copy follows links (Windows copies a junction as its folder), `cpSync` and `promises.cp` refuse a tree with a
+  link back to a folder the copy is inside with `ELOOP`, before copying anything (`linkLoop`). Node's `cpSync` over
+  such a junction ended the process (exit 127) with nothing to catch. Node cannot tell a junction from a directory
+  symlink, so the refusal is for both on Windows; on POSIX a link is copied as a link and nothing loops.
+- On Windows `OsChild.kill` and `processes.signal` send only TERM, KILL, INT and QUIT and throw for any other
+  (`ENOSYS`, `ERR_UNKNOWN_SIGNAL`), leaving the process running: Node's own `child.kill('SIGHUP')` ends it as SIGKILL
+  while `process.kill(pid, 'SIGHUP')` throws, and the `Os` takes the one rule for both.
+- `processes.stop`'s sweep on Windows ends what the child started between its spawn and its exit as recorded
+  (`GroupedChild.exitedAt`, shared with `app-process.ts` and `local-process.ts`), never up to the time of the sweep,
+  when its pid may already be another program's.
 
 `memoryOs` follows each column. `os/contract.test-helpers.ts` holds the cases with both answers: `os/memory.test.ts`
 checks the in-memory OS against both on any OS (and a few cases more: a program's file while it runs, `EXDEV`, symlink
@@ -394,10 +426,11 @@ The POSIX column is Linux's: macOS ignores case and refuses `unlink` of a folder
 show it are not run against a Mac (`linux: true`).
 
 Not modeled in memory: 8.3 short names, Windows' reserved names and trailing dots, alternate data streams, shares,
-`\\?\` paths, permissions beyond the mode bits (on Windows, the read-only bit), PTYs, the null device (a child's
+`\\?\` paths, permissions beyond the owner's write bit (on Windows the read-only attribute; on POSIX the host is never root), PTYs, a watch on a single file (refused: stricter than both OSes), the null device (a child's
 `'ignore'` is the way to discard), a write through a link that leads nowhere (refused, where the OS makes the
 target), and SQLite: a test gives the engine (`memoryOs({ sqlite })`), and the database's files are not in the
-in-memory tree, so what renames, copies or removes them is tested on the real OS.
+in-memory tree, so what renames, copies or removes them is tested on the real OS. NTFS's case table is the one measured
+on Windows 11; a volume formatted by an older Windows keeps an older table.
 
 ### 7.2 What each area needs, and whether the interface has it
 
@@ -427,10 +460,25 @@ GitHub's merge, so such a pair would conflict there too. Steps 3a and 3b both ow
 `sessions/`, so they would.
 
 The list is now generated as much as checked: `pnpm os:tighten` (`tsx tooling/os-tests.ts --tighten`) takes out every
-line the code no longer needs and never adds one, and `project.json` `queue.conflicts.mechanical` names the list with
-that command and `tooling/os-layer.test.ts` as its check, as the lint allowlists do (#1423). On a conflict the queue
-takes main's list, tightens it from the merged code, runs the check (no line new against main, through `baseCommit`
-with the merge not yet committed) and pushes. The second step costs one CI run, never a person.
+line the code no longer needs, carries the line of a file git sees renamed since main to its new path (as
+`lint:tighten` does, `alongRenames`), and adds nothing else. `project.json` `queue.conflicts.mechanical` names the list
+with that command and `tooling/os-layer.test.ts` as its check, as the lint allowlists do (#1423). On a conflict the
+queue takes main's list, tightens it from the merged code with `CC_LINT_BASE` set to main's tip, runs the check (no
+line new against main, through `baseCommit` with the merge not yet committed) and pushes.
+
+What that costs, read against the queue's code (`queue-conflict.mjs`, `queue-batch.mjs`):
+
+- The regeneration runs for a pull request GitHub reports as conflicting, on its own. A batch drops a member that
+  conflicts with the batch branch, and the member is regenerated and queued again later: one more cycle, no person.
+- A step that renames a listed file keeps its line through the regeneration (the renames are read since main's tip).
+- A comment or header edit a pull request made to the list is lost in a regeneration, since the queue takes main's
+  version of a mechanical file whole. The list's comments are a fixed two-line header; change them in a pull request
+  of their own.
+- A failing check hands the conflict to the author with nothing pushed, and the queue does not try again. It fails
+  only when the merged tree needs a line main's list does not have, which is a real new offender, for a person.
+
+The board's own tests list the file among the mechanical ones (`tooling/project-board-queue.test.ts`), and its
+AGENTS.md describes the entry.
 
 ### 7.4 Order
 

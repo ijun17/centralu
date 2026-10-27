@@ -1,7 +1,23 @@
 import { posix, win32 } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { forAll, name, recase, type Rng } from './property.test-helpers.js'
-import { envValue, fileUrlToPath, findOnPath, isInside, pathKey, pathRules, pathToFileUrl, samePath, traitsOf, type OsFamily } from './rules.js'
+import { forAll, name, recase, sameOnNtfs, type Rng } from './property.test-helpers.js'
+import {
+  envValue,
+  fileUrlToPath,
+  findOnPath,
+  foldCase,
+  isInside,
+  pathKey,
+  pathRules,
+  pathRulesFrom,
+  pathToFileUrl,
+  programCandidates,
+  samePath,
+  signalRefusal,
+  systemTool,
+  traitsOf,
+  type OsFamily,
+} from './rules.js'
 
 /**
  * The OS family's rules (#1599, docs/plans/os-layer.md §7.1), for both families on whatever OS this runs: paths and their
@@ -88,6 +104,36 @@ describe('paths by the family’s rules', () => {
     })
   }
 
+  it('windows: two names are one path exactly when NTFS reads them as one (not by JavaScript case)', () => {
+    // Letters that look alike or that JavaScript folds together, swapped at random: k, K and the Kelvin sign; ı and I;
+    // ß and S; µ and Greek Μ; é, É and e
+    const groups = [['k', 'K', '\u212a'], ['ı', 'I'], ['ß', 'S'], ['µ', '\u039c'], ['é', 'É', 'e'], ['a', 'A']]
+    const confuse = (r: Rng, s: string) => [...s].map((c) => r.pick(groups.find((g) => g.includes(c)) ?? [c])).join('')
+    forAll(
+      (r) => {
+        const a = name(r)
+        return { a, b: confuse(r, a) }
+      },
+      ({ a, b }) => {
+        expect(samePath(`C:\\d\\${a}`, `C:\\d\\${b}`, 'windows')).toBe(sameOnNtfs(a, b))
+        expect(isInside(`C:\\d\\${a}`, `C:\\d\\${b}\\x`, 'windows')).toBe(sameOnNtfs(a, b))
+        expect(samePath(`/d/${a}`, `/d/${b}`, 'posix')).toBe(a === b)
+      },
+    )
+    // One character never becomes two, and the folded form sorts as NTFS lists (`_` after `Z`)
+    expect(foldCase('ß', 'windows')).toBe('ß')
+    expect(['_', 'a', 'Z'].sort((x, y) => (foldCase(x, 'windows') < foldCase(y, 'windows') ? -1 : 1))).toEqual(['a', 'Z', '_'])
+  })
+
+  it('relative paths resolve from the working folder given, not from the process running the tests', () => {
+    expect(pathKey('rel', 'windows', 'D:\\work')).toBe(pathKey('D:\\work\\rel', 'windows'))
+    expect(isInside('/work', 'rel', 'posix', '/work')).toBe(true)
+    const p = pathRulesFrom('windows', () => 'D:\\work')
+    expect(p.resolve('rel')).toBe('D:\\work\\rel')
+    expect(p.relative('a', 'D:\\work\\a\\b')).toBe('b')
+    expect(pathRulesFrom('posix', () => '/work').resolve('rel')).toBe('/work/rel')
+  })
+
   it('another drive and a parent are outside; a name that only starts with two dots is inside', () => {
     expect(isInside('C:\\a', 'D:\\a\\b', 'windows')).toBe(false)
     expect(isInside('C:\\a\\b', 'C:\\a', 'windows')).toBe(false)
@@ -131,10 +177,37 @@ describe('the environment and PATH by the family’s rules', () => {
     )
   })
 
+  it("reads SystemRoot in any case, and never a relative one (#428)", () => {
+    expect(systemTool(['taskkill.exe'], { systemroot: 'D:\\Win' })).toBe('D:\\Win\\System32\\taskkill.exe')
+    expect(systemTool(['taskkill.exe'], { SYSTEMROOT: 'Win' })).toBe('C:\\Windows\\System32\\taskkill.exe')
+  })
+
+  it('a file URL with an encoded backslash is refused on Windows only, as Node refuses it', () => {
+    expect(() => fileUrlToPath('file:///C:/a%5cb', 'windows')).toThrow(expect.objectContaining({ code: 'ERR_INVALID_FILE_URL_PATH' }))
+    expect(() => fileUrlToPath('file:///C:/a%5Cb', 'windows')).toThrow(expect.objectContaining({ code: 'ERR_INVALID_FILE_URL_PATH' }))
+    expect(fileUrlToPath('file:///a%5cb', 'posix')).toBe('/a\\b')
+  })
+
+  it('a start on Windows tries .com and .exe after a path, and the path as written only when it has an extension', () => {
+    expect(programCandidates('C:\\bin\\node', 'windows')).toEqual(['C:\\bin\\node.com', 'C:\\bin\\node.exe'])
+    expect(programCandidates('C:\\bin\\a.foo', 'windows')).toEqual(['C:\\bin\\a.foo', 'C:\\bin\\a.foo.com', 'C:\\bin\\a.foo.exe'])
+    expect(programCandidates('/usr/bin/node', 'posix')).toEqual(['/usr/bin/node'])
+  })
+
   it('never searches a relative PATH folder on Windows, and reads a quoted one', () => {
     const there = new Set(['C:\\Program Files\\Git\\cmd\\git.exe', 'repo\\git.exe'])
     expect(findOnPath('git', { PATH: 'repo;"C:\\Program Files\\Git\\cmd"' }, 'windows', (p) => there.has(p))).toBe('C:\\Program Files\\Git\\cmd\\git.exe')
     expect(findOnPath('git', { PATH: '/usr/bin:/bin' }, 'posix', (p) => p === '/bin/git')).toBe('/bin/git')
+  })
+})
+
+describe('signals by family', () => {
+  it('Windows sends TERM, KILL, INT and QUIT, refuses the other names it knows, and does not know the rest', () => {
+    expect(['SIGTERM', 'SIGKILL', 'SIGINT', 'SIGQUIT'].map((s) => signalRefusal(s, 'windows'))).toEqual([null, null, null, null])
+    expect(['SIGHUP', 'SIGBREAK', 'SIGWINCH', 'SIGABRT'].map((s) => signalRefusal(s, 'windows'))).toEqual(['ENOSYS', 'ENOSYS', 'ENOSYS', 'ENOSYS'])
+    expect(['SIGUSR1', 'SIGSTOP', 'SIGPIPE', 'SIGNOPE'].map((s) => signalRefusal(s, 'windows'))).toEqual(Array(4).fill('ERR_UNKNOWN_SIGNAL'))
+    expect(['SIGHUP', 'SIGUSR1', 'SIGSTOP', 'SIGCHLD'].map((s) => signalRefusal(s, 'posix'))).toEqual([null, null, null, null])
+    expect(signalRefusal('SIGBREAK', 'posix')).toBe('ERR_UNKNOWN_SIGNAL')
   })
 })
 

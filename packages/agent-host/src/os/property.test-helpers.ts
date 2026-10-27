@@ -45,16 +45,48 @@ export function forAll<T>(make: (r: Rng) => T, check: (value: T) => void, runs =
   }
 }
 
-/** A file name: letters in both cases, digits, a few signs and other scripts; never `.` or `..` */
+/**
+ * The letters NTFS reads as one name in either case, as pairs written out here: the oracle of the property tests, so
+ * they do not fold case with the function the code under test uses (`foldCase`). Measured on Windows 11: these pairs
+ * are one name; the Kelvin sign (U+212A) and `k`, the dotless `ı` and `I`, `ß` and `S`, and the micro sign `µ` and
+ * Greek `Μ` are not.
+ */
+const CASE_PAIRS: ReadonlyArray<readonly [string, string]> = [
+  ['a', 'A'],
+  ['b', 'B'],
+  ['c', 'C'],
+  ['k', 'K'],
+  ['x', 'X'],
+  ['y', 'Y'],
+  ['z', 'Z'],
+  ['é', 'É'],
+  ['ı', 'ı'],
+  ['K', 'K'],
+  ['ß', 'ß'],
+  ['µ', 'µ'],
+]
+const OTHER_CASE = new Map<string, string>(CASE_PAIRS.flatMap(([lo, up]): Array<[string, string]> => [[lo, up], [up, lo]]))
+const FOLDED = new Map<string, string>(CASE_PAIRS.flatMap(([lo, up]): Array<[string, string]> => [[lo, lo], [up, lo]]))
+
+/**
+ * A file name: letters in both cases, digits, a few signs and other scripts, and letters NTFS does not fold although
+ * JavaScript's case functions would (`ı`, the Kelvin sign, `ß`, `µ`); never `.` or `..`
+ */
 export function name(r: Rng): string {
-  const chars = 'aAbBcCxXyYzZ019_-.é한'
+  const chars = [...'aAbBcCkKxXyYzZ019_-.éÉ한ıßµ', 'K']
   let s = ''
   const n = r.int(1, 8)
-  for (let i = 0; i < n; i++) s += r.pick([...chars])
+  for (let i = 0; i < n; i++) s += r.pick(chars)
   return s === '.' || s === '..' || /\.$/.test(s) ? `${s}x` : s
 }
 
-/** Its letters in another case at random (`aB` → `Ab`) */
+/** Its letters in the other case at random where NTFS has one (`aB` → `Ab`), by the pairs above */
 export function recase(r: Rng, s: string): string {
-  return [...s].map((c) => (r.bool() ? c.toUpperCase() : c.toLowerCase())).join('')
+  return [...s].map((c) => (r.bool() ? (OTHER_CASE.get(c) ?? c) : c)).join('')
+}
+
+/** Whether NTFS reads two names (or paths) as one, by the pairs above: the oracle for the Windows case rule */
+export function sameOnNtfs(a: string, b: string): boolean {
+  const fold = (s: string) => [...s].map((c) => FOLDED.get(c) ?? c).join('')
+  return fold(a) === fold(b)
 }

@@ -32,6 +32,7 @@ import { fileURLToPath } from 'node:url'
 import { Linter, type Rule } from 'eslint'
 import tseslint from 'typescript-eslint'
 import plugin, { loadedSpecifier } from './eslint-platform-checks.js'
+import { baseCommit, renamesSince, type Rename } from './lint-allowlist.js'
 import { EVERY_OS_TESTS, OS_ALLOWLIST, inOsLayer, isChecked, isRepoApp, parseOsAllowlist } from './os-layer.js'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
@@ -293,25 +294,41 @@ export function formatDurations(durations: Durations, source: string): string {
 
 /**
  * The allowlist's text with every line the code no longer needs taken out (`--tighten`): a file that moved behind the
- * layer, or is gone. Comments stay; nothing is added, so a new offender still fails `os-layer.test.ts`. The merge queue
- * runs it on a conflict in the list (`.centralu/apps/project-board/project.json` `queue.conflicts.mechanical`): two pull
- * requests that each take out a line next to the other's conflict in git, and the merged tree says which lines are left.
+ * layer, or is gone. A file git sees renamed since main (`renames`, which `pnpm lint:tighten` follows too) keeps its
+ * line under its new path; nothing else is added, so a new offender still fails `os-layer.test.ts`. Comments stay where
+ * they are and the paths stay sorted. The merge queue runs it on a conflict in the list
+ * (`.centralu/apps/project-board/project.json` `queue.conflicts.mechanical`): two pull requests that each take out a
+ * line next to the other's conflict in git, and the merged tree says which lines are left.
  */
-export function tightened(text: string, offenders: ReadonlySet<string>): string {
+export function tightened(text: string, offenders: ReadonlySet<string>, renames: readonly Rename[] = []): string {
   const lines = text.split(/\r?\n/)
   if (lines.at(-1) === '') lines.pop()
-  const kept = lines.filter((l) => {
-    const path = l.trim()
-    return path === '' || path.startsWith('#') || offenders.has(path)
+  const isPath = (l: string) => l.trim() !== '' && !l.trim().startsWith('#')
+  const moved = new Map(renames.map(({ from, to }) => [from, to]))
+  const paths = [...new Set(lines.filter(isPath).map((l) => moved.get(l.trim()) ?? l.trim()))].filter((p) => offenders.has(p)).sort()
+  // Each path line takes the next kept path in order; a path line left over is dropped
+  let next = 0
+  const kept = lines.flatMap((l) => {
+    if (!isPath(l)) return [l]
+    const path = paths[next]
+    if (path === undefined) return []
+    next++
+    return [path]
   })
   return kept.join('\n') + '\n'
+}
+
+/** The files git sees renamed since main (`CC_LINT_BASE`, which the merge queue sets, else origin/main); none when unknown */
+function renamesSinceMain(): Rename[] {
+  const base = baseCommit(ROOT, process.env.CC_LINT_BASE ?? 'origin/main')
+  return (base && renamesSince(ROOT, base)) || []
 }
 
 async function main(argv: string[]) {
   if (argv.includes('--tighten')) {
     const file = `${ROOT}${OS_ALLOWLIST}`
     const before = readFileSync(file, 'utf8')
-    const after = tightened(before, new Set(await repo.offenders(repoFiles())))
+    const after = tightened(before, new Set(await repo.offenders(repoFiles())), renamesSinceMain())
     if (after !== before) writeFileSync(file, after)
     const count = (t: string) => parseOsAllowlist(t).length
     console.error(`${OS_ALLOWLIST}: ${count(before)} -> ${count(after)} lines`)
