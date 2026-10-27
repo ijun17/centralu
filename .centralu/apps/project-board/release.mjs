@@ -54,6 +54,7 @@ import {
 } from './git.mjs'
 import { bumpText, compareVersions, declaredVersion, filesNamed, nextVersion, parseVersion, releaseNotes, sourceScheme, versionLines } from './versions.mjs'
 import { listSome, plural, short, sleep, span } from './util.mjs'
+import { now as clock } from './clock.mjs'
 
 /** A refusal: nothing was pushed, tagged, started or approved. */
 export class ReleaseRefusal extends Error {
@@ -885,7 +886,7 @@ export async function rehearseRelease({ repo, dir, cfg, gh, ci, permissions, reg
       lines: evidence.lines,
       started: false,
     }
-  const at = Date.now()
+  const at = clock()
   let ref = s.main
   if (s.at !== s.tip) {
     if (!onBranch) {
@@ -955,7 +956,7 @@ async function rehearseBumpPr(s, cfg, gh, { version, confirm }) {
       lines,
       started: false,
     }
-  const at = Date.now()
+  const at = clock()
   await gh.dispatchWorkflow(s.repo, file, b.name, cfg.rehearsalInputs)
   const run = await findRun(gh, s.repo, file, { event: 'workflow_dispatch', headSha: head }, (r) => r.headBranch === b.name, at)
   return {
@@ -1065,7 +1066,7 @@ export async function approveRelease(ctx, { version, comment, confirm = false, w
   if (!canMerge(ctx.permissions)) throw new ReleaseRefusal([NOT_MAINTAINER])
   const waiting = wait && confirm
   const limitMs = Math.min(APPROVE_WAIT_MAX_MINUTES, Math.max(0, Number(waitMinutes ?? APPROVE_WAIT_MINUTES) || 0)) * 60_000
-  const started = Date.now()
+  const started = clock()
   const cancelled = { summary: 'Not approved: cancelled while waiting for the gate.', lines: [], approved: false, cancelled: true }
   // What the first read found (version, tagged commit, run): a wait approves only that, never what replaced it
   let pin = null
@@ -1080,7 +1081,7 @@ export async function approveRelease(ctx, { version, comment, confirm = false, w
       // A call cancelled while the gate was read last approves nothing
       if (signal?.aborted) return cancelled
       await ctx.gh.approveDeployments(ctx.repo, run.id, [...new Set(pending.map((p) => p.environmentId))], String(comment ?? '').trim() || `Approved through the project board's release tool for ${tag}.`)
-      const after = waiting && beat > 1 ? ` after ${span(Date.now() - started)} of waiting for the gate` : ''
+      const after = waiting && beat > 1 ? ` after ${span(clock() - started)} of waiting for the gate` : ''
       return { summary: `Approved ${ctx.cfg.environment} for ${tag} (${what})${after}${run.url ? `: ${run.url}` : ''}.${last ? '' : ' The shim asks again once every platform job succeeds: approve with wait: true to approve it the moment it may go.'}`, lines, approved: true, run: run.url }
     }
     // Not yet: without waiting, answered as the step always has; waiting, read everything again later
@@ -1089,9 +1090,9 @@ export async function approveRelease(ctx, { version, comment, confirm = false, w
       if (problems) throw new ReleaseRefusal(problems)
       return answer
     }
-    if (Date.now() - started + APPROVE_POLL_MS > limitMs)
+    if (clock() - started + APPROVE_POLL_MS > limitMs)
       return { summary: `Not approved: the gate did not pass within ${span(limitMs)} of waiting, so nothing was approved. Still: ${why} Call again with wait: true to wait longer, or look at the run.`, lines: problems ?? [], approved: false, timedOut: true, run: answer?.run ?? null }
-    progress(beat, `Waiting to approve (${span(Date.now() - started)} so far): ${why}`)
+    progress(beat, `Waiting to approve (${span(clock() - started)} so far): ${why}`)
     if (!(await sleep(APPROVE_POLL_MS, signal))) return cancelled
   }
 }

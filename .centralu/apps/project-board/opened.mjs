@@ -14,6 +14,7 @@
 // by anyone: after that a draft is a hold (a person turned it back), and the queue does not mark it ready again.
 import { readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { now as clock, systemNow } from './clock.mjs'
 
 export const OPENED_FILE = 'opened-prs.json'
 /** How many are kept: the newest; a pull request is queued within hours of being opened */
@@ -32,7 +33,7 @@ export function readOpened(dir) {
 }
 
 /** Adds one: `{ repo, number, notice, draft, at }`. Oldest dropped past OPENED_MAX. */
-export function noteOpened(dir, { repo, number, notice = null, draft = false, at = new Date().toISOString() }) {
+export function noteOpened(dir, { repo, number, notice = null, draft = false, at = new Date(clock()).toISOString() }) {
   if (!notice) return
   const all = readOpened(dir)
   delete all[keyOf(repo, number)]
@@ -67,8 +68,8 @@ function writeAll(dir, all) {
         }
         throw e
       }
-      const until = Date.now() + 25
-      while (Date.now() < until);
+      const until = systemNow() + 25
+      while (systemNow() < until);
     }
   }
 }

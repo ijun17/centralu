@@ -1494,7 +1494,7 @@ let fake: FakeGh
 beforeEach(() => {
   root = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-project-board-queue-')))
   mkdirSync(join(root, 'data'))
-  fake = fakeGh(root, FAKE_GH)
+  fake = fakeGh(root, FAKE_GH, { inProcess: true })
 })
 
 // Waiting for the app trees can take a while on a loaded Windows machine: grace, kill, the process listing and
@@ -1512,7 +1512,13 @@ afterAll(() => {
   endLeftoverFakes()
 }, 60_000 * SLOW)
 
-const FAST = { PROJECT_BOARD_QUEUE_TICK_MS: '50', PROJECT_BOARD_QUEUE_POLL_MS: '50' }
+/**
+ * The queue moves one poll per `merge_queue` read (PROJECT_BOARD_QUEUE_STEP=read, queue-driver.mjs `STEP_ON_READ`), never on
+ * a timer, each poll 100 ms later on the queue's own clock (system.mjs `now`), and every item is due at every poll: a test
+ * steps it with `until` and `polls` and waits for no clock. The fake
+ * `gh` answers in the app's own process (`inProcess`), so a poll costs no process start (docs/plans/os-layer.md §2.4).
+ */
+const FAST = { PROJECT_BOARD_QUEUE_STEP: 'read', PROJECT_BOARD_QUEUE_TICK_MS: '50', PROJECT_BOARD_QUEUE_POLL_MS: '1' }
 /**
  * Every git the tests and the app run here (#1346): no automatic maintenance. Since git 2.29 a commit, merge or fetch may
  * start a detached `git maintenance run --auto` that goes on working in the checkout after the command returns, which
@@ -1520,7 +1526,7 @@ const FAST = { PROJECT_BOARD_QUEUE_TICK_MS: '50', PROJECT_BOARD_QUEUE_POLL_MS: '
  */
 const NO_GIT_MAINTENANCE = { GIT_CONFIG_COUNT: '2', GIT_CONFIG_KEY_0: 'maintenance.auto', GIT_CONFIG_VALUE_0: 'false', GIT_CONFIG_KEY_1: 'gc.auto', GIT_CONFIG_VALUE_1: '0' }
 /** A server that polls only at its start: what a test drives or reads, nothing moves under it */
-const IDLE_SERVER = { PROJECT_BOARD_QUEUE_TICK_MS: String(3_600_000) }
+const IDLE_SERVER = { PROJECT_BOARD_QUEUE_STEP: '', PROJECT_BOARD_QUEUE_TICK_MS: String(3_600_000) }
 /**
  * Without two tiers of CI unless a test asks for them (TIERS): the queue as a repository without them runs it, every
  * green run a full one. The tiers this repository has (project.json ci.fullTier) have tests of their own below.
@@ -1572,15 +1578,21 @@ const queueFile = () => filesNamed(join(root, 'data'), 'merge-queue.json')[0]!
 const queueOnDisk = () => JSON.parse(readFileSync(queueFile(), 'utf8'))
 const notices = () => (queueOnDisk().events as { kind: string; notify: boolean; text: string; told?: boolean | 'failed'; repostedAt?: string; reposted?: 'failed' }[]).filter((e) => e.notify)
 
-/** Polls until `ok` holds, through merge_queue (which also keeps the app awake), for at most `ms` (20 s). */
-async function until(ok: (q: any) => boolean, what: string, ms = 20_000) {
+/**
+ * Steps the queue until `ok` holds: each merge_queue read is one poll (FAST), so nothing is waited for by the clock. At most
+ * `most` of them; `ms` (20 s) only bounds a step that hangs.
+ */
+async function until(ok: (q: any) => boolean, what: string, ms = 20_000, most = 400) {
   const end = Date.now() + ms * SLOW
-  for (;;) {
+  for (let n = 0; ; n++) {
     const q = (await call('merge_queue', { all: true })).data
     if (ok(q)) return q
-    if (Date.now() > end) throw new Error(`timed out waiting for ${what}: ${JSON.stringify(q)}`)
-    await new Promise((r) => setTimeout(r, 100))
+    if (n >= most || Date.now() > end) throw new Error(`not after ${n + 1} polls: ${what}: ${JSON.stringify(q)}`)
   }
+}
+/** `n` more polls of the queue (each 100 ms later on its clock), for a test that checks nothing more happens */
+async function polls(n = 10) {
+  for (let i = 0; i < n; i++) await call('merge_queue', { all: true })
 }
 const stateOf = (q: any, pr = 77) => q.queue.find((i: any) => i.pr === pr)?.state
 /** Waits for the queue to read the pull request `n` more times (a poll each), rather than for a time. */
@@ -1672,8 +1684,8 @@ describe('the merge queue posts its news into the session that queued (#1161 ite
     expect(q.data.watch).toContain('merge-queue.mjs')
     await until((x) => stateOf(x) === 'merged', 'the merge')
     await until(() => told.length > 0, 'the notice')
-    // Ticks go on (every 50 ms here) with nothing left to poll: a told message is not posted again
-    await new Promise((r) => setTimeout(r, 500))
+    // More polls with nothing left to poll: a told message is not posted again
+    await polls(6)
     expect(told).toEqual([{ sessionId: 's1', text: 'Merge queue: merged #77 (feat(apps): change 77) as abcdef1, "feat(apps): change 77 (#77)".', appId: 'project-board' }])
     expect(notices().map((e) => e.told)).toEqual([true])
     // A reader of merge_queue never sees the address
@@ -1705,6 +1717,24 @@ describe('the merge queue posts its news into the session that queued (#1161 ite
 })
 
 describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, () => {
+  // What every test here relies on (FAST): the queue moves when a test reads it, one poll a read, and not in between
+  it('moves one poll per merge_queue read, and none between reads', async () => {
+    runtime(ghState({ checks: { [SHA]: [ghCheck('verify', null, 11), ghCheck('windows tests', 'success', 12)] }, runs: { [SHA]: [ghRun(null)] } }))
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    const reads = () => ghCalls().filter((a) => a[0] === 'pr' && a[1] === 'view').length
+    await until((x) => stateOf(x) === 'ci', 'in CI')
+    const counts = [reads()]
+    for (let i = 0; i < 5; i++) {
+      await call('merge_queue', { all: true })
+      counts.push(reads())
+    }
+    expect(counts.slice(1).map((n, i) => n - counts[i]!)).toEqual([1, 1, 1, 1, 1])
+    // Nothing moves while nobody reads: no timer ticks (the one wait here, for a timer that must not fire; a 50 ms one would)
+    const before = reads()
+    await new Promise((r) => setTimeout(r, 200))
+    expect(reads()).toBe(before)
+  })
+
   it('passes check, with queue_merge and unqueue as changes and merge_queue as a read', async () => {
     const r = await runtime(ghState()).check(appRef)
     expect(r.text.split('\n').filter((l) => l.startsWith('- problem'))).toEqual([])
@@ -2028,7 +2058,7 @@ describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, (
     patchGh((s) => (s.rateLimited = true))
     await until((x) => x.pause?.kind === 'rate', 'the pause')
     const before = ghCalls().length
-    await new Promise((r) => setTimeout(r, 500))
+    await polls(6)
     // Paused: no more calls to GitHub while it lasts (at least a minute)
     expect(ghCalls().length).toBe(before)
     expect((await call('merge_queue')).text).toMatch(/Paused until \d\d:\d\d:\d\d UTC: GitHub's rate limit was reached/)
@@ -3974,7 +4004,7 @@ describe('the main guard finds what broke main after it landed (#1259)', { timeo
     const repo = mainRepo([{ subject: 'feat(ui): change 81 (#81)', files: ['packages/ui/src/a.ts'] }])
     guardRuntime(repo, { branchRuns: { main: [mainRun(990, repo.shas[0]!, 'failure'), mainRun(980, repo.green, 'success')] } })
     await call('merge_queue')
-    await new Promise((r) => setTimeout(r, 500))
+    await polls(6)
     expect(ghCalls().some((a) => a.join(' ').includes('event=push'))).toBe(false)
     expect(issues()).toEqual([])
   })
@@ -3995,8 +4025,8 @@ describe('the main guard finds what broke main after it landed (#1259)', { timeo
     expect(mainRedNotices()).toHaveLength(1)
     expect(mainRedNotices()[0]!.owner).toBe('tester')
     expect(mainRedNotices()[0]!.text).toContain('Merge queue: main went red after #81 (feat(ui): change 81 (#81)) landed: verify failed at')
-    // Ticks go on, main still red on that commit: nothing is filed or said again
-    await new Promise((r) => setTimeout(r, 1_000))
+    // More polls, main still red on that commit: nothing is filed or said again
+    await polls(11)
     expect(issues()).toHaveLength(1)
     expect(mainRedNotices()).toHaveLength(1)
     expect(guardOnDisk().hunt).toMatchObject({ red: repo.shas[0], outcome: 'reverting', culprit: { sha: repo.shas[0] } })
@@ -4076,7 +4106,7 @@ describe('the main guard finds what broke main after it landed (#1259)', { timeo
     await call('queue_merge', { pr: 77, owner: 'tester' })
     const held = await call('merge_queue')
     expect(held.text).toContain("Landing held: 3 of main's full runs unfinished (at most 2, #1259).")
-    await new Promise((r) => setTimeout(r, 1_000))
+    await polls(11)
     expect(writes().map(short2)).not.toContain('merge 77')
     patchGh((s) => (s.branchRuns.main = [going(994), mainRun(993, repo.shas[0]!, 'success'), mainRun(992, repo.shas[0]!, 'success'), mainRun(980, repo.green, 'success')]))
     await until((x) => stateOf(x) === 'merged', 'the landing')
@@ -4131,7 +4161,7 @@ describe('the main guard reverts what broke main, at the front of the queue (#12
     const culprit = repo.shas[0]!
     seedQueue([{ repo: R, pr: 81, lowers: [], owner: 'tester', author: 'writer', state: 'merged', commit: culprit, title: 'feat(ui): change 81', updatedAt: new Date().toISOString(), reruns: {} }])
     guardRuntime(repo, redOn(repo, culprit))
-    await call('merge_queue')
+    // Stopped at the poll that reverts: the next one would read the revert's own CI
     await until(() => guardOnDisk().hunt?.outcome === 'reverting' && mainRedNotices().length > 0, 'the revert')
     // The revert: on main's tip, undoing exactly the culprit (its file gone again), and nothing in the checkout moved
     const branch = `revert/${culprit.slice(0, 12)}`
@@ -4221,7 +4251,7 @@ describe("the main guard does not revert a commit for the runner's own failure (
     guardRuntime(repo, redInSetup(repo, sha, { branchRuns: { main: [secondAttempt(sha, 'success'), mainRun(980, repo.green, 'success')] } }))
     await call('merge_queue')
     await until(() => guardOnDisk().green === sha, 'main green again')
-    await new Promise((r) => setTimeout(r, 1_000))
+    await polls(11)
     expect(reruns()).toEqual([['rerun-failed', '990']])
     expect(guardOnDisk().reruns[990]).toMatchObject({ attempt: 1 })
     expect(writes().filter((w) => w[0] === 'pr-create')).toEqual([])
@@ -4237,7 +4267,7 @@ describe("the main guard does not revert a commit for the runner's own failure (
     guardRuntime(repo, redInSetup(repo, sha, { branchRuns: { main: [secondAttempt(sha, 'failure'), mainRun(980, repo.green, 'success')] } }))
     await call('merge_queue')
     await until(() => issues().length > 0 && mainRedNotices().length > 0, 'the report')
-    await new Promise((r) => setTimeout(r, 1_000))
+    await polls(11)
     expect(reruns()).toHaveLength(1)
     expect(writes().filter((w) => w[0] === 'pr-create')).toEqual([])
     expect(queueOnDisk().items.filter((i: any) => i.state !== 'merged')).toEqual([])
@@ -4323,7 +4353,7 @@ describe("the main guard does not revert a commit for the runner's own failure (
     })
     await call('merge_queue')
     await until(() => issues().length > 0 && mainRedNotices().length > 0, 'the report')
-    await new Promise((r) => setTimeout(r, 1_000))
+    await polls(11)
     expect(reruns()).toEqual([['rerun-failed', '990']])
     expect(writes().filter((w) => w[0] === 'pr-create')).toEqual([])
     expect(issues()).toHaveLength(1)
@@ -4349,7 +4379,7 @@ describe("the main guard does not revert a commit for the runner's own failure (
     })
     await call('merge_queue')
     await until(() => issues().length > 0 && mainRedNotices().length > 0, 'the report')
-    await new Promise((r) => setTimeout(r, 1_000))
+    await polls(11)
     expect(reruns()).toEqual([['rerun-failed', '990']])
     expect(writes().filter((w) => w[0] === 'pr-create')).toEqual([])
     expect(queueOnDisk().items.filter((i: any) => i.state !== 'merged')).toEqual([])
@@ -4467,7 +4497,7 @@ describe("the main guard does not revert a commit for the runner's own failure (
     guardRuntime(repo, { ...redInSetup(repo, sha, { branchRuns: { main: [secondAttempt(sha, 'failure'), mainRun(980, repo.green, 'success')] } }), logs: { '31': log } })
     await call('merge_queue')
     await until(() => issues().length > 0 && mainRedNotices().length > 0, 'the report')
-    await new Promise((r) => setTimeout(r, 1_000))
+    await polls(11)
     // The first error line is "E: Unable to locate package": only the warning before it says the network
     expect(issues()[0]!.body).toContain('E: Unable to locate package')
     expect(issues()[0]!.body).toContain('Its failing step names the network or a package source')
@@ -4481,7 +4511,7 @@ describe("the main guard does not revert a commit for the runner's own failure (
     guardRuntime(repo, redInSetup(repo, sha, { branchRuns: { main: [secondAttempt(sha, 'failure'), mainRun(980, repo.green, 'success')] } }))
     await call('merge_queue')
     await until(() => issues().length > 0 && mainRedNotices().length > 0, 'the report')
-    await new Promise((r) => setTimeout(r, 1_000))
+    await polls(11)
     expect(reruns()).toHaveLength(1)
     expect(writes().filter((w) => w[0] === 'pr-create')).toEqual([])
     expect(issues()[0]!.title).toBe(`Main is red at ${sha.slice(0, 7)}: an infrastructure failure, not reverted`)
@@ -4510,7 +4540,7 @@ describe("the main guard does not revert a commit for the runner's own failure (
     })
     await call('merge_queue')
     await until(() => issues().length > 0 && mainRedNotices().length > 0, 'the report')
-    await new Promise((r) => setTimeout(r, 1_500))
+    await polls(16)
     expect(reruns().map((w) => w[1]).sort()).toEqual(['990', '991'])
     expect(writes().filter((w) => w[0] === 'pr-create')).toEqual([])
     expect(Object.keys(guardOnDisk().reruns).sort()).toEqual(['990', '991'])
@@ -4615,7 +4645,7 @@ describe('the main guard with overlapping failures, and when it acts again (#125
     patchGh((s) => (s.branchRuns.main = [mainRun(993, rv, 'failure'), mainRun(992, c, 'failure'), mainRun(991, a, 'failure'), mainRun(980, repo.green, 'success')]))
     await until(() => guardOnDisk().hunt?.red === rv && guardOnDisk().hunt?.endedAt, 'the third red')
     expect(guardOnDisk().hunt.outcome).toBe('explained')
-    await new Promise((r) => setTimeout(r, 500))
+    await polls(6)
     expect(issues()).toHaveLength(2)
     expect(writes().filter((w) => w[0] === 'pr-create')).toHaveLength(2)
   })
@@ -4906,12 +4936,12 @@ describe('the integrator lands an auto-tier branch without a pull request from i
     const repo = integrateRepo({ 'docs/guide': { 'docs/guide.md': 'read it top down\n' } })
     integrateRuntime(repo, 'docs/guide', patch)
     await call('integrate', handOver('docs/guide'))
-    await until(() => writes().some((w) => w[0] === 'draft' && w[1] === '600'), 'the record to be a draft again', BATCH_WAIT_MS)
+    // The poll that turns it back says why at once; the next one may say what it lands from instead
+    const q = await until((x) => writes().some((w) => w[0] === 'draft' && w[1] === '600') && (!reason || stateOf(x, 600) === 'attention'), 'the record to be a draft again', BATCH_WAIT_MS)
     const order = writes().map(short2).filter((w) => /^(ready|merge|draft) 600$/.test(w))
     expect(order).toEqual(merge ? ['ready 600', 'merge 600', 'draft 600'] : ['ready 600', 'draft 600'])
     expect(gh().prs['600']).toMatchObject({ state: 'OPEN', isDraft: true })
     if (reason) {
-      const q = await until((x) => stateOf(x, 600) === 'attention', 'attention')
       const item = q.queue.find((i: any) => i.pr === 600)
       expect(item.reason.kind).toBe(reason)
       if (reason === 'not-merged') expect(item.reason.text).toContain('it was turned back into a draft, which also stops what GitHub held')
@@ -5174,7 +5204,7 @@ describe("the merge queue keeps its messages until their owner acknowledges them
     await until((x) => stateOf(x) === 'attention', 'attention')
     // Posted once, with how to acknowledge it; then once more, 400 ms on (30 minutes in the product), and no more
     await until(() => told.length >= 2, 'the repost')
-    await new Promise((r) => setTimeout(r, 1_000))
+    await polls(11)
     expect(told).toHaveLength(2)
     expect(told[0]).toMatch(/needs attention: conflict\.[\s\S]*Ack it with the board app's ack tool once handled: ack\(\{ owner: "tester", seqs: \[\d+\] \}\)/)
     expect(told[1]).toMatch(/^Merge queue: still not acknowledged after \d+ minutes: Merge queue: #77/)

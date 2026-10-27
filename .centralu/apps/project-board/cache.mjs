@@ -1,4 +1,5 @@
 // The short cache the board and the reader's threads share (pure: no gh, no IO of its own).
+import { now as clock } from './clock.mjs'
 
 /**
  * Reads from GitHub kept in memory for `ttlMs`, at most `max` keys (the oldest read goes first). A
@@ -16,14 +17,14 @@ export function freshCache({ ttlMs, max = Infinity, keep = () => true }) {
     /** The value under `key`, from the cache or from `read()`; `fresh` skips the cache. */
     async get(key, read, { fresh = false } = {}) {
       const hit = entries.get(key)
-      if (!fresh && hit && Date.now() - hit.at < ttlMs) return hit.value
+      if (!fresh && hit && clock() - hit.at < ttlMs) return hit.value
       const generation = generationOf(key)
       const pending = reads.get(key)
       if (pending && pending.generation === generation) return pending.promise
       const promise = read().then((value) => {
         if (keep(value) && generationOf(key) === generation) {
           entries.delete(key)
-          entries.set(key, { at: Date.now(), value })
+          entries.set(key, { at: clock(), value })
           while (entries.size > max) entries.delete(entries.keys().next().value)
         }
         return value

@@ -6,7 +6,7 @@
 // answer. Whatever keeps it from answering (no such script yet, an older one without `--screen`, the files not known,
 // a crash) is read as "it does": a batch that cannot be judged runs the heavy jobs, as a change that cannot be judged
 // is deep (queue-integrate.mjs).
-import { execFile } from 'node:child_process'
+import { execFile } from './system.mjs'
 import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'

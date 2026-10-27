@@ -10,6 +10,7 @@ import { config } from './config.mjs'
 import { fetchRefs, git, GitError, remoteFor, topLevel } from './git.mjs'
 import { enqueue, pushEvent } from './queue.mjs'
 import { short } from './util.mjs'
+import { now as clock } from './clock.mjs'
 
 const REF_SPACE = 'refs/centralu-guard'
 const PR_SUFFIX = /\s*\(#\d+\)\s*$/
@@ -163,7 +164,7 @@ function revertBody({ red, culprit, how, name, defaultBranch, tip }) {
  * it as a notice, or through its watch command), and answers what to record on the hunt; null when it no longer
  * holds the lease (another driver acts).
  */
-export async function actOnRed(dir, found, { now = Date.now(), ref, update, renew = () => true }) {
+export async function actOnRed(dir, found, { now = clock(), ref, update, renew = () => true }) {
   const { red, culprit, how, why } = found
   const repo = config.repository
   const pr = culprit ? prOfSubject(culprit.subject) : null

@@ -15,6 +15,7 @@ import { releaseLease, readQueue, startDriver, TICK_MS } from '../queue-driver.m
 import { watchState } from '../queue.mjs'
 import { noticeText, watchStart } from '../notice-acks.mjs'
 import { shellQuote } from '../util.mjs'
+import { now as clock } from '../clock.mjs'
 
 const USAGE = 'Usage: node .centralu/apps/project-board/bin/merge-queue.mjs watch --data <folder> [--owner <name>] [--after <seq>] [--minutes <n>]'
 const args = process.argv.slice(2)
@@ -45,7 +46,7 @@ try {
 const again = (seq) => ['node', shellQuote(process.argv[1]), 'watch', '--data', shellQuote(opts.data), ...(opts.owner ? ['--owner', shellQuote(opts.owner)] : []), '--after', String(seq)].join(' ')
 const holder = `watch:${process.pid}`
 const driver = startDriver(opts.data, { holder })
-const deadline = Date.now() + opts.minutes * 60_000
+const deadline = clock() + opts.minutes * 60_000
 
 let finishing = false
 async function finish(code, lines) {
@@ -76,7 +77,7 @@ function look() {
   const code = news.some((e) => e.kind === 'attention') ? 3 : 0
   if (done && news.length) return finish(code, [...news.map(noticeText), ...tail])
   if (done) return finish(0, [`Nothing queued${opts.owner ? ` for ${opts.owner}` : ''}.`])
-  if (Date.now() > deadline) return news.length ? finish(code, [...news.map(noticeText), ...tail]) : finish(6, [`No news in ${opts.minutes} minutes.`, ...tail])
+  if (clock() > deadline) return news.length ? finish(code, [...news.map(noticeText), ...tail]) : finish(6, [`No news in ${opts.minutes} minutes.`, ...tail])
   // The driver's timer does not hold the process; this one does
   setTimeout(look, TICK_MS)
 }

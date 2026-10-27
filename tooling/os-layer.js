@@ -110,6 +110,21 @@ export const isChecked = (file) => CHECKED.test(file)
  */
 export const isRepoApp = (file) => file.startsWith('.centralu/apps/')
 
+/**
+ * An app of the repository starts programs only through its own door (the review of #1627): one module per app imports
+ * `REPO_APP_OS_MODULES`, so a test can answer every program the app starts in the app's process (the board's
+ * `system.mjs`, `PROJECT_BOARD_FAKE_PROGRAMS`). `local/os-imports` holds the rest of each app to it. An app is plain
+ * Node with no installs and reads its own files directly, so its other OS modules are not held to a door.
+ */
+export const REPO_APP_DOORS = ['.centralu/apps/project-board/system.mjs']
+export const REPO_APP_OS_MODULES = ['child_process']
+
+/** The door of the app `file` is in, or null when that app has none */
+export function repoAppDoor(file) {
+  const app = /^\.centralu\/apps\/[^/]+\//.exec(file)?.[0]
+  return (app && REPO_APP_DOORS.find((d) => d.startsWith(app))) ?? null
+}
+
 /** A test, or a test's helper module */
 export const isTestFile = (file) => /\.test\.(ts|tsx|mts|mjs)$|test-helpers\.(ts|mts|mjs)$/.test(file)
 

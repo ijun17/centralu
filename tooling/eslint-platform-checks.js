@@ -11,7 +11,7 @@
  * Tests are not checked: skipping a case on an OS is what they are for.
  */
 import { relative, sep } from 'node:path'
-import { OS_NAMED_EXPORTS, OS_PROCESS_USES, REPO_ROOT, mayTouchOs, osModule, readOsAllowlist } from './os-layer.js'
+import { OS_NAMED_EXPORTS, OS_PROCESS_USES, REPO_APP_OS_MODULES, REPO_ROOT, isRepoApp, mayTouchOs, osModule, readOsAllowlist, repoAppDoor } from './os-layer.js'
 
 /** Node's `process.platform` values */
 const OS_NAMES = new Set(['aix', 'android', 'cygwin', 'darwin', 'freebsd', 'haiku', 'linux', 'netbsd', 'openbsd', 'sunos', 'win32'])
@@ -158,6 +158,9 @@ const osAllowlist = () => (allowlist ??= new Set(readOsAllowlist()))
  * object pattern (`const { cwd } = process`, `const { PATH } = process.env`). Not seen: a computed key
  * (`process[name]`), `process.env` or a `node:url` namespace kept in a variable and read later, `require('node:url')`
  * read in place, a computed `import()`, and a `require` made by `createRequire` under another name.
+ *
+ * In the repository's own apps (`.centralu/apps/`), only `REPO_APP_OS_MODULES` (`child_process`) is held, to the app's
+ * door (`REPO_APP_DOORS`): every program an app starts goes through it.
  */
 export const osImports = {
   meta: {
@@ -165,12 +168,26 @@ export const osImports = {
     docs: { description: 'touches the OS only in the OS layer' },
     messages: {
       touch: "'{{module}}' is used only in the OS layer (tooling/os-layer.js); ask the layer for what this needs (docs/plans/os-layer.md)",
+      door: "'{{module}}' is used only in this app's door ({{door}}): start the program through it",
+      noDoor: "'{{module}}' is used only in an app's door, and this app has none: add one to tooling/os-layer.js REPO_APP_DOORS",
     },
     schema: [{ type: 'object', properties: { everywhere: { type: 'boolean' } }, additionalProperties: false }],
   },
   create(context) {
     const everywhere = context.options[0]?.everywhere === true
-    if (!everywhere && mayTouchOs(repoPath(context.filename), osAllowlist())) return {}
+    const file = repoPath(context.filename)
+    if (!everywhere && isRepoApp(file)) {
+      const door = repoAppDoor(file)
+      if (door === file) return {}
+      const checkApp = (node) => {
+        const module = touchedBy(node)
+        if (!module || !REPO_APP_OS_MODULES.includes(module)) return
+        if (door) context.report({ node, messageId: 'door', data: { module, door } })
+        else context.report({ node, messageId: 'noDoor', data: { module } })
+      }
+      return { ImportDeclaration: checkApp, ExportNamedDeclaration: checkApp, ExportAllDeclaration: checkApp, ImportExpression: checkApp, CallExpression: checkApp }
+    }
+    if (!everywhere && mayTouchOs(file, osAllowlist())) return {}
     const report = (node, module) => context.report({ node, messageId: 'touch', data: { module } })
     const check = (node) => {
       const module = touchedBy(node)

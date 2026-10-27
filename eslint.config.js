@@ -195,6 +195,22 @@ export default tseslint.config(
       ],
     },
   },
+  /*
+   * The board app reads the time only through its clock (.centralu/apps/project-board/clock.mjs, the review of #1627):
+   * a stepped test run moves that clock, and a time read anywhere else would be the system's.
+   */
+  {
+    files: ['.centralu/apps/project-board/**/*.mjs'],
+    ignores: ['.centralu/apps/project-board/clock.mjs'],
+    rules: {
+      'no-restricted-properties': ['error', { object: 'Date', property: 'now', message: "Read the time through the app's clock (clock.mjs `now`, or `systemNow` for the lease)" }],
+      'no-restricted-syntax': [
+        'error',
+        { selector: "NewExpression[callee.name='Date'][arguments.length=0]", message: "Read the time through the app's clock: `new Date(now())` (clock.mjs)" },
+        { selector: "CallExpression[callee.name='Date'][arguments.length=0]", message: "Read the time through the app's clock: `new Date(now()).toString()` (clock.mjs)" },
+      ],
+    },
+  },
   // Node process code: Node globals are allowed.
   {
     files: [
