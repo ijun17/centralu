@@ -249,6 +249,8 @@ The judgement logic (core/approval) decides from `kind` alone — a worked examp
 
 ## 3. RPC methods (summary)
 
+A method's params and results are zod schemas in `commands/methods/<concept>.params.ts` and `.results.ts`, joined by `methodsOf` in `<concept>.ts`. The host parses the params; a window reads results through `parseRpcResult`. The window's bundle takes the protocol through `@cc/protocol/client`, which leaves the params and the other schemas only the host parses out (#1648); the wire shapes are unchanged.
+
 | Group | Methods | Notes |
 |---|---|---|
 | agents | `createSession, send, respondApproval, interrupt, resumeSession, deleteSession` | product spec §6.2. `deleteSession` moves the session to the session archive (FR-22); the person sees "Archive session…" |

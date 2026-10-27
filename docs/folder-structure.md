@@ -42,7 +42,13 @@ centralu/
 │  │     ├─ commands.ts         # request/response RPC (RpcMethods), spread from commands/methods/; re-exports commands/
 │  │     ├─ commands/           # the shapes its methods carry: sessions (SessionInfo), projects, files; methods/
 │  │     │                      #   holds the methods by concept: sessions, orchestrator, projects, terminal, apps,
-│  │     │                      #   host, settings
+│  │     │                      #   host, settings, mail. Each concept's schemas the host alone parses are in
+│  │     │                      #   <concept>.params.ts, the answers a window reads in .results.ts (methodsOf joins
+│  │     │                      #   them in <concept>.ts)
+│  │     ├─ client.ts           # the entry the UI's bundle takes ('@cc/protocol/client'): index.ts without the schemas only
+│  │     │                      #   the host reads (the params of every method, client-frames.ts,
+│  │     │                      #   machines-hub.ts). Types of them come through; lint forbids '@cc/protocol' in ui,
+│  │     │                      #   platform and core (#1648)
 │  │     ├─ entities.ts         # shared types such as SessionState, ApprovalDetail, UpdateStatus: re-exports entities/
 │  │     ├─ entities/           # one module per concept: ids, sessions, grid, apps, tools, approvals, usage,
 │  │     │                      #   git, errors, updates, preferences

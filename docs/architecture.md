@@ -53,6 +53,12 @@ transition table, `isWaiting`, `isInTurn`, `stepSessionState`) are such rules; c
 under its old names. A copy kept on one side drifts (#428), so `core/session/state-parity.test.ts` feeds the same
 events to core's reducer and the host's copy and compares what a reconnect hands back.
 
+**The screen reaches protocol through `@cc/protocol/client`**, not `@cc/protocol` (#1648). The client entry (`protocol/client.ts`)
+leaves out the schemas only the host parses at run time (each method's params, the frames a client sends, the
+calls a machine makes to its hub), so they stay out of the UI's JS bundle; the types of them still come through. A schema
+the UI needs to parse (events, entities, each method's results through `parseRpcResult`) stays in the client entry. `guard/import-boundary` fails a
+bare `@cc/protocol` in ui, platform and core (tests excepted); the host imports the whole.
+
 **Which OS this is is asked in platform modules only** (`local/platform-checks`, `tooling/eslint-platform-checks.js`).
 In the packages, the apps and the npm launcher, reading `process.platform` (or `os.platform()`) and comparing
 anything with an OS name (`=== 'win32'`, `case 'darwin':`) is a lint error outside `PLATFORM_MODULES` in
