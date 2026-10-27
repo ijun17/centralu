@@ -3,13 +3,15 @@ import type { ApprovalDecision, ApprovalDetail, NormalizedEvent, PermissionPrese
 import { ORCHESTRATOR_MCP_NAME } from '../../apps/contract.js'
 import { rpcError } from '../../rpc-error.js'
 import { asObj } from '../../json-value.js'
-import { withStderrTail } from '../../stream-text.js'
 import { AlwaysAllowRules, alwaysAllowKey } from '../always-allow.js'
 import { bridgePath } from '../bridge-path.js'
-import { INTERRUPTED_BY_TOOL, type AgentProcess, type CreateSessionOpts, type EventSink, type InputObserver, type InputOrigin, type SessionHandle } from '../contract.js'
+import type { AgentSpawnSpec, CreateSessionOpts, EventSink, SessionHandle } from '../contract.js'
+import { CoreSession } from '../core/ledger.js'
+import type { CoreIo, RunningTurn, ToolWire, TurnEnding, TurnInput } from '../core/seam.js'
+import type { ToolStart } from '../core/tool-process.js'
 import { insideFolder } from '../edit-grant.js'
 import { fileEditDetail, type FileChange } from '../file-changes.js'
-import { CardIds, PendingCards, stopNotConfirmed, undeliveredError } from '../session-kit.js'
+import { CardIds, PendingCards } from '../session-kit.js'
 import { UnmappedTypes } from '../unmapped.js'
 import { AcpConnection, AUTH_REQUIRED, METHOD_NOT_FOUND, NO_TIMEOUT_MS, RpcError, type RpcId } from './connection.js'
 import { KNOWN_UPDATES } from './known-updates.js'
@@ -27,15 +29,20 @@ import {
 } from './wire.js'
 
 /**
- * One Centralu session on one ACP agent process (docs/plans/acp-adapter.md §3–§5): the handshake, opening the
- * conversation (new or load), one prompt at a time with input queued here, cancel, approvals and teardown.
+ * One Centralu session on one ACP agent process (docs/plans/acp-adapter.md §3–§5): the ACP wire on the session core
+ * (docs/plans/session-core.md §7.2 PR 5). The wire does the handshake, opening the conversation (new or load), the prompt,
+ * cancel and approvals; the core (`core/ledger.ts`) queues input (one prompt at a time), keeps the receipts, the Stop's
+ * timer, the exit (crash or asleep) and the process.
  */
 
 export type AcpSessionDeps = {
   /** The tool's name in host.log lines and messages */
   label: string
-  /** The started agent process (`spawnLocalAgent` in production, a scripted peer in tests) */
-  process: AgentProcess
+  /** How to install the tool (`AcpProfile.descriptor.install`) */
+  install?: string
+  /** The agent's process: what to start (`AcpProfile.launch`), and from where (the keeper's source, or this host's spawn) */
+  spec: AgentSpawnSpec
+  start: Omit<ToolStart, 'sessionId'>
   /** The CLI version when the agent does not say it (`agentInfo.version`) */
   version: () => Promise<string | null>
   /** How long a Stop may wait for the agent's `cancelled` before the person hears it has not taken effect */
@@ -49,20 +56,16 @@ export type AcpSessionDeps = {
   infersCompaction?: boolean
 }
 
-/** `compact`: the turn Centralu started to compact the session (`SessionEvents.sendCompact`), never the person's `/compact` */
-type Input = { text: string; id?: string; compact?: boolean; observer?: InputObserver; done?: { resolve(): void; reject(e: Error): void } }
-
 type Card = { callId: string; options: PermissionOption[]; answer(outcome: PermissionOutcome): void }
 
 /**
- * One prompt and what was asked of it. Each turn has its own: a Stop belongs to the turn it was pressed in, so a cancel the
- * agent answers late can never end the next one.
+ * One prompt and what was asked of it. Each turn has its own: a Stop belongs to the turn it was pressed in (`core.stopAsked`),
+ * so a cancel the agent answers late can never end the next one.
  */
 type Turn = {
-  input: Input
-  stopAsked: boolean
+  core: RunningTurn
+  input: TurnInput
   cancelResent: boolean
-  stopTimer?: ReturnType<typeof setTimeout>
   /** The context reading before this turn, and the last one in it (`usage_update.used`) */
   usedBefore: number | null
   used: number | null
@@ -75,34 +78,65 @@ type Turn = {
 /** While a command runs, how often its process tree is noted (`AgentProcess.noteTree`): a shell it starts may be late */
 const TREE_NOTE_MS = 2_000
 
-/** What a session is doing; the queue drains only in `ready` with no turn */
-type Phase = 'opening' | 'ready' | 'closed'
-
 const CANCELLED: PermissionOutcome = { outcome: { outcome: 'cancelled' } }
 
-export class AcpSession implements SessionHandle {
-  externalId: string | null = null
+export class AcpSession extends CoreSession<AcpWire> implements SessionHandle {
   /**
    * A process a previous host left is ended and the conversation opened again in a new one (`AcpAdapter`): a turn it was
    * running is not carried on, so the host ends it as one the restart stopped (`SessionManager.adoptKept`)
    */
   readonly takesOverTurn = false
-  readonly ready: Promise<void>
-  private phase: Phase = 'opening'
-  private readonly conn: AcpConnection
+
+  constructor(opts: CreateSessionOpts, emit: EventSink, deps: AcpSessionDeps) {
+    super(
+      { sessionId: opts.sessionId, resumeExternalId: opts.resumeExternalId ?? null, start: deps.start, stopConfirmMs: deps.stopConfirmMs },
+      emit,
+      new AcpWire(opts, deps),
+    )
+  }
+
+  appAttachment(): 'attached' | 'restart' | 'failed' {
+    return 'failed'
+  }
+
+  respondApproval(requestId: string, decision: ApprovalDecision, _scope?: unknown, matcher?: string): boolean {
+    return this.wire.respondApproval(requestId, decision, matcher)
+  }
+
+  applyRules(matchers: readonly string[]): void {
+    this.wire.rules.addAll(matchers)
+  }
+
+  setPermissionPreset(preset: PermissionPreset): void {
+    this.wire.preset = preset
+  }
+
+  async listCommands(): Promise<{ name: string; description?: string; argumentHint?: string }[]> {
+    return this.wire.commands
+  }
+}
+
+class AcpWire implements ToolWire {
+  readonly label: string
+  readonly install?: string
+  /** ACP runs one prompt at a time (§5.4); a cancel ends the turn with `cancelled`, so the Stop's timer applies */
+  readonly turns = { midTurnInput: false, interruptEndsProcess: false, confirmsStop: true } as const
+  readonly launch: ToolWire['launch']
+  readonly rules = new AlwaysAllowRules()
+  preset: PermissionPreset
+  commands: { name: string; description?: string; argumentHint?: string }[] = []
+  private io!: CoreIo
+  private conn!: AcpConnection
+  /** The ACP session the conversation is on this process: the one every frame names */
+  private conversation: string | null = null
   private readonly normalizer: AcpNormalizer
   private readonly unmapped: UnmappedTypes
   private readonly cards = new PendingCards<Card>()
   private readonly cardIds = new CardIds()
-  private readonly rules = new AlwaysAllowRules()
-  private readonly queue: Input[] = []
   private turn: Turn | null = null
   /** While `session/load` is answered, every update is the replay of the conversation, not this turn (§4.3) */
   private replaying = false
   private canClose = false
-  private preset: PermissionPreset
-  private commands: { name: string; description?: string; argumentHint?: string }[] = []
-  private lastTurnInputs: string[] = []
   /** Commands running now, by call id, and the clock that notes the tree while any runs */
   private readonly commandsRunning = new Set<string>()
   private treeClock: ReturnType<typeof setInterval> | null = null
@@ -117,30 +151,36 @@ export class AcpSession implements SessionHandle {
 
   constructor(
     private readonly opts: CreateSessionOpts,
-    private readonly emit: EventSink,
     private readonly deps: AcpSessionDeps,
   ) {
+    this.label = deps.label
+    if (deps.install !== undefined) this.install = deps.install
     this.preset = opts.permissionPreset
+    this.launch = async () => deps.spec
     this.normalizer = new AcpNormalizer(opts.sessionId, deps.label)
     this.unmapped = new UnmappedTypes(deps.label, opts.sessionId, KNOWN_UPDATES)
-    this.conn = new AcpConnection(
-      deps.process,
-      {
-        onNotification: (method, params) => this.onNotification(method, params),
-        onRequest: (id, method, params) => this.onRequest(id, method, params),
-        onExit: (code, expected) => this.onExit(code, expected),
-      },
-      deps.label,
-    )
-    this.ready = this.open()
-    this.ready.catch(() => {})
   }
 
-  get sessionId(): string {
+  private get sessionId(): string {
     return this.opts.sessionId
   }
 
-  private async open(): Promise<void> {
+  private emit(e: NormalizedEvent): void {
+    this.io.emit(e)
+  }
+
+  async open(io: CoreIo, resume: { externalId: string } | null): Promise<{ externalId: string | null }> {
+    this.io = io
+    // The process's exit is the core's (it watches the process); the connection only fails what it had asked
+    this.conn = new AcpConnection(
+      io.process,
+      {
+        onNotification: (method, params) => this.onNotification(method, params),
+        onRequest: (id, method, params) => this.onRequest(id, method, params),
+        onExit: () => {},
+      },
+      this.label,
+    )
     try {
       const init = InitializeResult.parse(
         await this.conn.request(
@@ -158,28 +198,26 @@ export class AcpSession implements SessionHandle {
       if (version) this.emit({ type: 'agent_version', sessionId: this.sessionId, version })
       this.canClose = init.agentCapabilities?.sessionCapabilities?.close !== undefined
       const base = { cwd: this.opts.cwd, mcpServers: this.mcpServers() }
-      const resume = this.opts.resumeExternalId
       if (resume) {
         const caps = init.agentCapabilities
         const method = caps?.loadSession ? 'session/load' : caps?.sessionCapabilities?.resume !== undefined ? 'session/resume' : null
-        if (!method) throw rpcError(`${this.deps.label} cannot reopen a conversation`, 'session_not_found')
+        if (!method) throw rpcError(`${this.label} cannot reopen a conversation`, 'session_not_found')
         this.replaying = method === 'session/load'
         try {
-          OpenedSession.parse((await this.conn.request(method, { ...base, sessionId: resume }, 150_000)) ?? {})
+          OpenedSession.parse((await this.conn.request(method, { ...base, sessionId: resume.externalId }, 150_000)) ?? {})
         } finally {
           this.replaying = false
         }
-        this.externalId = resume
+        this.conversation = resume.externalId
         this.costTotal = this.opts.runningCost?.last ?? null
       } else {
         const opened = OpenedSession.parse(await this.conn.request('session/new', base, 120_000))
-        if (!opened.sessionId) throw new Error(`${this.deps.label} opened a session without an id`)
-        this.externalId = opened.sessionId
+        if (!opened.sessionId) throw new Error(`${this.label} opened a session without an id`)
+        this.conversation = opened.sessionId
         this.costTotal = 0
         this.opts.runningCost?.keep(0)
       }
-      this.phase = 'ready'
-      this.next()
+      return { externalId: this.conversation }
     } catch (err) {
       throw this.openError(err)
     }
@@ -187,9 +225,9 @@ export class AcpSession implements SessionHandle {
 
   private openError(err: unknown): Error {
     if (err instanceof RpcError && err.code === AUTH_REQUIRED) {
-      return rpcError(`${this.deps.label} is not logged in. Log in from a terminal, then try again.`, 'not_logged_in')
+      return rpcError(`${this.label} is not logged in. Log in from a terminal, then try again.`, 'not_logged_in')
     }
-    if (err instanceof RpcError) return rpcError(`${this.deps.label}: ${err.message}`, 'internal')
+    if (err instanceof RpcError) return rpcError(`${this.label}: ${err.message}`, 'internal')
     return err instanceof Error ? err : new Error(String(err))
   }
 
@@ -211,82 +249,43 @@ export class AcpSession implements SessionHandle {
     ]
   }
 
-  appAttachment(): 'attached' | 'restart' | 'failed' {
-    return 'failed'
-  }
-
-  send(text: string, opts?: { origin?: InputOrigin; id?: string; compact?: boolean }): void {
-    this.enqueue({ text, ...(opts?.id ? { id: opts.id } : {}), ...(opts?.compact ? { compact: true } : {}) })
-  }
-
-  sendTracked(text: string, observer?: InputObserver): Promise<void> {
-    return new Promise<void>((resolve, reject) => this.enqueue({ text, ...(observer ? { observer } : {}), done: { resolve, reject } }))
-  }
-
-  private enqueue(input: Input): void {
-    if (this.phase === 'closed') {
-      const e = new Error(`${this.deps.label} session is closed`)
-      input.observer?.fail(e)
-      input.done?.reject(e)
-      return
-    }
-    this.queue.push(input)
-    this.next()
-  }
-
-  /** ACP runs one prompt at a time; a message sent during a turn waits for it (§5.4) */
-  private next(): void {
-    if (this.phase !== 'ready' || this.turn) return
-    const input = this.queue.shift()
-    if (input) void this.run(input)
-  }
-
-  turnInputs(): readonly string[] {
-    return this.lastTurnInputs
-  }
-
-  private async run(input: Input): Promise<void> {
-    const turn: Turn = { input, stopAsked: false, cancelResent: false, usedBefore: this.lastUsed, used: null, compacted: false, costTotal: null }
+  startTurn(input: TurnInput, core: RunningTurn): void {
+    const turn: Turn = { core, input, cancelResent: false, usedBefore: this.lastUsed, used: null, compacted: false, costTotal: null }
     this.turn = turn
-    this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'working' })
-    input.observer?.accepted?.()
-    let result: PromptResult | null = null
-    let failure: Error | null = null
+    // `session/prompt` has no earlier answer: the write is the nearest the agent says it took the input (§2.3)
+    this.io.inputAccepted(input.id)
+    void this.prompt(turn)
+  }
+
+  private async prompt(turn: Turn): Promise<void> {
+    let result: PromptResult
     try {
       result = PromptResult.parse(
-        await this.conn.request('session/prompt', { sessionId: this.externalId, prompt: [{ type: 'text', text: input.text }] }, NO_TIMEOUT_MS),
+        await this.conn.request('session/prompt', { sessionId: this.conversation, prompt: [{ type: 'text', text: turn.input.text }] }, NO_TIMEOUT_MS),
       )
     } catch (err) {
-      failure = err instanceof Error ? err : new Error(String(err))
+      const failure = err instanceof Error ? err : new Error(String(err))
+      turn.core.end({ how: 'failed', error: { code: 'internal', message: `${this.label}: ${failure.message}`, retryable: true }, inputError: failure })
+      return
     }
-    if (turn.stopTimer) clearTimeout(turn.stopTimer)
-    if (this.phase === 'closed') return
-    for (const e of this.normalizer.endTurn()) this.emit(e)
-    this.stopTreeClock()
-    this.closeCards()
-    this.lastTurnInputs = input.id ? [input.id] : []
-    this.turn = null
-    if (failure) {
-      this.emit({ type: 'error', sessionId: this.sessionId, error: { code: 'internal', message: `${this.deps.label}: ${failure.message}`, retryable: true } })
-      input.observer?.fail(failure)
-      input.done?.reject(failure)
-    } else if (result) {
-      this.endTurn(result, turn)
-      if (result.stopReason === 'cancelled' && turn.stopAsked) {
-        // A turn our Stop cancelled: its input did not finish, as Claude and Codex fail it: a stopped delegation is not reported as done
-        const stopped = new Error('The parent note was stopped before it finished')
-        input.observer?.fail(stopped)
-        input.done?.reject(stopped)
-      } else {
-        input.observer?.complete()
-        input.done?.resolve()
-      }
-    }
-    this.next()
+    turn.core.end(this.endingOf(result), () => this.endEvents(result, turn))
   }
 
-  private endTurn(result: PromptResult, turn: Turn): void {
+  private endingOf(result: PromptResult): TurnEnding {
+    switch (result.stopReason) {
+      case 'cancelled':
+        return { how: 'interrupted' }
+      case 'refusal':
+        return { how: 'failed', error: { code: 'internal', message: `${this.label} refused to go on with this turn.`, retryable: false }, inputError: null }
+      default:
+        return { how: 'complete' }
+    }
+  }
+
+  /** The turn's usage, an inferred compaction and a limit's notice, before the core's own ending event */
+  private endEvents(result: PromptResult, turn: Turn): NormalizedEvent[] {
     const sessionId = this.sessionId
+    const events: NormalizedEvent[] = []
     const turnTokens = tokenUsage(result)
     // A turn with no usage reports no cost: its spend stays in the total and is said with the next turn that reports
     const cost = turnTokens ? this.turnCost(turn) : null
@@ -294,7 +293,7 @@ export class AcpSession implements SessionHandle {
       if (cost !== null) this.costSoFar = (this.costSoFar ?? 0) + cost
       this.tokensSoFar = addTokens(this.tokensSoFar, turnTokens)
       const request = requestInput(result)
-      this.emit({
+      events.push({
         type: 'usage_update',
         sessionId,
         tokens: this.costSoFar === null ? this.tokensSoFar : { ...this.tokensSoFar, costUsd: this.costSoFar },
@@ -302,29 +301,24 @@ export class AcpSession implements SessionHandle {
       })
     }
     if (result.stopReason === 'end_turn' && this.inferredCompaction(turn)) {
-      this.emit({ type: 'compaction', sessionId, failed: false, trigger: 'manual' })
+      events.push({ type: 'compaction', sessionId, failed: false, trigger: 'manual' })
     }
-    switch (result.stopReason) {
-      case 'cancelled':
-        this.emit({ type: 'state_change', sessionId, state: 'waiting_input', reason: turn.stopAsked ? 'interrupted' : INTERRUPTED_BY_TOOL })
-        return
-      case 'refusal':
-        this.emit({ type: 'error', sessionId, error: { code: 'internal', message: `${this.deps.label} refused to go on with this turn.`, retryable: false } })
-        return
-      case 'max_tokens':
-      case 'max_turn_requests':
-        this.emit({
-          type: 'notice',
-          sessionId,
-          level: 'warning',
-          from: this.deps.label,
-          text: result.stopReason === 'max_tokens' ? `${this.deps.label} stopped: the reply reached its length limit.` : `${this.deps.label} stopped: the turn reached its limit of steps.`,
-        })
-        this.emit({ type: 'turn_complete', sessionId })
-        return
-      default:
-        this.emit({ type: 'turn_complete', sessionId })
+    if (result.stopReason === 'max_tokens' || result.stopReason === 'max_turn_requests') {
+      events.push({
+        type: 'notice',
+        sessionId,
+        level: 'warning',
+        from: this.label,
+        text: result.stopReason === 'max_tokens' ? `${this.label} stopped: the reply reached its length limit.` : `${this.label} stopped: the turn reached its limit of steps.`,
+      })
     }
+    return events
+  }
+
+  turnOver(why?: string): void {
+    for (const e of why === undefined ? this.normalizer.endTurn() : this.normalizer.endTurn(why)) this.emit(e)
+    this.stopTreeClock()
+    this.turn = null
   }
 
   /**
@@ -332,7 +326,7 @@ export class AcpSession implements SessionHandle {
    * the tool if it is killed: its tree is noted while a command runs, so they are ended with it (`noteTree`)
    */
   private watchCommands(e: NormalizedEvent): void {
-    const proc = this.deps.process
+    const proc = this.io.process
     if (!proc.noteTree) return
     if (e.type === 'tool_call' && e.summary.tool === 'Bash') {
       this.commandsRunning.add(e.callId)
@@ -368,19 +362,9 @@ export class AcpSession implements SessionHandle {
     return turn.usedBefore !== null && turn.used !== null && turn.used < turn.usedBefore
   }
 
+  /** ACP's Stop: `session/cancel`; after it the core answers every open permission `cancelled` (measured: the agent withdraws none) */
   interrupt(): void {
-    const turn = this.turn
-    if (!turn || this.phase !== 'ready') return
-    turn.stopAsked = true
-    this.conn.notify('session/cancel', { sessionId: this.externalId })
-    // ACP: after a cancel the client answers every open permission `cancelled` (measured: the agent withdraws none)
-    this.closeCards()
-    if (!turn.stopTimer) {
-      turn.stopTimer = setTimeout(() => {
-        if (this.turn === turn) this.emit(stopNotConfirmed(this.sessionId, `${this.deps.label} has not confirmed the stop; the turn may still be running.`))
-      }, this.deps.stopConfirmMs)
-      turn.stopTimer.unref?.()
-    }
+    this.conn.notify('session/cancel', { sessionId: this.conversation })
   }
 
   private onNotification(method: string, params: unknown): void {
@@ -389,7 +373,7 @@ export class AcpSession implements SessionHandle {
       return
     }
     const read = readUpdate(params)
-    if (!read || read.sessionId !== this.externalId || this.replaying) return
+    if (!read || read.sessionId !== this.conversation || this.replaying) return
     const turn = this.turn
     this.resendLostCancel()
     if ('other' in read) {
@@ -429,9 +413,9 @@ export class AcpSession implements SessionHandle {
    */
   private resendLostCancel(): void {
     const turn = this.turn
-    if (!turn?.stopAsked || turn.cancelResent) return
+    if (!turn?.core.stopAsked || turn.cancelResent) return
     turn.cancelResent = true
-    this.conn.notify('session/cancel', { sessionId: this.externalId })
+    this.conn.notify('session/cancel', { sessionId: this.conversation })
   }
 
   /** Answers a question cancelled, and remembers the call did not run as asked */
@@ -440,9 +424,9 @@ export class AcpSession implements SessionHandle {
     return CANCELLED
   }
 
-  /** Whether a question asked now belongs to a turn that still runs: none after Stop or after the turn's end */
+  /** Whether a question asked now belongs to a turn that still runs: none after Stop, after the turn's end or the close */
   private askable(turn: Turn | null): boolean {
-    return this.phase !== 'closed' && turn !== null && this.turn === turn && !turn.stopAsked
+    return turn !== null && this.turn === turn && !turn.core.stopAsked
   }
 
   private async onRequest(_id: RpcId, method: string, params: unknown): Promise<unknown> {
@@ -480,7 +464,7 @@ export class AcpSession implements SessionHandle {
     return key !== null && this.rules.allows(key)
   }
 
-  respondApproval(requestId: string, decision: ApprovalDecision, _scope?: unknown, matcher?: string): boolean {
+  respondApproval(requestId: string, decision: ApprovalDecision, matcher?: string): boolean {
     const card = this.cards.take(requestId)
     if (!card) return false
     // "Always" stays Centralu's rule: passing `allow_always` on would write it into the tool's own allowlist (§5.3)
@@ -492,19 +476,7 @@ export class AcpSession implements SessionHandle {
     return true
   }
 
-  applyRules(matchers: readonly string[]): void {
-    this.rules.addAll(matchers)
-  }
-
-  setPermissionPreset(preset: PermissionPreset): void {
-    this.preset = preset
-  }
-
-  async listCommands(): Promise<{ name: string; description?: string; argumentHint?: string }[]> {
-    return this.commands
-  }
-
-  private closeCards(): void {
+  releaseCards(): void {
     this.cards.release((requestId, card) => {
       this.normalizer.refuse(card.callId)
       card.answer(CANCELLED)
@@ -512,64 +484,17 @@ export class AcpSession implements SessionHandle {
     })
   }
 
-  private onExit(code: number | null, expected: boolean): void {
-    if (expected || this.phase === 'closed') return
-    const wasOpen = this.phase === 'ready'
-    this.phase = 'closed'
-    this.closeCards()
-    const turn = this.turn
-    this.turn = null
-    if (turn?.stopTimer) clearTimeout(turn.stopTimer)
-    this.dropQueue('were still queued when the agent exited')
-    const failure = new Error(`${this.deps.label} exited${code === null ? '' : ` (code ${code})`}`)
-    if (turn) {
-      for (const e of this.normalizer.endTurn()) this.emit(e)
-      this.stopTreeClock()
-      turn.input.observer?.fail(failure)
-      turn.input.done?.reject(failure)
+  async close(opts: { turnRunning: boolean }): Promise<void> {
+    if (!this.conn) return
+    if (opts.turnRunning && this.conversation) this.conn.notify('session/cancel', { sessionId: this.conversation })
+    if (this.canClose && this.conversation && !this.conn.isClosed) {
+      await this.conn.request('session/close', { sessionId: this.conversation }, 2000).catch(() => {})
     }
-    if (turn || !wasOpen) {
-      this.emit({ type: 'error', sessionId: this.sessionId, error: { code: 'adapter_crashed', message: withStderrTail(failure.message, this.conn), retryable: true } })
-    } else {
-      // Idle when it ended: the conversation is kept by the tool, and the next message opens it again
-      this.emit({ type: 'session_live', sessionId: this.sessionId, live: false, reason: 'asleep' })
-    }
-  }
-
-  private dropQueue(when: string): void {
-    const left = this.queue.splice(0)
-    if (left.length === 0) return
-    const e = new Error(`${left.length} message(s) ${when}`)
-    for (const i of left) {
-      i.observer?.fail(e)
-      i.done?.reject(e)
-    }
-    this.emit(undeliveredError(this.sessionId, left.length, when))
-  }
-
-  async dispose(): Promise<void> {
-    if (this.phase === 'closed') return
-    const turn = this.turn
-    this.phase = 'closed'
-    this.closeCards()
-    this.dropQueue('were still queued when the session closed')
-    if (turn) {
-      // The calls it had open end with it (#1562 review: a host stopped mid-command left the card spinning after its restart)
-      for (const e of this.normalizer.endTurn('Centralu stopped this session while the call ran')) this.emit(e)
-      this.stopTreeClock()
-    }
-    if (turn && this.externalId) {
-      if (turn.stopTimer) clearTimeout(turn.stopTimer)
-      this.conn.notify('session/cancel', { sessionId: this.externalId })
-      turn.input.observer?.fail(new Error('the session closed'))
-      turn.input.done?.reject(new Error('the session closed'))
-    }
-    if (this.canClose && this.externalId && !this.conn.isClosed) {
-      await this.conn.request('session/close', { sessionId: this.externalId }, 2000).catch(() => {})
-    }
-    await this.conn.dispose()
+    // The core stops the process next: its exit is ours, so the connection fails what it asked as cancelled, not as a crash
+    this.conn.close()
   }
 }
+
 
 function pick(options: readonly PermissionOption[], kind: string): PermissionOption | undefined {
   return options.find((o) => o.kind === kind)
