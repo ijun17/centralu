@@ -7,7 +7,7 @@ import { AlwaysAllowRules, alwaysAllowKey } from '../always-allow.js'
 import { bridgePath } from '../bridge-path.js'
 import { INTERRUPTED_BY_TOOL, type AgentProcess, type CreateSessionOpts, type EventSink, type InputObserver, type InputOrigin, type SessionHandle } from '../contract.js'
 import { insideFolder } from '../edit-grant.js'
-import { fileEditDetail, type FileChange } from '../file-changes.js'
+import { changedLines, fileEditDetail, type FileChange } from '../file-changes.js'
 import { CardIds, PendingCards, stopNotConfirmed, undeliveredError } from '../session-kit.js'
 import { UnmappedTypes } from '../unmapped.js'
 import { AcpConnection, AUTH_REQUIRED, METHOD_NOT_FOUND, NO_TIMEOUT_MS, RpcError, type FrameDirection, type RpcId } from './connection.js'
@@ -574,7 +574,7 @@ export function detailOf(call: ToolCallFields, cwd: string): ApprovalDetail {
   const input = asObj(call.rawInput)
   if (call.kind === 'execute') return { kind: 'command', command: str(input.command) || call.title || '', cwd: str(input.cwd) || cwd }
   if (call.kind === 'edit' || call.kind === 'delete' || call.kind === 'move') {
-    const diffs: FileChange[] = (call.content ?? []).flatMap((c) => (c.type === 'diff' && c.path ? [{ path: c.path, diff: c.newText ?? '' }] : []))
+    const diffs: FileChange[] = (call.content ?? []).flatMap((c) => (c.type === 'diff' && c.path ? [{ path: c.path, diff: c.oldText ? changedLines(c.oldText, c.newText ?? '') : (c.newText ?? '') }] : []))
     const changes = diffs.length ? diffs : editPaths(call).map((path) => ({ path, diff: str(input.content) || str(input.newString) || str(input.new_string) }))
     return fileEditDetail(call.kind === 'delete' ? changes.map((c) => ({ ...c, change: 'delete' as const })) : changes)
   }

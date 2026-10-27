@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import type { AdapterCapabilities, NormalizedEvent } from '@cc/protocol'
 import type { AgentProcess, CreateSessionOpts, ProcessSource } from '../contract.js'
 import { AcpAdapter } from './adapter.js'
+import { detailOf } from './session.js'
 import { FakeAcpPeer, INIT_RESULT, type PeerScript } from './fake-peer.test-helpers.js'
 import type { AcpProfile } from './profile.js'
 
@@ -77,6 +78,19 @@ async function turnCosts(w: ReturnType<typeof world>, s: Awaited<ReturnType<Retu
   }
   return w.events.flatMap((e) => (e.type === 'usage_update' ? [e.tokens.costUsd] : []))
 }
+
+describe('the approval card of an edit', () => {
+  const edit = (content: unknown[]) => detailOf({ toolCallId: 'c', kind: 'edit', title: 'Edit a.txt', content } as never, '/work')
+
+  it('shows the lines that changed between the old and the new text of the file, not the new text alone', () => {
+    const detail = edit([{ type: 'diff', path: '/work/a.txt', oldText: 'one\ntwo\nthree\nfour\n', newText: 'one\n2\nthree\nfour\n' }])
+    expect(detail).toMatchObject({ kind: 'file_edit', path: '/work/a.txt', diffPreview: '-two\n+2' })
+  })
+
+  it('keeps the new text as it was sent for a file that had no old text', () => {
+    expect(edit([{ type: 'diff', path: '/work/a.txt', newText: 'hello' }])).toMatchObject({ diffPreview: 'hello' })
+  })
+})
 
 describe('the ACP session against a scripted agent', () => {
   it('never calls authenticate, and says the tool is not logged in', async () => {

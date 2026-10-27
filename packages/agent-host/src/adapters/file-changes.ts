@@ -45,6 +45,21 @@ export function diffLines(prefix: '-' | '+', text: string): string {
 }
 
 /**
+ * The lines that differ between a file's text before and after: what is the same at the start and at the end is left
+ * out, the rest is shown as `-` lines then `+` lines (as Claude's Edit card shows its old and new string). A tool that
+ * names the whole file on both sides (ACP's `diff` content) would otherwise print the file twice.
+ */
+export function changedLines(before: string, after: string): string {
+  const a = before.replace(/\n$/, '').split('\n')
+  const b = after.replace(/\n$/, '').split('\n')
+  let start = 0
+  while (start < a.length && start < b.length && a[start] === b[start]) start++
+  let end = 0
+  while (end < a.length - start && end < b.length - start && a[a.length - 1 - end] === b[b.length - 1 - end]) end++
+  return [diffLines('-', a.slice(start, a.length - end).join('\n')), diffLines('+', b.slice(start, b.length - end).join('\n'))].filter(Boolean).join('\n')
+}
+
+/**
  * The paths a call changes, reported as `files_touched` only once the call went through (#843).
  *
  * Claude's paths are known when the call is made and Codex's when its item completes, but either way a file is
