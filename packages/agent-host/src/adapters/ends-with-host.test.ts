@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -115,6 +115,52 @@ describe('a CLI that must end with its host', () => {
     started.push(helper, h.pid!)
     h.kill('SIGKILL')
     expect(await goneWithin(helper, 10_000)).toBe(true)
+  })
+
+  /*
+   * Every tool started by this host, through the process seam (#1654 Q3): Codex's app-server and Claude Code end with a host
+   * killed outright, as ACP's tools already did, whatever they do with stdin's end. The CLI writes its pid to a file: the
+   * tool's own reader takes its stdout.
+   */
+  const pidFileCli = (file: string) => ({
+    command: process.execPath,
+    args: ['-e', `require('node:fs').writeFileSync(${JSON.stringify(file)}, String(process.pid)); process.stdin.resume(); setInterval(() => {}, 1000)`],
+  })
+  async function pidIn(file: string): Promise<number> {
+    for (let i = 0; i < 200; i++) {
+      if (existsSync(file) && readFileSync(file, 'utf8')) return Number(readFileSync(file, 'utf8'))
+      await new Promise((r) => setTimeout(r, 50 * SLOW))
+    }
+    throw new Error('the CLI wrote no pid')
+  }
+  async function endsWithItsHost(lines: (cli: { command: string; args: string[] }) => string[]): Promise<void> {
+    dir = mkdtempSync(join(tmpdir(), 'cc-ends-with-host-'))
+    const host = join(dir, 'host.mts')
+    const file = join(dir, 'cli.pid')
+    writeFileSync(host, [...lines(pidFileCli(file)), 'setInterval(() => {}, 1000)'].join('\n'))
+    const h = spawn(process.execPath, ['--import', 'tsx', host], { stdio: ['ignore', 'ignore', 'inherit'] })
+    started.push(h.pid!)
+    const cli = await pidIn(file)
+    started.push(cli)
+    h.kill('SIGKILL')
+    expect(await goneWithin(cli, 10_000)).toBe(true)
+  }
+  const moduleUrl = (file: string) => JSON.stringify(pathToFileURL(join(import.meta.dirname, file)).href)
+
+  it.skipIf(!unix)('ends Codex’s app-server when its host is SIGKILLed', async () => {
+    await endsWithItsHost((cli) => [
+      `import { CodexClient } from ${moduleUrl('codex/client.ts')}`,
+      `new CodexClient({ onNotification: () => {}, onServerRequest: () => {}, onExit: () => {} }, { command: ${JSON.stringify(cli.command)}, args: ${JSON.stringify(cli.args)} })`,
+    ])
+  })
+
+  it.skipIf(!unix)('ends Claude Code when its host is SIGKILLed', async () => {
+    await endsWithItsHost((cli) => [
+      `import { claudeQueryOptions } from ${moduleUrl('claude/sdk-query.ts')}`,
+      `import { spawnLocalAgent } from ${moduleUrl('local-process.ts')}`,
+      "const o = claudeQueryOptions({ sessionId: 's1', opts: { sessionId: 's1', cwd: process.cwd(), permissionPreset: 'normal' }, executablePath: undefined, servers: {}, permissionOptions: { permissionMode: 'default' }, codeIntelligence: {}, spawn: spawnLocalAgent, canUseTool: async () => ({ behavior: 'deny', message: '' }) })",
+      `o.spawnClaudeCodeProcess({ command: ${JSON.stringify(cli.command)}, args: ${JSON.stringify(cli.args)}, env: process.env })`,
+    ])
   })
 
   it('starts as before without it, and where there are no process groups', async () => {

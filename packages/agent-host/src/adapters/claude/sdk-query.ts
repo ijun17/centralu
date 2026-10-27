@@ -141,9 +141,10 @@ export function claudeQueryOptions({ sessionId, opts, executablePath, servers, p
      * Without a keeper the CLI is still spawned here rather than by the SDK, which signals only
      * the CLI's own pid: in a process group of its own (Windows: a tree), stopping it also ends
      * the helpers it started (a language server and its `tsserver`, MCP servers), and so does
-     * its exit (`local-process.ts`).
+     * its exit (`local-process.ts`). Started here, it also ends with this host however the host ends, stdin's end or not
+     * (`endsWithHost`, #1654 Q3, as every tool: core/tool-process.ts); the keeper's spawn leaves that flag out.
      */
-    spawnClaudeCodeProcess: (o: LocalSpawnSpec) => spawn(o) as never,
+    spawnClaudeCodeProcess: (o: LocalSpawnSpec) => spawn({ ...o, endsWithHost: true }) as never,
     /*
      * Reasoning effort. It only matters when the model supports it, so deciding support is
      * left to whatever provides the list (supportedModels) — this just passes through the

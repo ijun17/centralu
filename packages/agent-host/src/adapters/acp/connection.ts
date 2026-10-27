@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { z } from 'zod'
 import { errorMessage } from '@cc/protocol'
 import type { AgentProcess } from '../contract.js'
-import { waitForExit } from '../../timing.js'
+import { logToolStderr, stopToolProcess } from '../core/tool-process.js'
 import { lineSplitter, PendingRequests } from '../../transport/json-lines.js'
 
 /**
@@ -71,10 +71,7 @@ export class AcpConnection {
     proc.stdin.on('error', () => {})
     const lines = lineSplitter((line) => this.onLine(line))
     proc.stdout.on('data', (chunk: Buffer | string) => lines.push(chunk))
-    proc.stderr?.on('data', (d) => {
-      const s = String(d).trim()
-      if (s) console.error(`[${label}]`, s.slice(0, 500))
-    })
+    logToolStderr(proc, label)
     proc.on('exit', (code) => this.finish(code, null))
   }
 
@@ -159,9 +156,7 @@ export class AcpConnection {
   async dispose(graceMs = 2000): Promise<void> {
     if (this.closed) return
     this.closed = true
-    this.proc.stdin.end()
-    const exited = this.finished || (await waitForExit(this.proc, graceMs))
-    if (!exited) this.proc.kill('SIGKILL')
+    await stopToolProcess(this.proc, { graceMs, exited: this.finished })
   }
 
   /** Lets go of the process without closing it (a host swap under the keeper): no EOF, no signal */

@@ -1,11 +1,10 @@
 import type { ToolName } from '@cc/protocol'
 import { rpcError } from '../../rpc-error.js'
-import { waitForExit } from '../../timing.js'
 import type { AgentAdapter, AgentProcess, AgentSpawnSpec, CreateSessionOpts, EventSink, ProcessSource, SessionHandle } from '../contract.js'
 import { toolResultEvent } from '../tool-result.js'
 import { spawnLocalAgent } from '../local-process.js'
 import type { AcpProfile } from './profile.js'
-import { tapSessionProcess } from '../core/tool-process.js'
+import { endToolProcess, startToolProcess } from '../core/tool-process.js'
 import { AcpSession } from './session.js'
 import type { ToolCallFields } from './wire.js'
 
@@ -52,9 +51,9 @@ export abstract class AcpAdapter implements AgentAdapter {
     const spec = { command: launch.command, args: launch.args, cwd: opts.cwd, env: { ...process.env, ...launch.env } }
     const source = opts.processSource
     if (source?.adopt) await closeAdopted(source.adopt, opts.sessionId, emit)
-    // Under the keeper the process is the keeper's child, which it sweeps with its tree if this host goes (§3.3)
-    // Started here, it must end with this host however the host ends (`endsWithHost`, #1562 review)
-    const proc = tapSessionProcess(source ? source.spawn(spec) : this.spawn({ ...spec, endsWithHost: true }), opts.sessionId)
+    // Under the keeper the process is the keeper's child, which it sweeps with its tree if this host goes (§3.3); started
+    // here, it ends with this host however the host ends (`startToolProcess`, #1562 review)
+    const proc = startToolProcess(spec, { sessionId: opts.sessionId, spawn: this.spawn, ...(source ? { source } : {}) })
     const session = new AcpSession(opts, emit, {
       label,
       process: proc,
@@ -83,7 +82,6 @@ const ADOPTED_EXIT_MS = 5_000
  * a new process with `session/load`.
  */
 async function closeAdopted(adopt: NonNullable<ProcessSource['adopt']>, sessionId: string, emit: EventSink): Promise<void> {
-  adopt.process.kill('SIGKILL')
-  await waitForExit(adopt.process, ADOPTED_EXIT_MS)
+  await endToolProcess(adopt.process, ADOPTED_EXIT_MS)
   for (const call of adopt.openCalls) emit(toolResultEvent(sessionId, call.callId, false, '', 'Centralu restarted while this call ran; it was stopped'))
 }
