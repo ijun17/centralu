@@ -228,6 +228,11 @@ unless the file declares its own, also as `globalThis.process` or through `node:
 (`process[name]`), `process.env` or a `node:url` namespace kept in a variable and read later, `require('node:url')`
 read in place, a computed `import()`, and a `require` made by `createRequire` under another name.
 
+The repository's own apps (`.centralu/apps/`) are plain Node and read their own files, so the rule holds them to one
+thing only: `child_process` is imported by the app's door alone (`REPO_APP_DOORS`; the board's `system.mjs`, the review
+of #1627), so a test can answer every program the app starts in its own process. The board also reads the time only
+through its `clock.mjs` (`no-restricted-properties` and `no-restricted-syntax` in `eslint.config.js`).
+
 `tooling/os-layer.test.ts` holds the list to the truth and lets it only shrink:
 
 - the list equals the checked files that touch the OS outside the layer (`tsx tooling/os-tests.ts --offenders`): a

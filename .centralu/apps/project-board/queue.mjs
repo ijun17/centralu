@@ -43,7 +43,7 @@ export function longSubject(pr) {
  */
 export const SUBJECT_HOLD_MS = 6 * 3_600_000
 /** Whether an item holds the board app running now: attention `subject`, within SUBJECT_HOLD_MS of when it began (`attentionAt`). */
-export const holdsApp = (item, now = Date.now()) => item.state === 'attention' && item.reason?.kind === 'subject' && now - Date.parse(item.attentionAt ?? '') < SUBJECT_HOLD_MS
+export const holdsApp = (item, now) => item.state === 'attention' && item.reason?.kind === 'subject' && now - Date.parse(item.attentionAt ?? '') < SUBJECT_HOLD_MS
 /** Why a squash subject over the limit stops a pull request; the queue carries on by itself once the title fits. */
 const subjectAttention = (n, { subject, length }) =>
   attention(

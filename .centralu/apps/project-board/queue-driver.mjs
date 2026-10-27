@@ -14,7 +14,7 @@
 // or an outage pauses the whole queue with a growing wait.
 import { readFileSync, renameSync, unlinkSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { advanceClock, now as clock } from './system.mjs'
+import { advanceClock, now as clock, systemNow } from './clock.mjs'
 import { canMerge, evaluateChecks, firstFailure, squashMessage, workflowCheckNames } from './ci.mjs'
 import { CI, config, QUEUE } from './config.mjs'
 import {
@@ -129,8 +129,8 @@ function writeAtomic(path, value) {
       return
     } catch (e) {
       if (i >= 20 || !['EPERM', 'EACCES', 'EBUSY'].includes(e.code)) throw e
-      const until = Date.now() + 25
-      while (Date.now() < until) {
+      const until = systemNow() + 25
+      while (systemNow() < until) {
         // a short spin: the read-change-write below stays synchronous, so no other change interleaves
       }
     }
@@ -157,7 +157,7 @@ export function updateQueue(dir, fn) {
  * reason (a view, a call, other work), and queued again it is work again. The row reads "Running: merge queue, 2 items".
  */
 export const WORKING = new Set(['waiting', 'ci'])
-export function queueBusy(q, now = Date.now()) {
+export function queueBusy(q, now = clock()) {
   // Also an item in attention `subject`, for SUBJECT_HOLD_MS (queue.mjs holdsApp): it waits on a title edit, which only a poll sees (#1593)
   const active = q.items.filter((i) => WORKING.has(i.state) || holdsApp(i, now)).length
   if (active) return `merge queue, ${plural(active, 'item')}`
@@ -171,21 +171,21 @@ export function queueBusy(q, now = Date.now()) {
  * One step of the main guard (#1259, main-guard.mjs), at most once per its interval, by the driver holding the
  * lease: whichever driver runs, one guards. A step that fails is said once and waits the interval.
  */
-export async function runGuard(dir, { holder, now = Date.now(), ref = queueRef, act = actOnRed } = {}) {
+export async function runGuard(dir, { holder, now = clock(), ref = queueRef, act = actOnRed } = {}) {
   if (!QUEUE.guard) return { did: 'off' }
   const q = readQueue(dir)
   // It watches what the queue landed: a queue that never landed anything has nothing on main to answer for
   if (!q.items.some((i) => i.state === 'merged') && !q.guard) return { did: 'off' }
   if (q.guard?.nextAt && Date.parse(q.guard.nextAt) > now) return { did: 'wait' }
   // The lease is between processes, on the system's clock (a stepped test moves only the queue's)
-  if (!takeLease(dir, holder, Date.now())) return { did: 'busy' }
+  if (!takeLease(dir, holder, systemNow())) return { did: 'busy' }
   try {
     return await guardTick({
       q,
       now,
       update: (fn) => updateQueue(dir, fn),
-      renew: () => takeLease(dir, holder, Date.now()),
-      act: (found) => act(QUEUE.conflicts.checkout, found, { now, ref, update: (fn) => updateQueue(dir, fn), renew: () => takeLease(dir, holder, Date.now()) }),
+      renew: () => takeLease(dir, holder, systemNow()),
+      act: (found) => act(QUEUE.conflicts.checkout, found, { now, ref, update: (fn) => updateQueue(dir, fn), renew: () => takeLease(dir, holder, systemNow()) }),
       failingLine,
     })
   } finally {
@@ -219,7 +219,7 @@ function alive(pid) {
 }
 
 /** Takes or renews the lease for `holder`. False when another driver, still running, holds a fresh one. */
-export function takeLease(dir, holder, now = Date.now()) {
+export function takeLease(dir, holder, now = systemNow()) {
   const cur = readLease(dir)
   if (cur && cur.holder !== holder && Date.parse(cur.until) > now && alive(cur.pid)) return false
   mkdirSync(dir, { recursive: true })
@@ -512,7 +512,7 @@ async function onConflict(item, pr, { now, ref, renew, defaultBranch, landed = [
   if (not && !pr.isCrossRepository && pr.baseRefName !== defaultBranch && QUEUE.conflicts?.checkout) {
     const keep = setInterval(() => renew(), Math.max(1_000, LEASE_MS / 6))
     keep.unref?.()
-    const began = Date.now()
+    const began = clock()
     let restacked
     try {
       restacked = await rebaseStack({ repo: item.repo, pr: item.pr, dir: QUEUE.conflicts.checkout, push: true }, { readPr, prsWithHead, setPrBase, openPrsOnBase }, (k) => ref(item.repo, k))
@@ -526,7 +526,7 @@ async function onConflict(item, pr, { now, ref, renew, defaultBranch, landed = [
       clearInterval(keep)
     }
     if (restacked.pushed && !restacked.partial) {
-      const ms = Date.now() - began
+      const ms = clock() - began
       return {
         decision: { state: 'waiting' },
         patch: { conflict: { head, at: since, outcome: 'pushed', sha: restacked.rebased, files: [] } },
@@ -534,7 +534,7 @@ async function onConflict(item, pr, { now, ref, renew, defaultBranch, landed = [
       }
     }
     // Its commits were in the lower one's merge already (it was merged, not squashed): only the base moved
-    if (!restacked.partial) return { decision: { state: 'waiting' }, events: [conflictEvent(`${n}: ${restacked.summary}`, { step: 'restack', ms: Date.now() - began, by: 'queue' })] }
+    if (!restacked.partial) return { decision: { state: 'waiting' }, events: [conflictEvent(`${n}: ${restacked.summary}`, { step: 'restack', ms: clock() - began, by: 'queue' })] }
     return hand(`${not} Restacking it pushed the branch but could not move its base: ${restacked.summary}`, [])
   }
   if (not) return hand(not, [])
@@ -765,7 +765,7 @@ async function pollItem(item, { now, ref, renew, save, landed = [], stillIntegra
  * and writes back what changed. Answers what it did: `idle`, `paused`, `busy` (another driver),
  * `polled` (with the item's key) or `error`.
  */
-export async function tick(dir, { holder, now = Date.now(), ref = queueRef }) {
+export async function tick(dir, { holder, now = clock(), ref = queueRef }) {
   let q = readQueue(dir)
   const active = q.items.filter((i) => ACTIVE.has(i.state))
   // A batch whose last member landed still has its end to do (its branch, the tree check)
@@ -776,7 +776,7 @@ export async function tick(dir, { holder, now = Date.now(), ref = queueRef }) {
   if (q.pause && Date.parse(q.pause.until) > now) return { did: 'paused', until: q.pause.until }
   // Too many of main's full runs unfinished (#1259): each landing adds one, so the queue waits for them
   if (QUEUE.guard && (q.guard?.unfinished ?? 0) > QUEUE.guard.maxMainRuns) return { did: 'held', unfinished: q.guard.unfinished }
-  if (!takeLease(dir, holder, Date.now())) return { did: 'busy', holder: readLease(dir)?.holder ?? null }
+  if (!takeLease(dir, holder, systemNow())) return { did: 'busy', holder: readLease(dir)?.holder ?? null }
   q = readQueue(dir)
   // Batches first (#962): the running one when it is due, or a new one from items waiting for CI
   const work = batchWork(q, now)
@@ -790,7 +790,7 @@ export async function tick(dir, { holder, now = Date.now(), ref = queueRef }) {
   const key = itemKey(item)
   const at = new Date(now).toISOString()
   // Before every write to GitHub: still the driver? (A driver asleep past its lease must not act.)
-  const renew = () => takeLease(dir, holder, Date.now())
+  const renew = () => takeLease(dir, holder, systemNow())
   const save = (p) =>
     updateQueue(dir, (fresh) => {
       const it = fresh.items.find((i) => itemKey(i) === key && ACTIVE.has(i.state))

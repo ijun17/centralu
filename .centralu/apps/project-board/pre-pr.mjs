@@ -10,6 +10,7 @@ import { execFile, spawn } from './system.mjs'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { git, remoteFor, topLevel } from './git.mjs'
+import { now as clock } from './clock.mjs'
 
 const SPACE = 'refs/centralu-pre-pr'
 // A tier's name as it goes into a label; which names exist is the repository's (scripts/tier.mjs), not the board's
@@ -63,8 +64,8 @@ function runScript(args, cwd, { signal, limitMs, beat }) {
     let stopped = null
     child.stdout.on('data', (d) => (stdout += d))
     child.stderr.on('data', (d) => (stderr = (stderr + d).slice(-20_000)))
-    const started = Date.now()
-    const timer = setInterval(() => beat(Math.round((Date.now() - started) / 1000)), BEAT_MS)
+    const started = clock()
+    const timer = setInterval(() => beat(Math.round((clock() - started) / 1000)), BEAT_MS)
     const stop = (why) => {
       if (stopped) return
       stopped = why

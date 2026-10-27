@@ -5,7 +5,7 @@
 import { randomBytes } from 'node:crypto'
 import { join } from 'node:path'
 import { centralu, z } from './runtime/centralu-app-runtime.mjs'
-import { now as clock } from './system.mjs'
+import { now as clock, systemNow } from './clock.mjs'
 import { itemOf, itemRef, REF_HELP } from './board.mjs'
 import { canMerge, NO_PERMISSION } from './ci.mjs'
 import { APP_DIR, CI, config, QUEUE } from './config.mjs'
@@ -140,7 +140,7 @@ function driverLine(q, now = clock()) {
   const held = QUEUE.guard && (q.guard?.unfinished ?? 0) > QUEUE.guard.maxMainRuns ? ` Landing held: ${q.guard.unfinished} of main's full runs unfinished (at most ${QUEUE.guard.maxMainRuns}, #1259).` : ''
   if (!active) return `Nothing queued.${pause}${held}`
   // The lease is on the system's clock (queue-driver.mjs takeLease)
-  if (lease && Date.parse(lease.until) > Date.now()) return `Driven by ${String(lease.holder).startsWith('server:') ? 'the board app' : 'a watch command'}.${pause}${held}`
+  if (lease && Date.parse(lease.until) > systemNow()) return `Driven by ${String(lease.holder).startsWith('server:') ? 'the board app' : 'a watch command'}.${pause}${held}`
   return `Driven by the board app, which keeps running while the queue has work, and by a watch command while one runs.${pause}${held}`
 }
 

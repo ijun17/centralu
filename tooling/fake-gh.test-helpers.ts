@@ -43,42 +43,13 @@ const save = () => fs.writeFileSync(process.env.FAKE_GH_STATE, JSON.stringify(st
 /**
  * The same fake, answered inside the board app's process (`PROJECT_BOARD_FAKE_PROGRAMS`, the app's system.mjs) instead of
  * started: on Windows each start is a launcher and a Node, about 60 ms, and a merge queue test makes dozens (#1599,
- * docs/plans/os-layer.md §2.4). The script is the same text: what it reads of `process` (its arguments, environment,
- * output and exit) and `console` is given to it, and its input is what the app wrote, not stdin. What it does not model:
- * a timeout, a program not found (ENOENT), concurrency (each call answers whole, in order) and any other part of
- * `process`; tooling/project-board-system.test.ts holds the started program to those. A script must not write to the
- * real stdout: in the app that is its channel to Centralu, so `console` here writes to the call's own output.
+ * docs/plans/os-layer.md §2.4). The script is the same text, run by tooling/fake-gh-in-process.mjs with the call's input
+ * as its stdin, and a `process` and `console` that have only what it lists.
  */
+const IN_PROCESS = new URL('./fake-gh-in-process.mjs', import.meta.url).href
 const inProcessModule = (script: string) => `// Written by tooling/fake-gh.test-helpers.ts: the fake gh, answered in the board app's process
-import { createRequire } from 'node:module'
-const require = createRequire(import.meta.url)
-const body = new Function('process', 'console', 'require', '__input', ${JSON.stringify(script.replaceAll("fs.readFileSync(0, 'utf8')", '__input'))})
-const EXIT = Symbol('exit')
-export function gh(args, { input, env }) {
-  let stdout = ''
-  let stderr = ''
-  let code = 0
-  const process = {
-    argv: [globalThis.process.execPath, 'gh', ...args],
-    env: { ...env },
-    stdout: { write: (s) => ((stdout += String(s)), true) },
-    stderr: { write: (s) => ((stderr += String(s)), true) },
-    exit: (c = 0) => {
-      code = c
-      throw EXIT
-    },
-  }
-  try {
-    const write = (stream) => (...a) => void stream.write(a.map(String).join(' ') + '\\n')
-    body(process, { log: write(process.stdout), info: write(process.stdout), error: write(process.stderr), warn: write(process.stderr) }, require, input ?? '')
-  } catch (e) {
-    if (e !== EXIT) {
-      stderr += String(e && e.stack ? e.stack : e)
-      code = 1
-    }
-  }
-  return { code, stdout, stderr }
-}
+import { inProcessGh } from ${JSON.stringify(IN_PROCESS)}
+export const gh = inProcessGh(${JSON.stringify(script)})
 `
 
 export type GhCall = { args: string[]; stdin: string | null }

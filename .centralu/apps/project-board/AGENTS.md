@@ -307,8 +307,9 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
   screen when the driver moves an item, so it reads `merge_queue` again every 15 s while one is active.
 - `PROJECT_BOARD_QUEUE_TICK_MS`, `PROJECT_BOARD_QUEUE_POLL_MS`, `PROJECT_BOARD_QUEUE_TELL_RETRY_MS` and `PROJECT_BOARD_QUEUE_REPOST_MS` shorten the waits only for tests.
   `PROJECT_BOARD_QUEUE_STEP=read` (tests only) stops the timer: the server's driver ticks once at the start of each
-  `merge_queue` read, each tick `PROJECT_BOARD_QUEUE_STEP_MS` (100) later on the queue's clock (`system.mjs` `now`), so a
-  test moves the queue one poll at a time and waits for no clock (#1599). The lease between drivers keeps the system's clock.
+  `merge_queue` read, each tick `PROJECT_BOARD_QUEUE_STEP_MS` (100) later on the app's clock (`clock.mjs` `now`), so a
+  test moves the queue one poll at a time and waits for no clock (#1599). The lease between drivers keeps the system's clock
+  (`clock.mjs` `systemNow`): the other driver is another process, whose clock a step does not move.
   Tests: `tooling/project-board-queue.test.ts` (the decisions, the app against a fake `gh` that
   records every write, a restart, the watch command), and the screen in `e2e/fixtures/board-reader.ts`.
 
@@ -1097,11 +1098,14 @@ step shows on the screen.
 - `rules.mjs` — the rules for public text, commit messages and the pull request template (pure).
 - `answers.mjs` — the owner's saved answers: save, delete, mark recorded (pure; decision-tools.mjs keeps them in the data folder).
 - `stack.mjs`, `git.mjs` — rebase_stack's procedure (the queue runs it too, for a stack top), and local git through `execFile`.
-- `system.mjs` — the app's one door for starting programs (`execFile`, `spawn`: gh, git, Node, the conflict commands) and the
-  queue's clock (`now`). No other module imports `node:child_process` (#1599, docs/plans/os-layer.md §2.4). Tests only:
-  `PROJECT_BOARD_FAKE_PROGRAMS` names a module whose exports, named for programs, answer them in this process
-  (`tooling/fake-gh.test-helpers.ts` `inProcess`); `tooling/project-board-system.test.ts` starts the real ones and holds the
-  two to the same answers.
+- `system.mjs` — the app's one door for starting programs (`execFile`, `spawn`: gh, git, Node, the conflict commands).
+  No other module imports `node:child_process` (#1599, docs/plans/os-layer.md §2.4): lint refuses it (`local/os-imports`,
+  `REPO_APP_DOORS` in tooling/os-layer.js). Tests only: `PROJECT_BOARD_FAKE_PROGRAMS` names a module whose exports,
+  named for programs, answer them in this process (`tooling/fake-gh.test-helpers.ts` `inProcess`, run by
+  `tooling/fake-gh-in-process.mjs`: the call's input as the script's stdin, and a `process` that has only what it lists);
+  `tooling/project-board-system.test.ts` starts the real ones and holds the two to the same answers.
+- `clock.mjs` — the app's one clock: `now` for every time the app reads or writes (a stepped test moves it), `systemNow`
+  for the lease between processes. Lint refuses `Date.now()` and `new Date()` anywhere else in the app (eslint.config.js).
 - `opened.mjs` — which session opened each pull request (`open_pr`'s note, `opened-prs.json`), read by the queue (#1509 item 4).
 - `pre-pr.mjs` — open_pr's run of the repository's `scripts/pre-pr.mjs` on the pushed branches.
 - `release.mjs`, `versions.mjs` — the release procedure, and the version rules (pure).

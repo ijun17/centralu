@@ -181,6 +181,39 @@ describe('the allowlist', () => {
     60_000 * SLOW,
   )
 
+  it("holds the repository's apps to their own door for starting programs, and nothing else of theirs", async () => {
+    const app = '.centralu/apps/project-board/github.mjs'
+    for (const code of [
+      "import { execFile } from 'node:child_process'\nexport const e = execFile\n",
+      "import * as cp from 'child_process'\nexport const e = cp\n",
+      "export const cp = await import('node:child_process')\n",
+      "export const cp = process.getBuiltinModule('node:child_process')\n",
+    ]) {
+      expect(await refused(app, code), code).toEqual([expect.stringContaining("this app's door (.centralu/apps/project-board/system.mjs)")])
+    }
+    expect(await refused('.centralu/apps/project-board/system.mjs', "import { execFile } from 'node:child_process'\nexport const e = execFile\n")).toEqual([])
+    // Its own files and paths stay its own: an app is plain Node
+    expect(await refused(app, "import { readFileSync } from 'node:fs'\nimport { join } from 'node:path'\nexport const r = [readFileSync, join, process.cwd()]\n")).toEqual([])
+    expect(await refused('.centralu/apps/another/server.mjs', "import { spawn } from 'node:child_process'\nexport const s = spawn\n")).toEqual([
+      expect.stringContaining('REPO_APP_DOORS'),
+    ])
+  })
+
+  it("reads the board app's time only through its clock (clock.mjs)", async () => {
+    const lint = async (filePath: string, code: string) => {
+      const [res] = await eslint.lintText(code, { filePath: join(ROOT, filePath), warnIgnored: false })
+      return (res?.messages ?? []).filter((m) => m.ruleId === 'no-restricted-properties' || m.ruleId === 'no-restricted-syntax').map((m) => m.message)
+    }
+    const code = 'export const a = Date.now()\nexport const b = new Date()\nexport const c = Date()\nexport const d = new Date(5)\n'
+    expect(await lint('.centralu/apps/project-board/queue.mjs', code)).toEqual([
+      expect.stringContaining("the app's clock"),
+      expect.stringContaining("the app's clock"),
+      expect.stringContaining("the app's clock"),
+    ])
+    expect(await lint('.centralu/apps/project-board/bin/merge-queue.mjs', code)).toHaveLength(3)
+    expect(await lint('.centralu/apps/project-board/clock.mjs', code)).toEqual([])
+  })
+
   it('cannot grow: a new line is refused, a renamed file keeps its line, and only that file', () => {
     const main = ['packages/agent-host/src/a.ts', 'packages/agent-host/src/b.ts']
     expect(grown(main, [...main, 'packages/agent-host/src/c.ts'], [])).toEqual(['packages/agent-host/src/c.ts'])

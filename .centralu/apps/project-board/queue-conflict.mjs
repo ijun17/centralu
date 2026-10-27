@@ -25,6 +25,7 @@
 //
 // Every step answers how long it took, for the queue's events (the daily metrics count conflicts the
 // queue handled without a person).
+import { now } from './clock.mjs'
 import { execFile } from './system.mjs'
 import { copyFile, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, rmdir, symlink, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -393,7 +394,7 @@ async function restack({ root, tmp, remote, branch, branchTip, mainTip, defaultB
  * and `stat`: each regenerated file's lines added and removed against the default branch's version),
  * `push` (the commit), `superseded`.
  */
-export async function mergeMain({ repo, pr, defaultBranch, dir, conflicts, renew, landed = [], clock = Date.now }) {
+export async function mergeMain({ repo, pr, defaultBranch, dir, conflicts, renew, landed = [], clock = now }) {
   const branch = pr.headRefName
   const steps = []
   const handoff = (why, files = [], instruction = null) => ({ outcome: 'handoff', files, why, steps, ...(instruction ? { instruction } : {}) })

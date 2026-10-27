@@ -4,6 +4,8 @@ import { join } from 'node:path'
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { rmFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 import { endLeftoverFakes, fakeGh, type FakeGh } from './fake-gh.test-helpers.js'
+// @ts-expect-error -- a plain .mjs of tooling without types
+import { inProcessGh as untypedInProcessGh } from './fake-gh-in-process.mjs'
 import { SLOW } from './test-timing.js'
 
 /**
@@ -16,7 +18,8 @@ import { SLOW } from './test-timing.js'
 const SYSTEM = new URL('../.centralu/apps/project-board/system.mjs', import.meta.url).href
 
 type ExecFile = (file: string, args: string[], options: Record<string, unknown>, callback: (error: (Error & { code?: unknown }) | null, stdout: string, stderr: string) => void) => { stdin: { on(e: string, f: () => void): unknown; end(s?: string): void } }
-type System = { execFile: ExecFile; now(): number; advanceClock(ms: number): void }
+type System = { execFile: ExecFile }
+type Gh = (args: string[], call: { input?: string | null; cwd?: string; env?: Record<string, string> }) => { code: number; stdout: string; stderr: string }
 
 /** system.mjs as the app loads it, with `env` set while it is read (it reads PROJECT_BOARD_FAKE_PROGRAMS then) */
 async function system(env: Record<string, string> = {}): Promise<System> {
@@ -145,11 +148,60 @@ describe("the board app's door for starting programs", { timeout: 60_000 * SLOW 
     expect(gh.calls()).toHaveLength(2)
   })
 
-  it('keeps a clock the queue reads, which only a stepped test moves on', async () => {
-    const sys = await system()
+})
+
+const inProcessGh = untypedInProcessGh as (script: string) => Gh
+
+describe('the in-process fake gh: what a script is given', () => {
+  it("reads the call's input as its stdin, by fd 0 however it reads it, and never the app's own", () => {
+    const gh = inProcessGh(String.raw`
+const fs = require('node:fs')
+if (process.argv[2] === 'whole') process.stdout.write(fs.readFileSync(0, { encoding: 'utf8' }))
+if (process.argv[2] === 'chunks') {
+  const b = Buffer.alloc(3)
+  let n
+  while ((n = fs.readSync(0, b, 0, 3, null)) > 0) process.stdout.write(b.subarray(0, n).toString() + '|')
+}
+if (process.argv[2] === 'stat') fs.fstatSync(0)
+`)
+    expect(gh(['whole'], { input: 'é {"a":1}\n' }).stdout).toBe('é {"a":1}\n')
+    expect(gh(['chunks'], { input: 'abcdefg' }).stdout).toBe('abc|def|g|')
+    expect(gh(['whole'], {}).stdout).toBe('')
+    const stat = gh(['stat'], { input: 'x' })
+    expect(stat.code).toBe(1)
+    expect(stat.stderr).toContain('fs.fstatSync on stdin is not given by the in-process fake gh')
+  })
+
+  it('has a process and a console of only what it lists: anything else is an error naming it, not undefined', () => {
+    const gh = inProcessGh(String.raw`
+if (process.argv[2] === 'given') { process.stdout.write([process.platform === require('node:process').platform, process.cwd()].join(' ')); process.exitCode = 4 }
+if (process.argv[2] === 'time') process.hrtime()
+if (process.argv[2] === 'stream') process.stdin.on('data', () => {})
+if (process.argv[2] === 'table') console.table([])
+if (process.argv[2] === 'set') process.title = 'x'
+`)
+    expect(gh(['given'], { cwd: '/w' })).toEqual({ code: 4, stdout: 'true /w', stderr: '' })
+    for (const [arg, named] of [['time', 'process.hrtime'], ['stream', 'process.stdin.on'], ['table', 'console.table'], ['set', 'process.title']]) {
+      const r = gh([arg!], {})
+      expect(r.code, arg).toBe(1)
+      expect(r.stderr, arg).toContain(named)
+      expect(r.stdout, arg).toBe('')
+    }
+  })
+})
+
+describe("the board app's clock", () => {
+  it('is the one the queue reads, which only a stepped test moves on; the lease reads the system clock', async () => {
+    vi.resetModules()
+    const clock = (await import(/* @vite-ignore */ `${new URL('../.centralu/apps/project-board/clock.mjs', import.meta.url).href}?t=${Math.random()}`)) as {
+      now(): number
+      systemNow(): number
+      advanceClock(ms: number): void
+    }
     const before = Date.now()
-    expect(sys.now()).toBeGreaterThanOrEqual(before)
-    sys.advanceClock(60_000)
-    expect(sys.now() - Date.now()).toBeGreaterThanOrEqual(59_000)
+    expect(clock.now()).toBeGreaterThanOrEqual(before)
+    clock.advanceClock(60_000)
+    expect(clock.now() - Date.now()).toBeGreaterThanOrEqual(59_000)
+    expect(Math.abs(clock.systemNow() - Date.now())).toBeLessThan(1_000)
   })
 })

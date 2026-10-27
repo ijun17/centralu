@@ -7,6 +7,7 @@ import { execFile } from './system.mjs'
 import { tmpdir } from 'node:os'
 import { CANCELED_NOTE, LOST_RUNNER_NOTE, shutdownAt } from './run-failure.mjs'
 import { mapLimit, short } from './util.mjs'
+import { now as clock } from './clock.mjs'
 
 const GH_TIMEOUT_MS = 30_000
 const MAX_PAGES = 20
@@ -184,7 +185,7 @@ export async function readBoard(config) {
     project: { id: project.id, title: project.title, url: project.url, owner: config.owner, number: config.number },
     fields,
     items,
-    fetchedAt: new Date().toISOString(),
+    fetchedAt: new Date(clock()).toISOString(),
   }
 }
 

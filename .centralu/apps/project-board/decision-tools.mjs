@@ -11,6 +11,7 @@ import { answer, linesAnswer, reason } from './reply.mjs'
 import { englishProblems } from './rules.mjs'
 import { renderOpts, summaryView, thread } from './threads.mjs'
 import { mapLimit, plural } from './util.mjs'
+import { now as clock } from './clock.mjs'
 
 // --- The owner's answers: on this machine, never on GitHub as written --------------------------------
 // The screen saves the owner's answer to a "Needs decision" item in this app's data folder (outside
@@ -42,7 +43,7 @@ async function saveOwnerAnswer({ item, text, title }) {
   const ref = want.ref
   let r
   try {
-    r = saveAnswer(await ownerAnswers(), { repository: want.repo, number: want.number, title: await titleOf(want, title), text, now: new Date().toISOString() })
+    r = saveAnswer(await ownerAnswers(), { repository: want.repo, number: want.number, title: await titleOf(want, title), text, now: new Date(clock()).toISOString() })
   } catch (e) {
     throw new GitHubError('input', `Not saved: ${e.message}`)
   }
@@ -98,7 +99,7 @@ async function markOwnerAnswer({ item, url }) {
     problems.push(...englishProblems(c.body, 'The comment'))
   }
   if (problems.length) throw new GitHubError('input', `Not marked: ${problems.join(' ')}`)
-  const r = markRecorded(list, want.repo, want.number, url, new Date().toISOString())
+  const r = markRecorded(list, want.repo, want.number, url, new Date(clock()).toISOString())
   await keepAnswers(r.list)
   return answer(`Marked the owner's answer on ${ref} recorded: ${url}`, { ok: true, ref, answer: answerView(r.answer) })
 }

@@ -44,16 +44,5 @@ export function execFile(file, args, options, callback) {
   return { stdin, pid: undefined, kill: () => false }
 }
 
-/**
- * The time, in milliseconds since 1970: the system clock's, moved on in a stepped test run (`advanceClock`). The merge
- * queue's own clocks (polls, the main guard, reposts, probes) read it; the lease between processes reads the system's.
- */
-let offset = 0
-export const now = () => Date.now() + offset
-/** Tests only (queue-driver.mjs `STEP_ON_READ`): each step of the queue is this much later */
-export const advanceClock = (ms) => {
-  offset += ms
-}
-
 /** node:child_process's `spawn`, through this door; never faked (pre-pr's long run, read as it goes) */
 export const spawn = (...args) => spawnProgram(...args)

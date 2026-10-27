@@ -50,6 +50,7 @@ import { ACTIVE, attentionText, BATCH_ACTIVE, decideRun, ERROR_LIMIT, findItem, 
 import { afterMerge, batchable, failingLine, land, latestRuns, permissionsOf, pollMs, runFailures, takeLease, updateQueue } from './queue-driver.mjs'
 import { judgeBatch, screenOn } from './queue-screen.mjs'
 import { short } from './util.mjs'
+import { systemNow } from './clock.mjs'
 
 /** A dispatch GitHub refused (no workflow_dispatch trigger, a permission): no new batch for this long. */
 export const BATCH_OFF_MS = 60 * 60_000
@@ -91,7 +92,7 @@ export function formDue(q, now, ref) {
  */
 export async function batchTick(dir, b, { q, holder, now, ref }) {
   const at = new Date(now).toISOString()
-  const renew = () => takeLease(dir, holder, Date.now())
+  const renew = () => takeLease(dir, holder, systemNow())
   // Changes this batch in the queue as it is now, unless it ended meanwhile
   const save = (fn) =>
     updateQueue(dir, (fresh) => {
