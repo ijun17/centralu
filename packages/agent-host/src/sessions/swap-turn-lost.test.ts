@@ -116,15 +116,12 @@ describe('a swap mid-turn (#1562 review)', () => {
     expect(JSON.parse(store.settings.appSetting(`turn_span:${id}`)!)).toEqual({ latest: { since: 1, ended: true } })
   })
 
-  it('keeps both for an adapter that took the process over as it was: the turn goes on', async () => {
-    const { id } = await swapMidTurn(undefined, true)
-    expect(store.settings.appSetting(`input_origins:${id}`)).not.toBeNull()
-    expect(JSON.parse(store.settings.appSetting(`turn_span:${id}`)!)).toEqual({ latest: { since: 1 } })
-  })
-
   it('keeps the turn running for an adapter that took the process over as it was', async () => {
-    const { b, id } = await swapMidTurn(undefined)
+    const { b, id } = await swapMidTurn(undefined, true)
     expect(b.session(id).state).toBe('working')
     expect(b.session(id).interruption ?? null).toBeNull()
+    // And what a hub was given for it and where the turn began are kept for the process that runs it on (#1604)
+    expect(store.settings.appSetting(`input_origins:${id}`)).not.toBeNull()
+    expect(JSON.parse(store.settings.appSetting(`turn_span:${id}`)!)).toEqual({ latest: { since: 1 } })
   })
 })
