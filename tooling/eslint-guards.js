@@ -267,16 +267,57 @@ const noHandCodedError = guard('no-hand-coded-error', { coded: 'a coded error is
   },
 }))
 
-/** A rule that lets only the listed files call certain methods: the callee's text is the finding's key */
-const callersOf = (name, methods, what, rule) =>
-  guard(name, { caller: `{{callee}} deletes ${what} for good: ${rule}; a caller is listed with its reason in tooling/guard-exceptions.js` }, (context, add) => ({
-    CallExpression(node) {
-      const callee = node.callee
-      if (callee.type !== 'MemberExpression' || callee.computed) return
-      const text = context.sourceCode.getText(callee).replace(/\s+/g, '')
-      if (methods.some((m) => text.endsWith('.' + m))) add(node, 'caller', { callee: text }, text)
-    },
-  }))
+/** The name a property is written with, plainly (`name`, `'name'`, `['name']`); null when it is not known */
+const propertyName = (property) => {
+  const key = property.key
+  if (property.computed) return plain(key)
+  return key.type === 'Identifier' ? key.name : plain(key)
+}
+
+/**
+ * A rule that lets only the listed files reach certain methods. It follows the *property*, not a call shape: `x.name`,
+ * `x['name']`, `x?.name`, `x.name.bind(x)(…)`, `.call`, `.apply`, `const { name } = x`, and the name written as a string
+ * anywhere (`Reflect.get(x, 'name')`, `const k = 'name'; x[k]`) are all references. A method written `a.b` (a store's
+ * `subagentSteps.purge`) is the property `b` of something named `a`. What a file may reach is a count per kind (the receiver's
+ * text, `{name}` for a destructuring, `'name'` for a string), in tooling/guard-exceptions.js.
+ */
+const callersOf = (name, methods, what, rule) => {
+  const paths = methods.map((m) => m.split('.'))
+  const bare = new Set(paths.filter((p) => p.length === 1).map((p) => p[0]))
+  const nested = paths.filter((p) => p.length === 2)
+  /** Is `last`, taken from something named `holder`, one of the methods? */
+  const listed = (last, holder) => bare.has(last) || nested.some(([h, l]) => l === last && h === holder)
+  return guard(name, { caller: `{{callee}} reaches the call that deletes ${what} for good: ${rule}; a reference is listed with its reason in tooling/guard-exceptions.js` }, (context, add) => {
+    const text = (n) => context.sourceCode.getText(n).replace(/\s+/g, '').replace(/\?\./g, '.')
+    /** What a destructuring pattern takes its properties from: the name of the initializer, or of the property it is nested in */
+    const sourceOf = (pattern) => {
+      const parent = pattern.parent
+      if (parent.type === 'VariableDeclarator') return nameOf(unwrap(parent.init))
+      if (parent.type === 'AssignmentExpression') return nameOf(unwrap(parent.right))
+      if (parent.type === 'Property' && parent.parent.type === 'ObjectPattern') return propertyName(parent)
+      return null
+    }
+    return {
+      MemberExpression(node) {
+        const prop = nameOf(node)
+        if (prop !== null && listed(prop, nameOf(node.object))) add(node, 'caller', { callee: `${text(node.object)}.${prop}` }, `${text(node.object)}.${prop}`)
+      },
+      'ObjectPattern > Property'(node) {
+        const prop = propertyName(node)
+        if (prop !== null && listed(prop, sourceOf(node.parent))) add(node, 'caller', { callee: `{${prop}}` }, `{${prop}}`)
+      },
+      // The name as a string that is not a property key or a type: `Reflect.get(mgr, 'purgeSession')`, `const k = 'purgeSession'`
+      'Literal, TemplateLiteral'(node) {
+        const value = plain(node)
+        if (value === null || !bare.has(value)) return
+        const parent = node.parent
+        if (parent.type === 'MemberExpression' && parent.property === node) return // counted as the member
+        if (parent.key === node || parent.type === 'TSLiteralType') return // a definition, a destructuring (counted above) or a type
+        add(node, 'caller', { callee: `'${value}'` }, `'${value}'`)
+      },
+    }
+  })
+}
 const purgeCallers = callersOf('purge-callers', ['purgeSession', 'emptyTrash'], 'sessions', 'only the person deletes for good, and only through the RPC (#204)')
 const subagentPurgeCallers = callersOf('subagent-purge-callers', ['purgeSubagentSteps', 'subagentSteps.purge'], 'subagent steps', 'only the RPC handler and deleting all archived sessions do (#204)')
 

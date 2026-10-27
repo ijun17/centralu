@@ -9,7 +9,9 @@ export const IGNORES = [
   // here, none of the path-scoped blocks match them (3,422 false errors on 2026-10-03,
   // with two agents at work); each worktree runs its own lint.
   '.claude/**',
-  '**/dist/**',
+  // Build output: the dist folder at the root of an app or a package (vite's outDir). A folder named dist inside a src is source.
+  'apps/*/dist/**',
+  'packages/*/dist/**',
   '**/node_modules/**',
   'spike/**',
   'tmp/**',

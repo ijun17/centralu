@@ -333,9 +333,69 @@ describe('guard/purge-callers and guard/subagent-purge-callers', () => {
   ])('reports %s in a file that is not listed', async (_what, file, code, rule) => {
     expect(await lines(file, code, rule)).toEqual([1])
   })
-  it('does not report a method that is only named, defined or mentioned', async () => {
+  it.each([
+    ["a computed string", "mgr['purgeSession'](id)"],
+    ['a template string', 'mgr[`purgeSession`](id)'],
+    ['an optional call', 'mgr?.purgeSession(id)'],
+    ['a non-null receiver', 'mgr!.purgeSession(id)'],
+    ['a reference kept', 'const f = mgr.purgeSession'],
+    ['bind', 'mgr.purgeSession.bind(mgr)(id)'],
+    ['call', 'mgr.purgeSession.call(mgr, id)'],
+    ['apply', 'mgr.purgeSession.apply(mgr, [id])'],
+    ['a destructured method', 'const { purgeSession } = mgr; purgeSession(id)'],
+    ['a destructured method, renamed', 'const { purgeSession: purge } = mgr; purge(id)'],
+    ['a destructured string key', "const { 'purgeSession': purge } = mgr; purge(id)"],
+    ['a computed destructured key', "const { ['purgeSession']: purge } = mgr; purge(id)"],
+    ['a destructuring assignment', 'let purge; ({ purgeSession: purge } = mgr)'],
+    ['a destructured parameter', 'const f = ({ purgeSession }: M) => purgeSession(id)'],
+    ['a nested destructuring', 'const { trash: { purgeSession } } = mgr'],
+    ['Reflect.get', "Reflect.get(mgr, 'purgeSession')"],
+    ['a name kept in a variable', "const key = 'purgeSession'; mgr[key](id)"],
+    ['the emptying', "mgr['emptyTrash']()"],
+  ])('reports %s', async (_what, code) => {
+    expect(await lines('packages/agent-host/src/sessions/x.ts', code, 'purge-callers')).not.toEqual([])
+  })
+  it.each([
+    ['a destructured method of the store', 'const { purge } = this.host.store.subagentSteps; purge(id, 0)'],
+    ['a destructured, renamed method of the store', 'const { purge: p } = store.subagentSteps; p(id, 0)'],
+    ['a computed method of the store', "this.host.store.subagentSteps['purge'](id, 0)"],
+    ['bind on the store', 'store.subagentSteps.purge.bind(store.subagentSteps)(id, 0)'],
+    ['a nested destructuring of the store', 'const { subagentSteps: { purge } } = store'],
+    ['the steps kept, then called', 'const { subagentSteps } = store; subagentSteps.purge(id, 0)'],
+    ['the steps purge by name', "mgr['purgeSubagentSteps'](id, 0)"],
+    ['the steps purge, destructured', 'const { purgeSubagentSteps } = mgr'],
+  ])('reports %s for the subagent steps', async (_what, code) => {
+    expect(await lines('packages/agent-host/src/sessions/x.ts', code, 'subagent-purge-callers')).not.toEqual([])
+  })
+  it('does not report a method that is only named, defined, typed or mentioned', async () => {
     const file = 'packages/agent-host/src/sessions/x.ts'
-    await quiet(file, 'purge-callers', "// mgr.purgeSession(id) is the RPC's" + NL + 'class A { purgeSession(id: string) {} }' + NL + 'const f = mgr.purgeSession', 'mgr.purgeSession(id)')
+    const only = [
+      "// mgr.purgeSession(id) is the RPC's",
+      'class A { purgeSession(id: string) {} }',
+      'const o = { purgeSession: (id: string) => id }',
+      "const q = { 'purgeSession': 1, ['emptyTrash']: 2 }",
+      'interface I { purgeSession(id: string): void; emptyTrash: () => void }',
+      "type T = Parameters<M['purgeSession']>",
+      "type P = Pick<M, 'purgeSession' | 'emptyTrash'>",
+      'const { purge } = other',
+      'const { purgeSession2 } = mgr',
+      'mgr.purgeSessions(id)',
+      "const s = 'purgeSessions'",
+      'other.purge(id)',
+      'const { purge: p } = something.subagentSteps2',
+    ]
+    for (const code of only) await quiet(file, 'purge-callers', code, 'mgr.purgeSession(id)')
+    await quiet(file, 'subagent-purge-callers', 'other.purge(id)' + NL + 'const { purge } = other' + NL + 'type S = Pick<M, "purgeSubagentSteps">', 'store.subagentSteps.purge(id, 0)')
+  })
+  it('counts a reference of any spelling against the listed ones of the file (#204)', async () => {
+    const rpc = 'packages/agent-host/src/rpc.ts'
+    const listed = 'mgr.emptyTrash()' + NL + 'mgr.purgeSession(id)'
+    expect(await lines(rpc, listed, 'purge-callers')).toEqual([])
+    // The same receiver spelled another way is the same listed reference; a second one of that receiver is a finding, and so is a kind the file does not list
+    expect(await lines(rpc, "mgr.emptyTrash()" + NL + "mgr['purgeSession'](id)", 'purge-callers')).toEqual([])
+    expect(await lines(rpc, listed + NL + 'mgr.purgeSession.bind(mgr)(id)', 'purge-callers')).toEqual([2, 3])
+    expect(await lines(rpc, listed + NL + 'const { purgeSession } = mgr', 'purge-callers')).toEqual([3])
+    expect(await lines(rpc, listed + NL + "const k = 'purgeSession'", 'purge-callers')).toEqual([3])
   })
   it('lets a listed file make the calls listed for it, and no others', async () => {
     const rpc = 'packages/agent-host/src/rpc.ts'
@@ -469,6 +529,17 @@ describe('the guard rules as a set', () => {
       expect(rules.length, file).toBeGreaterThan(0)
       for (const rule of rules) expect(/^(guard|test-env|test-limits)\//.test(rule), `${file} ${rule}`).toBe(true)
     }
+  })
+
+  it('ignores the build output of an app or a package, and reads a source folder that happens to be named dist', async () => {
+    const built = ['apps/web/dist/x.js', 'apps/desktop/dist/assets/x.js', 'packages/ui/dist/x.js', 'packages/agent-host/dist/sessions/x.js']
+    const source = ['packages/agent-host/src/dist/x.ts', 'packages/ui/src/features/dist/Panel.tsx', 'apps/web/src/dist/x.ts', 'packages/agent-host/src/sessions/dist/x.mjs', 'e2e/dist/x.ts']
+    for (const linter of [eslint, virtualFileLinter()]) {
+      for (const file of built) expect(await linter.isPathIgnored(join(ROOT, file)), file).toBe(true)
+      for (const file of source) expect(await linter.isPathIgnored(join(ROOT, file)), file).toBe(false)
+    }
+    // And a guard finds what is in such a source folder
+    expect(await lines('packages/agent-host/src/dist/x.ts', "execFileSync('git')", 'git-start')).toEqual([1])
   })
 
   it('reads a file named test-helpers.ts as a source, as the tests it replaced did: only x.test-helpers.ts is a helper', async () => {
