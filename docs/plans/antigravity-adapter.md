@@ -296,12 +296,12 @@ swap) sends nothing.
 |---|---|---|
 | `init` | `agent_version` from `agy --version` at detect; `externalId := conversation_id` | **resume check**: an `init` whose id is not the `--conversation` asked for is the unknown-id case (§4.4) |
 | `user_input` `DONE` | dropped | an echo of our input |
-| `agent_response` `ACTIVE` `text_delta` | `message_delta` | `messageId` from `conversation_id:step_index` |
-| `agent_response` `DONE` | last `message_delta`; `usage` → per-call tokens and the context reading (§6) | a `DONE` with no text is a model call that only called tools |
-| `tool` `ACTIVE` | `tool_call` | call id `step:<step_index>`; title and kind from `tool-kinds.ts` and `tool-titles.ts`; the hook's `toolSummary` arg, when the gate saw it, is the card's summary |
-| `tool` `DONE` | `tool_result` | `tool_info.output`; edits → `files_touched` from the edit tools' path args |
+| `agent_response` `ACTIVE` `text_delta` | `message_delta` | `messageId` is `conversation_id:step_index`; a bare newline with no text before it (a model call that only called tools) is no message |
+| `agent_response` `DONE` | last `message_delta`; `usage` → `usage_update` (a running reading with a `request` per model call) | a `DONE` with no text is a model call that only called tools; `input_tokens` counts the cached part, so the uncached input is `input_tokens − cache_read_tokens` (no recording has a cache read yet: this follows `total_tokens = input + output`) |
+| `tool` `ACTIVE` | `tool_call` | call id `<conversation_id>:<step_index>`, the gate's `conversationId:stepIdx` (a sub-agent's steps count from the same numbers as its parent's); title and name from `tool-kinds.ts`, an unknown tool by its own name; the hook's `toolSummary` arg, when the gate saw it, is the card's summary |
+| `tool` `DONE` | `tool_result` | `tool_info.output`; edits → `files_touched` (`TouchedFiles`, only after an ok end) from `Path`, `TargetFile`, `AbsolutePath`, `FilePath`, `SearchPath` |
 | `tool` `ERROR` | `tool_result` (error) | a gate deny and a soft-deny keep their own wording |
-| `subagent` `DONE` | `subagent_event` (started) | `subagent_info.subagents[]: {type_name, role, initial_prompt, conversation_id, log_uri}`; §4.3 |
+| `subagent` `DONE` | `tool_result` of the `invoke_subagent` call (same step index) | `subagent_info.subagents[]: {type_name, role, initial_prompt, conversation_id, log_uri}` said as the role and the prompt; no `subagent_event` (§4.3) |
 | `system_message` | dropped | content not streamed; the resume notice is agy's, not the person's |
 | `result` `SUCCESS` | `turn_complete` | `denied_actions` → a `notice` naming them (should not happen under the gate) |
 | `result` `ERROR` `"interrupted"` | the turn ends `interrupted` | only after our SIGINT; otherwise `INTERRUPTED_BY_TOOL` |
@@ -310,8 +310,10 @@ swap) sends nothing.
 | process exit | `error` + `session_live {live: false, reason: 'crashed'}` unless we stopped it | open gate cards released (`PendingCards`), queued inputs said undelivered |
 | an unknown `step_type` or `event` | nothing; one host.log line | `unmapped.ts`, with `known-steps.ts` |
 
-`result.usage` is cumulative for the conversation and is not used for a turn's tokens; the turn's tokens are the sum
-of its `agent_response` `DONE` frames.
+`result.usage` is the conversation's total across processes. `usage_update.tokens` is a running reading (the host keeps
+the last), so a `result` sets it to that total, and each `agent_response` `DONE` in between sends the last reading with
+that model call added, plus the call's own input as `request`. A resumed process starts from the reading the
+conversation ended its last process with. An interrupted turn has its usage in the `result` alone.
 
 ### 4.2 Turns and input
 
@@ -326,9 +328,9 @@ hook's `ephemeralMessage` is the candidate for a nudge (not measured).
 `invoke_subagent` is asynchronous: its step ends `subagent` `DONE` within ~2 s with the child's conversation id, and
 the child reports back through its own `send_message` tool, which reaches the parent as a `system_message` step and
 another `agent_response` in the same turn (measured). The child's steps are **not** in the parent's stream; its tool
-calls do reach our gate (with the child's `conversationId`), so its approvals work. P1 maps the start (`subagent_event`
-with `parentCallId`) and closes it when the turn ends; `builtInSubagents` stays false until the child's progress has a
-source. The child's transcript (`log_uri`) is a file, and reading it is ruled out by §8.
+calls do reach our gate (with the child's `conversationId`), so its approvals work. P1 draws the start as the
+`invoke_subagent` call and its result; a `subagent_event` would be a visible change and waits for the protocol to name
+`invoke_subagent` as a launcher. `builtInSubagents` stays false until the child's progress has a source. The child's transcript (`log_uri`) is a file, and reading it is ruled out by §8.
 
 ### 4.4 Resume and the unknown id
 
@@ -408,9 +410,9 @@ each of those paths. No watchdog is needed.
 
 ## 6. Context and compaction
 
-- **Context use:** each `agent_response` `DONE` carries that model call's `input_tokens` and `cache_read_tokens`;
-  their sum is the prompt the model just read, which is the conversation's context at that call. That is a per-call
-  exact reading (`contextAtRequest` true), like Codex's.
+- **Context use:** each `agent_response` `DONE` carries that model call's `input_tokens` (the prompt the model just
+  read, cached part included) and `cache_read_tokens`, which is the conversation's context at that call. That is a
+  per-call exact reading (`contextAtRequest` true), like Codex's.
 - **Window:** `agy` reports none (no field in the stream, `/context` refused in print mode, `/model` has no size).
   Without a window there is no share to draw, and the rule is not to guess one. Proposed: `contextUsage: 'none'` in P1,
   readings kept for `ModelWindows` should a window source appear (open question 3).
@@ -502,11 +504,16 @@ shared privacy test (`adapters/frames/recordings-private.test.ts`) reads these r
 
 ### 10.2 The replayer
 
-A fake `AgentProcess` driven by a recording: it matches each line the adapter writes to stdin against the next `in`,
-then emits the `out` and `err` lines up to the next `in`, and plays each `gate` entry by calling the adapter's gate
-handler with the recorded hook input and checking the decision the adapter returns against the recorded one (or against
-the test's own answer to the card). Process exit is part of the recording (code and signal). Times keep the order and are
-not slept.
+Two levels. The wire alone (the pure `AgyWire`, before there is a session): `adapters/agy/replay.test-helpers.ts` reads a
+recording with the shared `loadRecording` and hands each `in`, `err` and `exit` line to the wire in order, checks each
+`out` against what `startTurn` writes and each `spawn` against `launchArgs`, and each `gate` request against a call the
+wire announced (a sub-agent's request names a conversation the stream never did). `frames/`'s `replaySpawner` is not used
+at this level: it plays `in` lines only and has no place for `err`, `gate` and `spawn`. With the session on the core, the
+whole adapter is driven by a fake `AgentProcess` driven by a recording: it matches each line the adapter writes to stdin
+against the next `in`, then emits the `out` and `err` lines up to the next `in`, and plays each `gate` entry by calling
+the adapter's gate handler with the recorded hook input and checking the decision the adapter returns against the
+recorded one (or against the test's own answer to the card). Process exit is part of the recording (code and signal).
+Times keep the order and are not slept.
 
 ### 10.3 The fake peer
 
