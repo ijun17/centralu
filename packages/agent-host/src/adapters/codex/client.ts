@@ -4,6 +4,7 @@ import { codexLaunch } from './native.js'
 import { toolCommand } from '../../tool-launch.js'
 import type { AgentProcess } from '../contract.js'
 import { spawnLocalAgent } from '../local-process.js'
+import { tapSessionProcess } from '../core/tool-process.js'
 import { waitForExit } from '../../timing.js'
 import { lineSplitter, PendingRequests } from '../../transport/json-lines.js'
 
@@ -77,6 +78,8 @@ export class CodexClient {
        * started or already holds (#280 step 2). Same stdio, same protocol.
        */
       process?: AgentProcess
+      /** The session this app-server serves: its frames are recorded under it when `CC_RECORD_FRAMES` is set (`core/tool-process.ts`) */
+      sessionId?: string
     } = {},
   ) {
     if (opts.process) {
@@ -94,6 +97,8 @@ export class CodexClient {
        */
       this.proc = spawnLocalAgent({ command: launch.command, args: [...launch.args, ...(opts.args ?? ['app-server'])], cwd: opts.cwd, env: launch.env(process.env) })
     }
+    // Before the reader below is attached, so a line is recorded before the client has seen it
+    if (opts.sessionId) tapSessionProcess(this.proc, opts.sessionId)
 
     /**
      * A spawn failure (ENOENT — when the path is off because of an nvm switch or codex being

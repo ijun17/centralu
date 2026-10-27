@@ -11,7 +11,7 @@ import { insideFolder } from '../edit-grant.js'
 import { fileEditDetail, type FileChange } from '../file-changes.js'
 import { CardIds, PendingCards, stopNotConfirmed, undeliveredError } from '../session-kit.js'
 import { UnmappedTypes } from '../unmapped.js'
-import { AcpConnection, AUTH_REQUIRED, METHOD_NOT_FOUND, NO_TIMEOUT_MS, RpcError, type FrameDirection, type RpcId } from './connection.js'
+import { AcpConnection, AUTH_REQUIRED, METHOD_NOT_FOUND, NO_TIMEOUT_MS, RpcError, type RpcId } from './connection.js'
 import { KNOWN_UPDATES } from './known-updates.js'
 import { addTokens, NO_TOKENS } from '../token-usage.js'
 import { AcpNormalizer, requestInput, tokenUsage } from './normalize.js'
@@ -42,8 +42,6 @@ export type AcpSessionDeps = {
   stopConfirmMs: number
   /** Which of Centralu's own tools a call is, or null (`AcpProfile.centraluToolOf`) */
   centraluToolOf?: (call: ToolCallFields) => string | null
-  /** Every line both ways, for the recorder (§10.1) */
-  onFrame?: (direction: FrameDirection, line: string) => void
   /**
    * The tool's `/compact` leaves no protocol frame (OpenCode 1.19.4, measured), so the one boundary known is Centralu's own
    * compact turn: ended `end_turn` with a context reading smaller than the one before it (§5.6, owner 2026-10-26)
@@ -131,7 +129,6 @@ export class AcpSession implements SessionHandle {
         onNotification: (method, params) => this.onNotification(method, params),
         onRequest: (id, method, params) => this.onRequest(id, method, params),
         onExit: (code, expected) => this.onExit(code, expected),
-        ...(deps.onFrame ? { onFrame: deps.onFrame } : {}),
       },
       deps.label,
     )

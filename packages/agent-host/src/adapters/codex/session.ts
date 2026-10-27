@@ -196,6 +196,7 @@ export class CodexSession implements SessionHandle {
       {
         cwd: opts.cwd,
         command: toolCommand('codex'),
+        sessionId: opts.sessionId,
         // Under the keeper (#280 step 2) the app-server is spawned there, or adopted from a previous host
         process: opts.processSource
           ? (opts.processSource.adopt?.process ?? spawnInKeeper(opts.processSource, opts.cwd))
