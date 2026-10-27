@@ -1,3 +1,4 @@
+import { ORCHESTRATOR_MCP_NAME } from '../../apps/contract.js'
 import { asObj } from '../../json-value.js'
 import type { RequestPermission, ToolCallFields } from '../acp/wire.js'
 
@@ -59,6 +60,17 @@ export function readAgyCall(call: ToolCallFields): Partial<ToolCallFields> {
  */
 export function isAgyQuestion(req: Pick<RequestPermission, 'toolCall'>): boolean {
   return req.toolCall.toolCallId.startsWith('interaction_')
+}
+
+/**
+ * Which of Centralu's own tools an MCP call is: the agent names the server in `_meta.mcp.server` and the tool in
+ * `_meta.mcp.tool` (measured, s8), and asks for each MCP call (kind `other`). Only that kind, so a call of another kind
+ * carrying the same names is never taken for Centralu's
+ */
+export function agyCentraluTool(call: ToolCallFields): string | null {
+  if (call.kind !== 'other') return null
+  const mcp = asObj(asObj(Reflect.get(call, '_meta')).mcp)
+  return mcp.server === ORCHESTRATOR_MCP_NAME && typeof mcp.tool === 'string' && mcp.tool ? mcp.tool : null
 }
 
 /**

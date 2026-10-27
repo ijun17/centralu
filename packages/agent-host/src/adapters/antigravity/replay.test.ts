@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import type { NormalizedEvent, PermissionPreset } from '@cc/protocol'
+import { ORCHESTRATOR_MCP_NAME } from '../../apps/contract.js'
 import type { AgentProcess } from '../contract.js'
 import { replaySpawner, type Recording } from '../frames/replay.test-helpers.js'
 import { AntigravityAdapter, antigravityProfile } from './index.js'
@@ -162,6 +163,21 @@ describe('Antigravity 1.4.3, replayed', () => {
     expect(w.state.left()).toBe(0)
     expect(of(w.events, 'approval_request')).toHaveLength(2)
     expect(callOrder(w.events)).toEqual([])
+  })
+
+  it("mcp: a call to Centralu's own tools (`_meta.mcp.server`) is answered without a card, as Cursor's and OpenCode's are", async () => {
+    // The recording with its stdio server named as Centralu's bridge: the frames are the agent's, the name is the bridge's
+    const rec = recording('mcp')
+    const renamed: Recording = JSON.parse(JSON.stringify(rec).replaceAll('"server":"spikestdio"', `"server":"${ORCHESTRATOR_MCP_NAME}"`)) as Recording
+    const w = world(renamed)
+    const handle = await open(w)
+    await turn(w, handle, 'Call the MCP tools', 'allow')
+    await handle.dispose()
+    expect(w.state.problems).toEqual([])
+    expect(w.state.left()).toBe(0)
+    const cards = of(w.events, 'approval_request')
+    expect(cards).toHaveLength(1)
+    expect(JSON.stringify(cards[0]!.detail)).toContain('spike_http_echo')
   })
 
   it('signed out: session/new refused (-32000) is a sign-in in Centralu, not "log in from a terminal", and the line turns signed out', async () => {

@@ -9,7 +9,7 @@ import { agyHome, agyPlatformKey, type AgyHome } from './agent-files.js'
 import { agyLaunch } from './launch.js'
 import { AGY_RELEASE, type AgyArchive } from './release.js'
 import { AgySetup, type AgySetupDeps } from './setup.js'
-import { agySessionMeta, agyStderrLine, isAgyQuestion, readAgyCall } from './shape.js'
+import { agyCentraluTool, agySessionMeta, agyStderrLine, isAgyQuestion, readAgyCall } from './shape.js'
 import { AGY_SURFACE } from './surface.js'
 
 /**
@@ -86,6 +86,7 @@ export function antigravityProfile(deps: AgyProfileDeps = {}): AgyProfile {
       const detail = !archive ? 'Not available on this system' : !installed ? 'Not installed' : loggedIn ? `antigravity-acp ${AGY_RELEASE.version}` : `antigravity-acp ${AGY_RELEASE.version} · sign-in required`
       return { tool: DESCRIPTOR.name, installed, loggedIn, detail, setup: now }
     },
+    centraluToolOf: agyCentraluTool,
     shape: {
       readCall: readAgyCall,
       isQuestion: isAgyQuestion,
