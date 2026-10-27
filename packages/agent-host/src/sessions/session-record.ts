@@ -321,7 +321,7 @@ export class SessionRecord {
             const data = (await readFile(p.path)).toString('base64')
             return { ...r, payload: { ...p, data } }
           } catch {
-            return { ...r, payload: { ...p, note: 'The image was cleared and no longer exists (total-size cap)' } }
+            return { ...r, payload: { ...p, note: 'the saved copy was cleared (total-size cap)' } }
           }
         }
         // A user attachment's own image follows the same rule — bytes are loaded if the file is still

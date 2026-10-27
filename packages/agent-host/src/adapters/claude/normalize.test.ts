@@ -278,7 +278,7 @@ describe('tool calls (the actual shape from the spike)', () => {
       },
     })
     const img = out.find((e) => e.type === 'message_image')
-    expect(img).toMatchObject({ data: '', note: 'Image is too large (8MB)' })
+    expect(img).toMatchObject({ data: '', note: 'too large (8MB)' })
     const under = 'a'.repeat(Math.floor((IMAGE_MAX_BYTES * 4) / 3))
     const drawn = n({
       type: 'user',

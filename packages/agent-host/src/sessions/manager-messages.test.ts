@@ -412,6 +412,29 @@ describe('a streaming message is stored as a single row (#66)', () => {
     expect(atts[1]?.data).toBeUndefined()
     rmSync(dir, { recursive: true, force: true })
   })
+
+  /*
+   * #1464 asked whether an image the agent viewed (Codex `imageView`) is stored, or lost on a reload. It is: the row is taken
+   * at once, in order, holding the path of the host's own copy of the bytes, and a read that failed is a row with its reason.
+   */
+  it('an image the agent viewed is a stored row with its own copy of the bytes, and one it could not read is a row with the reason (#1464)', async () => {
+    const { s, h } = await openSession()
+    const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAFklEQVR4nGP8z8Dwn4EIwESMolGFtFEIAJ2yAhH+Iz4jAAAAAElFTkSuQmCC'
+    h.emitEvent({ type: 'message_image', sessionId: s.id, mime: 'image/png', data: PNG, path: '/elsewhere/shot.png' })
+    h.emitEvent({ type: 'message_image', sessionId: s.id, mime: '', data: '', path: '/elsewhere/gone.png', note: 'the file is gone' })
+    const stored = () => store.messages.loadMessages(s.id, 50).filter((r) => r.kind === 'image').map((r) => r.payload as { data?: string; path?: string; note?: string })
+
+    // Both rows are taken at once, in order; the first has no bytes in the store, and (once its copy is written) a path of its own
+    await vi.waitFor(() => expect(stored()[0]?.path).not.toBe('/elsewhere/shot.png'))
+    const [viewed, unread] = stored()
+    expect(viewed).toMatchObject({ data: '', path: expect.stringMatching(/attachments.*\.png$/) })
+    expect(unread).toMatchObject({ data: '', path: '/elsewhere/gone.png', note: 'the file is gone' })
+
+    // What a reload serves: the bytes read back from the copy, and the reason as it was
+    const served = (await mgr.loadMessages(s.id, 50)).filter((r) => r.kind === 'image').map((r) => r.payload as { data?: string; note?: string })
+    expect(served[0]?.data).toBe(PNG)
+    expect(served[1]).toMatchObject({ data: '', note: 'the file is gone' })
+  })
 })
 
 /**

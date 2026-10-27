@@ -206,7 +206,6 @@ packages/agent-host/src/adapters/codex/usage.ts @typescript-eslint/no-unnecessar
 packages/agent-host/src/adapters/codex/usage.ts @typescript-eslint/no-unsafe-type-assertion 1
 packages/agent-host/src/adapters/file-changes.ts @typescript-eslint/no-non-null-assertion 2
 packages/agent-host/src/adapters/history-events.ts @typescript-eslint/no-non-null-assertion 2
-packages/agent-host/src/adapters/images.ts @typescript-eslint/no-unsafe-type-assertion 1
 packages/agent-host/src/adapters/local-process.ts @typescript-eslint/no-non-null-assertion 2
 packages/agent-host/src/adapters/local-process.ts @typescript-eslint/no-unsafe-type-assertion 2
 packages/agent-host/src/adapters/surface-read.ts @typescript-eslint/no-non-null-assertion 9

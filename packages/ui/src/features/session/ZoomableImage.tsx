@@ -7,17 +7,20 @@ export function ZoomableImage({
   alt,
   thumbClassName,
   onError,
+  onLoad,
 }: {
   src: string
   alt: string
   thumbClassName: string
   onError?: () => void
+  /** The loaded thumbnail, for the one that loads and has no size */
+  onLoad?: (img: HTMLImageElement) => void
 }) {
   const [zoom, setZoom] = useState(false)
   return (
     <>
       <button type="button" onClick={() => setZoom(true)} title={alt} className="block cursor-zoom-in">
-        <img src={src} alt={alt} className={thumbClassName} onError={onError} />
+        <img src={src} alt={alt} className={thumbClassName} onError={onError} onLoad={onLoad && ((e) => onLoad(e.currentTarget))} />
       </button>
       {zoom && (
         <Modal onClose={() => setZoom(false)} testId="image-lightbox">
