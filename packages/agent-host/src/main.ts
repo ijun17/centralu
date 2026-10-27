@@ -37,6 +37,7 @@ import { DEFAULT_RARE_TIER, commandsFor, currentRareTier, rareTierFrom, setRareT
 import { setOrchestratorPreamble } from './sessions/orchestrator-home.js'
 import { readShared } from './sessions/app-access.js'
 import { Store, StoreTooNewError } from './dev-services/store.js'
+import { agyHost } from './adapters/agy/host-files.js'
 import { createAdapters } from './adapters/registry.js'
 import { createRpcHandler } from './rpc.js'
 import { ExternalApps } from './apps/external/runtime.js'
@@ -307,7 +308,8 @@ try {
   refuse(err.message)
   process.exit(1)
 }
-const adapters = createAdapters()
+// `gates` is built below, once the front door's address is known: asked per session, never at start
+const adapters = createAdapters(agyHost(() => gates, dataRoot()))
 
 /*
  * Under the keeper, agents, terminals and project commands are spawned by the keeper, not by this

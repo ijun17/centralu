@@ -1,7 +1,10 @@
 import type { ToolDescriptor } from '@cc/protocol'
 import { rpcError } from '../../rpc-error.js'
 import { runProgram, runsAntigravity } from '../../os.js'
-import type { AgentAdapter, CreateSessionOpts, DetectResult, EventSink, SessionHandle } from '../contract.js'
+import type { AgentAdapter, AgentProcess, AgentSpawnSpec, CreateSessionOpts, DetectResult, EventSink, SessionHandle } from '../contract.js'
+import { STOP_CONFIRM_MS } from '../core/ledger.js'
+import { spawnLocalAgent } from '../local-process.js'
+import { AgySession, readAgyDenyRules, type AgyHostDeps } from './session.js'
 import { AGY_CAPABILITIES } from './capabilities.js'
 import type { ToolLaunch } from '../../tool-launch.js'
 import { findAgy } from './install.js'
@@ -39,7 +42,16 @@ export class AgyAdapter implements AgentAdapter {
   readonly capabilities = AGY_CAPABILITIES
   readonly surface = AGY_SURFACE
 
-  constructor(private readonly deps: AgyDeps = realDeps) {}
+  /**
+   * `host`: what a session needs of the host (the gate route, folders, files); without it the tool is listed and detected
+   * but cannot start a session (tests of detection)
+   */
+  constructor(
+    private readonly deps: AgyDeps = realDeps,
+    private readonly host?: AgyHostDeps,
+    private readonly spawn: (spec: AgentSpawnSpec) => AgentProcess = spawnLocalAgent,
+    private readonly stopConfirmMs = STOP_CONFIRM_MS,
+  ) {}
 
   private version: { at: number; value: string | null } | null = null
   private status: { at: number; result: DetectResult } | null = null
@@ -72,8 +84,26 @@ ${out.stderr}`)
     return result
   }
 
-  /** The session is wired in the next change (#59 part 2): until then the tool is listed and detected, and cannot start */
-  async createSession(_opts: CreateSessionOpts, _emit: EventSink): Promise<SessionHandle> {
-    throw rpcError('Antigravity sessions are not available yet.', 'internal')
+  async createSession(opts: CreateSessionOpts, emit: EventSink): Promise<SessionHandle> {
+    const host = this.host
+    if (!host) throw rpcError('Antigravity sessions are not available here.', 'internal')
+    const find = () => Promise.resolve(this.deps.find())
+    // Asked once here so a missing install is the error of the start, not of the first input
+    if (!(await find())) throw rpcError(`Antigravity is not installed. ${DESCRIPTOR.install}`, 'tool_not_installed')
+    const denyRules = await readAgyDenyRules(host)
+    const source = opts.processSource
+    const session = new AgySession(
+      opts,
+      emit,
+      { label: DESCRIPTOR.label, host, find, start: { spawn: this.spawn, ...(source ? { source } : {}) }, stopConfirmMs: this.stopConfirmMs },
+      denyRules,
+    )
+    try {
+      await session.ready
+    } catch (err) {
+      await session.dispose().catch(() => {})
+      throw err
+    }
+    return session
   }
 }

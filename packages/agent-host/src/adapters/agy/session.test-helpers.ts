@@ -7,10 +7,10 @@ import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
 import { FrontDoorGates } from '../../transport/gate-door.js'
 import { deriveHttpSecret } from '../../transport/http.js'
 import { HostServer } from '../../transport/server.js'
-import { agyGatePaths } from '../bridge-path.js'
 import type { AgentProcess, AgentSpawnSpec, CreateSessionOpts, SessionHandle } from '../contract.js'
 import { loadRecording, type Rec } from '../frames/replay.test-helpers.js'
-import { AgyAdapter } from './adapter.js'
+import { AgyAdapter } from './index.js'
+import { gateSources } from './gate-path.js'
 import { gateAnswer } from './gate-answer.mjs'
 import { agyFiles, nodeExecutable } from './host-files.js'
 
@@ -211,13 +211,8 @@ export async function startHost(dirs?: { dataDir: string; home: string; cwd: str
 /** The adapter a host would register, over a scripted `agy` */
 export function agyAdapter(host: TestHost, spawn: (spec: AgentSpawnSpec) => AgentProcess, stopConfirmMs?: number): AgyAdapter {
   return new AgyAdapter(
-    {
-      descriptor: { name: 'agy', label: 'Antigravity', mark: 'A', install: 'install agy', login: 'agy' },
-      detect: () => Promise.resolve({ installed: true, loggedIn: true } as never),
-      installedVersion: () => Promise.resolve('1.4.8'),
-      find: () => Promise.resolve({ command: 'agy', args: [] }),
-    },
-    { gates: () => host.gates, dataDir: host.dataDir, home: host.home, files: agyFiles, node: nodeExecutable, gateSources: agyGatePaths },
+    { find: () => ({ command: 'agy', args: [] }), run: () => Promise.resolve({ stdout: '', stderr: '' }), supported: () => true },
+    { gates: () => host.gates, dataDir: host.dataDir, home: host.home, files: agyFiles, node: nodeExecutable, gateSources },
     spawn,
     stopConfirmMs,
   )

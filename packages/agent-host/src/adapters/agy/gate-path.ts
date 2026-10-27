@@ -8,3 +8,8 @@ import { fileBeside } from '../../os.js'
 export function gatePath(base: string = import.meta.url): string {
   return fileBeside(base, 'agy-gate.mjs')
 }
+
+/** The hook's two files, both beside `main.mjs` when packaged (`plugin-root.ts` copies them into a session's plugin root) */
+export function gateSources(base: string = import.meta.url): { entry: string; answer: string } {
+  return { entry: gatePath(base), answer: fileBeside(base, 'gate-answer.mjs') }
+}

@@ -1,6 +1,9 @@
 import * as fs from 'node:fs/promises'
 import { homedir } from 'node:os'
+import type { GateInbound } from '../core/gate.js'
+import { gateSources } from './gate-path.js'
 import type { PluginFiles } from './plugin-root.js'
+import type { AgyHostDeps } from './session.js'
 
 /**
  * What the `agy` session does to files and which node runs its hook, bound to the real OS: the one place the session
@@ -27,3 +30,13 @@ export const personsHome = (): string => homedir()
 
 /** For tests: the same files, to read back what the session wrote */
 export const statPath = (path: string) => fs.stat(path)
+
+/** What the host gives the `agy` adapter (`registry.ts`): `gates` is asked per session, so the route may be built after the adapters */
+export const agyHost = (gates: () => GateInbound, dataDir: string): AgyHostDeps => ({
+  gates,
+  dataDir,
+  home: personsHome(),
+  files: agyFiles,
+  node: nodeExecutable,
+  gateSources,
+})

@@ -3,6 +3,7 @@ import { ClaudeAdapter } from './claude/index.js'
 import { CodexAdapter } from './codex/index.js'
 import { CursorAgentAdapter } from './cursor-agent/index.js'
 import { AgyAdapter } from './agy/index.js'
+import type { AgyHostDeps } from './agy/session.js'
 import { OpenCodeAdapter } from './opencode/index.js'
 import type { AgentAdapter } from './contract.js'
 
@@ -19,8 +20,8 @@ import type { AgentAdapter } from './contract.js'
  * descriptor tests something to hold: the rules that used to live in the protocol's shape
  * (marks are distinct, the commands are real) can only be checked across the whole set.
  */
-export function createAdapters(): Map<ToolName, AgentAdapter> {
-  const all: AgentAdapter[] = [new ClaudeAdapter(), new CodexAdapter(), new CursorAgentAdapter(), new OpenCodeAdapter(), new AgyAdapter()]
+export function createAdapters(agy?: AgyHostDeps): Map<ToolName, AgentAdapter> {
+  const all: AgentAdapter[] = [new ClaudeAdapter(), new CodexAdapter(), new CursorAgentAdapter(), new OpenCodeAdapter(), new AgyAdapter(undefined, agy)]
   return new Map(all.map((a) => [a.tool, a]))
 }
 
