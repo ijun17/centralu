@@ -290,7 +290,8 @@ bridge credential and the gate's callback address reach the hook and the MCP ser
 both inherit (measured). An app's entry names its server in its own `env` (`CC_APP_SERVER`); that `agy` adds such an
 `env` to the inherited one rather than replacing it was not measured, so it is checked with the wiring. The folder is
 made read-only (files 0444, folders 0555), and the gate refuses any write into it, since the agent sees it as a
-workspace. It is removed with the session.
+workspace. It is removed with the session. A shell command is not checked against it: under `auto`, or with an "always"
+rule on a command, a command could change the modes and rewrite the hook. The session id must be one path segment.
 
 Both gate files are copied (#1666 review finding 2): a copy of the entry alone exits 1 without an answer, which `agy`
 takes as a refusal. They are found where `bridge-path.ts` finds the bridge (`agyGatePaths()`): `agy/` beside the module
@@ -399,7 +400,7 @@ As built (`gate.ts`), each proved by a live run (`recordings/agy-1.4.8/preset-*`
 | Preset | The gate |
 |---|---|
 | `auto` | allows every known tool at once (the hook still runs, so `gatesSteps` holds) |
-| `edits` (#1525) | as `normal`, and an edit inside the session's folder without a card (`edit-grant.ts`) |
+| `edits` (#1525) | as `normal`, and an edit inside the session's folder without a card (`edit-grant.ts`), by the tools that write the text they are given (`write_to_file`, `write_file`, `replace_file_content`, `multi_replace_file_content`); `sed_file` is a card, since sed's `e` and `w` run a command and write another file |
 | `normal` | allows reads inside the session's folder, its readable folders and the paths given to read later, and starting a sub-agent (its own calls pass the gate one by one); a card for edits, commands, URL reads, browser actions and MCP calls to servers other than Centralu's |
 | `safe` | a card for everything but reads inside the session's folder and Centralu's own tools |
 
@@ -409,7 +410,9 @@ waited for; `agy` moves onto it when it lands. Two refusals come before any allo
 plugin root (§3.2), by any tool that names a path there, and the person's own deny rules (§5.5). A read of `agy`'s MCP
 tool descriptors (`~/.gemini/antigravity-cli/mcp/`) is allowed under every preset: the model reads one before each MCP
 call (measured under `safe`), and they are tool schemas `agy` writes itself. A path is checked through its links: a link
-in the folder that points out of it is outside it.
+in the folder that points out of it is outside it, and a path `agy` might expand (`~`, `$`, `%`, `://`) is a card under
+every preset. A call that began before a Stop is refused even when the next turn has begun by the time it is decided. A
+saved "always" rule names one file, so it never allows an edit over several.
 
 `tool-kinds.ts` classifies by tool name (`view_file`, `read_file`, `list_dir`, `grep_search`, `find_by_name` read;
 `write_to_file`, `replace_file_content`, `multi_replace_file_content`, `sed_file`, `notebook_edit` edit; `run_command`,
@@ -449,8 +452,9 @@ command(git push)", which the model reads and can tell the person.
 `agy` applies these rules itself under the skip flag (§1.2), so the gate's check is mostly early: a call `agy` would
 refuse after the person allowed it gets no card. Where a rule's meaning is not certain it is read broadly, since a
 broader deny only asks less: a command rule matches each part of a compound command (split at `;`, `&`, `|`,
-newlines, `$(`, backticks and parentheses, without reading quotes) by whole words, its program also through a path
-(`/bin/rm`); a path rule matches what is under it, as written or through links (where `agy` did not); a domain rule
+newlines, `$(`, backticks and parentheses, without reading quotes) by whole words, after shell keywords and common
+wrappers (`sudo`, `time`, `env`, `xargs`, `then`, …), its program also through a path (`/bin/rm`); this is best
+effort (`bash -c '…'` still hides a command), and `command(*)` denies every execute call; a path rule matches what is under it, as written or through links (where `agy` did not); a domain rule
 matches its subdomains. Not read: the `project` and `shared` scopes `/permissions` lists (`~/.gemini/config/projects/`
 and the Antigravity app's); `agy` still applies those itself.
 

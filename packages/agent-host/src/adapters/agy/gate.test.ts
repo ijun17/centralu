@@ -132,6 +132,27 @@ describe('what holds under every preset', () => {
     expect(await outcome(setup('safe'), hook('read_file', { Path: join(descriptors, 'centralu_centralu', 'ping.json') }))).toBe('card')
   })
 
+  it('a path agy might expand is a card under every preset, never checked as written', async () => {
+    for (const preset of ['auto', 'safe'] as const) {
+      for (const Path of ['~/.ssh/id_rsa', '$HOME/.ssh/id_rsa', '%USERPROFILE%\\x', 'file:///etc/passwd']) {
+        expect(await outcome(setup(preset), hook('read_file', { Path })), `${preset} ${Path}`).toBe('card')
+      }
+    }
+  })
+
+  it('edits does not grant sed_file, whose sed script can run a command', async () => {
+    const s = setup('edits')
+    expect(await outcome(s, hook('sed_file', { TargetFile: join(s.cwd, 'a.ts'), Expressions: ['1e touch x'] }))).toBe('card')
+    expect(await outcome(s, hook('replace_file_content', { TargetFile: join(s.cwd, 'a.ts') }))).toBe('allow')
+  })
+
+  it('a write into the plugin root is refused through .. and relative to it, under edits too', async () => {
+    const s = setup('edits', { cwd: tempRoot('agy-gate-cwd2-') })
+    dirs.push(s.cwd)
+    const viaDots = join(s.cwd, '..', s.pluginRoot.split('/').pop() ?? '', 'hooks.json')
+    expect(await s.gate.answer(write(viaDots))).toMatchObject({ decision: 'deny' })
+  })
+
   it('a write into the plugin root is refused, under auto too, by any tool that names the path', async () => {
     const s = setup('auto')
     const hooks = join(s.pluginRoot, '.agents', 'plugins', 'centralu', 'hooks.json')
@@ -175,6 +196,19 @@ describe('cards', () => {
     expect(s.gate.respondApproval(s.cards()[1]!.requestId, 'allow')).toBe(false)
   })
 
+  it('a saved rule for one file never allows an edit over several', async () => {
+    const s = setup('normal')
+    s.gate.applyRules([join(s.cwd, 'a.ts')])
+    expect(await outcome(s, hook('multi_replace_file_content', { Path: join(s.cwd, 'a.ts'), TargetFile: join(s.cwd, 'b.ts') }))).toBe('card')
+  })
+
+  it('input sent to a running command shows on its card', async () => {
+    const s = setup('normal')
+    void s.gate.answer(hook('send_command_input', { CommandId: 'c1', Input: 'yes' }))
+    await expect.poll(() => s.cards().length).toBe(1)
+    expect(s.cards()[0]!.detail).toMatchObject({ kind: 'command', command: 'yes', stdin: true })
+  })
+
   it('"always" with its matcher allows the same command later without a card, and a saved rule does too', async () => {
     const s = setup('normal')
     const first = s.gate.answer(run('npm test'))
@@ -208,6 +242,20 @@ describe('cards', () => {
 })
 
 describe('Stop', () => {
+  it('a call decided after a Stop and the next turn began is refused all the same', async () => {
+    let release: () => void = () => {}
+    const held = new Promise<void>((r) => (release = r))
+    const realPath = async (p: string) => (await held, realPathOf(p))
+    const s = setup('auto', { realPath })
+    const a = s.gate.answer(run('rm -rf build'))
+    s.gate.stop()
+    s.gate.resume()
+    release()
+    expect(await a).toEqual({ decision: 'deny', reason: STOPPED })
+    expect(await s.gate.answer(run('ls'))).toEqual({ decision: 'allow' })
+  })
+
+
   it('denies every open request before the interrupt is sent, and refuses calls until the next turn', async () => {
     const s = setup('normal')
     const a = s.gate.answer(run('one'))

@@ -64,7 +64,11 @@ export type PluginRootOpts = {
 export type GateSources = { entry: string; answer: string }
 
 /** The folder `--add-dir` names for this session */
-export const pluginRootFor = (dataDir: string, sessionId: string): string => join(dataDir, 'agy', sessionId)
+export function pluginRootFor(dataDir: string, sessionId: string): string {
+  // One folder below `agy/`, never the data folder or a folder beside it: removing the root removes this one folder
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(sessionId)) throw new Error(`not a session id for a plugin root: ${JSON.stringify(sessionId)}`)
+  return join(dataDir, 'agy', sessionId)
+}
 
 /** The plugin's own folder inside the root: the gate refuses writes anywhere under the root */
 export const pluginDirOf = (root: string): string => join(root, '.agents', 'plugins', PLUGIN_NAME)

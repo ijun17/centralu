@@ -168,7 +168,9 @@ class Run {
     rmSync(this.cwd, { recursive: true, force: true })
     if (this.gateData) {
       const data = this.gateData
-      void removePluginRoot(fsp, data, 'rec').then(() => rmSync(data, { recursive: true, force: true }))
+      void removePluginRoot(fsp, data, 'rec')
+        .then(() => rmSync(data, { recursive: true, force: true }))
+        .catch((e: unknown) => console.error(`could not remove ${data}: ${String(e)}`))
     } else rmSync(this.pluginRoot, { recursive: true, force: true })
   }
 }

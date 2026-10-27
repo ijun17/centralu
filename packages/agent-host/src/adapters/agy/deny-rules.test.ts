@@ -55,6 +55,16 @@ describe('a command rule', () => {
     }
   })
 
+  it('looks past shell keywords and common wrappers', () => {
+    for (const command of ['sudo rm -rf x', 'time rm -rf x', 'if true; then rm -rf x; fi', '{ rm -rf x; }', 'env A=1 rm -rf x']) {
+      expect(deniedBy(rules('command(rm -rf)'), { command }), command).not.toBeNull()
+    }
+  })
+
+  it('`command(*)` denies an execute call whose text is empty', () => {
+    expect(deniedBy(rules('command(*)'), { command: '' })).not.toBeNull()
+  })
+
   it('matches the program through its path, and `command(*)` matches every command', () => {
     expect(deniedBy(rules('command(rm -rf)'), { command: '/bin/rm -rf x' })).not.toBeNull()
     expect(deniedBy(rules('command(*)'), { command: 'ls' })).not.toBeNull()

@@ -123,8 +123,12 @@ export function deniedBy(rules: readonly DenyRule[], target: RuleTarget, realPat
 
 function matches(rule: DenyRule, t: RuleTarget, realPaths: ReadonlyMap<string, string>): boolean {
   switch (rule.kind) {
-    case 'command':
-      return t.command !== undefined && commandParts(t.command).some((part) => rule.prefix === '*' || startsWithWords(part, rule.prefix))
+    case 'command': {
+      if (t.command === undefined) return false
+      // `command(*)` denies every execute call, one whose text is empty or unknown included
+      const prefix = rule.prefix
+      return prefix === '*' || commandParts(t.command).some((part) => startsWithWords(part, prefix))
+    }
     case 'read_file':
     case 'write_file': {
       const paths = rule.kind === 'read_file' ? t.reads : t.writes
@@ -151,7 +155,13 @@ export function rulePaths(rules: readonly DenyRule[]): string[] {
 const words = (s: string): string[] => s.trim().split(/\s+/).filter(Boolean)
 
 /**
- * The simple commands in a command line: split at `;`, `&`, `|`, newlines and the start of a `$(`, a backtick or a
+ * Words before the program that are not the program: shell keywords and the common wrappers. Best effort: `bash -c '…'`
+ * and the like still hide a command from a rule here (`agy` applies its own rules as well, §1.2)
+ */
+const LEADERS = new Set(['{', '}', '!', 'then', 'do', 'else', 'elif', 'if', 'while', 'until', 'time', 'sudo', 'nice', 'nohup', 'env', 'command', 'exec', 'xargs', 'builtin'])
+
+/**
+ * The simple commands in a command line, best effort: split at `;`, `&`, `|`, newlines and the start of a `$(`, a backtick or a
  * parenthesis, without reading quotes. Not reading quotes splits more than a shell does, which can only find more parts
  * that start with a denied prefix. Leading `NAME=value` assignments are skipped.
  */
@@ -160,7 +170,7 @@ function commandParts(line: string): string[][] {
     .split(/[;&|\n\r(`]|\$\(/)
     .map((part) => {
       const w = words(part.replace(/[)]/g, ' '))
-      while (w.length > 0 && /^[A-Za-z_][A-Za-z0-9_]*=/.test(w[0] ?? '')) w.shift()
+      while (w.length > 0 && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(w[0] ?? '') || LEADERS.has(w[0] ?? ''))) w.shift()
       return w
     })
     .filter((w) => w.length > 0)

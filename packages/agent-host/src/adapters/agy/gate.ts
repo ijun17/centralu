@@ -74,6 +74,8 @@ export class AgyGate {
   private readonly cardIds = new CardIds()
   /** Set by `stop`: every call is refused with it until `resume` (a Stop's turn may ask once more before it ends) */
   private refusing: string | null = null
+  /** Counts the Stops: a call that began before one is refused even when `resume` came before it was decided */
+  private stops = 0
   /** The deny rules' paths resolved through links, once */
   private rulePathsReal: Promise<Map<string, string>> | null = null
 
@@ -100,6 +102,8 @@ export class AgyGate {
 
   private async decide(input: unknown, signal?: AbortSignal): Promise<GateAnswer> {
     if (this.refusing) return deny(this.refusing)
+    const stops = this.stops
+    const stopped = () => this.refusing ?? (this.stops !== stops ? STOPPED : null)
     const call = readHookCall(input)
     if (!call) return deny('Centralu could not read this call, so it was not run.')
     const tool = classifyTool(call.name, call.args)
@@ -107,9 +111,11 @@ export class AgyGate {
     if (await this.writesPluginRoot(target)) return deny(`Centralu does not allow writes into its ${PLUGIN_NAME} plugin folder.`)
     const rule = deniedBy(this.deps.denyRules ?? [], target, await this.realRulePaths(target))
     if (rule) return deny(`A deny rule in the person's agy settings blocks this call: ${rule.text}`)
-    if (await this.grantedWithoutCard(tool, call, target)) return this.refusing ? deny(this.refusing) : ALLOW
-    // Stop may have come while the paths were being checked
-    if (this.refusing) return deny(this.refusing)
+    const granted = await this.grantedWithoutCard(tool, call, target)
+    // A Stop may have come while the paths were being checked, and the next turn begun after it
+    const stop = stopped()
+    if (stop) return deny(stop)
+    if (granted) return ALLOW
     if (signal?.aborted) return deny(STOPPED)
     return this.raiseCard(detailOf(tool, call, this.deps.cwd), signal)
   }
@@ -117,13 +123,17 @@ export class AgyGate {
   /** The ACP adapter's order (`grantedWithoutCard`), then the reads each preset lets through on its own (§5.2) */
   private async grantedWithoutCard(tool: ToolClass, call: HookCall, target: RuleTarget): Promise<boolean> {
     if (tool.kind === 'other') return false
+    // A path `agy` may expand (`~`, `$HOME`, `%USERPROFILE%`, `file://`) is not checked as written: a card
+    if (tool.paths.some((p) => !plainPath(p))) return false
     if (this.preset === 'auto' || centraluTool(tool)) return true
     // A sub-agent's own calls pass this gate one by one (measured), so starting one asks only under `safe`
     if (tool.kind === 'subagent') return this.preset !== 'safe'
-    if (this.preset === 'edits' && tool.kind === 'edit' && target.writes?.length) {
+    if (this.preset === 'edits' && tool.kind === 'edit' && EDITS_GRANT.has(call.name) && target.writes?.length) {
       if (await insideFolder(this.deps.cwd, target.writes)) return true
     }
-    const key = alwaysAllowKey(detailOf(tool, call, this.deps.cwd))
+    // A rule names one file: a card over several files is never allowed by the first one's rule
+    const detail = detailOf(tool, call, this.deps.cwd)
+    const key = detail.kind === 'file_edit' && detail.multi ? '' : alwaysAllowKey(detail)
     if (key !== '' && this.rules.allows(key)) return true
     if (tool.kind === 'read') return (await this.readsDescriptors(target.reads ?? [])) || this.readAllowed(target.reads ?? [])
     return false
@@ -232,6 +242,7 @@ export class AgyGate {
    */
   stop(reason: string = STOPPED): void {
     this.refusing = reason
+    this.stops++
     this.cards.release((requestId, card) => {
       card.answer(deny(reason))
       this.deps.emit({ type: 'approval_resolved', sessionId: this.deps.sessionId, requestId, decision: 'deny' })
@@ -261,6 +272,15 @@ export function stopTurn(gate: AgyGate, interrupt: () => void): void {
 }
 
 const ALLOW: GateAnswer = { decision: 'allow' }
+
+/**
+ * The edit tools the `edits` grant answers: they write the text they are given. `sed_file` runs GNU sed, whose `e` and
+ * `w` commands run a command and write another file, so it is a card like a command
+ */
+const EDITS_GRANT = new Set(['write_to_file', 'write_file', 'replace_file_content', 'multi_replace_file_content'])
+
+/** A path the gate can check as written: no home or variable to expand, no URL */
+const plainPath = (p: string): boolean => !/^~|\$|%|:\/\//.test(p)
 const deny = (reason: string): GateAnswer => ({ decision: 'deny', reason })
 
 /** The hook's JSON (`{conversationId, stepIdx, toolCall: {name, args}, workspacePaths, …}`), or null when it has no tool name */
@@ -287,6 +307,9 @@ function centraluTool(tool: ToolClass): boolean {
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : '')
 
+/** What an execute call runs or types: the command line, or the input sent to a running one */
+const commandOf = (call: HookCall): string => str(call.args.CommandLine) || str(call.args.Command) || str(call.args.command) || str(call.args.Input)
+
 /** What the deny rules and the folder checks read of a call: absolute paths, resolved against the session's folder */
 function ruleTarget(tool: ToolClass, call: HookCall, cwd: string): RuleTarget {
   const abs = tool.paths.map((p) => (path.isAbsolute(p) ? p : path.resolve(cwd, p)))
@@ -296,7 +319,7 @@ function ruleTarget(tool: ToolClass, call: HookCall, cwd: string): RuleTarget {
     case 'edit':
       return { writes: abs }
     case 'execute':
-      return { command: str(call.args.CommandLine) || str(call.args.Command) || str(call.args.command) }
+      return { command: commandOf(call) }
     case 'mcp':
       return { mcp: { server: tool.server, tool: str(call.args.ToolName) } }
     case 'subagent':
@@ -314,7 +337,7 @@ function ruleTarget(tool: ToolClass, call: HookCall, cwd: string): RuleTarget {
 /** The card for a call, by its kind */
 export function detailOf(tool: ToolClass, call: HookCall, cwd: string): ApprovalDetail {
   if (tool.kind === 'execute') {
-    const command = str(call.args.CommandLine) || str(call.args.Command) || str(call.args.command)
+    const command = commandOf(call)
     return { kind: 'command', command, cwd: str(call.args.Cwd) || cwd, ...(call.name === 'send_command_input' ? { stdin: true } : {}) }
   }
   if (tool.kind === 'edit' && tool.paths.length > 0) {

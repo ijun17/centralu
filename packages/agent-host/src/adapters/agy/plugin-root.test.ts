@@ -118,6 +118,14 @@ describe('the plugin root', () => {
     await expect(removePluginRoot(r.api, '/data', 'never')).resolves.toBeUndefined()
   })
 
+  it('refuses a session id that is not one path segment, so removing it cannot reach the data folder', async () => {
+    const mem = memoryFiles()
+    for (const sessionId of ['', '..', '../x', 'a/b', '.hidden']) {
+      await expect(writePluginRoot({ dataDir: '/data', sessionId, node: NODE, gateSources: SOURCES, files: mem.api }), sessionId).rejects.toThrow(/session id/)
+      await expect(removePluginRoot(mem.api, '/data', sessionId), sessionId).rejects.toThrow(/session id/)
+    }
+  })
+
   it('finds the gate files in the source tree (bridge-path.ts)', () => {
     const s = agyGatePaths()
     expect(s.entry.endsWith(join('agy', 'agy-gate.mjs')) && s.answer.endsWith(join('agy', 'gate-answer.mjs'))).toBe(true)
