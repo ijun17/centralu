@@ -532,7 +532,8 @@ async function judgeRequest(home: AgyHome, call: unknown, sessionId: string, cwd
   const seen = new Set<string>()
   for (const text of read.texts) {
     const words = [...text.split(/[\r\n]+/), ...text.split(/[\s=,;'"`()<>|@[\]&]+/)].flatMap((word) => {
-      const starts = [...word.matchAll(/[~\\/]|[A-Za-z]:[\\/]/g)].map((m) => m.index)
+      // Zero-width, so a drive start (`x:/`) does not hide the separator that ends it (`x:/abs` is also `/abs`)
+      const starts = [...word.matchAll(/(?=[~\\/])|(?=[A-Za-z]:[\\/])/g)].map((m) => m.index)
       return [word, ...starts.filter((i) => i > 0).map((i) => word.slice(i))]
     })
     for (const word of words) {

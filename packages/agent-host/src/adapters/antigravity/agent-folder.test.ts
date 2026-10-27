@@ -245,6 +245,14 @@ describe('PowerShell variables, WSL paths, hardlinks, and the spellings only a t
     expect(paths).toContain('d:\\Users\\x')
   })
 
+  it('a word that starts like a drive (`x:`) is also read from the separator after it, on every OS', async () => {
+    const w = world()
+    const abs = WINDOWS ? w.token.slice(2) : w.token
+    for (const word of [`x:${abs}`, `x:${abs.replace(/\\/g, '/')}`]) {
+      expect(await reaches(w.home, { kind: 'execute', rawInput: { CommandLine: `tool ${word}`, Cwd: w.project } }, w.project), word).toBe(true)
+    }
+  })
+
   it('a WSL share, a distro and its mnt are above every drive the distro mounts', () => {
     for (const p of ['\\\\wsl$', '\\\\wsl$\\', '\\\\wsl$\\Ubuntu', '\\\\wsl.localhost\\Ubuntu\\', '\\\\WSL$\\Ubuntu\\mnt', '//wsl.localhost/Ubuntu/mnt/']) expect(wslAboveDrives(p), p).toBe(true)
     for (const p of ['\\\\wsl$\\Ubuntu\\home', '\\\\wsl$\\Ubuntu\\mnt\\c', '\\\\other\\Ubuntu', 'C:\\Ubuntu']) expect(wslAboveDrives(p), p).toBe(false)
