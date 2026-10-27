@@ -19,12 +19,52 @@
  */
 
 /**
- * The longest a string argument is sent whole (in UTF-16 code units, as JavaScript counts a string). A longer one, the
- * content of a large file being written, say, is cut to its head and a marker (`cutLongArguments`), so a call's request
- * stays far under the host's cap (1 MiB) whatever the file's size: the gate decides on paths, commands and kinds, never
- * on a whole file's content
+ * The longest a file's content is sent whole (in UTF-16 code units, as JavaScript counts a string). Longer content of a
+ * file being written or edited is cut to its head and a marker (`cutLongArguments`), so the call is still asked whatever
+ * the file's size. Only what no decision reads is ever cut (`CUTTABLE`)
  */
 export const ARGUMENT_BOUND = 64 * 1024
+
+/**
+ * What may be cut: the content arguments of the tools that write the text they are given. The gate decides on their
+ * paths alone (the deny rules, the plugin root, an `edits` grant, a file's "always" rule, which is the path), so cutting
+ * their content never makes a decision less strict. Nothing else is cut, whatever its size: a command, a path, a URL, a
+ * `Cwd`, an MCP tool's arguments are read whole by the deny rules and the "always" rules, and a call whose arguments
+ * alone are over the gate's cap is refused (413) and denied as too large to check. The host checks a marker is only
+ * ever here (`transport/gate-door.ts`), so a hook of another version cannot get a cut command decided on its head
+ */
+export const CUTTABLE = /** @type {const} */ ({
+  tools: ['write_to_file', 'write_file', 'edit_file', 'replace_file_content', 'multi_replace_file_content'],
+  args: ['Content', 'CodeContent', 'TargetContent', 'ReplacementContent', 'Target', 'Replacement', 'ReplacementChunks'],
+})
+
+/** The marker's start, as the host looks for it */
+export const CUT_MARKER = '[Centralu cut '
+
+/**
+ * Whether a string carrying the cut marker sits anywhere but a cuttable argument of a cuttable tool: the host then denies
+ * the call without deciding, since a decision would read the cut part. A marker in file content is left alone
+ * @param {unknown} hookInput the hook's input as parsed JSON
+ * @returns {boolean}
+ */
+export function cutOutsideContent(hookInput) {
+  /** @param {unknown} v @param {boolean} content @returns {boolean} */
+  const found = (v, content) => {
+    if (typeof v === 'string') return !content && v.includes(CUT_MARKER)
+    if (Array.isArray(v)) return v.some((x) => found(x, content))
+    if (v !== null && typeof v === 'object') return Object.values(v).some((x) => found(x, content))
+    return false
+  }
+  if (hookInput === null || typeof hookInput !== 'object' || Array.isArray(hookInput)) return found(hookInput, false)
+  const { toolCall, ...rest } = /** @type {Record<string, unknown>} */ (hookInput)
+  if (found(rest, false)) return true
+  if (toolCall === null || typeof toolCall !== 'object' || Array.isArray(toolCall)) return found(toolCall, false)
+  const { args, ...call } = /** @type {Record<string, unknown>} */ (toolCall)
+  if (found(call, false)) return true
+  const name = typeof call.name === 'string' ? call.name : ''
+  if (!(/** @type {readonly string[]} */ (CUTTABLE.tools).includes(name)) || args === null || typeof args !== 'object' || Array.isArray(args)) return found(args, false)
+  return Object.entries(args).some(([k, x]) => found(x, /** @type {readonly string[]} */ (CUTTABLE.args).includes(k)))
+}
 
 /** Errors that mean the request never reached anyone (nothing listens there yet: a host swap), so it is safe to send again */
 const NOT_SENT = new Set(['ECONNREFUSED', 'ENOTFOUND'])
@@ -104,10 +144,9 @@ async function decide({ env, input, fetch, sleep = (ms) => new Promise((r) => se
 }
 
 /**
- * The hook's input with every string longer than `ARGUMENT_BOUND` cut to its head and a marker naming how many bytes
- * were cut and the SHA-256 of the whole string. The digest keeps a cut argument's identity: two commands that share
- * their first `ARGUMENT_BOUND` characters still read differently, so a rule the person saved for one ("always allow"
- * matches the exact text) never matches the other. Input with nothing to cut, or that is not JSON, is sent as it came.
+ * The hook's input with each string in a cuttable argument (`CUTTABLE`) longer than `ARGUMENT_BOUND` cut to its head and
+ * a marker naming how many bytes were cut and the SHA-256 of the whole string, so two writes that share a head still
+ * read differently. Any other argument is sent whole. Input with nothing to cut, or that is not JSON, is sent as it came.
  * Uses the global Web Crypto, so this file still imports nothing.
  * @param {string} input
  * @returns {Promise<string>}
@@ -140,6 +179,13 @@ export async function cutLongArguments(input) {
     if (v !== null && typeof v === 'object') return Object.fromEntries(await Promise.all(Object.entries(v).map(async ([k, x]) => [k, await walk(x)])))
     return v
   }
-  const out = await walk(value)
-  return cut ? JSON.stringify(out) : input
+  const call = value?.toolCall
+  const args = call?.args
+  const cuttable = /** @type {readonly unknown[]} */ (CUTTABLE.tools).includes(call?.name) && args !== null && typeof args === 'object' && !Array.isArray(args)
+  if (!cuttable) return input
+  // Own entries rebuilt with fromEntries, so a key named __proto__ stays a plain key
+  const cutArgs = Object.fromEntries(
+    await Promise.all(Object.entries(args).map(async ([k, x]) => [k, /** @type {readonly string[]} */ (CUTTABLE.args).includes(k) ? await walk(x) : x])),
+  )
+  return cut ? JSON.stringify({ ...value, toolCall: { ...call, args: cutArgs } }) : input
 }

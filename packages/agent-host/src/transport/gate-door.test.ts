@@ -2,9 +2,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PROTOCOL_VERSION } from '@cc/protocol'
 import { GATE_ENV, GateRequests, type GateAnswer, type GateChannel, type GateHandler, type GateRequest } from '../adapters/core/gate.js'
 import { SessionProcess } from '../adapters/core/tool-process.js'
-import { gateAnswer } from '../adapters/agy/gate-answer.mjs'
+import { ARGUMENT_BOUND, gateAnswer } from '../adapters/agy/gate-answer.mjs'
 import { gateAddress } from '../swap-control.js'
-import { FrontDoorGates, gateRefusal, GATE_METHOD, scrub, type FrontDoorGatesOptions } from './gate-door.js'
+import { CUT_REFUSED, FrontDoorGates, gateRefusal, GATE_METHOD, scrub, type FrontDoorGatesOptions } from './gate-door.js'
 import { deriveHttpSecret } from './http.js'
 import { limitedToken } from './limited-token.js'
 import { METHOD_RIGHTS } from './method-rights.js'
@@ -448,6 +448,87 @@ describe('the review of #1675', () => {
     expect(args.Content).toMatch(/\[Centralu cut \d+ bytes of this argument before asking; SHA-256 of the whole: [0-9a-f]{64}\]$/)
     g.card('conv-1:2', { decision: 'allow' })
     expect(await answer).toEqual({ decision: 'allow' })
+  })
+
+  describe('cutting never makes a decision less strict', () => {
+    /**
+     * A stand-in for the agy gate's order (#1672): a deny rule on `rm` reads the whole command under every preset; `auto`
+     * allows the rest; `edits` allows a write inside the folder by its path and raises a card for a command
+     */
+    function ruleGate(preset: 'auto' | 'edits') {
+      const g = cardGate()
+      const seen: string[] = []
+      const gate: GateHandler = {
+        read,
+        decide: (r, gone) => {
+          const a = r.input as { CommandLine?: string; Path?: string }
+          if (a.CommandLine !== undefined) seen.push(a.CommandLine)
+          if (a.CommandLine !== undefined && /(^|[\s;&|])rm\s/.test(a.CommandLine)) return Promise.resolve({ decision: 'deny', reason: 'A deny rule blocks this call: rm' })
+          if (preset === 'auto') return Promise.resolve({ decision: 'allow' })
+          if (r.tool === 'write_file' && a.Path?.startsWith('/w/')) return Promise.resolve({ decision: 'allow' })
+          return g.gate.decide(r, gone)
+        },
+      }
+      return { ...g, gate, seen }
+    }
+    const padded = `${'#'.repeat(ARGUMENT_BOUND + 1024)}
+rm -rf ~`
+    const command = (CommandLine: string) => ({ ...INPUT, toolCall: { name: 'run_command', args: { CommandLine } } })
+
+    it('sends a command past the bound whole, so a deny rule under auto reads its end', async () => {
+      const { gates } = await host()
+      const g = ruleGate('auto')
+      const ch = await gates.open('s1', g.gate)
+      expect(await hook(ch.env, command(padded))).toEqual({ decision: 'deny', reason: 'A deny rule blocks this call: rm' })
+      expect(g.seen).toEqual([padded])
+    })
+
+    it('raises a card for a padded command under edits, never an allow', async () => {
+      const { gates } = await host()
+      const g = ruleGate('edits')
+      const ch = await gates.open('s1', g.gate)
+      const harmless = `${'#'.repeat(ARGUMENT_BOUND + 1024)}
+echo done`
+      const answer = hook(ch.env, command(harmless))
+      await until(() => g.asked.length === 1)
+      expect(g.seen).toEqual([harmless])
+      g.card('conv-1:2', { decision: 'deny', reason: 'The person declined.' })
+      expect(await answer).toEqual({ decision: 'deny', reason: 'The person declined.' })
+      // And the same padding before `rm` is the rule's deny under edits too
+      expect(await hook(ch.env, command(padded))).toEqual({ decision: 'deny', reason: 'A deny rule blocks this call: rm' })
+    })
+
+    it('denies a command over the cap as too large to check, undecided', async () => {
+      const { gates } = await host()
+      const g = ruleGate('auto')
+      const ch = await gates.open('s1', g.gate)
+      expect(await hook(ch.env, command(`${'#'.repeat(1024 * 1024)}
+echo hi`))).toEqual({
+        decision: 'deny',
+        reason: 'Centralu could not check this call: it is too large to check (over 1 MiB), so it was not run.',
+      })
+      expect(g.seen).toEqual([])
+    })
+
+    it('denies undecided a call cut outside a file’s content (a hook of another version, a forged request)', async () => {
+      const { gates } = await host()
+      const g = ruleGate('auto')
+      const ch = await gates.open('s1', g.gate)
+      const url = ch.env[GATE_ENV.url]!
+      const key = ch.env[GATE_ENV.token]!
+      const cutCommand = `${'#'.repeat(100)}
+[Centralu cut 9 bytes of this argument before asking; SHA-256 of the whole: ${'0'.repeat(64)}]`
+      for (const input of [
+        command(cutCommand),
+        { ...INPUT, toolCall: { name: 'write_file', args: { Path: cutCommand, Content: 'x' } } },
+        { ...INPUT, toolCall: { name: 'call_mcp_tool', args: { ServerName: 's', ToolName: 't', Arguments: { q: cutCommand } } } },
+      ]) {
+        expect(JSON.parse((await post(url, key, JSON.stringify(input))).text)).toEqual({ decision: 'deny', reason: CUT_REFUSED })
+      }
+      expect([g.seen, g.asked]).toEqual([[], []])
+      // A file's content cut by the hook is decided as before
+      expect(await hook(ch.env, { ...INPUT, toolCall: { name: 'write_file', args: { Path: '/w/f', Content: 'c'.repeat(2 * 1024 * 1024) } } })).toEqual({ decision: 'allow' })
+    })
   })
 
   it('drops a reason carrying a secret in any case, without its prefix, or split (F4)', async () => {

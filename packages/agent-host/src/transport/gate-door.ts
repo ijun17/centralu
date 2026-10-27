@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { GATE_DECISION_FIELDS, isSessionId, RpcMethods } from '@cc/protocol'
+import { cutOutsideContent } from '../adapters/agy/gate-answer.mjs'
 import { GATE_ENV, GateRequests, type GateAnswer, type GateChannel, type GateHandler, type GateInbound, type GateRequest } from '../adapters/core/gate.js'
 import { sameSecret } from './http.js'
 import { METHOD_RIGHTS, type Rights } from './method-rights.js'
@@ -110,6 +111,15 @@ export type FrontDoorGatesOptions = {
   heartbeatMs?: number
   maxBodyBytes?: number
   maxOpenPerSession?: number
+}
+
+/** The reason a call with a cut argument a decision reads is denied */
+export const CUT_REFUSED = 'Centralu could not check this call: an argument it checks was cut, so it was not run.'
+
+/** One answer with nothing to wait for */
+function answerAtOnce(res: ServerResponse, answer: GateAnswer): void {
+  res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' })
+  res.end(JSON.stringify(answer))
 }
 
 /** The front door's gate route and the keys it accepts (`GateInbound`); one per host, in memory */
@@ -225,6 +235,12 @@ export class FrontDoorGates implements GateInbound {
     if (!judged.ok) return plain(res, 400, 'not a gate request')
     // Closed (or opened again) while the body was read: its key is gone, and no card is raised for a closed gate
     if (this.open_.get(sessionId) !== entry) return plain(res, 404, 'not found')
+    /*
+     * The hook cuts only a file's content, which no decision reads (`CUTTABLE` in `gate-answer.mjs`). A cut anywhere else
+     * (a command, a path, a URL: a hook of another version, or a forged request) would have the preset, the deny rules
+     * and the "always" rules judge a head that may be harmless while the call runs whole, so it is denied undecided
+     */
+    if (cutOutsideContent(judged.params.request)) return answerAtOnce(res, { decision: 'deny', reason: CUT_REFUSED })
     let read: GateRequest | null
     try {
       read = entry.gate.read(judged.params.request)
