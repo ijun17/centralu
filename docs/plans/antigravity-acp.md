@@ -96,7 +96,12 @@ that will run the agent, and `asks` for the limited credential (it brings in a p
    and every file is there, so a folder is whole or absent.
 6. **Tidy**: the temporary folder always; older version folders best effort (a running session may hold them on
    Windows). A stale `.install-*` or `.sign-in-*` an earlier host left (one killed mid-install) is removed when the next
-   host starts; an install or sign-in waits for that.
+   host starts; an install or sign-in waits for that. Only when its owner is provably gone: each such folder's name
+   records the host process that made it (`.install-<pid>-<start>-<random>`, the start a hash of when that process
+   began, `0` where `ps` cannot say, as on Windows), and a folder goes only when no process has that pid or the one that
+   has it started at another time. The keeper's next host starts while the last one drains, and a second host on the
+   same data folder with another `--db` holds its own lock but shares `tools/` (re-review: such a host's start removed a
+   live sign-in), so a folder of a host still running is kept, and so is one whose owner cannot be told.
 
 `agents.cancelInstallTool` aborts it: the download stops and nothing is left. A second `installTool` while one runs
 joins it.
@@ -163,10 +168,23 @@ refused, (c) never `yolo`. Decided: **(b), with (c), and the file backend forced
   `fs/read_text_file` once it is advertised.
 - (c): the agent stays in `default`; `session/set_mode` is never sent (§5.1).
 
-What still reaches the token: a shell command (`cat`), which asks in `default` mode, so under Normal, Safe and Edits the
-person sees it; under Auto it runs, as any command does for Claude or Codex under Auto (said in
-[security-boundaries.md](../security-boundaries.md)). Measured in the review: the tool list loses the viewers, reads come
-as `fs/read_text_file`, and every path into the agent's folder is refused there.
+**Requests that name the agent's folder are refused.** Centralu answers every request the agent asks, and under Auto it
+allows them: the re-review measured `replace_file_content` running on a file in `antigravity-acp/`, which the harness
+counts as part of its workspace (with `gemini-home/config/skills`). So any permission request (an edit, a read by
+address, an MCP call, a command's folder) with a path in `<data>/tools/antigravity/` is refused under every preset and
+every saved rule (`AcpToolShape.neverAllowed`, `reachesAgentFolder`): every string in the request that reads as a path
+(absolute, `~/…`, `file:`, or relative to the session's folder), judged as written and through its links as far as it
+exists, with case folded. One folder is let through, the conversation's own plan folder
+`gemini-home/antigravity-acp/brain/<session id>/`: `/plan` writes its plan there as an edit it asks for (measured on
+1.4.3: `plan.md`, or a name of its choosing, and `<name>.metadata.json`; the harness itself keeps the MCP schemas it
+reads and its logs beside them). The token, `settings.json`, the conversations' databases, other conversations' folders,
+the MCP config and skills under `gemini-home/config/` and the programs stay refused; a link in the plan folder is judged
+by where it leads.
+
+What still reaches the token: a shell command (`cat`), whose words are not read. It asks in `default` mode, so under
+Normal, Safe and Edits the person sees it; under Auto it runs, as any command does for Claude or Codex under Auto (said
+in [security-boundaries.md](../security-boundaries.md)). Measured in the review: the tool list loses the viewers, reads
+come as `fs/read_text_file`, and every path into the agent's folder is refused there.
 
 ### 4.3 The sign-in
 
@@ -187,16 +205,17 @@ The address reaches the host and never `host.log`:
 - An address is opened once, and only `https` on a Google host.
 
 `agents.cancelSignIn` ends the process, and with it the one-shot listener (ACP cannot cancel `authenticate`). Endings:
-success reads `_meta.antigravity.tier` (`{name, upgradeUri}`: the plan name, offered as `ToolSetup.plan`) and the line is
-ready; the agent's "Timed out…" or our bound is `timed_out`; `-32000` with `data.reason = "onboarding_failed"` is
+success reads `_meta.antigravity.tier` (`{name, upgradeUri}`: the plan name, offered as `ToolSetup.plan`) and the line
+is ready; the agent's "Timed out…" or our bound is `timed_out`; `-32000` with `data.reason = "onboarding_failed"` is
 `ineligible` (the token is cleared by the agent, binary); a cancel is `cancelled`; anything else `failed`. The agent
 answers a timeout with the same code and reason ("Onboarding failed: Timed out waiting for the authentication flow to
-complete.", measured at 300 s), so the timeout's words are read first; the review found a timeout reported as
-`ineligible`. An ineligible answer names the account's verification page ("Verification URL: …", measured): it is carried
-as `failure.verifyUri` (only `https` on a Google host) for the screens' pull request to offer, never in `message` or the
-log, and this pull request adds no wording for it. The agent's words in a `failed` message lose any address or email. Success
-without `auth.type` on disk is said as `failed`, not taken for ready. The sign-in's stderr is filtered like a session's
-(§4.4).
+complete.", measured at 300 s), so the timeout's words are read first (only those words, and Centralu's own bound on the
+call: any other error that says "timed out" keeps its reason); the review found a timeout reported as `ineligible`. An
+ineligible answer names the account's verification page ("Verification URL: …", measured): it is carried as
+`failure.verifyUri` (only `https` on a Google host, with no user part and no port; the parsed address, not the agent's
+string) for the screens' pull request to offer, never in `message` or the log, and this pull request adds no wording for
+it. The agent's words in a `failed` message lose any address or email. Success without `auth.type` on disk is said as
+`failed`, not taken for ready. The sign-in's stderr is filtered like a session's (§4.4).
 
 ### 4.4 Signed out, and what reaches the logs
 
@@ -351,6 +370,9 @@ Measured after the deep review's fixes (macOS arm64, agent 1.4.3, a temporary da
   compact command. Before calling it the agent asked to `cat` the tool's schema file, which the harness keeps under
   `GEMINI_HOME/antigravity-acp/brain/<conversation>/mcp/`: under Normal that is a command card; under Auto it runs.
 - Under Normal a shell command asked (kind `command`), as in the spike.
+- After the re-review (Auto, a temporary `HOME`): asked to edit a file in `antigravity-acp/` with its edit tool, the
+  agent's request (`Run edit_file?`) was declined with no card, the file unchanged; `/plan` in the same session then
+  wrote its plan to `brain/<session id>/`, also with no card.
 - 5: no question came. `/plan` wrote its plan to `GEMINI_HOME/antigravity-acp/brain/<conversation>/plan.md` (an edit
   card under Normal) and ended the turn asking the person to "click Proceed", with no `interaction_*` request.
 
@@ -381,6 +403,12 @@ one by one on Windows):
 | Deep review: the archive asked for as stored, a gzipped answer's length not compared | `agent-files.test.ts` the real download (a local server that answers gzip) |
 | Deep review: the unpack streamed, memory bounded | `agent-files.test.ts` |
 | Deep review: an earlier host's `.install-*` removed at the start | `setup.test.ts` |
+| Re-review: only a folder whose owner has ended is removed; a live host's install and sign-in are kept | `setup.test.ts` (another host as a child process) |
+| Re-review: the setup's tests step only after the start-up cleanup has ended (it is slowed there, as on a busy Windows disk) | `setup.test.ts` |
+| Re-review: a verification page with a user part or a port is refused; what is passed on is the parsed address | `sign-in.test.ts` |
+| Re-review: only the authenticate call's own timeout is `timed_out` | `sign-in.test.ts` |
+| Re-review: an edit or read naming the agent's folder refused under every preset and rule; the conversation's plan let through, a link in it not | `shape.test.ts` |
+| Re-review: a zip bomb stopped before more than its declared size reaches the disk | `agent-files.test.ts` |
 | Deep review: a sign-in timeout is `timed_out`, an ineligible answer carries its page, no address in the message | `sign-in.test.ts` (the agent's real frames) |
 | Deep review: the readers and subagents off by their canonical names; a subagent's request refused under every preset | `shape.test.ts` |
 | Deep review: no compaction for an agent that advertises none; `compact_self` says so; the commands of a load's replay kept | `acp/session.test.ts`, `sessions/self-compaction.test.ts` |

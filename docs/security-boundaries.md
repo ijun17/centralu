@@ -147,9 +147,10 @@ matches Claude's `auto` bypass permissions. Commands have the person's OS access
 files outside the project. `safe` uses workspace-write with `untrusted` approval. `normal` follows the
 person's configured approval policy and sandbox mode, including a personal full-access mode.
 **Under `auto`, Antigravity's shell commands can read its account token** (the Google sign-in Centralu keeps in
-`<data>/tools/antigravity/gemini-home/`): its file viewers are off and Centralu refuses reads of that folder, but a command runs
-unasked under `auto` as it does for every tool, so it exposes that account, not only the project
-([plans/antigravity-acp.md](plans/antigravity-acp.md) §4.2).
+`<data>/tools/antigravity/gemini-home/`): its file viewers are off, Centralu refuses reads of that folder, and it
+refuses every edit or read request that names a file there under every preset (only the conversation's own plan folder
+is let through), but a command's words are not read, and a command runs unasked under `auto` as it does for every tool,
+so it exposes that account, not only the project ([plans/antigravity-acp.md](plans/antigravity-acp.md) §4.2).
 
 In the Codex adapter, every linked-worktree session still adds its repository's canonical git common
 directory to workspace-write's writable roots on start and resume (#585), retaining existing extra roots.
@@ -1255,8 +1256,13 @@ Centralu installs Google's Antigravity agent itself and keeps all of its state u
 - **The token is a file the agent's own tools do not read.** The file backend is forced (no Keychain item, no OS
   dialog in Centralu's name). The agent's built-in viewer read that file without asking in the spike, so its content
   readers are switched off for every session and reads come to Centralu (`fs/read_text_file`), which answers inside the
-  session's folder only, by real path, and never under `tools/antigravity/`. A shell command can still read it, and asks
-  under every preset but Auto. Centralu itself never opens the token file; it looks for its presence.
+  session's folder only, by real path, and never under `tools/antigravity/`. A permission request that names a file
+  under `tools/antigravity/` (an edit, a read by address, an MCP call; judged as written and through its links, any
+  case) is refused under every preset and every saved rule, Auto included: the agent's edit tools reached the token's
+  folder unasked under Auto before (re-review). Only the conversation's own plan folder
+  (`gemini-home/antigravity-acp/brain/<session id>/`, where `/plan` writes) is let through. What Auto still reaches: a
+  shell command, whose words are not read; it asks under every preset but Auto. Centralu itself never opens the token
+  file; it looks for its presence.
 - **The sign-in address stays out of logs and events.** It reaches the host through a private folder (`0700`) and the
   agent's stderr, is opened once and only as an `https` Google address, and no `tool_setup` event carries it. Lines of
   the agent's stderr that hold an address, an email or a token's name never reach `host.log` or a crash message.
