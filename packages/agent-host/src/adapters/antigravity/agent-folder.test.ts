@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { reachesAgentFolder, SCAN_LIMITS, within, type AgyHome } from './agent-files.js'
-import { fakeSignIn, folder, folderLink, pathFrom, pathIn, posixPaths, sep, tempData, thisHost, tokenPath, write } from './agent-files.test-helpers.js'
+import { candidatesOf, reachesAgentFolder, SCAN_LIMITS, within, wslDrivePath, type AgyHome } from './agent-files.js'
+import { fakeSignIn, folder, folderLink, hardLink, pathFrom, pathIn, posixPaths, processDrive, sep, tempData, thisHost, tokenPath, write } from './agent-files.test-helpers.js'
 
 /**
  * The guard on the agent's own folder (`reachesAgentFolder`, plan §4.2) against the requests a recheck of #1680 let through:
@@ -201,5 +201,89 @@ describe('the ways one file is spelled', () => {
       { kind: 'search', rawInput: { SearchPath: '.', Query: 'x' } },
     ]
     for (const ask of asks) expect(await reaches(w.home, ask, w.project), JSON.stringify(ask)).toBe(false)
+  })
+})
+
+describe('PowerShell variables, WSL paths, hardlinks, and the spellings only a text reading sees', () => {
+  it('fills PowerShell $env:NAME and ${env:NAME}, in a path and in a command', async () => {
+    const w = world()
+    const rest = pathFrom(w.home.geminiHome, w.token)
+    expect(await reaches(w.home, edit(`$env:GEMINI_HOME${sep}${rest}`), w.project)).toBe(true)
+    expect(await reaches(w.home, edit(`\${env:GEMINI_HOME}${sep}${rest}`), w.project)).toBe(true)
+    expect(await reaches(w.home, edit(`$ENV:gemini_home${sep}${rest}`), w.project)).toBe(WINDOWS)
+    expect(await reaches(w.home, { kind: 'execute', rawInput: { CommandLine: `Get-Content $env:GEMINI_HOME${sep}${rest}\nGet-Date`, Cwd: w.project } }, w.project)).toBe(true)
+    // A variable the agent does not have stays as written
+    expect(await reaches(w.home, edit(`$env:NO_SUCH_VARIABLE_HERE${sep}x`), w.project)).toBe(false)
+  })
+
+  it("maps a WSL share's /mnt/<letter> to that drive, by its text (any case, either slash)", () => {
+    const wsl = ['\\\\wsl$\\Ubuntu\\mnt\\c\\Users\\x', '//WSL$/Ubuntu/MNT/C/Users/x', '\\\\wsl.localhost\\Debian\\mnt\\c\\Users\\x', '\\\\WSL.LocalHost\\Debian\\mnt\\C\\Users\\x', '\\\\wsl$\\Ubuntu\\c\\Users\\x']
+    for (const p of wsl) expect(wslDrivePath(p), p).toBe('c:\\Users\\x')
+    expect(wslDrivePath('\\\\wsl$\\Ubuntu\\mnt\\d')).toBe('d:\\')
+    expect(wslDrivePath('\\\\wsl$\\Ubuntu\\mnt\\d\\')).toBe('d:\\')
+    // Not a drive: the distro's own files, another host, a longer name, a local path
+    for (const p of ['\\\\wsl$\\Ubuntu\\home\\me\\x', '\\\\wsl$\\Ubuntu\\mnt\\wsl\\x', '\\\\other\\Ubuntu\\mnt\\c\\x', '\\\\wsl$\\Ubuntu', 'C:\\mnt\\c\\x']) expect(wslDrivePath(p), p).toBeNull()
+  })
+
+  it.runIf(WINDOWS)("a WSL share's view of this machine's own drive reaches the folder, though it is another volume", async () => {
+    const w = world()
+    const drive = w.token[0]!
+    const rest = w.token.slice(3)
+    for (const host of ['wsl$', 'wsl.localhost', '?\\UNC\\wsl$', '.\\UNC\\WSL.LOCALHOST']) {
+      const share = `\\\\${host}\\NoSuchDistro\\mnt\\${drive}\\${rest}`
+      expect(await reaches(w.home, edit(share), w.project), share).toBe(true)
+      expect(await reaches(w.home, edit(share.replace(/\\/g, '/')), w.project), share).toBe(true)
+      expect(await reaches(w.home, { kind: 'execute', rawInput: { CommandLine: `type ${share}`, Cwd: w.project } }, w.project), share).toBe(true)
+    }
+    // A parent over the share, and a path that climbs into the mount
+    expect(await reaches(w.home, { kind: 'search', rawInput: { SearchPath: `\\\\wsl$\\NoSuchDistro\\mnt\\${drive}\\` } }, w.project)).toBe(true)
+    expect(await reaches(w.home, edit(`\\\\wsl$\\NoSuchDistro\\home\\..\\mnt\\${drive}\\${rest}`), w.project)).toBe(true)
+  })
+
+  it.runIf(WINDOWS)("a WSL share's mount is also judged as the drive it names (the share itself may be another volume)", () => {
+    const paths = candidatesOf('\\\\wsl$\\Ubuntu\\mnt\\D\\Users\\x', 'C:\\project')?.map((c) => c.path)
+    expect(paths).toContain('d:\\Users\\x')
+  })
+
+  it('declines a file in the plan folder that has a second name (a hardlink to the token), and lets a plain one through', async () => {
+    const w = world()
+    const plans = pathIn(w.home.geminiHome, 'antigravity-acp', 'brain', SID)
+    folder(plans)
+    write(pathIn(plans, 'plan.md'), 'plan')
+    hardLink(w.token, pathIn(plans, 'hard.md'))
+    expect(await reaches(w.home, edit(pathIn(plans, 'hard.md')), w.project)).toBe(true)
+    expect(await reaches(w.home, edit(pathIn(plans, 'plan.md')), w.project)).toBe(false)
+  })
+
+  it.runIf(WINDOWS)("`\\foo` is from the root of the session folder's drive, not the host process's", () => {
+    const other = processDrive() === 'Z' ? 'Y' : 'Z'
+    const paths = candidatesOf('\\agent\\x', `${other}:\\project`)?.map((c) => c.path.toLowerCase())
+    expect(paths).toContain(`${other}:\\agent\\x`.toLowerCase())
+  })
+
+  it.runIf(WINDOWS)('a trailing dot or space in a folder name is dropped as Windows does, also in a command word', async () => {
+    const w = world()
+    const spaced = w.token.replace('antigravity-acp', 'antigravity-acp. ')
+    expect(await reaches(w.home, { kind: 'execute', rawInput: { CommandLine: `type ${spaced}\nls`, Cwd: w.project } }, w.project)).toBe(true)
+    const dotted = w.token.replace(`${sep}antigravity${sep}`, `${sep}antigravity.${sep}`)
+    expect(dotted).not.toBe(w.token)
+    expect(await reaches(w.home, { kind: 'execute', rawInput: { CommandLine: `type ${dotted}\nls`, Cwd: w.project } }, w.project)).toBe(true)
+  })
+
+  it.runIf(WINDOWS)('a device prefix is not a wildcard: a project file under `\\\\?\\` is let through, the token is not', async () => {
+    const w = world()
+    expect(await reaches(w.home, edit(`\\\\?\\${pathIn(w.project, 'a.txt')}`), w.project)).toBe(false)
+    expect(await reaches(w.home, edit(`\\\\.\\${pathIn(w.project, 'a.txt')}`), w.project)).toBe(false)
+    expect(await reaches(w.home, edit(`\\\\?\\${w.token}`), w.project)).toBe(true)
+  })
+
+  it('a file: address is parsed as a URL: through a link, percent-encoded, and one that does not parse is refused', async () => {
+    const w = world()
+    folderLink(pathIn(w.home.geminiHome, 'antigravity-acp'), pathIn(w.project, 'notes'))
+    const url = (p: string) => `file://${p.split(sep).join('/').replace(/^([^/])/, '/$1')}`
+    expect(await reaches(w.home, edit(url(pathIn(w.project, 'notes', 'acp_token.json'))), w.project)).toBe(true)
+    expect(await reaches(w.home, edit(url(w.token).replace('acp_token', 'acp%5Ftoken')), w.project)).toBe(true)
+    expect(await reaches(w.home, edit('file:///a%2fb'), w.project)).toBe(true)
+    expect(await reaches(w.home, edit(url(pathIn(w.project, 'a.txt'))), w.project)).toBe(false)
   })
 })

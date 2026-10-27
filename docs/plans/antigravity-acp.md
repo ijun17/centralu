@@ -179,7 +179,7 @@ refused (recheck of #1680). Exactly what it checks:
   A request nested deeper than 32 levels, or with more than 1024 distinct one-line strings, is refused whole without
   being read (`SCAN_LIMITS`); so is one that throws while read.
 - Each one-line string (up to 32767 characters, the longest path an OS takes) as written, without one pair of
-  surrounding quotes, with `%VAR%`, `$VAR`, `${VAR}` filled in from the agent's environment (`GEMINI_HOME` included), and
+  surrounding quotes, with `%VAR%`, `$VAR`, `${VAR}` and PowerShell's `$env:VAR`, `${env:VAR}` filled in from the agent's environment (`GEMINI_HOME` included), and
   with each `{a,b}` alternative spelled out (more than 64 are refused). Each is then read as a path: a `file:` address as
   a URL parser reads it (`file:C:/x` too; a `file:/` address that does not parse is refused), `~`, absolute,
   drive-relative `C:foo` (judged from the drive's root, the session's folder and the host's own folder on that drive),
@@ -196,6 +196,10 @@ refused (recheck of #1680). Exactly what it checks:
   its volume is the folder's volume, or cannot be read. Its host's name proves nothing: `localhost`, `127.0.0.1`, the
   machine's own names and addresses, a hosts-file entry, and any share of any folder lead to the same file (measured:
   the admin share by each of those names gave the token's volume serial and file id). The volume, read with `stat`, does.
+  A WSL share (`\wsl$<distro>…`, `\wsl.localhost<distro>…`, any case, either slash, `\?UNCwsl…` too) is another
+  volume, but its `mnt<letter>…` (or `<letter>…`, where a distro mounts drives at its root) is this machine's `<letter>:`:
+  that path is judged as well, by text (tested without WSL). A distro whose mount point is set to something else
+  (`/etc/wsl.conf`), or a link inside a distro that leads to `/mnt/<letter>`, is not known and is not judged.
 - Then every line and every word (split at spaces, `=`, `,`, `;`, quotes, brackets, `|`, `@` and `&`) of every string,
   multi-line ones and a shell command included, and each word also from every place a path can start in it (`~`, a
   separator, a drive), read the same way by its text only (no links, no parent rule): a path in a list, an argument
@@ -206,7 +210,9 @@ which asks): a search or listing over the home folder, the data folder or a driv
 folder is the home folder searching `.`; an edit whose one-line text is `/`, `~`, `..` or a glob from a parent (it
 reads as a path); text that names a path in the folder (a note or a command quoting the token's path); a path through
 a dangling link; a file on a network share of the data folder's own volume (a loopback share); a request with more
-than 1024 strings, 32 levels or 64 brace alternatives; a listing of the plan folder itself (only files in it are let
+than 1024 strings, 32 levels or 64 brace alternatives (so a whole-file write of a large JSON such as `package-lock.json`, with
+more than 1024 distinct strings, and one line of text with seven or more `{a,b}` groups, such as minified JSON or a
+regular expression with `{1,3}` quantifiers, are declined and have to be done with a shell command, which asks); a listing of the plan folder itself (only files in it are let
 through).
 
 One folder is let through, the conversation's own plan folder
@@ -214,7 +220,9 @@ One folder is let through, the conversation's own plan folder
 1.4.3: `plan.md`, or a name of its choosing, and `<name>.metadata.json`; the harness itself keeps the MCP schemas it
 reads and its logs beside them). The token, `settings.json`, the conversations' databases, other conversations' folders,
 the MCP config and skills under `gemini-home/config/` and the programs stay refused; a link in the plan folder is judged
-by where it leads, and a plan folder that is itself a link lets nothing through.
+by where it leads, a plan folder that is itself a link lets nothing through, and a file in it with a second name
+(`stat().nlink > 1`: a hardlink to the token, which `realpath` cannot see) is refused. A hardlink made elsewhere (in the
+project) needs a shell command to make, the class below.
 
 What still reaches the token: a shell command that does not name its path (a variable, `cd` then a relative name). It
 asks in `default` mode, so under Normal, Safe and Edits the person sees it; under Auto it runs, as any command does for

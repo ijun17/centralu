@@ -482,7 +482,7 @@ export async function signInFolder(home: AgyHome, platform: Platform = HOST_PLAT
  *   deeper than `SCAN_LIMITS.depth` or with more than `SCAN_LIMITS.strings` one-line strings is refused whole, unread.
  *   Any request that throws while read is refused
  * - each one-line string up to the longest path an OS takes, as written, without one pair of surrounding quotes, with
- *   `%VAR%`, `$VAR` and `${VAR}` filled from the agent's environment, and with each `{a,b}` alternative spelled out (more
+ *   `%VAR%`, `$VAR`, `${VAR}`, `$env:VAR` and `${env:VAR}` filled from the agent's environment, and with each `{a,b}` alternative spelled out (more
  *   than 64 are refused); then as a path: a `file:` address as a URL parser reads it (`file:C:/x` too), `~`, absolute,
  *   drive-relative (`C:foo`, judged against the drive's root, the session's folder and the host's own per-drive folder),
  *   `\foo` on Windows, or relative to the session's folder. A `file:/` address that does not parse is refused
@@ -496,7 +496,7 @@ export async function signInFolder(home: AgyHome, platform: Platform = HOST_PLAT
  *   drive): a listing or a recursive search from there reaches inside. A shell call is exempt from the parents rule only
  * - Windows: a network path (`\\host\share`, `\\?\UNC\…`, a mapped drive, a volume or device path) is refused when it
  *   is on the same volume as the folder, or its volume cannot be read. Its host's name proves nothing (`localhost`,
- *   `127.0.0.1`, the machine's names and addresses, a hosts entry, any share of any folder all lead here), its volume does
+ *   `127.0.0.1`, the machine's names and addresses, a hosts entry, any share of any folder all lead here), its volume does. A WSL share's `mnt\<letter>` is also judged as that drive
  * - then every line and every word (split at spaces, `=`, `,`, `;`, quotes, brackets, `|`, `@`, `&`) of every string,
  *   multi-line ones and a shell command's included, and each word from every place a path can start in it, read the
  *   same way but by its text only (no links, no parents rule): a path in a list or an argument (`--out=<path>`, `-o<path>`). A command can still reach the folder in ways no text shows (a variable, `cd`
@@ -601,7 +601,8 @@ function variantsOf(text: string, env: Record<string, string | undefined>): stri
   for (const v of [...out]) {
     const filled = v
       .replace(/%([^%\s]+)%/g, (all, name: string) => (WINDOWS ? (lookup(name) ?? all) : all))
-      .replace(/\$\{(\w+)\}|\$(\w+)/g, (all, a?: string, b?: string) => lookup(a ?? b ?? '') ?? all)
+      // `$env:NAME` and `${env:NAME}` are PowerShell's own spelling
+      .replace(/\$\{env:([^}\s]+)\}|\$env:(\w+)|\$\{(\w+)\}|\$(\w+)/gi, (all, a?: string, b?: string, c?: string, d?: string) => lookup(a ?? b ?? c ?? d ?? '') ?? all)
     out.add(filled)
   }
   const all = new Set<string>()
@@ -638,7 +639,7 @@ type Candidate = { path: string }
  * The absolute paths a string may name, each as written (not normalized: `..` is judged after the links before it), and
  * a glob's fixed prefix too. Null when the string reads as a path that cannot be judged
  */
-function candidatesOf(text: string, cwd: string): Candidate[] | null {
+export function candidatesOf(text: string, cwd: string): Candidate[] | null {
   let s = text
   if (/^file:/i.test(s)) {
     // As a URL parser reads it, `file:C:/x` and `file:x` included; one that does not parse is a path only if it reads as one
@@ -653,6 +654,9 @@ function candidatesOf(text: string, cwd: string): Candidate[] | null {
   }
   if (WINDOWS) s = withoutDevicePrefix(s)
   const roots: string[] = []
+  // A WSL share is another volume, but `/mnt/c` in it is this machine's `C:`: that path is judged too
+  const mounted = WINDOWS ? wslDrivePath(windowsForm(s)) : null
+  if (mounted !== null) roots.push(mounted)
   let pathLike = true
   if (s === '~' || s.startsWith('~/') || (WINDOWS && s.startsWith('~\\'))) roots.push(homedir() + s.slice(1))
   // Windows: `\foo` is from the root of the process's drive, which Centralu takes to be the session folder's
@@ -679,6 +683,16 @@ function candidatesOf(text: string, cwd: string): Candidate[] | null {
     out.push({ path: segments.slice(0, at).join(sep) || sep })
   }
   return out
+}
+
+/**
+ * The Windows path a WSL share's `\mnt\<letter>\…` (or `\<letter>\…`, where the distro mounts drives at its root) names:
+ * `\\wsl$\<distro>\mnt\c\x` and `\\wsl.localhost\<distro>\mnt\c\x` as `c:\x`, any case, either slash. Null for any other
+ * path. A distro's mount point can be set to anything (`/etc/wsl.conf`); only these two are known
+ */
+export function wslDrivePath(path: string): string | null {
+  const m = /^[\\/]{2}wsl(?:\$|\.localhost)[\\/]+[^\\/]+[\\/]+(?:mnt[\\/]+)?([A-Za-z])(?:[\\/]+(.*))?$/i.exec(path)
+  return m ? `${(m[1] ?? '').toLowerCase()}:\\${(m[2] ?? '').replace(/\//g, '\\')}` : null
 }
 
 const joinRaw = (dir: string, rest: string) => (rest.length ? `${dir.replace(/[\\/]+$/, '')}${sep}${rest}` : dir)
@@ -732,7 +746,7 @@ async function reaches(guard: Guard, c: Candidate, parents: boolean): Promise<bo
   ]
   for (const [root, plans, target] of pairs) {
     if (within(root, target)) {
-      const plan = plans !== null && within(plans, target) && !(await isFolder(real.real))
+      const plan = plans !== null && within(plans, target) && !(await isFolder(real.real)) && !(await hardLinked(real.real))
       if (!plan) return true
     }
     if (parents && within(target, root)) return true
@@ -743,6 +757,11 @@ async function reaches(guard: Guard, c: Candidate, parents: boolean): Promise<bo
     if (volume === null || volume === guard.volume) return true
   }
   return false
+}
+
+/** A file with a second name: a hardlink to the token in the plan folder is the token, and `realpath` cannot tell */
+async function hardLinked(path: string): Promise<boolean> {
+  return stat(path).then((s) => s.nlink > 1, () => false)
 }
 
 async function isFolder(path: string): Promise<boolean> {

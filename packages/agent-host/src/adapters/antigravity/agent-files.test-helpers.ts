@@ -1,7 +1,7 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { hostname, tmpdir } from 'node:os'
-import { join, posix, relative, sep } from 'node:path'
+import { join, posix, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { NormalizedEvent, PermissionPreset } from '@cc/protocol'
 import type { AgentProcess, CreateSessionOpts } from '../contract.js'
@@ -66,6 +66,12 @@ export function link(target: string, at: string): boolean {
   symlinkSync(target, at)
   return true
 }
+
+/** A second name `at` for the file `target` (a hardlink, which every OS lets a test make) */
+export const hardLink = (target: string, at: string) => linkSync(target, at)
+
+/** The drive letter the host process's own folder is on (a root-relative path such as the one starting with a backslash means that drive's root), upper case; Windows only */
+export const processDrive = () => resolve(sep).slice(0, 1).toUpperCase()
 
 /** A link at `at` to the folder `target` that every OS lets a test make: a junction on Windows (no right needed), a symbolic link elsewhere */
 export function folderLink(target: string, at: string): void {
