@@ -1,0 +1,4 @@
+{
+  "bytes": 600,
+  "reason": "The relayed message look (#1629): two theme token names and labels in THEME_TOKENS (surface-relayed, ink-relayed) and the relayed branch in ChatRow's bubble. Plain strings and one flag, no dependency; lazy loading would not lower the total."
+}
