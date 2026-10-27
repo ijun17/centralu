@@ -123,10 +123,15 @@ the run and the file put back byte for byte after it). `~/.gemini/antigravity-cl
 written, per scope (`project`, `shared`, `global`), an entry it cannot parse included. With no hook:
 `command(echo deny-me)` refused `echo deny-me` and `echo ok; echo deny-me` ("Permission denied for unsandboxed(…).
 Matches user-configured deny rule.") and let `echo deny-me-also` run; `write_file(<folder>)` and `read_file(<folder>)`
-refused a write and a read under the folder, but only when the rule spelled the path as the call did (a rule under
-`/tmp` missed the same file as `/private/tmp`); `ls` of a denied folder through `run_command` ran. The kinds, from the
-binary's own documentation of its grants: `command(<prefix>)`, `read_file(<path>)`, `write_file(<path>)`,
-`mcp(<server>/<tool>)`, `read_url(<domain>)`, `execute_url(<domain>)`.
+refused a write and a read under the folder, but only when the rule was written as the call's path resolved through
+links: `read_file(/private/tmp/…/out)` refused a read of both `/tmp/…/out/x` and `/private/tmp/…/out/x`, while
+`read_file(/tmp/…/out)` refused neither, the exact spelling included (#1672 deep review). So a rule written through a
+link (`/tmp`, a linked home folder) matches nothing in `agy`. `ls` of a denied folder through `run_command` ran, and so
+did `"echo" deny-me` and `bash -c "echo deny-me"` under `command(echo deny-me)`: `agy` does not take quotes out or
+read a shell's script. A hook `allow` does not override `agy`'s own command rules (`echo deny-me` was refused with the
+hook answering `allow`). A settings file with a `//` comment: `agy` read none of its rules, and neither does the gate.
+The kinds, from the binary's own documentation of its grants: `command(<prefix>)`, `read_file(<path>)`,
+`write_file(<path>)`, `mcp(<server>/<tool>)`, `read_url(<domain>)`, `execute_url(<domain>)`.
 
 ### 1.3 Where hooks, MCP servers and rules come from, without writing anyone's config
 
@@ -233,8 +238,10 @@ adapters/agy/
   stream.ts         stream-json lines → our own narrow types (anti-corruption, agent-host.md §2)
   normalize.ts      step_update / result / stderr → NormalizedEvent (a small per-turn context)
   gate.ts           the host side of the PreToolUse gate: hook request → approval card → decision
-  plugin-root.ts    writes the per-session --add-dir root (§3.2)
-  tool-kinds.ts     agy tool names → read / edit / execute / mcp / subagent / other
+  plugin-root.ts    writes the per-session --add-dir root and keeps it as written (§3.2)
+  deny-rules.ts     the person's agy deny rules, deny only (§5.5)
+  command-line.ts   a shell command line → the simple commands it runs, for deny rules and the plugin root (§5.5)
+  tool-kinds.ts     agy tool names → read / edit / execute / mcp / subagent / web / other; every path argument
   known-steps.ts    step types and stderr markers mapped or left out on purpose (unmapped.ts reads it)
   agy-gate.mjs      the hook command (always runs; bundled like orchestrator-bridge.mjs)
   gate-answer.mjs   what the hook does: post the call, print one answer (§5.1)
@@ -290,8 +297,36 @@ bridge credential and the gate's callback address reach the hook and the MCP ser
 both inherit (measured). An app's entry names its server in its own `env` (`CC_APP_SERVER`); that `agy` adds such an
 `env` to the inherited one rather than replacing it was not measured, so it is checked with the wiring. The folder is
 made read-only (files 0444, folders 0555), and the gate refuses any write into it, since the agent sees it as a
-workspace. It is removed with the session. A shell command is not checked against it: under `auto`, or with an "always"
-rule on a command, a command could change the modes and rewrite the hook. The session id must be one path segment.
+workspace. It is removed with the session. The session id must be one path segment.
+
+**The modes do not stop the owner** (#1672 deep review, live): `chmod u+w` on the hook works in a 0555 folder, and `agy`
+runs `gate/agy-gate.mjs` afresh on each call, so a replaced hook answered every later call in place of the gate, and a
+stricter preset set after it never reached a call. Three things hold the root now:
+
+- **Checked at each turn start and each preset change.** `PluginRootKeeper` notes what it wrote (every entry's kind,
+  mode and content hash); `AgyGate.beginTurn()` and `setPermissionPreset()` compare the root on disk with it. On any
+  difference (a file changed, added, removed or made a link, a mode changed, the root gone) the root is written again
+  and `agy` is started again on the same conversation (`relaunch`) before another call runs; a preset change that finds
+  one first stops the turn (open cards denied "Centralu's gate files had changed; …"). A root that cannot be checked
+  keeps every call refused. Writing it again never follows a link: a root made a link to another folder is removed as a
+  link, and that folder's modes are left alone.
+- **File tools**: a write into the root by any tool that names a path there (every path argument, §5.2, through links,
+  ignoring case where the disk does) is refused under every preset, `auto` included.
+- **Commands**, under every preset but `auto`: one that runs in the root (`Cwd`) or names a path in it or in the two
+  folders above it (`<data>/agy`, the data folder), as written, through `~`, quotes, links or a shell's `-c` script
+  (`command-line.ts`), is refused without a card.
+
+Live (`recordings/agy-1.4.8/tamper-restore`, `root-command`): under `auto` the hook was made writable and replaced, as an
+auto-allowed command can; the change to `safe` found it, wrote the root back and started `agy` again on the same
+conversation, and the next command got a card (denied), the replaced hook never having run. Under `normal`, `ls -l` of
+the hook was refused without a card ("Centralu does not run commands that name its centralu plugin folder.").
+
+What is still possible: under `auto`, any command, a `chmod` and rewrite of the hook included, and the hook so replaced
+answers the rest of that turn. This is accepted because `auto` already allows every command without a card; a hook the
+agent rewrites gives it nothing `auto` had not, and the root is written back before the next turn or a change to a
+stricter preset. Under the other presets a command can still reach the root in ways no reading of its text finds (a
+variable, `cd` then a relative path, a script or a build step it runs), but only a command the person allowed, by its
+card or an "always" rule; such a change too lasts until the next turn start or preset change.
 
 Both gate files are copied (#1666 review finding 2): a copy of the entry alone exits 1 without an answer, which `agy`
 takes as a refusal. They are found where `bridge-path.ts` finds the bridge (`agyGatePaths()`): `agy/` beside the module
@@ -400,8 +435,8 @@ As built (`gate.ts`), each proved by a live run (`recordings/agy-1.4.8/preset-*`
 | Preset | The gate |
 |---|---|
 | `auto` | allows every known tool at once (the hook still runs, so `gatesSteps` holds) |
-| `edits` (#1525) | as `normal`, and an edit inside the session's folder without a card (`edit-grant.ts`), by the tools that write the text they are given (`write_to_file`, `write_file`, `replace_file_content`, `multi_replace_file_content`); `sed_file` is a card, since sed's `e` and `w` run a command and write another file |
-| `normal` | allows reads inside the session's folder, its readable folders and the paths given to read later, and starting a sub-agent (its own calls pass the gate one by one); a card for edits, commands, URL reads, browser actions and MCP calls to servers other than Centralu's |
+| `edits` (#1525) | as `normal`, and an edit inside the session's folder without a card (`edit-grant.ts`), by the tools that write the text they are given (`write_to_file`, `write_file`, `edit_file`, `replace_file_content`, `multi_replace_file_content`); `sed_file` and `notebook_edit` are cards of their own (`other`), since sed's `e` and `w` run a command and write another file |
+| `normal` | allows reads inside the session's folder, its readable folders and the paths given to read later, and the agent's own conversation tools (sub-agents, messages, its tasks and timers, a question to the person; their calls pass the gate one by one); a card for edits, commands, input sent to a running task, web searches and URL reads, browser actions and MCP calls to servers other than Centralu's |
 | `safe` | a card for everything but reads inside the session's folder and Centralu's own tools |
 
 The order is the ACP adapter's (`grantedWithoutCard`): `auto`, Centralu's own tool, the `edits` grant, a saved
@@ -411,13 +446,31 @@ plugin root (§3.2), by any tool that names a path there, and the person's own d
 tool descriptors (`~/.gemini/antigravity-cli/mcp/`) is allowed under every preset: the model reads one before each MCP
 call (measured under `safe`), and they are tool schemas `agy` writes itself. A path is checked through its links: a link
 in the folder that points out of it is outside it, and a path `agy` might expand (`~`, `$`, `%`, `://`) is a card under
-every preset. A call that began before a Stop is refused even when the next turn has begun by the time it is decided. A
-saved "always" rule names one file, so it never allows an edit over several.
+every preset. **Every path the call names must pass** for an allow: every argument named like a path (`Path`,
+`TargetFile`, `DirectoryPath`, `SearchDirectory`, `NotebookPath`, `OutputPath`, the lists `FilePaths`, `TargetFiles`,
+`ImagePaths`, …, and any argument whose name ends so, `Cwd` too) and any other argument whose value reads as a path
+(absolute, `~`, a drive, a share, `file:`), but never the text of an edit or a command (#1672 deep review finding 4). A
+call that began before a Stop is refused even when the next turn has begun by the time it is decided.
 
-`tool-kinds.ts` classifies by tool name (`view_file`, `read_file`, `list_dir`, `grep_search`, `find_by_name` read;
-`write_to_file`, `replace_file_content`, `multi_replace_file_content`, `sed_file`, `notebook_edit` edit; `run_command`,
-`send_command_input`, `notebook_execution` execute; `call_mcp_tool` by `ServerName`; `invoke_subagent` and the
-messaging tools subagent; `browser_*`, `read_url_content`, `search_web` outside). **An unknown name is a card**, never
+"Always" rules hold for what they were granted for only (#1672 deep review findings 2, 3). A file's rule is its path,
+and only the tools that write the text they are given answer to it: `sed_file` and `notebook_edit` get an `other` card,
+which offers no "always", so a rule from a `write_file` card never lets a sed script run. A rule names one file, so it
+never allows an edit over several. A command's rule is the command; it allows the call only when the call names no
+`Cwd` or one that is the session's folder through its links (`run_command` in 1.4.8 takes none, but older tools did).
+Input sent to a running task (`manage_task` `send_input`, `send_command_input`) is a `stdin` card, which has no
+"always".
+
+`tool-kinds.ts` classifies by tool name. The model of `agy` 1.4.8 has twelve tools (asked of it, 2026-10-27):
+`read_file`, `write_file`, `edit_file` (`Path`, `Target`, `Replacement`; its card is the diff), `run_command`
+(`CommandLine`, no `Cwd`), `manage_task` (`list`, `status`, `kill`, `send_input`), `send_message`, `schedule`,
+`invoke_subagent`, `define_subagent`, `manage_subagents`, `search_web` and `ask_question`, and `call_mcp_tool` with MCP
+servers. The kinds: `view_file`, `read_file`, `list_dir`, `grep_search`, `find_by_name` read; `write_to_file`,
+`write_file`, `edit_file`, `replace_file_content`, `multi_replace_file_content`, `sed_file`, `notebook_edit` edit;
+`run_command`, `send_command_input`, `notebook_execution` and `manage_task` sending input execute; `call_mcp_tool` by
+`ServerName`; the conversation tools (`invoke_subagent`, `send_message`, `define_subagent`, `manage_subagents`,
+`manage_task`, `schedule`, `ask_question`) subagent; `search_web`, `read_url_content` web (allowed under `auto`, a card
+otherwise); `browser_*` other. Before #1672's deep review `edit_file` was missing, so every edit of 1.4.8 was a raw
+card, under `auto` and `edits` too. **An unknown name is a card**, never
 an allow, under `auto` too: the list in `init.tools` is not complete (measured), and a new tool must not slip through.
 Calls to Centralu's own server (`centralu_centralu`, as `agy` names the plugin's `centralu` server) are allowed by the
 gate; the host's own approvals apply inside the bridge, as now. An attached app's server is not Centralu's own and gets
@@ -449,19 +502,41 @@ parsed, or one without the list gives no rules, and the preset alone decides. An
 ignored, as `agy` ignores it. The refusal names the rule: "A deny rule in the person's agy settings blocks this call:
 command(git push)", which the model reads and can tell the person.
 
-`agy` applies these rules itself under the skip flag (§1.2), so the gate's check is mostly early: a call `agy` would
-refuse after the person allowed it gets no card. Where a rule's meaning is not certain it is read broadly, since a
-broader deny only asks less: a command rule matches each part of a compound command (split at `;`, `&`, `|`,
-newlines, `$(`, backticks and parentheses, without reading quotes) by whole words, after shell keywords and common
-wrappers (`sudo`, `time`, `env`, `xargs`, `then`, …), its program also through a path (`/bin/rm`); this is best
-effort (`bash -c '…'` still hides a command), and `command(*)` denies every execute call; a path rule matches what is under it, as written or through links (where `agy` did not); a domain rule
-matches its subdomains. Not read: the `project` and `shared` scopes `/permissions` lists (`~/.gemini/config/projects/`
-and the Antigravity app's); `agy` still applies those itself.
+`agy` applies these rules itself under the skip flag, but not all of them (§1.2): a quoted program, a shell's `-c`
+script and a path rule written through a link pass its check. **For those the gate's check is the only one.** Where
+`agy` does refuse, the gate's check is early: a call `agy` would refuse after the person allowed it gets no card.
+
+Where a rule's meaning is not certain it is read broadly, since a broader deny only asks less:
+
+- A command rule is matched by whole words on what the shell runs (`command-line.ts`): quotes and backslashes taken
+  out (`"echo" deny-me` is `echo deny-me`); every simple command of a compound one; a command substitution, a
+  subshell, a process substitution and a here-string as commands of their own; a shell's `-c` script and `eval`'s
+  words read again; past shell keywords, assignments and redirections; after a wrapper (`sudo`, `env`, `xargs`,
+  `nohup`, `timeout`, `find … -exec`, …) from every later word; the program also through a path (`/bin/rm`,
+  `$HOME/bin/rm`). `command(*)` denies every execute call. A word the shell would change (a variable, a substitution,
+  a glob, a brace list) where the rule needs a word, or a line the gate cannot read with confidence (an unclosed quote
+  or substitution, a `-c` script or `eval` that is itself a variable, nesting past eight), "might" match: the call
+  then gets a card, under `auto` too, never an allow. Still not read: aliases and functions, and a script a shell reads
+  from a file.
+- A path rule matches what is under it, on every path argument of the call (§5.2), as written or through links on
+  either side (where `agy` matched only the rule as written), `~/…` as the home folder, and without case on macOS and
+  Windows (a rule on a file not made yet, `New.txt`, also catches `NEW.TXT`). A relative rule is ignored.
+- A domain rule matches its subdomains.
+
+Live, with the rules in the gate only and the person's settings untouched (`recordings/agy-1.4.8/deny-quoted`,
+`deny-path`): `"echo" deny-me` and `bash -c 'echo deny-me'` were refused under `command(echo deny-me)` and
+`echo allowed-two` ran; a `read_file` rule written through the temporary folder's link refused the read, and a read in
+the session's folder was allowed. `edit_file` under `edits` changed a file in the folder without a card
+(`recordings/agy-1.4.8/edit-file`).
+
+Not read: the `project` and `shared` scopes `/permissions` lists (`~/.gemini/config/projects/` and the Antigravity
+app's); `agy` still applies those itself.
 
 ### 5.6 Stop
 
 `stopTurn(gate, interrupt)` answers every open gate request `deny` ("The turn was stopped."), then sends the interrupt,
-and the gate refuses every further call until `resume()` (the next turn). Measured with a card open
+and the gate refuses every further call until `beginTurn()` (the next turn, which checks the plugin root first, §3.2).
+Measured with a card open
 (`recordings/agy-1.4.8/stop-card`): the process ended 0.5–0.6 s after the Stop, exit 1. The other order hangs until the
 hook's own timeout (§1.5).
 

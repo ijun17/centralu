@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { pathsOf } from '../../os.js'
 
 /**
@@ -17,6 +18,9 @@ import { pathsOf } from '../../os.js'
  *
  * The folder is left read-only (its files 0444, its folders 0555), and the gate refuses any write into it (`gate.ts`):
  * `agy` makes an `--add-dir` folder a workspace, so the agent can see it, and a hook it could rewrite would be no gate.
+ * Neither stops the owner's own processes (`chmod u+w` works in a 0555 folder), so `PluginRootKeeper` checks the root
+ * against what was written (every entry's kind, mode and content hash) at each turn start and each preset change, and
+ * writes it again when it differs; the session then starts `agy` again before the turn runs (§3.2).
  *
  * It touches no file itself (docs/plans/os-layer.md): the caller hands it `PluginFiles`, which the OS layer's `files`
  * (#1650) and Node's `fs/promises` both are, and the gate's two files (`agyGatePaths()` in `bridge-path.ts`).
@@ -33,6 +37,9 @@ export type PluginFiles = {
   chmod(path: string, mode: number): Promise<void>
   readdir(path: string, options: { withFileTypes: true }): Promise<readonly { name: string; isDirectory(): boolean; isFile(): boolean }[]>
   rm(path: string, options?: { recursive?: boolean; force?: boolean }): Promise<void>
+  /** Not following a link: a link put in the root is a change */
+  lstat(path: string): Promise<{ mode: number; isFile(): boolean; isDirectory(): boolean; isSymbolicLink(): boolean }>
+  readFile(path: string): Promise<Uint8Array | string>
 }
 
 export const PLUGIN_NAME = 'centralu'
@@ -132,8 +139,12 @@ export async function removePluginRoot(files: PluginFiles, dataDir: string, sess
   await files.rm(root, { recursive: true, force: true })
 }
 
-/** Every file and folder under `dir`, `dir` included: folders last on the way down when locking, first when opening */
+/**
+ * Every file and folder under `dir`, `dir` included: folders last on the way down when locking, first when opening. A
+ * link is never followed (a root made a link to another folder must not change that folder's modes): `rm` removes it
+ */
 async function setModes(files: PluginFiles, dir: string, fileMode: number, dirMode: number): Promise<void> {
+  if (!(await files.lstat(dir)).isDirectory()) return
   const opening = (dirMode & 0o200) !== 0
   if (opening) await files.chmod(dir, dirMode)
   for (const e of await files.readdir(dir, { withFileTypes: true })) {
@@ -142,4 +153,61 @@ async function setModes(files: PluginFiles, dir: string, fileMode: number, dirMo
     else if (e.isFile()) await files.chmod(p, fileMode)
   }
   if (!opening) await files.chmod(dir, dirMode)
+}
+
+/** What is under a plugin root: each entry by its path inside the root, with its kind, mode and, for a file, its hash */
+export type PluginSnapshot = ReadonlyMap<string, string>
+
+/** Every entry under `root` (the root included, as ''), read without following links; throws when the root is not there */
+export async function snapshotPluginRoot(files: PluginFiles, root: string): Promise<PluginSnapshot> {
+  const out = new Map<string, string>()
+  const walk = async (rel: string): Promise<void> => {
+    const p = rel ? join(root, rel) : root
+    const st = await files.lstat(p)
+    const mode = (st.mode & 0o7777).toString(8)
+    if (st.isSymbolicLink()) out.set(rel, `link ${mode}`)
+    else if (st.isFile()) out.set(rel, `file ${mode} ${createHash('sha256').update(await files.readFile(p)).digest('hex')}`)
+    else if (st.isDirectory()) {
+      out.set(rel, `dir ${mode}`)
+      const names = (await files.readdir(p, { withFileTypes: true })).map((e) => e.name).sort()
+      for (const name of names) await walk(rel ? join(rel, name) : name)
+    } else out.set(rel, `other ${mode}`)
+  }
+  await walk('')
+  return out
+}
+
+const sameSnapshot = (a: PluginSnapshot, b: PluginSnapshot): boolean => a.size === b.size && [...a].every(([k, v]) => b.get(k) === v)
+
+/**
+ * Keeps one session's plugin root as it was written (§3.2): `write` writes it and notes what it holds; `restore` checks
+ * it and, when anything differs (a file changed, added, removed or made a link, a mode changed), writes it again and
+ * says so, so the session starts `agy` again before the turn runs. The gate calls `restore` at each turn start and each
+ * preset change (`AgyGate.beginTurn`, `setPermissionPreset`)
+ */
+export class PluginRootKeeper {
+  private written: PluginSnapshot | null = null
+
+  constructor(private readonly opts: PluginRootOpts) {}
+
+  /** Writes the root afresh and returns its path, for `--add-dir` */
+  async write(): Promise<string> {
+    const root = await writePluginRoot(this.opts)
+    this.written = await snapshotPluginRoot(this.opts.files, root)
+    return root
+  }
+
+  /** Whether the root on disk is what `write` left; false when it was never written or cannot be read */
+  async intact(): Promise<boolean> {
+    if (!this.written) return false
+    const now = await snapshotPluginRoot(this.opts.files, pluginRootFor(this.opts.dataDir, this.opts.sessionId)).catch(() => null)
+    return now !== null && sameSnapshot(now, this.written)
+  }
+
+  /** True when the root had changed and was written again: `agy` must be started again before it runs another call */
+  async restore(): Promise<boolean> {
+    if (await this.intact()) return false
+    await this.write()
+    return true
+  }
 }

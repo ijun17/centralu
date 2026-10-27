@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { commandInterpreter, openCodeMatchesAnyCase, systemSettingsFolder, systemTool } from './os.js'
+import { commandInterpreter, ignoresPathCase, openCodeMatchesAnyCase, systemSettingsFolder, systemTool } from './os.js'
 
 /**
  * Windows looks a relative program path up in the working directory first, and the host works in a project's folder:
@@ -39,5 +39,11 @@ describe('openCodeMatchesAnyCase', () => {
     expect(openCodeMatchesAnyCase('win32')).toBe(true)
     expect(openCodeMatchesAnyCase('darwin')).toBe(false)
     expect(openCodeMatchesAnyCase('linux')).toBe(false)
+  })
+})
+
+describe('ignoresPathCase', () => {
+  it('is true where the disk ignores case by default, macOS and Windows, and false on Linux', () => {
+    expect((['darwin', 'win32', 'linux'] as const).map((p) => ignoresPathCase(p))).toEqual([true, true, false])
   })
 })

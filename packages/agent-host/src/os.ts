@@ -53,6 +53,14 @@ export function commandInterpreter(env: Record<string, string | undefined> = pro
   return driveAbsolute(env.ComSpec) ? env.ComSpec : systemTool(['cmd.exe'], env)
 }
 
+/**
+ * Whether the disk ignores case in names by default (APFS on macOS, NTFS on Windows): a check that refuses by path
+ * compares without case there, since `A.txt` and `a.txt` are one file
+ */
+export function ignoresPathCase(platform: Platform = HOST_PLATFORM): boolean {
+  return platform === 'darwin' || platform === 'win32'
+}
+
 /** `cp -c` clones a folder with APFS's clonefile: macOS only. */
 export function clonesFiles(platform: Platform = HOST_PLATFORM): boolean {
   return platform === 'darwin'

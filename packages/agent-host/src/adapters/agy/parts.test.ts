@@ -13,6 +13,10 @@ describe('tool kinds', () => {
   })
 
   it('a name it does not know is `other`, which the gate answers with a card, never an allow', () => {
+    // agy 1.4.8's own twelve tools (asked of the model): none is `other` (#1672 deep review finding 6)
+    expect(['read_file', 'write_file', 'edit_file', 'run_command', 'manage_task', 'send_message', 'schedule', 'invoke_subagent', 'define_subagent', 'manage_subagents', 'search_web', 'ask_question'].map((n) => toolKind(n))).toEqual(['read', 'edit', 'edit', 'execute', 'subagent', 'subagent', 'subagent', 'subagent', 'subagent', 'subagent', 'web', 'subagent'])
+    expect(toolKind('manage_task', { Action: 'send_input', TaskId: 't', Input: 'y' })).toBe('execute')
+    expect(toolKind('manage_task', { Action: 'kill', TaskId: 't' })).toBe('subagent')
     expect(toolKind('some_new_tool')).toBe('other')
     expect(toolKind('browser_click_element')).toBe('other')
     expect(toolKind('')).toBe('other')
@@ -23,6 +27,10 @@ describe('tool kinds', () => {
     expect(pathsOf({ Path: '/a', FilePath: '/a' })).toEqual(['/a'])
     expect(pathsOf({ Path: '  ', CommandLine: 'ls /x' })).toEqual([])
     expect(pathsOf(undefined)).toEqual([])
+    // Every argument named like a path, lists too, and a path under a name nobody listed; never the text of an edit
+    expect(pathsOf({ DirectoryPath: '/d', SearchDirectory: '/s', NotebookPath: '/n', FilePaths: ['/f1', '/f2'], TargetFiles: ['/t'], OutputPath: '/o', ImagePaths: ['/i'], Cwd: '/c' })).toEqual(['/d', '/s', '/n', '/f1', '/f2', '/t', '/o', '/i', '/c'])
+    expect(pathsOf({ Path: '/a', NewThing: '/b', Rel: 'not/abs', Multi: '/x\n/y' })).toEqual(['/a', '/b'])
+    expect(pathsOf({ Path: '/a', Content: '/ comment', Target: '/old', Replacement: '/new', CommandLine: '/bin/ls', Query: '/api/' })).toEqual(['/a'])
   })
 
   it('names a card as the other adapters do, and a call by what it does', () => {

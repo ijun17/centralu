@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { pathsOf } from '../../os.js'
-import { agySettingsPath, deniedBy, parseRule, readDenyRules, type DenyRule } from './deny-rules.js'
+import { ignoresPathCase, pathsOf } from '../../os.js'
+import { agySettingsPath, deniedBy, mightDeny, parseRule, readDenyRules, type DenyRule } from './deny-rules.js'
 
 /**
  * The person's own `agy` deny rules (owner decision on #59, Q1). Their syntax and the file they live in were measured on
@@ -103,5 +103,61 @@ describe('MCP and URL rules', () => {
     expect(deniedBy(rules('read_url(example.com)'), { readUrls: ['https://notexample.com/'] })).toBeNull()
     expect(deniedBy(rules('read_url(example.com)'), { executeUrls: ['https://example.com/'] })).toBeNull()
     expect(deniedBy(rules('execute_url(example.com)'), { executeUrls: ['https://example.com/'] })).not.toBeNull()
+  })
+})
+
+describe('a command rule against what the shell runs (#1672 deep review finding 5)', () => {
+  const deny = rules('command(echo deny-me)')
+  const sure = (command: string) => deniedBy(deny, { command })
+  const maybe = (command: string) => mightDeny(deny, { command })
+
+  it('matches the words with their quotes and backslashes taken out (live: agy itself ran `"echo" deny-me`)', () => {
+    for (const command of ['"echo" deny-me', "e'cho' deny-me", '\\echo deny-me', 'echo "deny-me"', "echo 'deny'-me", 'ec""ho deny-me']) {
+      expect(sure(command), command).not.toBeNull()
+    }
+  })
+
+  it("reads a shell's -c script, eval, a here-string and substitutions as commands (live: agy ran `bash -c \"echo deny-me\"`)", () => {
+    for (const command of [`bash -c 'echo deny-me'`, 'sh -lc "true && echo deny-me"', `zsh -c 'bash -c "echo deny-me"'`, 'eval echo deny-me', 'bash <<< "echo deny-me"', 'x="$(echo deny-me)"', 'cat <(echo deny-me)', 'echo `echo deny-me`']) {
+      expect(sure(command), command).not.toBeNull()
+    }
+  })
+
+  it('looks past wrappers and their options, and past redirections', () => {
+    for (const command of ['env -i FOO=1 echo deny-me', 'sudo -u root echo deny-me', 'xargs -n 1 echo deny-me', 'timeout 5 echo deny-me', 'find . -exec echo deny-me {} ;', '2>/dev/null echo deny-me', 'nohup echo deny-me > out.log 2>&1 &']) {
+      expect(sure(command), command).not.toBeNull()
+    }
+  })
+
+  it('still does not match a longer word, another command, or text the shell does not run', () => {
+    for (const command of ['echo deny-me-also', 'printf deny-me', 'echo ok # ; echo deny-me', "echo 'echo deny-me'"]) {
+      expect(sure(command), command).toBeNull()
+      expect(maybe(command), command).toBeNull()
+    }
+  })
+
+  it('a word the shell would change, or a line it cannot read, might match: never sure, never passed', () => {
+    for (const command of ['$E deny-me', '$(printf echo) deny-me', 'echo $X', 'e*o deny-me', 'bash -c "$CMD"', 'eval "$X"', "printf 'unclosed", 'printf $(true', "$'\\x65cho' deny-me"]) {
+      expect(sure(command), command).toBeNull()
+      expect(maybe(command), command).not.toBeNull()
+    }
+    // A line cut short still matches for certain what it does read; a program known through its path is sure; a later
+    // word that rules the rule out is sure not to
+    expect(sure("echo 'deny-me")).not.toBeNull()
+    expect(sure('$HOME/bin/echo deny-me')).not.toBeNull()
+    expect(maybe('$E fine')).toBeNull()
+  })
+})
+
+describe('path rules spelled with ~ or another case (#1672 deep review finding 4)', () => {
+  it('a rule under ~ is the home folder', async () => {
+    expect(parseRule('read_file(~/.ssh)', '/h')).toMatchObject({ path: join('/h', '.ssh') })
+    expect(parseRule('read_file(~/.ssh)')).toBeNull()
+    const read = await readDenyRules(reader({ '/s.json': JSON.stringify({ permissions: { deny: ['read_file(~/.ssh)'] } }) }), '/s.json', '/h')
+    expect(deniedBy(read, { reads: [join('/h', '.ssh', 'id_rsa')] })).not.toBeNull()
+  })
+
+  it.runIf(ignoresPathCase())('matches another case where the disk ignores it', () => {
+    expect(deniedBy(rules('write_file(/p/New.txt)'), { writes: ['/p/NEW.TXT'] })).not.toBeNull()
   })
 })

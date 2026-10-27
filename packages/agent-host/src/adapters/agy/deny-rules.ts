@@ -1,5 +1,6 @@
 import { asObj } from '../../json-value.js'
-import { pathsOf } from '../../os.js'
+import { ignoresPathCase, pathsOf } from '../../os.js'
+import { knownProgram, programName, readCommandLine, type Word } from './command-line.js'
 
 /**
  * The person's own `agy` deny rules, which the gate honours on top of Centralu's preset (owner decision on #59, Q1;
@@ -13,21 +14,25 @@ import { pathsOf } from '../../os.js'
  * it cannot parse included. The rule kinds, from the binary's own documentation of its grants:
  *
  *   command(<prefix>)          a shell command starting with these words; `command(*)` every command
- *   read_file(<absolute path>) a read of that file or of anything under that folder
+ *   read_file(<absolute path>) a read of that file or of anything under that folder (`~/…` too)
  *   write_file(<absolute path>) a write there
  *   mcp(<server>/<tool>)       one MCP tool
  *   read_url(<domain>)         reading a URL on that domain; `execute_url(<domain>)` acting on a page there
  *
- * `agy` applies them itself even under `--dangerously-skip-permissions` (measured: `command(echo deny-me)` denied
- * `echo deny-me` and `echo ok; echo deny-me` and let `echo deny-me-also` run; `write_file(<folder>)` and
- * `read_file(<folder>)` denied a write and a read under the folder, but only when the rule named the path as the call
- * did: a rule under `/tmp` did not catch the same file reached as `/private/tmp`). Honouring them here as well keeps a
- * card from being raised for a call `agy` would refuse after the person allowed it, and covers what `agy`'s own check
- * may not (a rule through a link, the kinds not measured).
+ * `agy` applies them itself even under `--dangerously-skip-permissions`, but not everywhere (measured, §1.2):
+ * `command(echo deny-me)` denied `echo deny-me` and `echo ok; echo deny-me` and let `echo deny-me-also` run, yet ran
+ * `"echo" deny-me` and `bash -c "echo deny-me"`; a path rule matched only when written as the call's path resolved
+ * through links, so a rule written through a link (`/tmp`, a linked home folder) matched nothing. **For what `agy` does
+ * not catch, this check is the only one.** It also keeps a card from being raised for a call `agy` would refuse after
+ * the person allowed it.
  *
  * Where a rule's meaning is not certain, it is read broadly, since a broader deny only asks less of the person's
- * trust: a path rule also matches through links, a command rule matches every part of a compound command, a domain
- * rule matches its subdomains. An entry that is none of the kinds above is ignored, as `agy` ignores it.
+ * trust: a path rule matches through links on either side, `~` in it is the home folder, and on a disk that ignores
+ * case (macOS, Windows) it ignores case; a command rule is matched on the words the shell would run (`command-line.ts`:
+ * quotes out, every part of a compound command, a shell's `-c` script, past wrappers); a domain rule matches its
+ * subdomains. A command the gate cannot read with confidence, or a word the shell would change, "might" match: the gate
+ * then raises a card rather than allow (`mightDeny`). An entry that is none of the kinds above is ignored, as `agy`
+ * ignores it.
  *
  * Not read: the project scope (`~/.gemini/config/projects/`) and the scope shared with the Antigravity app, which
  * `/permissions` also lists. `agy` still applies those itself. A settings file that is missing or cannot be read or
@@ -71,7 +76,7 @@ export function agyMcpDescriptors(home: string): string {
  * The deny rules in the settings file at `path`, read with `read` (`(p) => os.files.readFile(p, 'utf8')`); none when it is
  * missing or cannot be read or parsed (the preset alone decides)
  */
-export async function readDenyRules(read: (path: string) => Promise<string>, path: string): Promise<DenyRule[]> {
+export async function readDenyRules(read: (path: string) => Promise<string>, path: string, home?: string): Promise<DenyRule[]> {
   let raw: unknown
   try {
     raw = JSON.parse(await read(path))
@@ -81,15 +86,15 @@ export async function readDenyRules(read: (path: string) => Promise<string>, pat
   const deny = asObj(asObj(raw).permissions).deny
   if (!Array.isArray(deny)) return []
   return deny.flatMap((entry) => {
-    const rule = typeof entry === 'string' ? parseRule(entry) : null
+    const rule = typeof entry === 'string' ? parseRule(entry, home) : null
     return rule ? [rule] : []
   })
 }
 
 const RULE = /^\s*([a-z_]+)\((.*)\)\s*$/s
 
-/** One `kind(target)` entry, or null for one that is none of the known kinds */
-export function parseRule(text: string): DenyRule | null {
+/** One `kind(target)` entry, or null for one that is none of the known kinds; `~` in a path rule is `home` */
+export function parseRule(text: string, home?: string): DenyRule | null {
   const m = RULE.exec(text)
   if (!m) return null
   const kind = m[1] ?? ''
@@ -99,8 +104,10 @@ export function parseRule(text: string): DenyRule | null {
     case 'command':
       return { kind, prefix: target === '*' ? '*' : words(target), text }
     case 'read_file':
-    case 'write_file':
-      return target === '*' || path.isAbsolute(target) ? { kind, path: target, text } : null
+    case 'write_file': {
+      const p = home && (target === '~' || target.startsWith('~/')) ? path.join(home, target.slice(1)) : target
+      return p === '*' || path.isAbsolute(p) ? { kind, path: p, text } : null
+    }
     case 'mcp': {
       if (target === '*') return { kind, server: '*', tool: '*', text }
       const slash = target.indexOf('/')
@@ -115,34 +122,56 @@ export function parseRule(text: string): DenyRule | null {
   }
 }
 
-/** The first rule that denies this call, or null */
+/** The first rule that denies this call for certain, or null */
 export function deniedBy(rules: readonly DenyRule[], target: RuleTarget, realPaths: ReadonlyMap<string, string> = new Map()): DenyRule | null {
-  for (const rule of rules) if (matches(rule, target, realPaths)) return rule
+  const line = target.command === undefined ? null : readCommandLine(target.command)
+  for (const rule of rules) if (verdict(rule, target, realPaths, line) === 'yes') return rule
   return null
 }
 
-function matches(rule: DenyRule, t: RuleTarget, realPaths: ReadonlyMap<string, string>): boolean {
+/**
+ * The first rule that might deny this call when none does for certain: a command rule against a command the gate could
+ * not read with confidence, or whose words the shell would change. The gate raises a card for it, never an allow
+ */
+export function mightDeny(rules: readonly DenyRule[], target: RuleTarget): DenyRule | null {
+  const line = target.command === undefined ? null : readCommandLine(target.command)
+  for (const rule of rules) if (verdict(rule, target, new Map(), line) === 'maybe') return rule
+  return null
+}
+
+type Verdict = 'yes' | 'maybe' | 'no'
+
+function verdict(rule: DenyRule, t: RuleTarget, realPaths: ReadonlyMap<string, string>, line: ReturnType<typeof readCommandLine> | null): Verdict {
   switch (rule.kind) {
     case 'command': {
-      if (t.command === undefined) return false
+      if (line === null) return 'no'
       // `command(*)` denies every execute call, one whose text is empty or unknown included
       const prefix = rule.prefix
-      return prefix === '*' || commandParts(t.command).some((part) => startsWithWords(part, prefix))
+      if (prefix === '*') return 'yes'
+      let best: Verdict = 'no'
+      for (const cmd of line.commands) {
+        const v = startsWithWords(cmd, prefix)
+        if (v === 'yes') return 'yes'
+        if (v === 'maybe') best = 'maybe'
+      }
+      // A line not read with confidence: any command rule might match what was not read
+      return best === 'no' && !line.confident ? 'maybe' : best
     }
     case 'read_file':
     case 'write_file': {
       const paths = rule.kind === 'read_file' ? t.reads : t.writes
-      if (!paths?.length) return false
-      if (rule.path === '*') return true
+      if (!paths?.length) return 'no'
+      if (rule.path === '*') return 'yes'
       const ruleReal = realPaths.get(rule.path)
-      return paths.some((p) => [p, realPaths.get(p)].some((q) => q !== undefined && [rule.path, ruleReal].some((r) => r !== undefined && under(q, r))))
+      const hit = paths.some((p) => [p, realPaths.get(p)].some((q) => q !== undefined && [rule.path, ruleReal].some((r) => r !== undefined && under(q, r))))
+      return hit ? 'yes' : 'no'
     }
     case 'mcp':
-      return t.mcp !== undefined && (rule.server === '*' || rule.server === t.mcp.server) && (rule.tool === '*' || rule.tool === t.mcp.tool)
+      return t.mcp !== undefined && (rule.server === '*' || rule.server === t.mcp.server) && (rule.tool === '*' || rule.tool === t.mcp.tool) ? 'yes' : 'no'
     case 'read_url':
     case 'execute_url': {
       const urls = rule.kind === 'read_url' ? t.readUrls : t.executeUrls
-      return !!urls?.some((u) => onDomain(u, rule.domain))
+      return urls?.some((u) => onDomain(u, rule.domain)) ? 'yes' : 'no'
     }
   }
 }
@@ -154,39 +183,28 @@ export function rulePaths(rules: readonly DenyRule[]): string[] {
 
 const words = (s: string): string[] => s.trim().split(/\s+/).filter(Boolean)
 
-/**
- * Words before the program that are not the program: shell keywords and the common wrappers. Best effort: `bash -c '…'`
- * and the like still hide a command from a rule here (`agy` applies its own rules as well, §1.2)
- */
-const LEADERS = new Set(['{', '}', '!', 'then', 'do', 'else', 'elif', 'if', 'while', 'until', 'time', 'sudo', 'nice', 'nohup', 'env', 'command', 'exec', 'xargs', 'builtin'])
-
-/**
- * The simple commands in a command line, best effort: split at `;`, `&`, `|`, newlines and the start of a `$(`, a backtick or a
- * parenthesis, without reading quotes. Not reading quotes splits more than a shell does, which can only find more parts
- * that start with a denied prefix. Leading `NAME=value` assignments are skipped.
- */
-function commandParts(line: string): string[][] {
-  return line
-    .split(/[;&|\n\r(`]|\$\(/)
-    .map((part) => {
-      const w = words(part.replace(/[)]/g, ' '))
-      while (w.length > 0 && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(w[0] ?? '') || LEADERS.has(w[0] ?? ''))) w.shift()
-      return w
-    })
-    .filter((w) => w.length > 0)
+/** Whether a command's words start with the rule's: 'maybe' where a word the shell would change stands in the way */
+function startsWithWords(part: readonly Word[], prefix: readonly string[]): Verdict {
+  if (prefix.length === 0 || part.length < prefix.length) return 'no'
+  let sure = true
+  for (const [i, want] of prefix.entries()) {
+    const w = part[i]
+    if (!w) return 'no'
+    // The first word is the program: `/bin/rm` is `rm`, and `$HOME/bin/rm` too, its last part being plain
+    const got = i === 0 ? programName(w) : w.text
+    const plain = i === 0 ? knownProgram(w) : !w.dynamic
+    if (!plain) sure = false
+    else if (got !== want && !(i === 0 && w.text === want)) return 'no'
+  }
+  return sure ? 'yes' : 'maybe'
 }
 
-function startsWithWords(part: string[], prefix: string[]): boolean {
-  if (prefix.length === 0 || part.length < prefix.length) return false
-  return prefix.every((word, i) => {
-    const got = part[i] ?? ''
-    // The first word is the program: `/bin/rm` is `rm`
-    return i === 0 ? got === word || got.endsWith(`/${word}`) : got === word
-  })
-}
+/** A disk that ignores case (macOS, Windows by default): a path rule ignores it too, which only denies more */
+const FOLD_CASE = ignoresPathCase()
 
 function under(p: string, root: string): boolean {
-  const rel = path.relative(path.resolve(root), path.resolve(p))
+  const fold = (x: string) => (FOLD_CASE ? x.toLowerCase() : x)
+  const rel = path.relative(fold(path.resolve(root)), fold(path.resolve(p)))
   return rel === '' || (!path.isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${path.sep}`))
 }
 
