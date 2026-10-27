@@ -3,7 +3,7 @@ import type { ToolSetup, ToolSetupState } from '@cc/protocol'
 import { InstallFailure } from './failure.js'
 import { AGY_RELEASE } from './release.js'
 import { AgySetup } from './setup.js'
-import { fakeInstall, fakeSignIn, TEST_ARCHIVE, tempData } from './agent-files.test-helpers.js'
+import { fakeInstall, fakeSignIn, folder, inRoot, leftovers, TEST_ARCHIVE, tempData, write } from './agent-files.test-helpers.js'
 import type { SignInResult } from './sign-in.js'
 
 /**
@@ -175,5 +175,19 @@ describe('the setup line against its model', () => {
     const setup = new AgySetup({ home: t.home, archive: null, version: AGY_RELEASE.version, runInstall: async () => void started++ })
     expect(setup.install()).toMatchObject({ state: 'not_installed', failure: { reason: 'unsupported_platform' } })
     expect(started).toBe(0)
+  })
+})
+
+describe('what an earlier host left', () => {
+  it('removes a partial install and a sign-in folder as the host starts, before any install of its own', async () => {
+    const t = tempData()
+    data.push(t)
+    folder(inRoot(t.home, '.install-left'))
+    write(inRoot(t.home, '.install-left/archive.zip'), 'partial')
+    folder(inRoot(t.home, '.sign-in-left'))
+    const setup = new AgySetup({ home: t.home, archive: TEST_ARCHIVE, version: AGY_RELEASE.version })
+    await setup.whenTidy()
+    expect(leftovers(t.home, '.install-')).toEqual([])
+    expect(leftovers(t.home, '.sign-in-')).toEqual([])
   })
 })

@@ -1,9 +1,11 @@
 import { createHash } from 'node:crypto'
+import { createServer, type IncomingHttpHeaders } from 'node:http'
+import { gzipSync } from 'node:zlib'
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { makeZip, type ZipSpec } from '../../apps/external/zip.test-helpers.js'
-import { agyPlatformKey, installAgy, isInstalled, type InstallIo } from './agent-files.js'
+import { agyPlatformKey, decodedLength, installAgy, isInstalled, realInstallIo, type InstallIo } from './agent-files.js'
 import { InstallFailure } from './failure.js'
 import { AGY_INSTALL_SPACE_BYTES, AGY_RELEASE, type AgyArchive } from './release.js'
 import { tempData } from './agent-files.test-helpers.js'
@@ -156,5 +158,95 @@ describe('installing the pinned agent', () => {
     expect(existsSync(old)).toBe(false)
     expect(existsSync(join(t.home.geminiHome, 'antigravity-acp'))).toBe(true)
     expect(readdirSync(t.home.root).filter((n) => n.startsWith('.install-'))).toEqual([])
+  })
+})
+
+/**
+ * A local server that answers the way Google's download server did (deep review of #1680, measured): gzip whenever the
+ * request allows it, with `content-length` the gzipped size. `always` gzips even a request that asked for `identity`
+ */
+async function gzipServer(body: Buffer, always = false): Promise<{ url: string; asked: IncomingHttpHeaders[]; close(): Promise<void> }> {
+  const asked: IncomingHttpHeaders[] = []
+  const server = createServer((req, res) => {
+    asked.push(req.headers)
+    const accepts = String(req.headers['accept-encoding'] ?? '')
+    if (always || /gzip/.test(accepts)) {
+      const gz = gzipSync(body)
+      res.writeHead(200, { 'content-encoding': 'gzip', 'content-length': gz.length, 'content-type': 'application/zip' })
+      res.end(gz)
+    } else {
+      res.writeHead(200, { 'content-length': body.length, 'content-type': 'application/zip' })
+      res.end(body)
+    }
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  const port = typeof address === 'object' && address ? address.port : 0
+  return { url: `http://127.0.0.1:${port}/agy.zip`, asked, close: () => new Promise<void>((resolve) => server.close(() => resolve())) }
+}
+
+describe('the real download, against a server that gzips', () => {
+  const zip = makeZip(FILES)
+
+  it('asks for the archive as stored, and installs it', async () => {
+    const server = await gzipServer(zip)
+    const t = tempData()
+    data.push(t)
+    try {
+      const archive = { ...archiveOf(zip), url: server.url }
+      const io: InstallIo = { download: realInstallIo.download, freeBytes: async () => null }
+      await installAgy(t.home, archive, AGY_RELEASE.version, { io, signal: new AbortController().signal, platform: 'darwin' })
+      expect(isInstalled(t.home, archive)).toBe(true)
+      expect(server.asked[0]?.['accept-encoding']).toBe('identity')
+    } finally {
+      await server.close()
+    }
+  })
+
+  it('installs even when the server gzips anyway: the sha256 decides, not the length on the wire', async () => {
+    const server = await gzipServer(zip, true)
+    const t = tempData()
+    data.push(t)
+    try {
+      const archive = { ...archiveOf(zip), url: server.url }
+      const io: InstallIo = { download: realInstallIo.download, freeBytes: async () => null }
+      await installAgy(t.home, archive, AGY_RELEASE.version, { io, signal: new AbortController().signal, platform: 'darwin' })
+      expect(isInstalled(t.home, archive)).toBe(true)
+    } finally {
+      await server.close()
+    }
+  })
+
+  it('reads content-length as the decoded size only without a content-encoding', () => {
+    expect(decodedLength(new Headers({ 'content-length': '10' }))).toBe(10)
+    expect(decodedLength(new Headers({ 'content-length': '10', 'content-encoding': 'identity' }))).toBe(10)
+    expect(decodedLength(new Headers({ 'content-length': '10', 'content-encoding': 'gzip' }))).toBeNull()
+    expect(decodedLength(new Headers({}))).toBeNull()
+  })
+})
+
+describe('the unpack', () => {
+  it('streams a large entry to disk instead of holding it whole in memory', async () => {
+    // 160 MB of zeros: a few hundred KB zipped. Unpacked into one buffer, external memory would grow by the whole entry
+    const big = Buffer.alloc(160 * 1024 * 1024)
+    const zip = makeZip([
+      { name: 'agy_acp_server.par', data: big, mode: 0o100755 },
+      { name: 'localharness_external', data: 'harness', mode: 0o100755 },
+    ])
+    const archive = archiveOf(zip)
+    const before = process.memoryUsage().arrayBuffers
+    let peak = before
+    const sample = setInterval(() => {
+      peak = Math.max(peak, process.memoryUsage().arrayBuffers)
+    }, 2)
+    try {
+      const r = await install(zip, archive, { calls: 0 })
+      expect(r.failure).toBeNull()
+    } finally {
+      clearInterval(sample)
+    }
+    // Measured: about 320 MB held when the archive and the entry were read whole, about 64 MB streamed (garbage the GC
+    // has not yet taken); the bound sits between them
+    expect(peak - before).toBeLessThan(big.length * 0.7)
   })
 })

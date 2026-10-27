@@ -45,42 +45,56 @@ const EOCD_SEARCH = 22 + 0xffff
 
 /** Reads the central directory — if the entry count exceeds `maxEntries`, rejects before reading further */
 export function readZipEntries(buf: Buffer, maxEntries: number): ZipEntry[] {
-  let end = -1
-  for (let i = buf.length - 22; i >= Math.max(0, buf.length - EOCD_SEARCH); i--) {
-    if (buf.readUInt32LE(i) === EOCD) {
-      end = i
+  return readZipEntriesFrom(buf.length, (pos, len) => buf.subarray(pos, pos + len), maxEntries)
+}
+
+/**
+ * `readZipEntries` for an archive too large to hold in memory (Antigravity's, ~110 MB): only the end of the file and its
+ * central directory are read, through `read(position, length)`, with the same checks
+ */
+export function readZipEntriesFrom(size: number, read: (pos: number, len: number) => Buffer, maxEntries: number): ZipEntry[] {
+  const tailStart = Math.max(0, size - EOCD_SEARCH)
+  const tail = read(tailStart, size - tailStart)
+  let at = -1
+  for (let i = tail.length - 22; i >= 0; i--) {
+    if (tail.readUInt32LE(i) === EOCD) {
+      at = i
       break
     }
   }
-  if (end < 0) throw new ZipError('This is not a zip file (no end of central directory)')
-  const disk = buf.readUInt16LE(end + 4)
-  const cdDisk = buf.readUInt16LE(end + 6)
-  const total = buf.readUInt16LE(end + 10)
-  const cdSize = buf.readUInt32LE(end + 12)
-  const cdOffset = buf.readUInt32LE(end + 16)
+  if (at < 0) throw new ZipError('This is not a zip file (no end of central directory)')
+  const end = tailStart + at
+  const disk = tail.readUInt16LE(at + 4)
+  const cdDisk = tail.readUInt16LE(at + 6)
+  const total = tail.readUInt16LE(at + 10)
+  const cdSize = tail.readUInt32LE(at + 12)
+  const cdOffset = tail.readUInt32LE(at + 16)
   if (disk !== 0 || cdDisk !== 0) throw new ZipError('Split zip archives are not supported')
   if (total === 0xffff || cdSize === 0xffffffff || cdOffset === 0xffffffff) throw new ZipError('ZIP64 archives are not supported')
   if (total > maxEntries) throw new ZipError(`The archive has ${total} entries; at most ${maxEntries} are accepted`)
   if (cdOffset + cdSize > end) throw new ZipError('The zip file is damaged (central directory out of range)')
 
+  // The directory up to the end record, read on its own; `p` counts from the directory's start
+  const cd = read(cdOffset, end - cdOffset)
+  const limit = cd.length
   const out: ZipEntry[] = []
-  let p = cdOffset
+  let p = 0
   for (let n = 0; n < total; n++) {
-    if (p + 46 > end || buf.readUInt32LE(p) !== CEN) throw new ZipError('The zip file is damaged (bad central directory entry)')
-    const madeBy = buf.readUInt16LE(p + 4)
-    const flags = buf.readUInt16LE(p + 8)
-    const method = buf.readUInt16LE(p + 10)
-    const crc = buf.readUInt32LE(p + 16)
-    const compressedSize = buf.readUInt32LE(p + 20)
-    const size = buf.readUInt32LE(p + 24)
-    const nameLen = buf.readUInt16LE(p + 28)
-    const extraLen = buf.readUInt16LE(p + 30)
-    const commentLen = buf.readUInt16LE(p + 32)
-    const external = buf.readUInt32LE(p + 38)
-    const offset = buf.readUInt32LE(p + 42)
+    if (p + 46 > limit || cd.readUInt32LE(p) !== CEN) throw new ZipError('The zip file is damaged (bad central directory entry)')
+    const madeBy = cd.readUInt16LE(p + 4)
+    const flags = cd.readUInt16LE(p + 8)
+    const method = cd.readUInt16LE(p + 10)
+    const crc = cd.readUInt32LE(p + 16)
+    const compressedSize = cd.readUInt32LE(p + 20)
+    const size = cd.readUInt32LE(p + 24)
+    const nameLen = cd.readUInt16LE(p + 28)
+    const extraLen = cd.readUInt16LE(p + 30)
+    const commentLen = cd.readUInt16LE(p + 32)
+    const external = cd.readUInt32LE(p + 38)
+    const offset = cd.readUInt32LE(p + 42)
     const nameEnd = p + 46 + nameLen
-    if (nameEnd > end) throw new ZipError('The zip file is damaged (entry name out of range)')
-    const name = buf.toString('utf8', p + 46, nameEnd)
+    if (nameEnd > limit) throw new ZipError('The zip file is damaged (entry name out of range)')
+    const name = cd.toString('utf8', p + 46, nameEnd)
     // A name that does not decode as UTF-8 (an old code page) is never guessed at — writing a file under a guessed name would differ from the list the person saw
     if (name.includes('�')) throw new ZipError('An entry name is not UTF-8; re-create the archive with UTF-8 names')
     if (flags & 0x1) throw new ZipError(`Encrypted entries are not supported: ${name}`)
@@ -136,10 +150,17 @@ export function readZipEntry(buf: Buffer, e: ZipEntry): Buffer {
 
 /** An entry's bytes as stored (compressed by its `method`), found through its local header */
 export function zipEntryBytes(buf: Buffer, e: ZipEntry): Buffer {
-  if (e.offset + 30 > buf.length || buf.readUInt32LE(e.offset) !== LOC) throw new ZipError(`The zip file is damaged (bad local header): ${e.name}`)
-  const start = e.offset + 30 + buf.readUInt16LE(e.offset + 26) + buf.readUInt16LE(e.offset + 28)
-  if (start + e.compressedSize > buf.length) throw new ZipError(`The zip file is damaged (data out of range): ${e.name}`)
+  const start = zipEntryStart(buf.length, (pos, len) => buf.subarray(pos, pos + len), e)
   return buf.subarray(start, start + e.compressedSize)
+}
+
+/** Where an entry's stored bytes begin, read through its local header (`readZipEntriesFrom`'s `read`), checked to lie inside the file */
+export function zipEntryStart(size: number, read: (pos: number, len: number) => Buffer, e: ZipEntry): number {
+  const head = e.offset + 30 <= size ? read(e.offset, 30) : null
+  if (!head || head.length < 30 || head.readUInt32LE(0) !== LOC) throw new ZipError(`The zip file is damaged (bad local header): ${e.name}`)
+  const start = e.offset + 30 + head.readUInt16LE(26) + head.readUInt16LE(28)
+  if (start + e.compressedSize > size) throw new ZipError(`The zip file is damaged (data out of range): ${e.name}`)
+  return start
 }
 
 const CRC_TABLE = (() => {

@@ -107,19 +107,34 @@ export async function runSignIn(home: AgyHome, archive: AgyArchive, signal: Abor
   }
 }
 
-/** Why a sign-in ended without one, as a word for the screen */
+/**
+ * Why a sign-in ended without one, as a word for the screen. The agent answers both a sign-in that timed out and an account
+ * Google will not serve with `-32000` and `data.reason: "onboarding_failed"` (both measured on 1.4.3: "Onboarding failed:
+ * Timed out waiting for the authentication flow to complete." and "Onboarding failed: User is ineligible for free-tier. …
+ * Verification URL: <address>"), so the words tell them apart, the timeout first. The verification page is carried apart
+ * (`verifyUri`); no address or email in the agent's words reaches the message
+ */
 export function signInFailure(err: unknown, signal: AbortSignal): InstallFailure {
   if (err instanceof InstallFailure) return err
   if (signal.aborted) return new InstallFailure('cancelled', 'The sign-in was cancelled')
   const timedOut = new InstallFailure('timed_out', 'Sign-in timed out: the browser did not finish within 5 minutes')
   if (err instanceof RpcError) {
-    if (err.code === AUTH_REQUIRED && asObj(err.data).reason === 'onboarding_failed') {
-      return new InstallFailure('ineligible', 'Google did not set up Antigravity for this account')
-    }
     if (/timed out/i.test(err.message)) return timedOut
-    return new InstallFailure('failed', `Antigravity's sign-in failed: ${err.message}`)
+    if (err.code === AUTH_REQUIRED && asObj(err.data).reason === 'onboarding_failed') {
+      const verify = VERIFY_URL.exec(err.message)?.[1]
+      const url = verify ? signInUrl(verify) : null
+      return new InstallFailure('ineligible', 'Google did not set up Antigravity for this account', url ?? undefined)
+    }
+    return new InstallFailure('failed', `Antigravity's sign-in failed: ${scrubbed(err.message)}`)
   }
   const message = err instanceof Error ? err.message : String(err)
   if (/^No response for authenticate/.test(message)) return timedOut
-  return new InstallFailure('failed', `Antigravity's sign-in failed: ${message}`)
+  return new InstallFailure('failed', `Antigravity's sign-in failed: ${scrubbed(message)}`)
+}
+
+const VERIFY_URL = /Verification URL:\s*(\S+)/i
+
+/** The agent's words without the addresses and emails they may carry (its answers name the account's verification page) */
+function scrubbed(text: string): string {
+  return text.replace(/https?:\/\/\S+/gi, '(address)').replace(/[\w.+-]+@[\w-]+\.[\w.-]+/g, '(email)')
 }

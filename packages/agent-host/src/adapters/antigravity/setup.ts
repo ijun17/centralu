@@ -1,6 +1,6 @@
 import type { ToolSetup } from '@cc/protocol'
 import type { ToolSetupControl } from '../contract.js'
-import { hasSignIn, installAgy, isInstalled, type AgyHome, type InstallIo } from './agent-files.js'
+import { hasSignIn, installAgy, isInstalled, removeLeftovers, type AgyHome, type InstallIo } from './agent-files.js'
 import { InstallFailure } from './failure.js'
 import type { AgyArchive } from './release.js'
 import { runSignIn, type SignInDeps, type SignInResult } from './sign-in.js'
@@ -45,7 +45,17 @@ export class AgySetup implements ToolSetupControl {
   private signedOutSeen = false
   private readonly listeners = new Set<(setup: ToolSetup) => void>()
 
-  constructor(private readonly deps: AgySetupDeps) {}
+  /** What an earlier host left of an install or a sign-in, removed as this host starts; every install and sign-in waits for it */
+  private readonly tidied: Promise<void>
+
+  constructor(private readonly deps: AgySetupDeps) {
+    this.tidied = removeLeftovers(deps.home).catch(() => {})
+  }
+
+  /** Resolves once the leftovers of an earlier host are gone (for tests and the host's start) */
+  whenTidy(): Promise<void> {
+    return this.tidied
+  }
 
   installed(): boolean {
     return this.deps.archive !== null && isInstalled(this.deps.home, this.deps.archive)
@@ -88,10 +98,14 @@ export class AgySetup implements ToolSetupControl {
       this.deps.runInstall ??
       ((signal, onProgress) =>
         installAgy(this.deps.home, archive, this.deps.version, { signal, onProgress, ...(this.deps.installIo ? { io: this.deps.installIo } : {}) }))
-    const done = run(abort.signal, (p) => {
-      this.progress = p
-      this.changed()
-    }).then(
+    const done = this.tidied
+      .then(() =>
+        run(abort.signal, (p) => {
+          this.progress = p
+          this.changed()
+        }),
+      )
+      .then(
       () => {},
       (err: unknown) => {
         this.failure = failureOf(err, 'install')
@@ -123,7 +137,7 @@ export class AgySetup implements ToolSetupControl {
     const abort = new AbortController()
     this.failure = undefined
     const run = this.deps.runSignIn ?? ((signal) => runSignIn(this.deps.home, archive, signal, this.deps.signIn ?? {}))
-    const done = run(abort.signal).then(
+    const done = this.tidied.then(() => run(abort.signal)).then(
       (result) => {
         this.signedOutSeen = false
         this.plan = result.plan ?? undefined
@@ -163,6 +177,6 @@ export class AgySetup implements ToolSetupControl {
 }
 
 function failureOf(err: unknown, what: 'install' | 'sign-in'): NonNullable<ToolSetup['failure']> {
-  if (err instanceof InstallFailure) return { reason: err.reason, message: err.message }
+  if (err instanceof InstallFailure) return { reason: err.reason, message: err.message, ...(err.verifyUri ? { verifyUri: err.verifyUri } : {}) }
   return { reason: 'failed', message: `The ${what} failed: ${err instanceof Error ? err.message : String(err)}` }
 }

@@ -1,14 +1,15 @@
 import { spawn as spawnChild } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { createWriteStream, existsSync, readFileSync, watch, type FSWatcher } from 'node:fs'
+import { closeSync, createReadStream, createWriteStream, existsSync, fstatSync, openSync, readFileSync, readSync, watch, type FSWatcher } from 'node:fs'
 import { chmod, mkdir, mkdtemp, readdir, readFile, rename, rm, statfs, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { promisify } from 'node:util'
-import { inflateRaw } from 'node:zlib'
+import { Transform } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
+import { createInflateRaw } from 'node:zlib'
 import { errorMessage } from '@cc/protocol'
 import { asObj } from '../../json-value.js'
 import { HOST_PLATFORM, type Platform } from '../../os.js'
-import { readZipEntries, ZipError, zipEntryBytes } from '../../zip.js'
+import { readZipEntriesFrom, ZipError, zipEntryStart, type ZipEntry } from '../../zip.js'
 import { InstallFailure } from './failure.js'
 import { AGY_INSTALL_SPACE_BYTES, type AgyArchive, type AgyPlatformKey } from './release.js'
 
@@ -111,10 +112,11 @@ export type InstallIo = {
 
 export const realInstallIo: InstallIo = {
   async download(url, signal) {
-    const res = await fetch(url, { signal, redirect: 'follow' })
+    // The archive as stored: `fetch` asks for gzip by itself, and Google's server then sends the zip gzipped with a
+    // `content-length` of the gzipped size, which the decoded bytes never match (deep review of #1680, measured)
+    const res = await fetch(url, { signal, redirect: 'follow', headers: { 'accept-encoding': 'identity' } })
     if (!res.ok || !res.body) throw new InstallFailure('network', `The download answered ${res.status} ${res.statusText}`.trim())
-    const length = Number(res.headers.get('content-length'))
-    return { total: Number.isFinite(length) && length > 0 ? length : null, chunks: chunksOf(res.body) }
+    return { total: decodedLength(res.headers), chunks: chunksOf(res.body) }
   },
   async freeBytes(dir) {
     try {
@@ -124,6 +126,18 @@ export const realInstallIo: InstallIo = {
       return null
     }
   },
+}
+
+/**
+ * The size of the body `fetch` hands back, when the headers say it: `content-length` counts the bytes on the wire, so it is
+ * the decoded size only with no `content-encoding` (a server may encode even when asked for `identity`; the sha256 still
+ * decides then)
+ */
+export function decodedLength(headers: Headers): number | null {
+  const encoding = headers.get('content-encoding')?.trim().toLowerCase()
+  if (encoding && encoding !== 'identity') return null
+  const length = Number(headers.get('content-length'))
+  return Number.isFinite(length) && length > 0 ? length : null
 }
 
 /** A fetch body's chunks, as they arrive */
@@ -144,8 +158,6 @@ export type Progress = { received: number; total: number | null }
 
 /** Progress is said at most this often by bytes (the archive is ~110 MB: about a hundred steps) */
 const PROGRESS_STEP_BYTES = 1024 * 1024
-
-const inflate = promisify(inflateRaw)
 
 export async function installAgy(
   home: AgyHome,
@@ -169,7 +181,7 @@ export async function installAgy(
     if (sha !== archive.sha256) throw new InstallFailure('checksum', `The downloaded archive does not match the version Centralu pins (sha256 ${sha.slice(0, 12)}…)`)
     cancelled(signal)
     const pkg = join(work, 'pkg')
-    await unpack(await readFile(zip), archive, pkg, signal, opts.platform ?? HOST_PLATFORM)
+    await unpack(zip, archive, pkg, signal, opts.platform ?? HOST_PLATFORM)
     await rm(zip, { force: true })
     await writeFile(join(pkg, INSTALL_MARKER), `${JSON.stringify({ version, sha256: archive.sha256, url: archive.url })}\n`)
     cancelled(signal)
@@ -213,9 +225,26 @@ async function download(io: InstallIo, url: string, to: string, signal: AbortSig
   return hash.digest('hex')
 }
 
-/** Exactly the release's files, plain names only, each to its declared size; anything else refuses the archive */
-async function unpack(buf: Buffer, archive: AgyArchive, dir: string, signal: AbortSignal, platform: Platform): Promise<void> {
-  const entries = readZipEntries(buf, archive.files.length + 4).filter((e) => !(e.kind === 'dir' && e.size === 0))
+/**
+ * Exactly the release's files, plain names only, each to its declared size; anything else refuses the archive. Read from the
+ * file as a stream, entry by entry: only the zip's directory is held in memory, never the 110 MB archive or a 280 MB entry
+ */
+async function unpack(zip: string, archive: AgyArchive, dir: string, signal: AbortSignal, platform: Platform): Promise<void> {
+  const fd = openSync(zip, 'r')
+  let entries: ZipEntry[]
+  let starts: Map<ZipEntry, number>
+  try {
+    const size = fstatSync(fd).size
+    const read = (pos: number, len: number) => {
+      const buf = Buffer.alloc(len)
+      const got = readSync(fd, buf, 0, len, pos)
+      return buf.subarray(0, got)
+    }
+    entries = readZipEntriesFrom(size, read, archive.files.length + 4).filter((e) => !(e.kind === 'dir' && e.size === 0))
+    starts = new Map(entries.map((e) => [e, zipEntryStart(size, read, e)]))
+  } finally {
+    closeSync(fd)
+  }
   const names = entries.map((e) => e.name).sort()
   const want = [...archive.files].sort()
   if (names.length !== want.length || names.some((n, i) => n !== want[i])) {
@@ -224,17 +253,44 @@ async function unpack(buf: Buffer, archive: AgyArchive, dir: string, signal: Abo
   await mkdir(dir, { recursive: true })
   for (const e of entries) {
     if (e.kind !== 'file' || !/^[\w.-]+$/.test(e.name)) throw new InstallFailure('unpack', `The archive's entry ${e.name} is not a plain file`)
-    const raw = zipEntryBytes(buf, e)
-    // Inflated only up to the size it declares: a larger stream stops there (a zip bomb), and is refused
-    const data = e.method === 0 ? raw : e.method === 8 ? await inflate(raw, { maxOutputLength: Math.max(e.size, 1) }).catch(() => Buffer.alloc(0)) : null
-    if (!data) throw new InstallFailure('unpack', `The archive's entry ${e.name} uses compression method ${e.method}`)
-    if (data.length !== e.size) throw new InstallFailure('unpack', `${e.name} does not unpack to the ${e.size} bytes it declares`)
+    if (e.method !== 0 && e.method !== 8) throw new InstallFailure('unpack', `The archive's entry ${e.name} uses compression method ${e.method}`)
     cancelled(signal)
     const path = join(dir, e.name)
-    await writeFile(path, data, { mode: 0o755 })
+    await unpackEntry(zip, e, starts.get(e) ?? 0, path, signal)
     // Windows has no run bit: a program there is one by its name
     if (platform !== 'win32') await chmod(path, 0o755)
   }
+}
+
+/**
+ * One entry, from the archive's file to its own: inflated as it is read, and stopped the moment it passes the size it declares
+ * (a zip bomb), so it is refused before more than that is written
+ */
+async function unpackEntry(zip: string, e: ZipEntry, start: number, path: string, signal: AbortSignal): Promise<void> {
+  const tooLarge = () => new InstallFailure('unpack', `${e.name} does not unpack to the ${e.size} bytes it declares`)
+  let written = 0
+  const counted = new Transform({
+    transform(chunk: Buffer, _enc, done) {
+      written += chunk.length
+      done(written > e.size ? tooLarge() : null, chunk)
+    },
+  })
+  const out = createWriteStream(path, { mode: 0o755 })
+  // An empty entry has no bytes to read (`createReadStream` reads to the end of the file when `end` is before `start`)
+  const source = e.compressedSize > 0 ? createReadStream(zip, { start, end: start + e.compressedSize - 1 }) : null
+  try {
+    if (!source) {
+      if (e.size > 0) throw tooLarge()
+      await pipeline(async function* () {}, out, { signal })
+    } else if (e.method === 8) await pipeline(source, createInflateRaw(), counted, out, { signal })
+    else await pipeline(source, counted, out, { signal })
+  } catch (err) {
+    if (err instanceof InstallFailure || signal.aborted) throw err
+    const code: unknown = err instanceof Error ? Reflect.get(err, 'code') : undefined
+    if (code === 'ENOSPC' || code === 'EDQUOT') throw err
+    throw new InstallFailure('unpack', `${e.name} could not be unpacked: ${errorMessage(err)}`)
+  }
+  if (written !== e.size) throw tooLarge()
 }
 
 function cancelled(signal: AbortSignal): void {
@@ -253,7 +309,15 @@ function asFailure(err: unknown, signal: AbortSignal): InstallFailure {
   return new InstallFailure('failed', errorMessage(err))
 }
 
-/** What an earlier host left of an install or a sign-in it did not finish (it crashed, or was killed mid-way) */
+/**
+ * What an earlier host left of an install or a sign-in it did not finish (it crashed, or was killed mid-way): removed when
+ * this host starts (`AgySetup`), before any install or sign-in of its own (plan §3.2)
+ */
+export async function removeLeftovers(home: AgyHome): Promise<void> {
+  await removeStale(home.root, '.install-')
+  await removeStale(home.root, '.sign-in-')
+}
+
 async function removeStale(root: string, prefix: string): Promise<void> {
   const names = await readdir(root).catch((): string[] => [])
   await Promise.all(names.filter((n) => n.startsWith(prefix)).map((n) => rm(join(root, n), { recursive: true, force: true }).catch(() => {})))

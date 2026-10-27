@@ -100,15 +100,46 @@ describe("Antigravity's sign-in", () => {
   it('says why a sign-in ended, as a word the line can act on', () => {
     const live = new AbortController().signal
     const aborted = AbortSignal.abort()
-    expect(signInFailure(new RpcError(AUTH_REQUIRED, 'Onboarding failed', { reason: 'onboarding_failed' }), live).reason).toBe('ineligible')
     expect(signInFailure(new RpcError(-32603, 'Timed out waiting for the authentication flow to complete.'), live).reason).toBe('timed_out')
     expect(signInFailure(new Error('No response for authenticate'), live).reason).toBe('timed_out')
     expect(signInFailure(new Error('request cancelled while closing'), aborted).reason).toBe('cancelled')
     expect(signInFailure(new Error('Antigravity exited'), live).reason).toBe('failed')
   })
 
+  // The two answers 1.4.3 gave (deep review of #1680, raw captures): the same code and reason, told apart by their words
+  const TIMED_OUT = new RpcError(AUTH_REQUIRED, 'Onboarding failed: Timed out waiting for the authentication flow to complete.', { reason: 'onboarding_failed' })
+  const VERIFY = 'https://accounts.google.com/v3/signin/continue?flow=example'
+  const INELIGIBLE = new RpcError(
+    AUTH_REQUIRED,
+    `Onboarding failed: User is ineligible for free-tier. Reason: Your current account is not eligible for Antigravity. Verify your account to continue.\n\nAlternatively, try signing in with another personal Google account.. Verification URL: ${VERIFY}`,
+    { reason: 'onboarding_failed' },
+  )
+
+  it('tells a sign-in that timed out from an account Google will not serve, though both say onboarding_failed', () => {
+    const live = new AbortController().signal
+    expect(signInFailure(TIMED_OUT, live).reason).toBe('timed_out')
+    const ineligible = signInFailure(INELIGIBLE, live)
+    expect(ineligible.reason).toBe('ineligible')
+    // The verification page is carried apart for the screen, never in the words
+    expect(ineligible.verifyUri).toBe(VERIFY)
+    expect(ineligible.message).not.toContain('https://')
+  })
+
+  it('carries a verification page only when it is https on a Google host, and no address in a failure\'s words', () => {
+    const live = new AbortController().signal
+    const elsewhere = new RpcError(AUTH_REQUIRED, 'Onboarding failed: User is ineligible. Verification URL: https://accounts.google.com.evil.example/x', { reason: 'onboarding_failed' })
+    expect(signInFailure(elsewhere, live).verifyUri).toBeUndefined()
+    const other = signInFailure(new RpcError(-32603, 'Failed for someone@example.com, see https://example.com/help'), live)
+    expect(other.reason).toBe('failed')
+    expect(other.message).not.toMatch(/https:|someone@/)
+  })
+
   it("keeps the agent's address, its account's email and its token lines out of host.log", () => {
     expect(agyStderrLine(`Open the following link to authenticate the ACP server: ${ADDRESS}`)).toBeNull()
+    // Each rule on its own: a line with only an address, only an email, only a token word
+    expect(agyStderrLine('Opening https://example.com/plain')).toBeNull()
+    expect(agyStderrLine('Account someone@example.com chosen')).toBeNull()
+    expect(agyStderrLine('refreshed the token')).toBeNull()
     expect(agyStderrLine("loadCodeAssist response: {'upgradeSubscriptionUri': 'x'}")).toBeNull()
     expect(agyStderrLine('AccountChooser for someone@example.com')).toBeNull()
     expect(agyStderrLine('credential_store.py:235] using file credential storage.')).toBe('credential_store.py:235] using file credential storage.')

@@ -66,8 +66,12 @@ export const ToolSetup = z.object({
   signIn: z.enum(['centralu', 'terminal', 'none']),
   /** While `installing`: bytes received of the archive, and its size when known */
   progress: z.object({ received: z.number().int().nonnegative(), total: z.number().int().nonnegative().nullable() }).optional(),
-  /** The last install or sign-in that did not finish; cleared by the next start */
-  failure: z.object({ reason: ToolSetupFailureReason, message: z.string() }).optional(),
+  /**
+   * The last install or sign-in that did not finish; cleared by the next start. `verifyUri`: with `ineligible`, the Google
+   * page where the person can verify the account (the agent's answer names it; always `https` on a Google host), for the
+   * screen to open in the person's browser. Kept out of `message`, host.log and the stores, like the sign-in address
+   */
+  failure: z.object({ reason: ToolSetupFailureReason, message: z.string(), verifyUri: z.string().optional() }).optional(),
   /** The plan the tool said at its last sign-in (Antigravity's `_meta.antigravity.tier`), with its upgrade link when it gave one */
   plan: z.object({ name: z.string(), upgradeUri: z.string().optional() }).optional(),
 })
