@@ -1,7 +1,7 @@
 import { spawn as spawnChild } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { closeSync, createReadStream, createWriteStream, existsSync, fstatSync, openSync, readFileSync, readSync, watch, type FSWatcher } from 'node:fs'
-import { chmod, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, stat, statfs, writeFile } from 'node:fs/promises'
+import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, stat, statfs, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -472,30 +472,35 @@ export async function signInFolder(home: AgyHome, platform: Platform = HOST_PLAT
  *
  * The plan folder is the one place there the agent writes for the person: `/plan` writes
  * `gemini-home/antigravity-acp/brain/<its session id>/plan.md`, an edit it asks for (measured on 1.4.3; the same folder holds
- * the MCP schemas it reads). Only a file in that session's folder is let through (not the folder, so not a search or glob over it), judged both
- * as written there and where it really leads, so a link in it to the token is still refused.
+ * the MCP schemas it reads). Only a file in that session's folder is let through (not the folder, so not a search or glob
+ * over it), judged both as written there and where it really leads, so a link in it to the token is still refused; a plan
+ * folder that is itself a link, or sits under one, lets nothing through.
  *
  * It fails closed: what it cannot judge is refused (recheck of #1680). What is read, exactly:
  *
- * - every string of the request, object keys too, and the strings of one that holds JSON; a string with a line break, or
- *   longer than any OS takes as a path, names no file and is passed over. A request deeper than `SCAN_LIMITS.depth` or with
- *   more than `SCAN_LIMITS.strings` strings is refused whole, unread
- * - each string as written, without one pair of surrounding quotes, and with `%VAR%`, `$VAR` and `${VAR}` filled from the
- *   agent's environment; then as a path: a `file:` address, `~`, absolute, drive-relative (`C:foo`, judged against the
- *   drive's root, the session's folder and the host's own per-drive folder), or relative to the session's folder. A
- *   `file:` address that does not parse is refused
+ * - every string of the request, object keys too, and the strings of one that holds JSON (pretty-printed too). A request
+ *   deeper than `SCAN_LIMITS.depth` or with more than `SCAN_LIMITS.strings` one-line strings is refused whole, unread.
+ *   Any request that throws while read is refused
+ * - each one-line string up to the longest path an OS takes, as written, without one pair of surrounding quotes, with
+ *   `%VAR%`, `$VAR` and `${VAR}` filled from the agent's environment, and with each `{a,b}` alternative spelled out (more
+ *   than 64 are refused); then as a path: a `file:` address as a URL parser reads it (`file:C:/x` too), `~`, absolute,
+ *   drive-relative (`C:foo`, judged against the drive's root, the session's folder and the host's own per-drive folder),
+ *   `\foo` on Windows, or relative to the session's folder. A `file:/` address that does not parse is refused
  * - a glob (`*`, `?`, `[`, `{` in a segment) also as its fixed prefix, the folder it searches; a `..` after a glob segment is
  *   refused, since where it lands depends on what matched
  * - each path as written (Windows: its device prefix, trailing dots and spaces dropped as the OS does) and as it resolves:
  *   segment by segment through every link and junction, a `..` taken after the link before it as the OS does, case and
- *   8.3 names as the file system has them. Case is folded too (macOS and Windows take any case for one file)
+ *   8.3 names as the file system has them. A name that is there but does not resolve (a dangling link, a loop) is
+ *   refused. Case is folded too (macOS and Windows take any case for one file)
  * - refused when it is in the folder, or is the folder or one of its parents (the data folder, `tools/`, the home folder, a
- *   drive): a listing or a recursive search from there reaches inside. A shell call is exempt from the parents rule only,
- *   since its command's words are not read anyway (a command can still reach the folder; it asks under every preset but
- *   Auto, security-boundaries.md)
+ *   drive): a listing or a recursive search from there reaches inside. A shell call is exempt from the parents rule only
  * - Windows: a network path (`\\host\share`, `\\?\UNC\…`, a mapped drive, a volume or device path) is refused when it
  *   is on the same volume as the folder, or its volume cannot be read. Its host's name proves nothing (`localhost`,
  *   `127.0.0.1`, the machine's names and addresses, a hosts entry, any share of any folder all lead here), its volume does
+ * - then every line and every word (split at spaces, `=`, `,`, `;`, quotes, brackets, `|`) of every string, multi-line
+ *   ones and a shell command's included, read the same way but by its text only (no links, no parents rule): a path in a
+ *   list or an argument (`--out=<path>`). A command can still reach the folder in ways no text shows (a variable, `cd`
+ *   then a relative name); it asks under every preset but Auto (security-boundaries.md)
  */
 export async function reachesAgentFolder(home: AgyHome, call: unknown, sessionId: string, cwd: string): Promise<boolean> {
   // A check that throws (a path the OS will not take apart) has not shown the request stays outside
@@ -503,20 +508,37 @@ export async function reachesAgentFolder(home: AgyHome, call: unknown, sessionId
 }
 
 async function judgeRequest(home: AgyHome, call: unknown, sessionId: string, cwd: string): Promise<boolean> {
-  const strings = stringsIn(call)
-  if (strings === null) return true
+  const read = stringsIn(call)
+  if (read === null) return true
   const guard = await guardOf(home, sessionId)
   const parents = asObj(call).kind !== 'execute'
   const env: Record<string, string | undefined> = { ...process.env, GEMINI_HOME: home.geminiHome }
   const judged = new Set<string>()
-  for (const text of strings) {
-    for (const variant of variantsOf(text, env)) {
+  for (const text of read.strings) {
+    const variants = variantsOf(text, env)
+    if (variants === null) return true
+    for (const variant of variants) {
       const candidates = candidatesOf(variant, cwd)
       if (candidates === null) return true
       for (const c of candidates) {
         if (judged.has(c.path)) continue
         judged.add(c.path)
         if (await reaches(guard, c, parents)) return true
+      }
+    }
+  }
+  // Every line and word of every string, by its text only: a path in a list, an argument (`--out=<path>`), a command
+  const seen = new Set<string>()
+  for (const text of read.texts) {
+    for (const word of [...text.split(/[\r\n]+/), ...text.split(/[\s=,;'"`()<>|]+/)]) {
+      const w = word.trim()
+      if (w.length === 0 || w.length > MAX_PATH_TEXT || seen.has(w)) continue
+      seen.add(w)
+      for (const variant of variantsOf(w, env) ?? []) {
+        for (const c of candidatesOf(variant, cwd) ?? []) {
+          const target = written(c.path)
+          if (within(guard.root.written, target) && !(guard.plans !== null && within(guard.plans.written, target))) return true
+        }
       }
     }
   }
@@ -530,22 +552,27 @@ const WINDOWS = sep === '\\'
 /** The longest path any OS opens (Windows' 32767 UTF-16 units); a longer string names no file */
 const MAX_PATH_TEXT = 32767
 
-/** Every string in a request, distinct, or null when the request is beyond `SCAN_LIMITS` */
-function stringsIn(value: unknown): string[] | null {
+/**
+ * The strings in a request, distinct: `strings` those that may be one path (one line, short enough), `texts` all of them.
+ * Null when the request is beyond `SCAN_LIMITS`
+ */
+function stringsIn(value: unknown): { strings: string[]; texts: string[] } | null {
   const out = new Set<string>()
+  const texts = new Set<string>()
   const add = (text: string, depth: number): boolean => {
     const s = text.trim()
-    if (s.length === 0 || s.length > MAX_PATH_TEXT || /[\r\n]/.test(s)) return true
-    out.add(s)
-    if (out.size > SCAN_LIMITS.strings) return false
+    if (s.length === 0) return true
+    texts.add(s)
     if (/^[[{]/.test(s)) {
       try {
-        return walk(JSON.parse(s), depth + 1)
+        if (!walk(JSON.parse(s), depth + 1)) return false
       } catch {
-        return true
+        // Not JSON: read as text
       }
     }
-    return true
+    if (s.length > MAX_PATH_TEXT || /[\r\n]/.test(s)) return true
+    out.add(s)
+    return out.size <= SCAN_LIMITS.strings
   }
   const walk = (v: unknown, depth: number): boolean => {
     if (depth > SCAN_LIMITS.depth) return false
@@ -554,11 +581,14 @@ function stringsIn(value: unknown): string[] | null {
     if (v && typeof v === 'object') return Object.entries(v).every(([k, x]) => add(k, depth) && walk(x, depth + 1))
     return true
   }
-  return walk(value, 0) ? [...out] : null
+  return walk(value, 0) ? { strings: [...out], texts: [...texts] } : null
 }
 
-/** A string as written, without one pair of surrounding quotes, and with environment variables filled in */
-function variantsOf(text: string, env: Record<string, string | undefined>): string[] {
+/**
+ * A string as written, without one pair of surrounding quotes, with environment variables filled in, and with each
+ * `{a,b}` alternative spelled out. Null when there are more alternatives than `MAX_ALTERNATIVES`
+ */
+function variantsOf(text: string, env: Record<string, string | undefined>): string[] | null {
   const out = new Set([text])
   const quoted = /^(["'`])(.*)\1$/.exec(text)
   if (quoted?.[2]) out.add(quoted[2].trim())
@@ -569,7 +599,32 @@ function variantsOf(text: string, env: Record<string, string | undefined>): stri
       .replace(/\$\{(\w+)\}|\$(\w+)/g, (all, a?: string, b?: string) => lookup(a ?? b ?? '') ?? all)
     out.add(filled)
   }
-  return [...out].filter((s) => s.length > 0)
+  const all = new Set<string>()
+  for (const v of out) {
+    const spelled = alternativesOf(v)
+    if (spelled === null) return null
+    for (const a of spelled) all.add(a)
+  }
+  return [...all].filter((s) => s.length > 0)
+}
+
+const MAX_ALTERNATIVES = 64
+
+/** A glob's `{a,b}` alternatives, innermost first, each spelled out; null past `MAX_ALTERNATIVES` */
+function alternativesOf(text: string): string[] | null {
+  let todo = [text]
+  const done: string[] = []
+  while (todo.length > 0) {
+    const next: string[] = []
+    for (const t of todo) {
+      const m = /\{([^{}]*,[^{}]*)\}/.exec(t)
+      if (!m) done.push(t)
+      else for (const alt of (m[1] ?? '').split(',')) next.push(t.slice(0, m.index) + alt + t.slice(m.index + m[0].length))
+    }
+    if (done.length + next.length > MAX_ALTERNATIVES) return null
+    todo = next
+  }
+  return done
 }
 
 type Candidate = { path: string }
@@ -581,12 +636,15 @@ type Candidate = { path: string }
 function candidatesOf(text: string, cwd: string): Candidate[] | null {
   let s = text
   if (/^file:/i.test(s)) {
-    if (!/^file:[\\/]/i.test(s)) return [{ path: joinRaw(cwd, s) }]
+    // As a URL parser reads it, `file:C:/x` and `file:x` included; one that does not parse is a path only if it reads as one
+    let local: string | null = null
     try {
-      s = fileURLToPath(s)
+      local = fileURLToPath(s)
     } catch {
-      return null
+      if (/^file:[\\/]/i.test(s)) return null
     }
+    if (local === null) return [{ path: joinRaw(cwd, s) }]
+    s = local
   }
   if (WINDOWS) s = withoutDevicePrefix(s)
   const roots: string[] = []
@@ -644,11 +702,16 @@ async function guardOf(home: AgyHome, sessionId: string): Promise<Guard> {
   const memo = new Map<string, Promise<string | null>>()
   const root = await resolveLinks(home.root, memo)
   const plansAt = /^[A-Za-z0-9-]{1,64}$/.test(sessionId) ? join(home.geminiHome, 'antigravity-acp', 'brain', sessionId) : null
-  const plans = plansAt === null ? null : await resolveLinks(plansAt, memo)
+  let plans = plansAt === null ? null : await resolveLinks(plansAt, memo)
+  // A plan folder that is (or sits under) a link leads somewhere else: no plan folder then, so nothing is let through
+  if (plansAt !== null && plans !== null && root !== null) {
+    const expected = join(root.real, relative(written(home.root), written(plansAt)))
+    if (fold(plans.real) !== fold(expected)) plans = null
+  }
   const volume = root?.existing ? await stat(root.existing, { bigint: true }).then((s) => s.dev, () => null) : null
   return {
     root: { written: written(home.root), real: root?.real ?? written(home.root) },
-    plans: plansAt === null ? null : { written: written(plansAt), real: plans?.real ?? written(plansAt) },
+    plans: plansAt === null || plans === null ? null : { written: written(plansAt), real: plans.real },
     volume,
   }
 }
@@ -717,6 +780,8 @@ async function resolveLinks(path: string, memo: Map<string, Promise<string | nul
     }
     if (++steps > SCAN_LIMITS.linkSteps) return null
     const next = await real(join(at, part))
+    // A name that is there but does not resolve (a dangling link, a loop, no access) cannot be followed: unjudgeable
+    if (next === null && (await lstat(join(at, part)).then(() => true, () => false))) return null
     if (next === null) break
     at = next
   }

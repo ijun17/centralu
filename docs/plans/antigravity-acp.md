@@ -175,41 +175,49 @@ address, an MCP call, a command's folder) with a path in `<data>/tools/antigravi
 every saved rule (`AcpToolShape.neverAllowed`, `reachesAgentFolder`). The guard fails closed: what it cannot judge is
 refused (recheck of #1680). Exactly what it checks:
 
-- Every string of the request, object keys too, and the strings inside a string that holds JSON. A string with a line
-  break, or longer than 32767 characters, names no file and is passed over. A request nested deeper than 32 levels, or
-  with more than 1024 distinct strings, is refused whole without being read (`SCAN_LIMITS`).
-- Each string as written, without one pair of surrounding quotes, and with `%VAR%`, `$VAR`, `${VAR}` filled in from the
-  agent's environment (`GEMINI_HOME` included). Each is then read as a path: a `file:` address (one that does not parse
-  is refused), `~`, absolute, drive-relative `C:foo` (judged from the drive's root, the session's folder and the host's
-  own folder on that drive), `\foo` on Windows, or relative to the session's folder. A glob (`*`, `?`, `[`, `{` in a
-  segment) is judged by its fixed prefix as well; a `..` after a glob segment is refused.
-- Each path as written (on Windows without its `\?\` or `\.\` prefix, and with trailing dots and spaces dropped from
+- Every string of the request, object keys too, and the strings inside a string that holds JSON (pretty-printed too).
+  A request nested deeper than 32 levels, or with more than 1024 distinct one-line strings, is refused whole without
+  being read (`SCAN_LIMITS`); so is one that throws while read.
+- Each one-line string (up to 32767 characters, the longest path an OS takes) as written, without one pair of
+  surrounding quotes, with `%VAR%`, `$VAR`, `${VAR}` filled in from the agent's environment (`GEMINI_HOME` included), and
+  with each `{a,b}` alternative spelled out (more than 64 are refused). Each is then read as a path: a `file:` address as
+  a URL parser reads it (`file:C:/x` too; a `file:/` address that does not parse is refused), `~`, absolute,
+  drive-relative `C:foo` (judged from the drive's root, the session's folder and the host's own folder on that drive),
+  `\foo` on Windows, or relative to the session's folder. A glob (`*`, `?`, `[`, `{` in a segment) is judged by its
+  fixed prefix as well; a `..` after a glob segment is refused.
+- Each path as written (on Windows without its `\\?\` or `\\.\` prefix, and with trailing dots and spaces dropped from
   each name, as the OS does) and as it resolves: segment by segment through links and junctions, a `..` taken after
-  the link before it as the kernel does, 8.3 names and case as the file system has them. Case is also folded.
+  the link before it as the kernel does, 8.3 names and case as the file system has them. A name that exists but does
+  not resolve (a dangling link, a loop) is refused. Case is also folded.
 - It is refused when it is inside the folder, or is the folder or a parent of it (`<data>`, `<data>/tools`, the home
   folder, a drive's root): a listing or a recursive search from a parent reaches inside. A shell call's own folder is
-  exempt from the parent rule only, since its command's words are not read anyway.
-- On Windows a network path (`\host\share\…`, `\?\UNC\…`, a mapped drive, a volume or device path) is refused when
+  exempt from the parent rule only.
+- On Windows a network path (`\\host\share\…`, `\\?\UNC\…`, a mapped drive, a volume or device path) is refused when
   its volume is the folder's volume, or cannot be read. Its host's name proves nothing: `localhost`, `127.0.0.1`, the
   machine's own names and addresses, a hosts-file entry, and any share of any folder lead to the same file (measured:
   the admin share by each of those names gave the token's volume serial and file id). The volume, read with `stat`, does.
+- Then every line and every word (split at spaces, `=`, `,`, `;`, quotes, brackets and `|`) of every string, multi-line
+  ones and a shell command included, read the same way by its text only (no links, no parent rule): a path in a list,
+  an argument (`--out=<path>`), a command that names the token.
 
 Work this declines that it need not (accepted, since each is rare and the person can still do it with a shell command,
 which asks): a search or listing over the home folder, the data folder or a drive's root, including a session whose
 folder is the home folder searching `.`; an edit whose one-line text is `/`, `~`, `..` or a glob from a parent (it
-reads as a path); a file on a network share of the data folder's own volume (a loopback share); a request with more
-than 1024 strings or 32 levels; a listing of the plan folder itself (only files in it are let through).
+reads as a path); text that names a path in the folder (a note or a command quoting the token's path); a path through
+a dangling link; a file on a network share of the data folder's own volume (a loopback share); a request with more
+than 1024 strings, 32 levels or 64 brace alternatives; a listing of the plan folder itself (only files in it are let
+through).
 
 One folder is let through, the conversation's own plan folder
 `gemini-home/antigravity-acp/brain/<session id>/`: `/plan` writes its plan there as an edit it asks for (measured on
 1.4.3: `plan.md`, or a name of its choosing, and `<name>.metadata.json`; the harness itself keeps the MCP schemas it
 reads and its logs beside them). The token, `settings.json`, the conversations' databases, other conversations' folders,
 the MCP config and skills under `gemini-home/config/` and the programs stay refused; a link in the plan folder is judged
-by where it leads.
+by where it leads, and a plan folder that is itself a link lets nothing through.
 
-What still reaches the token: a shell command (`cat`), whose words are not read. It asks in `default` mode, so under
-Normal, Safe and Edits the person sees it; under Auto it runs, as any command does for Claude or Codex under Auto (said
-in [security-boundaries.md](../security-boundaries.md)). Measured in the review: the tool list loses the viewers, reads
+What still reaches the token: a shell command that does not name its path (a variable, `cd` then a relative name). It
+asks in `default` mode, so under Normal, Safe and Edits the person sees it; under Auto it runs, as any command does for
+Claude or Codex under Auto (said in [security-boundaries.md](../security-boundaries.md)). Measured in the review: the tool list loses the viewers, reads
 come as `fs/read_text_file`, and every path into the agent's folder is refused there.
 
 ### 4.3 The sign-in

@@ -1259,17 +1259,18 @@ Centralu installs Google's Antigravity agent itself and keeps all of its state u
   session's folder only, by real path, and never under `tools/antigravity/`. A permission request that may reach
   `tools/antigravity/` is refused under every preset and every saved rule, Auto included: the agent's edit tools
   reached the token's folder unasked under Auto before (re-review). The guard fails closed. It reads every string of
-  the request (object keys and JSON inside strings too; a string with a line break is passed over) as written, unquoted
-  and with environment variables filled in, as an absolute, `~`, `file:`, drive-relative or session-relative path and,
-  for a glob, by its fixed prefix. It judges each as written and as it resolves through links and junctions, with case
-  folded. A path inside the folder, or the folder or any parent of it (the data folder, `tools/`, the home folder, a
-  drive), is refused; on Windows so is a network path on the folder's own volume, or one whose volume cannot be read.
-  A request it cannot read whole (deeper than 32 levels, more than 1024 strings) is refused unread. Only a file in the
+  the request (object keys and JSON inside strings too) as written, unquoted, with environment variables and brace
+  alternatives filled in, as an absolute, `~`, `file:`, drive-relative or session-relative path and, for a glob, by
+  its fixed prefix. It judges each as written and as it resolves through links and junctions, with case folded. A path
+  inside the folder, or the folder or any parent of it (the data folder, `tools/`, the home folder, a drive), is
+  refused; on Windows so is a network path on the folder's own volume, or one whose volume cannot be read. Every line
+  and word of every string, a shell command's too, is also read by its text for a path inside the folder. A request it
+  cannot read whole (deeper than 32 levels, more than 1024 strings) is refused unread. Only a file in the
   conversation's own plan folder (`gemini-home/antigravity-acp/brain/<session id>/`, where `/plan` writes) is let
   through. What this declines that it need not, and the full list, are in
-  [plans/antigravity-acp.md](plans/antigravity-acp.md) §4.2. What Auto still reaches: a
-  shell command, whose words are not read; it asks under every preset but Auto. Centralu itself never opens the token
-  file; it looks for its presence.
+  [plans/antigravity-acp.md](plans/antigravity-acp.md) §4.2. What Auto still reaches: a shell command that reaches
+  the token without naming its path (a variable, `cd` then a relative name); it asks under every preset but Auto.
+  Centralu itself never opens the token file; it looks for its presence.
 - **The sign-in address stays out of logs and events.** It reaches the host through a private folder (`0700`) and the
   agent's stderr, is opened once and only as an `https` Google address, and no `tool_setup` event carries it. Lines of
   the agent's stderr that hold an address, an email or a token's name never reach `host.log` or a crash message.

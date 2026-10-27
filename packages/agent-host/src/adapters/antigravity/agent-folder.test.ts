@@ -32,7 +32,7 @@ const edit = (target: unknown) => ({ kind: 'edit', rawInput: { TargetFile: targe
 const reaches = (home: AgyHome, call: unknown, cwd: string) => reachesAgentFolder(home, call, SID, cwd)
 
 describe('a request that cannot be read whole is refused', () => {
-  it('past 64 paths: padding before the token does not hide it, and past the bound the request is refused unread', async () => {
+  it('a padded request: the token after 70 other paths is found, and past the strings bound the request is refused unread', async () => {
     const w = world()
     const padded = [...Array.from({ length: 70 }, (_, i) => pathIn(w.project, `f${i}.txt`)), w.token]
     expect(await reaches(w.home, { kind: 'edit', rawInput: { Chunks: padded } }, w.project)).toBe(true)
@@ -42,7 +42,7 @@ describe('a request that cannot be read whole is refused', () => {
     expect(await reaches(w.home, { kind: 'edit', rawInput: { Chunks: many.slice(0, 100) } }, w.project)).toBe(false)
   })
 
-  it('nested deeper than 8 levels: the token is still found, and past the bound the request is refused unread', async () => {
+  it('a nested request: the token 10 levels down is found, and past the depth bound the request is refused unread', async () => {
     const w = world()
     const nest = (v: unknown, n: number): unknown => (n === 0 ? v : { a: nest(v, n - 1) })
     expect(await reaches(w.home, { kind: 'edit', rawInput: nest(w.token, 10) }, w.project)).toBe(true)
@@ -54,6 +54,25 @@ describe('a request that cannot be read whole is refused', () => {
     const w = world()
     expect(await reaches(w.home, { kind: 'edit', rawInput: { files: { [w.token]: 'x' } } }, w.project)).toBe(true)
     expect(await reaches(w.home, { kind: 'edit', rawInput: JSON.stringify({ TargetFile: w.token }) }, w.project)).toBe(true)
+    expect(await reaches(w.home, { kind: 'edit', rawInput: JSON.stringify({ TargetFile: w.token }, null, 2) }, w.project)).toBe(true)
+    // Pretty-printed JSON is parsed too, so a parent named in it counts (its text alone is only read for paths inside)
+    expect(await reaches(w.home, { kind: 'search', rawInput: JSON.stringify({ SearchPath: w.dir }, null, 2) }, w.project)).toBe(true)
+  })
+
+  it('refuses a request whose reading throws', async () => {
+    const w = world()
+    const hostile = new Proxy({}, { ownKeys: () => { throw new Error('no keys') } })
+    await expect(reaches(w.home, { kind: 'edit', rawInput: hostile }, w.project)).resolves.toBe(true)
+  })
+
+  it('reads every line and word of a longer text: a list of paths, an argument, a command', async () => {
+    const w = world()
+    expect(await reaches(w.home, edit(`${pathIn(w.project, 'a.txt')}\n${w.token}`), w.project)).toBe(true)
+    expect(await reaches(w.home, { kind: 'other', rawInput: { args: [`--out=${w.token}`] } }, w.project)).toBe(true)
+    expect(await reaches(w.home, { kind: 'execute', rawInput: { CommandLine: `cat "${w.token}"`, Cwd: w.project } }, w.project)).toBe(true)
+    // Code that names no file there is let through, comments and all
+    const code = '/**\n * A note.\n */\nexport const a = 1 // ~ / ..\n'
+    expect(await reaches(w.home, { kind: 'edit', rawInput: { TargetFile: pathIn(w.project, 'a.ts'), CodeContent: code } }, w.project)).toBe(false)
   })
 })
 
@@ -72,6 +91,9 @@ describe('a folder above the agent folder, or a glob from one, reaches inside', 
     expect(await reaches(w.home, { kind: 'search', rawInput: { Glob: pathIn(w.dir, 'tools', '**', 'acp_token.json') } }, w.project)).toBe(true)
     expect(await reaches(w.home, { kind: 'search', rawInput: { Glob: pathIn(w.dir, '*') } }, w.project)).toBe(true)
     expect(await reaches(w.home, { kind: 'search', rawInput: { Glob: [w.project, '**', '..', '..', 'x'].join(sep) } }, w.project)).toBe(true)
+    // Alternatives, one of them the token
+    expect(await reaches(w.home, { kind: 'search', rawInput: { Glob: `{${w.token},x}` } }, w.project)).toBe(true)
+    expect(await reaches(w.home, { kind: 'search', rawInput: { Glob: `{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}` } }, w.project)).toBe(true)
     // A glob in the project stays there
     expect(await reaches(w.home, { kind: 'search', rawInput: { Glob: pathIn(w.project, '**', '*.ts') } }, w.project)).toBe(false)
   })
@@ -80,6 +102,13 @@ describe('a folder above the agent folder, or a glob from one, reaches inside', 
     const w = world()
     expect(await reaches(w.home, { kind: 'execute', rawInput: { CommandLine: 'ls', Cwd: w.dir } }, w.project)).toBe(false)
     expect(await reaches(w.home, { kind: 'execute', rawInput: { CommandLine: 'ls', Cwd: w.home.geminiHome } }, w.project)).toBe(true)
+  })
+
+  it('refuses a plan folder that is a link: it leads somewhere else', async () => {
+    const w = world()
+    folder(pathIn(w.home.geminiHome, 'antigravity-acp', 'brain'))
+    folderLink(pathIn(w.home.geminiHome, 'antigravity-acp'), pathIn(w.home.geminiHome, 'antigravity-acp', 'brain', SID))
+    expect(await reaches(w.home, edit(pathIn(w.home.geminiHome, 'antigravity-acp', 'brain', SID, 'acp_token.json')), w.project)).toBe(true)
   })
 
   it("lets a file in this conversation's plan through, but not the plan folder or a glob in it", async () => {
@@ -97,6 +126,8 @@ describe('the ways one file is spelled', () => {
     const w = world()
     expect(await reaches(w.home, edit(`"${w.token}"`), w.project)).toBe(true)
     expect(await reaches(w.home, edit(`'${w.token}'`), w.project)).toBe(true)
+    // A parent in quotes: only the unquoted reading sees it as one
+    expect(await reaches(w.home, { kind: 'search', rawInput: { SearchPath: `"${w.dir}"` } }, w.project)).toBe(true)
     const rest = pathFrom(w.home.geminiHome, w.token)
     expect(await reaches(w.home, edit(`$GEMINI_HOME/${rest}`), w.project)).toBe(true)
     expect(await reaches(w.home, edit(`\${GEMINI_HOME}/${rest}`), w.project)).toBe(true)
@@ -111,10 +142,21 @@ describe('the ways one file is spelled', () => {
     // A link to the data folder is a parent of the agent folder
     folderLink(w.dir, pathIn(w.project, 'data'))
     expect(await reaches(w.home, { kind: 'search', rawInput: { SearchPath: pathIn(w.project, 'data') } }, w.project)).toBe(true)
+    // A link to a folder there that does not exist yet: a write through it would create it inside
+    folderLink(pathIn(w.home.geminiHome, 'config'), pathIn(w.project, 'later'))
+    expect(await reaches(w.home, edit(pathIn(w.project, 'later', 'mcp_config.json')), w.project)).toBe(true)
+  })
+
+  it('a file: address however it is spelled', async () => {
+    const w = world()
+    const url = w.token.split(sep).join('/')
+    expect(await reaches(w.home, edit(`file:${url}`), w.project)).toBe(true)
+    expect(await reaches(w.home, edit(`file://${url.startsWith('/') ? '' : '/'}${url}`), w.project)).toBe(true)
   })
 
   it.runIf(!WINDOWS)('takes `..` after a link where it leads, as the kernel does, not by the text', async () => {
     const w = world()
+    folder(pathIn(w.home.geminiHome, 'antigravity-acp', 'brain'))
     folderLink(pathIn(w.home.geminiHome, 'antigravity-acp', 'brain'), pathIn(w.project, 'b'))
     // As text this is <project>/acp_token.json; the kernel reads <agent folder>/antigravity-acp/acp_token.json
     expect(await reaches(w.home, edit(`${w.project}/b/../acp_token.json`), w.project)).toBe(true)
