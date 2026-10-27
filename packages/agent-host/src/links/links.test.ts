@@ -21,7 +21,8 @@ import { readHoldCommand } from './swap-hold.js'
 import { storeMirror, storeRegistry } from './stored.js'
 import { ScriptedAdapter, scriptedAdapters } from './scripted-agent.test-helpers.js'
 import { activityCounts } from '../idle.js'
-import type { UpdateResumeFile } from '../lifecycle/update-resume.js'
+import type { UpdateResumeFolder } from '../lifecycle/update-resume.js'
+import { memoryUpdateFolder } from '../lifecycle/update-resume.test-helpers.js'
 import { SLOW, eventually } from '../../../../tooling/test-timing.js'
 
 /** The version the hub and its hosts are in these tests: a source tree carries the placeholder 0.0.0-dev (#1501), older than every release */
@@ -71,8 +72,8 @@ async function remoteHost(
     handover?: () => { state: 'waiting' | 'gave_up'; since: number } | null
     /** What happens on the host before it listens: no hub can see it yet */
     beforeListen?: (mgr: SessionManager) => Promise<void>
-    /** The data folder's `update-resume.json` (#1618), shared by the hosts that start in the same folder */
-    updateResume?: UpdateResumeFile
+    /** The data folder's lists of the turns an update cut (#1618), shared by the hosts that start in the same folder */
+    updateResume?: UpdateResumeFolder
     /** A host from before #1618: its hello says nothing of the turns it continued, and it continues none */
     before1618?: boolean
   } = {},
@@ -105,20 +106,6 @@ async function remoteHost(
     if (claude instanceof ScriptedAdapter) claude.release(sessionId)
   }
   return { server, mgr, store, port: p, close, release }
-}
-
-/** A data folder's `update-resume.json` (#1618), played by a variable */
-function memoryFolder(): UpdateResumeFile {
-  let held: string | null = null
-  return {
-    read: () => held,
-    write: (t) => {
-      held = t
-    },
-    remove: () => {
-      held = null
-    },
-  }
 }
 
 /** An RPC handler without these methods, as a build from before them answers */
@@ -1491,8 +1478,8 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
       if (broken || step === 'fail') throw new Error('the host could not count')
       return step ? { ...activity, working: 0, approvals: 0, questions: 0, background: 0, ...step } : activity
     }
-    /** The machine's data folder's `update-resume.json` (#1618), which every host there reads and writes */
-    const folder = memoryFolder()
+    /** The machine's data folder's lists of the turns an update cut (#1618), which every host there reads and writes */
+    const folder = memoryUpdateFolder()
     let running = await remoteHost(0, new Store(), { version: was, updateResume: folder, ...(o.before1618 ? { before1618: true } : {}), ...(o.noActivity ? {} : { activity: asked }) })
     let line = lineFor(running.port, { version: was })
     const runs: string[] = []
@@ -3337,8 +3324,8 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
     remoteStore.projects.addProject({ id: 'p-app', path: checkout('git@github.com:me/app.git'), name: 'app-checkout' })
     /** What the machine's host says runs there, from its own sessions, as main.ts counts it */
     const activity = () => activityCounts({ sessions: running.mgr.listSessions(), terminals: 0, commandRuns: 0 })
-    /** The machine's data folder's `update-resume.json`: the stopping host writes it, the next one reads it (lifecycle/update-resume.ts) */
-    const folder = memoryFolder()
+    /** The machine's data folder's lists of the turns an update cut: the stopping host writes one, the next reads them (lifecycle/update-resume.ts) */
+    const folder = memoryUpdateFolder()
     let running = await remoteHost(0, remoteStore, { version: OLDER, activity, updateResume: folder })
     let line = lineFor(running.port, { version: OLDER })
     const old = { version: OLDER, node: NODE }

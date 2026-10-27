@@ -139,7 +139,7 @@ import { Store } from '../dev-services/store.js'
 import type { UpdateService } from '../updates.js'
 import type { UpdateApplyBroker } from '../update-apply.js'
 import { cutTurns, inTurn, sessionIdle, type SessionIdle } from '../idle.js'
-import { dropFromUpdateResume, readUpdateResume, recordUpdateCut, type UpdateResumeFile } from '../lifecycle/update-resume.js'
+import { recordUpdateCut, UpdateResumeLists, type UpdateResumeFolder } from '../lifecycle/update-resume.js'
 import { UPDATE_CONTINUE_LINE, UPDATE_CONTINUE_TEXT } from './interruptions.js'
 import { appSettingRests, CardRests } from './card-rest.js'
 import { rpcError, sessionNotFound } from '../rpc-error.js'
@@ -349,8 +349,14 @@ export class SessionManager {
   private quitPersonWork: string[] = []
   /** Turns a hub's update cut, to continue once the start is done, and who to tell (#1618, `continueCutTurns`) */
   private updateCuts: { sessionId: string; requester: string | null }[] = []
-  /** The turns this host continued after an update cut them, and when (#1618): said in every hello, for a hub's callers */
-  private readonly continuedAfterUpdate: { sessionId: string; at: number }[] = []
+  /**
+   * The turns this host continues because an update cut them, and when its start took them up (#1618): said in every hello,
+   * for a hub's callers. Taken at the start, before this host answers any hello, so a hub that connects while a Continue is
+   * still on its way is told of it too (#1626 review); one that turns out lost leaves it (`turnLostInSwap`)
+   */
+  private continuedAfterUpdate: { sessionId: string; at: number }[] = []
+  /** The lists of the turns an update cut that the stops before this start left (#1618), each removed once dealt with */
+  private updateLists: UpdateResumeLists | null = null
   /** A linked hub stops this host for an update (`host.stop { forUpdate }`): the turns its stop ends are listed (#1618) */
   private stoppingForUpdate = false
   /** `disposeAll` has begun (#673): a card it withdraws is not the person's answer, and its request stays stored */
@@ -389,7 +395,7 @@ export class SessionManager {
        * it as it stopped, and each listed session this start finds mid-turn with no process is continued once
        * (`continueCutTurns`). This host writes it in turn when a linked hub stops it for an update (`stopForUpdate`)
        */
-      updateResume?: UpdateResumeFile
+      updateResume?: UpdateResumeFolder
       /** How handoff_session waits for an agent's note (#694); tests shorten it */
       handoffTimings?: HandoffTimings
     } = {},
@@ -518,7 +524,8 @@ export class SessionManager {
     const stoppedByQuit: SessionInfo[] = []
     /** Sessions whose turn a hub's update cut, continued once the start is done (#1618, `continueCutTurns`) */
     const cutByUpdate: SessionInfo[] = []
-    const listedCut = keeperOpts.updateResume ? readUpdateResume(keeperOpts.updateResume) : new Set<string>()
+    const lists = keeperOpts.updateResume ? new UpdateResumeLists(keeperOpts.updateResume) : null
+    this.updateLists = lists
     for (const s of store.sessions.listSessions()) {
       /*
        * Except where the process **does** still exist (#280 step 2): the keeper kept it through the
@@ -530,9 +537,11 @@ export class SessionManager {
        * And where a linked hub's update cut the turn (#1618): the turn goes on, in a new process, as a kept session's
        * does in its old one. It stays `working` until it is continued, so a hub reading this machine meanwhile sees a
        * turn running, not one that ended; the report it owes stays owed. If it cannot be continued, it is reset there
-       * (`turnLostInSwap`), as a kept process that could not be re-attached is
+       * (`turnLostInSwap`), as a kept process that could not be re-attached is. Only the turn the stop listed: its
+       * conversation still ends where it ended when that stop was done (`UpdateResumeLists.cut`), so a list left behind
+       * names no later turn, such as one a stop of the person's cut after a rollback to a host that never reads lists
        */
-      const goesOn = cut && listedCut.has(s.id)
+      const goesOn = cut && !!lists?.cut(s.id, s.lastSeq)
       const stale = cut && !goesOn
       const fixed = stale ? { ...s, state: 'idle' as const, waitingSince: null } : goesOn ? { ...s, state: 'working' as const, waitingSince: null } : s
       // Old cross-project ownership (#614) is cleared by store step v55, no longer here (#844)
@@ -553,10 +562,11 @@ export class SessionManager {
         cutByUpdate.push(fixed)
         // Until its Continue is in: a wake meanwhile (a window that sees the machine back) keeps it in its turn (`SessionStarts`)
         this.restartPolicy.continuingTurns.add(s.id)
+        this.continuedAfterUpdate.push({ sessionId: s.id, at: Date.now() })
       }
     }
-    // A listed session this start does not find cut (at rest, or gone) has nothing to continue: it leaves the list now
-    for (const id of listedCut) if (!cutByUpdate.some((s) => s.id === id)) this.updateResumeDone(id)
+    // A listed session this start does not find cut by that stop (at rest, gone, or in a later turn) has nothing to continue
+    for (const id of lists?.ids() ?? []) if (!cutByUpdate.some((s) => s.id === id)) this.updateResumeDone(id)
     /** What the start takes over as going on: the keeper's processes, and the turns an update cut (#1618) */
     const goingOn = new Set([...(keeperOpts.keptSessions ?? []), ...cutByUpdate.map((s) => s.id)])
     /*
@@ -1274,6 +1284,7 @@ export class SessionManager {
         if (!m || !inTurn(m.state)) {
           // Gone, or stopped by the person before its Continue went in: nothing to continue
           this.restartPolicy.continuingTurns.delete(sessionId)
+          this.notContinued(sessionId)
           this.updateResumeDone(sessionId)
           return
         }
@@ -1284,11 +1295,16 @@ export class SessionManager {
           this.restartPolicy.continuingTurns.delete(sessionId)
           console.error(`[agent-host] ${sessionId.slice(0, 8)}: the turn an update ended could not be continued (${errorMessage(e)})`)
           this.turnLostInSwap(m)
+          this.notContinued(sessionId)
           this.updateResumeDone(sessionId)
           return
         }
+        /*
+         * In, but this host is leaving meanwhile (a second update's stop, #1626 review): its stop lists the turn again, the
+         * note included, and the host after it continues it and tells the requester. Nothing is settled from here
+         */
+        if (this.disposing || this.handingOver) return
         this.restartPolicy.continuingTurns.delete(sessionId)
-        this.continuedAfterUpdate.push({ sessionId, at: Date.now() })
         // Sent: a host that starts after this one does not send it again
         this.updateResumeDone(sessionId)
         if (requester && !continued.has(requester)) void this.reports.tellCutByUpdate(sessionId, requester)
@@ -1297,9 +1313,14 @@ export class SessionManager {
     this.tellQuitNotices(() => true)
   }
 
-  /** One turn the update file listed is dealt with: it leaves the file (#1618, `dropFromUpdateResume`) */
+  /** One turn the lists named is dealt with: a list goes once all its turns are (#1618, `UpdateResumeLists.done`) */
   private updateResumeDone(sessionId: string): void {
-    if (this.keeperOpts.updateResume) dropFromUpdateResume(this.keeperOpts.updateResume, sessionId)
+    this.updateLists?.done(sessionId)
+  }
+
+  /** A turn the start took up that is not continued after all: the hello stops naming it (#1618) */
+  private notContinued(sessionId: string): void {
+    this.continuedAfterUpdate = this.continuedAfterUpdate.filter((c) => c.sessionId !== sessionId)
   }
 
   /**
@@ -1310,7 +1331,7 @@ export class SessionManager {
     this.stoppingForUpdate = true
   }
 
-  /** The turns this host continued after an update cut them (#1618), for the hello a linked hub reads */
+  /** The turns this host continues after an update cut them (#1618), for the hello a linked hub reads */
   updateContinued(): { sessionId: string; at: number }[] {
     return [...this.continuedAfterUpdate]
   }
@@ -3045,12 +3066,11 @@ export class SessionManager {
     this.leaveHost('Centralu is shutting down')
     /*
      * A linked hub's update stops this host (#1618): the turns it ends are the ones in a turn now, read in the same step as
-     * the processes are let go of below, with no new turn taken since `leaveHost`. Added to what the file already lists
-     * (turns an earlier stop cut that this host had not continued yet), for the host the hub starts next
+     * the processes are let go of below, with no new turn taken since `leaveHost`. Listed once the processes are down and
+     * their last output written (below), each with the last row of its conversation then: the mark the next start
+     * continues it by. A list of its own, beside any an earlier stop left (turns this host had not continued yet)
      */
-    if (this.stoppingForUpdate && this.keeperOpts.updateResume) {
-      recordUpdateCut(this.keeperOpts.updateResume, cutTurns({ sessions: this.listSessions(), terminals: 0, commandRuns: 0 }))
-    }
+    const cut = this.stoppingForUpdate && this.keeperOpts.updateResume ? cutTurns({ sessions: this.listSessions(), terminals: 0, commandRuns: 0 }) : []
     // The messages in progress are written as they stand — a shutdown must not swallow the last two seconds (#66).
     // Written, not closed: the supervisor may kill the host before the processes are down
     for (const [id, run] of this.record.streams) this.record.flushStream(id, run)
@@ -3062,6 +3082,9 @@ export class SessionManager {
     await Promise.allSettled([...this.adapters.values()].map((a) => a.settle?.()))
     // Closed once the processes are down, so their last deltas grow the open rows instead of opening new ones (#213)
     for (const id of [...this.record.streams.keys()]) this.record.closeStream(id)
+    if (cut.length && this.keeperOpts.updateResume) {
+      recordUpdateCut(this.keeperOpts.updateResume, cut.map((id) => ({ id, seq: this.store.messages.nextSeq(id) - 1 })))
+    }
     // Stamped after dispose finishes (see the comment on stampExternalSynced). Never stamped on a
     // crash — stamping the current time when the actual moment of death is unknown could swallow
     // whatever happened externally between death and discovery.

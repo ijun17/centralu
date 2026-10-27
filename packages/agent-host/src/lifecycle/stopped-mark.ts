@@ -1,6 +1,7 @@
-import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
+import { readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { UPDATE_RESUME_FILE, type UpdateResumeFile } from './update-resume.js'
+import { UPDATE_RESUME_PREFIX, type UpdateResumeFolder } from './update-resume.js'
 
 /**
  * The person's stop, kept in the data folder (#1143). A linked hub that finds no host running here starts one
@@ -34,26 +35,25 @@ export function markQuit(dataDir: string, now: number = Date.now()): void {
 }
 
 /**
- * The data folder's list of the turns an update cut (#1618, update-resume.ts): written by the host an update stops, read by
- * the next to start. Here beside the person's stop mark, the other file one host leaves in the folder for the next. A write
- * replaces it whole (a new file renamed over it), so a host stopped in the middle leaves the old list or the new, never half
+ * The data folder's lists of the turns an update cut (#1618, update-resume.ts): each written by a host an update stops,
+ * read by the next to start. Here beside the person's stop mark, the other file one host leaves in the folder for the next.
+ * Each list is written once, under a new name of its own (`wx`): nothing is renamed over a file another process may hold,
+ * and a host killed while it wrote leaves text that is not JSON, which the next start removes
  */
-export function updateResumeFile(dataDir: string): UpdateResumeFile {
-  const file = join(dataDir, UPDATE_RESUME_FILE)
+export function updateResumeFolder(dataDir: string): UpdateResumeFolder {
+  // `update-resume.<uuid>.json`, the names `add` gives (UPDATE_RESUME_PREFIX)
+  const NAME = /^update-resume\.[0-9a-f-]{36}\.json$/
   return {
-    read: () => {
+    names: () => readdirSync(dataDir).filter((n) => NAME.test(n)),
+    read: (name) => {
       try {
-        return readFileSync(file, 'utf8')
+        return readFileSync(join(dataDir, name), 'utf8')
       } catch (err) {
         if (err instanceof Error && 'code' in err && err.code === 'ENOENT') return null
         throw err
       }
     },
-    write: (text) => {
-      const next = `${file}.${process.pid}.tmp`
-      writeFileSync(next, text)
-      renameSync(next, file)
-    },
-    remove: () => rmSync(file, { force: true }),
+    add: (text) => writeFileSync(join(dataDir, `${UPDATE_RESUME_PREFIX}${randomUUID()}.json`), text, { flag: 'wx' }),
+    remove: (name) => rmSync(join(dataDir, name), { force: true }),
   }
 }

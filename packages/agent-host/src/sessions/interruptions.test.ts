@@ -10,7 +10,8 @@ import { Store } from '../dev-services/store.js'
 import { PERSON } from '../mail/address.js'
 import { personReportRecorder, personWorkRecorder } from '../mail/delegation.js'
 import { MailService } from '../mail/service.js'
-import { parseUpdateResume, type UpdateResumeFile } from '../lifecycle/update-resume.js'
+import type { UpdateResumeFolder } from '../lifecycle/update-resume.js'
+import { memoryUpdateFolder } from '../lifecycle/update-resume.test-helpers.js'
 import { isNetworkFailure, RECONNECTING_FLAG_MS } from './interruptions.js'
 import { SessionManager, type AgentProcessHost } from './manager.js'
 import { eventually } from '../../../../tooling/test-timing.js'
@@ -143,8 +144,8 @@ afterEach(async () => {
   rmSync(root, { recursive: true, force: true })
 })
 
-/** `updateResume`: the data folder's list of the turns an update cut (#1618, lifecycle/update-resume.ts) */
-function host(o: { updateResume?: UpdateResumeFile } = {}) {
+/** `updateResume`: the data folder's lists of the turns an update cut (#1618, lifecycle/update-resume.ts) */
+function host(o: { updateResume?: UpdateResumeFolder } = {}) {
   const claude = new Adapter()
   const adapters = new Map<ToolName, AgentAdapter>([['claude', claude]])
   const mgr = new SessionManager(store, adapters, (e) => events.push(e), undefined, join(root, 'worktrees'), {
@@ -463,20 +464,8 @@ describe("a turn a linked hub's update cut (#1618)", () => {
   /** What went into the session's process since it was continued: Centralu's note, never a message of the person's */
   const sentTo = (h: ReturnType<typeof host>, id: string) => h.claude.handles.get(id)?.sent ?? []
   const lines = (id: string) => store.messages.loadMessages(id, 50).map((m) => JSON.stringify(m.payload))
-  /** The data folder's `update-resume.json`, played by a variable */
-  function folder(): UpdateResumeFile & { ids(): string[] | null } {
-    let held: string | null = null
-    return {
-      read: () => held,
-      write: (t) => {
-        held = t
-      },
-      remove: () => {
-        held = null
-      },
-      ids: () => (held === null ? null : parseUpdateResume(held)),
-    }
-  }
+  /** The data folder's lists of the turns an update cut, played by a map */
+  const folder = memoryUpdateFolder
   /** The hub's update stops the host: what is in a turn is listed as the sessions are let go of */
   const stopForUpdate = async (h: ReturnType<typeof host>) => {
     h.mgr.stopForUpdate()
@@ -489,17 +478,20 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     const { parent, child } = await parentAndChild(a)
     expect(info(a, child).state).toBe('working')
     await stopForUpdate(a)
-    // The turn the stop ended, and only it: the parent was at rest
-    expect(f.ids()).toEqual([child])
+    // The turn the stop ended, and only it (the parent was at rest), with where its conversation ended then
+    expect(f.turns()).toEqual([{ id: child, seq: store.messages.nextSeq(child) - 1 }])
 
     const b = host({ updateResume: f })
     // A hub reading the machine before the note went in sees a turn running, not one that ended
     expect(info(b, child)).toMatchObject({ state: 'working' })
     expect(info(b, child).interruption ?? null).toBeNull()
+    // And a hub whose link is back before the note went in is told the turn goes on: named from the start (#1626 review)
+    expect(sentTo(b, child)).toHaveLength(0)
+    expect(b.mgr.updateContinued().map((c) => c.sessionId)).toEqual([child])
     await eventually(() => sentTo(b, child).length === 1)
     expect(sentTo(b, child)[0]).toContain('Centralu on this machine was updated while your turn was running')
     expect(sentTo(b, child)[0]).toContain('Continue where you stopped. Check what already happened before repeating a step.')
-    // Sent: it leaves the list, and the file with it
+    // Sent: its list goes
     await eventually(() => f.ids() === null)
     expect(b.mgr.updateContinued().map((c) => c.sessionId)).toEqual([child])
     // Not the person's message: no user row, and the line says what happened
@@ -542,6 +534,114 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     await startNoticesRan()
     await new Promise((r) => setTimeout(r, 50))
     expect(d.claude.handles.has(child)).toBe(false)
+  })
+
+  it('a list left behind (a file held open when it was to go) continues no later turn there (#1626 review)', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const f = folder()
+    const a = host({ updateResume: f })
+    const { child } = await parentAndChild(a)
+    await stopForUpdate(a)
+    // A virus scanner holds the list when the next host is done with it: it cannot be removed
+    const remove = f.remove
+    f.remove = () => {
+      throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' })
+    }
+    const b = host({ updateResume: f })
+    await eventually(() => sentTo(b, child).length === 1)
+    expect(f.ids()).toEqual([child])
+    b.claude.handles.get(child)!.answer('Sidebar indent fixed.')
+    await eventually(() => info(b, child).state !== 'working')
+    // Later the person gives it a new turn, and their own stop (a quit, `serve --stop`) cuts it
+    await b.mgr.send(child, 'now the header')
+    await b.mgr.disposeAll()
+    f.remove = remove
+    const c = host({ updateResume: f })
+    // A quit's turn, told as one: not continued, not said to be an update's
+    expect(info(c, child)).toMatchObject({ state: 'idle', interruption: { reason: 'quit' } })
+    await startNoticesRan()
+    await new Promise((r) => setTimeout(r, 50))
+    expect(c.claude.handles.has(child)).toBe(false)
+    expect(lines(child).filter((l) => l.includes('Centralu continued it'))).toHaveLength(1)
+    // And the list that names the turn long over goes now
+    expect(f.ids()).toBeNull()
+  })
+
+  it('a list a host from before #1618 never read (a rollback) continues no turn that host or a later stop began (#1626 review)', async () => {
+    const f = folder()
+    const a = host({ updateResume: f })
+    const { child } = await parentAndChild(a)
+    await stopForUpdate(a)
+    // Rolled back to a host that knows no list: the turn ends as a quit's there, and the person continues it by hand
+    const old = host()
+    expect(info(old, child)).toMatchObject({ state: 'idle', interruption: { reason: 'quit' } })
+    await old.mgr.send(child, 'Continue')
+    // Updated again by hand: the person's stop of that host cuts the turn they gave it
+    await old.mgr.disposeAll()
+    const b = host({ updateResume: f })
+    expect(info(b, child)).toMatchObject({ state: 'idle', interruption: { reason: 'quit' } })
+    await startNoticesRan()
+    await new Promise((r) => setTimeout(r, 50))
+    expect(b.claude.handles.has(child)).toBe(false)
+    expect(f.ids()).toBeNull()
+  })
+
+  it('a list that cannot be written is said with the error, and those turns end as a stop\'s always did', async () => {
+    const said = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const f = folder()
+    f.add = () => {
+      throw Object.assign(new Error('EPERM: operation not permitted'), { code: 'EPERM' })
+    }
+    const a = host({ updateResume: f })
+    const { parent, child } = await parentAndChild(a)
+    await stopForUpdate(a)
+    expect(said.mock.calls.map((c) => String(c[0])).some((l) => l.includes('could not be listed') && l.includes('EPERM: operation not permitted'))).toBe(true)
+    const b = host({ updateResume: f })
+    expect(info(b, child)).toMatchObject({ state: 'idle', interruption: { reason: 'quit' } })
+    await eventually(() => reportsTo(parent, child).length === 1)
+    expect(reportsTo(parent, child)[0]).toContain('Centralu quit or restarted')
+  })
+
+  it('a Continue the tool takes while a second update stops the host is left to the next host, which continues and tells it once (#1626 review)', async () => {
+    const f = folder()
+    const a = host({ updateResume: f })
+    const { parent, child } = await parentAndChild(a)
+    await stopForUpdate(a)
+    const b = host({ updateResume: f })
+    // The tool takes the note late: after the second update's stop began
+    let accept: (() => void) | undefined
+    const create = b.claude.createSession.bind(b.claude)
+    b.claude.createSession = async (opts, emit) => {
+      const h = await create(opts, emit)
+      if (opts.sessionId !== child) return h
+      return Object.assign(h, {
+        sendTracked: (text: string, observer?: { accepted?: () => void }) => {
+          h.send(text)
+          return new Promise<void>((r) => {
+            accept = () => {
+              observer?.accepted?.()
+              r()
+            }
+          })
+        },
+      })
+    }
+    await eventually(() => accept !== undefined)
+    const stopping = stopForUpdate(b)
+    accept!()
+    await stopping
+    // A host leaving settles nothing: the first stop's list stays, and its own stop lists the turn again, the note included
+    expect(reportsTo(parent, child)).toHaveLength(0)
+    expect(f.files.size).toBe(2)
+    expect(f.ids()).toEqual([child])
+    // The next host continues it, and its parent hears it once
+    const c = host({ updateResume: f })
+    await eventually(() => sentTo(c, child).length === 1)
+    await eventually(() => reportsTo(parent, child).length === 1)
+    expect(reportsTo(parent, child)[0]).toContain('Centralu continued it there')
+    await eventually(() => f.ids() === null)
+    await startNoticesRan()
+    expect(reportsTo(parent, child)).toHaveLength(1)
   })
 
   it('lists only what is in a turn when the host stops: not a session the person stopped, nor one at rest; a stop not for an update lists nothing', async () => {
@@ -644,6 +744,8 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     expect(reportsTo(parent, child)[0]).toContain('stopped before finishing: Centralu quit or restarted during its turn')
     expect(reportsTo(parent, child)[0]).not.toContain('continued it there')
     expect(f.ids()).toBeNull()
+    // No longer named to a hub as going on
+    expect(b.mgr.updateContinued()).toEqual([])
   })
 })
 

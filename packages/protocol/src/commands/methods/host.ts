@@ -338,8 +338,9 @@ export const hostMethods = {
    * its logon, which came with it
    *
    * `forUpdate` (#1618, additive): a linked hub stops this host to update it, roll it back or put a version back, and starts
-   * one again in this folder. As it lets its sessions go, this host writes the ids of those in a turn to the folder's
-   * `update-resume.json` (docs/agent-host.md §4.8), so the host that starts next continues each of those turns once. A host
+   * one again in this folder. As it lets its sessions go, this host writes those in a turn to a list of its own in the
+   * folder, each with the last row of its conversation (docs/agent-host.md §4.8), so the host that starts next continues
+   * each of those turns once, while its conversation still ends there. A host
    * older than it ignores it and stops, and its turns end as a stop's always did
    */
   'host.stop': {

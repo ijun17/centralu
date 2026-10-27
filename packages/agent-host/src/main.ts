@@ -64,7 +64,7 @@ import { stopGitChildren } from './dev-services/git-exec.js'
 import { Gate } from './lifecycle/gate.js'
 import { Shutdown, signalMode, stopPlan } from './lifecycle/shutdown.js'
 import { crashRecorder, holdSignals, wireEndings } from './lifecycle/endings.js'
-import { clearStoppedMark, markQuit, updateResumeFile } from './lifecycle/stopped-mark.js'
+import { clearStoppedMark, markQuit, updateResumeFolder } from './lifecycle/stopped-mark.js'
 import { bridgeAddress, ControlChannel, KEEPS_AGENTS_ACROSS_SWAP, onDrain, standby, viewPort } from './swap-control.js'
 import { installScript, remoteRuntime } from './links/install.js'
 import { Links } from './links/links.js'
@@ -288,7 +288,7 @@ process.on('exit', ownership.release)
 // A host in memory has no data folder to say it in
 if (dbPath !== ':memory:') clearStoppedMark(dirname(dbPath))
 // The turns an update cut when it stopped the host before this one, and where this one lists those its own update stop ends (#1618)
-const updateResume = dbPath === ':memory:' ? undefined : updateResumeFile(dirname(dbPath))
+const updateResume = dbPath === ':memory:' ? undefined : updateResumeFolder(dirname(dbPath))
 
 start.at('hold signals')
 const signals = holdSignals(process, (line) => console.error(line))

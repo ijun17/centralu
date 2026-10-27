@@ -3,14 +3,14 @@
  * HO15), against a stand-in process the test sends signals and errors to.
  */
 import { EventEmitter } from 'node:events'
-import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { readdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { REPEAT_AFTER_MS, crashRecorder, guardErrors, holdSignals, watchParent, wireEndings } from './endings.js'
 import type { LeaveMode } from './shutdown.js'
-import { updateResumeFile } from './stopped-mark.js'
-import { dropFromUpdateResume, readUpdateResume, recordUpdateCut, UPDATE_RESUME_FILE } from './update-resume.js'
+import { updateResumeFolder } from './stopped-mark.js'
+import { recordUpdateCut, UpdateResumeLists } from './update-resume.js'
 import { removeTree, tempRoot } from '../temp-dir.test-helpers.js'
 
 function fakeProcess() {
@@ -244,20 +244,39 @@ describe('every ending, wired (HO15)', () => {
   })
 })
 
-// #1618: the data folder's list of the turns an update cut, through the real file system
-describe('updateResumeFile', () => {
-  it('reads none where there is no file, replaces it whole, and removes it', async () => {
+// #1618: the data folder's lists of the turns an update cut, through the real file system
+describe('updateResumeFolder', () => {
+  it('writes each stop its own list, under a new name, reads them all, and removes each once dealt with', async () => {
     const dir = tempRoot('cc-update-resume-')
     try {
-      const f = updateResumeFile(dir)
-      expect(f.read()).toBeNull()
-      recordUpdateCut(f, ['s1'])
-      recordUpdateCut(f, ['s2'])
-      expect([...readUpdateResume(updateResumeFile(dir))]).toEqual(['s1', 's2'])
-      expect(JSON.parse(readFileSync(join(dir, UPDATE_RESUME_FILE), 'utf8'))).toEqual({ v: 1, ids: ['s1', 's2'] })
-      dropFromUpdateResume(f, 's1')
-      dropFromUpdateResume(f, 's2')
-      expect(existsSync(join(dir, UPDATE_RESUME_FILE))).toBe(false)
+      const f = updateResumeFolder(dir)
+      expect(f.names()).toEqual([])
+      recordUpdateCut(f, [{ id: 's1', seq: 3 }])
+      recordUpdateCut(f, [{ id: 's2', seq: 5 }])
+      const names = readdirSync(dir)
+      expect(names).toHaveLength(2)
+      for (const n of names) expect(n).toMatch(/^update-resume\.[0-9a-f-]{36}\.json$/)
+      // Another file in the folder is no list, and a list gone meanwhile reads as none
+      writeFileSync(join(dir, 'update-resume.json'), '{"v":1,"ids":["s9"]}')
+      expect(f.names().sort()).toEqual([...names].sort())
+      expect(f.read('update-resume.00000000-0000-0000-0000-000000000000.json')).toBeNull()
+      const lists = new UpdateResumeLists(updateResumeFolder(dir))
+      expect(lists.cut('s1', 3) && lists.cut('s2', 5)).toBe(true)
+      lists.done('s1')
+      lists.done('s2')
+      expect(readdirSync(dir)).toEqual(['update-resume.json'])
+    } finally {
+      await removeTree(dir)
+    }
+  })
+
+  it('a list a host killed mid-write left goes at the next start', async () => {
+    const dir = tempRoot('cc-update-resume-')
+    try {
+      const torn = join(dir, 'update-resume.0b5c6a4e-1d2f-4c3b-8a9e-7f6d5c4b3a21.json')
+      writeFileSync(torn, '{"v":1,"turns":[{"id":"s1",')
+      expect([...new UpdateResumeLists(updateResumeFolder(dir)).ids()]).toEqual([])
+      expect(existsSync(torn)).toBe(false)
     } finally {
       await removeTree(dir)
     }

@@ -207,9 +207,9 @@ export class RemoteAgents {
    * turned Auto reconnect off, or disconnected it, while it was down
    */
   private readonly toldDown = new Map<string, boolean>()
-  /** The turns an update of their machine cut whose callers were told it goes on (#1618), by session and when it was continued: once each */
   /** The machines whose link this hub's own update or rollback holds, until it is back (#1618, `linkChanged`) */
   private readonly updateHolds = new Set<string>()
+  /** The turns an update of their machine cut whose callers were told it goes on (#1618), by session and when it was taken up: once each */
   private readonly toldCut = new Set<string>()
   /** The cards of a caller's turn its caller was told of, once each (`<session>\0<turn>\0<request>`, #676) */
   private readonly toldCards = new Set<string>()
@@ -1290,7 +1290,11 @@ export class RemoteAgents {
   /**
    * A child whose turn an update of its machine cut, found in a turn again once the link is back: the host that update
    * started continued it (#1618). Its caller is told so once, and that the report it is owed is that turn's end, so it
-   * neither waits on a link that came back nor continues the child by hand a second time
+   * neither waits on a link that came back nor continues the child by hand a second time.
+   *
+   * Whatever the order of the Continue and the reconnect (#1626 review): the machine's host names each turn it continues
+   * from its start on, before it answers any hello, not once the Continue is in (`SessionManager.updateContinued`), so a
+   * link back while the Continue is still on its way is told it too
    */
   private tellContinued(rec: RemoteAgent): void {
     const at = this.host.linkedReader?.continuedAfterUpdate?.(rec.sessionId)

@@ -131,7 +131,7 @@ export type HostServerOptions = {
   logon?: () => HostLogon | null
   /** A sign-in's serve waiting to take over from this host, read at every `hello_ok` (#1224, `host.handover`) */
   handover?: () => HostHandover | null
-  /** The turns this host continued at its start after an update cut them, read at every `hello_ok` (#1618) */
+  /** The turns this host continues because an update cut them, taken up at its start, read at every `hello_ok` (#1618) */
   updateContinued?: () => { sessionId: string; at: number }[]
   /** A connection that passed hello has ended (its `RpcContext.client`) */
   onClientGone?: (client: number) => void
