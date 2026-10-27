@@ -373,6 +373,12 @@ export interface SessionHandle {
   /** Injects saved "always allow" rules — so they survive a restart (FR-10, C-2) */
   applyRules?(matchers: readonly string[]): void
   /**
+   * The input that makes this session's tool compact (#1451), for a tool that can only say so per process (ACP: from the
+   * commands its agent advertised, docs/plans/acp-adapter.md §5.6). `null`: the tool has no compact command, so Centralu never
+   * compacts the session and `compact_self` answers that it cannot. Absent: `AgentAdapter.compactCommand` decides.
+   */
+  compactCommand?(focus: string | null): string | null
+  /**
    * The model and effort the tool's conversation turned out to run with when it was opened, when they are not what the
    * session was asked to run (#1369): a conversation started elsewhere keeps the model it was started with. Taken once,
    * by the host, as it registers the handle, so it can record them before anything reads the session's settings; a
@@ -459,7 +465,8 @@ export interface AgentAdapter {
   windowCeilingFor?(autoCompactTokens: number): number
   /**
    * The input that makes this tool compact its conversation (#1451), with the focus line for the summary when it takes one:
-   * what `SessionHandle.send` is given when Centralu compacts a session at a break. Absent: `/compact`.
+   * what `SessionHandle.send` is given when Centralu compacts a session at a break. A session's own
+   * `SessionHandle.compactCommand` comes first. Absent from both: `/compact` (Codex's slash handling routes it).
    */
   compactCommand?(focus: string | null): string
   /**

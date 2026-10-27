@@ -618,8 +618,11 @@ exactly as Codex's readings do. ACP's `usage_update.used` is the context in toke
   otherwise, as for Codex.
 - **An ordinary message is never taken for a compaction** (#59's note). OpenCode's measured `/compact` sends none of
   the above, only text and a drop in `usage_update.used`.
-- Asking for one: `compactCommand` exists on the adapter only when the profile has one, so `compact_self` and the
-  break-time compaction are offered only for those tools. For a tool whose `/compact` leaves no protocol marker
+- Asking for one: the session decides (`AcpSession.compactCommand`): `/compact` when the agent advertised a `compact`
+  command (`available_commands_update`, also the one said during a load's replay) or the profile measured that it
+  compacts on it without advertising it (`infersCompaction`, OpenCode 1.19.4), else null, and then `compact_self` answers
+  that it cannot and the break-time compaction leaves the session alone (Antigravity 1.4.3 advertises plan, logout and
+  usage; Cursor's `/compact` is answered with ordinary text). For a tool whose `/compact` leaves no protocol marker
   (OpenCode 1.19.4), the compact turn Centralu itself started is the one known boundary: the adapter marks it when that
   turn ends `end_turn` and the next reading is smaller than the one before. That reads our own request's outcome, not a
   message, and it is what open question 4 asks the owner to accept or refuse.
@@ -673,7 +676,7 @@ Values for the ACP adapter, decided per profile and, where marked, from the `ini
 | `processModel` | `per-session` | §3.1 |
 | `instructionChannel` | `server` | §6 |
 | `sleep` | false | until resume is measured to lose nothing on Cursor |
-| `compactCommand` (method) | absent | §5.6 |
+| `compactCommand` (method) | absent on the adapter; the session's says null for Cursor | §5.6 |
 | `listExternalSessions`, `readExternalHistory` (methods) | PR 2 | `sessionCapabilities.list` |
 
 No new capability field is needed for PR 1. Whether a tool offers compaction is the presence of `compactCommand`,

@@ -294,6 +294,47 @@ describe('the ACP session against a scripted agent', () => {
     })
   })
 
+  describe('whether Centralu may compact the session (#1451, §5.6)', () => {
+    const commands = (...names: string[]) => ({ sessionUpdate: 'available_commands_update', availableCommands: names.map((name) => ({ name, description: name })) })
+
+    /** A session whose agent advertised `names` during its first turn */
+    async function advertising(names: string[], withProfile: AcpProfile = profile) {
+      const w = world(base, {}, withProfile)
+      const s = await w.start()
+      const peer = w.peers[0]!
+      s.send('go')
+      await peer.next(isPrompt)
+      peer.update(SID, commands(...names))
+      peer.release('session/prompt', { result: { stopReason: 'end_turn' } })
+      await w.event((e) => e.type === 'turn_complete')
+      return s
+    }
+
+    it('has no compact command when the agent advertises none (Antigravity 1.4.3: plan, logout, usage)', async () => {
+      expect((await advertising(['plan', 'logout', 'usage'])).compactCommand?.(null)).toBeNull()
+    })
+
+    it('sends /compact to an agent that advertises it, and to one measured to compact on it without saying so', async () => {
+      expect((await advertising(['compact', 'usage'])).compactCommand?.('keep the PR')).toBe('/compact')
+      // OpenCode 1.19.4 compacts on `/compact` but does not list it
+      expect((await advertising(['init', 'review'], { ...profile, infersCompaction: true })).compactCommand?.(null)).toBe('/compact')
+    })
+
+    it('keeps the commands an agent advertises during the replay of a load, as Antigravity does', async () => {
+      const loading: PeerScript = (method, params, peer) => {
+        if (method === 'session/load') {
+          peer.update(String(params.sessionId), commands('compact', 'usage'))
+          return { result: {} }
+        }
+        return base(method, params, peer)
+      }
+      const w = world(loading, { resumeExternalId: SID })
+      const s = await w.start()
+      expect((await s.listCommands?.())?.map((c) => c.name)).toEqual(['compact', 'usage'])
+      expect(s.compactCommand?.(null)).toBe('/compact')
+    })
+  })
+
   it("says a compaction in protocol frames is manual inside Centralu's compact turn, and auto elsewhere", async () => {
     const w = world()
     const s = await w.start()

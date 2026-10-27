@@ -55,8 +55,9 @@ export type AcpSessionDeps = {
   /** Which of Centralu's own tools a call is, or null (`AcpProfile.centraluToolOf`) */
   centraluToolOf?: (call: ToolCallFields) => string | null
   /**
-   * The tool's `/compact` leaves no protocol frame (OpenCode 1.19.4, measured), so the one boundary known is Centralu's own
-   * compact turn: ended `end_turn` with a context reading smaller than the one before it (§5.6, owner 2026-10-26)
+   * The tool's `/compact` compacts without the agent advertising it and leaves no protocol frame (OpenCode 1.19.4, measured), so
+   * the one boundary known is Centralu's own compact turn: ended `end_turn` with a context reading smaller than the one before
+   * it (§5.6, owner 2026-10-26). It is also what makes Centralu send that `/compact` at all (`AcpSession.compactCommand`)
    */
   infersCompaction?: boolean
   /** Where this tool's ACP differs from the common shape (`AcpProfile.shape`) */
@@ -129,6 +130,16 @@ export class AcpSession extends CoreSession<AcpWire> implements SessionHandle {
   async listCommands(): Promise<{ name: string; description?: string; argumentHint?: string }[]> {
     return this.wire.commands
   }
+
+  /**
+   * `/compact` when this agent compacts on it, else null: Centralu then neither compacts the session at a break nor takes
+   * `compact_self` (§5.6). A bare `/compact` sent to an agent without the command is an ordinary prompt to its model, which
+   * compacts nothing (Antigravity 1.4.3 advertises only plan, logout and usage; Cursor's model answered it with a summary).
+   * The focus line is not passed: no ACP agent measured takes one.
+   */
+  compactCommand(): string | null {
+    return this.wire.compacts() ? '/compact' : null
+  }
 }
 
 class AcpWire implements ToolWire {
@@ -167,6 +178,9 @@ class AcpWire implements ToolWire {
   private tokensSoFar = NO_TOKENS
   /** The turns' costs added up (null until one is known): the cost of the running reading */
   private costSoFar: number | null = null
+
+  /** The conversation `session/load` or `session/resume` is opening: its commands come during the replay (measured, Antigravity 1.4.3) */
+  private opening: string | null = null
 
   constructor(
     private readonly opts: CreateSessionOpts,
@@ -229,10 +243,12 @@ class AcpWire implements ToolWire {
         const method = caps?.loadSession ? 'session/load' : caps?.sessionCapabilities?.resume !== undefined ? 'session/resume' : null
         if (!method) throw rpcError(`${this.label} cannot reopen a conversation`, 'session_not_found')
         this.replaying = method === 'session/load'
+        this.opening = resume.externalId
         try {
           OpenedSession.parse((await this.conn.request(method, { ...base, sessionId: resume.externalId }, 150_000)) ?? {})
         } finally {
           this.replaying = false
+          this.opening = null
         }
         this.conversation = resume.externalId
         this.costTotal = this.opts.runningCost?.last ?? null
@@ -386,6 +402,11 @@ class AcpWire implements ToolWire {
     return before === null || turn.costTotal < before ? null : turn.costTotal - before
   }
 
+  /** Whether the agent compacts on `/compact`: it advertises the command, or the profile measured that it does without saying so */
+  compacts(): boolean {
+    return this.deps.infersCompaction === true || this.commands.some((c) => c.name.replace(/^\//, '') === 'compact')
+  }
+
   /** Centralu's own compact turn, with no protocol frame for it, whose reading went down (§5.6) */
   private inferredCompaction(turn: Turn): boolean {
     if (!this.deps.infersCompaction || !turn.input.compact || turn.compacted) return false
@@ -403,7 +424,13 @@ class AcpWire implements ToolWire {
       return
     }
     const read = readUpdate(params)
-    if (!read || read.sessionId !== this.conversation || this.replaying) return
+    if (!read) return
+    // The commands are the process's, not the conversation's history: the ones said during a load's replay are kept
+    if ('update' in read && read.update.sessionUpdate === 'available_commands_update' && (read.sessionId === this.conversation || read.sessionId === this.opening)) {
+      this.commands = read.update.availableCommands.map((c) => ({ name: c.name, ...(c.description ? { description: c.description } : {}), ...(c.input?.hint ? { argumentHint: c.input.hint } : {}) }))
+      return
+    }
+    if (read.sessionId !== this.conversation || this.replaying) return
     const turn = this.turn
     this.resendLostCancel()
     if ('other' in read) {
@@ -412,9 +439,6 @@ class AcpWire implements ToolWire {
     }
     const u = read.update
     switch (u.sessionUpdate) {
-      case 'available_commands_update':
-        this.commands = u.availableCommands.map((c) => ({ name: c.name, ...(c.description ? { description: c.description } : {}), ...(c.input?.hint ? { argumentHint: c.input.hint } : {}) }))
-        return
       case 'usage_update':
         // Measured: a cancelled turn reads `used: 0` just before it ends, and the next turn reads the real size again
         if (u.used > 0 && u.size > 0) {

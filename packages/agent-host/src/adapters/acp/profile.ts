@@ -21,7 +21,11 @@ export type AcpProfile = {
    * its own rights (#1562 review)
    */
   centraluToolOf?(call: ToolCallFields): string | null
-  /** Its `/compact` leaves no protocol frame: the core reads Centralu's compact turn instead (`AcpSessionDeps.infersCompaction`) */
+  /**
+   * Its `/compact` compacts though the agent does not advertise the command, and leaves no protocol frame: the core reads
+   * Centralu's compact turn instead (`AcpSessionDeps.infersCompaction`). Measured, never assumed: without it a session is
+   * compacted only when its agent advertises `compact` (`AcpSession.compactCommand`)
+   */
   readonly infersCompaction?: boolean
   /** The parts of a tool's ACP that differ from the common shape the core reads (`AcpToolShape`) */
   readonly shape?: AcpToolShape

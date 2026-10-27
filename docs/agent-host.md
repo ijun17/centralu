@@ -1608,7 +1608,10 @@ the params with the method's schema and reads the answer with its result schema,
   long wait and a compaction in the middle of work breaks the flow. Both send the tool's own command as a turn of its own (`SessionEvents.sendCompact`:
   Claude `/compact [focus]`, Codex's `thread/compact/start` through its slash handling, which takes the bare command, so a focus line
   reaches Claude only), with no user row, and the conversation gets a line from Centralu when the tool reports it done:
-  "Compacted by Centralu (reason)".
+  "Compacted by Centralu (reason)". **Only a tool that has the command:** the session's own `SessionHandle.compactCommand` decides first
+  (ACP: `/compact` when the agent advertises `compact` or its profile measured `infersCompaction`, else null, docs/plans/acp-adapter.md §5.6),
+  then the adapter's. A null command means the session is never compacted by Centralu, and `compact_self` answers the agent that it cannot
+  (Antigravity, which advertises only plan, logout and usage, where a bare `/compact` would only be a prompt to its model).
   - **`compact_self`**, a tool of an ordinary session and the orchestrator (loaded, 453 characters; docs/tool-cost.md §15): asks for a compaction
     **after the current turn ends**, never in the middle of one, with an optional `focus` line (one line, 300 characters). Its description says when:
     work is finished and reported; before waiting more than a few minutes on a child, CI or the person; switching to an unrelated task.
