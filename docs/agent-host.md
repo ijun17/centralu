@@ -757,7 +757,7 @@ A row goes when a turn is run for it or for a later one, and every row goes with
 Nothing is guessed from the time between turns. A turn with no origin is refused, and so is everything after the person's
 message. A link's loss or a restart of the hub keeps the rows but not whose the turn is (`unknown`): a turn that opens
 meanwhile is not taken for the caller's, and the rows stay for the re-read when the link is back (`verify`): if the machine's
-last message is the caller's note, the turn that is run for it afterwards is the caller's. The same read says whether the machine lists the child in a turn (`lastUserMessage`'s `atRest`) and the row of that message: at rest, every message it took in has run, so the rows up to that row are dropped, which settles the turns that opened while the hub could not see them. An older machine sends no origin
+last message is the caller's note, the turn that is run for it afterwards is the caller's. The same read says whether the machine lists the child in a turn (`lastUserMessage`'s `atRest`) and the row of that message: at rest, no turn will open for a message before that one, so the rows before that row are dropped, which settles the turns that opened while the hub could not see them. That message's own row stays: the tool opens the turn run for a queued note a moment after the turn before it ended, with the child at rest in between. An older machine sends no origin
 and behaves as before this: a note it runs as a turn of its own stays refused. A refusal names the turn by what the hub saw start it: a person's message, another session's, or no message
 at all ("which this hub did not see begin"), never the person without a message of theirs.
 

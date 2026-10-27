@@ -286,7 +286,7 @@ export type LinkedSessions = {
   /**
    * The last message a machine's session took in (its text and sender, `from` qualified), or null for none within its
    * last thousand messages: whose turn it is running (#1038 review). `seq`: its row there. `atRest`: the session is in no
-   * turn as that machine lists it now (absent when it did not say), so every message it took in has run (#1604)
+   * turn as that machine lists it now (absent when it did not say), so no turn is still to open for a message before its last (#1604)
    */
   lastUserMessage(sessionId: string): Promise<Outcome<{ message: { text: string; from: unknown; seq?: number } | null; atRest?: boolean }>>
   /** The cards standing in a machine's session now, as that machine lists them (#1038: agent_session on a child there) */

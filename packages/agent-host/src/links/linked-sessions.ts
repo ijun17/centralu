@@ -516,7 +516,7 @@ export function linkedSessions(
           if (!isObj(first) || typeof first.seq !== 'number') break
           beforeSeq = first.seq
         }
-        // Whether it is in a turn now (#1604): every message it took in has run when it is not. Not told, not guessed
+        // Whether it is in a turn now (#1604): no turn is still to open for a message before its last when it is not. Not told, not guessed
         const listed: unknown = await m.call('sessions.list', {}).catch(() => null)
         const id = m.q.strip(sessionId, 'The session')
         const row: unknown = (Array.isArray(listed) ? listed : []).find((s) => isObj(s) && s.id === id)

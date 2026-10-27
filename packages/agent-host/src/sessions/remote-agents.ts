@@ -837,11 +837,13 @@ export class RemoteAgents {
     if (last.message && sent !== undefined && last.message.text === sent && this.fromHubHere(rec, last.message.from)) this.setWhose(rec, 'caller')
     else this.setWhose(rec, 'other', 'ran a turn there that you did not give it while the hub could not see it (the person on that machine, most likely), or what you sent never went in')
     /*
-     * The turns that opened while the hub could not see them (#1604): the child is in none now, so every message it took in
-     * has run, and no turn will open for a row up to the last of them. The rows that were left (`turnOpens`) are done with
+     * The turns that opened while the hub could not see them (#1604): the child is in none now, so no turn will open for a
+     * message before the last it took in, and the rows left for those (`turnOpens`) are done with. The last one's own row
+     * stays: the tool opens the turn run for a queued note a moment after the one before it ended, with the child at rest
+     * in between, and a stale row is harmless where a missing one refuses the caller
      */
     const upTo = last.message?.seq
-    if (last.atRest && upTo !== undefined) this.setGiven(rec.sessionId, this.givenRows(rec.sessionId).filter((row) => row > upTo))
+    if (last.atRest && upTo !== undefined) this.setGiven(rec.sessionId, this.givenRows(rec.sessionId).filter((row) => row >= upTo))
   }
 
   /**

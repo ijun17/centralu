@@ -541,17 +541,27 @@ describe("the turn on the child's machine, read as the caller's only on evidence
       ra.observe({ type: 'machine_status', machine: { id: 'm1', name: 'Box', status: 'unreachable' } })
       lastAtRest = true
       await readAgain(ra)
-      expect(ra.of(child.sessionId)?.given).toBeUndefined()
+      expect(ra.of(child.sessionId)?.given).toEqual([NOTE_ROW])
     })
 
-    it('keeps the rows of messages after the last the machine took in when it reads the child at rest', async () => {
+    it('keeps the row of the last message the machine took in when it reads the child at rest: the turn run for it may not have opened', async () => {
       const ra = await afterNote()
       ra.observe({ type: 'machine_status', machine: { id: 'm1', name: 'Box', status: 'unreachable' } })
-      // The note (row 2) is not the last message read: the row after the task's is the one it names
+      // The note was queued in the turn that ended; the tool opens its turn a moment later, the child at rest in between
+      lastUser = { text: sentTexts[0]!, from: HUB, seq: NOTE_ROW }
+      lastAtRest = true
+      await readAgain(ra)
+      opens(ra, { seq: NOTE_ROW, from: named })
+      expect(reportOwed()).toBe(true)
+    })
+
+    it('keeps the rows after the last message the machine took in when it reads the child at rest', async () => {
+      const ra = await afterNote()
+      ra.observe({ type: 'machine_status', machine: { id: 'm1', name: 'Box', status: 'unreachable' } })
       lastUser = { text: sentTexts[0]!, from: HUB, seq: 1 }
       lastAtRest = true
       await readAgain(ra)
-      expect(ra.of(child.sessionId)?.given).toEqual([NOTE_ROW])
+      expect(ra.of(child.sessionId)?.given).toEqual([1, NOTE_ROW])
     })
 
     it("is not the caller's after the hub restarted when the machine's last message is not that note", async () => {
