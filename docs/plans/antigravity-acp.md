@@ -263,9 +263,17 @@ never reaches the agent (review of #1685, follow-up 8).
 - The helper writes each address to a file of its own (`url-<run>`, through `part-<run>`) and exits 0 whatever
   happens: a non-zero exit would send the launcher on to its own default browser, inside the job.
 - Where no helper can be written (a path holding the separator `BROWSER` is split at, `;` on Windows and `:` elsewhere,
-  or `%s`), `BROWSER` is empty: the person's own still does not reach the agent, its launcher opens the default browser
-  itself (the old behaviour), and the host does not open a second one.
-- An address is opened once, and only `https` on a Google host.
+  or `%s`, e.g. a data folder named `100%s`), the sign-in and every session refuse to start the agent, with a line in
+  `host.log` and an error that names why (`NO_HELPER`). Letting it start with no `BROWSER` was the other choice: its
+  launcher would then start the default browser itself, on Windows inside the host's job (the browser Stop ends), and a
+  sign-in that stopped working would hang the session start for two minutes again. A path Centralu can still use is
+  worth less than that, and the error says what to change (deep review of #1687, follow-up 4).
+- An address is opened once, and only the agent's own login request (`agentSignInUrl`, `sign-in.ts`): `https`,
+  `accounts.google.com/o/oauth2/v2/auth`, `response_type=code`, the agent's OAuth client
+  (`1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com`, public, measured in 1.4.3's login
+  address on Windows and Linux) and a `redirect_uri` on the loopback, each named once. The folder is under the data
+  folder, where an agent of another session could write, so a Google page planted there is not opened either (deep
+  review of #1687, follow-up 5). Another release's client has to be measured again with its pin.
 
 `agents.cancelSignIn` ends the process, and with it the one-shot listener (ACP cannot cancel `authenticate`). Endings:
 success reads `_meta.antigravity.tier` (`{name, upgradeUri}`: the plan name, offered as `ToolSetup.plan`) and the line
@@ -295,18 +303,31 @@ measured: a browser nobody asked for, then "No response for session/new" after 1
 There is no switch to make it answer instead: `AGY_ACP_ENABLE_OAUTH` and env-based auth selection were removed in this
 build (its own warning says so), and only an explicit logout makes `session/new` answer `auth_required` (read in the
 binary). So the signal is structural: **the session's `BROWSER` helper running is the agent asking for a sign-in**
-(`SignInWanted`, `acp/profile.ts`), when what it hands over is a Google sign-in address (`signInUrl`). Another address
-is dropped, never opened and never taken for a sign-in: none is known in a session (its browser subagent drives a
-Chrome of its own over CDP, not `webbrowser`), and treating any browser open as a sign-in would end a working session
-and mark the tool signed out. The session then fails what it had asked (`session/new`, `session/load` or the
+(`SignInWanted`, `acp/profile.ts`), when what it hands over is the agent's own login request (`agentSignInUrl`, §4.3).
+`BROWSER` reaches every command the agent runs, so a Google address alone says nothing: `gcloud auth login` opens
+Google's authorize page with gcloud's own client and a localhost redirect, and a script may open a Google Doc. Taking
+those for a sign-in ended a working session and marked the tool signed out (deep review of #1687, blocker). The
+agent's browser subagent drives a Chrome of its own over CDP, not `webbrowser`, so it is not affected.
+
+**What a command the agent runs can no longer open.** Any other address handed to a session's helper is dropped: not
+opened, not taken for a sign-in, and logged as one line without the address (`a command in a session asked for a
+browser; not opened`). So under Antigravity, `python -m webbrowser`, `gcloud auth login` (which then waits on its
+localhost port), `gh browse` or `gh auth login --web` (`gh` appends the address after `BROWSER`, so the helper is handed
+the literal `%s`) open nothing, and the command believes it did. Opening them would widen what opens without a person's
+action: an agent in the person's default mode could open any page in the person's browser. No per-session "the person
+allowed it" exists to tie it to yet (`agents.signIn` is the only opener, and it is `'asks'`), so it is left closed; a
+notice in the conversation, or opening through the broker after a yes, is the follow-up if people need it.
+
+The session then fails what it had asked (`session/new`, `session/load` or the
 prompt) with the `not_logged_in` error above, which notes the tool `signed_out`; it does not open the address. While
 the conversation opens, the failed open ends the process; once open, the session ends the process itself and sleeps,
 and the next message opens the conversation again in a new process (`session/load`), which asks again if the sign-in
-is still needed and fails the same way. Where no helper could be written (§4.3) none of this happens: the old wait
-and the agent's own browser remain, on that rare path only. The session start's RPC
+is still needed and fails the same way. Where no helper could be written (§4.3) the session does not start at all. The session start's RPC
 error keeps the code `not_logged_in` (it was sent as `internal`). Measured on Windows with the real agent: a
 refresh-refused token and a `{}` token each failed `agents.createSession` with `not_logged_in` in about 8.5 s (the
-agent's own start is most of it), the line went `signed_out`, and no agent process or browser was left.
+agent's own start is most of it), the line went `signed_out`, and no agent process or browser was left. Measured
+again with the strict match: the same, in 8.5 s; and the address 1.4.3 handed the helper with `{}` was
+`accounts.google.com/o/oauth2/v2/auth` with the client above and `redirect_uri=http://127.0.0.1:<port>/`.
 
 Other ACP clients: the protocol's authentication page (agentclientprotocol.com, "Authentication") has the agent block
 a gated request with `auth_required` and the client answer with `authenticate` on one of the advertised `authMethods`,
