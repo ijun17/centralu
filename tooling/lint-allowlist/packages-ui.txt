@@ -55,13 +55,12 @@ packages/ui/src/features/grid/GridView.tsx @typescript-eslint/no-non-null-assert
 packages/ui/src/features/grid/GridView.tsx @typescript-eslint/unbound-method 5
 packages/ui/src/features/grid/drop.ts @typescript-eslint/no-non-null-assertion 1
 packages/ui/src/features/inbox/Inbox.tsx @typescript-eslint/no-unsafe-type-assertion 1
-packages/ui/src/features/inbox/Inbox.tsx @typescript-eslint/unbound-method 4
+packages/ui/src/features/inbox/Inbox.tsx @typescript-eslint/unbound-method 3
 packages/ui/src/features/inbox/InboxPill.tsx @typescript-eslint/no-non-null-assertion 1
 packages/ui/src/features/inbox/inboxKeys.ts @typescript-eslint/no-unsafe-type-assertion 2
 packages/ui/src/features/machines/AddRemoteProjectDialog.tsx @typescript-eslint/no-misused-promises 1
 packages/ui/src/features/machines/AddRemoteProjectDialog.tsx @typescript-eslint/no-unsafe-type-assertion 1
 packages/ui/src/features/machines/AddRemoteProjectDialog.tsx @typescript-eslint/unbound-method 1
-packages/ui/src/features/machines/MachineTag.tsx @typescript-eslint/unbound-method 1
 packages/ui/src/features/machines/remoteIde.ts @typescript-eslint/no-unsafe-type-assertion 1
 packages/ui/src/features/machines/remoteIde.ts @typescript-eslint/unbound-method 1
 packages/ui/src/features/notices/Notices.tsx @typescript-eslint/unbound-method 1
@@ -88,9 +87,6 @@ packages/ui/src/features/pinned-app/useAppBuilder.ts @typescript-eslint/no-unsaf
 packages/ui/src/features/project/AgentInstructionsDialog.tsx @typescript-eslint/no-misused-promises 1
 packages/ui/src/features/project/AgentInstructionsDialog.tsx @typescript-eslint/no-unsafe-type-assertion 1
 packages/ui/src/features/project/AgentInstructionsDialog.tsx @typescript-eslint/unbound-method 1
-packages/ui/src/features/project/CreateProjectDialog.tsx @typescript-eslint/no-misused-promises 2
-packages/ui/src/features/project/CreateProjectDialog.tsx @typescript-eslint/no-unsafe-type-assertion 2
-packages/ui/src/features/project/CreateProjectDialog.tsx @typescript-eslint/unbound-method 1
 packages/ui/src/features/project/DeleteProjectDialog.tsx @typescript-eslint/no-misused-promises 1
 packages/ui/src/features/project/DeleteProjectDialog.tsx @typescript-eslint/no-unsafe-type-assertion 1
 packages/ui/src/features/project/DeleteProjectDialog.tsx @typescript-eslint/unbound-method 1
@@ -153,7 +149,7 @@ packages/ui/src/features/settings/GrantList.tsx @typescript-eslint/no-unsafe-typ
 packages/ui/src/features/settings/MachinesSection.tsx @typescript-eslint/no-non-null-assertion 1
 packages/ui/src/features/settings/MachinesSection.tsx @typescript-eslint/unbound-method 13
 packages/ui/src/features/settings/Settings.tsx @typescript-eslint/no-non-null-assertion 3
-packages/ui/src/features/settings/Settings.tsx @typescript-eslint/unbound-method 14
+packages/ui/src/features/settings/Settings.tsx @typescript-eslint/unbound-method 13
 packages/ui/src/features/settings/SleepSection.tsx @typescript-eslint/unbound-method 2
 packages/ui/src/features/settings/ThemeSection.tsx @typescript-eslint/no-non-null-assertion 2
 packages/ui/src/features/settings/ThemeSection.tsx @typescript-eslint/no-unsafe-type-assertion 3
@@ -162,7 +158,6 @@ packages/ui/src/features/settings/TypographySection.tsx @typescript-eslint/unbou
 packages/ui/src/features/settings/UpdateLine.tsx @typescript-eslint/unbound-method 2
 packages/ui/src/features/settings/UpdatesSection.tsx @typescript-eslint/unbound-method 7
 packages/ui/src/features/settings/apply-update.ts @typescript-eslint/no-misused-promises 4
-packages/ui/src/features/settings/apply-update.ts @typescript-eslint/no-unsafe-type-assertion 1
 packages/ui/src/features/settings/apply-update.ts @typescript-eslint/unbound-method 2
 packages/ui/src/features/sidebar/GridButton.tsx @typescript-eslint/unbound-method 2
 packages/ui/src/features/sidebar/OrchestratorButton.tsx @typescript-eslint/no-non-null-assertion 3
@@ -175,7 +170,7 @@ packages/ui/src/features/sidebar/apps/UserAppSessions.tsx @typescript-eslint/unb
 packages/ui/src/features/sidebar/layout.ts @typescript-eslint/consistent-type-assertions 1
 packages/ui/src/features/sidebar/layout.ts @typescript-eslint/no-unsafe-type-assertion 1
 packages/ui/src/features/sidebar/project/ProjectBlock.tsx @typescript-eslint/unbound-method 2
-packages/ui/src/features/sidebar/project/ProjectHeader.tsx @typescript-eslint/unbound-method 7
+packages/ui/src/features/sidebar/project/ProjectHeader.tsx @typescript-eslint/unbound-method 6
 packages/ui/src/features/sidebar/project/ProjectSessionDialogs.tsx @typescript-eslint/unbound-method 2
 packages/ui/src/features/sidebar/project/ProjectSessionRow.tsx @typescript-eslint/unbound-method 1
 packages/ui/src/features/sidebar/project/TrustAsk.tsx @typescript-eslint/unbound-method 1
@@ -192,7 +187,7 @@ packages/ui/src/features/viewer/copy.ts @typescript-eslint/no-unsafe-type-assert
 packages/ui/src/store/apps.ts @typescript-eslint/no-unsafe-type-assertion 10
 packages/ui/src/store/connection.ts @typescript-eslint/consistent-type-assertions 1
 packages/ui/src/store/connection.ts @typescript-eslint/no-unsafe-member-access 5
-packages/ui/src/store/connection.ts @typescript-eslint/no-unsafe-type-assertion 11
+packages/ui/src/store/connection.ts @typescript-eslint/no-unsafe-type-assertion 10
 packages/ui/src/store/events/conversation.ts @typescript-eslint/no-non-null-assertion 4
 packages/ui/src/store/events/conversation.ts @typescript-eslint/no-unsafe-type-assertion 2
 packages/ui/src/store/events/sessions.ts @typescript-eslint/no-non-null-assertion 2
