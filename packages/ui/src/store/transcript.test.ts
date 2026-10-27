@@ -26,6 +26,16 @@ describe('a script’s first message (§8.1)', () => {
   })
 })
 
+describe('an image the agent viewed keeps the path it was viewed under (#1464)', () => {
+  it('live and stored, apart from `path`, which a stored row holds as the host’s own copy', () => {
+    const viewed = '/work/shots/out.png'
+    const live = feed([{ type: 'message_image', mime: 'image/png', data: '', path: viewed, name: viewed, note: 'the file is gone' }])
+    expect(live[0]).toMatchObject({ kind: 'image', path: viewed, name: viewed })
+    const stored = messagesToChat([row(4, 'image', { mime: 'image/png', data: '', path: '/data/attachments/ab12.png', name: viewed })])
+    expect(stored[0]).toMatchObject({ kind: 'image', path: '/data/attachments/ab12.png', name: viewed })
+  })
+})
+
 describe('appendChat — live events', () => {
   it('chunks with the same stored number are one item, a different number starts the next one (#77)', () => {
     const items = feed([

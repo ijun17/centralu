@@ -132,6 +132,10 @@ describe('ChatRow: what the agent said', () => {
     expect(row({ kind: 'image', seq: 3, mime: '', data: '', path: String.raw`C:\Users\a\shot.png`, note: 'the file is gone' }).text).toBe(
       'Viewed an image: shot.png — could not be read (the file is gone)',
     )
+    // After a reload `path` is the host's own copy: the line and the tooltip are of the viewed file, kept as `name`
+    const reloaded = row({ kind: 'image', seq: 3, mime: '', data: '', path: '/data/attachments/ab12.png', name: '/work/shots/out.png', note: 'the saved copy was cleared (total-size cap)' })
+    expect(reloaded.text).toBe('Viewed an image: out.png — could not be read (the saved copy was cleared (total-size cap))')
+    expect(reloaded.html).toContain('title="/work/shots/out.png"')
     expect(row({ kind: 'image', seq: 3, mime: '', data: '', note: 'too large (12MB)' }).text).toBe('An image from the agent — could not be shown (too large (12MB))')
   })
 

@@ -256,14 +256,15 @@ function ImageMessage({ mime, data, path, name }: { mime?: string; data: string;
  * on screen a moment before the window found it undrawable.
  */
 function ImageNote({ path, name: viewed, note }: { path?: string; name?: string; note?: string }) {
-  // A stored row's `path` is the host's own copy of the file; the name it was viewed under is `name`
-  const name = viewed ?? (path ? path.split(/[\\/]/).filter(Boolean).pop() : undefined)
+  // A stored row's `path` is the host's own copy of the file; `name` is the path it was viewed under
+  const file = viewed ?? path
+  const name = file?.split(/[\\/]/).filter(Boolean).pop()
   const reason = note ? ` (${note})` : ''
   return (
     <div
       className="cc-fade rounded-lg border border-line bg-surface-raised px-3 py-2 text-sm text-ink-faint"
       data-testid="msg-image-missing"
-      title={path}
+      title={file}
     >
       {name ? `Viewed an image: ${name} — could not be read${reason}` : `An image from the agent — could not be shown${reason}`}
     </div>

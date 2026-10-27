@@ -13,6 +13,11 @@ import { IMAGE_MAX_BYTES, imageEventFromDisk, inlineImageEvent, mcpImageEvents, 
 const PNG_B64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAFklEQVR4nGP8z8Dwn4EIwESMolGFtFEIAJ2yAhH+Iz4jAAAAAElFTkSuQmCC'
 
+// A real animated GIF (3 frames, 24x24): the trailer is found by walking its blocks, as its data holds 0x3b bytes too
+const GIF_B64 =
+  'R0lGODlhGAAYAIEAAAAUyAAAAAAAAAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQABQAAACwAAAAAGAAYAAAIKQABCBxIsKDBgwgTKlzIsKHDhxAjSpxIsaLFixgzatzIsaPHjyBDPgwIACH5BAEFAAEALAAAAAAYABgAgVAUyAAAAAAAAAAAAAgpAAEIHEiwoMGDCBMqXMiwocOHECNKnEixosWLGDNq3Mixo8ePIEM+DAgAIfkEAQUAAQAsAAAAABgAGACBoBTIAAAAAAAAAAAACCkAAQgcSLCgwYMIEypcyLChw4cQI0qcSLGixYsYM2rcyLGjx48gQz4MCAA7'
+const GIF = Buffer.from(GIF_B64, 'base64')
+
 let dir: string
 beforeAll(async () => {
   dir = await mkdtemp(join(tmpdir(), 'cc-images-'))
@@ -59,9 +64,16 @@ describe('imageEventFromDisk', () => {
     expect(e).toMatchObject({ data: '', note: 'the file is not a valid .png image' })
   })
 
-  it('an empty file is told apart from a missing one', async () => {
+  it('an empty file, or one holding only the start of a signature, is still being written, not an invalid image (#1464)', async () => {
     await writeFile(join(dir, 'empty.png'), '')
-    expect(await imageEventFromDisk('s1', join(dir, 'empty.png'))).toMatchObject({ data: '', note: 'the file is not a valid .png image' })
+    expect(await imageEventFromDisk('s1', join(dir, 'empty.png'))).toMatchObject({ data: '', note: 'the file is cut short (0 bytes): it may still be being written' })
+    await writeFile(join(dir, 'start.png'), Buffer.from([0x89, 0x50, 0x4e]))
+    expect(await imageEventFromDisk('s1', join(dir, 'start.png'))).toMatchObject({ data: '', note: 'the file is cut short (3 bytes): it may still be being written' })
+  })
+
+  it('a valid GIF with bytes after its end is sent (#1464)', async () => {
+    await writeFile(join(dir, 'padded.gif'), Buffer.concat([GIF, Buffer.alloc(64)]))
+    expect(await imageEventFromDisk('s1', join(dir, 'padded.gif'))).toMatchObject({ mime: 'image/gif' })
   })
 
   it('the mime comes from the bytes: a PNG saved as .jpg is still drawn', async () => {
@@ -76,7 +88,8 @@ describe('a whole picture is never held back for what follows its end (#1464)', 
     expect(sniffImage(Buffer.concat([png, Buffer.alloc(300, 7)]))).toEqual({ mime: 'image/png', complete: true })
     const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 0xff, 0xd9]), Buffer.alloc(5000, 9)])
     expect(sniffImage(jpeg)).toEqual({ mime: 'image/jpeg', complete: true })
-    expect(sniffImage(Buffer.concat([Buffer.from('GIF89a'), Buffer.from([0, 0, 0x3b, 0, 0, 0])]))).toEqual({ mime: 'image/gif', complete: true })
+    // Padding after the trailer: 64 bytes, well past where a search from the back would look (browsers draw it)
+    expect(sniffImage(Buffer.concat([GIF, Buffer.alloc(64)]))).toEqual({ mime: 'image/gif', complete: true })
   })
 
   it('a text file that starts with BM is no picture, and a reason never names the path', async () => {
@@ -102,8 +115,9 @@ describe('sniffImage (#1464)', () => {
     expect(sniffImage(Buffer.from(PNG_B64, 'base64'))).toEqual({ mime: 'image/png', complete: true })
     expect(sniffImage(jpeg([0xff, 0xd9]))).toEqual({ mime: 'image/jpeg', complete: true })
     expect(sniffImage(jpeg([1, 2, 3]))).toEqual({ mime: 'image/jpeg', complete: false })
-    expect(sniffImage(Buffer.concat([Buffer.from('GIF89a'), Buffer.from([0, 0, 0x3b])]))).toEqual({ mime: 'image/gif', complete: true })
-    expect(sniffImage(Buffer.concat([Buffer.from('GIF89a'), Buffer.from([0, 0, 1])]))).toEqual({ mime: 'image/gif', complete: false })
+    expect(sniffImage(GIF)).toEqual({ mime: 'image/gif', complete: true })
+    // Every cut of the file short of its trailer is cut short, whatever bytes it ends on
+    for (let cut = 6; cut < GIF.length; cut++) expect(sniffImage(GIF.subarray(0, cut))).toEqual({ mime: 'image/gif', complete: false })
     const webp = Buffer.concat([Buffer.from('RIFF'), Buffer.from([20, 0, 0, 0]), Buffer.from('WEBP'), Buffer.alloc(16)])
     expect(sniffImage(webp)).toEqual({ mime: 'image/webp', complete: true })
     expect(sniffImage(webp.subarray(0, 20))).toEqual({ mime: 'image/webp', complete: false })
@@ -116,6 +130,13 @@ describe('inline images (#843)', () => {
     const over = 'a'.repeat(Math.ceil(((IMAGE_MAX_BYTES + 1) * 4) / 3) + 4)
     expect(inlineImageEvent('s1', 'image/png', over)).toMatchObject({ data: '', note: 'too large (8MB)' })
     expect(inlineImageEvent('s1', '', 'aWJs')).toEqual({ type: 'message_image', sessionId: 's1', mime: 'image/png', data: 'aWJs' })
+  })
+
+  it('holds an inline image cut short to the same check as one read from disk, and takes its mime from the bytes (#1464)', () => {
+    const png = Buffer.from(PNG_B64, 'base64')
+    expect(inlineImageEvent('s1', 'image/png', png.subarray(0, 30).toString('base64'))).toMatchObject({ data: '', note: 'the file is cut short (30 bytes): it may still be being written' })
+    expect(inlineImageEvent('s1', 'image/png', '')).toMatchObject({ data: '', note: 'the file is cut short (0 bytes): it may still be being written' })
+    expect(inlineImageEvent('s1', 'image/jpeg', PNG_B64)).toMatchObject({ mime: 'image/png', data: PNG_B64 })
   })
 
   it("reads an MCP answer's image content and leaves its text alone", () => {

@@ -445,8 +445,8 @@ describe('a streaming message is stored as a single row (#66)', () => {
     await vi.waitFor(() => expect(stored()[0]?.path).not.toBe('/elsewhere/shot.png'))
     const [viewed, unread] = stored()
     // The row's path is the host's own copy; what was viewed stays named, for the line a reload may have to draw instead (#1464)
-    expect(viewed).toMatchObject({ data: '', name: 'shot.png', path: expect.stringMatching(/attachments.*\.png$/) })
-    expect(unread).toMatchObject({ data: '', path: '/elsewhere/gone.png', name: 'gone.png', note: 'the file is gone' })
+    expect(viewed).toMatchObject({ data: '', name: '/elsewhere/shot.png', path: expect.stringMatching(/attachments.*\.png$/) })
+    expect(unread).toMatchObject({ data: '', path: '/elsewhere/gone.png', name: '/elsewhere/gone.png', note: 'the file is gone' })
 
     // What a reload serves: the bytes read back from the copy, and the reason as it was
     const served = (await mgr.loadMessages(s.id, 50)).filter((r) => r.kind === 'image').map((r) => r.payload as { data?: string; note?: string })

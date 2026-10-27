@@ -244,8 +244,8 @@ export class SessionRecord {
   persistImage(e: Extract<NormalizedEvent, { type: 'message_image' }>, m: SessionInfo): number {
     const ts = Date.now()
     const seq = this.host.store.messages.nextSeq(m.id)
-    // What the agent viewed is named by its file, kept apart from `path`, which becomes this host's own copy (#1464)
-    const name = e.path?.split(/[\\/]/).filter(Boolean).pop()
+    // The file the agent viewed, kept apart from `path`, which becomes this host's own copy (#1464)
+    const name = e.path
     const row = (path: string | undefined, note: string | undefined): StoredMessage => ({
       sessionId: m.id, seq, role: 'system', kind: 'image', ts,
       payload: { type: 'message_image', sessionId: m.id, mime: e.mime, data: '', path, note, ...(name ? { name } : {}) } satisfies NormalizedEvent,
