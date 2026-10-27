@@ -11,7 +11,6 @@ const CLASSES: readonly { name: Exclude<Rights, object>; says: string }[] = [
   { name: 'window', says: "refused, never a card: the person's own answers and the window's own state" },
   { name: 'link', says: 'refused: a hub linked to this host calls it, with the token' },
   { name: 'bridge', says: "refused: a session's own tool channel, which a Codex bridge reaches with its own credential" },
-  { name: 'gate', says: "refused: a session's approval gate asking about one call, which only that session's gate key raises, on the front door's gate route" },
 ]
 
 export function renderMethodRightsDoc(): string {

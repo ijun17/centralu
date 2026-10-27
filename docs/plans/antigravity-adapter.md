@@ -1,5 +1,10 @@
 # The Antigravity CLI adapter (#59, #1498)
 
+> **Superseded (#59).** Antigravity now runs on Google's official ACP agent through the existing ACP adapter
+> ([acp-adapter.md](acp-adapter.md)). The `agy -p` stream-json adapter, its PreToolUse hook gate and the front-door
+> gate route this document designed were built (#1666, #1670, #1675) and then removed; no code of them remains. Read
+> what follows as a record of what was measured on `agy` 1.4.7, not as a design to build.
+
 Proposed 2026-10-26. A design to agree on before code: what was measured from Antigravity CLI (`agy`), how a
 Centralu session runs it, how its stream maps onto our events, how approvals reach a card although print mode cannot
 ask, and how it is tested from recorded frames (#1498). `agy` has no Agent Client Protocol (ACP) surface, so it gets

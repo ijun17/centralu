@@ -65,9 +65,7 @@ import { Gate } from './lifecycle/gate.js'
 import { Shutdown, signalMode, stopPlan } from './lifecycle/shutdown.js'
 import { crashRecorder, holdSignals, wireEndings } from './lifecycle/endings.js'
 import { clearStoppedMark, markQuit } from './lifecycle/stopped-mark.js'
-import { bridgeAddress, ControlChannel, gateAddress, KEEPS_AGENTS_ACROSS_SWAP, onDrain, standby, viewPort } from './swap-control.js'
-import { FrontDoorGates } from './transport/gate-door.js'
-import { limitedToken } from './transport/limited-token.js'
+import { bridgeAddress, ControlChannel, KEEPS_AGENTS_ACROSS_SWAP, onDrain, standby, viewPort } from './swap-control.js'
 import { installScript, remoteRuntime } from './links/install.js'
 import { Links } from './links/links.js'
 import { linkedSessions } from './links/linked-sessions.js'
@@ -803,14 +801,6 @@ const elevation = detectToken().then((t) => {
     )
   }
 })
-/*
- * The gate route of hook-gated tools (#1654, session-core.md §8.1): a key per session, in memory only. A session's adapter
- * opens its channel through this (`GateInbound`); no reason it sends a hook carries the host's credentials
- */
-const gates = new FrontDoorGates({
-  url: (sessionId) => gateAddress(launch.frontDoor, port, sessionId),
-  redact: () => [token, limitedToken(token), httpSecret],
-})
 const server = new HostServer({
   port: Number(values.port),
   ...(launch.startedByServe ? { servedBy: 'serve' as const } : {}),
@@ -835,8 +825,6 @@ const server = new HostServer({
   },
   // Every HTTP route sits behind this secret (transport/http.ts)
   http: { secret: httpSecret, routes: views.routes },
-  // A hook-gated tool's gate asks here, under its session's gate key (transport/gate-door.ts)
-  gate: gates,
   // Which build this is and where it came from, in every hello_ok (#280, keeper-link.ts)
   build: hostBuild(BUILD, launch.keeperSource),
   // Whether it runs with administrator rights, for a hub linked to it (#702); asked once below

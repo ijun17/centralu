@@ -1,6 +1,5 @@
 import type { RpcMethodName, RpcResult } from './commands.js'
 import { appsResults } from './commands/methods/apps.results.js'
-import { gateResults } from './commands/methods/gate.results.js'
 import { hostResults } from './commands/methods/host.results.js'
 import { mailResults } from './commands/methods/mail.results.js'
 import { orchestratorResults } from './commands/methods/orchestrator.results.js'
@@ -23,7 +22,6 @@ const RpcResults = {
   ...hostResults,
   ...mailResults,
   ...settingsResults,
-  ...gateResults,
 }
 
 /**

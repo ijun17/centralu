@@ -178,7 +178,6 @@ const SKIP: Record<string, string> = {
   'commands.run': 'runs a slash command — has side effects',
   'apps.sessionTools': 'Codex-bridge only — needs a live session with an external app attached (covered end-to-end by adapters/codex/apps.test.ts)',
   'apps.sessionCall': 'Codex-bridge only — same reason as apps.sessionTools',
-  'gate.ask': 'refused on the WebSocket to every connection: only a session’s gate key raises it, on the gate route (covered by transport/gate-door.test.ts)',
   'apps.remove': 'destructive — moves a user-folder app away (covered by sessions/mcp-apps.test.ts)',
   'apps.openView': 'needs an external app with a home view in a trusted project (covered by app-home-view.test.ts with a real app)',
   'apps.closeView': 'needs an instance opened by apps.openView — covered by the same test',

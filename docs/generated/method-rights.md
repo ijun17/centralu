@@ -248,9 +248,3 @@ With the limited credential: refused: a session's own tool channel, which a Code
 - `apps.sessionTools`
 - `orchestrator.tool`
 - `orchestrator.tools`
-
-## gate
-
-With the limited credential: refused: a session's approval gate asking about one call, which only that session's gate key raises, on the front door's gate route.
-
-- `gate.ask`
