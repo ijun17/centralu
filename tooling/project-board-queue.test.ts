@@ -26,7 +26,7 @@ import { attributeByPaths, carried, mainVerdict, nextStep, sortCommits } from '.
 // @ts-expect-error — plain .mjs of a Centralu app
 import { classifyRun, looksLikeNetworkError, onFlakyList } from '../.centralu/apps/project-board/run-failure.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
-import { GitError, isAncestor, isNetworkFailure, showFile } from '../.centralu/apps/project-board/git.mjs'
+import { filesHolding, GitError, isAncestor, isNetworkFailure, showFile } from '../.centralu/apps/project-board/git.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { judgeBranch } from '../.centralu/apps/project-board/queue-integrate.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
@@ -4864,7 +4864,7 @@ describe('the integrator lands an auto-tier branch without a pull request from i
     // Main's CI on Windows (2026-10-27) read docs/nowhere as `retry`: the answer was read from the first line of a failed
     // fetch, so any line git printed before "couldn't find remote ref" turned it into a failure of the moment.
     // GIT_TRACE prints such lines every time.
-    const repo = integrateRepo({ 'docs/empty': {} })
+    const repo = integrateRepo({ 'docs/empty': {}, 'docs/guide': { 'docs/guide.md': 'read it top down\n' } })
     vi.stubEnv('GIT_TRACE', '1')
     try {
       const missing = await judgeBranch({ dir: repo.work, repo: 'ijun17/centralu', branch: 'docs/nowhere', defaultBranch: 'main' })
@@ -4877,11 +4877,44 @@ describe('the integrator lands an auto-tier branch without a pull request from i
       const main = repo.main
       expect(await showFile(repo.work, main, 'docs/none.md')).toBeNull()
       expect(await showFile(repo.work, main, 'docs/guide.md')).toBe('base\n')
-      await expect(showFile(repo.work, '0'.repeat(40), 'docs/guide.md')).rejects.toBeInstanceOf(GitError)
-      expect(await isAncestor(repo.work, main, main)).toBe(true)
+      // A commit that is not in the repository has no such file either (as before), in one answer
+      expect(await showFile(repo.work, '0'.repeat(40), 'docs/guide.md')).toBeNull()
+      expect(await showFile(repo.work, 'a'.repeat(40), 'docs/guide.md')).toBeNull()
+      // Not an ancestor is exit 1 with a trace line printed, not an error; an unknown commit is the error (128)
+      const tip = repo.heads['docs/guide']!
+      expect(await isAncestor(repo.work, main, tip)).toBe(true)
+      expect(await isAncestor(repo.work, tip, main)).toBe(false)
+      await expect(isAncestor(repo.work, 'a'.repeat(40), main)).rejects.toBeInstanceOf(GitError)
+      // Nothing found is exit 1 with the trace line too; a commit that is not there is the error
+      expect(await filesHolding(repo.work, tip, ['no such text anywhere'])).toEqual([])
+      expect(await filesHolding(repo.work, tip, ['read it top down'])).toEqual(['docs/guide.md'])
+      await expect(filesHolding(repo.work, 'a'.repeat(40), ['base'])).rejects.toBeInstanceOf(GitError)
     } finally {
       vi.unstubAllEnvs()
     }
+  }, 60_000 * SLOW)
+
+  it('keeps a failed fetch as a retry with the exit code and stderr, which fetch it was, and what ls-remote said', async () => {
+    const repo = integrateRepo({ 'docs/guide': { 'docs/guide.md': 'read it top down\n' } })
+    const judge = (branch: string) => judgeBranch({ dir: repo.work, repo: 'ijun17/centralu', branch, defaultBranch: 'main' })
+    // The first fetch (main) fails: the remote is away, so ls-remote is not even asked about the branch
+    renameSync(repo.origin, `${repo.origin}.away`)
+    const first = await judge('docs/guide')
+    renameSync(`${repo.origin}.away`, repo.origin)
+    expect(first, JSON.stringify(first)).toMatchObject({ retry: true })
+    expect(first.missing).toBeUndefined()
+    expect(first.unjudged).toMatch(/main could not be fetched: the fetch of main \(the first fetch\) exited 128, stderr: .*fatal/)
+    // The second fetch (the branch) fails while the remote lists it: a ref whose commit the remote does not have is
+    // advertised by ls-remote (exit 0) and refused by the fetch (exit 128, "not our ref"). So it is not "missing"
+    mkdirSync(join(repo.origin, 'refs/heads/docs'), { recursive: true })
+    writeFileSync(join(repo.origin, 'refs/heads/docs/broken'), `${'a'.repeat(40)}
+`)
+    const second = await judge('docs/broken')
+    expect(second, JSON.stringify(second)).toMatchObject({ retry: true })
+    expect(second.missing).toBeUndefined()
+    expect(second.unjudged).toMatch(/the branch docs\/broken could not be fetched: the fetch of docs\/broken \(the second fetch, after main was fetched\) exited 128, stderr: .*not our ref.*; ls-remote exit 0: docs\/broken is on the remote/)
+    // And a branch that is not there is still missing
+    expect(await judge('docs/nowhere')).toMatchObject({ missing: true })
   }, 60_000 * SLOW)
 
   it('takes the record already open from the branch when it is handed over again, and queues it again, never a second pull request', async () => {
@@ -5069,14 +5102,22 @@ describe('the queue judges an integrated change again on each new head and befor
     // A new auto head, read while GitHub's copy cannot be fetched
     const more = pushTo(repo, 'docs/guide', { 'docs/more.md': 'more\n' })
     renameSync(repo.origin, `${repo.origin}.away`)
-    patchGh((s) => (s.prs['600'].headRefOid = more))
-    await until(() => /the integrator could not judge #600/.test(itemsOnDisk()[0]?.lastError ?? ''), 'a poll that could not judge it')
+    // The fake's state is written whole by both sides, and patchGh reads, changes and writes it back: a write of the fake gh
+    // (a batch forming around the first head: dispatch, merge) between the read and the write loses the new head, and nothing
+    // ever judges it (seen in this pull request's Windows CI: the item sat in batch-1 at the old head for the whole wait, lastError
+    // empty). So the new head is set again on each look until the poll has read it.
+    await until(() => {
+      if (gh().prs['600'].headRefOid !== more) patchGh((s) => (s.prs['600'].headRefOid = more))
+      return /the integrator could not judge #600/.test(itemsOnDisk()[0]?.lastError ?? '')
+    }, 'a poll that could not judge it')
     expect(stateOf((await call('merge_queue')).data, 600)).not.toBe('attention')
     expect(tierNotices()).toEqual([])
     // Back in reach, and CI passed: judged auto, and it lands
     renameSync(`${repo.origin}.away`, repo.origin)
-    patchGh((s) => passes(s, more))
-    await until((x) => stateOf(x, 600) === 'merged', 'the record to land', BATCH_WAIT_MS)
+    await until((x) => {
+      if (!gh().runs[more]) patchGh((s) => passes(s, more)) // set again until it holds, as above
+      return stateOf(x, 600) === 'merged'
+    }, 'the record to land', BATCH_WAIT_MS)
     expect(itemsOnDisk()[0].tierAt).toMatchObject({ head: more, tier: 'auto' })
     expect(notices().filter((e) => e.kind === 'attention')).toEqual([])
   })

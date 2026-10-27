@@ -100,12 +100,6 @@ export async function remoteFor(dir, repo) {
 }
 
 /**
- * Fetches refs of the remote by name and answers their commits, in order. They land under a name of
- * this app's own for a moment and are removed again: no branch or remote-tracking ref of the person's
- * moves. stack.mjs runs one restack at a time, so the names never collide; release.mjs names its own
- * `space` per call.
- */
-/**
  * Whether `remote` has `ref` (`refs/heads/docs/x`), from the exit code of `git ls-remote --exit-code`: 2 is nothing
  * matched, and a match is taken only when it is `ref` itself (ls-remote matches a pattern on the name's tail, so
  * `refs/heads/refs/heads/docs/x` would match too). Anything else (no network, the remote away, a timeout) throws its
@@ -124,17 +118,12 @@ export async function remoteHas(dir, remote, ref) {
   return listed.split('\n').some((line) => line.trimEnd().endsWith(`\t${ref}`))
 }
 
-/** Whether `spec` names an object in `dir` (`git rev-parse --verify --quiet`: exit 1, nothing said, is no) */
-async function resolves(dir, spec) {
-  try {
-    await git(dir, ['rev-parse', '--verify', '--quiet', spec])
-    return true
-  } catch (e) {
-    if (e instanceof GitError && e.code === 1) return false
-    throw e
-  }
-}
-
+/**
+ * Fetches refs of the remote by name and answers their commits, in order. They land under a name of
+ * this app's own for a moment and are removed again: no branch or remote-tracking ref of the person's
+ * moves. stack.mjs runs one restack at a time, so the names never collide; release.mjs names its own
+ * `space` per call.
+ */
 export async function fetchRefs(dir, remote, refs, space = 'refs/centralu-restack') {
   const names = refs.map((_, i) => `${space}/${i}`)
   const specs = refs.map((r, i) => `+${r}:${names[i]}`)
@@ -203,16 +192,21 @@ export async function remoteRefs(dir, remote, prefix) {
 }
 
 /**
- * A file of a commit as text; null when the commit has no such file. Which failure it was is asked by exit codes (the
- * commit is there, the path in it is not), never read from git's message, whose first line is not always the error.
+ * A file of a commit as text; null when the commit has no such file, or the commit itself is not in the repository.
+ * One `git cat-file --batch`, which answers "<spec> missing" with exit 0 for both: nothing is read from git's error
+ * text, whose first line is not always the error, and nothing is asked twice. Any other failure (the repository, a
+ * promisor remote away) is git's exit code and throws.
  */
 export async function showFile(dir, rev, path) {
-  try {
-    return await git(dir, ['show', `${rev}:${path}`])
-  } catch (e) {
-    if (e instanceof GitError && (await resolves(dir, `${rev}^{commit}`)) && !(await resolves(dir, `${rev}:${path}`))) return null
-    throw e
-  }
+  const spec = `${rev}:${path}`
+  const answer = await git(dir, ['cat-file', '--batch'], { input: `${spec}\n` })
+  const header = answer.slice(0, answer.indexOf('\n'))
+  if (header.endsWith(' missing')) return null
+  const found = /^[0-9a-f]{40,64} (\w+) \d+$/.exec(header)
+  if (!found) throw new GitError(`git cat-file could not read ${spec}: ${header}`)
+  // A folder or anything else that is not a file: as `git show` prints it
+  if (found[1] !== 'blob') return git(dir, ['show', spec])
+  return answer.slice(header.length + 1, -1)
 }
 
 /** Every file of a commit's tree. */
