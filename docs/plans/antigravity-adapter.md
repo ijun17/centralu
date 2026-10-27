@@ -346,15 +346,26 @@ command), and the session keeps its old `externalId`. Open question 5 asks wheth
 ### 5.1 The gate
 
 `agy-gate.mjs` is the `PreToolUse` command. It reads the hook input, posts it to the session's gate address with the
-session's gate credential (`CC_AGY_GATE_URL`, `CC_AGY_GATE_TOKEN` from the environment, which `agy` passes on to its
-hooks), waits for a decision and prints `{"decision": "allow"}` or `{"decision": "deny", "reason": …}`. Which host end
-serves that address is not settled: a loopback listener per session with its own credential, or a host route on the
-bridge credential (#382). The session core's seam has no inbound path for it yet (#1654, gap 3), so the adapter keeps
-it behind a small interface (`GateInbound`) either can fill, and the script does not change between them.
+session's gate credential (`CC_GATE_URL`, `CC_GATE_TOKEN` from the environment, which `agy` passes on to its
+hooks), waits for a decision and prints `{"decision": "allow"}` or `{"decision": "deny", "reason": …}`. The host end
+is a route on the host's front door, `POST /gate/<sessionId>`, under a **gate-only key** of the session's own: random,
+held in the host's memory only, revoked when the session closes, and good for one method (`gate.ask`, rights class
+`gate`) for that session alone; not the bridge credential (#382), and no new listener (decided on #1654;
+session-core.md §8.1, `transport/gate-door.ts`). The adapter opens it through `GateInbound` and puts the channel's `env`
+in `agy`'s environment. The names are tool-neutral (`CC_GATE_URL`, `CC_GATE_TOKEN`), since the route is the front
+door's and not `agy`'s.
+
+**What the route answers.** `200` with its headers at once, then a space every 30 s while the card is open (Node's
+`fetch` gives up on an answer whose headers, or next piece of body, take over 300 s; JSON reads leading spaces as
+nothing), then one `{decision}` or `{decision: "deny", reason}`. A reason never carries the key or another credential.
+A wrong key, another session's key, a revoked one (the session closed, or the host restarted or was swapped: a host
+starts with no key) all get the front door's plain 404; a hook input with a `decision`, `permissionDecision` or
+`answer` field gets 400, since the channel asks and never answers; one over 1 MiB, 413, which the hook reports as a call too large to check; past 32 requests of one session (bodies still being read included), 429. A hook that `agy` kills past its entry's `timeout` has its request denied and its card withdrawn, so the person never answers a card for a call that will not run. The hook
+denies on every one of them.
 
 The hook is two files: `agy-gate.mjs`, the command, runs unconditionally under any name and only calls
 `gate-answer.mjs`, which holds the logic the tests drive. It uses Node's global `fetch` and touches no file or process
-(os-layer.md). It sends again only when the request never left (`ECONNREFUSED`, `ENOTFOUND`: a host swap), so a card is
+(os-layer.md). Before sending, it cuts a file's content longer than 64 KiB (the content arguments of the tools that write the text they are given, `CUTTABLE`) to its head and a marker naming the bytes cut and the SHA-256 of the whole (`cutLongArguments`); the card shows the head with the marker as the argument's text (no new element). Only what no decision reads is cut: the gate decides on those tools by their paths. A command, a path, a URL, a `Cwd` or an MCP tool's arguments are never cut, since the deny rules and the "always" rules read them whole; a call whose arguments alone are over 1 MiB is denied as too large to check. The door denies, undecided, a call with a cut marker anywhere else (`cutOutsideContent`: a hook of another version, a forged request). It sends again only when the request never left (`ECONNREFUSED`, `ENOTFOUND`: a host swap), so a card is
 never raised twice, and a `deny` reason names an error's code only, never its message (which can carry the address). The host side
 (`gate.ts`) decides from the preset and the always-allow rules, or raises an `approval_request` card and waits:
 
@@ -398,10 +409,10 @@ session can be the one whose requests go to the orchestrator (#1447).
 The gate fails closed: the host unreachable past a short retry across a swap → `deny` with the reason. The hook entry's
 `timeout` must outlast a person's answer (900 s proposed; 90 s measured to wait).
 
-**The gate's end sends its headers at once and then a space every so often until it decides.** Node's `fetch` gives up
-on an answer whose headers, or next piece of body, take over 300 s, and a person may take longer over a card; JSON reads
-leading spaces as nothing, so the heartbeat does not change the answer. Until that end exists (`feat/agy-gate`), a card
-left open past 300 s ends as `deny`.
+**The gate's end sends its headers at once and then a space every so often until it decides** (§5.1). Node's `fetch`
+gives up on an answer whose headers, or next piece of body, take over 300 s, and a person may take longer over a card;
+JSON reads leading spaces as nothing, so the heartbeat does not change the answer (`gate-door.test.ts` holds a card six
+minutes). The hook refuses a redirect (`redirect: 'error'`), so its key goes to the session's address only.
 
 How `agy` treats a hook that does not answer as asked was measured (§1.2): a timeout, a non-zero exit, output that is
 not JSON, `{}` and an unknown decision all keep the tool from running. **Empty output with exit 0 lets it run.** So
@@ -585,7 +596,7 @@ so it is run by hand before an `agy` bump, not on a schedule. The weekly surface
       check, interrupt and capabilities, as a pure wire (lines in, events out) replayed from the recordings; it plugs
       into the session core's `ToolWire` once the core's PRs 1, 3, 5 and 9 land.
    3. `feat/agy-gate`: the gate's decisions and presets, the plugin root, and Stop denying every open request first,
-      with each preset proved by a live run; its inbound path waits on the core's PR 3 (#1654, gap 3) and its card on
+      with each preset proved by a live run; its inbound path is the front door's gate route (§5.1, stacked on the core's PR 3) and its card on
       PR 5 and 8.
 
    Then the session wiring, detect and usage, `agy-gate.mjs` in the bundle, and agent-host.md §2–3.

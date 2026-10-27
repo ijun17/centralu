@@ -113,7 +113,7 @@ class Run {
       '-p=',
     ]
     this.write('spawn', { msg: { args } })
-    const env = { ...process.env, CC_AGY_GATE_URL: this.gateUrl, CC_AGY_GATE_TOKEN: this.gateToken, ...(opts.home ? { HOME: opts.home } : {}) }
+    const env = { ...process.env, CC_GATE_URL: this.gateUrl, CC_GATE_TOKEN: this.gateToken, ...(opts.home ? { HOME: opts.home } : {}) }
     const child = spawn('agy', args, { cwd: this.cwd, env, stdio: ['pipe', 'pipe', 'pipe'] })
     const proc = new Proc(child, this)
     this.procs.push(proc)

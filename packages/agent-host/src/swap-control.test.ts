@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { PassThrough } from 'node:stream'
 import { Drain, DrainCut } from './drain.js'
-import { bridgeAddress, ControlChannel, runDrain, standby, viewPort, type StandbyDeps } from './swap-control.js'
+import { bridgeAddress, ControlChannel, gateAddress, runDrain, standby, viewPort, type StandbyDeps } from './swap-control.js'
 import { readHandedToken } from './lifecycle/handed-token.js'
 import type { StoreInspection } from './dev-services/store.js'
 import { bridgeSessionOf } from './transport/bridge-token.js'
@@ -21,6 +21,14 @@ describe('the Codex bridge address (#280 step 3)', () => {
     const given = bridgeAddress('ws://127.0.0.1:61000', 52001, token, 's1')!
     expect(given.token).not.toContain(token)
     expect(bridgeSessionOf(token, given.token)).toBe('s1')
+  })
+})
+
+describe('the address a session’s gate hook posts to (#1654)', () => {
+  it('is the gate route on the front door’s port under a keeper, the host’s own without one, and nothing before it listens', () => {
+    expect(gateAddress('ws://127.0.0.1:61000', 52001, 's1')).toBe('http://127.0.0.1:61000/gate/s1')
+    expect(gateAddress(undefined, 52001, 's1')).toBe('http://127.0.0.1:52001/gate/s1')
+    expect(gateAddress('ws://127.0.0.1:61000', undefined, 's1')).toBeNull()
   })
 })
 

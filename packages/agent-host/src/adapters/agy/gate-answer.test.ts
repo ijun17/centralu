@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { gateAnswer, runHook } from './gate-answer.mjs'
+import { createHash } from 'node:crypto'
+import { ARGUMENT_BOUND, CUT_MARKER, CUTTABLE, cutLongArguments, cutOutsideContent, gateAnswer, runHook } from './gate-answer.mjs'
 
 /**
  * The gate hook `agy` runs before every tool call (docs/plans/antigravity-adapter.md §5). Measured on agy 1.4.7: a hook
@@ -9,7 +10,7 @@ import { gateAnswer, runHook } from './gate-answer.mjs'
  */
 
 const INPUT = JSON.stringify({ conversationId: 'conv-1', stepIdx: 2, toolCall: { name: 'run_command', args: { CommandLine: 'echo hi' } } })
-const ENV = { CC_AGY_GATE_URL: 'http://127.0.0.1:1/gate', CC_AGY_GATE_TOKEN: 'tok' }
+const ENV = { CC_GATE_URL: 'http://127.0.0.1:1/gate', CC_GATE_TOKEN: 'tok' }
 
 type Call = { url: string; init: RequestInit }
 const reply = (status: number, body: string) => () => Promise.resolve(new Response(body, { status }))
@@ -32,7 +33,7 @@ describe('the gate hook’s answer (gate-answer.mjs)', () => {
     const { calls, result } = run(reply(200, JSON.stringify({ decision: 'allow' })))
     expect(await result).toEqual({ decision: 'allow' })
     expect(calls).toHaveLength(1)
-    expect(calls[0]!.url).toBe(ENV.CC_AGY_GATE_URL)
+    expect(calls[0]!.url).toBe(ENV.CC_GATE_URL)
     expect(calls[0]!.init).toMatchObject({ method: 'POST', body: INPUT, headers: { authorization: 'Bearer tok' } })
   })
 
@@ -71,7 +72,7 @@ describe('the gate hook’s answer (gate-answer.mjs)', () => {
   }
 
   it('tries an unreachable gate again for its retry window, then denies', async () => {
-    const { calls, result } = run(refused, { ...ENV, CC_AGY_GATE_RETRY_MS: '1000' })
+    const { calls, result } = run(refused, { ...ENV, CC_GATE_RETRY_MS: '1000' })
     expect(await result).toMatchObject({ decision: 'deny', reason: expect.stringContaining('ECONNREFUSED') })
     expect(calls.length).toBe(5)
   })
@@ -84,8 +85,8 @@ describe('the gate hook’s answer (gate-answer.mjs)', () => {
   })
 
   for (const [what, env] of [
-    ['no address', { CC_AGY_GATE_TOKEN: 'tok' }],
-    ['no credential', { CC_AGY_GATE_URL: ENV.CC_AGY_GATE_URL }],
+    ['no address', { CC_GATE_TOKEN: 'tok' }],
+    ['no credential', { CC_GATE_URL: ENV.CC_GATE_URL }],
   ] as const) {
     it(`answers deny, asking no one, when the session gave it ${what}`, async () => {
       const { calls, result } = run(reply(200, JSON.stringify({ decision: 'allow' })), env)
@@ -94,10 +95,108 @@ describe('the gate hook’s answer (gate-answer.mjs)', () => {
     })
   }
 
+  it('follows no redirect: the key goes nowhere but the session’s address, and an allow from elsewhere is not taken', async () => {
+    // A gate address that redirects, with fetch's own rule: `redirect: 'error'` rejects, anything else follows
+    const elsewhere: Call[] = []
+    const { result } = run((call) => {
+      if (call.init.redirect === 'error') return Promise.reject(new TypeError('fetch failed', { cause: new Error('unexpected redirect') }))
+      elsewhere.push(call)
+      return reply(200, JSON.stringify({ decision: 'allow' }))()
+    })
+    expect((await result).decision).toBe('deny')
+    expect(elsewhere).toEqual([])
+  })
+
   it('keeps the address and credential out of what the model is told', async () => {
-    const leak = new TypeError(`bad header value Bearer tok for ${ENV.CC_AGY_GATE_URL}`)
+    const leak = new TypeError(`bad header value Bearer tok for ${ENV.CC_GATE_URL}`)
     const out = await run(() => Promise.reject(leak)).result
     expect(JSON.stringify(out)).not.toMatch(/tok|127\.0\.0\.1/)
+  })
+})
+
+describe('long arguments (cutLongArguments)', () => {
+  const call = (args: Record<string, unknown>) => JSON.stringify({ conversationId: 'c', stepIdx: 1, toolCall: { name: 'write_file', args } })
+
+  it('cuts a string past the bound to its head and a marker with the bytes cut and the whole one’s SHA-256', async () => {
+    const content = `${'a'.repeat(ARGUMENT_BOUND)}${'b'.repeat(3 * 1024 * 1024)}`
+    const out = JSON.parse(await cutLongArguments(call({ Path: '/w/f', Content: content }))) as { toolCall: { args: { Path: string; Content: string } } }
+    const digest = createHash('sha256').update(content).digest('hex')
+    expect(out.toolCall.args.Path).toBe('/w/f')
+    expect(out.toolCall.args.Content).toBe(`${'a'.repeat(ARGUMENT_BOUND)}
+[Centralu cut ${3 * 1024 * 1024} bytes of this argument before asking; SHA-256 of the whole: ${digest}]`)
+  })
+
+  it('sends what has nothing to cut, or is not JSON, exactly as it came', async () => {
+    const small = `{ "toolCall": {"args": {"Content": "${'x'.repeat(ARGUMENT_BOUND)}"}} }`
+    expect(await cutLongArguments(small)).toBe(small)
+    expect(await cutLongArguments('not json')).toBe('not json')
+  })
+
+  it('keeps two long writes with the same head apart, so a cut one never reads as another', async () => {
+    const head = 'x'.repeat(ARGUMENT_BOUND + 10)
+    expect(await cutLongArguments(call({ Path: '/w/f', Content: `${head}1` }))).not.toBe(await cutLongArguments(call({ Path: '/w/f', Content: `${head}2` })))
+  })
+
+  it('never cuts what a decision reads: a command, a path, a URL, a Cwd, an MCP tool’s arguments, any argument of another tool', async () => {
+    const padded = `${'#'.repeat(ARGUMENT_BOUND + 10)}
+rm -rf ~`
+    const inputs = [
+      JSON.stringify({ toolCall: { name: 'run_command', args: { CommandLine: padded, Cwd: padded } } }),
+      JSON.stringify({ toolCall: { name: 'call_mcp_tool', args: { ServerName: 's', ToolName: 't', Arguments: { q: padded } } } }),
+      JSON.stringify({ toolCall: { name: 'read_url_content', args: { Url: padded } } }),
+      JSON.stringify({ toolCall: { name: 'run_command', args: { Content: padded } } }),
+      call({ Path: padded, TargetFile: padded, Content: 'small' }),
+      JSON.stringify({ toolCall: { name: 'write_file', args: { Path: '/w/f' } }, workspacePaths: [padded] }),
+    ]
+    for (const input of inputs) expect(await cutLongArguments(input)).toBe(input)
+  })
+
+  it('cuts inside an edit’s chunks, and only there among its arguments', async () => {
+    const long = 'z'.repeat(ARGUMENT_BOUND + 10)
+    const input = JSON.stringify({ toolCall: { name: 'multi_replace_file_content', args: { TargetFile: '/w/f', Instruction: long, ReplacementChunks: [{ TargetContent: long, ReplacementContent: 'b' }] } } })
+    const out = JSON.parse(await cutLongArguments(input)) as { toolCall: { args: { Instruction: string; ReplacementChunks: { TargetContent: string }[] } } }
+    expect(out.toolCall.args.Instruction).toBe(long)
+    expect(out.toolCall.args.ReplacementChunks[0]?.TargetContent.includes(CUT_MARKER)).toBe(true)
+    expect(cutOutsideContent(out)).toBe(false)
+  })
+
+  it('never splits a character in two at the cut, and keeps a key named __proto__ a plain key', async () => {
+    const emoji = `${'a'.repeat(ARGUMENT_BOUND - 1)}😀${'b'.repeat(10)}`
+    const out = JSON.parse(await cutLongArguments(`{"__proto__": {"x": 1}, "toolCall": {"name": "write_file", "args": {"__proto__": {"y": 2}, "Content": ${JSON.stringify(emoji)}}}}`)) as {
+      toolCall: { args: Record<string, unknown> }
+    }
+    expect(Object.keys(out)).toEqual(['__proto__', 'toolCall'])
+    expect(Object.keys(out.toolCall.args)).toEqual(['__proto__', 'Content'])
+    expect(String(out.toolCall.args.Content).startsWith(`${'a'.repeat(ARGUMENT_BOUND - 1)}
+[Centralu cut`)).toBe(true)
+  })
+
+  it('finds a cut outside a file’s content, which the host then denies undecided (cutOutsideContent)', async () => {
+    const marked = `ls
+${CUT_MARKER}9 bytes of this argument before asking; SHA-256 of the whole: 00]`
+    expect(cutOutsideContent({ toolCall: { name: 'run_command', args: { CommandLine: marked } } })).toBe(true)
+    expect(cutOutsideContent({ toolCall: { name: 'write_file', args: { Path: marked, Content: 'x' } } })).toBe(true)
+    expect(cutOutsideContent({ toolCall: { name: 'run_command', args: { Content: marked } } })).toBe(true)
+    expect(cutOutsideContent({ toolCall: { name: marked, args: {} } })).toBe(true)
+    expect(cutOutsideContent({ toolCall: { name: 'write_file', args: { Path: '/w/f' } }, workspacePaths: [marked] })).toBe(true)
+    expect(cutOutsideContent([marked])).toBe(true)
+    expect(cutOutsideContent({ toolCall: { name: 'write_file', args: [marked] } })).toBe(true)
+    expect(cutOutsideContent({ toolCall: { name: 'write_file', args: { Path: '/w/f', Content: marked } } })).toBe(false)
+    expect(cutOutsideContent(JSON.parse(await cutLongArguments(call({ Path: '/w/f', Content: 'c'.repeat(ARGUMENT_BOUND + 1) }))))).toBe(false)
+    // Every tool and argument that may be cut is one the gate decides on by its path alone
+    expect(CUTTABLE.args).not.toContain('Path')
+  })
+
+  it('is what the hook sends', async () => {
+    let sent = ''
+    const fetch: typeof globalThis.fetch = (_u, init) => ((sent = typeof init?.body === 'string' ? init.body : ''), Promise.resolve(new Response('{"decision":"allow"}')))
+    await gateAnswer({ env: ENV, input: call({ Path: '/w/f', Content: 'q'.repeat(2 * 1024 * 1024) }), fetch })
+    expect(sent.length).toBeLessThan(ARGUMENT_BOUND + 1024)
+  })
+
+  it('says a call was too large to check when the gate answers 413', async () => {
+    const fetch: typeof globalThis.fetch = () => Promise.resolve(new Response('too large', { status: 413 }))
+    expect(await gateAnswer({ env: ENV, input: '{}', fetch })).toEqual({ decision: 'deny', reason: 'Centralu could not check this call: it is too large to check (over 1 MiB), so it was not run.' })
   })
 })
 

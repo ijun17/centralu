@@ -12,3 +12,13 @@ type GateIo = {
 export function gateAnswer(io: GateIo & { input: string }): Promise<GateAnswer>
 
 export function runHook(io: GateIo & { stdin: AsyncIterable<Uint8Array | string>; write: (line: string) => void }): Promise<void>
+
+export const ARGUMENT_BOUND: number
+
+export function cutLongArguments(input: string): Promise<string>
+
+export const CUTTABLE: { readonly tools: readonly string[]; readonly args: readonly string[] }
+
+export const CUT_MARKER: string
+
+export function cutOutsideContent(hookInput: unknown): boolean
