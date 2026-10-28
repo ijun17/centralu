@@ -56,7 +56,7 @@ export class MockPlatform implements Platform {
   /** The `emit` the modules are given, so they can broadcast without importing this class */
   private readonly forward: Emit = (event) => this.emit(event)
   private readonly store = new SessionStore(this.clock)
-  private readonly toolsMock = new ToolsMock()
+  private readonly toolsMock = new ToolsMock(this.forward)
   private readonly backgroundMock = new BackgroundTasksMock(this.forward)
   private readonly gitMock = new GitMock()
   private readonly projectStore = new ProjectStore(() => changedFileCount(this.gitMock.gitState.files))
@@ -263,6 +263,7 @@ export class MockPlatform implements Platform {
   keepRun(...a: Parameters<TrashMock['keepRun']>): void { this.trashMock.keepRun(...a) }
 
   // tools.ts
+  get setupCalls() { return this.toolsMock.setupCalls }
   get detected() { return this.toolsMock.detected }
   set detected(value: ToolsMock['detected']) { this.toolsMock.detected = value }
   get capabilityLimits() { return this.toolsMock.capabilityLimits }

@@ -14,7 +14,7 @@
 import { describe, expect, it } from 'vitest'
 import { createAdapters } from './registry.js'
 
-const descriptors = [...createAdapters({ antigravity: true }).values()].map((a) => a.descriptor)
+const descriptors = [...createAdapters().values()].map((a) => a.descriptor)
 
 describe('tool descriptors', () => {
   it('ships at least one adapter', () => {
@@ -27,7 +27,7 @@ describe('tool descriptors', () => {
   })
 
   it('keys the registry by the adapter its descriptor names', () => {
-    for (const [key, adapter] of createAdapters({ antigravity: true })) {
+    for (const [key, adapter] of createAdapters()) {
       expect(adapter.descriptor.name).toBe(key)
       expect(adapter.tool).toBe(key)
     }
@@ -54,7 +54,7 @@ describe('tool descriptors', () => {
  */
 describe('tool surfaces', () => {
   it('every shipped adapter says what its tool offers and what it limits', () => {
-    for (const [tool, adapter] of createAdapters({ antigravity: true })) {
+    for (const [tool, adapter] of createAdapters()) {
       expect(adapter.surface, `${tool} declares no surface`).toBeDefined()
       expect(adapter.surface!.baseline.version, `${tool} has no recorded baseline`).not.toBe('')
       for (const l of adapter.surface!.limitations) expect(l.measured.trim(), `${tool} ${l.name}`).not.toBe('')

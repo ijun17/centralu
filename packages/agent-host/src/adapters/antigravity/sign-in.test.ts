@@ -50,7 +50,9 @@ describe("Antigravity's sign-in", () => {
     expect(state.left()).toBe(0)
     expect(result.plan).toEqual({ name: 'Antigravity Starter Quota', upgradeUri: expect.stringMatching(/^https:\/\/antigravity\.google\//) })
     // Isolated as every Antigravity process is, with the BROWSER helper in a folder of its own
-    expect(specs[0]!.env).toMatchObject({ GEMINI_HOME: h.geminiHome, AGY_ACP_FORCE_FILE_STORAGE: '1' })
+    expect(specs[0]!.env).toMatchObject({ GEMINI_HOME: h.geminiHome })
+    // The agent picks its own token store (owner decision on #59): no store is forced
+    expect(specs[0]!.env).not.toHaveProperty('AGY_ACP_FORCE_FILE_STORAGE')
     expect(specs[0]!.env?.BROWSER).toMatch(/[\\/]\.sign-in-[^\\/]+[\\/]open-url(\.mjs' %s)?$/)
     expect(specs[0]!.command).toBe(inVersion(h, TEST_ARCHIVE.command))
     expect(opened).toEqual([ADDRESS])

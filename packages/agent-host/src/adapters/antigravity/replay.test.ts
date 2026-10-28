@@ -77,10 +77,9 @@ async function open(w: ReturnType<typeof world>, preset: PermissionPreset = 'nor
 const of = <T extends NormalizedEvent['type']>(events: readonly NormalizedEvent[], type: T) => events.filter((e): e is Extract<NormalizedEvent, { type: T }> => e.type === type)
 
 describe('Antigravity in the registry', () => {
-  it('is registered only when asked for, until its screens land', async () => {
+  it('is registered for everyone: the screens for its install and sign-in exist (#59)', async () => {
     const { createAdapters } = await import('../registry.js')
-    expect(createAdapters({ antigravity: false }).has('antigravity')).toBe(false)
-    expect(createAdapters({ antigravity: true }).get('antigravity')).toBeInstanceOf(AntigravityAdapter)
+    expect(createAdapters().get('antigravity')).toBeInstanceOf(AntigravityAdapter)
   })
 })
 
@@ -118,7 +117,7 @@ describe('Antigravity 1.4.3, replayed', () => {
     expect(of(w.events, 'usage_update').at(-1)?.tokens).toMatchObject({ inputTokens: 71032 })
   })
 
-  it('permissions: the agent stays in its default mode, offered reads only through Centralu, with its file viewers off', async () => {
+  it('permissions: the agent stays in its default mode, with no client reads offered and no tool filter sent', async () => {
     const w = world(recording('permissions'))
     const handle = await open(w)
     await turn(w, handle, 'Do these three steps', 'allow')
@@ -128,9 +127,10 @@ describe('Antigravity 1.4.3, replayed', () => {
     expect(methods).not.toContain('session/set_mode')
     expect(methods).not.toContain('session/set_config_option')
     const init = frames.find((f) => f.method === 'initialize') as { params: { clientCapabilities: { fs: unknown; terminal: unknown } } }
-    expect(init.params.clientCapabilities).toMatchObject({ fs: { readTextFile: true, writeTextFile: false }, terminal: false })
-    const created = frames.find((f) => f.method === 'session/new') as { params: { _meta?: { antigravity?: { disabledTools?: string[] } } } }
-    expect(created.params._meta?.antigravity?.disabledTools).toEqual(expect.arrayContaining(['view_file', 'search_directory', 'invoke_subagent']))
+    expect(init.params.clientCapabilities).toMatchObject({ fs: { readTextFile: false, writeTextFile: false }, terminal: false })
+    // The agent runs as shipped (owner decision on #59, 2026-10-28): no `_meta` on session/new, so no built-in tool is switched off
+    const created = frames.find((f) => f.method === 'session/new') as { params: Record<string, unknown> }
+    expect(created.params._meta).toBeUndefined()
     // Every answer is Allow once: `allow_always` (which the agent would keep as its own rule) is never sent
     const answers = frames.filter((f) => f.method === undefined).map((f) => JSON.stringify(f.result))
     expect(answers.every((a) => a.includes('"optionId":"allow"'))).toBe(true)

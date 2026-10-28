@@ -146,11 +146,12 @@ with `danger-full-access` (no sandbox) and `never` approval**, including a child
 matches Claude's `auto` bypass permissions. Commands have the person's OS access, including network and
 files outside the project. `safe` uses workspace-write with `untrusted` approval. `normal` follows the
 person's configured approval policy and sandbox mode, including a personal full-access mode.
-**Under `auto`, Antigravity's shell commands can read its account token** (the Google sign-in Centralu keeps in
-`<data>/tools/antigravity/gemini-home/`): its file viewers are off, Centralu refuses reads of that folder, and it
-refuses every edit or read request that names a file there under every preset (only the conversation's own plan folder
-is let through), but a command's words are not read, and a command runs unasked under `auto` as it does for every tool,
-so it exposes that account, not only the project ([plans/antigravity-acp.md](plans/antigravity-acp.md) §4.2).
+**Antigravity can read its account token on Windows and Linux** (the Google sign-in it keeps in
+`<data>/tools/antigravity/gemini-home/antigravity-acp/acp_token.json` there, and on a Mac without a usable Keychain):
+its own viewer and search read files without asking under every preset, as Codex can read its `auth.json` and Claude
+Code its credentials file on Linux, and under `auto` its commands, edits and subagents run unasked too. On a Mac with
+a usable Keychain the agent keeps the token there instead. Accepted by the owner (2026-10-28,
+[#59](https://github.com/ijun17/centralu/issues/59#issuecomment-6461617566); [plans/antigravity-acp.md](plans/antigravity-acp.md) §4.2).
 
 In the Codex adapter, every linked-worktree session still adds its repository's canonical git common
 directory to workspace-write's writable roots on start and resume (#585), retaining existing extra roots.
@@ -1253,27 +1254,22 @@ Centralu installs Google's Antigravity agent itself and keeps all of its state u
   measured runs, and development and review runs use a temporary `HOME`. The owner accepted this
   ([#59](https://github.com/ijun17/centralu/issues/59#issuecomment-6446873429);
   [plans/antigravity-acp.md](plans/antigravity-acp.md) §4.1).
-- **The token is a file the agent's own tools do not read.** The file backend is forced (no Keychain item, no OS
-  dialog in Centralu's name). The agent's built-in viewer read that file without asking in the spike, so its content
-  readers are switched off for every session and reads come to Centralu (`fs/read_text_file`), which answers inside the
-  session's folder only, by real path, and never under `tools/antigravity/`. A permission request that may reach
-  `tools/antigravity/` is refused under every preset and every saved rule, Auto included: the agent's edit tools
-  reached the token's folder unasked under Auto before (re-review). The guard fails closed. It reads every string of
-  the request (object keys and JSON inside strings too) as written, unquoted, with environment variables (`$VAR`, `%VAR%`, PowerShell's `$env:VAR`) and brace
-  alternatives filled in, as an absolute, `~`, `file:`, drive-relative or session-relative path and, for a glob, by
-  its fixed prefix. It judges each as written and as it resolves through links and junctions, with case folded. A path
-  inside the folder, or the folder or any parent of it (the data folder, `tools/`, the home folder, a drive), is
-  refused; on Windows so is a network path on the folder's own volume, or one whose volume cannot be read, and a WSL
-  share's `mnt<letter>` path is judged as that drive, and so is the same path reached from a session folder on a share; a distro's root and its
-  `mnt` count as parents of every drive (a distro with another mount point is not known). Every line
-  and word of every string, a shell command's too, is also read by its text for a path inside the folder. A request it
-  cannot read whole (deeper than 32 levels, more than 1024 strings) is refused unread (so a whole-file write of more than 1024 strings, or one line with seven or more `{a,b}` groups, is
-  declined). Only a file in the
-  conversation's own plan folder (`gemini-home/antigravity-acp/brain/<session id>/`, where `/plan` writes) that has no
-  second name (a hardlink to the token would) is let through. What this declines that it need not, and the full list, are in
-  [plans/antigravity-acp.md](plans/antigravity-acp.md) §4.2. What Auto still reaches: a shell command that reaches
-  the token without naming its path (a variable, `cd` then a relative name); it asks under every preset but Auto.
-  Centralu itself never opens the token file; it looks for its presence.
+- **The token is in the agent's own store, as Google ships it.** Centralu sets no store (owner 2026-10-28,
+  [#59](https://github.com/ijun17/centralu/issues/59#issuecomment-6461617566)). Agent 1.4.3 uses the macOS Keychain when
+  a probe of it works (service `gemini`, account `antigravity-acp`; the program is signed with Google's Developer ID, so
+  a Keychain prompt, if any, names Google's `agy_acp_server`, not Centralu), and otherwise the file
+  `gemini-home/antigravity-acp/acp_token.json` (mode 0600): always on Windows and Linux. Centralu never reads the
+  Keychain and never opens or looks for the file; signed in is read from `auth.type` in the agent's `settings.json`
+  alone, and a sign-in that no longer works is told when a session's process asks for the agent's own login (below).
+  **What Auto still reaches**, and more: nothing in Centralu keeps the agent from its own folder. Its viewer and search
+  read the token file without asking under every preset where the file is the store (Windows, Linux), as Codex reads
+  its `auth.json`; no built-in tool is switched off (no `_meta.antigravity.disabledTools`), no client read is offered
+  (`fs.readTextFile` false), and a permission request naming that folder is answered as any other of its kind (a card
+  under Safe, Normal and Edits, unasked under Auto or a saved rule). A subagent's request (`Run invoke_subagent?`, kind
+  `other`) runs unasked under Auto and asks with a card every time under the other presets: a call of kind `other` has
+  no rule key, so no saved "always" rule allows it. The guard of the first
+  build, which refused such requests under every preset, is gone, so a request is never refused for the path it names
+  ([plans/antigravity-acp.md](plans/antigravity-acp.md) §4.2 says why).
 - **The sign-in address stays out of logs and events.** It reaches the host through a private folder (`0700`) and the
   agent's stderr, is opened once and only when it is the agent's own login request (its OAuth client on Google's
   authorize page, a loopback redirect), and no `tool_setup` event carries it.

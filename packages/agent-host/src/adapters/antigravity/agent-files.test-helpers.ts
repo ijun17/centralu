@@ -1,7 +1,7 @@
-import { existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { spawn } from 'node:child_process'
-import { hostname, tmpdir } from 'node:os'
-import { join, posix, relative, resolve, sep } from 'node:path'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { NormalizedEvent, PermissionPreset } from '@cc/protocol'
 import type { AgentProcess, CreateSessionOpts } from '../contract.js'
@@ -31,7 +31,10 @@ export function fakeInstall(home: AgyHome, archive: AgyArchive = TEST_ARCHIVE): 
   writeFileSync(join(home.versionDir, INSTALL_MARKER), JSON.stringify({ version: AGY_RELEASE.version, sha256: archive.sha256 }))
 }
 
-/** What the agent's sign-in leaves on disk: `auth.type` and a token file (whose content no one reads) */
+/**
+ * What the agent's sign-in leaves on disk where its token goes to the file (Windows, Linux, a Mac without a usable
+ * Keychain): `auth.type` and a token file, whose content no one reads. On a Mac with the Keychain only the settings are left
+ */
 export function fakeSignIn(home: AgyHome): void {
   const dir = join(home.geminiHome, 'antigravity-acp')
   mkdirSync(dir, { recursive: true })
@@ -39,7 +42,14 @@ export function fakeSignIn(home: AgyHome): void {
   writeFileSync(join(dir, 'acp_token.json'), '{"decoy": true}')
 }
 
-/** The token file's path, as a read the agent might ask for */
+/** What the agent's sign-in leaves on disk where its token goes to the macOS Keychain: the settings only, no token file */
+export function fakeKeychainSignIn(home: AgyHome): void {
+  const dir = join(home.geminiHome, 'antigravity-acp')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'settings.json'), JSON.stringify({ auth: { type: 'oauth-personal' } }))
+}
+
+/** The token file's path, where the agent keeps the token in its file */
 export const tokenPath = (home: AgyHome) => join(home.geminiHome, 'antigravity-acp', 'acp_token.json')
 
 /** The folders under the install's root whose names start with `prefix` (what an install or a sign-in left) */
@@ -54,29 +64,6 @@ export const inRoot = (home: AgyHome, name: string) => join(home.root, name)
 export const folder = (path: string) => mkdirSync(path, { recursive: true })
 export const write = (path: string, text: string) => writeFileSync(path, text)
 export const pathIn = (...parts: string[]) => join(...parts)
-export const pathFrom = (from: string, to: string) => relative(from, to)
-export { sep }
-/** Node's POSIX path rules, the same on every OS */
-export const posixPaths = posix
-/** This machine's own name, as a network path may name it */
-export const thisHost = () => hostname()
-/** A symbolic link at `at` to `target`, or false where making one needs rights a test does not have (Windows) */
-export function link(target: string, at: string): boolean {
-  if (process.platform === 'win32') return false
-  symlinkSync(target, at)
-  return true
-}
-
-/** A second name `at` for the file `target` (a hardlink, which every OS lets a test make) */
-export const hardLink = (target: string, at: string) => linkSync(target, at)
-
-/** The drive letter the host process's own folder is on (a root-relative path such as the one starting with a backslash means that drive's root), upper case; Windows only */
-export const processDrive = () => resolve(sep).slice(0, 1).toUpperCase()
-
-/** A link at `at` to the folder `target` that every OS lets a test make: a junction on Windows (no right needed), a symbolic link elsewhere */
-export function folderLink(target: string, at: string): void {
-  symlinkSync(target, at, 'junction')
-}
 
 const hosts: (() => Promise<void>)[] = []
 
@@ -100,38 +87,6 @@ export async function endHosts(): Promise<void> {
 /** One of the committed recordings of 1.4.3 (`recordings/antigravity-1.4.3/<name>.jsonl`) */
 export function agyRecording(name: string): Recording {
   return loadRecording(fileURLToPath(new URL(`./recordings/antigravity-1.4.3/${name}.jsonl`, import.meta.url)))
-}
-
-/** A project folder with a file, and the agent's home inside it (as a session in Centralu's own data folder would be) */
-export function readsWorld(): { project: string; agent: string; notes: string; token: string; outside: string; link(): string | null; done(): void } {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-agy-reads-')))
-  const project = join(root, 'project')
-  const agent = join(project, '.agent-home')
-  mkdirSync(join(agent, 'antigravity-acp'), { recursive: true })
-  const notes = join(project, 'notes.txt')
-  const token = join(agent, 'antigravity-acp', 'acp_token.json')
-  const outside = join(root, 'outside.txt')
-  writeFileSync(notes, 'one\ntwo\nthree\n')
-  writeFileSync(token, '{"decoy": true}')
-  writeFileSync(outside, 'outside')
-  return {
-    project,
-    agent,
-    notes,
-    token,
-    outside,
-    /** A link in the project to the token, or null where this OS user may not make links (Windows without the right) */
-    link() {
-      const at = join(project, 'innocent.json')
-      try {
-        symlinkSync(token, at)
-        return at
-      } catch {
-        return null
-      }
-    },
-    done: () => rmSync(root, { recursive: true, force: true }),
-  }
 }
 
 export type Driven = {

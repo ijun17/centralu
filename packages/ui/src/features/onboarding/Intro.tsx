@@ -3,6 +3,8 @@ import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useLoad } from '../../app/useLoad.js'
 import { LoadFailed } from '../../components/LoadFailed.jsx'
+import { ToolSetupLine } from '../tools/ToolSetupLine.jsx'
+import { useLiveTools, useReloadOnReconnect } from '../tools/useToolSetup.js'
 import { ORCHESTRATOR_DEMANDS, useRefusals } from '../project/useToolChoice.js'
 
 /**
@@ -15,7 +17,9 @@ import { ORCHESTRATOR_DEMANDS, useRefusals } from '../project/useToolChoice.js'
  *
  * **The card doubles as the detection display.** There is no separate tool-detection screen — a
  * ready tool gets a live card, and a tool that is not ready gets a dim card with "Not connected"
- * and the prescription (an install or login command) standing right there together. Where the
+ * and the prescription (an install or login command) standing right there together. A tool Centralu
+ * installs itself shows its setup line instead, without the "Not connected" line, and is dimmed only before install; one the orchestrator
+ * cannot take (Antigravity, until it takes role text) is a plain refused card, reason and all, with no action. Where the
  * state is shown and where the action happens are the same spot.
  *
  * **Clicking a card only records the choice; no process starts** (lazy start). The orchestrator
@@ -29,7 +33,8 @@ export function Intro() {
    * and told the person to run a command "above" that was not there. It says what failed, with the same way to ask again.
    */
   const detected = useLoad<ToolStatus[]>(() => platform.agents.detect(), [platform])
-  const tools = detected.data ?? null
+  const tools = useLiveTools(detected.data ?? null)
+  useReloadOnReconnect(detected.reload)
   const detect = detected.reload
 
   // A tool that cannot take the orchestrator's role is shown with the reason, as one not connected is
@@ -60,25 +65,58 @@ export function Intro() {
         <div className="mt-2 grid grid-cols-2 gap-3">
           {cards.map((t) => {
             const ok = ready(t)
+            // A tool Centralu installs or signs in itself holds its action in the card; the others show the command to run, as before.
+            // One the orchestrator cannot take has no action to offer here (the sign-in lives in the new-session dialog): it is drawn as any refused card
+            const managed = (t.setup?.install === 'centralu' || t.setup?.signIn === 'centralu') && refusal(t.name) === null
+            // A card whose line holds buttons of its own (Install, Sign in) is not a <button>, which may not hold one: it acts as one once it can be picked
+            const Card = managed ? 'div' : 'button'
+            const pick = () => void completeIntro(t.name)
             return (
-              <button
+              <Card
                 key={t.name}
                 data-testid={`intro-card-${t.name}`}
-                disabled={!ok}
-                onClick={() => void completeIntro(t.name)}
+                {...(managed
+                  ? ok
+                    ? { role: 'button', tabIndex: 0, onClick: pick, onKeyDown: (e: React.KeyboardEvent) => {
+                        if (e.target !== e.currentTarget) return
+                        if (e.key === ' ') e.preventDefault()
+                        if (e.key === 'Enter') pick()
+                      },
+                      onKeyUp: (e: React.KeyboardEvent) => e.target === e.currentTarget && e.key === ' ' && pick() }
+                    : {}
+                  : { disabled: !ok, onClick: pick })}
                 /*
                  * Disabled is **dim** (user requirement) — gray text is the convention for
                  * "not available right now," and here that convention happens to be exactly
-                 * true.
+                 * true. A card with an action in it dims its words, not the action: a dimmed Install reads as disabled.
                  */
                 className={`rounded-lg border px-4 py-4 text-left transition-colors ${
                   ok
                     ? 'border-line bg-surface-raised hover:border-line-strong'
-                    : 'cursor-not-allowed border-line/60 bg-surface-raised/40 opacity-40'
+                    : managed
+                      ? // Dimmed only before it is installed: installed and waiting for a sign-in it is the person's next step, so not faded
+                        t.installed
+                        ? 'cursor-default border-line bg-surface-raised'
+                        : 'cursor-default border-line/60 bg-surface-raised/40'
+                      : 'cursor-not-allowed border-line/60 bg-surface-raised/40 opacity-40'
                 }`}
               >
-                <span className="block text-md font-medium text-ink">{t.label}</span>
-                {ok ? (
+                <span className={`block text-md font-medium text-ink ${managed ? `transition-opacity duration-150 ${t.installed ? '' : 'opacity-40'}` : ''}`}>{t.label}</span>
+                {managed ? (
+                  <>
+                    {ok && <span className="readout cc-setup-swap mt-1 block text-xs text-ink-faint">{t.detail}</span>}
+                    <ToolSetupLine
+                      status={t}
+                      label={t.label}
+                      login={t.login}
+                      shown={!ok}
+                      terminal={{ login: (label, command) => `${label}: run ${command} in a terminal`, missing: (label) => `${label} is not installed` }}
+                      redetect={() => void detect()}
+                      testId={`intro-card-${t.name}-setup`}
+                      className="mt-1.5 text-xs leading-body text-ink-muted"
+                    />
+                  </>
+                ) : ok ? (
                   <span className="readout mt-1 block text-xs text-ink-faint">{t.detail}</span>
                 ) : (
                   <>
@@ -93,7 +131,7 @@ export function Intro() {
                     )}
                   </>
                 )}
-              </button>
+              </Card>
             )
           })}
         </div>

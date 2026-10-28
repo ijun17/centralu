@@ -4,7 +4,7 @@ import { InstallFailure } from './failure.js'
 import { AGY_RELEASE } from './release.js'
 import { ownerGone, ownerTag, browserFolder } from './agent-files.js'
 import { AgySetup } from './setup.js'
-import { endHosts, fakeInstall, fakeSignIn, folder, inRoot, leftovers, otherHost, TEST_ARCHIVE, tempData, write } from './agent-files.test-helpers.js'
+import { endHosts, exists, fakeInstall, fakeKeychainSignIn, fakeSignIn, folder, inRoot, leftovers, otherHost, TEST_ARCHIVE, tempData, tokenPath, write } from './agent-files.test-helpers.js'
 import type { SignInResult } from './sign-in.js'
 
 // The start-up cleanup, as slow as a busy Windows disk makes it (CI on 08be80ba1): every install and sign-in waits for it,
@@ -185,6 +185,20 @@ describe('the setup line against its model', () => {
     w.finishSignIn('ok')
     await settle()
     expect(w.setup.current()).toMatchObject({ state: 'ready', plan: { name: 'Starter' } })
+  })
+
+  it('a sign-in kept in the macOS Keychain (its settings, no token file) is signed in, until a session finds it no longer works', () => {
+    const t = tempData()
+    data.push(t)
+    fakeInstall(t.home)
+    const setup = new AgySetup({ home: t.home, archive: TEST_ARCHIVE, version: AGY_RELEASE.version })
+    expect(setup.current().state).toBe('signed_out')
+    fakeKeychainSignIn(t.home)
+    expect(exists(tokenPath(t.home))).toBe(false)
+    expect(setup.current().state).toBe('ready')
+    // A stale sign-in: the session's process asked for the agent's own login (`SignInWanted`), and the line offers Sign in
+    setup.noteSignedOut()
+    expect(setup.current().state).toBe('signed_out')
   })
 
   it('on a system Google ships no build for, it is not installed and says why, and starts nothing', async () => {

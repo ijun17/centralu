@@ -12,6 +12,7 @@ import { useTools } from '../../store/selectors.js'
 import { useStore } from '../../store/store.js'
 import { appIdHint, deriveAppId } from './newAppId.js'
 import { useToolChoice } from './useToolChoice.js'
+import { ToolSetupLine } from '../tools/ToolSetupLine.jsx'
 
 /**
  * New app (M4 C-1) — asks for a name and the agent that builds it, and the host unpacks the app
@@ -174,14 +175,20 @@ ${parent?.trim() ?? ''}`
               }))}
             />
             {/* The reason it cannot be used is not hidden — a disabled button alone would look like it just does nothing */}
-            {blocked && (
-              <p className="mt-1.5 text-xs leading-body text-ink-muted" data-testid="new-app-tool-blocked">
-                {refusal(tool) ??
-                  (info(tool)?.installed
-                    ? `${toolMeta.label} needs a login. Run ${toolMeta.login} in a terminal, then open this again.`
-                    : `${toolMeta.label} is not installed (${info(tool)?.detail ?? 'not found'}).`)}
-              </p>
-            )}
+            <ToolSetupLine
+              status={info(tool)}
+              label={toolMeta.label}
+              login={toolMeta.login}
+              shown={blocked}
+              refusal={refusal(tool)}
+              terminal={{
+                login: (label, command) => `${label} needs a login. Run ${command} in a terminal, then open this again.`,
+                missing: (label, detail) => `${label} is not installed (${detail}).`,
+              }}
+              redetect={() => void redetect()}
+              testId="new-app-tool-blocked"
+              className="mt-1.5 text-xs leading-body text-ink-muted"
+            />
             {detectError && (
               <LoadFailed what="which tools are installed" error={detectError} onRetry={() => void redetect()} className="mt-1.5" testId="new-app-tool-detect-failed" />
             )}

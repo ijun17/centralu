@@ -60,22 +60,10 @@ export type AcpToolShape = {
   /** A permission request that is a question to the person (one option per answer), not an approval: asked as a question card */
   isQuestion?(req: RequestPermission): boolean
   /**
-   * A request refused under every preset and every saved rule, before any is read (Antigravity's subagents, and any request
-   * naming a file in its own folder); `cwd` is the session's folder, which a relative path is read from
-   */
-  neverAllowed?(req: RequestPermission, cwd: string): boolean | Promise<boolean>
-  /**
    * A permitted edit runs as a new call (another id) and the asked one later ends `failed` though the edit ran (measured on
    * Antigravity 1.4.3): the core folds the new call into the asked one, so its card ends as the edit did
    */
   readonly editRunsAsNewCall?: boolean
-  /**
-   * The client reads files for the agent (`fs/read_text_file`, advertised as `fs.readTextFile`): inside the session's folder
-   * only, and never under the folders this names (the agent's own home, which holds its token)
-   */
-  clientReads?: { refused(): readonly string[] }
-  /** What `session/new`, `session/load` and `session/resume` carry as `_meta` (Antigravity's built-in tool filter) */
-  sessionMeta?(): Record<string, unknown>
   /** The error for a conversation the tool refused as not signed in (`-32000`); the profile also notes the tool signed out */
   signedOut?(label: string): Error
   /** A line the tool wrote to stderr as it may reach host.log and a crash message: changed, or null to leave it out */

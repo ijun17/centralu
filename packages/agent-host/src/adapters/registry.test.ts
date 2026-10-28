@@ -22,9 +22,9 @@ const { createAdapters } = await import('./registry.js')
 describe("the registry's Antigravity", () => {
   it("hands the host's opener to the sign-in, and none when the host has none", () => {
     const openUrl = (_url: string) => {}
-    createAdapters({ antigravity: true, openUrl })
+    createAdapters({ openUrl })
     expect(profiles.at(-1)).toEqual({ signIn: { openUrl } })
-    createAdapters({ antigravity: true })
+    createAdapters()
     expect(profiles.at(-1)).toEqual({})
   })
 })

@@ -168,8 +168,8 @@ describe('guard/hand-made-looks', () => {
     expect(found).toEqual({ 'packages/ui/src/components/Pill.tsx': [], 'packages/ui/src/features/x.test.tsx': [], 'packages/ui/src/features/y.tsx': [1], 'apps/web/src/x.tsx': [] })
   })
   it('lets a listed file hold its counts: more fails with every one of that kind, fewer says the line is stale', async () => {
-    // Intro.tsx: one framed button (a tool card of the first run). A framed button is not a capsule unless it is rounded-full
-    const intro = 'packages/ui/src/features/onboarding/Intro.tsx'
+    // GridButton.tsx: one framed button (a sidebar tile). A framed button is not a capsule unless it is rounded-full
+    const intro = 'packages/ui/src/features/sidebar/GridButton.tsx'
     const one = 'const a = <button className="rounded-md border">x</button>'
     expect(await lines(intro, one, 'hand-made-looks')).toEqual([])
     expect(await lines(intro, one + NL + one, 'hand-made-looks')).toEqual([1, 2])

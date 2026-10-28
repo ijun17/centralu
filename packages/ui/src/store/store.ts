@@ -300,6 +300,7 @@ export const useStore = create<AppState>((rawSet, get) => {
     hostRequests: [],
     hostRequestsHeard: 0,
     agentVersions: null,
+    toolSetups: {},
     mail: null,
     mailThread: null,
     sleepPolicy: null,

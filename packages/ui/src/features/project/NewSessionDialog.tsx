@@ -15,6 +15,7 @@ import { Segmented } from '../../components/Segmented.jsx'
 import { TextInput } from '../../components/TextField.jsx'
 import { MachineTag } from '../machines/MachineTag.jsx'
 import { useToolChoice } from './useToolChoice.js'
+import { ToolSetupLine } from '../tools/ToolSetupLine.jsx'
 import { TrustProjectButton } from './TrustCard.jsx'
 import { envFilesOf, installCommandFor } from './worktreeSuggestions.js'
 
@@ -305,14 +306,21 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
             }))}
           />
           {/* The reason it cannot be used is not hidden — a disabled button alone would look like it just does nothing */}
-          {blocked && (
-            <p className="mt-2 text-xs leading-body text-ink-muted" data-testid="tool-blocked">
-              {refusal(tool) ??
-                (info(tool)?.installed
-                  ? `${toolMeta.label} needs a login — run ${toolMeta.login} in a terminal`
-                  : `${toolMeta.label} not found (${info(tool)?.detail ?? 'not installed'})`)}
-            </p>
-          )}
+          <ToolSetupLine
+            status={info(tool)}
+            label={toolMeta.label}
+            login={toolMeta.login}
+            machine={machine}
+            shown={blocked}
+            refusal={refusal(tool)}
+            terminal={{
+              login: (label, command) => `${label} needs a login — run ${command} in a terminal`,
+              missing: (label, detail) => `${label} not found (${detail})`,
+            }}
+            redetect={() => void redetect()}
+            testId="tool-blocked"
+            className="mt-2 text-xs leading-body text-ink-muted"
+          />
           {detectError && (
             <LoadFailed what="which tools are installed" error={detectError} onRetry={() => void redetect()} className="mt-2" testId="tool-detect-failed" />
           )}
