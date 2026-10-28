@@ -6,7 +6,7 @@ import type {
   TrashedRun,
   TrashedSession,
   TrashedSubagentSteps,
-} from '@cc/protocol'
+} from '@cc/protocol/client'
 
 /** Conversation search and approval-rule management (E-1, E-4) */
 export interface SearchPort {

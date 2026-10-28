@@ -1,4 +1,4 @@
-import type { PermissionPreset } from '@cc/protocol'
+import type { PermissionPreset } from '@cc/protocol/client'
 
 /**
  * The preset of a session a linked computer started (#1273: start_agent with a machine), on its sidebar row and its

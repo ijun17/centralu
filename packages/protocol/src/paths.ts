@@ -107,9 +107,11 @@ export function gitSourceError(url: string): string | null {
   if (!u) return 'Give the address of the repository to clone.'
   if (u.length > MAX_GIT_URL_LENGTH) return 'The repository address is too long.'
   // First: a helper's address is a command line, spaces and all, and this is the sentence that says why it is refused
-  if (u.includes('::')) return 'Transport helpers such as ext:: are not cloned — give an https:// or ssh address.'
+  if (u.includes('::'))
+    return 'Transport helpers such as ext:: are not cloned — give an https:// or ssh address.'
   // eslint-disable-next-line no-control-regex
-  if (/[\s\u0000-\u001f\u007f]/.test(u)) return 'The repository address has a space or a control character in it.'
+  if (/[\s\u0000-\u001f\u007f]/.test(u))
+    return 'The repository address has a space or a control character in it.'
   if (u.startsWith('-')) return 'A repository address cannot start with "-".'
   const scheme = /^([A-Za-z][A-Za-z0-9+.-]*):\/\//.exec(u)?.[1]?.toLowerCase()
   if (scheme) {
@@ -122,15 +124,24 @@ export function gitSourceError(url: string): string | null {
     } catch {
       return 'That is not a repository address.'
     }
-    if (!parsed.hostname || parsed.hostname.startsWith('-') || parsed.username.startsWith('-')) return 'The repository address names no host.'
-    if (parsed.password) return 'Leave the password out of the address — the machine’s own saved sign-in is used.'
+    if (!parsed.hostname || parsed.hostname.startsWith('-') || parsed.username.startsWith('-'))
+      return 'The repository address names no host.'
+    if (parsed.password)
+      return 'Leave the password out of the address — the machine’s own saved sign-in is used.'
     if (parsed.pathname.replace(/\/+/g, '') === '') return 'The repository address names no repository.'
     return null
   }
   // scp-like: [user@]host:path, where the host has no slash and is not a Windows drive letter
   const scp = /^(?:[A-Za-z0-9._~-]+@)?([A-Za-z0-9.-]+):(.+)$/.exec(u)
   const [, scpHost, scpPath] = scp ?? []
-  if (scpHost !== undefined && scpPath !== undefined && scpHost.length > 1 && !scpHost.startsWith('-') && !scpPath.startsWith('-')) return null
+  if (
+    scpHost !== undefined &&
+    scpPath !== undefined &&
+    scpHost.length > 1 &&
+    !scpHost.startsWith('-') &&
+    !scpPath.startsWith('-')
+  )
+    return null
   return 'A local folder is not cloned — give an https://, ssh:// or user@host:path address.'
 }
 
@@ -146,7 +157,11 @@ export function gitSourceError(url: string): string | null {
 export function gitRemoteKey(url: string): string | null {
   let u = url.trim()
   if (!u) return null
-  u = u.replace(/[?#].*$/, '').replace(/[/\\]+$/, '').replace(/\.git$/i, '').replace(/[/\\]+$/, '')
+  u = u
+    .replace(/[?#].*$/, '')
+    .replace(/[/\\]+$/, '')
+    .replace(/\.git$/i, '')
+    .replace(/[/\\]+$/, '')
   const [, schemeName, rest] = /^([A-Za-z][A-Za-z0-9+.-]*):\/\/(.*)$/.exec(u) ?? []
   let host: string
   let path: string
@@ -164,14 +179,22 @@ export function gitRemoteKey(url: string): string | null {
     host = scpHost
     path = scpPath
   }
-  path = path.replace(/\\/g, '/').replace(/^~\//, '').replace(/\/{2,}/g, '/').replace(/^\/+|\/+$/g, '')
+  path = path
+    .replace(/\\/g, '/')
+    .replace(/^~\//, '')
+    .replace(/\/{2,}/g, '/')
+    .replace(/^\/+|\/+$/g, '')
   if (!host || !path) return null
   return `${host.toLowerCase()}/${path}`
 }
 
 /** The folder name a clone of `url` gets by default: the repository's own name, without `.git` (#515) */
 export function repoNameOf(url: string): string {
-  const path = url.trim().replace(/[?#].*$/, '').replace(/[/\\]+$/, '').replace(/\.git$/i, '')
+  const path = url
+    .trim()
+    .replace(/[?#].*$/, '')
+    .replace(/[/\\]+$/, '')
+    .replace(/\.git$/i, '')
   return path.split(/[/:\\]/).pop() ?? ''
 }
 
@@ -200,10 +223,13 @@ export function folderNameError(name: string, windows: boolean): string | null {
   if (/[/\\]/.test(name)) return 'The name is one folder, without / or \\ in it.'
   // eslint-disable-next-line no-control-regex
   if (/[\u0000-\u001f\u007f]/.test(name)) return 'The name has a control character in it.'
-  if (new TextEncoder().encode(name).length > MAX_FOLDER_NAME_BYTES) return 'The name is too long for a folder.'
-  if (WINDOWS_RESERVED_NAME.test(name)) return `"${name}" is a name Windows keeps for a device — choose another.`
+  if (new TextEncoder().encode(name).length > MAX_FOLDER_NAME_BYTES)
+    return 'The name is too long for a folder.'
+  if (WINDOWS_RESERVED_NAME.test(name))
+    return `"${name}" is a name Windows keeps for a device — choose another.`
   if (windows) {
-    if (/[<>:"|?*]/.test(name)) return 'The name has a character Windows does not allow in a folder name (< > : " | ? *).'
+    if (/[<>:"|?*]/.test(name))
+      return 'The name has a character Windows does not allow in a folder name (< > : " | ? *).'
     if (/[. ]$/.test(name)) return 'A folder name on Windows cannot end with a dot or a space.'
   }
   return null

@@ -11,7 +11,17 @@ describe('serverNameProblem', () => {
     for (const ok of ['notes', 'a', '0', 'resource-search', 'a-b-c', 'x'.repeat(APP_ID_MAX_LENGTH)]) {
       expect(serverNameProblem(ok), ok).toBeNull()
     }
-    for (const bad of ['', '-notes', 'Notes', 'my_app', 'a__b', 'a b', 'x'.repeat(APP_ID_MAX_LENGTH + 1), '노트', 'notes!']) {
+    for (const bad of [
+      '',
+      '-notes',
+      'Notes',
+      'my_app',
+      'a__b',
+      'a b',
+      'x'.repeat(APP_ID_MAX_LENGTH + 1),
+      '노트',
+      'notes!',
+    ]) {
       expect(serverNameProblem(bad), bad).toBe('shape')
     }
   })

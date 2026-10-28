@@ -13,7 +13,7 @@ import type {
   UpdateSettingsParams,
   GitSource,
   UsageHistoryBy,
-} from '@cc/protocol'
+} from '@cc/protocol/client'
 import type {
   AgentPort,
   AlertKind,
@@ -26,7 +26,7 @@ import type {
   SystemPort,
   Unsubscribe,
 } from '../ports/index.js'
-import { SUBAGENT_STEPS_PAGE } from '@cc/protocol'
+import { SUBAGENT_STEPS_PAGE } from '@cc/protocol/client'
 import { isAppToolResult } from '../app-tool-result.js'
 import { RpcClient } from './rpc-client.js'
 
@@ -256,6 +256,18 @@ class WebAgentPort implements AgentPort {
   }
   detect(machine?: MachineRef) {
     return this.rpc.call('agents.detect', { ...on(machine) })
+  }
+  installTool(tool: ToolName, machine?: MachineRef) {
+    return this.rpc.call('agents.installTool', { tool, ...on(machine) })
+  }
+  cancelInstallTool(tool: ToolName, machine?: MachineRef) {
+    return this.rpc.call('agents.cancelInstallTool', { tool, ...on(machine) })
+  }
+  signInTool(tool: ToolName) {
+    return this.rpc.call('agents.signIn', { tool })
+  }
+  cancelSignInTool(tool: ToolName) {
+    return this.rpc.call('agents.cancelSignIn', { tool })
   }
   versions(force = false, machine?: MachineRef) {
     return this.rpc.call('agents.versions', { force, ...on(machine) })

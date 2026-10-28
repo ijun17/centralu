@@ -32,7 +32,7 @@ export function frameRecorder(sessionId: string, env: NodeJS.ProcessEnv = proces
     try {
       appendFileSync(file, `${JSON.stringify({ t: Date.now() - start, ...entry })}\n`)
     } catch (e) {
-      console.error('[acp] recorder could not write', file, errorMessage(e))
+      console.error('[frames] recorder could not write', file, errorMessage(e))
     }
   }
   return {

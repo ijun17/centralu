@@ -204,6 +204,12 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   // ── Per machine, named by an optional `machine` parameter ───────────────────────────────
   'agents.capabilities': { kind: 'machine' },
   'agents.detect': { kind: 'machine' },
+  // Downloaded and unpacked on the machine that will run it
+  'agents.installTool': { kind: 'machine' },
+  'agents.cancelInstallTool': { kind: 'machine' },
+  // The hub's own machine only: the tool's sign-in redirect goes to the loopback of the machine it runs on (#59)
+  'agents.signIn': HUB,
+  'agents.cancelSignIn': HUB,
   'agents.versions': { kind: 'machine' },
   'agents.setAutoApplyVersions': { kind: 'machine' },
   'agents.sleepPolicy': { kind: 'machine' },

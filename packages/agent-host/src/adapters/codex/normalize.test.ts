@@ -85,8 +85,9 @@ describe('streaming and tool calls', () => {
     expect(out[0]).toMatchObject({ steps: [{ text: 'X', status: 'pending' }] })
   })
 
-  it('an empty plan produces no event', () => {
-    expect(n('turn/plan/updated', { plan: [] })).toEqual([])
+  it('an emptied plan clears the panel, as Claude’s emptied todo list does; a notification with no plan says nothing', () => {
+    expect(n('turn/plan/updated', { plan: [] })).toEqual([{ type: 'plan_update', sessionId: S, steps: [] }])
+    expect(n('turn/plan/updated', {})).toEqual([])
   })
 
   // Output while a command is running (measured for #58): {threadId, turnId, itemId, delta}

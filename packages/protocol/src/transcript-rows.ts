@@ -112,7 +112,8 @@ export function appViewRecord(e: Extract<NormalizedEvent, { type: 'app_view' }>)
  * it is one row as it comes.
  */
 export function subagentStepRow(step: SubagentStep): Pick<StoredMessage, 'kind' | 'role'> {
-  const kind = step.type === 'message_delta' ? 'text' : step.type === 'reasoning_delta' ? 'reasoning' : step.type
+  const kind =
+    step.type === 'message_delta' ? 'text' : step.type === 'reasoning_delta' ? 'reasoning' : step.type
   return { kind, role: kind === 'text' || kind === 'reasoning' ? 'assistant' : 'system' }
 }
 

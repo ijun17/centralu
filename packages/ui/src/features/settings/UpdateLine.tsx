@@ -1,4 +1,4 @@
-import { APP_VERSION } from '@cc/protocol'
+import { APP_VERSION } from '@cc/protocol/client'
 import { useStore } from '../../store/store.js'
 import { Tooltip } from '../../components/primitives.jsx'
 import { Pill } from '../../components/Pill.jsx'

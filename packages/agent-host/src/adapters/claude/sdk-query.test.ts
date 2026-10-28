@@ -53,6 +53,27 @@ describe('the options of a session\'s query', () => {
   })
 })
 
+describe("the CLI's process", () => {
+  it('started here, ends with this host however the host ends (#1654 Q3)', () => {
+    const specs: unknown[] = []
+    const o = claudeQueryOptions({
+      sessionId: 's1',
+      opts: { sessionId: 's1', cwd: '/tmp', permissionPreset: 'normal' },
+      executablePath: undefined,
+      servers: {},
+      permissionOptions: { permissionMode: 'default' },
+      codeIntelligence: {},
+      spawn: (spec) => {
+        specs.push(spec)
+        throw new Error('not started')
+      },
+      canUseTool: () => Promise.resolve({ behavior: 'deny' as const, message: '' }),
+    })
+    expect(() => o.spawnClaudeCodeProcess({ command: 'claude', args: ['-p'], env: {} })).toThrow('not started')
+    expect(specs).toEqual([{ command: 'claude', args: ['-p'], env: {}, endsWithHost: true }])
+  })
+})
+
 describe('compactPointOff', () => {
   it('is quiet when the CLI compacts where the window it was passed says, and says where it should when it does not', () => {
     expect(compactPointOff(153_000, 120_000, 200_000)).toBeNull()

@@ -1,4 +1,4 @@
-import type { MailHeldRow, MailThreadRow, MailThreadView } from '@cc/protocol'
+import type { MailHeldRow, MailThreadRow, MailThreadView } from '@cc/protocol/client'
 
 /**
  * The person's side of the mailbox (#1347, docs/plans/mailbox.md §10.1): what the Inbox lists and shows, the person's words in a

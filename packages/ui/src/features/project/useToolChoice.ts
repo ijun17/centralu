@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { launchRefusal, type AdapterCapabilities, type LaunchDemands, type ToolName, type ToolStatus } from '@cc/protocol'
+import { launchRefusal, type AdapterCapabilities, type LaunchDemands, type ToolName, type ToolStatus } from '@cc/protocol/client'
 import type { MachineRef } from '@cc/platform/ports'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useLoad } from '../../app/useLoad.js'
 import { useToolMeta } from '../../store/selectors.js'
+import { useLiveTools, useReloadOnReconnect } from '../tools/useToolSetup.js'
 
 /**
  * Which agent tool a creation dialog (a new session, a new app's builder) starts, and whether it can.
@@ -38,7 +39,9 @@ export function useToolChoice(initial: ToolName, machine?: MachineRef, demands?:
   const [tool, setTool] = useState<ToolName>(initial)
   const toolMeta = useToolMeta(tool)
   const detected = useLoad<ToolStatus[]>(() => platform.agents.detect(machine), [platform, machine])
-  const tools = detected.data ?? null
+  // This computer's live setups over the list: a sign-in that just succeeded enables Start without asking again
+  const tools = useLiveTools(detected.data ?? null, machine)
+  useReloadOnReconnect(detected.reload)
   const refusal = useRefusals(tools, demands, machine)
 
   const autoPicked = useRef(false)
@@ -64,7 +67,7 @@ export function useToolChoice(initial: ToolName, machine?: MachineRef, demands?:
 }
 
 /** What the orchestrator's seat asks of a tool: its role as text, and no setting files read (#92) */
-export { ORCHESTRATOR_DEMANDS } from '@cc/protocol'
+export { ORCHESTRATOR_DEMANDS } from '@cc/protocol/client'
 
 /**
  * Why each of `tools` cannot run a start that asks `demands`, in the host's words (`launchRefusal`, the rule the host

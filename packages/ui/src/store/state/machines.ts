@@ -5,7 +5,7 @@ import type {
   MachineProbe,
   RemoteShell,
   SshHostList,
-} from '@cc/protocol'
+} from '@cc/protocol/client'
 
 /** Linked machines (#82). */
 export type MachinesSlice = {

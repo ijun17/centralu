@@ -1,9 +1,11 @@
-import { useMemo, useState } from 'react'
-import type { ToolName } from '@cc/protocol'
+import { useEffect, useMemo, useState } from 'react'
+import type { ToolName } from '@cc/protocol/client'
 import { useStore } from '../../store/store.js'
 import { useTools } from '../../store/selectors.js'
 import { useLoad } from '../../app/useLoad.js'
 import { useRefusals } from '../project/useToolChoice.js'
+import { ToolSetupLine } from '../tools/ToolSetupLine.jsx'
+import { useLiveTools, useReloadOnReconnect } from '../tools/useToolSetup.js'
 import { PastConversations } from './PastConversations.jsx'
 
 /**
@@ -48,7 +50,12 @@ function ToolSwitch({ sessionId, projectId, tool }: { sessionId: string; project
     () => (platform ? platform.agents.detect(machine ?? undefined) : Promise.resolve([])),
     [platform, machine],
   )
+  // This computer's live setups over the list, so a sign-in that just succeeded makes the tool pickable at once
+  const list = useLiveTools(found.data ?? null, machine)
+  useReloadOnReconnect(found.reload)
   const [busy, setBusy] = useState<ToolName | null>(null)
+  // The tool whose setup line stands under the capsule: a tool Centralu installs or signs in itself, picked before it is ready
+  const [setupFor, setSetupFor] = useState<ToolName | null>(null)
   // A tool that cannot keep what this project asks (an untrusted project, `launchRefusal`) is left out like one not installed
   const trusted = useStore((s) => !!s.projects[projectId]?.trusted)
   // Asked with the session's own preset and role (#1562 review): the switch keeps both, so a tool must keep them too
@@ -56,7 +63,7 @@ function ToolSwitch({ sessionId, projectId, tool }: { sessionId: string; project
   // Role text by its kind; a builder's fixed role the window does not hold, and the host refuses that switch itself
   const roleText = useStore((s) => s.sessions[sessionId]?.kind === 'orchestrator' || s.sessions[sessionId]?.kind === 'coordinator')
   const demands = useMemo(() => ({ permissionPreset: preset, projectTrusted: trusted, roleText }), [preset, trusted, roleText])
-  const refusal = useRefusals(found.data ?? null, demands, machine ?? undefined)
+  const refusal = useRefusals(list, demands, machine ?? undefined)
 
   /*
    * Only the tools that can run on the project's machine are offered (owner, 2026-10-18): one not installed or not
@@ -67,17 +74,46 @@ function ToolSwitch({ sessionId, projectId, tool }: { sessionId: string; project
    */
   const ready = (t: ToolName) => {
     if (found.error) return true
-    const d = found.data?.find((x) => x.name === t)
+    const d = list?.find((x) => x.name === t)
     return !!d && d.installed && d.loggedIn && refusal(t) === null
   }
-  const shown = tools.filter((t) => t.name === tool || ready(t.name))
+  /*
+   * The one exception (owner, 2026-10-28): a tool Centralu installs or signs in itself (Antigravity) is shown before it is
+   * ready, dimmed, since it is installed and signed in from here and nowhere else a person would think to look. Picking
+   * it shows its setup line; once it is ready it is picked like any other. A ready tool that is refused stays left out.
+   */
+  const needsSetup = (t: ToolName) => {
+    const d = list?.find((x) => x.name === t)
+    return !!d && (d.setup?.install === 'centralu' || d.setup?.signIn === 'centralu') && !(d.installed && d.loggedIn)
+  }
+  const shown = tools.filter((t) => t.name === tool || ready(t.name) || needsSetup(t.name))
+  /*
+   * The tool being set up wears the capsule's selected look while its line stands under it (owner, 2026-10-28); the session's
+   * own tool is unchanged all along. Never switched on its own: when the setup finishes the look goes back to the session's
+   * tool and the picked one is an ordinary ready tool, one more click from switching.
+   */
+  const stillNeeds = setupFor !== null && setupFor !== tool && needsSetup(setupFor)
+  useEffect(() => {
+    if (setupFor !== null && !stillNeeds) setSetupFor(null)
+  }, [setupFor, stillNeeds])
+  const lit = stillNeeds ? setupFor : tool
   // Still asking the machine: the session's own tool, and a placeholder where the others will stand
   const asking = found.loading && !found.data && !found.error
 
   // The same session takes the other tool (`agents.switchTool`): nothing was said yet, so nothing is lost, and the slot,
   // its place in the sidebar and a draft already typed all stay
   const pick = async (t: ToolName) => {
-    if (t === tool || busy) return
+    if (busy) return
+    if (t === tool) {
+      // The session's own tool again: the look and the line go back to it; a setup already running keeps running
+      setSetupFor(null)
+      return
+    }
+    if (needsSetup(t)) {
+      setSetupFor(t)
+      return
+    }
+    setSetupFor(null)
     setBusy(t)
     try {
       await useStore.getState().switchTool(sessionId, t)
@@ -92,6 +128,7 @@ function ToolSwitch({ sessionId, projectId, tool }: { sessionId: string; project
       The tools as one segmented capsule (owner, 2026-10-18), the top bar's shape: the chosen one filled a full hover
       step, the others quiet until hovered.
     */
+    <div className="flex flex-col items-center">
     <div
       className="inline-flex gap-0.5 rounded-full border border-line p-0.5"
       role="radiogroup"
@@ -99,7 +136,7 @@ function ToolSwitch({ sessionId, projectId, tool }: { sessionId: string; project
       data-testid="session-start-tools"
     >
       {shown.map((t) => {
-        const on = t.name === tool
+        const on = t.name === lit
         return (
           <button
             key={t.name}
@@ -113,7 +150,7 @@ function ToolSwitch({ sessionId, projectId, tool }: { sessionId: string; project
               on
                 ? 'bg-surface-hover text-ink'
                 : 'text-ink-muted hover:bg-surface-hover/50 hover:text-ink disabled:opacity-50 disabled:hover:bg-transparent'
-            }`}
+            } ${needsSetup(t.name) && !on ? 'opacity-50' : ''}`}
           >
             {busy === t.name ? 'Switching…' : t.label}
           </button>
@@ -126,6 +163,23 @@ function ToolSwitch({ sessionId, projectId, tool }: { sessionId: string; project
           aria-label="Looking for other tools"
         />
       )}
+    </div>
+    {/* The reason it cannot be picked yet, and what to press: the dialog's own line */}
+    <ToolSetupLine
+      status={list?.find((x) => x.name === setupFor)}
+      label={tools.find((x) => x.name === setupFor)?.label ?? ''}
+      login={tools.find((x) => x.name === setupFor)?.login ?? ''}
+      machine={machine}
+      shown={stillNeeds}
+      refusal={setupFor ? refusal(setupFor) : null}
+      terminal={{
+        login: (label, command) => `${label} needs a login — run ${command} in a terminal`,
+        missing: (label, detail) => `${label} not found (${detail})`,
+      }}
+      redetect={() => void found.reload()}
+      testId="session-start-tool-blocked"
+      className="mt-2 max-w-[560px] text-center text-xs leading-body text-ink-muted"
+    />
     </div>
   )
 }

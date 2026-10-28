@@ -30,6 +30,60 @@ export const ToolDescriptor = z.object({
 export type ToolDescriptor = z.infer<typeof ToolDescriptor>
 
 /**
+ * Where a tool stands on this machine, one shape for every tool (#59, owner 2026-10-27: the header shows an error
+ * donut for each tool that is installed but signed out, and Antigravity's line offers Centralu's own install and
+ * sign-in). Additive: a window that predates it reads `installed` and `loggedIn` as before.
+ *
+ * - `not_installed`: the tool is not found here (`install` says who can install it)
+ * - `installing`: Centralu is downloading or unpacking it (`progress`), only where `install` is `centralu`
+ * - `signed_out`: installed, and the tool says it is not signed in (or a session found so: `-32000` on ACP)
+ * - `signing_in`: Centralu's sign-in runs (the browser is open on that machine), only where `signIn` is `centralu`
+ * - `ready`: installed and signed in
+ * - `unknown`: installed, and its sign-in cannot be told without a session (OpenCode, whose providers each keep their own)
+ */
+export const ToolSetupState = z.enum(['not_installed', 'installing', 'signed_out', 'signing_in', 'ready', 'unknown'])
+export type ToolSetupState = z.infer<typeof ToolSetupState>
+
+/** Why Centralu's install or sign-in of a tool stopped, as a word a screen can act on; `message` says it in words */
+export const ToolSetupFailureReason = z.enum([
+  'network',
+  'checksum',
+  'disk_space',
+  'unpack',
+  'unsupported_platform',
+  'cancelled',
+  'timed_out',
+  'ineligible',
+  'failed',
+])
+export type ToolSetupFailureReason = z.infer<typeof ToolSetupFailureReason>
+
+export const ToolSetup = z.object({
+  state: ToolSetupState,
+  /** Who installs it: `centralu` (an `agents.installTool` action), or the person from a terminal (`ToolDescriptor.install`) */
+  install: z.enum(['centralu', 'terminal']),
+  /** How the person signs in: Centralu's own action (`agents.signIn`, on the machine the host runs on), a terminal (`ToolDescriptor.login`), or not at all (none) */
+  signIn: z.enum(['centralu', 'terminal', 'none']),
+  /** While `installing`: bytes received of the archive, and its size when known */
+  progress: z.object({ received: z.number().int().nonnegative(), total: z.number().int().nonnegative().nullable() }).optional(),
+  /**
+   * The last install or sign-in that did not finish; cleared by the next start. `verifyUri`: with `ineligible`, the Google
+   * page where the person can verify the account (the agent's answer names it; always `https` on a Google host), for the
+   * screen to open in the person's browser. Kept out of `message`, host.log and the stores, like the sign-in address
+   */
+  failure: z.object({ reason: ToolSetupFailureReason, message: z.string(), verifyUri: z.string().optional() }).optional(),
+  /** The plan the tool said at its last sign-in (Antigravity's `_meta.antigravity.tier`), with its upgrade link when it gave one */
+  plan: z.object({ name: z.string(), upgradeUri: z.string().optional() }).optional(),
+})
+export type ToolSetup = z.infer<typeof ToolSetup>
+
+/** The setup of a tool whose detection is all there is (Claude, Codex, Cursor): its two booleans in the one shape */
+export function setupOfDetection(installed: boolean, loggedIn: boolean | null): ToolSetup {
+  const state: ToolSetupState = !installed ? 'not_installed' : loggedIn === null ? 'unknown' : loggedIn ? 'ready' : 'signed_out'
+  return { state, install: 'terminal', signIn: 'terminal' }
+}
+
+/**
  * A descriptor and whether that tool can actually be used on this machine right now.
  *
  * One type rather than two lists to join: the screens that draw a row per tool need both
@@ -39,6 +93,8 @@ export const ToolStatus = ToolDescriptor.extend({
   installed: z.boolean(),
   loggedIn: z.boolean(),
   detail: z.string(),
+  /** Additive (#59): the same in the one shape every tool reports, with Centralu's install and sign-in where it has them */
+  setup: ToolSetup.optional(),
 })
 export type ToolStatus = z.infer<typeof ToolStatus>
 
@@ -51,15 +107,21 @@ export const AgentDifficulty = z.enum(['light', 'standard', 'heavy'])
 export type AgentDifficulty = z.infer<typeof AgentDifficulty>
 
 /** One difficulty's model for one tool (#729). The effort belongs to the model, as a project's remembered one does (#107) */
-export const AgentModelChoice = z.object({ model: z.string().min(1).max(200), effort: z.string().min(1).max(80).optional() })
+export const AgentModelChoice = z.object({
+  model: z.string().min(1).max(200),
+  effort: z.string().min(1).max(80).optional(),
+})
 export type AgentModelChoice = z.infer<typeof AgentModelChoice>
 
 /** Per tool (a registry name), per difficulty: what start_agent runs when a caller names a difficulty and no model */
-export const AgentModels = z.record(z.string().max(80), z.object({
-  light: AgentModelChoice.optional(),
-  standard: AgentModelChoice.optional(),
-  heavy: AgentModelChoice.optional(),
-}))
+export const AgentModels = z.record(
+  z.string().max(80),
+  z.object({
+    light: AgentModelChoice.optional(),
+    standard: AgentModelChoice.optional(),
+    heavy: AgentModelChoice.optional(),
+  }),
+)
 export type AgentModels = z.infer<typeof AgentModels>
 
 /**
@@ -169,13 +231,22 @@ export type LaunchDemands = {
 }
 
 /** What the orchestrator asks of its tool: Normal, no project's files, and Centralu's role text (`OrchestratorSlot`) */
-export const ORCHESTRATOR_DEMANDS: LaunchDemands = { permissionPreset: 'normal', projectTrusted: false, noSettingFiles: true, roleText: true }
+export const ORCHESTRATOR_DEMANDS: LaunchDemands = {
+  permissionPreset: 'normal',
+  projectTrusted: false,
+  noSettingFiles: true,
+  roleText: true,
+}
 
 /**
  * Why `label`'s tool cannot run a session that demands this, or null when it can. The one rule for both sides: the host
  * refuses a launch with it, and a picker shows the same words beside a tool it greys out.
  */
-export function launchRefusal(caps: AdapterCapabilities, label: string, demands: LaunchDemands): string | null {
+export function launchRefusal(
+  caps: AdapterCapabilities,
+  label: string,
+  demands: LaunchDemands,
+): string | null {
   if (caps.roleText === false && (demands.roleText || demands.noSettingFiles)) {
     return `${label} cannot take Centralu's role instructions yet, so it cannot run the orchestrator, a coordinator or an app's agent.`
   }
@@ -190,7 +261,12 @@ export function launchRefusal(caps: AdapterCapabilities, label: string, demands:
   return null
 }
 
-const PRESET_LABEL: Record<PermissionPreset, string> = { safe: 'Safe', normal: 'Normal', edits: 'Edits', auto: 'Auto' }
+const PRESET_LABEL: Record<PermissionPreset, string> = {
+  safe: 'Safe',
+  normal: 'Normal',
+  edits: 'Edits',
+  auto: 'Auto',
+}
 
 /**
  * One selectable model.

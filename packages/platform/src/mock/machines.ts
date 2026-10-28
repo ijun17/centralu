@@ -1,4 +1,4 @@
-import type { MachineAskConsent, MachineInfo, MachineProbe, SshHostList } from '@cc/protocol'
+import type { MachineAskConsent, MachineInfo, MachineProbe, SshHostList } from '@cc/protocol/client'
 import type { ProjectStore } from './project-store.js'
 import type { Emit } from './event-bus.js'
 import { mockError } from './mock-error.js'

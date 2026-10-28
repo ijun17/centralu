@@ -2,9 +2,8 @@ import { randomBytes } from 'node:crypto'
 import { z } from 'zod'
 import { codexLaunch } from './native.js'
 import { toolCommand } from '../../tool-launch.js'
-import type { AgentProcess } from '../contract.js'
-import { spawnLocalAgent } from '../local-process.js'
-import { waitForExit } from '../../timing.js'
+import type { AgentProcess, ProcessSource } from '../contract.js'
+import { adoptToolProcess, logToolStderr, startToolProcess, stopToolProcess } from '../core/tool-process.js'
 import { lineSplitter, PendingRequests } from '../../transport/json-lines.js'
 
 /**
@@ -72,15 +71,16 @@ export class CodexClient {
       command?: string
       args?: string[]
       cwd?: string
-      /**
-       * The app-server's process when it does not come from this host's `spawn` — one the keeper
-       * started or already holds (#280 step 2). Same stdio, same protocol.
-       */
+      /** An app-server a previous host left running, taken over as it is (#280 step 2). Same stdio, same protocol */
       process?: AgentProcess
+      /** Under the keeper (#280 step 2): the app-server is started there, to outlive this host */
+      source?: ProcessSource
+      /** The session this app-server serves: its frames are recorded under it when `CC_RECORD_FRAMES` is set (`core/tool-process.ts`) */
+      sessionId?: string
     } = {},
   ) {
     if (opts.process) {
-      this.proc = opts.process
+      this.proc = adoptToolProcess(opts.process, opts.sessionId)
     } else {
       /*
        * The platform binary npm's package ships rather than its `node` wrapper (#568, native.ts); otherwise as found, a
@@ -88,11 +88,15 @@ export class CodexClient {
        */
       const launch = codexLaunch(opts.command ?? toolCommand('codex'))
       /*
-       * In a process group of its own (Windows: a tree), so stopping it also ends what it started
-       * and what it left running after it exited (`local-process.ts`). It no longer shares the host's
-       * group: when the host goes, its stdin closes, and codex exits on EOF (#57).
+       * Started here: in a process group of its own (Windows: a tree), so stopping it also ends what it started and what
+       * it left running after it exited (`local-process.ts`), and behind the host watch, so it ends with this host even
+       * when the host is killed outright and stdin's end never reaches a wedged codex (#1654 Q3). Under the keeper: the
+       * keeper's. Tapped (`sessionId`) before the reader below is attached
        */
-      this.proc = spawnLocalAgent({ command: launch.command, args: [...launch.args, ...(opts.args ?? ['app-server'])], cwd: opts.cwd, env: launch.env(process.env) })
+      this.proc = startToolProcess(
+        { command: launch.command, args: [...launch.args, ...(opts.args ?? ['app-server'])], ...(opts.cwd === undefined ? {} : { cwd: opts.cwd }), env: launch.env(process.env) },
+        { ...(opts.sessionId ? { sessionId: opts.sessionId } : {}), ...(opts.source ? { source: opts.source } : {}) },
+      )
     }
 
     /**
@@ -127,10 +131,7 @@ export class CodexClient {
      */
     const lines = lineSplitter((line) => this.onLine(line))
     this.proc.stdout.on('data', (chunk: Buffer | string) => lines.push(chunk))
-    this.proc.stderr?.on('data', (d) => {
-      const s = String(d).trim()
-      if (s) console.error('[codex]', s.slice(0, 500))
-    })
+    logToolStderr(this.proc, 'codex')
     this.proc.on('exit', (code) => {
       if (this.finished) return
       this.finished = true
@@ -259,14 +260,7 @@ export class CodexClient {
      * session closed. codex is the one best positioned to clean up, so we close it in a way that
      * gives it the chance to. If it has not exited within 2 seconds, we kill it then.
      */
-    this.proc.stdin.end()
-    /*
-     * Ended is ended, by code or by signal: a process killed by a signal has no exit code, only a signal code. Its
-     * 'exit' is reported only after its output drains (up to 1 s, local-process.ts and keeper/agent-process.ts),
-     * so checking the exit code alone made a signalled process wait that out as if it were still running (`waitForExit`).
-     */
-    const exited = this.finished || (await waitForExit(this.proc, 2000))
-    if (!exited) this.proc.kill('SIGKILL')
+    await stopToolProcess(this.proc, { exited: this.finished })
   }
 
   /**

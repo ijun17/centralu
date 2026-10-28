@@ -1,4 +1,4 @@
-import type { PermissionPreset } from '@cc/protocol'
+import type { PermissionPreset } from '@cc/protocol/client'
 
 /**
  * The preset a session the person starts gets when they name none (#1525, owner 2026-10-24): `edits` in a trusted

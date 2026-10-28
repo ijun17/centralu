@@ -44,9 +44,11 @@ type Def = {
 }
 
 /** A JSON object (not an array, not null): what the tolerant reader and the schema test helpers walk into */
-export const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
+export const isRecord = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v)
 
-const isSchema = (v: unknown): v is z.ZodType => isRecord(v) && typeof v.safeParse === 'function' && isRecord(v.def)
+const isSchema = (v: unknown): v is z.ZodType =>
+  isRecord(v) && typeof v.safeParse === 'function' && isRecord(v.def)
 const isFunction = (v: unknown): v is () => unknown => typeof v === 'function'
 const schemaOrUndefined = (v: unknown): z.ZodType | undefined => (isSchema(v) ? v : undefined)
 
@@ -57,7 +59,9 @@ function defOf(schema: z.ZodType): Def {
   return {
     type: typeof d.type === 'string' ? d.type : '',
     innerType: schemaOrUndefined(d.innerType),
-    shape: isRecord(shape) ? Object.fromEntries(Object.entries(shape).filter((e): e is [string, z.ZodType] => isSchema(e[1]))) : undefined,
+    shape: isRecord(shape)
+      ? Object.fromEntries(Object.entries(shape).filter((e): e is [string, z.ZodType] => isSchema(e[1])))
+      : undefined,
     catchall: schemaOrUndefined(d.catchall),
     element: schemaOrUndefined(d.element),
     valueType: schemaOrUndefined(d.valueType),
@@ -98,7 +102,9 @@ function salvage(schema: z.ZodType, raw: unknown): unknown {
     }
     case 'record': {
       const valueType = def.valueType
-      return isRecord(raw) && valueType ? Object.fromEntries(Object.entries(raw).map(([k, v]) => [k, parseTolerant(valueType, v)])) : raw
+      return isRecord(raw) && valueType
+        ? Object.fromEntries(Object.entries(raw).map(([k, v]) => [k, parseTolerant(valueType, v)]))
+        : raw
     }
     case 'union': {
       // A tagged union can still be read piecewise as the branch its tag names; an untagged one cannot be told apart

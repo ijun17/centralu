@@ -4,7 +4,7 @@
  * join it automatically. Session and app ids carry their kind to avoid collisions.
  * Legacy order/hidden fields remain readable by the previous build during an update.
  */
-import { isRecord } from '@cc/protocol'
+import { isRecord } from '@cc/protocol/client'
 
 export type ProjectArrangement = {
   /** Explicit ordered membership. Absent only in snapshots from the previous build. */

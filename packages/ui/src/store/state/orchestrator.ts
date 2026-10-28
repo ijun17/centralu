@@ -1,6 +1,6 @@
 import type {
   ToolName,
-} from '@cc/protocol'
+} from '@cc/protocol/client'
 
 /** The orchestrator screen and its proposals (MCP servers, skills). */
 export type OrchestratorSlice = {

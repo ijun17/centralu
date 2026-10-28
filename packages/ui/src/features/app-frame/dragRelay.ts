@@ -1,4 +1,4 @@
-import { AppDragMessage, type AppId } from '@cc/protocol'
+import { AppDragMessage, type AppId } from '@cc/protocol/client'
 
 /**
  * The page's half of an item dragged out of an app view (#308).

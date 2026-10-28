@@ -1,5 +1,5 @@
-import type { Attachment, PermissionPreset, CreateSessionParams, SessionInfo, MessageImage, ToolName } from '@cc/protocol'
-import { DEFAULT_AUTO_COMPACT, isRecord, oneLineText, sessionLiveDefaults, SUBAGENT_STEPS_PAGE, wireSegments } from '@cc/protocol'
+import type { Attachment, PermissionPreset, CreateSessionParams, SessionInfo, MessageImage, ToolName } from '@cc/protocol/client'
+import { DEFAULT_AUTO_COMPACT, isRecord, oneLineText, sessionLiveDefaults, SUBAGENT_STEPS_PAGE, wireSegments } from '@cc/protocol/client'
 import type { AgentPort, SendIntent } from '../ports/index.js'
 import type { MockClock } from './clock.js'
 import type { SessionStore } from './session-store.js'

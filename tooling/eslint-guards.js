@@ -356,6 +356,20 @@ export const guardConfigs = [
     },
   },
   { files: ['packages/protocol/src/**/*.ts'], ignores: ['**/*.test.ts'], rules: { 'guard/no-tool-names': 'error' } },
+  // What the screen bundles reaches the protocol through its client entry, which leaves the host-only schemas out (#1648)
+  {
+    files: [...UI, 'packages/platform/src/**/*.{ts,tsx}', 'packages/core/src/**/*.{ts,tsx}'],
+    ignores: ['**/*.test.{ts,tsx}', '**/*.test-helpers.{ts,tsx}'],
+    rules: {
+      'guard/import-boundary': [
+        'error',
+        {
+          forbidden: ['^@cc/protocol$', '(^|/)protocol/src/(?!client(\\.|$))'],
+          why: "the UI's bundle takes the protocol through '@cc/protocol/client', which leaves out the schemas only the host reads; the whole of '@cc/protocol' puts them back (#1648)",
+        },
+      ],
+    },
+  },
   { files: [`${HOST_SRC}/adapters/{acp,frames,cursor-agent}/*.test.ts`], rules: { 'guard/no-sleeps': 'error' } },
   ...tsConfigs,
 ].map((config) => ({ ...config, plugins: { guard: guards } }))

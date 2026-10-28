@@ -1,4 +1,4 @@
-import { isInTurn, STOP_NOT_CONFIRMED_LABEL, type NormalizedEvent, type SessionState } from '@cc/protocol'
+import { isInTurn, STOP_NOT_CONFIRMED_LABEL, type NormalizedEvent, type SessionState } from '@cc/protocol/client'
 import {
   applyEvent,
   bumpSeq,

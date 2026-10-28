@@ -106,6 +106,27 @@ module.exports = {
       from: { path: '^packages/agent-host/src' },
       to: { path: '^packages/(ui|core|platform)/src' },
     },
+    /*
+     * What the screen bundles reaches the protocol through packages/protocol/src/client.ts alone (#1648): every schema in a module
+     * it reaches is in the JS bundle, so the whole entry, a module that only the host reads, or a relative path into the package
+     * puts them back. Here the specifier is resolved, so an alias, a relative path and a re-export are all the file they name.
+     * guard/import-boundary says the same in lint, with its message; the built bundle is checked for it as well (tooling/styles.test.ts).
+     * A new host-only method stays out by being in a <concept>.params.ts, which client.ts does not reach (client.test.ts).
+     */
+    {
+      name: 'screen-takes-protocol-through-client',
+      comment: "ui, platform, core and the apps import the protocol only through '@cc/protocol/client' (packages/protocol/src/client.ts), which leaves out the host-only schemas (#1648).",
+      severity: 'error',
+      from: { path: '^(packages/(ui|platform|core)|apps/[^/]+)/src/', pathNot: ['\.test-helpers\.tsx?$'] },
+      to: { path: '^packages/protocol/src/', pathNot: ['^packages/protocol/src/client\.ts$'] },
+    },
+    {
+      name: 'no-test-helpers-in-shipped-code',
+      comment: 'A *.test-helpers file is for tests; shipped code that imports one carries its imports (the whole protocol, for one) into the bundle (#1648).',
+      severity: 'error',
+      from: { path: '^(packages|apps)/', pathNot: ['\.test-helpers\.tsx?$'] },
+      to: { path: '\.test-helpers\.tsx?$' },
+    },
     {
       name: 'protocol-is-leaf',
       comment: 'protocol has zero dependencies (except zod).',

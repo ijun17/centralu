@@ -1,4 +1,4 @@
-import type { StoredMessage } from '@cc/protocol'
+import type { StoredMessage } from '@cc/protocol/client'
 import type { AppState, SubagentSteps } from './state.js'
 import { nextChatKey, type ChatItem } from './transcript.js'
 

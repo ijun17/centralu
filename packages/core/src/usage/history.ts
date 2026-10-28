@@ -1,4 +1,4 @@
-import type { UsageHistoryRow } from '@cc/protocol'
+import type { UsageHistoryRow } from '@cc/protocol/client'
 import { cacheHitRate } from './cache.js'
 
 /** One key's share of a usage history range: its rows summed over the periods (docs/agent-host.md §6.2) */

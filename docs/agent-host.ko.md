@@ -1292,8 +1292,11 @@ pty는 쓸어 내지 않는다: 셸이 끝나면 커널이 터미널의 전경 �
 갖는다. 멈춤은 `kill-tree.ts`의 방식이다: 트리의 모든 그룹에 TERM, 3초 뒤 살아남은 것에 KILL. 끝난 뒤에는 그 그룹을 같은
 방식으로 쓸어 낸다(`stopGroup`). Windows에서 멈춤은 트리에 `taskkill /T /F`이고, 끝난 뒤에는 남긴 것을 부모 링크와 생성
 시각으로 찾아 끝낸다(`collectOrphansWindows`). 이때 기준이 되는 시작 시각은 띄우기 전에 잰다. 띄우기와 쓸어 내기는 앱
-프로세스와 같은 코드를 쓴다(`dev-services/grouped-child.ts`: `spawnGrouped`, `sweepExited`). 자기 그룹에 있으므로 CLI는 더 이상 호스트의 그룹에 있지 않다: SIGKILL을
-받은 호스트는 stdin EOF로만 그것을 데려간다. codex는 EOF에 바로 끝나고, claude는 하던 턴을 마치고 끝난다. SDK는 자기가
+프로세스와 같은 코드를 쓴다(`dev-services/grouped-child.ts`: `spawnGrouped`, `sweepExited`). 자기 그룹에 있으므로 CLI는 더 이상 호스트의 그룹에 있지 않다. 그래서
+호스트가 띄우는 모든 CLI(Claude Code, Codex의 app-server, ACP 도구 모두)는 호스트 감시(`endsWithHost`, `HOST_WATCH`)
+뒤에서 시작한다: 호스트만 반대쪽 끝을 쥔 파이프로, 그것이 닫히면 호스트가 어떻게 끝났든(SIGKILL 포함), CLI가 stdin의 끝을
+어떻게 다루든 CLI의 그룹을 끝낸다(#1654; 모든 도구의 시작은 하나, `adapters/core/tool-process.ts`). 감시 뒤의 셸은 CLI를 띄우기 전에 스스로 찾아본다(libuv처럼 PATH를 직접 읽는다. 상대 항목과 빈 항목도 포함하고, `command -v`는 쓰지 않는다: 셸마다 답이 달라 Ubuntu 22.04의 dash 0.5.11은 실행할 수 없는 파일도 이름이 맞으면 첫 번째 것을 내놓는다). 없거나 실행할 수 없으면 fd 4로 알리고, 호스트는 감시 없이 Node가 주는 것과 같은 ENOENT/EACCES 'error'를 낸다("exited (code 127)"가 아니다). Windows에는 이 감시가
+없다: 거기서는 호스트의 자식이 kill-on-close job으로 호스트와 함께 끝난다. SDK는 자기가
 띄운 프로세스에만 실패 메시지에 CLI의 stderr 끝을 붙이므로, 두 어댑터가 같은 방식으로 붙인다(`withStderrTail`,
 `stream-text.ts`). 호스트가 띄운 자식과 keeper의 자식은 각각 stderr의 마지막 8 KiB를 쥐고(`AgentProcess.stderrTail`), 한
 스트림으로 디코딩하므로 두 조각에 걸쳐 나뉜 글자도 온전하다. Claude의 `adapter_crashed`와 Codex의 "codex app-server exited"는

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { changedFileCount, type GitFileStatus } from '@cc/protocol'
+import { changedFileCount, type GitFileStatus } from '@cc/protocol/client'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore } from '../../store/store.js'
 import { TabActions } from './tabActions.jsx'

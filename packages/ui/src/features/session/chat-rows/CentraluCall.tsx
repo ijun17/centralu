@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { centraluCallLabel, centraluCallTitle, type ToolSummary } from '@cc/protocol'
+import { centraluCallLabel, centraluCallTitle, type ToolSummary } from '@cc/protocol/client'
 import { useStore, type ChatItem } from '../../../store/store.js'
 import { Pill } from '../../../components/Pill.jsx'
 import { AppIcon, CentraluMarkIcon, ChevronIcon } from '../../../components/icons.jsx'

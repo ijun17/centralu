@@ -1,7 +1,7 @@
 import type {
   QuestionAnswer,
   StoredMessage,
-} from '@cc/protocol'
+} from '@cc/protocol/client'
 import type { SendIntent } from '@cc/platform/ports'
 import type { ChatAttachment, ChatItem } from '../transcript.js'
 

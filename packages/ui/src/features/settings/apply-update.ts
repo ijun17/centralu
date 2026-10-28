@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { APP_VERSION, type UpdateStatus } from '@cc/protocol'
+import { APP_VERSION, type UpdateStatus } from '@cc/protocol/client'
 import type { RelaunchCheck } from '@cc/platform/ports'
 import { useStore } from '../../store/store.js'
 import { applyOffer, installedUpdate, type ApplyOffer } from './apply-offer.js'

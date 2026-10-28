@@ -18,13 +18,14 @@ import type {
   UsageSnapshot,
   CacheStats,
   ToolName,
+  ToolSetup,
   ToolStatus,
   ModelOption,
   QuestionAnswer,
   AgentVersions,
   SleepPolicy,
   SendIntent,
-} from '@cc/protocol'
+} from '@cc/protocol/client'
 
 export type { SendIntent }
 import type { Unsubscribe, ConnectionState, MachineRef } from './common.js'
@@ -208,6 +209,15 @@ export interface AgentPort {
     machine?: MachineRef,
   ): Promise<UsageHistory>
   detect(machine?: MachineRef): Promise<ToolStatus[]>
+  /**
+   * Centralu's own install and sign-in of a tool that has them (#59: Antigravity). Each answers at once with the setup as it
+   * stands; how it goes on comes as `tool_setup` events. Install runs on `machine`; sign-in is this computer's only
+   * (a linked machine's line says to sign in there).
+   */
+  installTool(tool: ToolName, machine?: MachineRef): Promise<ToolSetup>
+  cancelInstallTool(tool: ToolName, machine?: MachineRef): Promise<ToolSetup>
+  signInTool(tool: ToolName): Promise<ToolSetup>
+  cancelSignInTool(tool: ToolName): Promise<ToolSetup>
   /**
    * The agent CLIs installed now, and whether idle sessions move to a newer one by themselves (#297). `force: false`
    * (the window gaining focus) takes a reading from moments ago.

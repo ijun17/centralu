@@ -96,6 +96,19 @@ export class InputReceipts {
     for (const id of ids) this.finish(id)
   }
 
+  /** These inputs did not finish (a stopped turn, a process gone): each one's observer is told, the others go on waiting */
+  fail(ids: readonly string[], error: Error): void {
+    for (const id of ids) {
+      const p = this.pending.get(id)
+      if (!p) continue
+      this.pending.delete(id)
+      if (!this.pending.size) this.ended.clear()
+      p.receipt.cancelled = true
+      p.observer?.fail(error)
+      p.reject(error)
+    }
+  }
+
   failAll(error: Error): string[] {
     const turns = [...new Set([...this.pending.values()].flatMap((p) => p.turn ? [p.turn] : []))]
     const pending = [...this.pending.values()]

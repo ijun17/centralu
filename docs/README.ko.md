@@ -49,8 +49,11 @@
 | [plans/beta-release-checklist.md](plans/beta-release-checklist.md) | 공개 릴리스를 막고 있는 것들. §2는 npm을 배포 채널로 만든 서명·격리 측정 |
 | [plans/remote-hub.md](plans/remote-hub.md) | 연결된 호스트로서의 원격 모드 (#82): 모양, 라우팅, 버전, 1단계가 만든 것; §10에 3단계(ssh로 원격을 설치·시작·업데이트·제거)와 probe 4(허브 교체를 건너 허브의 ssh가 어디서 사는가), [spikes/2026-10-remote-install/](spikes/2026-10-remote-install/)의 스크립트로 Windows와 WSL에서 측정 |
 | [plans/os-layer.md](plans/os-layer.md) | OS 계층 (#1599, 2026-10-26 제안): Windows 단위 테스트 시간이 어디에 드는지 파일별 측정, 계층이 무엇이고 어떤 OS 의미를 맡는지, 린트 규칙과 줄기만 하는 허용 목록, 같은 규칙에서 Windows 잡의 테스트를 고르는 법, 호스트 영역을 옮기는 순서, 주인에게 남은 질문 |
+| [plans/session-core.md](plans/session-core.md) | 공유 세션 코어 (#1654, 2026-10-27 제안): Claude·Codex·ACP 어댑터를 나란히 측정한 표, 여러 곳에서 따로 계산하는 개념과 어느 쪽이 맞는지, 코어가 맡는 것과 도구별로 남는 것, 경계 타입, `Os`를 통한 프로세스 (OS 계층 3c 단계), 녹화 프레임으로 코어는 한 번·도구 매핑은 따로 시험하기, PR 순서, 그 위의 Antigravity, 열린 질문 (영어만) |
 | [plans/runtime-unification.md](plans/runtime-unification.md) | 프로세스 런타임을 단계별로 다시 설계 (주인, 2026-10-08): macOS·Linux·Windows·원격에서 하나의 구조(런처 → 키퍼 → 호스트), 하나의 OS 계층, 하나의 시작 계획, 어디서나 검증된 콘텐츠; 단계 순서, 원격 3–4단계와 Windows 키퍼(#14)와의 관계, 완료의 정의. [runtime-lessons.md](runtime-lessons.md)가 각 단계의 관문 |
 | [plans/acp-adapter.md](plans/acp-adapter.md) | Cursor CLI를 첫 도구로 하는 범용 Agent Client Protocol 어댑터 (#59, #1476, 2026-10-26 제안): Cursor 2026.10.22와 OpenCode 1.19.4에서 측정한 프레임, 세션마다 프로세스 하나, `authenticate`를 부르지 않는 이유, resume보다 load, 업데이트 대응표, 승인은 한 번씩 답하고 규칙은 여기서 지킨다, 턴 중 입력은 호스트가 줄 세운다, 컨텍스트 비율과 압축, stdio 브리지로 가는 Centralu의 도구, 능력 목록, 녹화를 재생하는 테스트(#1498), 런타임에 SDK를 쓰지 않는 이유, PR 분할과 열린 질문 (영어만) |
+| [plans/antigravity-adapter.md](plans/antigravity-adapter.md) | 대체됨 (#59): `agy -p` 어댑터 설계. `agy` 1.4.7 측정 기록으로만 남기며, Antigravity는 ACP 어댑터 위의 Google ACP 에이전트로 실행한다 |
+| [plans/antigravity-acp.md](plans/antigravity-acp.md) | Google의 ACP 에이전트로 돌리는 Antigravity (#59, 2026-10-27 제안, `agy -p` 설계를 대신한다): 주인의 결정, 에이전트 1.4.3을 macOS에서 잰 결과와 어댑터에 요구하는 것, 고정한 버전의 설치(sha256, 원자적, 진행, 취소, 모든 OS), Centralu의 `GEMINI_HOME` 하나, 에이전트 자신의 저장소에 두는 토큰(쓸 수 있으면 macOS 키체인, 아니면 에이전트가 읽을 수 있는 파일), ACP `authenticate`와 `BROWSER` 도우미로 하는 로그인, 필드 이름, 편집의 두 id, 질문 카드, 모든 도구의 설정 상태 한 모양, 실기 확인이 필요한 것, 테스트 (영어만) |
 | [plans/root-apps.md](plans/root-apps.md) | 폴더에 `centralu.app.json`이 있는 프로젝트가 앱이다(#1141, 2026-10-18 결정): 루트 앱의 키, 매니페스트를 지웠을 때 남는 것, 사용자 폴더 앱을 프로젝트로 옮기기, 어느 세션이 그 도구를 받는가 |
 
 ## 문서를 쓰는 규칙

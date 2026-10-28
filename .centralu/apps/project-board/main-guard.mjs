@@ -19,6 +19,7 @@ import { short } from './util.mjs'
 import { pathMatches } from './versions.mjs'
 import { commitWithout, prOfSubject } from './main-revert.mjs'
 import { CAUSE_TEXT, classifyRun, jobFailure, looksLikeNetworkError } from './run-failure.mjs'
+import { now as clock } from './clock.mjs'
 
 export const GUARD_MS = Number(process.env.PROJECT_BOARD_QUEUE_GUARD_MS) || 2 * 60_000
 /** A bisect probe whose run has not finished after this long ends the hunt (no runner, a stuck run): an issue says so */
@@ -194,7 +195,7 @@ export function carried(all, known, pos) {
  * found, and answers what to record (`outcome` and anything else), or null when another driver holds the
  * lease. `probeCommit` makes a commit without known culprits for a probe. Answers what it did.
  */
-export async function guardTick({ q, update, now = Date.now(), renew, act, dir = QUEUE.conflicts.checkout, failingLine, probeCommit = commitWithout }) {
+export async function guardTick({ q, update, now = clock(), renew, act, dir = QUEUE.conflicts.checkout, failingLine, probeCommit = commitWithout }) {
   if (!QUEUE.guard) return { did: 'off' }
   const g = q.guard ?? {}
   if (g.nextAt && Date.parse(g.nextAt) > now) return { did: 'wait' }

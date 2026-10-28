@@ -1,6 +1,8 @@
-import type { NormalizedEvent, TokenUsage, ToolSummary } from '@cc/protocol'
+import type { NormalizedEvent, RequestInput, TokenUsage, ToolSummary } from '@cc/protocol'
 import { asObj } from '../../json-value.js'
+import { TouchedFiles } from '../file-changes.js'
 import { planUpdate } from '../plan.js'
+import { tokenCount } from '../token-usage.js'
 import { toolResultEvent } from '../tool-result.js'
 import { firstLine } from '../tool-titles.js'
 import { blockText, ToolCallFields, type PromptResult, type SessionUpdate } from './wire.js'
@@ -39,6 +41,8 @@ export class AcpNormalizer {
   private readonly open = new Map<string, OpenCall>()
   /** Every field said of each call this turn, merged: a permission request may carry less than the call did (measured, Cursor) */
   private readonly known = new Map<string, ToolCallFields>()
+  /** Paths an edit call would change, reported once the call ends ok (#843): a denied edit marks nothing */
+  private readonly touched: TouchedFiles
   private readonly compactions = new Map<string, string>()
   private segment = 0
   private lastChunk: 'message' | 'thought' | 'other' = 'other'
@@ -48,7 +52,9 @@ export class AcpNormalizer {
     /** Who returns a call's output: an empty one can be a command that printed nothing or output the tool did not return
      *  (measured on Cursor: 60 KB arrived as `stdout: ""`), and which it was cannot be told: said as the tool not returning it */
     private readonly label = 'The tool',
-  ) {}
+  ) {
+    this.touched = new TouchedFiles(sessionId)
+  }
 
   /** The events one update says. `available_commands_update` and the like are read by the session, not here */
   update(u: SessionUpdate): NormalizedEvent[] {
@@ -142,6 +148,11 @@ export class AcpNormalizer {
 
   /** Calls the person (or a Stop) refused this turn: whatever the agent says of them after, they did not run as asked */
   private readonly refused = new Set<string>()
+  /**
+   * Calls that ended this turn: a later update of one is dropped, not announced as a new call. Antigravity 1.4.3 ends an
+   * asked edit `failed` after its run, under another id, already ended it (`AcpToolShape.editRunsAsNewCall`)
+   */
+  private readonly ended = new Set<string>()
 
   /**
    * What this turn has heard of a call, merged with `u`. `asked`: `u` is a permission request's, which may carry less than
@@ -161,6 +172,7 @@ export class AcpNormalizer {
 
   private toolCall(u: ToolCallFields): NormalizedEvent[] {
     const id = u.toolCallId
+    if (this.ended.has(id)) return []
     const seen = this.call(u)
     this.known.set(id, seen)
     const events: NormalizedEvent[] = []
@@ -174,7 +186,7 @@ export class AcpNormalizer {
       events.push({ type: 'tool_call', sessionId: this.sessionId, callId: id, summary: summaryOf(seen), ...(seen.rawInput === undefined ? {} : { input: seen.rawInput }) })
       if (seen.kind === 'edit' || seen.kind === 'delete' || seen.kind === 'move') {
         const paths = pathsOf(seen)
-        if (paths.length) events.push({ type: 'files_touched', sessionId: this.sessionId, paths })
+        this.touched.call(id, paths)
       }
     }
     const output = outputOf(u)
@@ -185,11 +197,12 @@ export class AcpNormalizer {
     }
     if (u.status === 'completed' || u.status === 'failed') {
       this.open.delete(id)
+      this.ended.add(id)
       const refused = this.refused.delete(id)
       // Measured on Cursor: a refused call ends `completed` with nothing else
       const ok = u.status === 'completed' && !refused && rawOutputOk(seen.rawOutput)
       const text = output ?? rawOutputText(seen.rawOutput) ?? call.output
-      events.push(toolResultEvent(this.sessionId, id, ok, text || (refused ? 'Not run: the request was refused.' : ''), `${this.label} did not return the output`))
+      events.push(toolResultEvent(this.sessionId, id, ok, text || (refused ? 'Not run: the request was refused.' : ''), `${this.label} did not return the output`), ...this.touched.result(id, ok))
     }
     return events
   }
@@ -200,6 +213,7 @@ export class AcpNormalizer {
     this.open.clear()
     this.known.clear()
     this.refused.clear()
+    this.ended.clear()
     this.messages.clear()
     this.lastChunk = 'other'
     return events
@@ -216,15 +230,33 @@ export class AcpNormalizer {
   }
 }
 
-/** The prompt answer's token counts in our terms, or null when it carries none (Cursor, a `/compact`) */
+/** The prompt answer's token counts in our terms (this turn's alone), or null when it carries none (Cursor, a `/compact`) */
 export function tokenUsage(result: PromptResult): TokenUsage | null {
   const u = result.usage
   if (!u || (u.inputTokens === undefined && u.outputTokens === undefined)) return null
   return {
-    inputTokens: u.inputTokens ?? 0,
-    outputTokens: (u.outputTokens ?? 0) + (u.thoughtTokens ?? 0),
-    cacheReadTokens: u.cachedReadTokens ?? 0,
-    cacheCreationTokens: u.cachedWriteTokens ?? 0,
+    inputTokens: tokenCount(u.inputTokens),
+    outputTokens: tokenCount(u.outputTokens) + tokenCount(u.thoughtTokens),
+    cacheReadTokens: tokenCount(u.cachedReadTokens),
+    cacheCreationTokens: tokenCount(u.cachedWriteTokens),
+  }
+}
+
+/**
+ * What the prompt cache accounting reads of a turn: its input, split as the agent reports it (uncached input apart from
+ * cache reads, measured). The spec reports a turn's usage, which can hold several model requests; OpenCode's recordings read as one request (its total matches the context size), so this is the turn as
+ * one reading. A write figure is given only when the agent reports one. Null when the turn read no input.
+ */
+export function requestInput(result: PromptResult): RequestInput | null {
+  const u = result.usage
+  const inputTokens = tokenCount(u?.inputTokens)
+  const cacheReadTokens = tokenCount(u?.cachedReadTokens)
+  if (!u || inputTokens + cacheReadTokens <= 0) return null
+  return {
+    inputTokens,
+    cacheReadTokens,
+    ...(u.cachedWriteTokens !== undefined ? { cacheCreationTokens: tokenCount(u.cachedWriteTokens) } : {}),
+    ...(u.outputTokens !== undefined ? { outputTokens: tokenCount(u.outputTokens) + tokenCount(u.thoughtTokens) } : {}),
   }
 }
 

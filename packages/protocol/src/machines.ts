@@ -45,7 +45,19 @@ export type MachineId = z.infer<typeof MachineId>
  *                    stopping soon after they started. `error` says which; the person's Start
  *                    (`machines.reconnect`) starts one. An older window reads it as unreachable
  */
-export const MachineStatus = z.enum(['connecting', 'connected', 'unreachable', 'away', 'not_running', 'versions_differ', 'refused', 'starting', 'updating', 'disconnected', 'stopped'])
+export const MachineStatus = z.enum([
+  'connecting',
+  'connected',
+  'unreachable',
+  'away',
+  'not_running',
+  'versions_differ',
+  'refused',
+  'starting',
+  'updating',
+  'disconnected',
+  'stopped',
+])
 export type MachineStatus = z.infer<typeof MachineStatus>
 
 export const MachineSide = z.object({
@@ -84,14 +96,22 @@ export type MachineVersions = z.infer<typeof MachineVersions>
  * commit (`pnpm remote-dev`, #1036), `dirty` when the working copy had changes the commit does not hold. Its version
  * is `<base>.local.N`
  */
-export const InstallSource = z.object({ kind: z.literal('dev'), commit: z.string(), dirty: z.boolean().catch(false).default(false) })
+export const InstallSource = z.object({
+  kind: z.literal('dev'),
+  commit: z.string(),
+  dirty: z.boolean().catch(false).default(false),
+})
 export type InstallSource = z.infer<typeof InstallSource>
 
 /**
  * One side of a managed install: a Centralu version and the Node it runs on (`current` / `previous` there). `source`
  * (additive, #1036) is set for a dev build only; a release has none
  */
-export const InstalledVersion = z.object({ version: z.string(), node: z.string(), source: InstallSource.optional().catch(undefined) })
+export const InstalledVersion = z.object({
+  version: z.string(),
+  node: z.string(),
+  source: InstallSource.optional().catch(undefined),
+})
 export type InstalledVersion = z.infer<typeof InstalledVersion>
 
 /**
@@ -176,7 +196,11 @@ export const MachineInfo = z.object({
    * says why). Null when the host was already running. Additive; an older hub sends nothing
    */
   hostStarted: z
-    .object({ how: z.enum(['detached', 'link_bound']).catch('detached'), at: z.number(), note: z.string().nullable().default(null) })
+    .object({
+      how: z.enum(['detached', 'link_bound']).catch('detached'),
+      at: z.number(),
+      note: z.string().nullable().default(null),
+    })
     .nullable()
     .catch(null)
     .default(null),
@@ -187,7 +211,11 @@ export const MachineInfo = z.object({
    * field. Additive
    */
   install: z
-    .object({ managed: z.boolean().catch(false), current: InstalledVersion.nullable().catch(null), previous: InstalledVersion.nullable().catch(null) })
+    .object({
+      managed: z.boolean().catch(false),
+      current: InstalledVersion.nullable().catch(null),
+      previous: InstalledVersion.nullable().catch(null),
+    })
     .nullable()
     .catch(null)
     .default(null),
@@ -281,69 +309,6 @@ export const MachineAskConsent = z.object({
 export type MachineAskConsent = z.infer<typeof MachineAskConsent>
 
 /**
- * What a hub tells a machine it links to about the reverse direction (#550, `host.hubOffer`): who it is, and whether the
- * machine's sessions may ask its projects. The hub's id is its own, made once and kept in its store; the machine shows
- * the hub to its sessions by `name`, and calls it back on the connection the offer came in on, and on no other
- */
-export const HubOffer = z.object({
-  hub: z.object({ id: MachineId, name: z.string().min(1).max(200) }),
-  on: z.boolean(),
-})
-export type HubOffer = z.infer<typeof HubOffer>
-
-/** One of a hub's projects as a machine's session may name it (#550, `hub.projects`) */
-export const HubProject = z.object({ id: z.string().min(1).max(200), name: z.string().max(500) })
-export type HubProject = z.infer<typeof HubProject>
-
-/**
- * An ask_project of a machine's session into a hub's project (#550, `hub.askProject`). `caller` is the asking session as
- * that machine names it, its project's name and its agent depth there; the hub knows the machine itself from the link
- * the call came in on, never from these parameters. Without `task`, the call waits again for the task that session
- * already gave
- */
-export const HubAskParams = z.object({
-  caller: z.object({
-    sessionId: z.string().min(1).max(200),
-    name: z.string().max(500),
-    project: z.string().max(500),
-  }),
-  project: z.string().min(1).max(500),
-  session: z.string().max(500).optional(),
-  task: z.string().max(200_000).optional(),
-  /** The depth the asked session works at: the caller's on its machine, plus one (#867, #838) */
-  depth: z.number().int().min(1).max(64),
-})
-export type HubAskParams = z.infer<typeof HubAskParams>
-
-/** What a hub answers `hub.askProject` (#550): the asked session's last words, or that it still works, or why not */
-export const HubAskResult = z.union([
-  z.object({ ok: z.literal(false), error: z.string() }),
-  z.object({
-    ok: z.literal(true),
-    state: z.enum(['done', 'working']),
-    project: z.string(),
-    sessionId: z.string(),
-    sessionName: z.string(),
-    answer: z.string().optional(),
-    notice: z.string().optional(),
-  }),
-])
-export type HubAskResult = z.infer<typeof HubAskResult>
-
-/**
- * The calls a machine makes to a hub that linked to it (#550, the reverse direction; docs/protocol.md §1). Not RPC
- * methods: no window calls them, the router never sees them, and a hub answers them only through the handler its link
- * to that machine has, and only while that machine's switch is on
- */
-export const HubMethods = {
-  /** The hub's projects a machine's session may ask */
-  'hub.projects': { params: z.object({}), result: z.object({ projects: z.array(HubProject) }) },
-  /** An ask_project into one of them, behind the hub's card for the pair */
-  'hub.askProject': { params: HubAskParams, result: HubAskResult },
-} as const
-export type HubMethodName = keyof typeof HubMethods
-
-/**
  * What `machines.install` did there (docs/plans/remote-hub.md §10.2): the version `current` names
  * now, the one kept as `previous` (the rollback target), the versions it removed, and folders it could
  * not remove (a Windows program still running from them). `machine` is the row after it
@@ -431,7 +396,11 @@ export type HostReadSessionResult = z.infer<typeof HostReadSessionResult>
  * it from `host.readSession`'s lines, which are cut at 2,000 characters, so a long answer came back as an older line or
  * nothing at all
  */
-export const HostLastAnswerResult = z.object({ text: z.string(), length: z.number().int().min(0), seq: z.number().int().nullable() })
+export const HostLastAnswerResult = z.object({
+  text: z.string(),
+  length: z.number().int().min(0),
+  seq: z.number().int().nullable(),
+})
 export type HostLastAnswerResult = z.infer<typeof HostLastAnswerResult>
 
 /** One search hit, as `recall` shows it (`host.recall`); `seq` goes back as `host.readSession`'s `around` */
@@ -460,7 +429,14 @@ export const SshHost = z.object({
   /** Where the alias is declared, `<file>:<line>`, with the home folder as `~` */
   source: z.string().default(''),
   linked: z
-    .array(z.object({ machineId: MachineId, name: z.string(), shell: RemoteShell.catch('posix'), wslDistro: z.string().nullable().default(null) }))
+    .array(
+      z.object({
+        machineId: MachineId,
+        name: z.string(),
+        shell: RemoteShell.catch('posix'),
+        wslDistro: z.string().nullable().default(null),
+      }),
+    )
     .default([]),
 })
 export type SshHost = z.infer<typeof SshHost>

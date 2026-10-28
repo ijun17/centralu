@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { ToolName } from '@cc/protocol'
+import type { ToolName } from '@cc/protocol/client'
 import { useToolMeta, useTools } from '../../../store/selectors.js'
 import { Modal } from '../../../components/Modal.jsx'
 import { Badge } from '../../../components/Badge.jsx'

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { nextWaitingSession } from '@cc/core'
-import { parseAppLink } from '@cc/protocol'
+import { parseAppLink } from '@cc/protocol/client'
 import type { Platform } from '@cc/platform/ports'
 import { PlatformProvider, useCapability } from './PlatformProvider.jsx'
 import { useNavShortcut, useShortcut } from './shortcut.js'

@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { runsOlderCli } from '@cc/protocol'
+import { runsOlderCli } from '@cc/protocol/client'
 import type { SessionSummary } from '@cc/core'
 import { Button } from '../../components/Button.jsx'
 import { useStore } from '../../store/store.js'

@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { AdapterCapabilities, NormalizedEvent } from '@cc/protocol'
 import type { AgentProcess, CreateSessionOpts, ProcessSource } from '../contract.js'
+import { failureSentence, isNetworkFailure } from '../../sessions/interruptions.js'
 import { AcpAdapter } from './adapter.js'
 import { FakeAcpPeer, INIT_RESULT, type PeerScript } from './fake-peer.test-helpers.js'
 import type { AcpProfile } from './profile.js'
@@ -162,6 +163,20 @@ describe('the ACP session against a scripted agent', () => {
     expect(await busy.event((e) => e.type === 'error')).toMatchObject({ error: { code: 'adapter_crashed' } })
   })
 
+  it("puts the process's last words after a marker, so they are not read as the turn's own failure", async () => {
+    const w = world()
+    const s = await w.start()
+    s.send('go')
+    const peer = w.peers[0]!
+    await peer.next(isPrompt)
+    peer.stderr.write('connection reset: fetch failed\n')
+    peer.exit(1)
+    const { error } = (await w.event((e) => e.type === 'error')) as { error: { message: string } }
+    expect(error.message).toMatch(/^Fake exited \(code 1\)\. stderr: connection reset/)
+    expect(failureSentence(error.message)).toBe('Fake exited (code 1).')
+    expect(isNetworkFailure(error.message)).toBe(false)
+  })
+
   it('under Edits grants an edit inside the folder, and asks about a delete or a move there', async () => {
     const cwd = realpathSync(mkdtempSync(join(tmpdir(), 'cc-acp-edits-')))
     try {
@@ -199,6 +214,24 @@ describe('the ACP session against a scripted agent', () => {
     expect(answer).toEqual({ outcome: { outcome: 'cancelled' } })
     expect(w.events.some((e) => e.type === 'approval_request')).toBe(false)
     expect(peer.methods().filter((m) => m === 'session/cancel')).toHaveLength(2)
+  })
+
+  it("fails an input whose turn was stopped, and completes one whose turn ended", async () => {
+    const w = world()
+    const s = await w.start()
+    const peer = w.peers[0]!
+    const seen: string[] = []
+    const observer = (name: string) => ({ accepted: () => seen.push(`${name}:accepted`), complete: () => seen.push(`${name}:complete`), fail: (e: Error) => seen.push(`${name}:fail ${e.message}`) })
+    const stopped = s.sendTracked!('stop me', observer('a'))
+    await peer.next(isPrompt)
+    s.interrupt()
+    peer.release('session/prompt', { result: { stopReason: 'cancelled' } })
+    await expect(stopped).rejects.toThrow(/stopped/)
+    const done = s.sendTracked!('finish me', observer('b'))
+    await peer.next((m) => isPrompt(m) && JSON.stringify(m).includes('finish me'))
+    peer.release('session/prompt', { result: { stopReason: 'end_turn' } })
+    await done
+    expect(seen).toEqual(['a:accepted', 'a:fail The parent note was stopped before it finished', 'b:accepted', 'b:complete'])
   })
 
   it('logs a frame it cannot parse and goes on with the turn, rather than failing the running prompt', async () => {
@@ -261,6 +294,47 @@ describe('the ACP session against a scripted agent', () => {
     })
   })
 
+  describe('whether Centralu may compact the session (#1451, §5.6)', () => {
+    const commands = (...names: string[]) => ({ sessionUpdate: 'available_commands_update', availableCommands: names.map((name) => ({ name, description: name })) })
+
+    /** A session whose agent advertised `names` during its first turn */
+    async function advertising(names: string[], withProfile: AcpProfile = profile) {
+      const w = world(base, {}, withProfile)
+      const s = await w.start()
+      const peer = w.peers[0]!
+      s.send('go')
+      await peer.next(isPrompt)
+      peer.update(SID, commands(...names))
+      peer.release('session/prompt', { result: { stopReason: 'end_turn' } })
+      await w.event((e) => e.type === 'turn_complete')
+      return s
+    }
+
+    it('has no compact command when the agent advertises none (Antigravity 1.4.3: plan, logout, usage)', async () => {
+      expect((await advertising(['plan', 'logout', 'usage'])).compactCommand?.(null)).toBeNull()
+    })
+
+    it('sends /compact to an agent that advertises it, and to one measured to compact on it without saying so', async () => {
+      expect((await advertising(['compact', 'usage'])).compactCommand?.('keep the PR')).toBe('/compact')
+      // OpenCode 1.19.4 compacts on `/compact` but does not list it
+      expect((await advertising(['init', 'review'], { ...profile, infersCompaction: true })).compactCommand?.(null)).toBe('/compact')
+    })
+
+    it('keeps the commands an agent advertises during the replay of a load, as Antigravity does', async () => {
+      const loading: PeerScript = (method, params, peer) => {
+        if (method === 'session/load') {
+          peer.update(String(params.sessionId), commands('compact', 'usage'))
+          return { result: {} }
+        }
+        return base(method, params, peer)
+      }
+      const w = world(loading, { resumeExternalId: SID })
+      const s = await w.start()
+      expect((await s.listCommands?.())?.map((c) => c.name)).toEqual(['compact', 'usage'])
+      expect(s.compactCommand?.(null)).toBe('/compact')
+    })
+  })
+
   it("says a compaction in protocol frames is manual inside Centralu's compact turn, and auto elsewhere", async () => {
     const w = world()
     const s = await w.start()
@@ -289,14 +363,15 @@ describe('the ACP session against a scripted agent', () => {
     }
     const costs = w.events.flatMap((e) => (e.type === 'usage_update' ? [e.tokens.costUsd] : []))
     expect(costs).toHaveLength(2)
-    expect(costs[1]).toBeCloseTo(0.2)
+    // A running reading: the agent's total, which the carried spend completes
+    expect(costs[1]).toBeCloseTo(0.3)
   })
 
   it("takes a turn's cost as what it added to the running total the agent sends, a new conversation's from 0", async () => {
     const kept: number[] = []
     const w = world(base, { runningCost: { last: 5, keep: (t) => kept.push(t) } })
     const s = await w.start()
-    expect(await turnCosts(w, s, [0.1, 0.25])).toEqual([0.1, 0.15].map(near))
+    expect(await turnCosts(w, s, [0.1, 0.25])).toEqual([0.1, 0.25].map(near))
     expect(kept).toEqual([0, 0.1, 0.25])
   })
 
@@ -307,6 +382,31 @@ describe('the ACP session against a scripted agent', () => {
     expect(kept).toEqual([0.25])
     const unknown = world(base, { resumeExternalId: SID, runningCost: { last: null, keep: () => {} } })
     expect(await turnCosts(unknown, await unknown.start(), [0.25, 0.3])).toEqual([undefined, near(0.05)])
+  })
+
+  it("reports the tokens as a running reading, and each turn's input as a request for the cache accounting", async () => {
+    const w = world()
+    const s = await w.start()
+    const peer = w.peers[0]!
+    const turns = [
+      { inputTokens: 100, outputTokens: 10, thoughtTokens: 5, cachedReadTokens: 1_000 },
+      { inputTokens: 40, outputTokens: 4, cachedReadTokens: 1_100, cachedWriteTokens: 7 },
+    ]
+    for (const [i, usage] of turns.entries()) {
+      s.send(`turn ${i}`)
+      await peer.next((m) => isPrompt(m) && JSON.stringify(m).includes(`turn ${i}`))
+      peer.release('session/prompt', { result: { stopReason: 'end_turn', usage } })
+      await w.event((e) => e.type === 'turn_complete' && w.events.filter((x) => x.type === 'usage_update').length === i + 1)
+    }
+    const updates = w.events.flatMap((e) => (e.type === 'usage_update' ? [e] : []))
+    expect(updates.map((e) => e.tokens)).toEqual([
+      { inputTokens: 100, outputTokens: 15, cacheReadTokens: 1_000, cacheCreationTokens: 0 },
+      { inputTokens: 140, outputTokens: 19, cacheReadTokens: 2_100, cacheCreationTokens: 7 },
+    ])
+    expect(updates.map((e) => e.request)).toEqual([
+      { inputTokens: 100, cacheReadTokens: 1_000, outputTokens: 15 },
+      { inputTokens: 40, cacheReadTokens: 1_100, cacheCreationTokens: 7, outputTokens: 4 },
+    ])
   })
 
   it('closes a process a previous host left (with its open calls), and opens the conversation again in a new one', async () => {

@@ -64,6 +64,10 @@ export const OS_LAYER = [
   'packages/agent-host/src/dev-services/terminal.ts',
   // How Claude Code is started on Windows (#353)
   'packages/agent-host/src/adapters/claude/exe-link.ts',
+  // A program Centralu installs and runs from its own folder (#59, Google's Antigravity agent): which build this machine
+  // takes, its download and unpack with each OS's file modes, the one rename that puts it in place, the sign-in's BROWSER
+  // helper where the OS can run one, and the person's browser
+  'packages/agent-host/src/adapters/antigravity/agent-files.ts',
   // A new project's folder (#515): the Desktop (Windows' known folder, XDG, ~/Desktop) and each OS's path rules
   'packages/agent-host/src/dev-services/project-folder.ts',
   // The e2e lock (#1632): when another process started, and whether it is still the one that took the lock
@@ -109,6 +113,21 @@ export const isChecked = (file) => CHECKED.test(file)
  * installs), but they run on the person's machine, on any OS, so a test that reaches their OS use runs everywhere.
  */
 export const isRepoApp = (file) => file.startsWith('.centralu/apps/')
+
+/**
+ * An app of the repository starts programs only through its own door (the review of #1627): one module per app imports
+ * `REPO_APP_OS_MODULES`, so a test can answer every program the app starts in the app's process (the board's
+ * `system.mjs`, `PROJECT_BOARD_FAKE_PROGRAMS`). `local/os-imports` holds the rest of each app to it. An app is plain
+ * Node with no installs and reads its own files directly, so its other OS modules are not held to a door.
+ */
+export const REPO_APP_DOORS = ['.centralu/apps/project-board/system.mjs']
+export const REPO_APP_OS_MODULES = ['child_process']
+
+/** The door of the app `file` is in, or null when that app has none */
+export function repoAppDoor(file) {
+  const app = /^\.centralu\/apps\/[^/]+\//.exec(file)?.[0]
+  return (app && REPO_APP_DOORS.find((d) => d.startsWith(app))) ?? null
+}
 
 /** A test, or a test's helper module */
 export const isTestFile = (file) => /\.test\.(ts|tsx|mts|mjs)$|test-helpers\.(ts|mts|mjs)$/.test(file)

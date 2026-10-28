@@ -1,5 +1,5 @@
-import type { ProjectInfo, SavedCommand, GitSource } from '@cc/protocol'
-import { osPathBaseName, folderNameError, PROJECTS_DIR, gitSourceError, repoNameOf } from '@cc/protocol'
+import type { ProjectInfo, SavedCommand, GitSource } from '@cc/protocol/client'
+import { osPathBaseName, folderNameError, PROJECTS_DIR, gitSourceError, repoNameOf } from '@cc/protocol/client'
 import type { ProjectPort } from '../ports/index.js'
 import type { MockClock } from './clock.js'
 import type { SessionStore } from './session-store.js'

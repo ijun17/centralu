@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import type { CacheSessionStats, CacheStats, CacheWindowStats } from '@cc/protocol'
+import type { CacheSessionStats, CacheStats, CacheWindowStats } from '@cc/protocol/client'
 import { cacheHitRate, cacheWindowName, cacheWriteShare, percentOf, rebuildBreakdown } from '@cc/core'
 import { Tooltip } from '../../components/primitives.jsx'
 import { Badge } from '../../components/Badge.jsx'

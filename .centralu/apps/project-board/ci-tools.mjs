@@ -12,6 +12,7 @@ import { publicTextProblems } from './rules.mjs'
 import { forgetThread } from './threads.mjs'
 import { privateWords } from './words-tools.mjs'
 import { short, sleep, span } from './util.mjs'
+import { now as clock } from './clock.mjs'
 
 // --- CI: ci_status and merge_when_green -------------------------------------------------------------
 // The decisions are pure functions in ci.mjs; this part reads GitHub, asks them, and says the answer
@@ -24,8 +25,8 @@ let known = null
 
 /** The issue listing known intermittent failures (project.json ci.knownFailuresIssue), kept 5 minutes. */
 async function knownFailures() {
-  if (known && Date.now() - known.at < KNOWN_TTL_MS) return known
-  known = { at: Date.now(), ...(await readIssueText(config.repository, CI.knownFailures)) }
+  if (known && clock() - known.at < KNOWN_TTL_MS) return known
+  known = { at: clock(), ...(await readIssueText(config.repository, CI.knownFailures)) }
   return known
 }
 
@@ -180,7 +181,7 @@ ${note}` : summary
   const firstHead = p.headRefOid
   const req = await readRequired(repo, p.baseRefName, CI.workflows, workflowCheckNames, p.headRefOid)
   const limitMs = Math.min(60, Math.max(0, Number(waitMinutes ?? CI.waitMinutes) || 0)) * 60_000
-  const started = Date.now()
+  const started = clock()
   const signal = ctx?.mcpReq?.signal
   let quick = 0
   let beat = 0
@@ -208,16 +209,16 @@ ${note}` : summary
     } else if (!wait) {
       const ci = ciLines(what, p.headRefOid, req, checks, [], detail)
       return ciAnswer(noted(`Not merged yet: ${d.reason} Call again later, or with wait: true to wait for them.`, p), ci, { outcome: 'pending', merged: false, verdict: checks.verdict })
-    } else if (Date.now() - started + pause > limitMs) {
+    } else if (clock() - started + pause > limitMs) {
       const ci = ciLines(what, p.headRefOid, req, checks, [], detail)
-      return ciAnswer(noted(`Not merged: still not green after ${span(Date.now() - started)} of waiting (limit ${span(limitMs)}). ${d.reason}`, p), ci, {
+      return ciAnswer(noted(`Not merged: still not green after ${span(clock() - started)} of waiting (limit ${span(limitMs)}). ${d.reason}`, p), ci, {
         outcome: 'timeout',
         merged: false,
         verdict: checks.verdict,
       })
     } else {
       beat += 1
-      progress(ctx, beat, `Waiting for ${what} (${span(Date.now() - started)} so far): ${d.reason}`)
+      progress(ctx, beat, `Waiting for ${what} (${span(clock() - started)} so far): ${d.reason}`)
     }
     if (!(await sleep(pause, signal))) return asError(answer('Not merged: cancelled while waiting.', { outcome: 'cancelled', merged: false }))
     p = await readPr(repo, want.number)

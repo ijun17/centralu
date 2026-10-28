@@ -1,6 +1,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { AppBridge, McpUiHostContext, McpUiStyles, McpUiTheme } from '@modelcontextprotocol/ext-apps/app-bridge'
-import { APP_DRAG_NOTIFICATION, APP_VERSION, type AppId } from '@cc/protocol'
+import { APP_DRAG_NOTIFICATION, APP_VERSION, type AppId } from '@cc/protocol/client'
 import type { AppToolResult, AppViewFrame } from '@cc/platform/ports'
 import { usePlatform } from '../../app/PlatformProvider.js'
 import { Button } from '../../components/Button.jsx'

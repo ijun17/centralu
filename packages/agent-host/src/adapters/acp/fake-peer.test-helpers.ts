@@ -30,6 +30,7 @@ export class FakeAcpPeer extends EventEmitter implements AgentProcess {
   private nextId = 0
   private buffer = ''
   private ended = false
+  private errText = ''
   private readonly sent: ((m: Record<string, unknown>) => void)[] = []
 
   constructor(private readonly script: PeerScript) {
@@ -44,6 +45,12 @@ export class FakeAcpPeer extends EventEmitter implements AgentProcess {
       }
     })
     this.stdin.on('finish', () => this.exit(0))
+    this.stderr.on('data', (d: Buffer) => (this.errText += String(d)))
+  }
+
+  /** What the process wrote to stderr, as the real processes keep its end for a failure message */
+  stderrTail(): string {
+    return this.errText
   }
 
   /** The methods the adapter has called, in order (notifications included) */

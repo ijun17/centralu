@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { ToolName, UsageHistory, UsageHistoryBy } from '@cc/protocol'
+import type { ToolName, UsageHistory, UsageHistoryBy } from '@cc/protocol/client'
 import { percentOf, topUsage } from '@cc/core'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { formatCount } from '../../app/format.js'

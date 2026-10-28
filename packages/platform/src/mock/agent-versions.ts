@@ -1,5 +1,5 @@
-import type { AgentVersions, SleepPolicy } from '@cc/protocol'
-import { liveBackgroundTasks, runsOlderCli } from '@cc/protocol'
+import type { AgentVersions, SleepPolicy } from '@cc/protocol/client'
+import { liveBackgroundTasks, runsOlderCli } from '@cc/protocol/client'
 import type { AgentPort } from '../ports/index.js'
 import type { MockClock } from './clock.js'
 import type { SessionStore } from './session-store.js'

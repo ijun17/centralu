@@ -9,7 +9,7 @@
 // touched), and main's own scripts/tier.mjs runs with main's .centralu/tiers.json over what the branch
 // adds since it left main. A judge or rules missing on main, a branch not on GitHub, or anything else
 // that keeps the change from being judged answers deep, so it is refused, never let through.
-import { execFile } from 'node:child_process'
+import { execFile } from './system.mjs'
 import { randomBytes } from 'node:crypto'
 import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'

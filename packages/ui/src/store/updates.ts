@@ -1,4 +1,4 @@
-import { errorMessage } from '@cc/protocol'
+import { errorMessage } from '@cc/protocol/client'
 import type { AppState, StoreGet, StoreSet } from './state.js'
 import { agentApplyVerdict } from '../features/settings/apply-offer.js'
 import { typedWithin, TYPING_QUIET_MS } from '../features/settings/typing.js'

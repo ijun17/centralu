@@ -1,4 +1,4 @@
-import { APP_ID_MAX_LENGTH, APP_SERVER_PREFIX, RESERVED_NAME_PREFIX, type NewAppIdProblem } from '@cc/protocol'
+import { APP_ID_MAX_LENGTH, APP_SERVER_PREFIX, RESERVED_NAME_PREFIX, type NewAppIdProblem } from '@cc/protocol/client'
 
 /**
  * The id for the "New app" dialog (M4 C-1) — derived from the name the person typed, and checked

@@ -4,9 +4,10 @@ import type {
   ThemeFileEntry,
   UpdateStatus,
   AgentVersions,
+  ToolSetup,
   SleepPolicy,
   HostRequest,
-} from '@cc/protocol'
+} from '@cc/protocol/client'
 
 /** Updates, agent versions, screen preferences and theme files. */
 export type PreferencesSlice = {
@@ -36,6 +37,8 @@ export type PreferencesSlice = {
    * Owned by the host like `update`; null until the host has answered, or when it is too old to know.
    */
   agentVersions: AgentVersions | null
+  /** Where Centralu's own install and sign-in of a tool stands on this computer (`tool_setup`, #59); a tool not heard of has no entry */
+  toolSetups: Partial<Record<string, ToolSetup>>
   /** When this host puts idle sessions to sleep (#568); null until it has answered, or when it is too old to know */
   sleepPolicy: SleepPolicy | null
   /**

@@ -2,7 +2,7 @@
 // plain English messages. The app server runs as the person (docs/security-boundaries.md, "App
 // servers"), so this is their git, their credentials and their checkout; stack.mjs works in a
 // temporary worktree and release.mjs in a temporary index, so the checkout itself is never touched.
-import { execFile } from 'node:child_process'
+import { execFile } from './system.mjs'
 import { readFileSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { parseTolerant } from './tolerant.js'
-import { parseRpcResult, SessionInfo } from './commands.js'
+import { SessionInfo } from './commands.js'
+import { parseRpcResult } from './rpc-results.js'
 import { currentSession, missingDefaults, withoutDefaultedFields } from './test-helpers.js'
 
 describe('a client reads an older host (protocol.md §4, #280)', () => {
@@ -15,7 +16,10 @@ describe('a client reads an older host (protocol.md §4, #280)', () => {
   })
 
   it('one value a newer host invented costs that value only: the rest of the payload still gets its defaults', () => {
-    const odd = { ...(withoutDefaultedFields(SessionInfo, currentSession('s1')) as object), state: 'daydreaming' }
+    const odd = {
+      ...(withoutDefaultedFields(SessionInfo, currentSession('s1')) as object),
+      state: 'daydreaming',
+    }
     const fine = withoutDefaultedFields(SessionInfo, currentSession('s2'))
     const read = parseRpcResult('sessions.list', [odd, fine])
     expect(read).toHaveLength(2)
@@ -28,14 +32,25 @@ describe('a client reads an older host (protocol.md §4, #280)', () => {
 })
 
 describe('parseTolerant', () => {
-  const Item = z.object({ name: z.string(), tags: z.array(z.string()).default([]), level: z.enum(['a', 'b']) })
+  const Item = z.object({
+    name: z.string(),
+    tags: z.array(z.string()).default([]),
+    level: z.enum(['a', 'b']),
+  })
 
   it('is a plain parse when the payload fits: defaults applied, unknown fields dropped', () => {
-    expect(parseTolerant(Item, { name: 'x', level: 'a', extra: 1 })).toEqual({ name: 'x', tags: [], level: 'a' })
+    expect(parseTolerant(Item, { name: 'x', level: 'a', extra: 1 })).toEqual({
+      name: 'x',
+      tags: [],
+      level: 'a',
+    })
   })
 
   it('falls back field by field and element by element, never throwing', () => {
-    const read = parseTolerant(z.array(Item), [{ name: 'x', level: 'z', extra: 1 }, { name: 'y', level: 'b' }])
+    const read = parseTolerant(z.array(Item), [
+      { name: 'x', level: 'z', extra: 1 },
+      { name: 'y', level: 'b' },
+    ])
     expect(read).toEqual([
       { name: 'x', tags: [], level: 'z' },
       { name: 'y', tags: [], level: 'b' },

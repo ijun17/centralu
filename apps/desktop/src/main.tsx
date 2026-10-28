@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { backgroundCount, isInTurn } from '@cc/core'
-import { errorMessage } from '@cc/protocol'
+import { errorMessage } from '@cc/protocol/client'
 import { App, confirmKeyAction, prepareFirstPaint, useStore } from '@cc/ui'
 import {
   autoSwitch,

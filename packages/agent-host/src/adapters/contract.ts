@@ -10,6 +10,7 @@ import type {
   SessionGoal,
   ToolName,
   ToolDescriptor,
+  ToolSetup,
 } from '@cc/protocol'
 import type { ToolProfile } from '../apps/contract.js'
 import type { OrchestratorTools } from './contract/orchestrator.js'
@@ -280,7 +281,21 @@ export type HistoryMessage =
     }
   | { role: 'system'; event: HistoryEvent; ts?: number }
 
-export type DetectResult = { tool: ToolName; installed: boolean; loggedIn: boolean; detail: string }
+export type DetectResult = { tool: ToolName; installed: boolean; loggedIn: boolean; detail: string; setup?: ToolSetup }
+
+/**
+ * Centralu's own install and sign-in of a tool that has them (#59: Antigravity's agent, `ToolSetup.install/signIn: centralu`).
+ * Each start answers at once with the setup as it stands; how it goes on comes through `onChange` (the host turns it into
+ * `tool_setup` events). A second start while one runs joins it. Absent: the tool is installed and signed in from a terminal.
+ */
+export interface ToolSetupControl {
+  current(): ToolSetup
+  install(): ToolSetup
+  cancelInstall(): Promise<ToolSetup>
+  signIn(): ToolSetup
+  cancelSignIn(): Promise<ToolSetup>
+  onChange(listener: (setup: ToolSetup) => void): () => void
+}
 
 export type EventSink = (event: NormalizedEvent) => void
 
@@ -366,6 +381,12 @@ export interface SessionHandle {
   answerQuestion?(requestId: string, answers: QuestionAnswer[]): boolean
   /** Injects saved "always allow" rules — so they survive a restart (FR-10, C-2) */
   applyRules?(matchers: readonly string[]): void
+  /**
+   * The input that makes this session's tool compact (#1451), for a tool that can only say so per process (ACP: from the
+   * commands its agent advertised, docs/plans/acp-adapter.md §5.6). `null`: the tool has no compact command, so Centralu never
+   * compacts the session and `compact_self` answers that it cannot. Absent: `AgentAdapter.compactCommand` decides.
+   */
+  compactCommand?(focus: string | null): string | null
   /**
    * The model and effort the tool's conversation turned out to run with when it was opened, when they are not what the
    * session was asked to run (#1369): a conversation started elsewhere keeps the model it was started with. Taken once,
@@ -453,7 +474,8 @@ export interface AgentAdapter {
   windowCeilingFor?(autoCompactTokens: number): number
   /**
    * The input that makes this tool compact its conversation (#1451), with the focus line for the summary when it takes one:
-   * what `SessionHandle.send` is given when Centralu compacts a session at a break. Absent: `/compact`.
+   * what `SessionHandle.send` is given when Centralu compacts a session at a break. A session's own
+   * `SessionHandle.compactCommand` comes first. Absent from both: `/compact` (Codex's slash handling routes it).
    */
   compactCommand?(focus: string | null): string
   /**
@@ -484,6 +506,8 @@ export interface AgentAdapter {
   readonly surface?: AdapterSurface
 
   detect(): Promise<DetectResult>
+  /** Centralu's own install and sign-in, for a tool that has them (`ToolSetupControl`) */
+  readonly setup?: ToolSetupControl
   /**
    * The version of this tool installed on the machine now, or null when it is not installed or
    * cannot be told (#297). Read without starting a session, and cheaply: it runs every ten minutes

@@ -369,7 +369,7 @@ let registryAsked: (() => void) | null = null
 beforeEach(async () => {
   root = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-project-board-release-')))
   mkdirSync(join(root, 'data'))
-  gh = fakeGh(root, FAKE_GH)
+  gh = fakeGh(root, FAKE_GH, { inProcess: true })
   gitDirs = gitWrapper(gh.bin)
   const state: State = {
     permissions: { admin: true, maintain: true, push: true },

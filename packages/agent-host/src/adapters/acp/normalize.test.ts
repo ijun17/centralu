@@ -73,3 +73,30 @@ describe('a message’s text', () => {
     expect(events.map((e) => (e.type === 'message_delta' ? `${e.messageId}:${e.text}` : e.type))).toEqual(['a:x ', 'a:</th', 'b:next'])
   })
 })
+
+describe('files an edit marks', () => {
+  const edit = (n: AcpNormalizer) =>
+    n.update(frame({ sessionUpdate: 'tool_call', toolCallId: 'e', title: 'Edit a.txt', kind: 'edit', status: 'pending', rawInput: { path: '/w/a.txt' }, locations: [{ path: '/w/a.txt' }] }))
+
+  it('marks them when the edit ends ok, not when it is announced (#843, as Claude and Codex)', () => {
+    const n = new AcpNormalizer('s')
+    expect(edit(n).map((e) => e.type)).toEqual(['tool_call'])
+    const end = n.update(frame({ sessionUpdate: 'tool_call_update', toolCallId: 'e', status: 'completed' }))
+    expect(end.map((e) => e.type)).toEqual(['tool_result', 'files_touched'])
+    expect(end[1]).toMatchObject({ paths: ['/w/a.txt'] })
+  })
+
+  it('marks nothing for an edit the person refused', () => {
+    const n = new AcpNormalizer('s')
+    const start = edit(n)
+    n.refuse('e')
+    const end = [...start, ...n.update(frame({ sessionUpdate: 'tool_call_update', toolCallId: 'e', status: 'completed' }))]
+    expect(end.map((e) => e.type)).toEqual(['tool_call', 'tool_result'])
+  })
+
+  it('marks nothing for an edit that failed', () => {
+    const n = new AcpNormalizer('s')
+    const end = [...edit(n), ...n.update(frame({ sessionUpdate: 'tool_call_update', toolCallId: 'e', status: 'failed' }))]
+    expect(end.map((e) => e.type)).toEqual(['tool_call', 'tool_result'])
+  })
+})

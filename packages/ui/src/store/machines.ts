@@ -1,4 +1,4 @@
-import { errorMessage, isInTurn, type MachineInfo } from '@cc/protocol'
+import { errorMessage, isInTurn, type MachineInfo } from '@cc/protocol/client'
 import { isAway } from '@cc/core'
 import type { AppState, StoreGet, StoreSet } from './state.js'
 import { omitKey } from './patch.js'

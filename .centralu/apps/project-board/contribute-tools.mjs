@@ -15,6 +15,7 @@ import { commitProblems, DEFAULT_CONVENTIONS, fillTemplate, foreignBareIssueWarn
 import { rebaseStack, StackRefusal } from './stack.mjs'
 import { forgetThread } from './threads.mjs'
 import { privateWords } from './words-tools.mjs'
+import { now as clock } from './clock.mjs'
 
 // --- The contribution procedure: public text, pull requests, commits, stacks (#386 step 2) ----------
 // The rules come from the repository (the pull request template, the commit conventions) and the
@@ -87,9 +88,9 @@ const ruleFiles = new Map() // `${repo} ${path} ${ref}` → { at, text }
 async function ruleFile(repo, path, ref) {
   const key = `${repo.toLowerCase()} ${path} ${ref}`
   const hit = ruleFiles.get(key)
-  if (hit && Date.now() - hit.at < RULES_TTL_MS) return hit.text
+  if (hit && clock() - hit.at < RULES_TTL_MS) return hit.text
   const text = await readRepoFile(repo, path, ref)
-  ruleFiles.set(key, { at: Date.now(), text })
+  ruleFiles.set(key, { at: clock(), text })
   return text
 }
 

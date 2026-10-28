@@ -1,4 +1,4 @@
-import type { AppReach } from '@cc/protocol'
+import type { AppReach } from '@cc/protocol/client'
 
 type Unreachable = Extract<AppReach, { reachable: false }>
 

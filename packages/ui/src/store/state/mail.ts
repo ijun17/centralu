@@ -1,4 +1,4 @@
-import type { MailHeldRow, MailThreadRow, MailThreadView } from '@cc/protocol'
+import type { MailHeldRow, MailThreadRow, MailThreadView } from '@cc/protocol/client'
 
 /** The person's mailbox (#1347): the Inbox's Mail section and the thread open in it. */
 export type MailSlice = {

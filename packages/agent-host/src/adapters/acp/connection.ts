@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { z } from 'zod'
 import { errorMessage } from '@cc/protocol'
 import type { AgentProcess } from '../contract.js'
-import { waitForExit } from '../../timing.js'
+import { logToolStderr, stopToolProcess } from '../core/tool-process.js'
 import { lineSplitter, PendingRequests } from '../../transport/json-lines.js'
 
 /**
@@ -27,12 +27,6 @@ export class RpcError extends Error {
 export const METHOD_NOT_FOUND = -32601
 /** ACP's code for "authenticate first" (measured on Cursor: `{code: -32000, message: "Authentication required"}`) */
 export const AUTH_REQUIRED = -32000
-/** ACP's code for a session or resource that does not exist */
-export const RESOURCE_NOT_FOUND = -32002
-
-/** Which way a line went, for the recorder (§10.1) */
-export type { FrameDirection } from '../frames/recorder.js'
-import type { FrameDirection } from '../frames/recorder.js'
 
 export type AcpConnectionHandlers = {
   onNotification(method: string, params: unknown): void
@@ -40,8 +34,6 @@ export type AcpConnectionHandlers = {
   onRequest(id: RpcId, method: string, params: unknown): Promise<unknown>
   /** `expected`: this side closed it */
   onExit(code: number | null, expected: boolean): void
-  /** Every line both ways, in order, as written; for the recorder */
-  onFrame?(direction: FrameDirection, line: string): void
   /** An answer to a request this connection never sent: the previous host's, after a swap (§4.4) */
   onStrayResponse?(id: RpcId, result: unknown, error: RpcError | null): void
 }
@@ -72,15 +64,14 @@ export class AcpConnection {
     private readonly proc: AgentProcess,
     private readonly handlers: AcpConnectionHandlers,
     private readonly label: string,
+    /** A stderr line as host.log may carry it, or null to leave it out (`AcpToolShape.stderrLine`) */
+    stderrLine?: (line: string) => string | null,
   ) {
     proc.on('error', (err) => this.finish(null, new Error(`${label} failed to start: ${err.message}`)))
     proc.stdin.on('error', () => {})
     const lines = lineSplitter((line) => this.onLine(line))
     proc.stdout.on('data', (chunk: Buffer | string) => lines.push(chunk))
-    proc.stderr?.on('data', (d) => {
-      const s = String(d).trim()
-      if (s) console.error(`[${label}]`, s.slice(0, 500))
-    })
+    logToolStderr(proc, label, stderrLine)
     proc.on('exit', (code) => this.finish(code, null))
   }
 
@@ -95,7 +86,6 @@ export class AcpConnection {
 
   private onLine(line: string): void {
     if (!line.trim()) return
-    this.handlers.onFrame?.('in', line)
     let raw: unknown
     try {
       raw = JSON.parse(line)
@@ -159,17 +149,24 @@ export class AcpConnection {
   private write(obj: unknown): void {
     if (this.closed) return
     const line = JSON.stringify(obj)
-    this.handlers.onFrame?.('out', line)
     this.proc.stdin.write(line + '\n')
+  }
+
+  /** Fails every request still waiting with `error`: the caller knows why none will be answered (the process is left to it) */
+  failPending(error: Error): void {
+    this.pending.rejectAll(error)
+  }
+
+  /** This side is ending the process (the session core stops it next): its exit is expected, and nothing more is written */
+  close(): void {
+    this.closed = true
   }
 
   /** stdin EOF first, so the agent can end its own children; the whole tree is killed after `graceMs` */
   async dispose(graceMs = 2000): Promise<void> {
     if (this.closed) return
     this.closed = true
-    this.proc.stdin.end()
-    const exited = this.finished || (await waitForExit(this.proc, graceMs))
-    if (!exited) this.proc.kill('SIGKILL')
+    await stopToolProcess(this.proc, { graceMs, exited: this.finished })
   }
 
   /** Lets go of the process without closing it (a host swap under the keeper): no EOF, no signal */

@@ -1,4 +1,4 @@
-import type { ExternalSession, ToolName } from '@cc/protocol'
+import type { ExternalSession, ToolName } from '@cc/protocol/client'
 import type { AgentPort } from '../ports/index.js'
 import type { SessionStore } from './session-store.js'
 

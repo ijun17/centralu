@@ -1475,3 +1475,97 @@ html[data-accent] .cc-switch input:checked ~ .cc-switch-track {
 [data-theme-base='light'] img[data-file-icon] {
   filter: drop-shadow(0 0 0.6px rgb(0 0 0 / 0.55));
 }
+
+/*
+ * A tool's setup line (features/tools/ToolSetupLine.tsx, #59): the line changes its words in place (Install, the
+ * progress, Sign in, Waiting for the browser) and the install's bar fills. Every change is animated and none of it
+ * delays input (docs/design-system.md §9). With reduced motion nothing travels: the words change by a short fade, the
+ * bar's width by no transition.
+ */
+@keyframes cc-setup-swap {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.cc-setup-swap {
+  animation: cc-setup-swap 170ms ease-out;
+}
+.cc-progress {
+  transition: width 180ms ease-out;
+}
+@keyframes cc-setup-swap-still {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cc-setup-swap {
+    animation: cc-setup-swap-still 100ms linear;
+  }
+  .cc-progress {
+    transition: none;
+  }
+}
+
+/*
+ * The top bar's error donut for a tool that is installed but signed out comes and goes with a short fade and a small
+ * grow, not a cut (a donut's own ring does not move once it is there). Reduced motion: the fade alone.
+ */
+@keyframes cc-donut-in {
+  from {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@keyframes cc-donut-out {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+}
+.cc-donut-in {
+  animation: cc-donut-in 170ms ease-out;
+}
+.cc-donut-out {
+  animation: cc-donut-out 150ms ease-in forwards;
+}
+@keyframes cc-donut-in-still {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes cc-donut-out-still {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cc-donut-in {
+    animation: cc-donut-in-still 100ms linear;
+  }
+  .cc-donut-out {
+    animation: cc-donut-out-still 100ms linear forwards;
+  }
+}

@@ -1,4 +1,4 @@
-import type { AppReview } from '@cc/protocol'
+import type { AppReview } from '@cc/protocol/client'
 import { formatBytes } from '../../app/format.js'
 import { usesLines } from '../../store/app-catalog.js'
 import { Badge } from '../../components/Badge.jsx'

@@ -1,4 +1,4 @@
-import type { ProtocolErrorCode } from '@cc/protocol'
+import type { ProtocolErrorCode } from '@cc/protocol/client'
 
 /**
  * An error a mock method answers with, as the host's answer reaches a window (#850 item 14): its message and one of the

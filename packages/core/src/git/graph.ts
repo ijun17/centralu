@@ -1,4 +1,4 @@
-import type { GitCommit } from '@cc/protocol'
+import type { GitCommit } from '@cc/protocol/client'
 
 /**
  * Lays out the vertical lines of the commit graph.

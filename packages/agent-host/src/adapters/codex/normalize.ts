@@ -132,7 +132,8 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
     case 'turn/plan/updated': {
       const p = paramsOf(n, 'turn/plan/updated')
       // The same steps Claude's TodoWrite gives (adapters/plan.ts)
-      return Array.isArray(p.plan) && p.plan.length > 0 ? [planUpdate(sessionId, p.plan, 'step')] : []
+      // An emptied plan is sent too: it clears the panel, as Claude's emptied TodoWrite does (adapters/plan.ts)
+      return Array.isArray(p.plan) ? [planUpdate(sessionId, p.plan, 'step')] : []
     }
 
     /*

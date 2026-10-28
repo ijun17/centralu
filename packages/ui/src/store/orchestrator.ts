@@ -1,5 +1,5 @@
 import { initialSession } from '@cc/core'
-import type { ToolName } from '@cc/protocol'
+import type { ToolName } from '@cc/protocol/client'
 import type { AppState, StoreGet, StoreSet } from './state.js'
 import { syncBadge } from './events/notices.js'
 import { replayPendingEvents } from './sessionList.js'

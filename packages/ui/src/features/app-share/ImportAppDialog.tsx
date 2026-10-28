@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { AppReview } from '@cc/protocol'
+import type { AppReview } from '@cc/protocol/client'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { Button } from '../../components/Button.jsx'
 import { Modal } from '../../components/Modal.jsx'

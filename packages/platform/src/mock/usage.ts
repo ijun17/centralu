@@ -1,4 +1,4 @@
-import type { UsageSnapshot, CacheStats, ToolName, UsageHistory } from '@cc/protocol'
+import type { UsageSnapshot, CacheStats, ToolName, UsageHistory } from '@cc/protocol/client'
 import type { AgentPort, MachineRef } from '../ports/index.js'
 
 /** What the usage gauge reads (`agents.usage`): this computer's usage, each linked machine's, and the cache figures */

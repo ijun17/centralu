@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import { isAway, type SessionSummary } from '@cc/core'
-import type { ExternalAppStatus } from '@cc/protocol'
+import type { ExternalAppStatus } from '@cc/protocol/client'
 import { appSessionsNeedAttention } from '../tree.js'
 import { externalAppKey, useStore } from '../../../store/store.js'
 import { AppIcon } from '../../../components/icons.jsx'

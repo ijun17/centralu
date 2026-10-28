@@ -3,7 +3,7 @@ import type {
   UiPreferencesPatch,
   ThemeFileContent,
   ThemeFileEntry,
-} from '@cc/protocol'
+} from '@cc/protocol/client'
 
 /** Workspace snapshot (C-3) — returns to the place being viewed even after the window is closed and reopened */
 export type WorkspaceSnapshot = {

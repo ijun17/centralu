@@ -1,5 +1,5 @@
-import { appKeyOf } from '@cc/protocol'
-import type { AppErrorBundle, AppRun, ExternalAppInfo, NormalizedEvent } from '@cc/protocol'
+import { appKeyOf } from '@cc/protocol/client'
+import type { AppErrorBundle, AppRun, ExternalAppInfo, NormalizedEvent } from '@cc/protocol/client'
 import type { AppToolResult } from '../ports/index.js'
 import { isAppToolResult } from '../app-tool-result.js'
 import type { Emit } from './event-bus.js'

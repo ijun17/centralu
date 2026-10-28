@@ -1,4 +1,4 @@
-import type { ProjectConsent, ProjectConsentKind } from '@cc/protocol'
+import type { ProjectConsent, ProjectConsentKind } from '@cc/protocol/client'
 import type { Emit } from './event-bus.js'
 
 /** What the host remembers and lists: message search, permission rules and cross-project consents */

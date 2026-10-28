@@ -1,4 +1,4 @@
-import type { MailHeldRow, MailThreadRow } from '@cc/protocol'
+import type { MailHeldRow, MailThreadRow } from '@cc/protocol/client'
 import { useStore } from '../../store/store.js'
 import { Button } from '../../components/Button.js'
 import { RelativeAge } from '../../components/RelativeAge.js'

@@ -4,7 +4,7 @@ import { promisify } from 'node:util'
 import { z } from 'zod'
 import { asObj } from '../../json-value.js'
 import type { AdapterSurface, SurfaceInputs, ToolSurface } from '../contract.js'
-import { spawnLocalAgent } from '../local-process.js'
+import { startToolProcess } from '../core/tool-process.js'
 import { AcpConnection } from '../acp/connection.js'
 import { findOpenCode } from './install.js'
 import { SURFACE_BASELINE } from './surface-baseline.js'
@@ -27,7 +27,7 @@ async function gather(): Promise<SurfaceInputs> {
   ])
   // Measured: its help goes to stderr
   const help = shown.stdout + shown.stderr
-  const proc = spawnLocalAgent({ command: install.command, args: [...install.args, 'acp'], cwd: process.cwd(), env: process.env })
+  const proc = startToolProcess({ command: install.command, args: [...install.args, 'acp'], cwd: process.cwd(), env: process.env })
   const conn = new AcpConnection(proc, { onNotification: () => {}, onRequest: async () => null, onExit: () => {} }, 'opencode-surface')
   let init: unknown
   try {

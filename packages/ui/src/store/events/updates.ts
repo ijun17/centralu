@@ -1,4 +1,4 @@
-import type { NormalizedEvent } from '@cc/protocol'
+import type { NormalizedEvent } from '@cc/protocol/client'
 import type { StoreGet, StoreSet } from '../state.js'
 
 /**
@@ -32,6 +32,11 @@ export function updateEvent(e: NormalizedEvent, set: StoreSet, get: StoreGet): b
   // App-wide like update_status (#297): the installed agent CLIs, read on the host's own schedule
   if (e.type === 'agent_versions') {
     set({ agentVersions: e.status })
+    return true
+  }
+  // A tool's own install and sign-in moved (#59): app-wide, so the lines and the top bar read it without asking detect again
+  if (e.type === 'tool_setup') {
+    set((s) => ({ toolSetups: { ...s.toolSetups, [e.tool]: e.setup } }))
     return true
   }
   return false

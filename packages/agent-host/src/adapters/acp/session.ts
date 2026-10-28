@@ -1,18 +1,23 @@
 import { isAbsolute, join } from 'node:path'
-import type { ApprovalDecision, ApprovalDetail, NormalizedEvent, PermissionPreset } from '@cc/protocol'
+import type { ApprovalDecision, ApprovalDetail, NormalizedEvent, PermissionPreset, QuestionAnswer } from '@cc/protocol'
 import { ORCHESTRATOR_MCP_NAME } from '../../apps/contract.js'
 import { rpcError } from '../../rpc-error.js'
 import { asObj } from '../../json-value.js'
 import { AlwaysAllowRules, alwaysAllowKey } from '../always-allow.js'
 import { bridgePath } from '../bridge-path.js'
-import { INTERRUPTED_BY_TOOL, type AgentProcess, type CreateSessionOpts, type EventSink, type InputObserver, type InputOrigin, type SessionHandle } from '../contract.js'
+import type { AgentSpawnSpec, CreateSessionOpts, EventSink, SessionHandle } from '../contract.js'
+import { CoreSession } from '../core/ledger.js'
+import type { CoreIo, RunningTurn, ToolWire, TurnEnding, TurnInput } from '../core/seam.js'
+import type { ToolStart } from '../core/tool-process.js'
 import { insideFolder } from '../edit-grant.js'
 import { fileEditDetail, type FileChange } from '../file-changes.js'
-import { CardIds, PendingCards, stopNotConfirmed, undeliveredError } from '../session-kit.js'
+import { CardIds, PendingCards } from '../session-kit.js'
 import { UnmappedTypes } from '../unmapped.js'
-import { AcpConnection, AUTH_REQUIRED, METHOD_NOT_FOUND, NO_TIMEOUT_MS, RpcError, type FrameDirection, type RpcId } from './connection.js'
+import { AcpConnection, AUTH_REQUIRED, METHOD_NOT_FOUND, NO_TIMEOUT_MS, RpcError, type RpcId } from './connection.js'
 import { KNOWN_UPDATES } from './known-updates.js'
-import { AcpNormalizer, tokenUsage } from './normalize.js'
+import type { AcpToolShape, SignInWanted } from './profile.js'
+import { addTokens, NO_TOKENS } from '../token-usage.js'
+import { AcpNormalizer, requestInput, tokenUsage } from './normalize.js'
 import {
   InitializeResult,
   OpenedSession,
@@ -25,44 +30,52 @@ import {
 } from './wire.js'
 
 /**
- * One Centralu session on one ACP agent process (docs/plans/acp-adapter.md §3–§5): the handshake, opening the
- * conversation (new or load), one prompt at a time with input queued here, cancel, approvals and teardown.
+ * One Centralu session on one ACP agent process (docs/plans/acp-adapter.md §3–§5): the ACP wire on the session core
+ * (docs/plans/session-core.md §7.2 PR 5). The wire does the handshake, opening the conversation (new or load), the prompt,
+ * cancel and approvals; the core (`core/ledger.ts`) queues input (one prompt at a time), keeps the receipts, the Stop's
+ * timer, the exit (crash or asleep) and the process.
  */
 
 export type AcpSessionDeps = {
   /** The tool's name in host.log lines and messages */
   label: string
-  /** The started agent process (`spawnLocalAgent` in production, a scripted peer in tests) */
-  process: AgentProcess
+  /** How to install the tool (`AcpProfile.descriptor.install`) */
+  install?: string
+  /** The agent's process: what to start (`AcpProfile.launch`), and from where (the keeper's source, or this host's spawn) */
+  spec: AgentSpawnSpec
+  start: Omit<ToolStart, 'sessionId'>
   /** The CLI version when the agent does not say it (`agentInfo.version`) */
   version: () => Promise<string | null>
   /** How long a Stop may wait for the agent's `cancelled` before the person hears it has not taken effect */
   stopConfirmMs: number
   /** Which of Centralu's own tools a call is, or null (`AcpProfile.centraluToolOf`) */
   centraluToolOf?: (call: ToolCallFields) => string | null
-  /** Every line both ways, for the recorder (§10.1) */
-  onFrame?: (direction: FrameDirection, line: string) => void
   /**
-   * The tool's `/compact` leaves no protocol frame (OpenCode 1.19.4, measured), so the one boundary known is Centralu's own
-   * compact turn: ended `end_turn` with a context reading smaller than the one before it (§5.6, owner 2026-10-26)
+   * The tool's `/compact` compacts without the agent advertising it and leaves no protocol frame (OpenCode 1.19.4, measured), so
+   * the one boundary known is Centralu's own compact turn: ended `end_turn` with a context reading smaller than the one before
+   * it (§5.6, owner 2026-10-26). It is also what makes Centralu send that `/compact` at all (`AcpSession.compactCommand`)
    */
   infersCompaction?: boolean
+  /** Where this tool's ACP differs from the common shape (`AcpProfile.shape`) */
+  shape?: AcpToolShape
+  /** The agent asking for a browser sign-in in this session's process (`AcpProfile.launch`), removed with the session */
+  signInWanted?: SignInWanted
 }
 
-/** `compact`: the turn Centralu started to compact the session (`SessionEvents.sendCompact`), never the person's `/compact` */
-type Input = { text: string; id?: string; compact?: boolean; observer?: InputObserver; done?: { resolve(): void; reject(e: Error): void } }
+/** `edit`: the asked call is an edit whose run may come as a new call (`AcpToolShape.editRunsAsNewCall`), with its files */
+type Card = { callId: string; options: PermissionOption[]; edit: string[] | null; answer(outcome: PermissionOutcome): void }
 
-type Card = { callId: string; options: PermissionOption[]; answer(outcome: PermissionOutcome): void }
+/** A question the agent asked through a permission request (`AcpToolShape.isQuestion`): one option per answer */
+type QuestionCard = { callId: string; question: string; options: PermissionOption[]; answer(outcome: PermissionOutcome): void }
 
 /**
- * One prompt and what was asked of it. Each turn has its own: a Stop belongs to the turn it was pressed in, so a cancel the
- * agent answers late can never end the next one.
+ * One prompt and what was asked of it. Each turn has its own: a Stop belongs to the turn it was pressed in (`core.stopAsked`),
+ * so a cancel the agent answers late can never end the next one.
  */
 type Turn = {
-  input: Input
-  stopAsked: boolean
+  core: RunningTurn
+  input: TurnInput
   cancelResent: boolean
-  stopTimer?: ReturnType<typeof setTimeout>
   /** The context reading before this turn, and the last one in it (`usage_update.used`) */
   usedBefore: number | null
   used: number | null
@@ -75,34 +88,91 @@ type Turn = {
 /** While a command runs, how often its process tree is noted (`AgentProcess.noteTree`): a shell it starts may be late */
 const TREE_NOTE_MS = 2_000
 
-/** What a session is doing; the queue drains only in `ready` with no turn */
-type Phase = 'opening' | 'ready' | 'closed'
-
 const CANCELLED: PermissionOutcome = { outcome: { outcome: 'cancelled' } }
 
-export class AcpSession implements SessionHandle {
-  externalId: string | null = null
+export class AcpSession extends CoreSession<AcpWire> implements SessionHandle {
   /**
    * A process a previous host left is ended and the conversation opened again in a new one (`AcpAdapter`): a turn it was
    * running is not carried on, so the host ends it as one the restart stopped (`SessionManager.adoptKept`)
    */
   readonly takesOverTurn = false
-  readonly ready: Promise<void>
-  private phase: Phase = 'opening'
-  private readonly conn: AcpConnection
+
+  constructor(opts: CreateSessionOpts, emit: EventSink, deps: AcpSessionDeps) {
+    super(
+      { sessionId: opts.sessionId, resumeExternalId: opts.resumeExternalId ?? null, start: deps.start, stopConfirmMs: deps.stopConfirmMs },
+      emit,
+      new AcpWire(opts, deps),
+    )
+  }
+
+  appAttachment(): 'attached' | 'restart' | 'failed' {
+    return 'failed'
+  }
+
+  respondApproval(requestId: string, decision: ApprovalDecision, _scope?: unknown, matcher?: string): boolean {
+    return this.wire.respondApproval(requestId, decision, matcher)
+  }
+
+  answerQuestion(requestId: string, answers: QuestionAnswer[]): boolean {
+    return this.wire.answerQuestion(requestId, answers)
+  }
+
+  applyRules(matchers: readonly string[]): void {
+    this.wire.rules.addAll(matchers)
+  }
+
+  setPermissionPreset(preset: PermissionPreset): void {
+    this.wire.preset = preset
+  }
+
+  async listCommands(): Promise<{ name: string; description?: string; argumentHint?: string }[]> {
+    return this.wire.commands
+  }
+
+  /**
+   * `/compact` when this agent compacts on it, else null: Centralu then neither compacts the session at a break nor takes
+   * `compact_self` (§5.6). A bare `/compact` sent to an agent without the command is an ordinary prompt to its model, which
+   * compacts nothing (Antigravity 1.4.3 advertises only plan, logout and usage; Cursor's model answered it with a summary).
+   * The focus line is not passed: no ACP agent measured takes one.
+   */
+  compactCommand(): string | null {
+    return this.wire.compacts() ? '/compact' : null
+  }
+
+  override async dispose(): Promise<void> {
+    try {
+      await super.dispose()
+    } finally {
+      await this.wire.removeSignInWatch()
+    }
+  }
+}
+
+class AcpWire implements ToolWire {
+  readonly label: string
+  readonly install?: string
+  /** ACP runs one prompt at a time (§5.4); a cancel ends the turn with `cancelled`, so the Stop's timer applies */
+  readonly turns = { midTurnInput: false, interruptEndsProcess: false, confirmsStop: true } as const
+  readonly launch: ToolWire['launch']
+  readonly rules = new AlwaysAllowRules()
+  preset: PermissionPreset
+  commands: { name: string; description?: string; argumentHint?: string }[] = []
+  private io!: CoreIo
+  private conn!: AcpConnection
+  /** The ACP session the conversation is on this process: the one every frame names */
+  private conversation: string | null = null
   private readonly normalizer: AcpNormalizer
   private readonly unmapped: UnmappedTypes
   private readonly cards = new PendingCards<Card>()
+  private readonly questions = new PendingCards<QuestionCard>()
+  /** Edits allowed this turn whose run has not come yet, oldest first, and the new calls folded into them (`editRunsAsNewCall`) */
+  private readonly allowedEdits: { callId: string; paths: string[] }[] = []
+  private readonly folded = new Map<string, string>()
   private readonly cardIds = new CardIds()
-  private readonly rules = new AlwaysAllowRules()
-  private readonly queue: Input[] = []
   private turn: Turn | null = null
   /** While `session/load` is answered, every update is the replay of the conversation, not this turn (§4.3) */
   private replaying = false
   private canClose = false
-  private preset: PermissionPreset
-  private commands: { name: string; description?: string; argumentHint?: string }[] = []
-  private lastTurnInputs: string[] = []
   /** Commands running now, by call id, and the clock that notes the tree while any runs */
   private readonly commandsRunning = new Set<string>()
   private treeClock: ReturnType<typeof setInterval> | null = null
@@ -110,34 +180,70 @@ export class AcpSession implements SessionHandle {
   private lastUsed: number | null = null
   /** The session's running cost as last read at a turn's end: a turn's own cost is what it adds (OpenCode sends the total) */
   private costTotal: number | null = null
+  /** What this process's turns have used, added up: `usage_update.tokens` is a running reading, and ACP reports each turn's alone */
+  private tokensSoFar = NO_TOKENS
+  /** The turns' costs added up (null until one is known): the cost of the running reading */
+  private costSoFar: number | null = null
+
+  /** The conversation `session/load` or `session/resume` is opening: its commands come during the replay (measured, Antigravity 1.4.3) */
+  private opening: string | null = null
+  /** This process's conversation is open (`open` answered): until then a failed open ends the process, after it the wire does */
+  private opened = false
 
   constructor(
     private readonly opts: CreateSessionOpts,
-    private readonly emit: EventSink,
     private readonly deps: AcpSessionDeps,
   ) {
+    this.label = deps.label
+    if (deps.install !== undefined) this.install = deps.install
     this.preset = opts.permissionPreset
+    this.launch = async () => deps.spec
     this.normalizer = new AcpNormalizer(opts.sessionId, deps.label)
     this.unmapped = new UnmappedTypes(deps.label, opts.sessionId, KNOWN_UPDATES)
-    this.conn = new AcpConnection(
-      deps.process,
-      {
-        onNotification: (method, params) => this.onNotification(method, params),
-        onRequest: (id, method, params) => this.onRequest(id, method, params),
-        onExit: (code, expected) => this.onExit(code, expected),
-        ...(deps.onFrame ? { onFrame: deps.onFrame } : {}),
-      },
-      deps.label,
-    )
-    this.ready = this.open()
-    this.ready.catch(() => {})
+    deps.signInWanted?.watch(() => this.signInWanted())
   }
 
-  get sessionId(): string {
+  /**
+   * The agent wants an interactive sign-in inside this session's process (`SignInWanted`): it would wait for a browser
+   * nobody asked for, and `session/new` would end in "No response" two minutes later with the tool still said ready. What
+   * it was asked fails at once as not signed in, which notes the tool signed out, so its line offers Sign in
+   * (`AcpToolShape.signedOut`). While the conversation opens, the failed open ends the process (the adapter's, or the
+   * relaunch's); once open (a prompt, or idle), the process is ended here, and the next message starts a new one
+   */
+  private signInWanted(): void {
+    const conn = this.conn as AcpConnection | undefined
+    if (!conn || conn.isClosed) return
+    const error = this.deps.shape?.signedOut?.(this.label) ?? rpcError(`${this.label} is not logged in. Log in, then try again.`, 'not_logged_in')
+    conn.failPending(error)
+    if (this.opened) void conn.dispose(500)
+  }
+
+  async removeSignInWatch(): Promise<void> {
+    await this.deps.signInWanted?.remove()
+  }
+
+  private get sessionId(): string {
     return this.opts.sessionId
   }
 
-  private async open(): Promise<void> {
+  private emit(e: NormalizedEvent): void {
+    this.io.emit(e)
+  }
+
+  async open(io: CoreIo, resume: { externalId: string } | null): Promise<{ externalId: string | null }> {
+    this.io = io
+    this.opened = false
+    // The process's exit is the core's (it watches the process); the connection only fails what it had asked
+    this.conn = new AcpConnection(
+      io.process,
+      {
+        onNotification: (method, params) => this.onNotification(method, params),
+        onRequest: (id, method, params) => this.onRequest(id, method, params),
+        onExit: () => {},
+      },
+      this.label,
+      this.deps.shape?.stderrLine?.bind(this.deps.shape),
+    )
     try {
       const init = InitializeResult.parse(
         await this.conn.request(
@@ -145,8 +251,13 @@ export class AcpSession implements SessionHandle {
           {
             protocolVersion: 1,
             clientInfo: { name: 'centralu', version: '1' },
-            // No fs and no terminal: the agent uses its own tools, whose approvals come as `session/request_permission`
-            clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false, session: { compaction: {} } },
+            // No terminal, no reads and no writes: the agent uses its own tools, whose approvals come as
+            // `session/request_permission`
+            clientCapabilities: {
+              fs: { readTextFile: false, writeTextFile: false },
+              terminal: false,
+              session: { compaction: {} },
+            },
           },
           60_000,
         ),
@@ -155,28 +266,29 @@ export class AcpSession implements SessionHandle {
       if (version) this.emit({ type: 'agent_version', sessionId: this.sessionId, version })
       this.canClose = init.agentCapabilities?.sessionCapabilities?.close !== undefined
       const base = { cwd: this.opts.cwd, mcpServers: this.mcpServers() }
-      const resume = this.opts.resumeExternalId
       if (resume) {
         const caps = init.agentCapabilities
         const method = caps?.loadSession ? 'session/load' : caps?.sessionCapabilities?.resume !== undefined ? 'session/resume' : null
-        if (!method) throw rpcError(`${this.deps.label} cannot reopen a conversation`, 'session_not_found')
+        if (!method) throw rpcError(`${this.label} cannot reopen a conversation`, 'session_not_found')
         this.replaying = method === 'session/load'
+        this.opening = resume.externalId
         try {
-          OpenedSession.parse((await this.conn.request(method, { ...base, sessionId: resume }, 150_000)) ?? {})
+          OpenedSession.parse((await this.conn.request(method, { ...base, sessionId: resume.externalId }, 150_000)) ?? {})
         } finally {
           this.replaying = false
+          this.opening = null
         }
-        this.externalId = resume
+        this.conversation = resume.externalId
         this.costTotal = this.opts.runningCost?.last ?? null
       } else {
         const opened = OpenedSession.parse(await this.conn.request('session/new', base, 120_000))
-        if (!opened.sessionId) throw new Error(`${this.deps.label} opened a session without an id`)
-        this.externalId = opened.sessionId
+        if (!opened.sessionId) throw new Error(`${this.label} opened a session without an id`)
+        this.conversation = opened.sessionId
         this.costTotal = 0
         this.opts.runningCost?.keep(0)
       }
-      this.phase = 'ready'
-      this.next()
+      this.opened = true
+      return { externalId: this.conversation }
     } catch (err) {
       throw this.openError(err)
     }
@@ -184,9 +296,11 @@ export class AcpSession implements SessionHandle {
 
   private openError(err: unknown): Error {
     if (err instanceof RpcError && err.code === AUTH_REQUIRED) {
-      return rpcError(`${this.deps.label} is not logged in. Log in from a terminal, then try again.`, 'not_logged_in')
+      const signedOut = this.deps.shape?.signedOut?.(this.label)
+      if (signedOut) return signedOut
+      return rpcError(`${this.label} is not logged in. Log in from a terminal, then try again.`, 'not_logged_in')
     }
-    if (err instanceof RpcError) return rpcError(`${this.deps.label}: ${err.message}`, 'internal')
+    if (err instanceof RpcError) return rpcError(`${this.label}: ${err.message}`, 'internal')
     return err instanceof Error ? err : new Error(String(err))
   }
 
@@ -208,103 +322,83 @@ export class AcpSession implements SessionHandle {
     ]
   }
 
-  appAttachment(): 'attached' | 'restart' | 'failed' {
-    return 'failed'
-  }
-
-  send(text: string, opts?: { origin?: InputOrigin; id?: string; compact?: boolean }): void {
-    this.enqueue({ text, ...(opts?.id ? { id: opts.id } : {}), ...(opts?.compact ? { compact: true } : {}) })
-  }
-
-  sendTracked(text: string, observer?: InputObserver): Promise<void> {
-    return new Promise<void>((resolve, reject) => this.enqueue({ text, ...(observer ? { observer } : {}), done: { resolve, reject } }))
-  }
-
-  private enqueue(input: Input): void {
-    if (this.phase === 'closed') {
-      const e = new Error(`${this.deps.label} session is closed`)
-      input.observer?.fail(e)
-      input.done?.reject(e)
-      return
-    }
-    this.queue.push(input)
-    this.next()
-  }
-
-  /** ACP runs one prompt at a time; a message sent during a turn waits for it (§5.4) */
-  private next(): void {
-    if (this.phase !== 'ready' || this.turn) return
-    const input = this.queue.shift()
-    if (input) void this.run(input)
-  }
-
-  turnInputs(): readonly string[] {
-    return this.lastTurnInputs
-  }
-
-  private async run(input: Input): Promise<void> {
-    const turn: Turn = { input, stopAsked: false, cancelResent: false, usedBefore: this.lastUsed, used: null, compacted: false, costTotal: null }
+  startTurn(input: TurnInput, core: RunningTurn): void {
+    const turn: Turn = { core, input, cancelResent: false, usedBefore: this.lastUsed, used: null, compacted: false, costTotal: null }
     this.turn = turn
-    this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'working' })
-    input.observer?.accepted?.()
-    let result: PromptResult | null = null
-    let failure: Error | null = null
+    // `session/prompt` has no earlier answer: the write is the nearest the agent says it took the input (§2.3)
+    this.io.inputAccepted(input.id)
+    void this.prompt(turn)
+  }
+
+  private async prompt(turn: Turn): Promise<void> {
+    let result: PromptResult
     try {
       result = PromptResult.parse(
-        await this.conn.request('session/prompt', { sessionId: this.externalId, prompt: [{ type: 'text', text: input.text }] }, NO_TIMEOUT_MS),
+        await this.conn.request('session/prompt', { sessionId: this.conversation, prompt: [{ type: 'text', text: turn.input.text }] }, NO_TIMEOUT_MS),
       )
     } catch (err) {
-      failure = err instanceof Error ? err : new Error(String(err))
+      const failure = err instanceof Error ? err : new Error(String(err))
+      // Not signed in (`signInWanted`): said as such, so the screen offers the sign-in rather than a retry
+      if (Reflect.get(failure, 'code') === 'not_logged_in') {
+        turn.core.end({ how: 'failed', error: { code: 'not_logged_in', message: failure.message, retryable: false }, inputError: failure })
+        return
+      }
+      turn.core.end({ how: 'failed', error: { code: 'internal', message: `${this.label}: ${failure.message}`, retryable: true }, inputError: failure })
+      return
     }
-    if (turn.stopTimer) clearTimeout(turn.stopTimer)
-    if (this.phase === 'closed') return
-    for (const e of this.normalizer.endTurn()) this.emit(e)
-    this.stopTreeClock()
-    this.closeCards()
-    this.lastTurnInputs = input.id ? [input.id] : []
-    this.turn = null
-    if (failure) {
-      this.emit({ type: 'error', sessionId: this.sessionId, error: { code: 'internal', message: `${this.deps.label}: ${failure.message}`, retryable: true } })
-      input.observer?.fail(failure)
-      input.done?.reject(failure)
-    } else if (result) {
-      this.endTurn(result, turn)
-      input.observer?.complete()
-      input.done?.resolve()
-    }
-    this.next()
+    turn.core.end(this.endingOf(result), () => this.endEvents(result, turn))
   }
 
-  private endTurn(result: PromptResult, turn: Turn): void {
-    const sessionId = this.sessionId
-    const tokens = tokenUsage(result)
-    // A turn with no usage reports no cost: its spend stays in the total and is said with the next turn that reports
-    const cost = tokens ? this.turnCost(turn) : null
-    if (tokens) this.emit({ type: 'usage_update', sessionId, tokens: cost === null ? tokens : { ...tokens, costUsd: cost } })
-    if (result.stopReason === 'end_turn' && this.inferredCompaction(turn)) {
-      this.emit({ type: 'compaction', sessionId, failed: false, trigger: 'manual' })
-    }
+  private endingOf(result: PromptResult): TurnEnding {
     switch (result.stopReason) {
       case 'cancelled':
-        this.emit({ type: 'state_change', sessionId, state: 'waiting_input', reason: turn.stopAsked ? 'interrupted' : INTERRUPTED_BY_TOOL })
-        return
+        return { how: 'interrupted' }
       case 'refusal':
-        this.emit({ type: 'error', sessionId, error: { code: 'internal', message: `${this.deps.label} refused to go on with this turn.`, retryable: false } })
-        return
-      case 'max_tokens':
-      case 'max_turn_requests':
-        this.emit({
-          type: 'notice',
-          sessionId,
-          level: 'warning',
-          from: this.deps.label,
-          text: result.stopReason === 'max_tokens' ? `${this.deps.label} stopped: the reply reached its length limit.` : `${this.deps.label} stopped: the turn reached its limit of steps.`,
-        })
-        this.emit({ type: 'turn_complete', sessionId })
-        return
+        return { how: 'failed', error: { code: 'internal', message: `${this.label} refused to go on with this turn.`, retryable: false }, inputError: null }
       default:
-        this.emit({ type: 'turn_complete', sessionId })
+        return { how: 'complete' }
     }
+  }
+
+  /** The turn's usage, an inferred compaction and a limit's notice, before the core's own ending event */
+  private endEvents(result: PromptResult, turn: Turn): NormalizedEvent[] {
+    const sessionId = this.sessionId
+    const events: NormalizedEvent[] = []
+    const turnTokens = tokenUsage(result)
+    // A turn with no usage reports no cost: its spend stays in the total and is said with the next turn that reports
+    const cost = turnTokens ? this.turnCost(turn) : null
+    if (turnTokens) {
+      if (cost !== null) this.costSoFar = (this.costSoFar ?? 0) + cost
+      this.tokensSoFar = addTokens(this.tokensSoFar, turnTokens)
+      const request = requestInput(result)
+      events.push({
+        type: 'usage_update',
+        sessionId,
+        tokens: this.costSoFar === null ? this.tokensSoFar : { ...this.tokensSoFar, costUsd: this.costSoFar },
+        ...(request ? { request } : {}),
+      })
+    }
+    if (result.stopReason === 'end_turn' && this.inferredCompaction(turn)) {
+      events.push({ type: 'compaction', sessionId, failed: false, trigger: 'manual' })
+    }
+    if (result.stopReason === 'max_tokens' || result.stopReason === 'max_turn_requests') {
+      events.push({
+        type: 'notice',
+        sessionId,
+        level: 'warning',
+        from: this.label,
+        text: result.stopReason === 'max_tokens' ? `${this.label} stopped: the reply reached its length limit.` : `${this.label} stopped: the turn reached its limit of steps.`,
+      })
+    }
+    return events
+  }
+
+  turnOver(why?: string): void {
+    for (const e of why === undefined ? this.normalizer.endTurn() : this.normalizer.endTurn(why)) this.emit(e)
+    this.stopTreeClock()
+    this.allowedEdits.length = 0
+    this.folded.clear()
+    this.turn = null
   }
 
   /**
@@ -312,7 +406,7 @@ export class AcpSession implements SessionHandle {
    * the tool if it is killed: its tree is noted while a command runs, so they are ended with it (`noteTree`)
    */
   private watchCommands(e: NormalizedEvent): void {
-    const proc = this.deps.process
+    const proc = this.io.process
     if (!proc.noteTree) return
     if (e.type === 'tool_call' && e.summary.tool === 'Bash') {
       this.commandsRunning.add(e.callId)
@@ -342,25 +436,20 @@ export class AcpSession implements SessionHandle {
     return before === null || turn.costTotal < before ? null : turn.costTotal - before
   }
 
+  /** Whether the agent compacts on `/compact`: it advertises the command, or the profile measured that it does without saying so */
+  compacts(): boolean {
+    return this.deps.infersCompaction === true || this.commands.some((c) => c.name.replace(/^\//, '') === 'compact')
+  }
+
   /** Centralu's own compact turn, with no protocol frame for it, whose reading went down (§5.6) */
   private inferredCompaction(turn: Turn): boolean {
     if (!this.deps.infersCompaction || !turn.input.compact || turn.compacted) return false
     return turn.usedBefore !== null && turn.used !== null && turn.used < turn.usedBefore
   }
 
+  /** ACP's Stop: `session/cancel`; after it the core answers every open permission `cancelled` (measured: the agent withdraws none) */
   interrupt(): void {
-    const turn = this.turn
-    if (!turn || this.phase !== 'ready') return
-    turn.stopAsked = true
-    this.conn.notify('session/cancel', { sessionId: this.externalId })
-    // ACP: after a cancel the client answers every open permission `cancelled` (measured: the agent withdraws none)
-    this.closeCards()
-    if (!turn.stopTimer) {
-      turn.stopTimer = setTimeout(() => {
-        if (this.turn === turn) this.emit(stopNotConfirmed(this.sessionId, `${this.deps.label} has not confirmed the stop; the turn may still be running.`))
-      }, this.deps.stopConfirmMs)
-      turn.stopTimer.unref?.()
-    }
+    this.conn.notify('session/cancel', { sessionId: this.conversation })
   }
 
   private onNotification(method: string, params: unknown): void {
@@ -369,7 +458,13 @@ export class AcpSession implements SessionHandle {
       return
     }
     const read = readUpdate(params)
-    if (!read || read.sessionId !== this.externalId || this.replaying) return
+    if (!read) return
+    // The commands are the process's, not the conversation's history: the ones said during a load's replay are kept
+    if ('update' in read && read.update.sessionUpdate === 'available_commands_update' && (read.sessionId === this.conversation || read.sessionId === this.opening)) {
+      this.commands = read.update.availableCommands.map((c) => ({ name: c.name, ...(c.description ? { description: c.description } : {}), ...(c.input?.hint ? { argumentHint: c.input.hint } : {}) }))
+      return
+    }
+    if (read.sessionId !== this.conversation || this.replaying) return
     const turn = this.turn
     this.resendLostCancel()
     if ('other' in read) {
@@ -378,9 +473,6 @@ export class AcpSession implements SessionHandle {
     }
     const u = read.update
     switch (u.sessionUpdate) {
-      case 'available_commands_update':
-        this.commands = u.availableCommands.map((c) => ({ name: c.name, ...(c.description ? { description: c.description } : {}), ...(c.input?.hint ? { argumentHint: c.input.hint } : {}) }))
-        return
       case 'usage_update':
         // Measured: a cancelled turn reads `used: 0` just before it ends, and the next turn reads the real size again
         if (u.used > 0 && u.size > 0) {
@@ -390,16 +482,24 @@ export class AcpSession implements SessionHandle {
         }
         if (turn && u.cost?.currency === 'USD') turn.costTotal = u.cost.amount
         return
+      case 'tool_call':
+      case 'tool_call_update':
+        this.emitAll(this.normalizer.update({ ...this.foldEdit(this.readCall(u), u.sessionUpdate), sessionUpdate: u.sessionUpdate }), turn)
+        return
       default:
-        for (const e of this.normalizer.update(u)) {
-          this.watchCommands(e)
-          if (e.type !== 'compaction') {
-            this.emit(e)
-            continue
-          }
-          if (turn) turn.compacted = true
-          this.emit({ ...e, trigger: turn?.input.compact ? 'manual' : 'auto' })
-        }
+        this.emitAll(this.normalizer.update(u), turn)
+    }
+  }
+
+  private emitAll(events: readonly NormalizedEvent[], turn: Turn | null): void {
+    for (const e of events) {
+      this.watchCommands(e)
+      if (e.type !== 'compaction') {
+        this.emit(e)
+        continue
+      }
+      if (turn) turn.compacted = true
+      this.emit({ ...e, trigger: turn?.input.compact ? 'manual' : 'auto' })
     }
   }
 
@@ -409,9 +509,9 @@ export class AcpSession implements SessionHandle {
    */
   private resendLostCancel(): void {
     const turn = this.turn
-    if (!turn?.stopAsked || turn.cancelResent) return
+    if (!turn?.core.stopAsked || turn.cancelResent) return
     turn.cancelResent = true
-    this.conn.notify('session/cancel', { sessionId: this.externalId })
+    this.conn.notify('session/cancel', { sessionId: this.conversation })
   }
 
   /** Answers a question cancelled, and remembers the call did not run as asked */
@@ -420,9 +520,9 @@ export class AcpSession implements SessionHandle {
     return CANCELLED
   }
 
-  /** Whether a question asked now belongs to a turn that still runs: none after Stop or after the turn's end */
+  /** Whether a question asked now belongs to a turn that still runs: none after Stop, after the turn's end or the close */
   private askable(turn: Turn | null): boolean {
-    return this.phase !== 'closed' && turn !== null && this.turn === turn && !turn.stopAsked
+    return turn !== null && this.turn === turn && !turn.core.stopAsked
   }
 
   private async onRequest(_id: RpcId, method: string, params: unknown): Promise<unknown> {
@@ -430,22 +530,94 @@ export class AcpSession implements SessionHandle {
       this.unmapped.note(method)
       throw new RpcError(METHOD_NOT_FOUND, `Method not found: ${method}`)
     }
-    const req = RequestPermission.parse(params)
+    const asked = RequestPermission.parse(params)
+    const req = { ...asked, toolCall: this.readCall(asked.toolCall) }
     const turn = this.turn
     this.resendLostCancel()
     if (!this.askable(turn)) return this.refused(req.toolCall.toolCallId)
+    // A question is the person's to answer under every preset: never an approval, never answered without them
+    if (this.deps.shape?.isQuestion?.(req)) return this.ask(req)
     const call = this.normalizer.call(req.toolCall, true)
     const detail = detailOf(call, this.opts.cwd)
+    const edit = this.deps.shape?.editRunsAsNewCall && call.kind === 'edit' ? editPaths(call) : null
     const once = pick(req.options, 'allow_once')
     const granted = once !== undefined && (await this.grantedWithoutCard(detail, call))
     // Stop, or the turn's end, may have come while the folder was being checked
     if (!this.askable(turn)) return this.refused(req.toolCall.toolCallId)
-    if (granted && once) return selected(once)
+    if (granted && once) {
+      this.allowedEdit(call.toolCallId, edit)
+      return selected(once)
+    }
     const requestId = this.cardIds.next('acp-req')
     return new Promise<PermissionOutcome>((resolve) => {
-      this.cards.set(requestId, { callId: req.toolCall.toolCallId, options: req.options, answer: resolve })
+      this.cards.set(requestId, { callId: req.toolCall.toolCallId, options: req.options, edit, answer: resolve })
       this.emit({ type: 'approval_request', sessionId: this.sessionId, requestId, detail })
     })
+  }
+
+  /** The tool's own field names read into the core's (`AcpToolShape.readCall`) */
+  private readCall<T extends ToolCallFields>(call: T): T {
+    const shape = this.deps.shape
+    if (!shape?.readCall) return call
+    return { ...call, ...shape.readCall(call), toolCallId: call.toolCallId }
+  }
+
+  /** An edit was allowed: its run, if it comes as a new call, is folded into this one (`editRunsAsNewCall`) */
+  private allowedEdit(callId: string, paths: string[] | null): void {
+    if (paths?.length) this.allowedEdits.push({ callId, paths })
+  }
+
+  /**
+   * A new edit call whose file is one an allowed edit names is that edit's run (Antigravity 1.4.3: `<session>:<n>`,
+   * "Running edit_file", after the asked call's `allow`): it is said under the asked call's id, so the card the person
+   * answered ends as the edit did. The asked call's own late `failed` ("approved but never executed") then finds it ended
+   */
+  private foldEdit(u: ToolCallFields, kind: 'tool_call' | 'tool_call_update'): ToolCallFields {
+    const into = this.folded.get(u.toolCallId)
+    if (into) return { ...u, toolCallId: into }
+    // An allowed edit that ended with no run of its own (the agent said it failed) waits for none: a later edit of the
+    // same file is folded into its own asked call, not into this ended one
+    if (u.status === 'completed' || u.status === 'failed') {
+      const at = this.allowedEdits.findIndex((a) => a.callId === u.toolCallId)
+      if (at >= 0) this.allowedEdits.splice(at, 1)
+    }
+    // A run is said running or ended; a `pending` call is another edit about to be asked, never a run
+    if (kind !== 'tool_call' || u.kind !== 'edit' || u.status === 'pending' || this.allowedEdits.length === 0) return u
+    const paths = editPaths(u)
+    const at = this.allowedEdits.findIndex((a) => a.paths.some((p) => paths.includes(p)))
+    const allowed = at < 0 ? undefined : this.allowedEdits.splice(at, 1)[0]
+    if (!allowed) return u
+    this.folded.set(u.toolCallId, allowed.callId)
+    return { ...u, toolCallId: allowed.callId }
+  }
+
+  /**
+   * A question the agent asked as a permission request (Antigravity's `interaction_*`, from its binary: one option per
+   * answer, `reject_once` only for a "deny"): Centralu's question card, with the options' names as the answers. The answer
+   * picks the option of that name; anything else is answered `cancelled`, which the agent takes as no answer
+   */
+  private ask(req: { toolCall: ToolCallFields; options: PermissionOption[] }): Promise<PermissionOutcome> {
+    const requestId = this.cardIds.next('acp-question')
+    const text = firstContentText(req.toolCall) || req.toolCall.title || `${this.label} asks`
+    return new Promise<PermissionOutcome>((resolve) => {
+      this.questions.set(requestId, { callId: req.toolCall.toolCallId, question: text, options: req.options, answer: resolve })
+      this.emit({
+        type: 'question_request',
+        sessionId: this.sessionId,
+        requestId,
+        questions: [{ question: text, header: '', multiSelect: false, options: req.options.map((o) => ({ label: optionLabel(o), description: '' })) }],
+      })
+    })
+  }
+
+  answerQuestion(requestId: string, answers: QuestionAnswer[]): boolean {
+    const card = this.questions.take(requestId)
+    if (!card) return false
+    const chosen = answers.find((a) => a.question === card.question)?.answers[0] ?? answers[0]?.answers[0]
+    const option = card.options.find((o) => optionLabel(o) === chosen)
+    card.answer(option ? selected(option) : CANCELLED)
+    this.emit({ type: 'question_resolved', sessionId: this.sessionId, requestId })
+    return true
   }
 
   /** `auto`, Centralu's own tool, an `edits` grant inside the folder, or a rule the person saved: answered `allow_once` without a card */
@@ -460,96 +632,49 @@ export class AcpSession implements SessionHandle {
     return key !== null && this.rules.allows(key)
   }
 
-  respondApproval(requestId: string, decision: ApprovalDecision, _scope?: unknown, matcher?: string): boolean {
+  respondApproval(requestId: string, decision: ApprovalDecision, matcher?: string): boolean {
     const card = this.cards.take(requestId)
     if (!card) return false
     // "Always" stays Centralu's rule: passing `allow_always` on would write it into the tool's own allowlist (§5.3)
     if (decision === 'always' && matcher) this.rules.add(matcher)
     const option = pick(card.options, decision === 'deny' ? 'reject_once' : 'allow_once')
     if (decision === 'deny' || !option) this.normalizer.refuse(card.callId)
+    else this.allowedEdit(card.callId, card.edit)
     card.answer(option ? selected(option) : CANCELLED)
     this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId, decision })
     return true
   }
 
-  applyRules(matchers: readonly string[]): void {
-    this.rules.addAll(matchers)
-  }
-
-  setPermissionPreset(preset: PermissionPreset): void {
-    this.preset = preset
-  }
-
-  async listCommands(): Promise<{ name: string; description?: string; argumentHint?: string }[]> {
-    return this.commands
-  }
-
-  private closeCards(): void {
+  releaseCards(): void {
     this.cards.release((requestId, card) => {
       this.normalizer.refuse(card.callId)
       card.answer(CANCELLED)
       this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId, decision: 'deny' })
     })
+    this.questions.release((requestId, card) => {
+      card.answer(CANCELLED)
+      this.emit({ type: 'question_resolved', sessionId: this.sessionId, requestId })
+    })
   }
 
-  private onExit(code: number | null, expected: boolean): void {
-    if (expected || this.phase === 'closed') return
-    const wasOpen = this.phase === 'ready'
-    this.phase = 'closed'
-    this.closeCards()
-    const turn = this.turn
-    this.turn = null
-    if (turn?.stopTimer) clearTimeout(turn.stopTimer)
-    this.dropQueue('were still queued when the agent exited')
-    const failure = new Error(`${this.deps.label} exited${code === null ? '' : ` (code ${code})`}`)
-    if (turn) {
-      for (const e of this.normalizer.endTurn()) this.emit(e)
-      this.stopTreeClock()
-      turn.input.observer?.fail(failure)
-      turn.input.done?.reject(failure)
+  async close(opts: { turnRunning: boolean }): Promise<void> {
+    if (!this.conn) return
+    if (opts.turnRunning && this.conversation) this.conn.notify('session/cancel', { sessionId: this.conversation })
+    if (this.canClose && this.conversation && !this.conn.isClosed) {
+      await this.conn.request('session/close', { sessionId: this.conversation }, 2000).catch(() => {})
     }
-    if (turn || !wasOpen) {
-      const tail = this.conn.stderrTail().trim().split('\n').slice(-5).join('\n')
-      this.emit({ type: 'error', sessionId: this.sessionId, error: { code: 'adapter_crashed', message: tail ? `${failure.message}: ${tail}` : failure.message, retryable: true } })
-    } else {
-      // Idle when it ended: the conversation is kept by the tool, and the next message opens it again
-      this.emit({ type: 'session_live', sessionId: this.sessionId, live: false, reason: 'asleep' })
-    }
+    // The core stops the process next: its exit is ours, so the connection fails what it asked as cancelled, not as a crash
+    this.conn.close()
   }
+}
 
-  private dropQueue(when: string): void {
-    const left = this.queue.splice(0)
-    if (left.length === 0) return
-    const e = new Error(`${left.length} message(s) ${when}`)
-    for (const i of left) {
-      i.observer?.fail(e)
-      i.done?.reject(e)
-    }
-    this.emit(undeliveredError(this.sessionId, left.length, when))
-  }
 
-  async dispose(): Promise<void> {
-    if (this.phase === 'closed') return
-    const turn = this.turn
-    this.phase = 'closed'
-    this.closeCards()
-    this.dropQueue('were still queued when the session closed')
-    if (turn) {
-      // The calls it had open end with it (#1562 review: a host stopped mid-command left the card spinning after its restart)
-      for (const e of this.normalizer.endTurn('Centralu stopped this session while the call ran')) this.emit(e)
-      this.stopTreeClock()
-    }
-    if (turn && this.externalId) {
-      if (turn.stopTimer) clearTimeout(turn.stopTimer)
-      this.conn.notify('session/cancel', { sessionId: this.externalId })
-      turn.input.observer?.fail(new Error('the session closed'))
-      turn.input.done?.reject(new Error('the session closed'))
-    }
-    if (this.canClose && this.externalId && !this.conn.isClosed) {
-      await this.conn.request('session/close', { sessionId: this.externalId }, 2000).catch(() => {})
-    }
-    await this.conn.dispose()
-  }
+const optionLabel = (o: PermissionOption): string => o.name || o.optionId
+
+/** The text a call's first content block says (a question's wording, when the agent puts it there) */
+function firstContentText(call: ToolCallFields): string {
+  for (const c of call.content ?? []) if (c.type === 'content' && c.content?.type === 'text' && c.content.text) return c.content.text
+  return ''
 }
 
 function pick(options: readonly PermissionOption[], kind: string): PermissionOption | undefined {
@@ -580,4 +705,3 @@ export function detailOf(call: ToolCallFields, cwd: string): ApprovalDetail {
   }
   return { kind: 'other', raw: JSON.stringify({ title: call.title, kind: call.kind, input: call.rawInput }).slice(0, 2000) }
 }
-

@@ -212,7 +212,8 @@ export function remoteMachineToolsTests(): void {
         const m = (window as unknown as MockWindow).__mock
         const claude = m.detected.find((t: any) => t.name === 'claude')
         m.machineDetected = { box: [claude] }
-        m.detected = [{ ...claude, loggedIn: false }]
+        // Not installed here: an installed tool that is signed out has an signed-out donut of its own now (tool-setup.ts)
+        m.detected = [{ ...claude, installed: false, loggedIn: false }]
       })
       await reconnectHost(page)
       // This computer with no tool keeps its local No agent mark, the machine its donuts

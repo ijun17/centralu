@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { TrashedRun } from '@cc/protocol'
+import type { TrashedRun } from '@cc/protocol/client'
 import { messagesToChat, type ChatItem } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { formatBytes, formatDay, formatDuration } from '../../app/format.js'

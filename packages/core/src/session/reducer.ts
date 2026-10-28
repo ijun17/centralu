@@ -1,4 +1,4 @@
-import { applyBackgroundTasks, nextContext, toolCallLine } from '@cc/protocol'
+import { applyBackgroundTasks, nextContext, toolCallLine } from '@cc/protocol/client'
 import type {
   BackgroundTask,
   Interruption,
@@ -11,7 +11,7 @@ import type {
   SessionGoal,
   SessionState,
   TokenUsage,
-} from '@cc/protocol'
+} from '@cc/protocol/client'
 import { stepSessionState } from './state-machine.js'
 
 /**

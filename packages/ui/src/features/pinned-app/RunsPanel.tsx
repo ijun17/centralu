@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { AgentUse, AppPermission, AppRun, AppUsage } from '@cc/protocol'
+import type { AgentUse, AppPermission, AppRun, AppUsage } from '@cc/protocol/client'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useLoad } from '../../app/useLoad.js'
 import { formatClock, formatCount, formatDuration } from '../../app/format.js'

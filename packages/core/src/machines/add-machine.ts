@@ -1,4 +1,4 @@
-import type { MachineProbe, RemoteShell, SshHost } from '@cc/protocol'
+import type { MachineProbe, RemoteShell, SshHost } from '@cc/protocol/client'
 import { machineProblem, type MachineProblem } from './machines.js'
 
 /**

@@ -1,5 +1,5 @@
-import type { ToolName } from '@cc/protocol'
-import { sessionLiveDefaults } from '@cc/protocol'
+import type { ToolName } from '@cc/protocol/client'
+import { sessionLiveDefaults } from '@cc/protocol/client'
 import type { AgentPort } from '../ports/index.js'
 import type { MockClock } from './clock.js'
 import type { SessionStore } from './session-store.js'

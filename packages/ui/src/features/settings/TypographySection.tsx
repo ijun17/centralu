@@ -1,4 +1,4 @@
-import { TEXT_SIZES, type LineHeight } from '@cc/protocol'
+import { TEXT_SIZES, type LineHeight } from '@cc/protocol/client'
 import { useStore } from '../../store/store.js'
 import { BODY_FONTS, CODE_FONTS, isUsableFont } from '../../app/typography.js'
 import { OtherInput, OtherOption, SettingsSelect, useOtherChoice } from './OtherChoice.jsx'

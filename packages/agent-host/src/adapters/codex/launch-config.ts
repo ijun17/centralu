@@ -1,9 +1,7 @@
 import { realpathSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import type { PermissionPreset } from '@cc/protocol'
-import { toolCommand } from '../../tool-launch.js'
-import { codexLaunch } from './native.js'
-import type { AgentProcess, CreateSessionOpts, ProcessSource } from '../contract.js'
+import type { CreateSessionOpts } from '../contract.js'
 
 /**
  * Permission preset to Codex permission options.
@@ -175,12 +173,3 @@ export const APP_CALL_WAIT_MS = 240_000
  * and reads it (up to 15 seconds).
  */
 export const APP_STARTUP_TIMEOUT_SEC = 30
-
-/**
- * An app-server spawned in the keeper (#280 step 2), from the same program a direct spawn uses: the platform binary
- * rather than npm's `node` wrapper (#568, native.ts).
- */
-export function spawnInKeeper(source: ProcessSource, cwd: string): AgentProcess {
-  const launch = codexLaunch(toolCommand('codex'))
-  return source.spawn({ command: launch.command, args: [...launch.args, 'app-server'], cwd, env: launch.env(process.env) })
-}
