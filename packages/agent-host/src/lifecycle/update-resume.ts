@@ -84,7 +84,8 @@ export function parseUpdateResume(text: string): CutTurn[] | 'torn' | 'other' {
   }
   if (typeof o !== 'object' || o === null || !('v' in o) || o.v !== 1 || !('turns' in o) || !Array.isArray(o.turns)) return 'other'
   const turns: CutTurn[] = []
-  for (const t of o.turns as unknown[]) {
+  const listed: unknown[] = o.turns
+  for (const t of listed) {
     if (typeof t !== 'object' || t === null || !('id' in t) || !('seq' in t)) continue
     if (typeof t.id === 'string' && ID.test(t.id) && typeof t.seq === 'number' && Number.isSafeInteger(t.seq) && t.seq >= 0) turns.push({ id: t.id, seq: t.seq })
   }
