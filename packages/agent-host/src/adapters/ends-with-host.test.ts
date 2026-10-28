@@ -245,8 +245,10 @@ describe('a CLI that must end with its host', () => {
       ['a sh whose command -v prints the first file, runnable or not (dash 0.5.11)', dash011, []],
     ]
     const available = (name: string) => spawnSync(name, ['-c', 'exit 0']).status === 0
+    // By its path: an empty PATH would not find the shell itself
+    const where = (name: string) => spawnSync('sh', ['-c', `command -v ${name}`]).stdout.toString().trim()
     const say = (shell: string, flags: string[], prelude: string, command: string, cwd: string, PATH: string | undefined) => {
-      const r = spawnSync(shell, [...flags, '-c', `${prelude}${FIND_CLI}exit 0`, 'x', command], { cwd, env: PATH === undefined ? {} : { PATH }, stdio: ['ignore', 'ignore', 'ignore', 'ignore', 'pipe'] })
+      const r = spawnSync(where(shell), [...flags, '-c', `${prelude}${FIND_CLI}exit 0`, 'x', command], { cwd, env: PATH === undefined ? {} : { PATH }, stdio: ['ignore', 'ignore', 'ignore', 'ignore', 'pipe'] })
       return { said: String(r.output[4] ?? '').trim(), status: r.status }
     }
     for (const [label, prelude, flags] of shells) {
@@ -278,6 +280,7 @@ describe('a CLI that must end with its host', () => {
           ['a name, not runnable behind an empty PATH entry', 'plain-cli', `${sys}:`, 'eacces', 126],
           ['a name, runnable on a relative PATH entry', 'good-cli', `${sys}:./bin`, '', 0],
           ['a name, runnable after a folder of that name', 'good-cli', `${bin}:${sys}`, '', 0],
+          ['a name, runnable in the folder it starts in, PATH set but empty', 'good-cli', '', '', 0],
           ['a name, runnable after a file of that name that is not', 'good-cli', `${sys}:${join(dir, 'early')}:${bin}`, '', 0],
         ]
         for (const [what, command, PATH, said, status] of cases) {

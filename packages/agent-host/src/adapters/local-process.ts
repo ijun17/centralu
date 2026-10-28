@@ -49,9 +49,9 @@ export const FIND_CLI =
   // A bare name is looked up on PATH as libuv does, not with `command -v`, which differs by shell too: dash 0.5.11 (Ubuntu
   // 22.04) prints the first file of that name, runnable or not, and without a folder when an empty entry found it; 0.5.12
   // skips one that cannot be run. The first runnable file runs, so says nothing; else a match that cannot be run is
-  // EACCES and nothing is ENOENT. An empty entry is the folder it starts in (`/dev/null` ends the list so a trailing empty
-  // one is not split away). `exec` then searches the same PATH and skips what cannot be run, as libuv does.
-  '*) (IFS=:; set -f; e=2; for d in ${PATH:+$PATH:}/dev/null; do f=${d:-.}/$1; if [ -f "$f" ] && [ -x "$f" ]; then exit 0; fi; ' +
+  // EACCES and nothing is ENOENT. An empty entry, and a PATH set but empty, is the folder it starts in (`/dev/null` ends the
+  // list so a trailing empty one is not split away). `exec` then searches the same PATH and skips what cannot be run, as libuv does.
+  '*) (IFS=:; set -f; e=2; for d in ${PATH+$PATH:}/dev/null; do f=${d:-.}/$1; if [ -f "$f" ] && [ -x "$f" ]; then exit 0; fi; ' +
   '[ -e "$f" ] && e=1; done; exit $e); case $? in 1) echo eacces >&4; exit 126;; 2) echo enoent >&4; exit 127;; esac;; esac; '
 
 /**
