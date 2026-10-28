@@ -256,17 +256,27 @@ export function changeServeState(dataDir, change, platform = process.platform, {
 /**
  * A new full credential for `label` (#1405): written as its verifier only, and returned once. One label holds one
  * credential: a hub pairing again (each link does) replaces its own, and `window` the window's. The `legacy` one a
- * version 1 file left goes with a hub's pairing: whoever held it was a hub, which pairs now. Returns `{ token, id, state }`.
+ * version 1 file left goes with a hub's or the window's pairing: whoever held it was one of the two, which pairs now.
+ * Returns `{ token, id, state }`.
  */
 export function pairServe(dataDir, label, platform = process.platform, now = Date.now()) {
   ensureServeState(dataDir, platform, now)
   const { token, id } = mint()
   const state = changeServeState(dataDir, (s) => ({
     ...s,
-    // A hub's pairing removes the `legacy` one: whoever held it was a hub of before #1405, which pairs now
-    full: [...s.full.filter((e) => e.label !== label && !(label.startsWith('hub:') && e.label === LEGACY_LABEL)), { id, label, verifier: verifierOf(token), created: now }],
+    /*
+     * A hub's or the window's pairing removes the `legacy` one (#1405 review): whoever held it was a hub or the window
+     * of before #1405, each of which pairs now, so on a machine no hub links to it does not outlive the window's next
+     * start. Any other label leaves it: a program's own `--pair` does not cut off a hub that has not paired yet
+     */
+    full: [...s.full.filter((e) => e.label !== label && !(takesLegacyPlace(label) && e.label === LEGACY_LABEL)), { id, label, verifier: verifierOf(token), created: now }],
   }), platform)
   return { token, id, state }
+}
+
+/** The pairings that stand for whoever held a version 1 file's token: a hub's and the window's (`pairServe`) */
+function takesLegacyPlace(label) {
+  return label === 'window' || label.startsWith('hub:')
 }
 
 /** Removes the full credential `id`; true when there was one. A hello with it is refused from then on */

@@ -1461,17 +1461,21 @@ A host started with `centralu serve` on another machine is reached by the app th
   - **What anyone else gets.** `--connection` without `--pair` prints the limited credential (`limited`) and the
     other full credentials by id, label and date (`others`), never their values; `--stop` and the launcher's probes
     use the limited credential. `--revoke <id>` withdraws one full credential; `--rotate-token` draws a new key and
-    withdraws them all.
+    withdraws them all. Both act on the next hello: a socket already open with a withdrawn credential stays open until
+    it closes (a hub's current link included), since the host reads `serve.json` at hello and nowhere else.
   - **Moving on.** A version 1 file's token becomes a full credential labelled `legacy` (a hub or window still holding
-    it keeps working) and a new key is drawn; the next pairing removes `legacy`. An installed host from before
+    it keeps working) and a new key is drawn; the next pairing of a hub or of the window removes `legacy`
+    (a pairing under any other label leaves it, so a program's own `--pair` does not cut off a hub that has not paired yet). An installed host from before
     verifiers (a rollback; `verifiers` absent from its `bundle-info.json`) knows a single token: the launcher keeps one
     for it (`legacyHostToken`), gives it to that host and to a hub that pairs, and drops it once a host of today runs.
     A host bundle from before #538, whose `bundle-info.json` does not say `tokenOnStdin`, still gets that token in
     `CC_HOST_TOKEN`.
   - **The honest limit.** A process of this user on that machine can run `--pair` itself, as an agent that ssh-es there
     can. It gets a full credential of its own, which the file names by its label; the hub's machine row will list such
-    credentials and offer to revoke them (#1405 slice 5b). It can also read the key, which gives it only the limited
-    credential. On Windows any process of this user can run `--window` and get the window's credential, until the
+    credentials and offer to revoke them (#1405 slice 5b). It can also read the key. That
+    gives it the limited credential, and also a bridge credential (`ccb1`) for any session it can name, which reaches
+    that session's own tool channel (`orchestrator.tool`, under that session's preset; "The Codex bridge gets a credential of its own" below), as it
+    did before #1405 when the file held the token. On Windows any process of this user can run `--window` and get the window's credential, until the
     launcher checks its parent (#1417).
 - **Other users on the remote machine** can connect to 127.0.0.1 like anyone local, and are stopped by the token, as on
   a desktop. A machine where another user can read your files (root, or a wrong home-folder mode) can read the token;
@@ -1520,6 +1524,15 @@ A host started with `centralu serve` on another machine is reached by the app th
   on the port, which could otherwise make the line say no); a remote from before #838 has no `proof` and gets the
   hello as before, so on such a remote this hole stays open until it is updated. A host that refuses the `prove`
   (a machine rolled back to such a build) is a refusal: the hub reads the line again rather than retrying.
+- **Residual: the proof under a stored verifier** (#1405 review, held for the owner). A hub that paired proves the
+  host with `credentialProof`, keyed by its credential's verifier, which `serve.json` holds. A process of the same user
+  on the linked machine that reads the file can therefore stop the host (`host.stop` is everyday, or `kill`), listen on
+  its port, answer the hub's `prove { credential }` from the file, and receive the hub's full credential in the hello
+  that follows. That credential is never listed as an "other" one. This is no worse than before #1405, when the file
+  held the token itself, but a reader of `serve.json` gets more than the limited credential through it. Closing it needs
+  an asymmetric pairing (the verifier a public key, the hub signing the host's nonce instead of sending a bearer
+  credential); until the owner decides, it stays a stated residual. Another account cannot take this path: it cannot
+  read the 0600 file.
 - **The same on the linked machine.** `serve --connection`, `serve` and `serve --stop` ask the host on the recorded
   port with the token, and another account there can hold that port while the host is down. When the installed
   build proves, they send `prove` first and the hello only to a host that proved it (`helloSocket` in `serve-host.mjs`, beside `serve.mjs`).
