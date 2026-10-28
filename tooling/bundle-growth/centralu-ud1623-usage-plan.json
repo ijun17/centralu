@@ -1,0 +1,4 @@
+{
+  "bytes": 4200,
+  "reason": "The usage donuts for a tool with no limits and the panel for it (#1616, #1623): the protocol's `notReported`, `provisional`, `settle` and `totals` fields (zod schemas the UI bundle carries though only the host reads some), the dimmed fourth ring and the cross-fading rings in UsageDonuts, the settle ask, and the not-reported panel with its local totals (NotReported, formatReadAt, the copy). Measured with the same production build (vite build, NODE_ENV=production, JS of apps/web/dist/assets): origin/main b2b4f5098 is 1,917,790 B; this branch merged with it is 1,921,938 B, +4,148 B (main chunk +3,720 B, store chunk +427 B, the rest rounding). The branch alone on its merge base 137a2459a is 1,921,017 B. Plain components and schemas with no new dependency; lazy loading would not lower the total, which counts every chunk."
+}
