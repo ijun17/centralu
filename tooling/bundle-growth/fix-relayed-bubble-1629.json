@@ -1,4 +1,4 @@
 {
-  "bytes": 120,
-  "reason": "The relayed message look (#1629): the bubble look shared by ChatRow and the pinned copy (a helper and a flag). Measured 116 B against main (1,916,842 to 1,916,958 B). Plain strings, no dependency."
+  "bytes": 200,
+  "reason": "The relayed message look (#1629): the bubble look shared by ChatRow and the pinned copy (a helper and a flag). Measured 117 B against main (1,921,938 to 1,922,055 B, production build, Windows). Plain strings, no dependency."
 }
