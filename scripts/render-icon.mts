@@ -2,8 +2,8 @@
  * Renders the app icon from SVG.
  *
  *   pnpm icon            # re-renders whichever one is currently chosen
- *   pnpm icon grid       # switches to a different candidate (orbit · grid · dot)
- *   pnpm icon --preview  # draws all three side by side at real dock sizes to compare
+ *   pnpm icon grid       # switches to a different candidate (panes · orbit · grid · dot)
+ *   pnpm icon --preview  # draws every candidate side by side at real dock sizes to compare
  *
  * **SVG is kept as the source of truth.** With only a PNG, changing even one color needs an
  * image editor, and the diff shows only "the binary changed". SVG can be read, edited and
@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url'
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const ICONS = join(ROOT, 'apps/desktop/src-tauri/icons')
 const SOURCES = join(ICONS, 'sources')
-const NAMES = ['orbit', 'grid', 'dot'] as const
+const NAMES = ['panes', 'orbit', 'grid', 'dot'] as const
 
 const args = process.argv.slice(2)
 const preview = args.includes('--preview')
