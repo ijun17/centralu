@@ -324,14 +324,14 @@
  * between them), until the owner preferred the board's darker floor and the lift was found to
  * leave app panels on a different ground from the sessions beside them.
  *
- * So the sidebar keeps the distance now. Measured as CIELAB lightness (ΔL*), which follows what
- * the eye sees at the dark end better than hex steps do:
- *   Dark   sidebar #1d1d1d, conversation #0f0f0f: ΔL* 6.5, twice what the lifted conversation had
- *          from the old sidebar (#1d1d1d and #171717, ΔL* 3.0). Dark was #1a1a1a on #141414
- *          (ΔL* 2.9) until the owner asked for wider steps between the surfaces (#725).
+ * So the sidebar kept the distance for a while. Measured as CIELAB lightness (ΔL*), which follows
+ * what the eye sees at the dark end better than hex steps do:
+ *   Dark   sidebar #0f0f0f, conversation #0f0f0f: no step. The sidebar was #1d1d1d (ΔL* 6.5) until
+ *          the owner asked for it on the floor's own value (2026-10-27); the edge line (#363636)
+ *          alone parts them now.
  *   Light  sidebar #e0e0e0, conversation #e8e8e8: ΔL* 2.8, the sidebar a recess below the floor
  *          as it was before.
- * The hairline on the sidebar's edge stays; it was never enough on its own.
+ * The hairline on the sidebar's edge stays; in Light it sits beside the step.
  *
  * The other constraint is the approval card: lifted enough to be a component without becoming a
  * signal. Raised sits ΔL* 9.9 above the floor in Dark (#242424 on #0f0f0f) and 4.2 in Light
@@ -741,8 +741,8 @@
    *
    * Bright text on a dark background, but the sidebar background (surface-side) and the chip
    * background (surface-floor) were only six steps apart when this was written (#1a1a1a on
-   * #141414, three before that; Dark is #1d1d1d on #0f0f0f since #725, fourteen), so a single
-   * border did not separate them well.
+   * #141414, three before that; Dark was #1d1d1d on #0f0f0f, fourteen, and is the same value
+   * since 2026-10-27), so a single border did not separate them well.
    *
    * Instead of pushing the border brighter, this borrows the same touch as a keycap: a 1px
    * highlight on top and a shadow underneath. It reads as a distinct object without spending any

@@ -553,12 +553,16 @@ export function gridAppTests(): void {
 
         /*
          * With the conversation on the floor, the sidebar must not read as the same colour (the 2026-08 report: three
-         * steps apart, a hairline between them): at least six steps, with the hairline still drawn. The high-contrast
-         * presets put the sidebar on the floor itself and leave the edge to a 3:1 hairline (fixtures/theme.ts).
+         * steps apart, a hairline between them): Light keeps at least six steps, with the hairline still drawn. Dark
+         * and the high-contrast presets put the sidebar on the floor itself and leave the edge to the hairline (Dark by
+         * the owner's ask, 2026-10-27; the high-contrast ones to a 3:1 hairline, fixtures/theme.ts).
          */
         const sidebar = page.getByTestId('sidebar')
         expect(await sidebar.evaluate((el) => getComputedStyle(el).borderRightWidth)).toBe('1px')
-        if (preset.id === 'dark' || preset.id === 'light') {
+        if (preset.id === 'dark') {
+          expect(await background(sidebar), 'dark: the sidebar stands on the floor').toBe(await background(conversation))
+        }
+        if (preset.id === 'light') {
           const [side, floor] = [rgb(await background(sidebar)), rgb(await background(conversation))]
           expect(Math.min(...side.map((v, i) => Math.abs(v - floor[i]!))), `${preset.id}: sidebar ${side} vs conversation ${floor}`).toBeGreaterThanOrEqual(6)
         }
