@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { ToolName } from '@cc/protocol/client'
 import { useStore } from '../../store/store.js'
 import { useTools } from '../../store/selectors.js'
@@ -87,17 +87,33 @@ function ToolSwitch({ sessionId, projectId, tool }: { sessionId: string; project
     return !!d && (d.setup?.install === 'centralu' || d.setup?.signIn === 'centralu') && !(d.installed && d.loggedIn)
   }
   const shown = tools.filter((t) => t.name === tool || ready(t.name) || needsSetup(t.name))
+  /*
+   * The tool being set up wears the capsule's selected look while its line stands under it (owner, 2026-10-28); the session's
+   * own tool is unchanged all along. Never switched on its own: when the setup finishes the look goes back to the session's
+   * tool and the picked one is an ordinary ready tool, one more click from switching.
+   */
+  const stillNeeds = setupFor !== null && setupFor !== tool && needsSetup(setupFor)
+  useEffect(() => {
+    if (setupFor !== null && !stillNeeds) setSetupFor(null)
+  }, [setupFor, stillNeeds])
+  const lit = stillNeeds ? setupFor : tool
   // Still asking the machine: the session's own tool, and a placeholder where the others will stand
   const asking = found.loading && !found.data && !found.error
 
   // The same session takes the other tool (`agents.switchTool`): nothing was said yet, so nothing is lost, and the slot,
   // its place in the sidebar and a draft already typed all stay
   const pick = async (t: ToolName) => {
-    if (t === tool || busy) return
+    if (busy) return
+    if (t === tool) {
+      // The session's own tool again: the look and the line go back to it; a setup already running keeps running
+      setSetupFor(null)
+      return
+    }
     if (needsSetup(t)) {
       setSetupFor(t)
       return
     }
+    setSetupFor(null)
     setBusy(t)
     try {
       await useStore.getState().switchTool(sessionId, t)
@@ -120,7 +136,7 @@ function ToolSwitch({ sessionId, projectId, tool }: { sessionId: string; project
       data-testid="session-start-tools"
     >
       {shown.map((t) => {
-        const on = t.name === tool
+        const on = t.name === lit
         return (
           <button
             key={t.name}
@@ -134,7 +150,7 @@ function ToolSwitch({ sessionId, projectId, tool }: { sessionId: string; project
               on
                 ? 'bg-surface-hover text-ink'
                 : 'text-ink-muted hover:bg-surface-hover/50 hover:text-ink disabled:opacity-50 disabled:hover:bg-transparent'
-            } ${needsSetup(t.name) ? 'opacity-50' : ''}`}
+            } ${needsSetup(t.name) && !on ? 'opacity-50' : ''}`}
           >
             {busy === t.name ? 'Switching…' : t.label}
           </button>
@@ -154,7 +170,7 @@ function ToolSwitch({ sessionId, projectId, tool }: { sessionId: string; project
       label={tools.find((x) => x.name === setupFor)?.label ?? ''}
       login={tools.find((x) => x.name === setupFor)?.login ?? ''}
       machine={machine}
-      shown={setupFor !== null && needsSetup(setupFor)}
+      shown={stillNeeds}
       refusal={setupFor ? refusal(setupFor) : null}
       terminal={{
         login: (label, command) => `${label} needs a login — run ${command} in a terminal`,

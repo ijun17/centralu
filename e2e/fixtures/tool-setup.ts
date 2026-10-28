@@ -324,7 +324,9 @@ export function toolSetupTests(): void {
       })
 
       await radio.click()
-      await expect(radio).toHaveAttribute('aria-checked', 'false')
+      // The picked tool wears the selected look, and the session's tool is still Claude Code
+      await expect(radio).toHaveAttribute('aria-checked', 'true')
+      await expect(page.getByTestId('session-start-tool-claude')).toHaveAttribute('aria-checked', 'false')
       expect(await stored(page, id)).toBe('claude')
       const line = page.getByTestId('session-start-tool-blocked')
       await expect(line).toContainText('Antigravity is not installed.')
@@ -341,11 +343,45 @@ export function toolSetupTests(): void {
 
       await told(page, centralu('ready'))
       await expect(line).toHaveCount(0)
+      // Ready is not switched to: the look goes back to the session's own tool, and Antigravity is an ordinary ready tool
+      await expect(page.getByTestId('session-start-tool-claude')).toHaveAttribute('aria-checked', 'true')
+      await expect(radio).toHaveAttribute('aria-checked', 'false')
       await expect(radio).not.toHaveClass(/(^|\s)opacity-50(\s|$)/)
       expect(await stored(page, id)).toBe('claude')
       await radio.click()
       await expect.poll(() => stored(page, id)).toBe('antigravity')
       await expect(page.getByTestId('session-start-tool-codex')).toHaveCount(0)
+    })
+
+    test("picking the session's own tool again moves the look back and folds the line; a running install keeps running, and finishing switches nothing", async ({ page }) => {
+      await setup(page, { projects: ['/tmp/alpha'], trusted: true })
+      await likeTheRealAdapter(page)
+      await antigravity(page, centralu('not_installed'))
+      const id = await startSession(page, 'alpha')
+      const radio = page.getByTestId('session-start-tool-antigravity')
+      const claude = page.getByTestId('session-start-tool-claude')
+      await radio.click()
+      await page.getByTestId('session-start-tool-blocked-install').click()
+      await expect(page.getByTestId('session-start-tool-blocked')).toHaveAttribute('data-setup', 'installing')
+
+      await claude.click()
+      await expect(page.getByTestId('session-start-tool-blocked')).toHaveCount(0)
+      await expect(claude).toHaveAttribute('aria-checked', 'true')
+      await expect(radio).toHaveAttribute('aria-checked', 'false')
+      await expect(radio).toHaveClass(/(^|\s)opacity-50(\s|$)/)
+      // The install goes on without the line; nothing asked the host to stop it
+      expect(await calls(page)).toEqual(['install:antigravity'])
+      await told(page, centralu('signed_out'))
+      await told(page, centralu('ready'))
+      await page.evaluate(() => {
+        const m = (window as unknown as MockWindow).__mock
+        m.detected = m.detected.map((t: any) => (t.name === 'antigravity' ? { ...t, installed: true, loggedIn: true } : t))
+      })
+      // Done while the person was back on Claude Code: no switch, no line, Antigravity undimmed
+      await expect(radio).not.toHaveClass(/(^|\s)opacity-50(\s|$)/)
+      await expect(claude).toHaveAttribute('aria-checked', 'true')
+      await expect(page.getByTestId('session-start-tool-blocked')).toHaveCount(0)
+      expect(await stored(page, id)).toBe('claude')
     })
 
     test('in a project that is not trusted it says why, as the dialog does, with no Install', async ({ page }) => {

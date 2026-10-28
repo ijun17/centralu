@@ -581,10 +581,13 @@ or goes after the bar was first drawn.
 **The empty session's tool capsule (owner, 2026-10-28).** The capsule (`SessionStart.tsx`) keeps the 2026-10-18 rule for
 every tool: only an installed, signed-in, unrefused tool is offered. The one exception is a tool Centralu installs or signs
 in itself (`setup.install` or `setup.signIn` is `centralu`; today Antigravity) that is not installed or not signed in: it is
-shown, dimmed like the dialog's unusable options. Picking it does not switch the session; it shows that tool's
-`ToolSetupLine` under the capsule (Install, then Sign in; the dialog's words), folding in and out with the line's own
-motion. A refusal (an untrusted project) is said there as the dialog says it. Once the tool is ready it is undimmed and
-picked like any other, which switches the session. Without this, before install the tool was reachable only from the
+shown, dimmed like the dialog's unusable options. Picking it does not switch the session: the capsule's selected look
+(the fill) moves to it, and that tool's `ToolSetupLine` stands under the capsule (Install, then Sign in; the dialog's
+words), folding in and out with the line's own motion. Picking the session's own tool again moves the fill back and folds
+the line; a setup already running keeps running. A refusal (an untrusted project) is said there as the dialog says it.
+Nothing here ever switches the session by itself: when the setup finishes the line folds, the fill goes back to the
+session's real tool and the picked one is undimmed, an ordinary ready tool; one more click switches (the person may have
+gone back and started talking meanwhile). Without this, before install the tool was reachable only from the
 command palette.
 
 **The first-run card.** Antigravity's card is a refused card, drawn as Cursor's and OpenCode's are: dimmed whole, with the
