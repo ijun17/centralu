@@ -309,7 +309,7 @@ export function toolSetupTests(): void {
     // The real adapter cannot keep a project's own files out, so it runs only in trusted projects (the mock's default says nothing of it)
     const likeTheRealAdapter = (page: Page) => page.evaluate(() => ((window as unknown as MockWindow).__mock.capabilityLimits.antigravity = { keepsRepoFilesOut: false }))
 
-    test('a tool Centralu sets up is shown dimmed before it is ready; picking it shows the line, and it switches once it is ready', async ({ page }) => {
+    test('a tool Centralu sets up is shown dimmed before it is ready; picking it takes the fill and shows the line, ready does not switch the session, and one more click does', async ({ page }) => {
       await setup(page, { projects: ['/tmp/alpha'], trusted: true })
       await likeTheRealAdapter(page)
       await antigravity(page, centralu('not_installed'))
