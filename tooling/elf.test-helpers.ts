@@ -4,11 +4,13 @@
  * of them asked of the first library, as `readelf -V` would list them under it) and the string table those names are
  * in. Enough to test the release's check of a keeper without a Linux build at hand.
  */
-export function fakeElf(o: { machine: number; type?: number; needed?: string[]; versions?: string[] }): Buffer {
+export function fakeElf(o: { machine: number; type?: number; needed?: string[]; versions?: string[]; weak?: string[]; interp?: boolean }): Buffer {
   const needed = o.needed ?? []
   const versions = needed.length ? (o.versions ?? []) : []
   const phoff = 64
-  const phnum = needed.length ? 2 : 1
+  // An executable names its program interpreter (PT_INTERP); a shared library does not. Default: an executable
+  const interp = o.interp ?? true
+  const phnum = 1 + (needed.length ? 1 : 0) + (interp ? 1 : 0)
   const strtabAt = phoff + 56 * phnum
   const strings = [...needed, ...versions]
   const names = Buffer.concat([Buffer.from([0]), ...strings.map((n) => Buffer.from(`${n}\0`, 'latin1'))])
@@ -42,6 +44,10 @@ export function fakeElf(o: { machine: number; type?: number; needed?: string[]; 
   b.writeBigUInt64LE(vbase, phoff + 16)
   b.writeBigUInt64LE(BigInt(size), phoff + 32)
   b.writeBigUInt64LE(BigInt(size), phoff + 40)
+  if (interp) {
+    const ph = phoff + 56 * (phnum - 1)
+    b.writeUInt32LE(3, ph) // PT_INTERP
+  }
   if (needed.length) {
     const ph = phoff + 56
     b.writeUInt32LE(2, ph) // PT_DYNAMIC
@@ -58,6 +64,7 @@ export function fakeElf(o: { machine: number; type?: number; needed?: string[]; 
       // vn_next: 0, the last
       versions.forEach((_, i) => {
         const aux = verneedAt + 16 + 16 * i
+        if (o.weak?.includes(versions[i]!)) b.writeUInt16LE(2, aux + 4) // vna_flags: VER_FLG_WEAK
         b.writeUInt16LE(i + 2, aux + 6) // vna_other
         b.writeUInt32LE(offsets[needed.length + i]!, aux + 8) // vna_name
         b.writeUInt32LE(i + 1 < versions.length ? 16 : 0, aux + 12) // vna_next

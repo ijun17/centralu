@@ -15,12 +15,16 @@ export const ET_DYN = 3
 
 /**
  * `glibc`: the highest `GLIBC_x.y[.z]` among the version needs, as numbers (`[2, 34]`); null when they name none, as in
- * a statically linked file
+ * a statically linked file. A version need marked weak (`vna_flags` `VER_FLG_WEAK`) is left out: the loader starts a file
+ * whose weak version is missing (Rust's std asks for `pidfd_spawnp` that way). `interp`: it names a program interpreter
+ * (`PT_INTERP`), as an executable does and a shared library does not
  */
-export type ElfFacts = { type: number; machine: number; needed: string[]; glibc: number[] | null }
+export type ElfFacts = { type: number; machine: number; needed: string[]; glibc: number[] | null; interp: boolean }
 
 const PT_LOAD = 1
 const PT_DYNAMIC = 2
+const PT_INTERP = 3
+const VER_FLG_WEAK = 0x2
 const DT_NULL = 0n
 const DT_NEEDED = 1n
 const DT_STRTAB = 5n
@@ -48,8 +52,8 @@ function glibcOf(name: string): number[] | null {
 
 /** The facts, or a sentence saying why the bytes are not an ELF this can read */
 export function readElf(b: Buffer): ElfFacts | string {
-  if (b.length < 64 || b.readUInt32BE(0) !== 0x7f454c46) return 'not an ELF file'
-  if (b[4] !== 2 || b[5] !== 1) return 'not a 64-bit little-endian ELF'
+  if (b.length < 64 || b.readUInt32BE(0) !== 0x7f454c46) return 'it is not an ELF file'
+  if (b[4] !== 2 || b[5] !== 1) return 'it is not a 64-bit little-endian ELF'
   const type = b.readUInt16LE(16)
   const machine = b.readUInt16LE(18)
   const phoff = Number(b.readBigUInt64LE(32))
@@ -57,16 +61,18 @@ export function readElf(b: Buffer): ElfFacts | string {
   const phnum = b.readUInt16LE(56)
   if (phentsize < 56 || phoff + phentsize * phnum > b.length) return 'its program headers run past the end of the file'
   const loads: { offset: number; vaddr: bigint; filesz: bigint }[] = []
+  let interp = false
   let dynamic: { offset: number; size: number } | null = null
   for (let i = 0; i < phnum; i++) {
     const at = phoff + i * phentsize
     const pType = b.readUInt32LE(at)
     const offset = Number(b.readBigUInt64LE(at + 8))
     if (pType === PT_LOAD) loads.push({ offset, vaddr: b.readBigUInt64LE(at + 16), filesz: b.readBigUInt64LE(at + 32) })
+    else if (pType === PT_INTERP) interp = true
     else if (pType === PT_DYNAMIC) dynamic = { offset, size: Number(b.readBigUInt64LE(at + 32)) }
   }
   // Statically linked: it links nothing by name
-  if (!dynamic) return { type, machine, needed: [], glibc: null }
+  if (!dynamic) return { type, machine, needed: [], glibc: null, interp }
   if (dynamic.offset + dynamic.size > b.length) return 'its dynamic section runs past the end of the file'
   const names: bigint[] = []
   let strtab: bigint | null = null
@@ -81,7 +87,7 @@ export function readElf(b: Buffer): ElfFacts | string {
     else if (tag === DT_VERNEED) verneed = val
     else if (tag === DT_VERNEEDNUM) verneedNum = Number(val)
   }
-  if (names.length === 0 && verneed === null) return { type, machine, needed: [], glibc: null }
+  if (names.length === 0 && verneed === null) return { type, machine, needed: [], glibc: null, interp }
   if (strtab === null) return 'it links libraries but has no string table'
   // The dynamic section names its tables by their address once loaded: find the segment that holds each
   const fileAt = (addr: bigint): number | null => {
@@ -115,7 +121,7 @@ export function readElf(b: Buffer): ElfFacts | string {
         if (aux + 16 > b.length) return 'its version needs run past the end of the file'
         const name = string(b.readUInt32LE(aux + 8))
         if (name === null) return 'a version name runs past the end of the file'
-        const v = glibcOf(name)
+        const v = b.readUInt16LE(aux + 4) & VER_FLG_WEAK ? null : glibcOf(name)
         if (v && (!glibc || compareVersions(v, glibc) > 0)) glibc = v
         aux += b.readUInt32LE(aux + 12)
       }
@@ -124,5 +130,5 @@ export function readElf(b: Buffer): ElfFacts | string {
       at += next
     }
   }
-  return { type, machine, needed, glibc }
+  return { type, machine, needed, glibc, interp }
 }

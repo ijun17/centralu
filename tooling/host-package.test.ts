@@ -102,11 +102,11 @@ describe('staging and checking one (release-npm.mts)', () => {
     copyFileSync(LAUNCHER_PACKAGE_FILE, join(at, 'centralu-package.json'))
   }
   /** A keeper for `platform` as the AppImage carries it: an ELF for its machine, linking the C runtime only, glibc 2.34 at most */
-  const fakeKeeper = (platform: string, o: { machine?: number; type?: number; needed?: string[]; versions?: string[] } = {}) => {
+  const fakeKeeper = (platform: string, o: { machine?: number; type?: number; needed?: string[]; versions?: string[]; weak?: string[]; interp?: boolean } = {}) => {
     const at = join(dir, `keeper-${platform}-${Math.random().toString(36).slice(2)}`)
     writeFileSync(
       at,
-      fakeElf({ machine: o.machine ?? ELF_MACHINES[platform]!, type: o.type, needed: o.needed ?? ['libc.so.6', 'libgcc_s.so.1'], versions: o.versions ?? ['GLIBC_2.2.5', 'GLIBC_2.34'] }),
+      fakeElf({ machine: o.machine ?? ELF_MACHINES[platform]!, type: o.type, needed: o.needed ?? ['libc.so.6', 'libgcc_s.so.1'], versions: o.versions ?? ['GLIBC_2.2.5', 'GLIBC_2.34'], weak: o.weak, interp: o.interp }),
     )
     return { src: at, name: hostPackageKeeper(platform) ?? 'centralu-keeper' }
   }
@@ -232,10 +232,18 @@ describe('staging and checking one (release-npm.mts)', () => {
         writeFileSync(notElf, '#!/bin/sh\nexit 0\n')
         return { src: notElf, name: 'centralu-keeper' }
       })
-      expect(hostPackageProblems(pkg, 'linux-x64')).toEqual(['centralu-keeper is not an ELF file: a remote could not run it'])
+      expect(hostPackageProblems(pkg, 'linux-x64')).toEqual(['centralu-keeper cannot run on a remote: it is not an ELF file'])
       // A relocatable object (ELF type 1) is not something a remote can start
       stageHostPackage(src, pkg, fakeKeeper('linux-x64', { type: 1 }))
       expect(hostPackageProblems(pkg, 'linux-x64')).toEqual(['centralu-keeper is not an executable (ELF type 1)'])
+    })
+
+    // A shared library (ELF type 3, as a PIE executable is) has no program interpreter
+    it('must be an executable, not a shared library', () => {
+      const { pkg } = staged('linux-x64', () => fakeKeeper('linux-x64', { interp: false }))
+      expect(hostPackageProblems(pkg, 'linux-x64')).toEqual([
+        'centralu-keeper is a shared library, not an executable: it names no program interpreter, so a remote could not run it',
+      ])
     })
 
     it('must link nothing beyond the C runtime: a remote has no desktop', () => {
@@ -262,6 +270,12 @@ describe('staging and checking one (release-npm.mts)', () => {
         'centralu-keeper needs glibc 2.35, newer than the 2.34 a remote is checked for: it would not start on every machine a hub installs on',
       ])
       stageHostPackage(src, pkg, fakeKeeper('linux-x64', { versions: ['GLIBC_2.2.5', 'GLIBC_2.34'] }))
+      expect(hostPackageProblems(pkg, 'linux-x64')).toEqual([])
+    })
+
+    // Built on Ubuntu 24.04, Rust's std asks weakly for GLIBC_2.39 (pidfd_spawnp); glibc starts the file without it
+    it('does not count a weak glibc version need', () => {
+      const { pkg } = staged('linux-x64', () => fakeKeeper('linux-x64', { versions: ['GLIBC_2.39', 'GLIBC_2.34'], weak: ['GLIBC_2.39'] }))
       expect(hostPackageProblems(pkg, 'linux-x64')).toEqual([])
     })
 

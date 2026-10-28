@@ -82,9 +82,11 @@ const C_RUNTIME = /^(?:libc|libm|libdl|libpthread|librt|libutil|libgcc_s)\.so\.\
 export function keeperProblems(path: string, platform: string): string[] {
   const name = basename(path)
   const elf = readElf(readFileSync(path))
-  if (typeof elf === 'string') return [`${name} is ${elf}: a remote could not run it`]
+  if (typeof elf === 'string') return [`${name} cannot run on a remote: ${elf}`]
   const problems: string[] = []
   if (elf.type !== ET_EXEC && elf.type !== ET_DYN) problems.push(`${name} is not an executable (ELF type ${elf.type})`)
+  // A shared library has no program interpreter: its type alone would let it pass for the keeper
+  else if (elf.type === ET_DYN && !elf.interp) problems.push(`${name} is a shared library, not an executable: it names no program interpreter, so a remote could not run it`)
   const want = ELF_MACHINES[platform]
   if (elf.machine !== want) problems.push(`${name} is built for ELF machine 0x${elf.machine.toString(16)}, not ${platform} (0x${want?.toString(16)})`)
   // Windows keeps no exec bit to read; the release that stages a Linux package runs on Linux
