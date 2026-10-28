@@ -1,5 +1,5 @@
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -4930,8 +4930,8 @@ describe('the integrator lands an auto-tier branch without a pull request from i
       .map((what, i) => `${i + 1}${i === plan.length - 1 ? '|*' : ''}) ${what === 'ok' ? 'exec git upload-pack "$@"' : what === 'hide' ? 'exec git -c uploadpack.hideRefs=refs/heads upload-pack "$@"' : 'echo "the remote broke: stand-in failure" >&2; exit 1'};;`)
       .join('\n')
     const script = join(dir, 'upload-pack.sh')
-    writeFileSync(script, `#!/bin/sh\nn=$(cat '${counter}' 2>/dev/null || echo 0)\nn=$((n+1))\necho $n > '${counter}'\ncase $n in\n${cases}\nesac\n`, { mode: 0o755 })
-    g(repo.work, 'config', 'remote.origin.uploadpack', slash(script))
+    writeFileSync(script, `#!/bin/sh\nn=$(cat "${counter}" 2>/dev/null || echo 0)\nn=$((n+1))\necho $n > "${counter}"\ncase $n in\n${cases}\nesac\n`, { mode: 0o755 })
+    g(repo.work, 'config', 'remote.origin.uploadpack', `'${slash(script)}'`)
   }
 
   it('says the remote listed nothing, as a retry, when ls-remote exits 2 for the branch and for main alike', async () => {
@@ -4971,10 +4971,25 @@ describe('the integrator lands an auto-tier branch without a pull request from i
     }
   }, 60_000 * SLOW)
 
+  it('throws, not null, for a file the tree names but whose object cannot be read (a blobless clone with its remote away, a lost object)', async () => {
+    const repo = integrateRepo({})
+    const blob = g(repo.work, 'rev-parse', 'HEAD:README.md')
+    const loose = join(repo.work, '.git', 'objects', blob.slice(0, 2), blob.slice(2))
+    expect(existsSync(loose)).toBe(true)
+    // The blob only: the commit and its trees stay, so `HEAD:README.md` still names it
+    chmodSync(loose, 0o666)
+    rmSync(loose)
+    const at = g(repo.work, 'rev-parse', 'HEAD')
+    await expect(showFile(repo.work, at, 'README.md')).rejects.toBeInstanceOf(GitError)
+    // Another file (README.md and docs/guide.md share the blob), and a file the tree does not name, are told as before
+    expect(await showFile(repo.work, at, '.centralu/tiers.json')).toContain('fallback')
+    expect(await showFile(repo.work, at, 'docs/none.md')).toBeNull()
+  }, 60_000 * SLOW)
+
   // Windows cannot hold a file name with a line break in it; a POSIX file system can, and a tracked one is read by name
   it.skipIf(process.platform === 'win32')('reads a file whose name has a line break in it as that file, not as its first line (git cat-file --batch reads one name per line)', async () => {
     const repo = integrateRepo({})
-    for (const [name, text] of [['d/a', 'AAA\n'], ['d/a\nb', 'NEWLINE\n'], ['d/c\rd', 'CR\n'], ['d/e\nf', 'E\n']] as const) {
+    for (const [name, text] of [['d/a', 'AAA\n'], ['d/a\nb', 'NEWLINE\n'], ['d/c\rd', 'CR\n'], ['d/x', 'X\n'], ['d/x\r', 'XCR\n'],['d/e\nf', 'E\n']] as const) {
       mkdirSync(join(repo.work, 'd'), { recursive: true })
       writeFileSync(join(repo.work, name), text)
     }
@@ -4984,6 +4999,9 @@ describe('the integrator lands an auto-tier branch without a pull request from i
     expect(await showFile(repo.work, at, 'd/a')).toBe('AAA\n')
     expect(await showFile(repo.work, at, 'd/a\nb')).toBe('NEWLINE\n')
     expect(await showFile(repo.work, at, 'd/c\rd')).toBe('CR\n')
+    // A trailing CR is not the end of a line to git: d/x and d/x<CR> are two files
+    expect(await showFile(repo.work, at, 'd/x\r')).toBe('XCR\n')
+    expect(await showFile(repo.work, at, 'd/x')).toBe('X\n')
     // Absent, though the line before the break names a file that exists: not that file's text
     expect(await showFile(repo.work, at, 'd/a\nzzz')).toBeNull()
     expect(await showFile(repo.work, at, 'd/zzz\nb')).toBeNull()

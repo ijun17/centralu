@@ -195,36 +195,39 @@ export async function remoteRefs(dir, remote, prefix) {
  * A file of a commit as text; null when the commit has no such file. A `rev` that is not a commit or tree of the repository
  * (a name that does not exist, an option, a sha it lacks) is a caller's bug, not a missing file: it throws. One
  * `git cat-file --batch` answers "<spec> missing" with exit 0, so nothing is read from git's error text, whose first line is
- * not always the error; only a miss asks once more, whether the rev is there. `--batch` reads one name per line, so a path
- * holding a newline (a POSIX file name may) would be two requests and the first one's answer taken for it: those go by
- * `rev-parse --verify` and `git show`, whose arguments are not lines. Any other failure (the repository, a promisor remote
- * away) is git's exit code and throws.
+ * not always the error; but it says "missing" too for an object the tree names and the repository cannot read (a blobless
+ * clone with its remote away, a deleted object, a submodule), so a miss asks `rev-parse --verify` whether the tree names the
+ * path: if it does, that is a failure and throws. `--batch` reads one name per line, so a path holding a newline (a POSIX file
+ * name may) would be two requests and the first one's answer taken for it: those go by `rev-parse --verify` and `git show`,
+ * whose arguments are not lines. Any other failure (the repository, a promisor remote away) is git's exit code and throws.
  */
 export async function showFile(dir, rev, path) {
   const spec = `${rev}:${path}`
   if (rev.startsWith('-')) throw new GitError(`git cannot read ${spec}: ${rev} is not a revision`)
-  const absent = async () => {
-    // Exit 1 and no output: no such object. Exit 128 and others: git failed, and throws from here
+  // `rev-parse --verify --quiet`: exit 0 the object is named, exit 1 and no output it is not; 128 and others are git failing
+  const named = async (name) => {
     try {
-      await git(dir, ['rev-parse', '--verify', '--quiet', `${rev}^{tree}`])
+      await git(dir, ['rev-parse', '--verify', '--quiet', name])
+      return true
     } catch (e) {
-      if (e instanceof GitError && e.code === 1) throw new GitError(`git cannot read ${spec}: ${rev} is not a commit of this repository`, e.stderr, 1)
+      if (e instanceof GitError && e.code === 1) return false
       throw e
     }
+  }
+  const absent = async () => {
+    if (!(await named(`${rev}^{tree}`))) throw new GitError(`git cannot read ${spec}: ${rev} is not a commit of this repository`)
     return null
   }
   if (/[\r\n]/.test(path)) {
-    try {
-      await git(dir, ['rev-parse', '--verify', '--quiet', spec])
-    } catch (e) {
-      if (e instanceof GitError && e.code === 1) return absent()
-      throw e
-    }
+    if (!(await named(spec))) return absent()
     return git(dir, ['show', spec])
   }
   const answer = await git(dir, ['cat-file', '--batch'], { input: `${spec}\n` })
   const header = answer.slice(0, answer.indexOf('\n'))
-  if (header.endsWith(' missing')) return absent()
+  if (header.endsWith(' missing')) {
+    if (await named(spec)) throw new GitError(`git cannot read ${spec}: the tree names it, but its object cannot be read`)
+    return absent()
+  }
   const found = /^[0-9a-f]{40,64} (\w+) \d+$/.exec(header)
   if (!found) throw new GitError(`git cat-file could not read ${spec}: ${header}`)
   // A folder or anything else that is not a file: as `git show` prints it
