@@ -420,14 +420,19 @@ answer, and a test on memory says what the host does:
   listing). Where it differs from Node:
   - On Windows a junction is copied as a junction, not as the folder it leads to. A link to a folder is made as a
     junction when its target is a whole path on a drive (no right needed), else a directory symlink (a relative target,
-    a share); a link to a file or to nothing as a file symlink. Node makes every link to a folder a directory symlink,
-    which fails with `EPERM` without Developer Mode, so a tree of pnpm junctions copies where Node's did not. A
+    a share); a link to a file or to nothing as a file symlink. Every symlink needs Developer Mode or an administrator, so
+    without them a tree holding one is refused with `EPERM` (Node's too). Node makes every link to a folder a
+    directory symlink, so a tree of pnpm junctions copies where Node's did not. A
     directory symlink to a whole path comes out a junction: both lead to the same place, and nothing in Node can tell
     them apart.
+  - A copy's link leads where the source's did. A junction (always a whole path) or an absolute symlink in the copy
+    still leads into the source, on Windows now as on POSIX: an app's data carried to a new key (`carry.ts`) keeps a
+    junction it made leading to the old key's folder. A copy that must stand alone retargets its links itself
+    (`copyTreeWindows` for a worktree on Windows). An import (`handover.ts`) holds no link: staging leaves links out.
   - Stricter than Node: with `verbatimSymlinks` Node's `cpSync` copies a link in a circle too, and `fs.promises.cp`
     never died; the `Os` takes the one rule for every option and both forms. Node's checks that read where a link
     leads when it replaces one in the target (`ERR_FS_CP_SYMLINK_TO_SUBDIRECTORY`) are not made: a link in the target
-    is replaced, anything else there is `EEXIST`, as Node's `symlink` answers.
+    is replaced (with `force: false` too, as Node's), anything else there is `EEXIST`, as Node's `symlink` answers.
   - Node's other answers are kept: the same file, a folder into itself (by path and through the target's parents), a
     folder onto a non-folder and back, `ERR_FS_EISDIR` without `recursive`, `force`/`errorOnExist`
     (`ERR_FS_CP_EEXIST`), `preserveTimestamps` (the times first, then the mode, so a read-only file takes them too), a

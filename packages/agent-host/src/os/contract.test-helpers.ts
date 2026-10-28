@@ -94,6 +94,12 @@ const NO_SUCH_SIGNAL = 'SIGNOPE' as NodeJS.Signals
 
 const both = (v: unknown) => ({ windows: v, posix: v })
 const err = (code: string) => ({ error: code })
+/**
+ * The rest of the copy options case: a target through a file is the same refusal from both copies (Windows says no
+ * entry there, so the copy fails making the parent; POSIX says ENOTDIR at once)
+ */
+const OPTION_TAIL = { notRecursive: err('ERR_FS_EISDIR'), readOnlyFolder: 'k', throughFile: err('EEXIST'), throughFilePromised: err('EEXIST') }
+const OPTION_TAIL_POSIX = { ...OPTION_TAIL, throughFile: err('ENOTDIR'), throughFilePromised: err('ENOTDIR') }
 
 export const CONTRACT: Contract[] = [
   {
@@ -794,10 +800,10 @@ export const CONTRACT: Contract[] = [
     name: "a copy takes Node's options: force, errorOnExist, preserveTimestamps; a link onto a file is EEXIST, onto a link replaces it",
     // `timesLost`: a plain copy keeps the change time where copying a file does (Windows' CopyFile, macOS's copyfile)
     want: {
-      windows: { replaced: 'new', kept: 'old', refused: err('ERR_FS_CP_EEXIST'), times: true, timesLost: true, readOnlyTimes: true, linkOntoFile: err('EEXIST'), linkOntoLink: true },
-      posix: { replaced: 'new', kept: 'old', refused: err('ERR_FS_CP_EEXIST'), times: true, timesLost: false, readOnlyTimes: true, linkOntoFile: err('EEXIST'), linkOntoLink: true },
+      windows: { replaced: 'new', kept: 'old', refused: err('ERR_FS_CP_EEXIST'), times: true, timesLost: true, readOnlyTimes: true, linkOntoFile: err('EEXIST'), linkOntoLink: true, ...OPTION_TAIL },
+      posix: { replaced: 'new', kept: 'old', refused: err('ERR_FS_CP_EEXIST'), times: true, timesLost: false, readOnlyTimes: true, linkOntoFile: err('EEXIST'), linkOntoLink: true, ...OPTION_TAIL_POSIX },
     },
-    darwin: { replaced: 'new', kept: 'old', refused: err('ERR_FS_CP_EEXIST'), times: true, timesLost: true, readOnlyTimes: true, linkOntoFile: err('EEXIST'), linkOntoLink: true },
+    darwin: { replaced: 'new', kept: 'old', refused: err('ERR_FS_CP_EEXIST'), times: true, timesLost: true, readOnlyTimes: true, linkOntoFile: err('EEXIST'), linkOntoLink: true, ...OPTION_TAIL_POSIX },
     async run(os, root) {
       const { join } = os.paths.path
       const f = os.files
@@ -821,6 +827,9 @@ export const CONTRACT: Contract[] = [
       f.cpSync(s, join(root, 't2'), { recursive: true })
       const mtime = (...p: string[]) => f.statSync(join(root, ...p)).mtimeMs
       // A link copied onto a file, and onto a link: the junction `j` in `l`, over `j` a file in `lf` and a link in `ll`
+      const ro = join(root, 'ro')
+      f.mkdirSync(ro)
+      f.writeFileSync(join(ro, 'in'), 'k')
       const l = join(root, 'l')
       f.mkdirSync(l)
       f.symlinkSync(s, join(l, 'j'), 'junction')
@@ -837,7 +846,13 @@ export const CONTRACT: Contract[] = [
         readOnlyTimes: mtime('t1', 'ro') === 1_600_000_000_000,
         linkOntoFile: await outcome(() => f.cpSync(l, join(root, 'lf'), { recursive: true })),
         linkOntoLink: (f.cpSync(l, join(root, 'll'), { recursive: true }), os.paths.same(f.readlinkSync(join(root, 'll', 'j')), s)),
+        notRecursive: await outcome(() => f.cpSync(s, join(root, 'nr'))),
+        // A folder's mode is set once its entries are in: a read-only one is copied whole
+        readOnlyFolder: (f.chmodSync(ro, 0o555), f.cpSync(ro, join(root, 'rocopy'), { recursive: true }), f.readFileSync(join(root, 'rocopy', 'in'), 'utf8')),
+        throughFile: await outcome(() => f.cpSync(s, join(root, 'd1', 'a', 'x'), { recursive: true })),
+        throughFilePromised: await outcome(() => f.promises.cp(s, join(root, 'd1', 'a', 'x'), { recursive: true })),
       }
+      for (const p of [ro, join(root, 'rocopy')]) f.chmodSync(p, 0o755)
       // The temporary folder is removed after: nothing read-only is left in it
       for (const p of [join(s, 'ro'), join(root, 't1', 'ro'), join(root, 't2', 'ro')]) f.chmodSync(p, 0o644)
       return result

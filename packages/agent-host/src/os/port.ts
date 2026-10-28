@@ -139,8 +139,8 @@ export interface OsFiles {
   copyFileSync(from: HostPath, to: HostPath, mode?: number): void
   /**
    * A copy of a file or, with `recursive`, a tree, that never follows a link (os/copy.ts): every link, the root too,
-   * is made again as a link, on Windows a junction as a junction (a link to a folder at a whole drive path; a relative
-   * one as a directory symlink, which needs the right to make one). So no link can make a copy endless or end the
+   * is made again as a link, on Windows a link to a folder at a whole drive path as a junction, any other as a
+   * symlink (which needs the right to make one: Developer Mode or an administrator). So no link can make a copy endless or end the
    * process, as Node's own `cpSync` did over a link in a circle or a Windows junction back into the tree. The promise
    * form never blocks the event loop.
    */

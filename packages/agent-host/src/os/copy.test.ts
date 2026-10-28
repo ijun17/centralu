@@ -121,6 +121,8 @@ describe('the kind of link a copy makes', () => {
   it('on Windows: a junction to a folder at a whole drive path, a directory symlink for a relative one or a share, a file symlink otherwise; none on POSIX', () => {
     expect(copiedLinkKind('C:\\work\\x', true, 'windows')).toBe('junction')
     expect(copiedLinkKind('d:/work/x', true, 'windows')).toBe('junction')
+    expect(copiedLinkKind('\\\\?\\C:\\work\\x', true, 'windows')).toBe('junction')
+    expect(copiedLinkKind('C:x', true, 'windows')).toBe('dir')
     expect(copiedLinkKind('..\\x', true, 'windows')).toBe('dir')
     expect(copiedLinkKind('\\\\server\\share\\x', true, 'windows')).toBe('dir')
     expect(copiedLinkKind('C:\\work\\f.txt', false, 'windows')).toBe('file')

@@ -4,10 +4,12 @@ import { isInside, type OsFamily } from './rules.js'
 
 /**
  * The `Os`'s tree copy (`cpSync`, `promises.cp`), one definition for the real OS and the in-memory one (#1650,
- * docs/plans/os-layer.md §7.1). It never follows a link: every link in the tree, the root too, is made again as a link,
- * and the copy never asks what is behind one beyond whether it is a folder (on Windows, to make it the right kind).
- * So a link can neither make a copy endless nor end the process, whatever it leads to and however the tree changes
- * while it is copied.
+ * docs/plans/os-layer.md §7.1). It never walks into a link: every link in the tree, the root too, is made again as a link.
+ * Of what is behind one it asks only whether it is a folder (on Windows, to make the right kind), and where the source
+ * and the target's parents lead (to refuse a copy into itself). So a link can neither make a copy endless nor end the
+ * process, whatever it leads to. Changes made while it copies cannot either: an entry is copied as what `lstat` or the
+ * listing says it is, whichever says link; only a folder swapped for a link in the instant between its `lstat` and its
+ * listing is listed through that link, once, and its entries are copied by the same rules.
  *
  * Node's own `cpSync` follows links in places and ended the host on a tree with a link in a circle (`a -> b -> a`,
  * `x -> x`: exit 0xC0000409 on Windows, an uncaught C++ `filesystem_error`, abort, on Linux) and on Windows on any
@@ -83,15 +85,15 @@ const kindOf = (e: { isFile(): boolean; isDirectory(): boolean; isSymbolicLink()
 /**
  * The kind of link a copy makes on Windows for a link whose target is `target`, by what it leads to: to a folder, a
  * junction when the target is a whole path on a drive (it needs no right, where a directory symlink needs Developer
- * Mode or an administrator), else a directory symlink (a relative target, or a share, which a junction cannot hold);
- * to a file or to nothing, a file symlink. Node's APIs cannot tell a junction from a directory symlink to a whole path
+ * Mode or an administrator, as a file symlink does), else a directory symlink (a relative target, or a share, which a
+ * junction cannot hold); to a file or to nothing, a file symlink. Node's APIs cannot tell a junction from a directory symlink to a whole path
  * (`readlink`, `lstat` and the listing answer the same), and both lead to the same place for the host, so the copy
  * keeps what they have in common. POSIX has one kind of link: no kind is given there.
  */
 export function copiedLinkKind(target: string, toFolder: boolean, family: OsFamily): LinkKind | undefined {
   if (family !== 'windows') return undefined
   if (!toFolder) return 'file'
-  return /^[A-Za-z]:[\\/]/.test(target) ? 'junction' : 'dir'
+  return /^(\\\\\?\\)?[A-Za-z]:[\\/]/.test(target) ? 'junction' : 'dir'
 }
 
 /**
@@ -216,6 +218,7 @@ export type CopyFilesAsync = {
 }
 
 const DONE: CopyAnswer = { op: 'done' }
+/** What `throwIfNoEntry: false` answers as no entry: ENOENT only (a path through a file throws ENOTDIR on POSIX) */
 const isMissing = (e: unknown) => e instanceof Error && 'code' in e && e.code === 'ENOENT'
 
 function answerSync(f: CopyFilesSync, s: CopyStep): CopyAnswer {

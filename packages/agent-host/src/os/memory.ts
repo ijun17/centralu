@@ -860,7 +860,8 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     try {
       return statOf(existing(p, true, 'stat'))
     } catch (e) {
-      if (o?.throwIfNoEntry === false && ['ENOENT', 'ENOTDIR'].includes(errorCode(e) ?? '')) return undefined
+      // Node's `throwIfNoEntry` hides ENOENT only: a path through a file still throws ENOTDIR (measured on Linux)
+      if (o?.throwIfNoEntry === false && errorCode(e) === 'ENOENT') return undefined
       throw e
     }
   }
@@ -870,7 +871,8 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     try {
       return statOf(existing(p, false, 'lstat'))
     } catch (e) {
-      if (o?.throwIfNoEntry === false && ['ENOENT', 'ENOTDIR'].includes(errorCode(e) ?? '')) return undefined
+      // Node's `throwIfNoEntry` hides ENOENT only: a path through a file still throws ENOTDIR (measured on Linux)
+      if (o?.throwIfNoEntry === false && errorCode(e) === 'ENOENT') return undefined
       throw e
     }
   }
