@@ -717,7 +717,7 @@ describe('linked machines (#82)', () => {
 describe('a machine the hub says is connected is never shown away (#1611)', () => {
   const box = (over: Partial<MachineInfo> = {}): MachineInfo => ({
     id: 'box', name: 'Box', sshTarget: 'me@box', shell: 'posix', wslDistro: null, command: null, status: 'connected',
-    error: null, versions: null, lastConnectedAt: null, nextAttemptAt: null, localPort: null, sameLocalPort: false, hostStarted: null, install: null, operation: null, autostart: null, elevated: null, asks: null, logon: null, handover: null, autoReconnect: true, connect: 'at_start', ...over,
+    error: null, versions: null, lastConnectedAt: null, nextAttemptAt: null, localPort: null, sameLocalPort: false, hostStarted: null, install: null, operation: null, autostart: null, elevated: null, asks: null, logon: null, handover: null, autoReconnect: true, connect: 'at_start', otherCredentials: null, otherCredentialsMore: 0, ownCredentialGone: false, ...over,
   })
   const away = () => {
     const st = useStore.getState()
