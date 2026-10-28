@@ -24,6 +24,7 @@ const machine = (patch: Partial<MachineInfo> = {}): MachineInfo => ({
   otherCredentials: null,
   otherCredentialsMore: 0,
   ownCredentialGone: false,
+  credentialFileUnreadable: false,
   autostart: null,
   elevated: null,
   asks: null,

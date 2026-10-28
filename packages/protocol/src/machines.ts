@@ -319,6 +319,12 @@ export const MachineInfo = z.object({
    */
   ownCredentialGone: z.boolean().catch(false).default(false),
   /**
+   * The machine's `serve.json` cannot be read there (#1405 review: permission denied): its host refuses every new full
+   * hello, closes the links in with one after a few seconds, and this hub cannot pair again until it can. The row says
+   * so. Additive
+   */
+  credentialFileUnreadable: z.boolean().catch(false).default(false),
+  /**
    * The same switch as the older connect mode (`MachineConnect`, #1134): `at_start` when `autoReconnect` is on,
    * `when_needed` when it is off. Kept for one release so an older window still reads the row; read `autoReconnect`
    */

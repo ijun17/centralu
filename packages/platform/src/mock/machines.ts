@@ -98,6 +98,7 @@ export class MachinesMock {
         otherCredentials: null,
         otherCredentialsMore: 0,
         ownCredentialGone: false,
+        credentialFileUnreadable: false,
       }
       this.machinesList.push(info)
       this.emit({ type: 'machine_status', machine: { ...info } })

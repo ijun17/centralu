@@ -68,4 +68,26 @@ export function machineCredentialsTests(): void {
     await expect(page.getByTestId('machine-credentials-more-box')).toContainText('And 3 more')
     await expect(page.getByTestId('machine-own-credential-gone-box')).toContainText("This computer's own access there was replaced or withdrawn")
   })
+
+  // #1405 review: the machine's serve.json made unreadable there. The row said nothing, then that this computer's access was taken
+  test("a machine whose credential file cannot be read says so, and not that this computer's access was taken", async ({ page }) => {
+    await setup(page, ['/tmp/alpha'])
+    await page.getByTestId('open-settings').click()
+    await page.getByTestId('settings-tab-machines').click()
+    const open = page.getByTestId('machines-add-open')
+    if (await open.isVisible()) await open.click()
+    await page.getByTestId('machines-add-name').fill('Box')
+    await page.getByTestId('machines-add-target').fill('me@box')
+    await page.getByTestId('machines-add-confirm').click()
+    await expect(page.getByTestId('machine-row-box')).toBeVisible()
+    await page.evaluate(() => {
+      const mock = (window as any).__mock
+      const row = mock.machinesList.find((m: { id: string }) => m.id === 'box')
+      row.otherCredentials = []
+      row.credentialFileUnreadable = true
+      mock.emit({ type: 'machine_status', machine: { ...row } })
+    })
+    await expect(page.getByTestId('machine-credential-file-unreadable-box')).toContainText("This machine's credential file cannot be read there")
+    await expect(page.getByTestId('machine-own-credential-gone-box')).toHaveCount(0)
+  })
 }

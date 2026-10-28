@@ -1,6 +1,6 @@
 /** A `centralu serve` host's full credentials, as serve.json's verifiers (#1405) */
 import { describe, expect, it } from 'vitest'
-import { isFullCredential, LAST_READ_KEPT_MS, readCredentialFile, readFullCredentials, readListedCredentials, UsedCredentials, verifierOf, type FullCredential } from './serve-credentials.js'
+import { credentialsReport, isFullCredential, LAST_READ_KEPT_MS, readCredentialFile, readFullCredentials, readListedCredentials, UsedCredentials, verifierOf, type FullCredential } from './serve-credentials.js'
 
 const KEY = 'k'.repeat(43)
 const HUB = 'h'.repeat(43)
@@ -146,6 +146,47 @@ describe('the full credentials used here (#1405 review)', () => {
     expect(used.gone([])).toEqual([])
     for (const id of ['11111111', '22222222', '33333333']) used.saw(c(id, id))
     expect(used.gone([]).map((g) => g.id)).toEqual(['22222222', '33333333'])
+  })
+
+  // #1405 review: hub 1 paired again; hub 2's next read, before hub 1's new credential said hello, listed hub 1's last as gone
+  it('leaves out one whose label the file names again, paired the same way, before that one said hello here', () => {
+    const used = new UsedCredentials()
+    used.saw(c('aaaaaaaa', 'hub:studio-0123abcd'))
+    expect(used.gone([{ id: 'bbbbbbbb', label: 'hub:studio-0123abcd', replaced: false }])).toEqual([])
+    // Asked for another way, it is a change: listed
+    expect(used.gone([{ id: 'bbbbbbbb', label: 'hub:studio-0123abcd', replaced: true }]).map((g) => g.id)).toEqual(['aaaaaaaa'])
+  })
+
+  // #1405 review: a hub's label taken while its link was down, used, withdrawn; the hub's next link left no trace
+  it('gives every credential used under a hub label, listed or gone, by first use, for that hub to check', () => {
+    const used = new UsedCredentials()
+    used.saw(c('aaaaaaaa', 'hub:mac-0123abcd'))
+    used.saw(c('bbbbbbbb', 'window', { via: 'window' }))
+    used.saw(c('cccccccc', 'hub:mac-0123abcd'))
+    used.saw(c('dddddddd', 'hub:mac-0123abcd'))
+    used.saw(c('aaaaaaaa', 'hub:mac-0123abcd'))
+    // The host takes each hub-label one for its pairer again (the window's, with nothing after it, is listed)
+    expect(used.gone([{ id: 'dddddddd', label: 'hub:mac-0123abcd', replaced: false }]).map((g) => g.id)).toEqual(['bbbbbbbb'])
+    expect(used.underHubLabels().map((u) => u.id)).toEqual(['aaaaaaaa', 'cccccccc', 'dddddddd'])
+  })
+
+  it('answers host.credentials with the list, those gone, the hub-label ids, and why the file cannot be read (#1405 review)', () => {
+    const used = new UsedCredentials()
+    used.saw(c('aaaaaaaa', 'x'))
+    used.saw(c('cccccccc', 'hub:mac-0123abcd'))
+    const file = JSON.stringify({ v: 2, key: KEY, full: [{ ...entry('cccccccc', HUB), label: 'hub:mac-0123abcd' }] })
+    expect(credentialsReport('report', () => file, used)).toEqual({
+      credentials: [
+        { id: 'cccccccc', label: 'hub:mac-0123abcd', created: 1, replaced: false },
+        { id: 'aaaaaaaa', label: 'x', created: 1, replaced: false, gone: true },
+      ],
+      unreadable: null,
+      usedUnderHubLabels: [{ id: 'cccccccc', label: 'hub:mac-0123abcd', created: 1 }],
+    })
+    const denied = () => {
+      throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' })
+    }
+    expect(credentialsReport('report-denied', denied, used)).toMatchObject({ credentials: null, unreadable: 'EACCES' })
   })
 })
 

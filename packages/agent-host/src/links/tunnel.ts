@@ -199,6 +199,7 @@ function othersOf(raw: unknown): { others?: RemoteCredential[] } {
  * reads whole at each hello anyway. Null for anything but a list
  */
 export function credentialsOf(raw: unknown): RemoteCredential[] | null {
+  // Also `host.credentials`' `usedUnderHubLabels` (#1405 review), whose entries are read the same way
   if (!Array.isArray(raw)) return null
   return raw.flatMap((e: unknown) => {
     const o = asObj(e)

@@ -149,13 +149,17 @@ export type ListedCredential = { id: string; label: string; created: number; rep
  * `--revoke` within 135 ms left no trace on any row, so "loud" could be dodged by timing.
  *
  * Not every credential that goes is news. The window pairs again at each start, and a hub at each link, so their
- * earlier credentials go all the time. One that went is left out when the next credential of its label that said hello
- * here was paired the same way (its entry not `replaced`, the launcher's `pairServe`): that is its pairer again. One
- * whose label nothing used since, or whose successor was asked for another way, is listed. The launcher's own one-call
- * credential (`via: handover`) is not kept. What this cannot tell is two askers of the same way under one label (a
- * program's `--pair hub:<name>-<key>` that the hub's own next link takes the place of); the hub's row tells that one
- * itself, from its own credential being withdrawn while its link held it. At most `max` are kept, the oldest dropped
- * first; a restart of this host forgets them.
+ * earlier credentials go all the time. One that went is left out when the next credential of its label, the one that
+ * said hello here next or the one the file names now, was paired the same way (its entry not `replaced`, the launcher's
+ * `pairServe`): that is its pairer again. The file's own counts (#1405 review): a hub that had paired again but not yet
+ * said hello had its previous credential listed as gone on another hub's row for one read. One whose label nothing
+ * holds since, or whose successor was asked for another way, is listed. The launcher's own one-call credential (`via:
+ * handover`) is not kept.
+ *
+ * What this cannot tell is two askers of the same way under one label (a program's `--pair hub:<name>-<key>` that the
+ * hub's own next link takes the place of). So every id used under a hub's label is also given as it is (`underHubLabels`),
+ * and the hub of that label compares them with the ids it paired itself: any other is one it did not make (#1405
+ * review). At most `max` are kept, the oldest dropped first; a restart of this host forgets them.
  */
 export class UsedCredentials {
   private seq = 0
@@ -176,7 +180,7 @@ export class UsedCredentials {
   }
 
   /** Those used here that `listed` no longer names and no same-way successor took the place of, as `gone` */
-  gone(listed: readonly { id: string }[]): ListedCredential[] {
+  gone(listed: readonly { id: string; label?: string; replaced?: boolean }[]): ListedCredential[] {
     const now = new Set(listed.map((c) => c.id))
     const all = [...this.used]
     return all.flatMap(([id, u]) => {
@@ -184,9 +188,40 @@ export class UsedCredentials {
       // The next credential of its label used here, by first use
       const next = all.filter(([, s]) => s.label === u.label && s.seq > u.seq).sort(([, a], [, b]) => a.seq - b.seq)[0]
       if (next && !next[1].replaced) return []
+      // Or, before any of it said hello here, the one of its label the file names now (#1405 review)
+      if (!next && listed.some((c) => c.label === u.label && c.replaced === false)) return []
       return [{ id, label: u.label, created: u.created, replaced: u.replaced, gone: true }]
     })
   }
+
+  /**
+   * Every credential used here under a hub's label (`hub:`), listed or not, by first use (#1405 review): the hub of that
+   * label tells its own from one something else paired under it, which `gone` takes for its pairer again
+   */
+  underHubLabels(): UsedUnderHubLabel[] {
+    return [...this.used]
+      .filter(([, u]) => u.label.startsWith('hub:'))
+      .sort(([, a], [, b]) => a.seq - b.seq)
+      .map(([id, u]) => ({ id, label: u.label, created: u.created }))
+  }
+}
+
+/** A credential used on this host under a hub's label (`UsedCredentials.underHubLabels`) */
+export type UsedUnderHubLabel = { id: string; label: string; created: number }
+
+/**
+ * What `host.credentials` answers (#1405): the full credentials the file names, and those used here and gone since
+ * (`credentials`, null when the file cannot be read now: the hub keeps what it read last); the code of the error when
+ * it cannot be read (`unreadable`, #1405 review), so the hub's row can say the machine's credential file cannot be
+ * read; and the ids used under hub labels, for the hub of each to check against its own (`underHubLabels`)
+ */
+export type CredentialsReport = { credentials: ListedCredential[] | null; unreadable: string | null; usedUnderHubLabels: UsedUnderHubLabel[] }
+
+/** `host.credentials` for the serve.json at `path` and the credentials used on this host (main.ts) */
+export function credentialsReport(path: string, read: (p: string) => string, used: UsedCredentials): CredentialsReport {
+  const listed = readListedCredentials(path, read)
+  const unreadable = listed ? null : readCredentialFile(path, read).unreadable?.code ?? null
+  return { credentials: listed ? [...listed, ...used.gone(listed)] : null, unreadable, usedUnderHubLabels: used.underHubLabels() }
 }
 
 /**

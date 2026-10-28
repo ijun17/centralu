@@ -1473,8 +1473,10 @@ A host started with `centralu serve` on another machine is reached by the app th
     scanner holding it on Windows) names none for a new hello, at once (#1405 review: a credential paired just before
     kept full rights for 30 s while nothing listed it); a socket already in keeps what the file said at its last read
     for at most 5 s, so one busy moment does not close every link, and is then closed as "credential file unreadable",
-    not "credential withdrawn". The launcher says a file it may not read is a permission problem and how to give access
-    back, never to move it aside, which would end every credential it names. Changes to the file take
+    not "credential withdrawn". `host.credentials` then answers the error's code (`unreadable`), and the hub's row
+    says the machine's credential file cannot be read; a hub whose link was closed that way says the same, and does not
+    take its own credential for withdrawn. The launcher says a file it may not read is a permission problem and how to
+    give access back, never to move it aside, which would end every credential it names. Changes to the file take
     `serve.json.lock`: one whose time is more than 10 s from now, ahead or behind (a crashed writer, a clock set back),
     is taken over. A writer reads its lock back before each try of its rename, and tries only within 8 s of taking the
     lock by its own process clock, so neither a stall nor Windows' 5 s of rename retries lets a writer whose lock was
@@ -1502,7 +1504,8 @@ A host started with `centralu serve` on another machine is reached by the app th
     in the file and on the row ("which replaced an earlier one of that name") only when the entry it took the place of
     was asked for another way, or does not say (#1405 review): the window pairing at each start and a hub at each link
     are their own pairer again, and marking them made the flag mean nothing. So `--pair window` in the window's place,
-    and the window's next start after it, are a change the person sees. Two askers of the same way under one label (a
+    and the window's next start after it, are a change the person sees. The window's credential, from `serve --window`
+    on any OS, is listed on a hub's row as "window" with its date, and its re-pairing at each start is not marked. Two askers of the same way under one label (a
     program's `--pair hub:<name>-<key>` against that hub's own link) cannot be told apart by the launcher: the hub tells
     it itself. One under this hub's own label that this hub did not make says so ("under this computer's own name but
     not made by it"), and the row says when this hub's own was gone from the list or withdrawn while its link held it
@@ -1510,11 +1513,24 @@ A host started with `centralu serve` on another machine is reached by the app th
     since the link pairs again at once. A credential used and then withdrawn before the next 30 s read is listed too
     (#1405 review): the host keeps, while it runs, every full credential a socket said hello with, and `host.credentials`
     adds those no longer in `serve.json` as `gone` ("used there and withdrawn since", no Revoke), unless the next
-    credential of the same label used there was paired the same way (its pairer again, as at each window start or hub
-    link). Before, `--pair x`, a hello and `--revoke` within 135 ms left no trace on any row. What stays: the record is
-    in the host's memory (at most 256), so a restart of that host forgets it, and a same-way takeover of a hub's label
-    while that hub's link is down, then replaced by the hub's next link, leaves only its listing while it stood. It
-    lists 32 and counts the rest ("And N more"), so a flood of entries cannot hide the one after them. It can also read the key. That
+    credential of the same label, the next used there or the one the file names now, was paired the same way (its
+    pairer again, as at each window start or hub link; the file's own counts since a review found a hub that had paired
+    again but not yet said hello listed as gone on another hub's row for one read). Before, `--pair x`, a hello and
+    `--revoke` within 135 ms left no trace on any row. The machine's user can get around this at will in two ways:
+    - **Kill the host.** The record is in the host's memory (at most 256 entries). Use a credential, kill the machine's
+      host and withdraw the credential before the hub's next read, and the restarted host has no record of it: up to
+      the 30 s between two reads, nothing shows. This stays. Any record the host kept on disk, the same user could
+      delete just as easily; it is a residual of an attacker who is this machine's user, at most 30 s of use.
+    - **Take the hub's label while its link is down** (end the user's own ssh session, pair under
+      `hub:<name>-<key>`, use, withdraw, and let the hub pair again). The host takes the hub's next credential for
+      the same pairer again, so its `gone` leaves the taken one out. Closed (#1405 review): `host.credentials` also
+      gives every id used under a hub's label, listed or gone, in order of first use (`usedUnderHubLabels`), and the
+      hub compares those under its own label with the ids it paired itself while it runs. Any other is listed as used
+      and gone ("under this computer's own name but not made by it"); its own are never listed. Left: one used under
+      the hub's label before this hub's first link in its present run is not judged, since the hub does not remember
+      the ids of its earlier runs.
+
+    The row lists 32 and counts the rest ("And N more"), so a flood of entries cannot hide the one after them. It can also read the key. That
     gives it the limited credential, and also a bridge credential (`ccb1`) for any session it can name, which reaches
     that session's own tool channel (`orchestrator.tool`, under that session's preset; "The Codex bridge gets a credential of its own" below), as it
     did before #1405 when the file held the token. Any process of this user, on any OS, can run `--window` and get the window's credential, until

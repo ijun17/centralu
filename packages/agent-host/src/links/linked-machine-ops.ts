@@ -414,8 +414,9 @@ export class LinkedMachine extends LinkedMachineConnection {
 
   /**
    * `machines.revokeCredential` (#1405): withdraws one of the machine's other full credentials, by running
-   * `centralu serve --revoke <id>` there over the link's ssh. Its next hello there is refused; a connection already open
-   * with it stays until it closes. Not this hub's own credential, which the next link would only make again
+   * `centralu serve --revoke <id>` there over the link's ssh. Its next hello there is refused, and the host there closes a
+   * connection already open with it within a second. Not this hub's own credential, which the next link would only make
+   * again
    */
   async revokeCredential(credentialId: string): Promise<MachineInfo> {
     const exec = this.tunnel.exec?.bind(this.tunnel)

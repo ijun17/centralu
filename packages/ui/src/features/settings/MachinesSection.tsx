@@ -671,7 +671,7 @@ function VersionPrompt({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: 
  */
 function OtherCredentials({ m }: { m: MachineInfo }) {
   const others = m.otherCredentials
-  if (!others?.length && !m.ownCredentialGone) return null
+  if (!others?.length && !m.ownCredentialGone && !m.credentialFileUnreadable) return null
   // One that is gone no longer gives access: listed, since something used it, but not counted (#1405 review)
   const count = (others ?? []).filter((c) => !c.gone).length + m.otherCredentialsMore
   return (
@@ -679,6 +679,11 @@ function OtherCredentials({ m }: { m: MachineInfo }) {
       {m.ownCredentialGone && (
         <p className="text-ink" data-testid={`machine-own-credential-gone-${m.id}`}>
           This computer's own access there was replaced or withdrawn by something else while it was linked. The machine closed the link, and Centralu paired again.
+        </p>
+      )}
+      {m.credentialFileUnreadable && (
+        <p className="text-ink" data-testid={`machine-credential-file-unreadable-${m.id}`}>
+          This machine's credential file cannot be read there, so it refuses new connections with full access until it can.
         </p>
       )}
       {count > 0 && <p className="text-ink">{count === 1 ? 'Something else also has full access to this machine' : `${count} others also have full access to this machine`}</p>}

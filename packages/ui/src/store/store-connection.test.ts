@@ -516,7 +516,7 @@ describe('a message sent at the instant of disconnect (#173)', () => {
 describe('linked machines (#82)', () => {
   const box = (over: Partial<MachineInfo> = {}): MachineInfo => ({
     id: 'box', name: 'Box', sshTarget: 'me@box', shell: 'posix', wslDistro: null, command: null, status: 'connected',
-    error: null, versions: null, lastConnectedAt: null, nextAttemptAt: null, localPort: null, sameLocalPort: false, hostStarted: null, install: null, operation: null, autostart: null, elevated: null, asks: null, logon: null, handover: null, autoReconnect: true, connect: 'at_start', otherCredentials: null, otherCredentialsMore: 0, ownCredentialGone: false, ...over,
+    error: null, versions: null, lastConnectedAt: null, nextAttemptAt: null, localPort: null, sameLocalPort: false, hostStarted: null, install: null, operation: null, autostart: null, elevated: null, asks: null, logon: null, handover: null, autoReconnect: true, connect: 'at_start', otherCredentials: null, otherCredentialsMore: 0, ownCredentialGone: false, credentialFileUnreadable: false, ...over,
   })
 
   it('machine_status replaces that machine\'s row whole', async () => {
@@ -717,7 +717,7 @@ describe('linked machines (#82)', () => {
 describe('a machine the hub says is connected is never shown away (#1611)', () => {
   const box = (over: Partial<MachineInfo> = {}): MachineInfo => ({
     id: 'box', name: 'Box', sshTarget: 'me@box', shell: 'posix', wslDistro: null, command: null, status: 'connected',
-    error: null, versions: null, lastConnectedAt: null, nextAttemptAt: null, localPort: null, sameLocalPort: false, hostStarted: null, install: null, operation: null, autostart: null, elevated: null, asks: null, logon: null, handover: null, autoReconnect: true, connect: 'at_start', otherCredentials: null, otherCredentialsMore: 0, ownCredentialGone: false, ...over,
+    error: null, versions: null, lastConnectedAt: null, nextAttemptAt: null, localPort: null, sameLocalPort: false, hostStarted: null, install: null, operation: null, autostart: null, elevated: null, asks: null, logon: null, handover: null, autoReconnect: true, connect: 'at_start', otherCredentials: null, otherCredentialsMore: 0, ownCredentialGone: false, credentialFileUnreadable: false, ...over,
   })
   const away = () => {
     const st = useStore.getState()

@@ -59,7 +59,7 @@ import { acquireInstanceLock, lockConflictMessage } from './dev-services/instanc
 import { hostLogPath, startupBanner, teeStderrToFile } from './log-file.js'
 import { hostDrain } from './drain.js'
 import { HostRequests } from './host-requests.js'
-import { readCredentialFile, readListedCredentials, UsedCredentials, type FullCredential } from './lifecycle/serve-credentials.js'
+import { credentialsReport, readCredentialFile, UsedCredentials, type FullCredential } from './lifecycle/serve-credentials.js'
 import { createStopGate } from './lifecycle/stop-gate.js'
 import { stopGitChildren } from './dev-services/git-exec.js'
 import { Gate } from './lifecycle/gate.js'
@@ -767,11 +767,8 @@ const router: Router = new Router({
     // And what a delete may do to the folder, for the dialog that asks (#1301)
     deleteOutlook: (projectId) => userAppAdoption.outlook(projectId),
     // A serve host's full credentials, for the hub's machine row between links (#1405, `host.credentials`)
-    serveCredentials: () => {
-      const listed = launch.serveState ? readListedCredentials(launch.serveState, (f) => readFileSync(f, 'utf8')) : null
-      // And those a socket said hello with here that went since, before a hub could read them listed (#1405 review)
-      return listed ? [...listed, ...usedCredentials.gone(listed)] : null
-    },
+    // And those a socket said hello with here that went since, before a hub could read them listed (#1405 review)
+    serveCredentials: () => (launch.serveState ? credentialsReport(launch.serveState, (f) => readFileSync(f, 'utf8'), usedCredentials) : null),
     themes,
     terminals,
     updates,

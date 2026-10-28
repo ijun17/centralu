@@ -32,7 +32,7 @@ import type { AgentAdapter, ToolSetupControl } from './adapters/contract.js'
 import type { ViewHost } from './views/view-host.js'
 import type { MailPerson } from './mail/person.js'
 import type { InlineViews } from './inline-views.js'
-import type { ListedCredential } from './lifecycle/serve-credentials.js'
+import type { CredentialsReport } from './lifecycle/serve-credentials.js'
 import type {
   GridPanel,
   HostActivity,
@@ -111,7 +111,7 @@ export type RpcServices = {
   /** The calls of the limited credential waiting for the person (#1405, host-requests.ts) */
   requests?: Pick<HostRequests, 'list' | 'answer'>
   /** A `centralu serve` host's full credentials as the launcher lists them (#1405, `host.credentials`); absent or null: none */
-  serveCredentials?: () => ListedCredential[] | null
+  serveCredentials?: () => CredentialsReport | null
 }
 
 /** What the `machines.*` methods need from the hub's links (links/links.ts) */
@@ -1069,7 +1069,7 @@ export function createRpcHandler(
     // Whether a hub's auto session's child here runs auto (#1273): the hub reads it before it decides on its card
     'host.hubAuto': async () => ({ allowed: hubAutoOf(mgr.uiPreferences()) }),
     // Who else holds full access here (#1405): the hub's machine row reads it between links
-    'host.credentials': async () => ({ credentials: serveCredentials?.() ?? null }),
+    'host.credentials': async () => serveCredentials?.() ?? { credentials: null },
     // The hub's Settings → Machines sets it for a machine with no window of its own (#1273 review)
     'host.setHubAuto': async (p) => ({ allowed: hubAutoOf(mgr.setUiPreferences({ hubAuto: RpcMethods['host.setHubAuto'].params.parse(p).allowed })) }),
     'host.send': async (p) => {
