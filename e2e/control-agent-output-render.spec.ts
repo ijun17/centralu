@@ -421,7 +421,7 @@ test('An image sent by the agent renders in the conversation — a failure state
         mime: '',
         data: '',
         path: '/tmp/big.png',
-        note: 'Image is too large (12MB)',
+        note: 'too large (12MB)',
       })
     },
     { sid: id, png: PNG },
@@ -430,8 +430,7 @@ test('An image sent by the agent renders in the conversation — a failure state
   await expect(img).toBeVisible()
   // Checks whether it actually decoded — naturalWidth is 0 if the source is broken
   await expect.poll(() => img.evaluate((el) => (el as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
-  await expect(page.getByTestId('msg-image-missing')).toContainText('too large')
-  await expect(page.getByTestId('msg-image-missing')).toContainText('/tmp/big.png')
+  await expect(page.getByTestId('msg-image-missing')).toHaveText('Viewed an image: big.png — could not be read (too large (12MB))')
 
   /*
    * Persistence (#40's second decision: display-only -> kept, capped at 500MB total). The image
@@ -446,6 +445,29 @@ test('An image sent by the agent renders in the conversation — a failure state
   await expect(img).toBeVisible()
   await expect.poll(() => img.evaluate((el) => (el as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
   await expect(page.getByTestId('msg-image-missing')).toContainText('too large')
+})
+
+/**
+ * An image whose bytes the window cannot decode (#1464). WebKit paints such an `<img>` as an empty framed box, not even its
+ * alt text, so the owner saw a card with nothing in it. The card says what it was and that it could not be drawn, in the same
+ * muted line as an image the host could not read. (A picture cut short still loads, with its header's size, and paints
+ * partly: the host does not send one, `sniffImage`.)
+ */
+test('An image the window cannot decode is a line saying so, not an empty framed box (#1464)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'task')
+  const id = await page.evaluate(() => (window as never as { __store: any }).__store.getState().focusedSessionId)
+  const NOT_A_PICTURE = Buffer.from('this is text, not a picture').toString('base64')
+  await page.evaluate(
+    ({ sid, data }: { sid: string; data: string }) => {
+      const mock = (window as never as { __mock: any }).__mock
+      mock.emit({ type: 'message_image', sessionId: sid, mime: 'image/png', data, path: '/tmp/Screenshot 1.png' })
+    },
+    { sid: id, data: NOT_A_PICTURE },
+  )
+  const note = page.getByTestId('msg-image-missing')
+  await expect(note).toHaveText('Viewed an image: Screenshot 1.png — could not be read (the window could not draw it)')
+  await expect(page.getByTestId('msg-image')).toHaveCount(0)
 })
 
 /**

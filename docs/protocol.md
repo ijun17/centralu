@@ -66,7 +66,7 @@ type NormalizedEvent =
   | { type: 'user_message';     sessionId, seq, text, from? }   // human input, or another session's instruction (FR-11)
   | { type: 'tool_call';        sessionId, callId, summary: ToolSummary, input? }  // input: the raw tool input (#221)
   | { type: 'tool_result';      sessionId, callId, ok, summary, output? }           // output: the whole result text (#221)
-  | { type: 'message_image';    sessionId, mime, data, path?, note? }  // #40; note explains display failures
+  | { type: 'message_image';    sessionId, mime, data, path?, name?, note? }  // #40; note explains display failures; name is the path of the viewed file (#1464)
   | { type: 'compaction';       sessionId, failed, reason?, before?, after? }  // FR-14 marker: claude compact_boundary, codex a completed contextCompaction item (#303); `after` moves a known context reading there as an estimate (#1282)
   | { type: 'conversation_reset'; sessionId, trigger? }       // #304: the tool started a fresh conversation (Claude's /clear); a marker, and the gauge empties
   | { type: 'notice';           sessionId, level: 'info'|'warning'|'error', text, oncePerSession?,

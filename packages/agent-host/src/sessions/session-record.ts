@@ -111,11 +111,17 @@ export class SessionRecord {
       }
       // If the kind changes (answer <-> reasoning) or the message does, that point is a boundary
       if (run) this.closeStream(m.id)
+      /*
+       * A reasoning row never starts with a blank line (#1464): the adapter puts one before the first chunk of a second
+       * reasoning item to keep its heading off the one before, and it cannot tell when the row it meant to continue was
+       * closed here (an answer chunk, the person's message), so the first chunk of a row has them taken off
+       */
+      const first = streamKind === 'reasoning' ? text.replace(/^\s+/, '') : text
       // A row is never started with an empty chunk — the "" delta codex sends at the end once created 1,853
       // empty rows
-      if (!text) return null
+      if (!first) return null
       const seq = this.host.store.messages.nextSeq(m.id)
-      const fresh = { seq, kind: streamKind, payload: { ...e } as Record<string, unknown>, text, written: 0, lastWrite: 0 }
+      const fresh = { seq, kind: streamKind, payload: { ...e } as Record<string, unknown>, text: first, written: 0, lastWrite: 0 }
       this.streams.set(m.id, fresh)
       this.flushStream(m.id, fresh)
       m.lastSeq = seq
@@ -238,9 +244,11 @@ export class SessionRecord {
   persistImage(e: Extract<NormalizedEvent, { type: 'message_image' }>, m: SessionInfo): number {
     const ts = Date.now()
     const seq = this.host.store.messages.nextSeq(m.id)
+    // The file the agent viewed, kept apart from `path`, which becomes this host's own copy (#1464)
+    const name = e.path
     const row = (path: string | undefined, note: string | undefined): StoredMessage => ({
       sessionId: m.id, seq, role: 'system', kind: 'image', ts,
-      payload: { type: 'message_image', sessionId: m.id, mime: e.mime, data: '', path, note } satisfies NormalizedEvent,
+      payload: { type: 'message_image', sessionId: m.id, mime: e.mime, data: '', path, note, ...(name ? { name } : {}) } satisfies NormalizedEvent,
     })
     this.host.store.messages.appendMessages([row(e.path, e.note)])
     m.lastSeq = seq
@@ -261,8 +269,9 @@ export class SessionRecord {
       // Keeping under the cap is the writer's responsibility — once it overflows, the oldest files are
       // swept first
       void sweepAttachments().catch(() => {})
-    } catch (err) {
-      note = `Could not save the image: ${(err as Error).message}`
+    } catch {
+      // Not the system's message: it names the path, and the card shows the file
+      note = 'a copy could not be kept'
     }
     try {
       this.host.store.messages.upsertMessageNoIndex(row(stored ?? e.path, note))
@@ -321,7 +330,7 @@ export class SessionRecord {
             const data = (await readFile(p.path)).toString('base64')
             return { ...r, payload: { ...p, data } }
           } catch {
-            return { ...r, payload: { ...p, note: 'The image was cleared and no longer exists (total-size cap)' } }
+            return { ...r, payload: { ...p, note: 'the saved copy was cleared (total-size cap)' } }
           }
         }
         // A user attachment's own image follows the same rule — bytes are loaded if the file is still

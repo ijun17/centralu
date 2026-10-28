@@ -1,7 +1,7 @@
 import { InputReceipts, isUuid, type InputReceipt } from '../input-receipts.js'
 import type { InputObserver, InputOrigin } from '../contract.js'
 import { launchPreset } from '../edit-grant.js'
-import type { ApprovalDecision, ApprovalScope, PermissionPreset } from '@cc/protocol'
+import { endsStreamRow, streamRowKind, type ApprovalDecision, type ApprovalScope, type PermissionPreset } from '@cc/protocol'
 import { toolCommand } from '../../tool-launch.js'
 import { INTERRUPTED_BY_TOOL, type CreateSessionOpts, type EventSink, type SessionHandle } from '../contract.js'
 import { CodexClient } from './client.js'
@@ -9,6 +9,7 @@ import { imageEventFromDisk } from '../images.js'
 import { launchedThreads } from './child-tracker.js'
 import { CODEX_KNOWN_NOTIFICATIONS } from './known-notifications.js'
 import { CompactionMarks, goalFromCodex, normalizeNotification } from './normalize.js'
+import { ReasoningParts } from './reasoning-parts.js'
 import { turnError } from './model-rejected.js'
 import { reconcileOpenedThread, threadSettingsChanged, threadSettingsOf, type CodexThreadSettings } from './thread-settings.js'
 import { CodexRequestInputs } from './token-readings.js'
@@ -108,6 +109,9 @@ export class CodexSession implements SessionHandle {
   /** The preset the session is set to now (#1525), which can differ from the one it launched under only between `normal` and `edits` */
   private livePreset: PermissionPreset
 
+  /** Which reasoning item the open reasoning row last grew from, so a second item's summary does not run into the first's (#1464) */
+  private readonly reasoningParts = new ReasoningParts()
+
   setPermissionPreset(preset: PermissionPreset): void {
     this.livePreset = preset
   }
@@ -120,7 +124,11 @@ export class CodexSession implements SessionHandle {
     this.livePreset = opts.permissionPreset
     // An app's mark only for an app attached here (#730 review): a repository's own server may be named `app-<x>`
     const sink = emit
-    this.emit = (e) => sink(keepAttachedAppMarks(e, () => (opts.apps?.current() ?? []).map((a) => a.server)))
+    this.emit = (e) => {
+      // Whatever ends the open row, or a row of another kind (an answer), also ends the reasoning part before it (#1464)
+      if (endsStreamRow(e) || streamRowKind(e) === 'text') this.reasoningParts.reset()
+      sink(keepAttachedAppMarks(e, () => (opts.apps?.current() ?? []).map((a) => a.server)))
+    }
     this.unmapped = new UnmappedTypes('codex', opts.sessionId, CODEX_KNOWN_NOTIFICATIONS)
     this.retry = new RetryActivity(opts.sessionId)
     this.slashCommands = new CodexSlashCommands({
@@ -415,7 +423,7 @@ export class CodexSession implements SessionHandle {
 
   /** A notification of this thread's own, as the events it maps to (`normalizeNotification`), each the way it goes out */
   private emitNotification(n: { method: string; params?: unknown }): void {
-    for (const said of normalizeNotification(this.sessionId, n)) {
+    for (const said of this.reasoningParts.join(n, normalizeNotification(this.sessionId, n))) {
       /*
        * Codex does not say why it compacted. A compaction inside the compact turn this session started (`/compact`, Centralu's
        * own compaction or the person's) is manual; any other is the tool's own, in the middle of a turn (#1500): the host does not

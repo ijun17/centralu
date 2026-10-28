@@ -1,4 +1,5 @@
 import { memo, useMemo, useState } from 'react'
+import { splitRunTogetherHeadings } from '@cc/core'
 import { centraluCallOf, launchesSubagent } from '@cc/protocol/client'
 import { messagesToChat, useStore, type ChatItem } from '../../../store/store.js'
 import { ChevronIcon } from '../../../components/icons.jsx'
@@ -144,7 +145,8 @@ export const ChatRow = memo(function ChatRow({
      */
     return (
       <div className="min-w-0 text-md text-ink-muted [&_strong]:text-ink-muted" data-testid="msg-reasoning">
-        <Markdown text={item.text} projectRoot={projectRoot} projectId={projectId} linkSessionId={sessionId} />
+        {/* A row stored before the host kept two reasoning items apart has their headings run together (#1464) */}
+        <Markdown text={splitRunTogetherHeadings(item.text)} projectRoot={projectRoot} projectId={projectId} linkSessionId={sessionId} />
       </div>
     )
   }
@@ -197,22 +199,12 @@ export const ChatRow = memo(function ChatRow({
   }
   if (item.kind === 'image') {
     /*
-     * An image produced by the agent (#40). Display-only, so it is never stored — it disappears
-     * on restart, like terminal scrollback. When there is no `data`, this states the reason
-     * instead of a silent blank (failures stay visible — an app-wide rule).
+     * An image produced by the agent (#40). The host keeps a copy (a file under the attachments, its path in the row), so a
+     * reload brings it back unless the size cap swept it. When there is no `data`, this states the reason instead of a
+     * silent blank (failures stay visible — an app-wide rule).
      */
-    if (!item.data) {
-      return (
-        <div
-          className="rounded-lg border border-line bg-surface-raised px-3 py-2 text-sm text-ink-faint"
-          data-testid="msg-image-missing"
-        >
-          The image could not be displayed{item.note ? ` — ${item.note}` : ''}
-          {item.path && <span className="readout mt-1 block truncate text-xs">{item.path}</span>}
-        </div>
-      )
-    }
-    return <ImageMessage mime={item.mime} data={item.data} path={item.path} />
+    if (!item.data) return <ImageNote path={item.path} name={item.name} note={item.note} />
+    return <ImageMessage mime={item.mime} data={item.data} path={item.path} name={item.name} />
   }
   // A manager's worktree proposal (#69) — a line pointing at the door rather than a tool card, and the value
   // (branch name) is pre-filled into the window
@@ -237,7 +229,10 @@ export const ChatRow = memo(function ChatRow({
  * is never trapped by a grid cell's overflow (the pitfall called out in #62), and closing via
  * Esc or an outside click does not have to be rebuilt.
  */
-function ImageMessage({ mime, data, path }: { mime?: string; data: string; path?: string }) {
+function ImageMessage({ mime, data, path, name }: { mime?: string; data: string; path?: string; name?: string }) {
+  // Bytes the window cannot decode draw as an empty framed box (WebKit paints not even the alt text, #1464): say so instead
+  const [undrawable, setUndrawable] = useState(false)
+  if (undrawable) return <ImageNote path={path} name={name} note="the window could not draw it" />
   return (
     <div className="min-w-0" data-testid="msg-image">
       <ZoomableImage
@@ -245,7 +240,33 @@ function ImageMessage({ mime, data, path }: { mime?: string; data: string; path?
         alt={path ?? 'agent image'}
         /* Clipped so it never covers the whole screen vertically — the original aspect ratio is kept */
         thumbClassName="max-h-80 max-w-full rounded-lg border border-line"
+        onError={() => setUndrawable(true)}
+        onLoad={(img) => {
+          if (img.naturalWidth === 0 || img.naturalHeight === 0) setUndrawable(true)
+        }}
       />
+    </div>
+  )
+}
+
+/**
+ * In place of an image the host did not send or the window could not draw: one line that says what it was and why it is
+ * not here, in the muted style of the other notes (#1464). The file's name stands in the line and its whole path in the
+ * tooltip. It fades in over 160ms (opacity only under reduced motion, `cc-fade`) as the image it replaces can have been
+ * on screen a moment before the window found it undrawable.
+ */
+function ImageNote({ path, name: viewed, note }: { path?: string; name?: string; note?: string }) {
+  // A stored row's `path` is the host's own copy of the file; `name` is the path it was viewed under
+  const file = viewed ?? path
+  const name = file?.split(/[\\/]/).filter(Boolean).pop()
+  const reason = note ? ` (${note})` : ''
+  return (
+    <div
+      className="cc-fade rounded-lg border border-line bg-surface-raised px-3 py-2 text-sm text-ink-faint"
+      data-testid="msg-image-missing"
+      title={file}
+    >
+      {name ? `Viewed an image: ${name} — could not be read${reason}` : `An image from the agent — could not be shown${reason}`}
     </div>
   )
 }

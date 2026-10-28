@@ -1,0 +1,4 @@
+{
+  "bytes": 900,
+  "reason": "Undrawn image line and run-together reasoning headings (#1464): the ChatRow line for an image with no data or one the window cannot decode (onError/zero size, path tail and reason), and splitRunTogetherHeadings in core. Measured 1,917,706 B on this branch merged with main 137a2459a against main's 1,916,863 B, +843 B, all in the main chunk. Plain code with no dependency; lazy loading would not lower the total, which counts every chunk."
+}

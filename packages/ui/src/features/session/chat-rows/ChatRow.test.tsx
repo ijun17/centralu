@@ -124,7 +124,27 @@ describe('ChatRow: what the agent said', () => {
 
     const missing = row({ kind: 'image', seq: 3, mime: 'image/png', data: '', path: '/tmp/out.png', note: 'over the 500MB cap' })
     expect(testIds(missing.html)).toEqual(['msg-image-missing'])
-    expect(missing.text).toBe('The image could not be displayed — over the 500MB cap /tmp/out.png')
+    // One muted line, the file's name in it and the whole path in the tooltip (#1464)
+    expect(missing.text).toBe('Viewed an image: out.png — could not be read (over the 500MB cap)')
+    expect(missing.html).toContain('title="/tmp/out.png"')
+
+    // A file on a Windows machine is named by its last part too, and an image with no path (a tool's) says so
+    expect(row({ kind: 'image', seq: 3, mime: '', data: '', path: String.raw`C:\Users\a\shot.png`, note: 'the file is gone' }).text).toBe(
+      'Viewed an image: shot.png — could not be read (the file is gone)',
+    )
+    // After a reload `path` is the host's own copy: the line and the tooltip are of the viewed file, kept as `name`
+    const reloaded = row({ kind: 'image', seq: 3, mime: '', data: '', path: '/data/attachments/ab12.png', name: '/work/shots/out.png', note: 'the saved copy was cleared (total-size cap)' })
+    expect(reloaded.text).toBe('Viewed an image: out.png — could not be read (the saved copy was cleared (total-size cap))')
+    expect(reloaded.html).toContain('title="/work/shots/out.png"')
+    expect(row({ kind: 'image', seq: 3, mime: '', data: '', note: 'too large (12MB)' }).text).toBe('An image from the agent — could not be shown (too large (12MB))')
+  })
+
+  // #1464: stored rows from before the host joined two reasoning items with a blank line
+  it('draws the headings of a reasoning row stored run together as lines of their own', () => {
+    const { html } = row({ kind: 'reasoning', seq: 2, text: '**Checking projects child process****흰 화면의 초기화 로그를 확인합니다.**' })
+    expect(html).not.toContain('****')
+    expect(html.match(/<strong>/g)).toHaveLength(2)
+    expect(html).toMatch(/<\/strong><\/p>\s*<p><strong>/)
   })
 })
 
