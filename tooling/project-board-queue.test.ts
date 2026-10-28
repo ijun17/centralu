@@ -4877,9 +4877,11 @@ describe('the integrator lands an auto-tier branch without a pull request from i
       const main = repo.main
       expect(await showFile(repo.work, main, 'docs/none.md')).toBeNull()
       expect(await showFile(repo.work, main, 'docs/guide.md')).toBe('base\n')
-      // A commit that is not in the repository has no such file either (as before), in one answer
-      expect(await showFile(repo.work, '0'.repeat(40), 'docs/guide.md')).toBeNull()
-      expect(await showFile(repo.work, 'a'.repeat(40), 'docs/guide.md')).toBeNull()
+      // A revision that is not there is a caller's bug and throws, as it did for `git show` (it is not a missing file)
+      await expect(showFile(repo.work, '0'.repeat(40), 'docs/guide.md')).rejects.toBeInstanceOf(GitError)
+      await expect(showFile(repo.work, 'a'.repeat(40), 'docs/guide.md')).rejects.toBeInstanceOf(GitError)
+      await expect(showFile(repo.work, 'no-such-branch', 'docs/guide.md')).rejects.toBeInstanceOf(GitError)
+      await expect(showFile(repo.work, '-x', 'docs/guide.md')).rejects.toBeInstanceOf(GitError)
       // Not an ancestor is exit 1 with a trace line printed, not an error; an unknown commit is the error (128)
       const tip = repo.heads['docs/guide']!
       expect(await isAncestor(repo.work, main, tip)).toBe(true)
@@ -4915,6 +4917,81 @@ describe('the integrator lands an auto-tier branch without a pull request from i
     expect(second.unjudged).toMatch(/the branch docs\/broken could not be fetched: the fetch of docs\/broken \(the second fetch, after main was fetched\) exited 128, stderr: .*not our ref.*; ls-remote exit 0: docs\/broken is on the remote/)
     // And a branch that is not there is still missing
     expect(await judge('docs/nowhere')).toMatchObject({ missing: true })
+  }, 60_000 * SLOW)
+
+  // Real git, a bare remote, and a stand-in for upload-pack that answers each call as the plan says: `ok` as git does, `fail`
+  // with an error that says nothing about a ref, `hide` as a remote that lists no branch at all (a lagging replica)
+  const remoteAnswering = (repo: ReturnType<typeof integrateRepo>, plan: ('ok' | 'fail' | 'hide')[]) => {
+    const dir = join(root, 'upload-pack')
+    mkdirSync(dir, { recursive: true })
+    const slash = (p: string) => p.split(String.fromCharCode(92)).join('/')
+    const counter = slash(join(dir, 'calls'))
+    const cases = plan
+      .map((what, i) => `${i + 1}${i === plan.length - 1 ? '|*' : ''}) ${what === 'ok' ? 'exec git upload-pack "$@"' : what === 'hide' ? 'exec git -c uploadpack.hideRefs=refs/heads upload-pack "$@"' : 'echo "the remote broke: stand-in failure" >&2; exit 1'};;`)
+      .join('\n')
+    const script = join(dir, 'upload-pack.sh')
+    writeFileSync(script, `#!/bin/sh\nn=$(cat '${counter}' 2>/dev/null || echo 0)\nn=$((n+1))\necho $n > '${counter}'\ncase $n in\n${cases}\nesac\n`, { mode: 0o755 })
+    g(repo.work, 'config', 'remote.origin.uploadpack', slash(script))
+  }
+
+  it('says the remote listed nothing, as a retry, when ls-remote exits 2 for the branch and for main alike', async () => {
+    // The main fetch is answered; then the remote hides every branch for the branch's fetch and for both ls-remote calls
+    const repo = integrateRepo({ 'docs/guide': { 'docs/guide.md': 'read it top down\n' } })
+    remoteAnswering(repo, ['ok', 'hide'])
+    const r = await judgeBranch({ dir: repo.work, repo: 'ijun17/centralu', branch: 'docs/guide', defaultBranch: 'main' })
+    expect(r, JSON.stringify(r)).toMatchObject({ retry: true })
+    expect(r.missing).toBeUndefined()
+    expect(r.unjudged).toMatch(/ls-remote exit 2 for docs\/guide and for main, which was fetched a moment ago: the remote listed nothing/)
+  }, 60_000 * SLOW)
+
+  it("logs a branch told missing against its fetch's own word, once, with the exit code and the end of its stderr", async () => {
+    // The branch is not on the remote, but its fetch fails with an error that does not say so (the stand-in's); ls-remote
+    // then answers exit 2 for the branch and lists main: missing, and the disagreement is kept in the host's log
+    const repo = integrateRepo({ 'docs/guide': { 'docs/guide.md': 'read it top down\n' } })
+    remoteAnswering(repo, ['ok', 'fail', 'ok'])
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const r = await judgeBranch({ dir: repo.work, repo: 'ijun17/centralu', branch: 'docs/nowhere', defaultBranch: 'main' })
+      expect(r, JSON.stringify(r)).toMatchObject({ missing: true })
+      expect(r.retry).toBeUndefined()
+      const lines = log.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('[project-board] integrate:'))
+      expect(lines).toHaveLength(1)
+      expect(lines[0]).toMatch(/ls-remote says docs\/nowhere is not on the remote, but its fetch did not say so: the fetch of docs\/nowhere \(the second fetch\) exited 128, stderr: .*stand-in failure/)
+    } finally {
+      log.mockRestore()
+    }
+    // A fetch that does say it (git's own word) logs nothing
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      g(repo.work, 'config', '--unset', 'remote.origin.uploadpack')
+      expect(await judgeBranch({ dir: repo.work, repo: 'ijun17/centralu', branch: 'docs/nowhere', defaultBranch: 'main' })).toMatchObject({ missing: true })
+      expect(quiet.mock.calls.filter((c) => String(c[0]).includes('[project-board] integrate:'))).toEqual([])
+    } finally {
+      quiet.mockRestore()
+    }
+  }, 60_000 * SLOW)
+
+  // Windows cannot hold a file name with a line break in it; a POSIX file system can, and a tracked one is read by name
+  it.skipIf(process.platform === 'win32')('reads a file whose name has a line break in it as that file, not as its first line (git cat-file --batch reads one name per line)', async () => {
+    const repo = integrateRepo({})
+    for (const [name, text] of [['d/a', 'AAA\n'], ['d/a\nb', 'NEWLINE\n'], ['d/c\rd', 'CR\n'], ['d/e\nf', 'E\n']] as const) {
+      mkdirSync(join(repo.work, 'd'), { recursive: true })
+      writeFileSync(join(repo.work, name), text)
+    }
+    g(repo.work, 'add', '-A')
+    g(repo.work, 'commit', '-q', '-m', 'names with line breaks')
+    const at = g(repo.work, 'rev-parse', 'HEAD')
+    expect(await showFile(repo.work, at, 'd/a')).toBe('AAA\n')
+    expect(await showFile(repo.work, at, 'd/a\nb')).toBe('NEWLINE\n')
+    expect(await showFile(repo.work, at, 'd/c\rd')).toBe('CR\n')
+    // Absent, though the line before the break names a file that exists: not that file's text
+    expect(await showFile(repo.work, at, 'd/a\nzzz')).toBeNull()
+    expect(await showFile(repo.work, at, 'd/zzz\nb')).toBeNull()
+    // A folder is told as git show tells it; a name with a break that is a folder, too
+    expect(await showFile(repo.work, at, 'd')).toContain('d/a')
+    // And a revision that is not there still throws, whatever the name has in it
+    await expect(showFile(repo.work, 'no-such-branch', 'd/a\nb')).rejects.toBeInstanceOf(GitError)
+    await expect(showFile(repo.work, 'a'.repeat(40), 'd/a\nzzz')).rejects.toBeInstanceOf(GitError)
   }, 60_000 * SLOW)
 
   it('takes the record already open from the branch when it is handed over again, and queues it again, never a second pull request', async () => {
