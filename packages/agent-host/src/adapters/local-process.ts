@@ -46,13 +46,11 @@ export const FIND_CLI =
   // (macOS's sh fails where dash prints the path), and Node says ENOENT for none, EACCES for a folder or a file not runnable
   'case $1 in */*) [ -e "$1" ] || { echo enoent >&4; exit 127; }; ' +
   'if [ -d "$1" ] || [ ! -x "$1" ]; then echo eacces >&4; exit 126; fi;; ' +
-  // A bare name is looked up on PATH as libuv does, not with `command -v`, which differs by shell too: dash 0.5.11 (Ubuntu
-  // 22.04) prints the first file of that name, runnable or not, and without a folder when an empty entry found it; 0.5.12
-  // skips one that cannot be run. The first runnable file runs, so says nothing; else a match that cannot be run is
-  // EACCES and nothing is ENOENT. An empty entry, and a PATH set but empty, is the folder it starts in (`/dev/null` ends the
-  // list so a trailing empty one is not split away). `exec` then searches the same PATH and skips what cannot be run, as libuv does.
-  '*) (IFS=:; set -f; e=2; for d in ${PATH+$PATH:}/dev/null; do f=${d:-.}/$1; if [ -f "$f" ] && [ -x "$f" ]; then exit 0; fi; ' +
-  '[ -e "$f" ] && e=1; done; exit $e); case $? in 1) echo eacces >&4; exit 126;; 2) echo enoent >&4; exit 127;; esac;; esac; '
+  // A bare name is looked up by `sh` itself. When that finds nothing, PATH is read as libuv does: a match that cannot be run
+  // is EACCES, an empty entry is the folder it starts in (`/dev/null` ends the list so a trailing empty one is not split away), and nothing is ENOENT
+  '*) if c=$(command -v -- "$1" 2>/dev/null); then case $c in */*) if [ -d "$c" ] || [ ! -x "$c" ]; then echo eacces >&4; exit 126; fi;; esac; ' +
+  'else if (IFS=:; set -f; for d in ${PATH:+$PATH:}/dev/null; do [ -e "${d:-.}/$1" ] && exit 0; done; exit 1); then echo eacces >&4; exit 126; fi; ' +
+  'echo enoent >&4; exit 127; fi;; esac; '
 
 /**
  * The guard a CLI that must end with the host starts behind (`AgentSpawnSpec.endsWithHost`, macOS and Linux): `sh` keeps a

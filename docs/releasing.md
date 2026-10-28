@@ -179,9 +179,6 @@ script rehearses by default and why nothing publishes automatically.
   `release.yml` on a commit whose tree is the tagged commit's (`scripts/release-rehearsal.mjs`),
   so a tag pushed by hand skips nothing it has not earned, and anything GitHub does not answer
   runs verify. The rehearsal stays the one place verify runs on macOS, ubuntu-22.04 and arm64.
-  So what differs there must not decide a result: `pnpm typecheck` gives tsc a fixed 4 GB heap
-  (package.json), not Node's default of a quarter of the machine's memory, which on the 7 GB
-  macos-14 runner is under what tsc needs (0.1.0-beta.43's rehearsal ran out of heap there).
 
 A push to a branch or a merge still publishes nothing. **A `v*` tag now does** — that is what
 the tag is for.

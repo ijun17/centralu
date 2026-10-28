@@ -268,9 +268,7 @@ export const realRunners = {
     mirrorModules(root, dir)
   },
   tsc(dir) {
-    // The heap `pnpm typecheck` gives tsc (package.json): Node's default is a quarter of the machine's memory, under what
-    // tsc needs on a 7 GB macOS runner (0.1.0-beta.43's rehearsal)
-    return nodeBin(dir, 'typescript/bin/tsc', ['--noEmit', '-p', '.'], { NODE_OPTIONS: `${ENV.NODE_OPTIONS ?? ''} --max-old-space-size=4096`.trim() })
+    return nodeBin(dir, 'typescript/bin/tsc', ['--noEmit', '-p', '.'])
   },
   depcruise(dir) {
     const r = nodeBin(dir, 'dependency-cruiser/bin/dependency-cruise.mjs', ['packages', 'apps', '--config', 'tooling/dependency-cruiser.cjs', '--output-type', 'json'])

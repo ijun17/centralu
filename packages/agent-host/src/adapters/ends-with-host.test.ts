@@ -227,28 +227,19 @@ describe('a CLI that must end with its host', () => {
   /*
    * The lookup is one script run by whatever `sh` the OS has, and shells differ on a file that cannot be run: dash's
    * `command -v` prints its path, macOS's `sh` fails (the macOS re-check of #1668: an absolute path to a plain file read
-   * ENOENT where Node says EACCES), and Ubuntu 22.04's dash 0.5.11 prints the first file of a name, runnable or not, and
-   * without its folder when an empty PATH entry found it (the 0.1.0-beta.43 rehearsal: no EACCES behind an empty entry, and
-   * EACCES for a file Node runs from a later entry). So the decision is run under the OS's sh, under a POSIX bash, under a
-   * bash whose `command -v` fails for every name with a slash, which is how macOS's answers, and under one whose
-   * `command -v` answers as dash 0.5.11's does.
+   * ENOENT where Node says EACCES). So the decision is run under dash, under a POSIX bash, and under a bash whose
+   * `command -v` fails for every name with a slash, which is how macOS's answers.
    */
   describe.skipIf(!unix)('the lookup before the watch, in each kind of sh', () => {
     const macLike = 'command() { case "$*" in */*) return 1;; esac; builtin command "$@"; }; '
-    const dash011 =
-      'command() { [ "$1" = -v ] || { builtin command "$@"; return; }; shift; [ "$1" = -- ] && shift; ' +
-      '(IFS=:; set -f; for d in ${PATH:+$PATH:}/dev/null; do if [ -f "${d:-.}/$1" ]; then echo "${d:+$d/}$1"; exit 0; fi; done; exit 1); }; '
     const shells: [string, string, string[]][] = [
       ['sh', '', []],
       ['bash --posix', '', ['--posix']],
       ['a sh whose command -v fails for a path', macLike, []],
-      ['a sh whose command -v prints the first file, runnable or not (dash 0.5.11)', dash011, []],
     ]
     const available = (name: string) => spawnSync(name, ['-c', 'exit 0']).status === 0
-    // By its path: an empty PATH would not find the shell itself
-    const where = (name: string) => spawnSync('sh', ['-c', `command -v ${name}`]).stdout.toString().trim()
     const say = (shell: string, flags: string[], prelude: string, command: string, cwd: string, PATH: string | undefined) => {
-      const r = spawnSync(where(shell), [...flags, '-c', `${prelude}${FIND_CLI}exit 0`, 'x', command], { cwd, env: PATH === undefined ? {} : { PATH }, stdio: ['ignore', 'ignore', 'ignore', 'ignore', 'pipe'] })
+      const r = spawnSync(shell, [...flags, '-c', `${prelude}${FIND_CLI}exit 0`, 'x', command], { cwd, env: PATH === undefined ? {} : { PATH }, stdio: ['ignore', 'ignore', 'ignore', 'ignore', 'pipe'] })
       return { said: String(r.output[4] ?? '').trim(), status: r.status }
     }
     for (const [label, prelude, flags] of shells) {
@@ -261,9 +252,6 @@ describe('a CLI that must end with its host', () => {
         writeFileSync(join(bin, 'plain-cli'), 'not a program', { mode: 0o644 })
         writeFileSync(join(bin, 'good-cli'), '#!/bin/sh\n', { mode: 0o755 })
         chmodSync(join(bin, 'plain-cli'), 0o644)
-        mkdirSync(join(dir, 'early'))
-        writeFileSync(join(dir, 'early', 'good-cli'), 'not a program', { mode: 0o644 })
-        chmodSync(join(dir, 'early', 'good-cli'), 0o644)
         const sys = '/usr/bin:/bin'
         const cases: [string, string, string | undefined, string, number | null][] = [
           ['absolute, missing', join(dir, 'nothing'), sys, 'enoent', 127],
@@ -280,8 +268,6 @@ describe('a CLI that must end with its host', () => {
           ['a name, not runnable behind an empty PATH entry', 'plain-cli', `${sys}:`, 'eacces', 126],
           ['a name, runnable on a relative PATH entry', 'good-cli', `${sys}:./bin`, '', 0],
           ['a name, runnable after a folder of that name', 'good-cli', `${bin}:${sys}`, '', 0],
-          ['a name, runnable in the folder it starts in, PATH set but empty', 'good-cli', '', '', 0],
-          ['a name, runnable after a file of that name that is not', 'good-cli', `${sys}:${join(dir, 'early')}:${bin}`, '', 0],
         ]
         for (const [what, command, PATH, said, status] of cases) {
           const cwd = what.includes('empty') ? bin : dir

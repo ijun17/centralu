@@ -834,31 +834,6 @@ describe('the runners (real processes)', () => {
     120_000 * SLOW,
   )
 
-  // The macOS rehearsal of 0.1.0-beta.43: a SIGTERM between the wait's listeners going and the run's coming ended the runner
-  // by the OS's default, its command kept running and the test above waited for it. Sent here as the runner says it took
-  // the lock, which was inside that gap, several times
-  it.skipIf(win)(
-    'passes on a SIGTERM that reaches it as it takes the lock, before the command has started, and ends with 143',
-    async () => {
-      for (let i = 0; i < 5; i++) {
-        // A command that ends by itself, so a runner the signal ended outright does not leave it holding the pipes
-        const r = runner('setTimeout(() => {}, 4000)')
-        const exit = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => r.child.once('exit', (code, signal) => resolve({ code, signal })))
-        // On the line itself, not on a poll, which would come after the gap
-        let sent = false
-        r.child.stderr?.on('data', () => {
-          if (sent || !r.stderr().includes('e2e lock: taken')) return
-          sent = true
-          process.kill(r.child.pid ?? 0, 'SIGTERM')
-        })
-        expect(await exit, `run ${i}`).toEqual({ code: 143, signal: null })
-        await r.result
-        expect(lockFiles()).toEqual([])
-      }
-    },
-    120_000 * SLOW,
-  )
-
   it(
     'passes a SIGTERM that reaches it while the command runs on to the command, ends with 143, and gives the lock back',
     async () => {

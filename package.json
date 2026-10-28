@@ -8,7 +8,7 @@
   },
   "scripts": {
     "build": "vite build --config apps/web/vite.config.ts",
-    "typecheck": "node --max-old-space-size=4096 node_modules/typescript/bin/tsc --noEmit",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint": "tsx tooling/lint.ts",
     "lint:tighten": "tsx tooling/lint.ts --tighten",

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { cruise } from 'dependency-cruiser'
@@ -29,9 +29,7 @@ const FILES: Record<string, string> = {
 
 let root = ''
 beforeAll(() => {
-  // Its real path: macOS's tmpdir is under /var, a link to /private/var, and dependency-cruiser names a file it resolved by
-  // where the link leads, so a test-helper read from a linked root came out as a path out of the tree
-  root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-screen-protocol-')))
+  root = mkdtempSync(join(tmpdir(), 'cc-screen-protocol-'))
   for (const [file, text] of Object.entries(FILES)) {
     mkdirSync(dirname(join(root, file)), { recursive: true })
     writeFileSync(join(root, file), text)

@@ -45,27 +45,22 @@ try {
   console.error(`e2e lock: ${err instanceof Error ? err.message : String(err)}`)
   process.exit(stoppedBy === null ? 1 : signalExit(stoppedBy))
 }
-// Ctrl-C reaches the child itself on a terminal; a signal sent to this process alone is passed on (not on Windows: passesSignalOn).
-// Listened for before the wait's listeners go: with none, a signal ends this process by the OS's default, and the command it
-// started keeps running with the lock given up (the macOS rehearsal of 0.1.0-beta.43). One that comes before the command has
-// started is passed on once it has.
-let child: ReturnType<typeof spawn> | null = null
-let passedOn: 'SIGINT' | 'SIGTERM' | null = null
-for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-  process.on(signal, () => {
-    passedOn ??= signal
-    if (passesSignalOn()) child?.kill(signal)
-  })
-}
 process.off('SIGINT', onInt)
 process.off('SIGTERM', onTerm)
 console.error('e2e lock: taken')
 
-child = spawn(process.execPath, argv, { stdio: 'inherit' })
-if (passedOn !== null && passesSignalOn()) child.kill(passedOn)
+const child = spawn(process.execPath, argv, { stdio: 'inherit' })
 // Named in the lock at once, and its start time filled in as soon as it is known (on Windows that takes seconds): a runner
 // killed in between must not leave Playwright running with the lock free
 if (child.pid !== undefined) void trackChild(held, child.pid)
+// Ctrl-C reaches the child itself on a terminal; a signal sent to this process alone is passed on (not on Windows: passesSignalOn)
+let passedOn: 'SIGINT' | 'SIGTERM' | null = null
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(signal, () => {
+    passedOn ??= signal
+    if (passesSignalOn()) child.kill(signal)
+  })
+}
 // A run that cannot be started gives the lock back before it fails
 child.on('error', (err) => {
   held.release()
