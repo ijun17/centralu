@@ -229,8 +229,9 @@ export const STATE_LOCK_STALE_MS = 10_000
  *   `--pair` and `--revoke` for as long as it was ahead, so a hub could not link.
  * - The lock holds a nonce of its writer's, and the writer reads it back just before it replaces the file: a writer
  *   stalled past the 10 s, whose lock another took over meanwhile, writes nothing (#1405 review), rather than a state
- *   it computed before a `--revoke` that came in between. It throws, and its caller tries again. What is left is the
- *   moment between that read and the rename, which no lock file can close.
+ *   it computed before a `--revoke` that came in between. It throws, and whoever asked tries again (a hub at its next
+ *   link attempt, a person by running it again). What is left is the moment between that read and the rename, and two
+ *   waiters taking over one stale lock at once (one may remove the other's fresh lock), which no lock file can close.
  */
 export function changeServeState(dataDir, change, platform = process.platform, { sleep = sleepSync, nowMs = Date.now } = {}) {
   const file = join(dataDir, SERVE_STATE_FILE)
