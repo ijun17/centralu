@@ -201,7 +201,7 @@ export function usageNotReportedTests(): void {
       const fade = await page.getByTestId('usage-totals').evaluate((el) =>
         el.getAnimations().map((a) => ({ name: (a as CSSAnimation).animationName, ms: Number(a.effect?.getTiming().duration) })),
       )
-      expect(fade).toEqual([{ name: 'cc-donut-in', ms: 180 }])
+      expect(fade).toEqual([{ name: 'cc-row-in', ms: 180 }])
       await expect(page.getByTestId('usage-totals-as-of')).toHaveText(/^As of \d{1,2}:\d{2}\s(AM|PM)$/)
       // The panel's own first ask was answered with the old totals, and one more ask, to settle, brought the new ones
       const calls = await page.evaluate(() => (window as unknown as MockWindow).__mock.usageCalls as { tool: string; settle: boolean }[])
@@ -265,7 +265,7 @@ export function usageNotReportedTests(): void {
             const s = getComputedStyle(el)
             return { name: s.animationName, ms: parseFloat(s.animationDuration) * 1000 }
           })
-          expect(anim.name).toBe('cc-donut-in')
+          expect(anim.name).toBe('cc-row-in')
           expect(anim.ms).toBeGreaterThanOrEqual(150)
           expect(anim.ms).toBeLessThanOrEqual(200)
         }
@@ -274,7 +274,7 @@ export function usageNotReportedTests(): void {
           const found = new Set<string>()
           for (const sheet of document.styleSheets) {
             for (const rule of sheet.cssRules) {
-              if (rule instanceof CSSKeyframesRule && rule.name === 'cc-donut-in') {
+              if (rule instanceof CSSKeyframesRule && rule.name === 'cc-row-in') {
                 for (const frame of rule.cssRules) for (const p of (frame as CSSKeyframeRule).style) found.add(p)
               }
             }

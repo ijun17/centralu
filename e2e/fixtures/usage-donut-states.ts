@@ -144,7 +144,7 @@ export function usageDonutStatesTests(): void {
             failed = true
             return Promise.reject(new Error('the tool is busy'))
           }
-          return Promise.resolve({ ...UNSUPPORTED, provisional: true })
+          return Promise.resolve({ supported: false, reason: 'Codex does not report usage limits', notReported: true, usage: null, provisional: true })
         }
       })
       await reconnect(page)
