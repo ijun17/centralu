@@ -80,7 +80,7 @@ import { parseJson } from './dev-services/store/json.js'
 import { asObj } from './json-value.js'
 import { flagSetting } from './dev-services/store/settings.js'
 import { joinWorkJob, workJobLine, workJobWanted } from './lifecycle/work-job.js'
-import { PtyBroker, brokerPtyModule } from './dev-services/broker-pty.js'
+import { PtyBroker, brokerPtyModule, personOpener } from './dev-services/broker-pty.js'
 import { detectToken } from './elevation.js'
 
 /**
@@ -305,7 +305,12 @@ try {
   refuse(err.message)
   process.exit(1)
 }
-const adapters = createAdapters()
+/*
+ * What the host opens for the person stays outside its work job (lifecycle/work-job.ts): on Windows the terminal broker,
+ * which is outside the job, starts it (Antigravity's sign-in page, review of #1685). Without a broker there is no job of
+ * the host's either (or terminals start in the host too, and so does this)
+ */
+const adapters = createAdapters(personOpener(ptyBroker))
 
 /*
  * Under the keeper, agents, terminals and project commands are spawned by the keeper, not by this
@@ -578,6 +583,8 @@ const agentVersions = new AgentVersionService({
   readSeen: () => asObj(parseJson(store.settings.appSetting(AGENT_VERSIONS_SEEN_KEY))) as Record<string, string>,
   writeSeen: (seen) => store.settings.setAppSetting(AGENT_VERSIONS_SEEN_KEY, JSON.stringify(seen)),
 })
+// A tool's own install and sign-in (#59) tell every window as they go: no RPC is waiting when a download ends
+for (const a of adapters.values()) a.setup?.onChange((setup) => events.push({ type: 'tool_setup', tool: a.tool, setup }))
 versionsRef.current = agentVersions
 mgr.useVersionHint((tool) => agentVersions.installedNow(tool))
 /*

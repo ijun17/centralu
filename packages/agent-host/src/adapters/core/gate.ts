@@ -1,39 +1,11 @@
 /**
- * The approval gate's host side, for a tool that asks through a hook process rather than on its own wire (`agy`'s
- * PreToolUse hook, antigravity-adapter.md §5; #1654 seam gap 3). The hook is a separate process the tool starts per call:
- * it reaches this host, waits for a decision and prints it. Measured on `agy` 1.4.7: a hook that prints nothing and exits 0
- * lets the tool run (every other failure denies), so the hook must always print an answer; and SIGINT is not acted on
- * while a hook waits, so a Stop answers every open request `deny` before it signals (`SessionProcess.interrupt`).
+ * The approval gate's open requests, for a tool that asks through a process of its own rather than on its wire: a Stop
+ * or a close answers every open request `deny` at once, before the process hears of it (`SessionProcess`). The hook-path
+ * transport that once fed it (a front-door route under a per-session key, for `agy -p`) is retired (#59).
  */
 
 /** What the gate prints for the tool. Never "ask": print mode cannot ask (measured) */
 export type GateAnswer = { decision: 'allow' } | { decision: 'deny'; reason: string }
-
-/** One call the hook asks about, as it reads the tool's hook input */
-export type GateRequest = {
-  /** Unique per session while open: the hook's own id for the call */
-  requestId: string
-  tool: string
-  input: unknown
-  /** The tool's step the call belongs to (`agy`: the stream's `step_index`), so the card joins the call already drawn */
-  stepIndex?: number
-}
-
-/**
- * The hook's way back to this host: **an interface only**: the transport is decided (session-core.md §8.1: a route on the host's front
- * door under a gate-only key, random per session, in memory, revoked on close, one method, no decision field) and comes with
- * `agy`. It is opened per session before the tool starts, its `env` goes into the tool's environment (the hook inherits it,
- * measured), it fails closed (an unreachable host is a `deny`), and closing it denies what is still open.
- */
-export interface GateInbound {
-  open(sessionId: string, decide: (request: GateRequest) => Promise<GateAnswer>): Promise<GateChannel>
-}
-
-export type GateChannel = {
-  /** What the hook needs to find this host and prove the session (names and values per transport); no file holds it */
-  readonly env: Readonly<Record<string, string>>
-  close(): Promise<void>
-}
 
 /** The gate requests of one session still waiting for an answer, so a Stop or a close can deny them all at once */
 export class GateRequests {

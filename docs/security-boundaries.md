@@ -146,6 +146,12 @@ with `danger-full-access` (no sandbox) and `never` approval**, including a child
 matches Claude's `auto` bypass permissions. Commands have the person's OS access, including network and
 files outside the project. `safe` uses workspace-write with `untrusted` approval. `normal` follows the
 person's configured approval policy and sandbox mode, including a personal full-access mode.
+**Antigravity can read its account token on Windows and Linux** (the Google sign-in it keeps in
+`<data>/tools/antigravity/gemini-home/antigravity-acp/acp_token.json` there, and on a Mac without a usable Keychain):
+its own viewer and search read files without asking under every preset, as Codex can read its `auth.json` and Claude
+Code its credentials file on Linux, and under `auto` its commands, edits and subagents run unasked too. On a Mac with
+a usable Keychain the agent keeps the token there instead. Accepted by the owner (2026-10-28,
+[#59](https://github.com/ijun17/centralu/issues/59#issuecomment-6461617566); [plans/antigravity-acp.md](plans/antigravity-acp.md) §4.2).
 
 In the Codex adapter, every linked-worktree session still adds its repository's canonical git common
 directory to workspace-write's writable roots on start and resume (#585), retaining existing extra roots.
@@ -1229,6 +1235,56 @@ The folder's own mode is what protects the rest: a file written later with the d
 during a swap, an app's data, SQLite) is still behind a folder only its owner can enter, and an older build never
 widens the folder again. The host's `umask` is not changed: it is every agent's and every terminal's, and the files
 they write in the person's projects keep the person's own modes.
+
+### Antigravity's agent and its token (#59)
+
+Centralu installs Google's Antigravity agent itself and keeps all of its state under the data folder
+(`tools/antigravity/`, [plans/antigravity-acp.md](plans/antigravity-acp.md) §3, §4), so it sits behind the folder's
+`0700`. The rules that hold it:
+
+- **Only the pinned build runs.** `agents.installTool` downloads the one archive this Centralu pins and refuses it unless
+  its sha256 is the pinned one, before anything is unpacked; only the files the release names, as plain files, are
+  written, and the folder is put in place by one rename. The method `asks` for the limited credential: it brings in a
+  program that later runs.
+- **The agent's home is Centralu's.** Every process starts with `GEMINI_HOME` there, never the person's `~/.gemini`, so
+  none of their global MCP servers, hooks or skills load into a Centralu session, and Centralu never reads the CLI's
+  sign-in. The agent keeps the person's `HOME`, so its commands see their git, ssh and npm settings; one thing escapes
+  `GEMINI_HOME` because of it: Google's harness extracts its screencast encoder (`webm_encoder`) into
+  `$HOME/.gemini/antigravity/bin/` at the first prompt. Nothing else under `~/.gemini` was read or written in the
+  measured runs, and development and review runs use a temporary `HOME`. The owner accepted this
+  ([#59](https://github.com/ijun17/centralu/issues/59#issuecomment-6446873429);
+  [plans/antigravity-acp.md](plans/antigravity-acp.md) §4.1).
+- **The token is in the agent's own store, as Google ships it.** Centralu sets no store (owner 2026-10-28,
+  [#59](https://github.com/ijun17/centralu/issues/59#issuecomment-6461617566)). Agent 1.4.3 uses the macOS Keychain when
+  a probe of it works (service `gemini`, account `antigravity-acp`; the program is signed with Google's Developer ID, so
+  a Keychain prompt, if any, names Google's `agy_acp_server`, not Centralu), and otherwise the file
+  `gemini-home/antigravity-acp/acp_token.json` (mode 0600): always on Windows and Linux. Centralu never reads the
+  Keychain and never opens or looks for the file; signed in is read from `auth.type` in the agent's `settings.json`
+  alone, and a sign-in that no longer works is told when a session's process asks for the agent's own login (below).
+  **What Auto still reaches**, and more: nothing in Centralu keeps the agent from its own folder. Its viewer and search
+  read the token file without asking under every preset where the file is the store (Windows, Linux), as Codex reads
+  its `auth.json`; no built-in tool is switched off (no `_meta.antigravity.disabledTools`), no client read is offered
+  (`fs.readTextFile` false), and a permission request naming that folder is answered as any other of its kind (a card
+  under Safe, Normal and Edits, unasked under Auto or a saved rule). A subagent's request (`Run invoke_subagent?`, kind
+  `other`) runs unasked under Auto and asks with a card every time under the other presets: a call of kind `other` has
+  no rule key, so no saved "always" rule allows it. The guard of the first
+  build, which refused such requests under every preset, is gone, so a request is never refused for the path it names
+  ([plans/antigravity-acp.md](plans/antigravity-acp.md) §4.2 says why).
+- **The sign-in address stays out of logs and events.** It reaches the host through a private folder (`0700`) and the
+  agent's stderr, is opened once and only when it is the agent's own login request (its OAuth client on Google's
+  authorize page, a loopback redirect), and no `tool_setup` event carries it.
+- **The agent never starts a browser, and the person's `BROWSER` never reaches it.** Every Antigravity process gets
+  `BROWSER` set to Centralu's helper in that private folder (on Windows a `node` command line run with no shell, since
+  `cmd` would split the address at `&`). The host opens the address, on Windows through the terminal broker, outside
+  the host's job object, so a Stop, a finished sign-in or the host's exit cannot end the person's browser and its tabs
+  ([plans/antigravity-acp.md](plans/antigravity-acp.md) §4.3). In a session, the helper handed the agent's own login
+  request means the stored sign-in stopped working: the session fails as `not_logged_in` and its process ends. Commands
+  the agent runs inherit `BROWSER`, so any other address they hand it is dropped and logged without the address, never
+  opened and never taken for a sign-in: nothing is opened that the person did not ask for (§4.4). Where no helper can be
+  written, the agent is not started. Lines of
+  the agent's stderr that hold an address, an email or a token's name never reach `host.log` or a crash message.
+- **The agent never decides alone.** It stays in its `default` mode, where it asks; `allow_always` is never sent, so no
+  rule of its own outlives Centralu's preset; a question it asks is the person's to answer under every preset.
 
 ## Local transport
 

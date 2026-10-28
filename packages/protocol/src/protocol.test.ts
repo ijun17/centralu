@@ -586,6 +586,9 @@ const GOLDEN_EVENTS_V1: unknown[] = [
     type: 'agent_versions',
     status: { installed: { claude: '2.1.290', codex: null }, autoApply: true, checkedAt: 1791182683464 },
   },
+  // A tool's own install and sign-in (#59): its progress, and where it rests after
+  { type: 'tool_setup', tool: 'some-tool', setup: { state: 'installing', install: 'centralu', signIn: 'centralu', progress: { received: 1048576, total: null } } },
+  { type: 'tool_setup', tool: 'some-tool', setup: { state: 'signed_out', install: 'centralu', signIn: 'centralu', failure: { reason: 'timed_out', message: 'Sign-in timed out' } } },
   {
     type: 'error',
     sessionId: 's1',

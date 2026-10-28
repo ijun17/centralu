@@ -452,7 +452,8 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
          */
         const resync = connection === 'resync_required'
         if (resync) set({ connection: 'connected', hostResyncs: get().hostResyncs + 1 })
-        else set({ connection })
+        // A host that comes back may be another process (a restart, a swap): what its install and sign-in said before is not its word now
+        else set(connection === 'connected' ? { connection } : { connection, toolSetups: {} })
         /*
          * Disconnected and came back. The web client says `connected` before `resync_required`, but the port does
          * not promise that order: a resync that is the first word after a drop is a reconnect too, and must not

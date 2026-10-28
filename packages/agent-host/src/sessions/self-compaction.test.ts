@@ -20,7 +20,7 @@ function world(initial: Partial<SessionInfo> = {}) {
   const sessions = new Map<string, SessionInfo>([['s1', info(initial)]])
   const sent: [string, string][] = []
   const notices: [string, string][] = []
-  const state = { now: 1_000_000, idle: { idle: true } as SessionIdle, running: true, setting: { ...DEFAULT_AUTO_COMPACT }, failSend: false, modelWindow: undefined as number | null | undefined }
+  const state = { now: 1_000_000, idle: { idle: true } as SessionIdle, running: true, setting: { ...DEFAULT_AUTO_COMPACT }, failSend: false, modelWindow: undefined as number | null | undefined, noCompact: false }
   const host: SelfCompactionHost = {
     sessions: () => [...sessions.values()],
     session: (id) => sessions.get(id),
@@ -29,7 +29,7 @@ function world(initial: Partial<SessionInfo> = {}) {
     // undefined: the host has read the session's window in full (the reading's own); null: it knows none of the model
     window: (s) => (state.modelWindow === undefined ? (s.context?.window ?? null) : state.modelWindow),
     setting: () => state.setting,
-    command: (tool, focus) => (tool === 'claude' && focus ? `/compact ${focus}` : '/compact'),
+    command: (_id, tool, focus) => (state.noCompact ? null : tool === 'claude' && focus ? `/compact ${focus}` : '/compact'),
     send: (id, text) => {
       if (state.failSend) throw new Error('no process')
       sent.push([id, text])
@@ -223,6 +223,17 @@ describe('compact_self (#1451)', () => {
     expect(w.sent).toEqual([['s1', '/compact']])
   })
 
+  it('answers that it cannot for a tool with no compact command, and never sends one', () => {
+    // An ACP agent that advertises no `compact` (Antigravity: plan, logout, usage): a bare `/compact` would be a prompt to its model
+    const w = world({ tool: 'antigravity' })
+    w.state.noCompact = true
+    w.startTurn()
+    expect(w.c.request('s1', 'keep the PR')).toEqual({ text: expect.stringMatching(/no compact command/), isError: true })
+    w.endTurn()
+    vi.advanceTimersByTime(10_000)
+    expect(w.sent).toEqual([])
+  })
+
   it('drops the request when the person interrupts the turn, or it ends in an error', () => {
     const w = world()
     w.startTurn()
@@ -392,6 +403,14 @@ describe('a session at rest over the lower share (#1451)', () => {
     w.startTurn()
     w.emit({ type: 'compaction', sessionId: 's1', failed: false })
     expect(w.notices).toEqual([['s1', 'Compacted by Centralu (at rest for 10 minutes, over 30% of the window)']])
+  })
+
+  it('leaves a resting session of a tool with no compact command alone', () => {
+    const w = resting({ tool: 'antigravity' })
+    w.state.noCompact = true
+    later(w, 60)
+    expect(w.c.sweep()).toEqual([])
+    expect(w.sent).toEqual([])
   })
 
   it('leaves a context under the share or under the floor alone', () => {
@@ -669,6 +688,24 @@ describe('on the session manager (#1451)', () => {
     world.events.length = 0
     h.emitEvent({ type: 'compaction', sessionId: id, failed: false, before: 150_000, after: 8_000 })
     expect(world.events).toContainEqual(expect.objectContaining({ type: 'notice', sessionId: id, from: 'Centralu', text: 'Compacted by Centralu (the agent asked to after finishing its turn)' }))
+  })
+
+  it("goes by the session's own compact command first: none means no compaction and compact_self says it cannot", async () => {
+    const { id, h, tools } = await session()
+    // The handle decides per process (ACP: from the commands its agent advertised); the adapter's would send `/compact`
+    ;(h as { compactCommand?: (focus: string | null) => string | null }).compactCommand = () => null
+    h.emitEvent({ type: 'state_change', sessionId: id, state: 'working' })
+    expect(tools.compactSelf!('keep the PR')).toEqual({ text: expect.stringMatching(/no compact command/), isError: true })
+    h.finishTurn()
+    h.emitContext(156_000, 200_000)
+    expect(h.sent).toEqual(['hello'])
+    // One that has its own sends it, focus and all
+    ;(h as { compactCommand?: (focus: string | null) => string | null }).compactCommand = (focus) => `/compact${focus ? ` [${focus}]` : ''}`
+    h.emitEvent({ type: 'state_change', sessionId: id, state: 'working' })
+    tools.compactSelf!('keep the PR')
+    h.finishTurn()
+    h.emitContext(157_000, 200_000)
+    expect(h.sent).toEqual(['hello', '/compact [keep the PR]'])
   })
 
   it('accepts the request when the turn grew past the floor, and decides on the size read at its end', async () => {

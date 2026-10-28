@@ -145,3 +145,48 @@ describe('requests.list and requests.answer', () => {
     await expect(rpc('requests.answer', { requestId: 'r1', decision: 'allow' })).resolves.toEqual({ ok: false })
   })
 })
+
+/** Every tool's setup in one shape (#59, owner 2026-10-27: the header's donut for each tool installed but signed out) */
+describe('agents.detect and the setup actions', () => {
+  const adapter = (name: string, found: { installed: boolean; loggedIn: boolean }, setup?: unknown) =>
+    ({
+      tool: name,
+      descriptor: { name, label: name.toUpperCase(), mark: name[0], install: `install ${name}`, login: `login ${name}` },
+      detect: async () => ({ tool: name, ...found, detail: '' }),
+      ...(setup ? { setup } : {}),
+    }) as never
+
+  it('reports installed-but-signed-out for a tool that signs in from a terminal, and ready, and not installed', async () => {
+    const adapters = new Map([
+      ['t1', adapter('t1', { installed: true, loggedIn: false })],
+      ['t2', adapter('t2', { installed: true, loggedIn: true })],
+      ['t3', adapter('t3', { installed: false, loggedIn: false })],
+    ])
+    const rpc = createRpcHandler({} as SessionManager, adapters, {})
+    const found = (await rpc('agents.detect', {})) as { name: string; setup: { state: string; signIn: string } }[]
+    expect(found.map((t) => [t.name, t.setup.state, t.setup.signIn])).toEqual([
+      ['t1', 'signed_out', 'terminal'],
+      ['t2', 'ready', 'terminal'],
+      ['t3', 'not_installed', 'terminal'],
+    ])
+    expect(found.every((t) => RpcMethods['agents.detect'].result.safeParse([t]).success)).toBe(true)
+  })
+
+  it("passes the install and sign-in to the tool's own setup, and refuses them for a tool that has none", async () => {
+    const calls: string[] = []
+    const setup = { state: 'installing', install: 'centralu', signIn: 'centralu' }
+    const control = {
+      current: () => setup,
+      install: () => (calls.push('install'), setup),
+      cancelInstall: async () => (calls.push('cancelInstall'), setup),
+      signIn: () => (calls.push('signIn'), setup),
+      cancelSignIn: async () => (calls.push('cancelSignIn'), setup),
+      onChange: () => () => {},
+    }
+    const rpc = createRpcHandler({} as SessionManager, new Map([['own', adapter('own', { installed: false, loggedIn: false }, control)], ['term', adapter('term', { installed: true, loggedIn: true })]]), {})
+    for (const m of ['agents.installTool', 'agents.cancelInstallTool', 'agents.signIn', 'agents.cancelSignIn'] as const) await expect(rpc(m, { tool: 'own' })).resolves.toEqual(setup)
+    expect(calls).toEqual(['install', 'cancelInstall', 'signIn', 'cancelSignIn'])
+    await expect(rpc('agents.installTool', { tool: 'term' })).rejects.toThrow(/from a terminal/)
+    await expect(rpc('agents.signIn', { tool: 'nope' })).rejects.toThrow(/Unknown tool/)
+  })
+})

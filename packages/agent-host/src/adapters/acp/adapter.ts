@@ -1,15 +1,12 @@
 import type { ToolName } from '@cc/protocol'
-import { rpcError } from '../../rpc-error.js'
 import type { AgentAdapter, AgentProcess, AgentSpawnSpec, CreateSessionOpts, EventSink, ProcessSource, SessionHandle } from '../contract.js'
 import { toolResultEvent } from '../tool-result.js'
 import { spawnLocalAgent } from '../local-process.js'
 import type { AcpProfile } from './profile.js'
-import { endToolProcess, startToolProcess } from '../core/tool-process.js'
+import { STOP_CONFIRM_MS } from '../core/ledger.js'
+import { endToolProcess, toolNotInstalled } from '../core/tool-process.js'
 import { AcpSession } from './session.js'
 import type { ToolCallFields } from './wire.js'
-
-/** How long a Stop waits for the agent's `cancelled` before the person hears it has not taken effect (Claude's bound) */
-const STOP_CONFIRM_MS = 10_000
 
 /**
  * The generic ACP client adapter (docs/plans/acp-adapter.md): one agent process per session, spawned as a child of
@@ -47,20 +44,28 @@ export abstract class AcpAdapter implements AgentAdapter {
   async createSession(opts: CreateSessionOpts, emit: EventSink): Promise<SessionHandle> {
     const label = this.profile.descriptor.label
     const launch = await this.profile.launch(opts)
-    if (!launch) throw rpcError(`${label} is not installed. ${this.profile.descriptor.install}`, 'tool_not_installed')
+    if (!launch) throw toolNotInstalled(label, this.profile.descriptor.install)
     const spec = { command: launch.command, args: launch.args, cwd: opts.cwd, env: { ...process.env, ...launch.env } }
     const source = opts.processSource
-    if (source?.adopt) await closeAdopted(source.adopt, opts.sessionId, emit)
+    const shape = this.profile.shape
+    // The sign-in watch the launch made goes with a start that fails before the session owns it
+    if (source?.adopt) await closeAdopted(source.adopt, opts.sessionId, emit).catch(async (err: unknown) => {
+      await launch.signInWanted?.remove()
+      throw err
+    })
     // Under the keeper the process is the keeper's child, which it sweeps with its tree if this host goes (§3.3); started
-    // here, it ends with this host however the host ends (`startToolProcess`, #1562 review)
-    const proc = startToolProcess(spec, { sessionId: opts.sessionId, spawn: this.spawn, ...(source ? { source } : {}) })
+    // here, it ends with this host however the host ends (`startToolProcess`, #1562 review). The session core starts it
     const session = new AcpSession(opts, emit, {
       label,
-      process: proc,
+      spec,
+      start: { spawn: this.spawn, ...(source ? { source } : {}), ...(shape?.stderrLine ? { stderrLine: (l: string) => shape.stderrLine?.(l) ?? null } : {}) },
+      install: this.profile.descriptor.install,
       version: () => this.profile.installedVersion(),
       stopConfirmMs: this.stopConfirmMs,
       ...(this.profile.centraluToolOf ? { centraluToolOf: (call: ToolCallFields) => this.profile.centraluToolOf?.(call) ?? null } : {}),
       ...(this.profile.infersCompaction ? { infersCompaction: true } : {}),
+      ...(shape ? { shape } : {}),
+      ...(launch.signInWanted ? { signInWanted: launch.signInWanted } : {}),
     })
     try {
       await session.ready

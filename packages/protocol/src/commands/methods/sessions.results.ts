@@ -7,6 +7,7 @@ import {
   ExternalSession,
   ModelOption,
   SleepPolicy,
+  ToolSetup,
   ToolStatus,
   UsageSnapshot,
 } from '../../entities.js'
@@ -115,6 +116,10 @@ export const sessionsResults = {
   }),
   'agents.capabilities': AdapterCapabilities,
   'agents.detect': z.array(ToolStatus),
+  'agents.installTool': ToolSetup,
+  'agents.cancelInstallTool': ToolSetup,
+  'agents.signIn': ToolSetup,
+  'agents.cancelSignIn': ToolSetup,
   'agents.versions': AgentVersions,
   'agents.setAutoApplyVersions': AgentVersions,
   'agents.applyVersions': z.object({

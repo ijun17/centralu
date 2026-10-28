@@ -27,8 +27,6 @@ export class RpcError extends Error {
 export const METHOD_NOT_FOUND = -32601
 /** ACP's code for "authenticate first" (measured on Cursor: `{code: -32000, message: "Authentication required"}`) */
 export const AUTH_REQUIRED = -32000
-/** ACP's code for a session or resource that does not exist */
-export const RESOURCE_NOT_FOUND = -32002
 
 export type AcpConnectionHandlers = {
   onNotification(method: string, params: unknown): void
@@ -66,12 +64,14 @@ export class AcpConnection {
     private readonly proc: AgentProcess,
     private readonly handlers: AcpConnectionHandlers,
     private readonly label: string,
+    /** A stderr line as host.log may carry it, or null to leave it out (`AcpToolShape.stderrLine`) */
+    stderrLine?: (line: string) => string | null,
   ) {
     proc.on('error', (err) => this.finish(null, new Error(`${label} failed to start: ${err.message}`)))
     proc.stdin.on('error', () => {})
     const lines = lineSplitter((line) => this.onLine(line))
     proc.stdout.on('data', (chunk: Buffer | string) => lines.push(chunk))
-    logToolStderr(proc, label)
+    logToolStderr(proc, label, stderrLine)
     proc.on('exit', (code) => this.finish(code, null))
   }
 
@@ -150,6 +150,16 @@ export class AcpConnection {
     if (this.closed) return
     const line = JSON.stringify(obj)
     this.proc.stdin.write(line + '\n')
+  }
+
+  /** Fails every request still waiting with `error`: the caller knows why none will be answered (the process is left to it) */
+  failPending(error: Error): void {
+    this.pending.rejectAll(error)
+  }
+
+  /** This side is ending the process (the session core stops it next): its exit is expected, and nothing more is written */
+  close(): void {
+    this.closed = true
   }
 
   /** stdin EOF first, so the agent can end its own children; the whole tree is killed after `graceMs` */

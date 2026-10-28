@@ -24,6 +24,8 @@ import { inTurn, type SessionIdle } from '../idle.js'
  * **A turn Centralu starts to compact is marked** (`compactTurn`, said on its ending event as `turn.compaction`, once the tool has
  * reported the compaction in it): the window
  * raises no "done" notice or sound for it, and it is not a turn of the session's own.
+ * **Only a tool that can.** A tool with no compact command (`SelfCompactionHost.command` is null: an ACP agent that advertises none)
+ * is never sent one, and `compact_self` answers that it cannot: the bare `/compact` would be an ordinary prompt to its model.
  * **One compaction per rest.** What a compaction leaves is not always read back (Codex reports no size), so a session
  * Centralu compacted is not compacted again until it has had a turn of its own.
  */
@@ -49,8 +51,11 @@ export type SelfCompactionHost = {
   /** Whether a process of the session runs */
   running(sessionId: string): boolean
   setting(): AutoCompact
-  /** The input that makes the tool compact (`AgentAdapter.compactCommand`) */
-  command(tool: ToolName, focus: string | null): string
+  /**
+   * The input that makes the session's tool compact (`SessionHandle.compactCommand`, else `AgentAdapter.compactCommand`).
+   * `null`: the tool has none (an ACP agent that advertises no `compact`), so the session is never compacted by Centralu
+   */
+  command(sessionId: string, tool: ToolName, focus: string | null): string | null
   /** Sends the tool's compact command to the session as a turn of its own; throws when it cannot */
   send(sessionId: string, text: string): void
   /** A line in the conversation, in Centralu's name */
@@ -97,7 +102,11 @@ export class SelfCompaction {
 
   /** The `compact_self` tool's answer. Says what will happen */
   request(sessionId: string, focus?: string): { text: string; isError?: boolean } {
-    if (!this.host.session(sessionId)) return { text: 'This session is not known to Centralu.', isError: true }
+    const m = this.host.session(sessionId)
+    if (!m) return { text: 'This session is not known to Centralu.', isError: true }
+    if (this.host.command(sessionId, m.tool, null) === null) {
+      return { text: 'This tool has no compact command, so Centralu cannot compact this conversation. Nothing was asked; carry on as usual.', isError: true }
+    }
     const line = focus?.replace(/\s+/g, ' ').trim().slice(0, FOCUS_MAX_CHARS) || null
     const asked = this.pending.has(sessionId)
     this.pending.set(sessionId, { focus: line, endedAt: null, held: false, size: null })
@@ -292,7 +301,9 @@ export class SelfCompaction {
   }
 
   private fire(id: string, why: string, focus: string | null, tool: ToolName): void {
-    const text = this.host.command(tool, focus)
+    const text = this.host.command(id, tool, focus)
+    // The tool has no compact command: a bare `/compact` would only be a prompt to its model
+    if (text === null) return
     try {
       this.compacting.set(id, { why, sentAt: this.now(), started: false, compacted: false, ended: false })
       this.host.send(id, text)

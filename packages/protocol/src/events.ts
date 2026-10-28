@@ -15,6 +15,8 @@ import {
   Interruption,
   SessionState,
   TokenUsage,
+  ToolName,
+  ToolSetup,
   ToolSummary,
   UpdateStatus,
   HostRequest,
@@ -766,6 +768,12 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    * to reach the session headers.
    */
   z.object({ ...appScoped, type: z.literal('agent_versions'), status: AgentVersions }),
+  /**
+   * A tool's setup changed on this host (#59): an install's progress and end, a sign-in's start and end, or a session
+   * that found the tool signed out (`-32000` on ACP). App-wide like `agent_versions`: the tool lines and the header's
+   * donut read it without asking `agents.detect` again. Carries no secret: never the sign-in address
+   */
+  z.object({ ...appScoped, type: z.literal('tool_setup'), tool: ToolName, setup: ToolSetup }),
   /**
    * The update picture changed (issue #43).
    *

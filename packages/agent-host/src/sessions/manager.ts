@@ -459,7 +459,11 @@ export class SessionManager {
       running: (id) => this.handles.has(id),
       window: (m) => this.modelWindows.of(m),
       setting: () => autoCompactOf(this.uiPreferences()),
-      command: (tool, focus) => this.adapters.get(tool)?.compactCommand?.(focus) ?? '/compact',
+      command: (id, tool, focus) => {
+        const handle = this.handles.get(id)
+        if (handle?.compactCommand) return handle.compactCommand(focus)
+        return this.adapters.get(tool)?.compactCommand?.(focus) ?? '/compact'
+      },
       send: (id, text) => this.events.sendCompact(id, text),
       notice: (id, text) => this.onEvent({ type: 'notice', sessionId: id, level: 'info', from: 'Centralu', label: 'compaction', text }),
     })

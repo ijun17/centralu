@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, onTestFinished } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { PtyBroker, brokerPath, brokerPtyModule, parseBrokerEvent } from './broker-pty.js'
+import { pathToFileURL } from 'node:url'
+import { PtyBroker, brokerPath, brokerPtyModule, openForPerson, parseBrokerEvent, personOpener } from './broker-pty.js'
 import type { Pty, PtyModule } from './pty-slot.js'
 import { TerminalService } from './terminal.js'
 import { cleanUp, plantTreeScript, settle, treePids } from './process-tree.test-helpers.js'
@@ -16,6 +17,7 @@ import { SLOW } from '../../../../tooling/test-timing.js'
 
 /** A broker speaking the real protocol with no pty behind it: answers each request with what it was asked */
 const FAKE_BROKER = `
+import { appendFileSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 const send = (m) => process.stdout.write(JSON.stringify(m) + '\\n')
 const killed = new Set()
@@ -35,6 +37,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
     if (m.data === 'say junk') process.stdout.write('{"ev":"data","id":' + m.id + '}\\nnull\\n[1]\\n7\\n{"ev":"unheard of","id":1}\\nnot json\\n')
     send({ ev: 'data', id: m.id, data: 'got ' + m.data })
   } else if (m.op === 'resize') send({ ev: 'data', id: m.id, data: 'size ' + m.cols + 'x' + m.rows })
+  else if (m.op === 'open') appendFileSync(new URL('./opened.txt', import.meta.url), m.url + '\\n')
   else if (m.op === 'kill') {
     killed.add(m.id)
     send({ ev: 'exit', id: m.id, exitCode: 0, signal: 1 })
@@ -141,6 +144,73 @@ describe('a pty through the broker', () => {
     expect(broker.alive).toBe(false)
     ptys.spawn('pwsh.exe', [], { cwd: 'C:\\', cols: 80, rows: 24, env: {} })
     expect(inHost).toEqual(['pwsh.exe'])
+  })
+})
+
+/*
+ * Review of #1685: what the host opens for the person (Antigravity's sign-in page) is started by the broker, outside the
+ * job, so the browser outlives a Stop and the host. Only an https address is sent; a broker that is gone opens it in the host
+ */
+describe('an address opened for the person through the broker', () => {
+  let dir = ''
+  afterEach(() => {
+    if (dir) rmSync(dir, { recursive: true, force: true })
+    dir = ''
+  })
+
+  it('sends an https address to the broker, refuses any other, and opens in the host once the broker is gone', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'cc-broker-'))
+    writeFileSync(join(dir, 'broker.mjs'), FAKE_BROKER)
+    const broker = PtyBroker.start(join(dir, 'broker.mjs'))
+    const inHost: string[] = []
+    openForPerson(broker, 'https://accounts.google.com/o?a=1&b=2', (u) => inHost.push(u))
+    expect(broker.openUrl('file:///etc/passwd')).toBe(false)
+    expect(broker.openUrl('http://accounts.google.com/x')).toBe(false)
+    const opened = join(dir, 'opened.txt')
+    expect(await settle(() => (existsSync(opened) ? readFileSync(opened, 'utf8') : ''), (t) => t.length > 0, 5_000 * SLOW)).toBe('https://accounts.google.com/o?a=1&b=2\n')
+    expect(inHost).toEqual([])
+    broker.close()
+    await settle(() => broker.alive, (alive) => !alive, 5_000 * SLOW)
+    openForPerson(broker, 'https://accounts.google.com/again', (u) => inHost.push(u))
+    expect(inHost).toEqual(['https://accounts.google.com/again'])
+  })
+
+  /*
+   * The real broker's handler (deep review of #1687, follow-up 2: a no-op there kept every test green). Its own
+   * `pty-broker.mjs`, imported in a node of its own without starting as a broker, with a stand-in for `spawn`, so no
+   * browser opens: an https address goes to `rundll32 url.dll,FileProtocolHandler` detached, nothing else is started
+   */
+  it("the real broker's open starts rundll32 detached with the address whole, and only an https one", () => {
+    const probe = `
+      globalThis.__ccPtyBrokerImported = true
+      const { handle } = await import(${JSON.stringify(pathToFileURL(brokerPath()).href)})
+      const started = []
+      const start = (command, args, opts) => {
+        started.push({ command, args, detached: opts.detached, stdio: opts.stdio, shell: opts.shell ?? false })
+        return { on() {}, unref() {} }
+      }
+      for (const url of ['https://accounts.google.com/o?a=1&b=2', 'http://accounts.google.com/x', 'file:///etc/passwd', 'ms-settings:', 42]) handle({ op: 'open', url }, start)
+      process.stdout.write(JSON.stringify(started))
+    `
+    const out = execFileSync(process.execPath, ['--input-type=module', '-e', probe], { encoding: 'utf8' })
+    expect(JSON.parse(out)).toEqual([{ command: 'rundll32', args: ['url.dll,FileProtocolHandler', 'https://accounts.google.com/o?a=1&b=2'], detached: true, stdio: 'ignore', shell: false }])
+  })
+
+  it('is what the host gives the adapters while the broker runs, and nothing without one (main.ts)', async () => {
+    expect(personOpener(null)).toEqual({})
+    dir = mkdtempSync(join(tmpdir(), 'cc-broker-'))
+    writeFileSync(join(dir, 'broker.mjs'), FAKE_BROKER)
+    const broker = PtyBroker.start(join(dir, 'broker.mjs'))
+    try {
+      personOpener(broker).openUrl?.('https://accounts.google.com/wired')
+      const opened = join(dir, 'opened.txt')
+      expect(await settle(() => (existsSync(opened) ? readFileSync(opened, 'utf8') : ''), (t) => t.length > 0, 5_000 * SLOW)).toBe('https://accounts.google.com/wired\n')
+    } finally {
+      broker.close()
+    }
+    // The host hands it to the registry; dropped there, a sign-in would open from inside the job again
+    const main = readFileSync(new URL('../main.ts', import.meta.url), 'utf8')
+    expect(main).toContain('const adapters = createAdapters(personOpener(ptyBroker))')
   })
 })
 

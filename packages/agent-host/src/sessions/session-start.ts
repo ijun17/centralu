@@ -351,7 +351,10 @@ export class SessionStarts {
        */
       const left = worktree && params.projectId ? await this.host.worktrees.discardNewWorktree(params.cwd, worktree, params.projectId) : null
       const msg = (err as Error).message
-      throw rpcError(`Could not start ${params.tool} session: ${msg}${left ? ` (${left})` : ''}`)
+      // What the person can act on keeps its code (a tool not signed in: its line offers Sign in, review of #1685)
+      const code: unknown = Reflect.get(Object(err), 'code')
+      const kept = code === 'not_logged_in' || code === 'tool_not_installed' ? code : 'internal'
+      throw rpcError(`Could not start ${params.tool} session: ${msg}${left ? ` (${left})` : ''}`, kept)
     }
 
     // An imported conversation keeps the model it was started with: the record follows what runs (#1369), before it is saved

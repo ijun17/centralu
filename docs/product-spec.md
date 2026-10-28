@@ -478,7 +478,7 @@ rather than on the maintainer. Exactly two stops, no wizard:
    the orchestrator's role, and two large agent cards (Claude Code / Codex). **The cards are
    the tool detection display**: a ready tool is an active card; a tool that is not ready is
    dimmed and disabled with "Not connected" and the specific remedy inside (install command
-   vs. login command — the app does not do the login flow for you), plus a re-detect button.
+   vs. login command for a terminal tool; Antigravity's card says why it cannot be the orchestrator yet, as a refused card with no Install or Sign in; those are in the new-session dialog), plus a re-detect button.
    Clicking a ready card stores which tool the orchestrator will run on ("you can change
    this later" is stated on screen) and advances. It does **not** start any process.
 2. **The normal orchestrator session view**, empty. While the conversation has 0 messages,

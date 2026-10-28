@@ -2,7 +2,8 @@
 
 Proposed 2026-10-27. Part of #59 and #1599. Owner order (#59, 2026-10-26): the OS seam, then one session core that the
 Claude, Codex and ACP adapters share, then Antigravity (`agy`) as the first new tool on it
-(`antigravity-adapter.md` on branch `feat/agy-adapter`). A design to agree on before code: what
+(`antigravity-adapter.md`). Since 2026-10-27 Antigravity runs as Google's ACP agent on the ACP wire instead
+([antigravity-acp.md](antigravity-acp.md)); §8 and the `agy` parts of §9 are kept as the reasoning of the time. A design to agree on before code: what
 the three adapters do today, side by side (§1); where one concept is computed twice and which copy is right (§2); what
 the core owns and what stays per tool (§3); the seam (§4); how the core reaches processes through `Os` (§5); how
 recorded frames test it (§6); the pull requests (§7); Antigravity on it (§8). A record like the rest of `plans/`, so not
@@ -300,6 +301,57 @@ presence means supported).
 The Claude wire is the SDK: `startTurn` pushes to the SDK's input generator, `interrupt` is `query.interrupt`,
 `answer` resolves the pending `canUseTool` promise, `open` is `query()`. Nothing the SDK does moves.
 
+### 4.1 As built in PR 5
+
+`core/seam.ts` and `core/ledger.ts` (`CoreSession`), with ACP the first tool on them (`acp/session.ts`: `AcpWire`, and
+`AcpSession`, a `CoreSession` that adds ACP's card and command methods). What changed from the proposal above, and why:
+
+| Proposal | As built | Why |
+|---|---|---|
+| `CoreIo.turnStarted`, `turnEnded(how, detail)` | the core starts every turn (`state_change working`, then `startTurn`) and hands the wire a `RunningTurn`: `stopAsked` to read, `end(ending, events?)` to end it | the turn the tool ends is always the one it was handed, so a late answer for a turn already over is dropped by identity, not by guessing; a tool that starts turns of its own (Codex's, PR 6) adds `turnStarted` then |
+| `turnEnded('failed', { error })` | `TurnEnding`: `complete`, `interrupted`, or `failed` with the `error` event and `inputError` (null: the input completes) | ACP's refusal is an error whose input completes (§2.11); Q7's change makes the endings one, and then `inputError` goes |
+| (none) | `events` on `end`: the tool's own end-of-turn events (usage, a limit's notice), emitted after the turn's open calls end and before the core's ending event, and only when the end is taken | keeps today's order of events exactly, and counts no cost for a turn the session no longer runs |
+| (none) | `turnOver(why?)` and `releaseCards()`: the core says when, the wire still holds its open calls and cards | the cards move into the core with the decision order (PR 8); until then the core calls `releaseCards` on a Stop, at a turn's end, on an exit and on the close, and `turnOver` at a turn's end, on an exit and on the close (`why`: "Centralu stopped this session while the call ran") |
+| `CoreIo.process`, `externalId(id)` | the same, one `CoreIo` per process, plus `gates` (`SessionProcess.gates`) | an id from a replaced process changes nothing (`noteExternalId(id, from)`) |
+| `interrupt()` | optional; a tool whose Stop ends its process has none, and the core signals it (`SessionProcess.interrupt`: the open gate requests are denied first) | `agy` has no Stop on its wire |
+| `close(how)` | `close({ turnRunning })`, then the core stops the process (`SessionProcess.close`) | ACP sends `session/cancel` first when closed mid-turn; `detach` is no ACP feature (no `SessionHandle.detach`) |
+| `autoGrant`, `answer`, `grant`, `steer`, `adopt`, `blocking` | not yet | the decision order is PR 8; `steer` and blocking turns are Codex's (PR 6); `adopt` is Codex's and Claude's |
+
+What the ledger owns now, one copy for every tool on it:
+
+- **The phase and the queue.** `opening`, `ready`, `closed`. A tool without mid-turn input (`midTurnInput: false`) gets one
+  input at a time, the rest wait in order; with it, an input sent mid-turn joins the running turn, and the turn's end
+  settles them all.
+- **The receipts** (§2.3): every input has an `InputReceipts` receipt; the wire says when the tool took it
+  (`CoreIo.inputAccepted`: ACP at the write); a turn our Stop ended fails its inputs; an exit fails the turn's inputs
+  with "`<label>` exited (code N)", and the queued ones with the undelivered count and its `error` event; the close fails
+  them with "the session closed". `turnInputs` names the inputs the last turn took by the host's names.
+- **The Stop** (§2.4): `stopAsked` on the turn, the wire's own Stop, the cards released, and the 10 s timer
+  (`STOP_CONFIRM_MS`, now one constant for ACP; Claude's own copy in `claude/index.ts` goes with PR 7) for a tool with
+  `confirmsStop`. The notice reads ACP's words ("`<label>` has not confirmed the stop; the turn may still be running.");
+  Claude's differ ("…after N s. The turn is still running."), so PR 7 takes ACP's words or keeps its own as a visible
+  change of its own, not inside the move.
+- **"Interrupted by the tool"**: an `interrupted` ending without our Stop is `INTERRUPTED_BY_TOOL`, and its input completes.
+- **The exit** (§2.5): the core watches the process from its start (`SessionProcess`'s `onStart`, before the wire reads
+  it), `exit` and a failed start (`error`) alike, once. In a turn or while opening it is `adapter_crashed` with
+  `withStderrTail`'s message; idle, `session_live` asleep. ACP's `AcpConnection.onExit` no longer decides it: the
+  connection only fails the requests it had open, and `close()` marks this side's own stop as expected.
+- **A Stop that ends the process** (`interruptEndsProcess`, `agy`): the process is marked as ending by our hand, the gate
+  requests are denied, then SIGINT. Its exit is the Stop's confirmation and ends the turn as `interrupted` if the tool did
+  not say so first. The next input asks `launch` again with the conversation's id (`relaunch`, or `start` once the old
+  process is gone), opens it (the session is `opening` again, so an exit then is a crash), and goes on; nothing starts
+  until an input comes. A new process that cannot start or open is a crash, like an exit while opening: the inputs
+  waiting are undelivered, and the process is stopped, not left running. A tool found gone at that point (its `launch`
+  answers null, or the program is not there or cannot be run: ENOENT, EACCES) is no crash: the error is
+  `tool_not_installed` with the tool's install hint (`ToolWire.install`), from `toolNotInstalled`, the same function the
+  ACP adapter answers with at the first open.
+- **A wire that cannot write an input**: `startTurn` throwing ends that turn as `failed`, and the queue goes on.
+
+The core tests (`core/ledger.test.ts`) run a scripted wire in memory against a small model of the above: 150 random
+sequences each of inputs, Stops, the tool's endings, exits and the close, for an ACP-like tool, a tool with mid-turn
+input, and an `agy`-like tool (`midTurnInput: false`, `interruptEndsProcess: true`, its id said at the first input), and
+compare the ledger's events, what the wire was asked to write on which process, and how every input ended.
+
 ## 5. Reaching processes through `Os` (#1650, OS layer step 3c)
 
 The core reaches the OS only through `tool-process.ts`, which takes an `Os` (`os/port.ts` on `centralu/os-interface`,
@@ -332,7 +384,7 @@ and the keeper's `ProcessSource` (spawn and adopt). Tests give a fourth: the rep
 | `stopToolProcess(proc, { graceMs, exited })` | stdin's end, `STOP_GRACE_MS` (2 s), then the tree (`kill('SIGKILL')`) | `CodexClient.dispose`, `AcpConnection.dispose` |
 | `endToolProcess(proc, boundMs)` | the tree at once, then a bounded wait | ACP's `closeAdopted` |
 | `logToolStderr(proc, label)` | the 500-character host-log line (§2.11) | `CodexClient`, `AcpConnection` |
-| `SessionProcess` | a session's process across its replacements (below): `start`, `relaunch`, `interrupt`, `stop`, `close`, run one at a time in the order asked, so a Stop or a close asked while a start awaits its launch ends what it starts (or starts nothing, once closed) | nobody yet: `agy`'s wire, then the ledger (PR 5) |
+| `SessionProcess` | a session's process across its replacements (below): `start`, `relaunch`, `interrupt`, `stop`, `close`, run one at a time in the order asked, so a Stop or a close asked while a start awaits its launch ends what it starts (or starts nothing, once closed) | the ledger (PR 5, §4.1), for every tool on it |
 
 Claude stays on the SDK (§3.3): `claudeQueryOptions`'s `spawnClaudeCodeProcess` adds `endsWithHost` to what the SDK asks
 for (`claude/sdk-query.ts`), and `claude/session.ts` (#1626's) is untouched; its keeper spawn passes four fields and so
@@ -352,8 +404,8 @@ the watch. That also changes ACP on macOS and Linux, from "<label> exited (code 
    before it asks for the next.
 2. **An id learned late** (`noteExternalId(id, from)`): `agy` says its id only in `init`, after the first input; every
    later launch goes on with it. A late line from a process already replaced is ignored.
-3. **The gate's inbound path** (`GateInbound`, `GateChannel`, `GateRequest`, `GateAnswer`): an interface only; the
-   transport is decided (§8.1: a front-door route under a gate-only key), built with `agy`.
+3. **The gate's inbound path** (`GateInbound`, `GateChannel`, `GateRequest`): built as a front-door route under a
+   gate-only key per session (§8.1), then removed with the hook path (#59). Only `GateAnswer` and `GateRequests` remain.
 4. **A Stop denies every open gate request first** (`GateRequests.denyAll`, in `interrupt` and `stop`): SIGINT does not
    end `agy` while a gate hook waits.
 
@@ -456,7 +508,9 @@ PRs 5–9 for one tool do not wait for the others, so `agy` (§8) needs only 1, 
 | Codex gets the Stop confirmation timer | §2.4 | after 6, owner's call (§9.2) |
 | `endsWithHost` for Claude and Codex | §2.6 | done in 3 (Q3 decided it belongs there; §5.1) |
 
-## 8. Antigravity on the core
+## 8. Antigravity on the core (superseded)
+
+**Superseded (#59).** The `agy -p` adapter this section sketched on the core, with its hook gate, was built and then removed; Antigravity runs on Google's ACP agent through the ACP adapter. Read the section as a record of what the core was measured to need, not as a plan.
 
 From antigravity-adapter.md's measurements (`agy` 1.4.7, macOS, 2026-10-26), what `agy` supplies and what it takes:
 
@@ -477,40 +531,15 @@ So `agy`'s adapter is a wire (`stream.ts`, `normalize.ts`, `gate.ts`, `plugin-ro
 `known-steps.ts`) on the core, without its own queue, Stop, exit or approval order. Its pull request follows PRs 1, 3, 5, 8 and 9
 for ACP; it does not wait for Claude's or Codex's moves (PRs 2, 6, 7).
 
-### 8.1 The gate's way back to the host: a decision
+### 8.1 The gate's way back to the host (superseded)
 
-The hook is a process `agy` starts per call; it must reach this host, wait for a decision and print it (a hook that
-prints nothing and exits 0 lets the tool run, measured). Two transports were weighed, and a third, narrower one chosen:
-
-| | A. Loopback listener per session, its own token | B. A route on the host's front door, the bridge credential |
-|---|---|---|
-| What is new | a listener per `agy` session (`127.0.0.1`, a random port) and a random token per session in the tool's environment | one route and a `SessionHandle` method it reaches; no new listener |
-| Who can call | anyone on the machine who has the port and the token; the token is per session and dies with it | anyone who holds the session's bridge credential |
-| What a leaked secret allows | raising that session's gate cards until it closes | the same, plus what that credential already reaches (`orchestrator.tool`, `apps.sessionCall` for that session) |
-| Rights model | outside the host's method rights: a second front door to review and keep reviewed | inside them: one front door, its rights table and its tests |
-| Across a host swap | dies with the host; an adopted `agy` is reopened, not taken over (§8), so a new process gets a new listener and token | the route survives; a request the old host opened is answered only if the hook asks again |
-| Who holds the secret today | nobody: it is new | **no tool's environment holds the bridge credential today.** Claude's Centralu tools run inside the host with no token. Codex and ACP get the bridge's environment only in the bridge child process (thread config, `session/new`'s `mcpServers`), and only for a session with the orchestrator profile or apps. Another process can read it from that child's environment at most. The credential is an HMAC of the session id keyed by the host token: it does not die with the session and survives keeper swaps |
-| What `agy`'s shell would gain | the session's gate token only | a long-lived credential for its session's orchestrator and app tools, newly in the agent's own shell, skipping what the tool asks before an MCP call |
-| Windows | a loopback port (no firewall prompt for `127.0.0.1`) | nothing new |
-
-**Decision (owner, after the security review on #1668): a route on the host's front door under a gate-only key of its own.**
-Not the bridge credential, and no new listener.
-
-- The key is random per session, held in memory, revoked when the session closes, and allows exactly one method: raise a
-  gate request for that session. It is bound to the session it was made for and is not in the everyday rights.
-- The method's parameters carry no decision field. Approvals stay `window`-only in the rights table
-  (`agents.respondApproval`, `requests.answer`), so the channel can ask and never answer.
-- It fails closed (the hook denies when the host cannot be reached), keeps the secret out of every file (the plugin root
-  holds names only) and is closed with the session, denying what is open and what asks later. A Stop denies what is open and
-  what a dying process asks during its grace.
-- `core/gate.ts` stays interfaces only; the route and the key come with `agy`'s pull request.
-
-The key is in the tool's environment, so the agent's own shell commands hold it too. That is safe only because the channel
-**asks and never answers**: the decision comes from the preset, the always-allow rules or the person's card, never from the
-caller. A command holding the key can raise a card (noise the person sees and can deny), or ask again with an open
-request's id, which only ever denies the first wait (`GateRequests.wait`); it cannot allow a call. A transport that let the
-caller say "allowed" (a shortcut for Centralu's own tools, say) would hand the agent its own approvals, and must not be
-added.
+**Superseded (#59).** This section designed how `agy -p`'s `PreToolUse` hook process reached the host: a route on the
+front door (`POST /gate/<sessionId>`) under a per-session gate-only key (`ccg1:`), one method `gate.ask` in its own
+rights class `gate`, tool-neutral environment names `CC_GATE_URL` and `CC_GATE_TOKEN`. It was built (#1675) and then
+retired with the whole hook path, because Antigravity moves to Google's official ACP agent on the existing ACP adapter
+(#59). The route, the key, the rights class, the method and the hook are gone from the host; the history has the
+design and its security review. What stays of it: a tool that asks through a process of its own, rather than on its
+wire, may still need a Stop to deny every open request first (`GateRequests`).
 
 ## 9. Open questions
 
@@ -520,7 +549,8 @@ added.
 3. **`endsWithHost` for Claude and Codex** (§2.6): the stronger guarantee, at the cost of an `sh` wrapper per CLI on
    macOS and Linux and a real-OS test each.
 4. **The context guard** (§2.2): the upper bound for every tool, and "0 means no reading" per tool?
-5. **`agy` on Windows**: its interrupt is SIGINT, which `Os` cannot send on Windows (`kill` ends the child). Raise an
+5. **`agy` on Windows** (closed 2026-10-27: Antigravity runs as Google's ACP agent, whose Stop is `session/cancel` on
+   every OS, [antigravity-acp.md](antigravity-acp.md)): its interrupt is SIGINT, which `Os` cannot send on Windows (`kill` ends the child). Raise an
    `Os` addition (a console interrupt) when `agy`'s Windows pull request comes, or treat a Stop on Windows as ending the
    process (it ends it anyway, its §1.5)?
 6. **Recording Claude and Codex** (PR 2) spends real turns on a logged-in machine: which machine, and is the ACP
@@ -529,3 +559,12 @@ added.
    (retryable error, non-retryable error, notice and completion). Which is the host's meaning?
 8. **Usage limits** (§2.11): Codex reads the primary window when the weekly one was hit, and the two tools label the
    same window differently. Out of the core, but worth an issue?
+9. **Input after a Stop, for a tool with mid-turn input** (PR 6/7; from #1674's review). With `midTurnInput: true` the
+   ledger lets an input sent after a Stop, before the tool has ended the stopped turn, join that turn; the turn then ends
+   `interrupted` with the Stop asked, and that input fails as stopped though it was written after the Stop. Should an
+   input sent after a Stop wait in the queue for the next turn instead? No tool on the core has mid-turn input yet (ACP
+   and `agy` queue), so nothing reaches it today.
+10. **A mid-turn write that fails** (PR 6/7; from #1674's review). When `startTurn` throws on a later input that joins a
+    running turn, the ledger ends the whole turn `failed`: the inputs already written and accepted fail too, and the
+    session goes idle while the tool may still be working. Should only that input fail, the turn going on? Unreachable
+    today: ACP has no mid-turn input, and `AcpWire.startTurn` does not throw.
