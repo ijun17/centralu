@@ -353,6 +353,17 @@ export function timePrecision(
 }
 
 /**
+ * How `rmSync` is made, which decides what it answers to a folder a process works in on Windows (measured on Windows
+ * with Node 22.23.4, 23.11.1, 24.22.1 and 26.12.1): `js` (Node 22) walks the tree in JavaScript and gives the system's
+ * `EBUSY`; `native` (Node 23 and later; nodejs/node#53617, commit 7168295e7a, "fs: move rmSync implementation to c++")
+ * removes it with C++'s `std::filesystem` and gives `EPERM` for the same refusal. `rmdirSync`, `rename` and the promise
+ * `rm` give `EBUSY` on every Node. `nodeVersion` defaults to the running Node's.
+ */
+export function rmSyncImplementation(nodeVersion: string = process.versions.node): 'js' | 'native' {
+  return Number(nodeVersion.split('.')[0]) >= 23 ? 'native' : 'js'
+}
+
+/**
  * A file time as the family stores what `utimes` is given (seconds, or a `Date`), in nanoseconds, cut from the seconds
  * as libuv does (see `timePrecision`): to whole microseconds from the fraction on POSIX (so a `Date`'s milliseconds
  * come out a nanosecond short), from the whole value on Windows (so they come out exact); or, where nanoseconds are

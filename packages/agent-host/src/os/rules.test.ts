@@ -16,6 +16,7 @@ import {
   signalRefusal,
   storedTimeNs,
   systemTool,
+  rmSyncImplementation,
   timePrecision,
   traitsOf,
   type OsFamily,
@@ -295,6 +296,14 @@ describe('Windows path forms Win32 opens as one path', () => {
     expect(samePath('C:\\x\\y.', 'C:\\x\\y', 'windows')).toBe(false)
     expect(isInside('C:\\work\\proj', 'C:\\work\\proj.\\secret', 'windows')).toBe(false)
     expect(isInside('C:\\work\\proj', 'C:\\work\\proj \\secret', 'windows')).toBe(false)
+  })
+})
+
+describe('how rmSync is made: Node 23 moved it to C++, which changes the code of a busy folder', () => {
+  it('is JavaScript through Node 22 and native from Node 23', () => {
+    expect(
+      ['20.19.0', '22.23.4', '23.11.1', '24.22.1', '26.12.1'].map((v) => rmSyncImplementation(v)),
+    ).toEqual(['js', 'js', 'native', 'native', 'native'])
   })
 })
 

@@ -1,6 +1,6 @@
 import type { Os, OsChild, OsError } from './port.js'
 import type { MemoryOs } from './memory.js'
-import { timePrecision, type OsFamily } from './rules.js'
+import { rmSyncImplementation, timePrecision, type OsFamily } from './rules.js'
 
 /**
  * What the in-memory OS must answer as the real one does (#1599, docs/plans/os-layer.md §7.1): each case runs on an
@@ -33,6 +33,11 @@ export type Contract = {
    * OS and the running Node's libuv) says which applies, to the real OS and the in-memory one alike
    */
   nanoseconds?: unknown
+  /**
+   * The Windows answer where `rmSync` is Node's native one (Node 23 and later: `rmSyncImplementation`), when it is not
+   * `want.windows`; the real OS and the in-memory one alike
+   */
+  nativeRmSync?: unknown
   /** Needs the right to make a symlink, which a Windows account without Developer Mode lacks */
   symlinks?: boolean
   /**
@@ -45,6 +50,8 @@ export type Contract = {
 
 /** What a case answers on a family, for the running Node: its `nanoseconds` where the file system keeps them, else `want` */
 export function expectedFor(c: Contract, family: OsFamily): unknown {
+  if (family === 'windows' && c.nativeRmSync !== undefined && rmSyncImplementation() === 'native')
+    return c.nativeRmSync
   return c.nanoseconds !== undefined &&
     timePrecision(family, undefined, process.platform === 'darwin') === 'nanosecond'
     ? c.nanoseconds
@@ -400,6 +407,13 @@ export const CONTRACT: Contract[] = [
     want: {
       windows: { rename: err('EBUSY'), remove: err('EBUSY'), renameParent: err('EPERM'), writeInside: 'ok' },
       posix: { rename: 'ok', remove: 'ok', renameParent: 'ok', writeInside: 'ok' },
+    },
+    // `rmSync` is native from Node 23 (`rmSyncImplementation`): the same refusal, as EPERM
+    nativeRmSync: {
+      rename: err('EBUSY'),
+      remove: err('EPERM'),
+      renameParent: err('EPERM'),
+      writeInside: 'ok',
     },
     async run(os, root, ctx) {
       const { join } = os.paths.path

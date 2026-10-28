@@ -53,6 +53,7 @@ import {
   signalRefusal,
   storedTimeNs,
   timePrecision,
+  rmSyncImplementation,
   type TimePrecision,
   traitsOf,
   type OsFamily,
@@ -73,7 +74,7 @@ import { runChild } from './run.js'
  * - **Links.** Windows: a symlink needs a right (`symlinks: false` refuses one with `EPERM`); a junction needs none, is
  *   always absolute (a relative target is read from its folder), is a link to `lstat` and a folder listing, and one to a
  *   file cannot be followed (`ENOENT`). Removing a link never touches its target.
- * - **What Windows holds.** A running process's working folder cannot be renamed or removed (`EBUSY`); a folder below
+ * - **What Windows holds.** A running process's working folder cannot be renamed or removed (`EBUSY`; `rmSync` says `EPERM` from Node 23, `rmSyncImplementation`); a folder below
  *   which something is held open (a file, a watch, a working folder) cannot be renamed (`EPERM`); a file open in this
  *   process can be renamed and deleted but not replaced (`EPERM`); a running program's file can be renamed but not
  *   deleted or replaced (`EPERM`). POSIX holds none of these.
@@ -171,6 +172,8 @@ export type MemoryOsOptions = {
   env?: Env
   /** How finely `utimes` keeps a time. Default: as the running Node's libuv does it for the family (`timePrecision`) */
   timePrecision?: TimePrecision
+  /** How `rmSync` is made. Default: as the running Node's is (`rmSyncImplementation`); it decides the code of a busy folder */
+  rmSync?: 'js' | 'native'
   /** When the clock starts, in ms since 1970 */
   now?: number
   /** The host's working folder (made if missing); default the home folder */
@@ -277,6 +280,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
   const family = options.as
   const windows = family === 'windows'
   const precision = options.timePrecision ?? timePrecision(family)
+  const nativeRmSync = (options.rmSync ?? rmSyncImplementation()) === 'native'
   const HOME = windows ? 'C:\\Users\\person' : '/home/person'
   const cwd = options.cwd ?? HOME
   // Relative paths are read from this OS's working folder, never from the one of the process running the tests
@@ -802,7 +806,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     unlinkEntry(f.parent, f.name)
   }
 
-  function rm(p: string, o: RmOptions = {}) {
+  function rm(p: string, o: RmOptions = {}, sync = false) {
     const f = lookup(p, false, 'rm')
     if (!f.node) {
       if (o.force) return
@@ -816,7 +820,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
           'rm',
           p,
         )
-      if (windows && busyTree(f.node)) throw fsError('EBUSY', 'rmdir', p)
+      if (windows && busyTree(f.node)) throw fsError(sync && nativeRmSync ? 'EPERM' : 'EBUSY', 'rmdir', p)
       if (windows && below(f.node, (n) => runningFiles.has(n))) throw fsError('EPERM', 'unlink', p)
     } else if (windows && runningFiles.has(f.node)) throw fsError('EPERM', 'unlink', p)
     unlinkEntry(f.parent, f.name)
@@ -1153,7 +1157,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     cpSync: (a, b, o) => copyTreeSync(files, a, b, o, family, P),
     unlinkSync: unlink,
     rmdirSync: rmdir,
-    rmSync: rm,
+    rmSync: (p, o) => rm(p, o, true),
     symlinkSync: symlink,
     readlinkSync: readlink,
     realpathSync: (p) => {
