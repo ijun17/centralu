@@ -158,7 +158,7 @@ function parseServeState(raw) {
       if (typeof v.key !== 'string' || v.key.length < 32) return null
       // Exactly what the host takes (serve-credentials.ts `isListedEntry`): an entry of another shape is dropped here, so
       // the next write leaves it out too, and the host refuses it meanwhile
-      const full = (Array.isArray(v.full) ? v.full : []).filter((e) => isListedEntry(e)).map((e) => ({ id: e.id, label: e.label, verifier: e.verifier, created: Number.isFinite(e.created) ? e.created : 0, ...(e.replaced === true ? { replaced: true } : {}) }))
+      const full = (Array.isArray(v.full) ? v.full : []).filter((e) => isListedEntry(e)).map((e) => ({ id: e.id, label: e.label, verifier: e.verifier, created: Number.isFinite(e.created) ? e.created : 0, ...(PAIRED_VIA.includes(e.via) ? { via: e.via } : {}), ...(e.replaced === true ? { replaced: true } : {}) }))
       const legacyHostToken = typeof v.legacyHostToken === 'string' && v.legacyHostToken.length >= 32 ? v.legacyHostToken : null
       return { v: 2, key: v.key, port, full, legacyHostToken, token: limitedOf(v.key), proofKey: v.key }
     }
@@ -379,12 +379,26 @@ function putBack(aside, lock, link) {
 }
 
 /**
+ * How a full credential was asked for, kept on its entry as `via` (#1405 review): `pair` (`--connection --pair`, a
+ * hub's at each link or any program's), `window` (`--window`, the person's window on Windows at each start), `handover`
+ * (the launcher's own, for one `host.handover` call and withdrawn right after)
+ */
+export const PAIRED_VIA = ['pair', 'window', 'handover']
+
+/**
  * A new full credential for `label` (#1405): written as its verifier only, and returned once. One label holds one
  * credential: a hub pairing again (each link does) replaces its own, and `window` the window's. The `legacy` one a
  * version 1 file left goes with a hub's or the window's pairing: whoever held it was one of the two, which pairs now.
- * Returns `{ token, id, state }`.
+ * `via` is how it was asked for (`PAIRED_VIA`). Returns `{ token, id, state }`.
+ *
+ * `replaced` (#1405 review): set on the new entry only when the one of its label it takes the place of was asked for
+ * another way, or the file does not say how. The window pairing again at each start, and a hub at each link, are the
+ * same pairer as before and are not marked: marked at every routine pairing, the flag meant nothing. A `--pair window`
+ * taking the window's place, or the window's next start taking that one's, is marked. What this cannot tell is two
+ * askers of the same way: a program's `--pair hub:<name>-<key>` against that hub's own. The hub's row tells that one
+ * by itself (`hubsName`, and its own credential gone), docs/security-boundaries.md.
  */
-export function pairServe(dataDir, label, platform = process.platform, now = Date.now()) {
+export function pairServe(dataDir, label, platform = process.platform, now = Date.now(), via = 'pair') {
   ensureServeState(dataDir, platform, now)
   const { token, id } = mint()
   const state = changeServeState(dataDir, (s) => ({
@@ -392,13 +406,11 @@ export function pairServe(dataDir, label, platform = process.platform, now = Dat
     /*
      * A hub's or the window's pairing removes the `legacy` one (#1405 review): whoever held it was a hub or the window
      * of before #1405, each of which pairs now, so on a machine no hub links to it does not outlive the window's next
-     * start. Any other label leaves it: a program's own `--pair` does not cut off a hub that has not paired yet. One that
-     * takes the place of an earlier credential of its label is marked `replaced`, which a hub's machine row shows: a
-     * pairing under a label already there (a hub's own, `window`) is a change someone sees, not a silent swap
+     * start. Any other label leaves it: a program's own `--pair` does not cut off a hub that has not paired yet
      */
     full: [
       ...s.full.filter((e) => e.label !== label && !(takesLegacyPlace(label) && e.label === LEGACY_LABEL)),
-      { id, label, verifier: verifierOf(token), created: now, ...(s.full.some((e) => e.label === label) ? { replaced: true } : {}) },
+      { id, label, verifier: verifierOf(token), created: now, via, ...(s.full.some((e) => e.label === label && e.via !== via) ? { replaced: true } : {}) },
     ],
   }), platform)
   return { token, id, state }

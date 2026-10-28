@@ -222,14 +222,37 @@ describe('the data folder and the state file', () => {
       ['hub:mac', again.id, verifierOf(again.token)],
       ['window', win.id, verifierOf(win.token)],
     ])
-    // And says so: a pairing that took the place of an earlier one of its label is marked, a first one is not
+    // The same pairer pairing again (a hub at each link) is not marked: it is routine (#1405 review)
     expect(state.full.map((e: { label: string; replaced?: boolean }) => [e.label, e.replaced === true])).toEqual([
-      ['hub:mac', true],
+      ['hub:mac', false],
       ['window', false],
     ])
     expect(revokeServe(d, again.id)).toBe(true)
     expect(revokeServe(d, again.id)).toBe(false)
     expect(readServeState(d).full.map((e: { label: string; id: string; verifier: string }) => e.label)).toEqual(['window'])
+  })
+
+  it('marks a pairing replaced only when the one it took the place of was asked for another way (#1405 review)', () => {
+    const d = tempDir()
+    const marked = () => readServeState(d).full.map((e: { label: string; replaced?: boolean }) => [e.label, e.replaced === true])
+    // The window at each start: the same pairer, never marked
+    pairServe(d, 'window', process.platform, 1, 'window')
+    pairServe(d, 'window', process.platform, 2, 'window')
+    expect(marked()).toEqual([['window', false]])
+    // Something else pairing under the window's label is marked, and so is the window's next start after it
+    pairServe(d, 'window', process.platform, 3, 'pair')
+    expect(marked()).toEqual([['window', true]])
+    pairServe(d, 'window', process.platform, 4, 'window')
+    expect(marked()).toEqual([['window', true]])
+    pairServe(d, 'window', process.platform, 5, 'window')
+    expect(marked()).toEqual([['window', false]])
+    // An entry that does not say how it was asked for counts as another way
+    const file = join(d, SERVE_STATE_FILE)
+    const raw = JSON.parse(readFileSync(file, 'utf8')) as { full: { via?: string }[] }
+    delete raw.full[0]!.via
+    writeFileSync(file, JSON.stringify(raw))
+    pairServe(d, 'window', process.platform, 6, 'window')
+    expect(marked()).toEqual([['window', true]])
   })
 
   it('takes over a lock dated ahead of now, as one dated long ago (#1405 review: a crashed writer, then the clock set back)', () => {

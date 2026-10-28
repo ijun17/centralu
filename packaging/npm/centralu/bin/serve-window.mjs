@@ -79,7 +79,7 @@ export async function runWindow({
   }
 
   // The window's own full credential (#1405); an older installed host knows only the token kept for it
-  const token = takesVerifiers(entry) ? pairServe(dataDir, 'window', platform).token : legacyHostTokenOf(dataDir, platform)
+  const token = takesVerifiers(entry) ? pairServe(dataDir, 'window', platform, Date.now(), 'window').token : legacyHostTokenOf(dataDir, platform)
   const state = readServeState(dataDir)
   write(`${JSON.stringify({ ready: true, port: state.port ?? DEFAULT_SERVE_PORT, token, db: join(dataDir, 'store.db') })}\n`)
 

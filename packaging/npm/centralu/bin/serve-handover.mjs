@@ -134,7 +134,7 @@ export async function moveIntoSignIn({
    * right after, never kept. An older installed host knows only the token kept for it
    */
   const sayHandover = async (h) => {
-    const made = takesVerifiers(entry) ? pairServe(dataDir, 'handover', platform) : null
+    const made = takesVerifiers(entry) ? pairServe(dataDir, 'handover', platform, Date.now(), 'handover') : null
     try {
       return await askHostRpc({ port, token: made?.token ?? own.token, proofKey: own.proofKey, protocolVersion, prove, method: 'host.handover', params: { handover: h } })
     } finally {
