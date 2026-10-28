@@ -101,6 +101,12 @@ export type HostServerOptions = {
    * each hello and each `prove` naming one, so a pairing or a revocation applies at once
    */
   fullCredentials?: () => readonly FullCredential[]
+  /**
+   * How often the full credentials are read again while a socket holds one (#1405 review): a socket whose credential
+   * is no longer listed is closed then, so a revocation ends a connection already open with it, not only the next
+   * hello. 1 s when absent
+   */
+  credentialSweepMs?: number
   onRpc: RpcHandler
   allowedOrigins?: readonly string[]
   /**
@@ -244,6 +250,12 @@ export class HostServer {
   private lastClient = 0
   /** Handshake deadlines of sockets that have not sent a valid hello yet */
   private handshakeTimers = new Map<WebSocket, ReturnType<typeof setTimeout>>()
+  /**
+   * The sockets in with one of a `centralu serve` host's full credentials, by that credential's id (#1405 review):
+   * closed once it is no longer listed (`sweepWithdrawn`)
+   */
+  private fullBy = new Map<WebSocket, string>()
+  private sweepTimer: ReturnType<typeof setInterval> | undefined
   /** The sockets in `clients` by their `RpcContext.client`, for a call to one of them (`call`, #550) */
   private byClient = new Map<number, WebSocket>()
   /** This host's calls to a client still waiting for its answer, per socket (#550) */
@@ -297,6 +309,13 @@ export class HostServer {
       maxBufferedBytes,
       replayBudgetBytes: Math.min(opts.replayBudgetBytes ?? TRANSPORT_LIMITS.replayBudgetBytes, maxBufferedBytes),
       closeGraceMs: opts.closeGraceMs ?? TRANSPORT_LIMITS.closeGraceMs,
+    }
+    if (opts.fullCredentials) {
+      // Read only while a socket holds a full credential: an idle host does not touch serve.json
+      this.sweepTimer = setInterval(() => {
+        if (this.fullBy.size > 0) this.sweepWithdrawn(this.opts.fullCredentials?.() ?? [])
+      }, opts.credentialSweepMs ?? 1000)
+      this.sweepTimer.unref?.()
     }
     this.log = new EventLog(2000, this.limits.replayBudgetBytes)
     this.http = createServer(createHttpHandler(opts.http))
@@ -420,6 +439,7 @@ export class HostServer {
   }
 
   private async shutdown(): Promise<void> {
+    clearInterval(this.sweepTimer)
     for (const timer of this.handshakeTimers.values()) clearTimeout(timer)
     this.handshakeTimers.clear()
     const sockets = [...this.wss.clients]
@@ -511,6 +531,20 @@ export class HostServer {
    * answer it is cut after the grace. `ws.close()` alone waits up to 30 s for the answer, with the socket
    * still open and still read, and the slot it holds would stay taken that long.
    */
+  /**
+   * Closes every socket in with a full credential `full` no longer names (#1405 review): a revocation (`serve --revoke`,
+   * a pairing that replaced it, `--rotate-token`, the file moved aside) ends the connections already open with it too.
+   * Before, such a socket kept full rights for as long as it stayed open, while no listing showed the credential. The
+   * peer sees 4001 "credential withdrawn": a hub reads its connection line again and pairs anew
+   */
+  private sweepWithdrawn(full: readonly FullCredential[]): void {
+    for (const [ws, id] of this.fullBy) {
+      if (full.some((c) => c.id === id)) continue
+      this.fullBy.delete(ws)
+      this.refuse(ws, CLOSE_AUTH, 'credential withdrawn')
+    }
+  }
+
   private refuse(ws: WebSocket, code: number, reason: string): void {
     ws.close(code, reason)
     setTimeout(() => ws.terminate(), this.limits.closeGraceMs).unref()
@@ -598,7 +632,11 @@ export class HostServer {
          */
         if (authed) return
         // Full: the token, or for a `centralu serve` host one of the full credentials serve.json names (#1405)
-        const full = this.opts.fullCredentials ? isFullCredential(this.opts.fullCredentials(), frame.data.token) !== null : sameSecret(frame.data.token, this.opts.token)
+        const listed = this.opts.fullCredentials?.()
+        const match = listed ? isFullCredential(listed, frame.data.token) : null
+        const full = listed ? match !== null : sameSecret(frame.data.token, this.opts.token)
+        // Read now anyway: a socket already in with a credential this read no longer names goes (`sweepWithdrawn`)
+        if (listed) this.sweepWithdrawn(listed)
         if (!full) {
           // Every process of this user but the window holds the limited credential (#1405, limited-token.ts)
           limited = isLimitedToken(this.opts.token, frame.data.token)
@@ -638,6 +676,7 @@ export class HostServer {
         }
         this.clients.add(ws)
         this.byClient.set(client, ws)
+        if (match) this.fullBy.set(ws, match.id)
         label = frame.data.client?.trim().slice(0, 60) || null
         if (!limited && frame.data.shows?.includes(SHOWS_HOST_REQUESTS)) {
           this.showing.add(ws)
@@ -719,6 +758,7 @@ export class HostServer {
       clearTimeout(this.handshakeTimers.get(ws))
       this.handshakeTimers.delete(ws)
       this.clients.delete(ws)
+      this.fullBy.delete(ws)
       if (this.showing.delete(ws)) this.opts.onShowing?.(this.showing.size)
       leaving.abort()
       if (this.byClient.get(client) === ws) this.byClient.delete(client)

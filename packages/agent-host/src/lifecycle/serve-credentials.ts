@@ -7,8 +7,9 @@ import { asObj } from '../json-value.js'
  *
  * The file holds a `key`, which the launcher hands this host on stdin and which it derives what it hands out from (the
  * limited credential, a bridge's, a probe's proof), and one entry per full credential, `{ id, label, verifier }`, the
- * verifier being the SHA-256 of the credential as hex. A hub's (`--pair hub:<id>`, at each link) and the person's own
- * window's (`--window`, on Windows) are such entries. The file is read again at each hello, so a pairing or a
+ * verifier being the SHA-256 of the credential as hex. A hub's (`--pair hub:<name>-<key>`, at each link) and the
+ * person's own window's (`--window`, on Windows) are such entries. The file is read again at each hello, and every
+ * second while a socket holds a full credential (closed once its credential is gone, `HostServer`), so a pairing or a
  * revocation applies at once and a running host needs no message for it.
  *
  * What this protects: the full credentials are no longer written down anywhere. A process of this user that reads the
@@ -36,8 +37,8 @@ export function isListedEntry(f: Record<string, unknown>): f is { id: string; la
   )
 }
 
-/** One full credential the host accepts: its id, for the proof (`prove.credential`), and its verifier */
-export type FullCredential = { id: string; verifier: string }
+/** One full credential the host accepts: its id, for the proof (`prove.credential`), who it was made for, and its verifier */
+export type FullCredential = { id: string; label: string; verifier: string }
 
 /** A full credential's verifier: the SHA-256 of it, as hex (the launcher's `verifierOf`) */
 export function verifierOf(credential: string): string {
@@ -46,34 +47,61 @@ export function verifierOf(credential: string): string {
 
 /**
  * The full credentials `serve.json` at `path` names, read now: each entry of the listed shape (`isListedEntry`), and
- * no other. An unreadable file (a writer replacing it on Windows) is
- * tried again a few times; one that stays unreadable, or is not version 2, names none: a hello is then refused rather
- * than let in on a guess. `read` is the caller's (the file as text): this module does not touch the OS (#1599).
+ * no other. An unreadable file (a writer replacing it on Windows) is tried again a few times. Then:
+ *
+ * - a file that is not there (moved aside, as the launcher advises for a bad one; removed) names none, at once and from
+ *   then on (#1405 review): every credential it granted ends, and the sockets in with one are closed
+ *   (`HostServer` `sweepWithdrawn`). Keeping the last list here kept an old full credential open after the person
+ *   moved the file aside;
+ * - one that is there but stays refused (a scanner holding it on Windows) names what it said last, for at most
+ *   `LAST_READ_KEPT_MS` since that read, rather than refusing every hub and closing every link over a busy file; past
+ *   that, none;
+ * - one that reads but is not version 2 names none.
+ *
+ * A hello is then refused rather than let in on a guess. `read` is the caller's (the file as text): this module does
+ * not touch the OS (#1599).
  */
-export function readFullCredentials(path: string, read: (p: string) => string, pause: (ms: number) => void = sleepSync): FullCredential[] {
+export function readFullCredentials(
+  path: string,
+  read: (p: string) => string,
+  pause: (ms: number) => void = sleepSync,
+  now: () => number = Date.now,
+): FullCredential[] {
+  let missing = false
   for (let i = 0; i < 5; i++) {
     if (i > 0) pause(10 * i)
     let parsed: unknown
     try {
       parsed = JSON.parse(read(path))
-    } catch {
+    } catch (e) {
+      missing = asObj(e).code === 'ENOENT'
       continue
     }
     const o = asObj(parsed)
-    if (o.v !== 2 || !Array.isArray(o.full)) return []
+    if (o.v !== 2 || !Array.isArray(o.full)) {
+      lastRead.delete(path)
+      return []
+    }
     const full = o.full.flatMap((e: unknown) => {
       const f = asObj(e)
-      return isListedEntry(f) ? [{ id: f.id, verifier: f.verifier }] : []
+      return isListedEntry(f) ? [{ id: f.id, label: f.label, verifier: f.verifier }] : []
     })
-    lastRead.set(path, full)
+    lastRead.set(path, { full, at: now() })
     return full
   }
-  // Held past the retries (a scanner on Windows): what it said last, rather than refusing every hub until it lets go
-  return lastRead.get(path) ?? []
+  const last = lastRead.get(path)
+  if (missing || !last || now() - last.at > LAST_READ_KEPT_MS) {
+    lastRead.delete(path)
+    return []
+  }
+  return last.full
 }
 
-/** The last list read from each file, for a read that stays refused (`readFullCredentials`) */
-const lastRead = new Map<string, FullCredential[]>()
+/** How long a list read last stands for a file that is there but stays refused (`readFullCredentials`) */
+export const LAST_READ_KEPT_MS = 30_000
+
+/** The last list read from each file and when, for a read that stays refused (`readFullCredentials`) */
+const lastRead = new Map<string, { full: FullCredential[]; at: number }>()
 
 /** Waits `ms` on this thread: the reads are a few milliseconds apart, at a hello, and the host has no other wait here */
 function sleepSync(ms: number): void {

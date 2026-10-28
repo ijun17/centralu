@@ -1,6 +1,6 @@
 /** A `centralu serve` host's full credentials, as serve.json's verifiers (#1405) */
 import { describe, expect, it } from 'vitest'
-import { isFullCredential, readFullCredentials, verifierOf, type FullCredential } from './serve-credentials.js'
+import { isFullCredential, LAST_READ_KEPT_MS, readFullCredentials, verifierOf, type FullCredential } from './serve-credentials.js'
 
 const KEY = 'k'.repeat(43)
 const HUB = 'h'.repeat(43)
@@ -42,6 +42,30 @@ describe('reading the full credentials', () => {
     const good = JSON.stringify({ v: 2, key: KEY, full: [entry('aaaaaaaa', HUB)] })
     expect(readFullCredentials('held', () => good, () => {})).toHaveLength(1)
     expect(readFullCredentials('held', () => { throw new Error('EBUSY') }, () => {}).map((c) => c.id)).toEqual(['aaaaaaaa'])
+  })
+
+  it('names none once the file is gone, though it named some before (#1405 review: moved aside)', () => {
+    const good = JSON.stringify({ v: 2, key: KEY, full: [entry('aaaaaaaa', HUB)] })
+    expect(readFullCredentials('moved', () => good, () => {})).toHaveLength(1)
+    const gone = () => {
+      throw Object.assign(new Error('ENOENT: no such file'), { code: 'ENOENT' })
+    }
+    expect(readFullCredentials('moved', gone, () => {})).toEqual([])
+    // And a refused read after that does not bring the old list back
+    expect(readFullCredentials('moved', () => { throw new Error('EBUSY') }, () => {})).toEqual([])
+  })
+
+  it('keeps the last list for a file that stays refused only for a while, then names none', () => {
+    let t = 1_000
+    const good = JSON.stringify({ v: 2, key: KEY, full: [entry('aaaaaaaa', HUB)] })
+    const busy = () => {
+      throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' })
+    }
+    expect(readFullCredentials('busy', () => good, () => {}, () => t)).toHaveLength(1)
+    t += LAST_READ_KEPT_MS
+    expect(readFullCredentials('busy', busy, () => {}, () => t)).toHaveLength(1)
+    t += 1
+    expect(readFullCredentials('busy', busy, () => {}, () => t)).toEqual([])
   })
 
   it('takes a credential whose hash is one of them, and nothing else', () => {

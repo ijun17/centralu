@@ -358,14 +358,26 @@ const SERVE_WINDOW = 'w'.repeat(43)
 const serveEntry = (id: string, token: string) => ({ id, label: id, verifier: verifierOf(token), created: 1 })
 
 /** A host as `centralu serve` starts one: its key as the token, its full credentials those the file names */
-async function serveHost(full: object[]) {
-  // serve.json as the host reads it at each hello; `write` replaces it as the launcher does
-  let file = ''
+async function serveHost(full: object[], opts: { credentialSweepMs?: number; path?: string } = {}) {
+  // serve.json as the host reads it at each hello; `write` replaces it as the launcher does, `remove` moves it aside
+  let file: string | null = ''
   const write = (entries: object[]) => (file = JSON.stringify({ v: 2, key: SERVE_KEY, port: null, full: entries }))
+  const remove = () => (file = null)
+  const read = () => {
+    if (file === null) throw Object.assign(new Error('ENOENT: no such file'), { code: 'ENOENT' })
+    return file
+  }
   write(full)
-  server = new HostServer({ port: 0, token: SERVE_KEY, fullCredentials: () => readFullCredentials('serve.json', () => file), onRpc: async () => ({ ok: true }) })
+  const path = opts.path ?? 'serve.json'
+  server = new HostServer({
+    port: 0,
+    token: SERVE_KEY,
+    fullCredentials: () => readFullCredentials(path, read, () => {}),
+    ...(opts.credentialSweepMs ? { credentialSweepMs: opts.credentialSweepMs } : {}),
+    onRpc: async () => ({ ok: true }),
+  })
   const port = await server.listen()
-  return { port, write }
+  return { port, write, remove }
 }
 
 /** The frames a socket gets for what it sends first (a prove, a hello), and the code it closed with, if it did */
@@ -423,4 +435,41 @@ describe('a centralu serve host takes as full only the credentials serve.json na
     const unknown = (await serveExchange(port, { kind: 'prove', nonce, credential: 'cccccccc' })).frames[0] as { mac: string }
     expect(unknown.mac).toBe(hostProof(SERVE_KEY, nonce))
   })
+
+  /*
+   * #1405 review, the blocker: `--pair x`, a socket opened with it, `--revoke` within 135 ms. The socket kept full
+   * rights for as long as it stayed open (75 s+ measured), while serve.json, and so every listing, no longer named it
+   */
+  it('closes a socket already in with a credential once it is revoked, and leaves the others', async () => {
+    const { port, write } = await serveHost([serveEntry('aaaaaaaa', SERVE_HUB), serveEntry('bbbbbbbb', SERVE_WINDOW)], { credentialSweepMs: 20, path: 'revoked.json' })
+    const hub = await hello(port, SERVE_HUB)
+    const win = await hello(port, SERVE_WINDOW)
+    const limited = await hello(port, limitedToken(SERVE_KEY))
+    await hub.wait(() => [hub, win, limited].every((c) => c.frames.some((f) => f.kind === 'hello_ok')))
+    write([serveEntry('bbbbbbbb', SERVE_WINDOW)])
+    expect(await hub.closed).toBe(4001)
+    // The window's credential is still listed, and the limited one was never full: both stay in
+    await new Promise((r) => setTimeout(r, 100))
+    expect((await win.call('x')).ok).toBe(true)
+    expect(limited.ws.readyState).toBe(WebSocket.OPEN)
+  })
+
+  it('closes it at the next hello too, before any sweep', async () => {
+    const { port, write } = await serveHost([serveEntry('aaaaaaaa', SERVE_HUB), serveEntry('bbbbbbbb', SERVE_WINDOW)], { credentialSweepMs: 3_600_000, path: 'hello.json' })
+    const hub = await hello(port, SERVE_HUB)
+    await hub.wait(() => hub.frames.some((f) => f.kind === 'hello_ok'))
+    write([serveEntry('bbbbbbbb', SERVE_WINDOW)])
+    expect((await serveHello(port, SERVE_WINDOW)).frames[0]).toMatchObject({ kind: 'hello_ok' })
+    expect(await hub.closed).toBe(4001)
+  })
+
+  it('closes every full socket when serve.json is moved aside (#1405 review)', async () => {
+    const { port, remove } = await serveHost([serveEntry('aaaaaaaa', SERVE_HUB)], { credentialSweepMs: 20, path: 'moved.json' })
+    const hub = await hello(port, SERVE_HUB)
+    await hub.wait(() => hub.frames.some((f) => f.kind === 'hello_ok'))
+    remove()
+    expect(await hub.closed).toBe(4001)
+    expect((await serveHello(port, SERVE_HUB)).closed).toBe(4001)
+  })
 })
+
