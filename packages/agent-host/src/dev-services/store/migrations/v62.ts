@@ -1,6 +1,6 @@
 import { MigrationRange, type MigrationStep } from './context.js'
 
-/** The migration steps v62 and v63. The rule it follows is written above `migrationSteps` in `index.ts` */
+/** The migration steps v62 to v64. The rule it follows is written above `migrationSteps` in `index.ts` */
 export class StepsV62 extends MigrationRange {
   steps(): MigrationStep[] {
     return [
@@ -81,6 +81,28 @@ export class StepsV62 extends MigrationRange {
           if (cols.length > 0 && !cols.some((c) => c.name === 'rebuild_tokens')) {
             this.db.exec(`ALTER TABLE usage_buckets ADD COLUMN rebuild_tokens INTEGER NOT NULL DEFAULT 0`)
           }
+        },
+      },
+      {
+        to: 64,
+        breaksOlderReaders: false,
+        /**
+         * The last good totals of a tool that reports no limits (#1623), `usage_local_totals`: one row per tool with the JSON of
+         * its `UsageSnapshot.totals` and `at`, when they were read (ms). A tool whose command reads a large database takes a
+         * minute to count, so after a restart the usage panel shows these at once, with the time they were read, while a fresh
+         * read goes on. A row is replaced by each newer read. Counts only, no content; local to this computer.
+         *
+         * **Expand only (#292's rule).** A new table that an older host neither reads nor writes. It goes away when the totals
+         * are not needed any more, in a contract step one release after the code stops using it.
+         */
+        run: () => {
+          this.db.exec(`
+            CREATE TABLE IF NOT EXISTS usage_local_totals (
+              tool   TEXT PRIMARY KEY,
+              at     INTEGER NOT NULL,
+              totals TEXT NOT NULL
+            );
+          `)
         },
       },
     ]

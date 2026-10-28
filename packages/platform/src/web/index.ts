@@ -245,8 +245,8 @@ class WebAgentPort implements AgentPort {
   commands(sessionId: string) {
     return this.rpc.call('agents.commands', { sessionId })
   }
-  usage(tool: ToolName, machine?: MachineRef) {
-    return this.rpc.call('agents.usage', { tool, ...on(machine) })
+  usage(tool: ToolName, machine?: MachineRef, opts?: { settle?: boolean }) {
+    return this.rpc.call('agents.usage', { tool, ...(opts?.settle ? { settle: true } : {}), ...on(machine) })
   }
   usageHistory(range: { from: string; to: string; groupBy: 'day' | 'hour'; by: UsageHistoryBy; tool?: ToolName }, machine?: MachineRef) {
     return this.rpc.call('usage.history', { ...range, ...on(machine) })

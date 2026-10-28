@@ -1,5 +1,5 @@
 import type { AdapterCapabilities, ToolDescriptor } from '@cc/protocol'
-import type { AgentSpawnSpec, CreateSessionOpts, DetectResult } from '../contract.js'
+import type { AgentSpawnSpec, CreateSessionOpts, DetectResult, LocalUsage } from '../contract.js'
 import type { AdapterSurface } from '../contract/surface.js'
 import type { RequestPermission, ToolCallFields } from './wire.js'
 
@@ -21,6 +21,12 @@ export type AcpProfile = {
    * its own rights (#1562 review)
    */
   centraluToolOf?(call: ToolCallFields): string | null
+  /**
+   * What the tool says about its usage, from its own command (#1623): its plan, the totals it counted. An ACP tool has no
+   * limits to read, so the adapter never has `listUsage` (the one definition of "reports no limits"); with this it still
+   * says what it can. Absent: it says nothing. The reader keeps its own answer and never waits long (`adapters/usage-read.ts`).
+   */
+  localUsage?(ask?: { settle?: boolean; seed?: LocalUsage }): Promise<LocalUsage>
   /**
    * Its `/compact` compacts though the agent does not advertise the command, and leaves no protocol frame: the core reads
    * Centralu's compact turn instead (`AcpSessionDeps.infersCompaction`). Measured, never assumed: without it a session is

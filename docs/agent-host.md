@@ -3846,6 +3846,7 @@ step against:
 | 3, 6, 9, 16, 19, 34, 36, 41, 42, 44, 46, 49, 50, 51, 52, 57 | add a table (3 also backfills the index: heavy; 44 adds `project_consents`, the "always" one project was given to reach another, #371; 46 adds `linked_machines` and `machine_headers`, the hub's links and what it last heard from each, and the nullable `grid_layout.remote_session_id`, #82; 42 copies the grid's session rows into `grid_layout` once and leaves `grid_panels` as it was, #288; 49 adds `report_marks`, the report a session owes the session that gave it work, #646; 50 adds `agent_start_requests`, a start_agent card still waiting for the person, #673; 51 adds `delegated_turns`, the session that gave a running turn, #676; 52 adds `queued_requests`, a request held for a busy session, and the nullable `sessions.forked_from_session_id`, #677; 57 adds `app_run_records`, `app_run_messages` and `app_run_subagent_messages`, the record of a deleted app-agent session, and the nullable `app_runs.request`, `answer` and `output`, #378) | reads it (42: an older host keeps its grid in `grid_panels`, so the two builds' grids can differ; 46: an older host's `setGridView` drops a linked machine's session panel when it rewrites the layout) |
 | 60 | add a column and a table (#550): `linked_machines.asks`, the per-machine switch for a linked machine's sessions to ask this computer's projects, off by default, and `machine_ask_consents`, the pairs (a session of that machine, a project here) the person approved, each end a foreign key with CASCADE | reads it (an older host's insert leaves the switch off, it never reads the table, and its removal of a machine takes the machine's pairs with it) |
 | 62 | add two tables (#1452): `usage_readings` (the limit windows' readings) and `usage_buckets` (the requests of each hour per session, project, tool and model), §6.2 | reads it (an older host neither reads nor writes the two tables, so it records nothing while it serves a swap, and its purge leaves a purged session's `usage_buckets` rows, which hold counts only) |
+| 64 | add `usage_local_totals` (#1623): the last good totals of a tool that reports no limits, with when they were read, so a restart shows them at once, §6 | reads it (an older host neither reads nor writes the table) |
 | 10, 11, 40 | rebuild with the same shape (10: `sessions` with `project_id` nullable; 11 and 40: the index, then `VACUUM`: heavy) | reads it |
 | 21, 26, 29, 35, 48, 55 | rewrite data one way (21 rewrites every message: heavy; 48 gives a former worktree manager's worktree sessions `askedBy`, #561; 55 clears an `askedBy` that names a session of another project, the ask_project meaning from before #614, which the host start did until #844) | reads it, cannot be undone (55: a build of beta.20 or before still writes the old meaning, and a row it writes after the step keeps it, as that build showed it) |
 | **13, 28, 32, 56** | **drop a table or a column** (56: `usage_facts`, which nothing ever wrote, #423) | **breaks: raises `min_reader_version`** (56: an older host recreates the table empty, which harms nothing) |
@@ -3876,6 +3877,54 @@ there in the same pull request.
 → the adapter's optional `listUsage()`, which calls the tool's own API (the Claude SDK for one,
 `app-server` for the other). An adapter that cannot answer throws, and the manager degrades
 with the reason attached rather than showing a confident wrong number.
+
+**A tool that cannot report limits (#1616).** A tool whose adapter has no `listUsage()` at all is answered
+`supported: false, notReported: true` with a plain reason ("<tool> does not report usage limits"). The mark is positive on
+purpose: a read that failed (not logged in, a timeout) is also `supported: false`, and so is every answer of a host that
+predates the mark, so only the mark tells "never" from "not now"; without it the window draws the dashed, unknown ring. The
+window keeps the last answer through a call that fails (a host swap, a busy tool) and only learns why the ask failed.
+
+**What a tool with no limits still says (#1623).** "Reports no limits" has one definition: the adapter has no `listUsage()`
+(`usageFor` derives `notReported` from that and nowhere else). Cursor and OpenCode have no usage API, but their adapters have
+an optional `localUsage()`, read from the tool's own command and never its credential or state files: Cursor's plan from
+`agent about --format json` (`subscriptionTier`; the account's email in that output is never read out), OpenCode's local totals
+from `opencode stats` (boxed tables read by their labels: sessions, messages, tokens, cost; no JSON form). `usageFor` answers
+`supported: false, notReported: true` with a plain reason ("<tool> does not report usage limits") and a `usage` that carries
+`plan` and `totals { scope, asOf, rows }` (additive); the donut is the dimmed one (design-system.md §10). A failed read also answers
+`supported: false` but without `notReported`, which stays the unknown it is.
+- *Logged out.* `agent about` prints `subscriptionTier: null` with exit 0 for an account that is not logged in; the answer is then
+  the failed read every tool gives ("Cursor is not logged in on this computer", no `notReported`), and is kept ten seconds only,
+  so a login a moment ago is seen.
+- *Counts.* OpenCode writes the sessions and messages counts with `toLocaleString()` in the computer's language (Windows' regional
+  setting; `LANG` is ignored): `1,204`, `1.204`, `1 204` (no-break or narrow no-break space), `1'204`, `12,04,567`. A count is a
+  whole number, so only digit groups of exactly three behind one separator used throughout (or two and then three for the Indian
+  grouping) are read; anything else is a row with a null value, shown as a dash and never as a number that may be wrong. Tokens and
+  cost are `toFixed` with a suffix, not localized. The panel writes the two counts exactly, with the thousands separators of the
+  person's language (`1,204`), and the token rows abbreviated (owner, 2026-10-27).
+- *Cost of a read.* Each read is a process run, so the adapter's reader keeps it (`adapters/usage-read.ts`: Cursor's plan five
+  minutes; OpenCode's totals a minute, or ten times as long as the last run took, so a run of twelve seconds is not started each
+  minute), shares one run between askers, returns the last good answer at once while it reads again behind it (also for as long as
+  a slow run takes), and does not run a failed command again for a minute. The totals carry `asOf`, the time the read ended, so a
+  stale answer says how old it is (the panel writes "As of 3:42 PM", with the date for an earlier day). The readers keep the answer
+  in memory; the host also keeps the last good totals in its store (`usage_local_totals`, v64: one row per tool, replaced by each
+  newer read, counts only), writes them when a read ends, and hands them to the reader once after a restart (`localUsage({ seed })`).
+  The reader stands on them as on a stale answer, so the panel shows them at once with their `asOf` while a fresh read goes on; a
+  restart no longer needs a first slow run to show anything. Cursor's plan is not kept (a few seconds to read; it can change).
+  An answer that is returned stale (after a restart, or past its freshness) is marked `provisional`: it stands in for the read going
+  on behind it, so the open panel asks once more with `settle` and receives the new totals and their `asOf` when the read lands, in place
+  and without polling (a `settle` waits twenty seconds at most; past that the stale answer stands and the next open finds the new one).
+- *A slow command.* With no answer yet the asker waits three seconds, then gets an answer marked `provisional` (nothing known yet, or the last answer while it is read again)
+  while the run goes on; a provisional answer is never kept. The open panel then asks once more with `settle: true`, which waits for
+  the run in flight (twenty seconds at most) and answers what it read, so the plan or totals arrive on the
+  panel without polling. `opencode stats` reads every session it has: measured on Windows with a temporary data
+  folder filled with synthetic sessions (opencode 1.19.4, about 3 s for an empty database, 3.4 s for 200 sessions and 10,000
+  messages, 4.4 s for 1,000 and 50,000 (190 MB), 11.3 s for 5,000 and 250,000 (1 GB)), roughly 1.7 s more per thousand sessions,
+  so a database of some seven thousand sessions or more passes 15 s. The run is therefore not ended at 15 s: it has a ceiling of
+  five minutes, the asker never waits for it (a `settle` waits twenty seconds at most and then answers provisionally again, the run
+  going on), and a run that ends later is kept for the next ask. A run that reaches the ceiling is a failure, not started again for
+  a minute.
+- Measured on Windows (agent 2026.10.22, opencode 1.19.4): `agent about` 1.6 to 2.3 s, `opencode stats` 0.8 to 1.3 s; the recorded
+  outputs (email replaced) are the parsers' test input.
 
 Usage is an **account** property, not a session or directory one, which is why `listUsage()`
 takes no arguments — the answer is the same whichever folder you ask from. Only subscription

@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3'
-import type { ToolName } from '@cc/protocol'
+import { UsageSnapshot, type ToolName } from '@cc/protocol'
+import { isFromTheFuture } from '../../usage-clock.js'
 
 /** One window of a limit reading, as `agents.usage` names it */
 export type StoredWindow = { id: string; scope: string | null; label: string; percent: number; resetsAt: number | null }
@@ -89,6 +90,32 @@ export class UsageRecords {
       }
     })()
     return written
+  }
+
+  /**
+   * Keeps the totals a tool that reports no limits last read (`usage_local_totals`, v64), replacing the ones before: a restart
+   * then shows them at once with `totals.asOf`, while a fresh read goes on. An older read than the one kept is not stored.
+   */
+  saveLocalTotals(tool: ToolName, totals: NonNullable<UsageSnapshot['totals']>, now: number = Date.now()): void {
+    if (totals.asOf === undefined) return
+    const kept = this.db.prepare<unknown[], { at: number }>(`SELECT at FROM usage_local_totals WHERE tool = ?`).get(tool)
+    // A kept row dated in the future (the clock moved back) never blocks a read dated now
+    if (kept && kept.at > totals.asOf && !isFromTheFuture(kept.at, now)) return
+    this.db
+      .prepare(`INSERT INTO usage_local_totals (tool, at, totals) VALUES (?, ?, ?) ON CONFLICT(tool) DO UPDATE SET at = excluded.at, totals = excluded.totals`)
+      .run(tool, totals.asOf, JSON.stringify(totals))
+  }
+
+  /** The totals `saveLocalTotals` kept for a tool, or null: none, or not in the form this build reads (never a guess) */
+  localTotals(tool: ToolName): NonNullable<UsageSnapshot['totals']> | null {
+    const row = this.db.prepare<unknown[], { at: number; totals: string }>(`SELECT at, totals FROM usage_local_totals WHERE tool = ?`).get(tool)
+    if (!row) return null
+    try {
+      const parsed = UsageSnapshot.shape.totals.safeParse(JSON.parse(row.totals))
+      return parsed.success && parsed.data && parsed.data.asOf === row.at ? parsed.data : null
+    } catch {
+      return null
+    }
   }
 
   /**

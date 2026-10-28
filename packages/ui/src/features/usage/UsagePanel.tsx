@@ -6,9 +6,9 @@ import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { Tooltip } from '../../components/primitives.jsx'
 import { SkeletonLines } from '../../components/Skeleton.jsx'
 import { useStore } from '../../store/store.js'
-import { useToolMeta } from '../../store/selectors.js'
+import { useMachineName, useToolMeta } from '../../store/selectors.js'
 import { CacheSection } from './CacheSection.jsx'
-import { formatCount, formatDuration } from '../../app/format.js'
+import { formatCount, formatDuration, formatReadAt } from '../../app/format.js'
 import { HistorySection } from './HistorySection.jsx'
 import { SAME_ACCOUNT_LABEL } from './sameAccount.js'
 import { useLoad } from '../../app/useLoad.js'
@@ -37,9 +37,23 @@ export function UsagePanel({ tool, machine = null }: { tool: ToolName; /** A lin
   }
 
   const read = useLoad(() => platform.agents.usage(tool, machine ?? undefined), [platform, tool, machine])
-  const r = read.data
-  const state: { usage: UsageSnapshot | null; reason?: string; cache?: CacheStats; sameAccount?: boolean } = r
-    ? { usage: r.usage, reason: r.supported ? undefined : r.reason, cache: r.cache, sameAccount: r.sameAccountAsHub }
+  /*
+   * A tool whose own command is slower than the host waits answers `provisional` (#1623). The panel asks once more, to
+   * settle: that one call returns when the command ends, so the plan or the totals arrive on the open panel, and nothing
+   * polls. It is asked once and never again (an answer that is still provisional stands), so a host that ignores it cannot
+   * make a loop.
+   */
+  const provisional = read.data?.provisional === true
+  const settled = useLoad(() => (provisional ? platform.agents.usage(tool, machine ?? undefined, { settle: true }) : null), [platform, tool, machine, provisional])
+  const r = settled.data ?? read.data
+  const state: { usage: UsageSnapshot | null; reason?: string; cache?: CacheStats; sameAccount?: boolean; notReported?: boolean } = r
+    ? {
+        usage: r.usage,
+        reason: r.supported ? undefined : r.reason,
+        cache: r.cache,
+        sameAccount: r.sameAccountAsHub,
+        notReported: !r.supported && r.notReported === true,
+      }
     : { usage: null, reason: read.error ?? undefined }
 
   if (r === undefined && read.error === null) {
@@ -55,6 +69,21 @@ export function UsagePanel({ tool, machine = null }: { tool: ToolName; /** A lin
 
   // What the host stored over the last days (§6.2): independent of the limits too, and absent from a host that predates it
   const history = <HistorySection tool={tool} machine={machine} canOpen={(id) => id in useStore.getState().sessions} onOpen={openSession} />
+
+  /*
+   * A tool with no limits to report (#1623, owner 2026-10-26) is not "unavailable": nothing is wrong and nothing is to be
+   * done, and the panel says so in plain words. What the tool does say stands under it: its plan, and what it counted on this
+   * computer, labelled as totals and not a limit. A failed read (no `notReported`) is still the reason as it is.
+   */
+  if (state.notReported) {
+    return (
+      <>
+        <NotReported label={meta.label} usage={state.usage} machine={machine} />
+        {cache && <div className="px-4 pb-4 [&>section]:mt-0">{cache}</div>}
+        <div className="px-4 pb-4 [&>section:first-child]:mt-0">{history}</div>
+      </>
+    )
+  }
 
   // Failing to read it and there being none are different — the reason is shown as is
   if (!state.usage || state.usage.windows.length === 0) {
@@ -96,6 +125,65 @@ export function UsagePanel({ tool, machine = null }: { tool: ToolName; /** A lin
       {daily.length > 0 && <DailyTokens daily={daily} />}
       {cache}
       {history}
+    </div>
+  )
+}
+
+/** The words of the panel for a tool that reports no limits (#1623): the exact copy the owner confirms */
+export const NOT_REPORTED_COPY = {
+  title: (tool: string) => `${tool} does not report usage limits.`,
+  plan: (plan: string) => `${plan} plan`,
+  totalsTitle: (scope: string) => `Local totals · ${scope}`,
+  totalsNote: (tool: string, where: string) => `Counted by ${tool} on ${where}. These are totals, not a limit.`,
+  totalsAsOf: (at: number, now: number) => `As of ${formatReadAt(at, now)}`,
+}
+
+/**
+ * How a total is written: tokens as the daily tokens are (abbreviated), dollars with their cents, and the whole-number counts
+ * (sessions, messages) exactly, with the thousands separators of the person's language
+ */
+function totalText(value: number | null, unit: 'count' | 'tokens' | 'usd'): string {
+  // The tool printed it in a form that could not be read: a dash, never a number that may be wrong
+  if (value === null) return '—'
+  return unit === 'usd' ? `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : unit === 'count' ? value.toLocaleString() : formatCount(value)
+}
+
+function NotReported({ label, usage, machine }: { label: string; usage: UsageSnapshot | null; machine: string | null }) {
+  const totals = usage?.totals
+  // The totals are what that machine counted: the words say where, as the dropdown's header does
+  const machineName = useMachineName(machine)
+  return (
+    <div className="px-4 py-6" data-testid="usage-not-reported">
+      {/* Each part fades in as it arrives: the plan or the totals may come after the words, when the command was slow. The totals are keyed by the read, so new ones landing on the open panel (a settle) fade in as a whole, rows and time together, and do not jump */}
+      <p className="cc-row-in text-center text-sm leading-body text-ink-muted" data-testid="usage-not-reported-text">
+        {NOT_REPORTED_COPY.title(label)}
+      </p>
+      {usage?.plan && (
+        <p className="cc-row-in mt-4 text-center text-xs text-ink" data-testid="usage-plan">
+          {NOT_REPORTED_COPY.plan(usage.plan)}
+        </p>
+      )}
+      {totals && totals.rows.length > 0 && (
+        <section key={totals.asOf ?? 'unread'} className="cc-row-in mt-5 border-t border-line pt-3" data-testid="usage-totals">
+          <span className="text-xs uppercase text-ink-faint">{NOT_REPORTED_COPY.totalsTitle(totals.scope)}</span>
+          <ul className="mt-2 space-y-1">
+            {totals.rows.map((row) => (
+              <li key={row.id} className="flex items-baseline gap-2" data-testid={`usage-total-${row.id}`}>
+                <span className="text-xs text-ink-muted">{row.label}</span>
+                <span className="readout ml-auto text-xs text-ink" data-unread={row.value === null ? '' : undefined}>
+                  {totalText(row.value, row.unit)}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-2xs text-ink-faint">{NOT_REPORTED_COPY.totalsNote(label, machineName ?? 'this computer')}</p>
+          {totals.asOf !== undefined && (
+            <p className="mt-1 text-2xs text-ink-faint" data-testid="usage-totals-as-of">
+              {NOT_REPORTED_COPY.totalsAsOf(totals.asOf, Date.now())}
+            </p>
+          )}
+        </section>
+      )}
     </div>
   )
 }

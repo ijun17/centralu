@@ -85,3 +85,15 @@ export function dayKey(at: number): string {
   const d = new Date(at)
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
 }
+
+/**
+ * When something was read, short, in local time and English like the clock under a message: "3:42 PM" for today, "Oct 25,
+ * 3:42 PM" for an earlier day this year, "Dec 30, 2025, 3:42 PM" for an earlier year. `now` is the moment it is read against.
+ */
+export function formatReadAt(at: number, now: number): string {
+  const time = formatSaidAt(at)
+  if (dayKey(at) === dayKey(now)) return time
+  const sameYear = new Date(at).getFullYear() === new Date(now).getFullYear()
+  const day = new Date(at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', ...(sameYear ? {} : { year: 'numeric' }) })
+  return `${day}, ${time}`
+}

@@ -7,13 +7,47 @@ import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore, usageTools } from '../../store/store.js'
 import { useMachineName, useToolMeta } from '../../store/selectors.js'
 import { Tooltip } from '../../components/primitives.jsx'
-import { UsagePanel } from './UsagePanel.jsx'
+import { NOT_REPORTED_COPY, UsagePanel } from './UsagePanel.jsx'
 import { SAME_ACCOUNT_LABEL } from './sameAccount.js'
 import { usageTone, weeklyWindow } from './weekly.js'
 import { setupStates, signedOutTools, withLiveSetups } from '../tools/setupLine.js'
 import { ToolSetupLine } from '../tools/ToolSetupLine.jsx'
 
-type Snap = { usage: UsageSnapshot | null; reason?: string; cache?: CacheStats; sameAccount?: boolean }
+/**
+ * What `agents.usage` answered for one tool. `unsupported` is the host's own `supported: false` (the tool cannot report
+ * limits at all, #1616: `supported: false` with the host's `notReported` mark), never inferred from the tool's name. It
+ * is unset for a failed read and for an older host that sends no mark: those are *unknown for now*, not *never*.
+ */
+type Snap = {
+  usage: UsageSnapshot | null
+  reason?: string
+  cache?: CacheStats
+  sameAccount?: boolean
+  unsupported?: boolean
+}
+
+/**
+ * One `agents.usage` answer as a snap: the same reading wherever it comes from (first ask, retry). The host also answers
+ * `supported: false` for a read that failed, and a host that predates the mark answers both alike: only `notReported`
+ * (the tool has no way to report limits) is the dimmed ring, so everything else stays unknown for now.
+ */
+function toSnap(r: {
+  supported?: boolean
+  reason?: string
+  notReported?: boolean
+  usage: UsageSnapshot | null
+  cache?: CacheStats
+  sameAccountAsHub?: boolean
+}): Snap {
+  const unsupported = r.supported === false && r.notReported === true
+  return {
+    usage: r.usage,
+    reason: r.supported ? undefined : r.reason,
+    cache: r.cache,
+    sameAccount: r.sameAccountAsHub,
+    unsupported: unsupported || undefined,
+  }
+}
 
 /**
  * What one machine said about its limits. `live` is null until it has answered which tools are usable there; `snap`
@@ -153,31 +187,38 @@ export function UsageDonuts() {
           patch({ live: usable, signedOut, tools: found, order: found.filter((t) => usable.includes(t.name) || signedOut.includes(t.name)).map((t) => t.name) })
           for (const tool of usable) {
             const put = (snap: Snap) => patch((g) => ({ snap: { ...g.snap, [tool]: snap } }))
+            /*
+             * A call that failed is not an answer (#850; RV1624): the donut keeps what it last knew (known, or the tool
+             * has no limits) and only learns why the last ask failed. Over a host swap it would otherwise flash to
+             * dashed and back; over a link that stays up, stay dashed until the retry.
+             */
+            const failed = (reason: string) =>
+              patch((g) => ({ snap: { ...g.snap, [tool]: { ...(g.snap[tool] ?? { usage: null }), reason } } }))
+            /*
+             * A tool whose own command was slower than the host waits answered provisionally (#1623): asked once more,
+             * to settle, the donut gets the answer when the command ends, not at the next tick. Once per answer, never in a
+             * loop: the settled answer is final. The retry after a failed call takes the same path.
+             */
+            const take = (r: Parameters<typeof toSnap>[0] & { provisional?: boolean }) => {
+              put(toSnap(r))
+              if (r.provisional) {
+                void platform.agents
+                  .usage(tool, on, { settle: true })
+                  .then((s) => put(toSnap(s)))
+                  .catch(() => {})
+              }
+            }
             void platform.agents
               .usage(tool, on)
-              .then((r) =>
-                put({
-                  usage: r.usage,
-                  reason: r.supported ? undefined : r.reason,
-                  cache: r.cache,
-                  sameAccount: r.sameAccountAsHub,
-                }),
-              )
+              .then(take)
               .catch((e: Error) => {
-                put({ usage: null, reason: e.message })
+                failed(e.message)
                 // A reading that failed (the tool's process busy or restarting) is tried again soon, not in five minutes
                 retries.current.push(
                   setTimeout(() => {
                     void platform.agents
                       .usage(tool, on)
-                      .then((r) =>
-                        put({
-                          usage: r.usage,
-                          reason: r.supported ? undefined : r.reason,
-                          cache: r.cache,
-                          sameAccount: r.sameAccountAsHub,
-                        }),
-                      )
+                      .then(take)
                       .catch(() => {})
                   }, RETRY_MS),
                 )
@@ -386,7 +427,7 @@ export function UsageDonuts() {
               {(groups[drop.machine ?? HERE] ?? EMPTY).signedOut.includes(drop.tool) ? (
                 <SignedOutPanel tool={drop.tool} machine={drop.machine} group={groups[drop.machine ?? HERE] ?? EMPTY} redetect={() => loadOne(drop.machine)} />
               ) : (
-                <UsagePanel tool={drop.tool} machine={drop.machine} />
+                <UsagePanel key={`${drop.machine ?? ''}:${drop.tool}`} tool={drop.tool} machine={drop.machine} />
               )}
             </div>
           </div>
@@ -425,7 +466,7 @@ function MachineGroup({
   if (!info || info.status !== 'connected' || (!group.order.length && !donuts.length)) return null
   return (
     <span
-      className="ml-1.5 flex items-center gap-0.5 rounded-full border border-line py-0.5 pl-2 pr-0.5"
+      className="cc-capsule-in ml-1.5 flex items-center gap-0.5 rounded-full border border-line py-0.5 pl-2 pr-0.5"
       data-testid={`usage-machine-${machineId}`}
       data-status={info.status}
     >
@@ -460,12 +501,19 @@ function MachineGroup({
   )
 }
 
+/** The short change between a ring's states: its opacity, its fill and its colour, in the time of the bar's other small moves */
+const RING_FADE =
+  'transition-[opacity,color,stroke-dasharray] duration-150 ease-out motion-reduce:transition-opacity'
+
 /**
  * A single donut — the ring is weekly usage, the center is the tool's single letter.
  *
  * When the number is unknown, **it does not draw a full gray ring**: that reads as "0% used."
  * A dashed ring means unknown, and the expandable detail answers why it is unknown (claude needs
  * a live session to be asked about a limit at all — the usual reason for "unknown").
+ *
+ * A tool that does not report limits at all (the host's `supported: false`, #1616) is not "unknown for now": nothing
+ * the person does would change it, so its ring is solid and dimmed with no fill, and its letter keeps the full ink.
  */
 function Donut({
   tool,
@@ -496,6 +544,15 @@ function Donut({
   const label = machineName ? `${meta.label} on ${machineName}` : meta.label
   const w = !signedOut && snap?.usage ? weeklyWindow(snap.usage.windows) : null
   const known = w !== null
+  /*
+   * Three looks for what the ring can say (#1616). Known: the fill on its track. Unknown for now: a dashed ring and a
+   * faint letter, a state the person may change (a session to run, a machine to connect). Unsupported: the tool never
+   * reports limits, so there is nothing to act on: a plain, solid, dimmed ring with no fill, the letter at full ink.
+   */
+  const unsupported = !known && !signedOut && snap?.unsupported === true
+  const state = known ? 'known' : unsupported ? 'unsupported' : 'unknown'
+  // What is drawn: signed out is its own solid look (below), so it is neither the dashed unknown nor the dimmed unsupported
+  const look = signedOut ? 'signedOut' : state
   const percent = w?.percent ?? 0
   const R = 9
   const C = 2 * Math.PI * R
@@ -511,22 +568,25 @@ function Donut({
       content={
         <span className="block">
           <span className="block text-ink">{label}</span>
-          <span className="readout mt-1 block">
-            {signedOut
-              ? 'Not signed in'
-              : known
-                ? `${w.label}${w.scope ? ` · ${w.scope}` : ''} — ${percent}% used`
-                : 'Weekly usage unknown'}
-          </span>
+          {/* A tool with no limits says so once, in the line below: a second "unknown" or "none" line would repeat it */}
+          {(signedOut || !unsupported) && (
+            <span className="readout mt-1 block">
+              {signedOut
+                ? 'Not signed in'
+                : known
+                  ? `${w.label}${w.scope ? ` · ${w.scope}` : ''} — ${percent}% used`
+                  : 'Weekly usage unknown'}
+            </span>
+          )}
           {/* Why the numbers equal this computer's, or why there are none: said in the donut's words, never a blank (#726) */}
           {!signedOut && known && snap?.sameAccount && (
             <span className="readout block text-ink-faint" data-testid={`usage-donut-same-${id}`}>
               {SAME_ACCOUNT_LABEL}
             </span>
           )}
-          {!signedOut && !known && snap?.reason && (
-            <span className="readout block text-ink-faint" data-testid={`usage-donut-reason-${id}`}>
-              {snap.reason}
+          {!signedOut && !known && (unsupported || snap?.reason) && (
+            <span className={`readout ${unsupported ? 'mt-1' : ''} block text-ink-faint`} data-testid={`usage-donut-reason-${id}`}>
+              {unsupported ? NOT_REPORTED_COPY.title(meta.label) : snap.reason}
             </span>
           )}
           {/*
@@ -544,12 +604,13 @@ function Donut({
       <button
         type="button"
         onClick={onClick}
-        aria-label={signedOut ? `${label} not signed in` : `${label} weekly usage${known ? ` ${percent}%` : ' unknown'}`}
+        aria-label={signedOut ? `${label} not signed in` : `${label} ${unsupported ? 'reports no usage limits' : `weekly usage${known ? ` ${percent}%` : ' unknown'}`}`}
         data-testid={`usage-donut-${id}`}
         data-signed-out={signedOut || undefined}
         data-leaving={leaving || undefined}
         tabIndex={leaving ? -1 : undefined}
         data-percent={known ? percent : ''}
+        data-state={signedOut ? 'signed-out' : state}
         /*
          * Even while open, **another donut has to be clickable right away** — if the outside
          * click shield covered the donuts too, switching tools would take two clicks. So this
@@ -571,31 +632,57 @@ function Donut({
         } ${leaving ? 'cc-donut-out pointer-events-none' : entering ? 'cc-donut-in' : ''}`}
       >
         <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden>
+          {/*
+            The rings stand on top of each other and change by opacity (#1616, the owner's motion rule): a state change is
+            a short fade, never a jump, and with reduced motion it is the fade alone. The dashed one is the unknown; the
+            solid one is the track of a read ring; the thin dim one is the unsupported ring (a read ring's track alone is nearly
+            invisible in the light theme, and an empty track would also read as 0% used).
+          */}
           <circle
+            data-ring="dashed"
             cx="12"
             cy="12"
             r={R}
             fill="none"
             stroke="currentColor"
             strokeWidth="2.5"
-            className={`${ring} transition-colors duration-150`}
-            {...(known || signedOut ? {} : { strokeDasharray: '2 3' })}
+            strokeDasharray="2 3"
+            className={`text-line ${RING_FADE} ${look === 'unknown' ? 'opacity-100' : 'opacity-0'}`}
           />
-          {known && (
-            <circle
-              cx="12"
-              cy="12"
-              r={R}
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeDasharray={`${filled} ${C - filled}`}
-              // Has to start at 12 o'clock to match the direction people read in (same rule as the larger donut in the detail view)
-              transform="rotate(-90 12 12)"
-              className={tone}
-            />
-          )}
+          <circle
+            data-ring="solid"
+            cx="12"
+            cy="12"
+            r={R}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            className={`${ring} ${RING_FADE} ${look === 'known' || look === 'signedOut' ? 'opacity-100' : 'opacity-0'}`}
+          />
+          <circle
+            data-ring="dim"
+            cx="12"
+            cy="12"
+            r={R}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            className={`text-ink-faint ${RING_FADE} ${look === 'unsupported' ? 'opacity-50' : 'opacity-0'}`}
+          />
+          <circle
+            data-ring="fill"
+            cx="12"
+            cy="12"
+            r={R}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            // Has to start at 12 o'clock to match the direction people read in (same rule as the larger donut in the detail view)
+            transform="rotate(-90 12 12)"
+            style={{ strokeDasharray: `${filled} ${C - filled}` }}
+            className={`${tone} ${RING_FADE} ${known ? 'opacity-100' : 'opacity-0'}`}
+          />
           {/*
             The center letter is the **same mark** as the sidebar session chip. This single
             letter is why, with two donuts standing side by side, which is which reads without
@@ -607,7 +694,7 @@ function Donut({
             y="11"
             textAnchor="middle"
             dominantBaseline="central"
-            className={`fill-current font-sans font-semibold transition-colors duration-150 ${signedOut ? 'text-ink-signal' : known ? 'text-ink' : 'text-ink-faint'}`}
+            className={`fill-current font-sans font-semibold transition-colors duration-150 ease-out motion-reduce:transition-none ${signedOut ? 'text-ink-signal' : look === 'unknown' ? 'text-ink-faint' : 'text-ink'}`}
             style={{ fontSize: 'var(--text-2xs)' }}
           >
             {meta.mark}

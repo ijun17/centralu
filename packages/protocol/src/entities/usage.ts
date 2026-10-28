@@ -255,5 +255,31 @@ export const UsageSnapshot = z.object({
   windows: z.array(UsageWindow).default([]),
   /** Daily tokens. A tool that cannot report this leaves it empty — the UI collapses that row on its own */
   daily: z.array(z.object({ date: z.string(), tokens: z.number() })).default([]),
+  /**
+   * What the tool counted locally, as a total and not a limit (#1623): a tool with no limits to read (`agents.usage`
+   * answers it `notReported`) may still say how much was used on this computer. Absent when it says nothing, and from a
+   * host that predates it.
+   */
+  totals: z
+    .object({
+      /** What the totals cover, in the words the person reads under their title ("all time") */
+      scope: z.string(),
+      /**
+       * When the host read them, in ms since the epoch. A large database is read slowly, so the host keeps the last totals and
+       * the screen says how old they are. Absent from a host that predates it
+       */
+      asOf: z.number().optional(),
+      rows: z.array(
+        z.object({
+          id: z.string(),
+          label: z.string(),
+          /** Null: the tool printed it in a form the host could not read. The screen shows it as unread, never as a number */
+          value: z.number().nullable(),
+          /** How the screen writes the value: a count, a number of tokens, or dollars */
+          unit: z.enum(['count', 'tokens', 'usd']),
+        }),
+      ),
+    })
+    .optional(),
 })
 export type UsageSnapshot = z.infer<typeof UsageSnapshot>

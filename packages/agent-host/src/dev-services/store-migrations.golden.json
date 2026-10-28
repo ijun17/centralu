@@ -252,12 +252,16 @@
   {
    "to": 63,
    "breaksOlderReaders": false
+  },
+  {
+   "to": 64,
+   "breaksOlderReaders": false
   }
  ],
- "version": 63,
- "ran": 62,
+ "version": 64,
+ "ran": 63,
  "store": {
-  "userVersion": 63,
+  "userVersion": 64,
   "master": [
    {
     "type": "index",
@@ -531,6 +535,12 @@
    },
    {
     "type": "index",
+    "name": "sqlite_autoindex_usage_local_totals_1",
+    "tbl_name": "usage_local_totals",
+    "sql": null
+   },
+   {
+    "type": "index",
     "name": "sqlite_autoindex_usage_readings_1",
     "tbl_name": "usage_readings",
     "sql": null
@@ -768,6 +778,12 @@
     "name": "usage_buckets",
     "tbl_name": "usage_buckets",
     "sql": "CREATE TABLE usage_buckets (\n              hour           INTEGER NOT NULL,\n              session_id     TEXT NOT NULL,\n              project_id     TEXT NOT NULL DEFAULT '',\n              tool           TEXT NOT NULL,\n              model          TEXT NOT NULL DEFAULT '',\n              machine        TEXT NOT NULL DEFAULT '',\n              requests       INTEGER NOT NULL DEFAULT 0,\n              input          INTEGER NOT NULL DEFAULT 0,\n              cache_read     INTEGER NOT NULL DEFAULT 0,\n              cache_write    INTEGER NOT NULL DEFAULT 0,\n              cache_write_5m INTEGER NOT NULL DEFAULT 0,\n              cache_write_1h INTEGER NOT NULL DEFAULT 0,\n              output         INTEGER NOT NULL DEFAULT 0,\n              rebuilds       INTEGER NOT NULL DEFAULT 0,\n              causes         TEXT NOT NULL DEFAULT '{}', rebuild_tokens INTEGER NOT NULL DEFAULT 0,\n              PRIMARY KEY (hour, session_id, project_id, tool, model, machine)\n            )"
+   },
+   {
+    "type": "table",
+    "name": "usage_local_totals",
+    "tbl_name": "usage_local_totals",
+    "sql": "CREATE TABLE usage_local_totals (\n              tool   TEXT PRIMARY KEY,\n              at     INTEGER NOT NULL,\n              totals TEXT NOT NULL\n            )"
    },
    {
     "type": "table",
@@ -1095,6 +1111,7 @@
     }
    ],
    "usage_buckets": [],
+   "usage_local_totals": [],
    "usage_readings": [],
    "workspace": []
   },
@@ -1779,6 +1796,14 @@
      "rebuilds INTEGER notnull=1 default=0 pk=0",
      "causes TEXT notnull=1 default='{}' pk=0",
      "rebuild_tokens INTEGER notnull=1 default=0 pk=0"
+    ],
+    "rows": []
+   },
+   "usage_local_totals": {
+    "columns": [
+     "tool TEXT notnull=0 default=null pk=1",
+     "at INTEGER notnull=1 default=null pk=0",
+     "totals TEXT notnull=1 default=null pk=0"
     ],
     "rows": []
    },

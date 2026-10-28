@@ -453,6 +453,16 @@ export interface SessionHandle {
 /** Whose price ratios between uncached input, a cache read and a cache write the tool's model is billed by (`sessions/cache-cost.ts`, #1492) */
 export type CacheBilling = 'anthropic' | 'openai'
 
+/** What a tool with no limits says about its usage (`AgentAdapter.localUsage`) */
+export type LocalUsage = {
+  plan: string | null
+  totals?: NonNullable<UsageSnapshot['totals']>
+  /** The command ran and says nobody is logged in: the host answers as it does for any tool that is not logged in */
+  loggedOut?: boolean
+  /** Stands in for what the command has not finished reading: nothing yet, or the last answer while it is read again */
+  provisional?: boolean
+}
+
 export interface AgentAdapter {
   readonly tool: ToolName
   /** Absent: Anthropic's, the ratios the cache figures were first drawn with */
@@ -557,6 +567,17 @@ export interface AgentAdapter {
    * Throws when it cannot be fetched: the manager degrades with a reason.
    */
   listUsage?(): Promise<UsageSnapshot>
+
+  /**
+   * What a tool that **reports no limits** still says about its usage, read from the tool's own command (#1623): its plan,
+   * the totals it counted here. The one definition of "reports no limits" is that `listUsage` is absent; with `localUsage`
+   * the host then answers `supported: false, notReported: true` carrying this. Never reads the tool's credential or state
+   * files, and never waits long: past `settle` the answer may be `provisional` (the command is still running).
+   *
+   * `seed` is the last answer the host kept across a restart (its totals carry `asOf`, when they were read). A reader that has
+   * read nothing yet in this process stands on it, as on a stale answer: returned at once while a fresh read goes on.
+   */
+  localUsage?(ask?: { settle?: boolean; seed?: LocalUsage }): Promise<LocalUsage>
 
   /**
    * Which account the tool is logged in to on this host, as an opaque fingerprint (#726); `fingerprint` is null when the

@@ -1,5 +1,5 @@
 import type { ToolName } from '@cc/protocol'
-import type { AgentAdapter, AgentProcess, AgentSpawnSpec, CreateSessionOpts, EventSink, ProcessSource, SessionHandle } from '../contract.js'
+import type { AgentAdapter, AgentProcess, AgentSpawnSpec, CreateSessionOpts, EventSink, LocalUsage, ProcessSource, SessionHandle } from '../contract.js'
 import { toolResultEvent } from '../tool-result.js'
 import { spawnLocalAgent } from '../local-process.js'
 import type { AcpProfile } from './profile.js'
@@ -19,7 +19,14 @@ export abstract class AcpAdapter implements AgentAdapter {
     protected readonly profile: AcpProfile,
     private readonly spawn: (spec: AgentSpawnSpec) => AgentProcess = spawnLocalAgent,
     private readonly stopConfirmMs = STOP_CONFIRM_MS,
-  ) {}
+  ) {
+    // No `listUsage`, ever: an ACP tool reports no limits. What its own command says is `localUsage`, when it has one
+    const localUsage = profile.localUsage?.bind(profile)
+    if (localUsage) this.localUsage = localUsage
+  }
+
+  /** What the tool's own command says about its usage (the profile's `localUsage`), when it has one */
+  readonly localUsage?: (ask?: { settle?: boolean; seed?: LocalUsage }) => Promise<LocalUsage>
 
   get descriptor() {
     return this.profile.descriptor

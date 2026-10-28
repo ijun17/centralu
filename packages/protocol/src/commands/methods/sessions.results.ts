@@ -154,6 +154,20 @@ export const sessionsResults = {
     reason: z.string().optional(),
     usage: UsageSnapshot.nullable(),
     /**
+     * With `supported: false`: the tool has no way to report limits at all (its adapter has none), as against a read
+     * that failed, which also answers `supported: false` (not logged in, a timeout). The screen draws only this one as
+     * a plain dimmed ring (#1616); a host that predates it sends neither, and its failed and never answers look alike,
+     * so both stay the unknown they were. Absent otherwise.
+     */
+    notReported: z.boolean().optional(),
+    /**
+     * The answer stands in for one the host is still reading (#1623): a tool with no limits whose own command was
+     * slower than the host waits (`usage` holds nothing yet), or whose last answer is old and is being read again (`usage`
+     * is that answer, with its `totals.asOf`). Asking again with `settle` returns what the command read. Absent
+     * otherwise, and from a host that predates it.
+     */
+    provisional: z.boolean().optional(),
+    /**
      * Set on the hub's answer for a linked machine when `usage` is this computer's own because both are logged in to
      * the same account (#726); the meter says so. Absent otherwise, and from a host that predates it.
      */

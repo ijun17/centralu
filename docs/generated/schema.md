@@ -2,7 +2,7 @@
 
 # Store schema
 
-The tables of the host's store (`store.db`) at schema version 63, as a new store has them once
+The tables of the host's store (`store.db`) at schema version 64, as a new store has them once
 schema.sql and every migration step have run. Generated from a real `Store`
 (`packages/agent-host/src/dev-services/schema-doc.ts`); a test fails when this file and the migrations disagree.
 
@@ -373,6 +373,11 @@ erDiagram
     INTEGER rebuilds
     TEXT causes
     INTEGER rebuild_tokens
+  }
+  usage_local_totals {
+    TEXT tool PK
+    INTEGER at
+    TEXT totals
   }
   usage_readings {
     TEXT tool PK
@@ -937,6 +942,16 @@ Added in v62.
 Indexes:
 
 - `idx_usage_buckets_session`: `session_id`
+
+### `usage_local_totals`
+
+Added in v64.
+
+| Column | Type | Null | Default | Key | Added in |
+|---|---|---|---|---|---|
+| `tool` | TEXT | yes |  | PK | v64 |
+| `at` | INTEGER | no |  |  | v64 |
+| `totals` | TEXT | no |  |  | v64 |
 
 ### `usage_readings`
 

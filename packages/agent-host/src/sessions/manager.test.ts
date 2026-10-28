@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os'
 import type { GridPanel, NormalizedEvent, SessionInfo, StoredMessage, ToolName, TrashedSession, UsageHistory } from '@cc/protocol'
 import { NormalizedEvent as NormalizedEventSchema } from '@cc/protocol'
 import type { AgentAdapter } from '../adapters/contract.js'
+import { openCodeUsageReader } from '../adapters/opencode/usage.js'
 import { Store } from '../dev-services/store.js'
 import { SessionManager } from './manager.js'
 import { createRpcHandler } from '../rpc.js'
@@ -655,6 +656,182 @@ describe('while-alive facts are carried in the list', () => {
     expect(await rpc('agents.account', { tool: 'claude' })).toEqual({ loggedIn: true, fingerprint: 'abc' })
     // A tool whose adapter does not say answers unknown, not an error
     expect(await rpc('agents.account', { tool: 'codex' })).toEqual({ loggedIn: null, fingerprint: null })
+  })
+
+  it('marks only a tool with no way to report usage as notReported, not a read that failed (#1616)', async () => {
+    Object.assign(adapter, { listUsage: async () => Promise.reject(new Error('not logged in')) })
+    const failed = await rpc('agents.usage', { tool: 'claude' })
+    expect(failed).toMatchObject({ supported: false, reason: 'not logged in' })
+    expect(failed).not.toHaveProperty('notReported')
+    Object.assign(adapter, { listUsage: undefined })
+    expect(await rpc('agents.usage', { tool: 'claude' })).toMatchObject({
+      supported: false,
+      reason: 'Claude Code does not report usage limits',
+      notReported: true,
+    })
+  })
+
+  it('does not say a tool with no adapter reports no limits: nothing is known about it, so it is unknown (#1616)', async () => {
+    const r = await rpc('agents.usage', { tool: 'cursor' })
+    expect(r).toMatchObject({ supported: false, reason: 'cursor does not support usage queries', usage: null })
+    expect(r).not.toHaveProperty('notReported')
+  })
+
+  it('has one definition of a tool that reports no limits: its adapter has no listUsage; what it says itself is carried (#1623)', async () => {
+    const totals = { scope: 'all time', rows: [{ id: 'input', label: 'Input', value: 5, unit: 'tokens' }] }
+    const asks: unknown[] = []
+    Object.assign(adapter, {
+      listUsage: undefined,
+      localUsage: async (ask?: unknown) => (asks.push(ask), { plan: 'Free', totals }),
+    })
+    const r = await rpc('agents.usage', { tool: 'claude' })
+    expect(r).toMatchObject({ supported: false, notReported: true, usage: { plan: 'Free', windows: [], daily: [], totals } })
+    expect(r).toHaveProperty('reason', 'Claude Code does not report usage limits')
+    expect(r).not.toHaveProperty('provisional')
+    // The adapter's reader keeps what it read; the host keeps nothing of its own, so each ask goes to it
+    await rpc('agents.usage', { tool: 'claude' })
+    expect(asks).toHaveLength(2)
+    // A tool that has listUsage reports limits, whatever its snapshot says
+    Object.assign(adapter, { listUsage: async () => ({ plan: 'max', windows: [], daily: [] }) })
+    const limited = await rpc('agents.usage', { tool: 'claude' })
+    expect(limited).toMatchObject({ supported: true, usage: { plan: 'max' } })
+    expect(limited).not.toHaveProperty('notReported')
+  })
+
+  it('passes a provisional answer through, and asks the adapter to settle when the screen does (#1623)', async () => {
+    const asks: unknown[] = []
+    Object.assign(adapter, {
+      listUsage: undefined,
+      localUsage: async (ask?: { settle?: boolean }) => (asks.push(ask), ask?.settle ? { plan: 'Free' } : { plan: null, provisional: true }),
+    })
+    expect(await rpc('agents.usage', { tool: 'claude' })).toMatchObject({ notReported: true, provisional: true, usage: { plan: null } })
+    const settled = await rpc('agents.usage', { tool: 'claude', settle: true })
+    expect(settled).toMatchObject({ notReported: true, usage: { plan: 'Free' } })
+    expect(settled).not.toHaveProperty('provisional')
+    expect(asks).toEqual([{ settle: undefined }, { settle: true }])
+  })
+
+  it('keeps the totals a read produced, and after a restart answers them at once with the time they were read (#1623)', async () => {
+    const read = { scope: 'all time', asOf: 1_700_000_000_000, rows: [{ id: 'sessions', label: 'Sessions', value: 1204, unit: 'count' }] }
+    Object.assign(adapter, { listUsage: undefined, localUsage: async () => ({ plan: null, totals: read }) })
+    await rpc('agents.usage', { tool: 'claude' })
+    // Asked again with the same read (a stale answer returned): nothing is written again
+    const saved = vi.spyOn(store.usage, 'saveLocalTotals')
+    await rpc('agents.usage', { tool: 'claude' })
+    expect(saved).not.toHaveBeenCalled()
+    expect(store.usage.localTotals('claude')).toEqual(read)
+
+    // A new process on the same store, whose command is still reading: the reader is offered the kept totals as its seed
+    const seeds: unknown[] = []
+    const slow = new FakeAdapter()
+    Object.assign(slow, {
+      listUsage: undefined,
+      localUsage: async (ask?: { seed?: { totals?: unknown } }) => (seeds.push(ask?.seed?.totals), ask?.seed ?? { plan: null, provisional: true }),
+    })
+    const adapters = new Map<ToolName, AgentAdapter>([['claude', slow]])
+    const next = new SessionManager(store, adapters, () => {})
+    const handler = createRpcHandler(next, adapters)
+    const restored = (await handler('agents.usage', { tool: 'claude' })) as { usage: { totals: unknown }; provisional?: boolean }
+    expect(restored.usage.totals).toEqual(read)
+    expect(restored).not.toHaveProperty('provisional')
+    await handler('agents.usage', { tool: 'claude' })
+    // Offered once: the reader keeps its own answer after that
+    expect(seeds).toEqual([read, undefined])
+    await next.disposeAll()
+  })
+
+  it('tells the screen an old answer is being read again, and a settle brings the new totals with their new time, after a restart or not (#1623)', async () => {
+    const table = (sessions: number) => ['│Sessions' + String(sessions).padStart(40) + ' │', '│Messages' + '9'.padStart(40) + ' │'].join(String.fromCharCode(10))
+    let clock = 1_000_000
+    let release: (out: string) => void = () => {}
+    const runs: string[] = []
+    // The command ends when the test says, as a slow `opencode stats` does
+    const run = (): Promise<string> => new Promise((resolve) => ((release = resolve), runs.push('run')))
+    const world = (reader: ReturnType<typeof openCodeUsageReader>) => {
+      const a = new FakeAdapter()
+      Object.assign(a, { listUsage: undefined, localUsage: reader })
+      const adapters = new Map<ToolName, AgentAdapter>([['claude', a]])
+      const m = new SessionManager(store, adapters, () => {})
+      return { ask: createRpcHandler(m, adapters), m }
+    }
+    const sessionsOf = (r: unknown) => (r as { usage: { totals: { asOf: number; rows: { id: string; value: number }[] } } }).usage.totals
+    const first = world(openCodeUsageReader(run, () => clock))
+    const firstRead = first.ask('agents.usage', { tool: 'claude', settle: true })
+    await vi.waitFor(() => expect(runs).toHaveLength(1))
+    release(table(28))
+    expect(sessionsOf(await firstRead)).toMatchObject({ asOf: clock, rows: [{ id: 'sessions', value: 28 }, { id: 'messages' }] })
+
+    // Ten minutes on, with no restart: the old totals come back at once, marked provisional, while the command runs
+    clock += 10 * 60_000
+    const oldAt = sessionsOf(await first.ask('agents.usage', { tool: 'claude' })).asOf
+    const stale = (await first.ask('agents.usage', { tool: 'claude' })) as { provisional?: boolean }
+    expect(stale.provisional).toBe(true)
+    await vi.waitFor(() => expect(runs).toHaveLength(2))
+    // The screen's one more ask, with settle, ends when the command does, and carries the new totals and their time
+    const settled = first.ask('agents.usage', { tool: 'claude', settle: true })
+    clock += 12_000
+    release(table(30))
+    const fresh = (await settled) as { provisional?: boolean }
+    expect(fresh.provisional).toBeUndefined()
+    expect(sessionsOf(fresh)).toMatchObject({ asOf: clock, rows: [{ id: 'sessions', value: 30 }, { id: 'messages' }] })
+    expect(sessionsOf(fresh).asOf).toBeGreaterThan(oldAt)
+    expect(store.usage.localTotals('claude')?.asOf).toBe(clock)
+    await first.m.disposeAll()
+
+    // A restart a day later: the kept totals come back at once, provisional, and a settle brings the new read
+    clock += 86_400_000
+    const second = world(openCodeUsageReader(run, () => clock))
+    const kept = (await second.ask('agents.usage', { tool: 'claude' })) as { provisional?: boolean }
+    expect(kept.provisional).toBe(true)
+    expect(sessionsOf(kept)).toMatchObject({ asOf: clock - 86_400_000, rows: [{ id: 'sessions', value: 30 }, { id: 'messages' }] })
+    await vi.waitFor(() => expect(runs).toHaveLength(3))
+    const settledAgain = second.ask('agents.usage', { tool: 'claude', settle: true })
+    release(table(31))
+    expect(sessionsOf(await settledAgain)).toMatchObject({ asOf: clock, rows: [{ id: 'sessions', value: 31 }, { id: 'messages' }] })
+    await second.m.disposeAll()
+  })
+
+  it('does not keep a provisional answer, nor totals that say nothing of when they were read (#1623)', async () => {
+    Object.assign(adapter, {
+      listUsage: undefined,
+      localUsage: async () => ({ plan: null, provisional: true, totals: { scope: 'all time', asOf: 5, rows: [] } }),
+    })
+    await rpc('agents.usage', { tool: 'claude' })
+    expect(store.usage.localTotals('claude')).toBeNull()
+    Object.assign(adapter, { localUsage: async () => ({ plan: null, totals: { scope: 'all time', rows: [] } }) })
+    await rpc('agents.usage', { tool: 'claude' })
+    expect(store.usage.localTotals('claude')).toBeNull()
+  })
+
+  it('answers with the totals even when the store cannot keep them (#1623)', async () => {
+    const read = { scope: 'all time', asOf: 9, rows: [] }
+    Object.assign(adapter, { listUsage: undefined, localUsage: async () => ({ plan: null, totals: read }) })
+    vi.spyOn(store.usage, 'saveLocalTotals').mockImplementation(() => {
+      throw new Error('disk full')
+    })
+    expect(await rpc('agents.usage', { tool: 'claude' })).toMatchObject({ notReported: true, usage: { totals: read } })
+  })
+
+  it('tells a tool whose command says nobody is logged in as any tool is, not as one with no limits (#1623)', async () => {
+    Object.assign(adapter, { listUsage: undefined, localUsage: async () => ({ plan: null, loggedOut: true }) })
+    const r = await rpc('agents.usage', { tool: 'claude' })
+    expect(r).toMatchObject({ supported: false, reason: 'Claude Code is not logged in on this computer', usage: null })
+    expect(r).not.toHaveProperty('notReported')
+  })
+
+  it('runs no command for a tool with no limits when only the cache is wanted, and survives one that throws (#1623)', async () => {
+    let runs = 0
+    Object.assign(adapter, {
+      listUsage: undefined,
+      localUsage: async () => {
+        runs++
+        throw new Error('boom')
+      },
+    })
+    expect(await rpc('agents.usage', { tool: 'claude', limits: false })).toMatchObject({ notReported: true, usage: null })
+    expect(runs).toBe(0)
+    expect(await rpc('agents.usage', { tool: 'claude' })).toMatchObject({ supported: false, notReported: true, usage: null })
+    expect(runs).toBe(1)
   })
 
   it('counts each model request into the prompt cache figures agents.usage answers with (docs/agent-host.md §6.1)', async () => {

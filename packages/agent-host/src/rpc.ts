@@ -836,8 +836,8 @@ export function createRpcHandler(
     'agents.commands': async (p) =>
       mgr.listCommands(RpcMethods['agents.commands'].params.parse(p).sessionId),
     'agents.usage': async (p) => {
-      const { tool, limits } = RpcMethods['agents.usage'].params.parse(p)
-      return mgr.usageFor(tool, { limits })
+      const { tool, limits, settle } = RpcMethods['agents.usage'].params.parse(p)
+      return mgr.usageFor(tool, { limits, settle })
     },
     'usage.history': async (p) => mgr.usageHistory(RpcMethods['usage.history'].params.parse(p)),
     'agents.account': async (p) => mgr.accountFor(RpcMethods['agents.account'].params.parse(p).tool),

@@ -1082,6 +1082,39 @@
   }
 }
 
+/*
+ * A linked machine's capsule that comes (a machine whose link came back, #1616) fades in. Opacity only, so reduced motion
+ * keeps it: the change is still shown, without any travel. It never holds the press: the donuts in it are live from the
+ * first frame. (A donut that comes after the bar was first drawn has main's own entrance, `.cc-donut-in`.)
+ */
+@keyframes cc-capsule-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.cc-capsule-in {
+  animation: cc-capsule-in 180ms ease-out;
+}
+
+/*
+ * A row of the usage panel (#1623) fades in. Opacity only, so reduced motion keeps it: the change is still shown, without
+ * any travel. It never holds the press: the panel is live from the first frame.
+ */
+@keyframes cc-row-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.cc-row-in {
+  animation: cc-row-in 180ms ease-out;
+}
+
 @keyframes cc-drop-out {
   from {
     opacity: 1;
