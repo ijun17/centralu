@@ -3,6 +3,7 @@ import { lstatSync, mkdirSync, mkdtempSync, realpathSync, rmdirSync, rmSync, sym
 import { tmpdir } from 'node:os'
 import { basename, join, posix, win32 } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import { isInside as rulesIsInside } from '../os/rules.js'
 import { assertCreatePath, assertExistingPath, assertExistingPathSync, isInside, pathParts, UnsafePathError } from './path-guard.js'
 
 /**
@@ -150,6 +151,14 @@ describe('isInside (#428)', () => {
     expect(isInside('C:\\Work\\Proj', 'C:\\Work\\Proj-old', win32)).toBe(false)
     expect(isInside('C:\\Work\\Proj', 'D:\\Work\\Proj\\a', win32)).toBe(false)
     expect(isInside('C:\\Work\\Proj', '\\\\evil\\share\\Proj\\a', win32)).toBe(false)
+  })
+
+  // One definition of inside (`isInside` in os/rules.ts): NTFS tells the Kelvin sign (U+212A) from `k`, which Node's `relative()` does not
+  it('takes the Kelvin sign for another letter than k on Windows, as the OS layer does', () => {
+    const kelvin = '\u212a'
+    expect(isInside('C:\\a\\k', 'C:\\a\\K\\f', win32)).toBe(true)
+    expect(isInside('C:\\a\\k', `C:\\a\\${kelvin}\\f`, win32)).toBe(false)
+    expect(isInside('C:\\a\\k', `C:\\a\\${kelvin}\\f`, win32)).toBe(rulesIsInside('C:\\a\\k', `C:\\a\\${kelvin}\\f`, 'windows'))
   })
 
   // A drive root as the project (#849): judged by a prefix with a separator added, `D:\` became `D:\\` and held nothing

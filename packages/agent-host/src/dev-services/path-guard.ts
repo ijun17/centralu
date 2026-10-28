@@ -1,6 +1,7 @@
 import { lstatSync, realpathSync, statSync, type BigIntStats, type Stats } from 'node:fs'
 import { lstat, realpath, stat } from 'node:fs/promises'
 import { basename, dirname, join, posix, resolve, sep, win32, type PlatformPath } from 'node:path'
+import { isInside as rulesIsInside } from '../os/rules.js'
 import { shareRoot, walkLinks, walkLinksSync, type LinkWalk } from './link-walk.js'
 
 /** This OS's path rules */
@@ -181,14 +182,13 @@ export function pathParts(root: string, rel: string, p: PlatformPath = nativePat
 
 /**
  * Whether `candidate` is `root` or lies inside it, judged by segment (#428): `/a/wt-old` is not inside `/a/wt`, and a
- * name that only starts with two dots (`..cache`) is. On Windows `relative()` compares without regard to case, and
- * answers an absolute path for another drive or a UNC share, which is outside. Both are taken as given: canonicalize
- * them first (`canonicalPath`) wherever a link, a short name or a symlinked root could make one path look like two.
- * The one test of "inside" for the host; it used to be written nine times, with three ways to canonicalize.
+ * name that only starts with two dots (`..cache`) is. This is the OS layer's one rule (`isInside` in `os/rules.ts`), for
+ * the family of `p`: on Windows by NTFS's own case folding, which tells the Kelvin sign from `k` where Node's `relative()`
+ * does not, and another drive or a UNC share is outside. Both are taken as given: canonicalize them first
+ * (`canonicalPath`) wherever a link, a short name or a symlinked root could make one path look like two.
  */
 export function isInside(root: string, candidate: string, p: PlatformPath = nativePath): boolean {
-  const rel = p.relative(root, candidate)
-  return rel === '' || (rel !== '..' && !rel.startsWith(`..${p.sep}`) && !p.isAbsolute(rel))
+  return rulesIsInside(root, candidate, p.sep === '\\' ? 'windows' : 'posix')
 }
 
 /**

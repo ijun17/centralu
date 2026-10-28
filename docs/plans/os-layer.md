@@ -405,10 +405,14 @@ answer, and a test on memory says what the host does:
 - A recursive listing (`readdirSync`, `promises.readdir`) is breadth first as Node's but never enters a link. Node 22
   enters a junction on Windows and a symlink to a folder on Linux, and one leading back to its own folder made the
   listing on Windows stop at some depth without a word (192 names) and on Linux run to the limit of path lengths.
-- Where a copy follows links (Windows copies a junction as its folder), `cpSync` and `promises.cp` refuse a tree with a
-  link back to a folder the copy is inside with `ELOOP`, before copying anything (`linkLoop`). Node's `cpSync` over
-  such a junction ended the process (exit 127) with nothing to catch. Node cannot tell a junction from a directory
-  symlink, so the refusal is for both on Windows; on POSIX a link is copied as a link and nothing loops.
+- `cpSync` and `promises.cp` refuse a tree a copy cannot take with `ELOOP`, before copying anything (`linkLoop`), on
+  every OS and the same in memory: a link that leads in a circle (`a -> b -> a`, `x -> x`, a file link as much as a
+  folder link), and on Windows a junction back to a folder the copy is inside. Node's `cpSync` over either ended the
+  process with nothing to catch (exit 127 on Windows; an uncaught C++ error, abort 134, on Linux; `fs.promises.cp` and
+  `verbatimSymlinks` do not, but the rule is one). Windows copies only a junction as the folder it leads to: a symlink
+  to a folder, back to an ancestor too, is copied as a link, as is every link on POSIX, and is not refused. Node's
+  types do not tell a junction from a symlink there, so the real `Os` asks PowerShell, and only of a link that leads back
+  (a few hundred ms, once). The check reads the tree once before the copy (a folder once, however many links lead to it).
 - On Windows `OsChild.kill` and `processes.signal` send only TERM, KILL, INT and QUIT and throw for any other
   (`ENOSYS`, `ERR_UNKNOWN_SIGNAL`), leaving the process running: Node's own `child.kill('SIGHUP')` ends it as SIGKILL
   while `process.kill(pid, 'SIGHUP')` throws, and the `Os` takes the one rule for both.

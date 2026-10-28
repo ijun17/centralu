@@ -82,8 +82,9 @@ import { runChild } from './run.js'
  *   / `ENOTDIR`; a copy onto a folder: `EPERM` / `EISDIR`; a folder renamed onto one: `EPERM` / replaced if empty,
  *   else `ENOTEMPTY`).
  * - **Processes.** Programs are functions a test adds (`programs.add`); a start finds them as the OS would (PATH, and on
- *   Windows PATHEXT, `.exe`/`.com` and a batch file refused with `EINVAL`). Windows: any signal ends a process (exit
- *   `null` and the signal), and `stop` ends a tree at once (code 1, as `taskkill /F`). POSIX: groups, a signal a program
+ *   Windows PATHEXT, `.exe`/`.com` and a batch file refused with `EINVAL`). Windows: only TERM, KILL, INT and QUIT
+ *   end a process (exit `null` and the signal), any other name Node knows is `ENOSYS`, one it does not is
+ *   `ERR_UNKNOWN_SIGNAL` (`signalRefusal`), and `stop` ends a tree at once (code 1, as `taskkill /F`). POSIX: groups, a signal a program
  *   may trap, `stop` sends TERM and KILL after the grace on the clock. Output closes before `'exit'`, `'close'` follows.
  * - **Time** moves only by `clock.advance(ms)`: timers, grace periods and file times read it.
  *
@@ -498,6 +499,18 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
       }
     },
     isDir: (path) => statSync(path, { throwIfNoEntry: false })?.isDirectory() ?? false,
+    loops: (path) => {
+      try {
+        statSync(path)
+        return false
+      } catch (e) {
+        return errorCode(e) === 'ELOOP'
+      }
+    },
+    isJunction: (path) => {
+      const n = lookupOrNull(path, 'cp', false)?.node
+      return n?.kind === 'link' && n.junction
+    },
   }
 
   function readFile(p: string): Buffer {
@@ -733,11 +746,9 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     if (srcReal?.kind === 'dir' && dest !== undefined && dest.kind !== 'dir')
       throw nodeError('ERR_FS_CP_DIR_TO_NON_DIR', `Cannot overwrite non-directory ${to} with directory ${from}`, 'cp', to)
     if (srcReal?.kind === 'file' && dest?.kind === 'dir') throw nodeError('ERR_FS_CP_NON_DIR_TO_DIR', `Cannot overwrite directory ${to} with non-directory ${from}`, 'cp', to)
-    // A copy that follows links (Windows' junctions) would not end on a link back into the tree: refused first
-    if (!traits.cpKeepsLinks && o.recursive) {
-      const loop = linkLoop(from, treeReader, family, (...s) => P.join(...s))
-      if (loop !== null) throw linkLoopError(loop)
-    }
+    // A link in a circle, or a junction back into the tree, is a copy Node cannot do: refused first
+    const loop = o.recursive ? linkLoop(from, treeReader, family, (...s) => P.join(...s)) : null
+    if (loop !== null) throw linkLoopError(loop)
     const copy = (s: Node, sPath: string, dPath: string) => {
       if (s.kind === 'link' && !(windows && s.junction)) {
         const target = o.verbatimSymlinks || P.isAbsolute(s.target) ? s.target : P.resolve(P.dirname(sPath), s.target)

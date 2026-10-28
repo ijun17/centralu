@@ -682,6 +682,75 @@ export const CONTRACT: Contract[] = [
     },
   },
   {
+    name: 'a tree with a link in a circle (a -> b -> a, x -> x) is refused with ELOOP before anything is copied, a file link as much as a folder link',
+    // Node's own copy of one ended the process: exit 127 on Windows, an uncaught C++ error (abort) on Linux
+    symlinks: true,
+    want: both({
+      mutual: { copy: err('ELOOP'), copied: false, promised: err('ELOOP') },
+      self: { copy: err('ELOOP'), copied: false, promised: err('ELOOP') },
+      nested: { copy: err('ELOOP'), copied: false, promised: err('ELOOP') },
+      folders: { copy: err('ELOOP'), copied: false, promised: err('ELOOP') },
+      root: { copy: err('ELOOP'), copied: false, promised: err('ELOOP') },
+      rootNotRecursive: { copy: err('ELOOP'), copied: false },
+    }),
+    async run(os, root) {
+      const { join } = os.paths.path
+      const f = os.files
+      let n = 0
+      const tree = (build: (t: string) => void) => {
+        const t = join(root, `t${n++}`)
+        f.mkdirSync(join(t, 'd'), { recursive: true })
+        f.writeFileSync(join(t, 'f'), 'k')
+        build(t)
+        return t
+      }
+      const copyOf = async (t: string, recursive = true) => {
+        const out = join(root, `out${n++}`)
+        const copy = await outcome(() => (f.cpSync(t, out, { recursive }), 'ok'))
+        const result: Record<string, unknown> = { copy, copied: f.existsSync(out) }
+        if (recursive) result['promised'] = await outcome(async () => (await f.promises.cp(t, join(root, `out${n++}`), { recursive }), 'ok'))
+        return result
+      }
+      return {
+        mutual: await copyOf(
+          tree((t) => {
+            f.symlinkSync('loopB', join(t, 'loopA'), 'file')
+            f.symlinkSync('loopA', join(t, 'loopB'), 'file')
+          }),
+        ),
+        self: await copyOf(tree((t) => f.symlinkSync('x', join(t, 'x'), 'file'))),
+        nested: await copyOf(tree((t) => f.symlinkSync('x', join(t, 'd', 'x'), 'file'))),
+        folders: await copyOf(
+          tree((t) => {
+            f.symlinkSync(join(t, 'b'), join(t, 'a'), 'dir')
+            f.symlinkSync(join(t, 'a'), join(t, 'b'), 'dir')
+          }),
+        ),
+        root: await copyOf((f.symlinkSync('r', join(root, 'r'), 'file'), join(root, 'r'))),
+        rootNotRecursive: await copyOf(join(root, 'r'), false),
+      }
+    },
+  },
+  {
+    name: 'a link that leads somewhere is copied as a link, a symlink back to its own folder too; only a junction is followed as a folder',
+    symlinks: true,
+    want: both({ copy: 'ok', kept: { up: true, file: true, dangling: true }, folderFiles: ['f'] }),
+    async run(os, root) {
+      const { join } = os.paths.path
+      const f = os.files
+      const t = join(root, 't')
+      f.mkdirSync(join(t, 'd'), { recursive: true })
+      f.writeFileSync(join(t, 'd', 'f'), 'k')
+      f.writeFileSync(join(t, 'g'), 'k')
+      f.symlinkSync(t, join(t, 'd', 'up'), 'dir')
+      f.symlinkSync(join(t, 'g'), join(t, 'd', 'file'), 'file')
+      f.symlinkSync(join(t, 'gone'), join(t, 'd', 'dangling'), 'file')
+      const copy = await outcome(() => (f.cpSync(t, join(root, 'out'), { recursive: true }), 'ok'))
+      const kept = (name: string) => f.lstatSync(join(root, 'out', 'd', name)).isSymbolicLink()
+      return { copy, kept: { up: kept('up'), file: kept('file'), dangling: kept('dangling') }, folderFiles: f.readdirSync(join(root, 'out', 'd')).filter((n) => n === 'f') }
+    },
+  },
+  {
     name: 'names NTFS folds and those it does not: é and É are one, the Kelvin sign and k, or ı and I, are two',
     linux: true,
     want: {

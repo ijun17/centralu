@@ -2459,8 +2459,8 @@ tests. What differs from macOS and Linux, and what holds it:
   or a chain of local links ending in one, is refused unread, since `realpath` following it is already the SMB
   connection with the person's sign-in offered; the guard used to refuse it only afterwards, as outside the project
   (`path-guard-share.test.ts`). A project that is itself on a share (opened from one, a mapped drive, `\\wsl.localhost`)
-  keeps its links on that one share: they are followed, and a link to another host or share is refused. Windows paths ignore case; containment uses `relative()`, which does too. Every
-  "inside" test in the host is `isInside` in `path-guard.ts`, and every comparison that must see one
+  keeps its links on that one share: they are followed, and a link to another host or share is refused. Windows paths ignore case; containment folds case as NTFS does (`foldCase`). Every
+  "inside" test in the host is `isInside` in `os/rules.ts` (`path-guard.ts` `isInside` is that rule for a given path style: NTFS's case folding, which keeps the Kelvin sign apart from `k`), and every comparison that must see one
   place in two spellings canonicalizes with `canonicalPath` there (`realpathSync.native`: the long name
   for a short one, the case on disk, a link resolved, through the nearest folder that exists; #428). The
   copies had drifted: ask_project's read grants compared with case and the JS `realpath`, so a short

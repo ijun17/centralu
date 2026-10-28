@@ -74,6 +74,12 @@ describe("the rules are Node's own", () => {
       )
     })
   }
+
+  it.runIf(HOST_FAMILY === 'windows')("a file URL of \\\\?\\UNC\\server\\share is the share's, as Node reads it", () => {
+    const unc = '\\\\?\\UNC\\server\\share\\x'
+    expect(pathToFileUrl(unc, 'windows').href).toBe(pathToFileURL(unc, { windows: true }).href)
+    expect(pathToFileUrl(unc, 'windows').href).toBe('file://server/share/x')
+  })
 })
 
 describe('the real OS is made of the layer modules', () => {

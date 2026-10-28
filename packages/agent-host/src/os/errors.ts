@@ -11,7 +11,7 @@ export function asOsError(e: unknown): OsError {
   return Object.assign(error, { code: errorCode(error) ?? 'UNKNOWN' })
 }
 
-/** A tree copy refused for a link that leads back into the tree (`linkLoop` in rules.ts): `ELOOP` at the link */
+/** A tree copy refused for a link it cannot take (`linkLoop` in rules.ts): `ELOOP` at the link */
 export function linkLoopError(path: string): OsError {
   return Object.assign(new Error(`ELOOP: too many symbolic links encountered, cp '${path}'`), { code: 'ELOOP', syscall: 'cp', path })
 }

@@ -43,6 +43,7 @@ import {
   samePath,
   signalError,
   signalRefusal,
+  systemTool,
   type OsFamily,
   type TreeReader,
 } from './rules.js'
@@ -121,6 +122,21 @@ function readdirRecursiveSync(p: string, withFileTypes: boolean): string[] | OsD
   return withFileTypes ? listed.map((e) => e.entry) : listed.map((e) => e.rel)
 }
 
+/**
+ * Whether a Windows link is a junction rather than a symlink: Node's types and stats do not say, so PowerShell is
+ * asked (a few hundred ms, which is why `linkLoop` asks only of a link that leads back). A link it cannot tell counts
+ * as a junction, the side that refuses a copy.
+ */
+function isJunctionOnWindows(path: string): boolean {
+  const r = spawnSync(systemTool(['WindowsPowerShell', 'v1.0', 'powershell.exe'], process.env), ['-NoProfile', '-NonInteractive', '-Command', '(Get-Item -LiteralPath $env:CC_LINK_PATH -Force).LinkType'], {
+    env: { ...process.env, CC_LINK_PATH: path },
+    encoding: 'utf8',
+    windowsHide: true,
+    timeout: 30_000,
+  })
+  return r.status !== 0 || r.stdout.trim() !== 'SymbolicLink'
+}
+
 /** The tree reader `linkLoop` walks, on this machine */
 const treeReader: TreeReader = {
   list: (dir) => fs.readdirSync(dir, { withFileTypes: true }),
@@ -138,11 +154,20 @@ const treeReader: TreeReader = {
       return false
     }
   },
+  loops: (p) => {
+    try {
+      fs.statSync(p)
+      return false
+    } catch (e) {
+      return errorCode(e) === 'ELOOP'
+    }
+  },
+  isJunction: (p) => HOST_FAMILY !== 'windows' || isJunctionOnWindows(p),
 }
 
-/** A tree copy the layer refuses before Node starts it: one that would follow a link back into itself (`linkLoop`) */
+/** A tree copy the layer refuses before Node starts it: one Node cannot do and would end the process (`linkLoop`) */
 function refuseLoop(from: string, o: CopyTreeOptions | undefined): void {
-  if (traits.cpKeepsLinks || !o?.recursive) return
+  if (!o?.recursive) return
   const loop = linkLoop(from, treeReader, HOST_FAMILY, join)
   if (loop !== null) throw linkLoopError(loop)
 }

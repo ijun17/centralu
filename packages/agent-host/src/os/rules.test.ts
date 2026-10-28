@@ -7,6 +7,7 @@ import {
   findOnPath,
   foldCase,
   isInside,
+  linkLoop,
   pathKey,
   pathRules,
   pathRulesFrom,
@@ -17,6 +18,7 @@ import {
   systemTool,
   traitsOf,
   type OsFamily,
+  type TreeReader,
 } from './rules.js'
 
 /**
@@ -227,5 +229,46 @@ describe('the questions named for what differs', () => {
     })
     const posixTraits = traitsOf('posix')
     for (const [k, v] of Object.entries(traitsOf('windows'))) if (k !== 'clonesFiles') expect(posixTraits[k as keyof typeof posixTraits], k).toBe(!v)
+  })
+})
+
+describe('Windows path forms Win32 opens as one path', () => {
+  it('the \\\\?\\ form of a path is the plain path, and a plain one loses the dots and spaces ending a name', () => {
+    expect(samePath('\\\\?\\C:\\x', 'C:\\x', 'windows')).toBe(true)
+    expect(samePath('\\\\?\\c:\\X\\y', 'C:\\x\\Y', 'windows')).toBe(true)
+    expect(samePath('\\\\?\\UNC\\s\\sh\\x', '\\\\s\\sh\\x', 'windows')).toBe(true)
+    expect(samePath('\\\\?\\unc\\s\\sh', '\\\\s\\sh', 'windows')).toBe(true)
+    expect(samePath('C:\\x\\y.', 'C:\\x\\y', 'windows')).toBe(true)
+    expect(samePath('C:\\x\\y ', 'C:\\x\\y', 'windows')).toBe(true)
+    expect(samePath('C:\\x.\\y', 'C:\\x\\y', 'windows')).toBe(true)
+    expect(isInside('C:\\x', 'C:\\x.\\y. ', 'windows')).toBe(true)
+    expect(isInside('\\\\?\\C:\\x', 'C:\\x\\y', 'windows')).toBe(true)
+    // Verbatim skips the clean-up: a name ending in a dot is its own name there, and POSIX keeps every name
+    expect(samePath('\\\\?\\C:\\x\\y.', 'C:\\x\\y', 'windows')).toBe(false)
+    expect(samePath('/x/y.', '/x/y', 'posix')).toBe(false)
+    expect(samePath('C:\\x\\y.z', 'C:\\x\\y', 'windows')).toBe(false)
+  })
+})
+
+describe('linkLoop walks a folder once', () => {
+  it('however many links lead to it: a chain of folders each linked twice to the next is not walked as 2^n paths', () => {
+    // d0 holds two links to d1, d1 two links to d2, and so on: 2^16 ways down, 17 folders
+    const depth = 16
+    let listed = 0
+    // The folder a path leads to: a link a<n> or b<n> leads to d<n>
+    const folderOf = (path: string) => path.split('/').filter(Boolean).reduce((_, seg) => `d${seg.slice(1)}`, 'd0')
+    const reader: TreeReader = {
+      list: (dir) => {
+        listed++
+        const n = Number(folderOf(dir).slice(1))
+        return n >= depth ? [] : ['a', 'b'].map((name) => ({ name: `${name}${n + 1}`, isDirectory: () => false, isSymbolicLink: () => true }))
+      },
+      real: (path) => `/${folderOf(path)}`,
+      isDir: () => true,
+      loops: () => false,
+      isJunction: () => true,
+    }
+    expect(linkLoop('/d0', reader, 'windows', posix.join)).toBeNull()
+    expect(listed).toBeLessThan(2 * depth + 5)
   })
 })
