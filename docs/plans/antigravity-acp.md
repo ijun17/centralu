@@ -16,7 +16,7 @@ frames this pull request replays are committed, scrubbed, as `adapters/antigravi
 |---|---|
 | Antigravity runs as Google's ACP agent on Centralu's ACP adapter, not `agy -p` with a `PreToolUse` hook (owner 2026-10-27) | The hook path is fail-open: an empty hook answer allows, the hook file is writable by the agent's own commands, and command rules depend on parsing shell text. Over ACP an unanswered, cancelled or unknown answer denies (spike §5), turns, cancel and resume are the ACP core's, and Windows has an official build |
 | Sign-in happens inside Centralu (owner 2026-10-27) | The agent has no terminal sign-in; it signs in through ACP `authenticate` with a browser and a loopback redirect. Its state folder is Centralu's own, so a CLI sign-in does not carry over; sharing the CLI's folder would bring the person's global hooks and MCP servers in and move the token into the Keychain |
-| The sign-in action sits where the "needs a login" line is; the header donut shows a tool installed but signed out (owner 2026-10-27, both, wording on screenshots) | One shared piece (§12). It ships in the new-session dialog only for this beta: the first-run card and the new-app dialog show the refusal reason instead, until Antigravity can take role text (owner, 2026-10-29). The host side gives the state and the actions; the screens are drawn in the stacked pull request |
+| The sign-in action sits where the "needs a login" line is; the header donut shows a tool installed but signed out (owner 2026-10-27, both, wording on screenshots) | One shared piece (§12). It ships in the new-session dialog only for this beta: the first-run card and the new-app dialog show the refusal reason instead, until Antigravity can take role text (owner, 2026-10-28). The host side gives the state and the actions; the screens are drawn in the stacked pull request |
 | The header shows a signed-out donut (a solid ring in the signal ink, no red) for **every** tool installed but signed out: Claude Code, Codex, Cursor, and OpenCode where its detection can tell (owner 2026-10-27) | Every tool reports one shape, `ToolStatus.setup` (§8); OpenCode reports `signIn: none` (its free models need no account, so it is never signed out) |
 | Install inside Centralu: one pinned version, sha256, atomic, progress, cancel (owner 2026-10-27) | §3 |
 | Centralu's tools (the MCP bridge) ship in this beta, at parity with Cursor and OpenCode (owner 2026-10-27, replacing "next beta") | §7 |
@@ -549,7 +549,7 @@ One piece, `ToolSetupLine` (`packages/ui/src/features/tools/`), draws a tool's s
 the new-session dialog's tool line. The first-run orchestrator card and the new-app dialog use the same piece, but for
 Antigravity they show its refusal ("cannot take Centralu's role instructions yet…", `roleText: false`) and no Install
 or Sign in, as for Cursor and OpenCode; the setup there is separate future work, once Antigravity takes role text (owner,
-2026-10-29: this beta ships what the real host does). It reads the tool's `ToolStatus.setup`, with this computer's live `tool_setup`
+2026-10-28: this beta ships what the real host does). It reads the tool's `ToolStatus.setup`, with this computer's live `tool_setup`
 events over it (`withLiveSetups`), so Start enables the moment a sign-in succeeds. `setupView` (`setupLine.ts`) is the one
 mapping from a setup to a line:
 
