@@ -70,8 +70,9 @@ export type MkdirOptions = { recursive?: boolean; mode?: number }
 export type WriteOptions = { mode?: number; flag?: 'w' | 'wx' | 'a' | 'ax' }
 export type RmOptions = { recursive?: boolean; force?: boolean; maxRetries?: number; retryDelay?: number }
 /**
- * `cp`: `verbatimSymlinks` keeps a link's target as written; on Windows a junction is still copied as its target
- * (`traits.cpKeepsLinks`), and a tree with a link back into itself is refused (`ELOOP`, `OsFiles.cpSync`)
+ * `cp`, Node's options: `verbatimSymlinks` keeps a relative link's target as written (without it the copy's link is
+ * made whole from the source's folder); `preserveTimestamps` gives a copied file its source's times; an existing file is
+ * replaced unless `force` is false, which keeps it or, with `errorOnExist`, throws `ERR_FS_CP_EEXIST`
  */
 export type CopyTreeOptions = { recursive?: boolean; verbatimSymlinks?: boolean; preserveTimestamps?: boolean; force?: boolean; errorOnExist?: boolean }
 /** Open flags by name, or a number from `files.constants` (`O_RDONLY | O_NOFOLLOW`; on Windows `O_NOFOLLOW` and `O_NONBLOCK` are 0) */
@@ -137,9 +138,11 @@ export interface OsFiles {
   renameSync(from: HostPath, to: HostPath): void
   copyFileSync(from: HostPath, to: HostPath, mode?: number): void
   /**
-   * A copy of a file or, with `recursive`, a tree. Where a copy follows links (Windows: a junction is copied as its
-   * folder, `traits.cpKeepsLinks`), a tree with a link to a folder it is already inside is refused with `ELOOP`
-   * before anything is copied: Node's own copy of one ended the host with nothing to catch (`linkLoop` in rules.ts).
+   * A copy of a file or, with `recursive`, a tree, that never follows a link (os/copy.ts): every link, the root too,
+   * is made again as a link, on Windows a junction as a junction (a link to a folder at a whole drive path; a relative
+   * one as a directory symlink, which needs the right to make one). So no link can make a copy endless or end the
+   * process, as Node's own `cpSync` did over a link in a circle or a Windows junction back into the tree. The promise
+   * form never blocks the event loop.
    */
   cpSync(from: HostPath, to: HostPath, options?: CopyTreeOptions): void
   unlinkSync(path: HostPath): void

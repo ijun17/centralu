@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto'
-import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmdirSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmdirSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { removeDataQuietly } from '../../dev-services/data-folder.js'
+import { realOs } from '../../os/real.js'
 import { VERSIONS_REL } from './versions.js'
 
 /**
@@ -108,7 +109,8 @@ function copyFolderOnce(from: string, to: string): void {
   mkdirSync(dirname(to), { recursive: true })
   const tmp = `${to}.carry-${randomUUID()}`
   try {
-    cpSync(from, tmp, { recursive: true, preserveTimestamps: true, verbatimSymlinks: true })
+    // The `Os`'s copy: a link an app left in its data (one back to its own folder too) is copied as a link
+    realOs().files.cpSync(from, tmp, { recursive: true, preserveTimestamps: true, verbatimSymlinks: true })
     renameSync(tmp, to)
   } catch (e) {
     removeDataQuietly(tmp, '[apps]')

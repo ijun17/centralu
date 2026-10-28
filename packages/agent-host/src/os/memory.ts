@@ -4,7 +4,6 @@ import type { PlatformPath } from 'node:path'
 import { Duplex, PassThrough, Readable, type Writable } from 'node:stream'
 import type Database from 'better-sqlite3'
 import type {
-  CopyTreeOptions,
   Env,
   LinkKind,
   MkdirOptions,
@@ -42,7 +41,6 @@ import {
   foldCase,
   isInside,
   launchFor,
-  linkLoop,
   listRecursive,
   pathKey,
   pathRulesFrom,
@@ -55,11 +53,10 @@ import {
   signalRefusal,
   storedTimeNs,
   traitsOf,
-  type ListedEntry,
   type OsFamily,
-  type TreeReader,
 } from './rules.js'
-import { abortReason, asError, errorCode, linkLoopError } from './errors.js'
+import { abortReason, asError, errorCode } from './errors.js'
+import { copyTreeAsync, copyTreeSync } from './copy.js'
 import { runChild } from './run.js'
 
 /**
@@ -485,34 +482,6 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     return o?.withFileTypes ? listed.map((e) => e.entry) : listed.map((e) => e.rel)
   }
 
-  /** The tree `linkLoop` walks, in memory */
-  const treeReader: TreeReader = {
-    list: (dir): ListedEntry[] => {
-      const n = lookupOrNull(dir, 'scandir', true)?.node
-      return n?.kind === 'dir' ? sortedEntries(n).map((e) => dirent(e.name, e.node, dir)) : []
-    },
-    real: (path) => {
-      try {
-        return realpathNative(path)
-      } catch {
-        return null
-      }
-    },
-    isDir: (path) => statSync(path, { throwIfNoEntry: false })?.isDirectory() ?? false,
-    loops: (path) => {
-      try {
-        statSync(path)
-        return false
-      } catch (e) {
-        return errorCode(e) === 'ELOOP'
-      }
-    },
-    isJunction: (path) => {
-      const n = lookupOrNull(path, 'cp', false)?.node
-      return n?.kind === 'link' && n.junction
-    },
-  }
-
   function readFile(p: string): Buffer {
     const n = existing(p, true, 'open')
     if (n.kind === 'dir') throw fsError('EISDIR', 'read')
@@ -733,50 +702,8 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     const n = fileForWrite(to, 'copyfile', { mode: src.perm })
     n.data = Buffer.from(src.data)
     touch(n)
-  }
-
-  function cp(from: string, to: string, o: CopyTreeOptions = {}) {
-    const src = existing(from, false, 'cp')
-    // Node's own checks before it copies anything, the same on every OS (measured on Windows and Linux)
-    const srcReal = src.kind === 'link' ? lookupOrNull(from, 'cp', true)?.node : src
-    const dest = lookupOrNull(to, 'cp', true)?.node
-    if (dest !== undefined && dest === srcReal) throw nodeError('ERR_FS_CP_EINVAL', `Invalid src or dest: cp returned EINVAL (src and dest cannot be the same) ${to}`, 'cp', to)
-    if (srcReal?.kind === 'dir' && isInside(P.resolve(from), P.resolve(to), family))
-      throw nodeError('ERR_FS_CP_EINVAL', `Invalid src or dest: cp returned EINVAL (cannot copy ${from} to a subdirectory of self ${to}) ${to}`, 'cp', to)
-    if (srcReal?.kind === 'dir' && dest !== undefined && dest.kind !== 'dir')
-      throw nodeError('ERR_FS_CP_DIR_TO_NON_DIR', `Cannot overwrite non-directory ${to} with directory ${from}`, 'cp', to)
-    if (srcReal?.kind === 'file' && dest?.kind === 'dir') throw nodeError('ERR_FS_CP_NON_DIR_TO_DIR', `Cannot overwrite directory ${to} with non-directory ${from}`, 'cp', to)
-    // A link in a circle, or a junction back into the tree, is a copy Node cannot do: refused first
-    const loop = o.recursive ? linkLoop(from, treeReader, family, (...s) => P.join(...s)) : null
-    if (loop !== null) throw linkLoopError(loop)
-    const copy = (s: Node, sPath: string, dPath: string) => {
-      if (s.kind === 'link' && !(windows && s.junction)) {
-        const target = o.verbatimSymlinks || P.isAbsolute(s.target) ? s.target : P.resolve(P.dirname(sPath), s.target)
-        if (lookup(dPath, false, 'cp').node) rm(dPath, { recursive: true, force: true })
-        symlink(target, dPath)
-        return
-      }
-      const real = s.kind === 'link' ? existing(sPath, true, 'cp') : s
-      if (real.kind === 'dir') {
-        if (!o.recursive) throw nodeError('ERR_FS_EISDIR', `Recursive option is required to copy a directory: ${sPath}`, 'cp', sPath)
-        mkdir(dPath, { recursive: true })
-        for (const e of sortedEntries(real)) copy(e.node, P.join(sPath, e.name), P.join(dPath, e.name))
-        return
-      }
-      if (real.kind !== 'file') return
-      const there = lookup(dPath, true, 'cp').node
-      if (there && o.errorOnExist && o.force === false) throw fsError('EEXIST', 'cp', dPath)
-      if (there && o.force === false) return
-      // A file there is replaced, a read-only one too, and the copy takes the source's mode (measured on both)
-      if (there?.kind === 'file') unlink(dPath)
-      copyFile(sPath, dPath)
-      if (o.preserveTimestamps) {
-        const d = existing(dPath, true, 'cp')
-        d.atimeNs = real.atimeNs
-        d.mtimeNs = real.mtimeNs
-      }
-    }
-    copy(src, from, to)
+    // Windows' CopyFile keeps the source's change time
+    if (windows) n.mtimeNs = src.mtimeNs
   }
 
   function chmod(p: string, mode: number) {
@@ -992,7 +919,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     mkdtemp: (prefix) => syncly(() => mkdtemp(prefix)),
     rename: (a, b) => syncly(() => rename(a, b)),
     copyFile: (a, b, mode) => syncly(() => copyFile(a, b, mode)),
-    cp: (a, b, o) => syncly(() => cp(a, b, o)),
+    cp: (a, b, o) => copyTreeAsync(promises, a, b, o, family, P),
     unlink: (p) => syncly(() => unlink(p)),
     rmdir: (p) => syncly(() => rmdir(p)),
     rm: (p, o) => syncly(() => rm(p, o)),
@@ -1029,7 +956,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     mkdtempSync: mkdtemp,
     renameSync: rename,
     copyFileSync: copyFile,
-    cpSync: cp,
+    cpSync: (a, b, o) => copyTreeSync(files, a, b, o, family, P),
     unlinkSync: unlink,
     rmdirSync: rmdir,
     rmSync: rm,

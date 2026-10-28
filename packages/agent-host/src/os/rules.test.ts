@@ -7,7 +7,6 @@ import {
   findOnPath,
   foldCase,
   isInside,
-  linkLoop,
   pathKey,
   pathRules,
   pathRulesFrom,
@@ -18,7 +17,6 @@ import {
   systemTool,
   traitsOf,
   type OsFamily,
-  type TreeReader,
 } from './rules.js'
 
 /**
@@ -244,28 +242,5 @@ describe('Windows path forms Win32 opens as one path', () => {
     expect(samePath('C:\\x\\y.', 'C:\\x\\y', 'windows')).toBe(false)
     expect(isInside('C:\\work\\proj', 'C:\\work\\proj.\\secret', 'windows')).toBe(false)
     expect(isInside('C:\\work\\proj', 'C:\\work\\proj \\secret', 'windows')).toBe(false)
-  })
-})
-
-describe('linkLoop walks a folder once', () => {
-  it('however many links lead to it: a chain of folders each linked twice to the next is not walked as 2^n paths', () => {
-    // d0 holds two links to d1, d1 two links to d2, and so on: 2^16 ways down, 17 folders
-    const depth = 16
-    let listed = 0
-    // The folder a path leads to: a link a<n> or b<n> leads to d<n>
-    const folderOf = (path: string) => path.split('/').filter(Boolean).reduce((_, seg) => `d${seg.slice(1)}`, 'd0')
-    const reader: TreeReader = {
-      list: (dir) => {
-        listed++
-        const n = Number(folderOf(dir).slice(1))
-        return n >= depth ? [] : ['a', 'b'].map((name) => ({ name: `${name}${n + 1}`, isDirectory: () => false, isSymbolicLink: () => true }))
-      },
-      real: (path) => `/${folderOf(path)}`,
-      isDir: () => true,
-      loops: () => false,
-      isJunction: () => true,
-    }
-    expect(linkLoop('/d0', reader, 'windows', posix.join)).toBeNull()
-    expect(listed).toBeLessThan(2 * depth + 5)
   })
 })

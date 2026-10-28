@@ -34,7 +34,11 @@ export type OsTraits = {
   readonly locksRunningPrograms: boolean
   /** A watched folder's parents cannot be moved: a project is watched by one recursive watch on its root */
   readonly locksWatchedFolders: boolean
-  /** Copying a folder (`cp` with `verbatimSymlinks`) keeps a link as a link; on Windows a junction is copied as its target */
+  /**
+   * A tree's links to folders keep their meaning in a copy of it: false on Windows, where pnpm and workspaces link
+   * folders by junction, whose target is always a whole path, so the `Os`'s copy keeps them leading into the source and
+   * a copy that must stand alone (a worktree) retargets them itself (dev-services `copyTreeWindows`)
+   */
   readonly cpKeepsLinks: boolean
   /** A folder can be cloned with `cp -c` (APFS clonefile) */
   readonly clonesFiles: boolean
@@ -278,83 +282,6 @@ export function* recursiveListing<E extends ListedEntry>(root: string, join: (..
     }
   }
   return out
-}
-
-/** What `linkLoop` reads of a tree */
-export type TreeReader = {
-  /** The entries of a folder (through links) */
-  list(dir: string): ListedEntry[]
-  /** Where a path leads through every link, or null when nowhere; a folder's answer is compared by `pathKey` */
-  real(path: string): string | null
-  /** Whether a path leads to a folder (through links) */
-  isDir(path: string): boolean
-  /** Whether a path is a link that leads in a circle (`ELOOP` when it is followed) */
-  loops(path: string): boolean
-  /** Whether a link is a junction (Windows), which Windows copies as the folder it leads to; a symlink is copied as a link */
-  isJunction(path: string): boolean
-}
-
-/**
- * The first link in the tree at `root` that a copy of it cannot take, or null. Two kinds:
- *
- * - A link that leads in a circle (`loopA` -> `loopB` -> `loopA`, or `x` -> `x`), a file link as much as a folder
- *   link, on every OS. Node's own `cpSync` of a tree holding one ends the process with nothing to catch (exit 127 on
- *   Windows; an uncaught C++ `filesystem_error`, abort 134, on Linux): measured with Node 22. Its `stat` says `ELOOP`.
- * - A junction back to a folder the walk is already inside (itself, an ancestor, or by a chain of links). Windows
- *   copies a junction as the folder it leads to (`traits.cpKeepsLinks` false), so it would copy for ever and ended
- *   the process the same way. Only a junction: a Windows symlink to a folder is copied as a link, as every link is
- *   where `traits.cpKeepsLinks` is true, so a symlink back to an ancestor copies fine and is not refused (measured).
- *
- * The `Os` refuses such a copy with `ELOOP` before anything is copied, on the real OS and in memory alike. The walk
- * enters every link to a folder on Windows, since telling a junction from a symlink can cost a process there, and asks
- * `isJunction` only when it comes back to a folder it is inside: the cycle counts when every link on the way from the
- * root to its end is a junction (a symlink on the way is one Node's copy never enters). A folder is walked once, unless
- * it was walked through a symlink and a cycle skipped there (it may be reached by junctions alone another time). The
- * rule is wider than Node's in one way: a symlink to a big folder is read though the copy would not enter it.
- */
-export function linkLoop(root: string, read: TreeReader, family: OsFamily, join: (...parts: string[]) => string): string | null {
-  // A root that loops is `ELOOP` from a synchronous copy as it is, but `fs.promises.cp` copies it as a link
-  if (read.loops(root)) return root
-  const start = read.real(root)
-  if (start === null || !read.isDir(root)) return null
-  const followsLinks = !traitsOf(family).cpKeepsLinks
-  // Folders walked to the end with nothing skipped in them, by real path: reaching one again adds nothing
-  const done = new Set<string>()
-  const junctions = new Map<string, boolean>()
-  const isJunction = (path: string): boolean => {
-    let is = junctions.get(path)
-    if (is === undefined) junctions.set(path, (is = read.isJunction(path)))
-    return is
-  }
-  // Cycles back to a folder the walk was inside that a symlink on the way keeps Node's copy from following
-  let skipped = 0
-  // A folder's real path is its parent's and its name; only a link's is asked for. `links`: those entered on the way
-  const walk = (dir: string, dirReal: string, chain: ReadonlySet<string>, links: readonly string[]): string | null => {
-    const key = pathKey(dirReal, family)
-    if (done.has(key)) return null
-    const inside = new Set(chain).add(key)
-    const before = skipped
-    for (const e of read.list(dir)) {
-      const path = join(dir, e.name)
-      const link = e.isSymbolicLink()
-      if (link && read.loops(path)) return path
-      if (!link && !e.isDirectory()) continue
-      if (link && (!followsLinks || !read.isDir(path))) continue
-      const real = link ? read.real(path) : join(dirReal, e.name)
-      if (real === null) continue
-      const via = link ? [...links, path] : links
-      if (inside.has(pathKey(real, family))) {
-        if (via.every(isJunction)) return path
-        skipped++
-        continue
-      }
-      const found = walk(path, real, inside, via)
-      if (found !== null) return found
-    }
-    if (skipped === before) done.add(key)
-    return null
-  }
-  return walk(root, start, new Set(), [])
 }
 
 /** Where Windows lives when `%SystemRoot%` cannot be used */

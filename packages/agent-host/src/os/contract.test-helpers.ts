@@ -23,6 +23,11 @@ export function ready(child: OsChild): Promise<OsChild> {
 export type Contract = {
   name: string
   want: Record<OsFamily, unknown>
+  /**
+   * macOS's answer where it is not Linux's (`want.posix`), as measured on a Mac or as Darwin documents it:
+   * `real.test.ts` holds a Mac's real OS to it, and the in-memory OS (which models Linux) to `want.posix`
+   */
+  darwin?: unknown
   /** Needs the right to make a symlink, which a Windows account without Developer Mode lacks */
   symlinks?: boolean
   /**
@@ -343,7 +348,7 @@ export const CONTRACT: Contract[] = [
   {
     name: 'a copy of a tree keeps a relative link as written',
     symlinks: true,
-    want: { windows: { file: 'k', link: 't\\in' }, posix: { file: 'k', link: 't/in' } },
+    want: { windows: { file: 'k', link: 't\\in', whole: true }, posix: { file: 'k', link: 't/in', whole: true } },
     run(os, root) {
       const { join } = os.paths.path
       const f = os.files
@@ -351,7 +356,13 @@ export const CONTRACT: Contract[] = [
       f.writeFileSync(join(root, 'src', 't', 'in'), 'k')
       f.symlinkSync(join('t', 'in'), join(root, 'src', 's'), 'file')
       f.cpSync(join(root, 'src'), join(root, 'dst'), { recursive: true, verbatimSymlinks: true })
-      return { file: f.readFileSync(join(root, 'dst', 't', 'in'), 'utf8'), link: f.readlinkSync(join(root, 'dst', 's')) }
+      // Without verbatimSymlinks, Node's rule: made whole from the source link's folder
+      f.cpSync(join(root, 'src'), join(root, 'whole'), { recursive: true })
+      return {
+        file: f.readFileSync(join(root, 'dst', 't', 'in'), 'utf8'),
+        link: f.readlinkSync(join(root, 'dst', 's')),
+        whole: os.paths.same(f.readlinkSync(join(root, 'whole', 's')), join(root, 'src', 't', 'in')),
+      }
     },
   },
   {
@@ -416,12 +427,17 @@ export const CONTRACT: Contract[] = [
   },
   {
     name: 'a tree copied into itself is refused',
-    want: both({ copy: err('ERR_FS_CP_EINVAL') }),
+    want: both({ copy: err('ERR_FS_CP_EINVAL'), viaLink: err('ERR_FS_CP_EINVAL') }),
     async run(os, root) {
       const { join } = os.paths.path
       os.files.mkdirSync(join(root, 's'))
       os.files.writeFileSync(join(root, 's', 'f'), '')
-      return { copy: await outcome(() => os.files.cpSync(join(root, 's'), join(root, 's', 'in'), { recursive: true })) }
+      // `l` leads to `s`: `l/in` is inside it too
+      os.files.symlinkSync(join(root, 's'), join(root, 'l'), 'junction')
+      return {
+        copy: await outcome(() => os.files.cpSync(join(root, 's'), join(root, 's', 'in'), { recursive: true })),
+        viaLink: await outcome(() => os.files.cpSync(join(root, 's'), join(root, 'l', 'in'), { recursive: true })),
+      }
     },
   },
   {
@@ -576,6 +592,9 @@ export const CONTRACT: Contract[] = [
       windows: { seconds: '1700000000123456000', date: '1700000000123000000' },
       posix: { seconds: '1700000000123456000', date: '1700000000122999000' },
     },
+    // libuv cuts a time to whole microseconds on Linux only; on macOS APFS keeps the nanoseconds of the double it is
+    // given (measured on macOS 27, Node 26)
+    darwin: { seconds: '1700000000123456716', date: '1700000000122999906' },
     run(os, root) {
       const { join } = os.paths.path
       os.files.writeFileSync(join(root, 'a'), '')
@@ -613,6 +632,8 @@ export const CONTRACT: Contract[] = [
       windows: { stat: true, lstat: true, exists: true, read: 'x', write: 'ok' },
       posix: { stat: err('ENOTDIR'), lstat: err('ENOTDIR'), exists: false, read: err('ENOTDIR'), write: err('EISDIR') },
     },
+    // Darwin's open(2) with O_CREAT of `name/` that is not there answers ENOENT, Linux's EISDIR (measured on macOS 27)
+    darwin: { stat: err('ENOTDIR'), lstat: err('ENOTDIR'), exists: false, read: err('ENOTDIR'), write: err('ENOENT') },
     async run(os, root) {
       const { join } = os.paths.path
       const f = `${join(root, 'f')}/`
@@ -665,8 +686,9 @@ export const CONTRACT: Contract[] = [
     },
   },
   {
-    name: 'a tree with a link back to its own folder: copied as a link on POSIX, refused with ELOOP on Windows',
-    want: { windows: { copy: err('ELOOP'), copied: false, promised: err('ELOOP') }, posix: { copy: 'ok', copied: true, promised: 'ok' } },
+    name: 'a tree with a junction back to its own folder is copied with the junction as a link, by both copies',
+    // Node's own cpSync copied it as the folder it leads to on Windows, for ever, and ended the process (0xC0000409)
+    want: both({ copy: 'ok', kept: true, same: true, promised: 'ok', promisedKept: true }),
     async run(os, root) {
       const { join } = os.paths.path
       const f = os.files
@@ -674,24 +696,26 @@ export const CONTRACT: Contract[] = [
       f.mkdirSync(join(t, 'd'), { recursive: true })
       f.writeFileSync(join(t, 'd', 'f'), '')
       f.symlinkSync(t, join(t, 'd', 'up'), 'junction')
+      const up = (out: string) => f.lstatSync(join(root, out, 'd', 'up')).isSymbolicLink()
       return {
         copy: await outcome(() => (f.cpSync(t, join(root, 'copy'), { recursive: true }), 'ok')),
-        copied: f.existsSync(join(root, 'copy')),
+        kept: up('copy'),
+        same: os.paths.same(f.readlinkSync(join(root, 'copy', 'd', 'up')), t),
         promised: await outcome(async () => (await f.promises.cp(t, join(root, 'copy2'), { recursive: true }), 'ok')),
+        promisedKept: up('copy2'),
       }
     },
   },
   {
-    name: 'a tree with a link in a circle (a -> b -> a, x -> x) is refused with ELOOP before anything is copied, a file link as much as a folder link',
-    // Node's own copy of one ended the process: exit 127 on Windows, an uncaught C++ error (abort) on Linux
+    name: 'a tree with a link in a circle (a -> b -> a, x -> x) is copied with each link as a link, a file link as much as a folder link, the root too',
+    // Node's own cpSync of one ended the process: 0xC0000409 on Windows, an uncaught C++ error (abort) on Linux
     symlinks: true,
     want: both({
-      mutual: { copy: err('ELOOP'), copied: false, promised: err('ELOOP') },
-      self: { copy: err('ELOOP'), copied: false, promised: err('ELOOP') },
-      nested: { copy: err('ELOOP'), copied: false, promised: err('ELOOP') },
-      folders: { copy: err('ELOOP'), copied: false, promised: err('ELOOP') },
-      root: { copy: err('ELOOP'), copied: false, promised: err('ELOOP') },
-      rootNotRecursive: { copy: err('ELOOP'), copied: false },
+      mutual: { copy: 'ok', links: ['loopB', 'loopA'], promised: 'ok' },
+      self: { copy: 'ok', links: ['x'], promised: 'ok' },
+      folders: { copy: 'ok', links: [true, true], promised: 'ok' },
+      root: { copy: 'ok', links: ['r'], promised: 'ok' },
+      rootNotRecursive: { copy: 'ok', links: ['r'] },
     }),
     async run(os, root) {
       const { join } = os.paths.path
@@ -704,37 +728,47 @@ export const CONTRACT: Contract[] = [
         build(t)
         return t
       }
-      const copyOf = async (t: string, recursive = true) => {
+      // What each named link in the copy is (`''`: the copy itself), by `read`
+      const copyOf = async (t: string, names: string[], read: (link: string) => unknown, recursive = true) => {
         const out = join(root, `out${n++}`)
         const copy = await outcome(() => (f.cpSync(t, out, { recursive }), 'ok'))
-        const result: Record<string, unknown> = { copy, copied: f.existsSync(out) }
+        const result: Record<string, unknown> = { copy, links: names.map((name) => read(name === '' ? out : join(out, name))) }
         if (recursive) result['promised'] = await outcome(async () => (await f.promises.cp(t, join(root, `out${n++}`), { recursive }), 'ok'))
         return result
       }
+      // Made whole from the source's folder (no verbatimSymlinks): the name it leads to
+      const text = (link: string) => os.paths.path.basename(f.readlinkSync(link))
       return {
         mutual: await copyOf(
           tree((t) => {
             f.symlinkSync('loopB', join(t, 'loopA'), 'file')
             f.symlinkSync('loopA', join(t, 'loopB'), 'file')
           }),
+          ['loopA', 'loopB'],
+          text,
         ),
-        self: await copyOf(tree((t) => f.symlinkSync('x', join(t, 'x'), 'file'))),
-        nested: await copyOf(tree((t) => f.symlinkSync('x', join(t, 'd', 'x'), 'file'))),
+        self: await copyOf(
+          tree((t) => f.symlinkSync('x', join(t, 'd', 'x'), 'file')),
+          [join('d', 'x')],
+          text,
+        ),
         folders: await copyOf(
           tree((t) => {
             f.symlinkSync(join(t, 'b'), join(t, 'a'), 'dir')
             f.symlinkSync(join(t, 'a'), join(t, 'b'), 'dir')
           }),
+          ['a', 'b'],
+          (link) => f.lstatSync(link).isSymbolicLink(),
         ),
-        root: await copyOf((f.symlinkSync('r', join(root, 'r'), 'file'), join(root, 'r'))),
-        rootNotRecursive: await copyOf(join(root, 'r'), false),
+        root: await copyOf((f.symlinkSync('r', join(root, 'r'), 'file'), join(root, 'r')), [''], text),
+        rootNotRecursive: await copyOf(join(root, 'r'), [''], text, false),
       }
     },
   },
   {
-    name: 'a link that leads somewhere is copied as a link, a symlink back to its own folder too; only a junction is followed as a folder',
+    name: 'a link that leads somewhere is copied as a link: a symlink back to its own folder, a junction, one to a file and one to nothing',
     symlinks: true,
-    want: both({ copy: 'ok', kept: { up: true, file: true, dangling: true }, folderFiles: ['f'] }),
+    want: both({ copy: 'ok', kept: { up: true, junction: true, file: true, dangling: true }, through: 'k', folderFiles: ['f'] }),
     async run(os, root) {
       const { join } = os.paths.path
       const f = os.files
@@ -743,40 +777,70 @@ export const CONTRACT: Contract[] = [
       f.writeFileSync(join(t, 'd', 'f'), 'k')
       f.writeFileSync(join(t, 'g'), 'k')
       f.symlinkSync(t, join(t, 'd', 'up'), 'dir')
+      f.symlinkSync(join(t, 'd'), join(t, 'junction'), 'junction')
       f.symlinkSync(join(t, 'g'), join(t, 'd', 'file'), 'file')
       f.symlinkSync(join(t, 'gone'), join(t, 'd', 'dangling'), 'file')
       const copy = await outcome(() => (f.cpSync(t, join(root, 'out'), { recursive: true }), 'ok'))
-      const kept = (name: string) => f.lstatSync(join(root, 'out', 'd', name)).isSymbolicLink()
-      return { copy, kept: { up: kept('up'), file: kept('file'), dangling: kept('dangling') }, folderFiles: f.readdirSync(join(root, 'out', 'd')).filter((n) => n === 'f') }
+      const kept = (...name: string[]) => f.lstatSync(join(root, 'out', ...name)).isSymbolicLink()
+      return {
+        copy,
+        kept: { up: kept('d', 'up'), junction: kept('junction'), file: kept('d', 'file'), dangling: kept('d', 'dangling') },
+        through: f.readFileSync(join(root, 'out', 'junction', 'f'), 'utf8'),
+        folderFiles: f.readdirSync(join(root, 'out', 'd')).filter((n) => n === 'f'),
+      }
     },
   },
   {
-    name: 'a symlink to a folder above the copied tree is not entered by the copy; a junction back into the tree reached only through it still is refused',
-    symlinks: true,
-    // Windows: Node copies a symlink as a link and never enters it, so the tree above is no loop; but a junction back to
-    // the root, reached by a route of junctions too, is one. POSIX copies every link as a link
+    name: "a copy takes Node's options: force, errorOnExist, preserveTimestamps; a link onto a file is EEXIST, onto a link replaces it",
+    // `timesLost`: a plain copy keeps the change time where copying a file does (Windows' CopyFile, macOS's copyfile)
     want: {
-      windows: { above: 'ok', aboveKept: true, viaSymlinkFirst: err('ELOOP') },
-      posix: { above: 'ok', aboveKept: true, viaSymlinkFirst: 'ok' },
+      windows: { replaced: 'new', kept: 'old', refused: err('ERR_FS_CP_EEXIST'), times: true, timesLost: true, readOnlyTimes: true, linkOntoFile: err('EEXIST'), linkOntoLink: true },
+      posix: { replaced: 'new', kept: 'old', refused: err('ERR_FS_CP_EEXIST'), times: true, timesLost: false, readOnlyTimes: true, linkOntoFile: err('EEXIST'), linkOntoLink: true },
     },
+    darwin: { replaced: 'new', kept: 'old', refused: err('ERR_FS_CP_EEXIST'), times: true, timesLost: true, readOnlyTimes: true, linkOntoFile: err('EEXIST'), linkOntoLink: true },
     async run(os, root) {
       const { join } = os.paths.path
       const f = os.files
-      // outer/p/d/up -> outer (a symlink to the parent of the tree copied)
-      const p = join(root, 'outer', 'p')
-      f.mkdirSync(join(p, 'd'), { recursive: true })
-      f.writeFileSync(join(p, 'd', 'f'), 'k')
-      f.symlinkSync(join(root, 'outer'), join(p, 'd', 'up'), 'dir')
-      const above = await outcome(() => (f.cpSync(p, join(root, 'out1'), { recursive: true }), 'ok'))
-      const aboveKept = f.lstatSync(join(root, 'out1', 'd', 'up')).isSymbolicLink()
-      // q/0s -> q/a (a symlink, listed first) and q/a/j -> q (a junction back to the root): the junction is a loop on the
-      // route q -> a -> j, which the copy follows; the symlink 0s reaches the same folders first but is not followed
-      const q = join(root, 'q')
-      f.mkdirSync(join(q, 'a'), { recursive: true })
-      f.symlinkSync(join(q, 'a'), join(q, '0s'), 'dir')
-      f.symlinkSync(q, join(q, 'a', 'j'), 'junction')
-      const viaSymlinkFirst = await outcome(() => (f.cpSync(q, join(root, 'out2'), { recursive: true }), 'ok'))
-      return { above, aboveKept, viaSymlinkFirst }
+      const tree = (name: string, text: string) => {
+        f.mkdirSync(join(root, name))
+        f.writeFileSync(join(root, name, 'a'), text)
+        return join(root, name)
+      }
+      const s = tree('s', 'new')
+      const read = (d: string) => f.readFileSync(join(d, 'a'), 'utf8')
+      const replace = tree('d1', 'old')
+      f.cpSync(s, replace, { recursive: true })
+      const keep = tree('d2', 'old')
+      f.cpSync(s, keep, { recursive: true, force: false })
+      const refuse = tree('d3', 'old')
+      f.utimesSync(join(s, 'a'), 1_600_000_000, 1_600_000_000)
+      f.writeFileSync(join(s, 'ro'), 'r')
+      f.utimesSync(join(s, 'ro'), 1_600_000_000, 1_600_000_000)
+      f.chmodSync(join(s, 'ro'), 0o444)
+      f.cpSync(s, join(root, 't1'), { recursive: true, preserveTimestamps: true })
+      f.cpSync(s, join(root, 't2'), { recursive: true })
+      const mtime = (...p: string[]) => f.statSync(join(root, ...p)).mtimeMs
+      // A link copied onto a file, and onto a link: the junction `j` in `l`, over `j` a file in `lf` and a link in `ll`
+      const l = join(root, 'l')
+      f.mkdirSync(l)
+      f.symlinkSync(s, join(l, 'j'), 'junction')
+      f.mkdirSync(join(root, 'lf'))
+      f.writeFileSync(join(root, 'lf', 'j'), 'file')
+      f.mkdirSync(join(root, 'll'))
+      f.symlinkSync(join(root, 'gone'), join(root, 'll', 'j'), 'junction')
+      const result = {
+        replaced: read(replace),
+        kept: read(keep),
+        refused: await outcome(() => f.cpSync(s, refuse, { recursive: true, force: false, errorOnExist: true })),
+        times: mtime('t1', 'a') === 1_600_000_000_000,
+        timesLost: mtime('t2', 'a') === 1_600_000_000_000,
+        readOnlyTimes: mtime('t1', 'ro') === 1_600_000_000_000,
+        linkOntoFile: await outcome(() => f.cpSync(l, join(root, 'lf'), { recursive: true })),
+        linkOntoLink: (f.cpSync(l, join(root, 'll'), { recursive: true }), os.paths.same(f.readlinkSync(join(root, 'll', 'j')), s)),
+      }
+      // The temporary folder is removed after: nothing read-only is left in it
+      for (const p of [join(s, 'ro'), join(root, 't1', 'ro'), join(root, 't2', 'ro')]) f.chmodSync(p, 0o644)
+      return result
     },
   },
   {
@@ -797,12 +861,13 @@ export const CONTRACT: Contract[] = [
   },
   {
     name: 'a path without an extension starts on Windows only as a .com or .exe; elsewhere only as written',
-    want: { windows: { noExtension: err('ENOENT'), found: 0 }, posix: { noExtension: 0, found: err('ENOENT') } },
+    // Whether it starts, not how it ends: a copy of Node made in a test ended by a signal on macOS 27 (code null)
+    want: { windows: { noExtension: err('ENOENT'), found: 'started' }, posix: { noExtension: 'started', found: err('ENOENT') } },
     async run(os, root, ctx) {
       const { join } = os.paths.path
       ctx.program(join(root, 'noext'))
       ctx.program(join(root, 'withext.exe'))
-      const code = (path: string) => outcome(async () => (await os.processes.run(path, [])).code)
+      const code = (path: string) => outcome(async () => (await os.processes.run(path, []), 'started'))
       return { noExtension: await code(join(root, 'noext')), found: await code(join(root, 'withext')) }
     },
   },

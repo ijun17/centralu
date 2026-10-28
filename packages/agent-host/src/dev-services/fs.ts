@@ -8,6 +8,7 @@ import { folderNameError, IMAGE_PREVIEW_MAX_BYTES, wireBaseName, wireJoin, type 
 import { assertCreatePath, assertExistingPath, canonicalPath, isInside, MissingPathError, pathParts, UnsafePathError } from './path-guard.js'
 import { runGit, type GitTrust } from './git-exec.js'
 import { clonesFiles, cpKeepsLinks, hasWindowsFileNames, HOST_PLATFORM, type Platform } from '../os.js'
+import { realOs } from '../os/real.js'
 import { rpcError } from '../rpc-error.js'
 
 /**
@@ -429,11 +430,11 @@ export async function copyTree(
    */
   if (!existed) await rm(dst, { recursive: true, force: true })
   if (!cpKeepsLinks()) return copyTreeWindows(src, dst, links)
-  const { cpSync } = await import('node:fs')
-  // verbatimSymlinks: without it Node rewrites a relative link into an absolute one pointing back into the
+  // The `Os`'s copy, which makes every link again as a link and never follows one (a link in a circle ended the host
+  // in Node's own `cpSync`). verbatimSymlinks: without it Node rewrites a relative link into an absolute one pointing back into the
   // source, so dropEscapingLinks then removed every pnpm link in a Linux worktree as leaving it (seen on CI,
   // 2026-10-04). macOS took the clone path above, which keeps links as they are.
-  cpSync(src, dst, { recursive: true, verbatimSymlinks: true })
+  await realOs().files.promises.cp(src, dst, { recursive: true, verbatimSymlinks: true })
 }
 
 export type CopyTreeOptions = {

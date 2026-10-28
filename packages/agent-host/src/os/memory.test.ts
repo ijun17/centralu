@@ -47,6 +47,18 @@ describe('the in-memory OS answers the contract as each family does', () => {
     expect(os.files.readlinkSync(`${t}-r`)).toBe(t)
   })
 
+  it('windows: a tree copy makes a junction again as a junction, so it needs no right to make a symlink (Node makes a directory symlink)', async () => {
+    const os = fresh('windows', false)
+    const { join } = os.paths.path
+    const t = join(os.env.temp, 't')
+    os.files.mkdirSync(join(t, 'd'), { recursive: true })
+    os.files.symlinkSync(join(t, 'd'), join(t, 'j'), 'junction')
+    os.files.symlinkSync(t, join(t, 'd', 'up'), 'junction')
+    expect(await outcome(() => (os.files.cpSync(t, join(os.env.temp, 'c'), { recursive: true }), 'ok'))).toBe('ok')
+    expect(await outcome(async () => (await os.files.promises.cp(t, join(os.env.temp, 'c2'), { recursive: true }), 'ok'))).toBe('ok')
+    expect(os.files.readlinkSync(join(os.env.temp, 'c', 'd', 'up'))).toBe(t)
+  })
+
   it('windows: a junction to a file is made but leads nowhere', async () => {
     const os = fresh('windows')
     const f = os.paths.path.join(os.env.temp, 'f')

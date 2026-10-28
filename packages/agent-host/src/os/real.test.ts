@@ -46,8 +46,10 @@ describe('the real OS and the in-memory one answer the contract alike', () => {
       })
       const memoryRoot = memory.files.mkdtempSync(memory.paths.path.join(memory.env.temp, 'c-'))
       const fake = await outcome(() => c.run(memory, memoryRoot, memoryContext(memory)))
-      expect(real, 'the real OS').toEqual(c.want[HOST_FAMILY])
-      expect(fake, 'the in-memory OS').toEqual(real)
+      // macOS answers as Linux but where a case says otherwise (`darwin`); the in-memory OS models Linux
+      const mac = process.platform === 'darwin' && c.darwin !== undefined
+      expect(real, 'the real OS').toEqual(mac ? c.darwin : c.want[HOST_FAMILY])
+      expect(fake, 'the in-memory OS').toEqual(mac ? c.want[HOST_FAMILY] : real)
     })
   }
 })
@@ -89,6 +91,25 @@ describe('the real OS is made of the layer modules', () => {
     const r = await os.processes.run(process.execPath, ['-e', 'process.stdin.pipe(process.stdout); process.exitCode = 3'], { input: 'hé' })
     expect({ code: r.code, stdout: r.stdout.toString() }).toEqual({ code: 3, stdout: 'hé' })
     await expect(os.processes.run(os.paths.path.join(tmpdir(), 'cc-no-such-program'), [])).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('copies a tree with promises.cp without holding the event loop: other work runs between its steps', async () => {
+    const root = realpathSync.native(mkdtempSync(os.paths.path.join(tmpdir(), 'cc-os-cp-')))
+    roots.push(root)
+    const { join } = os.paths.path
+    for (let i = 0; i < 20; i++) os.files.mkdirSync(join(root, 't', `d${i}`), { recursive: true })
+    let turns = 0
+    let copying = true
+    const count = () => {
+      turns++
+      if (copying) setImmediate(count)
+    }
+    setImmediate(count)
+    await os.files.promises.cp(join(root, 't'), join(root, 'out'), { recursive: true })
+    copying = false
+    expect(os.files.readdirSync(join(root, 'out'))).toHaveLength(20)
+    // A copy done in one synchronous go lets no turn run before it ends
+    expect(turns).toBeGreaterThan(1)
   })
 
   it('ends a run past its time, its whole tree, and says so', async () => {

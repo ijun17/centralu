@@ -35,7 +35,6 @@ import {
   envValue,
   fileUrlToPath,
   isInside,
-  linkLoop,
   listRecursive,
   pathKey,
   pathToFileUrl,
@@ -43,11 +42,10 @@ import {
   samePath,
   signalError,
   signalRefusal,
-  systemTool,
   type OsFamily,
-  type TreeReader,
 } from './rules.js'
-import { abortReason, asOsError, errorCode, linkLoopError } from './errors.js'
+import { abortReason, asOsError, errorCode } from './errors.js'
+import { copyTreeAsync, copyTreeSync } from './copy.js'
 import { runChild } from './run.js'
 
 /**
@@ -122,56 +120,6 @@ function readdirRecursiveSync(p: string, withFileTypes: boolean): string[] | OsD
   return withFileTypes ? listed.map((e) => e.entry) : listed.map((e) => e.rel)
 }
 
-/**
- * Whether a Windows link is a junction rather than a symlink: Node's types and stats do not say, so PowerShell is
- * asked (a few hundred ms, which is why `linkLoop` asks only of a link that leads back). A link it cannot tell counts
- * as a junction, the side that refuses a copy.
- */
-function isJunctionOnWindows(path: string): boolean {
-  const r = spawnSync(systemTool(['WindowsPowerShell', 'v1.0', 'powershell.exe'], process.env), ['-NoProfile', '-NonInteractive', '-Command', '(Get-Item -LiteralPath $env:CC_LINK_PATH -Force).LinkType'], {
-    env: { ...process.env, CC_LINK_PATH: path },
-    encoding: 'utf8',
-    windowsHide: true,
-    timeout: 30_000,
-  })
-  return r.status !== 0 || r.stdout.trim() !== 'SymbolicLink'
-}
-
-/** The tree reader `linkLoop` walks, on this machine */
-const treeReader: TreeReader = {
-  list: (dir) => fs.readdirSync(dir, { withFileTypes: true }),
-  real: (p) => {
-    try {
-      return fs.realpathSync.native(p)
-    } catch {
-      return null
-    }
-  },
-  isDir: (p) => {
-    try {
-      return fs.statSync(p, { throwIfNoEntry: false })?.isDirectory() ?? false
-    } catch {
-      return false
-    }
-  },
-  loops: (p) => {
-    try {
-      fs.statSync(p)
-      return false
-    } catch (e) {
-      return errorCode(e) === 'ELOOP'
-    }
-  },
-  isJunction: (p) => HOST_FAMILY !== 'windows' || isJunctionOnWindows(p),
-}
-
-/** A tree copy the layer refuses before Node starts it: one Node cannot do and would end the process (`linkLoop`) */
-function refuseLoop(from: string, o: CopyTreeOptions | undefined): void {
-  if (!o?.recursive) return
-  const loop = linkLoop(from, treeReader, HOST_FAMILY, join)
-  if (loop !== null) throw linkLoopError(loop)
-}
-
 function readdirAsync(p: string, o?: { recursive?: boolean }): Promise<string[]>
 function readdirAsync(p: string, o: { withFileTypes: true; recursive?: boolean }): Promise<OsDirent[]>
 function readdirAsync(p: string, o?: { withFileTypes?: boolean; recursive?: boolean }): Promise<string[] | OsDirent[]> {
@@ -196,10 +144,7 @@ const promises: OsFilesAsync = {
   mkdtemp: (prefix) => fsp.mkdtemp(prefix),
   rename: (a, b) => fsp.rename(a, b),
   copyFile: (a, b, mode) => fsp.copyFile(a, b, mode),
-  cp: async (a, b, o?: CopyTreeOptions) => {
-    refuseLoop(a, o)
-    await fsp.cp(a, b, o)
-  },
+  cp: (a, b, o?: CopyTreeOptions) => copyTreeAsync(promises, a, b, o, HOST_FAMILY, pathsOf()),
   unlink: (p) => fsp.unlink(p),
   rmdir: (p) => fsp.rmdir(p),
   rm: (p, o) => fsp.rm(p, o),
@@ -249,10 +194,7 @@ const files: OsFiles = {
   mkdtempSync: (prefix) => fs.mkdtempSync(prefix),
   renameSync: (a, b) => fs.renameSync(a, b),
   copyFileSync: (a, b, mode) => fs.copyFileSync(a, b, mode),
-  cpSync: (a, b, o) => {
-    refuseLoop(a, o)
-    fs.cpSync(a, b, o)
-  },
+  cpSync: (a, b, o) => copyTreeSync(files, a, b, o, HOST_FAMILY, pathsOf()),
   unlinkSync: (p) => fs.unlinkSync(p),
   rmdirSync: (p) => fs.rmdirSync(p),
   rmSync: (p, o) => fs.rmSync(p, o),
