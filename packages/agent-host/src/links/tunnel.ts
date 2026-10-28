@@ -193,12 +193,14 @@ function othersOf(raw: unknown): { others?: RemoteCredential[] } {
 
 /**
  * A machine's full credentials as its connection line or `host.credentials` lists them (#1405), entry by entry: an id
- * `--revoke` takes, a label of one line with no format character, a date that is one; anything else is left out. At
- * most 1,000 are read; the row shows 32 and counts the rest. Null for anything but a list
+ * `--revoke` takes, a label of one line with no format character, a date that is one; anything else is left out. Every
+ * entry is read, however many (#1405 review): the row shows 32 and counts the rest, and a count cut at some bound would
+ * hide what lies past it, which the host accepts all the same. The list is no longer than `serve.json`, which the host
+ * reads whole at each hello anyway. Null for anything but a list
  */
 export function credentialsOf(raw: unknown): RemoteCredential[] | null {
   if (!Array.isArray(raw)) return null
-  return raw.slice(0, 1000).flatMap((e: unknown) => {
+  return raw.flatMap((e: unknown) => {
     const o = asObj(e)
     if (typeof o.id !== 'string' || !/^[0-9a-f]{8}$/.test(o.id) || typeof o.label !== 'string') return []
     const created = typeof o.created === 'number' && Number.isFinite(o.created) && o.created > 0 && o.created < 8.64e15 ? o.created : 0

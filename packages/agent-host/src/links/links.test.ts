@@ -3796,6 +3796,15 @@ describe('machines.revokeCredential (#1405)', () => {
     expect(row.otherCredentialsMore).toBe(8)
   })
 
+  it('counts every entry past the first 32, however many, so the count is exact (#1405 review)', async () => {
+    const many = Array.from({ length: 1205 }, (_, i) => cred(i.toString(16).padStart(8, '0'), `junk-${i}`))
+    const { hub } = await serveMachine([own, ...many])
+    await eventually(() => (hub.links.list()[0]!.otherCredentials?.length ?? 0) > 0)
+    const row = hub.links.list()[0]!
+    expect(row.otherCredentials).toHaveLength(32)
+    expect(row.otherCredentialsMore).toBe(1205 - 32)
+  })
+
   it("keeps the connection line's list from a machine that does not answer host.credentials", async () => {
     const remote = await remoteHost(0, new Store(), { without: ['host.credentials'] })
     const others = [{ id: 'aaaa1111', label: 'hub:studio', created: 5, replaced: false }]
