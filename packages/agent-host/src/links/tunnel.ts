@@ -999,6 +999,8 @@ export class SshTunnel implements Tunnel {
     } catch (err) {
       // No line: say what the remote said on the way out, if anything
       const why = lastLine(r.stderr)
+      // Its serve.json may not be read there (#1405 review): the launcher's own advice, not a guess at an older Centralu
+      if (r.code !== 0 && /cannot be read by this user \((EACCES|EPERM)\)/.test(why)) throw new Error(why.replace(/^centralu serve: /, ''))
       throw new Error(`${(err as Error).message}${why ? `: ${why}` : r.code ? ` (exit ${r.code})` : ''}`)
     }
   }

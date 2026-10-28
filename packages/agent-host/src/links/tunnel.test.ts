@@ -102,6 +102,8 @@ const answer = () => {
   // A remote updated meanwhile: refuses --pair only while this file exists, and prints no token without --pair
   if (process.env.FAKE_SSH_NO_PAIR_FILE && / --pair /.test(cmd) && fs.existsSync(process.env.FAKE_SSH_NO_PAIR_FILE)) { process.stderr.write('unknown option for serve: --pair' + String.fromCharCode(10)); process.exit(2) }
   if (process.env.FAKE_SSH_NO_PAIR_FILE && !/ --pair /.test(cmd) && !fs.existsSync(process.env.FAKE_SSH_NO_PAIR_FILE)) return process.stdout.write(line({ token: undefined, takes: ['from', 'window', 'pair'] }) + String.fromCharCode(10))
+  // A serve.json this user may not read there (#1405 review), as the launcher says it
+  if (process.env.FAKE_SSH_DENIED) { process.stderr.write('centralu serve: /d/serve.json cannot be read by this user (EACCES). Give this user read and write access to it again (on Linux and macOS: chmod 600 /d/serve.json) and run again; do not move it aside.' + String.fromCharCode(10)); process.exit(1) }
   if (process.env.FAKE_SSH_NO_PAIR && / --pair /.test(cmd)) { process.stderr.write('unknown option for serve: --pair' + String.fromCharCode(10)); process.exit(2) }
   // What centralu serve --detach answers, per FAKE_SSH_DETACH; anything else is --connection
   if (/ serve --detach/.test(cmd)) {
@@ -285,6 +287,13 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
     await expect(tunnel({ FAKE_SSH_HAS: '' }, { shell: 'powershell' }).open()).rejects.toThrow(/not installed on box/)
     await expect(tunnel({ FAKE_SSH_HAS: '' }, { shell: 'wsl', wslDistro: 'Ubuntu-24.04' }).open()).rejects.toThrow('not installed in WSL (Ubuntu-24.04) on box')
     await expect(tunnel({ FAKE_SSH_UNREACHABLE: '1' }).open()).rejects.toThrow(/ssh could not reach box: .*timed out/)
+  })
+
+  // #1405 review: the row said the Centralu there "may predate centralu serve", then the launcher's permission advice
+  it("says the machine's serve.json cannot be read there as that alone, not as a Centralu too old to print the line", async () => {
+    const err = await tunnel({ FAKE_SSH_DENIED: '1' }).open().catch((e: unknown) => e as Error)
+    expect(String(err)).toMatch(/serve\.json cannot be read by this user \(EACCES\)\. Give this user read and write access/)
+    expect(String(err)).not.toMatch(/may predate/)
   })
 
   it('opens no forward while the remote host is not running', async () => {
