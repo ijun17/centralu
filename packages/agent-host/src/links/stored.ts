@@ -6,6 +6,7 @@ import { z } from 'zod'
 import { randomBytes } from 'node:crypto'
 import { readJsonList } from '../dev-services/store/json.js'
 import { HUB_SELF_KEY } from '../dev-services/store/store-keys.js'
+import { hubKeyOf, SshTunnel } from './tunnel.js'
 
 /**
  * The registry and the headers mirror in the hub's own store (v46, store/linked-machines.ts). One writer per store
@@ -43,6 +44,15 @@ export function hubSelfId(store: Store): string {
    */
   store.settings.updateAppSetting(HUB_SELF_KEY, (current) => (current !== null && HUB_SELF_ID.test(current) ? current : made))
   return store.settings.appSetting(HUB_SELF_KEY) ?? made
+}
+
+/**
+ * The tunnel each linked machine's link opens (main.ts's `tunnelFor`): ssh, pairing there under this hub's own key,
+ * drawn from its id in the store (`hubSelfId`, #1405 review). Here rather than inline in main.ts so a test holds the
+ * key to the id: a key from the data folder's path gave two hubs of one computer name and one path a single label
+ */
+export function tunnelsFor(store: Store, log: (line: string) => void): (record: MachineRecord) => SshTunnel {
+  return (record) => new SshTunnel({ target: record.sshTarget, remote: record.remote, hubKey: hubKeyOf(hubSelfId(store)), log })
 }
 
 const kindOf = (k: 'sessions' | 'projects') => (k === 'sessions' ? 'session' : 'project')

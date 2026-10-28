@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { Store } from '../dev-services/store.js'
-import { hubSelfId, storeMirror, storeProjectOrder, storeRegistry } from './stored.js'
+import { hubSelfId, storeMirror, storeProjectOrder, storeRegistry, tunnelsFor } from './stored.js'
 
 /** The linked machines and the headers mirror in the hub's store (#82, store v46) */
 
@@ -186,5 +186,23 @@ describe('this host’s id (#550, and the host id in every mail address)', () =>
       b.close()
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+
+  /*
+   * #1405 review: the label a hub pairs as ends in its own key, drawn from this id. A key from the data folder's path
+   * gave two hubs of one computer name and one path a single label, each replacing the other's credential at each link
+   */
+  it('is what the tunnel a link opens pairs under: two stores at one path pair as two hubs', () => {
+    const record = { id: 'm1', name: 'box', sshTarget: 'box', remote: { shell: 'posix' as const }, slot: 1, addedAt: 0, acceptedVersions: null }
+    const labels = [new Store(), new Store()].map((store) => {
+      try {
+        const label = tunnelsFor(store, () => {})(record).pairsAs
+        expect(label.endsWith(`-${hubSelfId(store).slice('hub-'.length)}`)).toBe(true)
+        return label
+      } finally {
+        store.close()
+      }
+    })
+    expect(labels[0]).not.toBe(labels[1])
   })
 })

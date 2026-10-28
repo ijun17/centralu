@@ -926,6 +926,11 @@ export class SshTunnel implements Tunnel {
   /** An older remote refused `--pair` once (#1405): asked without it from then on, for this tunnel's life */
   private pairs = true
 
+  /** The label this hub pairs as there (#1405, `pairLabel`): its computer's name and its own key */
+  get pairsAs(): string {
+    return pairLabel(this.opts.hubName ?? hostname(), this.opts.hubKey)
+  }
+
   private async connectionLine(): Promise<ConnectionLine> {
     const remote = this.opts.remote ?? { shell: 'posix' }
     const base = [...this.config(), '-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '--', this.opts.target]
@@ -933,7 +938,7 @@ export class SshTunnel implements Tunnel {
      * A full credential of this hub's own, made there at each link (#1405): `--connection` alone prints none since. A
      * remote from before it answers `--pair` with "unknown option", and is asked again as before, printing its token
      */
-    const pair = this.pairs ? pairLabel(this.opts.hubName ?? hostname(), this.opts.hubKey) : null
+    const pair = this.pairs ? this.pairsAs : null
     let r = await this.run([...base, connectionCommand(remote, pair)], undefined, this.opts.commandTimeoutMs ?? SSH_COMMAND_TIMEOUT_MS)
     if (pair && r.code !== 0 && r.code !== 255 && /unknown option for serve: --pair/.test(r.stderr + r.stdout)) {
       this.pairs = false
