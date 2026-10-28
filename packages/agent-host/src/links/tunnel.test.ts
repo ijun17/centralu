@@ -291,9 +291,9 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
 
   // #1405 review: the row said the Centralu there "may predate centralu serve", then the launcher's permission advice
   it("says the machine's serve.json cannot be read there as that alone, not as a Centralu too old to print the line", async () => {
-    const err = await tunnel({ FAKE_SSH_DENIED: '1' }).open().catch((e: unknown) => e as Error)
-    expect(String(err)).toMatch(/serve\.json cannot be read by this user \(EACCES\)\. Give this user read and write access/)
-    expect(String(err)).not.toMatch(/may predate/)
+    const said = await tunnel({ FAKE_SSH_DENIED: '1' }).open().then(() => '', (e: unknown) => (e instanceof Error ? e.message : ''))
+    expect(said).toMatch(/serve\.json cannot be read by this user \(EACCES\)\. Give this user read and write access/)
+    expect(said).not.toMatch(/may predate/)
   })
 
   it('opens no forward while the remote host is not running', async () => {
