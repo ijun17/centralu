@@ -3817,6 +3817,15 @@ describe('machines.revokeCredential (#1405)', () => {
     expect(hub.links.list()[0]!.ownCredentialGone).toBe(true)
   })
 
+  it("reads this hub's own credential listed as gone as gone, and counts no gone one among the more (self-check)", async () => {
+    const { hub, set } = await serveMachine([own])
+    await eventually(() => hub.links.list()[0]!.otherCredentials !== null)
+    const many = Array.from({ length: 34 }, (_, i) => cred(i.toString(16).padStart(8, '0'), `junk-${i}`))
+    set([{ ...own, gone: true }, ...many, { ...cred('abab1212', 'x'), gone: true }])
+    await eventually(() => hub.links.list()[0]!.ownCredentialGone)
+    expect(hub.links.list()[0]!.otherCredentialsMore).toBe(2)
+  })
+
   it('lists one used there and withdrawn since, as gone, with nothing to revoke', async () => {
     const { hub, set } = await serveMachine([own])
     set([own, { ...cred('abab1212', 'x'), gone: true }])

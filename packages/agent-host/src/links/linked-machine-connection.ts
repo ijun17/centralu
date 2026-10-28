@@ -429,8 +429,10 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     if (this.status !== 'connected' || !line || !all) return { otherCredentials: null, otherCredentialsMore: 0, ownCredentialGone: this.ownCredentialTaken }
     const others = all.filter((c) => c.id !== line.credential && !this.revokedHere.has(c.id))
     const shown = others.slice(0, OTHER_CREDENTIALS_SHOWN).map((c) => ({ ...c, hubsName: !!line.pairedAs && c.label === line.pairedAs }))
-    const ownGone = this.credentials !== null && !!line.credential && !this.credentials.some((c) => c.id === line.credential)
-    return { otherCredentials: shown, otherCredentialsMore: others.length - shown.length, ownCredentialGone: ownGone || this.ownCredentialTaken }
+    // One listed as `gone` is no longer held: this hub's own among them is gone too, and none of them counts as more access
+    const ownGone = this.credentials !== null && !!line.credential && !this.credentials.some((c) => c.id === line.credential && !c.gone)
+    const more = others.slice(OTHER_CREDENTIALS_SHOWN).filter((c) => !c.gone).length
+    return { otherCredentials: shown, otherCredentialsMore: more, ownCredentialGone: ownGone || this.ownCredentialTaken }
   }
 
   /**
