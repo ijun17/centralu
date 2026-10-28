@@ -16,7 +16,7 @@ frames this pull request replays are committed, scrubbed, as `adapters/antigravi
 |---|---|
 | Antigravity runs as Google's ACP agent on Centralu's ACP adapter, not `agy -p` with a `PreToolUse` hook (owner 2026-10-27) | The hook path is fail-open: an empty hook answer allows, the hook file is writable by the agent's own commands, and command rules depend on parsing shell text. Over ACP an unanswered, cancelled or unknown answer denies (spike §5), turns, cancel and resume are the ACP core's, and Windows has an official build |
 | Sign-in happens inside Centralu (owner 2026-10-27) | The agent has no terminal sign-in; it signs in through ACP `authenticate` with a browser and a loopback redirect. Its state folder is Centralu's own, so a CLI sign-in does not carry over; sharing the CLI's folder would bring the person's global hooks and MCP servers in and move the token into the Keychain |
-| The sign-in action sits where the "needs a login" line is; the header donut shows a tool installed but signed out (owner 2026-10-27, both, wording on screenshots) | One shared piece (§12). It ships in the new-session dialog only for this beta: the first-run card and the new-app dialog show the refusal reason instead, until Antigravity can take role text (owner, 2026-10-28). The host side gives the state and the actions; the screens are drawn in the stacked pull request |
+| The sign-in action sits where the "needs a login" line is; the header donut shows a tool installed but signed out (owner 2026-10-27, both, wording on screenshots) | One shared piece (§12). It ships in the new-session dialog and the empty session's tool capsule only for this beta: the first-run card and the new-app dialog show the refusal reason instead, until Antigravity can take role text (owner, 2026-10-28). The host side gives the state and the actions; the screens are drawn in the stacked pull request |
 | The header shows a signed-out donut (a solid ring in the signal ink, no red) for **every** tool installed but signed out: Claude Code, Codex, Cursor, and OpenCode where its detection can tell (owner 2026-10-27) | Every tool reports one shape, `ToolStatus.setup` (§8); OpenCode reports `signIn: none` (its free models need no account, so it is never signed out) |
 | Install inside Centralu: one pinned version, sha256, atomic, progress, cancel (owner 2026-10-27) | §3 |
 | Centralu's tools (the MCP bridge) ship in this beta, at parity with Cursor and OpenCode (owner 2026-10-27, replacing "next beta") | §7 |
@@ -546,7 +546,7 @@ one by one on Windows):
 ## 12. The screens (#59, owner 2026-10-27)
 
 One piece, `ToolSetupLine` (`packages/ui/src/features/tools/`), draws a tool's setup where its "needs a login" line was:
-the new-session dialog's tool line. The first-run orchestrator card and the new-app dialog use the same piece, but for
+the new-session dialog's tool line and the empty session's tool capsule (below). The first-run orchestrator card and the new-app dialog use the same piece, but for
 Antigravity they show its refusal ("cannot take Centralu's role instructions yet…", `roleText: false`) and no Install
 or Sign in, as for Cursor and OpenCode; the setup there is separate future work, once Antigravity takes role text (owner,
 2026-10-28: this beta ships what the real host does). It reads the tool's `ToolStatus.setup`, with this computer's live `tool_setup`
@@ -577,6 +577,15 @@ person, which is the signal's white. Its tooltip says "Not signed in"; pressing 
 name for every tool, signed in or not (no "Usage" title). A tool that is signed out is not "no agent": the "No agent
 connected" mark shows only when no tool has a donut at all. A donut fades and grows in and fades out when a tool comes
 or goes after the bar was first drawn.
+
+**The empty session's tool capsule (owner, 2026-10-28).** The capsule (`SessionStart.tsx`) keeps the 2026-10-18 rule for
+every tool: only an installed, signed-in, unrefused tool is offered. The one exception is a tool Centralu installs or signs
+in itself (`setup.install` or `setup.signIn` is `centralu`; today Antigravity) that is not installed or not signed in: it is
+shown, dimmed like the dialog's unusable options. Picking it does not switch the session; it shows that tool's
+`ToolSetupLine` under the capsule (Install, then Sign in; the dialog's words), folding in and out with the line's own
+motion. A refusal (an untrusted project) is said there as the dialog says it. Once the tool is ready it is undimmed and
+picked like any other, which switches the session. Without this, before install the tool was reachable only from the
+command palette.
 
 **The first-run card.** Antigravity's card is a refused card, drawn as Cursor's and OpenCode's are: dimmed whole, with the
 refusal reason in the same type and no button, whether it is installed or not. (A managed tool the orchestrator can take

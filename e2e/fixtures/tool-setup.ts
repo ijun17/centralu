@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { setup } from './control.js'
-import { openSessionDialog } from './new-session.js'
+import { openSessionDialog, startSession } from './new-session.js'
 
 /**
  * A tool's setup line and the top bar's signed-out donuts (#59, owner 2026-10-27): Antigravity's Install and Sign in inside
@@ -301,6 +301,63 @@ export function toolSetupTests(): void {
       await told(page, centralu('signed_out', { failure: { reason: 'ineligible', message: 'no' } }))
       await expect(line).toContainText('Google did not set up Antigravity for this account.')
       await expect(page.getByTestId('tool-blocked-verify')).toHaveCount(0)
+    })
+  })
+
+  test.describe("the empty session's tool capsule (#59, owner 2026-10-28)", () => {
+    const stored = (page: Page, id: string) => page.evaluate((x) => (window as unknown as MockWindow).__store.getState().sessions[x]?.tool as string, id)
+    // The real adapter cannot keep a project's own files out, so it runs only in trusted projects (the mock's default says nothing of it)
+    const likeTheRealAdapter = (page: Page) => page.evaluate(() => ((window as unknown as MockWindow).__mock.capabilityLimits.antigravity = { keepsRepoFilesOut: false }))
+
+    test('a tool Centralu sets up is shown dimmed before it is ready; picking it shows the line, and it switches once it is ready', async ({ page }) => {
+      await setup(page, { projects: ['/tmp/alpha'], trusted: true })
+      await likeTheRealAdapter(page)
+      await antigravity(page, centralu('not_installed'))
+      const id = await startSession(page, 'alpha')
+      const radio = page.getByTestId('session-start-tool-antigravity')
+      await expect(radio).toBeVisible()
+      await expect(radio).toHaveClass(/(^|\s)opacity-50(\s|$)/)
+      // Another tool that is not ready stays out (the 2026-10-18 rule)
+      await page.evaluate(() => {
+        const m = (window as unknown as MockWindow).__mock
+        m.detected = m.detected.map((t: any) => (t.name === 'codex' ? { ...t, installed: false, loggedIn: false } : t))
+      })
+
+      await radio.click()
+      await expect(radio).toHaveAttribute('aria-checked', 'false')
+      expect(await stored(page, id)).toBe('claude')
+      const line = page.getByTestId('session-start-tool-blocked')
+      await expect(line).toContainText('Antigravity is not installed.')
+      await line.getByTestId('session-start-tool-blocked-install').click()
+      await expect(line).toHaveAttribute('data-setup', 'installing')
+      await told(page, centralu('signed_out'))
+      await page.evaluate(() => {
+        const m = (window as unknown as MockWindow).__mock
+        m.detected = m.detected.map((t: any) => (t.name === 'antigravity' ? { ...t, installed: true } : t))
+      })
+      await expect(line).toContainText('Antigravity needs a Google sign-in.')
+      await line.getByTestId('session-start-tool-blocked-sign-in').click()
+      await expect(line).toContainText('Waiting for the browser…')
+
+      await told(page, centralu('ready'))
+      await expect(line).toHaveCount(0)
+      await expect(radio).not.toHaveClass(/(^|\s)opacity-50(\s|$)/)
+      expect(await stored(page, id)).toBe('claude')
+      await radio.click()
+      await expect.poll(() => stored(page, id)).toBe('antigravity')
+      await expect(page.getByTestId('session-start-tool-codex')).toHaveCount(0)
+    })
+
+    test('in a project that is not trusted it says why, as the dialog does, with no Install', async ({ page }) => {
+      await setup(page, { projects: ['/tmp/alpha'] })
+      await likeTheRealAdapter(page)
+      await antigravity(page, centralu('not_installed'))
+      await startSession(page, 'alpha')
+      await page.getByTestId('session-start-tool-antigravity').click()
+      const line = page.getByTestId('session-start-tool-blocked')
+      await expect(line).toHaveAttribute('data-setup', 'refused')
+      await expect(line).toContainText('runs only in trusted projects')
+      await expect(line.getByRole('button')).toHaveCount(0)
     })
   })
 
