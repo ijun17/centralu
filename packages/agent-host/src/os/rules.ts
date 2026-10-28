@@ -183,7 +183,7 @@ export function envValue(env: Env, name: string, family: OsFamily): string | und
  * `Os` takes the one rule for both calls: a signal it cannot deliver throws, and never ends anything by accident.
  * Linux's names are delivered; a program may trap all but KILL and STOP, and those in `IGNORED_BY_DEFAULT` end nothing.
  */
-const WINDOWS_SIGNALS = ['SIGHUP', 'SIGINT', 'SIGQUIT', 'SIGILL', 'SIGABRT', 'SIGFPE', 'SIGKILL', 'SIGSEGV', 'SIGTERM', 'SIGBREAK', 'SIGWINCH'] as const
+const WINDOWS_SIGNAL_NAMES: readonly string[] = ['SIGHUP', 'SIGINT', 'SIGQUIT', 'SIGILL', 'SIGABRT', 'SIGFPE', 'SIGKILL', 'SIGSEGV', 'SIGTERM', 'SIGBREAK', 'SIGWINCH']
 const WINDOWS_ENDING = new Set<string>(['SIGTERM', 'SIGKILL', 'SIGINT', 'SIGQUIT'])
 const LINUX_SIGNALS = new Set<string>([
   'SIGHUP', 'SIGINT', 'SIGQUIT', 'SIGILL', 'SIGTRAP', 'SIGABRT', 'SIGIOT', 'SIGBUS', 'SIGFPE', 'SIGKILL', 'SIGUSR1', 'SIGSEGV', 'SIGUSR2',
@@ -200,7 +200,7 @@ export const IGNORED_BY_DEFAULT: ReadonlySet<string> = new Set(['SIGCHLD', 'SIGC
  */
 export function signalRefusal(signal: string, family: OsFamily): 'ERR_UNKNOWN_SIGNAL' | 'ENOSYS' | null {
   if (family === 'windows') {
-    if (!(WINDOWS_SIGNALS as readonly string[]).includes(signal)) return 'ERR_UNKNOWN_SIGNAL'
+    if (!WINDOWS_SIGNAL_NAMES.includes(signal)) return 'ERR_UNKNOWN_SIGNAL'
     return WINDOWS_ENDING.has(signal) ? null : 'ENOSYS'
   }
   return LINUX_SIGNALS.has(signal) ? null : 'ERR_UNKNOWN_SIGNAL'
