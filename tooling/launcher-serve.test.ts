@@ -75,7 +75,7 @@ import { hostDirIn } from '../packaging/npm/centralu/bin/platform.mjs'
 // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
 import { renameRetrying, replaceFile } from '../packaging/npm/centralu/bin/serve-util.mjs'
 // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
-import { changeServeState } from '../packaging/npm/centralu/bin/serve-files.mjs'
+import { changeServeState, noState, STATE_LOCK_MARGIN_MS, STATE_LOCK_STALE_MS } from '../packaging/npm/centralu/bin/serve-files.mjs'
 import { SLOW } from './test-timing.js'
 import { ownProcesses } from '../packages/agent-host/src/process.test-helpers.js'
 
@@ -257,6 +257,86 @@ describe('the data folder and the state file', () => {
     expect(readFileSync(lock, 'utf8')).toBe('another writer')
   })
 
+  /*
+   * #1405 review: the writer read its lock back, then removed it by name. A writer that took the lock over in between
+   * lost it, and a third could then write beside it
+   */
+  it('does not remove a lock another writer took over between its look and its removal', () => {
+    const d = tempDir()
+    pairServe(d, 'hub:mac')
+    const lock = join(d, `${SERVE_STATE_FILE}.lock`)
+    let looked = false
+    // The moment this writer looks at its lock, another takes it over
+    const read = (p: string, enc: BufferEncoding) => {
+      const text = readFileSync(p, enc)
+      if (!looked) {
+        looked = true
+        writeFileSync(lock, 'successor')
+      }
+      return text
+    }
+    changeServeState(d, (s: unknown) => s, process.platform, { read })
+    expect(readFileSync(lock, 'utf8')).toBe('successor')
+  })
+
+  /*
+   * #1405 review: on Windows the rename after the read-back is tried again for up to 5 s while a reader holds the
+   * file, long enough for the lock to go stale, be taken over and written under. A writer past its time writes nothing
+   */
+  it('writes nothing once it held its lock too long to finish before a waiter may take it over', () => {
+    const d = tempDir()
+    const hub = pairServe(d, 'hub:mac')
+    let t = 0
+    expect(() =>
+      changeServeState(d, (s: { full: unknown[] }) => {
+        t += STATE_LOCK_STALE_MS - STATE_LOCK_MARGIN_MS
+        return { ...s, port: 9500 }
+      }, process.platform, { clock: () => t }),
+    ).toThrow(/held too long/)
+    expect(readServeState(d)).toMatchObject({ port: null, full: [expect.objectContaining({ id: hub.id })] })
+    expect(existsSync(join(d, `${SERVE_STATE_FILE}.lock`))).toBe(false)
+  })
+
+  it('puts back a lock that looked stale and was not by the time it was taken over (two waiters at once)', () => {
+    const d = tempDir()
+    ensureServeState(d)
+    const lock = join(d, `${SERVE_STATE_FILE}.lock`)
+    // Another waiter's fresh lock, which this one's first look took for the stale one before it
+    writeFileSync(lock, 'fresh, another waiter')
+    let looks = 0
+    const nowMs = () => (++looks === 1 ? Date.now() + 60_000 : Date.now())
+    expect(() => changeServeState(d, (s: { full: unknown[] }) => ({ ...s, port: 9600 }), process.platform, { sleep: () => {}, nowMs })).toThrow(/held by another serve/)
+    expect(readFileSync(lock, 'utf8')).toBe('fresh, another waiter')
+    expect(readServeState(d).port).toBeNull()
+  })
+
+  // #1405 review: chmod 000 on serve.json was answered "Move it aside", which would lock out every holder of a credential
+  it('says a serve.json this user cannot read is a permission problem, not a file to move aside', () => {
+    const denied = (code: string) => () => {
+      throw Object.assign(new Error(`${code}: permission denied`), { code })
+    }
+    for (const code of ['EACCES', 'EPERM']) {
+      const said = noState('/d/serve.json', denied(code)).message
+      expect(said).toContain(`cannot be read by this user (${code})`)
+      expect(said).toContain('chmod 600 /d/serve.json')
+      expect(said).not.toMatch(/Move it aside/)
+    }
+    expect(noState('/d/serve.json', () => 'not json').message).toMatch(/not a serve state file\. Move it aside/)
+  })
+
+  // As it reads for real, where mode bits can refuse this user (not as root, who reads anything)
+  it.skipIf(!POSIX || process.getuid?.() === 0)('refuses to pair over a serve.json chmod 000, saying how to give it back', () => {
+    const d = tempDir()
+    ensureServeState(d)
+    const file = join(d, SERVE_STATE_FILE)
+    chmodSync(file, 0o000)
+    try {
+      expect(() => pairServe(d, 'hub:mac')).toThrow(/cannot be read by this user \(EACCES\)/)
+    } finally {
+      chmodSync(file, 0o600)
+    }
+  })
+
   it('moves a version 1 file on: its token becomes a full credential no longer written down, removed by the next pairing (#1405)', () => {
     const d = tempDir()
     const legacy = 'x'.repeat(43)
@@ -364,6 +444,19 @@ describe('replacing a file that a reader holds open (#1041)', () => {
       throw busy('ENOENT')
     }
     expect(() => renameRetrying('a', 'b', { ...quick, rename: enoent })).toThrow(/ENOENT/)
+    expect(calls).toBe(1)
+  })
+
+  // #1405 review: a writer under serve.json.lock asks before every try whether the lock is still its own
+  it('asks before every try whether it may still try, and stops with that answer', () => {
+    let calls = 0
+    let may = true
+    const rename = () => {
+      calls++
+      may = false
+      throw busy('EBUSY')
+    }
+    expect(() => renameRetrying('a', 'b', { ...quick, rename, mayTry: () => (may ? null : new Error('lock taken over')) })).toThrow(/lock taken over/)
     expect(calls).toBe(1)
   })
 
@@ -756,7 +849,10 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
       await expect(hello(port, String(readServeState(d).key))).rejects.toThrow(/closed 4001/)
       await expect(hello(port, 'not-the-token')).rejects.toThrow(/closed 4001/)
       // Withdrawn, the credential's next hello is refused
-      expect((await cli(d, ['--revoke', String(paired.credential)])).code).toBe(0)
+      const revoked = await cli(d, ['--revoke', String(paired.credential)])
+      expect(revoked.code).toBe(0)
+      // And says what the host does with a connection open with it (#1405 review: it said such a one stays)
+      expect(revoked.stderr).toContain('closes a connection already open with it within a second')
       await expect(hello(port, String(paired.token))).rejects.toThrow(/closed 4001/)
 
       const second = serve(d, [])

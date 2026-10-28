@@ -1457,8 +1457,9 @@ A host started with `centralu serve` on another machine is reached by the app th
     kept as its verifier, replacing that label's earlier one. A hub pairs as `hub:<its name>-<key>` at each link, the
     key being the 8 hex characters of the hub's own random id (`hubSelfId`, kept in its store), so two hubs of one
     computer name do not replace each other's credential; its own
-    credential lives in its memory only, as the token did, and it needs no store change. The person's window on
-    Windows gets one per start (`--window`, label `window`). The launcher's own hand-over call (`host.handover`, a
+    credential lives in its memory only, as the token did, and it needs no store change. `serve --window` gets one
+    per start (label `window`): the desktop app runs it on Windows, and it runs the same on Linux and macOS, so any
+    program of this user there can run it too. The launcher's own hand-over call (`host.handover`, a
     hub's) uses one made for that call and withdrawn after it.
   - **What anyone else gets.** `--connection` without `--pair` prints the limited credential (`limited`) and the
     other full credentials by id, label and date (`others`), never their values; `--stop` and the launcher's probes
@@ -1468,10 +1469,18 @@ A host started with `centralu serve` on another machine is reached by the app th
     socket whose credential the file no longer names (4001 "credential withdrawn"; a hub's link then pairs again).
     Before, a socket opened and then revoked within 135 ms kept full rights for as long as it stayed open, while no
     listing named it. A file that is not there (moved aside, as the launcher advises for a bad one) names no full
-    credential at all, at once; one that is there but stays refused (a scanner on Windows) stands at its last read for
-    at most 30 s. Changes to the file take `serve.json.lock`: one whose time is more than 10 s from now, ahead or
-    behind (a crashed writer, a clock set back), is taken over, and a writer whose lock was taken over while it stalled
-    writes nothing.
+    credential at all, at once. One that is there but cannot be read (permission denied, as after `chmod 000`, or a
+    scanner holding it on Windows) names none for a new hello, at once (#1405 review: a credential paired just before
+    kept full rights for 30 s while nothing listed it); a socket already in keeps what the file said at its last read
+    for at most 5 s, so one busy moment does not close every link, and is then closed as "credential file unreadable",
+    not "credential withdrawn". The launcher says a file it may not read is a permission problem and how to give access
+    back, never to move it aside, which would end every credential it names. Changes to the file take
+    `serve.json.lock`: one whose time is more than 10 s from now, ahead or behind (a crashed writer, a clock set back),
+    is taken over. A writer reads its lock back before each try of its rename, and tries only within 8 s of taking the
+    lock by its own process clock, so neither a stall nor Windows' 5 s of rename retries lets a writer whose lock was
+    taken over write. Taking a stale lock over, and removing one's own, move the lock aside first and put back one that
+    turns out to be another writer's. Left open: a writer suspended over 2 s between its last read-back and the rename,
+    and a system clock set forward by over 10 s while a lock is held.
   - **Moving on.** A version 1 file's token becomes a full credential labelled `legacy` (a hub or window still holding
     it keeps working) and a new key is drawn; the next pairing of a hub or of the window removes `legacy`
     (a pairing under any other label leaves it, so a program's own `--pair` does not cut off a hub that has not paired yet). An installed host from before
@@ -1484,8 +1493,8 @@ A host started with `centralu serve` on another machine is reached by the app th
     credentials and offer to revoke them (#1405 slice 5b). It can also read the key. That
     gives it the limited credential, and also a bridge credential (`ccb1`) for any session it can name, which reaches
     that session's own tool channel (`orchestrator.tool`, under that session's preset; "The Codex bridge gets a credential of its own" below), as it
-    did before #1405 when the file held the token. On Windows any process of this user can run `--window` and get the window's credential, until the
-    launcher checks its parent (#1417).
+    did before #1405 when the file held the token. Any process of this user, on any OS, can run `--window` and get the window's credential, until
+    the launcher checks its parent (#1417).
 - **Other users on the remote machine** can connect to 127.0.0.1 like anyone local, and are stopped by the token, as on
   a desktop. A machine where another user can read your files (root, or a wrong home-folder mode) can read the token;
   the remote mode is for a machine the person trusts, and the spec says so (product-spec.md §1.5).

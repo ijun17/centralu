@@ -5,7 +5,7 @@
  */
 import { execFileSync } from 'node:child_process'
 import { createHash, createHmac, randomBytes } from 'node:crypto'
-import { chmodSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeSync, closeSync } from 'node:fs'
+import { chmodSync, existsSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeSync, closeSync } from 'node:fs'
 import { join } from 'node:path'
 import { isAlive, renameRetrying, replaceFile, sleepSync } from './serve-util.mjs'
 import { CREDENTIAL_ID_RE, PAIR_LABEL_RE } from './serve-args.mjs'
@@ -20,7 +20,7 @@ import { CREDENTIAL_ID_RE, PAIR_LABEL_RE } from './serve-args.mjs'
  *   it is never a full one (a hello with it is refused as full).
  * - `full`: one entry per full credential, `{ id, label, verifier, created }`, the verifier being the SHA-256 of the
  *   credential. The credential itself is printed once, to whoever asked for it (`--pair`: a hub at each link,
- *   `--window` for the person's own window on Windows), and written nowhere. The host checks a hello against these,
+ *   `--window` for the person's own window, which the desktop app runs on Windows and which runs on every OS), and written nowhere. The host checks a hello against these,
  *   read again at each hello, so a pairing or a revocation applies at once.
  * - `legacyHostToken`: only while the installed host is from before verifiers (a rollback): the one token such a
  *   host knows, given to it and to the hub that pairs, as before #1405.
@@ -203,7 +203,7 @@ export function ensureServeState(dataDir, platform = process.platform, now = Dat
     }
   }
   let state = readServeState(dataDir)
-  if (!state) throw new Error(`${file} exists but is not a serve state file. Move it aside and run again.`)
+  if (!state) throw noState(file)
   // A version 1 file (#1405): its token becomes a full credential no longer written down, and a new key is drawn
   if (state.v === 1) {
     state = changeServeState(dataDir, (s) =>
@@ -217,8 +217,31 @@ export function ensureServeState(dataDir, platform = process.platform, now = Dat
   return state
 }
 
+/**
+ * Why serve.json gives no state (#1405 review): a file this user may not read is said as that, with what makes it
+ * readable again. Moving it aside, the advice for a file that is not a state file, would lock out every hub and window
+ * that holds a credential it names.
+ */
+export function noState(file, read = readFileSync) {
+  try {
+    read(file)
+  } catch (e) {
+    if (e?.code === 'EACCES' || e?.code === 'EPERM') {
+      return new Error(`${file} cannot be read by this user (${e.code}). Give this user read and write access to it again (on Linux and macOS: chmod 600 ${file}) and run again; do not move it aside.`)
+    }
+    if (e?.code === 'ENOENT') return new Error(`${file} is missing`)
+  }
+  return new Error(`${file} exists but is not a serve state file. Move it aside and run again.`)
+}
+
 /** How long a held `serve.json.lock` is waited on before it counts as a crashed writer's (`changeServeState`) */
 export const STATE_LOCK_STALE_MS = 10_000
+
+/**
+ * How long before `STATE_LOCK_STALE_MS` a writer stops trying to write (#1405 review): the time it leaves itself
+ * for the rename, so that a rename it starts lands before any waiter may count its lock as stale
+ */
+export const STATE_LOCK_MARGIN_MS = 2_000
 
 /**
  * Reads the state, changes it with `change` and writes it back, under a lock (`serve.json.lock`) so two changes at once
@@ -227,13 +250,24 @@ export const STATE_LOCK_STALE_MS = 10_000
  * - A lock whose time is more than `STATE_LOCK_STALE_MS` from now, either way, is a crashed writer's and is taken over.
  *   Either way (#1405 review): a lock dated ahead of now (a crashed writer, then the clock set back) blocked every
  *   `--pair` and `--revoke` for as long as it was ahead, so a hub could not link.
- * - The lock holds a nonce of its writer's, and the writer reads it back just before it replaces the file: a writer
- *   stalled past the 10 s, whose lock another took over meanwhile, writes nothing (#1405 review), rather than a state
- *   it computed before a `--revoke` that came in between. It throws, and whoever asked tries again (a hub at its next
- *   link attempt, a person by running it again). What is left is the moment between that read and the rename, and two
- *   waiters taking over one stale lock at once (one may remove the other's fresh lock), which no lock file can close.
+ * - The lock holds a nonce of its writer's, and the writer reads it back before each try of the rename that replaces
+ *   the file: a writer stalled past the 10 s, whose lock another took over meanwhile, writes nothing (#1405 review),
+ *   rather than a state it computed before a `--revoke` that came in between. It throws, and whoever asked tries again
+ *   (a hub at its next link attempt, a person by running it again).
+ * - A writer also writes only within `STATE_LOCK_STALE_MS - STATE_LOCK_MARGIN_MS` of taking its lock, by this
+ *   process's own clock, which a clock set back does not stretch (#1405 review): on Windows a rename is tried again
+ *   for up to 5 s while a reader holds the file, and a try seconds after the read-back could land after another writer
+ *   took the lock over and wrote. Its last try is then at least 2 s before any waiter may take the lock over.
+ * - Taking over a stale lock, and removing its own at the end, first move the lock aside under a name of this
+ *   writer's and look at what was moved: a fresh lock, or another writer's, is put back (`releaseLock`). Before, two
+ *   waiters taking over one stale lock at once could remove the other's fresh lock, and a writer's end could remove the
+ *   lock of one that took it over between its read-back and its removal.
+ *
+ * What is left: a writer suspended for over 2 s between its last read-back and the rename right after it, and a
+ * system clock set forward by more than 10 s while a writer holds the lock, which makes its lock look stale to a
+ * waiter. Both are a moment no lock file can close.
  */
-export function changeServeState(dataDir, change, platform = process.platform, { sleep = sleepSync, nowMs = Date.now } = {}) {
+export function changeServeState(dataDir, change, platform = process.platform, { sleep = sleepSync, nowMs = Date.now, clock = () => performance.now(), read = readFileSync } = {}) {
   const file = join(dataDir, SERVE_STATE_FILE)
   const lock = `${file}.lock`
   const mine = randomBytes(8).toString('hex')
@@ -249,7 +283,7 @@ export function changeServeState(dataDir, change, platform = process.platform, {
     } catch (e) {
       if (e?.code !== 'EEXIST') throw e
       try {
-        if (Math.abs(nowMs() - statSync(lock).mtimeMs) > STATE_LOCK_STALE_MS) rmSync(lock, { force: true })
+        if (Math.abs(nowMs() - statSync(lock).mtimeMs) > STATE_LOCK_STALE_MS) takeOverStale(lock, mine, nowMs)
       } catch {
         // gone meanwhile: try again
       }
@@ -258,26 +292,87 @@ export function changeServeState(dataDir, change, platform = process.platform, {
       sleep(25)
     }
   }
+  const took = clock()
   const held = () => {
     try {
-      return readFileSync(lock, 'utf8') === mine
+      return read(lock, 'utf8') === mine
     } catch {
       return false
     }
   }
+  // Whether this writer may still write: within its time, and the lock still its own
+  const mayWrite = () => {
+    if (clock() - took >= STATE_LOCK_STALE_MS - STATE_LOCK_MARGIN_MS) return new Error(`${lock} was held too long by this serve to write safely; nothing was written, try again`)
+    if (!held()) return new Error(`${lock} was taken over while this serve held it; nothing was written, try again`)
+    return null
+  }
   try {
     const before = readServeState(dataDir)
-    if (!before) throw new Error(`${file} is missing or unreadable`)
+    if (!before) throw noState(file)
     const after = change(before)
     if (after !== before) {
-      if (!held()) throw new Error(`${lock} was taken over while this serve held it; nothing was written, try again`)
-      replacePrivate(file, stateFile(after), platform)
+      const refusal = mayWrite()
+      if (refusal) throw refusal
+      replacePrivate(file, stateFile(after), platform, { mayTry: mayWrite })
     }
     // What was written, as a reader reads it: never null once written
     return after !== before ? parseServeState(JSON.stringify(stateFile(after))) : before
   } finally {
-    // Only its own: a lock another writer took over is that writer's to remove
-    if (held()) rmSync(lock, { force: true })
+    // Only its own: a lock another writer took over is that writer's to keep
+    releaseLock(lock, mine, { read })
+  }
+}
+
+/**
+ * Removes `lock` if it is `mine` (#1405 review): moved aside under a name of this writer's first, so what is looked at
+ * is what is removed, and put back when it was another writer's. Reading it and then removing it by name could remove
+ * a lock another writer took over in between. Never throws: a lock left behind goes stale and is taken over.
+ */
+export function releaseLock(lock, mine, { read = readFileSync, rename = renameSync, link = linkSync, rm = rmSync } = {}) {
+  const aside = `${lock}.${mine}.release`
+  try {
+    renameRetrying(lock, aside, { rename, budgetMs: 1_000 })
+  } catch {
+    // not there (taken over and removed), or held open past the retries: nothing of this writer's to remove now
+    return
+  }
+  let found = null
+  try {
+    found = read(aside, 'utf8')
+  } catch {
+    // unreadable: removed as this writer's own, since it was this writer that held the lock to the end
+  }
+  if (found !== null && found !== mine) putBack(aside, lock, link)
+  try {
+    rm(aside, { force: true })
+  } catch {
+    // a stray file beside the lock, nothing a writer reads
+  }
+}
+
+/**
+ * Takes over a lock that looked stale (`changeServeState`): moved aside first, and put back when what was moved is not
+ * stale after all (another waiter's fresh lock, taken over a moment before). The caller then creates its own
+ */
+function takeOverStale(lock, mine, nowMs) {
+  const aside = `${lock}.${mine}.stale`
+  renameSync(lock, aside)
+  let stale = true
+  try {
+    stale = Math.abs(nowMs() - statSync(aside).mtimeMs) > STATE_LOCK_STALE_MS
+  } catch {
+    // gone: nothing to put back
+  }
+  if (!stale) putBack(aside, lock, linkSync)
+  rmSync(aside, { force: true })
+}
+
+/** Puts a moved lock back where it was, unless another writer created one there since (a hard link never replaces) */
+function putBack(aside, lock, link) {
+  try {
+    link(aside, lock)
+  } catch {
+    // another holds the lock by now, or links are not possible here: that writer's read-back sees it is not its own
   }
 }
 
@@ -361,9 +456,9 @@ function writePrivate(file, value, flag) {
   }
 }
 
-/** Replaces a private file whole (`replaceFile`), created 0600 as `writePrivate` creates one */
-function replacePrivate(file, value, platform) {
-  replaceFile(file, `${JSON.stringify(value)}\n`, { mode: 0o600, flag: 'wx' })
+/** Replaces a private file whole (`replaceFile`), created 0600 as `writePrivate` creates one; `rename` goes to `renameRetrying` */
+function replacePrivate(file, value, platform, rename = {}) {
+  replaceFile(file, `${JSON.stringify(value)}\n`, { mode: 0o600, flag: 'wx', ...rename })
   keepPrivate(file, platform)
 }
 

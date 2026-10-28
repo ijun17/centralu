@@ -17,7 +17,8 @@ import { say, sleep } from './serve-util.mjs'
  * Makes sure the folder's serve host runs, then prints the window's ready line, `{"ready":true,"port","token","db"}`
  * (the line a host the window starts prints), and stays until the window goes. The token is a full credential made for
  * the window at each start (#1405, `--pair window`'s, replacing the last window's): serve.json keeps only its verifier.
- * Residual: any process of this user can run `--window` too, until it checks its parent (#1417).
+ * It runs the same on Linux and macOS, though only the Windows app runs it. Residual: any process of this user, on any
+ * OS, can run `--window` too, until it checks its parent (#1417).
  *
  * - No host answers: one is started the way `--detach` starts it, in this Windows sign-in through the scheduled task,
  *   so it outlives the window and the hub's link finds it (`serve --connection`).
