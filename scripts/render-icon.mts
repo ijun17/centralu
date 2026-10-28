@@ -9,6 +9,10 @@
  * image editor, and the diff shows only "the binary changed". SVG can be read, edited and
  * reviewed.
  *
+ * `sources/studio.html` draws `panes.svg` from a handful of settings and opens in any browser;
+ * its defaults are the shipped icon. Change the icon there, save the SVG over `panes.svg`, then
+ * run `pnpm icon`.
+ *
  * Rendering is done with Playwright (Chromium) — the repository already uses it for e2e, so it
  * is not a new dependency. Requiring rsvg or ImageMagick to be installed separately would keep
  * contributors from running this script at all.
