@@ -59,7 +59,7 @@ import { acquireInstanceLock, lockConflictMessage } from './dev-services/instanc
 import { hostLogPath, startupBanner, teeStderrToFile } from './log-file.js'
 import { hostDrain } from './drain.js'
 import { HostRequests } from './host-requests.js'
-import { readCredentialFile, readListedCredentials } from './lifecycle/serve-credentials.js'
+import { readCredentialFile, readListedCredentials, UsedCredentials, type FullCredential } from './lifecycle/serve-credentials.js'
 import { createStopGate } from './lifecycle/stop-gate.js'
 import { stopGitChildren } from './dev-services/git-exec.js'
 import { Gate } from './lifecycle/gate.js'
@@ -757,6 +757,8 @@ const requests: HostRequests = new HostRequests({
   rpc: (method, params, ctx) => hostDrain.track(`request ${method}`, () => router.handle(method, params, ctx)),
   canShow: (): boolean => server.showsHostRequests(),
 })
+/** The full credentials a socket said hello with on this host, for `host.credentials` once they are gone (#1405 review) */
+const usedCredentials = new UsedCredentials()
 const router: Router = new Router({
   forwarding: (method, params) => mgr.forwarding(method, params),
   local: createRpcHandler(mgr, adapters, {
@@ -765,7 +767,11 @@ const router: Router = new Router({
     // And what a delete may do to the folder, for the dialog that asks (#1301)
     deleteOutlook: (projectId) => userAppAdoption.outlook(projectId),
     // A serve host's full credentials, for the hub's machine row between links (#1405, `host.credentials`)
-    serveCredentials: () => (launch.serveState ? readListedCredentials(launch.serveState, (f) => readFileSync(f, 'utf8')) : null),
+    serveCredentials: () => {
+      const listed = launch.serveState ? readListedCredentials(launch.serveState, (f) => readFileSync(f, 'utf8')) : null
+      // And those a socket said hello with here that went since, before a hub could read them listed (#1405 review)
+      return listed ? [...listed, ...usedCredentials.gone(listed)] : null
+    },
     themes,
     terminals,
     updates,
@@ -824,7 +830,9 @@ const server = new HostServer({
    * A `centralu serve` host that takes verifiers (#1405): what it was handed is its key, and the full credentials are
    * the ones serve.json names, read at each hello (lifecycle/serve-credentials.ts)
    */
-  ...(serveState ? { fullCredentials: () => readCredentialFile(serveState, (f) => readFileSync(f, 'utf8')) } : {}),
+  ...(serveState
+    ? { fullCredentials: () => readCredentialFile(serveState, (f) => readFileSync(f, 'utf8')), onFullHello: (c: FullCredential) => usedCredentials.saw(c) }
+    : {}),
   allowedOrigins,
   onRpc: router.handle,
   // A limited call that cannot be undone waits for the person's card (#1405)

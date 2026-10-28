@@ -1,6 +1,6 @@
 /** A `centralu serve` host's full credentials, as serve.json's verifiers (#1405) */
 import { describe, expect, it } from 'vitest'
-import { isFullCredential, LAST_READ_KEPT_MS, readCredentialFile, readFullCredentials, readListedCredentials, verifierOf, type FullCredential } from './serve-credentials.js'
+import { isFullCredential, LAST_READ_KEPT_MS, readCredentialFile, readFullCredentials, readListedCredentials, UsedCredentials, verifierOf, type FullCredential } from './serve-credentials.js'
 
 const KEY = 'k'.repeat(43)
 const HUB = 'h'.repeat(43)
@@ -106,6 +106,46 @@ describe('reading the full credentials', () => {
     expect(isFullCredential(full, HUB)?.id).toBe('aaaaaaaa')
     expect(isFullCredential(full, WINDOW)).toBeNull()
     expect(isFullCredential(full, verifierOf(HUB))).toBeNull()
+  })
+})
+
+describe('the full credentials used here (#1405 review)', () => {
+  const c = (id: string, label: string, o: Partial<FullCredential> = {}): FullCredential => ({ id, label, verifier: verifierOf(id), created: 1, replaced: false, ...o })
+
+  it('lists one used and then withdrawn before any read, as gone: pair, hello, revoke within 135 ms', () => {
+    const used = new UsedCredentials()
+    used.saw(c('aaaaaaaa', 'x'))
+    expect(used.gone([{ id: 'aaaaaaaa' }])).toEqual([])
+    expect(used.gone([])).toEqual([{ id: 'aaaaaaaa', label: 'x', created: 1, replaced: false, gone: true }])
+  })
+
+  it('leaves out a credential its own pairer took the place of: the window at each start, a hub at each link', () => {
+    const used = new UsedCredentials()
+    used.saw(c('aaaaaaaa', 'window', { via: 'window' }))
+    used.saw(c('bbbbbbbb', 'window', { via: 'window' }))
+    used.saw(c('cccccccc', 'hub:mac-0123abcd'))
+    used.saw(c('dddddddd', 'hub:mac-0123abcd'))
+    expect(used.gone([{ id: 'bbbbbbbb' }, { id: 'dddddddd' }])).toEqual([])
+  })
+
+  it('lists one whose successor was asked for another way, and the window credential that one took the place of', () => {
+    const used = new UsedCredentials()
+    used.saw(c('aaaaaaaa', 'window', { via: 'window' }))
+    // `--pair window` by something else, used, then the window's next start
+    used.saw(c('bbbbbbbb', 'window', { via: 'pair', replaced: true }))
+    used.saw(c('cccccccc', 'window', { via: 'window', replaced: true }))
+    expect(used.gone([{ id: 'cccccccc' }]).map((g) => g.id)).toEqual(['aaaaaaaa', 'bbbbbbbb'])
+    // A later routine start does not hide what came before it
+    used.saw(c('dddddddd', 'window', { via: 'window' }))
+    expect(used.gone([{ id: 'dddddddd' }]).map((g) => g.id)).toEqual(['aaaaaaaa', 'bbbbbbbb'])
+  })
+
+  it("keeps nothing of the launcher's own one-call credential, and at most its bound", () => {
+    const used = new UsedCredentials(2)
+    used.saw(c('aaaaaaaa', 'handover', { via: 'handover' }))
+    expect(used.gone([])).toEqual([])
+    for (const id of ['11111111', '22222222', '33333333']) used.saw(c(id, id))
+    expect(used.gone([]).map((g) => g.id)).toEqual(['22222222', '33333333'])
   })
 })
 

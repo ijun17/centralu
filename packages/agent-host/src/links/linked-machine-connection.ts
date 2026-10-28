@@ -110,6 +110,12 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   /** The host this link started there, if it did (owner decision 7, plan §10.9) */
   protected hostStarted: (HostStart & { at: number }) | null = null
   protected endpoint: Endpoint | null = null
+  /**
+   * The machine's host closed this hub's link because the credential it was paired with is gone there (#1405 review:
+   * 4001 "credential withdrawn"), while it was still this hub's latest: something paired under its label or withdrew
+   * it. Kept for as long as this hub runs, since the link pairs again at once and the poll would not see it
+   */
+  private ownCredentialTaken = false
   /** The full credentials this hub withdrew on the machine (#1405): never listed again, whatever a line read before said */
   protected revokedHere = new Set<string>()
   /**
@@ -420,11 +426,11 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   private otherCredentials(): Pick<MachineInfo, 'otherCredentials' | 'otherCredentialsMore' | 'ownCredentialGone'> {
     const line = this.endpoint?.line
     const all = this.credentials ?? line?.others ?? null
-    if (this.status !== 'connected' || !line || !all) return { otherCredentials: null, otherCredentialsMore: 0, ownCredentialGone: false }
+    if (this.status !== 'connected' || !line || !all) return { otherCredentials: null, otherCredentialsMore: 0, ownCredentialGone: this.ownCredentialTaken }
     const others = all.filter((c) => c.id !== line.credential && !this.revokedHere.has(c.id))
     const shown = others.slice(0, OTHER_CREDENTIALS_SHOWN).map((c) => ({ ...c, hubsName: !!line.pairedAs && c.label === line.pairedAs }))
     const ownGone = this.credentials !== null && !!line.credential && !this.credentials.some((c) => c.id === line.credential)
-    return { otherCredentials: shown, otherCredentialsMore: others.length - shown.length, ownCredentialGone: ownGone }
+    return { otherCredentials: shown, otherCredentialsMore: others.length - shown.length, ownCredentialGone: ownGone || this.ownCredentialTaken }
   }
 
   /**
@@ -1014,9 +1020,20 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
            * from before it (updated without a restart, or rolled back). Said as that, not as a token problem.
            */
           const serve = `${shimNames(this.record.remote).centralu} serve`
+          /*
+           * Its credential withdrawn there while the link held it (#1405 review): pairing again is the way on, and the row
+           * keeps saying it happened. Not when this hub had already paired anew (its own earlier link, closed late)
+           */
+          const withdrawn = r.code === 4001 && r.reason === 'credential withdrawn'
+          if (withdrawn && client.credential !== undefined && client.credential === this.endpoint?.line.credential) {
+            this.ownCredentialTaken = true
+            this.deps.log?.(`[links] ${this.name}: its host closed the link, this computer's credential there was withdrawn; pairing again`)
+          }
           const why = r.proving
             ? `${this.name} runs an older Centralu host than the one installed there, which cannot prove it holds the link's token`
-            : r.code === 4002 ? (r.error?.message ?? 'The remote host speaks another protocol') : `${this.name} refused the link's token`
+            : r.code === 4002
+              ? (r.error?.message ?? 'The remote host speaks another protocol')
+              : withdrawn ? `${this.name} withdrew this computer's credential there` : `${this.name} refused the link's token`
           if (!this.refusedOnce) {
             this.refusedOnce = true
             this.setStatus('connecting', why)

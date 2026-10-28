@@ -38,7 +38,16 @@ export function isListedEntry(f: Record<string, unknown>): f is Record<string, u
 }
 
 /** One full credential the host accepts: its id, for the proof (`prove.credential`), who it was made for, and its verifier */
-export type FullCredential = { id: string; label: string; verifier: string }
+export type FullCredential = {
+  id: string
+  label: string
+  verifier: string
+  /** When it was made, and whether its pairing took the place of one asked for another way (the launcher's `pairServe`) */
+  created?: number
+  replaced?: boolean
+  /** How it was asked for (`pair`, `window`, `handover`), when the file says */
+  via?: string
+}
 
 /** A full credential's verifier: the SHA-256 of it, as hex (the launcher's `verifierOf`) */
 export function verifierOf(credential: string): string {
@@ -99,7 +108,9 @@ export function readCredentialFile(
     }
     const full = o.full.flatMap((e: unknown) => {
       const f = asObj(e)
-      return isListedEntry(f) ? [{ id: f.id, label: f.label, verifier: f.verifier }] : []
+      if (!isListedEntry(f)) return []
+      const created = typeof f.created === 'number' && Number.isFinite(f.created) ? f.created : 0
+      return [{ id: f.id, label: f.label, verifier: f.verifier, created, replaced: f.replaced === true, ...(typeof f.via === 'string' ? { via: f.via } : {}) }]
     })
     lastRead.set(path, { full, at: now() })
     return { full, open: full, unreadable: null }
@@ -126,8 +137,57 @@ export function readFullCredentials(
   return readCredentialFile(path, read, pause, now).full
 }
 
-/** A full credential as a hub's machine row lists it (#1405): never its verifier */
-export type ListedCredential = { id: string; label: string; created: number; replaced: boolean }
+/**
+ * A full credential as a hub's machine row lists it (#1405): never its verifier. `gone`: no longer listed, but a socket
+ * said hello with it on this host (`UsedCredentials`)
+ */
+export type ListedCredential = { id: string; label: string; created: number; replaced: boolean; gone?: boolean }
+
+/**
+ * The full credentials a socket said hello with on this host, kept while it runs (#1405 review), so that one withdrawn
+ * before a hub's next `host.credentials` read is still listed there, as `gone`: before, `--pair x`, a hello and
+ * `--revoke` within 135 ms left no trace on any row, so "loud" could be dodged by timing.
+ *
+ * Not every credential that goes is news. The window pairs again at each start, and a hub at each link, so their
+ * earlier credentials go all the time. One that went is left out when the next credential of its label that said hello
+ * here was paired the same way (its entry not `replaced`, the launcher's `pairServe`): that is its pairer again. One
+ * whose label nothing used since, or whose successor was asked for another way, is listed. The launcher's own one-call
+ * credential (`via: handover`) is not kept. What this cannot tell is two askers of the same way under one label (a
+ * program's `--pair hub:<name>-<key>` that the hub's own next link takes the place of); the hub's row tells that one
+ * itself, from its own credential being withdrawn while its link held it. At most `max` are kept, the oldest dropped
+ * first; a restart of this host forgets them.
+ */
+export class UsedCredentials {
+  private seq = 0
+  private readonly used = new Map<string, { label: string; created: number; replaced: boolean; seq: number }>()
+
+  constructor(private readonly max = 256) {}
+
+  /** A socket said hello with `c` */
+  saw(c: FullCredential): void {
+    if (c.via === 'handover') return
+    const known = this.used.get(c.id)
+    this.used.delete(c.id)
+    this.used.set(c.id, { label: c.label, created: c.created ?? 0, replaced: c.replaced === true, seq: known?.seq ?? ++this.seq })
+    for (const id of this.used.keys()) {
+      if (this.used.size <= this.max) break
+      this.used.delete(id)
+    }
+  }
+
+  /** Those used here that `listed` no longer names and no same-way successor took the place of, as `gone` */
+  gone(listed: readonly { id: string }[]): ListedCredential[] {
+    const now = new Set(listed.map((c) => c.id))
+    const all = [...this.used]
+    return all.flatMap(([id, u]) => {
+      if (now.has(id)) return []
+      // The next credential of its label used here, by first use
+      const next = all.filter(([, s]) => s.label === u.label && s.seq > u.seq).sort(([, a], [, b]) => a.seq - b.seq)[0]
+      if (next && !next[1].replaced) return []
+      return [{ id, label: u.label, created: u.created, replaced: u.replaced, gone: true }]
+    })
+  }
+}
 
 /**
  * The full credentials `serve.json` names, as the launcher's `--connection` lists them (`others`), for `host.credentials`:

@@ -672,15 +672,17 @@ function VersionPrompt({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: 
 function OtherCredentials({ m }: { m: MachineInfo }) {
   const others = m.otherCredentials
   if (!others?.length && !m.ownCredentialGone) return null
-  const count = (others?.length ?? 0) + m.otherCredentialsMore
+  // One that is gone no longer gives access: listed, since something used it, but not counted (#1405 review)
+  const count = (others ?? []).filter((c) => !c.gone).length + m.otherCredentialsMore
   return (
     <div className="mt-1 text-xs leading-body" data-testid={`machine-credentials-${m.id}`}>
       {m.ownCredentialGone && (
         <p className="text-ink" data-testid={`machine-own-credential-gone-${m.id}`}>
-          This computer's own access there was replaced or withdrawn by something else. The link stays until it closes, and the next one pairs again.
+          This computer's own access there was replaced or withdrawn by something else while it was linked. The machine closed the link, and Centralu paired again.
         </p>
       )}
       {count > 0 && <p className="text-ink">{count === 1 ? 'Something else also has full access to this machine' : `${count} others also have full access to this machine`}</p>}
+      {count === 0 && others?.some((c) => c.gone) && <p className="text-ink">Something else had full access to this machine, used it, and lost it since</p>}
       <ul className="mt-0.5">
         {(others ?? []).map((c) => (
           <li key={c.id} className="flex items-center gap-2 text-ink-muted" data-testid={`machine-credential-${c.id}`}>
@@ -689,15 +691,19 @@ function OtherCredentials({ m }: { m: MachineInfo }) {
               {c.created ? `, since ${new Date(c.created).toLocaleDateString()}` : ''}
               {/* A pairing under a label already there is a change, not a silent swap (#1405) */}
               {c.hubsName ? ', under this computer’s own name but not made by it' : c.replaced ? ', which replaced an earlier one of that name' : ''}
+              {/* Used there, then withdrawn before a read listed it (#1405 review): nothing left to revoke */}
+              {c.gone ? ', used there and withdrawn since' : ''}
             </span>
-            <button
-              className="rounded-md px-1.5 py-0.5 text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink"
-              onClick={() => void useStore.getState().revokeMachineCredential(m.id, c.id)}
-              data-testid={`machine-credential-revoke-${c.id}`}
-              title="Its next connection to this machine is refused"
-            >
-              Revoke
-            </button>
+            {!c.gone && (
+              <button
+                className="rounded-md px-1.5 py-0.5 text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink"
+                onClick={() => void useStore.getState().revokeMachineCredential(m.id, c.id)}
+                data-testid={`machine-credential-revoke-${c.id}`}
+                title="Its connections to this machine are closed, and the next is refused"
+              >
+                Revoke
+              </button>
+            )}
           </li>
         ))}
       </ul>

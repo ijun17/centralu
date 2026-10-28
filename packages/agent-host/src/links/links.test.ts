@@ -16,7 +16,7 @@ import { linkedSessions } from './linked-sessions.js'
 import { fakeRegistry } from './fake-registry.test-helpers.js'
 import { Router } from './router.js'
 import { DirectTunnel, StartedNotServing, type ConnectionLine, type HostStart, type Tunnel } from './tunnel.js'
-import type { ListedCredential } from '../lifecycle/serve-credentials.js'
+import { verifierOf, type FullCredential, type ListedCredential } from '../lifecycle/serve-credentials.js'
 import { NodeTooOld } from './node-floor.js'
 import { readHoldCommand } from './swap-hold.js'
 import { storeMirror, storeRegistry } from './stored.js'
@@ -79,6 +79,8 @@ async function remoteHost(
     before1618?: boolean
     /** A `centralu serve` host's full credentials, as `host.credentials` answers them (#1405) */
     credentials?: () => ListedCredential[] | null
+    /** A `centralu serve` host's full credentials as it takes them at hello, read again every 20 ms while one is in */
+    full?: () => FullCredential[]
   } = {},
 ) {
   const adapters = scriptedAdapters({ immediate: o.immediate, queueBehind: o.queueBehind, holdNext: o.holdNext })
@@ -92,6 +94,7 @@ async function remoteHost(
     ...(o.logon ? { logon: o.logon } : {}),
     ...(o.handover ? { handover: o.handover } : {}),
     ...(o.before1618 ? {} : { updateContinued: () => mgr.updateContinued() }),
+    ...(o.full ? { fullCredentials: o.full, credentialSweepMs: 20 } : {}),
   })
   await o.beforeListen?.(mgr)
   const p = await server.listen()
@@ -3785,6 +3788,40 @@ describe('machines.revokeCredential (#1405)', () => {
     set([cred('ffff6666', 'hub:hub-mac-0123abcd', true)])
     await eventually(() => hub.links.list()[0]!.ownCredentialGone)
     expect(hub.links.list()[0]!.otherCredentials).toEqual([{ id: 'ffff6666', label: 'hub:hub-mac-0123abcd', created: 7, replaced: true, hubsName: true }])
+  })
+
+  it("says this hub's own credential was taken while its link held it, and keeps saying it once the link pairs again (#1405 review)", async () => {
+    const label = 'hub:hub-mac-0123abcd'
+    const paired = [
+      { id: 'cccc3333', token: 'c'.repeat(43) },
+      { id: 'dddd4444', token: 'd'.repeat(43) },
+    ]
+    let full: FullCredential[] = [{ id: 'cccc3333', label, verifier: verifierOf(paired[0]!.token) }]
+    const remote = await remoteHost(0, new Store(), { full: () => full, credentials: () => full.map((c) => ({ id: c.id, label: c.label, created: 7, replaced: false })) })
+    let links = 0
+    // Each link pairs: the first gets cccc3333, the next dddd4444
+    const line = () => {
+      const p = paired[Math.min(links++, 1)]!
+      return lineFor(remote.port, { token: p.token, credential: p.id, pairedAs: label, others: [] })
+    }
+    const hub = await hubHost(line, new Store(), true, { credentialsMs: 20 })
+    await eventually(() => status(hub) === 'connected' && hub.links.list()[0]!.otherCredentials !== null)
+    expect(hub.links.list()[0]!.ownCredentialGone).toBe(false)
+    // Something of that user ran `--pair <this hub's label>` there, then the hub's next link took its place
+    full = [{ id: 'dddd4444', label, verifier: verifierOf(paired[1]!.token) }]
+    await eventually(() => links >= 2 && status(hub) === 'connected')
+    await eventually(() => hub.links.list()[0]!.ownCredentialGone)
+    // Connected on its new credential, the mark stands: the poll alone would have seen nothing amiss
+    await new Promise((r) => setTimeout(r, 100))
+    expect(status(hub)).toBe('connected')
+    expect(hub.links.list()[0]!.ownCredentialGone).toBe(true)
+  })
+
+  it('lists one used there and withdrawn since, as gone, with nothing to revoke', async () => {
+    const { hub, set } = await serveMachine([own])
+    set([own, { ...cred('abab1212', 'x'), gone: true }])
+    await eventually(() => hub.links.list()[0]!.otherCredentials?.length === 1)
+    expect(hub.links.list()[0]!.otherCredentials).toEqual([{ id: 'abab1212', label: 'x', created: 7, replaced: false, gone: true, hubsName: false }])
   })
 
   it('lists the first 32 and counts the rest, so a flood of entries cannot hide the one after them', async () => {

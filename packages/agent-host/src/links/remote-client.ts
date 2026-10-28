@@ -268,6 +268,11 @@ export class RemoteClient {
     this.connect()
   }
 
+  /** The id of the paired credential this client says hello with (#1405), if it was paired */
+  get credential(): string | undefined {
+    return this.opts.credential
+  }
+
   call(method: string, params: unknown): Promise<unknown> {
     if (this.closed) return Promise.reject(linkError('The link is closed', false))
     // Fails now rather than waiting for a machine that may not come back (see the header)

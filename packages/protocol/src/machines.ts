@@ -288,9 +288,11 @@ export const MachineInfo = z.object({
    * then `host.credentials` every 30 seconds while connected): who each was made for (`label`, as the one who paired
    * said it) and when. Never their values. Another hub that pairs with the machine, the machine's own window on
    * Windows, and anything of that user that ran `--pair` itself show here; the row offers to withdraw each
-   * (`machines.revokeCredential`). `replaced`: its pairing took the place of an earlier credential of its label (a
-   * re-pairing under `window` or a hub's name is a change the person sees). `hubsName`: it carries this hub's own label,
-   * and this hub did not make it. The first 32; `otherCredentialsMore` counts the rest. Null while it is not known: not
+   * (`machines.revokeCredential`). `replaced`: its pairing took the place of an earlier credential of its label that was
+   * asked for another way (a `--pair window` in the window's place; the window or a hub pairing again is not marked).
+   * `hubsName`: it carries this hub's own label, and this hub did not make it. `gone` (#1405 review): no longer held,
+   * but something said hello with it on that host before it went, so a credential used and withdrawn between two reads
+   * still shows; the row offers nothing to withdraw for it. The first 32; `otherCredentialsMore` counts the rest. Null while it is not known: not
    * connected yet, or a Centralu there from before it. Additive
    */
   otherCredentials: z
@@ -301,6 +303,7 @@ export const MachineInfo = z.object({
         created: z.number(),
         replaced: z.boolean().catch(false).default(false),
         hubsName: z.boolean().catch(false).default(false),
+        gone: z.boolean().optional().catch(undefined),
       }),
     )
     .max(32)
@@ -311,7 +314,8 @@ export const MachineInfo = z.object({
   otherCredentialsMore: z.number().int().min(0).catch(0).default(0),
   /**
    * This hub's own full credential there is gone (#1405): something paired under its label or withdrew it while the
-   * link was up. The link stays until it closes; the next link pairs again. Additive
+   * link was up. The host there closes the link then (#1405 review) and the next link pairs again; the mark stays for as
+   * long as this hub runs, so the link coming back does not hide it. Additive
    */
   ownCredentialGone: z.boolean().catch(false).default(false),
   /**

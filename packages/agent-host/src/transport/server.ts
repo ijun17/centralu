@@ -108,6 +108,8 @@ export type HostServerOptions = {
    * hello. 1 s when absent
    */
   credentialSweepMs?: number
+  /** A socket said hello with one of the full credentials `fullCredentials` names (#1405 review, `UsedCredentials`) */
+  onFullHello?: (credential: FullCredential) => void
   onRpc: RpcHandler
   allowedOrigins?: readonly string[]
   /**
@@ -697,7 +699,10 @@ export class HostServer {
         }
         this.clients.add(ws)
         this.byClient.set(client, ws)
-        if (match) this.fullBy.set(ws, match.id)
+        if (match) {
+          this.fullBy.set(ws, match.id)
+          this.opts.onFullHello?.(match)
+        }
         label = frame.data.client?.trim().slice(0, 60) || null
         if (!limited && frame.data.shows?.includes(SHOWS_HOST_REQUESTS)) {
           this.showing.add(ws)

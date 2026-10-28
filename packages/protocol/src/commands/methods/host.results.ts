@@ -57,7 +57,8 @@ export const hostResults = {
   'host.credentials': z.object({
     credentials: z
       // Unbounded: every one the folder holds, so the hub's count of those it does not list is exact (#1405 review)
-      .array(z.object({ id: z.string().max(16), label: z.string().max(80), created: z.number(), replaced: z.boolean().catch(false).default(false) }))
+      // `gone` (#1405 review): used there, and no longer listed. Additive
+      .array(z.object({ id: z.string().max(16), label: z.string().max(80), created: z.number(), replaced: z.boolean().catch(false).default(false), gone: z.boolean().optional() }))
       .nullable(),
   }),
   'host.lastAnswer': HostLastAnswerResult,

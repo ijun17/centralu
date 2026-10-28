@@ -1497,11 +1497,24 @@ A host started with `centralu serve` on another machine is reached by the app th
     link opened, then what the machine's host says through the link (`host.credentials`, read from `serve.json`) at each
     connect and every 30 seconds: a pairing there while the link is up shows within that. It is shown while connected,
     its labels cleaned to one line. A pairing under a label already there replaces that credential, as the hub's own
-    re-pairing at each link does, and is marked `replaced` in the file and on the row ("which replaced an earlier one of
-    that name"), so `--pair window` on a machine whose window never paired, or a second pairing under it, is a change
-    the person sees. One under this hub's own label that this hub did not make says so ("under this computer's own name
-    but not made by it"), and the row says when this hub's own is gone from the list. It lists 32 and counts the rest
-    ("And N more"), so a flood of entries cannot hide the one after them. It can also read the key. That
+    re-pairing at each link does. Each entry keeps how it was asked for (`via`: `pair` for `--connection --pair`,
+    `window` for `--window`, `handover` for the launcher's own one-call credential), and a pairing is marked `replaced`
+    in the file and on the row ("which replaced an earlier one of that name") only when the entry it took the place of
+    was asked for another way, or does not say (#1405 review): the window pairing at each start and a hub at each link
+    are their own pairer again, and marking them made the flag mean nothing. So `--pair window` in the window's place,
+    and the window's next start after it, are a change the person sees. Two askers of the same way under one label (a
+    program's `--pair hub:<name>-<key>` against that hub's own link) cannot be told apart by the launcher: the hub tells
+    it itself. One under this hub's own label that this hub did not make says so ("under this computer's own name but
+    not made by it"), and the row says when this hub's own was gone from the list or withdrawn while its link held it
+    (the host there closes the link then, 4001 "credential withdrawn"); that mark stays for as long as the hub runs,
+    since the link pairs again at once. A credential used and then withdrawn before the next 30 s read is listed too
+    (#1405 review): the host keeps, while it runs, every full credential a socket said hello with, and `host.credentials`
+    adds those no longer in `serve.json` as `gone` ("used there and withdrawn since", no Revoke), unless the next
+    credential of the same label used there was paired the same way (its pairer again, as at each window start or hub
+    link). Before, `--pair x`, a hello and `--revoke` within 135 ms left no trace on any row. What stays: the record is
+    in the host's memory (at most 256), so a restart of that host forgets it, and a same-way takeover of a hub's label
+    while that hub's link is down, then replaced by the hub's next link, leaves only its listing while it stood. It
+    lists 32 and counts the rest ("And N more"), so a flood of entries cannot hide the one after them. It can also read the key. That
     gives it the limited credential, and also a bridge credential (`ccb1`) for any session it can name, which reaches
     that session's own tool channel (`orchestrator.tool`, under that session's preset; "The Codex bridge gets a credential of its own" below), as it
     did before #1405 when the file held the token. Any process of this user, on any OS, can run `--window` and get the window's credential, until
