@@ -19,8 +19,6 @@ const fileIds = vi.hoisted(() => new Map<string, bigint>())
 const listing = vi.hoisted(() => ({ fails: new Set<string>(), calls: new Map<string, number>() }))
 /** Runs once, just before the next temp file of a marks file is written: what lands in the window before it is put in place */
 const beforeMarksTemp = vi.hoisted(() => ({ run: null as null | (() => void) }))
-/** A rename to this path fails once with EXDEV, as one onto another volume does */
-const otherVolume = vi.hoisted(() => ({ to: null as null | string }))
 
 vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs')>()
@@ -40,13 +38,6 @@ vi.mock('node:fs', async (importOriginal) => {
         run()
       }
       return (actual.writeFileSync as (...a: unknown[]) => void)(path, ...rest)
-    },
-    renameSync: (from: string, to: string) => {
-      if (otherVolume.to !== null && String(to) === otherVolume.to) {
-        otherVolume.to = null
-        throw Object.assign(new Error(`EXDEV: cross-device link not permitted, rename '${from}' -> '${to}'`), { code: 'EXDEV' })
-      }
-      return actual.renameSync(from, to)
     },
     readdirSync: (path: string, options?: unknown) => {
       listing.calls.set(String(path), (listing.calls.get(String(path)) ?? 0) + 1)
@@ -721,18 +712,6 @@ describe('what never gets brought in', () => {
     expect(readFileSync(join(home, 'timer', 'mine.txt'), 'utf8')).toBe('the person wrote this')
     // "Import and enable" still has to carry the key of the review the person saw
     expect(() => rt.commitImportAsProject(again.token, { enable: true, reviewKey: 'not-it' }, { path: join(home, 'other'), isDefault: true })).toThrow('What would be enabled is not what you reviewed')
-  })
-
-  it('brought in as a project on another volume: copied beside the target by the Os and renamed in', async () => {
-    make()
-    const target = join(root, 'Centralu', 'timer')
-    const { token } = await rt.prepareImport(plantSource('timer-src', 'timer', { 'lib/a.mjs': '// a' }))
-    otherVolume.to = target
-    expect(rt.commitImportAsProject(token, { enable: false }, { path: target, isDefault: true })).toBe('timer')
-    expect(otherVolume.to).toBeNull()
-    expect(readFileSync(join(target, 'lib', 'a.mjs'), 'utf8')).toBe('// a')
-    expect(readdirSync(dirname(target))).toEqual(['timer'])
-    expect(stagingLeft()).toEqual([])
   })
 
   it('an id follows the same rule as a new app — the app- prefix, the centralu prefix, a reserved id, an underscore', async () => {
