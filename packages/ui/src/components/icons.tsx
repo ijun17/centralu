@@ -229,7 +229,7 @@ export function FolderPlusIcon({ size = 13 }: { size?: number }) {
 }
 
 /**
- * Centralu's mark (#730): the app icon's orbit (a ring, the arc the app draws for "working", the centre), in one ink.
+ * Centralu's mark (#730): the orbit of the former app icon (a ring, the arc the app draws for "working", the centre), in one ink.
  * It marks a call to Centralu's own tools in a conversation, the points where an agent reaches other sessions,
  * projects, machines or apps. Kind by shape: it is emphasis, never the signal's brightness.
  */

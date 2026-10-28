@@ -1,0 +1,492 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Centralu icon studio (panes)</title>
+<style>
+  :root {
+    --bg: #161616; --panel: #1e1e1e; --line: #2e2e2e; --ink: #e8e8e8; --muted: #9a9a9a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
+    font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard", system-ui, sans-serif; }
+  .app { display: grid; grid-template-columns: 340px 1fr; height: 100vh; }
+  aside { background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; padding: 14px 16px 40px; }
+  main { overflow: auto; padding: 24px; display: flex; flex-direction: column; gap: 20px; align-items: center; }
+  h1 { font-size: 15px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 12px; }
+  details { border-top: 1px solid var(--line); padding: 8px 0; }
+  details[open] { padding-bottom: 12px; }
+  summary { cursor: pointer; font-weight: 600; padding: 4px 0; user-select: none; }
+  .row { display: grid; grid-template-columns: 96px 1fr 48px; gap: 8px; align-items: center; margin: 7px 0; }
+  .row label { color: var(--muted); }
+  .row input[type=range] { width: 100%; accent-color: #d0d0d0; }
+  .row output { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .row.color { grid-template-columns: 96px 1fr; }
+  .row.color .pair { display: flex; gap: 6px; align-items: center; }
+  .row.color input[type=color] { width: 34px; height: 24px; padding: 0; border: 1px solid var(--line); background: none; border-radius: 4px; }
+  .row.color input[type=text] { width: 90px; background: #111; color: var(--ink); border: 1px solid var(--line); border-radius: 4px; padding: 3px 6px; font-family: ui-monospace, monospace; }
+  select { background: #111; color: var(--ink); border: 1px solid var(--line); border-radius: 4px; padding: 3px 6px; width: 100%; }
+  .row.sel { grid-template-columns: 96px 1fr; }
+  .buttons { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+  button { background: #2a2a2a; color: var(--ink); border: 1px solid #3a3a3a; border-radius: 6px; padding: 6px 10px; cursor: pointer; font: inherit; }
+  button:hover { background: #333; }
+  .stage { width: min(560px, 90vw); aspect-ratio: 1; border-radius: 18px; display: grid; place-items: center;
+    background: repeating-conic-gradient(#202020 0% 25%, #1a1a1a 0% 50%) 0 0 / 24px 24px; }
+  .stage svg { width: 88%; height: 88%; }
+  .strips { display: flex; flex-direction: column; gap: 10px; width: min(760px, 95vw); }
+  .strip { display: flex; align-items: flex-end; gap: 22px; padding: 18px 22px; border-radius: 12px; }
+  .strip.light { background: #ececec; color: #555; }
+  .strip.dark { background: #1b1b1b; color: #888; border: 1px solid #2a2a2a; }
+  .strip figure { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 11px; }
+  .note { color: var(--muted); font-size: 12px; max-width: 760px; }
+  textarea { width: 100%; height: 90px; background: #111; color: var(--ink); border: 1px solid var(--line); border-radius: 6px; font: 11px ui-monospace, monospace; }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <h1>Centralu icon studio</h1>
+    <p class="sub">The app icon (#412, concept F: four panes, one of them different). The defaults are the shipped icon. Changes redraw at once and are kept in this browser. To change the icon, save the SVG over <code>panes.svg</code> with the settings in its header comment and run <code>pnpm icon</code>.</p>
+    <div class="buttons">
+      <button data-preset="base">App icon</button>
+      <button data-preset="relief">Shallow relief</button>
+      <button data-preset="flat">Flat</button>
+      <button data-preset="soft">Soft 3D</button>
+      <button data-preset="deep">Deep 3D</button>
+    </div>
+    <div id="controls"></div>
+    <details open>
+      <summary>Export</summary>
+      <div class="buttons">
+        <button id="dl-svg">Save SVG</button>
+        <button id="dl-png">Save PNG 1024</button>
+        <button id="copy-json">Copy settings</button>
+        <button id="reset">Reset</button>
+      </div>
+      <p class="sub">Paste settings (JSON)</p>
+      <textarea id="json-in" placeholder='{"bgA":"#7a7a7a", ...}'></textarea>
+      <div class="buttons"><button id="apply-json">Apply pasted settings</button></div>
+    </details>
+  </aside>
+  <main>
+    <div class="stage" id="stage"></div>
+    <div class="strips">
+      <div class="strip light" id="strip-light"></div>
+      <div class="strip dark" id="strip-dark"></div>
+    </div>
+    <p class="note">Check that the white pane still stands out at 16 and 32 px. 3D effects blur at small sizes, so icons usually tone them down there.</p>
+  </main>
+</div>
+
+<script>
+// ---------- settings ----------
+const DEFAULTS = {
+  // background
+  shape: 'squircle',          // squircle | rounded | circle | none
+  bodySize: 82,               // % of the 1024 canvas (Apple grid: 824/1024 ≈ 80.5)
+  cornerRound: 22,            // rounded-square radius, % of body
+  bgType: 'linear',           // linear | radial
+  bgA: '#808080',             // gradient start (light side)
+  bgB: '#000000',             // gradient end
+  bgAngle: 160,               // linear gradient angle, degrees (0 = light colour at the bottom, dark at the top)
+  bgCenterY: 30,              // radial centre height, %
+  edgeOpacity: 14,            // faint outline so it holds on a dark Dock, %
+  // mark geometry
+  markSize: 61,               // % of body
+  gap: 7,                     // gap between panes, % of mark
+  rOuter: 33,                 // outer corner radius, % of pane
+  rInner: 14,                 // other corners radius, % of pane
+  whiteQuadrant: 1,           // 1 = top right, 2 = top left, 3 = bottom left, 4 = bottom right
+  chamfer: 30,                // cut on the white pane's inner corner, % of pane (0 = none)
+  chamferRound: 10,           // rounding of the cut's ends, % of pane
+  // colours
+  white: '#ffffff',
+  black: '#454545',
+  // 3D
+  light: 315,                 // where the light comes from: 0 = top, 90 = right, 180 = bottom, 270 = left
+  depth: 8,                   // extrusion depth, canvas px
+  sideDark: 18,               // how much darker the sides are, %
+  faceGrad: 46,               // face gradient strength, %
+  bevel: 7,                   // edge highlight strength, %
+  bevelWidth: 3,              // edge highlight width, canvas px
+  gloss: 0,                   // soft sheen on the lit side, %
+  shadowDist: 0,              // drop shadow distance, canvas px
+  shadowBlur: 0,              // drop shadow blur, canvas px
+  shadowOpacity: 0,           // %
+  rimLight: 0,                // light rim on the background, on the lit side (emboss), %
+  bodyShade: 0,               // inner shading of the background body, %
+};
+
+const PRESETS = {
+  base: {},
+  relief: { depth: 0, sideDark: 0, faceGrad: 3, bevel: 25, bevelWidth: 2, gloss: 0, shadowDist: 3, shadowBlur: 3, shadowOpacity: 28, rimLight: 18, bodyShade: 6 },
+  flat: { depth: 0, sideDark: 0, faceGrad: 0, bevel: 0, gloss: 0, shadowDist: 0, shadowBlur: 0, shadowOpacity: 0, rimLight: 0, bodyShade: 0 },
+  deep: { rimLight: 0, depth: 26, sideDark: 55, faceGrad: 22, bevel: 55, bevelWidth: 9, gloss: 25, shadowDist: 30, shadowBlur: 24, shadowOpacity: 60, bodyShade: 30 },
+  soft: { rimLight: 6, depth: 6, sideDark: 30, faceGrad: 12, bevel: 30, bevelWidth: 10, gloss: 14, shadowDist: 12, shadowBlur: 22, shadowOpacity: 35, bodyShade: 16 },
+};
+
+const CONTROLS = [
+  { group: 'Background', open: true, items: [
+    { key: 'shape', label: 'Shape', type: 'select', options: [['squircle','Squircle (macOS icon)'],['rounded','Rounded square'],['circle','Circle'],['none','None (mark only)']] },
+    { key: 'bodySize', label: 'Body size', min: 60, max: 100, step: 1, unit: '%' },
+    { key: 'cornerRound', label: 'Corner (rounded square)', min: 0, max: 50, step: 1, unit: '%' },
+    { key: 'bgType', label: 'Gradient', type: 'select', options: [['linear','Linear'],['radial','Radial']] },
+    { key: 'bgA', label: 'Light colour', type: 'color' },
+    { key: 'bgB', label: 'Dark colour', type: 'color' },
+    { key: 'bgAngle', label: 'Linear angle', min: 0, max: 360, step: 1, unit: '°' },
+    { key: 'bgCenterY', label: 'Radial centre height', min: 0, max: 100, step: 1, unit: '%' },
+    { key: 'bodyShade', label: 'Inner shade', min: 0, max: 60, step: 1, unit: '%' },
+    { key: 'edgeOpacity', label: 'Edge line', min: 0, max: 40, step: 1, unit: '%' },
+  ]},
+  { group: 'Panes', open: true, items: [
+    { key: 'markSize', label: 'Mark size', min: 30, max: 90, step: 1, unit: '%' },
+    { key: 'gap', label: 'Gap', min: 0, max: 20, step: 0.5, unit: '%' },
+    { key: 'rOuter', label: 'Outer corner', min: 0, max: 50, step: 1, unit: '%' },
+    { key: 'rInner', label: 'Other corners', min: 0, max: 50, step: 1, unit: '%' },
+    { key: 'whiteQuadrant', label: 'White pane quadrant', type: 'select', options: [['1','1 (top right)'],['2','2 (top left)'],['3','3 (bottom left)'],['4','4 (bottom right)']] },
+    { key: 'chamfer', label: 'White pane cut corner', min: 0, max: 60, step: 1, unit: '%' },
+    { key: 'chamferRound', label: 'Cut rounding', min: 0, max: 20, step: 1, unit: '%' },
+  ]},
+  { group: 'Colours', open: true, items: [
+    { key: 'white', label: 'White pane', type: 'color' },
+    { key: 'black', label: 'Black panes', type: 'color' },
+  ]},
+  { group: '3D', open: true, items: [
+    { key: 'light', label: 'Light direction', min: 0, max: 359, step: 1, unit: '°' },
+    { key: 'depth', label: 'Extrusion depth', min: 0, max: 48, step: 1, unit: 'px' },
+    { key: 'sideDark', label: 'Side darkness', min: 0, max: 90, step: 1, unit: '%' },
+    { key: 'faceGrad', label: 'Face gradient', min: 0, max: 50, step: 1, unit: '%' },
+    { key: 'bevel', label: 'Edge highlight', min: 0, max: 100, step: 1, unit: '%' },
+    { key: 'bevelWidth', label: 'Edge width', min: 1, max: 24, step: 1, unit: 'px' },
+    { key: 'gloss', label: 'Gloss', min: 0, max: 60, step: 1, unit: '%' },
+    { key: 'shadowDist', label: 'Shadow distance', min: 0, max: 60, step: 1, unit: 'px' },
+    { key: 'shadowBlur', label: 'Shadow blur', min: 0, max: 60, step: 1, unit: 'px' },
+    { key: 'shadowOpacity', label: 'Shadow opacity', min: 0, max: 100, step: 1, unit: '%' },
+    { key: 'rimLight', label: 'Rim light', min: 0, max: 60, step: 1, unit: '%' },
+  ]},
+];
+
+const STORE = 'centralu-icon-studio-v3';
+// What this browser saved is used only while the defaults (the shipped icon) are the ones it
+// was saved against: after the icon changes, the studio opens with the new icon, not an old edit.
+const BASE = JSON.stringify(DEFAULTS);
+const saved = safeParse(typeof localStorage === 'undefined' ? null : localStorage.getItem(STORE));
+let S = Object.assign({}, DEFAULTS, saved && saved.base === BASE ? saved.settings : {});
+
+function safeParse(t) { try { return JSON.parse(t); } catch { return null; } }
+
+// ---------- colour helpers ----------
+function hexToRgb(h) {
+  h = h.replace('#', '');
+  if (h.length === 3) h = h.split('').map(c => c + c).join('');
+  const n = parseInt(h, 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+function rgbToHex([r, g, b]) {
+  return '#' + [r, g, b].map(v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join('');
+}
+function mix(a, b, t) {
+  const A = hexToRgb(a), B = hexToRgb(b);
+  return rgbToHex(A.map((v, i) => v + (B[i] - v) * t));
+}
+const lighten = (c, t) => mix(c, '#ffffff', t);
+const darken = (c, t) => mix(c, '#000000', t);
+
+// ---------- geometry ----------
+const f = n => +n.toFixed(2);
+
+// Superellipse (squircle) like the macOS icon body.
+function squirclePath(cx, cy, r, n = 5) {
+  const pts = [];
+  const N = 240;
+  for (let i = 0; i < N; i++) {
+    const t = (i / N) * Math.PI * 2;
+    const c = Math.cos(t), s = Math.sin(t);
+    const x = cx + r * Math.sign(c) * Math.pow(Math.abs(c), 2 / n);
+    const y = cy + r * Math.sign(s) * Math.pow(Math.abs(s), 2 / n);
+    pts.push(`${f(x)} ${f(y)}`);
+  }
+  return 'M' + pts.join('L') + 'Z';
+}
+function roundedRectPath(x, y, w, h, r) {
+  r = Math.min(r, w / 2, h / 2);
+  return `M${f(x + r)} ${f(y)}H${f(x + w - r)}A${f(r)} ${f(r)} 0 0 1 ${f(x + w)} ${f(y + r)}V${f(y + h - r)}A${f(r)} ${f(r)} 0 0 1 ${f(x + w - r)} ${f(y + h)}H${f(x + r)}A${f(r)} ${f(r)} 0 0 1 ${f(x)} ${f(y + h - r)}V${f(y + r)}A${f(r)} ${f(r)} 0 0 1 ${f(x + r)} ${f(y)}Z`;
+}
+
+// A pane: a square with its own radius per corner, and optionally one corner cut (chamfered).
+// corners: [tl, tr, br, bl], each {r} or {cut, round}
+function panePath(x, y, s, corners) {
+  const P = [[x, y], [x + s, y], [x + s, y + s], [x, y + s]];
+  const dirIn = [[0, -1], [1, 0], [0, 1], [-1, 0]];   // edge arriving at the corner (clockwise)
+  const dirOut = [[1, 0], [0, 1], [-1, 0], [0, -1]];  // edge leaving the corner
+  const parts = [];
+  const add = (p, d, k) => [p[0] + d[0] * k, p[1] + d[1] * k];
+  const geo = corners.map((c, i) => {
+    const C = P[i], din = dirIn[i], dout = dirOut[i];
+    if (c.cut > 0) {
+      const cr = Math.min(c.round, c.cut * 0.45);
+      const P1 = add(C, din, -c.cut), P2 = add(C, dout, c.cut);
+      const ux = P2[0] - P1[0], uy = P2[1] - P1[1], ul = Math.hypot(ux, uy);
+      const u = [ux / ul, uy / ul];
+      const entry = add(P1, din, -cr), exit = add(P2, dout, cr);
+      const draw = `L${f(entry[0])} ${f(entry[1])}Q${f(P1[0])} ${f(P1[1])} ${f(P1[0] + u[0] * cr)} ${f(P1[1] + u[1] * cr)}` +
+        `L${f(P2[0] - u[0] * cr)} ${f(P2[1] - u[1] * cr)}Q${f(P2[0])} ${f(P2[1])} ${f(exit[0])} ${f(exit[1])}`;
+      return { entry, exit, draw };
+    }
+    const r = Math.min(c.r, s / 2);
+    const entry = add(C, din, -r), exit = add(C, dout, r);
+    const draw = `L${f(entry[0])} ${f(entry[1])}` + (r > 0 ? `A${f(r)} ${f(r)} 0 0 1 ${f(exit[0])} ${f(exit[1])}` : '');
+    return { entry, exit, draw };
+  });
+  const start = geo[3].exit;
+  parts.push(`M${f(start[0])} ${f(start[1])}`);
+  geo.forEach(g => parts.push(g.draw));
+  parts.push('Z');
+  return parts.join('');
+}
+
+// ---------- build the SVG ----------
+function buildSVG(o, idp = 'a') {
+  const W = 1024, C = W / 2;
+  const body = W * o.bodySize / 100;
+  const id = k => `${idp}-${k}`;
+
+  // light vector (points toward the light), screen coordinates (y down)
+  const th = o.light * Math.PI / 180;
+  const L = [Math.sin(th), -Math.cos(th)];
+  const away = [-L[0], -L[1]];
+  const gx1 = f(0.5 + L[0] * 0.5), gy1 = f(0.5 + L[1] * 0.5), gx2 = f(0.5 - L[0] * 0.5), gy2 = f(0.5 - L[1] * 0.5);
+
+  // body shape
+  let bodyD = '';
+  if (o.shape === 'squircle') bodyD = squirclePath(C, C, body / 2);
+  else if (o.shape === 'rounded') bodyD = roundedRectPath(C - body / 2, C - body / 2, body, body, body * o.cornerRound / 100);
+  else if (o.shape === 'circle') bodyD = `M${C - body / 2} ${C}a${body / 2} ${body / 2} 0 1 0 ${body} 0a${body / 2} ${body / 2} 0 1 0 ${-body} 0Z`;
+
+  // background gradient
+  const ba = o.bgAngle * Math.PI / 180;
+  const bx = Math.sin(ba), by = -Math.cos(ba);
+  const bgGrad = o.bgType === 'radial'
+    ? `<radialGradient id="${id('bg')}" cx="0.5" cy="${o.bgCenterY / 100}" r="0.85" fx="0.5" fy="${o.bgCenterY / 100}"><stop offset="0" stop-color="${o.bgA}"/><stop offset="1" stop-color="${o.bgB}"/></radialGradient>`
+    : `<linearGradient id="${id('bg')}" x1="${f(0.5 - bx * 0.5)}" y1="${f(0.5 - by * 0.5)}" x2="${f(0.5 + bx * 0.5)}" y2="${f(0.5 + by * 0.5)}"><stop offset="0" stop-color="${o.bgA}"/><stop offset="1" stop-color="${o.bgB}"/></linearGradient>`;
+
+  // mark layout
+  const mark = (o.shape === 'none' ? W * 0.86 : body) * o.markSize / 100 * (o.shape === 'none' ? 100 / o.markSize : 1);
+  const g = mark * o.gap / 100;
+  const p = (mark - g) / 2;
+  const x0 = C - mark / 2, y0 = C - mark / 2;
+  const R = p * o.rOuter / 100, r = p * o.rInner / 100;
+  const cut = p * o.chamfer / 100, cutRound = p * o.chamferRound / 100;
+
+  // quadrants: 1 top-right, 2 top-left, 3 bottom-left, 4 bottom-right
+  // outer corner index (tl=0,tr=1,br=2,bl=3) and inner corner (toward the centre)
+  const Q = {
+    1: { x: x0 + p + g, y: y0,         outer: 1, inner: 3 },
+    2: { x: x0,         y: y0,         outer: 0, inner: 2 },
+    3: { x: x0,         y: y0 + p + g, outer: 3, inner: 1 },
+    4: { x: x0 + p + g, y: y0 + p + g, outer: 2, inner: 0 },
+  };
+
+  const defs = [bgGrad];
+  const panes = [];
+  // draw panes far from the light first, so a nearer pane's side never covers a lit face
+  const order = [1, 2, 3, 4].sort((a, b) => {
+    const ca = [Q[a].x + p / 2 - C, Q[a].y + p / 2 - C], cb = [Q[b].x + p / 2 - C, Q[b].y + p / 2 - C];
+    return (ca[0] * L[0] + ca[1] * L[1]) - (cb[0] * L[0] + cb[1] * L[1]);
+  });
+
+  const rimD = Math.max(1.5, o.shadowDist * 0.6);
+  defs.push(`<filter id="${id('shadow')}" x="-30%" y="-30%" width="160%" height="160%">` +
+    `<feGaussianBlur in="SourceAlpha" stdDeviation="${f(Math.max(0.01, o.shadowBlur / 2))}" result="blur"/>` +
+    `<feOffset in="blur" dx="${f(away[0] * o.shadowDist)}" dy="${f(away[1] * o.shadowDist)}" result="o1"/>` +
+    `<feFlood flood-color="#000" flood-opacity="${o.shadowOpacity / 100}"/><feComposite in2="o1" operator="in" result="sh"/>` +
+    `<feOffset in="blur" dx="${f(L[0] * rimD)}" dy="${f(L[1] * rimD)}" result="o2"/>` +
+    `<feFlood flood-color="#fff" flood-opacity="${(o.rimLight || 0) / 100}"/><feComposite in2="o2" operator="in" result="hi"/>` +
+    `<feMerge><feMergeNode in="hi"/><feMergeNode in="sh"/><feMergeNode in="SourceGraphic"/></feMerge></filter>`);
+
+  for (const q of order) {
+    const isWhite = q === Number(o.whiteQuadrant);
+    const face = isWhite ? o.white : o.black;
+    const corners = [0, 1, 2, 3].map(i => {
+      if (i === Q[q].outer) return { r: R };
+      if (i === Q[q].inner && isWhite && cut > 0) return { cut, round: cutRound };
+      return { r };
+    });
+    const d = panePath(Q[q].x, Q[q].y, p, corners);
+    const k = `p${q}`;
+
+    // face gradient: lit side lighter, far side darker
+    const faceLit = isWhite ? lighten(face, o.faceGrad / 100 * 0.6) : lighten(face, o.faceGrad / 100 * 1.4);
+    const faceFar = darken(face, o.faceGrad / 100 * (isWhite ? 0.9 : 0.5));
+    defs.push(`<linearGradient id="${id(k + 'face')}" x1="${gx1}" y1="${gy1}" x2="${gx2}" y2="${gy2}"><stop offset="0" stop-color="${faceLit}"/><stop offset="1" stop-color="${faceFar}"/></linearGradient>`);
+    // bevel: highlight on the lit edge, shade on the far edge
+    defs.push(`<linearGradient id="${id(k + 'bev')}" x1="${gx1}" y1="${gy1}" x2="${gx2}" y2="${gy2}">` +
+      `<stop offset="0" stop-color="#fff" stop-opacity="${f(o.bevel / 100 * (isWhite ? 0.9 : 0.55))}"/>` +
+      `<stop offset="0.45" stop-color="#fff" stop-opacity="0"/>` +
+      `<stop offset="0.55" stop-color="#000" stop-opacity="0"/>` +
+      `<stop offset="1" stop-color="#000" stop-opacity="${f(o.bevel / 100 * (isWhite ? 0.35 : 0.6))}"/></linearGradient>`);
+    defs.push(`<clipPath id="${id(k + 'clip')}"><path d="${d}"/></clipPath>`);
+    // gloss: a soft radial sheen on the lit side
+    defs.push(`<radialGradient id="${id(k + 'gloss')}" cx="${gx1}" cy="${gy1}" r="0.9"><stop offset="0" stop-color="#fff" stop-opacity="${f(o.gloss / 100)}"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>`);
+
+    // extrusion: copies of the pane stepped away from the light, darker the farther they are
+    let ext = '';
+    const steps = Math.ceil(o.depth);
+    if (steps > 0) {
+      const side = darken(face, o.sideDark / 100 * (isWhite ? 0.8 : 1)) ;
+      const sideBase = isWhite ? side : lighten(face, 0.04 + o.sideDark / 100 * 0.06);
+      for (let s = steps; s >= 1; s--) {
+        const t = s / steps;
+        const col = isWhite ? mix(sideBase, '#000000', 0.25 * t) : mix(sideBase, '#000000', 0.5 * t);
+        ext += `<path d="${d}" fill="${col}" transform="translate(${f(away[0] * o.depth * t)} ${f(away[1] * o.depth * t)})"/>`;
+      }
+    }
+
+    panes.push(
+      `<g filter="url(#${id('shadow')})">${ext}` +
+      `<path d="${d}" fill="url(#${id(k + 'face')})"/>` +
+      `<g clip-path="url(#${id(k + 'clip')})">` +
+        (o.gloss > 0 ? `<path d="${d}" fill="url(#${id(k + 'gloss')})"/>` : '') +
+        (o.bevel > 0 ? `<path d="${d}" fill="none" stroke="url(#${id(k + 'bev')})" stroke-width="${o.bevelWidth * 2}"/>` : '') +
+      `</g></g>`
+    );
+  }
+
+  // the body: gradient, inner shading, faint edge
+  let bodySvg = '';
+  if (o.shape !== 'none') {
+    defs.push(`<clipPath id="${id('bodyclip')}"><path d="${bodyD}"/></clipPath>`);
+    defs.push(`<radialGradient id="${id('bodyshade')}" cx="${f(0.5 - L[0] * 0.15)}" cy="${f(0.5 - L[1] * 0.15)}" r="0.75"><stop offset="0.55" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity="${o.bodyShade / 100}"/></radialGradient>`);
+    bodySvg = `<path d="${bodyD}" fill="url(#${id('bg')})"/>` +
+      (o.bodyShade > 0 ? `<path d="${bodyD}" fill="url(#${id('bodyshade')})"/>` : '') +
+      (o.edgeOpacity > 0 ? `<path d="${bodyD}" fill="none" stroke="#fff" stroke-opacity="${o.edgeOpacity / 100}" stroke-width="3"/>` : '');
+  }
+
+  const markGroup = o.shape !== 'none' ? `<g clip-path="url(#${id('bodyclip')})">${panes.join('')}</g>` : panes.join('');
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${W}" width="${W}" height="${W}" role="img" aria-label="Centralu"><defs>${defs.join('')}</defs>${bodySvg}${markGroup}</svg>`;
+}
+
+// ---------- the icon file ----------
+// panes.svg exactly as it is checked in: the settings in its header, the drawing below.
+// tooling/icon-studio.test.ts runs this against the checked-in file.
+function iconFile(o) {
+  return '<!-- Centralu app icon "panes" (#412 concept F: four panes, one of them different).\n'
+    + '     Generated by studio.html (next to this file) from these settings; change them there and regenerate\n'
+    + '     rather than editing the paths by hand:\n'
+    + JSON.stringify(o) + ' -->\n'
+    + buildSVG(o, 'icon') + '\n';
+}
+
+// ---------- UI ----------
+const controlsEl = document.getElementById('controls');
+const inputs = {};
+
+function renderControls() {
+  controlsEl.innerHTML = '';
+  for (const grp of CONTROLS) {
+    const det = document.createElement('details');
+    det.open = grp.open;
+    det.innerHTML = `<summary>${grp.group}</summary>`;
+    for (const c of grp.items) {
+      const row = document.createElement('div');
+      if (c.type === 'select') {
+        row.className = 'row sel';
+        row.innerHTML = `<label>${c.label}</label><select>${c.options.map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}</select>`;
+        const el = row.querySelector('select');
+        el.value = String(S[c.key]);
+        el.addEventListener('input', () => { S[c.key] = isNaN(+el.value) ? el.value : +el.value; update(); });
+        inputs[c.key] = { set: v => el.value = String(v) };
+      } else if (c.type === 'color') {
+        row.className = 'row color';
+        row.innerHTML = `<label>${c.label}</label><span class="pair"><input type="color"><input type="text" spellcheck="false"></span>`;
+        const [pick, text] = row.querySelectorAll('input');
+        pick.value = S[c.key]; text.value = S[c.key];
+        pick.addEventListener('input', () => { S[c.key] = pick.value; text.value = pick.value; update(); });
+        text.addEventListener('change', () => {
+          const v = text.value.trim();
+          if (/^#?[0-9a-f]{6}$/i.test(v)) { S[c.key] = v.startsWith('#') ? v : '#' + v; pick.value = S[c.key]; update(); }
+        });
+        inputs[c.key] = { set: v => { pick.value = v; text.value = v; } };
+      } else {
+        row.className = 'row';
+        row.innerHTML = `<label>${c.label}</label><input type="range" min="${c.min}" max="${c.max}" step="${c.step}"><output></output>`;
+        const el = row.querySelector('input'), out = row.querySelector('output');
+        const show = () => out.textContent = `${S[c.key]}${c.unit}`;
+        el.value = S[c.key]; show();
+        el.addEventListener('input', () => { S[c.key] = +el.value; show(); update(); });
+        el.addEventListener('dblclick', () => { S[c.key] = DEFAULTS[c.key]; el.value = S[c.key]; show(); update(); });
+        el.title = 'Double-click to restore the default';
+        inputs[c.key] = { set: v => { el.value = v; show(); } };
+      }
+      det.appendChild(row);
+    }
+    controlsEl.appendChild(det);
+  }
+}
+
+function syncInputs() { for (const k in inputs) inputs[k].set(S[k]); }
+
+const stage = document.getElementById('stage');
+const stripLight = document.getElementById('strip-light');
+const stripDark = document.getElementById('strip-dark');
+const SIZES = [256, 128, 64, 32, 16];
+
+let raf = 0;
+function update() {
+  cancelAnimationFrame(raf);
+  raf = requestAnimationFrame(() => {
+    const svg = buildSVG(S, 'main');
+    stage.innerHTML = svg;
+    const url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(buildSVG(S, 'mini'));
+    const figs = SIZES.map(s => `<figure><img src="${url}" width="${s}" height="${s}" alt=""><figcaption>${s}px</figcaption></figure>`).join('');
+    stripLight.innerHTML = figs;
+    stripDark.innerHTML = figs;
+    localStorage.setItem(STORE, JSON.stringify({ base: BASE, settings: S }));
+  });
+}
+
+function applyPreset(name) {
+  S = Object.assign({}, S, DEFAULTS, PRESETS[name] || {}, {
+    // keep the person's colours and geometry when switching the 3D preset
+    bgA: S.bgA, bgB: S.bgB, white: S.white, black: S.black, shape: S.shape, whiteQuadrant: S.whiteQuadrant,
+  });
+  syncInputs(); update();
+}
+
+function download(name, blob) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+
+document.querySelectorAll('[data-preset]').forEach(b => b.addEventListener('click', () => applyPreset(b.dataset.preset)));
+document.getElementById('dl-svg').addEventListener('click', () => download('panes.svg', new Blob([iconFile(S)], { type: 'image/svg+xml' })));
+document.getElementById('dl-png').addEventListener('click', () => {
+  const img = new Image();
+  img.onload = () => {
+    const c = document.createElement('canvas'); c.width = c.height = 1024;
+    c.getContext('2d').drawImage(img, 0, 0, 1024, 1024);
+    c.toBlob(b => download('centralu-logo-1024.png', b), 'image/png');
+  };
+  img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(buildSVG(S, 'png'));
+});
+document.getElementById('copy-json').addEventListener('click', async () => {
+  const t = JSON.stringify(S, null, 1);
+  try { await navigator.clipboard.writeText(t); } catch {}
+  document.getElementById('json-in').value = t;
+});
+document.getElementById('apply-json').addEventListener('click', () => {
+  const v = safeParse(document.getElementById('json-in').value);
+  if (v && typeof v === 'object') { S = Object.assign({}, DEFAULTS, v); syncInputs(); update(); }
+});
+document.getElementById('reset').addEventListener('click', () => { S = Object.assign({}, DEFAULTS); syncInputs(); update(); });
+
+renderControls();
+update();
+</script>
+</body>
+</html>
