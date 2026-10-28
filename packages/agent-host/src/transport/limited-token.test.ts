@@ -487,6 +487,8 @@ describe('a centralu serve host takes as full only the credentials serve.json na
     const hub = await hello(port, SERVE_HUB)
     await hub.wait(() => hub.frames.some((f) => f.kind === 'hello_ok'))
     write([serveEntry('aaaaaaaa', SERVE_HUB), serveEntry('bbbbbbbb', SERVE_WINDOW)])
+    // The host reads the new pairing (its sweep, every 20 ms here) before the file goes unreadable
+    await new Promise((r) => setTimeout(r, 100))
     deny()
     // The one paired just before the file went unreadable: refused at its first hello, and said why
     const fresh = await hello(port, SERVE_WINDOW)

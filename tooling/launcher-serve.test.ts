@@ -283,6 +283,19 @@ describe('the data folder and the state file', () => {
    * #1405 review: on Windows the rename after the read-back is tried again for up to 5 s while a reader holds the
    * file, long enough for the lock to go stale, be taken over and written under. A writer past its time writes nothing
    */
+  // Self-check: a lock that could not be read after it was moved aside may be another writer's, and is put back
+  it('puts back a lock it could not read once moved aside, rather than removing what may be another writer', () => {
+    const d = tempDir()
+    pairServe(d, 'hub:mac')
+    const lock = join(d, `${SERVE_STATE_FILE}.lock`)
+    const read = (p: string, enc: BufferEncoding) => {
+      if (p.endsWith('.release')) throw Object.assign(new Error('EBUSY: busy'), { code: 'EBUSY' })
+      return readFileSync(p, enc)
+    }
+    changeServeState(d, (s: unknown) => s, process.platform, { read })
+    expect(existsSync(lock)).toBe(true)
+  })
+
   it('writes nothing once it held its lock too long to finish before a waiter may take it over', () => {
     const d = tempDir()
     const hub = pairServe(d, 'hub:mac')

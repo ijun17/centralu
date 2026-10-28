@@ -263,9 +263,11 @@ export const STATE_LOCK_MARGIN_MS = 2_000
  *   waiters taking over one stale lock at once could remove the other's fresh lock, and a writer's end could remove the
  *   lock of one that took it over between its read-back and its removal.
  *
- * What is left: a writer suspended for over 2 s between its last read-back and the rename right after it, and a
+ * What is left: a writer suspended for over 2 s between its last read-back and the rename right after it; a
  * system clock set forward by more than 10 s while a writer holds the lock, which makes its lock look stale to a
- * waiter. Both are a moment no lock file can close.
+ * waiter; and the moment a lock is moved aside to be looked at, during which a third writer may create one and read
+ * the state while the lock's owner, past its read-back, renames (on a file system without hard links the moved lock is
+ * not put back at all, and its owner's next read-back refuses). No lock file can close these.
  */
 export function changeServeState(dataDir, change, platform = process.platform, { sleep = sleepSync, nowMs = Date.now, clock = () => performance.now(), read = readFileSync } = {}) {
   const file = join(dataDir, SERVE_STATE_FILE)
@@ -340,9 +342,9 @@ export function releaseLock(lock, mine, { read = readFileSync, rename = renameSy
   try {
     found = read(aside, 'utf8')
   } catch {
-    // unreadable: removed as this writer's own, since it was this writer that held the lock to the end
+    // unreadable (a scanner on Windows): it may be another writer's, so it is put back; if it was this one's, it goes stale
   }
-  if (found !== null && found !== mine) putBack(aside, lock, link)
+  if (found !== mine) putBack(aside, lock, link)
   try {
     rm(aside, { force: true })
   } catch {
