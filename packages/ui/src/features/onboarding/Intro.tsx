@@ -18,7 +18,8 @@ import { ORCHESTRATOR_DEMANDS, useRefusals } from '../project/useToolChoice.js'
  * **The card doubles as the detection display.** There is no separate tool-detection screen — a
  * ready tool gets a live card, and a tool that is not ready gets a dim card with "Not connected"
  * and the prescription (an install or login command) standing right there together. A tool Centralu
- * installs itself (Antigravity) shows its setup line instead, without the "Not connected" line, and is dimmed only before install. Where the
+ * installs itself shows its setup line instead, without the "Not connected" line, and is dimmed only before install; one the orchestrator
+ * cannot take (Antigravity, until it takes role text) is a plain refused card, reason and all, with no action. Where the
  * state is shown and where the action happens are the same spot.
  *
  * **Clicking a card only records the choice; no process starts** (lazy start). The orchestrator
@@ -64,8 +65,9 @@ export function Intro() {
         <div className="mt-2 grid grid-cols-2 gap-3">
           {cards.map((t) => {
             const ok = ready(t)
-            // A tool Centralu installs or signs in itself holds its action in the card; the others show the command to run, as before
-            const managed = t.setup?.install === 'centralu' || t.setup?.signIn === 'centralu'
+            // A tool Centralu installs or signs in itself holds its action in the card; the others show the command to run, as before.
+            // One the orchestrator cannot take has no action to offer here (the sign-in lives in the new-session dialog): it is drawn as any refused card
+            const managed = (t.setup?.install === 'centralu' || t.setup?.signIn === 'centralu') && refusal(t.name) === null
             // A card whose line holds buttons of its own (Install, Sign in) is not a <button>, which may not hold one: it acts as one once it can be picked
             const Card = managed ? 'div' : 'button'
             const pick = () => void completeIntro(t.name)
@@ -93,13 +95,13 @@ export function Intro() {
                     ? 'border-line bg-surface-raised hover:border-line-strong'
                     : managed
                       ? // Dimmed only before it is installed: installed and waiting for a sign-in it is the person's next step, so not faded
-                        t.installed && refusal(t.name) === null
+                        t.installed
                         ? 'cursor-default border-line bg-surface-raised'
                         : 'cursor-default border-line/60 bg-surface-raised/40'
                       : 'cursor-not-allowed border-line/60 bg-surface-raised/40 opacity-40'
                 }`}
               >
-                <span className={`block text-md font-medium text-ink ${managed ? `transition-opacity duration-150 ${t.installed && refusal(t.name) === null ? '' : 'opacity-40'}` : ''}`}>{t.label}</span>
+                <span className={`block text-md font-medium text-ink ${managed ? `transition-opacity duration-150 ${t.installed ? '' : 'opacity-40'}` : ''}`}>{t.label}</span>
                 {managed ? (
                   <>
                     {ok && <span className="readout cc-setup-swap mt-1 block text-xs text-ink-faint">{t.detail}</span>}
@@ -108,7 +110,6 @@ export function Intro() {
                       label={t.label}
                       login={t.login}
                       shown={!ok}
-                      refusal={refusal(t.name)}
                       terminal={{ login: (label, command) => `${label}: run ${command} in a terminal`, missing: (label) => `${label} is not installed` }}
                       redetect={() => void detect()}
                       testId={`intro-card-${t.name}-setup`}

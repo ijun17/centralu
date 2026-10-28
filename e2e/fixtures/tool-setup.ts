@@ -266,15 +266,21 @@ export function toolSetupTests(): void {
       await expect(page.getByTestId('create-session-confirm')).toBeDisabled()
     })
 
-    test('the new-app dialog uses the same line', async ({ page }) => {
-      await antigravity(page, centralu('not_installed'))
-      await page.getByTestId('create-app').click()
-      const dialog = page.getByTestId('new-app-dialog')
-      await dialog.getByTestId('new-app-tool-antigravity').click()
-      await expect(dialog.getByTestId('new-app-tool-blocked')).toContainText('Antigravity is not installed.')
-      await dialog.getByTestId('new-app-tool-blocked-install').click()
-      await expect(dialog.getByTestId('new-app-tool-blocked')).toHaveAttribute('data-setup', 'installing')
-      await expect(dialog.getByTestId('new-app-create')).toBeDisabled()
+    test('the new-app dialog gives the reason Antigravity cannot build an app, and no Install or Sign in', async ({ page }) => {
+      // The mock says what the real host says: Antigravity takes no role text, and an app's builder is given its role as text
+      for (const setup of [centralu('not_installed'), centralu('signed_out'), centralu('ready')]) {
+        await antigravity(page, setup)
+        await page.getByTestId('create-app').click()
+        const dialog = page.getByTestId('new-app-dialog')
+        await dialog.getByTestId('new-app-tool-antigravity').click()
+        const line = dialog.getByTestId('new-app-tool-blocked')
+        await expect(line).toHaveAttribute('data-setup', 'refused')
+        await expect(line).toContainText("Antigravity cannot take Centralu's role instructions yet")
+        await expect(line.getByRole('button')).toHaveCount(0)
+        await expect(dialog.getByTestId('new-app-create')).toBeDisabled()
+        await page.keyboard.press('Escape')
+        await expect(dialog).toHaveCount(0)
+      }
     })
 
     test('an account that is not eligible: Verify account opens Google\'s address, then Sign in again', async ({ page }) => {
@@ -299,55 +305,30 @@ export function toolSetupTests(): void {
   })
 
   test.describe('first run (#59)', () => {
-    test('the first-run card of Antigravity carries the action, and becomes pickable when it succeeds', async ({ page }) => {
-      await page.goto('/?mock=1')
-      await expect(page.getByTestId('intro')).toBeVisible()
-      await page.evaluate(() => {
-        const m = (window as unknown as MockWindow).__mock
-        const claude = m.detected.find((t: any) => t.name === 'claude')
-        m.detected = [
-          { ...claude, installed: false, loggedIn: false },
-          { name: 'antigravity', label: 'Antigravity', mark: 'A', install: 'Installed from Centralu', login: 'Sign in with Google', installed: true, loggedIn: false, detail: 'agent 1.4.3', setup: { state: 'signed_out', install: 'centralu', signIn: 'centralu' } },
-        ]
+    for (const [name, tool] of [
+      ['not installed', { installed: false, loggedIn: false, setup: { state: 'not_installed', install: 'centralu', signIn: 'centralu' } }],
+      ['installed, signed out', { installed: true, loggedIn: false, setup: { state: 'signed_out', install: 'centralu', signIn: 'centralu' } }],
+      ['installed and signed in', { installed: true, loggedIn: true, setup: { state: 'ready', install: 'centralu', signIn: 'centralu' } }],
+    ] as const) {
+      test(`the first-run card of Antigravity (${name}) is a refused card: the reason, dimmed whole, no Install or Sign in`, async ({ page }) => {
+        await page.goto('/?mock=1')
+        await expect(page.getByTestId('intro')).toBeVisible()
+        await page.evaluate((t) => {
+          const m = (window as unknown as MockWindow).__mock
+          const claude = m.detected.find((x: any) => x.name === 'claude')
+          m.detected = [claude, { name: 'antigravity', label: 'Antigravity', mark: 'A', install: 'Installed from Centralu', login: 'Sign in with Google', detail: 'agent 1.4.3', ...t }]
+        }, tool)
+        await page.getByTestId('redetect').click()
+        const card = page.getByTestId('intro-card-antigravity')
+        await expect(page.getByTestId('intro-card-antigravity-status')).toContainText("Antigravity cannot take Centralu's role instructions yet")
+        await expect(card.getByRole('button')).toHaveCount(0)
+        await expect(card).toBeDisabled()
+        // The same dimming and reason type as the other refused cards: the whole card, not only its title
+        await expect(card).toHaveClass(/opacity-40/)
+        await expect(page.getByTestId('intro-card-antigravity-status')).toHaveClass(/text-sm/)
+        await expect(page.getByTestId('intro-card-antigravity-setup')).toHaveCount(0)
       })
-      await page.getByTestId('redetect').click()
-      const card = page.getByTestId('intro-card-antigravity')
-      await expect(card).not.toHaveAttribute('role', 'button')
-      await expect(page.getByTestId('intro-card-antigravity-setup')).toContainText('Antigravity needs a Google sign-in.')
-      // Not eligible, in the narrow card: Verify account and Sign in again stay together as a pair
-      await told(page, centralu('signed_out', { failure: { reason: 'ineligible', message: 'no', verifyUri: 'https://accounts.google.com/verify' } }))
-      const [va, sa] = await Promise.all([page.getByTestId('intro-card-antigravity-setup-verify').boundingBox(), page.getByTestId('intro-card-antigravity-setup-sign-in').boundingBox()])
-      expect(Math.abs((va?.y ?? 0) - (sa?.y ?? 99))).toBeLessThan(4)
-      await told(page, centralu('signed_out'))
-      await expect(page.getByTestId('intro-card-antigravity-setup-verify')).toHaveCount(0)
-      // The line says it once: no grey "Not connected" above it, and installed and waiting for a sign-in the card is not dimmed
-      await expect(card).not.toContainText('Not connected')
-      await expect(card.locator('span').first()).not.toHaveClass(/opacity-40/)
-      await page.getByTestId('intro-card-antigravity-setup-sign-in').click()
-      await expect(page.getByTestId('intro-card-antigravity-setup')).toContainText('Waiting for the browser…')
-
-      await told(page, centralu('ready'))
-      await expect(page.getByTestId('intro-card-antigravity-setup')).toHaveCount(0)
-      await expect(card).toHaveAttribute('role', 'button')
-      await card.click()
-      await expect(page.getByTestId('orchestrator-suggestions')).toBeVisible()
-    })
-
-    test('a managed card that the orchestrator cannot take says why, and stays dimmed', async ({ page }) => {
-      await page.goto('/?mock=1')
-      await expect(page.getByTestId('intro')).toBeVisible()
-      await page.evaluate(() => {
-        const m = (window as unknown as MockWindow).__mock
-        m.capabilityLimits.antigravity = { roleText: false }
-        const claude = m.detected.find((t: any) => t.name === 'claude')
-        m.detected = [claude, { name: 'antigravity', label: 'Antigravity', mark: 'A', install: 'x', login: 'y', installed: true, loggedIn: true, detail: 'agent', setup: { state: 'ready', install: 'centralu', signIn: 'centralu' } }]
-      })
-      await page.getByTestId('redetect').click()
-      const line = page.getByTestId('intro-card-antigravity-setup')
-      await expect(line).toHaveAttribute('data-setup', 'refused')
-      await expect(line).toContainText('Antigravity')
-      await expect(page.getByTestId('intro-card-antigravity').locator('span').first()).toHaveClass(/opacity-40/)
-    })
+    }
   })
 
   test.describe('the top bar: a signed-out donut for a tool installed but signed out (#59)', () => {

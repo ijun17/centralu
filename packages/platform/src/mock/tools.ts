@@ -38,7 +38,7 @@ export class ToolsMock {
   /** The mock's adapter catalogue follows the same data shape as the host registry, not branches in its ports. */
   private readonly mockToolProfiles = new Map<ToolName, {
     models: { id: string; label: string; efforts: string[]; defaultEffort: string | null; tiers: { id: string; name: string; description: string }[] }[]
-    capabilities: Pick<AdapterCapabilities, 'verbosities' | 'exclusiveWriter' | 'toolDeferral' | 'instructionChannel' | 'processModel' | 'builtInSubagents' | 'peerMessaging'>
+    capabilities: Pick<AdapterCapabilities, 'verbosities' | 'exclusiveWriter' | 'toolDeferral' | 'instructionChannel' | 'processModel' | 'builtInSubagents' | 'peerMessaging' | 'roleText'>
   }>([
     // eslint-disable-next-line agent/agent-adapter-checks -- Fixture catalogue supplies this CLI's model and capability data.
     ['claude', {
@@ -58,6 +58,9 @@ export class ToolsMock {
       ],
       capabilities: { verbosities: ['low', 'medium', 'high'], exclusiveWriter: true, toolDeferral: false, instructionChannel: 'developer', processModel: 'per-session', builtInSubagents: true, peerMessaging: false },
     }],
+    // Antigravity takes no role text on the real host (`CAPABILITIES` in its adapter; `mock-capability-parity.test.ts` holds the two together)
+    // eslint-disable-next-line agent/agent-adapter-checks -- Fixture catalogue supplies this CLI's model and capability data.
+    ['antigravity', { models: [], capabilities: { verbosities: [], exclusiveWriter: false, toolDeferral: false, instructionChannel: 'server', processModel: 'per-session', builtInSubagents: false, peerMessaging: false, roleText: false } }],
   ])
 
   firstRegisteredTool(): ToolName {
