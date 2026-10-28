@@ -97,8 +97,21 @@ describe('what Centralu offers the agent at the start', () => {
     expect(init.params.clientCapabilities).toMatchObject({ fs: { readTextFile: false, writeTextFile: false } })
     const created = (await peer.next((m) => m.method === 'session/new')) as { params: Record<string, unknown> }
     expect(created.params._meta).toBeUndefined()
-    // The agent reads with its own viewer as shipped; a read sent here anyway is not served
+    // The agent reads with its own viewer as shipped; a read sent here anyway, mid-turn, is not served, and the turn goes on
+    handle.send('go')
+    await peer.next((m) => m.method === 'session/prompt')
     expect(await peer.ask('fs/read_text_file', { sessionId: SID, path: tokenPath(w.home) })).toMatchObject({ code: -32601 })
+    peer.update(SID, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'read it myself' } })
+    peer.release('session/prompt', { result: { stopReason: 'end_turn' } })
+    await w.event((e) => e.type === 'turn_complete')
+    expect(w.events.some((e) => e.type === 'error')).toBe(false)
+    // A second turn on the same process
+    handle.send('again')
+    await peer.next((m) => m.method === 'session/prompt' && peer.methods().filter((x) => x === 'session/prompt').length === 2)
+    peer.release('session/prompt', { result: { stopReason: 'end_turn' } })
+    await w.event((e) => e.type === 'turn_complete' && w.events.filter((x) => x.type === 'turn_complete').length === 2)
+    expect(w.peers).toHaveLength(1)
+    expect(w.events.some((e) => e.type === 'error')).toBe(false)
     await handle.dispose()
   })
 })

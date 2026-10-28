@@ -163,9 +163,10 @@ So:
   it without asking (its viewer and search do not ask, spike §6), as Codex can read its `auth.json` and Claude Code its
   credentials file on Linux. Said in [security-boundaries.md](../security-boundaries.md).
 - The agent's own viewer and search read files without asking, as under Claude's Safe; its subagents and workflows run
-  once their request (`Run invoke_subagent?`, kind `other`) is allowed: a card under Safe, Normal and Edits, at once under
-  Auto, a saved rule as for any request. Requests naming a file in `<data>/tools/antigravity/` (an edit of
-  `settings.json`, a read by address) are answered like any other.
+  once their request (`Run invoke_subagent?`, kind `other`) is allowed: at once under Auto, and under Safe, Normal and
+  Edits a card every time, since a call of kind `other` has no rule key and no saved "always" rule can allow it (as for
+  other tools' `other` calls). Requests naming a file in `<data>/tools/antigravity/` (an edit of `settings.json`, a read
+  by address) are answered like any other request of their kind, a saved rule included.
 - The agent stays in `default`; `session/set_mode` is never sent (§5.1).
 
 **Why the earlier choice was dropped.** The first build forced the file (`AGY_ACP_FORCE_FILE_STORAGE=1`), because a

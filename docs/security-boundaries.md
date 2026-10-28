@@ -1264,8 +1264,10 @@ Centralu installs Google's Antigravity agent itself and keeps all of its state u
   **What Auto still reaches**, and more: nothing in Centralu keeps the agent from its own folder. Its viewer and search
   read the token file without asking under every preset where the file is the store (Windows, Linux), as Codex reads
   its `auth.json`; no built-in tool is switched off (no `_meta.antigravity.disabledTools`), no client read is offered
-  (`fs.readTextFile` false), and a permission request naming that folder, or a subagent's (`Run invoke_subagent?`), is
-  answered as any other: a card under Safe, Normal and Edits, unasked under Auto or a saved rule. The guard of the first
+  (`fs.readTextFile` false), and a permission request naming that folder is answered as any other of its kind (a card
+  under Safe, Normal and Edits, unasked under Auto or a saved rule). A subagent's request (`Run invoke_subagent?`, kind
+  `other`) runs unasked under Auto and asks with a card every time under the other presets: a call of kind `other` has
+  no rule key, so no saved "always" rule allows it. The guard of the first
   build, which refused such requests under every preset, is gone, so a request is never refused for the path it names
   ([plans/antigravity-acp.md](plans/antigravity-acp.md) §4.2 says why).
 - **The sign-in address stays out of logs and events.** It reaches the host through a private folder (`0700`) and the
