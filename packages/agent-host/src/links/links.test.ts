@@ -3870,6 +3870,11 @@ describe('machines.revokeCredential (#1405)', () => {
     // Readable again: no longer said
     report = { credentials: [own] }
     await eventually(() => !hub.links.list()[0]!.credentialFileUnreadable)
+    // Moved aside after that: no file to read is not one that cannot be read (self-check)
+    report = { credentials: null, unreadable: 'EACCES' }
+    await eventually(() => hub.links.list()[0]!.credentialFileUnreadable)
+    report = { credentials: null, unreadable: null }
+    await eventually(() => !hub.links.list()[0]!.credentialFileUnreadable)
   })
 
   it('reads a link closed because the machine cannot read its credential file as that, not as its credential withdrawn', async () => {

@@ -1515,7 +1515,9 @@ A host started with `centralu serve` on another machine is reached by the app th
     adds those no longer in `serve.json` as `gone` ("used there and withdrawn since", no Revoke), unless the next
     credential of the same label, the next used there or the one the file names now, was paired the same way (its
     pairer again, as at each window start or hub link; the file's own counts since a review found a hub that had paired
-    again but not yet said hello listed as gone on another hub's row for one read). Before, `--pair x`, a hello and
+    again but not yet said hello listed as gone on another hub's row for one read). Under any label but a hub's this
+    also leaves out one used and then withdrawn when the label was paired the same way again; that new pairing is
+    listed itself, with Revoke. Before, `--pair x`, a hello and
     `--revoke` within 135 ms left no trace on any row. The machine's user can get around this at will in two ways:
     - **Kill the host.** The record is in the host's memory (at most 256 entries). Use a credential, kill the machine's
       host and withdraw the credential before the hub's next read, and the restarted host has no record of it: up to

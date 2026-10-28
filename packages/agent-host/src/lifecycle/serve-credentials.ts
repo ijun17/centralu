@@ -219,8 +219,10 @@ export type CredentialsReport = { credentials: ListedCredential[] | null; unread
 
 /** `host.credentials` for the serve.json at `path` and the credentials used on this host (main.ts) */
 export function credentialsReport(path: string, read: (p: string) => string, used: UsedCredentials): CredentialsReport {
-  const listed = readListedCredentials(path, read)
+  // Read again when the second read finds the file readable after all (a busy moment), so the answer is not null for nothing
+  let listed = readListedCredentials(path, read)
   const unreadable = listed ? null : readCredentialFile(path, read).unreadable?.code ?? null
+  if (!listed && unreadable === null) listed = readListedCredentials(path, read)
   return { credentials: listed ? [...listed, ...used.gone(listed)] : null, unreadable, usedUnderHubLabels: used.underHubLabels() }
 }
 

@@ -471,6 +471,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   private watchCredentials(client: RemoteClient): void {
     clearInterval(this.credentialsTimer)
     this.credentials = null
+    // A link that came up paired, so the file was read there: what a closed link said of it is past
+    this.fileUnreadable = false
     const stop = () => {
       clearInterval(this.credentialsTimer)
       if (this.readCredentials === read) this.readCredentials = null
@@ -483,7 +485,14 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
         const listed = credentialsOf(r.credentials)
         // Unreadable there (#1405 review): the last list stands, and the row says the file cannot be read
         const unreadable = typeof r.unreadable === 'string'
-        if (listed === null && !unreadable) return stop()
+        if (listed === null && !unreadable) {
+          // Not a file it cannot read (none there, or a host not run by serve): nothing to say about one
+          if (this.fileUnreadable) {
+            this.fileUnreadable = false
+            this.deps.broadcast({ type: 'machine_status', machine: this.info() })
+          }
+          return stop()
+        }
         const before = JSON.stringify(this.otherCredentials())
         if (listed) this.credentials = listed
         this.fileUnreadable = unreadable
