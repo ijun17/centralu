@@ -235,7 +235,7 @@ export function rotateToken({ env, home }) {
   return 0
 }
 
-/** `centralu serve --revoke <id>`: one full credential withdrawn (#1405); its next hello is refused */
+/** `centralu serve --revoke <id>`: one full credential withdrawn (#1405); its next hello is refused, and the host closes a socket already in with it */
 export function revokeCredential({ env, home, id, write = (line) => process.stdout.write(line) }) {
   const dataDir = serveDataDir(env, home)
   const revoked = revokeServe(dataDir, id)

@@ -533,9 +533,14 @@ export function connectionCommand(spec: RemoteSpec, pair: string | null = null):
   return remoteCommand(spec, pair ? `serve --connection --pair ${pair}` : 'serve --connection')
 }
 
-/** A hub's key for its pair label (#1405, `SshTunnelOptions.hubKey`): 8 hex characters of its data folder's SHA-256 */
-export function hubKeyOf(dataDir: string): string {
-  return createHash('sha256').update(dataDir).digest('hex').slice(0, 8)
+/**
+ * A hub's key for its pair label (#1405, `SshTunnelOptions.hubKey`): the 8 hex characters of its own id
+ * (`hubSelfId`, `hub-` and 4 random bytes, drawn once and kept in its store). Random, not its data folder's hash
+ * (#1405 review): two hubs on computers of one name whose data folders sit at the same path took one label, and each
+ * replaced the other's credential at each link
+ */
+export function hubKeyOf(hubSelfId: string): string {
+  return /^hub-([0-9a-f]{8})$/.exec(hubSelfId)?.[1] ?? createHash('sha256').update(hubSelfId).digest('hex').slice(0, 8)
 }
 
 /**
@@ -675,7 +680,7 @@ export type SshTunnelOptions = {
   /** This computer's name, for `serve --detach --from` (#1223); the OS's host name when absent */
   hubName?: string
   /**
-   * What tells this hub from another of the same name (#1405): its data folder, hashed (`hubKeyOf`). It ends the label
+   * What tells this hub from another of the same name (#1405): its own random id (`hubKeyOf`). It ends the label
    * the hub pairs as, so two hubs on computers of one name (or a packaged app and a development host on one computer)
    * do not replace each other's credential at each link
    */

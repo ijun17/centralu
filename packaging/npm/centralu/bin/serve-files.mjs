@@ -217,22 +217,38 @@ export function ensureServeState(dataDir, platform = process.platform, now = Dat
   return state
 }
 
+/** How long a held `serve.json.lock` is waited on before it counts as a crashed writer's (`changeServeState`) */
+export const STATE_LOCK_STALE_MS = 10_000
+
 /**
  * Reads the state, changes it with `change` and writes it back, under a lock (`serve.json.lock`) so two changes at once
- * (a hub pairing while a window starts) do not lose one another. A lock older than 10 s is a crashed writer's and is
- * taken over. Returns the state written.
+ * (a hub pairing while a window starts) do not lose one another. Returns the state written.
+ *
+ * - A lock whose time is more than `STATE_LOCK_STALE_MS` from now, either way, is a crashed writer's and is taken over.
+ *   Either way (#1405 review): a lock dated ahead of now (a crashed writer, then the clock set back) blocked every
+ *   `--pair` and `--revoke` for as long as it was ahead, so a hub could not link.
+ * - The lock holds a nonce of its writer's, and the writer reads it back just before it replaces the file: a writer
+ *   stalled past the 10 s, whose lock another took over meanwhile, writes nothing (#1405 review), rather than a state
+ *   it computed before a `--revoke` that came in between. It throws, and its caller tries again. What is left is the
+ *   moment between that read and the rename, which no lock file can close.
  */
 export function changeServeState(dataDir, change, platform = process.platform, { sleep = sleepSync, nowMs = Date.now } = {}) {
   const file = join(dataDir, SERVE_STATE_FILE)
   const lock = `${file}.lock`
+  const mine = randomBytes(8).toString('hex')
   for (let i = 0; ; i++) {
     try {
-      closeSync(openSync(lock, 'wx', 0o600))
+      const fd = openSync(lock, 'wx', 0o600)
+      try {
+        writeSync(fd, mine)
+      } finally {
+        closeSync(fd)
+      }
       break
     } catch (e) {
       if (e?.code !== 'EEXIST') throw e
       try {
-        if (nowMs() - statSync(lock).mtimeMs > 10_000) rmSync(lock, { force: true })
+        if (Math.abs(nowMs() - statSync(lock).mtimeMs) > STATE_LOCK_STALE_MS) rmSync(lock, { force: true })
       } catch {
         // gone meanwhile: try again
       }
@@ -241,15 +257,26 @@ export function changeServeState(dataDir, change, platform = process.platform, {
       sleep(25)
     }
   }
+  const held = () => {
+    try {
+      return readFileSync(lock, 'utf8') === mine
+    } catch {
+      return false
+    }
+  }
   try {
     const before = readServeState(dataDir)
     if (!before) throw new Error(`${file} is missing or unreadable`)
     const after = change(before)
-    if (after !== before) replacePrivate(file, stateFile(after), platform)
+    if (after !== before) {
+      if (!held()) throw new Error(`${lock} was taken over while this serve held it; nothing was written, try again`)
+      replacePrivate(file, stateFile(after), platform)
+    }
     // What was written, as a reader reads it: never null once written
     return after !== before ? parseServeState(JSON.stringify(stateFile(after))) : before
   } finally {
-    rmSync(lock, { force: true })
+    // Only its own: a lock another writer took over is that writer's to remove
+    if (held()) rmSync(lock, { force: true })
   }
 }
 

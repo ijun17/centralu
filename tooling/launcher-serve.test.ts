@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { execFile, spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, copyFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, copyFileSync, utimesSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { PassThrough } from 'node:stream'
 import { tmpdir } from 'node:os'
@@ -74,6 +74,8 @@ import {
 import { hostDirIn } from '../packaging/npm/centralu/bin/platform.mjs'
 // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
 import { renameRetrying, replaceFile } from '../packaging/npm/centralu/bin/serve-util.mjs'
+// @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
+import { changeServeState } from '../packaging/npm/centralu/bin/serve-files.mjs'
 import { SLOW } from './test-timing.js'
 import { ownProcesses } from '../packages/agent-host/src/process.test-helpers.js'
 
@@ -223,6 +225,36 @@ describe('the data folder and the state file', () => {
     expect(revokeServe(d, again.id)).toBe(true)
     expect(revokeServe(d, again.id)).toBe(false)
     expect(readServeState(d).full.map((e: { label: string; id: string; verifier: string }) => e.label)).toEqual(['window'])
+  })
+
+  it('takes over a lock dated ahead of now, as one dated long ago (#1405 review: a crashed writer, then the clock set back)', () => {
+    const d = tempDir()
+    ensureServeState(d)
+    const lock = join(d, `${SERVE_STATE_FILE}.lock`)
+    writeFileSync(lock, 'crashed')
+    const ahead = new Date(Date.now() + 5 * 60_000)
+    utimesSync(lock, ahead, ahead)
+    let waits = 0
+    const paired = changeServeState(d, (s: { full: unknown[] }) => ({ ...s, port: 9400 }), process.platform, { sleep: () => waits++ })
+    expect(paired.port).toBe(9400)
+    // Taken over at the first look, not after the five minutes (nor the 12 s the waiter gives up after)
+    expect(waits).toBeLessThanOrEqual(1)
+    expect(existsSync(lock)).toBe(false)
+  })
+
+  it('writes nothing once its lock was taken over while it was stalled (#1405 review), and leaves the new holder its lock', () => {
+    const d = tempDir()
+    const hub = pairServe(d, 'hub:mac')
+    const lock = join(d, `${SERVE_STATE_FILE}.lock`)
+    // Stalled past the 10 s: another writer took the lock over and revoked meanwhile
+    expect(() =>
+      changeServeState(d, (s: { full: unknown[] }) => {
+        writeFileSync(lock, 'another writer')
+        return { ...s, full: [...s.full, { id: 'dddddddd', label: 'late', verifier: verifierOf('z'.repeat(43)), created: 1 }] }
+      }),
+    ).toThrow(/taken over/)
+    expect(readServeState(d).full.map((e: { id: string }) => e.id)).toEqual([hub.id])
+    expect(readFileSync(lock, 'utf8')).toBe('another writer')
   })
 
   it('moves a version 1 file on: its token becomes a full credential no longer written down, removed by the next pairing (#1405)', () => {

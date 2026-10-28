@@ -492,8 +492,10 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
   })
 
   it('pairs under a label of its own: its name, and a key that tells it from a hub of the same name', () => {
-    expect(pairLabel('Mac-mini', hubKeyOf('/Users/me/.centralu'))).toMatch(/^hub:Mac-mini-[0-9a-f]{8}$/)
-    expect(pairLabel('Mac-mini', hubKeyOf('/Users/me/.centralu-dev'))).not.toBe(pairLabel('Mac-mini', hubKeyOf('/Users/me/.centralu')))
+    expect(pairLabel('Mac-mini', hubKeyOf('hub-0123abcd'))).toBe('hub:Mac-mini-0123abcd')
+    // Two hubs of one computer name are two labels by their own random ids, whatever their data folders' paths
+    expect(pairLabel('Mac-mini', hubKeyOf('hub-0123abcd'))).not.toBe(pairLabel('Mac-mini', hubKeyOf('hub-89abcdef')))
+    expect(hubKeyOf('not an id')).toMatch(/^[0-9a-f]{8}$/)
     // Never past what --pair takes (80 characters)
     expect(pairLabel('x'.repeat(64), hubKeyOf('/d')).length).toBeLessThanOrEqual(80)
   })

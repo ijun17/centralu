@@ -1454,15 +1454,24 @@ A host started with `centralu serve` on another machine is reached by the app th
   into the file by hand with no label or another id opens nothing, since one that nobody could see or withdraw would
   undo the listing below, and the launcher's next write leaves it out.
   - **Who gets a full credential.** Whoever runs `serve --connection --pair <label>`: one is made, printed once and
-    kept as its verifier, replacing that label's earlier one. A hub pairs as `hub:<its name>` at each link, so its own
+    kept as its verifier, replacing that label's earlier one. A hub pairs as `hub:<its name>-<key>` at each link, the
+    key being the 8 hex characters of the hub's own random id (`hubSelfId`, kept in its store), so two hubs of one
+    computer name do not replace each other's credential; its own
     credential lives in its memory only, as the token did, and it needs no store change. The person's window on
     Windows gets one per start (`--window`, label `window`). The launcher's own hand-over call (`host.handover`, a
     hub's) uses one made for that call and withdrawn after it.
   - **What anyone else gets.** `--connection` without `--pair` prints the limited credential (`limited`) and the
     other full credentials by id, label and date (`others`), never their values; `--stop` and the launcher's probes
     use the limited credential. `--revoke <id>` withdraws one full credential; `--rotate-token` draws a new key and
-    withdraws them all. Both act on the next hello: a socket already open with a withdrawn credential stays open until
-    it closes (a hub's current link included), since the host reads `serve.json` at hello and nowhere else.
+    withdraws them all. Both act at once on the next hello, and on the sockets already open (#1405 review): the host
+    reads `serve.json` at each hello and, while any socket holds a full credential, every second, and closes each
+    socket whose credential the file no longer names (4001 "credential withdrawn"; a hub's link then pairs again).
+    Before, a socket opened and then revoked within 135 ms kept full rights for as long as it stayed open, while no
+    listing named it. A file that is not there (moved aside, as the launcher advises for a bad one) names no full
+    credential at all, at once; one that is there but stays refused (a scanner on Windows) stands at its last read for
+    at most 30 s. Changes to the file take `serve.json.lock`: one whose time is more than 10 s from now, ahead or
+    behind (a crashed writer, a clock set back), is taken over, and a writer whose lock was taken over while it stalled
+    writes nothing.
   - **Moving on.** A version 1 file's token becomes a full credential labelled `legacy` (a hub or window still holding
     it keeps working) and a new key is drawn; the next pairing of a hub or of the window removes `legacy`
     (a pairing under any other label leaves it, so a program's own `--pair` does not cut off a hub that has not paired yet). An installed host from before

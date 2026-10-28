@@ -690,7 +690,7 @@ const links = new Links({
   terminal: screens.push,
   mirror: storeMirror(store),
   registry: storeRegistry(store),
-  tunnelFor: (record) => new SshTunnel({ target: record.sshTarget, remote: record.remote, hubKey: hubKeyOf(dataRoot()), log: (line) => console.error(line) }),
+  tunnelFor: (record) => new SshTunnel({ target: record.sshTarget, remote: record.remote, hubKey: hubKeyOf(hubSelfId(store)), log: (line) => console.error(line) }),
   installer: { runtime: remoteRuntime, script: installScript },
   log: (line) => console.error(line),
   // A child start_agent started on a machine names the session here that started it as its `askedBy` (#1038); the window draws it in that machine's project and points to it from that session (#1416)

@@ -1615,7 +1615,7 @@ WantedBy=default.target
 | `centralu serve --port <n>` | 같은 것을 그 포트로. 포트는 기록되어, 플래그 없는 다음 `serve`가 그것을 쓴다 |
 | `centralu serve --detach [--port <n>]` | 이 세션 바깥에서 `serve`를 띄우고, 그 호스트가 hello에 답하면 돌아온다. JSON 한 줄을 찍는다. 이미 돌고 있으면 두 번 띄우지 않고 그렇다고 답한다. 어떻게 띄우는지(setsid, WMI, WSL은 WMI로 만든 `wsl.exe`)와 `serve.log`, `serve.pid`는 영어판 §4.7 |
 | `centralu serve --stop` | 돌고 있는 호스트에 멈추라고 묻고(`host.stop`), 멈출 때까지 기다린 뒤 JSON 한 줄을 찍는다. 윈도우에서 런처를 죽이면 호스트가 정리 없이 끝나기 때문이다 |
-| `centralu serve --connection` | JSON 한 줄을 찍고 끝난다 (아래). `serve.json`이 아직 없으면 만든다. 제한 자격 증명을 싣고 전체 자격 증명은 목록만 싣는다(값은 싣지 않는다, #1405). `--pair <label>`을 붙이면 그 label의 새 전체 자격 증명(`token`, id는 `credential`)을 한 번 찍고 SHA-256만 남긴다. 허브는 연결할 때마다 `hub:<이름>`으로 이것을 실행한다. `--revoke <id>`는 전체 자격 증명 하나를 거둔다. 추가된 `install` 필드는 `{ managed, current, previous, node }` |
+| `centralu serve --connection` | JSON 한 줄을 찍고 끝난다 (아래). `serve.json`이 아직 없으면 만든다. 제한 자격 증명을 싣고 전체 자격 증명은 목록만 싣는다(값은 싣지 않는다, #1405). `--pair <label>`을 붙이면 그 label의 새 전체 자격 증명(`token`, id는 `credential`)을 한 번 찍고 SHA-256만 남긴다. 허브는 연결할 때마다 `hub:<이름>-<키>`로 이것을 실행한다(키는 허브 고유의 무작위 id에서 딴 16진수 8자). `--revoke <id>`는 전체 자격 증명 하나를 거둔다. 추가된 `install` 필드는 `{ managed, current, previous, node }` |
 | `centralu serve --rotate-token` | 포트는 두고 토큰을 바꾼다. 돌고 있는 serve는 재시작할 때까지 옛 토큰을 쓴다 |
 | `centralu serve --help` | 위의 것 |
 
