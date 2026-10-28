@@ -452,7 +452,7 @@ function MachineGroup({
   if (!info || info.status !== 'connected' || (!group.order.length && !donuts.length)) return null
   return (
     <span
-      className="cc-donut-in ml-1.5 flex items-center gap-0.5 rounded-full border border-line py-0.5 pl-2 pr-0.5"
+      className="cc-capsule-in ml-1.5 flex items-center gap-0.5 rounded-full border border-line py-0.5 pl-2 pr-0.5"
       data-testid={`usage-machine-${machineId}`}
       data-status={info.status}
     >
@@ -593,7 +593,7 @@ function Donut({
         data-leaving={leaving || undefined}
         tabIndex={leaving ? -1 : undefined}
         data-percent={known ? percent : ''}
-        data-state={state}
+        data-state={signedOut ? 'signed-out' : state}
         /*
          * Even while open, **another donut has to be clickable right away** — if the outside
          * click shield covered the donuts too, switching tools would take two clicks. So this
@@ -610,7 +610,7 @@ function Donut({
          * Inside that capsule the donut has no padding of its own and the capsule keeps 2px on every side, so its
          * hover circle stands the same distance from the outline above, below and beside it (owner).
          */
-        className={`relative z-40 flex items-center rounded-full ${machine ? '' : 'cc-donut-in p-0.5'} transition-colors hover:bg-surface-hover ${
+        className={`relative z-40 flex items-center rounded-full ${machine ? '' : 'p-0.5'} transition-colors hover:bg-surface-hover ${
           active ? 'bg-surface-hover' : ''
         } ${leaving ? 'cc-donut-out pointer-events-none' : entering ? 'cc-donut-in' : ''}`}
       >
