@@ -36,8 +36,9 @@ export type OsTraits = {
   readonly locksWatchedFolders: boolean
   /**
    * A tree's links to folders keep their meaning in a copy of it: false on Windows, where pnpm and workspaces link
-   * folders by junction, whose target is always a whole path, so the `Os`'s copy keeps them leading into the source and
-   * a copy that must stand alone (a worktree) retargets them itself (dev-services `copyTreeWindows`)
+   * folders by junction, whose target is always a whole path, so the `Os`'s copy keeps them leading into the source
+   * unless it is given `links` (`retarget`), as a copy that must stand alone is; a worktree on Windows is copied by
+   * dev-services `copyTreeWindows`, by the same rule
    */
   readonly cpKeepsLinks: boolean
   /** A folder can be cloned with `cp -c` (APFS clonefile) */
@@ -180,6 +181,20 @@ export function isInside(root: string, candidate: string, family: OsFamily, cwd?
   const r = pathKey(root, family, cwd)
   const c = pathKey(candidate, family, cwd)
   return c === r || c.startsWith(r.endsWith(sep) ? r : r + sep)
+}
+
+/**
+ * Where a link copied from the tree `links.from` leads in its copy at `links.to`: a whole `target` inside `from` leads
+ * to the same place inside `to`; any other answers null (kept as written, or left out, by the caller). The one rule for
+ * the `Os`'s copy (`copy.ts`, its `links` option) and the worktree copy on Windows (dev-services `copyTreeWindows`). By
+ * name, as `isInside`: canonicalize both where a link or a short name could make one path look like two.
+ */
+export function retarget(target: string, links: { from: string; to: string }, family: OsFamily): string | null {
+  if (!isInside(links.from, target, family)) return null
+  const p = pathRules(family)
+  const whole = family === 'windows' ? withoutVerbatimPrefix(p.resolve(target)) : target
+  const rest = p.relative(links.from, whole)
+  return rest === '' ? p.resolve(links.to) : p.join(links.to, rest)
 }
 
 type Env = Readonly<Record<string, string | undefined>>

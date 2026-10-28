@@ -432,8 +432,8 @@ export const CONTRACT: Contract[] = [
     },
   },
   {
-    name: 'a tree copied into itself is refused',
-    want: both({ copy: err('ERR_FS_CP_EINVAL'), viaLink: err('ERR_FS_CP_EINVAL') }),
+    name: 'a tree copied into itself is refused: as written, through a link in the target, past parents not made yet',
+    want: both({ copy: err('ERR_FS_CP_EINVAL'), viaLink: err('ERR_FS_CP_EINVAL'), deeper: err('ERR_FS_CP_EINVAL'), promised: err('ERR_FS_CP_EINVAL') }),
     async run(os, root) {
       const { join } = os.paths.path
       os.files.mkdirSync(join(root, 's'))
@@ -443,6 +443,9 @@ export const CONTRACT: Contract[] = [
       return {
         copy: await outcome(() => os.files.cpSync(join(root, 's'), join(root, 's', 'in'), { recursive: true })),
         viaLink: await outcome(() => os.files.cpSync(join(root, 's'), join(root, 'l', 'in'), { recursive: true })),
+        // `l/a` and `l/a/b` are not there: Node stops at the first and copies into itself
+        deeper: await outcome(() => os.files.cpSync(join(root, 's'), join(root, 'l', 'a', 'b', 'c'), { recursive: true })),
+        promised: await outcome(() => os.files.promises.cp(join(root, 's'), join(root, 'l', 'a', 'b', 'c'), { recursive: true })),
       }
     },
   },
@@ -710,6 +713,59 @@ export const CONTRACT: Contract[] = [
         promised: await outcome(async () => (await f.promises.cp(t, join(root, 'copy2'), { recursive: true }), 'ok')),
         promisedKept: up('copy2'),
       }
+    },
+  },
+  {
+    name: 'with `links`, a link into the tree leads to the same place in the copy, where it will stand; one outside keeps its target',
+    // carry.ts copies an app's data beside the new key and renames it in: a junction kept as written joined the two keys
+    want: both({ inside: true, written: 'n', oldWritten: false, outside: true, aliased: true, plain: true, promised: true }),
+    async run(os, root) {
+      const { join } = os.paths.path
+      const f = os.files
+      const t = join(root, 't')
+      f.mkdirSync(join(t, 'sub'), { recursive: true })
+      f.mkdirSync(join(root, 'outside'))
+      // Junctions: on Windows all an app can make without a right, and always a whole path
+      f.symlinkSync(join(t, 'sub'), join(t, 'subj'), 'junction')
+      f.symlinkSync(join(root, 'outside'), join(t, 'out'), 'junction')
+      // Outside by name, inside where it leads
+      f.symlinkSync(t, join(root, 'alias'), 'junction')
+      f.symlinkSync(join(root, 'alias', 'sub'), join(t, 'via'), 'junction')
+      const final = join(root, 'final')
+      f.cpSync(t, join(root, 'tmp'), { recursive: true, verbatimSymlinks: true, links: { from: t, to: final } })
+      f.renameSync(join(root, 'tmp'), final)
+      f.writeFileSync(join(final, 'subj', 'new'), 'n')
+      f.cpSync(t, join(root, 'plain'), { recursive: true, verbatimSymlinks: true })
+      const p = join(root, 'p')
+      await f.promises.cp(t, p, { recursive: true, links: { from: t, to: p } })
+      return {
+        inside: os.paths.same(f.readlinkSync(join(final, 'subj')), join(final, 'sub')),
+        written: f.readFileSync(join(final, 'sub', 'new'), 'utf8'),
+        oldWritten: f.existsSync(join(t, 'sub', 'new')),
+        outside: os.paths.same(f.readlinkSync(join(final, 'out')), join(root, 'outside')),
+        aliased: os.paths.same(f.readlinkSync(join(final, 'via')), join(final, 'sub')),
+        plain: os.paths.same(f.readlinkSync(join(root, 'plain', 'subj')), join(t, 'sub')),
+        promised: os.paths.same(f.readlinkSync(join(p, 'subj')), join(p, 'sub')),
+      }
+    },
+  },
+  {
+    name: 'with `links`, a whole link to nothing outside the tree keeps its target, by both copies',
+    // Where it really leads cannot be read: it is no link into the tree. Made as a file symlink on Windows
+    symlinks: true,
+    want: both({ copy: true, promised: true }),
+    async run(os, root) {
+      const { join } = os.paths.path
+      const f = os.files
+      const t = join(root, 't')
+      f.mkdirSync(t)
+      f.symlinkSync(join(root, 'nothing'), join(t, 'gone'), 'junction')
+      const kept = (out: string) => os.paths.same(f.readlinkSync(join(out, 'gone')), join(root, 'nothing'))
+      const a = join(root, 'a')
+      f.cpSync(t, a, { recursive: true, links: { from: t, to: a } })
+      const b = join(root, 'b')
+      await f.promises.cp(t, b, { recursive: true, links: { from: t, to: b } })
+      return { copy: kept(a), promised: kept(b) }
     },
   },
   {

@@ -72,9 +72,22 @@ export type RmOptions = { recursive?: boolean; force?: boolean; maxRetries?: num
 /**
  * `cp`, Node's options: `verbatimSymlinks` keeps a relative link's target as written (without it the copy's link is
  * made whole from the source's folder); `preserveTimestamps` gives a copied file its source's times; an existing file is
- * replaced unless `force` is false, which keeps it or, with `errorOnExist`, throws `ERR_FS_CP_EEXIST`
+ * replaced unless `force` is false, which keeps it or, with `errorOnExist`, throws `ERR_FS_CP_EEXIST`.
+ *
+ * `links`, the `Os`'s own: the tree this is a copy of and the place the copy will stand once it is in place (which can
+ * be another name than the copy's target: copied beside and renamed in). A link whose whole target is inside `from`
+ * is made leading to the same place inside `to` (`retarget`), so the copy stands alone; any other keeps its target.
+ * Without it every link keeps its target, as Node's `cp` does (which never retargets: without `verbatimSymlinks` it
+ * makes a relative target whole into the source, and keeps a whole one as written).
  */
-export type CopyTreeOptions = { recursive?: boolean; verbatimSymlinks?: boolean; preserveTimestamps?: boolean; force?: boolean; errorOnExist?: boolean }
+export type CopyTreeOptions = {
+  recursive?: boolean
+  verbatimSymlinks?: boolean
+  preserveTimestamps?: boolean
+  force?: boolean
+  errorOnExist?: boolean
+  links?: { from: string; to: string }
+}
 /** Open flags by name, or a number from `files.constants` (`O_RDONLY | O_NOFOLLOW`; on Windows `O_NOFOLLOW` and `O_NONBLOCK` are 0) */
 export type OpenFlags = 'r' | 'r+' | 'w' | 'wx' | 'a' | 'ax' | number
 

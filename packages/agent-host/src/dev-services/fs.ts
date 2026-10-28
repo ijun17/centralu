@@ -9,6 +9,7 @@ import { assertCreatePath, assertExistingPath, canonicalPath, isInside, MissingP
 import { runGit, type GitTrust } from './git-exec.js'
 import { clonesFiles, cpKeepsLinks, hasWindowsFileNames, HOST_PLATFORM, type Platform } from '../os.js'
 import { realOs } from '../os/real.js'
+import { retarget } from '../os/rules.js'
 import { rpcError } from '../rpc-error.js'
 
 /**
@@ -433,9 +434,10 @@ export async function copyTree(
   // The `Os`'s copy, which makes every link again as a link and never follows one (a link in a circle ended the host
   // in Node's own `cpSync`). verbatimSymlinks: without it Node rewrites a relative link into an absolute one pointing back into the
   // source, so dropEscapingLinks then removed every pnpm link in a Linux worktree as leaving it (seen on CI,
-  // 2026-10-04). macOS took the clone path above, which keeps links as they are.
+  // 2026-10-04). macOS took the clone path above, which keeps links as they are. `links`: a whole link into the
+  // project leads to the same place in the worktree, as copyTreeWindows makes it, not into the project.
   // Sync, as Node's was: a 20 000-entry pnpm tree takes 1.7 s this way and 7.4 s step by step through promises (Linux)
-  realOs().files.cpSync(src, dst, { recursive: true, verbatimSymlinks: true })
+  realOs().files.cpSync(src, dst, { recursive: true, verbatimSymlinks: true, links })
 }
 
 export type CopyTreeOptions = {
@@ -520,7 +522,8 @@ async function copyLinkWindows(source: string, target: string, from: string, to:
   if (written === null) return 'its target cannot be read'
   // Where it really leads, so a short name or another case of the project folder still counts as inside it
   const real = canonicalPath(resolve(dirname(source), written))
-  if (!isInside(from, real)) return `points outside ${from}`
+  const there = retarget(real, { from, to }, 'windows')
+  if (there === null) return `points outside ${from}`
   const folder = await stat(real).then(
     (s) => s.isDirectory(),
     () => true, // dangling: a junction is the only link made without a privilege, and its target may still appear
@@ -534,7 +537,7 @@ async function copyLinkWindows(source: string, target: string, from: string, to:
       if (errnoCode(e) !== 'EPERM') throw e
     }
   }
-  if (folder) await symlink(join(to, relative(from, real)), target, 'junction')
+  if (folder) await symlink(there, target, 'junction')
   else await copyFile(real, target)
   return null
 }

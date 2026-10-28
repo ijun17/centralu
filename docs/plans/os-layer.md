@@ -381,7 +381,7 @@ file refused", which is not what Node does: it opens files with share-delete):
 | a rename to the same name in another case | the name is stored as written | another name |
 | `mkdir` over a link; `mkdir -p` over one | `EEXIST`; followed: to a folder done, to nothing `ENOENT` | the same |
 | open a folder: to read; to write | allowed, it reads as `EISDIR`; allowed | allowed, it reads as `EISDIR`; `EISDIR` |
-| copy a tree into itself (`cpSync`), as written or through a link in the target's parents | `ERR_FS_CP_EINVAL` | the same |
+| copy a tree into itself (`cpSync`), as written, through a link in the target's parents, or through another name that is no link (a share to the same disk, `\\localhost\C$\…`; a bind mount) | `ERR_FS_CP_EINVAL` | the same |
 | `copyFile`: the copy's change time | the source's (CopyFile) | now (macOS too, measured on APFS) |
 | a junction | absolute (a relative target read from its folder); a link to `lstat` and the listing; one to a file leads nowhere (`ENOENT`) | — |
 | `realpathSync.native` / `realpathSync` | the case stored / the case given | the same |
@@ -425,26 +425,47 @@ answer, and a test on memory says what the host does:
     directory symlink, so a tree of pnpm junctions copies where Node's did not. A
     directory symlink to a whole path comes out a junction: both lead to the same place, and nothing in Node can tell
     them apart.
-  - A copy's link leads where the source's did. A junction (always a whole path) or an absolute symlink in the copy
-    still leads into the source, on Windows now as on POSIX: an app's data carried to a new key (`carry.ts`) keeps a
-    junction it made leading to the old key's folder. A copy that must stand alone retargets its links itself
-    (`copyTreeWindows` for a worktree on Windows). An import (`handover.ts`) holds no link: staging leaves links out.
+  - With the `Os`'s option `links: { from, to }`, a link whose whole target is inside `from` (by name, or where the
+    link really leads: another case, a short name, a link on the way) is made leading to the same place inside `to`,
+    and any other keeps its target; a relative target is kept as written, which already leads into the copy. This is
+    the rule `copyTreeWindows` applies to a worktree's junctions, one definition (`rules.ts` `retarget`). Without it
+    every link keeps its target, as Node's `cp` does: Node never retargets (without `verbatimSymlinks` it makes a
+    relative target whole into the *source*, and keeps a whole one as written), so a junction (always a whole path)
+    or an absolute symlink in the copy leads into the source. An option the caller sets, not the default: `to` is
+    where the copy will stand, which only the caller knows; `carry.ts` copies beside its place and renames it in, so a
+    default of the copy's own target would lead into a name that is gone. `carry.ts` sets it: kept as written, an
+    app's junction `subj -> …/_user/notes/sub` tied the new key's data to the old key's folder (what the app wrote
+    through it landed there, a later removal of the old copies would take it, and `returnAppFiles` would move it to
+    `app-trash`; #1650 review, Windows and Linux). Before #1650 Node copied such an in-tree junction on Windows as the
+    folder it leads to: an independent copy, or a crash when it led back up. `dev-services/fs.ts` sets it off
+    Windows, as its Windows walk does. An import (`handover.ts`) does not: staging leaves links out, so it holds none.
   - Stricter than Node: with `verbatimSymlinks` Node's `cpSync` copies a link in a circle too, and `fs.promises.cp`
     never died; the `Os` takes the one rule for every option and both forms. Node's checks that read where a link
     leads when it replaces one in the target (`ERR_FS_CP_SYMLINK_TO_SUBDIRECTORY`) are not made: a link in the target
     is replaced (with `force: false` too, as Node's), anything else there is `EEXIST`, as Node's `symlink` answers.
-  - Node's other answers are kept: the same file, a folder into itself (by path and through the target's parents), a
-    folder onto a non-folder and back, `ERR_FS_EISDIR` without `recursive`, `force`/`errorOnExist`
-    (`ERR_FS_CP_EEXIST`), `preserveTimestamps` (the times first, then the mode, so a read-only file takes them too), a
-    folder's mode set once its entries are in. A socket or other kind is `ERR_FS_CP_UNKNOWN` (Node names the kind).
-    `filter` and `dereference` are not offered: no caller passes them. An entry gone since its folder was listed is
-    skipped.
+  - A folder into itself is refused by the entries of the target's parents, `dev` and `ino` through links, as Node's
+    `checkParentPaths`, so a share to the same disk (`\\localhost\C$\…`, `\\127.0.0.1\C$\…`, which `realpath` does
+    not map back to the drive) and a Linux bind mount are caught: the earlier check by `realpath` let the share copy
+    run until the disk was full, and the bind mount end in `ENAMETOOLONG`. Parents not there yet are passed over,
+    where Node stops at the first missing one (`L -> src`, `to = L/a/b/c` copied into itself there). An entry the
+    volume gives no number (`ino` or `dev` 0) is no other entry, as Node's `areIdentical`.
+  - Node's other answers are kept: the same file, a folder onto a non-folder and back (at the root and below it),
+    `ERR_FS_EISDIR` without `recursive`, `force`/`errorOnExist` (`ERR_FS_CP_EEXIST`), `preserveTimestamps` (the
+    times first, then the mode, so a read-only file takes them too), a folder's mode set once its entries are in (one
+    already there keeps its own). A FIFO, socket or other kind is `ERR_FS_CP_UNKNOWN` (Node names the kind; a FIFO
+    given to `copyFile` would wait for ever). `filter` and `dereference` are not offered: no caller passes them. An
+    entry gone since its folder was listed is skipped.
   - `promises.cp` takes each step with a promise call, so it never holds the event loop (Node's own did not either;
     the earlier check did, for up to 25 s). That costs time: a 20 000-entry pnpm tree on Linux copies in 1.1 s with
     Node's `cpSync`, 1.7 s with the `Os`'s and 7.4 s with `promises.cp` (each step a trip through libuv's pool), so a
     caller that copied synchronously before still does (`dev-services/fs.ts`).
   - On Windows the copy stats each link (follows it one step) to choose its kind, as Node's `symlink` does when no
-    kind is given: a link to a share that does not answer waits as long as Windows does.
+    kind is given: a link to a share that does not answer waits as long as Windows does, about 21 s for the first
+    `stat` of `\\10.255.255.7\share\x` (then about 6 ms while Windows keeps the failure). The sync copy holds the
+    event loop that long, the promise copy a pool thread. `carry.ts` copies synchronously: it runs inside the user-app
+    adoption (`UserAppAdoption.adopt`, then `carryAppState`, both synchronous, between store steps), so the promise
+    copy is no small change there. A directory symlink whose target cannot be reached at copy time is made as a file
+    symlink (Node's does the same), so it does not work as a folder once the share is back.
   The host's copies go through it: `apps/external/carry.ts` (an app's data, which the app writes, so may hold any
   link), `apps/external/handover.ts` (an import moved to another volume) and `dev-services/fs.ts` off Windows (a
   worktree's copy when cloning cannot be used). On Windows a worktree's copy keeps its own walk, which retargets a

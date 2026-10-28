@@ -211,6 +211,23 @@ describe('the real OS is made of the layer modules', () => {
     const slow = os.processes.runSync(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], { timeoutMs: 300 })
     expect({ code: slow.code, signal: slow.signal, error: slow.error?.code }).toEqual({ code: null, signal: 'SIGTERM', error: 'ETIMEDOUT' })
   }, 30_000 * SLOW)
+
+  // The share names the folder, and `realpath` does not lead back to the drive: before the parents were compared by
+  // their numbers (Node's `checkParentPaths`), both copies ran until the disk was full (#1650 review)
+  it.skipIf(process.platform !== 'win32')('refuses a copy into itself through a share to the same disk (\\\\localhost\\C$)', async (ctx) => {
+    const root = realpathSync.native(mkdtempSync(win32.join(tmpdir(), 'cc-os-unc-')))
+    roots.push(root)
+    const s = win32.join(root, 's')
+    os.files.mkdirSync(s)
+    os.files.writeFileSync(win32.join(s, 'f'), '')
+    const share = `\\\\localhost\\${root[0]}$${root.slice(2)}`
+    // Administrative shares are off on some machines, and reach only for an administrator
+    if (!os.files.existsSync(share)) return ctx.skip()
+    expect({
+      copy: await outcome(() => os.files.cpSync(s, win32.join(share, 's', 'sub'), { recursive: true })),
+      promised: await outcome(() => os.files.promises.cp(s, win32.join(share, 's', 'sub'), { recursive: true })),
+    }).toEqual({ copy: { error: 'ERR_FS_CP_EINVAL' }, promised: { error: 'ERR_FS_CP_EINVAL' } })
+  })
 })
 
 describe('names on the real OS, by property', () => {
