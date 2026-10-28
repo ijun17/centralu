@@ -93,12 +93,46 @@ export function traitsOf(family: OsFamily): OsTraits {
  * err towards two names, which these do.
  */
 const NTFS_KEEPS_CASE: ReadonlyArray<readonly [number, number]> = [
-  [0xb5, 0xb5], [0x131, 0x131], [0x17f, 0x17f], [0x19b, 0x19b], [0x1c5, 0x1c5], [0x1c8, 0x1c8], [0x1cb, 0x1cb],
-  [0x1f2, 0x1f2], [0x23f, 0x240], [0x252, 0x252], [0x25c, 0x25c], [0x261, 0x261], [0x264, 0x266], [0x26a, 0x26a],
-  [0x26c, 0x26c], [0x282, 0x282], [0x287, 0x287], [0x29d, 0x29e], [0x345, 0x345], [0x3c2, 0x3c2], [0x3d0, 0x3d1],
-  [0x3d5, 0x3d6], [0x3f0, 0x3f1], [0x3f3, 0x3f3], [0x3f5, 0x3f5], [0x525, 0x52f], [0x10d0, 0x10ff], [0x13f8, 0x13fd],
-  [0x1c80, 0x1c8a], [0x1d8e, 0x1d8e], [0x1e9b, 0x1e9b], [0x1fbe, 0x1fbe], [0x2c5f, 0x2c5f], [0x2cec, 0x2cf3],
-  [0x2d27, 0x2d2d], [0xa661, 0xa661], [0xa699, 0xa69b], [0xa791, 0xa7f6], [0xab53, 0xab53], [0xab70, 0xabbf],
+  [0xb5, 0xb5],
+  [0x131, 0x131],
+  [0x17f, 0x17f],
+  [0x19b, 0x19b],
+  [0x1c5, 0x1c5],
+  [0x1c8, 0x1c8],
+  [0x1cb, 0x1cb],
+  [0x1f2, 0x1f2],
+  [0x23f, 0x240],
+  [0x252, 0x252],
+  [0x25c, 0x25c],
+  [0x261, 0x261],
+  [0x264, 0x266],
+  [0x26a, 0x26a],
+  [0x26c, 0x26c],
+  [0x282, 0x282],
+  [0x287, 0x287],
+  [0x29d, 0x29e],
+  [0x345, 0x345],
+  [0x3c2, 0x3c2],
+  [0x3d0, 0x3d1],
+  [0x3d5, 0x3d6],
+  [0x3f0, 0x3f1],
+  [0x3f3, 0x3f3],
+  [0x3f5, 0x3f5],
+  [0x525, 0x52f],
+  [0x10d0, 0x10ff],
+  [0x13f8, 0x13fd],
+  [0x1c80, 0x1c8a],
+  [0x1d8e, 0x1d8e],
+  [0x1e9b, 0x1e9b],
+  [0x1fbe, 0x1fbe],
+  [0x2c5f, 0x2c5f],
+  [0x2cec, 0x2cf3],
+  [0x2d27, 0x2d2d],
+  [0xa661, 0xa661],
+  [0xa699, 0xa69b],
+  [0xa791, 0xa7f6],
+  [0xab53, 0xab53],
+  [0xab70, 0xabbf],
 ]
 
 const keepsCase = (code: number) => NTFS_KEEPS_CASE.some(([lo, hi]) => code >= lo && code <= hi)
@@ -131,7 +165,8 @@ export function pathRulesFrom(family: OsFamily, cwd: () => string): PlatformPath
     ...p,
     resolve,
     relative: (from, to) => p.relative(resolve(from), resolve(to)),
-    toNamespacedPath: (path) => (family === 'windows' && path !== '' ? p.toNamespacedPath(resolve(path)) : path),
+    toNamespacedPath: (path) =>
+      family === 'windows' && path !== '' ? p.toNamespacedPath(resolve(path)) : path,
   }
   return Object.assign(rules, { [family === 'windows' ? 'win32' : 'posix']: rules })
 }
@@ -189,7 +224,11 @@ export function isInside(root: string, candidate: string, family: OsFamily, cwd?
  * the `Os`'s copy (`copy.ts`, its `links` option) and the worktree copy on Windows (dev-services `copyTreeWindows`). By
  * name, as `isInside`: canonicalize both where a link or a short name could make one path look like two.
  */
-export function retarget(target: string, links: { from: string; to: string }, family: OsFamily): string | null {
+export function retarget(
+  target: string,
+  links: { from: string; to: string },
+  family: OsFamily,
+): string | null {
   if (!isInside(links.from, target, family)) return null
   const p = pathRules(family)
   // `relative` reads a `\\?\` form as another root: both plain
@@ -220,12 +259,54 @@ export function envValue(env: Env, name: string, family: OsFamily): string | und
  * `Os` takes the one rule for both calls: a signal it cannot deliver throws, and never ends anything by accident.
  * Linux's names are delivered; a program may trap all but KILL and STOP, and those in `IGNORED_BY_DEFAULT` end nothing.
  */
-const WINDOWS_SIGNAL_NAMES: readonly string[] = ['SIGHUP', 'SIGINT', 'SIGQUIT', 'SIGILL', 'SIGABRT', 'SIGFPE', 'SIGKILL', 'SIGSEGV', 'SIGTERM', 'SIGBREAK', 'SIGWINCH']
+const WINDOWS_SIGNAL_NAMES: readonly string[] = [
+  'SIGHUP',
+  'SIGINT',
+  'SIGQUIT',
+  'SIGILL',
+  'SIGABRT',
+  'SIGFPE',
+  'SIGKILL',
+  'SIGSEGV',
+  'SIGTERM',
+  'SIGBREAK',
+  'SIGWINCH',
+]
 const WINDOWS_ENDING = new Set<string>(['SIGTERM', 'SIGKILL', 'SIGINT', 'SIGQUIT'])
 const LINUX_SIGNALS = new Set<string>([
-  'SIGHUP', 'SIGINT', 'SIGQUIT', 'SIGILL', 'SIGTRAP', 'SIGABRT', 'SIGIOT', 'SIGBUS', 'SIGFPE', 'SIGKILL', 'SIGUSR1', 'SIGSEGV', 'SIGUSR2',
-  'SIGPIPE', 'SIGALRM', 'SIGTERM', 'SIGCHLD', 'SIGSTKFLT', 'SIGCONT', 'SIGSTOP', 'SIGTSTP', 'SIGTTIN', 'SIGTTOU', 'SIGURG', 'SIGXCPU',
-  'SIGXFSZ', 'SIGVTALRM', 'SIGPROF', 'SIGWINCH', 'SIGIO', 'SIGPOLL', 'SIGPWR', 'SIGSYS',
+  'SIGHUP',
+  'SIGINT',
+  'SIGQUIT',
+  'SIGILL',
+  'SIGTRAP',
+  'SIGABRT',
+  'SIGIOT',
+  'SIGBUS',
+  'SIGFPE',
+  'SIGKILL',
+  'SIGUSR1',
+  'SIGSEGV',
+  'SIGUSR2',
+  'SIGPIPE',
+  'SIGALRM',
+  'SIGTERM',
+  'SIGCHLD',
+  'SIGSTKFLT',
+  'SIGCONT',
+  'SIGSTOP',
+  'SIGTSTP',
+  'SIGTTIN',
+  'SIGTTOU',
+  'SIGURG',
+  'SIGXCPU',
+  'SIGXFSZ',
+  'SIGVTALRM',
+  'SIGPROF',
+  'SIGWINCH',
+  'SIGIO',
+  'SIGPOLL',
+  'SIGPWR',
+  'SIGSYS',
 ])
 /** Signals whose default action on Linux is to do nothing (STOP, TSTP, TTIN and TTOU pause a process; not modelled) */
 export const IGNORED_BY_DEFAULT: ReadonlySet<string> = new Set(['SIGCHLD', 'SIGCONT', 'SIGURG', 'SIGWINCH'])
@@ -245,21 +326,48 @@ export function signalRefusal(signal: string, family: OsFamily): 'ERR_UNKNOWN_SI
 
 /** The error a send `signalRefusal` refuses throws, shaped as Node's own */
 export function signalError(signal: string, code: 'ERR_UNKNOWN_SIGNAL' | 'ENOSYS'): Error & { code: string } {
-  if (code === 'ERR_UNKNOWN_SIGNAL') return Object.assign(new TypeError(`Unknown signal: ${signal}`), { code })
+  if (code === 'ERR_UNKNOWN_SIGNAL')
+    return Object.assign(new TypeError(`Unknown signal: ${signal}`), { code })
   return Object.assign(new Error('kill ENOSYS'), { code, errno: -4054, syscall: 'kill' })
 }
 
+/** How finely a file system keeps a time `utimes` is given */
+export type TimePrecision = 'microsecond' | 'nanosecond'
+
 /**
- * A file time as the family stores what `utimes` is given (seconds, or a `Date`), in nanoseconds: both keep whole
- * microseconds, cut from the seconds as libuv does (Linux from the fraction, Windows from the whole value, so a
- * `Date`'s milliseconds come out exact on Windows and a nanosecond short on Linux). Measured with Node 22.
+ * What decides how finely a time set with `utimes` is kept is libuv (Node's file layer), not the OS alone: Windows
+ * is cut to microseconds on every Node measured (22, 24, 26); on POSIX libuv cut to microseconds on Linux until 1.52.0
+ * (Node 24.22.1 ships 1.52.1, Node 22.23 ships 1.51.0); 1.52.0 keeps nanoseconds ("unix: support nanosecond
+ * resolution in uv__fs_to_timespec"); macOS kept nanoseconds on every libuv measured (Node 26). `uv` defaults to the running Node's; the
+ * in-memory OS models Linux, so `macOs` is for a test on a Mac.
  */
-export function storedTimeNs(time: number | Date, family: OsFamily): bigint {
+export function timePrecision(
+  family: OsFamily,
+  uv: string = process.versions.uv,
+  macOs = false,
+): TimePrecision {
+  if (family === 'windows') return 'microsecond'
+  if (macOs) return 'nanosecond'
+  const [major = 0, minor = 0] = uv.split('.').map(Number)
+  return major > 1 || (major === 1 && minor >= 52) ? 'nanosecond' : 'microsecond'
+}
+
+/**
+ * A file time as the family stores what `utimes` is given (seconds, or a `Date`), in nanoseconds, cut from the seconds
+ * as libuv does (see `timePrecision`): to whole microseconds from the fraction on POSIX (so a `Date`'s milliseconds
+ * come out a nanosecond short), from the whole value on Windows (so they come out exact); or, where nanoseconds are
+ * kept, as the double gives them.
+ */
+export function storedTimeNs(
+  time: number | Date,
+  family: OsFamily,
+  precision: TimePrecision = timePrecision(family),
+): bigint {
   const seconds = time instanceof Date ? time.getTime() / 1000 : time
   if (family === 'windows') return BigInt(Math.trunc(seconds * 1e6)) * 1000n
   const whole = Math.trunc(seconds)
   let ns = Math.trunc((seconds - whole) * 1e9)
-  ns -= ns % 1000
+  if (precision === 'microsecond') ns -= ns % 1000
   return BigInt(whole) * 1_000_000_000n + BigInt(ns)
 }
 
@@ -272,9 +380,13 @@ export type ListedEntry = { readonly name: string; isDirectory(): boolean; isSym
  * link: Node does not on POSIX, but on Windows it enters a junction, and a junction to a folder above it made Node's
  * listing stop at some depth without saying so. With the rule here a listing is the same on every OS and ends.
  */
-export function listRecursive<E extends ListedEntry>(root: string, list: (dir: string) => E[], join: (...parts: string[]) => string): Array<Listed<E>> {
+export function listRecursive<E extends ListedEntry>(
+  root: string,
+  list: (dir: string) => E[],
+  join: (...parts: string[]) => string,
+): Array<Listed<E>> {
   const walk = recursiveListing<E>(root, join)
-  for (let step = walk.next(); ; ) {
+  for (let step = walk.next(); ;) {
     if (step.done) return step.value
     step = walk.next(list(step.value))
   }
@@ -286,7 +398,10 @@ export type Listed<E> = { rel: string; dir: string; entry: E }
  * `listRecursive`'s walk, for a caller that lists a folder asynchronously: it yields each folder to list and is
  * given back its entries, and returns the listing.
  */
-export function* recursiveListing<E extends ListedEntry>(root: string, join: (...parts: string[]) => string): Generator<string, Array<Listed<E>>, E[]> {
+export function* recursiveListing<E extends ListedEntry>(
+  root: string,
+  join: (...parts: string[]) => string,
+): Generator<string, Array<Listed<E>>, E[]> {
   const out: Array<Listed<E>> = []
   const queue: Array<{ dir: string; rel: string }> = [{ dir: root, rel: '' }]
   for (let next = queue.shift(); next; next = queue.shift()) {
@@ -354,7 +469,10 @@ export function programFor(
   if (found && /\.(cmd|bat)$/i.test(found)) {
     const batch = found
     const started = launch(batch)
-    found = started.args.length === 0 && /\.(exe|com)$/i.test(started.command) ? started.command : find(name, '.COM;.EXE')
+    found =
+      started.args.length === 0 && /\.(exe|com)$/i.test(started.command)
+        ? started.command
+        : find(name, '.COM;.EXE')
     if (!found) return { path: win32.join(win32.dirname(batch), `${name}.exe`), found: false }
   }
   return found ? { path: found, found: true } : { path: notOnPath(name, env), found: false }
@@ -388,7 +506,12 @@ export function programCandidates(path: string, family: OsFamily): string[] {
  * wrote. Only absolute entries are searched (a relative one is read from the working folder, which may be a cloned
  * repository), and an entry is read without its quotes (`"C:\Program Files\Git\cmd"`), as Windows reads it.
  */
-export function findOnPath(name: string, env: Env, family: OsFamily, exists: (path: string) => boolean): string | null {
+export function findOnPath(
+  name: string,
+  env: Env,
+  family: OsFamily,
+  exists: (path: string) => boolean,
+): string | null {
   if (family === 'windows') {
     const exts = /\.[^\\/.]+$/.test(name)
       ? ['']
@@ -503,10 +626,15 @@ export function shimTarget(text: string): string | null {
  * is the one the person's own terminal runs. A prefix that cannot be asked for falls back to the npm beside Node, which
  * is what the shim does as well.
  */
-export function nodeShimEntry(text: string, dir: string, deps: Pick<LaunchDeps, 'exists' | 'runJs'>): string | null {
+export function nodeShimEntry(
+  text: string,
+  dir: string,
+  deps: Pick<LaunchDeps, 'exists' | 'runJs'>,
+): string | null {
   const started = /^\s*"%NODE_EXE%"\s+"%(\w+)%"\s+%\*\s*$/m.exec(text)?.[1]
   if (!started) return null
-  const set = (name: string) => new RegExp(`^\\s*SET\\s+"${name}=%~dp0\\\\?([^"%]+)"`, 'im').exec(text)?.[1]?.trim() ?? null
+  const set = (name: string) =>
+    new RegExp(`^\\s*SET\\s+"${name}=%~dp0\\\\?([^"%]+)"`, 'im').exec(text)?.[1]?.trim() ?? null
   const relative = set(started)
   if (!relative) return null
   const base = win32.resolve(dir, relative)
@@ -550,21 +678,29 @@ function withPathExt(path: string, env: Env, deps: Pick<LaunchDeps, 'exists'>): 
  */
 export function fileUrlToPath(url: string | URL, family: OsFamily): string {
   const u = typeof url === 'string' ? new URL(url) : url
-  if (u.protocol !== 'file:') throw Object.assign(new TypeError('The URL must be of scheme file'), { code: 'ERR_INVALID_URL_SCHEME' })
+  if (u.protocol !== 'file:')
+    throw Object.assign(new TypeError('The URL must be of scheme file'), { code: 'ERR_INVALID_URL_SCHEME' })
   const host = u.hostname === 'localhost' ? '' : u.hostname
   if (/%2f/i.test(u.pathname) || (family === 'windows' && /%5c/i.test(u.pathname))) {
-    throw Object.assign(new TypeError('File URL path must not include encoded \\ or / characters'), { code: 'ERR_INVALID_FILE_URL_PATH' })
+    throw Object.assign(new TypeError('File URL path must not include encoded \\ or / characters'), {
+      code: 'ERR_INVALID_FILE_URL_PATH',
+    })
   }
   const pathname = decodeURIComponent(u.pathname)
   if (family !== 'windows') {
-    if (host !== '') throw Object.assign(new TypeError(`File URL host must be "localhost" or empty on ${family}`), { code: 'ERR_INVALID_FILE_URL_HOST' })
+    if (host !== '')
+      throw Object.assign(new TypeError(`File URL host must be "localhost" or empty on ${family}`), {
+        code: 'ERR_INVALID_FILE_URL_HOST',
+      })
     return pathname
   }
   const backslashed = pathname.replaceAll('/', '\\')
   if (host !== '') return `\\\\${u.hostname}${backslashed}`
   const letter = (backslashed.codePointAt(1) ?? 0) | 0x20
   if (!(letter >= 0x61 && letter <= 0x7a) || backslashed[2] !== ':') {
-    throw Object.assign(new TypeError('File URL path must be absolute'), { code: 'ERR_INVALID_FILE_URL_PATH' })
+    throw Object.assign(new TypeError('File URL path must be absolute'), {
+      code: 'ERR_INVALID_FILE_URL_PATH',
+    })
   }
   return backslashed.slice(1)
 }
@@ -573,7 +709,8 @@ export function fileUrlToPath(url: string | URL, family: OsFamily): string {
 export function pathToFileUrl(path: string, family: OsFamily): URL {
   const p = pathRules(family)
   // `\\?\UNC\server\share` names the share `\\server\share` does, as Node reads it (only in this case)
-  if (family === 'windows' && path.startsWith('\\\\?\\UNC\\')) return pathToFileUrl(`\\\\${path.slice('\\\\?\\UNC\\'.length)}`, family)
+  if (family === 'windows' && path.startsWith('\\\\?\\UNC\\'))
+    return pathToFileUrl(`\\\\${path.slice('\\\\?\\UNC\\'.length)}`, family)
   if (family === 'windows' && path.startsWith('\\\\')) {
     const [host = '', ...rest] = path.slice(2).split(/[\\/]/)
     const url = new URL('file://')
@@ -593,5 +730,8 @@ const URL_SEP = posix.sep
 
 /** A path segment as a URL writes it: what `new URL` would read as syntax is escaped */
 function encodePathSegment(segment: string): string {
-  return segment.replace(/[%\\\n\r\t#?]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`)
+  return segment.replace(
+    /[%\\\n\r\t#?]/g,
+    (c) => `%${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`,
+  )
 }

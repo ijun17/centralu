@@ -48,7 +48,8 @@ export type CopyAnswer =
 
 type Steps<T> = Generator<CopyStep, T, CopyAnswer>
 
-const unexpected = (step: CopyStep['op'], answer: CopyAnswer): Error => new Error(`copy: ${answer.op} given for ${step}`)
+const unexpected = (step: CopyStep['op'], answer: CopyAnswer): Error =>
+  new Error(`copy: ${answer.op} given for ${step}`)
 
 function* lstat(path: string): Steps<OsStats | undefined> {
   const a = yield { op: 'lstat', path }
@@ -126,20 +127,54 @@ export function copiedLinkKind(target: string, toFolder: boolean, family: OsFami
  *   into the copy already if it led into the tree. One there that is a link is replaced; anything else is `EEXIST`.
  * - An entry gone since its folder was listed is not copied.
  */
-export function* copySteps(from: string, to: string, o: CopyTreeOptions, family: OsFamily, P: PlatformPath): Steps<void> {
+export function* copySteps(
+  from: string,
+  to: string,
+  o: CopyTreeOptions,
+  family: OsFamily,
+  P: PlatformPath,
+): Steps<void> {
   const src = yield* lstat(from)
-  if (!src) throw Object.assign(new Error(`ENOENT: no such file or directory, lstat '${from}'`), { code: 'ENOENT', syscall: 'lstat', path: from })
+  if (!src)
+    throw Object.assign(new Error(`ENOENT: no such file or directory, lstat '${from}'`), {
+      code: 'ENOENT',
+      syscall: 'lstat',
+      path: from,
+    })
   const dest = yield* lstat(to)
   const srcKind = kindOf(src)
-  if (dest && sameEntry(dest, src)) throw cpError('ERR_FS_CP_EINVAL', `Invalid src or dest: cp returned EINVAL (src and dest cannot be the same) ${to}`, to)
-  if (srcKind === 'dir' && dest && !dest.isDirectory()) throw cpError('ERR_FS_CP_DIR_TO_NON_DIR', `Cannot overwrite non-directory ${to} with directory ${from}`, to)
-  if (srcKind !== 'dir' && dest?.isDirectory()) throw cpError('ERR_FS_CP_NON_DIR_TO_DIR', `Cannot overwrite directory ${to} with non-directory ${from}`, to)
+  if (dest && sameEntry(dest, src))
+    throw cpError(
+      'ERR_FS_CP_EINVAL',
+      `Invalid src or dest: cp returned EINVAL (src and dest cannot be the same) ${to}`,
+      to,
+    )
+  if (srcKind === 'dir' && dest && !dest.isDirectory())
+    throw cpError(
+      'ERR_FS_CP_DIR_TO_NON_DIR',
+      `Cannot overwrite non-directory ${to} with directory ${from}`,
+      to,
+    )
+  if (srcKind !== 'dir' && dest?.isDirectory())
+    throw cpError(
+      'ERR_FS_CP_NON_DIR_TO_DIR',
+      `Cannot overwrite directory ${to} with non-directory ${from}`,
+      to,
+    )
   if (srcKind === 'dir') {
     // Every parent of `to` up to the root, through links; one not there yet is passed over
-    for (let above = P.dirname(P.resolve(to)), last = ''; above !== last; last = above, above = P.dirname(above)) {
+    for (
+      let above = P.dirname(P.resolve(to)), last = '';
+      above !== last;
+      last = above, above = P.dirname(above)
+    ) {
       const parent = yield* stat(above)
       if (parent && sameEntry(parent, src)) {
-        throw cpError('ERR_FS_CP_EINVAL', `Invalid src or dest: cp returned EINVAL (cannot copy ${from} to a subdirectory of self ${to}) ${to}`, to)
+        throw cpError(
+          'ERR_FS_CP_EINVAL',
+          `Invalid src or dest: cp returned EINVAL (cannot copy ${from} to a subdirectory of self ${to}) ${to}`,
+          to,
+        )
       }
     }
   }
@@ -149,14 +184,17 @@ export function* copySteps(from: string, to: string, o: CopyTreeOptions, family:
   let realFrom: string | null | undefined
 
   // Depth first in listing order, as Node's; a folder's mode is set once what is in it is copied
-  type Task = { kind: Kind; from: string; to: string; stat: OsStats | undefined } | { kind: 'mode'; to: string; mode: number }
+  type Task =
+    | { kind: Kind; from: string; to: string; stat: OsStats | undefined }
+    | { kind: 'mode'; to: string; mode: number }
   const tasks: Task[] = [{ kind: srcKind, from, to, stat: src }]
   for (let t = tasks.pop(); t; t = tasks.pop()) {
     if (t.kind === 'mode') {
       yield { op: 'chmod', path: t.to, mode: t.mode }
       continue
     }
-    if (t.kind === 'other') throw cpError('ERR_FS_CP_UNKNOWN', `Cannot copy an unknown file type: ${t.from}`, t.from)
+    if (t.kind === 'other')
+      throw cpError('ERR_FS_CP_UNKNOWN', `Cannot copy an unknown file type: ${t.from}`, t.from)
     const there = yield* lstat(t.to)
     // A link by the listing or by `lstat` is a link: the listing sees a reparse point `lstat` cannot read, and `lstat`
     // a folder swapped for a link since the listing. An entry gone since then is not copied
@@ -164,25 +202,34 @@ export function* copySteps(from: string, to: string, o: CopyTreeOptions, family:
     if (t.kind !== 'link' && !stat) continue
     if (!stat || stat.isSymbolicLink()) {
       const written = yield* readlink(t.from)
-      let target = o.verbatimSymlinks || P.isAbsolute(written) ? written : P.resolve(P.dirname(t.from), written)
+      let target =
+        o.verbatimSymlinks || P.isAbsolute(written) ? written : P.resolve(P.dirname(t.from), written)
       if (o.links && P.isAbsolute(target)) {
         let moved = retarget(target, o.links, family)
         // Outside by name, it may still lead inside: another case or a short name of the tree, a link on the way
         if (moved === null) {
           if (realFrom === undefined) realFrom = yield* real(o.links.from)
           const leads = realFrom === null ? null : yield* real(t.from)
-          if (realFrom !== null && leads !== null) moved = retarget(leads, { from: realFrom, to: o.links.to }, family)
+          if (realFrom !== null && leads !== null)
+            moved = retarget(leads, { from: realFrom, to: o.links.to }, family)
         }
         if (moved !== null) target = moved
       }
-      const kind = family === 'windows' ? copiedLinkKind(target, yield* leadsToFolder(t.from), family) : undefined
+      const kind =
+        family === 'windows' ? copiedLinkKind(target, yield* leadsToFolder(t.from), family) : undefined
       if (there?.isSymbolicLink()) yield { op: 'unlink', path: t.to }
       yield { op: 'symlink', target, path: t.to, kind }
       continue
     }
     if (t.kind === 'dir') {
-      if (!o.recursive) throw cpError('ERR_FS_EISDIR', `Recursive option is required to copy a directory: ${t.from}`, t.from)
-      if (there && !there.isDirectory()) throw cpError('ERR_FS_CP_DIR_TO_NON_DIR', `Cannot overwrite non-directory ${t.to} with directory ${t.from}`, t.to)
+      if (!o.recursive)
+        throw cpError('ERR_FS_EISDIR', `Recursive option is required to copy a directory: ${t.from}`, t.from)
+      if (there && !there.isDirectory())
+        throw cpError(
+          'ERR_FS_CP_DIR_TO_NON_DIR',
+          `Cannot overwrite non-directory ${t.to} with directory ${t.from}`,
+          t.to,
+        )
       if (!there) {
         yield { op: 'mkdir', path: t.to, parents: false }
         tasks.push({ kind: 'mode', to: t.to, mode: stat.mode })
@@ -190,14 +237,30 @@ export function* copySteps(from: string, to: string, o: CopyTreeOptions, family:
       const entries = yield* list(t.from)
       for (let i = entries.length - 1; i >= 0; i--) {
         const e = entries[i]
-        if (e) tasks.push({ kind: kindOf(e), from: P.join(t.from, e.name), to: P.join(t.to, e.name), stat: undefined })
+        if (e)
+          tasks.push({
+            kind: kindOf(e),
+            from: P.join(t.from, e.name),
+            to: P.join(t.to, e.name),
+            stat: undefined,
+          })
       }
       continue
     }
-    if (there?.isDirectory()) throw cpError('ERR_FS_CP_NON_DIR_TO_DIR', `Cannot overwrite directory ${t.to} with non-directory ${t.from}`, t.to)
+    if (there?.isDirectory())
+      throw cpError(
+        'ERR_FS_CP_NON_DIR_TO_DIR',
+        `Cannot overwrite directory ${t.to} with non-directory ${t.from}`,
+        t.to,
+      )
     if (there) {
       if (o.force === false) {
-        if (o.errorOnExist) throw cpError('ERR_FS_CP_EEXIST', `Target already exists: cp returned EEXIST (${t.to} already exists)`, t.to)
+        if (o.errorOnExist)
+          throw cpError(
+            'ERR_FS_CP_EEXIST',
+            `Target already exists: cp returned EEXIST (${t.to} already exists)`,
+            t.to,
+          )
         continue
       }
       yield { op: 'unlink', path: t.to }
@@ -253,7 +316,10 @@ function answerSync(f: CopyFilesSync, s: CopyStep): CopyAnswer {
       return { op: 'list', entries: f.readdirSync(s.path, { withFileTypes: true }) }
     case 'leadsToFolder':
       try {
-        return { op: 'leadsToFolder', yes: f.statSync(s.path, { throwIfNoEntry: false })?.isDirectory() ?? false }
+        return {
+          op: 'leadsToFolder',
+          yes: f.statSync(s.path, { throwIfNoEntry: false })?.isDirectory() ?? false,
+        }
       } catch {
         return { op: 'leadsToFolder', yes: false }
       }
@@ -305,7 +371,13 @@ async function answerAsync(f: CopyFilesAsync, s: CopyStep): Promise<CopyAnswer> 
     case 'list':
       return { op: 'list', entries: await f.readdir(s.path, { withFileTypes: true }) }
     case 'leadsToFolder':
-      return { op: 'leadsToFolder', yes: await f.stat(s.path).then((st) => st.isDirectory(), () => false) }
+      return {
+        op: 'leadsToFolder',
+        yes: await f.stat(s.path).then(
+          (st) => st.isDirectory(),
+          () => false,
+        ),
+      }
     case 'real':
       return { op: 'real', path: await f.realpath(s.path).catch(() => null) }
     case 'readlink':
@@ -332,13 +404,27 @@ async function answerAsync(f: CopyFilesAsync, s: CopyStep): Promise<CopyAnswer> 
 }
 
 /** `copySteps` with sync calls */
-export function copyTreeSync(f: CopyFilesSync, from: string, to: string, o: CopyTreeOptions | undefined, family: OsFamily, P: PlatformPath): void {
+export function copyTreeSync(
+  f: CopyFilesSync,
+  from: string,
+  to: string,
+  o: CopyTreeOptions | undefined,
+  family: OsFamily,
+  P: PlatformPath,
+): void {
   const steps = copySteps(from, to, o ?? {}, family, P)
-  for (let s = steps.next(); !s.done; ) s = steps.next(answerSync(f, s.value))
+  for (let s = steps.next(); !s.done;) s = steps.next(answerSync(f, s.value))
 }
 
 /** `copySteps` with promise calls: nothing in it blocks the event loop */
-export async function copyTreeAsync(f: CopyFilesAsync, from: string, to: string, o: CopyTreeOptions | undefined, family: OsFamily, P: PlatformPath): Promise<void> {
+export async function copyTreeAsync(
+  f: CopyFilesAsync,
+  from: string,
+  to: string,
+  o: CopyTreeOptions | undefined,
+  family: OsFamily,
+  P: PlatformPath,
+): Promise<void> {
   const steps = copySteps(from, to, o ?? {}, family, P)
-  for (let s = steps.next(); !s.done; ) s = steps.next(await answerAsync(f, s.value))
+  for (let s = steps.next(); !s.done;) s = steps.next(await answerAsync(f, s.value))
 }

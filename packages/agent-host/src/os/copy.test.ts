@@ -86,7 +86,13 @@ function stepsOver(tree: Map<string, Entry>, from: string, to: string, over: Ove
           .map((p): OsDirent => {
             const c = tree.get(p)
             const link = c?.kind === 'link' || c?.kind === 'reparse'
-            return { name: posix.basename(p), parentPath: s.path, isFile: () => c?.kind === 'file', isDirectory: () => c?.kind === 'dir' || c?.kind === 'mount', isSymbolicLink: () => link }
+            return {
+              name: posix.basename(p),
+              parentPath: s.path,
+              isFile: () => c?.kind === 'file',
+              isDirectory: () => c?.kind === 'dir' || c?.kind === 'mount',
+              isSymbolicLink: () => link,
+            }
           })
         return { op: 'list', entries }
       }
@@ -105,8 +111,14 @@ function stepsOver(tree: Map<string, Entry>, from: string, to: string, over: Ove
         return { op: 'done' }
     }
   }
-  const steps = copySteps(from, to, over.options ?? { recursive: true, verbatimSymlinks: true }, 'posix', posix)
-  for (let s = steps.next(); !s.done; ) {
+  const steps = copySteps(
+    from,
+    to,
+    over.options ?? { recursive: true, verbatimSymlinks: true },
+    'posix',
+    posix,
+  )
+  for (let s = steps.next(); !s.done;) {
     taken.push(s.value)
     const a = answer(s.value)
     over.change?.(s.value)
@@ -116,7 +128,8 @@ function stepsOver(tree: Map<string, Entry>, from: string, to: string, over: Ove
 }
 
 const listed = (steps: CopyStep[]) => steps.flatMap((s) => (s.op === 'list' ? [s.path] : []))
-const made = (steps: CopyStep[]) => steps.flatMap((s) => (s.op === 'symlink' ? [`${s.path} -> ${s.target}`] : []))
+const made = (steps: CopyStep[]) =>
+  steps.flatMap((s) => (s.op === 'symlink' ? [`${s.path} -> ${s.target}`] : []))
 const codeOf = (fn: () => unknown) => {
   try {
     fn()
@@ -192,7 +205,11 @@ describe('the tree copy refuses what Node refuses', () => {
     ['/t/f', file],
   ])
   it('a copy into itself: by name, past parents not made yet, through a link, and through another name that is no link (a share, a bind mount)', () => {
-    const tree = new Map([...t, ['/L', { kind: 'link', target: '/t' }] as const, ['/share', { kind: 'mount', target: '/t' }] as const])
+    const tree = new Map([
+      ...t,
+      ['/L', { kind: 'link', target: '/t' }] as const,
+      ['/share', { kind: 'mount', target: '/t' }] as const,
+    ])
     expect(codeOf(() => stepsOver(tree, '/t', '/t/a/b'))).toBe('ERR_FS_CP_EINVAL')
     // Node stops at the first parent not there and copies `/t` into itself through `L`
     expect(codeOf(() => stepsOver(tree, '/t', '/L/a/b/c'))).toBe('ERR_FS_CP_EINVAL')
@@ -228,7 +245,9 @@ describe('the tree copy refuses what Node refuses', () => {
       ['/t/p', { kind: 'fifo' }],
     ])
     let copied = false
-    expect(codeOf(() => stepsOver(tree, '/t', '/out', { change: (s) => (copied ||= s.op === 'copyFile') }))).toBe('ERR_FS_CP_UNKNOWN')
+    expect(
+      codeOf(() => stepsOver(tree, '/t', '/out', { change: (s) => (copied ||= s.op === 'copyFile') })),
+    ).toBe('ERR_FS_CP_UNKNOWN')
     expect(copied).toBe(false)
   })
 })
@@ -263,7 +282,9 @@ describe('with `links`, a link into the tree leads into the copy', () => {
 
   it('a whole target inside (by name, or where it really leads) at the same place in `to`; a relative one, and any other, as written', () => {
     // Copied beside its place (`/tmp1`) and renamed to `/final`: the links lead where the copy will stand
-    expect(made(stepsOver(tree, '/t', '/tmp1', { options: { recursive: true, verbatimSymlinks: true, links } }))).toEqual([
+    expect(
+      made(stepsOver(tree, '/t', '/tmp1', { options: { recursive: true, verbatimSymlinks: true, links } })),
+    ).toEqual([
       '/tmp1/abs -> /final/sub',
       '/tmp1/rel -> sub',
       '/tmp1/out -> /elsewhere',
@@ -271,19 +292,31 @@ describe('with `links`, a link into the tree leads into the copy', () => {
       '/tmp1/gone -> /nowhere/x',
     ])
     // Without verbatimSymlinks, Node's rule makes the relative one whole into the tree first
-    expect(made(stepsOver(tree, '/t', '/tmp1', { options: { recursive: true, links } }))).toContain('/tmp1/rel -> /final/sub')
+    expect(made(stepsOver(tree, '/t', '/tmp1', { options: { recursive: true, links } }))).toContain(
+      '/tmp1/rel -> /final/sub',
+    )
   })
 
   it("without it every link keeps its target, as Node's cp", () => {
-    expect(made(stepsOver(tree, '/t', '/out'))).toEqual(['/out/abs -> /t/sub', '/out/rel -> sub', '/out/out -> /elsewhere', '/out/via -> /A/sub', '/out/gone -> /nowhere/x'])
+    expect(made(stepsOver(tree, '/t', '/out'))).toEqual([
+      '/out/abs -> /t/sub',
+      '/out/rel -> sub',
+      '/out/out -> /elsewhere',
+      '/out/via -> /A/sub',
+      '/out/gone -> /nowhere/x',
+    ])
   })
 
   it('the rule, one for the copy and the worktree copy on Windows: inside by segment and case, the `\\\\?\\` form too', () => {
     expect(retarget('/t/sub/x', links, 'posix')).toBe('/final/sub/x')
     expect(retarget('/t', links, 'posix')).toBe('/final')
     expect(retarget('/tt/x', links, 'posix')).toBeNull()
-    expect(retarget('\\\\?\\c:\\Data\\T\\sub', { from: 'C:\\data\\t', to: 'D:\\new' }, 'windows')).toBe('D:\\new\\sub')
-    expect(retarget('C:\\data\\t\\sub', { from: '\\\\?\\C:\\data\\t', to: 'D:\\new' }, 'windows')).toBe('D:\\new\\sub')
+    expect(retarget('\\\\?\\c:\\Data\\T\\sub', { from: 'C:\\data\\t', to: 'D:\\new' }, 'windows')).toBe(
+      'D:\\new\\sub',
+    )
+    expect(retarget('C:\\data\\t\\sub', { from: '\\\\?\\C:\\data\\t', to: 'D:\\new' }, 'windows')).toBe(
+      'D:\\new\\sub',
+    )
     expect(retarget('C:\\data\\t2', { from: 'C:\\data\\t', to: 'D:\\new' }, 'windows')).toBeNull()
   })
 })

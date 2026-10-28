@@ -94,7 +94,12 @@ export type OpenFlags = 'r' | 'r+' | 'w' | 'wx' | 'a' | 'ax' | number
 export interface OsFileHandle {
   readonly fd: number
   stat(): Promise<OsStats>
-  read(buffer: Uint8Array, offset: number, length: number, position: number | null): Promise<{ bytesRead: number }>
+  read(
+    buffer: Uint8Array,
+    offset: number,
+    length: number,
+    position: number | null,
+  ): Promise<{ bytesRead: number }>
   write(data: string | Uint8Array): Promise<void>
   chmod(mode: number): Promise<void>
   close(): Promise<void>
@@ -334,7 +339,11 @@ export type RunSyncOptions = Omit<RunOptions, 'signal' | 'stdoutFile'> & {
  * How a `runSync` ended: `error` when it did not start (`ENOENT`), passed `maxBuffer` on stdout or stderr (`ENOBUFS`,
  * the output so far kept, ended with SIGTERM) or `timeoutMs` (`ETIMEDOUT`, ended with SIGTERM)
  */
-export type RunSyncResult<T extends string | Buffer = string> = OsExit & { stdout: T; stderr: T; error?: OsError }
+export type RunSyncResult<T extends string | Buffer = string> = OsExit & {
+  stdout: T
+  stderr: T
+  error?: OsError
+}
 
 export interface OsProcesses {
   /**
@@ -349,8 +358,16 @@ export interface OsProcesses {
    */
   run(command: string, args: readonly string[], options?: RunOptions): Promise<RunResult>
   /** The same, holding the host until it ends (the layer's own `taskkill` and `ps`, a lock's owner): keep these few */
-  runSync(command: string, args: readonly string[], options?: RunSyncOptions & { encoding?: 'utf8' }): RunSyncResult
-  runSync(command: string, args: readonly string[], options: RunSyncOptions & { encoding: 'buffer' }): RunSyncResult<Buffer>
+  runSync(
+    command: string,
+    args: readonly string[],
+    options?: RunSyncOptions & { encoding?: 'utf8' },
+  ): RunSyncResult
+  runSync(
+    command: string,
+    args: readonly string[],
+    options: RunSyncOptions & { encoding: 'buffer' },
+  ): RunSyncResult<Buffer>
   /** A command line through the OS's shell (`cmd.exe /d /s /c`, `/bin/sh -c`): a person's own setup command, never built from parts */
   runShell(commandLine: string, options?: Omit<RunOptions, 'stdoutFile'>): Promise<RunResult>
   /**

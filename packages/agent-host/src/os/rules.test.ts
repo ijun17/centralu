@@ -14,7 +14,9 @@ import {
   programCandidates,
   samePath,
   signalRefusal,
+  storedTimeNs,
   systemTool,
+  timePrecision,
   traitsOf,
   type OsFamily,
 } from './rules.js'
@@ -30,7 +32,9 @@ const FAMILIES: OsFamily[] = ['windows', 'posix']
 /** An absolute path of the family: a drive or `/`, and some names */
 function absolute(r: Rng, family: OsFamily, depth = r.int(0, 5)): string {
   const names = Array.from({ length: depth }, () => name(r))
-  return family === 'windows' ? win32.join(`${r.pick(['C', 'c', 'D'])}:\\`, ...names) : posix.join('/', ...names)
+  return family === 'windows'
+    ? win32.join(`${r.pick(['C', 'c', 'D'])}:\\`, ...names)
+    : posix.join('/', ...names)
 }
 
 /** The same path written another way the family reads as the same: `/` for `\`, a trailing separator, `.` segments */
@@ -72,7 +76,12 @@ describe('paths by the family’s rules', () => {
         (r) => {
           const root = absolute(r, family, r.int(1, 4))
           const below = Array.from({ length: r.int(0, 4) }, () => name(r))
-          return { root, child: pathRules(family).join(root, ...below), sibling: `${root}${r.pick(['-old', 'x', '.bak', ' 2'])}`, below: below.length }
+          return {
+            root,
+            child: pathRules(family).join(root, ...below),
+            sibling: `${root}${r.pick(['-old', 'x', '.bak', ' 2'])}`,
+            below: below.length,
+          }
         },
         ({ root, child, sibling, below }) => {
           expect(isInside(root, child, family)).toBe(true)
@@ -107,8 +116,16 @@ describe('paths by the family’s rules', () => {
   it('windows: two names are one path exactly when NTFS reads them as one (not by JavaScript case)', () => {
     // Letters that look alike or that JavaScript folds together, swapped at random: k, K and the Kelvin sign; ı and I;
     // ß and S; µ and Greek Μ; é, É and e
-    const groups = [['k', 'K', '\u212a'], ['ı', 'I'], ['ß', 'S'], ['µ', '\u039c'], ['é', 'É', 'e'], ['a', 'A']]
-    const confuse = (r: Rng, s: string) => [...s].map((c) => r.pick(groups.find((g) => g.includes(c)) ?? [c])).join('')
+    const groups = [
+      ['k', 'K', '\u212a'],
+      ['ı', 'I'],
+      ['ß', 'S'],
+      ['µ', '\u039c'],
+      ['é', 'É', 'e'],
+      ['a', 'A'],
+    ]
+    const confuse = (r: Rng, s: string) =>
+      [...s].map((c) => r.pick(groups.find((g) => g.includes(c)) ?? [c])).join('')
     forAll(
       (r) => {
         const a = name(r)
@@ -122,7 +139,9 @@ describe('paths by the family’s rules', () => {
     )
     // One character never becomes two, and the folded form sorts as NTFS lists (`_` after `Z`)
     expect(foldCase('ß', 'windows')).toBe('ß')
-    expect(['_', 'a', 'Z'].sort((x, y) => (foldCase(x, 'windows') < foldCase(y, 'windows') ? -1 : 1))).toEqual(['a', 'Z', '_'])
+    expect(
+      ['_', 'a', 'Z'].sort((x, y) => (foldCase(x, 'windows') < foldCase(y, 'windows') ? -1 : 1)),
+    ).toEqual(['a', 'Z', '_'])
   })
 
   it('relative paths resolve from the working folder given, not from the process running the tests', () => {
@@ -143,7 +162,7 @@ describe('paths by the family’s rules', () => {
 })
 
 describe('the environment and PATH by the family’s rules', () => {
-  it("windows reads a variable in any case, an exact name first; posix only by its own name", () => {
+  it('windows reads a variable in any case, an exact name first; posix only by its own name', () => {
     forAll(
       (r) => ({ asked: recase(r, 'Path'), value: name(r) }),
       ({ asked, value }) => {
@@ -159,8 +178,14 @@ describe('the environment and PATH by the family’s rules', () => {
       (r) => {
         const folders = Array.from({ length: r.int(1, 4) }, (_, i) => `C:\\bin${i}`)
         const present = new Set<string>()
-        for (const f of folders) for (const ext of ['.exe', '.cmd', '', '.ps1']) if (r.bool(0.3)) present.add(win32.join(f, `tool${ext}`).toLowerCase())
-        return { folders, present: [...present], pathExt: r.pick(['.COM;.EXE;.BAT;.CMD', '.CMD;.EXE', undefined]) }
+        for (const f of folders)
+          for (const ext of ['.exe', '.cmd', '', '.ps1'])
+            if (r.bool(0.3)) present.add(win32.join(f, `tool${ext}`).toLowerCase())
+        return {
+          folders,
+          present: [...present],
+          pathExt: r.pick(['.COM;.EXE;.BAT;.CMD', '.CMD;.EXE', undefined]),
+        }
       },
       ({ folders, present, pathExt }) => {
         const exts = (pathExt ?? '.COM;.EXE;.BAT;.CMD').split(';').map((e) => e.toLowerCase())
@@ -177,36 +202,63 @@ describe('the environment and PATH by the family’s rules', () => {
     )
   })
 
-  it("reads SystemRoot in any case, and never a relative one (#428)", () => {
+  it('reads SystemRoot in any case, and never a relative one (#428)', () => {
     expect(systemTool(['taskkill.exe'], { systemroot: 'D:\\Win' })).toBe('D:\\Win\\System32\\taskkill.exe')
     expect(systemTool(['taskkill.exe'], { SYSTEMROOT: 'Win' })).toBe('C:\\Windows\\System32\\taskkill.exe')
   })
 
   it('a file URL with an encoded backslash is refused on Windows only, as Node refuses it', () => {
-    expect(() => fileUrlToPath('file:///C:/a%5cb', 'windows')).toThrow(expect.objectContaining({ code: 'ERR_INVALID_FILE_URL_PATH' }))
-    expect(() => fileUrlToPath('file:///C:/a%5Cb', 'windows')).toThrow(expect.objectContaining({ code: 'ERR_INVALID_FILE_URL_PATH' }))
+    expect(() => fileUrlToPath('file:///C:/a%5cb', 'windows')).toThrow(
+      expect.objectContaining({ code: 'ERR_INVALID_FILE_URL_PATH' }),
+    )
+    expect(() => fileUrlToPath('file:///C:/a%5Cb', 'windows')).toThrow(
+      expect.objectContaining({ code: 'ERR_INVALID_FILE_URL_PATH' }),
+    )
     expect(fileUrlToPath('file:///a%5cb', 'posix')).toBe('/a\\b')
   })
 
   it('a start on Windows tries .com and .exe after a path, and the path as written only when it has an extension', () => {
     expect(programCandidates('C:\\bin\\node', 'windows')).toEqual(['C:\\bin\\node.com', 'C:\\bin\\node.exe'])
-    expect(programCandidates('C:\\bin\\a.foo', 'windows')).toEqual(['C:\\bin\\a.foo', 'C:\\bin\\a.foo.com', 'C:\\bin\\a.foo.exe'])
+    expect(programCandidates('C:\\bin\\a.foo', 'windows')).toEqual([
+      'C:\\bin\\a.foo',
+      'C:\\bin\\a.foo.com',
+      'C:\\bin\\a.foo.exe',
+    ])
     expect(programCandidates('/usr/bin/node', 'posix')).toEqual(['/usr/bin/node'])
   })
 
   it('never searches a relative PATH folder on Windows, and reads a quoted one', () => {
     const there = new Set(['C:\\Program Files\\Git\\cmd\\git.exe', 'repo\\git.exe'])
-    expect(findOnPath('git', { PATH: 'repo;"C:\\Program Files\\Git\\cmd"' }, 'windows', (p) => there.has(p))).toBe('C:\\Program Files\\Git\\cmd\\git.exe')
+    expect(
+      findOnPath('git', { PATH: 'repo;"C:\\Program Files\\Git\\cmd"' }, 'windows', (p) => there.has(p)),
+    ).toBe('C:\\Program Files\\Git\\cmd\\git.exe')
     expect(findOnPath('git', { PATH: '/usr/bin:/bin' }, 'posix', (p) => p === '/bin/git')).toBe('/bin/git')
   })
 })
 
 describe('signals by family', () => {
   it('Windows sends TERM, KILL, INT and QUIT, refuses the other names it knows, and does not know the rest', () => {
-    expect(['SIGTERM', 'SIGKILL', 'SIGINT', 'SIGQUIT'].map((s) => signalRefusal(s, 'windows'))).toEqual([null, null, null, null])
-    expect(['SIGHUP', 'SIGBREAK', 'SIGWINCH', 'SIGABRT'].map((s) => signalRefusal(s, 'windows'))).toEqual(['ENOSYS', 'ENOSYS', 'ENOSYS', 'ENOSYS'])
-    expect(['SIGUSR1', 'SIGSTOP', 'SIGPIPE', 'SIGNOPE'].map((s) => signalRefusal(s, 'windows'))).toEqual(Array(4).fill('ERR_UNKNOWN_SIGNAL'))
-    expect(['SIGHUP', 'SIGUSR1', 'SIGSTOP', 'SIGCHLD'].map((s) => signalRefusal(s, 'posix'))).toEqual([null, null, null, null])
+    expect(['SIGTERM', 'SIGKILL', 'SIGINT', 'SIGQUIT'].map((s) => signalRefusal(s, 'windows'))).toEqual([
+      null,
+      null,
+      null,
+      null,
+    ])
+    expect(['SIGHUP', 'SIGBREAK', 'SIGWINCH', 'SIGABRT'].map((s) => signalRefusal(s, 'windows'))).toEqual([
+      'ENOSYS',
+      'ENOSYS',
+      'ENOSYS',
+      'ENOSYS',
+    ])
+    expect(['SIGUSR1', 'SIGSTOP', 'SIGPIPE', 'SIGNOPE'].map((s) => signalRefusal(s, 'windows'))).toEqual(
+      Array(4).fill('ERR_UNKNOWN_SIGNAL'),
+    )
+    expect(['SIGHUP', 'SIGUSR1', 'SIGSTOP', 'SIGCHLD'].map((s) => signalRefusal(s, 'posix'))).toEqual([
+      null,
+      null,
+      null,
+      null,
+    ])
     expect(signalRefusal('SIGBREAK', 'posix')).toBe('ERR_UNKNOWN_SIGNAL')
   })
 })
@@ -226,7 +278,8 @@ describe('the questions named for what differs', () => {
       hasWindowsFileNames: true,
     })
     const posixTraits = traitsOf('posix')
-    for (const [k, v] of Object.entries(traitsOf('windows'))) if (k !== 'clonesFiles') expect(posixTraits[k as keyof typeof posixTraits], k).toBe(!v)
+    for (const [k, v] of Object.entries(traitsOf('windows')))
+      if (k !== 'clonesFiles') expect(posixTraits[k as keyof typeof posixTraits], k).toBe(!v)
   })
 })
 
@@ -242,5 +295,27 @@ describe('Windows path forms Win32 opens as one path', () => {
     expect(samePath('C:\\x\\y.', 'C:\\x\\y', 'windows')).toBe(false)
     expect(isInside('C:\\work\\proj', 'C:\\work\\proj.\\secret', 'windows')).toBe(false)
     expect(isInside('C:\\work\\proj', 'C:\\work\\proj \\secret', 'windows')).toBe(false)
+  })
+})
+
+describe('how finely a file time is kept: libuv decides, with the OS family', () => {
+  it('windows cuts to microseconds on every libuv; Linux from libuv 1.52.0; macOS never cuts', () => {
+    expect(['1.51.0', '1.52.1', '1.53.0'].map((uv) => timePrecision('windows', uv))).toEqual([
+      'microsecond',
+      'microsecond',
+      'microsecond',
+    ])
+    expect(
+      ['1.50.0', '1.51.0', '1.52.0', '1.52.1', '1.53.0', '2.0.0'].map((uv) => timePrecision('posix', uv)),
+    ).toEqual(['microsecond', 'microsecond', 'nanosecond', 'nanosecond', 'nanosecond', 'nanosecond'])
+    expect(timePrecision('posix', '1.51.0', true)).toBe('nanosecond')
+  })
+
+  it('a time is stored cut or whole as that precision says', () => {
+    const t = 1_700_000_000 + 0.123456789
+    expect(storedTimeNs(t, 'posix', 'microsecond')).toBe(1700000000123456000n)
+    expect(storedTimeNs(t, 'posix', 'nanosecond')).toBe(1700000000123456716n)
+    expect(storedTimeNs(new Date(1700000000123), 'posix', 'nanosecond')).toBe(1700000000122999906n)
+    expect(storedTimeNs(t, 'windows')).toBe(1700000000123456000n)
   })
 })

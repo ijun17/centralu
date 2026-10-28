@@ -15,7 +15,11 @@ export const RUN_STOP_GRACE_MS = 2000
  * (`stop`), and the result says which (`ended`). Rejects only when the program could not be started.
  */
 export function runChild(
-  os: { processes: Pick<OsProcesses, 'stop'>; clock: OsClock; files: Pick<OsFiles, 'openSync' | 'closeSync'> },
+  os: {
+    processes: Pick<OsProcesses, 'stop'>
+    clock: OsClock
+    files: Pick<OsFiles, 'openSync' | 'closeSync'>
+  },
   start: (stdio: ['pipe' | 'ignore', 'pipe' | number, 'pipe']) => OsChild,
   options: Omit<RunOptions, 'cwd' | 'env'> = {},
 ): Promise<RunResult> {
@@ -73,7 +77,8 @@ export function runChild(
       timers.push(os.clock.setTimeout(() => done(() => resolve(result(code, signal))), CLOSE_AFTER_EXIT_MS))
     })
     child.once('close', (code, signal) => done(() => resolve(result(code, signal))))
-    if (options.timeoutMs !== undefined) timers.push(os.clock.setTimeout(() => stopFor('timeout'), options.timeoutMs))
+    if (options.timeoutMs !== undefined)
+      timers.push(os.clock.setTimeout(() => stopFor('timeout'), options.timeoutMs))
     if (options.signal) {
       if (options.signal.aborted) stopFor('aborted')
       else options.signal.addEventListener('abort', onAbort, { once: true })

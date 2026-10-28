@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { CONTRACT, memoryContext, outcome } from './contract.test-helpers.js'
+import { CONTRACT, expectedFor, memoryContext, outcome } from './contract.test-helpers.js'
 import { memoryOs, type MemoryOs, type ProgramContext } from './memory.js'
 import { forAll, name, recase, sameOnNtfs } from './property.test-helpers.js'
 import type { OsFamily } from './rules.js'
@@ -14,7 +14,8 @@ import { CLOSE_AFTER_EXIT_MS, RUN_STOP_GRACE_MS } from './run.js'
 const FAMILIES: OsFamily[] = ['windows', 'posix']
 
 /** A program that runs until it is ended */
-const waits = (ctx: ProgramContext) => new Promise<void>((resolve) => ctx.ended.addEventListener('abort', () => resolve()))
+const waits = (ctx: ProgramContext) =>
+  new Promise<void>((resolve) => ctx.ended.addEventListener('abort', () => resolve()))
 /** The same, saying `ready` first (the contract's waiter) */
 const waitsReady = (ctx: ProgramContext) => (ctx.stdout.write('ready'), waits(ctx))
 
@@ -31,7 +32,7 @@ describe('the in-memory OS answers the contract as each family does', () => {
         const os = fresh(family)
         const root = os.files.mkdtempSync(os.paths.path.join(os.env.temp, 'c-'))
         const got = await outcome(() => c.run(os, root, memoryContext(os)))
-        expect(got).toEqual(c.want[family])
+        expect(got).toEqual(expectedFor(c, family))
       })
     }
   }
@@ -54,8 +55,14 @@ describe('the in-memory OS answers the contract as each family does', () => {
     os.files.mkdirSync(join(t, 'd'), { recursive: true })
     os.files.symlinkSync(join(t, 'd'), join(t, 'j'), 'junction')
     os.files.symlinkSync(t, join(t, 'd', 'up'), 'junction')
-    expect(await outcome(() => (os.files.cpSync(t, join(os.env.temp, 'c'), { recursive: true }), 'ok'))).toBe('ok')
-    expect(await outcome(async () => (await os.files.promises.cp(t, join(os.env.temp, 'c2'), { recursive: true }), 'ok'))).toBe('ok')
+    expect(await outcome(() => (os.files.cpSync(t, join(os.env.temp, 'c'), { recursive: true }), 'ok'))).toBe(
+      'ok',
+    )
+    expect(
+      await outcome(
+        async () => (await os.files.promises.cp(t, join(os.env.temp, 'c2'), { recursive: true }), 'ok'),
+      ),
+    ).toBe('ok')
     expect(os.files.readlinkSync(join(os.env.temp, 'c', 'd', 'up'))).toBe(t)
   })
 
@@ -113,7 +120,9 @@ describe('names, by property', () => {
           expect(new Set(os.files.readdirSync(dir))).toEqual(new Set(written))
           names.forEach((n, i) => {
             const p = os.paths.path.join(dir, asked[i]!)
-            const owner = written.find((w) => (family === 'windows' ? sameOnNtfs(w, asked[i]!) : w === asked[i]))
+            const owner = written.find((w) =>
+              family === 'windows' ? sameOnNtfs(w, asked[i]!) : w === asked[i],
+            )
             expect(os.files.existsSync(p)).toBe(owner !== undefined)
             if (owner) {
               expect(os.files.readFileSync(p, 'utf8')).toBe(owner)
@@ -134,7 +143,11 @@ describe('names, by property', () => {
           const root = os.files.mkdtempSync(join(os.env.temp, 't-'))
           for (const [dir, file] of pairs) {
             // A name that is a folder already (or, on Windows, one in another case) is not written as a file
-            if (os.files.existsSync(join(root, 'src', dir, file)) && os.files.statSync(join(root, 'src', dir, file)).isDirectory()) continue
+            if (
+              os.files.existsSync(join(root, 'src', dir, file)) &&
+              os.files.statSync(join(root, 'src', dir, file)).isDirectory()
+            )
+              continue
             os.files.mkdirSync(join(root, 'src', dir), { recursive: true })
             os.files.writeFileSync(join(root, 'src', dir, file), `${dir}/${file}`)
           }
@@ -166,7 +179,12 @@ describe('processes in memory', () => {
         return 3
       })
       const r = await os.processes.run('echo', ['a', 'b'], { input: 'in' })
-      expect({ code: r.code, signal: r.signal, stdout: r.stdout.toString(), stderr: r.stderr.toString() }).toEqual({ code: 3, signal: null, stdout: 'a b:in', stderr: 'note' })
+      expect({
+        code: r.code,
+        signal: r.signal,
+        stdout: r.stdout.toString(),
+        stderr: r.stderr.toString(),
+      }).toEqual({ code: 3, signal: null, stdout: 'a b:in', stderr: 'note' })
       await expect(os.processes.run('nowhere', [])).rejects.toMatchObject({ code: 'ENOENT' })
     })
 
@@ -182,7 +200,9 @@ describe('processes in memory', () => {
       await os.clock.advance(3000)
       const r = await run
       expect(r.ended).toBe('timeout')
-      expect(r).toMatchObject(family === 'windows' ? { code: 1, signal: null } : { code: null, signal: 'SIGTERM' })
+      expect(r).toMatchObject(
+        family === 'windows' ? { code: 1, signal: null } : { code: null, signal: 'SIGTERM' },
+      )
     })
 
     it(`${family}: stop ends the tree: at once on Windows, TERM then KILL after the grace elsewhere`, async () => {
@@ -242,10 +262,16 @@ describe('processes in memory', () => {
     const dir = `${os.env.get('APPDATA')}\\npm`
     os.files.mkdirSync(`${dir}\\node_modules\\@openai\\codex\\bin`, { recursive: true })
     os.files.writeFileSync(`${dir}\\node_modules\\@openai\\codex\\bin\\codex.js`, '')
-    os.files.writeFileSync(`${dir}\\codex.cmd`, '@"%_prog%"  "%dp0%\\node_modules\\@openai\\codex\\bin\\codex.js" %*\r\n')
+    os.files.writeFileSync(
+      `${dir}\\codex.cmd`,
+      '@"%_prog%"  "%dp0%\\node_modules\\@openai\\codex\\bin\\codex.js" %*\r\n',
+    )
     os.env.set('PATH', `${os.env.get('PATH')};${dir}`)
     expect(os.tools.find('codex')).toBe(`${dir}\\codex.cmd`)
-    expect(os.tools.resolve('codex')).toEqual({ command: os.env.execPath, args: [`${dir}\\node_modules\\@openai\\codex\\bin\\codex.js`] })
+    expect(os.tools.resolve('codex')).toEqual({
+      command: os.env.execPath,
+      args: [`${dir}\\node_modules\\@openai\\codex\\bin\\codex.js`],
+    })
   })
 
   for (const family of FAMILIES) {
@@ -256,7 +282,9 @@ describe('processes in memory', () => {
       const pid = child.pid ?? 0
       expect(os.processes.signal(pid, 'SIGTERM')).toBe(true)
       // A process ended by pid from outside: code 1 on Windows, the signal on POSIX (the contract's signal case)
-      expect(await child.exited).toMatchObject(family === 'windows' ? { code: 1, signal: null } : { code: null, signal: 'SIGTERM' })
+      expect(await child.exited).toMatchObject(
+        family === 'windows' ? { code: 1, signal: null } : { code: null, signal: 'SIGTERM' },
+      )
       expect(os.processes.signal(pid, 'SIGTERM')).toBe(false)
     })
   }
@@ -348,14 +376,16 @@ describe('processes in memory', () => {
     const os = memoryOs({ as: 'posix' })
     // On TERM the root starts a helper that ignores TERM, then ends: the helper was not in the tree TERM was sent to
     os.programs.add('/usr/bin/helper', (ctx) => (ctx.onSignal((s) => s === 'SIGTERM'), waits(ctx)))
-    os.programs.add('/usr/bin/root', (ctx) =>
-      new Promise<void>((resolve) =>
-        ctx.onSignal(() => {
-          ctx.start('/usr/bin/helper', [])
-          setImmediate(resolve)
-          return true
-        }),
-      ),
+    os.programs.add(
+      '/usr/bin/root',
+      (ctx) =>
+        new Promise<void>((resolve) =>
+          ctx.onSignal(() => {
+            ctx.start('/usr/bin/helper', [])
+            setImmediate(resolve)
+            return true
+          }),
+        ),
     )
     const child = os.processes.start('root', [])
     await os.clock.advance(0)
@@ -370,20 +400,46 @@ describe('processes in memory', () => {
     const os = memoryOs({ as: 'windows' })
     const cmd = 'C:\\Windows\\System32\\cmd.exe'
     // cmd writes in the console's code page: 한 in code page 949 is C7 D1
-    os.programs.add(cmd, () => 0, { sync: ({ args }) => (args[0] === 'slow' ? { stdout: '', ms: 5000 } : args[0] === 'much' ? { stdout: 'x'.repeat(70_000) } : { stdout: Buffer.from([0xc7, 0xd1]) }) })
-    expect(os.processes.runSync(cmd, ['much'], { maxBuffer: 65_536 })).toMatchObject({ code: null, signal: 'SIGTERM', error: { code: 'ENOBUFS' } })
+    os.programs.add(cmd, () => 0, {
+      sync: ({ args }) =>
+        args[0] === 'slow'
+          ? { stdout: '', ms: 5000 }
+          : args[0] === 'much'
+            ? { stdout: 'x'.repeat(70_000) }
+            : { stdout: Buffer.from([0xc7, 0xd1]) },
+    })
+    expect(os.processes.runSync(cmd, ['much'], { maxBuffer: 65_536 })).toMatchObject({
+      code: null,
+      signal: 'SIGTERM',
+      error: { code: 'ENOBUFS' },
+    })
     expect(os.processes.runSync(cmd, ['much']).error).toBeUndefined()
-    expect(os.processes.runSync(cmd, ['slow'], { timeoutMs: 300 })).toMatchObject({ code: null, signal: 'SIGTERM', error: { code: 'ETIMEDOUT' } })
-    expect(os.processes.runSync(cmd, ['echo'], { encoding: 'buffer' }).stdout).toEqual(Buffer.from([0xc7, 0xd1]))
+    expect(os.processes.runSync(cmd, ['slow'], { timeoutMs: 300 })).toMatchObject({
+      code: null,
+      signal: 'SIGTERM',
+      error: { code: 'ETIMEDOUT' },
+    })
+    expect(os.processes.runSync(cmd, ['echo'], { encoding: 'buffer' }).stdout).toEqual(
+      Buffer.from([0xc7, 0xd1]),
+    )
     expect(os.processes.runSync(cmd, ['echo']).stdout).toBe('\ufffd\ufffd')
   })
 
   it('runSync answers a program that answers at once, and runShell goes through the shell', async () => {
     const os = memoryOs({ as: 'posix' })
-    os.programs.add('/usr/bin/ps', () => 0, { sync: ({ args }) => ({ stdout: `rows for ${args.join(' ')}` }) })
-    expect(os.processes.runSync('ps', ['-A'])).toEqual({ code: 0, signal: null, stdout: 'rows for -A', stderr: '' })
+    os.programs.add('/usr/bin/ps', () => 0, {
+      sync: ({ args }) => ({ stdout: `rows for ${args.join(' ')}` }),
+    })
+    expect(os.processes.runSync('ps', ['-A'])).toEqual({
+      code: 0,
+      signal: null,
+      stdout: 'rows for -A',
+      stderr: '',
+    })
     os.programs.add('/bin/sh', (ctx) => void ctx.stdout.write(ctx.args.join('|')))
-    expect((await os.processes.runShell('make setup && echo ok')).stdout.toString()).toBe('-c|make setup && echo ok')
+    expect((await os.processes.runShell('make setup && echo ok')).stdout.toString()).toBe(
+      '-c|make setup && echo ok',
+    )
   })
 })
 

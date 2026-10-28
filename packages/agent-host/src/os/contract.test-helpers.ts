@@ -1,6 +1,6 @@
 import type { Os, OsChild, OsError } from './port.js'
 import type { MemoryOs } from './memory.js'
-import type { OsFamily } from './rules.js'
+import { timePrecision, type OsFamily } from './rules.js'
 
 /**
  * What the in-memory OS must answer as the real one does (#1599, docs/plans/os-layer.md §7.1): each case runs on an
@@ -28,6 +28,11 @@ export type Contract = {
    * `real.test.ts` holds a Mac's real OS to it, and the in-memory OS (which models Linux) to `want.posix`
    */
   darwin?: unknown
+  /**
+   * The answer where the file system keeps nanoseconds, not `want`'s microseconds: `timePrecision` (the family, the
+   * OS and the running Node's libuv) says which applies, to the real OS and the in-memory one alike
+   */
+  nanoseconds?: unknown
   /** Needs the right to make a symlink, which a Windows account without Developer Mode lacks */
   symlinks?: boolean
   /**
@@ -36,6 +41,14 @@ export type Contract = {
    */
   linux?: boolean
   run(os: Os, root: string, ctx: ContractContext): unknown
+}
+
+/** What a case answers on a family, for the running Node: its `nanoseconds` where the file system keeps them, else `want` */
+export function expectedFor(c: Contract, family: OsFamily): unknown {
+  return c.nanoseconds !== undefined &&
+    timePrecision(family, undefined, process.platform === 'darwin') === 'nanosecond'
+    ? c.nanoseconds
+    : c.want[family]
 }
 
 export type ContractContext = {
@@ -53,7 +66,10 @@ export type ContractContext = {
 
 /** The contract's context on an in-memory OS: its waiter, a program that exits 0, and `cat` */
 export function memoryContext(os: MemoryOs): ContractContext {
-  const cat = os.paths.path.join(os.paths.path.dirname(os.env.execPath), os.family === 'windows' ? 'cat.exe' : 'cat')
+  const cat = os.paths.path.join(
+    os.paths.path.dirname(os.env.execPath),
+    os.family === 'windows' ? 'cat.exe' : 'cat',
+  )
   os.programs.add(cat, async (ctx) => {
     for await (const chunk of ctx.stdin) ctx.stdout.write(chunk)
   })
@@ -98,7 +114,12 @@ const err = (code: string) => ({ error: code })
  * The rest of the copy options case: a target through a file is the same refusal from both copies (Windows says no
  * entry there, so the copy fails making the parent; POSIX says ENOTDIR at once)
  */
-const OPTION_TAIL = { notRecursive: err('ERR_FS_EISDIR'), readOnlyFolder: 'k', throughFile: err('EEXIST'), throughFilePromised: err('EEXIST') }
+const OPTION_TAIL = {
+  notRecursive: err('ERR_FS_EISDIR'),
+  readOnlyFolder: 'k',
+  throughFile: err('EEXIST'),
+  throughFilePromised: err('EEXIST'),
+}
 const OPTION_TAIL_POSIX = { ...OPTION_TAIL, throughFile: err('ENOTDIR'), throughFilePromised: err('ENOTDIR') }
 
 export const CONTRACT: Contract[] = [
@@ -109,14 +130,35 @@ export const CONTRACT: Contract[] = [
       const p = os.paths.path.join(root, 'a.txt')
       os.files.writeFileSync(p, 'hé\n')
       const st = os.files.statSync(p)
-      return { text: os.files.readFileSync(p, 'utf8'), size: st.size, isFile: st.isFile(), list: os.files.readdirSync(root) }
+      return {
+        text: os.files.readFileSync(p, 'utf8'),
+        size: st.size,
+        isFile: st.isFile(),
+        list: os.files.readdirSync(root),
+      }
     },
   },
   {
     name: 'refusals on missing paths, folders and files',
     want: {
-      windows: [err('ENOENT'), err('EISDIR'), err('ENOTDIR'), err('ENOENT'), err('ENOENT'), err('EEXIST'), err('ENOENT')],
-      posix: [err('ENOENT'), err('EISDIR'), err('ENOTDIR'), err('ENOTDIR'), err('ENOENT'), err('EEXIST'), err('ENOENT')],
+      windows: [
+        err('ENOENT'),
+        err('EISDIR'),
+        err('ENOTDIR'),
+        err('ENOENT'),
+        err('ENOENT'),
+        err('EEXIST'),
+        err('ENOENT'),
+      ],
+      posix: [
+        err('ENOENT'),
+        err('EISDIR'),
+        err('ENOTDIR'),
+        err('ENOTDIR'),
+        err('ENOENT'),
+        err('EEXIST'),
+        err('ENOENT'),
+      ],
     },
     async run(os, root) {
       const { join } = os.paths.path
@@ -138,8 +180,24 @@ export const CONTRACT: Contract[] = [
     name: 'removing: each call on the wrong kind',
     linux: true,
     want: {
-      windows: [err('EPERM'), err('ENOENT'), err('ENOTEMPTY'), err('ERR_FS_EISDIR'), err('ENOENT'), 'ok', 'ok'],
-      posix: [err('EISDIR'), err('ENOTDIR'), err('ENOTEMPTY'), err('ERR_FS_EISDIR'), err('ENOENT'), 'ok', 'ok'],
+      windows: [
+        err('EPERM'),
+        err('ENOENT'),
+        err('ENOTEMPTY'),
+        err('ERR_FS_EISDIR'),
+        err('ENOENT'),
+        'ok',
+        'ok',
+      ],
+      posix: [
+        err('EISDIR'),
+        err('ENOTDIR'),
+        err('ENOTEMPTY'),
+        err('ERR_FS_EISDIR'),
+        err('ENOENT'),
+        'ok',
+        'ok',
+      ],
     },
     async run(os, root) {
       const { join } = os.paths.path
@@ -161,8 +219,24 @@ export const CONTRACT: Contract[] = [
   {
     name: 'renaming onto what is there',
     want: {
-      windows: { fileOntoFile: 'ok', text: 'a', fileOntoDir: err('EPERM'), dirOntoEmptyDir: err('EPERM'), dirOntoFullDir: err('EPERM'), missing: err('ENOENT'), intoMissing: err('ENOENT') },
-      posix: { fileOntoFile: 'ok', text: 'a', fileOntoDir: err('EISDIR'), dirOntoEmptyDir: 'ok', dirOntoFullDir: err('ENOTEMPTY'), missing: err('ENOENT'), intoMissing: err('ENOENT') },
+      windows: {
+        fileOntoFile: 'ok',
+        text: 'a',
+        fileOntoDir: err('EPERM'),
+        dirOntoEmptyDir: err('EPERM'),
+        dirOntoFullDir: err('EPERM'),
+        missing: err('ENOENT'),
+        intoMissing: err('ENOENT'),
+      },
+      posix: {
+        fileOntoFile: 'ok',
+        text: 'a',
+        fileOntoDir: err('EISDIR'),
+        dirOntoEmptyDir: 'ok',
+        dirOntoFullDir: err('ENOTEMPTY'),
+        missing: err('ENOENT'),
+        intoMissing: err('ENOENT'),
+      },
     },
     async run(os, root) {
       const { join } = os.paths.path
@@ -227,7 +301,15 @@ export const CONTRACT: Contract[] = [
   },
   {
     name: 'a link to a folder: a link to lstat and to the listing, the folder through it, removed alone',
-    want: both({ lstat: true, statDir: true, listed: { link: true, dir: false }, through: 'k', readlinkEnds: true, removed: 'ok', targetKept: true }),
+    want: both({
+      lstat: true,
+      statDir: true,
+      listed: { link: true, dir: false },
+      through: 'k',
+      readlinkEnds: true,
+      removed: 'ok',
+      targetKept: true,
+    }),
     run(os, root) {
       const { join } = os.paths.path
       const f = os.files
@@ -240,7 +322,10 @@ export const CONTRACT: Contract[] = [
         statDir: f.statSync(join(root, 'l')).isDirectory(),
         listed: { link: entry.isSymbolicLink(), dir: entry.isDirectory() },
         through: f.readFileSync(join(root, 'l', 'in'), 'utf8'),
-        readlinkEnds: f.readlinkSync(join(root, 'l')).replace(/[\\/]+$/, '').endsWith('t'),
+        readlinkEnds: f
+          .readlinkSync(join(root, 'l'))
+          .replace(/[\\/]+$/, '')
+          .endsWith('t'),
         removed: '',
         targetKept: false,
       }
@@ -256,7 +341,11 @@ export const CONTRACT: Contract[] = [
     async run(os, root) {
       const { join } = os.paths.path
       os.files.symlinkSync(join(root, 'gone'), join(root, 'l'), 'junction')
-      return { lstat: os.files.lstatSync(join(root, 'l')).isSymbolicLink(), exists: os.files.existsSync(join(root, 'l')), stat: await outcome(() => os.files.statSync(join(root, 'l'))) }
+      return {
+        lstat: os.files.lstatSync(join(root, 'l')).isSymbolicLink(),
+        exists: os.files.existsSync(join(root, 'l')),
+        stat: await outcome(() => os.files.statSync(join(root, 'l'))),
+      }
     },
   },
   {
@@ -268,13 +357,22 @@ export const CONTRACT: Contract[] = [
       os.files.mkdirSync(join(root, 't'))
       os.files.writeFileSync(join(root, 't', 'in'), 'k')
       os.files.symlinkSync(os.paths.path.join('t', 'in'), join(root, 's'), 'file')
-      return { read: os.files.readFileSync(join(root, 's'), 'utf8'), target: os.files.readlinkSync(join(root, 's')) }
+      return {
+        read: os.files.readFileSync(join(root, 's'), 'utf8'),
+        target: os.files.readlinkSync(join(root, 's')),
+      }
     },
   },
   {
     name: 'a file open in this process: renamed and deleted, but not replaced, nor its folder moved',
     want: {
-      windows: { renameOpen: 'ok', replaceOpen: err('EPERM'), moveFolder: err('EPERM'), unlinkOpen: 'ok', gone: false },
+      windows: {
+        renameOpen: 'ok',
+        replaceOpen: err('EPERM'),
+        moveFolder: err('EPERM'),
+        unlinkOpen: 'ok',
+        gone: false,
+      },
       posix: { renameOpen: 'ok', replaceOpen: 'ok', moveFolder: 'ok', unlinkOpen: 'ok', gone: false },
     },
     async run(os, root) {
@@ -310,13 +408,22 @@ export const CONTRACT: Contract[] = [
       f.mkdirSync(join(root, 'p', 'w'), { recursive: true })
       f.mkdirSync(join(root, 'q', 'w'), { recursive: true })
       f.mkdirSync(join(root, 'r', 'w'), { recursive: true })
-      const children = await Promise.all([ctx.waiter(join(root, 'p', 'w')), ctx.waiter(join(root, 'q', 'w')), ctx.waiter(join(root, 'r', 'w'))])
+      const children = await Promise.all([
+        ctx.waiter(join(root, 'p', 'w')),
+        ctx.waiter(join(root, 'q', 'w')),
+        ctx.waiter(join(root, 'r', 'w')),
+      ])
       try {
         const rename = await ok(() => f.renameSync(join(root, 'p', 'w'), join(root, 'p', 'w2')))
         const remove = await ok(() => f.rmSync(join(root, 'q', 'w'), { recursive: true }))
         const renameParent = await ok(() => f.renameSync(join(root, 'r'), join(root, 'r2')))
         const working = f.existsSync(join(root, 'p', 'w')) ? join(root, 'p', 'w') : join(root, 'p', 'w2')
-        return { rename, remove, renameParent, writeInside: await ok(() => f.writeFileSync(join(working, 'x'), '')) }
+        return {
+          rename,
+          remove,
+          renameParent,
+          writeInside: await ok(() => f.writeFileSync(join(working, 'x'), '')),
+        }
       } finally {
         await Promise.all(children.map((c) => os.processes.stop(c, 1000)))
       }
@@ -348,13 +455,20 @@ export const CONTRACT: Contract[] = [
     run(os, root) {
       const prefix = os.paths.path.join(root, 'x-')
       const made = os.files.mkdtempSync(prefix)
-      return { suffix: made.length - prefix.length, empty: os.files.readdirSync(made), dir: os.files.statSync(made).isDirectory() }
+      return {
+        suffix: made.length - prefix.length,
+        empty: os.files.readdirSync(made),
+        dir: os.files.statSync(made).isDirectory(),
+      }
     },
   },
   {
     name: 'a copy of a tree keeps a relative link as written',
     symlinks: true,
-    want: { windows: { file: 'k', link: 't\\in', whole: true }, posix: { file: 'k', link: 't/in', whole: true } },
+    want: {
+      windows: { file: 'k', link: 't\\in', whole: true },
+      posix: { file: 'k', link: 't/in', whole: true },
+    },
     run(os, root) {
       const { join } = os.paths.path
       const f = os.files
@@ -373,13 +487,20 @@ export const CONTRACT: Contract[] = [
   },
   {
     name: 'the same operations through promises',
-    want: { windows: { text: 'a', list: ['f'], missing: err('ENOENT') }, posix: { text: 'a', list: ['f'], missing: err('ENOENT') } },
+    want: {
+      windows: { text: 'a', list: ['f'], missing: err('ENOENT') },
+      posix: { text: 'a', list: ['f'], missing: err('ENOENT') },
+    },
     async run(os, root) {
       const { join } = os.paths.path
       const p = os.files.promises
       await p.mkdir(join(root, 'd'))
       await p.writeFile(join(root, 'd', 'f'), 'a')
-      return { text: await p.readFile(join(root, 'd', 'f'), 'utf8'), list: await p.readdir(join(root, 'd')), missing: await outcome(() => p.stat(join(root, 'nope'))) }
+      return {
+        text: await p.readFile(join(root, 'd', 'f'), 'utf8'),
+        list: await p.readdir(join(root, 'd')),
+        missing: await outcome(() => p.stat(join(root, 'nope'))),
+      }
     },
   },
   {
@@ -389,7 +510,10 @@ export const CONTRACT: Contract[] = [
       const { join, basename } = os.paths.path
       os.files.writeFileSync(join(root, 'Name.TXT'), 'x')
       os.files.renameSync(join(root, 'Name.TXT'), join(root, 'name.txt'))
-      return { list: os.files.readdirSync(root), native: basename(os.files.realpathNativeSync(join(root, 'name.txt'))) }
+      return {
+        list: os.files.readdirSync(root),
+        native: basename(os.files.realpathNativeSync(join(root, 'name.txt'))),
+      }
     },
   },
   {
@@ -433,7 +557,12 @@ export const CONTRACT: Contract[] = [
   },
   {
     name: 'a tree copied into itself is refused: as written, through a link in the target, past parents not made yet',
-    want: both({ copy: err('ERR_FS_CP_EINVAL'), viaLink: err('ERR_FS_CP_EINVAL'), deeper: err('ERR_FS_CP_EINVAL'), promised: err('ERR_FS_CP_EINVAL') }),
+    want: both({
+      copy: err('ERR_FS_CP_EINVAL'),
+      viaLink: err('ERR_FS_CP_EINVAL'),
+      deeper: err('ERR_FS_CP_EINVAL'),
+      promised: err('ERR_FS_CP_EINVAL'),
+    }),
     async run(os, root) {
       const { join } = os.paths.path
       os.files.mkdirSync(join(root, 's'))
@@ -441,11 +570,19 @@ export const CONTRACT: Contract[] = [
       // `l` leads to `s`: `l/in` is inside it too
       os.files.symlinkSync(join(root, 's'), join(root, 'l'), 'junction')
       return {
-        copy: await outcome(() => os.files.cpSync(join(root, 's'), join(root, 's', 'in'), { recursive: true })),
-        viaLink: await outcome(() => os.files.cpSync(join(root, 's'), join(root, 'l', 'in'), { recursive: true })),
+        copy: await outcome(() =>
+          os.files.cpSync(join(root, 's'), join(root, 's', 'in'), { recursive: true }),
+        ),
+        viaLink: await outcome(() =>
+          os.files.cpSync(join(root, 's'), join(root, 'l', 'in'), { recursive: true }),
+        ),
         // `l/a` and `l/a/b` are not there: Node stops at the first and copies into itself
-        deeper: await outcome(() => os.files.cpSync(join(root, 's'), join(root, 'l', 'a', 'b', 'c'), { recursive: true })),
-        promised: await outcome(() => os.files.promises.cp(join(root, 's'), join(root, 'l', 'a', 'b', 'c'), { recursive: true })),
+        deeper: await outcome(() =>
+          os.files.cpSync(join(root, 's'), join(root, 'l', 'a', 'b', 'c'), { recursive: true }),
+        ),
+        promised: await outcome(() =>
+          os.files.promises.cp(join(root, 's'), join(root, 'l', 'a', 'b', 'c'), { recursive: true }),
+        ),
       }
     },
   },
@@ -500,7 +637,16 @@ export const CONTRACT: Contract[] = [
         const unknownByPid = await outcome(() => os.processes.signal(c.pid ?? 0, NO_SUCH_SIGNAL))
         const quit = await sent(() => c.kill('SIGQUIT'), c)
         const termByPid = await sent(() => os.processes.signal(d.pid ?? 0, 'SIGTERM'), d)
-        return { hup, hupAlive, hupByPid, unknown, unknownByPid, quit, termByPid, gone: os.processes.signal(d.pid ?? 0, 'SIGTERM') }
+        return {
+          hup,
+          hupAlive,
+          hupByPid,
+          unknown,
+          unknownByPid,
+          quit,
+          termByPid,
+          gone: os.processes.signal(d.pid ?? 0, 'SIGTERM'),
+        }
       } finally {
         await Promise.all(children.map((child) => os.processes.stop(child, 1000)))
       }
@@ -509,8 +655,30 @@ export const CONTRACT: Contract[] = [
   {
     name: 'a read-only file: not written, opened to write, or copied onto; Windows refuses a rename onto it too',
     want: {
-      windows: { write: err('EPERM'), append: err('EPERM'), openToWrite: err('EPERM'), read: 'r', renameOnto: err('EPERM'), copyOnto: err('EPERM'), cpOnto: 'new', renameAway: 'ok', unlink: 'ok', madeReadOnly: err('EPERM') },
-      posix: { write: err('EACCES'), append: err('EACCES'), openToWrite: err('EACCES'), read: 'r', renameOnto: 'ok', copyOnto: err('EACCES'), cpOnto: 'new', renameAway: 'ok', unlink: 'ok', madeReadOnly: err('EACCES') },
+      windows: {
+        write: err('EPERM'),
+        append: err('EPERM'),
+        openToWrite: err('EPERM'),
+        read: 'r',
+        renameOnto: err('EPERM'),
+        copyOnto: err('EPERM'),
+        cpOnto: 'new',
+        renameAway: 'ok',
+        unlink: 'ok',
+        madeReadOnly: err('EPERM'),
+      },
+      posix: {
+        write: err('EACCES'),
+        append: err('EACCES'),
+        openToWrite: err('EACCES'),
+        read: 'r',
+        renameOnto: 'ok',
+        copyOnto: err('EACCES'),
+        cpOnto: 'new',
+        renameAway: 'ok',
+        unlink: 'ok',
+        madeReadOnly: err('EACCES'),
+      },
     },
     async run(os, root) {
       const { join } = os.paths.path
@@ -530,10 +698,20 @@ export const CONTRACT: Contract[] = [
         read: f.readFileSync(a, 'utf8'),
         renameOnto: await ok(() => f.renameSync(join(root, 'src'), readOnly('b'))),
         copyOnto: await ok(() => f.copyFileSync(join(root, 'a'), readOnly('c'))),
-        cpOnto: await outcome(() => (f.cpSync(join(root, f.existsSync(join(root, 'src')) ? 'src' : 'b'), readOnly('d')), f.readFileSync(join(root, 'd'), 'utf8'))),
+        cpOnto: await outcome(
+          () => (
+            f.cpSync(join(root, f.existsSync(join(root, 'src')) ? 'src' : 'b'), readOnly('d')),
+            f.readFileSync(join(root, 'd'), 'utf8')
+          ),
+        ),
         renameAway: await ok(() => f.renameSync(a, join(root, 'a2'))),
         unlink: await ok(() => f.unlinkSync(join(root, 'a2'))),
-        madeReadOnly: await ok(() => (f.writeFileSync(join(root, 'm'), '1', { mode: 0o400 }), f.writeFileSync(join(root, 'm'), '2'))),
+        madeReadOnly: await ok(
+          () => (
+            f.writeFileSync(join(root, 'm'), '1', { mode: 0o400 }),
+            f.writeFileSync(join(root, 'm'), '2')
+          ),
+        ),
       }
       // The temporary folder is removed after: nothing read-only is left in it
       for (const name of f.readdirSync(root)) f.chmodSync(join(root, name), 0o644)
@@ -548,7 +726,10 @@ export const CONTRACT: Contract[] = [
       os.files.writeFileSync(p, 'abc')
       const fd = os.files.openSync(p, 'r')
       try {
-        return { atEnd: os.files.readSync(fd, Buffer.alloc(4), 0, 4, 3), past: os.files.readSync(fd, Buffer.alloc(4), 0, 4, 100) }
+        return {
+          atEnd: os.files.readSync(fd, Buffer.alloc(4), 0, 4, 3),
+          past: os.files.readSync(fd, Buffer.alloc(4), 0, 4, 100),
+        }
       } finally {
         os.files.closeSync(fd)
       }
@@ -557,8 +738,22 @@ export const CONTRACT: Contract[] = [
   {
     name: 'refusals of a folder made through a file, a folder moved into itself, and copies onto the other kind or itself',
     want: {
-      windows: { mkdirThrough: err('ENOTDIR'), mkdirOnto: err('EEXIST'), renameInto: err('EPERM'), dirOntoFile: err('ERR_FS_CP_DIR_TO_NON_DIR'), fileOntoDir: err('ERR_FS_CP_NON_DIR_TO_DIR'), fileOntoItself: err('ERR_FS_CP_EINVAL') },
-      posix: { mkdirThrough: err('ENOTDIR'), mkdirOnto: err('EEXIST'), renameInto: err('EINVAL'), dirOntoFile: err('ERR_FS_CP_DIR_TO_NON_DIR'), fileOntoDir: err('ERR_FS_CP_NON_DIR_TO_DIR'), fileOntoItself: err('ERR_FS_CP_EINVAL') },
+      windows: {
+        mkdirThrough: err('ENOTDIR'),
+        mkdirOnto: err('EEXIST'),
+        renameInto: err('EPERM'),
+        dirOntoFile: err('ERR_FS_CP_DIR_TO_NON_DIR'),
+        fileOntoDir: err('ERR_FS_CP_NON_DIR_TO_DIR'),
+        fileOntoItself: err('ERR_FS_CP_EINVAL'),
+      },
+      posix: {
+        mkdirThrough: err('ENOTDIR'),
+        mkdirOnto: err('EEXIST'),
+        renameInto: err('EINVAL'),
+        dirOntoFile: err('ERR_FS_CP_DIR_TO_NON_DIR'),
+        fileOntoDir: err('ERR_FS_CP_NON_DIR_TO_DIR'),
+        fileOntoItself: err('ERR_FS_CP_EINVAL'),
+      },
     },
     async run(os, root) {
       const { join } = os.paths.path
@@ -596,21 +791,24 @@ export const CONTRACT: Contract[] = [
     },
   },
   {
-    name: 'file times keep whole microseconds, cut as each OS cuts them',
+    name: 'file times keep whole microseconds, cut or kept as libuv does',
     want: {
       windows: { seconds: '1700000000123456000', date: '1700000000123000000' },
       posix: { seconds: '1700000000123456000', date: '1700000000122999000' },
     },
-    // libuv cuts a time to whole microseconds on Linux only; on macOS APFS keeps the nanoseconds of the double it is
-    // given (measured on macOS 27, Node 26)
-    darwin: { seconds: '1700000000123456716', date: '1700000000122999906' },
+    // libuv decides (`timePrecision`): Linux cut to microseconds before libuv 1.52.0, which Node 24.22.1 ships; macOS kept
+    // the nanoseconds of the double it is given (measured on macOS 27, Node 26)
+    nanoseconds: { seconds: '1700000000123456716', date: '1700000000122999906' },
     run(os, root) {
       const { join } = os.paths.path
       os.files.writeFileSync(join(root, 'a'), '')
       os.files.writeFileSync(join(root, 'b'), '')
       os.files.utimesSync(join(root, 'a'), 1_700_000_000 + 0.123456789, 1_700_000_000 + 0.123456789)
       os.files.utimesSync(join(root, 'b'), new Date(1700000000123), new Date(1700000000123))
-      return { seconds: String(os.files.statSync(join(root, 'a')).mtimeNs), date: String(os.files.statSync(join(root, 'b')).mtimeNs) }
+      return {
+        seconds: String(os.files.statSync(join(root, 'a')).mtimeNs),
+        date: String(os.files.statSync(join(root, 'b')).mtimeNs),
+      }
     },
   },
   {
@@ -621,7 +819,10 @@ export const CONTRACT: Contract[] = [
       os.files.writeFileSync(join(root, 'h1'), 'h')
       os.files.linkSync(join(root, 'h1'), join(root, 'h2'))
       os.files.renameSync(join(root, 'h1'), join(root, 'h2'))
-      return { first: os.files.existsSync(join(root, 'h1')), nlink: os.files.statSync(join(root, 'h2')).nlink }
+      return {
+        first: os.files.existsSync(join(root, 'h1')),
+        nlink: os.files.statSync(join(root, 'h2')).nlink,
+      }
     },
   },
   {
@@ -639,10 +840,22 @@ export const CONTRACT: Contract[] = [
     name: 'a file named with a trailing separator: the file on Windows, ENOTDIR on POSIX',
     want: {
       windows: { stat: true, lstat: true, exists: true, read: 'x', write: 'ok' },
-      posix: { stat: err('ENOTDIR'), lstat: err('ENOTDIR'), exists: false, read: err('ENOTDIR'), write: err('EISDIR') },
+      posix: {
+        stat: err('ENOTDIR'),
+        lstat: err('ENOTDIR'),
+        exists: false,
+        read: err('ENOTDIR'),
+        write: err('EISDIR'),
+      },
     },
     // Darwin's open(2) with O_CREAT of `name/` that is not there answers ENOENT, Linux's EISDIR (measured on macOS 27)
-    darwin: { stat: err('ENOTDIR'), lstat: err('ENOTDIR'), exists: false, read: err('ENOTDIR'), write: err('ENOENT') },
+    darwin: {
+      stat: err('ENOTDIR'),
+      lstat: err('ENOTDIR'),
+      exists: false,
+      read: err('ENOTDIR'),
+      write: err('ENOENT'),
+    },
     async run(os, root) {
       const { join } = os.paths.path
       const f = `${join(root, 'f')}/`
@@ -684,9 +897,16 @@ export const CONTRACT: Contract[] = [
       f.symlinkSync(t, join(t, 'j'), 'junction')
       // Linux lists a folder in no order: each depth is sorted there; NTFS lists by name, as the want says
       const depth = (n: string) => n.split(/[\\/]/).length
-      const ordered = (names: string[]) => (os.traits.foldsPathCase ? names : [...names].sort((x, y) => depth(x) - depth(y) || (x < y ? -1 : x > y ? 1 : 0)))
-      const ents = f.readdirSync(t, { withFileTypes: true, recursive: true }).map((e) => ({ rel: join(relative(t, e.parentPath), e.name), parent: relative(t, e.parentPath) }))
-      const sortedEnts = os.traits.foldsPathCase ? ents : [...ents].sort((x, y) => depth(x.rel) - depth(y.rel) || (x.rel < y.rel ? -1 : 1))
+      const ordered = (names: string[]) =>
+        os.traits.foldsPathCase
+          ? names
+          : [...names].sort((x, y) => depth(x) - depth(y) || (x < y ? -1 : x > y ? 1 : 0))
+      const ents = f
+        .readdirSync(t, { withFileTypes: true, recursive: true })
+        .map((e) => ({ rel: join(relative(t, e.parentPath), e.name), parent: relative(t, e.parentPath) }))
+      const sortedEnts = os.traits.foldsPathCase
+        ? ents
+        : [...ents].sort((x, y) => depth(x.rel) - depth(y.rel) || (x.rel < y.rel ? -1 : 1))
       return {
         names: ordered(f.readdirSync(t, { recursive: true })),
         parents: sortedEnts.map((e) => e.parent),
@@ -710,7 +930,9 @@ export const CONTRACT: Contract[] = [
         copy: await outcome(() => (f.cpSync(t, join(root, 'copy'), { recursive: true }), 'ok')),
         kept: up('copy'),
         same: os.paths.same(f.readlinkSync(join(root, 'copy', 'd', 'up')), t),
-        promised: await outcome(async () => (await f.promises.cp(t, join(root, 'copy2'), { recursive: true }), 'ok')),
+        promised: await outcome(
+          async () => (await f.promises.cp(t, join(root, 'copy2'), { recursive: true }), 'ok'),
+        ),
         promisedKept: up('copy2'),
       }
     },
@@ -718,7 +940,15 @@ export const CONTRACT: Contract[] = [
   {
     name: 'with `links`, a link into the tree leads to the same place in the copy, where it will stand; one outside keeps its target',
     // carry.ts copies an app's data beside the new key and renames it in: a junction kept as written joined the two keys
-    want: both({ inside: true, written: 'n', oldWritten: false, outside: true, aliased: true, plain: true, promised: true }),
+    want: both({
+      inside: true,
+      written: 'n',
+      oldWritten: false,
+      outside: true,
+      aliased: true,
+      plain: true,
+      promised: true,
+    }),
     async run(os, root) {
       const { join } = os.paths.path
       const f = os.files
@@ -732,7 +962,11 @@ export const CONTRACT: Contract[] = [
       f.symlinkSync(t, join(root, 'alias'), 'junction')
       f.symlinkSync(join(root, 'alias', 'sub'), join(t, 'via'), 'junction')
       const final = join(root, 'final')
-      f.cpSync(t, join(root, 'tmp'), { recursive: true, verbatimSymlinks: true, links: { from: t, to: final } })
+      f.cpSync(t, join(root, 'tmp'), {
+        recursive: true,
+        verbatimSymlinks: true,
+        links: { from: t, to: final },
+      })
       f.renameSync(join(root, 'tmp'), final)
       f.writeFileSync(join(final, 'subj', 'new'), 'n')
       f.cpSync(t, join(root, 'plain'), { recursive: true, verbatimSymlinks: true })
@@ -791,11 +1025,22 @@ export const CONTRACT: Contract[] = [
         return t
       }
       // What each named link in the copy is (`''`: the copy itself), by `read`
-      const copyOf = async (t: string, names: string[], read: (link: string) => unknown, recursive = true) => {
+      const copyOf = async (
+        t: string,
+        names: string[],
+        read: (link: string) => unknown,
+        recursive = true,
+      ) => {
         const out = join(root, `out${n++}`)
         const copy = await outcome(() => (f.cpSync(t, out, { recursive }), 'ok'))
-        const result: Record<string, unknown> = { copy, links: names.map((name) => read(name === '' ? out : join(out, name))) }
-        if (recursive) result['promised'] = await outcome(async () => (await f.promises.cp(t, join(root, `out${n++}`), { recursive }), 'ok'))
+        const result: Record<string, unknown> = {
+          copy,
+          links: names.map((name) => read(name === '' ? out : join(out, name))),
+        }
+        if (recursive)
+          result['promised'] = await outcome(
+            async () => (await f.promises.cp(t, join(root, `out${n++}`), { recursive }), 'ok'),
+          )
         return result
       }
       // Made whole from the source's folder (no verbatimSymlinks): the name it leads to
@@ -830,7 +1075,12 @@ export const CONTRACT: Contract[] = [
   {
     name: 'a link that leads somewhere is copied as a link: a symlink back to its own folder, a junction, one to a file and one to nothing',
     symlinks: true,
-    want: both({ copy: 'ok', kept: { up: true, junction: true, file: true, dangling: true }, through: 'k', folderFiles: ['f'] }),
+    want: both({
+      copy: 'ok',
+      kept: { up: true, junction: true, file: true, dangling: true },
+      through: 'k',
+      folderFiles: ['f'],
+    }),
     async run(os, root) {
       const { join } = os.paths.path
       const f = os.files
@@ -846,7 +1096,12 @@ export const CONTRACT: Contract[] = [
       const kept = (...name: string[]) => f.lstatSync(join(root, 'out', ...name)).isSymbolicLink()
       return {
         copy,
-        kept: { up: kept('d', 'up'), junction: kept('junction'), file: kept('d', 'file'), dangling: kept('d', 'dangling') },
+        kept: {
+          up: kept('d', 'up'),
+          junction: kept('junction'),
+          file: kept('d', 'file'),
+          dangling: kept('d', 'dangling'),
+        },
         through: f.readFileSync(join(root, 'out', 'junction', 'f'), 'utf8'),
         folderFiles: f.readdirSync(join(root, 'out', 'd')).filter((n) => n === 'f'),
       }
@@ -857,8 +1112,28 @@ export const CONTRACT: Contract[] = [
     // `timesKept`: a plain copy keeps the change time where copying a file does: Windows' CopyFile; not Linux, nor macOS
     // (measured on APFS, Node 26)
     want: {
-      windows: { replaced: 'new', kept: 'old', refused: err('ERR_FS_CP_EEXIST'), times: true, timesKept: true, readOnlyTimes: true, linkOntoFile: err('EEXIST'), linkOntoLink: true, ...OPTION_TAIL },
-      posix: { replaced: 'new', kept: 'old', refused: err('ERR_FS_CP_EEXIST'), times: true, timesKept: false, readOnlyTimes: true, linkOntoFile: err('EEXIST'), linkOntoLink: true, ...OPTION_TAIL_POSIX },
+      windows: {
+        replaced: 'new',
+        kept: 'old',
+        refused: err('ERR_FS_CP_EEXIST'),
+        times: true,
+        timesKept: true,
+        readOnlyTimes: true,
+        linkOntoFile: err('EEXIST'),
+        linkOntoLink: true,
+        ...OPTION_TAIL,
+      },
+      posix: {
+        replaced: 'new',
+        kept: 'old',
+        refused: err('ERR_FS_CP_EEXIST'),
+        times: true,
+        timesKept: false,
+        readOnlyTimes: true,
+        linkOntoFile: err('EEXIST'),
+        linkOntoLink: true,
+        ...OPTION_TAIL_POSIX,
+      },
     },
     async run(os, root) {
       const { join } = os.paths.path
@@ -896,17 +1171,26 @@ export const CONTRACT: Contract[] = [
       const result = {
         replaced: read(replace),
         kept: read(keep),
-        refused: await outcome(() => f.cpSync(s, refuse, { recursive: true, force: false, errorOnExist: true })),
+        refused: await outcome(() =>
+          f.cpSync(s, refuse, { recursive: true, force: false, errorOnExist: true }),
+        ),
         times: mtime('t1', 'a') === 1_600_000_000_000,
         timesKept: mtime('t2', 'a') === 1_600_000_000_000,
         readOnlyTimes: mtime('t1', 'ro') === 1_600_000_000_000,
         linkOntoFile: await outcome(() => f.cpSync(l, join(root, 'lf'), { recursive: true })),
-        linkOntoLink: (f.cpSync(l, join(root, 'll'), { recursive: true }), os.paths.same(f.readlinkSync(join(root, 'll', 'j')), s)),
+        linkOntoLink:
+          (f.cpSync(l, join(root, 'll'), { recursive: true }),
+          os.paths.same(f.readlinkSync(join(root, 'll', 'j')), s)),
         notRecursive: await outcome(() => f.cpSync(s, join(root, 'nr'))),
         // A folder's mode is set once its entries are in: a read-only one is copied whole
-        readOnlyFolder: (f.chmodSync(ro, 0o555), f.cpSync(ro, join(root, 'rocopy'), { recursive: true }), f.readFileSync(join(root, 'rocopy', 'in'), 'utf8')),
+        readOnlyFolder:
+          (f.chmodSync(ro, 0o555),
+          f.cpSync(ro, join(root, 'rocopy'), { recursive: true }),
+          f.readFileSync(join(root, 'rocopy', 'in'), 'utf8')),
         throughFile: await outcome(() => f.cpSync(s, join(root, 'd1', 'a', 'x'), { recursive: true })),
-        throughFilePromised: await outcome(() => f.promises.cp(s, join(root, 'd1', 'a', 'x'), { recursive: true })),
+        throughFilePromised: await outcome(() =>
+          f.promises.cp(s, join(root, 'd1', 'a', 'x'), { recursive: true }),
+        ),
       }
       for (const p of [ro, join(root, 'rocopy')]) f.chmodSync(p, 0o755)
       // The temporary folder is removed after: nothing read-only is left in it
@@ -927,13 +1211,19 @@ export const CONTRACT: Contract[] = [
       // On Windows this is the file é; on POSIX a new one
       if (!os.files.existsSync(join(root, 'É'))) os.files.writeFileSync(join(root, 'É'), 'É')
       const list = os.files.readdirSync(root)
-      return { list: os.traits.foldsPathCase ? list : list.sort(), eAcute: os.files.readFileSync(join(root, 'É'), 'utf8') }
+      return {
+        list: os.traits.foldsPathCase ? list : list.sort(),
+        eAcute: os.files.readFileSync(join(root, 'É'), 'utf8'),
+      }
     },
   },
   {
     name: 'a path without an extension starts on Windows only as a .com or .exe; elsewhere only as written',
     // Whether it starts, not how it ends: a copy of Node made in a test ended by a signal on macOS 27 (code null)
-    want: { windows: { noExtension: err('ENOENT'), found: 'started' }, posix: { noExtension: 'started', found: err('ENOENT') } },
+    want: {
+      windows: { noExtension: err('ENOENT'), found: 'started' },
+      posix: { noExtension: 'started', found: err('ENOENT') },
+    },
     async run(os, root, ctx) {
       const { join } = os.paths.path
       ctx.program(join(root, 'noext'))

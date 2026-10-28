@@ -52,6 +52,8 @@ import {
   signalError,
   signalRefusal,
   storedTimeNs,
+  timePrecision,
+  type TimePrecision,
   traitsOf,
   type OsFamily,
 } from './rules.js'
@@ -133,7 +135,16 @@ export interface MemoryPrograms {
   add(path: string, program: Program, options?: { sync?: SyncProgram }): void
 }
 
-export type ProcessRow = { pid: number; ppid: number; pgid: number; command: string; args: readonly string[]; cwd: string; alive: boolean; exit: OsExit | null }
+export type ProcessRow = {
+  pid: number
+  ppid: number
+  pgid: number
+  command: string
+  args: readonly string[]
+  cwd: string
+  alive: boolean
+  exit: OsExit | null
+}
 
 export interface MemoryClock extends OsClock {
   /** Moves time on by `ms`, firing each timer that comes due in order, and letting what it starts run */
@@ -158,6 +169,8 @@ export type MemoryOsOptions = {
   symlinks?: boolean
   /** Variables set on top of the family's defaults (`undefined` removes one) */
   env?: Env
+  /** How finely `utimes` keeps a time. Default: as the running Node's libuv does it for the family (`timePrecision`) */
+  timePrecision?: TimePrecision
   /** When the clock starts, in ms since 1970 */
   now?: number
   /** The host's working folder (made if missing); default the home folder */
@@ -166,25 +179,67 @@ export type MemoryOsOptions = {
   sqlite?: (path: string, options: SqliteOptions) => Database.Database
 }
 
-type Meta = { ino: bigint; dev: bigint; perm: number; atimeNs: bigint; mtimeNs: bigint; ctimeNs: bigint; birthNs: bigint }
+type Meta = {
+  ino: bigint
+  dev: bigint
+  perm: number
+  atimeNs: bigint
+  mtimeNs: bigint
+  ctimeNs: bigint
+  birthNs: bigint
+}
 type FileNode = Meta & { kind: 'file'; data: Buffer; nlink: number }
-type DirNode = Meta & { kind: 'dir'; entries: Map<string, { name: string; node: Node }>; parent: DirNode | null }
+type DirNode = Meta & {
+  kind: 'dir'
+  entries: Map<string, { name: string; node: Node }>
+  parent: DirNode | null
+}
 type LinkNode = Meta & { kind: 'link'; target: string; junction: boolean }
 type Node = FileNode | DirNode | LinkNode
 
 /** Where a path leads: the folder it is in, its name there, and the node when there is one; `dirOnly` for `name/` on POSIX */
-type Found = { parent: DirNode; name: string; node: Node | undefined; native: string; given: string; dirOnly?: boolean }
+type Found = {
+  parent: DirNode
+  name: string
+  node: Node | undefined
+  native: string
+  given: string
+  dirOnly?: boolean
+}
 
 /** Characters Windows refuses in a name (measured: `a*b` is ENOENT to write or read, EINVAL to make a folder) */
-const refusedOnWindows = (name: string) => /[<>"|?*]/.test(name) || [...name].some((c) => c.charCodeAt(0) < 0x20)
+const refusedOnWindows = (name: string) =>
+  /[<>"|?*]/.test(name) || [...name].some((c) => c.charCodeAt(0) < 0x20)
 
 const LINK_HOPS = 40
 const STAT_FILE = 0o100000
 const STAT_DIR = 0o040000
 const STAT_LINK = 0o120000
 
-const WINDOWS_CONSTANTS: OsFileConstants = { O_RDONLY: 0, O_WRONLY: 1, O_RDWR: 2, O_CREAT: 256, O_EXCL: 1024, O_TRUNC: 512, O_APPEND: 8, O_NOFOLLOW: 0, O_NONBLOCK: 0, COPYFILE_EXCL: 1 }
-const POSIX_CONSTANTS: OsFileConstants = { O_RDONLY: 0, O_WRONLY: 1, O_RDWR: 2, O_CREAT: 64, O_EXCL: 128, O_TRUNC: 512, O_APPEND: 1024, O_NOFOLLOW: 131072, O_NONBLOCK: 2048, COPYFILE_EXCL: 1 }
+const WINDOWS_CONSTANTS: OsFileConstants = {
+  O_RDONLY: 0,
+  O_WRONLY: 1,
+  O_RDWR: 2,
+  O_CREAT: 256,
+  O_EXCL: 1024,
+  O_TRUNC: 512,
+  O_APPEND: 8,
+  O_NOFOLLOW: 0,
+  O_NONBLOCK: 0,
+  COPYFILE_EXCL: 1,
+}
+const POSIX_CONSTANTS: OsFileConstants = {
+  O_RDONLY: 0,
+  O_WRONLY: 1,
+  O_RDWR: 2,
+  O_CREAT: 64,
+  O_EXCL: 128,
+  O_TRUNC: 512,
+  O_APPEND: 1024,
+  O_NOFOLLOW: 131072,
+  O_NONBLOCK: 2048,
+  COPYFILE_EXCL: 1,
+}
 
 const MESSAGES: Record<string, string> = {
   ENOENT: 'no such file or directory',
@@ -203,7 +258,12 @@ const MESSAGES: Record<string, string> = {
 
 function fsError(code: string, syscall: string, path?: string, dest?: string): OsError {
   const where = path === undefined ? '' : ` '${path}'${dest === undefined ? '' : ` -> '${dest}'`}`
-  return Object.assign(new Error(`${code}: ${MESSAGES[code] ?? code}, ${syscall}${where}`), { code, syscall, ...(path === undefined ? {} : { path }), ...(dest === undefined ? {} : { dest }) })
+  return Object.assign(new Error(`${code}: ${MESSAGES[code] ?? code}, ${syscall}${where}`), {
+    code,
+    syscall,
+    ...(path === undefined ? {} : { path }),
+    ...(dest === undefined ? {} : { dest }),
+  })
 }
 
 /** One of Node's own errors (not an errno one) */
@@ -216,6 +276,7 @@ const later = (fn: () => void) => void setImmediate(fn)
 export function memoryOs(options: MemoryOsOptions): MemoryOs {
   const family = options.as
   const windows = family === 'windows'
+  const precision = options.timePrecision ?? timePrecision(family)
   const HOME = windows ? 'C:\\Users\\person' : '/home/person'
   const cwd = options.cwd ?? HOME
   // Relative paths are read from this OS's working folder, never from the one of the process running the tests
@@ -270,13 +331,24 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     const t = nowNs()
     return { ino: inoSeq++, dev, perm, atimeNs: t, mtimeNs: t, ctimeNs: t, birthNs: t }
   }
-  const newDir = (parent: DirNode | null, dev: bigint, perm = 0o755): DirNode => ({ ...meta(dev, perm), kind: 'dir', entries: new Map(), parent })
-  const newFile = (dev: bigint, data: Buffer, perm = 0o644): FileNode => ({ ...meta(dev, perm), kind: 'file', data, nlink: 1 })
+  const newDir = (parent: DirNode | null, dev: bigint, perm = 0o755): DirNode => ({
+    ...meta(dev, perm),
+    kind: 'dir',
+    entries: new Map(),
+    parent,
+  })
+  const newFile = (dev: bigint, data: Buffer, perm = 0o644): FileNode => ({
+    ...meta(dev, perm),
+    kind: 'file',
+    data,
+    nlink: 1,
+  })
 
   const roots = new Map<string, DirNode>()
   let devSeq = 1n
   if (windows) {
-    for (const letter of ['C', ...(options.volumes ?? [])]) roots.set(letter.toLowerCase(), newDir(null, devSeq++))
+    for (const letter of ['C', ...(options.volumes ?? [])])
+      roots.set(letter.toLowerCase(), newDir(null, devSeq++))
   }
   const posixRoot = newDir(null, devSeq++)
   if (!windows) roots.set('/', posixRoot)
@@ -324,28 +396,58 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     for (const [i, part] of parts.entries()) {
       const last = i === parts.length - 1
       if (part === '.') {
-        if (last) return { parent: dir.parent ?? dir, name: '.', node: dir, native: rootPath + native.join(P.sep), given: rootPath + given.join(P.sep) }
+        if (last)
+          return {
+            parent: dir.parent ?? dir,
+            name: '.',
+            node: dir,
+            native: rootPath + native.join(P.sep),
+            given: rootPath + given.join(P.sep),
+          }
         continue
       }
       if (part === '..') {
         dir = dir.parent ?? dir
         native.pop()
         given.pop()
-        if (last) return { parent: dir.parent ?? dir, name: '..', node: dir, native: rootPath + native.join(P.sep), given: rootPath + given.join(P.sep) }
+        if (last)
+          return {
+            parent: dir.parent ?? dir,
+            name: '..',
+            node: dir,
+            native: rootPath + native.join(P.sep),
+            given: rootPath + given.join(P.sep),
+          }
         continue
       }
       const entry = dir.entries.get(fold(part))
       if (!entry) {
-        if (last) return { parent: dir, name: part, node: undefined, native: rootPath + [...native, part].join(P.sep), given: rootPath + [...given, part].join(P.sep) }
+        if (last)
+          return {
+            parent: dir,
+            name: part,
+            node: undefined,
+            native: rootPath + [...native, part].join(P.sep),
+            given: rootPath + [...given, part].join(P.sep),
+          }
         throw fsError('ENOENT', syscall, p)
       }
       const node = entry.node
       if (node.kind === 'link' && (!last || follow)) {
         if (hops >= LINK_HOPS) throw fsError('ELOOP', syscall, p)
         const from = rootPath + native.join(P.sep)
-        const target = node.junction || P.isAbsolute(node.target) ? node.target : windows ? win32.resolve(from, node.target) : `${from}/${node.target}`
+        const target =
+          node.junction || P.isAbsolute(node.target)
+            ? node.target
+            : windows
+              ? win32.resolve(from, node.target)
+              : `${from}/${node.target}`
         const rest = parts.slice(i + 1)
-        const next = rest.length ? (windows ? win32.join(target, ...rest) : [target, ...rest].join(posix.sep)) : target
+        const next = rest.length
+          ? windows
+            ? win32.join(target, ...rest)
+            : [target, ...rest].join(posix.sep)
+          : target
         let found: Found
         try {
           found = lookup(next, follow, syscall, hops + 1)
@@ -353,13 +455,21 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
           const code = errorCode(e)
           throw code === 'ENOENT' || code === 'ENOTDIR' || code === 'ELOOP' ? fsError(code, syscall, p) : e
         }
-        if (node.junction && rest.length === 0 && found.node?.kind === 'file') throw fsError('ENOENT', syscall, p)
+        if (node.junction && rest.length === 0 && found.node?.kind === 'file')
+          throw fsError('ENOENT', syscall, p)
         if (rest.length === 0 && !found.node) throw fsError('ENOENT', syscall, p)
         return found
       }
       native.push(entry.name)
       given.push(part)
-      if (last) return { parent: dir, name: entry.name, node, native: rootPath + native.join(P.sep), given: rootPath + given.join(P.sep) }
+      if (last)
+        return {
+          parent: dir,
+          name: entry.name,
+          node,
+          native: rootPath + native.join(P.sep),
+          given: rootPath + given.join(P.sep),
+        }
       if (node.kind !== 'dir') throw fsError(windows ? 'ENOENT' : 'ENOTDIR', syscall, p)
       dir = node
     }
@@ -401,11 +511,18 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     }
     return false
   }
-  const heldBelow = (dir: DirNode) => below(dir, (n) => openFiles.has(n) || heldDirs.has(n) || watchedDirs.has(n) || runningFiles.has(n))
+  const heldBelow = (dir: DirNode) =>
+    below(dir, (n) => openFiles.has(n) || heldDirs.has(n) || watchedDirs.has(n) || runningFiles.has(n))
   const busyTree = (n: Node) => heldDirs.has(n) || (n.kind === 'dir' && below(n, (x) => heldDirs.has(x)))
 
   // ---- watches ----
-  type Watch = { dir: DirNode; recursive: boolean; listener: WatchListener; closed: boolean; errors: EventEmitter }
+  type Watch = {
+    dir: DirNode
+    recursive: boolean
+    listener: WatchListener
+    closed: boolean
+    errors: EventEmitter
+  }
   const watches = new Set<Watch>()
   const notify = (dir: DirNode, name: string, event: 'rename' | 'change') => {
     if (watches.size === 0) return
@@ -439,8 +556,25 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
   // ---- files ----
   const statOf = (n: Node): OsStats => {
     const type = n.kind === 'dir' ? STAT_DIR : n.kind === 'file' ? STAT_FILE : STAT_LINK
-    const perm = windows ? (n.kind === 'link' ? 0o666 : n.perm & 0o200 ? 0o666 : 0o444) : n.kind === 'link' ? 0o777 : n.perm
-    const size = n.kind === 'file' ? n.data.length : n.kind === 'dir' ? (windows ? 0 : 4096) : windows ? 0 : Buffer.byteLength(n.target)
+    const perm = windows
+      ? n.kind === 'link'
+        ? 0o666
+        : n.perm & 0o200
+          ? 0o666
+          : 0o444
+      : n.kind === 'link'
+        ? 0o777
+        : n.perm
+    const size =
+      n.kind === 'file'
+        ? n.data.length
+        : n.kind === 'dir'
+          ? windows
+            ? 0
+            : 4096
+          : windows
+            ? 0
+            : Buffer.byteLength(n.target)
     const ms = (ns: bigint) => Number(ns / 1_000_000n)
     return {
       isFile: () => n.kind === 'file',
@@ -449,7 +583,12 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
       size,
       mode: type | perm,
       uid: windows ? 0 : 1000,
-      nlink: n.kind === 'file' ? n.nlink : n.kind === 'dir' && !windows ? 2 + [...n.entries.values()].filter((e) => e.node.kind === 'dir').length : 1,
+      nlink:
+        n.kind === 'file'
+          ? n.nlink
+          : n.kind === 'dir' && !windows
+            ? 2 + [...n.entries.values()].filter((e) => e.node.kind === 'dir').length
+            : 1,
       dev: n.dev,
       ino: n.ino,
       atimeMs: ms(n.atimeNs),
@@ -468,7 +607,10 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     isSymbolicLink: () => n.kind === 'link',
   })
 
-  const sortedEntries = (dir: DirNode) => [...dir.entries.values()].sort((a, b) => (fold(a.name) < fold(b.name) ? -1 : fold(a.name) > fold(b.name) ? 1 : 0))
+  const sortedEntries = (dir: DirNode) =>
+    [...dir.entries.values()].sort((a, b) =>
+      fold(a.name) < fold(b.name) ? -1 : fold(a.name) > fold(b.name) ? 1 : 0,
+    )
 
   function readdir(p: string, o?: { withFileTypes?: boolean; recursive?: boolean }): string[] | OsDirent[] {
     const entriesOf = (dir: string): OsDirent[] => {
@@ -478,7 +620,9 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
       return sortedEntries(f.node).map((e) => dirent(e.name, e.node, dir))
     }
     // Breadth first and never into a link, by the one rule the real OS follows too
-    const listed = o?.recursive ? listRecursive(p, entriesOf, (...s) => P.join(...s)) : entriesOf(p).map((entry) => ({ rel: entry.name, entry }))
+    const listed = o?.recursive
+      ? listRecursive(p, entriesOf, (...s) => P.join(...s))
+      : entriesOf(p).map((entry) => ({ rel: entry.name, entry }))
     return o?.withFileTypes ? listed.map((e) => e.entry) : listed.map((e) => e.rel)
   }
 
@@ -490,7 +634,8 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     return Buffer.from(n.data)
   }
 
-  const bytes = (data: string | Uint8Array) => (typeof data === 'string' ? Buffer.from(data, 'utf8') : Buffer.from(data))
+  const bytes = (data: string | Uint8Array) =>
+    typeof data === 'string' ? Buffer.from(data, 'utf8') : Buffer.from(data)
 
   /**
    * A file without its owner's write bit cannot be written: on Windows that is the read-only attribute, `EPERM` (to
@@ -503,7 +648,11 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
   }
 
   /** The file at `p` for writing, made when missing; `exclusive` refuses one there */
-  function fileForWrite(p: string, syscall: string, o: { exclusive?: boolean; mode?: number; noFollow?: boolean } = {}): FileNode {
+  function fileForWrite(
+    p: string,
+    syscall: string,
+    o: { exclusive?: boolean; mode?: number; noFollow?: boolean } = {},
+  ): FileNode {
     const f = lookup(p, !o.noFollow, syscall)
     if (f.node) {
       if (o.exclusive) throw fsError('EEXIST', syscall, p)
@@ -607,7 +756,8 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     }
     const src = a.node
     // Into itself: Windows refuses with EPERM, Linux with EINVAL
-    if (src.kind === 'dir' && inside(src, b.parent)) throw fsError(windows ? 'EPERM' : 'EINVAL', 'rename', from, to)
+    if (src.kind === 'dir' && inside(src, b.parent))
+      throw fsError(windows ? 'EPERM' : 'EINVAL', 'rename', from, to)
     if (windows && src.kind === 'dir') {
       if (heldDirs.has(src)) throw fsError('EBUSY', 'rename', from, to)
       if (heldBelow(src)) throw fsError('EPERM', 'rename', from, to)
@@ -616,7 +766,8 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
       const dst = b.node
       if (windows) {
         if (dst.kind === 'dir') throw fsError('EPERM', 'rename', from, to)
-        if (openFiles.has(dst) || runningFiles.has(dst) || readOnly(dst)) throw fsError('EPERM', 'rename', from, to)
+        if (openFiles.has(dst) || runningFiles.has(dst) || readOnly(dst))
+          throw fsError('EPERM', 'rename', from, to)
       } else if (dst.kind === 'dir') {
         if (src.kind !== 'dir') throw fsError('EISDIR', 'rename', from, to)
         if (dst.entries.size > 0) throw fsError('ENOTEMPTY', 'rename', from, to)
@@ -658,7 +809,13 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
       throw fsError('ENOENT', 'lstat', p)
     }
     if (f.node.kind === 'dir') {
-      if (!o.recursive) throw nodeError('ERR_FS_EISDIR', `Path is a directory: rm returned EISDIR (is a directory) ${p}`, 'rm', p)
+      if (!o.recursive)
+        throw nodeError(
+          'ERR_FS_EISDIR',
+          `Path is a directory: rm returned EISDIR (is a directory) ${p}`,
+          'rm',
+          p,
+        )
       if (windows && busyTree(f.node)) throw fsError('EBUSY', 'rmdir', p)
       if (windows && below(f.node, (n) => runningFiles.has(n))) throw fsError('EPERM', 'unlink', p)
     } else if (windows && runningFiles.has(f.node)) throw fsError('EPERM', 'unlink', p)
@@ -670,7 +827,11 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     if (f.node) throw fsError('EEXIST', 'symlink', target, p)
     const junction = windows && kind === 'junction'
     if (windows && !junction && !canSymlink) throw fsError('EPERM', 'symlink', target, p)
-    const stored = junction ? win32.resolve(P.dirname(f.native), target) : windows ? target.replaceAll('/', '\\') : target
+    const stored = junction
+      ? win32.resolve(P.dirname(f.native), target)
+      : windows
+        ? target.replaceAll('/', '\\')
+        : target
     const n: LinkNode = { ...meta(f.parent.dev, 0o777), kind: 'link', target: stored, junction }
     link(f.parent, f.name, n)
   }
@@ -714,13 +875,20 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
 
   function utimes(p: string, atime: number | Date, mtime: number | Date) {
     const n = existing(p, true, 'utime')
-    n.atimeNs = storedTimeNs(atime, family)
-    n.mtimeNs = storedTimeNs(mtime, family)
+    n.atimeNs = storedTimeNs(atime, family, precision)
+    n.mtimeNs = storedTimeNs(mtime, family, precision)
   }
 
   // ---- descriptors ----
   const constants = windows ? WINDOWS_CONSTANTS : POSIX_CONSTANTS
-  type Fd = { node: FileNode | DirNode; read: boolean; write: boolean; append: boolean; pos: number; closed: boolean }
+  type Fd = {
+    node: FileNode | DirNode
+    read: boolean
+    write: boolean
+    append: boolean
+    pos: number
+    closed: boolean
+  }
   const fds = new Map<number, Fd>()
   let fdSeq = 3
   const FLAGS: Record<string, number> = {
@@ -745,12 +913,20 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
       if (!found.node) throw fsError('ENOENT', 'open', p)
       if (found.node.kind === 'link') throw fsError('ELOOP', 'open', p)
       // A folder opens (to fsync it); for writing too on Windows, not on POSIX. It reads as EISDIR
-      if (found.node.kind === 'dir' && !windows && access !== constants.O_RDONLY) throw fsError('EISDIR', 'open', p)
+      if (found.node.kind === 'dir' && !windows && access !== constants.O_RDONLY)
+        throw fsError('EISDIR', 'open', p)
       if (access !== constants.O_RDONLY) refuseReadOnly(found.node, 'open', p)
       node = found.node
     }
     const fd = fdSeq++
-    fds.set(fd, { node, read: access !== constants.O_WRONLY, write: access !== constants.O_RDONLY, append: (f & constants.O_APPEND) !== 0, pos: 0, closed: false })
+    fds.set(fd, {
+      node,
+      read: access !== constants.O_WRONLY,
+      write: access !== constants.O_RDONLY,
+      append: (f & constants.O_APPEND) !== 0,
+      pos: 0,
+      closed: false,
+    })
     // An open folder holds nothing on Windows: it is opened to share its deletion too
     if (node.kind === 'file') hold(openFiles, node)
     return fd
@@ -760,7 +936,13 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     if (!d || d.closed) throw fsError('EBADF', syscall)
     return d
   }
-  function readFd(fd: number, buffer: Uint8Array, offset: number, length: number, position: number | null): number {
+  function readFd(
+    fd: number,
+    buffer: Uint8Array,
+    offset: number,
+    length: number,
+    position: number | null,
+  ): number {
     const d = fdOf(fd, 'read')
     if (!d.read) throw fsError('EBADF', 'read')
     if (d.node.kind !== 'file') throw fsError('EISDIR', 'read')
@@ -834,7 +1016,10 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     return watcher
   }
 
-  function createReadStream(p: string, o: { encoding?: 'utf8'; start?: number; end?: number } = {}): Readable {
+  function createReadStream(
+    p: string,
+    o: { encoding?: 'utf8'; start?: number; end?: number } = {},
+  ): Readable {
     let done = false
     const stream = new Readable({
       encoding: o.encoding,
@@ -878,7 +1063,10 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
   }
   function readdirSync(p: string, o?: { recursive?: boolean }): string[]
   function readdirSync(p: string, o: { withFileTypes: true; recursive?: boolean }): OsDirent[]
-  function readdirSync(p: string, o?: { withFileTypes?: boolean; recursive?: boolean }): string[] | OsDirent[] {
+  function readdirSync(
+    p: string,
+    o?: { withFileTypes?: boolean; recursive?: boolean },
+  ): string[] | OsDirent[] {
     return readdir(p, o)
   }
   function readFileSync(p: string): Buffer
@@ -888,7 +1076,10 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
   }
   function readdirAsync(p: string, o?: { recursive?: boolean }): Promise<string[]>
   function readdirAsync(p: string, o: { withFileTypes: true; recursive?: boolean }): Promise<OsDirent[]>
-  function readdirAsync(p: string, o?: { withFileTypes?: boolean; recursive?: boolean }): Promise<string[] | OsDirent[]> {
+  function readdirAsync(
+    p: string,
+    o?: { withFileTypes?: boolean; recursive?: boolean },
+  ): Promise<string[] | OsDirent[]> {
     return syncly(() => readdir(p, o))
   }
   function readFileAsync(p: string): Promise<Buffer>
@@ -904,7 +1095,8 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
   const handle = (fd: number): OsFileHandle => ({
     fd,
     stat: () => syncly(() => fstat(fd)),
-    read: (buffer, offset, length, position) => syncly(() => ({ bytesRead: readFd(fd, buffer, offset, length, position) })),
+    read: (buffer, offset, length, position) =>
+      syncly(() => ({ bytesRead: readFd(fd, buffer, offset, length, position) })),
     write: (data) => syncly(() => void writeFd(fd, data)),
     chmod: (mode) => syncly(() => fchmod(fd, mode)),
     close: () => syncly(() => closeFd(fd)),
@@ -1011,22 +1203,28 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     set: setVar,
     home: HOME,
     get temp() {
-      return envValue(Object.fromEntries(vars), windows ? 'TEMP' : 'TMPDIR', family) ?? (windows ? `${HOME}\\AppData\\Local\\Temp` : '/tmp')
+      return (
+        envValue(Object.fromEntries(vars), windows ? 'TEMP' : 'TMPDIR', family) ??
+        (windows ? `${HOME}\\AppData\\Local\\Temp` : '/tmp')
+      )
     },
     execPath: windows ? 'C:\\Program Files\\nodejs\\node.exe' : '/usr/local/bin/node',
     username: 'person',
     cwd: () => cwd,
   }
   // The folders every machine of the family has
-  for (const dir of windows ? [HOME, env.temp, `${HOME}\\AppData\\Roaming`, 'C:\\Windows\\System32', 'C:\\Program Files\\nodejs', cwd] : [HOME, '/tmp', '/usr/bin', '/usr/local/bin', '/bin', '/dev', cwd]) {
+  for (const dir of windows
+    ? [HOME, env.temp, `${HOME}\\AppData\\Roaming`, 'C:\\Windows\\System32', 'C:\\Program Files\\nodejs', cwd]
+    : [HOME, '/tmp', '/usr/bin', '/usr/local/bin', '/bin', '/dev', cwd]) {
     mkdir(dir, { recursive: true })
   }
-  for (const v of options.volumes ?? []) if (!windows) {
-    mkdir(v, { recursive: true })
-    const f = lookup(v, false, 'mount')
-    const vol = newDir(f.parent, devSeq++)
-    f.parent.entries.set(fold(f.name), { name: f.name, node: vol })
-  }
+  for (const v of options.volumes ?? [])
+    if (!windows) {
+      mkdir(v, { recursive: true })
+      const f = lookup(v, false, 'mount')
+      const vol = newDir(f.parent, devSeq++)
+      f.parent.entries.set(fold(f.name), { name: f.name, node: vol })
+    }
   const devNull = windows ? '\\\\.\\nul' : '/dev/null'
 
   // ---- processes ----
@@ -1046,7 +1244,11 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
   const programKey = (path: string) => pathKey(path, family, cwd)
 
   /** The program file `command` names, as the OS would find it from `cwdPath` and `childEnv` */
-  function findProgram(command: string, cwdPath: string, childEnv: Env): { path: string } | { error: string } {
+  function findProgram(
+    command: string,
+    cwdPath: string,
+    childEnv: Env,
+  ): { path: string } | { error: string } {
     const isFile = (p: string) => {
       try {
         return existing(p, true, 'spawn').kind === 'file'
@@ -1060,9 +1262,11 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     else if (windows) {
       // Windows' process creation looks in the working folder first, then PATH (libuv's search_path)
       candidates.push(...withExts(win32.join(cwdPath, command)))
-      for (const dir of (envValue(childEnv, 'PATH', family) ?? '').split(';').filter(Boolean)) candidates.push(...withExts(win32.join(dir.replaceAll('"', ''), command)))
+      for (const dir of (envValue(childEnv, 'PATH', family) ?? '').split(';').filter(Boolean))
+        candidates.push(...withExts(win32.join(dir.replaceAll('"', ''), command)))
     } else {
-      for (const dir of (childEnv.PATH ?? '').split(':').filter(Boolean)) candidates.push(posix.join(dir, command))
+      for (const dir of (childEnv.PATH ?? '').split(':').filter(Boolean))
+        candidates.push(posix.join(dir, command))
     }
     for (const c of candidates) {
       if (!isFile(c)) continue
@@ -1168,7 +1372,16 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     const pid = pidSeq
     pidSeq += windows ? 4 : 1
     const contained = o.contained !== false
-    const row: ProcessRow = { pid, ppid, pgid: !windows && contained ? pid : parentGroup, command, args: [...args], cwd: cwdPath, alive: true, exit: null }
+    const row: ProcessRow = {
+      pid,
+      ppid,
+      pgid: !windows && contained ? pid : parentGroup,
+      command,
+      args: [...args],
+      cwd: cwdPath,
+      alive: true,
+      exit: null,
+    }
     table.push(row)
     child.pid = pid
 
@@ -1190,7 +1403,10 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     }
     // fd 1 and 2: a pipe to the host, a file, the parent program's own pipe (`'inherit'`), or nowhere
     const held: OutPipe[] = []
-    const outFor = (spec: OsStdio | undefined, inherited: OutPipe | undefined): { pipe: OutPipe; host: Readable | null } => {
+    const outFor = (
+      spec: OsStdio | undefined,
+      inherited: OutPipe | undefined,
+    ): { pipe: OutPipe; host: Readable | null } => {
       if (spec === 'inherit' && inherited) {
         held.push(holdPipe(inherited))
         return { pipe: inherited, host: null }
@@ -1240,7 +1456,8 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
           release(runningFiles, programNode)
         }
         // Input it never read: the host's write fails as a write to a closed pipe does (EPIPE)
-        if (programStdin.writableLength > 0) programStdin.destroy(Object.assign(new Error('write EPIPE'), { code: 'EPIPE', syscall: 'write' }))
+        if (programStdin.writableLength > 0)
+          programStdin.destroy(Object.assign(new Error('write EPIPE'), { code: 'EPIPE', syscall: 'write' }))
         for (const pipe of held) releasePipe(pipe)
         extra?.end()
         child.exitCode = exit.code
@@ -1282,7 +1499,8 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
         .then(
           (code) => proc.terminate({ code: typeof code === 'number' ? code : 0, signal: null }),
           (e: unknown) => {
-            if (row.alive && !err.pipe.stream.writableEnded) err.pipe.stream.write(String(asError(e).stack ?? e))
+            if (row.alive && !err.pipe.stream.writableEnded)
+              err.pipe.stream.write(String(asError(e).stack ?? e))
             proc.terminate({ code: 1, signal: null })
           },
         )
@@ -1330,7 +1548,8 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
       // Its group is swept once it has gone: TERM, then KILL after the grace
       const left = [...procs.values()].filter((p) => p.row.alive && p.row.pgid === root.row.pid)
       for (const p of left) deliver(p, 'SIGTERM')
-      if (left.length) clock.setTimeout(() => left.forEach((p) => p.row.alive && deliver(p, 'SIGKILL')), graceMs)
+      if (left.length)
+        clock.setTimeout(() => left.forEach((p) => p.row.alive && deliver(p, 'SIGKILL')), graceMs)
     }
     return { code: exit.code, signal: exit.signal }
   }
@@ -1339,37 +1558,93 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
    * As Node's `spawnSync`: past `maxBuffer` on either stream (default 1 MiB) it answers `ENOBUFS` with what was
    * written, and past `timeoutMs` (the program's `ms`) `ETIMEDOUT`; both as ended by SIGTERM
    */
-  function runSync(command: string, args: readonly string[], o?: RunSyncOptions & { encoding?: 'utf8' }): RunSyncResult
-  function runSync(command: string, args: readonly string[], o: RunSyncOptions & { encoding: 'buffer' }): RunSyncResult<Buffer>
-  function runSync(command: string, args: readonly string[], o: RunSyncOptions = {}): RunSyncResult<string | Buffer> {
+  function runSync(
+    command: string,
+    args: readonly string[],
+    o?: RunSyncOptions & { encoding?: 'utf8' },
+  ): RunSyncResult
+  function runSync(
+    command: string,
+    args: readonly string[],
+    o: RunSyncOptions & { encoding: 'buffer' },
+  ): RunSyncResult<Buffer>
+  function runSync(
+    command: string,
+    args: readonly string[],
+    o: RunSyncOptions = {},
+  ): RunSyncResult<string | Buffer> {
     const text = (b: Buffer) => (o.encoding === 'buffer' ? b : b.toString('utf8'))
     const cwdPath = o.cwd ?? env.cwd()
     const found = findProgram(command, cwdPath, o.env ?? env.all())
-    if ('error' in found) return { code: null, signal: null, stdout: text(Buffer.alloc(0)), stderr: text(Buffer.alloc(0)), error: fsError(found.error, `spawnSync ${command}`, command) }
+    if ('error' in found)
+      return {
+        code: null,
+        signal: null,
+        stdout: text(Buffer.alloc(0)),
+        stderr: text(Buffer.alloc(0)),
+        error: fsError(found.error, `spawnSync ${command}`, command),
+      }
     const entry = programs.get(programKey(found.path))
-    if (!entry?.sync) throw new Error(`memoryOs: ${found.path} has no answer for runSync (programs.add(path, program, { sync }))`)
-    const input = o.input === undefined ? '' : typeof o.input === 'string' ? o.input : Buffer.from(o.input).toString('utf8')
+    if (!entry?.sync)
+      throw new Error(
+        `memoryOs: ${found.path} has no answer for runSync (programs.add(path, program, { sync }))`,
+      )
+    const input =
+      o.input === undefined
+        ? ''
+        : typeof o.input === 'string'
+          ? o.input
+          : Buffer.from(o.input).toString('utf8')
     const r = entry.sync({ args, cwd: cwdPath, env: o.env ?? env.all(), input })
     const pid = pidSeq
     pidSeq += windows ? 4 : 1
     const stdout = bytes(r.stdout ?? '')
     const stderr = bytes(r.stderr ?? '')
     const max = o.maxBuffer ?? SYNC_MAX_BUFFER
-    const failed = o.timeoutMs !== undefined && (r.ms ?? 0) > o.timeoutMs ? 'ETIMEDOUT' : stdout.length > max || stderr.length > max ? 'ENOBUFS' : null
+    const failed =
+      o.timeoutMs !== undefined && (r.ms ?? 0) > o.timeoutMs
+        ? 'ETIMEDOUT'
+        : stdout.length > max || stderr.length > max
+          ? 'ENOBUFS'
+          : null
     const exit: OsExit = failed ? { code: null, signal: 'SIGTERM' } : { code: r.code ?? 0, signal: null }
-    table.push({ pid, ppid: HOST_PID, pgid: HOST_PID, command, args: [...args], cwd: cwdPath, alive: false, exit })
-    return { ...exit, stdout: text(stdout), stderr: text(stderr), ...(failed ? { error: fsError(failed, `spawnSync ${command}`, command) } : {}) }
+    table.push({
+      pid,
+      ppid: HOST_PID,
+      pgid: HOST_PID,
+      command,
+      args: [...args],
+      cwd: cwdPath,
+      alive: false,
+      exit,
+    })
+    return {
+      ...exit,
+      stdout: text(stdout),
+      stderr: text(stderr),
+      ...(failed ? { error: fsError(failed, `spawnSync ${command}`, command) } : {}),
+    }
   }
 
-  const shell = (line: string): [string, string[]] => (windows ? [commandInterpreter(env.all()), ['/d', '/s', '/c', line]] : ['/bin/sh', ['-c', line]])
+  const shell = (line: string): [string, string[]] =>
+    windows ? [commandInterpreter(env.all()), ['/d', '/s', '/c', line]] : ['/bin/sh', ['-c', line]]
 
   const processes: OsProcesses = {
     start: (command, args, o = {}) => startProcess(command, args, o, HOST_PID, HOST_PID),
-    run: (command, args, o = {}) => runChild({ processes: { stop }, clock, files }, (stdio) => processes.start(command, args, { cwd: o.cwd, env: o.env, stdio }), o),
+    run: (command, args, o = {}) =>
+      runChild(
+        { processes: { stop }, clock, files },
+        (stdio) => processes.start(command, args, { cwd: o.cwd, env: o.env, stdio }),
+        o,
+      ),
     runSync,
     runShell: (line, o = {}) => {
       const [command, args] = shell(line)
-      return runChild({ processes: { stop }, clock, files }, (stdio) => processes.start(command, args, { cwd: o.cwd, env: o.env, stdio }), o)
+      return runChild(
+        { processes: { stop }, clock, files },
+        (stdio) => processes.start(command, args, { cwd: o.cwd, env: o.env, stdio }),
+        o,
+      )
     },
     stop,
     alive: (pid) => pid === HOST_PID || procs.get(pid)?.row.alive === true,
@@ -1408,14 +1683,29 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     tools: {
       find: (name) => findOnPath(name, env.all(), family, launchDeps().exists),
       program: (name) =>
-        programFor(name, family, (n, pathExt) => findOnPath(n, pathExt ? { ...env.all(), PATHEXT: pathExt } : env.all(), family, launchDeps().exists), (p) => launchFor(p, launchDeps()), env.all()).path,
+        programFor(
+          name,
+          family,
+          (n, pathExt) =>
+            findOnPath(
+              n,
+              pathExt ? { ...env.all(), PATHEXT: pathExt } : env.all(),
+              family,
+              launchDeps().exists,
+            ),
+          (p) => launchFor(p, launchDeps()),
+          env.all(),
+        ).path,
       resolve: (command, o = {}) => resolveCommand(command, o.env ?? env.all(), launchDeps(), o.cwd),
     },
     env,
     clock,
     sqlite: {
       open: (path, o = {}) => {
-        if (!options.sqlite) throw Object.assign(new Error('memoryOs: no SQLite engine was given (memoryOs({ sqlite }))'), { code: 'ENOSYS' })
+        if (!options.sqlite)
+          throw Object.assign(new Error('memoryOs: no SQLite engine was given (memoryOs({ sqlite }))'), {
+            code: 'ENOSYS',
+          })
         return options.sqlite(path, o)
       },
     },

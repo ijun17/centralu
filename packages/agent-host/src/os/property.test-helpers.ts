@@ -65,8 +65,18 @@ const CASE_PAIRS: ReadonlyArray<readonly [string, string]> = [
   ['ß', 'ß'],
   ['µ', 'µ'],
 ]
-const OTHER_CASE = new Map<string, string>(CASE_PAIRS.flatMap(([lo, up]): Array<[string, string]> => [[lo, up], [up, lo]]))
-const FOLDED = new Map<string, string>(CASE_PAIRS.flatMap(([lo, up]): Array<[string, string]> => [[lo, lo], [up, lo]]))
+const OTHER_CASE = new Map<string, string>(
+  CASE_PAIRS.flatMap(([lo, up]): Array<[string, string]> => [
+    [lo, up],
+    [up, lo],
+  ]),
+)
+const FOLDED = new Map<string, string>(
+  CASE_PAIRS.flatMap(([lo, up]): Array<[string, string]> => [
+    [lo, lo],
+    [up, lo],
+  ]),
+)
 
 /**
  * A file name: letters in both cases, digits, a few signs and other scripts, and letters NTFS does not fold although

@@ -7,7 +7,13 @@ import type { Readable, Writable } from 'node:stream'
 import { devNull, homedir, tmpdir, userInfo } from 'node:os'
 import { join } from 'node:path'
 import { stopTree } from '../dev-services/kill-tree.js'
-import { killHandle, spawnGrouped, sweepLeftovers, tracked, type GroupedChild } from '../dev-services/grouped-child.js'
+import {
+  killHandle,
+  spawnGrouped,
+  sweepLeftovers,
+  tracked,
+  type GroupedChild,
+} from '../dev-services/grouped-child.js'
 import { whichTool } from '../env-path.js'
 import { HOST_PLATFORM, familyOf, pathsOf, traitsFor } from '../os.js'
 import { programPath, resolveCommand } from '../tool-launch.js'
@@ -98,7 +104,9 @@ const constants = {
 const handle = (h: fsp.FileHandle): OsFileHandle => ({
   fd: h.fd,
   stat: async () => toStats(await h.stat({ bigint: true })),
-  read: async (buffer, offset, length, position) => ({ bytesRead: (await h.read(buffer, offset, length, position)).bytesRead }),
+  read: async (buffer, offset, length, position) => ({
+    bytesRead: (await h.read(buffer, offset, length, position)).bytesRead,
+  }),
   write: async (data) => void (typeof data === 'string' ? await h.write(data) : await h.write(data)),
   chmod: (mode) => h.chmod(mode),
   close: () => h.close(),
@@ -122,7 +130,10 @@ function readdirRecursiveSync(p: string, withFileTypes: boolean): string[] | OsD
 
 function readdirAsync(p: string, o?: { recursive?: boolean }): Promise<string[]>
 function readdirAsync(p: string, o: { withFileTypes: true; recursive?: boolean }): Promise<OsDirent[]>
-function readdirAsync(p: string, o?: { withFileTypes?: boolean; recursive?: boolean }): Promise<string[] | OsDirent[]> {
+function readdirAsync(
+  p: string,
+  o?: { withFileTypes?: boolean; recursive?: boolean },
+): Promise<string[] | OsDirent[]> {
   if (o?.recursive) return readdirRecursiveAsync(p, !!o.withFileTypes)
   return o?.withFileTypes ? fsp.readdir(p, { withFileTypes: true }) : fsp.readdir(p, { encoding: 'utf8' })
 }
@@ -173,7 +184,9 @@ function readdirSync(p: string, o?: { recursive?: boolean }): string[]
 function readdirSync(p: string, o: { withFileTypes: true; recursive?: boolean }): OsDirent[]
 function readdirSync(p: string, o?: { withFileTypes?: boolean; recursive?: boolean }): string[] | OsDirent[] {
   if (o?.recursive) return readdirRecursiveSync(p, !!o.withFileTypes)
-  return o?.withFileTypes ? fs.readdirSync(p, { withFileTypes: true }) : fs.readdirSync(p, { encoding: 'utf8' })
+  return o?.withFileTypes
+    ? fs.readdirSync(p, { withFileTypes: true })
+    : fs.readdirSync(p, { encoding: 'utf8' })
 }
 function readFileSync(p: string): Buffer
 function readFileSync(p: string, encoding: 'utf8'): string
@@ -212,7 +225,10 @@ const files: OsFiles = {
   fchmodSync: (fd, mode) => fs.fchmodSync(fd, mode),
   closeSync: (fd) => fs.closeSync(fd),
   createReadStream: (p, o) => fs.createReadStream(p, o),
-  watch: (p, o, listener: WatchListener) => fs.watch(p, { recursive: o.recursive }, (event, name) => listener(event, name === null ? null : String(name))),
+  watch: (p, o, listener: WatchListener) =>
+    fs.watch(p, { recursive: o.recursive }, (event, name) =>
+      listener(event, name === null ? null : String(name)),
+    ),
   promises,
 }
 
@@ -250,7 +266,9 @@ class RealChild extends EventEmitter implements OsChild {
         this.emit('exit', code, signal)
         resolve({ code, signal })
       })
-      node.once('close', (code: number | null, signal: NodeJS.Signals | null) => this.emit('close', code, signal))
+      node.once('close', (code: number | null, signal: NodeJS.Signals | null) =>
+        this.emit('close', code, signal),
+      )
       node.on('error', (e) => {
         const error = asOsError(e)
         this.emit('error', error)
@@ -306,7 +324,8 @@ function asChild(start: () => GroupedChild): RealChild {
   }
 }
 
-const stdioFor = (stdio: readonly OsStdio[] | undefined): StdioOptions => (stdio ? [...stdio] : ['pipe', 'pipe', 'pipe'])
+const stdioFor = (stdio: readonly OsStdio[] | undefined): StdioOptions =>
+  stdio ? [...stdio] : ['pipe', 'pipe', 'pipe']
 
 /**
  * The shell a command line goes through, as the in-memory OS names it: on Windows ComSpec when it is a full path, else
@@ -316,7 +335,13 @@ const shellFor = (env: Env): string => (HOST_FAMILY === 'windows' ? commandInter
 
 function start(command: string, args: readonly string[], o: StartOptions = {}, shell = false): RealChild {
   const env = o.env ?? process.env
-  const options: SpawnOptions = { cwd: o.cwd, env, stdio: stdioFor(o.stdio), shell: shell ? shellFor(env) : false, windowsHide: true }
+  const options: SpawnOptions = {
+    cwd: o.cwd,
+    env,
+    stdio: stdioFor(o.stdio),
+    shell: shell ? shellFor(env) : false,
+    windowsHide: true,
+  }
   if (o.contained === false) {
     return asChild(() => {
       const spawnedAt = Date.now()
@@ -327,7 +352,8 @@ function start(command: string, args: readonly string[], o: StartOptions = {}, s
 }
 
 async function stop(child: OsChild, graceMs: number): Promise<OsExit> {
-  if (!(child instanceof RealChild)) throw new TypeError('realOs().processes.stop: a child the real OS started')
+  if (!(child instanceof RealChild))
+    throw new TypeError('realOs().processes.stop: a child the real OS started')
   const node = child.node
   const running = () => node !== null && node.exitCode === null && node.signalCode === null
   if (node?.pid !== undefined && running()) stopTree(killHandle(node), graceMs, running)
@@ -337,9 +363,21 @@ async function stop(child: OsChild, graceMs: number): Promise<OsExit> {
   return { code: exit.code, signal: exit.signal }
 }
 
-function runSync(command: string, args: readonly string[], o?: RunSyncOptions & { encoding?: 'utf8' }): RunSyncResult
-function runSync(command: string, args: readonly string[], o: RunSyncOptions & { encoding: 'buffer' }): RunSyncResult<Buffer>
-function runSync(command: string, args: readonly string[], o: RunSyncOptions = {}): RunSyncResult<string | Buffer> {
+function runSync(
+  command: string,
+  args: readonly string[],
+  o?: RunSyncOptions & { encoding?: 'utf8' },
+): RunSyncResult
+function runSync(
+  command: string,
+  args: readonly string[],
+  o: RunSyncOptions & { encoding: 'buffer' },
+): RunSyncResult<Buffer>
+function runSync(
+  command: string,
+  args: readonly string[],
+  o: RunSyncOptions = {},
+): RunSyncResult<string | Buffer> {
   const r = spawnSync(command, [...args], {
     cwd: o.cwd,
     env: o.env ?? process.env,
@@ -348,8 +386,15 @@ function runSync(command: string, args: readonly string[], o: RunSyncOptions = {
     maxBuffer: o.maxBuffer,
     windowsHide: true,
   })
-  const text = (b: Buffer | null) => (o.encoding === 'buffer' ? (b ?? Buffer.alloc(0)) : (b ?? Buffer.alloc(0)).toString('utf8'))
-  return { code: r.status, signal: r.signal, stdout: text(r.stdout), stderr: text(r.stderr), ...(r.error ? { error: asOsError(r.error) } : {}) }
+  const text = (b: Buffer | null) =>
+    o.encoding === 'buffer' ? (b ?? Buffer.alloc(0)) : (b ?? Buffer.alloc(0)).toString('utf8')
+  return {
+    code: r.status,
+    signal: r.signal,
+    stdout: text(r.stdout),
+    stderr: text(r.stderr),
+    ...(r.error ? { error: asOsError(r.error) } : {}),
+  }
 }
 
 const family = HOST_FAMILY
@@ -384,9 +429,19 @@ const realOsValue: Os = {
   },
   processes: {
     start: (command, args, o) => start(command, args, o),
-    run: (command, args, o = {}) => runChild({ processes: { stop }, clock, files }, (stdio) => start(command, args, { cwd: o.cwd, env: o.env, stdio }), o),
+    run: (command, args, o = {}) =>
+      runChild(
+        { processes: { stop }, clock, files },
+        (stdio) => start(command, args, { cwd: o.cwd, env: o.env, stdio }),
+        o,
+      ),
     runSync,
-    runShell: (line, o = {}) => runChild({ processes: { stop }, clock, files }, (stdio) => start(line, [], { cwd: o.cwd, env: o.env, stdio }, true), o),
+    runShell: (line, o = {}) =>
+      runChild(
+        { processes: { stop }, clock, files },
+        (stdio) => start(line, [], { cwd: o.cwd, env: o.env, stdio }, true),
+        o,
+      ),
     stop,
     alive: (pid) => {
       try {
@@ -444,7 +499,8 @@ const realOsValue: Os = {
   },
   clock,
   sqlite: {
-    open: (path, o = {}) => new Database(path, { readonly: o.readonly, fileMustExist: o.fileMustExist, timeout: o.timeout }),
+    open: (path, o = {}) =>
+      new Database(path, { readonly: o.readonly, fileMustExist: o.fileMustExist, timeout: o.timeout }),
   },
   traits,
 }
@@ -453,4 +509,3 @@ const realOsValue: Os = {
 export function realOs(): Os {
   return realOsValue
 }
-
