@@ -20,7 +20,7 @@ import { bridgeRefusal, bridgeSessionOf } from './bridge-token.js'
 import { isLimitedToken } from './limited-token.js'
 import { conditionalRight, limitedRefusal, type RightsHost } from './method-rights.js'
 import { credentialProof, hostProof } from './host-proof.js'
-import { isFullCredential, type FullCredential } from '../lifecycle/serve-credentials.js'
+import { isFullCredential, type CredentialsRead, type FullCredential } from '../lifecycle/serve-credentials.js'
 import { DrainCut, type Drain } from '../drain.js'
 import { rpcError } from '../rpc-error.js'
 
@@ -98,9 +98,10 @@ export type HostServerOptions = {
   token: string
   /**
    * The full credentials of a `centralu serve` host (#1405, lifecycle/serve-credentials.ts): their verifiers, asked at
-   * each hello and each `prove` naming one, so a pairing or a revocation applies at once
+   * each hello and each `prove` naming one, so a pairing or a revocation applies at once. A whole read
+   * (`readCredentialFile`) also says what a socket already in may keep while the file cannot be read, and that it cannot
    */
-  fullCredentials?: () => readonly FullCredential[]
+  fullCredentials?: () => readonly FullCredential[] | CredentialsRead
   /**
    * How often the full credentials are read again while a socket holds one (#1405 review): a socket whose credential
    * is no longer listed is closed then, so a revocation ends a connection already open with it, not only the next
@@ -215,6 +216,11 @@ export const REVERSE_CALL_TIMEOUT_MS = 30 * 60_000
 /** WebSocket close codes this server uses (4001 is the token rule's own) */
 const CLOSE_GOING_AWAY = 1001
 const CLOSE_AUTH = 4001
+/**
+ * Why a full hello is refused, or a socket in with a full credential closed, while `serve.json` cannot be read (#1405
+ * review): not "withdrawn", which a hub takes for its credential gone, and not "bad token". The hub's row says it
+ */
+export const CREDENTIAL_FILE_UNREADABLE = 'credential file unreadable'
 
 /** `hello_ok`'s `elevated`, only when it is known (#702) */
 function elevatedField(elevated: boolean | null | undefined): { elevated?: boolean } {
@@ -313,7 +319,8 @@ export class HostServer {
     if (opts.fullCredentials) {
       // Read only while a socket holds a full credential: an idle host does not touch serve.json
       this.sweepTimer = setInterval(() => {
-        if (this.fullBy.size > 0) this.sweepWithdrawn(this.opts.fullCredentials?.() ?? [])
+        const read = this.credentialRead()
+        if (this.fullBy.size > 0 && read) this.sweepWithdrawn(read)
       }, opts.credentialSweepMs ?? 1000)
       this.sweepTimer.unref?.()
     }
@@ -537,12 +544,24 @@ export class HostServer {
    * Before, such a socket kept full rights for as long as it stayed open, while no listing showed the credential. The
    * peer sees 4001 "credential withdrawn": a hub reads its connection line again and pairs anew
    */
-  private sweepWithdrawn(full: readonly FullCredential[]): void {
+  private sweepWithdrawn(read: CredentialsRead): void {
     for (const [ws, id] of this.fullBy) {
-      if (full.some((c) => c.id === id)) continue
+      if (read.open.some((c) => c.id === id)) continue
       this.fullBy.delete(ws)
-      this.refuse(ws, CLOSE_AUTH, 'credential withdrawn')
+      /*
+       * A file that cannot be read withdrew nothing (#1405 review): said as that, so a hub does not take its own credential
+       * for taken over, and its row can say why
+       */
+      this.refuse(ws, CLOSE_AUTH, read.unreadable ? CREDENTIAL_FILE_UNREADABLE : 'credential withdrawn')
     }
+  }
+
+  /** The full credentials as `fullCredentials` reads them now, whole; null on a host without them */
+  private credentialRead(): CredentialsRead | null {
+    const r = this.opts.fullCredentials?.()
+    if (!r) return null
+    if ('unreadable' in r) return r
+    return { full: [...r], open: [...r], unreadable: null }
   }
 
   private refuse(ws: WebSocket, code: number, reason: string): void {
@@ -618,7 +637,8 @@ export class HostServer {
         proved = true
         // A hub that paired names its credential (#1405): the proof is under that credential's verifier
         const ask = frame.data
-        const named = ask.credential ? this.opts.fullCredentials?.().find((c) => c.id === ask.credential) : undefined
+        // From what a socket in may keep: a proof lets nothing in, and the hello after it says why it is refused
+        const named = ask.credential ? this.credentialRead()?.open.find((c) => c.id === ask.credential) : undefined
         const mac = named ? credentialProof(named.verifier, ask.nonce) : hostProof(this.opts.token, ask.nonce)
         this.sendTo(ws, JSON.stringify({ kind: 'proof', nonce: ask.nonce, mac }))
         return
@@ -632,8 +652,8 @@ export class HostServer {
          */
         if (authed) return
         // Full: the token, or for a `centralu serve` host one of the full credentials serve.json names (#1405)
-        const listed = this.opts.fullCredentials?.()
-        const match = listed ? isFullCredential(listed, frame.data.token) : null
+        const listed = this.credentialRead()
+        const match = listed ? isFullCredential(listed.full, frame.data.token) : null
         const full = listed ? match !== null : sameSecret(frame.data.token, this.opts.token)
         // Read now anyway: a socket already in with a credential this read no longer names goes (`sweepWithdrawn`)
         if (listed) this.sweepWithdrawn(listed)
@@ -643,7 +663,8 @@ export class HostServer {
           // A Codex bridge holds a credential for its own session's calls only (bridge-token.ts)
           if (!limited) bridgeOf = bridgeSessionOf(this.opts.token, frame.data.token)
           if (!limited && bridgeOf === null) {
-            this.refuse(ws, CLOSE_AUTH, 'bad token')
+            // While serve.json cannot be read no full credential can be checked: refused, and said why (#1405 review)
+            this.refuse(ws, CLOSE_AUTH, listed?.unreadable ? CREDENTIAL_FILE_UNREADABLE : 'bad token')
             return
           }
         }

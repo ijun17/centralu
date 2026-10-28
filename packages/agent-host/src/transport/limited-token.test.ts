@@ -2,9 +2,9 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { WebSocket, type RawData } from 'ws'
 import { PROTOCOL_VERSION, type NormalizedEvent } from '@cc/protocol'
-import { HostServer, type RpcContext } from './server.js'
+import { CREDENTIAL_FILE_UNREADABLE, HostServer, type RpcContext } from './server.js'
 import { credentialProof, hostProof, proofNonce, provesCredential } from './host-proof.js'
-import { readFullCredentials, verifierOf } from '../lifecycle/serve-credentials.js'
+import { LAST_READ_KEPT_MS, readCredentialFile, verifierOf } from '../lifecycle/serve-credentials.js'
 import { isLimitedToken, limitedToken } from './limited-token.js'
 import { bridgeToken } from './bridge-token.js'
 import { HostRequests } from '../host-requests.js'
@@ -57,7 +57,8 @@ async function hello(port: number, token: string, extra: Record<string, unknown>
   const ws = new WebSocket(`ws://127.0.0.1:${port}`)
   const frames: Record<string, unknown>[] = []
   ws.on('message', (d) => frames.push(JSON.parse(text(d))))
-  const closed = new Promise<number>((r) => ws.on('close', (code) => r(code)))
+  let reason = ''
+  const closed = new Promise<number>((r) => ws.on('close', (code, why) => ((reason = String(why)), r(code))))
   await new Promise<void>((r) => ws.on('open', () => r()))
   ws.send(JSON.stringify({ kind: 'hello', token, protocolVersion: PROTOCOL_VERSION, ...extra }))
   const wait = async (pred: () => boolean, ms = 3000) => {
@@ -74,7 +75,7 @@ async function hello(port: number, token: string, extra: Record<string, unknown>
     await wait(() => frames.some((f) => f.kind === 'res' && f.id === id))
     return frames.find((f) => f.kind === 'res' && f.id === id) as { ok: boolean; error?: { code: string; message: string; data?: unknown } }
   }
-  return { ws, frames, closed, wait, call }
+  return { ws, frames, closed, wait, call, reason: () => reason }
 }
 
 const ev = (sessionId: string): NormalizedEvent => ({ type: 'turn_started', sessionId, turnId: 't1' }) as unknown as NormalizedEvent
@@ -358,12 +359,15 @@ const SERVE_WINDOW = 'w'.repeat(43)
 const serveEntry = (id: string, token: string) => ({ id, label: id, verifier: verifierOf(token), created: 1 })
 
 /** A host as `centralu serve` starts one: its key as the token, its full credentials those the file names */
-async function serveHost(full: object[], opts: { credentialSweepMs?: number; path?: string } = {}) {
-  // serve.json as the host reads it at each hello; `write` replaces it as the launcher does, `remove` moves it aside
+async function serveHost(full: object[], opts: { credentialSweepMs?: number; path?: string; now?: () => number } = {}) {
+  // serve.json as the host reads it at each hello; `write` replaces it as the launcher does, `remove` moves it aside, `deny` takes this user's read away
   let file: string | null = ''
+  let denied = false
   const write = (entries: object[]) => (file = JSON.stringify({ v: 2, key: SERVE_KEY, port: null, full: entries }))
   const remove = () => (file = null)
+  const deny = (on = true) => (denied = on)
   const read = () => {
+    if (denied) throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' })
     if (file === null) throw Object.assign(new Error('ENOENT: no such file'), { code: 'ENOENT' })
     return file
   }
@@ -372,12 +376,12 @@ async function serveHost(full: object[], opts: { credentialSweepMs?: number; pat
   server = new HostServer({
     port: 0,
     token: SERVE_KEY,
-    fullCredentials: () => readFullCredentials(path, read, () => {}),
+    fullCredentials: () => readCredentialFile(path, read, () => {}, opts.now),
     ...(opts.credentialSweepMs ? { credentialSweepMs: opts.credentialSweepMs } : {}),
     onRpc: async () => ({ ok: true }),
   })
   const port = await server.listen()
-  return { port, write, remove }
+  return { port, write, remove, deny }
 }
 
 /** The frames a socket gets for what it sends first (a prove, a hello), and the code it closed with, if it did */
@@ -470,6 +474,34 @@ describe('a centralu serve host takes as full only the credentials serve.json na
     remove()
     expect(await hub.closed).toBe(4001)
     expect((await serveHello(port, SERVE_HUB)).closed).toBe(4001)
+  })
+
+  /*
+   * #1405 review: serve.json made unreadable (chmod 000). A credential paired just before kept full rights 30 s while
+   * no row listed it, and then every full socket, the hub's too, closed as "credential withdrawn", which the hub took
+   * for its own credential taken over
+   */
+  it('refuses a new full hello at once while serve.json cannot be read, and closes the open ones after a few seconds as unreadable, not withdrawn', async () => {
+    let t = 1_000_000
+    const { port, write, deny } = await serveHost([serveEntry('aaaaaaaa', SERVE_HUB)], { credentialSweepMs: 20, path: 'denied.json', now: () => t })
+    const hub = await hello(port, SERVE_HUB)
+    await hub.wait(() => hub.frames.some((f) => f.kind === 'hello_ok'))
+    write([serveEntry('aaaaaaaa', SERVE_HUB), serveEntry('bbbbbbbb', SERVE_WINDOW)])
+    deny()
+    // The one paired just before the file went unreadable: refused at its first hello, and said why
+    const fresh = await hello(port, SERVE_WINDOW)
+    expect(await fresh.closed).toBe(4001)
+    expect(fresh.reason()).toBe(CREDENTIAL_FILE_UNREADABLE)
+    // The socket already in stays for a few seconds of a busy file, and the limited credential was never full
+    await new Promise((r) => setTimeout(r, 100))
+    expect(hub.ws.readyState).toBe(WebSocket.OPEN)
+    expect((await serveHello(port, limitedToken(SERVE_KEY))).frames[0]).toMatchObject({ kind: 'hello_ok' })
+    t += LAST_READ_KEPT_MS + 1
+    expect(await hub.closed).toBe(4001)
+    expect(hub.reason()).toBe(CREDENTIAL_FILE_UNREADABLE)
+    // Readable again: the credentials it names work as before
+    deny(false)
+    expect((await serveHello(port, SERVE_WINDOW)).frames[0]).toMatchObject({ kind: 'hello_ok' })
   })
 })
 

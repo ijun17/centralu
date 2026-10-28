@@ -59,7 +59,7 @@ import { acquireInstanceLock, lockConflictMessage } from './dev-services/instanc
 import { hostLogPath, startupBanner, teeStderrToFile } from './log-file.js'
 import { hostDrain } from './drain.js'
 import { HostRequests } from './host-requests.js'
-import { readFullCredentials } from './lifecycle/serve-credentials.js'
+import { readCredentialFile } from './lifecycle/serve-credentials.js'
 import { createStopGate } from './lifecycle/stop-gate.js'
 import { stopGitChildren } from './dev-services/git-exec.js'
 import { Gate } from './lifecycle/gate.js'
@@ -823,7 +823,7 @@ const server = new HostServer({
    * A `centralu serve` host that takes verifiers (#1405): what it was handed is its key, and the full credentials are
    * the ones serve.json names, read at each hello (lifecycle/serve-credentials.ts)
    */
-  ...(serveState ? { fullCredentials: () => readFullCredentials(serveState, (f) => readFileSync(f, 'utf8')) } : {}),
+  ...(serveState ? { fullCredentials: () => readCredentialFile(serveState, (f) => readFileSync(f, 'utf8')) } : {}),
   allowedOrigins,
   onRpc: router.handle,
   // A limited call that cannot be undone waits for the person's card (#1405)

@@ -46,6 +46,17 @@ export function verifierOf(credential: string): string {
 }
 
 /**
+ * What one read of `serve.json` gives the host (#1405 review): `full`, what a new hello is checked against; `open`,
+ * what a socket already in with a full credential may keep; and `unreadable`, set while the file is there but cannot be
+ * read (permission denied, a scanner holding it), with the error's code and since when.
+ */
+export type CredentialsRead = {
+  full: FullCredential[]
+  open: FullCredential[]
+  unreadable: { code: string; since: number } | null
+}
+
+/**
  * The full credentials `serve.json` at `path` names, read now: each entry of the listed shape (`isListedEntry`), and
  * no other. An unreadable file (a writer replacing it on Windows) is tried again a few times. Then:
  *
@@ -53,55 +64,80 @@ export function verifierOf(credential: string): string {
  *   then on (#1405 review): every credential it granted ends, and the sockets in with one are closed
  *   (`HostServer` `sweepWithdrawn`). Keeping the last list here kept an old full credential open after the person
  *   moved the file aside;
- * - one that is there but stays refused (a scanner holding it on Windows) names what it said last, for at most
- *   `LAST_READ_KEPT_MS` since that read, rather than refusing every hub and closing every link over a busy file; past
- *   that, none;
+ * - one that is there but stays refused (permission denied, or a scanner holding it on Windows) names none for a new
+ *   hello, at once (#1405 review: a credential paired just before kept full rights for 30 s while no row could list
+ *   it). A socket already in keeps what the file said last for at most `LAST_READ_KEPT_MS` since that read, so a
+ *   busy file does not close every link at its first refused read; past that it is closed, as "credential file
+ *   unreadable", not "withdrawn". `unreadable` says so, for `host.credentials` and the hub's row;
  * - one that reads but is not version 2 names none.
  *
  * A hello is then refused rather than let in on a guess. `read` is the caller's (the file as text): this module does
  * not touch the OS (#1599).
  */
-export function readFullCredentials(
+export function readCredentialFile(
   path: string,
   read: (p: string) => string,
   pause: (ms: number) => void = sleepSync,
   now: () => number = Date.now,
-): FullCredential[] {
-  let missing = false
+): CredentialsRead {
+  let code = ''
   for (let i = 0; i < 5; i++) {
     if (i > 0) pause(10 * i)
     let parsed: unknown
     try {
       parsed = JSON.parse(read(path))
     } catch (e) {
-      missing = asObj(e).code === 'ENOENT'
+      const c = asObj(e).code
+      code = typeof c === 'string' ? c : 'EUNREADABLE'
       continue
     }
+    refusedSince.delete(path)
     const o = asObj(parsed)
     if (o.v !== 2 || !Array.isArray(o.full)) {
       lastRead.delete(path)
-      return []
+      return { full: [], open: [], unreadable: null }
     }
     const full = o.full.flatMap((e: unknown) => {
       const f = asObj(e)
       return isListedEntry(f) ? [{ id: f.id, label: f.label, verifier: f.verifier }] : []
     })
     lastRead.set(path, { full, at: now() })
-    return full
+    return { full, open: full, unreadable: null }
   }
-  const last = lastRead.get(path)
-  if (missing || !last || now() - last.at > LAST_READ_KEPT_MS) {
+  if (code === 'ENOENT') {
     lastRead.delete(path)
-    return []
+    refusedSince.delete(path)
+    return { full: [], open: [], unreadable: null }
   }
-  return last.full
+  const since = refusedSince.get(path) ?? now()
+  refusedSince.set(path, since)
+  const last = lastRead.get(path)
+  const open = last && now() - last.at <= LAST_READ_KEPT_MS ? last.full : []
+  return { full: [], open, unreadable: { code, since } }
 }
 
-/** How long a list read last stands for a file that is there but stays refused (`readFullCredentials`) */
-export const LAST_READ_KEPT_MS = 30_000
+/** The full credentials a new hello is checked against now (`readCredentialFile`'s `full`) */
+export function readFullCredentials(
+  path: string,
+  read: (p: string) => string,
+  pause: (ms: number) => void = sleepSync,
+  now: () => number = Date.now,
+): FullCredential[] {
+  return readCredentialFile(path, read, pause, now).full
+}
 
-/** The last list read from each file and when, for a read that stays refused (`readFullCredentials`) */
+/**
+ * How long a socket already in keeps the credential a file that stays refused named at its last read
+ * (`readCredentialFile`): a few seconds, for a writer or a scanner on Windows, and no longer than a full credential
+ * should go on unlisted
+ */
+export const LAST_READ_KEPT_MS = 5_000
+
+/** The last list read from each file and when, for a read that stays refused (`readCredentialFile`) */
 const lastRead = new Map<string, { full: FullCredential[]; at: number }>()
+
+/** Since when each file has been refused, for `unreadable` */
+const refusedSince = new Map<string, number>()
 
 /** Waits `ms` on this thread: the reads are a few milliseconds apart, at a hello, and the host has no other wait here */
 function sleepSync(ms: number): void {
