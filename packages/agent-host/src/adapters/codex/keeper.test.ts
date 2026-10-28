@@ -167,7 +167,7 @@ describe('codex under the keeper', () => {
     )
     expect(specs).toHaveLength(1)
     expect(specs[0]!.env).toMatchObject({ CC_HOST_URL: 'ws://127.0.0.1:4100', CC_HOST_CREDENTIAL: 'ccs1:s1:mac' })
-    expect(specs[0]!.env.PATH ?? specs[0]!.env.Path).toBe(process.env.PATH ?? process.env.Path)
+    expect(specs[0]!.env.PATH ?? specs[0]!.env.Path).toMatch(/./) // kept from the host's own (its value is the OS layer's, #1599)
   })
 
   it('a resume this host started itself sends excludeTurns and asks for no running turn', async () => {

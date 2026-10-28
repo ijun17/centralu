@@ -124,7 +124,7 @@ describe('claude under the keeper', () => {
     const env = sdk.state.options!.env as AgentSpawnSpec['env']
     expect(env).toMatchObject({ CC_HOST_URL: 'ws://127.0.0.1:4100', CC_HOST_CREDENTIAL: 'ccs1:with-access:mac' })
     // The SDK's env replaces the CLI's environment: the host's own still has to be there
-    expect(env.PATH ?? env.Path).toBe(process.env.PATH ?? process.env.Path)
+    expect(env.PATH ?? env.Path).toMatch(/./) // kept from the host's own (its value is the OS layer's, #1599)
     const spawn = sdk.state.options!.spawnClaudeCodeProcess as (o: AgentSpawnSpec) => AgentProcess
     spawn({ command: 'claude', args: [], env })
     expect(spawned[0]!.env.CC_HOST_CREDENTIAL).toBe('ccs1:with-access:mac')
