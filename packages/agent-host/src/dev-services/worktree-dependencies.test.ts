@@ -49,7 +49,7 @@ it.for(['pnpm-lock.yaml', 'package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock
   },
 )
 
-itSymlink('copies workspace package dependencies before checking sibling links, and removes links outside the child', async () => {
+itSymlink('copies workspace package dependencies before checking sibling links, leads links into the main checkout into the child, and removes links outside both', async () => {
   await lock()
   await installed('', true)
   for (const pkg of ['a', 'b']) {
@@ -61,12 +61,19 @@ itSymlink('copies workspace package dependencies before checking sibling links, 
   }
   await symlink('../../b/node_modules/dep', join(main, 'packages', 'a', 'node_modules', 'sibling'), 'dir')
   await symlink(main, join(main, 'node_modules', 'escape'), 'dir')
+  const outside = join(root, 'outside')
+  await mkdir(outside)
+  await symlink(outside, join(main, 'node_modules', 'away'), 'dir')
   await prepareWorktreeDependencies(main, child)
   expect(await readFile(join(child, 'packages', 'a', 'node_modules', 'sibling', 'index.js'), 'utf8')).toBe('original')
-  if (process.platform === 'win32') {
-    // Node cannot tell an absolute symlink from a junction there: it is made again leading to the same place in the child
-    expect(realpathSync.native(join(child, 'node_modules', 'escape'))).toBe(realpathSync.native(child))
-  } else await expect(lstat(join(child, 'node_modules', 'escape'))).rejects.toMatchObject({ code: 'ENOENT' })
+  // An absolute link into the main checkout must never lead there from the child. Linux and Windows make it again
+  // leading to the same place in the child (the copy's `links` rule); macOS clones the tree as it is, so the link
+  // still leads into the main checkout and is dropped (#1708).
+  const escape = join(child, 'node_modules', 'escape')
+  if (process.platform === 'darwin') await expect(lstat(escape)).rejects.toMatchObject({ code: 'ENOENT' })
+  else expect(realpathSync.native(escape)).toBe(realpathSync.native(child))
+  // A link leading outside both checkouts keeps its target in the copy and is then dropped.
+  await expect(lstat(join(child, 'node_modules', 'away'))).rejects.toMatchObject({ code: 'ENOENT' })
 })
 
 /*
