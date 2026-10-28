@@ -385,6 +385,16 @@ the git work; `onConflict` in `queue-driver.mjs` decides, once per head.
   needs, so the merge commit may carry a lowering in a list that did not conflict; the commit message, the
   `regenerate` event (`also`) and its `stat` list those files too. A conflict in a list and in code goes
   to the author without running anything.
+- **The OS layer's allowlist** (#1599): `tooling/os-allowlist.txt` is a mechanical file the same way.
+  Two pull requests that each take out a neighbouring line conflict in git. The queue takes main's
+  version, runs `pnpm os:tighten` (which takes out every line the merged tree no longer needs, carries a
+  file git sees renamed since `CC_LINT_BASE` to its new path, and adds nothing else), then
+  `tooling/os-layer.test.ts` (the list is what the code needs, and no line is new against main's), and
+  pushes only if both pass. What it does not do: a comment the pull request edited in the list is
+  dropped with the rest of its version (the list's comments are its fixed header; change them in a
+  pull request of their own); a batch drops a member that conflicts and the member is regenerated on its
+  own later, one more cycle; and a failing check hands the conflict to the author with nothing pushed,
+  with no second try, since what fails then is a real new line in the list.
 - **Mechanical files**: when every conflicted file is named by an entry of `project.json`
   `queue.conflicts.mechanical` (`files`: path patterns as `release.versionFiles`; `run`: commands as
   argument lists, run in order without a shell, each at most `timeoutMinutes`, default 30; on Windows

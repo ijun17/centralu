@@ -5,7 +5,7 @@ import { dirname } from 'node:path'
 import { Client, type PriorDiscovery, type Tool } from '@modelcontextprotocol/client'
 import { CLIENT_INFO } from '@cc/protocol'
 import { KILL_GRACE_MS, hasProcessGroups, stopTree } from '../../dev-services/kill-tree.js'
-import { killHandle, spawnGrouped, sweepExited } from '../../dev-services/grouped-child.js'
+import { killHandle, spawnGrouped, sweepLeftovers, type GroupedChild } from '../../dev-services/grouped-child.js'
 import { RollingFile } from '../../log-file.js'
 import { LineTail, lineSplitter, type LineSplitter } from '../../stream-text.js'
 import { ExitAfterDrain } from '../../exit-after-drain.js'
@@ -80,8 +80,6 @@ export class AppStartError extends Error {
 
 export class AppProcess {
   readonly startedAt = Date.now()
-  /** When we saw it end (null while it runs) — with `spawnedAt`, how Windows tells what it left behind (`collectLeftovers`) */
-  private exitedAt: number | null = null
   readonly client: Client
   /** The tool list received on connection (the raw text, before filtering) — asked once per process */
   tools: Tool[] = []
@@ -100,8 +98,8 @@ export class AppProcess {
     readonly fd3: Socket | null,
     readonly log: AppLog,
     probeTimeoutMs: number,
-    /** Taken just before the spawn, so it is no later than the process's own creation time */
-    private readonly spawnedAt: number,
+    /** Its start and exit times (`spawnGrouped`): how Windows tells what it left behind (`collectLeftovers`) */
+    private readonly started: GroupedChild,
   ) {
     this.client = new Client(
       { name: CLIENT_INFO.name, version: CLIENT_INFO.version },
@@ -116,7 +114,6 @@ export class AppProcess {
     const settle = (info: ExitInfo) => {
       if (this.exit) return
       this.exit = info
-      this.exitedAt = Date.now()
       /*
        * 'exit' can arrive before stderr has finished flowing out — and it is exactly the last line
        * that carries the crash reason. This waits briefly for 'close' (every pipe closed), but if a
@@ -191,8 +188,8 @@ export class AppProcess {
       log.close()
       throw new AppStartError(head, head, [])
     }
-    const { child, spawnedAt } = started
-    const proc = new AppProcess(child, (child.stdio[3] as Socket | undefined) ?? null, log, spec.probeTimeoutMs, spawnedAt)
+    const { child } = started
+    const proc = new AppProcess(child, (child.stdio[3] as Socket | undefined) ?? null, log, spec.probeTimeoutMs, started)
     if (proc.fd3 && spec.serveFd3) proc.closeFd3Server = spec.serveFd3(proc.fd3, (line) => log.note(line))
     spec.onSpawn?.(proc)
     try {
@@ -313,13 +310,11 @@ export class AppProcess {
   }
 
   /**
-   * Ends what the app left running once it has ended (`sweepExited`): its group on macOS and Linux, at once; on
+   * Ends what the app left running once it has ended (`sweepLeftovers`): its group on macOS and Linux, at once; on
    * Windows what descends from it by parent links (kill-tree's `collectOrphansWindows`). Never rejects
    */
   private async collectLeftovers(): Promise<void> {
-    const pid = this.child.pid
-    if (typeof pid !== 'number') return
-    const ended = await sweepExited({ pid, spawnedAt: this.spawnedAt, exitedAt: this.exitedAt ?? Date.now() })
+    const ended = await sweepLeftovers(this.started)
     if (ended.length > 0) this.log.note(`ended ${ended.length} process(es) it left running: ${ended.join(', ')}`)
   }
 }

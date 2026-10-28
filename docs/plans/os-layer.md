@@ -175,6 +175,7 @@ Today it is a handful of modules, each owning one subject, that `local/platform-
 | Module | Subject |
 |---|---|
 | `agent-host/src/os.ts` | the host's questions named for what differs: `hasPs`, `clonesFiles`, `locksRunningPrograms`, `pathsOf`, `installedCopyPath`, `systemTool` |
+| `agent-host/src/os/real.ts` | the `Os` of the machine itself (§7.1), built from the modules in this table |
 | `agent-host/src/env-path.ts`, `tool-launch.ts` | finding a tool on PATH (PATHEXT, npm shims) and starting it (`.cmd` shims) |
 | `agent-host/src/dev-services/kill-tree.ts` | ending a process tree: groups and signals, or taskkill and parent links |
 | `agent-host/src/dev-services/terminal.ts` | the terminal's and the Run button's shell |
@@ -321,30 +322,230 @@ in-memory implementation, keeps a few integration tests on the real OS, and take
 ### 7.1 Interface and fake
 
 The layer's operations are an interface the host is given (as the store and the platform ports are), with a real
-implementation per OS family and one in memory:
+implementation and one in memory. In `packages/agent-host/src/os/`:
+
+| File | What | In the layer |
+|---|---|---|
+| `port.ts` | the `Os` interface: types only | no (runs nothing) |
+| `rules.ts` | the rules of a family (`windows`, `posix`), as pure functions: path case and form (`foldCase`, `pathKey`, `samePath`, `isInside`, relative paths from a given working folder with `pathRulesFrom`), the environment's case (`envValue`), PATH and PATHEXT (`findOnPath`, `programCandidates`), batch shims (`launchFor`, `resolveCommand`), the program path never planted (`programFor`, `notOnPath`, `systemTool`), `file:` URLs, which signals are sent (`signalRefusal`), stored file times (`storedTimeNs`), the recursive listing (`listRecursive`), and the questions named for what differs (`traitsOf`) | no: it answers for the family it is given, never for this host |
+| `real.ts` | `realOs()`: Node's calls, and the layer modules for what differs (`env-path.ts`, `tool-launch.ts`, `kill-tree.ts`, `grouped-child.ts`, `os.ts`) | yes |
+| `copy.ts` | the tree copy (`cpSync`, `promises.cp`): its steps written once (`copySteps`), carried out with an `Os`'s sync or promise calls, so the real and the in-memory OS copy by one definition; the kind of link it makes on Windows (`copiedLinkKind`) | no |
+| `run.ts` | what a run to the end is (input, timeout, overflow, abort, the close a grandchild holds), over any `Os` | no |
+| `memory.ts` | `memoryOs({ as: 'windows' \| 'posix' })` | no |
+
+**One definition per concept.** The rules moved out of `os.ts`, `env-path.ts`, `tool-launch.ts` and `kill-tree.ts`
+into `rules.ts`; those modules now read them for the running OS (`familyOf`, `traitsFor` in `os.ts`), with the
+signatures their callers use and their tests unchanged. Three reads follow Windows more closely than before:
+`systemTool` and `commandInterpreter` find `SystemRoot` and `ComSpec` in any case, and a variable's name and a
+path are compared by NTFS's case rule (`foldCase`), not by JavaScript's `toLowerCase`. The in-memory OS cannot import a layer module: a test that reaches the layer runs on
+Windows (§6.1, rule 4), and the point is that its tests do not. So the rules live where both can read them.
 
 ```ts
 interface Os {
-  files: {
-    readText(p: HostPath): Promise<string>
-    write(p: HostPath, data: string | Uint8Array, opts?: { atomic?: boolean }): Promise<void>
-    list(dir: HostPath): Promise<Entry[]>
-    stat(p: HostPath): Promise<Stat | null>
-    rename(from: HostPath, to: HostPath): Promise<void> // retries what Windows locks
-    remove(p: HostPath, opts?: { recursive?: boolean }): Promise<void> // never through a link
-    link(target: HostPath, at: HostPath): Promise<'symlink' | 'junction'>
-  }
-  paths: { join(...parts: string[]): HostPath; same(a: HostPath, b: HostPath): boolean; inside(root: HostPath, p: HostPath): boolean }
-  processes: { start(cmd: Command, opts: StartOptions): Child; stop(child: Child, graceMs: number): Promise<Exit> }
-  env: { get(name: string): string | undefined; home: HostPath; temp: HostPath; findTool(name: string): Promise<HostPath | null> }
+  files: OsFiles          // Node's sync names (readFileSync, renameSync, openSync/readSync, watch, cpSync, …) and
+                          // .promises (node:fs/promises' names); stats with bigint dev/ino and mtimeNs
+  paths: OsPaths          // path (win32 or posix), devNull, same, inside, key, fromFileUrl, toFileUrl
+  processes: OsProcesses  // start (a ChildProcess-like child, contained by default; stdio pipe, ignore, inherit,
+                          // overlapped or an fd), run, runSync, runShell, stop(child, grace) (the tree, then its
+                          // leftovers), alive(pid), signal(pid, signal) (a process the host did not start), pid
+  tools: OsTools          // find (whichTool), program (programPath), resolve (resolveCommand)
+  env: OsEnv              // get (any case on Windows), all, set, home, temp (read when asked), execPath, username, cwd()
+  clock: OsClock          // now, setTimeout (unref'd), sleep (keeps the host alive while awaited)
+  sqlite: OsSqlite        // open(path | ':memory:'): better-sqlite3 on the real OS; in memory, the engine the test gives
+  traits: OsTraits        // foldsPathCase, hasProcessGroups, locksRunningPrograms, locksWatchedFolders,
+                          // cpKeepsLinks, clonesFiles, measuresWithDu, hasPs, modesGuardFiles, hasWindowsFileNames
 }
 ```
 
-`memoryOs({ as: 'windows' | 'posix' })` keeps a file tree in memory and follows the chosen OS's rules: case-folding,
-`\` paths, junctions in place of directory symlinks, a rename of an open file refused. Logic tests then cover Windows
-semantics on Linux, which they do not today, and leave the Windows job.
+The shapes follow Node's own, so moving a module behind it changes where a call goes, not what it means: most of the
+host's file calls are synchronous (a store opened in a constructor, a write that must not yield, a fingerprint taken
+mid-scan), so `files` has Node's sync calls and `files.promises` the async ones. A child has `ChildProcess`'s events
+(`spawn`, `exit`, `close`, `error`) and fields, so the adapters' and apps' process code keeps its shape; a start
+Node refuses at once (`EINVAL` for a batch file) is an `'error'` like a program not found.
 
-### 7.2 Order
+**What Windows refuses, as measured** (Windows 11, Node 22, NTFS; the plan's first draft said "a rename of an open
+file refused", which is not what Node does: it opens files with share-delete):
+
+| | Windows | Linux |
+|---|---|---|
+| rename or delete a file open in this process | allowed | allowed |
+| rename another file onto an open one | `EPERM` | allowed |
+| rename a folder something below it holds open (a file, a watch, a working folder) | `EPERM` | allowed |
+| rename or remove a running process's working folder | `EBUSY` | allowed |
+| delete a running program's file / rename it | `EPERM` / allowed | allowed |
+| `unlink` a folder; `rmdir` a file | `EPERM`; `ENOENT` | `EISDIR`; `ENOTDIR` |
+| a path through a file | `ENOENT` | `ENOTDIR` |
+| rename a file onto a folder; a folder onto a folder | `EPERM`; `EPERM` | `EISDIR`; replaced if empty, else `ENOTEMPTY` |
+| a copy onto a folder | `EPERM` | `EISDIR` |
+| the working folder of a process that has just started | held only once the process has set it up, a moment after `spawn` (the in-memory OS holds it at once: stricter) | — |
+| a rename to the same name in another case | the name is stored as written | another name |
+| `mkdir` over a link; `mkdir -p` over one | `EEXIST`; followed: to a folder done, to nothing `ENOENT` | the same |
+| open a folder: to read; to write | allowed, it reads as `EISDIR`; allowed | allowed, it reads as `EISDIR`; `EISDIR` |
+| copy a tree into itself (`cpSync`), as written, through a link in the target's parents, or through another name that is no link (a share to the same disk, `\\localhost\C$\…`; a bind mount) | `ERR_FS_CP_EINVAL` | the same |
+| `copyFile`: the copy's change time | the source's (CopyFile) | now (macOS too, measured on APFS) |
+| a junction | absolute (a relative target read from its folder); a link to `lstat` and the listing; one to a file leads nowhere (`ENOENT`) | — |
+| `realpathSync.native` / `realpathSync` | the case stored / the case given | the same |
+| `child.kill()` / `taskkill /F` / `process.kill(pid)` | exit `null, SIGTERM` / `1, null` / `1, null` | exit `null, SIGTERM` / — / `null, SIGTERM` |
+| which signals | TERM, KILL, INT and QUIT end it at once; another name Node knows there: `process.kill` throws `ENOSYS`, `child.kill` ends it as SIGKILL; `SIGUSR1` and other names: `ERR_UNKNOWN_SIGNAL` | each sent; a program traps any but KILL and STOP |
+| a read-only file (the attribute; on Linux mode `444`, not root) | write, append, open to write, copy or rename onto it: `EPERM`; rename it away, remove it, `cp` onto it: allowed | write, open to write, copy onto: `EACCES`; rename onto, rename away, remove, `cp` onto: allowed |
+| read at or past the end | 0 bytes | the same |
+| `mkdir -p` through a file / onto a file | `ENOTDIR` / `EEXIST` | the same |
+| rename a folder into itself | `EPERM` | `EINVAL` |
+| `cpSync` a folder onto a file / a file onto a folder / a file onto itself | `ERR_FS_CP_DIR_TO_NON_DIR` / `ERR_FS_CP_NON_DIR_TO_DIR` / `ERR_FS_CP_EINVAL` | the same |
+| rename one hard link onto another of the same file | the first name goes (`nlink` 1) | nothing happens (`rename(2)`) |
+| a name with `*?<>"\|` | `ENOENT` to write or read, `EINVAL` to `mkdir` | an ordinary name |
+| `file/` (a trailing separator) | the file | `ENOTDIR` (`EISDIR` to make one; macOS `ENOENT`) |
+| start a path with no extension | tried as `.com` and `.exe` only: `ENOENT` for a file `node` | the path |
+| a child's stdin given as a file | it reads the file | the same |
+| `utimes` | whole microseconds of the value | whole microseconds of the fraction (a `Date`'s `.123` is `.122999`); macOS keeps the nanoseconds of the double (`.122999906`) |
+| case | NTFS's upcase table: `é`/`É` one name; the Kelvin sign and `k`, `ı` and `I`, `ß` and `SS` two; listed in upcased order (`_` after `Z`) | case counts |
+| `runSync` past `maxBuffer` / `timeout` | `ENOBUFS` with the output kept / `ETIMEDOUT`, both ended by SIGTERM | the same |
+
+**Where the `Os` answers otherwise than Node, on purpose** (#1650 review), so a caller cannot tell the OS from the
+answer, and a test on memory says what the host does:
+
+- A recursive listing (`readdirSync`, `promises.readdir`) is breadth first as Node's but never enters a link. Node 22
+  enters a junction on Windows and a symlink to a folder on Linux, and one leading back to its own folder made the
+  listing on Windows stop at some depth without a word (192 names) and on Linux run to the limit of path lengths.
+- `cpSync` and `promises.cp` are the `Os`'s own tree copy (`os/copy.ts`), which never follows a link: every link,
+  the root too, is made again as a link, whatever it leads to. Node's `cpSync` ended the process with nothing to
+  catch over a link in a circle (`a -> b -> a`, `x -> x`: 0xC0000409 on Windows; without `verbatimSymlinks` an
+  uncaught C++ `filesystem_error`, SIGABRT, on Linux) and on Windows over a junction back into the tree, which it
+  copied as the folder it leads to. Three earlier answers checked the tree before Node's copy (#1650): a check cannot
+  close the race with a link changed between it and the copy (10 of 40 copies ended the process on Windows), it had to
+  tell a junction from a directory symlink, which Node's APIs cannot (`readlink`, `lstat` and the listing answer the
+  same), and asking PowerShell cost 0.2 s a link, could hang for 30 s and failed on long and trailing-dot names. A
+  copy that never follows a link needs none of it. What a link is comes from the listing or `lstat`, whichever says
+  link (the listing sees a reparse point `lstat` cannot read; `lstat` sees a folder swapped for a link since the
+  listing). Where it differs from Node:
+  - On Windows a junction is copied as a junction, not as the folder it leads to. A link to a folder is made as a
+    junction when its target is a whole path on a drive (no right needed), else a directory symlink (a relative target,
+    a share); a link to a file or to nothing as a file symlink. Every symlink needs Developer Mode or an administrator, so
+    without them a tree holding one is refused with `EPERM` (Node's too). Node makes every link to a folder a
+    directory symlink, so a tree of pnpm junctions copies where Node's did not. A
+    directory symlink to a whole path comes out a junction: both lead to the same place, and nothing in Node can tell
+    them apart.
+  - With the `Os`'s option `links: { from, to }`, a link whose whole target is inside `from` (by name, or where the
+    link really leads: another case, a short name, a link on the way) is made leading to the same place inside `to`,
+    and any other keeps its target; a relative target is kept as written, which already leads into the copy. This is
+    the rule `copyTreeWindows` applies to a worktree's junctions, one definition (`rules.ts` `retarget`). Without it
+    every link keeps its target, as Node's `cp` does: Node never retargets (without `verbatimSymlinks` it makes a
+    relative target whole into the *source*, and keeps a whole one as written), so a junction (always a whole path)
+    or an absolute symlink in the copy leads into the source. An option the caller sets, not the default: `to` is
+    where the copy will stand, which only the caller knows; `carry.ts` copies beside its place and renames it in, so a
+    default of the copy's own target would lead into a name that is gone. `carry.ts` sets it: kept as written, an
+    app's junction `subj -> …/_user/notes/sub` tied the new key's data to the old key's folder (what the app wrote
+    through it landed there, a later removal of the old copies would take it, and `returnAppFiles` would move it to
+    `app-trash`; #1650 review, Windows and Linux). Before #1650 Node copied such an in-tree junction on Windows as the
+    folder it leads to: an independent copy, or a crash when it led back up. `dev-services/fs.ts` sets it off
+    Windows, as its Windows walk does. An import (`handover.ts`) does not: staging leaves links out, so it holds none.
+  - Stricter than Node: with `verbatimSymlinks` Node's `cpSync` copies a link in a circle too, and `fs.promises.cp`
+    never died; the `Os` takes the one rule for every option and both forms. Node's checks that read where a link
+    leads when it replaces one in the target (`ERR_FS_CP_SYMLINK_TO_SUBDIRECTORY`) are not made: a link in the target
+    is replaced (with `force: false` too, as Node's), anything else there is `EEXIST`, as Node's `symlink` answers.
+  - A folder into itself is refused by the entries of the target's parents, `dev` and `ino` through links, as Node's
+    `checkParentPaths`, so a share to the same disk (`\\localhost\C$\…`, `\\127.0.0.1\C$\…`, which `realpath` does
+    not map back to the drive) and a Linux bind mount are caught: the earlier check by `realpath` let the share copy
+    run until the disk was full, and the bind mount end in `ENAMETOOLONG`. Parents not there yet are passed over,
+    where Node stops at the first missing one (`L -> src`, `to = L/a/b/c` copied into itself there). An entry the
+    volume gives no number (`ino` or `dev` 0) is no other entry, as Node's `areIdentical`.
+  - Node's other answers are kept: the same file, a folder onto a non-folder and back (at the root and below it),
+    `ERR_FS_EISDIR` without `recursive`, `force`/`errorOnExist` (`ERR_FS_CP_EEXIST`), `preserveTimestamps` (the
+    times first, then the mode, so a read-only file takes them too), a folder's mode set once its entries are in (one
+    already there keeps its own). A FIFO, socket or other kind is `ERR_FS_CP_UNKNOWN` (Node names the kind; a FIFO
+    given to `copyFile` would wait for ever). `filter` and `dereference` are not offered: no caller passes them. An
+    entry gone since its folder was listed is skipped.
+  - `promises.cp` takes each step with a promise call, so it never holds the event loop (Node's own did not either;
+    the earlier check did, for up to 25 s). That costs time: a 20 000-entry pnpm tree on Linux copies in 1.1 s with
+    Node's `cpSync`, 1.7 s with the `Os`'s and 7.4 s with `promises.cp` (each step a trip through libuv's pool), so a
+    caller that copied synchronously before still does (`dev-services/fs.ts`).
+  - On Windows the copy stats each link (follows it one step) to choose its kind, as Node's `symlink` does when no
+    kind is given: a link to a share that does not answer waits as long as Windows does, about 21 s for the first
+    `stat` of `\\10.255.255.7\share\x` (then about 6 ms while Windows keeps the failure). The sync copy holds the
+    event loop that long, the promise copy a pool thread. `carry.ts` copies synchronously: it runs inside the user-app
+    adoption (`UserAppAdoption.adopt`, then `carryAppState`, both synchronous, between store steps), so the promise
+    copy is no small change there. A directory symlink whose target cannot be reached at copy time is made as a file
+    symlink (Node's does the same), so it does not work as a folder once the share is back.
+  The host's copies go through it: `apps/external/carry.ts` (an app's data, which the app writes, so may hold any
+  link), `apps/external/handover.ts` (an import moved to another volume) and `dev-services/fs.ts` off Windows (a
+  worktree's copy when cloning cannot be used). On Windows a worktree's copy keeps its own walk, which retargets a
+  junction into the worktree (`copyTreeWindows`, `traits.cpKeepsLinks`).
+- On Windows `OsChild.kill` and `processes.signal` send only TERM, KILL, INT and QUIT and throw for any other
+  (`ENOSYS`, `ERR_UNKNOWN_SIGNAL`), leaving the process running: Node's own `child.kill('SIGHUP')` ends it as SIGKILL
+  while `process.kill(pid, 'SIGHUP')` throws, and the `Os` takes the one rule for both.
+- `processes.stop`'s sweep on Windows ends what the child started between its spawn and its exit as recorded
+  (`GroupedChild.exitedAt`, shared with `app-process.ts` and `local-process.ts`), never up to the time of the sweep,
+  when its pid may already be another program's.
+
+`memoryOs` follows each column. `os/contract.test-helpers.ts` holds the cases with both answers: `os/memory.test.ts`
+checks the in-memory OS against both on any OS (and a few cases more: a program's file while it runs, `EXDEV`, symlink
+rights), and `os/real.test.ts` (the layer's own test, so it runs on Windows
+too) checks the real OS and the in-memory one as its family against the column of the OS it runs on. A case the
+in-memory OS gets wrong fails there. `os/rules.test.ts` checks the path, case and PATH rules by property, over
+generated paths and names, for both families on Linux; `real.test.ts` holds `rules.ts`'s `file:` URLs to Node's own.
+The POSIX column is Linux's. Where macOS answers otherwise a case says so (`darwin` in the contract): `real.test.ts`
+holds a Mac's real OS to it and the in-memory OS to Linux's, which is all it models. Measured on macOS 27 (APFS, Node
+26): `utimes` keeps nanoseconds, writing `name/` is `ENOENT`; from Darwin's documentation, not yet run there: a plain
+copy keeps a file's change time (`copyfile` with `COPYFILE_ALL`). macOS also ignores case and refuses `unlink` of a
+folder with `EPERM`, so the two cases that
+show it are not run against a Mac (`linux: true`).
+
+Not modeled in memory: 8.3 short names, Windows' reserved names and trailing dots, alternate data streams, shares,
+`\\?\` paths, permissions beyond the owner's write bit (on Windows the read-only attribute; on POSIX the host is never root), PTYs, a watch on a single file (refused: stricter than both OSes), the null device (a child's
+`'ignore'` is the way to discard), a write through a link that leads nowhere (refused, where the OS makes the
+target), and SQLite: a test gives the engine (`memoryOs({ sqlite })`), and the database's files are not in the
+in-memory tree, so what renames, copies or removes them is tested on the real OS. NTFS's case table is the one measured
+on Windows 11; a volume formatted by an older Windows keeps an older table.
+
+### 7.2 What each area needs, and whether the interface has it
+
+Surveyed from each area's shipped files before the interface was frozen (the parallel steps start from it):
+
+| Area | Needs | Covered by |
+|---|---|---|
+| 3a store and files | sync reads and writes, `mkdir -p` with a mode, `rm` with retries, a private file (`0600`, `wx`, a hard link to claim a name), `lstat`/`chmod` for the data folder, an append log (`openSync('a')`, `writeSync`, `fchmodSync`), `realpathSync.native`, `fs.watch`, `ps` for a lock's owner and a signal to a stray by pid, SQLite (WAL, `BEGIN EXCLUSIVE` lock) | `files`, `processes.runSync`/`signal`, `sqlite.open` (the database's own files only on the real OS, §7.1), `traits.modesGuardFiles`, `env.home` |
+| 3b worktrees | git run to its end with input, a 0600 output file, a timeout, a buffer cap and an abort that end the tree (`run`); `cp -c` (`run` + `traits.clonesFiles`), `cpSync` with `verbatimSymlinks`, a folder walk that sees junctions (`readdirSync` with types), `symlink(…, 'junction')` and its `EPERM` fallback, `realpath`, bigint `dev`/`ino`; the setup command through the shell; the one recursive watch on Windows | `processes.run`/`runShell`, `files`, `traits.cpKeepsLinks`/`locksWatchedFolders`, `tools.program` |
+| 3c adapters | a contained child with three pipes (or the host's own, `'inherit'`), `exit` and `error`, `kill`, `unref`, a tree stop with a grace and the sweep of what is left; short runs with a timeout; config files read sync; the clock for graces | `processes.start`/`stop`/`run`, `child.unref`, `tools.find`/`resolve`, `files`, `clock`. **Not in it**: the POSIX host watch (an extra fd and an `sh` wrapper, `endsWithHost`) and the keeper-held processes: those stay with the adapters' process code in the layer's `grouped-child.ts`/`kill-tree.ts` until 3f |
+| 3e apps runtime | the app server with stdio `['pipe','pipe','pipe','overlapped']`, its exit and close, a stop with a grace; sync file work (fingerprints, private JSON, staging, `cpSync` with timestamps, `utimesSync`, `EXDEV` across volumes), `fs.watch`, `process.kill(pid, 0)` | `processes.start` (`'overlapped'`), `stop`, `alive`, `files`, `clock` |
+| 3d links and ssh, 3f keeper | parked (#1626, #1615) | — |
+
+Outside every area: terminals (node-pty) stay in the layer's `terminal.ts`; sockets and HTTP (`views/`, `transport/`)
+are not in `Os` yet.
+
+**Lines parked for 3d and 3f.** `links/**` (28 lines) waits for #1626, and `keeper/**` and `lifecycle/**` (15) for
+#1615 (the remote keeper); no step before them touches those lines. The first pull request (the interface) takes no line
+off: 381 before and after.
+
+### 7.3 The allowlist across parallel steps
+
+Every step takes lines out of `tooling/os-allowlist.txt`. Git merges two removals of distinct lines cleanly only when a
+kept line lies between them; two steps that take out neighbouring lines conflict (tried: removing `b` and `c` of
+`a b c d` conflicts, `b` and `d` merges). The merge queue's batches merge each member into the batch branch with
+GitHub's merge, so such a pair would conflict there too. Steps 3a and 3b both own lines in `dev-services/` and
+`sessions/`, so they would.
+
+The list is now generated as much as checked: `pnpm os:tighten` (`tsx tooling/os-tests.ts --tighten`) takes out every
+line the code no longer needs, carries the line of a file git sees renamed since main to its new path (as
+`lint:tighten` does, `alongRenames`), and adds nothing else. `project.json` `queue.conflicts.mechanical` names the list
+with that command and `tooling/os-layer.test.ts` as its check, as the lint allowlists do (#1423). On a conflict the
+queue takes main's list, tightens it from the merged code with `CC_LINT_BASE` set to main's tip, runs the check (no
+line new against main, through `baseCommit` with the merge not yet committed) and pushes.
+
+What that costs, read against the queue's code (`queue-conflict.mjs`, `queue-batch.mjs`):
+
+- The regeneration runs for a pull request GitHub reports as conflicting, on its own. A batch drops a member that
+  conflicts with the batch branch, and the member is regenerated and queued again later: one more cycle, no person.
+- A step that renames a listed file keeps its line through the regeneration (the renames are read since main's tip).
+- A comment or header edit a pull request made to the list is lost in a regeneration, since the queue takes main's
+  version of a mechanical file whole. The list's comments are a fixed two-line header; change them in a pull request
+  of their own.
+- A failing check hands the conflict to the author with nothing pushed, and the queue does not try again. It fails
+  only when the merged tree needs a line main's list does not have, which is a real new offender, for a person.
+
+The board's own tests list the file among the mechanical ones (`tooling/project-board-queue.test.ts`), and its
+AGENTS.md describes the entry.
+
+### 7.4 Order
 
 By Windows time saved and risk:
 

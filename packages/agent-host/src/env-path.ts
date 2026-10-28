@@ -2,6 +2,8 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, lstatSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, join, win32 } from 'node:path'
+import { familyOf } from './os.js'
+import { findOnPath } from './os/rules.js'
 
 /**
  * Aligns the GUI app's PATH with **the user's actual PATH**.
@@ -172,7 +174,8 @@ export function ensureToolPath(): { path: string; source: 'shell' | 'fallback' |
  * And no narrower than Windows' own search (review of #1073): since a tool not found here is never
  * spawned by its bare name, a tool Windows would start has to be found here too. An entry is read
  * without its quotes (`"C:\Program Files\Git\cmd"`, as Windows reads it), and a name counts as there
- * when the name itself is (`presentOnWindows`), an App Execution Alias in WindowsApps included.
+ * when the name itself is (`presentOnWindows`), an App Execution Alias in WindowsApps included. The rule itself is
+ * `findOnPath` (`os/rules.ts`), which the in-memory OS follows too.
  */
 export function whichTool(
   name: string,
@@ -180,27 +183,7 @@ export function whichTool(
   platform: NodeJS.Platform = process.platform,
   exists: (path: string) => boolean = platform === 'win32' ? presentOnWindows : existsSync,
 ): string | null {
-  if (platform === 'win32') {
-    // Lowercased: NTFS ignores case, and `claude.cmd` is the name npm actually wrote.
-    const exts = /\.[^\\/.]+$/.test(name)
-      ? ['']
-      : (envVar(env, 'PATHEXT') || DEFAULT_PATHEXT).split(';').filter(Boolean).map((e) => e.toLowerCase())
-    for (const entry of (envVar(env, 'PATH') ?? '').split(';')) {
-      const dir = entry.replaceAll('"', '')
-      if (!dir || !win32.isAbsolute(dir)) continue
-      for (const ext of exts) {
-        const candidate = win32.join(dir, name + ext)
-        if (exists(candidate)) return candidate
-      }
-    }
-    return null
-  }
-  for (const dir of (env.PATH ?? '').split(delimiter)) {
-    if (!dir) continue
-    const candidate = join(dir, name)
-    if (exists(candidate)) return candidate
-  }
-  return null
+  return findOnPath(name, env, familyOf(platform), exists)
 }
 
 /**
@@ -217,18 +200,4 @@ function presentOnWindows(path: string): boolean {
   } catch {
     return false
   }
-}
-
-/** What Windows assumes when PATHEXT is not set */
-const DEFAULT_PATHEXT = '.COM;.EXE;.BAT;.CMD'
-
-/**
- * A Windows environment variable, whatever its case. `process.env` itself ignores case there, but
- * a copy of it (`{ ...process.env }`, an app's environment) is a plain object that keeps the
- * spelling Windows stored, which is usually `Path`.
- */
-function envVar(env: Env, name: string): string | undefined {
-  if (env[name] !== undefined) return env[name]
-  const key = Object.keys(env).find((k) => k.toUpperCase() === name)
-  return key === undefined ? undefined : env[key]
 }

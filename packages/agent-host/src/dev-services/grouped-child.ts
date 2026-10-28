@@ -21,13 +21,28 @@ export type GroupedChild = {
   child: ChildProcess
   /** `Date.now()` just before the spawn, so it is no later than the process's own creation time (`EndedRoot`) */
   spawnedAt: number
+  /**
+   * When the host saw it exit (its `'exit'`), or null while it runs: the other end of the window in which what it
+   * left was created. Not the time of the sweep: by then Windows may have given its pid to another program, whose
+   * children would fall inside the window and be ended (#1650 review).
+   */
+  exitedAt(): number | null
+}
+
+/** `child`, started just after `spawnedAt`, with the time of its exit recorded: the one definition of `exitedAt` */
+export function tracked(child: ChildProcess, spawnedAt: number): GroupedChild {
+  let exitedAt: number | null = null
+  child.once('exit', () => {
+    exitedAt = Date.now()
+  })
+  return { child, spawnedAt, exitedAt: () => exitedAt }
 }
 
 /** Starts `command` in a group of its own (not on Windows, see the file header), hidden */
 export function spawnGrouped(command: string, args: readonly string[], opts: SpawnOptions, platform?: NodeJS.Platform): GroupedChild {
   const spawnedAt = Date.now()
   const child = spawn(command, [...args], { ...opts, detached: hasProcessGroups(platform), windowsHide: true })
-  return { child, spawnedAt }
+  return tracked(child, spawnedAt)
 }
 
 const isSignal = (name: string): name is NodeJS.Signals => Object.prototype.hasOwnProperty.call(constants.signals, name)
@@ -54,4 +69,14 @@ export function sweepExited(root: EndedRoot, platform?: NodeJS.Platform, os?: Le
     return Promise.resolve([])
   }
   return collectOrphansWindows(root, os).catch(() => [])
+}
+
+/**
+ * `sweepExited` for a child started with `spawnGrouped` (or `tracked`), once it has exited: the window of what it left
+ * is from its spawn to its exit as recorded (`exitedAt`), never to now. Nothing for a child that never started.
+ */
+export function sweepLeftovers(started: GroupedChild, platform?: NodeJS.Platform, os?: LeftoverOs): Promise<number[]> {
+  const pid = started.child.pid
+  if (pid === undefined) return Promise.resolve([])
+  return sweepExited({ pid, spawnedAt: started.spawnedAt, exitedAt: started.exitedAt() ?? Date.now() }, platform, os)
 }

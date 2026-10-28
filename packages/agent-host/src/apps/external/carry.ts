@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto'
-import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmdirSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmdirSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { removeDataQuietly } from '../../dev-services/data-folder.js'
+import { realOs } from '../../os/real.js'
 import { VERSIONS_REL } from './versions.js'
 
 /**
@@ -108,7 +109,12 @@ function copyFolderOnce(from: string, to: string): void {
   mkdirSync(dirname(to), { recursive: true })
   const tmp = `${to}.carry-${randomUUID()}`
   try {
-    cpSync(from, tmp, { recursive: true, preserveTimestamps: true, verbatimSymlinks: true })
+    // The `Os`'s copy: a link an app left in its data (one back to its own folder too) is copied as a link, and one
+    // into the folder leads into the new key's (`to`, where `tmp` is renamed), not the old one's (#1650 review). A
+    // junction, all an app on Windows can make without a right, always holds a whole path: kept as written, the two
+    // keys would share what is behind it, and removing the old key's copy would take the new key's data with it.
+    // Sync: a link to a share that does not answer holds the event loop until Windows gives up (about 21 s, once)
+    realOs().files.cpSync(from, tmp, { recursive: true, preserveTimestamps: true, verbatimSymlinks: true, links: { from, to } })
     renameSync(tmp, to)
   } catch (e) {
     removeDataQuietly(tmp, '[apps]')

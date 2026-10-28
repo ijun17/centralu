@@ -55,6 +55,9 @@ export function osModule(specifier) {
 export const OS_LAYER = [
   // The host's questions named for what differs: `ps`, clonefile, locked programs, path rules, install paths
   'packages/agent-host/src/os.ts',
+  // The `Os` the host is given, on the machine itself (os/port.ts; its rules are os/rules.ts, pure, and the in-memory
+  // one os/memory.ts, which touches nothing)
+  'packages/agent-host/src/os/real.ts',
   // Finding a tool on PATH (PATHEXT, npm shims) and starting it (`.cmd` shims, absolute paths)
   'packages/agent-host/src/env-path.ts',
   'packages/agent-host/src/tool-launch.ts',

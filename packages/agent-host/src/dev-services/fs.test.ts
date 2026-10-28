@@ -230,6 +230,17 @@ describe('copyTree — the ordinary copy after a clone stops partway (#167)', ()
     expect(readFileSync(join(dst, 'alias', 'index.js'), 'utf8')).toBe('module.exports = 1\n')
     expect(lstatSync(join(dst, 'alias')).isSymbolicLink()).toBe(true)
   })
+
+  // A whole link into the project leads to the same place in the worktree, on Windows (copyTreeWindows) and on POSIX
+  // (the `Os`'s copy with `links`), by one rule; kept as written it led into the project (#1650 review)
+  it('a junction or whole link into the project leads into the copy', async () => {
+    const project = join(root, 'project')
+    mkdirSync(join(project, 'packages', 'a'), { recursive: true })
+    linkDir(join(project, 'packages', 'a'), join(project, 'linked'))
+    const worktree = join(root, 'worktree')
+    await copyTree(project, worktree, { clone: async () => false })
+    expect(realpathSync.native(join(worktree, 'linked'))).toBe(realpathSync.native(join(worktree, 'packages', 'a')))
+  })
 })
 
 describe('readTextFile — image previews', () => {

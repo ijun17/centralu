@@ -12,6 +12,7 @@
     "test": "vitest run",
     "lint": "tsx tooling/lint.ts",
     "lint:tighten": "tsx tooling/lint.ts --tighten",
+    "os:tighten": "tsx tooling/os-tests.ts --tighten",
     "depcruise": "depcruise packages apps --config tooling/dependency-cruiser.cjs",
     "verify": "pnpm lint && pnpm depcruise && pnpm typecheck && pnpm test",
     "pre-pr": "node scripts/pre-pr.mjs",

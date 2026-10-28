@@ -268,6 +268,12 @@ describe("Node's own npm.cmd and npx.cmd", () => {
     expect(launchFor(`${nodeDir}\\npm.cmd`, deps(files, 'win32', prefix))).toEqual({ command: NODE, args: [npmCli] })
   })
 
+  it('a prefix that is not an absolute path is not looked in: a relative one would be read from the working folder', () => {
+    const planted = `undefined\\node_modules\\npm\\bin\\npm-cli.js`
+    for (const answer of ['undefined', 'node_modules', '.\\prefix'])
+      expect(nodeShimEntry(nodeDistShim('npm'), nodeDir, deps({ ...files, [planted]: '', [`${answer}\\node_modules\\npm\\bin\\npm-cli.js`]: '' }, 'win32', answer))).toBe(npmCli)
+  })
+
   it('after `npm i -g npm`, the npm in the global prefix, as the batch file itself would choose', () => {
     const withPrefixNpm = { ...files, [prefixCli]: '' }
     expect(launchFor(`${nodeDir}\\npm.cmd`, deps(withPrefixNpm, 'win32', prefix))).toEqual({ command: NODE, args: [prefixCli] })

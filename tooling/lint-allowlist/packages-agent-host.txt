@@ -499,7 +499,7 @@ packages/agent-host/src/themes.ts @typescript-eslint/no-unsafe-type-assertion 1
 packages/agent-host/src/this-machine.ts @typescript-eslint/no-unnecessary-type-assertion 1
 packages/agent-host/src/this-machine.ts @typescript-eslint/no-unsafe-type-assertion 3
 packages/agent-host/src/timing.ts @typescript-eslint/no-unnecessary-type-assertion 2
-packages/agent-host/src/tool-launch.ts @typescript-eslint/no-non-null-assertion 2
+packages/agent-host/src/tool-launch.ts @typescript-eslint/no-non-null-assertion 1
 packages/agent-host/src/transport/bridge-token.ts @typescript-eslint/no-non-null-assertion 2
 packages/agent-host/src/transport/bridge-token.ts @typescript-eslint/no-unsafe-type-assertion 1
 packages/agent-host/src/transport/event-log.ts @typescript-eslint/no-non-null-assertion 1

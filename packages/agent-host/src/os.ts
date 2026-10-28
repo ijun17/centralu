@@ -13,6 +13,7 @@
 import { homedir } from 'node:os'
 import { posix, win32, type PlatformPath } from 'node:path'
 import { APP_NAME, APP_SLUG, type HostLogon } from '@cc/protocol'
+import { commandInterpreter as rulesCommandInterpreter, pathRules, systemTool as rulesSystemTool, traitsOf, type OsFamily, type OsTraits } from './os/rules.js'
 
 export type Platform = NodeJS.Platform
 
@@ -20,37 +21,37 @@ export type Platform = NodeJS.Platform
 export const HOST_PLATFORM: Platform = process.platform
 
 /**
+ * The family of OS `platform` is, whose rules `os/rules.ts` holds (#1599): Windows, or the POSIX systems. The one place
+ * the layer turns the platform into the family; the questions below read the family's answers from there.
+ */
+export function familyOf(platform: Platform = HOST_PLATFORM): OsFamily {
+  return platform === 'win32' ? 'windows' : 'posix'
+}
+
+/** Every question `OsTraits` names, answered for `platform`: the family's answers, and macOS's clones */
+export function traitsFor(platform: Platform = HOST_PLATFORM): OsTraits {
+  return { ...traitsOf(familyOf(platform)), clonesFiles: clonesFiles(platform) }
+}
+
+/**
  * `ps` and `lsof` are there to ask about another process: its start time, its working folder.
  * Windows has neither, and reuses pids quickly, so a pid alone says little there.
  */
 export function hasPs(platform: Platform = HOST_PLATFORM): boolean {
-  return platform !== 'win32'
-}
-
-/** Where Windows lives when `%SystemRoot%` cannot be used */
-const DEFAULT_SYSTEM_ROOT = 'C:\\Windows'
-
-/** A whole Windows path from a drive's root (`C:\…`): not relative, not drive-relative (`C:x`), not a share */
-function driveAbsolute(p: string | undefined): p is string {
-  return typeof p === 'string' && /^[A-Za-z]:[\\/]/.test(p)
+  return traitsOf(familyOf(platform)).hasPs
 }
 
 /**
- * A Windows system program by its full path under `%SystemRoot%\System32` (taskkill, PowerShell, cmd), so it is
- * never looked up by name: Windows looks a bare or relative name up in the working directory first, and the host runs
- * in a project's folder, where a planted `taskkill.exe` would run.
- *
- * A `SystemRoot` that is not a whole path from a drive's root is not used: an empty one made `System32\taskkill.exe`
- * a path relative to the working directory (#428). `C:\Windows` is used instead.
+ * A Windows system program by its full path under `%SystemRoot%System32` (taskkill, PowerShell, cmd), never looked up
+ * by name (`systemTool` in `os/rules.ts`, #428).
  */
 export function systemTool(segments: readonly string[], env: Record<string, string | undefined> = process.env): string {
-  const root = driveAbsolute(env.SystemRoot) ? env.SystemRoot : DEFAULT_SYSTEM_ROOT
-  return win32.join(root, 'System32', ...segments)
+  return rulesSystemTool(segments, env)
 }
 
-/** `%ComSpec%` when it is a whole path from a drive's root, else cmd.exe under `systemTool` (the same rule) */
+/** `%ComSpec%` when it is a whole path from a drive's root, else cmd.exe under `systemTool` (`commandInterpreter` in `os/rules.ts`) */
 export function commandInterpreter(env: Record<string, string | undefined> = process.env): string {
-  return driveAbsolute(env.ComSpec) ? env.ComSpec : systemTool(['cmd.exe'], env)
+  return rulesCommandInterpreter(env)
 }
 
 /** `cp -c` clones a folder with APFS's clonefile: macOS only. */
@@ -71,7 +72,7 @@ export function installsCliAsVersionFolders(platform: Platform = HOST_PLATFORM):
  * update is never run in place just to ask its version.
  */
 export function locksRunningPrograms(platform: Platform = HOST_PLATFORM): boolean {
-  return platform === 'win32'
+  return traitsOf(familyOf(platform)).locksRunningPrograms
 }
 
 /**
@@ -87,7 +88,7 @@ export function usesShippedConpty(platform: Platform = HOST_PLATFORM): boolean {
  * holds the folder open. There a project is watched by one recursive watch on its root instead of one per folder.
  */
 export function locksWatchedFolders(platform: Platform = HOST_PLATFORM): boolean {
-  return platform === 'win32'
+  return traitsOf(familyOf(platform)).locksWatchedFolders
 }
 
 /**
@@ -131,17 +132,17 @@ export function rustTarget(platform: Platform = HOST_PLATFORM, arch: string = pr
  * its ACL, which a profile folder already gives to its owner alone (#838, `keepDataFolderPrivate`).
  */
 export function modesGuardFiles(platform: Platform = HOST_PLATFORM): boolean {
-  return platform !== 'win32'
+  return traitsOf(familyOf(platform)).modesGuardFiles
 }
 
 /** File names that differ only by case are one file (Windows): comparing two spellings of a path folds case first. */
 export function foldsPathCase(platform: Platform = HOST_PLATFORM): boolean {
-  return platform === 'win32'
+  return traitsOf(familyOf(platform)).foldsPathCase
 }
 
 /** The path rules of `platform`: backslashes and drive letters on Windows, slashes elsewhere. */
 export function pathsOf(platform: Platform = HOST_PLATFORM): PlatformPath {
-  return platform === 'win32' ? win32 : posix
+  return pathRules(familyOf(platform))
 }
 
 /**
@@ -209,12 +210,12 @@ export function availableMemorySource(
 }
 
 /**
- * Node's `cpSync` keeps a link as a link (#849). Not on Windows: there a folder is linked with a junction (pnpm without
- * Developer Mode, npm and yarn workspaces), and `cpSync` copies a junction as a real folder holding its target, and
- * walks into two junctions that point at each other until the process dies. A copy there walks the tree itself.
+ * Whether a tree's links to folders keep their meaning in a plain copy (#849, `OsTraits.cpKeepsLinks`). Not on Windows:
+ * there a folder is linked with a junction (pnpm without Developer Mode, npm and yarn workspaces), whose target is a
+ * whole path, so a copy's junction still leads into the source; a worktree copy there retargets them itself.
  */
 export function cpKeepsLinks(platform: Platform = HOST_PLATFORM): boolean {
-  return platform !== 'win32'
+  return traitsOf(familyOf(platform)).cpKeepsLinks
 }
 
 /**
@@ -223,7 +224,7 @@ export function cpKeepsLinks(platform: Platform = HOST_PLATFORM): boolean {
  * There the sizes are read from the file system.
  */
 export function measuresWithDu(platform: Platform = HOST_PLATFORM): boolean {
-  return platform !== 'win32'
+  return traitsOf(familyOf(platform)).measuresWithDu
 }
 
 /**
@@ -232,7 +233,7 @@ export function measuresWithDu(platform: Platform = HOST_PLATFORM): boolean {
  * and `notes.txt:payload` writes a hidden stream on `notes.txt` instead of a file of that name.
  */
 export function hasWindowsFileNames(platform: Platform = HOST_PLATFORM): boolean {
-  return platform === 'win32'
+  return traitsOf(familyOf(platform)).hasWindowsFileNames
 }
 
 /**

@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto'
-import { cpSync, mkdirSync, mkdtempSync, renameSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, renameSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { appKeyOf, type AppReview, type ExternalAppInfo } from '@cc/protocol'
+import { realOs } from '../../os/real.js'
 import { canonicalJson } from './runs.js'
 import { ImportBook, reviewKey } from './import-book.js'
 import {
@@ -224,7 +225,7 @@ export class AppHandover {
       // Another volume: copied beside its place and renamed in, so it never stands half there
       const tmp = join(dirname(target.path), `.${s.review.appId}.${randomUUID()}`)
       try {
-        cpSync(s.appDir, tmp, { recursive: true, preserveTimestamps: true })
+        realOs().files.cpSync(s.appDir, tmp, { recursive: true, preserveTimestamps: true })
         renameSync(tmp, target.path)
       } catch (err) {
         discard(tmp, this.opts.remove)

@@ -20,6 +20,8 @@
  *                                                        `CC_TEST_FILES` reads it); with --shard, shard i of n,
  *                                                        balanced by the measured times (`balance`)
  *   tsx tooling/os-tests.ts --offenders                  the checked files that touch the OS outside the layer
+ *   tsx tooling/os-tests.ts --tighten                    takes off the allowlist every line the code no longer needs
+ *                                                        (`pnpm os:tighten`); never adds one
  *   tsx tooling/os-tests.ts --refresh-durations <vitest JSON report>...
  *                                                        rewrites tooling/test-durations.json from the reports
  */
@@ -30,7 +32,8 @@ import { fileURLToPath } from 'node:url'
 import { Linter, type Rule } from 'eslint'
 import tseslint from 'typescript-eslint'
 import plugin, { loadedSpecifier } from './eslint-platform-checks.js'
-import { EVERY_OS_TESTS, inOsLayer, isChecked, isRepoApp } from './os-layer.js'
+import { baseCommit, renamesSince, type Rename } from './lint-allowlist.js'
+import { EVERY_OS_TESTS, OS_ALLOWLIST, inOsLayer, isChecked, isRepoApp, parseOsAllowlist } from './os-layer.js'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 
@@ -289,7 +292,48 @@ export function formatDurations(durations: Durations, source: string): string {
   return `{\n  "source": ${JSON.stringify(source)},\n  "files": {\n${files.join(',\n')}\n  }\n}\n`
 }
 
+/**
+ * The allowlist's text with every line the code no longer needs taken out (`--tighten`): a file that moved behind the
+ * layer, or is gone. A file git sees renamed since main (`renames`, which `pnpm lint:tighten` follows too) keeps its
+ * line under its new path; nothing else is added, so a new offender still fails `os-layer.test.ts`. Comments stay where
+ * they are and the paths stay sorted. The merge queue runs it on a conflict in the list
+ * (`.centralu/apps/project-board/project.json` `queue.conflicts.mechanical`): two pull requests that each take out a
+ * line next to the other's conflict in git, and the merged tree says which lines are left.
+ */
+export function tightened(text: string, offenders: ReadonlySet<string>, renames: readonly Rename[] = []): string {
+  const lines = text.split(/\r?\n/)
+  if (lines.at(-1) === '') lines.pop()
+  const isPath = (l: string) => l.trim() !== '' && !l.trim().startsWith('#')
+  const moved = new Map(renames.map(({ from, to }) => [from, to]))
+  const paths = [...new Set(lines.filter(isPath).map((l) => moved.get(l.trim()) ?? l.trim()))].filter((p) => offenders.has(p)).sort()
+  // Each path line takes the next kept path in order; a path line left over is dropped
+  let next = 0
+  const kept = lines.flatMap((l) => {
+    if (!isPath(l)) return [l]
+    const path = paths[next]
+    if (path === undefined) return []
+    next++
+    return [path]
+  })
+  return kept.join('\n') + '\n'
+}
+
+/** The files git sees renamed since main (`CC_LINT_BASE`, which the merge queue sets, else origin/main); none when unknown */
+function renamesSinceMain(): Rename[] {
+  const base = baseCommit(ROOT, process.env.CC_LINT_BASE ?? 'origin/main')
+  return (base && renamesSince(ROOT, base)) || []
+}
+
 async function main(argv: string[]) {
+  if (argv.includes('--tighten')) {
+    const file = `${ROOT}${OS_ALLOWLIST}`
+    const before = readFileSync(file, 'utf8')
+    const after = tightened(before, new Set(await repo.offenders(repoFiles())), renamesSinceMain())
+    if (after !== before) writeFileSync(file, after)
+    const count = (t: string) => parseOsAllowlist(t).length
+    console.error(`${OS_ALLOWLIST}: ${count(before)} -> ${count(after)} lines`)
+    return
+  }
   if (argv.includes('--offenders')) {
     process.stdout.write((await repo.offenders(repoFiles())).join('\n') + '\n')
     return
@@ -304,7 +348,7 @@ async function main(argv: string[]) {
     return
   }
   const out = argv[argv.indexOf('--out') + 1]
-  if (!argv.includes('--out') || !out) throw new Error('usage: tsx tooling/os-tests.ts --out <file> [--shard i/n] | --offenders | --refresh-durations <report>...')
+  if (!argv.includes('--out') || !out) throw new Error('usage: tsx tooling/os-tests.ts --out <file> [--shard i/n] | --offenders | --tighten | --refresh-durations <report>...')
   const shardArg = argv.includes('--shard') ? argv[argv.indexOf('--shard') + 1] : undefined
   const shard = shardArg === undefined ? null : /^(\d+)\/(\d+)$/.exec(shardArg)
   if (shardArg !== undefined && (!shard || Number(shard[1]) < 1 || Number(shard[1]) > Number(shard[2]))) throw new Error(`--shard ${shardArg}: expected i/n with 1 <= i <= n`)

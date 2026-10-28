@@ -2,7 +2,7 @@ import type { ChildProcess } from 'node:child_process'
 import { EventEmitter } from 'node:events'
 import { PassThrough, Readable, type Writable } from 'node:stream'
 import { KILL_GRACE_MS, hasProcessGroups, killTree, noteGroups, stopGroup, stopTree, type KillOs, type LeftoverOs } from '../dev-services/kill-tree.js'
-import { killHandle, spawnGrouped, sweepExited } from '../dev-services/grouped-child.js'
+import { killHandle, spawnGrouped, sweepLeftovers, tracked, type GroupedChild } from '../dev-services/grouped-child.js'
 import { ExitAfterDrain } from '../exit-after-drain.js'
 import { Tail } from '../stream-text.js'
 import type { AgentProcess, AgentSpawnSpec } from './contract.js'
@@ -110,8 +110,8 @@ export class LocalAgentProcess extends EventEmitter implements AgentProcess {
 
   private constructor(
     private readonly child: ChildProcess,
-    /** Taken just before the spawn (`spawnGrouped`): the Windows sweep matches what it left by creation time */
-    private readonly spawnedAt: number,
+    /** Its start and exit times (`spawnGrouped`): the Windows sweep matches what it left by creation time */
+    private readonly started: GroupedChild,
     private readonly os: LocalProcessOs | undefined,
     private readonly spec: AgentSpawnSpec,
   ) {
@@ -150,9 +150,9 @@ export class LocalAgentProcess extends EventEmitter implements AgentProcess {
         ? spawnGrouped('/bin/sh', ['-c', HOST_WATCH, 'centralu-agent', spec.command, ...spec.args], { cwd: spec.cwd, env: spec.env, stdio: ['pipe', 'pipe', 'pipe', 'pipe', 'pipe'] }, os?.platform)
         : spawnGrouped(spec.command, spec.args, { cwd: spec.cwd, env: spec.env, stdio: ['pipe', 'pipe', 'pipe'] }, os?.platform)
     } catch (err) {
-      started = { child: notStarted(err as Error), spawnedAt: Date.now() }
+      started = tracked(notStarted(err as Error), Date.now())
     }
-    const p = new LocalAgentProcess(started.child, started.spawnedAt, os, spec)
+    const p = new LocalAgentProcess(started.child, started, os, spec)
     if (spec.signal) {
       if (spec.signal.aborted) p.kill('SIGTERM')
       else spec.signal.addEventListener('abort', () => p.kill('SIGTERM'), { once: true })
@@ -278,8 +278,7 @@ export class LocalAgentProcess extends EventEmitter implements AgentProcess {
     // Groups of its own its helpers started (a shell, measured: Cursor's), which its group's sweep does not reach
     this.stopGroupClock()
     for (const g of this.groups) stopGroup(g, KILL_GRACE_MS)
-    const root = { pid, spawnedAt: this.spawnedAt, exitedAt: Date.now() }
-    void sweepExited(root, this.os?.platform, this.os?.listProcesses ? { listProcesses: this.os.listProcesses, taskkill: this.os.taskkill } : undefined).then((ended) => {
+    void sweepLeftovers(this.started, this.os?.platform, this.os?.listProcesses ? { listProcesses: this.os.listProcesses, taskkill: this.os.taskkill } : undefined).then((ended) => {
       if (ended.length > 0) console.error(`[agent] ended ${ended.length} process(es) pid ${pid} left running: ${ended.join(', ')}`)
     })
   }
