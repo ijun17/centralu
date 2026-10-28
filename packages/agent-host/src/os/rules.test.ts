@@ -233,20 +233,17 @@ describe('the questions named for what differs', () => {
 })
 
 describe('Windows path forms Win32 opens as one path', () => {
-  it('the \\\\?\\ form of a path is the plain path, and a plain one loses the dots and spaces ending a name', () => {
+  it('the \\\\?\\ form of a path is the plain path; a name ending in a dot or a space is a name of its own, as Node opens it', () => {
     expect(samePath('\\\\?\\C:\\x', 'C:\\x', 'windows')).toBe(true)
     expect(samePath('\\\\?\\c:\\X\\y', 'C:\\x\\Y', 'windows')).toBe(true)
+    expect(samePath('\\\\?\\C:', 'C:\\', 'windows')).toBe(true)
     expect(samePath('\\\\?\\UNC\\s\\sh\\x', '\\\\s\\sh\\x', 'windows')).toBe(true)
     expect(samePath('\\\\?\\unc\\s\\sh', '\\\\s\\sh', 'windows')).toBe(true)
-    expect(samePath('C:\\x\\y.', 'C:\\x\\y', 'windows')).toBe(true)
-    expect(samePath('C:\\x\\y ', 'C:\\x\\y', 'windows')).toBe(true)
-    expect(samePath('C:\\x.\\y', 'C:\\x\\y', 'windows')).toBe(true)
-    expect(isInside('C:\\x', 'C:\\x.\\y. ', 'windows')).toBe(true)
     expect(isInside('\\\\?\\C:\\x', 'C:\\x\\y', 'windows')).toBe(true)
-    // Verbatim skips the clean-up: a name ending in a dot is its own name there, and POSIX keeps every name
-    expect(samePath('\\\\?\\C:\\x\\y.', 'C:\\x\\y', 'windows')).toBe(false)
-    expect(samePath('/x/y.', '/x/y', 'posix')).toBe(false)
-    expect(samePath('C:\\x\\y.z', 'C:\\x\\y', 'windows')).toBe(false)
+    // Node reads `y.` and `y` as two files, so a sibling folder `proj.` is not inside `proj`
+    expect(samePath('C:\\x\\y.', 'C:\\x\\y', 'windows')).toBe(false)
+    expect(isInside('C:\\work\\proj', 'C:\\work\\proj.\\secret', 'windows')).toBe(false)
+    expect(isInside('C:\\work\\proj', 'C:\\work\\proj \\secret', 'windows')).toBe(false)
   })
 })
 

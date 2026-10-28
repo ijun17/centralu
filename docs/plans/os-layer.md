@@ -412,7 +412,7 @@ answer, and a test on memory says what the host does:
   `verbatimSymlinks` do not, but the rule is one). Windows copies only a junction as the folder it leads to: a symlink
   to a folder, back to an ancestor too, is copied as a link, as is every link on POSIX, and is not refused. Node's
   types do not tell a junction from a symlink there, so the real `Os` asks PowerShell, and only of a link that leads back
-  (a few hundred ms, once). The check reads the tree once before the copy (a folder once, however many links lead to it).
+  (about 0.2 s for each such link). The check reads the tree before the copy, each folder once however many links lead to it (a 20 000-entry pnpm tree: the copy 11.3 s, the check about 1 s); on Windows it also reads what a symlink leads to, which the copy does not enter.
 - On Windows `OsChild.kill` and `processes.signal` send only TERM, KILL, INT and QUIT and throw for any other
   (`ENOSYS`, `ERR_UNKNOWN_SIGNAL`), leaving the process running: Node's own `child.kill('SIGHUP')` ends it as SIGKILL
   while `process.kill(pid, 'SIGHUP')` throws, and the `Os` takes the one rule for both.

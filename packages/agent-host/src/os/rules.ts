@@ -132,33 +132,30 @@ export function pathRulesFrom(family: OsFamily, cwd: () => string): PlatformPath
 }
 
 /**
- * A resolved Windows path in the one spelling Win32 opens it by. The `\\?\` and `\\.\` forms name the same file as the
- * plain path (`\\?\C:\x` is `C:\x`, `\\?\UNC\s\sh` is `\\s\sh`) but skip the clean-up Win32 does of a plain one, so
- * `\\?\C:\x.` stays a name of its own. A plain path loses the dots and spaces that end each name (`C:\x\y.` and
- * `C:\x\y ` open `C:\x\y`). Another `\\?\` form (a volume GUID) is left as it is.
+ * A resolved Windows path without its `\\?\` prefix: `\\?\C:\x` names the file `C:\x` does, and `\\?\UNC\s\sh` the
+ * share `\\s\sh` (the prefix only tells Win32 to leave the rest alone). Another `\\?\` form (a volume GUID) is kept.
+ * Dots and spaces that end a name are not dropped: Node opens every path in its `\\?\` form, so `y.` is a name of its
+ * own to it (measured: `readFileSync` of `d\y.\f` and of `d\y\f` read two files).
  */
-function win32Spelling(full: string): string {
-  const prefix = /^\\\\[?.]\\/.exec(full)
-  if (prefix) {
-    const unc = /^\\\\[?.]\\UNC\\/i.exec(full)
-    if (unc) return win32.resolve(`\\\\${full.slice(unc[0].length)}`)
-    return /^[A-Za-z]:(\\|$)/.test(full.slice(prefix[0].length)) ? full.slice(prefix[0].length) : full
-  }
-  const root = win32.parse(full).root
-  const names = full.slice(root.length).split('\\')
-  return root + names.map((n) => n.replace(/[. ]+$/, '') || n).join('\\')
+function withoutVerbatimPrefix(full: string): string {
+  const prefix = /^\\\\\?\\/.exec(full)
+  if (!prefix) return full
+  const unc = /^\\\\\?\\UNC\\/i.exec(full)
+  if (unc) return win32.resolve(`\\\\${full.slice(unc[0].length)}`)
+  const plain = full.slice(prefix[0].length)
+  return /^[A-Za-z]:(\\|$)/.test(plain) ? win32.resolve(plain.length === 2 ? `${plain}\\` : plain) : full
 }
 
 /**
  * The form two spellings of one path share: resolved (relative to `cwd`, default this process's working folder),
  * without a trailing separator, and on Windows in one case (`foldCase`) with one kind of separator, the `\\?\` form
- * as the plain one and a name without the dots and spaces Win32 drops from its end. Not the real spelling (that is
+ * as the plain one. Not the real spelling (that is
  * `realpathSync.native`'s): a key to compare and to index by.
  */
 export function pathKey(path: string, family: OsFamily, cwd?: string): string {
   const p = pathRules(family)
   let full = cwd === undefined ? p.resolve(path) : p.resolve(cwd, path)
-  if (family === 'windows') full = win32Spelling(full)
+  if (family === 'windows') full = withoutVerbatimPrefix(full)
   const root = p.parse(full).root
   while (full.length > root.length && (full.endsWith(p.sep) || full.endsWith('/'))) full = full.slice(0, -1)
   return foldCase(full, family)
@@ -309,10 +306,11 @@ export type TreeReader = {
  *   where `traits.cpKeepsLinks` is true, so a symlink back to an ancestor copies fine and is not refused (measured).
  *
  * The `Os` refuses such a copy with `ELOOP` before anything is copied, on the real OS and in memory alike. The walk
- * enters every link to a folder on Windows and asks `isJunction` only of one that leads back, since telling a junction
- * from a symlink can cost a process there; a folder is walked once. (A symlink to a folder that holds a junction back
- * to its own parent is refused though the copy would not enter the symlink: the one place the rule is wider than
- * Node's.)
+ * enters every link to a folder on Windows, since telling a junction from a symlink can cost a process there, and asks
+ * `isJunction` only when it comes back to a folder it is inside: the cycle counts when every link on the way from the
+ * root to its end is a junction (a symlink on the way is one Node's copy never enters). A folder is walked once, unless
+ * it was walked through a symlink and a cycle skipped there (it may be reached by junctions alone another time). The
+ * rule is wider than Node's in one way: a symlink to a big folder is read though the copy would not enter it.
  */
 export function linkLoop(root: string, read: TreeReader, family: OsFamily, join: (...parts: string[]) => string): string | null {
   // A root that loops is `ELOOP` from a synchronous copy as it is, but `fs.promises.cp` copies it as a link
@@ -320,13 +318,22 @@ export function linkLoop(root: string, read: TreeReader, family: OsFamily, join:
   const start = read.real(root)
   if (start === null || !read.isDir(root)) return null
   const followsLinks = !traitsOf(family).cpKeepsLinks
-  // Folders walked to the end with no loop in them, by real path: reaching one again by another way adds nothing
+  // Folders walked to the end with nothing skipped in them, by real path: reaching one again adds nothing
   const done = new Set<string>()
-  // A folder's real path is its parent's and its name; only a link's is asked for
-  const walk = (dir: string, dirReal: string, chain: ReadonlySet<string>): string | null => {
+  const junctions = new Map<string, boolean>()
+  const isJunction = (path: string): boolean => {
+    let is = junctions.get(path)
+    if (is === undefined) junctions.set(path, (is = read.isJunction(path)))
+    return is
+  }
+  // Cycles back to a folder the walk was inside that a symlink on the way keeps Node's copy from following
+  let skipped = 0
+  // A folder's real path is its parent's and its name; only a link's is asked for. `links`: those entered on the way
+  const walk = (dir: string, dirReal: string, chain: ReadonlySet<string>, links: readonly string[]): string | null => {
     const key = pathKey(dirReal, family)
     if (done.has(key)) return null
     const inside = new Set(chain).add(key)
+    const before = skipped
     for (const e of read.list(dir)) {
       const path = join(dir, e.name)
       const link = e.isSymbolicLink()
@@ -335,17 +342,19 @@ export function linkLoop(root: string, read: TreeReader, family: OsFamily, join:
       if (link && (!followsLinks || !read.isDir(path))) continue
       const real = link ? read.real(path) : join(dirReal, e.name)
       if (real === null) continue
+      const via = link ? [...links, path] : links
       if (inside.has(pathKey(real, family))) {
-        if (link && !read.isJunction(path)) continue
-        return path
+        if (via.every(isJunction)) return path
+        skipped++
+        continue
       }
-      const found = walk(path, real, inside)
+      const found = walk(path, real, inside, via)
       if (found !== null) return found
     }
-    done.add(key)
+    if (skipped === before) done.add(key)
     return null
   }
-  return walk(root, start, new Set())
+  return walk(root, start, new Set(), [])
 }
 
 /** Where Windows lives when `%SystemRoot%` cannot be used */

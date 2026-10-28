@@ -751,6 +751,35 @@ export const CONTRACT: Contract[] = [
     },
   },
   {
+    name: 'a symlink to a folder above the copied tree is not entered by the copy; a junction back into the tree reached only through it still is refused',
+    symlinks: true,
+    // Windows: Node copies a symlink as a link and never enters it, so the tree above is no loop; but a junction back to
+    // the root, reached by a route of junctions too, is one. POSIX copies every link as a link
+    want: {
+      windows: { above: 'ok', aboveKept: true, viaSymlinkFirst: err('ELOOP') },
+      posix: { above: 'ok', aboveKept: true, viaSymlinkFirst: 'ok' },
+    },
+    async run(os, root) {
+      const { join } = os.paths.path
+      const f = os.files
+      // outer/p/d/up -> outer (a symlink to the parent of the tree copied)
+      const p = join(root, 'outer', 'p')
+      f.mkdirSync(join(p, 'd'), { recursive: true })
+      f.writeFileSync(join(p, 'd', 'f'), 'k')
+      f.symlinkSync(join(root, 'outer'), join(p, 'd', 'up'), 'dir')
+      const above = await outcome(() => (f.cpSync(p, join(root, 'out1'), { recursive: true }), 'ok'))
+      const aboveKept = f.lstatSync(join(root, 'out1', 'd', 'up')).isSymbolicLink()
+      // q/0s -> q/a (a symlink, listed first) and q/a/j -> q (a junction back to the root): the junction is a loop on the
+      // route q -> a -> j, which the copy follows; the symlink 0s reaches the same folders first but is not followed
+      const q = join(root, 'q')
+      f.mkdirSync(join(q, 'a'), { recursive: true })
+      f.symlinkSync(join(q, 'a'), join(q, '0s'), 'dir')
+      f.symlinkSync(q, join(q, 'a', 'j'), 'junction')
+      const viaSymlinkFirst = await outcome(() => (f.cpSync(q, join(root, 'out2'), { recursive: true }), 'ok'))
+      return { above, aboveKept, viaSymlinkFirst }
+    },
+  },
+  {
     name: 'names NTFS folds and those it does not: é and É are one, the Kelvin sign and k, or ı and I, are two',
     linux: true,
     want: {
