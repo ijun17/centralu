@@ -382,7 +382,7 @@ file refused", which is not what Node does: it opens files with share-delete):
 | `mkdir` over a link; `mkdir -p` over one | `EEXIST`; followed: to a folder done, to nothing `ENOENT` | the same |
 | open a folder: to read; to write | allowed, it reads as `EISDIR`; allowed | allowed, it reads as `EISDIR`; `EISDIR` |
 | copy a tree into itself (`cpSync`), as written or through a link in the target's parents | `ERR_FS_CP_EINVAL` | the same |
-| `copyFile`: the copy's change time | the source's (CopyFile) | now (macOS: the source's, `copyfile`) |
+| `copyFile`: the copy's change time | the source's (CopyFile) | now (macOS too, measured on APFS) |
 | a junction | absolute (a relative target read from its folder); a link to `lstat` and the listing; one to a file leads nowhere (`ENOENT`) | — |
 | `realpathSync.native` / `realpathSync` | the case stored / the case given | the same |
 | `child.kill()` / `taskkill /F` / `process.kill(pid)` | exit `null, SIGTERM` / `1, null` / `1, null` | exit `null, SIGTERM` / — / `null, SIGTERM` |

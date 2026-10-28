@@ -798,12 +798,12 @@ export const CONTRACT: Contract[] = [
   },
   {
     name: "a copy takes Node's options: force, errorOnExist, preserveTimestamps; a link onto a file is EEXIST, onto a link replaces it",
-    // `timesLost`: a plain copy keeps the change time where copying a file does (Windows' CopyFile, macOS's copyfile)
+    // `timesKept`: a plain copy keeps the change time where copying a file does: Windows' CopyFile; not Linux, nor macOS
+    // (measured on APFS, Node 26)
     want: {
-      windows: { replaced: 'new', kept: 'old', refused: err('ERR_FS_CP_EEXIST'), times: true, timesLost: true, readOnlyTimes: true, linkOntoFile: err('EEXIST'), linkOntoLink: true, ...OPTION_TAIL },
-      posix: { replaced: 'new', kept: 'old', refused: err('ERR_FS_CP_EEXIST'), times: true, timesLost: false, readOnlyTimes: true, linkOntoFile: err('EEXIST'), linkOntoLink: true, ...OPTION_TAIL_POSIX },
+      windows: { replaced: 'new', kept: 'old', refused: err('ERR_FS_CP_EEXIST'), times: true, timesKept: true, readOnlyTimes: true, linkOntoFile: err('EEXIST'), linkOntoLink: true, ...OPTION_TAIL },
+      posix: { replaced: 'new', kept: 'old', refused: err('ERR_FS_CP_EEXIST'), times: true, timesKept: false, readOnlyTimes: true, linkOntoFile: err('EEXIST'), linkOntoLink: true, ...OPTION_TAIL_POSIX },
     },
-    darwin: { replaced: 'new', kept: 'old', refused: err('ERR_FS_CP_EEXIST'), times: true, timesLost: true, readOnlyTimes: true, linkOntoFile: err('EEXIST'), linkOntoLink: true, ...OPTION_TAIL_POSIX },
     async run(os, root) {
       const { join } = os.paths.path
       const f = os.files
@@ -842,7 +842,7 @@ export const CONTRACT: Contract[] = [
         kept: read(keep),
         refused: await outcome(() => f.cpSync(s, refuse, { recursive: true, force: false, errorOnExist: true })),
         times: mtime('t1', 'a') === 1_600_000_000_000,
-        timesLost: mtime('t2', 'a') === 1_600_000_000_000,
+        timesKept: mtime('t2', 'a') === 1_600_000_000_000,
         readOnlyTimes: mtime('t1', 'ro') === 1_600_000_000_000,
         linkOntoFile: await outcome(() => f.cpSync(l, join(root, 'lf'), { recursive: true })),
         linkOntoLink: (f.cpSync(l, join(root, 'll'), { recursive: true }), os.paths.same(f.readlinkSync(join(root, 'll', 'j')), s)),
