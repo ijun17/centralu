@@ -21,7 +21,7 @@ describe('when the totals were read (asOf)', () => {
   it('is fresh for ten times as long as the run took (a minute at least), by the run time and not a fixed time', async () => {
     let clock = 0
     let runs = 0
-    let took = 30_000
+    const took = 30_000
     const ask = openCodeUsageReader(async () => {
       runs++
       clock += took

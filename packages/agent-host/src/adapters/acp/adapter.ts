@@ -1,6 +1,4 @@
 import type { ToolName } from '@cc/protocol'
-import { rpcError } from '../../rpc-error.js'
-import { waitForExit } from '../../timing.js'
 import type { AgentAdapter, AgentProcess, AgentSpawnSpec, CreateSessionOpts, EventSink, LocalUsage, ProcessSource, SessionHandle } from '../contract.js'
 import { toolResultEvent } from '../tool-result.js'
 import { spawnLocalAgent } from '../local-process.js'
