@@ -672,8 +672,8 @@ describe('while-alive facts are carried in the list', () => {
   })
 
   it('does not say a tool with no adapter reports no limits: nothing is known about it, so it is unknown (#1616)', async () => {
-    const r = await rpc('agents.usage', { tool: 'codex' })
-    expect(r).toMatchObject({ supported: false, reason: 'codex does not support usage queries', usage: null })
+    const r = await rpc('agents.usage', { tool: 'cursor' })
+    expect(r).toMatchObject({ supported: false, reason: 'cursor does not support usage queries', usage: null })
     expect(r).not.toHaveProperty('notReported')
   })
 
