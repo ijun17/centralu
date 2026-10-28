@@ -440,7 +440,9 @@ answer, and a test on memory says what the host does:
     `filter` and `dereference` are not offered: no caller passes them. An entry gone since its folder was listed is
     skipped.
   - `promises.cp` takes each step with a promise call, so it never holds the event loop (Node's own did not either;
-    the earlier check did, for up to 25 s).
+    the earlier check did, for up to 25 s). That costs time: a 20 000-entry pnpm tree on Linux copies in 1.1 s with
+    Node's `cpSync`, 1.7 s with the `Os`'s and 7.4 s with `promises.cp` (each step a trip through libuv's pool), so a
+    caller that copied synchronously before still does (`dev-services/fs.ts`).
   - On Windows the copy stats each link (follows it one step) to choose its kind, as Node's `symlink` does when no
     kind is given: a link to a share that does not answer waits as long as Windows does.
   The host's copies go through it: `apps/external/carry.ts` (an app's data, which the app writes, so may hold any

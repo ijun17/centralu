@@ -434,7 +434,8 @@ export async function copyTree(
   // in Node's own `cpSync`). verbatimSymlinks: without it Node rewrites a relative link into an absolute one pointing back into the
   // source, so dropEscapingLinks then removed every pnpm link in a Linux worktree as leaving it (seen on CI,
   // 2026-10-04). macOS took the clone path above, which keeps links as they are.
-  await realOs().files.promises.cp(src, dst, { recursive: true, verbatimSymlinks: true })
+  // Sync, as Node's was: a 20 000-entry pnpm tree takes 1.7 s this way and 7.4 s step by step through promises (Linux)
+  realOs().files.cpSync(src, dst, { recursive: true, verbatimSymlinks: true })
 }
 
 export type CopyTreeOptions = {
